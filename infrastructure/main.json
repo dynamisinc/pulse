@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.48.1.52935",
-      "templateHash": "1514170551885006311"
+      "templateHash": "2576330696740266314"
     }
   },
   "parameters": {
@@ -75,7 +75,7 @@
       "type": "bool",
       "defaultValue": false,
       "metadata": {
-        "description": "Deploy ACS + Email Service resources. Off until email is needed."
+        "description": "Deploy ACS + Email Service (keyless: disableLocalAuth, Azure-managed sender) and grant the App Service identity the email-sending role (easy-login story 13). Off by default: the API stays dark (Email:Endpoint empty -> 503, capabilities.emailLinks false)."
       }
     },
     "deployAi": {
@@ -185,7 +185,7 @@
       "type": "string",
       "defaultValue": "",
       "metadata": {
-        "description": "Email sender address when deployCommunication=false (e.g., DoNotReply@xxx.azurecomm.net from shared ACS)"
+        "description": "Email sender address when deployCommunication=false (e.g., DoNotReply@xxx.azurecomm.net from a shared ACS). Without deployCommunication no Email__Endpoint is set, so email stays dark regardless."
       }
     },
     "staticWebAppName": {
@@ -228,13 +228,6 @@
       "defaultValue": "",
       "metadata": {
         "description": "Phase-1 staff allowlist JSON array (Authentication:StaffIdentity:Accounts, story login/06). Empty -> no staff sign-in (fail closed). Threaded like jwtSecretKey, sourced from the STAFF_IDENTITY_ACCOUNTS_JSON GitHub secret; webapp.bicep expands it into the indexed app-setting keys the .NET options binder reads."
-      }
-    },
-    "emailConnectionString": {
-      "type": "securestring",
-      "defaultValue": "",
-      "metadata": {
-        "description": "Azure Communication Services connection string for email"
       }
     }
   },
@@ -1004,10 +997,8 @@
           "frontendUrl": {
             "value": "[parameters('frontendUrl')]"
           },
-          "emailConnectionString": {
-            "value": "[parameters('emailConnectionString')]"
-          },
-          "emailDefaultSenderAddress": "[if(parameters('deployCommunication'), createObject('value', reference(resourceId('Microsoft.Resources/deployments', 'communicationDeploy'), '2025-04-01').outputs.managedDomainSenderAddress.value), createObject('value', parameters('emailSenderAddress')))]",
+          "emailEndpoint": "[if(parameters('deployCommunication'), createObject('value', reference(resourceId('Microsoft.Resources/deployments', 'communicationDeploy'), '2025-04-01').outputs.emailEndpoint.value), createObject('value', ''))]",
+          "emailSenderAddress": "[if(parameters('deployCommunication'), createObject('value', reference(resourceId('Microsoft.Resources/deployments', 'communicationDeploy'), '2025-04-01').outputs.managedDomainSenderAddress.value), createObject('value', parameters('emailSenderAddress')))]",
           "jwtSecretKey": {
             "value": "[parameters('jwtSecretKey')]"
           },
@@ -1043,7 +1034,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.48.1.52935",
-              "templateHash": "2751581238498265085"
+              "templateHash": "9506344730239653645"
             }
           },
           "parameters": {
@@ -1101,17 +1092,23 @@
                 "description": "Azure:BlobStorage:ContainerName — the private post-media container (the same local main.bicep passes to modules/storage.bicep)."
               }
             },
-            "emailConnectionString": {
-              "type": "securestring",
-              "defaultValue": ""
+            "emailEndpoint": {
+              "type": "string",
+              "defaultValue": "",
+              "metadata": {
+                "description": "Email:Endpoint — the Communication Services data-plane endpoint, https://{acs host} (communication.bicep output emailEndpoint). Empty -> email is off (fail closed)."
+              }
+            },
+            "emailSenderAddress": {
+              "type": "string",
+              "defaultValue": "",
+              "metadata": {
+                "description": "Email:SenderAddress — the verified MailFrom address; in UAT the Azure-managed DoNotReply@<guid>.azurecomm.net (communication.bicep output managedDomainSenderAddress)."
+              }
             },
             "emailProvider": {
               "type": "string",
               "defaultValue": "AzureCommunicationServices"
-            },
-            "emailDefaultSenderAddress": {
-              "type": "string",
-              "defaultValue": ""
             },
             "emailDefaultSenderName": {
               "type": "string",
@@ -1317,7 +1314,7 @@
                   "http20Enabled": false,
                   "webSocketsEnabled": true,
                   "cors": "[if(not(equals(parameters('frontendUrl'), '')), createObject('allowedOrigins', createArray(parameters('frontendUrl')), 'supportCredentials', true()), null())]",
-                  "appSettings": "[concat(createArray(createObject('name', 'APPLICATIONINSIGHTS_CONNECTION_STRING', 'value', parameters('appInsightsConnectionString')), createObject('name', 'ASPNETCORE_ENVIRONMENT', 'value', parameters('aspnetcoreEnvironment')), createObject('name', 'ConnectionStrings__DefaultConnection', 'value', parameters('sqlConnectionString')), createObject('name', 'Azure__BlobStorage__Provider', 'value', parameters('blobStorageProvider')), createObject('name', 'Azure__BlobStorage__ServiceUri', 'value', parameters('blobServiceUri')), createObject('name', 'Azure__BlobStorage__ContainerName', 'value', parameters('blobStorageContainerName')), createObject('name', 'Azure__SignalR__ConnectionString', 'value', parameters('signalRConnectionString')), createObject('name', 'Email__Provider', 'value', parameters('emailProvider')), createObject('name', 'Email__ConnectionString', 'value', parameters('emailConnectionString')), createObject('name', 'Email__DefaultSenderAddress', 'value', parameters('emailDefaultSenderAddress')), createObject('name', 'Email__DefaultSenderName', 'value', parameters('emailDefaultSenderName')), createObject('name', 'Email__SupportAddress', 'value', parameters('emailSupportAddress')), createObject('name', 'Authentication__FrontendBaseUrl', 'value', parameters('frontendUrl')), createObject('name', 'Authentication__Jwt__AccessTokenMinutes', 'value', string(parameters('jwtAccessTokenMinutes'))), createObject('name', 'Authentication__Jwt__RefreshTokenHours', 'value', string(parameters('jwtRefreshTokenHours'))), createObject('name', 'Authentication__Jwt__RememberMeDays', 'value', string(parameters('jwtRememberMeDays'))), createObject('name', 'Authentication__Jwt__SecretKey', 'value', parameters('jwtSecretKey')), createObject('name', 'Authentication__Bootstrap__Secret', 'value', parameters('bootstrapSecret')), createObject('name', 'Authentication__Cookie__SameSite', 'value', 'None')), variables('staffAccountSettings'), variables('generationSettings'))]"
+                  "appSettings": "[concat(createArray(createObject('name', 'APPLICATIONINSIGHTS_CONNECTION_STRING', 'value', parameters('appInsightsConnectionString')), createObject('name', 'ASPNETCORE_ENVIRONMENT', 'value', parameters('aspnetcoreEnvironment')), createObject('name', 'ConnectionStrings__DefaultConnection', 'value', parameters('sqlConnectionString')), createObject('name', 'Azure__BlobStorage__Provider', 'value', parameters('blobStorageProvider')), createObject('name', 'Azure__BlobStorage__ServiceUri', 'value', parameters('blobServiceUri')), createObject('name', 'Azure__BlobStorage__ContainerName', 'value', parameters('blobStorageContainerName')), createObject('name', 'Azure__SignalR__ConnectionString', 'value', parameters('signalRConnectionString')), createObject('name', 'Email__Endpoint', 'value', parameters('emailEndpoint')), createObject('name', 'Email__SenderAddress', 'value', parameters('emailSenderAddress')), createObject('name', 'Email__Provider', 'value', parameters('emailProvider')), createObject('name', 'Email__DefaultSenderName', 'value', parameters('emailDefaultSenderName')), createObject('name', 'Email__SupportAddress', 'value', parameters('emailSupportAddress')), createObject('name', 'Authentication__FrontendBaseUrl', 'value', parameters('frontendUrl')), createObject('name', 'Authentication__Jwt__AccessTokenMinutes', 'value', string(parameters('jwtAccessTokenMinutes'))), createObject('name', 'Authentication__Jwt__RefreshTokenHours', 'value', string(parameters('jwtRefreshTokenHours'))), createObject('name', 'Authentication__Jwt__RememberMeDays', 'value', string(parameters('jwtRememberMeDays'))), createObject('name', 'Authentication__Jwt__SecretKey', 'value', parameters('jwtSecretKey')), createObject('name', 'Authentication__Bootstrap__Secret', 'value', parameters('bootstrapSecret')), createObject('name', 'Authentication__Cookie__SameSite', 'value', 'None')), variables('staffAccountSettings'), variables('generationSettings'))]"
                 }
               },
               "tags": "[parameters('tags')]"
@@ -1655,7 +1652,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.48.1.52935",
-              "templateHash": "2999512333910923492"
+              "templateHash": "18295378216745555991"
             }
           },
           "parameters": {
@@ -1681,11 +1678,12 @@
           "resources": [
             {
               "type": "Microsoft.Communication/communicationServices",
-              "apiVersion": "2023-04-01",
+              "apiVersion": "2025-05-01",
               "name": "[parameters('acsName')]",
               "location": "global",
               "properties": {
                 "dataLocation": "[parameters('dataLocation')]",
+                "disableLocalAuth": true,
                 "linkedDomains": "[flatten(createArray(createArray(resourceId('Microsoft.Communication/emailServices/domains', parameters('emailServiceName'), 'AzureManagedDomain')), if(not(equals(parameters('emailCustomDomain'), '')), createArray(resourceId('Microsoft.Communication/emailServices/domains', parameters('emailServiceName'), parameters('emailCustomDomain'))), createArray())))]"
               },
               "tags": "[parameters('tags')]",
@@ -1710,7 +1708,8 @@
               "name": "[format('{0}/{1}', parameters('emailServiceName'), 'AzureManagedDomain')]",
               "location": "global",
               "properties": {
-                "domainManagement": "AzureManaged"
+                "domainManagement": "AzureManaged",
+                "userEngagementTracking": "Disabled"
               },
               "dependsOn": [
                 "[resourceId('Microsoft.Communication/emailServices', parameters('emailServiceName'))]"
@@ -1723,7 +1722,8 @@
               "name": "[format('{0}/{1}', parameters('emailServiceName'), parameters('emailCustomDomain'))]",
               "location": "global",
               "properties": {
-                "domainManagement": "CustomerManaged"
+                "domainManagement": "CustomerManaged",
+                "userEngagementTracking": "Disabled"
               },
               "dependsOn": [
                 "[resourceId('Microsoft.Communication/emailServices', parameters('emailServiceName'))]"
@@ -1737,7 +1737,11 @@
             },
             "acsHostName": {
               "type": "string",
-              "value": "[reference(resourceId('Microsoft.Communication/communicationServices', parameters('acsName')), '2023-04-01').hostName]"
+              "value": "[reference(resourceId('Microsoft.Communication/communicationServices', parameters('acsName')), '2025-05-01').hostName]"
+            },
+            "emailEndpoint": {
+              "type": "string",
+              "value": "[format('https://{0}', reference(resourceId('Microsoft.Communication/communicationServices', parameters('acsName')), '2025-05-01').hostName)]"
             },
             "emailServiceName": {
               "type": "string",
@@ -1750,6 +1754,79 @@
           }
         }
       }
+    },
+    {
+      "condition": "[and(parameters('deployCommunication'), variables('deployWebApp'))]",
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "communicationSenderRoleDeploy",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "acsName": {
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'communicationDeploy'), '2025-04-01').outputs.acsName.value]"
+          },
+          "backendPrincipalId": {
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'webAppDeploy'), '2025-04-01').outputs.principalId.value]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.48.1.52935",
+              "templateHash": "9897957220604615786"
+            }
+          },
+          "parameters": {
+            "acsName": {
+              "type": "string",
+              "metadata": {
+                "description": "Name of the Communication Service (communication.bicep output acsName)."
+              }
+            },
+            "backendPrincipalId": {
+              "type": "string",
+              "defaultValue": "",
+              "metadata": {
+                "description": "Object (principal) id of the API's system-assigned managed identity (webapp.bicep output principalId). Granted Communication and Email Service Owner on the Communication Service. Empty -> the role assignment is skipped."
+              }
+            }
+          },
+          "variables": {
+            "communicationAndEmailServiceOwnerRoleId": "09976791-48a7-449e-bb21-39d1a415f350"
+          },
+          "resources": [
+            {
+              "condition": "[not(equals(parameters('backendPrincipalId'), ''))]",
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.Communication/communicationServices', parameters('acsName'))]",
+              "name": "[guid(resourceId('Microsoft.Communication/communicationServices', parameters('acsName')), parameters('backendPrincipalId'), variables('communicationAndEmailServiceOwnerRoleId'))]",
+              "properties": {
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('communicationAndEmailServiceOwnerRoleId'))]",
+                "principalId": "[parameters('backendPrincipalId')]",
+                "principalType": "ServicePrincipal"
+              }
+            }
+          ],
+          "outputs": {
+            "roleDefinitionId": {
+              "type": "string",
+              "value": "[variables('communicationAndEmailServiceOwnerRoleId')]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Resources/deployments', 'communicationDeploy')]",
+        "[resourceId('Microsoft.Resources/deployments', 'webAppDeploy')]"
+      ]
     },
     {
       "condition": "[parameters('deployAi')]",
@@ -2221,6 +2298,10 @@
     "emailSenderAddress": {
       "type": "string",
       "value": "[if(parameters('deployCommunication'), reference(resourceId('Microsoft.Resources/deployments', 'communicationDeploy'), '2025-04-01').outputs.managedDomainSenderAddress.value, parameters('emailSenderAddress'))]"
+    },
+    "emailEndpoint": {
+      "type": "string",
+      "value": "[if(parameters('deployCommunication'), reference(resourceId('Microsoft.Resources/deployments', 'communicationDeploy'), '2025-04-01').outputs.emailEndpoint.value, '')]"
     },
     "aiFoundryEndpoint": {
       "type": "string",

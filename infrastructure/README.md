@@ -21,7 +21,7 @@ template and flipped per environment in [`parameters/uat.bicepparam`](parameters
 | `deployDatabase` | Azure SQL server + database | `false` | `true` |
 | `deployBackend` | App Service / Function App (per `hostingModel`) | `false` | `true` |
 | `deploySignalR` | Azure SignalR Service (real-time fan-out) | `false` | `false` (hub self-hosted) |
-| `deployCommunication` | ACS + Email Service | `false` | `false` |
+| `deployCommunication` | ACS + Email Service, **keyless** (`disableLocalAuth`), Azure-managed sender; grants the App Service identity **Communication and Email Service Owner** (easy-login/13, [below](#email-keyless-acs--easy-login-story-13)) | `false` | `true` |
 | `deployAi` | Azure AI Foundry account + E8 model deployments (Standard/Ambient) | `false` | `true` |
 | `generationProviderLive` | **Routes engine generation traffic to the live model** (`Generation:Provider` → `AzureOpenAI`). Separate from `deployAi` on purpose; **Tier-2 gated** | `false` | `false` |
 | `generationTenantBounded` | **§2 governance assertion, typed by a human** (`Generation:Governance:TenantBounded`) — not derived from `deployAi` | `false` | `false` |
@@ -104,7 +104,7 @@ Two `workflow_dispatch` / event-driven workflows under [`.github/workflows/`](..
 
 | Workflow | Trigger | Purpose | Required secrets |
 |---|---|---|---|
-| [`deploy-infrastructure.yml`](../.github/workflows/deploy-infrastructure.yml) | manual | Runs the Bicep deploy (same flow as the CLI above) | `AZURE_CREDENTIALS`; once backend toggles are on: `SQL_ADMIN_PASSWORD`, `JWT_SECRET_KEY`, `EMAIL_CONNECTION_STRING`, `SECURITY_CONTACT_EMAIL`; for login go-live (story login/06): `BOOTSTRAP_SECRET`, `STAFF_IDENTITY_ACCOUNTS_JSON` |
+| [`deploy-infrastructure.yml`](../.github/workflows/deploy-infrastructure.yml) | manual | Runs the Bicep deploy (same flow as the CLI above) | `AZURE_CREDENTIALS`; once backend toggles are on: `SQL_ADMIN_PASSWORD`, `JWT_SECRET_KEY`, `SECURITY_CONTACT_EMAIL` (email is keyless: `EMAIL_CONNECTION_STRING` is no longer read); for login go-live (story login/06): `BOOTSTRAP_SECRET`, `STAFF_IDENTITY_ACCOUNTS_JSON` |
 | [`deploy-frontend.yml`](../.github/workflows/deploy-frontend.yml) | push to `main` (`src/frontend/**`) + manual | Lints, type-checks, tests, builds the Vite SPA, publishes to `stapp-pulse-uat` | `AZURE_STATIC_WEB_APPS_API_TOKEN` |
 
 The security-contact email for Defender is passed to `defender.bicep` directly from the
@@ -333,6 +333,76 @@ curl -s -o /dev/null -w '%{http_code}\n' https://stpulseuat.blob.core.windows.ne
 # expect a 4xx (409 PublicAccessNotPermitted), never 200
 ```
 
+## Email (keyless ACS) — easy-login story 13
+
+`deployCommunication = true` (UAT) stands up `acs-pulse-uat` (Communication Service) and `email-pulse-uat`
+(Email Service) with the **Azure-managed domain**, and turns on "Email links" on the staff roster: the API
+emails each selected participant their own personal sign-in link.
+
+- **No keys.** `communication.bicep` sets `disableLocalAuth: true` (API version `2025-05-01`), so the data
+  plane rejects access keys and connection strings. The module has **no** key or connection-string output,
+  the App Service has **no** `Email__ConnectionString` setting, and the `emailConnectionString` parameter is
+  gone from `main.bicep` and `uat.bicepparam`.
+- **Access.** `modules/communication-sender-role.bicep` grants the App Service's system-assigned identity the
+  built-in **Communication and Email Service Owner** role (`09976791-48a7-449e-bb21-39d1a415f350`) on the
+  Communication Service: the narrowest *built-in* role that can send (Microsoft Learn names it for
+  Entra-authenticated ACS Email; the broader alternatives are Contributor and Owner). Same pattern as
+  `storage.bicep` (deterministic `guid()` name, skipped without a principal). It is a sibling module rather
+  than part of `communication.bicep` because `webApp` reads `communication`'s outputs (the managed sender's
+  domain is a service-generated GUID, so it cannot be a `main.bicep` local the way the storage URI is), and a
+  grant inside `communication.bicep` would make the two modules a cycle.
+- **App settings** (`webapp.bicep`): `Email__Endpoint = https://acs-pulse-uat.<geo>.communication.azure.com`
+  (from the Communication Service host name) and `Email__SenderAddress = DoNotReply@<guid>.azurecomm.net`
+  (the managed-domain sender). With `deployCommunication = false` both are empty and email is **dark**: the
+  endpoint answers `503`, the roster reports `capabilities.emailLinks: false`, and the button is not shown.
+  User-engagement (open/click) tracking is disabled on the domain and on every message.
+- **Deploy prerequisite.** The grant is a `roleAssignments` write: the same deploy-SP prerequisite as
+  `deployAi` / `deployStorage` (see above).
+- **Propagation.** RBAC takes minutes to apply. In the first ~10 minutes after the deploy a send can fail
+  (`failed` / `sendFailed` in the roster; `acs-email-send -> 401`/`403`/`credential` in the API log). Wait,
+  then send again.
+- **Rate limits.** Azure-managed domains are capped at **5 emails a minute and 10 an hour per subscription**,
+  and the cap cannot be raised. Fine for UAT testers; anything over shows as `failed` / `rateLimited`. A real
+  StartEx needs a verified custom domain (`emailCustomDomain`, DNS records at the registrar) and a quota
+  increase request.
+- **Deliverability.** Managed-domain mail often lands in **junk**. Test with a mailbox you control and check
+  the junk folder before calling it broken.
+- **Service lifecycle.** Microsoft has announced the retirement of ACS Email on **September 30, 2028**, and
+  from **October 23, 2026** onboarding to retiring ACS services may be limited for customers without an ACS
+  resource created before that date (see the
+  [ACS retirement guide](https://learn.microsoft.com/azure/communication-services/acs-retirement-and-breaking-changes-guide)).
+  If email is wanted, deploy before then; plan a replacement for the longer term.
+
+Steps (Tom, by hand):
+
+1. **What-if.** Run **Deploy Infrastructure** with `what_if: true` (or `az deployment group what-if` as in
+   "Deploy" above). Expect creates for `acs-pulse-uat`, `email-pulse-uat`, `email-pulse-uat/AzureManagedDomain`
+   and one `Microsoft.Authorization/roleAssignments` on `acs-pulse-uat`; on `app-pulse-api-uat-dynamis`, the
+   app settings `Email__Endpoint` and `Email__SenderAddress` added and `Email__ConnectionString` /
+   `Email__DefaultSenderAddress` removed. Nothing else should change.
+2. **Deploy.** Re-run with `what_if: false`. The app-setting change restarts the App Service.
+3. **Wait ~10 minutes** for the role to propagate, then verify:
+
+```bash
+RG=rg-pulse-uat-centralus
+az resource show -g $RG -n acs-pulse-uat --resource-type Microsoft.Communication/CommunicationServices \
+  --query "{host:properties.hostName, localAuthDisabled:properties.disableLocalAuth}" -o json
+# expect localAuthDisabled=true
+
+PRINCIPAL=$(az webapp identity show -n app-pulse-api-uat-dynamis -g $RG --query principalId -o tsv)
+az role assignment list --assignee "$PRINCIPAL" \
+  --scope $(az resource show -g $RG -n acs-pulse-uat --resource-type Microsoft.Communication/CommunicationServices --query id -o tsv) \
+  --query "[].roleDefinitionName" -o tsv
+# expect Communication and Email Service Owner
+
+az webapp config appsettings list -n app-pulse-api-uat-dynamis -g $RG \
+  --query "[?starts_with(name,'Email__')].{name:name,value:value}" -o table
+# expect Email__Endpoint (https://...communication.azure.com) and Email__SenderAddress (DoNotReply@...azurecomm.net)
+```
+
+4. **Send one** from the roster to a participant whose email is a mailbox you control (walk-through step 9),
+   check the junk folder, and tap the link.
+
 ## Follow-ups
 
 - **`functionapp.bicep` is not keyless-compatible.** It still builds `AzureWebJobsStorage` and
@@ -347,6 +417,11 @@ curl -s -o /dev/null -w '%{http_code}\n' https://stpulseuat.blob.core.windows.ne
   (and `Cognitive Services User` when `deployClaude` is set) automatically. **Still open for
   `functionapp.bicep`** — that host has no identity or `principalId` output yet; wire it the same way if
   the reaction loop ever moves out-of-process (`engine-runtime/implementation.md` open question (a)).
+- **Email (easy-login/13):** `deploy-infrastructure.yml` still maps the now-unused `EMAIL_CONNECTION_STRING`
+  secret into the environment (harmless; nothing reads it); drop the mapping and the secret. A custom role
+  with only `Microsoft.Communication/CommunicationServices/Read` + `/Write` and
+  `Microsoft.Communication/EmailServices/write` would be narrower than the built-in role (needs
+  role-definition write). A verified custom sender domain before any real StartEx (managed-domain limits).
 - Set the `AZURE_STATIC_WEB_APPS_API_TOKEN` repo secret so `deploy-frontend.yml` can publish.
 - Decide the wildcard DNS + TLS strategy for per-exercise subdomains (COR-008) before
   backend hosting is finalized, then set `frontendUrl` in `uat.bicepparam`.

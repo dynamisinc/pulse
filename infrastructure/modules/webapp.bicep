@@ -22,10 +22,16 @@ param blobStorageProvider string = 'None'
 param blobServiceUri string
 @description('Azure:BlobStorage:ContainerName — the private post-media container (the same local main.bicep passes to modules/storage.bicep).')
 param blobStorageContainerName string = 'post-media'
-@secure()
-param emailConnectionString string = ''
+// Email (easy-login story 13). KEYLESS: the API sends through Azure Communication Services with its
+// system-assigned identity (below), which holds "Communication and Email Service Owner" on the
+// Communication Service (modules/communication-sender-role.bicep). No connection string or access key
+// exists for these settings to carry. Both empty = the feature is dark (the endpoint answers 503 and the
+// roster reports capabilities.emailLinks: false).
+@description('Email:Endpoint — the Communication Services data-plane endpoint, https://{acs host} (communication.bicep output emailEndpoint). Empty -> email is off (fail closed).')
+param emailEndpoint string = ''
+@description('Email:SenderAddress — the verified MailFrom address; in UAT the Azure-managed DoNotReply@<guid>.azurecomm.net (communication.bicep output managedDomainSenderAddress).')
+param emailSenderAddress string = ''
 param emailProvider string = 'AzureCommunicationServices'
-param emailDefaultSenderAddress string = ''
 param emailDefaultSenderName string = 'Pulse'
 param emailSupportAddress string = 'pulse-support@cobrasoftware.com'
 @secure()
@@ -194,8 +200,10 @@ resource webApp 'Microsoft.Web/sites@2023-12-01' = {
   // DefaultAzureCredential presents to the AI Foundry data plane (aif-pulse-*, disableLocalAuth: true —
   // there is no key), so the runtime path needs NO API key and NO developer az-login credential. Its
   // principalId is exported below and consumed by main.bicep to grant the Cognitive Services OpenAI
-  // User role in modules/ai.bicep and Storage Blob Data Contributor in modules/storage.bicep
-  // (demo-polish/01). One-directional: this module never reads module ai's or storage's outputs.
+  // User role in modules/ai.bicep, Storage Blob Data Contributor in modules/storage.bicep
+  // (demo-polish/01) and Communication and Email Service Owner in modules/communication-sender-role.bicep
+  // (easy-login/13). One-directional for ai and storage: this module never reads their outputs. It DOES
+  // read module communication's endpoint + sender, which is why that grant is its own module.
   identity: {
     type: 'SystemAssigned'
   }
@@ -262,18 +270,18 @@ resource webApp 'Microsoft.Web/sites@2023-12-01' = {
           name: 'Azure__SignalR__ConnectionString'
           value: signalRConnectionString
         }
-        // Email
+        // Email (easy-login story 13) — keyless: endpoint + sender only; auth is the managed identity.
+        {
+          name: 'Email__Endpoint'
+          value: emailEndpoint
+        }
+        {
+          name: 'Email__SenderAddress'
+          value: emailSenderAddress
+        }
         {
           name: 'Email__Provider'
           value: emailProvider
-        }
-        {
-          name: 'Email__ConnectionString'
-          value: emailConnectionString
-        }
-        {
-          name: 'Email__DefaultSenderAddress'
-          value: emailDefaultSenderAddress
         }
         {
           name: 'Email__DefaultSenderName'
@@ -339,5 +347,6 @@ output defaultHostname string = webApp.properties.defaultHostName
 // modules/ai.bicep as backendPrincipalId so the role assignment (Cognitive Services OpenAI User) targets
 // the app itself — closing the keyless-auth gap that previously forced the measured spike to run as a
 // developer az login (engine-runtime/05; infrastructure/README.md follow-up). main.bicep passes the same
-// id to modules/storage.bicep for the Storage Blob Data Contributor grant (demo-polish/01).
+// id to modules/storage.bicep for the Storage Blob Data Contributor grant (demo-polish/01) and to
+// modules/communication-sender-role.bicep for the email-sending grant (easy-login/13).
 output principalId string = webApp.identity.principalId
