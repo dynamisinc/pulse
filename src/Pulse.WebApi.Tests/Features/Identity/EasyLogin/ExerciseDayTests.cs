@@ -17,6 +17,8 @@ public sealed class ExerciseDayTests
     private const string NewYork = "America/New_York";
     private const string Kolkata = "Asia/Kolkata";
     private const string Havana = "America/Havana";
+    private const string Chatham = "Pacific/Chatham";
+    private const string Troll = "Antarctica/Troll";
 
     private static DateTimeOffset Utc(int year, int month, int day, int hour, int minute = 0, int second = 0) =>
         new(year, month, day, hour, minute, second, TimeSpan.Zero);
@@ -145,13 +147,16 @@ public sealed class ExerciseDayTests
     [InlineData(Kolkata, 2026, 10, 12)]
     [InlineData(Havana, 2026, 3, 6)]
     [InlineData("UTC", 2026, 10, 12)]
+    [InlineData(Chatham, 2026, 4, 3)]   // review W-1: +13:45 -> +12:45 fall-back, which a 3 a.m. rollover sits inside
+    [InlineData(Troll, 2026, 10, 24)]   // review W-1: +02 -> +00 fall-back, which a 2 a.m. rollover sits inside
     public void TodayAndEndOfDayUtc_AgreeOnEveryBoundary_AcrossThreeDays(string zone, int year, int month, int day)
     {
         var start = new DateTimeOffset(year, month, day, 0, 0, 0, TimeSpan.Zero);
 
         for (var rollover = 0; rollover <= EasyLoginOptions.MaxDayRolloverHour; rollover++)
         {
-            for (var t = start; t < start.AddDays(3); t = t.AddMinutes(15))
+            DateOnly? previous = null;
+            for (var t = start; t < start.AddDays(3); t = t.AddMinutes(5))
             {
                 var today = ExerciseDay.Today(zone, t, rollover);
 
@@ -159,8 +164,43 @@ public sealed class ExerciseDayTests
                     t, "{0} at {1:O} (rollover {2}) is inside day {3}, which must end after it", zone, t, rollover, today);
                 ExerciseDay.EndOfDayUtc(zone, today.AddDays(-1), rollover).Should().BeOnOrBefore(
                     t, "{0} at {1:O} (rollover {2}): the previous day must already have ended", zone, t, rollover);
+                ExerciseDay.EndOfDayUtc(zone, t, rollover).Should().BeAfter(
+                    t, "{0} at {1:O} (rollover {2}): the end of the current day is always in the future", zone, t, rollover);
+
+                if (previous is { } earlier)
+                {
+                    today.Should().BeOnOrAfter(
+                        earlier, "{0} at {1:O} (rollover {2}): Today never goes backwards as time moves forward", zone, t, rollover);
+                }
+
+                previous = today;
             }
         }
+    }
+
+    [Theory]
+    // Chatham 2026-04-05 03:45 +13:45 -> 02:45 +12:45 (14:00Z). The 4th's day ends at the FIRST local 03:00, 13:15Z.
+    [InlineData(Chatham, 3, 2026, 4, 4, 13, 14, 2026, 4, 4)]
+    [InlineData(Chatham, 3, 2026, 4, 4, 13, 15, 2026, 4, 5)]
+    [InlineData(Chatham, 3, 2026, 4, 4, 13, 59, 2026, 4, 5)]
+    [InlineData(Chatham, 3, 2026, 4, 4, 14, 0, 2026, 4, 5)]
+    [InlineData(Chatham, 3, 2026, 4, 4, 14, 10, 2026, 4, 5)]
+    [InlineData(Chatham, 3, 2026, 4, 4, 14, 15, 2026, 4, 5)]
+    // Troll 2026-10-25 03:00 +02 -> 01:00 +00 (01:00Z). The 24th's day ends at the FIRST local 02:00, 00:00Z.
+    [InlineData(Troll, 2, 2026, 10, 24, 23, 59, 2026, 10, 24)]
+    [InlineData(Troll, 2, 2026, 10, 25, 0, 0, 2026, 10, 25)]
+    [InlineData(Troll, 2, 2026, 10, 25, 1, 30, 2026, 10, 25)]
+    [InlineData(Troll, 2, 2026, 10, 25, 2, 0, 2026, 10, 25)]
+    public void FallBackOverlap_TheDayTurnsAtTheEarlierOccurrence_AndStaysTurned(
+        string zone, int rollover, int y, int mo, int d, int h, int mi, int ey, int emo, int ed)
+    {
+        // Review W-1: the reviewer's probe instants. Around these overlaps the rollover's local time happens twice; the
+        // day turns at the FIRST occurrence (the instant EndOfDayUtc names) and does not flip back at the second.
+        var now = new DateTimeOffset(y, mo, d, h, mi, 0, TimeSpan.Zero);
+        var expected = new DateOnly(ey, emo, ed);
+
+        ExerciseDay.Today(zone, now, rollover).Should().Be(expected);
+        ExerciseDay.EndOfDayUtc(zone, now, rollover).Should().BeAfter(now);
     }
 
     // ---------------------------------------------------------------- zone resolution and argument guards

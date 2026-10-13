@@ -50,11 +50,13 @@ public class EasyLoginMigrationTests
         _fixture = fixture;
     }
 
-    [RequiresDockerFact]
-    public async Task TheMigration_DirectlyFollowsThePreviousOne()
+    [Fact]
+    public void TheMigration_DirectlyFollowsThePreviousOne()
     {
-        await using var database = await EphemeralDatabase.CreateAsync(_fixture);
-        var migrations = database.AllMigrations().ToList();
+        // Model-only: the migration list comes from the assembly, so no connection is opened.
+        using var context = new PulseDbContext(
+            new DbContextOptionsBuilder<PulseDbContext>().UseSqlServer("Server=model-only;Database=none;").Options);
+        var migrations = context.Database.GetMigrations().ToList();
 
         var index = migrations.FindIndex(m => m.EndsWith("_" + MigrationName, StringComparison.Ordinal));
 
