@@ -103,6 +103,7 @@ import {
   NOTIFICATION_POLL_FIRST_MIN,
   NOTIFICATION_POLL_INTERVAL_MS,
   NOTIFICATION_POLL_JITTER,
+  NOTIFICATION_READ_JITTER_MS,
   NOTIFICATION_PUBLISH_DELAY_MS,
   PRELOAD_BUFFER_CAP,
   type NotificationEvent,
@@ -145,8 +146,20 @@ export interface NotificationsAnnouncement {
 export interface NotificationsSessionConfig {
   readonly exerciseId: string
   readonly personaId: string
+  /** The signed-in account (part of the storage key: one persona, one entry per account). */
+  readonly accountId: string
   /** The persona's handle, without the `@` -- what a mention is matched against. */
   readonly handle: string
+}
+
+/** The slice of a `storage` event the store reads (fired in other tabs, never the writer). */
+export interface StorageChange {
+  /** The key that changed, or `null` when the whole store was cleared. */
+  readonly key: string | null
+  /** The new value, `null` when the key was removed. */
+  readonly newValue: string | null
+  /** Which store changed (`localStorage`, `sessionStorage`), `null` if unknown. */
+  readonly storageArea: Storage | null
 }
 
 /** The side effects the store depends on (see the module header). */
@@ -173,6 +186,10 @@ export interface NotificationsDeps {
   /** Subscribes to tab visibility changes; returns the unsubscribe. */
   readonly onVisibilityChange: (listener: () => void) => () => void
   readonly pollIntervalMs: number
+  /** Up to this long (random) before the baseline read and the visibility catch-up read. */
+  readonly readJitterMs: number
+  /** Subscribes to `storage` events from OTHER tabs; returns the unsubscribe. */
+  readonly onStorageChange: (listener: (change: StorageChange) => void) => () => void
   readonly publishDelayMs: number
   readonly announceThrottleMs: number
 }
@@ -185,7 +202,15 @@ export interface NotificationsStore {
   getAnnouncement(): NotificationsAnnouncement
   /** Marks every current row read and persists it. A no-op with no session. */
   markAllRead(): void
-  /** Sign-out: stop, forget, sweep storage. */
+  /**
+   * Holds (true) or resumes (false) the periodic re-read -- the shell's pause / EndEx overlay is
+   * up, the world is frozen and there is nothing to find. Realtime arrivals are unaffected.
+   */
+  setPaused(paused: boolean): void
+  /**
+   * Sign-out: stop, forget, sweep storage -- but only in a tab that has ever run a
+   * notifications session, so a STAFF tab's sign-out cannot wipe a participant's state.
+   */
   reset(): void
 }
 
@@ -287,6 +312,14 @@ function defaultDeps(): NotificationsDeps {
       return () => document.removeEventListener('visibilitychange', listener)
     },
     pollIntervalMs: NOTIFICATION_POLL_INTERVAL_MS,
+    readJitterMs: NOTIFICATION_READ_JITTER_MS,
+    onStorageChange: listener => {
+      if (typeof window === 'undefined') return () => undefined
+      const handler = (event: StorageEvent) =>
+        listener({ key: event.key, newValue: event.newValue, storageArea: event.storageArea })
+      window.addEventListener('storage', handler)
+      return () => window.removeEventListener('storage', handler)
+    },
     publishDelayMs: NOTIFICATION_PUBLISH_DELAY_MS,
     announceThrottleMs: NOTIFICATION_ANNOUNCE_THROTTLE_MS,
   }
@@ -308,8 +341,13 @@ interface ActiveSession {
   inFlight: boolean
   /** Arrivals held until the baseline lands. */
   buffer: ParticipantPostView[]
-  /** A poll tick was skipped because the tab was hidden. */
+  /** A poll tick was skipped because the tab was hidden (or the shell overlay was up). */
   missedWhileHidden: boolean
+  /** The shell's pause / EndEx overlay is up: the periodic re-read holds. */
+  paused: boolean
+  /** The jittered baseline read has not started yet. */
+  baselineTimer: ReturnType<typeof setTimeout> | undefined
+  unsubscribeStorage: (() => void) | undefined
   /** Removed ids already applied to the model. */
   readonly appliedRemoved: Set<string>
   publishTimer: ReturnType<typeof setTimeout> | undefined
@@ -331,6 +369,8 @@ export function createNotificationsStore(
 
   const listeners = new Set<() => void>()
   let session: ActiveSession | undefined
+  /** This tab has run a notifications session: only then does sign-out have anything to wipe. */
+  let everStarted = false
   let snapshot: NotificationsSnapshot = INACTIVE_SNAPSHOT
   let summary: NotificationsSummary = UNAVAILABLE_SUMMARY
   let announcement: NotificationsAnnouncement = NO_ANNOUNCEMENT
@@ -504,19 +544,43 @@ export function createNotificationsStore(
       random: deps.random,
     })
     s.scheduledFirst = true
-    s.pollTimer = setTimeout(() => {
-      s.pollTimer = undefined
-      if (s.stopped) return
-      if (!deps.isVisible()) {
-        s.missedWhileHidden = true
-        scheduleNextRead(s, deps)
-        return
-      }
-      // (`loadFeed` handles its own failures; the catch only keeps the chain alive.)
-      void loadFeed(s, deps)
-        .catch(() => undefined)
-        .then(() => scheduleNextRead(s, deps))
-    }, delay)
+    s.pollTimer = setTimeout(() => runTick(s, deps), delay)
+  }
+
+  /**
+   * One scheduled tick: read if the tab is visible and the shell is not paused; otherwise only
+   * note that a read was missed (made up by {@link catchUpRead} when things clear). Either way
+   * the chain carries on.
+   */
+  function runTick(s: ActiveSession, deps: NotificationsDeps): void {
+    s.pollTimer = undefined
+    if (s.stopped) return
+    if (!deps.isVisible() || s.paused) {
+      s.missedWhileHidden = true
+      scheduleNextRead(s, deps)
+      return
+    }
+    // (`loadFeed` handles its own failures; the catch only keeps the chain alive.)
+    void loadFeed(s, deps)
+      .catch(() => undefined)
+      .then(() => scheduleNextRead(s, deps))
+  }
+
+  /** A random delay in [0, readJitterMs): spreads reads many tabs would start together. */
+  function readJitter(deps: NotificationsDeps): number {
+    return Math.round(deps.random() * deps.readJitterMs)
+  }
+
+  /**
+   * Makes up a read that was missed while the tab was hidden or the shell was paused: after a
+   * short random delay (a whole room coming back from a pause must not read in the same
+   * instant), and the schedule is RE-SET behind it, so the next tick is a normal interval after
+   * this read rather than whatever was left on the old timer.
+   */
+  function catchUpRead(s: ActiveSession, deps: NotificationsDeps): void {
+    s.missedWhileHidden = false
+    if (s.pollTimer !== undefined) clearTimeout(s.pollTimer)
+    s.pollTimer = setTimeout(() => runTick(s, deps), readJitter(deps))
   }
 
   /** Applies removed ids not yet applied; returns whether anything visible changed. */
@@ -537,14 +601,18 @@ export function createNotificationsStore(
     s.stopped = true
     if (s.publishTimer !== undefined) clearTimeout(s.publishTimer)
     if (s.pollTimer !== undefined) clearTimeout(s.pollTimer)
+    if (s.baselineTimer !== undefined) clearTimeout(s.baselineTimer)
     s.publishTimer = undefined
     s.pollTimer = undefined
+    s.baselineTimer = undefined
     s.unsubscribeArrivals?.()
     s.unsubscribeRemoved?.()
     s.unsubscribeVisibility?.()
+    s.unsubscribeStorage?.()
     s.unsubscribeArrivals = undefined
     s.unsubscribeRemoved = undefined
     s.unsubscribeVisibility = undefined
+    s.unsubscribeStorage = undefined
     if (s.sourceStarted) {
       s.sourceStarted = false
       s.source.stop()
@@ -573,7 +641,14 @@ export function createNotificationsStore(
     const deps = resolveDeps()
     if (session !== undefined) stopSession(session, deps, true) // one session at a time
 
-    const storageKey = notificationStorageKey(config.exerciseId, config.personaId)
+    everStarted = true
+    const storageKey = notificationStorageKey(config.exerciseId, config.personaId, config.accountId)
+    // One browser holds one participant session, so any entry that is not THIS viewer's is dead
+    // weight (a previous sign-in's, another persona's, an expired exercise's): sweep it. The
+    // state store keeps the current key; any other store (a leftover per-tab entry) keeps nothing.
+    for (const storage of new Set([deps.storage(), ...deps.sweepStorages()])) {
+      clearAllNotificationStorage(storage, storage === deps.storage() ? storageKey : undefined)
+    }
     const model = new NotificationModel({
       selfPersonaId: config.personaId,
       selfHandle: config.handle,
@@ -591,6 +666,9 @@ export function createNotificationsStore(
       inFlight: false,
       buffer: [],
       missedWhileHidden: false,
+      paused: false,
+      baselineTimer: undefined,
+      unsubscribeStorage: undefined,
       appliedRemoved: new Set(),
       publishTimer: undefined,
       pollTimer: undefined,
@@ -618,14 +696,31 @@ export function createNotificationsStore(
       if (applyRemoved(s, deps) && s.loaded) publishNow(s, deps)
     })
 
-    // The baseline read now; then a re-read about every 30 s while the tab is visible.
-    void loadFeed(s, deps)
+    // The baseline read (after a short random delay, so a room that opened together does not
+    // read in the same instant), then a re-read about every 30 s while the tab is visible.
+    const baselineDelay = readJitter(deps)
+    if (baselineDelay <= 0) {
+      void loadFeed(s, deps)
+    } else {
+      s.baselineTimer = setTimeout(() => {
+        s.baselineTimer = undefined
+        void loadFeed(s, deps)
+      }, baselineDelay)
+    }
     scheduleNextRead(s, deps)
     s.unsubscribeVisibility = deps.onVisibilityChange(() => {
-      if (s.missedWhileHidden && deps.isVisible()) {
-        s.missedWhileHidden = false
-        void loadFeed(s, deps)
-      }
+      if (s.missedWhileHidden && deps.isVisible() && !s.paused) catchUpRead(s, deps)
+    })
+
+    // Another tab removed (or cleared) THIS viewer's entry -- a sign-out, or another sign-in's
+    // sweep. This tab's state is stale: end the session without writing it back.
+    s.unsubscribeStorage = deps.onStorageChange(change => {
+      if (change.storageArea !== null && change.storageArea !== deps.storage()) return
+      const gone = change.key === null || (change.key === s.storageKey && change.newValue === null)
+      if (!gone || session !== s) return
+      teardown(s) // no persist
+      session = undefined
+      setInactive()
     })
 
     notify()
@@ -641,10 +736,26 @@ export function createNotificationsStore(
     const deps = resolveDeps()
     s.model.markAllRead()
     publishNow(s, deps)
+    // Anything still HELD ("14 new replies") is now moot -- it would be spoken after "all read".
+    clearAnnouncements()
     speak('All notifications marked as read')
   }
 
+  function setPaused(paused: boolean): void {
+    const s = session
+    if (s === undefined || s.stopped || s.paused === paused) return
+    s.paused = paused
+    // Resumed with a read missed while paused: make it up (jittered), as for a hidden tab.
+    if (!paused && s.missedWhileHidden && resolveDeps().isVisible()) {
+      catchUpRead(s, resolveDeps())
+    }
+  }
+
   function reset(): void {
+    // A tab that never ran a notifications session (a STAFF tab, a read-only participant) has
+    // nothing of its own to forget -- and its sign-out must not wipe the state of a participant
+    // signed in elsewhere in the same browser.
+    if (!everStarted) return
     const deps = resolveDeps()
     const s = session
     if (s !== undefined) {
@@ -670,6 +781,7 @@ export function createNotificationsStore(
     getSummary: () => summary,
     getAnnouncement: () => announcement,
     markAllRead,
+    setPaused,
     reset,
   }
 }

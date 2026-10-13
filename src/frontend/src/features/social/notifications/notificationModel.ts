@@ -27,6 +27,20 @@
  * a snapshot is O(groups), and the store coalesces snapshots -- so there is no per-arrival
  * O(n^2) anywhere on the path (SOC-071).
  *
+ * MENTION STORMS (SOC-071). A top-level mention is its own post, so unlike replies it cannot
+ * group by subject; the exercise fires bursts of them at the PIO on purpose. So: up to
+ * MENTION_STORM_THRESHOLD mentions inside one MENTION_STORM_WINDOW_MS of SCENARIO time keep a
+ * row each; MORE than that fold into ONE rolling storm row ("Keisha and 41 others mentioned
+ * you") that opens its newest mention, counts as ONE unread group on the badge, and keeps
+ * absorbing every mention within a window of its span until the burst stops. The rule reads
+ * scenario ms only -- not arrival order, not wall-clock -- so a newest-first feed read and an
+ * oldest-first stream of pushes produce the same rows. Storms are rows like any other: the
+ * GROUPS_CAP bound, taken-down members, "Mark all read" and the announcements all apply.
+ *
+ * COUNTS ARRIVE ONLY WITH A READ. A pushed post carries the counts it had when it was
+ * broadcast; for a post already known to be mine they are ignored (see `ingest`), so only a
+ * feed read can move a like count -- or lower a baseline.
+ *
  * IDEMPOTENT. Every post carries an id, and re-offering one (the baseline read, a realtime
  * echo, the 30 s re-read) never double-counts. The 30 s re-read feeds the same `ingest`.
  *
@@ -53,6 +67,8 @@ import {
   EXCERPT_MAX_LENGTH,
   GROUPS_CAP,
   LIKE_RECORDS_CAP,
+  MENTION_STORM_THRESHOLD,
+  MENTION_STORM_WINDOW_MS,
   MINE_CAP,
   READ_IDS_CAP,
   type IngestResult,
@@ -86,13 +102,26 @@ interface Member {
   readonly excerpt: string
 }
 
-/** One reply/mention row: every event of one type about one subject post. */
+/**
+ * How a group came to be one row:
+ *  - `subject`  every event of one type about one subject post (replies to my post; mentions
+ *               that are replies under the same post);
+ *  - `loose`    ONE top-level mention, its own post being the subject (a candidate for a storm);
+ *  - `storm`    a rolling run of top-level mentions folded into one row (see the module header).
+ */
+type GroupKind = 'subject' | 'loose' | 'storm'
+
+/** One reply/mention row: every event it stands for. */
 interface Group {
   readonly key: string
+  readonly kind: GroupKind
   readonly type: 'reply' | 'mention'
+  /** What the row opens. For a storm this is only a seed: the row opens its NEWEST mention. */
   readonly subjectPostId: string
   readonly subjectHandle: string | undefined
   readonly members: Map<string, Member>
+  /** Scenario ms of the oldest member (a storm's span starts here). */
+  oldestMs: number
   /** Scenario ms of the newest member (what the group is ranked by when the cap bites). */
   newestMs: number
   /** The derived item; `undefined` when a member changed and it must be rebuilt. */
@@ -165,6 +194,10 @@ export class NotificationModel {
   private readonly groups = new Map<string, Group>()
   /** Event id -> the key of the group holding it. */
   private readonly memberIndex = new Map<string, string>()
+  /** The `loose` groups (single top-level mentions), ascending by scenario ms. */
+  private readonly loose: Group[] = []
+  /** The `storm` groups (few: each is a whole burst). */
+  private readonly storms: Group[] = []
   /** Per-post like bookkeeping (insertion-ordered, so the oldest can be forgotten). */
   private readonly likes = new Map<string, LikeRecord>()
   /** Read event ids (insertion-ordered, so the oldest can be forgotten). */
@@ -195,15 +228,19 @@ export class NotificationModel {
   // -------------------------------------------------------------------------
 
   /**
-   * Offers one post. Safe to call any number of times for the same post. For a batch (the
-   * feed read) use {@link ingestBatch}, which learns which posts are mine FIRST so the
-   * newest-first order of a feed cannot hide a reply behind its (older) parent.
+   * Offers one post that ARRIVED (a realtime push, or the echo of a post just published). Safe
+   * to call any number of times for the same post. For a feed read use {@link ingestBatch},
+   * which learns which posts are mine FIRST so the newest-first order of a feed cannot hide a
+   * reply behind its (older) parent.
+   *
+   * COUNTS ON AN ARRIVAL ARE IGNORED for a post already in "mine". A push carries the counts the
+   * post had when it was broadcast -- never a like (`PostReceived` has none) -- and a late or
+   * repeated one can be OLDER than what a read has already shown. Letting it through would drag
+   * a like count, and with it the baseline, DOWN, and the next read would then report likes the
+   * viewer had already seen. Only a feed READ may move a count.
    */
   ingest(post: ParticipantPostView): IngestResult {
-    if (this.isRemoved(post.id)) return NO_CHANGE
-    return post.authorPersonaId === this.selfPersonaId
-      ? this.observeOwn(post)
-      : this.observeOther(post)
+    return this.offer(post, false)
   }
 
   /**
@@ -214,15 +251,23 @@ export class NotificationModel {
     const events: NotificationEvent[] = []
     for (const post of posts) {
       if (post.authorPersonaId !== this.selfPersonaId) continue
-      const event = this.ingest(post).event
+      const event = this.offer(post, true).event
       if (event !== undefined) events.push(event)
     }
     for (const post of posts) {
       if (post.authorPersonaId === this.selfPersonaId) continue
-      const event = this.ingest(post).event
+      const event = this.offer(post, true).event
       if (event !== undefined) events.push(event)
     }
     return events
+  }
+
+  private offer(post: ParticipantPostView, fromRead: boolean): IngestResult {
+    if (this.isRemoved(post.id)) return NO_CHANGE
+    if (post.authorPersonaId === this.selfPersonaId) {
+      return !fromRead && this.mine.has(post.id) ? NO_CHANGE : this.observeOwn(post)
+    }
+    return this.observeOther(post)
   }
 
   /** One of MY posts: remember it, and track how its like count moved. */
@@ -288,11 +333,28 @@ export class NotificationModel {
     if (this.mentions(post.text)) {
       return parent != null
         ? this.addMember('mention', parent.postId, parent.authorHandle, post)
-        : this.addMember('mention', post.id, undefined, post)
+        : this.addTopLevelMention(post)
     }
     return NO_CHANGE
   }
 
+  private memberOf(post: ParticipantPostView, ms: number): Member {
+    return {
+      actorId: post.authorPersonaId,
+      at: post.scenarioTime,
+      ms,
+      excerpt: toExcerpt(post.text),
+    }
+  }
+
+  /** The result for a member that was just added: an event only when it is unread. */
+  private addedResult(type: 'reply' | 'mention', postId: string): IngestResult {
+    return this.readIds.has(postId)
+      ? { changed: true }
+      : { changed: true, event: { type, amount: 1 } }
+  }
+
+  /** A reply to my post, or a mention that is itself a reply: grouped by SUBJECT post. */
   private addMember(
     type: 'reply' | 'mention',
     subjectPostId: string,
@@ -307,28 +369,209 @@ export class NotificationModel {
       if (this.groups.size >= GROUPS_CAP && ms <= this.evictedFloorMs) return NO_CHANGE
       group = {
         key,
+        kind: 'subject',
         type,
         subjectPostId,
         subjectHandle,
         members: new Map(),
+        oldestMs: ms,
         newestMs: ms,
         item: undefined,
       }
       this.groups.set(key, group)
     }
-    group.members.set(post.id, {
-      actorId: post.authorPersonaId,
-      at: post.scenarioTime,
-      ms,
-      excerpt: toExcerpt(post.text),
-    })
+    group.members.set(post.id, this.memberOf(post, ms))
     if (ms > group.newestMs) group.newestMs = ms
+    if (ms < group.oldestMs) group.oldestMs = ms
     group.item = undefined
     this.memberIndex.set(post.id, key)
     if (this.groups.size > GROUPS_CAP && this.evictOldestGroup() === group) return NO_CHANGE
-    return this.readIds.has(post.id)
-      ? { changed: true }
-      : { changed: true, event: { type, amount: 1 } }
+    return this.addedResult(type, post.id)
+  }
+
+  // ---- mention storms (SOC-071) --------------------------------------------
+
+  /**
+   * A TOP-LEVEL mention: its own post is the subject, so it cannot group by subject. It is a
+   * `loose` row of its own until more than MENTION_STORM_THRESHOLD loose mentions fall inside
+   * one MENTION_STORM_WINDOW_MS window of scenario time; then they fold into a `storm` group,
+   * which keeps absorbing every mention within the window of its span (so it ROLLS with the
+   * burst and ends once the mentions stop for a window). The decision uses scenario ms only, so
+   * it does not depend on the order posts are offered in (a feed read is newest-first, a push
+   * oldest-first) or on how fast they arrive on the wall clock.
+   */
+  private addTopLevelMention(post: ParticipantPostView): IngestResult {
+    const ms = toMs(post.scenarioTime)
+
+    const storm = this.stormCovering(ms)
+    if (storm !== undefined) {
+      storm.members.set(post.id, this.memberOf(post, ms))
+      storm.item = undefined
+      this.memberIndex.set(post.id, storm.key)
+      this.growStorm(storm, ms)
+      return this.addedResult('mention', post.id)
+    }
+
+    const key = `mention:${post.id}`
+    // A full model ignores what it would only rank straight out again (see evictedFloorMs).
+    if (this.groups.size >= GROUPS_CAP && ms <= this.evictedFloorMs) return NO_CHANGE
+    const group: Group = {
+      key,
+      kind: 'loose',
+      type: 'mention',
+      subjectPostId: post.id,
+      subjectHandle: undefined,
+      members: new Map([[post.id, this.memberOf(post, ms)]]),
+      oldestMs: ms,
+      newestMs: ms,
+      item: undefined,
+    }
+    this.groups.set(key, group)
+    this.insertLoose(group)
+    this.memberIndex.set(post.id, key)
+
+    if (!this.tryFormStorm(ms) && this.groups.size > GROUPS_CAP) {
+      if (this.evictOldestGroup() === group) return NO_CHANGE
+    }
+    return this.addedResult('mention', post.id)
+  }
+
+  /** The storm whose span, widened by the window on both sides, contains `ms`. */
+  private stormCovering(ms: number): Group | undefined {
+    return this.storms.find(
+      storm => ms >= storm.oldestMs - MENTION_STORM_WINDOW_MS
+        && ms <= storm.newestMs + MENTION_STORM_WINDOW_MS,
+    )
+  }
+
+  /** Index of the first `loose` group whose ms is >= `ms` (binary search; `loose` is sorted). */
+  private lowerBound(ms: number): number {
+    let low = 0
+    let high = this.loose.length
+    while (low < high) {
+      const mid = (low + high) >>> 1
+      if ((this.loose[mid]?.newestMs ?? Infinity) < ms) low = mid + 1
+      else high = mid
+    }
+    return low
+  }
+
+  private insertLoose(group: Group): void {
+    // After any equal ms, so equal-ms groups keep their arrival order.
+    let low = 0
+    let high = this.loose.length
+    while (low < high) {
+      const mid = (low + high) >>> 1
+      if ((this.loose[mid]?.newestMs ?? Infinity) <= group.newestMs) low = mid + 1
+      else high = mid
+    }
+    this.loose.splice(low, 0, group)
+  }
+
+  /**
+   * Looks for MORE than MENTION_STORM_THRESHOLD loose mentions inside one window that includes
+   * `ms` (the one just added) and folds them into a new storm. O(log n + k), k being the loose
+   * mentions within two windows -- which is at most a handful, because a seventh would already
+   * have made a storm. Returns whether a storm formed.
+   */
+  private tryFormStorm(ms: number): boolean {
+    const first = this.lowerBound(ms - MENTION_STORM_WINDOW_MS)
+    for (let start = first; start < this.loose.length; start += 1) {
+      const startMs = this.loose[start]?.newestMs
+      if (startMs === undefined || startMs > ms) break
+      if (ms > startMs + MENTION_STORM_WINDOW_MS) continue
+      let end = start
+      while (
+        end + 1 < this.loose.length
+        && (this.loose[end + 1]?.newestMs ?? Infinity) <= startMs + MENTION_STORM_WINDOW_MS
+      ) end += 1
+      if (end - start + 1 > MENTION_STORM_THRESHOLD) {
+        this.formStorm(this.loose.slice(start, end + 1))
+        return true
+      }
+    }
+    return false
+  }
+
+  /** Folds loose groups into one new storm group, then lets it absorb what it now touches. */
+  private formStorm(folded: readonly Group[]): void {
+    const seed = folded[0]
+    if (seed === undefined) return
+    const storm: Group = {
+      key: `mention-storm:${seed.subjectPostId}`,
+      kind: 'storm',
+      type: 'mention',
+      subjectPostId: seed.subjectPostId,
+      subjectHandle: undefined,
+      members: new Map(),
+      oldestMs: Infinity,
+      newestMs: -Infinity,
+      item: undefined,
+    }
+    this.groups.set(storm.key, storm)
+    this.storms.push(storm)
+    for (const group of folded) this.foldInto(storm, group)
+    this.growStorm(storm, storm.newestMs)
+  }
+
+  /** Moves every member of `from` into `storm` and removes `from` as a row of its own. */
+  private foldInto(storm: Group, from: Group): void {
+    this.detach(from)
+    for (const [id, member] of from.members) {
+      storm.members.set(id, member)
+      this.memberIndex.set(id, storm.key)
+      if (member.ms < storm.oldestMs) storm.oldestMs = member.ms
+      if (member.ms > storm.newestMs) storm.newestMs = member.ms
+    }
+    storm.item = undefined
+  }
+
+  /**
+   * After a member joined (or a storm formed) at `ms`: widen the span, then absorb every loose
+   * mention and every other storm now within the window of it, until nothing more touches.
+   */
+  private growStorm(storm: Group, ms: number): void {
+    if (ms < storm.oldestMs) storm.oldestMs = ms
+    if (ms > storm.newestMs) storm.newestMs = ms
+    let grew = true
+    while (grew) {
+      grew = false
+      const low = storm.oldestMs - MENTION_STORM_WINDOW_MS
+      const high = storm.newestMs + MENTION_STORM_WINDOW_MS
+      for (
+        let index = this.lowerBound(low);
+        index < this.loose.length && (this.loose[index]?.newestMs ?? Infinity) <= high;
+      ) {
+        const near = this.loose[index]
+        if (near === undefined) break
+        this.foldInto(storm, near) // removes it from `loose`: the next one is at `index` now
+        grew = true
+      }
+      for (const other of [...this.storms]) {
+        if (other === storm) continue
+        if (other.newestMs < low || other.oldestMs > high) continue
+        this.foldInto(storm, other)
+        grew = true
+      }
+    }
+  }
+
+  /** Removes a group as a row (from the map and the loose/storm indexes) -- members untouched. */
+  private detach(group: Group): void {
+    this.groups.delete(group.key)
+    if (group.kind === 'loose') {
+      const at = this.loose.indexOf(group)
+      if (at >= 0) this.loose.splice(at, 1)
+    } else if (group.kind === 'storm') {
+      const at = this.storms.indexOf(group)
+      if (at >= 0) this.storms.splice(at, 1)
+    }
+  }
+
+  /** Removes a group AND forgets that its members were ever counted. */
+  private dropGroup(group: Group): void {
+    for (const id of group.members.keys()) this.memberIndex.delete(id)
+    this.detach(group)
   }
 
   /**
@@ -342,8 +585,7 @@ export class NotificationModel {
       if (oldest === undefined || group.newestMs < oldest.newestMs) oldest = group
     }
     if (oldest === undefined) return undefined
-    for (const id of oldest.members.keys()) this.memberIndex.delete(id)
-    this.groups.delete(oldest.key)
+    this.dropGroup(oldest)
     if (oldest.newestMs > this.evictedFloorMs) this.evictedFloorMs = oldest.newestMs
     return oldest
   }
@@ -366,7 +608,7 @@ export class NotificationModel {
       if (group !== undefined) {
         group.members.delete(postId)
         group.item = undefined
-        if (group.members.size === 0) this.groups.delete(memberKey)
+        if (group.members.size === 0) this.detach(group)
       }
       changed = true
     }
@@ -381,8 +623,7 @@ export class NotificationModel {
       const key = `${type}:${postId}`
       const group = this.groups.get(key)
       if (group === undefined) continue
-      for (const id of group.members.keys()) this.memberIndex.delete(id)
-      this.groups.delete(key)
+      this.dropGroup(group)
       changed = true
     }
     return changed
@@ -483,10 +724,14 @@ export class NotificationModel {
 
   private buildGroupItem(group: Group): NotificationItem {
     let newest: Member | undefined
+    let newestId: string | undefined
     let unread = false
     const lastSeenByActor = new Map<string, number>()
     for (const [id, member] of group.members) {
-      if (newest === undefined || member.ms > newest.ms) newest = member
+      if (newest === undefined || member.ms > newest.ms) {
+        newest = member
+        newestId = id
+      }
       if (!this.readIds.has(id)) unread = true
       const seen = lastSeenByActor.get(member.actorId)
       if (seen === undefined || member.ms > seen) lastSeenByActor.set(member.actorId, member.ms)
@@ -498,7 +743,9 @@ export class NotificationModel {
     return {
       id: group.key,
       type: group.type,
-      subjectPostId: group.subjectPostId,
+      // A storm has no single subject: the row opens its NEWEST mention (whose author is
+      // `actorIds[0]`, so the URL's cosmetic handle can still be a real one).
+      subjectPostId: group.kind === 'storm' ? (newestId ?? group.subjectPostId) : group.subjectPostId,
       subjectHandle: group.subjectHandle,
       at: newest?.at ?? '',
       unread,

@@ -37,6 +37,8 @@ import { notificationsStore } from './notificationsStore'
 
 const EXERCISE = 'ex-mock-0001'
 const ME = personaIdForHandle('dreyes_fh')
+/** The mock session's account (the third part of the storage key). */
+const ACCOUNT = 'acct-dreyes'
 
 interface PostInput {
   readonly id: string
@@ -114,6 +116,10 @@ afterEach(() => {
 })
 
 const bell = () => screen.findByRole('link', { name: /^Notifications/ })
+
+/** The engine's baseline read has landed (it starts after a short random wait, so await it). */
+const baselineLoaded = () =>
+  waitFor(() => expect(notificationsStore.getSnapshot().status).toBe('ready'))
 const rows = () => screen.getAllByTestId('notification-row')
 
 describe('derived items', () => {
@@ -275,12 +281,12 @@ describe('"Mark all read"', () => {
     expect(rows().every(row => row.getAttribute('data-unread') === 'false')).toBe(true)
     expect(screen.getByTestId('notifications-live')).toHaveTextContent('All notifications marked as read')
 
-    const stored = window.localStorage.getItem(notificationStorageKey(EXERCISE, ME))
+    const stored = window.localStorage.getItem(notificationStorageKey(EXERCISE, ME, ACCOUNT))
     expect(stored).not.toBeNull()
     expect(JSON.parse(stored ?? '{}').readIds.sort()).toEqual(['nt-mention-kward', 'nt-reply-fulco'])
     // The key names BOTH ids.
-    expect(notificationStorageKey(EXERCISE, ME)).toContain(EXERCISE)
-    expect(notificationStorageKey(EXERCISE, ME)).toContain(ME)
+    expect(notificationStorageKey(EXERCISE, ME, ACCOUNT)).toContain(EXERCISE)
+    expect(notificationStorageKey(EXERCISE, ME, ACCOUNT)).toContain(ME)
   })
 
   it('stays marked after a closed-and-reopened tab (localStorage outlives sessionStorage)', async () => {
@@ -317,6 +323,7 @@ describe('live and calm', () => {
     seed(OWN)
     renderChannel({ entries: ['/home'] })
     expect(await bell()).toHaveAccessibleName('Notifications')
+    await baselineLoaded() // a reply before this would simply be part of the baseline
 
     act(() => {
       postStore.appendPost(REPLY_FULCO)
@@ -335,6 +342,7 @@ describe('live and calm', () => {
     renderChannel({ entries: ['/home'] })
     await user.click(await screen.findByTestId('nav-post-button'))
     await screen.findByRole('dialog')
+    await baselineLoaded()
 
     // The frame behind the modal is inert -- and the live region must not be inside it.
     const frame = screen.getByTestId('nav-rail').closest('[inert]')
@@ -363,14 +371,15 @@ describe('live and calm', () => {
     expect(await screen.findByRole('link', { name: 'Notifications, 1 unread' })).toBeInTheDocument()
   })
 
-  it('stays bounded under a burst: 120 mentions cap the badge at 99+ and the page at 100 rows', async () => {
-    const burst = Array.from({ length: 120 }, (_, index) => fullPost({
-      id: `nt-burst-${index}`,
+  it('stays bounded: 120 SPREAD-OUT mentions cap the badge at 99+ and the page at 100 rows', async () => {
+    const spread = Array.from({ length: 120 }, (_, index) => fullPost({
+      id: `nt-spread-${index}`,
       handle: 'mvega_fh',
-      text: `@dreyes_fh burst ${index}`,
-      at: '2033-09-04T14:00:00.000Z',
+      text: `@dreyes_fh spread ${index}`,
+      // Two minutes apart: outside the mention-storm window, so each is a row of its own.
+      at: new Date(Date.UTC(2033, 8, 4, 8, 0, 0) + index * 120_000).toISOString(),
     }))
-    seed(OWN, ...burst)
+    seed(OWN, ...spread)
     renderChannel({ entries: ['/notifications'] })
 
     await waitFor(() => expect(rows()).toHaveLength(100))
@@ -382,6 +391,30 @@ describe('live and calm', () => {
       '20 older notifications are not shown.',
     )
   }, 30_000)
+
+  it('a MENTION STORM is one row and one unread: 120 mentions in a burst', async () => {
+    const authors = ['mvega_fh', 'kwardFH', 'tbrandt41', 'FulcoEM', 'Newsline7', 'TheScoopHQ']
+    const storm = Array.from({ length: 120 }, (_, index) => fullPost({
+      id: `nt-storm-${index}`,
+      handle: authors[index % authors.length] ?? 'mvega_fh',
+      text: `@dreyes_fh help ${index}`,
+      at: new Date(Date.UTC(2033, 8, 4, 14, 0, 0) + index * 400).toISOString(), // 48 s in all
+    }))
+    seed(OWN, ...storm)
+    renderChannel({ entries: ['/notifications'] })
+
+    await waitFor(() => expect(rows()).toHaveLength(1))
+    // The badge counts the storm as ONE group, like a reply row.
+    expect(await screen.findByLabelText('Notifications, 1 unread')).toBeInTheDocument()
+    expect(screen.getByTestId('notifications-badge')).toHaveTextContent(/^1$/)
+    // The grouped notice reads like the replies' one: the newest person, "and N others".
+    expect(rows()[0]).toHaveAttribute('data-type', 'mention')
+    expect(rows()[0]).toHaveTextContent('and 5 others mentioned you')
+    expect(screen.queryByTestId('notifications-hidden')).not.toBeInTheDocument()
+    // It opens the newest mention of the storm.
+    const link = within(rows()[0] as HTMLElement).getByRole('link')
+    expect(link.getAttribute('href')).toContain('/status/nt-storm-119')
+  })
 
   it('aggregates a burst of replies to one post into one row', async () => {
     const replies = Array.from({ length: 60 }, (_, index) => fullPost({
@@ -401,16 +434,26 @@ describe('live and calm', () => {
 
 describe('absent, not inert (D1-011)', () => {
   it.each(['readOnly', 'preview', 'kiosk'] as const)(
-    'a %s mount has no bell and /notifications lands on Home',
+    'a %s mount has no bell, no engine, no read and no storage; /notifications lands on Home',
     async variant => {
       seed(OWN, REPLY_FULCO)
+      const get = vi.spyOn(api, 'get')
       renderChannel({ entries: ['/notifications'], variant, beside: <RouterProbe /> })
       await waitFor(() => expect(screen.getByTestId('router-location')).toHaveTextContent('/home'))
+      await waitFor(() => expect(screen.getAllByTestId('post-card').length).toBeGreaterThan(0))
       expect(screen.queryByRole('link', { name: /notifications/i })).not.toBeInTheDocument()
+      expect(screen.queryByTestId('notifications-badge')).not.toBeInTheDocument()
       expect(screen.queryByTestId('notifications-page')).not.toBeInTheDocument()
-      // And nothing ran: no storage was touched for a viewer who has no notifications.
+      // The seam a staff preview relies on: the engine's `includeReplies` read never happens ...
+      const engineReads = get.mock.calls.filter(([url, config]) => {
+        const params = (config as { params?: { includeReplies?: boolean } } | undefined)?.params
+        return url === '/feed' && params?.includeReplies === true
+      })
+      expect(engineReads).toEqual([])
+      // ... nothing is written for a viewer who has no notifications ...
       const keys = Object.keys(window.localStorage)
       expect(keys.filter(key => key.startsWith(NOTIFICATION_STORAGE_PREFIX))).toEqual([])
+      // ... and the store is not available.
       expect(notificationsStore.getSummary().available).toBe(false)
     },
   )
@@ -424,17 +467,18 @@ describe('sign-out', () => {
     await waitFor(() => expect(rows()).toHaveLength(1))
     await user.click(screen.getByRole('button', { name: 'Mark all read' }))
     await waitFor(() =>
-      expect(window.localStorage.getItem(notificationStorageKey(EXERCISE, ME))).not.toBeNull())
+      expect(window.localStorage.getItem(notificationStorageKey(EXERCISE, ME, ACCOUNT)))
+        .not.toBeNull())
 
     // ... and a leftover from a build that kept the state per tab.
-    window.sessionStorage.setItem(notificationStorageKey(EXERCISE, ME), '{"v":1,"readIds":[],"likes":[]}')
+    window.sessionStorage.setItem(notificationStorageKey(EXERCISE, ME, ACCOUNT), '{"v":1,"readIds":[],"likes":[]}')
 
     act(() => {
       runSessionResets() // what `endSession` runs on sign-out
     })
 
-    expect(window.localStorage.getItem(notificationStorageKey(EXERCISE, ME))).toBeNull()
-    expect(window.sessionStorage.getItem(notificationStorageKey(EXERCISE, ME))).toBeNull()
+    expect(window.localStorage.getItem(notificationStorageKey(EXERCISE, ME, ACCOUNT))).toBeNull()
+    expect(window.sessionStorage.getItem(notificationStorageKey(EXERCISE, ME, ACCOUNT))).toBeNull()
     expect(notificationsStore.getSnapshot().items).toEqual([])
     await waitFor(() =>
       expect(screen.queryByRole('link', { name: /^Notifications/ })).not.toBeInTheDocument())

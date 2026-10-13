@@ -36,6 +36,8 @@ export type NotificationsEligibility =
     readonly kind: 'ready'
     readonly exerciseId: string
     readonly personaId: string
+    /** The signed-in account: part of the storage key (see `notificationStorage`). */
+    readonly accountId: string
     readonly handle: string
   }
 
@@ -52,6 +54,7 @@ export function useNotificationsEligibility(): NotificationsEligibility {
     kind: 'ready',
     exerciseId: session.exerciseId,
     personaId: session.personaId,
+    accountId: session.accountId,
     handle: self.handle,
   }
 }

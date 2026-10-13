@@ -15,9 +15,12 @@ import {
   type NotificationModelOptions,
 } from './notificationModel'
 import { EMPTY_PERSISTED } from './notificationStorage'
+import { describeItem } from './notificationText'
 import {
   EXCERPT_MAX_LENGTH,
   GROUPS_CAP,
+  MENTION_STORM_THRESHOLD,
+  MENTION_STORM_WINDOW_MS,
   MINE_CAP,
   READ_IDS_CAP,
   type NotificationItem,
@@ -57,9 +60,19 @@ const mine = (id: string, like = 0, at = '2033-09-04T12:00:00.000Z'): Participan
 const replyTo = (id: string, parentId: string, by = ALEX, at = '2033-09-04T14:00:00.000Z') =>
   post({ id, by, at, text: `Reply ${id}`, replyTo: { postId: parentId, authorHandle: HANDLE } })
 
-/** A distinct, increasing scenario instant for the n-th event (one second apart, from 08:00Z). */
+const EIGHT_AM = Date.UTC(2033, 8, 4, 8, 0, 0)
+
+/**
+ * A distinct, increasing scenario instant for the n-th event, TWO MINUTES apart from 08:00Z --
+ * further apart than the mention-storm window, so a run of mentions stays a run of rows.
+ */
 function tick(n: number): string {
-  return new Date(Date.UTC(2033, 8, 4, 8, 0, 0) + n * 1000).toISOString()
+  return new Date(EIGHT_AM + n * 120_000).toISOString()
+}
+
+/** The n-th second after 08:00Z: events this close together are a burst (one storm window). */
+function sec(n: number): string {
+  return new Date(EIGHT_AM + n * 1000).toISOString()
 }
 
 interface Harness {
@@ -237,8 +250,8 @@ describe('(c) like-count increases on my posts', () => {
     const { model, setNow } = harness()
     model.ingestBatch([mine('m1', 12)])
     setNow('2033-09-04T15:20:00.000Z')
-    const result = model.ingest(mine('m1', 15))
-    expect(result.event).toEqual({ type: 'like', amount: 3 })
+    const events = model.ingestBatch([mine('m1', 15)])
+    expect(events).toEqual([{ type: 'like', amount: 3 }])
     expect(only(model.items())).toMatchObject({
       id: 'like:m1',
       type: 'like',
@@ -257,9 +270,9 @@ describe('(c) like-count increases on my posts', () => {
     const { model, setNow } = harness()
     model.ingestBatch([mine('m1', 10)])
     setNow('2033-09-04T15:10:00.000Z')
-    model.ingest(mine('m1', 12))
+    model.ingestBatch([mine('m1', 12)])
     setNow('2033-09-04T15:40:00.000Z')
-    model.ingest(mine('m1', 17))
+    model.ingestBatch([mine('m1', 17)])
     const row = only(model.items())
     expect(row.count).toBe(7)
     expect(row.at).toBe('2033-09-04T15:40:00.000Z')
@@ -268,18 +281,17 @@ describe('(c) like-count increases on my posts', () => {
   it('re-reading an unchanged count adds nothing', () => {
     const { model } = harness()
     model.ingestBatch([mine('m1', 10)])
-    model.ingest(mine('m1', 13))
-    const again = model.ingest(mine('m1', 13))
-    expect(again).toEqual({ changed: false })
+    model.ingestBatch([mine('m1', 13)])
+    expect(model.ingestBatch([mine('m1', 13)])).toEqual([])
     expect(only(model.items()).count).toBe(3)
   })
 
   it('an unlike follows the baseline down so a later like still counts', () => {
     const { model } = harness()
     model.ingestBatch([mine('m1', 10)])
-    model.ingest(mine('m1', 7)) // three unlikes: below the baseline
+    model.ingestBatch([mine('m1', 7)]) // three unlikes: below the baseline
     expect(model.items()).toEqual([])
-    model.ingest(mine('m1', 9))
+    model.ingestBatch([mine('m1', 9)])
     expect(only(model.items()).count).toBe(2)
   })
 
@@ -296,7 +308,7 @@ describe('(c) like-count increases on my posts', () => {
     model.ingestBatch([mine('m1', 5)])
     model.ingest(mine('fresh', 0))
     expect(model.items()).toEqual([])
-    model.ingest(mine('fresh', 2))
+    model.ingestBatch([mine('fresh', 2)])
     expect(model.items().map(row => [row.id, row.count])).toEqual([['like:fresh', 2]])
   })
 
@@ -342,7 +354,7 @@ describe('aggregation (same subject post, same type)', () => {
   it('a reply row and a like row about the same post are different types, so two rows', () => {
     const { model } = harness()
     model.ingestBatch([mine('m1', 0), replyTo('r1', 'm1')])
-    model.ingest(mine('m1', 4))
+    model.ingestBatch([mine('m1', 4)])
     expect(model.items().map(row => row.id).sort()).toEqual(['like:m1', 'reply:m1'])
   })
 })
@@ -373,7 +385,7 @@ describe('ordering and identity', () => {
   it('carries only participant-safe data: no provenance can appear on a row (XC-002)', () => {
     const { model } = harness()
     model.ingestBatch([mine('m1'), replyTo('r1', 'm1')])
-    model.ingest(mine('m1', 3))
+    model.ingestBatch([mine('m1', 3)])
     for (const row of model.items()) {
       expect(Object.keys(row).sort()).toEqual([
         'actorCount', 'actorIds', 'at', 'count', 'excerpt', 'id', 'subjectHandle',
@@ -407,7 +419,7 @@ describe('taken-down posts', () => {
   it('a removed post of mine takes its like row AND the replies under it with it', () => {
     const { model } = harness()
     model.ingestBatch([mine('m1', 0), replyTo('r1', 'm1')])
-    model.ingest(mine('m1', 5))
+    model.ingestBatch([mine('m1', 5)])
     expect(model.items()).toHaveLength(2)
     expect(model.remove('m1')).toBe(true)
     expect(model.items()).toEqual([])
@@ -442,7 +454,7 @@ describe('read state', () => {
     h = harness()
     h.model.ingestBatch([mine('m1', 2), replyTo('r1', 'm1')])
     h.model.ingest(post({ id: 'p1', by: KIM, text: '@dreyes_fh', at: '2033-09-04T14:40:00.000Z' }))
-    h.model.ingest(mine('m1', 6))
+    h.model.ingestBatch([mine('m1', 6)])
   })
 
   it('starts with every derived row unread', () => {
@@ -461,7 +473,7 @@ describe('read state', () => {
 
   it('likes after "mark all read" count only the NEW ones, as a fresh unread row', () => {
     h.model.markAllRead()
-    h.model.ingest(mine('m1', 8))
+    h.model.ingestBatch([mine('m1', 8)])
     const like = h.model.items().find(row => row.type === 'like')
     expect(like).toMatchObject({ unread: true, count: 2 })
   })
@@ -534,6 +546,229 @@ describe('"Mark all read" never leaves an old event unread (W-1)', () => {
     expect(written.at(-1)).toBe(`r${READ_IDS_CAP + 39}`)
     // ... without touching the live set: the model itself still reads everything as read.
     expect(model.items().every(item => !item.unread)).toBe(true)
+  })
+})
+
+/** A top-level mention of me, by author `by`, at the given instant. */
+const mention = (id: string, at: string, by = ALEX): ParticipantPostView =>
+  post({ id, by, at, text: `@${HANDLE} help (${id})` })
+
+describe('mention storms fold into ONE row (SOC-071, W-1)', () => {
+  it('keeps one row per mention up to the threshold, even inside one window', () => {
+    const { model } = harness()
+    for (let index = 0; index < MENTION_STORM_THRESHOLD; index += 1) {
+      model.ingest(mention(`p${index}`, sec(index)))
+    }
+    const rows = model.items()
+    expect(rows).toHaveLength(MENTION_STORM_THRESHOLD)
+    expect(rows.every(row => row.count === 1)).toBe(true)
+  })
+
+  it('folds into ONE storm row once MORE than the threshold arrive inside the window', () => {
+    const { model } = harness()
+    for (let index = 0; index <= MENTION_STORM_THRESHOLD; index += 1) {
+      model.ingest(mention(`p${index}`, sec(index), `persona-${index}`))
+    }
+    const row = only(model.items())
+    expect(row).toMatchObject({ type: 'mention', count: MENTION_STORM_THRESHOLD + 1, unread: true })
+    expect(row.actorCount).toBe(MENTION_STORM_THRESHOLD + 1)
+  })
+
+  it('120 mentions in a burst are ONE unread group that reads "Keisha and 41 others mentioned you"', () => {
+    const { model } = harness()
+    const events: Array<{ type: string; amount: number }> = []
+    for (let index = 0; index < 120; index += 1) {
+      const result = model.ingest(mention(`p${index}`, sec(index % 59), `persona-${index % 42}`))
+      if (result.event !== undefined) events.push(result.event)
+    }
+    const row = only(model.items())
+    expect(row.count).toBe(120)
+    expect(row.actorCount).toBe(42)
+    expect(row.unread).toBe(true)
+    expect(describeItem(row, ['Keisha Ward', 'Tom Brandt'])).toBe(
+      'Keisha Ward and 41 others mentioned you',
+    )
+    // Every mention is still a thing to announce: the throttle (not the model) folds them.
+    expect(events).toHaveLength(120)
+    expect(events.every(event => event.type === 'mention' && event.amount === 1)).toBe(true)
+  })
+
+  it('opens the NEWEST mention of the storm, whose author is the first previewed actor', () => {
+    const { model } = harness()
+    for (let index = 0; index < 10; index += 1) {
+      model.ingest(mention(`p${index}`, sec(index), `persona-${index}`))
+    }
+    const row = only(model.items())
+    expect(row.subjectPostId).toBe('p9')
+    expect(row.actorIds[0]).toBe('persona-9')
+    expect(row.at).toBe(sec(9))
+  })
+
+  it('keeps three SPREAD-OUT mentions as three rows', () => {
+    const { model } = harness()
+    model.ingest(mention('p1', tick(0)))
+    model.ingest(mention('p2', tick(5)))
+    model.ingest(mention('p3', tick(10)))
+    expect(model.items().map(row => row.subjectPostId).sort()).toEqual(['p1', 'p2', 'p3'])
+  })
+
+  it('does not call a slow trickle a storm: one a minute for an hour is sixty rows', () => {
+    const { model } = harness()
+    for (let index = 0; index < 60; index += 1) {
+      model.ingest(mention(`p${index}`, new Date(EIGHT_AM + index * 61_000).toISOString()))
+    }
+    expect(model.items()).toHaveLength(60)
+  })
+
+  it('two bursts far apart are two storms', () => {
+    const { model } = harness()
+    const half = (index: number) => new Date(EIGHT_AM + 30 * 60_000 + index * 1000).toISOString()
+    for (let index = 0; index < 8; index += 1) model.ingest(mention(`a${index}`, sec(index)))
+    for (let index = 0; index < 9; index += 1) model.ingest(mention(`b${index}`, half(index)))
+    expect(model.items().map(row => row.count).sort()).toEqual([8, 9])
+  })
+
+  it('ROLLS: a storm absorbs mentions within a window of it, and a gap ends it', () => {
+    const { model } = harness()
+    for (let index = 0; index < 6; index += 1) model.ingest(mention(`s${index}`, sec(index)))
+    expect(model.items()).toHaveLength(1) // the storm
+    // 50 s after the newest member (+55 s), then again 50 s after that: still the same burst.
+    model.ingest(mention('t1', sec(55)))
+    model.ingest(mention('t2', sec(105)))
+    expect(only(model.items()).count).toBe(8)
+    // A 100 s lull: this one is NOT part of it -- a row of its own.
+    model.ingest(mention('later', sec(205)))
+    const rows = model.items()
+    expect(rows).toHaveLength(2)
+    expect(rows.find(row => row.subjectPostId === 'later')?.count).toBe(1)
+  })
+
+  it('is the same whichever order the mentions are offered in (feed read vs. stream)', () => {
+    const forward = harness()
+    const backward = harness()
+    const batch = Array.from({ length: 40 }, (_, index) =>
+      mention(`p${index}`, sec(index), `persona-${index % 9}`))
+    for (const item of batch) forward.model.ingest(item)
+    backward.model.ingestBatch([...batch].reverse()) // a feed is newest-first
+    const a = only(forward.model.items())
+    const b = only(backward.model.items())
+    expect(b).toMatchObject({ count: a.count, actorCount: a.actorCount, at: a.at })
+  })
+
+  it('merges two storms that a later mention bridges', () => {
+    const { model } = harness()
+    for (let index = 0; index < 6; index += 1) model.ingest(mention(`b${index}`, sec(100 + index)))
+    for (let index = 0; index < 6; index += 1) model.ingest(mention(`a${index}`, sec(index)))
+    expect(model.items()).toHaveLength(2) // 100 s apart: two storms
+    model.ingest(mention('bridge', sec(52))) // within a window of A, whose edge then reaches B
+    const row = only(model.items())
+    expect(row.count).toBe(13)
+  })
+
+  it('leaves mentions that are REPLIES under one post alone (they already group by subject)', () => {
+    const { model } = harness()
+    const parent = { postId: 'someone-elses', authorHandle: 'zed' }
+    for (let index = 0; index < 12; index += 1) {
+      model.ingest(post({ id: `p${index}`, text: `@${HANDLE} hi`, at: sec(index), replyTo: parent }))
+    }
+    expect(only(model.items())).toMatchObject({ id: 'mention:someone-elses', count: 12 })
+  })
+
+  it('"Mark all read" reads a storm; a mention that joins it makes it unread again', () => {
+    const { model } = harness()
+    for (let index = 0; index < 10; index += 1) model.ingest(mention(`p${index}`, sec(index)))
+    model.markAllRead()
+    expect(only(model.items()).unread).toBe(false)
+    const joined = model.ingest(mention('late', sec(30)))
+    expect(joined.event).toEqual({ type: 'mention', amount: 1 })
+    expect(only(model.items())).toMatchObject({ unread: true, count: 11 })
+  })
+
+  it('a taken-down member leaves the storm; the last one takes the row with it', () => {
+    const { model } = harness()
+    for (let index = 0; index < 7; index += 1) model.ingest(mention(`p${index}`, sec(index)))
+    expect(model.remove('p3')).toBe(true)
+    expect(only(model.items()).count).toBe(6)
+    for (const id of ['p0', 'p1', 'p2', 'p4', 'p5', 'p6']) model.remove(id)
+    expect(model.items()).toEqual([])
+  })
+
+  it('a taken-down post is never folded into a storm', () => {
+    const { removed, model } = harness()
+    for (let index = 0; index < 6; index += 1) {
+      if (index === 2) removed.add(`p${index}`)
+      model.ingest(mention(`p${index}`, sec(index)))
+    }
+    // 5 survivors: not more than the threshold, so no storm and no row for the removed one.
+    expect(model.items()).toHaveLength(5)
+  })
+
+  it('stays bounded: a burst of 1000 is one row, and storms + spread rows respect GROUPS_CAP', () => {
+    const { model } = harness()
+    for (let index = 0; index < 1000; index += 1) {
+      model.ingest(mention(`b${index}`, sec(index % 30), `persona-${index % 50}`))
+    }
+    expect(only(model.items()).count).toBe(1000)
+
+    // Plus far more spread-out mentions than the cap holds: the storm is the NEWEST, so it stays.
+    for (let index = 0; index < GROUPS_CAP + 100; index += 1) {
+      model.ingest(mention(`s${index}`, tick(index + 1)))
+    }
+    const rows = model.items()
+    expect(rows.length).toBeLessThanOrEqual(GROUPS_CAP)
+    expect(rows.some(row => row.count === 1000)).toBe(false) // the OLD storm aged out with the cap
+    expect(rows[0]?.subjectPostId).toBe(`s${GROUPS_CAP + 99}`)
+  })
+
+  it('a window of exactly MENTION_STORM_WINDOW_MS still counts as "within"', () => {
+    const { model } = harness()
+    for (let index = 0; index < MENTION_STORM_THRESHOLD; index += 1) {
+      model.ingest(mention(`p${index}`, sec(index * 12)))
+    }
+    expect(model.items()).toHaveLength(MENTION_STORM_THRESHOLD)
+    // The sixth lands exactly one window after the first.
+    model.ingest(mention('edge', new Date(EIGHT_AM + MENTION_STORM_WINDOW_MS).toISOString()))
+    expect(only(model.items()).count).toBe(MENTION_STORM_THRESHOLD + 1)
+  })
+})
+
+describe('counts only move with a feed READ (S-3)', () => {
+  it('ignores the counts of a pushed post that is already mine', () => {
+    const { model } = harness()
+    model.ingestBatch([mine('m1', 10)])
+    model.ingestBatch([mine('m1', 14)]) // a read: 4 new likes
+    expect(only(model.items()).count).toBe(4)
+
+    // A late / replayed push of the same post, carrying the counts it had when it was sent.
+    const stale = model.ingest(mine('m1', 0))
+    expect(stale).toEqual({ changed: false })
+    expect(only(model.items()).count).toBe(4) // the baseline was NOT dragged down to 0
+
+    // ... so the next read reports 4 + 1, not 14 + 1.
+    model.ingestBatch([mine('m1', 15)])
+    expect(only(model.items()).count).toBe(5)
+  })
+
+  it('does not let a stale push raise a count either', () => {
+    const { model } = harness()
+    model.ingestBatch([mine('m1', 3)])
+    expect(model.ingest(mine('m1', 50)).event).toBeUndefined()
+    expect(model.items()).toEqual([])
+  })
+
+  it('still registers a NEW post of mine from a push (its counts are its baseline)', () => {
+    const { model } = harness()
+    model.ingest(mine('fresh', 2))
+    model.ingestBatch([mine('fresh', 6)])
+    expect(only(model.items()).count).toBe(4)
+  })
+
+  it('a feed read may lower a baseline (an unlike)', () => {
+    const { model } = harness()
+    model.ingestBatch([mine('m1', 10)])
+    model.ingestBatch([mine('m1', 7)])
+    model.ingestBatch([mine('m1', 9)])
+    expect(only(model.items()).count).toBe(2)
   })
 })
 
@@ -627,7 +862,7 @@ describe('persistence round-trip (the model never touches storage itself)', () =
     const first = harness()
     first.model.ingestBatch([mine('m1', 5), replyTo('r1', 'm1')])
     first.model.markAllRead()
-    first.model.ingest(mine('m1', 9)) // 4 new likes since the baseline moved to 5
+    first.model.ingestBatch([mine('m1', 9)]) // 4 new likes since the baseline moved to 5
     const persisted = first.model.toPersisted()
 
     // A reload: a fresh model, the same stored state, the same feed (plus one new reply).

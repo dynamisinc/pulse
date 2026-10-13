@@ -9,15 +9,16 @@
  * newest first -- replies to my posts, @mentions of me, and "Your post got N new likes" --
  * each with a typed icon AND a text label (`NotificationRow`). Activating a row opens the
  * thread it is about, through the channel's navigation adapter. "Mark all read" is the one
- * control: it clears the rail's badge, persists per persona in `localStorage` (next to the
- * persisted tokens) under an exercise- and persona-scoped key, and is announced politely.
+ * control: it clears the rail's badge, persists per persona in `localStorage` under an
+ * exercise-, persona- and account-scoped key, and is announced politely.
  *
  * THE DATA is the engine's snapshot (`useNotifications`): this page derives nothing and
- * fetches nothing. The engine (`NotificationsEngine`, mounted by `SocialRoutes`) keeps
+ * fetches nothing. The engine (`NotificationsEngine`, mounted by `SocialChannel`) keeps
  * running on every route, so the list is already warm when the viewer arrives and is live
  * while they read it. Under a burst the rows are groups, so the page stays legible
- * (SOC-071); only the newest {@link MAX_NOTIFICATION_ROWS} are drawn and the rest are
- * counted in a note, so the DOM stays bounded too (NFR-002).
+ * (SOC-071) -- a mention storm is ONE row ("Keisha and 41 others mentioned you") -- and only
+ * the newest {@link MAX_NOTIFICATION_ROWS} are drawn, the rest counted in a note, so the DOM
+ * stays bounded too (NFR-002).
  *
  * STATES -- all text, none colour-only (NFR-001):
  *   - the cast / first read still loading: "Loading notifications..." (a polite status);

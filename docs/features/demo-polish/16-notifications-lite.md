@@ -19,8 +19,15 @@ Test paths are under `src/frontend/src/features/social/` (`n/` = `notifications/
       contains: (a) replies whose `inReplyTo.postId` is one of my posts, (b) posts whose text contains
       `@myhandle`, (c) one aggregated row per my post whose `counts.like` rose since I last looked ("Your post
       got 3 new likes"). Nothing is fabricated; with nothing new the page shows an honest empty state.
+      **Mention storms aggregate:** top-level mentions each keep a row of their own until MORE than 5 arrive
+      within 60 s of *scenario* time; from then on they fold into one rolling storm row ("Keisha and 41 others
+      mentioned you") that opens the newest mention, counts as ONE unread group on the badge, and keeps
+      absorbing mentions within 60 s of its span until the burst stops. Mentions that are replies under one
+      post already group by that post. Counts on a pushed post already known to be mine are ignored — only a
+      feed read can move a like count (or lower its baseline).
       *Tests:* `n/notificationModel.test.ts` (replies, mentions and their handle boundaries, like rise,
-      first-load baseline, unlike, aggregation, empty, own activity never notifies);
+      first-load baseline, unlike, aggregation, empty, own activity never notifies; "mention storms fold into
+      ONE row"; "counts only move with a feed READ");
       `n/NotificationsFlow.test.tsx` › "derived items" (through the real channel, incl. the
       `includeReplies` read and the empty state).
 - [x] **Bell and badge.** The nav rail shows a Notifications link with an unread count rendered as **text**
@@ -35,10 +42,11 @@ Test paths are under `src/frontend/src/features/social/` (`n/` = `notifications/
       ordinary session gets the bell).
 - [x] **Page.** `/notifications` lists items newest-first in **scenario time**, each with a typed icon **and**
       text label (reply / mention / like), opening the relevant thread on activation; "Mark all read" persists
-      per persona in **`localStorage`** under an exercise- and persona-scoped key
-      (`pulse.notifications.v1:{exerciseId}:{personaId}`) and clears the badge. (*Amended:* it was
-      `sessionStorage`; participant tokens now persist across a closed tab — easy-login 07 — so the read marks
-      and like baselines must too, or every reopen would show the whole feed as unread again.)
+      per persona in **`localStorage`** under an exercise-, persona- and account-scoped key
+      (`pulse.notifications.v1:{exerciseId}:{personaId}:{accountId}`) and clears the badge. (*Amended:* it was
+      `sessionStorage`; easy-login 07 moves participant tokens to `localStorage`, so the read marks and like
+      baselines must outlive a closed tab too, or every reopen would show the whole feed as unread again. The
+      account id keeps two humans who each log in to a shared org persona from sharing read marks.)
       *Tests:* `n/NotificationsFlow.test.tsx` › "the page" and › "Mark all read" (newest first, icon + label,
       scenario-time stamp and zone, activation opens the thread and Back returns, heading focus, one `view`
       event, persistence, a closed-and-reopened tab); `n/notificationsStore.test.ts` › "state lives in
@@ -47,10 +55,12 @@ Test paths are under `src/frontend/src/features/social/` (`n/` = `notifications/
 - [x] **Live and calm.** Reply and mention items arrive through the existing realtime feed subscription
       (`PostReceived`). **Like items come from count changes on the viewer's own posts**, detected by
       refetching the feed about every 30 s (first tick random; later ticks ±15 %; exponential backoff to ≈5 min
-      on repeated failures) while the tab is visible: B3 adds no reaction broadcast, and `PostReceived` never
-      carries a like. New items get a polite live-region announcement (mounted outside the frame that goes
-      `inert` while composing, so a compose in progress does not swallow it); under a burst, items are
-      aggregated (same post, same type) so the page stays legible (D1-005/SOC-071). A taken-down post drops out.
+      on repeated failures; the baseline and the catch-up read after a hidden tab or a pause are jittered 0–2 s;
+      the re-read holds while the shell's pause / EndEx overlay is up) while the tab is visible: B3 adds no reaction broadcast, and `PostReceived` never
+      carries a like. New items get a polite live-region announcement (throttled to one per ≈12 s, held items
+      spoken together, and dropped by "Mark all read"; mounted outside the frame that goes `inert` while
+      composing, so a compose in progress does not swallow it); under a burst, items are
+      aggregated (same post, same type; mention storms as above) so the page stays legible (D1-005/SOC-071). A taken-down post drops out.
       The model is bounded (newest 500 rows), so a long session costs the same per snapshot as a short one.
       *Tests:* `n/notificationsStore.test.ts` (baseline vs live, arrivals before the baseline, the re-read and
       its visibility gating, jitter and backoff, no overlapping reads, burst cost — one coalesced publish and one
@@ -59,11 +69,18 @@ Test paths are under `src/frontend/src/features/social/` (`n/` = `notifications/
       old event unread", "cost under a burst"; `n/NotificationsFlow.test.tsx` › "live and calm" (incl.
       announcing while the compose modal is open and a 120-mention burst capped at `99+` / 100 rows).
 - [x] **Isolation.** The derivation reads only the session's exercise-scoped feed; the storage key includes the
-      exercise id and the persona id; nothing is read from another persona. Sign-out sweeps **both**
-      `localStorage` and `sessionStorage` (registered with `core/auth/sessionReset`).
+      exercise id, the persona id and the account id; nothing is read from another viewer. Starting a session
+      sweeps every notification entry that is not the current viewer's (one browser holds one participant
+      session). Sign-out sweeps **both** `localStorage` and `sessionStorage` (registered with
+      `core/auth/sessionReset`) — but only in a tab that ever ran a notifications session, so a staff
+      sign-out cannot wipe a participant's state. If another tab removes the current key, this tab ends its
+      session without writing its stale state back.
       *Tests:* `n/notificationStorage.test.ts` (key scope, no collision, untrusted values, sweep, merge);
-      `n/notificationsStore.test.ts` › "Mark all read", "state lives in localStorage", "stop / restart /
-      reset" (another persona / another exercise start clean; a read landing after sign-out writes nothing);
+      `n/notificationsStore.test.ts` › "Mark all read", "state lives in localStorage", "storage hygiene",
+      "sign-out only wipes what this tab owns", "stop / restart / reset" (another persona / exercise /
+      account start clean; a read landing after sign-out writes nothing; a `storage` event from another tab);
+      `n/NotificationsFlow.test.tsx` › "absent, not inert" (a `preview` mount makes no `includeReplies`
+      read and writes no key);
       `n/NotificationsFlow.test.tsx` › "sign-out".
 
 ## Out of Scope
@@ -75,7 +92,8 @@ notification (SOC-072 — alert bar era), email.
   `layout/NavRail.tsx`, `layout/SocialRoutes.tsx` (the `/notifications` route), `layout/socialNavigation.ts`
   (the route vocabulary: `/notifications` is a reserved segment, never a persona handle) and
   `SocialChannel.tsx` (mounts the engine outside the inert-while-composing frame and passes
-  `showNotifications`). Reuse `resolveFeed`, the ref-counted `defaultArrivalSource`, `useSession().personaId`,
+  `showNotifications`). The staff preview needs no change: its `preview` variant has no affordances, so the
+  engine never starts there. Reuse `resolveFeed`, the ref-counted `defaultArrivalSource`, `useSession().personaId`,
   `formatScenarioTime`/`useScenarioTime`, the shared `SocialDirectory`.
 - Like-increase detection compares `counts.like` against a per-post snapshot stored in **`localStorage`**;
   first load establishes the baseline (no retroactive "new likes"). **Migration:** none — the earlier
@@ -93,6 +111,15 @@ notification (SOC-072 — alert bar era), email.
   read (`GET /api/feed?author=self`), to be filed as a post-demo follow-up.
 - In mock mode nothing raises a like count, so the like path is demonstrated by the store tests (fake timers),
   not in the browser.
+- **Shared persona / shared account.** The key is exercise + persona + account. Two humans who log in to a
+  shared org persona with *different* accounts get separate read marks. Two humans on the *same* shared
+  account (or one account in two browsers) are one viewer: they share read marks (last writer wins for a
+  record both tabs know; read marks are unioned). Until easy-login 07 merges, participant tokens are still in
+  `sessionStorage`, so on such a build this state can outlive the token across a closed tab — harmless
+  (nothing in it is content, and the next `start()` sweeps entries that are not the signed-in viewer's), but
+  not "lives and dies with the token".
+- A mention storm's membership is not capped (only the row count is), like a reply group's; it is bounded by
+  what a session can receive.
 - Reserved-handle validation (a persona whose handle is `notifications`, `home`, …) is a separate follow-up.
 
 ## Dependencies
