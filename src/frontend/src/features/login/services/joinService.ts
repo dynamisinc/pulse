@@ -32,6 +32,16 @@
  *   - never returns it: the mock envelope below contains fixed fake tokens, not
  *     the join token.
  *
+ * A PARTICIPANT LINK MAY ONLY EVER YIELD A PARTICIPANT SESSION. The page stores
+ * whatever this returns in `localStorage` (`persist: true`), the wider-blast-radius
+ * store that is for participant tokens only (EL-10); staff tokens belong in
+ * `sessionStorage`. So when the envelope's `session.role` is PRESENT and is not a
+ * participant-world role (`participant` / `pio`; anything else, or a value that is
+ * not a role at all, counts) the call is refused: it throws a 401-shaped error,
+ * classified and worded exactly like a refused link, and nothing is stored. A
+ * missing `session` or `session.role` is not refused (the contract always sends one,
+ * but the guard only acts on a role it can SEE).
+ *
  * ERROR CLASSES the page renders (`classifyJoinFailure`, the one seam, keyed on
  * HTTP status only — never on server text):
  *   - `link-invalid`  401, and 400 (a malformed request can never succeed on a
@@ -82,6 +92,7 @@ import { AxiosError, type AxiosAdapter, type InternalAxiosRequestConfig } from '
 import { api } from '@/core/services/api'
 import { USE_MOCK_DATA } from '@/core/config/mockData'
 import { SESSION_TTL_MS } from '@/core/auth/sessionResolver'
+import { isExerciseRole, isParticipantRole } from '@/core/auth/roles'
 import {
   ParticipantSignInError,
   isLoginEnvelope,
@@ -106,6 +117,7 @@ const MOCK_REFRESH_TOKEN = 'mock-join-refresh-token'
 /** Fixed error text: nothing here can contain a token, a URL or server text. */
 const NO_RESPONSE_MESSAGE = 'The join request did not reach the server.'
 const MALFORMED_MESSAGE = 'The join response was empty or malformed.'
+const NOT_A_PARTICIPANT_MESSAGE = 'The join response was not a participant session.'
 
 /**
  * How the page should present a failed exchange (see the module header). The
@@ -156,6 +168,18 @@ function mockEnvelope(): LoginEnvelope {
       expiresAt: new Date(Date.now() + SESSION_TTL_MS).toISOString(),
     },
   }
+}
+
+/**
+ * True when the envelope names a role that is not a participant-world role (see
+ * the module header). Only a role that is PRESENT is judged.
+ */
+function carriesNonParticipantRole(envelope: LoginEnvelope): boolean {
+  const session = envelope.session
+  if (typeof session !== 'object' || session === null) return false
+  const role = (session as Record<string, unknown>).role
+  if (role === undefined) return false
+  return !(isExerciseRole(role) && isParticipantRole(role))
 }
 
 /** A 401 shaped like the real one: no body, no detail. */
@@ -228,6 +252,12 @@ export async function signInWithLink(token: string): Promise<LoginEnvelope> {
 
   if (!isLoginEnvelope(data)) {
     throw new ParticipantSignInError(MALFORMED_MESSAGE)
+  }
+
+  // Never let staff (or any non-participant) tokens reach the page, which would
+  // persist them in `localStorage`. Reads as a refused link: status 401.
+  if (carriesNonParticipantRole(data)) {
+    throw new ParticipantSignInError(NOT_A_PARTICIPANT_MESSAGE, { status: 401 })
   }
 
   return data

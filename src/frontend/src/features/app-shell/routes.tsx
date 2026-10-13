@@ -83,8 +83,8 @@ import { SessionProvider } from '@/core/auth'
 import { RoleAwareEntry, type RoleAwareEntryProps } from './RoleAwareEntry'
 import { ParticipantSignInPage } from '@/features/login/pages/ParticipantSignInPage'
 import { StaffSignInPage } from '@/features/login/pages/StaffSignInPage'
-import { JoinPage, JOIN_PATH } from '@/features/login/pages/JoinPage'
-import { LOGIN_PATH, STAFF_LOGIN_PATH } from './constants'
+import { JoinPage } from '@/features/login/pages/JoinPage'
+import { JOIN_PATH, LOGIN_PATH, STAFF_LOGIN_PATH } from './constants'
 
 /**
  * Builds the role-aware route table. The orchestrator passes the concrete

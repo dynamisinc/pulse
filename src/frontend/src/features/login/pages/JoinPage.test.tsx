@@ -17,6 +17,10 @@
  *                                  ........................... "one browser, one identity"
  *   AC5  exercise name, resolved and failed (non-blocking) ..... "the exercise name"
  *   bare /join (the scrubbed address after a reload) ........... "a bare /join"
+ *   Gate-1 S-4: a non-participant role is never persisted
+ *                      ........ "a participant link never stores a staff session"
+ *   Gate-1 S-7: startedRef pinned on its own
+ *                      ........ "the exchange" (effect re-run after a failure)
  *   a11y: one h1, a main, keyboard reach ....................... "accessibility"
  *   content security: token never in a console call / the page .. "the token never leaks"
  *
@@ -299,6 +303,38 @@ describe('the exchange (AC1)', () => {
     expect(mockSetTokens).not.toHaveBeenCalled()
     expect(getAccessToken()).toBeNull()
     expect(router.state.location.pathname).toBe(`/join/${TOKEN}`)
+  })
+
+  it('does not retry on its own when the effect re-runs after a failure (startedRef, alone)', async () => {
+    mockPost.mockRejectedValue(axiosErrorWith(undefined))
+    const router = createMemoryRouter(
+      [
+        { path: '/join/:token', element: <JoinPage /> },
+        { path: '*', element: <p data-testid="entry">role-aware entry</p> },
+      ],
+      { initialEntries: [`/join/${TOKEN}`] },
+    )
+    const clientA = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const clientB = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const tree = (client: QueryClient) => (
+      <QueryClientProvider client={client}>
+        <RouterProvider router={router} />
+      </QueryClientProvider>
+    )
+
+    const { rerender } = render(tree(clientA))
+    await screen.findByRole('alert')
+    expect(mockPost).toHaveBeenCalledTimes(1)
+
+    // A new QueryClient changes the exchange callback's identity, so the start effect
+    // runs again with NO exchange in flight (the failed one has settled). Only
+    // `startedRef` stands between that re-run and an automatic second POST.
+    rerender(tree(clientB))
+    await act(async () => undefined)
+
+    expect(mockPost).toHaveBeenCalledTimes(1)
+    expect(screen.getByRole('alert')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument()
   })
 })
 
@@ -695,23 +731,75 @@ describe('a bare /join (the scrubbed address, after a reload)', () => {
     window.history.replaceState(null, '', '/join')
   })
 
-  it('makes no request and says the link was already used on this page', async () => {
+  it('makes no request and tells the participant how to sign in', async () => {
     renderJoin({ entries: ['/join'] })
 
     const status = await screen.findByRole('status')
-    expect(status).toHaveTextContent(/this link was already used on this page/i)
+    expect(status.textContent).toBe(
+      'To sign in, tap your link again or scan your card. '
+      + "You can also sign in with today's word.",
+    )
     expect(status.querySelector('svg')).not.toBeNull()
     expect(status).toHaveFocus()
     expect(mockPost).not.toHaveBeenCalled()
     expect(mockSetTokens).not.toHaveBeenCalled()
   })
 
-  it('offers sign-in as a link to /login', async () => {
+  it('never claims the link is spent (a pull-to-refresh mid-exchange must not say so)', async () => {
+    renderJoin({ entries: ['/join'] })
+
+    const status = await screen.findByRole('status')
+    expect(status.textContent).not.toMatch(/already used|used|spent|expired|invalid|no longer/i)
+  })
+
+  it('is what a reload during "Signing you in…" lands on, not a "link is used" message', async () => {
+    const pending = deferred<ReturnType<typeof ok>>()
+    mockPost.mockReturnValue(pending.promise)
+
+    // First load: the tap. The address bar is scrubbed while the exchange is in flight.
+    const first = renderJoin()
+    await screen.findByRole('status')
+    expect(window.location.pathname).toBe('/join')
+
+    // Pull-to-refresh: the page is torn down and boots again at the scrubbed address.
+    first.unmount()
+    renderJoin({ entries: [window.location.pathname] })
+
+    const status = await screen.findByRole('status')
+    expect(status).toHaveTextContent(/tap your link again or scan your card/i)
+    expect(status).not.toHaveTextContent(/already used/i)
+    expect(mockPost).toHaveBeenCalledTimes(1)
+  })
+
+  it('offers Continue as a link to /, and no sign-in-only or retry control', async () => {
     renderJoin({ entries: ['/join'] })
     await screen.findByRole('status')
 
-    expect(screen.getByRole('link', { name: /sign in/i })).toHaveAttribute('href', '/login')
+    const link = screen.getByRole('link', { name: 'Continue' })
+    expect(link).toHaveAttribute('href', '/')
+    expect(link.tagName).toBe('A')
+    expect(screen.queryByRole('link', { name: /go to sign in/i })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument()
+  })
+
+  it('hands over to the role-aware entry when Continue is followed', async () => {
+    const user = userEvent.setup()
+    renderJoin({ entries: ['/join'] })
+    await screen.findByRole('status')
+
+    await user.click(screen.getByRole('link', { name: 'Continue' }))
+
+    expect(await screen.findByTestId('entry')).toBeInTheDocument()
+  })
+
+  it('reaches Continue with one Tab from the status region', async () => {
+    const user = userEvent.setup()
+    renderJoin({ entries: ['/join'] })
+    await screen.findByRole('status')
+
+    await user.tab()
+
+    expect(screen.getByRole('link', { name: 'Continue' })).toHaveFocus()
   })
 
   it('is still a complete page: one h1 and a main', async () => {
@@ -724,7 +812,7 @@ describe('a bare /join (the scrubbed address, after a reload)', () => {
   it('treats a trailing slash the same way', async () => {
     renderJoin({ entries: ['/join/'] })
 
-    expect(await screen.findByRole('status')).toHaveTextContent(/already used/i)
+    expect(await screen.findByRole('status')).toHaveTextContent(/tap your link again/i)
     expect(mockPost).not.toHaveBeenCalled()
   })
 
@@ -736,6 +824,63 @@ describe('a bare /join (the scrubbed address, after a reload)', () => {
     await screen.findByRole('status')
 
     expect(getAccessToken()).toBe('access-A')
+  })
+})
+
+describe('a participant link never stores a staff session (Gate-1 S-4)', () => {
+  const STAFF_ENVELOPE = {
+    token: 'staff-access',
+    refreshToken: 'staff-refresh',
+    session: { role: 'controller', exerciseId: 'ex-alpha', accountId: 'acct-9' },
+  }
+
+  it.each(['controller', 'evaluator', 'planner', 'orgAdmin', 'superuser', 7, null])(
+    'refuses an envelope whose session.role is %s: generic failure, nothing persisted',
+    async role => {
+      mockPost.mockResolvedValue(ok({ ...STAFF_ENVELOPE, session: { role } }))
+
+      const { router } = renderJoin()
+
+      const alert = await screen.findByRole('alert')
+      expect(alert).toHaveTextContent(/this link isn't working any more/i)
+      expect(alert).toHaveFocus()
+      expect(screen.getByRole('link', { name: /go to sign in/i })).toHaveAttribute('href', '/login')
+      expect(mockSetTokens).not.toHaveBeenCalled()
+      expect(localStorage.length).toBe(0)
+      expect(sessionStorage.length).toBe(0)
+      expect(getAccessToken()).toBeNull()
+      expect(router.state.location.pathname).toBe(`/join/${TOKEN}`)
+    },
+  )
+
+  it('does not offer Try again (a retry cannot make a staff envelope a participant one)', async () => {
+    mockPost.mockResolvedValue(ok(STAFF_ENVELOPE))
+
+    renderJoin()
+    await screen.findByRole('alert')
+
+    expect(screen.queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument()
+  })
+
+  it('leaves the session the browser already holds untouched', async () => {
+    setTokens({ token: 'access-A', refreshToken: 'refresh-A' }, { persist: true })
+    mockSetTokens.mockClear()
+    mockPost.mockResolvedValue(ok(STAFF_ENVELOPE))
+
+    renderJoin()
+    await screen.findByRole('alert')
+
+    expect(getAccessToken()).toBe('access-A')
+    expect(localStorage.getItem('pulse.auth.token')).toBe('access-A')
+  })
+
+  it.each(['participant', 'pio'])('still signs in a %s session', async role => {
+    mockPost.mockResolvedValue(ok({ ...ENVELOPE, session: { role } }))
+
+    renderJoin()
+
+    await screen.findByTestId('entry')
+    expect(localStorage.getItem('pulse.auth.token')).toBe('access-B')
   })
 })
 

@@ -2,6 +2,15 @@
   "routes": [
     {
       "route": "/join/*",
+      "rewrite": "/index.html",
+      "headers": {
+        "Referrer-Policy": "no-referrer",
+        "Cache-Control": "no-store"
+      }
+    },
+    {
+      "route": "/join",
+      "rewrite": "/index.html",
       "headers": {
         "Referrer-Policy": "no-referrer",
         "Cache-Control": "no-store"

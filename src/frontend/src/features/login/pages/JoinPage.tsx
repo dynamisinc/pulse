@@ -28,8 +28,11 @@
  *      the page keeps working; the entry's `history.state` is preserved so the
  *      router's bookkeeping stays coherent.
  *   3. It is sent in a POST BODY (`signInWithLink`, never in an API URL).
- *   4. `public/staticwebapp.config.json` answers `/join/*` with
- *      `Referrer-Policy: no-referrer` and `Cache-Control: no-store`.
+ *   4. `public/staticwebapp.config.json` answers `/join/*` (and the bare `/join`)
+ *      with `Referrer-Policy: no-referrer` and `Cache-Control: no-store`. Each
+ *      rule also carries its own `rewrite` to `/index.html`, because Azure Static
+ *      Web Apps does not apply route rules to requests served via
+ *      `navigationFallback` (see `staticWebAppConfig.test.ts`).
  *   5. After a success the ref is emptied. After a failure it is KEPT, so "Try
  *      again" can repeat the exchange without the URL it no longer has.
  *
@@ -72,12 +75,20 @@
  *   - `unreachable`  `role="alert"` + icon. Network error or 5xx: "Couldn't reach
  *                    the exercise" and a "Try again" button that repeats the
  *                    exchange.
- *   - `already-used` `role="status"` + icon. A bare `/join` with no token: the
- *                    page was reloaded after the address bar was scrubbed (or
- *                    the scrubbed URL was bookmarked), so there is nothing left
- *                    to exchange. It says the link was already used on this page
- *                    and offers sign-in. (It does not guess whether a session
- *                    exists: the "Go to sign in" link is always correct.)
+ *   - `no-link`      `role="status"` + icon. A bare `/join` with no token: the
+ *                    address bar was scrubbed and the page was then reloaded
+ *                    (a pull-to-refresh during "Signing you in…" is the common
+ *                    way), or the scrubbed URL was bookmarked, so there is
+ *                    nothing left to exchange. It does NOT say the link is spent
+ *                    (the participant's link may be perfectly good, and the
+ *                    exchange may even have succeeded on the server with its
+ *                    answer lost to the reload): it says
+ *                    "To sign in, tap your link again or scan your card. You can
+ *                    also sign in with today's word." and offers "Continue",
+ *                    a link to `/`. The role-aware entry then decides, because
+ *                    this page cannot know whether a session exists: with one,
+ *                    the participant lands on their feed; without one, the entry
+ *                    fails closed to `/login`.
  * Error is NEVER colour-only: every region pairs its colour with an icon and
  * text. The sign-in link is a real `<a>` (react-router `<Link>`) and Try again a
  * real `<button>`, both reachable by keyboard.
@@ -113,7 +124,7 @@ import {
 import type { IconDefinition } from '@fortawesome/fontawesome-svg-core'
 import { setTokens } from '@/core/auth'
 import { resolveExerciseContext } from '@/core/exerciseContext'
-import { LOGIN_PATH } from '@/features/app-shell/constants'
+import { JOIN_PATH, LOGIN_PATH } from '@/features/app-shell/constants'
 import {
   classifyJoinFailure,
   signInWithLink,
@@ -123,16 +134,15 @@ import type { LoginEnvelope } from '../services/participantSignInService'
 import styles from './JoinPage.module.css'
 
 /**
- * The join route's base path. The router mounts `JOIN_PATH/:token` (a personal
- * link) and bare `JOIN_PATH` (the scrubbed address, after a reload).
+ * Where a successful exchange hands off, and where "Continue" goes from a bare
+ * `/join`: the role-aware entry (story 04 of login). `JOIN_PATH` (the route base:
+ * `JOIN_PATH/:token` for a personal link, bare `JOIN_PATH` for the scrubbed address)
+ * lives beside `LOGIN_PATH` in `app-shell/constants`.
  */
-export const JOIN_PATH = '/join'
-
-/** Where a successful exchange hands off: the role-aware entry (story 04 of login). */
 const ENTRY_PATH = '/'
 
 /** What the page is showing. See the module header. */
-type JoinView = 'signing-in' | 'already-used' | JoinFailure
+type JoinView = 'signing-in' | 'no-link' | JoinFailure
 
 /** The copy, icon and ARIA role of each view's region. */
 interface RegionSpec {
@@ -151,10 +161,11 @@ const REGIONS: Record<JoinView, RegionSpec> = {
     tone: 'status',
     spin: true,
   },
-  'already-used': {
+  'no-link': {
     role: 'status',
     icon: faCircleInfo,
-    text: 'This link was already used on this page. Sign in to continue.',
+    text: 'To sign in, tap your link again or scan your card. '
+      + "You can also sign in with today's word.",
     tone: 'notice',
   },
   // ONE generic message for a refused link: never wrong vs revoked vs replaced.
@@ -223,8 +234,8 @@ export function JoinPage() {
   const mountedRef = useRef(false)
   const regionRef = useRef<HTMLDivElement>(null)
 
-  // No token in the route: the link was already used on this page (see header).
-  const [view, setView] = useState<JoinView>(routeToken ? 'signing-in' : 'already-used')
+  // No token in the route: nothing to exchange (a reload of the scrubbed address; see header).
+  const [view, setView] = useState<JoinView>(routeToken ? 'signing-in' : 'no-link')
 
   /** Runs one exchange: success hands off, failure picks the view. Never concurrent. */
   const runExchange = useCallback(async () => {
@@ -310,9 +321,15 @@ export function JoinPage() {
           </button>
         ) : null}
 
-        {view === 'link-invalid' || view === 'already-used' ? (
+        {view === 'link-invalid' ? (
           <Link to={LOGIN_PATH} className={styles.action}>
             Go to sign in
+          </Link>
+        ) : null}
+
+        {view === 'no-link' ? (
+          <Link to={ENTRY_PATH} className={styles.action}>
+            Continue
           </Link>
         ) : null}
       </div>

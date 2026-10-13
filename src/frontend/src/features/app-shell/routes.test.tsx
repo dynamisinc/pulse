@@ -32,10 +32,9 @@ import type { Session } from '@/core/auth'
 import { useExerciseContext } from '@/core/exerciseContext'
 import type { ExerciseScope } from '@/core/exerciseContext'
 import { api } from '@/core/services/api'
-import { JOIN_PATH } from '@/features/login/pages/JoinPage'
 import { createRoleAwareRoutes } from './routes'
 import type { RoleAwareEntryProps } from './RoleAwareEntry'
-import { LOGIN_PATH, STAFF_LOGIN_PATH } from './constants'
+import { JOIN_PATH, LOGIN_PATH, STAFF_LOGIN_PATH } from './constants'
 
 vi.mock('@/core/services/api', () => ({ api: { get: vi.fn(), post: vi.fn() } }))
 
@@ -185,9 +184,44 @@ describe('createRoleAwareRoutes', () => {
   it('serves the join page at a bare /join with no exchange (the scrubbed address after a reload)', () => {
     renderAt(JOIN_PATH)
 
-    expect(screen.getByRole('status')).toHaveTextContent(/already used on this page/i)
-    expect(screen.getByRole('link', { name: /sign in/i })).toHaveAttribute('href', LOGIN_PATH)
+    expect(screen.getByRole('status')).toHaveTextContent(
+      /tap your link again or scan your card.*today's word/i,
+    )
+    expect(screen.getByRole('link', { name: 'Continue' })).toHaveAttribute('href', '/')
     expect(screen.queryByTestId('participant-guard')).not.toBeInTheDocument()
     expect(api.post).not.toHaveBeenCalled()
+  })
+
+  describe('"Continue" from a bare /join hands over to the role-aware entry (Gate-1 W-3)', () => {
+    it('fails closed to /login when there is no session', async () => {
+      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+      vi.mocked(useSession).mockImplementation(() => {
+        throw new Error('useSession() outside a resolved provider (unresolved)')
+      })
+      vi.mocked(useRole).mockReturnValue('participant')
+      vi.mocked(useExerciseContext).mockReturnValue(SCOPE)
+      const user = userEvent.setup()
+      renderAt(JOIN_PATH)
+
+      await user.click(screen.getByRole('link', { name: 'Continue' }))
+
+      // Landed on the sign-in page, not on a participant surface.
+      expect(await screen.findByLabelText('Handle')).toBeInTheDocument()
+      expect(screen.queryByTestId('participant-guard')).not.toBeInTheDocument()
+      consoleSpy.mockRestore()
+    })
+
+    it('lands a signed-in participant on their surface at /', async () => {
+      vi.mocked(useSession).mockReturnValue(SESSION)
+      vi.mocked(useRole).mockReturnValue('participant')
+      vi.mocked(useExerciseContext).mockReturnValue(SCOPE)
+      const user = userEvent.setup()
+      renderAt(JOIN_PATH)
+
+      await user.click(screen.getByRole('link', { name: 'Continue' }))
+
+      expect(await screen.findByTestId('participant-surface')).toBeInTheDocument()
+      expect(screen.queryByLabelText('Handle')).not.toBeInTheDocument()
+    })
   })
 })

@@ -70,12 +70,30 @@ limitation in `implementation.md`).
 Frontend, participant world. New: `features/login/pages/JoinPage.tsx` (+ `JoinPage.module.css`, reusing the sign-in
 page's tokens by copy or by importing the shared class names; do not edit `ParticipantSignInPage.module.css`, story
 09 owns it), `features/login/services/joinService.ts` (`signInWithLink(token)` over the shared axios client,
-reusing `ParticipantSignInError` and `LoginEnvelope` from `participantSignInService.ts` by import only; **no mock
-adapter**, like the other sign-in services, because a canned login would defeat the gate), `public/staticwebapp.config.json`.
-The **orchestrator seam** adds `JOIN_PATH = '/join'` to `app-shell/constants.ts` and the `/join/:token` route in
-`app-shell/routes.tsx` beside `/login`; the page reads `useParams().token`. Use a `useRef` guard for the single
+reusing `ParticipantSignInError` and `LoginEnvelope` from `participantSignInService.ts` by import only; **mock-first**
+per `implementation.md` (amended 2026-10-13): one env-guarded `USE_MOCK_DATA` flip, with `demo-` / `slow-` / `expired-`
+token prefixes for a backend-less demo, and a production build that omits `VITE_USE_MOCK_DATA` always calls the real
+endpoint, so a canned login can never stand in for the gate), `public/staticwebapp.config.json`.
+`JOIN_PATH = '/join'` lives in `app-shell/constants.ts` beside `LOGIN_PATH`, and the `/join/:token` and bare `/join`
+routes in `app-shell/routes.tsx` beside `/login`; the page reads `useParams().token`. Use a `useRef` guard for the single
 exchange. Build the page so the route is testable on its own with a memory router. MUI 9 does not apply (no MUI).
 See `implementation.md` (story 08, gotchas 9, 11).
+
+**Built as (Gate-1 folded).**
+- `staticwebapp.config.json` gives BOTH `/join/*` and the bare `/join` their own `"rewrite": "/index.html"` as well as the
+  two headers. Microsoft Learn ("Configure Azure Static Web Apps", Fallback routes): "Route rules aren't applied on
+  requests that trigger `navigationFallback`", so a headers-only rule would be silently ignored for `/join/<token>`.
+  `navigationFallback` itself is unchanged.
+- A bare `/join` (the scrubbed address after a reload, most often a pull-to-refresh during "Signing you in…") must not
+  say the participant's link is spent. It says "To sign in, tap your link again or scan your card. You can also sign in
+  with today's word." and offers **Continue**, a link to `/`: the role-aware entry then lands a signed-in participant on
+  their feed and fails closed to `/login` when there is no session.
+- A participant link only ever yields a participant session. If the envelope's `session.role` is present and is not
+  `participant` / `pio`, `signInWithLink` refuses it (a 401-shaped refusal, shown as the generic "link isn't working"
+  message) and nothing is persisted, so staff tokens can never reach `localStorage`.
+- The exchange is anonymous: the call sends `Authorization: false` so a session the browser already holds is not
+  presented (a live participant session bound to a different exercise than the host resolves to is refused with a 403
+  before the join handler runs).
 
 **One browser, one identity (from story 07, S-1).** The persisted participant session is per origin, not per tab. A new
 `setTokens(pair, { persist: true })` in any tab replaces the pair every tab uses, and `core/auth/crossTabSessionSync`
@@ -83,6 +101,13 @@ reloads the OTHER tabs so they show the new identity. So when a tester opens a s
 another sign-in is still in progress in another tab, that earlier sign-in can be interrupted by the reload (its exchange
 result is lost along with the already-scrubbed link) and has to be started again from the link. This is intended: do not
 try to defend against it in the page. Document it in the tester notes (feature walk-through) rather than in the UI.
+
+**Tester notes (Gate-1 S-5).** Put these in the feature walk-through, not in the UI.
+- Mail scanners (for example Microsoft Safe Links) may open the link and perform the exchange before the participant
+  taps it, so an early `login` / `method: link` event in the server's telemetry may be the scanner's, not the
+  participant's.
+- The page rewrites the address bar to `/join`, but the browser's global history (and its address-bar autocomplete) may
+  still hold the original `/join/<token>` URL. On a shared device, use **Sign out** when finished.
 
 ## Dependencies
 

@@ -157,6 +157,54 @@ describe('signInWithLink — response handling', () => {
   })
 })
 
+describe('signInWithLink — a participant link only yields a participant session (Gate-1 S-4)', () => {
+  const withRole = (role: unknown) => ({ ...ENVELOPE, session: { role, exerciseId: 'ex-1' } })
+
+  it.each(['participant', 'pio'])('accepts a %s session', async role => {
+    mockPost.mockResolvedValue(ok(withRole(role)))
+
+    await expect(signInWithLink(TOKEN)).resolves.toMatchObject({ token: 'access-1' })
+  })
+
+  it.each([
+    ['no session at all', { ...ENVELOPE }],
+    ['a null session', { ...ENVELOPE, session: null }],
+    ['a session with no role', { ...ENVELOPE, session: { exerciseId: 'ex-1' } }],
+  ])('accepts an envelope with %s (only a role it can SEE is judged)', async (_label, data) => {
+    mockPost.mockResolvedValue(ok(data))
+
+    await expect(signInWithLink(TOKEN)).resolves.toMatchObject({ token: 'access-1' })
+  })
+
+  it.each(['controller', 'evaluator', 'planner', 'orgAdmin', 'superuser', '', 7, null, {}])(
+    'refuses session.role %j, as a 401-shaped refusal',
+    async role => {
+      mockPost.mockResolvedValue(ok(withRole(role)))
+
+      const error = await failureOf()
+
+      expect(error).toBeInstanceOf(ParticipantSignInError)
+      expect((error as ParticipantSignInError).status).toBe(401)
+      expect(classifyJoinFailure(error)).toBe('link-invalid')
+    },
+  )
+
+  it('echoes neither the role nor the tokens it refused, nor the join token', async () => {
+    mockPost.mockResolvedValue(ok({
+      token: 'staff-access',
+      refreshToken: 'staff-refresh',
+      session: { role: 'controller' },
+    }))
+
+    const error = (await failureOf()) as ParticipantSignInError
+
+    const everything = `${error.message}${error.stack ?? ''}${JSON.stringify(error)}`
+    expect(everything).not.toMatch(/controller|staff-access|staff-refresh/)
+    expect(everything).not.toContain(TOKEN)
+    expect(error.cause).toBeUndefined()
+  })
+})
+
 describe('classifyJoinFailure — status mapping', () => {
   it.each([
     [401, 'link-invalid'],
