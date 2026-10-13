@@ -6,13 +6,20 @@
  * detection compares `counts.like` against a per-post snapshot"). Participant world -- plain
  * functions, no React, no clock.
  *
- * WHERE: `localStorage`, NOT `sessionStorage`. A participant's tokens now persist across a
- * closed tab (easy-login 07 keeps them in `localStorage`), so the same persona comes back to
- * the same exercise after a reopen -- and their read marks and like baselines must come back
- * with them, or every reopen would present the whole feed's replies as unread again and reset
- * every baseline. The state is tab-independent but still strictly per (exercise, persona).
- * Sign-out sweeps it (below), so a persisted token and persisted notification state live and
- * die together.
+ * WHERE: `localStorage`, NOT `sessionStorage`. Demo-polish easy-login 07 moves participant
+ * tokens to `localStorage`, so once it lands the same persona comes back to the same exercise
+ * after a closed tab -- and their read marks and like baselines must come back with them, or
+ * every reopen would present the whole feed's replies as unread again and reset every baseline.
+ * The state is tab-independent but strictly per (exercise, persona, account).
+ *
+ * IT DOES NOT SHARE A LIFETIME WITH THE TOKENS (a correction): sign-out sweeps this state, but
+ * a token that merely EXPIRES, or a browser that is simply closed, does not. And until
+ * easy-login 07 merges, participant tokens are still in `sessionStorage`, so on such a build
+ * this state outlives the token across a closed tab. That is harmless -- the key names the
+ * exercise, the persona and the account, nothing is stored that the server would not serve
+ * again, and `start()` sweeps every entry that is not the current viewer's -- but it is not
+ * "live and die together". One browser holds one participant session, so any entry that does
+ * not belong to the viewer who is signed in now is dead weight and is removed.
  *
  * MIGRATION: none. This feature has never shipped with `sessionStorage` state in the wild
  * (it was built on an unreleased branch), so there is nothing to migrate. The sign-out sweep
@@ -30,16 +37,21 @@
  * the rows themselves are always re-derived from the exercise-scoped feed, so storage can
  * never put content on screen that the server would not currently serve.
  *
- * THE KEY IS EXERCISE- AND PERSONA-SCOPED (Isolation AC, COR-001). It is built from BOTH
- * ids, each `encodeURIComponent`-ed so an id containing the `:` separator cannot make two
- * different pairs collide. A different persona (or the same persona in another exercise)
- * therefore reads a different key and starts from a clean baseline; nothing is ever read
- * from another persona's entry.
+ * THE KEY IS EXERCISE-, PERSONA- AND ACCOUNT-SCOPED (Isolation AC, COR-001). It is built
+ * from all three ids, each `encodeURIComponent`-ed so an id containing the `:` separator
+ * cannot make two different tuples collide. A different persona (or the same persona in
+ * another exercise) therefore reads a different key and starts from a clean baseline, and
+ * so does a different ACCOUNT on the same persona: two humans who each log in to a shared
+ * org persona on a kiosk do not inherit each other's read marks. Nothing is ever read from
+ * another viewer's entry. (Two humans on one SHARED account, or the same account in two
+ * browsers, are one viewer to this key -- see the story's known limitations.)
  *
- * SIGN-OUT. `clearAllNotificationStorage` removes EVERY entry under the prefix, whichever
- * persona wrote it, from EVERY store it is given; the notifications store registers a sweep
- * of both `localStorage` and `sessionStorage` with `core/auth/sessionReset`, so `endSession`
- * wipes them (the next sign-in on the same browser starts clean even for the same persona).
+ * SWEEPS. `clearAllNotificationStorage` removes entries under the prefix from the store it is
+ * given. On SIGN-OUT the notifications store sweeps EVERY entry from both `localStorage` and
+ * `sessionStorage` (registered with `core/auth/sessionReset`, so `endSession` wipes them: the
+ * next sign-in on the same browser starts clean even for the same persona) -- but only in a
+ * tab that ever ran a notifications session, so a STAFF tab's sign-out leaves a participant's
+ * state alone. On START it sweeps every entry except the current viewer's (`keepKey`).
  *
  * TWO TABS. `localStorage` is shared, so two tabs of the same persona write the same key.
  * `mergeForWrite` makes a write additive for what must never be lost (read marks are
@@ -104,9 +116,14 @@ export function getSessionStorage(): Storage | undefined {
   }
 }
 
-/** The storage key for one viewer: exercise AND persona (see the module header). */
-export function notificationStorageKey(exerciseId: string, personaId: string): string {
-  return `${NOTIFICATION_STORAGE_PREFIX}:${encodeURIComponent(exerciseId)}:${encodeURIComponent(personaId)}`
+/** The storage key for one viewer: exercise, persona AND account (see the module header). */
+export function notificationStorageKey(
+  exerciseId: string,
+  personaId: string,
+  accountId: string,
+): string {
+  const part = encodeURIComponent
+  return `${NOTIFICATION_STORAGE_PREFIX}:${part(exerciseId)}:${part(personaId)}:${part(accountId)}`
 }
 
 function isNonEmptyString(value: unknown): value is string {
@@ -211,17 +228,23 @@ export function mergeForWrite(
 }
 
 /**
- * Removes EVERY notification entry from the given storage, whichever exercise/persona wrote
- * it. Keys are collected first and removed after, because removing while iterating shifts
- * the indices.
+ * Removes every notification entry from the given storage, whichever exercise/persona/account
+ * wrote it -- except `keepKey`, when given (the entry of the viewer who is signed in now).
+ * Keys are collected first and removed after, because removing while iterating shifts the
+ * indices.
  */
-export function clearAllNotificationStorage(storage: Storage | undefined): void {
+export function clearAllNotificationStorage(
+  storage: Storage | undefined,
+  keepKey?: string,
+): void {
   if (storage === undefined) return
   try {
     const doomed: string[] = []
     for (let index = 0; index < storage.length; index += 1) {
       const key = storage.key(index)
-      if (key !== null && key.startsWith(`${NOTIFICATION_STORAGE_PREFIX}:`)) doomed.push(key)
+      if (key !== null && key.startsWith(`${NOTIFICATION_STORAGE_PREFIX}:`) && key !== keepKey) {
+        doomed.push(key)
+      }
     }
     for (const key of doomed) storage.removeItem(key)
   } catch {

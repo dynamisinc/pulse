@@ -14,7 +14,9 @@
  *
  * START / STOP. When the viewer is eligible (`useNotificationsEligibility`: an interactive,
  * persona-bound, not read-only participant whose persona has resolved) it starts a store
- * session keyed by exercise + persona + handle and stops it on cleanup. The effect depends
+ * session keyed by exercise + persona + account (+ the persona's handle, for mentions) and
+ * stops it on cleanup. While the shell's pause / EndEx overlay is up the periodic re-read holds
+ * (`OverlayHold`, below). The effect depends
  * on those primitives only, so it restarts exactly when the viewer changes, never on a
  * re-render. React StrictMode's dev-only mount/unmount/mount simply stops and restarts the
  * session (the store's `stop` is idempotent and releases the shared arrival source's
@@ -33,10 +35,28 @@
  */
 
 import { useEffect } from 'react'
+import { useOverlayState } from '@/features/participant-shell/components/OverlayLayer'
 import { notificationsStore } from './notificationsStore'
 import { useNotificationsAnnouncement } from './useNotifications'
 import { useNotificationsEligibility } from './useNotificationsEligibility'
 import styles from './NotificationsEngine.module.css'
+
+/**
+ * Tells the store when the shell's pause / EndEx overlay is up, so the periodic re-read holds
+ * while the world is frozen (and is made up, jittered, when it clears). `useOverlayState` is the
+ * shell's own public hook -- the overlay layer and the video player read the same state -- so
+ * this needs no new plumbing. Rendered only for an eligible viewer: a staff preview or a
+ * read-only mount never subscribes to it.
+ */
+function OverlayHold() {
+  const { state } = useOverlayState()
+  const held = state === 'pause' || state === 'endex'
+  useEffect(() => {
+    notificationsStore.setPaused(held)
+    return () => notificationsStore.setPaused(false)
+  }, [held])
+  return null
+}
 
 export function NotificationsEngine() {
   const eligibility = useNotificationsEligibility()
@@ -45,12 +65,13 @@ export function NotificationsEngine() {
   const ready = eligibility.kind === 'ready'
   const exerciseId = eligibility.kind === 'ready' ? eligibility.exerciseId : ''
   const personaId = eligibility.kind === 'ready' ? eligibility.personaId : ''
+  const accountId = eligibility.kind === 'ready' ? eligibility.accountId : ''
   const handle = eligibility.kind === 'ready' ? eligibility.handle : ''
 
   useEffect(() => {
     if (!ready) return
-    return notificationsStore.start({ exerciseId, personaId, handle })
-  }, [ready, exerciseId, personaId, handle])
+    return notificationsStore.start({ exerciseId, personaId, accountId, handle })
+  }, [ready, exerciseId, personaId, accountId, handle])
 
   return (
     <div
@@ -61,6 +82,7 @@ export function NotificationsEngine() {
       data-testid="notifications-live"
     >
       <span key={announcement.seq}>{announcement.text}</span>
+      {ready && <OverlayHold />}
     </div>
   )
 }

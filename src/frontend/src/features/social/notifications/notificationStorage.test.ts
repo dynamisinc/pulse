@@ -34,6 +34,9 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
+/** The signed-in account in every key below (the third key part). */
+const ACCOUNT = 'acct-1'
+
 const SAMPLE: PersistedNotifications = {
   v: 1,
   readIds: ['r1', 'r2'],
@@ -46,20 +49,20 @@ const SAMPLE: PersistedNotifications = {
 
 describe('the storage key (Isolation AC)', () => {
   it('includes BOTH the exercise id and the persona id, under the feature prefix', () => {
-    const key = notificationStorageKey('ex-1', 'persona-dreyes_fh')
+    const key = notificationStorageKey('ex-1', 'persona-dreyes_fh', ACCOUNT)
     expect(key.startsWith(`${NOTIFICATION_STORAGE_PREFIX}:`)).toBe(true)
     expect(key).toContain('ex-1')
     expect(key).toContain('persona-dreyes_fh')
   })
 
   it('differs per persona and per exercise', () => {
-    const base = notificationStorageKey('ex-1', 'p-a')
-    expect(notificationStorageKey('ex-1', 'p-b')).not.toBe(base)
-    expect(notificationStorageKey('ex-2', 'p-a')).not.toBe(base)
+    const base = notificationStorageKey('ex-1', 'p-a', ACCOUNT)
+    expect(notificationStorageKey('ex-1', 'p-b', ACCOUNT)).not.toBe(base)
+    expect(notificationStorageKey('ex-2', 'p-a', ACCOUNT)).not.toBe(base)
   })
 
   it('cannot be made to collide by an id that contains the separator', () => {
-    expect(notificationStorageKey('a:b', 'c')).not.toBe(notificationStorageKey('a', 'b:c'))
+    expect(notificationStorageKey('a:b', 'c', ACCOUNT)).not.toBe(notificationStorageKey('a', 'b:c', ACCOUNT))
   })
 })
 
@@ -136,16 +139,16 @@ describe('mergeForWrite (two tabs of one viewer)', () => {
 
 describe('read / write', () => {
   it('round-trips a state', () => {
-    const key = notificationStorageKey('ex-1', 'p-a')
+    const key = notificationStorageKey('ex-1', 'p-a', ACCOUNT)
     writePersisted(window.localStorage, key, SAMPLE)
     expect(readPersisted(window.localStorage, key)).toEqual(SAMPLE)
   })
 
   it('reads nothing from another persona\'s or another exercise\'s entry', () => {
-    writePersisted(window.localStorage, notificationStorageKey('ex-1', 'p-a'), SAMPLE)
-    expect(readPersisted(window.localStorage, notificationStorageKey('ex-1', 'p-b')))
+    writePersisted(window.localStorage, notificationStorageKey('ex-1', 'p-a', ACCOUNT), SAMPLE)
+    expect(readPersisted(window.localStorage, notificationStorageKey('ex-1', 'p-b', ACCOUNT)))
       .toEqual(EMPTY_PERSISTED)
-    expect(readPersisted(window.localStorage, notificationStorageKey('ex-2', 'p-a')))
+    expect(readPersisted(window.localStorage, notificationStorageKey('ex-2', 'p-a', ACCOUNT)))
       .toEqual(EMPTY_PERSISTED)
   })
 
@@ -211,20 +214,51 @@ describe('untrusted stored values', () => {
 
 describe('sign-out sweep', () => {
   it('removes every notification entry (any persona, any exercise) and nothing else', () => {
-    writePersisted(window.localStorage, notificationStorageKey('ex-1', 'p-a'), SAMPLE)
-    writePersisted(window.localStorage, notificationStorageKey('ex-1', 'p-b'), SAMPLE)
-    writePersisted(window.localStorage, notificationStorageKey('ex-2', 'p-a'), SAMPLE)
+    writePersisted(window.localStorage, notificationStorageKey('ex-1', 'p-a', ACCOUNT), SAMPLE)
+    writePersisted(window.localStorage, notificationStorageKey('ex-1', 'p-b', ACCOUNT), SAMPLE)
+    writePersisted(window.localStorage, notificationStorageKey('ex-2', 'p-a', ACCOUNT), SAMPLE)
     window.localStorage.setItem('unrelated', 'keep me')
     window.localStorage.setItem(`${NOTIFICATION_STORAGE_PREFIX}-lookalike`, 'keep me too')
 
     clearAllNotificationStorage(window.localStorage)
 
-    expect(window.localStorage.getItem(notificationStorageKey('ex-1', 'p-a'))).toBeNull()
-    expect(window.localStorage.getItem(notificationStorageKey('ex-1', 'p-b'))).toBeNull()
-    expect(window.localStorage.getItem(notificationStorageKey('ex-2', 'p-a'))).toBeNull()
+    expect(window.localStorage.getItem(notificationStorageKey('ex-1', 'p-a', ACCOUNT))).toBeNull()
+    expect(window.localStorage.getItem(notificationStorageKey('ex-1', 'p-b', ACCOUNT))).toBeNull()
+    expect(window.localStorage.getItem(notificationStorageKey('ex-2', 'p-a', ACCOUNT))).toBeNull()
     expect(window.localStorage.getItem('unrelated')).toBe('keep me')
     expect(window.localStorage.getItem(`${NOTIFICATION_STORAGE_PREFIX}-lookalike`))
       .toBe('keep me too')
+  })
+})
+
+describe('sweep on start: everything except the current viewer\'s entry', () => {
+  it('keeps exactly the key it is given, in the store it is given', () => {
+    const keep = notificationStorageKey('ex-1', 'p-a', ACCOUNT)
+    const other = notificationStorageKey('ex-1', 'p-b', ACCOUNT)
+    const otherAccount = notificationStorageKey('ex-1', 'p-a', 'acct-2')
+    for (const key of [keep, other, otherAccount]) {
+      writePersisted(window.localStorage, key, SAMPLE)
+    }
+    window.localStorage.setItem('unrelated', 'keep me')
+
+    clearAllNotificationStorage(window.localStorage, keep)
+
+    expect(window.localStorage.getItem(keep)).not.toBeNull()
+    expect(window.localStorage.getItem(other)).toBeNull()
+    expect(window.localStorage.getItem(otherAccount)).toBeNull()
+    expect(window.localStorage.getItem('unrelated')).toBe('keep me')
+  })
+
+  it('without a key to keep it removes them all (the sign-out sweep)', () => {
+    const key = notificationStorageKey('ex-1', 'p-a', ACCOUNT)
+    writePersisted(window.localStorage, key, SAMPLE)
+    clearAllNotificationStorage(window.localStorage)
+    expect(window.localStorage.getItem(key)).toBeNull()
+  })
+
+  it('the account id is the third key part and cannot collide with the others', () => {
+    expect(notificationStorageKey('ex-1', 'p', 'a:b')).not.toBe(notificationStorageKey('ex-1', 'p:a', 'b'))
+    expect(notificationStorageKey('ex-1', 'p-a', 'acct-1')).toContain('acct-1')
   })
 })
 

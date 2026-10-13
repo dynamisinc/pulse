@@ -43,7 +43,15 @@ import {
 const ME = 'persona-dreyes_fh'
 const HANDLE = 'dreyes_fh'
 const EXERCISE = 'ex-1'
-const CONFIG: NotificationsSessionConfig = { exerciseId: EXERCISE, personaId: ME, handle: HANDLE }
+const ACCOUNT = 'acct-dreyes'
+const CONFIG: NotificationsSessionConfig = {
+  exerciseId: EXERCISE,
+  personaId: ME,
+  accountId: ACCOUNT,
+  handle: HANDLE,
+}
+/** This viewer's storage key. */
+const KEY = notificationStorageKey(EXERCISE, ME, ACCOUNT)
 
 // ---------------------------------------------------------------------------
 // Builders and fakes
@@ -79,7 +87,19 @@ function fullPost(input: PostInput): Post {
 const mineP = (id: string, like = 0): Post => fullPost({ id, by: ME, like, text: `My post ${id}` })
 const replyP = (id: string, parent: string, by = 'persona-alex', at?: string): Post =>
   fullPost({ id, by, replyTo: parent, text: `Reply ${id}`, ...(at !== undefined ? { at } : {}) })
-const mentionP = (id: string): Post => fullPost({ id, text: `hello @${HANDLE} (${id})` })
+const mentionP = (id: string, at?: string, by?: string): Post =>
+  fullPost({
+    id,
+    text: `hello @${HANDLE} (${id})`,
+    ...(at !== undefined ? { at } : {}),
+    ...(by !== undefined ? { by } : {}),
+  })
+
+const EIGHT_AM = Date.UTC(2033, 8, 4, 8, 0, 0)
+/** The n-th instant TWO minutes after 08:00Z: far enough apart that mentions are NOT a storm. */
+const spread = (n: number): string => new Date(EIGHT_AM + n * 120_000).toISOString()
+/** The n-th second after 08:00Z: close enough together that mentions ARE a burst. */
+const burstAt = (n: number): string => new Date(EIGHT_AM + n * 1000).toISOString()
 
 /** Narrows a full post the way the arrival source delivers it (participant-safe). */
 function asView(post: Post): ParticipantPostView {
@@ -184,6 +204,9 @@ function rig(initial: Post[] = [], over: Partial<NotificationsDeps> = {}): Rig {
     // 0.5 is the centre of every jitter range: the first re-read lands at 62.5 % of the interval
     // and each later one at exactly the interval (the jitter has its own tests below).
     random: () => 0.5,
+    // No start-up / catch-up jitter by default, so a test's `settle()` is the baseline read; the
+    // jitter has its own tests (S-5).
+    readJitterMs: 0,
     ...over,
   })
   const notifications = { count: 0 }
@@ -369,7 +392,7 @@ describe('likes: the 30 s re-read, while the tab is visible', () => {
     const t = rig([mineP('m1', 12)])
     // A stored baseline of 8 means 4 likes accrued before this load.
     window.localStorage.setItem(
-      notificationStorageKey(EXERCISE, ME),
+      KEY,
       JSON.stringify({ v: 1, readIds: [], likes: [{ postId: 'm1', baseline: 8, riseAt: '2033-09-04T10:00:00.000Z' }] }),
     )
     t.store.start(CONFIG)
@@ -485,7 +508,7 @@ describe('calm under a burst (SOC-071, NFR-002)', () => {
     t.store.start(CONFIG)
     await settle()
     for (let index = 0; index < MAX_NOTIFICATION_ROWS + 50; index += 1) {
-      t.source.emit(mentionP(`p${index}`))
+      t.source.emit(mentionP(`p${index}`, spread(index)))
     }
     await advance(NOTIFICATION_PUBLISH_DELAY_MS)
     const snapshot = t.store.getSnapshot()
@@ -600,11 +623,11 @@ describe('"Mark all read": persists per persona under an exercise-scoped key', (
     expect(rows.every(row => !row.unread)).toBe(true)
     expect(t.store.getAnnouncement().text).toBe('All notifications marked as read')
 
-    const stored = readPersisted(window.localStorage, notificationStorageKey(EXERCISE, ME))
+    const stored = readPersisted(window.localStorage, KEY)
     expect([...stored.readIds].sort()).toEqual(['p1', 'r1'])
     const keys = Object.keys(window.localStorage)
     expect(keys.filter(key => key.startsWith(NOTIFICATION_STORAGE_PREFIX))).toEqual([
-      notificationStorageKey(EXERCISE, ME),
+      KEY,
     ])
   })
 
@@ -620,20 +643,23 @@ describe('"Mark all read": persists per persona under an exercise-scoped key', (
     expect(second.store.getSnapshot().items[0]).toMatchObject({ id: 'reply:m1', unread: false })
   })
 
-  it('does not leak to another persona: B reads A\'s entry nowhere and starts unread', async () => {
+  it('does not leak to another persona: B reads nothing of A\'s, and starting B sweeps A\'s entry', async () => {
     const a = rig([mineP('m1'), replyP('r1', 'm1')])
     const stopA = await started(a)
     a.store.markAllRead()
     stopA()
+    expect(readPersisted(window.localStorage, KEY).readIds).toEqual(['r1'])
 
     // Persona B sees a reply with the SAME id A marked read; for B it is unread.
     const b = rig([fullPost({ id: 'mb', by: 'persona-b' }), replyP('r1', 'mb')])
-    await started(b, { exerciseId: EXERCISE, personaId: 'persona-b', handle: 'persona_b' })
+    const configB: NotificationsSessionConfig = { ...CONFIG, personaId: 'persona-b', handle: 'pb' }
+    await started(b, configB)
     expect(b.store.getSummary().unread).toBe(1)
-    // And B wrote its own key without touching A's.
-    expect(readPersisted(window.localStorage, notificationStorageKey(EXERCISE, ME)).readIds)
-      .toEqual(['r1'])
-    expect(window.localStorage.getItem(notificationStorageKey(EXERCISE, 'persona-b'))).not.toBeNull()
+    // One browser holds one participant session: A's entry is dead weight and is gone, and B
+    // owns its own key.
+    expect(window.localStorage.getItem(KEY)).toBeNull()
+    expect(window.localStorage.getItem(notificationStorageKey(EXERCISE, 'persona-b', ACCOUNT)))
+      .not.toBeNull()
   })
 
   it('does not leak to another exercise: the same persona starts unread there', async () => {
@@ -643,8 +669,20 @@ describe('"Mark all read": persists per persona under an exercise-scoped key', (
     stopA()
 
     const other = rig([mineP('m1'), replyP('r1', 'm1')])
-    await started(other, { exerciseId: 'ex-2', personaId: ME, handle: HANDLE })
+    await started(other, { ...CONFIG, exerciseId: 'ex-2' })
     expect(other.store.getSummary().unread).toBe(1)
+  })
+
+  it('does not leak to another ACCOUNT on the same persona (two humans on a shared org persona)', async () => {
+    const first = rig([mineP('m1'), replyP('r1', 'm1')])
+    const stopFirst = await started(first)
+    first.store.markAllRead()
+    stopFirst()
+
+    const second = rig([mineP('m1'), replyP('r1', 'm1')])
+    await started(second, { ...CONFIG, accountId: 'acct-someone-else' })
+    expect(second.store.getSummary().unread).toBe(1) // the first account's marks are not theirs
+    expect(window.localStorage.getItem(KEY)).toBeNull() // ... and are not left lying around
   })
 
   it('is a no-op with no session', () => {
@@ -716,7 +754,7 @@ describe('stop / restart / reset', () => {
     t.store.start(CONFIG)
     await settle()
     t.store.markAllRead()
-    window.localStorage.setItem(notificationStorageKey('ex-9', 'persona-other'), '{"v":1,"readIds":[],"likes":[]}')
+    window.localStorage.setItem(notificationStorageKey('ex-9', 'persona-other', ACCOUNT), '{"v":1,"readIds":[],"likes":[]}')
     window.localStorage.setItem('unrelated', 'keep')
 
     t.store.reset()
@@ -746,7 +784,7 @@ describe('stop / restart / reset', () => {
     const stop = t.store.start(CONFIG)
     await settle()
     stop()
-    const stored = readPersisted(window.localStorage, notificationStorageKey(EXERCISE, ME))
+    const stored = readPersisted(window.localStorage, KEY)
     expect(stored.likes).toEqual([{ postId: 'm1', baseline: 2 }])
   })
 })
@@ -765,7 +803,9 @@ describe('"Mark all read" clears the badge however many events there are (W-1)',
     for (let index = 0; index < READ_IDS_CAP + 20; index += 1) {
       t.source.emit(replyP(`r${index}`, 'm1', `persona-${index % 5}`))
     }
-    for (let index = 0; index < 30; index += 1) t.source.emit(mentionP(`p${index}`))
+    for (let index = 0; index < 30; index += 1) {
+      t.source.emit(mentionP(`p${index}`, spread(index)))
+    }
     await advance(NOTIFICATION_PUBLISH_DELAY_MS)
     expect(t.store.getSummary().unread).toBe(31)
 
@@ -776,7 +816,7 @@ describe('"Mark all read" clears the badge however many events there are (W-1)',
     expect(rows.length).toBe(31)
     expect(rows.every(row => !row.unread)).toBe(true)
     // What is WRITTEN is bounded; what is remembered live is not.
-    const stored = readPersisted(window.localStorage, notificationStorageKey(EXERCISE, ME))
+    const stored = readPersisted(window.localStorage, KEY)
     expect(stored.readIds.length).toBe(READ_IDS_CAP)
   })
 })
@@ -792,7 +832,7 @@ describe('state lives in localStorage and survives a closed tab (W-4)', () => {
     const t = rig([mineP('m1', 2), replyP('r1', 'm1')])
     await started(t)
     t.store.markAllRead()
-    const key = notificationStorageKey(EXERCISE, ME)
+    const key = KEY
     expect(window.localStorage.getItem(key)).not.toBeNull()
     expect(window.sessionStorage.getItem(key)).toBeNull()
   })
@@ -824,10 +864,10 @@ describe('state lives in localStorage and survives a closed tab (W-4)', () => {
     const t = rig([mineP('m1', 2), replyP('r1', 'm1')])
     await started(t)
     t.store.markAllRead()
-    const other = notificationStorageKey('ex-9', 'persona-other')
+    const other = notificationStorageKey('ex-9', 'persona-other', ACCOUNT)
     window.localStorage.setItem(other, '{"v":1,"readIds":[],"likes":[]}')
     // A leftover from a development build that kept the state per tab:
-    window.sessionStorage.setItem(notificationStorageKey(EXERCISE, ME), '{"v":1,"readIds":[],"likes":[]}')
+    window.sessionStorage.setItem(KEY, '{"v":1,"readIds":[],"likes":[]}')
     window.localStorage.setItem('unrelated', 'keep')
     window.sessionStorage.setItem('unrelated', 'keep')
 
@@ -842,7 +882,7 @@ describe('state lives in localStorage and survives a closed tab (W-4)', () => {
   })
 
   it('also sweeps a store the caller injected as the state store', async () => {
-    const memory = new Map<string, string>([[notificationStorageKey('ex-1', 'p'), '{}']])
+    const memory = new Map<string, string>([[notificationStorageKey('ex-1', 'p', 'a'), '{}']])
     const injected = {
       get length() { return memory.size },
       key: (index: number) => [...memory.keys()][index] ?? null,
@@ -850,7 +890,11 @@ describe('state lives in localStorage and survives a closed tab (W-4)', () => {
       setItem: (key: string, value: string) => { memory.set(key, value) },
       removeItem: (key: string) => { memory.delete(key) },
     } as unknown as Storage
-    const t = rig([], { storage: () => injected })
+    const t = rig([mineP('m1', 2), replyP('r1', 'm1')], { storage: () => injected })
+    await started(t)
+    expect(memory.has(notificationStorageKey('ex-1', 'p', 'a'))).toBe(false) // start swept the stale one
+    t.store.markAllRead()
+    expect(memory.has(KEY)).toBe(true)
     t.store.reset()
     expect(memory.size).toBe(0)
   })
@@ -866,7 +910,7 @@ describe('state lives in localStorage and survives a closed tab (W-4)', () => {
     tabB.source.emit(mineP('fresh', 0))
     await advance(NOTIFICATION_PUBLISH_DELAY_MS)
 
-    const stored = readPersisted(window.localStorage, notificationStorageKey(EXERCISE, ME))
+    const stored = readPersisted(window.localStorage, KEY)
     expect(stored.readIds).toContain('r1') // tab A's mark survived tab B's write
     expect(stored.likes.map(record => record.postId).sort()).toEqual(['fresh', 'm1'])
   })
@@ -998,5 +1042,339 @@ describe('the re-read schedule: jitter and backoff (S-4)', () => {
     t.visibility.set(true) // the missed read is made up at once
     await settle()
     expect(t.fetchFeed).toHaveBeenCalledTimes(2)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Gate-2 fold: W-1 (storms), W-2 (storage hygiene), W-4, S-4, S-5, S-7
+// ---------------------------------------------------------------------------
+
+describe('mention storms in the engine (SOC-071, W-1)', () => {
+  it('120 mentions in a burst are ONE unread group; the announcement counts the mentions', async () => {
+    const t = rig([mineP('m1')])
+    t.store.start(CONFIG)
+    await settle()
+    const before = t.notifications.count
+
+    for (let index = 0; index < 120; index += 1) {
+      t.source.emit(mentionP(`p${index}`, burstAt(index % 50), `persona-${index % 42}`))
+    }
+    // The first is spoken at once; the other 119 are held.
+    expect(t.store.getAnnouncement().text).toBe('1 new mention')
+    await advance(NOTIFICATION_PUBLISH_DELAY_MS)
+
+    const snapshot = t.store.getSnapshot()
+    expect(snapshot.items).toHaveLength(1)
+    expect(snapshot.items[0]).toMatchObject({ type: 'mention', count: 120, actorCount: 42, unread: true })
+    expect(snapshot.unread).toBe(1) // ONE group
+    expect(t.store.getSummary().unread).toBe(1) // ... so the badge says 1, not 99+
+
+    await advance(NOTIFICATION_ANNOUNCE_THROTTLE_MS)
+    expect(t.store.getAnnouncement().text).toBe('119 new mentions')
+    // Calm: the whole burst cost 3 notifications (first line, one publish, the held line).
+    expect(t.notifications.count - before).toBe(3)
+  })
+
+  it('a storm is read by "Mark all read" like any other group', async () => {
+    const t = rig([mineP('m1')])
+    t.store.start(CONFIG)
+    await settle()
+    for (let index = 0; index < 20; index += 1) t.source.emit(mentionP(`p${index}`, burstAt(index)))
+    await advance(NOTIFICATION_PUBLISH_DELAY_MS)
+    expect(t.store.getSummary().unread).toBe(1)
+    t.store.markAllRead()
+    expect(t.store.getSummary().unread).toBe(0)
+    expect(t.store.getSnapshot().items[0]).toMatchObject({ count: 20, unread: false })
+  })
+
+  it('three spread-out mentions are three rows and three unread', async () => {
+    const t = rig([mineP('m1')])
+    t.store.start(CONFIG)
+    await settle()
+    for (let index = 0; index < 3; index += 1) t.source.emit(mentionP(`p${index}`, spread(index * 5)))
+    await advance(NOTIFICATION_PUBLISH_DELAY_MS)
+    expect(t.store.getSnapshot().items).toHaveLength(3)
+    expect(t.store.getSummary().unread).toBe(3)
+  })
+
+  it('a burst already in the feed at the baseline is one row too (and not announced)', async () => {
+    const burst = Array.from({ length: 30 }, (_, index) => mentionP(`p${index}`, burstAt(index)))
+    const t = rig([mineP('m1'), ...burst])
+    t.store.start(CONFIG)
+    await settle()
+    expect(t.store.getSnapshot().items).toHaveLength(1)
+    expect(t.store.getSummary().unread).toBe(1)
+    expect(t.store.getAnnouncement().text).toBe('')
+  })
+})
+
+describe('storage hygiene (W-2)', () => {
+  const started = async (rigged: Rig, config = CONFIG) => {
+    const stop = rigged.store.start(config)
+    await settle()
+    return stop
+  }
+  const keysOf = (storage: Storage) =>
+    Object.keys(storage).filter(key => key.startsWith(`${NOTIFICATION_STORAGE_PREFIX}:`))
+
+  it('start() sweeps every notification entry except the current viewer\'s', async () => {
+    const other = notificationStorageKey('ex-old', 'persona-old', 'acct-old')
+    const lookalike = `${NOTIFICATION_STORAGE_PREFIX}-not-ours`
+    window.localStorage.setItem(other, '{"v":1,"readIds":["x"],"likes":[]}')
+    window.localStorage.setItem(KEY, '{"v":1,"readIds":["r1"],"likes":[]}')
+    window.localStorage.setItem('unrelated', 'keep')
+    window.localStorage.setItem(lookalike, 'keep')
+    // A leftover from a build that kept the state per tab -- even the CURRENT key is stale there.
+    window.sessionStorage.setItem(KEY, '{"v":1,"readIds":[],"likes":[]}')
+
+    const t = rig([mineP('m1'), replyP('r1', 'm1')])
+    await started(t)
+
+    expect(window.localStorage.getItem(other)).toBeNull()
+    expect(keysOf(window.localStorage)).toEqual([KEY]) // the current one is kept ...
+    expect(t.store.getSummary().unread).toBe(0) // ... and READ: r1 was marked read
+    expect(keysOf(window.sessionStorage)).toEqual([])
+    expect(window.localStorage.getItem('unrelated')).toBe('keep')
+    expect(window.localStorage.getItem(lookalike)).toBe('keep')
+  })
+
+  it('the account id is part of the key (two humans on a shared org persona do not share marks)', () => {
+    expect(notificationStorageKey(EXERCISE, ME, 'acct-a')).not.toBe(
+      notificationStorageKey(EXERCISE, ME, 'acct-b'),
+    )
+    expect(KEY).toContain(encodeURIComponent(ACCOUNT))
+  })
+
+  describe('a `storage` event from another tab', () => {
+    const fire = (init: StorageEventInit) => {
+      window.dispatchEvent(new StorageEvent('storage', init))
+    }
+
+    it('removing the current key ends the session WITHOUT writing the stale state back', async () => {
+      const t = rig([mineP('m1', 2), replyP('r1', 'm1')])
+      await started(t)
+      t.store.markAllRead()
+      expect(window.localStorage.getItem(KEY)).not.toBeNull()
+
+      window.localStorage.removeItem(KEY) // what the other tab's sign-out did
+      fire({ key: KEY, newValue: null, storageArea: window.localStorage })
+
+      expect(t.store.getSummary()).toEqual({ available: false, unread: 0 })
+      expect(t.store.getSnapshot().status).toBe('inactive')
+      expect(t.source.subscribers()).toBe(0)
+      expect(t.source.calls.stopped).toBe(1)
+      // Nothing this tab does afterwards can resurrect the entry.
+      t.source.emit(mineP('fresh'))
+      await advance(NOTIFICATION_POLL_INTERVAL_MS * 3)
+      expect(window.localStorage.getItem(KEY)).toBeNull()
+      expect(t.fetchFeed).toHaveBeenCalledTimes(1) // ... and it stopped reading
+    })
+
+    it('clearing the whole store does the same', async () => {
+      const t = rig([mineP('m1')])
+      await started(t)
+      fire({ key: null, newValue: null, storageArea: window.localStorage })
+      expect(t.store.getSummary().available).toBe(false)
+    })
+
+    it('ignores another viewer\'s key, an UPDATE of ours, and another store', async () => {
+      const t = rig([mineP('m1')])
+      await started(t)
+      fire({ key: notificationStorageKey('ex-1', 'someone', 'else'), newValue: null, storageArea: window.localStorage })
+      fire({ key: KEY, newValue: '{"v":1,"readIds":[],"likes":[]}', storageArea: window.localStorage })
+      fire({ key: KEY, newValue: null, storageArea: window.sessionStorage })
+      expect(t.store.getSummary().available).toBe(true)
+    })
+
+    it('stops listening once the session has stopped', async () => {
+      const t = rig([mineP('m1')])
+      const stop = await started(t)
+      stop()
+      const before = t.notifications.count
+      fire({ key: KEY, newValue: null, storageArea: window.localStorage })
+      expect(t.notifications.count).toBe(before)
+    })
+  })
+})
+
+describe('sign-out only wipes what this tab owns (W-4)', () => {
+  it('a STAFF tab\'s sign-out (it never ran a notifications session) leaves participant state alone', async () => {
+    // The participant's state, written by a participant tab of the same browser.
+    const participant = rig([mineP('m1', 2), replyP('r1', 'm1')])
+    participant.store.start(CONFIG)
+    await settle()
+    participant.store.markAllRead()
+    expect(window.localStorage.getItem(KEY)).not.toBeNull()
+
+    // A staff tab: this store never started. `endSession` runs its reset.
+    const staff = rig()
+    const before = staff.notifications.count
+    staff.store.reset()
+
+    expect(window.localStorage.getItem(KEY)).not.toBeNull()
+    expect(staff.notifications.count).toBe(before) // ... and it published nothing either
+    expect(participant.store.getSummary().available).toBe(true) // the participant tab runs on
+  })
+
+  it('a participant tab\'s sign-out (it ran a session) sweeps the state', async () => {
+    const participant = rig([mineP('m1', 2), replyP('r1', 'm1')])
+    participant.store.start(CONFIG)
+    await settle()
+    participant.store.markAllRead()
+
+    participant.store.reset()
+
+    expect(window.localStorage.getItem(KEY)).toBeNull()
+    expect(participant.store.getSummary().available).toBe(false)
+  })
+
+  it('still sweeps after the session was stopped (the component unmounted before sign-out finished)', async () => {
+    const t = rig([mineP('m1', 2), replyP('r1', 'm1')])
+    const stop = t.store.start(CONFIG)
+    await settle()
+    t.store.markAllRead()
+    stop()
+    expect(window.localStorage.getItem(KEY)).not.toBeNull() // stop persists
+    t.store.reset()
+    expect(window.localStorage.getItem(KEY)).toBeNull()
+  })
+})
+
+describe('announcement hygiene (S-4)', () => {
+  it('the throttle is about 12 s, so it is not in lock-step with the new-posts pill\'s 3 s', () => {
+    expect(NOTIFICATION_ANNOUNCE_THROTTLE_MS).toBe(12_000)
+  })
+
+  it('"Mark all read" drops what was HELD, so it is not spoken after "all read"', async () => {
+    const t = rig([mineP('m1')])
+    t.store.start(CONFIG)
+    await settle()
+    t.source.emit(replyP('r1', 'm1'))
+    t.source.emit(replyP('r2', 'm1', 'persona-sam'))
+    t.source.emit(replyP('r3', 'm1', 'persona-kim'))
+    expect(t.store.getAnnouncement().text).toBe('1 new reply') // 2 more are held
+    await advance(NOTIFICATION_PUBLISH_DELAY_MS)
+
+    t.store.markAllRead()
+    expect(t.store.getAnnouncement().text).toBe('All notifications marked as read')
+
+    await advance(NOTIFICATION_ANNOUNCE_THROTTLE_MS * 2)
+    expect(t.store.getAnnouncement().text).toBe('All notifications marked as read')
+  })
+})
+
+describe('read jitter and the shell pause (S-5)', () => {
+  const JITTERY = { readJitterMs: 2_000, random: () => 0.5 } // every jitter is exactly 1 s
+
+  it('the baseline read waits a random 0-2 s', async () => {
+    const t = rig([mineP('m1', 1)], JITTERY)
+    t.store.start(CONFIG)
+    await advance(999)
+    expect(t.fetchFeed).toHaveBeenCalledTimes(0)
+    expect(t.store.getSnapshot().status).toBe('loading')
+    await advance(1)
+    expect(t.fetchFeed).toHaveBeenCalledTimes(1)
+    expect(t.store.getSnapshot().status).toBe('ready')
+  })
+
+  it('arrivals before the delayed baseline are still held and replayed', async () => {
+    const t = rig([mineP('m1')], JITTERY)
+    t.store.start(CONFIG)
+    t.source.emit(replyP('r1', 'm1')) // inside the 1 s wait
+    await advance(1_000)
+    expect(t.store.getSnapshot().items.map(item => item.id)).toEqual(['reply:m1'])
+  })
+
+  it('stopping inside the baseline wait reads nothing', async () => {
+    const t = rig([mineP('m1')], JITTERY)
+    t.store.start(CONFIG)()
+    await advance(60_000)
+    expect(t.fetchFeed).not.toHaveBeenCalled()
+  })
+
+  it('the catch-up read after a hidden tab is jittered, and the schedule is re-set behind it', async () => {
+    const t = rig([mineP('m1', 1)], JITTERY)
+    t.store.start(CONFIG)
+    await advance(1_000) // baseline at 1 s
+    t.visibility.set(false)
+    await advance(17_750) // t = 18.75 s: the first tick lands while hidden -> missed
+    expect(t.fetchFeed).toHaveBeenCalledTimes(1)
+
+    await advance(1_250) // t = 20 s
+    t.visibility.set(true)
+    await advance(999)
+    expect(t.fetchFeed).toHaveBeenCalledTimes(1) // not immediate
+    await advance(1) // t = 21 s: the jittered catch-up read
+    expect(t.fetchFeed).toHaveBeenCalledTimes(2)
+
+    // The OLD timer (48.75 s) is gone: the next read is a full interval after the catch-up.
+    await advance(NOTIFICATION_POLL_INTERVAL_MS - 1_001) // t = 49.999 s
+    expect(t.fetchFeed).toHaveBeenCalledTimes(2)
+    await advance(1_001) // t = 51 s = 21 s + 30 s
+    expect(t.fetchFeed).toHaveBeenCalledTimes(3)
+  })
+
+  it('holds the periodic re-read while the shell overlay is up, and makes it up when it clears', async () => {
+    const t = rig([mineP('m1', 1)])
+    t.store.start(CONFIG)
+    await settle()
+    t.store.setPaused(true)
+    t.feed.posts = [mineP('m1', 4)]
+    await advance(NOTIFICATION_POLL_INTERVAL_MS * 4)
+    expect(t.fetchFeed).toHaveBeenCalledTimes(1)
+    expect(t.store.getSnapshot().items).toEqual([])
+
+    t.store.setPaused(false)
+    await settle()
+    expect(t.fetchFeed).toHaveBeenCalledTimes(2)
+    expect(t.store.getSnapshot().items[0]).toMatchObject({ id: 'like:m1', count: 3 })
+  })
+
+  it('pausing with nothing missed, or twice, does nothing; realtime arrivals still land', async () => {
+    const t = rig([mineP('m1')])
+    t.store.start(CONFIG)
+    await settle()
+    t.store.setPaused(true)
+    t.store.setPaused(true)
+    t.store.setPaused(false)
+    await settle()
+    expect(t.fetchFeed).toHaveBeenCalledTimes(1)
+
+    t.store.setPaused(true)
+    t.source.emit(replyP('r1', 'm1'))
+    await advance(NOTIFICATION_PUBLISH_DELAY_MS)
+    expect(t.store.getSummary().unread).toBe(1)
+  })
+
+  it('setPaused with no session is a no-op', () => {
+    const t = rig()
+    expect(() => t.store.setPaused(true)).not.toThrow()
+  })
+})
+
+describe('the summary is referentially stable (S-7)', () => {
+  it('returns the SAME object across publishes where the unread count did not change', async () => {
+    const t = rig([mineP('m1'), replyP('r1', 'm1')])
+    t.store.start(CONFIG)
+    await settle()
+    const first = t.store.getSummary()
+    expect(first).toEqual({ available: true, unread: 1 })
+
+    // Publishes that change the snapshot but not the unread count:
+    t.source.emit(mineP('fresh')) // a new post of mine registers (a visible change, no row)
+    await advance(NOTIFICATION_PUBLISH_DELAY_MS)
+    t.feed.posts = [mineP('m1'), replyP('r1', 'm1'), mineP('fresh', 0)]
+    await advance(NOTIFICATION_POLL_INTERVAL_MS) // a re-read publishes too
+    expect(t.store.getSummary()).toBe(first)
+
+    // A real change makes a new object ...
+    t.store.markAllRead()
+    const read = t.store.getSummary()
+    expect(read).not.toBe(first)
+    expect(read).toEqual({ available: true, unread: 0 })
+    // ... which is then stable in turn.
+    t.source.emit(mineP('another'))
+    await advance(NOTIFICATION_PUBLISH_DELAY_MS)
+    expect(t.store.getSummary()).toBe(read)
   })
 })

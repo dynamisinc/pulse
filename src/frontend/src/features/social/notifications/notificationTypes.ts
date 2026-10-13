@@ -17,9 +17,12 @@
  * AGGREGATION (D1-005 / SOC-071). A row is one *group*, not one event: all the replies to
  * the same post of mine are ONE "Alex and 3 others replied to your post" row, all the
  * likes on one post are ONE "Your post got 5 new likes" row, and the mentions that are
- * replies under the same post are one row. That is what keeps the page legible at the
- * 120-posts/min stress load -- the number of rows is the number of distinct *subject*
- * posts, never the number of arrivals.
+ * replies under the same post are one row. Top-level mentions each have their own post, so
+ * they cannot group by subject: instead, more than {@link MENTION_STORM_THRESHOLD} of them
+ * within {@link MENTION_STORM_WINDOW_MS} of scenario time fold into one rolling MENTION STORM
+ * row (the stress scenario the exercise fires at a PIO). That is what keeps the page legible
+ * at the 120-posts/min stress load -- the number of rows is the number of distinct
+ * *subject* posts (or storms), never the number of arrivals.
  *
  * `NotificationItem` carries ids and data, never names: the page resolves the actors'
  * display names through the channel's shared persona directory at render, so the model
@@ -103,9 +106,11 @@ export const NOTIFICATION_PUBLISH_DELAY_MS = 250
 /**
  * The least time between two SPOKEN announcements. The first new item is announced at
  * once; further ones inside the window are held and spoken together when it ends, so a
- * burst reads "14 new replies" once, not fourteen times.
+ * burst reads "14 new replies" once, not fourteen times. Deliberately longer than the
+ * new-posts pill's 3 s, so a screen reader is not handed two live regions' worth of
+ * announcements in lock-step: the pill keeps up with the feed, this is the quieter channel.
  */
-export const NOTIFICATION_ANNOUNCE_THROTTLE_MS = 3_000
+export const NOTIFICATION_ANNOUNCE_THROTTLE_MS = 12_000
 
 /** Rows the page renders (newest first); the rest are summarized by a count, not drawn. */
 export const MAX_NOTIFICATION_ROWS = 100
@@ -129,6 +134,23 @@ export const GROUPS_CAP = 500
 
 /** Most of the viewer's own posts the model tracks (the oldest forgotten first). */
 export const MINE_CAP = 500
+
+/**
+ * MENTION STORMS (SOC-071). A top-level mention is normally its own row. Once MORE than this
+ * many arrive within {@link MENTION_STORM_WINDOW_MS} of SCENARIO time, they stop being rows
+ * and become ONE rolling storm group ("Keisha and 41 others mentioned you"); the storm keeps
+ * absorbing every further mention that lands within the window of its span.
+ */
+export const MENTION_STORM_THRESHOLD = 5
+
+/** The scenario-time window a mention storm is measured over, and rolls across. */
+export const MENTION_STORM_WINDOW_MS = 60_000
+
+/**
+ * Up to this long (random, ms) before the baseline read and the visibility catch-up read, so a
+ * crowd of tabs that opened or came back together does not hit the server in the same instant.
+ */
+export const NOTIFICATION_READ_JITTER_MS = 2_000
 
 /** Most per-post like records remembered per persona (oldest forgotten first). */
 export const LIKE_RECORDS_CAP = 200
