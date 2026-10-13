@@ -134,6 +134,9 @@ describe('/staff/participant-admin — a controller or planner reaches the compo
       // it reads "Print all cards".
       const toolbar = screen.getByTestId('roster-toolbar')
       expect(within(toolbar).getByRole('button', { name: 'Print all cards' })).toBeEnabled()
+      // Story 13: the email action is mounted but dark: the mock roster reports
+      // capabilities.emailLinks false (no mailer configured), so no button renders.
+      expect(within(toolbar).queryByRole('button', { name: /^Email/ })).not.toBeInTheDocument()
 
       // Deep link kept, no redirect, and exactly one main landmark (the frame's).
       expect(screen.getByTestId('pathname')).toHaveTextContent(PATH)
