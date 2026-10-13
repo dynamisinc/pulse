@@ -16,7 +16,7 @@ World: staff (the data feeds the print preview in story 12). The QR encodes exac
 
 ## Acceptance Criteria
 
-- [ ] **Given** `GET /api/staff/roster/cards`, **then** it answers `200 RosterCardsDto` with `exerciseName` and one
+- [ ] **Given** `POST /api/staff/roster/cards` *(amended: was GET, see EL-20)*, **then** it answers `200 RosterCardsDto` with `exerciseName` and one
       `RosterCardDto` per participant whose account is enabled, whose link is active and whose token decrypts:
       `name`, `agency`, `role`, `signInName`, `joinUrl` and `qrSvgDataUri`. Ordered by name. `?id=` (repeatable)
       limits it to those accounts; no `id` means every eligible participant.

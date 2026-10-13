@@ -33,6 +33,7 @@
 | EL-17 | **Collision control for parallel builders.** (a) Story 01 owns the **only** migration. (b) Story 01 owns the **only** new `Exercises` read (`ExerciseFactsReader`, +1 to the pinned `ResolvedScope` count in `OrganizationScopeSweepTests`); stories 02 to 06 read exercise facts through it. (c) The two new pre-auth routes and the pinned `11` in the two anonymous-access tests change **once**, in the orchestrator seam commit. | The repo pins these (migration snapshot, org-scope-exempt inventory, the allowlist size). Four builders editing them in parallel would conflict every time. |
 | EL-18 | **Email is a Could, dark by default.** No migration. Absent `Email:Endpoint` the endpoint answers 503 and `capabilities.emailLinks` is `false`. Nothing else depends on it, and it may merge after the freeze. | Tom: lowest priority, must not block the rest. |
 | EL-19 | **Tom's answers to the open questions (2026-10-13).** (a) Rotating the word **only blocks new sign-ins**; sessions already signed in with the old word stay (staff revoke or disable a person). (b) The planner's legacy "Import accounts" section **stays** beside the new roster screen. (c) The exercise day ends at **midnight in the exercise time zone** (`DayRolloverHour` default 0). (d) The forwarded-headers / per-room rate-limit fix is **post-demo** (filed as a security follow-up); the demo and the 4-5 testers are far under the limits. | Recorded so builders and reviewers treat these as decided. |
+| EL-20 | **Cards are requested by POST, not GET** (story 04 Gate-1 W-1/W-2, 2026-10-13). Body `{ participantIds }` (≤ 500) or `{ all: true }`; anything else is 400. `all` is uncapped (gated to controller/planner; ~6.8 KB per card). The frontend chunks `participantIds` at 500. | 500 GUIDs in a query string (~20 KB) exceed Kestrel's 8 KB request line (414 above ~203 ids) and possibly the App Service front end; and `?id[]=` / `?ids=` spellings silently bound to an empty array, i.e. *everyone*. A strict JSON body makes "everyone" an explicit choice. |
 
 ## Where the brief met the code
 
@@ -71,7 +72,7 @@ Staff routes need a live **staff** session assigned to the active exercise, hold
 | `POST /api/staff/roster/{id}/link/revoke` | none | 200 `RosterActionResultDto` | 404 | 03 |
 | `POST /api/staff/roster/{id}/disable` | none | 200 `RosterActionResultDto` | 404 | 03 |
 | `POST /api/staff/roster/{id}/enable` | none | 200 `RosterActionResultDto` | 404 | 03 |
-| `GET /api/staff/roster/cards?id={id}&id={id}…` | optional repeated `id` (none = every eligible participant); at most 500 | 200 `RosterCardsDto` | 400 (over 500) · 409 (join base not configured) | 04 |
+| `POST /api/staff/roster/cards` *(amended 2026-10-13, was GET with repeated `?id=`)* | `{ participantIds: string[] }` (1–500, de-duplicated) **or** `{ all: true }`; exactly one of the two; unknown properties, an empty array, both or neither → 400. Body limit 64 KiB | 200 `RosterCardsDto` | 400 · 409 (join base not configured) | 04 |
 | `GET /api/staff/day-word` | none | 200 `DayWordStatusDto` | | 05 |
 | `PUT /api/staff/day-word` | `DayWordPutBody` | 200 `DayWordSetResultDto` | 400 | 05 |
 | `DELETE /api/staff/day-word?date=yyyy-MM-dd` | optional `date` (default today) | 204 (idempotent) | 400 | 05 |
