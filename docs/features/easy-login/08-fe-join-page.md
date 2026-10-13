@@ -1,7 +1,7 @@
 # Story: Join page: tap the link, you are in
 
 **Feature:** Easy participant login  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Not Started
-**Requirements:** COR-011, COR-012, NFR-001, NFR-004  ·  **Design decisions:** none (EL-6, EL-7, C-2 in `implementation.md`)  ·  **Issue:** —
+**Requirements:** COR-011, COR-012, NFR-001, NFR-004  ·  **Design decisions:** none (EL-6, EL-7, C-2 in `implementation.md`)  ·  **Issue:** #473
 **Stack:** frontend  ·  **Review:** Tier-1  ·  **Priority:** Must  ·  **Wave:** 2  ·  **Effort:** S
 
 ## Context
