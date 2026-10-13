@@ -62,23 +62,25 @@
  * would.)
  *
  * ERROR TRANSLATION mirrors `staffAssignmentsService.ts`'s
- * `StaffAssignmentError` precedent: `ParticipantSignInError` carries a
- * transport-agnostic `status`/`serverMessage` so the page can render clear
- * feedback without coupling itself to axios internals.
+ * `StaffAssignmentError` precedent, minus its reason text: `ParticipantSignInError`
+ * carries a transport-agnostic `status` so the page can render clear feedback without
+ * coupling itself to axios internals.
  * `isUnauthorizedSignInError()` is the ONE seam the page uses to detect "bad
  * credentials/code/word" (status 401), and `isRateLimitedSignInError()` the one
- * for "too many tries" (status 429) — the page never inspects `serverMessage`
- * for either decision, so a server that happens to distinguish "no such
- * handle" from "wrong password" in its own logs can never leak that
- * distinction into the participant-facing copy (NFR-009, anti-enumeration).
+ * for "too many tries" (status 429) — the error carries no server text at all, so
+ * a server that happens to distinguish "no such handle" from "wrong password" can
+ * never leak that distinction into the participant-facing copy (NFR-009,
+ * anti-enumeration).
  *
- * THE DAY-WORD PATH IS STATUS-ONLY (NFR-004 / NFR-009). Unlike the two older
- * endpoints, `signInWithDayWord` rethrows a `ParticipantSignInError` that keeps
- * ONLY the HTTP status: no `serverMessage` and no `cause`. An axios error's
- * `config.data` holds the request body — i.e. the word — so carrying it as a
- * `cause` would put the word one `console.error(error)` / `JSON.stringify(error)`
- * away from a log, and a server body echoing the request must not become an
- * error string either.
+ * EVERY PATH IS STATUS-ONLY (NFR-004 / NFR-009; Gate-2 S-4 extended it from the
+ * day-word path to all three). Each `signInWith*` rethrows a `ParticipantSignInError`
+ * that keeps ONLY the HTTP status (plus a fixed message): no `serverMessage` and no
+ * `cause`. An axios error's `config.data` holds the request body - the password, the
+ * view-only code or the word - so carrying the error as a `cause` would put the
+ * credential one `console.error(error)` / `JSON.stringify(error)` / error-reporter
+ * capture away from a log, and a server body that echoes the request must not become an
+ * error string either. The page never needed either: it branches on the status alone, and
+ * its copy is frozen (AC5), so only the error OBJECT changed, not what a person reads.
  *
  * NEVER logs a username, password, word, or token — this module has no console
  * output at all, matching `tokenStore.ts` / `core/services/api.ts`'s own
@@ -133,27 +135,22 @@ export interface LoginEnvelope {
  * A transport-agnostic error this seam throws so the page can render clear
  * feedback WITHOUT coupling itself to axios internals. `status` is the HTTP
  * status when the server responded (401/…), or `undefined` when the request
- * never reached a response (network failure). Mirrors `StaffAssignmentError`
- * (`features/staff/services/staffAssignmentsService.ts`).
+ * never reached a response (network failure).
+ *
+ * It deliberately holds NOTHING ELSE: no server text and no `cause` (see "EVERY
+ * PATH IS STATUS-ONLY" in the file header).
  */
 export interface ParticipantSignInErrorInit {
   readonly status?: number
-  readonly serverMessage?: string
-  readonly cause?: unknown
 }
 
 export class ParticipantSignInError extends Error {
   readonly status?: number
-  readonly serverMessage?: string
 
   constructor(message: string, init: ParticipantSignInErrorInit = {}) {
     super(message)
     this.name = 'ParticipantSignInError'
     this.status = init.status
-    this.serverMessage = init.serverMessage
-    if (init.cause !== undefined) {
-      this.cause = init.cause
-    }
   }
 }
 
@@ -177,40 +174,20 @@ export function isRateLimitedSignInError(error: unknown): boolean {
   return error instanceof ParticipantSignInError && error.status === 429
 }
 
-/** Pulls a human-readable reason off a server error body (string or object). */
-function extractServerMessage(data: unknown): string | undefined {
-  if (typeof data === 'string') {
-    const trimmed = data.trim()
-    return trimmed.length > 0 ? trimmed : undefined
-  }
-  if (typeof data === 'object' && data !== null) {
-    const body = data as Record<string, unknown>
-    for (const key of ['message', 'detail', 'title'] as const) {
-      const value = body[key]
-      if (typeof value === 'string' && value.trim().length > 0) {
-        return value.trim()
-      }
-    }
-  }
-  return undefined
-}
-
-/** Translates any thrown transport failure into a `ParticipantSignInError`. */
-export function toSignInError(error: unknown, fallbackMessage: string): ParticipantSignInError {
+/**
+ * Translates any thrown transport failure into a STATUS-ONLY `ParticipantSignInError`:
+ * the HTTP status when the server answered, nothing else. The original error (an
+ * `AxiosError` holding the request body and the staff-or-participant headers) is dropped
+ * on the floor on purpose; see the file header.
+ */
+export function toSignInError(error: unknown, message: string): ParticipantSignInError {
   if (error instanceof ParticipantSignInError) {
     return error
   }
   if (axios.isAxiosError(error)) {
-    return new ParticipantSignInError(error.message, {
-      status: error.response?.status,
-      serverMessage: extractServerMessage(error.response?.data),
-      cause: error,
-    })
+    return new ParticipantSignInError(message, { status: error.response?.status })
   }
-  if (error instanceof Error) {
-    return new ParticipantSignInError(error.message, { cause: error })
-  }
-  return new ParticipantSignInError(fallbackMessage, { cause: error })
+  return new ParticipantSignInError(message)
 }
 
 /**
@@ -231,7 +208,8 @@ export function isLoginEnvelope(value: unknown): value is LoginEnvelope {
 /**
  * Signs in with a named account: `POST /auth/login`. Throws
  * `ParticipantSignInError` on failure (bad credentials, network failure, or a
- * malformed response) — fail closed, never a default/partial envelope.
+ * malformed response) — fail closed, never a default/partial envelope. The error
+ * carries the HTTP status only: never the password, a server reason or a cause.
  */
 export async function signInWithPassword(
   credentials: NamedSignInCredentials,
@@ -241,7 +219,7 @@ export async function signInWithPassword(
     const response = await api.post<LoginEnvelope>(LOGIN_ENDPOINT, credentials)
     data = response.data
   } catch (error) {
-    throw toSignInError(error, 'Could not sign in. Please try again.')
+    throw toSignInError(error, 'signInWithPassword: the sign-in request failed.')
   }
 
   if (!isLoginEnvelope(data)) {
@@ -254,7 +232,8 @@ export async function signInWithPassword(
 /**
  * Signs in with the shared exercise code: `POST /auth/shared`. Throws
  * `ParticipantSignInError` on failure (bad code, network failure, or a
- * malformed response) — fail closed, never a default/partial envelope.
+ * malformed response) — fail closed, never a default/partial envelope. The error
+ * carries the HTTP status only: never the code, a server reason or a cause.
  */
 export async function signInWithSharedCode(
   credentials: SharedSignInCredentials,
@@ -264,7 +243,7 @@ export async function signInWithSharedCode(
     const response = await api.post<LoginEnvelope>(SHARED_ENDPOINT, credentials)
     data = response.data
   } catch (error) {
-    throw toSignInError(error, 'Could not sign in. Please try again.')
+    throw toSignInError(error, 'signInWithSharedCode: the sign-in request failed.')
   }
 
   if (!isLoginEnvelope(data)) {
@@ -387,10 +366,7 @@ export async function signInWithDayWord(
       : await api.post<LoginEnvelope>(WORD_ENDPOINT, body)
     data = response.data
   } catch (error) {
-    const translated = toSignInError(error, 'Could not sign in. Please try again.')
-    throw new ParticipantSignInError('signInWithDayWord: the sign-in request failed.', {
-      status: translated.status,
-    })
+    throw toSignInError(error, 'signInWithDayWord: the sign-in request failed.')
   }
 
   if (!isLoginEnvelope(data)) {

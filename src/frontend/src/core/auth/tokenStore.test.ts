@@ -675,3 +675,120 @@ describe('tokenStore — storage that throws (memory fallback)', () => {
     expect(getAccessToken()).toBeNull()
   })
 })
+
+describe('W-6: the page\'s store is sticky (a refused staff tab never reads a participant pair)', () => {
+  /** What a participant's sign-in in another tab leaves in the shared localStorage. */
+  function participantPairInOtherTab(): void {
+    localStorage.setItem(ACCESS_KEY, 'p-access')
+    localStorage.setItem(REFRESH_KEY, 'p-refresh')
+    localStorage.setItem(SESSION_MARKER_KEY, 'participant-marker')
+  }
+
+  it('after an automatic clear of a staff session, reads answer null, not the participant pair', () => {
+    setTokens({ token: 'staff-access', refreshToken: 'staff-refresh' }) // sessionStorage
+    participantPairInOtherTab()
+    expect(getAccessToken()).toBe('staff-access') // sanity: the staff pair wins while it exists
+
+    clearActiveTokens()
+
+    expect(sessionStorage.length).toBe(0)
+    expect(getAccessToken()).toBeNull()
+    expect(getRefreshToken()).toBeNull()
+    expect(getSessionMarker()).toBeNull()
+    // The participant's pair is NOT touched: it is theirs, in another tab.
+    expect(localStorage.getItem(ACCESS_KEY)).toBe('p-access')
+    expect(localStorage.getItem(REFRESH_KEY)).toBe('p-refresh')
+  })
+
+  it('stays null however many times it is read, and rotateTokens cannot adopt the other pair', () => {
+    setTokens({ token: 'staff-access', refreshToken: 'staff-refresh' })
+    participantPairInOtherTab()
+    clearActiveTokens()
+
+    expect(getAccessToken()).toBeNull()
+    expect(getAccessToken()).toBeNull()
+    // A rotation presenting the participant's refresh token must not find it "stored".
+    expect(rotateTokens('p-refresh', { token: 'x', refreshToken: 'y' })).toBe(false)
+    expect(localStorage.getItem(ACCESS_KEY)).toBe('p-access')
+  })
+
+  it('also holds when the staff pair had no refresh token', () => {
+    setTokens({ token: 'shared-readonly-access' })
+    participantPairInOtherTab()
+
+    clearActiveTokens()
+
+    expect(getAccessToken()).toBeNull()
+    expect(getRefreshToken()).toBeNull()
+  })
+
+  it('a new sign-in ends it: a staff sign-in reads its own pair, a participant one the other store', () => {
+    setTokens({ token: 'staff-access', refreshToken: 'staff-refresh' })
+    participantPairInOtherTab()
+    clearActiveTokens()
+
+    setTokens({ token: 'staff-access-2', refreshToken: 'staff-refresh-2' })
+    expect(getAccessToken()).toBe('staff-access-2')
+
+    clearActiveTokens()
+    expect(getAccessToken()).toBeNull()
+
+    setTokens({ token: 'p-access-2', refreshToken: 'p-refresh-2' }, { persist: true })
+    expect(getAccessToken()).toBe('p-access-2')
+    expect(getRefreshToken()).toBe('p-refresh-2')
+    expect(sessionStorage.length).toBe(0)
+  })
+
+  it('an explicit sign-out forgets it: the page then reads whatever the store holds', () => {
+    setTokens({ token: 'staff-access', refreshToken: 'staff-refresh' })
+    clearActiveTokens()
+    clearTokens() // the page has no session now
+
+    participantPairInOtherTab()
+
+    expect(getAccessToken()).toBe('p-access')
+  })
+
+  it('a participant (localStorage) page whose session is cleared stays on its own store', () => {
+    setTokens({ token: 'p-access', refreshToken: 'p-refresh' }, { persist: true })
+
+    clearActiveTokens()
+
+    expect(getAccessToken()).toBeNull()
+    expect(localStorage.length).toBe(0)
+  })
+
+  it('records the store at BOOT: a page that loaded with a staff pair stays on sessionStorage', async () => {
+    vi.resetModules()
+    sessionStorage.setItem(ACCESS_KEY, 'staff-access')
+    sessionStorage.setItem(REFRESH_KEY, 'staff-refresh')
+    participantPairInOtherTab()
+    const fresh = await import('./tokenStore')
+    expect(fresh.getAccessToken()).toBe('staff-access')
+
+    fresh.clearActiveTokens()
+
+    expect(fresh.getAccessToken()).toBeNull()
+    expect(localStorage.getItem(ACCESS_KEY)).toBe('p-access')
+  })
+
+  it('a page that booted with only a participant pair is a participant page', async () => {
+    vi.resetModules()
+    participantPairInOtherTab()
+    const fresh = await import('./tokenStore')
+
+    expect(fresh.getAccessToken()).toBe('p-access')
+    fresh.clearActiveTokens()
+    expect(fresh.getAccessToken()).toBeNull()
+  })
+
+  it('a page that booted with NO session reads another tab\'s sign-in (nothing to be sticky to)', async () => {
+    vi.resetModules()
+    const fresh = await import('./tokenStore')
+    expect(fresh.getAccessToken()).toBeNull()
+
+    participantPairInOtherTab()
+
+    expect(fresh.getAccessToken()).toBe('p-access')
+  })
+})

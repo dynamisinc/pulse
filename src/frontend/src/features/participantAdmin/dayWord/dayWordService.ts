@@ -8,6 +8,10 @@
  *   PUT    /api/staff/day-word   DayWordPutBody -> 200 DayWordSetResultDto | 400
  *   DELETE /api/staff/day-word?date=yyyy-MM-dd  -> 204, idempotent       | 400
  *
+ * The wire contract lets both calls omit the date ("today"); THIS client never does
+ * (Gate-2 W-1): the panel always sends the date it displays, so the server's past-date
+ * `400` is the fail-safe for a panel left open across the local-midnight rollover.
+ *
  * Staff only: a live staff session assigned to the active exercise holding
  * `controller` or `planner` (401 no session, 403 wrong role). No request carries
  * an `exerciseId` - the server scopes everything (COR-001); the panel's React
@@ -37,7 +41,12 @@ import { api } from '@/core/services/api'
 import { USE_MOCK_DATA } from '@/core/config/mockData'
 import { dayWordMockAdapter } from './dayWordMocks'
 import { isDateString } from './dayWordDates'
-import type { DayWordPutBody, DayWordSetResultDto, DayWordStatusDto } from './types'
+import type {
+  DayWordPutBody,
+  DayWordPutRequest,
+  DayWordSetResultDto,
+  DayWordStatusDto,
+} from './types'
 
 /** The day-word endpoint, relative to the shared client's `/api` base URL. */
 export const DAY_WORD_ENDPOINT = '/staff/day-word'
@@ -239,16 +248,19 @@ export async function getDayWordStatus(): Promise<DayWordStatusDto> {
 }
 
 /**
- * `PUT /staff/day-word`. Omit `word` to have the server generate one; omit
- * `date` for today. Resolves with the plaintext word EXACTLY ONCE - the caller
- * must show it and drop it (see `OneTimeWordResult`), never cache it.
+ * `PUT /staff/day-word`. Omit `word` to have the server generate one. The `date` is
+ * REQUIRED (Gate-2 W-1, see `DayWordPutRequest`): the panel names the day it is showing
+ * even when that day is today, so a panel left open across the rollover is refused by
+ * the server (past-date `400`) rather than silently acting on the new day. Resolves with
+ * the plaintext word EXACTLY ONCE - the caller must show it and drop it (see
+ * `OneTimeWordResult`), never cache it.
  */
-export async function putDayWord(body: DayWordPutBody): Promise<DayWordSetResultDto> {
-  // Send only the fields that were provided: "omit `word`" is the contract's
-  // way of asking for a generated word, so an `undefined` must not become a key.
+export async function putDayWord(body: DayWordPutRequest): Promise<DayWordSetResultDto> {
+  // "Omit `word`" is the contract's way of asking for a generated word, so an `undefined`
+  // word must not become a key. The date is always present.
   const payload: DayWordPutBody = {
     ...(body.word !== undefined ? { word: body.word } : {}),
-    ...(body.date !== undefined ? { date: body.date } : {}),
+    date: body.date,
   }
   let data: unknown
   try {
@@ -265,15 +277,13 @@ export async function putDayWord(body: DayWordPutBody): Promise<DayWordSetResult
 }
 
 /**
- * `DELETE /staff/day-word[?date=yyyy-MM-dd]` - turns word sign-in off for a day
- * (default today). Idempotent: clearing a day with no word is still a 204.
+ * `DELETE /staff/day-word?date=yyyy-MM-dd` - turns word sign-in off for a day. The date
+ * is REQUIRED for the same reason as `putDayWord`'s: a stale panel must not clear the
+ * wrong day. Idempotent: clearing a day with no word is still a 204.
  */
-export async function deleteDayWord(date?: string): Promise<void> {
+export async function deleteDayWord(date: string): Promise<void> {
   try {
-    await api.delete(DAY_WORD_ENDPOINT, {
-      ...(date !== undefined ? { params: { date } } : {}),
-      ...mockConfig(),
-    })
+    await api.delete(DAY_WORD_ENDPOINT, { params: { date }, ...mockConfig() })
   } catch (error) {
     throw toDayWordError(error)
   }

@@ -39,6 +39,17 @@
  * this tab) with another user's refresh token (a participant who signed in in
  * another tab and left theirs in `localStorage`).
  *
+ * THE PAGE'S STORE IS STICKY (easy-login Gate-2 W-6). A page's session lives in ONE store,
+ * and which one is RECORDED: at boot (whichever store held tokens when the page loaded)
+ * and at every `setTokens`. After an AUTOMATIC clear of a `sessionStorage` session (the
+ * server refused a staff tab's refresh token), `activeArea()` keeps answering `session`
+ * (now empty) for that page until a new sign-in, instead of falling through to the
+ * `localStorage` store. Without that, the refused staff tab would silently start reading
+ * and presenting a PARTICIPANT's pair that another tab left in `localStorage`: a staff
+ * page acting with a participant's bearer, and a page that believes it is signed in
+ * after it was signed out. An explicit `clearTokens()` (sign-out) forgets the record,
+ * so the next boot or sign-in decides afresh.
+ *
  * The access token and refresh token are stored under two SEPARATE keys
  * (`pulse.auth.token`, `pulse.auth.refreshToken`; never serialized together as
  * one JSON blob) so neither can corrupt the other's encoding.
@@ -202,12 +213,28 @@ function holdsTokens(area: Area): boolean {
 }
 
 /**
+ * The store THIS PAGE's session lives in, as recorded at boot and at every
+ * `setTokens` (`null` = it had none and has not signed in). Sticky: see the module
+ * header, "THE PAGE'S STORE IS STICKY". Only `session` is acted on, because that
+ * is the one that can be emptied under a page while a DIFFERENT identity sits in
+ * the other store (a staff tab beside a participant's `localStorage` pair).
+ */
+let pageArea: Area | null = initialPageArea()
+
+function initialPageArea(): Area | null {
+  if (holdsTokens('session')) return 'session'
+  return holdsTokens('persistent') ? 'persistent' : null
+}
+
+/**
  * The ONE store this page's session lives in: `sessionStorage` if it holds any
- * token, else `localStorage`. Every read goes through this so the access token,
- * the refresh token and the marker always come from the same store.
+ * token, else `localStorage`, EXCEPT that a page recorded as a `sessionStorage`
+ * session stays on it even once it is empty (W-6). Every read goes through this so
+ * the access token, the refresh token and the marker always come from the same store.
  */
 function activeArea(): Area {
-  return holdsTokens('session') ? 'session' : 'persistent'
+  if (holdsTokens('session')) return 'session'
+  return pageArea === 'session' ? 'session' : 'persistent'
 }
 
 /**
@@ -291,6 +318,8 @@ export function setTokens(pair: TokenPair, options?: SetTokensOptions): void {
   const other: Area = target === 'persistent' ? 'session' : 'persistent'
 
   generation++
+  // This page's session now lives in `target`, whatever it was before (W-6).
+  pageArea = target
   // Old marker out FIRST: between here and the new marker below, a reader sees
   // the new pair under no marker, so a request sent under the old identity
   // fails its identity check rather than adopting a half-written pair.
@@ -337,6 +366,8 @@ function clearArea(area: Area): void {
 export function clearTokens(): void {
   generation++
   pageMarker = null
+  // A sign-out leaves this page with no session, so nothing is sticky any more (W-6).
+  pageArea = null
   for (const area of AREAS) clearArea(area)
 }
 
@@ -344,12 +375,15 @@ export function clearTokens(): void {
  * AUTOMATIC clear (the silent refresh, after the server refused this page's
  * session): clears only the store that holds THIS page's session. A staff tab
  * (`sessionStorage`) whose refresh token is refused must never wipe the pair a
- * participant signed in with in another tab (`localStorage`). Safe when nothing
- * is stored.
+ * participant signed in with in another tab (`localStorage`), and (W-6) afterwards
+ * must not READ it either: the page's store stays `sessionStorage`, now empty, until
+ * a new sign-in. Safe when nothing is stored.
  */
 export function clearActiveTokens(): void {
   generation++
   pageMarker = null
+  // `pageArea` is deliberately KEPT (W-6): a `sessionStorage` page whose session was
+  // refused must not fall through to the `localStorage` pair of someone else.
   clearArea(activeArea())
 }
 

@@ -48,12 +48,19 @@ import { readSrcFile } from '@/test/readSource'
 import { contrastRatio } from '@/test/contrast'
 
 const rawSources = import.meta.glob(
-  ['./ParticipantSignInPage.tsx', '../services/participantSignInService.ts'],
+  [
+    './ParticipantSignInPage.tsx',
+    '../services/participantSignInService.ts',
+    '../completeSignIn.ts',
+  ],
   { eager: true, query: '?raw', import: 'default' },
 ) as Record<string, string>
 
 const PAGE_SOURCE = rawSources['./ParticipantSignInPage.tsx'] ?? ''
 const SERVICE_SOURCE = rawSources['../services/participantSignInService.ts'] ?? ''
+// The shared "sign-in succeeded" step the page hands off to (Gate-2 W-2). It runs on the
+// participant path, so it is held to the same two-worlds rule as the page itself.
+const COMPLETE_SOURCE = rawSources['../completeSignIn.ts'] ?? ''
 const CSS_SOURCE = readSrcFile('features/login/pages/ParticipantSignInPage.module.css')
 
 /** Drops block comments and whole-line / trailing line comments, keeping code. */
@@ -65,6 +72,7 @@ function stripComments(source: string): string {
 
 const PAGE_CODE = stripComments(PAGE_SOURCE)
 const SERVICE_CODE = stripComments(SERVICE_SOURCE)
+const COMPLETE_CODE = stripComments(COMPLETE_SOURCE)
 const CSS_CODE = stripComments(CSS_SOURCE)
 
 /** Specifiers that would bring staff-world or default-MUI chrome onto this page. */
@@ -127,6 +135,7 @@ describe('ParticipantSignInPage boundary - the scan is not vacuous', () => {
   it('sees the real page, service and stylesheet', () => {
     expect(PAGE_SOURCE).toContain('export function ParticipantSignInPage')
     expect(SERVICE_SOURCE).toContain('export async function signInWithDayWord')
+    expect(COMPLETE_SOURCE).toContain('export function completeSignIn')
     expect(CSS_SOURCE).toContain('.toggleButton')
     expect(importSpecifiers(PAGE_CODE).length).toBeGreaterThan(5)
     expect(importSpecifiers(SERVICE_CODE)).toContain('@/core/services/api')
@@ -160,6 +169,10 @@ describe('ParticipantSignInPage boundary - the two-worlds rule (D0 section 2)', 
     expect(forbiddenImports(SERVICE_SOURCE)).toEqual([])
   })
 
+  it('the shared completeSignIn step imports no MUI, COBRA or theme module', () => {
+    expect(forbiddenImports(COMPLETE_SOURCE)).toEqual([])
+  })
+
   it('the page takes its icons from FontAwesome', () => {
     expect(importSpecifiers(PAGE_CODE)).toContain('@fortawesome/react-fontawesome')
     expect(importSpecifiers(PAGE_CODE)).toContain('@fortawesome/free-solid-svg-icons')
@@ -187,12 +200,16 @@ describe('ParticipantSignInPage boundary - content security (NFR-004 / NFR-009)'
   })
 
   it('the page does not put the word or the name in a URL', () => {
-    // navigate() is only ever given the role-aware entry '/'.
-    const navigations = Array.from(PAGE_CODE.matchAll(/navigate\(([^)]*)\)/g), match => match[1])
-    expect(navigations.length).toBeGreaterThan(0)
-    for (const argument of navigations) {
-      expect(argument?.trim()).toBe("'/'")
-    }
+    // The page never calls navigate() itself: it hands `navigate` to the shared
+    // `completeSignIn`, which only ever goes to the role-aware entry '/'.
+    expect(PAGE_CODE).not.toMatch(/\bnavigate\(/)
+    expect(PAGE_CODE).toMatch(/completeSignIn\(/)
+    const navigations = Array.from(
+      COMPLETE_CODE.matchAll(/\bnavigate\(([^,)]*)/g),
+      match => match[1]?.trim(),
+    )
+    expect(navigations).toEqual(['SIGNED_IN_PATH'])
+    expect(COMPLETE_CODE).toMatch(/export const SIGNED_IN_PATH = '\/'/)
     expect(PAGE_CODE).not.toMatch(/location\.(search|hash|href)\s*=/)
     expect(PAGE_CODE).not.toMatch(/useSearchParams/)
   })

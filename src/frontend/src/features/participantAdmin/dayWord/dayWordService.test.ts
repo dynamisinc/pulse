@@ -42,6 +42,9 @@ const STATUS_BODY = {
   upcoming: [{ date: '2026-10-15', setAt: '2026-10-13T13:05:00.0000000Z' }],
 }
 
+/** The day the panel shows as "today" in these tests. */
+const DAY = '2026-10-13'
+
 const SET_BODY = {
   date: '2026-10-13',
   word: 'harbor-cedar-47',
@@ -207,22 +210,22 @@ describe('getDayWordStatus', () => {
 })
 
 describe('putDayWord', () => {
-  it('PUTs an EMPTY body to generate for today (word and date omitted)', async () => {
+  it('ALWAYS sends the date, even for today and even when generating (Gate-2 W-1)', async () => {
     mockPut.mockResolvedValue({ data: SET_BODY } as AxiosResponse)
 
-    await putDayWord({})
+    await putDayWord({ date: DAY })
 
     const [url, body] = mockPut.mock.calls[0] ?? []
     expect(url).toBe('/staff/day-word')
-    expect(body).toEqual({})
+    // A generated word omits `word`, but the date the panel displays is always named.
+    expect(body).toEqual({ date: DAY })
     expect(body).not.toHaveProperty('word')
-    expect(body).not.toHaveProperty('date')
   })
 
-  it('does not turn an undefined field into a key', async () => {
+  it('does not turn an undefined word into a key, but keeps the date', async () => {
     mockPut.mockResolvedValue({ data: SET_BODY } as AxiosResponse)
-    await putDayWord({ word: undefined, date: undefined })
-    expect(mockPut.mock.calls[0]?.[1]).toEqual({})
+    await putDayWord({ word: undefined, date: DAY })
+    expect(mockPut.mock.calls[0]?.[1]).toEqual({ date: DAY })
   })
 
   it('sends a typed word and a pre-set date', async () => {
@@ -233,9 +236,23 @@ describe('putDayWord', () => {
     expect(mockPut.mock.calls[0]?.[1]).toEqual({ word: 'Pine Cone 42', date: '2026-10-15' })
   })
 
+  it('sends the date on every call, whatever the word', async () => {
+    mockPut.mockResolvedValue({ data: SET_BODY } as AxiosResponse)
+
+    await putDayWord({ date: DAY })
+    await putDayWord({ word: 'Pine Cone 42', date: DAY })
+    await putDayWord({ word: 'Pine Cone 42', date: '2026-10-20' })
+
+    expect(mockPut.mock.calls).toHaveLength(3)
+    for (const call of mockPut.mock.calls) {
+      expect(call[1]).toHaveProperty('date')
+      expect((call[1] as { date: unknown }).date).toMatch(/^\d{4}-\d{2}-\d{2}$/)
+    }
+  })
+
   it('returns the one-time result', async () => {
     mockPut.mockResolvedValue({ data: SET_BODY } as AxiosResponse)
-    await expect(putDayWord({})).resolves.toEqual(SET_BODY)
+    await expect(putDayWord({ date: DAY })).resolves.toEqual(SET_BODY)
   })
 
   it.each([
@@ -248,19 +265,22 @@ describe('putDayWord', () => {
     ['a missing validUntil', { ...SET_BODY, validUntil: undefined }],
   ])('fails closed on a malformed result: %s', async (_name, data) => {
     mockPut.mockResolvedValue({ data } as AxiosResponse)
-    await expect(putDayWord({})).rejects.toMatchObject({ name: 'DayWordError', kind: 'malformed' })
+    await expect(putDayWord({ date: DAY })).rejects.toMatchObject({
+      name: 'DayWordError',
+      kind: 'malformed',
+    })
   })
 
   it('does not accept a null in a result field (only the status\' display-only fields)', async () => {
     mockPut.mockResolvedValue({ data: { ...SET_BODY, setAt: null } } as AxiosResponse)
-    await expect(putDayWord({})).rejects.toMatchObject({ kind: 'malformed' })
+    await expect(putDayWord({ date: DAY })).rejects.toMatchObject({ kind: 'malformed' })
   })
 
   it('carries the server reason on a 400 (ProblemDetails detail)', async () => {
     mockPut.mockRejectedValue(
       axiosError(400, { title: 'Bad Request', detail: 'The word must be 6 to 64 letters.' }),
     )
-    await expect(putDayWord({ word: 'abc' })).rejects.toMatchObject({
+    await expect(putDayWord({ word: 'abc', date: DAY })).rejects.toMatchObject({
       status: 400,
       serverMessage: 'The word must be 6 to 64 letters.',
     })
@@ -268,21 +288,21 @@ describe('putDayWord', () => {
 
   it('never puts the word into an error message', async () => {
     mockPut.mockRejectedValue(axiosError(400, { detail: 'No.' }))
-    const error = await putDayWord({ word: 'super-secret-77' }).catch((e: unknown) => e)
+    const error = await putDayWord({ word: 'super-secret-77', date: DAY }).catch((e: unknown) => e)
     expect(String((error as DayWordError).message)).not.toContain('super-secret-77')
     expect(String((error as DayWordError).serverMessage)).not.toContain('super-secret-77')
   })
 })
 
 describe('deleteDayWord', () => {
-  it('DELETEs /staff/day-word with no date for today', async () => {
+  it('ALWAYS passes ?date=, including for today (Gate-2 W-1)', async () => {
     mockDelete.mockResolvedValue({ status: 204 } as AxiosResponse)
 
-    await expect(deleteDayWord()).resolves.toBeUndefined()
+    await expect(deleteDayWord(DAY)).resolves.toBeUndefined()
 
     const [url, config] = mockDelete.mock.calls[0] ?? []
     expect(url).toBe('/staff/day-word')
-    expect(config).not.toHaveProperty('params')
+    expect(config).toMatchObject({ params: { date: DAY } })
   })
 
   it('passes ?date= for a later day', async () => {
@@ -295,7 +315,7 @@ describe('deleteDayWord', () => {
 
   it('translates a 400 / 403', async () => {
     mockDelete.mockRejectedValue(axiosError(403, { detail: 'Nope.' }))
-    await expect(deleteDayWord()).rejects.toMatchObject({ status: 403, serverMessage: 'Nope.' })
+    await expect(deleteDayWord(DAY)).rejects.toMatchObject({ status: 403, serverMessage: 'Nope.' })
   })
 })
 
@@ -352,7 +372,7 @@ describe('the error never carries the request body (the word)', () => {
   ])('drops the AxiosError (and its config.data) for %s', async (_name, status) => {
     mockPut.mockRejectedValue(errorWithWordEverywhere(status))
 
-    const error = await failureOf(putDayWord({ word: WORD }))
+    const error = await failureOf(putDayWord({ word: WORD, date: DAY }))
 
     expect(error).toBeInstanceOf(DayWordError)
     expect(JSON.stringify(error)).not.toContain(WORD)
@@ -364,7 +384,7 @@ describe('the error never carries the request body (the word)', () => {
   it('keeps only a sanitised { code, status } as the cause', async () => {
     mockPut.mockRejectedValue(errorWithWordEverywhere(400))
 
-    const error = await failureOf(putDayWord({ word: WORD }))
+    const error = await failureOf(putDayWord({ word: WORD, date: DAY }))
 
     expect(error.cause).toEqual({ code: 'ERR_BAD_REQUEST', status: 400 })
     expect(error.cause).not.toBeInstanceOf(Error)
@@ -373,7 +393,7 @@ describe('the error never carries the request body (the word)', () => {
   it('does not keep a non-axios error as the cause either', async () => {
     mockPut.mockRejectedValue(new TypeError(`bad ${WORD}`))
 
-    const error = await failureOf(putDayWord({ word: WORD }))
+    const error = await failureOf(putDayWord({ word: WORD, date: DAY }))
 
     expect(error.cause).toBeUndefined()
   })
@@ -382,7 +402,7 @@ describe('the error never carries the request body (the word)', () => {
 describe('server messages (S-7)', () => {
   it('shows a string body on a 400, trimmed', async () => {
     mockPut.mockRejectedValue(axiosError(400, '  The word is too short.  '))
-    await expect(putDayWord({ word: 'abc' })).rejects.toMatchObject({
+    await expect(putDayWord({ word: 'abc', date: DAY })).rejects.toMatchObject({
       serverMessage: 'The word is too short.',
     })
   })
@@ -404,7 +424,7 @@ describe('server messages (S-7)', () => {
 
   it('caps a very long reason', async () => {
     mockPut.mockRejectedValue(axiosError(400, { detail: 'x'.repeat(2000) }))
-    const error = await failureOf(putDayWord({ word: 'abc' }))
+    const error = await failureOf(putDayWord({ word: 'abc', date: DAY }))
     expect((error.serverMessage ?? '').length).toBeLessThanOrEqual(301)
   })
 })

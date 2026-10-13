@@ -360,6 +360,17 @@ function isRefreshCoolingDown(): boolean {
 }
 
 /**
+ * Ends a no-answer refresh's cool-down so the NEXT 401 may call the refresh again.
+ * For a deliberate, user-initiated retry only (the session provider's "Try again" on
+ * its "Reconnecting..." screen): the cool-down exists to stop AUTOMATIC per-401 refresh
+ * calls hammering a server that is down, and a person pressing a button is not that.
+ * Harmless when no cool-down is running.
+ */
+export function endRefreshCooldown(): void {
+  refreshCooldown = null
+}
+
+/**
  * Best-effort: ends the server-side session a refresh just issued but this tab
  * must not keep (the user signed out, or someone else signed in, while the call
  * was in flight). Fire-and-forget, errors ignored. It presents the NEW access
@@ -541,13 +552,13 @@ api.interceptors.response.use(
     return silentRefresh(sentBearerToken(config), config._pulseSessionMarker ?? null)
       .then(newToken => {
         if (!newToken) {
-          // TODO(EL-07/M-4): this is where a refresh that was REFUSED (tokens cleared) and
-          // one that got NO ANSWER (pair kept, see `performSilentRefresh`) both surface as
-          // the original 401. `core/auth/session.tsx` treats any `resolveSession()` failure
-          // as signed-out and redirects to /login, so a dropped request at page load still
-          // lands a participant on the login page although their pair is intact. Follow-up
-          // (orchestrator, after the C6 `session.tsx` change merges): redirect only when no
-          // token remains (`getAccessToken() === null`); on a kept pair show a retry state.
+          // The original 401 surfaces here for two different reasons, and the token store is
+          // what tells them apart: a REFUSED refresh has already cleared this page's store
+          // (`performSilentRefresh`), a NO-ANSWER one (offline, timeout, 5xx, 429, or the
+          // cool-down) kept the pair on purpose. `core/auth/session.tsx` reads the store: no
+          // token -> /login; a pair still stored -> a "Reconnecting..." screen with a Try
+          // again, so a dropped request at page load never bounces a signed-in participant
+          // to sign in again (easy-login Gate-2 W-5, the former TODO EL-07/M-4).
           return Promise.reject(error)
         }
         config.headers.set('Authorization', `Bearer ${newToken}`)

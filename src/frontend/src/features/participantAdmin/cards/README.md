@@ -13,7 +13,7 @@ no brand skin, nothing that depends on background graphics.
 | File | Role |
 |---|---|
 | `PrintCardsButton.tsx` | **The export.** `<PrintCardsButton selection={ids} />`. COBRA button, "Print cards (N)" or "Print all cards". Owns open/closed and returns focus on close. |
-| `CardSheetPreview.tsx` | Full-screen dialog in a portal on `document.body` (sibling of `#root`): toolbar (Print, Close, count, skipped summary), on-screen warning banner, the sheet. |
+| `CardSheetPreview.tsx` | Full-screen dialog in a portal on `document.body` (sibling of `#root`): toolbar (Print, Close, count, skipped summary), on-screen warning banner, the sheet. After the browser's `afterprint`, a screen-only "Done printing? Close the sheet" prompt (focused; "Keep it open" to print again) so join URLs and QR codes do not stay on screen. |
 | `CardSheet.tsx` / `Card.tsx` | Pure, props-only paper. Pages of eight, one `<article>` per card. |
 | `cardSheet.module.css` | Screen preview + `@media print` rules (read its header). |
 | `cardsService.ts` | `POST /staff/roster/cards` through the shared axios client: `{ participantIds }` in chunks of 500 or `{ all: true }`, abort signal, runtime guards, typed `RosterCardsError`. |
@@ -120,5 +120,8 @@ a part-filled third page, and one skipped person per reason).
 - [ ] **Scan a printed QR with a phone camera:** it opens `/join/...` and signs in as that person.
 - [ ] Select 3 people: the label reads "Print cards (3)" and the sheet has exactly 3 cards.
 - [ ] 100 cards: the preview opens and scrolls without freezing, and prints.
+- [ ] After the print dialog closes (printed or cancelled), a "Done printing?" prompt appears with focus on
+      **Close the sheet**; it is not in the printed output. Close the sheet closes the preview; Keep it open hides the
+      prompt and returns focus to Print, and printing again asks again.
 - [ ] Close or Escape returns focus to the Print cards button; with the preview closed, Ctrl+P prints the
       roster page as before.

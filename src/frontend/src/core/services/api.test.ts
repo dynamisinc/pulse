@@ -71,7 +71,7 @@ import axios, {
   type InternalAxiosRequestConfig,
 } from 'axios'
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { api } from './api'
+import { api, endRefreshCooldown } from './api'
 import {
   setTokens,
   rotateTokens,
@@ -1312,6 +1312,26 @@ describe('L-1: a cool-down after a no-answer refresh', () => {
     expect(calls).toBe(2)
   })
 
+  it('endRefreshCooldown() ends it, so a deliberate retry may call the refresh at once (W-5)', async () => {
+    setTokens({ token: 'expired', refreshToken: 'refresh-1' }, { persist: true })
+    const calls = failingRefresh(rejectNetworkError)
+    await expect(api.get('/a')).rejects.toBeTruthy()
+    expect(calls.refresh).toBe(1)
+    await expect(api.get('/b')).rejects.toBeTruthy()
+    expect(calls.refresh).toBe(1) // inside the cool-down: no call
+
+    endRefreshCooldown()
+
+    await expect(api.get('/c')).rejects.toBeTruthy()
+    expect(calls.refresh).toBe(2)
+    // The pair is still the same one: ending the cool-down signs nobody out.
+    expect(getAccessToken()).toBe('expired')
+  })
+
+  it('endRefreshCooldown() is harmless when no cool-down is running', () => {
+    expect(() => endRefreshCooldown()).not.toThrow()
+  })
+
   it('is timed on a monotonic clock: moving the wall clock neither extends nor ends it', async () => {
     setTokens({ token: 'expired', refreshToken: 'refresh-1' }, { persist: true })
     const calls = failingRefresh(rejectNetworkError)
@@ -1453,6 +1473,101 @@ describe('S-3: an automatic clear touches only the store the session lives in', 
 
     expect(localStorage.length).toBe(0)
     expect(sessionStorage.length).toBe(0)
+  })
+})
+
+describe('W-6: a refused staff tab never falls through to a participant pair', () => {
+  /** What a participant's sign-in in another tab leaves in the shared localStorage. */
+  function participantPairInOtherTab(): void {
+    localStorage.setItem('pulse.auth.token', 'p-access')
+    localStorage.setItem('pulse.auth.refreshToken', 'p-refresh')
+    localStorage.setItem('pulse.auth.session', 'participant-marker')
+  }
+
+  /** An adapter that refuses everything with a 401 and records each request's bearer. */
+  function refusingAdapter(bearers: Array<string | null>): AxiosAdapter {
+    return config => {
+      const header: unknown = config.headers.get('Authorization')
+      bearers.push(typeof header === 'string' ? header : null)
+      return reject401(config)
+    }
+  }
+
+  it('after the refusal getAccessToken() is null in this page, and the participant pair is untouched', async () => {
+    setTokens({ token: 'expired-staff', refreshToken: 'staff-refresh' }) // sessionStorage
+    participantPairInOtherTab()
+    const bearers: Array<string | null> = []
+    api.defaults.adapter = refusingAdapter(bearers)
+
+    await expect(api.get('/protected')).rejects.toMatchObject({ response: { status: 401 } })
+
+    expect(getAccessToken()).toBeNull()
+    expect(getRefreshToken()).toBeNull()
+    expect(sessionStorage.length).toBe(0)
+    expect(localStorage.getItem('pulse.auth.token')).toBe('p-access')
+    expect(localStorage.getItem('pulse.auth.refreshToken')).toBe('p-refresh')
+  })
+
+  it('NO request goes out with the participant bearer, before, during or after the refusal', async () => {
+    setTokens({ token: 'expired-staff', refreshToken: 'staff-refresh' })
+    participantPairInOtherTab()
+    const bearers: Array<string | null> = []
+    api.defaults.adapter = refusingAdapter(bearers)
+
+    await expect(api.get('/protected')).rejects.toBeDefined()
+    // The page keeps working (polling, a retry button, a navigation): every later request
+    // must go out anonymous, never as the participant.
+    await expect(api.get('/later')).rejects.toBeDefined()
+    await expect(api.get('/session')).rejects.toBeDefined()
+
+    expect(bearers).not.toContain('Bearer p-access')
+    expect(bearers).not.toContain('Bearer p-refresh')
+    // The first call carried the staff token; the refresh call carries none; the rest none.
+    expect(bearers[0]).toBe('Bearer expired-staff')
+    expect(bearers.slice(1).every(bearer => bearer === null)).toBe(true)
+    // And the refresh call presented the STAFF refresh token in its body, not the participant's.
+    expect(getRefreshToken()).toBeNull()
+  })
+
+  it('a refresh call never presents the participant refresh token', async () => {
+    setTokens({ token: 'expired-staff', refreshToken: 'staff-refresh' })
+    participantPairInOtherTab()
+    const refreshBodies: string[] = []
+    api.defaults.adapter = config => {
+      if (config.url === '/auth/refresh') refreshBodies.push(String(config.data))
+      return reject401(config)
+    }
+
+    await expect(api.get('/protected')).rejects.toBeDefined()
+    await expect(api.get('/later')).rejects.toBeDefined()
+
+    // One refresh, with the staff token. The second 401 had nothing to present, so no call.
+    expect(refreshBodies).toEqual([JSON.stringify({ refreshToken: 'staff-refresh' })])
+  })
+
+  it('a staff tab with no refresh token to present is sticky too', async () => {
+    setTokens({ token: 'shared-readonly-access' }) // session-only, no refresh token
+    participantPairInOtherTab()
+    const bearers: Array<string | null> = []
+    api.defaults.adapter = refusingAdapter(bearers)
+
+    await expect(api.get('/protected')).rejects.toBeDefined()
+    await expect(api.get('/later')).rejects.toBeDefined()
+
+    expect(getAccessToken()).toBeNull()
+    expect(bearers).not.toContain('Bearer p-access')
+  })
+
+  it('a new sign-in in this tab ends it', async () => {
+    setTokens({ token: 'expired-staff', refreshToken: 'staff-refresh' })
+    participantPairInOtherTab()
+    api.defaults.adapter = config => reject401(config)
+    await expect(api.get('/protected')).rejects.toBeDefined()
+    expect(getAccessToken()).toBeNull()
+
+    setTokens({ token: 'staff-2', refreshToken: 'staff-refresh-2' })
+
+    expect(getAccessToken()).toBe('staff-2')
   })
 })
 

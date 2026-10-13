@@ -15,7 +15,9 @@
  *  - the word in a clearly framed block, with the standing notice "This is the
  *    only time Pulse shows this word";
  *  - a Copy button (the clipboard call runs inside the click handler, which is
- *    what Safari requires, and uses data already in memory - no await first);
+ *    what Safari requires, and uses data already in memory - no await first; it goes
+ *    through the shared `copyToClipboard`, which falls back to `execCommand('copy')`
+ *    where the Clipboard API is missing or refused);
  *  - a Show large toggle that renders the word in very large, high-contrast type
  *    (black on white, 21:1) so it can be read out across a room or projected.
  *    It is still the STAFF look - COBRA buttons, a plain bordered block - and
@@ -57,6 +59,7 @@ import {
   CobraSecondaryButton,
 } from '@/theme/styledComponents'
 import CobraStyles from '@/theme/CobraStyles'
+import { copyToClipboard } from '../shared/copyToClipboard'
 import { formatDateLabel, formatInstant } from './dayWordDates'
 import type { DayWordSetResultDto } from './types'
 
@@ -104,21 +107,19 @@ export function OneTimeWordResult({
   }, [])
 
   const handleCopy = () => {
-    // Called synchronously inside the click so Safari allows the clipboard write.
-    // A failure is reported ONCE, by the `role="alert"` block below; it is not also
-    // sent to the live region, which would have a screen reader say it twice.
-    const clipboard = typeof navigator === 'undefined' ? undefined : navigator.clipboard
-    if (!clipboard) {
-      setCopy('failed')
-      return
-    }
-    clipboard.writeText(result.word).then(
-      () => {
+    // Called synchronously inside the click so Safari allows the clipboard write: the
+    // shared helper starts the write on its first line (no await before it) and, where the
+    // async Clipboard API is missing or refused, falls back to `execCommand('copy')`
+    // (Gate-2 S-5). A failure is reported ONCE, by the `role="alert"` block below; it is
+    // not also sent to the live region, which would have a screen reader say it twice.
+    void copyToClipboard(result.word).then(copied => {
+      if (copied) {
         setCopy('copied')
         onAnnounce('Word copied to the clipboard.')
-      },
-      () => setCopy('failed'),
-    )
+      } else {
+        setCopy('failed')
+      }
+    })
   }
 
   const dateLabel = formatDateLabel(result.date)

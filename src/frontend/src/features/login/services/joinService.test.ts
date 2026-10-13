@@ -251,7 +251,7 @@ describe('classifyJoinFailure — status mapping', () => {
     const error = await failureOf()
 
     expect(classifyJoinFailure(error)).toBe('link-invalid')
-    expect((error as ParticipantSignInError).serverMessage).toBeUndefined()
+    expect(error).not.toHaveProperty('serverMessage')
     expect((error as ParticipantSignInError).message).not.toMatch(/revoked|controller/i)
   })
 })
@@ -278,7 +278,7 @@ describe('signInWithLink — the token never appears in an error or a log', () =
     expect(JSON.stringify(typed)).not.toContain(TOKEN)
     // The axios error (and the request body it echoes) is NOT chained on.
     expect(typed.cause).toBeUndefined()
-    expect(typed.serverMessage).toBeUndefined()
+    expect(typed).not.toHaveProperty('serverMessage')
   })
 
   it('keeps it out of the malformed-body error too', async () => {

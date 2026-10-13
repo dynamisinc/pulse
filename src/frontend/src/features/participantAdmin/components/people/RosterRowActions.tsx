@@ -62,7 +62,7 @@ import { useRosterAction } from '../../hooks/useRosterMutations'
 import type { RosterError } from '../../services/rosterService'
 import type { RosterActionKind, RosterEntryDto } from '../../types'
 import { ConfirmActionDialog } from './ConfirmActionDialog'
-import { copyToClipboard } from './copyToClipboard'
+import { copyToClipboard } from '../../shared/copyToClipboard'
 import {
   actionLabel,
   availableActions,
