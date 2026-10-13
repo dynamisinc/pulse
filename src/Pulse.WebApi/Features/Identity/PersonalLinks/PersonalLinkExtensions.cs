@@ -33,12 +33,24 @@ public static class PersonalLinkExtensions
     /// Registers the personal-link services and the <c>easy-login-join</c> rate-limit policy, and REPLACES story 01's
     /// fail-closed <c>NullParticipantLinkIssuer</c> with <see cref="ParticipantLinkService"/>. <c>Replace</c> (not
     /// <c>TryAdd</c>) makes the real issuer win whichever of this and <c>AddEasyLoginFoundation()</c> runs first.
+    /// Idempotent: a second call is a no-op.
     /// </summary>
     /// <param name="services">The service collection.</param>
     /// <returns>The same collection, for chaining.</returns>
     public static IServiceCollection AddPersonalLinks(this IServiceCollection services)
     {
         ArgumentNullException.ThrowIfNull(services);
+
+        // Idempotent (Gate-2 CR-001), the AddEasyLoginFoundation() marker pattern: the rate-limit policy below is NOT
+        // safe to repeat (a second AddPolicy with the same name throws when RateLimiterOptions is first built, which is
+        // at host start), and Program.cs already wires this, so a test host that calls it again must change nothing. A
+        // repeat call also leaves alone an issuer a test host Replaced after the first call.
+        if (services.Any(descriptor => descriptor.ServiceType == typeof(PersonalLinksRegistrationMarker)))
+        {
+            return services;
+        }
+
+        services.AddSingleton<PersonalLinksRegistrationMarker>();
 
         // TryAdd: the foundation registers the same system clock, and a test host's fake must win.
         services.TryAddSingleton(TimeProvider.System);
@@ -77,4 +89,12 @@ public static class PersonalLinkExtensions
 
         return endpoints;
     }
+}
+
+/// <summary>
+/// Registered once by <see cref="PersonalLinkExtensions.AddPersonalLinks"/> so a repeat call is a no-op. It carries no
+/// state and nothing resolves it.
+/// </summary>
+internal sealed class PersonalLinksRegistrationMarker
+{
 }

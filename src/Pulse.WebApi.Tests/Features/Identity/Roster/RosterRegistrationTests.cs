@@ -32,6 +32,21 @@ public sealed class RosterRegistrationTests
     }
 
     [Fact]
+    public void AddRoster_IsIdempotent()
+    {
+        var once = new ServiceCollection();
+        once.AddRoster();
+
+        var twice = new ServiceCollection();
+        twice.AddRoster();
+        twice.AddRoster();
+
+        twice.Count.Should().Be(once.Count, "Gate-2 CR-001: Program.cs wires AddRoster(), so a repeat call must register nothing more");
+        twice.Count(d => d.ServiceType == typeof(RosterService)).Should().Be(1);
+        twice.Count(d => d.ServiceType == typeof(RosterQueryService)).Should().Be(1);
+    }
+
+    [Fact]
     public async Task MapRosterEndpoints_MapsTheThreeFrozenRoutes_OnceEach()
     {
         using var host = await RosterHttpHost.StartAsync(services =>
