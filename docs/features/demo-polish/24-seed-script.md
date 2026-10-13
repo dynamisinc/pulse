@@ -59,8 +59,9 @@ Authors the content: S2.
       failed or part-held item fails the check, naming `-ReloadFiredRunSheet`; that switch loads a fresh copy of
       each spent item (the old one is never touched; an item still firing is refused before any write). Every
       run-sheet reply must point at a live post: when a re-seed posts the pack again under new ids (or a reply's
-      target item was reloaded), a kept, armable item's stale reply is re-pointed in place with `PUT` (same item,
-      same place in the queue; the queue's own content is sent back, every child echoed by id). It prints a ✅/❌
+      target item was reloaded), a kept, armable item's reply to a DEAD target is re-pointed in place with `PUT`
+      (same item, same place in the queue; the queue's own content is sent back, every child echoed by id). A
+      reply a controller re-targeted in the console to another live post is left alone and only warned about. It prints a ✅/❌
       summary and exits non-zero if any check fails.
 
 ## Out of Scope
