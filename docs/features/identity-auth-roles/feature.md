@@ -33,7 +33,7 @@ non-negotiables (staff vs participant worlds).
 | 05 | Hybrid identity model behind a provider interface | COR-014 | Complete | #62 |
 | 06 | Shared read-only access (view-only session) | COR-015 | Complete | #63 |
 | 07 | Shared-credential lifecycle (rotate/revoke/lockout) | COR-016 | Complete | #64 |
-| 08 | Participant admin panel (login triage) | COR-017 | Not Started | #65 |
+| 08 | Participant admin panel (login triage) | COR-017 | Not Started (partly taken up by [`easy-login`](../easy-login/feature.md); see the story's scope update) | #65 |
 | 09 | Organization-account operation (post-as-org, attribution) | COR-018 | Not Started | #66 |
 | 10 | Participant persona binding (provision a participant account with a posting persona) | COR-018, SOC-001, SOC-003 (consumed), COR-011 | Complete | #342 |
 | 11 | Default-deny session gate + pre-auth allowlist + SignalR hub (Wave 1) | COR-012 (+COR-001, COR-008, COR-015) | Not Started | #361 |
@@ -99,6 +99,11 @@ family surfaced but does not own.** `StaffLoginService.LoginAsync` (this feature
 cannot authenticate until one exists. Story 15 owns the fix (the login funnel + the `Session`/
 `SessionIssueRequest`/`AuthenticatedSession` exercise-scope representation); `exercise-lifecycle-admin/03`
 is the consumer, not the owner, of that fix. See story 15's own "Why this story lives here" section.
+
+**Easy participant login (2026-10-13) extends this feature without editing its Complete stories.** Personal
+links, the exercise day word, the staff roster and the card sheet are built in
+[`docs/features/easy-login/`](../easy-login/feature.md) on top of stories 02 (accounts), 03 (sessions) and 11
+(the pre-auth allowlist). It also takes up part of story 08 (COR-017); see that story's scope update.
 
 ## Design notes
 Foundation, spanning staff and participant worlds. Read-only sessions still get an ephemeral identity

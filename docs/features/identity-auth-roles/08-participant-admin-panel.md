@@ -1,6 +1,6 @@
 # Story: Participant admin panel (login triage)
 
-**Feature:** Identity, auth & roles  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Not Started
+**Feature:** Identity, auth & roles  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Not Started (scope partly taken up by [`easy-login`](../easy-login/feature.md); see the scope update below)
 **Requirements:** COR-017  ·  **Design decisions:** none  ·  **Issue:** #65
 
 ## Context
@@ -8,6 +8,25 @@ The first 30 minutes of every StartEx is login triage — it cannot require a su
 **Controllers** (not just OrgAdmins) can reset passwords, unlock accounts, force-logout sessions,
 reassign roles/org affiliations mid-exercise, and diagnose "wrong account" situations from the staff
 console, audit-logged (COR-017). (D5 flags this as a candidate console toolstrip tool.)
+
+## Scope update (2026-10-13): part of this is now built by `easy-login`
+
+Tom's StartEx login-triage decisions (the Tue 10/20 demo) produced the [`easy-login`](../easy-login/feature.md)
+feature, which implements the part of this story that the new sign-in model needs. **This story stays Not
+Started**: it keeps what `easy-login` does not cover, and the ACs below are not ticked by that feature.
+
+| AC below | Taken up by `easy-login` | Still on this story |
+|---|---|---|
+| Reset a password | Reissue a participant's personal link, or rotate the exercise's day word (a participant on the new paths has no password): `easy-login/03`, `/05`, `/10`, `/11` | Password reset for legacy password accounts |
+| Unlock an account | Not needed on the new paths (no per-account lockout, EL-9) | Lockout/unlock for password accounts (`Account.LockedOutUntil` is still reserved) |
+| Force-logout a session | Revoke link, reissue link and disable-the-person all end the participant's live sessions and report the count: `easy-login/03`, `/10` | Force-logout of a single session by id |
+| Reassign role/org affiliation | Re-importing a corrected roster CSV updates agency, role and the org-persona binding in place: `easy-login/02`, `/10` | A single-participant edit form |
+| Diagnose "wrong account" | The roster table shows each person's persona binding, last sign-in, live sessions and link state: `easy-login/10` | A guided "who is this person signed in as" view |
+| Audit-logged, staff-only, exercise-scoped, keyboard-operable | `easy-login/02, 03, 05, 10` (XC-004 events with staff role + acting human; controller/planner only) | |
+
+The roster screen at `/staff/participant-admin` is the "full participant-admin surface" the staff-shell flyout
+(`staff-shell/03`) has been waiting for. Wiring the flyout's footer link and its live data to it is a follow-up
+outside `easy-login`.
 
 ## Acceptance Criteria
 - [ ] From the staff console, a controller can reset a participant's password, unlock an account,
