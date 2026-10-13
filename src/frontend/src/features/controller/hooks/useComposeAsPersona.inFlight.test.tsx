@@ -27,7 +27,9 @@
  *  - an EXPLICIT discard (Esc / X) discards the draft, NOT the request: a composer reopened after
  *    it is an adopter like any other (locked, nothing sendable, the outcome taken over), so there
  *    is never a second request live on a key - a second one could settle first and the first
- *    one's late answer would then overwrite its question, draft or reply context.
+ *    one's late answer would then overwrite its question, draft or reply context;
+ *  - a locked composer is read-only in the HOOK, not just the DOM: `setText`, `setBaselineField`
+ *    and the tray's editing calls do nothing while a request for the target is out.
  */
 import { useLayoutEffect, useMemo } from 'react'
 import { act, render, renderHook } from '@testing-library/react'
@@ -38,6 +40,7 @@ import { endSession } from '@/core/auth/endSession'
 import { useExerciseContext } from '@/core/exerciseContext'
 import type { StaffPersona } from '@/features/personas'
 import type { CreatedPostView, Post, ReplyTarget } from '@/features/social'
+import { fakeFile } from '@/test/fakeMediaUploader'
 import {
   composeAsPersonaDraftStore,
   useComposeAsPersona,
@@ -625,7 +628,10 @@ describe('an explicit discard (Esc / X) discards the draft, NOT the request', ()
     expect(result.current.canPublish).toBe(false)
     act(() => result.current.publish())
     act(() => result.current.repostAnyway())
-    act(() => result.current.setText('A correction.')) // the hook API; the DOM field is read-only
+    // Typing a correction is refused by the hook itself (the DOM field is read-only too), so
+    // there is nothing for Post to send either.
+    act(() => result.current.setText('A correction.'))
+    expect(result.current.text).toBe('')
     act(() => result.current.publish())
     expect(sent()).toHaveLength(1)
   })
@@ -680,11 +686,13 @@ describe('an explicit discard (Esc / X) discards the draft, NOT the request', ()
 
   it('never a second request on the key while the first is out (the reviewer\'s C2 sequence)', async () => {
     // R1 out; Esc/X; the controller tries to post a correction (R2) from the reopened composer.
-    // R2 can not be sent, so R1's late answer can not land on top of R2's question or draft.
+    // The correction can not even be typed (the hook refuses the write) and so can not be sent:
+    // R1's late answer can not land on top of R2's question or draft, because there is no R2.
     const r1 = pendingRequest()
     postThenEscape(X, 'Boil-water order lifted.')
     const reopened = renderHook(() => useComposeAsPersona(options(X)))
     act(() => reopened.result.current.setText('A correction.'))
+    expect(reopened.result.current.text).toBe('')
     act(() => reopened.result.current.publish())
     expect(sent()).toHaveLength(1)
 
@@ -723,6 +731,71 @@ describe('an explicit discard (Esc / X) discards the draft, NOT the request', ()
     const next = renderHook(() => useComposeAsPersona(options(X)))
     expect(next.result.current.text).toBe('Boil-water order lifted.')
     expect(next.result.current.status).toBe('idle')
+  })
+})
+
+describe('a locked composer is read-only in the HOOK, not just in the DOM', () => {
+  it('setText while a request is out leaves the persisted draft unchanged (for any consumer)', () => {
+    pendingRequest()
+    senderOf(X, 'Boil-water order lifted.').unmount() // the draft store now holds the sent text
+    const adopter = renderHook(() => useComposeAsPersona(options(X)))
+    expect(adopter.result.current.text).toBe('Boil-water order lifted.')
+
+    act(() => adopter.result.current.setText('Tampered with.'))
+    act(() => adopter.result.current.setText(''))
+
+    expect(adopter.result.current.text).toBe('Boil-water order lifted.')
+    // The store is untouched: a reopen (the request is still out) is seeded with the same text.
+    adopter.unmount()
+    const again = renderHook(() => useComposeAsPersona(options(X)))
+    expect(again.result.current.text).toBe('Boil-water order lifted.')
+  })
+
+  it('the SENDER is locked the same way: nothing typed after Post reaches the draft', async () => {
+    const request = pendingRequest()
+    const sender = senderOf(X, 'Boil-water order lifted.')
+    act(() => sender.result.current.setText('Typed after Post.'))
+    expect(sender.result.current.text).toBe('Boil-water order lifted.')
+
+    await request.fail(429)
+
+    // The restored draft is exactly what was sent.
+    expect(sender.result.current.status).toBe('error')
+    expect(sender.result.current.text).toBe('Boil-water order lifted.')
+    // ... and the composer is writable again once the request has settled.
+    act(() => sender.result.current.setText('A better version.'))
+    expect(sender.result.current.text).toBe('A better version.')
+  })
+
+  it('the engagement baseline and the tray refuse edits while locked, and work again after', async () => {
+    const request = pendingRequest()
+    senderOf(X, 'Boil-water order lifted.').unmount()
+    const adopter = renderHook(() => useComposeAsPersona(options(X)))
+
+    act(() => adopter.result.current.setBaselineField('like', '500'))
+    let accepted = true
+    act(() => { accepted = adopter.result.current.tray.addFiles([fakeFile('a.png', 'image/png')]) })
+
+    expect(adopter.result.current.baselineFields.like).toBe('')
+    expect(accepted).toBe(false)
+    expect(adopter.result.current.tray.items).toHaveLength(0)
+
+    await request.fail(429)
+    act(() => adopter.result.current.setBaselineField('like', '500'))
+    act(() => { accepted = adopter.result.current.tray.addFiles([fakeFile('a.png', 'image/png')]) })
+    expect(adopter.result.current.baselineFields.like).toBe('500')
+    expect(accepted).toBe(true)
+    expect(adopter.result.current.tray.items).toHaveLength(1)
+  })
+
+  it('a composer on ANOTHER persona is not locked by this one\'s request', () => {
+    pendingRequest()
+    senderOf(X, 'From X.').unmount()
+    const other = renderHook(() => useComposeAsPersona(options(Y)))
+
+    act(() => other.result.current.setText('From Y.'))
+
+    expect(other.result.current.text).toBe('From Y.')
   })
 })
 

@@ -79,7 +79,8 @@
  *     "Posted ..." state shows, and the route's reply target is cleared only if it is STILL the
  *     one the post answered (the rule in the next paragraph);
  *   - unconfirmed: the "Post status unknown" question comes back (`awaitingDecision`) with the
- *     draft and the reply it was written for;
+ *     draft and the reply it was written for (after an ENGINE / USAGE takeover that reply was
+ *     already put back on the route at mount; after Esc / X it is not - see the last paragraph);
  *   - any other failure: the persisted draft comes back with the classified failure banner.
  * The settlement reaches it through a small module-level subscribe / notify (`subscribeSettlement`)
  * that a mounted adopter joins in a layout effect and leaves on unmount, and the outcome is also
@@ -180,9 +181,24 @@
  * reopened after Esc / X is therefore an ADOPTER like any other (see "adopting a request"): locked
  * and read-only, with Post, Ctrl/Cmd+Enter and "post again" sending nothing, and it takes the
  * outcome over when the request settles - a success shows "Posted"; an unconfirmed outcome brings
- * back the "Post status unknown" question with the text that was sent and the reply it carried;
- * a failure brings back the text and the failure banner. (The draft is empty in the meantime: it
- * was discarded.) The ENGINE / USAGE takeover is the same, minus the discard.
+ * back the "Post status unknown" question with the text that was sent; a failure brings back the
+ * text and the failure banner. (The draft is empty in the meantime: it was discarded.)
+ *
+ * THE REPLY AFTER Esc / X IS NOT PUT BACK ON THE ROUTE. The discard also forgot the reply context,
+ * and the controller dropped that reply on purpose, so `takeOver` deliberately has NO auto-restore
+ * (`onRestoreReply`) - it would undo an explicit act. The reply the request carried comes back
+ * only as the DRAFT'S RECORDED REPLY, in both the unconfirmed and the plain-failure case. If the
+ * route holds no such target the composer shows "This draft was a reply to @a" with "Reply to @a
+ * again", and Post / Retry / "post again" stay blocked until the controller chooses - so a reply
+ * is never sent as a top-level post. (A post that was NOT a reply has nothing to choose, and
+ * Retry works at once.) The ENGINE / USAGE takeover differs only in that its context survives, so
+ * the reply is put back on the route at mount.
+ *
+ * A LOCKED COMPOSER IS READ-ONLY IN THE HOOK, NOT JUST IN THE DOM. While a request for the target
+ * is out, `setText`, `setBaselineField` and the tray's editing calls (`addFiles`,
+ * `setLibrarySelection`, `setAlt`, `remove`) do nothing, for any consumer: nothing typed after
+ * Post can reach the persisted draft, the reply context or the tray, and the draft a success
+ * clears or a failure restores is exactly what was sent.
  */
 
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
@@ -709,6 +725,9 @@ export function useComposeAsPersona(
   // goes with it, so a typed reply that survives a non-explicit dock close comes back as one.
   const setText = useCallback(
     (value: string) => {
+      // Locked while a request for this target is out (see the module header): the registry,
+      // not this instance's state, is the truth, so a stale render can not slip a write through.
+      if (inFlightByKey.has(draftKey(exerciseId, personaId))) return
       setTextState(value)
       setPersistedDraft(exerciseId, personaId, value)
       const key = draftKey(exerciseId, personaId)
@@ -760,9 +779,32 @@ export function useComposeAsPersona(
     }
   }, [targetKey, replyTo])
 
-  const setBaselineField = useCallback((field: BaselineField, value: string) => {
-    setBaselineFields(current => ({ ...current, [field]: value }))
-  }, [])
+  const setBaselineField = useCallback(
+    (field: BaselineField, value: string) => {
+      if (inFlightByKey.has(targetKey)) return // locked while a request is out
+      setBaselineFields(current => ({ ...current, [field]: value }))
+    },
+    [targetKey],
+  )
+
+  // The tray the consumer sees: the same tray, with its EDITING calls locked while a request for
+  // this target is out. (Upload progress, `clear` and the read-only fields pass straight through.)
+  const guardedTray = useMemo<UseAttachmentTrayResult>(
+    () => ({
+      ...tray,
+      addFiles: files => (inFlightByKey.has(targetKey) ? false : tray.addFiles(files)),
+      setLibrarySelection: (ids, lookup) => {
+        if (!inFlightByKey.has(targetKey)) tray.setLibrarySelection(ids, lookup)
+      },
+      setAlt: (key, alt) => {
+        if (!inFlightByKey.has(targetKey)) tray.setAlt(key, alt)
+      },
+      remove: key => {
+        if (!inFlightByKey.has(targetKey)) tray.remove(key)
+      },
+    }),
+    [tray, targetKey],
+  )
 
   // Code-point length so a multi-byte emoji counts as one character (X-style).
   const length = useMemo(() => [...text].length, [text])
@@ -964,7 +1006,8 @@ export function useComposeAsPersona(
         // will find it.
         // (A draft that is still exactly what was sent - the dock was closed without discarding
         // it, e.g. the ENGINE flyout took it over - is the same draft: it gets the context too.
-        // A DIFFERENT, newer draft is the controller's own and is left alone.)
+        // A DIFFERENT, newer draft is the controller's own and is left alone - defensive: writes
+        // are locked while a request is out, so the persisted draft is '' or what was sent.)
         // (After an EXPLICIT discard the draft is '' here, so the text comes back too: the post
         // did not necessarily go out and the controller discarded before they could know. A
         // composer reopened meanwhile is an adopter and picks the text, question and banner up
@@ -1090,7 +1133,7 @@ export function useComposeAsPersona(
     replyMismatch,
     matchDraftReply,
     keepCurrentReply,
-    tray,
+    tray: guardedTray,
     baselineFields,
     baselineErrors: parsedBaseline.errors,
     baseline,

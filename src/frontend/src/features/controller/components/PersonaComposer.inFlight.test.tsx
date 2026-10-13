@@ -329,6 +329,10 @@ describe('after an explicit close (Esc / X) the persona stays locked', () => {
     expect(field().value).toBe('') // the draft was discarded; the request was not
     expect(field().readOnly).toBe(true)
     expect(postButton()).toBeDisabled()
+    // Even a change event that gets past the read-only field (a script, a paste hook) is refused
+    // by the hook: the field stays empty and so there is nothing for Post to send.
+    fireEvent.change(field(), { target: { value: 'Correction: zones 2-3 only.' } })
+    expect(field().value).toBe('')
     fireEvent.click(postButton())
     fireEvent.submit(screen.getByTestId('persona-composer'))
     fireEvent.keyDown(field(), { key: 'Enter', ctrlKey: true })

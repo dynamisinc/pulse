@@ -696,27 +696,28 @@ describe('useComposeAsPersona — a failure after the composer left the screen i
     expect(second.result.current.awaitingDecision).toBe(false)
   })
 
-  it('does not overwrite a newer draft the controller typed in the meantime', async () => {
+  it('cannot be overwritten by a newer draft: nothing can be typed while the request is out', async () => {
     const pending = deferredPublish()
     const first = renderHook(() => useComposeAsPersona(options()))
     act(() => first.result.current.setText('The one that was sent.'))
     act(() => first.result.current.publish())
     first.unmount()
     composeAsPersonaDraftStore.discardDraft('ex-live-0001', ACTIVE_PERSONA.id)
-    // The reopened composer is an ADOPTER of the request still out: locked, and read-only in the
-    // DOM. So this "newer draft" premise is reachable only through the hook API (`setText`), not by
-    // a controller typing; it is kept as a guard on the off-screen restore rule. The second
-    // composer is gone too when the response lands - one that stayed on screen would show the
-    // banner instead of a toast (see `useComposeAsPersona.inFlight.test.tsx`).
+    // The reopened composer is an ADOPTER of the request still out: locked, so the hook refuses
+    // the write (it used to be possible to slip a "newer draft" in through `setText`; the restore
+    // rule that protected it, `persisted === '' || persisted === text`, is now purely defensive).
+    // The second composer is gone when the response lands - one that stayed on screen would show
+    // the banner instead of a toast (see `useComposeAsPersona.inFlight.test.tsx`).
     const second = renderHook(() => useComposeAsPersona(options()))
     act(() => second.result.current.setText('A newer draft.'))
+    expect(second.result.current.text).toBe('')
     second.unmount()
 
     await act(async () => pending.reject(httpError(429, { error: 'rate_limited' })))
 
     expect(toast.error).toHaveBeenCalledTimes(1)
     const third = renderHook(() => useComposeAsPersona(options()))
-    expect(third.result.current.text).toBe('A newer draft.')
+    expect(third.result.current.text).toBe('The one that was sent.')
   })
 
   it('an UNCONFIRMED outcome says "status unknown - check the feed" and comes back gated', async () => {
