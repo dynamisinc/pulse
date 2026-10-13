@@ -101,3 +101,47 @@ cleared), `ParticipantAccessTests` (sessions ended, refresh fails afterwards, di
 enable restores), `PersonalLinkIsolationTests` (`[RequiresDockerFact]`: cross-exercise id 404, token on the wrong
 host, session predicate), `PersonalLinkTelemetryTests` (events valid, no token anywhere). Extend
 `Accounts/ParticipantLoginServiceTests` for the disabled account.
+
+### Test linkage
+
+AC numbers follow the order of the criteria above: AC-1 join success, AC-2 the uniform refusal (with 400, body limit
+and rate limit), AC-3 reissue, AC-4 revoke, AC-5 disable/enable, AC-6 the real issuer, AC-7 Isolation, AC-8
+Telemetry, AC-9 Authorization and abuse.
+
+- **AC-1** `JoinLoginServiceTests.Join_ActiveLink_IssuesTheSameSessionAsAPasswordSignIn_AndRecordsTheUse`,
+  `.Join_TheSameLink_WorksAgainAndAgain_UntilRevokedOrReissued`, `.Join_IsAdmitted_InEveryParticipantAccessibleState`,
+  `.Join_Success_BookkeepingAndTelemetry_ShareOneSaveChanges`; `JoinEndpointsHttpTests.Join_Success_Is200_WithExactlyTheLoginEnvelope`.
+- **AC-2** `JoinLoginServiceTests.Join_EveryOtherOutcome_IsTheSameRefusal_WithOneIdentitylessTargetlessEvent` (unknown,
+  malformed, revoked, superseded, other exercise's token, disabled account, build, completed, archived),
+  `.Join_WithNoResolvedScope_IsRefused_WithNoEvent`, `.Join_OnAHostScopeWithNoExerciseRow_IsRefused_WithNoEvent`,
+  `.Join_AMissingOrEmptyToken_IsInvalid_BeforeAnyLookup`; `JoinEndpointsHttpTests.Join_AMissingBodyOrEmptyToken_Is400ProblemDetails`,
+  `.Join_WithNoResolvedHost_IsABodyless401`, `.Join_EveryRefusal_IsTheSameBodyless401_OverTheRealPipeline`,
+  `.Join_TheThirtyFirstRequestInAMinute_Is429_ByDefault`, `.Join_TheLimit_ComesFromEasyLoginOptions`,
+  `.Join_AnOversizeBody_IsRefusedWith413_WhileItIsRead`.
+- **AC-3** `ParticipantAccessTests.Reissue_EndsEveryLiveSession_TheirRefreshFails_TheOldUrlStops_AndTheNewOneWorks`,
+  `.Reissue_WorksForAPersonWithNoLinkYet_AndForALinkThatNeedsReissue`;
+  `ParticipantLinkServiceTests.Reissue_RotatesInPlace_GenerationPlusOne_NewHashAndCopy_RevokedAtCleared`,
+  `.Reissue_ActiveLink_AlsoRotates_AndANeedsReissueLinkBecomesRecoverable`, `.Reissue_NoLinkYet_IssuesTheFirst`.
+- **AC-4** `ParticipantAccessTests.Revoke_EndsSessions_ClearsTheCopy_IsIdempotent_AndLeavesOtherSignInMethodsAlone`;
+  `ParticipantLinkServiceTests.Revoke_StampsTheRevoke_ClearsTheProtectedCopy_KeepsTheHash_AndIsIdempotent`.
+- **AC-5** `ParticipantAccessTests.Disable_EndsSessions_AndBlocksTheLinkAndThePassword_EnableRestoresBoth_AndChangesNothingElse`;
+  `ParticipantLoginServiceTests.Login_DisabledAccount_WithTheRightPassword_IsRefusedExactlyLikeAWrongPassword`;
+  the `DisabledAccount` row of the AC-2 matrix. The `/api/auth/word` refusal is story 05's half (it must check
+  `Account.DisabledAt`).
+- **AC-6** `ParticipantLinkServiceTests.EnsureActive_NoLink_StagesAFirstLink_StampedFromTheAccount_AndOnlyTheCallerSaves`,
+  `.EnsureActive_ActiveLink_IsReturnedUnchanged_EvenWhenItsCopyCannotBeDecrypted`,
+  `.EnsureActive_RevokedLink_IsReactivated_WithAFreshToken`, `.EnsureActive_TwiceInOneUnitOfWork_ReturnsTheStagedLink`,
+  `.EnsureActive_AnAccountWithNoExercise_IsRefused`, `.AddPersonalLinks_ReplacesTheNullIssuer_InEitherRegistrationOrder`.
+- **AC-7** `PersonalLinkIsolationTests.StaffActions_OnAnotherExercisesAccountId_Are404_IndistinguishableFromAnUnknownId_AndTouchNothing`,
+  `.ATokenMintedInB_PresentedOnAsHost_IsTheUniform401_AndLeavesBUntouched`,
+  `.SessionTermination_IsBoundedByExerciseAndAccount_BsSessionsSurviveEveryActionInA`,
+  `.StaffActions_WithAnUnsetOrEmptyScope_ReachNothing`,
+  `.StaffActions_ByAStaffSessionBoundToAnotherExercise_FailClosed_EvenIfTheScopeSaysA`; the `OtherExercisesToken` row
+  of the AC-2 matrix.
+- **AC-8** `PersonalLinkTelemetryTests.EveryStaffAction_EmitsOneValidEvent_WithTheStaffRole_ActingHuman_AndSessionsEnded`,
+  `.EveryStaffAction_CommitsItsMutationSessionsAndEvent_InOneSaveChanges`,
+  `.NoRawToken_JoinUrl_SessionToken_OrSessionId_AppearsInAnyEventLogOrResponseBody_ExceptTheStaffJoinUrl`; the event
+  assertions in the AC-1 and AC-2 join tests.
+- **AC-9** `ParticipantAccessTests.StaffRoutes_AreGated_401WithoutAStaffSession_403ForAnEvaluator_AndAnotherExercisesStaffFindsNothing`,
+  `.StaffRoutes_AnUnknownOrMalformedId_Is404`; `JoinEndpointsHttpTests.Join_Route_IsPreAuth_BodyLimited_AndOnItsOwnRateLimitPolicy`;
+  `ParticipantLinkServiceTests.AddPersonalLinks_RegistersTheEasyLoginJoinRateLimitPolicy`.
