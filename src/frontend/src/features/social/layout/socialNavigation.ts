@@ -89,6 +89,7 @@ export const SOCIAL_RESERVED_SEGMENTS: readonly string[] = [
   'explore',
   'hashtag',
   'login',
+  'join',
   'staff',
   THREAD_HANDLE_PLACEHOLDER,
 ]

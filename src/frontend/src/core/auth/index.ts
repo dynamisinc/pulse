@@ -34,4 +34,4 @@ export { getAccessToken, getRefreshToken, setTokens, clearTokens } from './token
 export type { TokenPair } from './tokenStore'
 
 export { logout } from './logout'
-export { endSession } from './endSession'
+export { endSession, resetClientSession } from './endSession'

@@ -9,7 +9,7 @@
  * shared `queryClient` singleton is used and reset between tests.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { endSession } from './endSession'
+import { endSession, resetClientSession } from './endSession'
 import { logout } from './logout'
 import { queryClient } from '../services/queryClient'
 import { ownPostStore } from '@/features/social/services/ownPostStore'
@@ -97,5 +97,30 @@ describe('endSession', () => {
     await endSession()
 
     expect(seenInsideLogout).toBe(0)
+  })
+})
+
+describe('resetClientSession (easy-login 08: the join page replaces an identity without a sign-out)', () => {
+  it('forgets the cache, own posts and a pending reply intent, exactly as sign-out does', () => {
+    queryClient.setQueryData(['feed'], [{ id: 'previous-user-post' }])
+    ownPostStore.add({
+      id: 'post-own-2',
+      authorPersonaId: 'persona-previous',
+      text: 'made by the previous identity',
+      counts: { reply: 0, repost: 0, like: 0 },
+      scenarioTime: '2033-09-04T15:00:00Z',
+    })
+    requestReplyFocus('post-2')
+
+    resetClientSession()
+
+    expect(queryClient.getQueryData(['feed'])).toBeUndefined()
+    expect(ownPostStore.getAll()).toEqual([])
+    expect(consumeReplyFocus('post-2')).toBe(false)
+  })
+
+  it('never logs out (the new identity\'s tokens are already stored)', () => {
+    resetClientSession()
+    expect(mockLogout).not.toHaveBeenCalled()
   })
 })

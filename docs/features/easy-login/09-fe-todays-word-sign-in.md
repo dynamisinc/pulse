@@ -1,6 +1,6 @@
 # Story: Sign-in page: Today's word
 
-**Feature:** Easy participant login  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Not Started
+**Feature:** Easy participant login  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** In Review
 **Requirements:** COR-011, COR-012, NFR-001, NFR-009  ·  **Design decisions:** none (EL-9, EL-10, C-2 in `implementation.md`)  ·  **Issue:** #474
 **Stack:** frontend  ·  **Review:** Tier-1  ·  **Priority:** Must  ·  **Wave:** 2  ·  **Effort:** S
 

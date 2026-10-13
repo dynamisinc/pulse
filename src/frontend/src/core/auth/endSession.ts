@@ -28,6 +28,12 @@
  *      same tab. Both modules are leaves (no imports beyond types) so this adds
  *      nothing to `core/auth`'s dependency graph.
  *
+ * Steps 1 and 3 are also exported alone as `resetClientSession()` (easy-login 08
+ * Gate-1 W-1): the join page REPLACES one identity with another without a sign-out,
+ * so it must forget the previous user's client state exactly as sign-out does, but
+ * must not log out (the new pair is already stored). One function, two callers, so
+ * the two paths can never drift apart.
+ *
  * NAVIGATION is the CALLER's job (the control does `void endSession()` then
  * `navigate(LOGIN_PATH)`) — this module has no router dependency, mirroring
  * `logout()`. Both `clear()` and the token clear run SYNCHRONOUSLY before
@@ -49,8 +55,18 @@ import { logout } from './logout'
  * afterward. Never throws.
  */
 export async function endSession(): Promise<void> {
+  resetClientSession()
+  await logout()
+}
+
+/**
+ * Forgets every piece of client state that belongs to the current identity (the
+ * React Query cache and the participant composer's tab-lived singletons) WITHOUT
+ * touching the token store. Sign-out calls it before `logout()`; the join page
+ * calls it after storing a new identity's tokens. Synchronous; never throws.
+ */
+export function resetClientSession(): void {
   queryClient.clear()
   ownPostStore.reset()
   resetReplyIntent()
-  await logout()
 }
