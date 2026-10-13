@@ -3,7 +3,7 @@
  * ---------------------------------------------------------------------------
  * The staff MEDIA-LIBRARY PICKER (demo-polish C1, story 17 "Attach from the
  * library"; CTL-001, NFR-001). STAFF world (COBRA): used by the controller's
- * post-as-persona composer AND imported by C3's run sheet (implementation.md
+ * post-as-persona composer AND by PE-FE's persona edit (implementation.md
  * section 4.1) - so its props are the FROZEN contract of section 1.11, exactly:
  *
  *   interface MediaLibraryPickerProps {

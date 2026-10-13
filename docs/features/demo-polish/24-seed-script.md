@@ -41,8 +41,12 @@ so content work never collides with the backend freeze (plan §2.5). Pack format
       then posts the opening feed as `controller-as-persona` in chronological order with `scenarioTime = anchor
       − minutesBeforeAnchor`, replies after parents (`parentPostId` from the manifest), and baselines
       (`engagementBaseline`); a re-run skips posts already in the manifest (idempotent) and never duplicates.
-- [ ] **Run-sheet export.** It writes `runsheet.demo.json` (`pulse.runsheet.v1`) with pack media keys and post
-      keys rewritten to real asset/post ids, importable by C3 without edits (`import` of it succeeds).
+- [ ] **Run-sheet load** *(amended 2026-10-08; C3 was replaced by inject-queue 06 + 07)*. It creates the pack's
+      run-sheet beats as server-side inject items through `POST /api/injects`. Persona handles resolve to ids via
+      `GET /api/personas`; pack media and post keys are rewritten to real asset/post ids; `replyTo` beats become
+      `{injectPostId}` or `{postId}`; bursts become `kind: burst` items. The manifest records the created item ids,
+      so a re-run never duplicates. Contract:
+      [`inject-queue/implementation.md` § Demo slice](../inject-queue/implementation.md#demo-slice--scripted-posts-server-side-stories-06--07--decided-2026-10-08).
 - [ ] **Self-check.** After seeding it fetches `GET /api/feed` and verifies ≥ the number of top-level posts
       seeded, that every media `url` answers a ranged request (`Range: bytes=0-1`) with `206`, and prints a ✅/❌
       summary; it exits non-zero if any check fails.

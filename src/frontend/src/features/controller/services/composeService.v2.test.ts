@@ -20,7 +20,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '@/core/services/api'
 import { getEmittedTelemetryEvents, resetTelemetryBuffer } from '@/core/telemetry'
 import { registerMockMedia, resetMockMediaRegistry } from '@/core/media/mockMediaRegistry'
-import { classifyLiveFailure } from '../runSheet/runSheetFire'
 import {
   BASELINE_FIELD_MESSAGE,
   BASELINE_RANGE_MESSAGE,
@@ -307,7 +306,7 @@ describe('classifyPublishFailure', () => {
       .toBe('The server could not take the post (HTTP 429).')
   })
 
-  // Gate-2 A M-3: the SAME rule as the run sheet's (`runSheetFire.classifyFailure`). The server
+  // Gate-2 A M-3 (#455: a post create is not idempotent). The server
   // can commit a post and still answer 5xx (the post-commit broadcast, a lost commit
   // acknowledgement, a gateway recycling mid-request), so a 5xx never proves nothing was created.
   it('408 and EVERY 5xx are UNCONFIRMED (the post may be live) - not a plain Retry', () => {
@@ -354,17 +353,14 @@ describe('classifyPublishFailure', () => {
     }
   })
 
-  it('agrees with the run sheet on every status: 408 / 5xx unconfirmed, 429 and other 4xx not', () => {
-    const unconfirmedBoth = (status: number) => {
-      const composer = classifyPublishFailure(httpError(status, undefined)).kind === 'unconfirmed'
-      const sheet = classifyLiveFailure(httpError(status, undefined)).kind === 'unconfirmed'
-      return [composer, sheet]
-    }
+  it('on every status: 408 / 5xx unconfirmed, 429 and other 4xx not', () => {
+    const unconfirmed = (status: number) =>
+      classifyPublishFailure(httpError(status, undefined)).kind === 'unconfirmed'
     for (const status of [400, 401, 403, 404, 409, 422, 429]) {
-      expect(unconfirmedBoth(status)).toEqual([false, false])
+      expect(unconfirmed(status)).toBe(false)
     }
     for (const status of [408, 500, 502, 503, 504]) {
-      expect(unconfirmedBoth(status)).toEqual([true, true])
+      expect(unconfirmed(status)).toBe(true)
     }
   })
 

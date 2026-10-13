@@ -1,9 +1,15 @@
 # Story: Run sheet
 
-**Feature:** Demo polish  ·  **Epic:** E7  ·  **Phase:** 1  ·  **Status:** In Review
+**Feature:** Demo polish  ·  **Epic:** E7  ·  **Phase:** 1  ·  **Status:** Dropped (replaced by inject-queue 06 + 07)
 **Requirements:** CTL-010 (lite), CTL-011 (lite), CTL-013 (lite), CTL-001, COR-018, NFR-001  ·  **Design decisions:** none (file schema `pulse.runsheet.v1`, implementation.md §1.9)  ·  **Issue:** #438
 **Story ID:** C3  ·  **Stack:** frontend  ·  **Priority:** Must  ·  **Effort:** M  ·  **Wave:** 3
 **Home stories:** [`inject-queue/02`](../inject-queue/02-fire-hold-skip-edit.md), [`/03`](../inject-queue/03-standalone-scheduler.md) (lite — manual fire only; no scheduler).
+
+> **Replaced 2026-10-08 (Tom).** Tom moved scripted posts **server-side**: several controllers each own their slice
+> of the script, so a list saved in one browser is not the product. This story is replaced by
+> [`inject-queue/06`](../inject-queue/06-scripted-posts-server-queue.md) (backend) and
+> [`inject-queue/07`](../inject-queue/07-scripted-posts-console.md) (console). 07 keeps the `RunSheetPanel` seam,
+> so the `runSheetSlot` mount is unchanged. The text below is kept for history. **Do not build it.**
 
 ## Context
 **As** a controller (and the presenter), **I want** a list of staged posts I can fire with one key press, **so
@@ -32,7 +38,7 @@ posts through the existing `POST /api/posts`, so it needs **no backend**.
       message), posts via `publishPost` with `origin: 'controller-as-persona'`, the controller's acting human
       and `scenarioTime = scenarioNow()`, disables while in flight (a double-press cannot fire twice), records
       `firedPostId` and the fired scenario time; **Fire next** fires the first pending beat; **Skip** marks
-      skipped (undo-able). A definite server refusal (4xx other than 408, or 429) sets `failed` with the error and a Retry. An outcome that may have posted (408, 5xx, no response, an unreadable 2xx, or a reload mid-request) sets **`unconfirmed`**: there is no Retry, only "Fire again…" behind a confirm, because post creation is not idempotent (#455). The beat is never falsely "fired". *(Amended at Gate-1, orchestrator ruling. C1's staff composer was aligned to this rule at Wave 3 Gate-2. F4's participant composer still offers Retry on 408, on 5xx other than 504, and when there is no response. That is tracked under #455.)*
+      skipped (undo-able). A server failure sets `failed` with the error and a Retry — never a false "fired".
 - [ ] **Reply beats.** A beat whose `replyTo` is another beat is disabled with the reason "Fire the parent
       first" until the parent is `fired`, then posts with `parentPostId = parent.firedPostId`; a
       `replyTo.postId` posts against that existing post.
@@ -63,7 +69,7 @@ against mocks; **live check** once BP (+B2 for reply beats) are deployed.
 ## Tests
 - Schema: valid/invalid matrix and round-trip; storage keyed per exercise (switch exercise → different sheet);
   storage-failure warning.
-- Fire: success records `firedPostId`; double-press fires once; refusal → `failed` + Retry; maybe-posted → `unconfirmed` + confirmed "Fire again…"; reply-parent gating;
+- Fire: success records `firedPostId`; double-press fires once; failure → `failed` + Retry; reply-parent gating;
   unknown persona blocks; request carries `controller-as-persona`, acting human,
   `parentPostId`/`engagementBaseline`/`media`, no `exerciseId`.
 - Keyboard handling (ignored while typing), statuses are text, no participant imports; scenario time (`T+Nm`,

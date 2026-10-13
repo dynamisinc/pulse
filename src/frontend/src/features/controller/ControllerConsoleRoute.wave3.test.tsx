@@ -2,9 +2,10 @@
  * features/controller/ControllerConsoleRoute.wave3.test.tsx
  * ---------------------------------------------------------------------------
  * The Wave 3 INTEGRATION of the controller console, through the real
- * `ControllerConsoleRoute` (demo-polish C1 post-as-persona v2, C2 live world, C3 run sheet,
- * C4 console cleanup, and the orchestrator's slot wiring - implementation.md section 4.2;
- * Wave 3 Gate-2 checks 1, 5, 11, 16, 22, 23, 26). Real providers (exercise context, React
+ * `ControllerConsoleRoute` (demo-polish C1 post-as-persona v2, C2 live world, C4 console
+ * cleanup, inject-queue 07's run sheet - which replaced demo-polish C3 - and the
+ * orchestrator's slot wiring - implementation.md section 4.2; Wave 3 Gate-2 checks 1, 5,
+ * 11, 16, 22, 23, 26). Real providers (exercise context, React
  * Query, toolstrip, active persona), the real mock-mode data layer, NOTHING about the
  * pieces under test mocked.
  *
@@ -15,9 +16,10 @@
  *  - ⌘K PATH: with no persona active the console opens the palette, and the target SURVIVES
  *    the pick (the composer opens already replying); a palette dismissed without a pick drops
  *    it, so a later unrelated ⌘K -> persona never opens a stale reply.
- *  - RUN SHEET: "Fire next" fires the next beat, as a controller-as-persona post.
- *  - ⌘K GATING: with a run-sheet dialog open the chord does nothing; with no modal it opens.
- *  - TWO-COLUMN KEY SCOPING: the run sheet's F / N / S / E do NOT fire from the live-world
+ *  - RUN SHEET: "Fire next" fires the first pending item of the (mock) inject queue.
+ *  - ⌘K GATING: with the persona edit dialog open the chord does nothing; with no modal it
+ *    opens. (The run sheet's editor is an inline form, not a modal, so ⌘K stays live over it.)
+ *  - TWO-COLUMN KEY SCOPING: the run sheet's F / N / H / S / E do NOT fire from the live-world
  *    column or from the composer; the live world's R does NOT fire from inside the run sheet.
  *  - C5 TAKEDOWN (wired through `renderRowActions` + `isRowRemoved`): every row carries
  *    "Take down"; taking one down marks THAT row REMOVED once, confirms the category, and
@@ -40,7 +42,7 @@ import { engineControlStore } from './engine/hooks/useEngineControl'
 import { engineSettingsStore } from './engine/hooks/useEngineSettings'
 import { composeAsPersonaDraftStore } from './hooks/useComposeAsPersona'
 import { ControllerConsoleRoute } from './ControllerConsoleRoute'
-import { MOCK_EXERCISE_ID, beatFixture, resetRunSheetWorld, seedStoredSheet, sheetFixture } from './runSheet/runSheetTestKit'
+import { injectMock } from './runSheet/injectMock'
 
 // Whole-console renders (MUI + emotion + three feature trees) are slow on a loaded box.
 vi.setConfig({ testTimeout: 60_000 })
@@ -49,7 +51,7 @@ const FULCO = 'persona-fulcoem'
 const WATER = 'persona-fairhavenwater'
 
 beforeEach(() => {
-  resetRunSheetWorld()
+  injectMock.reset() // the dev demo script: 4 pending items, in order
   setExerciseClock({ scenarioNow: () => new Date('2033-09-04T14:00:30Z') })
   postStore.resetForTests({ withDemoFixtures: true })
   reviewStore.resetForTests()
@@ -73,7 +75,7 @@ beforeEach(() => {
 
 afterEach(() => {
   resetExerciseClock()
-  resetRunSheetWorld()
+  injectMock.dispose()
   postStore.resetForTests()
   engineSettingsStore.resetForTests()
   composeAsPersonaDraftStore.resetForTests()
@@ -81,20 +83,23 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-/** Two pending beats for the run sheet, posting as personas in the mock cast. */
-function seedTwoBeats() {
-  seedStoredSheet(MOCK_EXERCISE_ID, sheetFixture([
-    beatFixture({ id: 'b1', order: 1, title: 'Boil notice', scenarioMinute: 14 }),
-    beatFixture({
-      id: 'b2',
-      order: 2,
-      title: 'Citizen pile-on',
-      scenarioMinute: 20,
-      persona: { handle: 'tbrandt41' },
-      text: 'Mine has been brown since noon.',
-    }),
-  ]))
+/** The status of the queue item at `order` (1-based), read from the mock server. */
+const itemStatus = (order: number) =>
+  injectMock.snapshot().items.find(item => item.order === order)?.status
+
+/** The run-sheet row for the queue item at `order`. */
+function sheetRow(order: number): HTMLElement {
+  const id = injectMock.snapshot().items.find(item => item.order === order)?.id
+  const row = screen.getAllByTestId('run-sheet-row').find(el => el.dataset.itemId === id)
+  if (row === undefined) throw new Error(`no run-sheet row for item ${order}`)
+  return row
 }
+
+/** Every item still pending: nothing in the queue was fired, held or skipped. */
+const expectQueueUntouched = () =>
+  expect(injectMock.snapshot().items.map(item => item.status)).toEqual([
+    'pending', 'pending', 'pending', 'pending',
+  ])
 
 async function renderRoute() {
   const user = userEvent.setup({ delay: null })
@@ -111,7 +116,7 @@ async function renderRoute() {
   const live = await screen.findByRole('region', { name: 'Live world' })
   const rows = await within(live).findAllByTestId('live-world-row')
   const sheet = await screen.findByTestId('run-sheet-panel')
-  await waitFor(() => expect(sheet).toHaveAttribute('data-personas', 'ready'))
+  await waitFor(() => expect(within(sheet).getAllByTestId('run-sheet-row')).toHaveLength(4))
   return { user, live, rows, sheet }
 }
 
@@ -120,8 +125,6 @@ type User = ReturnType<typeof userEvent.setup>
 const palette = () => screen.queryByTestId('command-palette')
 const dock = () => screen.queryByTestId('persona-dock-host')
 const banner = () => screen.queryByTestId('reply-banner')
-const beatStatus = (id: string) =>
-  within(screen.getByTestId(`beat-row-${id}`)).getByTestId('beat-status')
 
 /** ⌘K, then pick `personaId` in the palette's persona list. */
 async function pickPersona(user: User, personaId: string) {
@@ -145,12 +148,11 @@ async function replyAs(user: User, row: HTMLElement): Promise<string> {
 
 describe('the route wires both slots into the split layout', () => {
   it('mounts the live world and the run sheet side by side', async () => {
-    seedTwoBeats()
     const { live } = await renderRoute()
     expect(screen.getByTestId('console-slots')).toHaveAttribute('data-layout', 'split')
     expect(within(live).getByRole('heading', { name: 'LIVE WORLD' })).toBeInTheDocument()
     expect(
-      within(screen.getByRole('region', { name: 'Run sheet' })).getByRole('heading', { name: 'RUN SHEET' }),
+      within(screen.getByTestId('console-slot-run-sheet')).getByRole('heading', { name: 'RUN SHEET' }),
     ).toBeInTheDocument()
     // The wired slots replace the "not connected" line.
     expect(screen.queryByTestId('console-slots-status')).toBeNull()
@@ -304,26 +306,25 @@ describe('reply flow - the ⌘K path (no persona active)', () => {
 })
 
 describe('run sheet', () => {
-  it('"Fire next" fires the next pending beat as a controller-as-persona post', async () => {
-    seedTwoBeats()
-    const { user } = await renderRoute()
-    expect(beatStatus('b1')).toHaveTextContent('Pending')
+  it('"Fire next" fires the first pending item of the inject queue', async () => {
+    const { user, sheet } = await renderRoute()
+    expect(within(sheetRow(1)).getByTestId('status-text')).toHaveTextContent('Pending')
 
-    await user.click(screen.getByRole('button', { name: /Fire next/ }))
+    await user.click(within(sheet).getByRole('button', { name: 'Fire next pending item' }))
 
-    await waitFor(() => expect(beatStatus('b1')).toHaveTextContent('Fired'))
-    expect(beatStatus('b2')).toHaveTextContent('Pending')
-    const fired = postStore.getPosts().find(post => post.text === 'Boil-water advisory is in effect for Zones 2-4.')
-    expect(fired?.origin).toBe('controller-as-persona')
+    await waitFor(() => expect(itemStatus(1)).toBe('fired'))
+    await waitFor(() => expect(within(sheetRow(1)).getByTestId('status-text')).toHaveTextContent('Fired'))
+    expect(itemStatus(2)).toBe('pending')
   })
 })
 
 describe('⌘K gating - another modal on top', () => {
-  it('does nothing while a run-sheet dialog is open, and works again once it closes', async () => {
+  it('does nothing while the persona edit dialog is open, and works again once it closes', async () => {
     const { user } = await renderRoute()
-
-    await user.click(screen.getByRole('button', { name: 'Add beat' }))
-    expect(await screen.findByRole('dialog', { name: 'New beat' })).toBeInTheDocument()
+    await pickPersona(user, FULCO)
+    await user.click(await screen.findByRole('button', { name: 'Edit persona' }))
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByRole('textbox', { name: /display name/i })).toBeInTheDocument()
 
     await user.keyboard('{Control>}k{/Control}')
     expect(palette()).toBeNull()
@@ -331,7 +332,7 @@ describe('⌘K gating - another modal on top', () => {
     expect(palette()).toBeNull()
 
     await user.keyboard('{Escape}')
-    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'New beat' })).toBeNull())
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
 
     await user.keyboard('{Control>}k{/Control}')
     expect(await screen.findByRole('dialog', { name: /command palette/i })).toBeInTheDocument()
@@ -345,24 +346,21 @@ describe('two-column key scoping', () => {
     expect(row).toHaveFocus()
   }
 
-  it('the run sheet\'s F / N / S / E do NOT fire from a focused live-world row', async () => {
-    seedTwoBeats()
+  it('the run sheet\'s F / N / H / S / E do NOT fire from a focused live-world row', async () => {
     const { user, rows } = await renderRoute()
     const row = rows[0]
     if (row === undefined) throw new Error('no live-world rows')
     const postsBefore = postStore.getPosts().length
 
     focusRow(row)
-    await user.keyboard('fnse')
+    await user.keyboard('fnhse')
 
-    expect(beatStatus('b1')).toHaveTextContent('Pending')
-    expect(beatStatus('b2')).toHaveTextContent('Pending')
-    expect(screen.queryByRole('dialog')).toBeNull()
+    expectQueueUntouched()
+    expect(screen.queryByTestId('inject-editor')).toBeNull()
     expect(postStore.getPosts()).toHaveLength(postsBefore)
   })
 
-  it('the run sheet\'s F / N / S / E do NOT fire while typing in the composer', async () => {
-    seedTwoBeats()
+  it('the run sheet\'s F / N / H / S / E do NOT fire while typing in the composer', async () => {
     const { user } = await renderRoute()
     await pickPersona(user, WATER)
     const composer = await screen.findByTestId('persona-composer')
@@ -370,37 +368,34 @@ describe('two-column key scoping', () => {
     const postsBefore = postStore.getPosts().length
 
     await user.click(field)
-    await user.keyboard('fnse')
+    await user.keyboard('fnhse')
 
-    expect(field).toHaveValue('fnse')
-    expect(beatStatus('b1')).toHaveTextContent('Pending')
-    expect(beatStatus('b2')).toHaveTextContent('Pending')
-    expect(screen.queryByTestId('beat-editor')).toBeNull()
+    expect(field).toHaveValue('fnhse')
+    expectQueueUntouched()
+    expect(screen.queryByTestId('inject-editor')).toBeNull()
     expect(postStore.getPosts()).toHaveLength(postsBefore)
   })
 
   it('the live world\'s R does NOT fire from inside the run sheet (its own keys still do)', async () => {
-    seedTwoBeats()
     const { user } = await renderRoute()
 
-    await user.click(screen.getByTestId('beat-row-b1'))
+    await user.click(sheetRow(1))
     await user.keyboard('r')
     // R is the live world's "Reply as...": from the run sheet it opens neither the palette
     // (no persona is active, so a reply would have opened it) nor a dock.
     expect(palette()).toBeNull()
     expect(dock()).toBeNull()
-    expect(beatStatus('b1')).toHaveTextContent('Pending')
+    expectQueueUntouched()
 
     // The run sheet's own key, from the same place, works: the keys are scoped, not dead.
     await user.keyboard('n')
-    await waitFor(() => expect(beatStatus('b1')).toHaveTextContent('Fired'))
-    expect(beatStatus('b2')).toHaveTextContent('Pending')
+    await waitFor(() => expect(itemStatus(1)).toBe('fired'))
+    expect(itemStatus(2)).toBe('pending')
     expect(palette()).toBeNull()
     expect(dock()).toBeNull()
   })
 
   it('the live world\'s own R still replies (the scoping is not a dead keyboard)', async () => {
-    seedTwoBeats()
     const { user, rows } = await renderRoute()
     const row = rows[0]
     if (row === undefined) throw new Error('no live-world rows')
@@ -410,13 +405,12 @@ describe('two-column key scoping', () => {
 
     // No persona active -> the palette opens, carrying the reply.
     expect(await screen.findByTestId('command-palette')).toBeInTheDocument()
-    expect(beatStatus('b1')).toHaveTextContent('Pending')
+    expectQueueUntouched()
   })
 })
 
 describe('C5 takedown is wired into the live world', () => {
   it('offers "Take down" on every row; taking one down marks THAT row REMOVED and blocks replies to it', async () => {
-    seedTwoBeats()
     const { user, rows } = await renderRoute()
     for (const row of rows) {
       expect(within(row).getByTestId('takedown-trigger')).toBeInTheDocument()
@@ -442,7 +436,6 @@ describe('C5 takedown is wired into the live world', () => {
 
 describe('PE-FE persona edit is wired into the dock', () => {
   it('the persona panel offers "Edit persona", which opens the edit dialog', async () => {
-    seedTwoBeats()
     const { user } = await renderRoute()
     await pickPersona(user, FULCO)
     await waitFor(() => expect(dock()).not.toBeNull())

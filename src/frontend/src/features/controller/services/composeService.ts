@@ -264,10 +264,10 @@ function serverMessageOf(data: unknown): string | undefined {
  *  - {@link ComposeUnconfirmedError} -> 'unconfirmed';
  *  - an axios failure with a 2xx response, a 408, ANY 5xx (500/502/503/504 ...), or NO
  *    response at all (a connection dropped after the request was sent is indistinguishable
- *    from one that never connected) -> 'unconfirmed'. This is the SAME rule as the run
- *    sheet's (`runSheet/runSheetFire.ts`): the server can commit a post and still answer
- *    5xx (the post-commit broadcast, a lost commit acknowledgement, a gateway that
- *    recycles mid-request), so a 5xx never proves the post was not created;
+ *    from one that never connected) -> 'unconfirmed' (#455: a post create is not
+ *    idempotent). The server can commit a post and still answer 5xx (the post-commit
+ *    broadcast, a lost commit acknowledgement, a gateway that recycles mid-request), so a
+ *    5xx never proves the post was not created;
  *  - 429 -> 'failed' (rate limited BEFORE any work: retry is reasonable);
  *  - any other 4xx -> 'rejected', with the SERVER's message.
  * A plain `Error` from the MOCK pipeline has its engineering prefix (`createPost: `)

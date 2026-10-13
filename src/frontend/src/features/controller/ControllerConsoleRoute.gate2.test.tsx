@@ -5,7 +5,7 @@
  * (real providers, mock-mode data layer), next to `ControllerConsoleRoute.wave3.test.tsx`:
  *
  *  L-1  A console re-render (the review queue's tick, every swamped-mode change, a toolstrip
- *       toggle) does not re-render the run sheet's beat rows or the live-world column: both
+ *       toggle) does not re-render the run sheet's rows or the live-world column: both
  *       slot roots are `memo`ized with stable props. Counted with pass-through wrappers.
  *  S-3  C5's takedown step is non-modal, so Ctrl+K still opens the palette OVER it, the step
  *       closes, and focus lands in the palette (not on <body>).
@@ -35,13 +35,13 @@ import { engineSettingsStore } from './engine/hooks/useEngineSettings'
 import { composeAsPersonaDraftStore } from './hooks/useComposeAsPersona'
 import { ComposeUnconfirmedError, composeAsPersona } from './services/composeService'
 import { ControllerConsoleRoute } from './ControllerConsoleRoute'
-import { MOCK_EXERCISE_ID, beatFixture, resetRunSheetWorld, seedStoredSheet, sheetFixture } from './runSheet/runSheetTestKit'
+import { injectMock } from './runSheet/injectMock'
 
 vi.setConfig({ testTimeout: 60_000 })
 
 // Pass-through wrappers that COUNT renders (L-1). A wrapper renders exactly when its parent
 // re-renders it, so the count is "how often the slot root let a console render through".
-const renders = vi.hoisted(() => ({ liveWorldColumn: 0, beatRow: 0 }))
+const renders = vi.hoisted(() => ({ liveWorldColumn: 0, sheetRow: 0 }))
 
 vi.mock('./liveWorld/LiveWorldColumn', async importOriginal => {
   const actual = await importOriginal<typeof import('./liveWorld/LiveWorldColumn')>()
@@ -55,14 +55,14 @@ vi.mock('./liveWorld/LiveWorldColumn', async importOriginal => {
   }
 })
 
-vi.mock('./runSheet/RunSheetBeatRow', async importOriginal => {
-  const actual = await importOriginal<typeof import('./runSheet/RunSheetBeatRow')>()
+vi.mock('./runSheet/RunSheetRow', async importOriginal => {
+  const actual = await importOriginal<typeof import('./runSheet/RunSheetRow')>()
   const React = await import('react')
   return {
     ...actual,
-    RunSheetBeatRow: (props: Parameters<typeof actual.RunSheetBeatRow>[0]) => {
-      renders.beatRow += 1
-      return React.createElement(actual.RunSheetBeatRow, props)
+    RunSheetRow: (props: Parameters<typeof actual.RunSheetRow>[0]) => {
+      renders.sheetRow += 1
+      return React.createElement(actual.RunSheetRow, props)
     },
   }
 })
@@ -77,7 +77,7 @@ const WATER = 'persona-fairhavenwater'
 const realComposeAsPersona = vi.mocked(composeAsPersona).getMockImplementation()
 
 beforeEach(() => {
-  resetRunSheetWorld()
+  injectMock.reset() // the dev demo script: 4 pending items
   setExerciseClock({ scenarioNow: () => new Date('2033-09-04T14:00:30Z') })
   postStore.resetForTests({ withDemoFixtures: true })
   reviewStore.resetForTests()
@@ -87,7 +87,7 @@ beforeEach(() => {
   resetTelemetryBuffer()
   removedPosts.resetForTests()
   renders.liveWorldColumn = 0
-  renders.beatRow = 0
+  renders.sheetRow = 0
   vi.mocked(composeAsPersona).mockReset()
   if (realComposeAsPersona) vi.mocked(composeAsPersona).mockImplementation(realComposeAsPersona)
   vi.stubGlobal('matchMedia', (query: string) => ({
@@ -104,20 +104,13 @@ beforeEach(() => {
 
 afterEach(() => {
   resetExerciseClock()
-  resetRunSheetWorld()
+  injectMock.dispose()
   postStore.resetForTests()
   engineSettingsStore.resetForTests()
   composeAsPersonaDraftStore.resetForTests()
   removedPosts.resetForTests()
   vi.unstubAllGlobals()
 })
-
-function seedBeats() {
-  seedStoredSheet(MOCK_EXERCISE_ID, sheetFixture([
-    beatFixture({ id: 'b1', order: 1, title: 'Boil notice', scenarioMinute: 14 }),
-    beatFixture({ id: 'b2', order: 2, title: 'Citizen pile-on', scenarioMinute: 20 }),
-  ]))
-}
 
 async function renderRoute() {
   const user = userEvent.setup({ delay: null })
@@ -134,7 +127,7 @@ async function renderRoute() {
   const live = await screen.findByRole('region', { name: 'Live world' })
   const rows = await within(live).findAllByTestId('live-world-row')
   const sheet = await screen.findByTestId('run-sheet-panel')
-  await waitFor(() => expect(sheet).toHaveAttribute('data-personas', 'ready'))
+  await waitFor(() => expect(within(sheet).getAllByTestId('run-sheet-row')).toHaveLength(4))
   return { user, live, rows, sheet }
 }
 
@@ -155,13 +148,12 @@ async function closeDock(user: User) {
 }
 
 describe('L-1 - a console re-render does not re-render the slot roots', () => {
-  it('toggling the palette (a console render) leaves the beat rows and the live-world column alone', async () => {
-    seedBeats()
+  it('toggling the palette (a console render) leaves the run-sheet rows and the live-world column alone', async () => {
     const { user } = await renderRoute()
     // Let the mount settle (queries, personas, the first arrivals batch).
-    await waitFor(() => expect(renders.beatRow).toBeGreaterThanOrEqual(2))
+    await waitFor(() => expect(renders.sheetRow).toBeGreaterThanOrEqual(4))
     await new Promise(resolve => setTimeout(resolve, 400))
-    const rowsBefore = renders.beatRow
+    const rowsBefore = renders.sheetRow
     const columnBefore = renders.liveWorldColumn
 
     // Each toggle re-renders ControllerConsole (the toolstrip state it reads) and calls both slots.
@@ -174,7 +166,7 @@ describe('L-1 - a console re-render does not re-render the slot roots', () => {
     await user.keyboard('{Escape}')
     await waitFor(() => expect(palette()).toBeNull())
 
-    expect(renders.beatRow).toBe(rowsBefore)
+    expect(renders.sheetRow).toBe(rowsBefore)
     expect(renders.liveWorldColumn).toBe(columnBefore)
   })
 })
