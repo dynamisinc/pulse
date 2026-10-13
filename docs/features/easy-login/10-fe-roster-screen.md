@@ -1,7 +1,7 @@
 # Story: Roster screen (staff)
 
 **Feature:** Easy participant login  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Not Started
-**Requirements:** COR-011, COR-017 (part: roster, force-logout, credential reset, wrong-account diagnosis), COR-018, NFR-001  ·  **Design decisions:** none (EL-2, EL-3, EL-8, EL-13, EL-14)  ·  **Issue:** —
+**Requirements:** COR-011, COR-017 (part: roster, force-logout, credential reset, wrong-account diagnosis), COR-018, NFR-001  ·  **Design decisions:** none (EL-2, EL-3, EL-8, EL-13, EL-14)  ·  **Issue:** #475
 **Stack:** frontend  ·  **Review:** Tier-1  ·  **Priority:** Must  ·  **Wave:** 1  ·  **Effort:** L
 
 ## Context

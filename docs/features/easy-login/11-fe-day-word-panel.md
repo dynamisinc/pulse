@@ -1,7 +1,7 @@
 # Story: Today's word panel (staff)
 
 **Feature:** Easy participant login  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Not Started
-**Requirements:** COR-017 (part: credential reset), NFR-009, NFR-001  ·  **Design decisions:** none (EL-9, EL-14)  ·  **Issue:** —
+**Requirements:** COR-017 (part: credential reset), NFR-009, NFR-001  ·  **Design decisions:** none (EL-9, EL-14)  ·  **Issue:** #476
 **Stack:** frontend  ·  **Review:** Tier-1  ·  **Priority:** Must  ·  **Wave:** 1  ·  **Effort:** S
 
 ## Context

@@ -1,7 +1,7 @@
 # Story: Day word: staff controls and word sign-in
 
 **Feature:** Easy participant login  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Not Started
-**Requirements:** COR-011, COR-012, COR-017 (part: credential reset), NFR-009  ·  **Design decisions:** none (EL-9, EL-11, EL-13, EL-16)  ·  **Issue:** —
+**Requirements:** COR-011, COR-012, COR-017 (part: credential reset), NFR-009  ·  **Design decisions:** none (EL-9, EL-11, EL-13, EL-16)  ·  **Issue:** #470
 **Stack:** backend  ·  **Review:** Tier-2 (a new anonymous, guessable-secret sign-in path; always-Critical class)  ·  **Priority:** Must  ·  **Wave:** 1  ·  **Effort:** M
 
 ## Context
