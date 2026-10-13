@@ -4,7 +4,6 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.DependencyInjection.Extensions;
-using Microsoft.Net.Http.Headers;
 using Pulse.WebApi.Features.EngineRuntime;
 using Pulse.WebApi.Features.Identity.EasyLogin;
 
@@ -33,9 +32,9 @@ using Pulse.WebApi.Features.Identity.EasyLogin;
 /// JSON, is malformed, has an unknown or repeated property, has both or neither of the two members, an explicit
 /// <c>null</c> for either member, an empty <c>participantIds</c>, <c>all</c> other than <c>true</c>, or more than
 /// <see cref="EasyLoginOptions.MaxCardsPerRequest"/> ids as sent; <c>413</c> ProblemDetails for a body over <see cref="MaxRequestBodyBytes"/>; <c>409</c> ProblemDetails when
-/// <c>Authentication:FrontendBaseUrl</c> is not usable ("join links are not configured"). Every response the handler
-/// writes carries <c>Cache-Control: no-store</c>, because a sheet holds bearer credentials. (The filters' own 401/403
-/// carry no body and are written before the handler runs.)
+/// <c>Authentication:FrontendBaseUrl</c> is not usable ("join links are not configured"). Every response carries
+/// <c>Cache-Control: no-store</c>, because a sheet holds bearer credentials: the shared
+/// <see cref="NoStoreEndpointFilter"/> runs first, so the gate's bodyless 401/403 carry it too (Gate-2 S-3).
 /// </para>
 /// <para>
 /// <b>No exercise id anywhere.</b> The route and body name no exercise: the scope is the server-resolved
@@ -50,9 +49,6 @@ public static class LinkCardEndpoints
 
     /// <summary>The largest request body accepted, in bytes (64 KiB; 500 GUIDs are about 20 KB). Larger is a <c>413</c>.</summary>
     public const long MaxRequestBodyBytes = 64 * 1024;
-
-    /// <summary>The <c>Cache-Control</c> value on every handler response.</summary>
-    public const string NoStore = "no-store";
 
     /// <summary>The <c>detail</c> of a 400 for a body that is not the strict JSON shape (fixed text: no echo of the input).</summary>
     public const string MalformedBodyMessage =
@@ -91,7 +87,9 @@ public static class LinkCardEndpoints
     {
         ArgumentNullException.ThrowIfNull(endpoints);
 
+        // No-store first, so the gate's 401/403 are not cached either; then assigned staff; then controller/planner.
         endpoints.MapPost(CardsRoute, PostCardsAsync)
+            .AddEndpointFilter<NoStoreEndpointFilter>()
             .AddEndpointFilter<EngineCockpitStaffAuthorizationFilter>()
             .AddEndpointFilter<RosterStaffRoleFilter>()
             .WithMetadata(new RequestSizeLimitAttribute(MaxRequestBodyBytes));
@@ -110,9 +108,7 @@ public static class LinkCardEndpoints
         [FromServices] LinkCardService service,
         CancellationToken cancellationToken)
     {
-        // A sheet is a stack of bearer credentials: no cache, browser or proxy, may keep any answer from here.
-        request.HttpContext.Response.Headers[HeaderNames.CacheControl] = NoStore;
-
+        // A sheet is a stack of bearer credentials: NoStoreEndpointFilter has already marked this response no-store.
         var (body, refusal) = await ReadBodyAsync(request, cancellationToken);
         if (refusal is not null)
         {

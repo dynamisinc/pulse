@@ -10,11 +10,12 @@ using Xunit;
 
 /// <summary>
 /// easy-login/02 (AC-2, AC-3, AC-4, AC-5 and the amended derivation and matching rules) — the ONE row-judging engine,
-/// <see cref="RosterWorkspace"/>, driven in memory. It starts from the staff roster mock's seed and ports its rule
-/// tests (<c>participantAdmin/mocks/rosterMocks.test.ts</c>, the 34c6c80 rules), then pins the later amendments in
-/// <c>implementation.md</c> that the server follows and the mock does not yet (the persona-less rule and the same-file
-/// guards; story 10's mock is updated separately). The database-backed behaviour (one save, dry run, telemetry,
-/// isolation) is <see cref="RosterServiceTests"/>.
+/// <see cref="RosterWorkspace"/>, driven in memory. It starts from the staff roster mock's seed and pins the rules of
+/// <c>implementation.md</c> as amended, the persona-less rule and the same-file guards included. The staff roster mock
+/// (<c>src/frontend/src/features/participantAdmin/mocks/rosterMocks.ts</c>) mirrors these rules, guards (1)–(4)
+/// included, and <c>rosterMocks.test.ts</c> ports the key cases from these tests, so a rule changed in one place turns
+/// the other suite red. The database-backed behaviour (one save, dry run, telemetry, isolation) is
+/// <see cref="RosterServiceTests"/>.
 /// </summary>
 public sealed class RosterWorkspaceTests
 {

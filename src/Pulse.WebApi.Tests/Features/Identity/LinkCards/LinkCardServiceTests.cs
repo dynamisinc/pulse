@@ -403,6 +403,15 @@ public sealed class LinkCardServiceTests
         services.Count(d => d.ServiceType == typeof(QrSvgRenderer)).Should().Be(1);
         services.Single(d => d.ServiceType == typeof(LinkCardService)).Lifetime.Should().Be(ServiceLifetime.Scoped);
         services.Single(d => d.ServiceType == typeof(QrSvgRenderer)).Lifetime.Should().Be(ServiceLifetime.Singleton);
+
+        // Gate-2 CR-001: and the container still BUILDS, with its options (a duplicate options or rate-limit action only
+        // throws when the options are first built, which descriptor counts cannot see).
+        services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
+        using var provider = services.BuildServiceProvider();
+        var build = () => (
+            provider.GetRequiredService<Microsoft.Extensions.Options.IOptions<Microsoft.AspNetCore.RateLimiting.RateLimiterOptions>>().Value,
+            provider.GetRequiredService<Microsoft.Extensions.Options.IOptions<EasyLoginOptions>>().Value);
+        build.Should().NotThrow();
     }
 
     [Fact]

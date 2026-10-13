@@ -15,6 +15,7 @@ using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.Identity.DayWord;
 using Pulse.WebApi.Features.Identity.EasyLogin;
+using Pulse.WebApi.Features.Identity.Sessions;
 using Pulse.WebApi.Features.Identity.SharedAccess;
 using Pulse.WebApi.Features.Identity.Staff;
 using Pulse.WebApi.Tests.Data;
@@ -172,7 +173,7 @@ internal static class DayWordTestSupport
         PulseDbContext context,
         Guid? scope,
         TimeProvider clock,
-        RecordingSessionIssuer issuer,
+        ISessionIssuer issuer,
         ISharedCredentialHasher? hasher = null,
         int rolloverHour = 0,
         IExerciseClock? exerciseClock = null,

@@ -11,6 +11,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Pulse.WebApi.Data;
+using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.Identity.EasyLogin;
 using Pulse.WebApi.Features.Identity.Sessions;
 using Pulse.WebApi.Features.Identity.Staff;
@@ -46,17 +47,30 @@ public sealed class ParticipantDayLongLifecyclePinTests
         HttpStatusCode expectedOverlay)
     {
         var exerciseId = Guid.NewGuid();
+        var accountId = Guid.NewGuid();
         await using (var seed = _fixture.CreateContext())
         {
             seed.Exercises.Add(ExerciseLifecycleTestData.ExerciseInState(exerciseId, state));
             seed.Posts.Add(ExerciseLifecycleTestData.PostIn(exerciseId, SeededPostBody));
+
+            // A real, enabled account: refresh renews a participant session only while one exists in its exercise
+            // (easy-login Gate-2 S-1, fail closed).
+            seed.Accounts.Add(new Account
+            {
+                Id = accountId,
+                ExerciseId = exerciseId,
+                Username = $"pin{accountId:N}"[..30],
+                DisplayName = "Pat Participant",
+                Role = "participant",
+                CreatedAt = DateTimeOffset.UtcNow,
+            });
             await seed.SaveChangesAsync();
         }
 
         SessionIssueResult issued;
         await using (var issueContext = _fixture.CreateContext())
         {
-            issued = await IssuerFor(issueContext).IssueAsync(ParticipantRequest(exerciseId));
+            issued = await IssuerFor(issueContext).IssueAsync(ParticipantRequest(exerciseId, accountId));
         }
 
         issued.Session.RefreshExpiresAt.Should().Be(
@@ -111,9 +125,8 @@ public sealed class ParticipantDayLongLifecyclePinTests
         TimeProvider.System,
         NullLogger<SessionService>.Instance);
 
-    private static SessionIssueRequest ParticipantRequest(Guid exerciseId)
+    private static SessionIssueRequest ParticipantRequest(Guid exerciseId, Guid accountId)
     {
-        var accountId = Guid.NewGuid();
         return new SessionIssueRequest
         {
             ExerciseId = exerciseId,

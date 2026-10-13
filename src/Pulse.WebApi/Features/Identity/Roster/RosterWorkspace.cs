@@ -11,8 +11,10 @@ using Pulse.WebApi.Features.Identity.EasyLogin;
 /// <remarks>
 /// <para>
 /// <b>The frozen derivation and matching rules</b> (<c>docs/features/easy-login/implementation.md</c>, as amended at
-/// 34c6c80, 1aea6f2, f07c1ea, 241b7d0 and a70b106; the staff roster mock implements the 34c6c80 rules), in the order
-/// they are applied:
+/// 34c6c80, 1aea6f2, f07c1ea, 241b7d0 and a70b106), in the order they are applied. The staff roster mock
+/// (<c>src/frontend/src/features/participantAdmin/mocks/rosterMocks.ts</c>) mirrors these rules, the same-file guards
+/// (1)–(4) included, and <c>rosterMocks.test.ts</c> ports the key cases from <c>RosterWorkspaceTests</c>, so a file
+/// gets the same answer in dev as in production:
 /// </para>
 /// <list type="number">
 ///   <item><description>An invalid field fails the row (<see cref="RosterRowRules.Validate"/>). A <c>personaHandle</c>
@@ -47,10 +49,11 @@ using Pulse.WebApi.Features.Identity.EasyLogin;
 ///   <c>participant</c>).</description></item>
 /// </list>
 /// <para>
-/// <b>One deliberate tightening of the mock</b>: a key that matches MORE than one existing participant (two legacy
+/// <b>A key that matches more than one person</b>: a key that matches MORE than one existing participant (two legacy
 /// "Pat Lee" rows with no agency) fails the row instead of silently picking one, and a later key only conflicts when
 /// none of the people it matches is the matched person. Without the second half, re-uploading a file whose two
-/// same-name, same-agency people are told apart by <c>signInName</c> would fail one of them, breaking idempotency.
+/// same-name, same-agency people are told apart by <c>signInName</c> would fail one of them, breaking idempotency. The
+/// mock applies this rule too.
 /// </para>
 /// <para>
 /// <b>Isolation.</b> The caller builds the workspace from reads that ran through the central exercise filter, so

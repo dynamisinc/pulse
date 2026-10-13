@@ -22,6 +22,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Options;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.Identity;
@@ -88,6 +89,7 @@ public sealed class DayWordEndpointsHttpTests
 
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
         (await ReadDetailAsync(response)).Should().Be("A JSON body with signInName and word is required.");
+        response.Headers.CacheControl?.NoStore.Should().BeTrue("every word sign-in answer is no-store (Gate-2 S-3)");
     }
 
     [Theory]
@@ -136,6 +138,7 @@ public sealed class DayWordEndpointsHttpTests
 
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
         (await response.Content.ReadAsByteArrayAsync()).Should().BeEmpty("the refusal is bodyless: it says nothing about which half was wrong");
+        response.Headers.CacheControl?.NoStore.Should().BeTrue("every word sign-in answer is no-store, refusals included (Gate-2 S-3)");
     }
 
     [Fact]
@@ -197,8 +200,12 @@ public sealed class DayWordEndpointsHttpTests
     }
 
     [Fact]
-    public void AddDayWord_SharesTheHasherWithTheViewOnlyCredential()
+    public void AddDayWord_SharesTheHasherWithTheViewOnlyCredential_AndIsIdempotent()
     {
+        var once = new ServiceCollection();
+        once.AddSharedReadOnly();
+        once.AddDayWord();
+
         var services = new ServiceCollection();
         services.AddSharedReadOnly();
         services.AddDayWord();
@@ -207,19 +214,24 @@ public sealed class DayWordEndpointsHttpTests
         services.Count(d => d.ServiceType == typeof(ISharedCredentialHasher)).Should().Be(1, "TryAdd: one hasher across slices");
         services.Count(d => d.ServiceType == typeof(TimeProvider)).Should().Be(1);
         services.Count(d => d.ServiceType == typeof(ExerciseFactsReader)).Should().Be(1);
+        services.Count(d => d.ServiceType == typeof(WordLoginService)).Should().Be(1);
+        services.Count.Should().Be(once.Count, "Gate-2 CR-001: a repeat call registers nothing more");
+
+        // Gate-2 CR-001: counting descriptors cannot see a duplicate rate-limit policy, which only throws when the
+        // options are BUILT (at host start). Build them: the easy-login-word policy must be added exactly once.
+        using var provider = services.BuildServiceProvider();
+        var build = () => provider.GetRequiredService<IOptions<RateLimiterOptions>>().Value;
+        build.Should().NotThrow("a second AddDayWord() must not add the easy-login-word policy again");
     }
 
     [Fact]
     public async Task AddDayWord_ComposesIntoTheRealProgramHost()
     {
-        // The orchestrator wires AddEasyLoginFoundation() + AddDayWord() into Program.cs; this proves the slice's whole
-        // dependency graph resolves on the REAL host (a missing registration cannot hide behind a hand-built container).
-        await using var factory = new DummyDatabaseFactory()
-            .WithWebHostBuilder(builder => builder.ConfigureTestServices(services =>
-            {
-                services.AddEasyLoginFoundation();
-                services.AddDayWord();
-            }));
+        // Program.cs wires AddEasyLoginFoundation() + AddDayWord() (the backend seam commit), so this host adds nothing:
+        // it proves the slice's whole dependency graph resolves on the REAL host (a missing registration cannot hide
+        // behind a hand-built container). Re-registering here is what threw once Program.cs wired them (Gate-2 CR-001);
+        // a repeat call is now a no-op, pinned above.
+        await using var factory = new DummyDatabaseFactory();
 
         using var scope = factory.Services.CreateScope();
         scope.ServiceProvider.GetRequiredService<DayWordService>().Should().NotBeNull();
@@ -351,6 +363,8 @@ public sealed class DayWordEndpointsHttpTests
 
         using var signIn = await anonymous.PostAsJsonAsync(WordRoute, new { signInName = "JSmith", word = firstWord.ToUpperInvariant() });
         signIn.StatusCode.Should().Be(HttpStatusCode.OK);
+        signIn.Headers.CacheControl?.NoStore.Should().BeTrue(
+            "Gate-2 S-3: the 200 carries the session and refresh tokens, so no cache may keep it (as for /api/auth/join)");
         var envelope = JsonDocument.Parse(await signIn.Content.ReadAsStringAsync()).RootElement;
         envelope.EnumerateObject().Select(p => p.Name).Should().BeEquivalentTo(["token", "refreshToken", "session"]);
         var session = envelope.GetProperty("session");
@@ -371,6 +385,7 @@ public sealed class DayWordEndpointsHttpTests
 
         oldWord.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
         (await oldWord.Content.ReadAsByteArrayAsync()).Should().BeEmpty();
+        oldWord.Headers.CacheControl?.NoStore.Should().BeTrue("the refusal is no-store too");
         newWord.StatusCode.Should().Be(HttpStatusCode.OK);
     }
 

@@ -63,19 +63,19 @@ public static class RosterEndpoints
     /// </summary>
     public const long MaxAddRequestBytes = 16 * 1024;
 
-    private const string NoStore = "no-store";
     private const string DryRunParameter = "dryRun";
 
-    /// <summary>Registers the roster services.</summary>
+    /// <summary>Registers the roster services. Idempotent: every registration is a <c>TryAdd</c>.</summary>
     /// <param name="services">The service collection.</param>
     /// <returns>The same collection, for chaining.</returns>
     public static IServiceCollection AddRoster(this IServiceCollection services)
     {
         ArgumentNullException.ThrowIfNull(services);
 
-        // Scoped to the PulseDbContext unit of work.
-        services.AddScoped<RosterService>();
-        services.AddScoped<RosterQueryService>();
+        // Scoped to the PulseDbContext unit of work. TryAdd (Gate-2 CR-001): Program.cs wires this, so a test host that
+        // calls it again must not register a second descriptor.
+        services.TryAddScoped<RosterService>();
+        services.TryAddScoped<RosterQueryService>();
 
         // Also registered (TryAdd) by AddEasyLoginFoundation(); repeated so the slice never lacks its clock.
         services.TryAddSingleton(TimeProvider.System);
@@ -109,11 +109,7 @@ public static class RosterEndpoints
     /// <summary>The staff gate, in order: no-store on every response, then the assigned-staff filter, then the role filter.</summary>
     private static RouteHandlerBuilder WithRosterStaffGate(this RouteHandlerBuilder builder) =>
         builder
-            .AddEndpointFilter(static async (context, next) =>
-            {
-                context.HttpContext.Response.Headers.CacheControl = NoStore;
-                return await next(context);
-            })
+            .AddEndpointFilter<NoStoreEndpointFilter>()
             .AddEndpointFilter<EngineCockpitStaffAuthorizationFilter>()
             .AddEndpointFilter<RosterStaffRoleFilter>();
 

@@ -13,6 +13,7 @@ using Pulse.WebApi.Features.Identity.DayWord;
 using Pulse.WebApi.Features.Identity.EasyLogin;
 using Pulse.WebApi.Tests.Data;
 using Pulse.WebApi.Tests.Features.ExerciseConfiguration.Lifecycle;
+using Pulse.WebApi.Tests.Features.Identity.PersonalLinks;
 using Pulse.WebApi.Tests.Features.Identity.Staff;
 using static Pulse.WebApi.Tests.Features.Identity.DayWord.DayWordTestSupport;
 
@@ -158,6 +159,44 @@ public sealed class WordLoginServiceTests
         await SeedWordAsync(_fixture, exercise.Id, Today, Word);
 
         await AssertRefusedAsync(exercise.Id, Body("jsmith", Word), account, expectedCalls: ["Verify", "Verify"]);
+    }
+
+    [RequiresDockerFact]
+    public async Task ADisableRacingTheIssue_IsTheSameRefusal_AtTheSameKdfCost_AndRecordsNoSuccess()
+    {
+        // Gate-2 W-001 (story 03's join pattern): the word and name check out, then staff disable the account BEFORE the
+        // session is minted (the racing issuer commits the Disable on its own connection first). The sign-in re-reads
+        // the account after minting, so it is refused, and refused exactly as a disabled account is: the same two KDF
+        // calls (Gate-1 W-1), the same identity-less event, no LastLoginAt and no success event.
+        var (exercise, account) = await SeedLiveWithWordAsync();
+        var recording = new RecordingSessionIssuer();
+        var issuer = new RacingSessionIssuer(recording, async () =>
+        {
+            await using var staffSide = _fixture.CreateContext(new ExerciseContext { CurrentExerciseId = exercise.Id });
+            (await staffSide.Accounts.SingleAsync(a => a.Id == account.Id)).DisabledAt = DefaultNow;
+            await staffSide.SaveChangesAsync();
+        });
+        var hasher = new CountingHasher();
+
+        WordLoginResult result;
+        await using (var context = _fixture.CreateContext(new ExerciseContext { CurrentExerciseId = exercise.Id }))
+        {
+            result = await LoginService(context, exercise.Id, ClockAt(DefaultNow), issuer, hasher).SignInAsync(Body("jsmith", Word));
+        }
+
+        result.Outcome.Should().Be(WordLoginOutcome.Rejected, "a sign-in that lost the race to Disable is the uniform refusal");
+        result.Issued.Should().BeNull();
+        recording.IssueCount.Should().Be(1, "precondition: the session was minted before the re-read");
+        hasher.Calls.Should().Equal(
+            ["Verify", "Verify"], "the raced refusal pays the word check plus the redaction check, like every refusal (W-1)");
+        (await ReadAccountAsync(account.Id)).LastLoginAt.Should().BeNull("LastLoginAt is written only once the re-read passes");
+
+        var evt = (await ReadEventsAsync(_fixture, exercise.Id)).Should().ContainSingle(
+            "a raced attempt emits exactly one login event, and no success event").Subject;
+        evt.Payload.Should().Be("{\"outcome\":\"failure\",\"method\":\"word\"}");
+        evt.Actor.Kind.Should().Be("system");
+        evt.Actor.ParticipantId.Should().BeNull("the refusal names nobody");
+        evt.Target!.EntityId.Should().Be("jsmith", "the same attempted-name target a disabled account's refusal records");
     }
 
     [RequiresDockerTheory]

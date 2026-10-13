@@ -49,6 +49,17 @@ using Pulse.WebApi.Features.Identity.Sessions;
 /// second after; yesterday's word and tomorrow's pre-set word do not work today.
 /// </para>
 /// <para>
+/// <b>A Disable racing the sign-in (Gate-2 W-001, story 03's join pattern).</b> Staff can disable the account between
+/// the name lookup and the session being minted, and the Disable's session sweep cannot see a session that does not
+/// exist yet. So the session is minted FIRST and the account is re-read, untracked, AFTER it exists: a Disable committed
+/// before the re-read ends the fresh session at once and the attempt is the uniform refusal (the same redaction check,
+/// so it still costs the two KDF calls every refusal costs, and the same identity-less failure event). A Disable that
+/// commits after the re-read reads the sessions to end only AFTER that commit (Gate-2 S-2), and this session was
+/// committed before the re-read, so the Disable's own sweep ends it. <see cref="Account.LastLoginAt"/> and the success
+/// event are written only once the re-read passes, so a failed issue or a raced attempt never leaves a success event
+/// behind.
+/// </para>
+/// <para>
 /// <b>Never creates or changes an account (COR-011)</b> beyond recording <see cref="Account.LastLoginAt"/> on success.
 /// Refuses disabled accounts (<see cref="Account.DisabledAt"/>), any role outside the participant world, and any
 /// exercise that is not Staged/Live/Paused (EL-11). <b>The word appears nowhere</b>: not in a log (nothing here logs),
@@ -73,13 +84,6 @@ public sealed class WordLoginService
 
     /// <summary>The 400 reason for an over-long word. Never quotes it.</summary>
     public const string WordTooLongError = "word is too long.";
-
-    /// <summary>The participant-world account roles a word may sign in (staff-adjacent account roles are refused).</summary>
-    private static readonly HashSet<string> ParticipantWorldRoles = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "participant",
-        "pio",
-    };
 
     private readonly PulseDbContext _dbContext;
     private readonly IExerciseContext _exerciseContext;
@@ -222,26 +226,60 @@ public sealed class WordLoginService
             || !ExerciseLifecycleStates.IsParticipantAccessible(facts.Status)
             || account is null
             || account.DisabledAt is not null
-            || !ParticipantWorldRoles.Contains(account.Role))
+            || !ParticipantSessionRequests.IsParticipantWorldRole(account.Role))
         {
             return await RejectAsync(exerciseId, facts, storedHash, signInName, word, now, cancellationToken);
         }
 
-        // 7. Success: LastLoginAt and one success event in one unit of work, then the same session /api/auth/login
-        //    mints (persona and acting human as the account has them).
+        // 7. Mint exactly the session /api/auth/login mints (persona and acting human as the account has them). Nothing
+        //    about the sign-in is recorded yet: nothing is pending on the context, so the issuer saves only the session.
+        var issued = await _sessionIssuer.IssueAsync(ParticipantSessionRequests.For(account, exerciseId), cancellationToken);
+
+        // 8. Gate-2 W-001: re-read the account, untracked, now that the session exists. A Disable committed before this
+        //    read fails the check (its sweep may have run before the session existed). One that commits after it sweeps
+        //    only after committing (Gate-2 S-2), when this session already exists, so it ends it.
+        var accountId = account.Id;
+        var stillEnabled = await _dbContext.Accounts
+            .AsNoTracking()
+            .AnyAsync(a => a.ExerciseId == exerciseId && a.Id == accountId && a.DisabledAt == null, cancellationToken);
+
+        if (!stillEnabled)
+        {
+            // End the session just minted, then refuse exactly as a disabled account is refused above: the same
+            // redaction check and the same identity-less event, saved with the revocation in one unit of work.
+            await StageRacedSessionRevocationAsync(issued.Session.Id, exerciseId, cancellationToken);
+            return await RejectAsync(exerciseId, facts, storedHash, signInName, word, now, cancellationToken);
+        }
+
+        // 9. Success: LastLoginAt and one success event in one unit of work, only now that the account is known to be
+        //    enabled after its session exists.
         account.LastLoginAt = now;
         _dbContext.TelemetryEvents.Add(EasyLoginTelemetry.LoginSucceeded(
             exerciseId, account.Id, EasyLoginMethod.Word, EventTime(exerciseId, facts, now)));
         await _dbContext.SaveChangesAsync(cancellationToken);
 
-        var issued = await _sessionIssuer.IssueAsync(ParticipantSessionRequests.For(account, exerciseId), cancellationToken);
-
         return WordLoginResult.Authenticated(issued);
     }
 
     /// <summary>
-    /// Records one identity-less failure event and returns the uniform refusal. The target is the sanitized attempted
-    /// name, or none when the name is (or may be) a day word: (a) it normalises to the attempted word, or (b) it verifies
+    /// Stages the revocation of a session minted for an attempt that lost a race to a Disable (Gate-2 W-001). The read
+    /// carries an explicit <c>ExerciseId</c> predicate, since <c>Session</c> is unscoped; the caller's refusal saves it.
+    /// </summary>
+    private async Task StageRacedSessionRevocationAsync(Guid sessionId, Guid exerciseId, CancellationToken cancellationToken)
+    {
+        var raced = await _dbContext.Sessions
+            .FirstOrDefaultAsync(s => s.Id == sessionId && s.ExerciseId == exerciseId, cancellationToken);
+        if (raced is not null)
+        {
+            // A fresh read: the issuer stamped IssuedAt after this attempt's first clock read.
+            raced.RevokedAt ??= _timeProvider.GetUtcNow();
+        }
+    }
+
+    /// <summary>
+    /// Records one identity-less failure event (saved with anything the caller staged, such as a raced session's
+    /// revocation) and returns the uniform refusal. The target is the sanitized attempted name, or none when the name
+    /// is (or may be) a day word: (a) it normalises to the attempted word, or (b) it verifies
     /// against today's hash (the word typed into the name box, garbage in the word box). Check (b) is the refusal's one
     /// extra KDF call, always made so every refusal costs the same.
     /// </summary>

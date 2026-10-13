@@ -216,7 +216,7 @@ public sealed class ParticipantAccessTests
             await wrongPassword.Content.ReadAsStringAsync(), "the refusal is indistinguishable from a wrong password");
 
         var loginFailures = (await PersonalLinkSeed.ReadEventsAsync(_fixture, exercise.Id))
-            .Where(e => e.EventType == "login" && e.Payload == "{\"outcome\":\"failure\"}")
+            .Where(e => e.EventType == "login" && e.Payload == "{\"outcome\":\"failure\",\"method\":\"password\"}")
             .ToList();
         loginFailures.Should().HaveCount(2, "the disabled refusal and the wrong password each emit one password-login failure");
         loginFailures.Select(e => (e.Actor.Kind, e.Target?.EntityType, e.Target?.EntityId)).Distinct().Should().ContainSingle(

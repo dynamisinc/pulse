@@ -10,8 +10,9 @@ using Pulse.WebApi.Features.Identity.Staff;
 /// <summary>
 /// The four staff controls over one participant's access (easy-login/03, EL-8): <b>reissue</b> and <b>revoke</b> the
 /// personal link, and <b>disable</b> / <b>enable</b> the person. Reissue, revoke and disable end that participant's
-/// live sessions. Each mutation, its session terminations and its one XC-004 event commit in ONE <c>SaveChanges</c>.
-/// Scoped, matching the <see cref="PulseDbContext"/> unit of work.
+/// live sessions. Each mutation, its session terminations and its one XC-004 event commit in ONE <c>SaveChanges</c>,
+/// except a first disable, which commits <c>DisabledAt</c> on its own first (see below). Scoped, matching the
+/// <see cref="PulseDbContext"/> unit of work.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -31,8 +32,19 @@ using Pulse.WebApi.Features.Identity.Staff;
 /// <para>
 /// <b>Idempotent.</b> Revoking a revoked link (or a person with no link) and enabling an enabled person change nothing,
 /// write nothing and emit nothing: <c>200</c> with <c>sessionsEnded: 0</c>. Disabling a disabled person keeps the
-/// original <c>DisabledAt</c>; it writes and emits only if a usable session lingers (a join that raced the first disable),
-/// which it ends. Otherwise it is the same no-op.
+/// original <c>DisabledAt</c>; it writes and emits only if a usable session lingers (for instance after a first disable
+/// whose second save failed), which it ends. Otherwise it is the same no-op.
+/// </para>
+/// <para>
+/// <b>Disable commits before it sweeps (Gate-2 S-2).</b> A first disable commits <c>DisabledAt</c> BEFORE it reads the
+/// sessions to end, then ends them and writes its one <c>participant.disabled</c> event (with the exact
+/// <c>sessionsEnded</c>) in a second save. Every sign-in re-reads the account after minting its session, so a racing
+/// sign-in either re-reads after the commit (and refuses, revoking its own session) or committed its session before the
+/// read (which ends it): no session can fall between the two. It has to be two commits, not one transaction: under
+/// read-committed snapshot (Azure SQL Database's default) an uncommitted <c>DisabledAt</c> is invisible to the
+/// sign-in's re-read, which would then admit a session the sweep had already passed. The cost is the failure path: if
+/// the second save fails, the person stays disabled (every sign-in and every refresh refuses them) but that attempt's
+/// event is not written; the request fails, and pressing Disable again ends any session left.
 /// </para>
 /// <para>
 /// <b>What "sessions ended" means.</b> Every session of the account in this exercise that is not revoked and is still
@@ -159,8 +171,9 @@ public sealed class ParticipantAccessService
 
     /// <summary>
     /// Disables the person (EL-8): <c>DisabledAt</c> is set and their live sessions end; from then on the link, the day
-    /// word and the password sign-in all refuse them. Emits <c>participant.disabled</c>. Disabling again keeps the first
-    /// <c>DisabledAt</c> and writes only if a session had to be ended.
+    /// word and the password sign-in all refuse them. Emits <c>participant.disabled</c>. <c>DisabledAt</c> is committed
+    /// BEFORE the sessions are read (Gate-2 S-2), then the terminations and the one event are saved together. Disabling
+    /// again keeps the first <c>DisabledAt</c> and writes only if a session had to be ended.
     /// </summary>
     /// <param name="accountId">The participant's account id (route value), resolved under the central filter.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
@@ -177,14 +190,22 @@ public sealed class ParticipantAccessService
         var account = target.Account!;
         var now = staff.Now;
 
-        // Keep the ORIGINAL instant on a repeat disable (audit truth).
-        account.DisabledAt ??= now;
+        // Gate-2 S-2: COMMIT the disable before reading the sessions to end, so a racing sign-in either re-reads after
+        // this commit (and refuses) or committed its session before the read below (which ends it). Only the account
+        // is pending here. A repeat disable keeps the ORIGINAL instant (audit truth) and commits nothing at this step.
+        var firstDisable = account.DisabledAt is null;
+        if (firstDisable)
+        {
+            account.DisabledAt = now;
+            await _dbContext.SaveChangesAsync(cancellationToken);
+        }
 
         var sessionsEnded = await EndSessionsAsync(staff.ExerciseId, account.Id, now, cancellationToken);
 
-        // A first disable always changes the account; a repeat one writes (and emits) only if it found a lingering
-        // usable session to end. Otherwise it is a no-op: nothing written, nothing emitted.
-        if (_dbContext.ChangeTracker.HasChanges())
+        // ONE event per disable that changed anything, with the exact count, saved with the terminations: a first
+        // disable always; a repeat one only if it found a lingering usable session to end. Otherwise it is a no-op:
+        // nothing written, nothing emitted.
+        if (firstDisable || sessionsEnded > 0)
         {
             _dbContext.TelemetryEvents.Add(EasyLoginTelemetry.ParticipantDisabled(
                 staff.ExerciseId, staff.Actor, account.Id, sessionsEnded, staff.Time));
