@@ -42,6 +42,13 @@
  * `link.joinUrl` is passed through to the caller untouched and never logged,
  * stringified into an error message, or echoed anywhere here.
  *
+ * A thrown `RosterError` carries NO `cause` (Gate-2 S-1). The `AxiosError` it is made from
+ * holds the request config, and so the staff bearer in `config.headers.Authorization` (and
+ * on an import, the uploaded CSV in `config.data`); an Error's `cause` is an own property
+ * that a logger, an error reporter or `JSON.stringify` will happily serialise. Only the
+ * HTTP status and the server's own reason are kept, which is all any caller reads. This is
+ * what `cardsService` and `dayWordService` do too.
+ *
  * World: STAFF. Pure data/service module — no UI, no COBRA. Instants are real
  * wall-clock (the scenario-time rule, COR-053, binds the participant world).
  */
@@ -89,10 +96,13 @@ function mockOptions(): { adapter?: typeof rosterMockAdapter } {
 // Error
 // ---------------------------------------------------------------------------
 
+/**
+ * There is deliberately no `cause` here: see "Secrets" in the module header. An
+ * `AxiosError` is never kept.
+ */
 export interface RosterErrorInit {
   readonly status?: number
   readonly serverMessage?: string
-  readonly cause?: unknown
 }
 
 /**
@@ -110,9 +120,6 @@ export class RosterError extends Error {
     this.name = 'RosterError'
     this.status = init.status
     this.serverMessage = init.serverMessage
-    if (init.cause !== undefined) {
-      this.cause = init.cause
-    }
   }
 }
 
@@ -128,9 +135,16 @@ function firstText(...candidates: unknown[]): string | undefined {
   return undefined
 }
 
-/** Pulls a readable reason off a ProblemDetails / plain-string error body. */
-function extractServerMessage(data: unknown): string | undefined {
-  if (typeof data === 'string') return firstText(data)
+/**
+ * Pulls a readable reason off an error body. A ProblemDetails object is read on any
+ * status. A bare STRING body is trusted only on a `400`, where the contract says the
+ * server explains itself; on any other status it is more likely a proxy's or gateway's
+ * page (an HTML "Bad Gateway"), which must not be pasted into the screen, so the caller
+ * falls back to its generic wording (Gate-2 S-1; the same rule as `cardsService` and
+ * `dayWordService`).
+ */
+function extractServerMessage(data: unknown, status: number | undefined): string | undefined {
+  if (typeof data === 'string') return status === 400 ? firstText(data) : undefined
   if (typeof data !== 'object' || data === null) return undefined
   const body = data as Record<string, unknown>
 
@@ -149,14 +163,15 @@ function extractServerMessage(data: unknown): string | undefined {
 function toRosterError(error: unknown, fallback: string): RosterError {
   if (error instanceof RosterError) return error
   if (axios.isAxiosError(error)) {
+    const status = error.response?.status
+    // The AxiosError itself is dropped (it holds the staff bearer): status and reason only.
     return new RosterError(error.message, {
-      status: error.response?.status,
-      serverMessage: extractServerMessage(error.response?.data),
-      cause: error,
+      status,
+      serverMessage: extractServerMessage(error.response?.data, status),
     })
   }
-  if (error instanceof Error) return new RosterError(error.message, { cause: error })
-  return new RosterError(fallback, { cause: error })
+  if (error instanceof Error) return new RosterError(error.message)
+  return new RosterError(fallback)
 }
 
 // ---------------------------------------------------------------------------

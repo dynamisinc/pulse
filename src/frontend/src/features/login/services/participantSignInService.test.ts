@@ -375,7 +375,7 @@ describe('signInWithDayWord - status only, never the word (NFR-004 / NFR-009)', 
       expect(caught).toBeInstanceOf(ParticipantSignInError)
       const error = caught as ParticipantSignInError
       expect(error.status).toBe(status)
-      expect(error.serverMessage).toBeUndefined()
+      expect(error).not.toHaveProperty('serverMessage')
       expect(error.cause).toBeUndefined()
       expect(error.message).not.toContain(SECRET_WORD)
       expect(error.message).not.toContain(NAME)
@@ -411,6 +411,119 @@ describe('signInWithDayWord - status only, never the word (NFR-004 / NFR-009)', 
       expect(spy).not.toHaveBeenCalled()
       spy.mockRestore()
     }
+  })
+})
+
+describe('signInWithPassword / signInWithSharedCode - status-only errors (Gate-2 S-4)', () => {
+  const PASSWORD = 'correct-horse-battery-staple-9'
+  const HANDLE = 'quentin.reyes'
+  const CODE = 'view-only-code-7Q'
+
+  /** A real AxiosError whose request config echoes the credentials, as a live failure does. */
+  function axiosErrorEchoingBody(
+    status: number | null,
+    body: unknown,
+    serverText: unknown,
+  ): AxiosError {
+    const config = {
+      data: JSON.stringify(body),
+      headers: { Authorization: 'Bearer some-other-token' },
+    } as unknown as AxiosError['config']
+    const response = status === null
+      ? undefined
+      : ({ status, data: serverText, statusText: '', headers: {}, config } as unknown as AxiosResponse)
+    return new AxiosError(
+      `Request failed for ${PASSWORD}`,
+      'ERR_BAD_REQUEST',
+      config,
+      null,
+      response,
+    )
+  }
+
+  /** Everything reachable on an error: its string form, JSON, and every own property. */
+  function everythingOn(error: unknown): string {
+    const parts: string[] = [
+      String(error),
+      JSON.stringify(error, Object.getOwnPropertyNames(error)),
+    ]
+    for (const key of Object.getOwnPropertyNames(error)) {
+      const value = (error as Record<string, unknown>)[key]
+      parts.push(`${key}=${typeof value === 'string' ? value : JSON.stringify(value)}`)
+    }
+    return parts.join('\n')
+  }
+
+  const paths = [
+    [
+      'signInWithPassword',
+      () => signInWithPassword({ username: HANDLE, password: PASSWORD }),
+      { username: HANDLE, password: PASSWORD },
+      PASSWORD,
+    ],
+    [
+      'signInWithSharedCode',
+      () => signInWithSharedCode({ password: CODE }),
+      { password: CODE },
+      CODE,
+    ],
+  ] as const
+
+  describe.each(paths)('%s', (_name, call, body, secret) => {
+    it.each([401, 429, 500])('a %i carries only its status: no cause, no server text, no secret', async status => {
+      mockPost.mockRejectedValue(
+        axiosErrorEchoingBody(status, body, { message: `no such handle; you sent ${secret}`, detail: secret }),
+      )
+
+      const caught = await call().catch((error: unknown) => error)
+
+      expect(caught).toBeInstanceOf(ParticipantSignInError)
+      const error = caught as ParticipantSignInError
+      expect(error.status).toBe(status)
+      expect(error.cause).toBeUndefined()
+      expect(Object.getOwnPropertyNames(error)).not.toContain('cause')
+      expect(error).not.toHaveProperty('serverMessage')
+      expect(everythingOn(error)).not.toContain(secret)
+      expect(everythingOn(error)).not.toContain(HANDLE)
+      expect(everythingOn(error)).not.toContain('some-other-token')
+    })
+
+    it('no response at all: a status-less error, still without the secret or a cause', async () => {
+      mockPost.mockRejectedValue(axiosErrorEchoingBody(null, body, undefined))
+
+      const caught = await call().catch((error: unknown) => error)
+
+      expect(caught).toBeInstanceOf(ParticipantSignInError)
+      expect((caught as ParticipantSignInError).status).toBeUndefined()
+      expect((caught as ParticipantSignInError).cause).toBeUndefined()
+      expect(everythingOn(caught)).not.toContain(secret)
+    })
+
+    it('a non-axios error is not chained on either', async () => {
+      mockPost.mockRejectedValue(new TypeError(`odd ${secret}`))
+
+      const caught = await call().catch((error: unknown) => error)
+
+      expect(caught).toBeInstanceOf(ParticipantSignInError)
+      expect((caught as ParticipantSignInError).cause).toBeUndefined()
+      expect(everythingOn(caught)).not.toContain(secret)
+    })
+
+    it('the page still decides on the status alone (401 -> unauthorized, 429 -> not)', async () => {
+      mockPost.mockRejectedValue(axiosErrorEchoingBody(401, body, ''))
+      expect(isUnauthorizedSignInError(await call().catch((error: unknown) => error))).toBe(true)
+
+      mockPost.mockRejectedValue(axiosErrorEchoingBody(429, body, ''))
+      expect(isUnauthorizedSignInError(await call().catch((error: unknown) => error))).toBe(false)
+    })
+
+    it('a malformed success body does not contain the secret', async () => {
+      mockPost.mockResolvedValue({ data: {} } as unknown as Awaited<ReturnType<typeof api.post>>)
+
+      const caught = await call().catch((error: unknown) => error)
+
+      expect(everythingOn(caught)).not.toContain(secret)
+    })
   })
 })
 

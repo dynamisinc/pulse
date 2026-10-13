@@ -196,7 +196,7 @@ describe('getRoster', () => {
   })
 
   it('does not treat a 500 or a network failure as access-denied', async () => {
-    mockGet.mockRejectedValue(axiosErrorWith(500, 'Boom'))
+    mockGet.mockRejectedValue(axiosErrorWith(500, { title: 'Server Error', detail: 'Boom' }))
     const server = await getRoster().catch((e: unknown) => e)
     expect(isRosterAccessDenied(server)).toBe(false)
     expect((server as RosterError).serverMessage).toBe('Boom')
@@ -206,6 +206,98 @@ describe('getRoster', () => {
     expect((network as RosterError).status).toBeUndefined()
     expect(isRosterAccessDenied(network)).toBe(false)
     expect(isRosterAccessDenied(new Error('x'))).toBe(false)
+  })
+})
+
+describe('errors carry no cause and trust a string body only on a 400 (Gate-2 S-1)', () => {
+  const BEARER = 'staff-bearer-token-XYZ'
+  const CSV_BODY = 'name\nSecret Person'
+
+  /** A real AxiosError whose request config holds the staff bearer and the uploaded body. */
+  function errorHoldingTheBearer(status: number | null, data: unknown = ''): AxiosError {
+    const config = {
+      headers: { Authorization: `Bearer ${BEARER}` },
+      data: CSV_BODY,
+      url: '/staff/roster',
+    } as unknown as AxiosError['config']
+    const response = status === null
+      ? undefined
+      : ({ status, data, statusText: '', headers: {}, config } as unknown as AxiosResponse)
+    return new AxiosError('Request failed', 'ERR_BAD_REQUEST', config, null, response)
+  }
+
+  /** Everything reachable on the error: own properties, JSON, string form, `cause` chain. */
+  function everythingOn(error: unknown): string {
+    const parts: string[] = [String(error), JSON.stringify(error)]
+    for (const key of Object.getOwnPropertyNames(error)) {
+      const value = (error as Record<string, unknown>)[key]
+      parts.push(`${key}=${typeof value === 'string' ? value : JSON.stringify(value)}`)
+    }
+    return parts.join('\n')
+  }
+
+  it.each([
+    ['a 400', 400],
+    ['a 500', 500],
+    ['no response at all', null],
+  ])('drops the AxiosError, so the bearer is nowhere on the error: %s', async (_label, status) => {
+    mockGet.mockRejectedValue(errorHoldingTheBearer(status, { detail: 'Nope.' }))
+
+    const error = await getRoster().catch((e: unknown) => e)
+
+    expect(error).toBeInstanceOf(RosterError)
+    expect((error as RosterError).cause).toBeUndefined()
+    expect(Object.getOwnPropertyNames(error)).not.toContain('cause')
+    expect(everythingOn(error)).not.toContain(BEARER)
+    expect(everythingOn(error)).not.toContain('Secret Person')
+  })
+
+  it('drops the cause on a mutation and on the import too', async () => {
+    mockPost.mockRejectedValue(errorHoldingTheBearer(409, { detail: 'jsmith is already on the roster.' }))
+    const added = await addParticipant({ name: 'Jane Smith' }).catch((e: unknown) => e)
+    expect((added as RosterError).cause).toBeUndefined()
+    expect((added as RosterError).serverMessage).toBe('jsmith is already on the roster.')
+    expect(everythingOn(added)).not.toContain(BEARER)
+
+    mockPost.mockRejectedValue(errorHoldingTheBearer(400, { detail: 'Bad file.' }))
+    const imported = await importRoster(new File([CSV_BODY], 'people.csv'), { dryRun: true })
+      .catch((e: unknown) => e)
+    expect((imported as RosterError).cause).toBeUndefined()
+    expect(everythingOn(imported)).not.toContain(BEARER)
+    expect(everythingOn(imported)).not.toContain('Secret Person')
+  })
+
+  it('does not keep a non-axios error as the cause either', async () => {
+    mockGet.mockRejectedValue(new TypeError(`odd ${BEARER}`))
+    const error = await getRoster().catch((e: unknown) => e)
+    expect(error).toBeInstanceOf(RosterError)
+    expect((error as RosterError).cause).toBeUndefined()
+
+    mockGet.mockRejectedValue('a thrown string')
+    const odd = await getRoster().catch((e: unknown) => e)
+    expect((odd as RosterError).cause).toBeUndefined()
+  })
+
+  it('shows a bare string body on a 400, trimmed', async () => {
+    mockPost.mockRejectedValue(axiosErrorWith(400, '  Email is not valid.  '))
+    const error = await addParticipant({ name: 'Jane Smith' }).catch((e: unknown) => e)
+    expect((error as RosterError).serverMessage).toBe('Email is not valid.')
+  })
+
+  it.each([401, 403, 404, 409, 500, 502, 503])(
+    'ignores a bare string body on a %i (a proxy page, not a reason)',
+    async status => {
+      mockGet.mockRejectedValue(axiosErrorWith(status, '<html><body>Bad Gateway</body></html>'))
+      const error = await getRoster().catch((e: unknown) => e)
+      expect((error as RosterError).status).toBe(status)
+      expect((error as RosterError).serverMessage).toBeUndefined()
+    },
+  )
+
+  it('still reads a ProblemDetails reason on any status', async () => {
+    mockGet.mockRejectedValue(axiosErrorWith(503, { title: 'Unavailable', detail: 'Back soon.' }))
+    const error = await getRoster().catch((e: unknown) => e)
+    expect((error as RosterError).serverMessage).toBe('Back soon.')
   })
 })
 
