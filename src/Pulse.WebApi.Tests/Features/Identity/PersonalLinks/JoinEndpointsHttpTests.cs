@@ -23,6 +23,7 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Features.Identity;
@@ -30,6 +31,7 @@ using Pulse.WebApi.Features.Identity.EasyLogin;
 using Pulse.WebApi.Features.Identity.PersonalLinks;
 using Pulse.WebApi.Features.Identity.Sessions;
 using Pulse.WebApi.Tests.Data;
+using Pulse.WebApi.Tests.Features.ExerciseConfiguration.Lifecycle;
 using Pulse.WebApi.Tests.Features.Identity.Staff;
 
 /// <summary>
@@ -118,6 +120,7 @@ public sealed class JoinEndpointsHttpTests
 
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
         (await response.Content.ReadAsByteArrayAsync()).Should().BeEmpty("a refusal never explains itself");
+        response.Headers.CacheControl!.NoStore.Should().BeTrue("every join response is no-store (S-001)");
     }
 
     [Fact]
@@ -198,6 +201,7 @@ public sealed class JoinEndpointsHttpTests
 
         using var joined = await PersonalLinksTestHost.JoinAsync(client, token);
         joined.StatusCode.Should().Be(HttpStatusCode.OK, await joined.Content.ReadAsStringAsync());
+        joined.Headers.CacheControl!.NoStore.Should().BeTrue("the 200 carries session and refresh tokens (S-001)");
         var join = await PersonalLinksTestHost.JsonAsync(joined);
 
         using var loggedIn = await client.PostAsJsonAsync("/api/auth/login", new { username = account.Username, password = PersonalLinkSeed.Password });
@@ -265,6 +269,67 @@ public sealed class JoinEndpointsHttpTests
         // Exercise B's token still works on B's host: it was refused on A only because it is not A's.
         using var onB = host.Client(exerciseB.Hostname);
         (await PersonalLinksTestHost.JoinAsync(onB, tokenB)).StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
+    [RequiresDockerTheory]
+    [InlineData("disable")]
+    [InlineData("reissue")]
+    [InlineData("revoke")]
+    public async Task Join_RacingAStaffAction_BetweenTheLookupAndTheIssue_IsTheUniform401_AndLeavesNoLiveSession(string staffAction)
+    {
+        // Gate-1 W-001: the lookup admits the token, then staff disables / reissues / revokes BEFORE the session is minted
+        // (the racing issuer runs the change on its own connection first). The staff sweep cannot see a session that does
+        // not exist yet, so the join itself must notice and refuse.
+        var exercise = await PersonalLinkSeed.ExerciseAsync(_fixture);
+        var account = await PersonalLinkSeed.AccountAsync(_fixture, exercise.Id);
+        var (seededLink, token) = await PersonalLinkSeed.LinkAsync(_fixture, account);
+
+        async Task RaceAsync()
+        {
+            await using var staffSide = _fixture.CreateContext(new ExerciseContext { CurrentExerciseId = exercise.Id });
+            switch (staffAction)
+            {
+                case "disable":
+                    (await staffSide.Accounts.SingleAsync(a => a.Id == account.Id)).DisabledAt = DateTimeOffset.UtcNow;
+                    break;
+                case "reissue":
+                    await PersonalLinkSeed.LinkService(staffSide, exercise.Id).ReissueAsync(account, Guid.NewGuid(), DateTimeOffset.UtcNow);
+                    break;
+                default:
+                    ParticipantLinkService.Revoke(
+                        await staffSide.ParticipantLinks.SingleAsync(l => l.Id == seededLink.Id), Guid.NewGuid(), DateTimeOffset.UtcNow);
+                    break;
+            }
+
+            await staffSide.SaveChangesAsync();
+        }
+
+        await using var host = await PersonalLinksTestHost.StartAsync(
+            _fixture.ConnectionString!,
+            configureServices: services => services.Replace(ServiceDescriptor.Scoped<ISessionIssuer>(
+                provider => new RacingSessionIssuer(ActivatorUtilities.CreateInstance<SessionIssuer>(provider), RaceAsync))));
+        using var client = host.Client(exercise.Hostname);
+
+        using var response = await PersonalLinksTestHost.JoinAsync(client, token);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized, "a join that lost the race to {0} is refused", staffAction);
+        (await response.Content.ReadAsByteArrayAsync()).Should().BeEmpty("the same bodyless 401 as every other refusal");
+
+        await using var unfiltered = _fixture.CreateContext();
+        var sessions = await unfiltered.Sessions.AsNoTracking().Where(s => s.AccountId == account.Id).ToListAsync();
+        sessions.Should().ContainSingle("precondition: the session was minted before the re-check").Which.RevokedAt.Should().NotBeNull(
+            "the raced session is ended at once: no live session survives the {0}", staffAction);
+
+        var events = await PersonalLinkSeed.ReadEventsAsync(_fixture, exercise.Id);
+        var evt = events.Should().ContainSingle("a raced attempt emits exactly one login event, and no success event").Subject;
+        evt.Payload.Should().Be("{\"outcome\":\"failure\",\"method\":\"link\"}");
+        evt.Actor.Kind.Should().Be("system");
+        evt.Actor.ParticipantId.Should().BeNull("the refusal names nobody");
+        evt.Target.Should().BeNull();
+
+        var link = await PersonalLinkSeed.ReadLinkAsync(_fixture, exercise.Id, account.Id);
+        link!.UseCount.Should().Be(0, "a refused attempt is not a use");
+        (await PersonalLinkSeed.ReadAccountAsync(_fixture, exercise.Id, account.Id)).LastLoginAt.Should().BeNull();
     }
 
     private static string[] Keys(JsonElement element) =>

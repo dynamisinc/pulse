@@ -85,21 +85,3 @@ public static class ParticipantAccessEndpoints
         _ => Results.StatusCode(StatusCodes.Status500InternalServerError),
     };
 }
-
-/// <summary>
-/// Marks every response of the routes it wraps <c>Cache-Control: no-store</c> (the frozen contract's rule for staff
-/// responses: a <c>RosterActionResultDto</c> can carry a join URL, a bearer credential). Set before the next filter
-/// runs, so a gate's 401/403 carries it too. No dependencies; created by the filter factory.
-/// </summary>
-internal sealed class NoStoreEndpointFilter : IEndpointFilter
-{
-    /// <inheritdoc />
-    public ValueTask<object?> InvokeAsync(EndpointFilterInvocationContext context, EndpointFilterDelegate next)
-    {
-        ArgumentNullException.ThrowIfNull(context);
-        ArgumentNullException.ThrowIfNull(next);
-
-        context.HttpContext.Response.Headers.CacheControl = "no-store";
-        return next(context);
-    }
-}

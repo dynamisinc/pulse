@@ -31,13 +31,15 @@ using Pulse.WebApi.Features.Identity.Staff;
 /// <para>
 /// <b>Idempotent.</b> Revoking a revoked link (or a person with no link) and enabling an enabled person change nothing,
 /// write nothing and emit nothing: <c>200</c> with <c>sessionsEnded: 0</c>. Disabling a disabled person keeps the
-/// original <c>DisabledAt</c> and still ends any session that is somehow live (normally none).
+/// original <c>DisabledAt</c>; it writes and emits only if a usable session lingers (a join that raced the first disable),
+/// which it ends. Otherwise it is the same no-op.
 /// </para>
 /// <para>
-/// <b>What "sessions ended" means.</b> Every session of the account in this exercise with no <c>RevokedAt</c> is revoked,
-/// including one whose access token has lapsed while its refresh window is still open (its refresh then fails).
-/// <c>sessionsEnded</c> counts the ones that were still usable (access window or refresh window open), the roster's
-/// <c>liveSessions</c> definition, so the number staff see is exactly the drop in <c>liveSessions</c>.
+/// <b>What "sessions ended" means.</b> Every session of the account in this exercise that is not revoked and is still
+/// usable (access window or refresh window open, the roster's <c>liveSessions</c> definition) is revoked, including one
+/// whose access token has lapsed while its refresh window is still open (its refresh then fails). Sessions that already
+/// lapsed completely are left as they are, so their audit history stays intact. <c>sessionsEnded</c> counts exactly the
+/// sessions stamped, so the number staff see is the drop in <c>liveSessions</c>.
 /// </para>
 /// </remarks>
 public sealed class ParticipantAccessService
@@ -180,8 +182,8 @@ public sealed class ParticipantAccessService
 
         var sessionsEnded = await EndSessionsAsync(staff.ExerciseId, account.Id, now, cancellationToken);
 
-        // A first disable always changes the account; a repeat one writes (and emits) only if it found a lingering,
-        // non-revoked session to end. Otherwise it is a no-op: nothing written, nothing emitted.
+        // A first disable always changes the account; a repeat one writes (and emits) only if it found a lingering
+        // usable session to end. Otherwise it is a no-op: nothing written, nothing emitted.
         if (_dbContext.ChangeTracker.HasChanges())
         {
             _dbContext.TelemetryEvents.Add(EasyLoginTelemetry.ParticipantDisabled(
@@ -298,28 +300,26 @@ public sealed class ParticipantAccessService
     }
 
     /// <summary>
-    /// Revokes every non-revoked session of <paramref name="accountId"/> in <paramref name="exerciseId"/> and returns how
-    /// many of them were still usable. The <c>ExerciseId</c> and <c>AccountId</c> predicates are explicit and
-    /// load-bearing: <see cref="Session"/> has no global query filter (gotcha 4).
+    /// Revokes every still-usable session of <paramref name="accountId"/> in <paramref name="exerciseId"/> (not revoked,
+    /// and its access window or refresh window still open) and returns how many it revoked. The <c>ExerciseId</c> and
+    /// <c>AccountId</c> predicates are explicit and load-bearing: <see cref="Session"/> has no global query filter
+    /// (gotcha 4).
     /// </summary>
     private async Task<int> EndSessionsAsync(Guid exerciseId, Guid accountId, DateTimeOffset now, CancellationToken cancellationToken)
     {
-        var open = await _dbContext.Sessions
-            .Where(s => s.ExerciseId == exerciseId && s.AccountId == accountId && s.RevokedAt == null)
+        var live = await _dbContext.Sessions
+            .Where(s => s.ExerciseId == exerciseId
+                && s.AccountId == accountId
+                && s.RevokedAt == null
+                && (s.ExpiresAt > now || s.RefreshExpiresAt > now))
             .ToListAsync(cancellationToken);
 
-        var ended = 0;
-        foreach (var session in open)
+        foreach (var session in live)
         {
-            if (session.ExpiresAt > now || session.RefreshExpiresAt > now)
-            {
-                ended++;
-            }
-
             session.RevokedAt = now;
         }
 
-        return ended;
+        return live.Count;
     }
 
     private ParticipantAccessResult Done(Account account, ParticipantLink? link, int sessionsEnded) =>

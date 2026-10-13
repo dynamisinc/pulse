@@ -111,7 +111,7 @@ public sealed class PersonalLinkTelemetryTests
             context,
             new ExerciseContext { CurrentExerciseId = exercise.Id },
             new StubCurrentStaffSessionAccessor(staff.Current),
-            new ParticipantLinkService(context, protector),
+            PersonalLinkSeed.LinkService(context, exercise.Id, protector),
             new RosterLinkDtoFactory(protector, new JoinUrlBuilder(new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build())),
             new ExerciseFactsReader(context),
             new ManualTimeProvider(DateTimeOffset.UtcNow));

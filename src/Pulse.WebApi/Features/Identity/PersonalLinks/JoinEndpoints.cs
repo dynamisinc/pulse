@@ -23,7 +23,8 @@ using Pulse.WebApi.Features.Identity.Sessions;
 /// <b>Status contract.</b> <c>200</c> with exactly the <c>/api/auth/login</c> envelope
 /// (<see cref="ParticipantLoginResponseDto"/>); <c>400</c> ProblemDetails for a missing body or empty token;
 /// <c>401</c> with NO body for every other outcome; <c>429</c> beyond the rate limit; <c>413</c> over the body limit.
-/// The token travels in the body, never the URL, so it never reaches an access log. Nothing here logs.
+/// The handler's responses carry <c>Cache-Control: no-store</c> (the 200 holds session tokens). The token travels in
+/// the body, never the URL, so it never reaches an access log. Nothing here logs.
 /// </para>
 /// </remarks>
 public static class JoinEndpoints
@@ -41,6 +42,7 @@ public static class JoinEndpoints
         // PRE-AUTH (PreAuthAllowlist, seam commit): this route ESTABLISHES the session, so it cannot require one. It
         // fails closed on its own with one bodyless 401, behind its own per-IP limiter and the login body limit.
         return endpoints.MapPost(JoinRoute, JoinAsync)
+            .AddEndpointFilter<NoStoreEndpointFilter>()
             .RequireRateLimiting(JoinRateLimiterPolicy.PolicyName)
             .WithLoginBodyLimit()
             .AllowAnonymousPreAuth();

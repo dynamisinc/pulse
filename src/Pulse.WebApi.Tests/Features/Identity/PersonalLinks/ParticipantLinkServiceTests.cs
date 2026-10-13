@@ -10,6 +10,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
+using Pulse.WebApi.Data.Extensions;
 using Pulse.WebApi.Features.Identity.EasyLogin;
 using Pulse.WebApi.Features.Identity.PersonalLinks;
 using Pulse.WebApi.Tests.Data;
@@ -43,7 +44,7 @@ public sealed class ParticipantLinkServiceTests
         var staffUserId = Guid.NewGuid();
 
         await using var context = ScopedContext(exercise.Id);
-        var service = new ParticipantLinkService(context, _protector);
+        var service = PersonalLinkSeed.LinkService(context, exercise.Id, _protector);
 
         var link = await service.EnsureActiveAsync(account, staffUserId, Now);
 
@@ -73,7 +74,7 @@ public sealed class ParticipantLinkServiceTests
         var (seeded, _) = await PersonalLinkSeed.LinkAsync(_fixture, account, PersonalLinkSeed.Protector());
 
         await using var context = ScopedContext(exercise.Id);
-        var link = await new ParticipantLinkService(context, _protector).EnsureActiveAsync(account, Guid.NewGuid(), Now);
+        var link = await PersonalLinkSeed.LinkService(context, exercise.Id, _protector).EnsureActiveAsync(account, Guid.NewGuid(), Now);
 
         link!.Id.Should().Be(seeded.Id);
         link.TokenHash.Should().Be(seeded.TokenHash, "an active link is never rotated by ensure");
@@ -88,11 +89,16 @@ public sealed class ParticipantLinkServiceTests
     {
         var exercise = await PersonalLinkSeed.ExerciseAsync(_fixture);
         var account = await PersonalLinkSeed.AccountAsync(_fixture, exercise.Id);
-        var (seeded, oldToken) = await PersonalLinkSeed.LinkAsync(_fixture, account, revoked: true);
+        var (seeded, oldToken) = await PersonalLinkSeed.LinkAsync(
+            _fixture, account, revoked: true, useCount: 4, lastUsedAt: Now.AddDays(-1));
 
         await using var context = ScopedContext(exercise.Id);
-        var link = await new ParticipantLinkService(context, _protector).EnsureActiveAsync(account, issuedByStaffUserId: null, Now);
+        var link = await PersonalLinkSeed.LinkService(context, exercise.Id, _protector).EnsureActiveAsync(account, issuedByStaffUserId: null, Now);
         await context.SaveChangesAsync();
+
+        var stored = await PersonalLinkSeed.ReadLinkAsync(_fixture, exercise.Id, account.Id);
+        stored!.UseCount.Should().Be(0, "the counters describe the new token (W-002)");
+        stored.LastUsedAt.Should().BeNull();
 
         link!.Id.Should().Be(seeded.Id, "one row per account: a re-activation rotates in place");
         link.RevokedAt.Should().BeNull();
@@ -110,7 +116,7 @@ public sealed class ParticipantLinkServiceTests
         var account = await PersonalLinkSeed.AccountAsync(_fixture, exercise.Id);
 
         await using var context = ScopedContext(exercise.Id);
-        var service = new ParticipantLinkService(context, _protector);
+        var service = PersonalLinkSeed.LinkService(context, exercise.Id, _protector);
 
         var first = await service.EnsureActiveAsync(account, null, Now);
         var second = await service.EnsureActiveAsync(account, null, Now);
@@ -122,9 +128,8 @@ public sealed class ParticipantLinkServiceTests
     [Fact]
     public async Task EnsureActive_AnAccountWithNoExercise_IsRefused()
     {
-        await using var context = new PulseDbContext(
-            new DbContextOptionsBuilder<PulseDbContext>().UseSqlServer("Server=model-only;Database=none;").Options);
-        var service = new ParticipantLinkService(context, _protector);
+        await using var context = ModelOnlyContext();
+        var service = PersonalLinkSeed.LinkService(context, Guid.NewGuid(), _protector);
         var account = new Account { Id = Guid.NewGuid(), Username = "x", DisplayName = "X", Role = "participant" };
 
         var act = () => service.EnsureActiveAsync(account, null, Now);
@@ -132,17 +137,53 @@ public sealed class ParticipantLinkServiceTests
         await act.Should().ThrowAsync<ArgumentException>("a link can only be stamped from a real exercise scope");
     }
 
+    [Theory]
+    [InlineData("another exercise")]
+    [InlineData("unresolved")]
+    [InlineData("empty")]
+    public async Task EnsureActiveAndReissue_RefuseAnAccountOutsideTheResolvedScope_WithAReadableError(string scopeCase)
+    {
+        // S-004: a caller bug (an account from another exercise, or no resolved scope) is a readable refusal before any
+        // read or write (the context never connects), never a unique-index 500 at the caller's save.
+        var accountExercise = Guid.NewGuid();
+        Guid? scope = scopeCase switch
+        {
+            "another exercise" => Guid.NewGuid(),
+            "empty" => Guid.Empty,
+            _ => null,
+        };
+        await using var context = ModelOnlyContext();
+        var service = PersonalLinkSeed.LinkService(context, scope, _protector);
+        var account = new Account
+        {
+            Id = Guid.NewGuid(),
+            ExerciseId = accountExercise,
+            Username = "x",
+            DisplayName = "X",
+            Role = "participant",
+        };
+
+        var ensure = () => service.EnsureActiveAsync(account, null, Now);
+        var reissue = () => service.ReissueAsync(account, Guid.NewGuid(), Now);
+
+        (await ensure.Should().ThrowAsync<InvalidOperationException>()).Which.Message.Should().Contain(
+            "personal link", "the refusal reads as what it is ({0})", scopeCase);
+        await reissue.Should().ThrowAsync<InvalidOperationException>();
+        context.ChangeTracker.HasChanges().Should().BeFalse("nothing was staged");
+    }
+
     [RequiresDockerFact]
     public async Task Reissue_RotatesInPlace_GenerationPlusOne_NewHashAndCopy_RevokedAtCleared()
     {
         var exercise = await PersonalLinkSeed.ExerciseAsync(_fixture);
         var account = await PersonalLinkSeed.AccountAsync(_fixture, exercise.Id);
-        var (seeded, oldToken) = await PersonalLinkSeed.LinkAsync(_fixture, account, revoked: true);
+        var (seeded, oldToken) = await PersonalLinkSeed.LinkAsync(
+            _fixture, account, revoked: true, useCount: 7, lastUsedAt: Now.AddHours(-3));
         var staffUserId = Guid.NewGuid();
 
         await using (var context = ScopedContext(exercise.Id))
         {
-            var link = await new ParticipantLinkService(context, _protector).ReissueAsync(account, staffUserId, Now);
+            var link = await PersonalLinkSeed.LinkService(context, exercise.Id, _protector).ReissueAsync(account, staffUserId, Now);
             await context.SaveChangesAsync();
 
             link.Id.Should().Be(seeded.Id);
@@ -152,6 +193,10 @@ public sealed class ParticipantLinkServiceTests
             link.IssuedByStaffUserId.Should().Be(staffUserId);
             AssertRecoverable(link);
         }
+
+        var stored = await PersonalLinkSeed.ReadLinkAsync(_fixture, exercise.Id, account.Id);
+        stored!.UseCount.Should().Be(0, "a reissued link has never been used (W-002, matches the story-10 mock's newLink())");
+        stored.LastUsedAt.Should().BeNull();
 
         await using var read = ScopedContext(exercise.Id);
         (await read.ParticipantLinks.AnyAsync(l => l.TokenHash == ParticipantLinkTokens.Hash(oldToken))).Should().BeFalse(
@@ -166,7 +211,7 @@ public sealed class ParticipantLinkServiceTests
         var (seeded, _) = await PersonalLinkSeed.LinkAsync(_fixture, account, PersonalLinkSeed.Protector());
 
         await using var context = ScopedContext(exercise.Id);
-        var link = await new ParticipantLinkService(context, _protector).ReissueAsync(account, Guid.NewGuid(), Now);
+        var link = await PersonalLinkSeed.LinkService(context, exercise.Id, _protector).ReissueAsync(account, Guid.NewGuid(), Now);
 
         link.TokenHash.Should().NotBe(seeded.TokenHash);
         link.Generation.Should().Be(2);
@@ -180,7 +225,7 @@ public sealed class ParticipantLinkServiceTests
         var account = await PersonalLinkSeed.AccountAsync(_fixture, exercise.Id);
 
         await using var context = ScopedContext(exercise.Id);
-        var link = await new ParticipantLinkService(context, _protector).ReissueAsync(account, Guid.NewGuid(), Now);
+        var link = await PersonalLinkSeed.LinkService(context, exercise.Id, _protector).ReissueAsync(account, Guid.NewGuid(), Now);
         await context.SaveChangesAsync();
 
         link.Generation.Should().Be(1);
@@ -225,6 +270,9 @@ public sealed class ParticipantLinkServiceTests
         services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
         services.AddDbContext<PulseDbContext>(options => options.UseSqlServer("Server=model-only;Database=none;"));
 
+        // The host's AddExerciseScoping(): the issuer checks every account against the resolved scope (S-004).
+        services.AddExerciseScoping();
+
         if (foundationFirst)
         {
             services.AddEasyLoginFoundation();
@@ -263,6 +311,9 @@ public sealed class ParticipantLinkServiceTests
         options.RejectionStatusCode.Should().Be(429);
         JoinRateLimiterPolicy.PolicyName.Should().Be("easy-login-join");
     }
+
+    private static PulseDbContext ModelOnlyContext() => new(
+        new DbContextOptionsBuilder<PulseDbContext>().UseSqlServer("Server=model-only;Database=none;").Options);
 
     /// <summary>The stored copy decrypts to a token whose hash IS the row's hash (the link is reprintable).</summary>
     private void AssertRecoverable(ParticipantLink link)

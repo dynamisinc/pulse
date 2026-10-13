@@ -33,7 +33,8 @@ public sealed class ParticipantAccessTests
     {
         var exercise = await PersonalLinkSeed.ExerciseAsync(_fixture);
         var account = await PersonalLinkSeed.AccountAsync(_fixture, exercise.Id);
-        var (seededLink, oldToken) = await PersonalLinkSeed.LinkAsync(_fixture, account);
+        var (seededLink, oldToken) = await PersonalLinkSeed.LinkAsync(
+            _fixture, account, useCount: 5, lastUsedAt: DateTimeOffset.UtcNow.AddHours(-1));
         var staff = await PersonalLinkSeed.StaffAsync(_fixture, exercise.Id);
         var now = DateTimeOffset.UtcNow;
 
@@ -62,15 +63,20 @@ public sealed class ParticipantAccessTests
         var link = body.GetProperty("link");
         link.GetProperty("status").GetString().Should().Be("active");
         link.TryGetProperty("needsReissue", out _).Should().BeFalse();
+        link.GetProperty("useCount").GetInt32().Should().Be(0, "the counters restart with the new token (W-002)");
+        link.TryGetProperty("lastUsedAt", out _).Should().BeFalse("the new token has never been used");
         var joinUrl = link.GetProperty("joinUrl").GetString()!;
         joinUrl.Should().StartWith($"{PersonalLinkSeed.FrontendBaseUrl}/join/", "the response carries the new join URL");
         var newToken = PersonalLinkSeed.TokenOf(joinUrl);
         newToken.Should().NotBe(oldToken);
 
-        foreach (var ended in new[] { live, lapsedAccess, dead })
+        foreach (var ended in new[] { live, lapsedAccess })
         {
-            (await PersonalLinkSeed.ReadSessionAsync(_fixture, ended.Id)).RevokedAt.Should().NotBeNull("every non-revoked session of the person is ended");
+            (await PersonalLinkSeed.ReadSessionAsync(_fixture, ended.Id)).RevokedAt.Should().NotBeNull("every usable session of the person is ended");
         }
+
+        (await PersonalLinkSeed.ReadSessionAsync(_fixture, dead.Id)).RevokedAt.Should().BeNull(
+            "a session that had already lapsed completely keeps its history: it is not stamped (S-002)");
 
         (await PersonalLinkSeed.ReadSessionAsync(_fixture, alreadyRevoked.Id)).RevokedAt.Should().Be(alreadyRevokedAt, "an earlier revoke is kept");
         (await PersonalLinkSeed.ReadSessionAsync(_fixture, otherPerson.Id)).RevokedAt.Should().BeNull("only this participant's sessions end");
@@ -216,10 +222,15 @@ public sealed class ParticipantAccessTests
         loginFailures.Select(e => (e.Actor.Kind, e.Target?.EntityType, e.Target?.EntityId)).Distinct().Should().ContainSingle(
             "the disabled refusal carries exactly the wrong-password telemetry");
 
+        var lapsed = await PersonalLinkSeed.ParticipantSessionAsync(
+            _fixture, exercise.Id, account.Id, expiresAt: DateTimeOffset.UtcNow.AddHours(-13), refreshExpiresAt: DateTimeOffset.UtcNow.AddHours(-1));
         using var disabledAgain = await PersonalLinksTestHost.ActionAsync(staffClient, account.Id, "disable");
         disabledAgain.StatusCode.Should().Be(HttpStatusCode.OK, "disable is idempotent");
         (await PersonalLinksTestHost.JsonAsync(disabledAgain)).GetProperty("sessionsEnded").GetInt32().Should().Be(0);
         (await PersonalLinkSeed.ReadAccountAsync(_fixture, exercise.Id, account.Id)).DisabledAt.Should().Be(disabledAt, "the first instant is kept");
+        (await PersonalLinkSeed.ReadSessionAsync(_fixture, lapsed.Id)).RevokedAt.Should().BeNull("a lapsed session is not stamped (S-002)");
+        (await PersonalLinkSeed.ReadEventsAsync(_fixture, exercise.Id))
+            .Count(e => e.EventType == EasyLoginTelemetry.ParticipantDisabledEventType).Should().Be(1, "the repeat disable changed nothing, so emitted nothing");
 
         using var enabled = await PersonalLinksTestHost.ActionAsync(staffClient, account.Id, "enable");
         enabled.StatusCode.Should().Be(HttpStatusCode.OK);

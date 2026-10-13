@@ -24,6 +24,11 @@ using Pulse.WebApi.Features.Identity.EasyLogin;
 /// hash leaves the table and the old URL is simply an unknown token.
 /// </para>
 /// <para>
+/// <b>Scope guard.</b> Every method refuses (<see cref="InvalidOperationException"/>) an account whose exercise is not
+/// the request's resolved <see cref="IExerciseContext.CurrentExerciseId"/>, or any account while the scope is unresolved:
+/// a caller bug surfaces as a readable error rather than as a unique-index violation at its save.
+/// </para>
+/// <para>
 /// <b>Secrets.</b> The raw token exists only in memory here: the row stores its SHA-256 (<see cref="ParticipantLinkTokens.Hash"/>)
 /// and a Data Protection copy (<see cref="IParticipantLinkTokenProtector"/>). Nothing here logs.
 /// </para>
@@ -31,17 +36,24 @@ using Pulse.WebApi.Features.Identity.EasyLogin;
 public sealed class ParticipantLinkService : IParticipantLinkIssuer
 {
     private readonly PulseDbContext _dbContext;
+    private readonly IExerciseContext _exerciseContext;
     private readonly IParticipantLinkTokenProtector _protector;
 
     /// <summary>Creates the link service over the request's unit of work.</summary>
     /// <param name="dbContext">The caller's persistence context; changes are staged on it, never saved here.</param>
+    /// <param name="exerciseContext">The request's resolved exercise; every account must belong to it.</param>
     /// <param name="protector">Encrypts the reprintable copy of each new token.</param>
-    public ParticipantLinkService(PulseDbContext dbContext, IParticipantLinkTokenProtector protector)
+    public ParticipantLinkService(
+        PulseDbContext dbContext,
+        IExerciseContext exerciseContext,
+        IParticipantLinkTokenProtector protector)
     {
         ArgumentNullException.ThrowIfNull(dbContext);
+        ArgumentNullException.ThrowIfNull(exerciseContext);
         ArgumentNullException.ThrowIfNull(protector);
 
         _dbContext = dbContext;
+        _exerciseContext = exerciseContext;
         _protector = protector;
     }
 
@@ -74,7 +86,8 @@ public sealed class ParticipantLinkService : IParticipantLinkIssuer
 
     /// <summary>
     /// Replaces the account's token: a new token, hash and protected copy, <c>Generation</c> + 1, <c>RevokedAt</c>
-    /// cleared. The old hash leaves the table, so the old URL stops working the moment the caller saves. Issues the
+    /// cleared, and the use counters reset (<c>UseCount</c> 0, no <c>LastUsedAt</c>: they describe the new token). The
+    /// old hash leaves the table, so the old URL stops working the moment the caller saves. Issues the
     /// first link when the account has none. Never a no-op.
     /// </summary>
     /// <param name="account">The participant, loaded under the central exercise filter.</param>
@@ -163,6 +176,10 @@ public sealed class ParticipantLinkService : IParticipantLinkIssuer
         return link;
     }
 
+    /// <summary>
+    /// A fresh token on the same row (reissue, or re-activating a revoked link). The use counters restart: they belong
+    /// to the token, and a reprinted card has never been used.
+    /// </summary>
     private void Rotate(ParticipantLink link, Guid? issuedByStaffUserId, DateTimeOffset now)
     {
         var token = ParticipantLinkTokens.Generate();
@@ -174,15 +191,35 @@ public sealed class ParticipantLinkService : IParticipantLinkIssuer
         link.IssuedByStaffUserId = NullIfEmpty(issuedByStaffUserId);
         link.RevokedAt = null;
         link.RevokedByStaffUserId = null;
+        link.UseCount = 0;
+        link.LastUsedAt = null;
     }
 
-    private static void RequireScopedAccount(Account account)
+    /// <summary>
+    /// Fails before any read or write unless <paramref name="account"/> has an id and belongs to the request's resolved
+    /// exercise (COR-001). A mismatch is a caller bug: refused with a readable error, never left to the unique index.
+    /// </summary>
+    private void RequireScopedAccount(Account account)
     {
         ArgumentNullException.ThrowIfNull(account);
 
         if (account.Id == Guid.Empty || account.ExerciseId == Guid.Empty)
         {
             throw new ArgumentException("A personal link needs an account with an id and an exercise.", nameof(account));
+        }
+
+        var scope = _exerciseContext.CurrentExerciseId;
+        if (scope is null || scope.Value == Guid.Empty)
+        {
+            throw new InvalidOperationException(
+                "A personal link cannot be issued while the request's exercise scope is unresolved.");
+        }
+
+        if (account.ExerciseId != scope.Value)
+        {
+            throw new InvalidOperationException(
+                "A personal link can only be issued for an account in the request's resolved exercise; this account "
+                + "belongs to a different exercise.");
         }
     }
 

@@ -97,7 +97,9 @@ internal static class PersonalLinkSeed
         MsSqlContainerFixture fixture,
         Account account,
         IParticipantLinkTokenProtector? protector = null,
-        bool revoked = false)
+        bool revoked = false,
+        int useCount = 0,
+        DateTimeOffset? lastUsedAt = null)
     {
         var token = ParticipantLinkTokens.Generate();
         var link = new ParticipantLink
@@ -110,6 +112,8 @@ internal static class PersonalLinkSeed
             Generation = 1,
             IssuedAt = DateTimeOffset.UtcNow.AddHours(-2),
             RevokedAt = revoked ? DateTimeOffset.UtcNow.AddHours(-1) : null,
+            UseCount = useCount,
+            LastUsedAt = lastUsedAt,
         };
 
         await using var seed = fixture.CreateContext();
@@ -216,6 +220,10 @@ internal static class PersonalLinkSeed
             .ToListAsync();
     }
 
+    /// <summary>A link service whose resolved scope is <paramref name="exerciseId"/> (the S-004 guard checks it).</summary>
+    public static ParticipantLinkService LinkService(PulseDbContext context, Guid? exerciseId, IParticipantLinkTokenProtector? protector = null) =>
+        new(context, new ExerciseContext { CurrentExerciseId = exerciseId }, protector ?? Protector());
+
     /// <summary>A protector over an ephemeral key ring (for service-level tests).</summary>
     public static IParticipantLinkTokenProtector Protector() =>
         new ParticipantLinkTokenProtector(new EphemeralDataProtectionProvider());
@@ -258,7 +266,8 @@ internal sealed class PersonalLinksTestHost : IAsyncDisposable
 
     public static async Task<PersonalLinksTestHost> StartAsync(
         string connectionString,
-        IDictionary<string, string?>? settings = null)
+        IDictionary<string, string?>? settings = null,
+        Action<IServiceCollection>? configureServices = null)
     {
         var values = new Dictionary<string, string?> { [JoinUrlBuilder.FrontendBaseUrlKey] = PersonalLinkSeed.FrontendBaseUrl };
         foreach (var (key, value) in settings ?? new Dictionary<string, string?>())
@@ -293,6 +302,7 @@ internal sealed class PersonalLinksTestHost : IAsyncDisposable
                         services.AddParticipantAccounts();
                         services.AddEasyLoginFoundation();
                         services.AddPersonalLinks();
+                        configureServices?.Invoke(services);
                     })
                     .Configure(app =>
                     {
@@ -343,6 +353,19 @@ internal sealed class PersonalLinksTestHost : IAsyncDisposable
     {
         await _host.StopAsync();
         _host.Dispose();
+    }
+}
+
+/// <summary>
+/// Wraps the real issuer and runs <c>race</c> (a staff change on another connection) just before the session is minted,
+/// i.e. AFTER the join's lookup admitted the token: the Gate-1 W-001 race, made deterministic.
+/// </summary>
+internal sealed class RacingSessionIssuer(ISessionIssuer inner, Func<Task> race) : ISessionIssuer
+{
+    public async Task<SessionIssueResult> IssueAsync(SessionIssueRequest request, CancellationToken cancellationToken = default)
+    {
+        await race();
+        return await inner.IssueAsync(request, cancellationToken);
     }
 }
 

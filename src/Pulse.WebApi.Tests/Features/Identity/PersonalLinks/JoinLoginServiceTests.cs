@@ -275,7 +275,7 @@ public sealed class JoinLoginServiceTests
     private async Task<string> SupersedeAsync(Guid exerciseId, Account account, string oldToken)
     {
         await using var context = ScopedContext(exerciseId);
-        await new ParticipantLinkService(context, PersonalLinkSeed.Protector()).ReissueAsync(account, Guid.NewGuid(), Now.AddMinutes(-1));
+        await PersonalLinkSeed.LinkService(context, exerciseId).ReissueAsync(account, Guid.NewGuid(), Now.AddMinutes(-1));
         await context.SaveChangesAsync();
         return oldToken;
     }

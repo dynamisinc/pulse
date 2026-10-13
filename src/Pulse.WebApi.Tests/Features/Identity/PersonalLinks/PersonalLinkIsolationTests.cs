@@ -194,7 +194,7 @@ public sealed class PersonalLinkIsolationTests
             context,
             new ExerciseContext { CurrentExerciseId = scope },
             new StubCurrentStaffSessionAccessor(staff.Current),
-            new ParticipantLinkService(context, PersonalLinkSeed.Protector()),
+            PersonalLinkSeed.LinkService(context, scope),
             new RosterLinkDtoFactory(PersonalLinkSeed.Protector(), new JoinUrlBuilder(new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build())),
             new ExerciseFactsReader(context),
             new ManualTimeProvider(DateTimeOffset.UtcNow));

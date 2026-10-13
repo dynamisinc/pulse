@@ -29,6 +29,16 @@ using Pulse.WebApi.Features.Identity.Sessions;
 /// row: it is an unknown token.
 /// </para>
 /// <para>
+/// <b>A staff action racing the join (Gate-1 W-001).</b> Staff can revoke, reissue or disable between the lookup and
+/// the session being minted, and the staff action's session sweep cannot see a session that does not exist yet. So the
+/// session is minted FIRST and the link and account are re-read AFTER it exists: a staff change committed before the
+/// re-read is caught here (the fresh session is revoked and the attempt is the uniform refusal), and a staff action that
+/// starts after the session exists finds it and ends it. What remains is a window of milliseconds (a staff sweep that
+/// read the sessions just before this one was committed and saved just after the re-read); pressing Disable or Reissue
+/// again ends such a lingering session. The use is recorded, and the one <c>login</c> event written, only once the
+/// re-read passes, so a raced attempt emits exactly one identity-less failure event and no success event.
+/// </para>
+/// <para>
 /// <b>COR-011.</b> Nothing here creates or edits an account beyond the sign-in bookkeeping (<c>LastLoginAt</c>, and the
 /// link's <c>LastUsedAt</c> / <c>UseCount</c>). The link is reusable until revoked or reissued; using it never expires it.
 /// </para>
@@ -78,7 +88,7 @@ public sealed class JoinLoginService
     /// <summary>
     /// Exchanges a personal-link token for a participant session in the host-resolved exercise. Emits exactly one
     /// XC-004 <c>login</c> event (<c>method: link</c>) per attempt that reaches a resolved exercise, in the same unit of
-    /// work as the sign-in bookkeeping.
+    /// work as the sign-in bookkeeping (success) or the revocation of a raced session (failure).
     /// </summary>
     /// <param name="request">The join body. Its token is never logged.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
@@ -131,17 +141,50 @@ public sealed class JoinLoginService
             return JoinLoginResult.Rejected();
         }
 
-        // 5. Success: bookkeeping and the success event in ONE unit of work. The link stays usable.
+        // 5. Exactly the session /api/auth/login mints (persona, acting human, role, never read-only). The issuer commits
+        //    it; nothing about the use is recorded yet.
+        var issued = await _sessionIssuer.IssueAsync(
+            ParticipantSessionRequests.For(match.Account, scope.Value), cancellationToken);
+
+        // 6. W-001: re-read, untracked, now that the session exists. A revoke, reissue or disable that committed while we
+        //    were minting it fails this check; one that commits after it will find (and end) the session.
+        var linkId = match.Link.Id;
+        var accountId = match.Account.Id;
+        var stillAdmitted = await (
+                from link in _dbContext.ParticipantLinks.AsNoTracking()
+                where link.Id == linkId && link.TokenHash == tokenHash && link.RevokedAt == null
+                join account in _dbContext.Accounts.AsNoTracking() on link.AccountId equals account.Id
+                where account.Id == accountId && account.DisabledAt == null
+                select link.Id)
+            .AnyAsync(cancellationToken);
+
+        if (!stillAdmitted)
+        {
+            // End the session just minted (explicit ExerciseId: Session is unscoped) and record the attempt as the same
+            // identity-less failure every other refusal records. No success event was written for it.
+            var issuedId = issued.Session.Id;
+            var raced = await _dbContext.Sessions
+                .FirstOrDefaultAsync(s => s.Id == issuedId && s.ExerciseId == scope.Value, cancellationToken);
+            if (raced is not null)
+            {
+                // A fresh read: the issuer stamped IssuedAt after this attempt's first clock read.
+                raced.RevokedAt ??= _timeProvider.GetUtcNow();
+            }
+
+            _dbContext.TelemetryEvents.Add(EasyLoginTelemetry.LinkLoginFailed(scope.Value, time));
+            await _dbContext.SaveChangesAsync(cancellationToken);
+
+            return JoinLoginResult.Rejected();
+        }
+
+        // 7. Success: the bookkeeping and the success event in ONE unit of work. Only the use columns are written, so a
+        //    concurrent staff change to other columns is not overwritten. The link stays usable.
         match.Link.LastUsedAt = now;
         match.Link.UseCount += 1;
         match.Account.LastLoginAt = now;
         _dbContext.TelemetryEvents.Add(
             EasyLoginTelemetry.LoginSucceeded(scope.Value, match.Account.Id, EasyLoginMethod.Link, time));
         await _dbContext.SaveChangesAsync(cancellationToken);
-
-        // 6. Exactly the session /api/auth/login mints (persona, acting human, role, never read-only).
-        var issued = await _sessionIssuer.IssueAsync(
-            ParticipantSessionRequests.For(match.Account, scope.Value), cancellationToken);
 
         return JoinLoginResult.Authenticated(issued);
     }

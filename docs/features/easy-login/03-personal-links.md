@@ -87,6 +87,10 @@ pattern; read the exercise through `ExerciseFactsReader` (gotcha 3). Rate-limit 
 additive `services.AddRateLimiter(...)` reading `EasyLoginOptions`. Do not log the request body. See
 `implementation.md` (story 03, gotchas 2, 4, 5, 6, 8).
 
+A join that races a staff revoke, reissue or disable is caught by re-reading the link and account after the session is
+minted (Gate-1 W-001). `/api/auth/login` against disable keeps the same narrow window (a sign-in that passes its checks
+just before Disable commits): accepted for the demo, and pressing Disable again ends a lingering session.
+
 ## Dependencies
 
 Story 01. Story 02 calls the issuer this story implements (they build in parallel; the seam commit wires both).
@@ -117,7 +121,9 @@ Telemetry, AC-9 Authorization and abuse.
   `.Join_AMissingOrEmptyToken_IsInvalid_BeforeAnyLookup`; `JoinEndpointsHttpTests.Join_AMissingBodyOrEmptyToken_Is400ProblemDetails`,
   `.Join_WithNoResolvedHost_IsABodyless401`, `.Join_EveryRefusal_IsTheSameBodyless401_OverTheRealPipeline`,
   `.Join_TheThirtyFirstRequestInAMinute_Is429_ByDefault`, `.Join_TheLimit_ComesFromEasyLoginOptions`,
-  `.Join_AnOversizeBody_IsRefusedWith413_WhileItIsRead`.
+  `.Join_AnOversizeBody_IsRefusedWith413_WhileItIsRead`,
+  `.Join_RacingAStaffAction_BetweenTheLookupAndTheIssue_IsTheUniform401_AndLeavesNoLiveSession` (Gate-1 W-001:
+  disable, reissue, revoke).
 - **AC-3** `ParticipantAccessTests.Reissue_EndsEveryLiveSession_TheirRefreshFails_TheOldUrlStops_AndTheNewOneWorks`,
   `.Reissue_WorksForAPersonWithNoLinkYet_AndForALinkThatNeedsReissue`;
   `ParticipantLinkServiceTests.Reissue_RotatesInPlace_GenerationPlusOne_NewHashAndCopy_RevokedAtCleared`,
@@ -131,7 +137,9 @@ Telemetry, AC-9 Authorization and abuse.
 - **AC-6** `ParticipantLinkServiceTests.EnsureActive_NoLink_StagesAFirstLink_StampedFromTheAccount_AndOnlyTheCallerSaves`,
   `.EnsureActive_ActiveLink_IsReturnedUnchanged_EvenWhenItsCopyCannotBeDecrypted`,
   `.EnsureActive_RevokedLink_IsReactivated_WithAFreshToken`, `.EnsureActive_TwiceInOneUnitOfWork_ReturnsTheStagedLink`,
-  `.EnsureActive_AnAccountWithNoExercise_IsRefused`, `.AddPersonalLinks_ReplacesTheNullIssuer_InEitherRegistrationOrder`.
+  `.EnsureActive_AnAccountWithNoExercise_IsRefused`,
+  `.EnsureActiveAndReissue_RefuseAnAccountOutsideTheResolvedScope_WithAReadableError` (Gate-1 S-004),
+  `.AddPersonalLinks_ReplacesTheNullIssuer_InEitherRegistrationOrder`.
 - **AC-7** `PersonalLinkIsolationTests.StaffActions_OnAnotherExercisesAccountId_Are404_IndistinguishableFromAnUnknownId_AndTouchNothing`,
   `.ATokenMintedInB_PresentedOnAsHost_IsTheUniform401_AndLeavesBUntouched`,
   `.SessionTermination_IsBoundedByExerciseAndAccount_BsSessionsSurviveEveryActionInA`,
