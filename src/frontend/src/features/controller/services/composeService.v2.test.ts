@@ -452,21 +452,4 @@ describe('describeOffscreenFailure (the toast for a failure nobody was watching)
     expect(text).toBe('Post as @FairhavenWater: status unknown - check the feed. Draft restored.')
     expect(text).not.toMatch(/failed/)
   })
-
-  it('drops "Draft restored." when the caller did not put the text back (a newer post owns it)', () => {
-    expect(
-      describeOffscreenFailure(
-        'FairhavenWater',
-        { kind: 'rejected', status: 400, message: 'media is not yours.' },
-        { draftRestored: false },
-      ),
-    ).toBe('Post as @FairhavenWater failed (HTTP 400): media is not yours.')
-    expect(
-      describeOffscreenFailure(
-        'FairhavenWater',
-        { kind: 'unconfirmed', status: 504, message: 'May be live.' },
-        { draftRestored: false },
-      ),
-    ).toBe('Post as @FairhavenWater: status unknown - check the feed.')
-  })
 })

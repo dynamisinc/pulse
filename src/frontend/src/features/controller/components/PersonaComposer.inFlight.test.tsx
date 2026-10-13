@@ -19,9 +19,9 @@
  *     field, the "Post status unknown" question with the draft kept, or the failure banner with a
  *     Retry - and raises NO toast (the off-screen toast is only for when nobody is looking).
  *
- * An EXPLICIT close (Esc / X: `closeDock` discards the draft) is different: the draft is gone, so
- * the lock is released and a reopened composer is fresh and can post a correction at once; the old
- * request settles alone (one toast on a failure) and never touches the new one.
+ * An EXPLICIT close (Esc / X: `closeDock` discards the draft) discards the draft, NOT the request:
+ * the persona stays locked until that request settles (bounded by the publish deadline), so the
+ * reopened composer is an adopter too - there is never a second request live on a key.
  *
  * The hook-level cases (reply target, sign-out, two personas, target switching) are in
  * `../hooks/useComposeAsPersona.inFlight.test.tsx`. Harness as `PersonaComposer.gate2.test.tsx`.
@@ -308,50 +308,76 @@ describe('the reopened composer takes over the outcome', () => {
   })
 })
 
-describe('after an explicit close (Esc / X) the lock is released', () => {
+describe('after an explicit close (Esc / X) the persona stays locked', () => {
   /** Post is pressed, then the dock is closed the way `closeDock` does: unmount + discard. */
-  async function postThenEscape() {
+  async function postThenEscapeThenReopen() {
     const view = render(<Dock open />)
     fireEvent.change(field(), { target: { value: DRAFT } })
     fireEvent.keyDown(field(), { key: 'Enter', ctrlKey: true })
     expect(await screen.findByTestId('publishing')).toBeInTheDocument()
     view.rerender(<Dock open={false} />)
     composeAsPersonaDraftStore.discardDraft('ex-live-0001', PERSONA.id)
+    view.rerender(<Dock open />)
     return view
   }
 
-  it('the reopened composer is fresh and can post a correction while the old post is still out', async () => {
-    pendingRequest()
-    const view = await postThenEscape()
-    view.rerender(<Dock open />)
+  it('the reopened composer is an adopter: "Posting...", read-only, nothing sendable', async () => {
+    const request = pendingRequest()
+    await postThenEscapeThenReopen()
 
-    expect(screen.queryByTestId('publishing')).toBeNull()
-    expect(field().value).toBe('')
-    expect(field().readOnly).toBe(false)
-    fireEvent.change(field(), { target: { value: 'Correction: zones 2-3 only.' } })
-    expect(postButton()).toBeEnabled()
+    expect(screen.getByTestId('publishing')).toBeInTheDocument()
+    expect(field().value).toBe('') // the draft was discarded; the request was not
+    expect(field().readOnly).toBe(true)
+    expect(postButton()).toBeDisabled()
+    fireEvent.click(postButton())
+    fireEvent.submit(screen.getByTestId('persona-composer'))
     fireEvent.keyDown(field(), { key: 'Enter', ctrlKey: true })
+    fireEvent.keyDown(field(), { key: 'Enter', metaKey: true })
 
-    expect(publishPost).toHaveBeenCalledTimes(2)
-    expect(vi.mocked(publishPost).mock.calls[1]?.[0].text).toBe('Correction: zones 2-3 only.')
+    expect(publishPost).toHaveBeenCalledTimes(1)
+    await request.succeed()
+    expect(publishPost).toHaveBeenCalledTimes(1)
   })
 
-  it('the old post failing then raises ONE toast and leaves the new post\'s "Posting..." alone', async () => {
-    const old = pendingRequest()
-    const view = await postThenEscape()
-    pendingRequest()
-    view.rerender(<Dock open />)
-    fireEvent.change(field(), { target: { value: 'Correction: zones 2-3 only.' } })
-    fireEvent.keyDown(field(), { key: 'Enter', ctrlKey: true })
-    expect(await screen.findByTestId('publishing')).toBeInTheDocument()
+  it('SUCCESS: "Posted", an empty field, no toast', async () => {
+    const request = pendingRequest()
+    await postThenEscapeThenReopen()
 
-    await old.fail(429)
+    await request.succeed()
 
-    expect(toast.error).toHaveBeenCalledTimes(1)
-    expect(screen.getByTestId('publishing')).toBeInTheDocument()
-    expect(field().value).toBe('Correction: zones 2-3 only.')
-    expect(screen.queryByTestId('publish-error')).toBeNull()
+    expect(await screen.findByTestId('publish-success')).toBeInTheDocument()
+    expect(field().value).toBe('')
+    expect(field().readOnly).toBe(false)
+    expect(toast.error).not.toHaveBeenCalled()
+    expect(toast.warning).not.toHaveBeenCalled()
+  })
+
+  it('UNCONFIRMED: the "Post status unknown" question with the text that was sent, no toast', async () => {
+    const request = pendingRequest()
+    await postThenEscapeThenReopen()
+
+    await request.fail(504)
+
+    const banner = await screen.findByTestId('publish-unconfirmed')
+    expect(banner).toHaveTextContent('Post status unknown')
+    expect(field().value).toBe(DRAFT)
+    expect(postButton()).toBeDisabled()
+    expect(toast.warning).not.toHaveBeenCalled()
     fireEvent.keyDown(field(), { key: 'Enter', ctrlKey: true })
+    expect(publishPost).toHaveBeenCalledTimes(1)
+  })
+
+  it('FAILURE: the failure banner with the text back and a working Retry, no toast', async () => {
+    const request = pendingRequest()
+    await postThenEscapeThenReopen()
+
+    await request.fail(429)
+
+    expect(await screen.findByTestId('publish-error')).toHaveTextContent('Post failed (HTTP 429)')
+    expect(field().value).toBe(DRAFT)
+    expect(toast.error).not.toHaveBeenCalled()
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: 'Retry' }))
     expect(publishPost).toHaveBeenCalledTimes(2)
   })
 })

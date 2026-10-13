@@ -315,23 +315,16 @@ export function classifyPublishFailure(failure: unknown): PublishFailure {
  * The app-toast text for a publish that failed AFTER the composer was off-screen (the
  * dock was closed or the controller moved to another persona before the response
  * landed), so the failure would otherwise be silent. The draft was restored by the
- * caller (unless it says `draftRestored: false`: a newer post took over the draft); an
- * 'unconfirmed' outcome says the status is unknown rather than "failed".
+ * caller; an 'unconfirmed' outcome says the status is unknown rather than "failed".
  */
-export function describeOffscreenFailure(
-  handle: string,
-  failure: PublishFailure,
-  options: { readonly draftRestored?: boolean } = {},
-): string {
+export function describeOffscreenFailure(handle: string, failure: PublishFailure): string {
   const who = `Post as @${handle.startsWith('@') ? handle.slice(1) : handle}`
-  // Only when the caller really put the text back; a newer post may own the draft by now.
-  const restored = options.draftRestored === false ? '' : ' Draft restored.'
   if (failure.kind === 'unconfirmed') {
-    return `${who}: status unknown - check the feed.${restored}`
+    return `${who}: status unknown - check the feed. Draft restored.`
   }
   const code = failure.status !== undefined ? ` (HTTP ${failure.status})` : ''
   const reason = failure.message.replace(/[.!?\s]+$/, '')
-  return `${who} failed${code}: ${reason}.${restored}`
+  return `${who} failed${code}: ${reason}. Draft restored.`
 }
 
 // ---------------------------------------------------------------------------

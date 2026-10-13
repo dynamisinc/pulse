@@ -702,14 +702,14 @@ describe('useComposeAsPersona — a failure after the composer left the screen i
     act(() => first.result.current.setText('The one that was sent.'))
     act(() => first.result.current.publish())
     first.unmount()
-    // The EXPLICIT discard (Esc / X) also releases the in-flight lock, so the reopened composer is
-    // a fresh, unlocked one and the controller can genuinely type a newer draft into it. (Without
-    // the discard it would be an adopter - locked and read-only, so this premise would only be
-    // reachable through the hook API: see `useComposeAsPersona.inFlight.test.tsx`.)
     composeAsPersonaDraftStore.discardDraft('ex-live-0001', ACTIVE_PERSONA.id)
+    // The reopened composer is an ADOPTER of the request still out: locked, and read-only in the
+    // DOM. So this "newer draft" premise is reachable only through the hook API (`setText`), not by
+    // a controller typing; it is kept as a guard on the off-screen restore rule. The second
+    // composer is gone too when the response lands - one that stayed on screen would show the
+    // banner instead of a toast (see `useComposeAsPersona.inFlight.test.tsx`).
     const second = renderHook(() => useComposeAsPersona(options()))
     act(() => second.result.current.setText('A newer draft.'))
-    // The second composer is gone too when the response lands: nobody is looking, so the toast.
     second.unmount()
 
     await act(async () => pending.reject(httpError(429, { error: 'rate_limited' })))
