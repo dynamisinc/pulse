@@ -1,15 +1,17 @@
-#Requires -Version 7.0
+#Requires -Version 7.4
 
 <#
 .SYNOPSIS
     Pester 5 tests for Import-Roster.ps1 (easy-login story 14, #479). No network: the API is an in-memory fake
-    behind a mocked Invoke-WebRequest, az is mocked, and so is the clipboard.
+    behind a mocked Invoke-WebRequest, az is mocked, and so is the clipboard. A dropped connection and a 7.6
+    redirect are thrown as the real cmdlet throws them: an ErrorRecord whose TargetObject is the
+    HttpRequestMessage, Authorization header included.
 
 .DESCRIPTION
     Runs the real script (`& Import-Roster.ps1 ...`, so its parameter sets, exit codes and every output stream
     are what is tested) against a fake of the routes it calls: GET /api/exercise-context, POST
-    /api/auth/staff/login, POST /api/staff/roster/import, GET /api/staff/roster, PUT /api/staff/day-word and POST
-    /api/auth/logout. The fake enforces the request shapes the real endpoints enforce (the login body, the
+    /api/auth/staff/login, POST /api/staff/roster/import, GET /api/staff/roster, GET and PUT /api/staff/day-word
+    and POST /api/auth/logout. The fake enforces the request shapes the real endpoints enforce (the login body, the
     strict dryRun query, the multipart field "file", the bearer token).
 
     Covers:
@@ -63,6 +65,7 @@ BeforeAll {
             Calls = [System.Collections.Generic.List[object]]::new()
             Overrides = @{}      # 'METHOD /path' -> @{ Status = n; Content = '<raw body>' }
             Unreachable = @{}    # 'METHOD /path' -> the HttpRequestException message (no response at all)
+            Redirect = @{}       # 'METHOD /path' -> $true: PowerShell 7.6's MaximumRedirection 0 failure
         }
         # Already on the roster and in no test file: never in a links file.
         $fake.Participants.Add((New-FakeEntry 'Olive Outsider' 'ooutsider'))
@@ -87,15 +90,30 @@ BeforeAll {
         $fake.Calls.Add([pscustomobject]@{
                 Method = $method; Path = $path; Query = $uri.Query; Uri = [string] $Request['Uri']; Body = $bodyText
                 ContentType = [string] $Request['ContentType']; Headers = $headers; Form = $form; Authorized = $authorized
-                Debug = $Request['Debug']; Verbose = $Request['Verbose']; MaximumRedirection = $Request['MaximumRedirection']
-                SkipHttpErrorCheck = $Request['SkipHttpErrorCheck']
+                HasDebug = @($Request.Keys) -contains 'Debug'; Debug = $Request['Debug']
+                HasVerbose = @($Request.Keys) -contains 'Verbose'; Verbose = $Request['Verbose']
+                MaximumRedirection = $Request['MaximumRedirection']; SkipHttpErrorCheck = $Request['SkipHttpErrorCheck']
             })
 
         $reply = { param([int] $Status, $Json) [pscustomobject]@{ StatusCode = $Status; Content = $(if ($null -ne $Json) { ConvertTo-Json -InputObject $Json -Depth 10 -Compress } else { '' }); Headers = @{} } }
         $problem = { param([int] $Status, [string] $Detail) & $reply $Status ([ordered]@{ type = 'https://tools.ietf.org/html/rfc9110'; title = 'Bad Request'; status = $Status; detail = $Detail }) }
 
         $key = "$method $path"
-        if ($fake.Unreachable.ContainsKey($key)) { throw [System.Net.Http.HttpRequestException]::new($fake.Unreachable[$key]) }
+        # No response: thrown exactly as Invoke-WebRequest does, with the HttpRequestMessage (and so the bearer token)
+        # as the error record's TargetObject. Left in $Error, Get-Error would print the token.
+        $cmdletError = {
+            param([System.Exception] $Exception, [string] $ErrorId)
+            $message = [System.Net.Http.HttpRequestMessage]::new([System.Net.Http.HttpMethod]::new($method), $uri)
+            if ($headers['Authorization']) { $null = $message.Headers.TryAddWithoutValidation('Authorization', [string] $headers['Authorization']) }
+            [System.Management.Automation.ErrorRecord]::new($Exception, "$ErrorId,Microsoft.PowerShell.Commands.InvokeWebRequestCommand",
+                [System.Management.Automation.ErrorCategory]::InvalidOperation, $message)
+        }
+        if ($fake.Unreachable.ContainsKey($key)) {
+            throw (& $cmdletError ([System.Net.Http.HttpRequestException]::new($fake.Unreachable[$key])) 'WebCmdletWebResponseException')
+        }
+        if ($fake.Redirect.ContainsKey($key)) {
+            throw (& $cmdletError ([System.InvalidOperationException]::new('Operation is not valid due to the current state of the object.')) 'MaximumRedirectExceeded')
+        }
         if ($fake.Overrides.ContainsKey($key)) {
             $override = $fake.Overrides[$key]
             return [pscustomobject]@{ StatusCode = $override.Status; Content = [string] $override.Content; Headers = @{} }
@@ -136,7 +154,7 @@ BeforeAll {
                     $persona = ([string] $row.personaHandle).Trim().TrimStart('@')
                     $result = [ordered]@{ rowNumber = $number; name = $name; status = 'created'; personaCreated = $false }
                     if (-not $name.Trim()) { $result['status'] = 'failed'; $result['message'] = 'name is required.'; $rows.Add($result); continue }
-                    if ($persona -and $persona -ne 'FulcoEM') {
+                    if ($persona -and $persona -ne 'ExampleOrg') {
                         if ($signIn) { $result['signInName'] = $signIn }
                         $result['status'] = 'failed'; $result['message'] = "personaHandle '$persona' is not an org persona in this exercise."
                         $rows.Add($result); continue
@@ -156,6 +174,11 @@ BeforeAll {
                         dryRun = $dryRun; totalRows = $rows.Count; createdCount = (& $count 'created'); updatedCount = (& $count 'updated')
                         unchangedCount = (& $count 'unchanged'); failedCount = (& $count 'failed'); rows = @($rows)
                     })
+            }
+            'GET /api/staff/day-word' {
+                $status = [ordered]@{ timeZone = 'America/Chicago'; today = '2026-10-19'; todayEndsAt = '2026-10-20T05:00:00.0000000+00:00'; todaySet = $fake.WordSet; replacedCount = 0; upcoming = @() }
+                if ($fake.WordSet) { $status['setAt'] = '2026-10-19T12:30:00.0000000+00:00'; $status['setByName'] = 'Casey Controller' }
+                return & $reply 200 $status
             }
             'PUT /api/staff/day-word' {
                 $put = ConvertFrom-Json $bodyText -AsHashtable
@@ -201,7 +224,7 @@ BeforeAll {
 
     # The good testers: one with an org persona, one derived sign-in name, one already on the roster.
     $script:GoodRows = @(
-        'Jane Smith,Fulton EM,PIO,jane@example.test,FulcoEM,'
+        'Jane Smith,Example County,PIO,jane@example.test,ExampleOrg,'
         'Bob Jones,Red Cross,Volunteer,,,'
         'Carla Diaz,City,Planner,,,cdiaz'
     )
@@ -271,7 +294,7 @@ Describe 'Import-Roster.ps1' {
         It 'isolation: no request after the login carries an exercise id (the session decides)' {
             $null = Invoke-ImportRoster @{ CsvPath = (New-RosterCsv $script:GoodRows); OutFile = $script:OutFile; GenerateWord = $true }
             $staff = @($global:ImportRosterFake.Calls | Where-Object { $_.Path -notin '/api/exercise-context', '/api/auth/staff/login' })
-            $staff.Count | Should -Be 4
+            $staff.Count | Should -Be 5
             foreach ($call in $staff) {
                 "$($call.Query) $($call.Body)" | Should -Not -Match 'exercise' -Because "$($call.Method) $($call.Path)"
                 $call.Query | Should -Not -Match $global:ImportRosterFake.ExerciseId
@@ -280,24 +303,30 @@ Describe 'Import-Roster.ps1' {
 
         It 'every request: no redirects, the web cmdlet''s Debug and Verbose off, HTTP errors returned not thrown' {
             $null = Invoke-ImportRoster @{ CsvPath = (New-RosterCsv $script:GoodRows); OutFile = $script:OutFile; GenerateWord = $true; Verbose = $true; Debug = $true }
-            $global:ImportRosterFake.Calls.Count | Should -Be 6
+            $global:ImportRosterFake.Calls.Count | Should -Be 7
             foreach ($call in $global:ImportRosterFake.Calls) {
-                $call.MaximumRedirection | Should -Be 0 -Because "$($call.Method) $($call.Path)"
-                $call.Debug | Should -BeFalse -Because "$($call.Method) $($call.Path)"
-                $call.Verbose | Should -BeFalse -Because "$($call.Method) $($call.Path)"
-                $call.SkipHttpErrorCheck | Should -BeTrue -Because "$($call.Method) $($call.Path)"
+                $what = "$($call.Method) $($call.Path)"
+                $call.MaximumRedirection | Should -Be 0 -Because $what
+                # Present AND false: an absent switch would inherit the script's -Debug/-Verbose.
+                $call.HasDebug | Should -BeTrue -Because "$what must pass -Debug:`$false explicitly"
+                [bool] $call.Debug | Should -BeFalse -Because $what
+                $call.HasVerbose | Should -BeTrue -Because "$what must pass -Verbose:`$false explicitly"
+                [bool] $call.Verbose | Should -BeFalse -Because $what
+                $call.SkipHttpErrorCheck | Should -BeTrue -Because $what
             }
         }
 
-        It '-GenerateWord sends PUT /api/staff/day-word {} after the import; -Word sends { word }' {
+        It '-GenerateWord checks GET /api/staff/day-word, then sends PUT {} after the import; -Word sends { word }' {
             $null = Invoke-ImportRoster @{ CsvPath = (New-RosterCsv $script:GoodRows); OutFile = $script:OutFile; GenerateWord = $true }
             $put = Get-FakeCall PUT '/api/staff/day-word'
             $put.Count | Should -Be 1
             $put[0].Body | Should -BeExactly '{}'
             $put[0].Authorized | Should -BeTrue
-            (Get-CallSequence)[-2..-1] | Should -Be @('PUT /api/staff/day-word', 'POST /api/auth/logout')
+            (Get-FakeCall GET '/api/staff/day-word')[0].Authorized | Should -BeTrue
+            (Get-CallSequence)[-3..-1] | Should -Be @('GET /api/staff/day-word', 'PUT /api/staff/day-word', 'POST /api/auth/logout')
 
             $global:ImportRosterFake.Calls.Clear()
+            $global:ImportRosterFake.WordSet = $false     # another day: no word set yet
             $null = Invoke-ImportRoster @{ CsvPath = (New-RosterCsv $script:GoodRows); OutFile = $script:OutFile; Word = 'Harbor Lantern' }
             (Get-FakeCall PUT '/api/staff/day-word')[0].Body | Should -BeExactly '{"word":"Harbor Lantern"}'
         }
@@ -368,34 +397,52 @@ Describe 'Import-Roster.ps1' {
             (Get-Content -LiteralPath $script:OutFile -Raw) | Should -Not -Match 'ooutsider'   # on the roster, not in the file
         }
 
-        It 'prefixes '' to every cell that begins with =, +, -, @, a tab or a CR (formula injection)' {
+        It 'formula injection: the file and the clipboard escape every dangerous cell, and quote every cell' {
             # Names come from outside agencies. These people are already on the roster (the server stores names as
             # typed), so the file's rows match them by sign-in name and the names in the links file are theirs.
-            $hostile = [ordered]@{
-                eq1 = '=HYPERLINK("http://evil.test","x")'; plus1 = '+1+cmd'; minus1 = '-2+3'; at1 = '@SUM(A1)'
-                tab1 = "`tTabbed"; cr1 = "`rCarriage"; safe1 = 'Ann =Equals Inside'
-            }
-            foreach ($signIn in $hostile.Keys) { $global:ImportRosterFake.Participants.Add((New-FakeEntry $hostile[$signIn] $signIn)) }
-            $csv = New-RosterCsv @($hostile.Keys | ForEach-Object { "Placeholder $_,,,,,$_" })
+            # Expected = the cell's value once a spreadsheet has parsed the quoting.
+            $zwsp = [string] [char] 0x200B
+            $hostile = @(
+                @{ SignIn = 'eq1'; Name = '=HYPERLINK("http://evil.test","x")'; Expected = '''=HYPERLINK("http://evil.test","x")' }
+                @{ SignIn = 'plus1'; Name = '+1+cmd'; Expected = '''+1+cmd' }
+                @{ SignIn = 'minus1'; Name = '-2+3'; Expected = '''-2+3' }
+                @{ SignIn = 'at1'; Name = '@SUM(A1)'; Expected = '''@SUM(A1)' }
+                @{ SignIn = 'tab1'; Name = "`tTabbed"; Expected = "'`tTabbed" }
+                @{ SignIn = 'cr1'; Name = "`rCarriage"; Expected = "'`rCarriage" }
+                @{ SignIn = 'space1'; Name = '  =1+1'; Expected = '''  =1+1' }                   # S-002: after spaces
+                @{ SignIn = 'zw1'; Name = "$zwsp=1+1"; Expected = "'$zwsp=1+1" }                 # S-002: after a format character
+                @{ SignIn = 'quote1'; Name = '"=2+2'; Expected = '"=2+2' }                        # W-005: quoted, so it stays text
+                @{ SignIn = 'safe1'; Name = 'Ann =Equals Inside'; Expected = 'Ann =Equals Inside' }
+            )
+            foreach ($case in $hostile) { $global:ImportRosterFake.Participants.Add((New-FakeEntry $case.Name $case.SignIn)) }
+            $csv = New-RosterCsv @($hostile | ForEach-Object { "Placeholder $($_.SignIn),,,,,$($_.SignIn)" })
             $run = Invoke-ImportRoster @{ CsvPath = $csv; OutFile = $script:OutFile; CopyLinks = $true }
             $run.Code | Should -Be 0
             $text = [Text.Encoding]::UTF8.GetString([System.IO.File]::ReadAllBytes($script:OutFile)).TrimStart([char] 0xFEFF)
-            foreach ($signIn in $hostile.Keys) {
-                $url = ($global:ImportRosterFake.Participants | Where-Object signInName -eq $signIn).link['joinUrl']
-                $name = $hostile[$signIn]
-                $cell = if ($name -match '^[=+\-@\t\r]') { "'" + $name } else { $name }
-                $text | Should -Match ([regex]::Escape(('"{0}","{1}","{2}"' -f $cell.Replace('"', '""'), $signIn, $url))) -Because $signIn
+            $dangerous = '^[\s\p{Cc}\p{Cf}]*[=+\-@]'
+            foreach ($case in $hostile) {
+                $url = ($global:ImportRosterFake.Participants | Where-Object signInName -eq $case.SignIn).link['joinUrl']
+                # The file: the exact quoted cells, embedded quotes doubled.
+                $text | Should -Match ([regex]::Escape(('"{0}","{1}","{2}"' -f $case.Expected.Replace('"', '""'), $case.SignIn, $url))) -Because $case.SignIn
+                $case.Expected | Should -Not -Match $dangerous -Because "$($case.SignIn) must never parse as a formula"
             }
-            $text | Should -Not -Match '(^|,|\n)"[=+\-@\t\r]'      # no cell starts with a formula character
-            # The clipboard copy is escaped the same way (a tab or line break inside a cell becomes a space).
-            $clip = $global:ImportRosterClipboard[0]
-            $clip | Should -Match "(?m)^'=HYPERLINK"
-            $clip | Should -Match "(?m)^' Tabbed`t"
-            $clip | Should -Match "(?m)^' Carriage`t"
-            $clip | Should -Match "(?m)^Ann =Equals Inside`t"
+            # The clipboard: tab-separated, the same quoting and escaping (a tab or line break inside a cell is a space).
+            $rows = @(ConvertFrom-Csv -InputObject $global:ImportRosterClipboard[0] -Delimiter "`t")
+            $rows.Count | Should -Be $hostile.Count
+            foreach ($case in $hostile) {
+                $row = $rows | Where-Object signInName -eq $case.SignIn
+                $row.name | Should -BeExactly ($case.Expected -replace '[\t\r\n]', ' ') -Because "clipboard $($case.SignIn)"
+                $row.name | Should -Not -Match $dangerous
+            }
+            $global:ImportRosterClipboard[0] | Should -Match ([regex]::Escape("`"`"`"=2+2`"`t`"quote1`"`t"))
         }
 
         It 'ConvertTo-CsvCell: <Label>' -ForEach @(
+            @{ Label = 'leading spaces then = are escaped'; Value = '  =1'; Cell = '"''  =1"' }
+            @{ Label = 'a zero-width space then + is escaped'; Value = "$([char] 0x200B)+1"; Cell = "`"'$([char] 0x200B)+1`"" }
+            @{ Label = 'a control character then @ is escaped'; Value = "$([char] 7)@x"; Cell = "`"'$([char] 7)@x`"" }
+            @{ Label = 'a leading " is quoted, so = stays inside a text field'; Value = '"=1'; Cell = '"""=1"' }
+            @{ Label = 'leading spaces alone are left alone'; Value = ' Ann'; Cell = '" Ann"' }
             @{ Label = 'leading = is escaped'; Value = '=1+1'; Cell = '"''=1+1"' }
             @{ Label = 'leading + is escaped'; Value = '+1'; Cell = '"''+1"' }
             @{ Label = 'leading - is escaped'; Value = '-1'; Cell = '"''-1"' }
@@ -407,6 +454,17 @@ Describe 'Import-Roster.ps1' {
             @{ Label = 'a join URL is left alone'; Value = 'https://site.test/join/abc'; Cell = '"https://site.test/join/abc"' }
         ) {
             ConvertTo-CsvCell $Value | Should -BeExactly $Cell
+        }
+
+        It 'ConvertTo-LinksClipboardText quotes and escapes every cell, header included (W-005)' {
+            $text = ConvertTo-LinksClipboardText -Links @(
+                [pscustomobject]@{ Name = '"=1+1'; SignInName = 'q1'; JoinUrl = 'https://site.test/join/a' }
+                [pscustomobject]@{ Name = "=cmd`tx"; SignInName = 'e1'; JoinUrl = '' }
+            )
+            $lines = $text -split '\r?\n'
+            $lines[0] | Should -BeExactly "`"name`"`t`"signInName`"`t`"joinUrl`""
+            $lines[1] | Should -BeExactly "`"`"`"=1+1`"`t`"q1`"`t`"https://site.test/join/a`""
+            $lines[2] | Should -BeExactly "`"'=cmd x`"`t`"e1`"`t`"`""
         }
 
         It 'is readable and writable by the current user only (mode 600)' -Skip:$IsWindows {
@@ -482,10 +540,10 @@ Describe 'Import-Roster.ps1' {
             $run = Invoke-ImportRoster @{ CsvPath = (New-RosterCsv $script:GoodRows); OutFile = $script:OutFile; CopyLinks = $true }
             $global:ImportRosterClipboard.Count | Should -Be 1
             $lines = $global:ImportRosterClipboard[0] -split '\r?\n'
-            $lines[0] | Should -BeExactly "name`tsignInName`tjoinUrl"
+            $lines[0] | Should -BeExactly "`"name`"`t`"signInName`"`t`"joinUrl`""
             $lines.Count | Should -Be 4
             foreach ($p in @($global:ImportRosterFake.Participants | Where-Object signInName -in 'jsmith', 'bjones', 'cdiaz')) {
-                $lines | Should -Contain ("{0}`t{1}`t{2}" -f $p.name, $p.signInName, $p.link['joinUrl'])
+                $lines | Should -Contain ("`"{0}`"`t`"{1}`"`t`"{2}`"" -f $p.name, $p.signInName, $p.link['joinUrl'])
             }
             $run.Text | Should -Match 'also on the clipboard'
             foreach ($url in Get-FakeJoinUrls) { $run.Text.Contains($url) | Should -BeFalse }
@@ -501,7 +559,87 @@ Describe 'Import-Roster.ps1' {
         }
     }
 
-    Describe '-DryRun' {
+    Describe '-OutFile is checked before anything is sent (CR-001, S-003, W-002)' {
+    It 'a non-empty folder is refused, with a Join-Path hint, and survives intact' {
+        $folder = Join-Path $TestDrive 'keep-me'
+        New-Item -ItemType Directory -Path (Join-Path $folder 'nested') -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $folder 'notes.txt') -Value 'precious'
+        Set-Content -LiteralPath (Join-Path $folder 'nested/deep.txt') -Value 'also precious'
+        $run = Invoke-ImportRoster @{ CsvPath = (New-RosterCsv $script:GoodRows); OutFile = $folder }
+        $run.Code | Should -Be 1
+        $global:ImportRosterFake.Calls.Count | Should -Be 0
+        $run.Red -join "`n" | Should -Match "is a folder\. Name a file in it instead, e\.g\. -OutFile \(Join-Path '.+keep-me' 'roster-links\.csv'\)\. Nothing was sent\."
+        Get-Content -LiteralPath (Join-Path $folder 'notes.txt') | Should -Be 'precious'
+        Get-Content -LiteralPath (Join-Path $folder 'nested/deep.txt') | Should -Be 'also precious'
+    }
+
+    It 'the CSV itself is refused: <Name>' -ForEach @(
+        @{ Name = 'the same path'; Spell = { param($Csv) $Csv } }
+        @{ Name = 'another spelling of it'; Spell = { param($Csv) Join-Path (Split-Path -Parent $Csv) '.' (Split-Path -Leaf $Csv) } }
+        @{ Name = 'a symbolic link to it'; Link = $true; Spell = { param($Csv) $link = Join-Path $TestDrive 'link-to-csv.csv'; New-Item -ItemType SymbolicLink -Path $link -Target $Csv -Force | Out-Null; $link } }
+    ) {
+        if ($Link -and $IsWindows) { Set-ItResult -Skipped -Because 'symbolic links need elevation on Windows' }
+        $csv = New-RosterCsv $script:GoodRows
+        $before = Get-Content -LiteralPath $csv -Raw
+        $run = Invoke-ImportRoster @{ CsvPath = $csv; OutFile = (& $Spell $csv) }
+        $run.Code | Should -Be 1
+        $global:ImportRosterFake.Calls.Count | Should -Be 0
+        $run.Red -join "`n" | Should -Match 'is the roster CSV itself, which the links file would overwrite\. Choose another -OutFile\. Nothing was sent\.'
+        Get-Content -LiteralPath $csv -Raw | Should -BeExactly $before
+    }
+
+    It 'a path under a file (not a folder) is refused' {
+        $file = Join-Path $TestDrive 'a-file.txt'
+        Set-Content -LiteralPath $file -Value 'x'
+        $run = Invoke-ImportRoster @{ CsvPath = (New-RosterCsv $script:GoodRows); OutFile = (Join-Path $file 'links.csv') }
+        $run.Code | Should -Be 1
+        $global:ImportRosterFake.Calls.Count | Should -Be 0
+        $run.Red -join "`n" | Should -Match "is a file, not a folder"
+        Get-Content -LiteralPath $file | Should -Be 'x'
+    }
+
+    It 'a FIFO (not a regular file) is refused and left alone' -Skip:$IsWindows {
+        $fifo = Join-Path $TestDrive 'a-pipe'
+        & mkfifo -- $fifo
+        $run = Invoke-ImportRoster @{ CsvPath = (New-RosterCsv $script:GoodRows); OutFile = $fifo }
+        $run.Code | Should -Be 1
+        $global:ImportRosterFake.Calls.Count | Should -Be 0
+        $run.Red -join "`n" | Should -Match 'is not a regular file'
+        [string] (Get-Item -LiteralPath $fifo -Force).UnixStat.ItemType | Should -Be 'NamedPipe'
+    }
+
+    It 'missing folders on the way are created, and the file is written' {
+        $deep = Join-Path $TestDrive 'a/b/c/links.csv'
+        $run = Invoke-ImportRoster @{ CsvPath = (New-RosterCsv $script:GoodRows); OutFile = $deep }
+        $run.Code | Should -Be 0
+        @(Import-Csv -LiteralPath $deep).Count | Should -Be 3
+        @(Get-ChildItem -LiteralPath (Split-Path -Parent $deep) -Force).Name | Should -Be @('links.csv')   # the probe file is gone
+    }
+
+    It 'a links file that cannot be created: the import is saved, a readable reason, exit 1, signed out (W-002)' {
+        Mock New-PrivateFileStream {
+            throw [System.Management.Automation.MethodInvocationException]::new(
+                'Exception calling ".ctor" with "2" argument(s): "Access to the path is denied."', [System.UnauthorizedAccessException]::new('Access to the path is denied.'))
+        }
+        $run = Invoke-ImportRoster @{ CsvPath = (New-RosterCsv $script:GoodRows); OutFile = $script:OutFile }
+        $run.Code | Should -Be 1
+        $run.Red -join "`n" | Should -Match ('The import was saved, but the links file could not be written \(permission denied on ' + [regex]::Escape($script:OutFile) +
+            '\)\. Run again with the same file and a writable -OutFile; every row comes back unchanged\.')
+        $run.Text | Should -Not -Match 'Exception calling|MethodInvocationException|\.ctor'
+        (Get-CallSequence)[-1] | Should -Be 'POST /api/auth/logout'
+        Test-Path -LiteralPath $script:OutFile | Should -BeFalse
+    }
+
+    It 'a write that fails half-way leaves no partial links file behind (W-002)' {
+        Mock New-PrivateFileStream { [System.IO.File]::WriteAllText($Path, 'partial'); [System.IO.FileStream]::new($Path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read) }
+        $run = Invoke-ImportRoster @{ CsvPath = (New-RosterCsv $script:GoodRows); OutFile = $script:OutFile }
+        $run.Code | Should -Be 1
+        $run.Red -join "`n" | Should -Match 'The import was saved, but the links file could not be written \(Stream does not support writing\)'
+        Test-Path -LiteralPath $script:OutFile | Should -BeFalse
+    }
+}
+
+Describe '-DryRun' {
         It 'sends ?dryRun=true, then writes, copies and sets nothing (and reads no roster)' {
             $outDir = Join-Path $TestDrive 'dry-out'
             $out = Join-Path $outDir 'links.csv'
@@ -527,11 +665,41 @@ Describe 'Import-Roster.ps1' {
             $run.Text | Should -Match 'https://pulse-uat\.cobrasoftware\.com/login'
         }
 
-        It 'says so when it replaced the word already set that day' {
+        It 'a word already set today is left alone: no PUT, nothing printed or copied, and it says so (exit 0)' {
             $global:ImportRosterFake.WordSet = $true
-            $run = Invoke-ImportRoster @{ CsvPath = (New-RosterCsv $script:GoodRows); OutFile = $script:OutFile; Word = 'Harbor Lantern' }
+            $run = Invoke-ImportRoster @{ CsvPath = (New-RosterCsv $script:GoodRows); OutFile = $script:OutFile; GenerateWord = $true }
+            $run.Code | Should -Be 0
+            (Get-FakeCall GET '/api/staff/day-word').Count | Should -Be 1
+            (Get-FakeCall PUT '/api/staff/day-word').Count | Should -Be 0
+            $run.Text | Should -Match "Today's word for 2026-10-19 was already set by Casey Controller at .+, so it was NOT changed"
+            $run.Text | Should -Match 'run again with -ReplaceWord'
+            $run.Text.Contains($global:ImportRosterFake.GeneratedWord) | Should -BeFalse
+            Should -Invoke Set-Clipboard -Times 0 -Exactly
+            (Get-CallSequence)[-1] | Should -Be 'POST /api/auth/logout'
+        }
+
+        It '-ReplaceWord replaces it, and says the earlier word stopped working' {
+            $global:ImportRosterFake.WordSet = $true
+            $run = Invoke-ImportRoster @{ CsvPath = (New-RosterCsv $script:GoodRows); OutFile = $script:OutFile; Word = 'Harbor Lantern'; ReplaceWord = $true }
+            $run.Code | Should -Be 0
+            (Get-FakeCall PUT '/api/staff/day-word')[0].Body | Should -BeExactly '{"word":"Harbor Lantern"}'
             $run.Text | Should -Match 'REPLACED the word already set'
             $run.Text | Should -Match '\(as given'
+        }
+
+        It '-ReplaceWord without -GenerateWord or -Word is refused before anything is sent' {
+            $run = Invoke-ImportRoster @{ CsvPath = (New-RosterCsv $script:GoodRows); OutFile = $script:OutFile; ReplaceWord = $true }
+            $run.Code | Should -Be 1
+            $run.Text | Should -Match '-ReplaceWord goes with -GenerateWord or -Word'
+            $global:ImportRosterFake.Calls.Count | Should -Be 0
+        }
+
+        It 'the failed-row hint warns against re-running with -GenerateWord/-Word, only when they were given' {
+            $csv = New-RosterCsv ($script:GoodRows + 'Nora Nope,,,,NotAPersona,')
+            $run = Invoke-ImportRoster @{ CsvPath = $csv; OutFile = $script:OutFile; GenerateWord = $true }
+            $run.Red -join "`n" | Should -Match "run it without -GenerateWord/-Word unless you mean to change today's word"
+            $run = Invoke-ImportRoster @{ CsvPath = $csv; OutFile = $script:OutFile }
+            $run.Red -join "`n" | Should -Not -Match 'GenerateWord'
         }
 
         It '-GenerateWord with -Word is refused before anything is sent' {
@@ -620,10 +788,20 @@ Describe 'Import-Roster.ps1' {
         }
 
         It 'a connection failure explains -ApiHost; nothing else is sent' {
-            $global:ImportRosterFake.Unreachable['GET /api/exercise-context'] = 'Name or service not known (nope.example.test:443)'
+            $global:ImportRosterFake.Unreachable['GET /api/exercise-context'] = 'Name or service not known (nope.example.test:443).'
             $run = Invoke-ImportRoster @{ CsvPath = (New-RosterCsv $script:GoodRows); OutFile = $script:OutFile; ApiHost = 'nope.example.test' }
             Assert-CleanFailure $run
-            $run.Red -join "`n" | Should -Match 'No answer from the API to GET /api/exercise-context: Name or service not known.*Check -ApiHost'
+            $run.Red -join "`n" | Should -Match 'No answer from the API to GET /api/exercise-context: Name or service not known \(nope\.example\.test:443\)\. Check -ApiHost'
+            $run.Red -join "`n" | Should -Not -Match '\.\.'
+            Get-CallSequence | Should -Be @('GET /api/exercise-context')
+        }
+
+        It 'a redirect (PowerShell 7.6: MaximumRedirectExceeded) is not followed and explains -ApiHost (S-001)' {
+            $global:ImportRosterFake.Redirect['GET /api/exercise-context'] = $true
+            $run = Invoke-ImportRoster @{ CsvPath = (New-RosterCsv $script:GoodRows); OutFile = $script:OutFile }
+            Assert-CleanFailure $run
+            $run.Red -join "`n" | Should -Match 'GET /api/exercise-context answered a redirect\. The API never redirects, so it was not followed\. Check -ApiHost'
+            $run.Text | Should -Not -Match 'Operation is not valid'
             Get-CallSequence | Should -Be @('GET /api/exercise-context')
         }
 
@@ -707,7 +885,7 @@ Describe 'Import-Roster.ps1' {
                 Should -Be @('/api/auth/staff/login')
             @($global:ImportRosterFake.Calls | Where-Object { $_.Body.Contains($global:ImportRosterFake.Token) -or $_.Uri.Contains($global:ImportRosterFake.Token) }).Count | Should -Be 0
             @($global:ImportRosterFake.Calls | Where-Object Authorized | ForEach-Object { "$($_.Method) $($_.Path)" }) |
-                Should -Be @('POST /api/staff/roster/import', 'GET /api/staff/roster', 'PUT /api/staff/day-word', 'POST /api/auth/logout')
+                Should -Be @('POST /api/staff/roster/import', 'GET /api/staff/roster', 'GET /api/staff/day-word', 'PUT /api/staff/day-word', 'POST /api/auth/logout')
         }
 
         It 'failures with -Verbose -Debug (<Name>) leak nothing either' -ForEach @(
@@ -715,6 +893,8 @@ Describe 'Import-Roster.ps1' {
             @{ Name = 'dropped upload'; Setup = { $global:ImportRosterFake.Unreachable['POST /api/staff/roster/import'] = 'The response ended prematurely.' } }
             @{ Name = '400 upload'; Setup = { $global:ImportRosterFake.Overrides['POST /api/staff/roster/import'] = @{ Status = 400; Content = '{"detail":"too many rows"}' } } }
             @{ Name = 'failed roster read'; Setup = { $global:ImportRosterFake.Overrides['GET /api/staff/roster'] = @{ Status = 503; Content = '' } } }
+            @{ Name = 'redirected upload'; Setup = { $global:ImportRosterFake.Redirect['POST /api/staff/roster/import'] = $true } }
+            @{ Name = 'dropped word check'; Setup = { $global:ImportRosterFake.Unreachable['GET /api/staff/day-word'] = 'Connection reset by peer' } }
         ) {
             & $Setup
             $before = $global:Error.Count
@@ -725,7 +905,19 @@ Describe 'Import-Roster.ps1' {
             Assert-NoSecret ((Get-Error -Newest 5 -ErrorAction SilentlyContinue) | Out-String) 'Get-Error'
         }
 
-        It 'with no PULSE_STAFF_SECRET, the secret is read through az (usernames first, then only that entry) and never shown' {
+        It 'the caller''s $PSDefaultParameterValues do not reach the script''s commands (S-004)' {
+    $saved = $global:PSDefaultParameterValues
+    try {
+        $global:PSDefaultParameterValues = @{ 'Write-Verbose:Verbose' = $true }
+        $run = Invoke-ImportRoster @{ CsvPath = (New-RosterCsv $script:GoodRows); OutFile = $script:OutFile }
+        $run.Code | Should -Be 0
+        @($run.Records | Where-Object { $_ -is [System.Management.Automation.VerboseRecord] -and "$_" -match '^(GET|POST|PUT) /api/|^Staff secret|^Exercise ' }).Count |
+            Should -Be 0 -Because 'a profile default must not switch on the script''s verbose output'
+    }
+    finally { $global:PSDefaultParameterValues = $saved }
+}
+
+It 'with no PULSE_STAFF_SECRET, the secret is read through az (usernames first, then only that entry) and never shown' {
             $env:PULSE_STAFF_SECRET = $null
             $global:ImportRosterAz = [System.Collections.Generic.List[string]]::new()
             Mock Invoke-Az {
@@ -765,14 +957,20 @@ Describe 'Import-Roster.ps1' {
             $help = Get-Help $script:ScriptFile -Full
             $help.Synopsis | Should -Match 'Provisions UAT testers from a CSV'
             $names = @($help.parameters.parameter | ForEach-Object name)
-            foreach ($name in 'CsvPath', 'DryRun', 'OutFile', 'CopyLinks', 'GenerateWord', 'Word', 'CheckOnly', 'StaffUsername', 'ApiHost', 'SiteUrl', 'Subscription', 'ResourceGroup', 'WebAppName') {
+            foreach ($name in 'CsvPath', 'DryRun', 'OutFile', 'CopyLinks', 'GenerateWord', 'Word', 'ReplaceWord', 'CheckOnly', 'StaffUsername', 'ApiHost', 'SiteUrl', 'Subscription', 'ResourceGroup', 'WebAppName') {
                 $names | Should -Contain $name
                 (($help.parameters.parameter | Where-Object name -eq $name).description | Out-String).Trim() | Should -Not -BeNullOrEmpty -Because $name
             }
             @($help.examples.example).Count | Should -BeGreaterOrEqual 3
         }
 
-        It 'New-DemoParticipant.ps1''s help points testers at Import-Roster.ps1' {
+        It 'Get-Help renders <Script>''s description (it needs a blank line after #Requires)' -ForEach @(
+    @{ Script = 'Import-Roster.ps1' }, @{ Script = 'New-DemoParticipant.ps1' }, @{ Script = 'Copy-StaffSecret.ps1' }, @{ Script = 'Clear-DemoContent.ps1' }
+) {
+    ((Get-Help (Join-Path $PSScriptRoot $Script) -Full).description | Out-String).Trim() | Should -Not -BeNullOrEmpty
+}
+
+It 'New-DemoParticipant.ps1''s help points testers at Import-Roster.ps1' {
             $help = Get-Help (Join-Path $PSScriptRoot 'New-DemoParticipant.ps1') -Full
             ($help.description | Out-String) | Should -Match 'Import-Roster\.ps1'
         }

@@ -1,4 +1,5 @@
 #Requires -Version 7.0
+
 <#
 .SYNOPSIS
     Copies a UAT staff login's secret to the clipboard, so you can sign in without it ever being shown.

@@ -43,20 +43,24 @@ console (and the same authorization), rather than the ops bootstrap route. It ne
       for the staff secret and tokens; the only secrets it writes are the participant join links, to the gitignored
       local file the operator asked for, with the file's permissions restricted to the current user where the platform
       supports it.
-- [ ] **Isolation:** no exercise id is ever passed; the staff session's active exercise decides where people land.
+- [ ] **Isolation:** the operator never names an exercise; the login sends the host's resolved exercise (from
+      `GET /api/exercise-context`), as `StaffSignInPage` does, and no roster or day-word request carries an exercise id:
+      the staff session's active exercise decides where people land.
 
 ## Out of Scope
 
-Replacing `New-DemoParticipant.ps1`. Provisioning staff users. Bulk reissue or revoke. Emailing links (13). A Pester
-test harness (none exists for these scripts). Running against anything but the UAT defaults without explicit parameters.
+Replacing `New-DemoParticipant.ps1`. Provisioning staff users. Bulk reissue or revoke. Emailing links (13). Running
+against anything but the UAT defaults without explicit parameters. (A Pester harness is now **in scope**: see Tests.)
 
 ## Technical Notes
 
-Script, `scripts/uat/Import-Roster.ps1`, dot-sourcing `Common.ps1` (`Invoke-Az`). PowerShell 7 `Invoke-WebRequest
+Script, `scripts/uat/Import-Roster.ps1`, dot-sourcing `Common.ps1` (`Invoke-Az`), PowerShell 7.4+ (the links file is
+created mode 600 from its first byte, which needs .NET 8). PowerShell 7 `Invoke-WebRequest
 -Form @{ file = Get-Item $CsvPath }` does the multipart upload. Defaults (`-ApiHost`, `-SiteUrl`, `-Subscription`,
 `-ResourceGroup`, `-WebAppName`) match `New-DemoParticipant.ps1`. Add `-CheckOnly` only if it is free (sign in, call
-`GET /api/staff/roster`, report the count). The staff login body is `{ username, secret }`. See `implementation.md`
-(story 14).
+`GET /api/staff/roster`, report the count). The staff login body is `{ username, secret, exerciseId }`
+(`StaffLoginService` refuses a login without `exerciseId` with a 400); `exerciseId` is the host's, from
+`GET /api/exercise-context`. See `implementation.md` (story 14).
 
 ## Dependencies
 
@@ -64,6 +68,11 @@ Backend stories 02, 03 and 05 deployed to UAT (the seam commit and the freeze de
 
 ## Tests
 
-Manual (no harness for these scripts): `-DryRun` with a CSV containing a bad persona handle (the row fails, nothing
+Pester (in scope since the `Seed-DemoContent.Tests.ps1` precedent): `scripts/uat/Import-Roster.Tests.ps1`, Pester 5
+with no network (an in-memory fake API behind a mocked `Invoke-WebRequest`), covering the request shapes, exit codes,
+the links file (contents, formula escaping, permissions, the `-OutFile` checks), `-DryRun`, today's word, sign-out on
+failure, readable errors, and no secret, token or join link in any output stream or `$Error`.
+
+Manual, recorded in the PR: `-DryRun` with a CSV containing a bad persona handle (the row fails, nothing
 is created); a real import (five rows created, file written, no link on screen); the same file again (five
 `unchanged`); `-GenerateWord`; a wrong staff secret (clean error, exit 1). Record the run in the PR.

@@ -1,4 +1,4 @@
-#Requires -Version 7.0
+#Requires -Version 7.4
 
 <#
 .SYNOPSIS
@@ -20,8 +20,10 @@
       4. After a real import, reads the roster (GET /api/staff/roster) and writes name, signInName and joinUrl
          for every participant in the file to -OutFile. It prints only the file's path, never a link. With
          -CopyLinks it also puts the links on the clipboard.
-      5. With -GenerateWord or -Word, sets today's word (PUT /api/staff/day-word), prints it once so it can be
-         read out, and copies it to the clipboard.
+      5. With -GenerateWord or -Word, checks today's word (GET /api/staff/day-word). If none is set yet, or
+         with -ReplaceWord, sets it (PUT /api/staff/day-word), prints it once so it can be read out, and copies
+         it to the clipboard. A word that is already set is left alone, so a re-run cannot change it by
+         accident.
       6. Signs out (POST /api/auth/logout), always, even after a failure.
 
     Exit code: 0 when every row was created, updated or unchanged. 1 when any row failed, or on any error.
@@ -41,8 +43,8 @@
     personal sign-in credentials. They are written only to the -OutFile you asked for (gitignored by
     default), with permissions for the current user only (mode 600 on Linux and macOS, an owner-only ACL on
     Windows), and to the clipboard only with -CopyLinks. Each cell of that file that begins with =, +, -, @,
-    a tab or a carriage return is prefixed with ' so a spreadsheet never runs it as a formula (names come
-    from outside agencies).
+    a tab or a carriage return (or with =, +, - or @ after leading spaces or control characters) is prefixed
+    with ' so a spreadsheet never runs it as a formula (names come from outside agencies).
 
     Testers who need a single password-based login can still use New-DemoParticipant.ps1.
 
@@ -56,23 +58,31 @@
 .PARAMETER OutFile
     Where to write the links file after a real import. The default is
     scripts/uat/out/roster-links-<yyyyMMdd-HHmmss>.csv, which .gitignore excludes. If you choose another
-    path, keep it out of the repository. An existing file at the path is replaced.
+    path, keep it out of the repository. It must name a file, not a folder, and not the CSV itself; its
+    folder is created if needed. An existing file at the path is replaced. All of this is checked before
+    anything is sent.
 
 .PARAMETER CopyLinks
     Also put the links on the clipboard, as tab-separated name, signInName and joinUrl lines with a header.
     They paste into a spreadsheet as columns. They are never echoed. Clear the clipboard afterwards:
-    Set-Clipboard -Value $null. On Linux this needs xclip; without it, nothing is copied and the links are in
-    the file only.
+    Set-Clipboard -Value $null. Each cell is quoted and formula-safe, like the file. On Windows, clipboard
+    history (Win+V) and cloud clipboard sync keep their own copy of the links, which Set-Clipboard does not
+    clear: turn them off first, clear them afterwards, or leave out -CopyLinks. On Linux this needs xclip;
+    without it, nothing is copied and the links are in the file only.
 
 .PARAMETER GenerateWord
     After the import, have the server generate today's word. The word is printed once, so it can be read
-    out, and copied to the clipboard. Setting a word again the same day replaces the earlier one, and the
-    earlier word stops working.
+    out, and copied to the clipboard. If today's word is already set, it is left alone and nothing is printed
+    (a word cannot be shown again), unless -ReplaceWord is given.
 
 .PARAMETER Word
     After the import, set this text as today's word instead of a generated one. Like -GenerateWord, it is
-    printed once and copied. Typing a word on the command line leaves it in your shell history, so prefer
-    -GenerateWord.
+    printed once and copied, and an existing word for today is left alone unless -ReplaceWord is given.
+    Typing a word on the command line leaves it in your shell history, so prefer -GenerateWord.
+
+.PARAMETER ReplaceWord
+    With -GenerateWord or -Word: replace today's word even if it is already set. The earlier word stops
+    working at once, so anyone who has not signed in yet needs the new one.
 
 .PARAMETER CheckOnly
     Read-only. Signs in, reads the roster and reports how many participants it holds and how many have an
@@ -137,6 +147,7 @@ param(
     [Parameter(ParameterSetName = 'Import')] [switch] $CopyLinks,
     [Parameter(ParameterSetName = 'Import')] [switch] $GenerateWord,
     [Parameter(ParameterSetName = 'Import')] [ValidateNotNullOrEmpty()] [string] $Word,
+    [Parameter(ParameterSetName = 'Import')] [switch] $ReplaceWord,
 
     [Parameter(Mandatory, ParameterSetName = 'Check')] [switch] $CheckOnly,
 
@@ -152,6 +163,9 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+# The caller's parameter defaults never reach this script's commands (a '*:Verbose', an 'Invoke-WebRequest:...',
+# a 'Remove-Item:Recurse' in a profile): every command here runs with exactly the parameters written.
+$PSDefaultParameterValues = @{}
 . "$PSScriptRoot/Common.ps1"
 
 # The server's limit (RosterEndpoints.MaxImportFileBytes). Checked here too, so an oversized file fails before
@@ -179,11 +193,13 @@ function ConvertTo-FormulaSafeText {
     .SYNOPSIS
         Prefixes ' to text that begins with =, +, -, @, a tab or a carriage return, so that a spreadsheet shows
         it as text and never evaluates it as a formula (CSV/formula injection; story 02 Gate-1 W-3, recorded in
-        docs/features/easy-login/implementation.md). Names come from outside agencies.
+        docs/features/easy-login/implementation.md). Names come from outside agencies. Defence in depth: also
+        when =, +, - or @ follows leading white space, control or format characters, which some spreadsheets
+        skip before deciding a cell is a formula.
     #>
     param([AllowNull()] [object] $Value)
     $text = [string] $Value
-    if ($text -match '^[=+\-@\t\r]') { return "'" + $text }
+    if ($text -match '^(?:[\t\r]|[\s\p{Cc}\p{Cf}]*[=+\-@])') { return "'" + $text }
     return $text
 }
 
@@ -208,12 +224,14 @@ function ConvertTo-LinksClipboardText {
     <#
     .SYNOPSIS
         The -CopyLinks text: a header and one tab-separated line per participant, so it pastes into a
-        spreadsheet as columns. Formula-safe like the file. A tab or line break inside a cell becomes a space.
+        spreadsheet as columns. Every cell is quoted (embedded quotes doubled) and formula-safe, exactly like the
+        file, so a leading " cannot open a quoted field that lets a formula through. A tab or line break inside a
+        cell becomes a space, so each person stays on one line.
     #>
     param([AllowEmptyCollection()] [object[]] $Links)
-    $cell = { param($Value) (ConvertTo-FormulaSafeText $Value) -replace '[\t\r\n]', ' ' }
+    $cell = { param($Value) '"' + ((ConvertTo-FormulaSafeText $Value) -replace '[\t\r\n]', ' ').Replace('"', '""') + '"' }
     $lines = [System.Collections.Generic.List[string]]::new()
-    $lines.Add("name`tsignInName`tjoinUrl")
+    $lines.Add(((& $cell 'name'), (& $cell 'signInName'), (& $cell 'joinUrl')) -join "`t")
     foreach ($link in $Links) { $lines.Add(((& $cell $link.Name), (& $cell $link.SignInName), (& $cell $link.JoinUrl)) -join "`t") }
     return $lines -join [Environment]::NewLine
 }
@@ -230,6 +248,20 @@ function Format-Instant {
 }
 
 function Write-Failure([string] $Message) { Write-Host $Message -ForegroundColor Red }
+
+function Get-FileFailureReason {
+    <#
+    .SYNOPSIS
+        A short, readable reason for a failed file operation: the innermost exception (never PowerShell's
+        'Exception calling ... with ... argument(s)' wrapper), named for the common cases.
+    #>
+    param([Parameter(Mandatory)] [System.Exception] $Exception, [string] $Path)
+    $base = $Exception.GetBaseException()
+    if ($base -is [System.UnauthorizedAccessException]) { return "permission denied on $Path" }
+    if ($base -is [System.IO.DirectoryNotFoundException]) { return "a folder on the way to $Path does not exist" }
+    if ($base -is [System.IO.PathTooLongException]) { return "the path is too long: $Path" }
+    return (Get-PrintableText $base.Message -Max 200).TrimEnd('.')
+}
 
 # ═══════════════════════════════════════════════════════════════════════════════════════════════════════════
 # Local checks (nothing is sent when one fails)
@@ -264,11 +296,74 @@ function Get-RosterCsvFile {
     return $file
 }
 
+function Resolve-RealPath {
+    <#
+    .SYNOPSIS
+        The full path with every symbolic link (or junction) along it resolved, component by component; parts
+        that do not exist are appended as they are. Used to tell whether two paths name the same file.
+    #>
+    param([Parameter(Mandatory)] [string] $Path)
+    $full = [IO.Path]::GetFullPath($Path)
+    $current = [IO.Path]::GetPathRoot($full)
+    $pending = [System.Collections.Generic.List[string]]::new()
+    $pending.AddRange([string[]] $full.Substring($current.Length).Split([char[]] @('/', '\'), [StringSplitOptions]::RemoveEmptyEntries))
+    $hops = 0
+    while ($pending.Count -gt 0) {
+        $segment = $pending[0]; $pending.RemoveAt(0)
+        $next = [IO.Path]::Combine($current, $segment)
+        $item = Get-Item -LiteralPath $next -Force -ErrorAction Ignore
+        $target = if ($item -and $item.LinkType -in 'SymbolicLink', 'Junction') { [string] $item.LinkTarget } else { $null }
+        if (-not $target) { $current = $next; continue }
+        if (++$hops -gt 40) { throw "Too many symbolic links resolving '$Path'." }
+        $resolved = [IO.Path]::GetFullPath($(if ([IO.Path]::IsPathRooted($target)) { $target } else { [IO.Path]::Combine($current, $target) }))
+        $root = [IO.Path]::GetPathRoot($resolved)
+        $pending.InsertRange(0, [string[]] $resolved.Substring($root.Length).Split([char[]] @('/', '\'), [StringSplitOptions]::RemoveEmptyEntries))
+        $current = $root
+    }
+    return $current
+}
+
 function Resolve-LinksFilePath {
-    <# -OutFile as a full path, or the default: scripts/uat/out/roster-links-<yyyyMMdd-HHmmss>.csv (gitignored). #>
-    param([string] $OutFile)
-    if ($OutFile) { return $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($OutFile) }
-    return [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot 'out' ("roster-links-{0}.csv" -f (Get-Date -Format 'yyyyMMdd-HHmmss'))))
+    <#
+    .SYNOPSIS
+        -OutFile as a full path, or the default: scripts/uat/out/roster-links-<yyyyMMdd-HHmmss>.csv (gitignored).
+        Checked before anything is sent: it must not be a folder (Gate-1 CR-001), the CSV itself, or anything
+        but a regular file or a link; its folder must exist or be created here, and accept a new file.
+    #>
+    param([string] $OutFile, [Parameter(Mandatory)] [System.IO.FileInfo] $CsvFile)
+    $path = if ($OutFile) { $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($OutFile) }
+    else { [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot 'out' ("roster-links-{0}.csv" -f (Get-Date -Format 'yyyyMMdd-HHmmss')))) }
+
+    if (Test-Path -LiteralPath $path -PathType Container) {
+        throw "-OutFile '$path' is a folder. Name a file in it instead, e.g. -OutFile (Join-Path '$path' 'roster-links.csv'). Nothing was sent."
+    }
+    $comparison = if ($IsLinux) { [StringComparison]::Ordinal } else { [StringComparison]::OrdinalIgnoreCase }
+    if ([string]::Equals((Resolve-RealPath $path), (Resolve-RealPath $CsvFile.FullName), $comparison)) {
+        throw "-OutFile '$path' is the roster CSV itself, which the links file would overwrite. Choose another -OutFile. Nothing was sent."
+    }
+    # Only a regular file or a link is ever replaced (the link itself, never its target). UnixStat is lstat's view:
+    # UnixMode shows a FIFO as an ordinary file, ItemType does not.
+    $existing = Get-Item -LiteralPath $path -Force -ErrorAction Ignore
+    if ($existing -and $existing.UnixStat -and [string] $existing.UnixStat.ItemType -notin 'File', 'SymbolicLink') {
+        throw "-OutFile '$path' is not a regular file (it is a $($existing.UnixStat.ItemType)). Choose another -OutFile. Nothing was sent."
+    }
+
+    $parent = Split-Path -Parent $path
+    $ancestor = $parent
+    while ($ancestor -and -not (Test-Path -LiteralPath $ancestor)) { $ancestor = Split-Path -Parent $ancestor }
+    if ($ancestor -and -not (Test-Path -LiteralPath $ancestor -PathType Container)) {
+        throw "-OutFile '$path' cannot be written: '$ancestor' is a file, not a folder. Choose another -OutFile. Nothing was sent."
+    }
+    try {
+        if (-not (Test-Path -LiteralPath $parent -PathType Container)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
+        # Can a new file be made there? A probe file that is deleted as soon as it is closed.
+        $probe = Join-Path $parent ('.roster-links-probe-{0}.tmp' -f [guid]::NewGuid().ToString('N'))
+        [System.IO.FileStream]::new($probe, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None, 1, [System.IO.FileOptions]::DeleteOnClose).Dispose()
+    }
+    catch {
+        throw "-OutFile '$path' cannot be written ($(Get-FileFailureReason $_.Exception $parent)). Choose a writable -OutFile. Nothing was sent."
+    }
+    return $path
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════════════════════════════════
@@ -334,8 +429,14 @@ function Invoke-PulseApi {
     try {
         try { $response = Invoke-WebRequest @request }
         catch {
-            $reason = Get-PrintableText $_.Exception.Message
+            # PowerShell 7.6 reports a redirect it may not follow (MaximumRedirection 0) as an
+            # InvalidOperationException 'MaximumRedirectExceeded'; older versions return the 3xx (below).
+            $redirected = "$($_.FullyQualifiedErrorId)" -like 'MaximumRedirect*'
+            $reason = (Get-PrintableText $_.Exception.Message).TrimEnd('.')
             Clear-WebErrorRecord -Exceptions @($_.Exception)
+            if ($redirected) {
+                throw [System.Exception]::new("$Method $bare answered a redirect. The API never redirects, so it was not followed. $(Get-ApiHostHint $BaseUrl)")
+            }
             throw [System.Exception]::new("No answer from the API to $Method ${bare}: $reason. $(Get-ApiHostHint $BaseUrl)")
         }
     }
@@ -586,44 +687,47 @@ function Get-RosterLinks {
 function New-PrivateFileStream {
     <#
     .SYNOPSIS
-        Creates the file (replacing one already there) readable and writable by the current user only, BEFORE
-        any content is written: mode 600 on Linux and macOS, an owner-only ACL without inheritance on Windows.
+        Creates the file readable and writable by the current user only, from its first byte: mode 600 on Linux
+        and macOS, an owner-only ACL without inheritance on Windows. FileMode.CreateNew never follows or reuses
+        whatever is at the path. A file (or a link) already there is removed first: only ever a leaf, never a
+        folder (Resolve-LinksFilePath refused one before anything was sent).
     #>
     param([Parameter(Mandatory)] [string] $Path)
     $directory = Split-Path -Parent $Path
     if ($directory -and -not (Test-Path -LiteralPath $directory -PathType Container)) { New-Item -ItemType Directory -Path $directory -Force | Out-Null }
-    if (Test-Path -LiteralPath $Path) { Remove-Item -LiteralPath $Path -Force }   # recreated, so the restricted mode applies
+    $existing = Get-Item -LiteralPath $Path -Force -ErrorAction Ignore
+    if ($existing) {
+        $special = $existing.UnixStat -and [string] $existing.UnixStat.ItemType -notin 'File', 'SymbolicLink'
+        if ($existing -isnot [System.IO.FileInfo] -or $special -or -not (Test-Path -LiteralPath $Path -PathType Leaf)) { throw "'$Path' is not a regular file, so it was not replaced." }
+        Remove-Item -LiteralPath $Path -Force
+    }
 
     if ($IsWindows) {
-        # Created empty, restricted (inherited entries dropped, one FullControl entry for the current user), and
-        # only then opened for the content.
-        [System.IO.File]::WriteAllBytes($Path, [byte[]]::new(0))
         try {
-            $acl = Get-Acl -LiteralPath $Path
-            $acl.SetAccessRuleProtection($true, $false)
+            Add-Type -AssemblyName System.IO.FileSystem.AccessControl
+            $security = [System.Security.AccessControl.FileSecurity]::new()
+            $security.SetAccessRuleProtection($true, $false)
             $me = [System.Security.Principal.WindowsIdentity]::GetCurrent().User
-            $acl.AddAccessRule([System.Security.AccessControl.FileSystemAccessRule]::new($me, 'FullControl', 'Allow'))
-            Set-Acl -LiteralPath $Path -AclObject $acl
+            $security.AddAccessRule([System.Security.AccessControl.FileSystemAccessRule]::new(
+                    $me, [System.Security.AccessControl.FileSystemRights]::FullControl, [System.Security.AccessControl.AccessControlType]::Allow))
+            return [System.IO.FileSystemAclExtensions]::Create([System.IO.FileInfo]::new($Path), [System.IO.FileMode]::CreateNew,
+                [System.Security.AccessControl.FileSystemRights]::Write, [System.IO.FileShare]::None, 4096, [System.IO.FileOptions]::None, $security)
         }
-        catch { Write-Warning "Could not restrict the links file to your account ($($_.Exception.Message)). Delete it when you are done." }
-        return [System.IO.FileStream]::new($Path, [System.IO.FileMode]::Truncate, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
+        catch {
+            Write-Warning "Could not create the links file with an owner-only ACL ($(Get-FileFailureReason $_.Exception $Path)); it gets its folder's permissions. Delete it when you are done."
+            $left = Get-Item -LiteralPath $Path -Force -ErrorAction Ignore     # an empty file the failed attempt may have left
+            if ($left -is [System.IO.FileInfo] -and $left.Length -eq 0) { Remove-Item -LiteralPath $Path -Force }
+            return [System.IO.FileStream]::new($Path, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
+        }
     }
 
-    $optionsType = 'System.IO.FileStreamOptions' -as [type]
-    if ($optionsType -and $optionsType.GetProperty('UnixCreateMode')) {
-        # .NET 7+ (PowerShell 7.3+): the file is born with mode 600, so it is never readable by others.
-        $options = [System.IO.FileStreamOptions]::new()
-        $options.Mode = [System.IO.FileMode]::CreateNew
-        $options.Access = [System.IO.FileAccess]::Write
-        $options.Share = [System.IO.FileShare]::None
-        $options.UnixCreateMode = [System.IO.UnixFileMode] 'UserRead, UserWrite'
-        return [System.IO.FileStream]::new($Path, $options)
-    }
-    # PowerShell 7.0-7.2: create it empty, restrict it, then write.
-    $stream = [System.IO.FileStream]::new($Path, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
-    & chmod 600 -- $Path
-    if ($LASTEXITCODE -ne 0) { Write-Warning 'Could not restrict the links file to your account (chmod 600 failed). Delete it when you are done.' }
-    return $stream
+    # Linux and macOS (.NET 8+, hence #Requires -Version 7.4): born with mode 600, never readable by others.
+    $options = [System.IO.FileStreamOptions]::new()
+    $options.Mode = [System.IO.FileMode]::CreateNew
+    $options.Access = [System.IO.FileAccess]::Write
+    $options.Share = [System.IO.FileShare]::None
+    $options.UnixCreateMode = [System.IO.UnixFileMode] 'UserRead, UserWrite'
+    return [System.IO.FileStream]::new($Path, $options)
 }
 
 function Write-PrivateTextFile {
@@ -631,14 +735,20 @@ function Write-PrivateTextFile {
     param([Parameter(Mandatory)] [string] $Path, [Parameter(Mandatory)] [string] $Text)
     $preamble = [System.Text.UTF8Encoding]::new($true).GetPreamble()
     $bytes = [System.Text.Encoding]::UTF8.GetBytes($Text)
-    $stream = New-PrivateFileStream -Path $Path
+    $stream = $null
+    $written = $false
     try {
+        $stream = New-PrivateFileStream -Path $Path
         $stream.Write($preamble, 0, $preamble.Length)
         $stream.Write($bytes, 0, $bytes.Length)
+        $stream.Dispose()
+        $written = $true
     }
     finally {
-        $stream.Dispose()
+        if ($stream) { $stream.Dispose() }
         [Array]::Clear($bytes, 0, $bytes.Length)
+        # Never leave a partial links file behind.
+        if (-not $written -and $stream -and (Test-Path -LiteralPath $Path -PathType Leaf)) { Remove-Item -LiteralPath $Path -Force -ErrorAction Ignore }
     }
 }
 
@@ -670,16 +780,30 @@ function Set-ClipboardText {
 function Set-TodaysWord {
     <#
     .SYNOPSIS
-        PUT /api/staff/day-word: {} has the server generate today's word; { word } sets the given one. Prints the
-        word once, as the API returns it, and copies it.
+        GET /api/staff/day-word first: a word already set for today is left alone (it cannot be shown again, and a
+        new one would stop it working) unless -Replace. Otherwise PUT /api/staff/day-word: {} has the server
+        generate the word; { word } sets the given one. Prints the word once, as the API returns it, and copies it.
     #>
     param(
         [Parameter(Mandatory)] [string] $BaseUrl,
         [Parameter(Mandatory)] [string] $Token,
         [AllowNull()] [AllowEmptyString()] [string] $Word,
+        [switch] $Replace,
         [Parameter(Mandatory)] [string] $StaffUsername,
         [string] $SiteUrl
     )
+    $check = Invoke-PulseApi -BaseUrl $BaseUrl -Method GET -Path '/api/staff/day-word' -Token $Token
+    if ($check.Status -ne 200 -or $check.Json -isnot [System.Collections.IDictionary]) {
+        throw (Get-StaffRouteFailure -Response $check -What "Checking today's word" -Route 'GET /api/staff/day-word' -BaseUrl $BaseUrl -StaffUsername $StaffUsername)
+    }
+    if ($check.Json['todaySet'] -and -not $Replace) {
+        $by = if ($check.Json['setByName']) { " by $(Get-PrintableText $check.Json['setByName'] -Max 60)" } else { '' }
+        $at = if ($check.Json['setAt']) { " at $(Format-Instant $check.Json['setAt'])" } else { '' }
+        Write-Host ''
+        Write-Host "Today's word for $(Get-PrintableText $check.Json['today']) was already set$by$at, so it was NOT changed (a word is shown only once, so it is not printed)." -ForegroundColor Yellow
+        Write-Host '  Keep using the word you announced. To replace it, run again with -ReplaceWord: the current word then stops working at once.'
+        return
+    }
     $body = if ($Word) { [ordered]@{ word = $Word } } else { [ordered]@{} }
     try { $response = Invoke-PulseApi -BaseUrl $BaseUrl -Method PUT -Path '/api/staff/day-word' -Token $Token -Body $body }
     finally { if ($body.Contains('word')) { $body['word'] = $null } }
@@ -717,6 +841,7 @@ function Invoke-RosterImport {
         [switch] $CopyLinks,
         [switch] $GenerateWord,
         [string] $Word,
+        [switch] $ReplaceWord,
         [switch] $CheckOnly,
         [Parameter(Mandatory)] [string] $StaffUsername,
         [Parameter(Mandatory)] [string] $ApiHost,
@@ -732,10 +857,11 @@ function Invoke-RosterImport {
     $linksPath = $null
     try {
         if ($GenerateWord -and $Word) { throw 'Pass -GenerateWord or -Word, not both. Nothing was sent.' }
+        if ($ReplaceWord -and -not ($GenerateWord -or $Word)) { throw '-ReplaceWord goes with -GenerateWord or -Word. Nothing was sent.' }
         $baseUrl = Resolve-ApiBaseUrl -ApiHost $ApiHost
         if (-not $CheckOnly) {
             $csvFile = Get-RosterCsvFile -Path $CsvPath
-            if (-not $DryRun) { $linksPath = Resolve-LinksFilePath -OutFile $OutFile }
+            if (-not $DryRun) { $linksPath = Resolve-LinksFilePath -OutFile $OutFile -CsvFile $csvFile }
         }
     }
     catch { Write-Failure $_.Exception.Message; return 1 }
@@ -765,7 +891,8 @@ function Invoke-RosterImport {
         else {
             $importArguments = @{
                 BaseUrl = $baseUrl; Token = $token; CsvFile = $csvFile; DryRun = $DryRun; LinksPath = $linksPath
-                CopyLinks = $CopyLinks; GenerateWord = $GenerateWord; Word = $Word; StaffUsername = $StaffUsername; SiteUrl = $SiteUrl
+                CopyLinks = $CopyLinks; GenerateWord = $GenerateWord; Word = $Word; ReplaceWord = $ReplaceWord
+                StaffUsername = $StaffUsername; SiteUrl = $SiteUrl
             }
             $exitCode = Invoke-ImportSteps @importArguments
         }
@@ -811,6 +938,7 @@ function Invoke-ImportSteps {
         [switch] $CopyLinks,
         [switch] $GenerateWord,
         [string] $Word,
+        [switch] $ReplaceWord,
         [Parameter(Mandatory)] [string] $StaffUsername,
         [string] $SiteUrl
     )
@@ -827,7 +955,8 @@ function Invoke-ImportSteps {
     if ($failed -gt 0) {
         $exitCode = 1
         Write-Host ''
-        Write-Failure "$failed row(s) failed; the reason is on each red row. Fix them in the file and run again (rows already imported come back unchanged)."
+        $again = if ($GenerateWord -or $Word) { "; run it without -GenerateWord/-Word unless you mean to change today's word" } else { '' }
+        Write-Failure "$failed row(s) failed; the reason is on each red row. Fix them in the file and run again (rows already imported come back unchanged$again)."
     }
 
     if ($DryRun) {
@@ -854,8 +983,11 @@ function Invoke-ImportSteps {
         $joinLinksAvailable = [bool] $roster['joinLinksAvailable']
         $roster.Clear()
         $text = ConvertTo-LinksCsv -Links $links
-        Write-PrivateTextFile -Path $LinksPath -Text $text
-        $text = $null
+        try { Write-PrivateTextFile -Path $LinksPath -Text $text }
+        catch {
+            throw "The import was saved, but the links file could not be written ($(Get-FileFailureReason $_.Exception $LinksPath)). Run again with the same file and a writable -OutFile; every row comes back unchanged."
+        }
+        finally { $text = $null }
 
         $withLink = @($links | Where-Object { $_.JoinUrl }).Count
         Write-Host ''
@@ -885,7 +1017,7 @@ function Invoke-ImportSteps {
 
     # ── Today's word ───────────────────────────────────────────────────────────────────────────────────────────
     if ($GenerateWord -or $Word) {
-        Set-TodaysWord -BaseUrl $BaseUrl -Token $Token -Word $Word -StaffUsername $StaffUsername -SiteUrl $SiteUrl
+        Set-TodaysWord -BaseUrl $BaseUrl -Token $Token -Word $Word -Replace:$ReplaceWord -StaffUsername $StaffUsername -SiteUrl $SiteUrl
     }
     return $exitCode
 }
@@ -900,6 +1032,7 @@ $runArguments = @{
     CopyLinks     = $CopyLinks
     GenerateWord  = $GenerateWord
     Word          = $Word
+    ReplaceWord   = $ReplaceWord
     CheckOnly     = $CheckOnly
     StaffUsername = $StaffUsername
     ApiHost       = $ApiHost
