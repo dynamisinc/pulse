@@ -7,7 +7,8 @@
  *  - `getAll()` is a REFERENTIALLY-STABLE read-only snapshot - the same Set until a change - so a
  *    `useSyncExternalStore` read never loops, and an earlier snapshot is never mutated;
  *  - subscribers hear each change once; the unsubscribe stops it;
- *  - the store is bounded: past the cap the OLDEST id is forgotten, the newest survive;
+ *  - nothing is ever evicted: an early id is still removed after more than a thousand later ones
+ *    (the feed's frozen caches rely on this set alone to keep a taken-down post hidden);
  *  - `reset()` (sign-out) forgets everything and tells NOBODY (Gate-2 B L-3: a notify here is a
  *    blocking update that can repaint a taken-down post for a frame before the router's
  *    transition navigates to /login); a reset of an empty store keeps the snapshot;
@@ -16,7 +17,7 @@
 import { useSyncExternalStore } from 'react'
 import { act, renderHook } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { REMOVED_POST_CAP, removedPosts } from './removedPosts'
+import { removedPosts } from './removedPosts'
 
 afterEach(() => {
   removedPosts.resetForTests()
@@ -99,15 +100,17 @@ describe('removedPosts - snapshot and subscription', () => {
   })
 })
 
-describe('removedPosts - bounds and reset', () => {
-  it('is bounded: past the cap the oldest id is forgotten and the newest survive', () => {
-    for (let i = 0; i < REMOVED_POST_CAP + 5; i += 1) removedPosts.add(`post-${i}`)
+describe('removedPosts - retention and reset', () => {
+  it('keeps every id for the session: an early id is still removed after more than 1000 adds', () => {
+    // The Feed's frozen baseline / own-post caches still hold removed posts and filter ONLY
+    // through this set, so forgetting an old id would render that post again.
+    const total = 1005
+    for (let i = 0; i < total; i += 1) removedPosts.add(`post-${i}`)
 
-    expect(removedPosts.getAll().size).toBe(REMOVED_POST_CAP)
-    expect(removedPosts.has('post-0')).toBe(false)
-    expect(removedPosts.has('post-4')).toBe(false)
-    expect(removedPosts.has('post-5')).toBe(true)
-    expect(removedPosts.has(`post-${REMOVED_POST_CAP + 4}`)).toBe(true)
+    expect(removedPosts.getAll().size).toBe(total)
+    expect(removedPosts.has('post-0')).toBe(true)
+    expect(removedPosts.has('post-4')).toBe(true)
+    expect(removedPosts.has(`post-${total - 1}`)).toBe(true)
   })
 
   it('reset() forgets every id and tells NOBODY (Gate-2 B L-3)', () => {

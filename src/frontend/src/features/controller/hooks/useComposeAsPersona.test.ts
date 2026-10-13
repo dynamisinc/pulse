@@ -705,11 +705,14 @@ describe('useComposeAsPersona — a failure after the composer left the screen i
     composeAsPersonaDraftStore.discardDraft('ex-live-0001', ACTIVE_PERSONA.id)
     const second = renderHook(() => useComposeAsPersona(options()))
     act(() => second.result.current.setText('A newer draft.'))
+    // The second composer is gone too when the response lands (one that stays on screen would
+    // have ADOPTED the request and shown the banner instead of a toast: see
+    // `useComposeAsPersona.inFlight.test.tsx`).
+    second.unmount()
 
     await act(async () => pending.reject(httpError(429, { error: 'rate_limited' })))
 
     expect(toast.error).toHaveBeenCalledTimes(1)
-    second.unmount()
     const third = renderHook(() => useComposeAsPersona(options()))
     expect(third.result.current.text).toBe('A newer draft.')
   })

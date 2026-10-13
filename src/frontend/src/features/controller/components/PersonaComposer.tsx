@@ -41,6 +41,11 @@
  *     and Ctrl/Cmd+Enter stay disabled until the controller picks "Post again anyway..."
  *     -> "I checked the feed - post again", or "Discard draft (it went out)". Focus
  *     goes to the message, never to a button, so one stray Enter cannot double-post.
+ *   - A COMPOSER REOPENED WHILE ITS POST IS STILL OUT (the ENGINE / USAGE flyout took the dock
+ *     over and the draft was kept) comes back LOCKED - the same "Posting..." state, a read-only
+ *     field, Post disabled and Ctrl/Cmd+Enter a no-op - and shows the outcome when the request
+ *     settles ("Posted", the "Post status unknown" question, or the failure banner). The guard is
+ *     session-wide, not per mounted composer: see `useComposeAsPersona`.
  *
  * IDENTITY HEADER (R-001/R-004): renders the ACTIVE PERSONA - the cross-surface
  * `<Avatar>` + display name + the canonical `<VerifiedMark>` seal (identical to
