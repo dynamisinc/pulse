@@ -51,6 +51,9 @@ function setup() {
   return { queryClient, wrapper }
 }
 
+/** The mock clock is pinned to this day in `beforeEach`; the hooks must always send it. */
+const TODAY = '2026-10-13'
+
 beforeEach(() => {
   dayWordMockControls.reset()
   dayWordMockControls.setNow(new Date('2026-10-13T16:00:00.000Z'))
@@ -241,7 +244,7 @@ describe('useSetDayWord / useClearDayWord', () => {
     const invalidate = vi.spyOn(queryClient, 'invalidateQueries')
     const { result } = renderHook(() => useSetDayWord(), { wrapper })
 
-    await result.current.setWord({})
+    await result.current.setWord({ date: TODAY })
 
     await waitFor(() =>
       expect(invalidate).toHaveBeenCalledWith({ queryKey: dayWordQueryKey('ex-A') }))
@@ -253,7 +256,7 @@ describe('useSetDayWord / useClearDayWord', () => {
     const invalidate = vi.spyOn(queryClient, 'invalidateQueries')
     const { result } = renderHook(() => useClearDayWord(), { wrapper })
 
-    await result.current.mutateAsync(undefined)
+    await result.current.mutateAsync(TODAY)
 
     await waitFor(() =>
       expect(invalidate).toHaveBeenCalledWith({ queryKey: dayWordQueryKey('ex-A') }))
@@ -266,7 +269,9 @@ describe('useSetDayWord / useClearDayWord', () => {
     const invalidate = vi.spyOn(queryClient, 'invalidateQueries')
     const { result } = renderHook(() => useSetDayWord(), { wrapper })
 
-    await expect(result.current.setWord({})).rejects.toMatchObject({ status: 500 })
+    await expect(result.current.setWord({ date: TODAY })).rejects.toMatchObject({
+      status: 500,
+    })
 
     await waitFor(() =>
       expect(invalidate).toHaveBeenCalledWith({ queryKey: dayWordQueryKey('ex-A') }))
@@ -279,7 +284,9 @@ describe('useSetDayWord / useClearDayWord', () => {
     const invalidate = vi.spyOn(queryClient, 'invalidateQueries')
     const { result } = renderHook(() => useSetDayWord(), { wrapper })
 
-    await expect(result.current.setWord({})).rejects.toMatchObject({ kind: 'malformed' })
+    await expect(result.current.setWord({ date: TODAY })).rejects.toMatchObject({
+      kind: 'malformed',
+    })
 
     await waitFor(() =>
       expect(invalidate).toHaveBeenCalledWith({ queryKey: dayWordQueryKey('ex-A') }))
@@ -292,7 +299,9 @@ describe('useSetDayWord / useClearDayWord', () => {
     const invalidate = vi.spyOn(queryClient, 'invalidateQueries')
     const { result } = renderHook(() => useClearDayWord(), { wrapper })
 
-    await expect(result.current.mutateAsync(undefined)).rejects.toMatchObject({ status: 502 })
+    await expect(result.current.mutateAsync(TODAY)).rejects.toMatchObject({
+      status: 502,
+    })
 
     await waitFor(() =>
       expect(invalidate).toHaveBeenCalledWith({ queryKey: dayWordQueryKey('ex-A') }))
@@ -303,7 +312,10 @@ describe('useSetDayWord / useClearDayWord', () => {
     const { queryClient, wrapper } = setup()
     const { result } = renderHook(() => useSetDayWord(), { wrapper })
 
-    const saved = await result.current.setWord({ word: 'Granite Harbor 4417' })
+    const saved = await result.current.setWord({
+      word: 'Granite Harbor 4417',
+      date: TODAY,
+    })
 
     expect(saved.word).toBe('Granite Harbor 4417')
     await waitFor(() => expect(queryClient.getMutationCache().getAll()).toHaveLength(0))
@@ -318,7 +330,9 @@ describe('useSetDayWord / useClearDayWord', () => {
     const { queryClient, wrapper } = setup()
     const { result } = renderHook(() => useSetDayWord(), { wrapper })
 
-    await expect(result.current.setWord({ word: 'Granite Harbor 4417' })).rejects.toMatchObject({
+    await expect(
+      result.current.setWord({ word: 'Granite Harbor 4417', date: TODAY }),
+    ).rejects.toMatchObject({
       status: 400,
       serverMessage: 'Nope.',
     })

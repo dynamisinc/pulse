@@ -46,6 +46,13 @@
  * includes the active exercise id from `useExerciseContext()` (see
  * `useDayWord.ts`) so a switch can never paint another exercise's status.
  *
+ * THE DATE IS ALWAYS SENT (Gate-2 W-1). Generate, rotate and turn-off each send the date the
+ * panel is displaying, today included; the server's "today" is never trusted to match. A
+ * panel left open across the local-midnight rollover therefore cannot act on the new day
+ * while still showing the old one: the server refuses the stale date with its past-date
+ * `400`, the panel shows that reason and re-reads the status, and moves to the new day. The
+ * announcements are worded from the date that was sent.
+ *
  * TIME. Staff world: real wall-clock dates and instants, in the EXERCISE time
  * zone with the zone named. Scenario time is never used for "today".
  *
@@ -92,7 +99,7 @@ import { checkDayWord, describeDayWordCheck } from './dayWordNormalize'
 import { useClearDayWord, useDayWordStatus, useSetDayWord } from './useDayWord'
 import {
   DAY_WORD_MAX_DAYS_AHEAD,
-  type DayWordPutBody,
+  type DayWordPutRequest,
   type DayWordSetResultDto,
   type DayWordStatusDto,
 } from './types'
@@ -137,7 +144,7 @@ type WordSource = 'generate' | 'typed'
 
 type ConfirmState =
   | { readonly kind: 'rotate'; readonly source: WordSource; readonly date: string }
-  | { readonly kind: 'turnOff' }
+  | { readonly kind: 'turnOff'; readonly date: string }
   | { readonly kind: 'clearUpcoming'; readonly date: string }
 
 type FocusTarget = 'status' | 'upcoming' | 'trigger'
@@ -483,10 +490,13 @@ function DayWordPanelBody() {
     inFlightRef.current = true
     setActionError(null)
     setResult(null)
-    const body: DayWordPutBody = {
+    // ALWAYS name the date the panel is showing, today included (Gate-2 W-1). Omitting it
+    // for today let a panel left open across the rollover act on the server's NEW day while
+    // still displaying the old one. Sent, a stale date is refused with the server's
+    // past-date 400, `onSettled` re-reads the status and the panel moves to the new day.
+    const body: DayWordPutRequest = {
       ...(source === 'typed' ? { word: typedWord.trim() } : {}),
-      // Omit the date for today: the server's default is authoritative.
-      ...(date !== today ? { date } : {}),
+      date,
     }
     try {
       const saved = await setWord(body)
@@ -506,18 +516,22 @@ function DayWordPanelBody() {
     }
   }
 
-  /** Calls the DELETE for `date` (omit for today). Outcomes as for `runSet`. */
-  const runClear = async (date: string | undefined): Promise<CallOutcome> => {
+  /**
+   * Calls the DELETE for `date`, which is ALWAYS sent (see `runSet`). Outcomes as for
+   * `runSet`.
+   */
+  const runClear = async (date: string): Promise<CallOutcome> => {
     if (inFlightRef.current) return 'busy'
     inFlightRef.current = true
     setActionError(null)
     try {
       await clearMutation.mutateAsync(date)
       // A result view for the day that was just turned off is now a dead word.
-      if (result !== null && result.date === (date ?? today)) setResult(null)
+      if (result !== null && result.date === date) setResult(null)
+      // Worded from the date that was sent, not from "nothing was sent means today".
       announce(
-        date === undefined
-          ? 'Word sign-in is off for today.'
+        date === today
+          ? `Word sign-in is off for today, ${formatDateLabel(date)}.`
           : `Word cleared for ${formatDateLabel(date)}.`,
       )
       return 'ok'
@@ -560,7 +574,7 @@ function DayWordPanelBody() {
       // On success the result view takes focus itself; on failure go back.
       if (outcome === 'failed') requestFocus('trigger')
     } else if (confirm.kind === 'turnOff') {
-      const outcome = await runClear(undefined)
+      const outcome = await runClear(confirm.date)
       if (outcome === 'busy') return
       setConfirmOpen(false)
       requestFocus(outcome === 'ok' ? 'status' : 'trigger')
@@ -795,7 +809,7 @@ function DayWordPanelBody() {
           <Box>
             <CobraDeleteButton
               disabled={busy}
-              onClick={() => openConfirm({ kind: 'turnOff' })}
+              onClick={() => openConfirm({ kind: 'turnOff', date: today })}
               startIcon={<FontAwesomeIcon icon={faPowerOff} />}
             >
               Turn off word sign-in for today

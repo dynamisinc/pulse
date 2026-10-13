@@ -58,7 +58,7 @@ describe('dayWordService with USE_MOCK_DATA off', () => {
       },
     } as AxiosResponse)
 
-    await putDayWord({})
+    await putDayWord({ date: '2026-10-13' })
 
     expect(mockPut.mock.calls[0]?.[2]).not.toHaveProperty('adapter')
   })
