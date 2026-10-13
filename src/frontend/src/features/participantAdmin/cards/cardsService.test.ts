@@ -5,7 +5,7 @@
  * typed errors that carry no secrets, the runtime guards, and the shipped mock adapter.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { AxiosError, AxiosHeaders, type InternalAxiosRequestConfig } from 'axios'
+import { AxiosError, AxiosHeaders, CanceledError, type InternalAxiosRequestConfig } from 'axios'
 import { api } from '@/core/services/api'
 import {
   CARDS_ENDPOINT,
@@ -22,7 +22,7 @@ import {
   setMockCardsScenario,
 } from './cardsMocks'
 import { okResponse } from './cardsTestUtils'
-import type { RosterCardsDto } from './types'
+import type { RosterCardDto, RosterCardsDto } from './types'
 
 function idList(count: number): string[] {
   return Array.from({ length: count }, (_, i) => `p-${String(i).padStart(5, '0')}`)
@@ -42,6 +42,17 @@ function httpError(status: number, data: unknown = { detail: 'https://x/join/SEC
     headers: {},
     config,
   })
+}
+
+/** A minimal valid card for ordering tests. */
+function namedCard(id: string, name: string): RosterCardDto {
+  return {
+    participantId: id,
+    name,
+    signInName: id,
+    joinUrl: `https://h.example/join/${id}`,
+    qrSvgDataUri: 'data:image/svg+xml;base64,QQ==',
+  }
 }
 
 afterEach(() => {
@@ -106,7 +117,7 @@ describe('fetchRosterCards - request shape', () => {
     expect(get).toHaveBeenCalledTimes(1)
   })
 
-  it('chunks more than 500 ids into requests of at most 500, in order, and concatenates', async () => {
+  it('chunks more than 500 ids into requests of at most 500, in order, and merges', async () => {
     const ids = idList(1201)
     const get = vi.spyOn(api, 'get').mockImplementation(async (_url, config) => {
       const chunk = (config?.params as { id: string[] }).id
@@ -123,7 +134,10 @@ describe('fetchRosterCards - request shape', () => {
     const sent = get.mock.calls.map(([, config]) => (config?.params as { id: string[] }).id)
     expect(sent.map(chunk => chunk.length)).toEqual([500, 500, 201])
     expect(sent.flat()).toEqual(ids)
-    expect(result.cards.map(card => card.participantId)).toEqual(ids)
+    // Every person is on the merged sheet exactly once.
+    expect(result.cards).toHaveLength(1201)
+    expect(new Set(result.cards.map(card => card.participantId))).toEqual(new Set(ids))
+    // Skipped entries are concatenated in request order.
     expect(result.skipped.map(entry => entry.participantId)).toEqual([
       'skip-after-p-00000',
       'skip-after-p-00500',
@@ -132,9 +146,56 @@ describe('fetchRosterCards - request shape', () => {
     expect(result.exerciseName).toBe('Exercise A')
   })
 
+  it('re-sorts the merged cards by name (case- and accent-insensitive) after more than one chunk', async () => {
+    const ids = idList(501) // two requests: 500 + 1
+    let call = 0
+    vi.spyOn(api, 'get').mockImplementation(async () => {
+      call += 1
+      return okResponse({
+        exerciseName: 'X',
+        cards: call === 1
+          ? [namedCard('z', 'Zoe Young'), namedCard('m', 'Mary Smith')]
+          : [namedCard('a', 'adam Abel'), namedCard('l', '\u00C1lvaro Diaz')],
+        skipped: [],
+      })
+    })
+    const result = await fetchRosterCards(ids)
+    expect(result.cards.map(card => card.name)).toEqual([
+      'adam Abel',
+      '\u00C1lvaro Diaz',
+      'Mary Smith',
+      'Zoe Young',
+    ])
+  })
+
+  it('keeps ties in request order (a stable merge)', async () => {
+    const ids = idList(501)
+    let call = 0
+    vi.spyOn(api, 'get').mockImplementation(async () => {
+      call += 1
+      return okResponse({
+        exerciseName: 'X',
+        cards: [namedCard(`same-${call}`, 'Pat Lee')],
+        skipped: [],
+      })
+    })
+    const result = await fetchRosterCards(ids)
+    expect(result.cards.map(card => card.participantId)).toEqual(['same-1', 'same-2'])
+  })
+
+  it('leaves a single response in the server\'s order (no client re-sort)', async () => {
+    vi.spyOn(api, 'get').mockResolvedValue(okResponse({
+      exerciseName: 'X',
+      cards: [namedCard('z', 'Zoe Young'), namedCard('a', 'Adam Abel')],
+      skipped: [],
+    }))
+    const result = await fetchRosterCards(['z', 'a'])
+    expect(result.cards.map(card => card.name)).toEqual(['Zoe Young', 'Adam Abel'])
+  })
+
   it('de-duplicates ids before chunking', async () => {
     const get = vi.spyOn(api, 'get').mockResolvedValue(okResponse(bodyFor(['a', 'b'])))
-    await fetchRosterCards(['a', 'b', 'a', '', 'b'])
+    await fetchRosterCards(['a', 'b', 'a', '', '  ', 'b'])
     const [, config] = get.mock.calls[0] ?? []
     expect((config?.params as { id: string[] }).id).toEqual(['a', 'b'])
   })
@@ -147,6 +208,78 @@ describe('fetchRosterCards - request shape', () => {
       return okResponse(bodyFor(['x']))
     })
     await expect(fetchRosterCards(idList(600))).rejects.toMatchObject({ kind: 'unavailable' })
+  })
+})
+
+describe('fetchRosterCards - only an EMPTY input means everyone', () => {
+  it.each([
+    [['']],
+    [['', '  ']],
+    [['\t', '\n']],
+  ])('refuses the non-empty but unusable input %j as badRequest and sends NOTHING', async input => {
+    const get = vi.spyOn(api, 'get').mockResolvedValue(okResponse(bodyFor([])))
+    await expect(fetchRosterCards(input)).rejects.toMatchObject({ kind: 'badRequest' })
+    expect(get).not.toHaveBeenCalled()
+  })
+
+  it('still sends the one no-id request for a truly empty input', async () => {
+    const get = vi.spyOn(api, 'get').mockResolvedValue(okResponse(bodyFor([])))
+    await fetchRosterCards([])
+    expect(get).toHaveBeenCalledTimes(1)
+    expect(get.mock.calls[0]?.[1]?.params).toBeUndefined()
+  })
+})
+
+describe('fetchRosterCards - cancellation (React Query\'s AbortSignal)', () => {
+  it('passes the signal to every request', async () => {
+    const controller = new AbortController()
+    const get = vi.spyOn(api, 'get').mockImplementation(async () => okResponse(bodyFor(['x'])))
+    await fetchRosterCards(idList(501), controller.signal)
+    expect(get).toHaveBeenCalledTimes(2)
+    for (const [, config] of get.mock.calls) expect(config?.signal).toBe(controller.signal)
+  })
+
+  it('passes the signal on the no-id request too', async () => {
+    const controller = new AbortController()
+    const get = vi.spyOn(api, 'get').mockResolvedValue(okResponse(bodyFor([])))
+    await fetchRosterCards([], controller.signal)
+    expect(get.mock.calls[0]?.[1]?.signal).toBe(controller.signal)
+  })
+
+  it('makes no request at all when the signal has already fired', async () => {
+    const controller = new AbortController()
+    controller.abort()
+    const get = vi.spyOn(api, 'get').mockResolvedValue(okResponse(bodyFor([])))
+    await expect(fetchRosterCards(['a'], controller.signal)).rejects.toMatchObject({
+      kind: 'cancelled',
+    })
+    expect(get).not.toHaveBeenCalled()
+  })
+
+  it('stops after the chunk in flight when the signal fires, requesting no more', async () => {
+    const controller = new AbortController()
+    let calls = 0
+    vi.spyOn(api, 'get').mockImplementation(async () => {
+      calls += 1
+      if (calls === 1) controller.abort() // the preview closed while chunk 1 was loading
+      return okResponse(bodyFor(['x']))
+    })
+    await expect(fetchRosterCards(idList(1201), controller.signal)).rejects.toMatchObject({
+      kind: 'cancelled',
+    })
+    expect(calls).toBe(1)
+  })
+
+  it('maps an axios cancellation to the cancelled kind', async () => {
+    vi.spyOn(api, 'get').mockRejectedValue(new CanceledError('canceled'))
+    await expect(fetchRosterCards([])).rejects.toMatchObject({ kind: 'cancelled' })
+  })
+
+  it('still completes normally with a signal that never fires', async () => {
+    const controller = new AbortController()
+    vi.spyOn(api, 'get').mockResolvedValue(okResponse(bodyFor(['a'])))
+    const result = await fetchRosterCards(['a'], controller.signal)
+    expect(result.cards).toHaveLength(1)
   })
 })
 
@@ -245,6 +378,7 @@ describe('the shipped mock adapter (USE_MOCK_DATA)', () => {
   it.each([
     ['notConfigured', 'notConfigured', 409],
     ['forbidden', 'forbidden', 403],
+    ['unauthorized', 'unauthorized', 401],
     ['serverError', 'unavailable', 500],
   ] as const)('the %s scenario rejects as a %s error', async (scenario, kind, status) => {
     setMockCardsScenario(scenario)

@@ -41,7 +41,7 @@ describe('resolveSafeQrDataUri', () => {
     expect(resolveSafeQrDataUri(value)).toBeUndefined()
   })
 
-  it.each([undefined, null, 42, {}, [], true])('rejects a non-string (%s)', value => {
+  it.each([[undefined], [null], [42], [{}], [[]], [true]])('rejects a non-string (%j)', value => {
     expect(resolveSafeQrDataUri(value)).toBeUndefined()
   })
 

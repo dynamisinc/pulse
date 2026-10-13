@@ -10,9 +10,15 @@
  * therefore lives beside `#root`, and `cardSheet.module.css` hides `#root` (and this
  * component's toolbar) under `@media print`, leaving the sheet as ordinary flowing
  * content. While the preview is open this component adds the `sheetOpen` class to `<html>`
- * so those print rules apply ONLY then; with the preview closed, printing the page is
- * untouched. A React portal keeps this subtree inside the React tree, so the COBRA theme
- * from `StaffShellFrame` still reaches the toolbar's buttons.
+ * so those print rules apply ONLY then, and injects the page-size rule
+ * (`@page { size: letter portrait; margin: 0.5in }`) as a `<style>` in `<head>`; both are
+ * removed on close. An `@page` rule cannot be scoped to a class, so it must not sit in the
+ * stylesheet: routes are imported eagerly, which would make it Letter with 0.5in margins on
+ * EVERY print in both worlds from app start. With the preview closed, printing the page is
+ * untouched. (Emotion already injects inline `<style>` tags for MUI, so an inline style
+ * adds nothing new for a style-src policy.) A React portal keeps this subtree inside the
+ * React tree, so the COBRA theme from `StaffShellFrame` still reaches the toolbar's
+ * buttons.
  *
  * WHAT IS STAFF CHROME AND WHAT IS PAPER
  *   `.screenOnly` (toolbar with Print / Close and the count, the skipped summary, the
@@ -21,16 +27,20 @@
  *   sibling of the sheet, never inside it, so it can never print.
  *
  * THE DIALOG (NFR-001)
- *   `role="dialog"` + `aria-modal` + `aria-labelledby`. On open, focus moves to the dialog
- *   and every other body child is made `inert` (so Tab and screen readers stay inside);
- *   Tab and Shift+Tab wrap between the first and last control; a focus that escapes is
- *   pulled back; Escape closes. On close the inert state is restored and `PrintCardsButton`
- *   returns focus to the button that opened it. The scrolling sheet area is itself a
- *   focusable, named region so a keyboard user can scroll it.
+ *   `role="dialog"` + `aria-modal` + `aria-labelledby` (the title) + `aria-describedby`
+ *   (the "personal sign-in links" warning, so it is read when the dialog opens). On open,
+ *   focus moves to the dialog and every other body child is made `inert` (so Tab and
+ *   screen readers stay inside); Tab and Shift+Tab wrap between the first and last
+ *   control; a focus that escapes is pulled back; Escape closes. On close the inert state
+ *   is restored and `PrintCardsButton` returns focus to the button that opened it. The
+ *   scrolling sheet area is itself a focusable, named region so a keyboard user can scroll
+ *   it.
  *
  * STATES. Loading, error (replaces the sheet), empty (everyone was skipped) and loaded.
- * `409` (links not configured), `403` and `401` each get a specific message; anything
- * else gets a generic message and a Try again button. The status line is a polite live
+ * `409` (links not configured), `403`, `401`, `400` and an unreadable response each get a
+ * message that says what actually happened; a network failure or `5xx` gets a generic one.
+ * Where the same request might work (unreadable response, network failure, `5xx`) there
+ * is a Try again button. The status line is a polite live
  * region that is mounted from the start, so the result is announced once it lands: the
  * card count and, when people were left out, how many and why ("2 disabled, 1 whose link
  * needs reissue") with the instruction to fix them in the roster and print again.
@@ -48,7 +58,12 @@ import { faPrint, faTriangleExclamation, faXmark } from '@fortawesome/free-solid
 import { CobraPrimaryButton, CobraSecondaryButton } from '@/theme/styledComponents'
 import CobraStyles from '@/theme/CobraStyles'
 import { CardSheet } from './CardSheet'
-import { PERSONAL_LINKS_WARNING, summarizeSkipped } from './cardFormat'
+import {
+  CARD_SHEET_PAGE_RULE,
+  PAGE_STYLE_ATTR,
+  PERSONAL_LINKS_WARNING,
+  summarizeSkipped,
+} from './cardFormat'
 import { RosterCardsError, type RosterCardsErrorKind } from './cardsService'
 import { useRosterCards } from './useRosterCards'
 import styles from './cardSheet.module.css'
@@ -96,7 +111,22 @@ function errorCopy(kind: RosterCardsErrorKind): ErrorCopy {
         body: 'Sign in again, then print the cards.',
         canRetry: false,
       }
+    case 'badRequest':
+      return {
+        title: 'The server did not accept this card request',
+        body: 'Close this and select the people again. If it keeps happening, tell an ' +
+          'administrator.',
+        canRetry: false,
+      }
+    case 'malformed':
+      return {
+        title: 'The server sent cards this page could not read',
+        body: 'Try again. If it keeps happening, tell an administrator: the server and ' +
+          'this page may be on different versions.',
+        canRetry: true,
+      }
     default:
+      // unavailable (network failure, 5xx) and cancelled: the same request may well work.
       return {
         title: 'The cards could not be loaded',
         body: 'Check your connection and try again.',
@@ -106,8 +136,9 @@ function errorCopy(kind: RosterCardsErrorKind): ErrorCopy {
 }
 
 /**
- * Dialog mechanics for the open preview: the print-scoping class on <html>, `inert` on every
- * other body child, initial focus, the focus pull-back, and Escape. All undone on cleanup.
+ * Dialog mechanics for the open preview: the print scoping (a class on <html> and the
+ * injected `@page` style), `inert` on every other body child, initial focus, the focus
+ * pull-back, and Escape. All undone on cleanup.
  */
 function useOpenPreviewEffects(
   overlayRef: React.RefObject<HTMLDivElement | null>,
@@ -122,9 +153,14 @@ function useOpenPreviewEffects(
     const overlay = overlayRef.current
     if (overlay === null) return undefined
 
-    // Scope the @media print rules to "the preview is open".
+    // Scope the print rules to "the preview is open": a class on <html> for the @media print
+    // rules, and the @page rule as a <style> that exists only while the preview does.
     const html = document.documentElement
     html.classList.add(styles.sheetOpen ?? 'sheetOpen')
+    const pageStyle = document.createElement('style')
+    pageStyle.setAttribute(PAGE_STYLE_ATTR, '')
+    pageStyle.textContent = CARD_SHEET_PAGE_RULE
+    document.head.appendChild(pageStyle)
 
     // Keep focus and assistive tech inside the dialog: make every OTHER body child inert,
     // remembering which ones we changed so cleanup restores exactly those.
@@ -155,12 +191,14 @@ function useOpenPreviewEffects(
       document.removeEventListener('focusin', onFocusIn)
       for (const element of madeInert) element.removeAttribute('inert')
       html.classList.remove(styles.sheetOpen ?? 'sheetOpen')
+      pageStyle.remove()
     }
   }, [overlayRef])
 }
 
 export function CardSheetPreview({ participantIds, onClose }: CardSheetPreviewProps) {
   const titleId = useId()
+  const bannerId = useId()
   const overlayRef = useRef<HTMLDivElement>(null)
   const query = useRosterCards(participantIds)
   useOpenPreviewEffects(overlayRef, onClose)
@@ -241,6 +279,7 @@ export function CardSheetPreview({ participantIds, onClose }: CardSheetPreviewPr
       role="dialog"
       aria-modal="true"
       aria-labelledby={titleId}
+      aria-describedby={bannerId}
       tabIndex={-1}
       onKeyDown={trapTab}
       data-testid="card-sheet-preview"
@@ -305,6 +344,7 @@ export function CardSheetPreview({ participantIds, onClose }: CardSheetPreviewPr
         </Box>
 
         <Box
+          id={bannerId}
           data-testid="card-sheet-banner"
           sx={{
             display: 'flex',

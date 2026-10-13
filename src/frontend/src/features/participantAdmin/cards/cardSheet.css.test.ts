@@ -3,18 +3,18 @@
  * ---------------------------------------------------------------------------
  * The paper, guarded. jsdom cannot evaluate print media (and Vitest stubs every CSS import
  * to empty), so these assertions read the REAL stylesheet text off disk and check the
- * rules the story promises: US Letter portrait with 0.5in margins, eight cards a page (two
- * by four), a dashed cut guide, `break-inside: avoid`, a QR of at least 1.25in, `#root`
- * and the screen-only chrome hidden under `@media print`, and no COBRA colour anywhere.
- * The manual print checklist in README.md covers what only a printer can.
+ * rules the story promises: eight cards a page (two by four), a dashed cut guide,
+ * `break-inside: avoid`, a QR of at least 1.25in, `#root` and the screen-only chrome hidden
+ * under `@media print`, no COBRA colour anywhere, and NO `@page` rule in the stylesheet
+ * (it is injected while the preview is open; see `CardSheetPreview.test.tsx`). The manual
+ * print checklist in README.md covers what only a printer can.
  *
- * The second half is a SOURCE guard (like `staffShell/twoWorldsSeparation.test.ts`): the
- * printed card imports no COBRA/MUI, nothing here injects HTML, and nothing here touches
- * storage.
+ * The import and content guards for the whole folder live in `cardsSourceGuards.test.ts`.
  */
 import { describe, expect, it } from 'vitest'
 import { readSrcFile } from '@/test/readSource'
 import { cobraTheme } from '@/theme/cobraTheme'
+import { CARD_SHEET_PAGE_RULE } from './cardFormat'
 
 const CSS_PATH = 'features/participantAdmin/cards/cardSheet.module.css'
 const css = readSrcFile(CSS_PATH)
@@ -51,10 +51,14 @@ function rule(scope: string, selector: string): string {
 }
 
 describe('the paper (US Letter, eight-up)', () => {
-  it('sets @page to Letter portrait with 0.5in margins', () => {
-    const page = /@page\s*\{([^}]*)\}/.exec(clean)?.[1] ?? ''
-    expect(page).toMatch(/size:\s*letter portrait/)
-    expect(page).toMatch(/margin:\s*0\.5in/)
+  it('has NO @page rule in the stylesheet: it would apply to every print in the app', () => {
+    // Comments are stripped, so the prose explaining this does not count.
+    expect(clean).not.toMatch(/@page/)
+  })
+
+  it('gets Letter portrait with 0.5in margins from the rule injected while the preview is open', () => {
+    expect(CARD_SHEET_PAGE_RULE).toMatch(/size:\s*letter portrait/)
+    expect(CARD_SHEET_PAGE_RULE).toMatch(/margin:\s*0\.5in/)
   })
 
   it('lays a page out as two columns by four rows', () => {
@@ -169,55 +173,19 @@ describe('neutral, legible with background graphics off', () => {
     for (const hex of cobraHexes) expect(used).not.toContain(hex)
   })
 
+  it('clamps the exercise name to two lines so a long one cannot push the card apart', () => {
+    const exercise = rule(screenCss, '.exercise')
+    expect(exercise).toMatch(/-webkit-line-clamp:\s*2/)
+    expect(exercise).toMatch(/overflow:\s*hidden/)
+  })
+
+  it('sets the help line at 7pt or larger (legible on paper)', () => {
+    const size = Number(/font-size:\s*([\d.]+)pt/.exec(rule(screenCss, '.help'))?.[1])
+    expect(size).toBeGreaterThanOrEqual(7)
+    expect(size).toBeLessThanOrEqual(7.5)
+  })
+
   it('sets the sign-in name and the link in a monospace face', () => {
     expect(rule(screenCss, '.signIn,\n.link')).toMatch(/font-family:[^;]*monospace/)
-  })
-})
-
-describe('source guards (the printed card is neither COBRA nor injected HTML)', () => {
-  const sources = import.meta.glob('./*.{ts,tsx}', { query: '?raw', import: 'default', eager: true })
-  const files = Object.entries(sources)
-    .filter(([path]) => !/\.test\.tsx?$/.test(path) && !path.includes('cardsTestUtils'))
-    .map(([path, text]) => [path, String(text)] as const)
-
-  function importsOf(text: string): string[] {
-    return [...text.matchAll(/(?:from|import)\s+['"]([^'"]+)['"]/g)].map(m => m[1] ?? '')
-  }
-
-  it('scans the real source files (not zero)', () => {
-    expect(files.length).toBeGreaterThanOrEqual(10)
-  })
-
-  it.each(['./Card.tsx', './CardSheet.tsx', './cardFormat.ts', './safeQrDataUri.ts'])(
-    '%s imports neither COBRA nor MUI',
-    path => {
-      const text = files.find(([p]) => p === path)?.[1] ?? ''
-      expect(text.length).toBeGreaterThan(0)
-      for (const specifier of importsOf(text)) {
-        expect(specifier).not.toMatch(/^@\/theme/)
-        expect(specifier).not.toMatch(/^@mui\//)
-        expect(specifier).not.toMatch(/cobra/i)
-      }
-    },
-  )
-
-  it('the staff chrome uses the COBRA components and FontAwesome', () => {
-    const preview = files.find(([p]) => p === './CardSheetPreview.tsx')?.[1] ?? ''
-    const button = files.find(([p]) => p === './PrintCardsButton.tsx')?.[1] ?? ''
-    expect(preview).toMatch(/from '@\/theme\/styledComponents'/)
-    expect(button).toMatch(/from '@\/theme\/styledComponents'/)
-    expect(preview + button).toMatch(/@fortawesome\/react-fontawesome/)
-    expect(preview + button).not.toMatch(/@mui\/icons-material/)
-  })
-
-  it('injects no HTML, writes no storage, and uses no lazy images anywhere in the folder', () => {
-    for (const [path, text] of files) {
-      const code = text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1')
-      expect(code, path).not.toMatch(/dangerouslySetInnerHTML/)
-      expect(code, path).not.toMatch(/innerHTML\s*=/)
-      expect(code, path).not.toMatch(/\b(?:local|session)Storage\b/)
-      expect(code, path).not.toMatch(/loading=["']lazy["']/)
-      expect(code, path).not.toMatch(/\bconsole\.(?:log|info|debug|warn|error)\b/)
-    }
   })
 })

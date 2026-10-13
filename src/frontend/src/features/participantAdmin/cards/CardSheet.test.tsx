@@ -5,14 +5,9 @@
  * only cards (nothing interactive, no toolbar, no warning).
  */
 import { render, screen, within } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { CardSheet } from './CardSheet'
 import { buildMockCards } from './cardsMocks'
-
-// These specs mount the MUI/Emotion stack and a sheet of data-URI-image cards in jsdom, and a
-// full parallel run is often CPU-starved (see the note in `src/test/setup.ts`). A longer
-// per-test budget stops a slow worker failing a correct test.
-vi.setConfig({ testTimeout: 30_000 })
 
 describe('CardSheet - pagination', () => {
   it('puts eight cards on a page and the rest on the next', () => {

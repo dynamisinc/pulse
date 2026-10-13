@@ -17,9 +17,18 @@
  *
  * CHUNKING. The server rejects more than 500 ids, so a larger selection is split into
  * requests of at most {@link MAX_CARDS_PER_REQUEST} ids, sent one after the other, and
- * the `cards` and `skipped` of every response are concatenated in request order. An empty
- * selection is ONE request with no `id` at all ("every eligible participant"). The ids are
- * de-duplicated first (first occurrence wins) so a repeated id cannot be sent twice.
+ * the `cards` and `skipped` of every response are concatenated in request order. When more
+ * than one request was needed the merged cards are re-sorted by name, because each
+ * response is only ordered within itself and a hand-out sheet should read A to Z. An
+ * EMPTY input is ONE request with no `id` at all ("every eligible participant"): that is
+ * the only way to ask for everyone. A NON-empty input is de-duplicated and stripped of
+ * blank ids first (first occurrence wins); if nothing usable is left it is refused as a
+ * `badRequest` with NO request made, never quietly widened to "everyone".
+ *
+ * CANCELLATION. React Query hands the query function an `AbortSignal` that fires when the
+ * preview closes mid-load. It is passed to every request (so axios aborts the one in
+ * flight) and checked before each next chunk, so closing the preview stops the remaining
+ * requests instead of fetching a thousand credentials nobody will see.
  *
  * WIRE FORMAT. Axios serializes an array param as `id[]=a&id[]=b` by default; the server
  * binds repeated plain `id=a&id=b`. `paramsSerializer: { indexes: null }` produces exactly
@@ -48,6 +57,7 @@
 import axios from 'axios'
 import { api } from '@/core/services/api'
 import { USE_MOCK_DATA } from '@/core/config/mockData'
+import { usableIds } from './cardFormat'
 import { mockCardsAdapter } from './cardsMocks'
 import type {
   RosterCardDto,
@@ -78,8 +88,10 @@ const SKIP_REASONS: readonly RosterCardSkipReason[] = [
  *   notConfigured  409: the server has no join base URL (`Authentication:FrontendBaseUrl`).
  *   forbidden      403: signed in as staff, but not allowed to print cards.
  *   unauthorized   401: no staff session (the shared client already tried one refresh).
- *   badRequest     400: the server refused the request (e.g. too many ids).
+ *   badRequest     400: the server refused the request (e.g. too many ids), or the input
+ *                  held no usable id at all (refused here, nothing sent).
  *   malformed      200, but the body is not the frozen shape.
+ *   cancelled      the request was aborted (the preview closed mid-load).
  *   unavailable    anything else: network failure, 5xx.
  */
 export type RosterCardsErrorKind =
@@ -88,6 +100,7 @@ export type RosterCardsErrorKind =
   | 'unauthorized'
   | 'badRequest'
   | 'malformed'
+  | 'cancelled'
   | 'unavailable'
 
 /** Fixed, secret-free messages (they may end up in a log; they never carry a body). */
@@ -97,6 +110,7 @@ const ERROR_MESSAGES: Readonly<Record<RosterCardsErrorKind, string>> = {
   unauthorized: 'The staff session has ended.',
   badRequest: 'The server could not accept the card request.',
   malformed: 'The card response was empty or malformed.',
+  cancelled: 'The card request was cancelled.',
   unavailable: 'The cards could not be loaded.',
 }
 
@@ -127,6 +141,7 @@ function kindForStatus(status: number | undefined): RosterCardsErrorKind {
 /** Translates any thrown transport failure into a `RosterCardsError` (and drops the cause). */
 function toCardsError(error: unknown): RosterCardsError {
   if (error instanceof RosterCardsError) return error
+  if (axios.isCancel(error)) return new RosterCardsError('cancelled')
   if (axios.isAxiosError(error)) {
     const status = error.response?.status
     return new RosterCardsError(kindForStatus(status), status)
@@ -192,11 +207,6 @@ function toCard(card: RosterCardDto): RosterCardDto {
 
 // ---------------------------------------------------------------- requests
 
-/** Unique ids, first occurrence wins, blanks dropped. */
-function uniqueIds(ids: readonly string[]): string[] {
-  return [...new Set(ids.filter(id => id.length > 0))]
-}
-
 /** Splits `ids` into runs of at most `size` (an empty list gives no chunks). */
 export function chunkIds(ids: readonly string[], size: number = MAX_CARDS_PER_REQUEST): string[][] {
   const chunks: string[][] = []
@@ -207,13 +217,17 @@ export function chunkIds(ids: readonly string[], size: number = MAX_CARDS_PER_RE
 }
 
 /** One request. `ids` empty = no `id` param at all (every eligible participant). */
-async function fetchChunk(ids: readonly string[]): Promise<RosterCardsDto> {
+async function fetchChunk(
+  ids: readonly string[],
+  signal: AbortSignal | undefined,
+): Promise<RosterCardsDto> {
   let data: unknown
   try {
     const response = await api.get<unknown>(CARDS_ENDPOINT, {
       ...(ids.length > 0
         ? { params: { id: ids }, paramsSerializer: { indexes: null } }
         : {}),
+      ...(signal !== undefined ? { signal } : {}),
       ...(USE_MOCK_CARDS ? { adapter: mockCardsAdapter } : {}),
     })
     data = response.data
@@ -231,19 +245,39 @@ async function fetchChunk(ids: readonly string[]): Promise<RosterCardsDto> {
   }
 }
 
+/** Throws the `cancelled` error when `signal` has fired. Checked before every request. */
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted) throw new RosterCardsError('cancelled')
+}
+
+/** A-to-Z by name, case- and accent-insensitive, numbers in order; ties keep request order. */
+const NAME_COLLATOR = new Intl.Collator('en', { sensitivity: 'base', numeric: true })
+
 /**
- * Fetches the printable cards for `ids` (an empty list means every eligible participant).
- * Splits into requests of at most 500 and concatenates the results in request order.
+ * Fetches the printable cards for `ids`. An empty `ids` means every eligible participant
+ * (and is the ONLY thing that does). Otherwise the ids are cleaned, split into requests of
+ * at most 500 and merged: cards and skipped entries in request order, and the cards
+ * re-sorted by name when more than one request was needed. `signal` (React Query's) stops
+ * the remaining requests when it fires.
+ *
  * Throws `RosterCardsError` on any failure; one failed chunk fails the whole sheet (a
  * half sheet handed out as a whole one is worse than an error).
  */
-export async function fetchRosterCards(ids: readonly string[]): Promise<RosterCardsDto> {
-  const chunks = chunkIds(uniqueIds(ids))
-  if (chunks.length === 0) return fetchChunk([])
+export async function fetchRosterCards(
+  ids: readonly string[],
+  signal?: AbortSignal,
+): Promise<RosterCardsDto> {
+  throwIfAborted(signal)
+  if (ids.length === 0) return fetchChunk([], signal)
+
+  const chunks = chunkIds(usableIds(ids))
+  // A non-empty input with nothing usable in it is NOT "everyone": refuse, send nothing.
+  if (chunks.length === 0) throw new RosterCardsError('badRequest')
 
   let result: RosterCardsDto | undefined
   for (const chunk of chunks) {
-    const part = await fetchChunk(chunk)
+    throwIfAborted(signal)
+    const part = await fetchChunk(chunk, signal)
     result = result === undefined
       ? part
       : {
@@ -254,5 +288,11 @@ export async function fetchRosterCards(ids: readonly string[]): Promise<RosterCa
   }
   // `chunks` is non-empty here, so `result` is always set; guard instead of `!`.
   if (result === undefined) throw new RosterCardsError('unavailable')
+  if (chunks.length > 1) {
+    result = {
+      ...result,
+      cards: [...result.cards].sort((a, b) => NAME_COLLATOR.compare(a.name, b.name)),
+    }
+  }
   return result
 }

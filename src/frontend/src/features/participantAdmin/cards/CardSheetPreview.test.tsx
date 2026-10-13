@@ -1,9 +1,10 @@
 /**
  * features/participantAdmin/cards/CardSheetPreview.test.tsx
  * ---------------------------------------------------------------------------
- * The preview: portal location, the loaded sheet, the skipped summary, the 409/403/other
- * messages, the on-screen banner (and that it is outside the print subtree), Print, Close,
- * Escape, the focus trap and inert handling, and the no-cache / exercise-keyed query.
+ * The preview: portal location, the loaded sheet, the skipped summary, the 409/403/401/400/
+ * unreadable-response messages, the on-screen banner (and that it is outside the print
+ * subtree), Print, Close, Escape, the focus trap and inert handling, the `@page` rule that
+ * exists only while the preview is open, and the no-cache / exercise-keyed query.
  *
  * jsdom cannot evaluate print media, so the paper itself is covered by the CSS guard in
  * `cardSheet.css.test.ts` and the manual checklist in this folder's README.
@@ -12,18 +13,14 @@ import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { CardSheetPreview } from './CardSheetPreview'
-import { PERSONAL_LINKS_WARNING } from './cardFormat'
+import { CARD_SHEET_PAGE_RULE, PAGE_STYLE_ATTR, PERSONAL_LINKS_WARNING } from './cardFormat'
+import { PrintCardsButton } from './PrintCardsButton'
 import { buildMockCards, resetMockCards, setMockCardsScenario } from './cardsMocks'
 import { TEST_EXERCISE_ID, renderWithProviders, spyOnCardsEndpoint } from './cardsTestUtils'
 import { ROSTER_CARDS_KEY_ROOT, rosterCardsKey } from './useRosterCards'
 import styles from './cardSheet.module.css'
 
 const SHEET_OPEN_CLASS = styles.sheetOpen ?? 'sheetOpen'
-
-// These specs mount the MUI/Emotion stack and a sheet of data-URI-image cards in jsdom, and a
-// full parallel run is often CPU-starved (see the note in `src/test/setup.ts`). A longer
-// per-test budget stops a slow worker failing a correct test.
-vi.setConfig({ testTimeout: 30_000 })
 
 let printSpy: ReturnType<typeof vi.spyOn>
 let appRoot: HTMLDivElement
@@ -77,6 +74,15 @@ describe('CardSheetPreview - location and dialog semantics', () => {
     const labelId = dialog.getAttribute('aria-labelledby')
     expect(labelId).toBeTruthy()
     expect(document.getElementById(labelId ?? '')).toHaveTextContent('Print cards')
+  })
+
+  it('is described by the personal-links warning, so it is read when the dialog opens', async () => {
+    await renderPreview()
+    const dialog = await screen.findByRole('dialog')
+    const describedBy = dialog.getAttribute('aria-describedby')
+    expect(describedBy).toBeTruthy()
+    expect(document.getElementById(describedBy ?? '')).toBe(screen.getByTestId('card-sheet-banner'))
+    expect(dialog).toHaveAccessibleDescription(PERSONAL_LINKS_WARNING)
   })
 
   it('moves focus into the dialog on open', async () => {
@@ -181,6 +187,46 @@ describe('CardSheetPreview - errors replace the sheet', () => {
     expect(alert).toHaveTextContent('You do not have access to print cards')
     expect(alert).toHaveTextContent('controllers and planners')
     expect(screen.queryByTestId('card-sheet')).not.toBeInTheDocument()
+  })
+
+  it('401 (staff session ended): says so and tells staff to sign in again, no retry', async () => {
+    setMockCardsScenario('unauthorized')
+    await renderPreview()
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent('Your staff session has ended')
+    expect(alert).toHaveTextContent('Sign in again')
+    expect(screen.queryByTestId('card-sheet')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Print' })).toBeDisabled()
+    expect(screen.queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument()
+  })
+
+  it('400 (the request itself was refused): does not blame the connection, no retry', async () => {
+    // A non-empty input with nothing usable is refused as a bad request, nothing is sent.
+    await renderPreview([''])
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent('The server did not accept this card request')
+    expect(alert).toHaveTextContent('select the people again')
+    expect(alert.textContent).not.toMatch(/connection/i)
+    expect(screen.queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument()
+  })
+
+  it('an unreadable 200 body: says the page could not read it, not "check your connection"', async () => {
+    spyOnCardsEndpoint(() => ({ nothing: 'like the contract' }))
+    await renderPreview()
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent('The server sent cards this page could not read')
+    expect(alert).toHaveTextContent('different versions')
+    expect(alert.textContent).not.toMatch(/connection/i)
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument()
+  })
+
+  it('a network or server failure: the generic message with Try again', async () => {
+    setMockCardsScenario('serverError')
+    await renderPreview()
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent('The cards could not be loaded')
+    expect(alert).toHaveTextContent('Check your connection')
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument()
   })
 
   it('anything else: a generic message with Try again, which refetches', async () => {
@@ -379,12 +425,65 @@ describe('CardSheetPreview - focus and inert handling', () => {
   })
 })
 
+/** The text of every `<style>` in the document that holds an `@page` rule. */
+function pageRules(): string[] {
+  return Array.from(document.querySelectorAll('style'))
+    .map(style => style.textContent ?? '')
+    .filter(text => text.includes('@page'))
+}
+
+describe('CardSheetPreview - the @page rule exists only while the preview is open', () => {
+  it('there is no @page rule anywhere while the preview is closed', async () => {
+    // The button (closed) is what the roster mounts; this loads the whole module graph,
+    // including the stylesheet, exactly as the eagerly-imported route does.
+    await renderWithProviders(<PrintCardsButton selection={[]} />)
+    expect(pageRules()).toHaveLength(0)
+    expect(document.querySelector(`style[${PAGE_STYLE_ATTR}]`)).toBeNull()
+  })
+
+  it('adds exactly one @page rule (Letter portrait, 0.5in) when it opens', async () => {
+    await renderPreview()
+    await screen.findByRole('dialog')
+    expect(pageRules()).toEqual([CARD_SHEET_PAGE_RULE])
+    expect(document.querySelectorAll(`style[${PAGE_STYLE_ATTR}]`)).toHaveLength(1)
+    expect(document.head).toContainElement(document.querySelector(`style[${PAGE_STYLE_ATTR}]`))
+  })
+
+  it('removes it when the preview closes, leaving none behind', async () => {
+    const { unmount } = await renderPreview()
+    await screen.findByRole('dialog')
+    unmount()
+    expect(pageRules()).toHaveLength(0)
+  })
+
+  it('leaves none behind after opening and closing it through the button, twice', async () => {
+    const user = userEvent.setup()
+    spyOnCardsEndpoint(() => ({ exerciseName: 'X', cards: buildMockCards(1), skipped: [] }))
+    await renderWithProviders(<PrintCardsButton selection={[]} />)
+    for (let round = 0; round < 2; round += 1) {
+      await user.click(screen.getByRole('button', { name: 'Print all cards' }))
+      await screen.findByTestId('card-sheet')
+      expect(pageRules()).toHaveLength(1)
+      await user.keyboard('{Escape}')
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+      expect(pageRules()).toHaveLength(0)
+    }
+  })
+})
+
 describe('CardSheetPreview - secrets and isolation', () => {
   it('keys the query by the active exercise id and the sorted participant ids', async () => {
     const { queryClient } = await renderPreview(['b', 'a'])
     await loaded()
     const keys = queryClient.getQueryCache().findAll().map(query => query.queryKey)
     expect(keys).toEqual([[ROSTER_CARDS_KEY_ROOT, TEST_EXERCISE_ID, ['a', 'b']]])
+  })
+
+  it('keys an empty selection ("everyone") as all', async () => {
+    const { queryClient } = await renderPreview([])
+    await loaded()
+    const keys = queryClient.getQueryCache().findAll().map(query => query.queryKey)
+    expect(keys).toEqual([[ROSTER_CARDS_KEY_ROOT, TEST_EXERCISE_ID, 'all']])
   })
 
   it('does not cache: stale at once, collected at once, and gone when the preview closes', async () => {

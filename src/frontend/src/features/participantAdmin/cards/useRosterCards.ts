@@ -21,17 +21,24 @@
  * No card data is ever written to storage (this hook never touches `localStorage`,
  * `sessionStorage` or the query persister).
  *
+ * CANCELLATION. The query function takes React Query's `AbortSignal` and passes it down, so
+ * closing the preview mid-load aborts the request in flight and stops the remaining chunks
+ * of a large selection (see `cardsService.ts`).
+ *
  * ISOLATION (XC-001 / COR-001). The request carries NO exercise id: the server scopes the
  * call. The React Query KEY includes the active exercise id from `useExerciseContext()`,
  * so a staff member who switches exercise can never be handed the previous exercise's
- * cards from a cache entry. The ids in the key are sorted so the same set of people is
- * the same entry whatever order the roster listed them in.
+ * cards from a cache entry. The ids in the key are cleaned (blank and repeated ids
+ * dropped) and sorted so the same set of people is the same entry whatever order the
+ * roster listed them in. An EMPTY selection ("everyone") is keyed `'all'`, distinct from a
+ * non-empty selection that holds nothing usable, so the two can never share an entry.
  *
  * World: STAFF (data hook).
  */
 
 import { useQuery, type UseQueryResult } from '@tanstack/react-query'
 import { useExerciseContext } from '@/core/exerciseContext'
+import { usableIds } from './cardFormat'
 import { fetchRosterCards, type RosterCardsError } from './cardsService'
 import type { RosterCardsDto } from './types'
 
@@ -42,8 +49,12 @@ export const ROSTER_CARDS_KEY_ROOT = 'participantAdminCards'
 export function rosterCardsKey(
   exerciseId: string,
   participantIds: readonly string[],
-): readonly [string, string, readonly string[]] {
-  return [ROSTER_CARDS_KEY_ROOT, exerciseId, [...new Set(participantIds)].sort()]
+): readonly [string, string, 'all' | readonly string[]] {
+  return [
+    ROSTER_CARDS_KEY_ROOT,
+    exerciseId,
+    participantIds.length === 0 ? 'all' : usableIds(participantIds).sort(),
+  ]
 }
 
 /**
@@ -57,7 +68,7 @@ export function useRosterCards(
   const { exerciseId } = useExerciseContext()
   return useQuery<RosterCardsDto, RosterCardsError>({
     queryKey: rosterCardsKey(exerciseId, participantIds),
-    queryFn: () => fetchRosterCards(participantIds),
+    queryFn: ({ signal }) => fetchRosterCards(participantIds, signal),
     staleTime: 0,
     gcTime: 0,
     retry: false,

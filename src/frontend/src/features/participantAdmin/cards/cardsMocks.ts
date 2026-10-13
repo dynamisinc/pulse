@@ -31,8 +31,8 @@
  * on the manual checklist and needs the live backend.
  *
  * ERROR SCENARIOS. {@link setMockCardsScenario} switches the adapter to answer `409`
- * (join links not configured), `403` (wrong role) or `500`, so the preview's error
- * states are reachable and testable. Module state, default `'ok'`; tests call
+ * (join links not configured), `403` (wrong role), `401` (session ended) or `500`, so the
+ * preview's error states are reachable and testable. Module state, default `'ok'`; tests call
  * {@link resetMockCards} in `afterEach`.
  *
  * World: STAFF (data only). No UI, no COBRA.
@@ -205,7 +205,12 @@ export function buildMockSkipped(): RosterCardSkippedDto[] {
 // ---------------------------------------------------------------- scenarios
 
 /** Which answer the mock adapter gives. */
-export type MockCardsScenario = 'ok' | 'notConfigured' | 'forbidden' | 'serverError'
+export type MockCardsScenario =
+  | 'ok'
+  | 'notConfigured'
+  | 'forbidden'
+  | 'unauthorized'
+  | 'serverError'
 
 let scenario: MockCardsScenario = 'ok'
 
@@ -258,6 +263,9 @@ export const mockCardsAdapter: AxiosAdapter = config => {
   }
   if (scenario === 'forbidden') {
     return Promise.reject(httpError(config, 403, 'Forbidden', 'Your role cannot print cards.'))
+  }
+  if (scenario === 'unauthorized') {
+    return Promise.reject(httpError(config, 401, 'Unauthorized', 'The staff session has ended.'))
   }
   if (scenario === 'serverError') {
     return Promise.reject(httpError(config, 500, 'Server Error', 'Something went wrong.'))

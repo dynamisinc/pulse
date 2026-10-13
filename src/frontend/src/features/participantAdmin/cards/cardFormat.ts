@@ -20,9 +20,34 @@ export const CARDS_PER_PAGE = 8
 export const PERSONAL_LINKS_WARNING =
   'These cards contain personal sign-in links. Hand them out one by one and shred any left over.'
 
-/** The roster button label for `count` selected people ("Print all cards" when none). */
-export function printCardsLabel(count: number): string {
-  return count > 0 ? `Print cards (${count})` : 'Print all cards'
+/**
+ * The `@page` rule for the printed sheet: US Letter portrait with 0.5in margins. An
+ * `@page` rule cannot be scoped to a class, so it is NOT in the stylesheet (where it would
+ * apply to every print in the app from startup). `CardSheetPreview` injects it as a
+ * `<style>` while the preview is open and removes it on close.
+ */
+export const CARD_SHEET_PAGE_RULE = '@page { size: letter portrait; margin: 0.5in; }'
+
+/** Marks the injected `@page` style so it is easy to find (and to assert on in tests). */
+export const PAGE_STYLE_ATTR = 'data-card-sheet-page'
+
+/**
+ * The ids worth sending: blank and whitespace-only entries dropped, repeats dropped (first
+ * occurrence wins), order kept. The ids themselves are returned unaltered.
+ */
+export function usableIds(ids: readonly string[]): string[] {
+  return [...new Set(ids.filter(id => id.trim().length > 0))]
+}
+
+/**
+ * The roster button label. An EMPTY selection means "everyone eligible" ("Print all
+ * cards"); a non-empty selection names how many usable people it holds, so a selection
+ * that holds only blank ids reads "Print cards (0)" and never silently means "everyone".
+ */
+export function printCardsLabel(selection: readonly string[]): string {
+  return selection.length === 0
+    ? 'Print all cards'
+    : `Print cards (${usableIds(selection).length})`
 }
 
 /**

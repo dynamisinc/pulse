@@ -7,12 +7,14 @@
 import { describe, expect, it } from 'vitest'
 import {
   CARDS_PER_PAGE,
+  CARD_SHEET_PAGE_RULE,
   PERSONAL_LINKS_WARNING,
   affiliationLine,
   joinUrlOrigin,
   paginate,
   printCardsLabel,
   summarizeSkipped,
+  usableIds,
 } from './cardFormat'
 
 describe('affiliationLine', () => {
@@ -50,11 +52,46 @@ describe('joinUrlOrigin', () => {
   )
 })
 
+describe('usableIds', () => {
+  it('drops blank and whitespace-only ids and repeats, keeping first-seen order', () => {
+    expect(usableIds(['b', '', 'a', '  ', 'b', '\t', 'c', 'a'])).toEqual(['b', 'a', 'c'])
+  })
+
+  it('returns the ids unaltered (no trimming of a usable id)', () => {
+    expect(usableIds([' padded '])).toEqual([' padded '])
+  })
+
+  it('is empty for nothing and for only blanks', () => {
+    expect(usableIds([])).toEqual([])
+    expect(usableIds(['', ' '])).toEqual([])
+  })
+})
+
 describe('printCardsLabel', () => {
-  it('names the count for a selection and says "all" for none', () => {
-    expect(printCardsLabel(3)).toBe('Print cards (3)')
-    expect(printCardsLabel(1)).toBe('Print cards (1)')
-    expect(printCardsLabel(0)).toBe('Print all cards')
+  it('says "all" only for an EMPTY selection', () => {
+    expect(printCardsLabel([])).toBe('Print all cards')
+  })
+
+  it('names how many people a selection holds', () => {
+    expect(printCardsLabel(['a'])).toBe('Print cards (1)')
+    expect(printCardsLabel(['a', 'b', 'c'])).toBe('Print cards (3)')
+  })
+
+  it('does not count blank or repeated ids', () => {
+    expect(printCardsLabel(['a', '', ' ', 'a', 'b'])).toBe('Print cards (2)')
+  })
+
+  it('never reads "all" for a non-empty selection of only blank ids', () => {
+    expect(printCardsLabel([''])).toBe('Print cards (0)')
+    expect(printCardsLabel(['', '  '])).toBe('Print cards (0)')
+  })
+})
+
+describe('CARD_SHEET_PAGE_RULE', () => {
+  it('is US Letter portrait with 0.5in margins', () => {
+    expect(CARD_SHEET_PAGE_RULE).toMatch(/^@page\s*\{/)
+    expect(CARD_SHEET_PAGE_RULE).toMatch(/size:\s*letter portrait/)
+    expect(CARD_SHEET_PAGE_RULE).toMatch(/margin:\s*0\.5in/)
   })
 })
 

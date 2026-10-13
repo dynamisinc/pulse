@@ -17,7 +17,9 @@
  * THE SELECTION IS SNAPSHOTTED AT CLICK. The preview prints the people who were selected
  * when staff pressed the button, not whoever the roster later shows as selected: the
  * roster is inert behind the open dialog, so nothing can change it, but a snapshot makes
- * the sheet independent of re-renders in the slot.
+ * the sheet independent of re-renders in the slot. Blank and repeated ids are dropped from
+ * the count and the snapshot. Only an EMPTY selection means "everyone": a selection that
+ * holds ids but no usable one disables the button instead of quietly printing everybody.
  *
  * FOCUS. When the preview closes, focus returns to this button (an effect keyed on the
  * open state, so it also works in browsers that do not focus a button on click and it
@@ -32,7 +34,7 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faPrint } from '@fortawesome/free-solid-svg-icons'
 import { CobraSecondaryButton } from '@/theme/styledComponents'
 import { CardSheetPreview } from './CardSheetPreview'
-import { printCardsLabel } from './cardFormat'
+import { printCardsLabel, usableIds } from './cardFormat'
 
 export interface PrintCardsButtonProps {
   /**
@@ -48,10 +50,13 @@ export function PrintCardsButton({ selection }: PrintCardsButtonProps) {
   const buttonRef = useRef<HTMLButtonElement>(null)
   const wasOpenRef = useRef(false)
 
-  const count = new Set(selection).size
+  // Blank and repeated ids do not count. An EMPTY selection means "everyone eligible"; a
+  // non-empty one that holds nothing usable must never be widened to that, so it is disabled.
+  const usable = usableIds(selection)
+  const nothingUsable = selection.length > 0 && usable.length === 0
   const isOpen = openFor !== null
 
-  const open = useCallback(() => setOpenFor([...new Set(selection)]), [selection])
+  const open = useCallback(() => setOpenFor(usableIds(selection)), [selection])
   const close = useCallback(() => setOpenFor(null), [])
 
   // Return focus to the button once the preview has closed.
@@ -71,10 +76,11 @@ export function PrintCardsButton({ selection }: PrintCardsButtonProps) {
       <CobraSecondaryButton
         ref={buttonRef}
         aria-haspopup="dialog"
+        disabled={nothingUsable}
         startIcon={<FontAwesomeIcon icon={faPrint} />}
         onClick={open}
       >
-        {printCardsLabel(count)}
+        {printCardsLabel(selection)}
       </CobraSecondaryButton>
       {openFor !== null && <CardSheetPreview participantIds={openFor} onClose={close} />}
     </>

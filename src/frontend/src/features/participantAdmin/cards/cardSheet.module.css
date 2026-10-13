@@ -13,7 +13,7 @@
  *     default), so it uses only text and BORDERS, never a background fill, to carry
  *     meaning. (Borders and images print with graphics off; fills do not.)
  *
- * THE PAPER (US Letter portrait, 0.5in margins)
+ * THE PAPER (US Letter portrait, 0.5in margins, set by the injected `@page` rule)
  *   Printable area 7.5in x 10in. Eight cards per page, two columns by four rows, with a
  *   0.1in gutter so each card's dashed cut-guide border is its own (no doubled lines).
  *   Each page group is a fixed-height grid with a forced page break after it, so "eight
@@ -30,14 +30,11 @@
  *   on-screen "personal sign-in links" banner and the skipped summary (`.screenOnly`), and
  *   the overlay becomes ordinary in-flow content so the sheet can run over many pages.
  *
- * NOTE: `@page` cannot be scoped to a class. It is global once this stylesheet is loaded,
- * so it also applies to printing other staff pages in the same session (Letter, 0.5in).
+ * NOTE: there is deliberately NO `@page` rule in this file. `@page` cannot be scoped to a
+ * class, and routes are imported eagerly, so a rule here would force Letter with 0.5in
+ * margins on every print in the app from startup. `CardSheetPreview` injects it as a
+ * `<style>` only while the preview is open (`CARD_SHEET_PAGE_RULE` in `cardFormat.ts`).
  */
-
-@page {
-  size: letter portrait;
-  margin: 0.5in;
-}
 
 /* ------------------------------------------------------------------ overlay (screen) */
 
@@ -150,10 +147,15 @@
 }
 
 .exercise {
+  display: -webkit-box;
   min-width: 0;
+  overflow: hidden;
   font-size: 8pt;
   font-weight: 700;
   overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
 }
 
 .training {
@@ -306,7 +308,7 @@
 }
 
 .help {
-  font-size: 6.5pt;
+  font-size: 7pt;
   line-height: 1.15;
 }
 

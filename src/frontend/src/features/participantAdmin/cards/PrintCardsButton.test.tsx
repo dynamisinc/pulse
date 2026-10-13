@@ -5,8 +5,8 @@
  * the request it makes (ids in chunks of at most 500; none when empty), the selection
  * snapshot, and focus returning to the button.
  */
-import { screen } from '@testing-library/react'
-import userEvent from '@testing-library/user-event'
+import { act, screen } from '@testing-library/react'
+import userEvent, { PointerEventsCheckLevel } from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { PrintCardsButton } from './PrintCardsButton'
 import { PrintCardsButton as FromBarrel } from './index'
@@ -25,11 +25,6 @@ function serverFor() {
     skipped: [],
   }))
 }
-
-// These specs mount the MUI/Emotion stack and a sheet of data-URI-image cards in jsdom, and a
-// full parallel run is often CPU-starved (see the note in `src/test/setup.ts`). A longer
-// per-test budget stops a slow worker failing a correct test.
-vi.setConfig({ testTimeout: 30_000 })
 
 beforeEach(() => {
   vi.spyOn(window, 'print').mockImplementation(() => {})
@@ -50,7 +45,7 @@ describe('PrintCardsButton - label', () => {
     expect(screen.getByRole('button', { name: 'Print all cards' })).toBeInTheDocument()
   })
 
-  it.each([[1], [3], [42]])('reads "Print cards (%i)" for %i selected', async count => {
+  it.each([[1], [3], [42]])('reads "Print cards (%i)" for a selection of that size', async count => {
     await renderWithProviders(<PrintCardsButton selection={idList(count)} />)
     expect(screen.getByRole('button', { name: `Print cards (${count})` })).toBeInTheDocument()
   })
@@ -58,6 +53,25 @@ describe('PrintCardsButton - label', () => {
   it('counts a repeated id once', async () => {
     await renderWithProviders(<PrintCardsButton selection={['a', 'b', 'a']} />)
     expect(screen.getByRole('button', { name: 'Print cards (2)' })).toBeInTheDocument()
+  })
+
+  it('does not count blank or whitespace-only ids', async () => {
+    await renderWithProviders(<PrintCardsButton selection={['a', '', '  ', 'b']} />)
+    expect(screen.getByRole('button', { name: 'Print cards (2)' })).toBeEnabled()
+  })
+
+  it('a non-empty selection of only blank ids is "(0)" and disabled, never "everyone"', async () => {
+    // A disabled MUI button has `pointer-events: none`; click it anyway to prove it is inert.
+    const user = userEvent.setup({ pointerEventsCheck: PointerEventsCheckLevel.Never })
+    const { calls } = serverFor()
+    await renderWithProviders(<PrintCardsButton selection={['', '  ']} />)
+    const button = screen.getByRole('button', { name: 'Print cards (0)' })
+    expect(button).toBeDisabled()
+    expect(screen.queryByRole('button', { name: 'Print all cards' })).not.toBeInTheDocument()
+
+    await user.click(button)
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(calls).toHaveLength(0)
   })
 
   it('announces that it opens a dialog and has an icon (text carries the meaning)', async () => {
@@ -99,6 +113,18 @@ describe('PrintCardsButton - opening and the request', () => {
 
     expect(calls).toHaveLength(1)
     expect(calls[0]).toEqual({ ids: [], hasParams: false })
+  })
+
+  it('sends only the usable ids when blanks are mixed in', async () => {
+    const user = userEvent.setup()
+    const { calls } = serverFor()
+    await renderWithProviders(<PrintCardsButton selection={['a', '', 'b', ' ', 'a']} />)
+
+    await user.click(screen.getByRole('button', { name: 'Print cards (2)' }))
+    await screen.findByTestId('card-sheet')
+
+    expect(calls).toHaveLength(1)
+    expect(calls[0]?.ids).toEqual(['a', 'b'])
   })
 
   it('chunks a large selection at 500 and concatenates the cards', async () => {
@@ -186,5 +212,30 @@ describe('PrintCardsButton - closing', () => {
     screen.getByRole('button', { name: 'Print all cards' }).focus()
     await user.keyboard('{Enter}')
     expect(await screen.findByRole('dialog')).toBeInTheDocument()
+  })
+})
+
+describe('PrintCardsButton - closing mid-load stops the remaining requests', () => {
+  it('aborts the in-flight chunk and never requests the next ones', async () => {
+    const user = userEvent.setup()
+    let release: () => void = () => {}
+    const gate = new Promise<void>(resolve => { release = resolve })
+    const { calls } = spyOnCardsEndpoint(async () => {
+      await gate
+      return { exerciseName: 'Coastal Surge', cards: buildMockCards(1), skipped: [] }
+    })
+    await renderWithProviders(<PrintCardsButton selection={idList(1201)} />)
+
+    await user.click(screen.getByRole('button', { name: 'Print cards (1201)' }))
+    await vi.waitFor(() => expect(calls).toHaveLength(1)) // chunk 1 is in flight, held
+    await user.keyboard('{Escape}') // close the preview mid-load
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+
+    await act(async () => {
+      release()
+      await new Promise(resolve => setTimeout(resolve, 20))
+    })
+    // Chunks 2 and 3 were never requested.
+    expect(calls).toHaveLength(1)
   })
 })
