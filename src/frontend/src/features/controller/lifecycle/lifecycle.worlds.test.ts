@@ -184,6 +184,12 @@ describe('the StartEx / EndEx control stays in the STAFF world', () => {
     expect(Object.keys(PARTICIPANT_SOURCES).length).toBeGreaterThan(50)
   })
 
+  it('treats the session kit as TEST-ONLY: it is scanned as a test file, not as production source', () => {
+    expect(Object.keys(ownFiles).some(path => path.endsWith('lifecycle.sessionKit.testUtils.ts'))).toBe(true)
+    expect(Object.keys(FEATURE_SOURCES).some(path => /sessionKit/.test(path))).toBe(false)
+    expect(Object.keys(FEATURE_SOURCES).some(path => /\.testUtils\./.test(path))).toBe(false)
+  })
+
   it('imports no participant surface, participant styling, the participant shell, or icons-material', () => {
     expect(staffViolations(FEATURE_SOURCES)).toEqual([])
   })

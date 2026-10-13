@@ -16,6 +16,7 @@ import {
   parseLifecycle,
   postTransition,
   REQUEST_TIMEOUT_MS,
+  stateMayHaveChanged,
   toLifecycleError,
 } from './lifecycleService'
 
@@ -167,5 +168,26 @@ describe('toLifecycleError -- every failure is a sentence', () => {
     expect(toLifecycleError(original)).toBe(original)
     expect(toLifecycleError(new TypeError('boom'))).toBeInstanceOf(LifecycleError)
     expect(toLifecycleError('a string').message).toBe('The exercise state could not be read or changed. Try again.')
+  })
+})
+
+describe('stateMayHaveChanged -- which failures leave the exercise state UNKNOWN (S-A)', () => {
+  it.each([undefined, 408, 409, 500, 502, 503, 504, 599])(
+    'a failure with status %s may have changed the state: ask the server',
+    status => {
+      expect(stateMayHaveChanged(status)).toBe(true)
+    },
+  )
+
+  it.each([400, 401, 403, 404, 405, 422, 429])(
+    'a %i is a definitive refusal: the server persisted nothing',
+    status => {
+      expect(stateMayHaveChanged(status)).toBe(false)
+    },
+  )
+
+  it('agrees with what toLifecycleError reports for a failure with no response', () => {
+    expect(stateMayHaveChanged(toLifecycleError(new AxiosError('Network Error', 'ERR_NETWORK')).status))
+      .toBe(true)
   })
 })

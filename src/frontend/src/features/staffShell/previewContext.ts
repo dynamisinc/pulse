@@ -123,8 +123,20 @@ export function resolvePreviewMomentInstant(moment: PreviewMoment): Date {
 export interface PreviewContextValue {
   /** Whether "Preview as participant" is currently staged. */
   active: boolean
-  /** Activates the preview if inactive, or exits it if active. */
+  /**
+   * Activates the preview if inactive, or exits it if active. Activating also remembers which
+   * element had focus -- the control that opened the preview -- for {@link returnFocus}.
+   */
   toggle: () => void
+  /**
+   * Hands focus back to the element that was focused when the preview was entered (the staff
+   * header's "Preview as participant" button, activated by its own click or Enter), if it is
+   * still in the document; otherwise does nothing. Call it with `toggle()` when EXITING: the
+   * stage's own Exit button unmounts with the stage, and focus must not fall to <body>
+   * (NFR-001). The target is remembered by the provider, not looked up by selector, so this
+   * is independent of the header's markup.
+   */
+  returnFocus: () => void
   /** The currently-selected scenario moment. Defaults to `'now'`. */
   moment: PreviewMoment
   /** Selects a moment — mutually exclusive; replaces whatever was selected. */
@@ -135,6 +147,37 @@ const PreviewContext = createContext<PreviewContextValue | undefined>(undefined)
 
 export interface PreviewProviderProps {
   children: ReactNode
+}
+
+/**
+ * The provider's small mutable memory: whether the preview is staged (so a toggle can decide
+ * ENTER vs EXIT synchronously -- two toggles in one tick must still alternate) and which element
+ * had focus when it was entered (so Exit can hand focus back). It is a plain object the provider
+ * holds in state, mutated only from event handlers, never read while rendering -- the reason it
+ * is a class and not a `useRef` pair: the closures the context hands out would otherwise capture
+ * refs, which the render-purity lint (rightly, in general) refuses to see passed into a Provider.
+ */
+class PreviewFocusMemory {
+  private staged = false
+
+  private opener: HTMLElement | null = null
+
+  /** Flips staged/unstaged, returning the NEW value; on an enter, remembers the focused element. */
+  flip(): boolean {
+    this.staged = !this.staged
+    if (this.staged) {
+      const focused = document.activeElement
+      this.opener = focused instanceof HTMLElement && focused !== document.body ? focused : null
+    }
+    return this.staged
+  }
+
+  /** Focuses the remembered opener, once, if it is still in the document. */
+  restore(): void {
+    const opener = this.opener
+    this.opener = null
+    if (opener !== null && opener.isConnected) opener.focus()
+  }
 }
 
 /**
@@ -151,12 +194,16 @@ export function PreviewProvider({ children }: PreviewProviderProps) {
   const [active, setActive] = useState(false)
   const [moment, setMomentState] = useState<PreviewMoment>('now')
 
-  const toggle = useCallback(() => setActive(prev => !prev), [])
+  // See `PreviewFocusMemory`: ENTER vs EXIT, and the element to hand focus back to.
+  const [memory] = useState(() => new PreviewFocusMemory())
+
+  const toggle = useCallback(() => setActive(memory.flip()), [memory])
+  const returnFocus = useCallback(() => memory.restore(), [memory])
   const setMoment = useCallback((next: PreviewMoment) => setMomentState(next), [])
 
   const value = useMemo<PreviewContextValue>(
-    () => ({ active, toggle, moment, setMoment }),
-    [active, toggle, moment, setMoment],
+    () => ({ active, toggle, returnFocus, moment, setMoment }),
+    [active, toggle, returnFocus, moment, setMoment],
   )
 
   return createElement(PreviewContext.Provider, { value }, children)

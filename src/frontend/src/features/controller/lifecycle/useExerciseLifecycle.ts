@@ -23,11 +23,15 @@
  *      refreshing the scope is how the pill reflects the new state (LIVE -> ENDEX) with no
  *      remount. That refresh is server-authoritative and takes no argument -- this hook cannot
  *      tell the scope what the status now is, it only asks again.
- * A FAILED transition changes nothing on screen except an error message: the server persists
- * nothing on any non-200, so there is no rollback to do. A 409 (the machine refused -- another
- * controller got there first, or the state moved) means this console's view of the state was
- * stale, so it also re-reads the lifecycle (the buttons stop offering what is no longer
- * possible) AND re-resolves the exercise scope (the header pill stops showing the old state).
+ * A FAILED transition shows an error message and, when the failure is DEFINITIVE (400 / 401 /
+ * 403 / 404: the server persisted nothing), nothing else -- there is no rollback to do. But
+ * some failures leave the state UNKNOWN (`stateMayHaveChanged`): a 409 (the machine refused
+ * because another controller got there first -- this console's view was stale) and a request
+ * that got no status, a 408 or a 5xx (it may well have been APPLIED, only its answer lost). For
+ * those it re-reads the lifecycle (the buttons show the truth, not a guess) AND re-resolves the
+ * exercise scope (the header pill follows). If the re-read itself fails the server is
+ * unreachable, and the scope is left alone: a failed scope refresh fails the whole provider
+ * CLOSED and would take the console down over a network blip.
  *
  * ONE IN FLIGHT. A second `transition` while one is pending is ignored (a ref guard, because two
  * activations in the same tick both see `idle`): StartEx and EndEx must never race each other.
@@ -49,6 +53,7 @@ import { useExerciseContext, useExerciseScopeRefresh } from '@/core/exerciseCont
 import {
   fetchLifecycle,
   postTransition,
+  stateMayHaveChanged,
   toLifecycleError,
   type ExerciseLifecycle,
   type LifecycleState,
@@ -147,11 +152,19 @@ export function useExerciseLifecycle(): UseExerciseLifecycleResult {
       await refreshScope().catch(() => undefined)
       return true
     } catch (error) {
-      // The error is on the mutation (`transitionError`). A refusal (409) means our view of
-      // the state was stale: re-read it so the control stops offering what is no longer
-      // possible, and re-resolve the scope so the header pill stops showing the old state.
-      if (toLifecycleError(error).status === 409) {
-        if (!USE_MOCK_DATA) void queryClient.invalidateQueries({ queryKey: key })
+      // The error is on the mutation (`transitionError`). When the failure leaves the state
+      // unknown (a 409, or no status / 408 / 5xx: the server may have applied it), ask the
+      // server: re-read the lifecycle so the buttons show the truth, then re-resolve the scope
+      // so the header pill follows. See the module header.
+      if (stateMayHaveChanged(toLifecycleError(error).status)) {
+        if (!USE_MOCK_DATA) {
+          try {
+            await queryClient.fetchQuery({ queryKey: key, queryFn: fetchLifecycle, staleTime: 0 })
+          } catch {
+            // Unreachable: leave the scope alone (a failed refresh would fail the provider closed).
+            return false
+          }
+        }
         await refreshScope().catch(() => undefined)
       }
       return false

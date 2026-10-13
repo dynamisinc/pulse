@@ -29,8 +29,9 @@
  * `.pvstage`):
  *  1. A staff-world (COBRA) label strip, UNMISTAKABLY marking the stage as a
  *     preview ("PREVIEW AS PARTICIPANT — READ-ONLY") + an Exit control that
- *     calls `toggle()` and hands focus back to the header's preview toggle
- *     (the Exit button unmounts with the stage; focus must not fall to <body>).
+ *     calls `toggle()` and hands focus back to the control that opened the preview
+ *     (`usePreview().returnFocus`; the Exit button unmounts with the stage and focus must
+ *     not fall to <body>).
  *  2. The stage itself: a neutral staff-world mat framing the PARTICIPANT-
  *     WORLD render — `PreviewChannelHost` (`./PreviewChannelHost`), which mounts
  *     the real `SocialChannel` under `ShellContextProvider { variant: 'preview',
@@ -89,25 +90,21 @@ import { resolvePreviewMomentInstant, usePreview } from '../previewContext'
 import { PreviewChannelHost } from './PreviewChannelHost'
 import { PreviewErrorBoundary } from './PreviewErrorBoundary'
 
-/**
- * The header's "Preview as participant" toggle. It stays mounted across the work-area swap, so
- * it is where focus returns when Exit unmounts the stage.
- */
-const HEADER_PREVIEW_TOGGLE_SELECTOR = '[data-testid="staff-header-preview-toggle"]'
-
 export function PreviewAsParticipant() {
-  const { moment, toggle } = usePreview()
+  const { moment, toggle, returnFocus } = usePreview()
 
   // One instant per selected moment (always the default, `now`, while no picker is rendered): the
   // channel below must not re-render (and every memoized feed row with it) because the staff
   // strip did.
   const momentInstant = useMemo(() => resolvePreviewMomentInstant(moment), [moment])
 
-  // Exit unmounts this stage, and the button the keyboard user pressed with it: hand focus to the
-  // header toggle (still mounted) in the same gesture so it never falls to <body> (NFR-001).
+  // Exit unmounts this stage, and the button the keyboard user pressed with it: hand focus back to
+  // the control that OPENED the preview (the header toggle, which stays mounted) in the same
+  // gesture, so it never falls to <body> (NFR-001). The provider remembers that element when the
+  // preview is entered; nothing here looks anything up in the header's markup.
   const exit = () => {
     toggle()
-    document.querySelector<HTMLElement>(HEADER_PREVIEW_TOGGLE_SELECTOR)?.focus()
+    returnFocus()
   }
 
   return (

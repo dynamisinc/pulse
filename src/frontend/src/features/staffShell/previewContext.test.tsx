@@ -22,6 +22,7 @@
  * `toolRegistry.test.tsx`'s own harness pattern) exercises the REAL hook
  * output rather than a re-implemented fixture (WAVE0-REVIEW precedent 17).
  */
+import { useState } from 'react'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi, afterEach } from 'vitest'
@@ -167,5 +168,65 @@ describe('resolvePreviewMomentInstant — reads scenario time, never wall-clock'
     for (const id of PREVIEW_MOMENT_ORDER) {
       expect(resolvePreviewMomentInstant(id).getTime()).toBeLessThanOrEqual(liveNow)
     }
+  })
+})
+
+describe('usePreview — returnFocus() hands focus back to whatever opened the preview', () => {
+  function FocusProbe() {
+    const { active, toggle, returnFocus } = usePreview()
+    const [openerShown, setOpenerShown] = useState(true)
+    return (
+      <div>
+        {openerShown && <button type="button" onClick={toggle}>open</button>}
+        <button type="button" onClick={() => setOpenerShown(false)}>hide opener</button>
+        <button type="button" onClick={() => { toggle(); returnFocus() }}>exit</button>
+        <button type="button" onClick={returnFocus}>return only</button>
+        <output data-testid="active-state">{String(active)}</output>
+      </div>
+    )
+  }
+
+  it('restores focus to the element that was focused when the preview was entered', async () => {
+    const user = userEvent.setup()
+    render(<PreviewProvider><FocusProbe /></PreviewProvider>)
+
+    await user.click(screen.getByRole('button', { name: 'open' }))
+    // Focus moves on while the preview is up (the stage's own Exit button, here)...
+    screen.getByRole('button', { name: 'exit' }).focus()
+    await user.click(screen.getByRole('button', { name: 'exit' }))
+
+    // ...and goes BACK to the opener, not to <body> and not to the Exit button.
+    expect(screen.getByRole('button', { name: 'open' })).toHaveFocus()
+    expect(screen.getByTestId('active-state')).toHaveTextContent('false')
+  })
+
+  it('does nothing when the opener is gone from the document, or nothing was focused', async () => {
+    const user = userEvent.setup()
+    render(<PreviewProvider><FocusProbe /></PreviewProvider>)
+
+    // Nothing remembered yet: harmless (the click focuses the button itself, nothing moves it).
+    await user.click(screen.getByRole('button', { name: 'return only' }))
+    expect(screen.getByRole('button', { name: 'return only' })).toHaveFocus()
+
+    // Remembered, then the opener leaves the document: no throw, no focus stolen.
+    await user.click(screen.getByRole('button', { name: 'open' }))
+    const opener = screen.getByRole('button', { name: 'open' })
+    await user.click(screen.getByRole('button', { name: 'hide opener' }))
+    expect(opener).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'return only' }))
+    expect(screen.getByRole('button', { name: 'return only' })).toHaveFocus()
+  })
+
+  it('remembers the opener from the latest ENTER only: an exit does not overwrite it', async () => {
+    const user = userEvent.setup()
+    render(<PreviewProvider><FocusProbe /></PreviewProvider>)
+
+    await user.click(screen.getByRole('button', { name: 'open' }))
+    await user.click(screen.getByRole('button', { name: 'exit' }))
+    // The remembered opener was consumed by the exit: a second return is a no-op.
+    screen.getByRole('button', { name: 'return only' }).focus()
+    await user.click(screen.getByRole('button', { name: 'return only' }))
+
+    expect(screen.getByRole('button', { name: 'return only' })).toHaveFocus()
   })
 })

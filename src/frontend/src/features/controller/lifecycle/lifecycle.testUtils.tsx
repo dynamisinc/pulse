@@ -9,7 +9,7 @@
  * header's sign-out calls `useNavigate`).
  *
  * The control gates on the signed-in SESSION's role, so the harness also mounts the real
- * `SessionProvider`; the test file replaces the resolver with `lifecycle.sessionKit` (see
+ * `SessionProvider`; the test file replaces the resolver with `lifecycle.sessionKit.testUtils` (see
  * there for the one-line `vi.mock`) and `sessionRole` picks the role (default `controller`;
  * `'none'` mounts no `SessionProvider` at all, to prove the control fails closed).
  *
@@ -32,7 +32,7 @@ import type { ExerciseRole } from '@/core/auth'
 import { StaffHeader } from '@/features/staffShell/components/StaffHeader'
 import { SessionProvider } from '@/core/auth'
 import { ExerciseLifecycleControl } from './ExerciseLifecycleControl'
-import { resetSessionRole, setSessionRole } from './lifecycle.sessionKit'
+import { resetSessionRole, setSessionRole } from './lifecycle.sessionKit.testUtils'
 
 export interface RenderControlOptions {
   /** The status the MOCK exercise scope reports at mount. Defaults to the mock's own `live`. */

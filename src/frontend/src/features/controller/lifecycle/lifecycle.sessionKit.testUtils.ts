@@ -1,5 +1,5 @@
 /**
- * features/controller/lifecycle/lifecycle.sessionKit.ts
+ * features/controller/lifecycle/lifecycle.sessionKit.testUtils.ts
  * ---------------------------------------------------------------------------
  * TEST-ONLY session stand-in for the StartEx / EndEx control tests (demo-polish C6). Never
  * imported by app code.
@@ -11,7 +11,7 @@
  *
  *     vi.mock('@/core/auth/sessionResolver', async importOriginal => ({
  *       ...(await importOriginal<typeof import('@/core/auth/sessionResolver')>()),
- *       resolveSession: (await import('./lifecycle.sessionKit')).resolveSession,
+ *       resolveSession: (await import('./lifecycle.sessionKit.testUtils')).resolveSession,
  *     }))
  *
  * and picks the role per case with `setSessionRole` (`renderControl({ sessionRole })` does it).

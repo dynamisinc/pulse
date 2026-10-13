@@ -31,10 +31,10 @@ vi.mock('@/core/config/mockData', () => ({
   warnIfMockDataActive: () => undefined,
 }))
 
-// The control gates on the signed-in session's role (lifecycle.sessionKit: a staff session).
+// The control gates on the signed-in session's role (a staff session, from the session kit).
 vi.mock('@/core/auth/sessionResolver', async importOriginal => ({
   ...(await importOriginal<typeof import('@/core/auth/sessionResolver')>()),
-  resolveSession: (await import('./lifecycle.sessionKit')).resolveSession,
+  resolveSession: (await import('./lifecycle.sessionKit.testUtils')).resolveSession,
 }))
 
 const LIFECYCLE_PATH = '/staff/exercise-lifecycle'
@@ -53,6 +53,8 @@ const MACHINE: Record<string, readonly string[]> = {
 let serverState = 'staged'
 let lifecycleBodyOverride: unknown
 let postFailure: AxiosError | undefined
+/** The server APPLIES the transition, then the answer is lost / the request fails (S-A). */
+let failAfterApply: AxiosError | undefined
 let getLifecycleFailure: AxiosError | undefined
 /** When set, a POST waits for this promise (to hold a request in flight). */
 let postGate: Promise<void> | undefined
@@ -92,6 +94,7 @@ beforeEach(() => {
   serverState = 'staged'
   lifecycleBodyOverride = undefined
   postFailure = undefined
+  failAfterApply = undefined
   getLifecycleFailure = undefined
   postGate = undefined
 
@@ -129,6 +132,7 @@ beforeEach(() => {
       )
     }
     serverState = to
+    if (failAfterApply !== undefined) throw failAfterApply
     return { data: lifecycleBody() }
   })
 })
@@ -139,6 +143,7 @@ afterEach(() => {
 })
 
 const lifecycleReads = () => getSpy.mock.calls.filter(call => call[0] === LIFECYCLE_PATH)
+const scopeReads = () => getSpy.mock.calls.filter(call => call[0] === '/exercise-context')
 
 describe('ExerciseLifecycleControl (live) -- the requests', () => {
   it('reads the lifecycle on mount, with no exercise id anywhere in the request', async () => {
@@ -252,6 +257,73 @@ describe('ExerciseLifecycleControl (live) -- failures are visible text', () => {
     // Nothing changed: the pill and the buttons are as they were.
     expect(pillLabel()).toBe('STAGED')
     expect(screen.getByRole('button', { name: /start exercise/i })).toBeInTheDocument()
+  })
+
+  it.each([
+    ['no status at all (the response was lost)', new AxiosError('Network Error', 'ERR_NETWORK')],
+    ['a 408 (the request timed out)', httpError(408, undefined)],
+    ['a 502 (a proxy cut the response)', httpError(502, undefined)],
+    ['a 500 (the server failed after committing)', httpError(500, undefined)],
+  ])('S-A: %s -- the server may have APPLIED it, so the console asks instead of guessing', async (_label, failure) => {
+    const user = userEvent.setup()
+    failAfterApply = failure
+    renderControl({ withHeader: true })
+    await scopeResolved()
+    expect(pillLabel()).toBe('STAGED')
+    const readsBefore = lifecycleReads().length
+    const scopeBefore = scopeReads().length
+
+    await user.click(await screen.findByRole('button', { name: /start exercise/i }))
+
+    // The error is shown (the console cannot know it worked)...
+    expect(await screen.findByTestId('lifecycle-error')).toBeInTheDocument()
+    // ...but it re-read the lifecycle and re-resolved the scope, so the screen tells the truth:
+    await waitFor(() => expect(lifecycleReads().length).toBeGreaterThan(readsBefore))
+    await waitFor(() => expect(scopeReads().length).toBeGreaterThan(scopeBefore))
+    await waitFor(() => expect(pillLabel()).toBe('LIVE'))
+    expect(await screen.findByRole('button', { name: /end exercise/i })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /start exercise/i })).not.toBeInTheDocument()
+  })
+
+  it.each([400, 401, 403, 404, 429])(
+    'S-A: a definitive %i changes nothing the console thinks it knows: no re-read, no scope refresh',
+    async status => {
+      const user = userEvent.setup()
+      postFailure = httpError(status, undefined)
+      renderControl({ withHeader: true })
+      await scopeResolved()
+      const start = await screen.findByRole('button', { name: /start exercise/i })
+      const readsBefore = lifecycleReads().length
+      const scopeBefore = scopeReads().length
+
+      await user.click(start)
+      await screen.findByTestId('lifecycle-error')
+      await new Promise(resolve => setTimeout(resolve, 30))
+
+      expect(lifecycleReads()).toHaveLength(readsBefore)
+      expect(scopeReads()).toHaveLength(scopeBefore)
+      expect(pillLabel()).toBe('STAGED')
+    },
+  )
+
+  it('S-A: when the server cannot be reached at all the scope is left alone (a failed refresh would fail the provider closed)', async () => {
+    const user = userEvent.setup()
+    postFailure = new AxiosError('Network Error', 'ERR_NETWORK')
+    renderControl({ withHeader: true })
+    await scopeResolved()
+    const start = await screen.findByRole('button', { name: /start exercise/i })
+    const scopeBefore = scopeReads().length
+    // The re-read will fail too.
+    getLifecycleFailure = new AxiosError('Network Error', 'ERR_NETWORK')
+
+    await user.click(start)
+
+    expect(await screen.findByTestId('lifecycle-error')).toHaveTextContent('could not be reached')
+    await new Promise(resolve => setTimeout(resolve, 30))
+    expect(scopeReads()).toHaveLength(scopeBefore)
+    // The console is still standing.
+    expect(screen.getByTestId('staff-header')).toBeInTheDocument()
+    expect(pillLabel()).toBe('STAGED')
   })
 
   it('a network failure says the server could not be reached', async () => {

@@ -180,11 +180,13 @@ describe('EvaluatorDashboardRoute — Integration B wiring', () => {
     expect(screen.queryByTestId('toolstrip-tool-participant-admin')).not.toBeInTheDocument()
     expect(screen.queryByTestId('toolstrip-tool-annotations')).not.toBeInTheDocument()
 
-    // Exit preview → the work area (and its tools) come back.
+    // Exit preview → the work area (and its tools) come back, and focus goes back to the REAL
+    // header's Preview button that opened it (not to <body>).
     await user.click(screen.getByTestId('preview-exit'))
     await waitFor(() => {
       expect(screen.queryByTestId('preview-as-participant')).not.toBeInTheDocument()
     })
+    expect(screen.getByTestId('staff-header-preview-toggle')).toHaveFocus()
     expect(screen.getByTestId('toolstrip-tool-participant-admin')).toBeInTheDocument()
     expect(screen.getByTestId('toolstrip-tool-annotations')).toBeInTheDocument()
   })

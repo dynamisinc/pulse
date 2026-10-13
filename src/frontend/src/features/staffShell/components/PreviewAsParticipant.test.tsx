@@ -15,7 +15,8 @@
  *  - Exit calls `usePreview().toggle()` -- proven end-to-end through a small
  *    harness that mirrors the orchestrator's `active ? <PreviewAsParticipant
  *    /> : <WorkArea />` wiring (AC3); this component does not manage its own
- *    `active` state. Exit hands focus back to the header's preview toggle (S-3).
+ *    `active` state. Exit hands focus back to the control that OPENED the preview -- the header's
+ *    toggle -- through `usePreview().returnFocus`, with no selector lookup (S-3 / S-C).
  *  - Exit is keyboard-operable (Tab + Enter) -- no pointer-only interaction (AC5).
  *  - W-3: a render error in the participant half is contained by the stage's own boundary --
  *    "Participant preview unavailable", the strip and Exit keep working, and the error never
@@ -79,8 +80,8 @@ class OuterBoundary extends Component<{ children: ReactNode }, { hit: boolean }>
 
 /**
  * Mirrors the orchestrator's Integration-B wiring exactly (see
- * `previewContext.ts`'s module header): a header-style toggle button (it carries the real
- * header toggle's test id, which Exit returns focus to) plus
+ * `previewContext.ts`'s module header): a header-style toggle button (whatever opens the
+ * preview is where Exit returns focus; it needs no particular test id or markup) plus
  * `active ? <PreviewAsParticipant /> : <WorkArea />`. This is NOT
  * `PreviewAsParticipant`'s own responsibility — it proves the exported seam
  * composes the way the real frame will use it.
@@ -89,12 +90,7 @@ function Harness() {
   const { active, toggle } = usePreview()
   return (
     <div>
-      <button
-        type="button"
-        data-testid="staff-header-preview-toggle"
-        aria-pressed={active}
-        onClick={toggle}
-      >
+      <button type="button" data-testid="opener" aria-pressed={active} onClick={toggle}>
         header preview toggle
       </button>
       {active
@@ -150,12 +146,34 @@ describe('PreviewAsParticipant — replaces the work area, labelled, within the 
     expect(window.location.href).toBe(originalLocation)
   })
 
-  it('S-3: Exit returns focus to the header preview toggle instead of dropping it to <body>', async () => {
+  it('S-3: Exit returns focus to the control that opened the preview instead of dropping it to <body>', async () => {
     const user = await openPreview()
 
     await user.click(screen.getByTestId('preview-exit'))
 
-    expect(screen.getByTestId('staff-header-preview-toggle')).toHaveFocus()
+    expect(screen.getByTestId('opener')).toHaveFocus()
+  })
+
+  it('S-C: the target is remembered, not looked up: it is the opener whatever its markup', async () => {
+    // A different element opens the preview; Exit must go back to IT.
+    const user = userEvent.setup()
+    function Other() {
+      const { active, toggle } = usePreview()
+      return (
+        <div>
+          <button type="button" data-testid="other-opener" onClick={toggle}>open from elsewhere</button>
+          <button type="button" data-testid="staff-header-preview-toggle">a decoy with the old test id</button>
+          {active ? <PreviewAsParticipant /> : null}
+        </div>
+      )
+    }
+    render(<PreviewProvider><Other /></PreviewProvider>)
+
+    await user.click(screen.getByTestId('other-opener'))
+    await user.click(screen.getByTestId('preview-exit'))
+
+    expect(screen.getByTestId('other-opener')).toHaveFocus()
+    expect(screen.getByTestId('staff-header-preview-toggle')).not.toHaveFocus()
   })
 
   it('S-3: the same holds from the keyboard (Tab to Exit, Enter)', async () => {
@@ -171,7 +189,7 @@ describe('PreviewAsParticipant — replaces the work area, labelled, within the 
     await user.keyboard('{Enter}')
 
     expect(screen.queryByTestId('preview-as-participant')).not.toBeInTheDocument()
-    expect(screen.getByTestId('staff-header-preview-toggle')).toHaveFocus()
+    expect(screen.getByTestId('opener')).toHaveFocus()
   })
 })
 
@@ -238,7 +256,7 @@ describe('PreviewAsParticipant — W-3: a render error in the channel is contain
     await openPreview()
 
     expect(screen.queryByTestId('outer-boundary-hit')).not.toBeInTheDocument()
-    expect(screen.getByTestId('staff-header-preview-toggle')).toBeInTheDocument()
+    expect(screen.getByTestId('opener')).toBeInTheDocument()
   })
 
   it('Exit still works from the failed stage, and a later preview starts clean', async () => {
@@ -248,7 +266,7 @@ describe('PreviewAsParticipant — W-3: a render error in the channel is contain
 
     await user.click(screen.getByTestId('preview-exit'))
     expect(screen.getByTestId('work-area')).toBeInTheDocument()
-    expect(screen.getByTestId('staff-header-preview-toggle')).toHaveFocus()
+    expect(screen.getByTestId('opener')).toHaveFocus()
 
     host.shouldThrow = false
     await user.click(screen.getByRole('button', { name: 'header preview toggle' }))

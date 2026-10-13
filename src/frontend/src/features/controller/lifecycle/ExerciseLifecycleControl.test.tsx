@@ -25,7 +25,7 @@ import {
 // participant, so the harness swaps in a staff session whose role each case picks.
 vi.mock('@/core/auth/sessionResolver', async importOriginal => ({
   ...(await importOriginal<typeof import('@/core/auth/sessionResolver')>()),
-  resolveSession: (await import('./lifecycle.sessionKit')).resolveSession,
+  resolveSession: (await import('./lifecycle.sessionKit.testUtils')).resolveSession,
 }))
 
 afterEach(() => {

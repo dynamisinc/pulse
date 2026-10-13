@@ -174,6 +174,22 @@ export function toLifecycleError(error: unknown): LifecycleError {
   return new LifecycleError('The exercise state could not be read or changed. Try again.')
 }
 
+/**
+ * Whether a FAILED transition leaves this console unsure what state the exercise is in, so it
+ * must ask the server again instead of trusting what it last drew:
+ *   - `409` -- the machine refused because the state had already moved (another controller got
+ *     there first): the console's view was stale;
+ *   - no status at all (a network failure or timeout), `408` and any `5xx` -- the request may
+ *     well have been APPLIED and only its answer lost (a proxy cut the response, the server
+ *     committed and then failed), so "it failed" is a guess, not a fact.
+ * Every other status (400 / 401 / 403 / 404 / 429 ...) is a definitive refusal: the server
+ * recorded nothing, so the console's view still stands. (`LifecycleError.status` is
+ * `undefined` for a failure with no response.)
+ */
+export function stateMayHaveChanged(status: number | undefined): boolean {
+  return status === undefined || status === 409 || status === 408 || status >= 500
+}
+
 // -----------------------------------------------------------------------------
 // The calls
 // -----------------------------------------------------------------------------
