@@ -289,6 +289,195 @@ namespace Pulse.WebApi.Data.Migrations
                     b.ToTable("Follows");
                 });
 
+            modelBuilder.Entity("Pulse.WebApi.Data.Entities.InjectItem", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("AssigneeId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int?>("BurstWindowSeconds")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid>("CreatedByHumanId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset?>("DeletedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid?>("DriverHumanId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Error")
+                        .HasMaxLength(1024)
+                        .HasColumnType("nvarchar(1024)");
+
+                    b.Property<Guid>("ExerciseId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("FiredByHumanId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset?>("FiredScenarioTime")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("nvarchar(16)");
+
+                    b.Property<DateTimeOffset?>("LastPublishedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(1024)
+                        .HasColumnType("nvarchar(1024)");
+
+                    b.Property<int>("Order")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("PlannedMinute")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset?>("ReleasedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<double>("ShiftSeconds")
+                        .HasColumnType("float");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("nvarchar(16)");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ExerciseId");
+
+                    b.HasIndex("Status");
+
+                    b.ToTable("InjectItems");
+                });
+
+            modelBuilder.Entity("Pulse.WebApi.Data.Entities.InjectItemPost", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int?>("BaselineLike")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("BaselineReply")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("BaselineRepost")
+                        .HasColumnType("int");
+
+                    b.Property<string>("ClaimAction")
+                        .HasMaxLength(16)
+                        .HasColumnType("nvarchar(16)");
+
+                    b.Property<Guid?>("ClaimActorId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ClaimEventId")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<DateTimeOffset?>("ClaimedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<DateTimeOffset?>("DeletedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int?>("DueOffsetSeconds")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Error")
+                        .HasMaxLength(1024)
+                        .HasColumnType("nvarchar(1024)");
+
+                    b.Property<Guid>("ExerciseId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("FiredByHumanId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("FiredPostId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset?>("FiredScenarioTime")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<DateTimeOffset?>("FiredWallClock")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid>("InjectItemId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("PersonaId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("ReplyToInjectPostId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("ReplyToPostId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("Sequence")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("nvarchar(16)");
+
+                    b.Property<string>("Text")
+                        .IsRequired()
+                        .HasMaxLength(1024)
+                        .HasColumnType("nvarchar(1024)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ExerciseId");
+
+                    b.HasIndex("InjectItemId");
+
+                    b.ToTable("InjectItemPosts");
+                });
+
+            modelBuilder.Entity("Pulse.WebApi.Data.Entities.InjectQueueState", b =>
+                {
+                    b.Property<Guid>("ExerciseId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("int");
+
+                    b.HasKey("ExerciseId");
+
+                    b.ToTable("InjectQueueStates");
+                });
+
             modelBuilder.Entity("Pulse.WebApi.Data.Entities.MediaAsset", b =>
                 {
                     b.Property<Guid>("Id")
@@ -911,6 +1100,42 @@ namespace Pulse.WebApi.Data.Migrations
                     b.Navigation("Posts");
                 });
 
+            modelBuilder.Entity("Pulse.WebApi.Data.Entities.InjectItemPost", b =>
+                {
+                    b.HasOne("Pulse.WebApi.Data.Entities.InjectItem", null)
+                        .WithMany("Posts")
+                        .HasForeignKey("InjectItemId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.OwnsMany("Pulse.WebApi.Data.Entities.InjectMediaRef", "Media", b1 =>
+                        {
+                            b1.Property<Guid>("InjectItemPostId");
+
+                            b1.Property<int>("__synthesizedOrdinal")
+                                .ValueGeneratedOnAddOrUpdate();
+
+                            b1.Property<string>("Alt")
+                                .IsRequired();
+
+                            b1.Property<string>("MediaId")
+                                .IsRequired();
+
+                            b1.HasKey("InjectItemPostId", "__synthesizedOrdinal");
+
+                            b1.ToTable("InjectItemPosts");
+
+                            b1
+                                .ToJson("Media")
+                                .HasColumnType("nvarchar(max)");
+
+                            b1.WithOwner()
+                                .HasForeignKey("InjectItemPostId");
+                        });
+
+                    b.Navigation("Media");
+                });
+
             modelBuilder.Entity("Pulse.WebApi.Data.Entities.MediaAsset", b =>
                 {
                     b.HasOne("Pulse.WebApi.Data.Entities.MediaAsset", null)
@@ -1026,6 +1251,11 @@ namespace Pulse.WebApi.Data.Migrations
                         .IsRequired();
 
                     b.Navigation("Target");
+                });
+
+            modelBuilder.Entity("Pulse.WebApi.Data.Entities.InjectItem", b =>
+                {
+                    b.Navigation("Posts");
                 });
 #pragma warning restore 612, 618
         }
