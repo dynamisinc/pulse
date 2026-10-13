@@ -115,15 +115,18 @@ AC5 day boundary; XC-ISO isolation, XC-TEL telemetry, XC-SEC content security an
   `.Normalize_ALoneSurrogate_IsDroppedNotThrown`, `.IsAcceptableLength_BoundsAre6And64`,
   `.TheClientNormaliser_IsStillTheChainThisServerMirrors` (AC1, AC3)
 - `DayWordGeneratorTests.Generate_HasTheReadAloudShape_FromTheCuratedLists`, `.Generate_TwoCallsDiffer`,
-  `.TheCuratedLists_AreLowerCaseAsciiLetters_Unique_AndReadable`, `.Generate_IsAlwaysAnAcceptableWord_AndNormalisesToItsLettersAndDigits` (AC1)
+  `.TheCuratedLists_AreLowerCaseAsciiLetters_Unique_AndReadable`, `.TheWordSpace_IsAbout22Bits`,
+  `.Generate_IsAlwaysAnAcceptableWord_AndNormalisesToItsLettersAndDigits` (AC1)
 - `DayWordServiceTests.Set_ASuppliedWord_DefaultsToToday_ReturnsThePlaintextOnce_AndStoresOnlyTheHash`,
   `.Set_WithNoWord_GeneratesOne`, `.Set_ADateThatHasAWord_ReplacesItInPlace`,
   `.Set_UpTo14DaysAhead_IsAPreset_AndTheFifteenthDayIsNot`, `.Set_ABadDate_Is400`,
   `.Set_AWordShorterThanSixOnceNormalised_Is400_AndTheReasonNeverQuotesIt`,
-  `.Set_AWordLongerThan64OnceNormalised_OrOverTheRawBound_Is400`, `.Set_AnAccentedWord_IsAcceptedOnItsFoldedLength` (AC1)
+  `.Set_AWordLongerThan64OnceNormalised_OrOverTheRawBound_Is400`, `.Set_AnAccentedWord_IsAcceptedOnItsFoldedLength`,
+  `.Set_WhenAnotherFirstSetWinsTheRace_RetriesOnceAsARotation` (AC1)
 - `DayWordServiceTests.Status_WithNoWord_ReportsTheZoneTodayAndItsEnd`,
   `.Status_WithWords_ReportsWhoWhenHowOftenAndThePresetDates_NeverAWord`,
-  `.Status_ASetterOutsideTheExercisesTenant_IsNotNamed`, `.Status_InAnUnknownZone_FallsBackToUtcAndSaysSo`,
+  `.Status_ASetterOutsideTheExercisesTenant_IsNotNamed`, `.Status_InAnUnknownZone_FallsBackToUtcAndSaysSo_AndWarnsOnce`,
+  `.Status_InAKnownZone_DoesNotWarn`,
   `.Clear_RemovesThatDatesWord_AndIsIdempotent`, `.Clear_ABadOrOutOfRangeDate_Is400` (AC2);
   `.NoStaffSession_OrNoScope_IsUnauthorized`, `.AStaffUserWithoutControllerOrPlanner_IsForbidden`,
   `.APlanner_MayManageTheWord` (XC-AUTH)
@@ -134,15 +137,17 @@ AC5 day boundary; XC-ISO isolation, XC-TEL telemetry, XC-SEC content security an
   `.NoWordSetToday_IsRefused_AfterTheDecoy`, `.YesterdaysWord_AndTomorrowsPresetWord_AreRefused`,
   `.ADisabledAccount_IsRefused_EvenWithTheRightWord`, `.AnAccountOutsideTheParticipantWorld_IsRefused`,
   `.AnExerciseOutsideStagedLivePaused_IsRefused`, `.AnUnresolvedOrEmptyHost_IsRefused_AfterTheDecoy_WithNoTelemetry`,
-  `.AWordThatCannotBeValid_StillPaysTheDecoy`, `.TheWord_IsVerifiedBeforeTheNameIsLookedUp_AndAWrongWordNeverReadsAccounts`,
+  `.AWordThatCannotBeValid_StillPaysTheDecoy`, `.TheWordIsVerifiedBeforeTheNameLookup_AndEveryRefusalRunsTheSameStatements`,
   `.AMissingField_IsInvalid_BeforeAnyWork`, `.AnOversizedField_IsInvalid_AndTheReasonNeverQuotesIt` (AC4);
-  `.TheRoute_NeverCreatesOrChangesAnAccount` (XC-SEC)
+  `.TheRoute_NeverCreatesOrChangesAnAccount` (XC-SEC);
+  `.AnUnknownTimeZone_FallsBackToUtc_AndWarnsOncePerExercise_WithOnlyTheIdAndZone` (AC5)
 - `DayWordBoundaryTests.NewYork_RolloverZero_TheWordEndsAtLocalMidnight_ToTheSecond`,
   `.NewYork_FallBack_The25HourDayEndsAtTheNextLocalMidnight`, `.NewYork_SpringForward_The23HourDayEndsAtTheNextLocalMidnight`,
   `.Kolkata_AHalfHourOffsetZone_RollsOverAt1830Utc`, `.RolloverHourThree_TheDayEndsAtThreeLocal`,
+  `.RolloverHourTwo_OnTheSpringForwardNight_EndsTheDayWhenTheClocksJump`,
   `.TheStaffSide_FlipsTodayAndThePastAtTheSameInstant`, `.TheStaffSide_HonoursTheRolloverHour` (AC5)
 - `DayWordEndpointsHttpTests.StaffRoutes_WithNoStaffSession_Are401_AndNoStore`, `.AnEvaluator_Is403_AndNoStore`,
-  `.AParticipantSession_OrAnAnonymousCaller_NeverReachesTheStaffRoutes` (XC-AUTH);
+  `.AParticipantOrReadOnlySession_OrAnAnonymousCaller_NeverReachesTheStaffRoutes` (XC-AUTH);
   `.AController_GetsPutsAndDeletes_AndEveryResponseIsNoStore`, `.ABadDate_Is400ProblemDetails_WithAReadableDetail` (AC1, AC2);
   `.WordSignIn_EndToEnd_AnswersTheLoginEnvelope_AndARotationTakesEffectOnTheNextAttempt` (AC1, AC3);
   `.WordSignIn_NullBody_Is400ProblemDetails`, `.WordSignIn_AMissingField_Is400ProblemDetails`,

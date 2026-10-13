@@ -305,24 +305,34 @@ public sealed class DayWordEndpointsHttpTests
     }
 
     [RequiresDockerFact]
-    public async Task AParticipantSession_OrAnAnonymousCaller_NeverReachesTheStaffRoutes()
+    public async Task AParticipantOrReadOnlySession_OrAnAnonymousCaller_NeverReachesTheStaffRoutes()
     {
         var exercise = await SeedExerciseAsync(_fixture, hostname: HostFor());
         var participantToken = $"participant-{Guid.NewGuid():N}";
+        var readOnlyToken = $"readonly-{Guid.NewGuid():N}";
         await using (var seed = _fixture.CreateContext())
         {
             seed.Sessions.Add(TestSessions.NewSession(participantToken, exercise.Id));
+            seed.Sessions.Add(TestSessions.NewSession(readOnlyToken, exercise.Id, kind: "readonly", isReadOnly: true));
             await seed.SaveChangesAsync();
         }
 
         await using var host = await DayWordHttpTestHost.StartAsync(_fixture.ConnectionString!);
         using var participant = host.CreateClient(exercise.Hostname!, participantToken);
+        using var readOnly = host.CreateClient(exercise.Hostname!, readOnlyToken);
         using var anonymous = host.CreateClient(exercise.Hostname!);
 
         using var asParticipant = await participant.PutAsJsonAsync(StaffRoute, new { word = "Maple Harbor 42" });
+        using var readOnlyGet = await readOnly.GetAsync(StaffRoute);
+        using var readOnlyPut = await readOnly.PutAsJsonAsync(StaffRoute, new { word = "Maple Harbor 42" });
+        using var readOnlyDelete = await readOnly.DeleteAsync(StaffRoute);
         using var asAnonymous = await anonymous.GetAsync(StaffRoute);
 
         asParticipant.StatusCode.Should().Be(HttpStatusCode.Unauthorized, "a participant session is not a staff session");
+        readOnlyGet.StatusCode.Should().Be(HttpStatusCode.Unauthorized, "a shared view-only session is not a staff session");
+        readOnlyPut.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        readOnlyDelete.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        readOnlyGet.Headers.CacheControl?.NoStore.Should().BeTrue();
         asAnonymous.StatusCode.Should().Be(HttpStatusCode.Unauthorized, "the default-deny gate refuses an anonymous staff call");
         (await ReadWordsAsync(_fixture, exercise.Id)).Should().BeEmpty();
     }

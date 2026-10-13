@@ -4,8 +4,11 @@ using System;
 using System.Linq;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using System.Threading;
 using System.Threading.Tasks;
 using FluentAssertions;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.Identity.DayWord;
@@ -262,15 +265,83 @@ public sealed class DayWordServiceTests
     }
 
     [RequiresDockerFact]
-    public async Task Status_InAnUnknownZone_FallsBackToUtcAndSaysSo()
+    public async Task Status_InAnUnknownZone_FallsBackToUtcAndSaysSo_AndWarnsOnce()
     {
         var exercise = await SeedExerciseAsync(_fixture, timeZone: "Mars/Olympus_Mons");
         var staffUserId = await SeedStaffAsync(_fixture, exercise.Id);
+        var logger = new ListLogger<DayWordService>();
 
-        var status = (await StatusAsync(exercise.Id, staffUserId)).Status!;
+        var status = (await StatusAsync(exercise.Id, staffUserId, logger: logger)).Status!;
+        await StatusAsync(exercise.Id, staffUserId, logger: logger);
+        await SetAsync(exercise.Id, staffUserId, new DayWordPutBody { Word = "Maple Harbor 42" }, logger: logger);
 
         status.TimeZone.Should().Be("UTC", "the zone shown is the zone the day maths used");
         status.TodayEndsAt.Should().Be(new DateTimeOffset(2026, 10, 14, 0, 0, 0, TimeSpan.Zero).ToString("O"));
+
+        var warning = logger.Entries.Should().ContainSingle("Gate-1 S-6: logged once per exercise per process, not per request").Subject;
+        warning.Level.Should().Be(Microsoft.Extensions.Logging.LogLevel.Warning);
+        warning.Message.Should().Contain(exercise.Id.ToString()).And.Contain("Mars/Olympus_Mons");
+        warning.Message.Should().NotContainEquivalentOf("maple", "the warning names only the exercise and the zone");
+    }
+
+    [RequiresDockerFact]
+    public async Task Status_InAKnownZone_DoesNotWarn()
+    {
+        var (exerciseId, staffUserId) = await SeedAsync();
+        var logger = new ListLogger<DayWordService>();
+
+        await StatusAsync(exerciseId, staffUserId, logger: logger);
+
+        logger.Entries.Should().BeEmpty();
+    }
+
+    // ---------------------------------------------------------------- concurrent first set (Gate-1 W-3)
+
+    [RequiresDockerFact]
+    public async Task Set_WhenAnotherFirstSetWinsTheRace_RetriesOnceAsARotation()
+    {
+        var (exerciseId, staffUserId) = await SeedAsync();
+        var racer = await SeedStaffAsync(_fixture, exerciseId, "planner");
+        Guid racerRowId = Guid.Empty;
+
+        // Just before our first save, a competing first set for the same date commits (as another staff member's
+        // request would), so our insert hits the (ExerciseId, ForDate) unique index.
+        var interceptor = new RacingInsertInterceptor(async () =>
+        {
+            var row = await SeedWordAsync(_fixture, exerciseId, Today, "racer word one", setBy: racer);
+            racerRowId = row.Id;
+        });
+
+        var options = new DbContextOptionsBuilder<PulseDbContext>()
+            .UseSqlServer(_fixture.ConnectionString!)
+            .AddInterceptors(interceptor)
+            .Options;
+        var exerciseContext = new ExerciseContext { CurrentExerciseId = exerciseId };
+
+        DayWordResult result;
+        await using (var context = new PulseDbContext(options, exerciseContext, null))
+        {
+            result = await StaffService(context, exerciseId, staffUserId, ClockAt(DefaultNow))
+                .SetAsync(new DayWordPutBody { Word = "Maple Harbor 42" });
+        }
+
+        interceptor.Fired.Should().BeTrue("anti-vacuity: the race really happened");
+        result.Outcome.Should().Be(DayWordOutcome.Ok, "no 409: the caller's word becomes the date's word");
+        result.SetResult!.Replaced.Should().BeTrue("losing the race turns the first set into a rotation");
+        result.SetResult.Word.Should().Be("Maple Harbor 42");
+
+        var row = (await ReadWordsAsync(_fixture, exerciseId)).Should().ContainSingle("still one row per exercise per date").Subject;
+        row.Id.Should().Be(racerRowId, "the winner's row is replaced in place");
+        row.ReplacedCount.Should().Be(1, "ReplacedCount + 1");
+        row.SetByStaffUserId.Should().Be(staffUserId);
+        _hasher.Verify(row.WordHash, "mapleharbor42").Should().BeTrue();
+        _hasher.Verify(row.WordHash, "racerwordone").Should().BeFalse();
+
+        var evt = (await ReadEventsAsync(_fixture, exerciseId)).Should().ContainSingle(
+            "the refused insert's event was dropped with it; only the retry's event is written").Subject;
+        evt.EventType.Should().Be("credential.rotated");
+        evt.Payload.Should().Be("{\"date\":\"2026-10-13\",\"first\":false,\"generated\":false}");
+        evt.Target!.EntityId.Should().Be(racerRowId.ToString());
     }
 
     // ---------------------------------------------------------------- clear (AC2)
@@ -356,21 +427,47 @@ public sealed class DayWordServiceTests
         return (exercise.Id, staffUserId);
     }
 
-    private async Task<DayWordResult> SetAsync(Guid? scope, Guid? staffUserId, DayWordPutBody? body, DateTimeOffset? now = null)
+    private async Task<DayWordResult> SetAsync(
+        Guid? scope, Guid? staffUserId, DayWordPutBody? body, DateTimeOffset? now = null, ListLogger<DayWordService>? logger = null)
     {
         await using var context = _fixture.CreateContext(new ExerciseContext { CurrentExerciseId = scope });
-        return await StaffService(context, scope, staffUserId, ClockAt(now ?? DefaultNow)).SetAsync(body);
+        return await StaffService(context, scope, staffUserId, ClockAt(now ?? DefaultNow), logger: logger).SetAsync(body);
     }
 
-    private async Task<DayWordResult> StatusAsync(Guid? scope, Guid? staffUserId, DateTimeOffset? now = null)
+    private async Task<DayWordResult> StatusAsync(
+        Guid? scope, Guid? staffUserId, DateTimeOffset? now = null, ListLogger<DayWordService>? logger = null)
     {
         await using var context = _fixture.CreateContext(new ExerciseContext { CurrentExerciseId = scope });
-        return await StaffService(context, scope, staffUserId, ClockAt(now ?? DefaultNow)).GetStatusAsync();
+        return await StaffService(context, scope, staffUserId, ClockAt(now ?? DefaultNow), logger: logger).GetStatusAsync();
     }
 
     private async Task<DayWordResult> ClearAsync(Guid? scope, Guid? staffUserId, string? rawDate, DateTimeOffset? now = null)
     {
         await using var context = _fixture.CreateContext(new ExerciseContext { CurrentExerciseId = scope });
         return await StaffService(context, scope, staffUserId, ClockAt(now ?? DefaultNow)).ClearAsync(rawDate);
+    }
+}
+
+/// <summary>Runs a competing write once, just before the first save of the context it is attached to.</summary>
+internal sealed class RacingInsertInterceptor : SaveChangesInterceptor
+{
+    private readonly Func<Task> _race;
+
+    public RacingInsertInterceptor(Func<Task> race) => _race = race;
+
+    public bool Fired { get; private set; }
+
+    public override async ValueTask<InterceptionResult<int>> SavingChangesAsync(
+        DbContextEventData eventData,
+        InterceptionResult<int> result,
+        CancellationToken cancellationToken = default)
+    {
+        if (!Fired)
+        {
+            Fired = true;
+            await _race();
+        }
+
+        return await base.SavingChangesAsync(eventData, result, cancellationToken);
     }
 }

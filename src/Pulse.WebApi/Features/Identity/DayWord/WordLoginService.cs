@@ -1,6 +1,7 @@
 namespace Pulse.WebApi.Features.Identity.DayWord;
 
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
@@ -23,8 +24,10 @@ using Pulse.WebApi.Features.Identity.Sessions;
 /// <b>Word first, then name (EL-9).</b> The word is verified BEFORE the sign-in name is looked up, so a guesser needs
 /// both at once and learns nothing from either alone. Exactly ONE word verification runs on every path: against
 /// today's stored hash when one exists, otherwise <see cref="ISharedCredentialHasher.VerifyDecoy"/> (no word set, an
-/// unresolved host, a word that cannot be valid). There is deliberately NO failed-attempt lockout: one script could
-/// otherwise lock every participant out at StartEx. Only the per-IP limiter on the route applies.
+/// unresolved host, a word that cannot be valid). The name is then looked up on EVERY resolved-exercise path, whatever
+/// the word's result (Gate-1 W-1), so a right word with a wrong name runs exactly the statements a wrong word does and
+/// nothing in the request's work reveals that the word was right. There is deliberately NO failed-attempt lockout: one
+/// script could otherwise lock every participant out at StartEx. Only the per-IP limiter on the route applies.
 /// </para>
 /// <para>
 /// <b>The redaction check (story 01 Gate-1 fold).</b> Every refusal then runs exactly ONE more slow-KDF call: the
@@ -86,6 +89,7 @@ public sealed class WordLoginService
     private readonly IExerciseClock _exerciseClock;
     private readonly TimeProvider _timeProvider;
     private readonly EasyLoginOptions _options;
+    private readonly ILogger<WordLoginService> _logger;
 
     /// <summary>Creates the word sign-in funnel over its collaborators.</summary>
     /// <param name="dbContext">The persistence context (the account update and telemetry share one unit of work).</param>
@@ -96,6 +100,7 @@ public sealed class WordLoginService
     /// <param name="exerciseClock">The native exercise clock, for the telemetry scenario time.</param>
     /// <param name="timeProvider">The wall clock (a fake in tests).</param>
     /// <param name="options">The easy-login options (the day rollover hour).</param>
+    /// <param name="logger">Logs the once-per-exercise time-zone fallback warning (never a name or a word).</param>
     public WordLoginService(
         PulseDbContext dbContext,
         IExerciseContext exerciseContext,
@@ -104,7 +109,8 @@ public sealed class WordLoginService
         ExerciseFactsReader factsReader,
         IExerciseClock exerciseClock,
         TimeProvider timeProvider,
-        IOptions<EasyLoginOptions> options)
+        IOptions<EasyLoginOptions> options,
+        ILogger<WordLoginService> logger)
     {
         ArgumentNullException.ThrowIfNull(dbContext);
         ArgumentNullException.ThrowIfNull(exerciseContext);
@@ -114,6 +120,7 @@ public sealed class WordLoginService
         ArgumentNullException.ThrowIfNull(exerciseClock);
         ArgumentNullException.ThrowIfNull(timeProvider);
         ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(logger);
 
         _dbContext = dbContext;
         _exerciseContext = exerciseContext;
@@ -123,6 +130,7 @@ public sealed class WordLoginService
         _exerciseClock = exerciseClock;
         _timeProvider = timeProvider;
         _options = options.Value;
+        _logger = logger;
     }
 
     /// <summary>
@@ -182,7 +190,9 @@ public sealed class WordLoginService
             return RejectWithoutExercise(word, signInName);
         }
 
-        // One clock read: today's date, LastLoginAt and the event share it.
+        // One clock read: today's date, LastLoginAt and the event share it. An unknown zone falls back to UTC (logged
+        // once per exercise, with only the exercise id and the zone id).
+        DayWordTimeZoneWarning.WarnIfFallback(_logger, exerciseId, facts.TimeZone);
         var now = _timeProvider.GetUtcNow();
         var today = ExerciseDay.Today(facts.TimeZone, now, _options.DayRolloverHour);
 
@@ -199,18 +209,20 @@ public sealed class WordLoginService
             ? _hasher.Verify(storedHash, word)
             : _hasher.VerifyDecoy(word);
 
-        // 5. EL-11: only Staged / Live / Paused admit a sign-in (an unknown status fails closed).
-        if (!wordMatches || !ExerciseLifecycleStates.IsParticipantAccessible(facts.Status))
-        {
-            return await RejectAsync(exerciseId, facts, storedHash, signInName, word, now, cancellationToken);
-        }
-
-        // 6. Only now the name: trimmed, sanitized, matched case-insensitively (the column collation, as for
-        //    /api/auth/login) under the central filter. Tracked: a success records LastLoginAt.
+        // 5. Only after the word, the name: trimmed, sanitized, matched case-insensitively (the column collation, as
+        //    for /api/auth/login) under the central filter. Looked up on EVERY path whatever the word's result
+        //    (Gate-1 W-1), so the statements run never reveal that the word was right. Tracked, because a success
+        //    records LastLoginAt; on a refusal it is left unmodified, so the refusal's save writes only its event.
         var account = await _dbContext.Accounts
             .FirstOrDefaultAsync(a => a.ExerciseId == exerciseId && a.Username == signInName, cancellationToken);
 
-        if (account is null || account.DisabledAt is not null || !ParticipantWorldRoles.Contains(account.Role))
+        // 6. Everything must hold: today's word, a participant-accessible exercise (EL-11: Staged / Live / Paused; an
+        //    unknown status fails closed), and an enabled participant-world account of that name.
+        if (!wordMatches
+            || !ExerciseLifecycleStates.IsParticipantAccessible(facts.Status)
+            || account is null
+            || account.DisabledAt is not null
+            || !ParticipantWorldRoles.Contains(account.Role))
         {
             return await RejectAsync(exerciseId, facts, storedHash, signInName, word, now, cancellationToken);
         }

@@ -6,6 +6,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.Identity.DayWord;
@@ -211,24 +212,67 @@ public sealed class WordLoginServiceTests
     }
 
     [RequiresDockerFact]
-    public async Task TheWord_IsVerifiedBeforeTheNameIsLookedUp_AndAWrongWordNeverReadsAccounts()
+    public async Task TheWordIsVerifiedBeforeTheNameLookup_AndEveryRefusalRunsTheSameStatements()
     {
         var (exercise, _) = await SeedLiveWithWordAsync();
+        await SeedAccountAsync(_fixture, exercise.Id, "disabled1", disabledAt: DefaultNow.AddDays(-1));
 
-        // Right word: the one KDF verification precedes the first SQL statement that reads [Accounts].
-        var rightLog = await SignInWithLogAsync(exercise.Id, Body("jsmith", Word));
-        var kdf = rightLog.FindIndex(entry => entry.StartsWith("KDF:", StringComparison.Ordinal));
-        var accountsRead = rightLog.FindIndex(entry => entry.StartsWith("SQL:", StringComparison.Ordinal)
-            && entry.Contains("[Accounts]", StringComparison.Ordinal));
-        kdf.Should().BeGreaterThanOrEqualTo(0);
-        accountsRead.Should().BeGreaterThan(kdf, "EL-9: the word is verified BEFORE the sign-in name is looked up");
+        // Gate-1 W-1: a wrong word, a right word with an unknown name, and a right word for a disabled account must run
+        // the SAME statements in the SAME order, or the work done would tell a guesser that the word was right.
+        var wrongWord = await SignInWithLogAsync(exercise.Id, Body("jsmith", "Maple Harbor 99"));
+        var unknownName = await SignInWithLogAsync(exercise.Id, Body("nobody", Word));
+        var disabled = await SignInWithLogAsync(exercise.Id, Body("disabled1", Word));
+        var success = await SignInWithLogAsync(exercise.Id, Body("jsmith", Word));
 
-        // Wrong word: the name is never even looked up, so neither half teaches a guesser anything alone.
-        var wrongLog = await SignInWithLogAsync(exercise.Id, Body("jsmith", "Maple Harbor 99"));
-        wrongLog.Count(entry => entry.StartsWith("KDF:", StringComparison.Ordinal)).Should().Be(2, "the word check plus the refusal's redaction check");
-        wrongLog.Should().NotContain(
-            entry => entry.StartsWith("SQL:", StringComparison.Ordinal) && entry.Contains("[Accounts]", StringComparison.Ordinal),
-            "a wrong word refuses before any account read");
+        foreach (var log in new[] { wrongWord, unknownName, disabled, success })
+        {
+            var firstKdf = log.FindIndex(entry => entry.StartsWith("KDF:", StringComparison.Ordinal));
+            var accountsRead = log.FindIndex(entry => entry.StartsWith("SQL:", StringComparison.Ordinal)
+                && entry.Contains("FROM [Accounts]", StringComparison.Ordinal));
+            firstKdf.Should().BeGreaterThanOrEqualTo(0);
+            accountsRead.Should().BeGreaterThan(firstKdf, "EL-9: the word is verified BEFORE the sign-in name is looked up, on every path");
+        }
+
+        wrongWord.Should().Equal(unknownName, "a right word with an unknown name runs exactly what a wrong word runs");
+        wrongWord.Should().Equal(disabled, "a right word for a disabled account runs exactly what a wrong word runs");
+        wrongWord.Count(entry => entry.StartsWith("KDF:", StringComparison.Ordinal)).Should().Be(2, "the word check plus the refusal's redaction check");
+        wrongWord.Should().NotContain(
+            entry => entry.Contains("UPDATE", StringComparison.OrdinalIgnoreCase),
+            "the account read on a refusal is left untouched, so the refusal's save writes only its event");
+        wrongWord.Where(entry => entry.StartsWith("SQL:", StringComparison.Ordinal)).Last().Should().Contain(
+            "INSERT INTO [TelemetryEvents]", "the refusal's one write is its failure event");
+        success.Should().Contain(entry => entry.Contains("UPDATE [Accounts]", StringComparison.Ordinal), "anti-vacuity: a success does write LastLoginAt");
+    }
+
+    [RequiresDockerFact]
+    public async Task AnUnknownTimeZone_FallsBackToUtc_AndWarnsOncePerExercise_WithOnlyTheIdAndZone()
+    {
+        var exercise = await SeedExerciseAsync(_fixture, timeZone: "Mars/Olympus_Mons");
+        await SeedAccountAsync(_fixture, exercise.Id, "jsmith");
+        await SeedWordAsync(_fixture, exercise.Id, Today, Word);
+        var logger = new ListLogger<WordLoginService>();
+
+        // 2026-10-13T23:30Z is still the 13th in UTC (the fallback), though it is the 13th in New York too.
+        for (var attempt = 0; attempt < 2; attempt++)
+        {
+            await using var context = _fixture.CreateContext(new ExerciseContext { CurrentExerciseId = exercise.Id });
+            var service = LoginService(
+                context, exercise.Id, ClockAt(new DateTimeOffset(2026, 10, 13, 23, 30, 0, TimeSpan.Zero)), new RecordingSessionIssuer(), logger: logger);
+            (await service.SignInAsync(Body("jsmith", Word))).Outcome.Should().Be(WordLoginOutcome.Authenticated);
+        }
+
+        await using (var context = _fixture.CreateContext(new ExerciseContext { CurrentExerciseId = exercise.Id }))
+        {
+            var service = LoginService(
+                context, exercise.Id, ClockAt(new DateTimeOffset(2026, 10, 14, 0, 0, 0, TimeSpan.Zero)), new RecordingSessionIssuer(), logger: logger);
+            (await service.SignInAsync(Body("jsmith", Word))).Outcome.Should().Be(
+                WordLoginOutcome.Rejected, "with the UTC fallback the 13th's word ends at UTC midnight");
+        }
+
+        var warning = logger.Entries.Should().ContainSingle("the fallback is logged once per exercise per process, not per request").Subject;
+        warning.Level.Should().Be(LogLevel.Warning);
+        warning.Message.Should().Contain(exercise.Id.ToString()).And.Contain("Mars/Olympus_Mons");
+        warning.Message.Should().NotContainEquivalentOf("maple").And.NotContain("jsmith", "never a word or a sign-in name");
     }
 
     [RequiresDockerFact]
