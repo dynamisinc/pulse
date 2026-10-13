@@ -5,34 +5,39 @@
  * in part). Consumes the FROZEN backend contract (docs/features/easy-login/
  * implementation.md):
  *
- *   GET /api/staff/roster/cards?id={id}&id={id}...
- *     repeated optional `id` (none = every eligible participant); at most 500 per request.
+ *   POST /api/staff/roster/cards          (EL-20; it was a GET with repeated `?id=`)
+ *     body `{ participantIds: string[] }` (1 to 500 ids)  or  `{ all: true }`:
+ *     exactly one of the two. Both, neither, an empty array, more than 500 ids or an
+ *     unknown property is a 400. Body limit 64 KiB.
  *   200 -> RosterCardsDto { exerciseName, cards[], skipped[] }
- *   400 -> more than 500 ids      409 -> join base URL not configured
- *   401 -> no staff session       403 -> not assigned / wrong role (controller|planner only)
+ *   400 -> a body the server refuses   409 -> join base URL not configured
+ *   401 -> no staff session            403 -> not assigned / wrong role (controller|planner)
  *
  * NO EXERCISE ID IS EVER SENT (COR-001): the server scopes everything. A participant id
  * from another exercise comes back as an ordinary `notFound` skip, indistinguishable from
  * an unknown id.
  *
  * CHUNKING. The server rejects more than 500 ids, so a larger selection is split into
- * requests of at most {@link MAX_CARDS_PER_REQUEST} ids, sent one after the other, and
- * the `cards` and `skipped` of every response are concatenated in request order. When more
- * than one request was needed the merged cards are re-sorted by name, because each
- * response is only ordered within itself and a hand-out sheet should read A to Z. An
- * EMPTY input is ONE request with no `id` at all ("every eligible participant"): that is
- * the only way to ask for everyone. A NON-empty input is de-duplicated and stripped of
- * blank ids first (first occurrence wins); if nothing usable is left it is refused as a
- * `badRequest` with NO request made, never quietly widened to "everyone".
+ * requests of at most {@link MAX_CARDS_PER_REQUEST} ids, each `{ participantIds: chunk }`,
+ * sent one after the other; the `cards` and `skipped` of every response are concatenated in
+ * request order. When more than one request was needed the merged cards are re-sorted by
+ * name, because each response is only ordered within itself and a hand-out sheet should
+ * read A to Z. An EMPTY input is ONE request with the explicit body `{ all: true }`
+ * ("every eligible participant"): that is the only way to ask for everyone, and an empty
+ * `participantIds` array is never sent (the server refuses it). A NON-empty input is
+ * de-duplicated and stripped of blank ids first (first occurrence wins); if nothing usable
+ * is left it is refused as a `badRequest` with NO request made, never widened to everyone.
  *
  * CANCELLATION. React Query hands the query function an `AbortSignal` that fires when the
  * preview closes mid-load. It is passed to every request (so axios aborts the one in
  * flight) and checked before each next chunk, so closing the preview stops the remaining
  * requests instead of fetching a thousand credentials nobody will see.
  *
- * WIRE FORMAT. Axios serializes an array param as `id[]=a&id[]=b` by default; the server
- * binds repeated plain `id=a&id=b`. `paramsSerializer: { indexes: null }` produces exactly
- * that, and `cardsService.test.ts` asserts the resulting query string.
+ * WIRE FORMAT. Ids travel in a JSON body, never in the URL: 500 GUIDs in a query string
+ * (about 20 KB) exceed the server's 8 KB request line (a 414 above roughly 203 ids), and an
+ * array spelling the server did not recognise (`?id[]=`) silently widened the request to
+ * every participant. A strict body makes "everyone" an explicit choice. No `id=` query
+ * parameter is ever sent; `cardsService.test.ts` asserts the real serialized request.
  *
  * MOCK SEAM (mirrors `features/planner/services/accountImportService.ts`): every request
  * goes through the shared axios client (`@/core/services/api`), so URL, base URL, headers
@@ -64,12 +69,13 @@ import type {
   RosterCardSkipReason,
   RosterCardSkippedDto,
   RosterCardsDto,
+  RosterCardsRequest,
 } from './types'
 
 /** The cards endpoint, relative to the shared client's `/api` base URL. */
 export const CARDS_ENDPOINT = '/staff/roster/cards'
 
-/** The server's `MaxCardsPerRequest`: the most `id`s one request may carry. */
+/** The server's `MaxCardsPerRequest`: the most ids one request body may carry. */
 export const MAX_CARDS_PER_REQUEST = 500
 
 /** The SINGLE mock/live flip point. Mock in dev/test; the live endpoint otherwise. */
@@ -216,17 +222,14 @@ export function chunkIds(ids: readonly string[], size: number = MAX_CARDS_PER_RE
   return chunks
 }
 
-/** One request. `ids` empty = no `id` param at all (every eligible participant). */
+/** One request. The body is `{ all: true }` or `{ participantIds }`, never anything else. */
 async function fetchChunk(
-  ids: readonly string[],
+  body: RosterCardsRequest,
   signal: AbortSignal | undefined,
 ): Promise<RosterCardsDto> {
   let data: unknown
   try {
-    const response = await api.get<unknown>(CARDS_ENDPOINT, {
-      ...(ids.length > 0
-        ? { params: { id: ids }, paramsSerializer: { indexes: null } }
-        : {}),
+    const response = await api.post<unknown>(CARDS_ENDPOINT, body, {
       ...(signal !== undefined ? { signal } : {}),
       ...(USE_MOCK_CARDS ? { adapter: mockCardsAdapter } : {}),
     })
@@ -255,10 +258,10 @@ const NAME_COLLATOR = new Intl.Collator('en', { sensitivity: 'base', numeric: tr
 
 /**
  * Fetches the printable cards for `ids`. An empty `ids` means every eligible participant
- * (and is the ONLY thing that does). Otherwise the ids are cleaned, split into requests of
- * at most 500 and merged: cards and skipped entries in request order, and the cards
- * re-sorted by name when more than one request was needed. `signal` (React Query's) stops
- * the remaining requests when it fires.
+ * (sent as `{ all: true }`, and the ONLY thing that does). Otherwise the ids are cleaned,
+ * split into requests of at most 500 and merged: cards and skipped entries in request
+ * order, and the cards re-sorted by name when more than one request was needed. `signal`
+ * (React Query's) stops the remaining requests when it fires.
  *
  * Throws `RosterCardsError` on any failure; one failed chunk fails the whole sheet (a
  * half sheet handed out as a whole one is worse than an error).
@@ -268,7 +271,7 @@ export async function fetchRosterCards(
   signal?: AbortSignal,
 ): Promise<RosterCardsDto> {
   throwIfAborted(signal)
-  if (ids.length === 0) return fetchChunk([], signal)
+  if (ids.length === 0) return fetchChunk({ all: true }, signal)
 
   const chunks = chunkIds(usableIds(ids))
   // A non-empty input with nothing usable in it is NOT "everyone": refuse, send nothing.
@@ -277,7 +280,7 @@ export async function fetchRosterCards(
   let result: RosterCardsDto | undefined
   for (const chunk of chunks) {
     throwIfAborted(signal)
-    const part = await fetchChunk(chunk, signal)
+    const part = await fetchChunk({ participantIds: chunk }, signal)
     result = result === undefined
       ? part
       : {

@@ -10,9 +10,10 @@
  * WHAT IT DOES
  *   Renders a COBRA button that reads "Print cards (N)" for N selected people, or
  *   "Print all cards" when the selection is empty. Activating it opens the preview
- *   (`CardSheetPreview`), which fetches `GET /staff/roster/cards` for exactly those people
- *   (none selected = every eligible participant). The button owns only "is the preview
- *   open, and for which people"; fetching, the dialog and the sheet are the preview's.
+ *   (`CardSheetPreview`), which fetches `POST /staff/roster/cards` for exactly those people
+ *   (`{ participantIds }`; none selected = the explicit `{ all: true }`). The button owns
+ *   only "is the preview open, and for which people"; fetching, the dialog and the sheet
+ *   are the preview's.
  *
  * THE SELECTION IS SNAPSHOTTED AT CLICK. The preview prints the people who were selected
  * when staff pressed the button, not whoever the roster later shows as selected: the
