@@ -47,7 +47,7 @@ async function loaded() {
   return screen.findByTestId('card-sheet')
 }
 
-/** An `api.get` that stays pending until `release()`, so the loading state is observable. */
+/** A cards request that stays pending until `release()`, so the loading state is observable. */
 function holdCards() {
   let release: () => void = () => {}
   const gate = new Promise<void>(resolve => { release = resolve })

@@ -1,24 +1,29 @@
 /**
  * features/participantAdmin/cards/cardsMocks.ts
  * ---------------------------------------------------------------------------
- * The MOCK adapter for `GET /api/staff/roster/cards` (easy-login story 12), so the
+ * The MOCK adapter for `POST /api/staff/roster/cards` (easy-login story 12), so the
  * card sheet, the preview and the print layout can be built, reviewed and tested with
  * no backend. It follows the FROZEN contract in docs/features/easy-login/
  * implementation.md ("cards (staff)") and is swapped in at exactly ONE flip point,
  * `USE_MOCK_CARDS` in `cardsService.ts` (= `USE_MOCK_DATA`), never per call. Delete this
  * file's adapter when the live endpoint (backend story 04) is the only path.
  *
- * WHAT IT SERVES
- *   - No `id` params ("every eligible participant"): a realistic set of
+ * WHAT IT SERVES (the request is a JSON body, EL-20: `{ participantIds }` or `{ all: true }`)
+ *   - `{ all: true }` ("every eligible participant"): a realistic set of
  *     {@link MOCK_DEFAULT_CARD_COUNT} cards (two full pages plus a part page, so the
  *     page break and the short last page can be reviewed) AND one skipped entry for each
  *     of the four reasons (`noActiveLink`, `disabled`, `tokenUnrecoverable`, `notFound`).
- *   - One or more `id` params: that many cards, no skips. IDs ARE NOT LOOKED UP. The mock
- *     cannot know the ids the roster screen's own mock invents, so the i-th requested id
- *     is given the i-th mock person's card (re-keyed to the id you sent). That keeps the
- *     composed mock screen honest where it matters here: "Print cards (N)" yields N cards.
- *   - More than 500 `id`s: a 400 ProblemDetails, exactly as the server answers (the
- *     service chunks at 500, so this is only reachable if that chunking regresses).
+ *   - `{ participantIds: [...] }`: that many cards (after de-duplication), no skips. IDS ARE
+ *     NOT LOOKED UP. The mock cannot know the ids the roster screen's own mock invents, so
+ *     the i-th requested id is given the i-th mock person's card (re-keyed to the id you
+ *     sent). That keeps the composed mock screen honest where it matters here: "Print
+ *     cards (N)" yields N cards.
+ *   - The SAME 400 rules as the server, as a ProblemDetails: exactly one of `participantIds`
+ *     or `all` (both or neither is a 400), no unknown property, `all` must be `true`,
+ *     `participantIds` a non-empty array of strings with at most 500 entries, and the body
+ *     must be a JSON object. The service never sends such a body (it chunks at 500 and
+ *     never sends an empty array), so these are only reachable if that logic regresses,
+ *     and `cardsService.test.ts` proves each one is refused.
  *
  * The cards mix agency and role present, one present without the other, and neither;
  * one name has diacritics and one is very long, so the layout is reviewed against the
@@ -39,7 +44,6 @@
  */
 
 import { AxiosError, type AxiosAdapter, type InternalAxiosRequestConfig } from 'axios'
-import { api } from '@/core/services/api'
 import type { RosterCardDto, RosterCardSkippedDto, RosterCardsDto } from './types'
 
 /** The exercise name every mock response carries. */
@@ -247,9 +251,61 @@ function httpError(
   )
 }
 
-/** The `id` values on the request URL, read off the REAL serialization (`id=a&id=b`). */
-function requestedIds(config: InternalAxiosRequestConfig): string[] {
-  return new URL(api.getUri(config), 'http://mock.invalid').searchParams.getAll('id')
+/** A validated request body, or the reason the server would answer 400. */
+type ParsedRequest =
+  | { readonly kind: 'all' }
+  | { readonly kind: 'ids'; readonly ids: string[] }
+  | { readonly kind: 'invalid'; readonly problem: string }
+
+/** The only two properties a body may carry. */
+const REQUEST_PROPERTIES: readonly string[] = ['participantIds', 'all']
+
+/**
+ * Reads and validates the request body by the server's EL-20 rules. axios has already
+ * serialized a plain object to a JSON string by the time an adapter runs, so the real wire
+ * form is what is parsed here.
+ */
+function parseRequest(data: unknown): ParsedRequest {
+  let value: unknown = data
+  if (typeof data === 'string') {
+    try {
+      value = JSON.parse(data)
+    } catch {
+      return { kind: 'invalid', problem: 'The body is not valid JSON.' }
+    }
+  }
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return { kind: 'invalid', problem: 'The body must be a JSON object.' }
+  }
+  const body = value as Record<string, unknown>
+
+  const unknownProperty = Object.keys(body).find(key => !REQUEST_PROPERTIES.includes(key))
+  if (unknownProperty !== undefined) {
+    return { kind: 'invalid', problem: 'The body has an unknown property.' }
+  }
+  const hasIds = 'participantIds' in body
+  const hasAll = 'all' in body
+  if (hasIds === hasAll) {
+    return { kind: 'invalid', problem: 'Send exactly one of participantIds or all.' }
+  }
+
+  if (hasAll) {
+    return body.all === true
+      ? { kind: 'all' }
+      : { kind: 'invalid', problem: 'all must be true.' }
+  }
+
+  const ids = body.participantIds
+  if (!Array.isArray(ids) || !ids.every(id => typeof id === 'string')) {
+    return { kind: 'invalid', problem: 'participantIds must be an array of strings.' }
+  }
+  if (ids.length === 0) {
+    return { kind: 'invalid', problem: 'participantIds must not be empty.' }
+  }
+  if (ids.length > MOCK_MAX_IDS) {
+    return { kind: 'invalid', problem: `At most ${MOCK_MAX_IDS} ids per request.` }
+  }
+  return { kind: 'ids', ids: [...new Set(ids as string[])] }
 }
 
 /**
@@ -271,14 +327,12 @@ export const mockCardsAdapter: AxiosAdapter = config => {
     return Promise.reject(httpError(config, 500, 'Server Error', 'Something went wrong.'))
   }
 
-  const ids = requestedIds(config)
-  if (ids.length > MOCK_MAX_IDS) {
-    return Promise.reject(
-      httpError(config, 400, 'Bad Request', `At most ${MOCK_MAX_IDS} ids per request.`),
-    )
+  const request = parseRequest(config.data)
+  if (request.kind === 'invalid') {
+    return Promise.reject(httpError(config, 400, 'Bad Request', request.problem))
   }
 
-  const body: RosterCardsDto = ids.length === 0
+  const body: RosterCardsDto = request.kind === 'all'
     ? {
       exerciseName: MOCK_EXERCISE_NAME,
       cards: buildMockCards(MOCK_DEFAULT_CARD_COUNT),
@@ -286,7 +340,7 @@ export const mockCardsAdapter: AxiosAdapter = config => {
     }
     : {
       exerciseName: MOCK_EXERCISE_NAME,
-      cards: buildMockCards(ids.length, ids),
+      cards: buildMockCards(request.ids.length, request.ids),
       skipped: [],
     }
 

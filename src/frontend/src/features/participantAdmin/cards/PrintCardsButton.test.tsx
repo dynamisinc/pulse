@@ -100,10 +100,10 @@ describe('PrintCardsButton - opening and the request', () => {
     expect(await screen.findByRole('dialog', { name: 'Print cards' })).toBeInTheDocument()
     expect(await screen.findByTestId('card-sheet')).toBeInTheDocument()
     expect(calls).toHaveLength(1)
-    expect(calls[0]?.ids).toEqual(['a', 'b', 'c'])
+    expect(calls[0]?.body).toEqual({ participantIds: ['a', 'b', 'c'] })
   })
 
-  it('sends no id at all for an empty selection', async () => {
+  it('asks for everyone with the explicit { all: true } for an empty selection', async () => {
     const user = userEvent.setup()
     const { calls } = serverFor()
     await renderWithProviders(<PrintCardsButton selection={[]} />)
@@ -112,7 +112,8 @@ describe('PrintCardsButton - opening and the request', () => {
     await screen.findByTestId('card-sheet')
 
     expect(calls).toHaveLength(1)
-    expect(calls[0]).toEqual({ ids: [], hasParams: false })
+    expect(calls[0]?.body).toEqual({ all: true })
+    expect(calls[0]?.all).toBe(true)
   })
 
   it('sends only the usable ids when blanks are mixed in', async () => {
@@ -124,7 +125,7 @@ describe('PrintCardsButton - opening and the request', () => {
     await screen.findByTestId('card-sheet')
 
     expect(calls).toHaveLength(1)
-    expect(calls[0]?.ids).toEqual(['a', 'b'])
+    expect(calls[0]?.body).toEqual({ participantIds: ['a', 'b'] })
   })
 
   it('chunks a large selection at 500 and concatenates the cards', async () => {

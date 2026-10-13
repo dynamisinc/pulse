@@ -16,8 +16,8 @@ no brand skin, nothing that depends on background graphics.
 | `CardSheetPreview.tsx` | Full-screen dialog in a portal on `document.body` (sibling of `#root`): toolbar (Print, Close, count, skipped summary), on-screen warning banner, the sheet. |
 | `CardSheet.tsx` / `Card.tsx` | Pure, props-only paper. Pages of eight, one `<article>` per card. |
 | `cardSheet.module.css` | Screen preview + `@media print` rules (read its header). |
-| `cardsService.ts` | `GET /staff/roster/cards` through the shared axios client: repeated `id`, chunks of 500, abort signal, runtime guards, typed `RosterCardsError`. |
-| `cardsMocks.ts` | Mock adapter behind `USE_MOCK_DATA` (one flip point in the service). 20 cards + one skip per reason; scenarios for 409 / 403 / 401 / 500. |
+| `cardsService.ts` | `POST /staff/roster/cards` through the shared axios client: `{ participantIds }` in chunks of 500 or `{ all: true }`, abort signal, runtime guards, typed `RosterCardsError`. |
+| `cardsMocks.ts` | Mock adapter behind `USE_MOCK_DATA` (one flip point in the service). 20 cards + one skip per reason; enforces the server's 400 body rules; scenarios for 409 / 403 / 401 / 500. |
 | `useRosterCards.ts` | React Query hook: `staleTime: 0`, `gcTime: 0`, key includes the active exercise id. |
 | `safeQrDataUri.ts` | The narrow allow-list for the QR `<img src>` (a base64 SVG data URI and nothing else). |
 | `cardFormat.ts` | Pure helpers: affiliation line, `{site}` origin, label, pagination, skipped summary. |
@@ -60,13 +60,26 @@ are never clamped.
 
 ## Requests
 
-* **Everyone** is an EMPTY selection and nothing else: one request with no `id`. A non-empty selection is
-  cleaned (blank and repeated ids dropped) and sent in chunks of at most 500; if nothing usable is left it is
-  refused as a bad request with no request made, and the button is disabled ("Print cards (0)").
+The call is **`POST /api/staff/roster/cards`** with a JSON body (EL-20; it was a GET with repeated `?id=`).
+500 GUIDs in a query string are about 20 KB, over the server's 8 KB request line (a 414 above roughly 203 ids),
+and an array spelling the server did not recognise (`?id[]=`) silently widened the request to every participant.
+No `id=` query parameter is ever sent, and the URL never carries anything.
+
+* The body is exactly one of `{ participantIds: string[] }` (1 to 500 ids) or `{ all: true }`. Both, neither, an
+  empty array, more than 500 ids or an unknown property is a `400` (mapped to `badRequest`).
+* **Everyone** is an EMPTY selection and nothing else: one request with the explicit body `{ all: true }`. An
+  empty `participantIds` array is never sent. `all` is uncapped on the server, so a very large exercise comes back
+  as one large response.
+* A non-empty selection is cleaned (blank and repeated ids dropped) and sent as `{ participantIds }` in chunks of
+  at most 500; if nothing usable is left it is refused as a bad request with no request made, and the button is
+  disabled ("Print cards (0)").
 * When more than one chunk was needed the merged cards are re-sorted by name (each response is only ordered
   within itself); skipped entries stay in request order.
 * The query function takes React Query's `AbortSignal`, passes it to every request and checks it before each
   next chunk, so closing the preview mid-load stops the remaining requests.
+* The mock adapter parses the real serialized body and enforces the same `400` rules as the server (exactly one
+  of the two properties, no unknown property, `all` must be `true`, no empty array, no more than 500 ids), so a
+  regression in the service shows up in mock mode as well as in tests.
 
 ## Safety rails
 

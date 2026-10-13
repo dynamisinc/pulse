@@ -1,8 +1,10 @@
 /**
  * features/participantAdmin/cards/cardsService.test.ts
  * ---------------------------------------------------------------------------
- * The data seam: request shape (repeated plain `id`, no exercise id), chunking at 500,
- * typed errors that carry no secrets, the runtime guards, and the shipped mock adapter.
+ * The data seam: the request is a POST with a JSON body (`{ participantIds }` or
+ * `{ all: true }`, EL-20) and never an `id=` query parameter or an exercise id, chunking at
+ * 500, typed errors that carry no secrets, the runtime guards, and the shipped mock adapter
+ * including the 400 rules it enforces.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AxiosError, AxiosHeaders, CanceledError, type InternalAxiosRequestConfig } from 'axios'
@@ -18,10 +20,11 @@ import {
   MOCK_DEFAULT_CARD_COUNT,
   MOCK_EXERCISE_NAME,
   buildMockCards,
+  mockCardsAdapter,
   resetMockCards,
   setMockCardsScenario,
 } from './cardsMocks'
-import { okResponse } from './cardsTestUtils'
+import { captureCardsWire, okResponse, spyOnCardsEndpoint } from './cardsTestUtils'
 import type { RosterCardDto, RosterCardsDto } from './types'
 
 function idList(count: number): string[] {
@@ -75,65 +78,100 @@ describe('chunkIds', () => {
   })
 })
 
-describe('fetchRosterCards - request shape', () => {
-  it('sends ONE request with no id (and no params at all) for an empty selection', async () => {
-    const get = vi.spyOn(api, 'get').mockResolvedValue(okResponse(bodyFor([])))
+/** The `participantIds` of a recorded call. */
+function sentIds(call: { body: unknown }): string[] {
+  return (call.body as { participantIds: string[] }).participantIds
+}
+
+describe('fetchRosterCards - the request is a POST with a JSON body (EL-20)', () => {
+  it('posts exactly { all: true } for an empty selection (never an empty array)', async () => {
+    const { requests } = captureCardsWire()
     await fetchRosterCards([])
-    expect(get).toHaveBeenCalledTimes(1)
-    const [url, config] = get.mock.calls[0] ?? []
-    expect(url).toBe(CARDS_ENDPOINT)
-    expect(config?.params).toBeUndefined()
+    expect(requests).toHaveLength(1)
+    expect(requests[0]?.method).toBe('post')
+    expect(requests[0]?.rawBody).toBe('{"all":true}')
+    expect(requests[0]?.body).toEqual({ all: true })
   })
 
-  it('serializes ids as repeated plain `id=` params, not `id[]=`', async () => {
-    const get = vi.spyOn(api, 'get').mockResolvedValue(okResponse(bodyFor(['a', 'b'])))
+  it('posts { participantIds } for a selection, and nothing else in the body', async () => {
+    const { requests } = captureCardsWire()
     await fetchRosterCards(['a', 'b'])
-    const [url, config] = get.mock.calls[0] ?? []
-    const wire = api.getUri({
-      url,
-      params: config?.params,
-      paramsSerializer: config?.paramsSerializer,
-    })
-    expect(wire).toBe('/api/staff/roster/cards?id=a&id=b')
+    expect(requests).toHaveLength(1)
+    expect(requests[0]?.method).toBe('post')
+    expect(requests[0]?.rawBody).toBe('{"participantIds":["a","b"]}')
+    expect(Object.keys(requests[0]?.body as object)).toEqual(['participantIds'])
+  })
+
+  it('goes to /api/staff/roster/cards as JSON, with no query string at all', async () => {
+    const { requests } = captureCardsWire()
+    await fetchRosterCards(['a'])
+    await fetchRosterCards([])
+    expect(requests.map(request => request.url)).toEqual([
+      '/api/staff/roster/cards',
+      '/api/staff/roster/cards',
+    ])
+    for (const request of requests) expect(request.contentType).toContain('application/json')
+  })
+
+  it('never puts an id in the URL: no id= and no id[]= for one id, many, everyone or chunks', async () => {
+    const { requests } = captureCardsWire()
+    await fetchRosterCards(['a'])
+    await fetchRosterCards(idList(40))
+    await fetchRosterCards([])
+    await fetchRosterCards(idList(1201)) // three chunks
+    expect(requests).toHaveLength(6)
+    for (const { url } of requests) {
+      expect(url).not.toContain('?')
+      expect(url).not.toMatch(/[?&]ids?(\[\])?=/)
+    }
   })
 
   it('never sends an exercise id', async () => {
-    const get = vi.spyOn(api, 'get').mockResolvedValue(okResponse(bodyFor(['a'])))
+    const { requests } = captureCardsWire()
     await fetchRosterCards(['a'])
-    const [url, config] = get.mock.calls[0] ?? []
-    const wire = api.getUri({
-      url,
-      params: config?.params,
-      paramsSerializer: config?.paramsSerializer,
-    })
-    expect(wire.toLowerCase()).not.toContain('exercise')
-    expect(JSON.stringify(config?.params ?? {}).toLowerCase()).not.toContain('exercise')
+    await fetchRosterCards([])
+    for (const request of requests) {
+      expect(request.rawBody.toLowerCase()).not.toContain('exercise')
+      expect(request.url.toLowerCase()).not.toContain('exercise')
+    }
+  })
+
+  it('never sends an empty participantIds array, whatever the input', async () => {
+    const { requests } = captureCardsWire()
+    for (const input of [[], ['a'], idList(501)]) await fetchRosterCards(input)
+    for (const input of [[''], ['', ' ']]) {
+      await expect(fetchRosterCards(input)).rejects.toMatchObject({ kind: 'badRequest' })
+    }
+    expect(requests).toHaveLength(4) // everyone, one id, and two chunks; none for the blanks
+    for (const { body } of requests) {
+      const ids = (body as { participantIds?: string[] }).participantIds
+      if (ids !== undefined) expect(ids.length).toBeGreaterThan(0)
+    }
   })
 
   it('sends one request for exactly 500 ids', async () => {
     const ids = idList(500)
-    const get = vi.spyOn(api, 'get').mockResolvedValue(okResponse(bodyFor(ids)))
+    const { requests } = captureCardsWire()
     await fetchRosterCards(ids)
-    expect(get).toHaveBeenCalledTimes(1)
+    expect(requests).toHaveLength(1)
+    expect((requests[0]?.body as { participantIds: string[] }).participantIds).toEqual(ids)
   })
 
   it('chunks more than 500 ids into requests of at most 500, in order, and merges', async () => {
     const ids = idList(1201)
-    const get = vi.spyOn(api, 'get').mockImplementation(async (_url, config) => {
-      const chunk = (config?.params as { id: string[] }).id
-      return okResponse({
-        exerciseName: 'Exercise A',
-        cards: buildMockCards(chunk.length, chunk),
-        skipped: [{ participantId: `skip-after-${chunk[0] ?? ''}`, reason: 'disabled' }],
-      })
-    })
+    const { calls } = spyOnCardsEndpoint(({ ids: chunk }) => ({
+      exerciseName: 'Exercise A',
+      cards: buildMockCards(chunk.length, chunk),
+      skipped: [{ participantId: `skip-after-${chunk[0] ?? ''}`, reason: 'disabled' }],
+    }))
 
     const result = await fetchRosterCards(ids)
 
-    expect(get).toHaveBeenCalledTimes(3)
-    const sent = get.mock.calls.map(([, config]) => (config?.params as { id: string[] }).id)
+    expect(calls).toHaveLength(3)
+    const sent = calls.map(sentIds)
     expect(sent.map(chunk => chunk.length)).toEqual([500, 500, 201])
     expect(sent.flat()).toEqual(ids)
+    for (const call of calls) expect(call.all).toBe(false)
     // Every person is on the merged sheet exactly once.
     expect(result.cards).toHaveLength(1201)
     expect(new Set(result.cards.map(card => card.participantId))).toEqual(new Set(ids))
@@ -147,19 +185,18 @@ describe('fetchRosterCards - request shape', () => {
   })
 
   it('re-sorts the merged cards by name (case- and accent-insensitive) after more than one chunk', async () => {
-    const ids = idList(501) // two requests: 500 + 1
     let call = 0
-    vi.spyOn(api, 'get').mockImplementation(async () => {
+    spyOnCardsEndpoint(() => {
       call += 1
-      return okResponse({
+      return {
         exerciseName: 'X',
         cards: call === 1
           ? [namedCard('z', 'Zoe Young'), namedCard('m', 'Mary Smith')]
           : [namedCard('a', 'adam Abel'), namedCard('l', '\u00C1lvaro Diaz')],
         skipped: [],
-      })
+      }
     })
-    const result = await fetchRosterCards(ids)
+    const result = await fetchRosterCards(idList(501)) // two requests: 500 + 1
     expect(result.cards.map(card => card.name)).toEqual([
       'adam Abel',
       '\u00C1lvaro Diaz',
@@ -169,22 +206,17 @@ describe('fetchRosterCards - request shape', () => {
   })
 
   it('keeps ties in request order (a stable merge)', async () => {
-    const ids = idList(501)
     let call = 0
-    vi.spyOn(api, 'get').mockImplementation(async () => {
+    spyOnCardsEndpoint(() => {
       call += 1
-      return okResponse({
-        exerciseName: 'X',
-        cards: [namedCard(`same-${call}`, 'Pat Lee')],
-        skipped: [],
-      })
+      return { exerciseName: 'X', cards: [namedCard(`same-${call}`, 'Pat Lee')], skipped: [] }
     })
-    const result = await fetchRosterCards(ids)
+    const result = await fetchRosterCards(idList(501))
     expect(result.cards.map(card => card.participantId)).toEqual(['same-1', 'same-2'])
   })
 
   it('leaves a single response in the server\'s order (no client re-sort)', async () => {
-    vi.spyOn(api, 'get').mockResolvedValue(okResponse({
+    spyOnCardsEndpoint(() => ({
       exerciseName: 'X',
       cards: [namedCard('z', 'Zoe Young'), namedCard('a', 'Adam Abel')],
       skipped: [],
@@ -193,19 +225,18 @@ describe('fetchRosterCards - request shape', () => {
     expect(result.cards.map(card => card.name)).toEqual(['Zoe Young', 'Adam Abel'])
   })
 
-  it('de-duplicates ids before chunking', async () => {
-    const get = vi.spyOn(api, 'get').mockResolvedValue(okResponse(bodyFor(['a', 'b'])))
+  it('de-duplicates ids and drops blanks before chunking', async () => {
+    const { calls } = spyOnCardsEndpoint(() => bodyFor(['a', 'b']))
     await fetchRosterCards(['a', 'b', 'a', '', '  ', 'b'])
-    const [, config] = get.mock.calls[0] ?? []
-    expect((config?.params as { id: string[] }).id).toEqual(['a', 'b'])
+    expect(calls).toHaveLength(1)
+    expect(calls[0]?.body).toEqual({ participantIds: ['a', 'b'] })
   })
 
   it('fails the whole sheet when any chunk fails', async () => {
     let calls = 0
-    vi.spyOn(api, 'get').mockImplementation(async () => {
+    spyOnCardsEndpoint(() => {
       calls += 1
-      if (calls === 2) throw httpError(500)
-      return okResponse(bodyFor(['x']))
+      return calls === 2 ? Promise.reject(httpError(500)) : bodyFor(['x'])
     })
     await expect(fetchRosterCards(idList(600))).rejects.toMatchObject({ kind: 'unavailable' })
   })
@@ -217,49 +248,49 @@ describe('fetchRosterCards - only an EMPTY input means everyone', () => {
     [['', '  ']],
     [['\t', '\n']],
   ])('refuses the non-empty but unusable input %j as badRequest and sends NOTHING', async input => {
-    const get = vi.spyOn(api, 'get').mockResolvedValue(okResponse(bodyFor([])))
+    const post = vi.spyOn(api, 'post').mockResolvedValue(okResponse(bodyFor([])))
     await expect(fetchRosterCards(input)).rejects.toMatchObject({ kind: 'badRequest' })
-    expect(get).not.toHaveBeenCalled()
+    expect(post).not.toHaveBeenCalled()
   })
 
-  it('still sends the one no-id request for a truly empty input', async () => {
-    const get = vi.spyOn(api, 'get').mockResolvedValue(okResponse(bodyFor([])))
+  it('still asks for everyone, with the explicit { all: true }, for a truly empty input', async () => {
+    const post = vi.spyOn(api, 'post').mockResolvedValue(okResponse(bodyFor([])))
     await fetchRosterCards([])
-    expect(get).toHaveBeenCalledTimes(1)
-    expect(get.mock.calls[0]?.[1]?.params).toBeUndefined()
+    expect(post).toHaveBeenCalledTimes(1)
+    expect(post.mock.calls[0]?.[1]).toEqual({ all: true })
   })
 })
 
 describe('fetchRosterCards - cancellation (React Query\'s AbortSignal)', () => {
   it('passes the signal to every request', async () => {
     const controller = new AbortController()
-    const get = vi.spyOn(api, 'get').mockImplementation(async () => okResponse(bodyFor(['x'])))
+    const post = vi.spyOn(api, 'post').mockImplementation(async () => okResponse(bodyFor(['x'])))
     await fetchRosterCards(idList(501), controller.signal)
-    expect(get).toHaveBeenCalledTimes(2)
-    for (const [, config] of get.mock.calls) expect(config?.signal).toBe(controller.signal)
+    expect(post).toHaveBeenCalledTimes(2)
+    for (const [, , config] of post.mock.calls) expect(config?.signal).toBe(controller.signal)
   })
 
   it('passes the signal on the no-id request too', async () => {
     const controller = new AbortController()
-    const get = vi.spyOn(api, 'get').mockResolvedValue(okResponse(bodyFor([])))
+    const post = vi.spyOn(api, 'post').mockResolvedValue(okResponse(bodyFor([])))
     await fetchRosterCards([], controller.signal)
-    expect(get.mock.calls[0]?.[1]?.signal).toBe(controller.signal)
+    expect(post.mock.calls[0]?.[2]?.signal).toBe(controller.signal)
   })
 
   it('makes no request at all when the signal has already fired', async () => {
     const controller = new AbortController()
     controller.abort()
-    const get = vi.spyOn(api, 'get').mockResolvedValue(okResponse(bodyFor([])))
+    const post = vi.spyOn(api, 'post').mockResolvedValue(okResponse(bodyFor([])))
     await expect(fetchRosterCards(['a'], controller.signal)).rejects.toMatchObject({
       kind: 'cancelled',
     })
-    expect(get).not.toHaveBeenCalled()
+    expect(post).not.toHaveBeenCalled()
   })
 
   it('stops after the chunk in flight when the signal fires, requesting no more', async () => {
     const controller = new AbortController()
     let calls = 0
-    vi.spyOn(api, 'get').mockImplementation(async () => {
+    vi.spyOn(api, 'post').mockImplementation(async () => {
       calls += 1
       if (calls === 1) controller.abort() // the preview closed while chunk 1 was loading
       return okResponse(bodyFor(['x']))
@@ -271,13 +302,13 @@ describe('fetchRosterCards - cancellation (React Query\'s AbortSignal)', () => {
   })
 
   it('maps an axios cancellation to the cancelled kind', async () => {
-    vi.spyOn(api, 'get').mockRejectedValue(new CanceledError('canceled'))
+    vi.spyOn(api, 'post').mockRejectedValue(new CanceledError('canceled'))
     await expect(fetchRosterCards([])).rejects.toMatchObject({ kind: 'cancelled' })
   })
 
   it('still completes normally with a signal that never fires', async () => {
     const controller = new AbortController()
-    vi.spyOn(api, 'get').mockResolvedValue(okResponse(bodyFor(['a'])))
+    vi.spyOn(api, 'post').mockResolvedValue(okResponse(bodyFor(['a'])))
     const result = await fetchRosterCards(['a'], controller.signal)
     expect(result.cards).toHaveLength(1)
   })
@@ -291,19 +322,19 @@ describe('fetchRosterCards - errors', () => {
     [400, 'badRequest'],
     [500, 'unavailable'],
   ] as const)('maps HTTP %i to the %s kind', async (status, kind) => {
-    vi.spyOn(api, 'get').mockRejectedValue(httpError(status))
+    vi.spyOn(api, 'post').mockRejectedValue(httpError(status))
     const error = await fetchRosterCards([]).catch((e: unknown) => e)
     expect(error).toBeInstanceOf(RosterCardsError)
     expect(error).toMatchObject({ kind, status })
   })
 
   it('maps a network failure (no response) to unavailable', async () => {
-    vi.spyOn(api, 'get').mockRejectedValue(new Error('Network Error'))
+    vi.spyOn(api, 'post').mockRejectedValue(new Error('Network Error'))
     await expect(fetchRosterCards([])).rejects.toMatchObject({ kind: 'unavailable' })
   })
 
   it('carries no response body, no request config and no cause (no secrets)', async () => {
-    vi.spyOn(api, 'get').mockRejectedValue(httpError(409))
+    vi.spyOn(api, 'post').mockRejectedValue(httpError(409))
     const error = await fetchRosterCards([]).catch((e: unknown) => e)
     expect(error).toBeInstanceOf(RosterCardsError)
     const typed = error as RosterCardsError
@@ -328,13 +359,13 @@ describe('fetchRosterCards - runtime guards', () => {
     ['a skipped entry with an unknown reason', { ...good, skipped: [{ participantId: 'z', reason: 'nope' }] }],
     ['a skipped entry without an id', { ...good, skipped: [{ reason: 'disabled' }] }],
   ])('fails closed on %s', async (_label, body) => {
-    vi.spyOn(api, 'get').mockResolvedValue(okResponse(body))
+    vi.spyOn(api, 'post').mockResolvedValue(okResponse(body))
     await expect(fetchRosterCards([])).rejects.toMatchObject({ kind: 'malformed' })
   })
 
   it('copies only the known fields and drops a null optional', async () => {
     const card = { ...good.cards[0], agency: null, role: 'Chief', extra: 'ignored' }
-    vi.spyOn(api, 'get').mockResolvedValue(okResponse({ ...good, cards: [card], extraTop: 1 }))
+    vi.spyOn(api, 'post').mockResolvedValue(okResponse({ ...good, cards: [card], extraTop: 1 }))
     const result = await fetchRosterCards([])
     expect(result.cards[0]).not.toHaveProperty('agency')
     expect(result.cards[0]).not.toHaveProperty('extra')
@@ -383,5 +414,60 @@ describe('the shipped mock adapter (USE_MOCK_DATA)', () => {
   ] as const)('the %s scenario rejects as a %s error', async (scenario, kind, status) => {
     setMockCardsScenario(scenario)
     await expect(fetchRosterCards([])).rejects.toMatchObject({ kind, status })
+  })
+})
+
+describe('the shipped mock adapter enforces the server\'s 400 rules (EL-20)', () => {
+  /** POSTs `data` through the REAL axios pipeline into the mock adapter. */
+  function postToMock(data: unknown) {
+    return api.post(CARDS_ENDPOINT, data, { adapter: mockCardsAdapter })
+  }
+
+  it.each([
+    ['both participantIds and all', { participantIds: ['a'], all: true }],
+    ['neither participantIds nor all', {}],
+    ['no body at all', undefined],
+    ['an empty participantIds array', { participantIds: [] }],
+    ['more than 500 ids', { participantIds: idList(501) }],
+    ['an unknown property beside participantIds', { participantIds: ['a'], includeDisabled: true }],
+    ['an unknown property beside all', { all: true, extra: 1 }],
+    ['the old spelling ids', { ids: ['a'] }],
+    ['all: false', { all: false }],
+    ['all as a string', { all: 'true' }],
+    ['participantIds as a string', { participantIds: 'a' }],
+    ['participantIds holding a non-string', { participantIds: ['a', 1] }],
+    ['a JSON array body', ['a']],
+    ['a JSON null body', null],
+    ['a body that is not JSON', 'not json'],
+  ])('answers 400 to %s', async (_label, data) => {
+    const error = await postToMock(data).catch((e: unknown) => e)
+    expect(error).toMatchObject({ response: { status: 400 } })
+    const detail = (error as AxiosError<{ detail?: string }>).response?.data?.detail
+    expect(typeof detail === 'string' && detail.length > 0).toBe(true)
+  })
+
+  it('accepts exactly 500 ids, a repeated id (de-duplicated) and { all: true }', async () => {
+    const full = await postToMock({ participantIds: idList(500) })
+    expect((full.data as RosterCardsDto).cards).toHaveLength(500)
+
+    const repeated = await postToMock({ participantIds: ['a', 'a', 'b'] })
+    expect((repeated.data as RosterCardsDto).cards.map(card => card.participantId)).toEqual(['a', 'b'])
+
+    const everyone = await postToMock({ all: true })
+    expect((everyone.data as RosterCardsDto).cards).toHaveLength(MOCK_DEFAULT_CARD_COUNT)
+  })
+
+  it('serves the same everyone set whether reached through the service or directly', async () => {
+    const direct = (await postToMock({ all: true })).data as RosterCardsDto
+    const viaService = await fetchRosterCards([])
+    expect(viaService.cards.map(card => card.participantId))
+      .toEqual(direct.cards.map(card => card.participantId))
+    expect(viaService.skipped).toEqual(direct.skipped)
+  })
+
+  it('the service itself never trips those rules (it would surface as a thrown error)', async () => {
+    await expect(fetchRosterCards([])).resolves.toBeDefined()
+    await expect(fetchRosterCards(['a'])).resolves.toBeDefined()
+    await expect(fetchRosterCards(idList(1100))).resolves.toBeDefined()
   })
 })

@@ -48,7 +48,17 @@ export interface RosterCardSkippedDto {
   reason: RosterCardSkipReason
 }
 
-/** `GET /api/staff/roster/cards` 200 body. */
+/**
+ * `POST /api/staff/roster/cards` request body (EL-20). EXACTLY ONE of the two shapes:
+ * `{ participantIds }` (1 to 500 ids) or `{ all: true }`. Anything else is a 400 (both,
+ * neither, an empty array, more than 500 ids, an unknown property). "Everyone" is only ever
+ * the explicit `{ all: true }`, never an empty array and never an absent field.
+ */
+export type RosterCardsRequest =
+  | { participantIds: string[] }
+  | { all: true }
+
+/** `POST /api/staff/roster/cards` 200 body. */
 export interface RosterCardsDto {
   exerciseName: string
   cards: RosterCardDto[]
