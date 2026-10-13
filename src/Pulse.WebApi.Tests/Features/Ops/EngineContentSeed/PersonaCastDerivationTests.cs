@@ -33,8 +33,8 @@ public sealed class PersonaCastDerivationTests
     {
         { "FairhavenWater", "mid", 50232 },
         { "FairhavenWaterUpd", "nano", 550 },
-        { "FulcoEM", "mid", 54095 },
-        { "Newsline7", "large", 276540 },
+        { "KestrelCoEM", "mid", 49910 },
+        { "MetroDesk9", "large", 286440 },
         { "TheScoopHQ", "mid", 50186 },
         { "mvega_fh", "micro", 5913 },
         { "tbrandt41", "nano", 568 },
@@ -47,8 +47,8 @@ public sealed class PersonaCastDerivationTests
     {
         { "FairhavenWater", "agency", "2025-07-08T12:00:00Z" },
         { "FairhavenWaterUpd", "bad-actor", "2026-06-09T12:00:00Z" },
-        { "FulcoEM", "agency", "2025-09-22T12:00:00Z" },
-        { "Newsline7", "news-outlet", "2024-08-17T12:00:00Z" },
+        { "KestrelCoEM", "agency", "2024-08-29T12:00:00Z" },
+        { "MetroDesk9", "news-outlet", "2026-01-14T12:00:00Z" },
         { "TheScoopHQ", "influencer", "2025-07-09T12:00:00Z" },
         { "mvega_fh", "citizen", "2024-06-23T12:00:00Z" },
         { "tbrandt41", "citizen", "2025-06-27T12:00:00Z" },
@@ -100,8 +100,8 @@ public sealed class PersonaCastDerivationTests
     [Fact]
     public void DeriveAudienceMagnitude_IsDeterministic_AndBandOrdered()
     {
-        PersonaCastSeeder.DeriveAudienceMagnitude("mid", "FulcoEM").Should().Be(
-            PersonaCastSeeder.DeriveAudienceMagnitude("mid", "FulcoEM"),
+        PersonaCastSeeder.DeriveAudienceMagnitude("mid", "KestrelCoEM").Should().Be(
+            PersonaCastSeeder.DeriveAudienceMagnitude("mid", "KestrelCoEM"),
             "the derivation is pure — no Random, so a re-seed never changes a persona's reach");
 
         PersonaCastSeeder.DeriveAudienceMagnitude("nano", "kwardFH").Should().BeLessThan(
@@ -157,7 +157,7 @@ public sealed class PersonaCastDerivationTests
     {
         // S-001: the band vocabulary is ordinal and closed — a mis-cased or typo'd band is an authoring bug
         // that must fail loudly, never be folded to a neighbouring band.
-        var act = () => PersonaCastSeeder.DeriveAudienceMagnitude(band, "FulcoEM");
+        var act = () => PersonaCastSeeder.DeriveAudienceMagnitude(band, "KestrelCoEM");
 
         act.Should().Throw<ArgumentOutOfRangeException>("the band vocabulary is ordinal, lower-case only");
     }

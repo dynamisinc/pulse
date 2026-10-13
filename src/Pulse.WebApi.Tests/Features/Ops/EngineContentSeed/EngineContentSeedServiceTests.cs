@@ -305,6 +305,8 @@ public sealed class EngineContentSeedServiceTests
         payload.RootElement.GetProperty("personasBackfilled").GetInt32().Should().Be(
             0, "a fresh seed mutates no existing row — but the key is always present in the audit payload (S-B)");
         payload.RootElement.GetProperty("personasCastableClosed").GetInt32().Should().Be(0);
+        payload.RootElement.GetProperty("personasRenamed").GetInt32().Should().Be(
+            0, "a fresh seed renames nothing — but the key is always present in the audit payload (S-B)");
         payload.RootElement.GetProperty("storylineTitle").GetString().Should().Be("Water main contamination fears");
     }
 
@@ -326,8 +328,8 @@ public sealed class EngineContentSeedServiceTests
             {
                 Id = Guid.NewGuid(),
                 ExerciseId = exerciseId,
-                DisplayName = "Fulton County EM",
-                Handle = "FulcoEM",
+                DisplayName = "Kestrel County EM",
+                Handle = "KestrelCoEM",
                 Kind = "org",
                 Verified = true,
 
@@ -381,6 +383,83 @@ public sealed class EngineContentSeedServiceTests
         payload.RootElement.GetProperty("personasCastableClosed").GetInt32().Should().Be(1);
         payload.RootElement.GetProperty("personasReused").GetInt32().Should().Be(
             2, "the backfilled/closed counts are SUBSETS of reused, not additions to it");
+    }
+
+    [RequiresDockerFact]
+    public async Task Seed_OverACastSeededBeforeTheFictionRename_ReportsTheRename_AndTheLoopUsesTheNewHandles()
+    {
+        // 2026-10-13 fiction rename: an exercise seeded by an earlier build still holds @FulcoEM / @Newsline7.
+        // The re-seed renames them in place (same ids), says so in the response, the note and the XC-004 audit
+        // event, and hands the engine the NEW handles only.
+        var hostname = UniqueHostname();
+        var exerciseId = await InsertExerciseAsync(hostname);
+        var registry = new ReactionLoopRegistry();
+        var countyId = Guid.NewGuid();
+        var stationId = Guid.NewGuid();
+
+        await using (var seed = _fixture.CreateContext())
+        {
+            seed.Personas.Add(new Persona
+            {
+                Id = countyId,
+                ExerciseId = exerciseId,
+                DisplayName = "Fulton County EM",
+                Handle = "FulcoEM",
+                Kind = "org",
+                Verified = true,
+                Bio = "Official emergency management for Fulton County. Preparedness · Response · Recovery.",
+                PersonaType = "agency",
+                AudienceBand = "mid",
+                AudienceMagnitude = PersonaCastSeeder.DeriveAudienceMagnitude("mid", "FulcoEM"),
+                JoinedAt = PersonaCastSeeder.DeriveJoinedAt("agency", "FulcoEM"),
+            });
+            seed.Personas.Add(new Persona
+            {
+                Id = stationId,
+                ExerciseId = exerciseId,
+                DisplayName = "Newsline 7",
+                Handle = "Newsline7",
+                Kind = "org",
+                Verified = true,
+                Bio = "Fairhaven’s breaking-news source. Newsline 7 — on your side.",
+                PersonaType = "news-outlet",
+                AudienceBand = "large",
+                AudienceMagnitude = PersonaCastSeeder.DeriveAudienceMagnitude("large", "Newsline7"),
+                JoinedAt = PersonaCastSeeder.DeriveJoinedAt("news-outlet", "Newsline7"),
+            });
+            await seed.SaveChangesAsync();
+        }
+
+        await using var db = _fixture.CreateContext();
+        var result = await BuildService(db, registry, new EngineAutonomyRegistry())
+            .SeedAsync(new EngineContentSeedRequest { Hostname = hostname }, ConfiguredSecret);
+
+        result.PersonasRenamed.Should().Be(2, "both retired handles were renamed in place — reported, never silent (S-B)");
+        result.PersonasReused.Should().Be(2, "the renamed rows are reused, not duplicated");
+        result.PersonasCreated.Should().Be(7);
+        result.PersonasBackfilled.Should().Be(0);
+
+        var response = EngineContentSeedResponseDto.From(result);
+        response.PersonasRenamed.Should().Be(2);
+        response.Note.Should().Contain("renamed in place");
+        JsonSerializer.SerializeToElement(response).GetProperty("personasRenamed").GetInt32().Should().Be(
+            2, "the wire field is camelCase personasRenamed");
+
+        var registration = registry.Active.Single(r => r.ExerciseId == exerciseId);
+        registration.PersonasByHandle["KestrelCoEM"].InstanceId.Should().Be(
+            countyId, "the engine voices the renamed row, not a new one");
+        registration.PersonasByHandle["MetroDesk9"].InstanceId.Should().Be(stationId);
+        registration.PersonasByHandle.Keys.Should().NotContain(["FulcoEM", "Newsline7"]);
+        registration.Storylines.Single().ParticipatingPersonas.Should().Contain(["KestrelCoEM", "MetroDesk9"])
+            .And.NotContain(["FulcoEM", "Newsline7"]);
+
+        await using var verify = _fixture.CreateContext();
+        var evt = await verify.TelemetryEvents
+            .IgnoreQueryFilters()
+            .SingleAsync(e => e.ExerciseId == exerciseId && e.EventType == "engine.content_seeded");
+        using var payload = JsonDocument.Parse(evt.Payload!);
+        payload.RootElement.GetProperty("personasRenamed").GetInt32().Should().Be(
+            2, "the rename is part of the durable audit trail (XC-004)");
     }
 
     [RequiresDockerFact]

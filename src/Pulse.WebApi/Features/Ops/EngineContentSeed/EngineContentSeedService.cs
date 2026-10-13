@@ -186,15 +186,16 @@ public sealed partial class EngineContentSeedService
         var personasCreated = seeded.Count(persona => persona.Created);
         var personasReused = seeded.Count - personasCreated;
 
-        // The two mutations the seeder is allowed to make to an EXISTING row are reported separately from the
+        // The mutations the seeder is allowed to make to an EXISTING row are reported separately from the
         // reuse count (Gate-1 S-B). "6 reused" hid the fact that six rows had five columns rewritten; a
-        // re-seed now says "6 reused, 6 backfilled", and a gate closed on an existing row — which changes what
-        // the ENGINE may do — is never silent.
+        // re-seed now says "6 reused, 6 backfilled", a gate closed on an existing row — which changes what
+        // the ENGINE may do — is never silent, and neither is a retired handle renamed in place.
         var personasBackfilled = seeded.Count(persona => persona.PresentationBackfilled);
         var personasCastableClosed = seeded.Count(persona => persona.CastableClosed);
-        if (personasBackfilled > 0 || personasCastableClosed > 0)
+        var personasRenamed = seeded.Count(persona => persona.Renamed);
+        if (personasBackfilled > 0 || personasCastableClosed > 0 || personasRenamed > 0)
         {
-            LogExistingRowsMutated(personasBackfilled, personasCastableClosed, exerciseId);
+            LogExistingRowsMutated(personasBackfilled, personasCastableClosed, personasRenamed, exerciseId);
         }
 
         // 4b. Build the canned starter storyline (story 02) from the seeded handles — CASTABLE ones only.
@@ -252,7 +253,8 @@ public sealed partial class EngineContentSeedService
         //    work as story 01's persona writes (AC7).
         _dbContext.TelemetryEvents.Add(BuildSeededTelemetry(
             exercise, now, new PersonaSeedCounts(
-                personasCreated, personasReused, personasBackfilled, personasCastableClosed), storyline,
+                personasCreated, personasReused, personasBackfilled, personasCastableClosed, personasRenamed),
+            storyline,
             autoConfirmResponses));
 
         // One SaveChanges — the write-guard runs here; every scoped row carries the non-empty exercise id.
@@ -269,7 +271,8 @@ public sealed partial class EngineContentSeedService
         return EngineContentSeedResult.Provisioned(
             exerciseId,
             host,
-            new PersonaSeedCounts(personasCreated, personasReused, personasBackfilled, personasCastableClosed),
+            new PersonaSeedCounts(
+                personasCreated, personasReused, personasBackfilled, personasCastableClosed, personasRenamed),
             storyline.Id,
             storyline.Title,
             storyline.ResponseWindowMin,
@@ -283,12 +286,14 @@ public sealed partial class EngineContentSeedService
     /// </summary>
     /// <param name="personasBackfilled">How many existing rows had their presentation columns backfilled.</param>
     /// <param name="personasCastableClosed">How many existing rows had their engine-casting gate closed.</param>
+    /// <param name="personasRenamed">How many existing rows were renamed in place from a retired handle.</param>
     /// <param name="exerciseId">The exercise whose rows were mutated.</param>
     [LoggerMessage(
         EventId = 1,
         Level = LogLevel.Information,
-        Message = "Engine content seed mutated EXISTING persona rows for exercise {ExerciseId}: {PersonasBackfilled} presentation-backfilled (rows carrying only the migration defaults), {PersonasCastableClosed} engine-casting gate(s) closed to match the catalog.")]
-    private partial void LogExistingRowsMutated(int personasBackfilled, int personasCastableClosed, Guid exerciseId);
+        Message = "Engine content seed mutated EXISTING persona rows for exercise {ExerciseId}: {PersonasBackfilled} presentation-backfilled (rows carrying only the migration defaults), {PersonasCastableClosed} engine-casting gate(s) closed to match the catalog, {PersonasRenamed} renamed in place from a retired handle.")]
+    private partial void LogExistingRowsMutated(
+        int personasBackfilled, int personasCastableClosed, int personasRenamed, Guid exerciseId);
 
     /// <summary>
     /// Turns the exercise's IANA time-zone string into a <see cref="TimeZoneInfo"/> for the scenario clock,
@@ -339,6 +344,7 @@ public sealed partial class EngineContentSeedService
                 // the response an operator happens to be looking at when they run the seed.
                 personasBackfilled = counts.PresentationBackfilled,
                 personasCastableClosed = counts.CastableClosed,
+                personasRenamed = counts.Renamed,
                 storylineId = storyline.Id.ToString(),
                 storylineTitle = storyline.Title,
                 responseWindowMinutes = storyline.ResponseWindowMin,
@@ -452,6 +458,12 @@ public sealed class EngineContentSeedResult
     /// </summary>
     public int PersonasCastableClosed => Personas.CastableClosed;
 
+    /// <summary>
+    /// How many REUSED rows were renamed in place from a retired starter-cast handle (the 2026-10-13 fiction
+    /// rename). Same id, new handle, display name and bio, so it is reported like the other mutations.
+    /// </summary>
+    public int PersonasRenamed => Personas.Renamed;
+
     /// <summary>The freshly-built storyline's id — non-null only on <see cref="EngineContentSeedOutcome.Provisioned"/>.</summary>
     public Guid? StorylineId { get; }
 
@@ -508,7 +520,7 @@ public sealed class EngineContentSeedResult
 
 /// <summary>
 /// What one persona-seed pass did: rows created, rows reused, and — reported separately so they are never
-/// silent (Gate-1 S-B) — the two mutations the seeder is allowed to make to an EXISTING row.
+/// silent (Gate-1 S-B) — the mutations the seeder is allowed to make to an EXISTING row.
 /// </summary>
 /// <param name="Created">Rows this pass created.</param>
 /// <param name="Reused">Rows this pass reused (already present from a prior seed).</param>
@@ -521,8 +533,13 @@ public sealed class EngineContentSeedResult
 /// <paramref name="Reused"/>. This mutation changes what the ENGINE may do with an existing persona, so a
 /// non-zero value here is the one an operator should actually read.
 /// </param>
-public sealed record PersonaSeedCounts(int Created, int Reused, int PresentationBackfilled, int CastableClosed)
+/// <param name="Renamed">
+/// Reused rows that were renamed in place from a retired starter-cast handle (same id; new handle, display
+/// name and bio). Also a subset of <paramref name="Reused"/>.
+/// </param>
+public sealed record PersonaSeedCounts(
+    int Created, int Reused, int PresentationBackfilled, int CastableClosed, int Renamed)
 {
     /// <summary>The all-zero counts carried by every non-provisioned outcome.</summary>
-    public static PersonaSeedCounts None { get; } = new(0, 0, 0, 0);
+    public static PersonaSeedCounts None { get; } = new(0, 0, 0, 0, 0);
 }

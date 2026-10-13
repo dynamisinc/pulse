@@ -82,6 +82,14 @@ public sealed class EngineContentSeedResponseDto
     [JsonPropertyName("personasCastableClosed")]
     public required int PersonasCastableClosed { get; init; }
 
+    /// <summary>
+    /// How many of the REUSED rows were renamed in place from a retired starter-cast handle (also a subset of
+    /// <see cref="PersonasReused"/>). The row keeps its id, posts and bindings; its handle, display name and
+    /// bio change. Reported so a rename is never silent.
+    /// </summary>
+    [JsonPropertyName("personasRenamed")]
+    public required int PersonasRenamed { get; init; }
+
     /// <summary>The freshly-built starter storyline's id (in-memory only — not persisted this phase).</summary>
     [JsonPropertyName("storylineId")]
     public required string StorylineId { get; init; }
@@ -123,6 +131,7 @@ public sealed class EngineContentSeedResponseDto
             PersonasReused = result.PersonasReused,
             PersonasBackfilled = result.PersonasBackfilled,
             PersonasCastableClosed = result.PersonasCastableClosed,
+            PersonasRenamed = result.PersonasRenamed,
             StorylineId = (result.StorylineId ?? throw new InvalidOperationException(
                 "A provisioned seed result must carry a storyline id.")).ToString(),
             StorylineTitle = result.StorylineTitle ?? string.Empty,
@@ -145,7 +154,7 @@ public sealed class EngineContentSeedResponseDto
     /// <returns>The extra sentence(s), or an empty string.</returns>
     private static string MutationNote(EngineContentSeedResult result)
     {
-        if (result.PersonasBackfilled == 0 && result.PersonasCastableClosed == 0)
+        if (result.PersonasBackfilled == 0 && result.PersonasCastableClosed == 0 && result.PersonasRenamed == 0)
         {
             return string.Empty;
         }
@@ -162,6 +171,12 @@ public sealed class EngineContentSeedResponseDto
         {
             note += $" {result.PersonasCastableClosed} persona(s) had their engine-casting gate CLOSED to "
                 + "match the catalog, so the engine can no longer voice them.";
+        }
+
+        if (result.PersonasRenamed > 0)
+        {
+            note += $" {result.PersonasRenamed} persona(s) still carried a retired handle and were renamed in "
+                + "place (handle, display name and bio); their ids, posts and bindings are unchanged.";
         }
 
         return note;
