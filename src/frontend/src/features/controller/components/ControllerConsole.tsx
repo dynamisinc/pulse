@@ -307,8 +307,8 @@ export interface ControllerConsoleProps {
    */
   liveWorldSlot?: (ctx: ConsoleSlotContext) => ReactNode
   /**
-   * The RUN SHEET panel (demo-polish C3's `RunSheetPanel`) — supplied by the
-   * `/console` route. Right column of the main-area split. Absent = not rendered.
+   * The RUN SHEET panel (inject-queue 07's `RunSheetPanel`, which replaced demo-polish C3)
+   * — supplied by the `/console` route. Right column of the main-area split. Absent = not rendered.
    */
   runSheetSlot?: (ctx: ConsoleSlotContext) => ReactNode
   /**

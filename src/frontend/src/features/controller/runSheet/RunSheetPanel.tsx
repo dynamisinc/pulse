@@ -1,976 +1,827 @@
 /**
  * features/controller/runSheet/RunSheetPanel.tsx
  * ---------------------------------------------------------------------------
- * THE RUN SHEET PANEL (demo-polish C3, story 19 / issue #438; CTL-010 lite, CTL-011
- * lite, CTL-013 lite, CTL-001, COR-018, NFR-001). STAFF world: COBRA components
- * (`@/theme/styledComponents`) and the staff shell tokens (through `runSheetTokens`), dense,
- * desktop-first, keyboard-first, FontAwesome icons only, MUI 9 `sx`-only. It renders no
- * participant skin and no `PostCard`, and nothing in it can be mistaken for a participant view.
+ * THE RUN SHEET — the controller console's view of the server-side inject queue
+ * (inject-queue story 07, issue #453; backend = story 06). STAFF world: dense,
+ * dark COBRA operator chrome (`consoleChrome` tokens), COBRA buttons/fields,
+ * FontAwesome icons, MUI 9 `sx`-only. It renders NO participant component and
+ * carries NO participant skin — it must never be confusable with a participant view.
  *
- * WHAT IT IS. An MSEL-style list of STAGED POSTS ("beats") a controller can fire with one
- * key press - the misinformation beat of the demo script ("the impersonator posts a
- * brown-tap-water photo, citizen personas pile on"). Browser-side only: the sheet lives in
- * the controller's `localStorage` per exercise (`runSheetStore.ts`) with `pulse.runsheet.v1`
- * JSON import/export (`runSheetSchema.ts`), and firing posts through the existing
- * `POST /api/posts` (`runSheetFire.ts`) - no backend of its own, and NO scheduler: the
- * "intended minute" (T+14m) is information and a sort hint, nothing ever fires on a timer.
+ * THE FROZEN MOUNT SEAM. `RunSheetPanel` takes NO props (it is self-contained: it
+ * reads the exercise scope, personas and the queue itself). It replaces demo-polish
+ * C3's browser-only run sheet and keeps C3's seam name, so the orchestrator mounts
+ * `<RunSheetPanel />` in `ControllerConsole`'s `runSheetSlot` unchanged. It needs an
+ * `ExerciseContextProvider` and a React Query provider above it (the console route
+ * has both).
  *
- * MOUNTING. Self-contained and prop-less: it reads the exercise scope, the controller
- * identity, the personas and the media library itself. The orchestrator mounts it through
- * the console's `runSheetSlot` (`<RunSheetPanel />`); it needs the usual providers above it
- * (exercise context, React Query) and nothing else. It is keyed by exercise id, so an
- * exercise switch (which does not remount the console) resets the panel's own UI state, and
- * the store only ever hands it that exercise's sheet.
+ * WHAT IT DOES (the ACs of story 07)
+ *   - LIST: every item in `order` — T+N, a status chip (icon + text, never colour
+ *     alone), title, first persona (+N for a burst), assignee, fired scenario time
+ *     (with wall clock as a staff-only secondary), a failed item's server reason.
+ *   - MINE / ALL + open/fired/all: filters, not locks (IQ-3). Remembered per exercise
+ *     in `localStorage` (try/catch), default All.
+ *   - AUTHOR LIVE: Add / Edit open an INLINE editor (`InjectItemEditor`), not a modal.
+ *     Fired, firing and skipped items open read-only.
+ *   - FIRE ON CUE: Fire / Fire next / Hold / Release / Skip / Unskip / Retry / Delete
+ *     (inline confirm). NO confirmation dialog on Fire (CTL-034); it is disabled while
+ *     in flight, so a double press fires once. Fire next = the first PENDING item in
+ *     the CURRENT filter (held items are passed over). A 409 from a concurrent fire
+ *     reads "Already fired by {name}". Under FREEZE Fire/Retry are disabled with the
+ *     reason "World frozen"; under PAUSE INJECTS a banner says bursts are suspended
+ *     and manual fire still works (IQ-5).
+ *   - KEYBOARD: ↑/↓ select, F fire, N fire next, H hold/release, S skip/unskip, E edit,
+ *     A add — IGNORED while focus is in an input/textarea/select/contenteditable, and
+ *     while the editor is open; auto-repeat is ignored so holding N can never march
+ *     through the script. Every action is also a named button. A visible "Keyboard"
+ *     help lists them.
+ *   - LIVE SYNC: `useInjectQueue` polls every ~3 s and re-reads right after this
+ *     console's own action, so another controller's fire/hold/skip/edit appears within
+ *     seconds and a burst's "firing n/m" advances live. Status changes are announced
+ *     through a polite live region (`useStatusAnnouncer`).
  *
- * KEYBOARD (scoped to this panel; ignored while typing in a field - `runSheetKeyboard.ts`):
- *   ↑ / ↓  select · F  fire selected · N  fire next pending · S  skip / undo skip · E  edit
- * and every action is also a button. The legend is always visible under the list.
- *
- * SAFETY (the demo must not double-post or lie):
- *  - a fire claims the sheet's single fire slot synchronously, so a double-press cannot fire
- *    twice and only one beat is ever in flight;
- *  - a beat is "Fired" only once the server returned its post id; a server refusal is
- *    "Failed" with Retry; an unknown outcome (no response, 5xx, unreadable 2xx, a reload
- *    mid-request) is "Unconfirmed" - the post may be live - and re-firing it needs an
- *    explicit confirmation (POST /api/posts is not idempotent yet; F4 / #455);
- *  - irreversible edits (delete, replace-by-import, fire-again, discard) go through one
- *    confirm step whose default focus is Cancel; everything else is undo-able or harmless;
- *  - import is all-or-nothing and fails closed with a readable message; a storage failure
- *    is a visible warning, never silent loss.
- *
- * TIME. The intended minute reads "T+14m"; a fired stamp is SCENARIO time in the exercise's
- * zone (COR-053). The export's `exportedAt` is wall-clock metadata in the file only.
+ * WHAT IT NEVER DOES. No `exerciseId` in any request (the server scopes — COR-001);
+ * no telemetry for queue actions (the server emits the one `inject_action` event, so
+ * there is no double count — IQ-8); no wall-clock "in fiction" time (the fired time
+ * is scenario time, formatted in the exercise time zone); no raw HTML (React text).
  */
 
 import {
-  memo,
   useCallback,
-  useLayoutEffect,
+  useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
   type KeyboardEvent,
+  type ReactNode,
 } from 'react'
-import { Box, Stack, Typography } from '@mui/material'
+import { Box } from '@mui/material'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import {
-  faArrowDownShortWide,
-  faFileExport,
-  faFileImport,
-  faForwardFast,
+  faBolt,
+  faCircleInfo,
   faKeyboard,
-  faListCheck,
+  faPause,
   faPlus,
+  faRotateRight,
+  faSnowflake,
   faTriangleExclamation,
+  faXmark,
 } from '@fortawesome/free-solid-svg-icons'
-import {
-  CobraLinkButton,
-  CobraPrimaryButton,
-  CobraSecondaryButton,
-  CobraTextField,
-} from '@/theme/styledComponents'
-import CobraStyles from '@/theme/CobraStyles'
-import { wallClockNowIso } from '@/core/time/wallClock'
 import { useExerciseContext } from '@/core/exerciseContext'
-import { useMediaLibrary, type StaffMediaAssetView } from '@/core/media'
-import { useLibraryAssetLookup } from '@/features/controller/media/useLibraryAssetLookup'
-import { BUTTON_KBD_SX, FIELD_SX, KBD_SX, runSheetTokens } from './runSheetTokens'
-import { BeatEditor } from './BeatEditor'
-import { ConfirmDialog } from './ConfirmDialog'
-import { buildLibraryView, type LibraryView } from './libraryView'
-import { RunSheetBeatRow } from './RunSheetBeatRow'
-import { KEYBOARD_HELP, shortcutFor } from './runSheetKeyboard'
-import { downloadTextFile, readFileText, runSheetFilename } from './runSheetFileIO'
+import { useStaffPersonas } from '@/features/personas'
+import { consoleChrome as chrome } from '../consoleChrome'
+import { RunSheetButton } from './RunSheetButtons'
+import { RunSheetRow } from './RunSheetRow'
+import { InjectItemEditor, type EditorMode, type EditorSubmitResult } from './InjectItemEditor'
+import { KeyboardHelp } from './KeyboardHelp'
 import {
-  canAddBeat,
-  countStatuses,
-  deleteBlockReason,
-  firstPendingBeat,
-  runtimeOf,
-  type BeatContent,
-} from './runSheetModel'
+  InjectConflictError,
+  InjectNotFoundError,
+  InjectRateLimitedError,
+  InjectValidationError,
+} from './injectErrors'
+import { describeActionError, MESSAGES, type InjectAction } from './injectMessages'
 import {
-  RUN_SHEET_LIMITS,
-  formatScenarioMinute,
-  parseRunSheetFile,
-  serializeRunSheetFile,
-  sheetNameSchema,
-  type RunSheetBeat,
-  type RunSheetDefinition,
-} from './runSheetSchema'
-import {
-  addBeatTo,
-  deleteBeatFrom,
-  duplicateBeatIn,
-  moveBeatIn,
-  renameSheetIn,
-  replaceSheetIn,
-  skipBeatIn,
-  sortBeatsByMinuteIn,
-  startFreshIn,
-  unskipBeatIn,
-  updateBeatIn,
-} from './runSheetStore'
-import { useRunSheet, type FireReport } from './useRunSheet'
+  canDelete,
+  canFire,
+  canHold,
+  canRelease,
+  canRetry,
+  canSkip,
+  canUnskip,
+  filterItems,
+  firstPending,
+  isEditable,
+  type RunSheetFilters,
+} from './injectRules'
+import { useInjectAssignees } from './useInjectAssignees'
+import { CREATE_LOCK, useInjectQueue, type ActionOutcome } from './useInjectQueue'
+import { useRunSheetFilters } from './useRunSheetFilters'
+import { useStatusAnnouncer } from './useStatusAnnouncer'
+import type { InjectItemDto, InjectItemWrite } from './types'
 
-/** A confirm step waiting for the controller's answer. */
-type ConfirmState =
-  | { readonly kind: 'delete'; readonly beatId: string }
-  | { readonly kind: 'fire-again'; readonly beatId: string }
-  | { readonly kind: 'import'; readonly sheet: RunSheetDefinition; readonly fileName: string }
-  | { readonly kind: 'start-fresh' }
-
-const HEADER_BUTTON_SX = { py: '3px', px: 1.5, fontSize: 12, minWidth: 0 } as const
-
-/** "2 images", "1 video", or "3 media" when the library does not know every id. */
-function describeMedia(
-  beat: RunSheetBeat,
-  library: ReadonlyMap<string, StaffMediaAssetView> | undefined,
-): string {
-  const media = beat.media ?? []
-  if (media.length === 0) return ''
-  const assets = media.map(item => library?.get(item.mediaId))
-  if (assets.every(asset => asset !== undefined)) {
-    const videos = assets.filter(asset => asset?.kind === 'video').length
-    if (videos > 0) return videos === 1 && media.length === 1 ? '1 video' : `${media.length} media`
-    return `${media.length} ${media.length === 1 ? 'image' : 'images'}`
-  }
-  return `${media.length} media`
-}
-
-/** Every media id the sheet's beats reference (deduplicated, in first-use order). */
-function snapshotMediaIds(beats: readonly RunSheetBeat[]): readonly string[] {
-  const ids = new Set<string>()
-  for (const beat of beats) for (const item of beat.media ?? []) ids.add(item.mediaId)
-  return [...ids]
-}
-
-/**
- * Entry point. Keys the body by exercise so a switch cannot leave stale UI state behind.
- * `memo`ized: it is prop-less, and the console re-renders its slots at 1 Hz or more (the review
- * queue's tick, swamped mode) - without this every beat row (up to 200) re-rendered each time.
- * It still re-renders on its own state, its queries and the exercise context.
- */
-export const RunSheetPanel = memo(function RunSheetPanel() {
+/** The panel. No props: the frozen seam name (see the module header). */
+export function RunSheetPanel() {
   const { exerciseId } = useExerciseContext()
-  return <RunSheetPanelBody key={exerciseId} />
-})
+  // Keyed by exercise: a re-scope remounts the panel, so selection, an open editor and
+  // the remembered filters can never carry one exercise's state into another (COR-001).
+  return <RunSheetPanelBody key={exerciseId} exerciseId={exerciseId} />
+}
 
-function RunSheetPanelBody() {
-  const sheet = useRunSheet()
-  const { exerciseId, timeZone, snapshot, firing, personas, personasLoading } = sheet
-  // The media library. This `useMediaLibrary()` query STAYS: it is what FETCHES the library, so
-  // beat thumbnails and "not in the library" notes resolve even when C1's picker was never
-  // opened (`useLibraryAssetLookup()` below only READS the query cache, it never requests).
-  // The picker's Images / Videos filters use the same key family
-  // (`['staff','media',exerciseId,kind]`), so there is one cache entry per kind, shared. The
-  // "All" list is capped, so an asset picked under a filter may be absent from it: the lookup
-  // is the fallback for those ids (`libraryView.ts`).
-  const libraryQuery = useMediaLibrary()
-  const libraryData = libraryQuery.data
-  const lookupAsset = useLibraryAssetLookup()
-  const referencedMediaIds = useMemo(() => snapshotMediaIds(snapshot.beats), [snapshot.beats])
-  const library = useMemo<LibraryView | undefined>(
-    () =>
-      libraryData === undefined
-        ? undefined
-        : buildLibraryView(libraryData, referencedMediaIds, lookupAsset),
-    [libraryData, referencedMediaIds, lookupAsset],
+export default RunSheetPanel
+
+// ---------------------------------------------------------------------------
+// Internals
+// ---------------------------------------------------------------------------
+
+type EditorState =
+  | { readonly mode: 'create'; readonly key: number }
+  | {
+    readonly mode: 'edit' | 'view'
+    readonly itemId: string
+    readonly base: InjectItemDto
+    readonly key: number
+  }
+
+/** True when the key event came from a control the user is typing in. */
+function isTypingTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false
+  const tag = target.tagName
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true
+  if (target.isContentEditable) return true
+  return target.closest('[contenteditable=""], [contenteditable="true"]') !== null
+}
+
+const byOrder = (a: InjectItemDto, b: InjectItemDto): number => a.order - b.order
+
+function omitKey(record: Readonly<Record<string, string>>, key: string): Record<string, string> {
+  const { [key]: _omitted, ...rest } = record
+  return rest
+}
+
+interface SegmentOption<T extends string> {
+  readonly value: T
+  readonly label: string
+  /** Why this option is unavailable now (shown disabled, the reason as its tooltip). */
+  readonly unavailableReason?: string
+}
+
+interface SegmentedProps<T extends string> {
+  readonly label: string
+  readonly value: T
+  readonly options: readonly SegmentOption<T>[]
+  readonly onChange: (value: T) => void
+}
+
+/** A small toggle group: each option is a COBRA button with `aria-pressed` + a check when on. */
+function Segmented<T extends string>({ label, value, options, onChange }: SegmentedProps<T>) {
+  return (
+    <Box role="group" aria-label={label} sx={{ display: 'inline-flex', gap: 0.5, alignItems: 'center' }}>
+      {options.map(option => (
+        <RunSheetButton
+          key={option.value}
+          label={option.label}
+          ariaLabel={`${label}: ${option.label}`}
+          pressed={option.value === value}
+          disabled={option.unavailableReason !== undefined}
+          title={option.unavailableReason}
+          testId={`filter-${option.value}`}
+          onClick={() => onChange(option.value)}
+        />
+      ))}
+    </Box>
   )
+}
 
-  const [selectedId, setSelectedId] = useState<string | undefined>(undefined)
-  const [editor, setEditor] = useState<{ readonly beatId?: string } | undefined>(undefined)
-  const [confirm, setConfirm] = useState<ConfirmState | undefined>(undefined)
-  const [status, setStatus] = useState('')
-  const [alertMessage, setAlertMessage] = useState<string | undefined>(undefined)
-  const [importError, setImportError] = useState<string | undefined>(undefined)
-  const [importNotice, setImportNotice] = useState<string | undefined>(undefined)
-  const [nameError, setNameError] = useState<string | undefined>(undefined)
-
-  const fileInputRef = useRef<HTMLInputElement>(null)
-  const rowRefs = useRef(new Map<string, HTMLDivElement>())
-  const focusRowAfterRender = useRef<string | undefined>(undefined)
-
-  const beats = snapshot.beats
-  const selected = beats.find(beat => beat.id === selectedId) ?? beats[0]
-  const counts = countStatuses(snapshot)
-  const nextUp = firstPendingBeat(snapshot)
-  const unreadable = snapshot.state === 'unreadable'
-  const dialogOpen = editor !== undefined || confirm !== undefined
-
-  // Focus a row once it has rendered in its new place (after a move, a delete, a keyboard
-  // selection). Runs after every commit but only acts when a focus was requested.
-  useLayoutEffect(() => {
-    const id = focusRowAfterRender.current
-    if (id === undefined) return
-    focusRowAfterRender.current = undefined
-    rowRefs.current.get(id)?.focus()
-  })
-
-  const select = useCallback((beatId: string, focus: boolean) => {
-    setSelectedId(beatId)
-    if (focus) focusRowAfterRender.current = beatId
-  }, [])
-
-  const announce = useCallback((message: string) => setStatus(message), [])
-
-  // A row button that is replaced by its own action (Fire, Skip) takes keyboard focus with
-  // it; put focus back on the row so the next key press still reaches the shortcuts. Only
-  // when focus was actually lost (a dialog the action opened keeps it).
-  const restoreRowFocus = useCallback((beatId: string) => {
-    window.setTimeout(() => {
-      if (document.activeElement !== document.body && document.activeElement !== null) return
-      rowRefs.current.get(beatId)?.focus()
-    }, 0)
-  }, [])
-
-  // ---- firing -------------------------------------------------------------------------
-
-  const reportFire = (report: FireReport) => {
-    if (
-      report.outcome === 'failed'
-      || report.outcome === 'unconfirmed'
-      || report.outcome === 'unrecorded'
-    ) {
-      // One announcement, not two: the assertive alert carries the failure, so the polite
-      // status region is cleared rather than repeating it.
-      setAlertMessage(report.message)
-      announce('')
-      return
-    }
-    announce(report.message)
-    if (report.outcome === 'fired') setAlertMessage(undefined)
-  }
-
-  const runFire = async (beatId: string, confirmed = false) => {
-    const report = await sheet.fire(beatId, confirmed ? { confirmedUnconfirmed: true } : undefined)
-    reportFire(report)
-    if (report.outcome === 'needs-confirmation') setConfirm({ kind: 'fire-again', beatId })
-  }
-
-  const runFireNext = async (focus: boolean) => {
-    const report = await sheet.fireNext()
-    reportFire(report)
-    // Follow the beat that was actually sent; a blocked attempt leaves the selection alone.
-    if (
-      report.beatId !== undefined
-      && (report.outcome === 'fired' || report.outcome === 'failed' || report.outcome === 'unconfirmed')
-    ) {
-      select(report.beatId, focus)
-    }
-  }
-
-  const toggleSkip = useCallback(
-    (beatId: string) => {
-      const beat = beats.find(candidate => candidate.id === beatId)
-      if (beat === undefined) return
-      const record = runtimeOf(snapshot, beatId)
-      if (record.status === 'skipped') {
-        unskipBeatIn(exerciseId, beatId)
-        announce(`Skip undone for "${beat.title}".`)
-      } else if (record.status === 'fired') {
-        announce(`"${beat.title}" has already been fired.`)
-      } else if (record.inFlight === true) {
-        announce(`"${beat.title}" is firing right now.`)
-      } else {
-        skipBeatIn(exerciseId, beatId)
-        announce(`Skipped "${beat.title}". Press S again to undo.`)
-      }
-    },
-    [beats, snapshot, exerciseId, announce],
+function Banner({
+  icon,
+  children,
+  testId,
+  live,
+}: {
+  readonly icon: typeof faPause
+  readonly children: ReactNode
+  readonly testId: string
+  readonly live?: boolean
+}) {
+  return (
+    <Box
+      data-testid={testId}
+      role={live ? 'status' : undefined}
+      sx={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 1,
+        px: 1.25,
+        py: 0.75,
+        fontSize: 12,
+        color: chrome.ink,
+        border: `1px solid ${chrome.amber}`,
+        borderRadius: '6px',
+      }}
+    >
+      <FontAwesomeIcon icon={icon} color={chrome.amber} aria-hidden="true" />
+      <Box sx={{ minWidth: 0, flex: 1 }}>{children}</Box>
+    </Box>
   )
+}
 
-  const openEditor = useCallback(
-    (beatId: string) => {
-      const beat = beats.find(candidate => candidate.id === beatId)
-      if (beat === undefined) return
-      const record = runtimeOf(snapshot, beatId)
-      if (record.status === 'fired') {
-        announce(`"${beat.title}" is already live and cannot be edited. Duplicate it to reuse it.`)
-        return
-      }
-      if (record.inFlight === true) {
-        announce(`"${beat.title}" is firing right now.`)
-        return
-      }
-      setEditor({ beatId })
-    },
-    [beats, snapshot, announce],
+function RunSheetPanelBody({ exerciseId }: { readonly exerciseId: string }) {
+  const { timeZone } = useExerciseContext()
+  const queue = useInjectQueue()
+  const {
+    me,
+    assignees,
+    nameOf,
+    isLoading: identityLoading,
+    isError: rosterError,
+    refetch: refetchRoster,
+  } = useInjectAssignees()
+  const { personas, error: personasError } = useStaffPersonas()
+  const [filters, updateFilters] = useRunSheetFilters(exerciseId)
+  // WHO AM I is unknown until the roster read lands. If it FAILED, "Mine" cannot be evaluated: a
+  // remembered "Mine" would filter out every row and the sheet would claim nothing matches. So
+  // while the roster is unavailable the view falls back to ALL (with a visible note and "Mine"
+  // shown unavailable); the remembered choice is untouched and applies again once it loads.
+  const rosterUnavailable = rosterError && me === undefined
+  const scope: RunSheetFilters['scope'] = rosterUnavailable ? 'all' : filters.scope
+  // Still loading and the choice is "Mine": say so, not the "nothing matches" of an empty list.
+  const identityPending = scope === 'mine' && me === undefined && identityLoading
+
+  const reasonId = useId()
+  const helpId = useId()
+
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [editor, setEditor] = useState<EditorState | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
+  // Calm per-row guidance (a rate-limited fire / retry / release), by item id.
+  const [rowNotes, setRowNotes] = useState<Readonly<Record<string, string>>>({})
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
+  const [helpOpen, setHelpOpen] = useState(false)
+  const editorKey = useRef(0)
+  // The latest polled items, for decisions made AFTER an await (a render closure would be stale).
+  const latestItems = useRef<readonly InjectItemDto[]>([])
+  const rowRefs = useRef(new Map<string, HTMLLIElement>())
+
+  const { items, pauseTier } = queue
+  const frozen = pauseTier === 'freeze'
+  const injectsPaused = pauseTier === 'injects'
+  const fireDisabledReason = frozen ? MESSAGES.worldFrozen : undefined
+
+  const personasById = useMemo(() => new Map(personas.map(p => [p.id, p])), [personas])
+  const personaOf = useCallback((id: string) => personasById.get(id), [personasById])
+  const staffName = useCallback((id: string | undefined) => nameOf(id), [nameOf])
+
+  const statusFilter = filters.status
+  const visible = useMemo(
+    () => filterItems(items, { scope, status: statusFilter }, me),
+    [items, scope, statusFilter, me],
   )
+  const nextPending = firstPending(visible)
+  const selected = visible.find(item => item.id === selectedId)
 
-  const requestDelete = useCallback(
-    (beatId: string) => {
-      const reason = deleteBlockReason(snapshot, beatId)
-      if (reason !== undefined) {
-        announce(reason)
-        return
-      }
-      setConfirm({ kind: 'delete', beatId })
-    },
-    [snapshot, announce],
-  )
+  const announcement = useStatusAnnouncer(items, !queue.isLoading && !queue.isError)
 
-  // ---- keyboard -----------------------------------------------------------------------
+  // ----- editor derivation -------------------------------------------------
 
-  const handleKeyDown = (event: KeyboardEvent<HTMLElement>) => {
-    // Dialogs are portalled: their key events still bubble here through React, but they are
-    // not inside this panel's DOM and must never trigger a shortcut.
-    if (dialogOpen || unreadable) return
-    if (!(event.target instanceof Node) || !event.currentTarget.contains(event.target)) return
-    const shortcut = shortcutFor(event)
-    if (shortcut === undefined) return
-
-    const index = selected === undefined ? -1 : beats.findIndex(beat => beat.id === selected.id)
-    switch (shortcut) {
-      case 'previous':
-      case 'next': {
-        event.preventDefault()
-        if (beats.length === 0) return
-        const target = shortcut === 'next' ? Math.min(beats.length - 1, index + 1) : Math.max(0, index - 1)
-        const beat = beats[target]
-        if (beat !== undefined) select(beat.id, true)
-        return
-      }
-      case 'fire':
-        event.preventDefault()
-        if (selected !== undefined) void runFire(selected.id)
-        return
-      case 'fireNext':
-        event.preventDefault()
-        void runFireNext(true)
-        return
-      case 'skip':
-        event.preventDefault()
-        if (selected !== undefined) toggleSkip(selected.id)
-        return
-      case 'edit':
-        event.preventDefault()
-        if (selected !== undefined) openEditor(selected.id)
-        return
-    }
-  }
-
-  // ---- editor / confirm results -------------------------------------------------------
-
-  const saveBeat = (content: BeatContent) => {
-    const editing = editor?.beatId
-    setEditor(undefined)
-    if (editing === undefined) {
-      const created = addBeatTo(exerciseId, content)
-      if (created !== undefined) select(created, false)
-      announce(`Added "${content.title}".`)
-    } else {
-      updateBeatIn(exerciseId, editing, content)
-      announce(`Saved "${content.title}".`)
-    }
-  }
-
-  const confirmAction = async () => {
-    const current = confirm
-    setConfirm(undefined)
-    if (current === undefined) return
-    switch (current.kind) {
-      case 'delete': {
-        const index = beats.findIndex(beat => beat.id === current.beatId)
-        const title = beats[index]?.title ?? 'beat'
-        const outcome = deleteBeatFrom(exerciseId, current.beatId)
-        if (!outcome.ok) {
-          announce(outcome.reason)
-          return
-        }
-        const neighbour = beats[index + 1] ?? beats[index - 1]
-        if (neighbour !== undefined) select(neighbour.id, true)
-        announce(`Deleted "${title}". Its live post, if any, is not affected.`)
-        return
-      }
-      case 'fire-again':
-        await runFire(current.beatId, true)
-        restoreRowFocus(current.beatId)
-        return
-      case 'import':
-        applyImport(current.sheet, current.fileName)
-        return
-      case 'start-fresh':
-        startFreshIn(exerciseId)
-        announce('Started a new empty run sheet. The unreadable data was kept under a backup key.')
-        return
-    }
-  }
-
-  // ---- import / export ----------------------------------------------------------------
-
-  const applyImport = (definition: RunSheetDefinition, fileName: string) => {
-    // Refused while a beat is firing (checked again here, on the store's fresh read: the
-    // result of that fire must not land on the new sheet).
-    const replaced = replaceSheetIn(exerciseId, definition)
-    if (!replaced.ok) {
-      const message = `Import refused: ${replaced.reason} Nothing was changed.`
-      setImportError(message)
-      announce(message)
-      return
-    }
-    const first = definition.beats[0]
-    setSelectedId(first?.id)
-    const withMissing =
-      library === undefined
-        ? 0
-        : definition.beats.filter(beat =>
-          (beat.media ?? []).some(item => !library.has(item.mediaId))).length
-    const notice =
-      `Imported "${definition.name}" from ${fileName}: ${definition.beats.length} `
-      + `${definition.beats.length === 1 ? 'beat' : 'beats'}, all pending.`
-      + (withMissing > 0
-        ? ` Warning: ${withMissing} ${withMissing === 1 ? 'beat uses' : 'beats use'} media that is not `
-          + 'in this exercise\'s library (marked on the beat; you can still fire).'
-        : '')
-    setImportNotice(notice)
-    announce(notice)
-  }
-
-  const handleImportFile = async (file: File) => {
-    setImportError(undefined)
-    setImportNotice(undefined)
-    if (firing) {
-      const message = 'Import refused: a beat is firing right now. Wait for its result.'
-      setImportError(message)
-      announce(message)
-      return
-    }
-    if (file.size > RUN_SHEET_LIMITS.fileMaxBytes) {
-      const message =
-        `Import refused: ${file.name} is too large to be a run sheet (over 2 MB). Nothing was changed.`
-      setImportError(message)
-      announce(message)
-      return
-    }
-    let text: string
-    try {
-      text = await readFileText(file)
-    } catch {
-      const message = `Import refused: ${file.name} could not be read. Nothing was changed.`
-      setImportError(message)
-      announce(message)
-      return
-    }
-    const result = parseRunSheetFile(text)
-    if (!result.ok) {
-      const message = `Import refused, nothing was changed. ${result.message}`
-      setImportError(message)
-      announce(message)
-      return
-    }
-    if (beats.length > 0) {
-      setConfirm({ kind: 'import', sheet: result.sheet, fileName: file.name })
-      return
-    }
-    applyImport(result.sheet, file.name)
-  }
-
-  const handleExport = () => {
-    const filename = runSheetFilename(snapshot.name)
-    downloadTextFile(
-      filename,
-      serializeRunSheetFile({ name: snapshot.name, beats }, wallClockNowIso()),
-    )
-    setImportError(undefined)
-    announce(
-      `Exported ${beats.length} ${beats.length === 1 ? 'beat' : 'beats'} to ${filename}. `
-      + 'Status is not included in the file.',
-    )
-  }
-
-  const commitName = (value: string) => {
-    const parsed = sheetNameSchema.safeParse(value)
-    if (!parsed.success) {
-      setNameError(`Sheet name ${parsed.error.issues[0]?.message ?? 'is not valid'}.`)
-      return
-    }
-    setNameError(undefined)
-    renameSheetIn(exerciseId, parsed.data)
-  }
-
-  // ---- render -------------------------------------------------------------------------
-
-  const confirmBeat =
-    confirm !== undefined && 'beatId' in confirm
-      ? beats.find(beat => beat.id === confirm.beatId)
+  const liveEditing =
+    editor && editor.mode !== 'create'
+      ? items.find(item => item.id === editor.itemId)
       : undefined
-  const editingBeat = editor?.beatId === undefined
+  // Someone fired/skipped the item while it was open for edit: it is now read-only.
+  const editorMode: EditorMode | undefined = !editor
     ? undefined
-    : beats.find(beat => beat.id === editor.beatId)
-  const atLimit = !canAddBeat(snapshot)
+    : editor.mode === 'edit' && liveEditing && !isEditable(liveEditing.status)
+      ? 'view'
+      : editor.mode
+  // A read-only view follows the LIVE polled item (so a burst's "Firing n/m" keeps advancing); an
+  // edit form keeps the snapshot it was seeded from, so the controller's typing is never reset.
+  const editorSnapshot =
+    editor && editor.mode !== 'create'
+      ? editorMode === 'view' && liveEditing
+        ? liveEditing
+        : editor.base
+      : undefined
+
+  useEffect(() => {
+    latestItems.current = items
+  }, [items])
+
+  // The item being edited was deleted by another controller: close the editor, say so.
+  useEffect(() => {
+    if (!editor || editor.mode === 'create' || queue.isLoading) return
+    if (!items.some(item => item.id === editor.itemId)) {
+      setEditor(null)
+      setNotice(MESSAGES.notFound)
+    }
+  }, [editor, items, queue.isLoading])
+
+  // ----- actions -----------------------------------------------------------
+
+  /**
+   * Turns an action's outcome into the right message. A RATE-LIMITED reply (429 on fire / retry /
+   * release) is calm, per-row guidance — "Too many fires in a few seconds. Try again in a moment."
+   * — shown on THAT row; nothing is marked failed and the row's lock is already released. Every
+   * other failure stays a panel notice.
+   */
+  const report = useCallback(
+    (action: InjectAction, outcome: ActionOutcome<unknown>, itemId?: string): void => {
+      if (outcome.status === 'ok') {
+        setNotice(null)
+        if (itemId) setRowNotes(notes => omitKey(notes, itemId))
+        return
+      }
+      if (outcome.status !== 'error') return
+      if (outcome.error instanceof InjectRateLimitedError && itemId) {
+        const note = describeActionError(action, outcome.error, staffName)
+        setRowNotes(notes => ({ ...notes, [itemId]: note }))
+        return
+      }
+      setNotice(describeActionError(action, outcome.error, staffName))
+    },
+    [staffName],
+  )
+
+  const fireItem = (item: InjectItemDto): void => {
+    if (item.status === 'held') {
+      setNotice(MESSAGES.heldFireHint)
+      return
+    }
+    if (!canFire(item.status)) return
+    if (frozen) {
+      setNotice(`Fire is unavailable: ${MESSAGES.worldFrozen}`)
+      return
+    }
+    void queue.fire(item.id).then(outcome => report('fire', outcome, item.id))
+  }
+
+  const fireNext = (): void => {
+    if (frozen) {
+      setNotice(`Fire is unavailable: ${MESSAGES.worldFrozen}`)
+      return
+    }
+    if (!nextPending) {
+      setNotice('Nothing pending to fire in this view.')
+      return
+    }
+    setSelectedId(nextPending.id)
+    const target = nextPending.id
+    void queue.fire(target).then(outcome => report('fire', outcome, target))
+  }
+
+  const retryItem = (item: InjectItemDto): void => {
+    if (!canRetry(item.status)) return
+    if (frozen) {
+      setNotice(`Retry is unavailable: ${MESSAGES.worldFrozen}`)
+      return
+    }
+    void queue.retry(item.id).then(outcome => report('retry', outcome, item.id))
+  }
+
+  const toggleHold = (item: InjectItemDto): void => {
+    if (canRelease(item.status)) {
+      void queue.release(item.id).then(outcome => report('release', outcome, item.id))
+    } else if (canHold(item.status)) {
+      void queue.hold(item.id).then(outcome => report('hold', outcome, item.id))
+    }
+  }
+
+  const toggleSkip = (item: InjectItemDto): void => {
+    if (canUnskip(item.status)) {
+      void queue.unskip(item.id).then(outcome => report('unskip', outcome, item.id))
+    } else if (canSkip(item.status)) {
+      void queue.skip(item.id).then(outcome => report('skip', outcome, item.id))
+    }
+  }
+
+  const openEditor = (item: InjectItemDto): void => {
+    setConfirmDeleteId(null)
+    setEditor({
+      mode: isEditable(item.status) ? 'edit' : 'view',
+      itemId: item.id,
+      base: item,
+      key: ++editorKey.current,
+    })
+  }
+
+  const openCreate = (): void => {
+    setConfirmDeleteId(null)
+    setEditor({ mode: 'create', key: ++editorKey.current })
+  }
+
+  const confirmDelete = (item: InjectItemDto): void => {
+    if (!canDelete(item.status)) return
+    setConfirmDeleteId(null)
+    void queue.remove(item.id, item.version).then(outcome => report('delete', outcome))
+  }
+
+  const moveItem = (item: InjectItemDto, delta: -1 | 1): void => {
+    const index = visible.findIndex(candidate => candidate.id === item.id)
+    const neighbour = visible[index + delta]
+    if (index === -1 || !neighbour) return
+    // Swap the two rows' places in the FULL order (hidden rows stay where they are).
+    const ids = [...items].sort(byOrder).map(candidate => candidate.id)
+    const a = ids.indexOf(item.id)
+    const b = ids.indexOf(neighbour.id)
+    ids[a] = neighbour.id
+    ids[b] = item.id
+    void queue.reorder(ids).then(outcome => report('reorder', outcome))
+  }
+
+  /** Saves the editor: create, or update at the version the form was opened/reloaded at. */
+  const submitEditor = async (write: InjectItemWrite): Promise<EditorSubmitResult> => {
+    if (!editor) return { ok: false }
+    const outcome =
+      editor.mode === 'create'
+        ? await queue.create(write)
+        : await queue.update(editor.itemId, write, editor.base.version)
+
+    if (outcome.status === 'busy') return { ok: false }
+    if (outcome.status === 'ok') {
+      setNotice(null)
+      setSelectedId(outcome.value.id)
+      setEditor(null)
+      return { ok: true }
+    }
+
+    const error = outcome.error
+    if (error instanceof InjectValidationError) {
+      return { ok: false, form: error.detail || undefined, fields: error.fieldErrors }
+    }
+    if (error instanceof InjectConflictError && editor.mode !== 'create') {
+      // The server's current copy: the 409's own `item`, else the polled one (a 409 without an
+      // item must not leave us retrying a dead version forever).
+      const known =
+        error.item ?? latestItems.current.find(candidate => candidate.id === editor.itemId)
+
+      // The version did NOT move: nobody changed the item, the server refused THIS EDIT (an edit
+      // that would rewrite a published post, a kind change after release, a post being published
+      // right now...). Say why on the form and KEEP the draft: reloading would throw the work away.
+      if (known && known.version === editor.base.version) {
+        return { ok: false, form: error.detail || 'The server refused this edit.' }
+      }
+
+      // The version moved (stale save, or the item stopped being editable): reload the fresh copy.
+      setNotice(MESSAGES.changedByOthers)
+      if (known) {
+        setEditor({
+          mode: isEditable(known.status) ? 'edit' : 'view',
+          itemId: known.id,
+          base: known,
+          key: ++editorKey.current,
+        })
+      }
+      return { ok: false }
+    }
+    if (error instanceof InjectNotFoundError) {
+      setNotice(MESSAGES.notFound)
+      setEditor(null)
+      return { ok: false }
+    }
+    return { ok: false, form: describeActionError('save', error, staffName) }
+  }
+
+  // ----- keyboard ----------------------------------------------------------
+
+  const focusRow = (id: string): void => {
+    setSelectedId(id)
+    rowRefs.current.get(id)?.focus()
+  }
+
+  const moveSelection = (delta: 1 | -1): void => {
+    if (visible.length === 0) return
+    const index = selected ? visible.findIndex(item => item.id === selected.id) : -1
+    const nextIndex =
+      index === -1
+        ? delta === 1 ? 0 : visible.length - 1
+        : Math.min(visible.length - 1, Math.max(0, index + delta))
+    const next = visible[nextIndex]
+    if (next) focusRow(next.id)
+  }
+
+  const onKeyDown = (event: KeyboardEvent<HTMLElement>): void => {
+    // The editor owns the keyboard while it is open (its own Esc / Ctrl+Enter).
+    if (editor) return
+    if (event.metaKey || event.ctrlKey || event.altKey) return
+    // Typing in a field must never trigger an action.
+    if (isTypingTarget(event.target)) return
+
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault()
+      moveSelection(event.key === 'ArrowDown' ? 1 : -1)
+      return
+    }
+
+    // Auto-repeat must never repeat an ACTION (holding N would march through the script).
+    if (event.repeat || event.key.length !== 1) return
+
+    const key = event.key.toLowerCase()
+    if (key === 'n') {
+      event.preventDefault()
+      fireNext()
+    } else if (key === 'a') {
+      event.preventDefault()
+      openCreate()
+    } else if (selected) {
+      if (key === 'f') {
+        event.preventDefault()
+        fireItem(selected)
+      } else if (key === 'h') {
+        event.preventDefault()
+        toggleHold(selected)
+      } else if (key === 's') {
+        event.preventDefault()
+        toggleSkip(selected)
+      } else if (key === 'e') {
+        event.preventDefault()
+        openEditor(selected)
+      }
+    }
+  }
+
+  // ----- render ------------------------------------------------------------
+
+  const setFilters = (patch: Partial<RunSheetFilters>): void => {
+    updateFilters(patch)
+    setNotice(null)
+  }
+
+  const editorBusy =
+    queue.busyIds.has(CREATE_LOCK) ||
+    (editor !== null && editor.mode !== 'create' && queue.busyIds.has(editor.itemId))
+  const total = items.length
+  const filteredOut = total > 0 && visible.length === 0
 
   return (
     <Box
+      component="section"
+      role="region"
+      aria-label="Run sheet"
       data-testid="run-sheet-panel"
-      data-personas={personasLoading ? 'loading' : 'ready'}
-      onKeyDown={handleKeyDown}
+      onKeyDown={onKeyDown}
       sx={{
         display: 'flex',
         flexDirection: 'column',
+        // Fills its console slot (a flex column) and scrolls INSIDE its own list area.
         flex: 1,
+        height: '100%',
         minHeight: 0,
-        minWidth: 0,
-        bgcolor: runSheetTokens.panel,
-        border: `1px solid ${runSheetTokens.hairline}`,
-        borderRadius: '8px',
-        overflow: 'hidden',
-        color: 'text.primary',
+        bgcolor: chrome.panel,
+        color: chrome.ink,
+        fontFamily: "'Figtree', system-ui, sans-serif",
       }}
     >
-      {/* ---- header ---- */}
-      <Box
-        sx={{
-          flex: 'none',
-          p: 1.25,
-          borderBottom: `1px solid ${runSheetTokens.hairline}`,
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 1,
-          ...FIELD_SX,
-        }}
-      >
-        <Stack direction="row" sx={{ alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-          <FontAwesomeIcon icon={faListCheck} color={runSheetTokens.navy} aria-hidden="true" />
-          <Typography
-            component="h2"
-            sx={{
-              fontSize: 13,
-              fontWeight: 800,
-              letterSpacing: '0.1em',
-              color: runSheetTokens.navy,
-            }}
-          >
+      {/* Header + toolbar */}
+      <Box sx={{ px: 1.75, py: 1.5, borderBottom: `1px solid ${chrome.line}`, flex: 'none' }}>
+        <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1 }}>
+          <Box component="h2" sx={{ m: 0, fontSize: 11, fontWeight: 800, letterSpacing: '0.12em' }}>
             RUN SHEET
-          </Typography>
-          <Typography data-testid="run-sheet-counts" sx={{ fontSize: 12, color: runSheetTokens.mutedText }}>
-            {counts.total === 0
-              ? 'No beats yet'
-              : `${counts.fired} of ${counts.total} fired · ${counts.pending} pending`
-                + (counts.skipped > 0 ? ` · ${counts.skipped} skipped` : '')
-                + (counts.failed > 0 ? ` · ${counts.failed} failed` : '')
-                + (counts.unconfirmed > 0 ? ` · ${counts.unconfirmed} unconfirmed` : '')}
-          </Typography>
-          <Box sx={{ flex: 1 }} />
-          <CobraPrimaryButton
-            size="small"
-            aria-keyshortcuts="N"
-            disabled={unreadable || nextUp === undefined || firing}
-            onClick={() => void runFireNext(false)}
-            startIcon={<FontAwesomeIcon icon={faForwardFast} />}
-            sx={HEADER_BUTTON_SX}
+          </Box>
+          <Box
+            component="span"
+            data-testid="run-sheet-count"
+            sx={{ fontSize: 11.5, color: chrome.inkMuted }}
           >
-            Fire next
-            <Box component="kbd" aria-hidden="true" sx={BUTTON_KBD_SX}>N</Box>
-          </CobraPrimaryButton>
-        </Stack>
+            {total === 0 ? 'no items' : `${visible.length} of ${total} shown`}
+          </Box>
+        </Box>
 
-        {nextUp !== undefined && !unreadable && (
-          <Typography data-testid="run-sheet-next-up" sx={{ fontSize: 12, color: runSheetTokens.mutedText }}>
-            Next up: #{nextUp.order} {formatScenarioMinute(nextUp.scenarioMinute)}{' '}
-            "{nextUp.title}" as @{nextUp.persona.handle}
-          </Typography>
-        )}
+        <Box sx={{ mt: 1, display: 'flex', flexWrap: 'wrap', gap: 1.5, alignItems: 'center' }}>
+          <Segmented<RunSheetFilters['scope']>
+            label="Assigned to"
+            value={scope}
+            options={[
+              {
+                value: 'mine',
+                label: 'Mine',
+                unavailableReason: rosterUnavailable
+                  ? "Unavailable: the staff roster didn't load"
+                  : undefined,
+              },
+              { value: 'all', label: 'All' },
+            ]}
+            onChange={scope => setFilters({ scope })}
+          />
+          <Segmented<RunSheetFilters['status']>
+            label="Status"
+            value={filters.status}
+            options={[
+              { value: 'open', label: 'Open' },
+              { value: 'fired', label: 'Fired' },
+              { value: 'all', label: 'All' },
+            ]}
+            onChange={status => setFilters({ status })}
+          />
+        </Box>
 
-        {!unreadable && (
-          <Stack direction="row" sx={{ gap: 1, flexWrap: 'wrap', alignItems: 'flex-start' }}>
-            <CobraTextField
-              key={snapshot.name}
-              label="Sheet name"
-              size="small"
-              defaultValue={snapshot.name}
-              error={nameError !== undefined}
-              helperText={nameError}
-              onBlur={event => commitName(event.target.value)}
-              onKeyDown={event => {
-                // Enter commits (by blurring); Escape stays with the field.
-                if (event.key === 'Enter') event.currentTarget.querySelector('input')?.blur()
-              }}
-              sx={{ flex: '1 1 200px' }}
-            />
-            <Stack direction="row" sx={{ gap: 0.75, flexWrap: 'wrap', pt: '3px' }}>
-              <CobraSecondaryButton
-                size="small"
-                disabled={atLimit}
-                onClick={() => setEditor({})}
-                startIcon={<FontAwesomeIcon icon={faPlus} />}
-                sx={HEADER_BUTTON_SX}
-              >
-                Add beat
-              </CobraSecondaryButton>
-              <CobraSecondaryButton
-                size="small"
-                disabled={firing}
-                onClick={() => fileInputRef.current?.click()}
-                startIcon={<FontAwesomeIcon icon={faFileImport} />}
-                sx={HEADER_BUTTON_SX}
-              >
-                Import
-              </CobraSecondaryButton>
-              <CobraSecondaryButton
-                size="small"
-                onClick={handleExport}
-                startIcon={<FontAwesomeIcon icon={faFileExport} />}
-                sx={HEADER_BUTTON_SX}
-              >
-                Export
-              </CobraSecondaryButton>
-              <CobraSecondaryButton
-                size="small"
-                disabled={beats.length < 2}
-                onClick={() => {
-                  sortBeatsByMinuteIn(exerciseId)
-                  announce('Beats re-ordered by intended minute. This changes the order only; nothing fires on a timer.')
-                }}
-                startIcon={<FontAwesomeIcon icon={faArrowDownShortWide} />}
-                sx={HEADER_BUTTON_SX}
-              >
-                Sort by T+
-              </CobraSecondaryButton>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".json,application/json"
-                data-testid="run-sheet-import-input"
-                aria-label="Import a run sheet file"
-                tabIndex={-1}
-                hidden
-                onChange={event => {
-                  const file = event.target.files?.[0]
-                  // Reset so choosing the same file again still fires `change`.
-                  event.target.value = ''
-                  if (file !== undefined) void handleImportFile(file)
-                }}
-              />
-            </Stack>
-          </Stack>
-        )}
-
-        {atLimit && (
-          <Typography sx={{ fontSize: 12, color: runSheetTokens.mutedText }}>
-            A sheet holds at most {RUN_SHEET_LIMITS.beatsMax} beats.
-          </Typography>
-        )}
+        <Box sx={{ mt: 1, display: 'flex', flexWrap: 'wrap', gap: 1, alignItems: 'center' }}>
+          <RunSheetButton
+            kind="primary"
+            icon={faBolt}
+            label="Fire next"
+            ariaLabel="Fire next pending item"
+            disabled={frozen || !nextPending}
+            title={frozen ? MESSAGES.worldFrozen : !nextPending ? 'Nothing pending in this view' : undefined}
+            describedBy={frozen ? reasonId : undefined}
+            testId="fire-next"
+            onClick={fireNext}
+          />
+          <RunSheetButton
+            icon={faPlus}
+            label="Add"
+            ariaLabel="Add item"
+            testId="add-item"
+            onClick={openCreate}
+          />
+          <RunSheetButton
+            icon={faKeyboard}
+            label="Keyboard"
+            ariaLabel="Keyboard shortcuts"
+            pressed={helpOpen}
+            testId="keyboard-toggle"
+            onClick={() => setHelpOpen(open => !open)}
+          />
+          {nextPending ? (
+            <Box
+              component="span"
+              data-testid="next-target"
+              sx={{ fontSize: 11.5, color: chrome.inkMuted, minWidth: 0, overflowWrap: 'anywhere' }}
+            >
+              {`Next: ${nextPending.title}`}
+            </Box>
+          ) : null}
+        </Box>
       </Box>
 
-      {/* ---- notices ---- */}
-      {snapshot.storageWarning !== undefined && (
-        <Box
-          role="alert"
-          data-testid="run-sheet-storage-warning"
-          sx={{
-            flex: 'none',
-            display: 'flex',
-            gap: 1,
-            alignItems: 'flex-start',
-            px: 1.25,
-            py: 0.75,
-            fontSize: 12.5,
-            fontWeight: 600,
-            bgcolor: runSheetTokens.warningBanner.background,
-            color: runSheetTokens.warningBanner.text,
-            borderBottom: `1px solid ${runSheetTokens.hairline}`,
-          }}
-        >
-          <FontAwesomeIcon icon={faTriangleExclamation} aria-hidden="true" style={{ marginTop: 3 }} />
-          <span>Warning: {snapshot.storageWarning}</span>
-        </Box>
-      )}
-
-      {unreadable && (
-        <Box
-          role="alert"
-          data-testid="run-sheet-unreadable"
-          sx={{
-            flex: 'none',
-            p: 1.25,
-            fontSize: 12.5,
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 1,
-            alignItems: 'flex-start',
-          }}
-        >
-          <Box sx={{ display: 'flex', gap: 1, fontWeight: 600 }}>
-            <FontAwesomeIcon icon={faTriangleExclamation} aria-hidden="true" style={{ marginTop: 3 }} />
+      {/* Banners */}
+      <Box sx={{ px: 1.75, pt: 1, display: 'flex', flexDirection: 'column', gap: 1, flex: 'none' }}>
+        {frozen ? (
+          <Banner icon={faSnowflake} testId="banner-frozen" live>
+            <span id={reasonId}>{MESSAGES.worldFrozen}</span>
+            <span>{' — Fire and Retry are disabled until the world resumes.'}</span>
+          </Banner>
+        ) : null}
+        {injectsPaused ? (
+          <Banner icon={faPause} testId="banner-injects-paused" live>
+            <span>{MESSAGES.injectsPaused}</span>
+          </Banner>
+        ) : null}
+        {queue.droppedItemIds.length > 0 ? (
+          <Banner icon={faTriangleExclamation} testId="banner-dropped" live>
+            {`${queue.droppedItemIds.length} item${queue.droppedItemIds.length === 1 ? '' : 's'} couldn't be displayed (malformed data)`}
+          </Banner>
+        ) : null}
+        {rosterUnavailable ? (
+          <Banner icon={faTriangleExclamation} testId="banner-roster-failed" live>
             <span>
-              This exercise's saved run sheet could not be read ({snapshot.unreadableReason}).
-              It has not been changed or deleted. Starting a new sheet keeps a copy of the old
-              data under a backup key.
-            </span>
-          </Box>
-          <CobraSecondaryButton
-            size="small"
-            onClick={() => setConfirm({ kind: 'start-fresh' })}
-            sx={HEADER_BUTTON_SX}
-          >
-            Start a new sheet...
-          </CobraSecondaryButton>
-        </Box>
-      )}
-
-      {alertMessage !== undefined && (
+              {filters.scope === 'mine'
+                ? 'Couldn\'t load the staff roster, so "Mine" is unavailable: showing all items.'
+                : "Couldn't load the staff roster: \"Mine\" and the assignee list are unavailable."}
+            </span>{' '}
+            <RunSheetButton
+              icon={faRotateRight}
+              label="Try now"
+              ariaLabel="Try loading the staff roster now"
+              testId="reload-roster"
+              onClick={() => void refetchRoster()}
+            />
+          </Banner>
+        ) : null}
+        {queue.connectionLost ? (
+          <Banner icon={faTriangleExclamation} testId="banner-connection" live>
+            {MESSAGES.connectionLost}
+          </Banner>
+        ) : null}
+        {queue.isError ? (
+          <Banner icon={faTriangleExclamation} testId="banner-load-failed" live>
+            <span>{MESSAGES.loadFailed}</span>{' '}
+            <RunSheetButton
+              icon={faRotateRight}
+              label="Try now"
+              ariaLabel="Try loading the run sheet now"
+              testId="reload"
+              onClick={() => void queue.refetch()}
+            />
+          </Banner>
+        ) : null}
+        {/* The notice region exists from first render so a screen reader announces changes. */}
         <Box
-          role="alert"
-          data-testid="run-sheet-alert"
-          sx={{
-            flex: 'none',
-            display: 'flex',
-            gap: 1,
-            alignItems: 'flex-start',
-            px: 1.25,
-            py: 0.75,
-            fontSize: 12.5,
-            fontWeight: 600,
-            bgcolor: runSheetTokens.errorBanner.background,
-            color: runSheetTokens.errorBanner.text,
-            borderBottom: `1px solid ${runSheetTokens.hairline}`,
-          }}
-        >
-          <FontAwesomeIcon icon={faTriangleExclamation} aria-hidden="true" style={{ marginTop: 3 }} />
-          <span style={{ flex: 1 }}>{alertMessage}</span>
-          <CobraLinkButton size="small" onClick={() => setAlertMessage(undefined)} sx={HEADER_BUTTON_SX}>
-            Dismiss
-          </CobraLinkButton>
-        </Box>
-      )}
-
-      {importError !== undefined && (
-        <Box
-          role="alert"
-          data-testid="run-sheet-import-error"
-          sx={{
-            flex: 'none',
-            display: 'flex',
-            gap: 1,
-            alignItems: 'flex-start',
-            px: 1.25,
-            py: 0.75,
-            fontSize: 12.5,
-            fontWeight: 600,
-            bgcolor: runSheetTokens.errorBanner.background,
-            color: runSheetTokens.errorBanner.text,
-            borderBottom: `1px solid ${runSheetTokens.hairline}`,
-          }}
-        >
-          <FontAwesomeIcon icon={faTriangleExclamation} aria-hidden="true" style={{ marginTop: 3 }} />
-          <span style={{ flex: 1 }}>{importError}</span>
-          <CobraLinkButton size="small" onClick={() => setImportError(undefined)} sx={HEADER_BUTTON_SX}>
-            Dismiss
-          </CobraLinkButton>
-        </Box>
-      )}
-
-      {importNotice !== undefined && importError === undefined && (
-        <Typography
-          data-testid="run-sheet-import-notice"
-          sx={{
-            flex: 'none',
-            px: 1.25,
-            py: 0.75,
-            fontSize: 12.5,
-            borderBottom: `1px solid ${runSheetTokens.hairline}`,
-          }}
-        >
-          {importNotice}
-        </Typography>
-      )}
-
-      {/* ---- the list ---- */}
-      <Box
-        sx={{
-          flex: 1,
-          minHeight: 0,
-          overflowY: 'auto',
-          ...CobraStyles.Scrollbar.Styling,
-        }}
-      >
-        {!unreadable && beats.length === 0 && (
-          <Typography data-testid="run-sheet-empty" sx={{ p: 2, fontSize: 13, color: runSheetTokens.mutedText }}>
-            No beats yet. Add a beat, or import a run sheet file (pulse.runsheet.v1 JSON).
-          </Typography>
-        )}
-        {beats.length > 0 && (
-          <Box component="ul" aria-label="Beats" sx={{ m: 0, p: 0 }}>
-            {beats.map((beat, position) => {
-              const record = runtimeOf(snapshot, beat.id)
-              const replyTo = beat.replyTo
-              const parent =
-                replyTo !== undefined && 'beatId' in replyTo
-                  ? beats.find(candidate => candidate.id === replyTo.beatId)
-                  : undefined
-              const missing =
-                library === undefined
-                  ? 0
-                  : (beat.media ?? []).filter(item => !library.has(item.mediaId)).length
-              const blocked = sheet.blockedFor(beat)
-              return (
-                <RunSheetBeatRow
-                  key={beat.id}
-                  beat={beat}
-                  record={record}
-                  {...(parent !== undefined
-                    ? { parentTitle: parent.title, parentOrder: parent.order }
-                    : {})}
-                  position={position}
-                  total={beats.length}
-                  selected={selected?.id === beat.id}
-                  timeZone={timeZone}
-                  {...(blocked !== undefined && !blocked.startsWith('Personas are still loading')
-                    ? { blockedReason: blocked }
-                    : {})}
-                  mediaSummary={describeMedia(beat, library)}
-                  mediaMissing={missing}
-                  sheetFiring={firing}
-                  rowRef={element => {
-                    if (element === null) rowRefs.current.delete(beat.id)
-                    else rowRefs.current.set(beat.id, element)
-                  }}
-                  onSelect={() => setSelectedId(beat.id)}
-                  onFire={() => void runFire(beat.id).then(() => restoreRowFocus(beat.id))}
-                  onSkip={() => {
-                    toggleSkip(beat.id)
-                    restoreRowFocus(beat.id)
-                  }}
-                  onEdit={() => openEditor(beat.id)}
-                  onDuplicate={() => {
-                    const created = duplicateBeatIn(exerciseId, beat.id)
-                    if (created === undefined) {
-                      announce(`A sheet holds at most ${RUN_SHEET_LIMITS.beatsMax} beats.`)
-                      return
-                    }
-                    select(created, false)
-                    announce(`Duplicated "${beat.title}".`)
-                  }}
-                  onMove={direction => {
-                    moveBeatIn(exerciseId, beat.id, direction)
-                    focusRowAfterRender.current = beat.id
-                    announce(`Moved "${beat.title}" ${direction === -1 ? 'up' : 'down'}.`)
-                  }}
-                  onDelete={() => requestDelete(beat.id)}
-                />
-              )
-            })}
-          </Box>
-        )}
-      </Box>
-
-      {/* ---- live status + keyboard legend ---- */}
-      <Box
-        sx={{
-          flex: 'none',
-          borderTop: `1px solid ${runSheetTokens.hairline}`,
-          px: 1.25,
-          py: 0.75,
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 0.5,
-        }}
-      >
-        <Typography
           role="status"
           aria-live="polite"
-          aria-atomic="true"
-          data-testid="run-sheet-status"
-          sx={{ fontSize: 12, minHeight: '1.4em', fontWeight: 600 }}
-        >
-          {status}
-        </Typography>
-        <Box
-          component="div"
-          role="group"
-          aria-label="Keyboard"
-          data-testid="run-sheet-keyboard-help"
+          data-testid="run-sheet-notice"
           sx={{
-            display: 'flex',
+            display: notice ? 'flex' : 'none',
             alignItems: 'center',
-            gap: 1.25,
-            flexWrap: 'wrap',
-            fontSize: 11.5,
-            color: runSheetTokens.mutedText,
+            gap: 1,
+            px: 1.25,
+            py: 0.75,
+            fontSize: 12.5,
+            border: `1px solid ${chrome.blue}`,
+            borderRadius: '6px',
           }}
         >
-          <Box component="span" sx={{ display: 'inline-flex', gap: 0.75, alignItems: 'center', fontWeight: 800 }}>
-            <FontAwesomeIcon icon={faKeyboard} aria-hidden="true" />
-            Keyboard
-          </Box>
-          {KEYBOARD_HELP.map(entry => (
-            <Box key={entry.keys} component="span" sx={{ display: 'inline-flex', gap: 0.5, alignItems: 'center' }}>
-              <Box component="kbd" sx={KBD_SX}>{entry.keys}</Box>
-              {entry.action}
-            </Box>
-          ))}
+          <FontAwesomeIcon icon={faCircleInfo} color={chrome.blue} aria-hidden="true" />
+          <Box component="span" sx={{ flex: 1, minWidth: 0 }}>{notice}</Box>
+          <RunSheetButton
+            icon={faXmark}
+            label="Dismiss"
+            ariaLabel="Dismiss message"
+            testId="notice-dismiss"
+            onClick={() => setNotice(null)}
+          />
         </Box>
+        {helpOpen ? <KeyboardHelp id={helpId} /> : null}
       </Box>
 
-      {/* ---- dialogs ---- */}
-      {editor !== undefined && (
-        <BeatEditor
-          data={snapshot}
-          {...(editingBeat !== undefined ? { beat: editingBeat } : {})}
-          personas={personas}
-          {...(library !== undefined ? { library } : {})}
-          onSave={saveBeat}
-          onCancel={() => setEditor(undefined)}
-        />
-      )}
+      {/* Work area: the editor replaces the list while it is open (inline, never a modal) */}
+      <Box sx={{ flex: 1, minHeight: 0, overflowY: 'auto', p: 1.25 }}>
+        {editor && editorMode ? (
+          <InjectItemEditor
+            key={`${editor.key}-${editorMode}`}
+            mode={editorMode}
+            item={editorSnapshot}
+            liveItem={liveEditing}
+            items={items}
+            assignees={assignees}
+            assigneesUnavailable={rosterUnavailable}
+            me={me}
+            personas={personas}
+            personasUnavailable={personasError !== undefined}
+            busy={editorBusy}
+            onSubmit={submitEditor}
+            onCancel={() => setEditor(null)}
+          />
+        ) : queue.isLoading ? (
+          <Box data-testid="run-sheet-loading" sx={{ p: 2, fontSize: 12, color: chrome.inkMuted }}>
+            Loading the run sheet…
+          </Box>
+        ) : total === 0 && !queue.isError && queue.droppedItemIds.length === 0 ? (
+          <Box data-testid="run-sheet-empty" sx={{ p: 2, fontSize: 12.5, color: chrome.inkMuted }}>
+            The run sheet is empty. Add a scripted post to get started.
+          </Box>
+        ) : identityPending ? (
+          <Box data-testid="run-sheet-identity-loading" sx={{ p: 2, fontSize: 12.5, color: chrome.inkMuted }}>
+            Loading your assignments…
+          </Box>
+        ) : filteredOut ? (
+          <Box data-testid="run-sheet-filtered-empty" sx={{ p: 2, fontSize: 12.5, color: chrome.inkMuted }}>
+            <span>Nothing matches this view. </span>
+            <RunSheetButton
+              icon={faRotateRight}
+              label="Show everything"
+              ariaLabel="Show everything: all items, all statuses"
+              testId="show-all"
+              onClick={() => setFilters({ scope: 'all', status: 'all' })}
+            />
+          </Box>
+        ) : (
+          <Box
+            component="ul"
+            role="list"
+            aria-label="Run sheet items"
+            sx={{ m: 0, p: 0, display: 'flex', flexDirection: 'column', gap: 1.25 }}
+          >
+            {visible.map((item, index) => (
+              <RunSheetRow
+                key={item.id}
+                item={item}
+                selected={selected?.id === item.id}
+                tabStop={selected ? selected.id === item.id : index === 0}
+                busy={queue.busyIds.has(item.id)}
+                fireDisabledReason={fireDisabledReason}
+                fireReasonId={reasonId}
+                isMine={me !== undefined && item.assigneeId === me}
+                personaOf={personaOf}
+                nameOf={staffName}
+                timeZone={timeZone}
+                canMoveUp={index > 0}
+                canMoveDown={index < visible.length - 1}
+                confirmingDelete={confirmDeleteId === item.id}
+                rowNote={rowNotes[item.id]}
+                onDismissRowNote={() => setRowNotes(notes => omitKey(notes, item.id))}
+                onSelect={() => setSelectedId(item.id)}
+                onFire={() => fireItem(item)}
+                onHold={() => toggleHold(item)}
+                onRelease={() => toggleHold(item)}
+                onSkip={() => toggleSkip(item)}
+                onUnskip={() => toggleSkip(item)}
+                onRetry={() => retryItem(item)}
+                onOpen={() => openEditor(item)}
+                onRequestDelete={() => setConfirmDeleteId(item.id)}
+                onConfirmDelete={() => confirmDelete(item)}
+                onCancelDelete={() => setConfirmDeleteId(null)}
+                onMoveUp={() => moveItem(item, -1)}
+                onMoveDown={() => moveItem(item, 1)}
+                rowRef={element => {
+                  if (element) rowRefs.current.set(item.id, element)
+                  else rowRefs.current.delete(item.id)
+                }}
+              />
+            ))}
+          </Box>
+        )}
+      </Box>
 
-      {confirm?.kind === 'delete' && (
-        <ConfirmDialog
-          title="Delete this beat?"
-          confirmLabel="Delete beat"
-          destructive
-          onConfirm={() => void confirmAction()}
-          onCancel={() => setConfirm(undefined)}
-        >
-          "{confirmBeat?.title}" will be removed from the sheet.
-          {confirmBeat !== undefined && runtimeOf(snapshot, confirmBeat.id).status === 'fired'
-            ? ' Its live post stays in the world (use takedown to remove it); beats that reply to it will reply to that post instead.'
-            : ' This cannot be undone.'}
-        </ConfirmDialog>
-      )}
-
-      {confirm?.kind === 'fire-again' && (
-        <ConfirmDialog
-          title="Fire again?"
-          confirmLabel="Fire again"
-          onConfirm={() => void confirmAction()}
-          onCancel={() => setConfirm(undefined)}
-        >
-          The server did not confirm whether "{confirmBeat?.title}" went out, so it may already be
-          live. Check the Live world first. If the post is there, cancel and skip this beat instead.
-          Fire again only if it is not: a second post cannot be un-sent.
-        </ConfirmDialog>
-      )}
-
-      {confirm?.kind === 'import' && (
-        <ConfirmDialog
-          title="Replace the current run sheet?"
-          confirmLabel="Replace sheet"
-          destructive
-          onConfirm={() => void confirmAction()}
-          onCancel={() => setConfirm(undefined)}
-        >
-          Importing "{confirm.sheet.name}" ({confirm.sheet.beats.length}{' '}
-          {confirm.sheet.beats.length === 1 ? 'beat' : 'beats'}) replaces the {beats.length}{' '}
-          {beats.length === 1 ? 'beat' : 'beats'} in this sheet. Every imported beat starts as
-          pending, so the current fired / skipped status is lost. Posts that are already live are
-          not affected.
-        </ConfirmDialog>
-      )}
-
-      {confirm?.kind === 'start-fresh' && (
-        <ConfirmDialog
-          title="Start a new sheet?"
-          confirmLabel="Start new sheet"
-          destructive
-          onConfirm={() => void confirmAction()}
-          onCancel={() => setConfirm(undefined)}
-        >
-          The saved sheet for this exercise cannot be read. A new empty sheet replaces it; a copy of
-          the unreadable data is kept under a backup key in this browser.
-        </ConfirmDialog>
-      )}
+      {/* Polite live region: status changes (this console's and everyone else's) */}
+      <Box
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        data-testid="run-sheet-announcer"
+        sx={{
+          px: 1.75,
+          py: 0.75,
+          borderTop: `1px solid ${chrome.line}`,
+          fontSize: 11,
+          color: chrome.inkMuted,
+          minHeight: 24,
+          flex: 'none',
+        }}
+      >
+        {/* Keyed by the event id: a NEW node per announcement, so repeated words speak again. */}
+        <span key={announcement.id}>{announcement.text}</span>
+      </Box>
     </Box>
   )
 }

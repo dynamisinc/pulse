@@ -265,7 +265,7 @@ public sealed class CreatePostRequest   // existing members unchanged; Media cha
 {
     public IReadOnlyList<CreatePostMediaRequest>? Media { get; init; }   // <=4 images OR exactly 1 video; never mixed
     public string? ParentPostId { get; init; }                           // reply; resolved by IReplyParentResolver
-    public EngagementBaselineRequest? EngagementBaseline { get; init; }  // STAFF controller-as-persona only; ignored for participants
+    public EngagementBaselineRequest? EngagementBaseline { get; init; }  // STAFF controller-as-persona, or in-process inject (IQ-10, #458); ignored for participants
 }
 ```
 
@@ -411,6 +411,7 @@ Participant writes (`/api/media`, reactions) are mapped inside `MapGroup(string.
 | Upload | none | structured log only (account, kind, bytes) |
 | Takedown / persona edit | **console** (C5, PE-FE) via `buildAndEmit` | `steering_action`, `channel: system`, `actor { kind: system, actingHumanId, role }`, `target { entityType: post\|persona, entityId }`, `payload { action: "takedown"\|"persona_edit", category? , fields? }` |
 | Run-sheet fire | none extra | the resulting post's own `post`/`reply` event |
+| Inject-queue actions (amended 2026-10-08) | server (inject-queue 06) | `inject_action` per create/edit/delete/reorder/hold/release/skip/unskip/fire/retry; fired posts carry `origin: inject` + `injectId`. See inject-queue implementation.md § Demo slice (IQ-8) |
 
 In **live** mode the frontend must not also emit the events the server emits (no double count). In **mock** mode
 the frontend keeps emitting (`USE_MOCK_DATA`). Scenario time for server-emitted events:
@@ -419,6 +420,11 @@ the **DP-18** order: the running clock as-is, else the stored `exercise.CurrentS
 fallback); the wall clock goes only into `wallClockTime`/`emittedAt`.
 
 ### 1.9 Run-sheet file schema (C3 import/export) — `pulse.runsheet.v1`
+
+> **Superseded 2026-10-08; historical.** C3 was replaced by the server-side inject queue (inject-queue 06 + 07), and
+> its code was removed with the Wave 3 merge (#463). Nothing reads or writes this file format any more. S1 creates the
+> pack's run-sheet items through `POST /api/injects`; the pack's authoring shape is in §1.10 (`runSheet.items`) and
+> `docs/demo/pack/schema/pack.schema.json`.
 
 Definitions only. Status (`pending|fired|skipped|failed`, `firedPostId`) lives in browser storage, never in the
 file.
@@ -451,7 +457,8 @@ violation, never partially applies. `import(export(x))` deep-equals `x`.
 ### 1.10 Seed-pack schema (S1/S2) — `docs/demo/pack/pack.json`, `pulse.demopack.v1`
 
 Media files live next to it under `docs/demo/pack/media/**`. Media references are pack-local `key`s; S1 resolves
-them to uploaded `MediaAsset` ids and rewrites them when it exports the run sheet.
+them to uploaded `MediaAsset` ids, and rewrites the run sheet's references the same way when it loads it through
+`POST /api/injects`.
 
 ```jsonc
 {
@@ -467,7 +474,10 @@ them to uploaded `MediaAsset` ids and rewrites them when it exports the run shee
               "media": [{ "ref": "news-clip", "alt": "…" }],         // alt may override the media-level alt
               "replyTo": "p00",                                       // post key; parent must appear earlier in the array
               "baseline": { "like": 290, "repost": 150, "reply": 64 } }],
-  "runSheet": { "name": "…", "beats": [ /* RunSheetBeat shape, with media[].ref (pack key) and replyTo.postKey (a pack post key) instead of ids */ ] }
+  "runSheet": { "items": [ /* InjectItemWrite shape (inject-queue implementation.md § Demo slice) plus a pack `key`;
+                            `assignee` ("me" or a staff display name) replaces assigneeId; posts name `persona` by
+                            handle, media[].ref (pack key), replyTo = {postKey} | {sequence} | {item, sequence};
+                            S1 rewrites them to ids and POSTs each to /api/injects */ ] }
 }
 ```
 
@@ -543,7 +553,7 @@ import.
 | 21 | PE | BE: merge-patch endpoint. FE: dialog + button. | `Features/Social/PersonaAdmin/*`; `controller/personaEdit/*` | `PersonaEditButton` |
 | 22 | C5 | Takedown action + feed removal. | `controller/liveWorld/TakedownAction.tsx`, `controller/services/takedownService.ts`, `social/services/{realtimeFeed,removedPosts}.ts`, `social/pages/Feed.tsx` | — |
 | 23 | C6 | Preview shows the real channel; StartEx/EndEx control (Could). | `staffShell/components/PreviewAsParticipant.tsx`, `controller/lifecycle/*` | — |
-| 24 | S1 | PowerShell seeder over public APIs + run-sheet export. | `scripts/uat/Seed-DemoContent.ps1` | `docs/demo/pack/runsheet.demo.json` |
+| 24 | S1 | PowerShell seeder over public APIs + run-sheet load (`POST /api/injects`). | `scripts/uat/Seed-DemoContent.ps1` | inject items in the server queue |
 | 25 | S2 | Human + Claude pack authoring. | `docs/demo/pack/**` | `pack.json` |
 
 ## 3. Reuse map
@@ -657,8 +667,8 @@ Builder branch pattern: `build/demo-polish/<ID>-<slug>` off the wave umbrella (p
 | F7 | frontend | frontend-agent | FE `features/social/notifications/**`; minimal edits to F1's `layout/NavRail.tsx` and `layout/SocialRoutes.tsx` (only after F1 merged) | F1 | C-track | 3 (Could) | M |
 | C1 | frontend | frontend-agent | FE `features/controller/components/PersonaComposer.{tsx,module.css}`, `hooks/useComposeAsPersona.ts`, `services/composeService.ts`, `controller/media/**` (new) | F0, BM (live), B2 (live) | C2, C3*, C4, PE-FE | 3 | M |
 | C2 | frontend | frontend-agent | FE `features/controller/liveWorld/**` (new; not `TakedownAction.tsx`) | F0 | C1, C3, C4, PE-FE | 3 | M |
-| C3 | frontend | frontend-agent | FE `features/controller/runSheet/**` (new) | F0; **C1's `MediaLibraryPicker` (merge C1 first, or code against the frozen props in §1.11)** | C1*, C2, C4, PE-FE | 3 | M |
-| C4 | frontend | frontend-agent | FE `features/controller/components/{ControllerConsole,PersonaContextPanel}.tsx`, `components/steering/PausePill.tsx`, `console/CommandPalette.tsx`, `features/staffShell/staffHeaderMocks.ts`, `features/staffShell/components/StaffHeader.tsx`, tests | — | C1–C3, PE-FE | 3 | S |
+| ~~C3~~ → **inject-queue 07** | frontend | frontend-agent | FE `features/controller/runSheet/**` (new), `components/steering/PausePill.tsx` (injects option only) | inject-queue 06 contract; C1's `MediaLibraryPicker` | C1*, C2, C4, PE-FE | 3 | M |
+| C4 | frontend | frontend-agent | FE `features/controller/components/{ControllerConsole,PersonaContextPanel}.tsx`, `components/steering/PausePill.tsx` (label only; **not** the injects option, which inject-queue 07 owns), `console/CommandPalette.tsx`, `features/staffShell/staffHeaderMocks.ts`, `features/staffShell/components/StaffHeader.tsx`, tests | — | C1–C3, PE-FE | 3 | S |
 | PE-FE | frontend | frontend-agent | FE `features/controller/personaEdit/**` (new) | F0, PE-BE | C1–C4 | 3 | S–M |
 | C5 | frontend | frontend-agent | FE `controller/liveWorld/TakedownAction.tsx` (new), `controller/services/takedownService.ts` (new), `social/services/{realtimeFeed,removedPosts}.ts`, `social/pages/Feed.tsx` | B6, C2, F2, F4 | — | 3 (after) | S |
 | C6 | frontend | frontend-agent | FE `features/staffShell/components/{PreviewAsParticipant,PortalStub}.tsx` (+tests), `controller/lifecycle/**` (new) | F1 | — | 3 (Could) | S |

@@ -1,10 +1,10 @@
 /**
  * features/controller/media — public barrel (demo-polish C1, story 17).
  *
- * The STAFF-world media attach pieces of the controller console. C3's run sheet
- * imports `MediaLibraryPicker` from here (or by path) - its props are the FROZEN
- * contract of implementation.md section 1.11. Everything else is the composer's own
- * machinery, exported so C3 can reuse the same limits and the id -> asset lookup.
+ * The STAFF-world media attach pieces of the controller console. `MediaLibraryPicker`'s
+ * props are the FROZEN contract of implementation.md section 1.11 (PE-FE's persona edit
+ * uses it too). Everything else is the composer's own machinery, exported so another
+ * staff surface can reuse the same limits and the id -> asset lookup.
  */
 
 export { MediaLibraryPicker } from './MediaLibraryPicker'

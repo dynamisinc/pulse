@@ -145,6 +145,17 @@ function isCreatedPostView(data: unknown): data is CreatedPostView {
   )
 }
 
+/** Per-request options for {@link publishPost}. */
+export interface PublishPostOptions {
+  /**
+   * End THIS request after this many milliseconds (axios `timeout`): it rejects with no response,
+   * which a caller that handles "may already be live" treats as unconfirmed. Absent = the shared
+   * client's default (none). Used by the controller composer, whose in-flight lock would otherwise
+   * outlive a hung request.
+   */
+  readonly timeoutMs?: number
+}
+
 /**
  * POSTs a new post to the live backend (`POST /api/posts`) and resolves with
  * the parsed 201 view (participant or staff shape). Rejects on a non-2xx
@@ -152,8 +163,17 @@ function isCreatedPostView(data: unknown): data is CreatedPostView {
  * `exerciseId` (COR-001) and no frontend telemetry (the backend is the sole
  * XC-004 emitter for this request) — see the module header.
  */
-export async function publishPost(input: CreatePostInput): Promise<CreatedPostView> {
-  const response = await api.post<unknown>('/posts', toRequestBody(input))
+export async function publishPost(
+  input: CreatePostInput,
+  options: PublishPostOptions = {},
+): Promise<CreatedPostView> {
+  // The shared client sets NO timeout, and it must stay that way for everything else: a caller
+  // that needs its publish to end on a deadline asks for it here, for this one request. The
+  // two-argument call is kept when no timeout is asked for, so every other caller is unchanged.
+  const body = toRequestBody(input)
+  const response = options.timeoutMs !== undefined
+    ? await api.post<unknown>('/posts', body, { timeout: options.timeoutMs })
+    : await api.post<unknown>('/posts', body)
   if (!isCreatedPostView(response.data)) {
     throw new Error('publishPost: the server returned a malformed post')
   }

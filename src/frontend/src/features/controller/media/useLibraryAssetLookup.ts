@@ -7,7 +7,7 @@
  * WHY IT EXISTS. The frozen `MediaLibraryPicker` contract (implementation.md
  * section 1.11) reports a selection as bare ids - `onChange(ids)` - so a consumer
  * that needs the asset behind an id (the composer's tray rows and preview need the
- * thumbnail, poster, kind and file name; C3's run sheet needs the same) has to look
+ * thumbnail, poster, kind and file name) has to look
  * it up. The picker's own `useMediaLibrary()` query already holds every asset it has
  * shown, so the lookup reads THAT cache instead of making a second request:
  *

@@ -75,16 +75,20 @@
  *                     hook documents exactly when a target is dropped (composer (x), reply
  *                     sent, dock closed via `onDockClose`, persona or exercise changed,
  *                     palette dismissed without a pick).
- *   runSheetSlot   -> C3's `RunSheetPanel` (prop-less; reads its own providers).
+ *   runSheetSlot   -> inject-queue 07's `RunSheetPanel` (#453; it REPLACED demo-polish C3's
+ *                     browser-only run sheet, #438): the server-side scripted-posts queue,
+ *                     prop-less, beside `RunSheetMockPauseBridge` (mock mode only) so PAUSE
+ *                     INJECTS / FREEZE set through PausePill reach the mock queue.
+ *                     `ControllerConsoleRoute.test.tsx` proves the REAL route mounts it.
  *
  * STABILITY. The console re-renders constantly (the review queue's 1 s scenario-clock tick,
  * every swamped-mode change, each toolstrip toggle) and calls both slot functions each time.
  * Two things keep that cheap: every slot function and callback here has a stable identity
  * (`useCallback` / `useMemo` / module level), and each slot's ROOT is `memo`ized with stable
- * props - `RunSheetPanel` is prop-less and exported memoized, and `LiveWorldSlot` (below) takes
- * only `ctx`, `requestReply` and `isRowRemoved` and owns the one `onReplyAs` callback. A
- * console re-render therefore reconciles two memo boundaries instead of re-rendering up to 200
- * beats and every live-world row. (`isRowRemoved` is deliberately a NEW identity per takedown:
+ * props - `RunSheetSlot` (below) takes no props, and `LiveWorldSlot` takes only `ctx`,
+ * `requestReply` and `isRowRemoved` and owns the one `onReplyAs` callback. A console re-render
+ * therefore reconciles two memo boundaries instead of re-rendering every run-sheet row and
+ * every live-world row. (`isRowRemoved` is deliberately a NEW identity per takedown:
  * the column's memoized rows must re-render then.)
  *
  * C5's takedown rides the live-world column: `renderRowActions={renderTakedown}` (module
@@ -120,17 +124,34 @@ import { LiveWorldColumn, type LiveWorldPost } from './liveWorld'
 import { TakedownAction } from './liveWorld/TakedownAction'
 import { useIsRowRemoved } from './hooks/useRemovedPostIds'
 import { PersonaEditButton } from './personaEdit'
-import { RunSheetPanel } from './runSheet/RunSheetPanel'
 import { PersonaPicker } from './components/PersonaPicker'
 import { PersonaComposer } from './components/PersonaComposer'
 import { PersonaContextPanel } from './components/PersonaContextPanel'
+import { RunSheetMockPauseBridge, RunSheetPanel } from './runSheet'
 
 /**
- * The RUN SHEET slot (C3): the panel is prop-less - it reads the exercise scope, identity,
- * personas and media library itself - and exported `memo`ized, so the slot is a module-level
- * function with a trivially stable identity and a console re-render never re-renders the sheet.
+ * The RUN SHEET slot's root (inject-queue story 07, #453, which replaced demo-polish C3's
+ * browser-only run sheet): the server-side scripted-posts queue, mounted into
+ * `ControllerConsole`'s `runSheetSlot` - the same render-prop seam C4 defined for the live
+ * world. `RunSheetPanel` is self-contained (no props; it reads the exercise scope, the
+ * personas and the queue itself), so the slot context is not needed.
+ * `RunSheetMockPauseBridge` is mock-mode only (it renders nothing live): it hands the pause
+ * tier set through PausePill to the mock queue so PAUSE INJECTS / FREEZE work under
+ * `npm run dev`.
+ *
+ * `memo`ized with no props, and `renderRunSheet` is module level, so the console's 1 s
+ * review-queue tick reconciles this one boundary instead of re-rendering every row.
  */
-const renderRunSheet = () => <RunSheetPanel />
+const RunSheetSlot = memo(function RunSheetSlot() {
+  return (
+    <>
+      <RunSheetPanel />
+      <RunSheetMockPauseBridge />
+    </>
+  )
+})
+
+const renderRunSheet = () => <RunSheetSlot />
 
 /**
  * C5's per-row "Take down" control for the live-world column. MODULE-LEVEL so its

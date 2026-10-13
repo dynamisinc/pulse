@@ -264,10 +264,10 @@ function serverMessageOf(data: unknown): string | undefined {
  *  - {@link ComposeUnconfirmedError} -> 'unconfirmed';
  *  - an axios failure with a 2xx response, a 408, ANY 5xx (500/502/503/504 ...), or NO
  *    response at all (a connection dropped after the request was sent is indistinguishable
- *    from one that never connected) -> 'unconfirmed'. This is the SAME rule as the run
- *    sheet's (`runSheet/runSheetFire.ts`): the server can commit a post and still answer
- *    5xx (the post-commit broadcast, a lost commit acknowledgement, a gateway that
- *    recycles mid-request), so a 5xx never proves the post was not created;
+ *    from one that never connected) -> 'unconfirmed' (#455: a post create is not
+ *    idempotent). The server can commit a post and still answer 5xx (the post-commit
+ *    broadcast, a lost commit acknowledgement, a gateway that recycles mid-request), so a
+ *    5xx never proves the post was not created;
  *  - 429 -> 'failed' (rate limited BEFORE any work: retry is reasonable);
  *  - any other 4xx -> 'rejected', with the SERVER's message.
  * A plain `Error` from the MOCK pipeline has its engineering prefix (`createPost: `)
@@ -432,12 +432,24 @@ function toLiveInput(input: ComposeAsPersonaInput): CreatePostInput {
 }
 
 /**
+ * How long a live publish may stay out before the request is abandoned: just past the 230 s the
+ * gateway can hold a request, so the gateway's own answer (a 504) still wins when it comes.
+ */
+export const PUBLISH_TIMEOUT_MS = 240_000
+
+/**
  * LIVE adapter. `POST /api/posts` as the active persona and resolve with the
  * console's `Post` built from the 201 body. REJECTS (swallowing nothing) with:
  *  - {@link ComposeRejectedError} for a baseline the server would 400 (no request sent);
  *  - the axios error for any non-2xx (the composer shows the server's message);
  *  - {@link ComposeUnconfirmedError} for a 2xx whose body is not a post.
  * No frontend telemetry: the server emits the one authoritative `post` / `reply`.
+ *
+ * THE REQUEST ENDS ON A DEADLINE ({@link PUBLISH_TIMEOUT_MS}, this request only - the shared axios
+ * client keeps no timeout). The composer's in-flight lock is session-wide, so a POST that hung
+ * forever would lock the persona until sign-out. Axios rejects at the deadline with no response
+ * (`ECONNABORTED`), which {@link classifyPublishFailure} already calls `unconfirmed` - the post
+ * may have been created - so the controller is asked "did it go out?" instead of being stuck.
  */
 export async function publishAsPersonaLive(input: ComposeAsPersonaInput): Promise<Post> {
   const baselineError = validateEngagementBaseline(input.engagementBaseline)
@@ -445,7 +457,7 @@ export async function publishAsPersonaLive(input: ComposeAsPersonaInput): Promis
 
   let created: CreatedPostView
   try {
-    created = await publishPost(toLiveInput(input))
+    created = await publishPost(toLiveInput(input), { timeoutMs: PUBLISH_TIMEOUT_MS })
   } catch (failure) {
     // `publishPost` throws a plain Error for a 2xx body it could not read (the post
     // may exist); every other failure is an axios error and is passed through as is.
