@@ -9,9 +9,12 @@
  *  - Opening the tool renders a 330px flyout, absolutely positioned flush
  *    against the 56px toolstrip, listing rows (name/role/status chip/quick
  *    action) — AC1.
- *  - No dead footer link: the full participant-admin surface is not built, so
- *    nothing here is a raw `href` to an unregistered path (staff-navigation/04,
- *    COR-073 AC3; NFR-001).
+ *  - The footer link to the full participant-admin surface (staff-navigation/04,
+ *    COR-073 AC3; NFR-001; easy-login W2-4): never a dead control. It exists only when
+ *    the staff route registry offers the current role that surface (planner and
+ *    controller), reads its path FROM the registry entry, navigates client-side (no
+ *    reload), and is absent for everyone else and for a bare mount. The same against
+ *    the REAL registry is in `ParticipantAdminFlyout.registry.test.tsx`.
  *  - Never a `createPortal`/`document.body` escape (AC1).
  *  - The status chip is TEXT + ICON for every status, never color-only
  *    (NFR-001).
@@ -32,14 +35,22 @@
  * deterministically. The sibling `ParticipantAdminFlyout.default.test.tsx`
  * covers the REAL, un-mocked seams (WAVE0-REVIEW precedent 19).
  */
-import { render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { MemoryRouter, useLocation } from 'react-router-dom'
+import { faUsers } from '@fortawesome/free-solid-svg-icons'
 import { ThemeProvider } from '@mui/material/styles'
 import { cobraTheme } from '@/theme/cobraTheme'
 import { ParticipantAdminFlyout, PARTICIPANT_ADMIN_TOOL_ID } from './ParticipantAdminFlyout'
 import { Toolstrip } from './Toolstrip'
 import { ToolstripProvider } from '../toolRegistry'
+import { StaffNavigationProvider } from '@/features/app-shell'
+import type {
+  StaffRouteEntry,
+  StaffRouteRegistry,
+  StaffSurfaceRole,
+} from '@/features/app-shell'
 import { useExerciseContext } from '@/core/exerciseContext'
 import type { ExerciseScope } from '@/core/exerciseContext'
 import { useAdminAuthorization, useParticipantAdminRoster } from '../participantAdminMocks'
@@ -203,26 +214,21 @@ describe('ParticipantAdminFlyout — flyout content, closed by default (AC1)', (
 
   })
 
-  // staff-navigation/04 (COR-073), AC3 + NFR-001. This test previously PINNED
-  // the defect: it asserted the footer control carried href="/staff/participant-
-  // admin" — a raw anchor to a path no registry entry declares, i.e. a full page
-  // reload out of the SPA that lands in the catch-all and bounces the staff
-  // member to their role's default surface. The full participant-admin surface
-  // (identity-auth-roles/08) is Not Started, so the honest degrade is ABSENCE —
-  // the same rule this component already applies to role-gated quick actions.
-  // Re-pointed to assert the property that actually matters and cannot be
-  // satisfied by an unbuilt link: NOTHING in this flyout navigates by raw href.
-  it('renders no dead footer link — no raw href to an unbuilt surface (AC3, NFR-001)', async () => {
+  // staff-navigation/04 (COR-073), AC3 + NFR-001. This control once PINNED a defect: a raw
+  // `href="/staff/participant-admin"` to a path no registry entry declared, i.e. a full page
+  // reload out of the SPA that landed in the catch-all and bounced the staff member to their
+  // default surface. The footer was removed while the surface did not exist; it is back now
+  // (easy-login W2-4) and the describe below pins its replacement. What must stay true with no
+  // registry in reach is the original property: a link we cannot resolve is not offered.
+  it('offers no footer link, and no raw anchor, when there is no navigation context (AC3, NFR-001)', async () => {
     const user = userEvent.setup()
     renderFlyout()
 
     await openFlyout(user)
 
     const flyout = screen.getByTestId('participant-admin-flyout')
-    expect(within(flyout).queryByTestId('participant-admin-footer-link')).not.toBeInTheDocument()
+    expect(within(flyout).queryByTestId('participant-admin-full-link')).not.toBeInTheDocument()
     expect(within(flyout).queryByText(/open full participant admin/i)).not.toBeInTheDocument()
-    // No raw anchor anywhere in the flyout: a full-page reload out of the SPA
-    // must not be reachable from a staff tool, whatever it is labelled.
     expect(flyout.querySelectorAll('a[href]')).toHaveLength(0)
     // Every remaining focusable control is a real, live quick action — nothing
     // is tabbable-but-inert (NFR-001).
@@ -253,6 +259,156 @@ describe('ParticipantAdminFlyout — flyout content, closed by default (AC1)', (
 
     await openFlyout(user)
     expect(screen.getByTestId('participant-admin-flyout')).toBeInTheDocument()
+  })
+})
+
+describe('ParticipantAdminFlyout — the footer link to the full surface (W2-4)', () => {
+  const FULL_ENTRY: StaffRouteEntry = {
+    id: 'participant-admin',
+    path: '/staff/participant-admin',
+    label: 'Participants',
+    icon: faUsers,
+    element: <div />,
+    allowedRoles: ['planner', 'controller'],
+    group: 'administer',
+  }
+  const OTHER_ENTRY: StaffRouteEntry = {
+    id: 'evaluator-dashboard',
+    path: '/staff/evaluate',
+    label: 'Evaluator Dashboard',
+    icon: faUsers,
+    element: <div />,
+    allowedRoles: ['evaluator'],
+    group: 'evaluate',
+  }
+
+  function LocationProbe() {
+    return <div data-testid="pathname">{useLocation().pathname}</div>
+  }
+
+  /** The flyout under the router and the navigation context `StaffRouteTree` publishes. */
+  function renderWithNavigation(
+    role: StaffSurfaceRole,
+    registry: StaffRouteRegistry = [FULL_ENTRY, OTHER_ENTRY],
+    at = '/staff/console',
+  ) {
+    return render(
+      <ThemeProvider theme={cobraTheme}>
+        <MemoryRouter initialEntries={[at]}>
+          <LocationProbe />
+          <StaffNavigationProvider registry={registry} role={role}>
+            <ToolstripProvider>
+              <ParticipantAdminFlyout />
+              <Toolstrip />
+            </ToolstripProvider>
+          </StaffNavigationProvider>
+        </MemoryRouter>
+      </ThemeProvider>,
+    )
+  }
+
+  it.each(['planner', 'controller'] as const)('shows a %s the link, as a real anchor to the registry path', async role => {
+    const user = userEvent.setup()
+    renderWithNavigation(role)
+    await openFlyout(user)
+
+    const link = within(screen.getByTestId('participant-admin-flyout'))
+      .getByRole('link', { name: 'Open full participant admin' })
+    expect(link).toHaveAttribute('href', '/staff/participant-admin')
+    expect(link.querySelector('svg')).toHaveAttribute('aria-hidden', 'true')
+    expect(screen.getByRole('navigation', { name: 'Full participant admin' })).toContainElement(link)
+  })
+
+  it.each(['evaluator', 'orgAdmin'] as const)('hides it from a %s: the footer is ABSENT, not disabled', async role => {
+    const user = userEvent.setup()
+    renderWithNavigation(role)
+    await openFlyout(user)
+
+    const flyout = screen.getByTestId('participant-admin-flyout')
+    expect(within(flyout).queryByRole('link')).not.toBeInTheDocument()
+    expect(within(flyout).queryByTestId('participant-admin-footer')).not.toBeInTheDocument()
+    expect(within(flyout).queryByText(/open full participant admin/i)).not.toBeInTheDocument()
+  })
+
+  it('reads the path from the registry entry, never a hardcoded string', async () => {
+    const user = userEvent.setup()
+    renderWithNavigation('controller', [{ ...FULL_ENTRY, path: '/staff/participants-renamed' }])
+    await openFlyout(user)
+
+    expect(screen.getByRole('link', { name: 'Open full participant admin' }))
+      .toHaveAttribute('href', '/staff/participants-renamed')
+  })
+
+  it('offers nothing when the registry has no such entry', async () => {
+    const user = userEvent.setup()
+    renderWithNavigation('controller', [OTHER_ENTRY])
+    await openFlyout(user)
+
+    expect(screen.queryByRole('link')).not.toBeInTheDocument()
+  })
+
+  /**
+   * Records, at the DOCUMENT (after React's root handler has run), whether the router
+   * cancelled the click's default action, then cancels it so jsdom does not try to navigate.
+   */
+  function watchClickDefault(): { prevented: boolean[]; stop: () => void } {
+    const prevented: boolean[] = []
+    const onClick = (event: MouseEvent) => {
+      prevented.push(event.defaultPrevented)
+      event.preventDefault()
+    }
+    document.addEventListener('click', onClick)
+    return { prevented, stop: () => document.removeEventListener('click', onClick) }
+  }
+
+  it('navigates CLIENT-SIDE on a plain click: the router moves, the page does not reload', async () => {
+    const user = userEvent.setup()
+    renderWithNavigation('planner')
+    await openFlyout(user)
+    const link = screen.getByRole('link', { name: 'Open full participant admin' })
+    const watch = watchClickDefault()
+
+    await user.click(link)
+    watch.stop()
+
+    expect(screen.getByTestId('pathname')).toHaveTextContent('/staff/participant-admin')
+    // The router cancelled the browser's own navigation (a raw href would have reloaded the page).
+    expect(watch.prevented).toEqual([true])
+  })
+
+  it('leaves a modified click (open in a new tab) to the browser', async () => {
+    const user = userEvent.setup()
+    renderWithNavigation('controller')
+    await openFlyout(user)
+    const link = screen.getByRole('link', { name: 'Open full participant admin' })
+    const watch = watchClickDefault()
+
+    fireEvent.click(link, { ctrlKey: true })
+    watch.stop()
+
+    // Not intercepted: the router did not cancel it, so the browser opens the href in a new tab.
+    expect(watch.prevented).toEqual([false])
+    expect(screen.getByTestId('pathname')).toHaveTextContent('/staff/console')
+  })
+
+  it('is keyboard-operable: reachable by Tab and activated with Enter', async () => {
+    const user = userEvent.setup()
+    renderWithNavigation('controller')
+    await openFlyout(user)
+    const link = screen.getByRole('link', { name: 'Open full participant admin' })
+
+    await tabUntilFocused(user, link)
+    await user.keyboard('{Enter}')
+
+    expect(screen.getByTestId('pathname')).toHaveTextContent('/staff/participant-admin')
+  })
+
+  it('is absent when the staff member is already ON that page (it would go nowhere)', async () => {
+    const user = userEvent.setup()
+    renderWithNavigation('controller', [FULL_ENTRY], '/staff/participant-admin')
+    await openFlyout(user)
+
+    expect(screen.queryByRole('link')).not.toBeInTheDocument()
   })
 })
 
