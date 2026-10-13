@@ -40,6 +40,17 @@ public static class EasyLoginFoundationExtensions
     {
         ArgumentNullException.ThrowIfNull(services);
 
+        // Idempotent (story 04 Gate-1 S-4): AddLinkCards() and other slices call this too, and every TryAdd below is
+        // already safe to repeat, but the options Configure action is not. Without the marker each extra call appends
+        // another copy-from-configuration action, which would silently overwrite a Configure<EasyLoginOptions>
+        // override registered between two calls.
+        if (services.Any(descriptor => descriptor.ServiceType == typeof(EasyLoginFoundationMarker)))
+        {
+            return services;
+        }
+
+        services.AddSingleton<EasyLoginFoundationMarker>();
+
         // Clamp-to-default, never fail-fast (review W-2): each key is read with an invariant TryParse rather than the
         // binder (which throws on non-numeric text), a bad value falls back to its default, and the startup check logs the
         // refused KEY once. The rate-limit policies of stories 03 and 05 read these same clamped values.
@@ -68,4 +79,12 @@ public static class EasyLoginFoundationExtensions
 
         return services;
     }
+}
+
+/// <summary>
+/// Registered once by <see cref="EasyLoginFoundationExtensions.AddEasyLoginFoundation"/> so a repeat call is a no-op.
+/// It carries no state and nothing resolves it.
+/// </summary>
+internal sealed class EasyLoginFoundationMarker
+{
 }

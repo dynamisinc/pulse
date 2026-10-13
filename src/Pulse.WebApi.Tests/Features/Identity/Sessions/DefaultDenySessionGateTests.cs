@@ -95,6 +95,8 @@ public sealed class DefaultDenySessionGateTests
     [InlineData("POST", "/api/auth/login")]
     [InlineData("POST", "/api/auth/staff/login")]
     [InlineData("POST", "/api/auth/shared")]
+    [InlineData("POST", "/api/auth/join")]
+    [InlineData("POST", "/api/auth/word")]
     [InlineData("POST", "/api/auth/refresh")]
     [InlineData("POST", "/api/auth/logout")]
     [InlineData("GET", "/health")]
@@ -104,7 +106,7 @@ public sealed class DefaultDenySessionGateTests
     [InlineData("POST", "/api/ops/bind-participant-persona")]
     public async Task AllowlistedRoute_WithNoCredential_IsNeverRejectedByTheGate(string method, string route)
     {
-        // These eleven must stay reachable pre-auth. What they RETURN is each endpoint's own business (400 for
+        // These thirteen must stay reachable pre-auth. What they RETURN is each endpoint's own business (400 for
         // a missing body, 404 for an unconfigured ops secret, and 401 from /api/auth/refresh itself when no
         // refresh token is presented); the regression guarded here is narrower and exact: the GATE must not be
         // what answers. The RFC 6750 challenge header is the discriminator — only the gate writes it.
@@ -235,7 +237,7 @@ public sealed class DefaultDenySessionGateTests
     }
 
     [Fact]
-    public void EveryMappedEndpoint_IsEitherGated_OrOnTheElevenRouteAllowlist()
+    public void EveryMappedEndpoint_IsEitherGated_OrOnTheThirteenRouteAllowlist()
     {
         // The composition-root invariant, asserted against the LIVE route table rather than a hand-typed list:
         // an endpoint carries IAllowAnonymous if and only if PreAuthAllowlist names it. This is what makes a

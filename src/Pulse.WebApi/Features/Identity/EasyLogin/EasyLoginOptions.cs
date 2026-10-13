@@ -43,7 +43,7 @@ public sealed class EasyLoginOptions
     /// </summary>
     public int DayRolloverHour { get; set; }
 
-    /// <summary>The most cards one <c>GET /api/staff/roster/cards</c> may return (story 04). Default 500.</summary>
+    /// <summary>The most participant ids one <c>POST /api/staff/roster/cards</c> <c>{ participantIds }</c> body may name (story 04, EL-20). Default 500. <c>{ all: true }</c> is uncapped.</summary>
     public int MaxCardsPerRequest { get; set; } = 500;
 
     /// <summary>

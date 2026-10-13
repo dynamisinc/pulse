@@ -48,7 +48,7 @@ using Microsoft.Extensions.DependencyInjection;
 ///   failure is SILENT rather than total: the allowlisted routes keep working (<c>IAllowAnonymous</c>
 ///   short-circuits the middleware wherever it sits), so login succeeds and then every authenticated call
 ///   after it 401s.</description></item>
-///   <item><description>Each of <see cref="PreAuthAllowlist"/>'s eleven routes carries
+///   <item><description>Each of <see cref="PreAuthAllowlist"/>'s thirteen routes carries
 ///   <see cref="AllowAnonymousPreAuth{TBuilder}"/> at its own mapping call site.</description></item>
 /// </list>
 /// </para>

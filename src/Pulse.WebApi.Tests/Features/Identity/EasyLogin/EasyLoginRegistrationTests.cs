@@ -265,7 +265,8 @@ public sealed class EasyLoginRegistrationTests
 
         services.GetRequiredService<IOptions<EasyLoginOptions>>().Value.DayRolloverHour.Should().Be(0);
         services.GetRequiredService<ExerciseFactsReader>().Should().NotBeNull();
-        services.GetRequiredService<IParticipantLinkIssuer>().Should().BeOfType<NullParticipantLinkIssuer>();
+        // The backend seam wired story 03's AddPersonalLinks, which Replaces 01's fail-closed null issuer in the real host.
+        services.GetRequiredService<IParticipantLinkIssuer>().Should().BeOfType<Pulse.WebApi.Features.Identity.PersonalLinks.ParticipantLinkService>();
         services.GetRequiredService<TimeProvider>().Should().NotBeNull();
         services.GetRequiredService<JoinUrlBuilder>().Build("tok").Should().Be("https://pulse-uat.cobrasoftware.com/join/tok");
 

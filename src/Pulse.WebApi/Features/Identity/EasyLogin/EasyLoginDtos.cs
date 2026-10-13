@@ -411,7 +411,7 @@ public sealed class RosterCardSkipDto
     public required string Reason { get; init; }
 }
 
-/// <summary>The <c>GET /api/staff/roster/cards</c> body (<c>RosterCardsDto</c>).</summary>
+/// <summary>The <c>POST /api/staff/roster/cards</c> response body (<c>RosterCardsDto</c>; request shape EL-20).</summary>
 public sealed class RosterCardsDto
 {
     /// <summary>The exercise name for the sheet header.</summary>
