@@ -71,7 +71,7 @@ import axios, {
   type InternalAxiosRequestConfig,
 } from 'axios'
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { api } from './api'
+import { api, endRefreshCooldown } from './api'
 import {
   setTokens,
   rotateTokens,
@@ -1310,6 +1310,26 @@ describe('L-1: a cool-down after a no-answer refresh', () => {
     now += 2_000
     await expect(api.get('/c')).rejects.toBeTruthy()
     expect(calls).toBe(2)
+  })
+
+  it('endRefreshCooldown() ends it, so a deliberate retry may call the refresh at once (W-5)', async () => {
+    setTokens({ token: 'expired', refreshToken: 'refresh-1' }, { persist: true })
+    const calls = failingRefresh(rejectNetworkError)
+    await expect(api.get('/a')).rejects.toBeTruthy()
+    expect(calls.refresh).toBe(1)
+    await expect(api.get('/b')).rejects.toBeTruthy()
+    expect(calls.refresh).toBe(1) // inside the cool-down: no call
+
+    endRefreshCooldown()
+
+    await expect(api.get('/c')).rejects.toBeTruthy()
+    expect(calls.refresh).toBe(2)
+    // The pair is still the same one: ending the cool-down signs nobody out.
+    expect(getAccessToken()).toBe('expired')
+  })
+
+  it('endRefreshCooldown() is harmless when no cool-down is running', () => {
+    expect(() => endRefreshCooldown()).not.toThrow()
   })
 
   it('is timed on a monotonic clock: moving the wall clock neither extends nor ends it', async () => {
