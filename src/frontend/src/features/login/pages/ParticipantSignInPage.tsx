@@ -29,8 +29,11 @@
  * methods and coming back loses nothing) and switching clears any error. All
  * three endpoints return the SAME success envelope
  * (`../services/participantSignInService.ts`'s `LoginEnvelope`); on success
- * this page calls `setTokens(pair, { persist: true })` (`@/core/auth`) and
- * navigates to `/` — the role-aware entry (mounted elsewhere, story 04)
+ * this page calls the shared `completeSignIn` (`../completeSignIn`), which stores the
+ * pair with `setTokens(pair, { persist: true })`, runs `resetClientSession()` so the
+ * previous identity's cached data and composer state do not survive into this one
+ * (Gate-2 W-2, as the join page does), and navigates to `/` with `replace` — the
+ * role-aware entry (mounted elsewhere, story 04)
  * decides the participant's actual landing surface. This page never
  * re-decides that routing itself, and never special-cases the shared/read-only
  * path beyond what the backend already encodes in the envelope.
@@ -133,12 +136,12 @@
 
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faTowerBroadcast, faTriangleExclamation } from '@fortawesome/free-solid-svg-icons'
-import { setTokens } from '@/core/auth'
 import { resolveExerciseContext } from '@/core/exerciseContext'
 import { STAFF_LOGIN_PATH } from '@/features/app-shell/constants'
+import { completeSignIn } from '../completeSignIn'
 import {
   signInWithDayWord,
   signInWithPassword,
@@ -190,6 +193,7 @@ function useResolvedExerciseName(): string | undefined {
  */
 export function ParticipantSignInPage() {
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
   const exerciseName = useResolvedExerciseName()
 
   const [mode, setMode] = useState<SignInMode>('word')
@@ -228,14 +232,16 @@ export function ParticipantSignInPage() {
 
   /**
    * Common completion for every sign-in method: store the tokens in the
-   * PERSISTENT store (EL-10 — all participant methods persist), then hand off.
+   * PERSISTENT store (EL-10 — all participant methods persist), forget the previous
+   * identity's client state, then hand off with `navigate('/', { replace: true })`.
+   * The shared `completeSignIn` does all three in order (Gate-2 W-2); this page, the
+   * join page and the staff page cannot drift apart.
    */
-  function completeSignIn(envelope: LoginEnvelope) {
-    setTokens(
+  function finishSignIn(envelope: LoginEnvelope) {
+    completeSignIn(
       { token: envelope.token, refreshToken: envelope.refreshToken },
-      { persist: true },
+      { persist: true, navigate, queryClient },
     )
-    navigate('/')
   }
 
   async function handleWordSubmit(event: FormEvent<HTMLFormElement>) {
@@ -248,7 +254,7 @@ export function ParticipantSignInPage() {
         signInName: signInName.trim(),
         word: word.trim(),
       })
-      completeSignIn(envelope)
+      finishSignIn(envelope)
     } catch (caught) {
       if (isUnauthorizedSignInError(caught)) {
         setError({ mode: 'word', message: WORD_UNAUTHORIZED_MESSAGE })
@@ -272,7 +278,7 @@ export function ParticipantSignInPage() {
     setIsSubmitting(true)
     try {
       const envelope = await signInWithPassword({ username, password })
-      completeSignIn(envelope)
+      finishSignIn(envelope)
     } catch (caught) {
       if (isUnauthorizedSignInError(caught)) {
         setError({ mode: 'named', message: NAMED_UNAUTHORIZED_MESSAGE })
@@ -291,7 +297,7 @@ export function ParticipantSignInPage() {
     setIsSubmitting(true)
     try {
       const envelope = await signInWithSharedCode({ password: sharedPassword })
-      completeSignIn(envelope)
+      finishSignIn(envelope)
     } catch (caught) {
       if (isUnauthorizedSignInError(caught)) {
         setError({ mode: 'shared', message: SHARED_UNAUTHORIZED_MESSAGE })

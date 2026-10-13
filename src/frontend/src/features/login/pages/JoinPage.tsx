@@ -46,7 +46,9 @@
  * their back. A concurrent-click guard (`inFlightRef`) also stops a double-tap on
  * "Try again" from posting twice.
  *
- * ON SUCCESS (in this order, all synchronous after the response):
+ * ON SUCCESS (in this order, all synchronous after the response; the shared
+ * `completeSignIn` in `../completeSignIn.ts` runs it, and the participant and staff
+ * sign-in pages run the very same step - Gate-2 W-2):
  *   - `setTokens(pair, { persist: true })` — the pair goes to `localStorage`, so a
  *     phone stays signed in through a closed tab, and any STAFF `sessionStorage`
  *     pair in this browser is removed (documented consequence: opening a
@@ -123,9 +125,9 @@ import {
   faTriangleExclamation,
 } from '@fortawesome/free-solid-svg-icons'
 import type { IconDefinition } from '@fortawesome/fontawesome-svg-core'
-import { resetClientSession, setTokens } from '@/core/auth'
 import { resolveExerciseContext } from '@/core/exerciseContext'
 import { JOIN_PATH, LOGIN_PATH } from '@/features/app-shell/constants'
+import { completeSignIn, SIGNED_IN_PATH } from '../completeSignIn'
 import {
   classifyJoinFailure,
   signInWithLink,
@@ -135,12 +137,12 @@ import type { LoginEnvelope } from '../services/participantSignInService'
 import styles from './JoinPage.module.css'
 
 /**
- * Where a successful exchange hands off, and where "Continue" goes from a bare
- * `/join`: the role-aware entry (story 04 of login). `JOIN_PATH` (the route base:
- * `JOIN_PATH/:token` for a personal link, bare `JOIN_PATH` for the scrubbed address)
- * lives beside `LOGIN_PATH` in `app-shell/constants`.
+ * Where "Continue" goes from a bare `/join`: the role-aware entry (story 04 of login),
+ * the same place a successful exchange hands off to (`completeSignIn`'s `SIGNED_IN_PATH`).
+ * `JOIN_PATH` (the route base: `JOIN_PATH/:token` for a personal link, bare `JOIN_PATH`
+ * for the scrubbed address) lives beside `LOGIN_PATH` in `app-shell/constants`.
  */
-const ENTRY_PATH = '/'
+const ENTRY_PATH = SIGNED_IN_PATH
 
 /** What the page is showing. See the module header. */
 type JoinView = 'signing-in' | 'no-link' | JoinFailure
@@ -260,17 +262,14 @@ export function JoinPage() {
     // their back. (StrictMode's simulated unmount has remounted by now.)
     if (!mountedRef.current) return
 
-    setTokens(
-      { token: envelope.token, refreshToken: envelope.refreshToken },
-      { persist: true },
-    )
-    // Forget the previous identity's client state exactly as sign-out does (own posts,
-    // reply intent, the shared cache), then clear the provider's client too (the same
-    // object in the app; a test may mount its own).
-    resetClientSession()
-    queryClient.clear()
+    // Store the pair, forget the previous identity's client state exactly as sign-out does
+    // (own posts, reply intent, the shared cache and the provider's client), and hand off
+    // with `replace`: the same shared step the sign-in pages run (Gate-2 W-2).
     tokenRef.current = null
-    navigate(ENTRY_PATH, { replace: true })
+    completeSignIn(
+      { token: envelope.token, refreshToken: envelope.refreshToken },
+      { persist: true, navigate, queryClient },
+    )
   }, [navigate, queryClient])
 
   // Start the single exchange. `startedRef` makes the second (StrictMode) run of

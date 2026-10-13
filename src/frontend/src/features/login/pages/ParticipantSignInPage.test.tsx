@@ -66,7 +66,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { AxiosError, type AxiosResponse } from 'axios'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { api } from '@/core/services/api'
-import { setTokens } from '@/core/auth'
+import { resetClientSession, setTokens } from '@/core/auth'
 import { resolveExerciseContext } from '@/core/exerciseContext'
 import type { ExerciseScope } from '@/core/exerciseContext'
 import { STAFF_LOGIN_PATH } from '@/features/app-shell/constants'
@@ -83,6 +83,8 @@ vi.mock('@/core/config/mockData', () => ({
 
 vi.mock('@/core/auth', () => ({
   setTokens: vi.fn(),
+  // Spied here; its own behaviour is covered by core/auth/endSession.test.ts (Gate-2 W-2).
+  resetClientSession: vi.fn(),
 }))
 
 vi.mock('@/core/exerciseContext', () => ({
@@ -97,6 +99,7 @@ vi.mock('react-router-dom', async importOriginal => {
 
 const mockPost = vi.mocked(api.post)
 const mockSetTokens = vi.mocked(setTokens)
+const mockResetClientSession = vi.mocked(resetClientSession)
 const mockResolveExerciseContext = vi.mocked(resolveExerciseContext)
 
 const SCOPE: ExerciseScope = {
@@ -135,6 +138,7 @@ function renderPage() {
 beforeEach(() => {
   mockPost.mockReset()
   mockSetTokens.mockReset()
+  mockResetClientSession.mockReset()
   mockNavigate.mockReset()
   mockResolveExerciseContext.mockReset()
   mockResolveExerciseContext.mockResolvedValue(SCOPE)
@@ -406,6 +410,26 @@ describe('ParticipantSignInPage — Today\'s-word fields (09-AC2)', () => {
   })
 })
 
+/**
+ * Gate-2 W-2: every method stores the pair, THEN forgets the previous identity's client
+ * state, THEN navigates (with `replace`, so Back never returns to the sign-in page).
+ */
+function expectStoredResetThenNavigated(
+  pair: { token: string; refreshToken?: string | undefined },
+) {
+  expect(mockSetTokens).toHaveBeenCalledTimes(1)
+  expect(mockSetTokens).toHaveBeenCalledWith(pair, { persist: true })
+  expect(mockResetClientSession).toHaveBeenCalledTimes(1)
+  expect(mockNavigate).toHaveBeenCalledTimes(1)
+  expect(mockNavigate).toHaveBeenCalledWith('/', { replace: true })
+  const stored = mockSetTokens.mock.invocationCallOrder[0] ?? 0
+  const reset = mockResetClientSession.mock.invocationCallOrder[0] ?? 0
+  const navigated = mockNavigate.mock.invocationCallOrder[0] ?? 0
+  expect(stored).toBeGreaterThan(0)
+  expect(reset).toBeGreaterThan(stored)
+  expect(navigated).toBeGreaterThan(reset)
+}
+
 describe('ParticipantSignInPage — Today\'s word stores tokens (persisted) and navigates (09-AC3)', () => {
   it('POSTs /auth/word { signInName, word }, persists the pair, and navigates to /', async () => {
     mockPost.mockResolvedValue({
@@ -427,7 +451,7 @@ describe('ParticipantSignInPage — Today\'s word stores tokens (persisted) and 
         { persist: true },
       ),
     )
-    expect(mockNavigate).toHaveBeenCalledWith('/')
+    expectStoredResetThenNavigated({ token: 'tok-123', refreshToken: 'ref-456' })
   })
 
   it('trims surrounding whitespace and does NOTHING else to what was typed (server normalises)', async () => {
@@ -626,7 +650,7 @@ describe('ParticipantSignInPage — Today\'s word failures (09-AC4)', () => {
     expect(screen.getByRole('button', { name: 'Sign in' })).toBeEnabled()
 
     await user.click(screen.getByRole('button', { name: 'Sign in' }))
-    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/'))
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/', { replace: true }))
   })
 })
 
@@ -671,7 +695,7 @@ describe('ParticipantSignInPage — the word never leaks (NFR-004 / NFR-009)', (
     await submitWordForm(user, NAME, SECRET_WORD)
 
     await waitFor(() => expect(mockNavigate).toHaveBeenCalledTimes(1))
-    expect(mockNavigate).toHaveBeenCalledWith('/')
+    expect(mockNavigate).toHaveBeenCalledWith('/', { replace: true })
     expect(JSON.stringify(mockSetTokens.mock.calls)).not.toContain(SECRET_WORD)
   })
 })
@@ -699,7 +723,7 @@ describe('ParticipantSignInPage — Password sign-in stores tokens (persisted) a
         { persist: true },
       ),
     )
-    expect(mockNavigate).toHaveBeenCalledWith('/')
+    expectStoredResetThenNavigated({ token: 'tok-123', refreshToken: 'ref-456' })
   })
 })
 
@@ -722,7 +746,28 @@ describe('ParticipantSignInPage — View-only code sign-in stores tokens (persis
         { persist: true },
       ),
     )
-    expect(mockNavigate).toHaveBeenCalledWith('/')
+    expectStoredResetThenNavigated({ token: 'tok-999', refreshToken: undefined })
+  })
+})
+
+describe('ParticipantSignInPage — a failed sign-in does not reset the session (Gate-2 W-2)', () => {
+  it.each([
+    ['401', () => axiosErrorWith(401)],
+    ['429', () => axiosErrorWith(429)],
+    ['500', () => axiosErrorWith(500)],
+  ])('%s on Today\'s word: nothing stored, nothing reset, nowhere to go', async (_label, makeError) => {
+    mockPost.mockRejectedValue(makeError())
+    const user = userEvent.setup()
+    renderPage()
+
+    await submitWordForm(user, 'dreyes', 'bluebird')
+
+    await screen.findByRole('alert')
+    // The previous identity (if any) is still the current one: wiping its cache and
+    // composer state for an attempt that did not sign anyone in would be a regression.
+    expect(mockSetTokens).not.toHaveBeenCalled()
+    expect(mockResetClientSession).not.toHaveBeenCalled()
+    expect(mockNavigate).not.toHaveBeenCalled()
   })
 })
 

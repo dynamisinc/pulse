@@ -17,6 +17,11 @@
  * `Stack`, `Typography`) come straight from `@mui/material`, matching
  * `ExerciseSwitcher.tsx`'s precedent.
  *
+ * ON SUCCESS the shared `completeSignIn` (`../completeSignIn.ts`) stores the pair in
+ * the SESSION-scoped store (staff never opt in to `persist`), runs `resetClientSession()`
+ * so a previous identity's cached data and composer state cannot show through
+ * (easy-login Gate-2 W-2), and navigates to `/` with `replace`.
+ *
  * FORM SHAPE (AC1): username + secret ONLY. There is deliberately NO
  * exercise-id field — `exerciseId` is derived from the host, invisibly to the
  * staff member (see below), never typed or picked.
@@ -68,14 +73,14 @@
 import { useState, type FormEvent } from 'react'
 import { Box, Stack, Typography } from '@mui/material'
 import { ThemeProvider } from '@mui/material/styles'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faCircleNotch, faTriangleExclamation } from '@fortawesome/free-solid-svg-icons'
 import { CobraPrimaryButton, CobraTextField } from '@/theme/styledComponents'
 import { cobraTheme } from '@/theme/cobraTheme'
-import { setTokens } from '@/core/auth'
 import { resolveExerciseContext } from '@/core/exerciseContext'
+import { completeSignIn } from '../completeSignIn'
 import { staffSignIn, StaffSignInError } from '../services/staffSignInService'
 
 /** AC2 — shown when the host's exercise context cannot be resolved at submit time. */
@@ -129,6 +134,7 @@ function SignInAlert({ message }: { message: string }) {
  */
 function StaffSignInForm() {
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
 
   // Non-blocking, host-resolved exercise scope (see module header). Never
   // gates rendering — only gates SUBMISSION (AC2).
@@ -161,8 +167,13 @@ function StaffSignInForm() {
 
     staffSignIn({ username, secret, exerciseId })
       .then(envelope => {
-        setTokens({ token: envelope.token, refreshToken: envelope.refreshToken })
-        navigate('/')
+        // Store the pair (session-scoped: staff never opt in to `persist`), forget the
+        // previous identity's client state, and hand off - one shared step so staff and
+        // participant sign-in cannot drift (Gate-2 W-2).
+        completeSignIn(
+          { token: envelope.token, refreshToken: envelope.refreshToken },
+          { persist: false, navigate, queryClient },
+        )
       })
       .catch((error: unknown) => {
         const signInError =
