@@ -34,6 +34,11 @@
  *   - `/staff/login` -> `StaffSignInPage` (feature: login, story 03) — the
  *                        staff/controller sign-in form, linked from
  *                        `ParticipantSignInPage`.
+ *   - `/join/:token` -> `JoinPage` (feature: easy-login, story 08) — a participant
+ *                        taps their personal link; the page exchanges the token
+ *                        for a session and replaces itself with `/`.
+ *   - `/join`        -> `JoinPage` again, with no token (what is left after the
+ *                        page scrubbed the address bar and the tab was reloaded).
  *   - `*`            -> the role-aware entry. A catch-all — deliberately NOT a
  *                        flat staff route table — so the browser routes on the
  *                        resolved ROLE first and only then, for STAFF, on the
@@ -49,13 +54,14 @@
  *                        `pathnameBase` of `/` is what the registry's absolute
  *                        paths are matched against.
  *
- * ## The two login routes (pre-auth, PRE-`RoleAwareEntry`)
- * Both are SIBLINGS of the `*` catch-all, mounted OUTSIDE
+ * ## The login routes and the join routes (pre-auth, PRE-`RoleAwareEntry`)
+ * All four are SIBLINGS of the `*` catch-all, mounted OUTSIDE
  * `SessionProvider`/`ExerciseContextProvider` — they run before a session can
  * be resolved (that's the point: `/login` is where a fail-closed session
- * lands), so each page self-resolves whatever it needs (`resolveExerciseContext`
- * directly, never through the fail-closed providers hoisted below). Mounting
- * both a participant page and a staff page at this world-neutral layer does
+ * lands, and `/join` is where a personal link signs someone in), so each page
+ * self-resolves whatever it needs (`resolveExerciseContext` directly, never
+ * through the fail-closed providers hoisted below). Mounting participant
+ * pages and a staff page at this world-neutral layer does
  * NOT breach the two-worlds routing rule: each page encapsulates its own world
  * entirely on its own (`ParticipantSignInPage`'s CSS-module brand-neutral skin;
  * `StaffSignInPage`'s own `cobraTheme` mount) — this file itself imports no
@@ -77,7 +83,8 @@ import { SessionProvider } from '@/core/auth'
 import { RoleAwareEntry, type RoleAwareEntryProps } from './RoleAwareEntry'
 import { ParticipantSignInPage } from '@/features/login/pages/ParticipantSignInPage'
 import { StaffSignInPage } from '@/features/login/pages/StaffSignInPage'
-import { LOGIN_PATH, STAFF_LOGIN_PATH } from './constants'
+import { JoinPage } from '@/features/login/pages/JoinPage'
+import { JOIN_PATH, LOGIN_PATH, STAFF_LOGIN_PATH } from './constants'
 
 /**
  * Builds the role-aware route table. The orchestrator passes the concrete
@@ -93,6 +100,16 @@ export function createRoleAwareRoutes(surfaces: RoleAwareEntryProps): RouteObjec
     {
       path: STAFF_LOGIN_PATH,
       element: <StaffSignInPage />,
+    },
+    // Personal-link sign-in (easy-login 08). Pre-auth like the two above. The bare
+    // path is the scrubbed address after a reload (the token is gone by then).
+    {
+      path: `${JOIN_PATH}/:token`,
+      element: <JoinPage />,
+    },
+    {
+      path: JOIN_PATH,
+      element: <JoinPage />,
     },
     {
       path: '*',

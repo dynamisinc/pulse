@@ -196,7 +196,7 @@ function extractServerMessage(data: unknown): string | undefined {
 }
 
 /** Translates any thrown transport failure into a `ParticipantSignInError`. */
-function toSignInError(error: unknown, fallbackMessage: string): ParticipantSignInError {
+export function toSignInError(error: unknown, fallbackMessage: string): ParticipantSignInError {
   if (error instanceof ParticipantSignInError) {
     return error
   }
@@ -219,7 +219,7 @@ function toSignInError(error: unknown, fallbackMessage: string): ParticipantSign
  * handing the page a `token` that doesn't exist. `refreshToken`/`session` are
  * optional — a shared read-only session may omit `refreshToken` entirely.
  */
-function isLoginEnvelope(value: unknown): value is LoginEnvelope {
+export function isLoginEnvelope(value: unknown): value is LoginEnvelope {
   if (typeof value !== 'object' || value === null) return false
   const body = value as Record<string, unknown>
   return (
