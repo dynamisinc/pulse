@@ -37,7 +37,7 @@ The epics have no requirement text for personal links, day words or card sheets 
 
 | # | Story | Stack | Priority | Wave | Depends on | Status | Issue |
 |---|-------|-------|----------|------|------------|--------|-------|
-| 01 | [Foundation: schema, shared kernel, frozen contract](01-foundation-schema-and-seams.md) | backend | Must | 0 | none | In Progress | #466 |
+| 01 | [Foundation: schema, shared kernel, frozen contract](01-foundation-schema-and-seams.md) | backend | Must | 0 | none | In Review | #466 |
 | 02 | [Roster provisioning: CSV, add one, list, personas](02-roster-provisioning.md) | backend | Must | 1 | 01 | In Progress | #467 |
 | 03 | [Personal links: join, revoke, reissue, disable](03-personal-links.md) | backend | Must | 1 | 01 | In Progress | #468 |
 | 04 | [Link cards and QR codes](04-link-cards-and-qr.md) | backend | Must | 1 | 01 | In Progress | #469 |

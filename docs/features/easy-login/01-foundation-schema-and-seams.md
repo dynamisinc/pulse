@@ -1,6 +1,6 @@
 # Story: Foundation: schema, shared kernel, frozen contract
 
-**Feature:** Easy participant login  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** In Progress
+**Feature:** Easy participant login  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** In Review
 **Requirements:** COR-011, COR-012, COR-018 (enabling), XC-001, XC-004  ·  **Design decisions:** none (EL-1, EL-5, EL-6, EL-9, EL-13, EL-17 in `implementation.md`)  ·  **Issue:** #466
 **Stack:** backend  ·  **Review:** Tier-2 (a migration, two new isolation-bearing entities, and the frozen contract)  ·  **Priority:** Must  ·  **Wave:** 0  ·  **Effort:** M
 
@@ -104,3 +104,40 @@ Blocks stories 02, 03, 04, 05, 06 and 13.
 `RosterLinkDtoFactoryTests`, `EasyLoginRegistrationTests`. `Pulse.WebApi.Tests/Data/EasyLoginIsolationTests`
 (`[RequiresDockerFact]`, Testcontainers like its siblings) and `EasyLoginMigrationTests` (round-trip and
 idempotent script). `OrganizationScopeSweepTests` count bump (+1).
+
+### Test linkage
+
+AC numbers follow the order of the criteria above: AC-1 and AC-2 are the two Schema items, AC-3 is Isolation, AC-4
+is Frozen contract, AC-5 is Tokens, AC-6 is URLs and days, AC-7 is Exercise facts and telemetry, AC-8 is Sessions
+and gates, and AC-9 is the issuer, factory and registration item.
+
+- **AC-1** `EasyLoginMigrationTests.TheMigration_DirectlyFollowsThePreviousOne`,
+  `.Up_KeepsALegacyAccount_WithNullRosterColumns_AndItStillSignsInWithItsPassword`,
+  `.Up_CreatesTheColumnsWithTheStoryTypes`, `.TheModelSnapshot_MatchesTheModel_SoNoSchemaChangeIsPendingWithoutAMigration`,
+  `.TheDeployScript_AppliesItOverALegacyAccount_BatchByBatch_AndReplaysAsANoOp`.
+- **AC-2** `EasyLoginMigrationTests.Up_CreatesTheColumnsWithTheStoryTypes`, `.Up_CreatesTheThreeUniqueIndexes_ScopeLeading`,
+  `.UniqueIndexes_RefuseASecondLinkForAnAccount_ADuplicateTokenHash_AndASecondWordForADate`,
+  `.BothEntities_RoundTripEveryColumn`, `.Down_RemovesTheSchema_AndUpReappliesIt`; standing guards
+  `IdempotentMigrationScriptTests.*` and `MigrationRoundTripTests.*` stay green.
+- **AC-3** `EasyLoginIsolationTests.*` (by list, by id/IDOR, by the join's token-hash lookup, by aggregate, unset and
+  empty scope fail closed with the rows proven to exist, `IgnoreQueryFilters` control, write guard throws);
+  `QueryFilterModelTests.EveryExerciseScopedEntity_HasAGlobalQueryFilter` (two rows added); standing
+  `OrganizationScopeSweepTests`, `UnscopedIdentityEntityTests` green.
+- **AC-4** `EasyLoginDtoContractTests.*` (one test per frozen type, transcribed expected JSON; omission of optional
+  members; explicit camelCase names on every property; union literals; `LoginEnvelope` is the reused
+  `ParticipantLoginResponseDto`).
+- **AC-5** `ParticipantLinkTokensTests.*`, `ParticipantLinkTokenProtectorTests.*`.
+- **AC-6** `JoinUrlBuilderTests.*`, `ExerciseDayTests.*` (New York spring-forward and fall-back, Kolkata, Havana
+  missing midnight, rollover 0 and 3, unknown/blank zone, and a Today/EndOfDayUtc agreement sweep that also asserts
+  Today never goes backwards, including the review W-1 overlaps Pacific/Chatham r=3 and Antarctica/Troll r=2;
+  `.FallBackOverlap_TheDayTurnsAtTheEarlierOccurrence_AndStaysTurned` pins the reviewer's probe instants).
+  `EasyLoginWireTests.*` (review S-1: instants and dates are invariant under tr-TR, ar-SA, th-TH and fa-IR).
+- **AC-7** `ExerciseFactsReaderTests.*`, `OrganizationScopeSweepTests.TheExemptionInventory_IsPinned_SoANewUnboundedReadCannotSlipInSilently`
+  (`ResolvedScope` 23 to 24), `EasyLoginTelemetryTests.*`.
+- **AC-8** `ParticipantSessionRequestsTests.*` (including equivalence with `ParticipantLoginService` on real SQL),
+  `RosterStaffRoleFilterTests.*`.
+- **AC-9** `RosterLinkDtoFactoryTests.*`, `EasyLoginRegistrationTests.*` (including composition into the real
+  `Program` host; review W-2: an out-of-range or non-numeric `Authentication:EasyLogin` value falls back to its default,
+  the host still starts, and the key, never the value, is logged once at startup by `EasyLoginOptionsStartupCheck`).
+  The `QRCoder` 1.8.1 reference adds no warning to `Pulse.WebApi`. The `NU1903` warnings a solution build reports are
+  for SSH.NET in `Pulse.WebApi.Tests`, pulled in transitively by Testcontainers; they predate this story.
