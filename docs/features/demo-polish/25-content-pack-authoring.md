@@ -17,9 +17,10 @@ media and the fictional names. Constraint from plan §9: display names, bios and
 ## Acceptance Criteria
 - [ ] **Pack shape.** `docs/demo/pack/pack.json` validates against `docs/demo/pack/schema/` and S1's `-WhatIf`
       passes with zero warnings.
-- [ ] **Volume and coverage.** ≈ 35 opening posts backdated over ~6 scenario hours; a ~15-beat run sheet
-      covering plan beats 2–5 (breaking-news video, impersonator photo post, citizen pile-on replies, the PIO
-      statement context, a moderation target); 2–3 videos, ~10 photos, 9 avatars, 3–4 banners; threads with
+- [ ] **Volume and coverage.** ≈ 35 opening posts backdated over ~6 scenario hours; a ~15-item run sheet
+      (`runSheet.items`: inject items, `kind: "post"` or `"burst"`, the shape below) covering plan beats 2–5
+      (breaking-news video, impersonator photo post, citizen pile-on replies, the PIO statement context, a
+      moderation target); 2–3 videos, ~10 photos, 9 avatars, 3–4 banners; threads with
       replies; engagement baselines that make the rumor outpace the official post; the verified agency beside
       its unverified lookalike.
 - [ ] **Media rules.** Videos are H.264 MP4, 720p, ≤ 30 s and ≤ 20 MB; photos ≤ 5 MB (JPEG/PNG/WebP); every file
@@ -45,6 +46,18 @@ localisation, authoring more than the demo storyline needs.
   `*.mp4`/`*.webm` from F0). Keep the repo light: the pack is the demo's source of truth, so large originals
   stay out of git (store ≤ 20 MB renditions).
 - Use P3's test clips as the starting point for the video slots.
+- **Run-sheet shape** *(amended 2026-10-13; C3's `runSheet.beats` is gone)*. `runSheet` is `{ "items": [ … ] }`.
+  Each item maps 1:1 onto inject-queue 06's `InjectItemWrite`, with pack references where the wire has ids; S1
+  creates it with `POST /api/injects`, pending, in pack order. An item is `{ key, kind, title, notes?,
+  plannedMinute?, assignee?, burstWindowSeconds?, posts }`: `key` is a stable pack key; `kind` is `"post"`
+  (exactly 1 post) or `"burst"` (2–20 posts released across `burstWindowSeconds`, 30–600, default 90, and at
+  least 3 × (posts − 1)); `title` 1–120 and `notes` ≤ 500 are controller-facing; `plannedMinute` is the T+N
+  hint; `assignee` is `"me"` or a staff display name. Each post is `{ persona, text, media?, replyTo?,
+  engagementBaseline? }`: `persona` is a handle, `text` 1–280 (no markup), `media` uses pack media keys
+  (`{ ref, alt? }`, ≤ 4 images or 1 video), and `replyTo` is one of `{ "postKey": "p07" }` (an opening-feed
+  post), `{ "sequence": 1 }` (an earlier post of the same item) or `{ "item": "rs03", "sequence": 1 }` (a post of
+  an earlier item). The pile-on replies fit a `burst`. The schema in `docs/demo/pack/schema/` and S1's
+  `-WhatIf` check all of it; `scripts/uat/test-fixtures/demo-pack/pack.json` has one item of each kind.
 
 ## Dependencies
 P3 (clips), the names decision (10/14), S1's schema (for validation). Blocks the final seed run Mon 10/19.
