@@ -141,6 +141,16 @@ function rejectTimeout(config: InternalAxiosRequestConfig): Promise<never> {
 }
 
 /**
+ * After an AUTOMATIC clear of a staff (sessionStorage) session, no token, refresh token or
+ * identity marker is left there. The sticky-page record (W2-1) may remain, on purpose: it is
+ * what keeps the refused tab a staff tab across a reload. (An explicit sign-out leaves
+ * sessionStorage completely empty, and those cases still assert `.length` is 0.)
+ */
+function expectNoSessionTokens(): void {
+  expect(Object.keys(sessionStorage).filter(key => key !== 'pulse.auth.sticky')).toEqual([])
+}
+
+/**
  * `performSilentRefresh()` (api.ts) issues its own `POST /auth/refresh` call
  * with NO per-call `adapter` override — it must hit the SAME transport the
  * outer call used. A per-call `{ adapter }` on only the outer request would
@@ -1448,7 +1458,7 @@ describe('S-3: an automatic clear touches only the store the session lives in', 
 
     await expect(api.get('/protected')).rejects.toMatchObject({ response: { status: 401 } })
 
-    expect(sessionStorage.length).toBe(0)
+    expectNoSessionTokens()
     expect(localStorage.getItem('pulse.auth.token')).toBe('p-access')
     expect(localStorage.getItem('pulse.auth.refreshToken')).toBe('p-refresh')
     expect(localStorage.getItem('pulse.auth.session')).toBe('participant-marker')
@@ -1461,7 +1471,7 @@ describe('S-3: an automatic clear touches only the store the session lives in', 
 
     await expect(api.get('/protected')).rejects.toMatchObject({ response: { status: 401 } })
 
-    expect(sessionStorage.length).toBe(0)
+    expectNoSessionTokens()
     expect(localStorage.getItem('pulse.auth.refreshToken')).toBe('p-refresh')
   })
 
@@ -1503,7 +1513,7 @@ describe('W-6: a refused staff tab never falls through to a participant pair', (
 
     expect(getAccessToken()).toBeNull()
     expect(getRefreshToken()).toBeNull()
-    expect(sessionStorage.length).toBe(0)
+    expectNoSessionTokens()
     expect(localStorage.getItem('pulse.auth.token')).toBe('p-access')
     expect(localStorage.getItem('pulse.auth.refreshToken')).toBe('p-refresh')
   })

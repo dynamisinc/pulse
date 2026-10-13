@@ -40,10 +40,21 @@ import {
   getSessionMarker,
   rotateTokens,
   SESSION_MARKER_KEY,
+  STICKY_SESSION_KEY,
 } from './tokenStore'
 
 const ACCESS_KEY = 'pulse.auth.token'
 const REFRESH_KEY = 'pulse.auth.refreshToken'
+
+/**
+ * After an AUTOMATIC clear of a staff (sessionStorage) session, no token, refresh token or
+ * identity marker is left there. The sticky-page record (W2-1) may remain, on purpose: it is
+ * what keeps the refused tab a staff tab across a reload. (An explicit sign-out leaves
+ * sessionStorage completely empty, and those cases still assert `.length` is 0.)
+ */
+function expectNoSessionTokens(): void {
+  expect(Object.keys(sessionStorage).filter(key => key !== 'pulse.auth.sticky')).toEqual([])
+}
 
 beforeEach(() => {
   sessionStorage.clear()
@@ -442,7 +453,7 @@ describe('tokenStore — automatic vs explicit clears (S-3)', () => {
 
     clearActiveTokens()
 
-    expect(sessionStorage.length).toBe(0)
+    expectNoSessionTokens()
     expect(localStorage.getItem(ACCESS_KEY)).toBe('p-access')
     expect(localStorage.getItem(REFRESH_KEY)).toBe('p-refresh')
     expect(localStorage.getItem(SESSION_MARKER_KEY)).toBe('p-marker')
@@ -691,7 +702,7 @@ describe('W-6: the page\'s store is sticky (a refused staff tab never reads a pa
 
     clearActiveTokens()
 
-    expect(sessionStorage.length).toBe(0)
+    expectNoSessionTokens()
     expect(getAccessToken()).toBeNull()
     expect(getRefreshToken()).toBeNull()
     expect(getSessionMarker()).toBeNull()
@@ -790,5 +801,125 @@ describe('W-6: the page\'s store is sticky (a refused staff tab never reads a pa
     participantPairInOtherTab()
 
     expect(fresh.getAccessToken()).toBe('p-access')
+  })
+})
+
+describe('W2-1: the sticky record survives a reload (and a cross-tab reload)', () => {
+  function participantPairInOtherTab(): void {
+    localStorage.setItem(ACCESS_KEY, 'p-access')
+    localStorage.setItem(REFRESH_KEY, 'p-refresh')
+    localStorage.setItem(SESSION_MARKER_KEY, 'participant-marker')
+  }
+
+  it('a healthy staff session writes no record: sessionStorage holds the pair and its marker only', () => {
+    setTokens({ token: 'staff-access', refreshToken: 'staff-refresh' })
+
+    expect(sessionStorage.getItem(STICKY_SESSION_KEY)).toBeNull()
+    expect(Object.keys(sessionStorage).sort())
+      .toEqual([ACCESS_KEY, SESSION_MARKER_KEY, REFRESH_KEY].sort())
+    expect(isSessionScoped()).toBe(true)
+  })
+
+  it('an automatic clear of a staff session leaves ONLY the record, and the page stays session-scoped', () => {
+    setTokens({ token: 'staff-access', refreshToken: 'staff-refresh' })
+    participantPairInOtherTab()
+
+    clearActiveTokens()
+
+    expect(Object.keys(sessionStorage)).toEqual([STICKY_SESSION_KEY])
+    expect(sessionStorage.getItem(STICKY_SESSION_KEY)).toBe('session')
+    // Not a secret: no token, no identity.
+    expect(sessionStorage.getItem(STICKY_SESSION_KEY)).not.toMatch(/staff|token/i)
+    expect(isSessionScoped()).toBe(true)
+    expect(isPersistentSession()).toBe(true) // the stores still say a participant pair exists
+    expect(getAccessToken()).toBeNull()
+  })
+
+  it('an automatic clear of a PARTICIPANT session writes no record', () => {
+    setTokens({ token: 'p-access', refreshToken: 'p-refresh' }, { persist: true })
+
+    clearActiveTokens()
+
+    expect(sessionStorage.length).toBe(0)
+    expect(isSessionScoped()).toBe(false)
+  })
+
+  it('after a reload (F5) the page is still a staff page: null token, session-scoped', async () => {
+    setTokens({ token: 'staff-access', refreshToken: 'staff-refresh' })
+    participantPairInOtherTab()
+    clearActiveTokens()
+
+    vi.resetModules()
+    const reloaded = await import('./tokenStore')
+
+    expect(reloaded.getAccessToken()).toBeNull()
+    expect(reloaded.getRefreshToken()).toBeNull()
+    expect(reloaded.getSessionMarker()).toBeNull()
+    expect(reloaded.isSessionScoped()).toBe(true)
+    // The participant's pair is untouched, and is not rotated into by a stray refresh.
+    expect(localStorage.getItem(ACCESS_KEY)).toBe('p-access')
+    expect(reloaded.rotateTokens('p-refresh', { token: 'x', refreshToken: 'y' })).toBe(false)
+  })
+
+  it('without the record a reloaded page WOULD boot as the participant (the bug this prevents)', async () => {
+    participantPairInOtherTab() // a bare tab: no staff tokens, no record
+
+    vi.resetModules()
+    const bare = await import('./tokenStore')
+
+    expect(bare.getAccessToken()).toBe('p-access')
+    expect(bare.isSessionScoped()).toBe(false)
+  })
+
+  it('a new staff sign-in removes the record (the tokens say where the session lives)', () => {
+    setTokens({ token: 'staff-access', refreshToken: 'staff-refresh' })
+    clearActiveTokens()
+    expect(sessionStorage.getItem(STICKY_SESSION_KEY)).toBe('session')
+
+    setTokens({ token: 'staff-2', refreshToken: 'staff-refresh-2' })
+
+    expect(sessionStorage.getItem(STICKY_SESSION_KEY)).toBeNull()
+    expect(isSessionScoped()).toBe(true)
+  })
+
+  it('a participant sign-in in this tab removes it and the page stops being session-scoped', async () => {
+    setTokens({ token: 'staff-access', refreshToken: 'staff-refresh' })
+    clearActiveTokens()
+
+    setTokens({ token: 'p-access', refreshToken: 'p-refresh' }, { persist: true })
+
+    expect(sessionStorage.length).toBe(0)
+    expect(isSessionScoped()).toBe(false)
+    vi.resetModules()
+    const reloaded = await import('./tokenStore')
+    expect(reloaded.getAccessToken()).toBe('p-access')
+  })
+
+  it('an explicit sign-out removes it, so the next boot decides afresh', async () => {
+    setTokens({ token: 'staff-access', refreshToken: 'staff-refresh' })
+    participantPairInOtherTab()
+    clearActiveTokens()
+
+    clearTokens()
+
+    expect(sessionStorage.length).toBe(0)
+    expect(isSessionScoped()).toBe(false)
+  })
+
+  it('dies with the tab: it lives in sessionStorage, never localStorage', () => {
+    setTokens({ token: 'staff-access', refreshToken: 'staff-refresh' })
+    clearActiveTokens()
+
+    expect(localStorage.getItem(STICKY_SESSION_KEY)).toBeNull()
+  })
+
+  it('is survivable when storage throws: no function throws and the page still goes sticky in memory', () => {
+    setTokens({ token: 'staff-access', refreshToken: 'staff-refresh' })
+    breakStorage('setItem')
+
+    expect(() => clearActiveTokens()).not.toThrow()
+
+    expect(getAccessToken()).toBeNull()
+    expect(isSessionScoped()).toBe(true)
   })
 })

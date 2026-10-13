@@ -50,6 +50,17 @@
  * after it was signed out. An explicit `clearTokens()` (sign-out) forgets the record,
  * so the next boot or sign-in decides afresh.
  *
+ * THE RECORD SURVIVES A RELOAD (W2-1). The in-memory record alone is lost when the page
+ * reloads, and a reload is exactly what `crossTabSessionSync` does when a participant
+ * signs in or out in another tab, and what F5 does. So an automatic clear of a
+ * `sessionStorage` session also writes a tiny, NON-secret record into `sessionStorage`
+ * itself (`pulse.auth.sticky`): it survives F5, dies with the tab, and is removed by
+ * `clearTokens()` and by the next `setTokens()`. At boot a page with no staff tokens but
+ * that record is still a staff page, and `isSessionScoped()` says so, so another tab's
+ * participant sign-in neither reloads it nor lets it boot as that participant. It is only
+ * written at the moment of the clear, so a healthy staff session leaves `sessionStorage`
+ * holding exactly the pair and its marker, as before.
+ *
  * The access token and refresh token are stored under two SEPARATE keys
  * (`pulse.auth.token`, `pulse.auth.refreshToken`; never serialized together as
  * one JSON blob) so neither can corrupt the other's encoding.
@@ -115,6 +126,12 @@ const REFRESH_TOKEN_KEY = 'pulse.auth.refreshToken'
  * `core/auth/crossTabSessionSync` can recognise the `storage` event for it.
  */
 export const SESSION_MARKER_KEY = 'pulse.auth.session'
+
+/**
+ * The sticky-page record's key, in `sessionStorage` (see "THE RECORD SURVIVES A RELOAD").
+ * Exported (a name, not a secret) so tests and tooling can recognise it.
+ */
+export const STICKY_SESSION_KEY = 'pulse.auth.sticky'
 
 /** The token pair persisted from a login/refresh response envelope. */
 export interface TokenPair {
@@ -223,6 +240,8 @@ let pageArea: Area | null = initialPageArea()
 
 function initialPageArea(): Area | null {
   if (holdsTokens('session')) return 'session'
+  // A staff page whose session was refused and cleared, then reloaded (W2-1): still staff.
+  if (readItem('session', STICKY_SESSION_KEY) === 'session') return 'session'
   return holdsTokens('persistent') ? 'persistent' : null
 }
 
@@ -318,8 +337,10 @@ export function setTokens(pair: TokenPair, options?: SetTokensOptions): void {
   const other: Area = target === 'persistent' ? 'session' : 'persistent'
 
   generation++
-  // This page's session now lives in `target`, whatever it was before (W-6).
+  // This page's session now lives in `target`, whatever it was before (W-6). The sticky
+  // record (W2-1) has done its job: the tokens themselves say where the session lives.
   pageArea = target
+  removeItem('session', STICKY_SESSION_KEY)
   // Old marker out FIRST: between here and the new marker below, a reader sees
   // the new pair under no marker, so a request sent under the old identity
   // fails its identity check rather than adopting a half-written pair.
@@ -366,8 +387,10 @@ function clearArea(area: Area): void {
 export function clearTokens(): void {
   generation++
   pageMarker = null
-  // A sign-out leaves this page with no session, so nothing is sticky any more (W-6).
+  // A sign-out leaves this page with no session, so nothing is sticky any more (W-6), in
+  // memory or in this tab's sessionStorage (W2-1).
   pageArea = null
+  removeItem('session', STICKY_SESSION_KEY)
   for (const area of AREAS) clearArea(area)
 }
 
@@ -382,9 +405,16 @@ export function clearTokens(): void {
 export function clearActiveTokens(): void {
   generation++
   pageMarker = null
-  // `pageArea` is deliberately KEPT (W-6): a `sessionStorage` page whose session was
-  // refused must not fall through to the `localStorage` pair of someone else.
-  clearArea(activeArea())
+  const area = activeArea()
+  if (area === 'session') {
+    // This page's session lived in sessionStorage and was just refused. It stays a
+    // sessionStorage page (W-6), and the record outlives a reload (W2-1), so neither a
+    // cross-tab reload nor F5 can turn it into the participant whose pair sits next door.
+    pageArea = 'session'
+    writeItem('session', STICKY_SESSION_KEY, 'session')
+  }
+  // `pageArea` is otherwise KEPT: a participant page stays on its own store.
+  clearArea(area)
 }
 
 /**
@@ -397,11 +427,13 @@ export function isPersistentSession(): boolean {
 
 /**
  * `true` when this page's session lives in `sessionStorage` (every staff
- * session). Such a page is private to its tab: another tab's sign-in or
- * sign-out in the shared `localStorage` says nothing about it.
+ * session), including one that was refused and cleared and is still sticky to that
+ * store (W-6, W2-1). Such a page is private to its tab: another tab's sign-in or
+ * sign-out in the shared `localStorage` says nothing about it, and
+ * `crossTabSessionSync` must not reload it into that identity.
  */
 export function isSessionScoped(): boolean {
-  return holdsTokens('session')
+  return holdsTokens('session') || pageArea === 'session'
 }
 
 /**
