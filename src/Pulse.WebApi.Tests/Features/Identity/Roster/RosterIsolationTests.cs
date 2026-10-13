@@ -152,6 +152,61 @@ public sealed class RosterIsolationTests
     }
 
     [RequiresDockerFact]
+    public async Task AnAccountInAPointingAtBsPersona_OrAtNothing_GetsAFreshPersonaInA_AndBIsUntouched()
+    {
+        var a = await RosterSeed.ExerciseAsync(_fixture);
+        var b = await RosterSeed.ExerciseAsync(_fixture);
+        var bPersonaId = await RosterSeed.PersonaAsync(_fixture, b.ExerciseId, "cross_person", "human");
+        var cross = await RosterSeed.AccountAsync(_fixture, a.ExerciseId, "cperson", "Cross Person", personaId: bPersonaId);
+        var dangling = await RosterSeed.AccountAsync(_fixture, a.ExerciseId, "lperson", "Lost Person", personaId: Guid.NewGuid());
+        await RosterSeed.AccountAsync(_fixture, a.ExerciseId, "pperson", "Plain Person");
+        const string file = Header + "Cross Person,,,,,\nLost Person,,,,,\nPlain Person,,,,,";
+
+        await using (var dry = RosterHarness.For(_fixture, a))
+        {
+            var rows = (await dry.Service.ImportAsync(file, dryRun: true)).Report!.Rows;
+            rows.Should().OnlyContain(r => r.Status == RosterRowStatuses.Updated && r.PersonaCreated);
+        }
+
+        await using (var probe = _fixture.CreateContext())
+        {
+            (await probe.Personas.IgnoreQueryFilters().CountAsync(p => p.ExerciseId == a.ExerciseId)).Should().Be(0, "a dry run writes nothing");
+        }
+
+        await using (var harness = RosterHarness.For(_fixture, a))
+        {
+            var rows = (await harness.Service.ImportAsync(file, dryRun: false)).Report!.Rows;
+
+            rows.Should().OnlyContain(r => r.Status == RosterRowStatuses.Updated && r.PersonaCreated, "each is treated as persona-less");
+            rows[0].PersonaHandle.Should().Be("cross_person", "B's handle is not taken in A: A never sees B's personas");
+            rows[0].Message.Should().Be("persona re-created @cross_person: the previous one was not found.");
+            rows[1].Message.Should().Be(
+                "persona re-created @lost_person: the previous one was not found.",
+                "the cross-exercise id and a dangling id get ONE message: B's persona is never confirmed to exist");
+            rows[2].Message.Should().Be("persona created @plain_person.");
+        }
+
+        await using (var all = _fixture.CreateContext())
+        {
+            var bPersona = await all.Personas.IgnoreQueryFilters().AsNoTracking().SingleAsync(p => p.Id == bPersonaId);
+            (bPersona.ExerciseId, bPersona.Handle).Should().Be((b.ExerciseId, "cross_person"), "B's persona is untouched");
+            (await all.Accounts.IgnoreQueryFilters().CountAsync(x => x.ExerciseId == b.ExerciseId)).Should().Be(0);
+
+            var crossNow = await all.Accounts.IgnoreQueryFilters().AsNoTracking().SingleAsync(x => x.Id == cross.Id);
+            var fresh = await all.Personas.IgnoreQueryFilters().AsNoTracking().SingleAsync(p => p.Id == crossNow.PersonaId);
+            fresh.Id.Should().NotBe(bPersonaId);
+            (fresh.ExerciseId, fresh.Handle, fresh.Castable).Should().Be((a.ExerciseId, "cross_person", false), "a new persona, stamped A");
+
+            var lostNow = await all.Accounts.IgnoreQueryFilters().AsNoTracking().SingleAsync(x => x.Id == dangling.Id);
+            (await all.Personas.IgnoreQueryFilters().AnyAsync(p => p.Id == lostNow.PersonaId && p.ExerciseId == a.ExerciseId)).Should().BeTrue();
+        }
+
+        await using var again = RosterHarness.For(_fixture, a);
+        (await again.Service.ImportAsync(file, dryRun: false)).Report!.Rows.Should().OnlyContain(
+            r => r.Status == RosterRowStatuses.Unchanged, "a re-upload changes nothing");
+    }
+
+    [RequiresDockerFact]
     public async Task AStaffUserOfB_ScopedToA_IsForbidden_EvenThoughTheyControlB()
     {
         var a = await RosterSeed.ExerciseAsync(_fixture);

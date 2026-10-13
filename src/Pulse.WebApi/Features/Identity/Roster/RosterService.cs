@@ -309,6 +309,9 @@ public sealed class RosterService
                     : RosterRoles.Participant,
                 Persona = account.PersonaId is { } personaId ? personasById.GetValueOrDefault(personaId) : null,
                 PersonaAutoCreated = account.PersonaAutoCreated,
+
+                // A dangling id and another exercise's persona look the same here: neither is in this exercise's set.
+                HadUnresolvedPersona = account.PersonaId is { } storedId && !personasById.ContainsKey(storedId),
             });
         }
 

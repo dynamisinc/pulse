@@ -10,10 +10,11 @@ using Xunit;
 
 /// <summary>
 /// easy-login/02 (AC-2, AC-3, AC-4, AC-5 and the amended derivation and matching rules) — the ONE row-judging engine,
-/// <see cref="RosterWorkspace"/>, driven in memory with the same seed and the same cases as the staff roster mock's
-/// tests (<c>participantAdmin/mocks/rosterMocks.test.ts</c>), so the live server and the mock the screen was built
-/// against cannot disagree. The database-backed behaviour (one save, dry run, telemetry, isolation) is
-/// <see cref="RosterServiceTests"/>.
+/// <see cref="RosterWorkspace"/>, driven in memory. It starts from the staff roster mock's seed and ports its rule
+/// tests (<c>participantAdmin/mocks/rosterMocks.test.ts</c>, the 34c6c80 rules), then pins the later amendments in
+/// <c>implementation.md</c> that the server follows and the mock does not yet (the persona-less rule and the same-file
+/// guards; story 10's mock is updated separately). The database-backed behaviour (one save, dry run, telemetry,
+/// isolation) is <see cref="RosterServiceTests"/>.
 /// </summary>
 public sealed class RosterWorkspaceTests
 {
@@ -581,6 +582,134 @@ public sealed class RosterWorkspaceTests
         var outcome = new Roster().Add(Row("Aiko Tanaka"));
 
         outcome.Status.Should().NotBe(RosterRowStatuses.Created, "a single add that matches someone is a 409, persona or not");
+    }
+
+    // ------------------------------------------------------------------ same-file guards (3) and (4), a70b106
+
+    [Fact]
+    public void SameFile_AFailingRowStillReachesItsPerson_TheReviewersRegression_IsIdenticalOnEveryUpload()
+    {
+        // Dana is stored as dwhitfield / dana.whitfield@. Row 1 fails (different email) but resolves Dana; row 2 reaches
+        // Dana too (and repeats row 1's email). Before guard (3), row 2 updated Dana's email on upload 1, so upload 2
+        // then let row 1 through: a flip-flop. Now every upload gives the same answer and writes nothing.
+        var roster = new Roster();
+        var file = new[]
+        {
+            Row("Dana Whitfield", "Fulco County EM", role: "Ops Chief", email: "new@example.test", signInName: "dwhitfield"),
+            Row("Dana Whitfield", "Fulco County EM", role: "Planner", email: "new@example.test"),
+        };
+
+        var uploads = Enumerable.Range(0, 3)
+            .Select(_ => roster.Import(dryRun: false, file).Select(o => (o.Status, o.Message)).ToList())
+            .ToList();
+
+        uploads[0].Should().Equal(
+            (RosterRowStatuses.Failed, RosterWorkspace.DifferentEmailMessage),
+            (RosterRowStatuses.Failed, "email also on row 1"));
+        uploads[1].Should().Equal(uploads[0], "upload 2 gives exactly upload 1's answer");
+        uploads[2].Should().Equal(uploads[0], "and so does upload 3");
+        var dana = roster.BySignIn("dwhitfield");
+        (dana.Email, dana.JobRole).Should().Be(("dana.whitfield@example.test", "EOC Liaison"), "nothing was ever written");
+    }
+
+    [Fact]
+    public void SameFile_APersonResolvedByAFailingRow_CannotBeReachedByALaterRow()
+    {
+        // Guard (3) on its own (no shared email): row 1 resolves Dana by sign-in name and then fails.
+        var roster = new Roster();
+        var file = new[]
+        {
+            Row("Dana Whitfield", "Fulco County EM", email: "other@example.test", signInName: "dwhitfield"),
+            Row("Dana Whitfield", "Fulco County EM", role: "Planner", email: "new2@example.test"),
+        };
+
+        var first = roster.Import(dryRun: false, file);
+        first[0].Message.Should().Be(RosterWorkspace.DifferentEmailMessage);
+        first[1].Message.Should().Be("duplicate of row 1 (same person)");
+        roster.Import(dryRun: false, file).Select(o => o.Message).Should().Equal(first.Select(o => o.Message));
+        roster.BySignIn("dwhitfield").JobRole.Should().Be("EOC Liaison");
+    }
+
+    [Fact]
+    public void SameFile_ThePeopleAConflictingKeyNamed_CountAsReachedToo()
+    {
+        var roster = new Roster();
+        var file = new[]
+        {
+            Row("Anyone", email: "dana.whitfield@example.test", signInName: "moyelaran"),
+            Row("Dana Whitfield", "Fulco County EM", role: "Planner", email: "new3@example.test"),
+        };
+
+        var outcomes = roster.Import(dryRun: false, file);
+
+        outcomes[0].Message.Should().Be("signInName matches Marcus Oyelaran but email matches Dana Whitfield.");
+        outcomes[1].Message.Should().Be("duplicate of row 1 (same person)", "row 1 resolved Dana through its email key");
+    }
+
+    [Fact]
+    public void SameFile_AnEmailAnEarlierRowCarried_FailsTheLaterRow_TomAndPriya()
+    {
+        var roster = new Roster();
+        var file = new[]
+        {
+            Row("Tom Becker", "County Transportation", email: "shared@example.test", signInName: "tbecker"),
+            Row("Priya Raman", "Red Cross", email: "shared@example.test", signInName: "praman"),
+        };
+
+        var first = roster.Import(dryRun: false, file);
+        first[0].Status.Should().Be(RosterRowStatuses.Updated);
+        first[1].Status.Should().Be(RosterRowStatuses.Failed);
+        first[1].Message.Should().Be("email also on row 1");
+
+        var again = roster.Import(dryRun: false, file);
+        again.Select(o => (o.Status, o.Message)).Should().Equal(
+            (RosterRowStatuses.Unchanged, null), (RosterRowStatuses.Failed, "email also on row 1"));
+        roster.BySignIn("praman").Email.Should().BeNull("two people never end up sharing an email through one file");
+    }
+
+    [Fact]
+    public void SameFile_TwoNewPeopleWithExplicitSignInNamesAndOneEmail_FailTheLater_OnEveryUpload()
+    {
+        var roster = new Roster();
+        var file = new[]
+        {
+            Row("New One", email: "Same@Example.test", signInName: "new.one"),
+            Row("New Two", email: " same@example.test ", signInName: "new.two"),
+        };
+
+        roster.Import(dryRun: false, file).Select(o => (o.Status, o.Message)).Should().Equal(
+            (RosterRowStatuses.Created, null), (RosterRowStatuses.Failed, "email also on row 1"));
+        roster.Import(dryRun: false, file).Select(o => (o.Status, o.Message)).Should().Equal(
+            (RosterRowStatuses.Unchanged, null), (RosterRowStatuses.Failed, "email also on row 1"));
+        roster.Participants.Should().NotContain(p => p.SignInName == "new.two");
+    }
+
+    [Fact]
+    public void SameFile_AnInvalidRow_ReportsItsFieldError_BeforeTheNameAndAgencyGuard()
+    {
+        var outcomes = new Roster().Import(
+            dryRun: true,
+            Row("Zed Zimmer", "Alpha", role: new string('r', 129)),
+            Row("Zed Zimmer", "Alpha", email: "zed@example.test"));
+
+        outcomes[0].Failure.Should().Be(RosterRowFailure.Invalid);
+        outcomes[0].Message.Should().Be(RosterRowRules.RoleTooLongMessage);
+    }
+
+    [Fact]
+    public void Matched_AnUnresolvablePersonaId_IsReCreated_WithOneUniformMessage()
+    {
+        var roster = new Roster();
+        var lost = Participant("Lost Person", "lperson", null, null, null, "participant", null);
+        lost.HadUnresolvedPersona = true; // a dangling id, or another exercise's persona: the workspace cannot tell
+        roster.Participants.Add(lost);
+
+        var outcome = roster.Import(dryRun: false, Row("Lost Person")).Single();
+
+        outcome.Status.Should().Be(RosterRowStatuses.Updated);
+        outcome.PersonaCreated.Should().BeTrue();
+        outcome.Message.Should().Be("persona re-created @lost_person: the previous one was not found.");
+        roster.Import(dryRun: false, Row("Lost Person")).Single().Status.Should().Be(RosterRowStatuses.Unchanged);
     }
 
     // ------------------------------------------------------------------ explicit signInName refusals
