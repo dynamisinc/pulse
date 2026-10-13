@@ -23,6 +23,10 @@ export type { ExerciseContextProviderProps, ExerciseScopeRefresh } from './exerc
 export type { ExerciseScope, ExerciseStatus } from './exerciseContextResolver'
 export {
   resolveExerciseContext,
+  // Mock-only status control: the simulated StartEx/EndEx (controller/lifecycle) moves the
+  // mock scope's lifecycle status so the staff header's pill follows it. See the resolver.
+  setMockExerciseStatus,
+  resetMockExerciseStatus,
   // The fail-closed status guard + its vocabulary. Exported so a surface that
   // renders a lifecycle status off ANOTHER endpoint (e.g. the org exercise
   // list, COR-075) checks the literal against the same transitional superset
