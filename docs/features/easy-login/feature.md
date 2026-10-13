@@ -48,7 +48,7 @@ The epics have no requirement text for personal links, day words or card sheets 
 | 09 | [Sign-in page: Today's word](09-fe-todays-word-sign-in.md) | frontend | Must | 2 | 07 | Not Started | #474 |
 | 10 | [Roster screen (staff)](10-fe-roster-screen.md) | frontend | Must | 1 | contract | In Progress | #475 |
 | 11 | [Today's word panel (staff)](11-fe-day-word-panel.md) | frontend | Must | 1 | contract | In Progress | #476 |
-| 12 | [Printable card sheet (staff)](12-fe-card-sheet.md) | frontend | Must | 1 | contract | In Progress | #477 |
+| 12 | [Printable card sheet (staff)](12-fe-card-sheet.md) | frontend | Must | 1 | contract | In Review | #477 |
 | 13 | [Email the personal link (Azure Communication Services)](13-email-delivery.md) | backend + infra | **Could** | 3 | 02, 03, 10 | Not Started | #478 |
 | 14 | [UAT tester provisioning script](14-uat-roster-script.md) | script | Could | 2 | backend deployed | Not Started | #479 |
 
