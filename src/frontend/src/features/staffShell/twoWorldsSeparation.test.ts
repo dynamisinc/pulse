@@ -38,6 +38,12 @@ const FORBIDDEN_SPECIFIER_PATTERNS: RegExp[] = [
   // the relative form. No participant module carries this name, so it can't
   // over-match.
   /staffShellTokens/,
+  // Easy-login story 10: `features/participantAdmin/` is the STAFF roster screen
+  // (COBRA, join URLs, sign-in credentials) despite its name. Matched as a path
+  // SEGMENT, so it catches `@/features/participantAdmin/...` and
+  // `../participantAdmin/...` but not `staffShell/participantAdminMocks` or the
+  // `ParticipantAdminFlyout` component, which are different, shell-owned modules.
+  /(^|\/)participantAdmin(\/|$)/,
 ]
 
 /**
@@ -119,12 +125,34 @@ const PARTICIPANT_SURFACE_FILES: Record<string, string> = {
   ...participantShellFiles,
 }
 
+describe('Two-worlds separation — the participantAdmin forbidden specifier (easy-login 10)', () => {
+  const violationsFor = (specifier: string) =>
+    findViolations({ 'fixture.ts': `import { RosterPage } from '${specifier}'` })
+
+  it.each([
+    '@/features/participantAdmin',
+    '@/features/participantAdmin/pages/RosterPage',
+    '../participantAdmin/pages/RosterPage',
+    '../../participantAdmin',
+  ])('flags a participant surface importing %s', specifier => {
+    expect(violationsFor(specifier)).toEqual([{ file: 'fixture.ts', specifier }])
+  })
+
+  it.each([
+    '@/features/staffShell/participantAdminMocks',
+    '../participantAdminMocks',
+    './components/ParticipantAdminFlyout',
+  ])('does not flag the unrelated shell module %s', specifier => {
+    expect(violationsFor(specifier)).toEqual([])
+  })
+})
+
 describe('Two-worlds separation — participant surfaces import no COBRA/Cadence tokens (D7-009)', () => {
   it('scans at least one real participant-surface file (this test cannot vacuously pass)', () => {
     expect(Object.keys(PARTICIPANT_SURFACE_FILES).length).toBeGreaterThan(0)
   })
 
-  it('finds NO import/require of @/theme/*, cobraTheme, styledComponents, CobraStyles, or staffShellTokens under any participant surface root', () => {
+  it('finds NO import/require of @/theme/*, cobraTheme, styledComponents, CobraStyles, staffShellTokens, or participantAdmin under any participant surface root', () => {
     const violations = findViolations(PARTICIPANT_SURFACE_FILES)
 
     if (violations.length > 0) {
