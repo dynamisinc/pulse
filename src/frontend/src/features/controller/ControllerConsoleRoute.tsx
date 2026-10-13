@@ -96,11 +96,27 @@
  * `useIsRowRemoved()`) marks removed rows REMOVED and disables "Reply as..." on them.
  * PE-FE's persona edit button is the `actionsSlot` of `PersonaContextPanel` in the dock.
  *
- * Note: `SessionProvider` is deliberately NOT in this stack — the console's
- * operating identity is `useControllerIdentity()` (a Phase-1 mock; the one mock
- * session is a participant), exactly as the shipped `/evaluator` route mounts no
- * session either. Preview-as-participant (a shell-global capability) is a later
- * console story and is not wired here (Wave-1 scope guard).
+ * DEMO-POLISH C6 - PREVIEW AS PARTICIPANT + STARTEX / ENDEX (docs/features/demo-polish/
+ * 23-preview-and-startex.md).
+ *
+ *   Preview as participant  -> `PreviewProvider` wraps the frame; `ConsoleStaffHeader` passes
+ *                     `previewActive` / `onTogglePreview` to `StaffHeader` (the header shows the
+ *                     toggle only when it is handed a handler); `ConsoleWorkArea` swaps the
+ *                     console for `PreviewAsParticipant` while the preview is staged - the same
+ *                     XOR `EvaluatorDashboardRoute` uses. The console UNMOUNTS while the preview
+ *                     is up: its React state is gone on Exit (what survives and what is lost is
+ *                     listed in `features/staffShell/README.md`).
+ *   StartEx / EndEx  -> `lifecycleSlot={<ExerciseLifecycleControl />}` on `ControllerConsole`
+ *                     (its title row). The control is controller-only on the SIGNED-IN SESSION's
+ *                     role and renders nothing with no session.
+ *
+ * SESSION. This route does NOT mount a `SessionProvider` of its own, but one IS in the stack:
+ * `app-shell/routes.tsx` hoists `ExerciseContextProvider > SessionProvider` above
+ * `RoleAwareEntry`, so every staff route sits under the real session. The console's operating
+ * identity for attribution is still `useControllerIdentity()` (a Phase-1 mock). The PREVIEW
+ * needs the hoisted session (the real participant channel reads it, and narrows it to a
+ * read-only observer); a test that mounts this route directly and opens the preview must supply
+ * a `SessionProvider` itself, and one whose session role is `controller` to see StartEx / EndEx.
  */
 
 import { memo, useCallback, useMemo } from 'react'
@@ -111,6 +127,9 @@ import { StaffShellFrame } from '@/features/staffShell/StaffShellFrame'
 import { StaffHeader } from '@/features/staffShell/components/StaffHeader'
 import { pauseStatePillConfig } from '@/features/staffShell/components/statePillConfig'
 import { Toolstrip } from '@/features/staffShell/components/Toolstrip'
+import { PreviewProvider, usePreview } from '@/features/staffShell/previewContext'
+import { PreviewAsParticipant } from '@/features/staffShell/components/PreviewAsParticipant'
+import { ExerciseLifecycleControl } from './lifecycle'
 import { usePauseState } from './hooks/usePauseState'
 import { postStore } from '@/features/social/services/postStore'
 import { EngineDraftEditComposer, type ReviewQueueEditSlotProps } from './engine'
@@ -286,8 +305,18 @@ function ControllerConsoleContent() {
       liveWorldSlot={liveWorldSlot}
       runSheetSlot={renderRunSheet}
       onDockClose={clearReply}
+      lifecycleSlot={<ExerciseLifecycleControl />}
     />
   )
+}
+
+/**
+ * The work area: the console, or - while "Preview as participant" is staged - the preview stage
+ * in its place (the same XOR the evaluator dashboard uses; staff-shell story 04).
+ */
+function ConsoleWorkArea() {
+  const { active } = usePreview()
+  return active ? <PreviewAsParticipant /> : <ControllerConsoleContent />
 }
 
 /**
@@ -300,10 +329,13 @@ function ControllerConsoleContent() {
  */
 function ConsoleStaffHeader() {
   const { isPaused, label } = usePauseState()
+  const { active, toggle } = usePreview()
   return (
     <StaffHeader
       surfaceName="Controller Console"
       stateOverride={isPaused ? pauseStatePillConfig(label) : undefined}
+      previewActive={active}
+      onTogglePreview={toggle}
     />
   )
 }
@@ -316,12 +348,14 @@ export function ControllerConsoleRoute() {
   return (
     <ToolstripProvider>
       <ActivePersonaProvider>
-        <StaffShellFrame
-          header={<ConsoleStaffHeader />}
-          toolstrip={<Toolstrip />}
-        >
-          <ControllerConsoleContent />
-        </StaffShellFrame>
+        <PreviewProvider>
+          <StaffShellFrame
+            header={<ConsoleStaffHeader />}
+            toolstrip={<Toolstrip />}
+          >
+            <ConsoleWorkArea />
+          </StaffShellFrame>
+        </PreviewProvider>
       </ActivePersonaProvider>
     </ToolstripProvider>
   )
