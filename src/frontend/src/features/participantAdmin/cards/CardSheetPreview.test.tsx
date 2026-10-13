@@ -9,7 +9,7 @@
  * jsdom cannot evaluate print media, so the paper itself is covered by the CSS guard in
  * `cardSheet.css.test.ts` and the manual checklist in this folder's README.
  */
-import { screen, waitFor, within } from '@testing-library/react'
+import { act, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { CardSheetPreview } from './CardSheetPreview'
@@ -344,6 +344,165 @@ describe('CardSheetPreview - Print and Close', () => {
     expect(onClose).toHaveBeenCalledTimes(1)
     release()
     await loaded()
+  })
+})
+
+/** What the browser does when the print dialog has been used or dismissed. */
+function fireAfterPrint() {
+  act(() => {
+    window.dispatchEvent(new Event('afterprint'))
+  })
+}
+
+describe('CardSheetPreview - after printing (Gate-2 S-3)', () => {
+  it('shows no prompt before anything has been printed', async () => {
+    await renderPreview()
+    await loaded()
+    expect(screen.queryByTestId('card-sheet-after-print')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Close the sheet' })).not.toBeInTheDocument()
+  })
+
+  it('does not appear merely because Print was pressed: it waits for the browser\'s afterprint', async () => {
+    const user = userEvent.setup()
+    await renderPreview()
+    await loaded()
+
+    await user.click(screen.getByRole('button', { name: 'Print' }))
+
+    expect(printSpy).toHaveBeenCalledTimes(1)
+    expect(screen.queryByTestId('card-sheet-after-print')).not.toBeInTheDocument()
+  })
+
+  it('offers "Done printing? Close the sheet" on afterprint, focused on the primary action', async () => {
+    await renderPreview()
+    await loaded()
+
+    fireAfterPrint()
+
+    const prompt = await screen.findByRole('group', { name: 'Done printing?' })
+    expect(prompt).toHaveTextContent(/personal links and QR codes/i)
+    const close = within(prompt).getByRole('button', { name: 'Close the sheet' })
+    expect(close).toHaveFocus()
+    // The sentence is the focused button's description, so a screen reader reads it with the name.
+    expect(close).toHaveAccessibleDescription(/do not stay on this screen/i)
+    expect(within(prompt).getByRole('button', { name: 'Keep it open' })).toBeEnabled()
+    // Icon plus text, never colour alone.
+    expect(prompt.querySelector('svg')).not.toBeNull()
+  })
+
+  it('arrives by itself when the browser fires afterprint in response to Print', async () => {
+    const user = userEvent.setup()
+    // A real browser blocks in print() and fires afterprint when the dialog goes away.
+    printSpy.mockImplementation(() => { window.dispatchEvent(new Event('afterprint')) })
+    await renderPreview()
+    await loaded()
+
+    await user.click(screen.getByRole('button', { name: 'Print' }))
+
+    expect(await screen.findByRole('button', { name: 'Close the sheet' })).toHaveFocus()
+  })
+
+  it('also appears after a Ctrl+P / dismissed dialog (afterprint is not tied to our button)', async () => {
+    await renderPreview()
+    await loaded()
+    expect(printSpy).not.toHaveBeenCalled()
+
+    fireAfterPrint()
+
+    expect(await screen.findByTestId('card-sheet-after-print')).toBeInTheDocument()
+  })
+
+  it('"Close the sheet" closes the preview, so the links and QR codes leave the screen', async () => {
+    const user = userEvent.setup()
+    const onClose = vi.fn()
+    await renderPreview([], onClose)
+    await loaded()
+    fireAfterPrint()
+
+    await user.click(await screen.findByRole('button', { name: 'Close the sheet' }))
+
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  it('"Keep it open" hides the prompt and puts focus back on Print, for a second copy', async () => {
+    const user = userEvent.setup()
+    const onClose = vi.fn()
+    await renderPreview([], onClose)
+    await loaded()
+    fireAfterPrint()
+
+    await user.click(await screen.findByRole('button', { name: 'Keep it open' }))
+
+    expect(screen.queryByTestId('card-sheet-after-print')).not.toBeInTheDocument()
+    expect(onClose).not.toHaveBeenCalled()
+    expect(screen.getByRole('button', { name: 'Print' })).toHaveFocus()
+    expect(screen.getByTestId('card-sheet')).toBeInTheDocument()
+
+    // A second print asks again.
+    fireAfterPrint()
+    expect(await screen.findByRole('button', { name: 'Close the sheet' })).toHaveFocus()
+  })
+
+  it('never closes the sheet by itself', async () => {
+    const onClose = vi.fn()
+    await renderPreview([], onClose)
+    await loaded()
+    fireAfterPrint()
+    await screen.findByTestId('card-sheet-after-print')
+    await new Promise(resolve => setTimeout(resolve, 50))
+    expect(onClose).not.toHaveBeenCalled()
+  })
+
+  it('is screen-only: inside the staff chrome, never in the printed sheet', async () => {
+    await renderPreview()
+    await loaded()
+    fireAfterPrint()
+
+    const prompt = await screen.findByTestId('card-sheet-after-print')
+    expect(screen.getByTestId('card-sheet-screen-only')).toContainElement(prompt)
+    expect(screen.getByTestId('card-sheet')).not.toContainElement(prompt)
+    expect(screen.getByTestId('card-sheet-stage')).not.toContainElement(prompt)
+  })
+
+  it('keeps the dialog\'s keyboard behaviour: Escape still closes, Tab stays inside', async () => {
+    const user = userEvent.setup()
+    const onClose = vi.fn()
+    await renderPreview([], onClose)
+    await loaded()
+    fireAfterPrint()
+    const close = await screen.findByRole('button', { name: 'Close the sheet' })
+
+    await user.tab()
+    expect(screen.getByRole('button', { name: 'Keep it open' })).toHaveFocus()
+    await user.tab()
+    expect(screen.getByTestId('card-sheet-stage')).toHaveFocus()
+    await user.tab()
+    expect(screen.getByRole('button', { name: 'Print' })).toHaveFocus()
+
+    close.focus()
+    await user.keyboard('{Escape}')
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  it('offers nothing when there is no sheet on screen to close (error or all-skipped)', async () => {
+    setMockCardsScenario('serverError')
+    await renderPreview()
+    await screen.findByRole('alert')
+
+    fireAfterPrint()
+
+    expect(screen.queryByTestId('card-sheet-after-print')).not.toBeInTheDocument()
+  })
+
+  it('stops listening when the preview closes', async () => {
+    const remove = vi.spyOn(window, 'removeEventListener')
+    const { unmount } = await renderPreview()
+    await loaded()
+
+    unmount()
+
+    expect(remove).toHaveBeenCalledWith('afterprint', expect.any(Function))
+    expect(() => fireAfterPrint()).not.toThrow()
   })
 })
 
