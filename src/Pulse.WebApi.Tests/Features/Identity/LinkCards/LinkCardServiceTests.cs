@@ -306,6 +306,49 @@ public sealed class LinkCardServiceTests
     }
 
     [RequiresDockerFact]
+    public async Task TheCap_CountsIdsAsSent_BeforeDeduplication()
+    {
+        var exercise = await _world.SeedExerciseAsync();
+        var staff = await _world.SeedStaffAsync((exercise, "controller"));
+        var one = Guid.NewGuid().ToString();
+
+        var sameGuid501Times = Enumerable.Repeat(one, 501).ToList();
+        var mixedCase = Enumerable.Repeat(one, 250).Concat(Enumerable.Repeat(one.ToUpperInvariant(), 251)).ToList();
+
+        (await _world.GenerateAsync(exercise, staff, sameGuid501Times)).Outcome.Should().Be(
+            LinkCardOutcome.TooManyIds, "501 ids as sent is over the cap, even if they are one account");
+        (await _world.GenerateAsync(exercise, staff, mixedCase)).Outcome.Should().Be(
+            LinkCardOutcome.TooManyIds, "the cap is applied before case-insensitive de-duplication");
+        (await _world.GenerateAsync(exercise, staff, sameGuid501Times.Take(500).ToList())).Outcome.Should().Be(
+            LinkCardOutcome.Ok, "500 as sent is at the cap");
+    }
+
+    [RequiresDockerFact]
+    public async Task AnOverLongId_IsStillASkip_EchoedCutTo64Characters()
+    {
+        var exercise = await _world.SeedExerciseAsync();
+        var staff = await _world.SeedStaffAsync((exercise, "controller"));
+        var person = await _world.SeedParticipantAsync(exercise, "Still Printed");
+
+        var longA = new string('a', 64) + "-first-tail";
+        var longB = new string('A', 64) + "-a-different-tail";
+        var splitPair = new string('b', 63) + "\U0001F600" + "tail";
+        var exactly64 = new string('c', 64);
+
+        var result = await _world.GenerateAsync(
+            exercise, staff, [person.AccountId.ToString(), longA, longB, splitPair, exactly64, new string('z', 10_000)]);
+
+        result.Outcome.Should().Be(LinkCardOutcome.Ok, "one bad id never fails the whole sheet");
+        result.Sheet!.Cards.Should().ContainSingle().Which.ParticipantId.Should().Be(person.AccountId.ToString());
+        result.Sheet.Skipped.Select(s => s.ParticipantId).Should().Equal(
+            [new string('a', 64), new string('b', 63), exactly64, new string('z', 64)],
+            "an over-long id is echoed cut to 64 characters (never splitting a surrogate pair), and two that echo alike "
+            + "(case-insensitively) are one skip");
+        result.Sheet.Skipped.Should().OnlyContain(s => s.Reason == RosterCardSkipReasons.NotFound)
+            .And.OnlyContain(s => s.ParticipantId.Length <= LinkCardService.MaxEchoedIdLength);
+    }
+
+    [RequiresDockerFact]
     public async Task NoStaffSession_OrAnUnresolvedScope_IsUnauthenticated()
     {
         var exercise = await _world.SeedExerciseAsync();

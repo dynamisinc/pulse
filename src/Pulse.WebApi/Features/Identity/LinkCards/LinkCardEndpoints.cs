@@ -30,9 +30,9 @@ using Pulse.WebApi.Features.Identity.EasyLogin;
 /// </para>
 /// <para>
 /// <b>Status contract.</b> <c>200</c> <see cref="RosterCardsDto"/>; <c>400</c> ProblemDetails for a body that is not
-/// JSON, is malformed, has an unknown or repeated property, has both or neither of the two members, an empty
-/// <c>participantIds</c>, <c>all</c> other than <c>true</c>, or more than <see cref="EasyLoginOptions.MaxCardsPerRequest"/>
-/// ids; <c>413</c> ProblemDetails for a body over <see cref="MaxRequestBodyBytes"/>; <c>409</c> ProblemDetails when
+/// JSON, is malformed, has an unknown or repeated property, has both or neither of the two members, an explicit
+/// <c>null</c> for either member, an empty <c>participantIds</c>, <c>all</c> other than <c>true</c>, or more than
+/// <see cref="EasyLoginOptions.MaxCardsPerRequest"/> ids as sent; <c>413</c> ProblemDetails for a body over <see cref="MaxRequestBodyBytes"/>; <c>409</c> ProblemDetails when
 /// <c>Authentication:FrontendBaseUrl</c> is not usable ("join links are not configured"). Every response the handler
 /// writes carries <c>Cache-Control: no-store</c>, because a sheet holds bearer credentials. (The filters' own 401/403
 /// carry no body and are written before the handler runs.)

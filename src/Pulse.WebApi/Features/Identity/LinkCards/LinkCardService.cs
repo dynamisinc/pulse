@@ -59,6 +59,12 @@ using Pulse.WebApi.Features.Identity.Staff;
 /// </remarks>
 public sealed class LinkCardService
 {
+    /// <summary>
+    /// The longest requested id echoed back in a <c>notFound</c> skip; a longer value is echoed cut to this length (a
+    /// GUID is 36, so no real id is ever cut). It stays a skip rather than a 400 so one bad id never fails the sheet.
+    /// </summary>
+    public const int MaxEchoedIdLength = 64;
+
     private readonly PulseDbContext _dbContext;
     private readonly IExerciseContext _exerciseContext;
     private readonly ICurrentStaffSessionAccessor _currentStaffSession;
@@ -133,7 +139,8 @@ public sealed class LinkCardService
     /// <param name="request">
     /// The deserialized body (<c>null</c> for a JSON <c>null</c>). <c>all: true</c> means every participant in the
     /// exercise; <c>participantIds</c> means only these accounts, where a value that is not an account id of this
-    /// exercise (unknown, from another exercise, malformed or blank) is skipped as <c>notFound</c>, echoed as sent.
+    /// exercise (unknown, from another exercise, malformed or blank) is skipped as <c>notFound</c>, echoed as sent
+    /// (cut to <see cref="MaxEchoedIdLength"/> characters).
     /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The result the endpoint maps to a status.</returns>
@@ -335,7 +342,8 @@ public sealed class LinkCardService
     /// The validated body: "everyone" for <c>{ all: true }</c>, otherwise each distinct requested value in request
     /// order with its parsed account id (<c>null</c> when it is not a GUID). Two spellings of one GUID, or the same
     /// malformed text in two casings, are one entry (the first spelling is the one echoed back in a <c>notFound</c>
-    /// skip).
+    /// skip). A value is echoed at most <see cref="MaxEchoedIdLength"/> characters long, and two over-long values
+    /// that echo the same are one entry.
     /// </summary>
     private sealed class RequestedAccounts
     {
@@ -405,10 +413,14 @@ public sealed class LinkCardService
                     {
                         entries.Add(new RequestedId(id, raw));
                     }
+
+                    continue;
                 }
-                else if (seenUnparsed.Add(raw))
+
+                var echo = BoundedEcho(raw);
+                if (seenUnparsed.Add(echo))
                 {
-                    entries.Add(new RequestedId(Id: null, raw));
+                    entries.Add(new RequestedId(Id: null, echo));
                 }
             }
 
@@ -417,8 +429,20 @@ public sealed class LinkCardService
 
         private static (RequestedAccounts? Accounts, LinkCardResult? Refusal) Refuse(string message) =>
             (null, LinkCardResult.Invalid(message));
+
+        /// <summary>The value cut to <see cref="MaxEchoedIdLength"/> characters, never splitting a surrogate pair.</summary>
+        private static string BoundedEcho(string raw)
+        {
+            if (raw.Length <= MaxEchoedIdLength)
+            {
+                return raw;
+            }
+
+            var length = char.IsHighSurrogate(raw[MaxEchoedIdLength - 1]) ? MaxEchoedIdLength - 1 : MaxEchoedIdLength;
+            return raw[..length];
+        }
     }
 
-    /// <summary>One requested id: the parsed account id (or <c>null</c>) and the value exactly as sent.</summary>
+    /// <summary>One requested id: the parsed account id (or <c>null</c>) and the value to echo (as sent, length-bounded).</summary>
     private sealed record RequestedId(Guid? Id, string Raw);
 }

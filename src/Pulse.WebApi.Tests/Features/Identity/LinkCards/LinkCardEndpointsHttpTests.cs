@@ -133,11 +133,17 @@ public sealed class LinkCardEndpointsHttpTests
         await using var host = await StartHostAsync(exercise);
         using var client = host.Client(await LinkCardTestHost.SeedStaffSessionAsync(_world, staff, exercise));
 
-        var sheet = await PostSheetAsync(client, LinkCardTestHost.IdsJson(string.Empty, "not-a-guid"));
+        var overLong = new string('x', 300);
+        var sheet = await PostSheetAsync(client, LinkCardTestHost.IdsJson(string.Empty, "not-a-guid", overLong));
 
         sheet.Cards.Should().BeEmpty("only { all: true } means every participant");
         sheet.Skipped.Select(s => (s.ParticipantId, s.Reason)).Should().Equal(
-            [(string.Empty, RosterCardSkipReasons.NotFound), ("not-a-guid", RosterCardSkipReasons.NotFound)]);
+            [
+                (string.Empty, RosterCardSkipReasons.NotFound),
+                ("not-a-guid", RosterCardSkipReasons.NotFound),
+                (overLong[..LinkCardService.MaxEchoedIdLength], RosterCardSkipReasons.NotFound),
+            ],
+            "an over-long id is still a skip (never a 400 that fails the sheet), echoed cut to 64 characters");
     }
 
     [RequiresDockerTheory]
@@ -146,7 +152,11 @@ public sealed class LinkCardEndpointsHttpTests
     [InlineData("{\"participantIds\":[\"00000000-0000-0000-0000-000000000001\"],\"all\":true}", "application/json", "both members")]
     [InlineData("{}", "application/json", "neither member")]
     [InlineData("{\"all\":false}", "application/json", "all other than true")]
-    [InlineData("{\"all\":null}", "application/json", "all null and nothing else")]
+    [InlineData("{\"all\":null}", "application/json", "an explicit null all")]
+    [InlineData("{\"participantIds\":null,\"all\":true}", "application/json", "an explicit null participantIds beside all")]
+    [InlineData("{\"participantIds\":[\"00000000-0000-0000-0000-000000000001\"],\"all\":null}", "application/json", "an explicit null all beside participantIds")]
+    [InlineData("{\"participantIds\":null}", "application/json", "an explicit null participantIds")]
+    [InlineData("{\"participantIds\":[\"\\uD83D\"]}", "application/json", "an id that is not valid UTF-16")]
     [InlineData("{\"all\":\"true\"}", "application/json", "all as a string")]
     [InlineData("{\"all\":1}", "application/json", "all as a number")]
     [InlineData("{\"participantIds\":\"00000000-0000-0000-0000-000000000001\"}", "application/json", "participantIds as a string")]
@@ -284,9 +294,16 @@ public sealed class LinkCardEndpointsHttpTests
         using var client = host.Client(await LinkCardTestHost.SeedStaffSessionAsync(_world, evaluator, exercise));
 
         using var response = await LinkCardTestHost.PostCardsAsync(client, LinkCardTestHost.AllJson);
+        using var garbage = await LinkCardTestHost.PostCardsAsync(client, "{\"all\":tru", "text/plain");
+        using var oversized = await LinkCardTestHost.PostCardsAsync(
+            client, LinkCardTestHost.IdsJson(Enumerable.Range(0, 2000).Select(_ => (object)Guid.NewGuid()).ToArray()));
 
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden, "evaluators observe; they do not hand out credentials");
         (await response.Content.ReadAsStringAsync()).Should().NotContain("/join/");
+        garbage.StatusCode.Should().Be(
+            HttpStatusCode.Forbidden, "the role gate runs before the body is read, so a bad body changes nothing for an evaluator");
+        oversized.StatusCode.Should().Be(HttpStatusCode.Forbidden, "nor does an oversized one: it is never read");
+        (await _world.CardEventsAsync(exercise)).Should().BeEmpty();
     }
 
     [RequiresDockerFact]

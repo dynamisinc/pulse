@@ -12,8 +12,8 @@ using FluentAssertions;
 /// <c>SvgQRCode</c> with string colours). QRCoder 1.8.1 pulls <c>System.Drawing.Common</c> in transitively, so nothing
 /// stops a later edit from reaching for a bitmap renderer or a <c>System.Drawing.Color</c> overload, which compile
 /// everywhere and throw on Linux App Service at the first print. This sweeps the production source of
-/// <c>Features/Identity/LinkCards/</c> (code only, comments stripped) so that edit fails here instead. Model-only: runs
-/// on every machine.
+/// <c>Features/Identity/LinkCards/</c> (code only: whole-line <c>//</c> and <c>///</c> comments are dropped, nothing
+/// else) so that edit fails here instead. Model-only: runs on every machine.
 /// </summary>
 public sealed partial class LinkCardSourceGuardTests
 {
@@ -44,6 +44,16 @@ public sealed partial class LinkCardSourceGuardTests
     }
 
     [Theory]
+    [InlineData("    /// <see cref=\"System.Drawing.Color\"/> overloads are Windows-only.", false)]
+    [InlineData("// SvgQRCode owns the QRCodeData it renders.", false)]
+    [InlineData("var url = \"https://example.com\"; // trailing comment", true)]
+    [InlineData("        var svg = Render(); // uses QRCode", true)]
+    public void TheStripper_DropsOnlyWholeLineComments(string line, bool kept)
+    {
+        WholeLineComment().IsMatch(line).Should().Be(!kept, "'{0}' is {1}", line, kept ? "code, kept" : "a comment line, dropped");
+    }
+
+    [Theory]
     [InlineData("using System.Drawing;")]
     [InlineData("var c = Color.Black;")]
     [InlineData("using var qr = new QRCode(data);")]
@@ -60,7 +70,11 @@ public sealed partial class LinkCardSourceGuardTests
         caught.Should().BeTrue("the guard would be vacuous if it let '{0}' through", offendingLine);
     }
 
-    /// <summary>Every production <c>.cs</c> file of the slice, with <c>//</c> and <c>///</c> comment text removed.</summary>
+    /// <summary>
+    /// Every production <c>.cs</c> file of the slice with its whole-line <c>//</c> and <c>///</c> comments dropped. Only
+    /// WHOLE lines go: a trailing comment after code, and anything inside a string literal (<c>"https://…"</c>), stays,
+    /// so the stripper can only make the guard stricter, never hide code from it.
+    /// </summary>
     private static List<(string Name, string Code)> SliceFiles()
     {
         var slice = Path.Combine(FindRepositoryRoot(), "src", "Pulse.WebApi", "Features", "Identity", "LinkCards");
@@ -69,7 +83,7 @@ public sealed partial class LinkCardSourceGuardTests
         return Directory.EnumerateFiles(slice, "*.cs", SearchOption.AllDirectories)
             .Select(path => (Path.GetFileName(path), string.Join(
                 '\n',
-                File.ReadLines(path).Select(line => LineComment().Replace(line, string.Empty)))))
+                File.ReadLines(path).Where(line => !WholeLineComment().IsMatch(line)))))
             .ToList();
     }
 
@@ -87,9 +101,9 @@ public sealed partial class LinkCardSourceGuardTests
         throw new InvalidOperationException($"Could not locate pulse.slnx above '{AppContext.BaseDirectory}'.");
     }
 
-    /// <summary>A <c>//</c> comment to the end of the line (the slice has no <c>//</c> inside string literals that matters here).</summary>
-    [GeneratedRegex(@"//.*$", RegexOptions.CultureInvariant)]
-    private static partial Regex LineComment();
+    /// <summary>A line that is nothing but a <c>//</c> or <c>///</c> comment (leading whitespace allowed).</summary>
+    [GeneratedRegex(@"^\s*//", RegexOptions.CultureInvariant)]
+    private static partial Regex WholeLineComment();
 
     /// <summary><c>Color</c> as a whole identifier (not <c>DarkColorHex</c>).</summary>
     [GeneratedRegex(@"\bColor\b", RegexOptions.CultureInvariant)]

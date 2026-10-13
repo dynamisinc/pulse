@@ -16,10 +16,13 @@ World: staff (the data feeds the print preview in story 12). The QR encodes exac
 
 ## Acceptance Criteria
 
-- [ ] **Given** `POST /api/staff/roster/cards` *(amended: was GET, see EL-20)*, **then** it answers `200 RosterCardsDto` with `exerciseName` and one
-      `RosterCardDto` per participant whose account is enabled, whose link is active and whose token decrypts:
-      `name`, `agency`, `role`, `signInName`, `joinUrl` and `qrSvgDataUri`. Ordered by name. `?id=` (repeatable)
-      limits it to those accounts; no `id` means every eligible participant.
+- [ ] **Given** `POST /api/staff/roster/cards` *(amended: was GET, see EL-20)* with a JSON body that is exactly one
+      of `{ "participantIds": [ … ] }` or `{ "all": true }`, **then** it answers `200 RosterCardsDto` with
+      `exerciseName` and one `RosterCardDto` per participant whose account is enabled, whose link is active and whose
+      token decrypts: `name`, `agency`, `role`, `signInName`, `joinUrl` and `qrSvgDataUri`. Ordered by name.
+      `participantIds` (1 to 500, de-duplicated case-insensitively) limits it to those accounts; `all: true` means
+      every eligible participant (uncapped). A blank or malformed id is a `notFound` skip, echoed back cut to 64
+      characters; it never widens the request to everyone.
 - [ ] **Given** the QR, **then** `qrSvgDataUri` is `data:image/svg+xml;base64,…` for an SVG that encodes **exactly**
       the card's `joinUrl` (QRCoder `SvgQRCode`, error correction M, quiet zone included, a `viewBox` so it scales,
       black on white). The SVG contains no `<script>`, no `<image>`, no `href`/`xlink:href` and no external
@@ -30,7 +33,11 @@ World: staff (the data feeds the print preview in story 12). The QR encodes exac
       `tokenUnrecoverable` (the protected copy no longer decrypts). The request still succeeds with the others.
 - [ ] **Given** `Authentication:FrontendBaseUrl` is unset, **then** the endpoint answers `409` ProblemDetails
       ("join links are not configured") and no card is produced; `GET /api/staff/roster` already reports
-      `joinLinksAvailable: false` (story 02). **Given** more than `MaxCardsPerRequest` (500) ids, **then** `400`.
+      `joinLinksAvailable: false` (story 02). **Given** more than `MaxCardsPerRequest` (500) ids as sent (counted
+      before de-duplication), **then** `400`. **Given** any other body (not JSON; malformed; an unknown, mis-cased or
+      repeated property; both members or neither; an empty `participantIds`; `all` other than `true`; an explicit
+      `null` for either member; a wrong type), **then** `400` ProblemDetails. **Given** a body over 64 KiB, **then**
+      `413` ProblemDetails. Every `400`/`409`/`413` is ProblemDetails with a readable `detail` and no card.
 - [ ] **Given** any successful response, **then** it carries `Cache-Control: no-store` (it contains credentials).
 
 ### Cross-cutting
@@ -68,17 +75,19 @@ seeding `ParticipantLink` rows. Consumed by story 12.
 ## Tests
 
 `Pulse.WebApi.Tests/Features/Identity/LinkCards/`: `QrSvgRendererTests` (matrix equals QRCoder's for the URL,
-well-formed, no script/href/image), `LinkCardServiceTests` (eligible, each skip reason, join base unset,
->500, `id` filter), `LinkCardEndpointsHttpTests` (200/400/409/401/403, `no-store`),
-`LinkCardIsolationTests` (`[RequiresDockerFact]`: cross-exercise id is `notFound`), `LinkCardTelemetryTests`.
+well-formed, no script/href/image), `LinkCardServiceTests` (eligible, each skip reason, join base unset or vanishing
+mid-request, >500 as sent, `participantIds` vs `all`, every ill-shaped body, the 64-character echo bound),
+`LinkCardEndpointsHttpTests` (200 for both body shapes; 400 for every other body shape and over the cap; 409; 413
+over 64 KiB; 401/403 before the body is read; `no-store`; 500 ids and the 413 on REAL Kestrel, since TestServer has
+no request limits), `LinkCardIsolationTests` (`[RequiresDockerFact]`: cross-exercise id is `notFound`),
+`LinkCardTelemetryTests`, `LinkCardSourceGuardTests` (no `System.Drawing`, bitmap renderer or `Color` in the slice).
 Manual check in UAT: scan a card QR with a phone camera (see `feature.md` walk-through step 4).
 
 ### Test linkage
 
 AC numbers follow the order of the criteria above: AC-1 the 200 sheet, AC-2 the QR, AC-3 the skip reasons, AC-4 the
 409 and 400, AC-5 `no-store`; then AC-6 Isolation, AC-7 Telemetry, AC-8 Authorization, AC-9 Content security. The
-route is `POST` with `{ participantIds }` or `{ all: true }` (EL-20, Gate-1 W-1/W-2), so "`?id=` limits it / no `id`
-means everyone" in AC-1 reads as "`participantIds` limits it / `all: true` means everyone". Shared seeding and the
+route is `POST` with `{ participantIds }` or `{ all: true }` (EL-20, Gate-1 W-1/W-2). Shared seeding and the
 frontend-gate mirror live in `LinkCardTestWorld` (`FrontendQrGate` is `safeQrDataUri.ts`'s regex and 512 KB cap,
 transcribed); the HTTP suite runs on a self-hosted `LinkCardTestHost` with the real filters and the real token-backed
 `CurrentStaffSessionAccessor` (TestServer, or real Kestrel on a loopback port for the request-limit tests), because
@@ -98,19 +107,21 @@ transcribed); the HTTP suite runs on a self-hosted `LinkCardTestHost` with the r
   `.TheRenderer_IsTheCrossPlatformSvgPath_NeverSystemDrawing`;
   `LinkCardServiceTests.EveryCardsQr_EncodesItsOwnJoinUrl_AndPassesTheFrontendGate`;
   `LinkCardSourceGuardTests.TheLinkCardSlice_NeverReferencesSystemDrawing_TheBitmapRenderers_OrColor`,
-  `.TheGuard_CatchesTheThingsItBans`.
+  `.TheGuard_CatchesTheThingsItBans`, `.TheStripper_DropsOnlyWholeLineComments`.
 - **AC-3** `LinkCardServiceTests.EachSkipReason_IsReported_AndTheRequestStillSucceedsWithTheOthers` (`noActiveLink`
   for no link and revoked, `disabled` with and without a link, `tokenUnrecoverable` for a lost key ring, a stale copy
   and no copy, `notFound`), `.MalformedOrBlankIds_AreNotFound_AndNeverWidenToEveryone`;
+  `.AnOverLongId_IsStillASkip_EchoedCutTo64Characters`;
   `LinkCardEndpointsHttpTests.ABlankOrMalformedId_IsANotFoundSkip_EchoedBack_NeverEveryone`.
 - **AC-4** `LinkCardServiceTests.UnsetJoinBase_IsJoinLinksUnavailable_AndNoCardIsProduced`,
   `.AJoinBaseThatDisappearsMidRequest_IsJoinLinksUnavailable_NotAPartialSheet`,
   `.MoreIdsThanTheCap_IsTooManyIds_AndExactlyTheCapIsFine`, `.EveryIllShapedBody_IsInvalid_AndReadsNothing`;
   `LinkCardEndpointsHttpTests.NoJoinBase_Is409ProblemDetails_WithNoStore_AndNoCard`,
-  `.MoreThan500Ids_Is400ProblemDetails_WithNoStore`, `.EveryOtherBodyShape_Is400ProblemDetails_WithNoStore` (26 shapes:
-  unknown, mis-cased, repeated or old-spelling properties, both, neither, empty array, `all` not `true`, wrong types,
-  null ids, trailing content, comments, non-object roots, JSON `null`, empty, malformed, non-JSON content types),
-  `.OnRealKestrel_ABodyOver64KiB_Is413ProblemDetails_WithNoStore`.
+  `.MoreThan500Ids_Is400ProblemDetails_WithNoStore`, `.EveryOtherBodyShape_Is400ProblemDetails_WithNoStore` (30 shapes:
+  unknown, mis-cased, repeated or old-spelling properties, both, neither, empty array, `all` not `true`, an explicit
+  `null` for either member, wrong types, null ids, invalid UTF-16, trailing content, comments, non-object roots, JSON
+  `null`, empty, malformed, non-JSON content types),
+  `.OnRealKestrel_ABodyOver64KiB_Is413ProblemDetails_WithNoStore`; `LinkCardServiceTests.TheCap_CountsIdsAsSent_BeforeDeduplication`.
 - **AC-5** `LinkCardEndpointsHttpTests.AController_Gets200_InTheFrozenShape_WithNoStore` (and every 400/409/413 test above).
 - **AC-6** `LinkCardIsolationTests.AnIdFromAnotherExercise_IsNotFound_ExactlyLikeAnUnknownId`,
   `.Everyone_MeansEveryoneInTheCallersExercise_Only`, `.MixedRequest_GivesCardsOnlyForTheCallersExercise`,
@@ -121,7 +132,7 @@ transcribed); the HTTP suite runs on a self-hosted `LinkCardTestHost` with the r
   `.TheScenarioTime_IsTheLiveExerciseClock_WhenItRuns`, `.ARequestThatProducesNoCard_StillEmitsOneEvent_WithCountZero`,
   `.TwoRequests_AreTwoEvents`, `.NoUrlTokenOrName_EverReachesTheEvent`, `.ARefusedRequest_EmitsNothing`,
   `.TheEvent_PassesTheEnvelopeRules`.
-- **AC-8** `LinkCardEndpointsHttpTests.AnEvaluator_Is403`, `.AStaffUserNotAssignedToTheExercise_Is403`,
+- **AC-8** `LinkCardEndpointsHttpTests.AnEvaluator_Is403` (also with a garbage and an oversized body), `.AStaffUserNotAssignedToTheExercise_Is403`,
   `.AParticipantSession_NeverReachesIt_401`, `.AnUnresolvedScope_Is401`, `.NoCredential_Is401_BeforeTheBodyOrTheDatabaseIsTouched`,
   `.ComposedIntoTheRealProgramHost_AddLinkCardsAlone_ResolvesTheService`;
   `LinkCardServiceTests.NoStaffSession_OrAnUnresolvedScope_IsUnauthenticated`, `.AnEvaluator_OrAnUnassignedStaffUser_IsForbidden`,

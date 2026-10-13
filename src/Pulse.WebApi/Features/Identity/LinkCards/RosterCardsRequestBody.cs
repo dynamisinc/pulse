@@ -17,8 +17,12 @@ using System.Text.Json.Serialization;
 /// <c>?ids=</c> to an EMPTY list, which meant "everyone". Here "everyone" is only ever the explicit <c>all: true</c>.
 /// </para>
 /// <para>
-/// Members are nullable so "absent" is visible to the service, which enforces "exactly one of the two" and answers a
-/// readable 400 (<see cref="LinkCardService.GenerateAsync"/>). No exercise id: the scope is server-resolved (COR-001).
+/// <b>An explicit JSON <c>null</c> is refused, never read as "absent".</b> EL-20 types the members as
+/// <c>participantIds: string[]</c> and <c>all: true</c>, neither nullable, so <c>{"participantIds":null,"all":true}</c>,
+/// <c>{"participantIds":[…],"all":null}</c> and <c>{"all":null}</c> are each a 400: both members carry a converter that
+/// is handed the <c>null</c> token and throws. A <c>null</c> member on this type therefore always means the member was
+/// ABSENT, which the service turns into "exactly one of the two" (a readable 400 otherwise,
+/// <see cref="LinkCardService.GenerateAsync"/>). No exercise id: the scope is server-resolved (COR-001).
 /// </para>
 /// </remarks>
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
@@ -41,13 +45,100 @@ public sealed class RosterCardsRequestBody
 
     /// <summary>
     /// The accounts to print, as sent (1 to <c>MaxCardsPerRequest</c>). De-duplicated by the service (a GUID in any
-    /// casing is one account); a blank or malformed value is a <c>notFound</c> skip echoed back as sent. <c>null</c>
-    /// when absent.
+    /// casing is one account); a blank or malformed value is a <c>notFound</c> skip echoed back (bounded in length).
+    /// <c>null</c> only when absent: an explicit JSON <c>null</c> is refused.
     /// </summary>
     [JsonPropertyName("participantIds")]
+    [JsonConverter(typeof(NonNullStringListConverter))]
     public IReadOnlyList<string?>? ParticipantIds { get; init; }
 
-    /// <summary><c>true</c> to print every participant in the exercise; must be <c>true</c> when present. <c>null</c> when absent.</summary>
+    /// <summary>
+    /// <c>true</c> to print every participant in the exercise; must be <c>true</c> when present. <c>null</c> only when
+    /// absent: an explicit JSON <c>null</c> is refused.
+    /// </summary>
     [JsonPropertyName("all")]
+    [JsonConverter(typeof(NonNullBooleanConverter))]
     public bool? All { get; init; }
+
+    /// <summary>
+    /// Reads <c>participantIds</c>: a JSON array of strings (a <c>null</c> ELEMENT is kept for the service to refuse
+    /// with a readable 400). A <c>null</c> token for the whole member, or any other token, throws.
+    /// </summary>
+    private sealed class NonNullStringListConverter : JsonConverter<IReadOnlyList<string?>?>
+    {
+        public override bool HandleNull => true;
+
+        public override IReadOnlyList<string?>? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        {
+            if (reader.TokenType != JsonTokenType.StartArray)
+            {
+                throw new JsonException("participantIds must be an array of strings.");
+            }
+
+            var ids = new List<string?>();
+            while (reader.Read())
+            {
+                switch (reader.TokenType)
+                {
+                    case JsonTokenType.EndArray:
+                        return ids;
+                    case JsonTokenType.String:
+                        ids.Add(reader.GetString());
+                        break;
+                    case JsonTokenType.Null:
+                        ids.Add(null);
+                        break;
+                    default:
+                        throw new JsonException("participantIds must be an array of strings.");
+                }
+            }
+
+            throw new JsonException("participantIds is not a complete array.");
+        }
+
+        public override void Write(Utf8JsonWriter writer, IReadOnlyList<string?>? value, JsonSerializerOptions options)
+        {
+            ArgumentNullException.ThrowIfNull(writer);
+            if (value is null)
+            {
+                writer.WriteNullValue();
+                return;
+            }
+
+            writer.WriteStartArray();
+            foreach (var id in value)
+            {
+                writer.WriteStringValue(id);
+            }
+
+            writer.WriteEndArray();
+        }
+    }
+
+    /// <summary>Reads <c>all</c>: a JSON <c>true</c> or <c>false</c> only. A <c>null</c> token, or any other token, throws.</summary>
+    private sealed class NonNullBooleanConverter : JsonConverter<bool?>
+    {
+        public override bool HandleNull => true;
+
+        public override bool? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options) =>
+            reader.TokenType switch
+            {
+                JsonTokenType.True => true,
+                JsonTokenType.False => false,
+                _ => throw new JsonException("all must be the JSON literal true."),
+            };
+
+        public override void Write(Utf8JsonWriter writer, bool? value, JsonSerializerOptions options)
+        {
+            ArgumentNullException.ThrowIfNull(writer);
+            if (value is { } flag)
+            {
+                writer.WriteBooleanValue(flag);
+            }
+            else
+            {
+                writer.WriteNullValue();
+            }
+        }
+    }
 }
