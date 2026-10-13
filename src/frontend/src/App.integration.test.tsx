@@ -76,6 +76,7 @@ import { MemoryRouter } from 'react-router-dom'
 import { QueryClientProvider, QueryClient } from '@tanstack/react-query'
 import { describe, expect, it, vi } from 'vitest'
 import { ExerciseContextProvider } from '@/core/exerciseContext'
+import { SessionProvider } from '@/core/auth'
 import type { RoleAwareEntryProps, StaffSurfaceRole } from './features/app-shell'
 import { resolveDefaultStaffRoute, staffRoutesForRole } from './features/app-shell'
 import { STAFF_ROUTE_REGISTRY } from './features/staff'
@@ -107,15 +108,20 @@ vi.mock('./features/app-shell', async importOriginal => {
 
 /**
  * A dedicated client per render so React Query state never leaks between cases.
- * `ExerciseContextProvider` stands in for the hoisted, router-owned one (see the
- * module header) — the route compositions no longer mount their own.
+ * `ExerciseContextProvider` + `SessionProvider` stand in for the hoisted,
+ * router-owned ones (see the module header) — the route compositions no longer
+ * mount their own. The session is there because the preview stage now mounts the
+ * REAL Social channel (demo-polish C6), which reads it; production always has it
+ * (`createRoleAwareRoutes` hoists `ExerciseContextProvider > SessionProvider`).
  */
 function renderInStaffWorld(surface: ReactElement) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
     <MemoryRouter>
       <QueryClientProvider client={client}>
-        <ExerciseContextProvider>{surface}</ExerciseContextProvider>
+        <ExerciseContextProvider>
+          <SessionProvider>{surface}</SessionProvider>
+        </ExerciseContextProvider>
       </QueryClientProvider>
     </MemoryRouter>,
   )
@@ -161,10 +167,11 @@ describe('EvaluatorDashboardRoute — Integration B wiring', () => {
     // Enter preview.
     await user.click(previewButton)
 
-    // The participant-preview stage replaces the work area, rendering the
-    // read-only participant-world stub.
+    // The participant-preview stage replaces the work area, rendering the REAL
+    // Social channel (read-only; demo-polish C6) — not the old PortalStub mock.
     expect(await screen.findByTestId('preview-as-participant')).toBeInTheDocument()
-    expect(screen.getByTestId('portal-stub')).toBeInTheDocument()
+    expect(await screen.findByTestId('social-channel')).toBeInTheDocument()
+    expect(screen.queryByTestId('portal-stub')).not.toBeInTheDocument()
     expect(screen.getByTestId('staff-header-preview-toggle')).toHaveAttribute('aria-pressed', 'true')
 
     // The shell-global admin flyout is suppressed during preview (so it can

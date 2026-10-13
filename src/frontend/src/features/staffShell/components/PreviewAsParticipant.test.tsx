@@ -1,49 +1,56 @@
 /**
  * features/staffShell/components/PreviewAsParticipant.test.tsx
  * ---------------------------------------------------------------------------
- * Story 04 (Preview as participant) — RTL coverage for the Acceptance
- * Criteria in docs/features/staff-shell/04-preview-as-participant.md:
+ * Story 04 (Preview as participant) -- RTL coverage for the STAFF half of the
+ * stage: the Acceptance Criteria in
+ * docs/features/staff-shell/04-preview-as-participant.md, as they stand after
+ * demo-polish C6 swapped the `PortalStub` mock for the real channel:
  *
  *  - The stage is unmistakably labelled as a preview (AC1/AC3) and stays
- *    inside the staff frame (no navigation — this component renders nothing
+ *    inside the staff frame (no navigation -- this component renders nothing
  *    that changes `window.location` or mounts a router).
  *  - The moment picker offers exactly STARTEX/ADVISORY/BURST/NOW, is
  *    mutually exclusive (`role="radiogroup"`/`role="radio"` +
- *    `aria-checked`), and selecting one drives both the staged alert content
- *    AND the participant render's mount props (AC2).
- *  - The staged content renders via the REAL `ShellContextProvider` with
- *    `variant: 'preview'` (AC1/AC4) and carries NO post/act affordance
- *    (read-only).
- *  - Exit calls `usePreview().toggle()` — proven end-to-end through a small
+ *    `aria-checked`), and selecting one hands the participant render the
+ *    moment's scenario instant (AC2) -- always a scenario instant, never the
+ *    wall clock (COR-053).
+ *  - Exit calls `usePreview().toggle()` -- proven end-to-end through a small
  *    harness that mirrors the orchestrator's `active ? <PreviewAsParticipant
  *    /> : <WorkArea />` wiring (AC3); this component does not manage its own
  *    `active` state.
- *  - The picker + Exit are keyboard-operable (Tab + Enter/Space) — no
+ *  - The picker + Exit are keyboard-operable (Tab + Enter/Space) -- no
  *    pointer-only interaction (AC5).
  *
- * `@/core/exerciseContext` is mocked at the module boundary (mirrors
- * `StaffHeader.test.tsx` / `PortalStub.test.tsx`) purely so the nested
- * `PortalStub` can resolve a `timeZone` for its dateline; this test does not
- * exercise that seam's own resolution timing.
+ * `PreviewChannelHost` (the participant half) is replaced by a probe that prints
+ * the `scenarioNow` it is handed, so these cases need no providers and stay about
+ * the strip. The REAL channel under the real providers -- the feed, read-only,
+ * links that stay inside the preview, the two-worlds checks -- is
+ * `PreviewAsParticipant.channel.test.tsx`; the composition it is mounted under is
+ * `PreviewChannelHost.test.tsx`.
  */
 import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { useExerciseContext } from '@/core/exerciseContext'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { resetExerciseClock, setExerciseClock } from '@/core/clock'
 import { PreviewProvider, usePreview } from '../previewContext'
 import { PreviewAsParticipant } from './PreviewAsParticipant'
 
-vi.mock('@/core/exerciseContext', () => ({
-  useExerciseContext: vi.fn(),
+/** Stands in for the participant half: prints the scenario instant the strip hands it. */
+vi.mock('./PreviewChannelHost', () => ({
+  PreviewChannelHost: ({ scenarioNow }: { scenarioNow: Date }) => (
+    <div data-testid="channel-host" data-scenario-now={scenarioNow.toISOString()} />
+  ),
 }))
 
+/** A fixed scenario "now" (a fixed instant, never a wall-clock read). */
+const SCENARIO_NOW = new Date('2033-09-04T14:30:00.000Z')
+
 beforeEach(() => {
-  vi.mocked(useExerciseContext).mockReturnValue({
-    exerciseId: 'ex-test-preview-as-participant-0001',
-    exerciseName: 'Bay Shield 2026',
-    timeZone: 'UTC',
-    status: 'active',
-  })
+  setExerciseClock({ scenarioNow: () => SCENARIO_NOW })
+})
+
+afterEach(() => {
+  resetExerciseClock()
 })
 
 /**
@@ -144,31 +151,23 @@ describe('PreviewAsParticipant — moment picker (AC2/AC5)', () => {
     expect(screen.getByTestId('preview-moment-now')).toHaveAttribute('aria-checked', 'false')
   })
 
-  it('selecting a moment drives the staged participant content (AC2)', async () => {
+  it('hands the participant render the selected moment\'s scenario instant (AC2)', async () => {
     const user = await openPreview()
+    const host = () => screen.getByTestId('channel-host')
 
-    const nowHeadline = /water distribution site open at fairview high school/i
-    const burstHeadline = /do not drink tap water in zones 2–4/i
+    // NOW is the live scenario clock itself.
+    expect(host()).toHaveAttribute('data-scenario-now', SCENARIO_NOW.toISOString())
 
-    // Scoped to the <h1> headline specifically — BURST's alert-banner MESSAGE
-    // text also contains the same words, so an unscoped text query would
-    // ambiguously match both.
-    expect(screen.getByRole('heading', { name: nowHeadline })).toBeInTheDocument()
-
-    await user.click(screen.getByTestId('preview-moment-burst'))
-
-    expect(screen.getByRole('heading', { name: burstHeadline })).toBeInTheDocument()
-    expect(screen.queryByRole('heading', { name: nowHeadline })).not.toBeInTheDocument()
-    // BURST's mock alert state is "emergency" — its banner is present.
-    expect(screen.getByTestId('portal-stub-alert')).toHaveTextContent('EMERGENCY')
-  })
-
-  it('selecting STARTEX (alertState "none") removes the alert banner entirely', async () => {
-    const user = await openPreview()
-
+    // Each other moment is its fixed offset BEFORE the live scenario clock (never wall-clock).
+    const minutesBefore = (n: number) => new Date(SCENARIO_NOW.getTime() - n * 60_000).toISOString()
     await user.click(screen.getByTestId('preview-moment-startex'))
-
-    expect(screen.queryByTestId('portal-stub-alert')).not.toBeInTheDocument()
+    expect(host()).toHaveAttribute('data-scenario-now', minutesBefore(180))
+    await user.click(screen.getByTestId('preview-moment-advisory'))
+    expect(host()).toHaveAttribute('data-scenario-now', minutesBefore(90))
+    await user.click(screen.getByTestId('preview-moment-burst'))
+    expect(host()).toHaveAttribute('data-scenario-now', minutesBefore(20))
+    await user.click(screen.getByTestId('preview-moment-now'))
+    expect(host()).toHaveAttribute('data-scenario-now', SCENARIO_NOW.toISOString())
   })
 
   it('the picker and Exit are keyboard-operable — Tab reaches each control, Enter/Space activates it', async () => {
@@ -194,18 +193,15 @@ describe('PreviewAsParticipant — moment picker (AC2/AC5)', () => {
   })
 })
 
-describe('PreviewAsParticipant — staged content is read-only (AC4) and provably variant "preview"', () => {
-  it('the staged PortalStub carries data-shell-variant="preview" and no post/act affordance', async () => {
+describe('PreviewAsParticipant — the participant render sits below the strip, inside the mat', () => {
+  it('mounts the participant host in the frame inside the stage, never inside the label strip', async () => {
     const user = userEvent.setup()
     renderHarness()
     await user.click(screen.getByRole('button', { name: 'header preview toggle' }))
 
-    const stub = screen.getByTestId('portal-stub')
-    expect(stub).toHaveAttribute('data-shell-variant', 'preview')
-
-    // No affordance anywhere INSIDE the staged participant content (the
-    // stage chrome's own Exit/moment-picker buttons live outside `portal-stub`).
-    expect(within(stub).queryAllByRole('button')).toHaveLength(0)
-    expect(within(stub).queryAllByRole('link')).toHaveLength(0)
+    const frame = screen.getByTestId('preview-frame')
+    expect(screen.getByTestId('preview-stage')).toContainElement(frame)
+    expect(frame).toContainElement(screen.getByTestId('channel-host'))
+    expect(screen.getByTestId('preview-bar')).not.toContainElement(screen.getByTestId('channel-host'))
   })
 })

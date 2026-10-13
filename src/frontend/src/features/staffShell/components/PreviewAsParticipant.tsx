@@ -4,7 +4,9 @@
  * "Preview as participant" STAGE (feature: staff-shell, story 04 — COR-041;
  * see docs/features/staff-shell/04-preview-as-participant.md and
  * docs/design/D7-application-shells/SHELL-CONTRACT.md §1 "Variants" →
- * preview-as-participant).
+ * preview-as-participant). Reworked by demo-polish C6 (docs/features/demo-polish/
+ * 23-preview-and-startex.md, #442): the stage now hosts the REAL participant
+ * Social channel instead of the `PortalStub` mock.
  *
  * This is the component the ORCHESTRATOR renders IN PLACE OF a staff
  * surface's work area, driven by `usePreview().active` (`../previewContext`):
@@ -28,34 +30,46 @@
  *     preview ("PREVIEW AS PARTICIPANT — READ-ONLY") + the scenario-moment
  *     picker (AC2: STARTEX/ADVISORY/BURST/NOW, mutually exclusive —
  *     `role="radiogroup"` / `role="radio"` + `aria-checked`, NFR-001) + an
- *     Exit control that calls `toggle()`.
+ *     Exit control that calls `toggle()`. UNCHANGED by C6.
  *  2. The stage itself: a neutral staff-world mat framing the PARTICIPANT-
- *     WORLD render — `PortalStub` wrapped in `ShellContextProvider` with
- *     `{variant: 'preview', scenarioNow: <the selected moment's instant>}`
- *     (AC1/AC4) — participant-shell's own mount contract, imported (never
- *     reimplemented) from `@/features/participant-shell/mountContract`.
+ *     WORLD render — `PreviewChannelHost` (`./PreviewChannelHost`), which mounts
+ *     the real `SocialChannel` under `ShellContextProvider { variant: 'preview',
+ *     scenarioNow: <the selected moment's instant> }`, the brand providers, an
+ *     in-memory navigation provider and a read-only session scope. See that
+ *     file's header for the composition, why nothing in it can write, and why a
+ *     link inside it never moves the staff page.
  *
- * The picker drives BOTH the alert state/content (via `momentConfig`, from
- * `../previewContext`'s mock model) AND the `scenarioNow` handed to the
- * participant render (via `resolvePreviewMomentInstant`) — always scenario
- * time, never wall-clock (COR-053).
+ * The picker hands the participant render the selected moment's instant (via
+ * `resolvePreviewMomentInstant`) through the shell mount contract — always
+ * scenario time, never wall-clock (COR-053). NOTE: the Social channel's own
+ * per-post ages ("2h ago") come from the live scenario clock (`useScenarioTime`),
+ * not from the shell mount's `scenarioNow`, so choosing a moment re-times what a
+ * channel reads from the mount contract but does not re-date the feed's posts.
+ *
+ * The mat is sized for the channel's own frame (nav rail | 600px main | sidebar,
+ * `previewFrameMetrics`) and scrolls (it does not shrink the frame): the channel's
+ * responsive breakpoints are VIEWPORT media queries, so the frame is given the
+ * width the matching breakpoint assumes and the mat scrolls when the work area
+ * is narrower. The frame is a containing block for `position: fixed` (a
+ * transform), so the channel's skip link and any fixed element stay inside the
+ * frame instead of landing on the staff header.
  *
  * World: staff (COBRA/Cadence) for THIS component's own chrome (the label
- * strip + stage mat, `staffShellTokens`-sourced). `PortalStub`, mounted
+ * strip + stage mat, `staffShellTokens`-sourced). `PreviewChannelHost`, mounted
  * below, is the ONE deliberate exception the hard gate carves out
  * (SHELL-CONTRACT §4): a staff-world frame hosting a labelled
- * participant-world render, never the reverse.
+ * participant-world render, never the reverse. That split is why the participant
+ * half is its own file: it is scanned for COBRA imports on its own
+ * (`previewStubTwoWorlds.test.ts`), and this file is scanned for the opposite —
+ * no participant tokens in the staff strip.
  */
 
+import { useMemo } from 'react'
 import { Box, Stack, Typography } from '@mui/material'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faXmark } from '@fortawesome/free-solid-svg-icons'
-import {
-  ShellContextProvider,
-  type ShellMountProps,
-  type ShellVariant,
-} from '@/features/participant-shell/mountContract'
 import { staffShellTokens } from '../staffShellTokens'
+import { PREVIEW_FRAME_FULL_WIDTH_PX, PREVIEW_FRAME_NAV_WIDTH_PX } from '../previewFrameMetrics'
 import {
   getPreviewMomentConfig,
   PREVIEW_MOMENT_ORDER,
@@ -63,21 +77,14 @@ import {
   usePreview,
   type PreviewMoment,
 } from '../previewContext'
-import { PortalStub } from './PortalStub'
-
-/** `ShellMountProps.variant` this stage ALWAYS mounts the stub under (AC4). */
-const PREVIEW_VARIANT: ShellVariant = 'preview'
+import { PreviewChannelHost } from './PreviewChannelHost'
 
 export function PreviewAsParticipant() {
   const { moment, setMoment, toggle } = usePreview()
 
-  const momentConfig = getPreviewMomentConfig(moment)
-  const momentInstant = resolvePreviewMomentInstant(moment)
-
-  const mountProps: ShellMountProps = {
-    variant: PREVIEW_VARIANT,
-    scenarioNow: momentInstant,
-  }
+  // One instant per selected moment: the channel below must not re-render (and every
+  // memoized feed row with it) because the staff strip did.
+  const momentInstant = useMemo(() => resolvePreviewMomentInstant(moment), [moment])
 
   return (
     <Stack
@@ -187,22 +194,37 @@ export function PreviewAsParticipant() {
           borderRadius: '12px',
           p: { xs: 1.5, md: 3 },
           display: 'flex',
-          justifyContent: 'center',
         }}
       >
         <Box
+          data-testid="preview-frame"
           sx={{
             width: '100%',
-            maxWidth: 820,
+            maxWidth: PREVIEW_FRAME_FULL_WIDTH_PX,
+            // Centered when there is room, start-aligned (never clipped on the left)
+            // when the mat scrolls.
+            mx: 'auto',
             borderRadius: '8px',
-            overflow: 'hidden',
+            // `clip`, not `hidden`: `hidden` would make this the scroll container the
+            // channel's sticky rails bind to; they must bind to the mat.
+            overflow: 'clip',
             boxShadow: '0 18px 50px rgba(0, 0, 0, 0.22)',
             alignSelf: 'flex-start',
+            // A transform makes this the containing block for `position: fixed`
+            // descendants (the channel's skip link), keeping them off the staff header.
+            transform: 'translateZ(0)',
+            // The channel's breakpoints are VIEWPORT media queries (3 columns at
+            // >= 1184px, nav + main at >= 840px): give the frame the width the matching
+            // breakpoint lays out for, and let the mat scroll when the work area is narrower.
+            [`@media (min-width: ${PREVIEW_FRAME_FULL_WIDTH_PX}px)`]: {
+              minWidth: PREVIEW_FRAME_FULL_WIDTH_PX,
+            },
+            [`@media (min-width: ${PREVIEW_FRAME_NAV_WIDTH_PX}px) and (max-width: ${PREVIEW_FRAME_FULL_WIDTH_PX - 1}px)`]: {
+              minWidth: PREVIEW_FRAME_NAV_WIDTH_PX,
+            },
           }}
         >
-          <ShellContextProvider value={mountProps}>
-            <PortalStub momentConfig={momentConfig} />
-          </ShellContextProvider>
+          <PreviewChannelHost scenarioNow={momentInstant} />
         </Box>
       </Box>
     </Stack>

@@ -41,14 +41,19 @@
  * drives both the preview's alert state/content and the `scenarioNow` handed
  * to the staged participant render. This is deliberately a LOCAL, MOCK model
  * — participant-shell owns the real alert bar (D7-002); this story never
- * builds it, only stages a labelled stand-in inside the read-only preview.
+ * builds it (see "Since demo-polish C6" below for what the stage renders now).
  *
  * World: staff (COBRA/Cadence hosts the toggle this module backs) — but this
- * module itself renders no UI and imports neither COBRA nor MUI. The moment
- * CONTENT strings (kicker/headline/dek/alert message) are participant-world
- * copy, consumed only by the participant-world stub (`components/
- * PortalStub.tsx`); keeping them here (not duplicated) is what lets the
- * moment picker and the staged render agree on exactly one source of truth.
+ * module itself renders no UI and imports neither COBRA nor MUI.
+ *
+ * ## Since demo-polish C6: the stage hosts the REAL channel
+ * The moment CONTENT strings (alert state/message, kicker/headline/dek) were
+ * participant-world copy for the `PortalStub` mock the stage used to stage. C6
+ * replaced that stub with the real Social channel (`components/
+ * PreviewChannelHost.tsx`), which renders the exercise's own feed, so nothing
+ * renders those strings any more; they stay here as the moment model (the picker's
+ * labels and the `scenarioNow` offsets are what the stage still reads). The real
+ * alert bar is the participant shell's (D7-002) and is not mounted in the preview.
  */
 
 import {

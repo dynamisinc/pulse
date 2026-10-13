@@ -41,6 +41,40 @@ let droppedCount = 0
 let loggedDropInProd = false
 
 /**
+ * How many holders currently have telemetry muted (see {@link muteTelemetry}).
+ * A COUNT, not a boolean, so two overlapping holders (or a StrictMode
+ * mount/unmount/mount) cannot unmute each other early.
+ */
+let muteDepth = 0
+
+/**
+ * Silences the sink until the returned release function is called: while any
+ * holder is muted, `emitTelemetryEvent` neither buffers, logs, counts nor POSTs.
+ * The release is idempotent (a second call is a no-op), so a cleanup that runs
+ * twice can never unmute somebody else's hold.
+ *
+ * The ONE caller is the staff "preview as participant" (demo-polish C6). The
+ * preview mounts the REAL participant channel inside a staff frame, and that
+ * channel emits participant-kind telemetry on its own (a `view` for every feed,
+ * thread and profile it opens). A preview is promised to be inert -- "Nothing
+ * here reaches the exercise" -- and a staff session's `participant` events are
+ * refused by the server anyway (403, counted as a degraded-pipeline drop), so
+ * the preview holds a mute for as long as it is mounted rather than emit
+ * telemetry about a participant who does not exist. Nothing else may call this:
+ * telemetry is the sole feed for the AAR (see {@link getTelemetryHealth}).
+ */
+export function muteTelemetry(): () => void {
+  muteDepth++
+  let released = false
+  return () => {
+    if (released) return
+    released = true
+    // Never below zero: `resetTelemetryBuffer` may already have dropped this hold.
+    if (muteDepth > 0) muteDepth--
+  }
+}
+
+/**
  * Emits a validated v0 telemetry event to the mock sink:
  * 1. appends it to the bounded in-memory buffer,
  * 2. logs it to the dev console (DEV only — keeps identities out of prod
@@ -50,8 +84,12 @@ let loggedDropInProd = false
  *
  * Never throws — a POST/network failure (or a synchronous throw from the
  * client) is swallowed and counted so it can never block the caller's action.
+ * Returns immediately, doing none of the above, while telemetry is muted
+ * ({@link muteTelemetry}).
  */
 export function emitTelemetryEvent(event: TelemetryEventV0): void {
+  if (muteDepth > 0) return
+
   emittedCount++
   buffer.push(event)
   if (buffer.length > MAX_BUFFER) buffer.shift()
@@ -110,10 +148,15 @@ export function getEmittedTelemetryEvents(): readonly TelemetryEventV0[] {
   return [...buffer]
 }
 
-/** Clears the buffer and resets counters. For test isolation between cases. */
+/**
+ * Clears the buffer, resets counters, and drops every mute hold. For test
+ * isolation between cases (a hold leaked by a case that never unmounted must not
+ * silence the next one).
+ */
 export function resetTelemetryBuffer(): void {
   buffer.length = 0
   emittedCount = 0
   droppedCount = 0
   loggedDropInProd = false
+  muteDepth = 0
 }
