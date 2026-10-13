@@ -15,7 +15,7 @@ so content work never collides with the backend freeze (plan §2.5). Pack format
 ## Acceptance Criteria
 - [ ] **Script and safety.** `scripts/uat/Seed-DemoContent.ps1` (`#Requires -Version 7.0`, dot-sources
       `Common.ps1`) takes `-PackPath` (default `docs/demo/pack/pack.json`), `-ApiHost`, `-SiteUrl`,
-      `-StaffUsername`, `-ScenarioAnchor` (default: now, UTC), `-RunSheetOut`, `-WhatIf`, `-Resume`; calls
+      `-StaffUsername`, `-ScenarioAnchor` (default: now, UTC), `-WhatIf`, `-Resume`; calls
       the anonymous `GET /api/exercise-context` first (host-resolved `exerciseId` + `timeZone`), then signs in
       via `POST /api/auth/staff/login` with `{username, secret, exerciseId}` (the request requires
       `exerciseId`; single-exercise script, so no active-exercise switch), using a secret from `$env:PULSE_STAFF_SECRET` or a hidden prompt (the

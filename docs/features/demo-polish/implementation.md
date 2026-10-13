@@ -421,9 +421,10 @@ fallback); the wall clock goes only into `wallClockTime`/`emittedAt`.
 
 ### 1.9 Run-sheet file schema (C3 import/export) — `pulse.runsheet.v1`
 
-> **Superseded 2026-10-08.** C3 was replaced by the server-side inject queue (inject-queue 06 + 07); S1 loads beats
-> through `POST /api/injects`. The schema below is kept as the pack's authoring shape only; nothing imports it in the
-> browser.
+> **Superseded 2026-10-08; historical.** C3 was replaced by the server-side inject queue (inject-queue 06 + 07), and
+> its code was removed with the Wave 3 merge (#463). Nothing reads or writes this file format any more. S1 creates the
+> pack's run-sheet items through `POST /api/injects`; the pack's authoring shape is in §1.10 (`runSheet.items`) and
+> `docs/demo/pack/schema/pack.schema.json`.
 
 Definitions only. Status (`pending|fired|skipped|failed`, `firedPostId`) lives in browser storage, never in the
 file.
@@ -472,7 +473,9 @@ them to uploaded `MediaAsset` ids and rewrites them when it exports the run shee
               "media": [{ "ref": "news-clip", "alt": "…" }],         // alt may override the media-level alt
               "replyTo": "p00",                                       // post key; parent must appear earlier in the array
               "baseline": { "like": 290, "repost": 150, "reply": 64 } }],
-  "runSheet": { "name": "…", "beats": [ /* RunSheetBeat shape, with media[].ref (pack key) and replyTo.postKey (a pack post key) instead of ids */ ] }
+  "runSheet": { "items": [ /* InjectItemWrite shape (inject-queue implementation.md § Demo slice) plus a pack `key`;
+                            posts name `persona` by handle, media[].ref (pack key), replyTo = {postKey} | {sequence}
+                            | {item, sequence}; S1 rewrites them to ids and POSTs each to /api/injects */ ] }
 }
 ```
 
@@ -548,7 +551,7 @@ import.
 | 21 | PE | BE: merge-patch endpoint. FE: dialog + button. | `Features/Social/PersonaAdmin/*`; `controller/personaEdit/*` | `PersonaEditButton` |
 | 22 | C5 | Takedown action + feed removal. | `controller/liveWorld/TakedownAction.tsx`, `controller/services/takedownService.ts`, `social/services/{realtimeFeed,removedPosts}.ts`, `social/pages/Feed.tsx` | — |
 | 23 | C6 | Preview shows the real channel; StartEx/EndEx control (Could). | `staffShell/components/PreviewAsParticipant.tsx`, `controller/lifecycle/*` | — |
-| 24 | S1 | PowerShell seeder over public APIs + run-sheet export. | `scripts/uat/Seed-DemoContent.ps1` | `docs/demo/pack/runsheet.demo.json` |
+| 24 | S1 | PowerShell seeder over public APIs + run-sheet load (`POST /api/injects`). | `scripts/uat/Seed-DemoContent.ps1` | inject items in the server queue |
 | 25 | S2 | Human + Claude pack authoring. | `docs/demo/pack/**` | `pack.json` |
 
 ## 3. Reuse map
