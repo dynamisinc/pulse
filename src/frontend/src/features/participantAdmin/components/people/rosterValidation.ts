@@ -8,7 +8,7 @@
  *
  *   name           required, 1..256
  *   agency, role   <= 128
- *   email          optional, <= 254, a simple address shape
+ *   email          optional, <= 254, a simple address shape (no `<` or `>`, as the server)
  *   signInName     optional; `^[a-z0-9][a-z0-9._-]{2,31}$` AFTER trim + lower-case
  *   personaHandle  optional; an ORG persona in this exercise ('@' tolerated) —
  *                  existence is the server's call, so no client rule beyond a
@@ -45,7 +45,12 @@ export const EMPTY_ROSTER_FORM: RosterFormValues = {
 /** The sign-in name rule from the contract. */
 export const SIGN_IN_NAME_PATTERN = /^[a-z0-9][a-z0-9._-]{2,31}$/
 
-const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+/**
+ * The server's address shape (`RosterRowRules.EmailPattern`): something, `@`, something, a dot,
+ * something; no whitespace, no second `@`, and NO ANGLE BRACKET (`<` or `>`), so a pasted
+ * `Name <a@b.test>` is caught here instead of after a round trip.
+ */
+const EMAIL_PATTERN = /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/
 
 /** What a sign-in name is normalised to before it is validated or sent. */
 export function normalizeSignInName(value: string): string {

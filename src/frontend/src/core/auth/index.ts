@@ -29,6 +29,7 @@ export type { SessionProviderProps } from './session'
 
 export { resolveSession, isSessionExpired, SESSION_TTL_MS } from './sessionResolver'
 export type { Session } from './sessionResolver'
+export { SessionExpiredError } from './sessionExpiredError'
 
 export { getAccessToken, getRefreshToken, setTokens, clearTokens } from './tokenStore'
 export type { TokenPair } from './tokenStore'

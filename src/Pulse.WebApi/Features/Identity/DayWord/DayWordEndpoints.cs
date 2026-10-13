@@ -53,13 +53,10 @@ public static class DayWordEndpoints
     /// </summary>
     public const string WordSignInRateLimitPolicy = "easy-login-word";
 
-    /// <summary>The <c>Cache-Control</c> value every staff day-word response carries.</summary>
-    public const string NoStore = "no-store";
-
     /// <summary>
     /// Registers the slice: the two scoped services, the shared slow-KDF hasher and the kernel pieces they need
     /// (<c>TryAdd</c>, so the registrations of <c>AddSharedReadOnly()</c> and <c>AddEasyLoginFoundation()</c> win), and
-    /// the <c>easy-login-word</c> rate-limit policy.
+    /// the <c>easy-login-word</c> rate-limit policy. Idempotent: a second call is a no-op.
     /// </summary>
     /// <param name="services">The service collection.</param>
     /// <returns>The same collection, for chaining.</returns>
@@ -67,9 +64,19 @@ public static class DayWordEndpoints
     {
         ArgumentNullException.ThrowIfNull(services);
 
+        // Idempotent (Gate-2 CR-001), the AddEasyLoginFoundation() marker pattern: the rate-limit policy below is NOT
+        // safe to repeat (a second AddPolicy with the same name throws when RateLimiterOptions is first built, which is
+        // at host start), and Program.cs already wires this, so a test host that calls it again must change nothing.
+        if (services.Any(descriptor => descriptor.ServiceType == typeof(DayWordRegistrationMarker)))
+        {
+            return services;
+        }
+
+        services.AddSingleton<DayWordRegistrationMarker>();
+
         // Scoped, matching the PulseDbContext unit of work.
-        services.AddScoped<DayWordService>();
-        services.AddScoped<WordLoginService>();
+        services.TryAddScoped<DayWordService>();
+        services.TryAddScoped<WordLoginService>();
 
         // Shared with the view-only credential (story 06 registers the same singleton) and the kernel (story 01).
         services.TryAddSingleton<ISharedCredentialHasher, SharedCredentialHasher>();
@@ -115,8 +122,10 @@ public static class DayWordEndpoints
         endpoints.MapDelete(StaffRoute, ClearAsync).WithDayWordStaffGate();
 
         // PRE-AUTH (PreAuthAllowlist; the seam commit adds the entry): this route ESTABLISHES a session. It fails
-        // closed on its own with one bodyless 401, behind its own per-IP limiter and the 16 KiB login body bound.
+        // closed on its own with one bodyless 401, behind its own per-IP limiter and the 16 KiB login body bound. Its
+        // 200 carries the session and refresh tokens, so every answer is no-store, as for /api/auth/join (Gate-2 S-3).
         endpoints.MapPost(WordSignInRoute, WordSignInAsync)
+            .AddEndpointFilter<NoStoreEndpointFilter>()
             .RequireRateLimiting(WordSignInRateLimitPolicy)
             .WithLoginBodyLimit()
             .AllowAnonymousPreAuth();
@@ -204,17 +213,12 @@ public static class DayWordEndpoints
             _ => Results.Unauthorized(),
         };
     }
+}
 
-    /// <summary>Stamps <c>Cache-Control: no-store</c> on every response of the route it wraps, refusals included.</summary>
-    private sealed class NoStoreEndpointFilter : IEndpointFilter
-    {
-        public ValueTask<object?> InvokeAsync(EndpointFilterInvocationContext context, EndpointFilterDelegate next)
-        {
-            ArgumentNullException.ThrowIfNull(context);
-            ArgumentNullException.ThrowIfNull(next);
-
-            context.HttpContext.Response.Headers.CacheControl = NoStore;
-            return next(context);
-        }
-    }
+/// <summary>
+/// Registered once by <see cref="DayWordEndpoints.AddDayWord"/> so a repeat call is a no-op. It carries no state and
+/// nothing resolves it.
+/// </summary>
+internal sealed class DayWordRegistrationMarker
+{
 }

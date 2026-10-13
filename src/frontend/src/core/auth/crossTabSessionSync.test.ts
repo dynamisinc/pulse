@@ -18,7 +18,13 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { installCrossTabSessionSync } from './crossTabSessionSync'
-import { setTokens, rotateTokens, clearTokens, SESSION_MARKER_KEY } from './tokenStore'
+import {
+  setTokens,
+  rotateTokens,
+  clearTokens,
+  clearActiveTokens,
+  SESSION_MARKER_KEY,
+} from './tokenStore'
 
 const target = new EventTarget()
 let uninstall: () => void = () => undefined
@@ -195,6 +201,54 @@ describe('installCrossTabSessionSync — a staff tab (sessionStorage) is unaffec
     storageEvent(init)
 
     expect(reload).not.toHaveBeenCalled()
+  })
+})
+
+describe('installCrossTabSessionSync — a REFUSED staff tab is still a staff tab (W2-1)', () => {
+  beforeEach(() => {
+    setTokens({ token: 'staff', refreshToken: 'staff-refresh' }) // session-only
+    // The staff refresh token is refused: the automatic clear empties sessionStorage.
+    clearActiveTokens()
+  })
+
+  it.each([
+    ['a participant signing in elsewhere', { key: SESSION_MARKER_KEY, oldValue: null, newValue: 'm2' }],
+    ['a participant replacing another sign-in', { key: SESSION_MARKER_KEY, oldValue: 'm1', newValue: 'm2' }],
+    ['a participant signing out elsewhere', { key: SESSION_MARKER_KEY, oldValue: 'm1', newValue: null }],
+    ['localStorage being wiped', { key: null }],
+  ])('is NOT reloaded into the participant identity by %s', (_label, init) => {
+    storageEvent(init)
+
+    expect(reload).not.toHaveBeenCalled()
+  })
+
+  it('stays ignored after a reload too: the record is read back at boot', async () => {
+    localStorage.setItem('pulse.auth.token', 'p-access')
+    localStorage.setItem('pulse.auth.refreshToken', 'p-refresh')
+    localStorage.setItem(SESSION_MARKER_KEY, 'participant-marker')
+
+    vi.resetModules()
+    const freshStore = await import('./tokenStore')
+    const freshSync = await import('./crossTabSessionSync')
+    const reloadAgain = vi.fn()
+    const stop = freshSync.installCrossTabSessionSync(target, reloadAgain)
+    try {
+      storageEvent({ key: SESSION_MARKER_KEY, oldValue: 'participant-marker', newValue: 'm3' })
+      storageEvent({ key: SESSION_MARKER_KEY, oldValue: 'm3', newValue: null })
+
+      expect(reloadAgain).not.toHaveBeenCalled()
+      expect(freshStore.getAccessToken()).toBeNull()
+    } finally {
+      stop()
+    }
+  })
+
+  it('an explicit sign-out ends it: that page is an ordinary session-less page again', () => {
+    clearTokens()
+
+    storageEvent({ key: SESSION_MARKER_KEY, oldValue: null, newValue: 'marker-1' })
+
+    expect(reload).toHaveBeenCalledTimes(1)
   })
 })
 

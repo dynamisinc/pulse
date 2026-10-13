@@ -11,10 +11,19 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { dayWordMockControls, MOCK_DAY_WORD_TIME_ZONE } from './dayWordMocks'
 import { deleteDayWord, getDayWordStatus, putDayWord, type DayWordError } from './dayWordService'
 import { isDateString } from './dayWordDates'
+import type { DayWordPutBody, DayWordPutRequest } from './types'
 
 // 12:00 EDT on Tuesday 2026-10-13 in the mock exercise zone.
 const NOW = new Date('2026-10-13T16:00:00.000Z')
 const TODAY = '2026-10-13'
+
+/**
+ * The mock models the SERVER, whose contract lets `date` be omitted ("today"). The shipped
+ * client never omits it (Gate-2 W-1), so its types forbid that; these cases test the
+ * ADAPTER's defaulting and so speak the wire contract directly through the same code path.
+ */
+const putOmittingDate = (body: DayWordPutBody) => putDayWord(body as DayWordPutRequest)
+const deleteOmittingDate = () => deleteDayWord(undefined as unknown as string)
 
 async function failure(promise: Promise<unknown>): Promise<DayWordError> {
   try {
@@ -77,19 +86,19 @@ describe('GET status', () => {
 
 describe('PUT', () => {
   it('generates a word when none is supplied', async () => {
-    const result = await putDayWord({})
+    const result = await putOmittingDate({})
     expect(result).toMatchObject({ date: TODAY, generated: true, replaced: false })
     expect(result.word.length).toBeGreaterThan(5)
     expect(new Date(result.validUntil).toISOString()).toBe('2026-10-14T04:00:00.000Z')
   })
 
   it('records a typed word as typed', async () => {
-    const result = await putDayWord({ word: 'Pine Cone 42' })
+    const result = await putOmittingDate({ word: 'Pine Cone 42' })
     expect(result).toMatchObject({ generated: false, replaced: false, word: 'Pine Cone 42' })
   })
 
   it('flips todaySet and records who and when, without keeping the word', async () => {
-    await putDayWord({ word: 'pinecone42' })
+    await putOmittingDate({ word: 'pinecone42' })
 
     const status = await getDayWordStatus()
 
@@ -100,9 +109,9 @@ describe('PUT', () => {
   })
 
   it('marks a second set for the same date as a rotation and counts it', async () => {
-    await putDayWord({})
-    const second = await putDayWord({})
-    const third = await putDayWord({ word: 'another word 1' })
+    await putOmittingDate({})
+    const second = await putOmittingDate({})
+    const third = await putOmittingDate({ word: 'another word 1' })
 
     expect(second.replaced).toBe(true)
     expect(third.replaced).toBe(true)
@@ -124,19 +133,19 @@ describe('PUT', () => {
   })
 
   it('400s a word that is too short once normalised, with a readable reason', async () => {
-    const error = await failure(putDayWord({ word: 'a b c d' }))
+    const error = await failure(putOmittingDate({ word: 'a b c d' }))
     expect(error.status).toBe(400)
     expect(error.serverMessage).toMatch(/6 to 64/)
   })
 
   it('400s a word that is too long once normalised', async () => {
-    const error = await failure(putDayWord({ word: 'x'.repeat(65) }))
+    const error = await failure(putOmittingDate({ word: 'x'.repeat(65) }))
     expect(error.status).toBe(400)
   })
 
   it('accepts exactly the boundary lengths (6 and 64)', async () => {
-    await expect(putDayWord({ word: 'abcdef' })).resolves.toBeDefined()
-    await expect(putDayWord({ word: 'a'.repeat(64) })).resolves.toBeDefined()
+    await expect(putOmittingDate({ word: 'abcdef' })).resolves.toBeDefined()
+    await expect(putOmittingDate({ word: 'a'.repeat(64) })).resolves.toBeDefined()
   })
 
   it('400s a date in the past, a date too far ahead, and a malformed date', async () => {
@@ -146,12 +155,12 @@ describe('PUT', () => {
   })
 
   it('does not change anything on a 400', async () => {
-    await failure(putDayWord({ word: 'ab' }))
+    await failure(putOmittingDate({ word: 'ab' }))
     expect((await getDayWordStatus()).todaySet).toBe(false)
   })
 
   it('logs only whether a word was typed and the date - never the word', async () => {
-    await putDayWord({})
+    await putOmittingDate({})
     await putDayWord({ word: 'pinecone42', date: '2026-10-15' })
 
     const log = dayWordMockControls.putRequests()
@@ -163,15 +172,15 @@ describe('PUT', () => {
 
 describe('DELETE', () => {
   it('turns off today', async () => {
-    await putDayWord({})
+    await putOmittingDate({})
 
-    await expect(deleteDayWord()).resolves.toBeUndefined()
+    await expect(deleteOmittingDate()).resolves.toBeUndefined()
 
     expect((await getDayWordStatus()).todaySet).toBe(false)
   })
 
   it('clears a later date only', async () => {
-    await putDayWord({})
+    await putOmittingDate({})
     await putDayWord({ date: '2026-10-15' })
 
     await deleteDayWord('2026-10-15')
@@ -182,8 +191,8 @@ describe('DELETE', () => {
   })
 
   it('is idempotent: clearing a day with no word still succeeds', async () => {
-    await expect(deleteDayWord()).resolves.toBeUndefined()
-    await expect(deleteDayWord()).resolves.toBeUndefined()
+    await expect(deleteOmittingDate()).resolves.toBeUndefined()
+    await expect(deleteOmittingDate()).resolves.toBeUndefined()
     await expect(deleteDayWord('2026-10-20')).resolves.toBeUndefined()
   })
 
@@ -200,8 +209,8 @@ describe('error injection', () => {
 
     for (const call of [
       () => getDayWordStatus(),
-      () => putDayWord({}),
-      () => deleteDayWord(),
+      () => putOmittingDate({}),
+      () => deleteOmittingDate(),
     ]) {
       const error = await failure(call())
       expect(error.status).toBe(403)
@@ -213,7 +222,7 @@ describe('error injection', () => {
     dayWordMockControls.failNext(503, 'Down.', { method: 'get' })
 
     // A PUT is not the GET it was queued for, so it goes through.
-    await expect(putDayWord({})).resolves.toBeDefined()
+    await expect(putOmittingDate({})).resolves.toBeDefined()
     expect((await failure(getDayWordStatus())).status).toBe(503)
     await expect(getDayWordStatus()).resolves.toBeDefined()
   })
@@ -230,19 +239,19 @@ describe('error injection', () => {
   it('malformNext: the change COMMITS but the answer is not the contract shape', async () => {
     dayWordMockControls.malformNext()
 
-    const error = await failure(putDayWord({ word: 'pinecone42' }))
+    const error = await failure(putOmittingDate({ word: 'pinecone42' }))
     expect(error.kind).toBe('malformed')
     // The word really was set, even though the caller could not read the answer.
     expect((await getDayWordStatus()).todaySet).toBe(true)
     // One-shot: the next call is normal.
-    await expect(putDayWord({})).resolves.toBeDefined()
+    await expect(putOmittingDate({})).resolves.toBeDefined()
   })
 
   it('fails only the NEXT request with the queued status and reason', async () => {
     dayWordMockControls.failNext(400, 'Pick a different word.')
 
-    const error = await failure(putDayWord({ word: 'pinecone42' }))
+    const error = await failure(putOmittingDate({ word: 'pinecone42' }))
     expect(error).toMatchObject({ status: 400, serverMessage: 'Pick a different word.' })
-    await expect(putDayWord({ word: 'pinecone42' })).resolves.toBeDefined()
+    await expect(putOmittingDate({ word: 'pinecone42' })).resolves.toBeDefined()
   })
 })

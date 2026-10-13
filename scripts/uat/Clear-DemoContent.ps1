@@ -1,4 +1,5 @@
 #Requires -Version 7.0
+
 <#
 .SYNOPSIS
     Clears old rehearsal content from Pulse UAT so the demo opens fresh. Reversible.

@@ -312,6 +312,36 @@ public sealed class ParticipantLinkServiceTests
         JoinRateLimiterPolicy.PolicyName.Should().Be("easy-login-join");
     }
 
+    [Fact]
+    public void AddPersonalLinks_IsIdempotent_AndItsRateLimiterOptionsStillBuild()
+    {
+        static ServiceCollection Compose(int calls)
+        {
+            var services = new ServiceCollection();
+            services.AddLogging();
+            services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
+            services.AddEasyLoginFoundation();
+            for (var call = 0; call < calls; call++)
+            {
+                services.AddPersonalLinks();
+            }
+
+            return services;
+        }
+
+        var once = Compose(1);
+        var twice = Compose(2);
+
+        twice.Count.Should().Be(once.Count, "Gate-2 CR-001: Program.cs wires AddPersonalLinks(), so a repeat call must register nothing more");
+        twice.Where(d => d.ServiceType == typeof(IParticipantLinkIssuer)).Should().ContainSingle();
+
+        // Counting descriptors cannot see a duplicate rate-limit policy: AddPolicy only throws when the options are
+        // BUILT, which on a real host is at start-up. Build them.
+        using var provider = twice.BuildServiceProvider();
+        var build = () => provider.GetRequiredService<Microsoft.Extensions.Options.IOptions<Microsoft.AspNetCore.RateLimiting.RateLimiterOptions>>().Value;
+        build.Should().NotThrow("a second AddPersonalLinks() must not add the easy-login-join policy again");
+    }
+
     private static PulseDbContext ModelOnlyContext() => new(
         new DbContextOptionsBuilder<PulseDbContext>().UseSqlServer("Server=model-only;Database=none;").Options);
 

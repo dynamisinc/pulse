@@ -9,7 +9,9 @@ using Microsoft.EntityFrameworkCore;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.Identity.Accounts;
+using Pulse.WebApi.Features.Identity.Sessions;
 using Pulse.WebApi.Tests.Data;
+using Pulse.WebApi.Tests.Features.Identity.PersonalLinks;
 using Pulse.WebApi.Tests.Features.Identity.Staff;
 
 /// <summary>
@@ -27,7 +29,10 @@ public sealed class ParticipantLoginServiceTests
 
     public ParticipantLoginServiceTests(MsSqlContainerFixture fixture) => _fixture = fixture;
 
-    private ParticipantLoginService ServiceFor(PulseDbContext context, Guid? scope, RecordingSessionIssuer issuer) =>
+    private const string PasswordSuccessPayload = "{\"outcome\":\"success\",\"method\":\"password\"}";
+    private const string PasswordFailurePayload = "{\"outcome\":\"failure\",\"method\":\"password\"}";
+
+    private ParticipantLoginService ServiceFor(PulseDbContext context, Guid? scope, ISessionIssuer issuer) =>
         new(context, new ExerciseContext { CurrentExerciseId = scope }, issuer, _hasher);
 
     private async Task<Exercise> SeedExerciseAsync(DateTimeOffset? scenarioTime, string timeZone = "America/Chicago")
@@ -118,7 +123,9 @@ public sealed class ParticipantLoginServiceTests
         evt.Channel.Should().Be("system");
         evt.Actor.Kind.Should().Be("participant");
         evt.Actor.ParticipantId.Should().Be(account.Id.ToString());
-        evt.Payload.Should().Contain("success");
+        evt.Payload.Should().Be(
+            PasswordSuccessPayload,
+            "easy-login Gate-2 S-1: a password sign-in names its method, like the link and word sign-ins (additive field)");
         evt.ScenarioTime.Should().Be(scenario, "scenario time is stamped from the exercise's stored CurrentScenarioTime (B2 placeholder)");
         evt.TimeZone.Should().Be("America/Chicago");
 
@@ -147,7 +154,7 @@ public sealed class ParticipantLoginServiceTests
 
         var events = await ReadLoginEventsAsync(exercise.Id);
         events.Should().ContainSingle("a failed login still emits one XC-004 login event");
-        events[0].Payload.Should().Contain("failure");
+        events[0].Payload.Should().Be(PasswordFailurePayload, "easy-login Gate-2 S-1: the failure names its method too");
         events[0].Actor.Kind.Should().Be(
             "system",
             "an identity-less attempt is a SYSTEM actor: the v0 envelope conditionally requires participantId "
@@ -230,6 +237,7 @@ public sealed class ParticipantLoginServiceTests
         var disabledEvent = events.Single(e => e.Target!.EntityId == "disabled-dana");
         var wrongPasswordEvent = events.Single(e => e.Target!.EntityId == "enabled-eve");
         disabledEvent.Payload.Should().Be(wrongPasswordEvent.Payload, "the same failure payload as a wrong password");
+        disabledEvent.Payload.Should().Be(PasswordFailurePayload);
         disabledEvent.Actor.Kind.Should().Be("system");
         disabledEvent.Actor.ParticipantId.Should().BeNull("the refusal carries no identity, exactly like a wrong password");
         disabledEvent.Target!.EntityType.Should().Be(wrongPasswordEvent.Target!.EntityType);
@@ -271,6 +279,46 @@ public sealed class ParticipantLoginServiceTests
         result.Outcome.Should().Be(ParticipantLoginOutcome.Invalid, "a missing password is a 400 before any credential work");
         issuer.IssueCount.Should().Be(0);
         (await ReadLoginEventsAsync(exercise.Id)).Should().BeEmpty("a malformed request emits no telemetry");
+    }
+
+    [RequiresDockerFact]
+    public async Task Login_RacingADisable_BetweenTheCheckAndTheIssue_IsTheWrongPasswordRefusal_AndRecordsNoSuccess()
+    {
+        // easy-login Gate-2 W-001 (story 03's join pattern): the password verifies and the account is enabled, then staff
+        // disable it BEFORE the session is minted (the racing issuer commits the Disable on its own connection first).
+        // The sign-in re-reads the account after minting, so it is refused exactly as a disabled account is.
+        var exercise = await SeedExerciseAsync(scenarioTime: null);
+        var account = await SeedAccountAsync(exercise.Id, "racer", "pw-racer-123");
+
+        var recording = new RecordingSessionIssuer();
+        var issuer = new RacingSessionIssuer(recording, async () =>
+        {
+            await using var staffSide = _fixture.CreateContext(new ExerciseContext { CurrentExerciseId = exercise.Id });
+            (await staffSide.Accounts.SingleAsync(a => a.Id == account.Id)).DisabledAt = DateTimeOffset.UtcNow;
+            await staffSide.SaveChangesAsync();
+        });
+
+        ParticipantLoginResult result;
+        await using (var context = _fixture.CreateContext(new ExerciseContext { CurrentExerciseId = exercise.Id }))
+        {
+            result = await ServiceFor(context, exercise.Id, issuer)
+                .LoginAsync(new ParticipantLoginRequest { Username = "racer", Password = "pw-racer-123" });
+        }
+
+        result.Outcome.Should().Be(ParticipantLoginOutcome.RejectedCredential, "a sign-in that lost the race to Disable is the ordinary 401");
+        result.Issued.Should().BeNull("no session reaches the caller");
+        recording.IssueCount.Should().Be(1, "precondition: the session was minted before the re-read");
+
+        var evt = (await ReadLoginEventsAsync(exercise.Id)).Should().ContainSingle(
+            "a raced attempt emits exactly one login event, and no success event").Subject;
+        evt.Payload.Should().Be(PasswordFailurePayload, "the same failure a disabled account records");
+        evt.Actor.Kind.Should().Be("system");
+        evt.Actor.ParticipantId.Should().BeNull("the refusal names nobody");
+        evt.Target!.EntityId.Should().Be("racer", "the same attempted-handle target as every password refusal");
+
+        await using var verify = _fixture.CreateContext(new ExerciseContext { CurrentExerciseId = exercise.Id });
+        (await verify.Accounts.SingleAsync(a => a.Id == account.Id)).LastLoginAt.Should().BeNull(
+            "LastLoginAt is written only once the re-read passes");
     }
 
     [RequiresDockerFact]

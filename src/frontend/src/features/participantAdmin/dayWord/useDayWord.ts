@@ -65,7 +65,7 @@ import {
   getDayWordStatus,
   putDayWord,
 } from './dayWordService'
-import type { DayWordPutBody, DayWordSetResultDto, DayWordStatusDto } from './types'
+import type { DayWordPutRequest, DayWordSetResultDto, DayWordStatusDto } from './types'
 
 /**
  * The status query key. Carries the active exercise id for cache separation
@@ -152,7 +152,7 @@ export interface UseSetDayWord {
    * `variables` - which may hold a typed word - are released); the caller keeps
    * the error in its own state.
    */
-  readonly setWord: (body: DayWordPutBody) => Promise<DayWordSetResultDto>
+  readonly setWord: (body: DayWordPutRequest) => Promise<DayWordSetResultDto>
 }
 
 /** `PUT /staff/day-word` as a consume-once mutation. See the module header. */
@@ -163,7 +163,7 @@ export function useSetDayWord(): UseSetDayWord {
   const { mutateAsync, reset, isPending } = useMutation<
     DayWordSetResultDto,
     DayWordError,
-    DayWordPutBody
+    DayWordPutRequest
   >({
     mutationFn: putDayWord,
     // Evict the finished mutation (and the word in its variables / data) at once.
@@ -175,7 +175,7 @@ export function useSetDayWord(): UseSetDayWord {
     },
   })
 
-  const setWord = async (body: DayWordPutBody): Promise<DayWordSetResultDto> => {
+  const setWord = async (body: DayWordPutRequest): Promise<DayWordSetResultDto> => {
     try {
       return await mutateAsync(body)
     } finally {
@@ -187,12 +187,12 @@ export function useSetDayWord(): UseSetDayWord {
   return { isPending, setWord }
 }
 
-/** `DELETE /staff/day-word[?date=]`. `mutate(date?)`; omit the date for today. */
-export function useClearDayWord(): UseMutationResult<void, DayWordError, string | undefined> {
+/** `DELETE /staff/day-word?date=`. `mutate(date)`: the date is always sent (Gate-2 W-1). */
+export function useClearDayWord(): UseMutationResult<void, DayWordError, string> {
   const queryClient = useQueryClient()
   const { exerciseId } = useExerciseContext()
 
-  return useMutation<void, DayWordError, string | undefined>({
+  return useMutation<void, DayWordError, string>({
     mutationFn: date => deleteDayWord(date),
     onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: dayWordQueryKey(exerciseId) })

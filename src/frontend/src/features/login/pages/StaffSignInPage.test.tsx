@@ -30,7 +30,7 @@ import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { api } from '@/core/services/api'
 import { resolveExerciseContext } from '@/core/exerciseContext'
 import type { ExerciseScope } from '@/core/exerciseContext'
-import { setTokens } from '@/core/auth'
+import { resetClientSession, setTokens } from '@/core/auth'
 import { setTokens as realSetTokens } from '@/core/auth/tokenStore'
 import { StaffSignInPage } from './StaffSignInPage'
 
@@ -45,7 +45,8 @@ vi.mock('@/core/exerciseContext', async importOriginal => {
 
 vi.mock('@/core/auth', async importOriginal => {
   const actual = await importOriginal<typeof import('@/core/auth')>()
-  return { ...actual, setTokens: vi.fn() }
+  // `resetClientSession` is a spy: its own behaviour is covered by core/auth/endSession.test.ts.
+  return { ...actual, setTokens: vi.fn(), resetClientSession: vi.fn() }
 })
 
 const mockNavigate = vi.fn()
@@ -56,6 +57,7 @@ vi.mock('react-router-dom', () => ({
 const mockPost = vi.mocked(api.post)
 const mockResolveExerciseContext = vi.mocked(resolveExerciseContext)
 const mockSetTokens = vi.mocked(setTokens)
+const mockResetClientSession = vi.mocked(resetClientSession)
 
 const SCOPE: ExerciseScope = {
   exerciseId: 'ex-alpha',
@@ -87,6 +89,7 @@ beforeEach(() => {
   mockResolveExerciseContext.mockReset()
   mockNavigate.mockReset()
   mockSetTokens.mockReset()
+  mockResetClientSession.mockReset()
   mockResolveExerciseContext.mockResolvedValue(SCOPE)
 })
 
@@ -127,7 +130,41 @@ describe('StaffSignInPage — AC3: valid sign-in stores tokens and navigates to 
       token: 'tok-123',
       refreshToken: 'ref-456',
     }))
-    expect(mockNavigate).toHaveBeenCalledWith('/')
+    expect(mockNavigate).toHaveBeenCalledWith('/', { replace: true })
+  })
+
+  it('forgets the previous identity\'s client state AFTER storing the pair, BEFORE navigating (Gate-2 W-2)', async () => {
+    mockPost.mockResolvedValue({
+      data: { token: 'tok-123', refreshToken: 'ref-456', session: {} },
+    } as Awaited<ReturnType<typeof api.post>>)
+    renderPage()
+
+    await fillAndSubmit('planner1', 'correct-secret')
+
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledTimes(1))
+    expect(mockResetClientSession).toHaveBeenCalledTimes(1)
+    const stored = mockSetTokens.mock.invocationCallOrder[0] ?? 0
+    const reset = mockResetClientSession.mock.invocationCallOrder[0] ?? 0
+    const navigated = mockNavigate.mock.invocationCallOrder[0] ?? 0
+    expect(stored).toBeGreaterThan(0)
+    expect(reset).toBeGreaterThan(stored)
+    expect(navigated).toBeGreaterThan(reset)
+  })
+
+  it('does not reset the session when the sign-in is refused', async () => {
+    mockPost.mockRejectedValue({
+      isAxiosError: true,
+      response: { status: 401, data: '' },
+      message: 'Request failed',
+    })
+    renderPage()
+
+    await fillAndSubmit('planner1', 'wrong-secret')
+
+    await screen.findByRole('alert')
+    expect(mockSetTokens).not.toHaveBeenCalled()
+    expect(mockResetClientSession).not.toHaveBeenCalled()
+    expect(mockNavigate).not.toHaveBeenCalled()
   })
 
   it("sends the resolved exercise-context's exerciseId in the request body", async () => {

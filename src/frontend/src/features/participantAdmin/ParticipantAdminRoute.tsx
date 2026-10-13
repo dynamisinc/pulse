@@ -2,8 +2,9 @@
  * features/participantAdmin/ParticipantAdminRoute.tsx
  * ---------------------------------------------------------------------------
  * The PARTICIPANT ADMIN staff surface ROUTE composition (feature: easy-login,
- * story 10; EL-14) — the element the staff route registry mounts at
- * `/staff/participant-admin` for `planner` and `controller`.
+ * story 10; EL-14) — the frame + roster page that `ParticipantAdminSurface` fills
+ * with the day-word panel and the print action, and that the staff route registry
+ * mounts at `/staff/participant-admin` for `planner` and `controller`.
  *
  * This is the "full participant-admin surface" the staff-shell flyout
  * (`ParticipantAdminFlyout`) has been waiting for (identity-auth-roles/08).
@@ -23,28 +24,34 @@
  * No `PreviewProvider`: previewing the participant world belongs to the conduct
  * surfaces.
  *
- * ## Slot composition is the orchestrator's (integration seam)
- * `<RosterPage />` is mounted bare. After stories 11, 12 (and 13) land, the
- * orchestrator passes `dayWordSlot={<DayWordPanel />}`,
- * `renderCardsAction={selection => <PrintCardsButton selection={selection} />}`
- * and, only when `capabilities.emailLinks`, `renderEmailAction`. See
- * docs/features/easy-login/implementation.md, "Integration seam".
+ * ## Slot composition lives in `ParticipantAdminSurface`, not here
+ * `<RosterPage />` takes three slot props (`dayWordSlot`, `renderCardsAction`,
+ * `renderEmailAction`). This route accepts the same props and forwards them
+ * untouched, but it imports NOTHING from `dayWord/`, `cards/` or `email/`:
+ * `participantAdminSeparation.test.ts` forbids that for every file in story 10's
+ * set, so the roster screen stays testable and shippable without the slot
+ * stories. The one file that names those folders is `ParticipantAdminSurface.tsx`,
+ * which is what the staff route registry mounts. Mounted bare (as this file's own
+ * test does), the roster renders with no slot content.
  */
 
 import { StaffShellFrame } from '@/features/staffShell/StaffShellFrame'
 import { StaffHeader } from '@/features/staffShell/components/StaffHeader'
 import { Toolstrip } from '@/features/staffShell/components/Toolstrip'
 import { ToolstripProvider } from '@/features/staffShell/toolRegistry'
-import { RosterPage } from './pages/RosterPage'
+import { RosterPage, type RosterPageProps } from './pages/RosterPage'
 
-/** The `/staff/participant-admin` route element. See the module header. */
-export const ParticipantAdminRoute = () => (
+/**
+ * The participant-admin route composition. Slot props are forwarded to the roster
+ * page verbatim; see the module header for who supplies them.
+ */
+export const ParticipantAdminRoute = (slots: RosterPageProps) => (
   <ToolstripProvider>
     <StaffShellFrame
       header={<StaffHeader surfaceName="Participants" />}
       toolstrip={<Toolstrip />}
     >
-      <RosterPage />
+      <RosterPage {...slots} />
     </StaffShellFrame>
   </ToolstripProvider>
 )

@@ -1,8 +1,14 @@
 /**
- * features/participantAdmin/components/people/copyToClipboard.ts
+ * features/participantAdmin/shared/copyToClipboard.ts
  * ---------------------------------------------------------------------------
- * Copies a string to the clipboard for the roster's "Copy link" action
- * (feature: easy-login, story 10; gotcha 10).
+ * Copies a string to the clipboard. The ONE copy helper for the staff participant-admin
+ * surface (feature: easy-login): the roster's "Copy link" action (story 10, gotcha 10) and
+ * the day-word panel's "Copy" (story 11, Gate-2 S-5) both use it, so the Safari-gesture
+ * rule and the `execCommand` fallback are written, and tested, once. It started in
+ * `components/people/` for the roster alone; the day-word panel had its own bare
+ * `navigator.clipboard.writeText` with no fallback, which simply failed on an insecure
+ * origin or an old webview. It lives in `shared/` (not in either story's folder) so neither
+ * story imports the other's files and the separation guard stays meaningful.
  *
  * ## It must be called INSIDE the click handler
  * Safari only allows a clipboard write while the user gesture is still active.
@@ -28,7 +34,8 @@
  *    instead of pretending.
  *
  * Returns whether a copy succeeded. It never throws, never logs, and never
- * includes the text in anything it returns.
+ * includes the text in anything it returns. The text may be a secret (a join URL, the day
+ * word), so the caller must keep it out of the DOM, a toast and a log itself.
  *
  * World: STAFF. No UI.
  */

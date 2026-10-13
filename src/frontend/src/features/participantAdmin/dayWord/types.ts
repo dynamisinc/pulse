@@ -52,6 +52,21 @@ export interface DayWordPutBody {
   date?: string
 }
 
+/**
+ * What the staff panel actually sends (Gate-2 W-1): the wire contract lets `date` be
+ * omitted ("today"), but the panel ALWAYS names the date it is displaying, for generate,
+ * rotate-today and turn-off alike. The server's "today" is authoritative; omitting the
+ * date lets a panel left open across the local-midnight rollover silently act on the NEW
+ * day while still showing the old one. With the date sent, the server answers a stale
+ * panel with its past-date `400` and the panel re-reads the status instead.
+ *
+ * So the service and the hooks demand it at compile time (`DayWordPutBody` stays the
+ * lenient wire shape, which the mock adapter still accepts).
+ */
+export interface DayWordPutRequest extends DayWordPutBody {
+  date: string
+}
+
 /** `PUT /api/staff/day-word` 200 body. */
 export interface DayWordSetResultDto {
   date: string

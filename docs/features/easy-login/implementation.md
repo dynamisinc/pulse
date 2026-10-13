@@ -388,7 +388,7 @@ Every surface-adding story would touch these, so no builder owns them. The orche
 | Composition wiring test | `CompositionRootWiringTests` | Same commit: assert each new route is mapped exactly once on the real `WebApplicationFactory<Program>` host (the #310 to #317 lesson). |
 | Frontend routes | `app-shell/routes.tsx`, `app-shell/constants.ts` | After 08: add `JOIN_PATH` and the `/join/:token` route beside `/login`. |
 | Staff registry | `features/staff/staffRouteRegistry.tsx` | After 10: add the `participant-admin` entry (EL-14). `staffRouteRegistry.test.tsx` rules apply (unique id and path, path starts `/staff/`, `isDefaultFor ⊆ allowedRoles`). |
-| Roster slot composition | `features/participantAdmin/ParticipantAdminRoute.tsx`, `features/participantAdmin/index.ts` | After 11 and 12 (and 13 if it lands): pass `<DayWordPanel/>`, `selection => <PrintCardsButton selection={selection}/>` and, only when `capabilities.emailLinks`, `<EmailLinksButton/>` into `<RosterPage>`. |
+| Roster slot composition | `features/participantAdmin/ParticipantAdminSurface.tsx` (the registry's element; `ParticipantAdminRoute.tsx` stays slot-free because `participantAdminSeparation.test.ts` forbids story 10's files from importing the slot folders) | After 11 and 12 (and 13 if it lands): pass `<DayWordPanel/>`, `selection => <PrintCardsButton selection={selection}/>` and, only when `capabilities.emailLinks`, `<EmailLinksButton/>` into `<RosterPage>`. |
 
 ## Risks
 

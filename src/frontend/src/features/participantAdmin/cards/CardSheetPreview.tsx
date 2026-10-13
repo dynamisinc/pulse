@@ -45,16 +45,32 @@
  * card count and, when people were left out, how many and why ("2 disabled, 1 whose link
  * needs reissue") with the instruction to fix them in the roster and print again.
  *
+ * AFTER PRINTING (Gate-2 S-3). A printed sheet is done with, but the sheet on screen still
+ * holds every join URL and QR code (each one a sign-in as that person), and a projector, a
+ * screen share or the next person at the desk can still see it. So when the browser reports
+ * `afterprint` (the print dialog was used or dismissed, from our Print button or Ctrl+P) a
+ * prompt appears in the staff chrome: "Done printing?" with "Close the sheet" (the primary
+ * action) and "Keep it open" (to print again). It is screen-only (inside `.screenOnly`, so it
+ * never prints), it takes focus on its primary button so a keyboard or screen-reader user
+ * lands on it, it is a labelled group whose text is the focused button's description, and
+ * "Keep it open" returns focus to Print. It never closes the sheet by itself: a person who
+ * wants a second copy must not lose the sheet to a timer.
+ *
  * SECRETS. The cards come from `useRosterCards` (no cache, discarded on close). A join
  * URL appears only inside the sheet's DOM, never in this component's text, a title, a
  * toast or a log. Nothing here writes to storage.
  */
 
-import { useCallback, useEffect, useId, useRef, type KeyboardEvent } from 'react'
+import { useCallback, useEffect, useId, useRef, useState, type KeyboardEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { Box, Typography } from '@mui/material'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import { faPrint, faTriangleExclamation, faXmark } from '@fortawesome/free-solid-svg-icons'
+import {
+  faCircleCheck,
+  faPrint,
+  faTriangleExclamation,
+  faXmark,
+} from '@fortawesome/free-solid-svg-icons'
 import { CobraPrimaryButton, CobraSecondaryButton } from '@/theme/styledComponents'
 import CobraStyles from '@/theme/CobraStyles'
 import { CardSheet } from './CardSheet'
@@ -200,13 +216,40 @@ export function CardSheetPreview({ participantIds, onClose }: CardSheetPreviewPr
   const titleId = useId()
   const bannerId = useId()
   const overlayRef = useRef<HTMLDivElement>(null)
+  const promptTitleId = useId()
+  const promptBodyId = useId()
+  const printButtonRef = useRef<HTMLButtonElement>(null)
+  const closeSheetRef = useRef<HTMLButtonElement>(null)
   const query = useRosterCards(participantIds)
   useOpenPreviewEffects(overlayRef, onClose)
+
+  // The browser tells us when the print dialog is done with, however it was opened.
+  const [printPromptOpen, setPrintPromptOpen] = useState(false)
+  useEffect(() => {
+    const onAfterPrint = () => setPrintPromptOpen(true)
+    window.addEventListener('afterprint', onAfterPrint)
+    return () => window.removeEventListener('afterprint', onAfterPrint)
+  }, [])
 
   const data = query.data
   const cards = data?.cards ?? []
   const skipped = summarizeSkipped(data?.skipped ?? [])
   const canPrint = data !== undefined && cards.length > 0
+  // Only a sheet that is actually on screen needs closing; an error or empty state has no
+  // secrets to leave behind.
+  const showPrintPrompt = printPromptOpen && canPrint
+
+  // Move focus to the primary action when the prompt appears, so it is read out and one key
+  // closes the sheet.
+  useEffect(() => {
+    if (showPrintPrompt) closeSheetRef.current?.focus()
+  }, [showPrintPrompt])
+
+  // "Keep it open": hide the prompt and put focus back where printing starts.
+  const keepSheetOpen = useCallback(() => {
+    setPrintPromptOpen(false)
+    printButtonRef.current?.focus()
+  }, [])
 
   // Tab / Shift+Tab wrap inside the dialog.
   const trapTab = useCallback((event: KeyboardEvent<HTMLDivElement>) => {
@@ -328,6 +371,7 @@ export function CardSheetPreview({ participantIds, onClose }: CardSheetPreviewPr
 
           <Box role="group" aria-label="Card sheet actions" sx={{ display: 'flex', gap: 1 }}>
             <CobraPrimaryButton
+              ref={printButtonRef}
               disabled={!canPrint}
               startIcon={<FontAwesomeIcon icon={faPrint} />}
               onClick={() => window.print()}
@@ -362,6 +406,51 @@ export function CardSheetPreview({ participantIds, onClose }: CardSheetPreviewPr
           <FontAwesomeIcon icon={faTriangleExclamation} />
           <span>{PERSONAL_LINKS_WARNING}</span>
         </Box>
+
+        {showPrintPrompt && (
+          <Box
+            role="group"
+            aria-labelledby={promptTitleId}
+            data-testid="card-sheet-after-print"
+            sx={{
+              display: 'flex',
+              flexWrap: 'wrap',
+              alignItems: 'center',
+              gap: 1.5,
+              padding: '10px 15px',
+              bgcolor: 'background.paper',
+              color: 'text.primary',
+              borderBottom: '2px solid',
+              borderColor: 'text.primary',
+              fontSize: '0.875rem',
+            }}
+          >
+            <FontAwesomeIcon icon={faCircleCheck} />
+            <Box sx={{ flex: '1 1 18rem', minWidth: 0 }}>
+              <Typography
+                id={promptTitleId}
+                component="p"
+                sx={{ margin: 0, fontWeight: 700, fontSize: 'inherit' }}
+              >
+                Done printing?
+              </Typography>
+              <Typography id={promptBodyId} component="p" sx={{ margin: 0, fontSize: 'inherit' }}>
+                Close the sheet so the personal links and QR codes do not stay on this screen.
+              </Typography>
+            </Box>
+            <Box sx={{ display: 'flex', gap: 1 }}>
+              <CobraPrimaryButton
+                ref={closeSheetRef}
+                aria-describedby={promptBodyId}
+                startIcon={<FontAwesomeIcon icon={faXmark} />}
+                onClick={onClose}
+              >
+                Close the sheet
+              </CobraPrimaryButton>
+              <CobraSecondaryButton onClick={keepSheetOpen}>Keep it open</CobraSecondaryButton>
+            </Box>
+          </Box>
+        )}
       </div>
 
       <div

@@ -24,6 +24,7 @@ using Pulse.WebApi.Features.Identity.EasyLogin;
 using Pulse.WebApi.Features.Identity.LinkCards;
 using Pulse.WebApi.Features.Identity.LinkEmail;
 using Pulse.WebApi.Features.Identity.PersonalLinks;
+using Pulse.WebApi.Features.Identity.Roster;
 using Xunit;
 
 /// <summary>
@@ -49,6 +50,9 @@ using Xunit;
 ///   <item><description>Story 13 is dark on a host with no <c>Email:*</c> configuration: the mailer is the fail-closed null one.</description></item>
 ///   <item><description>Story 03's real link issuer replaced story 01's fail-closed null issuer.</description></item>
 ///   <item><description><c>AddEasyLoginFoundation()</c> is idempotent: a second call adds no second options action.</description></item>
+///   <item><description>Every easy-login <c>Add*</c> call is idempotent, and the container still builds its rate-limiter
+///   options after each is called twice (Gate-2 CR-001: <c>Program.cs</c> wires them, so a test host that calls one again
+///   must not register a second rate-limit policy, which throws at host start).</description></item>
 /// </list>
 /// The pre-auth allowlist itself (now thirteen routes) is pinned by <c>DefaultDenySessionGateTests</c> and
 /// <c>AnonymousAccessRegressionTests</c>.
@@ -183,9 +187,15 @@ public sealed class EasyLoginCompositionRootWiringTests
         using var request = new HttpRequestMessage(new HttpMethod(method), pattern);
         using var response = await client.SendAsync(request);
 
-        response.StatusCode.Should().NotBe(HttpStatusCode.NotFound, "{0} {1} must be wired, not 404", method, pattern);
+        // Gate-2 S-2: the exact answer, not merely "not 404". An empty body reaches the HANDLER on the real host and is
+        // its 400 ProblemDetails, before any database work. A 401 here would be the gate (or a handler refusing a
+        // request it should never have judged), a 404 a missing Map call, a 415 a binding change.
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest, "{0} {1} with an empty body is the handler's 400", method, pattern);
+        response.Content.Headers.ContentType?.MediaType.Should().Be("application/problem+json");
         response.Headers.WwwAuthenticate.Should().BeEmpty(
-            "{0} {1} is pre-auth: whatever it answers (400 for no body here), the gate must not be what answers", method, pattern);
+            "{0} {1} is pre-auth: the default-deny gate must not be what answers", method, pattern);
+        response.Headers.CacheControl?.NoStore.Should().BeTrue(
+            "{0} {1}: every answer of an anonymous sign-in is no-store (its 200 carries the tokens; Gate-2 S-3)", method, pattern);
     }
 
     [Fact]
@@ -228,6 +238,38 @@ public sealed class EasyLoginCompositionRootWiringTests
         twice.Count(d => d.ServiceType == typeof(IConfigureOptions<EasyLoginOptions>)).Should().Be(
             once.Count(d => d.ServiceType == typeof(IConfigureOptions<EasyLoginOptions>)),
             "a second copy-from-configuration action would overwrite an override registered between the two calls");
+    }
+
+    [Fact]
+    public void EveryEasyLoginAddCall_IsIdempotent_AndTheRateLimiterOptionsStillBuild()
+    {
+        // Gate-2 CR-001: Program.cs wires all five, and a test host's ConfigureTestServices runs AFTER Program.cs, so a
+        // host that adds one again used to register a second easy-login-word policy and throw at start-up.
+        static ServiceCollection Compose(int calls)
+        {
+            var services = new ServiceCollection();
+            services.AddLogging();
+            services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
+            for (var call = 0; call < calls; call++)
+            {
+                services.AddEasyLoginFoundation();
+                services.AddRoster();
+                services.AddPersonalLinks();
+                services.AddLinkCards();
+                services.AddDayWord();
+            }
+
+            return services;
+        }
+
+        var once = Compose(1);
+        var twice = Compose(2);
+
+        twice.Count.Should().Be(once.Count, "a repeat of any easy-login Add* call must register nothing more");
+
+        using var provider = twice.BuildServiceProvider();
+        var build = () => provider.GetRequiredService<IOptions<RateLimiterOptions>>().Value;
+        build.Should().NotThrow("the easy-login-join and easy-login-word policies must each be added exactly once");
     }
 
     private static RouteEndpoint FindRoute(EndpointDataSource dataSource, string method, string rawText) =>

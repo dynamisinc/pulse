@@ -125,8 +125,8 @@ describe('signInWithDayWord - mock adapter: everything else is a 401', () => {
     expect((wrongWord as ParticipantSignInError).message).toBe(
       (wrongName as ParticipantSignInError).message,
     )
-    expect((wrongWord as ParticipantSignInError).serverMessage).toBeUndefined()
-    expect((wrongName as ParticipantSignInError).serverMessage).toBeUndefined()
+    expect(wrongWord).not.toHaveProperty('serverMessage')
+    expect(wrongName).not.toHaveProperty('serverMessage')
   })
 })
 

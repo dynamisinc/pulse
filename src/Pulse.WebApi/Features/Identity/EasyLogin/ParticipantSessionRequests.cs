@@ -14,6 +14,22 @@ public static class ParticipantSessionRequests
     /// <summary>The session kind every participant sign-in mints.</summary>
     public const string ParticipantSessionKind = "participant";
 
+    /// <summary>The participant-world account roles a link or the day word may sign in (case-insensitive).</summary>
+    private static readonly HashSet<string> ParticipantWorldRoles = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "participant",
+        "pio",
+    };
+
+    /// <summary>
+    /// Whether <paramref name="role"/> is a participant-world account role (<c>participant</c> or <c>pio</c>, any
+    /// casing): the only roles the join link and the day word sign in (Gate-2 S-6, one rule for both). Anything else,
+    /// a staff-adjacent account role or a blank one, is refused with the method's uniform refusal.
+    /// </summary>
+    /// <param name="role">The account's stored role.</param>
+    /// <returns><c>true</c> for a participant-world role.</returns>
+    public static bool IsParticipantWorldRole(string? role) => role is not null && ParticipantWorldRoles.Contains(role);
+
     /// <summary>
     /// The session request for <paramref name="account"/>, bound to <paramref name="exerciseId"/>: kind
     /// <c>participant</c>, the account's role and persona, principal = the account id, acting human = the account's
