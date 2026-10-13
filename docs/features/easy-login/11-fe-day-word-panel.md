@@ -63,8 +63,8 @@ the orchestrator). A reminder or schedule for setting tomorrow's word.
 Frontend, staff world. New folder `features/participantAdmin/dayWord/`: `DayWordPanel.tsx` (the exported component,
 no required props), `dayWordService.ts` (axios under `/staff/day-word`, guards, typed error), `dayWordMocks.ts`,
 `useDayWord.ts` (a query for status and mutations for put/delete), its own small `types.ts` (the day-word half of
-the frozen contract; do not import from story 10's files). Mirror the server's normalisation (lower-case, `a-z0-9`
-only) in a pure helper with a test, for the live length check only; the server stays authoritative. Wrap the
+the frozen contract; do not import from story 10's files). Mirror the server's normalisation exactly (NFKD, accents stripped, lower-case, `a-z0-9`
+only; amended after Gate-1 W-2) in a pure helper with a test, for the live length check only; the server stays authoritative. Wrap the
 one-time result in a component that unmounts to clear it. See `implementation.md` (story 11).
 
 ## Dependencies
