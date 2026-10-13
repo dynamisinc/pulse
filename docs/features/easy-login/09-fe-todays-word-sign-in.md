@@ -35,7 +35,10 @@ mostly be filled in on a phone. The page's three methods need clear, plain names
       **word** field is cleared (the name is kept). **Given** `429`, **then** "Too many tries. Wait a minute and try
       again." **Given** any other failure, the existing generic "Could not sign in. Please try again."
 - [ ] **Given** the existing Password and View-only code forms, **then** their behaviour, messages and tests are
-      unchanged except that a success now stores the pair with `{ persist: true }`.
+      unchanged except that a success now stores the pair with `{ persist: true }`, and except that the view-only
+      form uses the one name **View-only code** throughout: its field label is "View-only code", its form
+      `aria-label` is "Sign in with a view-only code", and its 401 reads "That view-only code wasn't recognized."
+      (messages unchanged, except the view-only 401 names the method; amended 2026-10-13, Gate-1 W-1).
 - [ ] **Given** the page, **then** the existing `GET /exercise-context` heading ("Sign in to {exercise name}") and the
       subordinate "Staff or controller? Sign in here." link are untouched.
 
@@ -60,8 +63,10 @@ A per-exercise branded skin (C-2). Changes to the staff sign-in page. The backen
 
 Frontend, participant world. Edits `features/login/pages/ParticipantSignInPage.tsx` and `.module.css`, and
 `features/login/services/participantSignInService.ts` (add `signInWithDayWord(credentials)` next to the existing two,
-same `toSignInError` / `isLoginEnvelope` handling, **no mock adapter**; add `/auth/word` to the file header's
-contract note). Extend the existing `ParticipantSignInPage.test.tsx` and `participantSignInService.test.ts`;
+same `toSignInError` / `isLoginEnvelope` handling; **mock-first** behind the single `USE_MOCK_DATA` flip, per
+`implementation.md` (amended 2026-10-13: this line previously said "no mock adapter"). The mock signs in the word
+`demo-word` (normalised as EL-9 specifies before comparing) with any non-blank name, answers anything else with a
+401, and waits about 1.5 s when the name or word is `slow`; add `/auth/word` to the file header's contract note). Extend the existing `ParticipantSignInPage.test.tsx` and `participantSignInService.test.ts`;
 the labels they assert on change ("Account sign-in" becomes "Password"), so update them rather than adding a parallel
 suite. `SignInMode` becomes `'word' | 'named' | 'shared'`. MUI 9 does not apply (no MUI). See `implementation.md`
 (story 09).

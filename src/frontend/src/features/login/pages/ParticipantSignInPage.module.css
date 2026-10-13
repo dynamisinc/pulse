@@ -1,9 +1,21 @@
 /*
  * features/login/pages/ParticipantSignInPage.module.css
  * ---------------------------------------------------------------------------
- * Scoped styles for the participant sign-in page (feature: login, story 02).
- * CSS Module — every class is locally scoped by the build; this file carries
- * NO COBRA / MUI dependency (participant world, D0 §2 two-worlds rule).
+ * Scoped styles for the participant sign-in page (feature: login, story 02;
+ * extended by easy-login story 09 — "Today's word" — with the three-way method
+ * toggle). CSS Module — every class is locally scoped by the build; this file
+ * carries NO COBRA / MUI dependency (participant world, D0 §2 two-worlds rule).
+ *
+ * MOBILE-FIRST (easy-login 09): the Today's-word form is mostly filled in on a
+ * phone, so every input is 16 px (anything smaller makes iOS Safari zoom the
+ * viewport on focus), every tappable control (toggle buttons, inputs, submit)
+ * is at least 44 px tall, and nothing may scroll horizontally down to a 320 px
+ * viewport (long words wrap with `overflow-wrap: anywhere`, the three toggle
+ * labels wrap rather than overflow). A source-scan test
+ * (`ParticipantSignInPage.boundary.test.ts`) pins these numbers.
+ *
+ * STORY 08 reads this module too (the join page reuses `.page`, `.card`, ...),
+ * so classes here are only ever ADDED to or tuned — never renamed or removed.
  *
  * Deliberately BRAND-NEUTRAL: this page renders before any exercise brand is
  * confirmed (AC5's lookup is non-blocking and may never resolve), so the
@@ -19,6 +31,7 @@
   align-items: center;
   justify-content: center;
   min-height: 100vh;
+  min-height: 100dvh;
   padding: 24px;
   background: linear-gradient(180deg, #eef3f8 0%, #dfe7ee 100%);
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -30,6 +43,7 @@
   flex-direction: column;
   gap: 16px;
   width: 100%;
+  min-width: 0;
   max-width: 400px;
   padding: 32px;
   border-radius: 16px;
@@ -57,6 +71,8 @@
 
 .heading {
   margin: 0;
+  /* "Sign in to {exercise name}": a long, unbroken name wraps, never overflows. */
+  overflow-wrap: anywhere;
   color: #10202e;
   font-size: 22px;
   font-weight: 700;
@@ -71,9 +87,13 @@
   background: #f0f3f6;
 }
 
+/* Three methods (Today's word / Password / View-only code). Equal-width cells
+   that may wrap their label onto two lines at 320 px instead of overflowing. */
 .toggleButton {
-  flex: 1;
-  padding: 8px 12px;
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 44px;
+  padding: 8px 6px;
   border: none;
   border-radius: 8px;
   background: transparent;
@@ -81,18 +101,35 @@
   font: inherit;
   font-size: 13px;
   font-weight: 600;
+  line-height: 1.2;
+  text-align: center;
+  overflow-wrap: anywhere;
   cursor: pointer;
 }
 
+/* The active method is NOT shown by colour alone (NFR-001 / WCAG 1.4.1): a
+   raised white cell, a heavier weight AND a 3 px bar under the label. */
 .toggleButton[aria-pressed='true'] {
   background: #ffffff;
   color: #10202e;
-  box-shadow: 0 1px 3px rgba(15, 32, 51, 0.18);
+  font-weight: 700;
+  box-shadow: 0 1px 3px rgba(15, 32, 51, 0.18), inset 0 -3px 0 #2b5f75;
 }
 
 .toggleButton:focus-visible {
   outline: 2px solid #2b5f75;
   outline-offset: 2px;
+}
+
+/* Forced-colors (Windows High Contrast): the box-shadow bar above is dropped and
+   backgrounds are overridden, which would leave the active method looking like
+   the other two. A real border survives, so the active one keeps a visible
+   3 px bar in the system text colour. (Border, not outline: the outline is the
+   focus ring.) */
+@media (forced-colors: active) {
+  .toggleButton[aria-pressed='true'] {
+    border-bottom: 3px solid CanvasText;
+  }
 }
 
 .form {
@@ -105,6 +142,7 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
+  min-width: 0;
 }
 
 .label {
@@ -115,13 +153,19 @@
 
 .input {
   box-sizing: border-box;
+  width: 100%;
+  min-height: 44px;
   padding: 10px 12px;
-  border: 1px solid #cdd7de;
+  /* #7f8c98: 3.35:1 on the input fill (#fbfcfd) and 3.44:1 on the white card,
+     so the field edge meets WCAG 1.4.11 (>= 3:1) - the old #cdd7de was 1.42:1.
+     Pinned by ParticipantSignInPage.boundary.test.ts. */
+  border: 1px solid #7f8c98;
   border-radius: 8px;
   background: #fbfcfd;
   color: #10202e;
   font: inherit;
-  font-size: 15px;
+  /* 16 px: below this iOS Safari zooms the page when the field is focused. */
+  font-size: 16px;
 }
 
 .input:focus-visible {
@@ -131,13 +175,14 @@
 }
 
 .submitButton {
+  min-height: 44px;
   padding: 10px 16px;
   border: none;
   border-radius: 8px;
   background: #2b5f75;
   color: #ffffff;
   font: inherit;
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 700;
   cursor: pointer;
 }
@@ -163,12 +208,18 @@
   background: #fdeeee;
   color: #8a2a2a;
   font-size: 13px;
+  overflow-wrap: anywhere;
 }
 
+/* Always mounted (empty when idle) so a screen reader announces its text when it
+   swaps to "Signing in…"; the height is RESERVED so that swap never shifts the
+   layout. */
 .status {
   margin: 0;
+  min-height: 1.4em;
   color: #4a5b68;
   font-size: 13px;
+  line-height: 1.4;
 }
 
 /* The one cross-world link (to /staff/login) — visually SUBORDINATE to the
@@ -178,7 +229,9 @@
   margin: 4px 0 0;
   padding-top: 12px;
   border-top: 1px solid #e5eaf0;
-  color: #7c8894;
+  /* #5f6b76: 5.45:1 on white (was #7c8894, 3.62:1 - below the 4.5:1 AA floor
+     for 12 px text). Pinned by ParticipantSignInPage.boundary.test.ts. */
+  color: #5f6b76;
   font-size: 12px;
   text-align: center;
 }
@@ -197,5 +250,17 @@
 @media (max-width: 420px) {
   .card {
     padding: 24px;
+  }
+}
+
+/* Down to a 320 px phone: claw back the gutters so the three toggle cells keep
+   a usable width and the page never scrolls sideways. */
+@media (max-width: 360px) {
+  .page {
+    padding: 12px;
+  }
+
+  .card {
+    padding: 20px;
   }
 }

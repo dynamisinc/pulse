@@ -1,14 +1,17 @@
 /**
  * features/login/services/participantSignInService.test.ts
  * ---------------------------------------------------------------------------
- * Story 02 (participant sign-in) — boundary-mocked coverage for the
- * participant sign-in data seam.
+ * Story 02 (participant sign-in) + easy-login story 09 ("Today's word") —
+ * boundary-mocked coverage for the participant sign-in data seam.
  *
  * `@/core/services/api` is mocked at the module boundary (mirrors
  * `staffAssignmentsService.test.ts`) so these tests exercise
- * `signInWithPassword`/`signInWithSharedCode`'s own request shape /
- * validation / error-translation logic directly, with no async request ever
- * reaching a real sink (the repo's own worker-teardown footgun).
+ * `signInWithPassword`/`signInWithSharedCode`/`signInWithDayWord`'s own request
+ * shape / validation / error-translation logic directly, with no async request
+ * ever reaching a real sink (the repo's own worker-teardown footgun).
+ * `@/core/config/mockData` is pinned to `false` so `signInWithDayWord` takes
+ * its LIVE path here (a plain two-argument `api.post`, no adapter); its mock
+ * adapter has its own file, `participantSignInService.mock.test.ts`.
  *
  * `axios` itself is NOT mocked — the error-translation tests construct real
  * `AxiosError`s so `axios.isAxiosError` (used inside the service) recognizes
@@ -19,13 +22,19 @@ import { AxiosError, type AxiosResponse } from 'axios'
 import { api } from '@/core/services/api'
 import {
   ParticipantSignInError,
+  isRateLimitedSignInError,
   isUnauthorizedSignInError,
+  signInWithDayWord,
   signInWithPassword,
   signInWithSharedCode,
 } from './participantSignInService'
 
 vi.mock('@/core/services/api', () => ({
   api: { post: vi.fn() },
+}))
+
+vi.mock('@/core/config/mockData', () => ({
+  USE_MOCK_DATA: false,
 }))
 
 const mockPost = vi.mocked(api.post)
@@ -188,5 +197,232 @@ describe('isUnauthorizedSignInError — never distinguishes reason (NFR-009)', (
   it('is false for a plain non-ParticipantSignInError value', () => {
     expect(isUnauthorizedSignInError(new Error('boom'))).toBe(false)
     expect(isUnauthorizedSignInError('not an error')).toBe(false)
+  })
+})
+
+describe('signInWithDayWord — request shape (easy-login 09-AC3)', () => {
+  it('POSTs /auth/word with exactly { signInName, word } and no mock adapter on the live path', async () => {
+    mockPost.mockResolvedValue({
+      data: { token: 'tok-word' },
+    } as Awaited<ReturnType<typeof api.post>>)
+
+    await signInWithDayWord({ signInName: 'dreyes', word: 'bluebird' })
+
+    expect(mockPost).toHaveBeenCalledTimes(1)
+    const call = mockPost.mock.calls[0] ?? []
+    expect(call).toHaveLength(2)
+    const [url, body] = call
+    expect(url).toBe('/auth/word')
+    expect(body).toEqual({ signInName: 'dreyes', word: 'bluebird' })
+    expect(Object.keys(body as object).sort()).toEqual(['signInName', 'word'])
+  })
+
+  it('sends the values exactly as given - no trimming, case-folding or stripping (EL-9: the server normalises)', async () => {
+    mockPost.mockResolvedValue({
+      data: { token: 'tok-word' },
+    } as Awaited<ReturnType<typeof api.post>>)
+
+    await signInWithDayWord({ signInName: ' D.Reyes ', word: ' Café-7 ' })
+
+    const [, body] = mockPost.mock.calls[0] ?? []
+    expect(body).toEqual({ signInName: ' D.Reyes ', word: ' Café-7 ' })
+  })
+
+  it('puts neither the name nor the word in the URL', async () => {
+    mockPost.mockResolvedValue({
+      data: { token: 'tok-word' },
+    } as Awaited<ReturnType<typeof api.post>>)
+
+    await signInWithDayWord({ signInName: 'dreyes', word: 'bluebird' })
+
+    const [url] = mockPost.mock.calls[0] ?? []
+    expect(String(url)).not.toContain('dreyes')
+    expect(String(url)).not.toContain('bluebird')
+  })
+})
+
+describe('signInWithDayWord — response parsing', () => {
+  it('returns the parsed envelope on success', async () => {
+    mockPost.mockResolvedValue({
+      data: { token: 'tok-word', refreshToken: 'ref-word' },
+    } as Awaited<ReturnType<typeof api.post>>)
+
+    await expect(
+      signInWithDayWord({ signInName: 'dreyes', word: 'bluebird' }),
+    ).resolves.toEqual({ token: 'tok-word', refreshToken: 'ref-word' })
+  })
+
+  it('accepts an envelope with no refreshToken', async () => {
+    mockPost.mockResolvedValue({
+      data: { token: 'tok-word' },
+    } as Awaited<ReturnType<typeof api.post>>)
+
+    await expect(
+      signInWithDayWord({ signInName: 'dreyes', word: 'bluebird' }),
+    ).resolves.toEqual({ token: 'tok-word' })
+  })
+
+  it.each([
+    ['an empty object', {}],
+    ['an empty token', { token: '' }],
+    ['a non-string token', { token: 42 }],
+    ['a non-string refreshToken', { token: 'tok', refreshToken: 7 }],
+    ['null', null],
+    ['a string', 'ok'],
+  ])('fails closed (throws) on %s', async (_label, data) => {
+    mockPost.mockResolvedValue({ data } as unknown as Awaited<ReturnType<typeof api.post>>)
+
+    const caught = await signInWithDayWord({ signInName: 'dreyes', word: 'x' }).catch(
+      (error: unknown) => error,
+    )
+
+    expect(caught).toBeInstanceOf(ParticipantSignInError)
+    expect((caught as ParticipantSignInError).status).toBeUndefined()
+  })
+})
+
+describe('signInWithDayWord — status mapping', () => {
+  it('translates a 401 into a ParticipantSignInError carrying status 401', async () => {
+    mockPost.mockRejectedValue(axiosErrorWith(401))
+
+    const caught = await signInWithDayWord({ signInName: 'dreyes', word: 'wrong' }).catch(
+      (error: unknown) => error,
+    )
+
+    expect(caught).toBeInstanceOf(ParticipantSignInError)
+    expect((caught as ParticipantSignInError).status).toBe(401)
+    expect(isUnauthorizedSignInError(caught)).toBe(true)
+    expect(isRateLimitedSignInError(caught)).toBe(false)
+  })
+
+  it('translates a 429 into status 429 (rate limited), not "unauthorized"', async () => {
+    mockPost.mockRejectedValue(axiosErrorWith(429))
+
+    const caught = await signInWithDayWord({ signInName: 'dreyes', word: 'x' }).catch(
+      (error: unknown) => error,
+    )
+
+    expect((caught as ParticipantSignInError).status).toBe(429)
+    expect(isRateLimitedSignInError(caught)).toBe(true)
+    expect(isUnauthorizedSignInError(caught)).toBe(false)
+  })
+
+  it.each([400, 500, 503])('keeps status %i as neither unauthorized nor rate-limited', async status => {
+    mockPost.mockRejectedValue(axiosErrorWith(status))
+
+    const caught = await signInWithDayWord({ signInName: 'dreyes', word: 'x' }).catch(
+      (error: unknown) => error,
+    )
+
+    expect((caught as ParticipantSignInError).status).toBe(status)
+    expect(isUnauthorizedSignInError(caught)).toBe(false)
+    expect(isRateLimitedSignInError(caught)).toBe(false)
+  })
+
+  it('translates a network failure (no response) into an error with no status', async () => {
+    mockPost.mockRejectedValue(new AxiosError('Network Error'))
+
+    const caught = await signInWithDayWord({ signInName: 'dreyes', word: 'x' }).catch(
+      (error: unknown) => error,
+    )
+
+    expect(caught).toBeInstanceOf(ParticipantSignInError)
+    expect((caught as ParticipantSignInError).status).toBeUndefined()
+    expect(isUnauthorizedSignInError(caught)).toBe(false)
+    expect(isRateLimitedSignInError(caught)).toBe(false)
+  })
+
+  it('translates a non-axios throw into an error with no status', async () => {
+    mockPost.mockRejectedValue(new TypeError('boom'))
+
+    const caught = await signInWithDayWord({ signInName: 'dreyes', word: 'x' }).catch(
+      (error: unknown) => error,
+    )
+
+    expect(caught).toBeInstanceOf(ParticipantSignInError)
+    expect((caught as ParticipantSignInError).status).toBeUndefined()
+  })
+})
+
+describe('signInWithDayWord - status only, never the word (NFR-004 / NFR-009)', () => {
+  const SECRET_WORD = 'zq-secret-word-7'
+  const NAME = 'quentin.test'
+
+  /** An axios error shaped like a real one: its `config.data` holds the request body. */
+  function axiosErrorEchoing(status: number): AxiosError {
+    const response = {
+      status,
+      data: { message: `bad word ${SECRET_WORD} for ${NAME}`, detail: SECRET_WORD },
+      statusText: '',
+      headers: {},
+      config: {},
+    } as unknown as AxiosResponse
+    const config = {
+      data: JSON.stringify({ signInName: NAME, word: SECRET_WORD }),
+    } as unknown as AxiosError['config']
+    return new AxiosError(`Request failed with ${SECRET_WORD}`, undefined, config, undefined, response)
+  }
+
+  it.each([401, 429, 500])(
+    'a %i carries only its status: no server text, no cause, nothing containing the word',
+    async status => {
+      mockPost.mockRejectedValue(axiosErrorEchoing(status))
+
+      const caught = await signInWithDayWord({ signInName: NAME, word: SECRET_WORD }).catch(
+        (error: unknown) => error,
+      )
+
+      expect(caught).toBeInstanceOf(ParticipantSignInError)
+      const error = caught as ParticipantSignInError
+      expect(error.status).toBe(status)
+      expect(error.serverMessage).toBeUndefined()
+      expect(error.cause).toBeUndefined()
+      expect(error.message).not.toContain(SECRET_WORD)
+      expect(error.message).not.toContain(NAME)
+      // ...and serialising or printing the error cannot leak it either.
+      expect(String(error)).not.toContain(SECRET_WORD)
+      expect(JSON.stringify(error, Object.getOwnPropertyNames(error))).not.toContain(SECRET_WORD)
+    },
+  )
+
+  it('a malformed-response error does not contain the word either', async () => {
+    mockPost.mockResolvedValue({ data: {} } as unknown as Awaited<ReturnType<typeof api.post>>)
+
+    const caught = await signInWithDayWord({ signInName: NAME, word: SECRET_WORD }).catch(
+      (error: unknown) => error,
+    )
+
+    expect((caught as ParticipantSignInError).message).not.toContain(SECRET_WORD)
+  })
+
+  it('writes nothing to the console on success or failure', async () => {
+    const spies = (['log', 'info', 'warn', 'error', 'debug'] as const).map(method =>
+      vi.spyOn(console, method).mockImplementation(() => {}),
+    )
+
+    mockPost.mockResolvedValueOnce({
+      data: { token: 'tok-word' },
+    } as Awaited<ReturnType<typeof api.post>>)
+    await signInWithDayWord({ signInName: NAME, word: SECRET_WORD })
+    mockPost.mockRejectedValueOnce(axiosErrorEchoing(401))
+    await signInWithDayWord({ signInName: NAME, word: SECRET_WORD }).catch(() => undefined)
+
+    for (const spy of spies) {
+      expect(spy).not.toHaveBeenCalled()
+      spy.mockRestore()
+    }
+  })
+})
+
+describe('isRateLimitedSignInError', () => {
+  it('is false for a plain non-ParticipantSignInError value', () => {
+    expect(isRateLimitedSignInError(new Error('boom'))).toBe(false)
+    expect(isRateLimitedSignInError('not an error')).toBe(false)
+    expect(isRateLimitedSignInError(undefined)).toBe(false)
+  })
+
+  it('is true only for a ParticipantSignInError with status 429', () => {
+    expect(isRateLimitedSignInError(new ParticipantSignInError('x', { status: 429 }))).toBe(true)
+    expect(isRateLimitedSignInError(new ParticipantSignInError('x', { status: 401 }))).toBe(false)
   })
 })
