@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.48.1.52935",
-      "templateHash": "2576330696740266314"
+      "templateHash": "5487305365681791357"
     }
   },
   "parameters": {
@@ -1034,7 +1034,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.48.1.52935",
-              "templateHash": "9506344730239653645"
+              "templateHash": "6712391740524451075"
             }
           },
           "parameters": {
@@ -1109,10 +1109,6 @@
             "emailProvider": {
               "type": "string",
               "defaultValue": "AzureCommunicationServices"
-            },
-            "emailDefaultSenderName": {
-              "type": "string",
-              "defaultValue": "Pulse"
             },
             "emailSupportAddress": {
               "type": "string",
@@ -1314,7 +1310,7 @@
                   "http20Enabled": false,
                   "webSocketsEnabled": true,
                   "cors": "[if(not(equals(parameters('frontendUrl'), '')), createObject('allowedOrigins', createArray(parameters('frontendUrl')), 'supportCredentials', true()), null())]",
-                  "appSettings": "[concat(createArray(createObject('name', 'APPLICATIONINSIGHTS_CONNECTION_STRING', 'value', parameters('appInsightsConnectionString')), createObject('name', 'ASPNETCORE_ENVIRONMENT', 'value', parameters('aspnetcoreEnvironment')), createObject('name', 'ConnectionStrings__DefaultConnection', 'value', parameters('sqlConnectionString')), createObject('name', 'Azure__BlobStorage__Provider', 'value', parameters('blobStorageProvider')), createObject('name', 'Azure__BlobStorage__ServiceUri', 'value', parameters('blobServiceUri')), createObject('name', 'Azure__BlobStorage__ContainerName', 'value', parameters('blobStorageContainerName')), createObject('name', 'Azure__SignalR__ConnectionString', 'value', parameters('signalRConnectionString')), createObject('name', 'Email__Endpoint', 'value', parameters('emailEndpoint')), createObject('name', 'Email__SenderAddress', 'value', parameters('emailSenderAddress')), createObject('name', 'Email__Provider', 'value', parameters('emailProvider')), createObject('name', 'Email__DefaultSenderName', 'value', parameters('emailDefaultSenderName')), createObject('name', 'Email__SupportAddress', 'value', parameters('emailSupportAddress')), createObject('name', 'Authentication__FrontendBaseUrl', 'value', parameters('frontendUrl')), createObject('name', 'Authentication__Jwt__AccessTokenMinutes', 'value', string(parameters('jwtAccessTokenMinutes'))), createObject('name', 'Authentication__Jwt__RefreshTokenHours', 'value', string(parameters('jwtRefreshTokenHours'))), createObject('name', 'Authentication__Jwt__RememberMeDays', 'value', string(parameters('jwtRememberMeDays'))), createObject('name', 'Authentication__Jwt__SecretKey', 'value', parameters('jwtSecretKey')), createObject('name', 'Authentication__Bootstrap__Secret', 'value', parameters('bootstrapSecret')), createObject('name', 'Authentication__Cookie__SameSite', 'value', 'None')), variables('staffAccountSettings'), variables('generationSettings'))]"
+                  "appSettings": "[concat(createArray(createObject('name', 'APPLICATIONINSIGHTS_CONNECTION_STRING', 'value', parameters('appInsightsConnectionString')), createObject('name', 'ASPNETCORE_ENVIRONMENT', 'value', parameters('aspnetcoreEnvironment')), createObject('name', 'ConnectionStrings__DefaultConnection', 'value', parameters('sqlConnectionString')), createObject('name', 'Azure__BlobStorage__Provider', 'value', parameters('blobStorageProvider')), createObject('name', 'Azure__BlobStorage__ServiceUri', 'value', parameters('blobServiceUri')), createObject('name', 'Azure__BlobStorage__ContainerName', 'value', parameters('blobStorageContainerName')), createObject('name', 'Azure__SignalR__ConnectionString', 'value', parameters('signalRConnectionString')), createObject('name', 'Email__Endpoint', 'value', parameters('emailEndpoint')), createObject('name', 'Email__SenderAddress', 'value', parameters('emailSenderAddress')), createObject('name', 'Email__Provider', 'value', parameters('emailProvider')), createObject('name', 'Email__SupportAddress', 'value', parameters('emailSupportAddress')), createObject('name', 'Authentication__FrontendBaseUrl', 'value', parameters('frontendUrl')), createObject('name', 'Authentication__Jwt__AccessTokenMinutes', 'value', string(parameters('jwtAccessTokenMinutes'))), createObject('name', 'Authentication__Jwt__RefreshTokenHours', 'value', string(parameters('jwtRefreshTokenHours'))), createObject('name', 'Authentication__Jwt__RememberMeDays', 'value', string(parameters('jwtRememberMeDays'))), createObject('name', 'Authentication__Jwt__SecretKey', 'value', parameters('jwtSecretKey')), createObject('name', 'Authentication__Bootstrap__Secret', 'value', parameters('bootstrapSecret')), createObject('name', 'Authentication__Cookie__SameSite', 'value', 'None')), variables('staffAccountSettings'), variables('generationSettings'))]"
                 }
               },
               "tags": "[parameters('tags')]"

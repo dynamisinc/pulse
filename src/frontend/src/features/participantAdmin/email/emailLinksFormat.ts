@@ -67,7 +67,7 @@ const REASON_TEXT: Readonly<Record<string, string>> = {
   tokenUnrecoverable: 'link needs reissuing',
   notFound: 'not on this roster',
   sendFailed: 'the email could not be sent',
-  rateLimited: 'the email service is busy, try again later',
+  rateLimited: 'email limit reached; send again to just these people later',
   notAttempted: 'not attempted in time, send again',
 }
 
@@ -126,6 +126,16 @@ export function summarizeResult(result: RosterEmailResultDto): EmailLinksSummary
       participantIds: group.ids,
     })),
   }
+}
+
+/**
+ * The people who were NOT sent an email and can simply be sent again: every `failed`
+ * result (`rateLimited`, `notAttempted`, `sendFailed`), in result order. Never a
+ * `skipped` one (sending again cannot fix a missing address or link) and never a
+ * `sent` one (an emailed link cannot be recalled, so it is never sent twice by this).
+ */
+export function unsentIds(result: RosterEmailResultDto): string[] {
+  return result.results.filter(item => item.status === 'failed').map(item => item.participantId)
 }
 
 /** "1 person" / "3 people". */

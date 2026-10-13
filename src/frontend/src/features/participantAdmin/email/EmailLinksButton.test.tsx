@@ -61,6 +61,19 @@ describe('EmailLinksButton - dark until configured', () => {
     await renderWithRoster(<EmailLinksButton selection={['p-ann']} />, rosterWith(sampleEntries()))
     expect(screen.getByRole('button', { name: 'Email links (1)' })).toBeInTheDocument()
   })
+
+  it('is disabled while the roster has no join links (no site address: nothing to email)', async () => {
+    const user = userEvent.setup({ pointerEventsCheck: PointerEventsCheckLevel.Never })
+    const post = vi.spyOn(api, 'post')
+    const roster = { ...rosterWith(sampleEntries()), joinLinksAvailable: false }
+    await renderWithRoster(<EmailLinksButton selection={[]} />, roster)
+
+    const button = screen.getByRole('button', { name: 'Email all links' })
+    expect(button).toBeDisabled()
+    await user.click(button)
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+    expect(post).not.toHaveBeenCalled()
+  })
 })
 
 describe('EmailLinksButton - label', () => {
@@ -199,7 +212,9 @@ describe('EmailLinksButton - sending and the summary', () => {
 
     // The reasons, with the people's names from the roster.
     const reasons = within(summary).getByRole('list', { name: 'Not emailed' })
-    expect(reasons).toHaveTextContent('Failed, the email service is busy, try again later: Ben Baker')
+    expect(reasons).toHaveTextContent(
+      'Failed, email limit reached; send again to just these people later: Ben Baker',
+    )
     expect(reasons).toHaveTextContent('Skipped, no email address: Cal Cole')
     expect(reasons).toHaveTextContent('Skipped, disabled: Dee Dunn')
 
@@ -207,6 +222,57 @@ describe('EmailLinksButton - sending and the summary', () => {
     expect(screen.getByTestId('email-links-status')).toHaveAttribute('aria-live', 'polite')
     expect(screen.getByTestId('email-links-status')).toContainElement(summary)
     expect(screen.getByRole('button', { name: 'Close' })).toHaveFocus()
+  })
+
+  it('"Send again" re-posts ONLY the failed ids, then shows the new result', async () => {
+    const user = userEvent.setup()
+    const post = vi.spyOn(api, 'post')
+      .mockResolvedValueOnce(okResponse({
+        results: [
+          { participantId: 'p-ann', status: 'sent' },
+          { participantId: 'p-ben', status: 'failed', reason: 'rateLimited' },
+          { participantId: 'p-cal', status: 'skipped', reason: 'noEmail' },
+          { participantId: 'p-dee', status: 'failed', reason: 'notAttempted' },
+        ],
+      }))
+      .mockResolvedValueOnce(okResponse({
+        results: [
+          { participantId: 'p-ben', status: 'sent' },
+          { participantId: 'p-dee', status: 'sent' },
+        ],
+      }))
+    await renderWithRoster(
+      <EmailLinksButton selection={['p-ann', 'p-ben', 'p-cal', 'p-dee']} />,
+      rosterWith(sampleEntries()),
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Email links (4)' }))
+    await user.click(await screen.findByRole('button', { name: 'Send emails' }))
+    await user.click(await screen.findByRole('button', { name: 'Send again to the 2 not sent' }))
+
+    await waitFor(() => expect(post).toHaveBeenCalledTimes(2))
+    expect(post.mock.calls[1]?.[1]).toEqual({ participantIds: ['p-ben', 'p-dee'] })
+    await waitFor(() => expect(screen.getByTestId('email-links-summary')).toHaveTextContent('Sent: 2 people'))
+    expect(screen.getByTestId('email-links-summary')).toHaveTextContent('Failed: 0 people')
+    expect(screen.queryByRole('button', { name: /Send again/ })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Close' })).toHaveFocus()
+  })
+
+  it('offers no "Send again" when nobody failed (skips cannot be fixed by resending)', async () => {
+    const user = userEvent.setup()
+    spyOnEmail({
+      results: [
+        { participantId: 'p-ann', status: 'sent' },
+        { participantId: 'p-cal', status: 'skipped', reason: 'noEmail' },
+      ],
+    })
+    await renderWithRoster(<EmailLinksButton selection={['p-ann', 'p-cal']} />, rosterWith(sampleEntries()))
+
+    await user.click(screen.getByRole('button', { name: 'Email links (2)' }))
+    await user.click(await screen.findByRole('button', { name: 'Send emails' }))
+
+    await screen.findByTestId('email-links-summary')
+    expect(screen.queryByRole('button', { name: /Send again/ })).not.toBeInTheDocument()
   })
 
   it('with nothing selected, posts {} (the explicit "everyone eligible")', async () => {
@@ -249,7 +315,7 @@ describe('EmailLinksButton - sending and the summary', () => {
   })
 
   it.each([
-    [503, 'Email delivery is not configured on this server.'],
+    [503, 'Email delivery or personal links are not configured on this server.'],
     [403, 'This account is not allowed to email sign-in links.'],
     [500, 'The emails could not be sent. Check the connection and try again.'],
   ])('a %i is a fixed, secret-free message in an alert, and the dialog stays open', async (status, message) => {

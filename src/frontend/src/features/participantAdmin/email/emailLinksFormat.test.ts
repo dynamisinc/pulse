@@ -14,6 +14,7 @@ import {
   people,
   reasonText,
   summarizeResult,
+  unsentIds,
   usableIds,
 } from './emailLinksFormat'
 
@@ -67,11 +68,24 @@ describe('emailLinksFormat', () => {
       {
         status: 'failed',
         reason: 'rateLimited',
-        text: 'the email service is busy, try again later',
+        text: 'email limit reached; send again to just these people later',
         participantIds: ['3'],
       },
       { status: 'failed', reason: 'somethingNew', text: 'no reason given', participantIds: ['5'] },
     ])
+  })
+
+  it('the unsent are exactly the failed ones: never a skipped or a sent person', () => {
+    expect(unsentIds({
+      results: [
+        { participantId: 'sent', status: 'sent' },
+        { participantId: 'limited', status: 'failed', reason: 'rateLimited' },
+        { participantId: 'no-email', status: 'skipped', reason: 'noEmail' },
+        { participantId: 'late', status: 'failed', reason: 'notAttempted' },
+        { participantId: 'refused', status: 'failed', reason: 'sendFailed' },
+      ],
+    })).toEqual(['limited', 'late', 'refused'])
+    expect(unsentIds({ results: [{ participantId: 'a', status: 'sent' }] })).toEqual([])
   })
 
   it('words every known reason and counts people', () => {

@@ -60,13 +60,22 @@ public static class LinkEmailEndpoints
     /// <see cref="MediaEndpoints.CreateCredential"/> selection), the mailer (ACS when <c>Email:*</c> is usable,
     /// otherwise the fail-closed null mailer), the service, and a startup check that names a misconfigured key once.
     /// Every registration is <c>TryAdd</c>, so a test host's fake mailer wins. Prerequisites the host wires:
-    /// persistence and exercise scoping, <c>AddExerciseClock()</c> and <c>AddStaffIdentity()</c>. Idempotent.
+    /// persistence and exercise scoping, <c>AddExerciseClock()</c> and <c>AddStaffIdentity()</c>. Idempotent by a marker
+    /// (as <c>AddEasyLoginFoundation()</c>): a repeat call registers nothing, so it can never append a second options
+    /// action or hosted service.
     /// </summary>
     /// <param name="services">The service collection.</param>
     /// <returns>The same collection, for chaining.</returns>
     public static IServiceCollection AddLinkEmail(this IServiceCollection services)
     {
         ArgumentNullException.ThrowIfNull(services);
+
+        if (services.Any(descriptor => descriptor.ServiceType == typeof(LinkEmailMarker)))
+        {
+            return services;
+        }
+
+        services.AddSingleton<LinkEmailMarker>();
 
         services.AddEasyLoginFoundation();
         services.TryAddSingleton(TimeProvider.System);
@@ -197,6 +206,14 @@ public static class LinkEmailEndpoints
                 statusCode: tooLarge ? StatusCodes.Status413PayloadTooLarge : StatusCodes.Status400BadRequest));
         }
     }
+}
+
+/// <summary>
+/// Registered once by <see cref="LinkEmailEndpoints.AddLinkEmail"/> so a repeat call is a no-op. It carries no state and
+/// nothing resolves it.
+/// </summary>
+internal sealed class LinkEmailMarker
+{
 }
 
 /// <summary>

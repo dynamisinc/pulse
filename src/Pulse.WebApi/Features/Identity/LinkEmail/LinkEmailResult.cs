@@ -33,7 +33,10 @@ public static class RosterEmailFailureReasons
     /// <summary>The provider refused the send, could not be reached, timed out, or the credential failed.</summary>
     public const string SendFailed = "sendFailed";
 
-    /// <summary>The provider throttled the send (<c>429</c>). Try again later.</summary>
+    /// <summary>
+    /// The provider throttled the send (<c>429</c>), or an earlier send in the same batch was throttled and this one was
+    /// therefore not attempted. Nothing was sent: send again to just these people later.
+    /// </summary>
     public const string RateLimited = "rateLimited";
 
     /// <summary>The batch reached its time limit before this participant; nothing was attempted. Send again.</summary>

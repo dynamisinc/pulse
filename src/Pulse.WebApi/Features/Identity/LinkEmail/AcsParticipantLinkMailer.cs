@@ -18,12 +18,21 @@ public sealed class LinkEmailClientSettings
     /// <summary>Creates the settings.</summary>
     /// <param name="credential">The token credential (never a key).</param>
     /// <param name="clientOptions">Optional client options (a test host substitutes the transport); <c>null</c> = production options.</param>
-    public LinkEmailClientSettings(TokenCredential credential, EmailClientOptions? clientOptions = null)
+    /// <param name="sendTimeout">
+    /// Optional bound on ONE whole send, token acquisition included; <c>null</c> =
+    /// <see cref="AcsParticipantLinkMailer.SendTimeout"/>. A test shortens it.
+    /// </param>
+    public LinkEmailClientSettings(TokenCredential credential, EmailClientOptions? clientOptions = null, TimeSpan? sendTimeout = null)
     {
         ArgumentNullException.ThrowIfNull(credential);
+        if (sendTimeout is { } timeout)
+        {
+            ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(timeout, TimeSpan.Zero, nameof(sendTimeout));
+        }
 
         Credential = credential;
         ClientOptions = clientOptions;
+        SendTimeout = sendTimeout ?? AcsParticipantLinkMailer.SendTimeout;
     }
 
     /// <summary>The token credential.</summary>
@@ -31,6 +40,9 @@ public sealed class LinkEmailClientSettings
 
     /// <summary>Optional client options; <c>null</c> means <see cref="AcsParticipantLinkMailer.CreateClientOptions"/>.</summary>
     public EmailClientOptions? ClientOptions { get; }
+
+    /// <summary>The bound on one whole send: the managed-identity token request AND the HTTP call.</summary>
+    public TimeSpan SendTimeout { get; }
 }
 
 /// <summary>
@@ -48,7 +60,9 @@ public sealed class LinkEmailClientSettings
 /// send may already have been accepted, so a silent retry could email the same person twice (and "resending
 /// automatically" is out of scope), and a <c>429</c>'s <c>Retry-After</c> on an Azure-managed domain (5 a minute, 10 an
 /// hour) would otherwise stall the whole batch. Each send waits for the provider's <c>202 Accepted</c> only
-/// (<see cref="WaitUntil.Started"/>), never for delivery, and gives up after <see cref="SendTimeout"/>.
+/// (<see cref="WaitUntil.Started"/>), never for delivery, and the WHOLE send, including the managed-identity token
+/// request (which the SDK's network timeout does not cover, and which can hang while the identity endpoint retries),
+/// gives up after <see cref="SendTimeout"/> through a linked cancellation source.
 /// </para>
 /// <para>
 /// <b>Logs (gotcha 8).</b> A failure is logged with the operation and a status only: the HTTP status, or
@@ -67,6 +81,7 @@ public sealed partial class AcsParticipantLinkMailer : IParticipantLinkMailer
 
     private readonly EmailClient _client;
     private readonly string _senderAddress;
+    private readonly TimeSpan _sendTimeout;
     private readonly ILogger<AcsParticipantLinkMailer> _logger;
 
     /// <summary>Creates the mailer. Constructing it performs no I/O.</summary>
@@ -84,6 +99,7 @@ public sealed partial class AcsParticipantLinkMailer : IParticipantLinkMailer
 
         _client = new EmailClient(settings.Endpoint, clientSettings.Credential, clientSettings.ClientOptions ?? CreateClientOptions());
         _senderAddress = settings.SenderAddress;
+        _sendTimeout = clientSettings.SendTimeout;
         _logger = logger;
     }
 
@@ -118,9 +134,13 @@ public sealed partial class AcsParticipantLinkMailer : IParticipantLinkMailer
             UserEngagementTrackingDisabled = true,
         };
 
+        // Bounds the whole send, token acquisition included: the SDK's NetworkTimeout covers the HTTP call only.
+        using var bounded = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        bounded.CancelAfter(_sendTimeout);
+
         try
         {
-            await _client.SendAsync(WaitUntil.Started, email, cancellationToken).ConfigureAwait(false);
+            await _client.SendAsync(WaitUntil.Started, email, bounded.Token).ConfigureAwait(false);
             return LinkMailSendOutcome.Sent;
         }
         catch (RequestFailedException exception)
@@ -138,7 +158,7 @@ public sealed partial class AcsParticipantLinkMailer : IParticipantLinkMailer
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
-            // The SDK's network timeout, not the caller's cancellation.
+            // The send's own bound (or the SDK's network timeout), not the caller's cancellation.
             LogSendFailed(_logger, SendOperation, "timeout");
             return LinkMailSendOutcome.Failed;
         }

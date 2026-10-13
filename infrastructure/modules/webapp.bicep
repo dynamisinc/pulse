@@ -32,7 +32,6 @@ param emailEndpoint string = ''
 @description('Email:SenderAddress — the verified MailFrom address; in UAT the Azure-managed DoNotReply@<guid>.azurecomm.net (communication.bicep output managedDomainSenderAddress).')
 param emailSenderAddress string = ''
 param emailProvider string = 'AzureCommunicationServices'
-param emailDefaultSenderName string = 'Pulse'
 param emailSupportAddress string = 'pulse-support@cobrasoftware.com'
 @secure()
 param jwtSecretKey string = ''
@@ -282,10 +281,6 @@ resource webApp 'Microsoft.Web/sites@2023-12-01' = {
         {
           name: 'Email__Provider'
           value: emailProvider
-        }
-        {
-          name: 'Email__DefaultSenderName'
-          value: emailDefaultSenderName
         }
         {
           name: 'Email__SupportAddress'

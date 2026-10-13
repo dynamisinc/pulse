@@ -18,6 +18,7 @@ using Microsoft.Extensions.Hosting;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.Identity.EasyLogin;
+using Pulse.WebApi.Features.Identity.LinkEmail;
 using Pulse.WebApi.Features.Identity.Roster;
 using Pulse.WebApi.Features.Identity.Staff;
 using Pulse.WebApi.Tests.Data;
@@ -105,12 +106,11 @@ internal static class RosterSeed
     }
 
     /// <summary>Configuration with the SPA origin set, so join URLs can be built.</summary>
-    public static IConfiguration Configuration(string? frontendBaseUrl = FrontendBaseUrl, string? emailEndpoint = null) =>
+    public static IConfiguration Configuration(string? frontendBaseUrl = FrontendBaseUrl) =>
         new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
                 [JoinUrlBuilder.FrontendBaseUrlKey] = frontendBaseUrl,
-                [RosterQueryService.EmailEndpointKey] = emailEndpoint,
             })
             .Build();
 
@@ -123,6 +123,18 @@ internal static class RosterSeed
         content.Add(file, "file", fileName);
         return content;
     }
+}
+
+/// <summary>
+/// The email slice's switch, as the roster sees it (story 13, S-3): only <see cref="IsConfigured"/> matters here. It
+/// never sends.
+/// </summary>
+internal sealed class StubLinkMailer(bool configured) : IParticipantLinkMailer
+{
+    public bool IsConfigured { get; } = configured;
+
+    public Task<LinkMailSendOutcome> SendAsync(LinkEmailMessage message, CancellationToken cancellationToken) =>
+        throw new InvalidOperationException("The roster never sends email.");
 }
 
 /// <summary>
@@ -222,7 +234,8 @@ internal sealed class RosterHarness : IAsyncDisposable
         CurrentStaffSession? staff,
         bool realIssuer = true,
         IConfiguration? configuration = null,
-        Func<PulseDbContext, IParticipantLinkIssuer>? issuerOverride = null)
+        Func<PulseDbContext, IParticipantLinkIssuer>? issuerOverride = null,
+        IParticipantLinkMailer? linkMailer = null)
     {
         var context = fixture.CreateContext(new ExerciseContext { CurrentExerciseId = scope });
         var protector = new ParticipantLinkTokenProtector(KeyRing);
@@ -240,7 +253,7 @@ internal sealed class RosterHarness : IAsyncDisposable
             issuerOverride?.Invoke(context) ?? (issuer is null ? new NullParticipantLinkIssuer() : issuer),
             linkDtos,
             TimeProvider.System);
-        var query = new RosterQueryService(context, exerciseContext, linkDtos, joinUrls, configuration, TimeProvider.System);
+        var query = new RosterQueryService(context, exerciseContext, linkDtos, joinUrls, TimeProvider.System, linkMailer);
 
         return new RosterHarness(context, service, query, issuer);
     }

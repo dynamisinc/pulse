@@ -124,7 +124,8 @@ internal sealed class LinkEmailTestWorld
         string name,
         EmailSeededLink link = EmailSeededLink.Active,
         string? email = null,
-        bool disabled = false)
+        bool disabled = false,
+        string role = "participant")
     {
         var accountId = Guid.NewGuid();
         var signInName = $"p{accountId:N}"[..20];
@@ -136,7 +137,7 @@ internal sealed class LinkEmailTestWorld
             ExerciseId = exerciseId,
             Username = signInName,
             DisplayName = name,
-            Role = "participant",
+            Role = role,
             CreatedAt = DateTimeOffset.UtcNow,
             Email = address.Length == 0 ? null : address,
             DisabledAt = disabled ? DateTimeOffset.UtcNow.AddMinutes(-5) : null,

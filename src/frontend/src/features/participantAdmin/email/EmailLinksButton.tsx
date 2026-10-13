@@ -15,6 +15,9 @@
  *   1. A COBRA button: "Email links (N)" for N selected people, or "Email all links"
  *      with nothing selected (every eligible participant, the server's `{}`). A
  *      selection of only blank ids is "(0)" and disabled, never widened to everyone.
+ *      It is also disabled while the roster reports `joinLinksAvailable: false`: with no
+ *      site address there is no link to email, the server would answer 503, and the
+ *      roster's own banner already says why (S-2).
  *   2. A confirm step (`role="alertdialog"`, focus on Cancel): the story's sentence,
  *      verbatim ("This emails each person a personal sign-in link. An emailed link
  *      can't be recalled; reissue it to cancel it."), and how many of the people the
@@ -24,6 +27,10 @@
  *   4. A result summary in an `aria-live` region: counts by status (sent / skipped /
  *      failed, each text plus icon, never colour alone) and, for skipped and failed,
  *      the reasons with the people's names from the roster.
+ *   5. "Send again to the N not sent": re-posts ONLY the `failed` ids (rate-limited,
+ *      not attempted in time, send failed) as `{ participantIds }`, never a skipped or
+ *      a sent person, so nobody is emailed twice by it. The new result replaces the
+ *      summary. The confirm already given covers these same people.
  *   Closing returns focus to the button.
  *
  * SECRETS. Nothing here reads, shows or logs a join URL or an email address: the
@@ -66,6 +73,7 @@ import {
   looksEmailable,
   people,
   summarizeResult,
+  unsentIds,
   usableIds,
   type EmailLinksSummary,
 } from './emailLinksFormat'
@@ -138,6 +146,9 @@ export function EmailLinksButton({ selection }: EmailLinksButtonProps) {
 
   // `null` = closed; otherwise the ids the dialog was opened for (empty = everyone eligible).
   const [openFor, setOpenFor] = useState<readonly string[] | null>(null)
+  // Whether this dialog has sent at least once: the "who would be emailed" estimate then gives way
+  // to the results.
+  const [sentOnce, setSentOnce] = useState(false)
   const isOpen = openFor !== null
 
   const mutation = useMutation<RosterEmailResultDto, EmailLinksError, readonly string[]>({
@@ -151,6 +162,7 @@ export function EmailLinksButton({ selection }: EmailLinksButtonProps) {
 
   const open = useCallback(() => {
     reset()
+    setSentOnce(false)
     setOpenFor(usableIds(selection))
   }, [reset, selection])
   const close = useCallback(() => setOpenFor(null), [])
@@ -182,6 +194,19 @@ export function EmailLinksButton({ selection }: EmailLinksButtonProps) {
   const overCap = requested > MAX_EMAILS_PER_REQUEST
   const pending = mutation.isPending
   const done = mutation.isSuccess
+  const unsent = done ? unsentIds(mutation.data) : []
+  const joinLinksOff = roster.joinLinksAvailable === false
+
+  const send = (ids: readonly string[]) => {
+    setSentOnce(true)
+    mutation.mutate(ids)
+  }
+
+  // Re-posts only the people who were not sent an email; the snapshot becomes them.
+  const sendAgain = () => {
+    setOpenFor(unsent)
+    send(unsent)
+  }
 
   const nameById = new Map(entries.map(entry => [entry.id, entry.name]))
   const nameOf = (participantId: string) => nameById.get(participantId) ?? 'A participant not on this roster'
@@ -196,7 +221,7 @@ export function EmailLinksButton({ selection }: EmailLinksButtonProps) {
         ref={buttonRef}
         type="button"
         aria-haspopup="dialog"
-        disabled={nothingUsable}
+        disabled={nothingUsable || joinLinksOff}
         startIcon={<FontAwesomeIcon icon={faEnvelope} />}
         onClick={open}
       >
@@ -224,10 +249,14 @@ export function EmailLinksButton({ selection }: EmailLinksButtonProps) {
             <Typography variant="body2" sx={{ fontWeight: 600 }}>
               {EMAIL_LINKS_WARNING}
             </Typography>
-            <Typography variant="body2" data-testid="email-links-scope">
-              {scopeLine}
-            </Typography>
-            {overCap
+            {sentOnce
+              ? null
+              : (
+                <Typography variant="body2" data-testid="email-links-scope">
+                  {scopeLine}
+                </Typography>
+              )}
+            {overCap && !sentOnce
               ? (
                 <Typography variant="body2" data-testid="email-links-over-cap">
                   Email goes to at most {MAX_EMAILS_PER_REQUEST} people at a time. Select{' '}
@@ -270,9 +299,22 @@ export function EmailLinksButton({ selection }: EmailLinksButtonProps) {
         <DialogActions sx={{ padding: '8px 20px 16px', gap: 1 }}>
           {done
             ? (
-              <CobraPrimaryButton ref={closeRef} type="button" onClick={close}>
-                Close
-              </CobraPrimaryButton>
+              <>
+                {unsent.length > 0
+                  ? (
+                    <CobraSecondaryButton
+                      type="button"
+                      startIcon={<FontAwesomeIcon icon={faEnvelope} />}
+                      onClick={sendAgain}
+                    >
+                      Send again to the {unsent.length} not sent
+                    </CobraSecondaryButton>
+                  )
+                  : null}
+                <CobraPrimaryButton ref={closeRef} type="button" onClick={close}>
+                  Close
+                </CobraPrimaryButton>
+              </>
             )
             : (
               <>
@@ -286,7 +328,7 @@ export function EmailLinksButton({ selection }: EmailLinksButtonProps) {
                       type="button"
                       disabled={pending}
                       startIcon={<FontAwesomeIcon icon={faEnvelope} />}
-                      onClick={() => { if (openFor !== null) mutation.mutate(openFor) }}
+                      onClick={() => { if (openFor !== null) send(openFor) }}
                     >
                       {pending ? 'Sending…' : 'Send emails'}
                     </CobraPrimaryButton>

@@ -55,7 +55,8 @@ const STATUSES: readonly RosterEmailStatus[] = ['sent', 'skipped', 'failed']
 
 /**
  * What went wrong, in the terms the button needs to choose its message.
- *   notConfigured  503: email delivery is not configured on this server.
+ *   notConfigured  503: email delivery, or the personal links themselves (no site address),
+ *                  is not configured on this server.
  *   forbidden      403: signed in as staff, but not allowed to email links.
  *   unauthorized   401: no staff session.
  *   badRequest     400/413: the server refused the request, or nothing usable was given.
@@ -73,7 +74,7 @@ export type EmailLinksErrorKind =
   | 'unavailable'
 
 const ERROR_MESSAGES: Readonly<Record<EmailLinksErrorKind, string>> = {
-  notConfigured: 'Email delivery is not configured on this server.',
+  notConfigured: 'Email delivery or personal links are not configured on this server.',
   forbidden: 'This account is not allowed to email sign-in links.',
   unauthorized: 'The staff session has ended. Sign in again.',
   badRequest: 'The server could not accept the email request.',

@@ -2,7 +2,6 @@ namespace Pulse.WebApi.Features.Identity.LinkEmail;
 
 using System.Net.Mail;
 using Microsoft.Extensions.Configuration;
-using Pulse.WebApi.Features.Identity.Roster;
 
 /// <summary>
 /// The keyless email settings of easy-login story 13 (EL-18): <c>Email:Endpoint</c> (the Communication Services
@@ -12,18 +11,17 @@ using Pulse.WebApi.Features.Identity.Roster;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>Dark until configured.</b> <see cref="IsRequested"/> is exactly the rule story 02's roster uses for
-/// <c>capabilities.emailLinks</c> (<see cref="RosterQueryService.EmailEndpointKey"/> non-blank), so an unset endpoint
-/// turns both the capability and the send path off from the same key. An endpoint that is set but unusable (not an
-/// absolute <c>https</c> URL, or no valid sender) is refused here: the host still starts, the send path stays the
-/// fail-closed <see cref="NullParticipantLinkMailer"/> (<c>503</c>), and <see cref="LinkEmailStartupCheck"/> names the
-/// offending KEY once, never its value.
+/// <b>Dark until configured.</b> An unset endpoint, or one that is set but unusable (not an absolute <c>https</c> URL,
+/// or no valid sender), leaves the fail-closed <see cref="NullParticipantLinkMailer"/> in place: the host still starts,
+/// the send path answers <c>503</c>, and the roster's <c>capabilities.emailLinks</c> (which asks the SAME mailer's
+/// <see cref="IParticipantLinkMailer.IsConfigured"/>) is <c>false</c>, so the button is hidden. For a set-but-unusable
+/// value <see cref="LinkEmailStartupCheck"/> names the offending KEY once, never its value.
 /// </para>
 /// </remarks>
 public sealed class LinkEmailSettings
 {
     /// <summary>The endpoint key, verbatim as <c>webapp.bicep</c> provisions it (<c>Email__Endpoint</c>).</summary>
-    public const string EndpointKey = RosterQueryService.EmailEndpointKey;
+    public const string EndpointKey = "Email:Endpoint";
 
     /// <summary>The sender key, verbatim as <c>webapp.bicep</c> provisions it (<c>Email__SenderAddress</c>).</summary>
     public const string SenderAddressKey = "Email:SenderAddress";
@@ -41,8 +39,8 @@ public sealed class LinkEmailSettings
     public string SenderAddress { get; }
 
     /// <summary>
-    /// Whether email delivery was ASKED for: <c>Email:Endpoint</c> is non-blank. The same rule the roster's
-    /// <c>capabilities.emailLinks</c> applies.
+    /// Whether email delivery was ASKED for: <c>Email:Endpoint</c> is non-blank. Asked for is not usable: see
+    /// <see cref="TryRead"/>.
     /// </summary>
     /// <param name="configuration">The host configuration.</param>
     /// <returns><c>true</c> when the endpoint key holds a non-blank value.</returns>

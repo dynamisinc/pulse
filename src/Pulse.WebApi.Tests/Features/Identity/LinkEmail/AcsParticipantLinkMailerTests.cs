@@ -114,9 +114,46 @@ public sealed class AcsParticipantLinkMailerTests
     }
 
     [Fact]
+    public async Task ASlowTokenRequest_IsBoundedBySendTimeout_AndReportedAsATimeout()
+    {
+        // W-3: the SDK's NetworkTimeout covers the HTTP call only; a managed-identity endpoint that hangs or retries
+        // would otherwise hold the whole batch. The linked cancellation source bounds token acquisition too.
+        var transport = new FakeAcsEmailHandler(HttpStatusCode.Accepted);
+        var logs = new LinkEmailCapturingLoggerProvider();
+        var mailer = CreateMailer(transport, logs, new HangingTokenCredential(), sendTimeout: TimeSpan.FromMilliseconds(200));
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+
+        var outcome = await mailer.SendAsync(Message(), CancellationToken.None);
+
+        clock.Stop();
+        outcome.Should().Be(LinkMailSendOutcome.Failed);
+        clock.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(10), "the send gave up at its bound, not when the token arrived");
+        transport.Requests.Should().BeEmpty("no token, no request");
+        logs.Messages.Should().ContainSingle(m => m.Contains("Link email send failed", StringComparison.Ordinal))
+            .Which.Should().Contain("timeout");
+    }
+
+    [Fact]
+    public async Task TheCallersCancellation_IsNotATimeout_ItPropagates()
+    {
+        var mailer = CreateMailer(
+            new FakeAcsEmailHandler(HttpStatusCode.Accepted),
+            new LinkEmailCapturingLoggerProvider(),
+            new HangingTokenCredential(),
+            sendTimeout: TimeSpan.FromMinutes(5));
+        using var cancelled = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
+
+        var send = () => mailer.SendAsync(Message(), cancelled.Token);
+
+        await send.Should().ThrowAsync<OperationCanceledException>();
+    }
+
+    [Fact]
     public void TheProductionClientOptions_RetryNothing_AreBounded_AndNeverLogContent()
     {
         var options = AcsParticipantLinkMailer.CreateClientOptions();
+        new LinkEmailClientSettings(new FixedTokenCredential()).SendTimeout.Should().Be(
+            AcsParticipantLinkMailer.SendTimeout, "the whole send is bounded by default");
 
         options.Retry.MaxRetries.Should().Be(0);
         options.Retry.NetworkTimeout.Should().Be(AcsParticipantLinkMailer.SendTimeout);
@@ -155,7 +192,8 @@ public sealed class AcsParticipantLinkMailerTests
     private static AcsParticipantLinkMailer CreateMailer(
         FakeAcsEmailHandler transport,
         LinkEmailCapturingLoggerProvider logs,
-        TokenCredential? credential = null)
+        TokenCredential? credential = null,
+        TimeSpan? sendTimeout = null)
     {
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
         {
@@ -170,7 +208,7 @@ public sealed class AcsParticipantLinkMailerTests
         var factory = LoggerFactory.Create(builder => builder.AddProvider(logs));
         return new AcsParticipantLinkMailer(
             settings,
-            new LinkEmailClientSettings(credential ?? new FixedTokenCredential(), options),
+            new LinkEmailClientSettings(credential ?? new FixedTokenCredential(), options, sendTimeout),
             factory.CreateLogger<AcsParticipantLinkMailer>());
     }
 
@@ -194,6 +232,19 @@ public sealed class AcsParticipantLinkMailerTests
 
         public override ValueTask<AccessToken> GetTokenAsync(TokenRequestContext requestContext, CancellationToken cancellationToken) =>
             ValueTask.FromResult(GetToken(requestContext, cancellationToken));
+    }
+
+    /// <summary>A credential whose token request never answers (an identity endpoint that hangs); it honours cancellation.</summary>
+    private sealed class HangingTokenCredential : TokenCredential
+    {
+        public override AccessToken GetToken(TokenRequestContext requestContext, CancellationToken cancellationToken) =>
+            GetTokenAsync(requestContext, cancellationToken).AsTask().GetAwaiter().GetResult();
+
+        public override async ValueTask<AccessToken> GetTokenAsync(TokenRequestContext requestContext, CancellationToken cancellationToken)
+        {
+            await Task.Delay(Timeout.Infinite, cancellationToken);
+            throw new InvalidOperationException("unreachable");
+        }
     }
 
     /// <summary>A credential that cannot get a token (role not propagated, identity off).</summary>

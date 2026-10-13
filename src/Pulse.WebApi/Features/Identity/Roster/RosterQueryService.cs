@@ -1,10 +1,10 @@
 namespace Pulse.WebApi.Features.Identity.Roster;
 
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Configuration;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.Identity.EasyLogin;
+using Pulse.WebApi.Features.Identity.LinkEmail;
 
 /// <summary>
 /// The read behind <c>GET /api/staff/roster</c> (story 02): every participant in the staff caller's exercise as a
@@ -29,50 +29,53 @@ using Pulse.WebApi.Features.Identity.EasyLogin;
 /// <b>Live sessions</b> are this account's sessions in this exercise that are not revoked and whose access window or
 /// refresh window is still open, so a locked phone that will refresh on wake still counts.
 /// </para>
+/// <para>
+/// <b>The email capability</b> (story 13, S-3) is the email slice's OWN switch: the registered
+/// <see cref="IParticipantLinkMailer"/>'s <see cref="IParticipantLinkMailer.IsConfigured"/>, the same value that decides
+/// whether <c>POST /api/staff/roster/email-links</c> answers <c>503</c>. So a set-but-unusable <c>Email:Endpoint</c>
+/// hides the button instead of offering one that can only fail, and a host without <c>AddLinkEmail()</c> reports
+/// <c>false</c>. The mailer is an OPTIONAL constructor dependency: the roster does not need the email slice to work.
+/// </para>
 /// </remarks>
 public sealed class RosterQueryService
 {
-    /// <summary>
-    /// The configuration key whose presence means link emailing is configured (story 13, EL-18). Read here so the roster
-    /// can report <c>capabilities.emailLinks</c> without depending on story 13's code; absent, the capability is off.
-    /// </summary>
-    public const string EmailEndpointKey = "Email:Endpoint";
-
     private readonly PulseDbContext _dbContext;
     private readonly IExerciseContext _exerciseContext;
     private readonly RosterLinkDtoFactory _linkDtoFactory;
     private readonly JoinUrlBuilder _joinUrlBuilder;
-    private readonly IConfiguration _configuration;
     private readonly TimeProvider _timeProvider;
+    private readonly IParticipantLinkMailer? _linkMailer;
 
     /// <summary>Creates the query service.</summary>
     /// <param name="dbContext">The request's persistence context (central exercise filter).</param>
     /// <param name="exerciseContext">The server-resolved exercise scope.</param>
     /// <param name="linkDtoFactory">Projects each participant's link (story 01).</param>
     /// <param name="joinUrlBuilder">Whether join links can be built (story 01).</param>
-    /// <param name="configuration">Host configuration (the email capability).</param>
     /// <param name="timeProvider">The server clock (live-session windows).</param>
+    /// <param name="linkMailer">
+    /// The email slice's mailer (story 13), when the host registers one; <c>null</c> (not registered) means the
+    /// capability is off. Optional, so the container passes <c>null</c> rather than failing.
+    /// </param>
     public RosterQueryService(
         PulseDbContext dbContext,
         IExerciseContext exerciseContext,
         RosterLinkDtoFactory linkDtoFactory,
         JoinUrlBuilder joinUrlBuilder,
-        IConfiguration configuration,
-        TimeProvider timeProvider)
+        TimeProvider timeProvider,
+        IParticipantLinkMailer? linkMailer = null)
     {
         ArgumentNullException.ThrowIfNull(dbContext);
         ArgumentNullException.ThrowIfNull(exerciseContext);
         ArgumentNullException.ThrowIfNull(linkDtoFactory);
         ArgumentNullException.ThrowIfNull(joinUrlBuilder);
-        ArgumentNullException.ThrowIfNull(configuration);
         ArgumentNullException.ThrowIfNull(timeProvider);
 
         _dbContext = dbContext;
         _exerciseContext = exerciseContext;
         _linkDtoFactory = linkDtoFactory;
         _joinUrlBuilder = joinUrlBuilder;
-        _configuration = configuration;
         _timeProvider = timeProvider;
+        _linkMailer = linkMailer;
     }
 
     /// <summary>Lists the roster of the resolved exercise, or <c>null</c> when no exercise is resolved (fail closed: 401).</summary>
@@ -134,7 +137,7 @@ public sealed class RosterQueryService
             JoinLinksAvailable = _joinUrlBuilder.IsAvailable,
             Capabilities = new RosterCapabilitiesDto
             {
-                EmailLinks = !string.IsNullOrWhiteSpace(_configuration[EmailEndpointKey]),
+                EmailLinks = _linkMailer?.IsConfigured ?? false,
             },
         };
     }

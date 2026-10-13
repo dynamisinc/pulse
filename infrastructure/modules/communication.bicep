@@ -16,6 +16,11 @@
 //
 // Sender: the Azure-managed domain's DoNotReply@<guid>.azurecomm.net (UAT). A customer-managed domain is
 // supported (emailCustomDomain) but out of scope for story 13; it needs DNS verification before linking.
+// No sender display name ("Pulse") is set: Microsoft Learn ("How to add multiple sender addresses") states that
+// sender usernames (Microsoft.Communication/emailServices/domains/senderUsernames, which carry displayName)
+// "cannot be enabled for Azure Managed Domains", and that managed-domain sender usernames can't be personalized.
+// On a verified custom domain with raised limits, a senderUsernames child (username 'DoNotReply',
+// displayName 'Pulse') would do it.
 // ============================================================================
 
 param acsName string

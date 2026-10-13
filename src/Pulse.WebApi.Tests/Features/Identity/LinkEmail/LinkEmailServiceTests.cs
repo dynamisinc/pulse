@@ -95,13 +95,13 @@ public sealed class LinkEmailServiceTests
         var exercise = await _world.SeedExerciseAsync();
         var staff = await _world.SeedStaffAsync((exercise, "controller"));
         var a = await _world.SeedParticipantAsync(exercise, "A Refused");
-        var b = await _world.SeedParticipantAsync(exercise, "B Throttled");
-        var c = await _world.SeedParticipantAsync(exercise, "C Faulting");
-        var d = await _world.SeedParticipantAsync(exercise, "D Fine");
+        var b = await _world.SeedParticipantAsync(exercise, "B Faulting");
+        var c = await _world.SeedParticipantAsync(exercise, "C Fine");
+        var d = await _world.SeedParticipantAsync(exercise, "D Throttled");
         var mailer = new FakeParticipantLinkMailer()
             .Answer(a.Email!, LinkMailSendOutcome.Failed)
-            .Answer(b.Email!, LinkMailSendOutcome.RateLimited)
-            .ThrowFor(c.Email!);
+            .ThrowFor(b.Email!)
+            .Answer(d.Email!, LinkMailSendOutcome.RateLimited);
         var logs = new LinkEmailCapturingLoggerProvider();
 
         var result = await _world.SendAsync(exercise, staff, mailer, logs: logs);
@@ -110,9 +110,9 @@ public sealed class LinkEmailServiceTests
         result.Body!.Results.Select(r => (r.ParticipantId, r.Status, r.Reason)).Should().Equal(
             [
                 (a.AccountId.ToString(), RosterEmailStatuses.Failed, RosterEmailFailureReasons.SendFailed),
-                (b.AccountId.ToString(), RosterEmailStatuses.Failed, RosterEmailFailureReasons.RateLimited),
-                (c.AccountId.ToString(), RosterEmailStatuses.Failed, RosterEmailFailureReasons.SendFailed),
-                (d.AccountId.ToString(), RosterEmailStatuses.Sent, null),
+                (b.AccountId.ToString(), RosterEmailStatuses.Failed, RosterEmailFailureReasons.SendFailed),
+                (c.AccountId.ToString(), RosterEmailStatuses.Sent, null),
+                (d.AccountId.ToString(), RosterEmailStatuses.Failed, RosterEmailFailureReasons.RateLimited),
             ]);
         mailer.Messages.Should().HaveCount(4, "every eligible person was attempted, in order, despite the failures");
 
@@ -122,8 +122,8 @@ public sealed class LinkEmailServiceTests
             [
                 (a.LinkId.ToString(), "failed"),
                 (b.LinkId.ToString(), "failed"),
-                (c.LinkId.ToString(), "failed"),
-                (d.LinkId.ToString(), "sent"),
+                (c.LinkId.ToString(), "sent"),
+                (d.LinkId.ToString(), "failed"),
             ]);
 
         logs.All.Should().Contain("InvalidOperationException", "an unexpected fault is logged by type");
@@ -157,6 +157,70 @@ public sealed class LinkEmailServiceTests
         AssertNoSecrets(everything, jane);
         everything.Should().NotContain(skipped.Name);
         logs.All.Should().Contain("1 sent, 1 skipped, 0 failed", "one count-only summary line per batch");
+    }
+
+    [RequiresDockerFact]
+    public async Task OnlyRosterAccounts_AreEmailed_AnyOtherRoleIsNotFound_AndNeverEmailed()
+    {
+        // W-1: the same participant-world roles the roster lists (participant, pio). A bootstrap, staff-like or
+        // org-admin account in the exercise, even with an address and an active link, is never emailed.
+        var exercise = await _world.SeedExerciseAsync();
+        var staff = await _world.SeedStaffAsync((exercise, "controller"));
+        var participant = await _world.SeedParticipantAsync(exercise, "Ann Participant");
+        var pio = await _world.SeedParticipantAsync(exercise, "Pat Pio", role: "pio");
+        var others = new List<EmailSeededParticipant>();
+        foreach (var role in new[] { "controller", "bootstrap", "orgAdmin", "planner" })
+        {
+            others.Add(await _world.SeedParticipantAsync(exercise, $"Zed {role}", role: role));
+        }
+
+        var mailer = new FakeParticipantLinkMailer();
+
+        var everyone = await _world.SendAsync(exercise, staff, mailer);
+        var named = await _world.SendAsync(exercise, staff, mailer, others.Select(o => o.AccountId.ToString()).ToList());
+
+        everyone.Body!.Results.Select(r => r.ParticipantId).Should().BeEquivalentTo(
+            [participant.AccountId.ToString(), pio.AccountId.ToString()],
+            "'everyone' is everyone ON THE ROSTER");
+        named.Body!.Results.Should().HaveCount(others.Count).And.OnlyContain(
+            r => r.Status == RosterEmailStatuses.Skipped && r.Reason == RosterEmailSkipReasons.NotFound,
+            "an account that is not on the roster reads exactly like an unknown id");
+        mailer.Messages.Select(m => m.RecipientAddress).Should().BeEquivalentTo([participant.Email, pio.Email]);
+        foreach (var other in others)
+        {
+            mailer.Messages.Should().NotContain(m => m.RecipientAddress == other.Email);
+        }
+    }
+
+    [RequiresDockerFact]
+    public async Task AfterTheFirst429_NobodyElseIsAttempted_TheyAreRateLimited_AndNothingIsRecordedForThem()
+    {
+        // S-1: the provider's throttle window is minutes long on a managed domain; the next send would only be throttled.
+        var exercise = await _world.SeedExerciseAsync();
+        var staff = await _world.SeedStaffAsync((exercise, "controller"));
+        var a = await _world.SeedParticipantAsync(exercise, "A Sent");
+        var b = await _world.SeedParticipantAsync(exercise, "B Throttled");
+        var c = await _world.SeedParticipantAsync(exercise, "C Waiting");
+        var d = await _world.SeedParticipantAsync(exercise, "D Waiting");
+        var skipped = await _world.SeedParticipantAsync(exercise, "E NoEmail", email: string.Empty);
+        var mailer = new FakeParticipantLinkMailer().Answer(b.Email!, LinkMailSendOutcome.RateLimited);
+
+        var result = await _world.SendAsync(exercise, staff, mailer);
+
+        result.Body!.Results.Select(r => (r.ParticipantId, r.Status, r.Reason)).Should().Equal(
+            [
+                (a.AccountId.ToString(), RosterEmailStatuses.Sent, null),
+                (b.AccountId.ToString(), RosterEmailStatuses.Failed, RosterEmailFailureReasons.RateLimited),
+                (c.AccountId.ToString(), RosterEmailStatuses.Failed, RosterEmailFailureReasons.RateLimited),
+                (d.AccountId.ToString(), RosterEmailStatuses.Failed, RosterEmailFailureReasons.RateLimited),
+                (skipped.AccountId.ToString(), RosterEmailStatuses.Skipped, RosterEmailSkipReasons.NoEmail),
+            ],
+            "a skip is still a skip; only the eligible people after the 429 become rateLimited");
+        mailer.Messages.Select(m => m.RecipientAddress).Should().Equal([a.Email, b.Email], "the provider is not called again");
+
+        var events = await _world.EmailEventsAsync(exercise);
+        events.Select(e => e.Target!.EntityId).Should().BeEquivalentTo(
+            [a.LinkId.ToString(), b.LinkId.ToString()], "only the two attempts are recorded");
     }
 
     [RequiresDockerFact]

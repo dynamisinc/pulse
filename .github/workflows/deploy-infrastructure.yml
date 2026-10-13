@@ -95,7 +95,6 @@ jobs:
           # lets no staff sign in.
           BOOTSTRAP_SECRET: ${{ secrets.BOOTSTRAP_SECRET }}
           STAFF_IDENTITY_ACCOUNTS_JSON: ${{ secrets.STAFF_IDENTITY_ACCOUNTS_JSON }}
-          EMAIL_CONNECTION_STRING: ${{ secrets.EMAIL_CONNECTION_STRING }}
         run: |
           echo "## Infrastructure What-If Preview" >> $GITHUB_STEP_SUMMARY
           echo "**Environment:** ${{ github.event.inputs.environment }}" >> $GITHUB_STEP_SUMMARY
@@ -122,7 +121,6 @@ jobs:
           # lets no staff sign in.
           BOOTSTRAP_SECRET: ${{ secrets.BOOTSTRAP_SECRET }}
           STAFF_IDENTITY_ACCOUNTS_JSON: ${{ secrets.STAFF_IDENTITY_ACCOUNTS_JSON }}
-          EMAIL_CONNECTION_STRING: ${{ secrets.EMAIL_CONNECTION_STRING }}
         run: |
           az deployment group create \
             --resource-group ${{ steps.env.outputs.resource_group }} \

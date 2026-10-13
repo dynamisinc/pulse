@@ -7,6 +7,7 @@ using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.Identity.EasyLogin;
+using Pulse.WebApi.Features.Identity.Roster;
 using Pulse.WebApi.Features.Identity.Staff;
 
 /// <summary>
@@ -43,9 +44,12 @@ public sealed class LinkEmailPacing
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>Who is considered.</b> With <c>participantIds</c>: those accounts (1 to <see cref="MaxParticipantsPerRequest"/>
-/// as sent, de-duplicated). Omitted (<c>{}</c>): every participant in the exercise, of whom at most
-/// <see cref="MaxParticipantsPerRequest"/> may be eligible (more is a <c>400</c>, decided BEFORE any send). Each one is,
+/// <b>Who is considered.</b> Roster accounts only: the participant-world roles (<c>participant</c>, <c>pio</c>), the
+/// same set <c>RosterQueryService</c> lists. A staff, bootstrap or org-admin account is never emailed, and its id is
+/// <c>notFound</c> like any other id that is not on the roster. With <c>participantIds</c>: those accounts (1 to
+/// <see cref="MaxParticipantsPerRequest"/> as sent, de-duplicated). Omitted (<c>{}</c>): every participant in the
+/// exercise, of whom at most <see cref="MaxParticipantsPerRequest"/> may be eligible (more is a <c>400</c>, decided
+/// BEFORE any send). Each one is,
 /// in this order: <c>skipped</c> <c>disabled</c>, <c>noEmail</c> (none, or not a single bare deliverable address),
 /// <c>noActiveLink</c>, <c>tokenUnrecoverable</c>; otherwise eligible and emailed. Ids that match no account here
 /// (unknown, malformed, or from ANOTHER exercise, which the central filter hides) are <c>skipped</c> /
@@ -55,7 +59,10 @@ public sealed class LinkEmailPacing
 /// <b>Sending.</b> Sequential, in name order, with <see cref="LinkEmailPacing.SendPause"/> between sends. One failure
 /// never aborts the batch: a provider refusal, throttle, timeout, credential failure or any unexpected fault in one
 /// send becomes that participant's <c>failed</c> result (<see cref="RosterEmailFailureReasons"/>, generic) and the next
-/// one is attempted. No send is retried automatically. When the request is aborted the batch stops between sends.
+/// one is attempted. The ONE exception is the provider's throttle: after the first <c>429</c> nobody else is attempted
+/// (the next send would only be throttled too, and on an Azure-managed domain the window is minutes long); everyone
+/// left is reported <c>failed</c> / <c>rateLimited</c> without a call and without an event, so staff can send again to
+/// just them later. No send is retried automatically. When the request is aborted the batch stops between sends.
 /// </para>
 /// <para>
 /// <b>Telemetry (XC-004).</b> Every send ATTEMPT records exactly one <c>participant.link.emailed</c> event
@@ -307,12 +314,20 @@ public sealed partial class LinkEmailService
         var started = _timeProvider.GetTimestamp();
         var results = new List<RosterEmailResultItemDto>(plan.Count);
         var attempted = 0;
+        var throttled = false;
 
         foreach (var step in plan)
         {
             if (step.Delivery is not { } delivery)
             {
                 results.Add(Result(step.ParticipantId, RosterEmailStatuses.Skipped, step.Skipped));
+                continue;
+            }
+
+            // After the provider's first 429, nobody else is attempted (and nothing is recorded for them).
+            if (throttled)
+            {
+                results.Add(Result(step.ParticipantId, RosterEmailStatuses.Failed, RosterEmailFailureReasons.RateLimited));
                 continue;
             }
 
@@ -344,6 +359,7 @@ public sealed partial class LinkEmailService
                 time));
             await _dbContext.SaveChangesAsync(CancellationToken.None);
 
+            throttled = outcome == LinkMailSendOutcome.RateLimited;
             results.Add(outcome switch
             {
                 LinkMailSendOutcome.Sent => Result(step.ParticipantId, RosterEmailStatuses.Sent, reason: null),
@@ -389,7 +405,10 @@ public sealed partial class LinkEmailService
     /// </summary>
     private async Task<List<EmailCandidate>> LoadCandidatesAsync(RequestedAccounts request, CancellationToken cancellationToken)
     {
-        IQueryable<Account> accounts = _dbContext.Accounts.AsNoTracking();
+        // Roster accounts only (W-1): the same participant-world roles the roster lists. Any other account in the
+        // exercise (a bootstrap, staff-like or org-admin account) is never emailed and reads as notFound.
+        IQueryable<Account> accounts = _dbContext.Accounts.AsNoTracking()
+            .Where(account => account.Role == RosterRoles.Participant || account.Role == RosterRoles.Pio);
         if (!request.Everyone)
         {
             var ids = request.Entries

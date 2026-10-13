@@ -10,6 +10,7 @@ using Microsoft.EntityFrameworkCore;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.Identity.EasyLogin;
+using Pulse.WebApi.Features.Identity.LinkEmail;
 using Pulse.WebApi.Features.Identity.Roster;
 using Pulse.WebApi.Features.Ops.EngineContentSeed;
 using Pulse.WebApi.Tests.Data;
@@ -346,11 +347,11 @@ public sealed class RosterServiceTests
         }
 
         await using var list = RosterHarness.Create(
-            _fixture, world.ExerciseId, world.StaffSession, configuration: RosterSeed.Configuration(emailEndpoint: "https://acs.example.test"));
+            _fixture, world.ExerciseId, world.StaffSession, linkMailer: new StubLinkMailer(configured: true));
         var roster = (await list.Query.ListAsync())!;
 
         roster.JoinLinksAvailable.Should().BeTrue();
-        roster.Capabilities.EmailLinks.Should().BeTrue("Email:Endpoint is configured");
+        roster.Capabilities.EmailLinks.Should().BeTrue("the email slice's mailer is configured");
         roster.Participants.Select(p => p.Name).Should().Equal(
             ["Aiko Tanaka", "Riley Chen"], "ordered by name; an account with a non-participant role is not on the roster");
 
@@ -370,7 +371,13 @@ public sealed class RosterServiceTests
         JsonSerializer.Serialize(roster).Should().NotContain(":null", "optional fields are omitted, never null");
 
         await using var noEmail = RosterHarness.For(_fixture, world);
-        (await noEmail.Query.ListAsync())!.Capabilities.EmailLinks.Should().BeFalse("unset Email:Endpoint means the capability is off");
+        (await noEmail.Query.ListAsync())!.Capabilities.EmailLinks.Should().BeFalse(
+            "no mailer registered (no AddLinkEmail) means the capability is off");
+
+        await using var dark = RosterHarness.Create(
+            _fixture, world.ExerciseId, world.StaffSession, linkMailer: new NullParticipantLinkMailer());
+        (await dark.Query.ListAsync())!.Capabilities.EmailLinks.Should().BeFalse(
+            "the fail-closed null mailer (email unset or unusable) means the capability is off");
     }
 
     [RequiresDockerFact]
