@@ -13,18 +13,21 @@
  * active tier's LABEL text beside a status dot — the dot's colour is decorative
  * reinforcement, never the sole signal.
  *
- * THERE IS NO "PAUSE INJECTS" OPTION (demo-polish C4; supersedes world-steering
- * story 07's disabled placeholder). There is no inject queue in the product yet
- * (`inject-queue`, feature #4, is Not Started), so a tier that pauses nothing is
- * not offered at all — a greyed-out "No inject queue yet" row reads as unfinished
- * to a presenter. The `injects` tier STAYS in the `PauseTier` type and in
- * `usePauseState` (the server contract, the header pill's INJECTS PAUSED label
- * and the participant overlay all still know it); only its radio is gone.
- * RE-ENABLE: add `{ value: 'injects', label: 'Pause injects', hint: 'World keeps
- * living', amber: false }` back to `TIER_OPTIONS` once an inject queue exists.
+ * "PAUSE INJECTS" IS LIVE (inject-queue story 07; IQ-5; CTL-023). The radio was a
+ * disabled "No inject queue yet" placeholder (world-steering story 07), then removed
+ * by demo-polish C4 because a tier that paused nothing read as unfinished. There IS
+ * an inject queue now (the console's run sheet, backed by story 06's server queue),
+ * so C4's RE-ENABLE note is carried out: the option is back in `TIER_OPTIONS` as a
+ * REAL control. It sets the existing `injects` tier through the existing
+ * `usePauseState().setTier` action — no second path: while it is active the server
+ * suspends running bursts (manual fire still works) and the run sheet shows "Injects
+ * paused: bursts are suspended; manual fire still works". It is listed FIRST (mildest to
+ * strongest) but it is NOT the default selection: opening the pill and pressing Pause
+ * still pauses the ENGINE, exactly as it has since #449 (the demo plan's pause step is
+ * the engine). Pausing injects is a deliberate pick of its radio.
  *
- * THE PAUSE POPOVER (D5-014/1.3). Opening the pill reveals two radio tiers —
- * Pause engine / Freeze world. The footer has a **Cancel** link
+ * THE PAUSE POPOVER (D5-014/1.3). Opening the pill reveals three radio tiers —
+ * Pause injects / Pause engine / Freeze world. The footer has a **Cancel** link
  * (dismiss, no change), a **Resume** button that appears while any tier is
  * active (returns to `running`), and the primary **Pause** action that applies
  * the selected tier. FREEZE IS GUARDED: choosing Freeze routes through a
@@ -102,21 +105,27 @@ interface TierOption {
   readonly amber: boolean
 }
 
-/** Only tiers that do something today — see the module header on `injects`. */
+/** The three pause tiers, mildest first — see the module header on `injects`. */
 const TIER_OPTIONS: readonly TierOption[] = [
+  { value: 'injects', label: 'Pause injects', hint: 'World keeps living', amber: false },
   { value: 'engine', label: 'Pause engine', hint: 'No new AI content', amber: false },
   { value: 'freeze', label: 'Freeze world', hint: 'Participants notice — guarded', amber: true },
 ]
 
-/** The tier the popover pre-selects when running — the first offered option. */
-const DEFAULT_CHOICE: PauseChoice = TIER_OPTIONS[0]?.value ?? 'engine'
+/**
+ * The tier the popover pre-selects when running: Pause ENGINE, set explicitly rather than
+ * taken from the list order. "Open the pill, press Pause" has paused the engine since #449
+ * and the demo plan's pause step relies on it; Pause injects (listed first) is a deliberate
+ * choice, never the default.
+ */
+const DEFAULT_CHOICE: PauseChoice = 'engine'
 
 /**
  * The radio to pre-select for the active `tier`: the tier itself when it is
- * one of the offered options, otherwise the default. A tier that is not offered
- * (`injects`, which the server/store can still report) must not leave the radio
- * group with a value that matches nothing — otherwise Pause would apply a tier
- * the controller cannot see selected.
+ * one of the offered options, otherwise the default. A tier the server/store
+ * reports that is NOT offered must not leave the radio group with a value that
+ * matches nothing — otherwise Pause would apply a tier the controller cannot see
+ * selected. (Every tier but `running` is offered today; the guard keeps it so.)
  */
 function choiceForTier(tier: PauseTier): PauseChoice {
   return TIER_OPTIONS.find(option => option.value === tier)?.value ?? DEFAULT_CHOICE
