@@ -315,16 +315,23 @@ export function classifyPublishFailure(failure: unknown): PublishFailure {
  * The app-toast text for a publish that failed AFTER the composer was off-screen (the
  * dock was closed or the controller moved to another persona before the response
  * landed), so the failure would otherwise be silent. The draft was restored by the
- * caller; an 'unconfirmed' outcome says the status is unknown rather than "failed".
+ * caller (unless it says `draftRestored: false`: a newer post took over the draft); an
+ * 'unconfirmed' outcome says the status is unknown rather than "failed".
  */
-export function describeOffscreenFailure(handle: string, failure: PublishFailure): string {
+export function describeOffscreenFailure(
+  handle: string,
+  failure: PublishFailure,
+  options: { readonly draftRestored?: boolean } = {},
+): string {
   const who = `Post as @${handle.startsWith('@') ? handle.slice(1) : handle}`
+  // Only when the caller really put the text back; a newer post may own the draft by now.
+  const restored = options.draftRestored === false ? '' : ' Draft restored.'
   if (failure.kind === 'unconfirmed') {
-    return `${who}: status unknown - check the feed. Draft restored.`
+    return `${who}: status unknown - check the feed.${restored}`
   }
   const code = failure.status !== undefined ? ` (HTTP ${failure.status})` : ''
   const reason = failure.message.replace(/[.!?\s]+$/, '')
-  return `${who} failed${code}: ${reason}. Draft restored.`
+  return `${who} failed${code}: ${reason}.${restored}`
 }
 
 // ---------------------------------------------------------------------------
@@ -432,12 +439,24 @@ function toLiveInput(input: ComposeAsPersonaInput): CreatePostInput {
 }
 
 /**
+ * How long a live publish may stay out before the request is abandoned: just past the 230 s the
+ * gateway can hold a request, so the gateway's own answer (a 504) still wins when it comes.
+ */
+export const PUBLISH_TIMEOUT_MS = 240_000
+
+/**
  * LIVE adapter. `POST /api/posts` as the active persona and resolve with the
  * console's `Post` built from the 201 body. REJECTS (swallowing nothing) with:
  *  - {@link ComposeRejectedError} for a baseline the server would 400 (no request sent);
  *  - the axios error for any non-2xx (the composer shows the server's message);
  *  - {@link ComposeUnconfirmedError} for a 2xx whose body is not a post.
  * No frontend telemetry: the server emits the one authoritative `post` / `reply`.
+ *
+ * THE REQUEST ENDS ON A DEADLINE ({@link PUBLISH_TIMEOUT_MS}, this request only - the shared axios
+ * client keeps no timeout). The composer's in-flight lock is session-wide, so a POST that hung
+ * forever would lock the persona until sign-out. Axios rejects at the deadline with no response
+ * (`ECONNABORTED`), which {@link classifyPublishFailure} already calls `unconfirmed` - the post
+ * may have been created - so the controller is asked "did it go out?" instead of being stuck.
  */
 export async function publishAsPersonaLive(input: ComposeAsPersonaInput): Promise<Post> {
   const baselineError = validateEngagementBaseline(input.engagementBaseline)
@@ -445,7 +464,7 @@ export async function publishAsPersonaLive(input: ComposeAsPersonaInput): Promis
 
   let created: CreatedPostView
   try {
-    created = await publishPost(toLiveInput(input))
+    created = await publishPost(toLiveInput(input), { timeoutMs: PUBLISH_TIMEOUT_MS })
   } catch (failure) {
     // `publishPost` throws a plain Error for a 2xx body it could not read (the post
     // may exist); every other failure is an axios error and is passed through as is.

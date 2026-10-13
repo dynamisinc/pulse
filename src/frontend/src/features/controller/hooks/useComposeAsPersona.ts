@@ -63,7 +63,11 @@
  * draft / question / context stores), and every request is its own object (its identity is the
  * token): a response releases ONLY the entry it created, never a newer one for the same key, and
  * a response for persona A can never unlock persona B. `send` (hence Post, Ctrl/Cmd+Enter and
- * "post again") is a no-op while the key has an entry, whichever instance asks.
+ * "post again") is a no-op while the key has an entry, whichever instance asks. Two things end an
+ * entry besides its own response: the EXPLICIT discard (Esc / X - see the last paragraph) and the
+ * request's own deadline - `publishAsPersonaLive` ends the POST at `PUBLISH_TIMEOUT_MS` (just past
+ * the gateway's 230 s) and a request with no response is an 'unconfirmed' outcome, so a hung POST
+ * can not lock the persona until sign-out.
  *
  * ADOPTING A REQUEST. A composer that MOUNTS (or switches target) onto a key with a request in
  * flight starts locked - `status: 'publishing'`, `isPublishing` true, so the composer shows the
@@ -88,8 +92,16 @@
  * and (b) the target is STILL the one the post answered. (a) matters because the route's target
  * outlives no dock: once the composer unmounts the route has already dropped the target, and
  * anything it holds now was set AFTER the post was sent - e.g. a fresh "Reply as" on another post
- * - which a late 201 must never wipe (it would turn that reply into a top-level post). An adopter
- * applies the same test against the target the route holds when the response lands.
+ * - which a late 201 must never wipe (it would turn that reply into a top-level post).
+ *
+ * An adopter can not see (a) with its eyes shut - the route's target on a reopened dock is either
+ * one RESTORED from the draft's recorded reply or one the controller deliberately picked, and the
+ * two look the same. So it applies (b) twice. WHEN IT ADOPTS it captures the reply the draft was
+ * recorded for (`contextByKey`; absent when that record is gone, e.g. the controller cleared the
+ * reply while the post was out). When the response lands it clears the route's target only if that
+ * captured reply IS the post this request answered AND the route still holds exactly that target.
+ * A target the controller re-picked over a record that no longer says "reply to that post" is the
+ * controller's own and survives the late 201.
  *
  * A REPLY NEVER TURNS INTO A TOP-LEVEL POST ON REMOUNT. Everything that persists across an
  * unmount - the "Post status unknown" question, the draft an off-screen failure restored, and a
@@ -158,6 +170,19 @@
  * `composeAsPersonaDraftStore.discardDraft(exerciseId, personaId)` before clearing its
  * own dock state, so an explicitly-dismissed draft never silently pre-fills a later
  * compose for the same persona.
+ *
+ * AN EXPLICIT DISCARD ALSO RELEASES THE IN-FLIGHT LOCK for that target. Once the draft is gone the
+ * lock protects nothing (there is no text left to send twice), and it would only stop the
+ * controller posting a correction as that persona for up to ~230 s in the middle of a live beat.
+ * So after Esc / X a reopened composer is fresh and usable - not an adopter. The old request is
+ * not cancelled: it settles through its sender's own closure, with no adopter, so the off-screen
+ * rules apply - a failure raises ONE toast and puts the text and the "status unknown" question
+ * back where the next non-explicit reopen finds them (the post did not necessarily go out, and
+ * the controller discarded before they could know); a success changes nothing and says nothing.
+ * Its release is identity-checked, and while a NEWER request owns the key (the controller already
+ * posted again) the old outcome writes nothing to the shared draft / question / context - those
+ * now describe the new post - and only toasts. The ENGINE / USAGE takeover is NOT an explicit
+ * discard: it stays locked, which is the point of the session-wide guard.
  */
 
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
@@ -252,8 +277,9 @@ const inFlightByKey = new Map<string, InFlightRequest>()
 const settlementListeners = new Map<string, Set<() => void>>()
 
 /**
- * Wakes the composers that adopted a request for `key`. Called by the SENDER once the module
- * stores are final, so a listener reads the settled state. Returns an unsubscribe.
+ * Subscribes `listener` to the settlement of the request in flight for `key` - a composer that
+ * ADOPTED it joins here. {@link settleRequest} calls the listeners once the module stores are
+ * final, so a listener reads the settled state. Returns an unsubscribe.
  */
 function subscribeSettlement(key: string, listener: () => void): () => void {
   let listeners = settlementListeners.get(key)
@@ -279,10 +305,30 @@ function releaseInFlight(request: InFlightRequest): void {
   if (inFlightByKey.get(request.key) === request) inFlightByKey.delete(request.key)
 }
 
-/** Records how `request` ended, then tells the composers that adopted it. */
+/** Records how `request` ended, then wakes the composers subscribed to its key (the adopters). */
 function settleRequest(request: InFlightRequest, outcome: SettledOutcome): void {
   request.outcome = outcome
   for (const listener of [...(settlementListeners.get(request.key) ?? [])]) listener()
+}
+
+/**
+ * A request a composer ADOPTED, with the reply the draft was recorded for at the moment it did.
+ * The record can disappear or change afterwards (the controller clears the reply while the post
+ * is out), and "was this target restored from the draft, or re-picked by the controller?" can only
+ * be answered from what the draft said WHEN ADOPTION STARTED.
+ */
+interface AdoptedRequest {
+  readonly request: InFlightRequest
+  /** `contextByKey.get(key)?.replyTo?.postId` at adoption; `undefined` = no reply recorded. */
+  readonly draftReplyPostId: string | undefined
+}
+
+/** Adoption of the request in flight for `key`, if any (the caller rules out its own request). */
+function adoptionOf(key: string): AdoptedRequest | undefined {
+  const request = inFlightByKey.get(key)
+  return request === undefined
+    ? undefined
+    : { request, draftReplyPostId: contextByKey.get(key)?.replyTo?.postId }
 }
 
 /** What a composer that mounts (or switches) onto `key` starts from: locked, asking, or idle. */
@@ -321,9 +367,22 @@ function setPersistedDraft(exerciseId: string, personaId: string, text: string):
 /**
  * Explicitly discards a persisted draft - the EXPLICIT close (Esc/X) path,
  * called by `ControllerConsole`'s `closeDock` (never by this hook's own
- * unmount; see the module header). A no-op if there was no draft.
+ * unmount; see the module header) - and releases the target's in-flight lock. A no-op if there
+ * was no draft and no request in flight.
  */
 function discardDraft(exerciseId: string, personaId: string): void {
+  forgetDraft(exerciseId, personaId)
+  // Nothing is left to send twice, so the lock for this target is released too (see the module
+  // header). The old request still settles through its sender; its own release is identity-checked.
+  inFlightByKey.delete(draftKey(exerciseId, personaId))
+}
+
+/**
+ * Forgets the persisted draft, question and reply context for a target but NOT its in-flight
+ * entry: the hook's own paths (a success clearing what was sent, "it went out") are not the
+ * controller walking away, and must never release another request's lock.
+ */
+function forgetDraft(exerciseId: string, personaId: string): void {
   const key = draftKey(exerciseId, personaId)
   draftByKey.delete(key)
   unconfirmedByKey.delete(key)
@@ -521,9 +580,7 @@ export function useComposeAsPersona(
   const [failure, setFailure] = useState<PublishFailure | undefined>(
     () => seedStateFor(targetKey).failure,
   )
-  const [adopted, setAdopted] = useState<InFlightRequest | undefined>(() =>
-    inFlightByKey.get(targetKey),
-  )
+  const [adopted, setAdopted] = useState<AdoptedRequest | undefined>(() => adoptionOf(targetKey))
   const [lastPublished, setLastPublished] = useState<Post | null>(null)
   // What the persisted draft (if any) was written for - see `contextByKey`.
   const [draftContext, setDraftContext] = useState<DraftContext | undefined>(() =>
@@ -586,8 +643,9 @@ export function useComposeAsPersona(
       // this very instance sent it: its own closure handles the response). A post that may
       // already be live comes back asking, not as a fresh draft.
       const seed = seedStateFor(key)
-      const flying = inFlightByKey.get(key)
-      setAdopted(flying !== undefined && flying.sender !== instanceId ? flying : undefined)
+      const adoption = adoptionOf(key)
+      const adoptable = adoption !== undefined && adoption.request.sender !== instanceId
+      setAdopted(adoptable ? adoption : undefined)
       setStatus(seed.status)
       setFailure(seed.failure)
       setLastPublished(null)
@@ -612,9 +670,16 @@ export function useComposeAsPersona(
   // target-change effect above. A LAYOUT effect so the subscription exists before any response can
   // land after the commit (the toast decision looks for adopters), and the first call catches an
   // outcome that was written between render and subscribe.
+  //
+  // That window - the adopter rendered 'publishing' but is not subscribed yet - is where the sender
+  // could see "no adopter" and toast while this composer also shows the banner a moment later (two
+  // signals for one outcome). It needs a render that is separated from its commit by a task, i.e.
+  // a concurrent / transition render; for a discrete update (a click, a keypress, a mount) render,
+  // commit and layout effects run in ONE task and no response can land in between. The cost if it
+  // ever does is one redundant toast, never a lost or doubled outcome.
   useLayoutEffect(() => {
-    if (adopted === undefined || adopted.key !== targetKey) return
-    const request = adopted
+    if (adopted === undefined || adopted.request.key !== targetKey) return
+    const { request, draftReplyPostId } = adopted
     let taken = false
     const takeOver = () => {
       const outcome = request.outcome
@@ -635,9 +700,12 @@ export function useComposeAsPersona(
       setFailure(undefined)
       setLastPublished(outcome.post)
       setStatus('success')
-      // Only if the target is STILL the one this post answered (Gate-2 A M-1).
+      // Only if the draft was recorded as a reply to the post this request answered WHEN WE
+      // ADOPTED IT (else the target on screen is one the controller picked over a record that is
+      // gone) AND the route still holds exactly that target (Gate-2 A M-1; see the module header).
       if (
         request.replyTo !== undefined
+        && draftReplyPostId === request.replyTo.postId
         && latestReplyToRef.current?.postId === request.replyTo.postId
       ) {
         onClearReplyRef.current?.()
@@ -856,10 +924,15 @@ export function useComposeAsPersona(
     const succeed = (post: Post) => {
       if (fromAPreviousSession()) return
       releaseInFlight(request)
-      unconfirmedByKey.delete(targetKey)
-      // The draft is gone whether or not the composer is still mounted - but only if
-      // it is still what was sent (a remount may already hold a newer draft).
-      if (getPersistedDraft(exerciseId, personaId) === text) discardDraft(exerciseId, personaId)
+      // A NEWER request owns the key when the controller discarded explicitly and posted again:
+      // the shared draft / question now describe that post; this old success leaves them alone.
+      const superseded = inFlightByKey.has(targetKey)
+      if (!superseded) {
+        unconfirmedByKey.delete(targetKey)
+        // The draft is gone whether or not the composer is still mounted - but only if
+        // it is still what was sent (a remount may already hold a newer draft).
+        if (getPersistedDraft(exerciseId, personaId) === text) forgetDraft(exerciseId, personaId)
+      }
       if (stillOnScreen()) {
         setDraftContext(contextByKey.get(targetKey))
         setTextState('')
@@ -890,15 +963,20 @@ export function useComposeAsPersona(
     const fail = (error: unknown) => {
       if (fromAPreviousSession()) return
       releaseInFlight(request)
+      // A NEWER request owns the key (explicit discard, then a new post): the shared draft /
+      // question / context belong to it, so this old outcome writes none of them and only toasts.
+      const superseded = inFlightByKey.has(targetKey)
       const classified = classifyPublishFailure(error)
       // What a remounted composer must know about this request: the reply it carried (or
       // that it carried none).
       const sentContext: DraftContext = { replyTo: sentReplyTo }
-      if (classified.kind === 'unconfirmed') {
-        unconfirmedByKey.set(targetKey, classified)
-        contextByKey.set(targetKey, sentContext)
-      } else {
-        unconfirmedByKey.delete(targetKey)
+      if (!superseded) {
+        if (classified.kind === 'unconfirmed') {
+          unconfirmedByKey.set(targetKey, classified)
+          contextByKey.set(targetKey, sentContext)
+        } else {
+          unconfirmedByKey.delete(targetKey)
+        }
       }
 
       if (!stillOnScreen()) {
@@ -909,8 +987,12 @@ export function useComposeAsPersona(
         // (A draft that is still exactly what was sent - the dock was closed without discarding
         // it, e.g. the ENGINE flyout took it over - is the same draft: it gets the context too.
         // A DIFFERENT, newer draft is the controller's own and is left alone.)
+        // (After an EXPLICIT discard the draft is '' here, so the text comes back too: the post
+        // did not necessarily go out and the controller discarded before they could know. A
+        // freshly reopened composer keeps showing its own, empty field; the restored text and a
+        // pending question are found by the next non-explicit reopen, as the toast says.)
         const persisted = getPersistedDraft(exerciseId, personaId)
-        if (persisted === '' || persisted === text) {
+        if (!superseded && (persisted === '' || persisted === text)) {
           setPersistedDraft(exerciseId, personaId, text)
           contextByKey.set(targetKey, sentContext)
         }
@@ -918,7 +1000,10 @@ export function useComposeAsPersona(
         // it shows the banner, and a toast on top would be the same outcome twice.
         if (!hasAdopter(targetKey)) {
           const notify = classified.kind === 'unconfirmed' ? toast.warning : toast.error
-          notify(describeOffscreenFailure(handle, classified), { autoClose: 10_000 })
+          notify(
+            describeOffscreenFailure(handle, classified, { draftRestored: !superseded }),
+            { autoClose: 10_000 },
+          )
         }
         settleRequest(request, { kind: 'failure', failure: classified })
         return
@@ -982,7 +1067,7 @@ export function useComposeAsPersona(
     // The reply the unresolved request carried - survives a remount (it is persisted).
     const sentReplyTo = contextByKey.get(targetKey)?.replyTo
     unconfirmedByKey.delete(targetKey)
-    discardDraft(exerciseId, personaId)
+    forgetDraft(exerciseId, personaId)
     setDraftContext(undefined)
     setTextState('')
     clearTray()

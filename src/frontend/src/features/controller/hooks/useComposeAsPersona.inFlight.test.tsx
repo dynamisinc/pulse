@@ -21,7 +21,12 @@
  *  - the sender's own callbacks are not duplicated by the adopter (`onPublished` fires once);
  *  - a response clears only ITS OWN entry: two personas in flight do not unlock each other, and a
  *    previous session's response neither changes anything nor deletes the next session's entry;
- *  - switching target (same instance) onto an in-flight key locks and adopts too.
+ *  - switching target (same instance) onto an in-flight key locks and adopts too;
+ *  - an adopter's late 201 clears the route's reply target only if the draft was recorded as a
+ *    reply to that post WHEN IT ADOPTED, so a target the controller re-picked is never wiped (W-1);
+ *  - an EXPLICIT discard (Esc / X) releases the lock: a reopen is fresh and can post, and the old
+ *    request settles alone - one toast on failure, nothing on success, never touching the new
+ *    request (W-2). The ENGINE / USAGE takeover (no discard) stays locked.
  */
 import { useLayoutEffect, useMemo } from 'react'
 import { act, render, renderHook } from '@testing-library/react'
@@ -497,6 +502,222 @@ describe('the reply target, across the remount', () => {
     act(() => h.compose?.publish())
     expect(sent()).toHaveLength(1)
   })
+
+  it('W-1: a target the controller RE-PICKED is not wiped by an adopter\'s late 201', async () => {
+    // Reply to A, post (out); the route's target goes away while the composer is still up (its
+    // recorded reply goes with it); the dock is taken over; the controller then picks "Reply as" A
+    // AGAIN on purpose and reopens. The adopter sees A on screen, but the draft no longer says
+    // "reply to A" - so that A is the controller's own and must survive the old 201.
+    const request = pendingRequest()
+    const view = render(<Route dockOpen />)
+    act(() => h.request?.(A))
+    act(() => h.compose?.setText('@a yes, it is safe'))
+    act(() => h.compose?.publish())
+    act(() => h.clear?.())
+    closeDock(view)
+    act(() => h.request?.(A))
+    view.rerender(<Route dockOpen />)
+    expect(h.compose?.isPublishing).toBe(true)
+    expect(h.reply?.postId).toBe('post-A')
+    h.onClearReply?.mockClear()
+
+    await request.succeed()
+
+    expect(h.compose?.status).toBe('success')
+    expect(h.onClearReply).not.toHaveBeenCalled()
+    expect(h.reply?.postId).toBe('post-A')
+  })
+
+  it('W-1: after Esc / X (explicit discard) a re-picked target survives the old 201', async () => {
+    // The flow as the controller lives it: reply to A (post out), Esc/X (draft discarded, route
+    // clears A), "Reply as" A again, reopen. The lock was released with the discard, so this
+    // composer is fresh - not an adopter - and the old response can not touch the new target.
+    const request = pendingRequest()
+    const view = render(<Route dockOpen />)
+    act(() => h.request?.(A))
+    act(() => h.compose?.setText('@a yes, it is safe'))
+    act(() => h.compose?.publish())
+    view.rerender(<Route dockOpen={false} />)
+    composeAsPersonaDraftStore.discardDraft('ex-1', X.id)
+    act(() => h.clear?.())
+    act(() => h.request?.(A))
+    view.rerender(<Route dockOpen />)
+    expect(h.reply?.postId).toBe('post-A')
+    expect(h.compose?.isPublishing).toBe(false)
+    h.onClearReply?.mockClear()
+
+    await request.succeed()
+
+    expect(h.onClearReply).not.toHaveBeenCalled()
+    expect(h.reply?.postId).toBe('post-A')
+    expect(h.compose?.status).toBe('idle')
+  })
+})
+
+describe('an explicit discard (Esc / X) releases the lock', () => {
+  /** Post is pressed as `activePersona`; the dock is closed explicitly: unmount + discard. */
+  function postThenEscape(activePersona: StaffPersona, text: string) {
+    const view = senderOf(activePersona, text)
+    view.unmount()
+    composeAsPersonaDraftStore.discardDraft('ex-1', activePersona.id)
+  }
+
+  it('a reopened composer is fresh: not locked, and it can post', () => {
+    pendingRequest()
+    postThenEscape(X, 'Boil-water order lifted.')
+
+    const { result } = renderHook(() => useComposeAsPersona(options(X)))
+
+    expect(result.current.status).toBe('idle')
+    expect(result.current.isPublishing).toBe(false)
+    expect(result.current.text).toBe('')
+    act(() => result.current.setText('A correction.'))
+    expect(result.current.canPublish).toBe(true)
+    act(() => result.current.publish())
+    expect(sent()).toHaveLength(2)
+    expect(sent()[1]?.[0].text).toBe('A correction.')
+  })
+
+  it('CONTRAST: the same reopen WITHOUT the discard (the ENGINE takeover) stays locked', () => {
+    pendingRequest()
+    senderOf(X, 'Boil-water order lifted.').unmount()
+
+    const { result } = renderHook(() => useComposeAsPersona(options(X)))
+    act(() => result.current.publish())
+
+    expect(result.current.isPublishing).toBe(true)
+    expect(sent()).toHaveLength(1)
+  })
+
+  it('another persona\'s discard does not unlock this one', () => {
+    pendingRequest()
+    senderOf(X, 'From X.').unmount()
+    composeAsPersonaDraftStore.discardDraft('ex-1', Y.id)
+
+    const { result } = renderHook(() => useComposeAsPersona(options(X)))
+
+    expect(result.current.isPublishing).toBe(true)
+  })
+
+  it('the old FAILURE gives exactly one toast and never unlocks or clears the NEW request', async () => {
+    const old = pendingRequest()
+    postThenEscape(X, 'Boil-water order lifted.')
+    const fresh = pendingRequest()
+    const reopened = renderHook(() => useComposeAsPersona(options(X)))
+    act(() => reopened.result.current.setText('A correction.'))
+    act(() => reopened.result.current.publish())
+    expect(reopened.result.current.isPublishing).toBe(true)
+    expect(sent()).toHaveLength(2)
+
+    await old.fail(429)
+
+    expect(toast.error).toHaveBeenCalledTimes(1)
+    // The text is NOT restored (the new post owns the draft), and the toast does not claim it was.
+    expect(vi.mocked(toast.error).mock.calls[0]?.[0]).not.toMatch(/Draft restored/)
+    expect(reopened.result.current.isPublishing).toBe(true)
+    expect(reopened.result.current.text).toBe('A correction.')
+    act(() => reopened.result.current.publish())
+    expect(sent()).toHaveLength(2)
+    const again = renderHook(() => useComposeAsPersona(options(X)))
+    expect(again.result.current.isPublishing).toBe(true)
+    expect(again.result.current.text).toBe('A correction.')
+
+    await fresh.succeed()
+    expect(reopened.result.current.status).toBe('success')
+    expect(again.result.current.status).toBe('success')
+    expect(toast.error).toHaveBeenCalledTimes(1)
+  })
+
+  it('the old UNCONFIRMED outcome gives exactly one toast and leaves the new post\'s lock alone', async () => {
+    const old = pendingRequest()
+    postThenEscape(X, 'Boil-water order lifted.')
+    pendingRequest()
+    const reopened = renderHook(() => useComposeAsPersona(options(X)))
+    act(() => reopened.result.current.setText('A correction.'))
+    act(() => reopened.result.current.publish())
+
+    await old.fail(504)
+
+    expect(toast.warning).toHaveBeenCalledTimes(1)
+    expect(reopened.result.current.awaitingDecision).toBe(false)
+    expect(reopened.result.current.isPublishing).toBe(true)
+    reopened.unmount()
+    // A reopen finds the NEW request still locking the key - not a question about the old one.
+    const again = renderHook(() => useComposeAsPersona(options(X)))
+    expect(again.result.current.isPublishing).toBe(true)
+    expect(again.result.current.awaitingDecision).toBe(false)
+  })
+
+  it('the old SUCCESS says nothing and never unlocks or clears the NEW request', async () => {
+    const old = pendingRequest()
+    postThenEscape(X, 'Boil-water order lifted.')
+    const fresh = pendingRequest()
+    const reopened = renderHook(() => useComposeAsPersona(options(X)))
+    act(() => reopened.result.current.setText('A correction.'))
+    act(() => reopened.result.current.publish())
+
+    await old.succeed()
+
+    expect(toast.error).not.toHaveBeenCalled()
+    expect(toast.warning).not.toHaveBeenCalled()
+    expect(reopened.result.current.isPublishing).toBe(true)
+    expect(reopened.result.current.text).toBe('A correction.')
+    act(() => reopened.result.current.publish())
+    expect(sent()).toHaveLength(2)
+
+    await fresh.succeed()
+    expect(reopened.result.current.status).toBe('success')
+  })
+
+  it('old FAILURE, no new request: ONE toast, and the text comes back for the next reopen (the decision)', async () => {
+    const old = pendingRequest()
+    postThenEscape(X, 'Boil-water order lifted.')
+    // A fresh composer is on screen, empty. It is not an adopter: the toast is the live signal.
+    const fresh = renderHook(() => useComposeAsPersona(options(X)))
+
+    await old.fail(429)
+
+    expect(toast.error).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(toast.error).mock.calls[0]?.[0]).toMatch(/Draft restored/)
+    expect(fresh.result.current.status).toBe('idle')
+    expect(fresh.result.current.text).toBe('')
+    fresh.unmount()
+    const next = renderHook(() => useComposeAsPersona(options(X)))
+    expect(next.result.current.text).toBe('Boil-water order lifted.')
+    expect(next.result.current.canPublish).toBe(true)
+  })
+
+  it('old UNCONFIRMED, no new request: ONE toast, and the question comes back for the next reopen', async () => {
+    const old = pendingRequest()
+    postThenEscape(X, 'Boil-water order lifted.')
+    const fresh = renderHook(() => useComposeAsPersona(options(X)))
+
+    await old.fail(504)
+
+    expect(toast.warning).toHaveBeenCalledTimes(1)
+    expect(fresh.result.current.status).toBe('idle')
+    fresh.unmount()
+    const next = renderHook(() => useComposeAsPersona(options(X)))
+    expect(next.result.current.awaitingDecision).toBe(true)
+    expect(next.result.current.text).toBe('Boil-water order lifted.')
+    expect(next.result.current.canPublish).toBe(false)
+  })
+
+  it('old SUCCESS, no new request: no toast, and nothing is brought back', async () => {
+    const old = pendingRequest()
+    postThenEscape(X, 'Boil-water order lifted.')
+    const fresh = renderHook(() => useComposeAsPersona(options(X)))
+
+    await old.succeed()
+
+    expect(toast.error).not.toHaveBeenCalled()
+    expect(toast.warning).not.toHaveBeenCalled()
+    fresh.unmount()
+    const next = renderHook(() => useComposeAsPersona(options(X)))
+    expect(next.result.current.text).toBe('')
+    expect(next.result.current.status).toBe('idle')
+  })
+
 })
 
 describe('sign-out while a request is in flight', () => {

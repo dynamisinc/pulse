@@ -32,6 +32,7 @@ import {
   isValidBaselineValue,
   parseBaselineField,
   postFromCreated,
+  PUBLISH_TIMEOUT_MS,
   publishAsPersonaLive,
   validateEngagementBaseline,
   type ComposeAsPersonaInput,
@@ -270,6 +271,31 @@ describe('publishAsPersonaLive (LIVE adapter)', () => {
 
     await expect(publishAsPersonaLive(BASE)).rejects.toBeInstanceOf(ComposeUnconfirmedError)
   })
+
+  it('ends the request on a deadline just past the gateway\'s 230 s - this request only', async () => {
+    await publishAsPersonaLive(BASE)
+
+    // The composer's in-flight lock is session-wide, so a hung POST must not hold it until
+    // sign-out. The shared axios client keeps NO timeout; this one call carries its own.
+    expect(PUBLISH_TIMEOUT_MS).toBe(240_000)
+    expect(PUBLISH_TIMEOUT_MS).toBeGreaterThan(230_000)
+    expect(postsCalls()[0]?.[2]).toEqual({ timeout: PUBLISH_TIMEOUT_MS })
+  })
+
+  it('a request that hits the deadline (no response, ECONNABORTED) surfaces as UNCONFIRMED', async () => {
+    const timedOut = new AxiosError(
+      `timeout of ${PUBLISH_TIMEOUT_MS}ms exceeded`,
+      'ECONNABORTED',
+    )
+    vi.mocked(api.post).mockRejectedValueOnce(timedOut)
+
+    // Passed through as the axios error (nothing swallowed) ...
+    await expect(publishAsPersonaLive(BASE)).rejects.toBe(timedOut)
+    // ... which the composer classifies as "may already be live": it asks, never locks forever.
+    const classified = classifyPublishFailure(timedOut)
+    expect(classified.kind).toBe('unconfirmed')
+    expect(classified.status).toBeUndefined()
+  })
 })
 
 describe('classifyPublishFailure', () => {
@@ -425,5 +451,22 @@ describe('describeOffscreenFailure (the toast for a failure nobody was watching)
     })
     expect(text).toBe('Post as @FairhavenWater: status unknown - check the feed. Draft restored.')
     expect(text).not.toMatch(/failed/)
+  })
+
+  it('drops "Draft restored." when the caller did not put the text back (a newer post owns it)', () => {
+    expect(
+      describeOffscreenFailure(
+        'FairhavenWater',
+        { kind: 'rejected', status: 400, message: 'media is not yours.' },
+        { draftRestored: false },
+      ),
+    ).toBe('Post as @FairhavenWater failed (HTTP 400): media is not yours.')
+    expect(
+      describeOffscreenFailure(
+        'FairhavenWater',
+        { kind: 'unconfirmed', status: 504, message: 'May be live.' },
+        { draftRestored: false },
+      ),
+    ).toBe('Post as @FairhavenWater: status unknown - check the feed.')
   })
 })

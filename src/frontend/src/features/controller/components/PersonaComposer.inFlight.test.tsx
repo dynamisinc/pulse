@@ -19,6 +19,10 @@
  *     field, the "Post status unknown" question with the draft kept, or the failure banner with a
  *     Retry - and raises NO toast (the off-screen toast is only for when nobody is looking).
  *
+ * An EXPLICIT close (Esc / X: `closeDock` discards the draft) is different: the draft is gone, so
+ * the lock is released and a reopened composer is fresh and can post a correction at once; the old
+ * request settles alone (one toast on a failure) and never touches the new one.
+ *
  * The hook-level cases (reply target, sign-out, two personas, target switching) are in
  * `../hooks/useComposeAsPersona.inFlight.test.tsx`. Harness as `PersonaComposer.gate2.test.tsx`.
  */
@@ -301,5 +305,53 @@ describe('the reopened composer takes over the outcome', () => {
     view.rerender(<Dock open />)
     expect(field().value).toBe(DRAFT)
     expect(screen.queryByTestId('publishing')).toBeNull()
+  })
+})
+
+describe('after an explicit close (Esc / X) the lock is released', () => {
+  /** Post is pressed, then the dock is closed the way `closeDock` does: unmount + discard. */
+  async function postThenEscape() {
+    const view = render(<Dock open />)
+    fireEvent.change(field(), { target: { value: DRAFT } })
+    fireEvent.keyDown(field(), { key: 'Enter', ctrlKey: true })
+    expect(await screen.findByTestId('publishing')).toBeInTheDocument()
+    view.rerender(<Dock open={false} />)
+    composeAsPersonaDraftStore.discardDraft('ex-live-0001', PERSONA.id)
+    return view
+  }
+
+  it('the reopened composer is fresh and can post a correction while the old post is still out', async () => {
+    pendingRequest()
+    const view = await postThenEscape()
+    view.rerender(<Dock open />)
+
+    expect(screen.queryByTestId('publishing')).toBeNull()
+    expect(field().value).toBe('')
+    expect(field().readOnly).toBe(false)
+    fireEvent.change(field(), { target: { value: 'Correction: zones 2-3 only.' } })
+    expect(postButton()).toBeEnabled()
+    fireEvent.keyDown(field(), { key: 'Enter', ctrlKey: true })
+
+    expect(publishPost).toHaveBeenCalledTimes(2)
+    expect(vi.mocked(publishPost).mock.calls[1]?.[0].text).toBe('Correction: zones 2-3 only.')
+  })
+
+  it('the old post failing then raises ONE toast and leaves the new post\'s "Posting..." alone', async () => {
+    const old = pendingRequest()
+    const view = await postThenEscape()
+    pendingRequest()
+    view.rerender(<Dock open />)
+    fireEvent.change(field(), { target: { value: 'Correction: zones 2-3 only.' } })
+    fireEvent.keyDown(field(), { key: 'Enter', ctrlKey: true })
+    expect(await screen.findByTestId('publishing')).toBeInTheDocument()
+
+    await old.fail(429)
+
+    expect(toast.error).toHaveBeenCalledTimes(1)
+    expect(screen.getByTestId('publishing')).toBeInTheDocument()
+    expect(field().value).toBe('Correction: zones 2-3 only.')
+    expect(screen.queryByTestId('publish-error')).toBeNull()
+    fireEvent.keyDown(field(), { key: 'Enter', ctrlKey: true })
+    expect(publishPost).toHaveBeenCalledTimes(2)
   })
 })

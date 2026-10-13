@@ -48,7 +48,7 @@
  * is an opaque GUID - and the set dies with the session (`reset()` on sign-out).
  */
 
-/** Every id taken down this session; never trimmed (see SHAPE in the module header). */
+/** Every id taken down this session; never trimmed (header: "EVERY ID IS KEPT"). */
 let removed: ReadonlySet<string> = new Set()
 
 const listeners = new Set<() => void>()
