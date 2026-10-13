@@ -194,7 +194,7 @@ internal sealed class LinkCardTestWorld
         Guid? staffUserId,
         string? frontendBase = FrontendBase,
         int? maxCardsPerRequest = null,
-        Action<IServiceCollection>? configure = null)
+        Func<IConfiguration, IConfiguration>? wrapConfiguration = null)
     {
         var settings = new Dictionary<string, string?> { [JoinUrlBuilder.FrontendBaseUrlKey] = frontendBase };
         if (maxCardsPerRequest is { } max)
@@ -204,31 +204,48 @@ internal sealed class LinkCardTestWorld
 
         var services = new ServiceCollection();
         services.AddLogging();
-        services.AddSingleton<IConfiguration>(new ConfigurationBuilder().AddInMemoryCollection(settings).Build());
+        IConfiguration configuration = new ConfigurationBuilder().AddInMemoryCollection(settings).Build();
+        services.AddSingleton(wrapConfiguration is null ? configuration : wrapConfiguration(configuration));
         services.AddScoped<IExerciseContext>(_ => new ExerciseContext { CurrentExerciseId = scope });
         services.AddScoped(provider => _fixture.CreateContext(provider.GetRequiredService<IExerciseContext>()));
         services.AddScoped<ICurrentStaffSessionAccessor>(_ => new StubCurrentStaffSessionAccessor(
             staffUserId is { } staff ? new CurrentStaffSession { SessionId = Guid.NewGuid(), StaffUserId = staff } : null));
+        services.AddScoped<StaffAssignmentService>();
         services.AddExerciseClock();
-        services.AddEasyLoginFoundation();
-        services.AddSingleton<IDataProtectionProvider>(KeyRing);
         services.AddLinkCards();
-        configure?.Invoke(services);
+        services.AddSingleton<IDataProtectionProvider>(KeyRing);
 
         return services.BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = true, ValidateOnBuild = true });
     }
 
-    /// <summary>Runs one card request as <paramref name="staffUserId"/> scoped to <paramref name="scope"/>.</summary>
-    public async Task<LinkCardResult> GenerateAsync(
+    /// <summary>The body for <paramref name="ids"/>: <c>{ all: true }</c> when <c>null</c>, otherwise <c>{ participantIds }</c>.</summary>
+    public static RosterCardsRequestBody Body(IReadOnlyList<string?>? ids) =>
+        ids is null ? new RosterCardsRequestBody { All = true } : new RosterCardsRequestBody { ParticipantIds = ids };
+
+    /// <summary>
+    /// Runs one card request as <paramref name="staffUserId"/> scoped to <paramref name="scope"/>: <c>{ all: true }</c>
+    /// when <paramref name="ids"/> is <c>null</c>, otherwise <c>{ participantIds: ids }</c>.
+    /// </summary>
+    public Task<LinkCardResult> GenerateAsync(
         Guid? scope,
         Guid? staffUserId,
-        IReadOnlyList<string>? ids = null,
+        IReadOnlyList<string?>? ids = null,
         string? frontendBase = FrontendBase,
-        int? maxCardsPerRequest = null)
+        int? maxCardsPerRequest = null) =>
+        GenerateWithBodyAsync(scope, staffUserId, Body(ids), frontendBase, maxCardsPerRequest);
+
+    /// <summary>Runs one card request with exactly <paramref name="body"/> (which may be <c>null</c> or ill-shaped).</summary>
+    public async Task<LinkCardResult> GenerateWithBodyAsync(
+        Guid? scope,
+        Guid? staffUserId,
+        RosterCardsRequestBody? body,
+        string? frontendBase = FrontendBase,
+        int? maxCardsPerRequest = null,
+        Func<IConfiguration, IConfiguration>? wrapConfiguration = null)
     {
-        await using var provider = BuildServices(scope, staffUserId, frontendBase, maxCardsPerRequest);
+        await using var provider = BuildServices(scope, staffUserId, frontendBase, maxCardsPerRequest, wrapConfiguration);
         await using var request = provider.CreateAsyncScope();
-        return await request.ServiceProvider.GetRequiredService<LinkCardService>().GenerateAsync(ids);
+        return await request.ServiceProvider.GetRequiredService<LinkCardService>().GenerateAsync(body);
     }
 
     /// <summary>Every <c>roster.cards.generated</c> event persisted for <paramref name="exerciseId"/> (read past any filter).</summary>

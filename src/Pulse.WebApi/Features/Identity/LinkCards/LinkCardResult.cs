@@ -14,6 +14,9 @@ public enum LinkCardOutcome
     /// <summary>A staff caller who is not a controller or planner on the resolved exercise (<c>403</c>).</summary>
     Forbidden,
 
+    /// <summary>The body is not exactly one of <c>{ participantIds }</c> or <c>{ all: true }</c> (<c>400</c>).</summary>
+    Invalid,
+
     /// <summary>More ids than <see cref="EasyLoginOptions.MaxCardsPerRequest"/> (<c>400</c>).</summary>
     TooManyIds,
 
@@ -56,6 +59,15 @@ public sealed class LinkCardResult
     /// <summary>The caller may not print cards on this exercise.</summary>
     /// <returns>A <see cref="LinkCardOutcome.Forbidden"/> result.</returns>
     public static LinkCardResult Forbidden() => new(LinkCardOutcome.Forbidden, sheet: null, message: null);
+
+    /// <summary>The body has the wrong shape.</summary>
+    /// <param name="message">A readable, secret-free reason.</param>
+    /// <returns>An <see cref="LinkCardOutcome.Invalid"/> result.</returns>
+    public static LinkCardResult Invalid(string message)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(message);
+        return new LinkCardResult(LinkCardOutcome.Invalid, sheet: null, message);
+    }
 
     /// <summary>Too many ids in one request.</summary>
     /// <param name="max">The configured cap.</param>

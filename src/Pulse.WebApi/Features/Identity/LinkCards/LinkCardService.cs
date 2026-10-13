@@ -9,7 +9,7 @@ using Pulse.WebApi.Features.Identity.EasyLogin;
 using Pulse.WebApi.Features.Identity.Staff;
 
 /// <summary>
-/// Builds the printable card sheet behind <c>GET /api/staff/roster/cards</c> (easy-login story 04, EL-12): for each
+/// Builds the printable card sheet behind <c>POST /api/staff/roster/cards</c> (easy-login story 04, EL-12, EL-20): for each
 /// participant with an enabled account and an active link whose stored copy still decrypts, a card with the name,
 /// agency, job label, sign-in name, join URL and a QR of exactly that URL. Everyone else considered is reported in
 /// <c>skipped</c> with a reason. It READS links that stories 02 and 03 created; it never creates, rotates or changes
@@ -21,12 +21,13 @@ using Pulse.WebApi.Features.Identity.Staff;
 /// <see cref="IExerciseContext"/>. Accounts and links are read through the central exercise filter
 /// (<c>IExerciseScoped</c>), so an id from another exercise matches no row and is skipped as <c>notFound</c> through
 /// exactly the same code path, status and body shape as an id that exists nowhere. A malformed or blank id is also
-/// <c>notFound</c>: only a request with NO <c>id</c> at all means "every participant", so a request can never
-/// widen to the whole roster by accident.
+/// <c>notFound</c>: only the explicit <c>{ "all": true }</c> means "every participant" (EL-20), so a request can
+/// never widen to the whole roster by accident.
 /// </para>
 /// <para>
-/// <b>Which participants are considered.</b> With no <c>id</c>: every account in the exercise (the same set the
-/// roster lists). With <c>id</c>s: those accounts. Each one is then, in this order: <c>disabled</c> (staff disabled
+/// <b>Which participants are considered.</b> With <c>all: true</c>: every account in the exercise (the same set the
+/// roster lists; uncapped, as EL-20 decides). With <c>participantIds</c>: those accounts, de-duplicated (a GUID in any
+/// casing, or the same malformed text in any casing, is one entry). Each one is then, in this order: <c>disabled</c> (staff disabled
 /// them; re-enable first), <c>noActiveLink</c> (no link, or revoked), <c>tokenUnrecoverable</c> (active, but the
 /// stored copy no longer decrypts to the token the row's hash names, so reissue), or a card. "Recoverable" is
 /// decided by <see cref="RosterLinkDtoFactory"/>, the one definition the roster list also uses, so the sheet and the
@@ -36,6 +37,13 @@ using Pulse.WebApi.Features.Identity.Staff;
 /// <b>Order.</b> Cards are ordered by name (then account id, for a stable order between equal names), as the
 /// database collation sorts them. <c>skipped</c> lists the participants found but skipped in the same name order,
 /// then the <c>notFound</c> ids in the order they were requested, each once.
+/// </para>
+/// <para>
+/// <b>Who may ask (EL-13), re-checked here.</b> The endpoint filters already refuse anyone but an assigned controller
+/// or planner. This service re-reads the caller's assignment through the SAME primitive the filters use
+/// (<see cref="StaffAssignmentService.GetAssignmentsAsync"/>: own-only, bounded by the caller's tenant) and the same
+/// role rule (<see cref="RosterStaffRoleFilter.IsAdmittedRole"/>), so the two checks share one definition, and the
+/// role it admits is the one recorded on the event.
 /// </para>
 /// <para>
 /// <b>Telemetry (XC-004).</b> Every successful request emits exactly one <c>roster.cards.generated</c> event with the
@@ -54,6 +62,7 @@ public sealed class LinkCardService
     private readonly PulseDbContext _dbContext;
     private readonly IExerciseContext _exerciseContext;
     private readonly ICurrentStaffSessionAccessor _currentStaffSession;
+    private readonly StaffAssignmentService _staffAssignments;
     private readonly ExerciseFactsReader _factsReader;
     private readonly RosterLinkDtoFactory _linkDtoFactory;
     private readonly JoinUrlBuilder _joinUrlBuilder;
@@ -66,6 +75,7 @@ public sealed class LinkCardService
     /// <param name="dbContext">The request's persistence context (central exercise filter applied).</param>
     /// <param name="exerciseContext">The server-resolved exercise scope, the ONLY source of the exercise.</param>
     /// <param name="currentStaffSession">Identifies the staff caller (the telemetry acting human).</param>
+    /// <param name="staffAssignments">The caller's own assignments: the role re-check, as the filters read it.</param>
     /// <param name="factsReader">The exercise name and the telemetry time zone / scenario time.</param>
     /// <param name="linkDtoFactory">Decides whether a link is active and recoverable, and builds its join URL.</param>
     /// <param name="joinUrlBuilder">Tells whether a join base is configured at all.</param>
@@ -77,6 +87,7 @@ public sealed class LinkCardService
         PulseDbContext dbContext,
         IExerciseContext exerciseContext,
         ICurrentStaffSessionAccessor currentStaffSession,
+        StaffAssignmentService staffAssignments,
         ExerciseFactsReader factsReader,
         RosterLinkDtoFactory linkDtoFactory,
         JoinUrlBuilder joinUrlBuilder,
@@ -88,6 +99,7 @@ public sealed class LinkCardService
         ArgumentNullException.ThrowIfNull(dbContext);
         ArgumentNullException.ThrowIfNull(exerciseContext);
         ArgumentNullException.ThrowIfNull(currentStaffSession);
+        ArgumentNullException.ThrowIfNull(staffAssignments);
         ArgumentNullException.ThrowIfNull(factsReader);
         ArgumentNullException.ThrowIfNull(linkDtoFactory);
         ArgumentNullException.ThrowIfNull(joinUrlBuilder);
@@ -99,6 +111,7 @@ public sealed class LinkCardService
         _dbContext = dbContext;
         _exerciseContext = exerciseContext;
         _currentStaffSession = currentStaffSession;
+        _staffAssignments = staffAssignments;
         _factsReader = factsReader;
         _linkDtoFactory = linkDtoFactory;
         _joinUrlBuilder = joinUrlBuilder;
@@ -112,19 +125,20 @@ public sealed class LinkCardService
     /// Builds the card sheet for the resolved exercise. Fails closed, in order: no resolved exercise or no staff
     /// session gives <see cref="LinkCardOutcome.Unauthenticated"/>; a caller who is not a controller or planner there
     /// gives <see cref="LinkCardOutcome.Forbidden"/> (the endpoint filters already refuse both; this re-checks);
-    /// more than <see cref="EasyLoginOptions.MaxCardsPerRequest"/> ids gives <see cref="LinkCardOutcome.TooManyIds"/>;
-    /// no usable join base gives <see cref="LinkCardOutcome.JoinLinksUnavailable"/>. None of those reads a link or
-    /// writes anything.
+    /// a body that is not exactly one of <c>{ participantIds }</c> (1 or more) or <c>{ all: true }</c> gives
+    /// <see cref="LinkCardOutcome.Invalid"/>; more than <see cref="EasyLoginOptions.MaxCardsPerRequest"/> ids gives
+    /// <see cref="LinkCardOutcome.TooManyIds"/>; no usable join base gives <see cref="LinkCardOutcome.JoinLinksUnavailable"/>.
+    /// None of those reads a link or writes anything.
     /// </summary>
-    /// <param name="requestedIds">
-    /// The <c>id</c> query values as sent. Empty (or <c>null</c>) means every participant in the exercise; otherwise
-    /// only these accounts, where a value that is not an account id of this exercise (unknown, from another
-    /// exercise, malformed or blank) is skipped as <c>notFound</c>.
+    /// <param name="request">
+    /// The deserialized body (<c>null</c> for a JSON <c>null</c>). <c>all: true</c> means every participant in the
+    /// exercise; <c>participantIds</c> means only these accounts, where a value that is not an account id of this
+    /// exercise (unknown, from another exercise, malformed or blank) is skipped as <c>notFound</c>, echoed as sent.
     /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The result the endpoint maps to a status.</returns>
     public async Task<LinkCardResult> GenerateAsync(
-        IReadOnlyList<string>? requestedIds,
+        RosterCardsRequestBody? request,
         CancellationToken cancellationToken = default)
     {
         // COR-001: the server-resolved scope, never a request value. Unset or the empty sentinel: fail closed.
@@ -140,23 +154,27 @@ public sealed class LinkCardService
             return LinkCardResult.Unauthenticated();
         }
 
-        // The caller's OWN assignment on the resolved exercise: the role the filter admitted, re-checked here and
-        // recorded on the event. StaffAssignment is an access record (not exercise-scoped, not org-owned), and this
-        // read is pinned to the caller's own staff id and the resolved exercise, so it cannot reach anyone else's.
-        var role = await _dbContext.StaffAssignments
-            .AsNoTracking()
-            .Where(assignment => assignment.StaffUserId == staff.StaffUserId && assignment.ExerciseId == exerciseId)
-            .Select(assignment => assignment.Role)
-            .FirstOrDefaultAsync(cancellationToken);
+        // The caller's OWN assignment on the resolved exercise, read exactly as the filters read it (own-only and
+        // tenant-bounded by StaffAssignmentService), with the same role rule: the role admitted here is the one
+        // recorded on the event.
+        var assignments = await _staffAssignments.GetAssignmentsAsync(cancellationToken);
+        if (assignments is null)
+        {
+            return LinkCardResult.Unauthenticated();
+        }
+
+        var role = assignments
+            .FirstOrDefault(assignment => Guid.TryParse(assignment.ExerciseId, out var id) && id == exerciseId)
+            ?.Role;
         if (!RosterStaffRoleFilter.IsAdmittedRole(role))
         {
             return LinkCardResult.Forbidden();
         }
 
-        var maxCards = _options.Value.MaxCardsPerRequest;
-        if (requestedIds is not null && requestedIds.Count > maxCards)
+        var parsed = RequestedAccounts.Parse(request, _options.Value.MaxCardsPerRequest);
+        if (parsed.Refusal is { } refusal)
         {
-            return LinkCardResult.TooManyIds(maxCards);
+            return refusal;
         }
 
         if (!_joinUrlBuilder.IsAvailable)
@@ -171,8 +189,8 @@ public sealed class LinkCardService
             return LinkCardResult.Unauthenticated();
         }
 
-        var request = RequestedAccounts.Parse(requestedIds);
-        var candidates = await LoadCandidatesAsync(request, cancellationToken);
+        var requested = parsed.Accounts!;
+        var candidates = await LoadCandidatesAsync(requested, cancellationToken);
 
         var cards = new List<RosterCardDto>(candidates.Count);
         var skipped = new List<RosterCardSkipDto>();
@@ -219,15 +237,15 @@ public sealed class LinkCardService
             });
         }
 
-        if (!request.Everyone)
+        if (!requested.Everyone)
         {
             var found = candidates.Select(candidate => candidate.AccountId).ToHashSet();
-            foreach (var requested in request.Entries)
+            foreach (var entry in requested.Entries)
             {
                 // Unknown, from another exercise (hidden by the central filter), malformed or blank: one answer.
-                if (requested.Id is not { } id || !found.Contains(id))
+                if (entry.Id is not { } id || !found.Contains(id))
                 {
-                    skipped.Add(Skip(requested.Raw, RosterCardSkipReasons.NotFound));
+                    skipped.Add(Skip(entry.Raw, RosterCardSkipReasons.NotFound));
                 }
             }
         }
@@ -251,7 +269,7 @@ public sealed class LinkCardService
 
     /// <summary>
     /// Reads the considered accounts with their link (if any) in one query, through the central exercise filter on
-    /// BOTH sets, ordered by name. In id mode with no parseable id there is nothing to read.
+    /// BOTH sets, ordered by name. With ids of which none parses there is nothing to read.
     /// </summary>
     private async Task<List<CardCandidate>> LoadCandidatesAsync(RequestedAccounts request, CancellationToken cancellationToken)
     {
@@ -314,9 +332,10 @@ public sealed class LinkCardService
     }
 
     /// <summary>
-    /// The parsed <c>id</c> query: "everyone" when no value was sent, otherwise each distinct value in request order
-    /// with its parsed account id (<c>null</c> when it is not a GUID). Two spellings of one GUID are one entry (the
-    /// first spelling is the one echoed back in a <c>notFound</c> skip).
+    /// The validated body: "everyone" for <c>{ all: true }</c>, otherwise each distinct requested value in request
+    /// order with its parsed account id (<c>null</c> when it is not a GUID). Two spellings of one GUID, or the same
+    /// malformed text in two casings, are one entry (the first spelling is the one echoed back in a <c>notFound</c>
+    /// skip).
     /// </summary>
     private sealed class RequestedAccounts
     {
@@ -330,20 +349,56 @@ public sealed class LinkCardService
 
         public IReadOnlyList<RequestedId> Entries { get; }
 
-        public static RequestedAccounts Parse(IReadOnlyList<string>? values)
+        /// <summary>Validates the body's shape (EL-20) and parses it, or returns the 400 that refuses it.</summary>
+        public static (RequestedAccounts? Accounts, LinkCardResult? Refusal) Parse(RosterCardsRequestBody? body, int maxIds)
         {
-            if (values is null || values.Count == 0)
+            if (body is null)
             {
-                return new RequestedAccounts(everyone: true, []);
+                return Refuse("A JSON body is required: { \"participantIds\": [ ... ] } or { \"all\": true }.");
             }
 
-            var entries = new List<RequestedId>(values.Count);
-            var seenIds = new HashSet<Guid>();
-            var seenUnparsed = new HashSet<string>(StringComparer.Ordinal);
+            var ids = body.ParticipantIds;
+            var hasIds = ids is not null;
+            var hasAll = body.All is not null;
 
-            foreach (var value in values)
+            if (hasIds && hasAll)
             {
-                var raw = value ?? string.Empty;
+                return Refuse("Send either participantIds or all, not both.");
+            }
+
+            if (!hasIds && !hasAll)
+            {
+                return Refuse($"Send participantIds (1 to {maxIds} ids) or all: true.");
+            }
+
+            if (hasAll)
+            {
+                return body.All == true
+                    ? (new RequestedAccounts(everyone: true, []), null)
+                    : Refuse("all must be true; to print some participants, send participantIds instead.");
+            }
+
+            if (ids!.Count == 0)
+            {
+                return Refuse("participantIds must hold at least one id; to print everyone, send all: true.");
+            }
+
+            if (ids.Count > maxIds)
+            {
+                return (null, LinkCardResult.TooManyIds(maxIds));
+            }
+
+            var entries = new List<RequestedId>(ids.Count);
+            var seenIds = new HashSet<Guid>();
+            var seenUnparsed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var raw in ids)
+            {
+                if (raw is null)
+                {
+                    return Refuse("participantIds must hold strings only.");
+                }
+
                 if (Guid.TryParse(raw, out var id))
                 {
                     if (seenIds.Add(id))
@@ -357,8 +412,11 @@ public sealed class LinkCardService
                 }
             }
 
-            return new RequestedAccounts(everyone: false, entries);
+            return (new RequestedAccounts(everyone: false, entries), null);
         }
+
+        private static (RequestedAccounts? Accounts, LinkCardResult? Refusal) Refuse(string message) =>
+            (null, LinkCardResult.Invalid(message));
     }
 
     /// <summary>One requested id: the parsed account id (or <c>null</c>) and the value exactly as sent.</summary>

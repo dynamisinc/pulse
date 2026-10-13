@@ -76,15 +76,19 @@ Manual check in UAT: scan a card QR with a phone camera (see `feature.md` walk-t
 ### Test linkage
 
 AC numbers follow the order of the criteria above: AC-1 the 200 sheet, AC-2 the QR, AC-3 the skip reasons, AC-4 the
-409 and 400, AC-5 `no-store`; then AC-6 Isolation, AC-7 Telemetry, AC-8 Authorization, AC-9 Content security. Shared
-seeding and the frontend-gate mirror live in `LinkCardTestWorld` (`FrontendQrGate` is `safeQrDataUri.ts`'s regex and
-512 KB cap, transcribed); the HTTP suite runs on a self-hosted `LinkCardTestHost` with the real filters and the real
-token-backed `CurrentStaffSessionAccessor`, because `Program.cs` does not map the route until the seam commit.
+409 and 400, AC-5 `no-store`; then AC-6 Isolation, AC-7 Telemetry, AC-8 Authorization, AC-9 Content security. The
+route is `POST` with `{ participantIds }` or `{ all: true }` (EL-20, Gate-1 W-1/W-2), so "`?id=` limits it / no `id`
+means everyone" in AC-1 reads as "`participantIds` limits it / `all: true` means everyone". Shared seeding and the
+frontend-gate mirror live in `LinkCardTestWorld` (`FrontendQrGate` is `safeQrDataUri.ts`'s regex and 512 KB cap,
+transcribed); the HTTP suite runs on a self-hosted `LinkCardTestHost` with the real filters and the real token-backed
+`CurrentStaffSessionAccessor` (TestServer, or real Kestrel on a loopback port for the request-limit tests), because
+`Program.cs` does not map the route until the seam commit.
 
 - **AC-1** `LinkCardServiceTests.EligibleParticipants_GetACardEach_WithEveryField_OrderedByName`,
-  `.NoId_MeansEveryParticipant_AndEveryoneWithoutACard_IsSkippedWithTheReason`, `.Ids_LimitTheSheet_ToThoseAccounts`,
+  `.AllTrue_MeansEveryParticipant_AndEveryoneWithoutACard_IsSkippedWithTheReason`, `.Ids_LimitTheSheet_ToThoseAccounts`,
   `.ARepeatedId_GivesOneCard`, `.TheService_ChangesNoLink`; `LinkCardEndpointsHttpTests.AController_Gets200_InTheFrozenShape_WithNoStore`,
-  `.APlanner_Gets200`, `.RepeatedIdQueryValues_AllBind`.
+  `.APlanner_Gets200`, `.ParticipantIds_LimitTheSheet_DeduplicatedCaseInsensitively`, `.OnRealKestrel_500Ids_Is200`,
+  `.OnlyPost_IsMapped_TheOldGetIsGone`.
 - **AC-2** `QrSvgRendererTests.TheRenderedModuleMatrix_EqualsQRCodersMatrix_ForTheSameUrl_AtErrorCorrectionM`,
   `.TheRenderedMatrix_IsNotTheMatrixOfAnyOtherErrorCorrectionLevel`, `.AnotherUrl_GivesAnotherMatrix`,
   `.TheSvg_IsWellFormedXml_WithAViewBoxTheSizeOfTheMatrix_AndNoWidthOrHeight`,
@@ -92,15 +96,22 @@ token-backed `CurrentStaffSessionAccessor`, because `Program.cs` does not map th
   `.TheSvg_HasNoScriptImageHrefOrExternalReference`, `.TheDataUri_IsTheBase64OfTheUtf8Svg`,
   `.TheDataUri_PassesTheFrontendGate_RegexAndSizeCap`, `.AnEmptyUrl_IsRefused`,
   `.TheRenderer_IsTheCrossPlatformSvgPath_NeverSystemDrawing`;
-  `LinkCardServiceTests.EveryCardsQr_EncodesItsOwnJoinUrl_AndPassesTheFrontendGate`.
+  `LinkCardServiceTests.EveryCardsQr_EncodesItsOwnJoinUrl_AndPassesTheFrontendGate`;
+  `LinkCardSourceGuardTests.TheLinkCardSlice_NeverReferencesSystemDrawing_TheBitmapRenderers_OrColor`,
+  `.TheGuard_CatchesTheThingsItBans`.
 - **AC-3** `LinkCardServiceTests.EachSkipReason_IsReported_AndTheRequestStillSucceedsWithTheOthers` (`noActiveLink`
   for no link and revoked, `disabled` with and without a link, `tokenUnrecoverable` for a lost key ring, a stale copy
   and no copy, `notFound`), `.MalformedOrBlankIds_AreNotFound_AndNeverWidenToEveryone`;
-  `LinkCardEndpointsHttpTests.AnEmptyIdValue_IsANotFoundSkip_NeverEveryone`.
+  `LinkCardEndpointsHttpTests.ABlankOrMalformedId_IsANotFoundSkip_EchoedBack_NeverEveryone`.
 - **AC-4** `LinkCardServiceTests.UnsetJoinBase_IsJoinLinksUnavailable_AndNoCardIsProduced`,
-  `.MoreIdsThanTheCap_IsTooManyIds_AndExactlyTheCapIsFine`; `LinkCardEndpointsHttpTests.NoJoinBase_Is409ProblemDetails_WithNoStore_AndNoCard`,
-  `.MoreThan500Ids_Is400ProblemDetails_WithNoStore`.
-- **AC-5** `LinkCardEndpointsHttpTests.AController_Gets200_InTheFrozenShape_WithNoStore` (and the 400/409 tests above).
+  `.AJoinBaseThatDisappearsMidRequest_IsJoinLinksUnavailable_NotAPartialSheet`,
+  `.MoreIdsThanTheCap_IsTooManyIds_AndExactlyTheCapIsFine`, `.EveryIllShapedBody_IsInvalid_AndReadsNothing`;
+  `LinkCardEndpointsHttpTests.NoJoinBase_Is409ProblemDetails_WithNoStore_AndNoCard`,
+  `.MoreThan500Ids_Is400ProblemDetails_WithNoStore`, `.EveryOtherBodyShape_Is400ProblemDetails_WithNoStore` (26 shapes:
+  unknown, mis-cased, repeated or old-spelling properties, both, neither, empty array, `all` not `true`, wrong types,
+  null ids, trailing content, comments, non-object roots, JSON `null`, empty, malformed, non-JSON content types),
+  `.OnRealKestrel_ABodyOver64KiB_Is413ProblemDetails_WithNoStore`.
+- **AC-5** `LinkCardEndpointsHttpTests.AController_Gets200_InTheFrozenShape_WithNoStore` (and every 400/409/413 test above).
 - **AC-6** `LinkCardIsolationTests.AnIdFromAnotherExercise_IsNotFound_ExactlyLikeAnUnknownId`,
   `.Everyone_MeansEveryoneInTheCallersExercise_Only`, `.MixedRequest_GivesCardsOnlyForTheCallersExercise`,
   `.TheExerciseName_IsTheCallersExercise`, `.AControllerOfB_ScopedToA_GetsNothingFromEither`,
@@ -111,9 +122,10 @@ token-backed `CurrentStaffSessionAccessor`, because `Program.cs` does not map th
   `.TwoRequests_AreTwoEvents`, `.NoUrlTokenOrName_EverReachesTheEvent`, `.ARefusedRequest_EmitsNothing`,
   `.TheEvent_PassesTheEnvelopeRules`.
 - **AC-8** `LinkCardEndpointsHttpTests.AnEvaluator_Is403`, `.AStaffUserNotAssignedToTheExercise_Is403`,
-  `.AParticipantSession_NeverReachesIt_401`, `.AnUnresolvedScope_Is401`, `.NoCredential_Is401_BeforeAnyDatabaseAccess`,
-  `.OnlyGet_IsMapped`, `.ComposedIntoTheRealProgramHost_TheCardServiceResolves`;
+  `.AParticipantSession_NeverReachesIt_401`, `.AnUnresolvedScope_Is401`, `.NoCredential_Is401_BeforeTheBodyOrTheDatabaseIsTouched`,
+  `.ComposedIntoTheRealProgramHost_AddLinkCardsAlone_ResolvesTheService`;
   `LinkCardServiceTests.NoStaffSession_OrAnUnresolvedScope_IsUnauthenticated`, `.AnEvaluator_OrAnUnassignedStaffUser_IsForbidden`,
-  `.AddLinkCards_IsIdempotent_WithTheRightLifetimes`.
+  `.AddLinkCards_IsIdempotent_WithTheRightLifetimes`, `.AddLinkCards_BringsTheEasyLoginKernel_SoAMissingSeamLineCannot500`,
+  `.AddLinkCards_NeverDisplacesAReplacedLinkIssuer_WhicheverRunsFirst`.
 - **AC-9** `QrSvgRendererTests.TheSvg_NeverCarriesTheUrlItself_OnlyModuleGeometry`, `.TheSvg_HasNoScriptImageHrefOrExternalReference`;
   `LinkCardServiceTests.EligibleParticipants_GetACardEach_WithEveryField_OrderedByName` (names returned verbatim).

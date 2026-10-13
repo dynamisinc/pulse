@@ -6,8 +6,13 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using FluentAssertions;
+using System.Threading;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Primitives;
 using Pulse.WebApi.Data;
+using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.Identity.EasyLogin;
 using Pulse.WebApi.Features.Identity.LinkCards;
 using Pulse.WebApi.Tests.Data;
@@ -16,8 +21,9 @@ using Pulse.WebApi.Tests.Data;
 /// easy-login/04: <see cref="LinkCardService"/> against real SQL. A participant whose account is enabled, whose link
 /// is active and whose token decrypts gets a card (name, agency, role, sign-in name, join URL, QR of exactly that URL),
 /// ordered by name. Everyone else considered is skipped with <c>notFound</c>, <c>noActiveLink</c>, <c>disabled</c> or
-/// <c>tokenUnrecoverable</c>, and the request still succeeds. <c>id</c> limits it to those accounts; none means every
-/// participant. An unset join base is <see cref="LinkCardOutcome.JoinLinksUnavailable"/> (409) and more than
+/// <c>tokenUnrecoverable</c>, and the request still succeeds. <c>participantIds</c> limits it to those accounts;
+/// <c>all: true</c> means every participant (EL-20), and any other body shape is <see cref="LinkCardOutcome.Invalid"/>
+/// (400). An unset join base is <see cref="LinkCardOutcome.JoinLinksUnavailable"/> (409) and more than
 /// <c>MaxCardsPerRequest</c> ids is <see cref="LinkCardOutcome.TooManyIds"/> (400). Isolation lives in
 /// <see cref="LinkCardIsolationTests"/>, telemetry in <see cref="LinkCardTelemetryTests"/>.
 /// </summary>
@@ -88,7 +94,7 @@ public sealed class LinkCardServiceTests
     }
 
     [RequiresDockerFact]
-    public async Task NoId_MeansEveryParticipant_AndEveryoneWithoutACard_IsSkippedWithTheReason()
+    public async Task AllTrue_MeansEveryParticipant_AndEveryoneWithoutACard_IsSkippedWithTheReason()
     {
         var exercise = await _world.SeedExerciseAsync();
         var staff = await _world.SeedStaffAsync((exercise, "controller"));
@@ -112,8 +118,8 @@ public sealed class LinkCardServiceTests
             "every participant in the exercise is considered, and the skipped ones are listed in name order");
 
         var empty = await _world.GenerateAsync(exercise, staff, ids: []);
-        empty.Sheet!.Cards.Select(c => c.ParticipantId).Should().Equal(
-            result.Sheet.Cards.Select(c => c.ParticipantId), "an empty id list is the same as no id");
+        empty.Outcome.Should().Be(LinkCardOutcome.Invalid, "an empty participantIds is refused, never read as 'everyone' (EL-20)");
+        empty.Sheet.Should().BeNull();
     }
 
     [RequiresDockerFact]
@@ -181,7 +187,7 @@ public sealed class LinkCardServiceTests
         var staff = await _world.SeedStaffAsync((exercise, "controller"));
         await _world.SeedParticipantAsync(exercise, "Someone Eligible");
 
-        var result = await _world.GenerateAsync(exercise, staff, ["not-a-guid", "", "not-a-guid"]);
+        var result = await _world.GenerateAsync(exercise, staff, ["not-a-guid", "", "NOT-A-GUID", "not-a-guid"]);
 
         result.Outcome.Should().Be(LinkCardOutcome.Ok);
         result.Sheet!.Cards.Should().BeEmpty("a request that names ids, however malformed, never means 'everyone'");
@@ -192,7 +198,7 @@ public sealed class LinkCardServiceTests
                 new RosterCardSkipDto { ParticipantId = string.Empty, Reason = RosterCardSkipReasons.NotFound },
             },
             options => options.WithStrictOrdering(),
-            "each distinct value is reported once, in request order");
+            "each distinct value (case-insensitively) is reported once, as first sent, in request order");
     }
 
     [RequiresDockerFact]
@@ -207,6 +213,58 @@ public sealed class LinkCardServiceTests
 
         result.Sheet!.Cards.Should().ContainSingle().Which.ParticipantId.Should().Be(id);
         result.Sheet.Skipped.Should().BeEmpty();
+    }
+
+    [RequiresDockerFact]
+    public async Task EveryIllShapedBody_IsInvalid_AndReadsNothing()
+    {
+        var exercise = await _world.SeedExerciseAsync();
+        var staff = await _world.SeedStaffAsync((exercise, "controller"));
+        var person = await _world.SeedParticipantAsync(exercise, "Would Get A Card");
+        var id = person.AccountId.ToString();
+
+        var shapes = new (RosterCardsRequestBody? Body, string Why)[]
+        {
+            (null, "a JSON null body"),
+            (new RosterCardsRequestBody(), "neither member"),
+            (new RosterCardsRequestBody { ParticipantIds = [id], All = true }, "both members"),
+            (new RosterCardsRequestBody { ParticipantIds = [] }, "an empty participantIds"),
+            (new RosterCardsRequestBody { All = false }, "all other than true"),
+            (new RosterCardsRequestBody { ParticipantIds = [id, null] }, "a null id"),
+        };
+
+        foreach (var (body, why) in shapes)
+        {
+            var result = await _world.GenerateWithBodyAsync(exercise, staff, body);
+
+            result.Outcome.Should().Be(LinkCardOutcome.Invalid, "{0} is not exactly one of the two shapes", why);
+            result.Sheet.Should().BeNull();
+            result.Message.Should().NotBeNullOrWhiteSpace("the 400 says what to send ({0})", why);
+            result.Message.Should().NotContain(id, "the reason never echoes the request ({0})", why);
+        }
+
+        (await _world.CardEventsAsync(exercise)).Should().BeEmpty("a refused body generates no sheet");
+    }
+
+    [RequiresDockerFact]
+    public async Task AJoinBaseThatDisappearsMidRequest_IsJoinLinksUnavailable_NotAPartialSheet()
+    {
+        var exercise = await _world.SeedExerciseAsync();
+        var staff = await _world.SeedStaffAsync((exercise, "controller"));
+        await _world.SeedParticipantAsync(exercise, "First Person");
+        await _world.SeedParticipantAsync(exercise, "Second Person");
+
+        // FrontendBaseUrl answers the up-front availability check, then vanishes (a configuration reload): the first
+        // card's join URL cannot be built.
+        var result = await _world.GenerateWithBodyAsync(
+            exercise,
+            staff,
+            LinkCardTestWorld.Body(null),
+            wrapConfiguration: inner => new VanishingFrontendBase(inner, readsBeforeVanishing: 1));
+
+        result.Outcome.Should().Be(LinkCardOutcome.JoinLinksUnavailable, "no card is produced without a join base");
+        result.Sheet.Should().BeNull("never a partial sheet");
+        (await _world.CardEventsAsync(exercise)).Should().BeEmpty("a 409 records nothing");
     }
 
     [RequiresDockerFact]
@@ -302,6 +360,88 @@ public sealed class LinkCardServiceTests
         services.Count(d => d.ServiceType == typeof(QrSvgRenderer)).Should().Be(1);
         services.Single(d => d.ServiceType == typeof(LinkCardService)).Lifetime.Should().Be(ServiceLifetime.Scoped);
         services.Single(d => d.ServiceType == typeof(QrSvgRenderer)).Lifetime.Should().Be(ServiceLifetime.Singleton);
+    }
+
+    [Fact]
+    public void AddLinkCards_BringsTheEasyLoginKernel_SoAMissingSeamLineCannot500()
+    {
+        var services = new ServiceCollection();
+        services.AddLinkCards();
+
+        foreach (var kernel in new[]
+        {
+            typeof(JoinUrlBuilder), typeof(RosterLinkDtoFactory), typeof(ExerciseFactsReader),
+            typeof(IParticipantLinkTokenProtector), typeof(IParticipantLinkIssuer),
+        })
+        {
+            services.Count(d => d.ServiceType == kernel).Should().Be(
+                1, "AddLinkCards registers {0} through AddEasyLoginFoundation", kernel.Name);
+        }
+
+        var again = new ServiceCollection();
+        again.AddEasyLoginFoundation();
+        again.AddLinkCards();
+        again.Count(d => d.ServiceType == typeof(JoinUrlBuilder)).Should().Be(
+            1, "the kernel is TryAdd-based: calling it twice registers nothing twice");
+    }
+
+    [Fact]
+    public void AddLinkCards_NeverDisplacesAReplacedLinkIssuer_WhicheverRunsFirst()
+    {
+        var replacedFirst = new ServiceCollection();
+        replacedFirst.Replace(ServiceDescriptor.Scoped<IParticipantLinkIssuer, StubIssuer>());
+        replacedFirst.AddLinkCards();
+
+        var replacedAfter = new ServiceCollection();
+        replacedAfter.AddLinkCards();
+        replacedAfter.Replace(ServiceDescriptor.Scoped<IParticipantLinkIssuer, StubIssuer>());
+
+        foreach (var services in new[] { replacedFirst, replacedAfter })
+        {
+            services.Where(d => d.ServiceType == typeof(IParticipantLinkIssuer)).Should().ContainSingle()
+                .Which.ImplementationType.Should().Be(
+                    typeof(StubIssuer), "story 03's real issuer must win (it Replaces; the kernel TryAdds)");
+        }
+    }
+
+    private sealed class StubIssuer : IParticipantLinkIssuer
+    {
+        public Task<ParticipantLink?> EnsureActiveAsync(
+            Account account,
+            Guid? issuedByStaffUserId,
+            DateTimeOffset now,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult<ParticipantLink?>(null);
+    }
+
+    /// <summary>
+    /// An <see cref="IConfiguration"/> whose <c>Authentication:FrontendBaseUrl</c> answers the first N reads and then
+    /// disappears, as a configuration reload would make it. Every other key reads through.
+    /// </summary>
+    private sealed class VanishingFrontendBase : IConfiguration
+    {
+        private readonly IConfiguration _inner;
+        private int _readsLeft;
+
+        public VanishingFrontendBase(IConfiguration inner, int readsBeforeVanishing)
+        {
+            _inner = inner;
+            _readsLeft = readsBeforeVanishing;
+        }
+
+        public string? this[string key]
+        {
+            get => string.Equals(key, JoinUrlBuilder.FrontendBaseUrlKey, StringComparison.OrdinalIgnoreCase)
+                ? (Interlocked.Decrement(ref _readsLeft) >= 0 ? _inner[key] : null)
+                : _inner[key];
+            set => _inner[key] = value;
+        }
+
+        public IEnumerable<IConfigurationSection> GetChildren() => _inner.GetChildren();
+
+        public IChangeToken GetReloadToken() => _inner.GetReloadToken();
+
+        public IConfigurationSection GetSection(string key) => _inner.GetSection(key);
     }
 
     private static string DecodedSvg(string dataUri)

@@ -74,7 +74,7 @@ public sealed class LinkCardTelemetryTests
         clock.Freeze(exercise);
         await using (var request = provider.CreateAsyncScope())
         {
-            await request.ServiceProvider.GetRequiredService<LinkCardService>().GenerateAsync([]);
+            await request.ServiceProvider.GetRequiredService<LinkCardService>().GenerateAsync(LinkCardTestWorld.Body(null));
         }
 
         var evt = (await _world.CardEventsAsync(exercise)).Should().ContainSingle().Subject;

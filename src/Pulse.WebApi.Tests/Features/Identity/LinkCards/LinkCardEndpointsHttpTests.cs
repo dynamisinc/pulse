@@ -16,17 +16,22 @@ using Microsoft.Extensions.DependencyInjection;
 using Pulse.WebApi.Features.Identity.EasyLogin;
 using Pulse.WebApi.Features.Identity.LinkCards;
 using Pulse.WebApi.Tests.Data;
+using Pulse.WebApi.Tests.Features.ExerciseConfiguration.Lifecycle;
 
 /// <summary>
-/// easy-login/04 over HTTP: <c>GET /api/staff/roster/cards</c> through the real filters and the real token-backed
-/// staff-session accessor (<see cref="LinkCardTestHost"/>). <c>200</c> in the frozen <c>RosterCardsDto</c> shape,
-/// <c>400</c> over the id cap, <c>409</c> with no join base, <c>401</c> with no staff session (a participant session
-/// included), <c>403</c> for an evaluator or an unassigned staff user, and <c>Cache-Control: no-store</c> on every
-/// answer the handler writes. Plus the composition proof on the real <c>Program</c> host.
+/// easy-login/04 over HTTP: <c>POST /api/staff/roster/cards</c> (EL-20) through the real filters and the real
+/// token-backed staff-session accessor (<see cref="LinkCardTestHost"/>). <c>200</c> in the frozen <c>RosterCardsDto</c>
+/// shape for <c>{ participantIds }</c> or <c>{ all: true }</c>; <c>400</c> ProblemDetails for every other body shape and
+/// over the id cap; <c>413</c> over 64 KiB; <c>409</c> with no join base; <c>401</c> with no staff session (a participant
+/// session included); <c>403</c> for an evaluator or an unassigned staff user; and <c>Cache-Control: no-store</c> on
+/// every answer the handler writes. The 500-id and 64 KiB tests run on REAL Kestrel, where request limits apply.
+/// Plus the composition proof on the real <c>Program</c> host.
 /// </summary>
 [Collection(MsSqlCollection.Name)]
 public sealed class LinkCardEndpointsHttpTests
 {
+    private const string NeverConnects = "Server=nonexistent;Database=pulse;Trusted_Connection=False;Connect Timeout=1;";
+
     private readonly LinkCardTestWorld _world;
 
     public LinkCardEndpointsHttpTests(MsSqlContainerFixture fixture) => _world = new LinkCardTestWorld(fixture);
@@ -43,7 +48,7 @@ public sealed class LinkCardEndpointsHttpTests
         await using var host = await StartHostAsync(exercise);
         using var client = host.Client(await LinkCardTestHost.SeedStaffSessionAsync(_world, staff, exercise));
 
-        using var response = await client.GetAsync(LinkCardEndpoints.CardsRoute);
+        using var response = await LinkCardTestHost.PostCardsAsync(client, LinkCardTestHost.AllJson);
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         response.Headers.CacheControl!.NoStore.Should().BeTrue("the body holds bearer credentials");
@@ -93,13 +98,13 @@ public sealed class LinkCardEndpointsHttpTests
         await using var host = await StartHostAsync(exercise);
         using var client = host.Client(await LinkCardTestHost.SeedStaffSessionAsync(_world, staff, exercise));
 
-        using var response = await client.GetAsync(LinkCardEndpoints.CardsRoute);
+        using var response = await LinkCardTestHost.PostCardsAsync(client, LinkCardTestHost.AllJson);
 
         response.StatusCode.Should().Be(HttpStatusCode.OK, "planners provision participants too (EL-13)");
     }
 
     [RequiresDockerFact]
-    public async Task RepeatedIdQueryValues_AllBind()
+    public async Task ParticipantIds_LimitTheSheet_DeduplicatedCaseInsensitively()
     {
         var exercise = await _world.SeedExerciseAsync();
         var staff = await _world.SeedStaffAsync((exercise, "controller"));
@@ -110,14 +115,16 @@ public sealed class LinkCardEndpointsHttpTests
         await using var host = await StartHostAsync(exercise);
         using var client = host.Client(await LinkCardTestHost.SeedStaffSessionAsync(_world, staff, exercise));
 
-        var sheet = await GetSheetAsync(client, $"{LinkCardEndpoints.CardsRoute}?id={one.AccountId}&id={two.AccountId}");
+        var sheet = await PostSheetAsync(
+            client, LinkCardTestHost.IdsJson(one.AccountId, two.AccountId, one.AccountId.ToString().ToUpperInvariant()));
 
-        sheet.Cards.Select(c => c.ParticipantId).Should().BeEquivalentTo([one.AccountId.ToString(), two.AccountId.ToString()],
-            "the frontend sends repeated plain id=a&id=b");
+        sheet.Cards.Select(c => c.ParticipantId).Should().Equal(
+            [one.AccountId.ToString(), two.AccountId.ToString()], "only the requested accounts, once each, by name");
+        sheet.Skipped.Should().BeEmpty();
     }
 
     [RequiresDockerFact]
-    public async Task AnEmptyIdValue_IsANotFoundSkip_NeverEveryone()
+    public async Task ABlankOrMalformedId_IsANotFoundSkip_EchoedBack_NeverEveryone()
     {
         var exercise = await _world.SeedExerciseAsync();
         var staff = await _world.SeedStaffAsync((exercise, "controller"));
@@ -126,10 +133,57 @@ public sealed class LinkCardEndpointsHttpTests
         await using var host = await StartHostAsync(exercise);
         using var client = host.Client(await LinkCardTestHost.SeedStaffSessionAsync(_world, staff, exercise));
 
-        var sheet = await GetSheetAsync(client, $"{LinkCardEndpoints.CardsRoute}?id=");
+        var sheet = await PostSheetAsync(client, LinkCardTestHost.IdsJson(string.Empty, "not-a-guid"));
 
-        sheet.Cards.Should().BeEmpty("only a request with no id parameter at all means every participant");
-        sheet.Skipped.Should().ContainSingle().Which.Reason.Should().Be(RosterCardSkipReasons.NotFound);
+        sheet.Cards.Should().BeEmpty("only { all: true } means every participant");
+        sheet.Skipped.Select(s => (s.ParticipantId, s.Reason)).Should().Equal(
+            [(string.Empty, RosterCardSkipReasons.NotFound), ("not-a-guid", RosterCardSkipReasons.NotFound)]);
+    }
+
+    [RequiresDockerTheory]
+    [InlineData("{\"participantIds\":[\"00000000-0000-0000-0000-000000000001\"],\"extra\":1}", "application/json", "an unknown property")]
+    [InlineData("{\"participantIds\":[]}", "application/json", "an empty participantIds")]
+    [InlineData("{\"participantIds\":[\"00000000-0000-0000-0000-000000000001\"],\"all\":true}", "application/json", "both members")]
+    [InlineData("{}", "application/json", "neither member")]
+    [InlineData("{\"all\":false}", "application/json", "all other than true")]
+    [InlineData("{\"all\":null}", "application/json", "all null and nothing else")]
+    [InlineData("{\"all\":\"true\"}", "application/json", "all as a string")]
+    [InlineData("{\"all\":1}", "application/json", "all as a number")]
+    [InlineData("{\"participantIds\":\"00000000-0000-0000-0000-000000000001\"}", "application/json", "participantIds as a string")]
+    [InlineData("{\"participantIds\":[1]}", "application/json", "a numeric id")]
+    [InlineData("{\"participantIds\":[null]}", "application/json", "a null id")]
+    [InlineData("{\"ParticipantIds\":[\"00000000-0000-0000-0000-000000000001\"]}", "application/json", "a mis-cased property")]
+    [InlineData("{\"All\":true}", "application/json", "a mis-cased all")]
+    [InlineData("{\"id\":[\"00000000-0000-0000-0000-000000000001\"]}", "application/json", "the old id spelling")]
+    [InlineData("{\"ids\":[\"00000000-0000-0000-0000-000000000001\"]}", "application/json", "an ids spelling")]
+    [InlineData("{\"all\":true,\"all\":true}", "application/json", "a repeated property")]
+    [InlineData("{\"all\":true,}", "application/json", "a trailing comma")]
+    [InlineData("{\"all\":true} {}", "application/json", "trailing content")]
+    [InlineData("{/*c*/\"all\":true}", "application/json", "a comment")]
+    [InlineData("[{\"all\":true}]", "application/json", "an array root")]
+    [InlineData("\"all\"", "application/json", "a string root")]
+    [InlineData("null", "application/json", "a JSON null")]
+    [InlineData("", "application/json", "an empty body")]
+    [InlineData("{\"all\":tru", "application/json", "malformed JSON")]
+    [InlineData("{\"all\":true}", "text/plain", "a non-JSON content type")]
+    [InlineData("all=true", "application/x-www-form-urlencoded", "a form body")]
+    public async Task EveryOtherBodyShape_Is400ProblemDetails_WithNoStore(string body, string contentType, string why)
+    {
+        var exercise = await _world.SeedExerciseAsync();
+        var staff = await _world.SeedStaffAsync((exercise, "controller"));
+        await _world.SeedParticipantAsync(exercise, "Would Get A Card");
+
+        await using var host = await StartHostAsync(exercise);
+        using var client = host.Client(await LinkCardTestHost.SeedStaffSessionAsync(_world, staff, exercise));
+
+        using var response = await LinkCardTestHost.PostCardsAsync(client, body, contentType);
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest, "{0} is not exactly { participantIds } or { all: true }", why);
+        response.Headers.CacheControl!.NoStore.Should().BeTrue();
+        response.Content.Headers.ContentType!.MediaType.Should().Be("application/problem+json");
+        (await ProblemDetailAsync(response)).Should().NotBeNullOrWhiteSpace("a 400 says what to send ({0})", why);
+        (await response.Content.ReadAsStringAsync()).Should().NotContain("/join/", "no card is produced ({0})", why);
+        (await _world.CardEventsAsync(exercise)).Should().BeEmpty("a refused body generates no sheet ({0})", why);
     }
 
     [RequiresDockerFact]
@@ -141,13 +195,62 @@ public sealed class LinkCardEndpointsHttpTests
         await using var host = await StartHostAsync(exercise);
         using var client = host.Client(await LinkCardTestHost.SeedStaffSessionAsync(_world, staff, exercise));
 
-        var query = string.Join("&", Enumerable.Range(0, 501).Select(_ => $"id={Guid.NewGuid()}"));
-        using var response = await client.GetAsync($"{LinkCardEndpoints.CardsRoute}?{query}");
+        using var response = await LinkCardTestHost.PostCardsAsync(
+            client, LinkCardTestHost.IdsJson(Enumerable.Range(0, 501).Select(_ => (object)Guid.NewGuid()).ToArray()));
 
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
         response.Headers.CacheControl!.NoStore.Should().BeTrue();
         response.Content.Headers.ContentType!.MediaType.Should().Be("application/problem+json");
         (await ProblemDetailAsync(response)).Should().Contain("500");
+        (await _world.CardEventsAsync(exercise)).Should().BeEmpty();
+    }
+
+    [RequiresDockerFact]
+    public async Task OnRealKestrel_500Ids_Is200()
+    {
+        // The EL-20 regression: 500 GUIDs (~20 KB) blew Kestrel's 8 KB request line as a query string. In a body they
+        // fit the 64 KiB limit with room to spare. TestServer has no request line, so only real Kestrel proves it.
+        var exercise = await _world.SeedExerciseAsync();
+        var staff = await _world.SeedStaffAsync((exercise, "controller"));
+        var people = new List<SeededParticipant>();
+        for (var i = 0; i < 3; i++)
+        {
+            people.Add(await _world.SeedParticipantAsync(exercise, $"Kestrel Person {i}"));
+        }
+
+        var ids = people.Select(p => (object)p.AccountId)
+            .Concat(Enumerable.Range(0, 497).Select(_ => (object)Guid.NewGuid()))
+            .ToArray();
+        ids.Should().HaveCount(500);
+
+        await using var host = await StartHostAsync(exercise, realKestrel: true);
+        using var client = host.Client(await LinkCardTestHost.SeedStaffSessionAsync(_world, staff, exercise));
+
+        var sheet = await PostSheetAsync(client, LinkCardTestHost.IdsJson(ids));
+
+        sheet.Cards.Select(c => c.ParticipantId).Should().BeEquivalentTo(people.Select(p => p.AccountId.ToString()));
+        sheet.Skipped.Should().HaveCount(497).And.OnlyContain(s => s.Reason == RosterCardSkipReasons.NotFound);
+        sheet.Cards.Should().OnlyContain(c => FrontendQrGate.Admits(c.QrSvgDataUri));
+    }
+
+    [RequiresDockerFact]
+    public async Task OnRealKestrel_ABodyOver64KiB_Is413ProblemDetails_WithNoStore()
+    {
+        var exercise = await _world.SeedExerciseAsync();
+        var staff = await _world.SeedStaffAsync((exercise, "controller"));
+
+        await using var host = await StartHostAsync(exercise, realKestrel: true);
+        using var client = host.Client(await LinkCardTestHost.SeedStaffSessionAsync(_world, staff, exercise));
+
+        // ~78 KB: over the route's 64 KiB limit (and over 500 ids, but the body limit refuses it while it is read).
+        var oversized = LinkCardTestHost.IdsJson(Enumerable.Range(0, 2000).Select(_ => (object)Guid.NewGuid()).ToArray());
+        oversized.Length.Should().BeGreaterThan((int)LinkCardEndpoints.MaxRequestBodyBytes);
+
+        using var response = await LinkCardTestHost.PostCardsAsync(client, oversized);
+
+        response.StatusCode.Should().Be(HttpStatusCode.RequestEntityTooLarge, "the route's body is bounded at 64 KiB");
+        response.Headers.CacheControl!.NoStore.Should().BeTrue();
+        response.Content.Headers.ContentType!.MediaType.Should().Be("application/problem+json");
         (await _world.CardEventsAsync(exercise)).Should().BeEmpty();
     }
 
@@ -161,7 +264,7 @@ public sealed class LinkCardEndpointsHttpTests
         await using var host = await StartHostAsync(exercise, frontendBase: null);
         using var client = host.Client(await LinkCardTestHost.SeedStaffSessionAsync(_world, staff, exercise));
 
-        using var response = await client.GetAsync(LinkCardEndpoints.CardsRoute);
+        using var response = await LinkCardTestHost.PostCardsAsync(client, LinkCardTestHost.AllJson);
 
         response.StatusCode.Should().Be(HttpStatusCode.Conflict);
         response.Headers.CacheControl!.NoStore.Should().BeTrue();
@@ -180,7 +283,7 @@ public sealed class LinkCardEndpointsHttpTests
         await using var host = await StartHostAsync(exercise);
         using var client = host.Client(await LinkCardTestHost.SeedStaffSessionAsync(_world, evaluator, exercise));
 
-        using var response = await client.GetAsync(LinkCardEndpoints.CardsRoute);
+        using var response = await LinkCardTestHost.PostCardsAsync(client, LinkCardTestHost.AllJson);
 
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden, "evaluators observe; they do not hand out credentials");
         (await response.Content.ReadAsStringAsync()).Should().NotContain("/join/");
@@ -196,7 +299,7 @@ public sealed class LinkCardEndpointsHttpTests
         await using var host = await StartHostAsync(exercise);
         using var client = host.Client(await LinkCardTestHost.SeedStaffSessionAsync(_world, elsewhere, exercise));
 
-        using var response = await client.GetAsync(LinkCardEndpoints.CardsRoute);
+        using var response = await LinkCardTestHost.PostCardsAsync(client, LinkCardTestHost.AllJson);
 
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
     }
@@ -210,7 +313,7 @@ public sealed class LinkCardEndpointsHttpTests
         await using var host = await StartHostAsync(exercise);
         using var client = host.Client(await LinkCardTestHost.SeedParticipantSessionAsync(_world, exercise));
 
-        using var response = await client.GetAsync(LinkCardEndpoints.CardsRoute);
+        using var response = await LinkCardTestHost.PostCardsAsync(client, LinkCardTestHost.AllJson);
 
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized, "a participant's live session is not a staff session");
         (await _world.CardEventsAsync(exercise)).Should().BeEmpty();
@@ -225,7 +328,7 @@ public sealed class LinkCardEndpointsHttpTests
         await using var host = await StartHostAsync(scope: null);
         using var client = host.Client(await LinkCardTestHost.SeedStaffSessionAsync(_world, staff, exercise));
 
-        using var response = await client.GetAsync(LinkCardEndpoints.CardsRoute);
+        using var response = await LinkCardTestHost.PostCardsAsync(client, LinkCardTestHost.AllJson);
 
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
     }
@@ -242,8 +345,8 @@ public sealed class LinkCardEndpointsHttpTests
         await using var host = await StartHostAsync(exerciseA);
         using var client = host.Client(await LinkCardTestHost.SeedStaffSessionAsync(_world, staff, exerciseA));
 
-        using var cross = await client.GetAsync($"{LinkCardEndpoints.CardsRoute}?id={bob.AccountId}");
-        using var missing = await client.GetAsync($"{LinkCardEndpoints.CardsRoute}?id={unknown}");
+        using var cross = await LinkCardTestHost.PostCardsAsync(client, LinkCardTestHost.IdsJson(bob.AccountId));
+        using var missing = await LinkCardTestHost.PostCardsAsync(client, LinkCardTestHost.IdsJson(unknown));
 
         cross.StatusCode.Should().Be(HttpStatusCode.OK);
         missing.StatusCode.Should().Be(cross.StatusCode);
@@ -254,65 +357,66 @@ public sealed class LinkCardEndpointsHttpTests
     }
 
     [Fact]
-    public async Task NoCredential_Is401_BeforeAnyDatabaseAccess()
+    public async Task NoCredential_Is401_BeforeTheBodyOrTheDatabaseIsTouched()
     {
-        // A never-connecting database: the staff gate refuses before any query runs.
-        await using var host = await LinkCardTestHost.StartAsync(
-            "Server=nonexistent;Database=pulse;Trusted_Connection=False;Connect Timeout=1;", new EphemeralDataProtectionProvider());
+        // A never-connecting database and a body that is not even JSON: the staff gate refuses first, so neither the
+        // database nor the body is read (an unauthorized caller learns nothing about the body rules).
+        await using var host = await LinkCardTestHost.StartAsync(NeverConnects, new EphemeralDataProtectionProvider());
         host.ScopeTo(Guid.NewGuid());
         using var client = host.Client(bearerToken: null);
 
-        using var response = await client.GetAsync(LinkCardEndpoints.CardsRoute);
+        using var valid = await LinkCardTestHost.PostCardsAsync(client, LinkCardTestHost.AllJson);
+        using var garbage = await LinkCardTestHost.PostCardsAsync(client, "not json", "text/plain");
 
-        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized, "an anonymous caller never reaches the card sheet");
+        valid.StatusCode.Should().Be(HttpStatusCode.Unauthorized, "an anonymous caller never reaches the card sheet");
+        garbage.StatusCode.Should().Be(HttpStatusCode.Unauthorized, "the gate runs before the body is read");
     }
 
     [Fact]
-    public async Task OnlyGet_IsMapped()
+    public async Task OnlyPost_IsMapped_TheOldGetIsGone()
     {
-        await using var host = await LinkCardTestHost.StartAsync(
-            "Server=nonexistent;Database=pulse;Trusted_Connection=False;Connect Timeout=1;", new EphemeralDataProtectionProvider());
+        await using var host = await LinkCardTestHost.StartAsync(NeverConnects, new EphemeralDataProtectionProvider());
         using var client = host.Client(bearerToken: null);
 
-        using var response = await client.PostAsync(LinkCardEndpoints.CardsRoute, content: null);
+        using var response = await client.GetAsync($"{LinkCardEndpoints.CardsRoute}?id={Guid.NewGuid()}");
 
-        response.StatusCode.Should().Be(HttpStatusCode.MethodNotAllowed);
+        response.StatusCode.Should().Be(HttpStatusCode.MethodNotAllowed, "EL-20 replaced GET ?id= with a POST body");
     }
 
     [Fact]
-    public async Task ComposedIntoTheRealProgramHost_TheCardServiceResolves()
+    public async Task ComposedIntoTheRealProgramHost_AddLinkCardsAlone_ResolvesTheService()
     {
+        // AddLinkCards() brings the easy-login kernel itself (S-4): no other line is needed for the service to resolve.
         await using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
             builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(new Dictionary<string, string?>
             {
                 [JoinUrlBuilder.FrontendBaseUrlKey] = LinkCardTestWorld.FrontendBase,
             }));
-            builder.ConfigureTestServices(services =>
-            {
-                services.AddEasyLoginFoundation();
-                services.AddLinkCards();
-            });
+            builder.ConfigureTestServices(services => services.AddLinkCards());
         });
 
         using var scope = factory.Services.CreateScope();
 
         scope.ServiceProvider.GetRequiredService<LinkCardService>().Should().NotBeNull(
-            "every collaborator the seam commit relies on (staff identity, clock, scoping, foundation) is in the real host");
+            "every collaborator the seam commit relies on (staff identity, clock, scoping, kernel) is in the real host");
         scope.ServiceProvider.GetRequiredService<QrSvgRenderer>().Should().BeSameAs(
             factory.Services.GetRequiredService<QrSvgRenderer>(), "the renderer is a stateless singleton");
     }
 
-    private async Task<LinkCardTestHost> StartHostAsync(Guid? scope, string? frontendBase = LinkCardTestWorld.FrontendBase)
+    private async Task<LinkCardTestHost> StartHostAsync(
+        Guid? scope,
+        string? frontendBase = LinkCardTestWorld.FrontendBase,
+        bool realKestrel = false)
     {
-        var host = await LinkCardTestHost.StartAsync(_world.Fixture.ConnectionString!, _world.KeyRing, frontendBase);
+        var host = await LinkCardTestHost.StartAsync(_world.Fixture.ConnectionString!, _world.KeyRing, frontendBase, realKestrel);
         host.ScopeTo(scope);
         return host;
     }
 
-    private static async Task<RosterCardsDto> GetSheetAsync(HttpClient client, string url)
+    private static async Task<RosterCardsDto> PostSheetAsync(HttpClient client, string json)
     {
-        using var response = await client.GetAsync(url);
+        using var response = await LinkCardTestHost.PostCardsAsync(client, json);
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         response.Headers.CacheControl!.NoStore.Should().BeTrue();
 
