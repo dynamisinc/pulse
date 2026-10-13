@@ -11,7 +11,11 @@ the frozen wire contract are in `docs/features/easy-login/implementation.md`.
 ## Layout
 
 ```
-ParticipantAdminRoute.tsx   StaffShellFrame + RosterPage (the registry mounts this at /staff/participant-admin)
+ParticipantAdminSurface.tsx the registry's element at /staff/participant-admin: the route with the day-word panel
+                            (11) and the print-cards action (12) composed into the roster's slots. The ONE file
+                            that names dayWord/, cards/ or email/ (guarded by participantAdminSeparation.test.ts)
+ParticipantAdminRoute.tsx   StaffShellFrame + RosterPage; forwards the slot props, imports no slot folder
+index.ts                    public barrel: ParticipantAdminSurface
 pages/RosterPage.tsx        the composition point + the three frozen slot props
 components/people/          RosterTable, RosterRowActions, RosterImportPanel, AddParticipantDialog,
                             ConfirmActionDialog, RosterBadges, and the pure rules they render
@@ -24,7 +28,8 @@ test/                       render harness + fixtures for the tests
 ```
 
 Stories 11 (`dayWord/`), 12 (`cards/`) and 13 (`email/`) own their own folders and plug into `RosterPage`'s props.
-Nothing here imports them.
+Story 10's files import none of them; `ParticipantAdminSurface.tsx` does the composing. Story 13's email action is not
+composed yet (it lands on its own branch): add `renderEmailAction` to the surface when it does.
 
 ## The seam: slot props (frozen)
 

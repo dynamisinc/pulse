@@ -12,7 +12,10 @@
  *   - no import of a participant surface (the other direction of the
  *     two-worlds gate lives in `staffShell/twoWorldsSeparation.test.ts`);
  *   - the slot seam: this story imports nothing from `dayWord/`, `cards/` or
- *     `email/` — the orchestrator composes them through `RosterPage`'s props;
+ *     `email/` — the orchestrator composes them through `RosterPage`'s props. The
+ *     composition itself lives in ONE file outside this set,
+ *     `ParticipantAdminSurface.tsx`, and a second guard pins that it is the only
+ *     file in the feature (outside the slot folders) that names them;
  *   - SECRETS: nothing here logs, toasts, or stores anything (`console.`,
  *     `react-toastify`, `localStorage`, `sessionStorage`), and no raw HTML
  *     injection (`dangerouslySetInnerHTML`);
@@ -98,6 +101,30 @@ describe('participantAdmin (staff roster) — source guards', () => {
   it('does not import the slot folders (dayWord/, cards/, email/): the props are the seam', () => {
     const slotFolders = /(^|\/)(dayWord|cards|email)(\/|$)/
     expect(offenders((_p, s) => specifiersOf(s).some(x => slotFolders.test(x)))).toEqual([])
+  })
+
+  it('composes the slots in exactly one place: ParticipantAdminSurface.tsx (Gate-2 W-3)', () => {
+    // The route file stays slot-free (guarded above) so the roster ships without the slot
+    // stories, and composition needs a home outside that set. This pins that the home is
+    // ONE file: if a second file starts importing `dayWord/`, `cards/` or `email/` the seam
+    // has begun to erode, and it should be a deliberate edit here, not a side effect.
+    const slotFolders = /(^|\/)(dayWord|cards|email)(\/|$)/
+    const insideSlotFolder = (path: string) => /^\.\/(dayWord|cards|email)\//.test(path)
+    const composers = Object.entries(ALL)
+      .filter(([path]) =>
+        !insideSlotFolder(path)
+        && !/\.test\.tsx?$/.test(path)
+        && !path.startsWith('./test/'),
+      )
+      .filter(([, source]) => specifiersOf(source).some(x => slotFolders.test(x)))
+      .map(([path]) => path)
+    expect(composers).toEqual(['./ParticipantAdminSurface.tsx'])
+
+    // And it composes the two slots that exist on this branch, through the route.
+    const surface = code(ALL['./ParticipantAdminSurface.tsx'] ?? '')
+    expect(surface).toContain('<ParticipantAdminRoute')
+    expect(surface).toContain('dayWordSlot=')
+    expect(surface).toContain('renderCardsAction')
   })
 
   it('never logs, toasts, or stores anything (a join URL must not escape through any of them)', () => {
