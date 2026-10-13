@@ -10,20 +10,24 @@
 sheet into UAT, **so that** the demo opens on a believable, populated fictional county — and re-running it on
 Monday is safe. It drives only the **public product APIs** (no seed-only backend code, no SQL, no `/api/ops/*`),
 so content work never collides with the backend freeze (plan §2.5). Pack format: implementation.md §1.10
-(`pulse.demopack.v1`); the run-sheet output follows §1.9. Authors the content: S2.
+(`pulse.demopack.v1`); the run sheet is its `runSheet.items`, loaded as server-side inject items through the
+[inject-queue contract](../inject-queue/implementation.md#wire-contract-frozen-for-06--07) (§1.9 is historical).
+Authors the content: S2.
 
 ## Acceptance Criteria
 - [ ] **Script and safety.** `scripts/uat/Seed-DemoContent.ps1` (`#Requires -Version 7.0`, dot-sources
       `Common.ps1`) takes `-PackPath` (default `docs/demo/pack/pack.json`), `-ApiHost`, `-SiteUrl`,
-      `-StaffUsername`, `-ScenarioAnchor` (default: now, UTC), `-RunSheetOut`, `-WhatIf`, `-Resume`; calls
+      `-StaffUsername`, `-ScenarioAnchor` (default: now, UTC), `-WhatIf`, `-Resume`, `-ReloadFiredRunSheet`; calls
       the anonymous `GET /api/exercise-context` first (host-resolved `exerciseId` + `timeZone`), then signs in
       via `POST /api/auth/staff/login` with `{username, secret, exerciseId}` (the request requires
       `exerciseId`; single-exercise script, so no active-exercise switch), using a secret from `$env:PULSE_STAFF_SECRET` or a hidden prompt (the
       `Copy-StaffSecret.ps1` pattern) — **the secret and tokens are never printed, logged or written to disk**.
 - [ ] **Public APIs only.** It calls nothing but `/api/exercise-context` (for `exerciseId` and the `timeZone` every
       post requires), `/api/auth/staff/login`, `/api/steering/pause-tier`,
-      `/api/staff/media`, `/api/media`, `/api/personas`, `/api/staff/personas/{id}`, `/api/posts`, `/api/feed`;
-      a test greps the script for any other `/api/` path or `sqlcmd`/SQL and fails.
+      `/api/staff/media`, `/api/media`, `/api/personas`, `/api/staff/personas/{id}`, `/api/posts`, `/api/feed`,
+      `/api/injects` (`GET` to read the run sheet, `POST` to create an item) and `/api/injects/assignees` (`GET`);
+      never an item route such as fire, delete or reorder. A test greps the script for any other `/api/` path or
+      `sqlcmd`/SQL and fails, and checks the script's allowlist against this list.
 - [ ] **Engine paused by default (Decision 4).** After seeding, and unless `-LeaveEngineRunning` is passed, it
       calls `POST /api/steering/pause-tier` with `{"tier":"engine","actingHumanId":…,"timeZone":…}` (the server 400s without a non-blank `actingHumanId`; the script sends the login session's) as the controller, before posting as well as after (so the engine cannot react to the seed posts) and reports the applied
       tier. The tier lives in memory and every reset or restart sets it back to `running`, so the run-of-show
@@ -48,8 +52,12 @@ so content work never collides with the backend freeze (plan §2.5). Pack format
       so a re-run never duplicates. Contract:
       [`inject-queue/implementation.md` § Demo slice](../inject-queue/implementation.md#demo-slice--scripted-posts-server-side-stories-06--07--decided-2026-10-08).
 - [ ] **Self-check.** After seeding it fetches `GET /api/feed` and verifies ≥ the number of top-level posts
-      seeded, that every media `url` answers a ranged request (`Range: bytes=0-1`) with `206`, and prints a ✅/❌
-      summary; it exits non-zero if any check fails.
+      seeded, that every media `url` answers a ranged request (`Range: bytes=0-1`) with `206`, and that every
+      run-sheet item is in `GET /api/injects` with the pack's post count and is **armable** (`pending`, or `held`
+      before its release), with the armable items in pack order in the queue ("Fire next" follows it). A rehearsal that fired the run sheet leaves it spent, so a fired, firing, skipped,
+      failed or part-held item fails the check, naming `-ReloadFiredRunSheet`; that switch loads a fresh copy of
+      each spent item (the old one is never touched; an item still firing is refused before any write). It prints
+      a ✅/❌ summary and exits non-zero if any check fails.
 
 ## Out of Scope
 Resetting or clearing UAT (`Reset-DemoState.ps1`, `Clear-DemoContent.ps1` already exist; run them first),
@@ -58,7 +66,7 @@ seeding, a GUI.
 
 ## Technical Notes
 - Files: `scripts/uat/Seed-DemoContent.ps1`, `scripts/uat/Seed-DemoContent.Tests.ps1` (Pester 5 for the pure
-  functions: pack validation, offset math, manifest/idempotency, run-sheet rewrite — if Pester is unavailable on
+  functions: pack validation, offset math, manifest/idempotency, run-sheet load — if Pester is unavailable on
   the machine, document a `-WhatIf` dry-run transcript instead), `docs/demo/pack/schema/**` (JSON Schema for
   `pack.json`). Follow the style of `New-DemoParticipant.ps1` (comment-based help, `-WhatIf`, secrets handled in
   memory).
@@ -74,8 +82,10 @@ Backend frozen and live in UAT: PE-BE, BM, BP, B2 (and I1 deployed). S2 supplies
 functional walk starts; final re-run Mon 10/19 after the final reset.
 
 ## Tests
-- Pester (or documented dry run): pack validation matrix (each rule), offset math, manifest idempotency (second
-  run issues zero uploads/posts), run-sheet rewrite passes the C3 schema, no secret in output, API-path
-  allowlist grep.
+- Pester (or documented dry run): pack validation matrix (each rule, including the inject queue's), offset math,
+  manifest idempotency (second run issues zero uploads, posts and run-sheet items), the run-sheet load (exact
+  `POST /api/injects` bodies against a fake that enforces the server's 400 rules; uncertain creates adopted,
+  never re-sent; spent items reported, failed by the self-check and reloaded by `-ReloadFiredRunSheet`), no
+  secret in output, API-path allowlist grep checked against this story's list.
 - Manual (🧑): `-WhatIf` transcript; full run against UAT; the self-check summary all ✅; open the participant app
   and confirm photos, a playing video, threads with replies and baselines.
