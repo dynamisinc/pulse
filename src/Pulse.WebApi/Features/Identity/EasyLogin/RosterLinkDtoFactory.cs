@@ -1,6 +1,5 @@
 namespace Pulse.WebApi.Features.Identity.EasyLogin;
 
-using System.Globalization;
 using Pulse.WebApi.Data.Entities;
 
 /// <summary>
@@ -93,5 +92,5 @@ public sealed class RosterLinkDtoFactory
             : null;
     }
 
-    private static string FormatInstant(DateTimeOffset instant) => instant.ToString("O", CultureInfo.InvariantCulture);
+    private static string FormatInstant(DateTimeOffset instant) => EasyLoginWire.Instant(instant);
 }

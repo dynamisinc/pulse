@@ -1,6 +1,6 @@
 # Story: Foundation: schema, shared kernel, frozen contract
 
-**Feature:** Easy participant login  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Not Started
+**Feature:** Easy participant login  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** In Review
 **Requirements:** COR-011, COR-012, COR-018 (enabling), XC-001, XC-004  ·  **Design decisions:** none (EL-1, EL-5, EL-6, EL-9, EL-13, EL-17 in `implementation.md`)  ·  **Issue:** —
 **Stack:** backend  ·  **Review:** Tier-2 (a migration, two new isolation-bearing entities, and the frozen contract)  ·  **Priority:** Must  ·  **Wave:** 0  ·  **Effort:** M
 
@@ -128,10 +128,16 @@ and gates, and AC-9 is the issuer, factory and registration item.
   `ParticipantLoginResponseDto`).
 - **AC-5** `ParticipantLinkTokensTests.*`, `ParticipantLinkTokenProtectorTests.*`.
 - **AC-6** `JoinUrlBuilderTests.*`, `ExerciseDayTests.*` (New York spring-forward and fall-back, Kolkata, Havana
-  missing midnight, rollover 0 and 3, unknown/blank zone, and a Today/EndOfDayUtc agreement sweep).
+  missing midnight, rollover 0 and 3, unknown/blank zone, and a Today/EndOfDayUtc agreement sweep that also asserts
+  Today never goes backwards, including the review W-1 overlaps Pacific/Chatham r=3 and Antarctica/Troll r=2;
+  `.FallBackOverlap_TheDayTurnsAtTheEarlierOccurrence_AndStaysTurned` pins the reviewer's probe instants).
+  `EasyLoginWireTests.*` (review S-1: instants and dates are invariant under tr-TR, ar-SA, th-TH and fa-IR).
 - **AC-7** `ExerciseFactsReaderTests.*`, `OrganizationScopeSweepTests.TheExemptionInventory_IsPinned_SoANewUnboundedReadCannotSlipInSilently`
   (`ResolvedScope` 23 to 24), `EasyLoginTelemetryTests.*`.
 - **AC-8** `ParticipantSessionRequestsTests.*` (including equivalence with `ParticipantLoginService` on real SQL),
   `RosterStaffRoleFilterTests.*`.
 - **AC-9** `RosterLinkDtoFactoryTests.*`, `EasyLoginRegistrationTests.*` (including composition into the real
-  `Program` host and `ValidateOnStart`); the `QRCoder` 1.8.1 reference builds warning-free.
+  `Program` host; review W-2: an out-of-range or non-numeric `Authentication:EasyLogin` value falls back to its default,
+  the host still starts, and the key, never the value, is logged once at startup by `EasyLoginOptionsStartupCheck`).
+  The `QRCoder` 1.8.1 reference adds no warning to `Pulse.WebApi`. The `NU1903` warnings a solution build reports are
+  for SSH.NET in `Pulse.WebApi.Tests`, pulled in transitively by Testcontainers; they predate this story.

@@ -1,6 +1,5 @@
 namespace Pulse.WebApi.Features.Identity.EasyLogin;
 
-using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
@@ -99,7 +98,6 @@ public static partial class EasyLoginTelemetry
     private const string FailureOutcome = "failure";
     private const string SentOutcome = "sent";
     private const string FailedOutcome = "failed";
-    private const string DateFormat = "yyyy-MM-dd";
 
     private static readonly JsonSerializerOptions PayloadOptions = new()
     {
@@ -313,7 +311,8 @@ public static partial class EasyLoginTelemetry
     /// blank value, anything over <see cref="MaxAttemptedNameLength"/> characters, anything with whitespace or a
     /// control character (a phrase, such as a spoken day word), an email address (<c>@</c>), a URL (<c>:</c>,
     /// <c>/</c> or <c>\</c>), a value shaped like a link token (22 base64url characters) and one shaped like a
-    /// generated day word (<c>adjective-noun-NN</c>).
+    /// generated day word (<c>adjective-noun-NN</c>, separators optional, so <c>mapleharbor42</c> too; a name such as
+    /// <c>jsmith42</c> is dropped as well, which is accepted over-redaction).
     /// </summary>
     /// <param name="attemptedSignInName">The sanitized name as typed.</param>
     /// <returns>The trimmed name, or <c>null</c>.</returns>
@@ -429,7 +428,7 @@ public static partial class EasyLoginTelemetry
         _ => throw new ArgumentOutOfRangeException(nameof(method), method, "Unknown sign-in method."),
     };
 
-    private static string FormatDate(DateOnly date) => date.ToString(DateFormat, CultureInfo.InvariantCulture);
+    private static string FormatDate(DateOnly date) => EasyLoginWire.Date(date);
 
     private static string Serialize<T>(T payload) => JsonSerializer.Serialize(payload, PayloadOptions);
 
@@ -451,8 +450,12 @@ public static partial class EasyLoginTelemetry
     [GeneratedRegex("^[A-Za-z0-9_-]{22}$", RegexOptions.CultureInvariant)]
     private static partial Regex TokenShape();
 
-    /// <summary>The generated day word's read-aloud shape, <c>adjective-noun-NN</c> (story 05).</summary>
-    [GeneratedRegex("^[A-Za-z]+-[A-Za-z]+-[0-9]{2}$", RegexOptions.CultureInvariant)]
+    /// <summary>
+    /// The generated day word's read-aloud shape, <c>adjective-noun-NN</c> (story 05), with or without its separators
+    /// (<c>-</c>, <c>_</c> or <c>.</c>): <c>maple-harbor-42</c>, <c>mapleharbor42</c>. Review W-3: this deliberately
+    /// over-redacts a sign-in name that ends in two digits (<c>jsmith42</c>), which costs only an audit target.
+    /// </summary>
+    [GeneratedRegex("^[A-Za-z]+[-_.]?[A-Za-z]+[-_.]?[0-9]{2}$", RegexOptions.CultureInvariant)]
     private static partial Regex GeneratedWordShape();
 
     private sealed record LoginPayload(

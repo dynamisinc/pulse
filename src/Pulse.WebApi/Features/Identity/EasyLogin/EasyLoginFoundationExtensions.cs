@@ -1,6 +1,7 @@
 namespace Pulse.WebApi.Features.Identity.EasyLogin;
 
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
 /// <summary>
@@ -18,10 +19,11 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 /// calls runs first.
 /// </para>
 /// <para>
-/// <b>Configuration.</b> <see cref="EasyLoginOptions"/> binds from <c>Authentication:EasyLogin</c> through
-/// <c>BindConfiguration</c>, which reads <c>IConfiguration</c> from the container at options-build time (so this method
-/// needs no <c>IConfiguration</c> parameter), and is validated at startup. <see cref="JoinUrlBuilder"/> reads
-/// <c>Authentication:FrontendBaseUrl</c>, the key <c>webapp.bicep</c> provisions.
+/// <b>Configuration.</b> <see cref="EasyLoginOptions"/> is read from <c>Authentication:EasyLogin</c> with
+/// <see cref="EasyLoginOptions.FromConfiguration"/>, using the container's <c>IConfiguration</c> at options-build time
+/// (so this method needs no <c>IConfiguration</c> parameter). A bad value never stops the host: it falls back to its
+/// default and <see cref="EasyLoginOptionsStartupCheck"/> logs the key once at startup. <see cref="JoinUrlBuilder"/>
+/// reads <c>Authentication:FrontendBaseUrl</c>, the key <c>webapp.bicep</c> provisions.
 /// </para>
 /// <para>
 /// <b>Not registered, by design.</b> <see cref="RosterStaffRoleFilter"/> has no constructor dependencies and is created
@@ -31,20 +33,20 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 /// </remarks>
 public static class EasyLoginFoundationExtensions
 {
-    /// <summary>Registers the easy-login kernel: options, clock, Data Protection, token protector, URL builder, facts reader, link DTO factory and the null link issuer.</summary>
+    /// <summary>Registers the easy-login kernel: options (and their startup check), clock, Data Protection, token protector, URL builder, facts reader, link DTO factory and the null link issuer.</summary>
     /// <param name="services">The service collection.</param>
     /// <returns>The same collection, for chaining.</returns>
     public static IServiceCollection AddEasyLoginFoundation(this IServiceCollection services)
     {
         ArgumentNullException.ThrowIfNull(services);
 
+        // Clamp-to-default, never fail-fast (review W-2): each key is read with an invariant TryParse rather than the
+        // binder (which throws on non-numeric text), a bad value falls back to its default, and the startup check logs the
+        // refused KEY once. The rate-limit policies of stories 03 and 05 read these same clamped values.
         services.AddOptions<EasyLoginOptions>()
-            .BindConfiguration(EasyLoginOptions.SectionName)
-            .Validate(
-                options => options.IsValid(),
-                $"{EasyLoginOptions.SectionName}: DayRolloverHour must be 0 to {EasyLoginOptions.MaxDayRolloverHour}, "
-                + "and JoinPermitPerMinute, WordPermitPerMinute and MaxCardsPerRequest must be positive.")
-            .ValidateOnStart();
+            .Configure<IConfiguration>((options, configuration) =>
+                options.CopyFrom(EasyLoginOptions.FromConfiguration(configuration)));
+        services.AddHostedService<EasyLoginOptionsStartupCheck>();
 
         // Stories 05 and 06 inject TimeProvider so day-boundary tests substitute a fake clock instead of sleeping.
         // TryAdd: several slices register the same system clock, and a test host's fake must win.
