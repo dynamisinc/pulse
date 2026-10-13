@@ -14,7 +14,13 @@ using Xunit;
 /// backdated scenario join instant. These are the documented PARITY assertions against the frontend mock's
 /// <c>features/personas/seedCast.ts</c> (<c>BAND_BASE</c> + <c>deriveFollowerCount</c> +
 /// <c>deriveJoinedAt</c>): the expected values below were computed by running that module's own arithmetic
-/// over the live catalog's handles, so a drift on either side fails here.
+/// over the live catalog's handles, so a drift in the arithmetic on either side fails here.
+/// <para>
+/// The arithmetic agrees, but the mock's handles do not yet: after the 2026-10-13 fiction rename the live
+/// catalog uses <c>KestrelCoEM</c> / <c>MetroDesk9</c>, while the mock's templates keep the old handles until
+/// the pending frontend sweep. Until then the mock and the live seed show different follower counts and join
+/// dates for those two personas; the sweep restores parity.
+/// </para>
 /// </summary>
 public sealed class PersonaCastDerivationTests
 {

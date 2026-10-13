@@ -182,7 +182,8 @@ public sealed partial class EngineContentSeedService
         var now = _timeProvider.GetUtcNow();
 
         // 4a. Seed the persona cast (story 01) — ADDED to the tracked context, committed below with the event.
-        var seeded = await _personaSeeder.SeedAsync(exerciseId, cancellationToken);
+        var seedResult = await _personaSeeder.SeedAsync(exerciseId, cancellationToken);
+        var seeded = seedResult.Personas;
         var personasCreated = seeded.Count(persona => persona.Created);
         var personasReused = seeded.Count - personasCreated;
 
@@ -192,11 +193,36 @@ public sealed partial class EngineContentSeedService
         // the ENGINE may do — is never silent, and neither is a retired handle renamed in place.
         var personasBackfilled = seeded.Count(persona => persona.PresentationBackfilled);
         var personasCastableClosed = seeded.Count(persona => persona.CastableClosed);
-        var personasRenamed = seeded.Count(persona => persona.Renamed);
+        var renames = seeded.Select(persona => persona.Rename).OfType<PersonaRename>().ToList();
+        var personasRenamed = renames.Count;
         if (personasBackfilled > 0 || personasCastableClosed > 0 || personasRenamed > 0)
         {
             LogExistingRowsMutated(personasBackfilled, personasCastableClosed, personasRenamed, exerciseId);
         }
+
+        // Each rename is logged with what it kept (a staff-edited name/bio, a location still naming the old
+        // fiction), so an operator can follow up on exactly the rows that need a human.
+        foreach (var rename in renames)
+        {
+            LogPersonaRenamed(exerciseId, rename.PersonaId, rename);
+        }
+
+        // Rows the rename could not touch (replacement already present, or a casing the seeder never wrote)
+        // still show the old fiction to participants, and the engine no longer voices them.
+        var retiredHandlesRemaining = seedResult.RetiredHandlesRemaining;
+        if (retiredHandlesRemaining.Count > 0)
+        {
+            LogRetiredHandlesRemaining(
+                retiredHandlesRemaining.Count, DescribeHandles(retiredHandlesRemaining), exerciseId);
+        }
+
+        var counts = new PersonaSeedCounts(
+            personasCreated,
+            personasReused,
+            personasBackfilled,
+            personasCastableClosed,
+            personasRenamed,
+            retiredHandlesRemaining.Count);
 
         // 4b. Build the canned starter storyline (story 02) from the seeded handles — CASTABLE ones only.
         // profiles-social-graph/06: the SOC-052 lookalike and the low-credibility outlet are seeded as ROWS
@@ -252,10 +278,7 @@ public sealed partial class EngineContentSeedService
         // 5. Exactly one XC-004 audit event (COR-001-stamped with the exercise's own id) in the SAME unit of
         //    work as story 01's persona writes (AC7).
         _dbContext.TelemetryEvents.Add(BuildSeededTelemetry(
-            exercise, now, new PersonaSeedCounts(
-                personasCreated, personasReused, personasBackfilled, personasCastableClosed, personasRenamed),
-            storyline,
-            autoConfirmResponses));
+            exercise, now, counts, renames, storyline, autoConfirmResponses));
 
         // One SaveChanges — the write-guard runs here; every scoped row carries the non-empty exercise id.
         await _dbContext.SaveChangesAsync(cancellationToken);
@@ -271,12 +294,13 @@ public sealed partial class EngineContentSeedService
         return EngineContentSeedResult.Provisioned(
             exerciseId,
             host,
-            new PersonaSeedCounts(
-                personasCreated, personasReused, personasBackfilled, personasCastableClosed, personasRenamed),
+            counts,
             storyline.Id,
             storyline.Title,
             storyline.ResponseWindowMin,
-            autoConfirmResponses);
+            autoConfirmResponses,
+            renames,
+            retiredHandlesRemaining);
     }
 
     /// <summary>
@@ -294,6 +318,35 @@ public sealed partial class EngineContentSeedService
         Message = "Engine content seed mutated EXISTING persona rows for exercise {ExerciseId}: {PersonasBackfilled} presentation-backfilled (rows carrying only the migration defaults), {PersonasCastableClosed} engine-casting gate(s) closed to match the catalog, {PersonasRenamed} renamed in place from a retired handle.")]
     private partial void LogExistingRowsMutated(
         int personasBackfilled, int personasCastableClosed, int personasRenamed, Guid exerciseId);
+
+    /// <summary>Records one in-place rename of a retired handle, with what it kept (W-1). No secret is logged.</summary>
+    /// <param name="exerciseId">The exercise the renamed row belongs to.</param>
+    /// <param name="personaId">The renamed row's (unchanged) id.</param>
+    /// <param name="rename">The rename; formatted lazily through <see cref="PersonaRename.ToString"/> (= <see cref="PersonaRename.Describe"/>).</param>
+    [LoggerMessage(
+        EventId = 2,
+        Level = LogLevel.Information,
+        Message = "Engine content seed for exercise {ExerciseId}, persona {PersonaId}: {Rename}.")]
+    private partial void LogPersonaRenamed(Guid exerciseId, Guid personaId, PersonaRename rename);
+
+    /// <summary>
+    /// Records rows still on a retired handle after the seed — the replacement already existed, or the casing
+    /// was not the seeder's own — so they were not renamed and the engine no longer voices them.
+    /// </summary>
+    /// <param name="count">How many rows are still on a retired handle.</param>
+    /// <param name="handles">Their handles, <c>@</c>-prefixed and comma-separated.</param>
+    /// <param name="exerciseId">The exercise they belong to.</param>
+    [LoggerMessage(
+        EventId = 3,
+        Level = LogLevel.Warning,
+        Message = "Engine content seed left {Count} persona row(s) on a retired handle for exercise {ExerciseId} ({Handles}): not renamed because the replacement handle already exists or the casing differs. Participants still see them; the engine no longer voices them.")]
+    private partial void LogRetiredHandlesRemaining(int count, string handles, Guid exerciseId);
+
+    /// <summary>Formats handles for an operator message: <c>@a, @b</c>.</summary>
+    /// <param name="handles">The stored handles (no leading <c>@</c>).</param>
+    /// <returns>The formatted list.</returns>
+    internal static string DescribeHandles(IEnumerable<string> handles) =>
+        string.Join(", ", handles.Select(handle => "@" + handle));
 
     /// <summary>
     /// Turns the exercise's IANA time-zone string into a <see cref="TimeZoneInfo"/> for the scenario clock,
@@ -331,6 +384,7 @@ public sealed partial class EngineContentSeedService
         Exercise exercise,
         DateTimeOffset now,
         PersonaSeedCounts counts,
+        IReadOnlyList<PersonaRename> renames,
         Storyline storyline,
         bool autoConfirmResponses)
     {
@@ -345,6 +399,19 @@ public sealed partial class EngineContentSeedService
                 personasBackfilled = counts.PresentationBackfilled,
                 personasCastableClosed = counts.CastableClosed,
                 personasRenamed = counts.Renamed,
+
+                // Additive (S-4): which row went from which handle to which, and what the rename kept, so
+                // the durable trail can answer "what happened to @X" without the operator's console output.
+                renamedPersonas = renames.Select(rename => new
+                {
+                    personaId = rename.PersonaId.ToString(),
+                    oldHandle = rename.OldHandle,
+                    newHandle = rename.NewHandle,
+                    keptStaffEditedDisplayName = rename.KeptStaffEditedDisplayName,
+                    keptStaffEditedBio = rename.KeptStaffEditedBio,
+                    locationMentions = rename.LocationMentions,
+                }).ToList(),
+                personasOnRetiredHandle = counts.OnRetiredHandle,
                 storylineId = storyline.Id.ToString(),
                 storylineTitle = storyline.Title,
                 responseWindowMinutes = storyline.ResponseWindowMin,
@@ -410,7 +477,9 @@ public sealed class EngineContentSeedResult
         Guid? storylineId,
         string? storylineTitle,
         int responseWindowMinutes,
-        bool autoConfirmResponses)
+        bool autoConfirmResponses,
+        IReadOnlyList<PersonaRename> renames,
+        IReadOnlyList<string> retiredHandlesRemaining)
     {
         Outcome = outcome;
         Error = error;
@@ -421,6 +490,8 @@ public sealed class EngineContentSeedResult
         StorylineTitle = storylineTitle;
         ResponseWindowMinutes = responseWindowMinutes;
         AutoConfirmResponses = autoConfirmResponses;
+        Renames = renames;
+        RetiredHandlesRemaining = retiredHandlesRemaining;
     }
 
     /// <summary>Which outcome occurred.</summary>
@@ -460,9 +531,22 @@ public sealed class EngineContentSeedResult
 
     /// <summary>
     /// How many REUSED rows were renamed in place from a retired starter-cast handle (the 2026-10-13 fiction
-    /// rename). Same id, new handle, display name and bio, so it is reported like the other mutations.
+    /// rename). Same id and new handle (and the new catalog name/bio unless staff had edited them), so it is
+    /// reported like the other mutations.
     /// </summary>
     public int PersonasRenamed => Personas.Renamed;
+
+    /// <summary>The per-row detail behind <see cref="PersonasRenamed"/> (empty when nothing was renamed).</summary>
+    public IReadOnlyList<PersonaRename> Renames { get; }
+
+    /// <summary>
+    /// How many rows are still on a retired handle after the seed (not renamed: the replacement already
+    /// existed or the casing differs). Normally 0.
+    /// </summary>
+    public int PersonasOnRetiredHandle => Personas.OnRetiredHandle;
+
+    /// <summary>The stored handles behind <see cref="PersonasOnRetiredHandle"/>.</summary>
+    public IReadOnlyList<string> RetiredHandlesRemaining { get; }
 
     /// <summary>The freshly-built storyline's id — non-null only on <see cref="EngineContentSeedOutcome.Provisioned"/>.</summary>
     public Guid? StorylineId { get; }
@@ -484,6 +568,8 @@ public sealed class EngineContentSeedResult
     /// <param name="storylineTitle">The built storyline title.</param>
     /// <param name="responseWindowMinutes">The clamped silence window.</param>
     /// <param name="autoConfirmResponses">Whether the operator opted in to auto-confirming plausible official responses.</param>
+    /// <param name="renames">The in-place renames of retired handles (null = none).</param>
+    /// <param name="retiredHandlesRemaining">Handles of rows still on a retired handle (null = none).</param>
     /// <returns>A provisioned result.</returns>
     public static EngineContentSeedResult Provisioned(
         Guid exerciseId,
@@ -492,30 +578,33 @@ public sealed class EngineContentSeedResult
         Guid storylineId,
         string storylineTitle,
         int responseWindowMinutes,
-        bool autoConfirmResponses = false)
+        bool autoConfirmResponses = false,
+        IReadOnlyList<PersonaRename>? renames = null,
+        IReadOnlyList<string>? retiredHandlesRemaining = null)
     {
         ArgumentException.ThrowIfNullOrEmpty(hostname);
         ArgumentNullException.ThrowIfNull(personas);
         return new EngineContentSeedResult(
             EngineContentSeedOutcome.Provisioned, null, exerciseId, hostname,
-            personas, storylineId, storylineTitle, responseWindowMinutes, autoConfirmResponses);
+            personas, storylineId, storylineTitle, responseWindowMinutes, autoConfirmResponses,
+            renames ?? [], retiredHandlesRemaining ?? []);
     }
 
     /// <summary>A validation failure.</summary>
     /// <param name="error">The human-readable reason.</param>
     /// <returns>An invalid result.</returns>
     public static EngineContentSeedResult Invalid(string error) =>
-        new(EngineContentSeedOutcome.Invalid, error, null, null, PersonaSeedCounts.None, null, null, 0, false);
+        new(EngineContentSeedOutcome.Invalid, error, null, null, PersonaSeedCounts.None, null, null, 0, false, [], []);
 
     /// <summary>The fail-closed result for an unconfigured/wrong secret.</summary>
     /// <returns>A rejected result.</returns>
     public static EngineContentSeedResult Rejected() =>
-        new(EngineContentSeedOutcome.Rejected, null, null, null, PersonaSeedCounts.None, null, null, 0, false);
+        new(EngineContentSeedOutcome.Rejected, null, null, null, PersonaSeedCounts.None, null, null, 0, false, [], []);
 
     /// <summary>The result for a hostname that resolves to no exercise (never creating one).</summary>
     /// <returns>A host-not-found result.</returns>
     public static EngineContentSeedResult HostNotFound() =>
-        new(EngineContentSeedOutcome.HostNotFound, null, null, null, PersonaSeedCounts.None, null, null, 0, false);
+        new(EngineContentSeedOutcome.HostNotFound, null, null, null, PersonaSeedCounts.None, null, null, 0, false, [], []);
 }
 
 /// <summary>
@@ -534,12 +623,16 @@ public sealed class EngineContentSeedResult
 /// non-zero value here is the one an operator should actually read.
 /// </param>
 /// <param name="Renamed">
-/// Reused rows that were renamed in place from a retired starter-cast handle (same id; new handle, display
-/// name and bio). Also a subset of <paramref name="Reused"/>.
+/// Reused rows that were renamed in place from a retired starter-cast handle (same id; new handle, and the new
+/// catalog display name and bio unless staff had edited them). Also a subset of <paramref name="Reused"/>.
+/// </param>
+/// <param name="OnRetiredHandle">
+/// Rows still on a retired handle after the pass, which the rename could not touch. NOT catalog rows, so not
+/// part of <paramref name="Created"/> or <paramref name="Reused"/>. Normally 0.
 /// </param>
 public sealed record PersonaSeedCounts(
-    int Created, int Reused, int PresentationBackfilled, int CastableClosed, int Renamed)
+    int Created, int Reused, int PresentationBackfilled, int CastableClosed, int Renamed, int OnRetiredHandle)
 {
     /// <summary>The all-zero counts carried by every non-provisioned outcome.</summary>
-    public static PersonaSeedCounts None { get; } = new(0, 0, 0, 0, 0);
+    public static PersonaSeedCounts None { get; } = new(0, 0, 0, 0, 0, 0);
 }

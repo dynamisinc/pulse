@@ -84,11 +84,20 @@ public sealed class EngineContentSeedResponseDto
 
     /// <summary>
     /// How many of the REUSED rows were renamed in place from a retired starter-cast handle (also a subset of
-    /// <see cref="PersonasReused"/>). The row keeps its id, posts and bindings; its handle, display name and
-    /// bio change. Reported so a rename is never silent.
+    /// <see cref="PersonasReused"/>). The row keeps its id, posts and bindings; its handle changes, and its
+    /// display name and bio too unless staff had edited them. Reported so a rename is never silent;
+    /// <see cref="Note"/> says per row what was kept.
     /// </summary>
     [JsonPropertyName("personasRenamed")]
     public required int PersonasRenamed { get; init; }
+
+    /// <summary>
+    /// How many rows are still on a retired handle after this seed: the replacement handle already existed or
+    /// the casing differs, so they were not renamed. Not catalog rows (not counted as created or reused).
+    /// Normally 0; non-zero needs a human, and <see cref="Note"/> names the handles.
+    /// </summary>
+    [JsonPropertyName("personasOnRetiredHandle")]
+    public required int PersonasOnRetiredHandle { get; init; }
 
     /// <summary>The freshly-built starter storyline's id (in-memory only — not persisted this phase).</summary>
     [JsonPropertyName("storylineId")]
@@ -132,6 +141,7 @@ public sealed class EngineContentSeedResponseDto
             PersonasBackfilled = result.PersonasBackfilled,
             PersonasCastableClosed = result.PersonasCastableClosed,
             PersonasRenamed = result.PersonasRenamed,
+            PersonasOnRetiredHandle = result.PersonasOnRetiredHandle,
             StorylineId = (result.StorylineId ?? throw new InvalidOperationException(
                 "A provisioned seed result must carry a storyline id.")).ToString(),
             StorylineTitle = result.StorylineTitle ?? string.Empty,
@@ -146,20 +156,21 @@ public sealed class EngineContentSeedResponseDto
     }
 
     /// <summary>
-    /// Appends a plain-language sentence to <see cref="Note"/> when this seed MUTATED existing rows, so an
-    /// operator reading the response sees it without having to compare counts (Gate-1 S-B). Empty when the
-    /// run only created and/or reused rows untouched — the ordinary case stays quiet.
+    /// Appends plain-language sentences to <see cref="Note"/> when this seed MUTATED existing rows, or left rows
+    /// on a retired handle, so an operator reading the response sees it without having to compare counts
+    /// (Gate-1 S-B). Empty when the run only created and/or reused rows untouched — the ordinary case stays
+    /// quiet.
     /// </summary>
     /// <param name="result">The provisioned seed result.</param>
     /// <returns>The extra sentence(s), or an empty string.</returns>
     private static string MutationNote(EngineContentSeedResult result)
     {
-        if (result.PersonasBackfilled == 0 && result.PersonasCastableClosed == 0 && result.PersonasRenamed == 0)
+        var note = string.Empty;
+        if (result.PersonasBackfilled > 0 || result.PersonasCastableClosed > 0 || result.PersonasRenamed > 0)
         {
-            return string.Empty;
+            note += " THIS RUN ALSO MODIFIED EXISTING ROWS:";
         }
 
-        var note = " THIS RUN ALSO MODIFIED EXISTING ROWS:";
         if (result.PersonasBackfilled > 0)
         {
             note += $" {result.PersonasBackfilled} persona(s) carried only the schema defaults for the "
@@ -175,8 +186,20 @@ public sealed class EngineContentSeedResponseDto
 
         if (result.PersonasRenamed > 0)
         {
+            // One clause per row, saying what was kept (a staff-edited name/bio is never overwritten; a
+            // location still naming the old fiction is left for a human), e.g.
+            // "renamed @Old→@New; kept staff-edited bio; location still mentions <name>".
             note += $" {result.PersonasRenamed} persona(s) still carried a retired handle and were renamed in "
-                + "place (handle, display name and bio); their ids, posts and bindings are unchanged.";
+                + "place; their ids, posts and bindings are unchanged: "
+                + string.Join(" | ", result.Renames.Select(rename => rename.Describe())) + ".";
+        }
+
+        if (result.PersonasOnRetiredHandle > 0)
+        {
+            note += $" ATTENTION: {result.PersonasOnRetiredHandle} persona row(s) are still on a retired handle ("
+                + EngineContentSeedService.DescribeHandles(result.RetiredHandlesRemaining)
+                + ") and were NOT renamed, because the replacement handle already exists or the casing differs. "
+                + "Participants still see them; the engine no longer voices them.";
         }
 
         return note;

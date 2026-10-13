@@ -253,7 +253,7 @@ Bind by **handle**, not id — not because an id is unobtainable (`GET /api/pers
 handle is stable across re-seeds and knowable up front, so it can be written into this runbook; an id is
 environment-specific and must be looked up every time. `PersonaCastSeeder.Catalog` seeds
 `mvega_fh`, `tbrandt41`, `kwardFH` (individual people — the right choice for a participant) plus
-`FairhavenWater`, `FulcoEM`, `Newsline7` (organization/outlet accounts — **not** what you want bound to a
+`FairhavenWater`, `KestrelCoEM`, `MetroDesk9` (organization/outlet accounts — **not** what you want bound to a
 human participant). Handles match case-insensitively and a leading `@` is ignored.
 
 - **200** → bound; re-binding the same persona is an idempotent no-op success, and re-binding a

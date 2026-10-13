@@ -26,8 +26,9 @@ using Xunit;
 public sealed class PersonaCastSeederTests
 {
     /// <summary>
-    /// The nine-persona live cast, handle-for-handle with the frontend org library
-    /// (<c>features/personas/personaTemplates.ts</c>) — including the SOC-052 pair
+    /// The nine-persona live cast, meant to match the frontend org library
+    /// (<c>features/personas/personaTemplates.ts</c>) handle-for-handle; the county EM and TV-station rows
+    /// diverge until the pending frontend sweep applies the 2026-10-13 fiction rename — including the SOC-052 pair
     /// <c>@FairhavenWater</c> (verified) / <c>@FairhavenWaterUpd</c> (NOT verified).
     /// </summary>
     private static readonly (string Handle, string DisplayName, string Kind, bool Verified, string PersonaType, string Band)[] ExpectedCast =
@@ -53,13 +54,16 @@ public sealed class PersonaCastSeederTests
         _fixture = fixture;
     }
 
-    private async Task<IReadOnlyList<SeededPersona>> SeedAndSaveAsync(Guid exerciseId)
+    private async Task<IReadOnlyList<SeededPersona>> SeedAndSaveAsync(Guid exerciseId) =>
+        (await SeedResultAndSaveAsync(exerciseId)).Personas;
+
+    private async Task<PersonaCastSeedResult> SeedResultAndSaveAsync(Guid exerciseId)
     {
         await using var db = _fixture.CreateContext();
         var seeder = new PersonaCastSeeder(db);
-        var seeded = await seeder.SeedAsync(exerciseId);
+        var result = await seeder.SeedAsync(exerciseId);
         await db.SaveChangesAsync();
-        return seeded;
+        return result;
     }
 
     private async Task<List<Persona>> ReadPersonasAsync(Guid exerciseId)
@@ -569,10 +573,16 @@ public sealed class PersonaCastSeederTests
             await seed.SaveChangesAsync();
         }
 
-        var seeded = await SeedAndSaveAsync(exerciseId);
+        var result = await SeedResultAndSaveAsync(exerciseId);
+        var seeded = result.Personas;
 
         seeded.Count(p => p.Renamed).Should().Be(2, "both retired handles were renamed, and the seed reports it");
         seeded.Count(p => p.Created).Should().Be(7, "the renamed rows are reused, so only the other seven are created");
+        seeded.Single(p => p.InstanceId == county.Id).Rename!.Describe().Should().Be(
+            "renamed @FulcoEM→@KestrelCoEM", "catalog text is replaced, so there is nothing kept to report");
+        seeded.Single(p => p.InstanceId == station.Id).Rename!.Should().BeEquivalentTo(
+            new PersonaRename(station.Id, RetiredStationHandle, "MetroDesk9", false, false, []));
+        result.RetiredHandlesRemaining.Should().BeEmpty("no row is left on a retired handle");
 
         var rows = await ReadPersonasAsync(exerciseId);
         rows.Should().HaveCount(9, "a rename never leaves the old persona beside a new one");
@@ -626,10 +636,13 @@ public sealed class PersonaCastSeederTests
             await seed.SaveChangesAsync();
         }
 
-        var seeded = await SeedAndSaveAsync(exerciseId);
+        var result = await SeedResultAndSaveAsync(exerciseId);
+        var seeded = result.Personas;
 
         seeded.Should().NotContain(p => p.Renamed, "nothing is renamed while the replacement handle is taken");
         seeded.Single(p => p.Dossier.Handle == "KestrelCoEM").InstanceId.Should().Be(current.Id);
+        result.RetiredHandlesRemaining.Should().Equal(
+            [RetiredCountyHandle], "the row left on the retired handle is reported, not left unnoticed (S-1)");
 
         var rows = await ReadPersonasAsync(exerciseId);
         var untouched = rows.Single(r => r.Id == legacy.Id);
@@ -654,9 +667,11 @@ public sealed class PersonaCastSeederTests
             await seed.SaveChangesAsync();
         }
 
-        var seeded = await SeedAndSaveAsync(exerciseId);
+        var result = await SeedResultAndSaveAsync(exerciseId);
 
-        seeded.Should().NotContain(p => p.Renamed);
+        result.Personas.Should().NotContain(p => p.Renamed);
+        result.RetiredHandlesRemaining.Should().Equal(
+            [RetiredCountyHandle.ToLowerInvariant()], "the remaining-row count is case-insensitive, like the unique index");
         var rows = await ReadPersonasAsync(exerciseId);
         rows.Single(r => r.Id == lowerCased.Id).Handle.Should().Be(RetiredCountyHandle.ToLowerInvariant());
         rows.Should().ContainSingle(r => r.Handle == "KestrelCoEM");
@@ -691,6 +706,66 @@ public sealed class PersonaCastSeederTests
         row.JoinedAt.Should().Be(authoredJoinedAt, "a join instant that is not the old handle's derivation is kept");
         row.Location.Should().Be("Fairhaven");
         row.Castable.Should().BeFalse("the rename never opens an engine-casting gate a human closed");
+    }
+
+    [RequiresDockerFact]
+    public async Task SeedAsync_RetiredHandleRename_KeepsAStaffEditedDisplayNameAndBio_AndReportsThem()
+    {
+        // W-1: persona admin lets staff edit the display name and bio. The rename replaces only the OLD
+        // catalog text; an edit is kept and reported, never overwritten.
+        var exerciseId = Guid.NewGuid();
+        var legacy = LegacyCountyRow(exerciseId);
+        legacy.DisplayName = "County Emergency Mgmt";
+        legacy.Bio = "Staff wrote this bio for the tabletop.";
+
+        await using (var seed = _fixture.CreateContext())
+        {
+            seed.Personas.Add(legacy);
+            await seed.SaveChangesAsync();
+        }
+
+        var seeded = await SeedAndSaveAsync(exerciseId);
+
+        var rename = seeded.Single(p => p.InstanceId == legacy.Id).Rename;
+        rename.Should().NotBeNull();
+        rename!.KeptStaffEditedDisplayName.Should().BeTrue();
+        rename.KeptStaffEditedBio.Should().BeTrue();
+        rename.Describe().Should().Be(
+            "renamed @FulcoEM→@KestrelCoEM; kept staff-edited display name; kept staff-edited bio");
+
+        var row = (await ReadPersonasAsync(exerciseId)).Single(r => r.Id == legacy.Id);
+        row.Handle.Should().Be("KestrelCoEM", "the handle is always renamed");
+        row.DisplayName.Should().Be("County Emergency Mgmt", "a staff-edited display name is kept");
+        row.Bio.Should().Be("Staff wrote this bio for the tabletop.", "a staff-edited bio is kept");
+    }
+
+    [RequiresDockerFact]
+    public async Task SeedAsync_RetiredHandleRename_ReportsALocationStillNamingTheOldFiction_AndTreatsANullBioAsOld()
+    {
+        // The rename does not own Location, so a location still naming the old county is left alone and
+        // reported. A null bio counts as the old catalog text, so it gets the new bio.
+        var exerciseId = Guid.NewGuid();
+        var legacy = LegacyCountyRow(exerciseId);
+        legacy.Bio = null;
+        legacy.Location = "Fulton County, OH";
+
+        await using (var seed = _fixture.CreateContext())
+        {
+            seed.Personas.Add(legacy);
+            await seed.SaveChangesAsync();
+        }
+
+        var seeded = await SeedAndSaveAsync(exerciseId);
+
+        var rename = seeded.Single(p => p.InstanceId == legacy.Id).Rename!;
+        rename.LocationMentions.Should().Equal(["Fulton"]);
+        rename.KeptStaffEditedBio.Should().BeFalse("a null bio counts as the old catalog text");
+        rename.Describe().Should().Be("renamed @FulcoEM→@KestrelCoEM; location still mentions Fulton");
+
+        var row = (await ReadPersonasAsync(exerciseId)).Single(r => r.Id == legacy.Id);
+        row.Location.Should().Be("Fulton County, OH", "the rename never edits the location; it only reports it");
+        row.Bio.Should().Be("Official emergency management for Kestrel County. Preparedness · Response · Recovery.");
+        row.DisplayName.Should().Be("Kestrel County EM");
     }
 
     [RequiresDockerFact]

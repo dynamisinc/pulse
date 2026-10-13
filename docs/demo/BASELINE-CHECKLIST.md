@@ -28,9 +28,9 @@
     to the clipboard without showing it.
   - **Participant (the PIO):** `participant1`'s password is stored only as a hash and can't be recovered.
     Create a fresh login with `pwsh scripts/uat/New-DemoParticipant.ps1 -Username pio1 -DisplayName "PIO (demo)"`.
-    It prompts for a password and binds **@FulcoEM**, the official account the storyline's silence test
+    It prompts for a password and binds **@KestrelCoEM**, the official account the storyline's silence test
     waits for. Don't bind a citizen persona (mvega_fh and friends), because the engine writes as them too.
-    To rebind an existing login, run `Reset-DemoState.ps1 -ParticipantUsername pio1 -PersonaHandle FulcoEM`,
+    To rebind an existing login, run `Reset-DemoState.ps1 -ParticipantUsername pio1 -PersonaHandle KestrelCoEM`,
     then sign that participant out and back in.
 - **URLs:** participant `https://pulse-uat.cobrasoftware.com/login` · controller
   `https://pulse-uat.cobrasoftware.com/staff/login`, then `/staff/console`.
@@ -77,7 +77,7 @@ screenshot, in the results table at the end. Times are scenario time unless a st
 | # | Do | Expect |
 |---|---|---|
 | 4.0 | Check step 0's output, and that beat 3 has run | `Official posts … auto-confirm ON`. If it says anything else, re-run the reset with `-AutoConfirmResponses`; without it a statement only slows the escalation, because the console has no confirm button yet. **Only answer once the storyline is Escalating and silence drafts have arrived.** An answer before the silence window opens addresses the storyline straight away: on 2026-10-07 it went Addressed then Resolved in 35 s, and beat 3 never happened. A Resolved storyline needs a re-seed |
-| 4.1 | As the participant (on @FulcoEM), post an official statement that **carries `#WaterIssues`** | It appears in the feed. Matching is keyword-based: without the hashtag, the post must use the storyline's wording (Fulton County Emergency Management, water, safety, official statement) |
+| 4.1 | As the participant (on @KestrelCoEM), post an official statement that **carries `#WaterIssues`** | It appears in the feed. Matching is keyword-based: without the hashtag, the post must use the storyline's wording (Kestrel County Emergency Management, water, safety, official statement) |
 | 4.2 | Watch the console for a tick or two | The storyline turns **Addressed**, and the silence drafts stop |
 | 4.3 | Watch the review queue | One new burst of 3 voices reacts to the statement. With the live provider it reads as mostly gratitude and follow-up questions, plus one skeptic. **On `Fake` the wording is canned** (it ignores the tone mix), so it reads as more worry; the engine still decided a gratitude burst |
 
