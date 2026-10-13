@@ -1,7 +1,7 @@
 # Story: Email the personal link (Azure Communication Services)
 
 **Feature:** Easy participant login  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Not Started
-**Requirements:** COR-011, COR-017 (part: delivering credentials), NFR-004, NFR-009  ·  **Design decisions:** none (EL-18, C-3 in `implementation.md`)  ·  **Issue:** —
+**Requirements:** COR-011, COR-017 (part: delivering credentials), NFR-004, NFR-009  ·  **Design decisions:** none (EL-18, C-3 in `implementation.md`)  ·  **Issue:** #478
 **Stack:** backend + infra (+ a small frontend slice)  ·  **Review:** Tier-2 (infrastructure identity, outbound email of credentials)  ·  **Priority:** **Could, last**  ·  **Wave:** 3  ·  **Effort:** M
 
 > **This is the piece that may slip past the Thu 10/15 backend freeze, and nothing else may depend on it.**

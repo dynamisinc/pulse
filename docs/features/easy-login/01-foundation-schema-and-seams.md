@@ -1,7 +1,7 @@
 # Story: Foundation: schema, shared kernel, frozen contract
 
-**Feature:** Easy participant login  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Not Started
-**Requirements:** COR-011, COR-012, COR-018 (enabling), XC-001, XC-004  ·  **Design decisions:** none (EL-1, EL-5, EL-6, EL-9, EL-13, EL-17 in `implementation.md`)  ·  **Issue:** —
+**Feature:** Easy participant login  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** In Progress
+**Requirements:** COR-011, COR-012, COR-018 (enabling), XC-001, XC-004  ·  **Design decisions:** none (EL-1, EL-5, EL-6, EL-9, EL-13, EL-17 in `implementation.md`)  ·  **Issue:** #466
 **Stack:** backend  ·  **Review:** Tier-2 (a migration, two new isolation-bearing entities, and the frozen contract)  ·  **Priority:** Must  ·  **Wave:** 0  ·  **Effort:** M
 
 ## Context
