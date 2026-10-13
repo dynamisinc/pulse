@@ -10,7 +10,7 @@
  */
 import { render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { ReadOnlySessionScope, SessionProvider, useSession } from './session'
+import { ReadOnlySessionScope, SessionProvider, useOptionalSession, useSession } from './session'
 import { resolveSession, type Session } from './sessionResolver'
 
 vi.mock('./sessionResolver', () => ({
@@ -124,5 +124,43 @@ describe('ReadOnlySessionScope', () => {
 
     expect(seen.length).toBeGreaterThan(afterFirst)
     expect(new Set(seen).size).toBe(1)
+  })
+})
+
+describe('useOptionalSession (the non-throwing twin of useSession)', () => {
+  function OptionalProbe() {
+    const session = useOptionalSession()
+    return <output data-testid="optional">{session === undefined ? 'no session' : session.role}</output>
+  }
+
+  it('returns undefined, and does NOT throw, outside a SessionProvider', () => {
+    render(<OptionalProbe />)
+
+    expect(screen.getByTestId('optional')).toHaveTextContent('no session')
+  })
+
+  it('returns the bound session inside a SessionProvider', async () => {
+    render(
+      <SessionProvider>
+        <OptionalProbe />
+      </SessionProvider>,
+    )
+
+    expect(await screen.findByTestId('optional')).toHaveTextContent(FIXTURE.role)
+  })
+
+  it('sees the read-only narrowing inside a ReadOnlySessionScope, like useSession does', async () => {
+    function NarrowedProbe() {
+      return <output data-testid="narrowed">{String(useOptionalSession()?.isReadOnly)}</output>
+    }
+    render(
+      <SessionProvider>
+        <ReadOnlySessionScope>
+          <NarrowedProbe />
+        </ReadOnlySessionScope>
+      </SessionProvider>,
+    )
+
+    expect(await screen.findByTestId('narrowed')).toHaveTextContent('true')
   })
 })

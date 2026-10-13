@@ -36,18 +36,29 @@ const ALLOWED: Readonly<Record<LifecycleState, readonly LifecycleState[]>> = {
   archived: [],
 }
 
-/** Folds the legacy status literals onto their COR-032 equivalents (the backend's `TryParse`). */
+/**
+ * Folds every status the exercise scope can carry onto its COR-032 literal (the backend's
+ * `TryParse`). Keyed by `core/exerciseContext`'s own `ExerciseStatus` vocabulary and written
+ * as a `Record` over it, so a status added to (or retired from) that vocabulary fails to
+ * compile here until this table follows -- there is no second, narrower list to drift.
+ * (No other module canonicalizes: `statePillConfig` only aliases the legacy literals.)
+ */
+const CANONICAL_STATE: Readonly<Record<ExerciseStatus, LifecycleState>> = {
+  build: 'build',
+  staged: 'staged',
+  live: 'live',
+  paused: 'paused',
+  completed: 'completed',
+  archived: 'archived',
+  // Legacy (pre-COR-032), still valid through the transition.
+  scheduled: 'build',
+  active: 'live',
+  complete: 'completed',
+}
+
+/** The COR-032 literal for `status` (see {@link CANONICAL_STATE}). */
 export function canonicalLifecycleState(status: ExerciseStatus): LifecycleState {
-  switch (status) {
-    case 'scheduled':
-      return 'build'
-    case 'active':
-      return 'live'
-    case 'complete':
-      return 'completed'
-    default:
-      return status
-  }
+  return CANONICAL_STATE[status]
 }
 
 /** The lifecycle the mock reports for a scope whose status is `status`. */

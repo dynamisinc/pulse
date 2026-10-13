@@ -24,9 +24,10 @@ The control is self-contained; it needs the console's providers (`ExerciseContex
 
 ## Behaviour
 
-- **Start exercise** while `live` is in `allowedTransitions` (a staged exercise); **End exercise** while
-  `completed` is (a live or paused one). The server's table decides — the console never derives a button
-  from `state` alone. Nothing to press at build / completed / archived: the control renders nothing.
+- **Start exercise** for a **staged** exercise (`state === 'staged'` and `live` is in `allowedTransitions`); **End
+  exercise** while `completed` is (a live or paused one). A paused exercise also reaches `live`, but that is a
+  *resume* — the world-steering tier control's job — so it is never offered as "Start exercise". The server's table
+  decides what is reachable. Nothing to press at build / completed / archived: the control renders nothing.
 - Start runs at once. End opens a **type-to-confirm** dialog: the confirm button stays disabled until the
   field reads `END` (exact, after trimming). The dialog is a modal MUI `Dialog` (`aria-modal`), so the
   console's Ctrl/Cmd+K is inert while it is open.
@@ -35,11 +36,18 @@ The control is self-contained; it needs the console's providers (`ExerciseContex
   scope, so it follows (LIVE -> ENDEX) with no remount.
 - Errors are **text**: an icon, a bold lead-in and the reason (the server's own sentence for a 409 / 400
   when it is short, one-line and not markup; otherwise a fixed sentence per status). A failed End is shown
-  inside the dialog, which stays open with `END` still typed. A 409 also re-reads the lifecycle.
-- **Absent for non-controllers**: nothing renders and no request is made unless the operating role is
-  `controller` (the console's controller-identity seam; `role` prop overrides).
-- **Keyboard**: native buttons; the pending Start stays focusable (`aria-disabled`); after a success removes
-  the button that held focus, focus moves to the control's group.
+  inside the dialog, which stays open with `END` still typed. A 409 means the console's view was stale, so it also
+  re-reads the lifecycle **and** re-resolves the exercise scope (the pill stops showing the old state).
+- **Absent for non-controllers**: nothing renders and no request is made unless the **signed-in session's** role is
+  `controller` (`useOptionalSession()`; staff routes sit under the `SessionProvider` hoisted in `app-shell/routes.tsx`;
+  `role` prop overrides, for tests). With no session it fails closed — renders nothing — instead of crashing the
+  console. Not `useControllerIdentity().role`: that is a hard-coded mock, so gating on it would be a no-op. This only
+  hides a control: the server's transition route admits **any** assigned staff session (backend follow-up).
+- **Keyboard**: native buttons; while a request is in flight the focusable controls (Start, and the End dialog's field,
+  Cancel and confirm) are `aria-disabled` / read-only — never `disabled`, which would drop focus to `<body>` mid-request;
+  after a success removes the button that held focus, focus moves to the control's group.
+- **With the staff preview open**, the console (and so this control) is unmounted; nothing here is lost, because the
+  state is the server's (or, under mock data, the exercise scope's). See `features/staffShell/README.md`.
 - No client telemetry: the server records one lifecycle-transition event per applied transition.
 
 ## Mock data

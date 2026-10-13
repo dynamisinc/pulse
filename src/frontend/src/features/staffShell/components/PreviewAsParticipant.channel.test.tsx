@@ -15,7 +15,7 @@
  *
  *  - AC1 Real channel: the exercise's own feed renders; opening a thread, a profile or
  *    Explore moves the CHANNEL and never the router, `window.location` or history; the
- *    strip, picker and Exit are still there; changing the moment does not remount it.
+ *    label strip and Exit are still there (the moment picker was removed after Gate-1).
  *  - AC2 Read-only: every write affordance is ABSENT (not disabled) on every page the
  *    preview can reach; and nothing issues a write request, telemetry included.
  *  - AC3 Two worlds: no MUI in the participant subtree, none of the participant shell's
@@ -100,7 +100,7 @@ afterEach(() => {
 })
 
 describe('PreviewAsParticipant -- the real channel (AC1)', () => {
-  it('renders the exercise\'s own feed inside the staff frame, with the strip, picker and Exit unchanged', async () => {
+  it('renders the exercise\'s own feed inside the staff frame, with the label strip and Exit', async () => {
     renderPreview()
     const cards = await feedReady()
 
@@ -113,9 +113,8 @@ describe('PreviewAsParticipant -- the real channel (AC1)', () => {
     expect(screen.getByTestId('preview-stage')).toContainElement(frame)
     expect(screen.getByTestId('staff-shell-work-area')).toContainElement(screen.getByTestId('preview-stage'))
 
-    // The staff strip is unchanged.
+    // The staff strip keeps its label and Exit (the moment picker was removed after Gate-1).
     expect(screen.getByTestId('preview-bar-label')).toHaveTextContent('PREVIEW AS PARTICIPANT — READ-ONLY')
-    expect(screen.getByRole('radiogroup', { name: 'Preview scenario moment' })).toBeInTheDocument()
     expect(screen.getByTestId('preview-exit')).toBeInTheDocument()
   })
 
@@ -160,18 +159,12 @@ describe('PreviewAsParticipant -- the real channel (AC1)', () => {
     expect(replaceState).not.toHaveBeenCalled()
   })
 
-  it('choosing a moment does not remount or reload the channel', async () => {
-    const user = userEvent.setup()
+  it('offers no moment picker (Gate-1 amendment): nothing on the strip changes the feed', async () => {
     renderPreview()
     await feedReady()
-    const before = channel()
-    const reads = vi.spyOn(api, 'get')
 
-    await user.click(screen.getByTestId('preview-moment-burst'))
-
-    expect(screen.getByTestId('preview-moment-burst')).toHaveAttribute('aria-checked', 'true')
-    expect(channel()).toBe(before)
-    expect(reads).not.toHaveBeenCalled()
+    expect(screen.queryByRole('radiogroup')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('preview-moment-picker')).not.toBeInTheDocument()
   })
 })
 

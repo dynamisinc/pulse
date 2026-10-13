@@ -14,10 +14,11 @@
  *    NO MUI: it is the thing inside the staff frame that must not pick the frame up.
  *    (`twoWorldsSeparation.test.ts` also scans it with the participant roots, for the
  *    COBRA/token half of this; this adds the no-MUI half that is specific to it.)
- *  - `components/PreviewAsParticipant.tsx` -- the STAFF half: the labelled strip, the
- *    moment picker, Exit and the neutral mat. It must import NO participant surface
- *    (no `social`, no `participant-shell`, no brand token, no CSS module): the
- *    participant world reaches it through exactly one sibling import, the host.
+ *  - `components/PreviewAsParticipant.tsx` -- the STAFF half: the labelled strip, Exit and
+ *    the neutral mat. It must import NO participant surface (no `social`, no
+ *    `participant-shell`, no brand token, no CSS module): the participant world reaches it
+ *    through exactly one sibling import, the host -- the only other sibling is the stage's own
+ *    (staff-world) error boundary.
  *
  * Uses Vite's `import.meta.glob` (eager, `?raw`) to read the REAL source text,
  * mirroring `twoWorldsSeparation.test.ts`'s own approach -- this fails the moment a
@@ -93,6 +94,9 @@ const hostFiles = import.meta.glob('./components/PreviewChannelHost.tsx', {
   eager: true, query: '?raw', import: 'default',
 })
 const stripFiles = import.meta.glob('./components/PreviewAsParticipant.tsx', {
+  eager: true, query: '?raw', import: 'default',
+})
+const boundaryFiles = import.meta.glob('./components/PreviewErrorBoundary.tsx', {
   eager: true, query: '?raw', import: 'default',
 })
 
@@ -176,7 +180,17 @@ describe('PreviewAsParticipant (the staff strip) -- carries no participant token
     const source = Object.values(stripFiles).join('\n')
     const siblings = extractImportSpecifiers(source).filter(specifier => specifier.startsWith('./'))
 
-    expect(siblings).toEqual(['./PreviewChannelHost'])
+    // The host is the participant half; the error boundary is staff chrome around it (W-3).
+    expect(siblings.sort()).toEqual(['./PreviewChannelHost', './PreviewErrorBoundary'])
+  })
+
+  it('the stage\'s error boundary is staff chrome: it imports no participant surface either', () => {
+    const boundary = Object.values(boundaryFiles).join('\n')
+
+    expect(boundary).not.toBe('')
+    const hits = extractImportSpecifiers(boundary).filter(specifier =>
+      FORBIDDEN_IN_STAFF_STRIP.some(pattern => pattern.test(specifier)))
+    expect(hits).toEqual([])
   })
 })
 

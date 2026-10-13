@@ -183,4 +183,17 @@ export function ReadOnlySessionScope({ children }: ReadOnlySessionScopeProps) {
   )
 }
 
+/**
+ * The surrounding session, or `undefined` when there is no `SessionProvider` above -- the
+ * NON-THROWING twin of `useSession()`, for a control that must FAIL CLOSED rather than crash
+ * (demo-polish C6: the StartEx / EndEx control is controller-only, and "no session" simply
+ * means "no controller", so it renders nothing instead of taking the console down with it).
+ * Anything that needs a session to function must keep using `useSession()`.
+ */
+// Colocated with the provider by design - same rationale as `useSession` above.
+// eslint-disable-next-line react-refresh/only-export-components
+export function useOptionalSession(): Session | undefined {
+  return useContext(SessionContext)
+}
+
 // END demo-polish C6

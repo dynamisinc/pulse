@@ -6,7 +6,11 @@
  * real server refuses teaches the wrong thing.
  */
 import { afterEach, describe, expect, it } from 'vitest'
-import { resolveExerciseContext, resetMockExerciseStatus } from '@/core/exerciseContext'
+import {
+  EXERCISE_STATUSES,
+  resetMockExerciseStatus,
+  resolveExerciseContext,
+} from '@/core/exerciseContext'
 import { LifecycleError, LIFECYCLE_STATES } from './lifecycleService'
 import { canonicalLifecycleState, mockLifecycleFor, simulateTransition } from './lifecycleMock'
 
@@ -28,6 +32,12 @@ describe('the mock state machine mirrors the backend table', () => {
 
   it.each(LIFECYCLE_STATES.map(state => [state] as const))('%s allows exactly what the server allows', state => {
     expect(mockLifecycleFor(state).allowedTransitions).toEqual(BACKEND[state])
+  })
+
+  it('maps EVERY status the exercise scope can carry (the shared vocabulary) to a COR-032 literal', () => {
+    for (const status of EXERCISE_STATUSES) {
+      expect(LIFECYCLE_STATES).toContain(canonicalLifecycleState(status))
+    }
   })
 
   it('folds the legacy literals onto their COR-032 equivalents', () => {

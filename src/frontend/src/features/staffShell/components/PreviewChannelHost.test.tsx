@@ -160,7 +160,7 @@ describe('PreviewChannelHost -- nothing it mounts can write (AC2)', () => {
     expect(screen.getByTestId('role')).toHaveTextContent('participant')
   })
 
-  it('mutes the telemetry the channel emits on its own while mounted, and restores it after', async () => {
+  it('mutes the participant telemetry the channel emits on its own while mounted, and restores it after', async () => {
     const view = mount()
     await screen.findByTestId('probe')
 
@@ -180,5 +180,25 @@ describe('PreviewChannelHost -- nothing it mounts can write (AC2)', () => {
       target: { entityType: 'feed', entityId: 'all-posts' },
     })
     expect(getEmittedTelemetryEvents()).toHaveLength(1)
+  })
+
+  it('CR-001: a staff audit record emitted WHILE the preview is mounted is still recorded', async () => {
+    mount()
+    await screen.findByTestId('probe')
+
+    // What a takedown does when its DELETE resolves after the preview was opened.
+    buildAndEmit({
+      exerciseId: 'ex-mock-0001',
+      eventType: 'steering_action',
+      channel: 'system',
+      actor: { kind: 'system', actingHumanId: 'human-controller-01', role: 'controller' },
+      wallClockTime: new Date().toISOString(),
+      scenarioTime: MOMENT.toISOString(),
+      timeZone: 'UTC',
+      target: { entityType: 'post', entityId: 'post-9' },
+      payload: { action: 'takedown', category: 'pii' },
+    })
+
+    expect(getEmittedTelemetryEvents().map(event => event.eventType)).toEqual(['steering_action'])
   })
 })

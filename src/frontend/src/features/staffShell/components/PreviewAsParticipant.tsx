@@ -22,29 +22,43 @@
  * conditional (work-area XOR stage) IS the "replaces the work area"
  * behavior (AC1/AC3); exiting (the Exit control below) only calls
  * `toggle()`, which flips `active` back and lets the orchestrator's same
- * conditional restore the prior work area.
+ * conditional restore the prior work area. Because it is a swap, the work
+ * area UNMOUNTS while the preview is up: see "WHAT THE SWAP COSTS" below.
  *
  * Anatomy, top → bottom (matches `Pulse Staff Shell.dc.html`'s `.pvbar` /
  * `.pvstage`):
  *  1. A staff-world (COBRA) label strip, UNMISTAKABLY marking the stage as a
- *     preview ("PREVIEW AS PARTICIPANT — READ-ONLY") + the scenario-moment
- *     picker (AC2: STARTEX/ADVISORY/BURST/NOW, mutually exclusive —
- *     `role="radiogroup"` / `role="radio"` + `aria-checked`, NFR-001) + an
- *     Exit control that calls `toggle()`. UNCHANGED by C6.
+ *     preview ("PREVIEW AS PARTICIPANT — READ-ONLY") + an Exit control that
+ *     calls `toggle()` and hands focus back to the header's preview toggle
+ *     (the Exit button unmounts with the stage; focus must not fall to <body>).
  *  2. The stage itself: a neutral staff-world mat framing the PARTICIPANT-
  *     WORLD render — `PreviewChannelHost` (`./PreviewChannelHost`), which mounts
  *     the real `SocialChannel` under `ShellContextProvider { variant: 'preview',
- *     scenarioNow: <the selected moment's instant> }`, the brand providers, an
- *     in-memory navigation provider and a read-only session scope. See that
- *     file's header for the composition, why nothing in it can write, and why a
- *     link inside it never moves the staff page.
+ *     scenarioNow }`, the brand providers, an in-memory navigation provider and
+ *     a read-only session scope. See that file's header for the composition, why
+ *     nothing in it can write, and why a link inside it never moves the staff
+ *     page. The host sits inside `PreviewErrorBoundary`: a render error in the
+ *     channel shows "Participant preview unavailable" there and never reaches
+ *     the app's fail-closed boundary (which would redirect to /login); the
+ *     strip and Exit are siblings of the boundary and keep working.
  *
- * The picker hands the participant render the selected moment's instant (via
- * `resolvePreviewMomentInstant`) through the shell mount contract — always
- * scenario time, never wall-clock (COR-053). NOTE: the Social channel's own
- * per-post ages ("2h ago") come from the live scenario clock (`useScenarioTime`),
- * not from the shell mount's `scenarioNow`, so choosing a moment re-times what a
- * channel reads from the mount contract but does not re-date the feed's posts.
+ * NO MOMENT PICKER (amended after Gate-1; story 23, AC1). The STARTEX / ADVISORY /
+ * BURST / NOW picker this strip used to carry is NOT rendered. The Social channel
+ * dates every post from the live scenario clock (`useScenarioTime`), not from the
+ * shell mount's `scenarioNow`, so choosing a moment changed nothing the audience
+ * could see — on stage, worse than no picker. The moment MODEL and its context
+ * (`../previewContext`) are kept for a channel that can honour one; until then the
+ * stage mounts the channel at its default moment, `now` — the live scenario clock.
+ * Scenario time only (COR-053), never wall-clock.
+ *
+ * WHAT THE SWAP COSTS (decided, not accidental). The console's work area unmounts for
+ * as long as the preview is up, so React state it held is gone on Exit. What SURVIVES
+ * lives above the swap or in a module store: the active persona (`ActivePersonaProvider`),
+ * persona-composer drafts and the reply they were written against (the draft store; the
+ * composer restores the reply when it remounts), the engine / review queue data
+ * (module stores) and the toolstrip. What is LOST: an open inline edit in a console
+ * panel (a run-sheet item, a review-queue draft edit), whether the persona dock was open,
+ * and panel scroll positions. See the controller `lifecycle` README for the full list.
  *
  * The mat is sized for the channel's own frame (nav rail | 600px main | sidebar,
  * `previewFrameMetrics`) and scrolls (it does not shrink the frame): the channel's
@@ -52,7 +66,8 @@
  * width the matching breakpoint assumes and the mat scrolls when the work area
  * is narrower. The frame is a containing block for `position: fixed` (a
  * transform), so the channel's skip link and any fixed element stay inside the
- * frame instead of landing on the staff header.
+ * frame instead of landing on the staff header. (The media viewer is portalled to
+ * <body> and, while open, covers the staff chrome until Esc — accepted for the demo.)
  *
  * World: staff (COBRA/Cadence) for THIS component's own chrome (the label
  * strip + stage mat, `staffShellTokens`-sourced). `PreviewChannelHost`, mounted
@@ -70,21 +85,30 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faXmark } from '@fortawesome/free-solid-svg-icons'
 import { staffShellTokens } from '../staffShellTokens'
 import { PREVIEW_FRAME_FULL_WIDTH_PX, PREVIEW_FRAME_NAV_WIDTH_PX } from '../previewFrameMetrics'
-import {
-  getPreviewMomentConfig,
-  PREVIEW_MOMENT_ORDER,
-  resolvePreviewMomentInstant,
-  usePreview,
-  type PreviewMoment,
-} from '../previewContext'
+import { resolvePreviewMomentInstant, usePreview } from '../previewContext'
 import { PreviewChannelHost } from './PreviewChannelHost'
+import { PreviewErrorBoundary } from './PreviewErrorBoundary'
+
+/**
+ * The header's "Preview as participant" toggle. It stays mounted across the work-area swap, so
+ * it is where focus returns when Exit unmounts the stage.
+ */
+const HEADER_PREVIEW_TOGGLE_SELECTOR = '[data-testid="staff-header-preview-toggle"]'
 
 export function PreviewAsParticipant() {
-  const { moment, setMoment, toggle } = usePreview()
+  const { moment, toggle } = usePreview()
 
-  // One instant per selected moment: the channel below must not re-render (and every
-  // memoized feed row with it) because the staff strip did.
+  // One instant per selected moment (always the default, `now`, while no picker is rendered): the
+  // channel below must not re-render (and every memoized feed row with it) because the staff
+  // strip did.
   const momentInstant = useMemo(() => resolvePreviewMomentInstant(moment), [moment])
+
+  // Exit unmounts this stage, and the button the keyboard user pressed with it: hand focus to the
+  // header toggle (still mounted) in the same gesture so it never falls to <body> (NFR-001).
+  const exit = () => {
+    toggle()
+    document.querySelector<HTMLElement>(HEADER_PREVIEW_TOGGLE_SELECTOR)?.focus()
+  }
 
   return (
     <Stack
@@ -96,7 +120,7 @@ export function PreviewAsParticipant() {
         bgcolor: staffShellTokens.workArea.background,
       }}
     >
-      {/* 1. Staff-world label strip + moment picker + Exit (AC1/AC2/AC3/AC5). */}
+      {/* 1. Staff-world label strip + Exit (AC1/AC3/AC5). */}
       <Stack
         direction="row"
         data-testid="preview-bar"
@@ -125,24 +149,6 @@ export function PreviewAsParticipant() {
           PREVIEW AS PARTICIPANT — READ-ONLY
         </Typography>
 
-        <Stack
-          direction="row"
-          role="radiogroup"
-          aria-label="Preview scenario moment"
-          data-testid="preview-moment-picker"
-          sx={{ gap: 0.75 }}
-        >
-          {PREVIEW_MOMENT_ORDER.map(id => (
-            <MomentChip
-              key={id}
-              id={id}
-              label={getPreviewMomentConfig(id).label}
-              selected={moment === id}
-              onSelect={setMoment}
-            />
-          ))}
-        </Stack>
-
         <Box sx={{ flex: 1 }} />
 
         <Typography
@@ -160,7 +166,7 @@ export function PreviewAsParticipant() {
           component="button"
           type="button"
           data-testid="preview-exit"
-          onClick={toggle}
+          onClick={exit}
           sx={{
             display: 'flex',
             alignItems: 'center',
@@ -224,48 +230,11 @@ export function PreviewAsParticipant() {
             },
           }}
         >
-          <PreviewChannelHost scenarioNow={momentInstant} />
+          <PreviewErrorBoundary>
+            <PreviewChannelHost scenarioNow={momentInstant} />
+          </PreviewErrorBoundary>
         </Box>
       </Box>
     </Stack>
-  )
-}
-
-interface MomentChipProps {
-  id: PreviewMoment
-  label: string
-  selected: boolean
-  onSelect: (id: PreviewMoment) => void
-}
-
-/**
- * One moment chip — a real `<button>` (via MUI's `component="button"`, so it
- * is natively focusable and Enter/Space-activatable, NFR-001) carrying
- * `role="radio"` + `aria-checked` so assistive tech announces the
- * mutually-exclusive selection (AC2/AC5). Selection is never color-only: the
- * selected chip also gets a filled background AND `aria-checked="true"`.
- */
-function MomentChip({ id, label, selected, onSelect }: MomentChipProps) {
-  return (
-    <Box
-      component="button"
-      type="button"
-      role="radio"
-      aria-checked={selected}
-      data-testid={`preview-moment-${id}`}
-      onClick={() => onSelect(id)}
-      sx={{
-        font: '700 11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
-        padding: '5px 12px',
-        borderRadius: '999px',
-        border: `1px solid ${staffShellTokens.toolstrip.borderColor}`,
-        color: selected ? '#fff' : staffShellTokens.accent.secondaryText,
-        background: selected ? staffShellTokens.header.background : 'transparent',
-        cursor: 'pointer',
-        whiteSpace: 'nowrap',
-      }}
-    >
-      {label}
-    </Box>
   )
 }

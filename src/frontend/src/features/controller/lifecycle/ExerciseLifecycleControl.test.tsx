@@ -12,7 +12,7 @@
  */
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { hasOtherModalMounted } from '@/core/a11y/modalPriority'
 import {
   pillLabel,
@@ -20,6 +20,13 @@ import {
   resetLifecycleMock,
   scopeResolved,
 } from './lifecycle.testUtils'
+
+// The control gates on the signed-in session's role; the mock resolver's session is a
+// participant, so the harness swaps in a staff session whose role each case picks.
+vi.mock('@/core/auth/sessionResolver', async importOriginal => ({
+  ...(await importOriginal<typeof import('@/core/auth/sessionResolver')>()),
+  resolveSession: (await import('./lifecycle.sessionKit')).resolveSession,
+}))
 
 afterEach(() => {
   resetLifecycleMock()
@@ -42,12 +49,12 @@ describe('ExerciseLifecycleControl -- offers only what the state machine allows 
     expect(screen.queryByRole('button', { name: /start exercise/i })).not.toBeInTheDocument()
   })
 
-  it('PAUSED allows both live and completed, so both are offered', async () => {
+  it('W-1: PAUSED offers End only -- its way back to live is a RESUME, never a second "Start exercise"', async () => {
     renderControl({ status: 'paused', withHeader: true })
     await scopeResolved()
 
-    expect(screen.getByRole('button', { name: /start exercise/i })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /end exercise/i })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /start exercise/i })).not.toBeInTheDocument()
   })
 
   it.each(['build', 'completed', 'archived'] as const)(
@@ -73,12 +80,18 @@ describe('ExerciseLifecycleControl -- offers only what the state machine allows 
   })
 
   it('is a labelled group whose buttons say what they do in text, not just an icon', async () => {
-    renderControl({ status: 'paused', withHeader: true })
+    const view = renderControl({ status: 'staged', withHeader: true })
     await scopeResolved()
+    const startGroup = screen.getByRole('group', { name: 'Exercise lifecycle' })
+    expect(within(startGroup).getByRole('button', { name: 'Start exercise' }))
+      .toHaveTextContent('Start exercise')
+    view.unmount()
 
-    const group = screen.getByRole('group', { name: 'Exercise lifecycle' })
-    expect(within(group).getByRole('button', { name: 'Start exercise' })).toHaveTextContent('Start exercise')
-    expect(within(group).getByRole('button', { name: 'End exercise' })).toHaveTextContent('End exercise')
+    renderControl({ status: 'live', withHeader: true })
+    await scopeResolved()
+    const endGroup = screen.getByRole('group', { name: 'Exercise lifecycle' })
+    expect(within(endGroup).getByRole('button', { name: 'End exercise' }))
+      .toHaveTextContent('End exercise')
   })
 })
 
@@ -256,11 +269,11 @@ describe('ExerciseLifecycleControl -- End exercise needs a typed END', () => {
   })
 })
 
-describe('ExerciseLifecycleControl -- absent for non-controller roles', () => {
+describe('ExerciseLifecycleControl -- absent for non-controller roles (W-2: gated on the SESSION)', () => {
   it.each(['evaluator', 'planner', 'participant', 'pio', 'orgAdmin'] as const)(
-    'renders nothing at all for the %s role, even when the exercise could be ended',
-    async role => {
-      renderControl({ status: 'live', role, withHeader: true })
+    'renders nothing for a %s SESSION, even when the exercise could be ended',
+    async sessionRole => {
+      renderControl({ status: 'live', sessionRole, withHeader: true })
       await scopeResolved()
 
       expect(screen.queryByTestId('exercise-lifecycle-control')).not.toBeInTheDocument()
@@ -269,8 +282,30 @@ describe('ExerciseLifecycleControl -- absent for non-controller roles', () => {
     },
   )
 
-  it('renders for the controller role', async () => {
-    renderControl({ status: 'live', role: 'controller', withHeader: true })
+  it('renders for a controller SESSION', async () => {
+    renderControl({ status: 'live', sessionRole: 'controller', withHeader: true })
+    await scopeResolved()
+
+    expect(screen.getByRole('button', { name: /end exercise/i })).toBeInTheDocument()
+  })
+
+  it('FAILS CLOSED with no session at all: nothing rendered, and the surrounding tree is not taken down', async () => {
+    renderControl({ status: 'live', sessionRole: 'none', withHeader: true })
+    await scopeResolved()
+
+    expect(screen.getByTestId('staff-header')).toBeInTheDocument()
+    expect(screen.queryByTestId('exercise-lifecycle-control')).not.toBeInTheDocument()
+  })
+
+  it('the `role` prop overrides the session (a test seam): an evaluator prop hides it for a controller session', async () => {
+    renderControl({ status: 'live', sessionRole: 'controller', role: 'evaluator', withHeader: true })
+    await scopeResolved()
+
+    expect(screen.queryByTestId('exercise-lifecycle-control')).not.toBeInTheDocument()
+  })
+
+  it('...and a controller prop shows it for a non-controller session', async () => {
+    renderControl({ status: 'live', sessionRole: 'evaluator', role: 'controller', withHeader: true })
     await scopeResolved()
 
     expect(screen.getByRole('button', { name: /end exercise/i })).toBeInTheDocument()

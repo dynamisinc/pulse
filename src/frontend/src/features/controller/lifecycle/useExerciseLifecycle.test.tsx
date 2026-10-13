@@ -54,6 +54,18 @@ describe('useExerciseLifecycle (mock data)', () => {
     })
   })
 
+  it('W-1: canStart is for a STAGED exercise only -- paused reaches live too, but that is a resume', async () => {
+    const paused = mountHook('paused')
+    await waitFor(() => expect(paused.result.current).not.toBeNull())
+    expect(paused.result.current.lifecycle.allowedTransitions).toContain('live')
+    expect(paused.result.current.lifecycle).toMatchObject({ canStart: false, canEnd: true })
+    paused.unmount()
+
+    const live = mountHook('live')
+    await waitFor(() => expect(live.result.current).not.toBeNull())
+    expect(live.result.current.lifecycle).toMatchObject({ canStart: false, canEnd: true })
+  })
+
   it('a successful Start returns true, moves the scope\'s status and the buttons, and records what happened', async () => {
     const { result } = mountHook('staged')
     await waitFor(() => expect(result.current).not.toBeNull())

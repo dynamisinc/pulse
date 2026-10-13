@@ -7,9 +7,11 @@
  * the transition logic is testable without a render of the dialog.
  *
  * WHAT IT READS. The resolved exercise's lifecycle `state` and the `allowedTransitions` from it
- * (`GET /api/staff/exercise-lifecycle`, `lifecycleService`). The control offers Start when `live`
- * is allowed and End when `completed` is -- the SERVER's table decides, so the console never
- * drifts from the state machine. Under MOCK DATA the same shape is derived from the exercise
+ * (`GET /api/staff/exercise-lifecycle`, `lifecycleService`). The control offers Start when the
+ * exercise is STAGED and `live` is allowed, and End when `completed` is allowed -- the SERVER's
+ * table decides what is reachable, so the console never drifts from the state machine. (`paused`
+ * also allows `live`, but that is a RESUME, which is the world-steering tier control's job, not
+ * a second "Start exercise" button.) Under MOCK DATA the same shape is derived from the exercise
  * scope's own `status` (`lifecycleMock`), which is also what the header pill renders.
  *
  * WHAT IT DOES. `transition(to)` calls `POST .../transition { to }` (or simulates it under mock
@@ -23,8 +25,9 @@
  *      tell the scope what the status now is, it only asks again.
  * A FAILED transition changes nothing on screen except an error message: the server persists
  * nothing on any non-200, so there is no rollback to do. A 409 (the machine refused -- another
- * controller got there first, or the state moved) also re-reads the lifecycle so the buttons
- * stop offering what is no longer possible.
+ * controller got there first, or the state moved) means this console's view of the state was
+ * stale, so it also re-reads the lifecycle (the buttons stop offering what is no longer
+ * possible) AND re-resolves the exercise scope (the header pill stops showing the old state).
  *
  * ONE IN FLIGHT. A second `transition` while one is pending is ignored (a ref guard, because two
  * activations in the same tick both see `idle`): StartEx and EndEx must never race each other.
@@ -69,7 +72,11 @@ export interface UseExerciseLifecycleResult {
   readonly loadPhase: LifecycleLoadPhase
   /** Plain-text reason the state could not be read; `undefined` otherwise. */
   readonly loadError: string | undefined
-  /** `live` is reachable from here: the control offers **Start exercise**. */
+  /**
+   * The exercise is STAGED and `live` is reachable: the control offers **Start exercise**.
+   * Not merely "`live` is reachable" -- a paused exercise reaches `live` too, but that is a
+   * resume (the world-steering tier control), not a start.
+   */
   readonly canStart: boolean
   /** `completed` is reachable from here: the control offers **End exercise**. */
   readonly canEnd: boolean
@@ -139,10 +146,14 @@ export function useExerciseLifecycle(): UseExerciseLifecycleResult {
       //    the provider closed (and unmounted this control); there is nothing to add here.
       await refreshScope().catch(() => undefined)
       return true
-    } catch {
+    } catch (error) {
       // The error is on the mutation (`transitionError`). A refusal (409) means our view of
-      // the state was stale: re-read it so the control stops offering what is no longer possible.
-      if (!USE_MOCK_DATA) void queryClient.invalidateQueries({ queryKey: key })
+      // the state was stale: re-read it so the control stops offering what is no longer
+      // possible, and re-resolve the scope so the header pill stops showing the old state.
+      if (toLifecycleError(error).status === 409) {
+        if (!USE_MOCK_DATA) void queryClient.invalidateQueries({ queryKey: key })
+        await refreshScope().catch(() => undefined)
+      }
       return false
     } finally {
       inFlightRef.current = false
@@ -172,7 +183,7 @@ export function useExerciseLifecycle(): UseExerciseLifecycleResult {
     allowedTransitions,
     loadPhase,
     loadError,
-    canStart: allowedTransitions.includes('live'),
+    canStart: lifecycle?.state === 'staged' && allowedTransitions.includes('live'),
     canEnd: allowedTransitions.includes('completed'),
     pending,
     transitionError: isError ? toLifecycleError(mutationError).message : undefined,

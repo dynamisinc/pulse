@@ -24,11 +24,17 @@ import userEvent from '@testing-library/user-event'
 import { AxiosError } from 'axios'
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest'
 import { api } from '@/core/services/api'
-import { pillLabel, renderControl, scopeResolved } from './lifecycle.testUtils'
+import { pillLabel, renderControl, resetLifecycleMock, scopeResolved } from './lifecycle.testUtils'
 
 vi.mock('@/core/config/mockData', () => ({
   USE_MOCK_DATA: false,
   warnIfMockDataActive: () => undefined,
+}))
+
+// The control gates on the signed-in session's role (lifecycle.sessionKit: a staff session).
+vi.mock('@/core/auth/sessionResolver', async importOriginal => ({
+  ...(await importOriginal<typeof import('@/core/auth/sessionResolver')>()),
+  resolveSession: (await import('./lifecycle.sessionKit')).resolveSession,
 }))
 
 const LIFECYCLE_PATH = '/staff/exercise-lifecycle'
@@ -129,6 +135,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks()
+  resetLifecycleMock()
 })
 
 const lifecycleReads = () => getSpy.mock.calls.filter(call => call[0] === LIFECYCLE_PATH)
@@ -189,8 +196,8 @@ describe('ExerciseLifecycleControl (live) -- the requests', () => {
   it('offers exactly the targets the server lists, ignoring any it does not know', async () => {
     lifecycleBodyOverride = {
       exerciseId: 'ex-live-0001',
-      state: 'paused',
-      storedStatus: 'paused',
+      state: 'staged',
+      storedStatus: 'staged',
       allowedTransitions: ['live', 'teleported'],
     }
     renderControl({ withHeader: true })
@@ -219,6 +226,8 @@ describe('ExerciseLifecycleControl (live) -- failures are visible text', () => {
     expect(alert).toHaveTextContent(
       "'live' -> 'live' is not an allowed lifecycle transition (allowed from 'live': paused, completed).",
     )
+    // S-1: the exercise scope was re-resolved too, so the header pill stops showing the old state.
+    await waitFor(() => expect(pillLabel()).toBe('LIVE'))
     // The lifecycle was re-read, so the control now offers what is actually possible.
     await waitFor(() => expect(lifecycleReads().length).toBeGreaterThan(readsBefore))
     expect(await screen.findByRole('button', { name: /end exercise/i })).toBeInTheDocument()
@@ -335,11 +344,24 @@ describe('ExerciseLifecycleControl (live) -- in flight', () => {
     await user.type(within(dialog).getByLabelText('Type END to confirm'), 'END')
     await user.click(within(dialog).getByTestId('end-exercise-confirm'))
 
-    await waitFor(() => expect(within(dialog).getByTestId('end-exercise-confirm')).toHaveTextContent('Ending…'))
-    expect(within(dialog).getByTestId('end-exercise-confirm')).toBeDisabled()
-    expect(within(dialog).getByRole('button', { name: 'Cancel' })).toBeDisabled()
+    const confirm = within(dialog).getByTestId('end-exercise-confirm')
+    await waitFor(() => expect(confirm).toHaveTextContent('Ending…'))
+    // S-2: `aria-disabled`, NOT `disabled` -- the control that holds focus keeps it mid-request.
+    expect(confirm).toHaveAttribute('aria-disabled', 'true')
+    expect(confirm).not.toBeDisabled()
+    expect(confirm).toHaveFocus()
+    const cancel = within(dialog).getByRole('button', { name: 'Cancel' })
+    expect(cancel).toHaveAttribute('aria-disabled', 'true')
+    expect(cancel).not.toBeDisabled()
+    const field = within(dialog).getByLabelText('Type END to confirm')
+    expect(field).toHaveAttribute('readonly')
+    expect(field).not.toBeDisabled()
+    // ...and none of them does anything while the request is in flight.
+    await user.click(cancel)
     await user.keyboard('{Escape}')
+    await user.click(confirm)
     expect(screen.getByRole('dialog')).toBeInTheDocument()
+    expect(postSpy).toHaveBeenCalledTimes(1)
 
     release()
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
@@ -383,8 +405,8 @@ describe('ExerciseLifecycleControl (live) -- when the state cannot be read', () 
 })
 
 describe('ExerciseLifecycleControl (live) -- absent for non-controllers', () => {
-  it('renders nothing and issues NO request for an evaluator', async () => {
-    renderControl({ role: 'evaluator', withHeader: true })
+  it('renders nothing and issues NO request for an evaluator SESSION', async () => {
+    renderControl({ sessionRole: 'evaluator', withHeader: true })
     await scopeResolved()
     // Let any would-be query settle.
     await new Promise(resolve => setTimeout(resolve, 20))

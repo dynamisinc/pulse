@@ -7,9 +7,11 @@
  * only, MUI 9 `sx`-only, dense and keyboard-first -- unmistakably the machine, never a
  * participant surface.
  *
- * WHAT IT SHOWS (all gated by the SERVER's allowed transitions -- `useExerciseLifecycle`):
- *   - **Start exercise** while `live` is a legal next state (a staged exercise);
- *   - **End exercise** while `completed` is (a live or paused one);
+ * WHAT IT SHOWS (gated by the SERVER's allowed transitions -- `useExerciseLifecycle`):
+ *   - **Start exercise** for a STAGED exercise (`live` is its legal next state). A PAUSED
+ *     exercise also reaches `live`, but that is a resume -- the world-steering tier control's
+ *     job -- so it is not offered here as a second "Start exercise";
+ *   - **End exercise** while `completed` is a legal next state (a live or paused exercise);
  *   - nothing to press otherwise (build, completed, archived): the control then shows only the
  *     last result and any error, or renders nothing at all if there is neither.
  * Start runs at once -- it is reversible by EndEx and a presenter's first beat. End opens the
@@ -27,11 +29,15 @@
  * confirmed in a polite live region ("Exercise started. The state is now LIVE.").
  *
  * ABSENT FOR NON-CONTROLLERS. The control renders nothing -- and, because the inner component
- * never mounts, issues no request -- unless the operating role is `controller`. The role comes
- * from the console's controller-identity seam (`useControllerIdentity`, the SessionProvider-free
- * source the rest of the console uses); `role` overrides it for a test or a future surface. This
- * hides a control, it does not authorize anything: the server gates both endpoints to a staff
- * session assigned to the resolved exercise (401 / 403).
+ * never mounts, issues no request -- unless the signed-in role is `controller`. The role is the
+ * REAL session's (`useOptionalSession().role`: staff routes sit under the `SessionProvider` that
+ * `app-shell/routes.tsx` hoists above `RoleAwareEntry`); `role` overrides it for a test. With no
+ * session at all it FAILS CLOSED -- renders nothing -- rather than crash the console (the
+ * non-throwing read; see `core/auth`). NOT `useControllerIdentity().role`: that is a hard-coded
+ * `'controller'` mock, so gating on it would be a no-op. This hides a control, it does not
+ * authorize anything: the server gates both endpoints to a staff session assigned to the
+ * resolved exercise (401 / 403) -- ANY assigned staff role, not only controllers -- so the
+ * controller-only rule is a client-side convention until the server enforces it too.
  *
  * KEYBOARD (NFR-001). Both buttons are native buttons in the tab order. While a request is in
  * flight the Start button stays focusable (`aria-disabled`, reading "Starting...") rather than
@@ -53,16 +59,16 @@ import {
   CobraPrimaryButton,
   CobraSecondaryButton,
 } from '@/theme/styledComponents'
-import type { ExerciseRole } from '@/core/auth'
-import { useControllerIdentity } from '../identity/controllerIdentity'
+import { useOptionalSession, type ExerciseRole } from '@/core/auth'
 import { EndExerciseDialog } from './EndExerciseDialog'
 import { useExerciseLifecycle } from './useExerciseLifecycle'
 import type { LifecycleTarget } from './lifecycleService'
 
 export interface ExerciseLifecycleControlProps {
   /**
-   * The operating role. Defaults to the console's controller identity. Anything but
-   * `controller` renders nothing.
+   * Overrides the role the control gates on (a test, or a future surface). Defaults to the
+   * signed-in session's role. Anything but `controller` -- including no session -- renders
+   * nothing.
    */
   readonly role?: ExerciseRole
 }
@@ -74,8 +80,8 @@ const SUCCESS_TEXT: Readonly<Record<LifecycleTarget, string>> = {
 }
 
 export function ExerciseLifecycleControl({ role }: ExerciseLifecycleControlProps) {
-  const identity = useControllerIdentity()
-  if ((role ?? identity.role) !== 'controller') return null
+  const session = useOptionalSession()
+  if ((role ?? session?.role) !== 'controller') return null
   return <ExerciseLifecycleControlBody />
 }
 

@@ -8,6 +8,11 @@
  * state pill move when the control changes the exercise's state, and a `MemoryRouter` (the
  * header's sign-out calls `useNavigate`).
  *
+ * The control gates on the signed-in SESSION's role, so the harness also mounts the real
+ * `SessionProvider`; the test file replaces the resolver with `lifecycle.sessionKit` (see
+ * there for the one-line `vi.mock`) and `sessionRole` picks the role (default `controller`;
+ * `'none'` mounts no `SessionProvider` at all, to prove the control fails closed).
+ *
  * The mock exercise scope starts `live`; `status` pre-sets the status the mock scope reports
  * (`setMockExerciseStatus`), and `resetLifecycleMock()` puts it back -- call it in `afterEach`.
  */
@@ -25,29 +30,39 @@ import {
 } from '@/core/exerciseContext'
 import type { ExerciseRole } from '@/core/auth'
 import { StaffHeader } from '@/features/staffShell/components/StaffHeader'
+import { SessionProvider } from '@/core/auth'
 import { ExerciseLifecycleControl } from './ExerciseLifecycleControl'
+import { resetSessionRole, setSessionRole } from './lifecycle.sessionKit'
 
 export interface RenderControlOptions {
   /** The status the MOCK exercise scope reports at mount. Defaults to the mock's own `live`. */
   readonly status?: ExerciseStatus
-  /** Overrides the operating role (the console's identity is `controller`). */
+  /** The `role` PROP override (wins over the session's role). */
   readonly role?: ExerciseRole
+  /** The signed-in session's role; `'none'` = no `SessionProvider`. Defaults to `controller`. */
+  readonly sessionRole?: ExerciseRole | 'none'
   /** Render the real staff header beside the control, to read the state pill. */
   readonly withHeader?: boolean
 }
 
 /** Renders the control (and optionally the header) under the real providers. */
 export function renderControl(options: RenderControlOptions = {}): RenderResult {
-  const { status, role, withHeader = false } = options
+  const { status, role, sessionRole = 'controller', withHeader = false } = options
   if (status !== undefined) setMockExerciseStatus(status)
+  if (sessionRole !== 'none') setSessionRole(sessionRole)
+  const body = (
+    <>
+      {withHeader && <StaffHeader surfaceName="Controller Console" />}
+      <ExerciseLifecycleControl {...(role !== undefined ? { role } : {})} />
+    </>
+  )
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
     <QueryClientProvider client={client}>
       <MemoryRouter>
         <ThemeProvider theme={cobraTheme}>
           <ExerciseContextProvider>
-            {withHeader && <StaffHeader surfaceName="Controller Console" />}
-            <ExerciseLifecycleControl {...(role !== undefined ? { role } : {})} />
+            {sessionRole === 'none' ? body : <SessionProvider>{body}</SessionProvider>}
           </ExerciseContextProvider>
         </ThemeProvider>
       </MemoryRouter>
@@ -55,9 +70,10 @@ export function renderControl(options: RenderControlOptions = {}): RenderResult 
   )
 }
 
-/** Restores the mock exercise scope to its canned status. */
+/** Restores the mock exercise scope to its canned status and the session to a controller. */
 export function resetLifecycleMock(): void {
   resetMockExerciseStatus()
+  resetSessionRole()
 }
 
 /** Waits for the exercise scope to resolve, i.e. for the header (or anything under it) to mount. */

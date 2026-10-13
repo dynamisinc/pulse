@@ -27,7 +27,7 @@ export {
 export { SessionProvider, useSession } from './session'
 export type { SessionProviderProps } from './session'
 // demo-polish C6 (the staff preview): a read-only narrowing of the surrounding session.
-export { ReadOnlySessionScope } from './session'
+export { ReadOnlySessionScope, useOptionalSession } from './session'
 export type { ReadOnlySessionScopeProps } from './session'
 
 export { resolveSession, isSessionExpired, SESSION_TTL_MS } from './sessionResolver'

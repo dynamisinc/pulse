@@ -15,7 +15,13 @@
  * field reads `END`; Enter in the field confirms (only when it matches, never while a request is
  * in flight); **Cancel** and Esc close it. While the request is in flight the dialog cannot be
  * dismissed (Esc and Cancel are ignored and the button reads "Ending...") so the controller is
- * never left wondering whether the exercise ended. A REFUSED or failed request leaves the dialog
+ * never left wondering whether the exercise ended. The controls that can hold focus (the field,
+ * Cancel, the confirm button) are marked `aria-disabled` / read-only while pending, NOT
+ * `disabled`: a `disabled` control that has focus drops it to <body> in the middle of the
+ * request, stranding a keyboard user inside a modal (the only `disabled` state left is the
+ * confirm button BEFORE END is typed, which cannot hold focus yet).
+ *
+ * A REFUSED or failed request leaves the dialog
  * open with the reason as TEXT (an icon, a bold lead-in and the sentence -- never colour alone),
  * announced with `role="alert"`, and the field still holding `END`, so retrying is one key press.
  *
@@ -46,6 +52,11 @@ import {
 /** The word the controller types. Exact match after trimming. */
 export const END_CONFIRM_WORD = 'END'
 
+/** MUI does not style `aria-disabled`: dim the pending control and drop the pointer. */
+const PENDING_SX = {
+  '&[aria-disabled="true"]': { opacity: 0.6, cursor: 'default' },
+} as const
+
 export interface EndExerciseDialogProps {
   /** A request is in flight: the dialog cannot be dismissed and the confirm reads "Ending...". */
   readonly pending: boolean
@@ -68,6 +79,9 @@ export function EndExerciseDialog({ pending, error, onConfirm, onCancel }: EndEx
   const confirm = () => {
     if (canConfirm) onConfirm()
   }
+  const cancel = () => {
+    if (!pending) onCancel()
+  }
   const handleKeyDown = (event: KeyboardEvent<HTMLElement>) => {
     if (event.key !== 'Enter') return
     // A native default action (a button's click) must still happen on the buttons.
@@ -79,9 +93,7 @@ export function EndExerciseDialog({ pending, error, onConfirm, onCancel }: EndEx
   return (
     <Dialog
       open
-      onClose={() => {
-        if (!pending) onCancel()
-      }}
+      onClose={cancel}
       maxWidth="xs"
       fullWidth
       aria-labelledby={titleId}
@@ -105,9 +117,11 @@ export function EndExerciseDialog({ pending, error, onConfirm, onCancel }: EndEx
           autoComplete="off"
           // Focus lands in the field on open: the controller's next act is to type END.
           autoFocus
-          disabled={pending}
           slotProps={{
             htmlInput: {
+              // Read-only (not disabled) while the request is in flight: it may hold focus.
+              readOnly: pending,
+              'aria-disabled': pending,
               'data-testid': 'end-exercise-confirm-input',
               spellCheck: false,
               autoCapitalize: 'characters',
@@ -138,14 +152,16 @@ export function EndExerciseDialog({ pending, error, onConfirm, onCancel }: EndEx
         )}
       </DialogContent>
       <DialogActions sx={{ px: 3, pb: 2 }}>
-        <CobraLinkButton onClick={onCancel} disabled={pending}>
+        <CobraLinkButton onClick={cancel} aria-disabled={pending} sx={PENDING_SX}>
           Cancel
         </CobraLinkButton>
         <CobraDeleteButton
           startIcon={<FontAwesomeIcon icon={faStop} aria-hidden="true" />}
           onClick={confirm}
-          disabled={!canConfirm}
+          disabled={!matches}
+          aria-disabled={pending}
           aria-busy={pending}
+          sx={PENDING_SX}
           data-testid="end-exercise-confirm"
         >
           {pending ? 'Ending…' : 'End exercise'}

@@ -6,14 +6,14 @@
  * 23-preview-and-startex.md). It mounts the REAL Social channel -- the same
  * `<SocialChannel />` a participant gets -- inside the staff frame, and replaces
  * the `PortalStub` mock this file's predecessor staged. `PreviewAsParticipant.tsx`
- * (the staff half: label strip, moment picker, Exit, neutral mat) renders this and
+ * (the staff half: label strip, Exit, neutral mat) renders this and
  * nothing else of the participant world.
  *
  * ## The composition (outermost first)
  *
- *   PreviewTelemetryMute              holds the telemetry mute while the preview is mounted
+ *   PreviewTelemetryMute              holds the PARTICIPANT-event mute while the preview is mounted
  *   > ReadOnlySessionScope            the surrounding session, narrowed to a read-only observer
- *     > ShellContextProvider          { variant: 'preview', scenarioNow: <the chosen moment> }
+ *     > ShellContextProvider          { variant: 'preview', scenarioNow: <the moment's instant> }
  *       > BrandThemeProvider          the exercise's brand tokens (a plain context + CSS vars)
  *         > SocialBrandScope          --pulse-ac from the brand, exactly as App.tsx mounts it
  *           > MemorySocialNavigationProvider   the channel's location lives in memory
@@ -37,8 +37,11 @@
  *     persona, from showing the staff user a Follow button.
  *  3. `PreviewTelemetryMute` -- the one thing the channel does on its own, with no
  *     control to hide, is emit participant-kind telemetry (a `view` per feed /
- *     thread / profile). A preview must not report on a participant who does not
- *     exist, so the sink is muted while this is mounted.
+ *     thread / profile, a `search`). A preview must not report on a participant who
+ *     does not exist, so PARTICIPANT-kind events are muted while this is mounted.
+ *     Nothing else is: the sink is process-wide, and a staff audit record (a
+ *     takedown's `steering_action`, emitted when its request resolves) must still be
+ *     recorded if it lands while a preview is open.
  *
  * ## Why links stay inside the preview (AC: "Real channel")
  * `MemorySocialNavigationProvider` keeps the channel's location in React state and
@@ -47,7 +50,8 @@
  * staff page's address bar. It starts at `/home`.
  *
  * ## Scenario time (COR-053)
- * `scenarioNow` is the instant of the moment the staff strip has selected, handed
+ * `scenarioNow` is the instant of the preview's moment (the live scenario clock: the strip
+ * no longer offers a picker, so it is always the default `now`), handed
  * to the channel through the shell mount contract like any other mount. Every
  * participant-visible time here is scenario time; nothing reads the wall clock.
  *
@@ -87,7 +91,7 @@ const PREVIEW_VARIANT: ShellVariant = 'preview'
 const INITIAL_ENTRIES: readonly string[] = [HOME_PATH]
 
 export interface PreviewChannelHostProps {
-  /** The scenario-time instant of the moment the staff strip selected (COR-053). */
+  /** The scenario-time instant of the preview's moment (COR-053). */
   scenarioNow: Date
 }
 
@@ -103,7 +107,7 @@ function PreviewTelemetryMute() {
 }
 
 export function PreviewChannelHost({ scenarioNow }: PreviewChannelHostProps) {
-  // A new object only when the moment changes: the channel (and every memoized feed
+  // A new object only when the instant changes: the channel (and every memoized feed
   // row) must not re-render because the staff strip did.
   const mount = useMemo<ShellMountProps>(
     () => ({ variant: PREVIEW_VARIANT, scenarioNow }),

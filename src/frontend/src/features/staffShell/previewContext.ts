@@ -31,29 +31,25 @@
  * `usePreview()` THROWS when called outside a `<PreviewProvider>` — there is
  * no default/module-global preview state a caller could silently read.
  *
- * ## The scenario-moment model (mock, AC2)
- * Four mutually-exclusive moments — STARTEX / ADVISORY / BURST / NOW — each
- * carrying a mock alert state (`none` / `info` / `advisory` / `emergency`,
- * exactly NFR-001's four states), mock in-fiction content (kicker/headline/
- * dek), and a scenario instant. `now` reads the LIVE scenario clock
- * (`scenarioNow()` from `@/core/clock`, never wall-clock — COR-053); the
- * other three are FIXED MINUTE OFFSETS before it, so selecting a moment
- * drives both the preview's alert state/content and the `scenarioNow` handed
- * to the staged participant render. This is deliberately a LOCAL, MOCK model
- * — participant-shell owns the real alert bar (D7-002); this story never
- * builds it (see "Since demo-polish C6" below for what the stage renders now).
+ * ## The scenario-moment model (kept; NOT offered in the UI since demo-polish C6)
+ * Four mutually-exclusive moments -- STARTEX / ADVISORY / BURST / NOW -- each a label and a
+ * scenario instant. `now` reads the LIVE scenario clock (`scenarioNow()` from `@/core/clock`,
+ * never wall-clock -- COR-053); the other three are FIXED MINUTE OFFSETS before it. The stage
+ * hands the selected moment's instant to the staged participant render through the shell mount
+ * contract (`ShellContextProvider`'s `scenarioNow`).
  *
- * World: staff (COBRA/Cadence hosts the toggle this module backs) — but this
- * module itself renders no UI and imports neither COBRA nor MUI.
+ * The moment PICKER is no longer rendered (Gate-1 amendment to C6 story 23): the stage now
+ * hosts the real Social channel, whose per-post ages come from the live scenario clock
+ * (`useScenarioTime`), not from the shell mount, so a picker changes nothing the audience
+ * would see -- worse on stage than no picker. The model and `setMoment` stay for the day a
+ * channel (or an "as of" feed view) can honour a chosen moment; until then `moment` is always
+ * its default, `now`.
  *
- * ## Since demo-polish C6: the stage hosts the REAL channel
- * The moment CONTENT strings (alert state/message, kicker/headline/dek) were
- * participant-world copy for the `PortalStub` mock the stage used to stage. C6
- * replaced that stub with the real Social channel (`components/
- * PreviewChannelHost.tsx`), which renders the exercise's own feed, so nothing
- * renders those strings any more; they stay here as the moment model (the picker's
- * labels and the `scenarioNow` offsets are what the stage still reads). The real
- * alert bar is the participant shell's (D7-002) and is not mounted in the preview.
+ * World: staff (COBRA/Cadence hosts the toggle this module backs) -- but this
+ * module itself renders no UI and imports neither COBRA nor MUI. The model carries no
+ * participant-facing copy: the mock alert/headline strings the retired `PortalStub` rendered
+ * were removed with it (C6); the real alert bar is the participant shell's (D7-002) and is not
+ * mounted in the preview.
  */
 
 import {
@@ -78,27 +74,11 @@ export const PREVIEW_MOMENT_ORDER: readonly PreviewMoment[] = [
   'now',
 ]
 
-/**
- * The mock alert severity a moment drives — NFR-001's four states exactly
- * (none/info/advisory/emergency). A LOCAL mock model only; never the real
- * alert bar (participant-shell owns that contract, D7-002).
- */
-export type PreviewAlertState = 'none' | 'info' | 'advisory' | 'emergency'
-
-/** One moment's mock alert state + in-fiction content + scenario offset. */
+/** One moment's label + scenario offset. */
 export interface PreviewMomentConfig {
   readonly id: PreviewMoment
   /** Chip caption, e.g. "STARTEX". */
   readonly label: string
-  readonly alertState: PreviewAlertState
-  /** Mock alert message. Present whenever `alertState !== 'none'`. */
-  readonly alertMessage?: string
-  /** Mock in-fiction masthead kicker/section label. */
-  readonly kicker: string
-  /** Mock in-fiction headline. */
-  readonly headline: string
-  /** Mock in-fiction dek/summary. */
-  readonly dek: string
   /**
    * Minutes BEFORE the live scenario "now" this moment represents (`0` for
    * `now` itself). Never positive — a preview never shows the future.
@@ -107,45 +87,10 @@ export interface PreviewMomentConfig {
 }
 
 const PREVIEW_MOMENT_CONFIGS: Record<PreviewMoment, PreviewMomentConfig> = {
-  startex: {
-    id: 'startex',
-    label: 'STARTEX',
-    alertState: 'none',
-    kicker: 'FAIRHAVEN TODAY',
-    headline: 'Exercise operations underway across the region',
-    dek: 'Local agencies are coordinating routine readiness activities this morning.',
-    offsetMinutes: -180,
-  },
-  advisory: {
-    id: 'advisory',
-    label: 'ADVISORY',
-    alertState: 'advisory',
-    alertMessage: 'Boil Water Advisory — Zones 2–4. Boil tap water for 1 minute before use.',
-    kicker: 'FAIRHAVEN TODAY',
-    headline: 'Boil Water Advisory issued for Zones 2–4',
-    dek: 'Residents in affected zones should boil tap water for at least one minute before use.',
-    offsetMinutes: -90,
-  },
-  burst: {
-    id: 'burst',
-    label: 'BURST',
-    alertState: 'emergency',
-    alertMessage: 'Do not drink tap water in Zones 2–4. Distribution open at Fairview HS.',
-    kicker: 'FAIRHAVEN TODAY',
-    headline: 'Do not drink tap water in Zones 2–4',
-    dek: 'Contamination confirmed at the Millbrook treatment plant; distribution open at Fairview High School.',
-    offsetMinutes: -20,
-  },
-  now: {
-    id: 'now',
-    label: 'NOW',
-    alertState: 'info',
-    alertMessage: 'Distribution continues at Fairview High School while testing is underway.',
-    kicker: 'FAIRHAVEN TODAY',
-    headline: 'Water distribution site open at Fairview High School',
-    dek: 'Crews continue flushing and testing the Millbrook system; an update is expected this afternoon.',
-    offsetMinutes: 0,
-  },
+  startex: { id: 'startex', label: 'STARTEX', offsetMinutes: -180 },
+  advisory: { id: 'advisory', label: 'ADVISORY', offsetMinutes: -90 },
+  burst: { id: 'burst', label: 'BURST', offsetMinutes: -20 },
+  now: { id: 'now', label: 'NOW', offsetMinutes: 0 },
 }
 
 /**
