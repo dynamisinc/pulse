@@ -1,6 +1,7 @@
 namespace Pulse.WebApi.Tests.Features.Identity.Roster;
 
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json;
 using System.Threading.Tasks;
@@ -528,6 +529,37 @@ public sealed class RosterServiceTests
         await using var after = Read(world.ExerciseId);
         (await after.Accounts.SingleAsync()).JobRole.Should().Be("Ops Chief", "no flip-flop between the two rows");
         (await after.TelemetryEvents.CountAsync()).Should().Be(events, "a stable re-upload emits no roster.imported");
+    }
+
+    [RequiresDockerFact]
+    public async Task Import_ARowThatResolvesAPersonAndFails_StillBlocksALaterRow_SoEveryUploadIsIdenticalAndWritesNothing()
+    {
+        var world = await RosterSeed.ExerciseAsync(_fixture);
+        var dana = await RosterSeed.AccountAsync(
+            _fixture, world.ExerciseId, "dwhitfield", "Dana Whitfield", agency: "Fulco EM", email: "dana@example.test");
+        const string file = Header
+            + "Dana Whitfield,Fulco EM,Ops Chief,new@example.test,,dwhitfield\n"
+            + "Dana Whitfield,Fulco EM,Planner,new@example.test,,";
+
+        var reports = new List<RosterImportResultDto>();
+        for (var upload = 0; upload < 3; upload++)
+        {
+            await using var harness = RosterHarness.For(_fixture, world);
+            reports.Add((await harness.Service.ImportAsync(file, dryRun: false)).Report!);
+        }
+
+        reports[0].Rows.Select(r => (r.Status, r.Message)).Should().Equal(
+            (RosterRowStatuses.Failed, RosterWorkspace.DifferentEmailMessage),
+            (RosterRowStatuses.Failed, "email also on row 1"));
+        reports[1].Rows.Should().BeEquivalentTo(reports[0].Rows, "upload 2 gives exactly upload 1's answer");
+        reports[2].Rows.Should().BeEquivalentTo(reports[0].Rows, "and so does upload 3");
+
+        await using var read = Read(world.ExerciseId);
+        var stored = await read.Accounts.SingleAsync();
+        stored.Id.Should().Be(dana.Id);
+        (stored.Email, stored.JobRole, stored.PersonaId).Should().Be(("dana@example.test", (string?)null, (Guid?)null), "nothing was written");
+        (await read.Personas.CountAsync()).Should().Be(0);
+        (await read.TelemetryEvents.CountAsync()).Should().Be(0, "no upload wrote anything, so none emits roster.imported");
     }
 
     internal static Session Session(Guid exerciseId, Guid accountId, DateTimeOffset expiresAt, DateTimeOffset? refreshExpiresAt, bool revoked = false) => new()

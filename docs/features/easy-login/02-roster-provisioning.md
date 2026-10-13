@@ -50,10 +50,13 @@ the real one). The CSV columns, the derivation rules and the wire shapes are fro
       handle derived as for a new row), the row is `updated` with `personaCreated: true`, and no link is issued for
       them (staff reissue one, story 03). Same-file guards: two rows with the same first key fail the later one with a
       message naming the earlier row; two rows that reach the **same existing** participant through any keys fail the
-      later one ("duplicate of row N (same person)"); and a row keyed by name + agency alone fails when another row of
-      the file has that name + agency with a `signInName` or `email` ("same name and agency as row N: add a signInName
-      or email to tell them apart"), on the first upload and on every re-upload. *(Amended after Gate-1: f07c1ea,
-      241b7d0.)*
+      later one ("duplicate of row N (same person)"), a person counting as reached as soon as a row resolves them even
+      if that row then fails; a row keyed by name + agency alone fails when another row of the file has that name +
+      agency with a `signInName` or `email` ("same name and agency as row N: add a signInName or email to tell them
+      apart"); and a row whose email an earlier row carried fails ("email also on row N"); all on the first upload and
+      on every re-upload. A stored persona id that resolves to nothing in the exercise (dangling, or another
+      exercise's) is replaced the same way, reported uniformly as "persona re-created @x: the previous one was not
+      found". *(Amended after Gate-1: f07c1ea, 241b7d0, a70b106.)*
 - [ ] **Given** `POST /api/staff/roster` with a `RosterRowWrite`, **then** it creates one participant the same way
       and answers `201 RosterEntryDto`; a key that already exists answers `409`; an invalid field answers `400`.
 - [ ] **Given** `GET /api/staff/roster`, **then** it lists **every account in the exercise** (including ones the
@@ -143,11 +146,18 @@ rule tests (`participantAdmin/mocks/rosterMocks.test.ts`) case for case.
   `.SameFile_ANameAndAgencyOnlyRow_FailsWhenAnotherRowHasThatNameAndAgencyWithAKey_OnEveryUpload` (W-1),
   `.SameFile_TwoRowsReachingTheSameExistingPersonThroughDifferentKeys_FailTheLaterOne` (W-2),
   `.Matched_APersonalessParticipant_GetsAnAutoCitizenPersona_ThenIsUnchanged`, `.Matched_APersonalessParticipant_InADryRun_ReportsThePersona_ButCreatesNone`,
-  `.Add_MatchingAPersonalessParticipant_IsStillNotACreation` (CR-001);
+  `.Add_MatchingAPersonalessParticipant_IsStillNotACreation` (CR-001),
+  `.SameFile_AFailingRowStillReachesItsPerson_TheReviewersRegression_IsIdenticalOnEveryUpload`,
+  `.SameFile_APersonResolvedByAFailingRow_CannotBeReachedByALaterRow`, `.SameFile_ThePeopleAConflictingKeyNamed_CountAsReachedToo` (W-A),
+  `.SameFile_AnEmailAnEarlierRowCarried_FailsTheLaterRow_TomAndPriya`,
+  `.SameFile_TwoNewPeopleWithExplicitSignInNamesAndOneEmail_FailTheLater_OnEveryUpload` (W-C),
+  `.Matched_AnUnresolvablePersonaId_IsReCreated_WithOneUniformMessage` (S-a), `.SameFile_AnInvalidRow_ReportsItsFieldError_BeforeTheNameAndAgencyGuard` (S-b);
   `RosterServiceTests.Import_TheSameFileTwice_IsIdempotent_NothingIsCreated_NoLinkRotates_NoEventIsEmitted`,
   `.Import_AChangedRow_IsUpdatedAndPersisted_AndABlankCellNeverClears`,
   `.Import_AMatchedPersonalessParticipant_GetsANonCastableAutoPersona_NoLink_AndADryRunWritesNone` (CR-001),
-  `.Import_TwoRowsReachingOnePersonByDifferentKeys_FailTheLater_AndTheReuploadIsStable` (W-2).
+  `.Import_TwoRowsReachingOnePersonByDifferentKeys_FailTheLater_AndTheReuploadIsStable` (W-2),
+  `.Import_ARowThatResolvesAPersonAndFails_StillBlocksALaterRow_SoEveryUploadIsIdenticalAndWritesNothing` (W-A);
+  `RosterIsolationTests.AnAccountInAPointingAtBsPersona_OrAtNothing_GetsAFreshPersonaInA_AndBIsUntouched` (W-B).
 - **AC-5** `RosterEndpointsHttpTests.Add_Is201WithTheEntry_ThenTheSameKeyIs409_AndAnInvalidFieldIs400_AsProblemDetails`;
   `RosterServiceTests.Add_CreatesOneParticipant_WithAnActiveLink_AndOnlyALinkEvent`, `.Add_AnExistingKeyIsAConflict_AndAnInvalidFieldIsInvalid_AndNeitherWrites`;
   `RosterWorkspaceTests.Add_*`.
