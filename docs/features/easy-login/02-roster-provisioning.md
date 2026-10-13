@@ -1,7 +1,7 @@
 # Story: Roster provisioning: CSV, add one, list, personas
 
 **Feature:** Easy participant login  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Not Started
-**Requirements:** COR-011, COR-017 (part: roster and diagnosis view), COR-018 (org-persona binding at provisioning)  ·  **Design decisions:** none (EL-1 to EL-4, EL-13, EL-17)  ·  **Issue:** —
+**Requirements:** COR-011, COR-017 (part: roster and diagnosis view), COR-018 (org-persona binding at provisioning)  ·  **Design decisions:** none (EL-1 to EL-4, EL-13, EL-17)  ·  **Issue:** #467
 **Stack:** backend  ·  **Review:** Tier-1 (staff-only writes; isolation and content security checked at Gate 1)  ·  **Priority:** Must  ·  **Wave:** 1  ·  **Effort:** L
 
 ## Context
