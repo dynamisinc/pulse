@@ -50,7 +50,7 @@ The epics have no requirement text for personal links, day words or card sheets 
 | 11 | [Today's word panel (staff)](11-fe-day-word-panel.md) | frontend | Must | 1 | contract | In Review | #476 |
 | 12 | [Printable card sheet (staff)](12-fe-card-sheet.md) | frontend | Must | 1 | contract | In Review | #477 |
 | 13 | [Email the personal link (Azure Communication Services)](13-email-delivery.md) | backend + infra | **Could** | 3 | 02, 03, 10 | Not Started | #478 |
-| 14 | [UAT tester provisioning script](14-uat-roster-script.md) | script | Could | 2 | backend deployed | Not Started | #479 |
+| 14 | [UAT tester provisioning script](14-uat-roster-script.md) | script | Could | 2 | backend deployed | In Review | #479 |
 
 **Story 13 is the piece that may slip past the freeze, and nothing else depends on it.** It adds no migration, is dark until configured, and the roster screen works fully without it. If it is not built, delete nothing: the `capabilities.emailLinks: false` flag and the unused slot already cover its absence.
 

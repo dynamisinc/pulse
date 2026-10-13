@@ -1,6 +1,6 @@
 # Story: UAT tester provisioning script
 
-**Feature:** Easy participant login  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Not Started
+**Feature:** Easy participant login  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** In Review
 **Requirements:** COR-011 (staff-provisioned only)  ·  **Design decisions:** none (EL-2, EL-13)  ·  **Issue:** #479
 **Stack:** script (PowerShell 7)  ·  **Review:** Tier-1  ·  **Priority:** Could  ·  **Wave:** 2  ·  **Effort:** S
 
