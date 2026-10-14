@@ -1,22 +1,22 @@
 {
   "$schema": "./schema/pack.schema.json",
   "schema": "pulse.demopack.v1",
-  "county": "Fulton County (fictional): City of Fairhaven, East Side Zones 2-4. DRAFT names, pending Tom’s approval by Wed 2026-10-14.",
+  "county": "Kestrel County (fictional): City of Fairhaven, East Side Zones 2-4. Names approved by Tom 2026-10-13 (FIC-001).",
   "personas": [
     {
-      "handle": "FulcoEM",
-      "displayName": "Fulton County EM",
-      "bio": "Official account of Fulton County Emergency Management. Preparedness, response and recovery for every community in the county. Alerts and advisories posted here first.",
-      "location": "Fulton County",
+      "handle": "KestrelCoEM",
+      "displayName": "Kestrel County EM",
+      "bio": "Official account of Kestrel County Emergency Management. Preparedness, response and recovery for every community in the county. Alerts and advisories posted here first.",
+      "location": "Kestrel County",
       "verified": true,
-      "avatar": "avatars/fulcoem.png",
-      "banner": "banners/fulcoem.jpg"
+      "avatar": "avatars/kestrelcoem.png",
+      "banner": "banners/kestrelcoem.jpg"
     },
     {
       "handle": "FairhavenWater",
       "displayName": "Fairhaven Water Utility",
       "bio": "Official account of the City of Fairhaven water utility. Service updates, advisories and repair news for Zones 1 to 4.",
-      "location": "Fairhaven, Fulton County",
+      "location": "Fairhaven, Kestrel County",
       "verified": true,
       "avatar": "avatars/fairhavenwater.png",
       "banner": "banners/fairhavenwater.jpg"
@@ -31,13 +31,13 @@
       "banner": "banners/fairhavenwater.jpg"
     },
     {
-      "handle": "Newsline7",
-      "displayName": "Newsline 7",
-      "bio": "Fairhaven’s breaking-news source. Local news, weather and traffic for Fulton County. Newsline 7, on your side.",
+      "handle": "MetroDesk9",
+      "displayName": "Metro Desk 9",
+      "bio": "Fairhaven’s breaking-news source. Local news, weather and traffic for Kestrel County. Metro Desk 9, on your side.",
       "location": "Fairhaven",
       "verified": true,
-      "avatar": "avatars/newsline7.png",
-      "banner": "banners/newsline7.jpg"
+      "avatar": "avatars/metrodesk9.png",
+      "banner": "banners/metrodesk9.jpg"
     },
     {
       "handle": "TheScoopHQ",
@@ -190,13 +190,13 @@
       "kind": "image",
       "width": 1600,
       "height": 900,
-      "alt": "Official notice from Fulton County Emergency Management. Boil water advisory, Zones 2 to 4. Boiling tap water for 1 minute is safe and effective. The advisory has not expanded: Zones 2, 3 and 4 only. Free bottled water at Elm Street Fire Station and Fairhaven High School. Official updates come only from verified accounts: FulcoEM and FairhavenWater."
+      "alt": "Official notice from Kestrel County Emergency Management. Boil water advisory, Zones 2 to 4. Boiling tap water for 1 minute is safe and effective. The advisory has not expanded: Zones 2, 3 and 4 only. Free bottled water at Elm Street Fire Station and Fairhaven High School. Official updates come only from verified accounts: KestrelCoEM and FairhavenWater."
     }
   ],
   "posts": [
     {
       "key": "p01",
-      "persona": "Newsline7",
+      "persona": "MetroDesk9",
       "text": "BREAKING: A water main has broken on Elm Street near the Eastside pump station. Crews are on scene and east side residents report low or no water pressure. More as we learn it. #WaterIssues",
       "minutesBeforeAnchor": 355,
       "baseline": {"like": 214, "repost": 96, "reply": 31}
@@ -225,14 +225,14 @@
     },
     {
       "key": "p05",
-      "persona": "FulcoEM",
-      "text": "Fulton County EM is supporting @FairhavenWater on the Elm Street main break. Please avoid Elm Street between Main Street and the river while crews work, and follow the utility for service updates.",
+      "persona": "KestrelCoEM",
+      "text": "Kestrel County EM is supporting @FairhavenWater on the Elm Street main break. Please avoid Elm Street between Main Street and the river while crews work, and follow the utility for service updates.",
       "minutesBeforeAnchor": 305,
       "baseline": {"like": 96, "repost": 74, "reply": 8}
     },
     {
       "key": "p06",
-      "persona": "Newsline7",
+      "persona": "MetroDesk9",
       "text": "Our crew is at the Elm Street break, where workers have dug down to the main and are working to shut it off. Traffic is being diverted around the site. #WaterIssues",
       "minutesBeforeAnchor": 290,
       "media": [{"ref": "news-elm-break"}],
@@ -248,7 +248,7 @@
     },
     {
       "key": "p08",
-      "persona": "Newsline7",
+      "persona": "MetroDesk9",
       "text": "Fairhaven Water hasn’t given a time yet. We’ll post here as soon as they do.",
       "minutesBeforeAnchor": 279,
       "replyTo": "p07",
@@ -263,7 +263,7 @@
     },
     {
       "key": "p10",
-      "persona": "FulcoEM",
+      "persona": "KestrelCoEM",
       "text": "Sharing the @FairhavenWater boil water advisory for Zones 2-4 (the east side). Boil tap water for 1 minute, then let it cool. Not sure of your zone? It’s printed on your water bill. #WaterIssues",
       "minutesBeforeAnchor": 262,
       "media": [{"ref": "photo-advisory-sign"}, {"ref": "photo-boiling-pot"}],
@@ -324,14 +324,14 @@
     },
     {
       "key": "p18",
-      "persona": "Newsline7",
+      "persona": "MetroDesk9",
       "text": "Fairhaven Water says repairs on the Elm Street main could run into tomorrow. The boil water advisory for Zones 2-4 stays in effect until two rounds of tests come back clean. #WaterIssues",
       "minutesBeforeAnchor": 185,
       "baseline": {"like": 521, "repost": 287, "reply": 44}
     },
     {
       "key": "p19",
-      "persona": "FulcoEM",
+      "persona": "KestrelCoEM",
       "text": "Free bottled water for Zones 2-4 residents at Elm Street Fire Station and Fairhaven High School. Limit 2 cases per household. Distribution opens in one hour. #WaterIssues",
       "minutesBeforeAnchor": 170,
       "media": [{"ref": "photo-distribution"}],
@@ -354,7 +354,7 @@
     },
     {
       "key": "p22",
-      "persona": "FulcoEM",
+      "persona": "KestrelCoEM",
       "text": "Yes. Families with infants can go straight to the table at the side door at both sites. No need to wait in the main line.",
       "minutesBeforeAnchor": 158,
       "replyTo": "p20",
@@ -379,7 +379,7 @@
     {
       "key": "p25",
       "persona": "FairhavenWater",
-      "text": "Bottled water at both sites is free. This account is not affiliated with Fairhaven Water. For official updates, follow this account and @FulcoEM.",
+      "text": "Bottled water at both sites is free. This account is not affiliated with Fairhaven Water. For official updates, follow this account and @KestrelCoEM.",
       "minutesBeforeAnchor": 142,
       "replyTo": "p21",
       "baseline": {"like": 233, "repost": 162, "reply": 14}
@@ -394,7 +394,7 @@
     },
     {
       "key": "p27",
-      "persona": "Newsline7",
+      "persona": "MetroDesk9",
       "text": "Lines are forming at the Fairhaven High School distribution site. Volunteers tell us they have plenty of water for now. #WaterIssues",
       "minutesBeforeAnchor": 130,
       "media": [{"ref": "photo-line"}],
@@ -439,7 +439,7 @@
     },
     {
       "key": "p33",
-      "persona": "FulcoEM",
+      "persona": "KestrelCoEM",
       "text": "Reminder: boiling tap water for 1 minute makes it safe to drink while the advisory is in effect. Both bottled water sites stay open until further notice. #WaterIssues",
       "minutesBeforeAnchor": 55,
       "baseline": {"like": 191, "repost": 152, "reply": 14}
@@ -461,7 +461,7 @@
     {
       "key": "p36",
       "persona": "kwardFH",
-      "text": "Showering is fine, just don’t swallow any. For little ones a sponge bath is safer. @FulcoEM has the official guidance.",
+      "text": "Showering is fine, just don’t swallow any. For little ones a sponge bath is safer. @KestrelCoEM has the official guidance.",
       "minutesBeforeAnchor": 14,
       "replyTo": "p35",
       "baseline": {"like": 17}
@@ -472,13 +472,13 @@
       {
         "key": "rs01",
         "kind": "post",
-        "title": "Beat 2 · BREAKING video: second main break on Mill Road (Newsline 7)",
-        "notes": "Beat 2. Fire it, or show the live path: compose as Newsline7, attach news-mill-road from the media library (or upload newsline-mill-road.mp4 from the demo laptop), paste this text, then Skip this item. Nothing later replies to it, so either path works.",
+        "title": "Beat 2 · BREAKING video: second main break on Mill Road (Metro Desk 9)",
+        "notes": "Beat 2. Fire it, or show the live path: compose as MetroDesk9, attach news-mill-road from the media library (or upload news-mill-road.mp4 from the demo laptop), paste this text, then Skip this item. Nothing later replies to it, so either path works.",
         "plannedMinute": 3,
         "assignee": "me",
         "posts": [
           {
-            "persona": "Newsline7",
+            "persona": "MetroDesk9",
             "text": "BREAKING: A second water main has burst on Mill Road near the Eastside reservoir. Water is pouring into the street and crews are on the way. No word yet on whether the boil water advisory will expand. #WaterIssues",
             "media": [{"ref": "news-mill-road"}],
             "engagementBaseline": {"like": 386, "repost": 254, "reply": 12}
@@ -567,7 +567,7 @@
           },
           {
             "persona": "kwardFH",
-            "text": "Hold on. This account doesn’t have the check mark. Has @FairhavenWater or @FulcoEM said this anywhere?",
+            "text": "Hold on. This account doesn’t have the check mark. Has @FairhavenWater or @KestrelCoEM said this anywhere?",
             "replyTo": {"item": "rs03", "sequence": 1},
             "engagementBaseline": {"like": 122, "repost": 15}
           },
@@ -633,14 +633,14 @@
       {
         "key": "rs07",
         "kind": "post",
-        "title": "Beat 4 · CUE THE PIO: Newsline 7 asks officials to confirm",
-        "notes": "Beat 4 cue. After this fires, the PIO (participant, posting as @FulcoEM) posts the official statement and attaches pio-statement-card.png from the demo laptop. Suggested text: docs/demo/pack/README.md, beat 4.",
+        "title": "Beat 4 · CUE THE PIO: Metro Desk 9 asks officials to confirm",
+        "notes": "Beat 4 cue. After this fires, the PIO (participant, posting as @KestrelCoEM) posts the official statement and attaches pio-statement-card.png from the demo laptop. Suggested text: docs/demo/pack/README.md, beat 4.",
         "plannedMinute": 10,
         "assignee": "me",
         "posts": [
           {
-            "persona": "Newsline7",
-            "text": "Posts claiming boiling is unsafe and that the advisory now covers all of Fairhaven are spreading fast. We have asked Fulton County EM and Fairhaven Water to confirm. #WaterIssues",
+            "persona": "MetroDesk9",
+            "text": "Posts claiming boiling is unsafe and that the advisory now covers all of Fairhaven are spreading fast. We have asked Kestrel County EM and Fairhaven Water to confirm. #WaterIssues",
             "engagementBaseline": {"like": 291, "repost": 172, "reply": 38}
           }
         ]
@@ -648,14 +648,14 @@
       {
         "key": "rs08",
         "kind": "post",
-        "title": "Beat 4 · BACKUP ONLY: the PIO statement as @FulcoEM (Skip if the PIO posted live)",
-        "notes": "BACKUP ONLY. The PIO posts this live as @FulcoEM with the notice card. Fire this only if the live post fails; otherwise Skip it. No baseline, so it shows real counts like the PIO’s own post.",
+        "title": "Beat 4 · BACKUP ONLY: the PIO statement as @KestrelCoEM (Skip if the PIO posted live)",
+        "notes": "BACKUP ONLY. The PIO posts this live as @KestrelCoEM with the notice card. Fire this only if the live post fails; otherwise Skip it. No baseline, so it shows real counts like the PIO’s own post.",
         "plannedMinute": 11,
         "assignee": "me",
         "posts": [
           {
-            "persona": "FulcoEM",
-            "text": "OFFICIAL: Boiling tap water for 1 minute IS safe and is still the right step in Zones 2-4. The advisory has NOT expanded. Posts saying otherwise did not come from Fairhaven Water or Fulton County EM. Rely on verified accounts only. #WaterIssues",
+            "persona": "KestrelCoEM",
+            "text": "OFFICIAL: Boiling tap water for 1 minute IS safe and is still the right step in Zones 2-4. The advisory has NOT expanded. Posts saying otherwise did not come from Fairhaven Water or Kestrel County EM. Rely on verified accounts only. #WaterIssues",
             "media": [{"ref": "pio-statement-card"}]
           }
         ]
@@ -664,13 +664,13 @@
         "key": "rs09",
         "kind": "post",
         "title": "Beat 4 · Citizen follow-up question to the PIO (prefer Reply as… live)",
-        "notes": "Beat 4. Preferred: in Live world, Reply as… mvega_fh on the PIO’s post and paste this text, so the PIO sees it in the thread. Fire this item only if replying live is not possible (it posts top-level, mentioning @FulcoEM). Otherwise Skip it.",
+        "notes": "Beat 4. Preferred: in Live world, Reply as… mvega_fh on the PIO’s post and paste this text, so the PIO sees it in the thread. Fire this item only if replying live is not possible (it posts top-level, mentioning @KestrelCoEM). Otherwise Skip it.",
         "plannedMinute": 12,
         "assignee": "me",
         "posts": [
           {
             "persona": "mvega_fh",
-            "text": "@FulcoEM thank you. Is the formula I made earlier with boiled water still OK to use? And should we throw out the ice in the freezer?"
+            "text": "@KestrelCoEM thank you. Is the formula I made earlier with boiled water still OK to use? And should we throw out the ice in the freezer?"
           }
         ]
       },
@@ -701,7 +701,7 @@
         "posts": [
           {
             "persona": "kwardFH",
-            "text": "Official word from @FulcoEM and @FairhavenWater: keep boiling, the advisory has NOT expanded. Share this instead of the fake. #WaterIssues",
+            "text": "Official word from @KestrelCoEM and @FairhavenWater: keep boiling, the advisory has NOT expanded. Share this instead of the fake. #WaterIssues",
             "engagementBaseline": {"like": 183, "repost": 151}
           },
           {
@@ -719,14 +719,14 @@
       {
         "key": "rs12",
         "kind": "post",
-        "title": "Beat 4 · Newsline 7 reports the correction",
-        "notes": "Beat 4 wrap. Newsline 7 carries the official line to its larger audience.",
+        "title": "Beat 4 · Metro Desk 9 reports the correction",
+        "notes": "Beat 4 wrap. Metro Desk 9 carries the official line to its larger audience.",
         "plannedMinute": 15,
         "assignee": "me",
         "posts": [
           {
-            "persona": "Newsline7",
-            "text": "UPDATE: Fulton County EM says boiling tap water remains safe and the advisory has not expanded beyond Zones 2-4. Officials say the \"do not boil\" posts did not come from the utility or the county. #WaterIssues",
+            "persona": "MetroDesk9",
+            "text": "UPDATE: Kestrel County EM says boiling tap water remains safe and the advisory has not expanded beyond Zones 2-4. Officials say the \"do not boil\" posts did not come from the utility or the county. #WaterIssues",
             "engagementBaseline": {"like": 612, "repost": 334, "reply": 52}
           }
         ]

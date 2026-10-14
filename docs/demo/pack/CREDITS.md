@@ -9,8 +9,9 @@ not the download link). Then change **Status** to `STOCK` and note any edit you 
 
 - `PLACEHOLDER`: a labelled grey card made for this draft. **Must be replaced before the final seed.** It is not
   demo content.
-- `GENERATED DRAFT`: a simple fictional mark or notice made for this pack (2026-10-13). No third-party material, so
-  no licence is needed. Tom approves it or replaces it.
+- `GENERATED DRAFT`: a simple fictional mark or notice made for this pack (2026-10-13; the Kestrel County EM and
+  Metro Desk 9 marks and the notice card redrawn 2026-10-14 for FIC-001). No third-party material, so no licence
+  is needed. Tom approves it or replaces it.
 - `STOCK`: the real file, credited below.
 
 Shot descriptions and search terms are in [`MEDIA-SHOTLIST.md`](MEDIA-SHOTLIST.md).
@@ -19,7 +20,7 @@ Shot descriptions and search terms are in [`MEDIA-SHOTLIST.md`](MEDIA-SHOTLIST.m
 
 | File | Used for | Status | Source | Licence | URL | Notes |
 |---|---|---|---|---|---|---|
-| `media/news-elm-break.mp4` | V1 · p06 Newsline 7 on-scene report | PLACEHOLDER | | | | Real H.264 1280×720 20 s placeholder |
+| `media/news-elm-break.mp4` | V1 · p06 Metro Desk 9 on-scene report | PLACEHOLDER | | | | Real H.264 1280×720 20 s placeholder |
 | `media/news-elm-break.poster.jpg` | V1 poster | PLACEHOLDER | | | | Frame from the final clip, same source |
 | `media/news-mill-road.mp4` | V2 · rs01 BREAKING (beat 2) | PLACEHOLDER | | | | Real H.264 1280×720 15 s placeholder |
 | `media/news-mill-road.poster.jpg` | V2 poster | PLACEHOLDER | | | | Frame from the final clip, same source |
@@ -39,16 +40,16 @@ Shot descriptions and search terms are in [`MEDIA-SHOTLIST.md`](MEDIA-SHOTLIST.m
 | `media/photo-line.jpg` | P7 · p27 | PLACEHOLDER | | | | No recognisable faces |
 | `media/photo-brown-glass.jpg` | P8 · rs03 impersonator (beat 3) | PLACEHOLDER | | | | |
 | `media/photo-empty-shelves.jpg` | P9 · rs06 (beat 3) | PLACEHOLDER | | | | No store branding |
-| `media/pio-statement-card.png` | P10 · PIO live post + rs08 backup (beat 4) | GENERATED DRAFT | Generated for this pack | n/a (own work) | — | Redraw if the county name changes |
+| `media/pio-statement-card.png` | P10 · PIO live post + rs08 backup (beat 4) | GENERATED DRAFT | Generated for this pack | n/a (own work) | — | Redrawn for Kestrel County (FIC-001). Redraw if a name on it changes |
 
 ## Avatars
 
 | File | Used for | Status | Source | Licence | URL | Notes |
 |---|---|---|---|---|---|---|
-| `avatars/fulcoem.png` | @FulcoEM | GENERATED DRAFT | Generated for this pack | n/a (own work) | — | Fictional mark |
+| `avatars/kestrelcoem.png` | @KestrelCoEM | GENERATED DRAFT | Generated for this pack | n/a (own work) | — | Fictional mark |
 | `avatars/fairhavenwater.png` | @FairhavenWater | GENERATED DRAFT | Generated for this pack | n/a (own work) | — | Fictional mark |
 | `avatars/fairhavenwaterupd.png` | @FairhavenWaterUpd (lookalike) | GENERATED DRAFT | Generated for this pack | n/a (own work) | — | Deliberate near-copy of the utility's mark |
-| `avatars/newsline7.png` | @Newsline7 | GENERATED DRAFT | Generated for this pack | n/a (own work) | — | Fictional mark |
+| `avatars/metrodesk9.png` | @MetroDesk9 | GENERATED DRAFT | Generated for this pack | n/a (own work) | — | Fictional mark |
 | `avatars/thescoophq.png` | @TheScoopHQ | GENERATED DRAFT | Generated for this pack | n/a (own work) | — | Fictional mark |
 | `avatars/mvega_fh.jpg` | @mvega_fh | PLACEHOLDER | | | | No people |
 | `avatars/tbrandt41.jpg` | @tbrandt41 | PLACEHOLDER | | | | No people |
@@ -59,9 +60,9 @@ Shot descriptions and search terms are in [`MEDIA-SHOTLIST.md`](MEDIA-SHOTLIST.m
 
 | File | Used for | Status | Source | Licence | URL | Notes |
 |---|---|---|---|---|---|---|
-| `banners/fulcoem.jpg` | @FulcoEM | PLACEHOLDER | | | | |
+| `banners/kestrelcoem.jpg` | @KestrelCoEM | PLACEHOLDER | | | | |
 | `banners/fairhavenwater.jpg` | @FairhavenWater and @FairhavenWaterUpd | PLACEHOLDER | | | | One file, both profiles |
-| `banners/newsline7.jpg` | @Newsline7 | PLACEHOLDER | | | | No recognisable skyline |
+| `banners/metrodesk9.jpg` | @MetroDesk9 | PLACEHOLDER | | | | No recognisable skyline |
 | `banners/thescoophq.jpg` | @TheScoopHQ | PLACEHOLDER | | | | |
 
 ## Before the final seed (Mon 10/19)

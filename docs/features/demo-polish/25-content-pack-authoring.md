@@ -12,7 +12,7 @@ PIO's official photo post, citizen replies (plan §3). This story is **content, 
 and structure against the `pulse.demopack.v1` schema (implementation.md §1.10); Tom picks/approves the stock
 media and the fictional names. Constraint from plan §9: display names, bios and avatars can change freely,
 **handles and the `#WaterIssues` hashtag cannot** (the engine matches on them), so handles stay neutral (e.g.
-`FulcoEM`, `FairhavenWater`, `FairhavenWaterUpd`).
+`KestrelCoEM`, `FairhavenWater`, `FairhavenWaterUpd`).
 
 ## Acceptance Criteria
 - [ ] **Pack shape.** `docs/demo/pack/pack.json` validates against `docs/demo/pack/schema/` and S1's `-WhatIf`

@@ -55,31 +55,31 @@ Photos: crop to 16:9 and export at 1600 × 900, JPEG quality around 80.
 
 | # | Pack key / file | Kind | Status | Used by |
 |---|---|---|---|---|
-| V1 | `news-elm-break` · `media/news-elm-break.mp4` + `.poster.jpg` | video | PLACEHOLDER | p06 (@Newsline7, opening feed, beat 1) |
-| V2 | `news-mill-road` · `media/news-mill-road.mp4` + `.poster.jpg` | video | PLACEHOLDER | rs01 (@Newsline7, BREAKING, beat 2) |
+| V1 | `news-elm-break` · `media/news-elm-break.mp4` + `.poster.jpg` | video | PLACEHOLDER | p06 (@MetroDesk9, opening feed, beat 1) |
+| V2 | `news-mill-road` · `media/news-mill-road.mp4` + `.poster.jpg` | video | PLACEHOLDER | rs01 (@MetroDesk9, BREAKING, beat 2) |
 | V3 | `scoop-brown-tap` · `media/scoop-brown-tap.mp4` + `.poster.jpg` | video | PLACEHOLDER | rs05 (@TheScoopHQ, beat 3) |
 | P1 | `photo-elm-crew` · `media/photo-elm-crew.jpg` | photo | PLACEHOLDER | p03 (@FairhavenWater) |
-| P2 | `photo-advisory-sign` · `media/photo-advisory-sign.jpg` | photo | PLACEHOLDER | p10 (@FulcoEM, 2-photo grid) |
-| P3 | `photo-boiling-pot` · `media/photo-boiling-pot.jpg` | photo | PLACEHOLDER | p10 (@FulcoEM, 2-photo grid) |
+| P2 | `photo-advisory-sign` · `media/photo-advisory-sign.jpg` | photo | PLACEHOLDER | p10 (@KestrelCoEM, 2-photo grid) |
+| P3 | `photo-boiling-pot` · `media/photo-boiling-pot.jpg` | photo | PLACEHOLDER | p10 (@KestrelCoEM, 2-photo grid) |
 | P4 | `photo-brown-sink` · `media/photo-brown-sink.jpg` | photo | PLACEHOLDER | p15 (@tbrandt41) |
 | P5 | `photo-hydrant-flush` · `media/photo-hydrant-flush.jpg` | photo | PLACEHOLDER | p17 (@FairhavenWater) |
-| P6 | `photo-distribution` · `media/photo-distribution.jpg` | photo | PLACEHOLDER | p19 (@FulcoEM) |
-| P7 | `photo-line` · `media/photo-line.jpg` | photo | PLACEHOLDER | p27 (@Newsline7) |
+| P6 | `photo-distribution` · `media/photo-distribution.jpg` | photo | PLACEHOLDER | p19 (@KestrelCoEM) |
+| P7 | `photo-line` · `media/photo-line.jpg` | photo | PLACEHOLDER | p27 (@MetroDesk9) |
 | P8 | `photo-brown-glass` · `media/photo-brown-glass.jpg` | photo | PLACEHOLDER | rs03 (@FairhavenWaterUpd, the impersonator, beat 3) |
 | P9 | `photo-empty-shelves` · `media/photo-empty-shelves.jpg` | photo | PLACEHOLDER | rs06 (@dreyes_fh, beat 3) |
 | P10 | `pio-statement-card` · `media/pio-statement-card.png` | image | GENERATED DRAFT | rs08 (backup) and the PIO's live post (beat 4) |
-| A1 | `avatars/fulcoem.png` | avatar | GENERATED DRAFT | @FulcoEM |
+| A1 | `avatars/kestrelcoem.png` | avatar | GENERATED DRAFT | @KestrelCoEM |
 | A2 | `avatars/fairhavenwater.png` | avatar | GENERATED DRAFT | @FairhavenWater |
 | A3 | `avatars/fairhavenwaterupd.png` | avatar | GENERATED DRAFT | @FairhavenWaterUpd (the lookalike) |
-| A4 | `avatars/newsline7.png` | avatar | GENERATED DRAFT | @Newsline7 |
+| A4 | `avatars/metrodesk9.png` | avatar | GENERATED DRAFT | @MetroDesk9 |
 | A5 | `avatars/thescoophq.png` | avatar | GENERATED DRAFT | @TheScoopHQ |
 | A6 | `avatars/mvega_fh.jpg` | avatar | PLACEHOLDER | @mvega_fh |
 | A7 | `avatars/tbrandt41.jpg` | avatar | PLACEHOLDER | @tbrandt41 |
 | A8 | `avatars/kwardfh.jpg` | avatar | PLACEHOLDER | @kwardFH |
 | A9 | `avatars/dreyes_fh.jpg` | avatar | PLACEHOLDER | @dreyes_fh |
-| B1 | `banners/fulcoem.jpg` | banner | PLACEHOLDER | @FulcoEM |
+| B1 | `banners/kestrelcoem.jpg` | banner | PLACEHOLDER | @KestrelCoEM |
 | B2 | `banners/fairhavenwater.jpg` | banner | PLACEHOLDER | @FairhavenWater **and** @FairhavenWaterUpd (the lookalike copies it) |
-| B3 | `banners/newsline7.jpg` | banner | PLACEHOLDER | @Newsline7 |
+| B3 | `banners/metrodesk9.jpg` | banner | PLACEHOLDER | @MetroDesk9 |
 | B4 | `banners/thescoophq.jpg` | banner | PLACEHOLDER | @TheScoopHQ |
 
 That is 3 videos (each with a poster), 10 photos, 9 avatars and 4 banners: **29 uploads**. The server allows 30
@@ -90,7 +90,7 @@ uploads a minute per account. S1 waits out a 429, so more files only make the ru
 ### V1 · `news-elm-break` (PLACEHOLDER)
 
 - **File:** `media/news-elm-break.mp4`, poster `media/news-elm-break.poster.jpg`
-- **Used by:** p06, Newsline 7's on-scene report in the opening feed. It is the video that plays inline and opens
+- **Used by:** p06, Metro Desk 9's on-scene report in the opening feed. It is the video that plays inline and opens
   full-screen in beat 1.
 - **The shot:** street-level footage of a road or utility crew in high-visibility vests working in a trench cut
   across a city street, with an excavator and water at the bottom. Traffic cones or barriers. Early-morning or
@@ -106,7 +106,7 @@ uploads a minute per account. S1 waits out a 429, so more files only make the ru
 ### V2 · `news-mill-road` (PLACEHOLDER)
 
 - **File:** `media/news-mill-road.mp4`, poster `media/news-mill-road.poster.jpg`
-- **Used by:** rs01, Newsline 7's BREAKING post in beat 2. If the controller shows the live upload path instead,
+- **Used by:** rs01, Metro Desk 9's BREAKING post in beat 2. If the controller shows the live upload path instead,
   this is also the file to upload from the demo laptop (keep a copy there).
 - **The shot:** water gushing or bubbling up from a street or a burst pipe and running down the road toward a
   drain. A strong, obvious "something broke" image in the first 2 seconds. A vehicle with amber lights is a
@@ -144,7 +144,7 @@ uploads a minute per account. S1 waits out a 429, so more files only make the ru
 
 ### P2 · `photo-advisory-sign` (PLACEHOLDER)
 
-- **Used by:** p10 (@FulcoEM, first photo of a 2-photo grid).
+- **Used by:** p10 (@KestrelCoEM, first photo of a 2-photo grid).
 - **The shot:** a yellow roadside or sandwich-board sign reading "Boil water advisory" at the edge of a residential
   street. Stock rarely has this exact sign: take a blank yellow warning sign and add the words in an editor. That
   keeps the sign fictional. No real agency name on it.
@@ -154,7 +154,7 @@ uploads a minute per account. S1 waits out a 429, so more files only make the ru
 
 ### P3 · `photo-boiling-pot` (PLACEHOLDER)
 
-- **Used by:** p10 (@FulcoEM, second photo of the grid: how to boil).
+- **Used by:** p10 (@KestrelCoEM, second photo of the grid: how to boil).
 - **The shot:** a pot of water at a full rolling boil on a stove.
 - **Alt:** "A pot of water at a rolling boil on a kitchen stove."
 - **Search:** `boiling water pot`, `pot boiling stove`, `rolling boil`.
@@ -175,7 +175,7 @@ uploads a minute per account. S1 waits out a 429, so more files only make the ru
 
 ### P6 · `photo-distribution` (PLACEHOLDER)
 
-- **Used by:** p19 (@FulcoEM, free bottled water at two sites).
+- **Used by:** p19 (@KestrelCoEM, free bottled water at two sites).
 - **The shot:** stacks of shrink-wrapped cases of bottled water on pallets or tables, ideally inside a fire station
   bay or a gym. **No brand labels readable** (blur them if needed).
 - **Alt:** "Stacks of shrink-wrapped cases of bottled water on pallets inside an open fire station bay, with a
@@ -184,7 +184,7 @@ uploads a minute per account. S1 waits out a 429, so more files only make the ru
 
 ### P7 · `photo-line` (PLACEHOLDER)
 
-- **Used by:** p27 (@Newsline7, lines at Fairhaven High School).
+- **Used by:** p27 (@MetroDesk9, lines at Fairhaven High School).
 - **The shot:** a queue of people **seen from behind** on a sidewalk outside a school-like building. Faces not
   recognisable.
 - **Alt:** "A line of people, seen from behind, waits on a sidewalk outside a school building to collect bottled
@@ -211,15 +211,16 @@ uploads a minute per account. S1 waits out a 429, so more files only make the ru
 
 - **Used by:** the PIO's live statement in beat 4 (the PIO attaches it from the demo laptop), and rs08, the backup
   of that post.
-- **What it is:** a 1600 × 900 PNG notice card: navy header "FULTON COUNTY EMERGENCY MANAGEMENT · Official notice",
+- **What it is:** a 1600 × 900 PNG notice card: navy header "KESTREL COUNTY EMERGENCY MANAGEMENT · Official notice",
   the title "Boil water advisory: Zones 2-4", and four lines (boiling is safe, the advisory has not expanded, the
   free water sites, verified accounts only). Generated for this pack, no stock and no real logo.
-- **Decision for Tom:** keep it, or have it redrawn. **If the county name changes, it must be redrawn** (the name is
-  in the image). Keep its alt text in step with the words on the card.
-- **Alt:** "Official notice from Fulton County Emergency Management. Boil water advisory, Zones 2 to 4. Boiling tap
-  water for 1 minute is safe and effective. The advisory has not expanded: Zones 2, 3 and 4 only. Free bottled
+- **Decision for Tom:** keep it, or have it redrawn. It was redrawn for Kestrel County on 2026-10-14 (FIC-001).
+  **If a name on it changes again, it must be redrawn** (the names are in the image). Keep its alt text in step with
+  the words on the card.
+- **Alt:** "Official notice from Kestrel County Emergency Management. Boil water advisory, Zones 2 to 4. Boiling
+  tap water for 1 minute is safe and effective. The advisory has not expanded: Zones 2, 3 and 4 only. Free bottled
   water at Elm Street Fire Station and Fairhaven High School. Official updates come only from verified accounts:
-  FulcoEM and FairhavenWater."
+  KestrelCoEM and FairhavenWater."
 - **Demo prep:** copy `media/pio-statement-card.png` to the PIO's demo laptop (desktop or Pictures) so it can be
   attached live.
 
@@ -230,10 +231,10 @@ for picking.
 
 | # | File | Status | What it must show | Search |
 |---|---|---|---|---|
-| A1 | `avatars/fulcoem.png` | GENERATED DRAFT | Navy circle, white shield outline, "FCEM". A fictional county EM mark. Redraw if the county name changes. | — (design, not stock) |
+| A1 | `avatars/kestrelcoem.png` | GENERATED DRAFT | Navy circle, white shield outline, "KCEM". A fictional county EM mark (redrawn for Kestrel County, FIC-001). | — (design, not stock) |
 | A2 | `avatars/fairhavenwater.png` | GENERATED DRAFT | Deep blue, white water drop with two wave lines. The **real** utility. | — |
 | A3 | `avatars/fairhavenwaterupd.png` | GENERATED DRAFT | The **lookalike**: almost the same drop on a slightly brighter blue, **without the wave lines**. Close enough to fool a skim, different enough to spot (SOC-052). Keep this pairing if you redesign A2. | — |
-| A4 | `avatars/newsline7.png` | GENERATED DRAFT | Red tile, white "7", navy "NEWSLINE" bar. Avoid a 7 inside a circle: that is a real network's mark. | — |
+| A4 | `avatars/metrodesk9.png` | GENERATED DRAFT | Red tile, white "9", navy "METRO DESK" bar (redrawn for Metro Desk 9, FIC-001). Don't style the 9 like a real station's numeral mark (for example a numeral inside a circle). | — |
 | A5 | `avatars/thescoophq.png` | GENERATED DRAFT | Yellow, black "THE SCOOP". Tabloid feel. | — |
 | A6 | `avatars/mvega_fh.jpg` | PLACEHOLDER | Sunflowers or a backyard garden. **No people.** (Mom, nurse, east side.) | `sunflowers garden`, `backyard flowers` |
 | A7 | `avatars/tbrandt41.jpg` | PLACEHOLDER | A dog on a porch step, or a dog's face close up. **No people.** (Coffee, dogs, local sports.) | `dog porch`, `golden retriever portrait` |
@@ -246,7 +247,7 @@ The resident avatars avoid faces on purpose: a stock portrait is a real person's
 
 | # | File | Status | What it must show | Search |
 |---|---|---|---|---|
-| B1 | `banners/fulcoem.jpg` | PLACEHOLDER | Aerial view of a small river town with green hills. No recognisable landmark. | `small town aerial river`, `town valley aerial`, `rural town drone` |
+| B1 | `banners/kestrelcoem.jpg` | PLACEHOLDER | Aerial view of a small river town with green hills. No recognisable landmark. | `small town aerial river`, `town valley aerial`, `rural town drone` |
 | B2 | `banners/fairhavenwater.jpg` | PLACEHOLDER | Water treatment plant basins or a reservoir under a blue sky. **Used by both** the utility and its lookalike: the impersonator copied the banner. | `water treatment plant`, `reservoir aerial`, `water treatment basins` |
-| B3 | `banners/newsline7.jpg` | PLACEHOLDER | Out-of-focus city lights at dusk, or abstract studio lights. **No recognisable skyline.** | `city lights bokeh`, `blurred city night`, `studio lights abstract` |
+| B3 | `banners/metrodesk9.jpg` | PLACEHOLDER | Out-of-focus city lights at dusk, or abstract studio lights. **No recognisable skyline.** | `city lights bokeh`, `blurred city night`, `studio lights abstract` |
 | B4 | `banners/thescoophq.jpg` | PLACEHOLDER | A dramatic spotlight or a red-lit dark background. Tabloid mood, no text. | `spotlight dark background`, `dramatic red light abstract` |
