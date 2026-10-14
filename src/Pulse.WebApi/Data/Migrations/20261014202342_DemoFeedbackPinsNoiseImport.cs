@@ -17,7 +17,9 @@ namespace Pulse.WebApi.Data.Migrations
     /// added in this same migration, and EF emits each inside <c>EXEC(N'…')</c> in the idempotent script, so the batch
     /// compiles. The one new <c>NOT NULL</c> column on an existing table, <c>Exercises.NoiseLevel</c>, carries
     /// <c>DEFAULT N'off'</c>, so existing exercises read <c>off</c> with no backfill; everything else added to an existing
-    /// table is nullable. <c>NoisePosts</c> has no foreign key (its persona is a logical reference, house style).
+    /// table is nullable. <c>NoisePosts.Text</c> is <c>nvarchar(1024)</c>, sized in UTF-16 code units like
+    /// <c>InjectItemPost.Text</c>: the 1–280 code-point content limit is validated in code, and emoji take two units.
+    /// <c>NoisePosts</c> has no foreign key (its persona is a logical reference, house style).
     /// The column <c>Order</c> is a reserved word — EF brackets it; any raw SQL must write <c>[Order]</c>.
     /// </remarks>
     public partial class DemoFeedbackPinsNoiseImport : Migration
@@ -69,7 +71,7 @@ namespace Pulse.WebApi.Data.Migrations
                     Id = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
                     ExerciseId = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
                     PersonaId = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
-                    Text = table.Column<string>(type: "nvarchar(280)", maxLength: 280, nullable: false),
+                    Text = table.Column<string>(type: "nvarchar(1024)", maxLength: 1024, nullable: false),
                     Order = table.Column<int>(type: "int", nullable: false),
                     PostedCount = table.Column<int>(type: "int", nullable: false, defaultValue: 0),
                     LastPostedWallClock = table.Column<DateTimeOffset>(type: "datetimeoffset", nullable: true),

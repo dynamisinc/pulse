@@ -169,6 +169,36 @@ public class PostIngestServiceAttributionTests
             personaId.ToString(), "even an engine post is attributed to the persona it was posted AS");
     }
 
+    [RequiresDockerFact]
+    public async Task NoiseOrigin_FromAnInProcessCaller_IsAccepted_AndStoredAsNoise()
+    {
+        // demo-feedback/01 (DF-12): the white-noise pacer publishes through this funnel with origin 'noise'. It is an
+        // in-process provenance like 'engine' — no human behind it — and PostAttributionResolver never yields it, so
+        // no HTTP caller can reach it (PostWriteEndpointTests proves that half).
+        var exerciseId = Guid.NewGuid();
+        var personaId = Guid.NewGuid();
+
+        var broadcaster = new FakeFeedBroadcaster();
+        await using var context = _fixture.CreateContext(ScopeFor(exerciseId));
+        var service = new PostIngestService(context, ScopeFor(exerciseId), broadcaster);
+
+        var result = await service.IngestAsync(
+            ValidRequest(),
+            new PostAttribution
+            {
+                AuthorPersonaId = personaId,
+                Origin = "noise",
+                ActingHumanId = string.Empty,
+            });
+
+        result.Outcome.Should().Be(PostIngestOutcome.Created, "'noise' is in the PostOrigin union from demo-feedback/01");
+
+        await using var readContext = _fixture.CreateContext();
+        var stored = await readContext.Posts.IgnoreQueryFilters().SingleAsync(p => p.Id == result.Post!.Id);
+        stored.Origin.Should().Be("noise", "a white-noise post is told apart from an inject or engine post by its origin");
+        stored.ExerciseId.Should().Be(exerciseId);
+    }
+
     private static IExerciseContext ScopeFor(Guid exerciseId) =>
         new ExerciseContext { CurrentExerciseId = exerciseId };
 

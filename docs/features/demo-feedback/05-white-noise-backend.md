@@ -19,7 +19,7 @@ content is C3 and the seed script loads it (S1). Shapes are frozen in [`implemen
       400. Setting the current level again is a no-op `200` with no push and no telemetry.
 - [ ] `PUT /api/staff/noise/pool { mode, posts }` (controller role) replaces or appends the pool. Each entry's
       `persona` resolves by handle (leading `@` stripped) or id **in this exercise**; text goes through `PostSanitizer`
-      and must be 1–280 characters. Bad entries are reported in `rejected` with their index and reason, the rest apply,
+      and must be 1–280 **code points** (as `InjectItemValidator` counts them, not `string.Length`). Bad entries are reported in `rejected` with their index and reason, the rest apply,
       all in one `SaveChanges`. More than 1,000 entries ⇒ 400. `replace` resets `PostedCount` for the new pool.
 - [ ] **Pacer (DF-12):** a hosted service publishes noise posts for every exercise whose level is not `off`, at
       0 / 2 / 6 / 15 posts per minute with ±40% jitter on each gap. Each post goes through `PostIngestService.IngestAsync`

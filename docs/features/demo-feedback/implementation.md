@@ -58,7 +58,7 @@
 | `PostReaction` | constant `ReactionKinds.Pin = "pin"` only (no column change) |
 | `InjectItem` | `ExternalRef string? (max 64)`; filtered unique index `(ExerciseId, ExternalRef)` where `ExternalRef IS NOT NULL AND DeletedAt IS NULL` |
 | `Exercise` | `NoiseLevel string (max 8, required, default 'off')` |
-| `NoisePost` (new, `IExerciseScoped`) | `Id, ExerciseId, PersonaId, Text (max 280), Order int, PostedCount int default 0, LastPostedWallClock DateTimeOffset?, CreatedWallClock`; index `(ExerciseId, PostedCount, Order)` |
+| `NoisePost` (new, `IExerciseScoped`) | `Id, ExerciseId, PersonaId, Text (column max 1024, like `InjectItemPost.Text`; content 1–280 **code points**, validated in code), Order int, PostedCount int default 0, LastPostedWallClock DateTimeOffset?, CreatedWallClock`; index `(ExerciseId, PostedCount, Order)` |
 
 Hand-written SQL naming a column added in the same migration is `EXEC(N'…')`-wrapped; `IdempotentMigrationScriptTests`
 must replay it (#413).
