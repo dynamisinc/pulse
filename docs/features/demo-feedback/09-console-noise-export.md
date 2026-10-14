@@ -19,7 +19,7 @@ pill, and an **Export posts** button in the console title row.
       "Stopped: the clock is not running", "No posts in the pool").
 - [ ] **Export posts** in the console title row (beside the StartEx/EndEx slot) downloads
       `GET /api/staff/exports/posts.xlsx` with the session's bearer token (fetch as a blob, then save with the server's
-      file name), shows a spinner while it runs, and shows the error text on failure.
+      file name), shows a spinner while it runs, and shows the error text on failure. A `429` (another export is being built) is retried once after about 1 s before its reason is shown (02 Gate-1 fold).
 - [ ] **Noise origin on the client** (01 Gate-1 L1): add `'noise'` to `PostOrigin` (`social/types/post.ts`), to `telemetryOriginSchema` (`core/telemetry/schema.ts`), and a console origin label in `originConsoleLabel` (`social/services/postService.ts`), e.g. `NOISE · AUTO`, so Live world never shows the raw string. Participant surfaces show nothing new.
 - [ ] Mock adapters for both behind the console's existing mock switch.
 
