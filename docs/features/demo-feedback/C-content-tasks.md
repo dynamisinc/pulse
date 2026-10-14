@@ -27,3 +27,4 @@ No product code. Done on the #491 branch so the pack, its media and its files me
 - About 100 everyday posts in the pack's new `noise` array, spread over the citizen personas: traffic, weather, school
   events, sports, food, pets, a few faintly on-topic grumbles ("anyone else's water taste weird?"). Fictional names and
   places only; no real brands, people or news outlets; no profanity.
+- **Sizing (05 Gate-1):** about 15 posts × the minutes noise will run on High, so texts don't visibly repeat (about 100 is enough for ~7 minutes of High or ~50 of Low). Spread posts evenly across personas: the pacer never posts the same persona twice in a row, so a persona with few entries repeats them about every other post. Use only citizen personas that **no participant signs in as**.
