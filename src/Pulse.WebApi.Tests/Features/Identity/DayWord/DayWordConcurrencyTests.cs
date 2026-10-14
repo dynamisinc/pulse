@@ -16,6 +16,7 @@ using Pulse.WebApi.Features.Identity.DayWord;
 using Pulse.WebApi.Features.Identity.EasyLogin;
 using Pulse.WebApi.Features.Identity.SharedAccess;
 using Pulse.WebApi.Tests.Data;
+using Pulse.WebApi.Tests.Features.ExerciseConfiguration.Lifecycle;
 using static Pulse.WebApi.Tests.Features.Identity.DayWord.DayWordTestSupport;
 
 /// <summary>
@@ -247,6 +248,65 @@ public sealed class DayWordConcurrencyTests
             "the failed clear left no credential.revoked behind");
     }
 
+    // ---------------------------------------------------------------- only a lost race is retried (Gate-1 L-1)
+
+    [RequiresDockerTheory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Set_AFailedSaveThatIsNotALostRace_PropagatesAfterOneTry_AndWritesNothing(bool rotation)
+    {
+        var (exerciseId, staffUserId) = await SeedAsync();
+        var seeded = rotation ? await SeedWordAsync(_fixture, exerciseId, Today, "opening word one") : null;
+
+        // Every save fails with a plain DbUpdateException: no stale token, no unique-index violation. Both branches of
+        // the set (a rotation of a seeded row, and a first set) must give up at once, never re-read and retry.
+        var interceptor = new FailingSaveInterceptor();
+
+        var act = () => RacedAsync(
+            interceptor,
+            exerciseId,
+            staffUserId,
+            DefaultNow.AddSeconds(2),
+            service => service.SetAsync(new DayWordPutBody { Word = "caller word three" }));
+
+        (await act.Should().ThrowAsync<DbUpdateException>()).Which.Should().BeSameAs(
+            interceptor.Thrown, "a save failure that is not a lost race propagates unchanged");
+        interceptor.Calls.Should().Be(1, "only a lost race is retried; any other save failure is not tried again");
+
+        var rows = await ReadWordsAsync(_fixture, exerciseId);
+        if (seeded is null)
+        {
+            rows.Should().BeEmpty("the failed first set wrote no row");
+        }
+        else
+        {
+            var row = rows.Should().ContainSingle().Subject;
+            row.Id.Should().Be(seeded.Id);
+            row.ReplacedCount.Should().Be(0, "the failed rotation changed nothing");
+            _hasher.Verify(row.WordHash, "openingwordone").Should().BeTrue();
+        }
+
+        (await ReadEventsAsync(_fixture, exerciseId)).Should().BeEmpty("the failed request left no event behind");
+    }
+
+    [RequiresDockerFact]
+    public async Task Clear_AFailedSaveThatIsNotALostRace_PropagatesAfterOneTry_AndRemovesNothing()
+    {
+        var (exerciseId, staffUserId) = await SeedAsync();
+        var seeded = await SeedWordAsync(_fixture, exerciseId, Today, "opening word one");
+        var interceptor = new FailingSaveInterceptor();
+
+        var act = () => RacedAsync(interceptor, exerciseId, staffUserId, DefaultNow.AddSeconds(2), service => service.ClearAsync(null));
+
+        (await act.Should().ThrowAsync<DbUpdateException>()).Which.Should().BeSameAs(
+            interceptor.Thrown, "a save failure that is not a lost race propagates unchanged");
+        interceptor.Calls.Should().Be(1, "only a lost race is retried; any other save failure is not tried again");
+
+        var row = (await ReadWordsAsync(_fixture, exerciseId)).Should().ContainSingle("the failed clear removed nothing").Subject;
+        row.Id.Should().Be(seeded.Id);
+        (await ReadEventsAsync(_fixture, exerciseId)).Should().BeEmpty("the failed clear left no credential.revoked behind");
+    }
+
     // ---------------------------------------------------------------- the token itself (model-only)
 
     [Fact]
@@ -280,9 +340,9 @@ public sealed class DayWordConcurrencyTests
         return (exercise.Id, staffUserId);
     }
 
-    /// <summary>Runs one caller request over a context carrying <paramref name="interceptor"/> (the race).</summary>
+    /// <summary>Runs one caller request over a context carrying <paramref name="interceptor"/> (the race or the failure).</summary>
     private async Task<DayWordResult> RacedAsync(
-        RacingSaveInterceptor interceptor,
+        SaveChangesInterceptor interceptor,
         Guid exerciseId,
         Guid staffUserId,
         DateTimeOffset now,
@@ -343,5 +403,27 @@ internal sealed class RacingSaveInterceptor : SaveChangesInterceptor
         }
 
         return await base.SavingChangesAsync(eventData, result, cancellationToken);
+    }
+}
+
+/// <summary>
+/// Fails every save of the context it is attached to with a plain <see cref="DbUpdateException"/> that is NOT a lost race
+/// (no stale concurrency token, no unique-index violation), counting the attempts. Nothing reaches the database.
+/// </summary>
+internal sealed class FailingSaveInterceptor : SaveChangesInterceptor
+{
+    /// <summary>The one exception every save fails with, so a test can prove it propagated unchanged.</summary>
+    public DbUpdateException Thrown { get; } = new("not a race");
+
+    /// <summary>How many saves were attempted.</summary>
+    public int Calls { get; private set; }
+
+    public override ValueTask<InterceptionResult<int>> SavingChangesAsync(
+        DbContextEventData eventData,
+        InterceptionResult<int> result,
+        CancellationToken cancellationToken = default)
+    {
+        Calls++;
+        throw Thrown;
     }
 }

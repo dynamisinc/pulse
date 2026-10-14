@@ -321,6 +321,9 @@ public sealed class DayWordService
             catch (DbUpdateException ex) when (attempt < MaxWriteAttempts && IsLostRace(ex, inserted: !replaced))
             {
                 // Lost the race: forget the refused insert or update and its event, then go round and re-read.
+                // Clearing the WHOLE tracker relies on nothing else being tracked in this request scope (every earlier
+                // read, here and in the route filters, is AsNoTracking); a tracked write added before this loop would
+                // be silently dropped.
                 _dbContext.ChangeTracker.Clear();
             }
         }
@@ -398,6 +401,9 @@ public sealed class DayWordService
             catch (DbUpdateConcurrencyException) when (attempt < MaxWriteAttempts)
             {
                 // Lost the race: forget the refused delete and its event, then go round and re-read.
+                // Clearing the WHOLE tracker relies on nothing else being tracked in this request scope (every earlier
+                // read, here and in the route filters, is AsNoTracking); a tracked write added before this loop would
+                // be silently dropped.
                 _dbContext.ChangeTracker.Clear();
             }
         }

@@ -134,10 +134,13 @@ AC5 day boundary; XC-ISO isolation, XC-TEL telemetry, XC-SEC content security an
 - `DayWordConcurrencyTests.Set_TwoRotationsRacingOnOneRow_BothApply_AndReplacedCountCountsBoth`,
   `.Set_ARotationRacingAClearThatCommitsFirst_SetsTheWordAfresh_AsAFirstSet`,
   `.Set_WhenEverySaveLosesARace_FailsAfterTheBound_WithoutLooping`,
+  `.Set_AFailedSaveThatIsNotALostRace_PropagatesAfterOneTry_AndWritesNothing`,
   `.ReplacedCount_IsTheConcurrencyToken_InTheModel_TheSnapshot_AndTheEasyLoginMigration` (AC1);
   `.Clear_RacingARotationThatCommitsFirst_StillClears_OnTopOfIt`,
   `.Clear_RacingAnotherClear_IsStillIdempotent_AndOnlyTheRemoverEmits`,
-  `.Clear_WhenEverySaveLosesARace_FailsAfterTheBound_WithoutLooping` (AC2) *(added 2026-10-14, Copilot review on #486)*
+  `.Clear_WhenEverySaveLosesARace_FailsAfterTheBound_WithoutLooping`,
+  `.Clear_AFailedSaveThatIsNotALostRace_PropagatesAfterOneTry_AndRemovesNothing` (AC2) *(added 2026-10-14, Copilot
+  review on #486 and its Gate-1)*
 - `DayWordServiceTests.Status_WithNoWord_ReportsTheZoneTodayAndItsEnd`,
   `.Status_WithWords_ReportsWhoWhenHowOftenAndThePresetDates_NeverAWord`,
   `.Status_ASetterOutsideTheExercisesTenant_IsNotNamed`, `.Status_InAnUnknownZone_FallsBackToUtcAndSaysSo_AndWarnsOnce`,
