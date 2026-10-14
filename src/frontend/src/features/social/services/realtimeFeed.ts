@@ -34,6 +34,18 @@
  * safe to RENDER is not decided here — the media components allow-list it
  * (`components/media/safeMediaUrl.ts`).
  *
+ * CONTRACT v2 (demo-polish C5): `PostRemoved`. The same hub also pushes `PostRemoved
+ * { postId }` when a controller takes a post down (B6, implementation.md §1.5.5). It is
+ * validated the same way — the payload is rebuilt as `{ postId }` ONLY (a non-object, a
+ * missing / non-string / empty id, or a stray provenance key riding along never reaches a
+ * subscriber) — and surfaced through `subscribeRemoved`. This module decides nothing about
+ * WHAT to do with a removal and cannot know which ids any surface is showing, so it
+ * surfaces every well-formed id; a consumer that is not showing the post ignores it. The
+ * app-wide singleton is wired (bottom of the file) to record each id in the session's
+ * `removedPosts` store, which is what `<Feed>` and the Explore baseline react to. A removal
+ * is a push-only fact: while the transport is POLLING there is no `PostRemoved`, and the
+ * post simply stops being returned by the next read (the server omits it).
+ *
  * TESTABILITY (NFR-003 fallback + recovery). `createRealtimeFeed({ connection,
  * fetchFeed, pollIntervalMs, reconnectWindowMs })` lets RTL inject a fake
  * connection (to force "hub unreachable → polling" and "recover") and a fake
@@ -50,9 +62,13 @@ import { parseMediaAssetView } from '@/core/media/mediaGuards'
 import { toParticipantView } from '@/features/social'
 import type { ParticipantPostView, Post, PostInReplyTo, PostMedia } from '@/features/social'
 import { resolveFeed } from './feedService'
+import { removedPosts } from './removedPosts'
 
 /** The hub event carrying a newly-persisted post. Mirrors `SignalRFeedBroadcaster`'s constant. */
 const POST_RECEIVED_EVENT = 'PostReceived'
+
+/** The hub event carrying a taken-down post's id (B6). Mirrors the broadcaster's constant. */
+const POST_REMOVED_EVENT = 'PostRemoved'
 
 /** Default polling cadence while degraded (NFR-003 fallback). */
 const DEFAULT_POLL_INTERVAL_MS = 5000
@@ -66,10 +82,24 @@ export type FeedTransportMode = 'connecting' | 'realtime' | 'polling'
 /** A subscriber that receives each newly-observed participant-safe post. */
 export type PostStreamHandler = (post: ParticipantPostView) => void
 
+/** A taken-down post, as surfaced to subscribers: the id and NOTHING else (B6's whole payload). */
+export interface PostRemovedEvent {
+  readonly postId: string
+}
+
+/** A subscriber that receives each validated `PostRemoved`. */
+export type PostRemovedHandler = (event: PostRemovedEvent) => void
+
 /** The social feed's real-time consumer surface. */
 export interface RealtimeFeed {
   /** Registers a handler for each newly-observed post. Returns an idempotent unsubscribe. */
   subscribe(handler: PostStreamHandler): () => void
+  /**
+   * Registers a handler for each validated `PostRemoved { postId }` push (a controller
+   * took the post down). Returns an idempotent unsubscribe. Push-only: nothing is
+   * delivered while the transport is polling (see the module header).
+   */
+  subscribeRemoved(handler: PostRemovedHandler): () => void
   /**
    * Starts the transport (attempts real-time, degrades to polling on failure).
    * Resolves once running.
@@ -169,6 +199,20 @@ function toParticipantPostView(payload: unknown): ParticipantPostView | null {
 }
 
 /**
+ * Validates a raw `PostRemoved` payload and rebuilds it as `{ postId }`. Returns `null`
+ * (dropped, never cast blindly) for anything but an object with a non-empty string
+ * `postId`. A fresh literal from the one known key — never a spread — so nothing else the
+ * wire carried can ride along (XC-002 defence in depth). The id is opaque: it is NOT
+ * required to be a GUID (the mock backend's ids are not).
+ */
+function toPostRemovedEvent(payload: unknown): PostRemovedEvent | null {
+  if (typeof payload !== 'object' || payload === null) return null
+  const { postId } = payload as Record<string, unknown>
+  if (typeof postId !== 'string' || postId.length === 0) return null
+  return { postId }
+}
+
+/**
  * Drives the feed transport: real-time by default, polling fallback while
  * degraded, automatic recovery. See the module header for the guarantees.
  */
@@ -178,6 +222,7 @@ class RealtimeFeedController implements RealtimeFeed {
   private readonly pollIntervalMs: number
   private readonly reconnectWindowMs: number
   private readonly handlers = new Set<PostStreamHandler>()
+  private readonly removedHandlers = new Set<PostRemovedHandler>()
   private readonly seenIds = new Set<string>()
   private currentMode: FeedTransportMode = 'connecting'
   private baselined = false
@@ -186,6 +231,7 @@ class RealtimeFeedController implements RealtimeFeed {
   private pollTimer: ReturnType<typeof setInterval> | null = null
   private reconnectWindowTimer: ReturnType<typeof setTimeout> | null = null
   private unsubscribePush: (() => void) | null = null
+  private unsubscribeRemoved: (() => void) | null = null
   private unsubscribeState: (() => void) | null = null
 
   constructor(options: CreateRealtimeFeedOptions = {}) {
@@ -209,6 +255,16 @@ class RealtimeFeedController implements RealtimeFeed {
     }
   }
 
+  subscribeRemoved(handler: PostRemovedHandler): () => void {
+    this.removedHandlers.add(handler)
+    let active = true
+    return () => {
+      if (!active) return
+      active = false
+      this.removedHandlers.delete(handler)
+    }
+  }
+
   async start(): Promise<void> {
     if (this.started) return
     this.started = true
@@ -216,6 +272,9 @@ class RealtimeFeedController implements RealtimeFeed {
 
     this.unsubscribePush = this.connection.subscribe(POST_RECEIVED_EVENT, payload => {
       this.handlePush(payload)
+    })
+    this.unsubscribeRemoved = this.connection.subscribe(POST_REMOVED_EVENT, payload => {
+      this.handleRemovedPush(payload)
     })
     this.unsubscribeState = this.connection.onStateChange(state => {
       this.handleStateChange(state)
@@ -237,6 +296,10 @@ class RealtimeFeedController implements RealtimeFeed {
     if (this.unsubscribePush !== null) {
       this.unsubscribePush()
       this.unsubscribePush = null
+    }
+    if (this.unsubscribeRemoved !== null) {
+      this.unsubscribeRemoved()
+      this.unsubscribeRemoved = null
     }
     if (this.unsubscribeState !== null) {
       this.unsubscribeState()
@@ -337,6 +400,19 @@ class RealtimeFeedController implements RealtimeFeed {
     this.deliverNew(view)
   }
 
+  private handleRemovedPush(payload: unknown): void {
+    const event = toPostRemovedEvent(payload)
+    if (event === null) return
+    // A handler that throws must not starve the others (or the transport's own callback).
+    for (const handler of [...this.removedHandlers]) {
+      try {
+        handler(event)
+      } catch {
+        // Isolated: one consumer's failure is not the removal's failure.
+      }
+    }
+  }
+
   private handlePoll(posts: readonly Post[]): void {
     if (!this.baselined) {
       // First observation after degrading: adopt the current feed as the baseline
@@ -369,3 +445,9 @@ export function createRealtimeFeed(options: CreateRealtimeFeedOptions = {}): Rea
  * Lazy: no side effects until started.
  */
 export const realtimeFeed: RealtimeFeed = createRealtimeFeed()
+
+// Every valid `PostRemoved` on the app-wide transport is recorded in the session's removed-post
+// store (C5) — the one place `<Feed>` and the Explore baseline learn that a post must go. Wired
+// here (not inside the controller) so an isolated `createRealtimeFeed()` in a test never writes to
+// global state. It only registers a handler; it touches neither the network nor the connection.
+realtimeFeed.subscribeRemoved(({ postId }) => removedPosts.add(postId))

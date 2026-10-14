@@ -1,4 +1,5 @@
 #Requires -Version 7.0
+
 <#
 .SYNOPSIS
     Puts Pulse UAT into a known, demo-ready state and reports what it found.

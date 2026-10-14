@@ -117,3 +117,348 @@
 .originLabel {
   font-weight: 700;
 }
+
+/* ---------------------------------------------------------------------------
+   demo-polish C1 (story 17): reply banner, attach controls, baseline, preview,
+   outcome banners. STAFF styling only: square-ish borders, monospaced meta,
+   one cobalt accent (#0020c2, the COBRA primary). Every state is carried by a
+   word or an icon as well as colour (NFR-001).
+   ------------------------------------------------------------------------- */
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* "Replying to @handle - "excerpt"" with a clear (x) control. */
+.replyBanner {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0;
+  padding: 6px 4px 6px 8px;
+  font-size: 12px;
+  color: #1f2933;
+  background: #eef1ff;
+  border: 1px solid #0020c2;
+  border-left-width: 4px;
+  border-radius: 2px;
+}
+
+.replyText {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.replyHandle {
+  font-weight: 700;
+}
+
+/* Attachments: the Upload / From library actions, the hint, the picker panel. */
+.attach {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.attachActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.hint {
+  margin: 0;
+  font-size: 11.5px;
+  color: #4a5360;
+}
+
+.libraryPanel {
+  padding: 8px;
+  border: 1px solid #8a94a6;
+  border-radius: 2px;
+  background: #f5f6f8;
+}
+
+/* A disclosure row ("Starting engagement"): a real button, a chevron AND words. */
+.disclosure {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 4px 6px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  text-align: left;
+  color: #1f2933;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 2px;
+  cursor: pointer;
+}
+
+.disclosure:hover {
+  background: #f1f3f8;
+}
+
+.disclosure:focus-visible {
+  outline: 2px solid #0020c2;
+  outline-offset: 2px;
+}
+
+.disclosureSummary {
+  margin-left: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  font-weight: 400;
+  color: #4a5360;
+}
+
+.baselineFields {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 4px 6px 0;
+}
+
+.baselineRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 6px 10px;
+}
+
+.presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding-top: 5px;
+}
+
+.preset {
+  padding: 2px 7px;
+  font: inherit;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  font-weight: 700;
+  color: #1f2933;
+  background: #ffffff;
+  border: 1px solid #8a94a6;
+  border-radius: 2px;
+  cursor: pointer;
+}
+
+.preset:hover {
+  background: #f1f3f8;
+}
+
+.preset:focus-visible {
+  outline: 2px solid #0020c2;
+  outline-offset: 2px;
+}
+
+.preset:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+/* PREVIEW: unmistakably a STAFF mock-up of what will be sent - dashed border, a
+   PREVIEW label, monospaced meta, no avatar and no engagement row. It must never
+   be mistaken for (or styled like) a participant post card. */
+.preview {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  color: #1f2933;
+  background: #f5f6f8;
+  border: 1px dashed #4a5360;
+  border-radius: 0;
+}
+
+.previewHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-bottom: 4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  border-bottom: 1px solid #c4c9d2;
+}
+
+.previewLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-weight: 800;
+}
+
+.previewMeta {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 2px 10px;
+  margin: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+}
+
+.previewMeta dt {
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: #4a5360;
+}
+
+.previewMeta dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.previewText {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.previewEmpty {
+  margin: 0;
+  font-size: 12px;
+  font-style: italic;
+  color: #4a5360;
+}
+
+.previewMedia {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.previewMediaItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11.5px;
+}
+
+.previewThumb {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  overflow: hidden;
+  color: #4a5360;
+  background: #dde1e8;
+  border: 1px solid #8a94a6;
+}
+
+.previewThumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.previewAlt {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.previewAltMissing {
+  font-weight: 700;
+  text-decoration: underline;
+}
+
+/* Outcome: FAILED (alert) and POSTED (status). Icon + words + a distinct border;
+   the colour only reinforces. */
+.errorBanner {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px;
+  font-size: 12px;
+  color: #6b1610;
+  background: #fdecea;
+  border: 2px solid #8a1c14;
+  border-radius: 2px;
+}
+
+.errorText {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.errorTitle {
+  font-weight: 800;
+}
+
+.success {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 6px 8px;
+  font-size: 12px;
+  color: #0b4a1f;
+  background: #eaf6ee;
+  border: 2px solid #0b6b2a;
+  border-radius: 2px;
+}
+
+.successLabel {
+  font-weight: 800;
+}
+
+.successTime {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+}
+
+.publishing {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+/* The words that explain a disabled Post button (never leave it unexplained). */
+.blockers {
+  margin: 0;
+  padding: 0 0 0 16px;
+  font-size: 11.5px;
+  color: #4a5360;
+}
+
+/* The two-step choice under an 'unconfirmed' (post status unknown) message. The message
+   itself is focusable (tabIndex -1) so focus has a safe, button-free landing place. */
+.errorMessage:focus-visible {
+  outline: 2px solid #8a1c14;
+  outline-offset: 2px;
+}
+
+.bannerActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}

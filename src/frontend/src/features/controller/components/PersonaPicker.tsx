@@ -524,7 +524,13 @@ function PersonaPickerRow({
           fontWeight: 800,
         }}
       >
-        {persona.initials}
+        {/* An account whose name has no letter or digit has `initials === ""`: an empty
+            coloured disc reads as a rendering bug, so it gets the silhouette the participant
+            Avatar shows in that case (Gate-2 B S-2). The disc is decorative (aria-hidden); the
+            name beside it is what identifies the persona. */}
+        {persona.initials.trim() === ''
+          ? <FontAwesomeIcon icon={faUser} size="sm" data-testid={`persona-picker-silhouette-${persona.id}`} />
+          : persona.initials}
       </Box>
 
       <Stack sx={{ flex: 1, minWidth: 0, gap: '1px' }}>

@@ -37,6 +37,14 @@
   text-align: left;
 }
 
+/* The region itself is a programmatic focus target only (`tabIndex={-1}`, never a Tab stop): when
+ * a taken-down post held focus, focus lands here so keyboard / screen-reader users keep their
+ * place (demo-polish C5). It is not an interactive control, so it draws no ring around the whole
+ * column (same treatment as the media viewer's dialog container). */
+.feed:focus {
+  outline: none;
+}
+
 /* The post list. `aria-live="polite"` (set in the TSX) is the seam story 04's
  * "new posts" pill announces into — no auto-scroll, no live-insert. */
 .list {
