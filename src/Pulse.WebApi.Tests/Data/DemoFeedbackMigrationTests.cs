@@ -125,7 +125,8 @@ public class DemoFeedbackMigrationTests
                 "Id", "ExerciseId", "PersonaId", "Text", "Order", "PostedCount", "LastPostedWallClock", "CreatedWallClock",
             },
             "NoisePost has exactly the columns implementation.md names");
-        noise.FindProperty(nameof(NoisePost.Text))!.GetMaxLength().Should().Be(280);
+        noise.FindProperty(nameof(NoisePost.Text))!.GetMaxLength().Should().Be(
+            1024, "the column is sized in UTF-16 code units for 280 code points (emoji take two)");
         noise.FindProperty(nameof(NoisePost.Text))!.IsNullable.Should().BeFalse();
         noise.FindProperty(nameof(NoisePost.PostedCount))!.GetDefaultValue().Should().Be(0);
         noise.FindProperty(nameof(NoisePost.LastPostedWallClock))!.IsNullable.Should().BeTrue();
@@ -156,7 +157,7 @@ public class DemoFeedbackMigrationTests
             ["NoisePosts.Id"] = "uniqueidentifier NOT NULL",
             ["NoisePosts.ExerciseId"] = "uniqueidentifier NOT NULL",
             ["NoisePosts.PersonaId"] = "uniqueidentifier NOT NULL",
-            ["NoisePosts.Text"] = "nvarchar(280) NOT NULL",
+            ["NoisePosts.Text"] = "nvarchar(1024) NOT NULL",
             ["NoisePosts.Order"] = "int NOT NULL",
             ["NoisePosts.PostedCount"] = "int NOT NULL",
             ["NoisePosts.LastPostedWallClock"] = "datetimeoffset NULL",
@@ -244,7 +245,7 @@ public class DemoFeedbackMigrationTests
             Id = Guid.NewGuid(),
             ExerciseId = exerciseId,
             PersonaId = Guid.NewGuid(),
-            Text = new string('n', NoisePost.MaxTextLength),
+            Text = new string('n', NoisePost.MaxTextColumnLength),
             Order = 3,
             CreatedWallClock = new DateTimeOffset(2026, 10, 14, 20, 0, 0, TimeSpan.Zero),
         };

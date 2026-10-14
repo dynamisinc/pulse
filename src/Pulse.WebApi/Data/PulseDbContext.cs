@@ -731,7 +731,8 @@ public class PulseDbContext : DbContext
             entity.HasKey(e => e.Id);
             entity.Property(e => e.ExerciseId).IsRequired();
 
-            entity.Property(e => e.Text).IsRequired().HasMaxLength(NoisePost.MaxTextLength);
+            // Sized in UTF-16 code units like InjectItemPost.Text: the 280-code-point content limit is validated in code.
+            entity.Property(e => e.Text).IsRequired().HasMaxLength(NoisePost.MaxTextColumnLength);
             entity.Property(e => e.PostedCount).IsRequired().HasDefaultValue(0);
 
             // `Order` is a SQL reserved word — EF brackets it; raw SQL must too.
