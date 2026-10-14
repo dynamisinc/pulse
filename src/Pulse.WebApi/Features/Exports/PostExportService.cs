@@ -271,12 +271,15 @@ public sealed class PostExportService
             staffRoles.TryAdd(member.Id, member.Role);
         }
 
-        // Deleted inject items are included: a post an item published outlives the item.
-        // TODO(demo-feedback 01): prefer InjectItem.ExternalRef over the title once story 01's column is merged.
+        // Deleted inject items are included: a post an item published outlives the item. The MSEL Inject # (DF-10)
+        // wins over the title when the item has one.
         var injects = await _dbContext.InjectItems
             .AsNoTracking()
-            .Select(item => new { item.Id, item.Title })
-            .ToDictionaryAsync(item => item.Id, item => item.Title, cancellationToken);
+            .Select(item => new { item.Id, item.Title, item.ExternalRef })
+            .ToDictionaryAsync(
+                item => item.Id,
+                item => string.IsNullOrWhiteSpace(item.ExternalRef) ? item.Title : item.ExternalRef,
+                cancellationToken);
 
         return new ExportLookups(personas, humans, staffRoles, injects);
     }
@@ -287,7 +290,6 @@ public sealed class PostExportService
         TimeZoneInfo zone,
         CancellationToken cancellationToken)
     {
-        // TODO(demo-feedback 01): read Post.PinnedForAllAt into the page once story 01's column is merged.
         var posts = await _dbContext.Posts
             .AsNoTracking()
             .Where(post => page.Contains(post.Id))
@@ -304,7 +306,8 @@ public sealed class PostExportService
                 post.DeletedAt,
                 post.BaselineLikeCount,
                 post.BaselineRepostCount,
-                post.BaselineReplyCount))
+                post.BaselineReplyCount,
+                post.PinnedForAllAt))
             .ToDictionaryAsync(post => post.Id, cancellationToken);
 
         var engagement = await _engagementReader.GetAsync(page, viewerPersonaId: null, cancellationToken);
@@ -378,9 +381,7 @@ public sealed class PostExportService
                 ShownLikes = post.BaselineLikeCount + realLike,
                 ShownReposts = post.BaselineRepostCount + realRepost,
                 ShownReplies = post.BaselineReplyCount + realReply,
-
-                // TODO(demo-feedback 01): PostExportLabels.Yes when Post.PinnedForAllAt is set.
-                PinnedForAll = string.Empty,
+                PinnedForAll = post.PinnedForAllAt is null ? string.Empty : PostExportLabels.Yes,
                 Status = post.DeletedAt is null ? PostExportLabels.Live : PostExportLabels.TakenDown,
                 TakenDownAt = PostExportLabels.ScenarioTime(post.DeletedAt, zone),
             });
@@ -400,8 +401,8 @@ public sealed class PostExportService
     }
 
     private static string ResolveInjectRef(string? injectId, ExportLookups lookups) =>
-        Guid.TryParse(injectId, out var itemId) && lookups.Injects.TryGetValue(itemId, out var title)
-            ? title
+        Guid.TryParse(injectId, out var itemId) && lookups.Injects.TryGetValue(itemId, out var reference)
+            ? reference
             : string.Empty;
 
     private TelemetryEvent BuildDownloadedEvent(
@@ -467,7 +468,8 @@ public sealed class PostExportService
         DateTimeOffset? DeletedAt,
         int BaselineLikeCount,
         int BaselineRepostCount,
-        int BaselineReplyCount);
+        int BaselineReplyCount,
+        DateTimeOffset? PinnedForAllAt);
 
     /// <summary>The opaque XC-004 payload: the row count only.</summary>
     private sealed class DownloadedPayload

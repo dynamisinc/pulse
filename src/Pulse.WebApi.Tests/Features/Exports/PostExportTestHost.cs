@@ -230,8 +230,9 @@ public sealed class PostExportSeed
     /// <summary>Seeds an inject item.</summary>
     /// <param name="exerciseId">The owning exercise.</param>
     /// <param name="title">The item title.</param>
+    /// <param name="externalRef">The MSEL Inject # (DF-10), or <c>null</c> for a console-authored item.</param>
     /// <returns>The item id.</returns>
-    public async Task<Guid> InjectItemAsync(Guid exerciseId, string title)
+    public async Task<Guid> InjectItemAsync(Guid exerciseId, string title, string? externalRef = null)
     {
         var id = Guid.NewGuid();
         await using var seed = _fixture.CreateContext();
@@ -241,6 +242,7 @@ public sealed class PostExportSeed
             ExerciseId = exerciseId,
             Kind = "post",
             Title = title,
+            ExternalRef = externalRef,
             Status = "fired",
             CreatedByHumanId = Guid.NewGuid(),
             CreatedAt = WallStart,

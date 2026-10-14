@@ -131,7 +131,8 @@ public sealed class PostExportEndpointTests
         var cityFire = await _seed.PersonaAsync(exerciseId, "cityfire", "City Fire Dept");
         var resident = await _seed.PersonaAsync(exerciseId, "resident_ann", "Ann Resident");
         var accountId = await _seed.AccountAsync(exerciseId, "Pat Player");
-        var injectId = await _seed.InjectItemAsync(exerciseId, "Bridge closure");
+        var injectId = await _seed.InjectItemAsync(exerciseId, "Bridge closure", externalRef: "INJ-007");
+        var titleOnlyInject = await _seed.InjectItemAsync(exerciseId, "Shelter opens");
 
         var root = await _seed.PostAsync(exerciseId, cityFire, minute: 0, p =>
         {
@@ -140,6 +141,8 @@ public sealed class PostExportEndpointTests
             p.BaselineLikeCount = 40;
             p.BaselineRepostCount = 5;
             p.BaselineReplyCount = 2;
+            p.PinnedForAllAt = PostExportSeed.ScenarioStart.AddMinutes(3);
+            p.PinnedForAllByHumanId = staffUserId.ToString();
         });
 
         // The reply is seeded before posts with earlier scenario times: the export sorts, not the insert order.
@@ -168,6 +171,7 @@ public sealed class PostExportEndpointTests
         {
             p.DeletedAt = PostExportSeed.ScenarioStart.AddMinutes(45);
             p.ActingHumanId = "someone-from-nowhere";
+            p.InjectId = titleOnlyInject.ToString();
         });
 
         await _seed.ReactionAsync(exerciseId, root, ReactionKinds.Like);
@@ -204,12 +208,14 @@ public sealed class PostExportEndpointTests
         rootRow["Shown likes"].Should().Be("42", "baseline + real, as participants saw it");
         rootRow["Shown reposts"].Should().Be("6");
         rootRow["Shown replies"].Should().Be("3");
+        rootRow["Pinned for all"].Should().Be("Yes", "a controller pinned it for everyone");
         rootRow["Status"].Should().Be("Live");
         rootRow["Taken down at"].Should().BeEmpty();
 
         var injectRow = rows[1];
         injectRow["Author type"].Should().Be("Scripted inject");
-        injectRow["Inject #"].Should().Be("Bridge closure", "the inject item's title until it has an external ref");
+        injectRow["Inject #"].Should().Be("INJ-007", "the item's MSEL Inject # wins over its title");
+        injectRow["Pinned for all"].Should().BeEmpty();
         injectRow["Media"].Should().Be("1 video");
         injectRow["Posted by"].Should().Be("Casey Controller");
 
@@ -230,6 +236,7 @@ public sealed class PostExportEndpointTests
         var takenDownRow = rows[5];
         takenDownRow["Status"].Should().Be("Taken down");
         takenDownRow["Taken down at"].Should().Be("2033-09-04 08:45");
+        takenDownRow["Inject #"].Should().Be("Shelter opens", "an item without an external ref falls back to its title");
         takenDownRow["Posted by"].Should().BeEmpty("an acting human who does not resolve in the exercise stays blank");
 
         using var workbook = ExportWorkbookReader.Open(await response.Content.ReadAsByteArrayAsync());

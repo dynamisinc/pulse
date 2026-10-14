@@ -56,6 +56,23 @@ Gate tests (401/403 per role, evaluator allowed), column order and header, autho
 a taken-down row, formula-safety read-back, isolation A/B, telemetry, and the content headers. Read the generated
 bytes back with ClosedXML in the test.
 
+Linked (`src/Pulse.WebApi.Tests/Features/Exports/`):
+
+- AC 1 (gate, headers): `PostExportEndpointTests.Anonymous_Returns401_WithNoStore`, `ParticipantSession_Returns401_ItIsNotAStaffSession`,
+  `ReadOnlySession_Returns401_ItIsNotAStaffSession`, `StaffNotAssignedToTheExercise_Returns403`, `UnresolvedScope_Returns401`,
+  `AnyAssignedStaffRole_Gets200_WithTheXlsxHeaders` (controller, evaluator, planner), `Route_IsInTheStaffWorld`
+- AC 2 (sheet layout): `PostExportWorkbookTests.Sheet_IsPosts_WithTheFrozenColumnsInOrder_BoldFrozenHeader_AndAutofilterOverTheUsedRange`,
+  `Columns_HaveSensibleWidths_AndTextIsWrappedAboutSixtyWide`, `AnEmptyExport_StillHasTheHeaderAndAFilter`
+- AC 3-5 (rows, author type, posted by, inject #, counts, pinned, status): `PostExportEndpointTests.EveryPostAndReply_IncludingTakenDown_OneRowEach_OldestFirst_WithResolvedColumns`,
+  `PostExportWorkbookTests.AuthorType_MapsEveryOrigin_AndWritesAnUnknownOneRaw`, `PostedBy_IsBlankOnlyForEngineAndWhiteNoise`,
+  `Media_IsSummarisedReadably`, `ReplyTo_IsHandleAndPostId_OrTheIdAlone_OrBlank`
+- AC 6 (times): `PostExportWorkbookTests.WallClock_IsAnExcelDateTimeCell_AndCountsAreNumbers`, `ScenarioTime_IsFormattedInTheExercisesZone`,
+  `FileName_UsesTheExerciseSlug_AndTheUtcMinute`
+- AC 7 (formula safety): `PostExportWorkbookTests.FormulaLookingText_IsWrittenAsLiteralText_NeverAFormula`, `CleanText_DropsCharactersXmlCannotCarry_AndKeepsEverythingElse`
+- AC 8 (paging, 413): `PostExportEndpointTests.MoreThanOnePage_IsWrittenCompletelyAndInOrder`, `MoreThanFiftyThousandPosts_Returns413_WithAReadableReason_AndNoTelemetry`
+- Isolation: `PostExportEndpointTests.ExportFromA_ContainsNoRowPersonaStaffNameOrInjectFromB`
+- Telemetry: `PostExportEndpointTests.OneDownloadedEvent_PerDownload_StaffActor_RowsOnly`
+
 ## Tech notes
 
 Own `Features/Exports/**`: `PostExportEndpoints.cs` (`AddPostExport()` / `MapPostExport()`; the orchestrator wires
