@@ -452,7 +452,7 @@ public sealed partial class LinkEmailService
         catch (Exception exception)
         {
             // The type only: an exception message from deeper down could carry the address or the URL.
-            LogUnexpectedSendFault(_logger, exception.GetType().Name);
+            LogUnexpectedSendFault(_logger, exception.GetType().Name, LinkMailSendOutcome.Failed);
             return LinkMailSendOutcome.Failed;
         }
 
@@ -462,7 +462,8 @@ public sealed partial class LinkEmailService
         }
         catch (Exception exception)
         {
-            LogUnexpectedSendFault(_logger, exception.GetType().Name);
+            // The mailer may have handed the message over before it threw: unconfirmed, not failed.
+            LogUnexpectedSendFault(_logger, exception.GetType().Name, LinkMailSendOutcome.TimedOut);
             return LinkMailSendOutcome.TimedOut;
         }
 #pragma warning restore CA1031
@@ -539,8 +540,11 @@ public sealed partial class LinkEmailService
     [LoggerMessage(
         EventId = 2,
         Level = LogLevel.Warning,
-        Message = "Link email send faulted unexpectedly ({ExceptionType}); reported as failed, the batch continues.")]
-    private static partial void LogUnexpectedSendFault(ILogger logger, string exceptionType);
+        Message = "Link email send faulted unexpectedly ({ExceptionType}); reported as {Outcome}, the batch continues.")]
+    private static partial void LogUnexpectedSendFault(
+        ILogger logger,
+        string exceptionType,
+        LinkMailSendOutcome outcome);
 
     [LoggerMessage(
         EventId = 3,
