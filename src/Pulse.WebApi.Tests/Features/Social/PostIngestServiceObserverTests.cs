@@ -110,7 +110,7 @@ public class PostIngestServiceObserverTests
 
     private static CreatePostRequest Request() => new()
     {
-        Text = "Fulton County EM: do not drink tap water #WaterIssues",
+        Text = "Kestrel County EM: do not drink tap water #WaterIssues",
         ScenarioTime = "2033-06-14T09:00:00-05:00",
         TimeZone = "America/Chicago",
     };

@@ -85,11 +85,11 @@ public class PersonaHandleUniquenessTests
     [RequiresDockerFact]
     public async Task DifferentExercises_MayEachUseTheSameHandle()
     {
-        // Per-exercise, NOT org-global (§7 Q3, resolved): each isolated world runs its own "@FulcoEM". A globally
+        // Per-exercise, NOT org-global (§7 Q3, resolved): each isolated world runs its own "@KestrelCoEM". A globally
         // unique index would have made a second exercise's cast unseedable — the opposite of COR-001's intent.
         var exerciseA = Guid.NewGuid();
         var exerciseB = Guid.NewGuid();
-        var handle = $"FulcoEM_{Guid.NewGuid():N}";
+        var handle = $"KestrelCoEM_{Guid.NewGuid():N}";
 
         await InsertAsync(NewPersona(exerciseA, handle), NewPersona(exerciseB, handle));
 

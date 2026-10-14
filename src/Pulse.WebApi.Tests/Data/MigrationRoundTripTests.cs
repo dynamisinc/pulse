@@ -392,7 +392,7 @@ public class MigrationRoundTripTests
                 BrandAccent = "#d97706",
                 BrandSurface = "#ffffff",
                 BrandOnSurface = "#1c1c1c",
-                OutletNamesJson = """{"news":"Newsline 7","weather":"Fairhaven Weather Service"}""",
+                OutletNamesJson = """{"news":"Metro Desk 9","weather":"Fairhaven Weather Service"}""",
                 ComplianceChromeEnabled = false,
                 ChromeTopText = "UNCLASSIFIED // EXERCISE",
                 ChromeTopFg = "#eaf5e6",
@@ -420,7 +420,7 @@ public class MigrationRoundTripTests
         reloaded.BrandAccent.Should().Be("#d97706");
         reloaded.BrandSurface.Should().Be("#ffffff");
         reloaded.BrandOnSurface.Should().Be("#1c1c1c");
-        reloaded.OutletNamesJson.Should().Be("""{"news":"Newsline 7","weather":"Fairhaven Weather Service"}""");
+        reloaded.OutletNamesJson.Should().Be("""{"news":"Metro Desk 9","weather":"Fairhaven Weather Service"}""");
         reloaded.ComplianceChromeEnabled.Should().BeFalse("chrome-off is a legal stored state (D7-008)");
         reloaded.ChromeTopText.Should().Be("UNCLASSIFIED // EXERCISE");
         reloaded.ChromeTopFg.Should().Be("#eaf5e6");

