@@ -1,6 +1,6 @@
 # Story: Email the personal link (Azure Communication Services)
 
-**Feature:** Easy participant login  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Not Started
+**Feature:** Easy participant login  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** In Review
 **Requirements:** COR-011, COR-017 (part: delivering credentials), NFR-004, NFR-009  ·  **Design decisions:** none (EL-18, C-3 in `implementation.md`)  ·  **Issue:** #478
 **Stack:** backend + infra (+ a small frontend slice)  ·  **Review:** Tier-2 (infrastructure identity, outbound email of credentials)  ·  **Priority:** **Could, last**  ·  **Wave:** 3  ·  **Effort:** M
 
@@ -28,7 +28,9 @@ deliberately minimal.
       participant (omitting the ids means everyone eligible, at most 100 per call; more is `400`) and answers
       `200 RosterEmailResultDto` with, per participant, `sent`, `skipped` (reason: `noEmail`, `noActiveLink`,
       `disabled`, `tokenUnrecoverable`, `notFound`, where `notFound` covers an id from another exercise identically)
-      or `failed` (a generic reason). Sends are sequential with a short pause; **one failure never aborts the batch**.
+      or `failed` (a generic reason). Sends are sequential with a short pause; **one failure never aborts the batch**,
+      except the provider's `429`: no further send is attempted; the rest are `failed`/`rateLimited` with no event
+      *(amended 2026-10-13, Gate-1 S-1)*.
       Behind `EngineCockpitStaffAuthorizationFilter` + `RosterStaffRoleFilter`, `Cache-Control: no-store`.
 - [ ] **Given** `Email:Endpoint` is unset, **then** the endpoint answers `503` ProblemDetails ("Email delivery is not
       configured") and sends nothing, `GET /api/staff/roster` reports `capabilities.emailLinks: false`, and the host
@@ -44,7 +46,7 @@ deliberately minimal.
 - [ ] **Given** a send attempt, **then** one `participant.link.emailed` event is recorded (`sent` / `failed`) with the
       staff actor and the link as target; **no email address, token or URL appears in any event, log line or response
       body**. Provider errors are logged with the operation and status only.
-- [ ] **Given** the infrastructure, **then** `uat.bicepparam` sets `deployCommunication = true`;
+- [ ] **Given** the infrastructure, **then** `uat.bicepparam` sets `deployCommunication = true` *(amended 10/14, Tom: `false` until after the 10/20 demo; the code merges dark)*;
       `communication.bicep` grants the App Service's system-assigned identity the built-in role that allows sending on
       the Communication Service (**confirm the role against the current Microsoft Learn page on ACS Email with
       Microsoft Entra authentication and state the role and its id in the PR; least privilege, not Owner**) using the
@@ -95,7 +97,8 @@ human-run infrastructure deploy. **Nothing depends on this story.**
 ## Tests
 
 `Pulse.WebApi.Tests/Features/Identity/LinkEmail/`: `LinkEmailServiceTests` (eligibility and each skip reason, a fake
-mailer, one failure does not abort, no secrets in events/logs, HTML encoding of a hostile name), `LinkEmailEndpointsHttpTests`
+mailer, one failure does not abort, the 429 exception `AfterTheFirst429_NobodyElseIsAttempted_TheyAreRateLimited_AndNothingIsRecordedForThem`,
+no secrets in events/logs, HTML encoding of a hostile name), `LinkEmailEndpointsHttpTests`
 (200/400/401/403/503, `no-store`), `LinkEmailIsolationTests` (`[RequiresDockerFact]`), `NullParticipantLinkMailerTests`
 (startup with no config). `features/participantAdmin/email/*.test.tsx` (button hidden without the capability, confirm,
 summary). Infra: `az bicep build` in CI. Manual: send to a controlled mailbox and tap the link (walk-through step 9).

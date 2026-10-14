@@ -13,6 +13,7 @@ using Pulse.WebApi.Features.Identity.Accounts;
 using Pulse.WebApi.Features.Identity.DayWord;        // easy-login 05
 using Pulse.WebApi.Features.Identity.EasyLogin;      // easy-login 01
 using Pulse.WebApi.Features.Identity.LinkCards;      // easy-login 04
+using Pulse.WebApi.Features.Identity.LinkEmail;      // easy-login 13
 using Pulse.WebApi.Features.Identity.PersonalLinks;  // easy-login 03
 using Pulse.WebApi.Features.Identity.Roster;         // easy-login 02
 using Pulse.WebApi.Features.Identity.Sessions;
@@ -151,11 +152,15 @@ builder.Services.AddSharedCredentialLifecycle();
 // 05 the day word add their own slices; 03 and 05 each add one named rate-limit policy (easy-login-join /
 // easy-login-word) under the single app.UseRateLimiter() above. 06's day-long participant sessions live inside
 // AddSessions (above) and need no line here. All depend on AddStaffIdentity, AddSessions and AddExerciseClock.
+// 13 (email the personal link) is additive and DARK until Email:Endpoint + Email:SenderAddress are usable: without
+// them the mailer is the fail-closed null one, POST /api/staff/roster/email-links answers 503 and the roster reports
+// capabilities.emailLinks: false. Keyless (the App Service's managed identity); no middleware, no migration.
 builder.Services.AddEasyLoginFoundation();
 builder.Services.AddRoster();
 builder.Services.AddPersonalLinks();
 builder.Services.AddLinkCards();
 builder.Services.AddDayWord();
+builder.Services.AddLinkEmail();
 
 // Exercise lifecycle administration (E1 exercise-lifecycle-admin, COR-074/075/076) — the ORGANIZATION-tier
 // staff slice: POST/GET /api/org/exercises and GET /api/org/staff-assignments. Registers the slice's three
@@ -458,6 +463,7 @@ app.MapPersonalLinkEndpoints();            // easy-login 03 POST /api/auth/join 
 app.MapDayWordEndpoints();                 // easy-login 05 POST /api/auth/word (pre-auth), GET/PUT/DELETE /api/staff/day-word
 app.MapRosterEndpoints();                  // easy-login 02 GET/POST /api/staff/roster, POST /api/staff/roster/import
 app.MapLinkCardEndpoints();                // easy-login 04 POST /api/staff/roster/cards
+app.MapLinkEmailEndpoints();               // easy-login 13 POST /api/staff/roster/email-links (503 until email is configured)
 app.MapBootstrapEndpoints();               // #308 POST /api/ops/bootstrap-exercise (secret-gated seed; 404 when unconfigured)
 app.MapEngineContentSeedEndpoints();       // #327 POST /api/ops/seed-engine-content (secret-gated engine drive path; 404 when unconfigured)
 

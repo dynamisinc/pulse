@@ -122,11 +122,12 @@ describe('participantAdmin (staff roster) — source guards', () => {
       .map(([path]) => path)
     expect(composers).toEqual(['./ParticipantAdminSurface.tsx'])
 
-    // And it composes the two slots that exist on this branch, through the route.
+    // And it composes all three slots (11, 12 and 13), through the route.
     const surface = code(ALL['./ParticipantAdminSurface.tsx'] ?? '')
     expect(surface).toContain('<ParticipantAdminRoute')
     expect(surface).toContain('dayWordSlot=')
     expect(surface).toContain('renderCardsAction')
+    expect(surface).toContain('renderEmailAction')
   })
 
   it('never logs, toasts, or stores anything (a join URL must not escape through any of them)', () => {

@@ -22,6 +22,7 @@ using Pulse.WebApi.Features.Identity;
 using Pulse.WebApi.Features.Identity.DayWord;
 using Pulse.WebApi.Features.Identity.EasyLogin;
 using Pulse.WebApi.Features.Identity.LinkCards;
+using Pulse.WebApi.Features.Identity.LinkEmail;
 using Pulse.WebApi.Features.Identity.PersonalLinks;
 using Pulse.WebApi.Features.Identity.Roster;
 using Xunit;
@@ -34,8 +35,9 @@ using Xunit;
 /// <para>
 /// <b>Why this exists.</b> Every easy-login slice (stories 02–05) is tested on its own slice-level host, which wires
 /// its own <c>AddXxx()</c>/<c>MapXxx()</c>. Such a host cannot notice that <c>Program.cs</c> forgot the line: an unwired
-/// slice simply 404s in production (the #310 → #317 lesson). These tests fail if any of the five <c>Add*</c> or four
-/// <c>Map*</c> calls is removed from <c>Program.cs</c>.
+/// slice simply 404s in production (the #310 → #317 lesson). These tests fail if any of the six <c>Add*</c> or five
+/// <c>Map*</c> calls (story 13's <c>AddLinkEmail()</c> / <c>MapLinkEmailEndpoints()</c> included) is removed from
+/// <c>Program.cs</c>.
 /// </para>
 /// <para>
 /// <b>What is pinned.</b>
@@ -44,7 +46,8 @@ using Xunit;
 ///   <item><description>The two anonymous sign-ins (<c>/api/auth/join</c>, <c>/api/auth/word</c>) are pre-auth, carry the
 ///   16 KiB login body limit and their own named rate-limit policy, and are NOT answered by the default-deny gate.</description></item>
 ///   <item><description>Every staff route IS answered by the gate for an anonymous caller (401 + challenge, never 404).</description></item>
-///   <item><description>The card route carries its 64 KiB body limit (EL-20).</description></item>
+///   <item><description>The card route carries its 64 KiB body limit (EL-20); the email-links route its 16 KiB limit.</description></item>
+///   <item><description>Story 13 is dark on a host with no <c>Email:*</c> configuration: the mailer is the fail-closed null one.</description></item>
 ///   <item><description>Story 03's real link issuer replaced story 01's fail-closed null issuer.</description></item>
 ///   <item><description><c>AddEasyLoginFoundation()</c> is idempotent: a second call adds no second options action.</description></item>
 ///   <item><description>Every easy-login <c>Add*</c> call is idempotent, and the container still builds its rate-limiter
@@ -66,13 +69,14 @@ public sealed class EasyLoginCompositionRootWiringTests
         { "POST", DayWordEndpoints.WordSignInRoute, DayWordEndpoints.WordSignInRateLimitPolicy },
     };
 
-    /// <summary>Every staff-only easy-login route (stories 02, 03, 04, 05).</summary>
+    /// <summary>Every staff-only easy-login route (stories 02, 03, 04, 05, 13).</summary>
     public static TheoryData<string, string> StaffRoutes() => new()
     {
         { "GET", "/api/staff/roster" },
         { "POST", "/api/staff/roster" },
         { "POST", "/api/staff/roster/import" },
         { "POST", "/api/staff/roster/cards" },
+        { "POST", "/api/staff/roster/email-links" },
         { "POST", "/api/staff/roster/{id:guid}/link/reissue" },
         { "POST", "/api/staff/roster/{id:guid}/link/revoke" },
         { "POST", "/api/staff/roster/{id:guid}/disable" },
@@ -133,6 +137,31 @@ public sealed class EasyLoginCompositionRootWiringTests
         endpoint.Metadata.GetMetadata<IAllowAnonymous>().Should().BeNull("the card sheet is staff-only");
     }
 
+    [Fact]
+    public void TheEmailLinksRoute_CarriesItsBodyLimit_AndIsNotAnonymous()
+    {
+        using var factory = new ProbeFactory();
+        var endpoint = FindRoute(factory.Services.GetRequiredService<EndpointDataSource>(), "POST", LinkEmailEndpoints.EmailLinksRoute);
+
+        var sizeLimit = endpoint.Metadata.GetMetadata<IRequestSizeLimitMetadata>();
+        sizeLimit.Should().NotBeNull("the email-links route must carry a body limit");
+        sizeLimit!.MaxRequestBodySize.Should().Be(
+            LinkEmailEndpoints.MaxRequestBodyBytes, "story 13: the body is capped at 16 KiB (100 ids are about 4 KB)");
+        endpoint.Metadata.GetMetadata<IAllowAnonymous>().Should().BeNull("emailing links is staff-only");
+    }
+
+    [Fact]
+    public void WithNoEmailConfiguration_TheRealHostIsDark_TheMailerIsTheNullOne()
+    {
+        using var factory = new ProbeFactory();
+
+        var mailer = factory.Services.GetRequiredService<IParticipantLinkMailer>();
+
+        mailer.Should().BeOfType<NullParticipantLinkMailer>(
+            "story 13 is dark until Email:Endpoint and Email:SenderAddress are usable (EL-18)");
+        mailer.IsConfigured.Should().BeFalse();
+    }
+
     [Theory]
     [MemberData(nameof(StaffRoutes))]
     public async Task AnAnonymousStaffCall_IsAnsweredByTheGate_NeverA404(string method, string pattern)
@@ -181,6 +210,21 @@ public sealed class EasyLoginCompositionRootWiringTests
     }
 
     [Fact]
+    public void AddLinkEmail_IsIdempotent()
+    {
+        var once = new ServiceCollection().AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
+        once.AddLinkEmail();
+
+        var twice = new ServiceCollection().AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
+        twice.AddLinkEmail();
+        twice.AddLinkEmail();
+
+        twice.Count.Should().Be(once.Count, "a repeat call registers nothing more (marker, as AddEasyLoginFoundation)");
+        twice.Count(d => d.ServiceType == typeof(IConfigureOptions<LinkEmailPacing>)).Should().Be(
+            once.Count(d => d.ServiceType == typeof(IConfigureOptions<LinkEmailPacing>)));
+    }
+
+    [Fact]
     public void AddEasyLoginFoundation_IsIdempotent()
     {
         var once = new ServiceCollection().AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
@@ -199,8 +243,9 @@ public sealed class EasyLoginCompositionRootWiringTests
     [Fact]
     public void EveryEasyLoginAddCall_IsIdempotent_AndTheRateLimiterOptionsStillBuild()
     {
-        // Gate-2 CR-001: Program.cs wires all five, and a test host's ConfigureTestServices runs AFTER Program.cs, so a
-        // host that adds one again used to register a second easy-login-word policy and throw at start-up.
+        // Gate-2 CR-001: Program.cs wires all six (story 13's AddLinkEmail included), and a test host's
+        // ConfigureTestServices runs AFTER Program.cs, so a host that adds one again used to register a second
+        // easy-login-word policy and throw at start-up.
         static ServiceCollection Compose(int calls)
         {
             var services = new ServiceCollection();
@@ -213,6 +258,7 @@ public sealed class EasyLoginCompositionRootWiringTests
                 services.AddPersonalLinks();
                 services.AddLinkCards();
                 services.AddDayWord();
+                services.AddLinkEmail();
             }
 
             return services;
