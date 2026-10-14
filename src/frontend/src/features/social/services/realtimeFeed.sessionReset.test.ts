@@ -76,6 +76,9 @@ beforeEach(() => {
 
 afterEach(() => {
   realtimeFeed.stop()
+  // The singleton outlives each test: clear its poll state (an unresolved GET leaves
+  // `pollInFlight` set) so the next test starts from a clean feed, not this one's leftovers.
+  runSessionResets()
   vi.useRealTimers()
 })
 
@@ -105,6 +108,7 @@ describe('runSessionResets() resets the app-wide realtimeFeed', () => {
   it('B\'s first degraded poll baselines silently (no spurious "N new posts")', async () => {
     await realtimeFeed.start()
     await vi.advanceTimersByTimeAsync(0)
+    expect(resolveFeedMock).toHaveBeenCalledTimes(1) // a clean singleton polls at once
     gets[0]?.resolve([polledPost('post-a1')]) // A's feed is baselined
     await vi.advanceTimersByTimeAsync(0)
     realtimeFeed.stop() // A's screens unmount
@@ -114,6 +118,7 @@ describe('runSessionResets() resets the app-wide realtimeFeed', () => {
     const unsubscribe = realtimeFeed.subscribe(post => received.push(post))
     await realtimeFeed.start()
     await vi.advanceTimersByTimeAsync(0)
+    expect(resolveFeedMock).toHaveBeenCalledTimes(2) // A's baseline, then B's first poll
     gets[1]?.resolve([polledPost('post-b1'), polledPost('post-b2')])
     await vi.advanceTimersByTimeAsync(0)
 
