@@ -7,6 +7,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Extensions;
+using Pulse.WebApi.Features.Identity.EasyLogin;
 using Pulse.WebApi.Features.Identity.Sessions;
 using Pulse.WebApi.Features.Identity.Staff;
 
@@ -56,6 +57,46 @@ public class SessionRegistrationTests
 
         options.SessionLifetimeMinutes.Should().Be(60, "sessions are short-lived by default (one hour)");
         options.RefreshLifetimeMinutes.Should().Be(720, "the refresh window is longer than the access window");
+        options.ParticipantDayLong.Should().BeTrue("easy-login story 06: participant sessions last the exercise day by default");
+    }
+
+    [Fact]
+    public void AddSessions_BindsParticipantDayLongOff_FromAuthenticationSession()
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["Authentication:Session:ParticipantDayLong"] = "false" })
+            .Build();
+        var services = BaseServices();
+        services.AddSessions(configuration);
+        using var provider = services.BuildServiceProvider();
+
+        provider.GetRequiredService<IOptions<SessionOptions>>().Value.ParticipantDayLong.Should().BeFalse(
+            "Authentication:Session:ParticipantDayLong = false restores the sliding participant window");
+    }
+
+    [Fact]
+    public void AddSessions_RegistersTheDayCapInputs_WithoutOverridingAHostsOwnClock()
+    {
+        // The day cap needs a clock and the exercise facts reader. AddSessions TryAdds both so the slice resolves on its
+        // own, and must never replace a clock the host (or AddEasyLoginFoundation, or a test) registered first.
+        var hostClock = new FixedClock();
+        var services = BaseServices();
+        services.AddSingleton(EmptyConfig()); // AddEasyLoginFoundation binds through the container's IConfiguration, as a real host has.
+        services.AddSingleton<TimeProvider>(hostClock);
+        services.AddSessions(EmptyConfig());
+        services.AddEasyLoginFoundation();
+        using var provider = services.BuildServiceProvider();
+        using var scope = provider.CreateScope();
+
+        scope.ServiceProvider.GetRequiredService<TimeProvider>().Should().BeSameAs(hostClock);
+        scope.ServiceProvider.GetRequiredService<ExerciseFactsReader>().Should().NotBeNull();
+        scope.ServiceProvider.GetRequiredService<ISessionIssuer>().Should().BeOfType<SessionIssuer>();
+        scope.ServiceProvider.GetRequiredService<SessionService>().Should().NotBeNull();
+    }
+
+    private sealed class FixedClock : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => new(2026, 10, 14, 12, 0, 0, TimeSpan.Zero);
     }
 
     [Fact]

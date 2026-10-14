@@ -46,32 +46,32 @@
  * the FULL participant-admin surface (out of scope here, E1
  * identity-auth-roles/08) — see below.
  *
- * ## The footer link to the full admin surface (staff-navigation/04, COR-073)
+ * ## The footer link to the full admin surface (staff-navigation/04, COR-073; easy-login W2-4)
  * This flyout used to end with `<CobraLinkButton href="/staff/participant-admin">
- * Open full participant admin →</CobraLinkButton>`. That was a DEAD CONTROL
- * dressed as navigation, and worse than a broken link:
- *  - it was a raw `href`, i.e. a FULL PAGE RELOAD out of the SPA — every bit of
- *    client-side state (this flyout, the open toolstrip, any in-progress work
- *    in the surface behind it) discarded on click;
- *  - `/staff/participant-admin` is not in `STAFF_ROUTE_REGISTRY`
- *    (`@/features/staff/staffRouteRegistry`), so the reload landed in the
- *    `*` catch-all and `StaffRouteTree` bounced the staff member back to their
- *    role's default surface. Click → lose everything → end up somewhere else.
+ * Open full participant admin →</CobraLinkButton>`. That was a DEAD CONTROL dressed as
+ * navigation, and worse than a broken link: it was a raw `href` (a FULL PAGE RELOAD out of the
+ * SPA, discarding the open toolstrip and any in-progress work), and `/staff/participant-admin`
+ * had no registry entry, so the reload landed in the `*` catch-all and bounced the staff member
+ * back to their default surface. The footer was therefore REMOVED until the surface existed.
  *
- * The full participant-admin surface is one of the ~40 planned staff surfaces
- * and is NOT BUILT (identity-auth-roles/08, Not Started). Rather than invent it,
- * or fake it with a disabled-but-focusable button, the footer is ABSENT — the
- * same "absent, not a dead control" rule this component already applies to
- * role-gated quick actions (see "Role gating" above and
- * `../participantAdminMocks`'s header for why absent beat disabled). Nothing
- * here is focusable, so nothing here can be tabbed to and activated for no
- * effect (NFR-001).
- *
- * TO RESTORE IT (one small edit, once the surface exists): add the registry
- * entry in `@/features/staff/staffRouteRegistry`, then render a react-router
- * `<Link to={entry.path}>`-based control here — CLIENT-SIDE navigation, never a
- * raw `href`. Do not hardcode the path string: read it from the registry entry
- * so a rename can't resurrect this exact bug.
+ * The surface exists now (easy-login: the roster, "Today's word" and the printable cards are the
+ * `participant-admin` entry in `@/features/staff/staffRouteRegistry`), so the footer is back, built
+ * so the old bug cannot return:
+ *  - CLIENT-SIDE navigation, never a reload. It is a real anchor (`href` for open-in-new-tab and
+ *    for assistive tech) whose plain click is handled by react-router's own `useLinkClickHandler`,
+ *    exactly what `<Link>` does internally; modified clicks fall through to the browser. (A COBRA
+ *    button cannot be a `<Link>` itself: `styled(Button)` does not type a polymorphic `component`.)
+ *  - The path is READ FROM THE REGISTRY ENTRY, never hardcoded here, so a rename cannot resurrect
+ *    the dead link. This component never imports the concrete registry (that would close the
+ *    cycle registry -> route -> frame -> this flyout -> registry); it reads the `{registry, role}`
+ *    that `StaffRouteTree` publishes through `useStaffNavigation()`, as `SurfaceLauncher` does.
+ *  - ROLE-GATED BY THE REGISTRY, which is the only gate. The flyout is SHELL-GLOBAL: it is mounted
+ *    on every staff surface, including the evaluator's and the org admin's. The entry's
+ *    `allowedRoles` is `planner` and `controller`, so only they get the link; for anyone else the
+ *    footer is ABSENT (not disabled), the codebase's pattern for an unavailable affordance. With no
+ *    navigation context at all (a bare mount) it is absent too: a link we cannot resolve is not
+ *    offered.
+ *  - Absent while the staff member is ALREADY on that page, where it would go nowhere.
  *
  * ## Role gating (COR-017)
  * A quick action is entirely ABSENT (not disabled) when the current staff
@@ -97,9 +97,11 @@
  */
 
 import { Box, IconButton, Stack, Tooltip, Typography } from '@mui/material'
+import { useHref, useLinkClickHandler, useLocation } from 'react-router-dom'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import type { IconDefinition } from '@fortawesome/fontawesome-svg-core'
 import {
+  faArrowRight,
   faCircleCheck,
   faLock,
   faUserClock,
@@ -109,6 +111,7 @@ import {
 import { useExerciseContext } from '@/core/exerciseContext'
 import { scenarioNow } from '@/core/clock'
 import { buildAndEmit } from '@/core/telemetry'
+import { staffRoutesForRole, useStaffNavigation } from '@/features/app-shell'
 import { CobraLinkButton } from '@/theme/styledComponents'
 import { staffShellTokens } from '../staffShellTokens'
 import { useRegisterShellGlobalTool, useToolstrip } from '../toolRegistry'
@@ -124,6 +127,13 @@ import {
  * hand-copy the string.
  */
 export const PARTICIPANT_ADMIN_TOOL_ID = 'participant-admin'
+
+/**
+ * The staff route registry id of the full participant-admin surface
+ * (`@/features/staff/staffRouteRegistry`). NOT the toolstrip tool id above: a different
+ * namespace that happens to spell the same.
+ */
+const PARTICIPANT_ADMIN_ROUTE_ID = 'participant-admin'
 
 /** Flyout panel width (AC1: "a 330px flyout"). */
 const FLYOUT_WIDTH_PX = 330
@@ -237,6 +247,45 @@ function ParticipantAdminRowView({
 }
 
 /**
+ * The footer link to the full participant-admin surface. Rendered only when the registry
+ * has that entry for the current role (see the module header), so it always sits inside a
+ * router and the router hooks below are safe.
+ */
+function FullAdminLink({ path, label }: { path: string; label: string }) {
+  const href = useHref(path)
+  // react-router's own click handling: a plain click navigates client-side (no reload),
+  // a modified click (new tab, new window, download) is left to the browser.
+  // (Typed for MUI Button's element; the handler reads only the event's button and modifier
+  // keys, and MUI renders an `<a>` here because `href` is set.)
+  const handleClick = useLinkClickHandler<HTMLButtonElement>(path)
+  const { pathname } = useLocation()
+  if (pathname === path) return null
+
+  return (
+    <Box
+      component="nav"
+      aria-label="Full participant admin"
+      data-testid="participant-admin-footer"
+      sx={{
+        px: 1.75,
+        py: 1.25,
+        borderTop: `1px solid ${staffShellTokens.toolstrip.borderColor}`,
+      }}
+    >
+      <CobraLinkButton
+        href={href}
+        onClick={handleClick}
+        data-testid="participant-admin-full-link"
+        endIcon={<FontAwesomeIcon icon={faArrowRight} aria-hidden="true" />}
+        sx={{ px: 0 }}
+      >
+        {label}
+      </CobraLinkButton>
+    </Box>
+  )
+}
+
+/**
  * Registers the participant-admin shell-global tool and renders its 330px
  * login-triage flyout while active. Mount exactly once, inside the staff
  * frame, under `<ToolstripProvider>` + `<ExerciseContextProvider>` — see
@@ -248,6 +297,15 @@ export function ParticipantAdminFlyout() {
   const roster = useParticipantAdminRoster(exerciseId)
   const { role, actingHumanId, canPerformAdminAction } = useAdminAuthorization()
   const { isActive, toggleTool } = useToolstrip()
+
+  // The registry entry for the full surface, if THIS role may open it. `allowedRoles` is the
+  // only gate (module header), read through the context `StaffRouteTree` publishes.
+  const navigation = useStaffNavigation()
+  const fullAdminEntry =
+    navigation === null
+      ? undefined
+      : staffRoutesForRole(navigation.registry, navigation.role)
+        .find(entry => entry.id === PARTICIPANT_ADMIN_ROUTE_ID)
 
   const pendingCount = roster.filter(row => PENDING_STATUSES.has(row.status)).length
 
@@ -353,12 +411,10 @@ export function ParticipantAdminFlyout() {
         ))}
       </Stack>
 
-      {/* NO FOOTER LINK — see "The footer link to the full admin surface" in
-          the module header. `/staff/participant-admin` has no registry entry
-          and no surface behind it, so there is deliberately nothing focusable
-          here to activate. Restore this footer as a react-router `<Link>` (or
-          a `useNavigate` control) to the registry entry's `path` the moment
-          identity-auth-roles/08 declares one — never as a raw `href`. */}
+      {/* Absent unless the registry offers this role the full surface; see the module header. */}
+      {fullAdminEntry !== undefined && (
+        <FullAdminLink path={fullAdminEntry.path} label="Open full participant admin" />
+      )}
     </Box>
   )
 }

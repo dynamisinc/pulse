@@ -31,9 +31,10 @@ import { useSession, useRole } from '@/core/auth'
 import type { Session } from '@/core/auth'
 import { useExerciseContext } from '@/core/exerciseContext'
 import type { ExerciseScope } from '@/core/exerciseContext'
+import { api } from '@/core/services/api'
 import { createRoleAwareRoutes } from './routes'
 import type { RoleAwareEntryProps } from './RoleAwareEntry'
-import { LOGIN_PATH, STAFF_LOGIN_PATH } from './constants'
+import { JOIN_PATH, LOGIN_PATH, STAFF_LOGIN_PATH } from './constants'
 
 vi.mock('@/core/services/api', () => ({ api: { get: vi.fn(), post: vi.fn() } }))
 
@@ -112,9 +113,15 @@ beforeEach(() => {
 })
 
 describe('createRoleAwareRoutes', () => {
-  it('replaces the flat routes with the two login routes + a role-aware catch-all', () => {
+  it('replaces the flat routes with the login + join routes and a role-aware catch-all', () => {
     const routes = createRoleAwareRoutes(SURFACES)
-    expect(routes.map(r => r.path)).toEqual([LOGIN_PATH, STAFF_LOGIN_PATH, '*'])
+    expect(routes.map(r => r.path)).toEqual([
+      LOGIN_PATH,
+      STAFF_LOGIN_PATH,
+      `${JOIN_PATH}/:token`,
+      JOIN_PATH,
+      '*',
+    ])
   })
 
   it('mounts RoleAwareEntry under the catch-all and routes on ROLE, not the typed path', () => {
@@ -135,8 +142,10 @@ describe('createRoleAwareRoutes', () => {
 
     // The real page's form, present synchronously regardless of the
     // exercise-context lookup's outcome (ParticipantSignInPage.tsx AC5).
-    expect(screen.getByLabelText('Handle')).toBeInTheDocument()
-    expect(screen.getByLabelText('Password')).toBeInTheDocument()
+    // Easy-login 09: "Today's word" is now the default method, so that is the
+    // form on screen (the Password form is one toggle away).
+    expect(screen.getByLabelText('Sign-in name')).toBeInTheDocument()
+    expect(screen.getByLabelText("Today's word")).toBeInTheDocument()
     // The deleted placeholder's own copy must never appear.
     expect(screen.queryByText(/sign-in required/i)).not.toBeInTheDocument()
     expect(screen.queryByText(/your session could not be resolved/i)).not.toBeInTheDocument()
@@ -159,5 +168,63 @@ describe('createRoleAwareRoutes', () => {
     await user.click(staffLink)
 
     expect(screen.getByRole('heading', { name: 'Staff sign-in' })).toBeInTheDocument()
+  })
+
+  it('serves the join page at /join/:token, pre-auth (easy-login 08), and exchanges the token', () => {
+    vi.mocked(api.post).mockReturnValue(new Promise(() => undefined))
+
+    renderAt(`${JOIN_PATH}/a-personal-link-token`)
+
+    // The join page's live region, NOT the role-aware entry (no guard, no surface).
+    expect(screen.getByRole('status')).toHaveTextContent('Signing you in…')
+    expect(screen.queryByTestId('participant-guard')).not.toBeInTheDocument()
+    expect(api.post).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(api.post).mock.calls[0]?.[0]).toBe('/auth/join')
+    expect(vi.mocked(api.post).mock.calls[0]?.[1]).toEqual({ token: 'a-personal-link-token' })
+  })
+
+  it('serves the join page at a bare /join with no exchange (the scrubbed address after a reload)', () => {
+    renderAt(JOIN_PATH)
+
+    expect(screen.getByRole('status')).toHaveTextContent(
+      /tap your link again or scan your card.*today's word/i,
+    )
+    expect(screen.getByRole('link', { name: 'Continue' })).toHaveAttribute('href', '/')
+    expect(screen.queryByTestId('participant-guard')).not.toBeInTheDocument()
+    expect(api.post).not.toHaveBeenCalled()
+  })
+
+  describe('"Continue" from a bare /join hands over to the role-aware entry (Gate-1 W-3)', () => {
+    it('fails closed to /login when there is no session', async () => {
+      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+      vi.mocked(useSession).mockImplementation(() => {
+        throw new Error('useSession() outside a resolved provider (unresolved)')
+      })
+      vi.mocked(useRole).mockReturnValue('participant')
+      vi.mocked(useExerciseContext).mockReturnValue(SCOPE)
+      const user = userEvent.setup()
+      renderAt(JOIN_PATH)
+
+      await user.click(screen.getByRole('link', { name: 'Continue' }))
+
+      // Landed on the sign-in page (Today's word is its default method, story 09), not on a
+      // participant surface.
+      expect(await screen.findByLabelText('Sign-in name')).toBeInTheDocument()
+      expect(screen.queryByTestId('participant-guard')).not.toBeInTheDocument()
+      consoleSpy.mockRestore()
+    })
+
+    it('lands a signed-in participant on their surface at /', async () => {
+      vi.mocked(useSession).mockReturnValue(SESSION)
+      vi.mocked(useRole).mockReturnValue('participant')
+      vi.mocked(useExerciseContext).mockReturnValue(SCOPE)
+      const user = userEvent.setup()
+      renderAt(JOIN_PATH)
+
+      await user.click(screen.getByRole('link', { name: 'Continue' }))
+
+      expect(await screen.findByTestId('participant-surface')).toBeInTheDocument()
+      expect(screen.queryByLabelText('Handle')).not.toBeInTheDocument()
+    })
   })
 })

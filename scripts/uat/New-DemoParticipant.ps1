@@ -5,6 +5,12 @@
     Creates a UAT participant login with a password you choose, bound to a posting persona.
 
 .DESCRIPTION
+    TESTERS: use Import-Roster.ps1 instead. It provisions a whole list of people from a CSV through the staff
+    roster API (the same path and authorization as the console), and writes each person's personal sign-in
+    link to a local file, so there is no password to invent or relay:
+        pwsh scripts/uat/Import-Roster.ps1 -CsvPath testers.csv -DryRun
+    This script remains for a single password-based login through the ops bootstrap route.
+
     Participant passwords are stored only as a slow hash, so a forgotten one can't be recovered. Make a new
     login instead. This calls the secret-gated POST /api/ops/bootstrap-exercise for the existing UAT
     exercise with a NEW username. The bootstrap never overwrites an existing account (an existing username

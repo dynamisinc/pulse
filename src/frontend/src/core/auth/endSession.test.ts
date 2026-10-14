@@ -9,7 +9,7 @@
  * shared `queryClient` singleton is used and reset between tests.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { endSession } from './endSession'
+import { endSession, resetClientSession } from './endSession'
 import { logout } from './logout'
 import { queryClient } from '../services/queryClient'
 import { ownPostStore } from '@/features/social/services/ownPostStore'
@@ -165,5 +165,45 @@ describe('endSession - features\' registered resets (Gate-2 A L-5)', () => {
     registerSessionReset(reset)()
     await endSession()
     expect(reset).not.toHaveBeenCalled()
+  })
+})
+
+describe('resetClientSession (easy-login 08: the join page replaces an identity without a sign-out)', () => {
+  it('forgets the cache, own posts and a pending reply intent, exactly as sign-out does', () => {
+    queryClient.setQueryData(['feed'], [{ id: 'previous-user-post' }])
+    ownPostStore.add({
+      id: 'post-own-2',
+      authorPersonaId: 'persona-previous',
+      text: 'made by the previous identity',
+      counts: { reply: 0, repost: 0, like: 0 },
+      scenarioTime: '2033-09-04T15:00:00Z',
+    })
+    requestReplyFocus('post-2')
+
+    resetClientSession()
+
+    expect(queryClient.getQueryData(['feed'])).toBeUndefined()
+    expect(ownPostStore.getAll()).toEqual([])
+    expect(consumeReplyFocus('post-2')).toBe(false)
+  })
+
+  it('never logs out (the new identity\'s tokens are already stored)', () => {
+    resetClientSession()
+    expect(mockLogout).not.toHaveBeenCalled()
+  })
+
+  it('also forgets taken-down ids and runs every registered reset (Wave 3 x easy-login seam)', () => {
+    // Every sign-in goes through resetClientSession (completeSignIn), so the previous
+    // identity's controller drafts, notification state and taken-down ids must not
+    // survive a join link or Today's word any more than they survive a sign-out.
+    removedPosts.add('post-taken-down')
+    const reset = vi.fn()
+    const unregister = registerSessionReset(reset)
+
+    resetClientSession()
+
+    expect(removedPosts.getAll().size).toBe(0)
+    expect(reset).toHaveBeenCalledTimes(1)
+    unregister()
   })
 })

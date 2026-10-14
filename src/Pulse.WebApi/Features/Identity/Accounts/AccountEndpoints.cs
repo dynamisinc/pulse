@@ -208,7 +208,7 @@ public static class AccountEndpoints
     /// <c>.csv</c> (browsers vary in the content type they attach to a chosen <c>.csv</c> file), while rejecting
     /// an obviously-wrong binary type (e.g. an image) sent without a <c>.csv</c> name.
     /// </summary>
-    private static bool IsCsvUpload(IFormFile file)
+    internal static bool IsCsvUpload(IFormFile file)
     {
         if (!string.IsNullOrEmpty(file.FileName) &&
             file.FileName.EndsWith(".csv", StringComparison.OrdinalIgnoreCase))

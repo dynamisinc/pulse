@@ -167,8 +167,10 @@ describe('the launcher is LIVE for a planner (no longer permanently degraded)', 
 })
 
 describe('the degrade is intact for a single-surface role (the non-vacuity control)', () => {
+  // The controller used to be a control here. Easy-login's participant-admin surface
+  // (Gate-2 W-3) gave the controller a second destination, so the controller flipped to a
+  // live launcher (asserted below) and the evaluator is the remaining single-surface role.
   it.each([
-    ['controller', '/staff/console', 'stub-controller-console'],
     ['evaluator', '/staff/evaluate', 'stub-evaluator-dashboard'],
   ] as const)('a %s still gets the static lockup', async (role, path, surfaceTestId) => {
     // Without this control the cases above could be passing because the launcher
@@ -180,6 +182,25 @@ describe('the degrade is intact for a single-surface role (the non-vacuity contr
     const lockup = screen.getByTestId('staff-header-lockup')
     expect(lockup.tagName).not.toBe('BUTTON')
     expect(lockup).not.toHaveAttribute('aria-haspopup')
+  })
+})
+
+describe('the launcher for a controller (easy-login participant-admin, Gate-2 W-3)', () => {
+  it('is live now: the controller has a second destination, Participants, under Administer', async () => {
+    const user = userEvent.setup()
+    renderTreeAt('controller', '/staff/console', '/staff/console')
+    await screen.findByTestId('stub-controller-console')
+
+    const lockup = screen.getByTestId('staff-header-lockup')
+    expect(lockup.tagName).toBe('BUTTON')
+
+    await user.click(lockup)
+    expect(screen.getByTestId('surface-launcher-item-controller-console'))
+      .toHaveAttribute('aria-current', 'page')
+    expect(screen.getByTestId('surface-launcher-item-participant-admin')).toBeEnabled()
+    // Not the planner's or org admin's surfaces.
+    expect(screen.queryByTestId('surface-launcher-item-exercise-management')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('surface-launcher-item-planner-workspace')).not.toBeInTheDocument()
   })
 })
 
