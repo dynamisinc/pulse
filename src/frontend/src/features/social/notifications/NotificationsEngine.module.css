@@ -1,0 +1,24 @@
+/*
+ * features/social/notifications/NotificationsEngine.module.css
+ * ---------------------------------------------------------------------------
+ * The notifications engine's polite live region (demo-polish F7). CSS Module, locally
+ * scoped, NO COBRA / MUI (participant world). Light only: the Social skin has one palette
+ * and this sheet declares no colour at all.
+ *
+ * The region is for assistive technology only: it is visually hidden but stays in the
+ * accessibility tree and is never `display: none` / `hidden` (either would stop it being
+ * announced). The standard clip-based pattern -- the same one the nav rail's icon-only
+ * labels and the new-posts pill's spoken copy use.
+ */
+
+.live {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}

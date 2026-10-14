@@ -11,8 +11,8 @@
  *  - Default state is inactive, moment `'now'`.
  *  - `toggle()` flips `active`; `setMoment()` replaces the selected moment
  *    (mutually exclusive by construction — a single state value).
- *  - Every moment's config carries a DISTINCT alert state, covering all four
- *    NFR-001 states (none/info/advisory/emergency) across the four moments.
+ *  - Every moment's config is just a label and a scenario offset: since demo-polish C6 it
+ *    carries NO participant-facing copy (the retired PortalStub's alert / headline strings).
  *  - `resolvePreviewMomentInstant` is pinned against a FAKE exercise clock
  *    (divergent from the system clock, WAVE0-REVIEW precedent 18 — not a bare
  *    `Date.now` spy), proving it reads scenario time, never wall-clock, and
@@ -22,6 +22,7 @@
  * `toolRegistry.test.tsx`'s own harness pattern) exercises the REAL hook
  * output rather than a re-implemented fixture (WAVE0-REVIEW precedent 17).
  */
+import { useState } from 'react'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi, afterEach } from 'vitest'
@@ -32,7 +33,6 @@ import {
   PreviewProvider,
   resolvePreviewMomentInstant,
   usePreview,
-  type PreviewAlertState,
 } from './previewContext'
 
 function Probe() {
@@ -115,29 +115,19 @@ describe('usePreview — setMoment() (mutually exclusive selection)', () => {
   })
 })
 
-describe('getPreviewMomentConfig — the four moments cover all four NFR-001 alert states', () => {
-  it('startex/advisory/burst/now map to none/advisory/emergency/info respectively', () => {
-    expect(getPreviewMomentConfig('startex').alertState).toBe('none')
-    expect(getPreviewMomentConfig('advisory').alertState).toBe('advisory')
-    expect(getPreviewMomentConfig('burst').alertState).toBe('emergency')
-    expect(getPreviewMomentConfig('now').alertState).toBe('info')
+describe('getPreviewMomentConfig — the four moments carry a label and an offset, and no participant copy', () => {
+  it('startex/advisory/burst/now are labelled STARTEX/ADVISORY/BURST/NOW', () => {
+    expect(PREVIEW_MOMENT_ORDER.map(id => getPreviewMomentConfig(id).label))
+      .toEqual(['STARTEX', 'ADVISORY', 'BURST', 'NOW'])
   })
 
-  it('exercises every distinct PreviewAlertState across the four moments (no accidental duplicate)', () => {
-    const states = PREVIEW_MOMENT_ORDER.map(id => getPreviewMomentConfig(id).alertState)
-    const distinct = new Set<PreviewAlertState>(states)
-    expect(distinct.size).toBe(4)
-    expect(distinct).toEqual(new Set(['none', 'info', 'advisory', 'emergency']))
+  it('each moment id maps to its own config', () => {
+    for (const id of PREVIEW_MOMENT_ORDER) expect(getPreviewMomentConfig(id).id).toBe(id)
   })
 
-  it('a non-"none" moment always carries an alert message; "none" never does', () => {
+  it('carries no participant-facing copy (the retired PortalStub\'s alert / headline strings)', () => {
     for (const id of PREVIEW_MOMENT_ORDER) {
-      const config = getPreviewMomentConfig(id)
-      if (config.alertState === 'none') {
-        expect(config.alertMessage).toBeUndefined()
-      } else {
-        expect(config.alertMessage).toBeTruthy()
-      }
+      expect(Object.keys(getPreviewMomentConfig(id)).sort()).toEqual(['id', 'label', 'offsetMinutes'])
     }
   })
 })
@@ -178,5 +168,65 @@ describe('resolvePreviewMomentInstant — reads scenario time, never wall-clock'
     for (const id of PREVIEW_MOMENT_ORDER) {
       expect(resolvePreviewMomentInstant(id).getTime()).toBeLessThanOrEqual(liveNow)
     }
+  })
+})
+
+describe('usePreview — returnFocus() hands focus back to whatever opened the preview', () => {
+  function FocusProbe() {
+    const { active, toggle, returnFocus } = usePreview()
+    const [openerShown, setOpenerShown] = useState(true)
+    return (
+      <div>
+        {openerShown && <button type="button" onClick={toggle}>open</button>}
+        <button type="button" onClick={() => setOpenerShown(false)}>hide opener</button>
+        <button type="button" onClick={() => { toggle(); returnFocus() }}>exit</button>
+        <button type="button" onClick={returnFocus}>return only</button>
+        <output data-testid="active-state">{String(active)}</output>
+      </div>
+    )
+  }
+
+  it('restores focus to the element that was focused when the preview was entered', async () => {
+    const user = userEvent.setup()
+    render(<PreviewProvider><FocusProbe /></PreviewProvider>)
+
+    await user.click(screen.getByRole('button', { name: 'open' }))
+    // Focus moves on while the preview is up (the stage's own Exit button, here)...
+    screen.getByRole('button', { name: 'exit' }).focus()
+    await user.click(screen.getByRole('button', { name: 'exit' }))
+
+    // ...and goes BACK to the opener, not to <body> and not to the Exit button.
+    expect(screen.getByRole('button', { name: 'open' })).toHaveFocus()
+    expect(screen.getByTestId('active-state')).toHaveTextContent('false')
+  })
+
+  it('does nothing when the opener is gone from the document, or nothing was focused', async () => {
+    const user = userEvent.setup()
+    render(<PreviewProvider><FocusProbe /></PreviewProvider>)
+
+    // Nothing remembered yet: harmless (the click focuses the button itself, nothing moves it).
+    await user.click(screen.getByRole('button', { name: 'return only' }))
+    expect(screen.getByRole('button', { name: 'return only' })).toHaveFocus()
+
+    // Remembered, then the opener leaves the document: no throw, no focus stolen.
+    await user.click(screen.getByRole('button', { name: 'open' }))
+    const opener = screen.getByRole('button', { name: 'open' })
+    await user.click(screen.getByRole('button', { name: 'hide opener' }))
+    expect(opener).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'return only' }))
+    expect(screen.getByRole('button', { name: 'return only' })).toHaveFocus()
+  })
+
+  it('remembers the opener from the latest ENTER only: an exit does not overwrite it', async () => {
+    const user = userEvent.setup()
+    render(<PreviewProvider><FocusProbe /></PreviewProvider>)
+
+    await user.click(screen.getByRole('button', { name: 'open' }))
+    await user.click(screen.getByRole('button', { name: 'exit' }))
+    // The remembered opener was consumed by the exit: a second return is a no-op.
+    screen.getByRole('button', { name: 'return only' }).focus()
+    await user.click(screen.getByRole('button', { name: 'return only' }))
+
+    expect(screen.getByRole('button', { name: 'return only' })).toHaveFocus()
   })
 })

@@ -65,5 +65,6 @@ export {
   resetTelemetryBuffer,
   getTelemetryHealth,
   noteTelemetryDrop,
+  muteTelemetry,
 } from './mockSink'
 export type { TelemetryHealth } from './mockSink'

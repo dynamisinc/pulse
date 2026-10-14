@@ -227,3 +227,77 @@ export function useSession(): Session {
   }
   return session
 }
+
+// -----------------------------------------------------------------------------
+// BEGIN demo-polish C6 -- ReadOnlySessionScope.
+//
+// Deliberately APPENDED here and self-contained: it edits no existing line of this file
+// (no import change, no change to `SessionProvider` / `useSession`), so it merges cleanly
+// with anything that reworks session persistence above (the easy participant login). It
+// only reads `SessionContext` and `useSession()`, whatever else changes about how the
+// session is resolved or stored.
+// -----------------------------------------------------------------------------
+
+export interface ReadOnlySessionScopeProps {
+  children: ReactNode
+}
+
+/**
+ * Parent session -> its read-only narrowing, cached so the SAME object is handed to
+ * consumers on every render of the scope (a hook-free memo: keyed on the parent's
+ * identity, collected with it, and it needs no import beyond what this file has).
+ */
+const readOnlyNarrowings = new WeakMap<Session, Session>()
+
+function narrowToReadOnly(session: Session): Session {
+  let narrowed = readOnlyNarrowings.get(session)
+  if (narrowed === undefined) {
+    narrowed = { ...session, isReadOnly: true, personaId: undefined }
+    readOnlyNarrowings.set(session, narrowed)
+  }
+  return narrowed
+}
+
+/**
+ * Narrows the SURROUNDING session to a read-only OBSERVER for the subtree below
+ * it (COR-015) -- `isReadOnly: true` and no `personaId` -- and changes nothing
+ * else. It is a scope over the one bound session, never a second session: it
+ * mints no identity, resolves nothing, and fails closed exactly like
+ * `useSession()` (it throws outside a `SessionProvider`, there is no default).
+ *
+ * WHY IT EXISTS (demo-polish C6, the staff "preview as participant"). The preview
+ * mounts the real participant channel inside the staff frame, and the channel's
+ * write controls decide whether to exist from TWO independent answers: the shell
+ * variant (`affordancesAvailable('preview')` is false) and the session
+ * (`!isReadOnly && personaId !== undefined` -- the follow button, the like and
+ * repost toggles, the composers). The variant alone is not enough: in a build
+ * served from mock data the bound session is a participant persona, and a control
+ * that asks only the session would render for the staff user. Narrowing the
+ * session here makes the second answer agree with the first by CONSTRUCTION, so
+ * no write affordance in the preview depends on every control remembering to ask
+ * the variant. (`role` is left alone: it names who is signed in, and nothing in
+ * the channel may widen what it can do from it.)
+ */
+export function ReadOnlySessionScope({ children }: ReadOnlySessionScopeProps) {
+  const session = useSession()
+  return (
+    <SessionContext.Provider value={narrowToReadOnly(session)}>
+      {children}
+    </SessionContext.Provider>
+  )
+}
+
+/**
+ * The surrounding session, or `undefined` when there is no `SessionProvider` above -- the
+ * NON-THROWING twin of `useSession()`, for a control that must FAIL CLOSED rather than crash
+ * (demo-polish C6: the StartEx / EndEx control is controller-only, and "no session" simply
+ * means "no controller", so it renders nothing instead of taking the console down with it).
+ * Anything that needs a session to function must keep using `useSession()`.
+ */
+// Colocated with the provider by design - same rationale as `useSession` above.
+// eslint-disable-next-line react-refresh/only-export-components
+export function useOptionalSession(): Session | undefined {
+  return useContext(SessionContext)
+}
+
+// END demo-polish C6
