@@ -46,16 +46,31 @@
  * is a push-only fact: while the transport is POLLING there is no `PostRemoved`, and the
  * post simply stops being returned by the next read (the server omits it).
  *
- * IDENTITY CHANGE (COR-001). `resetClientSession()` stops the shared connection whenever the
- * identity on the tab changes (sign-out, every sign-in) - it is joined to ONE identity's
- * exercise groups for life. A consumer that is still started then hears `Disconnected` with
- * reason `'stopped'`. That is NOT "auto-reconnect exhausted": it is not degraded, there is
- * nothing to poll around, and giving up would leave the next identity with a feed that
- * never goes real-time again. So the feed RE-ATTACHES: it asks the connection to start
- * again, which builds a fresh connection on whatever token is then current with this
- * feed's handlers still registered, and only falls back to polling if THAT fails. (A feed
- * that is not started - the usual case, the screens are unmounted by the navigation - has
- * already released its subscriptions and simply starts clean when the next screen mounts.)
+ * IDENTITY CHANGE (COR-001). Two things happen when the identity on the tab changes (sign-out,
+ * every sign-in; `resetClientSession()` runs both):
+ *
+ * (1) The shared connection is STOPPED - it is joined to ONE identity's exercise groups for
+ * life. A consumer that is still started then hears `Disconnected` with reason `'stopped'`. That
+ * is NOT "auto-reconnect exhausted": it is not degraded and there is nothing to poll around, and
+ * giving up would leave the next identity with a feed that never goes real-time again. So the
+ * feed RE-ATTACHES: it asks the connection to start again, which builds a fresh connection on
+ * whatever token is then current with this feed's handlers still registered, and only falls back
+ * to polling if THAT fails. Not after a sign-out: with no token stored there is nothing to attach
+ * as (an empty-token negotiate is one pointless 401), so it waits for the next screen's start().
+ * A start that the stop OVERTOOK can settle late - the real library rejects it only once the old
+ * negotiate returns, possibly after the re-attach has connected - so a failed start never
+ * degrades the feed to polling while the connection is in fact up.
+ *
+ * (2) The feed's OWN identity-scoped state is forgotten (`resetForSession()`, registered with
+ * `core/auth/sessionReset` at the bottom of this module). `seenIds` and `baselined` describe
+ * what the previous identity's page held, and `pollInFlight` / a `GET /feed` still on the wire
+ * belong to its token. Left alone, B's first degraded poll would emit B's whole page as "new"
+ * (a spurious "N new posts" pill), A's late answer (the shared api client has no request
+ * timeout) would be delivered into B's stream, and A's in-flight flag would block B's polls
+ * until it landed. The reset bumps `pollGeneration`, so a poll answers only into the generation
+ * that issued it; clears the flag, the baseline and the dedup set; and the next degraded poll
+ * baselines silently. It does NOT touch subscriptions or timers: a feed that is still mounted
+ * keeps running and simply re-baselines on its next poll, and an unmounted one starts clean.
  *
  * TESTABILITY (NFR-003 fallback + recovery). `createRealtimeFeed({ connection,
  * fetchFeed, pollIntervalMs, reconnectWindowMs })` lets RTL inject a fake
@@ -67,6 +82,8 @@
  * COBRA, no wall-clock (COR-053; scenario time rides on each post untouched).
  */
 
+import { getAccessToken } from '@/core/auth/tokenStore'
+import { registerSessionReset } from '@/core/auth/sessionReset'
 import { HubConnectionState, realtimeConnection } from '@/core/realtime/connection'
 import type { RealtimeConnection, RealtimeStateReason } from '@/core/realtime/connection'
 import { parseMediaAssetView } from '@/core/media/mediaGuards'
@@ -120,6 +137,19 @@ export interface RealtimeFeed {
   stop(): void
   /** The active transport mode. */
   readonly mode: FeedTransportMode
+}
+
+/**
+ * A {@link RealtimeFeed} that can also forget the identity it served. Kept off `RealtimeFeed`
+ * itself: consumers and their test fakes never need it, only the session-reset registration.
+ */
+export interface SessionResettableFeed extends RealtimeFeed {
+  /**
+   * The session is ending: forget everything scoped to the identity that is leaving - the
+   * dedup set, the polling baseline, the in-flight poll flag - and make any `GET /feed` still on
+   * the wire answer into the void. Synchronous; never throws; touches no subscription or timer.
+   */
+  resetForSession(): void
 }
 
 /** Options for {@link createRealtimeFeed} — overrides used by tests. */
@@ -227,7 +257,7 @@ function toPostRemovedEvent(payload: unknown): PostRemovedEvent | null {
  * Drives the feed transport: real-time by default, polling fallback while
  * degraded, automatic recovery. See the module header for the guarantees.
  */
-class RealtimeFeedController implements RealtimeFeed {
+class RealtimeFeedController implements SessionResettableFeed {
   private readonly connection: RealtimeConnection
   private readonly fetchFeed: () => Promise<Post[]>
   private readonly pollIntervalMs: number
@@ -239,6 +269,11 @@ class RealtimeFeedController implements RealtimeFeed {
   private baselined = false
   private started = false
   private pollInFlight = false
+  /**
+   * Bumped by `resetForSession()`. A poll captures it before awaiting `fetchFeed()` and answers
+   * only into the generation that issued it, so an answer for a previous identity is dropped.
+   */
+  private pollGeneration = 0
   private pollTimer: ReturnType<typeof setInterval> | null = null
   private reconnectWindowTimer: ReturnType<typeof setTimeout> | null = null
   private unsubscribePush: (() => void) | null = null
@@ -296,8 +331,15 @@ class RealtimeFeedController implements RealtimeFeed {
       this.enterRealtime()
     } catch {
       // Hub unreachable on first connect (NFR-003) — degrade to polling immediately.
-      this.enterPolling()
+      this.degradeAfterFailedStart()
     }
+  }
+
+  resetForSession(): void {
+    this.pollGeneration += 1
+    this.pollInFlight = false
+    this.seenIds.clear()
+    this.baselined = false
   }
 
   stop(): void {
@@ -351,14 +393,36 @@ class RealtimeFeedController implements RealtimeFeed {
   private reattach(): void {
     this.clearReconnectWindow()
     if (this.currentMode === 'realtime') this.currentMode = 'connecting'
+    // A sign-out: logout() has already cleared the tokens (it runs synchronously right after the
+    // reset, ahead of this microtask), so there is no identity to attach as. Negotiating with an
+    // empty token would only earn a 401 on /hubs/exercise/negotiate; the next screen's start()
+    // connects, on the next identity's token. The screens are unmounting anyway.
+    if (getAccessToken() === null) return
     this.connection.start().then(
       () => {
         if (this.started) this.enterRealtime()
       },
       () => {
-        if (this.started) this.enterPolling()
+        this.degradeAfterFailedStart()
       },
     )
+  }
+
+  /**
+   * A `connection.start()` this feed made has rejected. Normally that means the hub is
+   * unreachable and the feed polls (NFR-003) - but a start that `stop()` overtook is rejected
+   * only once its old negotiate returns, which can be AFTER a re-attach has connected. Polling
+   * on top of a live connection would never end (the poll loop only restarts the connection when
+   * it is `Disconnected`), so if the connection is up the feed is simply real-time. A feed that
+   * has been stopped meanwhile does nothing (no poll timer may outlive `stop()`).
+   */
+  private degradeAfterFailedStart(): void {
+    if (!this.started) return
+    if (this.connection.state === HubConnectionState.Connected) {
+      this.enterRealtime()
+      return
+    }
+    this.enterPolling()
   }
 
   private enterRealtime(): void {
@@ -410,7 +474,14 @@ class RealtimeFeedController implements RealtimeFeed {
     // overlap — two concurrent polls could both observe baselined === false and race the
     // dedup/baseline state. Skip a tick while one is still running; the next cadence retries.
     if (this.pollInFlight) return
+    // Self-heal: polling is the fallback for a connection that is NOT up. If it is up, whatever
+    // degraded the feed has since been overtaken (a late-rejecting start), so stop polling.
+    if (this.connection.state === HubConnectionState.Connected) {
+      this.enterRealtime()
+      return
+    }
     this.pollInFlight = true
+    const generation = this.pollGeneration
     try {
       // Recovery driver: while degraded, keep trying to re-establish real-time. A
       // successful start() emits Connected via onStateChange → we return to push transport.
@@ -422,12 +493,17 @@ class RealtimeFeedController implements RealtimeFeed {
 
       try {
         const posts = await this.fetchFeed()
+        // The session ended while this read was on the wire: it is the PREVIOUS identity's
+        // page, and the baseline/dedup state it would land in is the next one's. Drop it.
+        if (generation !== this.pollGeneration) return
         this.handlePoll(posts)
       } catch {
         // Feed fetch failed while degraded — remain in polling; the next tick retries.
       }
     } finally {
-      this.pollInFlight = false
+      // Only the generation that set the flag may clear it: a stale tick finishing late must not
+      // release the flag a newer tick (the next identity's) is holding.
+      if (generation === this.pollGeneration) this.pollInFlight = false
     }
   }
 
@@ -473,7 +549,9 @@ class RealtimeFeedController implements RealtimeFeed {
  * Creates an isolated feed transport. The app uses {@link realtimeFeed}; tests use
  * this to inject fakes.
  */
-export function createRealtimeFeed(options: CreateRealtimeFeedOptions = {}): RealtimeFeed {
+export function createRealtimeFeed(
+  options: CreateRealtimeFeedOptions = {},
+): SessionResettableFeed {
   return new RealtimeFeedController(options)
 }
 
@@ -481,7 +559,13 @@ export function createRealtimeFeed(options: CreateRealtimeFeedOptions = {}): Rea
  * The app-wide social feed transport, bound to the shared `realtimeConnection`.
  * Lazy: no side effects until started.
  */
-export const realtimeFeed: RealtimeFeed = createRealtimeFeed()
+const appWideFeed = createRealtimeFeed()
+export const realtimeFeed: RealtimeFeed = appWideFeed
+
+// The app-wide feed is identity-scoped state living for the life of the TAB: forget it whenever the
+// session ends (sign-out, every sign-in). A registration, not an import from `core/auth` into here
+// - `resetClientSession()` runs it with the other registered resets. See the module header (H-1).
+registerSessionReset(() => appWideFeed.resetForSession(), import.meta.hot)
 
 // Every valid `PostRemoved` on the app-wide transport is recorded in the session's removed-post
 // store (C5) — the one place `<Feed>` and the Explore baseline learn that a post must go. Wired

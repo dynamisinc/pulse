@@ -108,6 +108,23 @@ export class FakeHubConnection {
     })
   }
 
+  /**
+   * Test helper: makes the NEXT `start()` hang until the returned handle settles it, so a test can
+   * let a start - in particular one that `stop()` has overtaken - settle LATE, after the shared
+   * connection has already moved on (a real `HubConnection.stop()` only gets the old start to
+   * reject once its negotiate returns). `fail()` rejects it like an unreachable hub would.
+   */
+  holdStart(): { release: () => void, fail: (error?: Error) => void } {
+    let release: () => void = () => {}
+    let fail: (error: Error) => void = () => {}
+    const gate = new Promise<void>((resolve, reject) => {
+      release = resolve
+      fail = reject
+    })
+    this.startImpl = () => gate
+    return { release: () => release(), fail: error => fail(error ?? new Error('hub unreachable')) }
+  }
+
   /** Test helper: simulate the server pushing `eventName` with `payload`. */
   emit(eventName: string, payload: unknown): void {
     for (const handler of [...(this.handlers.get(eventName) ?? [])]) handler(payload)

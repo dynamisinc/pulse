@@ -32,6 +32,9 @@ vi.mock('@/core/services/api', () => ({ api: { get: vi.fn(), post: vi.fn() } }))
 const IDENTITY_A = { token: 'identity-A-access', refreshToken: 'identity-A-refresh' }
 const IDENTITY_B = { token: 'identity-B-access', refreshToken: 'identity-B-refresh' }
 
+/** Unregisters the fake transport's session reset, whatever the test body did (Gate-1 L-3). */
+let unregisterFakeReset: (() => void) | undefined
+
 beforeEach(() => {
   sessionStorage.clear()
   localStorage.clear()
@@ -39,6 +42,8 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  unregisterFakeReset?.()
+  unregisterFakeReset = undefined
   vi.restoreAllMocks()
 })
 
@@ -71,15 +76,15 @@ describe('completeSignIn - the app-wide shared connection', () => {
 describe('completeSignIn - an identity switch on a live connection', () => {
   function connectAs() {
     const transport = createFakeTransport()
-    const unregister = registerSessionReset(() => {
+    unregisterFakeReset = registerSessionReset(() => {
       void transport.connection.stop()
     })
-    return { ...transport, unregister }
+    return transport
   }
 
   it('A\'s connection is stopped before B\'s consumers start, and B gets its own on B\'s token', async () => {
     completeSignIn(IDENTITY_A, { persist: true, navigate: vi.fn() })
-    const { connection, fakes, unregister } = connectAs()
+    const { connection, fakes } = connectAs()
     const delivered: unknown[] = []
     connection.subscribe('PostReceived', payload => delivered.push(payload)) // a consumer of A
     await connection.start()
@@ -110,12 +115,11 @@ describe('completeSignIn - an identity switch on a live connection', () => {
     fakes[1]?.emit('PostReceived', 'a post from identity B\'s exercise')
     expect(delivered).toEqual(['a post from identity B\'s exercise'])
 
-    unregister()
   })
 
   it('sign-out then sign-in as someone else: each end of a session stops what is live', async () => {
     completeSignIn(IDENTITY_A, { persist: true, navigate: vi.fn() })
-    const { connection, fakes, unregister } = connectAs()
+    const { connection, fakes } = connectAs()
     await connection.start()
 
     await endSession() // sign-out
@@ -130,6 +134,5 @@ describe('completeSignIn - an identity switch on a live connection', () => {
     expect(fakes[1]?.startedWithToken).toBe('identity-B-access')
     expect(connection.state).toBe(HubConnectionState.Connected)
 
-    unregister()
   })
 })

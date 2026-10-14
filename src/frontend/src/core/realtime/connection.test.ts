@@ -23,6 +23,7 @@ import {
   createRealtimeConnection,
   HubConnectionState,
   sessionAccessTokenFactory,
+  stopOnHotDispose,
 } from './connection'
 import type { RealtimeConnection, RealtimeStateReason } from './connection'
 import { clearTokens, setTokens } from '@/core/auth/tokenStore'
@@ -243,6 +244,11 @@ function observe(connection: RealtimeConnection): Observed[] {
 async function flush(): Promise<void> {
   await Promise.resolve()
   await Promise.resolve()
+}
+
+/** Lets a whole (fake) close run to the end: a handful of promise hops, not one. */
+async function settle(): Promise<void> {
+  for (let i = 0; i < 12; i += 1) await Promise.resolve()
 }
 
 describe('createRealtimeConnection — stop() (identity change, COR-001)', () => {
@@ -537,5 +543,72 @@ describe('createRealtimeConnection — stop() (identity change, COR-001)', () =>
     await flush()
 
     expect(seen).toEqual([[HubConnectionState.Disconnected, 'stopped']])
+  })
+})
+
+describe('createRealtimeConnection — stop() promises are independent (Gate-1 S-1)', () => {
+  afterEach(() => {
+    clearTokens()
+  })
+
+  it('a hung close of an EARLIER connection does not make a later stop() hang', async () => {
+    const { connection, fakes, latest } = createFakeTransport()
+    await connection.start()
+    latest().stopImpl = () => new Promise<void>(() => {}) // identity A's teardown never finishes
+    void connection.stop()
+
+    await connection.start() // identity B connects regardless
+    expect(fakes).toHaveLength(2)
+    let secondStopSettled = false
+    void connection.stop().then(() => {
+      secondStopSettled = true
+    })
+    await settle()
+
+    expect(fakes[1]?.state).toBe(HubConnectionState.Disconnected)
+    expect(secondStopSettled).toBe(true) // it reports ITS close, not A's
+  })
+
+  it('a repeat stop() while the connection is already abandoned reports the latest close', async () => {
+    const { connection, latest } = createFakeTransport()
+    await connection.start()
+    let finishClosing: () => void = () => {}
+    latest().stopImpl = () => new Promise<void>(resolve => { finishClosing = resolve })
+
+    const first = connection.stop()
+    let repeatSettled = false
+    void connection.stop().then(() => {
+      repeatSettled = true
+    })
+    await settle()
+    expect(repeatSettled).toBe(false) // still closing: the repeat waits for the same close
+
+    finishClosing()
+    await first
+    await settle()
+    expect(repeatSettled).toBe(true)
+  })
+})
+
+describe('stopOnHotDispose — a hot-replaced module cannot orphan a live connection (Gate-1 L-2)', () => {
+  it('stops the connection when Vite disposes the module', async () => {
+    const { connection, latest } = createFakeTransport()
+    await connection.start()
+    let dispose: () => void = () => {}
+    stopOnHotDispose(connection, { dispose: callback => { dispose = callback } })
+
+    dispose()
+    await flush()
+
+    expect(latest().stopCallCount).toBe(1)
+    expect(connection.state).toBe(HubConnectionState.Disconnected)
+  })
+
+  it('does nothing without a hot context (a production build)', async () => {
+    const { connection, latest } = createFakeTransport()
+    await connection.start()
+
+    expect(() => stopOnHotDispose(connection, undefined)).not.toThrow()
+    expect(latest().stopCallCount).toBe(0)
   })
 })

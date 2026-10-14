@@ -59,6 +59,7 @@ import { HubConnectionBuilder, HubConnectionState, LogLevel } from '@microsoft/s
 import type { HubConnection } from '@microsoft/signalr'
 import { getAccessToken } from '@/core/auth/tokenStore'
 import { registerSessionReset } from '@/core/auth/sessionReset'
+import type { HotModule } from '@/core/auth/sessionReset'
 
 export { HubConnectionState } from '@microsoft/signalr'
 
@@ -253,7 +254,10 @@ class SharedRealtimeConnection implements RealtimeConnection {
   private readonly subscriptions = new Set<Subscription>()
   private connection: HubConnection | null = null
   private startPromise: Promise<void> | null = null
-  /** Settles when every connection `stop()` has abandoned has finished closing. */
+  /**
+   * Settles when the connection the MOST RECENT `stop()` abandoned has finished closing. Not a
+   * chain of every earlier close: one hung negotiate must not make every later stop() hang.
+   */
   private closing: Promise<void> = Promise.resolve()
 
   constructor(options: CreateRealtimeConnectionOptions = {}) {
@@ -332,9 +336,7 @@ class SharedRealtimeConnection implements RealtimeConnection {
       // Detaching is best effort; the connection is abandoned either way.
     }
 
-    this.closing = Promise.all([this.closing, closeQuietly(connection, startInFlight)]).then(
-      () => undefined,
-    )
+    this.closing = closeQuietly(connection, startInFlight)
     // Announced AFTER the rest of the synchronous reset pass (and, on sign-out, after the
     // token clear that follows it) so a listener that re-attaches sees the world as it
     // will be, not as it was.
@@ -404,3 +406,17 @@ export const realtimeConnection: RealtimeConnection = createRealtimeConnection()
 registerSessionReset(() => {
   void realtimeConnection.stop()
 }, import.meta.hot)
+
+/**
+ * Stops `connection` when Vite hot-replaces the module that calls this (dev only; `hot` is
+ * `undefined` in a production build). A hot-replaced `connection.ts` creates a NEW singleton, so
+ * without this the old one would stay connected - on its identity's groups - with nobody holding
+ * it. Takes the connection and `hot` as arguments so a test can drive the dispose callback.
+ */
+export function stopOnHotDispose(connection: RealtimeConnection, hot?: HotModule): void {
+  hot?.dispose(() => {
+    void connection.stop()
+  })
+}
+
+stopOnHotDispose(realtimeConnection, import.meta.hot)
