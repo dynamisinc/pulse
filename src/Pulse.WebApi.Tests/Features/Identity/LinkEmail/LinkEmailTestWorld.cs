@@ -3,11 +3,13 @@ namespace Pulse.WebApi.Tests.Features.Identity.LinkEmail;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Data.Common;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -190,7 +192,9 @@ internal sealed class LinkEmailTestWorld
 
     /// <summary>
     /// The service as the host composes it, in its own provider. <paramref name="scope"/> is the resolved exercise
-    /// (<c>null</c> = unresolved); <paramref name="staffUserId"/> the staff caller (<c>null</c> = none).
+    /// (<c>null</c> = unresolved); <paramref name="staffUserId"/> the staff caller (<c>null</c> = none);
+    /// <paramref name="reReads"/> an optional hook on the send-time re-read; <paramref name="clock"/> an optional
+    /// hand-driven server clock (default: the system clock).
     /// </summary>
     public ServiceProvider BuildServices(
         Guid? scope,
@@ -198,7 +202,9 @@ internal sealed class LinkEmailTestWorld
         IParticipantLinkMailer mailer,
         LinkEmailCapturingLoggerProvider? logs = null,
         string? frontendBase = FrontendBase,
-        Action<LinkEmailPacing>? pacing = null)
+        Action<LinkEmailPacing>? pacing = null,
+        LinkEmailReReadHook? reReads = null,
+        TimeProvider? clock = null)
     {
         var settings = new Dictionary<string, string?>
         {
@@ -215,9 +221,21 @@ internal sealed class LinkEmailTestWorld
                 builder.AddProvider(logs);
             }
         });
+        if (clock is not null)
+        {
+            services.AddSingleton(clock);
+        }
+
         services.AddSingleton<IConfiguration>(new ConfigurationBuilder().AddInMemoryCollection(settings).Build());
         services.AddScoped<IExerciseContext>(_ => new ExerciseContext { CurrentExerciseId = scope });
-        services.AddScoped(provider => _fixture.CreateContext(provider.GetRequiredService<IExerciseContext>()));
+        services.AddScoped(provider => reReads is null
+            ? _fixture.CreateContext(provider.GetRequiredService<IExerciseContext>())
+            : new PulseDbContext(
+                new DbContextOptionsBuilder<PulseDbContext>()
+                    .UseSqlServer(_fixture.ConnectionString!)
+                    .AddInterceptors(reReads)
+                    .Options,
+                provider.GetRequiredService<IExerciseContext>()));
         services.AddScoped<ICurrentStaffSessionAccessor>(_ => new StubCurrentStaffSessionAccessor(
             staffUserId is { } staff ? new CurrentStaffSession { SessionId = Guid.NewGuid(), StaffUserId = staff } : null));
         services.AddScoped<StaffAssignmentService>();
@@ -242,8 +260,11 @@ internal sealed class LinkEmailTestWorld
         IReadOnlyList<string>? ids = null,
         LinkEmailCapturingLoggerProvider? logs = null,
         string? frontendBase = FrontendBase,
-        Action<LinkEmailPacing>? pacing = null) =>
-        SendWithBodyAsync(scope, staffUserId, mailer, new RosterEmailLinksBody { ParticipantIds = ids }, logs, frontendBase, pacing);
+        Action<LinkEmailPacing>? pacing = null,
+        LinkEmailReReadHook? reReads = null,
+        TimeProvider? clock = null) =>
+        SendWithBodyAsync(
+            scope, staffUserId, mailer, new RosterEmailLinksBody { ParticipantIds = ids }, logs, frontendBase, pacing, reReads, clock);
 
     /// <summary>Runs one email request with exactly <paramref name="body"/> (which may be <c>null</c>).</summary>
     public async Task<LinkEmailResult> SendWithBodyAsync(
@@ -253,11 +274,56 @@ internal sealed class LinkEmailTestWorld
         RosterEmailLinksBody? body,
         LinkEmailCapturingLoggerProvider? logs = null,
         string? frontendBase = FrontendBase,
-        Action<LinkEmailPacing>? pacing = null)
+        Action<LinkEmailPacing>? pacing = null,
+        LinkEmailReReadHook? reReads = null,
+        TimeProvider? clock = null)
     {
-        await using var provider = BuildServices(scope, staffUserId, mailer, logs, frontendBase, pacing);
+        await using var provider = BuildServices(scope, staffUserId, mailer, logs, frontendBase, pacing, reReads, clock);
         await using var request = provider.CreateAsyncScope();
         return await request.ServiceProvider.GetRequiredService<LinkEmailService>().SendAsync(body);
+    }
+
+    /// <summary>
+    /// Changes one account in its own context, past any filter, as a concurrent roster import or access action would
+    /// (Copilot review on #487: the batch must send to what is there at send time, not to what it planned).
+    /// </summary>
+    public async Task ChangeAccountAsync(Guid accountId, Action<Account> change)
+    {
+        await using var write = _fixture.CreateContext();
+        change(await write.Accounts.IgnoreQueryFilters().SingleAsync(a => a.Id == accountId));
+        await write.SaveChangesAsync();
+    }
+
+    /// <summary>Changes one link row in its own context, past any filter, as a concurrent staff link action would.</summary>
+    public async Task ChangeLinkAsync(Guid linkId, Action<ParticipantLink> change)
+    {
+        await using var write = _fixture.CreateContext();
+        change(await write.ParticipantLinks.IgnoreQueryFilters().SingleAsync(l => l.Id == linkId));
+        await write.SaveChangesAsync();
+    }
+
+    /// <summary>Revokes a link as story 03 does: <c>RevokedAt</c> stamped, the protected copy cleared.</summary>
+    public Task RevokeLinkAsync(Guid linkId) => ChangeLinkAsync(linkId, link =>
+    {
+        link.RevokedAt = DateTimeOffset.UtcNow;
+        link.ProtectedToken = null;
+    });
+
+    /// <summary>
+    /// Reissues a link IN PLACE as story 03 does (a new token, hash and protected copy, <c>Generation</c> + 1, not
+    /// revoked) and returns the new join URL. The old token is dead from then on.
+    /// </summary>
+    public async Task<string> ReissueLinkAsync(Guid linkId)
+    {
+        var token = ParticipantLinkTokens.Generate();
+        await ChangeLinkAsync(linkId, link =>
+        {
+            link.TokenHash = ParticipantLinkTokens.Hash(token);
+            link.ProtectedToken = new ParticipantLinkTokenProtector(KeyRing).Protect(token);
+            link.Generation += 1;
+            link.RevokedAt = null;
+        });
+        return $"{FrontendBase}/join/{token}";
     }
 
     /// <summary>Every <c>participant.link.emailed</c> event persisted for <paramref name="exerciseId"/> (read past any filter).</summary>
@@ -269,6 +335,59 @@ internal sealed class LinkEmailTestWorld
             .AsNoTracking()
             .Where(e => e.ExerciseId == exerciseId && e.EventType == EasyLoginTelemetry.LinkEmailedEventType)
             .ToListAsync();
+    }
+}
+
+/// <summary>
+/// Runs an action, ONCE, when the service re-reads one participant just before their send: a <c>SELECT</c> on
+/// <c>[Accounts]</c> that carries that account id as a parameter. The planning read of "everyone" carries no account id,
+/// so it never fires there. Lets a test fault the re-read, or move the clock during it, deterministically (no sleep).
+/// </summary>
+internal sealed class LinkEmailReReadHook : DbCommandInterceptor
+{
+    private readonly ConcurrentDictionary<Guid, Action> _actions = new();
+
+    /// <summary>Runs <paramref name="action"/> as <paramref name="accountId"/>'s re-read is about to execute.</summary>
+    public LinkEmailReReadHook When(Guid accountId, Action action)
+    {
+        _actions[accountId] = action;
+        return this;
+    }
+
+    public override InterceptionResult<DbDataReader> ReaderExecuting(
+        DbCommand command,
+        CommandEventData eventData,
+        InterceptionResult<DbDataReader> result)
+    {
+        Fire(command);
+        return base.ReaderExecuting(command, eventData, result);
+    }
+
+    public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
+        DbCommand command,
+        CommandEventData eventData,
+        InterceptionResult<DbDataReader> result,
+        CancellationToken cancellationToken = default)
+    {
+        Fire(command);
+        return base.ReaderExecutingAsync(command, eventData, result, cancellationToken);
+    }
+
+    private void Fire(DbCommand command)
+    {
+        if (!command.CommandText.Contains("FROM [Accounts]", StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        foreach (var parameter in command.Parameters.Cast<DbParameter>())
+        {
+            if (parameter.Value is Guid id && _actions.TryRemove(id, out var action))
+            {
+                action();
+                return;
+            }
+        }
     }
 }
 
@@ -290,8 +409,11 @@ internal sealed class FakeParticipantLinkMailer : IParticipantLinkMailer
     /// <summary>Every message handed to the mailer, in order (including the ones answered as failures).</summary>
     public IReadOnlyList<LinkEmailMessage> Messages => _sent.ToArray();
 
-    /// <summary>Optional hook run on each send (e.g. to advance a clock).</summary>
-    public Action? OnSend { get; set; }
+    /// <summary>
+    /// Optional hook run on each send, with the message being sent, BEFORE it is answered (e.g. to change rows mid-batch,
+    /// as a concurrent roster import or link action would, deterministically between two sends).
+    /// </summary>
+    public Func<LinkEmailMessage, Task>? OnSend { get; set; }
 
     public FakeParticipantLinkMailer Answer(string recipient, LinkMailSendOutcome outcome)
     {
@@ -305,16 +427,20 @@ internal sealed class FakeParticipantLinkMailer : IParticipantLinkMailer
         return this;
     }
 
-    public Task<LinkMailSendOutcome> SendAsync(LinkEmailMessage message, CancellationToken cancellationToken)
+    public async Task<LinkMailSendOutcome> SendAsync(LinkEmailMessage message, CancellationToken cancellationToken)
     {
         _sent.Enqueue(message);
-        OnSend?.Invoke();
+        if (OnSend is { } onSend)
+        {
+            await onSend(message);
+        }
+
         if (_throwFor.Contains(message.RecipientAddress))
         {
             throw new InvalidOperationException($"boom for {message.RecipientAddress}");
         }
 
-        return Task.FromResult(_outcomes.TryGetValue(message.RecipientAddress, out var outcome) ? outcome : LinkMailSendOutcome.Sent);
+        return _outcomes.TryGetValue(message.RecipientAddress, out var outcome) ? outcome : LinkMailSendOutcome.Sent;
     }
 }
 

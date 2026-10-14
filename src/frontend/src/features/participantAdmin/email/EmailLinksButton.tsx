@@ -28,11 +28,12 @@
  *      failed, each text plus icon, never colour alone) and, for skipped and failed,
  *      the reasons with the people's names from the roster.
  *   5. "Send again to the N not sent": re-posts ONLY the ids KNOWN not to have been
- *      sent (rate-limited, not attempted in time, send failed) as `{ participantIds }`.
- *      Never a skipped or a sent person, and never a timed-out one (`timedOut`: it may
- *      have been accepted, and the summary says to check first), so nobody is emailed
- *      twice by it. The new result replaces the summary. The confirm already given covers
- *      these same people.
+ *      sent and fixed by waiting (rate-limited, not attempted in time) as
+ *      `{ participantIds }`. Never a skipped or a sent person, never a refused one
+ *      (`sendFailed`: it would most likely be refused again), and never a timed-out one
+ *      (`timedOut`: it may have been accepted, and the summary says to check first), so
+ *      nobody is emailed twice by it. The new result replaces the summary. The confirm
+ *      already given covers these same people.
  *   Closing returns focus to the button.
  *
  * SECRETS. Nothing here reads, shows or logs a join URL or an email address: the

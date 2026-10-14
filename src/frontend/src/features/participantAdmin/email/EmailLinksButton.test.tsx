@@ -258,28 +258,31 @@ describe('EmailLinksButton - sending and the summary', () => {
     expect(screen.getByRole('button', { name: 'Close' })).toHaveFocus()
   })
 
-  it('a timed-out send is "not confirmed sent" and is left out of "Send again"', async () => {
+  it('a timed-out or refused send is left out of "Send again"', async () => {
     const user = userEvent.setup()
     const post = vi.spyOn(api, 'post')
       .mockResolvedValueOnce(okResponse({
         results: [
           { participantId: 'p-ann', status: 'failed', reason: 'timedOut' },
           { participantId: 'p-ben', status: 'failed', reason: 'rateLimited' },
+          { participantId: 'p-cal', status: 'failed', reason: 'sendFailed' },
         ],
       }))
       .mockResolvedValueOnce(okResponse({ results: [{ participantId: 'p-ben', status: 'sent' }] }))
     await renderWithRoster(
-      <EmailLinksButton selection={['p-ann', 'p-ben']} />,
+      <EmailLinksButton selection={['p-ann', 'p-ben', 'p-cal']} />,
       rosterWith(sampleEntries()),
     )
 
-    await user.click(screen.getByRole('button', { name: 'Email links (2)' }))
+    await user.click(screen.getByRole('button', { name: 'Email links (3)' }))
     await user.click(await screen.findByRole('button', { name: 'Send emails' }))
 
     const summary = await screen.findByTestId('email-links-summary')
     expect(summary).toHaveTextContent(
       'Failed, not confirmed sent: it may have been sent, so check with them before sending again: Ann Able',
     )
+    expect(summary).toHaveTextContent('Failed, the email could not be sent: Cal Cole')
+    // Copilot review on #487: only rateLimited / notAttempted are re-posted, so Ben alone.
     await user.click(screen.getByRole('button', { name: 'Send again to the 1 not sent' }))
 
     await waitFor(() => expect(post).toHaveBeenCalledTimes(2))
