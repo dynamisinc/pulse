@@ -503,6 +503,16 @@ BeforeAll {
                         if ($request.Headers['Range'] -eq 'bytes=0-1') { & $send $context 206 $null @{ 'Content-Range' = 'bytes 0-1/2' } ([byte[]] (1, 2)) } else { & $send $context 200 $null @{} ([byte[]] (1, 2)) }
                         continue
                     }
+                    if ($path -like '/stall/*') {
+                        # A 200 that promises 10 bytes, sends 2, then stalls until the test releases it (or 30 s pass).
+                        $stalled = $context.Response
+                        $stalled.StatusCode = 200; $stalled.ContentLength64 = 10
+                        $stalled.OutputStream.Write([byte[]] (1, 2), 0, 2); $stalled.OutputStream.Flush()
+                        $held = [Diagnostics.Stopwatch]::StartNew()
+                        while (-not $State.Release -and $held.Elapsed.TotalSeconds -lt 30) { Start-Sleep -Milliseconds 50 }
+                        try { $stalled.Abort() } catch { }
+                        continue
+                    }
                     if ($path -eq '/api/exercise-context') { & $send $context 200 ([ordered]@{ exerciseId = $State.ExerciseId; exerciseName = 'Listener'; timeZone = 'America/Chicago'; status = 'live' }); continue }
                     if ($path -eq '/api/auth/staff/login') {
                         $login = ConvertFrom-Json -InputObject $text -AsHashtable
@@ -1479,6 +1489,41 @@ Describe 'Media upload: an uncertain outcome is looked up and adopted, never sen
             @($script:Fake.Posts | Where-Object { @($_.media | Where-Object { $_.mediaId -eq $late }).Count -gt 0 }).Count | Should -Be 1
         }
 
+        It 'a VIDEO upload that landed after its run stopped: the next run keeps its poster (hidden by then) and adopts the video, sending neither again' {
+            $script:Fake.MediaFaults[5] = 'lost-before-write'                   # the video
+            (Invoke-FakeSeed).Code | Should -Be 1
+            $posterId = (Get-SeedManifestFiles)['media/river-clip.poster.jpg']['assetId']
+            # It landed late, with its poster, which the library now hides (MediaLibraryService: posters are not listed).
+            $late = Add-FakeAsset -Unit (Get-FixtureUnit 'media/river-clip.mp4') -Poster $posterId
+            $script:Fake.Calls.Clear()
+            $run = Invoke-FakeSeed
+            $run.Code | Should -Be 0 -Because $run.Text
+            $run.Text | Should -Match 'Media uploads   1 to upload'
+            $run.Text | Should -Match '\+ media/river-clip\.mp4  \(video, .+; an earlier upload of it got no clear answer, so the media library is checked for it first\)'
+            (Get-FakeCalls POST '/api/media').Count | Should -Be 0              # neither the poster nor the video again
+            $script:Fake.Assets.Count | Should -Be 5
+            $files = Get-SeedManifestFiles
+            $files['media/river-clip.mp4']['assetId'] | Should -Be $late
+            $files['media/river-clip.mp4']['posterAssetId'] | Should -Be $posterId
+            $files['media/river-clip.poster.jpg']['assetId'] | Should -Be $posterId
+        }
+
+        It 'plan and run agree: when the poster''s bytes changed, the video is not looked up first, and the plan does not say it is' {
+            $script:Fake.MediaFaults[5] = 'lost-before-write'
+            (Invoke-FakeSeed).Code | Should -Be 1
+            $root = Join-Path $TestDrive 'poster-changed'
+            Remove-Item -Recurse -Force $root -ErrorAction SilentlyContinue
+            Copy-Item -Recurse $script:FixtureRoot $root
+            $poster = Join-Path $root 'media/river-clip.poster.jpg'
+            [IO.File]::WriteAllBytes($poster, [IO.File]::ReadAllBytes($poster) + [byte[]] (0))   # same JPEG head, other bytes
+            $script:Fake.Calls.Clear()
+            $run = Invoke-FakeSeed @{ PackPath = (Join-Path $root 'pack.json') }
+            $run.Code | Should -Be 0 -Because $run.Text
+            $run.Text | Should -Not -Match 'river-clip\.mp4 .*checked for it first'
+            (Get-FakeCalls GET '/api/staff/media').Count | Should -Be 2         # step 4 only: nothing to look up
+            @(Get-FakeCalls POST '/api/media' | ForEach-Object { $_.Form['file'].Name }) | Should -Be @('river-clip.poster.jpg', 'river-clip.mp4')
+        }
+
         It 'a next run that cannot tell whether the earlier upload landed sends nothing for it' {
             $script:Fake.MediaFaults[2] = 'lost-before-write'
             (Invoke-FakeSeed).Code | Should -Be 1
@@ -1639,6 +1684,20 @@ Describe 'Media upload: an uncertain outcome is looked up and adopted, never sen
             finally { Stop-SeedTestServer $redirect }
             $closed = Get-FreeTcpPort
             (Get-MediaUrlSha256 -Url "http://localhost:$closed/blob/a1" -Bytes 2 -TimeoutSec 5).Status | Should -Be 0
+        }
+
+        It 'a body that stalls after its headers is cut off at the deadline (Status 0), not waited on' {
+            # HttpClient.Timeout stops at the headers with ResponseHeadersRead; -TimeoutSec must bound the body too.
+            $server = Start-SeedTestServer
+            try {
+                $watch = [Diagnostics.Stopwatch]::StartNew()
+                $got = Get-MediaUrlSha256 -Url "$($server.BaseUrl)/stall/a1" -Bytes 10 -TimeoutSec 2
+                $watch.Stop()
+                $got.Status | Should -Be 0
+                $got.Sha256 | Should -BeNullOrEmpty
+                $watch.Elapsed.TotalSeconds | Should -BeLessThan 15
+            }
+            finally { $server.State.Release = $true; Stop-SeedTestServer $server }
         }
     }
 }

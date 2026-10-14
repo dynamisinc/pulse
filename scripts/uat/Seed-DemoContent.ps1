@@ -37,7 +37,10 @@
          when the uploading run first read it and that the manifest does not claim, and whose bytes (and its
          poster's), fetched from its signed URL, have the file's SHA-256. The manifest marks a file "pending"
          before its upload is sent. A run that stopped on an uncertain upload, or was interrupted during one,
-         leaves the mark, and the next run looks for that upload the same way before it sends the file again.
+         leaves the mark, and the next run looks for that upload the same way before it sends the file again
+         (when the file's bytes, and a video's poster's bytes, are still the ones it sent). A pending video keeps
+         its poster even though the library no longer lists it: the library hides an image once a video uses
+         it as its poster. Each look-up download has one deadline, body included.
       8. Edits persona profiles: PATCH /api/staff/personas/{id} as a JSON merge-patch, covering display name,
          bio, location, verified, avatar and banner. Only the fields that differ are sent.
       9. Posts the opening feed as controller-as-persona (POST /api/posts) in scenario-time order, with
@@ -1136,6 +1139,9 @@ function Get-UploadPlan {
             $videoEntry = & $entryFor $video.File
             # Gate-1 L-1: offline (-WhatIf) there is no library; $verified is already true then.
             if ($null -ne $Library -and $videoEntry -and [string] $videoEntry['posterAssetId'] -eq $posterId -and $Library.Ids.Contains([string] $videoEntry['assetId'])) { $verified = $true }
+            # The video's last upload got no clear answer: if it landed, this poster is attached to it, and the library
+            # hides it. Keep it, so step 7 can find that upload (it checks the poster's bytes) instead of sending both again.
+            if ((Test-PendingUpload -Entry $videoEntry -Unit $video -PosterUnit $unit) -and [string] $videoEntry['pending']['posterAssetId'] -eq $posterId) { $verified = $true }
         }
         if ($verified) { & $decide $unit 'reuse' $posterId 'already uploaded' }
         else { & $decide $unit 'upload' $null 'no longer in the media library' }
@@ -1143,14 +1149,30 @@ function Get-UploadPlan {
 
     foreach ($unit in $Units) {
         $reason = $decision[$unit.File].Reason
-        # An earlier upload of these bytes got no clear answer (or its run was interrupted): step 7 looks first.
-        $pending = (& $entryFor $unit.File)
-        if ($decision[$unit.File].Action -eq 'upload' -and $pending -and $pending['pending'] -is [System.Collections.IDictionary] -and [string] $pending['pending']['sha256'] -ceq $unit.Sha256) {
+        # An earlier upload of these bytes got no clear answer (or its run was interrupted): step 7 looks first, by
+        # the same test (Test-PendingUpload), so the plan says exactly what the run will do.
+        $posterUnit = if ($unit.PosterFile) { $byFile[$unit.PosterFile] } else { $null }
+        if ($decision[$unit.File].Action -eq 'upload' -and (Test-PendingUpload -Entry (& $entryFor $unit.File) -Unit $unit -PosterUnit $posterUnit)) {
             $lookFirst = 'an earlier upload of it got no clear answer, so the media library is checked for it first'
             $reason = if ($reason -eq 'new file') { $lookFirst } else { "$reason; $lookFirst" }
         }
         [pscustomobject]@{ Unit = $unit; Action = $decision[$unit.File].Action; AssetId = $decision[$unit.File].AssetId; Reason = $reason }
     }
+}
+
+function Test-PendingUpload {
+    <#
+    .SYNOPSIS
+        True when a manifest files entry carries a "pending" mark for an upload of exactly these bytes: the file's
+        SHA-256 and, for a video with a poster, the poster file's SHA-256. Step 7 then looks for that upload in the
+        media library before sending the file again, and the plan says so. Bytes, not ids: the poster may have been
+        uploaded again since (its library row hides while it is the poster of the upload that landed).
+    #>
+    param([AllowNull()] [object] $Entry, [Parameter(Mandatory)] [object] $Unit, [AllowNull()] [object] $PosterUnit)
+    if ($Entry -isnot [System.Collections.IDictionary] -or $Entry['pending'] -isnot [System.Collections.IDictionary]) { return $false }
+    $pending = $Entry['pending']
+    $posterSha = if ($PosterUnit) { $PosterUnit.Sha256 } else { '' }
+    return ([string] $pending['sha256'] -ceq $Unit.Sha256) -and ([string] $pending['posterSha256'] -ceq $posterSha)
 }
 
 function Get-MediaUploadFileName {
@@ -2490,16 +2512,19 @@ function Get-MediaUrlSha256 {
         GET <url> and returns @{ Status; Sha256 }: the SHA-256 of the body when it is a 200 of exactly -Bytes bytes,
         else $null (another file). Status is 0 on a network failure. Like Invoke-MediaRangeRequest: no Authorization
         header (media URLs are pre-signed, and the session token never leaves the API host), and redirects are not
-        followed. A body longer than -Bytes is not read to the end.
+        followed. A body longer than -Bytes is not read to the end. -TimeoutSec is ONE deadline for the whole
+        download, body included: HttpClient.Timeout stops covering the body once the headers are in
+        (ResponseHeadersRead), so a stalled body would otherwise hang the run. Past it, the result is Status 0.
     #>
     param([Parameter(Mandatory)] [string] $Url, [Parameter(Mandatory)] [long] $Bytes, [int] $TimeoutSec = 180)
     $handler = [System.Net.Http.HttpClientHandler]::new()
     $handler.AllowAutoRedirect = $false
     $client = [System.Net.Http.HttpClient]::new($handler)
-    $client.Timeout = [TimeSpan]::FromSeconds($TimeoutSec)
+    $client.Timeout = [System.Threading.Timeout]::InfiniteTimeSpan      # the deadline below bounds everything
+    $deadline = [System.Threading.CancellationTokenSource]::new([TimeSpan]::FromSeconds($TimeoutSec))
     $hash = [System.Security.Cryptography.IncrementalHash]::CreateHash([System.Security.Cryptography.HashAlgorithmName]::SHA256)
     try {
-        $response = $client.GetAsync($Url, [System.Net.Http.HttpCompletionOption]::ResponseHeadersRead).GetAwaiter().GetResult()
+        $response = $client.GetAsync($Url, [System.Net.Http.HttpCompletionOption]::ResponseHeadersRead, $deadline.Token).GetAwaiter().GetResult()
         try {
             $status = [int] $response.StatusCode
             $length = $response.Content.Headers.ContentLength
@@ -2507,7 +2532,7 @@ function Get-MediaUrlSha256 {
             $stream = $response.Content.ReadAsStreamAsync().GetAwaiter().GetResult()
             $buffer = [byte[]]::new(81920)
             $total = [long] 0
-            while (($read = $stream.Read($buffer, 0, $buffer.Length)) -gt 0) {
+            while (($read = $stream.ReadAsync($buffer, 0, $buffer.Length, $deadline.Token).GetAwaiter().GetResult()) -gt 0) {
                 $total += $read
                 if ($total -gt $Bytes) { return [pscustomobject]@{ Status = 200; Sha256 = $null } }
                 $hash.AppendData($buffer, 0, $read)
@@ -2518,7 +2543,7 @@ function Get-MediaUrlSha256 {
         finally { $response.Dispose() }
     }
     catch { Clear-SeedWebErrors -Exceptions @($_.Exception); return [pscustomobject]@{ Status = 0; Sha256 = $null } }
-    finally { $hash.Dispose(); $client.Dispose() }
+    finally { $hash.Dispose(); $deadline.Dispose(); $client.Dispose() }
 }
 
 function Get-PauseTierRank {
@@ -3014,10 +3039,10 @@ function Invoke-DemoSeed {
             $marked = $null
             $outcome = $null
 
-            # An earlier run sent these bytes (with this poster) and got no clear answer, or stopped mid-upload: the
-            # asset may be in the library already. Look before sending the file again.
-            $earlier = if ($previous -is [System.Collections.IDictionary]) { $previous['pending'] } else { $null }
-            if ($earlier -is [System.Collections.IDictionary] -and [string] $earlier['sha256'] -ceq $unit.Sha256 -and [string] $earlier['posterAssetId'] -eq [string] $posterId) {
+            # An earlier run sent these bytes (with this poster's bytes) and got no clear answer, or stopped mid-upload:
+            # the asset may be in the library already. Look before sending the file again.
+            if (Test-PendingUpload -Entry $previous -Unit $unit -PosterUnit $posterUnit) {
+                $earlier = $previous['pending']
                 $found = Find-UploadedMediaAsset -Context $context -Unit $unit -PosterUnit $posterUnit -KnownIds @(Get-SeedList $earlier 'knownIds') -Claimed $claimedAssets
                 if ($found.Outcome -eq 'unknown') {
                     Write-SeedLine FAIL "$($unit.File): an earlier upload of it got no clear answer, and the media library cannot tell now whether it was stored: $($found.Detail)."
@@ -3025,8 +3050,12 @@ function Invoke-DemoSeed {
                     return 1
                 }
                 if ($found.Outcome -eq 'found') {
+                    # Recorded with what THAT upload sent: its uploader and its poster (the poster it carries).
                     $by = if ($earlier['uploadedBy']) { [string] $earlier['uploadedBy'] } else { $me }
-                    $outcome = [pscustomobject]@{ Outcome = 'adopted'; AssetId = $found.AssetId; Detail = 'an earlier upload of it got no clear answer'; Others = $found.Others; UploadedBy = $by }
+                    $outcome = [pscustomobject]@{
+                        Outcome = 'adopted'; AssetId = $found.AssetId; Detail = 'an earlier upload of it got no clear answer'; Others = $found.Others
+                        UploadedBy = $by; PosterAssetId = $(if ($posterUnit) { [string] $earlier['posterAssetId'] } else { $null })
+                    }
                 }
             }
 
@@ -3043,11 +3072,15 @@ function Invoke-DemoSeed {
                 # the mark, and the next run looks for this upload (above) before sending the file again.
                 $marked = [ordered]@{}
                 if ($previous -is [System.Collections.IDictionary]) { foreach ($key in $previous.Keys) { if ($key -ne 'pending') { $marked[$key] = $previous[$key] } } }
-                $marked['pending'] = [ordered]@{ sha256 = $unit.Sha256; posterAssetId = $posterId; knownIds = $known; uploadedBy = $me; sentAt = Format-SeedInstant ([DateTimeOffset]::UtcNow) }
+                $marked['pending'] = [ordered]@{
+                    sha256 = $unit.Sha256; posterAssetId = $posterId; posterSha256 = $(if ($posterUnit) { $posterUnit.Sha256 } else { $null })
+                    knownIds = $known; uploadedBy = $me; sentAt = Format-SeedInstant ([DateTimeOffset]::UtcNow)
+                }
                 $manifest['files'][$unit.File] = $marked
                 Save-SeedManifest -Manifest $manifest -Path $manifestPath
                 $outcome = Add-MediaAsset -Context $context -Form $form -Unit $unit -PosterUnit $posterUnit -KnownIds $known -Claimed $claimedAssets
                 $outcome | Add-Member -NotePropertyName UploadedBy -NotePropertyValue $me
+                $outcome | Add-Member -NotePropertyName PosterAssetId -NotePropertyValue $posterId
             }
 
             switch ($outcome.Outcome) {
@@ -3084,7 +3117,7 @@ function Invoke-DemoSeed {
             $entry = [ordered]@{ assetId = $assetId; sha256 = $unit.Sha256; kind = $unit.Kind; bytes = $unit.Bytes; uploadedBy = $outcome.UploadedBy }
             $entry[$(if ($outcome.Outcome -eq 'adopted') { 'adoptedAt' } else { 'uploadedAt' })] = Format-SeedInstant ([DateTimeOffset]::UtcNow)
             if ($posterUnit) {
-                $entry['posterAssetId'] = $posterId
+                $entry['posterAssetId'] = $outcome.PosterAssetId
                 $entry['posterSha256'] = $posterUnit.Sha256
             }
             $manifest['files'][$unit.File] = $entry
