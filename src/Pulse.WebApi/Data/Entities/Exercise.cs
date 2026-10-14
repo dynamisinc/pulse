@@ -266,4 +266,21 @@ public sealed class Exercise : IOrganizationOwned
     /// changes no channel, engine or telemetry behaviour (story 04).
     /// </summary>
     public bool IsPracticeMode { get; set; }
+
+    // ============================================================================================
+    // demo-feedback story 01 (the feature's ONE migration) — white noise (DF-12). Story 05 owns the behaviour.
+    // ============================================================================================
+
+    /// <summary>The schema bound of <see cref="NoiseLevel"/>.</summary>
+    public const int MaxNoiseLevelLength = 8;
+
+    /// <summary>The <see cref="NoiseLevel"/> value an exercise starts with, and the one existing rows are backfilled to.</summary>
+    public const string DefaultNoiseLevel = "off";
+
+    /// <summary>
+    /// The white-noise level (demo-feedback DF-12): <c>off</c> | <c>low</c> | <c>medium</c> | <c>high</c>, persisted so a
+    /// restart keeps it. Required, defaulting to <c>off</c> (column default too, so existing rows read <c>off</c>).
+    /// STAFF-WORLD ONLY: never projected onto a participant surface (XC-002). No CHECK constraint; story 05 validates.
+    /// </summary>
+    public string NoiseLevel { get; set; } = DefaultNoiseLevel;
 }

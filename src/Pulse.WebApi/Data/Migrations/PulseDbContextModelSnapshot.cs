@@ -228,6 +228,13 @@ namespace Pulse.WebApi.Data.Migrations
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<string>("NoiseLevel")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(8)
+                        .HasColumnType("nvarchar(8)")
+                        .HasDefaultValue("off");
+
                     b.Property<Guid>("OrganizationId")
                         .HasColumnType("uniqueidentifier");
 
@@ -375,6 +382,10 @@ namespace Pulse.WebApi.Data.Migrations
                     b.Property<Guid>("ExerciseId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<string>("ExternalRef")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
                     b.Property<Guid?>("FiredByHumanId")
                         .HasColumnType("uniqueidentifier");
 
@@ -427,6 +438,10 @@ namespace Pulse.WebApi.Data.Migrations
                     b.HasIndex("ExerciseId");
 
                     b.HasIndex("Status");
+
+                    b.HasIndex("ExerciseId", "ExternalRef")
+                        .IsUnique()
+                        .HasFilter("[ExternalRef] IS NOT NULL AND [DeletedAt] IS NULL");
 
                     b.ToTable("InjectItems");
                 });
@@ -598,6 +613,44 @@ namespace Pulse.WebApi.Data.Migrations
                     b.HasIndex("PosterMediaAssetId");
 
                     b.ToTable("MediaAssets");
+                });
+
+            modelBuilder.Entity("Pulse.WebApi.Data.Entities.NoisePost", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset>("CreatedWallClock")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid>("ExerciseId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset?>("LastPostedWallClock")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("Order")
+                        .HasColumnType("int");
+
+                    b.Property<Guid>("PersonaId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("PostedCount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(0);
+
+                    b.Property<string>("Text")
+                        .IsRequired()
+                        .HasMaxLength(280)
+                        .HasColumnType("nvarchar(280)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ExerciseId", "PostedCount", "Order");
+
+                    b.ToTable("NoisePosts");
                 });
 
             modelBuilder.Entity("Pulse.WebApi.Data.Entities.Organization", b =>
@@ -841,6 +894,13 @@ namespace Pulse.WebApi.Data.Migrations
                     b.Property<Guid?>("ParentPostId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<DateTimeOffset?>("PinnedForAllAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("PinnedForAllByHumanId")
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
                     b.Property<Guid?>("RumorRef")
                         .HasColumnType("uniqueidentifier");
 
@@ -849,6 +909,9 @@ namespace Pulse.WebApi.Data.Migrations
                     b.HasIndex("ExerciseId");
 
                     b.HasIndex("ParentPostId");
+
+                    b.HasIndex("ExerciseId", "PinnedForAllAt")
+                        .HasFilter("[PinnedForAllAt] IS NOT NULL");
 
                     b.ToTable("Posts");
                 });

@@ -82,4 +82,22 @@ public sealed class Post : IExerciseScoped
 
     /// <summary>The seeded reply baseline (see <see cref="BaselineLikeCount"/>). <c>NOT NULL DEFAULT 0</c>. Staff-only.</summary>
     public int BaselineReplyCount { get; set; }
+
+    /// <summary>The schema bound of <see cref="PinnedForAllByHumanId"/> (demo-feedback DF-7).</summary>
+    public const int MaxPinnedForAllByHumanIdLength = 128;
+
+    /// <summary>
+    /// When a controller pinned this post for EVERY participant (an "exercise pin", demo-feedback DF-7), in SCENARIO
+    /// time (COR-053) — never wall clock. <c>null</c> = not pinned for everyone. Indexed by
+    /// <c>IX_Posts_ExerciseId_PinnedForAllAt</c>, filtered to pinned rows, for the Pinned tab's exercise-pin read.
+    /// </summary>
+    /// <remarks>Schema only (demo-feedback story 01); the pin endpoints and the Pinned tab are story 04.</remarks>
+    public DateTimeOffset? PinnedForAllAt { get; set; }
+
+    /// <summary>
+    /// The staff human who set the exercise pin (COR-018), at most <see cref="MaxPinnedForAllByHumanIdLength"/>
+    /// characters; <c>null</c> when not pinned. Staff/telemetry-only (XC-002) — never projected onto a participant
+    /// response.
+    /// </summary>
+    public string? PinnedForAllByHumanId { get; set; }
 }
