@@ -53,6 +53,10 @@ class FakeConnection implements RealtimeConnection {
     return () => this.stateListeners.delete(listener)
   }
 
+  stop(): Promise<void> {
+    return Promise.resolve()
+  }
+
   start(): Promise<void> {
     this.state = HubConnectionState.Connected
     return Promise.resolve()

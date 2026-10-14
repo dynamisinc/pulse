@@ -37,6 +37,11 @@
  *      feature keeps at module level for the life of the tab - the controller composer's unsent
  *      drafts and its unresolved "did that post go out?" questions - registers its reset
  *      there, so this module imports no feature for it (core stays world-neutral).
+ *      `core/realtime` registers there too: it STOPS the shared hub connection (COR-001). The
+ *      server joins a connection to its identity's exercise and role groups once, at connect, so a
+ *      connection that outlived an identity switch on the tab would keep delivering the PREVIOUS
+ *      exercise to the next sign-in; the next consumer to start opens a new one on the new token.
+ *      (A registration, not an import: `core/auth` still imports nothing from `core/realtime`.)
  *
  * Steps 1 and 3-5 are also exported alone as `resetClientSession()` (easy-login 08
  * Gate-1 W-1): the join page REPLACES one identity with another without a sign-out,
