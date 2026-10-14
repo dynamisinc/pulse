@@ -28,7 +28,17 @@
  *      same tab. Both modules are leaves (no imports beyond types) so this adds
  *      nothing to `core/auth`'s dependency graph.
  *
- * Steps 1 and 3 are also exported alone as `resetClientSession()` (easy-login 08
+ *   4. FORGET THE SESSION'S TAKEN-DOWN POST IDS (demo-polish C5): `removedPosts` is the
+ *      same kind of tab-lived module singleton (opaque ids that stop a post being shown),
+ *      reset the same way so a sign-in on the same tab never inherits the last session's.
+ *      Also a leaf module (no imports).
+ *
+ *   5. RUN THE FEATURES' REGISTERED RESETS (`./sessionReset`, Wave 3 Gate-2 A L-5): state a
+ *      feature keeps at module level for the life of the tab - the controller composer's unsent
+ *      drafts and its unresolved "did that post go out?" questions - registers its reset
+ *      there, so this module imports no feature for it (core stays world-neutral).
+ *
+ * Steps 1 and 3-5 are also exported alone as `resetClientSession()` (easy-login 08
  * Gate-1 W-1): the join page REPLACES one identity with another without a sign-out,
  * so it must forget the previous user's client state exactly as sign-out does, but
  * must not log out (the new pair is already stored). One function, two callers, so
@@ -45,8 +55,10 @@
  */
 import { queryClient } from '../services/queryClient'
 import { ownPostStore } from '@/features/social/services/ownPostStore'
+import { removedPosts } from '@/features/social/services/removedPosts'
 import { resetReplyIntent } from '@/features/social/services/replyIntent'
 import { logout } from './logout'
+import { runSessionResets } from './sessionReset'
 
 /**
  * Fully tears down the client session: drops all cached server-state so no
@@ -61,12 +73,15 @@ export async function endSession(): Promise<void> {
 
 /**
  * Forgets every piece of client state that belongs to the current identity (the
- * React Query cache and the participant composer's tab-lived singletons) WITHOUT
- * touching the token store. Sign-out calls it before `logout()`; the join page
+ * React Query cache, the participant composer's and takedown's tab-lived singletons,
+ * and every feature reset registered with `./sessionReset`) WITHOUT touching the
+ * token store. Sign-out calls it before `logout()`; the join page
  * calls it after storing a new identity's tokens. Synchronous; never throws.
  */
 export function resetClientSession(): void {
   queryClient.clear()
   ownPostStore.reset()
+  removedPosts.reset()
   resetReplyIntent()
+  runSessionResets()
 }

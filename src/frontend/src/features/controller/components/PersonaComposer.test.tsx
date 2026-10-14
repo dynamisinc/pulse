@@ -92,7 +92,7 @@ describe('PersonaComposer — publish as the active persona (CTL-001)', () => {
       />,
     )
 
-    const input = screen.getByLabelText('Post text')
+    const input = screen.getByLabelText('Post as Fairhaven Water')
     const postButton = screen.getByRole('button', { name: 'Post' })
     expect(postButton).toBeDisabled()
 
@@ -127,7 +127,7 @@ describe('PersonaComposer — staff-only origin line (R-003, SOC-003)', () => {
     // Not shown until something is fired.
     expect(screen.queryByTestId('origin-line')).not.toBeInTheDocument()
 
-    await user.type(screen.getByLabelText('Post text'), 'Official update.')
+    await user.type(screen.getByLabelText('Post as Fairhaven Water'), 'Official update.')
     await user.click(screen.getByRole('button', { name: 'Post' }))
 
     expect(screen.getByTestId('origin-label')).toHaveTextContent('SIMCELL · MANUAL')
@@ -165,7 +165,7 @@ describe('PersonaComposer — identity + scenario time (R-001/R-004, COR-053)', 
       />,
     )
 
-    await user.type(screen.getByLabelText('Post text'), 'Advisory update.')
+    await user.type(screen.getByLabelText('Post as Fairhaven Water'), 'Advisory update.')
     await user.click(screen.getByRole('button', { name: 'Post' }))
 
     const post = onPublished.mock.calls[0]?.[0]
@@ -242,7 +242,7 @@ describe('PersonaComposer — over-length draft blocks publish (SOC-001 char lim
       />,
     )
 
-    await user.type(screen.getByLabelText('Post text'), 'This is way over the ten-char limit')
+    await user.type(screen.getByLabelText('Post as Fairhaven Water'), 'This is way over the ten-char limit')
 
     const counter = screen.getByTestId('char-counter')
     expect(counter).toHaveAttribute('data-state', 'over')
@@ -265,7 +265,7 @@ describe('PersonaComposer — keyboard-first fire (NFR-001, CTL-001 quick-fire)'
       />,
     )
 
-    const input = screen.getByLabelText('Post text')
+    const input = screen.getByLabelText('Post as Fairhaven Water')
     await user.type(input, 'Fire via keyboard.')
     await user.keyboard('{Control>}{Enter}{/Control}')
 

@@ -58,15 +58,23 @@
  * {@link EXPLORE_RETRY_MS} while anyone is still consuming it — the rail is
  * persistent, so one transient failure at sign-in must not blank it for the session.
  *
- * TODO(C5): takedown removal (Wave 3). When a removed-post event reaches the client,
- * drop that id from `byId` here and publish, so a taken-down post leaves Trending
- * and search without a reload. Until then the visibility filter in `trending.ts` /
- * `search.ts` only covers posts that arrive already marked removed.
+ * TAKEDOWN (demo-polish C5). A controller's takedown (`PostRemoved`, or the console's
+ * own call in mock mode) is recorded in the session's `removedPosts` store. While the
+ * store is running it listens to that store: every id recorded there is DROPPED from the
+ * baseline and published at once (a removal is rare and deliberate, so it is not batched),
+ * so a taken-down post leaves Trending and search without a reload — its hashtags stop
+ * counting and it stops matching. An id already recorded when the baseline read lands, or
+ * when an arrival is offered, is never admitted at all (the removal can beat the read).
+ * The listener lives and dies with the run (`start`/`teardown`), so sign-out — which also
+ * clears `removedPosts` — and the last consumer leaving both release it. The visibility
+ * filter in `trending.ts` / `search.ts` still covers a post that arrives already marked
+ * removed; this covers one removed AFTER it was loaded.
  */
 
 import { toParticipantView, type ParticipantPostView, type Post } from '@/features/social'
 import { compareNewestFirst, resolveFeed } from '../services/feedService'
 import { defaultFeedStreamSource, type FeedStreamSource } from '../services/feedStreamSource'
+import { removedPosts as sessionRemovedPosts } from '../services/removedPosts'
 
 /** Most posts the baseline keeps (the newest-200 the contract serves). */
 export const EXPLORE_FEED_CAP = 200
@@ -113,9 +121,14 @@ export interface ExploreFeedStore {
   reset(): void
 }
 
+/** The slice of the `removedPosts` store this one reads (a test injects its own). */
+export type RemovedPostsSource = Pick<typeof sessionRemovedPosts, 'has' | 'subscribe'>
+
 export interface CreateExploreFeedStoreOptions {
   /** The arrival source (default: the app-wide top-level-only `defaultFeedStreamSource`). */
   readonly source?: FeedStreamSource
+  /** The taken-down post ids (default: the session's `removedPosts` store). */
+  readonly removed?: RemovedPostsSource
   /** The baseline read (default: `resolveFeed`, top-level, All Posts). */
   readonly fetchFeed?: () => Promise<Post[]>
   readonly batchMs?: number
@@ -141,6 +154,7 @@ export function createExploreFeedStore(
   options: CreateExploreFeedStoreOptions = {},
 ): ExploreFeedStore {
   const source = options.source ?? defaultFeedStreamSource
+  const removed = options.removed ?? sessionRemovedPosts
   const fetchFeed = options.fetchFeed ?? (() => resolveFeed())
   const batchMs = options.batchMs ?? EXPLORE_ARRIVAL_BATCH_MS
   const retryMs = options.retryMs ?? EXPLORE_RETRY_MS
@@ -160,6 +174,7 @@ export function createExploreFeedStore(
   let dirty = false
   let streaming = false // whether THIS run subscribed to / started the arrival source
   let unsubscribeSource: (() => void) | undefined
+  let unsubscribeRemoved: (() => void) | undefined
   let batchTimer: ReturnType<typeof setTimeout> | undefined
   let retryTimer: ReturnType<typeof setTimeout> | undefined
 
@@ -188,9 +203,26 @@ export function createExploreFeedStore(
   }
 
   function onArrival(view: ParticipantPostView): void {
-    if (!active || byId.has(view.id)) return
+    if (!active || byId.has(view.id) || removed.has(view.id)) return
     byId.set(view.id, view)
     scheduleBatch()
+  }
+
+  /**
+   * A takedown landed: forget every held post that is now removed, and (once the baseline
+   * is ready) publish immediately so Trending and search stop counting it. An id this store
+   * is not holding changes nothing and wakes nobody.
+   */
+  function onRemoved(): void {
+    if (!active) return
+    let dropped = false
+    for (const id of [...byId.keys()]) {
+      if (removed.has(id)) {
+        byId.delete(id)
+        dropped = true
+      }
+    }
+    if (dropped && status === 'ready') publish()
   }
 
   function load(): void {
@@ -201,7 +233,7 @@ export function createExploreFeedStore(
         if (mine !== epoch) return
         for (const post of posts) {
           const view = toParticipantView(post)
-          if (!byId.has(view.id)) byId.set(view.id, view)
+          if (!byId.has(view.id) && !removed.has(view.id)) byId.set(view.id, view)
         }
         status = 'ready'
         failure = undefined
@@ -229,6 +261,9 @@ export function createExploreFeedStore(
     status = 'loading'
     failure = undefined
     snapshot = { status, posts: IDLE_SNAPSHOT.posts, error: undefined }
+    // Takedowns are listened to for the whole run — even an observer / read-only consumer
+    // (D1-011) with no arrival transport can be told in mock mode / by a same-tab console.
+    unsubscribeRemoved = removed.subscribe(onRemoved)
     // Subscribe BEFORE the read so nothing that lands while it is in flight is lost;
     // duplicates between the two are removed by id. An observer / read-only consumer
     // (D1-011) opens no transport at all: the read below is all it gets.
@@ -251,6 +286,8 @@ export function createExploreFeedStore(
     retryTimer = undefined
     unsubscribeSource?.()
     unsubscribeSource = undefined
+    unsubscribeRemoved?.()
+    unsubscribeRemoved = undefined
     // Only stop a source THIS run started: `stop()` is the shared transport's own
     // ref-count release, so stopping one we never started would drop another user's hold.
     if (streaming) source.stop()

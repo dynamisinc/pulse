@@ -12,7 +12,9 @@
  *  - `resetForTests()` restores the seeded baseline and clears listeners (no
  *    cross-test pollution);
  *  - the store holds FULL `Post` records (provenance intact) — narrowing is the
- *    read path's job (XC-002), never the store's.
+ *    read path's job (XC-002), never the store's;
+ *  - `removePost` (demo-polish C5, the mock-mode takedown's soft delete) removes by id, swaps
+ *    the snapshot and notifies; an unknown id changes nothing.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { listPosts, type Post } from '@/features/social'
@@ -99,5 +101,42 @@ describe('postStore — resetForTests', () => {
     postStore.appendPost(buildPost())
     // The pre-reset listener was cleared, so it saw only the pre-reset append.
     expect(listener).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('postStore - removePost (C5 mock-mode takedown)', () => {
+  it('removes the post by id, swaps the snapshot and notifies subscribers', () => {
+    postStore.appendPost(buildPost({ id: 'post-to-remove' }))
+    const before = postStore.getPosts()
+    const heard = vi.fn()
+    postStore.subscribe(heard)
+
+    expect(postStore.removePost('post-to-remove')).toBe(true)
+
+    expect(postStore.getPosts().some(post => post.id === 'post-to-remove')).toBe(false)
+    expect(postStore.getPosts()).not.toBe(before)
+    expect(before.some(post => post.id === 'post-to-remove')).toBe(true)
+    expect(postStore.getPosts()).toHaveLength(listPosts().length)
+    expect(heard).toHaveBeenCalledTimes(1)
+  })
+
+  it('answers false for an unknown id and changes nothing (no snapshot swap, no notification)', () => {
+    const before = postStore.getPosts()
+    const heard = vi.fn()
+    postStore.subscribe(heard)
+
+    expect(postStore.removePost('never-existed')).toBe(false)
+
+    expect(postStore.getPosts()).toBe(before)
+    expect(heard).not.toHaveBeenCalled()
+  })
+
+  it('leaves replies that pointed at the removed post alone (the server does not cascade)', () => {
+    postStore.appendPost(buildPost({ id: 'parent-post' }))
+    postStore.appendPost(buildPost({ id: 'child-reply', parentPostId: 'parent-post' }))
+
+    postStore.removePost('parent-post')
+
+    expect(postStore.getPosts().some(post => post.id === 'child-reply')).toBe(true)
   })
 })

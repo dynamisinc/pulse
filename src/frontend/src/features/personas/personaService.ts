@@ -205,6 +205,11 @@ function isValidPersona(value: unknown): value is Persona {
     // undefined/coerced value would silently misrender it, so validate it
     // strictly rather than accept any element with a string id.
     typeof p.verified === 'boolean' &&
+    // `initials` is what `Avatar` renders for an org (and `.trim()`s to choose between that and
+    // the silhouette), so a non-string would throw in render. The server always sends one -
+    // `""` for a name with no letter or digit, which the Avatar turns into the silhouette - so
+    // an empty string is VALID; only a missing / wrong-typed value fails closed (Gate-2 B S-1).
+    typeof p.initials === 'string' &&
     // `followingCount`/`audienceMagnitude` (profiles-social-graph/02+07) are
     // OPTIONAL (see types.ts's module header) — validated only when present,
     // same treatment as `bio`, so this never rejects the still-current mock

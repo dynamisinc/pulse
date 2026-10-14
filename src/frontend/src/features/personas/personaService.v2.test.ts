@@ -83,6 +83,38 @@ describe('Persona v2 fields — read seam', () => {
     await expect(resolvePersonas()).rejects.toThrow(/malformed persona set/)
   })
 
+  // Gate-2 B S-1: `Avatar` calls `persona.initials.trim()`, so a non-string `initials` would
+  // throw in render. The server always sends a string - `""` for a name with no letter or
+  // digit, which the Avatar turns into the silhouette - so `""` is VALID and anything else
+  // fails closed.
+  it.each([
+    ['missing', undefined],
+    ['null', null],
+    ['a number', 42],
+    ['an object', { text: 'FW' }],
+  ])('fails closed when initials is %s', async (_name, initials) => {
+    const { initials: _dropped, ...withoutInitials } = WIRE
+    const body = initials === undefined ? withoutInitials : { ...WIRE, initials }
+    vi.spyOn(api, 'get').mockResolvedValue(apiBody([body]))
+
+    await expect(resolvePersonas()).rejects.toThrow(/malformed persona set/)
+  })
+
+  it('accepts an EMPTY initials string (a name with no letter or digit) and passes it through', async () => {
+    vi.spyOn(api, 'get').mockResolvedValue(apiBody([{ ...WIRE, initials: '' }]))
+
+    const [persona] = await resolvePersonas()
+
+    expect(persona?.initials).toBe('')
+  })
+
+  it('fails closed on the STAFF read too when initials is not a string', async () => {
+    const staff = { ...WIRE, personaType: 'agency', initials: 7 }
+    vi.spyOn(api, 'get').mockResolvedValue(apiBody([staff]))
+
+    await expect(resolveStaffPersonas()).rejects.toThrow()
+  })
+
   it('toParticipantPersona forwards them only when present', () => {
     const decorated = toParticipantPersona({ ...WIRE, avatarUrl: '/a.svg', location: 'Fulton County' })
 
