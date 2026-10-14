@@ -1,0 +1,237 @@
+/*
+ * features/controller/media/MediaLibraryPicker.module.css
+ * ---------------------------------------------------------------------------
+ * Layout + state styling for the staff media-library picker (demo-polish C1).
+ * STAFF world (COBRA): dense, desktop-first, neutral greys with the COBRA cobalt
+ * (#0020c2) as the one accent. It deliberately carries NO participant skin - the
+ * picker lists participant CONTENT inside staff CHROME and must never look like a
+ * participant card (a hard 1px square-ish tile, monospaced meta, no avatar).
+ *
+ * STATE IS NEVER COLOR-ONLY (NFR-001): "selected" is a check + the selection order
+ * number + a thick border; "unavailable" is a dimmed tile PLUS the reason in the
+ * status line; focus is a 2px outline with an offset.
+ */
+
+.picker {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Segmented All / Images / Videos filter (native radios: arrow keys for free). */
+.filter {
+  display: inline-flex;
+  align-self: flex-start;
+  margin: 0;
+  padding: 0;
+  border: 1px solid #8a94a6;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.filterOption {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #1f2933;
+  background: #ffffff;
+  cursor: pointer;
+}
+
+.filterOption + .filterOption {
+  border-left: 1px solid #8a94a6;
+}
+
+.filterOption input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  margin: 0;
+  cursor: pointer;
+}
+
+.filterOptionChecked {
+  color: #ffffff;
+  background: #0020c2;
+}
+
+/* The checked option also gets an underline: not colour alone. */
+.filterOptionChecked span {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.filterOptionDisabled {
+  color: #4a5360;
+  background: #eceef2;
+  cursor: not-allowed;
+}
+
+.filterOptionDisabled input {
+  cursor: not-allowed;
+}
+
+.filterOption:focus-within {
+  outline: 2px solid #0020c2;
+  outline-offset: -2px;
+  z-index: 1;
+}
+
+.filterOptionChecked:focus-within {
+  outline-color: #ffffff;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  max-height: 260px;
+  overflow-y: auto;
+  /* Room for the 2px focus outline + its 2px offset, which an overflow container clips. */
+  padding: 5px;
+  margin: 0;
+}
+
+.tile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 4px;
+  border: 1px solid #8a94a6;
+  border-radius: 2px;
+  background: #ffffff;
+  color: #1f2933;
+  cursor: pointer;
+  user-select: none;
+}
+
+.tile:hover {
+  background: #f1f3f8;
+}
+
+.tile:focus-visible {
+  outline: 2px solid #0020c2;
+  outline-offset: 2px;
+}
+
+.tileSelected {
+  border: 3px solid #0020c2;
+  padding: 2px;
+  background: #eef1ff;
+}
+
+.tileUnavailable {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.thumb {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 4 / 3;
+  overflow: hidden;
+  background: #dde1e8;
+  color: #4a5360;
+  font-size: 20px;
+}
+
+.thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* "VIDEO 0:04" label bottom-left: the kind is TEXT, not just an icon. */
+.kindBadge {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: #ffffff;
+  background: rgba(20, 24, 31, 0.85);
+}
+
+/* Selection order, top-left: check + "1".."4". */
+.order {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 5px;
+  font-size: 11px;
+  font-weight: 800;
+  color: #ffffff;
+  background: #0020c2;
+}
+
+.name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.when {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 10px;
+  line-height: 1.25;
+  color: #4a5360;
+}
+
+.status {
+  margin: 0;
+  font-size: 12px;
+  color: #1f2933;
+}
+
+.message {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+  padding: 8px;
+  font-size: 12px;
+  border: 1px solid #8a94a6;
+  border-radius: 2px;
+  color: #1f2933;
+  background: #f5f6f8;
+}
+
+.messageError {
+  border: 2px solid #8a1c14;
+  color: #6b1610;
+  background: #fdecea;
+  font-weight: 600;
+}

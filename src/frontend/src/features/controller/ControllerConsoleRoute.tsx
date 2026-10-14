@@ -59,14 +59,42 @@
  * the shipped `createPost` with `origin: 'engine'` (sanitized, NFR-004) — there
  * is no second publish path here and no `'engine-edited'` origin.
  *
- * SERIAL INTEGRATION — the RUN SHEET (inject-queue story 07, #453). `ControllerConsole`
- * lays out a `runSheetSlot` (demo-polish C4); this composition root supplies it with the
- * self-contained, prop-less `<RunSheetPanel />` (the server-side scripted-posts queue, which
- * replaced C3's browser-only run sheet) plus `RunSheetMockPauseBridge` (mock mode only), so
- * the panel is reachable at `/console`. Before this, the slot was NOT supplied at all and the
- * console showed its "not connected" status line. `ControllerConsoleRoute.test.tsx` mounts the
- * REAL route and proves the panel renders there and that PausePill's Pause injects / Freeze
- * reach it.
+ * DEMO-POLISH WAVE 3 - THE MAIN-AREA SLOTS (docs/features/demo-polish/implementation.md
+ * section 4.2; stories 17-20). `ControllerConsole` lays out a LIVE WORLD | RUN SHEET split
+ * and renders whatever this route hands it through two render-prop slots; the route is
+ * where the independently-built stories meet:
+ *
+ *   liveWorldSlot  -> C2's `LiveWorldColumn`. Its "Reply as..." (button, or R on a focused
+ *                     row) arrives as a `ReplyTarget`. The console's `ctx.openComposer`
+ *                     accepts a `replyTo` but does NOT keep it, so THIS route keeps it
+ *                     (`useReplyTarget`) and passes it to C1's `PersonaComposer`
+ *                     (`replyTo` / `onClearReply`) through `dockSlots`. `onReplyAs` therefore
+ *                     does both: `requestReply(target)` then `ctx.openComposer({ replyTo })`.
+ *                     With no persona active the console opens the command palette instead
+ *                     (never an empty dock) and the target waits there for the pick; the
+ *                     hook documents exactly when a target is dropped (composer (x), reply
+ *                     sent, dock closed via `onDockClose`, persona or exercise changed,
+ *                     palette dismissed without a pick).
+ *   runSheetSlot   -> inject-queue 07's `RunSheetPanel` (#453; it REPLACED demo-polish C3's
+ *                     browser-only run sheet, #438): the server-side scripted-posts queue,
+ *                     prop-less, beside `RunSheetMockPauseBridge` (mock mode only) so PAUSE
+ *                     INJECTS / FREEZE set through PausePill reach the mock queue.
+ *                     `ControllerConsoleRoute.test.tsx` proves the REAL route mounts it.
+ *
+ * STABILITY. The console re-renders constantly (the review queue's 1 s scenario-clock tick,
+ * every swamped-mode change, each toolstrip toggle) and calls both slot functions each time.
+ * Two things keep that cheap: every slot function and callback here has a stable identity
+ * (`useCallback` / `useMemo` / module level), and each slot's ROOT is `memo`ized with stable
+ * props - `RunSheetSlot` (below) takes no props, and `LiveWorldSlot` takes only `ctx`,
+ * `requestReply` and `isRowRemoved` and owns the one `onReplyAs` callback. A console re-render
+ * therefore reconciles two memo boundaries instead of re-rendering every run-sheet row and
+ * every live-world row. (`isRowRemoved` is deliberately a NEW identity per takedown:
+ * the column's memoized rows must re-render then.)
+ *
+ * C5's takedown rides the live-world column: `renderRowActions={renderTakedown}` (module
+ * level, stable) mounts "Take down" on each row, and `isRowRemoved` (from
+ * `useIsRowRemoved()`) marks removed rows REMOVED and disables "Reply as..." on them.
+ * PE-FE's persona edit button is the `actionsSlot` of `PersonaContextPanel` in the dock.
  *
  * Note: `SessionProvider` is deliberately NOT in this stack — the console's
  * operating identity is `useControllerIdentity()` (a Phase-1 mock; the one mock
@@ -75,8 +103,10 @@
  * console story and is not wired here (Wave-1 scope guard).
  */
 
-import { useCallback, useMemo, type ReactNode } from 'react'
-import { ToolstripProvider } from '@/features/staffShell/toolRegistry'
+import { memo, useCallback, useMemo } from 'react'
+import type { ReplyTarget } from '@/features/social'
+import { useExerciseContext } from '@/core/exerciseContext'
+import { ToolstripProvider, useToolstrip } from '@/features/staffShell/toolRegistry'
 import { StaffShellFrame } from '@/features/staffShell/StaffShellFrame'
 import { StaffHeader } from '@/features/staffShell/components/StaffHeader'
 import { pauseStatePillConfig } from '@/features/staffShell/components/statePillConfig'
@@ -84,33 +114,85 @@ import { Toolstrip } from '@/features/staffShell/components/Toolstrip'
 import { usePauseState } from './hooks/usePauseState'
 import { postStore } from '@/features/social/services/postStore'
 import { EngineDraftEditComposer, type ReviewQueueEditSlotProps } from './engine'
-import { ControllerConsole } from './components/ControllerConsole'
+import { ControllerConsole, type ConsoleSlotContext } from './components/ControllerConsole'
 import type { CommandPalettePersonaSlot } from './console/CommandPalette'
-import type { PersonaDockSlots } from './console/personaDockHost'
+import { PERSONAS_TOOL_ID, type PersonaDockSlots } from './console/personaDockHost'
 import { useControllerIdentity } from './identity/controllerIdentity'
 import { ActivePersonaProvider, useActivePersona } from './hooks/useActivePersona'
+import { useReplyTarget } from './hooks/useReplyTarget'
+import { LiveWorldColumn, type LiveWorldPost } from './liveWorld'
+import { TakedownAction } from './liveWorld/TakedownAction'
+import { useIsRowRemoved } from './hooks/useRemovedPostIds'
+import { PersonaEditButton } from './personaEdit'
 import { PersonaPicker } from './components/PersonaPicker'
 import { PersonaComposer } from './components/PersonaComposer'
 import { PersonaContextPanel } from './components/PersonaContextPanel'
 import { RunSheetMockPauseBridge, RunSheetPanel } from './runSheet'
 
 /**
- * The console's RUN SHEET slot (inject-queue story 07, replacing demo-polish C3's
- * browser-only run sheet): the server-side inject queue, mounted into
- * `ControllerConsole`'s `runSheetSlot` — the SAME render-prop seam C4 defined for the live
+ * The RUN SHEET slot's root (inject-queue story 07, #453, which replaced demo-polish C3's
+ * browser-only run sheet): the server-side scripted-posts queue, mounted into
+ * `ControllerConsole`'s `runSheetSlot` - the same render-prop seam C4 defined for the live
  * world. `RunSheetPanel` is self-contained (no props; it reads the exercise scope, the
- * personas and the queue itself), so the slot context is not needed. `RunSheetMockPauseBridge`
- * is mock-mode only (it renders nothing live): it hands the pause tier set through PausePill
- * to the mock queue so PAUSE INJECTS / FREEZE work under `npm run dev`.
+ * personas and the queue itself), so the slot context is not needed.
+ * `RunSheetMockPauseBridge` is mock-mode only (it renders nothing live): it hands the pause
+ * tier set through PausePill to the mock queue so PAUSE INJECTS / FREEZE work under
+ * `npm run dev`.
  *
- * A module-level function keeps the slot's identity stable across console renders.
+ * `memo`ized with no props, and `renderRunSheet` is module level, so the console's 1 s
+ * review-queue tick reconciles this one boundary instead of re-rendering every row.
  */
-const renderRunSheetSlot = (): ReactNode => (
-  <>
-    <RunSheetPanel />
-    <RunSheetMockPauseBridge />
-  </>
-)
+const RunSheetSlot = memo(function RunSheetSlot() {
+  return (
+    <>
+      <RunSheetPanel />
+      <RunSheetMockPauseBridge />
+    </>
+  )
+})
+
+const renderRunSheet = () => <RunSheetSlot />
+
+/**
+ * C5's per-row "Take down" control for the live-world column. MODULE-LEVEL so its
+ * identity never changes: the column's rows are memoized and the slot runs on every
+ * console render (review queue, swamped mode).
+ */
+const renderTakedown = (post: LiveWorldPost) => <TakedownAction post={post} />
+
+interface LiveWorldSlotProps {
+  readonly ctx: ConsoleSlotContext
+  readonly requestReply: (target: ReplyTarget) => void
+  readonly isRowRemoved: (post: { readonly id: string }) => boolean
+}
+
+/**
+ * The LIVE WORLD slot's root (C2 + C5). "Reply as..." sets the reply target AND opens the
+ * composer in one go: `ctx.openComposer` selects the active persona and opens the dock, or
+ * opens the palette when there is no persona to open it for (the target waits for the pick).
+ * `memo`ized, and `onReplyAs` is built once per (`ctx`, `requestReply`) - both stable for the
+ * life of the console - so the console's 1 s tick does not re-render the column.
+ */
+const LiveWorldSlot = memo(function LiveWorldSlot({
+  ctx,
+  requestReply,
+  isRowRemoved,
+}: LiveWorldSlotProps) {
+  const onReplyAs = useCallback(
+    (target: ReplyTarget) => {
+      requestReply(target)
+      ctx.openComposer({ replyTo: target })
+    },
+    [ctx, requestReply],
+  )
+  return (
+    <LiveWorldColumn
+      onReplyAs={onReplyAs}
+      renderRowActions={renderTakedown}
+      isRowRemoved={isRowRemoved}
+    />
+  )
+})
 
 /**
  * The console content, inside the provider stack so it may read the controller
@@ -118,7 +200,25 @@ const renderRunSheetSlot = (): ReactNode => (
  */
 function ControllerConsoleContent() {
   const identity = useControllerIdentity()
+  const { exerciseId } = useExerciseContext()
   const { activePersona } = useActivePersona()
+  // The command palette's open state IS the "Personas" tool's active state (see
+  // `ControllerConsole`); the reply target needs it to know a pick is still pending.
+  const { isActive } = useToolstrip()
+  const paletteOpen = isActive(PERSONAS_TOOL_ID)
+
+  // C5: which live-world rows are taken down. A new predicate identity per removal (and
+  // only then), so the column re-renders on a takedown - from this console or another
+  // controller's `PostRemoved` - and disables "Reply as..." / R on the removed row.
+  const isRowRemoved = useIsRowRemoved()
+
+  // The post being replied to ("Reply as..." in the live world), held here because the
+  // console's `openComposer` does not keep it. See `useReplyTarget` for when it is dropped.
+  const { replyTo, requestReply, clearReply } = useReplyTarget({
+    exerciseId,
+    activePersonaId: activePersona?.id ?? null,
+    paletteOpen,
+  })
 
   // The ⌘K palette's PERSONAS section renders persona-operation/02's picker.
   // The picker sets the active persona itself (via useActivePersona); `onSelect`
@@ -137,18 +237,38 @@ function ControllerConsoleContent() {
     () =>
       activePersona
         ? {
-          contextPanel: <PersonaContextPanel persona={activePersona} />,
+          contextPanel: (
+            <PersonaContextPanel
+              persona={activePersona}
+              actionsSlot={<PersonaEditButton persona={activePersona} />}
+            />
+          ),
           composer: (
             <PersonaComposer
               activePersona={activePersona}
               actingHumanId={identity.actingHumanId}
               callSign={identity.callSign}
               onPublished={post => postStore.appendPost(post)}
+              replyTo={replyTo ?? undefined}
+              onClearReply={clearReply}
+              // A draft remounted after the dock closed comes back WITH its reply: the route
+              // dropped the target on close, so the composer asks for it back.
+              onRestoreReply={requestReply}
             />
           ),
         }
         : undefined,
-    [activePersona, identity.actingHumanId, identity.callSign],
+    [activePersona, identity.actingHumanId, identity.callSign, replyTo, clearReply, requestReply],
+  )
+
+  // LIVE WORLD slot (C2 + C5): stable between takedowns - `requestReply` never changes, `ctx`
+  // is stable for the life of the console, and `isRowRemoved` changes identity only when a
+  // post is taken down.
+  const liveWorldSlot = useCallback(
+    (ctx: ConsoleSlotContext) => (
+      <LiveWorldSlot ctx={ctx} requestReply={requestReply} isRowRemoved={isRowRemoved} />
+    ),
+    [requestReply, isRowRemoved],
   )
 
   // The docked review queue's edit composer — a stable render-prop identity so
@@ -163,7 +283,9 @@ function ControllerConsoleContent() {
       renderPersonaResults={renderPersonaResults}
       dockSlots={dockSlots}
       reviewEditSlot={reviewEditSlot}
-      runSheetSlot={renderRunSheetSlot}
+      liveWorldSlot={liveWorldSlot}
+      runSheetSlot={renderRunSheet}
+      onDockClose={clearReply}
     />
   )
 }

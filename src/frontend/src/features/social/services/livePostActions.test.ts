@@ -116,6 +116,16 @@ describe('publishPost — wire contract (COR-001)', () => {
     })
   })
 
+  it('sends NO request config by default, and the per-request timeout only when asked for', async () => {
+    await publishPost(PARTICIPANT_INPUT)
+    // Exactly (url, body): the shared client keeps its own defaults for every other caller.
+    expect(postMock.mock.calls[0]).toHaveLength(2)
+
+    await publishPost(PARTICIPANT_INPUT, { timeoutMs: 240_000 })
+    expect(postMock.mock.calls[1]?.[2]).toEqual({ timeout: 240_000 })
+    expect(postMock.mock.calls[1]).toHaveLength(3)
+  })
+
   it('omits injectId / media / parentPostId / engagementBaseline entirely when absent', async () => {
     await publishPost(PARTICIPANT_INPUT)
 

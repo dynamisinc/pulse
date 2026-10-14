@@ -34,6 +34,10 @@
  *                      `assembleFeedView`'s job, not the store's) and notifies
  *                      every subscriber. The appended `Post` already carries its
  *                      own `exerciseId`, stamped upstream by `createPost`.
+ *   - `removePost()`   Takes a post OUT of the set (demo-polish C5, mock-mode takedown):
+ *                      stands in for the server's soft delete, which the feed read omits.
+ *                      Swaps the snapshot and notifies, like an append; returns whether the
+ *                      id was present. Only the console's `takedownService` calls it.
  *   - `subscribe()`    Registers a change listener; returns an unsubscribe.
  *   - `resetForTests()` Restores the seeded baseline and clears listeners, so
  *                      tests never pollute each other.
@@ -136,6 +140,20 @@ function appendPost(post: Post): void {
 }
 
 /**
+ * Removes the post with `postId` from the set (the mock backend's soft delete: a taken-down post
+ * is simply no longer returned by a read) and notifies every subscriber. Replies that pointed at
+ * it are left alone, exactly as the server leaves them (a soft-deleted parent hides its thread,
+ * it does not cascade). Returns `true` when the post was present, `false` (nothing changes, no
+ * notification) when it was not — the caller decides whether an unknown id is an error.
+ */
+function removePost(postId: string): boolean {
+  if (!posts.some(existing => existing.id === postId)) return false
+  posts = posts.filter(existing => existing.id !== postId)
+  for (const listener of listeners) listener()
+  return true
+}
+
+/**
  * Subscribes to store changes. The listener fires after each `appendPost`;
  * re-read the current set via `getPosts()`. Returns an unsubscribe function.
  */
@@ -167,6 +185,7 @@ function resetForTests(options: ResetOptions = {}): void {
 export const postStore = {
   getPosts,
   appendPost,
+  removePost,
   subscribe,
   resetForTests,
 }

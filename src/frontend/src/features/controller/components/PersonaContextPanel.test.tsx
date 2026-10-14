@@ -402,7 +402,7 @@ describe('PersonaContextPanel — real data (demo-polish C4)', () => {
       expect(await screen.findByTestId('persona-context-recents-empty')).toBeInTheDocument()
       const readsBefore = mockedResolveFeed.mock.calls.length
 
-      await user.type(await screen.findByLabelText('Post text'), 'Boil water advisory lifted for Zone 2.')
+      await user.type(await screen.findByLabelText('Post as Fairhaven Water Utility'), 'Boil water advisory lifted for Zone 2.')
       await user.click(screen.getByRole('button', { name: 'Post' }))
 
       const list = await screen.findByTestId('persona-context-recents')

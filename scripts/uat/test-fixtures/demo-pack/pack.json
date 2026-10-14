@@ -1,0 +1,114 @@
+{
+  "$schema": "../../../../docs/demo/pack/schema/pack.schema.json",
+  "schema": "pulse.demopack.v1",
+  "county": "Fairhaven County (TEST FIXTURE: not demo content)",
+  "personas": [
+    {
+      "handle": "FulcoEM",
+      "displayName": "Fairhaven County EM",
+      "bio": "Test fixture bio for the seed script. Official updates for fictional Fairhaven County.",
+      "location": "Fairhaven County",
+      "verified": true,
+      "avatar": "avatars/fulcoem.png",
+      "banner": "banners/county.jpg"
+    },
+    {
+      "handle": "Newsline7",
+      "displayName": "Newsline 7",
+      "bio": "Test fixture bio. Local news for the fictional Fairhaven valley.",
+      "verified": true
+    }
+  ],
+  "media": [
+    {
+      "key": "harbor-photo",
+      "file": "media/harbor-photo.jpg",
+      "kind": "image",
+      "width": 96,
+      "height": 64,
+      "alt": "Test pattern standing in for a photo of standing water on a harbor road."
+    },
+    {
+      "key": "river-clip",
+      "file": "media/river-clip.mp4",
+      "kind": "video",
+      "poster": "media/river-clip.poster.jpg",
+      "width": 96,
+      "height": 64,
+      "durationSec": 1,
+      "alt": "One-second test pattern standing in for footage of a swollen river."
+    }
+  ],
+  "posts": [
+    {
+      "key": "p01",
+      "persona": "Newsline7",
+      "text": "Test fixture: river levels rising near the old mill bridge this morning. Crews on scene.",
+      "minutesBeforeAnchor": 120,
+      "media": [{ "ref": "river-clip" }],
+      "baseline": { "like": 40, "repost": 12, "reply": 3 }
+    },
+    {
+      "key": "p02",
+      "persona": "FulcoEM",
+      "text": "Test fixture: Harbor Road is closed between 3rd and 5th. Please use Mill Street instead.",
+      "minutesBeforeAnchor": 90,
+      "media": [{ "ref": "harbor-photo", "alt": "Test pattern standing in for a photo of the closed section of Harbor Road." }],
+      "baseline": { "like": 85, "repost": 30 }
+    },
+    {
+      "key": "p03",
+      "persona": "FulcoEM",
+      "text": "Test fixture reply: thanks for the footage. The bridge stays open for now; we will post any change here.",
+      "minutesBeforeAnchor": 75,
+      "replyTo": "p01",
+      "baseline": { "like": 9 }
+    }
+  ],
+  "runSheet": {
+    "items": [
+      {
+        "key": "i01",
+        "kind": "post",
+        "title": "Newsline follows up on the road closure",
+        "notes": "Fixture only. Fire after the first participant post.",
+        "plannedMinute": 5,
+        "assignee": "me",
+        "posts": [
+          {
+            "persona": "Newsline7",
+            "text": "Test fixture inject: we are at the Harbor Road closure now. More shortly.",
+            "media": [{ "ref": "harbor-photo" }],
+            "replyTo": { "postKey": "p02" },
+            "engagementBaseline": { "like": 20 }
+          }
+        ]
+      },
+      {
+        "key": "i02",
+        "kind": "burst",
+        "title": "Residents pile on about the bridge",
+        "plannedMinute": 12,
+        "assignee": "eve evaluator",
+        "burstWindowSeconds": 60,
+        "posts": [
+          {
+            "persona": "mvega_fh",
+            "text": "Test fixture burst: is the mill bridge really still open? Water is over the curb on my street.",
+            "engagementBaseline": { "like": 15, "repost": 4 }
+          },
+          {
+            "persona": "Newsline7",
+            "text": "Test fixture burst reply: we are checking with the county now.",
+            "replyTo": { "sequence": 1 }
+          },
+          {
+            "persona": "FulcoEM",
+            "text": "Test fixture burst reply: crews are at Harbor Road. Please stay clear of the closure.",
+            "replyTo": { "item": "i01", "sequence": 1 }
+          }
+        ]
+      }
+    ]
+  }
+}

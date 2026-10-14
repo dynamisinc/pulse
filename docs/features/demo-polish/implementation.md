@@ -421,9 +421,10 @@ fallback); the wall clock goes only into `wallClockTime`/`emittedAt`.
 
 ### 1.9 Run-sheet file schema (C3 import/export) — `pulse.runsheet.v1`
 
-> **Superseded 2026-10-08.** C3 was replaced by the server-side inject queue (inject-queue 06 + 07); S1 loads beats
-> through `POST /api/injects`. The schema below is kept as the pack's authoring shape only; nothing imports it in the
-> browser.
+> **Superseded 2026-10-08; historical.** C3 was replaced by the server-side inject queue (inject-queue 06 + 07), and
+> its code was removed with the Wave 3 merge (#463). Nothing reads or writes this file format any more. S1 creates the
+> pack's run-sheet items through `POST /api/injects`; the pack's authoring shape is in §1.10 (`runSheet.items`) and
+> `docs/demo/pack/schema/pack.schema.json`.
 
 Definitions only. Status (`pending|fired|skipped|failed`, `firedPostId`) lives in browser storage, never in the
 file.
@@ -456,7 +457,8 @@ violation, never partially applies. `import(export(x))` deep-equals `x`.
 ### 1.10 Seed-pack schema (S1/S2) — `docs/demo/pack/pack.json`, `pulse.demopack.v1`
 
 Media files live next to it under `docs/demo/pack/media/**`. Media references are pack-local `key`s; S1 resolves
-them to uploaded `MediaAsset` ids and rewrites them when it exports the run sheet.
+them to uploaded `MediaAsset` ids, and rewrites the run sheet's references the same way when it loads it through
+`POST /api/injects`.
 
 ```jsonc
 {
@@ -472,7 +474,10 @@ them to uploaded `MediaAsset` ids and rewrites them when it exports the run shee
               "media": [{ "ref": "news-clip", "alt": "…" }],         // alt may override the media-level alt
               "replyTo": "p00",                                       // post key; parent must appear earlier in the array
               "baseline": { "like": 290, "repost": 150, "reply": 64 } }],
-  "runSheet": { "name": "…", "beats": [ /* RunSheetBeat shape, with media[].ref (pack key) and replyTo.postKey (a pack post key) instead of ids */ ] }
+  "runSheet": { "items": [ /* InjectItemWrite shape (inject-queue implementation.md § Demo slice) plus a pack `key`;
+                            `assignee` ("me" or a staff display name) replaces assigneeId; posts name `persona` by
+                            handle, media[].ref (pack key), replyTo = {postKey} | {sequence} | {item, sequence};
+                            S1 rewrites them to ids and POSTs each to /api/injects */ ] }
 }
 ```
 
@@ -504,7 +509,7 @@ export interface ReplyTarget { postId: string; authorHandle: string; authorDispl
 export function publishPost(input: CreatePostInput): Promise<CreatedPostView>        // livePostActions.ts; 201 body; rejects on non-2xx; NEVER swallows
 
 // Slot / prop contracts used by the orchestrator mounts
-interface LiveWorldColumnProps { onReplyAs(target: ReplyTarget): void; renderRowActions?(post: LiveWorldPost): ReactNode }        // C2
+interface LiveWorldColumnProps { onReplyAs(target: ReplyTarget): void; renderRowActions?(post: LiveWorldPost): ReactNode; isRowRemoved?(post: LiveWorldPost): boolean }        // C2 (isRowRemoved added at C2 Gate-1 for C5)
 interface RunSheetPanelProps { /* self-contained; reads personas, library, exercise scope */ }                                   // C3
 interface ControllerConsoleProps { liveWorldSlot?(ctx: ConsoleSlotContext): ReactNode; runSheetSlot?(ctx: ConsoleSlotContext): ReactNode }   // C4
 interface ConsoleSlotContext { openComposer(opts?: { personaId?: string; replyTo?: ReplyTarget }): void }                        // C4 (type in ControllerConsole.tsx)
@@ -548,7 +553,7 @@ import.
 | 21 | PE | BE: merge-patch endpoint. FE: dialog + button. | `Features/Social/PersonaAdmin/*`; `controller/personaEdit/*` | `PersonaEditButton` |
 | 22 | C5 | Takedown action + feed removal. | `controller/liveWorld/TakedownAction.tsx`, `controller/services/takedownService.ts`, `social/services/{realtimeFeed,removedPosts}.ts`, `social/pages/Feed.tsx` | — |
 | 23 | C6 | Preview shows the real channel; StartEx/EndEx control (Could). | `staffShell/components/PreviewAsParticipant.tsx`, `controller/lifecycle/*` | — |
-| 24 | S1 | PowerShell seeder over public APIs + run-sheet export. | `scripts/uat/Seed-DemoContent.ps1` | `docs/demo/pack/runsheet.demo.json` |
+| 24 | S1 | PowerShell seeder over public APIs + run-sheet load (`POST /api/injects`). | `scripts/uat/Seed-DemoContent.ps1` | inject items in the server queue |
 | 25 | S2 | Human + Claude pack authoring. | `docs/demo/pack/**` | `pack.json` |
 
 ## 3. Reuse map
@@ -681,7 +686,7 @@ rebases C3.
 | Bicep composition root | `infrastructure/main.bicep` | **Delegated to I1 for Wave 1** (no other story touches infra). (1) add local `blobServiceUri = 'https://${storageName}.blob.${az.environment().suffixes.storage}'`. It must be `az.environment()`: `main.bicep`'s `environment` parameter shadows the function (BCP265). It is a plain local, **not** a module output — webApp↔storage would otherwise form a cycle, same reason as the `ai` module); (2) pass `blobServiceUri` and `blobStorageContainerName` to `webApp`; (3) delete the `storageConnectionString:` line from the `webApp` call; (4) pass `backendPrincipalId: deployWebApp ? webApp.outputs.principalId! : ''` and `corsAllowedOrigins: empty(frontendUrl) ? [] : [frontendUrl]` to `storage`; (4a) pass `blobStorageProvider: deployStorage ? 'Azure' : 'None'` (fail closed where no storage exists); (5) `az bicep build` + `build-params` locally. 🧑 Tom then runs **Deploy Infrastructure**. `infrastructure/main.json` is a stale committed artifact — do not hand-edit. |
 | Participant app root | `App.tsx`, `features/app-shell/**`, `features/participant-shell/**` | **No change expected**: F1's router sits inside `SocialChannel` under the existing `*` catch-all, so the location-blindness test stays valid. Orchestrator-only if needed: hiding the duplicate `ParticipantSignOutControl` row in `participant-shell/ShellLayout.tsx` once F1's account card ships. |
 | Right-rail slot mounts | `features/social/layout/RightRailContent.tsx` | F1 creates it with "Who to follow" only. After F1 **and** F6 merge, the orchestrator adds `<SearchBox/>` and `<TrendingPanel/>` (one-file edit). |
-| Console slot wiring | `features/controller/ControllerConsoleRoute.tsx` | After C1–C4 merge the orchestrator: passes `liveWorldSlot`/`runSheetSlot`; holds the `replyTo: ReplyTarget \| null` state and passes it to `PersonaComposer` through `dockSlots`; maps `LiveWorldColumn.onReplyAs` → `ctx.openComposer({ replyTo })`; passes `actionsSlot={<PersonaEditButton persona={activePersona}/>}` to `PersonaContextPanel`; after C5, passes `renderRowActions={post => <TakedownAction post={post}/>}`. |
+| Console slot wiring | `features/controller/ControllerConsoleRoute.tsx` | After C1–C4 merge the orchestrator: passes `liveWorldSlot`/`runSheetSlot`; holds the `replyTo: ReplyTarget \| null` state and passes it to `PersonaComposer` through `dockSlots`; maps `LiveWorldColumn.onReplyAs` → `ctx.openComposer({ replyTo })`; passes `actionsSlot={<PersonaEditButton persona={activePersona}/>}` to `PersonaContextPanel`; after C5, passes `renderRowActions={renderTakedown}` (a **module-level, stable** `const renderTakedown = (post: LiveWorldPost) => <TakedownAction post={post}/>`) **and** `isRowRemoved={useIsRowRemoved()}` (called in the route component; a new function identity per removal). Without `isRowRemoved`, "Reply as…" and R stay live on a removed row (C5 AC2). Holds Ctrl/Cmd+K inert while another `[aria-modal]` layer is mounted (`core/a11y/modalPriority`). |
 | Staff route registry | `features/staff/staffRouteRegistry.tsx` | Not expected to change (the run sheet and live world live inside the console). |
 | Feature barrels | `features/controller/index.ts`, `features/social/index.ts` | `social/index.ts` is F0's; no Wave-2 builder edits it. New controller directories are imported by path from the route file. |
 

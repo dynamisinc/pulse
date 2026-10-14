@@ -1,4 +1,5 @@
 #Requires -Version 7.0
+
 <#
 .SYNOPSIS
     Creates a UAT participant login with a password you choose, bound to a posting persona.
