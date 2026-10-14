@@ -14,7 +14,7 @@ is a two-step dialog: choose a file, see the dry-run report, then apply.
 - [ ] The run sheet toolbar gets **Import from Excel** after Add. It opens a COBRA dialog: a file picker accepting
       `.xlsx` and `.csv`, a one-line hint ("A Cadence MSEL export works as-is; only social-media rows are imported"),
       and **Preview**.
-- [ ] Preview posts the file to `POST /api/injects/import?dryRun=true` and shows the counts (to create, update,
+- [ ] Preview posts the file to `POST /api/injects/import?dryRun=true` (always send `dryRun` explicitly; a missing flag is a 400) and shows the counts (to create, update,
       unchanged, skipped, failed) and a table of rows: row number, Inject #, title, persona, planned minute, status,
       message. Skipped rows are collapsed under "N rows skipped (not social media)"; failed rows are listed first.
 - [ ] **Import N items** re-posts the same file with `dryRun=false`, shows the result counts, and closes on "Done". The
