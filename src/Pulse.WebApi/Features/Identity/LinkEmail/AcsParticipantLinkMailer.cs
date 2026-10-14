@@ -65,18 +65,20 @@ public sealed class LinkEmailClientSettings
 /// gives up after <see cref="SendTimeout"/> through a linked cancellation source.
 /// </para>
 /// <para>
-/// <b>Plain failure only when nothing can have been sent</b> (Copilot review on #487, 10/14). The send starts a
-/// long-running operation, so an answer that does not PROVE the message was refused leaves its fate unknown: no HTTP
-/// response (status <c>0</c>: DNS, connection reset or TLS, possibly after the request reached ACS), <c>408</c>, any
-/// <c>5xx</c>, and the send's own timeout are all <see cref="LinkMailSendOutcome.TimedOut"/> (unconfirmed: "check before
-/// sending again"). Only a definite refusal (a <c>4xx</c> other than <c>429</c>) and a credential failure (no token, so
-/// no request) are <see cref="LinkMailSendOutcome.Failed"/>. See <see cref="Classify"/>.
+/// <b>Unconfirmed by default: plain failure only when nothing can have been sent</b> (Copilot review on #487 and its
+/// Gate-1 fold, 10/14). The send starts a long-running operation, so anything that does not PROVE the message was
+/// refused leaves its fate unknown and is <see cref="LinkMailSendOutcome.TimedOut"/> (unconfirmed: "check before sending
+/// again"): no HTTP response (status <c>0</c>: DNS, connection reset or TLS, possibly after the request reached ACS),
+/// <c>408</c>, any <c>5xx</c>, any other status that is not a <c>4xx</c> (e.g. a <c>200</c> where <c>202</c> was due),
+/// the send's own timeout, and any unexpected fault (e.g. a <c>202</c> whose body cannot be read or parsed).
+/// <see cref="LinkMailSendOutcome.Failed"/> means exactly a definite refusal (a <c>4xx</c> other than <c>408</c> and
+/// <c>429</c>) or a credential failure (no token, so no request). See <see cref="Classify"/>.
 /// </para>
 /// <para>
 /// <b>Logs (gotcha 8).</b> A failure is logged with the operation and a status only: the HTTP status, or
-/// <c>no-response</c> / <c>credential</c> / <c>timeout</c>. Never the exception message (a provider message can echo the
-/// recipient), the recipient, the subject, the body or the URL. Request and response bodies are never logged by the SDK
-/// either (<c>IsLoggingContentEnabled</c> is forced off).
+/// <c>no-response</c> / <c>credential</c> / <c>timeout</c> / <c>unexpected:{exception type}</c>. Never the exception
+/// message (a provider or parser message can echo the recipient), the recipient, the subject, the body or the URL.
+/// Request and response bodies are never logged by the SDK either (<c>IsLoggingContentEnabled</c> is forced off).
 /// </para>
 /// </remarks>
 public sealed partial class AcsParticipantLinkMailer : IParticipantLinkMailer
@@ -84,7 +86,10 @@ public sealed partial class AcsParticipantLinkMailer : IParticipantLinkMailer
     /// <summary>The operation name in a failure log line.</summary>
     public const string SendOperation = "acs-email-send";
 
-    /// <summary>The longest one send may take before it is reported as failed.</summary>
+    /// <summary>
+    /// The longest one send may take before it is given up and reported UNCONFIRMED
+    /// (<see cref="LinkMailSendOutcome.TimedOut"/>, <c>timedOut</c>): it may already have been accepted.
+    /// </summary>
     public static readonly TimeSpan SendTimeout = TimeSpan.FromSeconds(20);
 
     private readonly EmailClient _client;
@@ -171,20 +176,30 @@ public sealed partial class AcsParticipantLinkMailer : IParticipantLinkMailer
             LogSendFailed(_logger, SendOperation, "timeout");
             return LinkMailSendOutcome.TimedOut;
         }
+#pragma warning disable CA1031 // Any other fault after the call started must become an outcome, not abort the batch.
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            // E.g. a 202 whose body cannot be read (IOException) or parsed (JsonException): ACS may well have accepted the
+            // message, so it is unconfirmed, never a plain failure staff might resend by hand. The type only: the
+            // exception message can carry the body, and so the recipient.
+            LogSendFailed(_logger, SendOperation, "unexpected:" + exception.GetType().Name);
+            return LinkMailSendOutcome.TimedOut;
+        }
+#pragma warning restore CA1031
     }
 
     /// <summary>
     /// What a <see cref="RequestFailedException"/> status means for ONE send: <c>429</c> is
-    /// <see cref="LinkMailSendOutcome.RateLimited"/> (throttled, nothing taken); <c>0</c> (no HTTP response),
-    /// <c>408</c> and any <c>5xx</c> are <see cref="LinkMailSendOutcome.TimedOut"/> (UNCONFIRMED: the provider may already
-    /// have accepted the message, so it is never offered for a blind resend); any other status, a definite refusal, is
-    /// <see cref="LinkMailSendOutcome.Failed"/>.
+    /// <see cref="LinkMailSendOutcome.RateLimited"/> (throttled, nothing taken); any other <c>4xx</c> except <c>408</c>, a
+    /// definite refusal, is <see cref="LinkMailSendOutcome.Failed"/>; EVERYTHING else (<c>0</c> = no HTTP response,
+    /// <c>408</c>, any <c>5xx</c>, any <c>2xx</c>/<c>3xx</c> oddity) is <see cref="LinkMailSendOutcome.TimedOut"/>
+    /// (UNCONFIRMED: the provider may already have accepted the message, so it is never offered for a blind resend).
     /// </summary>
     private static LinkMailSendOutcome Classify(int status) => status switch
     {
         429 => LinkMailSendOutcome.RateLimited,
-        0 or 408 or >= 500 => LinkMailSendOutcome.TimedOut,
-        _ => LinkMailSendOutcome.Failed,
+        >= 400 and < 500 and not 408 => LinkMailSendOutcome.Failed,
+        _ => LinkMailSendOutcome.TimedOut,
     };
 
     [LoggerMessage(

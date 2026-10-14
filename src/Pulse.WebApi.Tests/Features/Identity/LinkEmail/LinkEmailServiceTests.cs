@@ -9,6 +9,8 @@ using FluentAssertions;
 using Pulse.WebApi.Features.Identity.EasyLogin;
 using Pulse.WebApi.Features.Identity.LinkEmail;
 using Pulse.WebApi.Tests.Data;
+using Pulse.WebApi.Tests.Features.EngineRuntime.Clock;
+using Pulse.WebApi.Tests.Features.Injects;
 
 /// <summary>
 /// easy-login/13: <see cref="LinkEmailService"/> against real SQL with a fake mailer. Each eligible participant (enabled,
@@ -110,7 +112,10 @@ public sealed class LinkEmailServiceTests
         result.Body!.Results.Select(r => (r.ParticipantId, r.Status, r.Reason)).Should().Equal(
             [
                 (a.AccountId.ToString(), RosterEmailStatuses.Failed, RosterEmailFailureReasons.SendFailed),
-                (b.AccountId.ToString(), RosterEmailStatuses.Failed, RosterEmailFailureReasons.SendFailed),
+
+                // Gate-1 W-1 on the #487 follow-ups: the fault came from INSIDE the mailer, after the message was handed
+                // over, so it may have left: unconfirmed (timedOut), never sendFailed.
+                (b.AccountId.ToString(), RosterEmailStatuses.Failed, RosterEmailFailureReasons.TimedOut),
                 (c.AccountId.ToString(), RosterEmailStatuses.Sent, null),
                 (d.AccountId.ToString(), RosterEmailStatuses.Failed, RosterEmailFailureReasons.RateLimited),
             ]);
@@ -478,6 +483,99 @@ public sealed class LinkEmailServiceTests
             ]);
         mailer.Messages.Select(m => m.RecipientAddress).Should().Equal([first.Email], "neither is emailed on the planned data");
         (await _world.EmailEventsAsync(exercise)).Should().ContainSingle().Which.Target!.EntityId.Should().Be(first.LinkId.ToString());
+    }
+
+    [RequiresDockerFact]
+    public async Task AFailedReRead_StopsTheBatch_With200_TheSentAreReported_AndTheRestAreNotAttempted()
+    {
+        // Gate-1 W-2 on the #487 follow-ups: a re-read that throws (here a real SqlException, a command timeout) must
+        // not turn the batch into a 500 that discards who was already emailed (the UI would then re-offer the whole
+        // selection and email them twice). The participant whose re-read failed, and everyone planned after them, are
+        // failed/notAttempted with no call and no event, exactly as when the budget runs out.
+        var exercise = await _world.SeedExerciseAsync();
+        var staff = await _world.SeedStaffAsync((exercise, "controller"));
+        var a = await _world.SeedParticipantAsync(exercise, "A First");
+        var b = await _world.SeedParticipantAsync(exercise, "B Second");
+        var c = await _world.SeedParticipantAsync(exercise, "C ReReadFails");
+        var d = await _world.SeedParticipantAsync(exercise, "D After");
+        var skipped = await _world.SeedParticipantAsync(exercise, "E NoEmail", email: string.Empty);
+        var reReads = new LinkEmailReReadHook()
+            .When(c.AccountId, () => throw SqlExceptionFactory.Create(-2, "Execution Timeout Expired."));
+        var mailer = new FakeParticipantLinkMailer();
+        var logs = new LinkEmailCapturingLoggerProvider();
+
+        var result = await _world.SendAsync(exercise, staff, mailer, logs: logs, reReads: reReads);
+
+        result.Outcome.Should().Be(LinkEmailOutcome.Ok, "the batch answers 200 with what really happened");
+        result.Body!.Results.Select(r => (r.ParticipantId, r.Status, r.Reason)).Should().Equal(
+            [
+                (a.AccountId.ToString(), RosterEmailStatuses.Sent, null),
+                (b.AccountId.ToString(), RosterEmailStatuses.Sent, null),
+                (c.AccountId.ToString(), RosterEmailStatuses.Failed, RosterEmailFailureReasons.NotAttempted),
+                (d.AccountId.ToString(), RosterEmailStatuses.Failed, RosterEmailFailureReasons.NotAttempted),
+                (skipped.AccountId.ToString(), RosterEmailStatuses.Skipped, RosterEmailSkipReasons.NoEmail),
+            ]);
+        mailer.Messages.Select(m => m.RecipientAddress).Should().Equal([a.Email, b.Email], "exactly the two sends");
+        (await _world.EmailEventsAsync(exercise)).Select(e => e.Target!.EntityId).Should().BeEquivalentTo(
+            [a.LinkId.ToString(), b.LinkId.ToString()], "no call, no event for anyone not attempted");
+        logs.All.Should().Contain("SqlException", "the fault is logged by type");
+        AssertNoSecrets(logs.All, a, b, c, d);
+    }
+
+    [RequiresDockerFact]
+    public async Task ASlowReRead_ThatSpendsTheBudget_LeavesThatParticipantNotAttempted()
+    {
+        // Gate-1 S-3 on the #487 follow-ups: the budget is checked again AFTER the re-read, immediately before the send,
+        // so a slow re-read cannot push a send past the budget (and the request past the front end's 230 s). The clock
+        // is driven by hand: B's re-read "takes" longer than the whole budget.
+        var exercise = await _world.SeedExerciseAsync();
+        var staff = await _world.SeedStaffAsync((exercise, "controller"));
+        var a = await _world.SeedParticipantAsync(exercise, "A First");
+        var b = await _world.SeedParticipantAsync(exercise, "B SlowReRead");
+        var clock = new ManualTimeProvider(new DateTimeOffset(2026, 10, 14, 12, 0, 0, TimeSpan.Zero));
+        var reReads = new LinkEmailReReadHook().When(b.AccountId, () => clock.Advance(TimeSpan.FromSeconds(11)));
+        var mailer = new FakeParticipantLinkMailer();
+
+        var result = await _world.SendAsync(
+            exercise, staff, mailer, pacing: p => p.BatchBudget = TimeSpan.FromSeconds(10), reReads: reReads, clock: clock);
+
+        result.Body!.Results.Select(r => (r.ParticipantId, r.Status, r.Reason)).Should().Equal(
+            [
+                (a.AccountId.ToString(), RosterEmailStatuses.Sent, null),
+                (b.AccountId.ToString(), RosterEmailStatuses.Failed, RosterEmailFailureReasons.NotAttempted),
+            ]);
+        mailer.Messages.Should().ContainSingle("no send starts once the budget is spent, however it was spent");
+        (await _world.EmailEventsAsync(exercise)).Should().ContainSingle();
+    }
+
+    [RequiresDockerFact]
+    public async Task AnAccountMovedToANonRosterRoleAfterPlanning_IsNotFound_AndNeverEmailed()
+    {
+        // Gate-1 S-1 on the #487 follow-ups: pins the re-read's roster-role filter (participant, pio only).
+        var exercise = await _world.SeedExerciseAsync();
+        var staff = await _world.SeedStaffAsync((exercise, "controller"));
+        var first = await _world.SeedParticipantAsync(exercise, "A First");
+        var promoted = await _world.SeedParticipantAsync(exercise, "B Promoted");
+        var mailer = new FakeParticipantLinkMailer
+        {
+            OnSend = async message =>
+            {
+                if (message.RecipientAddress == first.Email)
+                {
+                    await _world.ChangeAccountAsync(promoted.AccountId, account => account.Role = "controller");
+                }
+            },
+        };
+
+        var result = await _world.SendAsync(exercise, staff, mailer);
+
+        result.Body!.Results.Select(r => (r.ParticipantId, r.Status, r.Reason)).Should().Equal(
+            [
+                (first.AccountId.ToString(), RosterEmailStatuses.Sent, null),
+                (promoted.AccountId.ToString(), RosterEmailStatuses.Skipped, RosterEmailSkipReasons.NotFound),
+            ],
+            "an account no longer on the roster at send time reads like any id that is not on it");
+        mailer.Messages.Select(m => m.RecipientAddress).Should().Equal([first.Email]);
     }
 
     [RequiresDockerFact]

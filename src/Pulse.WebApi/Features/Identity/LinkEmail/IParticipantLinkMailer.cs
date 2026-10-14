@@ -34,15 +34,16 @@ public enum LinkMailSendOutcome
     RateLimited,
 
     /// <summary>
-    /// The send's fate is unknown: it did not finish within its bound, got no HTTP response, or the provider answered
-    /// <c>408</c> or a <c>5xx</c>. NOT CONFIRMED either way: the provider may already have accepted the message, so it
-    /// must not be blindly sent again (it could email the person twice).
+    /// The send's fate is unknown: it did not finish within its bound, got no HTTP response, the provider answered
+    /// <c>408</c>, a <c>5xx</c> or any other status that is not a <c>4xx</c> refusal, or the send faulted unexpectedly once
+    /// the call had started. NOT CONFIRMED either way: the provider may already have accepted the message, so it must not
+    /// be blindly sent again (it could email the person twice). The default for anything that is not proven refused.
     /// </summary>
     TimedOut,
 
     /// <summary>
-    /// A definite refusal (a <c>4xx</c> other than <c>429</c>), the credential failed (no token, so no request), or an
-    /// unexpected fault. Nothing is known to be sent.
+    /// Exactly: a definite refusal (a <c>4xx</c> other than <c>408</c> and <c>429</c>), or the credential failed (no
+    /// token, so no request). Nothing was sent.
     /// </summary>
     Failed,
 }

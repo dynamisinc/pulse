@@ -31,12 +31,16 @@ deliberately minimal.
       or `failed` (a generic reason). Sends are sequential with a short pause; **one failure never aborts the batch**,
       except the provider's `429`: no further send is attempted; the rest are `failed`/`rateLimited` with no event
       *(amended 2026-10-13, Gate-1 S-1)*.
-      A send whose fate is unknown (no HTTP response, `408`, a `5xx`, or the send's own timeout) is `failed`/`timedOut`
-      (unconfirmed: check before sending again); `sendFailed` is only a definite refusal (another `4xx`) or a credential
-      failure. Each planned send first **re-reads that participant** (same scope and eligibility rules) and uses the
-      address and link on file at that moment: one who has become ineligible since the batch was planned is `skipped`
-      with the matching reason (`notFound` if no longer on this exercise's roster), and a reissued link is sent as the
-      new link *(amended 10/14, Copilot review on #487)*.
+      A send whose fate is unknown (no HTTP response, `408`, a `5xx`, any other status that is not a `4xx` refusal, a
+      fault once the message was handed to the provider such as a `202` whose body cannot be read, or the send's own
+      timeout) is `failed`/`timedOut` (unconfirmed: check before sending again); `sendFailed` is only a definite refusal
+      (a `4xx` other than `408`/`429`) or a credential failure, i.e. nothing was sent. Each planned send first
+      **re-reads that participant** (same scope and eligibility rules) and uses the address and link on file at that
+      moment: one who has become ineligible since the batch was planned is `skipped` with the matching reason
+      (`notFound` if no longer on this exercise's roster), and a reissued link is sent as the new link. The time budget
+      is checked again after the re-read, just before the send. If a re-read fails, that participant and everyone after
+      them are `failed`/`notAttempted` (no call, no event) and the answer is still `200` with what was sent
+      *(amended 10/14, Copilot review on #487 and its Gate-1 fold)*.
       Behind `EngineCockpitStaffAuthorizationFilter` + `RosterStaffRoleFilter`, `Cache-Control: no-store`.
 - [ ] **Given** `Email:Endpoint` is unset, **then** the endpoint answers `503` ProblemDetails ("Email delivery is not
       configured") and sends nothing, `GET /api/staff/roster` reports `capabilities.emailLinks: false`, and the host
@@ -118,4 +122,8 @@ and `NoHttpResponse_IsUnconfirmed_NotPlainlyFailed_AndLoggedAsNoResponseOnly` (A
 `AnAccountDisabledOrItsAddressRemovedAfterPlanning_IsSkippedWithThatReason_AndNothingIsSentOrRecorded` and
 `LinkEmailIsolationTests.TheSendTimeReRead_IsScopedToo_AParticipantNoLongerInTheCallersExercise_IsNotFound_AndNeverEmailed`
 (AC-1 and Isolation, send-time re-read); `LinkEmailEndpointsHttpTests` 401/403 refusals carry `no-store` (AC-1);
-`emailLinksFormat.test.ts` and `EmailLinksButton.test.tsx` resend set (AC-7).
+`emailLinksFormat.test.ts` and `EmailLinksButton.test.tsx` resend set (AC-7). Gate-1 fold (10/14):
+`AcsParticipantLinkMailerTests.A202WhoseBodyCannotBeRead_IsUnconfirmed_NotPlainlyFailed_AndLoggedByTypeOnly` and the
+`200` row of `AProviderAnswer_…` (AC-1, unconfirmed by default); `LinkEmailServiceTests.AFailedReRead_StopsTheBatch_With200_TheSentAreReported_AndTheRestAreNotAttempted`,
+`ASlowReRead_ThatSpendsTheBudget_LeavesThatParticipantNotAttempted` and
+`AnAccountMovedToANonRosterRoleAfterPlanning_IsNotFound_AndNeverEmailed` (AC-1).

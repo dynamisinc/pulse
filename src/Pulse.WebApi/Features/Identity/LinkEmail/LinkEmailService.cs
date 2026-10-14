@@ -63,17 +63,23 @@ public sealed class LinkEmailPacing
 /// the same rules, and sends to the address and with the link on file AT THAT MOMENT. A participant who has become
 /// ineligible is <c>skipped</c> with the matching reason (no send, no event); one no longer on this exercise's roster is
 /// <c>notFound</c>; a reissued link is still active, so the email carries the NEW link (the old one is dead). The
-/// re-read is part of that send's work: it runs only once the batch budget has admitted the send.
+/// re-read is part of that send's work: it runs only once the batch budget has admitted the send, and the budget is
+/// checked again after it, immediately before the send, so a slow re-read cannot push a send past the budget. If the
+/// re-read itself fails (e.g. the database times out), that participant and everyone planned after them are
+/// <c>failed</c> / <c>notAttempted</c> with no call and no event, and the batch still answers <c>200</c> with what was
+/// really sent: a 500 would hide those sends, and a retry of the whole selection would email them twice.
 /// </para>
 /// <para>
 /// <b>Sending.</b> Sequential, in name order, with <see cref="LinkEmailPacing.SendPause"/> between sends. One failure
 /// never aborts the batch: a provider refusal, throttle, timeout, credential failure or any unexpected fault in one
-/// send becomes that participant's <c>failed</c> result (<see cref="RosterEmailFailureReasons"/>, generic; an
-/// unconfirmed send (a timeout, no HTTP response, a <c>408</c> or a <c>5xx</c>) is <c>timedOut</c>, because the provider
-/// may have accepted it, so it is not offered for a blind resend) and the next one is attempted. The ONE exception is
-/// the provider's throttle: after the first <c>429</c> nobody else is attempted (the next send would only be throttled
-/// too, and on an Azure-managed domain the window is minutes long); everyone left is reported <c>failed</c> /
-/// <c>rateLimited</c> without a call and without an event, so staff can send again to just them later. No send is retried automatically. When the request is aborted the batch stops between sends.
+/// send becomes that participant's <c>failed</c> result (<see cref="RosterEmailFailureReasons"/>, generic; anything
+/// the provider may have accepted (a timeout, no HTTP response, a <c>408</c>, a <c>5xx</c>, any fault once the message
+/// was handed to the mailer) is <c>timedOut</c>, so it is not offered for a blind resend; <c>sendFailed</c> is only a
+/// send that cannot have left) and the next one is attempted. The ONE exception is the provider's throttle: after the
+/// first <c>429</c> nobody else is attempted (the next send would only be throttled too, and on an Azure-managed domain
+/// the window is minutes long); everyone left is reported <c>failed</c> / <c>rateLimited</c> without a call and without
+/// an event, so staff can send again to just them later. No send is retried automatically. When the request is aborted
+/// the batch stops between sends.
 /// </para>
 /// <para>
 /// <b>Telemetry (XC-004).</b> Every send ATTEMPT records exactly one <c>participant.link.emailed</c> event
@@ -329,6 +335,7 @@ public sealed partial class LinkEmailService
         var results = new List<RosterEmailResultItemDto>(plan.Count);
         var attempted = 0;
         var throttled = false;
+        var reReadFailed = false;
 
         foreach (var step in plan)
         {
@@ -345,8 +352,9 @@ public sealed partial class LinkEmailService
                 continue;
             }
 
-            // The first send always starts; after that, no new send starts once the budget is spent.
-            if (attempted > 0 && _timeProvider.GetElapsedTime(started) >= pacing.BatchBudget)
+            // The first send always starts; after that, no new send starts once the budget is spent. After a failed
+            // re-read nothing else is attempted either (the database is in trouble: stop, and report what was sent).
+            if (reReadFailed || (attempted > 0 && _timeProvider.GetElapsedTime(started) >= pacing.BatchBudget))
             {
                 results.Add(Result(step.ParticipantId, RosterEmailStatuses.Failed, RosterEmailFailureReasons.NotAttempted));
                 continue;
@@ -361,10 +369,33 @@ public sealed partial class LinkEmailService
 
             // The plan may be minutes old by now: send to what is on file NOW (address, link, enabled), or skip with the
             // reason the same rules give. Part of this send's work, so the budget check above already admitted it.
-            var current = await DecideNowAsync(exerciseId, step.AccountId, cancellationToken);
+            PlannedStep current;
+#pragma warning disable CA1031 // A failed re-read must not discard the sends already made (a 500 would hide them).
+            try
+            {
+                current = await DecideNowAsync(exerciseId, step.AccountId, cancellationToken);
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                // The type only. Nothing was sent to this participant: notAttempted, as is everyone after them.
+                LogReReadFault(_logger, exception.GetType().Name);
+                reReadFailed = true;
+                results.Add(Result(step.ParticipantId, RosterEmailStatuses.Failed, RosterEmailFailureReasons.NotAttempted));
+                continue;
+            }
+#pragma warning restore CA1031
+
             if (current.Delivery is not { } delivery)
             {
                 results.Add(Result(current.ParticipantId, RosterEmailStatuses.Skipped, current.Skipped));
+                continue;
+            }
+
+            // The budget again, AFTER the re-read and immediately before the send: a slow re-read must not push a send
+            // past the budget (and the request past the front end's 230 s). The first send still always starts.
+            if (attempted > 0 && _timeProvider.GetElapsedTime(started) >= pacing.BatchBudget)
+            {
+                results.Add(Result(step.ParticipantId, RosterEmailStatuses.Failed, RosterEmailFailureReasons.NotAttempted));
                 continue;
             }
 
@@ -398,28 +429,41 @@ public sealed partial class LinkEmailService
     }
 
     /// <summary>
-    /// Composes and sends one message. Any fault, of any type, becomes <see cref="LinkMailSendOutcome.Failed"/>: one
-    /// participant's failure must never abort the rest of the batch. The request token is NOT passed to the mailer, so
-    /// a send is never cut off half way (its outcome would be unknown); the mailer's own timeout bounds it.
+    /// Composes and sends one message. No fault, of any type, escapes: one participant's failure must never abort the
+    /// rest of the batch. A fault while COMPOSING (before anything reaches the mailer) is
+    /// <see cref="LinkMailSendOutcome.Failed"/>: nothing can have been sent. A fault thrown by the MAILER is
+    /// <see cref="LinkMailSendOutcome.TimedOut"/>: the message was handed over and may have left (Gate-1 W-1 on the #487
+    /// follow-ups). The request token is NOT passed to the mailer, so a send is never cut off half way (its outcome
+    /// would be unknown); the mailer's own timeout bounds it.
     /// </summary>
     private async Task<LinkMailSendOutcome> SendOneAsync(string exerciseName, Delivery delivery)
     {
 #pragma warning disable CA1031 // One participant's fault (including an unexpected one) must not stop the batch.
+        LinkEmailMessage message;
         try
         {
-            var message = LinkEmailComposer.Compose(
+            message = LinkEmailComposer.Compose(
                 delivery.Address,
                 exerciseName,
                 delivery.DisplayName,
                 delivery.SignInName,
                 delivery.JoinUrl);
-            return await _mailer.SendAsync(message, CancellationToken.None);
         }
         catch (Exception exception)
         {
             // The type only: an exception message from deeper down could carry the address or the URL.
             LogUnexpectedSendFault(_logger, exception.GetType().Name);
             return LinkMailSendOutcome.Failed;
+        }
+
+        try
+        {
+            return await _mailer.SendAsync(message, CancellationToken.None);
+        }
+        catch (Exception exception)
+        {
+            LogUnexpectedSendFault(_logger, exception.GetType().Name);
+            return LinkMailSendOutcome.TimedOut;
         }
 #pragma warning restore CA1031
     }
@@ -497,6 +541,12 @@ public sealed partial class LinkEmailService
         Level = LogLevel.Warning,
         Message = "Link email send faulted unexpectedly ({ExceptionType}); reported as failed, the batch continues.")]
     private static partial void LogUnexpectedSendFault(ILogger logger, string exceptionType);
+
+    [LoggerMessage(
+        EventId = 3,
+        Level = LogLevel.Warning,
+        Message = "Link email re-read faulted ({ExceptionType}); the rest of the batch is not attempted.")]
+    private static partial void LogReReadFault(ILogger logger, string exceptionType);
 
     /// <summary>One considered account and its link row (or <c>null</c>), as read from the database.</summary>
     private sealed class EmailCandidate
