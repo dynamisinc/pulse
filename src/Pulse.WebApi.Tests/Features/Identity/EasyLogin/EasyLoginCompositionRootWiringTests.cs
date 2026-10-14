@@ -194,7 +194,7 @@ public sealed class EasyLoginCompositionRootWiringTests
         response.Content.Headers.ContentType?.MediaType.Should().Be("application/problem+json");
         response.Headers.WwwAuthenticate.Should().BeEmpty(
             "{0} {1} is pre-auth: the default-deny gate must not be what answers", method, pattern);
-        response.Headers.CacheControl?.NoStore.Should().BeTrue(
+        (response.Headers.CacheControl?.NoStore).Should().BeTrue(
             "{0} {1}: every answer of an anonymous sign-in is no-store (its 200 carries the tokens; Gate-2 S-3)", method, pattern);
     }
 
