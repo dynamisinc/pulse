@@ -247,3 +247,13 @@ the media buttons (06).
 | Noise floods the demo | Default `off`; High is 15/min, well under the 120/min burst-legibility bar (NFR-002) |
 | Import maps the wrong persona | Dry-run first in the UI (10); unknown handles fail the row, never fall back |
 | Evaluator still has write power at the API | Accepted for the demo (DF-14); say so if asked; #61/#377 after |
+
+### S-2 checklist (from the five Gate-1 reviews, 10/14–15)
+
+- **Merge order:** 01 → 02 → 03 → 04 → 05 into `feature/demo-feedback`, each a **real merge** (no squash); after each, `Data/Migrations` must hold exactly one `20261014202342_DemoFeedbackPinsNoiseImport`.
+- **DI** (`Program.cs`): `AddPostExport()`; `AddPostPins()` after `AddSocialReactions()` / `AddSocialRealtimeHub()` / `AddExerciseClock()` and staff identity; `AddInjectImport()` and `AddWhiteNoise()` after `AddInjects()` (which is after `AddPauseTierSteering()`).
+- **Routes:** `MapPostExport()`; `MapPostPins()` at **top level** (never inside `DenyReadOnlySessions()`, or a view-only `GET /api/feed/pinned` is refused); `MapInjectImport()` and `MapWhiteNoise()` beside `MapInjects()`.
+- **CORS:** `.WithExposedHeaders("Content-Disposition")` (09 reads the export file name).
+- **Pacer in tests:** confirm 05's `FirstSweepDelay` landed; otherwise remove the `WhiteNoisePacer` hosted service in the `WebApplicationFactory` fixtures.
+- **`CompositionRootWiringTests`:** each maps exactly once: `GET /api/staff/exports/posts.xlsx`; `POST /api/injects/import` (staff + controller filters); `GET /api/feed/pinned`, `PUT`/`DELETE /api/staff/posts/{postId:guid}/pin`; `GET`/`PUT /api/staff/noise`, `PUT /api/staff/noise/pool`. One `WhiteNoisePacer` hosted service; `IFeedBroadcaster` → `SignalRFeedBroadcaster`; `INoiseBroadcaster` → `NoiseBroadcaster`; `INoiseJitterSource` → `CryptoNoiseJitterSource`; `PinService` / `PinnedFeedService` / `InjectImportService` resolve.
+- **Afterwards:** flip stories 01–05 to In Review and tick their ACs; file one follow-up issue with the remaining Gate-1 Mediums/Lows (02 M1/M4 + L1–L6, 03 L1–L7, 04 L2–L6, 05 L2–L4/L7–L10, 01 L2/L5); then the umbrella PR to `main` (Copilot review, Gate 2).
