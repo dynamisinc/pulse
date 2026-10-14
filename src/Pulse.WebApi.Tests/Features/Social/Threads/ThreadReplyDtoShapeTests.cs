@@ -148,7 +148,8 @@ public class ThreadReplyDtoShapeTests
         Counts = new ParticipantPostCounts(1, 2, 3),
         Media = new[] { new PostMediaDto("m1", "video", "https://media.example/m1", "alt", "https://media.example/p1", 640, 360, 12.5) },
         InReplyTo = new PostInReplyToDto(Guid.NewGuid().ToString(), "parent_handle"),
-        Viewer = new PostViewerStateDto(true, true),
+        Viewer = new PostViewerStateDto(true, true, true),
+        PinnedForAll = true,
     };
 
     private static PropertyInfo[] JsonProperties(Type type) => type

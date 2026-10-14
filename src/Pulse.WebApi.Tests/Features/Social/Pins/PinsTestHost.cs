@@ -274,6 +274,49 @@ public sealed class PinsSeeder
         await seed.SaveChangesAsync();
     }
 
+    /// <summary>
+    /// Seeds <paramref name="count"/> posts, each liked by <paramref name="personaId"/> at a distinct scenario instant
+    /// (the i-th like at <see cref="PostCreatedAt"/> + i minutes), in one unit of work.
+    /// </summary>
+    /// <param name="exerciseId">The owning exercise.</param>
+    /// <param name="authorPersonaId">The author of every post.</param>
+    /// <param name="personaId">The liking persona.</param>
+    /// <param name="count">How many.</param>
+    /// <returns>The post ids, oldest like first.</returns>
+    public async Task<IReadOnlyList<Guid>> SeedLikedPostsAsync(Guid exerciseId, Guid authorPersonaId, Guid personaId, int count)
+    {
+        var ids = new List<Guid>(count);
+        await using var seed = _fixture.CreateContext();
+        for (var i = 0; i < count; i++)
+        {
+            var id = Guid.NewGuid();
+            ids.Add(id);
+            seed.Posts.Add(new Post
+            {
+                Id = id,
+                ExerciseId = exerciseId,
+                AuthorPersonaId = authorPersonaId,
+                Body = $"Pins bulk body {id:N}",
+                CreatedScenarioTime = PostCreatedAt,
+                Origin = "participant",
+                ActingHumanId = "human-pins-test",
+                CreatedWallClock = new DateTimeOffset(2026, 10, 14, 9, 0, 0, TimeSpan.Zero),
+            });
+            seed.PostReactions.Add(new PostReaction
+            {
+                Id = Guid.NewGuid(),
+                ExerciseId = exerciseId,
+                PostId = id,
+                PersonaId = personaId,
+                Kind = ReactionKinds.Like,
+                CreatedScenarioTime = PostCreatedAt.AddMinutes(i),
+            });
+        }
+
+        await seed.SaveChangesAsync();
+        return ids;
+    }
+
     /// <summary>Reads the physical post row (unfiltered).</summary>
     /// <param name="postId">The post id.</param>
     /// <returns>The row.</returns>
