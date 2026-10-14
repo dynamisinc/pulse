@@ -27,6 +27,7 @@ vi.mock('@/core/realtime/connection', async importOriginal => {
     },
     onStateChange: () => () => {},
     start: () => Promise.resolve(),
+    stop: () => Promise.resolve(),
   }
   return { ...actual, realtimeConnection: fake }
 })
@@ -94,6 +95,7 @@ describe('realtimeFeed singleton - PostRemoved is recorded in removedPosts', () 
       },
       onStateChange: () => () => {},
       start: () => Promise.resolve(),
+      stop: () => Promise.resolve(),
     }
     const isolated = createRealtimeFeed({ connection })
     await isolated.start()

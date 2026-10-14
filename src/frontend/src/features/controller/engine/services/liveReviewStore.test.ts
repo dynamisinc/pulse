@@ -51,6 +51,10 @@ class FakeConnection implements RealtimeConnection {
     return () => this.stateListeners.delete(listener)
   }
 
+  stop(): Promise<void> {
+    return Promise.resolve()
+  }
+
   start(): Promise<void> {
     this.startCallCount += 1
     return this.startImpl().then(() => {

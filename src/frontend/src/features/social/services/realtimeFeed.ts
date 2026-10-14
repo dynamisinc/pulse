@@ -46,6 +46,17 @@
  * is a push-only fact: while the transport is POLLING there is no `PostRemoved`, and the
  * post simply stops being returned by the next read (the server omits it).
  *
+ * IDENTITY CHANGE (COR-001). `resetClientSession()` stops the shared connection whenever the
+ * identity on the tab changes (sign-out, every sign-in) - it is joined to ONE identity's
+ * exercise groups for life. A consumer that is still started then hears `Disconnected` with
+ * reason `'stopped'`. That is NOT "auto-reconnect exhausted": it is not degraded, there is
+ * nothing to poll around, and giving up would leave the next identity with a feed that
+ * never goes real-time again. So the feed RE-ATTACHES: it asks the connection to start
+ * again, which builds a fresh connection on whatever token is then current with this
+ * feed's handlers still registered, and only falls back to polling if THAT fails. (A feed
+ * that is not started - the usual case, the screens are unmounted by the navigation - has
+ * already released its subscriptions and simply starts clean when the next screen mounts.)
+ *
  * TESTABILITY (NFR-003 fallback + recovery). `createRealtimeFeed({ connection,
  * fetchFeed, pollIntervalMs, reconnectWindowMs })` lets RTL inject a fake
  * connection (to force "hub unreachable → polling" and "recover") and a fake
@@ -57,7 +68,7 @@
  */
 
 import { HubConnectionState, realtimeConnection } from '@/core/realtime/connection'
-import type { RealtimeConnection } from '@/core/realtime/connection'
+import type { RealtimeConnection, RealtimeStateReason } from '@/core/realtime/connection'
 import { parseMediaAssetView } from '@/core/media/mediaGuards'
 import { toParticipantView } from '@/features/social'
 import type { ParticipantPostView, Post, PostInReplyTo, PostMedia } from '@/features/social'
@@ -276,8 +287,8 @@ class RealtimeFeedController implements RealtimeFeed {
     this.unsubscribeRemoved = this.connection.subscribe(POST_REMOVED_EVENT, payload => {
       this.handleRemovedPush(payload)
     })
-    this.unsubscribeState = this.connection.onStateChange(state => {
-      this.handleStateChange(state)
+    this.unsubscribeState = this.connection.onStateChange((state, reason) => {
+      this.handleStateChange(state, reason)
     })
 
     try {
@@ -307,7 +318,7 @@ class RealtimeFeedController implements RealtimeFeed {
     }
   }
 
-  private handleStateChange(state: HubConnectionState): void {
+  private handleStateChange(state: HubConnectionState, reason?: RealtimeStateReason): void {
     if (!this.started) return
     switch (state) {
       case HubConnectionState.Connected:
@@ -317,11 +328,37 @@ class RealtimeFeedController implements RealtimeFeed {
         this.armReconnectWindow()
         break
       case HubConnectionState.Disconnected:
-        this.enterPolling()
+        if (reason === 'stopped') {
+          this.reattach()
+        } else {
+          this.enterPolling()
+        }
         break
       default:
         break
     }
+  }
+
+  /**
+   * The shared connection was stopped ON PURPOSE (the session's identity changed), not lost:
+   * start it again rather than degrade (see the module header). The connection builds a fresh
+   * connection on the then-current token and re-attaches this feed's handlers, so nothing is
+   * re-subscribed here. Success arrives as `Connected` (and is also handled here, for a
+   * connection that does not emit it); failure falls back to polling, whose recovery driver
+   * keeps retrying. A polling feed keeps its timer running meanwhile - it is the safety net
+   * until the connection is back.
+   */
+  private reattach(): void {
+    this.clearReconnectWindow()
+    if (this.currentMode === 'realtime') this.currentMode = 'connecting'
+    this.connection.start().then(
+      () => {
+        if (this.started) this.enterRealtime()
+      },
+      () => {
+        if (this.started) this.enterPolling()
+      },
+    )
   }
 
   private enterRealtime(): void {

@@ -22,6 +22,31 @@
  * `features/social/services/realtimeFeed.ts`) can fall back to polling and
  * recover without knowing anything about SignalR internals.
  *
+ * IDENTITY CHANGE: `stop()` (COR-001). The server joins a connection to its
+ * `exercise:{id}` group (and the role-scoped groups) ONCE, in `OnConnectedAsync`,
+ * from the token presented when the connection was made. A connection therefore
+ * belongs to ONE identity for its whole life: if the identity on a tab changes
+ * without a page reload (sign-out then sign-in as someone else; every
+ * `completeSignIn`), a connection left running would keep delivering the PREVIOUS
+ * identity's exercise to the new one. So this module registers a session reset
+ * (`core/auth/sessionReset`, run by `resetClientSession()` on sign-out AND every
+ * sign-in) that calls `stop()` on the shared connection:
+ *   - the live `HubConnection` is ABANDONED synchronously (its handlers detached
+ *     first, so a late frame from the old exercise can reach no one) and closed in
+ *     the background; `state` reads `Disconnected` from that moment;
+ *   - the registered `subscribe` handlers are kept in a registry here, not just on
+ *     the `HubConnection`, so they survive: the NEXT `start()` builds a fresh
+ *     `HubConnection`, re-attaches every handler and negotiates with whatever token
+ *     the store holds THEN (the token factory is read per call);
+ *   - `start()` never waits for the old connection to finish closing, so a slow or
+ *     hung teardown can never block the new identity's connection;
+ *   - a stop that overtakes a `start()` in flight rejects that start and makes sure
+ *     the half-made connection is closed too, so nothing is left connected on the
+ *     old token;
+ *   - listeners hear `Disconnected` with reason `'stopped'` (once, and only if a
+ *     connection was actually up or coming up) so a consumer can tell a deliberate
+ *     stop from "auto-reconnect exhausted" and re-attach instead of giving up.
+ *
  * TESTABILITY. `createRealtimeConnection({ hubUrl, buildConnection })` lets a
  * test point the connection at a fake transport (or override the hub URL)
  * without a real WebSocket; the app uses the lazy shared `realtimeConnection`
@@ -33,12 +58,28 @@
 import { HubConnectionBuilder, HubConnectionState, LogLevel } from '@microsoft/signalr'
 import type { HubConnection } from '@microsoft/signalr'
 import { getAccessToken } from '@/core/auth/tokenStore'
+import { registerSessionReset } from '@/core/auth/sessionReset'
 
 export { HubConnectionState } from '@microsoft/signalr'
 
 /** A handler for a hub event's payload. The payload is untyped at the transport
  * layer — each consumer validates/narrows it to its own contract. */
 export type RealtimeEventHandler = (payload: unknown) => void
+
+/**
+ * Why a state transition happened, when the transport knows. Only one reason exists:
+ * `'stopped'` accompanies the `Disconnected` that `stop()` causes (a DELIBERATE end,
+ * e.g. the session's identity changed), as opposed to a bare `Disconnected`, which means
+ * the connection was lost and auto-reconnect is exhausted. A consumer that polls as a
+ * fallback should degrade on the latter and re-attach on the former.
+ */
+export type RealtimeStateReason = 'stopped'
+
+/** Observes connection-state transitions; `reason` is set only for a deliberate stop. */
+export type RealtimeStateListener = (
+  state: HubConnectionState,
+  reason?: RealtimeStateReason,
+) => void
 
 /**
  * The shared real-time transport surface consumers depend on. Kept minimal so
@@ -53,15 +94,29 @@ export interface RealtimeConnection {
 
   /**
    * Observes connection-state transitions (Connected / Reconnecting / Disconnected).
-   * Returns an unsubscribe.
+   * A `Disconnected` caused by {@link RealtimeConnection.stop} carries the reason
+   * `'stopped'`. Returns an unsubscribe.
    */
-  onStateChange(listener: (state: HubConnectionState) => void): () => void
+  onStateChange(listener: RealtimeStateListener): () => void
 
   /**
    * Starts the connection if it is not already started. Idempotent; resolves once
-   * connected, rejects if the start fails.
+   * connected, rejects if the start fails (or if `stop()` overtakes it). After a
+   * `stop()` this opens a NEW connection on the then-current session token with
+   * every `subscribe`d handler re-attached.
    */
   start(): Promise<void>
+
+  /**
+   * Deliberately ends the connection (the session's identity is changing). Idempotent,
+   * never throws or rejects, and safe in every state: never started, connecting (the
+   * start in flight is rejected and its half-made connection closed), connected or
+   * reconnecting. `subscribe`d handlers survive and are re-attached by the next
+   * `start()`. Resolves once the abandoned connection has finished closing; callers
+   * that do not care (the session reset) may ignore the promise, and `start()` never
+   * waits on it.
+   */
+  stop(): Promise<void>
 
   /** The current connection state (`Disconnected` before the first start). */
   readonly state: HubConnectionState
@@ -141,17 +196,65 @@ function createDefaultHubConnection(hubUrl: string): HubConnection {
     .build()
 }
 
+/** One registered `subscribe`, kept so a rebuilt `HubConnection` can be given it back. */
+interface Subscription {
+  readonly eventName: string
+  readonly handler: RealtimeEventHandler
+}
+
+/** Why a start that `stop()` overtook was rejected (the real SignalR reports its own abort). */
+const STOPPED_DURING_START = 'The realtime connection was stopped while it was starting.'
+
+/**
+ * Closes an abandoned `HubConnection` as far as it will go, and NEVER rejects.
+ *
+ * `HubConnection.stop()` is asked synchronously (this runs up to its first `await` as soon
+ * as it is called), so the transport starts closing at once. If a `start()` was in flight
+ * we then let it settle and, should it have produced a live connection anyway (a transport
+ * that finished its handshake despite the abort), stop that too: a stop must never leave a
+ * connection that was negotiated on the old identity's token.
+ */
+async function closeQuietly(
+  connection: HubConnection,
+  startInFlight: Promise<void> | null,
+): Promise<void> {
+  try {
+    await connection.stop()
+  } catch {
+    // Closing is best effort; there is nothing a caller could do about a failed close.
+  }
+  if (startInFlight !== null) {
+    try {
+      await startInFlight
+    } catch {
+      // The rejection belongs to whoever called start(); here we only wait for it to settle.
+    }
+  }
+  if (connection.state !== HubConnectionState.Disconnected) {
+    try {
+      await connection.stop()
+    } catch {
+      // As above.
+    }
+  }
+}
+
 /**
  * The single shared connection. The underlying `HubConnection` is built lazily
  * on the first `subscribe`/`start` — importing this module (or the singleton
- * below) touches neither the network nor `window`.
+ * below) touches neither the network nor `window`. After `stop()` it is built
+ * afresh on the next `subscribe`/`start` (see the module header).
  */
 class SharedRealtimeConnection implements RealtimeConnection {
   private readonly buildConnection: (hubUrl: string) => HubConnection
   private readonly hubUrlOverride: string | undefined
-  private readonly stateListeners = new Set<(state: HubConnectionState) => void>()
+  private readonly stateListeners = new Set<RealtimeStateListener>()
+  /** Every live `subscribe`, so the handlers outlive any one `HubConnection` (see `stop`). */
+  private readonly subscriptions = new Set<Subscription>()
   private connection: HubConnection | null = null
   private startPromise: Promise<void> | null = null
+  /** Settles when every connection `stop()` has abandoned has finished closing. */
+  private closing: Promise<void> = Promise.resolve()
 
   constructor(options: CreateRealtimeConnectionOptions = {}) {
     this.buildConnection = options.buildConnection ?? createDefaultHubConnection
@@ -164,16 +267,17 @@ class SharedRealtimeConnection implements RealtimeConnection {
 
   subscribe(eventName: string, handler: RealtimeEventHandler): () => void {
     const connection = this.ensureConnection()
+    const subscription: Subscription = { eventName, handler }
+    this.subscriptions.add(subscription)
     connection.on(eventName, handler)
-    let active = true
     return () => {
-      if (!active) return
-      active = false
-      connection.off(eventName, handler)
+      if (!this.subscriptions.delete(subscription)) return
+      // The CURRENT connection: it may have been rebuilt since this subscribe.
+      this.connection?.off(eventName, handler)
     }
   }
 
-  onStateChange(listener: (state: HubConnectionState) => void): () => void {
+  onStateChange(listener: RealtimeStateListener): () => void {
     this.stateListeners.add(listener)
     return () => {
       this.stateListeners.delete(listener)
@@ -185,19 +289,59 @@ class SharedRealtimeConnection implements RealtimeConnection {
     if (connection.state === HubConnectionState.Connected) return Promise.resolve()
     if (this.startPromise !== null) return this.startPromise
 
-    const pending = connection
+    const pending: Promise<void> = connection
       .start()
       .then(() => {
+        if (this.connection !== connection) {
+          // stop() overtook this start and is closing this connection (and re-stopping it if
+          // it came up after all): do not announce a connection that is already abandoned.
+          throw new Error(STOPPED_DURING_START)
+        }
         this.emitState(HubConnectionState.Connected)
       })
       .catch((error: unknown) => {
         // Failed to connect: clear the memo so a later start() (the polling
-        // recovery driver) can retry rather than replaying this rejection.
-        this.startPromise = null
+        // recovery driver) can retry rather than replaying this rejection. Only if it is
+        // still OURS: after a stop() a newer start may own the memo.
+        if (this.startPromise === pending) this.startPromise = null
         throw error
       })
     this.startPromise = pending
     return pending
+  }
+
+  stop(): Promise<void> {
+    const connection = this.connection
+    if (connection === null) return this.closing
+
+    const startInFlight = this.startPromise
+    const wasLive = connection.state !== HubConnectionState.Disconnected || startInFlight !== null
+    // Nothing up and nothing coming up (never started, or already closed): there is nothing
+    // to end, and the built-but-idle connection can serve the next start() as it is.
+    if (!wasLive) return this.closing
+
+    // Abandon the connection SYNCHRONOUSLY, before anything awaits: from here `state` reads
+    // Disconnected and a start() builds a new connection rather than touching this one.
+    this.connection = null
+    this.startPromise = null
+    try {
+      // Detach every handler first, so a frame still in flight from the old identity's
+      // exercise reaches nobody - least of all a consumer already subscribed for the next one.
+      for (const { eventName, handler } of this.subscriptions) connection.off(eventName, handler)
+    } catch {
+      // Detaching is best effort; the connection is abandoned either way.
+    }
+
+    this.closing = Promise.all([this.closing, closeQuietly(connection, startInFlight)]).then(
+      () => undefined,
+    )
+    // Announced AFTER the rest of the synchronous reset pass (and, on sign-out, after the
+    // token clear that follows it) so a listener that re-attaches sees the world as it
+    // will be, not as it was.
+    void Promise.resolve().then(() => {
+      this.emitState(HubConnectionState.Disconnected, 'stopped')
+    })
+    return this.closing
   }
 
   private ensureConnection(): HubConnection {
@@ -205,24 +349,34 @@ class SharedRealtimeConnection implements RealtimeConnection {
 
     const hubUrl = this.hubUrlOverride ?? resolveHubUrl()
     const connection = this.buildConnection(hubUrl)
+    // Every callback below ignores a connection stop() has abandoned: it is closing in the
+    // background and must not speak for the shared connection any more.
     connection.onreconnecting(() => {
+      if (this.connection !== connection) return
       this.emitState(HubConnectionState.Reconnecting)
     })
     connection.onreconnected(() => {
+      if (this.connection !== connection) return
       this.emitState(HubConnectionState.Connected)
     })
     connection.onclose(() => {
+      if (this.connection !== connection) return
       // Auto-reconnect exhausted: clear the memo so start() can re-establish later.
       this.startPromise = null
       this.emitState(HubConnectionState.Disconnected)
     })
+    for (const { eventName, handler } of this.subscriptions) connection.on(eventName, handler)
     this.connection = connection
     return connection
   }
 
-  private emitState(state: HubConnectionState): void {
-    for (const listener of this.stateListeners) {
-      listener(state)
+  private emitState(state: HubConnectionState, reason?: RealtimeStateReason): void {
+    for (const listener of [...this.stateListeners]) {
+      try {
+        listener(state, reason)
+      } catch {
+        // One listener's failure must not starve the others - or reject start()/stop().
+      }
     }
   }
 }
@@ -242,3 +396,11 @@ export function createRealtimeConnection(
  * should construct a `HubConnection`. Lazy: no side effects until first use.
  */
 export const realtimeConnection: RealtimeConnection = createRealtimeConnection()
+
+// The shared connection belongs to ONE identity (see the module header), so every end of a
+// session - sign-out and every sign-in, both through `resetClientSession()` - stops it. Done
+// through the registry, not a direct import, so `core/auth` stays free of `core/realtime`.
+// `stop()` never rejects, so ignoring the promise is safe.
+registerSessionReset(() => {
+  void realtimeConnection.stop()
+}, import.meta.hot)
