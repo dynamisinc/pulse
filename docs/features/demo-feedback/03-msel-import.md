@@ -62,6 +62,42 @@ non-social rows; dry run writes nothing; apply creates items in order with the r
 assignee; re-import is all `unchanged`; changed pending row ⇒ `updated`; fired row ⇒ untouched; each failure reason;
 magic-byte rejection of a renamed `.txt`; isolation A/B; role gate; telemetry.
 
+All in `src/Pulse.WebApi.Tests/Features/Injects/Import/` (fixture: `MselFixture` writes Cadence's column layout,
+`Inject #` as a number cell, and Cadence's own CSV escaping). DB tests are `[RequiresDockerFact]`.
+
+- **AC-1 dry run / `dryRun` rule:** `InjectImportEndpointTests.DryRun_ReturnsTheReport_AndWritesNothingButTheDryRunEvent`,
+  `.DryRunFalse_ReturnsTheSameReport_AndCreatesTheItems`, `.DryRunParameter_MissingRepeatedOrNotABool_Is400_AndNothingIsWritten`
+- **AC-2 upload validation:** `InjectImportEndpointTests.UploadValidation_Refusals_Are400WithAReadableReason_AndWriteNothing`;
+  `MselReaderTests.ARenamedTextFile_IsNotAWorkbook_MagicBytesDecide`, `.AWorkbookNamedCsv_IsStillReadAsAWorkbook`,
+  `.BinaryOrNonUtf8Content_IsRefused`, `.AnEmptyFile_AndAnOversizedFile_AreRefused`, `.Xlsx_CadenceExport_ReadsTheMselSheet_WithTheNumericInjectNumberAsText`,
+  `.Xlsx_WithoutAnMselSheet_UsesTheFirstSheet`, `.Xlsx_WithNoUsableSheet_IsRefused`, `.Xlsx_MoreThan2000DataRows_IsRefused`,
+  `.Xlsx_AZipThatIsNotAWorkbook_IsRefusedAsUnreadable`, `.Xlsx_AZipBomb_IsRefusedBeforeClosedXmlExpandsIt`,
+  `.Csv_CadenceExport_ReadsHeaderAndRows_WithSpreadsheetRowNumbers_AndTheBomDropped`, `.Csv_QuotedCellsWithCommasLineBreaksAndQuotes_AreOneCell`,
+  `.Csv_BlankLinesAndCommaOnlyLines_AreSkipped_ButStillCountTowardsRowNumbers`, `.Csv_AQuotedCellThatNeverCloses_IsRefused`,
+  `.Csv_NoHeader_IsRefused`, `.Csv_MoreThan2000DataRows_IsRefused_And2000IsAccepted`;
+  `MselImportPlannerTests.AHeaderMissingARequiredColumn_IsRefused_NamingWhatIsMissing`, `.HeadersMatch_CaseInsensitivelyAndTrimmed_UnknownColumnsIgnored`
+- **AC-3 filter:** `MselImportPlannerTests.TheSocialRule_DF9`, `.NonSocialRows_AreSkippedWithTheReason_AndSocialRowsCounted`
+- **AC-4 mapping (DF-11):** `InjectImportEndpointTests.Apply_AppendsOneSinglePostItemPerSocialRow_InFileOrder_AfterTheExistingItems`,
+  `.Apply_TheCsvExport_ImportsExactlyLikeTheXlsx`; `MselImportPlannerTests.PlannedMinute_DF11_CountsFromTheEarliestScenarioDayAndTimeOfAnyRow`,
+  `.PlannedMinute_FallsBackToScheduledTime_WhenNoRowHasAScenarioTime_AndIsNullWithNeither`, `.PlannedMinute_ARowWithoutTheChosenTime_IsUnplanned_AndAnUnreadableTimeWarns`,
+  `.Mapping_PersonaByHandleWithTheAtStripped_ThenByExactDisplayName_CaseInsensitive`, `.Mapping_TitleNotesAssigneeTextAndExternalRef`,
+  `.Mapping_ABlankTitleFallsBackToInjectNumber_ALongTitleAndNotesAreTruncatedWithAWarning`, `.Mapping_PulseMediaByFileName_NewestOfTwoSameNamedFilesWins_AltIsTheStem`;
+  `MselReaderTests.Xlsx_RealTimeCells_ReadAsTimesOfDay`
+- **AC-5 row failures:** `InjectImportEndpointTests.RowFailures_AreReported_AndTheOtherRowsStillApply`;
+  `MselImportPlannerTests.RowFailures_PersonaAndMedia`, `.RowFailures_EmptyOrOver280TextAfterSanitizing`,
+  `.RowFailures_ADuplicateInjectNumber_FailsTheLaterRow`, `.Mapping_AnUnknownResponsibleController_IsAWarningNotAFailure`
+- **AC-6 idempotent re-import (DF-10):** `InjectImportEndpointTests.ReImportingTheSameFile_IsAllUnchanged_AndWritesNothing`,
+  `.AChangedPendingRow_IsUpdated_WithTheVersionBumped_AndSaysWhatChanged`, `.AChangedRowWhoseItemAlreadyFired_IsLeftAlone`,
+  `.ADeletedItemsInjectNumber_CanBeImportedAgain`
+- **AC-7 one save + queue token:** `InjectImportEndpointTests.Apply_AppendsOneSinglePostItemPerSocialRow_InFileOrder_AfterTheExistingItems`
+- **Isolation (XC-001):** `InjectImportEndpointTests.Isolation_PersonasAndMediaResolveOnlyInTheCallersExercise_AndItemsAreStampedFromScope`;
+  `MselImportPlannerTests.Isolation_AHandleOnlyInAnotherExercise_FailsExactlyLikeAnUnknownHandle`
+- **Authorization:** `InjectImportEndpointTests.OnlyAController_MayImport_EvaluatorAndPlannerAre403_AndAnUnassignedStaffIs403`
+- **Content security (NFR-004):** `MselImportPlannerTests.Mapping_EveryTextCellIsSanitized_StripNeverEncode`;
+  `MselReaderTests.Xlsx_NeverEvaluatesAFormula_ItReadsTheCachedValueOnly`, `.Csv_EveryCellIsLengthBounded`
+- **Telemetry (XC-004):** `InjectImportEndpointTests.DryRun_ReturnsTheReport_AndWritesNothingButTheDryRunEvent`,
+  `.Apply_AppendsOneSinglePostItemPerSocialRow_InFileOrder_AfterTheExistingItems`
+
 ## Tech notes
 
 Own `Features/Injects/Import/**` (`InjectImportEndpoints.cs` with `AddInjectImport()` / `MapInjectImport()`,

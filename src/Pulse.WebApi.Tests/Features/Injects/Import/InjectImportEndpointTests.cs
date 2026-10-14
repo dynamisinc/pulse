@@ -62,7 +62,7 @@ public sealed class InjectImportEndpointTests
         (await db.InjectQueueStates.CountAsync()).Should().Be(0, "nor bumps the queue version");
         var events = await db.TelemetryEvents.ToListAsync();
         events.Should().ContainSingle("the dry-run event is the only write").Which.EventType.Should().Be("injects.imported");
-        Payload(events[0]).Should().BeEquivalentTo(new { created = 3, updated = 0, unchanged = 0, skipped = 2, failed = 0, dryRun = true });
+        Payload(events[0]).Should().Be(new ImportedPayload(3, 0, 0, 2, 0, true));
     }
 
     [RequiresDockerFact]
@@ -175,7 +175,7 @@ public sealed class InjectImportEndpointTests
         (await after.InjectQueueStates.SingleAsync()).Version.Should().Be(queueVersionBefore + 1, "the creates bump the queue token once");
         var imported = await after.TelemetryEvents.Where(e => e.EventType == "injects.imported").ToListAsync();
         imported.Should().ContainSingle();
-        Payload(imported[0]).Should().BeEquivalentTo(new { created = 3, updated = 0, unchanged = 0, skipped = 2, failed = 0, dryRun = false });
+        Payload(imported[0]).Should().Be(new ImportedPayload(3, 0, 0, 2, 0, false));
         imported[0].Actor!.ActingHumanId.Should().Be(seeded.StaffUserId.ToString());
         (await after.TelemetryEvents.CountAsync(e => e.EventType == "inject_action"))
             .Should().Be(1, "only the console create emits an item action; the import emits its one event");
@@ -468,18 +468,10 @@ public sealed class InjectImportEndpointTests
         return string.Join("|", items) + "#" + string.Join("|", posts) + "#" + token;
     }
 
-    private static Dictionary<string, object> Payload(TelemetryEvent telemetry)
-    {
-        using var document = JsonDocument.Parse(telemetry.Payload!);
-        return document.RootElement.EnumerateObject().ToDictionary(
-            property => property.Name,
-            property => property.Value.ValueKind switch
-            {
-                JsonValueKind.True => true,
-                JsonValueKind.False => false,
-                _ => (object)property.Value.GetInt32(),
-            });
-    }
+    private static ImportedPayload Payload(TelemetryEvent telemetry) =>
+        JsonSerializer.Deserialize<ImportedPayload>(telemetry.Payload!, new JsonSerializerOptions(JsonSerializerDefaults.Web))!;
+
+    private sealed record ImportedPayload(int Created, int Updated, int Unchanged, int Skipped, int Failed, bool DryRun);
 
     private sealed record KestrelSeed(Guid ExerciseId, Guid StaffUserId, Guid FirePersona, Guid ResidentPersona);
 
