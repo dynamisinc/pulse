@@ -65,10 +65,18 @@ public sealed class LinkEmailClientSettings
 /// gives up after <see cref="SendTimeout"/> through a linked cancellation source.
 /// </para>
 /// <para>
+/// <b>Plain failure only when nothing can have been sent</b> (Copilot review on #487, 10/14). The send starts a
+/// long-running operation, so an answer that does not PROVE the message was refused leaves its fate unknown: no HTTP
+/// response (status <c>0</c>: DNS, connection reset or TLS, possibly after the request reached ACS), <c>408</c>, any
+/// <c>5xx</c>, and the send's own timeout are all <see cref="LinkMailSendOutcome.TimedOut"/> (unconfirmed: "check before
+/// sending again"). Only a definite refusal (a <c>4xx</c> other than <c>429</c>) and a credential failure (no token, so
+/// no request) are <see cref="LinkMailSendOutcome.Failed"/>. See <see cref="Classify"/>.
+/// </para>
+/// <para>
 /// <b>Logs (gotcha 8).</b> A failure is logged with the operation and a status only: the HTTP status, or
-/// <c>credential</c> / <c>timeout</c>. Never the exception message (a provider message can echo the recipient), the
-/// recipient, the subject, the body or the URL. Request and response bodies are never logged by the SDK either
-/// (<c>IsLoggingContentEnabled</c> is forced off).
+/// <c>no-response</c> / <c>credential</c> / <c>timeout</c>. Never the exception message (a provider message can echo the
+/// recipient), the recipient, the subject, the body or the URL. Request and response bodies are never logged by the SDK
+/// either (<c>IsLoggingContentEnabled</c> is forced off).
 /// </para>
 /// </remarks>
 public sealed partial class AcsParticipantLinkMailer : IParticipantLinkMailer
@@ -145,10 +153,10 @@ public sealed partial class AcsParticipantLinkMailer : IParticipantLinkMailer
         }
         catch (RequestFailedException exception)
         {
-            // Status 0 = no HTTP response (DNS, connection refused, TLS). The message is deliberately not logged.
+            // Status 0 = no HTTP response (DNS, connection reset, TLS). The message is deliberately not logged.
             var status = exception.Status == 0 ? "no-response" : exception.Status.ToString(CultureInfo.InvariantCulture);
             LogSendFailed(_logger, SendOperation, status);
-            return exception.Status == 429 ? LinkMailSendOutcome.RateLimited : LinkMailSendOutcome.Failed;
+            return Classify(exception.Status);
         }
         catch (AuthenticationFailedException)
         {
@@ -164,6 +172,20 @@ public sealed partial class AcsParticipantLinkMailer : IParticipantLinkMailer
             return LinkMailSendOutcome.TimedOut;
         }
     }
+
+    /// <summary>
+    /// What a <see cref="RequestFailedException"/> status means for ONE send: <c>429</c> is
+    /// <see cref="LinkMailSendOutcome.RateLimited"/> (throttled, nothing taken); <c>0</c> (no HTTP response),
+    /// <c>408</c> and any <c>5xx</c> are <see cref="LinkMailSendOutcome.TimedOut"/> (UNCONFIRMED: the provider may already
+    /// have accepted the message, so it is never offered for a blind resend); any other status, a definite refusal, is
+    /// <see cref="LinkMailSendOutcome.Failed"/>.
+    /// </summary>
+    private static LinkMailSendOutcome Classify(int status) => status switch
+    {
+        429 => LinkMailSendOutcome.RateLimited,
+        0 or 408 or >= 500 => LinkMailSendOutcome.TimedOut,
+        _ => LinkMailSendOutcome.Failed,
+    };
 
     [LoggerMessage(
         EventId = 1,

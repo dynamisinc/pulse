@@ -260,6 +260,49 @@ internal sealed class LinkEmailTestWorld
         return await request.ServiceProvider.GetRequiredService<LinkEmailService>().SendAsync(body);
     }
 
+    /// <summary>
+    /// Changes one account in its own context, past any filter, as a concurrent roster import or access action would
+    /// (Copilot review on #487: the batch must send to what is there at send time, not to what it planned).
+    /// </summary>
+    public async Task ChangeAccountAsync(Guid accountId, Action<Account> change)
+    {
+        await using var write = _fixture.CreateContext();
+        change(await write.Accounts.IgnoreQueryFilters().SingleAsync(a => a.Id == accountId));
+        await write.SaveChangesAsync();
+    }
+
+    /// <summary>Changes one link row in its own context, past any filter, as a concurrent staff link action would.</summary>
+    public async Task ChangeLinkAsync(Guid linkId, Action<ParticipantLink> change)
+    {
+        await using var write = _fixture.CreateContext();
+        change(await write.ParticipantLinks.IgnoreQueryFilters().SingleAsync(l => l.Id == linkId));
+        await write.SaveChangesAsync();
+    }
+
+    /// <summary>Revokes a link as story 03 does: <c>RevokedAt</c> stamped, the protected copy cleared.</summary>
+    public Task RevokeLinkAsync(Guid linkId) => ChangeLinkAsync(linkId, link =>
+    {
+        link.RevokedAt = DateTimeOffset.UtcNow;
+        link.ProtectedToken = null;
+    });
+
+    /// <summary>
+    /// Reissues a link IN PLACE as story 03 does (a new token, hash and protected copy, <c>Generation</c> + 1, not
+    /// revoked) and returns the new join URL. The old token is dead from then on.
+    /// </summary>
+    public async Task<string> ReissueLinkAsync(Guid linkId)
+    {
+        var token = ParticipantLinkTokens.Generate();
+        await ChangeLinkAsync(linkId, link =>
+        {
+            link.TokenHash = ParticipantLinkTokens.Hash(token);
+            link.ProtectedToken = new ParticipantLinkTokenProtector(KeyRing).Protect(token);
+            link.Generation += 1;
+            link.RevokedAt = null;
+        });
+        return $"{FrontendBase}/join/{token}";
+    }
+
     /// <summary>Every <c>participant.link.emailed</c> event persisted for <paramref name="exerciseId"/> (read past any filter).</summary>
     public async Task<List<TelemetryEvent>> EmailEventsAsync(Guid exerciseId)
     {
@@ -290,8 +333,11 @@ internal sealed class FakeParticipantLinkMailer : IParticipantLinkMailer
     /// <summary>Every message handed to the mailer, in order (including the ones answered as failures).</summary>
     public IReadOnlyList<LinkEmailMessage> Messages => _sent.ToArray();
 
-    /// <summary>Optional hook run on each send (e.g. to advance a clock).</summary>
-    public Action? OnSend { get; set; }
+    /// <summary>
+    /// Optional hook run on each send, with the message being sent, BEFORE it is answered (e.g. to change rows mid-batch,
+    /// as a concurrent roster import or link action would, deterministically between two sends).
+    /// </summary>
+    public Func<LinkEmailMessage, Task>? OnSend { get; set; }
 
     public FakeParticipantLinkMailer Answer(string recipient, LinkMailSendOutcome outcome)
     {
@@ -305,16 +351,20 @@ internal sealed class FakeParticipantLinkMailer : IParticipantLinkMailer
         return this;
     }
 
-    public Task<LinkMailSendOutcome> SendAsync(LinkEmailMessage message, CancellationToken cancellationToken)
+    public async Task<LinkMailSendOutcome> SendAsync(LinkEmailMessage message, CancellationToken cancellationToken)
     {
         _sent.Enqueue(message);
-        OnSend?.Invoke();
+        if (OnSend is { } onSend)
+        {
+            await onSend(message);
+        }
+
         if (_throwFor.Contains(message.RecipientAddress))
         {
             throw new InvalidOperationException($"boom for {message.RecipientAddress}");
         }
 
-        return Task.FromResult(_outcomes.TryGetValue(message.RecipientAddress, out var outcome) ? outcome : LinkMailSendOutcome.Sent);
+        return _outcomes.TryGetValue(message.RecipientAddress, out var outcome) ? outcome : LinkMailSendOutcome.Sent;
     }
 }
 

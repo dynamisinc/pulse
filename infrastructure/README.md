@@ -359,8 +359,9 @@ emails each selected participant their own personal sign-in link.
 - **Deploy prerequisite.** The grant below is a `roleAssignments` write: the same deploy-SP prerequisite as
   `deployAi` / `deployStorage` (see above).
 - **Propagation.** RBAC takes minutes to apply. In the first ~10 minutes after the deploy a send can fail
-  (`failed` / `sendFailed` in the roster; `acs-email-send -> 401`/`403`/`credential`/`timeout` in the API log).
-  Wait, then use "Send again to the N not sent".
+  (`failed` / `sendFailed` in the roster; `acs-email-send -> 401`/`403`/`credential` in the API log).
+  Wait, then select those people and email them again ("Send again to the N not sent" offers only the
+  `rateLimited` / `notAttempted` people, not `sendFailed` ones).
 - **Rate limits.** Azure-managed domains are capped at **5 emails a minute and 10 an hour per subscription**,
   and the cap cannot be raised. Fine for UAT testers. The API stops at the provider's first `429` and reports
   everyone left as `failed` / `rateLimited` ("email limit reached; send again to just these people later"),

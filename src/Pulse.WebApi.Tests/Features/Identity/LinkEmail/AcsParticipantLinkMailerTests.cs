@@ -23,8 +23,10 @@ using Pulse.WebApi.Features.Identity.LinkEmail;
 /// easy-login/13: <see cref="AcsParticipantLinkMailer"/> against a fake HTTP transport (no network). It proves the
 /// send is KEYLESS (a bearer token from the <c>TokenCredential</c>, never an HMAC access-key signature), the message is
 /// exactly one bare recipient with no cc/bcc/reply-to and tracking disabled, from <c>Email:SenderAddress</c>; that
-/// <c>202</c> is sent, <c>429</c> is rate-limited and anything else (including a credential failure) is failed, each
-/// after ONE attempt (no automatic resend); and that a failure log names the operation and status only.
+/// <c>202</c> is sent, <c>429</c> is rate-limited, an answer that leaves the outcome unknown (no response, <c>408</c>,
+/// <c>5xx</c>, a timeout) is UNCONFIRMED (<see cref="LinkMailSendOutcome.TimedOut"/>), and a definite refusal (any other
+/// <c>4xx</c>) or a credential failure is failed, each after ONE attempt (no automatic resend); and that a failure log
+/// names the operation and status only.
 /// </summary>
 public sealed class AcsParticipantLinkMailerTests
 {
@@ -76,11 +78,21 @@ public sealed class AcsParticipantLinkMailerTests
 
     [Theory]
     [InlineData(HttpStatusCode.TooManyRequests, LinkMailSendOutcome.RateLimited, "429")]
-    [InlineData(HttpStatusCode.InternalServerError, LinkMailSendOutcome.Failed, "500")]
-    [InlineData(HttpStatusCode.ServiceUnavailable, LinkMailSendOutcome.Failed, "503")]
-    [InlineData(HttpStatusCode.Unauthorized, LinkMailSendOutcome.Failed, "401")]
+
+    // Copilot review on #487: the send is an LRO start (WaitUntil.Started). A 408 or a 5xx does not say the message was
+    // NOT accepted (a gateway can fail after ACS took it), so it is unconfirmed, never offered for a blind resend.
+    [InlineData(HttpStatusCode.RequestTimeout, LinkMailSendOutcome.TimedOut, "408")]
+    [InlineData(HttpStatusCode.InternalServerError, LinkMailSendOutcome.TimedOut, "500")]
+    [InlineData(HttpStatusCode.BadGateway, LinkMailSendOutcome.TimedOut, "502")]
+    [InlineData(HttpStatusCode.ServiceUnavailable, LinkMailSendOutcome.TimedOut, "503")]
+    [InlineData(HttpStatusCode.GatewayTimeout, LinkMailSendOutcome.TimedOut, "504")]
+
+    // A definite refusal: the provider answered and did not take the message.
     [InlineData(HttpStatusCode.BadRequest, LinkMailSendOutcome.Failed, "400")]
-    public async Task AProviderRefusal_IsOneAttempt_MappedToAnOutcome_AndLoggedWithOperationAndStatusOnly(
+    [InlineData(HttpStatusCode.Unauthorized, LinkMailSendOutcome.Failed, "401")]
+    [InlineData(HttpStatusCode.Forbidden, LinkMailSendOutcome.Failed, "403")]
+    [InlineData(HttpStatusCode.NotFound, LinkMailSendOutcome.Failed, "404")]
+    public async Task AProviderAnswer_IsOneAttempt_MappedToAnOutcome_AndLoggedWithOperationAndStatusOnly(
         HttpStatusCode status,
         LinkMailSendOutcome expected,
         string loggedStatus)
@@ -95,6 +107,24 @@ public sealed class AcsParticipantLinkMailerTests
         transport.Requests.Should().ContainSingle("no automatic retry: a resend could email the person twice");
         var line = logs.Messages.Should().ContainSingle(m => m.Contains("Link email send failed", StringComparison.Ordinal)).Subject;
         line.Should().Contain(AcsParticipantLinkMailer.SendOperation).And.Contain(loggedStatus);
+        AssertNoSecret(logs.All);
+    }
+
+    [Fact]
+    public async Task NoHttpResponse_IsUnconfirmed_NotPlainlyFailed_AndLoggedAsNoResponseOnly()
+    {
+        // Copilot review on #487: status 0 (DNS, connection reset, TLS) can happen AFTER the request reached ACS, so the
+        // message may have been accepted. It is the unconfirmed outcome (timedOut: "check before sending again").
+        var transport = new FakeAcsEmailHandler(HttpStatusCode.Accepted, dropTheConnection: true);
+        var logs = new LinkEmailCapturingLoggerProvider();
+        var mailer = CreateMailer(transport, logs);
+
+        var outcome = await mailer.SendAsync(Message(), CancellationToken.None);
+
+        outcome.Should().Be(LinkMailSendOutcome.TimedOut, "with no HTTP response nobody knows whether ACS took the message");
+        transport.Requests.Should().ContainSingle("no automatic retry: a resend could email the person twice");
+        logs.Messages.Should().ContainSingle(m => m.Contains("Link email send failed", StringComparison.Ordinal))
+            .Which.Should().Contain(AcsParticipantLinkMailer.SendOperation).And.Contain("no-response");
         AssertNoSecret(logs.All);
     }
 
@@ -259,13 +289,21 @@ public sealed class AcsParticipantLinkMailerTests
     }
 }
 
-/// <summary>A fake Communication Services email endpoint: records each request and answers with a fixed status.</summary>
+/// <summary>
+/// A fake Communication Services email endpoint: records each request and answers with a fixed status, or (with
+/// <c>dropTheConnection</c>) fails with no HTTP response after the request was sent, as a connection reset would.
+/// </summary>
 internal sealed class FakeAcsEmailHandler : HttpMessageHandler
 {
     private readonly HttpStatusCode _status;
+    private readonly bool _dropTheConnection;
     private readonly ConcurrentQueue<RecordedEmailRequest> _requests = new();
 
-    public FakeAcsEmailHandler(HttpStatusCode status) => _status = status;
+    public FakeAcsEmailHandler(HttpStatusCode status, bool dropTheConnection = false)
+    {
+        _status = status;
+        _dropTheConnection = dropTheConnection;
+    }
 
     public IReadOnlyList<RecordedEmailRequest> Requests => _requests.ToArray();
 
@@ -278,6 +316,12 @@ internal sealed class FakeAcsEmailHandler : HttpMessageHandler
             request.Headers.Authorization?.ToString(),
             request.Headers.Contains("x-ms-content-sha256"),
             body));
+
+        if (_dropTheConnection)
+        {
+            // The message text names the recipient, to prove it is never logged.
+            throw new HttpRequestException("The connection was reset while sending to jane.smith@example.org");
+        }
 
         var operationId = Guid.NewGuid().ToString();
         var response = new HttpResponseMessage(_status)

@@ -8,8 +8,9 @@ namespace Pulse.WebApi.Features.Identity.LinkEmail;
 /// <remarks>
 /// <b>One place decides "configured".</b> <see cref="IsConfigured"/> is what the endpoint's <c>503</c> reads, and it is
 /// <c>true</c> only for a host whose <c>Email:*</c> settings are usable (<see cref="LinkEmailSettings.TryRead"/>). A
-/// mailer never throws for a provider failure: it answers <see cref="LinkMailSendOutcome.Failed"/> or
-/// <see cref="LinkMailSendOutcome.RateLimited"/>, so one bad send cannot abort a batch.
+/// mailer never throws for a provider failure: it answers <see cref="LinkMailSendOutcome.Failed"/>,
+/// <see cref="LinkMailSendOutcome.RateLimited"/> or <see cref="LinkMailSendOutcome.TimedOut"/>, so one bad send cannot
+/// abort a batch.
 /// </remarks>
 public interface IParticipantLinkMailer
 {
@@ -33,12 +34,16 @@ public enum LinkMailSendOutcome
     RateLimited,
 
     /// <summary>
-    /// The send did not finish within its bound. NOT CONFIRMED either way: the provider may already have accepted the
-    /// message, so it must not be blindly sent again (it could email the person twice).
+    /// The send's fate is unknown: it did not finish within its bound, got no HTTP response, or the provider answered
+    /// <c>408</c> or a <c>5xx</c>. NOT CONFIRMED either way: the provider may already have accepted the message, so it
+    /// must not be blindly sent again (it could email the person twice).
     /// </summary>
     TimedOut,
 
-    /// <summary>Anything else: refused, unreachable, or the credential failed. Nothing is known to be sent.</summary>
+    /// <summary>
+    /// A definite refusal (a <c>4xx</c> other than <c>429</c>), the credential failed (no token, so no request), or an
+    /// unexpected fault. Nothing is known to be sent.
+    /// </summary>
     Failed,
 }
 

@@ -31,6 +31,12 @@ deliberately minimal.
       or `failed` (a generic reason). Sends are sequential with a short pause; **one failure never aborts the batch**,
       except the provider's `429`: no further send is attempted; the rest are `failed`/`rateLimited` with no event
       *(amended 2026-10-13, Gate-1 S-1)*.
+      A send whose fate is unknown (no HTTP response, `408`, a `5xx`, or the send's own timeout) is `failed`/`timedOut`
+      (unconfirmed: check before sending again); `sendFailed` is only a definite refusal (another `4xx`) or a credential
+      failure. Each planned send first **re-reads that participant** (same scope and eligibility rules) and uses the
+      address and link on file at that moment: one who has become ineligible since the batch was planned is `skipped`
+      with the matching reason (`notFound` if no longer on this exercise's roster), and a reissued link is sent as the
+      new link *(amended 10/14, Copilot review on #487)*.
       Behind `EngineCockpitStaffAuthorizationFilter` + `RosterStaffRoleFilter`, `Cache-Control: no-store`.
 - [ ] **Given** `Email:Endpoint` is unset, **then** the endpoint answers `503` ProblemDetails ("Email delivery is not
       configured") and sends nothing, `GET /api/staff/roster` reports `capabilities.emailLinks: false`, and the host
@@ -57,7 +63,9 @@ deliberately minimal.
 - [ ] **Given** the frontend slice, **then** `<EmailLinksButton selection={ids} />` (mounted by the orchestrator into
       the roster's `renderEmailAction`, and only when `capabilities.emailLinks`) shows **Email links (N)**, confirms
       ("This emails each person a personal sign-in link. An emailed link can't be recalled; reissue it to cancel it."),
-      calls the endpoint, and shows a result summary (counts by status and the reasons for skipped and failed). It is
+      calls the endpoint, and shows a result summary (counts by status and the reasons for skipped and failed). Its
+      "Send again to the N not sent" re-posts **only** the `rateLimited` and `notAttempted` ids, never `sendFailed` or
+      `timedOut` *(amended 10/14, Copilot review on #487)*. It is
       COBRA, mock-first against the frozen contract, and renders nothing when the capability is off.
 
 ### Cross-cutting
@@ -102,3 +110,12 @@ no secrets in events/logs, HTML encoding of a hostile name), `LinkEmailEndpoints
 (200/400/401/403/503, `no-store`), `LinkEmailIsolationTests` (`[RequiresDockerFact]`), `NullParticipantLinkMailerTests`
 (startup with no config). `features/participantAdmin/email/*.test.tsx` (button hidden without the capability, confirm,
 summary). Infra: `az bicep build` in CI. Manual: send to a controlled mailbox and tap the link (walk-through step 9).
+
+Copilot review on #487 (10/14): `AcsParticipantLinkMailerTests.AProviderAnswer_IsOneAttempt_MappedToAnOutcome_AndLoggedWithOperationAndStatusOnly`
+and `NoHttpResponse_IsUnconfirmed_NotPlainlyFailed_AndLoggedAsNoResponseOnly` (AC-1, unconfirmed sends);
+`LinkEmailServiceTests.AnAddressChangedAfterPlanning_IsSentToTheCurrentAddress_NeverTheOldOne`,
+`ALinkRevokedAfterPlanning_IsSkippedNoActiveLink_AndAReissuedOne_IsSentWithTheNewLink`,
+`AnAccountDisabledOrItsAddressRemovedAfterPlanning_IsSkippedWithThatReason_AndNothingIsSentOrRecorded` and
+`LinkEmailIsolationTests.TheSendTimeReRead_IsScopedToo_AParticipantNoLongerInTheCallersExercise_IsNotFound_AndNeverEmailed`
+(AC-1 and Isolation, send-time re-read); `LinkEmailEndpointsHttpTests` 401/403 refusals carry `no-store` (AC-1);
+`emailLinksFormat.test.ts` and `EmailLinksButton.test.tsx` resend set (AC-7).

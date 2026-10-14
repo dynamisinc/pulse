@@ -373,6 +373,114 @@ public sealed class LinkEmailServiceTests
     }
 
     [RequiresDockerFact]
+    public async Task AnAddressChangedAfterPlanning_IsSentToTheCurrentAddress_NeverTheOldOne()
+    {
+        // Copilot review on #487: a batch runs up to 150 s, and a roster import can change Account.Email meanwhile. Each
+        // participant is re-read just before their send, so the email goes to the address on file NOW. The change is
+        // made while A's send is in flight, i.e. after B was planned and before B's send: deterministic, no sleep.
+        var exercise = await _world.SeedExerciseAsync();
+        var staff = await _world.SeedStaffAsync((exercise, "controller"));
+        var first = await _world.SeedParticipantAsync(exercise, "A First");
+        var moved = await _world.SeedParticipantAsync(exercise, "B Moved");
+        var newAddress = $"new-{Guid.NewGuid():N}@example.org";
+        var mailer = new FakeParticipantLinkMailer
+        {
+            OnSend = async message =>
+            {
+                if (message.RecipientAddress == first.Email)
+                {
+                    await _world.ChangeAccountAsync(moved.AccountId, account => account.Email = newAddress);
+                }
+            },
+        };
+
+        var result = await _world.SendAsync(exercise, staff, mailer);
+
+        result.Body!.Results.Select(r => (r.ParticipantId, r.Status, r.Reason)).Should().Equal(
+            [
+                (first.AccountId.ToString(), RosterEmailStatuses.Sent, null),
+                (moved.AccountId.ToString(), RosterEmailStatuses.Sent, null),
+            ]);
+        mailer.Messages.Select(m => m.RecipientAddress).Should().Equal(
+            [first.Email, newAddress], "B's link goes to the address on file at send time, not the one planned");
+        mailer.Messages[1].HtmlBody.Should().Contain(moved.JoinUrl, "the link itself did not change");
+    }
+
+    [RequiresDockerFact]
+    public async Task ALinkRevokedAfterPlanning_IsSkippedNoActiveLink_AndAReissuedOne_IsSentWithTheNewLink()
+    {
+        // The existing eligibility rule, applied at send time: a revoked link is noActiveLink (skipped, no send, no event);
+        // a reissued link is ACTIVE with a new token, so it is emailed, carrying the NEW link (the old one is dead).
+        var exercise = await _world.SeedExerciseAsync();
+        var staff = await _world.SeedStaffAsync((exercise, "controller"));
+        var first = await _world.SeedParticipantAsync(exercise, "A First");
+        var revoked = await _world.SeedParticipantAsync(exercise, "B Revoked");
+        var reissued = await _world.SeedParticipantAsync(exercise, "C Reissued");
+        string? newJoinUrl = null;
+        var mailer = new FakeParticipantLinkMailer
+        {
+            OnSend = async message =>
+            {
+                if (message.RecipientAddress == first.Email)
+                {
+                    await _world.RevokeLinkAsync(revoked.LinkId!.Value);
+                    newJoinUrl = await _world.ReissueLinkAsync(reissued.LinkId!.Value);
+                }
+            },
+        };
+
+        var result = await _world.SendAsync(exercise, staff, mailer);
+
+        result.Body!.Results.Select(r => (r.ParticipantId, r.Status, r.Reason)).Should().Equal(
+            [
+                (first.AccountId.ToString(), RosterEmailStatuses.Sent, null),
+                (revoked.AccountId.ToString(), RosterEmailStatuses.Skipped, RosterEmailSkipReasons.NoActiveLink),
+                (reissued.AccountId.ToString(), RosterEmailStatuses.Sent, null),
+            ]);
+        mailer.Messages.Select(m => m.RecipientAddress).Should().Equal(
+            [first.Email, reissued.Email], "a link revoked after planning is never emailed");
+        var reissuedMessage = mailer.Messages[1];
+        reissuedMessage.HtmlBody.Should().Contain(newJoinUrl).And.NotContain(reissued.Token!, "never the dead link");
+        reissuedMessage.PlainTextBody.Should().Contain(newJoinUrl).And.NotContain(reissued.Token!);
+
+        var events = await _world.EmailEventsAsync(exercise);
+        events.Select(e => e.Target!.EntityId).Should().BeEquivalentTo(
+            [first.LinkId.ToString(), reissued.LinkId.ToString()], "a skip at send time records nothing, like any skip");
+    }
+
+    [RequiresDockerFact]
+    public async Task AnAccountDisabledOrItsAddressRemovedAfterPlanning_IsSkippedWithThatReason_AndNothingIsSentOrRecorded()
+    {
+        var exercise = await _world.SeedExerciseAsync();
+        var staff = await _world.SeedStaffAsync((exercise, "controller"));
+        var first = await _world.SeedParticipantAsync(exercise, "A First");
+        var disabled = await _world.SeedParticipantAsync(exercise, "B Disabled");
+        var cleared = await _world.SeedParticipantAsync(exercise, "C Cleared");
+        var mailer = new FakeParticipantLinkMailer
+        {
+            OnSend = async message =>
+            {
+                if (message.RecipientAddress == first.Email)
+                {
+                    await _world.ChangeAccountAsync(disabled.AccountId, account => account.DisabledAt = DateTimeOffset.UtcNow);
+                    await _world.ChangeAccountAsync(cleared.AccountId, account => account.Email = null);
+                }
+            },
+        };
+
+        var result = await _world.SendAsync(exercise, staff, mailer);
+
+        result.Body!.Results.Select(r => (r.ParticipantId, r.Status, r.Reason)).Should().Equal(
+            [
+                (first.AccountId.ToString(), RosterEmailStatuses.Sent, null),
+                (disabled.AccountId.ToString(), RosterEmailStatuses.Skipped, RosterEmailSkipReasons.Disabled),
+                (cleared.AccountId.ToString(), RosterEmailStatuses.Skipped, RosterEmailSkipReasons.NoEmail),
+            ]);
+        mailer.Messages.Select(m => m.RecipientAddress).Should().Equal([first.Email], "neither is emailed on the planned data");
+        (await _world.EmailEventsAsync(exercise)).Should().ContainSingle().Which.Target!.EntityId.Should().Be(first.LinkId.ToString());
+    }
+
+    [RequiresDockerFact]
     public async Task AnEvaluator_IsForbidden_AndNoSessionIsUnauthenticated_AndNeitherSendsAnything()
     {
         var exercise = await _world.SeedExerciseAsync();

@@ -30,7 +30,10 @@ public enum LinkEmailOutcome
 /// <summary>The fixed, generic <c>reason</c> values of a <c>failed</c> result (never a provider message).</summary>
 public static class RosterEmailFailureReasons
 {
-    /// <summary>The provider refused the send, could not be reached, timed out, or the credential failed.</summary>
+    /// <summary>
+    /// The provider refused the send (a definite <c>4xx</c> other than <c>429</c>), the credential failed, or the send
+    /// faulted unexpectedly. Not offered by the roster's "Send again" (a refusal would most likely be refused again).
+    /// </summary>
     public const string SendFailed = "sendFailed";
 
     /// <summary>
@@ -43,8 +46,9 @@ public static class RosterEmailFailureReasons
     public const string NotAttempted = "notAttempted";
 
     /// <summary>
-    /// The send timed out. NOT CONFIRMED either way: the provider may already have accepted it, so check with the person
-    /// before sending again (a blind resend could email them twice).
+    /// The send's fate is unknown: it timed out, got no HTTP response, or the provider answered <c>408</c> or a <c>5xx</c>.
+    /// NOT CONFIRMED either way: the provider may already have accepted it, so check with the person before sending again
+    /// (a blind resend could email them twice).
     /// </summary>
     public const string TimedOut = "timedOut";
 }
