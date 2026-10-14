@@ -19,8 +19,8 @@ public sealed class MselReaderTests
 {
     private static readonly MselRowSpec[] TwoRows =
     [
-        new(1, "StartEx", "Exercise starts", "08:00", "1", "08:00", "Director", "All", "Verbal"),
-        new(2, "Boil water", "BOIL WATER NOTICE", "08:05", "1", "08:05", "@KestrelCoEM", "Public", "Social Media"),
+        new("1", "StartEx", "Exercise starts", "08:00", "1", "08:00", "Director", "All", "Verbal"),
+        new("2", "Boil water", "BOIL WATER NOTICE", "08:05", "1", "08:05", "@KestrelCoEM", "Public", "Social Media"),
     ];
 
     // ---- CSV ----
@@ -41,7 +41,7 @@ public sealed class MselReaderTests
     {
         var rows = new[]
         {
-            new MselRowSpec(7, "Quote, comma", "Line one,\r\nline \"two\"\nline three", "08:00", "1", "08:00", "@a", "b", "Social"),
+            new MselRowSpec("7", "Quote, comma", "Line one,\r\nline \"two\"\nline three", "08:00", "1", "08:00", "@a", "b", "Social"),
         };
 
         var read = InjectImportService.Read(MselFixture.Csv(rows), "msel.csv", "text/csv");
@@ -166,7 +166,7 @@ public sealed class MselReaderTests
     public void Xlsx_MoreThan2000DataRows_IsRefused()
     {
         var rows = Enumerable.Range(1, 2001)
-            .Select(i => new MselRowSpec(i, "t", "d", "08:00", "1", "08:00", "@a", "b", "Phone"))
+            .Select(i => new MselRowSpec(i.ToString(System.Globalization.CultureInfo.InvariantCulture), "t", "d", "08:00", "1", "08:00", "@a", "b", "Phone"))
             .ToList();
 
         InjectImportService.Read(MselFixture.Xlsx(rows), "x.xlsx", null).Error.Should().Contain("more than 2000 data rows");
@@ -185,6 +185,16 @@ public sealed class MselReaderTests
         InjectImportService.Read(stream.ToArray(), "x.xlsx", null).Error.Should().Be(MselWorkbookReader.UnreadableMessage);
     }
 
+    [Theory]
+    [InlineData(new byte[] { 0x50, 0x4B, 0x03, 0x04 })]
+    [InlineData(new byte[] { 0x50, 0x4B, 0x03, 0x04, 0x14, 0x00, 0x00, 0x00, 0x08, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0x01, 0x02 })]
+    public void Xlsx_AMalformedZip_IsTheUnreadable400_NeverAnException(byte[] content)
+    {
+        var read = () => InjectImportService.Read(content, "x.xlsx", null);
+
+        read.Should().NotThrow().Which.Error.Should().Be(MselWorkbookReader.UnreadableMessage);
+    }
+
     [Fact]
     public void Xlsx_AZipBomb_IsRefusedBeforeClosedXmlExpandsIt()
     {
@@ -193,13 +203,13 @@ public sealed class MselReaderTests
         {
             using var entry = zip.CreateEntry("xl/sharedStrings.xml", System.IO.Compression.CompressionLevel.Optimal).Open();
             var zeros = new byte[1024 * 1024];
-            for (var i = 0; i < 70; i++)
+            for (var i = 0; i < 20; i++)
             {
                 entry.Write(zeros);
             }
         }
 
-        stream.Length.Should().BeLessThan(1024 * 1024, "70 MiB of zeros compresses to well under the upload cap");
+        stream.Length.Should().BeLessThan(1024 * 1024, "20 MiB of zeros (past the 16 MiB bound) compresses to well under the upload cap");
         InjectImportService.Read(stream.ToArray(), "x.xlsx", null).Error.Should().Be(MselWorkbookReader.TooLargeUnpackedMessage);
     }
 

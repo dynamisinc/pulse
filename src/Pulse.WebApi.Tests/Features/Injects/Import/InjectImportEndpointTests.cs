@@ -116,6 +116,7 @@ public sealed class InjectImportEndpointTests
             ([0xFF, 0xD8, 0xFF, 0xE0, 0x00], "photo.csv", "text/csv", MselFileFormat.NotXlsxOrCsvMessage),
             (missingColumns, "msel.csv", "text/csv", "the header row is missing the required column(s): Delivery Method, From / Source."),
             (new byte[MselLimits.MaxFileBytes + 1], "big.csv", "text/csv", InjectImportService.TooLargeMessage),
+            (new byte[MselLimits.MaxRequestBytes + 1024], "bigger.csv", "text/csv", InjectImportService.TooLargeMessage),
         };
 
         foreach (var (content, name, type, expected) in cases)
@@ -204,12 +205,12 @@ public sealed class InjectImportEndpointTests
         var photo = await AddMediaAsync(host, seeded.ExerciseId, "brown-water.jpg", MediaKinds.Image);
         var rows = new List<MselRowSpec>
         {
-            new(10, "Good", "With a photo", "08:00", "1", "08:00", "@KestrelFire", "Public", "Social Media", PulseMedia: "brown-water.jpg"),
-            new(11, "Unknown persona", "x", "08:01", "1", "08:01", "@Nobody", "Public", "Social Media"),
-            new(12, "Unknown media", "x", "08:02", "1", "08:02", "@KestrelFire", "Public", "Social Media", PulseMedia: "missing.png"),
-            new(13, "Too long", new string('w', 281), "08:03", "1", "08:03", "@KestrelFire", "Public", "Social Media"),
-            new(10, "Duplicate", "x", "08:04", "1", "08:04", "@KestrelFire", "Public", "Social Media"),
-            new(14, "Unknown controller", "fine", "08:05", "1", "08:05", "@KestrelFire", "Public", "Social Media", Controller: "Pat Nobody"),
+            new("10", "Good", "With a photo", "08:00", "1", "08:00", "@KestrelFire", "Public", "Social Media", PulseMedia: "brown-water.jpg"),
+            new("11", "Unknown persona", "x", "08:01", "1", "08:01", "@Nobody", "Public", "Social Media"),
+            new("12", "Unknown media", "x", "08:02", "1", "08:02", "@KestrelFire", "Public", "Social Media", PulseMedia: "missing.png"),
+            new("13", "Too long", new string('w', 281), "08:03", "1", "08:03", "@KestrelFire", "Public", "Social Media"),
+            new("10", "Duplicate", "x", "08:04", "1", "08:04", "@KestrelFire", "Public", "Social Media"),
+            new("14", "Unknown controller", "fine", "08:05", "1", "08:05", "@KestrelFire", "Public", "Social Media", Controller: "Pat Nobody"),
         };
 
         var report = await ImportOkAsync(host, MselFixture.Xlsx(rows, pulseMedia: true), dryRun: false);
@@ -314,6 +315,60 @@ public sealed class InjectImportEndpointTests
         (await host.GetQueueAsync()).Items.Select(item => item.Title).Should().Equal("Resident photo", "Day two", "Boil water notice");
     }
 
+    [RequiresDockerFact]
+    public async Task ReImport_ABlankResponsibleController_KeepsTheConsoleAssignment_AndTheFileStaysUnchanged()
+    {
+        await using var host = await StartAsync();
+        var seeded = await SeedKestrelAsync(host);
+        var file = Kestrel(seeded).Xlsx;
+        await ImportOkAsync(host, file, dryRun: false);
+        var photo = (await host.GetQueueAsync()).Items.Single(item => item.Title == "Resident photo");
+        photo.AssigneeId.Should().BeNull("the row's Responsible Controller cell is blank");
+
+        // A controller assigns it in the console (the queue's own edit path), changing nothing else.
+        var assign = await host.PutAsync(photo.Id, new
+        {
+            kind = photo.Kind,
+            title = photo.Title,
+            notes = photo.Notes,
+            plannedMinute = photo.PlannedMinute,
+            assigneeId = seeded.StaffUserId.ToString(),
+            version = photo.Version,
+            posts = photo.Posts.Select(post => new { id = post.Id, personaId = post.PersonaId, text = post.Text }).ToArray(),
+        });
+        assign.StatusCode.Should().Be(HttpStatusCode.OK, await assign.Content.ReadAsStringAsync());
+        var before = await SnapshotAsync(host, seeded.ExerciseId);
+
+        var again = await ImportOkAsync(host, file, dryRun: false);
+
+        (again.CreatedCount, again.UpdatedCount, again.UnchangedCount, again.FailedCount).Should().Be((0, 0, 3, 0),
+            "the same file must be all unchanged even after a console assignment (Gate-1 M-2)");
+        (await host.GetQueueAsync()).Items.Single(item => item.Title == "Resident photo").AssigneeId
+            .Should().Be(seeded.StaffUserId.ToString());
+        (await SnapshotAsync(host, seeded.ExerciseId)).Should().Be(before);
+    }
+
+    [RequiresDockerFact]
+    public async Task TextInjectNumbers_MatchCaseInsensitively_ADuplicateFails_AndAReImportIsUnchangedNot409()
+    {
+        await using var host = await StartAsync();
+        var seeded = await SeedKestrelAsync(host);
+        MselRowSpec Row(string injectNumber, string title) =>
+            new(injectNumber, title, "Water is brown", "08:00", "1", "08:00", "@KestrelFire", "Public", "Social Media");
+
+        var duplicate = await ImportOkAsync(host, MselFixture.Xlsx([Row("INJ-1", "first"), Row("inj-1 ", "second")]), dryRun: true);
+        duplicate.Rows.Select(row => row.Status).Should().Equal("created", "failed");
+        duplicate.Rows[1].Message.Should().Be("duplicate of row 2");
+
+        await ImportOkAsync(host, MselFixture.Xlsx([Row("INJ-1", "first")]), dryRun: false);
+        var again = await ImportOkAsync(host, MselFixture.Xlsx([Row("inj-1 ", "first")]), dryRun: false);
+
+        again.Rows.Should().ContainSingle().Which.Status.Should().Be(
+            "unchanged", "'inj-1 ' is the same Inject # as 'INJ-1' — no duplicate insert, no unique-index 409");
+        await using var db = host.Db(seeded.ExerciseId);
+        (await db.InjectItems.Select(item => item.ExternalRef).ToListAsync()).Should().Equal("INJ-1");
+    }
+
     // ---- XC-001: isolation ----
 
     [RequiresDockerFact]
@@ -327,10 +382,10 @@ public sealed class InjectImportEndpointTests
         host.ActAs(b.ExerciseId, b.StaffUserId);
         var rows = new List<MselRowSpec>
         {
-            new(1, "A's handle", "x", "08:00", "1", "08:00", "@KestrelFire", "Public", "Social Media"),
-            new(2, "Unknown handle", "x", "08:01", "1", "08:01", "@NeverExisted", "Public", "Social Media"),
-            new(3, "A's media", "x", "08:02", "1", "08:02", "@BCountyEM", "Public", "Social Media", PulseMedia: "only-in-a.jpg"),
-            new(4, "B's own", "x", "08:03", "1", "08:03", "@BCountyEM", "Public", "Social Media"),
+            new("1", "A's handle", "x", "08:00", "1", "08:00", "@KestrelFire", "Public", "Social Media"),
+            new("2", "Unknown handle", "x", "08:01", "1", "08:01", "@NeverExisted", "Public", "Social Media"),
+            new("3", "A's media", "x", "08:02", "1", "08:02", "@BCountyEM", "Public", "Social Media", PulseMedia: "only-in-a.jpg"),
+            new("4", "B's own", "x", "08:03", "1", "08:03", "@BCountyEM", "Public", "Social Media"),
         };
 
         var report = await ImportOkAsync(host, MselFixture.Xlsx(rows, pulseMedia: true), dryRun: false);

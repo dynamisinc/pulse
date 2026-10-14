@@ -23,8 +23,8 @@ public static class ImportRequests
 
     /// <summary>
     /// The edit body for a candidate whose item exists: the MSEL-owned fields from the file; the child's identity, its
-    /// reply target and its seeded engagement kept as they are (the MSEL has no columns for them); and, when the file's
-    /// <c>Responsible Controller</c> did not match anyone, the item's current assignee kept too.
+    /// reply target and its seeded engagement kept as they are (the MSEL has no columns for them); and, unless the file's
+    /// <c>Responsible Controller</c> matched someone, the item's current assignee kept too (blank or unmatched alike).
     /// </summary>
     /// <param name="candidate">The candidate.</param>
     /// <param name="item">The existing item, with its children loaded.</param>
@@ -51,7 +51,7 @@ public static class ImportRequests
                 Reply = child.BaselineReply,
             };
 
-        var assignee = candidate.AssigneeUnmatched ? item.AssigneeId : candidate.AssigneeId;
+        var assignee = candidate.KeepExistingAssignee ? item.AssigneeId : candidate.AssigneeId;
         return Build(candidate, assignee, child?.Id, replyTo, baseline);
     }
 

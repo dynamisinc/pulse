@@ -96,8 +96,10 @@ public static class MselWorkbookReader
 
             return null;
         }
-        catch (InvalidDataException)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
+            // Any malformed zip (InvalidDataException, IOException, NotSupportedException, ArgumentException …) is the
+            // readable 400, never a 500 (Gate-1 L-7).
             return UnreadableMessage;
         }
     }

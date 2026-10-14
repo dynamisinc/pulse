@@ -71,7 +71,8 @@ All in `src/Pulse.WebApi.Tests/Features/Injects/Import/` (fixture: `MselFixture`
   `MselReaderTests.ARenamedTextFile_IsNotAWorkbook_MagicBytesDecide`, `.AWorkbookNamedCsv_IsStillReadAsAWorkbook`,
   `.BinaryOrNonUtf8Content_IsRefused`, `.AnEmptyFile_AndAnOversizedFile_AreRefused`, `.Xlsx_CadenceExport_ReadsTheMselSheet_WithTheNumericInjectNumberAsText`,
   `.Xlsx_WithoutAnMselSheet_UsesTheFirstSheet`, `.Xlsx_WithNoUsableSheet_IsRefused`, `.Xlsx_MoreThan2000DataRows_IsRefused`,
-  `.Xlsx_AZipThatIsNotAWorkbook_IsRefusedAsUnreadable`, `.Xlsx_AZipBomb_IsRefusedBeforeClosedXmlExpandsIt`,
+  `.Xlsx_AZipThatIsNotAWorkbook_IsRefusedAsUnreadable`, `.Xlsx_AMalformedZip_IsTheUnreadable400_NeverAnException`,
+  `.Xlsx_AZipBomb_IsRefusedBeforeClosedXmlExpandsIt`,
   `.Csv_CadenceExport_ReadsHeaderAndRows_WithSpreadsheetRowNumbers_AndTheBomDropped`, `.Csv_QuotedCellsWithCommasLineBreaksAndQuotes_AreOneCell`,
   `.Csv_BlankLinesAndCommaOnlyLines_AreSkipped_ButStillCountTowardsRowNumbers`, `.Csv_AQuotedCellThatNeverCloses_IsRefused`,
   `.Csv_NoHeader_IsRefused`, `.Csv_MoreThan2000DataRows_IsRefused_And2000IsAccepted`;
@@ -81,14 +82,17 @@ All in `src/Pulse.WebApi.Tests/Features/Injects/Import/` (fixture: `MselFixture`
   `.Apply_TheCsvExport_ImportsExactlyLikeTheXlsx`; `MselImportPlannerTests.PlannedMinute_DF11_CountsFromTheEarliestScenarioDayAndTimeOfAnyRow`,
   `.PlannedMinute_FallsBackToScheduledTime_WhenNoRowHasAScenarioTime_AndIsNullWithNeither`, `.PlannedMinute_ARowWithoutTheChosenTime_IsUnplanned_AndAnUnreadableTimeWarns`,
   `.Mapping_PersonaByHandleWithTheAtStripped_ThenByExactDisplayName_CaseInsensitive`, `.Mapping_TitleNotesAssigneeTextAndExternalRef`,
-  `.Mapping_ABlankTitleFallsBackToInjectNumber_ALongTitleAndNotesAreTruncatedWithAWarning`, `.Mapping_PulseMediaByFileName_NewestOfTwoSameNamedFilesWins_AltIsTheStem`;
+  `.Mapping_ABlankTitleFallsBackToInjectNumber_ALongTitleAndNotesAreTruncatedWithAWarning`, `.Mapping_PulseMediaByFileName_NewestOfTwoSameNamedFilesWins_AltIsTheStem`,
+  `.Mapping_OnlyAMatchedResponsibleController_ChangesAnExistingAssignee_ABlankCellKeepsIt`;
   `MselReaderTests.Xlsx_RealTimeCells_ReadAsTimesOfDay`
 - **AC-5 row failures:** `InjectImportEndpointTests.RowFailures_AreReported_AndTheOtherRowsStillApply`;
   `MselImportPlannerTests.RowFailures_PersonaAndMedia`, `.RowFailures_EmptyOrOver280TextAfterSanitizing`,
-  `.RowFailures_ADuplicateInjectNumber_FailsTheLaterRow`, `.Mapping_AnUnknownResponsibleController_IsAWarningNotAFailure`
+  `.RowFailures_ADuplicateInjectNumber_FailsTheLaterRow`, `.RowFailures_ADuplicateTextInjectNumber_IgnoresCaseAndSurroundingSpace`,
+  `.Mapping_AnUnknownResponsibleController_IsAWarningNotAFailure`
 - **AC-6 idempotent re-import (DF-10):** `InjectImportEndpointTests.ReImportingTheSameFile_IsAllUnchanged_AndWritesNothing`,
   `.AChangedPendingRow_IsUpdated_WithTheVersionBumped_AndSaysWhatChanged`, `.AChangedRowWhoseItemAlreadyFired_IsLeftAlone`,
-  `.ADeletedItemsInjectNumber_CanBeImportedAgain`
+  `.ADeletedItemsInjectNumber_CanBeImportedAgain`, `.ReImport_ABlankResponsibleController_KeepsTheConsoleAssignment_AndTheFileStaysUnchanged`,
+  `.TextInjectNumbers_MatchCaseInsensitively_ADuplicateFails_AndAReImportIsUnchangedNot409`
 - **AC-7 one save + queue token:** `InjectImportEndpointTests.Apply_AppendsOneSinglePostItemPerSocialRow_InFileOrder_AfterTheExistingItems`
 - **Isolation (XC-001):** `InjectImportEndpointTests.Isolation_PersonasAndMediaResolveOnlyInTheCallersExercise_AndItemsAreStampedFromScope`;
   `MselImportPlannerTests.Isolation_AHandleOnlyInAnotherExercise_FailsExactlyLikeAnUnknownHandle`

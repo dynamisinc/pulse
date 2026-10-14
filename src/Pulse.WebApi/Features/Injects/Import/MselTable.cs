@@ -66,9 +66,9 @@ public static class MselLimits
 
     /// <summary>
     /// The most bytes a workbook may expand to (the sum of its parts' declared uncompressed sizes) before ClosedXML loads
-    /// it — the zip-bomb bound. A 2,000-row MSEL is a few MB unpacked.
+    /// it — the zip-bomb bound (16 MiB, Gate-1 M-1). A 2,000-row MSEL is a few MB unpacked.
     /// </summary>
-    public const long MaxWorkbookUncompressedBytes = 64L * 1024 * 1024;
+    public const long MaxWorkbookUncompressedBytes = 16L * 1024 * 1024;
 }
 
 /// <summary>Decides what an upload is by its bytes, never by its name or MIME type alone.</summary>

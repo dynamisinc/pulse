@@ -29,13 +29,13 @@ internal static class MselFixture
     /// <summary>The Kestrel-style demo rows: three social posts and two non-social injects, StartEx at day 1 08:00.</summary>
     public static List<MselRowSpec> KestrelRows(string handle1, string handle2, string displayName2, string controller) =>
     [
-        new(1, "StartEx", "Exercise starts", "08:00", "1", "08:00", "Exercise Director", "All players", "Verbal"),
-        new(2, "Boil water notice", "BOIL WATER NOTICE for #Kestrel County zones 3-5.", "08:05", "1", "08:05",
+        new("1", "StartEx", "Exercise starts", "08:00", "1", "08:00", "Exercise Director", "All players", "Verbal"),
+        new("2", "Boil water notice", "BOIL WATER NOTICE for #Kestrel County zones 3-5.", "08:05", "1", "08:05",
             "@" + handle1, "Public", "Social Media", Notes: "Beat 1", Controller: controller),
-        new(3, "Phone call from mayor", "Mayor calls the EOC.", "08:10", "1", "08:10", "Mayor", "EOC", "Phone"),
-        new(4, "Resident photo", "Is anyone else's water brown?", "08:20", "1", "08:20", displayName2, "Public",
+        new("3", "Phone call from mayor", "Mayor calls the EOC.", "08:10", "1", "08:10", "Mayor", "EOC", "Phone"),
+        new("4", "Resident photo", "Is anyone else's water brown?", "08:20", "1", "08:20", displayName2, "Public",
             "social"),
-        new(5, "Day two", "Day two: still brown.", "08:00", "2", "08:30", handle2, "Public", "Pulse"),
+        new("5", "Day two", "Day two: still brown.", "08:00", "2", "08:30", handle2, "Public", "Pulse"),
     ];
 
     public static byte[] Xlsx(
@@ -59,7 +59,15 @@ internal static class MselFixture
         foreach (var row in rows)
         {
             var values = Values(row, conduct, pulseMedia);
-            sheet.Cell(rowNumber, 1).Value = row.InjectNumber; // a NUMBER cell, as Cadence writes it
+            // A whole number is a NUMBER cell, as Cadence writes it; anything else (INJ-1) is a text cell.
+            if (int.TryParse(row.InjectNumber, NumberStyles.None, CultureInfo.InvariantCulture, out var number))
+            {
+                sheet.Cell(rowNumber, 1).Value = number;
+            }
+            else
+            {
+                sheet.Cell(rowNumber, 1).Value = row.InjectNumber;
+            }
             for (var column = 1; column < values.Count; column++)
             {
                 sheet.Cell(rowNumber, column + 1).Value = values[column];
@@ -120,7 +128,7 @@ internal static class MselFixture
     {
         var values = new List<string>
         {
-            row.InjectNumber.ToString(CultureInfo.InvariantCulture),
+            row.InjectNumber,
             row.Title,
             row.Description,
             row.ScheduledTime,
@@ -154,7 +162,7 @@ internal static class MselFixture
 
 /// <summary>One MSEL data row as Cadence models it.</summary>
 internal sealed record MselRowSpec(
-    int InjectNumber,
+    string InjectNumber,
     string Title,
     string Description,
     string ScheduledTime,

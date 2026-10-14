@@ -107,7 +107,12 @@ public static class InjectImportEndpoints
         {
             form = await request.ReadFormAsync(cancellationToken);
         }
-        catch (InvalidDataException)
+        catch (BadHttpRequestException ex) when (ex.StatusCode == StatusCodes.Status413PayloadTooLarge)
+        {
+            // The body broke the request-size cap while it was read: say why, as a readable 400 (Gate-1 L-1).
+            return Problem(StatusCodes.Status400BadRequest, InjectImportService.TooLargeMessage);
+        }
+        catch (Exception ex) when (ex is InvalidDataException or BadHttpRequestException)
         {
             return Problem(StatusCodes.Status400BadRequest, NoFileMessage);
         }

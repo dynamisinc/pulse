@@ -102,12 +102,12 @@ public sealed class MselImportPlannerTests
     {
         var rows = new[]
         {
-            new MselRowSpec(1, "a", "x", "09:15", "", "", "@KestrelFire", "p", "Social"),
-            new MselRowSpec(2, "b", "y", "10:00", "", "", "@KestrelFire", "p", "Social"),
+            new MselRowSpec("1", "a", "x", "09:15", "", "", "@KestrelFire", "p", "Social"),
+            new MselRowSpec("2", "b", "y", "10:00", "", "", "@KestrelFire", "p", "Social"),
         };
         Plan(rows).Rows.Select(row => row.PlannedMinute).Should().Equal(0, 45);
 
-        var none = new[] { new MselRowSpec(1, "a", "x", "", "", "", "@KestrelFire", "p", "Social") };
+        var none = new[] { new MselRowSpec("1", "a", "x", "", "", "", "@KestrelFire", "p", "Social") };
         Plan(none).Rows.Single().PlannedMinute.Should().BeNull("no time at all is an unplanned item");
     }
 
@@ -116,9 +116,9 @@ public sealed class MselImportPlannerTests
     {
         var rows = new[]
         {
-            new MselRowSpec(1, "a", "x", "08:00", "1", "08:00", "@KestrelFire", "p", "Social"),
-            new MselRowSpec(2, "b", "y", "08:00", "1", "", "@KestrelFire", "p", "Social"),
-            new MselRowSpec(3, "c", "z", "08:00", "1", "half past", "@KestrelFire", "p", "Social"),
+            new MselRowSpec("1", "a", "x", "08:00", "1", "08:00", "@KestrelFire", "p", "Social"),
+            new MselRowSpec("2", "b", "y", "08:00", "1", "", "@KestrelFire", "p", "Social"),
+            new MselRowSpec("3", "c", "z", "08:00", "1", "half past", "@KestrelFire", "p", "Social"),
         };
 
         var plan = Plan(rows);
@@ -158,7 +158,7 @@ public sealed class MselImportPlannerTests
         var rows = new[]
         {
             new MselRowSpec(
-                1,
+                "1",
                 "<b>Bold</b> title<script>alert(1)</script>",
                 "<img src=x onerror=alert(1)>Water is <i>brown</i>",
                 "08:00",
@@ -183,8 +183,8 @@ public sealed class MselImportPlannerTests
     {
         var rows = new[]
         {
-            new MselRowSpec(4, "", "x", "", "", "", "@KestrelFire", "p", "Social"),
-            new MselRowSpec(5, new string('t', 130), "y", "", "", "", "@KestrelFire", "p", "Social", Notes: new string('n', 600)),
+            new MselRowSpec("4", "", "x", "", "", "", "@KestrelFire", "p", "Social"),
+            new MselRowSpec("5", new string('t', 130), "y", "", "", "", "@KestrelFire", "p", "Social", Notes: new string('n', 600)),
         };
 
         var plan = Plan(rows);
@@ -199,21 +199,57 @@ public sealed class MselImportPlannerTests
     [Fact]
     public void Mapping_AnUnknownResponsibleController_IsAWarningNotAFailure()
     {
-        var rows = new[] { new MselRowSpec(1, "a", "x", "", "", "", "@KestrelFire", "p", "Social", Controller: "Pat Nobody") };
+        var rows = new[] { new MselRowSpec("1", "a", "x", "", "", "", "@KestrelFire", "p", "Social", Controller: "Pat Nobody") };
 
         var row = Plan(rows).Rows.Single();
 
         row.Candidate.Should().NotBeNull();
         row.Candidate!.AssigneeId.Should().BeNull();
-        row.Candidate.AssigneeUnmatched.Should().BeTrue();
+        row.Candidate.KeepExistingAssignee.Should().BeTrue("an unmatched name never changes an existing item's assignee");
         row.ToReport("created", null).Message
             .Should().Be("Responsible Controller 'Pat Nobody' is not a staff member of this exercise; left unassigned.");
     }
 
     [Fact]
+    public void Mapping_OnlyAMatchedResponsibleController_ChangesAnExistingAssignee_ABlankCellKeepsIt()
+    {
+        var rows = new[]
+        {
+            new MselRowSpec("1", "a", "x", "", "", "", "@KestrelFire", "p", "Social", Controller: "casey controller"),
+            new MselRowSpec("2", "b", "y", "", "", "", "@KestrelFire", "p", "Social", Controller: ""),
+        };
+
+        var plan = Plan(rows);
+
+        plan.Rows[0].Candidate!.KeepExistingAssignee.Should().BeFalse("a matched name says who the item is for");
+        plan.Rows[0].Candidate!.AssigneeId.Should().Be(Casey);
+        plan.Rows[1].Candidate!.KeepExistingAssignee.Should().BeTrue(
+            "a blank cell must not wipe a console assignment on re-import (Gate-1 M-2)");
+        plan.Rows[1].Candidate!.AssigneeId.Should().BeNull();
+        plan.Rows[1].Warnings.Should().BeEmpty("a blank cell is not a warning");
+    }
+
+    [Fact]
+    public void RowFailures_ADuplicateTextInjectNumber_IgnoresCaseAndSurroundingSpace()
+    {
+        var rows = new[]
+        {
+            new MselRowSpec("INJ-1", "a", "x", "", "", "", "@KestrelFire", "p", "Social"),
+            new MselRowSpec("inj-1 ", "b", "y", "", "", "", "@KestrelFire", "p", "Social"),
+        };
+
+        var plan = Plan(rows);
+
+        plan.Rows[0].Candidate!.ExternalRef.Should().Be("INJ-1");
+        var later = plan.Rows[1].ToFinalReport();
+        later.Status.Should().Be("failed");
+        later.Message.Should().Be("duplicate of row 2", "the live-item unique index compares ExternalRef case-insensitively");
+    }
+
+    [Fact]
     public void Mapping_PulseMediaByFileName_NewestOfTwoSameNamedFilesWins_AltIsTheStem()
     {
-        var rows = new[] { new MselRowSpec(1, "a", "x", "", "", "", "@KestrelFire", "p", "Social", PulseMedia: " Brown-Water.JPG ") };
+        var rows = new[] { new MselRowSpec("1", "a", "x", "", "", "", "@KestrelFire", "p", "Social", PulseMedia: " Brown-Water.JPG ") };
 
         var media = Plan(rows, pulseMedia: true).Rows.Single().Candidate!.Media;
 
@@ -229,7 +265,7 @@ public sealed class MselImportPlannerTests
     [InlineData("@KestrelFire", "newscast.mp4,a.jpg", "Pulse Media has more than 4 images or more than one video (a post carries up to 4 images or exactly 1 video).")]
     public void RowFailures_PersonaAndMedia(string source, string media, string expected)
     {
-        var rows = new[] { new MselRowSpec(1, "a", "x", "", "", "", source, "p", "Social", PulseMedia: media) };
+        var rows = new[] { new MselRowSpec("1", "a", "x", "", "", "", source, "p", "Social", PulseMedia: media) };
 
         var report = Plan(rows, pulseMedia: true).Rows.Single().ToFinalReport();
 
@@ -242,9 +278,9 @@ public sealed class MselImportPlannerTests
     {
         var rows = new[]
         {
-            new MselRowSpec(1, "a", "<script>only markup</script>", "", "", "", "@KestrelFire", "p", "Social"),
-            new MselRowSpec(2, "b", new string('w', 281), "", "", "", "@KestrelFire", "p", "Social"),
-            new MselRowSpec(3, "c", "<b>" + new string('w', 280) + "</b>", "", "", "", "@KestrelFire", "p", "Social"),
+            new MselRowSpec("1", "a", "<script>only markup</script>", "", "", "", "@KestrelFire", "p", "Social"),
+            new MselRowSpec("2", "b", new string('w', 281), "", "", "", "@KestrelFire", "p", "Social"),
+            new MselRowSpec("3", "c", "<b>" + new string('w', 280) + "</b>", "", "", "", "@KestrelFire", "p", "Social"),
         };
 
         var plan = Plan(rows);
@@ -259,9 +295,9 @@ public sealed class MselImportPlannerTests
     {
         var rows = new[]
         {
-            new MselRowSpec(12, "a", "x", "", "", "", "@KestrelFire", "p", "Social"),
-            new MselRowSpec(13, "b", "y", "", "", "", "@KestrelFire", "p", "Phone"),
-            new MselRowSpec(12, "c", "z", "", "", "", "@KestrelFire", "p", "Social"),
+            new MselRowSpec("12", "a", "x", "", "", "", "@KestrelFire", "p", "Social"),
+            new MselRowSpec("13", "b", "y", "", "", "", "@KestrelFire", "p", "Phone"),
+            new MselRowSpec("12", "c", "z", "", "", "", "@KestrelFire", "p", "Social"),
         };
 
         var plan = Plan(rows);
@@ -279,8 +315,8 @@ public sealed class MselImportPlannerTests
         var otherExercisePersona = "OtherCountyEM";
         var rows = new[]
         {
-            new MselRowSpec(1, "a", "x", "", "", "", "@" + otherExercisePersona, "p", "Social"),
-            new MselRowSpec(2, "b", "y", "", "", "", "@" + "NeverExisted", "p", "Social"),
+            new MselRowSpec("1", "a", "x", "", "", "", "@" + otherExercisePersona, "p", "Social"),
+            new MselRowSpec("2", "b", "y", "", "", "", "@" + "NeverExisted", "p", "Social"),
         };
 
         var plan = Plan(rows);

@@ -290,9 +290,11 @@ public static class MselImportPlanner
             }
         }
 
-        // Assignee by display name; unknown is a warning, never a failure.
+        // Assignee by display name; unknown is a warning, never a failure. Only a MATCHED name says who the item is for:
+        // a blank or unmatched cell leaves a new item unassigned and an existing item with whoever it has (Gate-1 M-2),
+        // so re-importing the same Cadence file never wipes an assignment made in the console.
         Guid? assigneeId = null;
-        var assigneeUnmatched = false;
+        var keepExistingAssignee = true;
         if (Clean(cells[ResponsibleControllerHeader]) is { } controller)
         {
             var matches = facts.Assignees
@@ -301,10 +303,10 @@ public static class MselImportPlanner
             if (matches.Count == 1)
             {
                 assigneeId = matches[0].Id;
+                keepExistingAssignee = false;
             }
             else
             {
-                assigneeUnmatched = true;
                 warnings.Add(matches.Count == 0
                     ? $"Responsible Controller '{controller}' is not a staff member of this exercise; left unassigned."
                     : $"Responsible Controller '{controller}' matches more than one staff member; left unassigned.");
@@ -317,7 +319,7 @@ public static class MselImportPlanner
             notes,
             planned.Minute,
             assigneeId,
-            assigneeUnmatched,
+            keepExistingAssignee,
             persona.Id,
             text,
             media);
@@ -538,9 +540,10 @@ public sealed record PlannedMedia(Guid AssetId, string Alt);
 /// <param name="Notes">The item notes, or <c>null</c>.</param>
 /// <param name="PlannedMinute">The planned minute (DF-11), or <c>null</c>.</param>
 /// <param name="AssigneeId">The matched assignee, or <c>null</c>.</param>
-/// <param name="AssigneeUnmatched">
-/// Whether the row named a <c>Responsible Controller</c> that did not match. A new item is then unassigned; an existing
-/// item keeps whoever a controller assigned in the console (the file says nothing usable about it).
+/// <param name="KeepExistingAssignee">
+/// Whether the row's <c>Responsible Controller</c> is blank or did not match anyone. A new item is then unassigned; an
+/// existing item keeps whoever a controller assigned in the console (the file says nothing usable about it). Only a
+/// matched name changes an existing item's assignee.
 /// </param>
 /// <param name="PersonaId">The resolved persona.</param>
 /// <param name="Text">The sanitized post text.</param>
@@ -551,7 +554,7 @@ public sealed record ImportCandidate(
     string? Notes,
     int? PlannedMinute,
     Guid? AssigneeId,
-    bool AssigneeUnmatched,
+    bool KeepExistingAssignee,
     Guid PersonaId,
     string Text,
     IReadOnlyList<PlannedMedia> Media);
