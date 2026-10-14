@@ -559,6 +559,25 @@ Describe 'Import-Roster.ps1' {
         }
     }
 
+    Describe 'The links file fails closed without an owner-only ACL (Copilot review on #486)' {
+        # -WindowsAcl forces the Windows branch. Off Windows the ACL APIs throw PlatformNotSupportedException,
+        # which is exactly the "the owner-only ACL could not be set" path this pins. On Windows the ACL succeeds,
+        # so these are skipped there (the Windows Get-Acl check is in story 14's manual UAT steps).
+        It 'throws and writes nothing, rather than falling back to the folder''s permissions' -Skip:$IsWindows {
+            $target = Join-Path $TestDrive "acl-$([guid]::NewGuid().ToString('N')).csv"
+            { Write-PrivateTextFile -Path $target -Text "name,signInName,joinUrl`nA,a1,https://site.test/join/secret" -WindowsAcl $true } |
+                Should -Throw '*owner-only ACL could not be set*no links file was written*'
+            Test-Path -LiteralPath $target | Should -BeFalse
+        }
+
+        It 'a file already at the path is not left behind either' -Skip:$IsWindows {
+            $target = Join-Path $TestDrive "acl-old-$([guid]::NewGuid().ToString('N')).csv"
+            Set-Content -LiteralPath $target -Value 'old links'
+            { Write-PrivateTextFile -Path $target -Text 'name,signInName,joinUrl' -WindowsAcl $true } | Should -Throw '*owner-only ACL*'
+            Test-Path -LiteralPath $target | Should -BeFalse
+        }
+    }
+
     Describe '-OutFile is checked before anything is sent (CR-001, S-003, W-002)' {
     It 'a non-empty folder is refused, with a Join-Path hint, and survives intact' {
         $folder = Join-Path $TestDrive 'keep-me'

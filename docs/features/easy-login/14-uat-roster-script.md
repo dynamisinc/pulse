@@ -45,7 +45,8 @@ console (and the same authorization), rather than the ops bootstrap route. It ne
 - [ ] **Secrets (NFR-009):** the script follows the existing scripts' rule ("never printed, logged or written to disk")
       for the staff secret and tokens; the only secrets it writes are the participant join links, to the gitignored
       local file the operator asked for, with the file's permissions restricted to the current user where the platform
-      supports it.
+      supports it. *(Copilot review on #486: if the owner-only ACL can't be set on Windows, no links file is written at
+      all. The script never falls back to the folder's inherited permissions.)*
 - [ ] **Isolation:** the operator never names an exercise; the login sends the host's resolved exercise (from
       `GET /api/exercise-context`), as `StaffSignInPage` does, and no roster or day-word request carries an exercise id:
       the staff session's active exercise decides where people land.

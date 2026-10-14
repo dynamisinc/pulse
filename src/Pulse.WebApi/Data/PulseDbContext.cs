@@ -685,6 +685,14 @@ public class PulseDbContext : DbContext
             entity.HasIndex(e => new { e.ExerciseId, e.ForDate }).IsUnique();
 
             entity.Property(e => e.WordHash).IsRequired().HasMaxLength(ExerciseDayWord.MaxWordHashLength);
+
+            // Concurrent writes to one date SERIALIZE (Copilot review on #486). Every rotation is ReplacedCount + 1
+            // and nothing else writes the row in place, so the count doubles as its optimistic-concurrency token: a
+            // rotation's UPDATE (and a clear's DELETE) carries `AND [ReplacedCount] = <the value read>`, so a writer
+            // whose read went stale matches no row and gets DbUpdateConcurrencyException instead of silently
+            // overwriting the other staff member's rotation and losing its increment. DayWordService re-reads and
+            // re-applies (bounded). Model-only: the existing int column, no DDL.
+            entity.Property(e => e.ReplacedCount).IsConcurrencyToken();
         });
 
         // ------------------------------------------------------------------------------------------
