@@ -39,18 +39,18 @@ public sealed class PersonaProfilePatchParserTests
     {
         var patch = ParseValid($$"""
             {
-              "displayName": "Fulton County EM",
+              "displayName": "Kestrel County EM",
               "bio": "Official county updates.",
-              "location": "Fulton, OH",
+              "location": "Kestrel, OH",
               "verified": false,
               "avatarMediaId": "{{SomeMediaId}}",
               "bannerMediaId": "{{SomeMediaId:N}}"
             }
             """);
 
-        patch.DisplayName.Should().Be(new PatchField<string>(true, "Fulton County EM"));
+        patch.DisplayName.Should().Be(new PatchField<string>(true, "Kestrel County EM"));
         patch.Bio.Should().Be(new PatchField<string?>(true, "Official county updates."));
-        patch.Location.Should().Be(new PatchField<string?>(true, "Fulton, OH"));
+        patch.Location.Should().Be(new PatchField<string?>(true, "Kestrel, OH"));
         patch.Verified.Should().Be(new PatchField<bool>(true, false));
         patch.AvatarMediaId.Should().Be(new PatchField<Guid?>(true, SomeMediaId));
         patch.BannerMediaId.Should().Be(new PatchField<Guid?>(true, SomeMediaId), "any GUID spelling parses");
@@ -196,15 +196,15 @@ public sealed class PersonaProfilePatchParserTests
     {
         var patch = ParseValid("""
             {
-              "displayName": "  <b>Fulton</b> County EM  ",
+              "displayName": "  <b>Kestrel</b> County EM  ",
               "bio": "<script>alert('x')</script>Official updates. <img src=x onerror=alert(1)>Stay safe.",
-              "location": "<i>Fulton</i>, OH"
+              "location": "<i>Kestrel</i>, OH"
             }
             """);
 
-        patch.DisplayName.Value.Should().Be("Fulton County EM");
+        patch.DisplayName.Value.Should().Be("Kestrel County EM");
         patch.Bio.Value.Should().Be("Official updates. Stay safe.", "NFR-004: script blocks and tags are stripped, never encoded");
-        patch.Location.Value.Should().Be("Fulton, OH");
+        patch.Location.Value.Should().Be("Kestrel, OH");
     }
 
     [Fact]
@@ -300,7 +300,7 @@ public sealed class PersonaProfilePatchParserTests
             Id = Guid.NewGuid(),
             ExerciseId = exerciseId,
             DisplayName = "Old name",
-            Handle = "FulcoEM",
+            Handle = "KestrelCoEM",
             Kind = "org",
             PersonaType = "agency",
             Verified = true,
@@ -318,7 +318,7 @@ public sealed class PersonaProfilePatchParserTests
         persona.Location.Should().Be("Old town");
         persona.Verified.Should().BeTrue();
         persona.AvatarMediaId.Should().Be(avatar);
-        persona.Handle.Should().Be("FulcoEM");
+        persona.Handle.Should().Be("KestrelCoEM");
         persona.Kind.Should().Be("org");
         persona.PersonaType.Should().Be("agency");
         persona.ExerciseId.Should().Be(exerciseId);
@@ -363,12 +363,12 @@ public sealed class PersonaProfilePatchParserTests
     }
 
     [Theory]
-    [InlineData("Fulcо EM")] // Cyrillic о
-    [InlineData("Fulton Cоunty ЕМ")] // Cyrillic о, Е, М
-    [InlineData("FuIcoEM")] // capital I for l
-    [InlineData("Ful​co EM")] // a zero-width space INSIDE a visible name
+    [InlineData("KestrelCо EM")] // Cyrillic о
+    [InlineData("Kestrel Cоunty ЕМ")] // Cyrillic о, Е, М
+    [InlineData("KestreICoEM")] // capital I for l
+    [InlineData("Kes​trel EM")] // a zero-width space INSIDE a visible name
     [InlineData("\U0001F6A8")] // an emoji alone is visible
-    [InlineData("福尔顿")] // CJK
+    [InlineData("凯斯特尔")] // CJK
     public void DisplayName_LookalikesAndOtherScripts_StayAllowed(string value)
     {
         // SOC-052: impersonation training needs lookalike names. Only invisibility and control/bidi are refused.
@@ -388,7 +388,7 @@ public sealed class PersonaProfilePatchParserTests
     [InlineData("⁩")]
     public void ControlAndBidiOverrideCharacters_AreRefused_InEveryTextField(string bad)
     {
-        var value = "Ful" + bad + "co";
+        var value = "Kes" + bad + "trel";
 
         ParseInvalid(JsonSerializer.Serialize(new { displayName = value })).Should().Be(PersonaAdminMessages.DisplayNameForbiddenCharacter);
         ParseInvalid(JsonSerializer.Serialize(new { bio = value })).Should().Be(PersonaAdminMessages.BioForbiddenCharacter);

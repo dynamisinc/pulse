@@ -21,8 +21,8 @@ public sealed class StarterStorylineFactoryTests
     private static readonly IReadOnlyList<string> SeededHandles =
     [
         "FairhavenWater",
-        "FulcoEM",
-        "Newsline7",
+        "KestrelCoEM",
+        "MetroDesk9",
         "mvega_fh",
         "tbrandt41",
         "kwardFH",
@@ -35,7 +35,7 @@ public sealed class StarterStorylineFactoryTests
 
         storyline.Title.Should().Be("Water main contamination fears");
         storyline.Expectation.Should().Be(
-            "an official statement from Fulton County Emergency Management addressing the water safety concern");
+            "an official statement from Kestrel County Emergency Management addressing the water safety concern");
         storyline.CurveName.Should().Be("Standard");
         storyline.Hashtags.Should().ContainSingle().Which.Should().Be("#WaterIssues");
     }
@@ -55,7 +55,7 @@ public sealed class StarterStorylineFactoryTests
         var storyline = StarterStorylineFactory.Build(ExerciseId, SeededHandles);
 
         storyline.ParticipatingPersonas.Should().Equal(
-            new[] { "mvega_fh", "tbrandt41", "kwardFH", "Newsline7", "FairhavenWater", "FulcoEM" },
+            new[] { "mvega_fh", "tbrandt41", "kwardFH", "MetroDesk9", "FairhavenWater", "KestrelCoEM" },
             "the anxious citizen voices must be picked for the first, smaller bursts before the official/outlet "
             + "accounts (ADP-001), regardless of the order story 01 emits the cast in (AC1)");
     }
@@ -118,12 +118,12 @@ public sealed class StarterStorylineFactoryTests
     [Fact]
     public void Build_AppendsUnknownHandlesLastWithoutDropping()
     {
-        var handles = new[] { "someOtherHandle", "mvega_fh", "FulcoEM" };
+        var handles = new[] { "someOtherHandle", "mvega_fh", "KestrelCoEM" };
 
         var storyline = StarterStorylineFactory.Build(ExerciseId, handles);
 
         storyline.ParticipatingPersonas.Should().Equal(
-            new[] { "mvega_fh", "FulcoEM", "someOtherHandle" },
+            new[] { "mvega_fh", "KestrelCoEM", "someOtherHandle" },
             "known handles are ordered citizens-first and an unknown handle is appended last (never dropped)");
     }
 }

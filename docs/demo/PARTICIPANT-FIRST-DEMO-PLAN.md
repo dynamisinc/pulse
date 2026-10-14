@@ -514,7 +514,7 @@ the orchestrator mounts C2/C3. PE's backend half must merge before the 10/15 bac
 
 **The fictional names, by Wed 10/14.** Display names, bios and avatars can change at seed time through PE
 with no code. **Handles and the hashtag can't.** `PersonaCastSeeder` and the engine's storyline seed are
-backend code, and the engine's response matching keys on `#WaterIssues` and the "Fulton County EM" wording.
+backend code, and the engine's response matching keys on `#WaterIssues` and the "Kestrel County Emergency Management" wording.
 
 - **Recommended:** keep the handles neutral (e.g. `@CountyEM`, `@FairhavenWater`) and rename display
   names only.

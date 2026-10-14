@@ -36,17 +36,19 @@
  *
  * SHAPE. `getAll()` returns a REFERENTIALLY-STABLE read-only snapshot (the identity only
  * changes on an `add` that adds something, or a `reset`), so `useSyncExternalStore` can
- * read it without looping and a consumer can memoize on it. It is bounded
- * ({@link REMOVED_POST_CAP}, oldest id evicted): takedowns are rare, deliberate acts,
- * but a store that can grow without limit is a bug waiting for a long exercise.
- * An id that was never displayed is recorded all the same (a baseline read may still be
- * in flight when the removal lands); a consumer that is not showing it simply ignores it.
+ * read it without looping and a consumer can memoize on it. An id that was never displayed is
+ * recorded all the same (a baseline read may still be in flight when the removal lands); a
+ * consumer that is not showing it simply ignores it.
+ *
+ * EVERY ID IS KEPT FOR THE WHOLE SESSION - there is deliberately NO cap and NO eviction. The
+ * Home feed's frozen baseline and `ownPostStore` can still hold a removed post's view (see WHAT IT
+ * HOLDS), and this set is the ONLY thing that keeps it from rendering: forgetting an id would
+ * quietly put a taken-down post back on the next update. Retention is cheap and bounded by the
+ * thing that fills it - a takedown is a deliberate staff act, a handful per exercise, and an id
+ * is an opaque GUID - and the set dies with the session (`reset()` on sign-out).
  */
 
-/** Most removed ids one session remembers (a moderation beat removes a handful). */
-export const REMOVED_POST_CAP = 1000
-
-/** Newest-removed last (a `Set` iterates in insertion order, which the eviction relies on). */
+/** Every id taken down this session; never trimmed (header: "EVERY ID IS KEPT"). */
 let removed: ReadonlySet<string> = new Set()
 
 const listeners = new Set<() => void>()
@@ -68,17 +70,13 @@ function has(postId: string): boolean {
 /**
  * Records `postId` as taken down and wakes subscribers. Idempotent (a repeat is a no-op
  * and wakes nobody — the server's takedown is idempotent too, and a push can follow the
- * console's own call); an empty or non-string id is ignored. Past the cap the OLDEST id
- * is forgotten.
+ * console's own call); an empty or non-string id is ignored. An id is never forgotten
+ * before `reset()`.
  */
 function add(postId: string): void {
   if (typeof postId !== 'string' || postId.length === 0 || removed.has(postId)) return
   const next = new Set(removed)
   next.add(postId)
-  if (next.size > REMOVED_POST_CAP) {
-    const oldest = next.values().next()
-    if (oldest.done !== true) next.delete(oldest.value)
-  }
   removed = next
   notify()
 }

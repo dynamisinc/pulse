@@ -24,9 +24,11 @@ using Pulse.WebApi.Features.Social;
 /// <para>
 /// <b>Narrow, engine-scoped stopgap — NOT COR-020/021.</b> This is a hardcoded, fixed cast with no template
 /// library and no authoring UI; <c>persona-management</c> remains the real templates/cast-authoring feature
-/// (see <c>feature.md</c> "Naming disambiguation"). The nine handles/names/kind/verified values mirror the
-/// shipped frontend org-library mock (<c>personaTemplates.ts</c>) handle-for-handle so
-/// <c>GET /api/personas</c> and this seed never disagree.
+/// (see <c>feature.md</c> "Naming disambiguation"). The nine handles/names/kind/verified values are meant to
+/// mirror the frontend org-library mock (<c>personaTemplates.ts</c>) handle-for-handle so
+/// <c>GET /api/personas</c> and this seed never disagree. <b>That parity is broken until the pending frontend
+/// sweep lands:</b> the 2026-10-13 fiction rename (<c>docs/design/DECISIONS.md</c> FIC-001) changed the county EM
+/// and TV-station entries here first, and the mock still carries the old ones.
 /// </para>
 /// <para>
 /// <b>The SOC-052 impersonation pair is now seeded (<c>profiles-social-graph/06</c>, AC4) — superseding
@@ -154,8 +156,9 @@ public sealed class PersonaCastSeeder
         };
 
     /// <summary>
-    /// The fixed nine-persona starter cast (E8 arch §5), matching the shipped frontend org-library mock
-    /// (<c>personaTemplates.ts</c>) handle-for-handle — the official voices (utility, county EM), a broadcast
+    /// The fixed nine-persona starter cast (E8 arch §5), meant to match the frontend org-library mock
+    /// (<c>personaTemplates.ts</c>) handle-for-handle (restored by the pending frontend sweep after the
+    /// 2026-10-13 fiction rename) — the official voices (utility, county EM), a broadcast
     /// outlet, a sensational low-credibility outlet, the SOC-052 unverified lookalike of the utility, and four
     /// residents. Presentation fields (bio / persona type / audience band) are authored here; the concrete
     /// magnitude and join instant are DERIVED per handle (see <see cref="DeriveAudienceMagnitude"/> /
@@ -196,13 +199,13 @@ public sealed class PersonaCastSeeder
             DossierAudience: 300,
             Castable: false),
         new PersonaSeedSpec(
-            Handle: "FulcoEM",
-            DisplayName: "Fulton County EM",
+            Handle: "KestrelCoEM",
+            DisplayName: "Kestrel County EM",
             Kind: OrgKind,
             Verified: true,
             ProfileType: AgencyProfileType,
             Band: MidBand,
-            Bio: "Official emergency management for Fulton County. Preparedness · Response · Recovery.",
+            Bio: "Official emergency management for Kestrel County. Preparedness · Response · Recovery.",
             Type: PersonaType.Agency,
             VoiceNotes: "Authoritative but calm. Issues plain-language advisories with zones and actions; "
                 + "coordinates with and gently corrects other voices.",
@@ -210,13 +213,13 @@ public sealed class PersonaCastSeeder
             DossierAudience: 8000,
             Castable: true),
         new PersonaSeedSpec(
-            Handle: "Newsline7",
-            DisplayName: "Newsline 7",
+            Handle: "MetroDesk9",
+            DisplayName: "Metro Desk 9",
             Kind: OrgKind,
             Verified: true,
             ProfileType: NewsOutletProfileType,
             Band: LargeBand,
-            Bio: "Fairhaven’s breaking-news source. Newsline 7 — on your side.",
+            Bio: "Fairhaven’s breaking-news source. Metro Desk 9 — on your side.",
             Type: PersonaType.Outlet,
             VoiceNotes: "Broadcast-news cadence, headline first. Attributes claims to officials; reports "
                 + "developments without editorializing.",
@@ -297,17 +300,51 @@ public sealed class PersonaCastSeeder
     ];
 
     /// <summary>
+    /// Starter-cast handles that are no longer in <see cref="Catalog"/>, each with the catalog handle that
+    /// replaced it. These come from the 2026-10-13 demo-fiction rename: Fulton County became Kestrel County
+    /// (<c>@FulcoEM</c> → <c>@KestrelCoEM</c>) and Newsline 7 became Metro Desk 9 (<c>@Newsline7</c> →
+    /// <c>@MetroDesk9</c>). <see cref="SeedAsync"/> renames such a row IN PLACE, so an exercise seeded by an
+    /// earlier build keeps one persona per role instead of gaining a second one next to the old handle.
+    /// </summary>
+    /// <remarks>
+    /// The old names here are the only place they are meant to survive in the seeder. Each pair also carries
+    /// the old catalog display name and bio, so the rename can tell catalog text (replaced) from a staff edit
+    /// (kept). Remove the table, and <see cref="RetiredFictionTerms"/>, once no deployed database can still
+    /// hold the old handles: after the post-demo UAT reset (<c>docs/design/DECISIONS.md</c> FIC-001).
+    /// </remarks>
+    private static readonly IReadOnlyList<RetiredHandle> RetiredHandles =
+    [
+        new RetiredHandle(
+            OldHandle: "FulcoEM",
+            NewHandle: "KestrelCoEM",
+            OldDisplayName: "Fulton County EM",
+            OldBio: "Official emergency management for Fulton County. Preparedness · Response · Recovery."),
+        new RetiredHandle(
+            OldHandle: "Newsline7",
+            NewHandle: "MetroDesk9",
+            OldDisplayName: "Newsline 7",
+            OldBio: "Fairhaven’s breaking-news source. Newsline 7 — on your side."),
+    ];
+
+    /// <summary>
+    /// The retired fiction names. A renamed row whose <see cref="Persona.Location"/> still contains one of
+    /// them (case-insensitive) is reported, because the rename does not own that field and leaves it as is.
+    /// </summary>
+    private static readonly string[] RetiredFictionTerms = ["Fulton", "Newsline"];
+
+    /// <summary>
     /// Authoring-time guard: validates the developer-authored <see cref="Catalog"/> and the band table the
     /// moment this type is first touched, so a mistake surfaces on the FIRST test/boot that uses the seeder
     /// rather than as an opaque truncation error at <c>SaveChangesAsync</c> — or, far worse, as a silently
     /// wrong SOC-052 join date nobody notices. Checks, for every entry: the bio against the
     /// <see cref="Persona.MaxBioLength"/> column bound, the band against the closed SOC-054 vocabulary, and
     /// the archetype against the closed <see cref="KnownProfileTypes"/> union. Also asserts every band floor
-    /// is positive.
+    /// is positive, and that every <see cref="RetiredHandles"/> pair maps a handle no longer in the catalog to
+    /// one that is.
     /// </summary>
     /// <exception cref="InvalidOperationException">
-    /// A catalog bio exceeds the stored column's bound, a catalog archetype is outside the closed union, or a
-    /// band floor is not positive.
+    /// A catalog bio exceeds the stored column's bound, a catalog archetype is outside the closed union, a
+    /// band floor is not positive, or a retired-handle pair is malformed.
     /// </exception>
     static PersonaCastSeeder()
     {
@@ -349,6 +386,24 @@ public sealed class PersonaCastSeeder
             _ = DeriveAudienceMagnitude(spec.Band, spec.Handle);
             _ = DeriveJoinedAt(spec.ProfileType, spec.Handle);
         }
+
+        foreach (var retired in RetiredHandles)
+        {
+            // A typo'd pair would turn the in-place rename into a silent no-op, and the old persona would then
+            // sit next to a freshly created one. So a pair must point at a real catalog handle, and its old
+            // handle must really be gone from the catalog.
+            if (!Catalog.Any(spec => string.Equals(spec.Handle, retired.NewHandle, StringComparison.Ordinal)))
+            {
+                throw new InvalidOperationException(
+                    $"Retired handle '{retired.OldHandle}' maps to '{retired.NewHandle}', which is not a catalog handle.");
+            }
+
+            if (Catalog.Any(spec => string.Equals(spec.Handle, retired.OldHandle, StringComparison.OrdinalIgnoreCase)))
+            {
+                throw new InvalidOperationException(
+                    $"Retired handle '{retired.OldHandle}' is still in the catalog. A handle is either current or retired.");
+            }
+        }
     }
 
     private readonly PulseDbContext _dbContext;
@@ -367,19 +422,28 @@ public sealed class PersonaCastSeeder
     /// caller commits). Idempotent and non-clobbering — a re-run reuses existing rows and never duplicates or
     /// overwrites them (the same contract <c>BootstrapService</c> uses for its own rows), so re-seeding an
     /// exercise that predates a catalog entry ADDS the missing handle exactly once and leaves the rows that
-    /// already exist (and their presentation fields) untouched.
+    /// already exist (and their presentation fields) untouched. A row still carrying a
+    /// <see cref="RetiredHandles"/> handle is renamed in place rather than duplicated (see
+    /// <see cref="RenameRetiredHandles"/>).
     /// </summary>
     /// <param name="exerciseId">The caller-resolved exercise the cast is scoped to (COR-001); must not be empty.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>The nine seeded personas — each pairing the persisted <see cref="Persona.Id"/> with its real dossier.</returns>
-    public async Task<IReadOnlyList<SeededPersona>> SeedAsync(Guid exerciseId, CancellationToken cancellationToken = default)
+    /// <returns>
+    /// The nine seeded personas (each pairing the persisted <see cref="Persona.Id"/> with its real dossier),
+    /// plus the stored handles of any rows in this exercise still on a retired handle after the pass.
+    /// </returns>
+    public async Task<PersonaCastSeedResult> SeedAsync(Guid exerciseId, CancellationToken cancellationToken = default)
     {
         if (exerciseId == Guid.Empty)
         {
             throw new ArgumentException("The persona cast is exercise-scoped (COR-001).", nameof(exerciseId));
         }
 
-        var handles = Catalog.Select(spec => spec.Handle).ToList();
+        // The catalog handles plus the retired ones, so a row an earlier build seeded under an old handle is
+        // found and renamed below instead of being left beside a new duplicate.
+        var handles = Catalog.Select(spec => spec.Handle)
+            .Concat(RetiredHandles.Select(retired => retired.OldHandle))
+            .ToList();
 
         // Idempotency read: the ops seam has no resolved request scope, so bypass the fail-closed-to-empty
         // global filter and confine the read with an EXPLICIT ExerciseId predicate (still one exercise only).
@@ -390,6 +454,11 @@ public sealed class PersonaCastSeeder
             .IgnoreQueryFilters()
             .Where(persona => persona.ExerciseId == exerciseId && handles.Contains(persona.Handle))
             .ToListAsync(cancellationToken);
+
+        // In-place rename of retired handles, BEFORE the by-handle index is built, so the renamed row is then
+        // reused under its new handle like any other existing row. Only rows from the read above (this exercise
+        // only) can be touched.
+        var renames = RenameRetiredHandles(existing);
 
         // The GroupBy stays now that the unique index exists: it is what keeps the ToDictionary from THROWING on
         // a same-handle pair, and it costs one pass over six rows. Under the index that pair is unreachable, so
@@ -424,9 +493,10 @@ public sealed class PersonaCastSeeder
 
             if (existingByHandle.TryGetValue(spec.Handle, out var row))
             {
-                // Idempotent re-run: reuse the existing row's id, never overwrite an AUTHORED value. The two
-                // mutations the seeder IS allowed to make on an existing row are both REPORTED, never silent
-                // (Gate-1 S-B) — the caller surfaces them in the seed response and the XC-004 audit event.
+                // Idempotent re-run: reuse the existing row's id, never overwrite an AUTHORED value. The
+                // mutations the seeder IS allowed to make on an existing row (the retired-handle rename above,
+                // the sentinel backfill, the one-way gate closure) are all REPORTED, never silent (Gate-1 S-B) —
+                // the caller surfaces them in the seed response and the XC-004 audit event.
                 var backfilled = BackfillSentinelPresentationFields(row, spec, bio, magnitude, joinedAt);
                 var castableClosed = ReconcileCastableOneWay(row, spec);
                 seeded.Add(new SeededPersona(
@@ -435,7 +505,8 @@ public sealed class PersonaCastSeeder
                     Created: false,
                     Castable: row.Castable,
                     PresentationBackfilled: backfilled,
-                    CastableClosed: castableClosed));
+                    CastableClosed: castableClosed,
+                    Rename: renames.GetValueOrDefault(row.Id)));
                 continue;
             }
 
@@ -464,12 +535,116 @@ public sealed class PersonaCastSeeder
                 Created: true,
                 Castable: spec.Castable,
 
-                // A brand-new row is authored correctly from the start: nothing was backfilled or closed.
+                // A brand-new row is authored correctly from the start: nothing was renamed, backfilled or closed.
                 PresentationBackfilled: false,
-                CastableClosed: false));
+                CastableClosed: false,
+                Rename: null));
         }
 
-        return seeded;
+        // Rows still on a retired handle after the pass (case-insensitive, like the unique index): the
+        // replacement already existed, or the casing was not the seeder's own. They are not renamed and the
+        // engine no longer voices them, so the caller reports them rather than leaving them unnoticed.
+        var retiredHandlesRemaining = existing
+            .Where(persona => RetiredHandles.Any(
+                retired => string.Equals(persona.Handle, retired.OldHandle, StringComparison.OrdinalIgnoreCase)))
+            .Select(persona => persona.Handle)
+            .Order(StringComparer.Ordinal)
+            .ToList();
+
+        return new PersonaCastSeedResult(seeded, retiredHandlesRemaining);
+    }
+
+    /// <summary>
+    /// Renames, in place, every row in <paramref name="existing"/> whose handle is EXACTLY a retired handle
+    /// (ordinal match), provided the replacement handle is not already taken in the same exercise. The row
+    /// keeps its id, so its posts, follows and participant bindings (all keyed by persona id) carry over.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>What changes.</b> The handle always takes the new value. The display name and bio take the catalog
+    /// values for the new handle only while they still equal the OLD catalog text (ordinal; a null bio counts
+    /// as the old text). A staff edit made through persona admin is kept and reported instead of being
+    /// overwritten. The handle-derived SOC-054 magnitude and backdated join instant are re-derived for the
+    /// new handle only while the row still holds exactly what <see cref="DeriveAudienceMagnitude"/> and
+    /// <see cref="DeriveJoinedAt"/> gave the OLD handle; anything else there (the migration-default sentinel
+    /// pair, which <see cref="BackfillSentinelPresentationFields"/> handles next, or a changed value) is left
+    /// alone. Kind, verified, archetype, band, location and the engine-casting gate are not touched; a location
+    /// that still mentions a <see cref="RetiredFictionTerms"/> name is reported.
+    /// </para>
+    /// <para>
+    /// <b>When the new handle already exists, nothing happens.</b> Renaming then would put two rows on one
+    /// handle, which <c>IX_Personas_ExerciseId_Handle</c> forbids. The old row is left as it is (it drops out
+    /// of the engine's cast because it is no longer a catalog handle, and <see cref="SeedAsync"/> reports it),
+    /// and the existing new-handle row is reused.
+    /// </para>
+    /// <para>
+    /// <b>Isolation (COR-001).</b> <paramref name="existing"/> is the explicit-<c>ExerciseId</c> read of
+    /// <see cref="SeedAsync"/>, so only rows of the caller-resolved exercise can be renamed. The changes are
+    /// tracked, not saved; the composing caller commits them with its audit event in one unit of work.
+    /// </para>
+    /// </remarks>
+    /// <param name="existing">The tracked rows of ONE exercise returned by the idempotency read.</param>
+    /// <returns>What was renamed, keyed by persona id (empty when there was nothing to rename).</returns>
+    private static Dictionary<Guid, PersonaRename> RenameRetiredHandles(IReadOnlyList<Persona> existing)
+    {
+        var renamed = new Dictionary<Guid, PersonaRename>();
+        foreach (var retired in RetiredHandles)
+        {
+            var row = existing.FirstOrDefault(
+                persona => string.Equals(persona.Handle, retired.OldHandle, StringComparison.Ordinal));
+            if (row is null)
+            {
+                continue;
+            }
+
+            // Case-insensitive, like the unique index: "kestrelcoem" would collide with "KestrelCoEM".
+            var replacementTaken = existing.Any(
+                persona => string.Equals(persona.Handle, retired.NewHandle, StringComparison.OrdinalIgnoreCase));
+            if (replacementTaken)
+            {
+                continue;
+            }
+
+            var spec = Catalog.Single(entry => string.Equals(entry.Handle, retired.NewHandle, StringComparison.Ordinal));
+            var oldHandle = row.Handle;
+            var newHandle = PostSanitizer.Sanitize(spec.Handle);
+
+            var stillDerivedFromOldHandle =
+                string.Equals(row.AudienceBand, spec.Band, StringComparison.Ordinal)
+                && string.Equals(row.PersonaType, spec.ProfileType, StringComparison.Ordinal)
+                && row.AudienceMagnitude == DeriveAudienceMagnitude(spec.Band, retired.OldHandle)
+                && row.JoinedAt == DeriveJoinedAt(spec.ProfileType, retired.OldHandle);
+            if (stillDerivedFromOldHandle)
+            {
+                row.AudienceMagnitude = DeriveAudienceMagnitude(spec.Band, newHandle);
+                row.JoinedAt = DeriveJoinedAt(spec.ProfileType, newHandle);
+            }
+
+            // Compared with the SANITIZED old catalog text, because that is what the old build stored.
+            var keptDisplayName = !string.Equals(
+                row.DisplayName, PostSanitizer.Sanitize(retired.OldDisplayName), StringComparison.Ordinal);
+            if (!keptDisplayName)
+            {
+                row.DisplayName = PostSanitizer.Sanitize(spec.DisplayName);
+            }
+
+            var keptBio = row.Bio is not null
+                && !string.Equals(row.Bio, PostSanitizer.Sanitize(retired.OldBio), StringComparison.Ordinal);
+            if (!keptBio)
+            {
+                row.Bio = PostSanitizer.Sanitize(spec.Bio);
+            }
+
+            var locationMentions = RetiredFictionTerms
+                .Where(term => row.Location?.Contains(term, StringComparison.OrdinalIgnoreCase) == true)
+                .ToList();
+
+            row.Handle = newHandle;
+            renamed[row.Id] = new PersonaRename(
+                row.Id, oldHandle, newHandle, keptDisplayName, keptBio, locationMentions);
+        }
+
+        return renamed;
     }
 
     /// <summary>
@@ -697,6 +872,13 @@ public sealed class PersonaCastSeeder
         PersonaStyle Style,
         int DossierAudience,
         bool Castable);
+
+    /// <summary>A starter-cast handle that left the catalog, and the catalog handle that replaced it.</summary>
+    /// <param name="OldHandle">The retired handle, without a leading <c>@</c>, exactly as earlier builds stored it.</param>
+    /// <param name="NewHandle">The current catalog handle the row is renamed to.</param>
+    /// <param name="OldDisplayName">The old catalog display name; a row still carrying it gets the new one.</param>
+    /// <param name="OldBio">The old catalog bio; a row still carrying it (or no bio) gets the new one.</param>
+    private sealed record RetiredHandle(string OldHandle, string NewHandle, string OldDisplayName, string OldBio);
 }
 
 /// <summary>
@@ -735,10 +917,82 @@ public sealed class PersonaCastSeeder
 /// catalog. Reported for the same reason, and more sharply: this one changes what the engine may do with an
 /// existing row, so it must never happen unreported.
 /// </param>
+/// <param name="Rename">
+/// What this call did when it renamed an existing row in place from a retired handle (see
+/// <c>PersonaCastSeeder.RetiredHandles</c>); <c>null</c> otherwise. The row keeps its id, so the caller reports
+/// it like the other mutations to existing rows (Gate-1 S-B).
+/// </param>
 public sealed record SeededPersona(
     Guid InstanceId,
     PersonaDossier Dossier,
     bool Created,
     bool Castable,
     bool PresentationBackfilled,
-    bool CastableClosed);
+    bool CastableClosed,
+    PersonaRename? Rename)
+{
+    /// <summary>Whether this call renamed the row in place from a retired handle.</summary>
+    public bool Renamed => Rename is not null;
+}
+
+/// <summary>
+/// The result of one <see cref="PersonaCastSeeder.SeedAsync"/> pass.
+/// </summary>
+/// <param name="Personas">The nine seeded catalog personas, in catalog order.</param>
+/// <param name="RetiredHandlesRemaining">
+/// The stored handles of rows in this exercise still on a retired handle after the pass (matched
+/// case-insensitively). Normally empty. Non-empty means the replacement handle already existed or the casing
+/// was not the seeder's own, so the row was not renamed; it is no longer voiced by the engine and is reported.
+/// </param>
+public sealed record PersonaCastSeedResult(
+    IReadOnlyList<SeededPersona> Personas,
+    IReadOnlyList<string> RetiredHandlesRemaining);
+
+/// <summary>
+/// One in-place rename of a retired starter-cast handle, as reported in the seed note, the log and the
+/// <c>engine.content_seeded</c> audit payload.
+/// </summary>
+/// <param name="PersonaId">The renamed row's id (unchanged by the rename).</param>
+/// <param name="OldHandle">The handle the row carried before.</param>
+/// <param name="NewHandle">The handle it carries now.</param>
+/// <param name="KeptStaffEditedDisplayName">The display name was not the old catalog text, so it was kept.</param>
+/// <param name="KeptStaffEditedBio">The bio was not the old catalog text, so it was kept.</param>
+/// <param name="LocationMentions">Retired fiction names the (untouched) location still contains.</param>
+public sealed record PersonaRename(
+    Guid PersonaId,
+    string OldHandle,
+    string NewHandle,
+    bool KeptStaffEditedDisplayName,
+    bool KeptStaffEditedBio,
+    IReadOnlyList<string> LocationMentions)
+{
+    /// <summary>
+    /// A one-line description for operators, e.g.
+    /// <c>renamed @Old→@New; kept staff-edited bio; location still mentions &lt;retired name&gt;</c>.
+    /// </summary>
+    /// <returns>The description.</returns>
+    public string Describe()
+    {
+        var parts = new List<string> { $"renamed @{OldHandle}→@{NewHandle}" };
+        if (KeptStaffEditedDisplayName)
+        {
+            parts.Add("kept staff-edited display name");
+        }
+
+        if (KeptStaffEditedBio)
+        {
+            parts.Add("kept staff-edited bio");
+        }
+
+        if (LocationMentions.Count > 0)
+        {
+            parts.Add($"location still mentions {string.Join(" and ", LocationMentions)}");
+        }
+
+        return string.Join("; ", parts);
+    }
+
+    /// <summary>The same as <see cref="Describe"/>, so a log template formats the rename only when it is written.</summary>
+    /// <returns>The description.</returns>
+    public override string ToString() => Describe();
+}

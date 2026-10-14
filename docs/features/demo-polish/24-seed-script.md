@@ -25,9 +25,10 @@ Authors the content: S2.
 - [ ] **Public APIs only.** It calls nothing but `/api/exercise-context` (for `exerciseId` and the `timeZone` every
       post requires), `/api/auth/staff/login`, `/api/steering/pause-tier`,
       `/api/staff/media`, `/api/media`, `/api/personas`, `/api/staff/personas/{id}`, `/api/posts`, `/api/feed`,
-      `/api/injects` (`GET` to read the run sheet, `POST` to create an item) and `/api/injects/assignees` (`GET`);
-      never an item route such as fire, delete or reorder. A test greps the script for any other `/api/` path or
-      `sqlcmd`/SQL and fails, and checks the script's allowlist against this list.
+      `/api/injects` (`GET` to read the run sheet, `POST` to create an item), `/api/injects/assignees` (`GET`)
+      and `/api/injects/{id}` (`PUT` only: re-pointing a kept item's stale reply in place, *amended 2026-10-13
+      for the Tue 10/20 re-seed*); never fire, delete or reorder. A test greps the script for any other `/api/`
+      path or `sqlcmd`/SQL and fails, and checks the script's allowlist against this list.
 - [ ] **Engine paused by default (Decision 4).** After seeding, and unless `-LeaveEngineRunning` is passed, it
       calls `POST /api/steering/pause-tier` with `{"tier":"engine","actingHumanId":…,"timeZone":…}` (the server 400s without a non-blank `actingHumanId`; the script sends the login session's) as the controller, before posting as well as after (so the engine cannot react to the seed posts) and reports the applied
       tier. The tier lives in memory and every reset or restart sets it back to `running`, so the run-of-show
@@ -56,8 +57,12 @@ Authors the content: S2.
       run-sheet item is in `GET /api/injects` with the pack's post count and is **armable** (`pending`, or `held`
       before its release), with the armable items in pack order in the queue ("Fire next" follows it). A rehearsal that fired the run sheet leaves it spent, so a fired, firing, skipped,
       failed or part-held item fails the check, naming `-ReloadFiredRunSheet`; that switch loads a fresh copy of
-      each spent item (the old one is never touched; an item still firing is refused before any write). It prints
-      a ✅/❌ summary and exits non-zero if any check fails.
+      each spent item (the old one is never touched; an item still firing is refused before any write). Every
+      run-sheet reply must point at a live post: when a re-seed posts the pack again under new ids (or a reply's
+      target item was reloaded), a kept, armable item's reply to a DEAD target is re-pointed in place with `PUT`
+      (same item, same place in the queue; the queue's own content is sent back, every child echoed by id). A
+      reply a controller re-targeted in the console to another live post is left alone and only warned about. It prints a ✅/❌
+      summary and exits non-zero if any check fails.
 
 ## Out of Scope
 Resetting or clearing UAT (`Reset-DemoState.ps1`, `Clear-DemoContent.ps1` already exist; run them first),

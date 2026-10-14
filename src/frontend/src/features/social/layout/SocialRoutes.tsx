@@ -6,6 +6,10 @@
  *   /                      -> redirect to /home
  *   /home                  -> the feed (`HomeView`)                    [kept mounted]
  *   /explore               -> `ExplorePage` (F0's stub; F6 fills it)
+ *   /notifications         -> `NotificationsPage` (F7; redirects Home for a session
+ *                             that has no notifications -- read-only, persona-less, ...).
+ *                             The notifications ENGINE is not mounted here: `SocialChannel`
+ *                             mounts it outside the frame (see there).
  *   /hashtag/:tag          -> the hashtag feed
  *   /:handle/status/:id    -> the flattened thread
  *   /:handle               -> a profile
@@ -68,6 +72,7 @@
 import { useState, type ContextType } from 'react'
 import { Route, Routes, UNSAFE_RouteContext } from 'react-router-dom'
 import { ExplorePage } from '../explore/ExplorePage'
+import { NotificationsPage } from '../notifications/NotificationsPage'
 import {
   HOME_PATH,
   SOCIAL_ROUTE_PATTERNS,
@@ -110,6 +115,7 @@ export function SocialRoutes() {
           {/* Home renders above, outside <Routes>, so it can stay mounted. */}
           <Route path={SOCIAL_ROUTE_PATTERNS.home} element={null} />
           <Route path={SOCIAL_ROUTE_PATTERNS.explore} element={<ExplorePage />} />
+          <Route path={SOCIAL_ROUTE_PATTERNS.notifications} element={<NotificationsPage />} />
           <Route path={SOCIAL_ROUTE_PATTERNS.hashtag} element={<HashtagRoute />} />
           <Route path={SOCIAL_ROUTE_PATTERNS.thread} element={<ThreadRoute />} />
           <Route path={SOCIAL_ROUTE_PATTERNS.profile} element={<ProfileRoute />} />

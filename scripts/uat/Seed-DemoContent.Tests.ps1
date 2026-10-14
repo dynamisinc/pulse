@@ -80,6 +80,9 @@ BeforeAll {
             # '408-after-write' | '503-after-write' | 'unreadable-201').
             Injects = [System.Collections.Generic.List[object]]::new()
             InjectAttempts = 0; InjectFaults = @{}
+            # PUT /api/injects/{id}: attempt number → 'conflict' (someone else saved the item just before: its version
+            # moves on, so this PUT is a 409) | 'lost-after-write' (applied, but the answer never arrives).
+            PutAttempts = 0; PutFaults = @{}
             Roster = @(
                 [ordered]@{ id = 'f0000000-0000-4000-8000-00000000000f'; displayName = 'Casey Controller'; role = 'controller' }
                 [ordered]@{ id = 'e0000000-0000-4000-8000-00000000000e'; displayName = 'Eve Evaluator'; role = 'evaluator' }
@@ -309,6 +312,51 @@ BeforeAll {
                 return & $reply 200 ([ordered]@{ tier = $Fake.Tier; clockFrozen = $false })
             }
             '^/api/injects/assignees$' { return & $reply 200 ([ordered]@{ me = $Fake.StaffId; assignees = @($Fake.Roster) }) }
+            '^/api/injects/(?<id>[0-9a-fA-F-]{36})$' {
+                # PUT: the server's edit rules (InjectQueueService.UpdateAsync): version, then editable, then the write's
+                # own rules; a child that echoes an id keeps its identity, sequence = array position.
+                $itemId = $Matches.id
+                if ($Method -ne 'PUT') { return & $reply 405 $null }
+                $Fake.PutAttempts++
+                $problem = { param([int] $Status, [string] $Detail, $Current) $body = [ordered]@{ type = 'https://tools.ietf.org/html/rfc9110'; title = 'Error'; status = $Status; detail = $Detail }; if ($Current) { $body['item'] = $Current }; & $reply $Status $body }
+                $item = @($Fake.Injects) | Where-Object { $_.id -eq $itemId } | Select-Object -First 1
+                if (-not $item) { return & $problem 404 'Not found.' $null }
+                if ($Fake.PutFaults[$Fake.PutAttempts] -eq 'conflict') { $item.version = [int] $item.version + 1 }
+                $request = ConvertFrom-SeedJson $bodyText
+                if ($null -eq $request['version']) { return & $problem 400 'version is required.' $null }
+                if ([long] $request['version'] -ne [long] $item.version) { return & $problem 409 'Changed by someone else. Refresh to see the latest version.' $item }
+                if ($item.status -notin 'pending', 'held', 'failed') { return & $problem 409 "This item is $($item.status) and is read-only." $item }
+                $existing = @{}
+                foreach ($child in @($item.posts)) { $existing[[string] $child.id] = $child }
+                for ($i = 0; $i -lt @($request['posts']).Count; $i++) {
+                    $echo = [string] $request['posts'][$i]['id']
+                    if ($echo -and -not $existing.Contains($echo)) { return & $problem 400 "Post $($i + 1): id does not name a post of this item." $null }
+                }
+                $detail = Test-FakeInjectWrite -Fake $Fake -Request $request
+                if ($detail) { return & $problem 400 $detail $null }
+                $ids = @($request['posts'] | ForEach-Object { if ($_['id']) { [string] $_['id'] } else { [guid]::NewGuid().ToString() } })
+                $posts = for ($i = 0; $i -lt $ids.Count; $i++) {
+                    $source = $request['posts'][$i]
+                    $kept = $existing[$ids[$i]]
+                    $post = [ordered]@{ id = $ids[$i]; sequence = $i + 1; status = $(if ($kept) { $kept.status } else { 'pending' }); personaId = [string] $source['personaId']; text = ([string] $source['text']).Trim() }
+                    if ($source['media']) { $post['media'] = @($source['media'] | ForEach-Object { [ordered]@{ mediaId = $_['mediaId']; alt = ([string] $_['alt']).Trim() } }) }
+                    $replyTo = $source['replyTo']
+                    if ($null -ne $replyTo) {
+                        $post['replyTo'] = if ($null -ne $replyTo['sequence']) { [ordered]@{ injectPostId = $ids[$replyTo['sequence'] - 1] } }
+                        elseif ($replyTo['injectPostId']) { [ordered]@{ injectPostId = $replyTo['injectPostId'] } }
+                        else { [ordered]@{ postId = $replyTo['postId'] } }
+                    }
+                    if ($source['engagementBaseline']) { $post['engagementBaseline'] = $source['engagementBaseline'] }
+                    $post
+                }
+                $item['kind'] = $request['kind']; $item['title'] = ([string] $request['title']).Trim()
+                foreach ($field in 'notes', 'plannedMinute', 'assigneeId') { if ($null -ne $request[$field]) { $item[$field] = $request[$field] } elseif ($item.Contains($field)) { $item.Remove($field) } }
+                if ($request['kind'] -eq 'burst') { $item['burstWindowSeconds'] = $(if ($null -ne $request['burstWindowSeconds']) { $request['burstWindowSeconds'] } else { 90 }) } elseif ($item.Contains('burstWindowSeconds')) { $item.Remove('burstWindowSeconds') }
+                $item['posts'] = @($posts); $item['total'] = @($posts).Count
+                $item['version'] = [int] $item.version + 1; $item['updatedAt'] = '2026-10-20T08:00:00.000Z'
+                if ($Fake.PutFaults[$Fake.PutAttempts] -eq 'lost-after-write') { throw [System.Net.Http.HttpRequestException]::new('The response ended prematurely.') }
+                return & $reply 200 $item
+            }
             '^/api/injects$' {
                 if ($Method -eq 'GET') { return & $reply 200 ([ordered]@{ items = @($Fake.Injects); pauseTier = $Fake.Tier }) }
                 $Fake.InjectAttempts++
@@ -1377,7 +1425,7 @@ Describe 'Run-sheet load end to end (in-memory fake that enforces the server''s 
         (Get-InjectManifest)['i02']['itemId'] | Should -Be $script:Fake.Injects[1].id
     }
 
-    It 'warns when a loaded item still replies to a seeded post that was archived and posted again' {
+    It 'a loaded item whose seeded parent post was archived and posted again is re-pointed in place (S1c)' {
         (Invoke-FakeSeed).Code | Should -Be 0
         $p02 = @($script:Fake.Posts) | Where-Object { $_.text -like 'Test fixture: Harbor Road is closed*' }
         [void] $script:Fake.Posts.Remove($p02)                       # archived (Clear-DemoContent.ps1)
@@ -1385,8 +1433,10 @@ Describe 'Run-sheet load end to end (in-memory fake that enforces the server''s 
         $again.Code | Should -Be 0 -Because $again.Text
         (Get-FakeCalls POST '/api/posts').Count | Should -Be 4        # p02 posted again
         (Get-FakeCalls POST '/api/injects').Count | Should -Be 2      # nothing loaded twice
-        $again.Text | Should -Match '\[WARN\] i01 still replies to the earlier copy of p02 \(archived and posted again since\), not the current one: at fire it would fail or answer the old post'
-        $again.Text | Should -Not -Match 'i02 still replies'
+        @(Get-FakeCalls PUT "/api/injects/$($script:Fake.Injects[0].id)").Count | Should -Be 1
+        $again.Text | Should -Match '\[PASS\] i01 — re-pointed post 1''s reply to p02 in place: same item, order 1, version 1 -> 2'
+        $again.Text | Should -Not -Match 'still replies to the earlier copy'
+        $again.Text | Should -Match '✅ every run-sheet reply points at a live post'
     }
 
     It 'a lost manifest adopts the items already in the run sheet instead of duplicating them' {
@@ -1792,7 +1842,7 @@ Describe 'Spent run sheet (rehearsals) and -ReloadFiredRunSheet (Gate-1 S1b M-1)
             $script:Fake.Injects.Count | Should -Be 4
         }
 
-        It 'a PARTIAL reload (i01 fired, i02 still pending): i02 is left alone, the plan warns about order, the self-check fails on the inversion (N-1), and i02''s stale reply is reported (L-2)' {
+        It 'a PARTIAL reload (i01 fired, i02 still pending): i02 is left alone, the plan warns about order, the self-check fails on the inversion (N-1), and i02''s stale reply is re-pointed in place (L-2, S1c)' {
             (Invoke-FakeSeed).Code | Should -Be 0
             Set-RowState $script:Fake.Injects[0] 'fired'                    # i01 fired in a rehearsal; i02 still pending
             $run = Invoke-FakeSeed @{ ReloadFiredRunSheet = $true }
@@ -1802,7 +1852,9 @@ Describe 'Spent run sheet (rehearsals) and -ReloadFiredRunSheet (Gate-1 S1b M-1)
             $run.Text | Should -Match '\[WARN\] Order: i01 will be added at the END of the console''s queue, after i02, which comes later in the pack.*Skip the remaining old items \(i02\) in the console and run again with -ReloadFiredRunSheet'
             $run.Text | Should -Match '❌ the console''s queue is out of pack order: i01 \(order 3\) comes after i02 \(order 2\), so "Fire next" would take i02 first\. Drag them into pack order in the console, or Skip the remaining old items'
             $run.Text | Should -Match 'NOT READY'
-            $run.Text | Should -Match '\[WARN\] i02 still replies to the earlier copy of post 1 of i01 \(i01 was loaded again since\), not the current one: at fire it would fail or answer the old post\. Delete i02 in the console and run again'
+            # S1c: i02's reply to i01's OLD post is re-pointed in place to the fresh copy's post (no longer only a warning).
+            $run.Text | Should -Match '\[PASS\] i02 — re-pointed post 3''s reply to post 1 of i01 in place: same item, order 2, version 1 -> 2'
+            $script:Fake.Injects[1].posts[2].replyTo.injectPostId | Should -Be $script:Fake.Injects[2].posts[0].id
         }
 
         It 'an uncertain create during a reload adopts the fresh copy (never the fired one), once' {
@@ -1919,6 +1971,315 @@ Describe 'Spent run sheet (rehearsals) and -ReloadFiredRunSheet (Gate-1 S1b M-1)
     }
 }
 
+Describe 'Tue 10/20 re-seed: stale replies re-pointed in place (S1c)' {
+    BeforeAll {
+        function Get-RepointManifest { ConvertFrom-SeedJson (Get-Content -LiteralPath (Join-Path $TestDrive 'manifests' "$($script:Fake.ExerciseId).json") -Raw) }
+        function Set-FakeFired($Item) {
+            $Item.status = 'fired'; $Item.firedCount = @($Item.posts).Count
+            foreach ($post in @($Item.posts)) { $post.status = 'fired' }
+        }
+        function Clear-FakeFeed {
+            <# Clear-DemoContent.ps1: every post made before now is archived (gone from the feed); the queue is untouched. #>
+            $script:Fake.Posts.Clear()
+        }
+        function Get-FakePostId([string] $Like) { [string] (@($script:Fake.Posts) | Where-Object { $_.text -like $Like } | Select-Object -First 1).id }
+        function Get-Puts { @($script:Fake.Calls | Where-Object Method -eq 'PUT') }
+        function Write-RepointPack {
+            param([string] $Name, [scriptblock] $Mutate)
+            $root = Join-Path $TestDrive $Name
+            if (-not (Test-Path $root)) { Copy-Item -Recurse $script:FixtureRoot $root }
+            $pack = Get-FixturePack; & $Mutate $pack
+            Set-Content -LiteralPath (Join-Path $root 'pack.json') -Value (ConvertTo-SeedJson $pack)
+            return (Join-Path $root 'pack.json')
+        }
+    }
+
+    Context 'pure' {
+        It 'the PUT body is the QUEUE''s item, every child echoed by id, only the stale reply changed, with its version' {
+            $row = [ordered]@{
+                id = 'item-2'; kind = 'burst'; title = 'Edited title'; notes = 'console note'; plannedMinute = 12; assigneeId = 'id-eve'; burstWindowSeconds = 60
+                order = 2; status = 'held'; version = 7; firedCount = 0
+                posts = @(
+                    [ordered]@{ id = 'c1'; sequence = 1; status = 'pending'; personaId = 'pa'; text = 'One'; replyTo = [ordered]@{ postId = 'old-p01' }; engagementBaseline = [ordered]@{ like = 15 } }
+                    [ordered]@{ id = 'c2'; sequence = 2; status = 'pending'; personaId = 'pb'; text = 'Two'; replyTo = [ordered]@{ injectPostId = 'c1' }; media = @([ordered]@{ mediaId = 'm1'; alt = 'Alt' }) }
+                    [ordered]@{ id = 'c3'; sequence = 3; status = 'pending'; personaId = 'pc'; text = 'Three'; replyTo = [ordered]@{ injectPostId = 'old-i01-c1' } }
+                )
+            }
+            $repairs = @([pscustomobject]@{ Sequence = 1; Field = 'postId'; Current = 'new-p01' }, [pscustomobject]@{ Sequence = 3; Field = 'injectPostId'; Current = 'new-i01-c1' })
+            ConvertTo-SeedJson (New-InjectRepointBody -Row $row -Repairs $repairs) -Compress | Should -BeExactly ('{"kind":"burst","title":"Edited title","notes":"console note","plannedMinute":12,"assigneeId":"id-eve","burstWindowSeconds":60,"posts":[' +
+                '{"id":"c1","personaId":"pa","text":"One","replyTo":{"postId":"new-p01"},"engagementBaseline":{"like":15}},' +
+                '{"id":"c2","personaId":"pb","text":"Two","media":[{"mediaId":"m1","alt":"Alt"}],"replyTo":{"injectPostId":"c1"}},' +
+                '{"id":"c3","personaId":"pc","text":"Three","replyTo":{"injectPostId":"new-i01-c1"}}],"version":7}')
+        }
+
+        It 'L-1: a target is dead only when it is no longer live (<Name>)' -ForEach @(
+            @{ Name = 'a live pack post'; Field = 'postId'; Id = 'p-live'; Complete = $true; Dead = $false }
+            @{ Name = 'an archived seed copy, feed complete'; Field = 'postId'; Id = 'p-old'; Complete = $true; Dead = $true }
+            @{ Name = 'an archived seed copy, feed window full'; Field = 'postId'; Id = 'p-old'; Complete = $false; Dead = $true }
+            @{ Name = 'an unknown post, feed complete'; Field = 'postId'; Id = 'p-other'; Complete = $true; Dead = $true }
+            @{ Name = 'an unknown post outside a full feed window'; Field = 'postId'; Id = 'p-other'; Complete = $false; Dead = $false }
+            @{ Name = 'a post of a live item'; Field = 'injectPostId'; Id = 'c-live'; Complete = $true; Dead = $false }
+            @{ Name = 'a post of a superseded item'; Field = 'injectPostId'; Id = 'c-old'; Complete = $true; Dead = $true }
+            @{ Name = 'a post of no item in the queue'; Field = 'injectPostId'; Id = 'c-gone'; Complete = $true; Dead = $true }
+            @{ Name = 'a post of a spent item (repairs do not count spent)'; Field = 'injectPostId'; Id = 'c-fired'; Complete = $true; Dead = $false }
+        ) {
+            $queue = @(
+                [ordered]@{ id = 'item-live'; status = 'pending'; posts = @([ordered]@{ id = 'c-live'; sequence = 1; status = 'pending' }) }
+                [ordered]@{ id = 'item-old'; status = 'fired'; posts = @([ordered]@{ id = 'c-old'; sequence = 1; status = 'fired' }) }
+                [ordered]@{ id = 'item-fired'; status = 'fired'; posts = @([ordered]@{ id = 'c-fired'; sequence = 1; status = 'fired' }) }
+            )
+            $liveness = New-InjectLiveness -LivePostIds @('p-live') -RetiredPostIds @('p-old', 'p-live') -FeedComplete $Complete -Queue $queue -SupersededItemIds @('item-old')
+            Test-InjectTargetDead -Liveness $liveness -Field $Field -Id $Id | Should -Be $Dead
+            # The self-check also counts a spent item's posts as dead (S-3).
+            $strict = New-InjectLiveness -LivePostIds @('p-live') -FeedComplete $Complete -Queue $queue -SupersededItemIds @('item-old') -SpentDead
+            Test-InjectTargetDead -Liveness $strict -Field 'injectPostId' -Id 'c-fired' | Should -BeTrue
+        }
+
+        It 'L-1: a repair is flagged Dead only for a dead loaded target; a live re-target is not' {
+            $pack = Get-FixturePack
+            $row = [ordered]@{ id = 'item-1'; posts = @([ordered]@{ id = 'c1'; sequence = 1; replyTo = [ordered]@{ postId = 'p03-live' } }) }
+            $liveness = New-InjectLiveness -LivePostIds @('p03-live', 'p02-new') -RetiredPostIds @('p02-old') -FeedComplete $true
+            $repair = @(Get-InjectReplyRepairs -PackItem $pack['runSheet']['items'][0] -Row $row -PostIds @{ p02 = 'p02-new' } -Liveness $liveness)
+            "$($repair[0].Loaded)|$($repair[0].Dead)" | Should -Be 'p03-live|False'
+            $row['posts'][0]['replyTo']['postId'] = 'p02-old'
+            (@(Get-InjectReplyRepairs -PackItem $pack['runSheet']['items'][0] -Row $row -PostIds @{ p02 = 'p02-new' } -Liveness $liveness))[0].Dead | Should -BeTrue
+        }
+
+        It 'reply repairs name the post, the field, the old and the current id' {
+            $pack = Get-FixturePack
+            $row = [ordered]@{ id = 'item-1'; posts = @([ordered]@{ id = 'c1'; sequence = 1; replyTo = [ordered]@{ postId = 'old-p02' } }) }
+            $repair = @(Get-InjectReplyRepairs -PackItem $pack['runSheet']['items'][0] -Row $row -PostIds @{ p02 = 'new-p02' })
+            $repair.Count | Should -Be 1
+            "$($repair[0].Sequence)|$($repair[0].Field)|$($repair[0].Loaded)|$($repair[0].Current)|$($repair[0].Target)" | Should -Be '1|postId|old-p02|new-p02|p02'
+            @(Get-InjectReplyRepairs -PackItem $pack['runSheet']['items'][0] -Row $row -PostIds @{ p02 = 'old-p02' }) | Should -BeNullOrEmpty
+        }
+    }
+
+    Context 'end to end' {
+        BeforeEach {
+            $script:Fake = New-FakePulse
+            $env:PULSE_STAFF_SECRET = $script:Fake.Secret
+            Mock Invoke-WebRequest { Invoke-FakePulse -Fake $script:Fake -Uri $Uri -Method $Method -Headers $Headers -Body $Body -Form $Form -ContentType $ContentType }
+            Mock Invoke-MediaRangeRequest { 206 }
+            Mock Start-Sleep { }
+            Remove-Item -Recurse -Force (Join-Path $TestDrive 'manifests') -ErrorAction SilentlyContinue
+        }
+        AfterEach { $env:PULSE_STAFF_SECRET = $null }
+
+        It 're-seed keeps order: Clear-DemoContent, then the seed, re-points a postKey reply IN PLACE (same item, same order, version advances)' {
+            (Invoke-FakeSeed).Code | Should -Be 0
+            $i01 = $script:Fake.Injects[0]
+            $id, $order, $version = $i01.id, $i01.order, $i01.version
+            Clear-FakeFeed
+            $script:Fake.Calls.Clear()
+            $run = Invoke-FakeSeed                                           # Tuesday morning: no -Resume needed
+            $run.Code | Should -Be 0 -Because $run.Text
+            (Get-FakeCalls POST '/api/posts').Count | Should -Be 3          # the opening feed, posted again under new ids
+            (Get-FakeCalls POST '/api/injects').Count | Should -Be 0        # nothing created
+            @(Get-Puts | ForEach-Object Path) | Should -Be @("/api/injects/$id")
+            $script:Fake.Injects.Count | Should -Be 2
+            $script:Fake.Injects[0].id | Should -Be $id
+            $script:Fake.Injects[0].order | Should -Be $order
+            $script:Fake.Injects[0].version | Should -Be ($version + 1)
+            $script:Fake.Injects[0].posts[0].replyTo.postId | Should -Be (Get-FakePostId 'Test fixture: Harbor Road is closed*')
+            (Get-RepointManifest)['injects']['i01']['itemId'] | Should -Be $id
+            $run.Text | Should -Match "Re-point        1 kept item\(s\) whose reply target gets a new id"
+            $run.Text | Should -Match "~ i01  post 1's reply to p02 \(posted again\)"
+            $run.Text | Should -Match "\[PASS\] i01 — re-pointed post 1's reply to p02 in place: same item, order $order, version $version -> $($version + 1)"
+            $run.Text | Should -Match '✅ every run-sheet reply points at a live post'
+            $run.Text | Should -Match '✅ the armable run-sheet items are in pack order'
+        }
+
+        It 'an { item, sequence } reply is re-pointed in place after its target item was reloaded' {
+            (Invoke-FakeSeed).Code | Should -Be 0
+            $i02 = $script:Fake.Injects[1]
+            Set-FakeFired $script:Fake.Injects[0]
+            $script:Fake.Calls.Clear()
+            $run = Invoke-FakeSeed @{ ReloadFiredRunSheet = $true }
+            @(Get-Puts | ForEach-Object Path) | Should -Be @("/api/injects/$($i02.id)")
+            $script:Fake.Injects[1].id | Should -Be $i02.id
+            $script:Fake.Injects[1].posts[2].replyTo.injectPostId | Should -Be $script:Fake.Injects[2].posts[0].id   # i01's fresh copy
+            $run.Text | Should -Match "~ i02  post 3's reply to post 1 of i01 \(loaded again\)"
+            $run.Text | Should -Match '✅ every run-sheet reply points at a live post'
+            # (exit 1 here is the N-1 order check: i01's fresh copy sits behind i02.)
+            $run.Text | Should -Match '❌ the console''s queue is out of pack order'
+        }
+
+        It 'a 409 (someone saved the item just before) re-reads and retries once with the fresh version' {
+            (Invoke-FakeSeed).Code | Should -Be 0
+            Clear-FakeFeed
+            $script:Fake.PutFaults[1] = 'conflict'
+            $script:Fake.Calls.Clear()
+            $run = Invoke-FakeSeed
+            $run.Code | Should -Be 0 -Because $run.Text
+            @(Get-Puts).Count | Should -Be 2
+            @(Get-FakeCalls GET '/api/injects').Count | Should -BeGreaterOrEqual 2             # the plan's read + the re-read
+            (ConvertFrom-SeedJson (Get-Puts)[1].Body)['version'] | Should -Be 2                  # the fresh version
+            $script:Fake.Injects[0].version | Should -Be 3
+            $run.Text | Should -Match "\[PASS\] i01 — re-pointed post 1's reply to p02 in place"
+        }
+
+        It 'a 409 that persists after one retry is a warning naming the item; the run goes on and the self-check fails' {
+            (Invoke-FakeSeed).Code | Should -Be 0
+            Clear-FakeFeed
+            $script:Fake.PutFaults[1] = 'conflict'; $script:Fake.PutFaults[2] = 'conflict'
+            $script:Fake.Calls.Clear()
+            $run = Invoke-FakeSeed
+            $run.Code | Should -Be 1
+            @(Get-Puts).Count | Should -Be 2                                   # never more than one retry
+            $run.Text | Should -Match "\[WARN\] i01: could not re-point post 1's reply to p02 in place \(PUT /api/injects/\{id\} answered 409 Changed by someone else\. Refresh to see the latest version\. \(also after re-reading it and retrying once with the fresh version\)\)"
+            $run.Text | Should -Match '10\. Pause the engine'                 # the run went on
+            $run.Text | Should -Match '❌ run-sheet replies that do not point at a live post: i01 post 1 \(the earlier copy of p02\)'
+        }
+
+        It 'the PUT body echoes every child id unchanged and keeps the queue''s title, text and assignee (console edits survive)' {
+            # A variant where i02's first post replies to a seeded post, so the whole burst gets a PUT.
+            $path = Write-RepointPack 'repoint-burst' { param($p) $p['runSheet']['items'][1]['posts'][0]['replyTo'] = [ordered]@{ postKey = 'p01' } }
+            (Invoke-FakeSeed @{ PackPath = $path }).Code | Should -Be 0
+            $i02 = $script:Fake.Injects[1]
+            $childIds = @($i02.posts | ForEach-Object id)
+            $i01Child = $script:Fake.Injects[0].posts[0].id
+            # Console edits after loading: a new title, a reworded post, another assignee.
+            $i02.title = 'Pile-on, as rehearsed'; $i02.posts[1].text = 'Console-edited reply text.'; $i02.assigneeId = $script:Fake.StaffId
+            Clear-FakeFeed
+            $script:Fake.Calls.Clear()
+            $run = Invoke-FakeSeed @{ PackPath = $path }
+            $run.Text | Should -Match 'i02 differs from the pack'             # the existing warning still applies
+            $put = @(Get-Puts | Where-Object Path -eq "/api/injects/$($i02.id)")
+            $put.Count | Should -Be 1
+            $body = ConvertFrom-SeedJson $put[0].Body
+            @($body.Keys) | Should -Be @('kind', 'title', 'plannedMinute', 'assigneeId', 'burstWindowSeconds', 'posts', 'version')
+            @($body['posts'] | ForEach-Object { $_['id'] }) | Should -Be $childIds
+            $body['title'] | Should -Be 'Pile-on, as rehearsed'
+            $body['posts'][1]['text'] | Should -Be 'Console-edited reply text.'
+            $body['assigneeId'] | Should -Be $script:Fake.StaffId
+            $body['version'] | Should -Be 1
+            $body['posts'][0]['replyTo']['postId'] | Should -Be (Get-FakePostId 'Test fixture: river levels rising*')   # the only change
+            $body['posts'][1]['replyTo']['injectPostId'] | Should -Be $childIds[0]
+            $body['posts'][2]['replyTo']['injectPostId'] | Should -Be $i01Child
+            $body['posts'][0]['engagementBaseline']['like'] | Should -Be 15
+            $script:Fake.Injects[1].title | Should -Be 'Pile-on, as rehearsed'                  # the console's edit stayed
+            @($script:Fake.Injects[1].posts | ForEach-Object id) | Should -Be $childIds
+        }
+
+        It 'L-1: a reply re-targeted in the console to another LIVE post is left alone: warned about, never PUT' {
+            (Invoke-FakeSeed).Code | Should -Be 0
+            $p03 = Get-FakePostId 'Test fixture reply: thanks for the footage*'
+            $script:Fake.Injects[0].posts[0].replyTo = [ordered]@{ postId = $p03 }      # a controller chose p03 instead of p02
+            $script:Fake.Calls.Clear()
+            $run = Invoke-FakeSeed
+            $run.Code | Should -Be 0 -Because $run.Text
+            Get-Puts | Should -BeNullOrEmpty
+            $script:Fake.Injects[0].posts[0].replyTo.postId | Should -Be $p03
+            $run.Text | Should -Match "\[WARN\] i01 differs from the pack in post 1's reply \(re-targeted to another live post, not the pack's p02\)"
+            $run.Text | Should -Not -Match 'Re-point        '
+            $run.Text | Should -Match '✅ every run-sheet reply points at a live post'
+        }
+
+        It 'L-1: the same re-target is re-pointed once its post is archived (dead), on the Tuesday re-seed' {
+            (Invoke-FakeSeed).Code | Should -Be 0
+            $script:Fake.Injects[0].posts[0].replyTo = [ordered]@{ postId = (Get-FakePostId 'Test fixture reply: thanks for the footage*') }
+            Clear-FakeFeed
+            $script:Fake.Calls.Clear()
+            $run = Invoke-FakeSeed
+            $run.Code | Should -Be 0 -Because $run.Text
+            @(Get-Puts).Count | Should -Be 1
+            $script:Fake.Injects[0].posts[0].replyTo.postId | Should -Be (Get-FakePostId 'Test fixture: Harbor Road is closed*')
+        }
+
+        It 'S-2: a final PUT whose answer is lost but which landed is a success (the queue is read once more), not a warning' {
+            (Invoke-FakeSeed).Code | Should -Be 0
+            Clear-FakeFeed
+            $script:Fake.PutFaults[1] = 'conflict'; $script:Fake.PutFaults[2] = 'lost-after-write'
+            $script:Fake.Calls.Clear()
+            $run = Invoke-FakeSeed
+            $run.Code | Should -Be 0 -Because $run.Text
+            @(Get-Puts).Count | Should -Be 2
+            $run.Text | Should -Match "\[PASS\] i01 — re-pointed post 1's reply to p02 in place"
+            $run.Text | Should -Not -Match 'could not re-point'
+        }
+
+        It 'S-3: a reply whose scripted parent is spent (a rehearsal fired it) does not point at a live post' {
+            (Invoke-FakeSeed).Code | Should -Be 0
+            Set-FakeFired $script:Fake.Injects[0]
+            $run = Invoke-FakeSeed
+            $run.Code | Should -Be 1
+            $run.Text | Should -Match '❌ run-sheet replies that do not point at a live post: i02 post 3 \(its scripted parent is spent, superseded or gone\)'
+        }
+
+        It 'S-3: a console-chosen post outside a full 200-post feed window is not called dead; the line says it was not checked' {
+            (Invoke-FakeSeed).Code | Should -Be 0
+            $persona = @($script:Fake.Personas.Keys)[2]
+            $old = [ordered]@{ id = [guid]::NewGuid().ToString(); authorPersonaId = $persona; text = 'an old live post'; scenarioTime = '2026-01-01T00:00:00.000Z'; media = @(); parent = $null; counts = [ordered]@{ reply = 0; repost = 0; like = 0 } }
+            $script:Fake.Posts.Add($old)
+            foreach ($n in 1..200) {
+                $script:Fake.Posts.Add([ordered]@{ id = "new-$n"; authorPersonaId = $persona; text = "newer chatter $n"; scenarioTime = '2099-01-01T00:00:00.000Z'; media = @(); parent = $null; counts = [ordered]@{ reply = 0; repost = 0; like = 0 } })
+            }
+            $script:Fake.Injects[0].posts[0].replyTo = [ordered]@{ postId = $old.id }   # live, but beyond the window
+            $script:Fake.Calls.Clear()
+            $run = Invoke-FakeSeed
+            Get-Puts | Should -BeNullOrEmpty                                    # unknown is never re-pointed
+            $run.Text | Should -Match "✅ every run-sheet reply that could be checked points at a live post \(1 target\(s\) beyond the feed's newest 200 posts not checked\)"
+        }
+
+        It 'S-4: -LeaveEngineRunning still reads the tier once and warns about a frozen world, without touching it' {
+            $script:Fake.Tier = 'freeze'
+            $run = Invoke-FakeSeed @{ LeaveEngineRunning = $true }
+            $run.Code | Should -Be 0 -Because $run.Text
+            (Get-FakeCalls GET '/api/steering/pause-tier').Count | Should -Be 1
+            (Get-FakeCalls POST '/api/steering/pause-tier').Count | Should -Be 0
+            $script:Fake.Tier | Should -Be 'freeze'
+            $run.Text | Should -Match '\[WARN\] the world is FROZEN\. A frozen server clock falls behind'
+        }
+
+        It 'fired items are never PUT (with or without -ReloadFiredRunSheet)' {
+            (Invoke-FakeSeed).Code | Should -Be 0
+            $firedId = $script:Fake.Injects[0].id
+            Set-FakeFired $script:Fake.Injects[0]
+            Clear-FakeFeed
+            $script:Fake.Calls.Clear()
+            $plain = Invoke-FakeSeed
+            $plain.Code | Should -Be 1                                          # the spent item fails the self-check
+            Get-Puts | Should -BeNullOrEmpty
+            Clear-FakeFeed
+            $reload = Invoke-FakeSeed @{ ReloadFiredRunSheet = $true }
+            @(Get-Puts | Where-Object { $_.Path -like "*$firedId*" }) | Should -BeNullOrEmpty
+            # Its fresh copy already resolves to the new p02.
+            $script:Fake.Injects[2].posts[0].replyTo.postId | Should -Be (Get-FakePostId 'Test fixture: Harbor Road is closed*')
+        }
+
+        It '-WhatIf lists the items it would re-point and sends nothing' {
+            (Invoke-FakeSeed).Code | Should -Be 0
+            # The manifest lost i01 (another machine loaded it): a live run would create it, so i02's reply would move.
+            $path = Join-Path $TestDrive 'manifests' "$($script:Fake.ExerciseId).json"
+            $manifest = ConvertFrom-SeedJson (Get-Content -LiteralPath $path -Raw); $manifest['injects'].Remove('i01')
+            Set-Content -LiteralPath $path -Value (ConvertTo-SeedJson $manifest)
+            $script:Fake.Calls.Clear()
+            $run = Invoke-FakeSeed @{ WhatIf = $true }
+            $run.Code | Should -Be 0
+            $run.Text | Should -Match "~ i02  post 3's reply to post 1 of i01 \(loaded again\)"
+            $run.Text | Should -Match '-WhatIf cannot see the feed or the queue'
+            @($script:Fake.Calls | ForEach-Object { "$($_.Method) $($_.Path)" }) | Should -Be @('GET /api/exercise-context')
+        }
+
+        It 'the secret and the token never appear in a re-seed''s output or in a PUT body' {
+            (Invoke-FakeSeed).Code | Should -Be 0
+            Clear-FakeFeed
+            $script:Fake.PutFaults[1] = 'conflict'                             # the retry path too
+            $run = Invoke-FakeSeed
+            $run.Code | Should -Be 0 -Because $run.Text
+            @(Get-Puts).Count | Should -Be 2
+            foreach ($text in @($run.Text) + @(Get-Puts | ForEach-Object Body)) {
+                $text.Contains($script:Fake.Secret) | Should -BeFalse
+                $text.Contains($script:Fake.Token) | Should -BeFalse
+                $text.Contains($script:Fake.Refresh) | Should -BeFalse
+            }
+            @(Get-Puts | Where-Object { -not $_.Authorized }) | Should -BeNullOrEmpty
+            @(Get-Puts | Where-Object { ([Uri] $_.Uri).Host -ne 'api.fake.test' }) | Should -BeNullOrEmpty
+        }
+    }
+}
+
 Describe 'Gate-1 folds end to end (in-memory fake)' {
     BeforeEach {
         $script:Fake = New-FakePulse
@@ -1953,6 +2314,7 @@ Describe 'Gate-1 folds end to end (in-memory fake)' {
         (Get-FakeCalls POST '/api/steering/pause-tier').Count | Should -Be 0
         $script:Fake.Tier | Should -Be 'freeze'
         $run.Text | Should -Match "found 'freeze' \(the engine is already paused\); left as it is"
+        $run.Text | Should -Match '\[WARN\] the world is FROZEN\. A frozen server clock falls behind.*Reset-DemoState\.ps1 -Restart, wait ~8 minutes'
     }
 
     It 'L-6: a running engine is paused once and reported' {
@@ -2144,7 +2506,7 @@ Describe 'Public APIs only' {
 
     It 'its own allowlist matches the story''s list exactly (read from 24-seed-script.md)' {
         $script:Allowed | Should -Be @('/api/exercise-context', '/api/auth/staff/login', '/api/steering/pause-tier', '/api/staff/media', '/api/media',
-            '/api/personas', '/api/staff/personas/{id}', '/api/posts', '/api/feed', '/api/injects', '/api/injects/assignees')
+            '/api/personas', '/api/staff/personas/{id}', '/api/posts', '/api/feed', '/api/injects', '/api/injects/assignees', '/api/injects/{id}')
         Get-SeedApiAllowlist | Should -Be $script:Allowed
     }
 
@@ -2156,6 +2518,17 @@ Describe 'Public APIs only' {
         Test-SeedApiPath '/api/injects' | Should -BeTrue
         Test-SeedApiPath '/api/injects/assignees' | Should -BeTrue
         Test-SeedApiPath '/api/injects/11111111-2222-4333-8444-555555555555/fire' | Should -BeFalse   # the seed never fires
+        Test-SeedApiPath '/api/injects/11111111-2222-4333-8444-555555555555/fire' -Method POST | Should -BeFalse
+        Test-SeedApiPath '/api/injects/11111111-2222-4333-8444-555555555555' -Method PUT | Should -BeTrue      # S1c: re-point in place
+        Test-SeedApiPath '/api/injects/11111111-2222-4333-8444-555555555555' -Method GET | Should -BeFalse     # PUT only on an item
+        Test-SeedApiPath '/api/injects/11111111-2222-4333-8444-555555555555' | Should -BeFalse
+        Test-SeedApiPath '/api/injects/not-a-guid' -Method PUT | Should -BeFalse
+        # S1c S-1: the {id} entries are placeholders, never paths: a literal "{id}" passes for no method.
+        foreach ($method in 'PUT', 'GET', 'POST', 'PATCH', '') {
+            Test-SeedApiPath '/api/injects/{id}' -Method $method | Should -BeFalse -Because $method
+            Test-SeedApiPath '/api/staff/personas/{id}' -Method $method | Should -BeFalse -Because $method
+        }
+        { Invoke-PulseApi -Context @{ BaseUrl = 'https://x.test'; Token = 't' } -Method POST -Path '/api/injects/11111111-2222-4333-8444-555555555555' } | Should -Throw '*allowlist*'
         Test-SeedApiPath '/api/injects/reorder' | Should -BeFalse
         { Invoke-PulseApi -Context @{ BaseUrl = 'https://x.test'; Token = 't' } -Method GET -Path '/api/threads/1' } | Should -Throw '*allowlist*'
     }

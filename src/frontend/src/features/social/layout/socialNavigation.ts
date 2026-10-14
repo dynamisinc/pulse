@@ -67,6 +67,9 @@ export const HOME_PATH = '/home'
 /** The Explore route (F0's stub today; F6 fills the page). */
 export const EXPLORE_PATH = '/explore'
 
+/** The Notifications route (demo-polish F7: derived, client-side notifications). */
+export const NOTIFICATIONS_PATH = '/notifications'
+
 /**
  * The handle segment used for a thread link built from a post id ALONE.
  *
@@ -80,13 +83,14 @@ export const THREAD_HANDLE_PLACEHOLDER = 'i'
 
 /**
  * First path segments that are NEVER a persona handle: routes the channel owns
- * (`home`, `explore`, `hashtag`), and the app-level `login` / `staff` prefixes
+ * (`home`, `explore`, `notifications`, `hashtag`), and the app-level `login` / `staff` prefixes
  * (a participant typing `/staff` must land on Home, not on an "account doesn't
  * exist" profile -- COR-004). Compared case-insensitively.
  */
 export const SOCIAL_RESERVED_SEGMENTS: readonly string[] = [
   'home',
   'explore',
+  'notifications',
   'hashtag',
   'login',
   'staff',
@@ -116,6 +120,7 @@ export function isThreadHandle(segment: string): boolean {
 export const SOCIAL_ROUTE_PATTERNS = {
   home: HOME_PATH,
   explore: EXPLORE_PATH,
+  notifications: NOTIFICATIONS_PATH,
   hashtag: '/hashtag/:tag',
   thread: '/:handle/status/:id',
   profile: '/:handle',
@@ -125,6 +130,7 @@ export const SOCIAL_ROUTE_PATTERNS = {
 export const socialPaths = {
   home: (): string => HOME_PATH,
   explore: (): string => EXPLORE_PATH,
+  notifications: (): string => NOTIFICATIONS_PATH,
   /** `tag` is the normalized tag (no leading `#`). */
   hashtag: (tag: string): string => `/hashtag/${encodeURIComponent(tag)}`,
   profile: (handle: string): string => `/${encodeURIComponent(handle)}`,
@@ -141,7 +147,14 @@ export const socialPaths = {
  * every reserved first segment that is not itself a route (`/staff`,
  * `/staff/console`, `/login`, ...): all of them are sent to Home.
  */
-export type SocialRouteKind = 'home' | 'explore' | 'hashtag' | 'thread' | 'profile' | 'redirect'
+export type SocialRouteKind =
+  | 'home'
+  | 'explore'
+  | 'notifications'
+  | 'hashtag'
+  | 'thread'
+  | 'profile'
+  | 'redirect'
 
 /** The shape of a hashtag the channel will route: letters, digits and `_`, 1-100 of them. */
 const HASHTAG_PARAM_PATTERN = /^[\p{L}\p{N}_]{1,100}$/u
@@ -182,6 +195,7 @@ function decodeParam(value: string | undefined): string {
 export function matchSocialRoute(pathname: string): SocialRouteKind {
   if (matchPath(SOCIAL_ROUTE_PATTERNS.home, pathname)) return 'home'
   if (matchPath(SOCIAL_ROUTE_PATTERNS.explore, pathname)) return 'explore'
+  if (matchPath(SOCIAL_ROUTE_PATTERNS.notifications, pathname)) return 'notifications'
   const hashtag = matchPath(SOCIAL_ROUTE_PATTERNS.hashtag, pathname)
   if (hashtag) {
     return normalizeHashtagParam(decodeParam(hashtag.params.tag)) === undefined

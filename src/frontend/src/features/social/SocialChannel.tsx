@@ -59,6 +59,14 @@
  * card exists only in a `full` / `readOnly` mount (never a staff `preview`); the
  * Profile pill only for a persona-bound session.
  *
+ * NOTIFICATIONS (demo-polish F7). `<NotificationsEngine />` is mounted HERE, as a sibling of the
+ * frame rather than inside it, for one reason: it owns the polite live region that announces
+ * new replies/mentions/likes, and the frame goes `inert` while the compose modal is open --
+ * a live region inside it would be inert too, and an announcement made while the participant
+ * is composing would be lost. Outside the frame it is announced regardless. The engine itself
+ * runs on every route (the rail's bell keeps counting on Home), and starts only for an
+ * interactive, persona-bound, not read-only participant.
+ *
  * SCENARIO TIME: nothing in this file renders time. Every post still renders its own
  * scenario-time stamp (COR-053).
  *
@@ -75,6 +83,7 @@ import {
 } from '@/features/participant-shell/mountContract'
 import { ComposeModal } from './layout/ComposeModal'
 import { NavRail } from './layout/NavRail'
+import { NotificationsEngine } from './notifications/NotificationsEngine'
 import { RightRailContent } from './layout/RightRailContent'
 import { SocialDirectoryProvider } from './layout/SocialDirectoryProvider'
 import { SocialNavigationProvider } from './layout/SocialNavigationProvider'
@@ -174,6 +183,7 @@ function SocialFrame() {
           postButtonRef={postButtonRef}
           self={self}
           showAccount={showAccount && !awaitingSelf}
+          showNotifications={affordancesAvailable(variant)}
         />
 
         <main
@@ -189,6 +199,9 @@ function SocialFrame() {
 
         <RightRailContent />
       </div>
+
+      {/* Outside the (inert-while-composing) frame on purpose: see the header. */}
+      <NotificationsEngine />
 
       {composeOpen && <ComposeModal onClose={closeCompose} returnFocusRef={postButtonRef} />}
     </div>

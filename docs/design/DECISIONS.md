@@ -867,3 +867,38 @@ decisions above. Roster (anchor → decision):
 
 > Sign-offs #3 and #6 are explicitly provisional ("open to explore", "for now") and are logged as
 > open items in [`STORY-UPDATES.md`](D4-press-weather/STORY-UPDATES.md), not as settled guarantees.
+
+---
+
+## Demo fiction
+
+### FIC-001 — Fulton County → Kestrel County, Newsline 7 → Metro Desk 9 (Tom, 2026-10-13)
+**Decision.** Tom renamed the demo fiction on 2026-10-13. The county "Fulton County" becomes **Kestrel
+County**: the EM account `@FulcoEM` "Fulton County EM" becomes `@KestrelCoEM` "Kestrel County EM". The TV
+station "Newsline 7" becomes **Metro Desk 9**: `@Newsline7` becomes `@MetroDesk9`. The city Fairhaven,
+every other handle and `#WaterIssues` are unchanged. The starter storyline's silence test now reads "an
+official statement from Kestrel County Emergency Management addressing the water safety concern".
+
+**Applied in place.** The next `POST /api/ops/seed-engine-content` (run by
+`scripts/uat/Reset-DemoState.ps1`) has `PersonaCastSeeder` rename an existing `@FulcoEM` / `@Newsline7` row
+in place, so its id, posts, follows and participant bindings are kept. Details:
+- The display name and bio are replaced only while they are still the old catalog text. A staff edit is
+  kept and reported.
+- The location is never edited. A location still naming the old fiction is reported.
+- A row whose replacement handle already exists is left alone and reported as still on a retired handle.
+- Every rename is reported in the seed response (`personasRenamed`), its note, the log and the
+  `engine.content_seeded` audit event (`renamedPersonas`).
+- No schema change and no migration.
+
+**Removal.** `PersonaCastSeeder.RetiredHandles` (with `RetiredFictionTerms`) is temporary. Remove it once no
+deployed database can hold the old handles, that is after the post-demo UAT reset. Owner: the orchestrator /
+Tom.
+
+**Pending.** The frontend mock (`personaTemplates.ts`, `seedCast.ts` and fixtures), the demo content pack
+and the remaining docs keep the old names until the orchestrator's sweep. Until then mock and live disagree
+on these two personas: name, follower count and join date.
+
+**Grep note.** Search for the new county as `Kestrel County` or `KestrelCoEM`, never bare `Kestrel`. Bare
+`Kestrel` also matches ASP.NET Core's Kestrel web server (for example `LoginRequestLimitTests`). The old
+names stay searchable as `fulton|fulco|newsline`. In the backend, the intended leftovers are the
+`RetiredHandles` table and the rename tests.
