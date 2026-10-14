@@ -15,12 +15,11 @@
  * START / STOP. When the viewer is eligible (`useNotificationsEligibility`: an interactive,
  * persona-bound, not read-only participant whose persona has resolved) it starts a store
  * session keyed by exercise + persona + account (+ the persona's handle, for mentions) and
- * stops it on cleanup. While the shell's pause / EndEx overlay is up the periodic re-read holds
- * (`OverlayHold`, below). The effect depends
- * on those primitives only, so it restarts exactly when the viewer changes, never on a
- * re-render. React StrictMode's dev-only mount/unmount/mount simply stops and restarts the
- * session (the store's `stop` is idempotent and releases the shared arrival source's
- * reference each time).
+ * stops it on cleanup. While the shell's pause / EndEx overlay is up the feed reads hold
+ * (`OverlayHold`, below). The effect depends on those primitives only, so it restarts exactly
+ * when the viewer changes, never on a re-render. React StrictMode's dev-only
+ * mount/unmount/mount simply stops and restarts the session (the store's `stop` is idempotent
+ * and releases the shared arrival source's reference each time).
  *
  * THE LIVE REGION. A persistent `role="status"` / `aria-live="polite"` / `aria-atomic`
  * element is mounted from the first render, EMPTY: a polite region has to exist before its
@@ -42,11 +41,17 @@ import { useNotificationsEligibility } from './useNotificationsEligibility'
 import styles from './NotificationsEngine.module.css'
 
 /**
- * Tells the store when the shell's pause / EndEx overlay is up, so the periodic re-read holds
- * while the world is frozen (and is made up, jittered, when it clears). `useOverlayState` is the
- * shell's own public hook -- the overlay layer and the video player read the same state -- so
- * this needs no new plumbing. Rendered only for an eligible viewer: a staff preview or a
- * read-only mount never subscribes to it.
+ * Tells the store when the shell's pause / EndEx overlay is up, so the feed reads hold while the
+ * world is frozen (and are made up, jittered, when it clears). `useOverlayState` is the shell's
+ * own public hook -- the overlay layer and the video player read the same state -- so this needs
+ * no new plumbing. Rendered only for an eligible viewer: a staff preview or a read-only mount
+ * never subscribes to it.
+ *
+ * ORDER MATTERS. This is a CHILD of the engine, so its effect runs BEFORE the engine's `start()`
+ * effect: on a mount, or on a restart for a new identity, while the overlay is up, the store has
+ * no (new) session to hold yet. It does not need one -- the store remembers the last request and
+ * starts every session with it -- so there is nothing to sequence here. The cleanup resumes: an
+ * unmount must not leave the next session held by a hold nobody is watching any more.
  */
 function OverlayHold() {
   const { state } = useOverlayState()

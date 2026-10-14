@@ -49,6 +49,17 @@
  * cannot be seen from here -- the transition body deliberately names no exercise, COR-001 -- which
  * is why the End dialog names the exercise it believes it is ending.)
  *
+ * THE SAME CHECK GUARDS A SUCCESS. A transition's 200 answer echoes the `exerciseId` too, and a
+ * switch that happened between the read and the click lands the change on the SESSION's exercise,
+ * not the one on screen. When that echo is not the console's exercise the answer is not recorded
+ * as a success: no `lastTransition` (so nothing is announced as started or ended, and an open End
+ * dialog is not closed as a success), `transition` resolves `false`, and the answer goes into the
+ * cache under the shown exercise's key -- exactly what a read of it would have done -- so the
+ * control falls into the mismatch state above (nothing offered, "different exercise"), and the
+ * scope is re-resolved so the console catches up. The words stay truthful (`transitionError`): the
+ * request was applied to the session's exercise, it is NOT confirmed for the one on screen. They
+ * live until the next attempt or `clearError`, so they survive the scope moving under them.
+ *
  * ONE IN FLIGHT. A second `transition` while one is pending is ignored (a ref guard, because two
  * activations in the same tick both see `idle`): StartEx and EndEx must never race each other.
  *
@@ -82,6 +93,16 @@ import { mockLifecycleFor, simulateTransition } from './lifecycleMock'
 const SCOPE_MISMATCH_MESSAGE =
   'The server is on a different exercise than this console shows, so nothing is offered. ' +
   'The console is refreshing; reload the page if this stays.'
+
+/**
+ * Shown when a transition SUCCEEDED but its answer is for a different exercise than the console
+ * shows. It is the reason inside the control's own lead-ins ("The exercise state was not changed.",
+ * "The exercise was not ended."), so it says where the change went and what is, and is not, known.
+ */
+const APPLIED_ELSEWHERE_MESSAGE =
+  'The server applied your request to a different exercise than the one this console shows, ' +
+  'so it is not confirmed for the one on screen. The console is refreshing; check the exercise ' +
+  'it shows now before trying again.'
 
 /** Where the lifecycle read is cached, per exercise (an exercise switch is a different key). */
 export function lifecycleQueryKey(exerciseId: string): readonly unknown[] {
@@ -150,11 +171,13 @@ export function useExerciseLifecycle(): UseExerciseLifecycleResult {
   const [last, setLast] = useState<
     { readonly to: LifecycleTarget; readonly alreadyDone: boolean } | undefined
   >(undefined)
+  // The last transition succeeded, but for the session's exercise rather than the one shown.
+  const [appliedElsewhere, setAppliedElsewhere] = useState(false)
   const inFlightRef = useRef(false)
 
   const {
     mutateAsync,
-    reset: clearError,
+    reset: resetMutation,
     isPending,
     isError,
     error: mutationError,
@@ -169,11 +192,26 @@ export function useExerciseLifecycle(): UseExerciseLifecycleResult {
     },
   })
 
+  const clearError = useCallback(() => {
+    resetMutation()
+    setAppliedElsewhere(false)
+  }, [resetMutation])
+
   const transition = useCallback(async (to: LifecycleTarget): Promise<boolean> => {
     if (inFlightRef.current) return false
     inFlightRef.current = true
+    setAppliedElsewhere(false) // a new attempt starts without the last one's notice
     try {
       const next = await mutateAsync(to)
+      if (!sameExercise(next.exerciseId, exerciseId)) {
+        // Applied, but to the session's exercise, not the one on screen: NOT a success here (see
+        // the module header). Park the answer where a read of it would be, so the control's
+        // existing mismatch state takes over, and let the console catch up.
+        setAppliedElsewhere(true)
+        queryClient.setQueryData(key, next)
+        await refreshScope().catch(() => undefined)
+        return false
+      }
       setLast({ to, alreadyDone: false })
       // 1. The buttons follow the response at once (live; mock derives from the scope below).
       queryClient.setQueryData(key, next)
@@ -256,7 +294,9 @@ export function useExerciseLifecycle(): UseExerciseLifecycleResult {
     canStart: lifecycle?.state === 'staged' && allowedTransitions.includes('live'),
     canEnd: allowedTransitions.includes('completed'),
     pending,
-    transitionError: isError ? toLifecycleError(mutationError).message : undefined,
+    transitionError: appliedElsewhere
+      ? APPLIED_ELSEWHERE_MESSAGE
+      : isError ? toLifecycleError(mutationError).message : undefined,
     lastTransition: last?.to,
     lastTransitionAlreadyDone: last?.alreadyDone ?? false,
     transition,

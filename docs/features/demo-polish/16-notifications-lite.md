@@ -56,7 +56,9 @@ Test paths are under `src/frontend/src/features/social/` (`n/` = `notifications/
       (`PostReceived`). **Like items come from count changes on the viewer's own posts**, detected by
       refetching the feed about every 30 s (first tick random; later ticks ±15 %; exponential backoff to ≈5 min
       on repeated failures; the baseline and the catch-up read after a hidden tab or a pause are jittered 0–2 s;
-      the re-read holds while the shell's pause / EndEx overlay is up) while the tab is visible: B3 adds no reaction broadcast, and `PostReceived` never
+      the feed reads — the baseline as well as the re-read — hold while the shell's pause / EndEx overlay is up,
+      **including a session that starts or restarts while it is already up**, and are made up, jittered, when it
+      clears) while the tab is visible: B3 adds no reaction broadcast, and `PostReceived` never
       carries a like. New items get a polite live-region announcement (throttled to one per ≈12 s, held items
       spoken together, and dropped by "Mark all read"; mounted outside the frame that goes `inert` while
       composing, so a compose in progress does not swallow it); under a burst, items are
@@ -67,17 +69,21 @@ Test paths are under `src/frontend/src/features/social/` (`n/` = `notifications/
       throttled announcement for 120 arrivals —, takedown, row cap, "Mark all read" clears the badge after more
       than 500 events); `n/notificationModel.test.ts` › "the model is bounded", "Mark all read never leaves an
       old event unread", "cost under a burst"; `n/NotificationsFlow.test.tsx` › "live and calm" (incl.
-      announcing while the compose modal is open and a 120-mention burst capped at `99+` / 100 rows).
+      announcing while the compose modal is open and a 120-mention burst capped at `99+` / 100 rows);
+      `n/notificationsStore.test.ts` › "read jitter and the shell pause" and › "a session that STARTS while the
+      shell overlay is already up" (held at start, held across an identity change, made up once and jittered on
+      resume); `n/NotificationsEngine.overlay.test.tsx` (a channel that mounts under the overlay starts held).
 - [x] **Isolation.** The derivation reads only the session's exercise-scoped feed; the storage key includes the
       exercise id, the persona id and the account id; nothing is read from another viewer. Starting a session
       sweeps every notification entry that is not the current viewer's (one browser holds one participant
       session). Sign-out sweeps **both** `localStorage` and `sessionStorage` (registered with
-      `core/auth/sessionReset`) — but only in a tab that ever ran a notifications session, so a staff
-      sign-out cannot wipe a participant's state. If another tab removes the current key, this tab ends its
+      `core/auth/sessionReset`) — but only in a tab that has run a notifications session since it last swept (the
+      sweep spends the ownership; a new session re-arms it), so a staff sign-out — or a second reset in a tab that
+      already signed its participant out — cannot wipe a participant's state. If another tab removes the current key, this tab ends its
       session without writing its stale state back.
       *Tests:* `n/notificationStorage.test.ts` (key scope, no collision, untrusted values, sweep, merge);
       `n/notificationsStore.test.ts` › "Mark all read", "state lives in localStorage", "storage hygiene",
-      "sign-out only wipes what this tab owns", "stop / restart / reset" (another persona / exercise /
+      "sign-out only wipes what this tab owns" (incl. "the sweep spends the ownership"), "stop / restart / reset" (another persona / exercise /
       account start clean; a read landing after sign-out writes nothing; a `storage` event from another tab);
       `n/NotificationsFlow.test.tsx` › "absent, not inert" (a `preview` mount makes no `includeReplies`
       read and writes no key);

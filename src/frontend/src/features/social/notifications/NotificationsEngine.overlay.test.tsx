@@ -8,6 +8,8 @@
  *
  *  - `pause` and `endex` hold the re-read; `broadcast` (a break-fiction notice) and `none` do not;
  *  - clearing the overlay resumes it, and so does unmounting;
+ *  - a channel that MOUNTS while the overlay is already up starts HELD (the hold is the store's
+ *    own state: `OverlayHold`'s effect runs before the engine's `start()`, when no session exists);
  *  - a mount that has no notifications (a staff preview, a read-only observer) never even
  *    subscribes to the overlay state.
  *
@@ -98,6 +100,22 @@ describe('the engine holds the re-read while the shell overlay is up', () => {
     view.unmount()
     expect(setPaused).toHaveBeenLastCalledWith(false)
     expect(overlay.subscribers()).toBe(0)
+  })
+
+  // Copilot review on #484: `OverlayHold` is a CHILD of the engine, so its effect runs BEFORE the
+  // engine's `start()`. Before the store remembered the hold, a channel that mounted while the
+  // overlay was up started an UNPAUSED session and the baseline read ran behind the holding page.
+  it('a channel that MOUNTS while the overlay is already up starts held, and reads once it clears', async () => {
+    // Every jitter is ~0 here, so a baseline read that is NOT held would land at once.
+    vi.spyOn(Math, 'random').mockReturnValue(0.0001)
+    overlay.set('pause')
+    renderChannel({ entries: ['/home'] })
+    await screen.findByRole('link', { name: /^Notifications/ }) // the session is running
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 150)) })
+    expect(notificationsStore.getSnapshot().status).toBe('loading') // no baseline behind the page
+
+    act(() => overlay.set('none'))
+    await waitFor(() => expect(notificationsStore.getSnapshot().status).toBe('ready'))
   })
 
   it.each(['preview', 'readOnly', 'kiosk'] as const)(

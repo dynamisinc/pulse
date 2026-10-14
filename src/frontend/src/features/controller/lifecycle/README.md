@@ -52,7 +52,12 @@ The control is self-contained; it needs the console's providers (`ExerciseContex
   now ENDEX."). Any other state: the reason stands and an open End dialog is never torn down underneath the controller.
 - **The server's exercise must be the one shown.** The lifecycle answer's `exerciseId` echo must match the console's
   exercise (a second tab may have switched the session's active exercise); if not, nothing is offered, the console says
-  so, and the scope is re-resolved. The End dialog also **names the exercise** it believes it is ending.
+  so, and the scope is re-resolved. The End dialog also **names the exercise** it believes it is ending. The check
+  guards a **success** too: a transition's 200 answer that names another exercise (the session was switched between
+  the read and the click, so the change landed there) is not announced, does not close the End dialog, and returns
+  `false`; the answer is parked under the shown exercise's key so the control drops into the same "different exercise"
+  state, the scope is re-resolved, and the reason is shown as text (applied to the session's exercise, not confirmed
+  for the one on screen).
 - **The status text does not linger**: the result is cleared from the live region after ~5 s, so it can never stay up
   as a stale claim ("the state is now LIVE") after a later freeze.
 - **Start is not undone by EndEx.** There is no "un-start"; **Pause** (the world-steering tier control) is the

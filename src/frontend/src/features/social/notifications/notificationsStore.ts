@@ -32,7 +32,8 @@
  *      like is noticed: B3 adds no reaction broadcast and `PostReceived` never carries a
  *      like, so a like is only ever visible as a count change on one of the viewer's own
  *      posts. A tick that lands while the tab is hidden is skipped, and the missed read is
- *      made up the moment the tab is visible again;
+ *      made up the moment the tab is visible again. The same goes for the shell's pause /
+ *      EndEx overlay (below), which holds the baseline read as well as the periodic ones;
  *   4. watches `removedPosts` and drops a taken-down post from the list;
  *   5. publishes immutable snapshots (below) and a polite announcement string.
  *
@@ -54,6 +55,17 @@
  *    spoken together when it ends ("14 new replies"). Nothing is announced for the
  *    baseline -- the badge says what was already there.
  *
+ * THE SHELL OVERLAY HOLD (`setPaused`). While the participant shell's pause / EndEx overlay is
+ * up the world is frozen and there is nothing to find, so every FEED READ holds -- the baseline
+ * and the periodic ones alike -- and a held read is noted as missed (`missedWhileHidden`, the
+ * hidden-tab flag) and made up, jittered, when the overlay clears (`catchUpRead`). Realtime
+ * arrivals are not held. The hold is the STORE's state, not the session's: the engine's
+ * `OverlayHold` is a child of the engine, so its effect runs BEFORE the engine's `start()` and
+ * there is no session to tell yet. The last request is therefore remembered with or without a
+ * session (`overlayHeld`) and every session is created with it -- a channel that mounts while
+ * the overlay is up, and a session restarted by an identity change while it stays up, both
+ * start held.
+ *
  * ISOLATION (COR-001). The only data read is the session's own exercise-scoped feed and the
  * shared arrival source; the storage key carries the exercise id and the persona id; a
  * session never reads another persona's entry.
@@ -61,10 +73,14 @@
  * SIGN-OUT. `reset()` stops any session WITHOUT writing (a late-resolving read after
  * sign-out must not re-persist), sweeps every notification key from BOTH `localStorage` (where
  * the state lives, next to the persisted tokens) and `sessionStorage` (where an earlier
- * development build kept it) and publishes the inactive state. It is registered with
- * `core/auth/sessionReset` below, the way the controller composer registers its drafts:
- * `core/` cannot import this feature, and a browser-lived singleton must not hand one
- * sign-in's baseline to the next.
+ * development build kept it) and publishes the inactive state. It sweeps only in a tab that
+ * OWNS notification state -- one that has started a session since its last sweep -- and the
+ * sweep spends that ownership: a tab that signed out owns nothing, so its next `reset()` (a
+ * later sign-in's, or a staff sign-out in the same tab) cannot wipe a participant who is
+ * signed in in ANOTHER tab of the browser; only a newly started session re-arms it. It is
+ * registered with `core/auth/sessionReset` below, the way the controller composer registers
+ * its drafts: `core/` cannot import this feature, and a browser-lived singleton must not hand
+ * one sign-in's baseline to the next.
  *
  * ARRIVALS THAT DO NOT FIT. The model is bounded (`GROUPS_CAP` rows, `MINE_CAP` own posts), so
  * a long session costs the same per snapshot as a short one. WHAT THE RE-READ CAN SEE is bounded
@@ -203,13 +219,17 @@ export interface NotificationsStore {
   /** Marks every current row read and persists it. A no-op with no session. */
   markAllRead(): void
   /**
-   * Holds (true) or resumes (false) the periodic re-read -- the shell's pause / EndEx overlay is
-   * up, the world is frozen and there is nothing to find. Realtime arrivals are unaffected.
+   * Holds (true) or resumes (false) the feed reads -- the baseline and the periodic re-read --
+   * while the shell's pause / EndEx overlay is up: the world is frozen and there is nothing to
+   * find. Held reads are made up, jittered, on resume. Realtime arrivals are unaffected. The
+   * request is remembered when there is NO session yet, and the next session to start starts
+   * with it (the engine's overlay hook runs before its `start()`).
    */
   setPaused(paused: boolean): void
   /**
-   * Sign-out: stop, forget, sweep storage -- but only in a tab that has ever run a
-   * notifications session, so a STAFF tab's sign-out cannot wipe a participant's state.
+   * Sign-out: stop, forget, sweep storage -- but only in a tab that has run a notifications
+   * session since it last swept, so a STAFF tab's sign-out cannot wipe a participant's state
+   * (and neither can a tab that has already signed its own participant out).
    */
   reset(): void
 }
@@ -341,9 +361,12 @@ interface ActiveSession {
   inFlight: boolean
   /** Arrivals held until the baseline lands. */
   buffer: ParticipantPostView[]
-  /** A poll tick was skipped because the tab was hidden (or the shell overlay was up). */
+  /**
+   * A read was skipped because the tab was hidden or the shell overlay was up -- a poll tick, or
+   * the baseline of a session that started held. Made up by {@link catchUpRead} when things clear.
+   */
   missedWhileHidden: boolean
-  /** The shell's pause / EndEx overlay is up: the periodic re-read holds. */
+  /** The shell's pause / EndEx overlay is up: the feed reads (baseline and periodic) hold. */
   paused: boolean
   /** The jittered baseline read has not started yet. */
   baselineTimer: ReturnType<typeof setTimeout> | undefined
@@ -369,8 +392,17 @@ export function createNotificationsStore(
 
   const listeners = new Set<() => void>()
   let session: ActiveSession | undefined
-  /** This tab has run a notifications session: only then does sign-out have anything to wipe. */
-  let everStarted = false
+  /**
+   * This tab has run a notifications session since its last sweep: only then does sign-out have
+   * anything of its own to wipe. `start` arms it, `reset` spends it (see "SIGN-OUT" above).
+   */
+  let ownsState = false
+  /**
+   * The shell's pause / EndEx overlay is up. Kept here, not only on the session, because the
+   * engine's `OverlayHold` reports it BEFORE the engine starts the session (see the module
+   * header); every session is created with this value.
+   */
+  let overlayHeld = false
   let snapshot: NotificationsSnapshot = INACTIVE_SNAPSHOT
   let summary: NotificationsSummary = UNAVAILABLE_SUMMARY
   let announcement: NotificationsAnnouncement = NO_ANNOUNCEMENT
@@ -566,6 +598,21 @@ export function createNotificationsStore(
       .then(() => scheduleNextRead(s, deps))
   }
 
+  /**
+   * The session's first read. Held like any other while the shell overlay is up -- the session
+   * then waits at `loading` behind the holding page and the read is made up, jittered, when the
+   * overlay clears (see {@link catchUpRead}); a hold that lands inside the jittered start-up wait
+   * is honoured too.
+   */
+  function runBaseline(s: ActiveSession, deps: NotificationsDeps): void {
+    if (s.stopped) return
+    if (s.paused) {
+      s.missedWhileHidden = true
+      return
+    }
+    void loadFeed(s, deps)
+  }
+
   /** A random delay in [0, readJitterMs): spreads reads many tabs would start together. */
   function readJitter(deps: NotificationsDeps): number {
     return Math.round(deps.random() * deps.readJitterMs)
@@ -641,7 +688,7 @@ export function createNotificationsStore(
     const deps = resolveDeps()
     if (session !== undefined) stopSession(session, deps, true) // one session at a time
 
-    everStarted = true
+    ownsState = true // (armed again by every start; spent by the next sweep)
     const storageKey = notificationStorageKey(config.exerciseId, config.personaId, config.accountId)
     // One browser holds one participant session, so any entry that is not THIS viewer's is dead
     // weight (a previous sign-in's, another persona's, an expired exercise's): sweep it. The
@@ -666,7 +713,7 @@ export function createNotificationsStore(
       inFlight: false,
       buffer: [],
       missedWhileHidden: false,
-      paused: false,
+      paused: overlayHeld,
       baselineTimer: undefined,
       unsubscribeStorage: undefined,
       appliedRemoved: new Set(),
@@ -697,14 +744,15 @@ export function createNotificationsStore(
     })
 
     // The baseline read (after a short random delay, so a room that opened together does not
-    // read in the same instant), then a re-read about every 30 s while the tab is visible.
+    // read in the same instant), then a re-read about every 30 s while the tab is visible. A
+    // session that starts while the shell overlay is up holds it (`runBaseline`).
     const baselineDelay = readJitter(deps)
     if (baselineDelay <= 0) {
-      void loadFeed(s, deps)
+      runBaseline(s, deps)
     } else {
       s.baselineTimer = setTimeout(() => {
         s.baselineTimer = undefined
-        void loadFeed(s, deps)
+        runBaseline(s, deps)
       }, baselineDelay)
     }
     scheduleNextRead(s, deps)
@@ -742,6 +790,7 @@ export function createNotificationsStore(
   }
 
   function setPaused(paused: boolean): void {
+    overlayHeld = paused // remembered even with no session: the next `start` begins with it
     const s = session
     if (s === undefined || s.stopped || s.paused === paused) return
     s.paused = paused
@@ -752,10 +801,11 @@ export function createNotificationsStore(
   }
 
   function reset(): void {
-    // A tab that never ran a notifications session (a STAFF tab, a read-only participant) has
-    // nothing of its own to forget -- and its sign-out must not wipe the state of a participant
-    // signed in elsewhere in the same browser.
-    if (!everStarted) return
+    // A tab that has not run a notifications session since its last sweep (a STAFF tab, a
+    // read-only participant, a tab that already signed its participant out) has nothing of its
+    // own to forget -- and its sign-out must not wipe the state of a participant signed in
+    // elsewhere in the same browser.
+    if (!ownsState) return
     const deps = resolveDeps()
     const s = session
     if (s !== undefined) {
@@ -766,6 +816,10 @@ export function createNotificationsStore(
     for (const storage of new Set([deps.storage(), ...deps.sweepStorages()])) {
       clearAllNotificationStorage(storage)
     }
+    // The sweep spends the ownership: this tab now holds nothing of its own, so a later reset
+    // (the next sign-in's, a staff sign-out) must not reach into another tab's participant state.
+    // Only a newly started session re-arms it.
+    ownsState = false
     setInactive()
   }
 

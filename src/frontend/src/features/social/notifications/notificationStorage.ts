@@ -50,8 +50,10 @@
  * given. On SIGN-OUT the notifications store sweeps EVERY entry from both `localStorage` and
  * `sessionStorage` (registered with `core/auth/sessionReset`, so `endSession` wipes them: the
  * next sign-in on the same browser starts clean even for the same persona) -- but only in a
- * tab that ever ran a notifications session, so a STAFF tab's sign-out leaves a participant's
- * state alone. On START it sweeps every entry except the current viewer's (`keepKey`).
+ * tab that has run a notifications session since it last swept (the sweep spends the
+ * ownership; a new session re-arms it), so a STAFF tab's sign-out -- or a second reset in a tab
+ * that already signed its participant out -- leaves a participant's state alone. On START it
+ * sweeps every entry except the current viewer's (`keepKey`).
  *
  * TWO TABS. `localStorage` is shared, so two tabs of the same persona write the same key.
  * `mergeForWrite` makes a write additive for what must never be lost (read marks are

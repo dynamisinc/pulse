@@ -1238,6 +1238,68 @@ describe('sign-out only wipes what this tab owns (W-4)', () => {
     t.store.reset()
     expect(window.localStorage.getItem(KEY)).toBeNull()
   })
+
+  // Copilot review on #484: the ownership flag must not outlive the sweep it licensed. A tab that
+  // once ran a participant session and signed out is, from then on, a tab with nothing to wipe --
+  // and `reset()` now runs on every sign-in too (`resetClientSession`), so it is called often.
+  describe('the sweep spends the ownership (a tab that signed out owns nothing)', () => {
+    /** Another tab of the same browser: its own store instance, the same `localStorage`. */
+    async function anotherTabSignedIn() {
+      const other = rig([mineP('m1', 2), replyP('r1', 'm1')])
+      other.store.start(CONFIG)
+      await settle()
+      other.store.markAllRead()
+      expect(window.localStorage.getItem(KEY)).not.toBeNull()
+      return other
+    }
+
+    it('participant session -> reset (sweeps) -> a second reset leaves another tab\'s keys alone', async () => {
+      const t = rig([mineP('m1', 2), replyP('r1', 'm1')])
+      t.store.start(CONFIG)
+      await settle()
+      t.store.markAllRead()
+      t.store.reset() // the participant sign-out: sweeps
+      expect(window.localStorage.getItem(KEY)).toBeNull()
+
+      const other = await anotherTabSignedIn() // a participant signs in, in ANOTHER tab
+      const before = t.notifications.count
+      t.store.reset() // this tab is a staff tab now: its sign-out has nothing of its own to wipe
+
+      expect(window.localStorage.getItem(KEY)).not.toBeNull()
+      expect(other.store.getSummary().available).toBe(true)
+      expect(t.notifications.count).toBe(before) // ... and it published nothing either
+    })
+
+    it('a sign-out followed by a sign-in\'s reset does not sweep a participant signed in elsewhere', async () => {
+      const t = rig([mineP('m1', 2), replyP('r1', 'm1')])
+      t.store.start(CONFIG)()
+      await settle()
+      t.store.reset() // sign-out
+      const other = await anotherTabSignedIn()
+
+      t.store.reset() // the next sign-in (staff) in this tab: `runSessionResets()`
+
+      expect(window.localStorage.getItem(KEY)).not.toBeNull()
+      expect(other.store.getSummary().available).toBe(true)
+    })
+
+    it('a session started after a reset re-arms the ownership: its next sign-out sweeps again', async () => {
+      const t = rig([mineP('m1', 2), replyP('r1', 'm1')])
+      t.store.start(CONFIG)
+      await settle()
+      t.store.reset()
+      t.store.reset() // spent: a no-op
+
+      t.store.start(CONFIG) // this tab runs a participant session again
+      await settle()
+      t.store.markAllRead()
+      expect(window.localStorage.getItem(KEY)).not.toBeNull()
+      t.store.reset()
+
+      expect(window.localStorage.getItem(KEY)).toBeNull()
+      expect(t.store.getSummary().available).toBe(false)
+    })
+  })
 })
 
 describe('announcement hygiene (S-4)', () => {
@@ -1346,9 +1408,141 @@ describe('read jitter and the shell pause (S-5)', () => {
     expect(t.store.getSummary().unread).toBe(1)
   })
 
-  it('setPaused with no session is a no-op', () => {
+  it('setPaused with no session starts nothing and does not throw', () => {
     const t = rig()
     expect(() => t.store.setPaused(true)).not.toThrow()
+    expect(t.store.getSummary().available).toBe(false)
+    expect(t.fetchFeed).not.toHaveBeenCalled()
+  })
+
+  it('a pause that lands inside the jittered baseline wait holds the baseline too', async () => {
+    const t = rig([mineP('m1', 1)], JITTERY)
+    t.store.start(CONFIG)
+    await advance(500)
+    t.store.setPaused(true)
+    await advance(60_000) // the baseline would have landed at 1 s
+    expect(t.fetchFeed).not.toHaveBeenCalled()
+    expect(t.store.getSnapshot().status).toBe('loading')
+
+    t.store.setPaused(false)
+    await advance(1_000) // the jittered make-up
+    expect(t.fetchFeed).toHaveBeenCalledTimes(1)
+    expect(t.store.getSnapshot().status).toBe('ready')
+  })
+})
+
+// Copilot review on #484: the engine's `OverlayHold` is a CHILD of the engine, so its effect
+// (`setPaused`) runs BEFORE the engine's `start()`. The hold is therefore the store's own state,
+// remembered with no session and applied to whichever session starts next.
+describe('a session that STARTS while the shell overlay is already up', () => {
+  const JITTERY = { readJitterMs: 2_000, random: () => 0.5 } // every jitter is exactly 1 s
+
+  it('starts held: no baseline read, no periodic re-read, until the overlay clears -- then exactly the made-up read', async () => {
+    const t = rig([mineP('m1', 1), replyP('r1', 'm1')])
+    t.store.setPaused(true) // OverlayHold's effect, before any session exists
+    t.store.start(CONFIG)
+    await advance(NOTIFICATION_POLL_INTERVAL_MS * 4)
+
+    expect(t.fetchFeed).not.toHaveBeenCalled()
+    expect(t.store.getSnapshot().status).toBe('loading')
+    expect(t.store.getSummary()).toEqual({ available: true, unread: 0 })
+
+    t.store.setPaused(false)
+    await settle()
+    expect(t.fetchFeed).toHaveBeenCalledTimes(1) // the baseline, made up -- not also a periodic one
+    expect(t.store.getSnapshot().status).toBe('ready')
+    expect(t.store.getSummary().unread).toBe(1)
+
+    // ... and the schedule carries on from the make-up read, one interval later.
+    await advance(NOTIFICATION_POLL_INTERVAL_MS - 1)
+    expect(t.fetchFeed).toHaveBeenCalledTimes(1)
+    await advance(1)
+    expect(t.fetchFeed).toHaveBeenCalledTimes(2)
+  })
+
+  it('makes the baseline up with the same jitter as any read made up after a pause', async () => {
+    const t = rig([mineP('m1', 1)], JITTERY)
+    t.store.setPaused(true)
+    t.store.start(CONFIG)
+    await advance(60_000)
+    expect(t.fetchFeed).not.toHaveBeenCalled()
+
+    t.store.setPaused(false)
+    await advance(999)
+    expect(t.fetchFeed).not.toHaveBeenCalled()
+    await advance(1)
+    expect(t.fetchFeed).toHaveBeenCalledTimes(1)
+  })
+
+  it('still holds realtime arrivals that land while it is held, and replays them after the baseline', async () => {
+    const t = rig([mineP('m1')])
+    t.store.setPaused(true)
+    t.store.start(CONFIG)
+    t.source.emit(replyP('r1', 'm1')) // realtime is not held
+    await advance(NOTIFICATION_POLL_INTERVAL_MS)
+    expect(t.store.getSummary().unread).toBe(0) // not classifiable until my posts are known
+
+    t.store.setPaused(false)
+    await settle()
+    expect(t.store.getSnapshot().items.map(item => item.id)).toEqual(['reply:m1'])
+    expect(t.store.getSummary().unread).toBe(1)
+  })
+
+  it('cleared while the tab is hidden: the made-up read waits for the tab to be visible', async () => {
+    const t = rig([mineP('m1', 1)])
+    t.visibility.set(false)
+    t.store.setPaused(true)
+    t.store.start(CONFIG)
+    t.store.setPaused(false)
+    await advance(NOTIFICATION_POLL_INTERVAL_MS * 2)
+    expect(t.fetchFeed).not.toHaveBeenCalled()
+
+    t.visibility.set(true)
+    await settle()
+    expect(t.fetchFeed).toHaveBeenCalledTimes(1)
+    expect(t.store.getSnapshot().status).toBe('ready')
+  })
+
+  it('a hold that was lifted before the session started changes nothing', async () => {
+    const t = rig([mineP('m1', 1)])
+    t.store.setPaused(true)
+    t.store.setPaused(false) // OverlayHold's cleanup
+    t.store.start(CONFIG)
+    await settle()
+    expect(t.fetchFeed).toHaveBeenCalledTimes(1)
+    expect(t.store.getSnapshot().status).toBe('ready')
+  })
+
+  it('an identity change while held (the engine re-runs start()) starts the NEW session held too', async () => {
+    const t = rig([mineP('m1', 1)])
+    t.store.start(CONFIG)
+    await settle()
+    expect(t.fetchFeed).toHaveBeenCalledTimes(1)
+
+    t.store.setPaused(true)
+    // The eligible persona changed: the engine stops the old session and starts the new one.
+    t.store.start({ ...CONFIG, personaId: 'persona-other', handle: 'other_fh' })
+    await advance(NOTIFICATION_POLL_INTERVAL_MS * 4)
+    expect(t.fetchFeed).toHaveBeenCalledTimes(1) // the new session read nothing behind the page
+    expect(t.store.getSnapshot().status).toBe('loading')
+
+    t.store.setPaused(false)
+    await settle()
+    expect(t.fetchFeed).toHaveBeenCalledTimes(2)
+    expect(t.store.getSnapshot().status).toBe('ready')
+  })
+
+  it('stop and restart while held (StrictMode\'s start / stop / start) leaves one held session', async () => {
+    const t = rig([mineP('m1', 1)])
+    t.store.setPaused(true)
+    t.store.start(CONFIG)()
+    t.store.start(CONFIG)
+    await advance(NOTIFICATION_POLL_INTERVAL_MS * 2)
+    expect(t.fetchFeed).not.toHaveBeenCalled()
+
+    t.store.setPaused(false)
+    await settle()
+    expect(t.fetchFeed).toHaveBeenCalledTimes(1)
   })
 })
 

@@ -56,7 +56,7 @@ it keeps the labelled "PREVIEW AS PARTICIPANT — READ-ONLY" strip and a neutral
       (mock data: allowed-transitions gating, type-to-confirm, the pill following, keyboard, absent for non-controller
       sessions), [`ExerciseLifecycleControl.live.test.tsx`](../../../src/frontend/src/features/controller/lifecycle/ExerciseLifecycleControl.live.test.tsx)
       (the live endpoints: request shapes, every error as text, uncertain failures re-read, an outcome already reached
-      is a success), and [`ControllerConsoleRoute.c6.test.tsx`](../../../src/frontend/src/features/controller/ControllerConsoleRoute.c6.test.tsx)
+      is a success, a success whose answer names another exercise is not one), and [`ControllerConsoleRoute.c6.test.tsx`](../../../src/frontend/src/features/controller/ControllerConsoleRoute.c6.test.tsx)
       (mounted in the real route: Start / End move the pill — also while WORLD FROZEN —, Ctrl+K inert while the End
       dialog is open, preview toggle and Exit).
 
@@ -150,7 +150,19 @@ Gate-2 on C6 and the console seam came back clean (0 Critical); the Warnings and
 - **Suggestions folded in:** the read-only test also covers Notifications (the F7 seam); the mock status setters are
   out of the `core/exerciseContext` barrel and are a no-op unless `USE_MOCK_DATA`; the End dialog names the exercise
   it will end, and `parseLifecycle` keeps `exerciseId` — an answer for a different exercise than the one shown
-  refreshes the scope and offers nothing; the Start comment says EndEx does not undo Start (Pause is the
+  refreshes the scope and offers nothing (a transition's own 200 answer included — see the Copilot fold below); the Start comment says EndEx does not undo Start (Pause is the
   mitigation); the control takes no `role` prop (it is hidden, not configured); the 403 copy reads "staff assigned to
   this exercise" until backend follow-up #481; the `lifecycle-status` message clears after about 5 s; the
   `lifecycleSlot` element is a module constant.
+
+## Amendments (Copilot review fold on #484)
+- **A success is checked against the shown exercise too.** The Gate-2 S-3 check covered the lifecycle READ; the
+  transition's 200 answer echoes `exerciseId` as well, and a session switched between the read and the click (the
+  duplicated-tab case) applies the change to the SESSION's exercise. `useExerciseLifecycle.transition` now validates
+  `sameExercise(next.exerciseId, shown)` before recording a success. On a mismatch it sets no `lastTransition` (nothing is
+  announced as started or ended), resolves `false` (an open End dialog is not closed as a success), parks the answer under
+  the shown exercise's key so the control falls into its existing "different exercise" state (nothing to press), and
+  re-resolves the scope. The words are truthful and live in `transitionError` (so the End dialog shows them too, under
+  "The exercise was not ended."): the request was applied to the session's exercise, it is not confirmed for the one on
+  screen. *Tests:* `ExerciseLifecycleControl.live.test.tsx` › "a SUCCESSFUL transition whose answer is for a DIFFERENT
+  exercise than the one shown" (Start, the in-between state, the End dialog, and the letter-case control).

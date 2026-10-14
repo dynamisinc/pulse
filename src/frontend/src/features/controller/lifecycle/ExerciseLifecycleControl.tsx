@@ -23,7 +23,11 @@
  *
  * WHAT HAPPENS NEXT. A success updates the buttons from the response and re-resolves the exercise
  * scope, so the staff header's state pill moves (LIVE -> ENDEX) -- see the hook. Under mock data
- * the same path runs against a simulated machine.
+ * the same path runs against a simulated machine. A success whose answer is for a DIFFERENT
+ * exercise than the one shown (the session was switched from another tab) is not announced and
+ * does not close the End dialog: the control drops into its "different exercise" state (nothing
+ * to press), the scope is re-resolved, and the reason -- the change went to the session's
+ * exercise, it is not confirmed for the one on screen -- is shown as text, in the dialog if open.
  *
  * ERRORS ARE TEXT. A failed read shows "Exercise state unavailable" with a **Retry** button; a
  * refused or failed transition shows an icon, a bold lead-in and the reason (the server's own

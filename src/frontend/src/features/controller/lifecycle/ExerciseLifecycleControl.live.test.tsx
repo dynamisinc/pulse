@@ -51,6 +51,12 @@ const MACHINE: Record<string, readonly string[]> = {
 }
 
 let serverState = 'staged'
+/** The exercise the server's SESSION is on: what the scope and every lifecycle answer name. */
+let serverExerciseId = 'ex-live-0001'
+/** When set, ONLY the transition's answer names this exercise (the GETs name the session's). */
+let postAnswerExerciseId: string | undefined
+/** When set, a scope read made after a transition waits for this promise (holds the refresh). */
+let scopeGate: Promise<void> | undefined
 let lifecycleBodyOverride: unknown
 let postFailure: AxiosError | undefined
 /** The server APPLIES the transition, then the answer is lost / the request fails (S-A). */
@@ -61,7 +67,7 @@ let postGate: Promise<void> | undefined
 
 function lifecycleBody() {
   return lifecycleBodyOverride ?? {
-    exerciseId: 'ex-live-0001',
+    exerciseId: serverExerciseId,
     state: serverState,
     storedStatus: serverState,
     allowedTransitions: MACHINE[serverState] ?? [],
@@ -74,6 +80,14 @@ function lifecycleBody() {
       isTerminal: false,
     },
   }
+}
+
+/** The 200 body of a transition: the lifecycle body, naming `postAnswerExerciseId` if it is set. */
+function transitionAnswer(): unknown {
+  const body = lifecycleBody()
+  return postAnswerExerciseId !== undefined && typeof body === 'object' && body !== null
+    ? { ...body, exerciseId: postAnswerExerciseId }
+    : body
 }
 
 function httpError(status: number, data: unknown): AxiosError {
@@ -92,6 +106,9 @@ let postSpy: MockInstance<typeof api.post>
 
 beforeEach(() => {
   serverState = 'staged'
+  serverExerciseId = 'ex-live-0001'
+  postAnswerExerciseId = undefined
+  scopeGate = undefined
   lifecycleBodyOverride = undefined
   postFailure = undefined
   failAfterApply = undefined
@@ -100,10 +117,13 @@ beforeEach(() => {
 
   getSpy = vi.spyOn(api, 'get').mockImplementation(async (url: string) => {
     if (url === '/exercise-context') {
+      if (scopeGate !== undefined && postSpy.mock.calls.length > 0) await scopeGate
       return {
         data: {
-          exerciseId: 'ex-live-0001',
-          exerciseName: 'Coastal Surge (live)',
+          exerciseId: serverExerciseId,
+          exerciseName: serverExerciseId === 'ex-live-0001'
+            ? 'Coastal Surge (live)'
+            : 'Harbor Drill (other)',
           timeZone: 'America/New_York',
           status: serverState,
         },
@@ -133,7 +153,7 @@ beforeEach(() => {
     }
     serverState = to
     if (failAfterApply !== undefined) throw failAfterApply
-    return { data: lifecycleBody() }
+    return { data: transitionAnswer() }
   })
 })
 
@@ -514,6 +534,111 @@ describe('ExerciseLifecycleControl (live) -- the server\'s exercise must be the 
 
     expect(await screen.findByRole('button', { name: /start exercise/i })).toBeInTheDocument()
     expect(screen.queryByTestId('lifecycle-load-error')).not.toBeInTheDocument()
+  })
+
+  // Copilot review on #484: the SUCCESS answer names an exercise too. A duplicated tab whose
+  // session was switched to another exercise (by the other tab) still shows the old one; the POST
+  // then lands on the SESSION's exercise, and its 200 answer is for that one, not the one shown.
+  describe('a SUCCESSFUL transition whose answer is for a DIFFERENT exercise than the one shown', () => {
+    const NOT_CONFIRMED = 'not confirmed for the one on screen'
+
+    it('Start: is not announced as started, offers nothing for the shown exercise, says what happened, and re-resolves the scope', async () => {
+      const user = userEvent.setup()
+      renderControl({ withHeader: true })
+      await scopeResolved()
+      const start = await screen.findByRole('button', { name: /start exercise/i })
+      // The other tab switched the session to another exercise AFTER this tab drew its buttons.
+      serverExerciseId = 'ex-other-9999'
+      const scopeBefore = scopeReads().length
+
+      await user.click(start)
+
+      expect(postSpy).toHaveBeenCalledTimes(1) // the request did go out: it was applied, elsewhere
+      // The words are truthful: applied to the session's exercise, not confirmed for this one.
+      const alert = await screen.findByTestId('lifecycle-error')
+      expect(alert).toHaveAttribute('role', 'alert')
+      expect(alert).toHaveTextContent('different exercise than the one this console shows')
+      expect(alert).toHaveTextContent(NOT_CONFIRMED)
+      // Never announced: not "started", and not an "already" either.
+      expect(screen.getByTestId('lifecycle-status')).toBeEmptyDOMElement()
+      expect(document.body).not.toHaveTextContent(/Exercise (started|ended)/)
+      // The scope was re-resolved, so the console catches up with the session.
+      await waitFor(() => expect(scopeReads().length).toBeGreaterThan(scopeBefore))
+      await waitFor(() => expect(screen.getByTestId('staff-header')).toHaveTextContent('Harbor Drill'))
+      expect(screen.getByTestId('lifecycle-status')).toBeEmptyDOMElement()
+    })
+
+    it('Start: while the scope is still catching up, the shown exercise\'s buttons are already gone (fail closed)', async () => {
+      const user = userEvent.setup()
+      renderControl({ withHeader: true })
+      await scopeResolved()
+      const start = await screen.findByRole('button', { name: /start exercise/i })
+      serverExerciseId = 'ex-other-9999'
+      let releaseScope: () => void = () => undefined
+      scopeGate = new Promise<void>(resolve => { releaseScope = resolve })
+
+      await user.click(start)
+
+      // The refresh has not landed, yet nothing is offered for the exercise on screen: the answer
+      // is held in the cache and the control is in its existing "different exercise" state.
+      await screen.findByTestId('lifecycle-error')
+      expect(screen.queryByRole('button', { name: /start exercise|end exercise/i })).not.toBeInTheDocument()
+      expect(screen.getByTestId('lifecycle-load-error'))
+        .toHaveTextContent('different exercise than this console shows')
+      expect(screen.getByTestId('lifecycle-status')).toBeEmptyDOMElement()
+      releaseScope()
+      await waitFor(() => expect(screen.getByTestId('staff-header')).toHaveTextContent('Harbor Drill'))
+    })
+
+    it('End: the dialog is NOT closed as a success and nothing is announced as ended; it explains itself, and Cancel closes it', async () => {
+      serverState = 'live'
+      const user = userEvent.setup()
+      renderControl({ withHeader: true })
+      await scopeResolved()
+      await user.click(await screen.findByRole('button', { name: /end exercise/i }))
+      const dialog = await screen.findByRole('dialog')
+      const field = within(dialog).getByLabelText('Type END to confirm')
+      await user.type(field, 'END')
+      serverExerciseId = 'ex-other-9999' // the session moved while this tab sat on the old exercise
+      const scopeBefore = scopeReads().length
+
+      await user.click(within(dialog).getByTestId('end-exercise-confirm'))
+
+      // The dialog stays and says, in text, that this is not confirmed for the exercise on screen.
+      const error = await within(dialog).findByTestId('end-exercise-error')
+      expect(error).toHaveAttribute('role', 'alert')
+      expect(error).toHaveTextContent('different exercise than the one this console shows')
+      expect(error).toHaveTextContent(NOT_CONFIRMED)
+      expect(screen.getByRole('dialog')).toBeInTheDocument()
+      expect(field).toHaveValue('END')
+      expect(screen.getByTestId('lifecycle-status')).toBeEmptyDOMElement()
+      expect(document.body).not.toHaveTextContent(/Exercise (started|ended)/)
+      await waitFor(() => expect(scopeReads().length).toBeGreaterThan(scopeBefore))
+      await waitFor(() => expect(screen.getByTestId('staff-header')).toHaveTextContent('Harbor Drill'))
+
+      await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }))
+      await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+      // Cancelling clears the notice, and nothing was ever announced as a success. (With the
+      // session's exercise ended there is nothing to press, so the group itself may be gone.)
+      expect(screen.queryByTestId('lifecycle-error')).not.toBeInTheDocument()
+      expect(screen.queryByTestId('lifecycle-status')?.textContent ?? '').toBe('')
+    })
+
+    it('the same exercise in a different letter case is still a plain success', async () => {
+      const user = userEvent.setup()
+      renderControl({ withHeader: true })
+      await scopeResolved()
+      const start = await screen.findByRole('button', { name: /start exercise/i })
+      const scopeBefore = scopeReads().length
+      postAnswerExerciseId = 'EX-LIVE-0001' // the console's exercise, only the letter case differs
+
+      await user.click(start)
+
+      await waitFor(() => expect(screen.getByTestId('lifecycle-status'))
+        .toHaveTextContent('Exercise started. The state is now LIVE.'))
+      expect(screen.queryByTestId('lifecycle-error')).not.toBeInTheDocument()
+      await waitFor(() => expect(scopeReads().length).toBeGreaterThan(scopeBefore))
+    })
   })
 
   it('names the exercise in the End dialog', async () => {
