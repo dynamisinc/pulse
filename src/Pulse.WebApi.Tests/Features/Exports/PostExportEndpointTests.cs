@@ -8,6 +8,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using FluentAssertions;
+using Microsoft.Extensions.DependencyInjection;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.Exports;
 using Pulse.WebApi.Tests.Data;
@@ -165,6 +166,7 @@ public sealed class PostExportEndpointTests
             p.Origin = "engine";
             p.ActingHumanId = staffUserId.ToString(); // ignored: engine posts have no acting human
             p.CreatedWallClock = PostExportSeed.WallStart.AddMinutes(6); // same scenario minute, later wall clock
+            p.InjectId = "MSEL-17"; // not a GUID: written raw
         });
         var noisePost = await _seed.PostAsync(exerciseId, resident, minute: 20, p => p.Origin = "noise");
         var takenDown = await _seed.PostAsync(exerciseId, cityFire, minute: 30, p =>
@@ -222,6 +224,7 @@ public sealed class PostExportEndpointTests
         var engineRow = rows[2];
         engineRow["Author type"].Should().Be("Engine");
         engineRow["Posted by"].Should().BeEmpty("engine posts have no human behind them");
+        engineRow["Inject #"].Should().Be("MSEL-17", "a non-GUID inject id is not a table reference, so it is written raw");
 
         var replyRow = rows[3];
         replyRow["Author type"].Should().Be("Participant");
@@ -246,20 +249,89 @@ public sealed class PostExportEndpointTests
     }
 
     [RequiresDockerFact]
-    public async Task MoreThanOnePage_IsWrittenCompletelyAndInOrder()
+    public async Task MoreThanOnePage_IsWrittenCompletelyInTheExactOrder_AcrossThePageBoundary()
     {
         var exerciseId = await _seed.ExerciseAsync();
         var (token, _) = await _seed.StaffAsync(exerciseId, [(exerciseId, "controller")]);
-        await _seed.BulkPostsAsync(exerciseId, PostExportService.PageSize + 7);
+
+        // Post i has scenario minute i / 2, so posts share a minute in pairs and only the wall clock (rising by one
+        // second with i) orders each pair. With 507 posts the pairs (498, 499) and (500, 501) sit on both sides of
+        // the 500-row page boundary. The expected order is exactly i = 0..506.
+        const int count = PostExportService.PageSize + 7;
+        var expected = Enumerable.Range(0, count)
+            .Select(i => new Post
+            {
+                Id = Guid.NewGuid(),
+                ExerciseId = exerciseId,
+                AuthorPersonaId = Guid.NewGuid(),
+                Body = $"paged {i}",
+                CreatedScenarioTime = PostExportSeed.ScenarioStart.AddMinutes(i / 2),
+                CreatedWallClock = PostExportSeed.WallStart.AddSeconds(i),
+                Origin = "engine",
+                ActingHumanId = string.Empty,
+            })
+            .ToList();
+
+        // Inserted scrambled (odd indexes reversed, then even indexes reversed) so neither insert order nor id order
+        // could produce the expected sequence by accident.
+        var scrambled = expected.Where((_, i) => i % 2 == 1).Reverse()
+            .Concat(expected.Where((_, i) => i % 2 == 0).Reverse())
+            .ToList();
+        await _seed.PostsAsync(scrambled);
 
         await using var host = await PostExportTestHost.StartAsync(_seed.ConnectionString, exerciseId);
         using var response = await host.GetExportAsync(token);
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         var rows = ExportWorkbookReader.Rows(await response.Content.ReadAsByteArrayAsync());
-        rows.Should().HaveCount(PostExportService.PageSize + 7, "every page is written");
-        rows.Select(r => r["Post id"]).Should().OnlyHaveUniqueItems();
-        rows.Should().OnlyContain(r => r["Author type"] == "Engine");
+        rows.Select(r => r["Post id"]).Should().Equal(
+            expected.Select(post => post.Id.ToString()),
+            "every page is written, oldest scenario time first, ties by wall clock, across the page boundary");
+        rows.Select(r => r["Text"]).Should().Equal(expected.Select(post => post.Body));
+    }
+
+    [RequiresDockerFact]
+    public async Task ASecondExportWhileOneIsRunning_Returns429_WithAReadableReason()
+    {
+        var exerciseId = await _seed.ExerciseAsync();
+        var (token, _) = await _seed.StaffAsync(exerciseId, [(exerciseId, "controller")]);
+        await using var host = await PostExportTestHost.StartAsync(_seed.ConnectionString, exerciseId);
+
+        // Stand in for an export that is mid-build: hold the process-wide gate.
+        var gate = host.Services.GetRequiredService<PostExportGate>();
+        using (var running = gate.TryEnter())
+        {
+            running.Should().NotBeNull();
+
+            using var refused = await host.GetExportAsync(token);
+            refused.StatusCode.Should().Be(HttpStatusCode.TooManyRequests);
+            refused.Headers.CacheControl!.NoStore.Should().BeTrue();
+            (await refused.Content.ReadAsStringAsync()).Should().Contain("Another post export is being built right now");
+            (await _seed.TelemetryAsync(exerciseId)).Should().BeEmpty("a refused export records no download");
+        }
+
+        using (var allowed = await host.GetExportAsync(token))
+        {
+            allowed.StatusCode.Should().Be(HttpStatusCode.OK, "the gate opens once the running export finishes");
+        }
+
+        // A finished export releases the gate too (when its response is disposed), so the next one runs.
+        await host.WaitForExportGateOpenAsync();
+        using var again = await host.GetExportAsync(token);
+        again.StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
+    [RequiresDockerFact]
+    public async Task ARefusedCaller_NeverTakesTheGate()
+    {
+        var exerciseId = await _seed.ExerciseAsync();
+        await using var host = await PostExportTestHost.StartAsync(_seed.ConnectionString, exerciseId);
+
+        using var refused = await host.GetExportAsync(bearerToken: null);
+        refused.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+
+        using var lease = host.Services.GetRequiredService<PostExportGate>().TryEnter();
+        lease.Should().NotBeNull("the staff gate runs before the export gate, and a 401 leaves it open");
     }
 
     [RequiresDockerFact]
@@ -311,6 +383,7 @@ public sealed class PostExportEndpointTests
         });
 
         var postB = await _seed.PostAsync(exerciseB, personaB, 0, p => p.Body = "B-only body");
+        var replyToB = await _seed.PostAsync(exerciseA, personaA, 3, p => p.ParentPostId = postB);
         await _seed.ReactionAsync(exerciseB, postA, ReactionKinds.Like); // a stray B reaction on A's post
 
         await using var host = await PostExportTestHost.StartAsync(_seed.ConnectionString, exerciseA);
@@ -319,14 +392,16 @@ public sealed class PostExportEndpointTests
         var rows = ExportWorkbookReader.Rows(await response.Content.ReadAsByteArrayAsync());
 
         rows.Select(r => r["Post id"]).Should().BeEquivalentTo(
-            new[] { postA, leakyA, participantLeak }.Select(id => id.ToString()),
+            new[] { postA, leakyA, participantLeak, replyToB }.Select(id => id.ToString()),
             "only exercise A's posts are exported");
         rows.Should().NotContain(r => r["Post id"] == postB.ToString());
 
         var allText = string.Join("|", rows.SelectMany(r => r.Values));
         allText.Should().NotContain("bravo_secret").And.NotContain("Bravo Secret Persona")
             .And.NotContain("Bea From B").And.NotContain("B secret inject").And.NotContain("Bravo Player")
-            .And.NotContain("B-only body");
+            .And.NotContain("B-only body").And.NotContain(postB.ToString());
+        rows.Single(r => r["Post id"] == replyToB.ToString())["Reply to"].Should().BeEmpty(
+            "a parent that does not resolve inside the exercise is not printed, not even its id");
 
         rows.Single(r => r["Post id"] == postA.ToString())["Posted by"].Should().Be("Both Exercises");
         rows.Single(r => r["Post id"] == postA.ToString())["Likes"].Should().Be("0", "B's stray reaction never counts in A");
@@ -369,6 +444,7 @@ public sealed class PostExportEndpointTests
         payload.RootElement.GetProperty("rows").GetInt32().Should().Be(2);
         downloaded.Payload.Should().NotContain("secret").And.NotContain("City Fire");
 
+        await host.WaitForExportGateOpenAsync();
         using (var second = await host.GetExportAsync(token))
         {
             second.StatusCode.Should().Be(HttpStatusCode.OK);

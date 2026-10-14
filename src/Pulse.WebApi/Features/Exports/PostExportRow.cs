@@ -31,13 +31,19 @@ public sealed record PostExportRow
     /// <summary><c>Posted by</c>: the acting human's display name; blank for engine and white noise, or when unresolved.</summary>
     public required string PostedBy { get; init; }
 
-    /// <summary><c>Inject #</c>: the inject item's external reference, else its title; blank for posts without an inject.</summary>
+    /// <summary>
+    /// <c>Inject #</c>: the inject item's external reference, else its title; a non-GUID inject id raw; blank for posts
+    /// without an inject or whose item is not in the exercise.
+    /// </summary>
     public required string InjectRef { get; init; }
 
     /// <summary><c>Post id</c>.</summary>
     public required string PostId { get; init; }
 
-    /// <summary><c>Reply to</c>: <c>@handle</c> and post id of the parent, blank for a top-level post.</summary>
+    /// <summary>
+    /// <c>Reply to</c>: <c>@handle</c> and post id of the parent; blank for a top-level post and for a parent that does
+    /// not resolve inside the exercise.
+    /// </summary>
     public required string ReplyTo { get; init; }
 
     /// <summary><c>Text</c>: the post body, written as a literal text value (never a formula).</summary>
@@ -160,7 +166,7 @@ public static class PostExportLabels
 
     /// <summary>Formats the <c>Reply to</c> cell: <c>@handle</c> and the parent post id, or the id alone.</summary>
     /// <param name="parentHandle">The parent's author handle, or <c>null</c> when it does not resolve.</param>
-    /// <param name="parentPostId">The parent post id, or <c>null</c> for a top-level post.</param>
+    /// <param name="parentPostId">The parent post id when it resolved inside the exercise, else <c>null</c>.</param>
     /// <returns>The cell text, or blank.</returns>
     public static string ReplyTo(string? parentHandle, Guid? parentPostId)
     {

@@ -32,7 +32,7 @@ public enum PostExportOutcome
 /// <summary>The result of <see cref="PostExportService.ExportAsync"/>.</summary>
 public sealed class PostExportResult
 {
-    private PostExportResult(PostExportOutcome outcome, byte[]? content, string? fileName, int rowCount, string? reason)
+    private PostExportResult(PostExportOutcome outcome, MemoryStream? content, string? fileName, int rowCount, string? reason)
     {
         Outcome = outcome;
         Content = content;
@@ -44,8 +44,11 @@ public sealed class PostExportResult
     /// <summary>Which outcome occurred.</summary>
     public PostExportOutcome Outcome { get; }
 
-    /// <summary>The <c>.xlsx</c> bytes; non-null only for <see cref="PostExportOutcome.Ok"/>.</summary>
-    public byte[]? Content { get; }
+    /// <summary>
+    /// The <c>.xlsx</c>, positioned at 0; non-null only for <see cref="PostExportOutcome.Ok"/>. The caller owns it and
+    /// disposes it (the endpoint hands it to <c>Results.File</c>, which disposes it after writing the response).
+    /// </summary>
+    public MemoryStream? Content { get; }
 
     /// <summary>The download file name; non-null only for <see cref="PostExportOutcome.Ok"/>.</summary>
     public string? FileName { get; }
@@ -57,11 +60,11 @@ public sealed class PostExportResult
     public string? Reason { get; }
 
     /// <summary>A built workbook.</summary>
-    /// <param name="content">The file bytes.</param>
+    /// <param name="content">The file, positioned at 0.</param>
     /// <param name="fileName">The download file name.</param>
     /// <param name="rowCount">The data rows written.</param>
     /// <returns>An OK result.</returns>
-    public static PostExportResult Ok(byte[] content, string fileName, int rowCount) =>
+    public static PostExportResult Ok(MemoryStream content, string fileName, int rowCount) =>
         new(PostExportOutcome.Ok, content, fileName, rowCount, null);
 
     /// <summary>The fail-closed result for an unresolved scope.</summary>
@@ -214,20 +217,26 @@ public sealed class PostExportService
             workbook.AddRows(rows);
         }
 
-        byte[] content;
-        using (var buffer = new MemoryStream())
+        // One buffer, handed to the response as-is: no second full copy of the file (Gate-1 M1).
+        var content = new MemoryStream();
+        try
         {
-            workbook.SaveTo(buffer);
-            content = buffer.ToArray();
+            workbook.SaveTo(content);
+            content.Position = 0;
+
+            // 4. One XC-004 event, stamped from one clock read.
+            var now = _timeProvider.GetUtcNow();
+            var staff = await _currentStaffSession.GetCurrentStaffSessionAsync(cancellationToken);
+            _dbContext.TelemetryEvents.Add(BuildDownloadedEvent(exerciseId, facts, staff, lookups, workbook.RowCount, now));
+            await _dbContext.SaveChangesAsync(cancellationToken);
+
+            return PostExportResult.Ok(content, PostExportLabels.FileName(facts.Name, now), workbook.RowCount);
         }
-
-        // 4. One XC-004 event, stamped from one clock read.
-        var now = _timeProvider.GetUtcNow();
-        var staff = await _currentStaffSession.GetCurrentStaffSessionAsync(cancellationToken);
-        _dbContext.TelemetryEvents.Add(BuildDownloadedEvent(exerciseId, facts, staff, lookups, workbook.RowCount, now));
-        await _dbContext.SaveChangesAsync(cancellationToken);
-
-        return PostExportResult.Ok(content, PostExportLabels.FileName(facts.Name, now), workbook.RowCount);
+        catch
+        {
+            await content.DisposeAsync();
+            throw;
+        }
     }
 
     private async Task<ExportLookups> ReadLookupsAsync(Guid exerciseId, Guid organizationId, CancellationToken cancellationToken)
@@ -354,12 +363,17 @@ public sealed class PostExportService
             var realRepost = real?.RealRepost ?? 0;
             var realReply = real?.RealReply ?? 0;
 
+            // Reply to names the parent only when the parent resolved INSIDE this exercise (parentAuthors is read
+            // through the scoped Posts set); a parent id pointing anywhere else is not printed (Gate-1 L2).
+            Guid? resolvedParentId = null;
             string? parentHandle = null;
-            if (post.ParentPostId is { } parentId
-                && parentAuthors.TryGetValue(parentId, out var parentAuthorId)
-                && lookups.Personas.TryGetValue(parentAuthorId, out var parentAuthor))
+            if (post.ParentPostId is { } parentId && parentAuthors.TryGetValue(parentId, out var parentAuthorId))
             {
-                parentHandle = parentAuthor.Handle;
+                resolvedParentId = parentId;
+                if (lookups.Personas.TryGetValue(parentAuthorId, out var parentAuthor))
+                {
+                    parentHandle = parentAuthor.Handle;
+                }
             }
 
             rows.Add(new PostExportRow
@@ -372,7 +386,7 @@ public sealed class PostExportService
                 PostedBy = ResolvePostedBy(post, lookups),
                 InjectRef = ResolveInjectRef(post.InjectId, lookups),
                 PostId = post.Id.ToString(),
-                ReplyTo = PostExportLabels.ReplyTo(parentHandle, post.ParentPostId),
+                ReplyTo = PostExportLabels.ReplyTo(parentHandle, resolvedParentId),
                 Text = post.Body,
                 Media = media.GetValueOrDefault(post.Id) ?? string.Empty,
                 Likes = realLike,
@@ -400,10 +414,25 @@ public sealed class PostExportService
         return lookups.Humans.GetValueOrDefault(post.ActingHumanId) ?? string.Empty;
     }
 
-    private static string ResolveInjectRef(string? injectId, ExportLookups lookups) =>
-        Guid.TryParse(injectId, out var itemId) && lookups.Injects.TryGetValue(itemId, out var reference)
-            ? reference
-            : string.Empty;
+    /// <summary>
+    /// The <c>Inject #</c> cell. A GUID names an inject item: its reference when the item is in this exercise, else
+    /// blank (an item id from another exercise is never resolved). A non-GUID inject id is not a reference into any
+    /// table, so it is written raw (Gate-1 L4).
+    /// </summary>
+    private static string ResolveInjectRef(string? injectId, ExportLookups lookups)
+    {
+        if (string.IsNullOrWhiteSpace(injectId))
+        {
+            return string.Empty;
+        }
+
+        if (!Guid.TryParse(injectId, out var itemId))
+        {
+            return injectId;
+        }
+
+        return lookups.Injects.GetValueOrDefault(itemId) ?? string.Empty;
+    }
 
     private TelemetryEvent BuildDownloadedEvent(
         Guid exerciseId,

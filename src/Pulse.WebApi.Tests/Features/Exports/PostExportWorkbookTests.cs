@@ -130,9 +130,37 @@ public sealed class PostExportWorkbookTests
         PostExportWorkbook.CleanText(null).Should().BeEmpty();
         PostExportWorkbook.CleanText(new string('a', 40_000)).Should().HaveLength(PostExportWorkbook.MaxCellTextLength);
 
+        // A surrogate pair straddling the limit is dropped whole, never split into a lone high surrogate.
+        var straddling = new string('a', PostExportWorkbook.MaxCellTextLength - 1) + "\U0001F525" + "tail";
+        var cut = PostExportWorkbook.CleanText(straddling);
+        cut.Should().HaveLength(PostExportWorkbook.MaxCellTextLength - 1);
+        char.IsHighSurrogate(cut[^1]).Should().BeFalse();
+
+        // A pair that ends exactly at the limit is kept.
+        var fitting = new string('a', PostExportWorkbook.MaxCellTextLength - 2) + "\U0001F525" + "tail";
+        PostExportWorkbook.CleanText(fitting).Should().EndWith("\U0001F525").And.HaveLength(PostExportWorkbook.MaxCellTextLength);
+
         // The file still opens with a control character in a post.
         using var workbook = ExportWorkbookReader.Open(Write(Row("bell\u0007here")));
         workbook.Worksheet("Posts").Cell(2, 10).GetString().Should().Be("bellhere");
+    }
+
+    [Fact]
+    public void Gate_AdmitsOneExportAtATime_AndALeaseReleasesOnlyOnce()
+    {
+        using var gate = new PostExportGate();
+
+        var first = gate.TryEnter();
+        first.Should().NotBeNull();
+        gate.TryEnter().Should().BeNull("a second export is refused while the first holds the gate");
+
+        first!.Dispose();
+        first.Dispose(); // a double dispose must not over-release the gate
+
+        var second = gate.TryEnter();
+        second.Should().NotBeNull("the gate reopened");
+        gate.TryEnter().Should().BeNull("one release, not two: still single-flight");
+        second!.Dispose();
     }
 
     [Theory]

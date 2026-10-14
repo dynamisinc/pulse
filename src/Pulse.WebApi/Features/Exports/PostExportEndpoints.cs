@@ -26,7 +26,8 @@ using Pulse.WebApi.Features.Social.Engagement;
 /// <para>
 /// <b>Responses.</b> 200 with the <c>.xlsx</c>, <c>Content-Disposition: attachment; filename="pulse-posts-&lt;slug&gt;-&lt;yyyyMMdd-HHmm&gt;.xlsx"</c>
 /// (the server's UTC wall clock at download). 413 with a readable reason when the exercise has more than
-/// <see cref="PostExportService.MaxRows"/> posts. 404 when the resolved scope has no exercise row.
+/// <see cref="PostExportService.MaxRows"/> posts. 429 with a readable reason while another export is being built in
+/// this process (<see cref="PostExportGate"/>). 404 when the resolved scope has no exercise row.
 /// </para>
 /// <para>
 /// <b>Required <c>Program.cs</c> wiring (orchestrator-owned, seam S-2):</b> <c>builder.Services.AddPostExport();</c> and
@@ -52,6 +53,9 @@ public static class PostExportEndpoints
         ArgumentNullException.ThrowIfNull(services);
 
         services.TryAddScoped<PostExportService>();
+
+        // One gate per process: a second export while one is building is refused with 429 (Gate-1 M1).
+        services.TryAddSingleton<PostExportGate>();
 
         // The concrete reader, not IPostEngagementReader: see PostExportService's remarks on the zero-count fallback.
         services.TryAddScoped<PostEngagementReader>();
@@ -81,40 +85,71 @@ public static class PostExportEndpoints
         return endpoints;
     }
 
-    /// <summary>Builds the workbook and returns it as an attachment. The filters have already admitted the caller.</summary>
-    /// <param name="httpContext">The request (for the <c>Content-Disposition</c> header).</param>
+    /// <summary>
+    /// Builds the workbook and returns it as an attachment, one export at a time per process. The filters have already
+    /// admitted the caller.
+    /// </summary>
+    /// <param name="httpContext">The request (for the <c>Content-Disposition</c> header and the lease's lifetime).</param>
+    /// <param name="gate">The process-wide single-flight guard.</param>
     /// <param name="service">The export service.</param>
     /// <param name="cancellationToken">The request-aborted token.</param>
-    /// <returns>200, 401, 404 or 413.</returns>
+    /// <returns>200, 401, 404, 413 or 429.</returns>
     private static async Task<IResult> ExportAsync(
         HttpContext httpContext,
+        PostExportGate gate,
         PostExportService service,
         CancellationToken cancellationToken)
     {
-        var result = await service.ExportAsync(cancellationToken);
-
-        switch (result.Outcome)
+        var lease = gate.TryEnter();
+        if (lease is null)
         {
-            case PostExportOutcome.Ok when result.Content is { } content && result.FileName is { } fileName:
-                // Written by hand so the name is always quoted, as the contract shows. The name is [a-z0-9-.] only
-                // (PostExportLabels.FileName), so it needs no escaping.
-                httpContext.Response.Headers.ContentDisposition = $"attachment; filename=\"{fileName}\"";
-                return Results.Bytes(content, XlsxContentType);
+            return Results.Problem(
+                detail: "Another post export is being built right now. Try again in a few seconds.",
+                statusCode: StatusCodes.Status429TooManyRequests,
+                title: "An export is already running");
+        }
 
-            case PostExportOutcome.TooManyRows:
-                return Results.Problem(
-                    detail: result.Reason,
-                    statusCode: StatusCodes.Status413PayloadTooLarge,
-                    title: "Too many posts to export");
+        var leaseHandedToResponse = false;
+        try
+        {
+            var result = await service.ExportAsync(cancellationToken);
 
-            case PostExportOutcome.ScopeUnresolved:
-                return Results.Unauthorized();
+            switch (result.Outcome)
+            {
+                case PostExportOutcome.Ok when result.Content is { } content && result.FileName is { } fileName:
+                    // Written by hand so the name is always quoted, as the contract shows. The name is [a-z0-9-.] only
+                    // (PostExportLabels.FileName), so it needs no escaping.
+                    httpContext.Response.Headers.ContentDisposition = $"attachment; filename=\"{fileName}\"";
 
-            case PostExportOutcome.NotFound:
-                return Results.NotFound();
+                    // The gate stays shut until the response is written and the buffer released; Results.File
+                    // disposes the stream, and the lease is disposed with the response.
+                    httpContext.Response.RegisterForDispose(lease);
+                    leaseHandedToResponse = true;
+                    return Results.File(content, XlsxContentType);
 
-            default:
-                return Results.StatusCode(StatusCodes.Status500InternalServerError);
+                case PostExportOutcome.TooManyRows:
+                    return Results.Problem(
+                        detail: result.Reason,
+                        statusCode: StatusCodes.Status413PayloadTooLarge,
+                        title: "Too many posts to export");
+
+                case PostExportOutcome.ScopeUnresolved:
+                    return Results.Unauthorized();
+
+                case PostExportOutcome.NotFound:
+                    return Results.NotFound();
+
+                default:
+                    result.Content?.Dispose();
+                    return Results.StatusCode(StatusCodes.Status500InternalServerError);
+            }
+        }
+        finally
+        {
+            if (!leaseHandedToResponse)
+            {
+                lease.Dispose();
+            }
         }
     }
 }

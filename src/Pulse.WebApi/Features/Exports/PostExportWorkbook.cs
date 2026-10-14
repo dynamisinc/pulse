@@ -21,7 +21,7 @@ using ClosedXML.Excel;
 /// <para>
 /// <b>Valid XML.</b> Characters XML 1.0 cannot carry (C0 controls other than tab, line feed and carriage return,
 /// unpaired surrogates, U+FFFE/U+FFFF) are removed from text, so one odd post can never produce a file Excel refuses
-/// to open. Text longer than Excel's 32,767-character cell limit is cut to it.
+/// to open. Text longer than Excel's 32,767-character cell limit is cut to it, never inside a surrogate pair.
 /// </para>
 /// </remarks>
 public sealed class PostExportWorkbook : IDisposable
@@ -190,7 +190,15 @@ public sealed class PostExportWorkbook : IDisposable
         }
 
         var cleaned = builder?.ToString() ?? value;
-        return cleaned.Length > MaxCellTextLength ? cleaned[..MaxCellTextLength] : cleaned;
+        if (cleaned.Length <= MaxCellTextLength)
+        {
+            return cleaned;
+        }
+
+        // Never split a surrogate pair at the cut (Gate-1 L3): the pairs are intact here, so a high surrogate as the
+        // last kept char means its low half would be cut off; drop the whole pair instead.
+        var length = char.IsHighSurrogate(cleaned[MaxCellTextLength - 1]) ? MaxCellTextLength - 1 : MaxCellTextLength;
+        return cleaned[..length];
     }
 
     /// <summary>Writes a text VALUE (never a formula); a blank value leaves the cell empty.</summary>

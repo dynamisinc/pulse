@@ -38,6 +38,9 @@ public sealed class PostExportTestHost : IAsyncDisposable
 
     private PostExportTestHost(WebApplication app) => _app = app;
 
+    /// <summary>The host's root service provider (e.g. to hold the export gate).</summary>
+    public IServiceProvider Services => _app.Services;
+
     /// <summary>Starts a host whose resolved scope is <paramref name="currentExerciseId"/> (<c>null</c> = unresolved).</summary>
     /// <param name="connectionString">The migrated test database.</param>
     /// <param name="currentExerciseId">The server-resolved scope.</param>
@@ -68,6 +71,30 @@ public sealed class PostExportTestHost : IAsyncDisposable
         app.MapPostExport();
         await app.StartAsync();
         return new PostExportTestHost(app);
+    }
+
+    /// <summary>
+    /// Waits (up to 5 s) until the export gate is open. A successful export releases the gate when the server disposes
+    /// the response, which can land just after the client has read the body, so back-to-back calls wait here first.
+    /// </summary>
+    /// <returns>A task that completes once the gate is free (and leaves it free).</returns>
+    public async Task WaitForExportGateOpenAsync()
+    {
+        var gate = _app.Services.GetRequiredService<PostExportGate>();
+        for (var attempt = 0; attempt < 100; attempt++)
+        {
+            using (var lease = gate.TryEnter())
+            {
+                if (lease is not null)
+                {
+                    return;
+                }
+            }
+
+            await Task.Delay(50);
+        }
+
+        throw new TimeoutException("The export gate did not open within 5 seconds after the previous export.");
     }
 
     /// <summary>Calls the export route presenting <paramref name="bearerToken"/> (or none).</summary>
@@ -339,6 +366,19 @@ public sealed class PostExportSeed
 INSERT INTO [Posts] ([Id], [ExerciseId], [AuthorPersonaId], [Body], [CreatedScenarioTime], [CreatedWallClock], [Origin], [ActingHumanId])
 SELECT TOP ({count}) NEWID(), {exerciseId}, NEWID(), N'bulk', {scenario}, {wall}, N'engine', N''
 FROM sys.all_objects a CROSS JOIN sys.all_objects b;");
+    }
+
+    /// <summary>
+    /// Seeds <paramref name="posts"/> in one save, in the order given (callers scramble it, so the export's order cannot
+    /// come from insert order).
+    /// </summary>
+    /// <param name="posts">The rows.</param>
+    /// <returns>A task.</returns>
+    public async Task PostsAsync(IEnumerable<Post> posts)
+    {
+        await using var seed = _fixture.CreateContext();
+        seed.Posts.AddRange(posts);
+        await seed.SaveChangesAsync();
     }
 
     /// <summary>Reads every telemetry row for the exercise, ignoring query filters.</summary>
