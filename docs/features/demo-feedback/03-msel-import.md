@@ -17,7 +17,7 @@ Column mapping and limits are frozen in [`implementation.md` → MSEL columns](i
 - [ ] **Given** a controller session, **when** it posts a multipart `file` to `POST /api/injects/import?dryRun=true`,
       **then** it gets `200 InjectImportResultDto` and **nothing is written** (no item, no queue-version bump, no
       telemetry other than the dry-run event). With `dryRun=false` the same report comes back and the items are written.
-      `dryRun` missing, repeated or not a bool ⇒ 400 (same rule as the roster import).
+      `dryRun` missing, repeated or not a bool ⇒ 400 (stricter than the roster import, which treats a missing flag as false; amended after Gate-1).
 - [ ] **Upload validation:** empty file, file over 2 MiB, more than 2,000 data rows, a file that is neither `.xlsx`
       (checked by magic bytes `PK\x03\x04`, not by extension or MIME alone) nor UTF-8 text CSV, a workbook with no
       usable sheet, or a header row missing any of `Inject #`, `Delivery Method`, `From / Source`, `Description` ⇒ `400`
