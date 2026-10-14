@@ -28,7 +28,7 @@ content is C3 and the seed script loads it (S1). Shapes are frozen in [`implemen
       the same unit of work.
 - [ ] **Selection (DF-13):** least-posted first, then pool order; never the same persona twice in a row when another
       persona is available; an empty pool means nothing posts and `running` is false.
-- [ ] **Stops (DF-13):** no noise while the pause tier is `Freeze` or the exercise clock is frozen or not running;
+- [ ] **Stops (DF-13):** no noise while the pause tier is `Freeze`, the exercise clock is frozen or not running, or the lifecycle is not `staged`/`live` (EndEx, lifecycle pause);
       `Pause injects` and `Engine paused` do **not** stop noise. Noise resumes on the next tick after the stop clears.
 - [ ] **Restart:** after an API restart the pacer resumes at the persisted level (no catch-up burst for the downtime).
 - [ ] `NoiseStateChanged` is also pushed after each published noise post (so `postedCount`/`lastPostedAt` stay live),
