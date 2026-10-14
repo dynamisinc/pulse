@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Pulse.WebApi.Data;
+using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.Social.Engagement;
 using Pulse.WebApi.Features.Social.Follows;
@@ -73,6 +74,20 @@ public sealed class ReactionServiceAuthorizationTests
 
         result.Outcome.Should().Be(ReactionOutcome.Invalid);
         result.ValidationError.Should().Be("kind must be 'like' or 'repost'.");
+    }
+
+    [Fact]
+    public async Task ThePinKind_IsStillRejected_TheConstantAloneChangesNoBehaviour()
+    {
+        // demo-feedback/01 adds ReactionKinds.Pin as a constant only. Story 04 (personal pins, DF-6) is what teaches
+        // TryParseKind to accept it — and is expected to replace this test when it does.
+        var service = CreateService(Exercise, Session("participant", Exercise));
+
+        var react = await service.ReactAsync(Guid.NewGuid(), ReactionKinds.Pin);
+        var unreact = await service.UnreactAsync(Guid.NewGuid(), ReactionKinds.Pin);
+
+        react.Outcome.Should().Be(ReactionOutcome.Invalid, "'pin' is not a reaction kind until story 04");
+        unreact.Outcome.Should().Be(ReactionOutcome.Invalid);
     }
 
     private static CurrentSessionPersona Session(string kind, Guid exerciseId) => new()

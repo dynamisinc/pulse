@@ -40,8 +40,9 @@ using Pulse.WebApi.Features.Social.Threads;
 /// </para>
 /// <para>
 /// Accepts the full <c>PostOrigin</c> union (<c>participant</c> / <c>controller-as-persona</c> / <c>engine</c>
-/// / <c>inject</c>) because all four have a real caller: the first two over HTTP, <c>engine</c> from the
-/// reaction loop, and <c>inject</c> from Phase 4's MSEL fire, which reuses this funnel verbatim. Which of them
+/// / <c>inject</c> / <c>noise</c>) because all five have a real caller: the first two over HTTP, <c>engine</c> from
+/// the reaction loop, <c>inject</c> from Phase 4's MSEL fire, which reuses this funnel verbatim, and <c>noise</c>
+/// from the demo-feedback white-noise pacer (DF-12). Which of them
 /// an HTTP caller may CLAIM is a narrower question, answered upstream by
 /// <see cref="PostAttributionResolver"/> (only <c>participant</c> and <c>controller-as-persona</c> are
 /// reachable over HTTP at all).
@@ -64,6 +65,7 @@ public sealed partial class PostIngestService
         "controller-as-persona",
         "engine",
         "inject",
+        "noise", // demo-feedback/01 (DF-12): the white-noise pacer, in-process only — PostAttributionResolver never yields it.
     };
 
     /// <summary>The <c>origin</c> of a participant writing as their own bound persona.</summary>
@@ -218,7 +220,7 @@ public sealed partial class PostIngestService
         //    engine burst, Phase 4's inject fire) from writing an unattributed or off-union row.
         if (!AllowedOrigins.Contains(attribution.Origin))
         {
-            return PostIngestResult.Invalid("origin must be one of participant, controller-as-persona, engine, inject.");
+            return PostIngestResult.Invalid("origin must be one of participant, controller-as-persona, engine, inject, noise.");
         }
 
         var origin = attribution.Origin;

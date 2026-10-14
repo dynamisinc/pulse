@@ -24,8 +24,17 @@ namespace Pulse.WebApi.Data.Entities;
 /// </remarks>
 public sealed class NoisePost : IExerciseScoped
 {
-    /// <summary>The schema bound of <see cref="Text"/>.</summary>
+    /// <summary>
+    /// The content bound of <see cref="Text"/> in Unicode CODE POINTS (1..280), validated in code by story 05 — not the
+    /// column width, which is <see cref="MaxTextColumnLength"/>.
+    /// </summary>
     public const int MaxTextLength = 280;
+
+    /// <summary>
+    /// The column width of <see cref="Text"/> in UTF-16 code units (like <c>InjectItemPost.Text</c>): 280 code points
+    /// can need up to 560 units once emoji and other astral characters take two, so the column leaves room.
+    /// </summary>
+    public const int MaxTextColumnLength = 1024;
 
     /// <summary>Primary key.</summary>
     public Guid Id { get; set; }
@@ -36,7 +45,7 @@ public sealed class NoisePost : IExerciseScoped
     /// <summary>The <see cref="Persona"/> that posts this text — a logical reference resolved through the scoped <c>Personas</c> set.</summary>
     public Guid PersonaId { get; set; }
 
-    /// <summary>The post text, at most <see cref="MaxTextLength"/> characters.</summary>
+    /// <summary>The post text: 1..<see cref="MaxTextLength"/> code points, stored in an <c>nvarchar(1024)</c> column.</summary>
     public required string Text { get; set; }
 
     /// <summary>The entry's position in the pool; the tie-break after <see cref="PostedCount"/>.</summary>

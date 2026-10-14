@@ -9,6 +9,7 @@ using FluentAssertions;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.ExerciseConfiguration;
 using Pulse.WebApi.Tests.Data;
+using Pulse.WebApi.Tests.Features.ExerciseConfiguration.Lifecycle;
 using Xunit;
 
 /// <summary>
@@ -147,7 +148,7 @@ public sealed class ChromeConfigCompositionTests
     // ---- the FROZEN wire shape -------------------------------------------------------------------
 
     [RequiresDockerFact]
-    public async Task ChromeConfig_KeepsTheFrozenWireShape_ExactlyThreeKeysAndThreePerBanner()
+    public async Task ChromeConfig_KeepsTheFrozenWireShape_ExactlyFourKeysAndThreePerBanner()
     {
         // A changed/added/removed key does NOT raise a type error — chromeConfig.ts's private isChromeConfig
         // guard rejects the body and the shell silently falls back to its default, blanking the per-exercise
@@ -158,9 +159,10 @@ public sealed class ChromeConfigCompositionTests
         await using var host = await StartHostAsync(exerciseId);
         var root = await GetOkAsync(host);
 
+        // demo-feedback/01 adds exactly one key, `watermark` (XC-002: the ONLY new field on this participant projection).
         root.EnumerateObject().Select(p => p.Name).Should().BeEquivalentTo(
-            new[] { "enabled", "top", "bottom" },
-            "ChromeConfigResponse is frozen: fill it, never reshape it");
+            new[] { "enabled", "top", "bottom", "watermark" },
+            "ChromeConfigResponse is frozen: fill it, never reshape it — watermark is the one sanctioned addition");
 
         foreach (var banner in new[] { "top", "bottom" })
         {
@@ -169,7 +171,50 @@ public sealed class ChromeConfigCompositionTests
         }
 
         root.GetProperty("enabled").ValueKind.Should().BeOneOf(JsonValueKind.True, JsonValueKind.False);
+        root.GetProperty("watermark").ValueKind.Should().BeOneOf(JsonValueKind.True, JsonValueKind.False);
         root.GetProperty("top").GetProperty("text").ValueKind.Should().Be(JsonValueKind.String);
+    }
+
+    // ---- demo-feedback/01: the media-marking flag (DF-3) -----------------------------------------
+
+    [RequiresDockerTheory]
+    [InlineData(true, true)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(false, false)]
+    public async Task ChromeConfig_ServesWatermark_EqualToTheExercisesWatermarkEnabled_WithEnabledUnchanged(
+        bool chromeEnabled, bool watermarkEnabled)
+    {
+        var exerciseId = Guid.NewGuid();
+        await SeedExerciseAsync(exerciseId, e =>
+        {
+            e.ComplianceChromeEnabled = chromeEnabled;
+            e.WatermarkEnabled = watermarkEnabled;
+        });
+
+        await using var host = await StartHostAsync(exerciseId);
+        var root = await GetOkAsync(host);
+
+        root.GetProperty("watermark").GetBoolean().Should().Be(
+            watermarkEnabled, "watermark is the stored WatermarkEnabled verbatim, decoupled from the banner (DF-3)");
+        root.GetProperty("enabled").GetBoolean().Should().Be(
+            chromeEnabled || !watermarkEnabled,
+            "enabled is still ResolveEffectiveChromeEnabled: chrome as stored, forced on when both markings are off");
+    }
+
+    [RequiresDockerFact]
+    public async Task ChromeConfig_WithoutStory02Wired_StillServesTheExercisesWatermark()
+    {
+        // The constant default keeps its banners, but the media-marking flag is never a constant that disagrees with
+        // the exercise's real NFR-008 state.
+        var exerciseId = Guid.NewGuid();
+        await SeedExerciseAsync(exerciseId, e => e.WatermarkEnabled = false);
+
+        await using var host = await StartHostAsync(exerciseId, includeComplianceChromeSlice: false);
+        var root = await GetOkAsync(host);
+
+        root.GetProperty("watermark").GetBoolean().Should().BeFalse();
+        root.GetProperty("top").GetProperty("text").GetString().Should().Be(ParticipantShellDefaults.ChromeTopText);
     }
 
     // ---- NFR-008 on the participant read path ----------------------------------------------------
