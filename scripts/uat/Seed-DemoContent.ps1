@@ -40,7 +40,9 @@
          leaves the mark, and the next run looks for that upload the same way before it sends the file again
          (when the file's bytes, and a video's poster's bytes, are still the ones it sent). A pending video keeps
          its poster even though the library no longer lists it: the library hides an image once a video uses
-         it as its poster. Each look-up download has one deadline, body included. The library returns at most
+         it as its poster. Every such look-up runs before anything is sent. So a video found there keeps the
+         poster it carries, and no new copy of that poster is uploaded, even on a run by another staff user.
+         Each look-up download has one deadline, body included. The library returns at most
          its newest 200 rows of a kind. "Not there" counts only when those rows reach back to before the
          upload; otherwise the script cannot tell, and it stops.
       8. Edits persona profiles: PATCH /api/staff/personas/{id} as a JSON merge-patch, covering display name,
@@ -1157,6 +1159,13 @@ function Get-UploadPlan {
         if ($decision[$unit.File].Action -eq 'upload' -and (Test-PendingUpload -Entry (& $entryFor $unit.File) -Unit $unit -PosterUnit $posterUnit)) {
             $lookFirst = 'an earlier upload of it got no clear answer, so the media library is checked for it first'
             $reason = if ($reason -eq 'new file') { $lookFirst } else { "$reason; $lookFirst" }
+        }
+        # A poster sent again only for a video whose earlier upload step 7 looks for first: if that upload is found, it
+        # carries this poster, and the copy already uploaded is kept instead.
+        $entry = & $entryFor $unit.File
+        if ($decision[$unit.File].Action -eq 'upload' -and $unit.Roles.Contains('poster') -and $entry -and $entry['assetId'] -and [string] $entry['sha256'] -ceq $unit.Sha256) {
+            $pendingVideos = @($Units | Where-Object { $_.PosterFile -ceq $unit.File -and (Test-PendingUpload -Entry (& $entryFor $_.File) -Unit $_ -PosterUnit $unit) })
+            if ($pendingVideos.Count -gt 0) { $reason += "; kept instead if the earlier upload of $(@($pendingVideos.File) -join ', ') is found (it carries this poster)" }
         }
         [pscustomobject]@{ Unit = $unit; Action = $decision[$unit.File].Action; AssetId = $decision[$unit.File].AssetId; Reason = $reason }
     }
@@ -3036,6 +3045,36 @@ function Invoke-DemoSeed {
             foreach ($field in 'assetId', 'posterAssetId') { if ($known -is [System.Collections.IDictionary] -and $known[$field]) { [void] $claimedAssets.Add([string] $known[$field]) } }
         }
         $me = $StaffUsername.ToLowerInvariant()
+        $posterOf = { param($Unit) if ($Unit.Kind -eq 'video' -and $Unit.PosterFile) { $units | Where-Object File -ceq $Unit.PosterFile | Select-Object -First 1 } else { $null } }
+
+        # Every look-up first, before anything is sent. An earlier run sent these bytes (and this poster's bytes) and got
+        # no clear answer, or stopped mid-upload: the asset may be in the library already. A video found here carries the
+        # poster it was sent with, so that poster is kept below, never sent again, even when this run's staff user could
+        # not reuse it for a NEW video upload (the server's same-uploader rule).
+        $early = @{}
+        foreach ($item in @($uploadPlan | Where-Object Action -eq 'upload')) {
+            $unit = $item.Unit
+            $posterUnit = & $posterOf $unit
+            $previous = if ($manifest['files'].Contains($unit.File)) { $manifest['files'][$unit.File] } else { $null }
+            if (-not (Test-PendingUpload -Entry $previous -Unit $unit -PosterUnit $posterUnit)) { continue }
+            $earlier = $previous['pending']
+            $found = Find-UploadedMediaAsset -Context $context -Unit $unit -PosterUnit $posterUnit -KnownIds @(Get-SeedList $earlier 'knownIds') -Claimed $claimedAssets
+            if ($found.Outcome -eq 'unknown') {
+                Write-SeedLine FAIL "$($unit.File): an earlier upload of it got no clear answer, and the media library cannot tell now whether it was stored: $($found.Detail)."
+                Write-Host '  Nothing was sent for it. Wait about a minute, then run the same command again.' -ForegroundColor Yellow
+                return 1
+            }
+            if ($found.Outcome -eq 'found') {
+                # Recorded with what THAT upload sent: its uploader and its poster (the poster it carries).
+                [void] $claimedAssets.Add([string] $found.AssetId)
+                $early[$unit.File] = [pscustomobject]@{
+                    Outcome = 'adopted'; AssetId = $found.AssetId; Detail = 'an earlier upload of it got no clear answer'; Others = $found.Others
+                    UploadedBy = $(if ($earlier['uploadedBy']) { [string] $earlier['uploadedBy'] } else { $me })
+                    PosterAssetId = $(if ($posterUnit) { [string] $earlier['posterAssetId'] } else { $null })
+                }
+            }
+        }
+
         foreach ($item in $uploadPlan) {
             $unit = $item.Unit
             if ($item.Action -eq 'reuse') {
@@ -3044,29 +3083,21 @@ function Invoke-DemoSeed {
                 Write-SeedLine SKIP "$($unit.File) — already uploaded ($($item.AssetId))"
                 continue
             }
-            $posterUnit = if ($unit.Kind -eq 'video' -and $unit.PosterFile) { $units | Where-Object File -ceq $unit.PosterFile | Select-Object -First 1 } else { $null }
+            $posterUnit = & $posterOf $unit
             $posterId = if ($posterUnit) { [string] $assetIds[$unit.PosterFile] } else { $null }
             $previous = if ($manifest['files'].Contains($unit.File)) { $manifest['files'][$unit.File] } else { $null }
             $marked = $null
-            $outcome = $null
+            $outcome = $early[$unit.File]                                           # found above: nothing to send
 
-            # An earlier run sent these bytes (with this poster's bytes) and got no clear answer, or stopped mid-upload:
-            # the asset may be in the library already. Look before sending the file again.
-            if (Test-PendingUpload -Entry $previous -Unit $unit -PosterUnit $posterUnit) {
-                $earlier = $previous['pending']
-                $found = Find-UploadedMediaAsset -Context $context -Unit $unit -PosterUnit $posterUnit -KnownIds @(Get-SeedList $earlier 'knownIds') -Claimed $claimedAssets
-                if ($found.Outcome -eq 'unknown') {
-                    Write-SeedLine FAIL "$($unit.File): an earlier upload of it got no clear answer, and the media library cannot tell now whether it was stored: $($found.Detail)."
-                    Write-Host '  Nothing was sent for it. Wait about a minute, then run the same command again.' -ForegroundColor Yellow
-                    return 1
-                }
-                if ($found.Outcome -eq 'found') {
-                    # Recorded with what THAT upload sent: its uploader and its poster (the poster it carries).
-                    $by = if ($earlier['uploadedBy']) { [string] $earlier['uploadedBy'] } else { $me }
-                    $outcome = [pscustomobject]@{
-                        Outcome = 'adopted'; AssetId = $found.AssetId; Detail = 'an earlier upload of it got no clear answer'; Others = $found.Others
-                        UploadedBy = $by; PosterAssetId = $(if ($posterUnit) { [string] $earlier['posterAssetId'] } else { $null })
-                    }
+            # A poster planned to be sent again only for its videos' uploads, when each of them was found above: no
+            # upload needs it any more, so the copy already uploaded stays (the found video carries its own poster).
+            if (-not $outcome -and $unit.Roles.Contains('poster') -and $previous -is [System.Collections.IDictionary] -and $previous['assetId'] -and [string] $previous['sha256'] -ceq $unit.Sha256) {
+                $sending = @($uploadPlan | Where-Object { $_.Unit.PosterFile -ceq $unit.File -and $_.Action -eq 'upload' -and -not $early.Contains($_.Unit.File) })
+                if ($sending.Count -eq 0) {
+                    $assetIds[$unit.File] = [string] $previous['assetId']
+                    [void] $claimedAssets.Add([string] $previous['assetId'])
+                    Write-SeedLine SKIP "$($unit.File) — kept ($($previous['assetId'])): its video's earlier upload was found in the media library, so no new upload needs it"
+                    continue
                 }
             }
 

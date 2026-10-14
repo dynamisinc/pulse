@@ -1508,6 +1508,31 @@ Describe 'Media upload: an uncertain outcome is looked up and adopted, never sen
             $files['media/river-clip.poster.jpg']['assetId'] | Should -Be $posterId
         }
 
+        It 'a recovery run under ANOTHER staff user finds the late video first and keeps its poster: no replacement poster is sent' {
+            $script:Fake.MediaFaults[5] = 'lost-before-write'                   # the video
+            (Invoke-FakeSeed).Code | Should -Be 1
+            $posterId = (Get-SeedManifestFiles)['media/river-clip.poster.jpg']['assetId']
+            $late = Add-FakeAsset -Unit (Get-FixtureUnit 'media/river-clip.mp4') -Poster $posterId
+            # That earlier run was controller2's: this run (controller1) could not reuse its poster for a NEW video upload.
+            $path = Join-Path $TestDrive 'manifests' "$($script:Fake.ExerciseId).json"
+            $manifest = ConvertFrom-SeedJson (Get-Content -LiteralPath $path -Raw)
+            $manifest['files']['media/river-clip.poster.jpg']['uploadedBy'] = 'controller2'
+            $manifest['files']['media/river-clip.mp4']['pending']['uploadedBy'] = 'controller2'
+            Save-SeedManifest -Manifest $manifest -Path $path
+            $script:Fake.Calls.Clear()
+            $run = Invoke-FakeSeed
+            $run.Code | Should -Be 0 -Because $run.Text
+            $run.Text | Should -Match "\+ media/river-clip\.poster\.jpg .+same staff user.+; kept instead if the earlier upload of media/river-clip\.mp4 is found"
+            $run.Text | Should -Match ([regex]::Escape("media/river-clip.poster.jpg — kept ($posterId)"))
+            (Get-FakeCalls POST '/api/media').Count | Should -Be 0              # no replacement poster, no second video
+            $script:Fake.Assets.Count | Should -Be 5
+            $files = Get-SeedManifestFiles
+            $files['media/river-clip.mp4']['assetId'] | Should -Be $late
+            $files['media/river-clip.mp4']['posterAssetId'] | Should -Be $posterId
+            $files['media/river-clip.mp4']['uploadedBy'] | Should -Be 'controller2'
+            $files['media/river-clip.poster.jpg']['assetId'] | Should -Be $posterId
+        }
+
         It 'plan and run agree: when the poster''s bytes changed, the video is not looked up first, and the plan does not say it is' {
             $script:Fake.MediaFaults[5] = 'lost-before-write'
             (Invoke-FakeSeed).Code | Should -Be 1
