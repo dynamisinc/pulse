@@ -44,6 +44,7 @@ import { Box } from '@mui/material'
 import { ThemeProvider } from '@mui/material/styles'
 import CssBaseline from '@mui/material/CssBaseline'
 import { cobraTheme } from '@/theme/cobraTheme'
+import { useOptionalPreview } from './previewContext'
 import { STAFF_HEADER_HEIGHT_PX, STAFF_TOOLSTRIP_WIDTH_PX, staffShellTokens } from './staffShellTokens'
 
 export interface StaffShellFrameProps {
@@ -84,6 +85,12 @@ export function StaffShellFrame({
   children,
   globalOverlay,
 }: StaffShellFrameProps) {
+  // While "Preview as participant" is staged the work area hosts the real Social channel, which
+  // brings its own `<main>`. A page has ONE main landmark (WCAG 1.3.1 / 2.4.1; a screen-reader user
+  // jumps to "the" main), so the work area stops being one for as long as the preview is up and
+  // becomes a plain container; the PREVIEW's labelled region + the channel's main carry the
+  // landmarks. Without a `PreviewProvider` (the planner workspace) it is always `main`.
+  const previewStaged = useOptionalPreview()?.active === true
   return (
     <ThemeProvider theme={cobraTheme}>
       <CssBaseline />
@@ -120,7 +127,7 @@ export function StaffShellFrame({
           }}
         >
           <Box
-            component="main"
+            component={previewStaged ? 'div' : 'main'}
             data-testid="staff-shell-work-area"
             sx={{
               minHeight: 0,

@@ -96,21 +96,40 @@
  * `useIsRowRemoved()`) marks removed rows REMOVED and disables "Reply as..." on them.
  * PE-FE's persona edit button is the `actionsSlot` of `PersonaContextPanel` in the dock.
  *
- * Note: `SessionProvider` is deliberately NOT in this stack — the console's
- * operating identity is `useControllerIdentity()` (a Phase-1 mock; the one mock
- * session is a participant), exactly as the shipped `/evaluator` route mounts no
- * session either. Preview-as-participant (a shell-global capability) is a later
- * console story and is not wired here (Wave-1 scope guard).
+ * DEMO-POLISH C6 - PREVIEW AS PARTICIPANT + STARTEX / ENDEX (docs/features/demo-polish/
+ * 23-preview-and-startex.md).
+ *
+ *   Preview as participant  -> `PreviewProvider` wraps the frame; `ConsoleStaffHeader` passes
+ *                     `previewActive` / `onTogglePreview` to `StaffHeader` (the header shows the
+ *                     toggle only when it is handed a handler); `ConsoleWorkArea` swaps the
+ *                     console for `PreviewAsParticipant` while the preview is staged - the same
+ *                     XOR `EvaluatorDashboardRoute` uses. The console UNMOUNTS while the preview
+ *                     is up: its React state is gone on Exit (what survives and what is lost is
+ *                     listed in `features/staffShell/README.md`).
+ *   StartEx / EndEx  -> `lifecycleSlot={<ExerciseLifecycleControl />}` on `ControllerConsole`
+ *                     (its title row). The control is controller-only on the SIGNED-IN SESSION's
+ *                     role and renders nothing with no session.
+ *
+ * SESSION. This route does NOT mount a `SessionProvider` of its own, but one IS in the stack:
+ * `app-shell/routes.tsx` hoists `ExerciseContextProvider > SessionProvider` above
+ * `RoleAwareEntry`, so every staff route sits under the real session. The console's operating
+ * identity for attribution is still `useControllerIdentity()` (a Phase-1 mock). The PREVIEW
+ * needs the hoisted session (the real participant channel reads it, and narrows it to a
+ * read-only observer); a test that mounts this route directly and opens the preview must supply
+ * a `SessionProvider` itself, and one whose session role is `controller` to see StartEx / EndEx.
  */
 
 import { memo, useCallback, useMemo } from 'react'
 import type { ReplyTarget } from '@/features/social'
-import { useExerciseContext } from '@/core/exerciseContext'
+import { useExerciseContext, type ExerciseStatus } from '@/core/exerciseContext'
 import { ToolstripProvider, useToolstrip } from '@/features/staffShell/toolRegistry'
 import { StaffShellFrame } from '@/features/staffShell/StaffShellFrame'
 import { StaffHeader } from '@/features/staffShell/components/StaffHeader'
 import { pauseStatePillConfig } from '@/features/staffShell/components/statePillConfig'
 import { Toolstrip } from '@/features/staffShell/components/Toolstrip'
+import { PreviewProvider, usePreview } from '@/features/staffShell/previewContext'
+import { PreviewAsParticipant } from '@/features/staffShell/components/PreviewAsParticipant'
+import { ExerciseLifecycleControl } from './lifecycle'
 import { usePauseState } from './hooks/usePauseState'
 import { postStore } from '@/features/social/services/postStore'
 import { EngineDraftEditComposer, type ReviewQueueEditSlotProps } from './engine'
@@ -159,6 +178,15 @@ const renderRunSheet = () => <RunSheetSlot />
  * console render (review queue, swamped mode).
  */
 const renderTakedown = (post: LiveWorldPost) => <TakedownAction post={post} />
+
+/**
+ * The StartEx / EndEx control for `ControllerConsole`'s `lifecycleSlot` (demo-polish C6). A MODULE-
+ * LEVEL element, like `renderRunSheet` above: the console re-renders constantly (the review queue's
+ * 1 s tick, every swamped-mode change) and an element built inside the route would be a new object
+ * each time, re-rendering the control for nothing. It takes no props, so one shared element is
+ * exact.
+ */
+const LIFECYCLE_SLOT = <ExerciseLifecycleControl />
 
 interface LiveWorldSlotProps {
   readonly ctx: ConsoleSlotContext
@@ -286,24 +314,57 @@ function ControllerConsoleContent() {
       liveWorldSlot={liveWorldSlot}
       runSheetSlot={renderRunSheet}
       onDockClose={clearReply}
+      lifecycleSlot={LIFECYCLE_SLOT}
     />
   )
 }
 
 /**
+ * The work area: the console, or - while "Preview as participant" is staged - the preview stage
+ * in its place (the same XOR the evaluator dashboard uses; staff-shell story 04).
+ */
+function ConsoleWorkArea() {
+  const { active } = usePreview()
+  return active ? <PreviewAsParticipant /> : <ControllerConsoleContent />
+}
+
+/**
+ * The lifecycle statuses in which the WORLD IS RUNNING - the only ones a pause tier describes. A
+ * tier (INJECTS / ENGINE PAUSED, WORLD FROZEN) means "the exercise is live but held"; before
+ * StartEx there is nothing to hold (the server refuses a Freeze then) and after EndEx there is
+ * nothing left running. `paused` is the lifecycle's own held state and `active` its legacy alias.
+ */
+const WORLD_RUNNING_STATUSES: readonly ExerciseStatus[] = ['live', 'paused', 'active']
+
+/**
  * The staff header for the console: the shared `StaffHeader` with its exercise-
  * state pill driven by the world-steering tiered-pause tier (D7-010) — while a
- * tier is active the pill shows INJECTS PAUSED / ENGINE PAUSED / WORLD FROZEN
- * (amber), otherwise the lifecycle status (LIVE / STAGED / …). Reads
- * `usePauseState()` here (inside the provider stack) rather than in the shared
- * header, so the header stays free of the controller-only pause/identity seam.
+ * tier is active AND THE WORLD IS RUNNING the pill shows INJECTS PAUSED / ENGINE
+ * PAUSED / WORLD FROZEN (amber), otherwise the lifecycle status (LIVE / STAGED /
+ * ENDEX / …). Reads `usePauseState()` here (inside the provider stack) rather
+ * than in the shared header, so the header stays free of the controller-only
+ * pause/identity seam.
+ *
+ * WHY THE TIER ONLY OVERRIDES WHILE THE WORLD IS RUNNING (Gate-2 W-2). The override wins over the
+ * lifecycle status, and a tier set before EndEx is still recorded after it - so without this rule
+ * a controller who froze the world and then pressed End exercise would see WORLD FROZEN on the
+ * header while the exercise had in fact ended, hiding the state change from the very pill that
+ * exists to show it. The rule is a pure DISPLAY rule: EndEx moves the pill to ENDEX whatever tier
+ * is recorded. (The alternative - resetting the tier on a successful EndEx - would make the
+ * lifecycle control issue a second server write, couple two steering features, and still miss
+ * the exercise being ended from another console.)
  */
 function ConsoleStaffHeader() {
   const { isPaused, label } = usePauseState()
+  const { status } = useExerciseContext()
+  const { active, toggle } = usePreview()
+  const showTier = isPaused && WORLD_RUNNING_STATUSES.includes(status)
   return (
     <StaffHeader
       surfaceName="Controller Console"
-      stateOverride={isPaused ? pauseStatePillConfig(label) : undefined}
+      stateOverride={showTier ? pauseStatePillConfig(label) : undefined}
+      previewActive={active}
+      onTogglePreview={toggle}
     />
   )
 }
@@ -316,12 +377,14 @@ export function ControllerConsoleRoute() {
   return (
     <ToolstripProvider>
       <ActivePersonaProvider>
-        <StaffShellFrame
-          header={<ConsoleStaffHeader />}
-          toolstrip={<Toolstrip />}
-        >
-          <ControllerConsoleContent />
-        </StaffShellFrame>
+        <PreviewProvider>
+          <StaffShellFrame
+            header={<ConsoleStaffHeader />}
+            toolstrip={<Toolstrip />}
+          >
+            <ConsoleWorkArea />
+          </StaffShellFrame>
+        </PreviewProvider>
       </ActivePersonaProvider>
     </ToolstripProvider>
   )

@@ -20,9 +20,10 @@ import {
 } from './socialNavigation'
 
 describe('socialPaths', () => {
-  it('builds the five in-channel URLs', () => {
+  it('builds the in-channel URLs', () => {
     expect(socialPaths.home()).toBe('/home')
     expect(socialPaths.explore()).toBe('/explore')
+    expect(socialPaths.notifications()).toBe('/notifications')
     expect(socialPaths.hashtag('waterissues')).toBe('/hashtag/waterissues')
     expect(socialPaths.profile('FulcoEM')).toBe('/FulcoEM')
     expect(socialPaths.thread('post-1', 'FulcoEM')).toBe('/FulcoEM/status/post-1')
@@ -41,7 +42,7 @@ describe('socialPaths', () => {
 describe('reserved segments (COR-004)', () => {
   it('reserves exactly the routes the channel owns plus the app-level prefixes', () => {
     expect([...SOCIAL_RESERVED_SEGMENTS].sort()).toEqual(
-      ['explore', 'hashtag', 'home', 'i', 'login', 'staff'].sort(),
+      ['explore', 'hashtag', 'home', 'i', 'login', 'notifications', 'staff'].sort(),
     )
   })
 
@@ -56,6 +57,7 @@ describe('reserved segments (COR-004)', () => {
     expect(isThreadHandle('FulcoEM')).toBe(true)
     expect(isThreadHandle('staff')).toBe(false)
     expect(isThreadHandle('explore')).toBe(false)
+    expect(isThreadHandle('notifications')).toBe(false)
   })
 })
 
@@ -65,6 +67,8 @@ describe('matchSocialRoute', () => {
     ['/HOME', 'home'],
     ['/home/', 'home'],
     ['/explore', 'explore'],
+    ['/notifications', 'notifications'],
+    ['/NOTIFICATIONS', 'notifications'],
     ['/hashtag/waterissues', 'hashtag'],
     ['/hashtag/%23WaterIssues', 'hashtag'],
     ['/hashtag/caf%C3%A9', 'hashtag'],

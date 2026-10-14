@@ -160,6 +160,11 @@ describe('ThreadView — a request cannot go stale (L-7)', () => {
     renderThread()
 
     await screen.findByText('Unable to load this thread.')
+    // The drop runs in a passive effect after the error commit; findByText can resolve
+    // between the two under load (seen once in a full run). Flush effects first, so the
+    // assertion reads the settled state. consumeReplyFocus cannot go inside waitFor: it
+    // consumes, so a retry would pass vacuously.
+    await act(async () => {})
     expect(consumeReplyFocus(FOCUS)).toBe(false)
   })
 })
