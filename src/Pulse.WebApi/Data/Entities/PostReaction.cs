@@ -10,6 +10,13 @@ public static class ReactionKinds
 
     /// <summary>A repost (SOC-030).</summary>
     public const string Repost = "repost";
+
+    /// <summary>
+    /// A PERSONAL pin (demo-feedback DF-6): a participant keeping a post on their own Pinned tab. Stored as a reaction
+    /// row so it reuses the filtered unique index, but it is never counted in engagement and never visible to anyone
+    /// else. The constant only exists from story 01; the reaction write path accepts it from story 04.
+    /// </summary>
+    public const string Pin = "pin";
 }
 
 /// <summary>

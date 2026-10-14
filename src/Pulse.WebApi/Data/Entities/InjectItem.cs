@@ -107,6 +107,19 @@ public sealed class InjectItem : IExerciseScoped
     /// <summary>Soft-delete marker (XC-010); <c>null</c> while the item is live.</summary>
     public DateTimeOffset? DeletedAt { get; set; }
 
+    /// <summary>The schema bound of <see cref="ExternalRef"/> (demo-feedback DF-10).</summary>
+    public const int MaxExternalRefLength = 64;
+
+    /// <summary>
+    /// The MSEL <c>Inject #</c> this item was imported from (demo-feedback DF-10), at most
+    /// <see cref="MaxExternalRefLength"/> characters; <c>null</c> for an item authored in the console. The MSEL import's
+    /// idempotency key: <c>IX_InjectItems_ExerciseId_ExternalRef</c> is unique per exercise among LIVE items
+    /// (<c>WHERE [ExternalRef] IS NOT NULL AND [DeletedAt] IS NULL</c>), so a re-import updates rather than duplicates,
+    /// and a deleted item frees its reference. Staff world only.
+    /// </summary>
+    /// <remarks>Schema only (demo-feedback story 01); the import that writes it is story 03.</remarks>
+    public string? ExternalRef { get; set; }
+
     /// <summary>The child posts, including soft-deleted ones; readers order by sequence and exclude deleted rows.</summary>
     public IList<InjectItemPost> Posts { get; set; } = new List<InjectItemPost>();
 }
