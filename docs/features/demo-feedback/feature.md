@@ -1,6 +1,6 @@
 # Feature: Demo feedback cut (10/20)
 
-**Epic:** cross-cutting (E2 Social, E7 Controller, E10 Evaluation) · **Phase:** 1 · **World:** both · **Issue:** _TBD_
+**Epic:** cross-cutting (E2 Social, E7 Controller, E10 Evaluation) · **Phase:** 1 · **World:** both · **Issue:** #496
 **Target:** Tue 10/20 demo. **Code freeze (backend and frontend) Sun 10/18 evening.** Final reset and seed Mon 10/19.
 Decisions: [`implementation.md`](implementation.md#decisions-df-n) (DF-1 to DF-16). Scope agreed with Tom on Wed 10/14.
 

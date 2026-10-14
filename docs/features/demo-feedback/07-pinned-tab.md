@@ -1,7 +1,7 @@
 # Story: Pinned tab and Pin action (participant)
 
 **Feature:** Demo feedback cut (10/20)  ·  **Phase:** 1  ·  **Status:** Not Started
-**Requirements:** feeds-discovery (new: Pinned)  ·  **Decisions:** DF-5, DF-6, DF-7  ·  **Issue:** _TBD_
+**Requirements:** feeds-discovery (new: Pinned)  ·  **Decisions:** DF-5, DF-6, DF-7  ·  **Issue:** #503
 **Stack:** frontend  ·  **World:** participant  ·  **Review:** Tier-1  ·  **Priority:** Must  ·  **Wave:** 2  ·  **Effort:** M
 
 ## Context

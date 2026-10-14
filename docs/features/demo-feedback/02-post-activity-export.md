@@ -1,7 +1,7 @@
 # Story: Post activity export (.xlsx)
 
 **Feature:** Demo feedback cut (10/20)  ·  **Phase:** 1  ·  **Status:** Not Started
-**Requirements:** AAR export (lite; E10 F10.4 slice)  ·  **Decisions:** DF-8  ·  **Issue:** _TBD_
+**Requirements:** AAR export (lite; E10 F10.4 slice)  ·  **Decisions:** DF-8  ·  **Issue:** #498
 **Stack:** backend  ·  **Review:** Tier-1  ·  **Priority:** Must  ·  **Wave:** 1  ·  **Effort:** M
 
 ## Context

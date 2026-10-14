@@ -1,7 +1,7 @@
 # Story: Foundation: schema, contract, watermark flag
 
 **Feature:** Demo feedback cut (10/20)  ·  **Phase:** 1  ·  **Status:** Not Started
-**Requirements:** NFR-008 (watermark to the participant client), groundwork for DF-6, DF-7, DF-10, DF-12  ·  **Decisions:** DF-3, DF-6, DF-7, DF-10, DF-12  ·  **Issue:** _TBD_
+**Requirements:** NFR-008 (watermark to the participant client), groundwork for DF-6, DF-7, DF-10, DF-12  ·  **Decisions:** DF-3, DF-6, DF-7, DF-10, DF-12  ·  **Issue:** #497
 **Stack:** backend  ·  **Review:** **Tier-2** (schema)  ·  **Priority:** Must  ·  **Wave:** 0  ·  **Effort:** S
 
 ## Context

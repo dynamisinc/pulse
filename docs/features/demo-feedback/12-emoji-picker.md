@@ -1,7 +1,7 @@
 # Story: Emoji picker in both composers
 
 **Feature:** Demo feedback cut (10/20)  ·  **Phase:** 1  ·  **Status:** Not Started
-**Requirements:** D1 composer polish  ·  **Decisions:** DF-15  ·  **Issue:** _TBD_
+**Requirements:** D1 composer polish  ·  **Decisions:** DF-15  ·  **Issue:** #508
 **Stack:** frontend  ·  **World:** both  ·  **Review:** Tier-1  ·  **Priority:** Should  ·  **Wave:** 2 (12a), 3 (12b)  ·  **Effort:** S
 
 ## Context

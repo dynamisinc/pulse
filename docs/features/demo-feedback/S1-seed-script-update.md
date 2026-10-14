@@ -1,7 +1,7 @@
 # Story: Seed script: noise pool, exercise pins, watermark on
 
 **Feature:** Demo feedback cut (10/20)  ·  **Phase:** 1  ·  **Status:** Not Started
-**Decisions:** DF-12, DF-16  ·  **Issue:** _TBD_
+**Decisions:** DF-12, DF-16  ·  **Issue:** #510
 **Stack:** script  ·  **Review:** Tier-1  ·  **Priority:** Must  ·  **Wave:** 3  ·  **Effort:** M
 
 ## Context
