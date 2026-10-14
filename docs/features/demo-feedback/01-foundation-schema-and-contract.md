@@ -41,3 +41,26 @@ Every endpoint and behaviour that uses these columns (02–05). The participant 
 
 Migration replay (`IdempotentMigrationScriptTests`), model snapshot shape, the isolation case, the `noise` origin guard,
 and a `GET /api/chrome-config` projection test with `WatermarkEnabled` on and off.
+
+Linked (all under `src/Pulse.WebApi.Tests`):
+
+- AC 1 (one migration, exact schema, `off` backfill): `DemoFeedbackMigrationTests.TheMigration_IsTheFeaturesOnlyOne_DirectlyAfterEasyLogin`,
+  `.TheModelSnapshot_MatchesTheModel_SoNoSchemaChangeIsPendingWithoutAMigration`, `.ThePostPinColumns_AreNullable_BoundedAndIndexedOnPinnedRowsOnly`,
+  `.TheImportKey_IsBounded_AndUniquePerExerciseAmongLiveItems`, `.TheNoiseLevel_IsRequired_Bounded_AndDefaultsToOff`,
+  `.Up_CreatesTheColumnsWithTheContractTypes_AndTheOffDefault`, `.Up_CreatesTheThreeIndexes_ScopeLeading_WithTheirFilters`,
+  `.TheImportKey_RefusesASecondLiveItem_ButAllowsADeletedOne_AnotherExercise_AndNone`, `.TheNewColumns_RoundTrip_AndNewRowsTakeTheDefaults`,
+  `.Down_RemovesTheSchema_AndUpReappliesIt`
+- AC 2 (`NoisePost` scoped, lengths): `DemoFeedbackMigrationTests.NoisePost_HasTheContractColumns_NoForeignKey_AndTheLeastPostedFirstIndex`,
+  `QueryFilterModelTests.EveryExerciseScopedEntity_HasAGlobalQueryFilter(NoisePost)`
+- AC 3 (`ReactionKinds.Pin`, no behaviour change): `DemoFeedbackMigrationTests.ThePinReactionKind_IsTheConstantOnly_AndFitsTheKindColumn`,
+  `ReactionServiceAuthorizationTests.ThePinKind_IsStillRejected_TheConstantAloneChangesNoBehaviour` (story 04 replaces it)
+- AC 4 (`noise` origin, unreachable over HTTP): `PostIngestServiceAttributionTests.NoiseOrigin_FromAnInProcessCaller_IsAccepted_AndStoredAsNoise`,
+  `PostWriteEndpointTests.ParticipantSession_ClaimingAPrivilegedOrigin_Returns403_AndPersistsNothing`,
+  `PostWriteEndpointTests.StaffSession_ClaimingANonControllerOrigin_Returns400_AndPersistsNothing` (both now include `noise`)
+- AC 5 (`watermark` on `GET /api/chrome-config`): `ChromeConfigProjectionTests.ProjectAsync_ServesWatermark_EqualToWatermarkEnabled_AndLeavesEnabledToTheGuard`,
+  `.ConstantDefault_KeepsItsBanners_ButServesTheExercisesWatermark`,
+  `ChromeConfigCompositionTests.ChromeConfig_ServesWatermark_EqualToTheExercisesWatermarkEnabled_WithEnabledUnchanged`,
+  `.ChromeConfig_WithoutStory02Wired_StillServesTheExercisesWatermark`
+- AC 6 (replay, `EXEC(N'…')`): `IdempotentMigrationScriptTests.TheDeployScript_BringsUpDemoFeedback_OverLegacyRows_AndReplaysAsANoOp`
+- XC-001: `DemoFeedbackIsolationTests` (cross-exercise list, pacer read, IDOR, aggregate, fail-closed scope, write guard)
+- XC-002: `ChromeConfigCompositionTests.ChromeConfig_KeepsTheFrozenWireShape_ExactlyFourKeysAndThreePerBanner`

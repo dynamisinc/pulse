@@ -7,7 +7,7 @@ using Pulse.WebApi.Features.ParticipantShell;
 /// <summary>
 /// Story 02's real, PER-EXERCISE <see cref="IChromeConfigProjection"/> — the contribution that retires story
 /// 01b's constant-preserving default (COR-031). It fills the FROZEN <see cref="ChromeConfigResponse"/> shape
-/// (<c>{ enabled, top{text,fg,bg}, bottom{text,fg,bg} }</c>) from the resolved exercise's chrome columns, so
+/// (<c>{ enabled, top{text,fg,bg}, bottom{text,fg,bg}, watermark }</c>) from the resolved exercise's chrome columns, so
 /// <c>GET /api/chrome-config</c> finally answers differently for different exercises while
 /// <c>chromeConfig.ts</c>'s runtime guard and <c>ComplianceChrome.tsx</c> need no change at all.
 /// </summary>
@@ -73,6 +73,10 @@ public sealed class ChromeConfigProjection : IChromeConfigProjection
                 Fg = Fallback(source.ChromeBottomFg, ParticipantShellDefaults.ChromeBannerFg),
                 Bg = Fallback(source.ChromeBottomBg, ParticipantShellDefaults.ChromeBannerBg),
             },
+
+            // demo-feedback/01 (DF-3): the media-marking flag is the stored WatermarkEnabled, verbatim and decoupled
+            // from `enabled`; the NFR-008 guard above still governs `enabled` exactly as before.
+            Watermark = source.WatermarkEnabled,
         });
     }
 
