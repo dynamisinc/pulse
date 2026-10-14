@@ -61,7 +61,7 @@ public class PersonaHandleUniqueIndexMigrationGuardTests
 
         var exerciseA = Guid.NewGuid();
         var exerciseB = Guid.NewGuid();
-        string[] cast = ["FairhavenWater", "FulcoEM", "Newsline7", "mvega_fh", "tbrandt41", "kwardFH"];
+        string[] cast = ["FairhavenWater", "KestrelCoEM", "MetroDesk9", "mvega_fh", "tbrandt41", "kwardFH"];
         await database.InsertPersonasAsync(exerciseA, cast);
         await database.InsertPersonasAsync(exerciseB, cast);
 

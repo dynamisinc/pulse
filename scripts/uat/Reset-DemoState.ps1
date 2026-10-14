@@ -18,13 +18,32 @@
          straight after a restart landed on the old process and vanished at the handover ~6 minutes later.
          So after -Restart, wait ~8 minutes and run the script again without it.
       4. Re-seeds the engine (POST /api/ops/seed-engine-content): registers the reaction loop and rebuilds
-         the starter storyline at scenario minute 0. Persona rows are reused, never duplicated. With
-         -AutoConfirmResponses, a PIO post that plausibly answers the storyline addresses it straight away.
+         the starter storyline at scenario minute 0. Persona rows are reused, never duplicated (but see the
+         one-time rename below). With -AutoConfirmResponses, a PIO post that plausibly answers the storyline
+         addresses it straight away.
       5. Optionally binds a participant account to a posting persona (-ParticipantUsername with
          -PersonaHandle), so the participant's composer is present.
       6. Confirms the session-gated routes the demo uses answer 401 (wired), never 404 (dead).
 
     Posts, accounts and other persisted rows are NOT touched.
+
+    ONE-TIME RENAME after the deploy of the 2026-10-13 fiction rename (Fulton County -> Kestrel County,
+    Newsline 7 -> Metro Desk 9): the first run's re-seed renames the existing @FulcoEM and @Newsline7
+    personas IN PLACE to @KestrelCoEM and @MetroDesk9. The handle always changes; the display name and bio
+    change only if staff had not edited them. Ids, posts and participant bindings are kept. That run
+    reports personasRenamed: 2 as a 'Seed modified rows' WARN, and the server note it prints lists each
+    rename and anything it kept (a staff-edited name or bio, a location still naming the old fiction).
+    Every later run reports 0. A 'Retired handles left' WARN means a row could not be renamed because its
+    new handle already exists; check that exercise's personas by hand.
+      - PIO: a PIO bound to @FulcoEM stays bound, now as @KestrelCoEM. If the binding is missing, re-bind
+        with -ParticipantUsername <name> -PersonaHandle KestrelCoEM, then sign that participant out and in.
+      - Drafts: review drafts queued before the rename still address @FulcoEM / @Newsline7 and fail to
+        publish. After this first re-seed, run Clear-DemoContent.ps1 (try -WhatIf first). It vetoes Queued
+        and Held drafts of every storyline except the one just seeded, which covers all pre-rename drafts,
+        and archives posts created before -Before as usual. It leaves drafts that are counting down alone
+        and reports them; veto those in the console.
+      - Not touched: the exercise's outlet names (Exercise.OutletNamesJson; if it says "Newsline 7", change
+        it in exercise settings) and the text of old posts.
 
     The bootstrap secret comes from $env:PULSE_BOOTSTRAP_SECRET if set, otherwise from the App Service's
     settings through YOUR az login. It is held in memory, sent only as the X-Bootstrap-Secret header, and
@@ -58,8 +77,8 @@
     different persona replaces the old binding and the response says which).
 
 .PARAMETER PersonaHandle
-    The persona to bind. For the PIO demo use FulcoEM: the starter storyline's silence test waits for
-    "an official statement from Fulton County Emergency Management". Avoid the citizen personas
+    The persona to bind. For the PIO demo use KestrelCoEM: the starter storyline's silence test waits for
+    "an official statement from Kestrel County Emergency Management". Avoid the citizen personas
     (mvega_fh, tbrandt41, kwardFH, dreyes_fh): the engine writes as them, so the participant would see the
     engine posting under their own name. The participant must sign out and back in afterwards, because a
     session keeps the persona it signed in with.
@@ -74,7 +93,7 @@
     pwsh scripts/uat/Reset-DemoState.ps1 -AutoConfirmResponses     # the demo setting, once #415 is deployed
 
 .EXAMPLE
-    pwsh scripts/uat/Reset-DemoState.ps1 -ParticipantUsername pio1 -PersonaHandle FulcoEM
+    pwsh scripts/uat/Reset-DemoState.ps1 -ParticipantUsername pio1 -PersonaHandle KestrelCoEM
 
 .EXAMPLE
     pwsh scripts/uat/Reset-DemoState.ps1 -Restart     # then, ~8 minutes later: pwsh scripts/uat/Reset-DemoState.ps1
@@ -227,7 +246,24 @@ if (-not $CheckOnly) {
                 $s = $seed.Content | ConvertFrom-Json
                 Add-Result 'Engine seeded' PASS ("storyline '{0}' at minute 0; escalates after {1} scenario min of silence; personas {2} created / {3} reused" -f `
                     $s.storylineTitle, $s.responseWindowMinutes, $s.personasCreated, $s.personasReused)
-                if ($s.personasBackfilled -gt 0 -or $s.personasCastableClosed -gt 0) { Add-Result 'Seed modified rows' WARN $s.note }
+                # personasRenamed / personasOnRetiredHandle are absent on a server that predates the fiction
+                # rename; $null -gt 0 is false.
+                if ($s.personasBackfilled -gt 0 -or $s.personasCastableClosed -gt 0 -or $s.personasRenamed -gt 0) {
+                    $detail = $s.note
+                    if ($s.personasRenamed -gt 0) {
+                        # The count may be 1, so name the retired handles as a set, not as two certain renames;
+                        # the server note says exactly which row went where.
+                        $detail = ("{0} persona(s) renamed in place from retired handle(s) (@FulcoEM / @Newsline7); " +
+                            "ids, posts and bindings kept; one-time after the fiction rename, 0 on later runs. " +
+                            "The server note lists each rename and anything it kept: {1}") -f $s.personasRenamed, $s.note
+                    }
+                    Add-Result 'Seed modified rows' WARN $detail
+                }
+                if ($s.personasOnRetiredHandle -gt 0) {
+                    Add-Result 'Retired handles left' WARN (("{0} persona row(s) still on a retired handle (@FulcoEM / @Newsline7) " +
+                        "were NOT renamed: the new handle already exists or the casing differs. Check that exercise's " +
+                        "personas by hand.") -f $s.personasOnRetiredHandle)
+                }
 
                 # A server older than engine-runtime/06 (#415) silently ignores the field and omits it from
                 # the response, so report what the SERVER says it applied, not what was asked for.

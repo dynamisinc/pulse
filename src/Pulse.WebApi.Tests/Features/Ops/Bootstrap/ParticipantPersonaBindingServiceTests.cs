@@ -55,7 +55,7 @@ public sealed class ParticipantPersonaBindingServiceTests
             AccountId: Guid.NewGuid(),
             Username: $"participant-{Guid.NewGuid():N}",
             FirstPersonaId: Guid.NewGuid(),
-            FirstHandle: $"FulcoEM{Guid.NewGuid():N}"[..18],
+            FirstHandle: $"KestrelCoEM{Guid.NewGuid():N}"[..22],
             SecondPersonaId: Guid.NewGuid(),
             SecondHandle: $"mvega{Guid.NewGuid():N}"[..18]);
 
@@ -73,7 +73,7 @@ public sealed class ParticipantPersonaBindingServiceTests
         {
             Id = seeded.FirstPersonaId,
             ExerciseId = seeded.ExerciseId,
-            DisplayName = "Fulton County EM",
+            DisplayName = "Kestrel County EM",
             Handle = seeded.FirstHandle,
             Kind = "org",
             Verified = true,
@@ -423,7 +423,7 @@ public sealed class ParticipantPersonaBindingServiceTests
                 {
                     Hostname = host,
                     Username = "participant1",
-                    PersonaHandle = "FulcoEM",
+                    PersonaHandle = "KestrelCoEM",
                 },
                 Secret);
 

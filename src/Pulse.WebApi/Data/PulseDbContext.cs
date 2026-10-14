@@ -294,7 +294,7 @@ public class PulseDbContext : DbContext
 
             // Handle uniqueness PER EXERCISE, never globally (docs/01-platform-core-isolation.md §7 Q3,
             // resolved in favour of the recommended per-exercise scope; see backend-host/03). Two different
-            // exercises may each run a "@FulcoEM" — that is the point of an isolated world — but within ONE
+            // exercises may each run a "@KestrelCoEM" — that is the point of an isolated world — but within ONE
             // exercise a handle identifies exactly one persona, which PersonaCastSeeder's idempotency read and
             // every by-handle resolver already assume. Same shape as Account.Username above.
             //
