@@ -18,7 +18,7 @@ an endpoint or behaviour beyond that. The frozen shapes are in [`implementation.
       `InjectItem.ExternalRef` and its filtered unique index; `Exercise.NoiseLevel` (required, default `'off'`);
       and the new `NoisePost` table with its index. Existing rows get `NoiseLevel = 'off'`.
 - [ ] `NoisePost` implements `IExerciseScoped`, is registered in `PulseDbContext` with the **central exercise filter**,
-      and has the lengths in the contract (`Text` 280, `PinnedForAllByHumanId` 128, `ExternalRef` 64, `NoiseLevel` 8).
+      and has the lengths in the contract (`Text` column 1024 for 280 code points, `PinnedForAllByHumanId` 128, `ExternalRef` 64, `NoiseLevel` 8).
 - [ ] `ReactionKinds.Pin = "pin"` exists beside `Like` and `Repost`. **No behaviour change**: `ReactionService.TryParseKind`
       still rejects `pin` until story 04 (this story only adds the constant).
 - [ ] `PostIngestService.AllowedOrigins` accepts `noise`. HTTP callers still cannot reach it (`PostAttributionResolver`
