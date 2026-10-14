@@ -121,7 +121,7 @@ public class DemoPolishSeamSkeletonTests
             Counts = new ParticipantPostCounts(1, 2, 3),
             ScenarioTime = "2033-09-04T13:00:00.0000000+00:00",
             Media = [new PostMediaDto("m1", MediaKinds.Image, "https://example.test/m1", "alt")],
-            InReplyTo = new PostInReplyToDto("post-0", "FulcoEM"),
+            InReplyTo = new PostInReplyToDto("post-0", "KestrelCoEM"),
             Viewer = new PostViewerStateDto(true, false),
         };
 
@@ -158,7 +158,7 @@ public class DemoPolishSeamSkeletonTests
             Counts = new ParticipantPostCounts(0, 0, 0),
             ScenarioTime = "s",
             Media = [new PostMediaDto("m1", MediaKinds.Video, "https://example.test/v", "alt", PosterUrl: "https://example.test/p")],
-            InReplyTo = new PostInReplyToDto("parent", "FulcoEM"),
+            InReplyTo = new PostInReplyToDto("parent", "KestrelCoEM"),
             Viewer = new PostViewerStateDto(Liked: true, Reposted: false),
         };
         using (var document = JsonDocument.Parse(JsonSerializer.Serialize(full, DefaultOptions)))
@@ -166,7 +166,7 @@ public class DemoPolishSeamSkeletonTests
             var root = document.RootElement;
             root.GetProperty("media")[0].GetProperty("posterUrl").GetString().Should().Be("https://example.test/p");
             root.GetProperty("inReplyTo").GetProperty("postId").GetString().Should().Be("parent");
-            root.GetProperty("inReplyTo").GetProperty("authorHandle").GetString().Should().Be("FulcoEM");
+            root.GetProperty("inReplyTo").GetProperty("authorHandle").GetString().Should().Be("KestrelCoEM");
             root.GetProperty("viewer").GetProperty("liked").GetBoolean().Should().BeTrue();
             root.GetProperty("viewer").GetProperty("reposted").GetBoolean().Should().BeFalse();
         }

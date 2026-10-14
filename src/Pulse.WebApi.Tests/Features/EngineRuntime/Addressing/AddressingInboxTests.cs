@@ -101,7 +101,7 @@ public sealed class AddressingInboxTests
         var inbox = new AddressingInbox();
         var exerciseId = Guid.NewGuid();
         var observer = new EngineAddressingObserver(inbox);
-        var post = CommittedPost(exerciseId, "participant", "Fulton County EM: do not drink tap water #WaterIssues");
+        var post = CommittedPost(exerciseId, "participant", "Kestrel County EM: do not drink tap water #WaterIssues");
 
         observer.OnPostPublished(exerciseId, post);
 

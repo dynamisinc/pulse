@@ -40,7 +40,7 @@ public static class StarterStorylineFactory
 
     /// <summary>The silence test (ADP-001): the official action that would address this concern.</summary>
     public const string StorylineExpectation =
-        "an official statement from Fulton County Emergency Management addressing the water safety concern";
+        "an official statement from Kestrel County Emergency Management addressing the water safety concern";
 
     /// <summary>The escalation-profile name (ADP-010) — the built <c>Standard</c> curve, unchanged.</summary>
     public const string CurveName = "Standard";
@@ -74,9 +74,9 @@ public static class StarterStorylineFactory
         "mvega_fh",
         "tbrandt41",
         "kwardFH",
-        "Newsline7",
+        "MetroDesk9",
         "FairhavenWater",
-        "FulcoEM",
+        "KestrelCoEM",
     ];
 
     private static readonly Dictionary<string, int> CitizensFirstRank =
