@@ -23,6 +23,16 @@
  * this test fails the moment a participant surface actually imports
  * staff-world chrome — precedent 17, no tautological tests — and the
  * file-count assertion guards against silently passing by scanning zero files.
+ *
+ * DEMO-POLISH C6 -- THE ONE PARTICIPANT FILE THAT LIVES IN THIS FEATURE. The staff
+ * "preview as participant" now mounts the real Social channel, and the file that
+ * does the mounting, `components/PreviewChannelHost.tsx`, is participant-world code
+ * that sits under `features/staffShell/` (the staff frame hosts it; it must not
+ * pick the frame up). It is scanned here with the participant roots, so the general
+ * gate covers it exactly as it covers the channel it mounts. Its own narrower gate
+ * (no MUI either; and the reverse check on the staff strip) is
+ * `previewStubTwoWorlds.test.ts`. Only that ONE file is added: the rest of
+ * `features/staffShell` is the staff frame and legitimately imports all of this.
  */
 import { describe, expect, it } from 'vitest'
 
@@ -116,6 +126,11 @@ const participantShellFiles = import.meta.glob('../participant-shell/**/*.{ts,ts
   eager: true, query: '?raw', import: 'default',
 })
 
+// The participant-world file the staff preview hosts (demo-polish C6; see the module header).
+const previewChannelHostFiles = import.meta.glob('./components/PreviewChannelHost.tsx', {
+  eager: true, query: '?raw', import: 'default',
+})
+
 const PARTICIPANT_SURFACE_FILES: Record<string, string> = {
   ...socialFiles,
   ...portalFiles,
@@ -123,6 +138,7 @@ const PARTICIPANT_SURFACE_FILES: Record<string, string> = {
   ...pressFiles,
   ...weatherFiles,
   ...participantShellFiles,
+  ...previewChannelHostFiles,
 }
 
 describe('Two-worlds separation — the participantAdmin forbidden specifier (easy-login 10)', () => {
@@ -150,6 +166,11 @@ describe('Two-worlds separation — the participantAdmin forbidden specifier (ea
 describe('Two-worlds separation — participant surfaces import no COBRA/Cadence tokens (D7-009)', () => {
   it('scans at least one real participant-surface file (this test cannot vacuously pass)', () => {
     expect(Object.keys(PARTICIPANT_SURFACE_FILES).length).toBeGreaterThan(0)
+  })
+
+  it('scans the preview\'s participant host, which lives under staffShell (C6)', () => {
+    expect(Object.keys(previewChannelHostFiles)).toHaveLength(1)
+    expect(Object.keys(PARTICIPANT_SURFACE_FILES)).toContain('./components/PreviewChannelHost.tsx')
   })
 
   it('finds NO import/require of @/theme/*, cobraTheme, styledComponents, CobraStyles, staffShellTokens, or participantAdmin under any participant surface root', () => {

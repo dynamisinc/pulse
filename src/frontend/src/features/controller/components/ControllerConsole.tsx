@@ -319,11 +319,24 @@ export interface ControllerConsoleProps {
    * must not outlive the dock). Give it a stable identity (`useCallback`).
    */
   onDockClose?: () => void
+  /**
+   * The exercise StartEx / EndEx control (demo-polish C6's `ExerciseLifecycleControl`) -
+   * supplied by the `/console` route. Rendered in the console's title row, between the title
+   * and the call sign. Absent = nothing rendered.
+   */
+  lifecycleSlot?: ReactNode
 }
 
 export function ControllerConsole(
-  { renderPersonaResults, dockSlots, reviewEditSlot, liveWorldSlot, runSheetSlot, onDockClose }:
-  ControllerConsoleProps = {},
+  {
+    renderPersonaResults,
+    dockSlots,
+    reviewEditSlot,
+    liveWorldSlot,
+    runSheetSlot,
+    onDockClose,
+    lifecycleSlot,
+  }: ControllerConsoleProps = {},
 ) {
   const identity = useControllerIdentity()
   const { exerciseId, timeZone } = useExerciseContext()
@@ -611,6 +624,7 @@ export function ControllerConsole(
                   CONTROLLER CONSOLE
                 </Typography>
                 <Box sx={{ flex: 1 }} />
+                {lifecycleSlot}
                 <Typography
                   data-testid="controller-callsign"
                   sx={{

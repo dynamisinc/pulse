@@ -1,0 +1,284 @@
+/**
+ * features/social/notifications/notificationStorage.test.ts
+ * ---------------------------------------------------------------------------
+ * What the notifications feature keeps in `sessionStorage` (demo-polish F7, story 16
+ * "Isolation": "the storage key includes the exercise id; nothing is read from another
+ * persona"): the key's scope, the round trip, defence against malformed/oversized stored
+ * values, the merge that keeps two tabs from undoing each other, the sign-out sweep, which
+ * store the state lives in (`localStorage`: tokens persist across a closed tab, so must it),
+ * and survival of unusable storage.
+ */
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import {
+  EMPTY_PERSISTED,
+  NOTIFICATION_STORAGE_PREFIX,
+  clearAllNotificationStorage,
+  getPersistentStorage,
+  getSessionStorage,
+  mergeForWrite,
+  notificationStorageKey,
+  parsePersisted,
+  readPersisted,
+  writePersisted,
+  type PersistedNotifications,
+} from './notificationStorage'
+import { LIKE_RECORDS_CAP, READ_IDS_CAP } from './notificationTypes'
+
+beforeEach(() => {
+  window.localStorage.clear()
+  window.sessionStorage.clear()
+})
+afterEach(() => {
+  window.localStorage.clear()
+  window.sessionStorage.clear()
+  vi.restoreAllMocks()
+})
+
+/** The signed-in account in every key below (the third key part). */
+const ACCOUNT = 'acct-1'
+
+const SAMPLE: PersistedNotifications = {
+  v: 1,
+  readIds: ['r1', 'r2'],
+  likes: [
+    { postId: 'm1', baseline: 4 },
+    { postId: 'm2', baseline: 2, riseAt: '2033-09-04T14:00:00.000Z' },
+    { postId: 'm3', baseline: 9, read: { count: 3, at: '2033-09-04T13:00:00.000Z' } },
+  ],
+}
+
+describe('the storage key (Isolation AC)', () => {
+  it('includes BOTH the exercise id and the persona id, under the feature prefix', () => {
+    const key = notificationStorageKey('ex-1', 'persona-dreyes_fh', ACCOUNT)
+    expect(key.startsWith(`${NOTIFICATION_STORAGE_PREFIX}:`)).toBe(true)
+    expect(key).toContain('ex-1')
+    expect(key).toContain('persona-dreyes_fh')
+  })
+
+  it('differs per persona and per exercise', () => {
+    const base = notificationStorageKey('ex-1', 'p-a', ACCOUNT)
+    expect(notificationStorageKey('ex-1', 'p-b', ACCOUNT)).not.toBe(base)
+    expect(notificationStorageKey('ex-2', 'p-a', ACCOUNT)).not.toBe(base)
+  })
+
+  it('cannot be made to collide by an id that contains the separator', () => {
+    expect(notificationStorageKey('a:b', 'c', ACCOUNT)).not.toBe(notificationStorageKey('a', 'b:c', ACCOUNT))
+  })
+})
+
+describe('which storage', () => {
+  it('the state store is localStorage (it must outlive a closed tab, like the tokens)', () => {
+    expect(getPersistentStorage()).toBe(window.localStorage)
+  })
+
+  it('sessionStorage is still reachable, but only so sign-out can sweep it', () => {
+    expect(getSessionStorage()).toBe(window.sessionStorage)
+  })
+
+  it('both lookups tolerate storage that throws on access (a sandboxed frame)', () => {
+    const local = vi.spyOn(window, 'localStorage', 'get').mockImplementation(() => {
+      throw new Error('SecurityError')
+    })
+    const session = vi.spyOn(window, 'sessionStorage', 'get').mockImplementation(() => {
+      throw new Error('SecurityError')
+    })
+    expect(getPersistentStorage()).toBeUndefined()
+    expect(getSessionStorage()).toBeUndefined()
+    local.mockRestore()
+    session.mockRestore()
+  })
+})
+
+describe('mergeForWrite (two tabs of one viewer)', () => {
+  const stored: PersistedNotifications = {
+    v: 1,
+    readIds: ['a', 'b'],
+    likes: [
+      { postId: 'only-stored', baseline: 7 },
+      { postId: 'both', baseline: 1 },
+    ],
+  }
+  const mine: PersistedNotifications = {
+    v: 1,
+    readIds: ['b', 'c'],
+    likes: [
+      { postId: 'both', baseline: 9 },
+      { postId: 'only-mine', baseline: 2 },
+    ],
+  }
+
+  it('unions read marks (stored first, so this tab\'s newest stay at the tail)', () => {
+    expect(mergeForWrite(stored, mine).readIds).toEqual(['a', 'b', 'c'])
+  })
+
+  it('keeps a like record this tab does not know, and takes this tab\'s version of a shared one', () => {
+    const merged = mergeForWrite(stored, mine)
+    expect(merged.likes).toEqual([
+      { postId: 'only-stored', baseline: 7 },
+      { postId: 'both', baseline: 9 },
+      { postId: 'only-mine', baseline: 2 },
+    ])
+  })
+
+  it('writing into an empty store is just this tab\'s state', () => {
+    expect(mergeForWrite(EMPTY_PERSISTED, mine)).toEqual(mine)
+  })
+
+  it('stays bounded', () => {
+    const many = (prefix: string, n: number): PersistedNotifications => ({
+      v: 1,
+      readIds: Array.from({ length: n }, (_, i) => `${prefix}${i}`),
+      likes: Array.from({ length: n }, (_, i) => ({ postId: `${prefix}${i}`, baseline: i })),
+    })
+    const merged = mergeForWrite(many('s', READ_IDS_CAP), many('m', READ_IDS_CAP))
+    expect(merged.readIds).toHaveLength(READ_IDS_CAP)
+    expect(merged.readIds.at(-1)).toBe(`m${READ_IDS_CAP - 1}`)
+    expect(merged.likes.length).toBeLessThanOrEqual(LIKE_RECORDS_CAP)
+  })
+})
+
+describe('read / write', () => {
+  it('round-trips a state', () => {
+    const key = notificationStorageKey('ex-1', 'p-a', ACCOUNT)
+    writePersisted(window.localStorage, key, SAMPLE)
+    expect(readPersisted(window.localStorage, key)).toEqual(SAMPLE)
+  })
+
+  it('reads nothing from another persona\'s or another exercise\'s entry', () => {
+    writePersisted(window.localStorage, notificationStorageKey('ex-1', 'p-a', ACCOUNT), SAMPLE)
+    expect(readPersisted(window.localStorage, notificationStorageKey('ex-1', 'p-b', ACCOUNT)))
+      .toEqual(EMPTY_PERSISTED)
+    expect(readPersisted(window.localStorage, notificationStorageKey('ex-2', 'p-a', ACCOUNT)))
+      .toEqual(EMPTY_PERSISTED)
+  })
+
+  it('an absent entry is the empty state', () => {
+    expect(readPersisted(window.localStorage, 'nothing-here')).toEqual(EMPTY_PERSISTED)
+  })
+})
+
+describe('untrusted stored values', () => {
+  it.each([
+    ['not json', '{oops'],
+    ['a string', '"hello"'],
+    ['null', 'null'],
+    ['an array', '[]'],
+    ['the wrong version', JSON.stringify({ v: 2, readIds: [], likes: [] })],
+    ['missing arrays', JSON.stringify({ v: 1 })],
+    ['arrays of the wrong type', JSON.stringify({ v: 1, readIds: 'x', likes: {} })],
+  ])('%s is ignored (an empty state, never half-trusted)', (_label, raw) => {
+    expect(parsePersisted(raw)).toEqual(EMPTY_PERSISTED)
+  })
+
+  it('drops malformed entries but keeps the good ones', () => {
+    const parsed = parsePersisted(JSON.stringify({
+      v: 1,
+      readIds: ['ok', 7, '', null, 'also-ok'],
+      likes: [
+        { postId: 'good', baseline: 3 },
+        { postId: 'neg', baseline: -1 },
+        { postId: 'nan', baseline: 'x' },
+        { baseline: 2 },
+        { postId: 'bad-read', baseline: 1, read: { count: 'x', at: 'y' } },
+        { postId: 'bad-rise', baseline: 1, riseAt: 7 },
+        'junk',
+      ],
+    }))
+    expect(parsed.readIds).toEqual(['ok', 'also-ok'])
+    expect(parsed.likes).toEqual([{ postId: 'good', baseline: 3 }])
+  })
+
+  it('rebuilds records field by field: a stray key (even an own `__proto__`) never rides through', () => {
+    // Written as raw JSON: an object literal's `__proto__` is not an own key, JSON's is.
+    const parsed = parsePersisted(
+      '{"v":1,"readIds":[],"likes":[{"postId":"m1","baseline":1,"secret":"x",' +
+        '"__proto__":{"polluted":true}}]}',
+    )
+    expect(Object.keys(parsed.likes[0] ?? {}).sort()).toEqual(['baseline', 'postId'])
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined()
+  })
+
+  it('bounds an oversized stored state, keeping the newest entries', () => {
+    const readIds = Array.from({ length: READ_IDS_CAP + 40 }, (_, index) => `r${index}`)
+    const likes = Array.from({ length: LIKE_RECORDS_CAP + 40 }, (_, index) => ({
+      postId: `m${index}`,
+      baseline: index,
+    }))
+    const parsed = parsePersisted(JSON.stringify({ v: 1, readIds, likes }))
+    expect(parsed.readIds).toHaveLength(READ_IDS_CAP)
+    expect(parsed.readIds.at(-1)).toBe(`r${READ_IDS_CAP + 39}`)
+    expect(parsed.likes).toHaveLength(LIKE_RECORDS_CAP)
+    expect(parsed.likes.at(-1)?.postId).toBe(`m${LIKE_RECORDS_CAP + 39}`)
+  })
+})
+
+describe('sign-out sweep', () => {
+  it('removes every notification entry (any persona, any exercise) and nothing else', () => {
+    writePersisted(window.localStorage, notificationStorageKey('ex-1', 'p-a', ACCOUNT), SAMPLE)
+    writePersisted(window.localStorage, notificationStorageKey('ex-1', 'p-b', ACCOUNT), SAMPLE)
+    writePersisted(window.localStorage, notificationStorageKey('ex-2', 'p-a', ACCOUNT), SAMPLE)
+    window.localStorage.setItem('unrelated', 'keep me')
+    window.localStorage.setItem(`${NOTIFICATION_STORAGE_PREFIX}-lookalike`, 'keep me too')
+
+    clearAllNotificationStorage(window.localStorage)
+
+    expect(window.localStorage.getItem(notificationStorageKey('ex-1', 'p-a', ACCOUNT))).toBeNull()
+    expect(window.localStorage.getItem(notificationStorageKey('ex-1', 'p-b', ACCOUNT))).toBeNull()
+    expect(window.localStorage.getItem(notificationStorageKey('ex-2', 'p-a', ACCOUNT))).toBeNull()
+    expect(window.localStorage.getItem('unrelated')).toBe('keep me')
+    expect(window.localStorage.getItem(`${NOTIFICATION_STORAGE_PREFIX}-lookalike`))
+      .toBe('keep me too')
+  })
+})
+
+describe('sweep on start: everything except the current viewer\'s entry', () => {
+  it('keeps exactly the key it is given, in the store it is given', () => {
+    const keep = notificationStorageKey('ex-1', 'p-a', ACCOUNT)
+    const other = notificationStorageKey('ex-1', 'p-b', ACCOUNT)
+    const otherAccount = notificationStorageKey('ex-1', 'p-a', 'acct-2')
+    for (const key of [keep, other, otherAccount]) {
+      writePersisted(window.localStorage, key, SAMPLE)
+    }
+    window.localStorage.setItem('unrelated', 'keep me')
+
+    clearAllNotificationStorage(window.localStorage, keep)
+
+    expect(window.localStorage.getItem(keep)).not.toBeNull()
+    expect(window.localStorage.getItem(other)).toBeNull()
+    expect(window.localStorage.getItem(otherAccount)).toBeNull()
+    expect(window.localStorage.getItem('unrelated')).toBe('keep me')
+  })
+
+  it('without a key to keep it removes them all (the sign-out sweep)', () => {
+    const key = notificationStorageKey('ex-1', 'p-a', ACCOUNT)
+    writePersisted(window.localStorage, key, SAMPLE)
+    clearAllNotificationStorage(window.localStorage)
+    expect(window.localStorage.getItem(key)).toBeNull()
+  })
+
+  it('the account id is the third key part and cannot collide with the others', () => {
+    expect(notificationStorageKey('ex-1', 'p', 'a:b')).not.toBe(notificationStorageKey('ex-1', 'p:a', 'b'))
+    expect(notificationStorageKey('ex-1', 'p-a', 'acct-1')).toContain('acct-1')
+  })
+})
+
+describe('unusable storage', () => {
+  it('no storage at all: reads are empty, writes and sweeps are no-ops', () => {
+    expect(readPersisted(undefined, 'k')).toEqual(EMPTY_PERSISTED)
+    expect(() => writePersisted(undefined, 'k', SAMPLE)).not.toThrow()
+    expect(() => clearAllNotificationStorage(undefined)).not.toThrow()
+  })
+
+  it('storage that throws (quota, blocked) never throws out of the feature', () => {
+    const broken = {
+      length: 1,
+      key: () => { throw new Error('blocked') },
+      getItem: () => { throw new Error('blocked') },
+      setItem: () => { throw new Error('quota') },
+      removeItem: () => { throw new Error('blocked') },
+    } as unknown as Storage
+    expect(readPersisted(broken, 'k')).toEqual(EMPTY_PERSISTED)
+    expect(() => writePersisted(broken, 'k', SAMPLE)).not.toThrow()
+    expect(() => clearAllNotificationStorage(broken)).not.toThrow()
+  })
+})

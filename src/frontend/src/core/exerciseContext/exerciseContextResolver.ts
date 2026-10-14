@@ -139,13 +139,47 @@ const MOCK_EXERCISE_CONTEXT: ExerciseContextResponseBody = {
 }
 
 /**
+ * The lifecycle status the MOCK scope currently reports. Starts at the canned
+ * `MOCK_EXERCISE_CONTEXT.status` and moves only through {@link setMockExerciseStatus}
+ * -- the mock stand-in for the server changing the exercise's stored state
+ * (`POST /api/staff/exercise-lifecycle/transition`), so that a refresh of the scope
+ * (`useExerciseScopeRefresh`) after a SIMULATED StartEx / EndEx reads the new state
+ * back and the staff header's state pill follows, exactly as it follows a real one
+ * (demo-polish C6). Mock data only: nothing reads it when the live resolver is in use.
+ */
+let mockStatus: ExerciseStatus = MOCK_EXERCISE_CONTEXT.status
+
+/**
+ * Mock-only: makes the mock scope report `status` from the next resolution on. The ONE
+ * caller is the controller's simulated lifecycle transition under mock data
+ * (`features/controller/lifecycle`); the live path never reaches it (the server owns the
+ * state).
+ *
+ * NOT part of the `core/exerciseContext` barrel (`index.ts`): a mock control is not something
+ * production code should be able to reach for by the public import, so the few callers (the
+ * lifecycle mock and the tests) import it from THIS module by path. And it is a NO-OP unless
+ * `USE_MOCK_DATA` is on, so even a stray call cannot move a real build's scope: with the live
+ * resolver in use `mockStatus` is never read anyway, and this keeps the claim true by
+ * construction. A module-level value, so tests that call it must {@link resetMockExerciseStatus}.
+ */
+export function setMockExerciseStatus(status: ExerciseStatus): void {
+  if (!USE_MOCK_DATA) return
+  mockStatus = status
+}
+
+/** Restores the canned mock status (`live`). For test isolation between cases. */
+export function resetMockExerciseStatus(): void {
+  mockStatus = MOCK_EXERCISE_CONTEXT.status
+}
+
+/**
  * Short-circuits the network layer with a canned response so resolution is
  * instant in the current no-backend scaffold, while still exercising the
  * shared axios client's request pipeline (base URL, headers, interceptors)
  * exactly as a live endpoint call would.
  */
 const mockAdapter: AxiosAdapter = config => Promise.resolve({
-  data: MOCK_EXERCISE_CONTEXT,
+  data: { ...MOCK_EXERCISE_CONTEXT, status: mockStatus },
   status: 200,
   statusText: 'OK',
   headers: {},
