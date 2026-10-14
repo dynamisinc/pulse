@@ -234,7 +234,8 @@ public class PostWriteEndpointTests
         // and the because-reason names the origin, so a failure still says which case broke.
         await using var factory = CreateFactory();
 
-        foreach (var origin in new[] { "controller-as-persona", "engine", "inject" })
+        // "noise" (demo-feedback/01, DF-12) is in-process only: the pacer's origin must never be claimable over HTTP.
+        foreach (var origin in new[] { "controller-as-persona", "engine", "inject", "noise" })
         {
             var world = await SeedWorldAsync();
             using var client = factory.CreateClientFor(world.Host, world.ParticipantToken);
@@ -343,7 +344,8 @@ public class PostWriteEndpointTests
         // operator's write indistinguishable from a trainee's in the evaluation record.
         await using var factory = CreateFactory();
 
-        foreach (var origin in new[] { "engine", "inject", "participant" })
+        // "noise" (demo-feedback/01, DF-12) joins the in-process-only provenances no staff caller can claim.
+        foreach (var origin in new[] { "engine", "inject", "noise", "participant" })
         {
             var world = await SeedWorldAsync();
             using var client = factory.CreateClientFor(world.Host, world.StaffToken);
