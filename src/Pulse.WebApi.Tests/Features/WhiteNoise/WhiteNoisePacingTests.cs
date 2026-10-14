@@ -239,6 +239,29 @@ public sealed class WhiteNoisePacingTests
     }
 
     [Fact]
+    public void ThePacer_WaitsFiveSecondsBeforeItsFirstSweep_SoAStartingHostDoesNoDatabaseWork()
+    {
+        new WhiteNoisePacerOptions().FirstSweepDelay.Should().Be(TimeSpan.FromSeconds(5));
+        new WhiteNoisePacerOptions().TickInterval.Should().Be(TimeSpan.FromSeconds(1));
+    }
+
+    [Theory]
+    [InlineData("staged", true)]
+    [InlineData("live", true)]
+    [InlineData("active", true)]
+    [InlineData("Live", true)]
+    [InlineData("build", false)]
+    [InlineData("scheduled", false)]
+    [InlineData("paused", false)]
+    [InlineData("completed", false)]
+    [InlineData("complete", false)]
+    [InlineData("archived", false)]
+    [InlineData("", false)]
+    [InlineData(null, false)]
+    public void OnlyAStagedOrLiveLifecycle_MakesNoise(string? status, bool makesNoise) =>
+        WhiteNoiseService.IsLifecycleMakingNoise(status).Should().Be(makesNoise, "DF-13, amended: legacy literals fold through TryParse");
+
+    [Fact]
     public void BackoffDelay_DoublesToTheCap()
     {
         var options = new WhiteNoisePacerOptions();

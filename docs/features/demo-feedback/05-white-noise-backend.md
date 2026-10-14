@@ -63,20 +63,26 @@ Linked (all under `src/Pulse.WebApi.Tests/Features/WhiteNoise`; the endpoint and
 - AC PUT pool (resolve in this exercise, sanitize, 1–280 code points, rejections by index, one save, > 1,000 ⇒ 400,
   replace resets counts): `WhiteNoiseEndpointTests.PutPool_Replace_ResolvesPersonasInThisExerciseOnly_SanitizesText_AndReportsBadEntriesByIndex`,
   `WhiteNoiseEndpointTests.PutPool_AppendAddsAfterTheExistingEntries_AndReplaceResetsThePoolAndItsCounts`,
-  `WhiteNoiseEndpointTests.PutPool_RefusesABadModeAMissingListAndMoreThanAThousandEntries`
+  `WhiteNoiseEndpointTests.PutPool_RefusesABadModeAMissingListAndMoreThanAThousandEntries`,
+  `WhiteNoiseEndpointTests.PutPool_ReplaceWithNoUsableEntry_Is400WithTheRejections_AndLeavesThePool_ButAnEmptyListClearsIt` (Gate-1 L5),
+  `WhiteNoiseEndpointTests.PutPool_PushesNoiseStateChangedOnce_WithTheNewPoolSize` (Gate-1 L6)
 - AC Pacer (DF-12: rates, jitter, funnel, origin `noise`, no acting human, scenario time, count in the same save):
   `WhiteNoisePacerTests.High_PublishesNoisePostsThroughTheFunnel_AtItsRate_WithScenarioTimeAndNoActingHuman`,
   `WhiteNoisePacerTests.Off_StopsNoise_AndALevelChangeRestartsTheTimetableAtTheNewRate`,
   `WhiteNoisePacingTests.EachLevel_HasItsFrozenRate`, `WhiteNoisePacingTests.AGap_StaysWithinFortyPercentOfItsMean`,
   `WhiteNoisePacingTests.OverASimulatedHour_TheRateHoldsAndEveryGapIsWithinTheJitterBounds`,
-  `WhiteNoisePacingTests.NextDue_IsMeasuredFromThePreviousDue_ButNeverCatchesUp`, `WhiteNoisePacingTests.Off_NeverPosts`
+  `WhiteNoisePacingTests.NextDue_IsMeasuredFromThePreviousDue_ButNeverCatchesUp`, `WhiteNoisePacingTests.Off_NeverPosts`,
+  `WhiteNoisePacerTests.ARefusedEntry_IsSkipped_SoTheRotationMovesOn`, `WhiteNoisePacerTests.AThrowingPublish_SkipsTheEntry_SoTheRotationMovesOn` (Gate-1 L1),
+  `WhiteNoisePacingTests.ThePacer_WaitsFiveSecondsBeforeItsFirstSweep_SoAStartingHostDoesNoDatabaseWork` (Gate-1 M2)
 - AC Selection (DF-13): `WhiteNoisePacerTests.Selection_NeverRepeatsAPersonaBackToBack_WhenAnotherIsAvailable`,
   `WhiteNoisePacerTests.AnEmptyPool_PostsNothing_AndIsNotRunning`,
   `WhiteNoisePacingTests.Selection_IsLeastPostedThenPoolOrder_AvoidingTheLastPersona`,
   `WhiteNoisePacingTests.Selection_RepeatsThePersona_OnlyWhenNoOtherIsAvailable`
 - AC Stops (DF-13; `running: false` with a level set while the clock is not running):
   `WhiteNoisePacerTests.FreezeAndAFrozenOrStoppedClock_StopNoise_PauseInjectsAndEnginePausedDoNot`,
-  `WhiteNoisePacingTests.AStop_DropsTheTimetable_AndTheFirstPostAfterItIsOneGapOut`
+  `WhiteNoisePacingTests.AStop_DropsTheTimetable_AndTheFirstPostAfterItIsOneGapOut`,
+  `WhiteNoisePacerTests.ALifecycleThatIsNotStagedOrLive_StopsNoise_AndRunningIsFalse`,
+  `WhiteNoisePacingTests.OnlyAStagedOrLiveLifecycle_MakesNoise` (Gate-1 M1)
 - AC Restart: `WhiteNoisePacerTests.ARestart_ResumesAtThePersistedLevel_WithoutACatchUpBurst`,
   `WhiteNoisePacingTests.AFirstSighting_IsOneGapOut_SoARestartNeverBursts`
 - AC Throttle: `WhiteNoisePacerTests.ThePostDrivenPush_IsThrottledToOnePerTwoSecondsPerExercise`,

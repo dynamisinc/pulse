@@ -97,10 +97,12 @@ public sealed partial class WhiteNoisePacer : BackgroundService
     /// <inheritdoc />
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        // Never run inline in the host's start-up: the first sweep waits one tick.
+        // Never run inline in the host's start-up, and never sweep during it: the first sweep waits
+        // FirstSweepDelay (the InjectBurstRunner pattern), so a host that is starting — every WebApplicationFactory
+        // fixture included — does no database work on the pacer's behalf.
         await Task.Yield();
 
-        var delay = _options.TickInterval;
+        var delay = _options.FirstSweepDelay;
         var consecutiveFailures = 0;
         string? lastLoggedFailure = null;
 
@@ -207,7 +209,7 @@ public sealed partial class WhiteNoisePacer : BackgroundService
             }
 
             // In-memory stop check first: a frozen or stopped exercise costs no database work.
-            if (WhiteNoiseService.IsStopped(_pauseTiers, _clock, exerciseId))
+            if (WhiteNoiseService.IsTierOrClockStopped(_pauseTiers, _clock, exerciseId))
             {
                 _scheduler.IsDue(exerciseId, NoiseRates.Off, stopped: true, _timeProvider.GetUtcNow());
                 continue;
@@ -265,10 +267,12 @@ public sealed partial class WhiteNoisePacer : BackgroundService
         }
 
         var service = scope.ServiceProvider.GetRequiredService<WhiteNoiseService>();
-        var level = await service.ReadCurrentLevelAsync(cancellationToken).ConfigureAwait(false) ?? NoiseRates.Off;
+        var facts = await service.ReadPacingFactsAsync(cancellationToken).ConfigureAwait(false);
 
+        // A lifecycle that is not staged or live (EndEx, a lifecycle pause) stops noise like a Freeze: the timetable is
+        // dropped, so the first post after it clears is one gap out.
         var now = _timeProvider.GetUtcNow();
-        if (!_scheduler.IsDue(exerciseId, level, stopped: false, now))
+        if (!_scheduler.IsDue(exerciseId, facts?.Level ?? NoiseRates.Off, stopped: facts is { LifecycleMakingNoise: false }, now))
         {
             return false;
         }
@@ -309,6 +313,12 @@ public sealed class WhiteNoisePacerOptions
     /// next due time is measured from the previous due time, so the tick never erodes the rate.
     /// </summary>
     public TimeSpan TickInterval { get; init; } = TimeSpan.FromSeconds(1);
+
+    /// <summary>
+    /// The wait before the FIRST sweep after start-up. Default 5 s (as <c>InjectBurstRunner</c>'s idle-first wait):
+    /// a restart resumes noise a few seconds later, and a starting host does no database work for the pacer.
+    /// </summary>
+    public TimeSpan FirstSweepDelay { get; init; } = TimeSpan.FromSeconds(5);
 
     /// <summary>The longest wait between sweeps while sweeps keep failing. Default 60 s.</summary>
     public TimeSpan MaxFailureBackoff { get; init; } = TimeSpan.FromSeconds(60);

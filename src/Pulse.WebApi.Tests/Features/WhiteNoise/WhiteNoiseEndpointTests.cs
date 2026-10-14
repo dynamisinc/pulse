@@ -235,4 +235,65 @@ public sealed class WhiteNoiseEndpointTests
         var ok = (await (await host.PutPoolAsync(new { mode = "replace", posts = exactly })).Content.ReadFromJsonAsync<WirePoolResult>())!;
         ok.PoolSize.Should().Be(1000);
     }
+
+    [RequiresDockerFact]
+    public async Task PutPool_ReplaceWithNoUsableEntry_Is400WithTheRejections_AndLeavesThePool_ButAnEmptyListClearsIt()
+    {
+        await using var host = await WhiteNoiseTestHost.StartAsync(_fixture.ConnectionString!);
+        var exercise = await host.SeedExerciseAsync();
+        await host.SeedPoolAsync(exercise, 3);
+        host.ActAs(exercise.ExerciseId, exercise.ControllerId);
+
+        var response = await host.PutPoolAsync(new
+        {
+            mode = "replace",
+            posts = new[]
+            {
+                new { persona = "@nobody", text = "typo'd handle" },
+                new { persona = $"@{exercise.Prefix}0", text = "<i></i>" },
+            },
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        using (var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync()))
+        {
+            var root = document.RootElement;
+            root.GetProperty("detail").GetString().Should().Be(WhiteNoiseService.NoUsableEntriesMessage);
+            root.GetProperty("poolSize").GetInt32().Should().Be(3, "the pool is left as it was");
+            root.GetProperty("rejected").EnumerateArray().Select(r => r.GetProperty("index").GetInt32()).Should().Equal(0, 1);
+        }
+
+        (await host.PoolAsync(exercise.ExerciseId)).Should().HaveCount(3);
+        (await host.TelemetryAsync(exercise.ExerciseId, WhiteNoiseService.PoolReplacedEventType)).Should().BeEmpty();
+        host.NoiseBroadcaster.Calls.Should().BeEmpty("a refused PUT pushes nothing");
+
+        var cleared = (await (await host.PutPoolAsync(new { mode = "replace", posts = Array.Empty<object>() }))
+            .Content.ReadFromJsonAsync<WirePoolResult>())!;
+        cleared.PoolSize.Should().Be(0, "an explicit empty list still clears the pool");
+        (await host.PoolAsync(exercise.ExerciseId)).Should().BeEmpty();
+    }
+
+    [RequiresDockerFact]
+    public async Task PutPool_PushesNoiseStateChangedOnce_WithTheNewPoolSize()
+    {
+        await using var host = await WhiteNoiseTestHost.StartAsync(_fixture.ConnectionString!);
+        var exercise = await host.SeedExerciseAsync();
+        host.ActAs(exercise.ExerciseId, exercise.ControllerId);
+
+        (await host.PutPoolAsync(new
+        {
+            mode = "replace",
+            posts = new[] { new { persona = $"@{exercise.Prefix}0", text = "one" }, new { persona = $"@{exercise.Prefix}1", text = "two" } },
+        })).StatusCode.Should().Be(HttpStatusCode.OK);
+        host.NoiseBroadcaster.Calls.Should().ContainSingle().Which.State.PoolSize.Should().Be(2);
+
+        (await host.PutPoolAsync(new
+        {
+            mode = "append",
+            posts = new[] { new { persona = $"@{exercise.Prefix}2", text = "three" } },
+        })).StatusCode.Should().Be(HttpStatusCode.OK);
+        host.NoiseBroadcaster.Calls.Should().HaveCount(2, "one push per pool PUT");
+        host.NoiseBroadcaster.Calls[1].ExerciseId.Should().Be(exercise.ExerciseId);
+        host.NoiseBroadcaster.Calls[1].State.PoolSize.Should().Be(3);
+    }
 }

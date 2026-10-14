@@ -11,6 +11,7 @@ using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.EngineRuntime.Steering;
+using Pulse.WebApi.Features.ExerciseConfiguration.Lifecycle;
 using Pulse.WebApi.Features.Identity.EasyLogin;
 using Pulse.WebApi.Features.Identity.Staff;
 using Pulse.WebApi.Features.Injects;
@@ -59,6 +60,10 @@ public sealed partial class WhiteNoiseService
 
     /// <summary>The rejection reason for text that is empty or too long once sanitized.</summary>
     public const string TextLengthReason = "text must be 1 to 280 characters after sanitising.";
+
+    /// <summary>The 400 for a replace whose entries were all rejected (the pool is left unchanged).</summary>
+    public const string NoUsableEntriesMessage =
+        "No entry could be used, so the pool was left unchanged. Send an empty posts list to clear the pool.";
 
     /// <summary>The rejection reason for a persona that does not resolve in this exercise.</summary>
     public const string PersonaNotFoundReason = "persona does not name a persona in this exercise.";
@@ -143,15 +148,38 @@ public sealed partial class WhiteNoiseService
     }
 
     /// <summary>
-    /// Whether noise is stopped for <paramref name="exerciseId"/> right now (DF-13): the pause tier is
-    /// <see cref="PauseTier.Freeze"/>, or the exercise clock is frozen or not running. <c>Pause injects</c> and
-    /// <c>Engine paused</c> do not stop noise.
+    /// Whether noise is stopped for <paramref name="exerciseId"/> right now (DF-13, amended after Gate-1): the pause
+    /// tier is <see cref="PauseTier.Freeze"/>, the exercise clock is frozen or not running, or the lifecycle is not
+    /// <c>staged</c> or <c>live</c> (EndEx, a lifecycle pause). <c>Pause injects</c> and <c>Engine paused</c> do not
+    /// stop noise.
+    /// </summary>
+    /// <param name="pauseTiers">The pause tiers.</param>
+    /// <param name="clock">The exercise clock.</param>
+    /// <param name="exerciseId">The exercise.</param>
+    /// <param name="lifecycleStatus">The stored lifecycle status (canonical or legacy literal).</param>
+    /// <returns><c>true</c> when nothing may post.</returns>
+    public static bool IsStopped(PauseTierRegistry pauseTiers, IExerciseClock clock, Guid exerciseId, string? lifecycleStatus) =>
+        IsTierOrClockStopped(pauseTiers, clock, exerciseId) || !IsLifecycleMakingNoise(lifecycleStatus);
+
+    /// <summary>
+    /// Whether the lifecycle lets noise run: <c>staged</c> or <c>live</c>, legacy literals folded through
+    /// <see cref="ExerciseLifecycleStates.TryParse"/> (so <c>active</c> counts as <c>live</c>).
+    /// </summary>
+    /// <param name="lifecycleStatus">The stored lifecycle status.</param>
+    /// <returns><c>true</c> for <c>staged</c> and <c>live</c>.</returns>
+    public static bool IsLifecycleMakingNoise(string? lifecycleStatus) =>
+        ExerciseLifecycleStates.TryParse(lifecycleStatus, out var state)
+        && state is ExerciseLifecycleStates.Staged or ExerciseLifecycleStates.Live;
+
+    /// <summary>
+    /// The in-memory half of <see cref="IsStopped"/>: the Freeze tier, or a frozen or stopped clock. The pacer checks
+    /// it before any database work.
     /// </summary>
     /// <param name="pauseTiers">The pause tiers.</param>
     /// <param name="clock">The exercise clock.</param>
     /// <param name="exerciseId">The exercise.</param>
     /// <returns><c>true</c> when nothing may post.</returns>
-    public static bool IsStopped(PauseTierRegistry pauseTiers, IExerciseClock clock, Guid exerciseId)
+    public static bool IsTierOrClockStopped(PauseTierRegistry pauseTiers, IExerciseClock clock, Guid exerciseId)
     {
         ArgumentNullException.ThrowIfNull(pauseTiers);
         ArgumentNullException.ThrowIfNull(clock);
@@ -183,7 +211,7 @@ public sealed partial class WhiteNoiseService
             return WhiteNoiseResult.ScopeUnresolved<NoiseStateDto>();
         }
 
-        return WhiteNoiseResult.Ok(await BuildStateAsync(exerciseId, level, cancellationToken));
+        return WhiteNoiseResult.Ok(await BuildStateAsync(exerciseId, level, facts.Status, cancellationToken));
     }
 
     /// <summary>
@@ -228,7 +256,7 @@ public sealed partial class WhiteNoiseService
         var from = exercise.NoiseLevel;
         if (string.Equals(from, to, StringComparison.Ordinal))
         {
-            return WhiteNoiseResult.Ok(await BuildStateAsync(exerciseId, to!, cancellationToken));
+            return WhiteNoiseResult.Ok(await BuildStateAsync(exerciseId, to!, facts.Status, cancellationToken));
         }
 
         exercise.NoiseLevel = to!;
@@ -244,7 +272,7 @@ public sealed partial class WhiteNoiseService
             JsonSerializer.Serialize(new LevelChangedPayload(from, to!))));
         await _dbContext.SaveChangesAsync(cancellationToken);
 
-        var state = await BuildStateAsync(exerciseId, to!, CancellationToken.None);
+        var state = await BuildStateAsync(exerciseId, to!, facts.Status, CancellationToken.None);
 
         // The level has committed: a failed push must not turn it into a failed request. The console re-reads on
         // its next mount, and the next noise post pushes again.
@@ -261,8 +289,10 @@ public sealed partial class WhiteNoiseService
     /// </summary>
     /// <param name="request">The body.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>The pool size and the rejections; <see cref="WhiteNoiseOutcome.Invalid"/> (400) for a bad mode, a
-    /// missing <c>posts</c>, or more than <see cref="MaxPoolEntriesPerCall"/> entries.</returns>
+    /// <returns>The pool size and the rejections, after which <c>NoiseStateChanged</c> is pushed once;
+    /// <see cref="WhiteNoiseOutcome.Invalid"/> (400) for a bad mode, a missing <c>posts</c>, more than
+    /// <see cref="MaxPoolEntriesPerCall"/> entries, or a replace with entries none of which could be used (the pool is
+    /// left unchanged and the 400 carries the rejections).</returns>
     public async Task<WhiteNoiseResult<NoisePoolResultDto>> ReplacePoolAsync(
         NoisePoolRequest? request,
         CancellationToken cancellationToken = default)
@@ -329,6 +359,16 @@ public sealed partial class WhiteNoiseService
             });
         }
 
+        // A replace that names entries but has none usable would silently empty the pool (a mistyped seed); refuse it
+        // and leave the pool as it is. An explicit empty list still clears the pool.
+        if (replace && posts.Count > 0 && accepted.Count == 0)
+        {
+            var current = await _dbContext.NoisePosts.CountAsync(cancellationToken);
+            return WhiteNoiseResult.Invalid(
+                new NoisePoolResultDto { PoolSize = current, Rejected = rejected },
+                NoUsableEntriesMessage);
+        }
+
         if (replace)
         {
             var existing = await _dbContext.NoisePosts.ToListAsync(cancellationToken);
@@ -348,6 +388,14 @@ public sealed partial class WhiteNoiseService
         await _dbContext.SaveChangesAsync(cancellationToken);
 
         var poolSize = await _dbContext.NoisePosts.CountAsync(CancellationToken.None);
+
+        // The pool size the knob shows has changed: one push (no throttle), after the commit.
+        var level = await ReadLevelAsync(exerciseId, facts, CancellationToken.None);
+        if (level is not null)
+        {
+            await PushAsync(exerciseId, await BuildStateAsync(exerciseId, level, facts.Status, CancellationToken.None));
+        }
+
         return WhiteNoiseResult.Ok(new NoisePoolResultDto { PoolSize = poolSize, Rejected = rejected });
     }
 
@@ -368,7 +416,7 @@ public sealed partial class WhiteNoiseService
 
         var facts = await _exerciseFacts.GetAsync(exerciseId, cancellationToken);
         var level = facts is null ? null : await ReadLevelAsync(exerciseId, facts, cancellationToken);
-        if (facts is null || NoiseRates.PerMinute(level) <= 0 || IsStopped(_pauseTiers, _clock, exerciseId))
+        if (facts is null || NoiseRates.PerMinute(level) <= 0 || IsStopped(_pauseTiers, _clock, exerciseId, facts.Status))
         {
             return NoisePublishOutcome.Stopped;
         }
@@ -414,18 +462,28 @@ public sealed partial class WhiteNoiseService
             ActingHumanId = string.Empty,
         };
 
-        var result = await _ingest.IngestAsync(request, attribution, cancellationToken);
+        PostIngestResult result;
+        try
+        {
+            result = await _ingest.IngestAsync(request, attribution, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Nothing committed. Skip the entry in its own save so the rotation moves on, then let the pacer log it.
+            await SkipEntryAsync(exerciseId, item.Id);
+            throw;
+        }
+
         if (result.Outcome != PostIngestOutcome.Created)
         {
-            // Nothing was written; drop the uncommitted count so it can never ride along on a later save.
-            _dbContext.ChangeTracker.Clear();
             LogPublishRefused(exerciseId, item.Id, result.ValidationError ?? result.Outcome.ToString());
+            await SkipEntryAsync(exerciseId, item.Id);
             return NoisePublishOutcome.Refused;
         }
 
         if (_throttle.TryAcquire(exerciseId, now))
         {
-            var state = await BuildStateAsync(exerciseId, level!, CancellationToken.None);
+            var state = await BuildStateAsync(exerciseId, level!, facts.Status, CancellationToken.None);
             await PushAsync(exerciseId, state);
         }
 
@@ -433,12 +491,12 @@ public sealed partial class WhiteNoiseService
     }
 
     /// <summary>
-    /// Reads the scoped exercise's persisted level for the pacer's sweep step, or <c>null</c> when the exercise
-    /// cannot be resolved.
+    /// Reads what the pacer needs about the scoped exercise: its persisted level and whether its lifecycle lets noise
+    /// run; <c>null</c> when the exercise cannot be resolved.
     /// </summary>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>The level.</returns>
-    public async Task<string?> ReadCurrentLevelAsync(CancellationToken cancellationToken = default)
+    /// <returns>The pacing facts.</returns>
+    public async Task<NoisePacingFacts?> ReadPacingFactsAsync(CancellationToken cancellationToken = default)
     {
         if (ResolveScope() is not { } exerciseId)
         {
@@ -446,7 +504,30 @@ public sealed partial class WhiteNoiseService
         }
 
         var facts = await _exerciseFacts.GetAsync(exerciseId, cancellationToken);
-        return facts is null ? null : await ReadLevelAsync(exerciseId, facts, cancellationToken);
+        var level = facts is null ? null : await ReadLevelAsync(exerciseId, facts, cancellationToken);
+        return level is null ? null : new NoisePacingFacts(level, IsLifecycleMakingNoise(facts!.Status));
+    }
+
+    /// <summary>
+    /// Counts an entry that could not be published (the funnel refused it, or threw) in its own statement, so
+    /// least-posted-first moves on to another entry at the next due time instead of retrying this one forever. It
+    /// is not a published post: the state's <c>postedCount</c> counts posts, not pool counters.
+    /// </summary>
+    private async Task SkipEntryAsync(Guid exerciseId, Guid entryId)
+    {
+        _dbContext.ChangeTracker.Clear();
+        try
+        {
+            await _dbContext.NoisePosts
+                .Where(entry => entry.Id == entryId)
+                .ExecuteUpdateAsync(set => set.SetProperty(entry => entry.PostedCount, entry => entry.PostedCount + 1));
+        }
+#pragma warning disable CA1031 // The skip is best effort; the original failure is what gets reported.
+        catch (Exception ex)
+        {
+            LogSkipFailed(ex, exerciseId, entryId);
+        }
+#pragma warning restore CA1031
     }
 
     private Guid? ResolveScope()
@@ -466,7 +547,11 @@ public sealed partial class WhiteNoiseService
     private IQueryable<Post> NoisePosts() =>
         _dbContext.Posts.Where(post => post.Origin == NoiseRates.NoiseOrigin);
 
-    private async Task<NoiseStateDto> BuildStateAsync(Guid exerciseId, string level, CancellationToken cancellationToken)
+    private async Task<NoiseStateDto> BuildStateAsync(
+        Guid exerciseId,
+        string level,
+        string? lifecycleStatus,
+        CancellationToken cancellationToken)
     {
         var poolSize = await _dbContext.NoisePosts.CountAsync(cancellationToken);
         var postedCount = await NoisePosts().CountAsync(cancellationToken);
@@ -479,7 +564,9 @@ public sealed partial class WhiteNoiseService
             PoolSize = poolSize,
             PostedCount = postedCount,
             LastPostedAt = lastPostedAt?.ToString("O", CultureInfo.InvariantCulture),
-            Running = NoiseRates.PerMinute(level) > 0 && poolSize > 0 && !IsStopped(_pauseTiers, _clock, exerciseId),
+            Running = NoiseRates.PerMinute(level) > 0
+                && poolSize > 0
+                && !IsStopped(_pauseTiers, _clock, exerciseId, lifecycleStatus),
         };
     }
 
@@ -619,6 +706,12 @@ public sealed partial class WhiteNoiseService
         Message = "White noise: the NoiseStateChanged push for exercise {ExerciseId} failed; the change itself is committed.")]
     private partial void LogPushFailed(Exception exception, Guid exerciseId);
 
+    [LoggerMessage(
+        EventId = 3,
+        Level = LogLevel.Warning,
+        Message = "White noise: could not skip pool entry {EntryId} of exercise {ExerciseId} after a failed publish; it may be picked again.")]
+    private partial void LogSkipFailed(Exception exception, Guid exerciseId, Guid entryId);
+
     private sealed record PersonaLookup(HashSet<Guid> Ids, Dictionary<string, Guid> ByHandle);
 
     /// <summary><c>noise.level.changed</c> payload: counts and literals only (XC-004).</summary>
@@ -668,6 +761,11 @@ public static class NoiseSelection
         return ordered[0];
     }
 }
+
+/// <summary>What the pacer reads about an exercise before deciding whether a post is due.</summary>
+/// <param name="Level">The persisted level.</param>
+/// <param name="LifecycleMakingNoise">Whether the lifecycle is <c>staged</c> or <c>live</c>.</param>
+public sealed record NoisePacingFacts(string Level, bool LifecycleMakingNoise);
 
 /// <summary>What one pacer step did.</summary>
 public enum NoisePublishOutcome
@@ -729,6 +827,14 @@ public static class WhiteNoiseResult
     /// <returns>The result.</returns>
     public static WhiteNoiseResult<TValue> Ok<TValue>(TValue value)
         where TValue : class => new(WhiteNoiseOutcome.Ok, value, null);
+
+    /// <summary>A validation failure that still carries a value (e.g. the rejections of a refused pool replace).</summary>
+    /// <typeparam name="TValue">The value type.</typeparam>
+    /// <param name="value">The value.</param>
+    /// <param name="message">The detail.</param>
+    /// <returns>The result.</returns>
+    public static WhiteNoiseResult<TValue> Invalid<TValue>(TValue value, string message)
+        where TValue : class => new(WhiteNoiseOutcome.Invalid, value, message);
 
     /// <summary>A validation failure.</summary>
     /// <typeparam name="TValue">The value type.</typeparam>

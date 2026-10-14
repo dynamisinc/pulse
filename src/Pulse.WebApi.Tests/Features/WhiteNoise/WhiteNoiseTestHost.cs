@@ -81,7 +81,10 @@ internal sealed class WhiteNoiseTestHost : IAsyncDisposable
         _caller.StaffUserId = staffUserId;
     }
 
-    public static async Task<WhiteNoiseTestHost> StartAsync(string connectionString, INoiseJitterSource? jitter = null)
+    public static async Task<WhiteNoiseTestHost> StartAsync(
+        string connectionString,
+        INoiseJitterSource? jitter = null,
+        Action<IServiceCollection>? configureServices = null)
     {
         var caller = new CallerHolder();
         var time = new ManualTimeProvider(new DateTimeOffset(2026, 10, 20, 14, 0, 0, TimeSpan.Zero));
@@ -135,6 +138,9 @@ internal sealed class WhiteNoiseTestHost : IAsyncDisposable
         // A fresh, SETTABLE ExerciseContext per scope (the pacer sets its own), seeded from the acting caller.
         builder.Services.RemoveAll<IExerciseContext>();
         builder.Services.AddScoped<IExerciseContext>(_ => new ExerciseContext { CurrentExerciseId = caller.ExerciseId });
+
+        // Last word for a test (e.g. a SaveChanges interceptor that makes the funnel throw).
+        configureServices?.Invoke(builder.Services);
 
         var app = builder.Build();
         app.Use(async (context, next) =>
@@ -232,6 +238,15 @@ internal sealed class WhiteNoiseTestHost : IAsyncDisposable
         await using var db = Db(exerciseId);
         var row = await db.Exercises.SingleAsync(e => e.Id == exerciseId);
         row.NoiseLevel = level;
+        await db.SaveChangesAsync();
+    }
+
+    /// <summary>Sets the lifecycle status directly on the row (as EndEx or a lifecycle pause would).</summary>
+    public async Task SetStatusInDbAsync(Guid exerciseId, string status)
+    {
+        await using var db = Db(exerciseId);
+        var row = await db.Exercises.SingleAsync(e => e.Id == exerciseId);
+        row.Status = status;
         await db.SaveChangesAsync();
     }
 

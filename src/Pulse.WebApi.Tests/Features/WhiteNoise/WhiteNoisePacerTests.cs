@@ -283,4 +283,144 @@ public sealed class WhiteNoisePacerTests
         (await host.NoisePostsAsync(a.ExerciseId)).Should().HaveCount(14);
         (await host.NoisePostsAsync(b.ExerciseId)).Should().HaveCount(3);
     }
+
+    [RequiresDockerFact]
+    public async Task ALifecycleThatIsNotStagedOrLive_StopsNoise_AndRunningIsFalse()
+    {
+        await using var host = await WhiteNoiseTestHost.StartAsync(_fixture.ConnectionString!);
+        var exercise = await host.SeedExerciseAsync();
+        await host.SeedPoolAsync(exercise, 6);
+        await host.SetLevelInDbAsync(exercise.ExerciseId, NoiseRates.High);
+        host.StartClock(exercise);
+        host.ActAs(exercise.ExerciseId, exercise.EvaluatorId);
+
+        (await host.TickForAsync(5)).Should().Be(1, "live: noise runs");
+
+        await host.SetStatusInDbAsync(exercise.ExerciseId, "paused");
+        (await host.TickForAsync(60)).Should().Be(0, "a lifecycle pause stops noise (DF-13, amended)");
+        (await host.ReadStateOkAsync(await host.GetStateAsync())).Should().Match<WireNoiseState>(
+            state => state.Level == "high" && !state.Running, "the knob can say why: the level is set but nothing runs");
+
+        await host.SetStatusInDbAsync(exercise.ExerciseId, "active");
+        (await host.TickForAsync(4)).Should().Be(0, "no catch-up after the pause");
+        (await host.TickForAsync(1)).Should().Be(1, "the legacy 'active' literal folds to live");
+        (await host.ReadStateOkAsync(await host.GetStateAsync())).Running.Should().BeTrue();
+
+        await host.SetStatusInDbAsync(exercise.ExerciseId, "completed");
+        (await host.TickForAsync(60)).Should().Be(0, "EndEx stops noise");
+        (await host.ReadStateOkAsync(await host.GetStateAsync())).Running.Should().BeFalse();
+
+        await host.SetStatusInDbAsync(exercise.ExerciseId, "staged");
+        (await host.TickForAsync(5)).Should().Be(1, "staged lets noise run");
+    }
+
+    [RequiresDockerFact]
+    public async Task ARefusedEntry_IsSkipped_SoTheRotationMovesOn()
+    {
+        await using var host = await WhiteNoiseTestHost.StartAsync(_fixture.ConnectionString!);
+        var exercise = await host.SeedExerciseAsync();
+
+        // Entry 0 is least posted and first in order, but the funnel refuses it (no author persona).
+        await using (var db = host.Db(exercise.ExerciseId))
+        {
+            db.NoisePosts.Add(new Pulse.WebApi.Data.Entities.NoisePost
+            {
+                Id = Guid.NewGuid(),
+                ExerciseId = exercise.ExerciseId,
+                PersonaId = Guid.Empty,
+                Text = "refused",
+                Order = 0,
+                CreatedWallClock = DateTimeOffset.UtcNow,
+            });
+            await db.SaveChangesAsync();
+        }
+
+        await host.SeedPoolAsync(exercise, 2);
+        await using (var db = host.Db(exercise.ExerciseId))
+        {
+            // SeedPoolAsync numbered its entries from 0 too; move them after the refused one.
+            foreach (var entry in await db.NoisePosts.Where(n => n.Text != "refused").ToListAsync())
+            {
+                entry.Order += 1;
+            }
+
+            await db.SaveChangesAsync();
+        }
+
+        await host.SetLevelInDbAsync(exercise.ExerciseId, NoiseRates.High);
+        host.StartClock(exercise);
+
+        (await host.TickForAsync(5)).Should().Be(0, "the first due post is the refused entry");
+        (await host.TickForAsync(8)).Should().Be(2, "it was skipped, so the next due times pick the other entries");
+
+        var pool = await host.PoolAsync(exercise.ExerciseId);
+        pool.Single(p => p.Text == "refused").PostedCount.Should().Be(1, "the skip is counted in its own save");
+        (await host.NoisePostsAsync(exercise.ExerciseId)).Should().HaveCount(2).And.OnlyContain(p => p.Body != "refused");
+    }
+
+    [RequiresDockerFact]
+    public async Task AThrowingPublish_SkipsTheEntry_SoTheRotationMovesOn()
+    {
+        var interceptor = new ThrowOnPostBodyInterceptor("boom");
+        await using var host = await WhiteNoiseTestHost.StartAsync(
+            _fixture.ConnectionString!,
+            configureServices: services => services.ConfigureDbContext<PulseDbContext>(options => options.AddInterceptors(interceptor)));
+        var exercise = await host.SeedExerciseAsync();
+
+        await using (var db = host.Db(exercise.ExerciseId))
+        {
+            var texts = new[] { "boom", "calm one", "calm two" };
+            for (var index = 0; index < texts.Length; index++)
+            {
+                db.NoisePosts.Add(new Pulse.WebApi.Data.Entities.NoisePost
+                {
+                    Id = Guid.NewGuid(),
+                    ExerciseId = exercise.ExerciseId,
+                    PersonaId = exercise.PersonaIds[index],
+                    Text = texts[index],
+                    Order = index,
+                    CreatedWallClock = DateTimeOffset.UtcNow,
+                });
+            }
+
+            await db.SaveChangesAsync();
+        }
+
+        await host.SetLevelInDbAsync(exercise.ExerciseId, NoiseRates.High);
+        host.StartClock(exercise);
+
+        (await host.TickForAsync(5)).Should().Be(0, "the first due post throws inside the funnel");
+        interceptor.Thrown.Should().Be(1);
+        (await host.TickForAsync(8)).Should().Be(2, "the throwing entry was skipped; the rotation moved on");
+
+        (await host.PoolAsync(exercise.ExerciseId)).Single(p => p.Text == "boom").PostedCount.Should().Be(1);
+        (await host.NoisePostsAsync(exercise.ExerciseId)).Select(p => p.Body).Should().Equal("calm one", "calm two");
+    }
+}
+
+/// <summary>Makes the funnel's SaveChanges throw when it adds a post with the given body.</summary>
+internal sealed class ThrowOnPostBodyInterceptor : Microsoft.EntityFrameworkCore.Diagnostics.SaveChangesInterceptor
+{
+    private readonly string _body;
+    private int _thrown;
+
+    public ThrowOnPostBodyInterceptor(string body) => _body = body;
+
+    public int Thrown => System.Threading.Volatile.Read(ref _thrown);
+
+    public override System.Threading.Tasks.ValueTask<Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<int>> SavingChangesAsync(
+        Microsoft.EntityFrameworkCore.Diagnostics.DbContextEventData eventData,
+        Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<int> result,
+        System.Threading.CancellationToken cancellationToken = default)
+    {
+        var adding = eventData.Context?.ChangeTracker.Entries<Pulse.WebApi.Data.Entities.Post>()
+            .Any(entry => entry.State == EntityState.Added && entry.Entity.Body == _body) ?? false;
+        if (adding)
+        {
+            System.Threading.Interlocked.Increment(ref _thrown);
+            throw new InvalidOperationException("database unreachable");
+        }
+
+        return base.SavingChangesAsync(eventData, result, cancellationToken);
+    }
 }

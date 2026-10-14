@@ -1,5 +1,6 @@
 namespace Pulse.WebApi.Features.WhiteNoise;
 
+using System.Collections.Generic;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -23,14 +24,21 @@ using Pulse.WebApi.Features.Identity.EasyLogin;
 /// </para>
 /// <para>
 /// <b>Responses.</b> 200 with <see cref="NoiseStateDto"/> or <see cref="NoisePoolResultDto"/>; 400 ProblemDetails
-/// (with a readable <c>detail</c>) for an unknown level, a bad pool mode, a missing <c>posts</c>, or more than 1,000
-/// entries; 401 when no scope resolves.
+/// (with a readable <c>detail</c>) for an unknown level, a bad pool mode, a missing <c>posts</c>, more than 1,000
+/// entries, or a replace none of whose entries could be used (that 400 also carries <c>poolSize</c> and
+/// <c>rejected</c>, and the pool is left unchanged); 401 when no scope resolves.
 /// </para>
 /// </remarks>
 public static class WhiteNoiseEndpoints
 {
     /// <summary>The state and level route.</summary>
     public const string NoiseRoute = "/api/staff/noise";
+
+    /// <summary>The ProblemDetails extension carrying the unchanged pool size on a refused replace.</summary>
+    public const string PoolSizeExtension = "poolSize";
+
+    /// <summary>The ProblemDetails extension carrying the rejections on a refused replace.</summary>
+    public const string RejectedExtension = "rejected";
 
     /// <summary>The pool route.</summary>
     public const string PoolRoute = "/api/staff/noise/pool";
@@ -111,6 +119,16 @@ public static class WhiteNoiseEndpoints
         where TValue : class => result.Outcome switch
         {
             WhiteNoiseOutcome.Ok when result.Value is { } value => Results.Json(value),
+
+            // A replace with no usable entry: the 400 carries the same poolSize + rejected the 200 would.
+            WhiteNoiseOutcome.Invalid when result.Value is NoisePoolResultDto pool => Results.Problem(
+                detail: result.Message,
+                statusCode: StatusCodes.Status400BadRequest,
+                extensions: new Dictionary<string, object?>
+                {
+                    [PoolSizeExtension] = pool.PoolSize,
+                    [RejectedExtension] = pool.Rejected,
+                }),
             WhiteNoiseOutcome.Invalid => Results.Problem(detail: result.Message, statusCode: StatusCodes.Status400BadRequest),
             WhiteNoiseOutcome.ScopeUnresolved => Results.Unauthorized(),
             _ => Results.StatusCode(StatusCodes.Status500InternalServerError),
