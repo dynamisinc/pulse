@@ -16,6 +16,15 @@ using Pulse.WebApi.Features.Social.Follows;
 /// </summary>
 /// <remarks>
 /// <para>
+/// <b>Personal pin (demo-feedback DF-6).</b> <see cref="ReactionKinds.Pin"/> rides this same write path: same
+/// participant-only allowlist, same visibility check, same soft delete and filtered unique index. It differs only in
+/// what it reports and emits: it never moves a displayed count (the engagement reader counts <c>like</c> and
+/// <c>repost</c> explicitly), its state is <see cref="PostViewerStateDto.Pinned"/>, and its XC-004 event is
+/// <c>post.pinned</c> / <c>post.unpinned</c> with <c>{"scope":"personal"}</c>.
+/// </para>
+/// </remarks>
+/// <remarks>
+/// <para>
 /// <b>Nothing about identity or scope is client-supplied (COR-001).</b> The exercise comes ONLY from
 /// <see cref="IExerciseContext"/>, the reacting persona ONLY from the caller's session
 /// (<see cref="ICurrentSessionPersonaAccessor"/>). The one value a caller supplies, the post id, is resolved through
@@ -82,6 +91,15 @@ public sealed class ReactionService
     private const string RepostedPayload = "{\"reposted\":true}";
     private const string UnrepostedPayload = "{\"reposted\":false}";
 
+    /// <summary>XC-004 <c>eventType</c> for a personal pin (demo-feedback telemetry, story 04).</summary>
+    private const string PinnedEventType = "post.pinned";
+
+    /// <summary>XC-004 <c>eventType</c> for removing a personal pin.</summary>
+    private const string UnpinnedEventType = "post.unpinned";
+
+    /// <summary>The pin/unpin payload: counts-only telemetry carries the pin's scope and nothing else.</summary>
+    private const string PersonalPinPayload = "{\"scope\":\"personal\"}";
+
     private const string SocialChannel = "social";
     private const string PersonaActorKind = "persona";
     private const string PostEntityType = "post";
@@ -144,7 +162,7 @@ public sealed class ReactionService
     /// succeeds as a no-op when it already does. Emits exactly one XC-004 event with a real change, none otherwise.
     /// </summary>
     /// <param name="postId">The post to react to. Resolved through the exercise-scoped post set.</param>
-    /// <param name="kind">The route's reaction kind; must be exactly <c>like</c> or <c>repost</c>.</param>
+    /// <param name="kind">The route's reaction kind; must be exactly <c>like</c>, <c>repost</c> or <c>pin</c>.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The outcome the endpoint maps to an HTTP status.</returns>
     public Task<ReactionResult> ReactAsync(Guid postId, string? kind, CancellationToken cancellationToken = default) =>
@@ -155,7 +173,7 @@ public sealed class ReactionService
     /// succeeds as a no-op when there is none. Emits exactly one XC-004 event with a real change, none otherwise.
     /// </summary>
     /// <param name="postId">The post to stop reacting to. Resolved through the exercise-scoped post set.</param>
-    /// <param name="kind">The route's reaction kind; must be exactly <c>like</c> or <c>repost</c>.</param>
+    /// <param name="kind">The route's reaction kind; must be exactly <c>like</c>, <c>repost</c> or <c>pin</c>.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The outcome the endpoint maps to an HTTP status.</returns>
     public Task<ReactionResult> UnreactAsync(Guid postId, string? kind, CancellationToken cancellationToken = default) =>
@@ -189,7 +207,7 @@ public sealed class ReactionService
 
         if (!TryParseKind(requestedKind, out var kind))
         {
-            return ReactionResult.Invalid("kind must be 'like' or 'repost'.");
+            return ReactionResult.Invalid("kind must be 'like', 'repost' or 'pin'.");
         }
 
         // 3. The reacting persona must exist IN THIS EXERCISE. The central filter already scopes the read; the
@@ -387,11 +405,14 @@ public sealed class ReactionService
         var engagement = await _engagementReader.GetAsync([postId], personaId, cancellationToken);
         var real = engagement.TryGetValue(postId, out var found)
             ? found
-            : new PostEngagement(0, 0, 0, ViewerLiked: false, ViewerReposted: false);
+            : new PostEngagement(0, 0, 0, ViewerLiked: false, ViewerReposted: false, ViewerPinned: false);
 
-        var active = string.Equals(kind, ReactionKinds.Like, StringComparison.Ordinal)
-            ? real.ViewerLiked
-            : real.ViewerReposted;
+        var active = kind switch
+        {
+            ReactionKinds.Like => real.ViewerLiked,
+            ReactionKinds.Pin => real.ViewerPinned,
+            _ => real.ViewerReposted,
+        };
 
         return new ReactionStateDto(
             postId.ToString(),
@@ -401,7 +422,7 @@ public sealed class ReactionService
                 Reply: baseline.Reply + real.RealReply,
                 Repost: baseline.Repost + real.RealRepost,
                 Like: baseline.Like + real.RealLike),
-            new PostViewerStateDto(real.ViewerLiked, real.ViewerReposted));
+            new PostViewerStateDto(real.ViewerLiked, real.ViewerReposted, real.ViewerPinned));
     }
 
     /// <summary>
@@ -419,14 +440,19 @@ public sealed class ReactionService
         string timeZone,
         DateTimeOffset now)
     {
-        var isLike = string.Equals(kind, ReactionKinds.Like, StringComparison.Ordinal);
+        var (eventType, payload) = kind switch
+        {
+            ReactionKinds.Like => (LikeEventType, activate ? LikedPayload : UnlikedPayload),
+            ReactionKinds.Pin => (activate ? PinnedEventType : UnpinnedEventType, PersonalPinPayload),
+            _ => (RepostEventType, activate ? RepostedPayload : UnrepostedPayload),
+        };
 
         return new TelemetryEvent
         {
             EventId = Guid.NewGuid().ToString(),
             SchemaVersion = "v0",
             ExerciseId = exerciseId,
-            EventType = isLike ? LikeEventType : RepostEventType,
+            EventType = eventType,
             Channel = SocialChannel,
             Actor = new TelemetryActor
             {
@@ -445,9 +471,7 @@ public sealed class ReactionService
                 EntityType = PostEntityType,
                 EntityId = postId.ToString(),
             },
-            Payload = isLike
-                ? (activate ? LikedPayload : UnlikedPayload)
-                : (activate ? RepostedPayload : UnrepostedPayload),
+            Payload = payload,
             EmittedAt = now,
         };
     }
@@ -464,6 +488,13 @@ public sealed class ReactionService
         if (string.Equals(requestedKind, ReactionKinds.Repost, StringComparison.Ordinal))
         {
             kind = ReactionKinds.Repost;
+            return true;
+        }
+
+        // demo-feedback DF-6: a personal pin is a reaction too, but never a counted one.
+        if (string.Equals(requestedKind, ReactionKinds.Pin, StringComparison.Ordinal))
+        {
+            kind = ReactionKinds.Pin;
             return true;
         }
 
