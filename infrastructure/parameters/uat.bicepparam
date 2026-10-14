@@ -9,7 +9,7 @@ using '../main.bicep'
 // Cost posture: Phase B0's backend (Pulse.WebApi + PulseDbContext) has landed, so this now deploys the
 // App Service host (app-pulse-api-uat), Azure SQL (sqldb-pulse-uat), and App Insights alongside the
 // Free-tier Static Web App. Storage (keyless blob media, demo-polish/01) is on for the demo;
-// Communication (keyless email of personal links, easy-login/13) is on. Before running the Deploy
+// Communication (keyless email of personal links, easy-login/13) is OFF until after the 10/20 demo. Before running the Deploy
 // Infrastructure workflow, ensure the SQL_ADMIN_PASSWORD, JWT_SECRET_KEY, and (for login go-live,
 // story login/06) BOOTSTRAP_SECRET + STAFF_IDENTITY_ACCOUNTS_JSON GitHub secrets are set on the uat
 // environment.
@@ -25,7 +25,8 @@ param location = 'centralus'
 // managed identity granted Storage Blob Data Contributor at account scope. The grant needs the deploy
 // SP's role-assignment write (already required by deployAi) and takes minutes to propagate — do not
 // smoke-test media uploads in the first ~10 minutes after the deploy.
-// Communication on (easy-login/13): acs-pulse-uat + email-pulse-uat with the Azure-managed sender
+// Communication (easy-login/13) is OFF until after the 10/20 demo (Tom, 2026-10-14: the code merges dark;
+// the email setup and its Tier-2 answers come after the demo). Flip deployCommunication to true then. When on: acs-pulse-uat + email-pulse-uat with the Azure-managed sender
 // domain (DoNotReply@<guid>.azurecomm.net, no DNS work), KEYLESS (disableLocalAuth: no connection string
 // or access key exists), and the App Service's managed identity granted "Communication and Email Service
 // Owner" on the Communication Service. Same deploy-SP role-assignment prerequisite and the same ~10 minute
@@ -36,7 +37,7 @@ param deployMonitoring = true
 param deployStorage = true
 param deployDatabase = true
 param deployBackend = true
-param deployCommunication = true
+param deployCommunication = false
 // Flip to true when social-api/03-signalr-feed-host (B1 real-time) lands; bump signalRSkuName to
 // Standard_S1 for real exercise load (Free_F1 caps at 20 connections / 20k msgs/day).
 param deploySignalR = false

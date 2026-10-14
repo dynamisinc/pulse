@@ -46,7 +46,7 @@ deliberately minimal.
 - [ ] **Given** a send attempt, **then** one `participant.link.emailed` event is recorded (`sent` / `failed`) with the
       staff actor and the link as target; **no email address, token or URL appears in any event, log line or response
       body**. Provider errors are logged with the operation and status only.
-- [ ] **Given** the infrastructure, **then** `uat.bicepparam` sets `deployCommunication = true`;
+- [ ] **Given** the infrastructure, **then** `uat.bicepparam` sets `deployCommunication = true` *(amended 10/14, Tom: `false` until after the 10/20 demo; the code merges dark)*;
       `communication.bicep` grants the App Service's system-assigned identity the built-in role that allows sending on
       the Communication Service (**confirm the role against the current Microsoft Learn page on ACS Email with
       Microsoft Entra authentication and state the role and its id in the PR; least privilege, not Owner**) using the

@@ -21,7 +21,7 @@ template and flipped per environment in [`parameters/uat.bicepparam`](parameters
 | `deployDatabase` | Azure SQL server + database | `false` | `true` |
 | `deployBackend` | App Service / Function App (per `hostingModel`) | `false` | `true` |
 | `deploySignalR` | Azure SignalR Service (real-time fan-out) | `false` | `false` (hub self-hosted) |
-| `deployCommunication` | ACS + Email Service, **keyless** (`disableLocalAuth`), Azure-managed sender; grants the App Service identity **Communication and Email Service Owner** (easy-login/13, [below](#email-keyless-acs--easy-login-story-13)) | `false` | `true` |
+| `deployCommunication` | ACS + Email Service, **keyless** (`disableLocalAuth`), Azure-managed sender; grants the App Service identity **Communication and Email Service Owner** (easy-login/13, [below](#email-keyless-acs--easy-login-story-13)) | `false` | `false` until after the 10/20 demo, then `true` |
 | `deployAi` | Azure AI Foundry account + E8 model deployments (Standard/Ambient) | `false` | `true` |
 | `generationProviderLive` | **Routes engine generation traffic to the live model** (`Generation:Provider` → `AzureOpenAI`). Separate from `deployAi` on purpose; **Tier-2 gated** | `false` | `false` |
 | `generationTenantBounded` | **§2 governance assertion, typed by a human** (`Generation:Governance:TenantBounded`) — not derived from `deployAi` | `false` | `false` |
@@ -335,7 +335,7 @@ curl -s -o /dev/null -w '%{http_code}\n' https://stpulseuat.blob.core.windows.ne
 
 ## Email (keyless ACS) — easy-login story 13
 
-`deployCommunication = true` (UAT) stands up `acs-pulse-uat` (Communication Service) and `email-pulse-uat`
+**UAT keeps this `false` until after the 10/20 demo** (Tom, 2026-10-14: the code merges dark). `deployCommunication = true` stands up `acs-pulse-uat` (Communication Service) and `email-pulse-uat`
 (Email Service) with the **Azure-managed domain**, and turns on "Email links" on the staff roster: the API
 emails each selected participant their own personal sign-in link.
 
