@@ -168,22 +168,22 @@ public sealed partial class WhiteNoiseService
     {
         if (ResolveScope() is not { } exerciseId)
         {
-            return WhiteNoiseResult<NoiseStateDto>.ScopeUnresolved();
+            return WhiteNoiseResult.ScopeUnresolved<NoiseStateDto>();
         }
 
         var facts = await _exerciseFacts.GetAsync(exerciseId, cancellationToken);
         if (facts is null)
         {
-            return WhiteNoiseResult<NoiseStateDto>.ScopeUnresolved();
+            return WhiteNoiseResult.ScopeUnresolved<NoiseStateDto>();
         }
 
         var level = await ReadLevelAsync(exerciseId, facts, cancellationToken);
         if (level is null)
         {
-            return WhiteNoiseResult<NoiseStateDto>.ScopeUnresolved();
+            return WhiteNoiseResult.ScopeUnresolved<NoiseStateDto>();
         }
 
-        return WhiteNoiseResult<NoiseStateDto>.Ok(await BuildStateAsync(exerciseId, level, cancellationToken));
+        return WhiteNoiseResult.Ok(await BuildStateAsync(exerciseId, level, cancellationToken));
     }
 
     /// <summary>
@@ -200,20 +200,20 @@ public sealed partial class WhiteNoiseService
     {
         if (ResolveScope() is not { } exerciseId)
         {
-            return WhiteNoiseResult<NoiseStateDto>.ScopeUnresolved();
+            return WhiteNoiseResult.ScopeUnresolved<NoiseStateDto>();
         }
 
         var to = request?.Level;
         if (!NoiseRates.IsLevel(to))
         {
-            return WhiteNoiseResult<NoiseStateDto>.Invalid(InvalidLevelMessage);
+            return WhiteNoiseResult.Invalid<NoiseStateDto>(InvalidLevelMessage);
         }
 
         var staff = await _staffSession.GetCurrentStaffSessionAsync(cancellationToken);
         var facts = staff is null ? null : await _exerciseFacts.GetAsync(exerciseId, cancellationToken);
         if (staff is null || facts is null)
         {
-            return WhiteNoiseResult<NoiseStateDto>.ScopeUnresolved();
+            return WhiteNoiseResult.ScopeUnresolved<NoiseStateDto>();
         }
 
         var exercise = await _dbContext.Exercises
@@ -222,13 +222,13 @@ public sealed partial class WhiteNoiseService
             .FirstOrDefaultAsync(cancellationToken);
         if (exercise is null)
         {
-            return WhiteNoiseResult<NoiseStateDto>.ScopeUnresolved();
+            return WhiteNoiseResult.ScopeUnresolved<NoiseStateDto>();
         }
 
         var from = exercise.NoiseLevel;
         if (string.Equals(from, to, StringComparison.Ordinal))
         {
-            return WhiteNoiseResult<NoiseStateDto>.Ok(await BuildStateAsync(exerciseId, to!, cancellationToken));
+            return WhiteNoiseResult.Ok(await BuildStateAsync(exerciseId, to!, cancellationToken));
         }
 
         exercise.NoiseLevel = to!;
@@ -250,7 +250,7 @@ public sealed partial class WhiteNoiseService
         // its next mount, and the next noise post pushes again.
         await PushAsync(exerciseId, state);
 
-        return WhiteNoiseResult<NoiseStateDto>.Ok(state);
+        return WhiteNoiseResult.Ok(state);
     }
 
     /// <summary>
@@ -269,23 +269,23 @@ public sealed partial class WhiteNoiseService
     {
         if (ResolveScope() is not { } exerciseId)
         {
-            return WhiteNoiseResult<NoisePoolResultDto>.ScopeUnresolved();
+            return WhiteNoiseResult.ScopeUnresolved<NoisePoolResultDto>();
         }
 
         var mode = request?.Mode;
         if (mode is not (ReplaceMode or AppendMode))
         {
-            return WhiteNoiseResult<NoisePoolResultDto>.Invalid("mode must be replace or append.");
+            return WhiteNoiseResult.Invalid<NoisePoolResultDto>("mode must be replace or append.");
         }
 
         if (request!.Posts is not { } posts)
         {
-            return WhiteNoiseResult<NoisePoolResultDto>.Invalid("posts is required.");
+            return WhiteNoiseResult.Invalid<NoisePoolResultDto>("posts is required.");
         }
 
         if (posts.Count > MaxPoolEntriesPerCall)
         {
-            return WhiteNoiseResult<NoisePoolResultDto>.Invalid(
+            return WhiteNoiseResult.Invalid<NoisePoolResultDto>(
                 $"posts may hold at most {MaxPoolEntriesPerCall} entries per call.");
         }
 
@@ -293,7 +293,7 @@ public sealed partial class WhiteNoiseService
         var facts = staff is null ? null : await _exerciseFacts.GetAsync(exerciseId, cancellationToken);
         if (staff is null || facts is null)
         {
-            return WhiteNoiseResult<NoisePoolResultDto>.ScopeUnresolved();
+            return WhiteNoiseResult.ScopeUnresolved<NoisePoolResultDto>();
         }
 
         var personas = await LoadPersonaLookupAsync(cancellationToken);
@@ -348,7 +348,7 @@ public sealed partial class WhiteNoiseService
         await _dbContext.SaveChangesAsync(cancellationToken);
 
         var poolSize = await _dbContext.NoisePosts.CountAsync(CancellationToken.None);
-        return WhiteNoiseResult<NoisePoolResultDto>.Ok(new NoisePoolResultDto { PoolSize = poolSize, Rejected = rejected });
+        return WhiteNoiseResult.Ok(new NoisePoolResultDto { PoolSize = poolSize, Rejected = rejected });
     }
 
     /// <summary>
@@ -703,7 +703,7 @@ public enum WhiteNoiseOutcome
 public sealed class WhiteNoiseResult<TValue>
     where TValue : class
 {
-    private WhiteNoiseResult(WhiteNoiseOutcome outcome, TValue? value, string? message)
+    internal WhiteNoiseResult(WhiteNoiseOutcome outcome, TValue? value, string? message)
     {
         Outcome = outcome;
         Value = value;
@@ -718,18 +718,28 @@ public sealed class WhiteNoiseResult<TValue>
 
     /// <summary>The 400 detail on <see cref="WhiteNoiseOutcome.Invalid"/>.</summary>
     public string? Message { get; }
+}
 
+/// <summary>Factories for <see cref="WhiteNoiseResult{TValue}"/>.</summary>
+public static class WhiteNoiseResult
+{
     /// <summary>A success.</summary>
+    /// <typeparam name="TValue">The value type.</typeparam>
     /// <param name="value">The value.</param>
     /// <returns>The result.</returns>
-    public static WhiteNoiseResult<TValue> Ok(TValue value) => new(WhiteNoiseOutcome.Ok, value, null);
+    public static WhiteNoiseResult<TValue> Ok<TValue>(TValue value)
+        where TValue : class => new(WhiteNoiseOutcome.Ok, value, null);
 
     /// <summary>A validation failure.</summary>
+    /// <typeparam name="TValue">The value type.</typeparam>
     /// <param name="message">The detail.</param>
     /// <returns>The result.</returns>
-    public static WhiteNoiseResult<TValue> Invalid(string message) => new(WhiteNoiseOutcome.Invalid, null, message);
+    public static WhiteNoiseResult<TValue> Invalid<TValue>(string message)
+        where TValue : class => new(WhiteNoiseOutcome.Invalid, null, message);
 
     /// <summary>No scope or staff session.</summary>
+    /// <typeparam name="TValue">The value type.</typeparam>
     /// <returns>The result.</returns>
-    public static WhiteNoiseResult<TValue> ScopeUnresolved() => new(WhiteNoiseOutcome.ScopeUnresolved, null, null);
+    public static WhiteNoiseResult<TValue> ScopeUnresolved<TValue>()
+        where TValue : class => new(WhiteNoiseOutcome.ScopeUnresolved, null, null);
 }

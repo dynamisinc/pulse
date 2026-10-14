@@ -53,6 +53,42 @@ Use a fake clock / time provider: level persistence and push, pool replace/appen
 jitter bounds over a simulated window, selection rules, Freeze/clock stops, Pause injects does not stop, restart
 resume, isolation across two exercises, role gates (evaluator GET ok, PUT 403), throttle, telemetry.
 
+Linked (all under `src/Pulse.WebApi.Tests/Features/WhiteNoise`; the endpoint and pacer classes are real SQL,
+`[RequiresDockerFact]`):
+
+- AC GET (any assigned staff): `WhiteNoiseEndpointTests.Get_AsAnEvaluator_ReturnsTheStateOfAFreshExercise`,
+  `WhiteNoisePacingTests.NoiseStateDto_MatchesTheFrozenWireShape`
+- AC PUT level (persist, staff-group push, 400, same-level no-op): `WhiteNoiseEndpointTests.PutLevel_PersistsPushesToTheStaffGroupAndEmitsOneEvent_AndTheSameLevelAgainIsANoOp`,
+  `WhiteNoiseEndpointTests.PutLevel_RejectsAnUnknownLevelWith400_AndChangesNothing`
+- AC PUT pool (resolve in this exercise, sanitize, 1–280 code points, rejections by index, one save, > 1,000 ⇒ 400,
+  replace resets counts): `WhiteNoiseEndpointTests.PutPool_Replace_ResolvesPersonasInThisExerciseOnly_SanitizesText_AndReportsBadEntriesByIndex`,
+  `WhiteNoiseEndpointTests.PutPool_AppendAddsAfterTheExistingEntries_AndReplaceResetsThePoolAndItsCounts`,
+  `WhiteNoiseEndpointTests.PutPool_RefusesABadModeAMissingListAndMoreThanAThousandEntries`
+- AC Pacer (DF-12: rates, jitter, funnel, origin `noise`, no acting human, scenario time, count in the same save):
+  `WhiteNoisePacerTests.High_PublishesNoisePostsThroughTheFunnel_AtItsRate_WithScenarioTimeAndNoActingHuman`,
+  `WhiteNoisePacerTests.Off_StopsNoise_AndALevelChangeRestartsTheTimetableAtTheNewRate`,
+  `WhiteNoisePacingTests.EachLevel_HasItsFrozenRate`, `WhiteNoisePacingTests.AGap_StaysWithinFortyPercentOfItsMean`,
+  `WhiteNoisePacingTests.OverASimulatedHour_TheRateHoldsAndEveryGapIsWithinTheJitterBounds`,
+  `WhiteNoisePacingTests.NextDue_IsMeasuredFromThePreviousDue_ButNeverCatchesUp`, `WhiteNoisePacingTests.Off_NeverPosts`
+- AC Selection (DF-13): `WhiteNoisePacerTests.Selection_NeverRepeatsAPersonaBackToBack_WhenAnotherIsAvailable`,
+  `WhiteNoisePacerTests.AnEmptyPool_PostsNothing_AndIsNotRunning`,
+  `WhiteNoisePacingTests.Selection_IsLeastPostedThenPoolOrder_AvoidingTheLastPersona`,
+  `WhiteNoisePacingTests.Selection_RepeatsThePersona_OnlyWhenNoOtherIsAvailable`
+- AC Stops (DF-13; `running: false` with a level set while the clock is not running):
+  `WhiteNoisePacerTests.FreezeAndAFrozenOrStoppedClock_StopNoise_PauseInjectsAndEnginePausedDoNot`,
+  `WhiteNoisePacingTests.AStop_DropsTheTimetable_AndTheFirstPostAfterItIsOneGapOut`
+- AC Restart: `WhiteNoisePacerTests.ARestart_ResumesAtThePersistedLevel_WithoutACatchUpBurst`,
+  `WhiteNoisePacingTests.AFirstSighting_IsOneGapOut_SoARestartNeverBursts`
+- AC Throttle: `WhiteNoisePacerTests.ThePostDrivenPush_IsThrottledToOnePerTwoSecondsPerExercise`,
+  `WhiteNoisePacingTests.TheThrottle_AllowsOnePushPerTwoSecondsPerExercise`
+- AC Not in the run sheet: `WhiteNoisePacerTests.NoisePosts_NeverAppearInTheRunSheet`
+- XC-001: `WhiteNoisePacerTests.TwoExercisesAtDifferentLevels_EachPostOnlyTheirOwnPool`,
+  `WhiteNoisePacingTests.TwoExercises_KeepIndependentTimetables`, the cross-exercise persona cases in
+  `PutPool_Replace_ResolvesPersonasInThisExerciseOnly_SanitizesText_AndReportsBadEntriesByIndex`
+- XC-002 / role gates: `WhiteNoiseEndpointTests.Puts_AsAnEvaluator_Are403_AndWithoutAStaffSession_Everything401`
+- XC-004: the telemetry assertions in the PUT level and PUT pool tests above
+- NFR-002: `WhiteNoisePacingTests.EvenAtTheShortestJitter_TheRateNeverExceedsItsBoundAndHighStaysFarBelowTheBurstBar`
+
 ## Tech notes
 
 Own new `Features/WhiteNoise/**` (`WhiteNoiseEndpoints.cs` with `AddWhiteNoise()` / `MapWhiteNoise()`,
