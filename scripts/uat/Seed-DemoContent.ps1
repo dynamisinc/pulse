@@ -2477,8 +2477,14 @@ function Find-UploadedMediaAsset {
     try { $response = Invoke-PulseApi -Context $Context -Method GET -Path "/api/staff/media?kind=$($Unit.Kind)&take=$Take" }
     catch { return & $result 'unknown' $null 0 "re-reading the media library failed ($($_.Exception.Message.TrimEnd('.')))" }
     if ($response.Status -ne 200 -or $null -eq $response.Json) { return & $result 'unknown' $null 0 "re-reading the media library answered $($response.Status)" }
+    # "Not there" is only as good as the page: anything but an array of readable rows proves nothing.
+    $rows = @($response.Json)
+    $unreadable = @($rows | Where-Object { $_ -isnot [System.Collections.IDictionary] -or -not $_['id'] -or -not $_['kind'] -or -not $_['url'] -or $_['fileName'] -isnot [string] })
+    if ($response.Json -isnot [System.Collections.IList] -or $unreadable.Count -gt 0) {
+        return & $result 'unknown' $null 0 're-reading the media library answered 200 with rows it cannot read'
+    }
 
-    $candidates = @(Select-MediaUploadCandidates -Rows @($response.Json) -Unit $Unit -WithPoster:($null -ne $PosterUnit) -KnownIds $KnownIds -Claimed $Claimed)
+    $candidates = @(Select-MediaUploadCandidates -Rows $rows -Unit $Unit -WithPoster:($null -ne $PosterUnit) -KnownIds $KnownIds -Claimed $Claimed)
     $timeout = if ($Unit.Kind -eq 'video') { 900 } else { 180 }
     $found = [System.Collections.Generic.List[string]]::new()
     foreach ($row in $candidates) {
@@ -2495,7 +2501,6 @@ function Find-UploadedMediaAsset {
     if ($found.Count -gt 0) { return & $result 'found' $found[0] ($found.Count - 1) $null }
     # A FULL page is no proof of absence: newest first, the upload could sit below it. It is proof once the page reaches
     # a row that was there before the upload (KnownIds): every newer row, the upload included, is then on the page.
-    $rows = @($response.Json)
     $reachesBack = @($rows | Where-Object { $_ -is [System.Collections.IDictionary] -and $KnownIds -contains [string] $_['id'] }).Count -gt 0
     if ($rows.Count -ge $Take -and -not $reachesBack) {
         return & $result 'unknown' $null 0 ("the media library's newest $Take $($Unit.Kind)s do not reach back to before that upload, so they cannot show whether it is there " +

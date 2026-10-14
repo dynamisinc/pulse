@@ -1612,7 +1612,11 @@ Describe 'Media upload: an uncertain outcome is looked up and adopted, never sen
             $script:Library = @()
             $script:UrlSha = @{}                                                # asset id → the SHA-256 its signed URL serves
             $script:LibraryStatus = 200
-            Mock Invoke-PulseApi { [pscustomobject]@{ Status = $script:LibraryStatus; Json = @($script:Library); Text = '[]' } }
+            $script:LibraryJson = $null                                        # set to answer something other than the rows
+            Mock Invoke-PulseApi {
+                $json = if ($null -ne $script:LibraryJson) { , $script:LibraryJson } else { , @($script:Library) }   # the comma keeps an array an array
+                [pscustomobject]@{ Status = $script:LibraryStatus; Json = $json; Text = '[]' }
+            }
             Mock Get-MediaUrlSha256 {
                 $id = ([Uri] $Url).AbsolutePath.Split('/')[-1]
                 if ($script:UrlSha.Contains($id)) { [pscustomobject]@{ Status = 200; Sha256 = $script:UrlSha[$id] } } else { [pscustomobject]@{ Status = 0; Sha256 = $null } }
@@ -1686,9 +1690,13 @@ Describe 'Media upload: an uncertain outcome is looked up and adopted, never sen
             @{ Name = 'the library answers 503'; Status = 503; Throw = $false; UrlDown = $false }
             @{ Name = 'the library does not answer'; Status = 200; Throw = $true; UrlDown = $false }
             @{ Name = 'a candidate''s signed URL does not answer'; Status = 200; Throw = $false; UrlDown = $true }
+            @{ Name = 'a 200 that is an object, not rows'; Status = 200; Throw = $false; UrlDown = $false; Json = [ordered]@{ error = 'gateway' } }
+            @{ Name = 'a 200 with a row it cannot read'; Status = 200; Throw = $false; UrlDown = $false; Json = @('<html>', @{ id = 'z9'; kind = 'image'; url = 'https://blob.fake.test/post-media/z9'; fileName = 'other.jpg' }) }
+            @{ Name = 'a 200 with a row missing its id'; Status = 200; Throw = $false; UrlDown = $false; Json = @(, @{ kind = 'image'; url = 'https://blob.fake.test/post-media/z9'; fileName = 'other.jpg' }) }
         ) {
             $script:Library = @(New-LibraryRow 'a1')
             if (-not $UrlDown) { $script:UrlSha['a1'] = $script:Photo.Sha256 }
+            if ($Json) { $script:LibraryJson = $Json; $script:Library = @() }
             $script:LibraryStatus = $Status
             if ($Throw) { Mock Invoke-PulseApi { throw 'GET /api/staff/media failed: Connection reset by peer.' } }
             $found = Find-UploadedMediaAsset -Context $script:Context -Unit $script:Photo
