@@ -217,7 +217,7 @@ the media buttons (06).
 | Seam | File(s) | When |
 |---|---|---|
 | S-1 Excel package | `src/Pulse.WebApi/Pulse.WebApi.csproj`: `ClosedXML` 0.105.1 | Before W1 (done on the umbrella 10/14) |
-| S-2 Backend composition root | `src/Pulse.WebApi/Program.cs`: `AddPostExport()/MapPostExport()`, `AddInjectImport()/MapInjectImport()`, `AddPostPins()/MapPostPins()`, `AddWhiteNoise()/MapWhiteNoise()` (after `AddInjects`/`AddPauseTierSteering`), one commit; `CompositionRootWiringTests` asserts each new route maps exactly once | After backend W1 merges |
+| S-2 Backend composition root | `src/Pulse.WebApi/Program.cs`: `AddPostExport()/MapPostExport()`, `AddInjectImport()/MapInjectImport()`, `AddPostPins()/MapPostPins()`, `AddWhiteNoise()/MapWhiteNoise()` (after `AddInjects`/`AddPauseTierSteering`), one commit; `CompositionRootWiringTests` asserts each new route maps exactly once. **Also** add `.WithExposedHeaders("Content-Disposition")` to the CORS policy so story 09 can read the export file name cross-origin (02 Gate-1 M2). **Merge 01 with a real merge, never a squash**: 02-05 merged earlier 01 heads, and a squash would bring back the superseded migration file (02 Gate-1 M3) | After backend W1 merges |
 | S-3 Staff registry | `features/staff/staffRouteRegistry.tsx`: `/staff/console` `allowedRoles: ['controller', 'evaluator']` (default for controller only) + its test; a console entry in the evaluator's surface launcher | With 11 |
 
 ## Gotchas that will bite a parallel builder
