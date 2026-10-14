@@ -12,7 +12,7 @@ using Pulse.WebApi.Data;
 namespace Pulse.WebApi.Data.Migrations
 {
     [DbContext(typeof(PulseDbContext))]
-    [Migration("20261014191518_DemoFeedbackPinsNoiseImport")]
+    [Migration("20261014202342_DemoFeedbackPinsNoiseImport")]
     partial class DemoFeedbackPinsNoiseImport
     {
         /// <inheritdoc />
@@ -646,8 +646,8 @@ namespace Pulse.WebApi.Data.Migrations
 
                     b.Property<string>("Text")
                         .IsRequired()
-                        .HasMaxLength(280)
-                        .HasColumnType("nvarchar(280)");
+                        .HasMaxLength(1024)
+                        .HasColumnType("nvarchar(1024)");
 
                     b.HasKey("Id");
 
