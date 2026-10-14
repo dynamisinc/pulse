@@ -123,7 +123,10 @@ public sealed class OrganizationScopeSweepTests
         // inject-queue/06 (#452): +1 for InjectQueueService.ReadExerciseFactsAsync — the slice's ONE read of the
         // exercise row, by the server-resolved scope (time zone, scenario fallback, and the tenant that bounds the
         // staff roster join, which itself carries .InOrganization(...) and so is not an exemption).
-        ["ResolvedScope"] = 23,
+        // easy-login/01 (EL-17): +1 for ExerciseFactsReader.GetAsync — the easy-login feature's ONE read of the
+        // exercise row, by a server-resolved id (IExerciseContext, or a server-issued Session's bound ExerciseId).
+        // Stories 02 to 06 read exercise facts through it, so this number must not move again for the feature.
+        ["ResolvedScope"] = 24,
 
         // orgAdmin startup seeder: +1 for OrgAdminSeedService, which resolves the seeded staff human by their
         // configured IdP ExternalSubject — the SAME resolve-by-subject read StaffLoginService and

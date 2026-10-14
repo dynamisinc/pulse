@@ -51,7 +51,10 @@ export function registerSessionReset(reset: SessionReset, hot?: HotModule): () =
   return unregister
 }
 
-/** Runs every registered reset. Called by `endSession`; never throws. */
+/**
+ * Runs every registered reset. Called by `resetClientSession` (sign-out and every
+ * sign-in); never throws.
+ */
 export function runSessionResets(): void {
   for (const reset of [...resets]) {
     try {

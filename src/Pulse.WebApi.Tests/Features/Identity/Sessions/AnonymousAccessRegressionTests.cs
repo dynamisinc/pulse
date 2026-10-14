@@ -142,7 +142,7 @@ public sealed class AnonymousAccessRegressionTests
         // every test in both suites. The literal pins it: GROWING the pre-auth allowlist must fail a test and force
         // a decision, not merely appear in a diff and hope a human notices (AC4).
         PreAuthAllowlist.Routes.Should().HaveCount(
-            11,
+            13,
             "the pre-auth allowlist is the one deliberately hand-maintained opt-out in the whole gate; a new entry "
             + "is a security decision and must be made explicitly here as well as there");
 

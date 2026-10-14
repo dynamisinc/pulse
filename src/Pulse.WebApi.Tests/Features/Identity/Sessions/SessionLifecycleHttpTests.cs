@@ -112,7 +112,9 @@ public sealed class SessionLifecycleHttpTests
             Role = "participant",
             ActingHumanId = "human-1",
             IsReadOnly = kind == "readonly",
-            IssuedAt = DateTimeOffset.UtcNow.AddMinutes(-5),
+            // "Now" (it was now - 5 min): easy-login story 06 refuses a participant refresh once the day of the
+            // session's last issue/refresh has ended, so a seed in the past would fail closed just after UTC midnight.
+            IssuedAt = DateTimeOffset.UtcNow,
             ExpiresAt = DateTimeOffset.UtcNow.AddHours(1),
             RefreshExpiresAt = DateTimeOffset.UtcNow.AddHours(12),
         });

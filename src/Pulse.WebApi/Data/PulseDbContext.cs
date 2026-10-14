@@ -168,6 +168,12 @@ public class PulseDbContext : DbContext
     /// <summary>The per-exercise queue-membership token row (inject-queue/06). Exercise-scoped (<see cref="IExerciseScoped"/>).</summary>
     public DbSet<InjectQueueState> InjectQueueStates => Set<InjectQueueState>();
 
+    /// <summary>Participants' personal sign-in links, one per account (easy-login/01, EL-5). Exercise-scoped (<see cref="IExerciseScoped"/>).</summary>
+    public DbSet<ParticipantLink> ParticipantLinks => Set<ParticipantLink>();
+
+    /// <summary>The hashed "word for the day", one per exercise per local date (easy-login/01, EL-9). Exercise-scoped (<see cref="IExerciseScoped"/>).</summary>
+    public DbSet<ExerciseDayWord> ExerciseDayWords => Set<ExerciseDayWord>();
+
     /// <inheritdoc />
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -527,6 +533,15 @@ public class PulseDbContext : DbContext
             // Login handle: bounded (index-key eligible) and unique PER EXERCISE, never globally (COR-004).
             entity.Property(e => e.Username).HasMaxLength(256);
             entity.HasIndex(e => new { e.ExerciseId, e.Username }).IsUnique();
+
+            // easy-login/01 (EL-1, EL-4, EL-8) — additive roster columns. Bounded free text (NFR-004), all NULLABLE
+            // so no existing row changes behaviour; PersonaAutoCreated is required-WITH-DEFAULT false, so the
+            // migration backfills existing rows to "not auto-created" and a raw insert that omits it is still valid.
+            // The default equals the CLR default, so EF's sentinel needs no override (contrast Persona.Castable).
+            entity.Property(e => e.Agency).HasMaxLength(Account.MaxAgencyLength);
+            entity.Property(e => e.JobRole).HasMaxLength(Account.MaxJobRoleLength);
+            entity.Property(e => e.Email).HasMaxLength(Account.MaxEmailLength);
+            entity.Property(e => e.PersonaAutoCreated).IsRequired().HasDefaultValue(false);
         });
 
         modelBuilder.Entity<SharedCredential>(entity =>
@@ -636,6 +651,48 @@ public class PulseDbContext : DbContext
             entity.HasKey(e => e.ExerciseId);
             entity.Property(e => e.ExerciseId).ValueGeneratedNever();
             entity.Property(e => e.Version).IsConcurrencyToken();
+        });
+
+        // ==========================================================================================
+        // easy-login/01 — the feature's ONE migration (EL-17). Both entities are IExerciseScoped, so the
+        // reflection loop below gives them the central read filter and GuardExerciseScope covers their writes;
+        // nothing here scopes them by hand. In each, the exercise-leading UNIQUE composite index doubles as the
+        // standard scoped lookup index, so no separate single-column ExerciseId index is added.
+        // ==========================================================================================
+        modelBuilder.Entity<ParticipantLink>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.ExerciseId).IsRequired();
+
+            // ONE link per account per exercise (EL-5): a reissue rotates the row in place. Scope leads the key.
+            entity.HasIndex(e => new { e.ExerciseId, e.AccountId }).IsUnique();
+
+            // The join lookup key: the SHA-256 of a 128-bit random token is globally unique. Bounded so it is
+            // index-key eligible; the hash is upper-case hex, so the case-insensitive collation changes nothing.
+            entity.Property(e => e.TokenHash).IsRequired().HasMaxLength(ParticipantLink.MaxTokenHashLength);
+            entity.HasIndex(e => e.TokenHash).IsUnique();
+
+            entity.Property(e => e.ProtectedToken).HasMaxLength(ParticipantLink.MaxProtectedTokenLength);
+        });
+
+        modelBuilder.Entity<ExerciseDayWord>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.ExerciseId).IsRequired();
+
+            // ONE word per exercise per local calendar date (EL-9); setting a date again replaces it in place.
+            // DateOnly maps to SQL `date`.
+            entity.HasIndex(e => new { e.ExerciseId, e.ForDate }).IsUnique();
+
+            entity.Property(e => e.WordHash).IsRequired().HasMaxLength(ExerciseDayWord.MaxWordHashLength);
+
+            // Concurrent writes to one date SERIALIZE (Copilot review on #486). Every rotation is ReplacedCount + 1
+            // and nothing else writes the row in place, so the count doubles as its optimistic-concurrency token: a
+            // rotation's UPDATE (and a clear's DELETE) carries `AND [ReplacedCount] = <the value read>`, so a writer
+            // whose read went stale matches no row and gets DbUpdateConcurrencyException instead of silently
+            // overwriting the other staff member's rotation and losing its increment. DayWordService re-reads and
+            // re-applies (bounded). Model-only: the existing int column, no DDL.
+            entity.Property(e => e.ReplacedCount).IsConcurrencyToken();
         });
 
         // ------------------------------------------------------------------------------------------

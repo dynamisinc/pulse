@@ -10,6 +10,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { resolveSession, isSessionExpired, type Session } from './sessionResolver'
+import { SessionExpiredError } from './sessionExpiredError'
 import { api } from '../services/api'
 
 vi.mock('../services/api', () => ({
@@ -74,6 +75,37 @@ describe('resolveSession', () => {
   it('fails closed when the resolved session is already expired (forces re-auth)', async () => {
     mockGet.mockResolvedValue(validBody({ expiresAt: new Date(Date.now() - 1000).toISOString() }))
     await expect(resolveSession()).rejects.toThrow(/expired/)
+  })
+
+  it('throws the TYPED SessionExpiredError for an expired session (W2-2), and only for that', async () => {
+    mockGet.mockResolvedValue(validBody({ expiresAt: new Date(Date.now() - 1000).toISOString() }))
+    const expired = await resolveSession().catch((e: unknown) => e)
+    expect(expired).toBeInstanceOf(SessionExpiredError)
+    expect(expired).toBeInstanceOf(Error)
+    expect((expired as Error).name).toBe('SessionExpiredError')
+    // Fixed, secret-free message.
+    expect((expired as Error).message).toBe(
+      'resolveSession: resolved session is already expired; re-auth required',
+    )
+
+    // A malformed body proves nothing about the sign-in: a plain Error, NOT the typed one.
+    const malformed = [
+      { data: null },
+      { data: '<html><body>Sign in to the venue Wi-Fi</body></html>' },
+      { data: {} },
+      validBody({ role: 'superuser' }),
+      validBody({ expiresAt: 'not-a-date' }),
+    ]
+    for (const response of malformed) {
+      mockGet.mockResolvedValue(response as Awaited<ReturnType<typeof api.get>>)
+      const error = await resolveSession().catch((e: unknown) => e)
+      expect(error).toBeInstanceOf(Error)
+      expect(error).not.toBeInstanceOf(SessionExpiredError)
+    }
+
+    // And a failed request is passed through untouched.
+    mockGet.mockRejectedValue(new Error('network down'))
+    expect(await resolveSession().catch((e: unknown) => e)).not.toBeInstanceOf(SessionExpiredError)
   })
 
   it('propagates request failures rather than falling back to a default session', async () => {

@@ -25,6 +25,11 @@ using Microsoft.AspNetCore.Routing;
 ///   scope before a session exists.</description></item>
 ///   <item><description>The three login endpoints — they ESTABLISH the session; each fails closed on its own
 ///   with anti-enumeration 401s and its own rate-limiter policy.</description></item>
+///   <item><description>The two easy-login sign-ins (feature easy-login, EL-7 / EL-9): <c>/api/auth/join</c> (the
+///   personal-link token in the POST body, story 03) and <c>/api/auth/word</c> (sign-in name + today's word,
+///   story 05). Like the three above they ESTABLISH a session, answer every refusal with the same bodyless 401,
+///   carry the 16 KiB login body limit and their own rate-limiter policy (<c>easy-login-join</c> /
+///   <c>easy-login-word</c>), and take the exercise only from the Host-resolved scope.</description></item>
 ///   <item><description><c>/api/auth/refresh</c> — self-gating: the refresh token IS the credential, read from
 ///   the request body.</description></item>
 ///   <item><description><c>/api/auth/logout</c> — deliberately a no-op 204 with no session. A client whose
@@ -58,7 +63,7 @@ public static class PreAuthAllowlist
 
     /// <summary>
     /// The allowlist, as <c>"{METHOD} {routePattern}"</c> keys matching
-    /// <see cref="RoutePattern.RawText"/>. Exactly eleven routes.
+    /// <see cref="RoutePattern.RawText"/>. Exactly thirteen routes.
     /// </summary>
     public static IReadOnlySet<string> Routes { get; } = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
@@ -66,6 +71,8 @@ public static class PreAuthAllowlist
         "POST /api/auth/login",
         "POST /api/auth/staff/login",
         "POST /api/auth/shared",
+        "POST /api/auth/join",
+        "POST /api/auth/word",
         "POST /api/auth/refresh",
         "POST /api/auth/logout",
         $"{AnyMethod} /health",

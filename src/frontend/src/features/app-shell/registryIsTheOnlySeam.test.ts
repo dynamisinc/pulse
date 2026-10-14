@@ -28,16 +28,19 @@ const SURFACE_LITERALS = [
   '/staff/evaluate',
   '/staff/plan',
   '/staff/exercises',
+  '/staff/participant-admin',
   // Shipped route compositions.
   'ControllerConsoleRoute',
   'EvaluatorDashboardRoute',
   'PlannerWorkspaceRoute',
   'ExerciseManagementRoute',
+  'ParticipantAdminSurface',
   // Shipped registry ids.
   'controller-console',
   'evaluator-dashboard',
   'planner-workspace',
   'exercise-management',
+  'participant-admin',
   // The registry module itself: the glue consumes an INJECTED registry, so even
   // importing the concrete table here would couple the two.
   'staffRouteRegistry',

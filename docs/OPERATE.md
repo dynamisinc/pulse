@@ -57,6 +57,21 @@ frontend second** — the exact opposite of promotion.
 Left unmanaged the failure is **transient and self-healing** — both workflows complete, so UAT blanks
 only for the window between them — but a tab holding the old bundle stays blank until a hard reload.
 
+## Easy login (participant sign-in)
+
+Decided by Tom on 2026-10-14 (#486, Tier-2 items 3, 4 and 7):
+
+- **Join links are built from `Authentication__FrontendBaseUrl`.** Infra sets it from `frontendUrl` in
+  `infrastructure/parameters/uat.bicepparam` (`https://pulse-uat.cobrasoftware.com`); the 2026-10-09
+  infra deploy applied it. Without it, the roster reports `joinLinksAvailable: false` and shows no links.
+- **The reprint keys** (ASP.NET DataProtection, under `/home/ASP.NET/DataProtection-Keys` on the App
+  Service) are stored unencrypted. That is accepted for UAT. Post-demo, protect them with Key Vault.
+- **If that key ring is lost** (the app is recreated, or moved to another region), printed cards and
+  links **still work**, because sign-in matches the token's hash. They just can't be **reprinted**. To
+  get a new card, use **Reissue** on the roster. That voids the old card, so hand out the new one.
+- **Shared devices: tap Sign out.** A participant session ends at midnight in the exercise time zone.
+  A **View-only code** session also persists, but is not day-capped (accepted for the demo).
+
 ## Rollback
 
 **Frontend (deploy-only):**

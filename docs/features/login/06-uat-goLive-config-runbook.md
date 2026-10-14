@@ -98,8 +98,10 @@ If a future story introduces environment-gated behavior (e.g. a dev-only diagnos
       - **Step 6** — the `uat` GitHub environment has `VITE_USE_MOCK_DATA=false` and
         `VITE_API_URL=https://app-pulse-api-uat-dynamis.azurewebsites.net/api`. Live `/login` renders the
         participant sign-in surface with the heading **"Sign in to Pulse UAT Pilot"** — the exercise name
-        resolved from the real backend, conclusive proof the SPA is off mock data — with the Account
-        sign-in / Exercise code tabs and the "Staff or controller? Sign in here." link to `/staff/login`.
+        resolved from the real backend, conclusive proof the SPA is off mock data — with the three
+        sign-in methods (Today's word, the default, then Password and View-only code; easy-login 09 renamed the
+        old Account sign-in / Exercise code tabs) and the "Staff or controller? Sign in here." link to
+        `/staff/login`.
         Live `/staff/login` renders username + secret only (no exercise field), COBRA-themed, as story 03
         specifies.
 

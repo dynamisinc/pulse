@@ -24,6 +24,16 @@
 export const LOGIN_PATH = '/login'
 
 /**
+ * The personal-link sign-in route's base (feature: easy-login, story 08).
+ * `routes.tsx` mounts `JoinPage` at `${JOIN_PATH}/:token` (a participant tapped
+ * their link or scanned their card) and at bare `JOIN_PATH` (what the address bar
+ * shows once the page has scrubbed the token, e.g. after a reload). Pre-auth, like
+ * {@link LOGIN_PATH}; `public/staticwebapp.config.json` sends no-referrer / no-store
+ * for everything under it.
+ */
+export const JOIN_PATH = '/join'
+
+/**
  * Where a staff/controller member signs in (feature: login, story 03, wired by
  * story 04). Deliberately a SEPARATE path from {@link LOGIN_PATH} rather than a
  * role-aware redirect target: a fail-closed case fires precisely when the role

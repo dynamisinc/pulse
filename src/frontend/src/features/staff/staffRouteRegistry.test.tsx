@@ -109,6 +109,48 @@ describe('STAFF_ROUTE_REGISTRY — the shipped paths (stable deep links)', () =>
     expect(byId.get('evaluator-dashboard')).toBe('/staff/evaluate')
     expect(byId.get('planner-workspace')).toBe('/staff/plan')
     expect(byId.get('exercise-management')).toBe('/staff/exercises')
+    expect(byId.get('participant-admin')).toBe('/staff/participant-admin')
+  })
+})
+
+describe('STAFF_ROUTE_REGISTRY — the participant-admin entry (easy-login, Gate-2 W-3)', () => {
+  const entry = STAFF_ROUTE_REGISTRY.find(candidate => candidate.id === 'participant-admin')
+
+  it('exists, so the roster / day-word / cards stack is reachable at all', () => {
+    // The regression this pins: stories 10-12 shipped a full surface that no URL led to.
+    expect(entry).toBeDefined()
+    expect(entry?.path).toBe('/staff/participant-admin')
+  })
+
+  it('mirrors the server gate exactly: controller and planner, nobody else', () => {
+    expect([...(entry?.allowedRoles ?? [])].sort()).toEqual(['controller', 'planner'])
+  })
+
+  it('is nobody\'s home page, so it moves no shipped role\'s default', () => {
+    expect(entry?.isDefaultFor).toBeUndefined()
+    expect(resolveDefaultStaffRoute(STAFF_ROUTE_REGISTRY, 'planner')?.id).toBe('planner-workspace')
+    expect(resolveDefaultStaffRoute(STAFF_ROUTE_REGISTRY, 'controller')?.id)
+      .toBe('controller-console')
+  })
+
+  it('files itself under Administer, beside exercise-management, for the launcher', () => {
+    expect(entry?.group).toBe('administer')
+    const administer = staffRoutesForRole(STAFF_ROUTE_REGISTRY, 'planner')
+      .filter(candidate => candidate.group === 'administer')
+      .map(candidate => candidate.id)
+    expect(administer).toEqual(['exercise-management', 'participant-admin'])
+  })
+
+  it('is invisible to the evaluator and the org admin', () => {
+    for (const role of ['evaluator', 'orgAdmin'] as const) {
+      expect(staffRoutesForRole(STAFF_ROUTE_REGISTRY, role).map(e => e.id))
+        .not.toContain('participant-admin')
+    }
+  })
+
+  it('gives the controller a SECOND surface, which un-degrades the launcher for them', () => {
+    expect(staffRoutesForRole(STAFF_ROUTE_REGISTRY, 'controller').map(e => e.id))
+      .toEqual(['controller-console', 'participant-admin'])
   })
 })
 

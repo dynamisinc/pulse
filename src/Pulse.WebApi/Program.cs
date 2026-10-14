@@ -10,6 +10,11 @@ using Pulse.WebApi.Features.ExerciseConfiguration.Lifecycle;
 using Pulse.WebApi.Features.ExerciseConfiguration.PracticeMode;
 using Pulse.WebApi.Features.ExerciseResolution;
 using Pulse.WebApi.Features.Identity.Accounts;
+using Pulse.WebApi.Features.Identity.DayWord;        // easy-login 05
+using Pulse.WebApi.Features.Identity.EasyLogin;      // easy-login 01
+using Pulse.WebApi.Features.Identity.LinkCards;      // easy-login 04
+using Pulse.WebApi.Features.Identity.PersonalLinks;  // easy-login 03
+using Pulse.WebApi.Features.Identity.Roster;         // easy-login 02
 using Pulse.WebApi.Features.Identity.Sessions;
 using Pulse.WebApi.Features.Identity.SharedAccess;
 using Pulse.WebApi.Features.Identity.Staff;
@@ -121,7 +126,7 @@ builder.Services.AddExerciseLifecycle();        // story 03 — COR-032 state ma
 // the bare Host header — so 12 routes and the SignalR hub were reachable with no credential at all. The
 // fallback policy applies to every endpoint that declares no authorization metadata of its own: minimal
 // APIs, MVC controllers (POST /api/telemetry) and hub endpoints alike, which an IEndpointFilter could not
-// have covered. The ONLY exceptions are the eleven routes in PreAuthAllowlist, each marked
+// have covered. The ONLY exceptions are the thirteen routes in PreAuthAllowlist, each marked
 // .AllowAnonymousPreAuth() at its own mapping call site.
 builder.Services.AddSessionAuthorization();
 
@@ -138,6 +143,19 @@ builder.Services.AddSharedReadOnly();
 // rotation-grace + brute-force lockout over story 06's SharedCredential. Reuses 06's "shared-login"
 // rate-limiter policy (registers no new limiter); staff endpoints are gated by ICurrentStaffSessionAccessor.
 builder.Services.AddSharedCredentialLifecycle();
+
+// Easy participant login (feature easy-login, #465; docs/features/easy-login/implementation.md). 01's
+// AddEasyLoginFoundation registers the shared kernel (options + startup check, Data Protection for the reprintable
+// link copy, token protector, join-URL builder, exercise-facts reader) and a fail-closed null link issuer that 03's
+// AddPersonalLinks REPLACES with the real one, whichever runs first. 02 roster provisioning, 04 link cards + QR and
+// 05 the day word add their own slices; 03 and 05 each add one named rate-limit policy (easy-login-join /
+// easy-login-word) under the single app.UseRateLimiter() above. 06's day-long participant sessions live inside
+// AddSessions (above) and need no line here. All depend on AddStaffIdentity, AddSessions and AddExerciseClock.
+builder.Services.AddEasyLoginFoundation();
+builder.Services.AddRoster();
+builder.Services.AddPersonalLinks();
+builder.Services.AddLinkCards();
+builder.Services.AddDayWord();
 
 // Exercise lifecycle administration (E1 exercise-lifecycle-admin, COR-074/075/076) — the ORGANIZATION-tier
 // staff slice: POST/GET /api/org/exercises and GET /api/org/staff-assignments. Registers the slice's three
@@ -318,7 +336,7 @@ app.UseOrganizationResolution();
 // immediately after UseSessionAuthentication, which is what populates HttpContext.User for a live session.
 // WebApplication auto-inserts UseAuthorization() ahead of ALL user middleware when it is never called
 // explicitly; that placement would evaluate the fallback policy before the principal exists. The failure would
-// be SILENT and nastier than a total outage: the eleven allowlisted routes keep working (IAllowAnonymous
+// be SILENT and nastier than a total outage: the thirteen allowlisted routes keep working (IAllowAnonymous
 // short-circuits the middleware wherever it sits), so login still succeeds — and then every authenticated call
 // after it 401s. Calling it here is load-bearing, not stylistic — the same class of ordering constraint as
 // host-resolution-before-session-authentication above. From this line on, an endpoint is reachable without a
@@ -436,6 +454,10 @@ app.MapStaffAuthEndpoints();        // #62 POST /api/auth/staff/login, GET /api/
 app.MapSharedReadOnlyEndpoints();          // #63 POST /api/auth/shared (view-only session + ephemeral identity)
 app.MapAccountEndpoints();                 // #59 POST /api/auth/login, POST /api/staff/accounts[/import]
 app.MapSharedCredentialLifecycleEndpoints(); // #64 POST /api/staff/shared-credential/{rotate,revoke}
+app.MapPersonalLinkEndpoints();            // easy-login 03 POST /api/auth/join (pre-auth), POST /api/staff/roster/{id}/{link/reissue,link/revoke,disable,enable}
+app.MapDayWordEndpoints();                 // easy-login 05 POST /api/auth/word (pre-auth), GET/PUT/DELETE /api/staff/day-word
+app.MapRosterEndpoints();                  // easy-login 02 GET/POST /api/staff/roster, POST /api/staff/roster/import
+app.MapLinkCardEndpoints();                // easy-login 04 POST /api/staff/roster/cards
 app.MapBootstrapEndpoints();               // #308 POST /api/ops/bootstrap-exercise (secret-gated seed; 404 when unconfigured)
 app.MapEngineContentSeedEndpoints();       // #327 POST /api/ops/seed-engine-content (secret-gated engine drive path; 404 when unconfigured)
 

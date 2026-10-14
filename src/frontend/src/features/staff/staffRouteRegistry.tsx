@@ -54,11 +54,13 @@ import {
   faFolderOpen,
   faGear,
   faSliders,
+  faUsers,
 } from '@fortawesome/free-solid-svg-icons'
 import type { StaffRouteRegistry } from '@/features/app-shell'
 import { ControllerConsoleRoute } from '@/features/controller'
 import { EvaluatorDashboardRoute } from '@/features/evaluator'
 import { ExerciseManagementRoute } from '@/features/exerciseLifecycleAdmin'
+import { ParticipantAdminSurface } from '@/features/participantAdmin'
 import { PlannerWorkspaceRoute } from '@/features/planner'
 
 /**
@@ -128,6 +130,31 @@ const REGISTRY_TABLE = [
     isDefaultFor: ['orgAdmin'],
     group: 'administer',
     description: 'Create exercises and see every run your organization owns.',
+  },
+  {
+    // SURFACE #5 (easy-login, Gate-2 W-3): the roster, "Today's word" and the printable
+    // card sheet. It was built and tested but UNREACHABLE until this entry existed.
+    //
+    // `allowedRoles` mirrors the server gate for the roster / day-word / cards endpoints
+    // exactly: `controller` OR `planner` assigned to the exercise. An evaluator or an
+    // org-admin would get a 403 on every call, so the surface is simply not offered
+    // (and a typed URL redirects to their own default, like any other gated path).
+    //
+    // No `isDefaultFor`: it is nobody's home page. The planner and controller keep
+    // `/staff/plan` and `/staff/console`; they gain this as a second destination
+    // under Administer in the surface launcher.
+    //
+    // `element` is `ParticipantAdminSurface`, NOT `ParticipantAdminRoute`: the surface
+    // is the route with the day-word and print-cards slots composed in. The bare route
+    // renders the roster alone (see `participantAdmin/ParticipantAdminSurface.tsx`).
+    id: 'participant-admin',
+    path: '/staff/participant-admin',
+    label: 'Participants',
+    icon: faUsers,
+    element: <ParticipantAdminSurface />,
+    allowedRoles: ['planner', 'controller'],
+    group: 'administer',
+    description: 'Who can sign in: the roster, personal links, today\'s word and printable cards.',
   },
 ] as const satisfies StaffRouteRegistry
 

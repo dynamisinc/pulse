@@ -88,7 +88,8 @@ functional walk starts; final re-run Mon 10/19 after the final reset.
 
 ## Tests
 - Pester (or documented dry run): pack validation matrix (each rule, including the inject queue's), offset math,
-  manifest idempotency (second run issues zero uploads, posts and run-sheet items), the run-sheet load (exact
+  manifest idempotency (second run issues zero uploads, posts and run-sheet items; an uncertain upload is looked
+  up in the media library and adopted, never re-sent), the run-sheet load (exact
   `POST /api/injects` bodies against a fake that enforces the server's 400 rules; uncertain creates adopted,
   never re-sent; spent items reported, failed by the self-check and reloaded by `-ReloadFiredRunSheet`), no
   secret in output, API-path allowlist grep checked against this story's list.
