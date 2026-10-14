@@ -42,7 +42,7 @@
     written to disk, and the web cmdlet's own verbose and debug output is switched off. Join links are
     personal sign-in credentials. They are written only to the -OutFile you asked for (gitignored by
     default), with permissions for the current user only (mode 600 on Linux and macOS, an owner-only ACL on
-    Windows), and to the clipboard only with -CopyLinks. Each cell of that file that begins with =, +, -, @,
+    Windows; if that ACL cannot be set, no file is written at all), and to the clipboard only with -CopyLinks. Each cell of that file that begins with =, +, -, @,
     a tab or a carriage return (or with =, +, - or @ after leading spaces or control characters) is prefixed
     with ' so a spreadsheet never runs it as a formula (names come from outside agencies).
 
@@ -695,8 +695,14 @@ function New-PrivateFileStream {
         and macOS, an owner-only ACL without inheritance on Windows. FileMode.CreateNew never follows or reuses
         whatever is at the path. A file (or a link) already there is removed first: only ever a leaf, never a
         folder (Resolve-LinksFilePath refused one before anything was sent).
+    .DESCRIPTION
+        FAILS CLOSED (Copilot review on #486). The file is a list of bearer credentials, so when the owner-only
+        ACL cannot be set it is NEVER written with its folder's inherited permissions instead: whatever the
+        failed attempt left is removed and this throws. The caller reports "the import was saved, but the links
+        file could not be written" and the operator re-runs (every row comes back unchanged).
+        -WindowsAcl defaults to $IsWindows; the tests force it on Linux, where the ACL APIs throw, to prove that.
     #>
-    param([Parameter(Mandatory)] [string] $Path)
+    param([Parameter(Mandatory)] [string] $Path, [bool] $WindowsAcl = $IsWindows)
     $directory = Split-Path -Parent $Path
     if ($directory -and -not (Test-Path -LiteralPath $directory -PathType Container)) { New-Item -ItemType Directory -Path $directory -Force | Out-Null }
     $existing = Get-Item -LiteralPath $Path -Force -ErrorAction Ignore
@@ -706,7 +712,7 @@ function New-PrivateFileStream {
         [System.IO.File]::Delete($Path)     # unlinks a file or a link (never its target); it cannot delete a folder
     }
 
-    if ($IsWindows) {
+    if ($WindowsAcl) {
         try {
             Add-Type -AssemblyName System.IO.FileSystem.AccessControl
             $security = [System.Security.AccessControl.FileSecurity]::new()
@@ -718,10 +724,13 @@ function New-PrivateFileStream {
                 [System.Security.AccessControl.FileSystemRights]::Write, [System.IO.FileShare]::None, 4096, [System.IO.FileOptions]::None, $security)
         }
         catch {
-            Write-Warning "Could not create the links file with an owner-only ACL ($(Get-FileFailureReason $_.Exception $Path)); it gets its folder's permissions. Delete it when you are done."
-            $left = Get-Item -LiteralPath $Path -Force -ErrorAction Ignore     # an empty file the failed attempt may have left
-            if ($left -is [System.IO.FileInfo] -and $left.Length -eq 0) { [System.IO.File]::Delete($Path) }
-            return [System.IO.FileStream]::new($Path, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
+            $reason = Get-FileFailureReason $_.Exception $Path
+            # Anything at the path now is ours (CreateNew, after the removal above): remove it, then stop.
+            $left = Get-Item -LiteralPath $Path -Force -ErrorAction Ignore
+            if ($left -is [System.IO.FileInfo]) {
+                try { [System.IO.File]::Delete($Path) } catch { Write-Warning "An empty links file may be left at $Path; delete it." }
+            }
+            throw "an owner-only ACL could not be set ($reason), so no links file was written; choose an -OutFile in a folder you own"
         }
     }
 
@@ -736,13 +745,13 @@ function New-PrivateFileStream {
 
 function Write-PrivateTextFile {
     <# Writes UTF-8 with a BOM (so Excel reads accented names correctly) to a file only the current user can read. #>
-    param([Parameter(Mandatory)] [string] $Path, [Parameter(Mandatory)] [string] $Text)
+    param([Parameter(Mandatory)] [string] $Path, [Parameter(Mandatory)] [string] $Text, [bool] $WindowsAcl = $IsWindows)
     $preamble = [System.Text.UTF8Encoding]::new($true).GetPreamble()
     $bytes = [System.Text.Encoding]::UTF8.GetBytes($Text)
     $stream = $null
     $written = $false
     try {
-        $stream = New-PrivateFileStream -Path $Path
+        $stream = New-PrivateFileStream -Path $Path -WindowsAcl $WindowsAcl
         $stream.Write($preamble, 0, $preamble.Length)
         $stream.Write($bytes, 0, $bytes.Length)
         $stream.Dispose()

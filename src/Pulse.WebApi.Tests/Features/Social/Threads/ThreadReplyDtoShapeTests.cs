@@ -93,7 +93,8 @@ public class ThreadReplyDtoShapeTests
             Origin = "inject",
             ActingHumanId = "human-x",
             CreatedWallClock = DateTimeOffset.UnixEpoch,
-            InjectId = "043",
+            // A sentinel no serialized GUID can contain: "043" collided with a random id about 1 run in 50.
+            InjectId = "INJECT-ID-MUST-NOT-LEAK",
             BaselineLikeCount = 96,
             BaselineRepostCount = 40,
             BaselineReplyCount = 12,
@@ -111,7 +112,7 @@ public class ThreadReplyDtoShapeTests
         node["status"]!.GetValue<string>().Should().Be("taken-down");
         node["scenarioTime"]!.GetValue<string>().Should().Be(reply.CreatedScenarioTime.ToString("O"), "scenario time is emitted round-trip (COR-053)");
         JsonNode.DeepEquals(node["counts"], JsonNode.Parse("""{"reply":0,"repost":0,"like":0}""")).Should().BeTrue();
-        json.Should().NotContain("TOMBSTONE-BODY-MUST-NOT-LEAK").And.NotContain("043").And.NotContain("human-x");
+        json.Should().NotContain("TOMBSTONE-BODY-MUST-NOT-LEAK").And.NotContain("INJECT-ID-MUST-NOT-LEAK").And.NotContain("human-x");
     }
 
     [Fact]
