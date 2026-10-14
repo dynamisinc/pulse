@@ -292,6 +292,7 @@ namespace Pulse.WebApi.Data.Migrations
                         .HasColumnType("date");
 
                     b.Property<int>("ReplacedCount")
+                        .IsConcurrencyToken()
                         .HasColumnType("int");
 
                     b.Property<DateTimeOffset>("SetAt")

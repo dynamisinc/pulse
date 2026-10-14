@@ -31,12 +31,19 @@ the **real date in the exercise time zone**, never scenario time.
       stripped, lower-cased, only `a-z0-9` kept) or it is `400`. The response is `DayWordSetResultDto` and carries
       the **plaintext once**; storage holds only the `ISharedCredentialHasher` hash, and no later call can read it.
       Setting a date that already has a word **replaces** it in place (`replaced: true`, `ReplacedCount` + 1): a
-      rotation. It takes effect on the very next sign-in attempt.
+      rotation. It takes effect on the very next sign-in attempt. *(Amended 2026-10-14, Copilot review on #486.)*
+      Concurrent writes to one date **serialize**: `ReplacedCount` is the row's optimistic-concurrency token, so a
+      set or clear whose read went stale before its save re-reads and re-applies the same caller's write on top of
+      the other (at most 3 tries, then a `500`, never a loop). Every successful rotation is counted, the word a set
+      returns was the current word when it committed (`replaced` describes the row at that commit, so a rotation
+      that lost to a clear is a first set), and no request fails merely because another landed at the same moment.
 - [ ] **Given** `GET /api/staff/day-word`, **then** it answers `DayWordStatusDto`: the zone, today's date, when
       today ends, whether today's word is set, who set it (display name, from a `StaffUsers` read bounded with
       `.InOrganization(...)`) and when, how many times it was replaced, and the dates with words pre-set (never the
       words). **Given** `DELETE /api/staff/day-word[?date=]`, **then** that date's row is removed (`204`,
-      idempotent) and the word path is closed for it until a new word is set.
+      idempotent) and the word path is closed for it until a new word is set. *(Amended 2026-10-14, Copilot review
+      on #486.)* A clear racing a rotation of the same date clears the rotated word too (it is applied after it); a
+      clear racing another clear is the idempotent `204`, and only the one that removed the row emits.
 - [ ] **Given** a request to `POST /api/auth/word { signInName, word }` with today's word and an **enabled**
       participant account of that sign-in name in the host-resolved exercise (name matched case-insensitively,
       trimmed), in an exercise that is Staged/Live/Paused, **then** it answers `200` with exactly the
@@ -103,7 +110,8 @@ shape, two calls differ), `DayWordServiceTests` (set, generate, replace/rotate, 
 plaintext never persisted), `WordLoginServiceTests` (success, the full uniform-401 matrix, decoy path taken when no
 word, name case-insensitivity, lifecycle refusal), `DayWordBoundaryTests` (fake clock, DST, zones),
 `DayWordEndpointsHttpTests` (200/204/400/401/403/429, `no-store`, body limit), `DayWordIsolationTests`
-(`[RequiresDockerFact]`), `DayWordTelemetryTests` (events valid, the word appears nowhere).
+(`[RequiresDockerFact]`), `DayWordTelemetryTests` (events valid, the word appears nowhere), `DayWordConcurrencyTests`
+(concurrent rotations and clears serialize; the retry bound).
 
 ### Linked tests (builder)
 
@@ -123,6 +131,13 @@ AC5 day boundary; XC-ISO isolation, XC-TEL telemetry, XC-SEC content security an
   `.Set_AWordShorterThanSixOnceNormalised_Is400_AndTheReasonNeverQuotesIt`,
   `.Set_AWordLongerThan64OnceNormalised_OrOverTheRawBound_Is400`, `.Set_AnAccentedWord_IsAcceptedOnItsFoldedLength`,
   `.Set_WhenAnotherFirstSetWinsTheRace_RetriesOnceAsARotation` (AC1)
+- `DayWordConcurrencyTests.Set_TwoRotationsRacingOnOneRow_BothApply_AndReplacedCountCountsBoth`,
+  `.Set_ARotationRacingAClearThatCommitsFirst_SetsTheWordAfresh_AsAFirstSet`,
+  `.Set_WhenEverySaveLosesARace_FailsAfterTheBound_WithoutLooping`,
+  `.ReplacedCount_IsTheConcurrencyToken_InTheModel_TheSnapshot_AndTheEasyLoginMigration` (AC1);
+  `.Clear_RacingARotationThatCommitsFirst_StillClears_OnTopOfIt`,
+  `.Clear_RacingAnotherClear_IsStillIdempotent_AndOnlyTheRemoverEmits`,
+  `.Clear_WhenEverySaveLosesARace_FailsAfterTheBound_WithoutLooping` (AC2) *(added 2026-10-14, Copilot review on #486)*
 - `DayWordServiceTests.Status_WithNoWord_ReportsTheZoneTodayAndItsEnd`,
   `.Status_WithWords_ReportsWhoWhenHowOftenAndThePresetDates_NeverAWord`,
   `.Status_ASetterOutsideTheExercisesTenant_IsNotNamed`, `.Status_InAnUnknownZone_FallsBackToUtcAndSaysSo_AndWarnsOnce`,

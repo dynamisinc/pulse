@@ -41,6 +41,11 @@ public sealed class ExerciseDayWord : IExerciseScoped
     /// <summary>The <see cref="StaffUser"/> who set the current word.</summary>
     public Guid SetByStaffUserId { get; set; }
 
-    /// <summary>How many times the word for this date was replaced after it was first set. Defaults to 0.</summary>
+    /// <summary>
+    /// How many times the word for this date was replaced after it was first set. Defaults to 0. Also the row's
+    /// optimistic-concurrency token (<c>PulseDbContext.OnModelCreating</c>): every rotation increments it, so a rotation
+    /// or clear whose read went stale matches no row, and concurrent rotations serialize instead of losing a count
+    /// (Copilot review on #486).
+    /// </summary>
     public int ReplacedCount { get; set; }
 }

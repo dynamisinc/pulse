@@ -37,11 +37,25 @@ using Pulse.WebApi.Features.Identity.Staff;
 /// never used for it; it appears only on the telemetry envelope (COR-053). One clock read per operation is shared by
 /// the row and its event.
 /// </para>
+/// <para>
+/// <b>Concurrent writes to one date serialize</b> (Copilot review on #486). <see cref="ExerciseDayWord.ReplacedCount"/>
+/// is the row's optimistic-concurrency token, so a set or clear whose read went stale before its save is refused by the
+/// database, re-reads, and re-applies the same caller's write on top of what committed (at most
+/// <see cref="MaxWriteAttempts"/> tries). Every successful rotation counts, the word a set returns was the current word
+/// when it committed, and a request never fails merely because another staff member wrote the same date at once.
+/// </para>
 /// </remarks>
 public sealed class DayWordService
 {
     /// <summary>How many days past today a word may be pre-set (today plus 14, inclusive).</summary>
     public const int MaxDaysAhead = 14;
+
+    /// <summary>
+    /// How many times one set or clear tries its write when another staff member's write to the same (exercise, date)
+    /// row keeps committing between its read and its save: the first try plus two re-reads. Past it the request fails
+    /// (the last lost-race exception propagates) rather than loop.
+    /// </summary>
+    public const int MaxWriteAttempts = 3;
 
     /// <summary>The wire format of a calendar date (<see cref="EasyLoginWire.DateFormat"/>).</summary>
     public const string DateFormat = EasyLoginWire.DateFormat;
@@ -255,55 +269,60 @@ public sealed class DayWordService
 
         // 3. One row per (exercise, date): replace in place when one exists (a rotation), else insert. Tracked read
         //    under the central filter, so it can only ever be this exercise's row.
+        //
+        //    Concurrent writes to one date SERIALIZE (Copilot review on #486): each request is applied on top of
+        //    whatever committed before it, none is silently overwritten, and none fails merely because another staff
+        //    member wrote the same date at the same moment. Our save can lose a race in two ways, retried alike:
+        //      - another rotation (or a clear) committed between our read and our UPDATE. ReplacedCount is the row's
+        //        concurrency token (PulseDbContext), so our UPDATE carries `AND ReplacedCount = <the count we read>`,
+        //        matches no row, and EF raises DbUpdateConcurrencyException. (Without the token the UPDATE overwrote
+        //        the other rotation and wrote OUR read count + 1 over theirs: last writer won and one increment, which
+        //        the panel shows as "Replaced N times", was lost.)
+        //      - Gate-1 W-3: another staff member's FIRST set committed between our read and our INSERT, so the
+        //        (ExerciseId, ForDate) unique index refused ours.
+        //    Either way: drop the refused write and its event, re-read the row as it now is under the central filter,
+        //    and apply the SAME word on top of it: a rotation when a row exists, a first set when it was cleared in
+        //    between. No 409: the caller asked for this word to be the date's word, and at our commit it is. Exactly
+        //    one credential.rotated is written, with the save that commits. Bounded by MaxWriteAttempts: past it the
+        //    last exception propagates (it names the table, index or key, never the word) rather than loop.
         var eventTime = EasyLoginEventTime.For(context.ExerciseId, context.Facts, _exerciseClock, now);
-        var row = await FindRowAsync(context.ExerciseId, date, cancellationToken);
-
-        var replaced = row is not null;
-        if (row is null)
+        bool replaced;
+        for (var attempt = 1; ; attempt++)
         {
-            row = new ExerciseDayWord
+            var row = await FindRowAsync(context.ExerciseId, date, cancellationToken);
+
+            replaced = row is not null;
+            if (row is null)
             {
-                Id = Guid.NewGuid(),
-                ExerciseId = context.ExerciseId,
-                ForDate = date,
-                WordHash = hash,
-                SetAt = now,
-                SetByStaffUserId = context.StaffUserId,
-                ReplacedCount = 0,
-            };
-            _dbContext.ExerciseDayWords.Add(row);
-        }
-        else
-        {
-            Replace(row, hash, now, context.StaffUserId);
-        }
-
-        _dbContext.TelemetryEvents.Add(SetEvent(context, row.Id, date, first: !replaced, generated, eventTime));
-
-        try
-        {
-            await _dbContext.SaveChangesAsync(cancellationToken);
-        }
-        catch (DbUpdateException ex) when (!replaced && IsUniqueViolation(ex))
-        {
-            // Gate-1 W-3: another staff member's FIRST set for the same date committed between our read and our
-            // insert, so the (ExerciseId, ForDate) unique index refused ours. Exactly one retry, as a rotation: drop
-            // the refused insert and its event, re-read the winner's row under the central filter, and replace it in
-            // place. No 409: the caller asked for this word to be the date's word, and now it is.
-            _dbContext.ChangeTracker.Clear();
-
-            var winner = await FindRowAsync(context.ExerciseId, date, cancellationToken);
-            if (winner is null)
+                row = new ExerciseDayWord
+                {
+                    Id = Guid.NewGuid(),
+                    ExerciseId = context.ExerciseId,
+                    ForDate = date,
+                    WordHash = hash,
+                    SetAt = now,
+                    SetByStaffUserId = context.StaffUserId,
+                    ReplacedCount = 0,
+                };
+                _dbContext.ExerciseDayWords.Add(row);
+            }
+            else
             {
-                // The winner was cleared again in between: nothing coherent to replace. Fail rather than loop (the
-                // exception names the index and key, never the word).
-                throw;
+                Replace(row, hash, now, context.StaffUserId);
             }
 
-            Replace(winner, hash, now, context.StaffUserId);
-            _dbContext.TelemetryEvents.Add(SetEvent(context, winner.Id, date, first: false, generated, eventTime));
-            await _dbContext.SaveChangesAsync(cancellationToken);
-            replaced = true;
+            _dbContext.TelemetryEvents.Add(SetEvent(context, row.Id, date, first: !replaced, generated, eventTime));
+
+            try
+            {
+                await _dbContext.SaveChangesAsync(cancellationToken);
+                break;
+            }
+            catch (DbUpdateException ex) when (attempt < MaxWriteAttempts && IsLostRace(ex, inserted: !replaced))
+            {
+                // Lost the race: forget the refused insert or update and its event, then go round and re-read.
+                _dbContext.ChangeTracker.Clear();
+            }
         }
 
         return DayWordResult.ForSet(new DayWordSetResultDto
@@ -351,23 +370,37 @@ public sealed class DayWordService
             return DayWordResult.Invalid(ClearRangeError);
         }
 
-        var row = await FindRowAsync(context.ExerciseId, date, cancellationToken);
-        if (row is null)
+        // Concurrent writes to one date serialize here too (Copilot review on #486). Our DELETE carries the
+        // ReplacedCount concurrency token, so it matches no row when, between our read and our save, another staff
+        // member rotated the word (the count moved) or cleared it (the row is gone), and EF raises
+        // DbUpdateConcurrencyException. Neither is a 500: drop the refused delete and its event, re-read, and apply
+        // the clear again on top of what committed. A word rotated meanwhile is cleared too (the clear is the later
+        // request, and the staff member closing the word path must not be left with a word still open that they never
+        // saw); a row another clear already removed is the idempotent no-op (that clear wrote the one
+        // credential.revoked; this one writes none). Bounded by MaxWriteAttempts, exactly as a set.
+        var eventTime = EasyLoginEventTime.For(context.ExerciseId, context.Facts, _exerciseClock, now);
+        for (var attempt = 1; ; attempt++)
         {
-            return DayWordResult.Cleared();
+            var row = await FindRowAsync(context.ExerciseId, date, cancellationToken);
+            if (row is null)
+            {
+                return DayWordResult.Cleared();
+            }
+
+            _dbContext.ExerciseDayWords.Remove(row);
+            _dbContext.TelemetryEvents.Add(EasyLoginTelemetry.DayWordCleared(context.ExerciseId, context.Actor, row.Id, date, eventTime));
+
+            try
+            {
+                await _dbContext.SaveChangesAsync(cancellationToken);
+                return DayWordResult.Cleared();
+            }
+            catch (DbUpdateConcurrencyException) when (attempt < MaxWriteAttempts)
+            {
+                // Lost the race: forget the refused delete and its event, then go round and re-read.
+                _dbContext.ChangeTracker.Clear();
+            }
         }
-
-        _dbContext.ExerciseDayWords.Remove(row);
-        _dbContext.TelemetryEvents.Add(EasyLoginTelemetry.DayWordCleared(
-            context.ExerciseId,
-            context.Actor,
-            row.Id,
-            date,
-            EasyLoginEventTime.For(context.ExerciseId, context.Facts, _exerciseClock, now)));
-
-        await _dbContext.SaveChangesAsync(cancellationToken);
-
-        return DayWordResult.Cleared();
     }
 
     /// <summary>Parses a strict <c>yyyy-MM-dd</c> calendar date.</summary>
@@ -380,6 +413,15 @@ public sealed class DayWordService
     /// <summary>Whether a save failed on a unique index (SQL Server 2601 duplicate key, 2627 unique constraint).</summary>
     private static bool IsUniqueViolation(DbUpdateException exception) =>
         exception.InnerException is SqlException { Number: DuplicateKeyErrorNumber or UniqueConstraintErrorNumber };
+
+    /// <summary>
+    /// Whether a set's save lost a race to another writer of the same (exercise, date) row: our INSERT lost to another
+    /// first set on the unique index (<paramref name="inserted"/>), or our UPDATE matched no row because a rotation or a
+    /// clear committed since our read (<see cref="DbUpdateConcurrencyException"/>, raised on the
+    /// <see cref="ExerciseDayWord.ReplacedCount"/> concurrency token). Anything else is not a race and is not retried.
+    /// </summary>
+    private static bool IsLostRace(DbUpdateException exception, bool inserted) =>
+        inserted ? IsUniqueViolation(exception) : exception is DbUpdateConcurrencyException;
 
     /// <summary>Rotates <paramref name="row"/> in place to the new hash (ReplacedCount + 1).</summary>
     private static void Replace(ExerciseDayWord row, string hash, DateTimeOffset now, Guid staffUserId)
