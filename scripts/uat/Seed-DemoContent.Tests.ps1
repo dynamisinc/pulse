@@ -1643,6 +1643,20 @@ Describe 'Media upload: an uncertain outcome is looked up and adopted, never sen
             $found.Others | Should -Be 1
         }
 
+        It 'a FULL page with no match proves absence only when it reaches a row from before the upload' {
+            # 200 newer rows of other names (newest first): the upload, had it landed, could sit below this page.
+            $script:Library = @(1..200 | ForEach-Object { New-LibraryRow ('n{0:000}' -f $_) -FileName "other-$_.jpg" })
+            $cannot = Find-UploadedMediaAsset -Context $script:Context -Unit $script:Photo -KnownIds @('old1')
+            $cannot.Outcome | Should -Be 'unknown'
+            $cannot.Detail | Should -Match 'do not reach back to before that upload'
+            $cannot.Detail | Should -Match 'remove its "pending" mark'
+            # The page's last row predates the upload: everything newer is on it, so "not there" is proven.
+            (Find-UploadedMediaAsset -Context $script:Context -Unit $script:Photo -KnownIds @('n200')).Outcome | Should -Be 'none'
+            # A page under the cap is the whole library.
+            $script:Library = @($script:Library | Select-Object -First 199)
+            (Find-UploadedMediaAsset -Context $script:Context -Unit $script:Photo).Outcome | Should -Be 'none'
+        }
+
         It 'cannot tell (<Name>) -> unknown, so the caller sends nothing' -ForEach @(
             @{ Name = 'the library answers 503'; Status = 503; Throw = $false; UrlDown = $false }
             @{ Name = 'the library does not answer'; Status = 200; Throw = $true; UrlDown = $false }

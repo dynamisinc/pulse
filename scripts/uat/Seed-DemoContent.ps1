@@ -40,7 +40,9 @@
          leaves the mark, and the next run looks for that upload the same way before it sends the file again
          (when the file's bytes, and a video's poster's bytes, are still the ones it sent). A pending video keeps
          its poster even though the library no longer lists it: the library hides an image once a video uses
-         it as its poster. Each look-up download has one deadline, body included.
+         it as its poster. Each look-up download has one deadline, body included. The library returns at most
+         its newest 200 rows of a kind. "Not there" counts only when those rows reach back to before the
+         upload; otherwise the script cannot tell, and it stops.
       8. Edits persona profiles: PATCH /api/staff/personas/{id} as a JSON merge-patch, covering display name,
          bio, location, verified, avatar and banner. Only the fields that differ are sent.
       9. Posts the opening feed as controller-as-persona (POST /api/posts) in scenario-time order, with
@@ -2445,8 +2447,9 @@ function Find-UploadedMediaAsset {
     .DESCRIPTION
         A GET /api/staff/media row has no size, hash or uploader, but its url (and posterUrl) is pre-signed, so the
         bytes themselves are compared. The candidates are the rows Select-MediaUploadCandidates keeps: the file's
-        kind, name, hints and poster, not in KnownIds (rows of that name the library held before the upload) and
-        not claimed. Each candidate's bytes, and its poster's, are fetched from the signed URL (Get-MediaUrlSha256,
+        kind, name, hints and poster, not in KnownIds (rows the library held before the upload: those of that name,
+        and its newest few) and not claimed. "Not there" needs proof too: a full page (Take rows) counts only when it
+        reaches one of the KnownIds, else the answer is 'unknown'. Each candidate's bytes, and its poster's, are fetched from the signed URL (Get-MediaUrlSha256,
         no token) and must hash to the file's SHA-256 and the poster file's. The library lists the newest upload
         first, so the first match is adopted; Others counts any further copies (an earlier attempt that also
         landed). 'unknown' means the library or a candidate's URL did not answer, so it cannot tell: the caller must
@@ -2480,8 +2483,16 @@ function Find-UploadedMediaAsset {
         }
         $found.Add([string] $row['id'])
     }
-    if ($found.Count -eq 0) { return & $result 'none' $null 0 $null }
-    return & $result 'found' $found[0] ($found.Count - 1) $null
+    if ($found.Count -gt 0) { return & $result 'found' $found[0] ($found.Count - 1) $null }
+    # A FULL page is no proof of absence: newest first, the upload could sit below it. It is proof once the page reaches
+    # a row that was there before the upload (KnownIds): every newer row, the upload included, is then on the page.
+    $rows = @($response.Json)
+    $reachesBack = @($rows | Where-Object { $_ -is [System.Collections.IDictionary] -and $KnownIds -contains [string] $_['id'] }).Count -gt 0
+    if ($rows.Count -ge $Take -and -not $reachesBack) {
+        return & $result 'unknown' $null 0 ("the media library's newest $Take $($Unit.Kind)s do not reach back to before that upload, so they cannot show whether it is there " +
+            '(to send the file anyway, accepting a possible second copy, remove its "pending" mark from the manifest)')
+    }
+    return & $result 'none' $null 0 $null
 }
 
 function Invoke-MediaRangeRequest {
@@ -3065,9 +3076,12 @@ function Invoke-DemoSeed {
                 if ($null -ne $unit.Height) { $form['height'] = ([long] $unit.Height).ToString([Globalization.CultureInfo]::InvariantCulture) }
                 if ($unit.Kind -eq 'video' -and $null -ne $unit.DurationSec) { $form['durationSec'] = ([double] $unit.DurationSec).ToString('R', [Globalization.CultureInfo]::InvariantCulture) }
                 if ($posterUnit) { $form['posterMediaId'] = $posterId }
-                # The rows of this name the library held before this upload: none of them can be the asset it stores.
+                # Rows the library held before this upload: those of this name (none can be the asset it stores) and the
+                # newest few (a later look-up's page that reaches one of them reaches back past the upload).
                 $name = Get-MediaUploadFileName -Path $unit.Path
-                $known = @(@($library.Rows[$unit.Kind]) | Where-Object { $_ -is [System.Collections.IDictionary] -and ($null -eq $name -or [string] $_['fileName'] -ceq $name) } | ForEach-Object { [string] $_['id'] })
+                $before = @(@($library.Rows[$unit.Kind]) | Where-Object { $_ -is [System.Collections.IDictionary] })
+                $known = @(@($before | Where-Object { $null -eq $name -or [string] $_['fileName'] -ceq $name }) + @($before | Select-Object -First 10) |
+                        ForEach-Object { [string] $_['id'] } | Select-Object -Unique)
                 # Marked pending BEFORE it is sent: a run that stops, or is interrupted, before a clear answer leaves
                 # the mark, and the next run looks for this upload (above) before sending the file again.
                 $marked = [ordered]@{}
