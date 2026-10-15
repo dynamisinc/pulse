@@ -7,13 +7,16 @@
  * chrome's `inkMuted` / `inkFaint`, the navy header's muted ink, and the delete
  * button's hover fill under its white label.
  *
- * And the two-worlds boundary for the token: no participant file (`features/social/**`,
- * `features/participant-shell/**`) imports `theme/cobraTheme`, so no participant brand
- * can inherit `text.muted`. (The broader staff-chrome gate is
- * `features/staffShell/twoWorldsSeparation.test.ts`.)
+ * And a NARROW two-worlds check for the token: no participant file under
+ * `features/social/**` or `features/participant-shell/**` imports the COBRA theme, so no
+ * participant brand can inherit `text.muted`. This is not the gate.
+ * `features/staffShell/twoWorldsSeparation.test.ts` is the real one (every participant root,
+ * the staff preview host, all staff chrome); this check reuses its forbidden-import list
+ * (`@/test/twoWorlds`) rather than keeping a second, weaker copy.
  */
 import { describe, expect, it } from 'vitest'
 import { contrastRatio, hexToRgb } from '@/test/contrast'
+import { extractImportSpecifiers, findViolations } from '@/test/twoWorlds'
 import { consoleChrome } from '@/features/controller/consoleChrome'
 import { staffShellTokens } from '@/features/staffShell/staffShellTokens'
 import { cobraTheme } from './cobraTheme'
@@ -96,7 +99,7 @@ describe('other staff inks checked by story 25', () => {
   })
 })
 
-describe('two worlds: no participant code imports the COBRA theme', () => {
+describe('two worlds (narrow): no participant code imports the COBRA theme', () => {
   const participantFiles: Record<string, string> = {
     ...import.meta.glob('../features/social/**/*.{ts,tsx}', {
       eager: true, query: '?raw', import: 'default',
@@ -106,45 +109,24 @@ describe('two worlds: no participant code imports the COBRA theme', () => {
     }),
   }
 
-  /** Import/require specifiers only, so prose in comments that mentions COBRA never matches. */
-  function specifiers(source: string): string[] {
-    const found: string[] = []
-    for (const pattern of [
-      /import\s+(?:type\s+)?[^'"]*?from\s+['"]([^'"]+)['"]/g,
-      /import\s+['"]([^'"]+)['"]/g,
-      /import\s*\(\s*['"]([^'"]+)['"]\s*\)/g,
-      /require\(\s*['"]([^'"]+)['"]\s*\)/g,
-    ]) {
-      for (const match of source.matchAll(pattern)) {
-        if (match[1] !== undefined) found.push(match[1])
-      }
-    }
-    return found
-  }
-
   it('scans real files from both roots (never passes on an empty glob)', () => {
     const paths = Object.keys(participantFiles)
     expect(paths.some(p => p.startsWith('../features/social/'))).toBe(true)
     expect(paths.some(p => p.startsWith('../features/participant-shell/'))).toBe(true)
   })
 
-  const COBRA_THEME_SPECIFIER = /(^|\/)theme\/cobraTheme$|^@\/theme$/
-
-  it('the check itself catches the aliased, relative and side-effect import forms', () => {
+  it('the shared gate list catches aliased, relative, side-effect and dynamic imports', () => {
     const fixture = [
       "import { cobraTheme } from '@/theme/cobraTheme'",
       "import cobra from '../../../theme/cobraTheme'",
       "import '@/theme/cobraTheme'",
       "const t = await import('@/theme/cobraTheme')",
     ].join('\n')
-    expect(specifiers(fixture).filter(s => COBRA_THEME_SPECIFIER.test(s))).toHaveLength(4)
+    expect(extractImportSpecifiers(fixture)).toHaveLength(4)
+    expect(findViolations({ 'fixture.ts': fixture })).toHaveLength(4)
   })
 
-  it('finds no import of theme/cobraTheme under features/social or features/participant-shell', () => {
-    const offenders = Object.entries(participantFiles)
-      .flatMap(([file, source]) => specifiers(source)
-        .filter(s => COBRA_THEME_SPECIFIER.test(s))
-        .map(s => `${file} -> ${s}`))
-    expect(offenders).toEqual([])
+  it('finds no COBRA theme import under features/social or features/participant-shell', () => {
+    expect(findViolations(participantFiles)).toEqual([])
   })
 })
