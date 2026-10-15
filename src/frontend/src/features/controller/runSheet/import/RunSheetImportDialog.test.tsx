@@ -298,9 +298,14 @@ describe('Import from Excel — accessibility', () => {
     // Everything behind the modal (the run sheet) is hidden from assistive tech.
     expect(screen.getByTestId('run-sheet-panel').closest('[aria-hidden="true"]')).not.toBeNull()
 
-    // Focus escapes to a control behind the modal: it comes back inside.
-    act(() => screen.getByTestId('add-item').focus())
-    await waitFor(() => expect(dialog.contains(document.activeElement)).toBe(true))
+    // Focus escapes to a control behind the modal: the trap pulls it back into its root (the
+    // dialog container around the Paper, which MUI focuses when no sentinel was crossed).
+    const trapRoot = dialog.closest('.MuiDialog-container')
+    if (!trapRoot) throw new Error('no dialog container')
+    const behind = screen.getByTestId('add-item')
+    act(() => behind.focus())
+    await waitFor(() => expect(trapRoot.contains(document.activeElement)).toBe(true))
+    expect(behind).not.toHaveFocus()
 
     // Tab off the end lands on the end sentinel: focus wraps to the first tabbable control.
     const end = document.querySelector<HTMLElement>('[data-testid="sentinelEnd"]')
