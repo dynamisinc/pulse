@@ -39,11 +39,33 @@
   padding: 16px;
 }
 
+/*
+ * The image's frame: shrink-wraps the picture (inline-block, no line box below it) so
+ * the positioned EXERCISE bands cover exactly the image. A percentage max-height on the
+ * image would not resolve inside a content-sized frame, so the height budget is the
+ * DYNAMIC viewport minus the banner insets, the alert bar and 140px (toolbar + stage
+ * padding) -- the same budget as the expanded video player. `vh` first as the fallback.
+ */
+.imageFrame {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  border-radius: 8px;
+  line-height: 0;
+}
+
 .image {
   display: block;
   max-width: 100%;
-  max-height: 100%;
-  border-radius: 8px;
+  max-height: calc(
+    100vh - var(--pulse-chrome-top, 0px) - var(--pulse-alert-height, 0px)
+    - var(--pulse-chrome-bottom, 0px) - 140px
+  );
+  max-height: calc(
+    100dvh - var(--pulse-chrome-top, 0px) - var(--pulse-alert-height, 0px)
+    - var(--pulse-chrome-bottom, 0px) - 140px
+  );
   object-fit: contain;
 }
 

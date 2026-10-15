@@ -57,12 +57,16 @@
  * register here with ZERO exercise language of their own — if compliance
  * chrome is ALSO disabled (a legal state, D7-008), there would be no exercise
  * signal on screen at all. `ExerciseWatermarkSlot` reserves that fallback
- * signal, driven by `chromeConfig.ts`'s `isWatermarkRequired()` (the same
- * signal that feature already exposes) — it renders nothing while chrome is
- * on. Out-of-fiction pages already say "EXERCISE" explicitly and don't need
- * it; break-fiction is explicitly forbidden from carrying ANY such signal (an
- * "EXERCISE" mark would defeat break-fiction's entire premise of reading as
- * genuinely real).
+ * signal, shown ONLY when the compliance chrome is disabled
+ * (`!chromeConfig.enabled`, the D7 / NFR-008 invariant) — it renders nothing
+ * while chrome is on. It deliberately does NOT use `isWatermarkRequired()`:
+ * that predicate (demo-feedback DF-3, `watermark || !enabled`) governs the
+ * MEDIA bands; the exercise's media-watermark switch must not put an
+ * "EXERCISE" mark on the in-fiction control pages while the banners are up
+ * (demo-feedback 06 Gate-1 M-1). Out-of-fiction pages already say "EXERCISE"
+ * explicitly and don't need it; break-fiction is explicitly forbidden from
+ * carrying ANY such signal (an "EXERCISE" mark would defeat break-fiction's
+ * entire premise of reading as genuinely real).
  *
  * World: participant, except break-fiction (alien to both worlds by design —
  * see point 1 above). No COBRA, no MUI, no default MUI look — plain React +
@@ -71,7 +75,7 @@
 
 import { useEffect, useId, useState, type CSSProperties, type RefObject } from 'react'
 import { SHELL_Z } from '../../mountContract'
-import { isWatermarkRequired, useChromeConfig } from '../../chromeConfig'
+import { useChromeConfig } from '../../chromeConfig'
 import { useOverlayState } from './overlayState'
 import { useLeaveFullscreenWhileActive } from './useLeaveFullscreenWhileActive'
 import { useOverlayFocusTrap } from './useOverlayFocusTrap'
@@ -261,13 +265,14 @@ function useWallClockNow(active: boolean): Date {
 
 /**
  * The NFR-008 reserved watermark slot — see the module header. Renders
- * nothing unless compliance chrome is disabled (`isWatermarkRequired`,
- * `chromeConfig.ts`); non-interactive, announced as supplementary context
+ * nothing unless compliance chrome is disabled (`!enabled` — NOT the media rule
+ * `isWatermarkRequired`); non-interactive, announced as supplementary context
  * (mirrors `ComplianceChrome`'s `role="note"` treatment).
  */
 function ExerciseWatermarkSlot() {
   const chromeConfig = useChromeConfig()
-  if (!isWatermarkRequired(chromeConfig)) return null
+  // D7 / NFR-008: the chrome-off fallback only. The media-watermark switch does not apply here.
+  if (chromeConfig.enabled) return null
 
   return (
     <div

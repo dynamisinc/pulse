@@ -49,11 +49,11 @@ vi.mock('@/core/exerciseContext', () => ({
 
 vi.mock('../../chromeConfig', () => ({
   useChromeConfig: vi.fn(),
-  isWatermarkRequired: (config: { enabled: boolean }) => !config.enabled,
 }))
 
 const CHROME_ENABLED: ChromeConfig = {
   enabled: true,
+  watermark: false,
   top: { text: 'top', fg: '#000000', bg: '#ffffff' },
   bottom: { text: 'bottom', fg: '#000000', bg: '#ffffff' },
 }

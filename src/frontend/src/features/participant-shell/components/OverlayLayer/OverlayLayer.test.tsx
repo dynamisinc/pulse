@@ -15,11 +15,10 @@
  * `./overlayState.test.tsx` / `./overlayState.default.test.tsx`).
  *
  * `../../chromeConfig`'s `useChromeConfig` is mocked too, so the NFR-008
- * watermark tests control `isWatermarkRequired`'s input directly without
- * needing a `QueryClientProvider` ancestor. `isWatermarkRequired` itself is
- * re-implemented here as the same one-line pure predicate the real module
- * exports (`!config.enabled`) rather than imported, so this file needs no
- * `QueryClientProvider` wrapper at all (matches `ComplianceChrome.test.tsx`'s
+ * watermark tests control the resolved config directly without needing a
+ * `QueryClientProvider` ancestor. The slot reads `config.enabled` itself (the
+ * D7 chrome-off rule, NOT the media predicate `isWatermarkRequired`), so this
+ * file needs no `QueryClientProvider` wrapper at all (matches `ComplianceChrome.test.tsx`'s
  * fully-mocked-seam setup).
  *
  * `useOverlayFocusTrap` is NOT mocked - the a11y tests below exercise the
@@ -41,7 +40,6 @@ vi.mock('./overlayState', () => ({
 
 vi.mock('../../chromeConfig', () => ({
   useChromeConfig: vi.fn(),
-  isWatermarkRequired: (config: { enabled: boolean }) => !config.enabled,
 }))
 
 const mockUseOverlayState = vi.mocked(useOverlayState)
@@ -49,11 +47,13 @@ const mockUseChromeConfig = vi.mocked(useChromeConfig)
 
 const CHROME_ENABLED: ChromeConfig = {
   enabled: true,
+  watermark: false,
   top: { text: 'top', fg: '#000000', bg: '#ffffff' },
   bottom: { text: 'bottom', fg: '#000000', bg: '#ffffff' },
 }
 const CHROME_DISABLED: ChromeConfig = {
   enabled: false,
+  watermark: false,
   top: { text: 'top', fg: '#000000', bg: '#ffffff' },
   bottom: { text: 'bottom', fg: '#000000', bg: '#ffffff' },
 }
@@ -340,6 +340,24 @@ describe('OverlayLayer — NFR-008 watermark slot (in-fiction-only, chrome-off f
     render(<OverlayLayer />)
 
     expect(screen.queryByTestId('pulse-overlay-watermark-slot')).not.toBeInTheDocument()
+  })
+
+  it('does not render the watermark with chrome ON even when the MEDIA watermark switch is on (Gate-1 M-1)', () => {
+    mockUseChromeConfig.mockReturnValue({ ...CHROME_ENABLED, watermark: true })
+    mockUseOverlayState.mockReturnValue(overlayState({ state: 'pause', register: 'in-fiction' }))
+
+    render(<OverlayLayer />)
+
+    expect(screen.queryByTestId('pulse-overlay-watermark-slot')).not.toBeInTheDocument()
+  })
+
+  it('renders it with chrome OFF whatever the media watermark switch says', () => {
+    mockUseChromeConfig.mockReturnValue({ ...CHROME_DISABLED, watermark: false })
+    mockUseOverlayState.mockReturnValue(overlayState({ state: 'endex', register: 'in-fiction' }))
+
+    render(<OverlayLayer />)
+
+    expect(screen.getByTestId('pulse-overlay-watermark-slot')).toHaveTextContent('EXERCISE')
   })
 
   it('does not render the watermark on the out-of-fiction page even when chrome is disabled — it already names the exercise explicitly', () => {

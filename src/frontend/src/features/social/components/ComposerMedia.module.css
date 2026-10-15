@@ -37,8 +37,10 @@
   color: var(--pc-ink);
 }
 
+/* `isolation: isolate`: the bands / badge z-indexes stay inside the thumbnail (Gate-1 M-2). */
 .thumb {
   position: relative;
+  isolation: isolate;
   flex: none;
   display: flex;
   align-items: center;
@@ -58,11 +60,15 @@
   object-fit: cover;
 }
 
-/* A word + an icon marks a video thumbnail: it is not just "a picture". */
+/* A word + an icon marks a video thumbnail: it is not just "a picture". Above the
+ * EXERCISE bands (z-index 1), and vertically CENTRED between them so it never covers
+ * the bottom band's middle "EXERCISE" (Gate-1 L-2). */
 .videoBadge {
   position: absolute;
+  z-index: 2;
+  top: 50%;
   left: 4px;
-  bottom: 4px;
+  transform: translateY(-50%);
   display: inline-flex;
   align-items: center;
   gap: 4px;

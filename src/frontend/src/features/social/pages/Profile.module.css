@@ -63,6 +63,9 @@
    * what shows when the persona has no banner image, while one loads, and if it
    * fails to load. Fixed height: the image arriving never moves the page. */
   position: relative;
+  /* Keeps the EXERCISE bands' z-index inside the banner: they never paint over the
+   * avatar that overlaps its bottom edge (demo-feedback 06). */
+  isolation: isolate;
   height: 150px;
   overflow: hidden;
   background:

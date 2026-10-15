@@ -21,6 +21,12 @@
  * allow-list in `safeMediaUrl.ts` rejects) or whose `<img>` errors renders the
  * `MediaFallbackTile` (the alt text) instead — never a broken-image icon.
  *
+ * EXERCISE BANDS (demo-feedback 06, DF-4): every tile that SHOWS a picture carries
+ * the shared `ExerciseBands` overlay (top + bottom "EXERCISE EXERCISE EXERCISE"),
+ * when the exercise requires marking. The bands are `aria-hidden` and click-through,
+ * so a tile button keeps its alt-text name and stays activatable. The alt-text
+ * placeholder shows no media and carries none.
+ *
  * STACKING (see `PostMediaSlot`): the slot's wrapper is `z-index: 2` above the
  * card's open-the-thread overlay, so the tile buttons are independently
  * clickable; `onClick` stops propagation so a tap never also opens the thread.
@@ -34,6 +40,7 @@
 
 import { useState } from 'react'
 import type { PostMedia } from '../../types/post'
+import { ExerciseBands } from './ExerciseBands'
 import { MediaFallbackTile } from './MediaFallbackTile'
 import { MAX_GRID_IMAGES, mediaAlt, singleMediaAspectRatio } from './mediaLayout'
 import { resolveSafeMediaUrl } from './safeMediaUrl'
@@ -85,15 +92,18 @@ export function MediaGrid({ media, onOpen }: MediaGridProps) {
         }
 
         const image = (
-          <img
-            className={styles.image}
-            src={src}
-            alt={alt}
-            loading="lazy"
-            decoding="async"
-            draggable={false}
-            onError={() => setFailed(previous => new Set(previous).add(failKey))}
-          />
+          <>
+            <img
+              className={styles.image}
+              src={src}
+              alt={alt}
+              loading="lazy"
+              decoding="async"
+              draggable={false}
+              onError={() => setFailed(previous => new Set(previous).add(failKey))}
+            />
+            <ExerciseBands />
+          </>
         )
 
         if (onOpen === undefined) {
