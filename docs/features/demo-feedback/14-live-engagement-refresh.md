@@ -84,3 +84,46 @@ and a `pin` send none; a reply sends the parent's frame; isolation across two ex
 not fail the write. Frontend: validator (good and malformed frames); store ordering (stale version dropped; reset on
 sign-out); `PostActions` numbers change on a push while `active` stays; optimistic toggle not overwritten; a like and
 a repost on my post notify live once each; repost row text.
+
+**Version formula (DF-18, documented on `PostEngagementChangedDto`):** `version = R + Rd + P + Pd`, where `R` = the
+post's `like` + `repost` reaction rows (active and soft-deleted), `Rd` = those with `DeletedAt` set, `P` = its direct
+replies (live and taken down), `Pd` = those with `DeletedAt` set. Rows are never un-deleted or hard-deleted, so every
+like, unlike, repost, un-repost, reply and reply takedown raises it by exactly one; pins are not counted; all four terms
+read through the exercise-scoped sets. The version is read before the counts.
+
+Backend (`src/Pulse.WebApi.Tests/Features/Social/Engagement/`):
+
+- `PostEngagementChangedPushTests.LikeUnlikeRepostUnrepost_EachSendOneFrame_WithTheShownCounts_AndAStrictlyHigherVersion`
+  (AC ReactionService, DTO counts = baseline + real, version monotonic)
+- `PostEngagementChangedPushTests.TheFramesCounts_EqualWhatTheCallReturns_AndTheVersionIsWhatAnotherInstanceReads`
+  (counts via `IPostEngagementReader`, version derived from the DB so two instances agree)
+- `PostEngagementChangedPushTests.ANoOpLike_AndAPin_SendNothing` (never for `pin`, never for a no-op)
+- `PostEngagementChangedPushTests.AReply_SendsItsParentsFrame_AfterItsOwnPostReceived_AndATopLevelPostSendsNone`
+  (AC PostIngestService)
+- `PostEngagementChangedPushTests.ThePush_TargetsOnlyTheWritingExercise_AndAnotherExercisesRowsNeverMoveIt` (isolation)
+- `PostEngagementChangedPushTests.AFailingBroadcaster_NeverFailsTheReaction_OrTheReply` (failure logged and swallowed)
+- `PostEngagementChangedWireTests.PostEngagementChanged_SerializesToExactlyPostIdCountsAndVersion` (wire shape, XC-002)
+- `PostEngagementChangedWireTests.BroadcastPostEngagementChanged_SendsToTheOwningExercisesGroupOnly` (exercise group
+  only; a second exercise's group and the staff group get nothing)
+- `PostEngagementChangedWireTests.IFeedBroadcaster_DefaultEngagementChanged_IsANoOp_SoOlderDoublesStillWork`
+  (default interface method)
+
+Frontend (`src/frontend/src/features/social/`):
+
+- `services/realtimeFeed.engagementChanged.test.ts`: strict validator (good frame rebuilt with only `postId`/`counts`/
+  `version`; 18 malformed shapes dropped); `subscribeEngagementChanged` on the existing connection, handler isolation,
+  unsubscribe and `stop()`.
+- `services/postCountsStore.test.ts`: version gate (stale and equal versions dropped, per post), per-post listeners,
+  `usePostCounts` newest-of seed and store, reset on sign-out through `resetClientSession()`, the reset generation
+  (`pinState` pattern: a frame or mock toggle started before a reset is dropped), the default source wired
+  into the store, and the mock adapter emitting on a mock like / repost / reply.
+- `components/post/PostActions.liveCounts.test.tsx`: a push moves reply / repost / like numbers while `aria-pressed`
+  (`active`) stays; stale frame dropped; inert counts follow; an optimistic toggle in flight is not overwritten by an
+  older frame, and a newer frame after it settles still lands.
+- `notifications/notificationsStore.engagement.test.ts`: a like and a repost on my post notify live once each (replayed
+  and stale frames and the next re-read do not re-notify); the badge moves while the tab is hidden; frames that beat
+  the baseline are held and replayed; someone else's post is ignored; unsubscribe on stop.
+- `notifications/notificationText.test.ts` (repost row text) and `notifications/NotificationRow.repost.test.tsx`
+  (Repost label, sentence, excerpt, thread link).
+- Updated: `notifications/notificationsStore.test.ts` (announcement wording for reposts; the persisted record list now
+  holds a `repost:`-keyed record per own post).
