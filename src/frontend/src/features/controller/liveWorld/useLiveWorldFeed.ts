@@ -51,6 +51,12 @@
  * rows already listed keep moving (nothing pushes reaction counts). It stops on
  * unmount or when the mode leaves REALTIME.
  *
+ * ## Unread and pins (story 08)
+ * Every entry records whether it arrived LIVE (a realtime arrival, or a post first
+ * seen by a sweep) or was part of the opening baseline: that is what the column's
+ * unread tracking keys on. The pin-for-everyone state rides on the entry too and is
+ * changed through `setPinned` (one entry, one re-rendered row).
+ *
  * ## Lifetime
  * Unmounting stops the timers, drops the queue, unsubscribes and releases the
  * transport; a late response after unmount is ignored. `resolveFeed` takes no
@@ -71,9 +77,11 @@ import {
   type FeedTransportMode,
 } from '@/features/social/services/feedStreamSource'
 import {
+  applyPinChange,
   EMPTY_LIVE_WORLD_STATE,
   ingest,
   mergePending,
+  readPinnedForAll,
   toEntry,
   type LiveWorldEntry,
   type LiveWorldState,
@@ -131,6 +139,11 @@ export interface UseLiveWorldFeedResult {
   retry(): void
   /** Moves every pending arrival into `rows`. A no-op when none. Stable identity. */
   showPending(): void
+  /**
+   * Sets one post's pin-for-everyone state (story 08: this console's own pin response,
+   * or another console's `PostPinChanged`). Unknown ids are ignored. Stable identity.
+   */
+  setPinned(postId: string, pinnedForAll: boolean): void
 }
 
 /** Streams the exercise's posts (replies included) for the Live world column. */
@@ -165,9 +178,10 @@ export function useLiveWorldFeed({
     const batch = queueRef.current
     if (batch.length === 0) return
     queueRef.current = []
+    // Realtime arrivals are LIVE: unread on arrival (story 08).
     const entries = batch.map(view => {
       seqRef.current += 1
-      return toEntry(view, seqRef.current)
+      return toEntry(view, seqRef.current, { live: true })
     })
     const buffer = isReadingRef.current()
     setState(prev => ingest(prev, entries, buffer))
@@ -187,8 +201,16 @@ export function useLiveWorldFeed({
       // same-instant tie keeps the server's order.
       const base = seqRef.current
       seqRef.current += posts.length
-      const entries = posts.map((post, index) =>
-        toEntry(toParticipantView(post), base + posts.length - index))
+      // A post first seen by a SWEEP arrived after the opening baseline: it is live
+      // (unread). Known posts keep their own flag (see `ingest`). The pin state is read
+      // off the raw wire post too, so it survives a narrowing that predates the field.
+      const entries = posts.map((post, index) => {
+        const view = toParticipantView(post)
+        return toEntry(view, base + posts.length - index, {
+          live: kind === 'sweep',
+          pinnedForAll: readPinnedForAll(post) || readPinnedForAll(view),
+        })
+      })
       const buffer = kind === 'sweep' && isReadingRef.current()
       setState(prev => ingest(prev, entries, buffer))
       if (kind === 'initial') {
@@ -284,6 +306,10 @@ export function useLiveWorldFeed({
     setState(mergePending)
   }, [])
 
+  const setPinned = useCallback((postId: string, pinnedForAll: boolean) => {
+    setState(prev => applyPinChange(prev, postId, pinnedForAll))
+  }, [])
+
   return {
     rows: state.rows,
     pending: state.pending,
@@ -292,5 +318,6 @@ export function useLiveWorldFeed({
     mode,
     retry,
     showPending,
+    setPinned,
   }
 }

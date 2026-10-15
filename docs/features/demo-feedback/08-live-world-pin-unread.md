@@ -38,3 +38,22 @@ Hiding the pin action for evaluators (11). Unread elsewhere in the console.
 
 Pin/unpin calls and error display; live pin change from the subscription; unread on arrival, read after visibility,
 Mark all read, persistence across remount, storage failure tolerated; burst render count.
+
+Implemented in (all under `src/frontend/src/features/controller/liveWorld/`):
+
+- [`LiveWorldColumn.pinUnread.test.tsx`](../../../src/frontend/src/features/controller/liveWorld/LiveWorldColumn.pinUnread.test.tsx):
+  pin / unpin through the service beside Take down, "Pinning…" single-flight, failure alert + Dismiss, wire-seeded
+  marker, live `PostPinChanged` through a `subscribePinChanged` double (incl. a held post), no pin on a removed row;
+  unread on arrival (bold, accent bar, "New", "N unread"), read after half the row is visible for 1 s (fake
+  IntersectionObserver) and not before, a burst does not restart the dwell, Mark all read, no-IO fallback;
+  persistence across remount, per-exercise scope, throwing `localStorage` tolerated, malformed value ignored;
+  "N new" merges rows unread; 120-post burst render count (settled rows do not re-render).
+- [`pinForAllService.test.ts`](../../../src/frontend/src/features/controller/liveWorld/pinForAllService.test.ts):
+  `PUT` / `DELETE /staff/posts/{id}/pin`, encoding, timeout, plain-text errors.
+- [`pinChangeSource.test.ts`](../../../src/frontend/src/features/controller/liveWorld/pinChangeSource.test.ts):
+  no-op before story 07, delegation to `realtimeFeed.subscribePinChanged` after, malformed events dropped.
+- [`liveWorldModel.pinUnread.test.ts`](../../../src/frontend/src/features/controller/liveWorld/liveWorldModel.pinUnread.test.ts):
+  `live` / `pinnedForAll` on entries, refresh rules, `applyPinChange` identity.
+- `liveWorldStyles.test.ts` (unread accent contrast), `liveWorldTwoWorlds.test.ts` (allowlist + exercise-scope
+  guard updated), `LiveWorldColumn.test.tsx` / `TakedownAction.inColumn.test.tsx` (tab order now Reply as… → Pin for
+  everyone → Take down).

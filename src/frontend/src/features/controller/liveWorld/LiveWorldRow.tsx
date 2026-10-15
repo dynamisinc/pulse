@@ -45,6 +45,17 @@
  * Tab stops. The accessible name is the author line (`aria-labelledby`) and the
  * post text is the description, so arriving on a row reads who said what.
  *
+ * PINNED FOR EVERYONE (story 08, DF-7). A pinned post carries a marker on the author
+ * line: a thumbtack icon AND the words "Pinned for everyone" (never colour alone). The
+ * row's **Pin for everyone** / **Unpin** action (`PinForAllAction`) sits beside the other
+ * actions, right before the `renderRowActions` slot where the console mounts *Take down*;
+ * it is not rendered on a removed row (the server refuses to pin a taken-down post).
+ *
+ * UNREAD (story 08). An unread row (`unread`, decided by the column) is BOLD, has the
+ * unread accent as its left bar and a "New" chip on the author line, so the state is in
+ * the accessible name too ("… New …"), never colour alone. `data-unread="true"` is what
+ * the column's single IntersectionObserver watches to mark it read once seen.
+ *
  * PERFORMANCE. The row is `memo`'d on its props: `entry`/`persona` keep their
  * identity while a post is unchanged, so an insert elsewhere in the list does
  * not re-render it (NFR-002 / SOC-071). The caller should pass a stable `onReply`.
@@ -61,6 +72,7 @@ import {
   faReply,
   faRetweet,
   faShare,
+  faThumbtack,
 } from '@fortawesome/free-solid-svg-icons'
 import type { IconDefinition } from '@fortawesome/fontawesome-svg-core'
 import { formatScenarioTime } from '@/core/clock'
@@ -70,6 +82,7 @@ import { CobraLinkButton } from '@/theme/styledComponents'
 import { LiveWorldMedia } from './LiveWorldMedia'
 import { toLiveWorldPost, type LiveWorldEntry, type LiveWorldPost } from './liveWorldModel'
 import { liveWorldTokens, monoMeta, srOnly } from './liveWorldStyles'
+import { PinForAllAction } from './PinForAllAction'
 
 interface CountDef {
   readonly key: 'reply' | 'repost' | 'like' | 'share'
@@ -104,6 +117,10 @@ export interface LiveWorldRowProps {
    * with a REMOVED marker and a disabled Reply as….
    */
   readonly isRowRemoved?: (post: LiveWorldPost) => boolean
+  /** Whether the post is unread (story 08): bold, accent bar, "New" chip. */
+  readonly unread: boolean
+  /** Called when this console pinned / unpinned the post for everyone. Pass a stable one. */
+  readonly onPinnedChange: (postId: string, pinnedForAll: boolean) => void
 }
 
 export const LiveWorldRow = memo(function LiveWorldRow({
@@ -114,8 +131,13 @@ export const LiveWorldRow = memo(function LiveWorldRow({
   onReply,
   renderRowActions,
   isRowRemoved,
+  unread,
+  onPinnedChange,
 }: LiveWorldRowProps) {
-  const post = useMemo(() => toLiveWorldPost(entry.view, persona), [entry.view, persona])
+  const post = useMemo(
+    () => toLiveWorldPost(entry.view, persona, entry.pinnedForAll),
+    [entry.view, persona, entry.pinnedForAll],
+  )
   const when = useMemo(
     () => formatScenarioTime(post.scenarioTime, timeZone, { format: 'absolute' }),
     [post.scenarioTime, timeZone],
@@ -137,6 +159,8 @@ export const LiveWorldRow = memo(function LiveWorldRow({
       data-kind={isReply ? 'reply' : 'post'}
       data-removed={removed ? 'true' : undefined}
       data-author-unknown={post.authorUnknown === true ? 'true' : undefined}
+      data-unread={unread ? 'true' : undefined}
+      data-pinned={post.pinnedForAll === true ? 'true' : undefined}
       tabIndex={active ? 0 : -1}
       aria-labelledby={metaId}
       aria-describedby={bodyId}
@@ -148,7 +172,8 @@ export const LiveWorldRow = memo(function LiveWorldRow({
         py: '7px',
         bgcolor: liveWorldTokens.surface,
         borderBottom: `1px solid ${liveWorldTokens.hairline}`,
-        borderLeft: `3px solid ${isReply ? liveWorldTokens.panelBorder : 'transparent'}`,
+        borderLeft: `3px solid ${
+          unread ? liveWorldTokens.unread : isReply ? liveWorldTokens.panelBorder : 'transparent'}`,
         outline: 'none',
         '&:hover': { bgcolor: liveWorldTokens.surfaceHover },
         '&:focus-visible': {
@@ -222,6 +247,50 @@ export const LiveWorldRow = memo(function LiveWorldRow({
           </Box>
         )}
         {' '}
+        {post.pinnedForAll === true && (
+          <Box
+            component="span"
+            data-testid="live-world-pinned"
+            sx={{
+              ...monoMeta,
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '3px',
+              px: '5px',
+              fontWeight: 700,
+              letterSpacing: '0.04em',
+              color: liveWorldTokens.ink,
+              border: `1px solid ${liveWorldTokens.focus}`,
+              borderRadius: '2px',
+            }}
+          >
+            <Box component="span" sx={{ color: liveWorldTokens.focus, display: 'inline-flex' }}>
+              <FontAwesomeIcon icon={faThumbtack} aria-hidden="true" />
+            </Box>
+            Pinned for everyone
+          </Box>
+        )}
+        {' '}
+        {unread && (
+          <Box
+            component="span"
+            data-testid="live-world-unread"
+            sx={{
+              ...monoMeta,
+              display: 'inline-flex',
+              alignItems: 'center',
+              px: '5px',
+              fontWeight: 800,
+              letterSpacing: '0.06em',
+              color: liveWorldTokens.unread,
+              border: `1px solid ${liveWorldTokens.unread}`,
+              borderRadius: '2px',
+            }}
+          >
+            New
+          </Box>
+        )}
+        {' '}
         <Box sx={{ flex: 1 }} />
         <Box
           component="time"
@@ -246,6 +315,7 @@ export const LiveWorldRow = memo(function LiveWorldRow({
         data-testid="live-world-text"
         sx={{
           fontSize: 13,
+          fontWeight: unread ? 700 : 400,
           lineHeight: 1.4,
           color: liveWorldTokens.ink,
           whiteSpace: 'pre-wrap',
@@ -314,6 +384,7 @@ export const LiveWorldRow = memo(function LiveWorldRow({
           <FontAwesomeIcon icon={faReply} aria-hidden="true" />
           Reply as…
         </CobraLinkButton>
+        {!removed && <PinForAllAction post={post} onPinnedChange={onPinnedChange} />}
         {renderRowActions?.(post)}
       </Stack>
     </Box>

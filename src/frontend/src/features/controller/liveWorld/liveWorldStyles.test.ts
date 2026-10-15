@@ -11,6 +11,7 @@
 import { describe, expect, it } from 'vitest'
 import { contrastRatio } from '@/test/contrast'
 import { staffShellTokens } from '@/features/staffShell/staffShellTokens'
+import { cobraTheme } from '@/theme/cobraTheme'
 import { liveWorldTokens, monoMeta, srOnly } from './liveWorldStyles'
 
 const NORMAL_TEXT = 4.5
@@ -55,6 +56,19 @@ describe('liveWorldTokens contrast (AA)', () => {
       .toBeGreaterThanOrEqual(NON_TEXT)
     expect(contrastRatio(liveWorldTokens.danger, liveWorldTokens.toolbar))
       .toBeGreaterThanOrEqual(NON_TEXT)
+  })
+})
+
+describe('unread accent (story 08)', () => {
+  it('clears 4.5:1 as chip text and 3:1 as the left bar on every row surface', () => {
+    for (const surface of [liveWorldTokens.surface, liveWorldTokens.surfaceHover]) {
+      expect(contrastRatio(liveWorldTokens.unread, surface)).toBeGreaterThanOrEqual(NORMAL_TEXT)
+      expect(contrastRatio(liveWorldTokens.unread, surface)).toBeGreaterThanOrEqual(NON_TEXT)
+    }
+  })
+
+  it('is a COBRA token (the primary-action cobalt), not a participant accent', () => {
+    expect(liveWorldTokens.unread).toBe(cobraTheme.palette.buttonPrimary.main)
   })
 })
 

@@ -79,6 +79,18 @@
  * `useCallback` for the best performance, and give `isRowRemoved` a new identity
  * whenever the removed set changes.
  *
+ * ## Pin for everyone and unread (story 08, DF-7)
+ * Each row carries **Pin for everyone** / **Unpin** (`PinForAllAction`, beside *Take
+ * down*) and a "Pinned for everyone" marker when pinned. A pin updates the row from this
+ * console's own response at once, and from `PostPinChanged` for changes made in other
+ * consoles through `pinChangeSource` (default: story 07's
+ * `realtimeFeed.subscribePinChanged`, see `pinChangeSource.ts`; a test seam prop).
+ * Posts that arrive live are UNREAD (bold, accent bar, "New") until half the row has been
+ * visible for a second or the controller clicks **Mark all read**; the title bar shows
+ * "N unread" (listed rows). Read state is per browser and per exercise in
+ * `localStorage` (`useLiveWorldUnread`); the exercise id scopes that local key only and
+ * is never sent anywhere. "N new" is unchanged: merged rows arrive unread.
+ *
  * Time on the column is scenario time in the exercise zone (COR-053); the zone is
  * named in the toolbar. No wall-clock is shown.
  */
@@ -101,6 +113,7 @@ import {
   faArrowsRotate,
   faArrowUp,
   faBolt,
+  faCheckDouble,
   faEllipsis,
   faTowerBroadcast,
   faTriangleExclamation,
@@ -132,6 +145,8 @@ import {
 } from './liveWorldModel'
 import { liveWorldTokens, monoMeta, srOnly } from './liveWorldStyles'
 import { useLiveWorldFeed } from './useLiveWorldFeed'
+import { defaultPinChangeSource, type PinChangeSource } from './pinChangeSource'
+import { useLiveWorldUnread, useMarkReadWhenSeen } from './useLiveWorldUnread'
 
 /** A scroll offset (px) at or below which the list counts as "at the top". */
 const TOP_THRESHOLD_PX = 4
@@ -152,6 +167,11 @@ export interface LiveWorldColumnProps {
   isRowRemoved?(post: LiveWorldPost): boolean
   /** TEST SEAM: an injectable arrival source (defaults to the shared transport). */
   source?: FeedStreamSource
+  /**
+   * TEST SEAM: where pin changes made in OTHER consoles come from (defaults to story 07's
+   * `realtimeFeed.subscribePinChanged`). Must be a stable reference.
+   */
+  pinChangeSource?: PinChangeSource
 }
 
 interface TransportDisplay {
@@ -211,21 +231,33 @@ function isTextEntry(target: HTMLElement): boolean {
 export function LiveWorldColumn(props: LiveWorldColumnProps) {
   // `exerciseId` is read ONLY as a React key (never sent anywhere): a switch of
   // the session's exercise remounts the panel, dropping every row, the buffer and
-  // the filter of the old exercise (COR-001).
+  // the filter of the old exercise (COR-001). It also scopes the LOCAL unread store
+  // (a localStorage key, story 08): read state is per exercise, and nothing is sent.
   const { exerciseId, timeZone } = useExerciseContext()
-  return <LiveWorldPanel key={exerciseId} timeZone={timeZone} {...props} />
+  return (
+    <LiveWorldPanel
+      key={exerciseId}
+      readStateScope={exerciseId}
+      timeZone={timeZone}
+      {...props}
+    />
+  )
 }
 
 interface LiveWorldPanelProps extends LiveWorldColumnProps {
   readonly timeZone: string
+  /** Scopes the per-browser unread store (story 08). Local only. */
+  readonly readStateScope: string
 }
 
 function LiveWorldPanel({
   timeZone,
+  readStateScope,
   onReplyAs,
   renderRowActions,
   isRowRemoved,
   source,
+  pinChangeSource = defaultPinChangeSource,
 }: LiveWorldPanelProps) {
   const { personas, loading: personasLoading, error: personasError } = usePersonas()
   const personaById = useMemo(
@@ -252,7 +284,23 @@ function LiveWorldPanel({
   const isReading = useCallback(() => scrolledRef.current || focusInListRef.current, [])
 
   const feed = useLiveWorldFeed({ isReading, ...(source !== undefined ? { source } : {}) })
-  const { showPending } = feed
+  const { showPending, setPinned } = feed
+
+  // Pin changes made in OTHER consoles (`PostPinChanged`). This console's own changes
+  // apply from the pin call's response (`setPinned` through the row's action).
+  useEffect(
+    () => pinChangeSource.subscribePinChanged(event => setPinned(event.postId, event.pinnedForAll)),
+    [pinChangeSource, setPinned],
+  )
+
+  // Unread (story 08): derived per post, remembered per browser and exercise.
+  const unread = useLiveWorldUnread({
+    scope: readStateScope,
+    rows: feed.rows,
+    pending: feed.pending,
+    ready: feed.status === 'ready',
+  })
+  const { unreadIds, unreadCount, markRead, markAllRead } = unread
 
   // The latest `onReplyAs`, behind a stable callback, so rows (memoized) never
   // re-render just because the parent passed a fresh function.
@@ -280,6 +328,9 @@ function LiveWorldPanel({
     }
     return rows
   }, [feed.rows, personaById, filter])
+
+  // Unread rows become read once half of the row has been visible for a second.
+  useMarkReadWhenSeen(listRef, markRead, visible, unreadIds)
 
   const pendingCount = useMemo(
     () => feed.pending.filter(entry => matchesFilter(entry, filter)).length,
@@ -471,7 +522,7 @@ function LiveWorldPanel({
     } else if (key === 'r') {
       const found = visible.find(item => item.entry.view.id === row.dataset.postId)
       if (found === undefined) return
-      const post = toLiveWorldPost(found.entry.view, found.persona)
+      const post = toLiveWorldPost(found.entry.view, found.persona, found.entry.pinnedForAll)
       // A removed post can't be replied to: the shortcut is a no-op on its row.
       if (isRowRemovedRef.current?.(post) === true) return
       event.preventDefault()
@@ -571,6 +622,17 @@ function LiveWorldPanel({
           }}
         >
           {countLabel}
+        </Box>
+        <Box
+          data-testid="live-world-unread-count"
+          sx={{
+            fontFamily: liveWorldTokens.mono,
+            fontSize: 11,
+            fontWeight: 700,
+            color: liveWorldTokens.barText,
+          }}
+        >
+          {`${unreadCount} unread`}
         </Box>
       </Stack>
 
@@ -675,6 +737,17 @@ function LiveWorldPanel({
             </Box>
           </Box>
         )}
+
+        <CobraSecondaryButton
+          size="small"
+          data-testid="live-world-mark-all-read"
+          disabled={unreadCount === 0}
+          onClick={markAllRead}
+          sx={{ py: '1px', px: '10px', fontSize: 12, gap: '6px' }}
+        >
+          <FontAwesomeIcon icon={faCheckDouble} aria-hidden="true" />
+          Mark all read
+        </CobraSecondaryButton>
 
         <Box sx={{ flex: 1 }} />
         <Box sx={{ ...monoMeta, display: 'flex', alignItems: 'center', gap: '10px' }}>
@@ -811,6 +884,8 @@ function LiveWorldPanel({
                 timeZone={timeZone}
                 active={row.entry.view.id === effectiveActiveId}
                 onReply={handleReply}
+                unread={unreadIds.has(row.entry.view.id)}
+                onPinnedChange={setPinned}
                 {...(renderRowActions !== undefined ? { renderRowActions } : {})}
                 {...(isRowRemoved !== undefined ? { isRowRemoved } : {})}
               />
