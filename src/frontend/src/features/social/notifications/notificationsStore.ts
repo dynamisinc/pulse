@@ -35,7 +35,16 @@
  *      made up the moment the tab is visible again. The same goes for the shell's pause /
  *      EndEx overlay (below), which holds the baseline read as well as the periodic ones;
  *   4. watches `removedPosts` and drops a taken-down post from the list;
- *   5. publishes immutable snapshots (below) and a polite announcement string.
+ *   5. publishes immutable snapshots (below) and a polite announcement string;
+ *   6. (demo-feedback DF-19) subscribes to the default ENGAGEMENT source
+ *      (`defaultEngagementChangeSource`: the hub's `PostEngagementChanged` live, the mock adapter
+ *      under mock data) and offers every frame to the model, which applies a frame for one of MY
+ *      posts only when its `version` is newer than the last one applied to that post. A like or a
+ *      repost on my post is therefore noticed THE MOMENT it lands -- not on the next 30 s read --
+ *      and a replayed or stale frame never notifies twice. Frames are not held while the tab is
+ *      hidden (the badge updates live there too); frames that beat the baseline read are held
+ *      (newest per post) and replayed after it, like early arrivals. The 30 s re-read stays as the
+ *      safety net for a transport that is polling, where there are no frames.
  *
  * ARRIVALS BEFORE THE BASELINE are held in a bounded buffer and replayed after the first
  * read, in order: a reply cannot be classified until the viewer's own posts are known, and
@@ -100,6 +109,11 @@ import { scenarioNow } from '@/core/clock'
 import type { Post, ParticipantPostView } from '../types/post'
 import { resolveFeed } from '../services/feedService'
 import { defaultArrivalSource, type FeedStreamSource } from '../services/feedStreamSource'
+import {
+  defaultEngagementChangeSource,
+  type EngagementChangeSource,
+  type PostEngagementChangedEvent,
+} from '../services/realtimeFeed'
 import { toParticipantView } from '../services/postService'
 import { removedPosts } from '../services/removedPosts'
 import { NotificationModel } from './notificationModel'
@@ -184,6 +198,8 @@ export interface NotificationsDeps {
   readonly fetchFeed: () => Promise<readonly Post[]>
   /** The shared arrival source (unfiltered: replies included). */
   readonly source: () => FeedStreamSource
+  /** The `PostEngagementChanged` source (DF-19): live counts for my posts' likes and reposts. */
+  readonly engagement: () => EngagementChangeSource
   /** The session's taken-down post ids. */
   readonly removed: {
     getAll(): ReadonlySet<string>
@@ -252,6 +268,7 @@ const SPOKEN: Record<NotificationType, readonly [string, string]> = {
   reply: ['reply', 'replies'],
   mention: ['mention', 'mentions'],
   like: ['like', 'likes'],
+  repost: ['repost', 'reposts'],
 }
 
 /** What was held back for the next spoken announcement. */
@@ -261,7 +278,7 @@ export interface HeldEvents {
 }
 
 function emptyHeld(): HeldEvents {
-  return { events: 0, amountByType: { reply: 0, mention: 0, like: 0 } }
+  return { events: 0, amountByType: { reply: 0, mention: 0, like: 0, repost: 0 } }
 }
 
 /** "1 new reply" / "14 new replies" / "3 new notifications" -- names no one (no cast needed). */
@@ -320,6 +337,7 @@ function defaultDeps(): NotificationsDeps {
   return {
     fetchFeed: () => resolveFeed('all', { includeReplies: true }),
     source: () => defaultArrivalSource,
+    engagement: () => defaultEngagementChangeSource,
     removed: removedPosts,
     storage: getPersistentStorage,
     sweepStorages: () => [getPersistentStorage(), getSessionStorage()],
@@ -361,6 +379,8 @@ interface ActiveSession {
   inFlight: boolean
   /** Arrivals held until the baseline lands. */
   buffer: ParticipantPostView[]
+  /** Engagement frames held until the baseline lands: the newest per post (DF-19). */
+  readonly pendingFrames: Map<string, PostEngagementChangedEvent>
   /**
    * A read was skipped because the tab was hidden or the shell overlay was up -- a poll tick, or
    * the baseline of a session that started held. Made up by {@link catchUpRead} when things clear.
@@ -380,6 +400,7 @@ interface ActiveSession {
   /** The first re-read has been scheduled. */
   scheduledFirst: boolean
   unsubscribeArrivals: (() => void) | undefined
+  unsubscribeEngagement: (() => void) | undefined
   unsubscribeRemoved: (() => void) | undefined
   unsubscribeVisibility: (() => void) | undefined
   sourceStarted: boolean
@@ -510,6 +531,34 @@ export function createNotificationsStore(
   }
 
   /**
+   * One `PostEngagementChanged` frame (DF-19). Before the baseline it is held (the newest frame per
+   * post; the model drops anything older anyway) and replayed after the read; afterwards it goes
+   * straight to the model, which ignores frames for posts that are not mine and stale versions.
+   */
+  function onEngagement(
+    s: ActiveSession,
+    deps: NotificationsDeps,
+    frame: PostEngagementChangedEvent,
+  ): void {
+    if (s.stopped) return
+    if (!s.loaded) {
+      const held = s.pendingFrames.get(frame.postId)
+      if (held === undefined || frame.version > held.version) {
+        s.pendingFrames.delete(frame.postId) // re-insert at the newest end
+        s.pendingFrames.set(frame.postId, frame)
+        if (s.pendingFrames.size > PRELOAD_BUFFER_CAP) {
+          const oldest = s.pendingFrames.keys().next()
+          if (oldest.done !== true) s.pendingFrames.delete(oldest.value)
+        }
+      }
+      return
+    }
+    const result = s.model.observeEngagement(frame.postId, frame.counts, frame.version)
+    for (const event of result.events) announce(event, deps.announceThrottleMs)
+    if (result.changed) schedulePublish(s, deps)
+  }
+
+  /**
    * One feed read. Resolves to what happened -- `ok`, `failed` (drives the backoff) or `skipped`
    * (stopped, or a read is already in flight: nothing was asked, so nothing is counted).
    */
@@ -553,6 +602,13 @@ export function createNotificationsStore(
       for (const post of replay) {
         const result = s.model.ingest(post)
         if (result.event !== undefined) announce(result.event, deps.announceThrottleMs)
+      }
+      // Frames that beat the baseline (DF-19): one already in the read moves nothing.
+      const frames = [...s.pendingFrames.values()]
+      s.pendingFrames.clear()
+      for (const frame of frames) {
+        const result = s.model.observeEngagement(frame.postId, frame.counts, frame.version)
+        for (const event of result.events) announce(event, deps.announceThrottleMs)
       }
     }
     applyRemoved(s, deps)
@@ -653,10 +709,12 @@ export function createNotificationsStore(
     s.pollTimer = undefined
     s.baselineTimer = undefined
     s.unsubscribeArrivals?.()
+    s.unsubscribeEngagement?.()
     s.unsubscribeRemoved?.()
     s.unsubscribeVisibility?.()
     s.unsubscribeStorage?.()
     s.unsubscribeArrivals = undefined
+    s.unsubscribeEngagement = undefined
     s.unsubscribeRemoved = undefined
     s.unsubscribeVisibility = undefined
     s.unsubscribeStorage = undefined
@@ -665,6 +723,7 @@ export function createNotificationsStore(
       s.source.stop()
     }
     s.buffer = []
+    s.pendingFrames.clear()
     clearAnnouncements()
   }
 
@@ -712,6 +771,7 @@ export function createNotificationsStore(
       loaded: false,
       inFlight: false,
       buffer: [],
+      pendingFrames: new Map(),
       missedWhileHidden: false,
       paused: overlayHeld,
       baselineTimer: undefined,
@@ -722,6 +782,7 @@ export function createNotificationsStore(
       failures: 0,
       scheduledFirst: false,
       unsubscribeArrivals: undefined,
+      unsubscribeEngagement: undefined,
       unsubscribeRemoved: undefined,
       unsubscribeVisibility: undefined,
       sourceStarted: false,
@@ -737,6 +798,11 @@ export function createNotificationsStore(
     s.sourceStarted = true
     // Fail-soft: a source that cannot start yields no stream; the 30 s read still runs.
     void s.source.start().catch(() => undefined)
+
+    // DF-19: likes and reposts on my posts arrive live as engagement frames. The frames ride the
+    // same shared connection the arrival source just started; nothing new is opened.
+    s.unsubscribeEngagement = deps.engagement().subscribeEngagementChanged(frame =>
+      onEngagement(s, deps, frame))
 
     s.unsubscribeRemoved = deps.removed.subscribe(() => {
       // A takedown drops the row at once (no waiting for the coalescing window).

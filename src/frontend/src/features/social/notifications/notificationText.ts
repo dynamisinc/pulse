@@ -5,6 +5,10 @@
  * kept out of the row component so they are unit-testable and so the component file exports
  * only a component (fast refresh). Participant world -- no UI.
  *
+ * A like or a repost row is anonymous: nothing the client receives says WHO liked or reposted, so
+ * those rows say what happened to the post and never invent a name ("Your post got 2 new reposts").
+ * Should a repost row ever carry its actors, it names them ("Alex reposted your post").
+ *
  * The sentence is plain text built from persona DISPLAY NAMES the caller already resolved
  * through the shared directory; nothing here reads a cast, a clock or the network. A person
  * the cast does not list is {@link UNKNOWN_ACTOR}, never a raw persona id.
@@ -36,5 +40,9 @@ export function describeItem(item: NotificationItem, names: readonly string[]): 
       return `${actorsLabel(names, item.actorCount)} mentioned you`
     case 'like':
       return `Your post got ${item.count} new ${item.count === 1 ? 'like' : 'likes'}`
+    case 'repost':
+      return item.actorCount > 0
+        ? `${actorsLabel(names, item.actorCount)} reposted your post`
+        : `Your post got ${item.count} new ${item.count === 1 ? 'repost' : 'reposts'}`
   }
 }
