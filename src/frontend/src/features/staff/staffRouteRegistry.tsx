@@ -145,7 +145,7 @@ const REGISTRY_TABLE = [
     // `allowedRoles` mirrors the server gate for the roster / day-word / cards endpoints
     // exactly: `controller` OR `planner` assigned to the exercise. An evaluator or an
     // org-admin would get a 403 on every call, so the surface is simply not offered
-    // (and a typed URL redirects to their own default, like any other gated path).
+    // (a typed URL shows the "not allowed" page, like any other gated path; DF-20).
     //
     // No `isDefaultFor`: it is nobody's home page. The planner and controller keep
     // `/staff/plan` and `/staff/console`; they gain this as a second destination
