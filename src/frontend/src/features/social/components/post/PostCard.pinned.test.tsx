@@ -6,22 +6,31 @@
  *
  *  - every card variant that shows a post renders the marker ABOVE its author row when the
  *    post is pinned for everyone, and the card's <article> is described by it. Every surface
- *    (home feed All / Following, thread root and replies, profile tabs, Pinned tab, search
- *    and hashtag results) builds its card through `toPostView` + `<PostCard>`, so the chain
- *    is exercised from a participant-safe read here;
+ *    (home feed All / Following, thread root and replies, profile tabs, Pinned tab, hashtag
+ *    results) builds its card through `toPostView` + `<PostCard>`, so the chain is exercised
+ *    from a participant-safe read here (and through a real surface in
+ *    `ThreadView.pinnedMarker.test.tsx`);
  *  - a personal pin (`viewer.pinned`, or one confirmed this session in `pinState`) shows NO
  *    marker (DF-6: private) - only the Pin action's pressed state;
  *  - LIVE through the shared pin sources (no new hub subscription): a `PostPinChanged` push
  *    (story 07's `realtimeFeed.subscribePinChanged` fan-out) and the mock-mode exercise pin
  *    (`setMockExercisePin`) add and remove the marker on mounted cards without a reload;
  *  - a push wakes only the cards showing that post (burst legibility);
- *  - a held push beats an older read on mount; a re-read that changes the flag wins after it.
+ *  - a held push beats an older read on mount; a re-read that changes the flag wins after it;
+ *  - a hub gap (the shared connection leaving Connected) drops held pushes, so cards fall back
+ *    to their reads (Gate-1 M-1); a session reset (`runSessionResets`) forgets them too.
  */
 import { Profiler, type ReactNode } from 'react'
 import { act, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ExerciseContextProvider } from '@/core/exerciseContext'
 import { SessionProvider } from '@/core/auth'
+import { runSessionResets } from '@/core/auth/sessionReset'
+import {
+  HubConnectionState,
+  realtimeConnection,
+  type RealtimeStateListener,
+} from '@/core/realtime/connection'
 import { personaById, personaIdForHandle } from '@/features/personas'
 import { realtimeFeed } from '../../services/realtimeFeed'
 import { toPostView } from '../../services/feedService'
@@ -36,6 +45,14 @@ import type { PostCardVariant, PostView } from './types'
 type PinHandler = (event: { postId: string; pinnedForAll: boolean }) => void
 
 let pinHandlers: PinHandler[] = []
+let stateListeners: RealtimeStateListener[] = []
+
+/** The shared hub connection reports a state, exactly as its `onStateChange` does. */
+function hubState(state: HubConnectionState) {
+  act(() => {
+    for (const listener of [...stateListeners]) listener(state)
+  })
+}
 
 /** Delivers a `PostPinChanged` exactly as the shared transport's fan-out does. */
 function pushPinChanged(postId: string, pinnedForAll: boolean) {
@@ -98,6 +115,13 @@ beforeEach(() => {
       pinHandlers = pinHandlers.filter(h => h !== handler)
     }
   })
+  stateListeners = []
+  vi.spyOn(realtimeConnection, 'onStateChange').mockImplementation(listener => {
+    stateListeners.push(listener)
+    return () => {
+      stateListeners = stateListeners.filter(l => l !== listener)
+    }
+  })
   resetMockReactions()
   resetMockPins({ exercisePins: [] })
   pinState.reset()
@@ -125,7 +149,12 @@ describe('PostCard — "Pinned" marker in every variant', () => {
     readonly overrides: Partial<ParticipantPostView>
     readonly withHandlers: boolean
   }> = [
-    { name: 'feed card (full, All / Following, profile, search)', variant: 'full', overrides: {}, withHandlers: true },
+    {
+      name: 'feed card (full: All / Following, profile, hashtag)',
+      variant: 'full',
+      overrides: {},
+      withHandlers: true,
+    },
     { name: 'observer card (readOnly)', variant: 'readOnly', overrides: {}, withHandlers: false },
     {
       name: 'thread reply',
@@ -280,7 +309,41 @@ describe('PostCard — the marker follows the live pin state', () => {
     pushPinChanged('post-pinned-1', true)
     expect(markerIn('post-pinned-1')).not.toBeNull()
 
-    act(() => exercisePinState.reset())
+    // The real sign-out / sign-in path runs every registered reset.
+    act(() => runSessionResets())
     expect(markerIn('post-pinned-1')).toBeNull()
+  })
+})
+
+describe('PostCard — a hub gap drops held pushes (Gate-1 M-1)', () => {
+  it('a card mounting after a gap trusts its read, not the push held from before it', async () => {
+    const first = await renderCards(<PostCard post={view({ id: 'post-elsewhere' })} variant="full" />)
+    pushPinChanged('post-pinned-1', true)
+    // The hub drops: an unpin may have been missed while it was down.
+    hubState(HubConnectionState.Reconnecting)
+    first.unmount()
+
+    await renderCards(<PostCard post={view()} variant="full" />)
+    expect(markerIn('post-pinned-1')).toBeNull()
+  })
+
+  it('a mounted card returns to its read when the hub drops', async () => {
+    await renderCards(<PostCard post={view()} variant="full" />)
+    pushPinChanged('post-pinned-1', true)
+    expect(markerIn('post-pinned-1')).not.toBeNull()
+
+    hubState(HubConnectionState.Disconnected)
+    expect(markerIn('post-pinned-1')).toBeNull()
+  })
+
+  it('a push after the gap is held and shown again; Connected itself drops nothing', async () => {
+    await renderCards(<PostCard post={view()} variant="full" />)
+    hubState(HubConnectionState.Reconnecting)
+    hubState(HubConnectionState.Connected)
+    pushPinChanged('post-pinned-1', true)
+    expect(markerIn('post-pinned-1')).not.toBeNull()
+
+    hubState(HubConnectionState.Connected)
+    expect(markerIn('post-pinned-1')).not.toBeNull()
   })
 })

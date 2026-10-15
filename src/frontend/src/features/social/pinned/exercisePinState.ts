@@ -31,9 +31,11 @@
  *  - ON MOUNT a held push wins (it is at least as new as a baseline that predates it);
  *  - WHILE MOUNTED the most recently observed wins: a push that arrives wins, and a re-read
  *    that hands the card a DIFFERENT `fromRead` wins in turn, until the next push.
- *  - KNOWN LIMIT: a push missed while the hub was down is not seen; a card that mounts after
- *    it with a held push from before the gap can show the older state until the next push or
- *    a re-read with a changed value.
+ *  - HUB GAPS (Gate-1 M-1): when the shared connection leaves `Connected` (reconnecting,
+ *    disconnected, stopped) pushes may be missed, so every held push is DROPPED and its cards
+ *    are woken: mounted cards fall back to their read, and a card that mounts later trusts its
+ *    read. A push that arrives after the gap is held (and wins) again. This is a state
+ *    listener on `realtimeConnection` (`onStateChange`), not a hub subscription.
  *
  * BURST LEGIBILITY (SOC-071). Listeners are kept PER POST ID: a pin change wakes only the
  * cards showing that post, never every card on the feed.
@@ -42,10 +44,12 @@
  *
  * SESSION. `reset()` forgets every held push and wakes the affected cards; it is registered
  * with `registerSessionReset`, so one identity's state never decorates the next sign-in.
+ * A Vite hot replace of this module detaches its handlers (`import.meta.hot.dispose`).
  */
 
 import { useCallback, useState, useSyncExternalStore } from 'react'
 import { registerSessionReset } from '@/core/auth/sessionReset'
+import { HubConnectionState, realtimeConnection } from '@/core/realtime/connection'
 import { realtimeFeed } from '../services/realtimeFeed'
 import { viewerEngagement } from './pinEvents'
 
@@ -73,7 +77,14 @@ function apply(postId: string, pinnedForAll: boolean): void {
   notify(postId)
 }
 
-/** Attaches the one handler per existing source (idempotent). */
+/** Drops every held push and wakes the affected cards (they fall back to their read). */
+function dropHeld(): void {
+  const held = [...entries.keys()]
+  entries.clear()
+  for (const postId of held) notify(postId)
+}
+
+/** Attaches the one handler per existing source, plus the hub-gap listener (idempotent). */
 function connect(): void {
   if (disconnect !== null) return
   const offPush =
@@ -83,9 +94,14 @@ function connect(): void {
   const offMock = viewerEngagement.subscribe(event => {
     if (event.kind === 'exercise') apply(event.postId, event.active)
   })
+  // A hub gap (M-1): pushes may be missed from here, so a held push no longer beats a read.
+  const offState = realtimeConnection.onStateChange(state => {
+    if (state !== HubConnectionState.Connected) dropHeld()
+  })
   disconnect = () => {
     offPush()
     offMock()
+    offState()
   }
 }
 
@@ -113,9 +129,7 @@ function subscribe(postId: string, listener: Listener): () => void {
 
 /** Sign-out: forgets every held push and wakes the affected cards (they show their read). */
 function reset(): void {
-  const held = [...entries.keys()]
-  entries.clear()
-  for (const postId of held) notify(postId)
+  dropHeld()
 }
 
 /** Test-only: forgets everything and detaches from the sources (the next subscribe re-attaches). */
@@ -130,6 +144,8 @@ function resetForTests(): void {
 export const exercisePinState = { get, subscribe, reset, resetForTests }
 
 registerSessionReset(() => exercisePinState.reset(), import.meta.hot)
+// A hot-replaced module must not leave its handlers on the shared sources (Gate-1 L-5).
+import.meta.hot?.dispose(() => disconnect?.())
 
 /** Which source a card shows, and what it last saw of each. */
 interface Observed {

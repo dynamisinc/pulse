@@ -4,8 +4,9 @@
  * The "Pinned" line a post card shows ABOVE its author row when the post is pinned for
  * everyone (demo-feedback story 21; DF-7, DF-34, NFR-001), the way X heads a pinned post.
  * Every surface that renders a post through `<PostCard>` gets it: home feed (All and
- * Following), thread root and replies, profile tabs, the Pinned tab, search and hashtag
- * results. `<PostCard>` decides WHEN (the live exercise-pin state); this part only draws it.
+ * Following), thread root and replies, profile tabs, the Pinned tab and hashtag results.
+ * (Explore search rows are not post cards, so they show no marker.) `<PostCard>` decides
+ * WHEN (the live exercise-pin state); this part only draws it.
  *
  *   <p .marker id={id} data-testid="pinned-for-all-label">
  *     <FontAwesomeIcon faThumbtack aria-hidden/>   decoration only
