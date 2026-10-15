@@ -64,7 +64,8 @@ media on the server.
 | 12 | [Emoji picker in both composers](12-emoji-picker.md) | frontend | Should | 2 / 3 (12b) | none | In Progress | #508 |
 | 13 | [Participant polish: tooltips (#494) and centered frame (#495)](13-participant-polish.md) | frontend | Should | 3 | 06, 07 | Not Started | #509 |
 | S1 | [Seed script: noise pool, exercise pins, watermark on](S1-seed-script-update.md) | script | Must | 3 | 04, 05 deployed | Not Started | #510 |
-| C | [Content: burned-in media, Kestrel MSEL file, noise pool](C-content-tasks.md) | content | Must | any | #491 | Not Started | #511 |
+| 14 | [MSEL import: alt text and engagement columns; slot in by planned minute](14-msel-import-alt-engagement-order.md) | backend | Must | 3 | 03 | Not Started | #518 |
+| C | [Content: Kestrel MSEL file, noise pool (C1 burn-in dropped 10/15)](C-content-tasks.md) | content | Must | any | #491, 14 | Not Started | #511 |
 
 ## Manual UAT walk (Sun 10/18, before pencils down)
 
