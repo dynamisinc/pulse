@@ -379,6 +379,7 @@ const POST_ORIGINS: readonly PostOrigin[] = [
   'controller-as-persona',
   'engine',
   'inject',
+  'noise',
 ]
 
 function isStaffPostView(created: CreatedPostView): created is StaffPostView {

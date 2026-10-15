@@ -11,7 +11,11 @@
  *   1. the pool is empty           -> "No posts in the pool" (the one stop a controller fixes
  *                                     outside the console, so it wins even when frozen too);
  *   2. the pause tier is Freeze     -> "Stopped: the world is frozen";
- *   3. anything else                -> "Stopped: the clock is not running".
+ *   3. the exercise has ended       -> "Stopped: the exercise has ended" (lifecycle
+ *                                     `completed` / `archived`, or the legacy `complete`);
+ *   4. the exercise is paused       -> "Stopped: the exercise is paused" (lifecycle `paused`);
+ *   5. anything else                -> "Stopped: the clock is not running".
+ * The lifecycle comes from the exercise context's `status` (the header pill's source).
  *
  * THE FREEZE IS READ FROM THE CONSOLE'S OWN PAUSE TIER, not only from `running`. The server pushes
  * `NoiseStateChanged` on a level change and on each noise post, NOT on a Freeze, so a knob that
@@ -20,12 +24,18 @@
  * Pause injects and Pause engine do not stop noise (DF-13), so only `freeze` counts here.
  */
 
+import type { ExerciseStatus } from '@/core/exerciseContext'
 import type { PauseTier } from '../hooks/usePauseState'
 import type { NoiseStateDto } from './noiseTypes'
 
 export const NOISE_STOPPED_EMPTY_POOL = 'No posts in the pool'
 export const NOISE_STOPPED_FROZEN = 'Stopped: the world is frozen'
 export const NOISE_STOPPED_CLOCK = 'Stopped: the clock is not running'
+export const NOISE_STOPPED_ENDED = 'Stopped: the exercise has ended'
+export const NOISE_STOPPED_PAUSED = 'Stopped: the exercise is paused'
+
+/** Lifecycle statuses that mean the exercise is over (COR-032 and the legacy `complete`). */
+const ENDED_STATUSES: ReadonlySet<ExerciseStatus> = new Set(['completed', 'archived', 'complete'])
 
 /** What the knob's status line says, and whether it is a stop the controller should notice. */
 export interface NoiseStatusLine {
@@ -45,12 +55,23 @@ export function formatNoiseCounts(state: Pick<NoiseStateDto, 'poolSize' | 'poste
 
 /**
  * The status line for `state` under the console's current pause `tier`: Off, Running, or the
- * reason noise is stopped (see the module header for the order).
+ * reason noise is stopped (see the module header for the order). `status` is the exercise
+ * context's lifecycle status.
  */
-export function noiseStatusLine(state: NoiseStateDto, tier: PauseTier): NoiseStatusLine {
+export function noiseStatusLine(
+  state: NoiseStateDto,
+  tier: PauseTier,
+  status?: ExerciseStatus,
+): NoiseStatusLine {
   if (state.level === 'off') return { kind: 'off', text: 'Off' }
   if (state.poolSize === 0) return { kind: 'stopped', text: NOISE_STOPPED_EMPTY_POOL }
   if (tier === 'freeze') return { kind: 'stopped', text: NOISE_STOPPED_FROZEN }
-  if (!state.running) return { kind: 'stopped', text: NOISE_STOPPED_CLOCK }
+  if (!state.running) {
+    if (status !== undefined && ENDED_STATUSES.has(status)) {
+      return { kind: 'stopped', text: NOISE_STOPPED_ENDED }
+    }
+    if (status === 'paused') return { kind: 'stopped', text: NOISE_STOPPED_PAUSED }
+    return { kind: 'stopped', text: NOISE_STOPPED_CLOCK }
+  }
   return { kind: 'running', text: 'Running' }
 }

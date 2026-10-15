@@ -12,15 +12,17 @@
  *     `PUT /api/staff/noise` (see `useNoiseState` for the serialised writes);
  *   - the current rate ("6 posts/min") and, as secondary text, the pool size and the posted count;
  *   - a status line: Off, Running, or WHY noise is stopped while a level is set ("Stopped: the
- *     world is frozen", "Stopped: the clock is not running", "No posts in the pool";
- *     `noiseStatus.ts`), with an icon beside the words (never colour alone, NFR-001);
+ *     world is frozen", "Stopped: the exercise has ended", "Stopped: the exercise is paused",
+ *     "Stopped: the clock is not running", "No posts in the pool"; `noiseStatus.ts`), with an
+ *     icon beside the words (never colour alone, NFR-001);
  *   - a failed read or write as visible text in an alert region.
  *
  * ACCESSIBILITY (story 09 cross-cutting AC; NFR-001). The segments are an ARIA radio group named by
  * the visible label: one tab stop (the checked option, or Off when nothing is known yet), and
- * Arrow Left/Up and Right/Down move AND choose (wrapping), Home and End jump to Off and High,
- * following the WAI-ARIA radio pattern. Space or Enter on a focused option chooses it. The status
- * line is a polite live region, so a stop is announced without stealing focus.
+ * Arrow Left/Up and Right/Down move AND choose (wrapping) from the FOCUSED option, Home and End
+ * jump to Off and High, following the WAI-ARIA radio pattern. Space or Enter on a focused option
+ * chooses it. The status line is a polite live region, so a stop is announced without stealing
+ * focus.
  *
  * NOT ROLE-GATED HERE. An evaluator sees the knob and a 403 comes back as words; hiding the write
  * affordance for evaluators is story 11's job (`noise/**` is on its list).
@@ -36,6 +38,7 @@ import {
   faTriangleExclamation,
   faWaveSquare,
 } from '@fortawesome/free-solid-svg-icons'
+import { useExerciseContext } from '@/core/exerciseContext'
 import { consoleChrome as chrome } from '../consoleChrome'
 import { usePauseState } from '../hooks/usePauseState'
 import { formatNoiseCounts, formatNoiseRate, noiseStatusLine } from './noiseStatus'
@@ -66,6 +69,7 @@ function levelForKey(key: string, index: number): NoiseLevel | undefined {
 export function NoiseControl() {
   const { state, selectedLevel, loadError, saveError, setLevel } = useNoiseState()
   const { tier } = usePauseState()
+  const { status: exerciseStatus } = useExerciseContext()
   const labelId = useId()
   const optionRefs = useRef<Partial<Record<NoiseLevel, HTMLButtonElement | null>>>({})
 
@@ -74,7 +78,10 @@ export function NoiseControl() {
   }
 
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    const index = selectedLevel === undefined ? 0 : NOISE_LEVELS.indexOf(selectedLevel)
+    // Move from the FOCUSED option (Gate-1 L4); fall back to the selected one, then Off.
+    const focused = NOISE_LEVELS.find(level => optionRefs.current[level] === event.target)
+    const from = focused ?? selectedLevel
+    const index = from === undefined ? 0 : NOISE_LEVELS.indexOf(from)
     const next = levelForKey(event.key, index)
     if (next === undefined) return
     event.preventDefault()
@@ -84,7 +91,7 @@ export function NoiseControl() {
 
   // The tab stop: the checked option, else Off (nothing is known before the first read).
   const tabStop: NoiseLevel = selectedLevel ?? 'off'
-  const status = state === undefined ? undefined : noiseStatusLine(state, tier)
+  const status = state === undefined ? undefined : noiseStatusLine(state, tier, exerciseStatus)
   const statusIcon =
     status?.kind === 'running' ? faCirclePlay : status?.kind === 'stopped' ? faCirclePause : faCircleStop
 

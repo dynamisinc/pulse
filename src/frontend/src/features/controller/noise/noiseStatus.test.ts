@@ -11,7 +11,9 @@ import {
   noiseStatusLine,
   NOISE_STOPPED_CLOCK,
   NOISE_STOPPED_EMPTY_POOL,
+  NOISE_STOPPED_ENDED,
   NOISE_STOPPED_FROZEN,
+  NOISE_STOPPED_PAUSED,
 } from './noiseStatus'
 import type { NoiseStateDto } from './noiseTypes'
 
@@ -58,6 +60,24 @@ describe('noiseStatusLine (why noise is stopped, in words)', () => {
   it('says the clock is not running for any other stop', () => {
     expect(noiseStatusLine(state({ running: false }), 'running'))
       .toEqual({ kind: 'stopped', text: NOISE_STOPPED_CLOCK })
+  })
+
+  it.each([
+    ['completed', NOISE_STOPPED_ENDED],
+    ['archived', NOISE_STOPPED_ENDED],
+    ['complete', NOISE_STOPPED_ENDED],
+    ['paused', NOISE_STOPPED_PAUSED],
+    ['live', NOISE_STOPPED_CLOCK],
+    ['staged', NOISE_STOPPED_CLOCK],
+  ] as const)('names a %s lifecycle after the pool and Freeze checks', (status, text) => {
+    expect(noiseStatusLine(state({ running: false }), 'running', status).text).toBe(text)
+  })
+
+  it('keeps the pool and Freeze reasons ahead of the lifecycle', () => {
+    expect(noiseStatusLine(state({ poolSize: 0, running: false }), 'running', 'completed').text)
+      .toBe(NOISE_STOPPED_EMPTY_POOL)
+    expect(noiseStatusLine(state({ running: false }), 'freeze', 'paused').text)
+      .toBe(NOISE_STOPPED_FROZEN)
   })
 
   it('does not treat Pause injects or Pause engine as a stop (DF-13)', () => {

@@ -4,12 +4,17 @@
  * The state machine behind the console's White noise knob (demo-feedback story 09). STAFF world,
  * a hook with no UI.
  *
- * READ. `GET /api/staff/noise` on mount, and again whenever something that changes `running`
- * without a push changes: the console's pause tier (a Freeze or its release) and the exercise's
- * lifecycle status (StartEx, EndEx). The server pushes `NoiseStateChanged` only on a level change
- * and on each noise post, so without these re-reads the knob would keep saying "Running" through
- * a Freeze. Between pushes and reads, the newest answer wins (a sequence guard drops a read that
- * an earlier-started one overtook).
+ * READ. `GET /api/staff/noise` on mount and on an exercise switch. The server pushes
+ * `NoiseStateChanged` only on a level change and on each noise post, NOT when a Freeze, a Resume,
+ * EndEx or a clock change moves `running`, so the hook also re-reads:
+ *   - when the console's pause tier or the exercise's lifecycle status changes, AFTER
+ *     {@link TIER_REREAD_DELAY_MS}: the tier flips optimistically before its POST reaches the
+ *     server, so an immediate read would see the old world (Gate-1 M1);
+ *   - every {@link NOISE_POLL_MS} while a level is set and the tab is visible, so a Freeze, EndEx
+ *     or clock change made from ANOTHER console still reaches this one (Gate-1 M1);
+ *   - after a write that got no answer (timeout or network), because it may have been applied.
+ * Between pushes and reads, the newest answer wins (a sequence guard drops a read that a later
+ * read or push overtook).
  *
  * LIVE. The staff-group `NoiseStateChanged` frame on the shared hub connection replaces the state
  * (another controller's change, the posted count ticking up), and every hub (re)connect re-reads.
@@ -17,19 +22,31 @@
  * WRITE. `setLevel(level)` shows the level at once (`selectedLevel`) and sends `PUT { level }`.
  * Writes are SERIALISED: while one is in flight, a newer choice waits and only the latest waiting
  * choice is sent next (arrowing Off -> High never races three PUTs at the server). A failure keeps
- * its sentence in `saveError` until the next choice, and the knob falls back to the server's level
- * (nothing was changed there).
+ * its sentence in `saveError` until the next choice or a successful write, and the knob falls back
+ * to the server's level (nothing was changed there).
  *
  * EXERCISE SWITCH. The console does not remount when the session's exercise changes, so all state
- * is dropped and re-read when `exerciseId` changes, and an answer for the previous exercise is
- * ignored.
+ * is dropped and re-read when `exerciseId` changes. A write still in flight for the previous
+ * exercise finishes, but its answer is not adopted; a choice made in the new exercise meanwhile is
+ * sent next, never stranded (Gate-1 M2).
  */
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useExerciseContext } from '@/core/exerciseContext'
 import { usePauseState } from '../hooks/usePauseState'
-import { fetchNoiseState, putNoiseLevel, subscribeNoiseState } from './noiseService'
+import {
+  fetchNoiseState,
+  NoiseRequestError,
+  putNoiseLevel,
+  subscribeNoiseState,
+} from './noiseService'
 import type { NoiseLevel, NoiseStateDto } from './noiseTypes'
+
+/** How long after a pause-tier or lifecycle change the state is re-read (the POST settles). */
+export const TIER_REREAD_DELAY_MS = 500
+
+/** The light poll while a level is set and the tab is visible. */
+export const NOISE_POLL_MS = 20_000
 
 export interface UseNoiseStateResult {
   /** The server's state; `undefined` until the first read (or push) lands. */
@@ -40,9 +57,13 @@ export interface UseNoiseStateResult {
   readonly saving: boolean
   /** Why the state could not be read (cleared by the next successful read or push). */
   readonly loadError: string | null
-  /** Why the last level change failed (cleared by the next choice). */
+  /** Why the last level change failed (cleared by the next choice or a successful write). */
   readonly saveError: string | null
   setLevel(level: NoiseLevel): void
+}
+
+function tabVisible(): boolean {
+  return typeof document === 'undefined' || document.visibilityState === 'visible'
 }
 
 export function useNoiseState(): UseNoiseStateResult {
@@ -83,7 +104,7 @@ export function useNoiseState(): UseNoiseStateResult {
       })
   }, [adopt])
 
-  // A new exercise: forget everything from the previous one, and listen for this one's pushes.
+  // A new exercise: forget everything from the previous one, read it, and listen for its pushes.
   useEffect(() => {
     setState(undefined)
     setPendingLevel(null)
@@ -91,7 +112,7 @@ export function useNoiseState(): UseNoiseStateResult {
     setSaveError(null)
     desiredLevel.current = null
     const forExercise = exerciseId
-    return subscribeNoiseState(
+    const unsubscribe = subscribeNoiseState(
       next => {
         if (forExercise !== exerciseRef.current) return
         // A push is newer than any read still in flight.
@@ -100,36 +121,61 @@ export function useNoiseState(): UseNoiseStateResult {
       },
       read,
     )
+    read()
+    return unsubscribe
   }, [exerciseId, adopt, read])
 
-  // Read on mount, on an exercise switch, and when the tier or lifecycle moves `running`.
+  // The tier or lifecycle moved `running` without a push: re-read once the change has settled.
+  // The first run (mount / exercise switch) is skipped: the effect above has just read.
+  const lastTrigger = useRef<{ exerciseId: string; tier: string; status: string } | null>(null)
   useEffect(() => {
-    read()
+    const previous = lastTrigger.current
+    lastTrigger.current = { exerciseId, tier, status }
+    if (previous === null || previous.exerciseId !== exerciseId) return
+    if (previous.tier === tier && previous.status === status) return
+    const timer = setTimeout(read, TIER_REREAD_DELAY_MS)
+    return () => clearTimeout(timer)
   }, [exerciseId, tier, status, read])
+
+  // The light poll: only while a level is set, and only for a visible tab.
+  const levelSet = state !== undefined && state.level !== 'off'
+  useEffect(() => {
+    if (!levelSet) return
+    const timer = setInterval(() => {
+      if (tabVisible()) read()
+    }, NOISE_POLL_MS)
+    return () => clearInterval(timer)
+  }, [levelSet, exerciseId, read])
 
   const pump = useCallback(async () => {
     if (writing.current) return
     writing.current = true
-    const forExercise = exerciseRef.current
     try {
       while (desiredLevel.current !== null) {
         const level = desiredLevel.current
         desiredLevel.current = null
+        // Captured per write: the exercise may switch while it is in flight.
+        const forExercise = exerciseRef.current
         try {
           const next = await putNoiseLevel(level)
-          if (forExercise !== exerciseRef.current) return
+          if (forExercise !== exerciseRef.current) continue
           readSequence.current += 1
           adopt(next)
+          setSaveError(null)
         } catch (error) {
-          if (forExercise !== exerciseRef.current) return
+          if (forExercise !== exerciseRef.current) continue
           setSaveError(error instanceof Error ? error.message : 'White noise was not changed.')
+          // No answer at all: the write may have been applied, so ask the server.
+          if (!(error instanceof NoiseRequestError) || error.status === undefined) read()
         }
       }
     } finally {
+      // The loop exits only when nothing is waiting (a stale write `continue`s instead of
+      // returning), so no later choice is ever left behind here.
       writing.current = false
-      if (forExercise === exerciseRef.current) setPendingLevel(null)
+      setPendingLevel(null)
     }
-  }, [adopt])
+  }, [adopt, read])
 
   const setLevel = useCallback(
     (level: NoiseLevel) => {
