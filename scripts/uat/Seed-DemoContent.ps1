@@ -77,7 +77,7 @@
          add a second one (the queue does not show Inject #, so it may also be an item the import made itself).
          So is an msel item that replies to a post: an MSEL row cannot carry the reply, so the import creates it
          top-level. And so is a loaded item without a plannedMinute while msel items are left out: the import
-         slots each item it creates in by planned minute (DF-18), and cannot place around one without it.
+         slots each item it creates in by planned minute (DF-22), and cannot place around one without it.
          Handles become persona ids, media keys become
          the uploaded asset ids, a reply to a seeded post becomes { postId }, a reply to an earlier post of
          the same item stays { sequence }, and a reply to a post of an earlier item becomes { injectPostId }.
@@ -114,7 +114,7 @@
          deleted item. A post outside a full 200-post feed window cannot be confirmed, and the line says how
          many it did not check. The armable items it loaded must be in pack order in the console's queue,
          because "Fire next" follows that order. (With exceptMsel the on-stage import then slots its items in by
-         planned minute, DF-18, so the queue reads in pack order again when every seeded item has a
+         planned minute, DF-22, so the queue reads in pack order again when every seeded item has a
          plannedMinute.) Every pin must have been accepted and show pinnedForAll in the feed, the white-noise
          pool must have loaded, white noise must be off and media marking on. It prints a ✅/❌ summary and
          exits 1 if any check failed. However a run ends after step 6 began (an early stop, an error), it
@@ -164,7 +164,7 @@
     warns about this, and the self-check fails on it. First Skip the remaining items in the console, then run
     with -ReloadFiredRunSheet: everything reloads, in pack order. Or drag the items into order in the console.
     The on-stage MSEL import is the one writer that does not append: it places each item it creates just before
-    the first pending item with a later planned minute (DF-18, story 14). So give every seeded item a
+    the first pending item with a later planned minute (DF-22, story 16). So give every seeded item a
     plannedMinute; the plan warns when an exceptMsel run loads one without it.
 
     -Resume continues a partial run on its ORIGINAL scenario anchor. Without it, the script refuses to add
@@ -1943,11 +1943,11 @@ function Get-InjectPlan {
             }
         })
 
-    # Order with the import (DF-18, story 14): it places each item it creates just before the first pending item with a
+    # Order with the import (DF-22, story 16): it places each item it creates just before the first pending item with a
     # later planned minute, so the queue reads in pack order again only when every seeded item has one.
     $unplanned = @($items | Where-Object { $null -eq $_.Item['plannedMinute'] } | ForEach-Object Key)
     if ($unplanned.Count -gt 0 -and @($left | Where-Object Msel).Count -gt 0) {
-        $warnings.Add(("{0} ha{1} no plannedMinute, but the on-stage MSEL import places each item it creates just before the first pending item with a later planned minute (DF-18), so it cannot place its items around {0}, and ""Fire next"" may leave pack order. Give every seeded item a plannedMinute." -f
+        $warnings.Add(("{0} ha{1} no plannedMinute, but the on-stage MSEL import places each item it creates just before the first pending item with a later planned minute (DF-22), so it cannot place its items around {0}, and ""Fire next"" may leave pack order. Give every seeded item a plannedMinute." -f
                 ($unplanned -join ', '), $(if ($unplanned.Count -eq 1) { 's' } else { 've' })))
     }
 
@@ -4000,7 +4000,7 @@ function Invoke-DemoSeed {
                             $inversion.PackFirst.Key, $inversion.PackFirst.Order, $inversion.QueuedAhead.Key, $inversion.QueuedAhead.Order)
                     }
                     elseif (@($injectPlan.Left | Where-Object Msel).Count -gt 0) {
-                        "the armable run-sheet items are in pack order in the console's queue; the on-stage import slots the msel items in by planned minute (DF-18), so ""Fire next"" follows the pack when every seeded item has a plannedMinute"
+                        "the armable run-sheet items are in pack order in the console's queue; the on-stage import slots the msel items in by planned minute (DF-22), so ""Fire next"" follows the pack when every seeded item has a plannedMinute"
                     }
                     else { "the armable run-sheet items are in pack order in the console's queue (""Fire next"" follows the pack)" })
             }

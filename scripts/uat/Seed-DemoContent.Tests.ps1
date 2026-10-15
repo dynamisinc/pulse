@@ -3255,12 +3255,12 @@ Describe 'Demo feedback S1 (#510): -RunSheet, white noise, exercise pins and med
             @((Get-InjectPlan -Pack $pack -Manifest $manifest -Queue @($row) -PersonaIds $personas -RunSheet exceptMsel).Warnings) | Should -BeNullOrEmpty
         }
 
-        It 'plan (DF-18): exceptMsel warns when a loaded item has no plannedMinute while msel items are left out; all, or a fully planned sheet, do not' {
+        It 'plan (DF-22): exceptMsel warns when a loaded item has no plannedMinute while msel items are left out; all, or a fully planned sheet, do not' {
             $pack = Get-FixturePack
             $pack['runSheet']['items'][1].Remove('plannedMinute')
             $plan = Get-InjectPlan -Pack $pack -Manifest (New-SeedManifest) -Queue $null -PersonaIds $null -RunSheet exceptMsel
             ($plan.Warnings -join "`n") | Should -BeExactly ('i02 has no plannedMinute, but the on-stage MSEL import places each item it creates just before the first pending item with a later planned minute ' +
-                '(DF-18), so it cannot place its items around i02, and "Fire next" may leave pack order. Give every seeded item a plannedMinute.')
+                '(DF-22), so it cannot place its items around i02, and "Fire next" may leave pack order. Give every seeded item a plannedMinute.')
             @((Get-InjectPlan -Pack $pack -Manifest (New-SeedManifest) -Queue $null -PersonaIds $null).Warnings) | Should -BeNullOrEmpty
             @((Get-InjectPlan -Pack (Get-FixturePack) -Manifest (New-SeedManifest) -Queue $null -PersonaIds $null -RunSheet exceptMsel).Warnings) | Should -BeNullOrEmpty
             $pack['runSheet']['items'][2].Remove('msel')                                          # nothing left for the import
@@ -3280,8 +3280,8 @@ Describe 'Demo feedback S1 (#510): -RunSheet, white noise, exercise pins and med
             $run.Text | Should -Match '\[SKIP\] i03 — left for the on-stage MSEL import'
             $run.Text | Should -Match '✅ all 2 run-sheet item\(s\) are in the console''s queue with their posts'
             $run.Text | Should -Match '➖ run-sheet item\(s\) left out by -RunSheet exceptMsel, not checked: i03 \(msel ''3''\)'
-            # M-1: the seeded items are in pack order; the import slots its items in by planned minute (DF-18).
-            $run.Text | Should -Match '✅ the armable run-sheet items are in pack order in the console''s queue; the on-stage import slots the msel items in by planned minute \(DF-18\), so "Fire next" follows the pack when every seeded item has a plannedMinute'
+            # M-1: the seeded items are in pack order; the import slots its items in by planned minute (DF-22).
+            $run.Text | Should -Match '✅ the armable run-sheet items are in pack order in the console''s queue; the on-stage import slots the msel items in by planned minute \(DF-22\), so "Fire next" follows the pack when every seeded item has a plannedMinute'
             $run.Text | Should -Not -Match 'has no plannedMinute'
         }
 
@@ -3290,7 +3290,7 @@ Describe 'Demo feedback S1 (#510): -RunSheet, white noise, exercise pins and med
             ((Invoke-FakeSeed @{ PackPath = $path; WhatIf = $true; RunSheet = 'exceptMsel' }).Text) | Should -Match '\[WARN\] i01 has no plannedMinute, but the on-stage MSEL import places each item it creates'
             $run = Invoke-FakeSeed @{ PackPath = $path; RunSheet = 'exceptMsel' }
             $run.Code | Should -Be 0 -Because $run.Text
-            $run.Text | Should -Match '\[WARN\] i01 has no plannedMinute.*\(DF-18\)'
+            $run.Text | Should -Match '\[WARN\] i01 has no plannedMinute.*\(DF-22\)'
             $script:Fake.Injects.Count | Should -Be 2
         }
 
