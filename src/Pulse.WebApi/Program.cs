@@ -20,6 +20,10 @@ using Pulse.WebApi.Features.Identity.Sessions;
 using Pulse.WebApi.Features.Identity.SharedAccess;
 using Pulse.WebApi.Features.Identity.Staff;
 using Pulse.WebApi.Features.Injects;
+using Pulse.WebApi.Features.Injects.Import;         // demo-feedback 03
+using Pulse.WebApi.Features.Exports;                // demo-feedback 02
+using Pulse.WebApi.Features.Social.Pins;            // demo-feedback 04
+using Pulse.WebApi.Features.WhiteNoise;             // demo-feedback 05
 using Pulse.WebApi.Features.ExerciseLifecycleAdmin;
 using Pulse.WebApi.Features.Media; // demo-polish BM
 using Pulse.WebApi.Features.Ops.Bootstrap;
@@ -266,6 +270,15 @@ builder.Services.AddPauseParticipantOverlay();  // #351 REPLACES #350's no-op pu
 builder.Services.AddStorylineSteering();        // #352 storyline target GET/POST
 builder.Services.AddInjects();                  // #452 scripted-post queue + InjectBurstRunner (needs the pause tier + post funnel above)
 
+// Demo feedback cut (#496), orchestrator seam S-2. All four use TryAdd, so the order among them is free; they sit
+// here because pins need the reactions, realtime hub and clock above, and import + white noise need AddInjects
+// (and, through it, the pause tier and the post funnel). White noise's pacer waits FirstSweepDelay (5 s) before its
+// first sweep, so WebApplicationFactory<Program> hosts do not hit the database the moment they start.
+builder.Services.AddPostExport();               // demo-feedback 02 GET /api/staff/exports/posts.xlsx
+builder.Services.AddInjectImport();             // demo-feedback 03 POST /api/injects/import
+builder.Services.AddPostPins();                 // demo-feedback 04 personal + exercise pins, GET /api/feed/pinned
+builder.Services.AddWhiteNoise();               // demo-feedback 05 noise pool + pacer, /api/staff/noise*
+
 // CORS: allow exactly the configured frontend origin (Authentication__FrontendBaseUrl — the same app
 // setting infrastructure/modules/webapp.bicep provisions for the Static Web App's URL). Fail closed
 // (no cross-origin access at all) when the key is unset/empty rather than falling open.
@@ -277,7 +290,10 @@ builder.Services.AddCors(options =>
     {
         if (!string.IsNullOrWhiteSpace(frontendBaseUrl))
         {
-            policy.WithOrigins(frontendBaseUrl).AllowAnyHeader().AllowAnyMethod();
+            // Content-Disposition is exposed so the console can read the post export's file name
+            // cross-origin (demo-feedback 02/09); without it the browser hides the header from script.
+            policy.WithOrigins(frontendBaseUrl).AllowAnyHeader().AllowAnyMethod()
+                .WithExposedHeaders("Content-Disposition");
         }
         else
         {
@@ -498,6 +514,15 @@ app.MapEngineReview();    // #286 GET queue + approve/edit/veto/re-roll/batch + 
 app.MapPauseTierSteering();   // #350 pause tier (Freeze reaches the real clock)
 app.MapStorylineSteering();   // #352 storyline actual/target read + target set
 app.MapInjects();             // #452 /api/injects* (staff gate; mutations controller-only)
+
+// Demo feedback cut (#496), seam S-2. Each slice carries its own gates inside its Map extension (staff filter, plus
+// the controller-role filter on every mutation). MapPostPins() stays at TOP LEVEL on purpose: a view-only session
+// must still read GET /api/feed/pinned; the personal pin rides the existing reaction route, which already sits
+// inside DenyReadOnlySessions() above.
+app.MapPostExport();          // demo-feedback 02 GET /api/staff/exports/posts.xlsx (any assigned staff)
+app.MapInjectImport();        // demo-feedback 03 POST /api/injects/import (controller)
+app.MapPostPins();            // demo-feedback 04 GET /api/feed/pinned; PUT/DELETE /api/staff/posts/{id}/pin (controller)
+app.MapWhiteNoise();          // demo-feedback 05 GET /api/staff/noise (any staff); PUT noise + noise/pool (controller)
 
 app.Run();
 
