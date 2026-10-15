@@ -59,3 +59,14 @@ run sheet seeded into every state the row actions depend on (pending, held, skip
   `/staff/console`, keeps `/staff/evaluate` as default and has the console in its launcher; not extended.
 - `TakedownAction.test.tsx`'s CTL-033 cases now drive the session gate instead of the identity mock; the 40 existing
   console suites that mount no session fix the gate to "controller" with one `vi.mock` line each.
+- **Gate-1 fold-in (same file unless noted):** the engine mode is shown to both roles (kill switch or
+  `engine-mode-readout`), and an evaluator's readout is a `role="status"` span built from the server settings
+  ("ENGINE · LIVE (SUGGEST)" on the mock snapshot) (H-1); the pause tier is a `pause-readout` status span; the ENGINE
+  flyout shows an evaluator no autonomy / tier-policy group and no provider lever, but the read-only note and the
+  current default and tier policy as text, with the controller's levers as the control case (M-1, M-2); while
+  degraded, Restore is present for a controller and absent for an evaluator, the indicator stays for both (M-2); the
+  review queue's hint does not tell an evaluator to press A or V (L-1); the chip's reason is visually hidden text in the
+  chip and the chip has no `title` (L-2); the noise level reads "Level: Off" (L-3); Space (batch select) and
+  Ctrl/⌘+Enter in the read-only editor change nothing, with a controller's Space then B as the control case (L-4).
+- **Polling (M-3, `access/useReadOnlyRefresh.test.tsx`, fake timers):** an evaluator's console re-reads the pause tier
+  and the engine settings every 15 s, stops on unmount, and a controller's console never polls.

@@ -62,6 +62,14 @@ import { useReviewQueue } from '../hooks/useReviewQueue'
 import { consoleChrome as chrome } from '../../consoleChrome'
 import { useCanControl } from '../../access'
 
+/** The queue's one-line explanation. A non-controller (story 11 L-1) is not told to press keys. */
+const REVIEW_HINT_CONTROLLER =
+  'Engine drafts awaiting your call — approve (A) or veto (V). Expired timers hold the draft ' +
+  'for you; nothing posts without a decision.'
+const REVIEW_HINT_READ_ONLY =
+  "Engine drafts awaiting a controller's call. Expired timers hold the draft; nothing posts " +
+  'without a decision.'
+
 export interface ReviewQueueEditSlotProps {
   /** The burst being edited. */
   readonly item: EngineReviewItem
@@ -346,8 +354,7 @@ export function ReviewQueue({ editSlot }: ReviewQueueProps = {}) {
         </Typography>
 
         <Typography sx={{ mt: 0.5, fontSize: 10.5, color: chrome.inkFaint, lineHeight: 1.4 }}>
-          Engine drafts awaiting your call — approve (A) or veto (V). Expired timers hold the draft
-          for you; nothing posts without a decision.
+          {canControl ? REVIEW_HINT_CONTROLLER : REVIEW_HINT_READ_ONLY}
         </Typography>
       </Box>
 

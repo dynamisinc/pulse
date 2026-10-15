@@ -18,7 +18,7 @@
  *  - The controller's console is UNCHANGED: the full list of its controls (role, test id and name)
  *    equals the list recorded before this story's gating went in.
  */
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -33,7 +33,7 @@ import { resetTelemetryBuffer } from '@/core/telemetry'
 import { postStore } from '@/features/social/services/postStore'
 import { removedPosts } from '@/features/social/services/removedPosts'
 import { reviewStore } from '../engine/services/reviewStore'
-import { engineControlStore } from '../engine/hooks/useEngineControl'
+import { engineControlStore, useEngineControl } from '../engine/hooks/useEngineControl'
 import { engineSettingsStore } from '../engine/hooks/useEngineSettings'
 import { composeAsPersonaDraftStore } from '../hooks/useComposeAsPersona'
 import { resetPauseStateForTest } from '../hooks/usePauseState'
@@ -158,6 +158,20 @@ async function renderConsole(role: ExerciseRole): Promise<void> {
   await screen.findByTestId('export-posts')
 }
 
+/** Puts this exercise's engine into the mock provider-degraded clamp before the console mounts. */
+async function degradeEngine(): Promise<void> {
+  const hook = renderHook(() => useEngineControl(), {
+    wrapper: ({ children }) => (
+      <QueryClientProvider client={new QueryClient()}>
+        <ExerciseContextProvider>{children}</ExerciseContextProvider>
+      </QueryClientProvider>
+    ),
+  })
+  await waitFor(() => expect(hook.result.current).toBeTruthy())
+  act(() => hook.result.current.degrade('provider degraded (test)'))
+  hook.unmount()
+}
+
 /** Lets anything a key press MIGHT have started actually start before asserting it did not. */
 async function quiet(): Promise<void> {
   await act(async () => {
@@ -234,6 +248,10 @@ describe('what an evaluator keeps', () => {
     await renderConsole('evaluator')
     const chip = screen.getByTestId('console-view-only-chip')
     expect(chip).toHaveTextContent('View only')
+    // Gate-1 L-2: the reason is in the chip's text (visually hidden), not a mouse-only title.
+    expect(within(chip).getByTestId('console-view-only-reason'))
+      .toHaveTextContent('Only a controller can change the exercise.')
+    expect(chip).not.toHaveAttribute('title')
     // In the title row, beside the console title.
     const title = screen.getByRole('heading', { level: 1, name: 'CONTROLLER CONSOLE' })
     expect(title.parentElement).toContainElement(chip)
@@ -250,12 +268,79 @@ describe('what an evaluator keeps', () => {
     expect(screen.getAllByTestId('live-world-row').length).toBeGreaterThan(0)
     expect(screen.getAllByTestId('review-card').length).toBeGreaterThan(0)
     // The white noise level and rate stay visible as words.
-    expect(screen.getByTestId('noise-level-readonly')).toHaveTextContent('Off')
+    expect(screen.getByTestId('noise-level-readonly')).toHaveTextContent('Level: Off')
     expect(screen.getByTestId('noise-rate')).toBeInTheDocument()
     // Every row still opens, read-only ("View").
     const opens = screen.getAllByTestId('row-open')
     expect(opens).toHaveLength(SEED.length)
     for (const open of opens) expect(open).toHaveAccessibleName(/^View /)
+  })
+
+  it.each(['controller', 'evaluator'] as const)(
+    'the engine mode is shown to a %s (kill switch or read-only readout)',
+    async role => {
+      await renderConsole(role)
+      const shown = [...all('engine-kill-switch'), ...all('engine-mode-readout')]
+      expect(shown).toHaveLength(1)
+    },
+  )
+
+  it('H-1: an evaluator reads the engine mode from the server settings, as a status', async () => {
+    await renderConsole('evaluator')
+    const readout = await screen.findByTestId('engine-mode-readout')
+    expect(readout.tagName).toBe('SPAN')
+    expect(readout).toHaveAttribute('role', 'status')
+    // The mock settings snapshot: not stopped, no clamp, effective Suggest.
+    await waitFor(() => expect(readout).toHaveTextContent('ENGINE · LIVE (SUGGEST)'))
+    expect(within(readout).queryByRole('button')).not.toBeInTheDocument()
+  })
+
+  it('an evaluator reads the pause tier as a non-interactive status', async () => {
+    await renderConsole('evaluator')
+    const readout = screen.getByTestId('pause-readout')
+    expect(readout.tagName).toBe('SPAN')
+    expect(readout).toHaveAttribute('role', 'status')
+    expect(readout).toHaveTextContent('Pause state: RUNNING')
+  })
+
+  it('L-1: the review queue does not tell an evaluator to press A or V', async () => {
+    await renderConsole('evaluator')
+    const queue = screen.getByTestId('review-queue')
+    expect(queue).not.toHaveTextContent(/approve \(A\)|veto \(V\)/)
+    expect(queue).toHaveTextContent("Engine drafts awaiting a controller's call.")
+  })
+
+  it('M-2: the ENGINE flyout shows an evaluator the settings as text, with no lever', async () => {
+    await renderConsole('evaluator')
+    fireEvent.click(screen.getByTestId('toolstrip-tool-engine-settings'))
+    expect(await screen.findByTestId('engine-settings-readonly-note')).toBeInTheDocument()
+    expect(screen.queryByRole('group', { name: 'Exercise autonomy default' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('group', { name: 'Tier-policy mode' })).not.toBeInTheDocument()
+    expect(screen.queryByTestId('provider-lever-cut')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('provider-lever-restore')).not.toBeInTheDocument()
+    // M-1: the current values are still there, as words.
+    expect(screen.getByTestId('autonomy-default-readonly')).toHaveTextContent('Exercise default: Suggest')
+    expect(screen.getByTestId('tier-policy-readonly')).toHaveTextContent(/^Current: /)
+  })
+
+  it('M-2 control case: a controller gets the ENGINE levers and no read-only text', async () => {
+    await renderConsole('controller')
+    fireEvent.click(screen.getByTestId('toolstrip-tool-engine-settings'))
+    expect(await screen.findByRole('group', { name: 'Exercise autonomy default' })).toBeInTheDocument()
+    expect(screen.getByRole('group', { name: 'Tier-policy mode' })).toBeInTheDocument()
+    expect(screen.queryByTestId('engine-settings-readonly-note')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('autonomy-default-readonly')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('tier-policy-readonly')).not.toBeInTheDocument()
+  })
+
+  it.each([
+    ['controller', 1],
+    ['evaluator', 0],
+  ] as const)('M-2: while degraded, a %s gets %i Restore control(s); the indicator stays', async (role, count) => {
+    await degradeEngine()
+    await renderConsole(role)
+    expect(screen.getByTestId('engine-degraded-indicator')).toBeInTheDocument()
+    expect(all('engine-degraded-restore')).toHaveLength(count)
   })
 
   it('opens the run sheet editor in view mode, with no Save', async () => {
@@ -288,6 +373,20 @@ describe('keyboard shortcuts that write are inert for an evaluator', () => {
     expect(await screen.findByTestId('inject-editor')).toHaveAttribute('data-mode', 'view')
   })
 
+  it('run sheet: Ctrl+Enter in the read-only editor saves nothing', async () => {
+    await renderConsole('evaluator')
+    const before = queueStatuses()
+    const versions = injectMock.snapshot().items.map(i => i.version)
+    fireEvent.click(screen.getByRole('button', { name: 'View Pending one' }))
+    const editor = await screen.findByTestId('inject-editor')
+    fireEvent.keyDown(editor, { key: 'Enter', ctrlKey: true })
+    fireEvent.keyDown(editor, { key: 'Enter', metaKey: true })
+    await quiet()
+    expect(queueStatuses()).toEqual(before)
+    expect(injectMock.snapshot().items.map(i => i.version)).toEqual(versions)
+    expect(screen.getByTestId('inject-editor')).toHaveAttribute('data-mode', 'view')
+  })
+
   it('run sheet: the Keyboard help lists only the keys that still work (move, open)', async () => {
     await renderConsole('evaluator')
     fireEvent.click(screen.getByRole('button', { name: 'Keyboard shortcuts' }))
@@ -296,16 +395,25 @@ describe('keyboard shortcuts that write are inert for an evaluator', () => {
     expect(keys).toEqual(['↑ / ↓', 'E'])
   })
 
-  it('review queue: A, V, R and B change nothing', async () => {
+  it('review queue: A, V, R, E, Space (batch select) and B change nothing', async () => {
     await renderConsole('evaluator')
     const before = reviewDispositions()
     const card = first(screen.getAllByTestId('review-card'))
     card.focus()
-    for (const key of ['a', 'v', 'r', 'b', 'e']) fireEvent.keyDown(card, { key })
+    for (const key of ['a', 'v', 'r', 'e', ' ', 'b']) fireEvent.keyDown(card, { key })
     await quiet()
     expect(reviewDispositions()).toEqual(before)
     expect(screen.getByTestId('review-queue-status')).toHaveTextContent('')
     expect(screen.queryByTestId('review-queue-edit-slot')).not.toBeInTheDocument()
+  })
+
+  it("review queue control case: a controller's Space then B batch-approves", async () => {
+    await renderConsole('controller')
+    const card = first(screen.getAllByTestId('review-card'))
+    card.focus()
+    fireEvent.keyDown(card, { key: ' ' })
+    fireEvent.keyDown(card, { key: 'b' })
+    expect(screen.getByTestId('review-queue-status')).toHaveTextContent(/^Batch approved 1 draft/)
   })
 
   it('live world: R (Reply as…) opens nothing', async () => {

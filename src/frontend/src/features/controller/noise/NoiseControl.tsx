@@ -91,6 +91,12 @@ export function NoiseControl() {
     choose(next)
   }
 
+  // Story 11: a non-controller's level as words, never blank (still reading, or the read failed).
+  const readOnlyLevel =
+    selectedLevel !== undefined
+      ? NOISE_LEVEL_LABELS[selectedLevel]
+      : loadError === null ? 'reading…' : 'unknown'
+
   // The tab stop: the checked option, else Off (nothing is known before the first read).
   const tabStop: NoiseLevel = selectedLevel ?? 'off'
   const status = state === undefined ? undefined : noiseStatusLine(state, tier, exerciseStatus)
@@ -186,7 +192,7 @@ export function NoiseControl() {
             data-testid="noise-level-readonly"
             sx={{ fontSize: 12, fontWeight: 800, color: chrome.ink }}
           >
-            {selectedLevel === undefined ? '' : NOISE_LEVEL_LABELS[selectedLevel]}
+            {`Level: ${readOnlyLevel}`}
           </Typography>
         )}
 

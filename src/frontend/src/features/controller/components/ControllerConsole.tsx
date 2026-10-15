@@ -143,6 +143,7 @@ import { useRegisterSurfaceTool, useToolstrip } from '@/features/staffShell/tool
 import { staffShellTokens } from '@/features/staffShell/staffShellTokens'
 import { useControllerIdentity } from '../identity/controllerIdentity'
 import { useCanControl, ViewOnlyChip } from '../access'
+import { useReadOnlyRefresh } from '../access/useReadOnlyRefresh'
 import { CommandPalette, type CommandPalettePersonaSlot } from '../console/CommandPalette'
 // The component lives in `personaDockHost.tsx`; the shared ids/types in the
 // sibling `personaDockHost.ts`. A bare `./personaDockHost` specifier resolves
@@ -361,6 +362,8 @@ export function ControllerConsole(
   const identity = useControllerIdentity()
   // Story 11 (DF-14): false for an evaluator, whose console has no write control at all.
   const canControl = useCanControl()
+  // A non-controller never acts, so the pause tier and engine settings are re-read on a timer.
+  useReadOnlyRefresh()
   const { exerciseId, timeZone } = useExerciseContext()
   const { isActive, toggleTool } = useToolstrip()
   // The console's root element: the reference point for "is some OTHER modal on top of

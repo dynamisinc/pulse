@@ -236,8 +236,39 @@ export function PausePill() {
     closePopover()
   }
 
-  // Story 11 (DF-14): every pill action writes; a non-controller reads the tier on the header pill.
-  if (!canControl) return null
+  // Story 11 (DF-14): every pill action writes, so a non-controller gets the tier as a readout.
+  if (!canControl) {
+    return (
+      <Box
+        component="span"
+        role="status"
+        data-testid="pause-readout"
+        sx={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 0.75,
+          px: 1,
+          py: 0.5,
+          fontFamily: "'Figtree', system-ui, sans-serif",
+          fontSize: 11,
+          fontWeight: 800,
+          letterSpacing: '0.04em',
+          color: isPaused ? chrome.amber : chrome.ink,
+          bgcolor: chrome.card,
+          border: `1px solid ${isPaused ? chrome.amber : chrome.line}`,
+          borderRadius: '999px',
+        }}
+      >
+        <Box
+          component="span"
+          aria-hidden="true"
+          sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: TIER_DOT[tier], flexShrink: 0 }}
+        />
+        <FontAwesomeIcon icon={isPaused ? faCirclePause : faPlay} aria-hidden="true" style={{ fontSize: 10 }} />
+        {`Pause state: ${label}`}
+      </Box>
+    )
+  }
 
   return (
     <>

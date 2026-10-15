@@ -124,6 +124,11 @@ const TIER_POLICY_OPTIONS: ReadonlyArray<{ value: TierPolicyMode; label: string 
   { value: 'auto', label: 'Auto (by purpose)' },
 ]
 
+/** The tier-policy mode's display label (story 11 M-1's read-only text). */
+function tierPolicyLabel(mode: TierPolicyMode): string {
+  return TIER_POLICY_OPTIONS.find(option => option.value === mode)?.label ?? mode
+}
+
 /** Human copy for an effective/default autonomy level — text, never colour alone. */
 function autonomyLevelCopy(level: AutonomyDefaultLevel): string {
   return level === 'delayed-auto' ? 'Delayed-auto' : 'Suggest'
@@ -408,6 +413,15 @@ export function EngineSettingsPanel({ open, onClose }: EngineSettingsPanelProps)
                   )
                 })}
               </Stack>}
+              {/* Story 11 M-1: a non-controller reads the base default as text. */}
+              {!canControl && (
+                <Typography
+                  data-testid="autonomy-default-readonly"
+                  sx={{ fontSize: 11.5, fontWeight: 700, color: chrome.ink }}
+                >
+                  {`Exercise default: ${autonomyLevelCopy(autonomy.exerciseDefaultLevel)}`}
+                </Typography>
+              )}
 
               {pendingAutonomyDefault && (
                 <Typography
@@ -490,6 +504,15 @@ export function EngineSettingsPanel({ open, onClose }: EngineSettingsPanelProps)
                   )
                 })}
               </Stack>}
+              {/* Story 11 M-1: a non-controller reads the current tier policy as text. */}
+              {!canControl && (
+                <Typography
+                  data-testid="tier-policy-readonly"
+                  sx={{ fontSize: 11.5, fontWeight: 700, color: chrome.ink }}
+                >
+                  {`Current: ${tierPolicyLabel(settings.tierPolicyMode)}`}
+                </Typography>
+              )}
 
               {pendingTierPolicy && (
                 <Typography
