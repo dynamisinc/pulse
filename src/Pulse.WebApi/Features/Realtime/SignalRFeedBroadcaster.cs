@@ -2,6 +2,7 @@ namespace Pulse.WebApi.Features.Realtime;
 
 using Microsoft.AspNetCore.SignalR;
 using Pulse.WebApi.Features.Social;
+using Pulse.WebApi.Features.Social.Editing;
 using Pulse.WebApi.Features.Social.Moderation;
 using Pulse.WebApi.Features.Social.Pins;
 
@@ -28,6 +29,9 @@ public sealed class SignalRFeedBroadcaster : IFeedBroadcaster
 
     /// <summary>The SignalR client method name a subscriber handles when an exercise pin changes (demo-feedback DF-7).</summary>
     private const string PostPinChangedEvent = "PostPinChanged";
+
+    /// <summary>The SignalR client method name a subscriber handles when a post's author edits it (demo-feedback DF-33).</summary>
+    private const string PostEditedEvent = "PostEdited";
 
     private readonly IHubContext<ExerciseRealtimeHub> _hubContext;
 
@@ -85,5 +89,23 @@ public sealed class SignalRFeedBroadcaster : IFeedBroadcaster
         await _hubContext.Clients
             .Group(ExerciseRealtimeHub.GroupNameFor(exerciseId))
             .SendAsync(PostPinChangedEvent, PostPinChangedDto.For(postId, pinnedForAll), cancellationToken: cancellationToken);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Sends <c>PostEdited</c> with <see cref="PostEditedDto"/> to the exercise-wide group from
+    /// <see cref="ExerciseRealtimeHub.GroupNameFor"/>, exactly as <c>PostRemoved</c> and <c>PostPinChanged</c> do. Staff
+    /// connections already belong to that group, so consoles receive it once too.
+    /// </remarks>
+    public async Task BroadcastPostEditedAsync(
+        Guid exerciseId,
+        PostEditedDto edited,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(edited);
+
+        await _hubContext.Clients
+            .Group(ExerciseRealtimeHub.GroupNameFor(exerciseId))
+            .SendAsync(PostEditedEvent, edited, cancellationToken: cancellationToken);
     }
 }

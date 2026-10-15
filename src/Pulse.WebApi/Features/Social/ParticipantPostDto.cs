@@ -3,6 +3,7 @@ namespace Pulse.WebApi.Features.Social;
 using System.Diagnostics.CodeAnalysis;
 using System.Text.Json.Serialization;
 using Pulse.WebApi.Data.Entities;
+using Pulse.WebApi.Features.Social.Editing;
 
 /// <summary>
 /// The FROZEN participant-safe post shape — the server-side mirror of the frontend
@@ -61,6 +62,7 @@ public class ParticipantPostDto
         InReplyTo = source.InReplyTo;
         Viewer = source.Viewer;
         PinnedForAll = source.PinnedForAll;
+        Edited = source.Edited;
     }
 
     /// <summary>The post id.</summary>
@@ -114,6 +116,15 @@ public class ParticipantPostDto
     public bool? PinnedForAll { get; init; }
 
     /// <summary>
+    /// The "Edited" summary (demo-feedback DF-31, story 19): <c>{ count, scenarioTime }</c> once the author has edited the
+    /// post, else <c>null</c>. Frozen as <c>edited: {...} | null</c>, so it is ALWAYS on the wire (written as
+    /// <c>null</c> when never edited, never omitted). The time is SCENARIO time (COR-053); the wall-clock
+    /// <see cref="Post.LastEditedAt"/> is staff/export only and never carried here (XC-002).
+    /// </summary>
+    [JsonPropertyName("edited")]
+    public PostEditedSummaryDto? Edited { get; init; }
+
+    /// <summary>
     /// The single server-side XC-002 narrowing — the server-side mirror of the frontend
     /// <c>toParticipantView</c> (retiring finding S2-2). Maps only participant-safe fields; it MUST NOT read
     /// or include <see cref="Post.Origin"/>, <see cref="Post.ActingHumanId"/>,
@@ -121,7 +132,8 @@ public class ParticipantPostDto
     /// persisted <see cref="Post.CreatedScenarioTime"/> emitted round-trip ISO-8601 — never re-derived from
     /// the server clock (COR-053). Counts seed to zero for a freshly-read post. <see cref="PinnedForAll"/> is
     /// <c>true</c> only when <see cref="Post.PinnedForAllAt"/> is set; <see cref="Post.PinnedForAllByHumanId"/> is
-    /// never read.
+    /// never read. <see cref="Edited"/> reads only <see cref="Post.EditCount"/> and
+    /// <see cref="Post.LastEditedScenarioTime"/>, never the wall-clock <see cref="Post.LastEditedAt"/>.
     /// </summary>
     /// <param name="post">The full post entity to narrow to the participant-safe shape.</param>
     /// <returns>The participant-safe projection of <paramref name="post"/>.</returns>
@@ -137,6 +149,7 @@ public class ParticipantPostDto
             ScenarioTime = post.CreatedScenarioTime.ToString("O"),
             Counts = new ParticipantPostCounts(0, 0, 0),
             PinnedForAll = PinnedForAllFlag(post),
+            Edited = PostEditRules.SummaryOf(post),
         };
     }
 
