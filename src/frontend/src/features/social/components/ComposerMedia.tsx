@@ -34,6 +34,12 @@
  * previous one at the end), or to the attach button once the tray is empty, so focus
  * never falls to the page.
  *
+ * EXERCISE BANDS (demo-feedback 06, DF-4): a thumbnail that shows the picked picture
+ * or the video's first frame carries the shared `ExerciseBands` overlay when the
+ * exercise requires marking — the author sees the media as everyone else will. On
+ * this small box the line overflows evenly, so the middle "EXERCISE" stays whole; the
+ * "Video" badge sits above the bottom band. The icon-only state (no preview) has none.
+ *
  * A11Y: every control is a real `<button>`/`<input>` with a label; the thumbnails
  * are decorative (`alt=""`, `aria-hidden` video) because the description field
  * next to each IS the text alternative being authored; status is words + icons,
@@ -65,6 +71,7 @@ import {
   effectiveAlt,
   type ComposerAttachment,
 } from '../hooks/useComposePost'
+import { ExerciseBands } from './media/ExerciseBands'
 import styles from './ComposerMedia.module.css'
 
 /**
@@ -269,6 +276,7 @@ function AttachmentRow({
         {previewUrl === undefined && (
           <FontAwesomeIcon icon={item.kind === 'video' ? faFilm : faImage} />
         )}
+        {previewUrl !== undefined && <ExerciseBands />}
         {item.kind === 'video' && (
           <span className={styles.videoBadge}>
             <FontAwesomeIcon icon={faPlay} />

@@ -12,6 +12,12 @@
  *   - activating a tile calls `onOpenPost(postId)` — thread navigation is the
  *     caller's job; this component never routes.
  *
+ * EXERCISE BANDS (demo-feedback 06, DF-4): a tile that shows a picture, poster or
+ * first frame carries the shared `ExerciseBands` overlay when the exercise requires
+ * marking (`aria-hidden`, click-through, so the tile's name and activation are
+ * unchanged); the play badge sits above the bottom band. The alt-text placeholder
+ * shows no media and carries none.
+ *
  * ACCESSIBILITY (NFR-001): each tile is a real `<button>` whose accessible name is
  * the media item's ALT text; a video tile adds a visually-hidden "Video" description
  * and a play-icon badge, so the kind is never colour-only or sight-only. With no
@@ -30,6 +36,7 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faPlay } from '@fortawesome/free-solid-svg-icons'
 import type { PostMedia } from '../../types/post'
 import type { PostView } from '../post'
+import { ExerciseBands } from './ExerciseBands'
 import { MediaFallbackTile } from './MediaFallbackTile'
 import { mediaAlt } from './mediaLayout'
 import { resolveSafeMediaUrl, withFirstFrameHint } from './safeMediaUrl'
@@ -42,25 +49,36 @@ export interface MediaTabGridProps {
   readonly onOpenPost?: (postId: string) => void
 }
 
-/** The visible face of one tile: the photo, the poster, a first frame, or the placeholder. */
+/**
+ * The visible face of one tile: the photo, the poster, a first frame (each with the
+ * EXERCISE bands when required), or the placeholder (no media, so no bands).
+ */
 function Thumbnail({ item, alt }: { readonly item: PostMedia, readonly alt: string }) {
   if (item.kind === 'video') {
     const poster = resolveSafeMediaUrl(item.posterUrl)
     if (poster !== undefined) {
-      return <img className={styles.thumb} src={poster} alt={alt} loading="lazy" decoding="async" />
+      return (
+        <>
+          <img className={styles.thumb} src={poster} alt={alt} loading="lazy" decoding="async" />
+          <ExerciseBands />
+        </>
+      )
     }
     const src = resolveSafeMediaUrl(item.url)
     if (src !== undefined) {
       return (
-        <video
-          className={styles.thumb}
-          src={withFirstFrameHint(src)}
-          muted
-          playsInline
-          preload="metadata"
-          tabIndex={-1}
-          aria-hidden="true"
-        />
+        <>
+          <video
+            className={styles.thumb}
+            src={withFirstFrameHint(src)}
+            muted
+            playsInline
+            preload="metadata"
+            tabIndex={-1}
+            aria-hidden="true"
+          />
+          <ExerciseBands />
+        </>
       )
     }
     return <MediaFallbackTile alt={alt} kind="video" />
@@ -68,7 +86,12 @@ function Thumbnail({ item, alt }: { readonly item: PostMedia, readonly alt: stri
 
   const src = resolveSafeMediaUrl(item.url)
   if (src === undefined) return <MediaFallbackTile alt={alt} />
-  return <img className={styles.thumb} src={src} alt={alt} loading="lazy" decoding="async" />
+  return (
+    <>
+      <img className={styles.thumb} src={src} alt={alt} loading="lazy" decoding="async" />
+      <ExerciseBands />
+    </>
+  )
 }
 
 interface MediaTabTileProps {

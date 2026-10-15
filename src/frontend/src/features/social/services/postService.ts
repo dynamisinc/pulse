@@ -79,6 +79,7 @@ import type {
   Post,
   PostCounts,
   PostMedia,
+  PostViewerState,
 } from '../types/post'
 
 // The ONE XC-002 media narrowing lives in the leaf `./narrowMedia` (so `ownPostStore`
@@ -257,9 +258,22 @@ export function toParticipantView(post: Post): ParticipantPostView {
       ? { inReplyTo: { postId: post.inReplyTo.postId, authorHandle: post.inReplyTo.authorHandle } }
       : {}),
     ...(post.linkPreview != null ? { linkPreview: post.linkPreview } : {}),
-    ...(post.viewer != null
-      ? { viewer: { liked: post.viewer.liked, reposted: post.viewer.reposted } }
-      : {}),
+    ...(post.viewer != null ? { viewer: narrowViewer(post.viewer) } : {}),
+    // DF-7: `true` or absent. Anything else (a `false`/`null` from a lenient backend) is absent.
+    ...(post.pinnedForAll === true ? { pinnedForAll: true as const } : {}),
+  }
+}
+
+/**
+ * The caller's viewer state rebuilt from its documented keys only. `pinned` (DF-6) is
+ * carried when the wire sent a boolean and omitted otherwise, so a pre-pin fixture
+ * keeps exactly its `liked` / `reposted` keys.
+ */
+function narrowViewer(viewer: PostViewerState): PostViewerState {
+  return {
+    liked: viewer.liked,
+    reposted: viewer.reposted,
+    ...(typeof viewer.pinned === 'boolean' ? { pinned: viewer.pinned } : {}),
   }
 }
 
@@ -293,7 +307,8 @@ function isWellFormedMedia(item: unknown): boolean {
 
 /**
  * Runtime guard for the OPTIONAL contract-v2 members of a wire post — `media`,
- * `inReplyTo`, `viewer` (implementation.md §1.5.3). Each is accepted when absent
+ * `inReplyTo`, `viewer` (implementation.md §1.5.3), plus the demo-feedback pin members
+ * `viewer.pinned` and `pinnedForAll` (story 07). Each is accepted when absent
  * (every pre-v2 body and fixture) OR `null` (treated as absent: one backend
  * member missing `WhenWritingNull` must not fail-close the whole feed), but must
  * be well-formed when present, so a
@@ -315,7 +330,11 @@ export function hasWellFormedV2Members(value: object): boolean {
     (isAbsent(viewer) ||
       (isRecord(viewer) &&
         typeof viewer.liked === 'boolean' &&
-        typeof viewer.reposted === 'boolean'))
+        typeof viewer.reposted === 'boolean' &&
+        (isAbsent(viewer.pinned) || typeof viewer.pinned === 'boolean'))) &&
+    // DF-7: `pinnedForAll` is `true` or absent on the wire; a stray boolean is tolerated
+    // (`toParticipantView` keeps only `true`), anything else fails closed.
+    (isAbsent(p.pinnedForAll) || typeof p.pinnedForAll === 'boolean')
   )
 }
 
@@ -334,6 +353,9 @@ export function originConsoleLabel(post: Post): string {
       return 'PARTICIPANT'
     case 'inject':
       return post.injectId ? `INJ-${post.injectId}` : 'INJ-unknown'
+    case 'noise':
+      // demo-feedback DF-12: a white-noise pool post, released by the server pacer.
+      return 'NOISE · AUTO'
     default: {
       // Exhaustiveness guard: a future 5th PostOrigin value fails the build
       // here rather than silently falling through unmapped.

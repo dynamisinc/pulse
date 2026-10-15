@@ -414,3 +414,102 @@ describe('teardown', () => {
     expect(ids(result.current.rows)).toEqual(['a'])
   })
 })
+
+describe('pin generations (story 08 Gate-1 M1): a stale read never reverts a fresh pin', () => {
+  it('sweep in flight -> pin -> sweep resolves WITHOUT the flag -> the pin stays', async () => {
+    source.mode = 'polling'
+    mockedResolveFeed.mockResolvedValue([post('a', { scenarioTime: at(1) })])
+    const { result } = await mount()
+    expect(result.current.rows[0]?.pinnedForAll).toBe(false)
+
+    let finish: (posts: ReturnType<typeof post>[]) => void = () => {}
+    mockedResolveFeed.mockReturnValue(new Promise(resolve => {
+      finish = resolve
+    }))
+    await advance(POLLING_SWEEP_MS) // the sweep starts and stays in flight
+    expect(mockedResolveFeed).toHaveBeenCalledTimes(2)
+
+    act(() => result.current.setPinned('a', true))
+    expect(result.current.rows[0]?.pinnedForAll).toBe(true)
+
+    // The server answered before the pin landed: no pinnedForAll, fresh counts.
+    await act(async () => {
+      finish([post('a', { scenarioTime: at(1), counts: { reply: 0, repost: 0, like: 5 } })])
+      await vi.advanceTimersByTimeAsync(0)
+    })
+    expect(result.current.rows[0]?.view.counts.like).toBe(5) // the rest of the sweep applied
+    expect(result.current.rows[0]?.pinnedForAll).toBe(true) // the marker stays
+  })
+
+  it('an unpin during a sweep that still reports the post pinned stays unpinned', async () => {
+    source.mode = 'polling'
+    mockedResolveFeed.mockResolvedValue([post('a', { scenarioTime: at(1), pinnedForAll: true } as
+      Partial<ReturnType<typeof post>>)])
+    const { result } = await mount()
+    expect(result.current.rows[0]?.pinnedForAll).toBe(true)
+
+    let finish: (posts: ReturnType<typeof post>[]) => void = () => {}
+    mockedResolveFeed.mockReturnValue(new Promise(resolve => {
+      finish = resolve
+    }))
+    await advance(POLLING_SWEEP_MS)
+    act(() => result.current.setPinned('a', false))
+    await act(async () => {
+      finish([post('a', { scenarioTime: at(1), pinnedForAll: true } as
+        Partial<ReturnType<typeof post>>)])
+      await vi.advanceTimersByTimeAsync(0)
+    })
+    expect(result.current.rows[0]?.pinnedForAll).toBe(false)
+  })
+
+  it('a sweep that STARTS after the pin carries the server state as usual', async () => {
+    source.mode = 'polling'
+    mockedResolveFeed.mockResolvedValue([post('a', { scenarioTime: at(1) })])
+    const { result } = await mount()
+    act(() => result.current.setPinned('a', true))
+    // The server now says unpinned (another console unpinned it): the newer read wins.
+    await advance(POLLING_SWEEP_MS)
+    expect(result.current.rows[0]?.pinnedForAll).toBe(false)
+  })
+})
+
+describe('a pin change while an arrival waits in the batch queue', () => {
+  it('pinned before the flush: the queued arrival is inserted pinned for everyone', async () => {
+    const { result } = await mount()
+
+    act(() => source.emit(view('n1', { scenarioTime: at(5) })))
+    act(() => result.current.setPinned('n1', true))
+    expect(result.current.rows).toEqual([]) // still in the 150 ms queue
+
+    await advance(ARRIVAL_BATCH_MS)
+    expect(ids(result.current.rows)).toEqual(['n1'])
+    expect(result.current.rows[0]?.pinnedForAll).toBe(true)
+  })
+
+  it('unpinned before the flush: an arrival that came in pinned is inserted unpinned', async () => {
+    const { result } = await mount()
+
+    act(() => source.emit(view('n1', { scenarioTime: at(5), pinnedForAll: true })))
+    act(() => result.current.setPinned('n1', false))
+    expect(result.current.rows).toEqual([])
+
+    await advance(ARRIVAL_BATCH_MS)
+    expect(ids(result.current.rows)).toEqual(['n1'])
+    expect(result.current.rows[0]?.pinnedForAll).toBe(false)
+    expect(result.current.rows[0]?.view.pinnedForAll).toBeUndefined()
+  })
+
+  it('leaves other queued arrivals as they came', async () => {
+    const { result } = await mount()
+
+    act(() => {
+      source.emit(view('n1', { scenarioTime: at(5), pinnedForAll: true }))
+      source.emit(view('n2', { scenarioTime: at(6) }))
+    })
+    act(() => result.current.setPinned('n2', true))
+
+    await advance(ARRIVAL_BATCH_MS)
+    expect(ids(result.current.rows)).toEqual(['n2', 'n1'])
+    expect(result.current.rows.map(row => row.pinnedForAll)).toEqual([true, true])
+  })
+})

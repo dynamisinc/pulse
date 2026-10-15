@@ -1,7 +1,7 @@
 /**
  * features/social/components/post/PostActions.tsx
  * ---------------------------------------------------------------------------
- * The action row of the decomposed `<PostCard>`: reply · repost · like (R-002),
+ * The action row of the decomposed `<PostCard>`: reply · repost · like (R-002) · pin,
  * with PERSISTED like / repost toggles (demo-polish F3 "Engagement"; SOC-030,
  * SOC-020/021, NFR-001, COR-015, D1-011). `PostCard` ALREADY MOUNTS it (F0,
  * DP-14), so every card on every surface — feed, thread, profile, hashtag, the
@@ -32,6 +32,20 @@
  * and text, announced through an always-mounted POLITE live region
  * (`role="status"`) so assistive technology hears it without losing focus.
  *
+ * PIN (demo-feedback story 07, DF-6). After Like sits the viewer's PERSONAL pin
+ * (FontAwesome thumbtack): `usePin` owns an optimistic toggle with exact rollback on
+ * failure (the `useReaction` pattern) over `PUT`/`DELETE /api/posts/{id}/reactions/pin`.
+ * It shows NO count (a pin is private and never counted). Its accessible name is a STABLE
+ * "Pin" and `aria-pressed` carries `viewer.pinned` (the ARIA toggle-button pattern: the name
+ * never flips to "Unpin", the pressed state says it); ON is a filled icon (outline at rest)
+ * plus the pressed state, never colour alone (NFR-001). It is gated exactly like
+ * Like (writable session + bound persona + a non-read-only card) and is ABSENT otherwise -
+ * with no count there is nothing to render inert. A failed pin shares the card's one
+ * live region. When a pin or a like SETTLES the row tells a mounted Pinned tab
+ * (`pinned/pinEvents.viewerEngagement`) so it re-reads without a reload. The row hands
+ * `usePin` its `post.viewer` object as the server snapshot, so a FRESHER read (a new
+ * object) overrides an older confirmed pin (see `usePin`).
+ *
  * HIDDEN, NOT DISABLED (D1-011 / F3). There is NO Quote trigger, NO quote panel
  * (`QuoteComposer` is no longer mounted) and NO Share action — they are absent
  * from the DOM, not greyed out. (`useAmplify().doQuote` and `amplify.quotePost`
@@ -57,7 +71,8 @@
  * fail-closed, there is no default session).
  *
  * DOM hooks (tests depend on them): `data-testid="post-actions"`,
- * `button[data-action="reply|repost|like"]` (or `span[data-action]` when inert),
+ * `button[data-action="reply|repost|like|pin"]` (or `span[data-action]` when inert; pin
+ * is never inert, it is absent),
  * `data-testid="post-actions-notice"` (the live region; present only while a like
  * or repost control is).
  *
@@ -65,17 +80,21 @@
  * No COBRA, no MUI.
  */
 
+import { useEffect, useRef } from 'react'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import {
   faComment,
   faRetweet,
   faHeart,
+  faThumbtack,
   faCircleExclamation,
 } from '@fortawesome/free-solid-svg-icons'
 import type { IconDefinition } from '@fortawesome/fontawesome-svg-core'
 import { useReaction } from '../../hooks/useReaction'
 import { useAmplify } from '../../hooks/useAmplify'
 import { useTransientMessage } from '../../hooks/useTransientMessage'
+import { usePin } from '../../pinned/usePin'
+import { viewerEngagement } from '../../pinned/pinEvents'
 import { formatMagnitude, spokenMagnitude } from '../../services/audience'
 import type { PostCardVariant, PostView } from './types'
 import styles from './PostActions.module.css'
@@ -140,6 +159,25 @@ function PostActionsRow({ post, variant, onReply }: PostActionsProps) {
     notice,
   })
 
+  const pin = usePin({
+    postId: post.id,
+    initiallyPinned: post.viewer?.pinned === true,
+    serverSnapshot: post.viewer,
+    notice,
+  })
+
+  // A like SETTLED (pending true -> false): tell a mounted Pinned tab, which lists liked
+  // posts too. The like hook is shared with every surface, so the row observes it rather
+  // than threading a callback through it. A rolled-back like re-reads harmlessly.
+  const likePendingRef = useRef(reaction.pending)
+  useEffect(() => {
+    const wasPending = likePendingRef.current
+    likePendingRef.current = reaction.pending
+    if (wasPending && !reaction.pending) {
+      viewerEngagement.notify({ postId: post.id, kind: 'like', active: reaction.likedByViewer })
+    }
+  }, [reaction.pending, reaction.likedByViewer, post.id])
+
   // A card is read-only when its VARIANT says so (observer shells) or when the SESSION
   // itself is read-only — the two can disagree (`variant="full"` + a read-only
   // session), and then all three actions must still go inert together (COR-015).
@@ -147,6 +185,8 @@ function PostActionsRow({ post, variant, onReply }: PostActionsProps) {
   const canLike = !isReadOnly && reaction.canReact
   const canRepost = !isReadOnly && amplify.canAmplify
   const canReply = !isReadOnly && onReply !== undefined
+  // Gated exactly like Like (story 07). No count, so when it cannot act it is absent.
+  const canPin = !isReadOnly && pin.canPin
 
   // Canonical reply · repost · like order (R-002). A toggle shows the hook's own
   // optimistic total only while it is a live control; inert counts follow the post.
@@ -232,11 +272,27 @@ function PostActionsRow({ post, variant, onReply }: PostActionsProps) {
             </button>
           )
         })}
+        {canPin && (
+          <button
+            type="button"
+            className={
+              pin.pinned
+                ? `${styles.actionButton} ${styles.actionButtonActive}`
+                : styles.actionButton
+            }
+            data-action="pin"
+            aria-label="Pin"
+            aria-pressed={pin.pinned}
+            onClick={pin.toggle}
+          >
+            <FontAwesomeIcon icon={faThumbtack} aria-hidden="true" className={styles.actionIcon} />
+          </button>
+        )}
       </div>
-      {/* Always mounted while a like / repost control exists (only those can fail), so
+      {/* Always mounted while a like / repost / pin control exists (only those can fail), so
           the region exists BEFORE its text changes — a live region injected with its
           content is announced unreliably. Empty when there is nothing to say. */}
-      {(canLike || canRepost) && (
+      {(canLike || canRepost || canPin) && (
         <div
           className={styles.notice}
           role="status"

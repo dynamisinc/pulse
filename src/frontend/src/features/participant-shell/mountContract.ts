@@ -278,6 +278,14 @@ export interface ChromeConfig {
   readonly enabled: boolean
   readonly top: ChromeBannerConfig
   readonly bottom: ChromeBannerConfig
+  /**
+   * The exercise's media-marking switch (`Exercise.WatermarkEnabled`, verbatim;
+   * demo-feedback DF-3, story 01 adds it to `GET /api/chrome-config`). Decoupled from
+   * `enabled`: it drives the `EXERCISE EXERCISE EXERCISE` bands on participant images
+   * and video, and `isWatermarkRequired()` ORs it with chrome-off. `chromeConfig.ts`
+   * parses a body WITHOUT it (an older API) as `true` — fail toward marking.
+   */
+  readonly watermark: boolean
 }
 
 /**

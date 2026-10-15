@@ -5,7 +5,7 @@
  * opens it large; a video whose browser has no native fullscreen opens here too.
  *
  *   role="dialog" aria-modal="true"  (portalled to <body>)
- *     stage     the current image (or the expanded VideoPlayer)
+ *     stage     the current image (or the expanded VideoPlayer), with the EXERCISE bands
  *     toolbar   [x Close]                         [<] 2 / 4 [>]
  *     status    polite live region: "Image 2 of 4: <alt>"
  *
@@ -33,6 +33,12 @@
  * sits under the banners; the controls live in a BOTTOM toolbar so a visible
  * alert bar (fixed under the top banner) can never cover Close.
  *
+ * EXERCISE BANDS (demo-feedback 06, DF-4): the viewer is the in-app "full screen"
+ * for media, so it is marked like every other surface. An image sits in a frame that
+ * shrink-wraps the picture and carries `ExerciseBands` (the bands hug the IMAGE, not
+ * the letterboxed stage); a video brings its own bands inside the expanded player.
+ * An alt-text placeholder shows no media and gets none.
+ *
  * Body scroll is locked while open and restored on close. Participant world:
  * CSS Module, FontAwesome icons, no COBRA, no MUI. Reads only contract URLs
  * (through `safeMediaUrl`); an unsafe one shows the alt-text placeholder.
@@ -46,6 +52,7 @@ import { faChevronLeft, faChevronRight, faXmark } from '@fortawesome/free-solid-
 import { hasOtherModalMounted } from '@/core/a11y/modalPriority'
 import { SHELL_Z } from '@/features/participant-shell/mountContract'
 import type { PostMedia } from '../../types/post'
+import { ExerciseBands } from './ExerciseBands'
 import { MediaFallbackTile } from './MediaFallbackTile'
 import { mediaAlt } from './mediaLayout'
 import { resolveSafeMediaUrl } from './safeMediaUrl'
@@ -69,7 +76,10 @@ export interface MediaViewerProps {
   readonly startAt?: number
 }
 
-/** One image in the stage; a load error swaps in the alt-text placeholder. */
+/**
+ * One image in the stage, inside a frame that shrink-wraps it so the EXERCISE bands
+ * cover exactly the picture; a load error swaps in the alt-text placeholder.
+ */
 function ViewerImage({ item }: { readonly item: PostMedia }) {
   // Keyed by the URL that failed: a re-minted URL for the same item retries.
   const [failedSrc, setFailedSrc] = useState<string | null>(null)
@@ -84,14 +94,17 @@ function ViewerImage({ item }: { readonly item: PostMedia }) {
     )
   }
   return (
-    <img
-      className={styles.image}
-      src={src}
-      alt={alt}
-      decoding="async"
-      draggable={false}
-      onError={() => setFailedSrc(src)}
-    />
+    <div className={styles.imageFrame} data-testid="media-viewer-image-frame">
+      <img
+        className={styles.image}
+        src={src}
+        alt={alt}
+        decoding="async"
+        draggable={false}
+        onError={() => setFailedSrc(src)}
+      />
+      <ExerciseBands />
+    </div>
   )
 }
 

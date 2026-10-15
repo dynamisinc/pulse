@@ -1,0 +1,134 @@
+/*
+ * core/emoji/EmojiPicker.module.css
+ * ---------------------------------------------------------------------------
+ * Look of the shared emoji picker panel (demo-feedback story 12). CSS Module, no MUI,
+ * no COBRA: the picker is world-neutral and SKINNED BY ITS HOST through custom
+ * properties. Every color/radius/font rule reads a `--_*` alias that falls back to a
+ * neutral default, so a host class on the same element only has to set:
+ *
+ *   --emoji-bg  --emoji-panel  --emoji-line  --emoji-control-line
+ *   --emoji-ink  --emoji-ink-muted  --emoji-accent  --emoji-hover
+ *   --emoji-radius  --emoji-font
+ *
+ * (The Social composer maps them to its participant `--pc-*` tokens; 12b's persona
+ * composer will map them to COBRA.) The panel sits IN FLOW below the host's toolbar
+ * rather than floating, so it is never clipped by a dialog's `overflow: hidden` and
+ * it reads like a phone's emoji tray on narrow screens.
+ *
+ * The emoji are text drawn by the OS emoji font (native - nothing is downloaded).
+ * The active emoji gets an outline ring, a shape cue, not only a tint (NFR-001).
+ */
+
+.picker {
+  --_bg: var(--emoji-bg, #fff);
+  --_panel: var(--emoji-panel, #f3f5f6);
+  --_line: var(--emoji-line, #e5e8ea);
+  --_control-line: var(--emoji-control-line, #7b8993);
+  --_ink: var(--emoji-ink, #0e1518);
+  --_ink-muted: var(--emoji-ink-muted, #61707a);
+  --_accent: var(--emoji-accent, #1e3a5f);
+  --_hover: var(--emoji-hover, rgba(14, 21, 24, .045));
+  --_radius: var(--emoji-radius, 14px);
+
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(100%, 352px);
+  padding: 10px;
+  border: 1px solid var(--_line);
+  border-radius: var(--_radius);
+  background: var(--_bg);
+  color: var(--_ink);
+  font-family: var(--emoji-font, inherit);
+  box-shadow: 0 4px 16px rgba(14, 21, 24, .12);
+}
+
+.search {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 7px 12px;
+  /* An input boundary: needs 3:1 against the background (WCAG 1.4.11). */
+  border: 1px solid var(--_control-line);
+  border-radius: 999px;
+  background: var(--_panel);
+  color: var(--_ink);
+  font-family: inherit;
+  font-size: 15px;
+}
+
+.search::placeholder {
+  color: var(--_ink-muted);
+}
+
+.search:focus-visible {
+  outline: 2px solid var(--_accent);
+  outline-offset: 1px;
+}
+
+.list {
+  max-height: 232px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.group + .group {
+  margin-top: 6px;
+}
+
+.heading {
+  padding: 4px 2px;
+  color: var(--_ink-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.grid {
+  display: grid;
+  /* Keep in step with EMOJI_COLUMNS in emojiData.ts (arrow keys assume it). */
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  gap: 2px;
+}
+
+.option {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 1;
+  min-width: 0;
+  border-radius: 10px;
+  font-family: 'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji', 'Segoe UI Symbol', sans-serif;
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  user-select: none;
+}
+
+.option:hover {
+  background: var(--_hover);
+}
+
+.active {
+  background: var(--_hover);
+  outline: 2px solid var(--_accent);
+  outline-offset: -2px;
+}
+
+.empty {
+  margin: 0;
+  padding: 8px 2px;
+  color: var(--_ink-muted);
+  font-size: 13px;
+}
+
+.srOnly {
+  position: absolute;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  white-space: nowrap;
+}

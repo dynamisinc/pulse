@@ -1,6 +1,6 @@
 # Story: Pinned tab and Pin action (participant)
 
-**Feature:** Demo feedback cut (10/20)  ·  **Phase:** 1  ·  **Status:** Not Started
+**Feature:** Demo feedback cut (10/20)  ·  **Phase:** 1  ·  **Status:** In Review
 **Requirements:** feeds-discovery (new: Pinned)  ·  **Decisions:** DF-5, DF-6, DF-7  ·  **Issue:** #503
 **Stack:** frontend  ·  **World:** participant  ·  **Review:** Tier-1  ·  **Priority:** Must  ·  **Wave:** 2  ·  **Effort:** M
 
@@ -44,3 +44,14 @@ The console's pin-for-everyone action (08). Pin ordering. Profile tabs (unchange
 
 Three-tab keyboard nav; pinned panel order and empty state; Pin toggle optimistic + rollback; live `PostPinChanged`
 add/remove; `PostRemoved` removes from the tab; view-only sees no Pinned tab.
+
+All under `src/frontend/src/features/social/` (Vitest, mock mode unless noted).
+
+| AC | Tests |
+|---|---|
+| Three tabs, N-tab keyboard, lazy mount, view-only gate | `layout/routes/HomeView.pinnedTab.test.tsx` (order + roving tabindex, click opens and keeps the panel mounted, Right/Left wrap with focus following, Home/End, observer sees no Pinned tab); losing the switch mid-view falls back to All Posts: `layout/routes/HomeView.sessionLoss.test.tsx`; no-persona: `SocialChannel.feedSwitch.noPersona.test.tsx` (no tablist at all); the two-tab suite `SocialChannel.feedSwitch.test.tsx` still passes |
+| Pinned panel: DF-5 order, `PostCard`, "Pinned" marker, empty state | `pinned/PinnedFeed.test.tsx` (order + marker above the author line, fiction-safe, word not colour; the card's article is described by "Pinned"; scenario-time header; empty copy; error state); mock parity of DF-5 in `pinned/pinnedFeedService.mock.test.ts`; live wire + fail-closed + XC-002 narrowing in `pinned/pinnedServices.live.test.ts` |
+| Pin action: after Like, no count, stable name "Pin" + `aria-pressed`, optimistic + rollback, PUT/DELETE | `components/post/PostActions.pin.test.tsx` (anatomy, absent on a read-only card, optimistic flip before the write settles, in-flight guard, DELETE to unpin, exact rollback + polite live region, cross-card sync, a later server read overrides an older confirmed pin); route + body in `pinned/pinnedServices.live.test.ts`; read-only / no-persona sessions in `PostActions.sessionReadOnly.test.tsx` / `PostActions.noPersona.test.tsx`; row order updated in `PostActions.test.tsx`, `PostCard.test.tsx`, `post/PostCard.parts.test.tsx` |
+| Pin / unpin / like / unlike updates the mounted tab | `pinned/PinnedFeed.test.tsx` ("unpinning a post in the tab takes it off and keeps focus in the tab", "does not pull focus back once the reader has moved it out of the tab", "liking or pinning a post elsewhere adds it without a reload"); `PostActions.pin.test.tsx` ("notifies once a like settles") |
+| `subscribePinChanged` + live `pinnedForAll`; `PostRemoved` leaves the tab | `services/realtimeFeed.pinChanged.test.ts` (frozen name on the singleton, exact two-key payload, malformed dropped, handler isolation, nothing after stop, `PostReceived` keeps `pinnedForAll: true`, never `viewer`); `pinned/PinnedFeed.test.tsx` (push adds/removes the marker and the post, patch lands before the re-read, `PostRemoved` takes the post off at once) |
+| `ParticipantPostView.pinnedForAll`, `viewer.pinned`, provenance test | `types/post.provenance.test.ts` (third viewer key, `pinnedForAll` kept, who/when pinned never carried, `false`/`null` treated as absent) |

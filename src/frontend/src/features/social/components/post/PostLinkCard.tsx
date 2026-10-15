@@ -16,6 +16,10 @@
  * (`alt=""`): the title directly below carries the meaning, so a screen reader
  * does not hear it twice.
  *
+ * EXERCISE BANDS (demo-feedback 06, DF-4, Gate-1 M-4: "EVERYTHING must be watermarked"):
+ * the preview photo carries the shared `ExerciseBands` overlay under the same rule as
+ * every other participant image; the text-label fallback shows no media and has none.
+ *
  * Not interactive on purpose (no real link to follow): a tap anywhere on the card
  * opens the thread through the card's open-region overlay, so it needs no z-index
  * lift and no click handler.
@@ -25,6 +29,7 @@
 
 import { useState } from 'react'
 import type { PostLinkPreview } from '../../types/post'
+import { ExerciseBands } from '../media/ExerciseBands'
 import { resolveSafeMediaUrl } from '../media/safeMediaUrl'
 import styles from './PostLinkCard.module.css'
 
@@ -54,6 +59,7 @@ export function PostLinkCard({ linkPreview }: PostLinkCardProps) {
             data-testid="post-link-image"
             onError={() => setFailedSrc(imageSrc)}
           />
+          <ExerciseBands />
         </div>
       ) : (
         <div className={styles.linkCardImage} aria-hidden="true">

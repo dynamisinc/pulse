@@ -47,5 +47,7 @@ describe('useChromeConfig (default mock adapter, shipped path)', () => {
     await waitFor(() => expect(result.current.top.text).toContain('UNCLASSIFIED'))
     expect(result.current.enabled).toBe(true)
     expect(result.current.bottom.text).toContain('PULSE TRAINING ENVIRONMENT')
+    // demo-feedback 06 (DF-3): the mock marks media by default.
+    expect(result.current.watermark).toBe(true)
   })
 })

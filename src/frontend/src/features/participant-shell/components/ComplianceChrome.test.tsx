@@ -48,6 +48,7 @@ afterEach(() => {
 // config entirely (precedent 17: a real config test, not a tautology).
 const NON_DEFAULT_CONFIG: ChromeConfig = {
   enabled: true,
+  watermark: false,
   top: {
     text: 'ROLE-PLAY EXERCISE ONLY -- SECTOR 7 -- SIMULATED FEED',
     fg: '#101820',
@@ -62,6 +63,7 @@ const NON_DEFAULT_CONFIG: ChromeConfig = {
 
 const DISABLED_CONFIG: ChromeConfig = {
   enabled: false,
+  watermark: false,
   top: { text: 'unused-while-disabled-top', fg: '#000000', bg: '#ffffff' },
   bottom: { text: 'unused-while-disabled-bottom', fg: '#000000', bg: '#ffffff' },
 }
@@ -101,6 +103,7 @@ describe('ComplianceChrome — config-driven banners (AC1/AC2)', () => {
 
     const secondConfig: ChromeConfig = {
       enabled: true,
+      watermark: false,
       top: { text: 'SECOND EXERCISE TOP BANNER', fg: '#00ff00', bg: '#000011' },
       bottom: { text: 'SECOND EXERCISE BOTTOM BANNER', fg: '#00ff00', bg: '#000011' },
     }

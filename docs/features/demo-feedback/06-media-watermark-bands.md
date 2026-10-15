@@ -1,6 +1,6 @@
 # Story: EXERCISE bands on all participant media
 
-**Feature:** Demo feedback cut (10/20)  ·  **Phase:** 1  ·  **Status:** Not Started
+**Feature:** Demo feedback cut (10/20)  ·  **Phase:** 1  ·  **Status:** In Review
 **Requirements:** NFR-008  ·  **Decisions:** DF-3, DF-4  ·  **Issue:** #502 (closes #456 item 1)
 **Stack:** frontend  ·  **World:** participant  ·  **Review:** Tier-1  ·  **Priority:** Must  ·  **Wave:** 2  ·  **Effort:** M
 
@@ -40,3 +40,31 @@ Staff surfaces (Live world thumbnails, controller pickers). Burned-in media (C1)
 
 `isWatermarkRequired` truth table; each surface renders bands when required and not otherwise; full-screen viewer keeps
 them; player controls still reachable; chrome-config parse with the field missing.
+
+Where they live (`src/frontend/src/features/`):
+
+- `isWatermarkRequired` truth table; parse with the field missing (older API), explicit `false`, malformed values;
+  mock default `true`: [`participant-shell/chromeConfig.test.tsx`](../../../src/frontend/src/features/participant-shell/chromeConfig.test.tsx),
+  [`participant-shell/chromeConfig.default.test.tsx`](../../../src/frontend/src/features/participant-shell/chromeConfig.default.test.tsx),
+  [`planner/services/chromeConfigWireContract.test.tsx`](../../../src/frontend/src/features/planner/services/chromeConfigWireContract.test.tsx) (body now carries `watermark`)
+- The shared overlay (when / text / `aria-hidden` / click-through / centred uppercase / container-scaled clamp /
+  computed >= 4.5:1 over white media / skin tokens / no COBRA or MUI on any banded file; fail toward marking outside
+  the providers; shipped default draws them):
+  [`social/components/media/ExerciseBands.test.tsx`](../../../src/frontend/src/features/social/components/media/ExerciseBands.test.tsx),
+  [`social/components/media/ExerciseBands.default.test.tsx`](../../../src/frontend/src/features/social/components/media/ExerciseBands.default.test.tsx)
+- Feed and thread image tiles: [`social/components/media/MediaGrid.bands.test.tsx`](../../../src/frontend/src/features/social/components/media/MediaGrid.bands.test.tsx)
+- Inline player (bands both ways, old slot gone, controls row and Play visible and clickable, keyboard unchanged,
+  full screen keeps / forces them, bare-`<video>` full screen still routed to the modal):
+  [`social/components/media/VideoPlayer.test.tsx`](../../../src/frontend/src/features/social/components/media/VideoPlayer.test.tsx)
+- Viewer, images and video (bands hug the image, kept while paging, none when not required, Esc + focus return):
+  [`social/components/media/MediaViewer.test.tsx`](../../../src/frontend/src/features/social/components/media/MediaViewer.test.tsx),
+  [`social/components/post/PostMediaSlot.test.tsx`](../../../src/frontend/src/features/social/components/post/PostMediaSlot.test.tsx) (Expand fallback modal)
+- Profile Media tab: [`social/components/media/MediaTabGrid.bands.test.tsx`](../../../src/frontend/src/features/social/components/media/MediaTabGrid.bands.test.tsx)
+- Composer previews: [`social/components/ComposerMedia.bands.test.tsx`](../../../src/frontend/src/features/social/components/ComposerMedia.bands.test.tsx)
+- Gate-1 fold-ins: real hooks under the real providers (`watermark: false` + chrome on => no bands after success; no
+  providers => bands): [`social/components/media/ExerciseBands.live.test.tsx`](../../../src/frontend/src/features/social/components/media/ExerciseBands.live.test.tsx);
+  link-preview photo: [`social/components/post/PostLinkCard.bands.test.tsx`](../../../src/frontend/src/features/social/components/post/PostLinkCard.bands.test.tsx);
+  persona banner photo: [`social/pages/Profile.bannerBands.test.tsx`](../../../src/frontend/src/features/social/pages/Profile.bannerBands.test.tsx);
+  in-fiction pause/EndEx slot back on the D7 chrome-off rule (chrome on + watermark on => no slot):
+  [`participant-shell/components/OverlayLayer/OverlayLayer.test.tsx`](../../../src/frontend/src/features/participant-shell/components/OverlayLayer/OverlayLayer.test.tsx);
+  stacking / isolation / span-only markup: `ExerciseBands.test.tsx`

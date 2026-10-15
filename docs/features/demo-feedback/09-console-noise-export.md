@@ -1,6 +1,6 @@
 # Story: Console: white-noise knob and Export
 
-**Feature:** Demo feedback cut (10/20)  ·  **Phase:** 1  ·  **Status:** Not Started
+**Feature:** Demo feedback cut (10/20)  ·  **Phase:** 1  ·  **Status:** In Review
 **Requirements:** ambient chatter (lite), AAR export (lite)  ·  **Decisions:** DF-8, DF-12, DF-13  ·  **Issue:** #505
 **Stack:** frontend  ·  **World:** staff  ·  **Review:** Tier-1  ·  **Priority:** Must  ·  **Wave:** 2  ·  **Effort:** M
 
@@ -35,3 +35,15 @@ Hiding the control's write affordance for evaluators (11 does it). A pool editor
 
 Level change round trip and error; live update from the hub event; stopped reasons; export downloads a blob with the
 server file name; export error; keyboard on the radio group.
+
+Built on `build/demo-feedback/09-console-noise-export`:
+
+| Test file | Covers |
+|---|---|
+| [`noise/NoiseControl.test.tsx`](../../../src/frontend/src/features/controller/noise/NoiseControl.test.tsx) | live path: GET on mount (level, rate, pool, posted); level change round trip; 403 shown as text with fallback to the server level; `NoiseStateChanged` on the shared connection; stopped reasons (frozen, clock, empty pool) and a re-read on a tier change; keyboard radio group (one tab stop, arrows choose and wrap, Home/End) |
+| [`noise/NoiseControl.mock.test.tsx`](../../../src/frontend/src/features/controller/noise/NoiseControl.mock.test.tsx) | the knob end to end behind `USE_MOCK_DATA`; the mock's push and its 400 for an unknown level |
+| [`noise/noiseStatus.test.ts`](../../../src/frontend/src/features/controller/noise/noiseStatus.test.ts) | "6 posts/min", pool and posted wording; the stopped-reason order (empty pool, Freeze, clock); Pause injects/engine do not stop noise |
+| [`noise/noiseService.test.ts`](../../../src/frontend/src/features/controller/noise/noiseService.test.ts) | GET/PUT `/staff/noise`; error sentences (400 detail, 403, no response, malformed body); hub frames, malformed frames dropped, resync on connect, unsubscribe; `parseNoiseState` |
+| [`noise/noiseOrigin.test.ts`](../../../src/frontend/src/features/controller/noise/noiseOrigin.test.ts) | `noise` in `telemetryOriginSchema`; `originConsoleLabel` -> `NOISE · AUTO`; no origin on the participant view |
+| [`export/exportService.test.ts`](../../../src/frontend/src/features/controller/export/exportService.test.ts) | blob download saved under the server file name (quoted, bare, `filename*`, fallback, path characters stripped); bearer token sent; 429 retried once after 1 s, then the server's reason; 413/403/no-response sentences; the mock adapter |
+| [`export/ExportPostsButton.test.tsx`](../../../src/frontend/src/features/controller/export/ExportPostsButton.test.tsx) | spinner and "Exporting…" while running (a second press ignored), save with the server name, error text on failure |

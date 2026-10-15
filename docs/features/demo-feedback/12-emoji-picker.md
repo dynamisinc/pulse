@@ -1,6 +1,6 @@
 # Story: Emoji picker in both composers
 
-**Feature:** Demo feedback cut (10/20)  ·  **Phase:** 1  ·  **Status:** Not Started
+**Feature:** Demo feedback cut (10/20)  ·  **Phase:** 1  ·  **Status:** In Progress (12a merged; 12b pending)
 **Requirements:** D1 composer polish  ·  **Decisions:** DF-15  ·  **Issue:** #508
 **Stack:** frontend  ·  **World:** both  ·  **Review:** Tier-1  ·  **Priority:** Should  ·  **Wave:** 2 (12a), 3 (12b)  ·  **Effort:** S
 
@@ -35,3 +35,26 @@ GIF search (external service). Emoji reactions on posts.
 
 Insert at caret and over a selection; character count; Escape returns focus; no `fetch` to a third-party host during
 picker use (spy); both composers.
+
+**12a (participant)** — all under `src/frontend/src/`:
+- [`core/emoji/emojiLogic.test.ts`](../../../src/frontend/src/core/emoji/emojiLogic.test.ts): bundled data (whole
+  grid rows per category, no duplicates, single native graphemes, no URLs/skin tones/ZWJ), search, grid movement,
+  `insertAtSelection` (caret, selection, clamping).
+- [`core/emoji/EmojiPicker.test.tsx`](../../../src/frontend/src/core/emoji/EmojiPicker.test.tsx): opens from the
+  button (click and Enter) with focus in the search box; search + count; arrows move the active emoji; Enter inserts
+  at the caret and never submits the form; a press replaces the selection; Escape closes, restores focus and
+  selection, and does not reach an ancestor; Tab out and an outside press close; disabled while busy; no
+  images/MUI; **no `fetch` and no `XMLHttpRequest` during picker use (spies)**.
+- [`features/social/components/Composer.emoji.test.tsx`](../../../src/frontend/src/features/social/components/Composer.emoji.test.tsx):
+  the face-smile button in the `ComposerForm` tools row; insert at the caret and over a selection in `Composer`;
+  the 280 ring counts the emoji and can go over; Escape returns focus; participant skin (no MUI/COBRA); no network
+  spy; `ComposeModal` (Escape closes only the picker, then the dialog's own Escape works); `ReplyComposer`.
+
+**Library decision (DF-15, checked 10/14):** hand-rolled, no dependency added. `frimousse` 0.4.0 (2026-09-21, peer
+React ^18 || ^19, no advisories) fetches emojibase data from a CDN by default and caches it in browser storage;
+`emoji-picker-react` 5.0.0 (2026-10-10, peer React >=16.8, native by default, no advisories; dependency
+`shipstyles` 1.0.0, no advisories) is a four-day-old major at 50 MB unpacked. A bundled list of 176 common emoji
+(Unicode <= 13, no skin-tone/ZWJ sequences) meets the bar with no network path at all.
+
+**12b (persona composer)**: not built yet - reuse `core/emoji` (`useEmojiPicker` + `EmojiPickerButton` +
+`EmojiPicker`) with a COBRA skin class that sets the `--emoji-*` properties.

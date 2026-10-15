@@ -238,6 +238,54 @@
   cursor: not-allowed;
 }
 
+/* The emoji button (story 12a): the same round, accent-colored icon button as the attach
+ * button beside it (`ComposerMedia.module.css .attachButton`). */
+.emojiButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: none;
+  color: var(--pc-accent);
+  font-size: 16px;
+  cursor: pointer;
+}
+
+.emojiButton:hover,
+.emojiButton:focus-visible,
+.emojiButton[aria-expanded='true'] {
+  background: var(--pc-hover);
+}
+
+.emojiButton:focus-visible {
+  outline: 2px solid var(--pc-accent);
+  outline-offset: 1px;
+}
+
+.emojiButton:disabled {
+  opacity: .5;
+  cursor: not-allowed;
+}
+
+/* Participant skin for the shared `core/emoji` picker: its `--emoji-*` hooks read this
+ * form's `--pc-*` palette, so the panel matches the composer (no MUI, no COBRA). */
+.emojiPicker {
+  --emoji-bg: var(--pc-bg);
+  --emoji-panel: var(--pc-panel);
+  --emoji-line: var(--pc-line);
+  --emoji-control-line: var(--pc-control-line);
+  --emoji-ink: var(--pc-ink);
+  --emoji-ink-muted: var(--pc-ink-muted);
+  --emoji-accent: var(--pc-accent);
+  --emoji-hover: var(--pc-hover);
+  --emoji-radius: 14px;
+  --emoji-font: inherit;
+}
+
 .notice {
   margin: 0;
   color: var(--pc-ink-muted);
