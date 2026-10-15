@@ -40,11 +40,26 @@
  * adapter remembers (`mockReactionSnapshot`), so a card that re-mounts later in the
  * same page session agrees with an earlier toggle. Off under Vitest by default.
  *
+ * LIVE COUNTS (demo-feedback story 14, DF-17 / DF-18). `externalCount` is the kind's number from
+ * the card's live counts (`usePostCounts`: the post's own count, or a newer `PostEngagementChanged`
+ * frame). When it CHANGES, the hook adopts it as `count` and leaves `active` exactly as it is: a
+ * push is one payload for the whole exercise and never says whether *I* liked or reposted. While a
+ * write is IN FLIGHT a changed external count is not applied - the frame may predate this toggle,
+ * and the write's own answer reconciles the number a moment later - so an optimistic toggle is
+ * never overwritten by an older frame. In MOCK mode a confirmed change also tells the mock
+ * engagement source (`emitMockReactionEngagement`), which stands in for the server's push.
+ *
+ * MY OWN REACTION NEVER NOTIFIES ME (Gate-1 M-2). Turning a like / repost ON tells the
+ * notifications store first (`noteOwnReaction`), so if the post is the viewer's own, the rise their
+ * write causes is absorbed silently; a write that fails, does not turn it on, or answers a count
+ * no higher than the card held before the tap (a server no-op, e.g. after a stale cached read)
+ * withdraws that (N-1; the store also expires an unmatched note).
+ *
  * NO IDENTITY, NO TIME ON THE WIRE (COR-001/COR-053): the service sends neither
  * `exerciseId` nor `personaId` nor a timestamp — the server derives all three.
  */
 
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { USE_MOCK_DATA } from '@/core/config/mockData'
 import {
   deleteReaction,
@@ -52,6 +67,9 @@ import {
   putReaction,
   type ReactionKind,
 } from '../services/reactionService'
+import { emitMockReactionEngagement } from '../services/mockEngagementChanges'
+import { postCountsStore } from '../services/postCountsStore'
+import { notificationsStore } from '../notifications/notificationsStore'
 import { useTransientMessage, type UseTransientMessageResult } from './useTransientMessage'
 
 /** Options for {@link useReactionToggle}. */
@@ -60,6 +78,12 @@ export interface UseReactionToggleOptions {
   readonly kind: ReactionKind
   /** The post's current count for this kind — seeds `count` (owned locally after). */
   readonly initialCount: number
+  /**
+   * The kind's LIVE count from the card (`usePostCounts`). A change replaces `count` - never
+   * `active` - unless a write is in flight (see the module header). Omit it for seed-only
+   * behaviour.
+   */
+  readonly externalCount?: number
   /** Whether the viewer already reacted (from `post.viewer`) — seeds `active`. */
   readonly initiallyActive: boolean
   /** Whether the session may react at all (writable AND a bound persona). */
@@ -104,7 +128,10 @@ export function useReactionToggle(options: UseReactionToggleOptions): UseReactio
   // (the stand-in for the next fetch reporting the viewer's state).
   const [seed] = useState(() => {
     const remembered = USE_MOCK_DATA ? mockReactionSnapshot(postId, kind) : undefined
-    return remembered ?? { active: initiallyActive, count: initialCount }
+    // Gate-1 H-1: the count seeds from the card's LIVE count (a frame held before this card mounted
+    // included), not the read's own number - `lastExternalRef` starts at the same value, so a
+    // seed from the stale read would never be corrected.
+    return remembered ?? { active: initiallyActive, count: options.externalCount ?? initialCount }
   })
   const [active, setActive] = useState(seed.active)
   const [count, setCount] = useState(seed.count)
@@ -126,6 +153,18 @@ export function useReactionToggle(options: UseReactionToggleOptions): UseReactio
   // A ref (not state): two taps in one tick must not both pass the guard.
   const inFlightRef = useRef(false)
 
+  // DF-17: a pushed count moves the NUMBER only. The last external value seen is a ref so the
+  // mount-time value (equal to the seed, or older than a mock memory) is never re-applied.
+  const { externalCount } = options
+  const lastExternalRef = useRef(externalCount)
+  useEffect(() => {
+    if (externalCount === undefined || externalCount === lastExternalRef.current) return
+    lastExternalRef.current = externalCount
+    // In flight: the optimistic value stands; the write's own answer reconciles the count.
+    if (inFlightRef.current) return
+    commit({ active: stateRef.current.active, count: externalCount })
+  }, [externalCount, commit])
+
   const toggle = useCallback(() => {
     if (!canAct || inFlightRef.current) return
     inFlightRef.current = true
@@ -141,6 +180,10 @@ export function useReactionToggle(options: UseReactionToggleOptions): UseReactio
     setPending(true)
     clear()
 
+    // A sign-out / sign-in while the write is out resets the live counts store; the late answer
+    // then belongs to the previous identity and must not push numbers into the next one's store.
+    const generation = postCountsStore.generation()
+    if (nextActive) notificationsStore.noteOwnReaction(postId, kind)
     const write = nextActive
       ? putReaction(postId, kind, previous)
       : deleteReaction(postId, kind, previous)
@@ -151,12 +194,21 @@ export function useReactionToggle(options: UseReactionToggleOptions): UseReactio
           // Reconcile onto the server's own answer (viewer flag + count).
           const confirmed = kind === 'like' ? state.viewer.liked : state.viewer.reposted
           commit({ active: confirmed, count: state.counts[kind] })
+          // N-1: no rise of mine is coming (not turned on, or a server no-op): release the note.
+          if (nextActive && (!confirmed || state.counts[kind] <= previous.count)) {
+            notificationsStore.cancelOwnReaction(postId, kind)
+          }
           // Mock only, and only for a real state change (the server's rule).
-          if (USE_MOCK_DATA && confirmed !== previous.active) emitMockTelemetry(confirmed)
+          if (USE_MOCK_DATA && confirmed !== previous.active) {
+            emitMockTelemetry(confirmed)
+            // The mock stand-in for the server's PostEngagementChanged push (DF-17).
+            emitMockReactionEngagement(postId, kind, state.counts[kind], generation)
+          }
         },
         () => {
           // Roll back EXACTLY, and tell the viewer (polite live region).
           commit(previous)
+          if (nextActive) notificationsStore.cancelOwnReaction(postId, kind)
           show(failureMessage)
         },
       )

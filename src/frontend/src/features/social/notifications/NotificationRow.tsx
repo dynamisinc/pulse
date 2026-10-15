@@ -12,8 +12,9 @@
  * channel's navigation adapter (`activateLink` -> the `onOpen` callback), never the browser.
  *
  * TYPE IS NEVER COLOUR ALONE (NFR-001). Every row carries its type TWICE as non-colour
- * information: a FontAwesome icon (reply arrow / @ / heart) AND a text label ("Reply" /
- * "Mention" / "Like"). Unread is also three cues, not a tint alone: a "New" text tag, a
+ * information: a FontAwesome icon (reply arrow / @ / heart / retweet arrows) AND a text label
+ * ("Reply" / "Mention" / "Like" / "Repost"). Unread is also three cues, not a tint alone: a
+ * "New" text tag, a
  * heavier summary and the row wash. The icon is decorative (`aria-hidden`); the label and the
  * sentence carry the meaning for assistive technology.
  *
@@ -33,7 +34,7 @@
 import { memo, type MouseEvent } from 'react'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import type { IconDefinition } from '@fortawesome/fontawesome-svg-core'
-import { faAt, faHeart, faReply } from '@fortawesome/free-solid-svg-icons'
+import { faAt, faHeart, faReply, faRetweet } from '@fortawesome/free-solid-svg-icons'
 import type { Persona } from '@/features/personas'
 import type { FormatScenarioTimeOptions } from '@/core/clock'
 import { Avatar } from '../components/Avatar'
@@ -48,6 +49,7 @@ const TYPE_PRESENTATION: Record<NotificationType, { label: string; icon: IconDef
   reply: { label: 'Reply', icon: faReply },
   mention: { label: 'Mention', icon: faAt },
   like: { label: 'Like', icon: faHeart },
+  repost: { label: 'Repost', icon: faRetweet },
 }
 
 export interface NotificationRowProps {

@@ -12,11 +12,17 @@
          for the UAT host. A 5xx there is what the 2026-08-03 silent migration failure looked like, while
          both health checks stayed green.
       3. Only with -Restart: restarts the App Service, then STOPS. Engine state (loop registration,
-         storylines, autonomy overrides, the kill switch, the pause tier, the scenario clock) lives in
-         process memory, so a restart clears whatever the last rehearsal left behind. But the old process
-         keeps serving for several minutes, and the new one starts empty. On 2026-10-07 a seed sent
-         straight after a restart landed on the old process and vanished at the handover ~6 minutes later.
-         So after -Restart, wait ~8 minutes and run the script again without it.
+         storylines, autonomy overrides, the kill switch) lives in process memory, so a restart clears
+         whatever the last rehearsal left behind. Until story 18 is deployed the pause tier and the scenario
+         clock are in memory too, and a restart clears them. AFTER STORY 18 (DF-28) A RESTART NO LONGER
+         CLEARS THE PAUSE TIER, THE SCENARIO CLOCK OR THE OVERLAY: they are kept per exercise and come back
+         on start, so a world left FROZEN stays frozen. The clean slate is then POST
+         /api/steering/runtime-state/reset, which Invoke-DemoReset.ps1 runs first (and falls back to -Restart
+         while the route answers 404).
+         The old process keeps serving for several minutes, and the new one starts empty. On 2026-10-07 a
+         seed sent straight after a restart landed on the old process and vanished at the handover ~6 minutes
+         later. So after -Restart, wait ~8 minutes and run the script again without it (Invoke-DemoReset.ps1
+         polls for the new process instead).
       4. Re-seeds the engine (POST /api/ops/seed-engine-content): registers the reaction loop and rebuilds
          the starter storyline at scenario minute 0. Persona rows are reused, never duplicated (but see the
          one-time rename below). With -AutoConfirmResponses, a PIO post that plausibly answers the storyline
@@ -54,8 +60,11 @@
     Read-only: run checks 1, 2 and 6, change nothing, need no secret and no az login.
 
 .PARAMETER Restart
-    Restart the App Service and stop (step 3); run again without it ~8 minutes later. Use it to clear pause,
-    autonomy and kill-switch state that a rehearsal left behind.
+    Restart the App Service and stop (step 3); run again without it ~8 minutes later. Use it to clear the
+    autonomy and kill-switch state that a rehearsal left behind. Before story 18 it also clears the pause tier
+    and the scenario clock. After story 18 (DF-28) a restart no longer clears the pause tier, the scenario
+    clock or the overlay (they are persisted): use POST /api/steering/runtime-state/reset for that, which
+    Invoke-DemoReset.ps1 runs as its first step.
 
 .PARAMETER NoRestart
     Accepted for old command lines and ignored: restarting is now opt-in (-Restart).
@@ -201,7 +210,7 @@ if ($CheckOnly) {
     Test-Wiring
 }
 elseif ($Restart) {
-    Write-Host "`n3. Restart the App Service (clears in-memory engine, pause and autonomy state)" -ForegroundColor Cyan
+    Write-Host "`n3. Restart the App Service (clears in-memory engine and autonomy state; the pause tier and clock only before story 18)" -ForegroundColor Cyan
     try {
         Invoke-Az webapp restart --resource-group $ResourceGroup --name $WebAppName --subscription $Subscription | Out-Null
         Write-Host "  [PASS] Restart — $WebAppName restart requested" -ForegroundColor Green
@@ -214,6 +223,8 @@ elseif ($Restart) {
     Write-Host 'RESTARTED — not seeded yet, on purpose.' -ForegroundColor Yellow
     Write-Host '  The old process keeps serving for several minutes and the new one starts with an empty engine, so a'
     Write-Host '  seed sent now would be lost at the handover. Wait ~8 minutes, then run this script again without -Restart.'
+    Write-Host '  Once story 18 is deployed, a restart no longer clears the pause tier or the scenario clock (DF-28): use'
+    Write-Host '  Invoke-DemoReset.ps1, which calls POST /api/steering/runtime-state/reset.'
     exit 3
 }
 

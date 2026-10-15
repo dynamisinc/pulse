@@ -3,6 +3,7 @@ namespace Pulse.WebApi.Features.Realtime;
 using Microsoft.AspNetCore.SignalR;
 using Pulse.WebApi.Features.Social;
 using Pulse.WebApi.Features.Social.Editing;
+using Pulse.WebApi.Features.Social.Engagement;
 using Pulse.WebApi.Features.Social.Moderation;
 using Pulse.WebApi.Features.Social.Pins;
 
@@ -32,6 +33,9 @@ public sealed class SignalRFeedBroadcaster : IFeedBroadcaster
 
     /// <summary>The SignalR client method name a subscriber handles when a post's author edits it (demo-feedback DF-33).</summary>
     private const string PostEditedEvent = "PostEdited";
+
+    /// <summary>The SignalR client method name a subscriber handles when a post's shown counts change (demo-feedback DF-17).</summary>
+    private const string PostEngagementChangedEvent = "PostEngagementChanged";
 
     private readonly IHubContext<ExerciseRealtimeHub> _hubContext;
 
@@ -107,5 +111,24 @@ public sealed class SignalRFeedBroadcaster : IFeedBroadcaster
         await _hubContext.Clients
             .Group(ExerciseRealtimeHub.GroupNameFor(exerciseId))
             .SendAsync(PostEditedEvent, edited, cancellationToken: cancellationToken);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Sends <c>PostEngagementChanged</c> with the given <see cref="PostEngagementChangedDto"/> (post id, shown counts,
+    /// version; nothing else, XC-002) to the exercise-wide group from <see cref="ExerciseRealtimeHub.GroupNameFor"/>,
+    /// exactly as <c>PostRemoved</c> does, never to the staff group alone. Staff connections already belong to that
+    /// group, so consoles receive it once too.
+    /// </remarks>
+    public async Task BroadcastPostEngagementChangedAsync(
+        Guid exerciseId,
+        PostEngagementChangedDto change,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(change);
+
+        await _hubContext.Clients
+            .Group(ExerciseRealtimeHub.GroupNameFor(exerciseId))
+            .SendAsync(PostEngagementChangedEvent, change, cancellationToken: cancellationToken);
     }
 }

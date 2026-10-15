@@ -53,7 +53,7 @@ export interface OrgExercise {
  */
 export interface CreateExerciseResult {
   readonly exercise: OrgExercise
-  /** The creator's own role — `planner` or `orgAdmin`. */
+  /** The creator's own role — `planner`, `orgAdmin` or (DF-20) `controller`. */
   readonly assignedRole: string
 }
 

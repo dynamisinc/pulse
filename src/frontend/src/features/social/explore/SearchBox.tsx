@@ -75,6 +75,7 @@ import { scenarioNow, useScenarioTime } from '@/core/clock'
 import { useExerciseContext } from '@/core/exerciseContext'
 import { buildAndEmit } from '@/core/telemetry'
 import { wallClockNowIso } from '@/core/time/wallClock'
+import { ParticipantTooltip } from '../components/ParticipantTooltip'
 import { sanitizeText } from '../services/sanitize'
 import { useExploreOpeners, type ExploreOpenerProps } from './exploreNavigation'
 import { parseQuery, runSearch, type SearchSort } from './search'
@@ -359,17 +360,19 @@ export function SearchBox({
             onKeyDown={handleInputKeyDown}
           />
           {query !== '' && (
-            <button
-              type="button"
-              className={styles.clear}
-              aria-label="Clear search"
-              onClick={() => {
-                updateQuery('')
-                inputRef.current?.focus()
-              }}
-            >
-              <FontAwesomeIcon icon={faXmark} aria-hidden="true" />
-            </button>
+            <ParticipantTooltip label="Clear search">
+              <button
+                type="button"
+                className={styles.clear}
+                aria-label="Clear search"
+                onClick={() => {
+                  updateQuery('')
+                  inputRef.current?.focus()
+                }}
+              >
+                <FontAwesomeIcon icon={faXmark} aria-hidden="true" />
+              </button>
+            </ParticipantTooltip>
           )}
         </div>
       </form>

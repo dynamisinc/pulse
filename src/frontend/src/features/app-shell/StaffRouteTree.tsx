@@ -23,15 +23,21 @@
  *
  * ## What it does
  *  - registers ONE `<Route>` per registry entry the role is ALLOWED to open
- *    (`allowedRoles` is the single gate — an unauthorized entry is simply not
- *    registered, so it cannot render, only redirect);
- *  - sends every other path — unknown, misspelt, bare `/staff`, or authorized-
- *    for-someone-else — to the role's DEFAULT surface via a replacing redirect.
- *    NOT to `/login`: a signed-in controller who types a bad path should land on
- *    their console, not be bounced to sign-in;
- *  - wraps each surface in a per-route `RouteFocusScope`, so moving between
- *    staff surfaces moves focus to the new surface instead of stranding it on
- *    `<body>` (NFR-001).
+ *    (`allowedRoles` is the single gate);
+ *  - registers the path of every entry the role is NOT allowed to open to the
+ *    COBRA `StaffNotAllowedPage` (demo-feedback story 15, DF-20): "You need the
+ *    … role to open …" plus a button to the role's own default page. The
+ *    refused surface's element is never rendered — only its label and
+ *    `allowedRoles` are read. Before DF-20 these paths silently redirected,
+ *    which left a controller at `/staff/exercises` on the console with no
+ *    explanation;
+ *  - sends every other path — unknown, misspelt, or bare `/staff` — to the
+ *    role's DEFAULT surface via a replacing redirect. NOT to `/login`: a
+ *    signed-in controller who types a bad path should land on their console,
+ *    not be bounced to sign-in;
+ *  - wraps each surface, and each not-allowed page, in a per-route
+ *    `RouteFocusScope`, so moving between staff paths moves focus to the new
+ *    content instead of stranding it on `<body>` (NFR-001).
  *
  * ## Descendant-`<Routes>` contract
  * This renders a DESCENDANT `<Routes>`, which react-router matches relative to
@@ -41,15 +47,19 @@
  * component under a non-splat route would make react-router warn and match
  * nothing — tests mount it under `path="*"` for exactly that reason.
  *
- * World: routing glue — world-neutral. The COBRA boundary is mounted by
+ * World: routing glue, staff side. The COBRA boundary is mounted by
  * `RoleAwareEntry`'s staff hand-off ABOVE this component; this file imports no
- * theme and no surface (the registry is injected).
+ * theme and no concrete surface (the registry is injected). Its one rendered
+ * page of its own, `StaffNotAllowedPage`, is COBRA and staff-only — this tree
+ * never mounts on the participant branch.
  */
 
 import { Navigate, Route, Routes } from 'react-router-dom'
 import { RouteFocusScope } from './RouteFocusScope'
 import { StaffNavigationProvider } from './staffNavigationContext'
+import { StaffNotAllowedPage } from './StaffNotAllowedPage'
 import {
+  isStaffRouteAllowed,
   staffRoutesForRole,
   toDescendantRoutePath,
   type StaffRouteRegistry,
@@ -73,6 +83,10 @@ export interface StaffRouteTreeProps {
 
 export function StaffRouteTree({ routes, role, defaultPath }: StaffRouteTreeProps) {
   const allowed = staffRoutesForRole(routes, role)
+  // Registered surfaces this role may NOT open: their paths get the not-allowed
+  // page (DF-20) instead of falling through to the silent default redirect.
+  const refused = routes.filter(entry => !isStaffRouteAllowed(entry, role))
+  const homeLabel = routes.find(entry => entry.path === defaultPath)?.label
 
   return (
     // Publishes {registry, role} to staff chrome rendered INSIDE each surface —
@@ -97,10 +111,29 @@ export function StaffRouteTree({ routes, role, defaultPath }: StaffRouteTreeProp
             }
           />
         ))}
+        {refused.map(entry => (
+          <Route
+            key={`not-allowed:${entry.id}`}
+            path={toDescendantRoutePath(entry.path)}
+            element={
+              <RouteFocusScope
+                focusKey={`staff:not-allowed:${entry.id}`}
+                label={`Not allowed: ${entry.label}`}
+              >
+                <StaffNotAllowedPage
+                  surfaceLabel={entry.label}
+                  allowedRoles={entry.allowedRoles}
+                  homePath={defaultPath}
+                  homeLabel={homeLabel}
+                />
+              </RouteFocusScope>
+            }
+          />
+        ))}
         {/*
-          Unknown path, bare `/staff`, or a surface this role may not open → the
-          role's default surface. `replace` so a mistyped URL does not sit in the
-          back stack between two real surfaces.
+          Unknown path or bare `/staff` → the role's default surface. `replace`
+          so a mistyped URL does not sit in the back stack between two real
+          surfaces. (A REGISTERED path this role may not open is handled above.)
         */}
         <Route
           path="*"

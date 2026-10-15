@@ -49,7 +49,9 @@ which has always assumed a create path exists — it did not, until now.
       already states for every settings read/write.
 - [x] Given a **Controller or Evaluator** session, when they attempt to create an exercise (via the
       surface or the endpoint directly), then the action is refused — creation is Planner/OrgAdmin
-      only.
+      only. **Widened by DF-20 (demo-feedback story 15): controller admitted.** Creation is now
+      Planner/OrgAdmin/Controller; an Evaluator is still refused (`403`), and a controller creator gets a
+      `controller` assignment (AC3's creator's-own-role rule).
 - [x] The `POST /api/ops/bootstrap-exercise` seam is **untouched** by this story: its secret gate,
       its rate limit, and its "disabled by default, not for customer-facing use" posture are not
       weakened, deprecated, or routed through this new path.
@@ -150,8 +152,8 @@ production middleware. Every guard below was **neutered and watched go red**.
   than a test that a particular spoof is rejected — and
   `ExerciseAdminRolesTests.NoDtoInThisSlice_ExposesTheCustomerTenant` keeps it that way as the DTOs evolve.
 
-**AC5 — Controller/Evaluator refused**
-- `ExerciseCreationEndpointTests.Create_AsController_IsRefused (AC5)`
+**AC5 — Evaluator refused (widened by DF-20, demo-feedback story 15: controller admitted)**
+- `ExerciseCreationEndpointTests.Create_AsController_PersistsAnExerciseInTheCallersOwnTenant_WithAControllerAssignment (AC5, DF-20)`
 - `ExerciseCreationEndpointTests.Create_AsEvaluator_IsRefused (AC5)`
 - `ExerciseCreationEndpointTests.Create_WithNoSession_IsUnauthorized (AC5)`
 

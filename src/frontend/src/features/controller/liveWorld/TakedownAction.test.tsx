@@ -42,6 +42,7 @@ import { getEmittedTelemetryEvents, resetTelemetryBuffer } from '@/core/telemetr
 import { postStore } from '@/features/social/services/postStore'
 import { removedPosts } from '@/features/social/services/removedPosts'
 import { useControllerIdentity } from '../identity/controllerIdentity'
+import { useCanControl } from '../access/useCanControl'
 import {
   TakedownError,
   takeDownPost,
@@ -67,12 +68,17 @@ vi.mock('../identity/controllerIdentity', async importOriginal => {
   return { ...actual, useControllerIdentity: vi.fn(actual.useControllerIdentity) }
 })
 
+// Demo-feedback story 11 (DF-14): the action gates on the signed-in session's role through
+// `useCanControl()`; this suite mounts no session, so the gate is a mock each case can flip.
+vi.mock('../access/useCanControl', () => ({ useCanControl: vi.fn(() => true) }))
+
 vi.mock('../services/takedownService', async importOriginal => {
   const actual = await importOriginal<typeof import('../services/takedownService')>()
   return { ...actual, takeDownPost: vi.fn(actual.takeDownPost) }
 })
 
 const mockedIdentity = vi.mocked(useControllerIdentity)
+const mockedCanControl = vi.mocked(useCanControl)
 const mockedTakeDown = vi.mocked(takeDownPost)
 const realTakeDown = mockedTakeDown.getMockImplementation()
 const realIdentity = mockedIdentity.getMockImplementation()
@@ -128,6 +134,7 @@ beforeEach(() => {
   mockedTakeDown.mockReset()
   if (realTakeDown) mockedTakeDown.mockImplementation(realTakeDown)
   mockedIdentity.mockReset()
+  mockedCanControl.mockReturnValue(true)
   if (realIdentity) mockedIdentity.mockImplementation(realIdentity)
 })
 
@@ -656,13 +663,8 @@ describe('TakedownAction - AC2: the visible outcome', () => {
 })
 
 describe('TakedownAction - CTL-033: absent, not disabled, for a non-controller', () => {
-  it('renders nothing at all when the role is not controller', () => {
-    mockedIdentity.mockReturnValue({
-      actingHumanId: 'human-evaluator-1',
-      callSign: 'EVAL-1',
-      role: 'evaluator' as unknown as 'controller',
-      isLead: false,
-    })
+  it('renders nothing at all when the signed-in session is not a controller', () => {
+    mockedCanControl.mockReturnValue(false)
 
     const { container } = renderAction()
 
@@ -673,12 +675,7 @@ describe('TakedownAction - CTL-033: absent, not disabled, for a non-controller',
   })
 
   it('renders nothing for a non-controller even when the post is already removed', () => {
-    mockedIdentity.mockReturnValue({
-      actingHumanId: 'human-planner-1',
-      callSign: 'PLAN-1',
-      role: 'planner' as unknown as 'controller',
-      isLead: false,
-    })
+    mockedCanControl.mockReturnValue(false)
     removedPosts.add(POST.id)
 
     const { container } = renderAction()

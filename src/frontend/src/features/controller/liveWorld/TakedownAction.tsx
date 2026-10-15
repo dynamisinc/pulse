@@ -72,8 +72,8 @@
  *   - failure  an alert with the server's plain-text message, **Retry** (re-sends the category
  *              the controller already confirmed) and **Dismiss**.
  *
- * ABSENT, NOT DISABLED, FOR NON-CONTROLLERS (CTL-033): when the controller-identity seam's role is
- * not `controller` the component renders nothing at all. (The backend refuses anyone else too.)
+ * ABSENT, NOT DISABLED, FOR NON-CONTROLLERS (CTL-033): when the signed-in session is not a
+ * controller (`useCanControl()`, demo-feedback story 11) the component renders nothing at all.
  *
  * FOCUS-TRAP CONTRACT (F2, `core/a11y/modalPriority`). The step's trap (initial focus, Tab wrap)
  * STANDS ASIDE while any other `[aria-modal="true"]` element is mounted (`hasOtherModalMounted`:
@@ -130,7 +130,7 @@ import {
   CobraSecondaryButton,
 } from '@/theme/styledComponents'
 import { useTakedown } from '../hooks/useTakedown'
-import { useControllerIdentity } from '../identity/controllerIdentity'
+import { useCanControl } from '../access'
 import {
   DEFAULT_TAKEDOWN_CATEGORY,
   TAKEDOWN_CATEGORIES,
@@ -374,7 +374,7 @@ function ConfirmPanel({
 
 /** The Live world row's Take down control. See the module header. */
 export function TakedownAction({ post }: TakedownActionProps) {
-  const { role } = useControllerIdentity()
+  const canControl = useCanControl()
   const takedown = useTakedown(post.id)
 
   const triggerRef = useRef<HTMLButtonElement>(null)
@@ -442,7 +442,7 @@ export function TakedownAction({ post }: TakedownActionProps) {
   }, [phase])
 
   // Absent, not disabled, for anyone who is not a controller (CTL-033). Hooks above all ran.
-  if (role !== 'controller') return null
+  if (!canControl) return null
 
   function openConfirm(event: ReactMouseEvent<HTMLElement>): void {
     if (phase === 'pending') return

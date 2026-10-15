@@ -2,6 +2,7 @@ namespace Pulse.WebApi.Features.Realtime;
 
 using Pulse.WebApi.Features.Social;
 using Pulse.WebApi.Features.Social.Editing;
+using Pulse.WebApi.Features.Social.Engagement;
 
 /// <summary>
 /// The contract-first seam between the post-write path and the real-time fan-out. Story 02's
@@ -76,5 +77,25 @@ public interface IFeedBroadcaster
     /// <returns>A task that completes when the frame has been dispatched.</returns>
     Task BroadcastPostEditedAsync(
         Guid exerciseId, PostEditedDto edited, CancellationToken cancellationToken = default) =>
+        Task.CompletedTask;
+
+    /// <summary>
+    /// Tells the exercise's subscribers that a post's shown engagement changed (demo-feedback DF-17): a like or repost
+    /// was added or removed, or a reply landed under it. The payload is ONLY
+    /// <c>PostEngagementChanged { postId, counts { reply, repost, like }, version }</c>: the shown counts every
+    /// participant sees and a database-derived version (DF-18). It never carries who reacted, the viewer's own
+    /// <c>active</c> state, or the baseline / real split (XC-002). It goes to the exercise-wide group, because every
+    /// participant card showing the post must update.
+    /// </summary>
+    /// <remarks>
+    /// A <b>default interface method</b> (a no-op), so the <see cref="IFeedBroadcaster"/> test doubles that predate live
+    /// engagement keep compiling unchanged. <c>SignalRFeedBroadcaster</c> implements the real fan-out.
+    /// </remarks>
+    /// <param name="exerciseId">The owning exercise run whose subscribers receive the change (COR-001 scope).</param>
+    /// <param name="change">The post's new shown counts and version.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>A task that completes when the change has been dispatched.</returns>
+    Task BroadcastPostEngagementChangedAsync(
+        Guid exerciseId, PostEngagementChangedDto change, CancellationToken cancellationToken = default) =>
         Task.CompletedTask;
 }

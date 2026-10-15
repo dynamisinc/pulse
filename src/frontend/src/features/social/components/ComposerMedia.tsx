@@ -72,6 +72,7 @@ import {
   type ComposerAttachment,
 } from '../hooks/useComposePost'
 import { ExerciseBands } from './media/ExerciseBands'
+import { ParticipantTooltip } from './ParticipantTooltip'
 import styles from './ComposerMedia.module.css'
 
 /**
@@ -124,16 +125,18 @@ export function AttachButton({ onPick, buttonRef, disabled = false }: AttachButt
 
   return (
     <>
-      <button
-        ref={buttonRef}
-        type="button"
-        className={styles.attachButton}
-        onClick={() => inputRef.current?.click()}
-        disabled={disabled}
-        aria-label="Add photos or video"
-      >
-        <FontAwesomeIcon icon={faImage} aria-hidden="true" />
-      </button>
+      <ParticipantTooltip label="Add photos or video">
+        <button
+          ref={buttonRef}
+          type="button"
+          className={styles.attachButton}
+          onClick={() => inputRef.current?.click()}
+          disabled={disabled}
+          aria-label="Add photos or video"
+        >
+          <FontAwesomeIcon icon={faImage} aria-hidden="true" />
+        </button>
+      </ParticipantTooltip>
       <input
         ref={inputRef}
         type="file"
@@ -254,6 +257,7 @@ function AttachmentRow({
   const noun = item.kind === 'video' ? 'video' : 'photo'
   const ordinal = count > 1 ? ` ${index + 1}` : ''
   const uploading = item.status === 'uploading'
+  const removeLabel = uploading ? `Cancel upload of ${item.file.name}` : `Remove ${item.file.name}`
   const percent = Math.round(Math.min(1, Math.max(0, item.progress)) * 100)
   const missingAlt = touched && effectiveAlt(item.alt).length === 0
 
@@ -337,18 +341,18 @@ function AttachmentRow({
         </div>
       </div>
 
-      <button
-        type="button"
-        className={styles.remove}
-        data-attachment-action={uploading ? 'cancel' : 'remove'}
-        disabled={disabled}
-        aria-label={
-          uploading ? `Cancel upload of ${item.file.name}` : `Remove ${item.file.name}`
-        }
-        onClick={() => (uploading ? onCancel(item.key) : onRemove(item.key))}
-      >
-        <FontAwesomeIcon icon={faXmark} aria-hidden="true" />
-      </button>
+      <ParticipantTooltip label={removeLabel}>
+        <button
+          type="button"
+          className={styles.remove}
+          data-attachment-action={uploading ? 'cancel' : 'remove'}
+          disabled={disabled}
+          aria-label={removeLabel}
+          onClick={() => (uploading ? onCancel(item.key) : onRemove(item.key))}
+        >
+          <FontAwesomeIcon icon={faXmark} aria-hidden="true" />
+        </button>
+      </ParticipantTooltip>
     </li>
   )
 }

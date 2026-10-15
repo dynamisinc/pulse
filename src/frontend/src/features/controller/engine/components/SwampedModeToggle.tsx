@@ -29,9 +29,11 @@ import { Box, Stack, Typography } from '@mui/material'
 import { useSwampedMode } from '../hooks/useSwampedMode'
 // D5 dark operator-chrome tokens (matches `ReviewQueue`'s `chrome`). Staff-only.
 import { consoleChrome as chrome } from '../../consoleChrome'
+import { useCanControl } from '../../access'
 
 export function SwampedModeToggle() {
   const { swampedMode, isLead, setSwampedMode } = useSwampedMode()
+  const canControl = useCanControl()
 
   return (
     <Stack
@@ -43,7 +45,7 @@ export function SwampedModeToggle() {
     >
       {/* The enable/disable affordance — LEAD ONLY. Absent (not disabled) for a
           non-lead controller (COR-015). */}
-      {isLead && (
+      {canControl && isLead && (
         <Box
           component="button"
           type="button"

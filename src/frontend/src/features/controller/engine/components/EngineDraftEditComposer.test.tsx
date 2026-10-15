@@ -51,7 +51,7 @@
  * assertion and costs ~58ms per character.
  */
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ThemeProvider } from '@mui/material/styles'
 import { cobraTheme } from '@/theme/cobraTheme'
 import { ExerciseContextProvider } from '@/core/exerciseContext'
@@ -62,6 +62,10 @@ import { postStore } from '@/features/social/services/postStore'
 import { reviewStore } from '../services/reviewStore'
 import { ReviewQueue } from './ReviewQueue'
 import { EngineDraftEditComposer } from './EngineDraftEditComposer'
+
+// Demo-feedback story 11 (DF-14): the console's write controls render only for a controller
+// session, and this suite mounts none, so the read-only gate is fixed to "controller" here.
+vi.mock('@/features/controller/access/useCanControl', () => ({ useCanControl: () => true }))
 
 beforeEach(() => {
   setExerciseClock({ scenarioNow: () => new Date('2033-09-04T14:00:30Z') })
