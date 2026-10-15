@@ -10,8 +10,11 @@ using ClosedXML.Excel;
 
 /// <summary>
 /// Builds a real Cadence-layout MSEL file the way Cadence's <c>MselWorksheetBuilder</c> writes it: the 16 MSEL columns
-/// in order (+ optional conduct columns and the Pulse <c>Pulse Media</c> extension), sheet <c>MSEL</c>, <c>Inject #</c>
-/// as a NUMBER cell, times as <c>HH:mm</c> text; and the same rows as CSV with Cadence's own field escaping.
+/// in order (+ optional conduct columns, the Pulse <c>Pulse Media</c> extension, and story 14's <c>Pulse Media Alt</c>,
+/// <c>Pulse Likes</c>, <c>Pulse Reposts</c>, <c>Pulse Replies</c>), sheet <c>MSEL</c>, <c>Inject #</c> as a NUMBER cell,
+/// times as <c>HH:mm</c> text; and the same rows as CSV with Cadence's own field escaping. In the <c>.xlsx</c> an
+/// engagement value that is a number is written as a NUMBER cell (as Excel stores a typed <c>962</c>: the double
+/// <c>962.0</c>); a leading apostrophe forces a TEXT cell, as it does in Excel (<c>'962</c> → the text <c>962</c>).
 /// </summary>
 internal static class MselFixture
 {
@@ -25,6 +28,8 @@ internal static class MselFixture
     public static readonly string[] ConductHeaders = ["Status", "Fired At", "Fired By"];
 
     public const string PulseMediaHeader = "Pulse Media";
+
+    public static readonly string[] PulseExtensionHeaders = ["Pulse Media Alt", "Pulse Likes", "Pulse Reposts", "Pulse Replies"];
 
     /// <summary>The Kestrel-style demo rows: three social posts and two non-social injects, StartEx at day 1 08:00.</summary>
     public static List<MselRowSpec> KestrelRows(string handle1, string handle2, string displayName2, string controller) =>
@@ -44,21 +49,26 @@ internal static class MselFixture
         bool pulseMedia = false,
         string sheetName = "MSEL",
         Action<XLWorkbook>? before = null,
-        Action<IXLWorksheet>? after = null)
+        Action<IXLWorksheet>? after = null,
+        bool pulseExtensions = false)
     {
         using var workbook = new XLWorkbook();
         before?.Invoke(workbook);
         var sheet = workbook.Worksheets.Add(sheetName);
-        var headers = Headers(conduct, pulseMedia);
+        var headers = Headers(conduct, pulseMedia, pulseExtensions);
         for (var column = 0; column < headers.Count; column++)
         {
             sheet.Cell(1, column + 1).Value = headers[column];
         }
 
+        var engagementColumns = pulseExtensions
+            ? Enumerable.Range(headers.Count - 3, 3).ToHashSet()
+            : [];
+
         var rowNumber = 2;
         foreach (var row in rows)
         {
-            var values = Values(row, conduct, pulseMedia);
+            var values = Values(row, conduct, pulseMedia, pulseExtensions);
             // A whole number is a NUMBER cell, as Cadence writes it; anything else (INJ-1) is a text cell.
             if (int.TryParse(row.InjectNumber, NumberStyles.None, CultureInfo.InvariantCulture, out var number))
             {
@@ -70,7 +80,15 @@ internal static class MselFixture
             }
             for (var column = 1; column < values.Count; column++)
             {
-                sheet.Cell(rowNumber, column + 1).Value = values[column];
+                var cell = sheet.Cell(rowNumber, column + 1);
+                if (engagementColumns.Contains(column))
+                {
+                    SetEngagementCell(cell, values[column]);
+                }
+                else
+                {
+                    cell.Value = values[column];
+                }
             }
 
             rowNumber++;
@@ -82,13 +100,18 @@ internal static class MselFixture
         return stream.ToArray();
     }
 
-    public static byte[] Csv(IReadOnlyList<MselRowSpec> rows, bool conduct = false, bool pulseMedia = false, bool bom = true)
+    public static byte[] Csv(
+        IReadOnlyList<MselRowSpec> rows,
+        bool conduct = false,
+        bool pulseMedia = false,
+        bool bom = true,
+        bool pulseExtensions = false)
     {
         var builder = new StringBuilder();
-        builder.Append(string.Join(",", Headers(conduct, pulseMedia).Select(Escape))).Append("\r\n");
+        builder.Append(string.Join(",", Headers(conduct, pulseMedia, pulseExtensions).Select(Escape))).Append("\r\n");
         foreach (var row in rows)
         {
-            builder.Append(string.Join(",", Values(row, conduct, pulseMedia).Select(Escape))).Append("\r\n");
+            builder.Append(string.Join(",", Values(row, conduct, pulseMedia, pulseExtensions).Select(Escape))).Append("\r\n");
         }
 
         var text = Encoding.UTF8.GetBytes(builder.ToString());
@@ -108,7 +131,27 @@ internal static class MselFixture
             : field;
     }
 
-    private static List<string> Headers(bool conduct, bool pulseMedia)
+    /// <summary>
+    /// An engagement cell as Excel would hold it: a number typed into the cell is a NUMBER (a double), a leading
+    /// apostrophe makes it TEXT, and anything else is text. A blank stays blank.
+    /// </summary>
+    private static void SetEngagementCell(IXLCell cell, string value)
+    {
+        if (value.StartsWith('\''))
+        {
+            cell.Value = value[1..];
+        }
+        else if (value.Length > 0 && double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var number))
+        {
+            cell.Value = number;
+        }
+        else
+        {
+            cell.Value = value;
+        }
+    }
+
+    private static List<string> Headers(bool conduct, bool pulseMedia, bool pulseExtensions)
     {
         var headers = CadenceHeaders.ToList();
         if (conduct)
@@ -121,10 +164,15 @@ internal static class MselFixture
             headers.Add(PulseMediaHeader);
         }
 
+        if (pulseExtensions)
+        {
+            headers.AddRange(PulseExtensionHeaders);
+        }
+
         return headers;
     }
 
-    private static List<string> Values(MselRowSpec row, bool conduct, bool pulseMedia)
+    private static List<string> Values(MselRowSpec row, bool conduct, bool pulseMedia, bool pulseExtensions)
     {
         var values = new List<string>
         {
@@ -156,6 +204,11 @@ internal static class MselFixture
             values.Add(row.PulseMedia);
         }
 
+        if (pulseExtensions)
+        {
+            values.AddRange([row.PulseMediaAlt, row.PulseLikes, row.PulseReposts, row.PulseReplies]);
+        }
+
         return values;
     }
 }
@@ -173,4 +226,8 @@ internal sealed record MselRowSpec(
     string DeliveryMethod,
     string Notes = "",
     string Controller = "",
-    string PulseMedia = "");
+    string PulseMedia = "",
+    string PulseMediaAlt = "",
+    string PulseLikes = "",
+    string PulseReposts = "",
+    string PulseReplies = "");

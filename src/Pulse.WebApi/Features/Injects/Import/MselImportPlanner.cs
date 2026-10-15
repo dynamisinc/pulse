@@ -9,7 +9,8 @@ using Pulse.WebApi.Features.Social;
 /// <summary>
 /// Turns a read <see cref="MselTable"/> into one planned outcome per data row (demo-feedback story 03): the header check,
 /// the social filter (DF-9), the planned minute (DF-11), and the mapping of every social row onto a single-post run-sheet
-/// item. A pure function over facts the service read IN SCOPE — no I/O, no DI — so every rule is unit-testable.
+/// item — including the Pulse extension columns for alt text and the engagement baseline (story 14, DF-17). A pure
+/// function over facts the service read IN SCOPE — no I/O, no DI — so every rule is unit-testable.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -65,6 +66,24 @@ public static class MselImportPlanner
     /// <summary>The Pulse extension column: comma-separated media-library file names.</summary>
     public const string PulseMediaHeader = "Pulse Media";
 
+    /// <summary>
+    /// The Pulse extension column (story 14, DF-17): the alt text for each <see cref="PulseMediaHeader"/> file, separated
+    /// by <see cref="AltSeparator"/>, in the same order.
+    /// </summary>
+    public const string PulseMediaAltHeader = "Pulse Media Alt";
+
+    /// <summary>The Pulse extension column (story 14, DF-17): the post's engagement baseline <c>like</c>.</summary>
+    public const string PulseLikesHeader = "Pulse Likes";
+
+    /// <summary>The Pulse extension column (story 14, DF-17): the post's engagement baseline <c>repost</c>.</summary>
+    public const string PulseRepostsHeader = "Pulse Reposts";
+
+    /// <summary>The Pulse extension column (story 14, DF-17): the post's engagement baseline <c>reply</c>.</summary>
+    public const string PulseRepliesHeader = "Pulse Replies";
+
+    /// <summary>The separator between the entries of a <see cref="PulseMediaAltHeader"/> cell.</summary>
+    public const char AltSeparator = '|';
+
     private const int MinutesPerDay = 24 * 60;
 
     private static readonly string[] RequiredHeaders =
@@ -74,6 +93,7 @@ public static class MselImportPlanner
     [
         InjectNumberHeader, TitleHeader, DescriptionHeader, ScheduledTimeHeader, ScenarioDayHeader, ScenarioTimeHeader,
         SourceHeader, DeliveryMethodHeader, NotesHeader, ResponsibleControllerHeader, PulseMediaHeader,
+        PulseMediaAltHeader, PulseLikesHeader, PulseRepostsHeader, PulseRepliesHeader,
     ];
 
     private static readonly string[] TimeFormats =
@@ -290,6 +310,21 @@ public static class MselImportPlanner
             }
         }
 
+        // Alt text per file (story 14, DF-17; NFR-001), else the file-name stem.
+        if (ApplyAltText(cells, media, warnings) is { } altFailure)
+        {
+            return Fail(altFailure, handle);
+        }
+
+        // Engagement baseline (story 14, DF-17): blank is not set; anything but a whole number 0..MaxBaseline fails.
+        var like = ParseBaseline(cells, PulseLikesHeader);
+        var repost = ParseBaseline(cells, PulseRepostsHeader);
+        var reply = ParseBaseline(cells, PulseRepliesHeader);
+        if ((like.Error ?? repost.Error ?? reply.Error) is { } baselineFailure)
+        {
+            return Fail(baselineFailure, handle);
+        }
+
         // Assignee by display name; unknown is a warning, never a failure. Only a MATCHED name says who the item is for:
         // a blank or unmatched cell leaves a new item unassigned and an existing item with whoever it has (Gate-1 M-2),
         // so re-importing the same Cadence file never wipes an assignment made in the console.
@@ -322,9 +357,118 @@ public static class MselImportPlanner
             keepExistingAssignee,
             persona.Id,
             text,
-            media);
+            media,
+            like.Value,
+            repost.Value,
+            reply.Value);
 
         return PlannedImportRow.ForCandidate(row.RowNumber, injectNumber, title, handle, planned.Minute, candidate, warnings);
+    }
+
+    /// <summary>
+    /// Story 14 (DF-17): sets each file's alt text from <c>Pulse Media Alt</c> — the cell sanitized as every text cell
+    /// is, split on <see cref="AltSeparator"/>, each entry trimmed. A blank cell or a blank entry keeps the file-name stem
+    /// the media loop already put there; fewer entries than files leaves the rest on the stem with a warning; an entry
+    /// longer than <see cref="InjectItemValidator.MaxAltLength"/> is truncated with a warning; alt text on a row without
+    /// media is ignored with a warning. More entries than files is the row's failure, returned here.
+    /// </summary>
+    /// <remarks>
+    /// The bound is UTF-16 units, the unit <see cref="InjectItemValidator"/> (and the funnel) measure alt text in after
+    /// sanitizing, so a truncated entry always passes the write path; a surrogate pair is never split.
+    /// </remarks>
+    private static string? ApplyAltText(RowCells cells, List<PlannedMedia> media, List<string> warnings)
+    {
+        if (Clean(cells[PulseMediaAltHeader]) is not { } altCell)
+        {
+            return null;
+        }
+
+        if (media.Count == 0)
+        {
+            warnings.Add("Pulse Media Alt ignored: the row has no Pulse Media.");
+            return null;
+        }
+
+        var entries = altCell.Split(AltSeparator);
+        if (entries.Length > media.Count)
+        {
+            return string.Create(
+                CultureInfo.InvariantCulture,
+                $"Pulse Media Alt has {Count(entries.Length, "entry", "entries")} for {Count(media.Count, "Pulse Media file", "Pulse Media files")}.");
+        }
+
+        if (entries.Length < media.Count)
+        {
+            warnings.Add(string.Create(
+                CultureInfo.InvariantCulture,
+                $"Pulse Media Alt has {Count(entries.Length, "entry", "entries")} for {Count(media.Count, "Pulse Media file", "Pulse Media files")}; the rest use the file name."));
+        }
+
+        for (var index = 0; index < entries.Length; index++)
+        {
+            if (Clean(entries[index]) is not { } alt)
+            {
+                continue; // a blank entry keeps the stem
+            }
+
+            if (alt.Length > InjectItemValidator.MaxAltLength)
+            {
+                alt = FitAlt(alt);
+                warnings.Add(string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"Pulse Media Alt entry {index + 1} truncated to {InjectItemValidator.MaxAltLength} characters."));
+            }
+
+            media[index] = media[index] with { Alt = alt };
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Story 14 (DF-17): one engagement column. Blank (after sanitizing) is not set. Otherwise the cell must be a whole
+    /// number 0..<see cref="InjectItemValidator.MaxBaseline"/>: the readers write a numeric <c>.xlsx</c> cell in invariant
+    /// shortest form (Excel's <c>962.0</c> reads <c>962</c>, a fraction keeps its decimals), and text is parsed with the
+    /// invariant culture (sign, decimal point and exponent allowed; no thousands separator, so <c>1,5</c> is never 15).
+    /// Negative, fractional, too large or not a number is the row's failure, naming the column.
+    /// </summary>
+    private static (int? Value, string? Error) ParseBaseline(RowCells cells, string header)
+    {
+        if (Clean(cells[header]) is not { } value)
+        {
+            return (null, null);
+        }
+
+        if (decimal.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var number)
+            && number == decimal.Truncate(number)
+            && number is >= 0 and <= InjectItemValidator.MaxBaseline)
+        {
+            return ((int)number, null);
+        }
+
+        return (null, string.Create(
+            CultureInfo.InvariantCulture,
+            $"{header} '{value}' is not a whole number from 0 to {InjectItemValidator.MaxBaseline:N0}."));
+    }
+
+    private static string Count(int count, string singular, string plural) =>
+        string.Create(CultureInfo.InvariantCulture, $"{count} {(count == 1 ? singular : plural)}");
+
+    /// <summary>Bounds sanitized alt text to <see cref="InjectItemValidator.MaxAltLength"/> UTF-16 units, never splitting a pair.</summary>
+    private static string FitAlt(string alt)
+    {
+        if (alt.Length <= InjectItemValidator.MaxAltLength)
+        {
+            return alt;
+        }
+
+        var cut = InjectItemValidator.MaxAltLength;
+        if (char.IsHighSurrogate(alt[cut - 1]))
+        {
+            cut--;
+        }
+
+        return alt[..cut].TrimEnd();
     }
 
     /// <summary>
@@ -458,11 +602,11 @@ public static class MselImportPlanner
 
     private static string? FallbackTitle(string? injectNumber) => injectNumber is null ? null : $"Inject {injectNumber}";
 
+    /// <summary>The fallback alt text: the file name without its extension (the whole name when that leaves nothing).</summary>
     private static string AltFor(string fileName)
     {
         var stem = Path.GetFileNameWithoutExtension(fileName).Trim();
-        var alt = stem.Length > 0 ? stem : fileName;
-        return TruncateCodePoints(alt, InjectItemValidator.MaxAltLength);
+        return FitAlt(stem.Length > 0 ? stem : fileName);
     }
 
     private static string TruncateCodePoints(string value, int maxCodePoints)
@@ -531,7 +675,9 @@ public sealed record ImportAssignee(Guid Id, string DisplayName);
 
 /// <summary>One media reference a candidate asks for.</summary>
 /// <param name="AssetId">The library asset id.</param>
-/// <param name="Alt">The alt text (the file name without its extension).</param>
+/// <param name="Alt">
+/// The sanitized alt text: the file's <c>Pulse Media Alt</c> entry (story 14), else the file name without its extension.
+/// </param>
 public sealed record PlannedMedia(Guid AssetId, string Alt);
 
 /// <summary>What a social row asks for: one single-post run-sheet item keyed by its <c>Inject #</c>.</summary>
@@ -548,6 +694,9 @@ public sealed record PlannedMedia(Guid AssetId, string Alt);
 /// <param name="PersonaId">The resolved persona.</param>
 /// <param name="Text">The sanitized post text.</param>
 /// <param name="Media">The media, in cell order.</param>
+/// <param name="BaselineLike">The <c>Pulse Likes</c> baseline (story 14), or <c>null</c> when the cell is blank.</param>
+/// <param name="BaselineRepost">The <c>Pulse Reposts</c> baseline (story 14), or <c>null</c> when the cell is blank.</param>
+/// <param name="BaselineReply">The <c>Pulse Replies</c> baseline (story 14), or <c>null</c> when the cell is blank.</param>
 public sealed record ImportCandidate(
     string ExternalRef,
     string Title,
@@ -557,7 +706,10 @@ public sealed record ImportCandidate(
     bool KeepExistingAssignee,
     Guid PersonaId,
     string Text,
-    IReadOnlyList<PlannedMedia> Media);
+    IReadOnlyList<PlannedMedia> Media,
+    int? BaselineLike,
+    int? BaselineRepost,
+    int? BaselineReply);
 
 /// <summary>One data row's plan: a final outcome (skipped/failed), or a candidate the queue decides on.</summary>
 public sealed class PlannedImportRow
