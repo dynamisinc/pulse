@@ -174,14 +174,80 @@ public sealed class ExerciseListEndpointTests
             + "(scheduled → build) rather than emitting a literal no deployed client guard accepts");
     }
 
-    /// <summary>AC5: a Controller session cannot reach the list.</summary>
+    /// <summary>
+    /// demo-feedback DF-20 (story 15): a Controller session MAY list — and sees exactly its own customer's
+    /// exercises, with the same positive control and unbounded control as the org-admin case above.
+    /// </summary>
     [RequiresDockerFact]
-    public async Task List_AsController_IsRefused()
+    public async Task List_AsController_ReturnsOnlyTheCallersOwnTenantsExercises()
     {
-        await AssertRoleIsRefusedAsync(ExerciseAdminRoles.Controller);
+        var world = await OrgAdminTestWorld.SeedAsync(_fixture, ExerciseAdminRoles.Controller);
+
+        await using var factory = new OrgAdminProbeFactory(_fixture.ConnectionString!);
+        using var client = OrgAdminTestWorld.CreateClient(factory, world.Token);
+
+        var response = await client.GetAsync(new Uri(ExerciseLifecycleAdminEndpoints.ExercisesRoute, UriKind.Relative));
+        response.StatusCode.Should().Be(
+            HttpStatusCode.OK,
+            "DF-20: the controller joined ExerciseAdministrators — a 403 means the filter still refuses it, a 401 "
+            + "means the service re-check refused it (ListAsync returns null for a non-administrator)");
+
+        var listed = (await response.Content.ReadFromJsonAsync<List<OrgExerciseWire>>())!;
+
+        listed.Select(row => row.ExerciseId).Should().Contain(
+            world.OwnExercise.Id.ToString(), "positive control: the controller's own customer's run is listed");
+        listed.Select(row => row.ExerciseId).Should().NotContain(
+            world.OtherExercise.Id.ToString(),
+            "widening the ROLE set must not widen the TENANT bound: customer Y's run is never listed");
+        listed.Select(row => row.Name).Should().NotContain(world.OtherExercise.Name);
+
+        await using var read = _fixture.CreateContext();
+        var otherExists = await read.Exercises.AsNoTracking().AnyAsync(e => e.Id == world.OtherExercise.Id);
+        otherExists.Should().BeTrue("the unbounded control: the omission above is the tenant bound, not an empty table");
     }
 
-    /// <summary>AC5: an Evaluator session cannot reach the list.</summary>
+    /// <summary>
+    /// demo-feedback DF-20 (story 15), the second-tenant case: a controller in tenant A creates an exercise; a
+    /// controller in tenant B lists and never sees it (nor tenant A's other run) — while still seeing its own.
+    /// Nothing about the role crosses customers.
+    /// </summary>
+    [RequiresDockerFact]
+    public async Task List_AsControllerInASecondTenant_NeverSeesWhatAControllerInTheFirstTenantCreated()
+    {
+        var tenantA = await OrgAdminTestWorld.SeedAsync(_fixture, ExerciseAdminRoles.Controller);
+        var tenantB = await OrgAdminTestWorld.SeedAsync(_fixture, ExerciseAdminRoles.Controller);
+
+        await using var factory = new OrgAdminProbeFactory(_fixture.ConnectionString!);
+
+        string createdId;
+        using (var clientA = OrgAdminTestWorld.CreateClient(factory, tenantA.Token))
+        {
+            var create = await clientA.PostAsJsonAsync(
+                ExerciseLifecycleAdminEndpoints.ExercisesRoute,
+                new { name = $"Tenant A Controller Run {Guid.NewGuid():N}" });
+            create.StatusCode.Should().Be(HttpStatusCode.Created);
+            createdId = (await create.Content.ReadFromJsonAsync<CreateExerciseWire>())!.Exercise.ExerciseId;
+
+            var listA = await clientA.GetFromJsonAsync<List<OrgExerciseWire>>(
+                new Uri(ExerciseLifecycleAdminEndpoints.ExercisesRoute, UriKind.Relative));
+            listA!.Select(row => row.ExerciseId).Should().Contain(
+                createdId, "positive control: tenant A's controller sees the run it just created");
+        }
+
+        using var clientB = OrgAdminTestWorld.CreateClient(factory, tenantB.Token);
+        var fetchedB = await clientB.GetFromJsonAsync<List<OrgExerciseWire>>(
+            new Uri(ExerciseLifecycleAdminEndpoints.ExercisesRoute, UriKind.Relative));
+        fetchedB.Should().NotBeNull();
+        var listB = fetchedB!;
+
+        listB.Should().ContainSingle(
+            "tenant B owns exactly one exercise; anything more is another customer's run leaking across")
+            .Which.ExerciseId.Should().Be(tenantB.OwnExercise.Id.ToString());
+        listB.Select(row => row.ExerciseId).Should().NotContain(createdId);
+        listB.Select(row => row.ExerciseId).Should().NotContain(tenantA.OwnExercise.Id.ToString());
+    }
+
+    /// <summary>AC5 (and story 15): an Evaluator session still cannot reach the list.</summary>
     [RequiresDockerFact]
     public async Task List_AsEvaluator_IsRefused()
     {
@@ -236,7 +302,8 @@ public sealed class ExerciseListEndpointTests
 
         response.StatusCode.Should().Be(
             HttpStatusCode.Forbidden,
-            "AC5: exercise list/management is Planner/OrgAdmin only — a {0} already reaches their individual "
+            "AC5 as widened by DF-20: exercise list/management is Planner/OrgAdmin/Controller only — a {0} "
+            + "already reaches their individual "
             + "assigned exercises through the switcher, a different and narrower concern. A 200 here means "
             + "the endpoint gates on 'any staff session' rather than on role",
             role);

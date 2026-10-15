@@ -158,8 +158,9 @@ public sealed class ExerciseCreationService
             StaffUserId = caller.StaffUserId,
             ExerciseId = exercise.Id,
 
-            // COR-074 AC3: the creator's OWN role (planner or orgAdmin) — so they reach the new run through
-            // the exercise switcher with no separate provisioning step.
+            // COR-074 AC3: the creator's OWN role (planner, orgAdmin or — DF-20 — controller) — so they reach
+            // the new run through the exercise switcher with no separate provisioning step. A controller
+            // creator therefore holds a controller assignment on the new run.
             Role = caller.Role,
             CreatedAt = now,
         };

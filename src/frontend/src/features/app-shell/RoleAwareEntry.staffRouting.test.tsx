@@ -81,11 +81,16 @@ const STAFF_ROUTES: StaffRouteRegistry = [
   },
 ]
 
-/** Every staff surface testid — asserted absent on every participant case. */
+/**
+ * Every staff surface testid — asserted absent on every participant case. The
+ * not-allowed page (story 15, DF-20) is staff-only too, so it is listed: a
+ * participant typing a staff path must never be told "you need the … role".
+ */
 const ALL_STAFF_SURFACE_TESTIDS = [
   'staff-surface-planner',
   'staff-surface-controller',
   'staff-surface-evaluator',
+  'staff-not-allowed-page',
 ]
 
 const BASE_SESSION: Session = {
@@ -213,21 +218,32 @@ describe('staff deep links', () => {
 })
 
 describe('staff role gating — allowedRoles decides, not the URL', () => {
-  it('a controller at /staff/plan does NOT get the planner surface', () => {
+  // Demo-feedback story 15 (DF-20): a REGISTERED path the role may not open
+  // renders the not-allowed page in place, instead of a silent redirect.
+  it('a controller at /staff/plan does NOT get the planner surface — it is told why', () => {
     primeSession('controller')
     renderAt('/staff/plan')
 
     expect(screen.queryByTestId('staff-surface-planner')).not.toBeInTheDocument()
-    expect(screen.getByTestId('staff-surface-controller')).toBeInTheDocument()
-    expect(screen.getByTestId('pathname')).toHaveTextContent('/staff/console')
+    expect(screen.queryByTestId('staff-surface-controller')).not.toBeInTheDocument()
+    expect(screen.getByTestId('staff-not-allowed-page')).toBeInTheDocument()
+    expect(
+      screen.getByText('You need the planner role to open Exercise Settings.'),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Go to Controller Console' })).toBeInTheDocument()
+    expect(screen.getByTestId('pathname')).toHaveTextContent('/staff/plan')
   })
 
-  it('an evaluator at /staff/console does NOT get the console surface', () => {
+  it('an evaluator at /staff/console does NOT get the console surface — it is told why', () => {
     primeSession('evaluator')
     renderAt('/staff/console')
 
     expect(screen.queryByTestId('staff-surface-controller')).not.toBeInTheDocument()
-    expect(screen.getByTestId('staff-surface-evaluator')).toBeInTheDocument()
+    expect(screen.queryByTestId('staff-surface-evaluator')).not.toBeInTheDocument()
+    expect(
+      screen.getByText('You need the controller role to open Controller Console.'),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Go to Evaluator Dashboard' })).toBeInTheDocument()
   })
 })
 

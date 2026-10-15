@@ -46,16 +46,34 @@ system).
 ## Stories
 | # | Story | Requirement(s) | Status | Issue |
 |---|-------|----------------|--------|-------|
-| 01 | Exercise creation (backend endpoint + Planner/OrgAdmin surface) | COR-074 | Backend built — frontend outstanding | — |
-| 02 | Exercise list & management (org-scoped) | COR-075 | Backend built — frontend outstanding | — |
-| 03 | OrgAdmin surface family | COR-076 | Backend built — `RoleAwareEntry` routing outstanding | — |
+| 01 | Exercise creation (backend endpoint + Planner/OrgAdmin surface) | COR-074 | Backend and frontend shipped in #411 | — |
+| 02 | Exercise list & management (org-scoped) | COR-075 | Backend and frontend shipped in #411 (row actions not built) | — |
+| 03 | OrgAdmin surface family | COR-076 | Backend and `RoleAwareEntry` routing shipped in #411 (the staff-assignment view is not consumed yet) | — |
 
 > **Backend pass landed 2026-08-02** (Tier-2 sign-off outstanding on all three). Three org-tier endpoints
 > exist and are wired into `Program.cs`: `POST`/`GET /api/org/exercises` and
 > `GET /api/org/staff-assignments`. `orgAdmin` is a real server-side role for the first time, with its own
 > authorization filter. `IOrganizationContext` gained the production writer it never had (reviewer WR-006),
-> and `Organization` itself joined the org-scope sweep (WR-008). **No frontend surface is built** — an
-> `orgAdmin` who logs in is still redirected to login by `RoleAwareEntry`. See implementation.md.
+> and `Organization` itself joined the org-scope sweep (WR-008).
+>
+> **The frontend shipped in the same PR, #411 (merged 2026-08-03):** `/staff/exercises` (Exercise
+> Management — the create form and the org-scoped list) is a staff registry entry, and an `orgAdmin` who
+> signs in lands there instead of being redirected to login. See
+> `src/frontend/src/features/exerciseLifecycleAdmin/README.md` for what was deliberately not built (row
+> actions, the org-scoped staff-assignment view).
+
+## DF-20 — controllers may list and create exercises (demo-feedback story 15, 2026-10-15)
+Tom decided (decision DF-20, `docs/features/demo-feedback/implementation.md`; issue #516) that a
+**controller** may list and create its organization's exercises, besides the planner and the org admin.
+The role set `ExerciseAdminRoles.ExerciseAdministrators` is now planner + orgAdmin + controller; the
+endpoint filter and both services' re-checks read that one set. `POST`/`GET /api/org/exercises` therefore
+admit a controller; an **evaluator is still refused (`403`)**, and `GET /api/org/staff-assignments` stays
+**org admin only**. A controller who creates an exercise gets a `controller` staff assignment on it (the
+existing "creator's own role" rule). The frontend registry entry for `/staff/exercises` admits the
+controller too (seam S-4). The org-tier isolation rules are unchanged — no id in an org route, the tenant
+only from the server session, nothing across customers — and the backend suites add controller cases for
+create and list in a second tenant. A staff role that opens a registered path it is not admitted to now
+sees a COBRA "not allowed" page instead of a silent redirect.
 
 ## Dependencies
 **Hard prerequisite — the `Organization` tenant tier.** All three stories depend on the

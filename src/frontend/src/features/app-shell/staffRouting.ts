@@ -164,15 +164,16 @@ export interface StaffRouteEntry {
   readonly element: ReactNode
   /**
    * The single source of truth for who may reach this surface — used by BOTH
-   * the route tree (an unauthorized path redirects to the role's default
-   * surface, it never renders) and, later, launcher visibility.
+   * the route tree (for a role not listed here the surface never renders; its
+   * path shows the not-allowed page naming these roles — demo-feedback story
+   * 15, DF-20) and launcher visibility.
    */
   readonly allowedRoles: readonly StaffSurfaceRole[]
   /** Which launcher section this surface belongs to. */
   readonly group: StaffRouteGroup
   /**
    * Roles that LAND here by default — the destination for a bare `/staff`, for
-   * an unknown staff path, and for a path this role may not open. Must be a
+   * an unknown staff path, and the not-allowed page's "Go to …" button. Must be a
    * subset of {@link allowedRoles}; at most one entry per role (asserted by the
    * registry's test). Omitted on a surface that is nobody's home page.
    */
@@ -198,8 +199,9 @@ export function staffRoutesForRole(
 }
 
 /**
- * The role's default surface — where a bare `/staff`, an unknown staff path, or
- * a path this role may not open lands.
+ * The role's default surface — where a bare `/staff` or an unknown staff path
+ * lands, and where the not-allowed page's button (a registered path this role
+ * may not open; demo-feedback story 15) sends the person.
  *
  * Resolution order:
  *  1. the first entry that declares `isDefaultFor: [role]` AND allows the role

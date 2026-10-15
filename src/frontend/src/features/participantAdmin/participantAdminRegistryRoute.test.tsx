@@ -21,9 +21,10 @@
  * Proves:
  *  1. a controller (and a planner) at the path sees the roster, the day-word panel
  *     and the Print cards button;
- *  2. an evaluator and an org admin are refused (redirected to their own default,
- *     the roster never renders), and a participant or PIO typing the path still
- *     lands on the participant surface (COR-004);
+ *  2. an evaluator and an org admin are refused (since demo-feedback story 15 they
+ *     see the not-allowed page with a button to their own default; the roster never
+ *     renders), and a participant or PIO typing the path still lands on the
+ *     participant surface (COR-004);
  *  3. the surface launcher lists the entry under Administer, beside the surface the
  *     staff member came from.
  */
@@ -157,27 +158,31 @@ describe('/staff/participant-admin — a controller or planner reaches the compo
 })
 
 describe('/staff/participant-admin — refused exactly as the registry gates other routes', () => {
-  it('an EVALUATOR is bounced to their own default; the roster never renders', async () => {
+  it('an EVALUATOR is told it needs another role; the roster never renders', async () => {
     primeSession('evaluator')
     renderAt(PATH)
 
-    expect(await screen.findByTestId('stub-evaluator-dashboard')).toBeInTheDocument()
-    await waitFor(() => {
-      expect(screen.getByTestId('pathname')).toHaveTextContent('/staff/evaluate')
-    })
+    expect(await screen.findByTestId('staff-not-allowed-page')).toBeInTheDocument()
+    expect(
+      screen.getByText('You need the planner or controller role to open Participants.'),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Go to Evaluator Dashboard' })).toBeInTheDocument()
+    expect(screen.getByTestId('pathname')).toHaveTextContent(PATH)
     expect(screen.queryByTestId('roster-table')).not.toBeInTheDocument()
     expect(screen.queryByTestId('day-word-panel')).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /print/i })).not.toBeInTheDocument()
   })
 
-  it('an ORG ADMIN is bounced to their own default; the roster never renders', async () => {
+  it('an ORG ADMIN is told it needs another role; the roster never renders', async () => {
     primeSession('orgAdmin')
     renderAt(PATH)
 
-    expect(await screen.findByTestId('exercise-management-page')).toBeInTheDocument()
-    await waitFor(() => {
-      expect(screen.getByTestId('pathname')).toHaveTextContent('/staff/exercises')
-    })
+    expect(await screen.findByTestId('staff-not-allowed-page')).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: 'Go to Exercise Management' }),
+    ).toBeInTheDocument()
+    expect(screen.getByTestId('pathname')).toHaveTextContent(PATH)
+    expect(screen.queryByTestId('exercise-management-page')).not.toBeInTheDocument()
     expect(screen.queryByTestId('roster-table')).not.toBeInTheDocument()
     expect(screen.queryByTestId('day-word-panel')).not.toBeInTheDocument()
   })

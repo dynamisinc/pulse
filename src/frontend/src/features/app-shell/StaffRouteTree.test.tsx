@@ -1,15 +1,17 @@
 /**
  * features/app-shell/StaffRouteTree.test.tsx
  * ---------------------------------------------------------------------------
- * The nested staff route tree in isolation: deep-linking, `allowedRoles` gating,
- * the unknown-path fallback (to the role's DEFAULT surface, never `/login`), and
- * per-route focus management (NFR-001).
+ * The nested staff route tree in isolation: deep-linking, `allowedRoles` gating
+ * (a REGISTERED path the role may not open renders the COBRA not-allowed page —
+ * demo-feedback story 15, DF-20), the unknown-path fallback (to the role's
+ * DEFAULT surface, never `/login`), and per-route focus management (NFR-001).
  *
  * The tree is mounted under a SPLAT route, exactly as `routes.tsx` mounts it —
  * a descendant `<Routes>` under a non-splat parent matches nothing, so getting
  * this wrong in the app would silently blank every staff surface.
  */
 import { render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { faClipboardCheck, faGear, faSliders } from '@fortawesome/free-solid-svg-icons'
 import { describe, it, expect } from 'vitest'
@@ -109,15 +111,61 @@ describe('StaffRouteTree — role gating (allowedRoles is the only gate)', () =>
     renderTree('controller', '/staff/console', '/staff/plan')
 
     expect(screen.queryByTestId('surface-plan')).not.toBeInTheDocument()
-    expect(screen.getByTestId('surface-console')).toBeInTheDocument()
-    expect(screen.getByTestId('pathname')).toHaveTextContent('/staff/console')
+  })
+})
+
+describe('StaffRouteTree — a registered path the role may not open says so (DF-20)', () => {
+  it('renders the not-allowed page in place — no silent redirect, no surface', () => {
+    renderTree('controller', '/staff/console', '/staff/plan')
+
+    expect(screen.getByTestId('staff-not-allowed-page')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { level: 1, name: 'Not allowed' })).toBeInTheDocument()
+    expect(
+      screen.getByText('You need the planner role to open Exercise Settings.'),
+    ).toBeInTheDocument()
+    // The URL stays where the person asked to go; nothing else rendered.
+    expect(screen.getByTestId('pathname')).toHaveTextContent('/staff/plan')
+    expect(screen.queryByTestId('surface-plan')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('surface-console')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('login-sentinel')).not.toBeInTheDocument()
   })
 
-  it('sends a planner off the controller console to their own default surface', () => {
+  it('names every admitted role in words, joined naturally', () => {
+    renderTree('planner', '/staff/plan', '/staff/timeline')
+
+    expect(
+      screen.getByText('You need the controller or evaluator role to open Timeline Explorer.'),
+    ).toBeInTheDocument()
+  })
+
+  it('offers one button to the role default page, and it goes there', async () => {
+    const user = userEvent.setup()
     renderTree('planner', '/staff/plan', '/staff/console')
 
-    expect(screen.queryByTestId('surface-console')).not.toBeInTheDocument()
+    expect(
+      screen.getByText('You need the controller role to open Controller Console.'),
+    ).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Go to Exercise Settings' }))
+
     expect(screen.getByTestId('surface-plan')).toBeInTheDocument()
+    expect(screen.getByTestId('pathname')).toHaveTextContent('/staff/plan')
+    expect(screen.queryByTestId('staff-not-allowed-page')).not.toBeInTheDocument()
+  })
+
+  it('takes route focus like any surface, labelled with the refused surface', () => {
+    renderTree('evaluator', '/staff/evaluate', '/staff/console')
+
+    expect(document.activeElement).toHaveAttribute(
+      'data-app-shell-focus-scope',
+      'staff:not-allowed:controller-console',
+    )
+    expect(document.activeElement).toHaveAttribute('aria-label', 'Not allowed: Controller Console')
+  })
+
+  it('owns exactly one main landmark, like a surface', () => {
+    renderTree('controller', '/staff/console', '/staff/evaluate')
+
+    expect(screen.getAllByRole('main')).toHaveLength(1)
   })
 })
 
