@@ -47,11 +47,18 @@ All in `src/frontend/src/features/controller/runSheet/` (Vitest + RTL, against t
   parse, no `exerciseId`)
 - **AC-3 apply + 400:** `import/RunSheetImportDialog.test.tsx` › "re-posts the same file with dryRun=false, shows the
   result, Done closes, the sheet updates", "shows the server's reason on a 400…", "…when the import itself is
-  refused…", "a 409 asks to run the import again"; `import/importService.test.ts` (400 → server `detail`)
-- **AC-4 #493:** `RunSheetField.test.tsx` (label is a `<label for>` before the input box, no notch, computed colour
-  ≥ 4.5:1 on `panel`/`card`/`bg` at rest, focused and in error; every field of the "New scripted item" form)
+  refused…", "a 409 asks to run the import again"; `import/importService.test.ts` (400 → server `detail`;
+  401 / 403 / 409 / 413 / other status each get their own kind and wording)
+- **Snapshot at pick time (Gate-1 H-1, M-1):** `import/RunSheetImportDialog.test.tsx` › "posts a .csv picked as
+  application/vnd.ms-excel as text/csv", "Import sends the previewed bytes even after the original file changes";
+  `import/importReport.test.ts` › "the pick-time snapshot"
+- **AC-4 #493:** `RunSheetField.test.tsx` (label is a `<label for>` before the input box, no notch; the label's
+  computed colour is ≥ 4.5:1 on `panel`/`card`/`bg` at rest and in error; the focus tint is checked as the `blue`
+  token, since jsdom does not evaluate `:focus-within`; every field of the "New scripted item" form)
 - **AC-5 mock adapter:** `import/importMock.test.ts` (refusals, dry run writes nothing, apply creates items in the
   queue the poll reads, re-import never duplicates); `import/importService.test.ts` › `getInjectImportService`
-- **A11y:** `import/RunSheetImportDialog.test.tsx` › "starts with focus inside the dialog…", "Escape closes the
-  dialog", "run-sheet shortcuts do not fire from inside the dialog", "the result table has a caption and column
-  headers"
+- **A11y:** `import/RunSheetImportDialog.test.tsx` › "starts with focus inside the dialog, and the trap brings
+  focus back" (focus behind the modal returns; the end sentinel wraps to the first control), "the hidden file input
+  is not a tab stop of its own", "Escape closes the dialog", "Escape and Cancel are ignored while a request is in
+  flight", "run-sheet shortcuts do not fire from inside the dialog", "modified keys (Ctrl/Cmd+K) still reach the
+  console…", "secondary text clears 4.5:1 on white…", "the result table has a caption and column headers"

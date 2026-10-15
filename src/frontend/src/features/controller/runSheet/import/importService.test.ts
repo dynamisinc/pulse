@@ -25,7 +25,7 @@ vi.mock('@/core/config/mockData', () => ({
 }))
 
 import { createLiveInjectImportService, getInjectImportService, IMPORT_PATH } from './importService'
-import { InjectImportError } from './importErrors'
+import { describeImportFailure, InjectImportError } from './importErrors'
 import { injectImportMock } from './importMock'
 import { parseImportResult, type InjectImportResultDto } from './importTypes'
 
@@ -91,13 +91,20 @@ describe('createLiveInjectImportService', () => {
     })
   })
 
-  it('409 -> conflict, 403 -> forbidden, 500 / network -> unavailable', async () => {
-    postMock.mockRejectedValueOnce(axiosError(409, { detail: 'The run sheet changed while importing. Run the import again.' }))
+  it('401 / 403 / 409 / 413 / other status / network each get their own kind', async () => {
+    const conflict = 'The run sheet changed while importing. Run the import again.'
+    postMock.mockRejectedValueOnce(axiosError(409, { detail: conflict }))
     await expect(service.importFile(file, { dryRun: false })).rejects.toMatchObject({ kind: 'conflict' })
+    postMock.mockRejectedValueOnce(axiosError(401, {}))
+    await expect(service.importFile(file, { dryRun: false }))
+      .rejects.toMatchObject({ kind: 'unauthenticated', status: 401 })
     postMock.mockRejectedValueOnce(axiosError(403, {}))
     await expect(service.importFile(file, { dryRun: false })).rejects.toMatchObject({ kind: 'forbidden' })
-    postMock.mockRejectedValueOnce(axiosError(500, {}))
-    await expect(service.importFile(file, { dryRun: false })).rejects.toMatchObject({ kind: 'unavailable' })
+    postMock.mockRejectedValueOnce(axiosError(413, ''))
+    await expect(service.importFile(file, { dryRun: false })).rejects.toMatchObject({ kind: 'tooLarge' })
+    postMock.mockRejectedValueOnce(axiosError(500, { detail: 'boom' }))
+    await expect(service.importFile(file, { dryRun: false }))
+      .rejects.toMatchObject({ kind: 'server', status: 500, detail: 'boom' })
     postMock.mockRejectedValueOnce(new Error('Network Error'))
     await expect(service.importFile(file, { dryRun: false }))
       .rejects.toBeInstanceOf(InjectImportError)
@@ -139,5 +146,20 @@ describe('getInjectImportService', () => {
     postMock.mockResolvedValue({ data: report(true) })
     await getInjectImportService().importFile(file, { dryRun: true })
     expect(postMock).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('describeImportFailure', () => {
+  it('words each kind: 400 reason, session expired, too large, server status + detail', () => {
+    expect(describeImportFailure(new InjectImportError('refused', 'the file is empty.', 400), 'preview'))
+      .toBe('The file could not be previewed: the file is empty.')
+    expect(describeImportFailure(new InjectImportError('unauthenticated', '', 401), 'import'))
+      .toMatch(/session expired.*sign in again/i)
+    expect(describeImportFailure(new InjectImportError('tooLarge', '', 413), 'import'))
+      .toMatch(/^The file could not be imported: the file is too large/)
+    expect(describeImportFailure(new InjectImportError('server', 'boom', 502), 'import'))
+      .toBe('The file could not be imported: the server answered with error 502: boom')
+    expect(describeImportFailure(new InjectImportError('server', '', 500), 'preview'))
+      .toMatch(/error 500\. Try again/)
   })
 })

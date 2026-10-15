@@ -23,8 +23,60 @@ export const IMPORT_MAX_FILE_BYTES = 2 * 1024 * 1024
 export const IMPORT_ACCEPT =
   '.xlsx,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv'
 
+/**
+ * Secondary text inside the (light) COBRA dialog. NOT `text.secondary`: COBRA's #848482 is
+ * ~3.7:1 on white, under the 4.5:1 AA floor (theme fix tracked in #461). `primary.dark`
+ * (#696969, dim gray) is a COBRA token at ~5.5:1 on white and ~4.9:1 on the `grid.light`
+ * table header.
+ */
+export const IMPORT_MUTED_TEXT = 'primary.dark'
+
 /** The one-line hint under the picker (AC wording). */
 export const IMPORT_HINT = 'A Cadence MSEL export works as-is; only social-media rows are imported.'
+
+/** The `.xlsx` MIME type (Office Open XML workbook). */
+export const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+
+/**
+ * The content type an import file is SENT with, from its extension, never the browser's guess:
+ * Windows with Office installed reports a `.csv` as `application/vnd.ms-excel`, which the
+ * server reads as a claim to be a workbook and refuses (`MselFileFormat.ClaimsWorkbook`).
+ * Anything else keeps what the browser said (the client check refuses it anyway).
+ */
+export function normalisedImportType(name: string, browserType: string): string {
+  const lower = name.toLowerCase()
+  if (lower.endsWith('.csv')) return 'text/csv'
+  if (lower.endsWith('.xlsx')) return XLSX_MIME
+  return browserType
+}
+
+/** Reads a Blob's bytes (`arrayBuffer`, with a `FileReader` fallback for older runtimes). */
+function readBytes(file: Blob): Promise<ArrayBuffer> {
+  if (typeof file.arrayBuffer === 'function') return file.arrayBuffer()
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      if (reader.result instanceof ArrayBuffer) resolve(reader.result)
+      else reject(new Error('Could not read the file'))
+    }
+    reader.onerror = () => reject(reader.error ?? new Error('Could not read the file'))
+    reader.readAsArrayBuffer(file)
+  })
+}
+
+/**
+ * Snapshots the picked file IN MEMORY at pick time, with the normalised content type. Preview
+ * and Import then post exactly these bytes: a file the controller re-saves in Excel between the
+ * two steps can neither change what is imported nor fail the upload (Chrome's
+ * ERR_UPLOAD_FILE_CHANGED on a disk-backed File).
+ */
+export async function snapshotImportFile(picked: File): Promise<File> {
+  const bytes = await readBytes(picked)
+  return new File([bytes], picked.name, {
+    type: normalisedImportType(picked.name, picked.type),
+    lastModified: picked.lastModified,
+  })
+}
 
 /** Why `file` cannot be sent, or `null` when it can. */
 export function validateImportFile(file: Pick<File, 'name' | 'size'>): string | null {

@@ -19,9 +19,12 @@
  * ERRORS -> `InjectImportError` with a `kind` the dialog words:
  *   400 'refused'      the server's readable `detail` (wrong file type, too big, missing
  *                      column, ...). Nothing was written.
+ *   401 'unauthenticated' the session expired: sign in again.
+ *   403 'forbidden'    not allowed (evaluators: story 11 hides the button).
  *   409 'conflict'     the run sheet kept changing under the import; run it again.
- *   401/403 'forbidden' not allowed (evaluators: story 11 hides the button).
- *   anything else      'unavailable' (network / 5xx).
+ *   413 'tooLarge'     the body broke a size cap before the endpoint read it.
+ *   other status       'server' (status + any `detail`); no response: 'unavailable'.
+ *   (See `importErrors.ts`.)
  * A 2xx whose body is not the frozen contract, or whose echoed `dryRun` is not the one
  * requested, REJECTS (fail closed): "validated, nothing written" must never be shown for a
  * real import, or the reverse.

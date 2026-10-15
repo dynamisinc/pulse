@@ -10,10 +10,13 @@ import {
   IMPORT_MAX_FILE_BYTES,
   importableCount,
   itemsWord,
+  normalisedImportType,
   skippedSummary,
+  snapshotImportFile,
   splitReportRows,
   statusLabel,
   validateImportFile,
+  XLSX_MIME,
 } from './importReport'
 import type { InjectImportResultDto, InjectImportRowDto } from './importTypes'
 
@@ -92,5 +95,37 @@ describe('counts and wording', () => {
     expect(statusLabel('skipped', false)).toBe('Skipped')
     expect(skippedSummary(3)).toBe('3 rows skipped (not social media)')
     expect(skippedSummary(1)).toBe('1 row skipped (not social media)')
+  })
+})
+
+const NL = String.fromCharCode(10)
+
+/** A Blob's text through `FileReader` (present in every jsdom). */
+function textOf(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result))
+    reader.onerror = () => reject(reader.error)
+    reader.readAsText(blob)
+  })
+}
+
+describe('the pick-time snapshot (H-1 / M-1)', () => {
+  it('types a file by its extension, never the browser guess', () => {
+    // Windows + Office reports a .csv as application/vnd.ms-excel.
+    expect(normalisedImportType('msel.csv', 'application/vnd.ms-excel')).toBe('text/csv')
+    expect(normalisedImportType('MSEL.XLSX', '')).toBe(XLSX_MIME)
+    expect(normalisedImportType('notes.txt', 'text/plain')).toBe('text/plain')
+  })
+
+  it('copies the bytes into memory with the normalised type and the same name', async () => {
+    const content = 'Inject #,Title' + NL + '1,Hello'
+    const picked = new File([content], 'msel.csv', { type: 'application/vnd.ms-excel' })
+    const snapshot = await snapshotImportFile(picked)
+    expect(snapshot).not.toBe(picked)
+    expect(snapshot.name).toBe('msel.csv')
+    expect(snapshot.type).toBe('text/csv')
+    expect(snapshot.size).toBe(picked.size)
+    expect(await textOf(snapshot)).toBe(content)
   })
 })

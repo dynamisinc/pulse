@@ -11,7 +11,11 @@
  *  - **Import N items** re-posts the SAME file with dryRun=false, shows the result counts, and
  *    **Done** closes; the run sheet shows the new items on its next poll;
  *  - a 400 shows the server's reason (preview and import);
- *  - a11y: modal with focus inside, focus kept inside, Escape closes, the table has headers;
+ *  - the picked file is snapshot at pick time: a .csv goes as text/csv whatever the browser
+ *    said, and Import posts the previewed bytes even if the file changed on disk;
+ *  - a11y: modal, the focus trap driven (escape + wrap), Escape closes (not while a request
+ *    is in flight), secondary text >= 4.5:1, the table has headers; Ctrl/Cmd+K still
+ *    reaches the console;
  *    run-sheet single-key shortcuts do not fire from inside the dialog.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -28,14 +32,49 @@ const seed: InjectItemWrite[] = [
 
 const IMPORTABLE = MOCK_MSEL_ROWS.filter(r => /social|pulse/i.test(r.deliveryMethod) && !r.failure)
 
+/** WCAG 2.1 contrast of two CSS colours (`#rrggbb` or `rgb(...)`). */
+function contrast(a: string, b: string): number {
+  const lum = (value: string): number => {
+    const hex = /^#([0-9a-f]{6})$/i.exec(value.trim())
+    const rgb = /^rgba?\((\d+),\s*(\d+),\s*(\d+)/i.exec(value.trim())
+    const n = hex ? Number.parseInt(hex[1] ?? '0', 16) : 0
+    const channels = hex
+      ? [(n >> 16) & 255, (n >> 8) & 255, n & 255]
+      : rgb
+        ? [Number(rgb[1]), Number(rgb[2]), Number(rgb[3])]
+        : [Number.NaN, Number.NaN, Number.NaN]
+    const [r, g, bl] = channels.map(c => {
+      const v = c / 255
+      return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4
+    }) as [number, number, number]
+    return 0.2126 * r + 0.7152 * g + 0.0722 * bl
+  }
+  const [hi, lo] = [lum(a), lum(b)].sort((x, y) => y - x) as [number, number]
+  return (hi + 0.05) / (lo + 0.05)
+}
+
+/** A Blob's text through `FileReader`. */
+function textOf(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result))
+    reader.onerror = () => reject(reader.error)
+    reader.readAsText(blob)
+  })
+}
+
 function msel(name = 'kestrel-msel.xlsx'): File {
   return new File(['PK fake workbook bytes'], name, {
     type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   })
 }
 
-async function openDialog(): Promise<HTMLElement> {
-  renderRunSheet(<RunSheetPanel />)
+async function openDialog(onOuterKeyDown?: (key: string) => void): Promise<HTMLElement> {
+  renderRunSheet(
+    <div onKeyDown={event => onOuterKeyDown?.(event.key)}>
+      <RunSheetPanel />
+    </div>,
+  )
   await screen.findAllByTestId('run-sheet-row')
   fireEvent.click(screen.getByRole('button', { name: 'Import from Excel' }))
   return screen.findByRole('dialog', { name: 'Import from Excel' })
@@ -45,8 +84,15 @@ function pick(dialog: HTMLElement, file: File): void {
   fireEvent.change(within(dialog).getByTestId('import-file-input'), { target: { files: [file] } })
 }
 
+/** Preview is enabled once the picked file has been snapshot into memory. */
+async function previewReady(dialog: HTMLElement): Promise<HTMLElement> {
+  const button = within(dialog).getByRole('button', { name: /^Preview/ })
+  await waitFor(() => expect(button).toBeEnabled())
+  return button
+}
+
 async function preview(dialog: HTMLElement): Promise<void> {
-  fireEvent.click(within(dialog).getByRole('button', { name: /^Preview/ }))
+  fireEvent.click(await previewReady(dialog))
   await within(dialog).findByTestId('import-report')
 }
 
@@ -84,7 +130,7 @@ describe('Import from Excel — the toolbar and the dialog', () => {
     expect(within(dialog).getByRole('button', { name: /^Preview/ })).toBeDisabled()
     pick(dialog, msel())
     expect(within(dialog).getByTestId('import-file-name')).toHaveTextContent('kestrel-msel.xlsx')
-    expect(within(dialog).getByRole('button', { name: /^Preview/ })).toBeEnabled()
+    await previewReady(dialog)
   })
 
   it('checks the file before upload (wrong type: a reason, no request)', async () => {
@@ -148,13 +194,43 @@ describe('Import from Excel — preview', () => {
     const dialog = await openDialog()
     pick(dialog, msel())
     injectImportMock.refuseNext('the header row is missing the required column(s): Delivery Method.')
-    fireEvent.click(within(dialog).getByRole('button', { name: /^Preview/ }))
+    fireEvent.click(await previewReady(dialog))
     const alert = await within(dialog).findByRole('alert')
     expect(alert).toHaveTextContent(
       'The file could not be previewed: the header row is missing the required column(s): Delivery Method.',
     )
     expect(within(dialog).queryByTestId('import-report')).toBeNull()
     expect(within(dialog).getByRole('button', { name: /^Preview/ })).toBeEnabled()
+  })
+})
+
+describe('Import from Excel — the file is snapshot at pick time', () => {
+  it('posts a .csv picked as application/vnd.ms-excel as text/csv', async () => {
+    const dialog = await openDialog()
+    const csv = new File(['Inject #,Title'], 'kestrel-msel.csv', { type: 'application/vnd.ms-excel' })
+    pick(dialog, csv)
+    await preview(dialog)
+    expect(injectImportMock.calls[0]?.file.type).toBe('text/csv')
+    expect(injectImportMock.calls[0]?.file.name).toBe('kestrel-msel.csv')
+  })
+
+  it('Import sends the previewed bytes even after the original file changes', async () => {
+    const dialog = await openDialog()
+    const original = new File(['version one'], 'kestrel-msel.csv', { type: 'text/csv' })
+    pick(dialog, original)
+    await preview(dialog)
+    // The controller re-saves the file on disk: the original File now reads differently.
+    Object.defineProperty(original, 'arrayBuffer', {
+      value: () => Promise.reject(new Error('ERR_UPLOAD_FILE_CHANGED')),
+    })
+    Object.defineProperty(original, 'size', { value: 999 })
+    fireEvent.click(within(dialog).getByRole('button', { name: `Import ${IMPORTABLE.length} items` }))
+    await within(dialog).findByRole('button', { name: 'Done' })
+    const sent = injectImportMock.calls[1]?.file
+    if (!sent) throw new Error('no import call')
+    expect(sent).not.toBe(original)
+    expect(sent).toBe(injectImportMock.calls[0]?.file)
+    expect(await textOf(sent)).toBe('version one')
   })
 })
 
@@ -169,7 +245,9 @@ describe('Import from Excel — apply', () => {
     const done = await within(dialog).findByRole('button', { name: 'Done' })
 
     expect(injectImportMock.calls.map(c => c.dryRun)).toEqual([true, false])
-    expect(injectImportMock.calls[1]?.file).toBe(file)
+    // The SAME in-memory snapshot is posted twice (not the disk-backed original).
+    expect(injectImportMock.calls[1]?.file).toBe(injectImportMock.calls[0]?.file)
+    expect(injectImportMock.calls[1]?.file.name).toBe(file.name)
     expect(within(dialog).getByTestId('import-report')).toHaveAttribute('data-dry-run', 'false')
     expect(within(dialog).getByTestId('import-count-created')).toHaveTextContent(`Created${IMPORTABLE.length}`)
     expect(within(dialog).getByTestId('import-status')).toHaveTextContent(/Import complete/)
@@ -211,17 +289,86 @@ describe('Import from Excel — apply', () => {
 })
 
 describe('Import from Excel — accessibility', () => {
-  it('starts with focus inside the dialog and keeps it there', async () => {
+  it('starts with focus inside the dialog, and the trap brings focus back', async () => {
+    // jsdom's document never "has focus"; MUI's trap only enforces when it does.
+    vi.spyOn(document, 'hasFocus').mockReturnValue(true)
     const dialog = await openDialog()
+    const choose = within(dialog).getByRole('button', { name: 'Choose file' })
+    await waitFor(() => expect(choose).toHaveFocus())
+    // Everything behind the modal (the run sheet) is hidden from assistive tech.
+    expect(screen.getByTestId('run-sheet-panel').closest('[aria-hidden="true"]')).not.toBeNull()
+
+    // Focus escapes to a control behind the modal: it comes back inside.
+    act(() => screen.getByTestId('add-item').focus())
     await waitFor(() => expect(dialog.contains(document.activeElement)).toBe(true))
-    expect(within(dialog).getByRole('button', { name: 'Choose file' })).toHaveFocus()
-    // The trap: MUI's focus sentinels bracket the dialog, and everything behind it (the run
-    // sheet) is hidden from assistive tech while it is open. (jsdom has no real window focus,
-    // so MUI's focusin enforcement cannot be driven here; the structure is what is asserted.)
-    expect(document.querySelector('[data-testid="sentinelStart"]')).not.toBeNull()
-    expect(document.querySelector('[data-testid="sentinelEnd"]')).not.toBeNull()
-    const panel = screen.getByTestId('run-sheet-panel')
-    expect(panel.closest('[aria-hidden="true"]')).not.toBeNull()
+
+    // Tab off the end lands on the end sentinel: focus wraps to the first tabbable control.
+    const end = document.querySelector<HTMLElement>('[data-testid="sentinelEnd"]')
+    if (!end) throw new Error('no end sentinel')
+    act(() => end.focus())
+    await waitFor(() => expect(choose).toHaveFocus())
+  })
+
+  it('the hidden file input is not a tab stop of its own', async () => {
+    const dialog = await openDialog()
+    expect(within(dialog).getByTestId('import-file-input')).toHaveAttribute('tabindex', '-1')
+  })
+
+  it('Escape and Cancel are ignored while a request is in flight', async () => {
+    let release: () => void = () => {}
+    const real = injectImportMock.importFile
+    vi.spyOn(injectImportMock, 'importFile').mockImplementation(async (file, options) => {
+      await new Promise<void>(resolve => {
+        release = resolve
+      })
+      return real(file, options)
+    })
+    const dialog = await openDialog()
+    pick(dialog, msel())
+    fireEvent.click(await previewReady(dialog))
+    await within(dialog).findByRole('button', { name: /^Previewing/ })
+
+    fireEvent.keyDown(dialog, { key: 'Escape' })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+    await act(async () => {
+      await new Promise(resolve => setTimeout(resolve, 30))
+    })
+    expect(screen.getByRole('dialog')).toBe(dialog)
+
+    await act(async () => {
+      release()
+    })
+    await within(dialog).findByTestId('import-report')
+    fireEvent.keyDown(dialog, { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+  })
+
+  it('modified keys (Ctrl/Cmd+K) still reach the console; plain keys stay in the dialog', async () => {
+    const outer = vi.fn<(key: string) => void>()
+    const dialog = await openDialog(outer)
+    const choose = within(dialog).getByRole('button', { name: 'Choose file' })
+    fireEvent.keyDown(choose, { key: 'k', ctrlKey: true })
+    fireEvent.keyDown(choose, { key: 'k', metaKey: true })
+    expect(outer).toHaveBeenCalledTimes(2)
+    fireEvent.keyDown(choose, { key: 'a' })
+    fireEvent.keyDown(choose, { key: 'n' })
+    expect(outer).toHaveBeenCalledTimes(2)
+  })
+
+  it('secondary text clears 4.5:1 on white (not COBRA text.secondary)', async () => {
+    const dialog = await openDialog()
+    for (const testId of ['import-hint', 'import-file-name']) {
+      const colour = getComputedStyle(within(dialog).getByTestId(testId)).color
+      expect(contrast(colour, '#ffffff'), testId).toBeGreaterThanOrEqual(4.5)
+    }
+    pick(dialog, msel())
+    await preview(dialog)
+    const caption = within(dialog).getByTestId('import-rows').querySelector('caption')
+    const label = within(within(dialog).getByTestId('import-count-created')).getByText('To create')
+    for (const element of [caption, label]) {
+      if (!element) throw new Error('missing element')
+      expect(contrast(getComputedStyle(element).color, '#ffffff')).toBeGreaterThanOrEqual(4.5)
+    }
   })
 
   it('Escape closes the dialog', async () => {

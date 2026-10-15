@@ -25,7 +25,13 @@ import {
   faPen,
 } from '@fortawesome/free-solid-svg-icons'
 import type { InjectImportResultDto, InjectImportRowDto, InjectImportRowStatus } from './importTypes'
-import { countLines, skippedSummary, splitReportRows, statusLabel } from './importReport'
+import {
+  countLines,
+  IMPORT_MUTED_TEXT,
+  skippedSummary,
+  splitReportRows,
+  statusLabel,
+} from './importReport'
 
 const STATUS_ICON: Readonly<Record<InjectImportRowStatus, IconDefinition>> = {
   created: faCirclePlus,
@@ -79,7 +85,13 @@ function RowsTable({
       <Box component="table" data-testid={testId} sx={{ width: '100%', borderCollapse: 'collapse', minWidth: 720 }}>
         <Box
           component="caption"
-          sx={{ captionSide: 'top', textAlign: 'left', p: '6px 10px', fontSize: 12.5, color: 'text.secondary' }}
+          sx={{
+            captionSide: 'top',
+            textAlign: 'left',
+            p: '6px 10px',
+            fontSize: 12.5,
+            color: IMPORT_MUTED_TEXT,
+          }}
         >
           {caption}
         </Box>
@@ -153,7 +165,7 @@ export function ImportReportView({ result }: ImportReportViewProps) {
               borderRadius: 1,
             }}
           >
-            <Box component="dt" sx={{ fontSize: 12, color: 'text.secondary' }}>{line.label}</Box>
+            <Box component="dt" sx={{ fontSize: 12, color: IMPORT_MUTED_TEXT }}>{line.label}</Box>
             <Box component="dd" sx={{ m: 0, fontSize: 18, fontWeight: 700 }}>{line.value}</Box>
           </Box>
         ))}

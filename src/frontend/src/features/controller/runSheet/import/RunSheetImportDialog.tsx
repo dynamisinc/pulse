@@ -14,6 +14,11 @@
  *              create + update) re-posts THE SAME FILE with `dryRun=false`.
  *   3. DONE    the result counts and rows; **Done** closes. The run sheet shows the new items
  *              on its next 3 s poll — no extra wiring.
+ *   THE FILE IS SNAPSHOT AT PICK TIME (`snapshotImportFile`): its bytes are copied into memory
+ *   with a content type from its extension (`.csv` -> `text/csv`, `.xlsx` -> the xlsx MIME), so
+ *   Windows + Office never sends a `.csv` as `application/vnd.ms-excel` (the server refuses that
+ *   as a fake workbook), and Import posts exactly the bytes that were previewed even if the file
+ *   is re-saved on disk in between (no ERR_UPLOAD_FILE_CHANGED).
  *   A 400 shows the server's reason (`detail`) in the dialog, as text with an icon in a
  *   `role="alert"`; a 409 says the run sheet changed and to run it again. Picking another
  *   file at any point clears the previous report, so a report never sits against a
@@ -57,8 +62,10 @@ import {
   formatFileSize,
   IMPORT_ACCEPT,
   IMPORT_HINT,
+  IMPORT_MUTED_TEXT,
   importableCount,
   itemsWord,
+  snapshotImportFile,
   validateImportFile,
 } from './importReport'
 import { ImportReportView } from './ImportReportView'
@@ -103,6 +110,10 @@ export function RunSheetImportDialog({ onClose }: RunSheetImportDialogProps) {
   const [failure, setFailure] = useState<string | null>(null)
   const [phase, setPhase] = useState<Phase>('choose')
   const [result, setResult] = useState<InjectImportResultDto | null>(null)
+  /** The picked file is being copied into memory; Preview waits for it. */
+  const [reading, setReading] = useState(false)
+  /** Bumps per pick, so a slow read of an earlier pick never replaces a later one. */
+  const pickSeq = useRef(0)
   const inFlight = useRef(false)
   const inputRef = useRef<HTMLInputElement>(null)
   const chooseRef = useRef<HTMLButtonElement>(null)
@@ -111,7 +122,7 @@ export function RunSheetImportDialog({ onClose }: RunSheetImportDialogProps) {
 
   const busy = phase === 'previewing' || phase === 'applying'
   const toImport = result && result.dryRun ? importableCount(result) : 0
-  const canPreview = file !== null && clientError === null
+  const canPreview = file !== null && clientError === null && !reading
 
   // Move focus to the next decision once a step lands (the button that had it may be gone).
   useEffect(() => {
@@ -133,17 +144,37 @@ export function RunSheetImportDialog({ onClose }: RunSheetImportDialogProps) {
       return
     }
     const picked = event.target.files?.[0] ?? null
+    // So picking the same file again still fires `change`.
+    event.target.value = ''
+    const seq = ++pickSeq.current
+    const refusal = picked ? validateImportFile(picked) : null
     setFile(picked)
-    setClientError(picked ? validateImportFile(picked) : null)
+    setClientError(refusal)
     setFailure(null)
     setResult(null)
     setPhase('choose')
-    // So picking the same file again still fires `change`.
-    event.target.value = ''
+    if (!picked || refusal !== null) {
+      setReading(false)
+      return
+    }
+    // Snapshot the bytes now (see the header): Preview and Import send exactly these.
+    setReading(true)
+    snapshotImportFile(picked).then(
+      snapshot => {
+        if (seq !== pickSeq.current) return
+        setFile(snapshot)
+        setReading(false)
+      },
+      () => {
+        if (seq !== pickSeq.current) return
+        setClientError("The file couldn't be read. Choose it again.")
+        setReading(false)
+      },
+    )
   }
 
   const run = async (dryRun: boolean): Promise<void> => {
-    if (inFlight.current || file === null || clientError !== null) return
+    if (inFlight.current || file === null || clientError !== null || reading) return
     inFlight.current = true
     setFailure(null)
     setPhase(dryRun ? 'previewing' : 'applying')
@@ -172,13 +203,21 @@ export function RunSheetImportDialog({ onClose }: RunSheetImportDialogProps) {
       // The dialog is portalled but React events still bubble up the COMPONENT tree, into the
       // run sheet's single-key shortcuts (A add, N fire next...). Keys typed here stay here.
       // MUI's own Escape handling runs on this same element, so Escape still closes.
-      onKeyDown={event => event.stopPropagation()}
+      // Modified keys (Ctrl/Cmd+K, the console palette) still bubble; the palette stays inert
+      // under any aria-modal layer on its own.
+      onKeyDown={event => {
+        if (!event.ctrlKey && !event.metaKey && !event.altKey) event.stopPropagation()
+      }}
     >
       <DialogTitle id={titleId} sx={{ fontSize: 16, fontWeight: 800 }}>
         Import from Excel
       </DialogTitle>
       <DialogContent sx={{ display: 'grid', gap: 1.5 }}>
-        <Typography id={hintId} data-testid="import-hint" sx={{ fontSize: 13, color: 'text.secondary' }}>
+        <Typography
+          id={hintId}
+          data-testid="import-hint"
+          sx={{ fontSize: 13, color: IMPORT_MUTED_TEXT }}
+        >
           {IMPORT_HINT}
         </Typography>
 
@@ -200,12 +239,18 @@ export function RunSheetImportDialog({ onClose }: RunSheetImportDialogProps) {
             accept={IMPORT_ACCEPT}
             aria-label="MSEL file (.xlsx or .csv)"
             data-testid="import-file-input"
+            // Reached through the visible "Choose file" button; never a second, invisible tab stop.
+            tabIndex={-1}
             disabled={busy || phase === 'done'}
             onChange={handleFileChange}
           />
           <Typography
             data-testid="import-file-name"
-            sx={{ fontSize: 13, color: file ? 'text.primary' : 'text.secondary', overflowWrap: 'anywhere' }}
+            sx={{
+              fontSize: 13,
+              color: file ? 'text.primary' : IMPORT_MUTED_TEXT,
+              overflowWrap: 'anywhere',
+            }}
           >
             {file ? `${file.name} (${formatFileSize(file.size)})` : 'No file chosen'}
           </Typography>
