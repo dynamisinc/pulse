@@ -22,10 +22,14 @@ pwsh scripts/uat/Seed-DemoContent.ps1 -StaffUsername controller1 -ReloadFiredRun
 1. `pwsh scripts/uat/Clear-DemoContent.ps1` (try `-WhatIf` first). It archives Monday's posts, and every
    run-sheet item an MSEL import created, fired or not, so the on-stage import of the Kestrel MSEL creates all
    of them fresh. It lists their Inject #s before writing. Items this seed loaded, or that were written in
-   the console, have no Inject # and are not touched. Open consoles drop the archived items within about 3 s
-   (they poll the run sheet). The script prints a `-RestoreManifest` command that puts everything back, except
-   an imported item whose Inject # a newer import holds by then (it says which). An imported item publishing a
-   post at that very moment is left alone and named: run the script again a few seconds later.
+   the console, have no Inject # and are not touched. An open console in a visible tab drops the archived items
+   within about 3 s (it polls the run sheet); a background tab does once it is brought to the front.
+   An imported item publishing a post at that very moment is left alone and named: run the script again a few
+   seconds later. If it says **claim stuck** (older than 60 s), Release or Retry that item in the console (a
+   firing one settles by itself once PAUSE INJECTS and FREEZE are off), then run the script again.
+   The script prints a `-RestoreManifest` command that puts everything back, on the same database only. An
+   imported item whose Inject # a newer import holds by then stays archived (it says which), and a restored item
+   that was firing publishes its remaining posts at once unless PAUSE INJECTS or FREEZE is on.
    After this step, check the MSEL with the import's **Preview** only: a real import before the show leaves the
    on-stage import nothing to create. If that happened, run steps 1 to 4 again.
 2. `pwsh scripts/uat/Reset-DemoState.ps1`.
@@ -51,7 +55,8 @@ So wait about 8 minutes, then run `pwsh scripts/uat/Reset-DemoState.ps1` (withou
 
 ## Rehearsals and re-runs
 
-Run-of-show: `Clear-DemoContent.ps1` (optional), then `Reset-DemoState.ps1`, then this script. **After a
+Run-of-show: `Clear-DemoContent.ps1` (**required** after a rehearsal that imported the MSEL, so the show's import
+creates its items; optional otherwise), then `Reset-DemoState.ps1`, then this script. **After a
 rehearsal that fired the run sheet: add `-ReloadFiredRunSheet`.** Firing spends an item: the console cannot
 fire it again, the server will not delete a fired item, and neither reset script touches the items this
 script loads (`Clear-DemoContent.ps1` archives only the items an MSEL import created). A plain run reports
