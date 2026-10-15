@@ -28,12 +28,14 @@ Tom chose (10/15) to fix all three in the importer before the Sunday freeze (DF-
       files ⇒ the row **fails** ("Pulse Media Alt has N entries for M Pulse Media files"); fewer ⇒ the missing ones
       fall back to the stem with a **warning**. Each entry is trimmed and must fit `InjectItemValidator.MaxAltLength`
       (1,000) after the same sanitising the write path applies (longer ⇒ truncated with a warning, like `Title`).
-      Alt text with no `Pulse Media` ⇒ warning, ignored.
+      Alt text with no `Pulse Media` ⇒ warning, ignored. Header absent ⇒ the stem, as before story 14 (on re-import
+      too); header present ⇒ the file wins.
 - [x] **`Pulse Likes`**, **`Pulse Reposts`**, **`Pulse Replies`**: the post's `engagementBaseline` (`like`, `repost`,
       `reply`). Each optional; blank ⇒ not set (0). A value must be a whole number 0…`InjectItemValidator.MaxBaseline`
       (1,000,000); a numeric cell is accepted as-is if it is integral (Excel stores `962` as `962.0`), text is parsed
       with invariant culture, and anything else (negative, fractional, too large, not a number) ⇒ the row **fails**
-      with a message naming the column.
+      with a message naming the column. None of the three headers present (a plain Cadence export) ⇒ a re-import keeps
+      the item's baseline, as before story 14; any one present ⇒ the file is the source for all three.
 - [x] Both flow through the existing write path (`ImportRequests` → `InjectItemValidator.Parse`), so a seeded item
       and an imported item with the same values are indistinguishable.
 - [x] **Re-import (DF-10):** a changed alt text or baseline on an unfired item is an update (`status: 'updated'`); the
@@ -49,9 +51,9 @@ Tom chose (10/15) to fix all three in the importer before the Sunday freeze (DF-
       skipped, held…) keep their places and are never moved; existing pending items keep their relative order.
 - [x] Items the import **updates** keep their place (no reordering of existing rows beyond the shift needed to
       insert).
-- [x] The new order is written in the same transaction as the created items, through the same mechanics as
-      `ReorderAsync` (one queue-version bump, the run-sheet change broadcast staff consoles already receive), so an open
-      console shows the new order without a reload. Item versions follow whatever `ReorderAsync` does today.
+- [x] The new order is written in the same transaction as the created items, through `ReorderAsync`'s mechanics
+      (`WriteQueueOrder` + one queue-token bump; no item version bumped for a shift). Open consoles pick up the new order
+      through their existing 3 s poll of `GET /api/injects`, without a reload (no new event).
 - [x] A dry run computes nothing about order and writes nothing.
 
 ### Cross-cutting
@@ -73,3 +75,19 @@ every invalid number); service tests for create / update / unchanged with the ne
 among pending items, ties, null minutes, fired items fixed in place, several new items with one minute, re-import
 leaves positions alone, isolation (another exercise's items never move); one end-to-end HTTP test that imports a
 small `.xlsx` with all four columns and reads the items back through `GET /api/injects` in time order.
+
+Where they live (`src/Pulse.WebApi.Tests/Features/Injects/Import/`; SQL tests are `[RequiresDockerFact]`):
+
+- Column rules (alt split / blank / stem / too many / too few / sanitising / truncation / no media; engagement blank,
+  invariant text, every invalid value, numeric vs text `.xlsx` cells, header presence):
+  [`MselImportPulseColumnsTests.cs`](../../../src/Pulse.WebApi.Tests/Features/Injects/Import/MselImportPulseColumnsTests.cs)
+- Write path and change comparison (seeded ≡ imported, update body, kept vs file baseline, `alt text` / `engagement`):
+  [`ImportRequestsTests.cs`](../../../src/Pulse.WebApi.Tests/Features/Injects/Import/ImportRequestsTests.cs)
+- Placement rule (interleave, ties, same-minute file order, no minute, non-pending fixed, unsorted pending, stored
+  minute of an updated item): [`ImportQueuePlacementTests.cs`](../../../src/Pulse.WebApi.Tests/Features/Injects/Import/ImportQueuePlacementTests.cs)
+- On SQL: create / seeded-equivalence / re-import unchanged, updated, fired; engagement and alt headers absent vs
+  present; dry run; placement in one save with one token bump and no version change; re-import keeps positions;
+  isolation; end-to-end `.xlsx` over HTTP read back through `GET /api/injects`:
+  [`InjectImportAltEngagementOrderTests.cs`](../../../src/Pulse.WebApi.Tests/Features/Injects/Import/InjectImportAltEngagementOrderTests.cs)
+- Story 03 expectations updated for DF-18: [`InjectImportEndpointTests.cs`](../../../src/Pulse.WebApi.Tests/Features/Injects/Import/InjectImportEndpointTests.cs)
+  (`Apply_AppendsOneSinglePostItemPerSocialRow_InFileOrder_AfterTheExistingItems`, `ADeletedItemsInjectNumber_CanBeImportedAgain`)

@@ -141,8 +141,8 @@ Cadence's export (`MselWorksheetBuilder` / `ExcelFormattingHelper.MselColumns`) 
 | `Notes` | no | item notes (≤ 500, truncated with a warning) |
 | `Responsible Controller` | no | assignee by display name from the assignee list, else unassigned with a warning |
 | `Pulse Media` (Pulse extension) | no | comma-separated media-library file names (≤ 4 images or 1 video); an unknown name fails the row |
-| `Pulse Media Alt` (Pulse extension, 14) | no | alt text per `Pulse Media` file, `\|`-separated, same order; blank entry ⇒ file-name stem; more entries than files fails the row, fewer warns |
-| `Pulse Likes`, `Pulse Reposts`, `Pulse Replies` (Pulse extension, 14) | no | `engagementBaseline` like / repost / reply: whole number 0…1,000,000 (an integral numeric cell or invariant text), else the row fails |
+| `Pulse Media Alt` (Pulse extension, 14) | no | alt text per `Pulse Media` file, `\|`-separated, same order; blank entry ⇒ file-name stem; more entries than files fails the row, fewer warns; header absent ⇒ stems, as before 14 |
+| `Pulse Likes`, `Pulse Reposts`, `Pulse Replies` (Pulse extension, 14) | no | `engagementBaseline` like / repost / reply: whole number 0…1,000,000 (an integral numeric cell or invariant text), else the row fails; none of the three headers ⇒ a re-import keeps the item's baseline |
 
 Order (DF-18, 14): a created item goes immediately before the first pending item whose `PlannedMinute` is greater than its own (ties after; no minute or no later pending item ⇒ end); non-pending items never move.
 
