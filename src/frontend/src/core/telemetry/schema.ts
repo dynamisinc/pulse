@@ -71,6 +71,8 @@ export const telemetryOriginSchema = z.enum([
   'controller-as-persona',
   'engine',
   'inject',
+  // demo-feedback DF-12: a white-noise pool post (server pacer, no human behind it).
+  'noise',
 ])
 export type TelemetryOrigin = z.infer<typeof telemetryOriginSchema>
 
@@ -126,7 +128,7 @@ const isoDateTimeString = z.iso.datetime({ offset: true })
  *   eventType: string
  *   channel: 'social' | 'portal' | 'news' | 'press' | 'weather' | 'system'
  *   actor: { kind, participantId?, personaId?, actingHumanId?, sessionId?, role? }
- *   origin?: 'participant' | 'controller-as-persona' | 'engine' | 'inject'
+ *   origin?: 'participant' | 'controller-as-persona' | 'engine' | 'inject' | 'noise'
  *   injectId?: string
  *   correlationId?: string   // reserved: groups one logical operation
  *   causationId?: string     // reserved: eventId of the direct parent event
