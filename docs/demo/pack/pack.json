@@ -1,0 +1,903 @@
+{
+  "$schema": "./schema/pack.schema.json",
+  "schema": "pulse.demopack.v1",
+  "county": "Kestrel County (fictional): City of Fairhaven, East Side Zones 2-4. Names approved by Tom 2026-10-13 (FIC-001).",
+  "personas": [
+    {
+      "handle": "KestrelCoEM",
+      "displayName": "Kestrel County EM",
+      "bio": "Official account of Kestrel County Emergency Management. Preparedness, response and recovery for every community in the county. Alerts and advisories posted here first.",
+      "location": "Kestrel County",
+      "verified": true,
+      "avatar": "avatars/kestrelcoem.png",
+      "banner": "banners/kestrelcoem.jpg"
+    },
+    {
+      "handle": "FairhavenWater",
+      "displayName": "Fairhaven Water Utility",
+      "bio": "Official account of the City of Fairhaven water utility. Service updates, advisories and repair news for Zones 1 to 4.",
+      "location": "Fairhaven, Kestrel County",
+      "verified": true,
+      "avatar": "avatars/fairhavenwater.png",
+      "banner": "banners/fairhavenwater.jpg"
+    },
+    {
+      "handle": "FairhavenWaterUpd",
+      "displayName": "Fairhaven Water Update",
+      "bio": "Real-time Fairhaven water updates. Stay informed, stay safe. 💧",
+      "location": "Fairhaven",
+      "verified": false,
+      "avatar": "avatars/fairhavenwaterupd.png",
+      "banner": "banners/fairhavenwater.jpg"
+    },
+    {
+      "handle": "MetroDesk9",
+      "displayName": "Metro Desk 9",
+      "bio": "Fairhaven’s breaking-news source. Local news, weather and traffic for Kestrel County. Metro Desk 9, on your side.",
+      "location": "Fairhaven",
+      "verified": true,
+      "avatar": "avatars/metrodesk9.png",
+      "banner": "banners/metrodesk9.jpg"
+    },
+    {
+      "handle": "TheScoopHQ",
+      "displayName": "The Scoop",
+      "bio": "The stories they don’t want you to see. 👀 Tips welcome. #Fairhaven",
+      "location": "Everywhere",
+      "verified": false,
+      "avatar": "avatars/thescoophq.png",
+      "banner": "banners/thescoophq.jpg"
+    },
+    {
+      "handle": "mvega_fh",
+      "displayName": "Marisol Vega",
+      "bio": "Fairhaven east side. Mom of two, night-shift nurse, neighbor.",
+      "location": "East Side, Fairhaven",
+      "verified": false,
+      "avatar": "avatars/mvega_fh.jpg"
+    },
+    {
+      "handle": "tbrandt41",
+      "displayName": "Tom Brandt",
+      "bio": "Small business owner. Coffee, dogs, local sports. Opinions my own.",
+      "location": "Fairhaven",
+      "verified": false,
+      "avatar": "avatars/tbrandt41.jpg"
+    },
+    {
+      "handle": "kwardFH",
+      "displayName": "Keisha Ward",
+      "bio": "Community organizer and east side block captain. Fairhaven strong. 💧",
+      "location": "Fairhaven",
+      "verified": false,
+      "avatar": "avatars/kwardfh.jpg"
+    },
+    {
+      "handle": "dreyes_fh",
+      "displayName": "Dana Reyes",
+      "bio": "Fairhaven resident. Just trying to keep up.",
+      "location": "Fairhaven",
+      "verified": false,
+      "avatar": "avatars/dreyes_fh.jpg"
+    }
+  ],
+  "media": [
+    {
+      "key": "news-elm-break",
+      "file": "media/news-elm-break.mp4",
+      "kind": "video",
+      "poster": "media/news-elm-break.poster.jpg",
+      "width": 1280,
+      "height": 720,
+      "durationSec": 20,
+      "alt": "Street-level news footage of a utility crew in high-visibility vests working in a deep trench cut across a city street. Water pools at the bottom around a large exposed pipe, an excavator works beside it and traffic cones steer cars around the site."
+    },
+    {
+      "key": "news-mill-road",
+      "file": "media/news-mill-road.mp4",
+      "kind": "video",
+      "poster": "media/news-mill-road.poster.jpg",
+      "width": 1280,
+      "height": 720,
+      "durationSec": 15,
+      "alt": "News footage of water gushing up through cracked pavement and flowing down a residential street toward a storm drain, as a utility truck with flashing amber lights pulls up."
+    },
+    {
+      "key": "scoop-brown-tap",
+      "file": "media/scoop-brown-tap.mp4",
+      "kind": "video",
+      "poster": "media/scoop-brown-tap.poster.jpg",
+      "width": 1280,
+      "height": 720,
+      "durationSec": 10,
+      "alt": "Shaky phone video of cloudy, brownish water running from a kitchen faucet into a stainless steel sink."
+    },
+    {
+      "key": "photo-elm-crew",
+      "file": "media/photo-elm-crew.jpg",
+      "kind": "image",
+      "width": 1600,
+      "height": 900,
+      "alt": "A utility crew in high-visibility vests stands around an excavated trench in a city street. A section of large water pipe is exposed and water has pooled at the bottom."
+    },
+    {
+      "key": "photo-advisory-sign",
+      "file": "media/photo-advisory-sign.jpg",
+      "kind": "image",
+      "width": 1600,
+      "height": 900,
+      "alt": "A yellow roadside sign reading \"Boil water advisory\" stands on the sidewalk at the edge of a residential street."
+    },
+    {
+      "key": "photo-boiling-pot",
+      "file": "media/photo-boiling-pot.jpg",
+      "kind": "image",
+      "width": 1600,
+      "height": 900,
+      "alt": "A pot of water at a rolling boil on a kitchen stove."
+    },
+    {
+      "key": "photo-brown-sink",
+      "file": "media/photo-brown-sink.jpg",
+      "kind": "image",
+      "width": 1600,
+      "height": 900,
+      "alt": "Cloudy, brownish tap water filling a white kitchen sink."
+    },
+    {
+      "key": "photo-hydrant-flush",
+      "file": "media/photo-hydrant-flush.jpg",
+      "kind": "image",
+      "width": 1600,
+      "height": 900,
+      "alt": "An open fire hydrant sends a strong stream of water along the gutter of a residential street."
+    },
+    {
+      "key": "photo-distribution",
+      "file": "media/photo-distribution.jpg",
+      "kind": "image",
+      "width": 1600,
+      "height": 900,
+      "alt": "Stacks of shrink-wrapped cases of bottled water on pallets inside an open fire station bay, with a folding table set up in front."
+    },
+    {
+      "key": "photo-line",
+      "file": "media/photo-line.jpg",
+      "kind": "image",
+      "width": 1600,
+      "height": 900,
+      "alt": "A line of people, seen from behind, waits on a sidewalk outside a school building to collect bottled water."
+    },
+    {
+      "key": "photo-brown-glass",
+      "file": "media/photo-brown-glass.jpg",
+      "kind": "image",
+      "width": 1600,
+      "height": 900,
+      "alt": "A clear drinking glass of cloudy, brown-tinted tap water held under a running kitchen faucet."
+    },
+    {
+      "key": "photo-empty-shelves",
+      "file": "media/photo-empty-shelves.jpg",
+      "kind": "image",
+      "width": 1600,
+      "height": 900,
+      "alt": "Empty store shelves where bottled water is normally stocked, with a few torn plastic wraps left behind."
+    },
+    {
+      "key": "pio-statement-card",
+      "file": "media/pio-statement-card.png",
+      "kind": "image",
+      "width": 1600,
+      "height": 900,
+      "alt": "Official notice from Kestrel County Emergency Management. Boil water advisory, Zones 2 to 4. Boiling tap water for 1 minute is safe and effective. The advisory has not expanded: Zones 2, 3 and 4 only. Free bottled water at Elm Street Fire Station and Fairhaven High School. Official updates come only from verified accounts: KestrelCoEM and FairhavenWater."
+    }
+  ],
+  "posts": [
+    {
+      "key": "p01",
+      "persona": "MetroDesk9",
+      "text": "BREAKING: A water main has broken on Elm Street near the Eastside pump station. Crews are on scene and east side residents report low or no water pressure. More as we learn it. #WaterIssues",
+      "minutesBeforeAnchor": 355,
+      "baseline": {"like": 214, "repost": 96, "reply": 31}
+    },
+    {
+      "key": "p02",
+      "persona": "kwardFH",
+      "text": "Woke up to almost no water pressure on the east side. Anyone else? #WaterIssues",
+      "minutesBeforeAnchor": 348,
+      "baseline": {"like": 24, "repost": 3, "reply": 9}
+    },
+    {
+      "key": "p03",
+      "persona": "FairhavenWater",
+      "text": "We are responding to a main break on Elm Street. Customers in Zones 2, 3 and 4 may have low pressure or no water. Crews are isolating the break now. Next update within the hour. #WaterIssues",
+      "minutesBeforeAnchor": 335,
+      "media": [{"ref": "photo-elm-crew"}],
+      "baseline": {"like": 182, "repost": 141, "reply": 22}
+    },
+    {
+      "key": "p04",
+      "persona": "tbrandt41",
+      "text": "no water at the shop so we’re closed till further notice i guess. great start to the day",
+      "minutesBeforeAnchor": 322,
+      "baseline": {"like": 11, "repost": 0, "reply": 4}
+    },
+    {
+      "key": "p05",
+      "persona": "KestrelCoEM",
+      "text": "Kestrel County EM is supporting @FairhavenWater on the Elm Street main break. Please avoid Elm Street between Main Street and the river while crews work, and follow the utility for service updates.",
+      "minutesBeforeAnchor": 305,
+      "baseline": {"like": 96, "repost": 74, "reply": 8}
+    },
+    {
+      "key": "p06",
+      "persona": "MetroDesk9",
+      "text": "Our crew is at the Elm Street break, where workers have dug down to the main and are working to shut it off. Traffic is being diverted around the site. #WaterIssues",
+      "minutesBeforeAnchor": 290,
+      "media": [{"ref": "news-elm-break"}],
+      "baseline": {"like": 642, "repost": 311, "reply": 58}
+    },
+    {
+      "key": "p07",
+      "persona": "mvega_fh",
+      "text": "Do they know how long it will take? I have a 12-hour shift and two kids at home.",
+      "minutesBeforeAnchor": 284,
+      "replyTo": "p06",
+      "baseline": {"like": 9, "repost": 0, "reply": 1}
+    },
+    {
+      "key": "p08",
+      "persona": "MetroDesk9",
+      "text": "Fairhaven Water hasn’t given a time yet. We’ll post here as soon as they do.",
+      "minutesBeforeAnchor": 279,
+      "replyTo": "p07",
+      "baseline": {"like": 14}
+    },
+    {
+      "key": "p09",
+      "persona": "FairhavenWater",
+      "text": "BOIL WATER ADVISORY for Zones 2, 3 and 4. Pressure loss means the water may be contaminated. Bring tap water to a rolling boil for 1 minute before drinking, cooking, brushing teeth or making formula. A precaution until testing is complete. #WaterIssues",
+      "minutesBeforeAnchor": 270,
+      "baseline": {"like": 418, "repost": 377, "reply": 64}
+    },
+    {
+      "key": "p10",
+      "persona": "KestrelCoEM",
+      "text": "Sharing the @FairhavenWater boil water advisory for Zones 2-4 (the east side). Boil tap water for 1 minute, then let it cool. Not sure of your zone? It’s printed on your water bill. #WaterIssues",
+      "minutesBeforeAnchor": 262,
+      "media": [{"ref": "photo-advisory-sign"}, {"ref": "photo-boiling-pot"}],
+      "baseline": {"like": 263, "repost": 208, "reply": 18}
+    },
+    {
+      "key": "p11",
+      "persona": "dreyes_fh",
+      "text": "Does the advisory cover the west side of Main Street? The zone map is confusing. #WaterIssues",
+      "minutesBeforeAnchor": 250,
+      "baseline": {"like": 5, "repost": 0, "reply": 3}
+    },
+    {
+      "key": "p12",
+      "persona": "kwardFH",
+      "text": "West of Main is Zone 1, so you’re outside it. East of Main is Zones 2-4.",
+      "minutesBeforeAnchor": 246,
+      "replyTo": "p11",
+      "baseline": {"like": 12}
+    },
+    {
+      "key": "p13",
+      "persona": "TheScoopHQ",
+      "text": "So the water’s been bad since last night and they’re only telling us NOW? 👀 Makes you wonder what else they’re sitting on. #WaterIssues",
+      "minutesBeforeAnchor": 240,
+      "baseline": {"like": 386, "repost": 214, "reply": 47}
+    },
+    {
+      "key": "p14",
+      "persona": "mvega_fh",
+      "text": "Boiled a big pot for the kids and the formula. Cooling a pitcher in the fridge now. Tip: label it so nobody refills it from the tap 😅 #WaterIssues",
+      "minutesBeforeAnchor": 232,
+      "baseline": {"like": 48, "repost": 12, "reply": 5}
+    },
+    {
+      "key": "p15",
+      "persona": "tbrandt41",
+      "text": "this is what came out of my kitchen tap on the east side. not boiling THAT. #WaterIssues",
+      "minutesBeforeAnchor": 220,
+      "media": [{"ref": "photo-brown-sink"}],
+      "baseline": {"like": 164, "repost": 97, "reply": 41}
+    },
+    {
+      "key": "p16",
+      "persona": "FairhavenWater",
+      "text": "Thanks for sharing. Discolored water can happen after a main break when sediment is stirred up. Run your cold tap for a few minutes until it clears, then boil as advised. If it doesn’t clear, reply here and we’ll follow up.",
+      "minutesBeforeAnchor": 214,
+      "replyTo": "p15",
+      "baseline": {"like": 86, "repost": 31, "reply": 3}
+    },
+    {
+      "key": "p17",
+      "persona": "FairhavenWater",
+      "text": "Crews are flushing hydrants on the east side to clear sediment from the lines. You may see water running in the street. This is planned and helps clear discolored water. #WaterIssues",
+      "minutesBeforeAnchor": 200,
+      "media": [{"ref": "photo-hydrant-flush"}],
+      "baseline": {"like": 141, "repost": 88, "reply": 12}
+    },
+    {
+      "key": "p18",
+      "persona": "MetroDesk9",
+      "text": "Fairhaven Water says repairs on the Elm Street main could run into tomorrow. The boil water advisory for Zones 2-4 stays in effect until two rounds of tests come back clean. #WaterIssues",
+      "minutesBeforeAnchor": 185,
+      "baseline": {"like": 521, "repost": 287, "reply": 44}
+    },
+    {
+      "key": "p19",
+      "persona": "KestrelCoEM",
+      "text": "Free bottled water for Zones 2-4 residents at Elm Street Fire Station and Fairhaven High School. Limit 2 cases per household. Distribution opens in one hour. #WaterIssues",
+      "minutesBeforeAnchor": 170,
+      "media": [{"ref": "photo-distribution"}],
+      "baseline": {"like": 612, "repost": 538, "reply": 37}
+    },
+    {
+      "key": "p20",
+      "persona": "mvega_fh",
+      "text": "Is there a separate line for families with infants? We need water for formula.",
+      "minutesBeforeAnchor": 163,
+      "replyTo": "p19",
+      "baseline": {"like": 22, "repost": 0, "reply": 1}
+    },
+    {
+      "key": "p21",
+      "persona": "FairhavenWaterUpd",
+      "text": "Water distribution sites OPEN NOW: Elm Street Fire Station and Fairhaven High. Bring cash, $5 per case. #WaterIssues",
+      "minutesBeforeAnchor": 160,
+      "baseline": {"like": 724, "repost": 611, "reply": 88}
+    },
+    {
+      "key": "p22",
+      "persona": "KestrelCoEM",
+      "text": "Yes. Families with infants can go straight to the table at the side door at both sites. No need to wait in the main line.",
+      "minutesBeforeAnchor": 158,
+      "replyTo": "p20",
+      "baseline": {"like": 64, "repost": 18}
+    },
+    {
+      "key": "p23",
+      "persona": "kwardFH",
+      "text": "This is wrong. The water is FREE, the county just said so. Check which account you’re reading: this one isn’t the utility.",
+      "minutesBeforeAnchor": 154,
+      "replyTo": "p21",
+      "baseline": {"like": 54, "repost": 9}
+    },
+    {
+      "key": "p24",
+      "persona": "tbrandt41",
+      "text": "wait which one is the real water company. they look the same",
+      "minutesBeforeAnchor": 149,
+      "replyTo": "p21",
+      "baseline": {"like": 19, "repost": 0, "reply": 2}
+    },
+    {
+      "key": "p25",
+      "persona": "FairhavenWater",
+      "text": "Bottled water at both sites is free. This account is not affiliated with Fairhaven Water. For official updates, follow this account and @KestrelCoEM.",
+      "minutesBeforeAnchor": 142,
+      "replyTo": "p21",
+      "baseline": {"like": 233, "repost": 162, "reply": 14}
+    },
+    {
+      "key": "p26",
+      "persona": "kwardFH",
+      "text": "Confirmed, just came from the fire station. The infant table had no line at all.",
+      "minutesBeforeAnchor": 138,
+      "replyTo": "p22",
+      "baseline": {"like": 31}
+    },
+    {
+      "key": "p27",
+      "persona": "MetroDesk9",
+      "text": "Lines are forming at the Fairhaven High School distribution site. Volunteers tell us they have plenty of water for now. #WaterIssues",
+      "minutesBeforeAnchor": 130,
+      "media": [{"ref": "photo-line"}],
+      "baseline": {"like": 304, "repost": 118, "reply": 26}
+    },
+    {
+      "key": "p28",
+      "persona": "kwardFH",
+      "text": "Checking on older neighbors who can’t carry cases. If you’re able, knock on a door today. Fairhaven looks after its own. #WaterIssues",
+      "minutesBeforeAnchor": 110,
+      "baseline": {"like": 208, "repost": 141, "reply": 12}
+    },
+    {
+      "key": "p29",
+      "persona": "TheScoopHQ",
+      "text": "Hearing from a source that the plant had problems BEFORE the main broke. Nobody official will say. Draw your own conclusions. 👀 #WaterIssues",
+      "minutesBeforeAnchor": 95,
+      "baseline": {"like": 547, "repost": 332, "reply": 92}
+    },
+    {
+      "key": "p30",
+      "persona": "mvega_fh",
+      "text": "Who is the source? I have kids. I need facts, not guesses.",
+      "minutesBeforeAnchor": 90,
+      "replyTo": "p29",
+      "baseline": {"like": 37, "repost": 0, "reply": 1}
+    },
+    {
+      "key": "p31",
+      "persona": "TheScoopHQ",
+      "text": "Ask yourself why nobody official will answer the question 🤷",
+      "minutesBeforeAnchor": 86,
+      "replyTo": "p30",
+      "baseline": {"like": 61, "repost": 12}
+    },
+    {
+      "key": "p32",
+      "persona": "FairhavenWater",
+      "text": "Update: crews have isolated the Elm Street break and pressure is returning in Zone 2. Zones 3 and 4 will follow over the next few hours. The boil water advisory remains in effect for Zones 2-4. #WaterIssues",
+      "minutesBeforeAnchor": 80,
+      "baseline": {"like": 262, "repost": 181, "reply": 30}
+    },
+    {
+      "key": "p33",
+      "persona": "KestrelCoEM",
+      "text": "Reminder: boiling tap water for 1 minute makes it safe to drink while the advisory is in effect. Both bottled water sites stay open until further notice. #WaterIssues",
+      "minutesBeforeAnchor": 55,
+      "baseline": {"like": 191, "repost": 152, "reply": 14}
+    },
+    {
+      "key": "p34",
+      "persona": "mvega_fh",
+      "text": "Two cases from Fairhaven High, in and out in 15 minutes. Thank you to the volunteers! #WaterIssues",
+      "minutesBeforeAnchor": 40,
+      "baseline": {"like": 66, "repost": 8, "reply": 3}
+    },
+    {
+      "key": "p35",
+      "persona": "dreyes_fh",
+      "text": "Is it safe to shower with tap water during the advisory? Kids keep asking. #WaterIssues",
+      "minutesBeforeAnchor": 18,
+      "baseline": {"like": 9, "repost": 0, "reply": 4}
+    },
+    {
+      "key": "p36",
+      "persona": "kwardFH",
+      "text": "Showering is fine, just don’t swallow any. For little ones a sponge bath is safer. @KestrelCoEM has the official guidance.",
+      "minutesBeforeAnchor": 14,
+      "replyTo": "p35",
+      "baseline": {"like": 17}
+    }
+  ],
+  "pins": ["p09", "p10"],
+  "runSheet": {
+    "items": [
+      {
+        "key": "rs01",
+        "kind": "post",
+        "msel": "4",
+        "title": "Beat 2 · BREAKING video: second main break on Mill Road (Metro Desk 9)",
+        "notes": "Beat 2. Fire it, or show the live path: compose as MetroDesk9, attach news-mill-road from the media library (or upload news-mill-road.mp4 from the demo laptop), paste this text, then Skip this item. Nothing later replies to it, so either path works.",
+        "plannedMinute": 3,
+        "assignee": "me",
+        "posts": [
+          {
+            "persona": "MetroDesk9",
+            "text": "BREAKING: A second water main has burst on Mill Road near the Eastside reservoir. Water is pouring into the street and crews are on the way. No word yet on whether the boil water advisory will expand. #WaterIssues",
+            "media": [{"ref": "news-mill-road"}],
+            "engagementBaseline": {"like": 386, "repost": 254, "reply": 12}
+          }
+        ]
+      },
+      {
+        "key": "rs02",
+        "kind": "burst",
+        "title": "Beat 2 · Residents react to the Mill Road break",
+        "notes": "Beat 2. Fire right after the breaking news. Top-level posts (not replies), so they work whether rs01 was fired or posted live.",
+        "plannedMinute": 4,
+        "assignee": "me",
+        "burstWindowSeconds": 45,
+        "posts": [
+          {
+            "persona": "tbrandt41",
+            "text": "mill road is a river right now. can see it from the shop window #WaterIssues",
+            "engagementBaseline": {"like": 31, "repost": 6}
+          },
+          {
+            "persona": "kwardFH",
+            "text": "If you’re near Mill Road, stay back and let the crews work. Please don’t drive through the water. #WaterIssues",
+            "engagementBaseline": {"like": 58, "repost": 27}
+          },
+          {
+            "persona": "dreyes_fh",
+            "text": "Our pressure just dropped again. Is that from the new break? #WaterIssues",
+            "engagementBaseline": {"like": 12}
+          },
+          {
+            "persona": "mvega_fh",
+            "text": "Does this mean the advisory is getting bigger? My sister is on the west side with a newborn. #WaterIssues",
+            "engagementBaseline": {"like": 19}
+          }
+        ]
+      },
+      {
+        "key": "rs03",
+        "kind": "post",
+        "title": "Beat 3 · Impersonator \"do NOT boil\" photo post (TAKEDOWN TARGET, beat 5)",
+        "notes": "Beat 3 opener: the unverified lookalike of @FairhavenWater posts the brown-water photo. Fire BEFORE rs04 and rs10: they reply to it. Beat 5: take THIS post down from Live world. Its baseline makes it outrun every official post.",
+        "plannedMinute": 6,
+        "assignee": "me",
+        "posts": [
+          {
+            "persona": "FairhavenWaterUpd",
+            "text": "URGENT: Do NOT boil your tap water. New lab results show boiling concentrates the contaminant. The advisory now covers ALL of Fairhaven. Use bottled water only, even for bathing. Share this now. #WaterIssues",
+            "media": [{"ref": "photo-brown-glass"}],
+            "engagementBaseline": {"like": 1840, "repost": 1420, "reply": 310}
+          }
+        ]
+      },
+      {
+        "key": "rs04",
+        "kind": "burst",
+        "title": "Beat 3 · Pile-on: 7 replies to the impersonator post",
+        "notes": "Beat 3. Seven replies to rs03 over 75 s; its reply count climbs live. Fire only after rs03 has fired: a reply to an unfired post fails (\"Fire the parent first\").",
+        "plannedMinute": 7,
+        "assignee": "me",
+        "burstWindowSeconds": 75,
+        "posts": [
+          {
+            "persona": "mvega_fh",
+            "text": "Wait, do NOT boil?? I’ve been boiling water for the baby’s formula all day. What do I do now?",
+            "replyTo": {"item": "rs03", "sequence": 1},
+            "engagementBaseline": {"like": 143, "repost": 0, "reply": 6}
+          },
+          {
+            "persona": "tbrandt41",
+            "text": "great. boiled water all day for nothing",
+            "replyTo": {"item": "rs03", "sequence": 1},
+            "engagementBaseline": {"like": 96}
+          },
+          {
+            "persona": "dreyes_fh",
+            "text": "Same here. Just poured out the pitcher I had in the fridge.",
+            "replyTo": {"sequence": 1},
+            "engagementBaseline": {"like": 41}
+          },
+          {
+            "persona": "TheScoopHQ",
+            "text": "Told you they weren’t telling the whole story. 👀 Share before it disappears. #WaterIssues",
+            "replyTo": {"item": "rs03", "sequence": 1},
+            "engagementBaseline": {"like": 412, "repost": 286}
+          },
+          {
+            "persona": "kwardFH",
+            "text": "Hold on. This account doesn’t have the check mark. Has @FairhavenWater or @KestrelCoEM said this anywhere?",
+            "replyTo": {"item": "rs03", "sequence": 1},
+            "engagementBaseline": {"like": 122, "repost": 15}
+          },
+          {
+            "persona": "tbrandt41",
+            "text": "they look exactly the same to me. how is anyone supposed to tell",
+            "replyTo": {"sequence": 5},
+            "engagementBaseline": {"like": 34}
+          },
+          {
+            "persona": "mvega_fh",
+            "text": "Going to the store for more bottled water before it’s all gone.",
+            "replyTo": {"item": "rs03", "sequence": 1},
+            "engagementBaseline": {"like": 26}
+          }
+        ]
+      },
+      {
+        "key": "rs05",
+        "kind": "post",
+        "msel": "9",
+        "title": "Beat 3 · The Scoop amplifies with the brown-tap video",
+        "notes": "Beat 3. The low-credibility outlet piles on with video. Its baseline also outruns the official posts.",
+        "plannedMinute": 8,
+        "assignee": "me",
+        "posts": [
+          {
+            "persona": "TheScoopHQ",
+            "text": "This is what’s coming out of east side taps right now. And they want you to BOIL it? 👀 Watch and decide for yourself. #WaterIssues",
+            "media": [{"ref": "scoop-brown-tap"}],
+            "engagementBaseline": {"like": 962, "repost": 718, "reply": 141}
+          }
+        ]
+      },
+      {
+        "key": "rs06",
+        "kind": "burst",
+        "title": "Beat 3 · Run on bottled water (empty-shelves photo, 2 replies)",
+        "notes": "Beat 3. A resident posts the empty-shelves photo; two replies land in its thread.",
+        "plannedMinute": 9,
+        "assignee": "me",
+        "burstWindowSeconds": 40,
+        "posts": [
+          {
+            "persona": "dreyes_fh",
+            "text": "The grocery on Main Street is completely out of bottled water. #WaterIssues",
+            "media": [{"ref": "photo-empty-shelves"}],
+            "engagementBaseline": {"like": 214, "repost": 163, "reply": 4}
+          },
+          {
+            "persona": "tbrandt41",
+            "text": "same at the gas station by the highway. people are buying it by the cart",
+            "replyTo": {"sequence": 1},
+            "engagementBaseline": {"like": 18}
+          },
+          {
+            "persona": "kwardFH",
+            "text": "Please don’t panic-buy. The distribution sites still have plenty, and it’s free. #WaterIssues",
+            "replyTo": {"sequence": 1},
+            "engagementBaseline": {"like": 67, "repost": 22}
+          }
+        ]
+      },
+      {
+        "key": "rs07",
+        "kind": "post",
+        "msel": "11",
+        "title": "Beat 4 · CUE THE PIO: Metro Desk 9 asks officials to confirm",
+        "notes": "Beat 4 cue. After this fires, the PIO (participant, posting as @KestrelCoEM) posts the official statement and attaches pio-statement-card.png from the demo laptop. Suggested text: docs/demo/pack/README.md, beat 4.",
+        "plannedMinute": 10,
+        "assignee": "me",
+        "posts": [
+          {
+            "persona": "MetroDesk9",
+            "text": "Posts claiming boiling is unsafe and that the advisory now covers all of Fairhaven are spreading fast. We have asked Kestrel County EM and Fairhaven Water to confirm. #WaterIssues",
+            "engagementBaseline": {"like": 291, "repost": 172, "reply": 38}
+          }
+        ]
+      },
+      {
+        "key": "rs08",
+        "kind": "post",
+        "msel": "13",
+        "title": "Beat 4 · BACKUP ONLY: the PIO statement as @KestrelCoEM (Skip if the PIO posted live)",
+        "notes": "BACKUP ONLY. The PIO posts this live as @KestrelCoEM with the notice card. Fire this only if the live post fails; otherwise Skip it. No baseline, so it shows real counts like the PIO’s own post.",
+        "plannedMinute": 11,
+        "assignee": "me",
+        "posts": [
+          {
+            "persona": "KestrelCoEM",
+            "text": "OFFICIAL: Boiling tap water for 1 minute IS safe and is still the right step in Zones 2-4. The advisory has NOT expanded. Posts saying otherwise did not come from Fairhaven Water or Kestrel County EM. Rely on verified accounts only. #WaterIssues",
+            "media": [{"ref": "pio-statement-card"}]
+          }
+        ]
+      },
+      {
+        "key": "rs09",
+        "kind": "post",
+        "msel": "14",
+        "title": "Beat 4 · Citizen follow-up question to the PIO (prefer Reply as… live)",
+        "notes": "Beat 4. Preferred: in Live world, Reply as… mvega_fh on the PIO’s post and paste this text, so the PIO sees it in the thread. Fire this item only if replying live is not possible (it posts top-level, mentioning @KestrelCoEM). Otherwise Skip it.",
+        "plannedMinute": 12,
+        "assignee": "me",
+        "posts": [
+          {
+            "persona": "mvega_fh",
+            "text": "@KestrelCoEM thank you. Is the formula I made earlier with boiled water still OK to use? And should we throw out the ice in the freezer?"
+          }
+        ]
+      },
+      {
+        "key": "rs10",
+        "kind": "post",
+        "title": "Beat 4 · Verified utility answers inside the impersonator thread",
+        "notes": "Beat 4. The verified @FairhavenWater replies to rs03, beside its unverified lookalike. rs03 must have fired and must not be taken down yet.",
+        "plannedMinute": 13,
+        "assignee": "me",
+        "posts": [
+          {
+            "persona": "FairhavenWater",
+            "text": "This is not a Fairhaven Water account. Boiling tap water for 1 minute is safe and effective, and the advisory still covers Zones 2-4 only. Our only account carries the verified check mark.",
+            "replyTo": {"item": "rs03", "sequence": 1},
+            "engagementBaseline": {"like": 344, "repost": 291, "reply": 41}
+          }
+        ]
+      },
+      {
+        "key": "rs11",
+        "kind": "burst",
+        "title": "Beat 4 · Residents share the correction",
+        "notes": "Beat 4. The correction spreads. The last post asks why the fake is still up: the lead-in to beat 5.",
+        "plannedMinute": 14,
+        "assignee": "me",
+        "burstWindowSeconds": 45,
+        "posts": [
+          {
+            "persona": "kwardFH",
+            "text": "Official word from @KestrelCoEM and @FairhavenWater: keep boiling, the advisory has NOT expanded. Share this instead of the fake. #WaterIssues",
+            "engagementBaseline": {"like": 183, "repost": 151}
+          },
+          {
+            "persona": "dreyes_fh",
+            "text": "Ok, refilling the pitcher. Sorry everyone, I shared the fake post earlier.",
+            "engagementBaseline": {"like": 53}
+          },
+          {
+            "persona": "tbrandt41",
+            "text": "so why is the fake one still up? how is that allowed",
+            "engagementBaseline": {"like": 41}
+          }
+        ]
+      },
+      {
+        "key": "rs12",
+        "kind": "post",
+        "msel": "17",
+        "title": "Beat 4 · Metro Desk 9 reports the correction",
+        "notes": "Beat 4 wrap. Metro Desk 9 carries the official line to its larger audience.",
+        "plannedMinute": 15,
+        "assignee": "me",
+        "posts": [
+          {
+            "persona": "MetroDesk9",
+            "text": "UPDATE: Kestrel County EM says boiling tap water remains safe and the advisory has not expanded beyond Zones 2-4. Officials say the \"do not boil\" posts did not come from the utility or the county. #WaterIssues",
+            "engagementBaseline": {"like": 612, "repost": 334, "reply": 52}
+          }
+        ]
+      },
+      {
+        "key": "rs13",
+        "kind": "post",
+        "msel": "18",
+        "title": "Beat 5 · OPTIONAL second takedown target: impersonator doubles down",
+        "notes": "Beat 5, optional. A second takedown target, e.g. if rs03 was already taken down in a run-through or you want to show takedown twice. Skip if not needed.",
+        "plannedMinute": 16,
+        "assignee": "me",
+        "posts": [
+          {
+            "persona": "FairhavenWaterUpd",
+            "text": "The so-called official accounts are covering for each other. We stand by our update: do NOT boil. Bottled water only. #WaterIssues",
+            "engagementBaseline": {"like": 418, "repost": 297, "reply": 95}
+          }
+        ]
+      },
+      {
+        "key": "rs14",
+        "kind": "burst",
+        "title": "Beat 5 · After the takedown: residents notice",
+        "notes": "Beat 5. Fire only AFTER the takedown. If takedown is not in the build, Skip this item.",
+        "plannedMinute": 17,
+        "assignee": "me",
+        "burstWindowSeconds": 30,
+        "posts": [
+          {
+            "persona": "kwardFH",
+            "text": "The fake water account’s post is gone. Thank you to everyone who reported it. #WaterIssues",
+            "engagementBaseline": {"like": 96, "repost": 22}
+          },
+          {
+            "persona": "mvega_fh",
+            "text": "Good. Only following the accounts with the check mark from now on.",
+            "engagementBaseline": {"like": 38}
+          },
+          {
+            "persona": "tbrandt41",
+            "text": "still boiling. still annoyed. but at least it’s the right answer",
+            "engagementBaseline": {"like": 27}
+          }
+        ]
+      },
+      {
+        "key": "rs15",
+        "kind": "post",
+        "msel": "20",
+        "title": "Close · Fairhaven Water: Mill Road break isolated (then Freeze, beat 6)",
+        "notes": "Closing post before beat 6. Fire it, then freeze the world.",
+        "plannedMinute": 18,
+        "assignee": "me",
+        "posts": [
+          {
+            "persona": "FairhavenWater",
+            "text": "Mill Road update: crews have isolated the second break. Zone 4 may see low pressure for a few more hours. The boil water advisory for Zones 2-4 stays in effect until testing is complete. #WaterIssues",
+            "engagementBaseline": {"like": 228, "repost": 176, "reply": 19}
+          }
+        ]
+      }
+    ]
+  },
+  "noise": [
+    {"persona": "tbrandt41", "text": "found a twenty in my winter coat pocket. best day of the month"},
+    {"persona": "kwardFH", "text": "School board meets next week and bus route changes are on the agenda. If it affects your kids, come and speak."},
+    {"persona": "dreyes_fh", "text": "Do you need a permit to have a garage sale in Fairhaven? Never done one before."},
+    {"persona": "mvega_fh", "text": "Why do kids ask what’s for dinner while they are literally still eating lunch?"},
+    {"persona": "dreyes_fh", "text": "First time making bread from scratch. It’s a brick. A tasty brick, but a brick."},
+    {"persona": "mvega_fh", "text": "Boiled it, cooled it, and it still tastes like the pool at the rec center. Is that just me?"},
+    {"persona": "tbrandt41", "text": "anyone know a guy who fixes lawn mowers. mine sounds like an angry goose"},
+    {"persona": "kwardFH", "text": "Leaf pickup starts soon. Bags go on the curb, not in the street, so the storm drains stay clear."},
+    {"persona": "mvega_fh", "text": "Coffee before a night shift is a science. Too early and you crash at 3am, too late and you’re up until noon."},
+    {"persona": "kwardFH", "text": "Quick poll for the block: potluck or cookout for the fall get-together? Reply with your vote."},
+    {"persona": "dreyes_fh", "text": "Anyone know what they’re building on the empty lot by the bowling alley?"},
+    {"persona": "tbrandt41", "text": "traffic on main is a parking lot again. leave early or don’t leave"},
+    {"persona": "mvega_fh", "text": "Does anyone have a good recipe for a big batch of soup I can freeze before my next stretch of night shifts? Bonus points if the kids will actually eat it."},
+    {"persona": "dreyes_fh", "text": "The new bakery on Ash Street has cinnamon rolls the size of my head. Worth the line."},
+    {"persona": "kwardFH", "text": "Long day for a lot of families on the east side. Let’s be patient with each other in the checkout lines."},
+    {"persona": "tbrandt41", "text": "coffee count: four. useful things done: zero"},
+    {"persona": "kwardFH", "text": "Voter registration table at the farmers market this weekend. Checking your registration takes two minutes."},
+    {"persona": "dreyes_fh", "text": "Got stuck behind the street sweeper for six blocks. Very clean drive, though."},
+    {"persona": "mvega_fh", "text": "Garden update: the last tomatoes are finally ripe and the squirrels know it."},
+    {"persona": "tbrandt41", "text": "chili cook-off at the rec center next month. already working on my strategy"},
+    {"persona": "kwardFH", "text": "The crosswalk at Main and Birch still has no flashing light. I’ve asked the city twice. Third time’s the charm?"},
+    {"persona": "dreyes_fh", "text": "The kids are begging for a puppy. The cat has not been consulted."},
+    {"persona": "tbrandt41", "text": "new light at fifth and cedar takes forever. timed it. almost 3 minutes"},
+    {"persona": "mvega_fh", "text": "Finally slept six hours straight after three nights in a row. I feel like a brand new person."},
+    {"persona": "dreyes_fh", "text": "My cat has decided the laundry basket belongs to her now. I guess I just live here."},
+    {"persona": "kwardFH", "text": "Free tutoring for middle schoolers starts at the library on Monday. Please pass it on to any parent who could use it."},
+    {"persona": "tbrandt41", "text": "tried a new dark roast at home. way too dark. drinking it anyway"},
+    {"persona": "mvega_fh", "text": "My daughter rode to the corner and back without the little side wheels today. I may have cried a bit."},
+    {"persona": "tbrandt41", "text": "who decided the downtown parking meters need an app AND exact change"},
+    {"persona": "mvega_fh", "text": "Brushing teeth with water from the pitcher in the fridge. The kids think it’s camping."},
+    {"persona": "dreyes_fh", "text": "My youngest asked why the sky is blue and I panicked and said \"science\"."},
+    {"persona": "kwardFH", "text": "New to the east side? Welcome! Our block group meets the first Monday of the month and everyone is invited."},
+    {"persona": "mvega_fh", "text": "The crossing guard by the elementary school knows every kid’s name. Every single one. That man deserves a parade."},
+    {"persona": "kwardFH", "text": "The east side food pantry is low on cereal and canned fruit. If you’re at the store this week, grab one extra."},
+    {"persona": "dreyes_fh", "text": "Does the rec center still do Saturday swim lessons for little kids?"},
+    {"persona": "tbrandt41", "text": "watched the replay of the herons game. 28-21 over kestrel valley and they still made it look hard"},
+    {"persona": "kwardFH", "text": "Have you seen the new mural on the side of the laundromat? Local artists, local pride."},
+    {"persona": "dreyes_fh", "text": "Any recommendations for a mechanic who won’t upsell me? The car is making a brand new noise."},
+    {"persona": "mvega_fh", "text": "Kettle’s been going all day. Starting to feel like I run a tea shop."},
+    {"persona": "tbrandt41", "text": "why does every road project in this town start the same week"},
+    {"persona": "kwardFH", "text": "Coat drive starts next month. Clean, gently used, all sizes. Kids’ sizes go first, so start looking in those closets now."},
+    {"persona": "tbrandt41", "text": "the herons kicker is a sophomore and already better than anyone i played with"},
+    {"persona": "dreyes_fh", "text": "Ok, who else forgot to sign the field trip permission slip? Just me? Cool."},
+    {"persona": "mvega_fh", "text": "The story time lady at the library does all the voices. Now my youngest won’t let me read without doing them too 😂"},
+    {"persona": "tbrandt41", "text": "dog figured out how to open the back gate. we are now in negotiations"},
+    {"persona": "mvega_fh", "text": "Nurse tip of the day: lifting something heavy? Bend your knees and keep it close to your body. Your back will thank you."},
+    {"persona": "dreyes_fh", "text": "Does anyone know if the library is open on Sundays?"},
+    {"persona": "kwardFH", "text": "Our little free library box is overflowing. Take a book, leave a book, keep it going."},
+    {"persona": "dreyes_fh", "text": "Our water looks a little cloudy after it sits in the glass. Is that normal?"},
+    {"persona": "tbrandt41", "text": "gas went down a dime. don’t get used to it"},
+    {"persona": "mvega_fh", "text": "Gray, drizzly day means blanket fort day. We’re up to four chairs and every couch cushion we own."},
+    {"persona": "kwardFH", "text": "Neighborhood watch is moving to the second Thursday of the month. Coffee’s on me."},
+    {"persona": "mvega_fh", "text": "Lunchbox inventory: two thermoses, one lid, zero idea where the other lid went."},
+    {"persona": "tbrandt41", "text": "fall league starts saturday. bowling, not football. my knees made that call"},
+    {"persona": "kwardFH", "text": "Thank you to our sanitation crews. Early starts, heavy cans, and they still wave at every kid on the sidewalk."},
+    {"persona": "dreyes_fh", "text": "What time does the farmers market close on Saturdays?"},
+    {"persona": "kwardFH", "text": "Pumpkin carving night at the rec center next Friday. Bring a pumpkin and we’ll bring the tools and the cleanup crew 🎃"},
+    {"persona": "mvega_fh", "text": "The kids made a get-well card for my basil plant. It isn’t sick, they just think it looks sad. 🌿"},
+    {"persona": "tbrandt41", "text": "took the dogs out on the river trail. they came back about 40% mud"},
+    {"persona": "dreyes_fh", "text": "Saw a heron down by the river today. Had no idea we had those here."},
+    {"persona": "tbrandt41", "text": "trash pickup moved a day again and nobody told me. cans just sitting out there like a monument"},
+    {"persona": "dreyes_fh", "text": "Is the Cedar Avenue bridge still down to one lane? Trying to plan the school run."},
+    {"persona": "mvega_fh", "text": "Picture day tomorrow and my son just told me he cut his own bangs. Please send strength."},
+    {"persona": "kwardFH", "text": "East side block party planning has moved to the library community room. Bring ideas and, if you can, a folding table."},
+    {"persona": "dreyes_fh", "text": "The cat just knocked a full glass of water off the counter. At least it was the boiled kind."},
+    {"persona": "mvega_fh", "text": "Swapped shifts so I can make the band concert next week. Worth it."},
+    {"persona": "kwardFH", "text": "Huge thank you to everyone who came out for the park cleanup. 22 bags of trash and one very confused raccoon. Fairhaven strong."},
+    {"persona": "tbrandt41", "text": "someone left a full shopping cart in the middle of the lot on main. bold move"},
+    {"persona": "dreyes_fh", "text": "Trying to keep up with all the school emails. Is there one calendar somewhere with everything on it?"},
+    {"persona": "tbrandt41", "text": "kid down the street is selling cookies for a quarter. bought three. support small business"},
+    {"persona": "mvega_fh", "text": "Twelve hours on my feet, then home to a science project due tomorrow. The volcano is drying on the counter as we speak 🌋"},
+    {"persona": "kwardFH", "text": "Stopped by to see the couple at the end of our street. They’re fine, they just wanted company. Sometimes that’s the whole job."},
+    {"persona": "tbrandt41", "text": "leaf blowers before 8 should be illegal"},
+    {"persona": "mvega_fh", "text": "Made pancakes for dinner and now I’m the coolest mom in Fairhaven. Low bar. I’ll take it."},
+    {"persona": "kwardFH", "text": "If the truck cracked your recycling bin, the city will replace it for free. You just have to ask."},
+    {"persona": "dreyes_fh", "text": "Is there a walking trail around here flat enough for a stroller?"},
+    {"persona": "kwardFH", "text": "Proud of our east side youth league. Every kid played in every game this season. That’s how it should be."},
+    {"persona": "mvega_fh", "text": "Shoutout to the night crew on my unit. You all carried me last night. ❤️"},
+    {"persona": "dreyes_fh", "text": "Kids want to trick-or-treat on our street this year. Is the east side still doing the porch light thing?"},
+    {"persona": "tbrandt41", "text": "pothole on cedar ate my hubcap. second one this year. city says it’s on the list"},
+    {"persona": "dreyes_fh", "text": "Is the fall parade still happening this year?"},
+    {"persona": "tbrandt41", "text": "anyone else’s water taste weird or is it just me"},
+    {"persona": "kwardFH", "text": "The senior center needs drivers for weekly grocery runs. Even one hour a month makes a difference."},
+    {"persona": "mvega_fh", "text": "Fellow night-shifters: blackout curtains are worth every penny. That’s the post."},
+    {"persona": "dreyes_fh", "text": "Which pizza place on the east side delivers the latest? Asking for a very tired family."},
+    {"persona": "tbrandt41", "text": "best breakfast burrito in fairhaven is the food truck by the hardware store. fight me"},
+    {"persona": "kwardFH", "text": "The community garden on Ash Street has three open plots. First come, first served. Message me if you want one 🌱"},
+    {"persona": "mvega_fh", "text": "Has anyone tried the new playground at Riverside Park? Wondering if it’s ok for a five-year-old."},
+    {"persona": "tbrandt41", "text": "drizzle again. so much for fixing the fence this weekend"},
+    {"persona": "dreyes_fh", "text": "Leftover spaghetti for the third night in a row. Nobody has complained yet."},
+    {"persona": "kwardFH", "text": "Please watch for kids walking home from school. Drivers on Cedar have been flying lately."},
+    {"persona": "mvega_fh", "text": "Anybody know a pediatric dentist on the east side who’s taking new patients?"},
+    {"persona": "dreyes_fh", "text": "It’s officially sweater weather and I am here for it."},
+    {"persona": "tbrandt41", "text": "boil, cool, pour, repeat. that’s the whole day"},
+    {"persona": "kwardFH", "text": "The bus shelter on Fifth Street has a bench again. Small wins count."},
+    {"persona": "mvega_fh", "text": "Sending good thoughts to everyone pulling a double today. Sit down for five minutes and eat something real."},
+    {"persona": "kwardFH", "text": "An orange cat has been napping on my porch for three days. Collar, no tag, very polite. Is he yours?"},
+    {"persona": "mvega_fh", "text": "A neighbor left a bag of lemons on our porch with a note that just said \"too many\". Best neighbor on the block."},
+    {"persona": "tbrandt41", "text": "dog ate a sock. dog is fine. sock is not"},
+    {"persona": "dreyes_fh", "text": "Anyone taking the kids to the park this weekend? Mine need to run off some energy."}
+  ]
+}
