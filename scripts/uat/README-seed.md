@@ -16,6 +16,85 @@ pwsh scripts/uat/Seed-DemoContent.ps1 -StaffUsername controller1 -Resume   # fin
 pwsh scripts/uat/Seed-DemoContent.ps1 -StaffUsername controller1 -ReloadFiredRunSheet   # re-arm a run sheet a rehearsal fired
 ```
 
+## Demo reset: `Invoke-DemoReset.ps1` and `Test-DemoReady.ps1` (story 26, #544)
+
+One command puts UAT into the demo's opening state, in the right order, and ends with the yes/no pre-flight:
+
+```powershell
+pwsh scripts/uat/Invoke-DemoReset.ps1 -WhatIf                                   # the plan + each script's own preview; writes nothing
+pwsh scripts/uat/Invoke-DemoReset.ps1 -AutoConfirmResponses                     # THE RESET
+pwsh scripts/uat/Invoke-DemoReset.ps1 -AutoConfirmResponses -ReloadFiredRunSheet   # after a rehearsal that fired the run sheet
+pwsh scripts/uat/Test-DemoReady.ps1                                             # the pre-flight alone (read-only), any time
+pwsh scripts/uat/Test-DemoReady.ps1 -Json                                       # ... and its results to scripts/uat/logs/demo-ready-<timestamp>.json
+```
+
+**When to run `Invoke-DemoReset`:**
+
+- **Sat 10/17**, after the last Wave 4 merge is deployed, before rehearsal 1.
+- **Mon 10/19**, after the last deploy, before rehearsal 2 (the final reset).
+- **Tue 10/20, demo morning, at least 1 hour before the show** (time for a re-run, or for the restart fallback's wait).
+  Monday's seed is a day old by then and would not trend (see "Why Tuesday" below).
+
+**What it runs, stopping at the first failure and naming the step:**
+
+1. `POST /api/steering/runtime-state/reset` (story 18, DF-28): pause tier running, scenario clock unstarted, overlay
+   none. Until story 18 is deployed the route answers 404 and the script falls back to `Reset-DemoState.ps1 -Restart`,
+   then polls `/health` and the pause tier until the new process answers (it marks the old process first, so
+   "running" can only come from the new one) instead of waiting a fixed 8 minutes.
+2. `Reset-DemoState.ps1` (engine loop re-seed).
+3. `Clear-DemoContent.ps1` (old posts and MSEL-imported run-sheet items archived, stale drafts vetoed).
+4. `Seed-DemoContent.ps1 -RunSheet exceptMsel` (which sets pause tier `engine`, DF-38).
+5. `Test-DemoReady.ps1`.
+
+The transcript goes to `scripts/uat/logs/demo-reset-<yyyyMMdd-HHmmss>.log` (git-ignored). No secret is ever passed on a
+command line or written to the log: step 1 and the pre-flight read the staff secret from `PULSE_STAFF_SECRET` or the
+App Setting (through your `az login`), and the seed asks for it with a hidden prompt when `PULSE_STAFF_SECRET` is not
+set; answer it in the same window. Needs `az login` and the SQL firewall rule (for `Clear-DemoContent.ps1`).
+
+**After story 18 an App Service restart no longer clears the pause tier or the scenario clock (DF-28).** They are
+persisted per exercise and come back on start, so a world left FROZEN stays frozen across a restart. The clean slate
+is the runtime reset (step 1); `Reset-DemoState.ps1 -Restart` only clears the in-memory engine state (loop
+registration, storylines, autonomy, kill switch).
+
+**Expected `Test-DemoReady` output** on a ready exercise (exit 0). Any `FAIL` exits 1 and says what to do. `WARN`
+lines do not block: before Wave 4 is deployed, "Wave 4 schema" and the edits route are `WARN`.
+
+```text
+Pulse demo pre-flight (read-only) — https://app-pulse-api-uat-dynamis.azurewebsites.net
+  [PASS] 1. API health — expected /health and /health/ready 200; got both, the database answering after 41 s (...)
+  [PASS] 1. Schema matches code — expected /api/exercise-context 200; got 200, exercise 'Kestrel ...' (...), status live
+  [PASS] 2. Pause tier — expected engine (DF-38); got engine
+  [PASS] 1. Wave 4 schema — expected migration DemoFeedbackWave4RuntimeAndEdits (story 17); deployed: ... persisted = true
+  [PASS] 3. Engine review queue — expected 0 pending drafts; got 0
+  [PASS] 4. Generation provider — expected Fake (DF-38); got Fake
+  [PASS] 5. White noise — expected off; got off (pool ...)
+  [PASS] 5. Media marking — expected watermarkEnabled on; got on
+  [PASS] 6. Exercise pins — expected p09, p10 pinned for everyone; got all 2
+  [PASS] 7. Run sheet — expected the 7 seeded items pending and no MSEL-imported item (DF-16); got all 7 pending, ...
+  [PASS] 8. Media (image) — expected 200 with image/*; got 206 image/jpeg from <storage host> (SAS reachable)
+  [PASS] 8. Media (video) — expected 200 with video/*; got 206 video/mp4 from <storage host> (SAS reachable)
+  [PASS] 9. Scenario clock — expected a minute inside the pack's window (0 to 720 after the seed anchor ...); got minute 4 (...)
+  [PASS] 10. Route /api/feed/pinned — expected an answer, not 404; got 200
+  [PASS] 10. Route /api/posts/{id}/edits — expected an answer, not 404; got 200 for seeded post p10
+Signed out.
+
+READY — 15 checks, 0 warning(s), 0 skipped.
+```
+
+What the API cannot show, and how the pre-flight copes (its help has the detail):
+
+- **Applied migrations** have no route. Check 1 reads story 17's contract instead: the pause tier carries `persisted`
+  once 17 is deployed (WARN before).
+- **An item's Inject # (`ExternalRef`)** is not in `GET /api/injects`. Check 7 tells items apart by title: a pending
+  or held item that is not a seeded pack item fails (an import, a seeded copy of an msel item, or a console item); a
+  spent one warns. `Clear-DemoContent.ps1 -WhatIf` lists the imported items by Inject #.
+- **The server's scenario clock** has no read route, and the participant clock is the browser's wall clock. Check 9
+  reads the seed's anchor from the feed and warns when now is outside 0 to 720 minutes after it (Trending's 12 hours),
+  or when the server says its clock is frozen.
+
+Tests: `Invoke-Pester scripts/uat/Test-DemoReady.Tests.ps1, scripts/uat/Invoke-DemoReset.Tests.ps1 -Output Detailed`
+(no network).
+
 ## Demo week (Mon 10/19 rehearsal, Tue 10/20 demo)
 
 **The demo command line** (DF-16), on both days:
@@ -79,9 +158,10 @@ seed is about 24 hours old by Tuesday's demo: none of it would trend.
 
 **Hazard: never leave the world FROZEN overnight.** A frozen server clock falls behind, so Tuesday's run-sheet
 fires and engine posts would be stamped in the past and never trend. The seed warns when it finds the world
-frozen. If it happened, run `pwsh scripts/uat/Reset-DemoState.ps1 -Restart`. A restart clears the in-memory pause
-tier and scenario clock, but the old process keeps serving for several minutes (Reset-DemoState's own help).
-So wait about 8 minutes, then run `pwsh scripts/uat/Reset-DemoState.ps1` (without `-Restart`), then the seed.
+frozen. If it happened, run `pwsh scripts/uat/Invoke-DemoReset.ps1`: its runtime reset clears the tier and the clock.
+(Before story 18, a restart did that: `pwsh scripts/uat/Reset-DemoState.ps1 -Restart`, wait about 8 minutes because
+the old process keeps serving, then `Reset-DemoState.ps1` without `-Restart`, then the seed. After story 18 a restart
+keeps the frozen tier and clock, DF-28.)
 
 ## Rehearsals and re-runs
 
