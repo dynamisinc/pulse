@@ -21,12 +21,12 @@ for everyone are marked and arrive live.
       pin or like show up here."
 - [ ] `PostActions` gains a **Pin** action (FontAwesome thumbtack) after Like, gated like Like, with an optimistic
       toggle and rollback on failure (same pattern as `useReaction`), calling `PUT/DELETE /api/posts/{id}/reactions/pin`.
-      It shows no count. Its accessible name is "Pin" / "Unpin" and `aria-pressed` reflects `viewer.pinned`.
+      It shows no count. Its accessible name is a stable "Pin" and `aria-pressed` reflects `viewer.pinned` (amended after Gate-1: ARIA toggle pattern).
 - [ ] Pinning, unpinning, liking or unliking while the Pinned tab is mounted updates it without a reload (add or remove
       the item; re-fetch is acceptable).
 - [ ] `realtimeFeed` subscribes to `PostPinChanged` and exposes
       `subscribePinChanged(handler: (e: { postId: string; pinnedForAll: boolean }) => void): () => void` (the frozen
-      name story 08 uses). The Pinned tab and visible `PostCard`s update `pinnedForAll` live; a removed post
+      name story 08 uses). The Pinned tab updates `pinnedForAll` live (amended after Gate-1: the marker lives in the Pinned tab only for the demo; a marker on every card is follow-up #514); a removed post
       (`PostRemoved`) leaves the tab.
 - [ ] `ParticipantPostView` gains `pinnedForAll?: true` and `viewer.pinned`; the realtime parser keeps both;
       `post.provenance.test.ts` is updated for the third viewer key.
