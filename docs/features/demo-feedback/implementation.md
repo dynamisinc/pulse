@@ -257,3 +257,7 @@ the media buttons (06).
 - **Pacer in tests:** confirm 05's `FirstSweepDelay` landed; otherwise remove the `WhiteNoisePacer` hosted service in the `WebApplicationFactory` fixtures.
 - **`CompositionRootWiringTests`:** each maps exactly once: `GET /api/staff/exports/posts.xlsx`; `POST /api/injects/import` (staff + controller filters); `GET /api/feed/pinned`, `PUT`/`DELETE /api/staff/posts/{postId:guid}/pin`; `GET`/`PUT /api/staff/noise`, `PUT /api/staff/noise/pool`. One `WhiteNoisePacer` hosted service; `IFeedBroadcaster` → `SignalRFeedBroadcaster`; `INoiseBroadcaster` → `NoiseBroadcaster`; `INoiseJitterSource` → `CryptoNoiseJitterSource`; `PinService` / `PinnedFeedService` / `InjectImportService` resolve.
 - **Afterwards:** flip stories 01–05 to In Review and tick their ACs; file one follow-up issue with the remaining Gate-1 Mediums/Lows (02 M1/M4 + L1–L6, 03 L1–L7, 04 L2–L6, 05 L2–L4/L7–L10, 01 L2/L5); then the umbrella PR to `main` (Copilot review, Gate 2).
+
+### Frontend integration branch (10/15)
+
+`feature/demo-feedback` became backend PR #513, so the frontend integrates on **`feature/demo-feedback-fe`** (cut from it) and goes to `main` in its own PR after #513, or stacked on it if #513 is still open. Merge order for Wave 2: 12a (done) → 07 → 08 (needs 07's `subscribePinChanged`) → 06 → 09 → 10 (after its H-1 CSV fix is re-checked). After the merges: the full frontend suite, plus one integration test proving story 08's `defaultPinChangeSource` receives a `PostPinChanged` from the real `realtimeFeed` (07 Gate-1 L10).
