@@ -48,6 +48,18 @@
  * a like or repost is announced the moment it lands instead of on the next 30 s read. A read and a
  * frame that both carry the same rise announce it once: the second sees no rise.
  *
+ * A READ NEVER UNDOES A NEWER FRAME (Gate-1 M-1). Every applied frame bumps a tick; the store
+ * captures {@link NotificationModel.readMark} when a feed read STARTS and passes it to
+ * {@link NotificationModel.ingestBatch}. A post of mine whose last frame was applied after that
+ * read started keeps the frame's counts: the read's are older, and letting them through would
+ * withdraw the notification the frame raised and re-announce it on the next fresh read.
+ *
+ * MY OWN LIKE / REPOST IS SILENT (Gate-1 M-2). When the viewer starts liking or reposting a post,
+ * the store tells the model ({@link NotificationModel.noteOwnReaction}); if the post is mine, the
+ * next rise of that count (from the frame, or a read) absorbs one step into the baseline instead of
+ * notifying. A write that fails or changes nothing withdraws it (`cancelOwnReaction`). It is never
+ * persisted.
+ *
  * REPOST RECORDS ride in the same bounded, persisted record list as the like records, under the
  * key `repost:<postId>` (the like record keeps the bare post id), so the persisted shape is
  * unchanged and an old stored state loads as-is (its posts simply have no repost baseline yet).
@@ -173,6 +185,8 @@ interface MyPost {
   reposts: number
   /** The `version` of the newest engagement frame applied to this post (-1: none yet). */
   version: number
+  /** The model's frame tick when a frame was last applied to this post (0: never). */
+  frameTick: number
 }
 
 /** Collapses whitespace and truncates to the excerpt length (adds an ellipsis when cut). */
@@ -250,6 +264,10 @@ export class NotificationModel {
    * also keeps a re-read of the feed from "discovering" (and announcing) an evicted row again.
    */
   private evictedFloorMs = -Infinity
+  /** Bumped by every applied engagement frame (see `readMark`). */
+  private frameTick = 0
+  /** My own likes / reposts not yet absorbed, by record key (see `noteOwnReaction`). */
+  private readonly ownPending = new Map<string, number>()
   /** Whether the persisted part (read ids / like records) changed since `takeDirty`. */
   private dirty = false
 
@@ -290,17 +308,43 @@ export class NotificationModel {
    * Offers a batch (a feed read): my own posts first, then everyone else's. Returns the
    * NEW unread events, in order -- what the store announces for a re-read.
    */
-  ingestBatch(posts: readonly ParticipantPostView[]): NotificationEvent[] {
+  ingestBatch(posts: readonly ParticipantPostView[], readMark?: number): NotificationEvent[] {
     const events: NotificationEvent[] = []
     for (const post of posts) {
       if (post.authorPersonaId !== this.selfPersonaId) continue
-      events.push(...this.offer(post, true).events)
+      events.push(...this.offer(post, true, readMark).events)
     }
     for (const post of posts) {
       if (post.authorPersonaId === this.selfPersonaId) continue
       events.push(...this.offer(post, true).events)
     }
     return events
+  }
+
+  /**
+   * The frame tick to capture when a feed read STARTS and hand back to {@link ingestBatch}: a post
+   * of mine whose frame was applied after it keeps the frame's (newer) counts (Gate-1 M-1).
+   */
+  readMark(): number {
+    return this.frameTick
+  }
+
+  /**
+   * The viewer started liking / reposting `postId` (Gate-1 M-2). If the post is mine, the next rise
+   * of that count absorbs one step silently into the baseline - my own reaction never notifies me.
+   */
+  noteOwnReaction(postId: string, kind: CountKind): void {
+    if (!this.mine.has(postId)) return
+    const key = recordKey(kind, postId)
+    this.ownPending.set(key, (this.ownPending.get(key) ?? 0) + 1)
+  }
+
+  /** Withdraws a {@link noteOwnReaction} whose write failed or changed nothing. */
+  cancelOwnReaction(postId: string, kind: CountKind): void {
+    const key = recordKey(kind, postId)
+    const pending = this.ownPending.get(key) ?? 0
+    if (pending <= 1) this.ownPending.delete(key)
+    else this.ownPending.set(key, pending - 1)
   }
 
   /**
@@ -320,14 +364,22 @@ export class NotificationModel {
     const own = this.mine.get(postId)
     if (own === undefined || version <= own.version) return NO_OBSERVATION
     own.version = version
+    this.frameTick += 1
+    own.frameTick = this.frameTick
     const result = this.applyCounts(postId, own, counts.like, counts.repost)
     return result.changed || result.events.length > 0 ? result : NO_OBSERVATION
   }
 
-  private offer(post: ParticipantPostView, fromRead: boolean): Offered {
+  private offer(post: ParticipantPostView, fromRead: boolean, readMark?: number): Offered {
     if (this.isRemoved(post.id)) return NOTHING_OFFERED
     if (post.authorPersonaId === this.selfPersonaId) {
-      return !fromRead && this.mine.has(post.id) ? NOTHING_OFFERED : this.observeOwn(post)
+      if (!fromRead && this.mine.has(post.id)) return NOTHING_OFFERED
+      // M-1: a read that started before this post's last frame carries older counts.
+      const known = this.mine.get(post.id)
+      if (known !== undefined && readMark !== undefined && known.frameTick > readMark) {
+        return NOTHING_OFFERED
+      }
+      return this.observeOwn(post)
     }
     return offered(this.observeOther(post))
   }
@@ -341,6 +393,7 @@ export class NotificationModel {
         likes: post.counts.like,
         reposts: post.counts.repost,
         version: -1,
+        frameTick: 0,
       }
       this.mine.set(post.id, own)
       if (this.mine.size > MINE_CAP) {
@@ -398,9 +451,22 @@ export class NotificationModel {
     }
 
     // A rise SEEN in this session (not merely a higher count than a stored baseline).
-    const rose = previous !== undefined && value > previous
+    let amount = previous !== undefined && value > previous ? value - previous : 0
+
+    // M-2: the part of the rise that is MY OWN like / repost moves the baseline silently.
+    const own = this.ownPending.get(key) ?? 0
+    if (amount > 0 && own > 0) {
+      const absorbed = Math.min(own, amount)
+      amount -= absorbed
+      if (own - absorbed > 0) this.ownPending.set(key, own - absorbed)
+      else this.ownPending.delete(key)
+      record = { ...record, baseline: record.baseline + absorbed }
+      this.setLikeRecord(record)
+      changed = true
+    }
+
     if (value > record.baseline) {
-      if (rose || record.riseAt === undefined) {
+      if (amount > 0 || record.riseAt === undefined) {
         // Stamp when the rise was first seen; a reloaded rise that already has a stamp keeps it.
         record = { ...record, riseAt: this.now() }
         this.setLikeRecord(record)
@@ -416,9 +482,7 @@ export class NotificationModel {
       changed = true
     }
 
-    if (rose && previous !== undefined) {
-      return { changed: true, events: [{ type: kind, amount: value - previous }] }
-    }
+    if (amount > 0) return { changed: true, events: [{ type: kind, amount }] }
     return changed ? { changed: true, events: [] } : NOTHING_OFFERED
   }
 

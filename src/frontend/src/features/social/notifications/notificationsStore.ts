@@ -243,6 +243,13 @@ export interface NotificationsStore {
    */
   setPaused(paused: boolean): void
   /**
+   * The viewer started liking / reposting `postId` (Gate-1 M-2): if it is their own post, the rise
+   * it causes is absorbed silently instead of notifying them. A no-op with no session.
+   */
+  noteOwnReaction(postId: string, kind: 'like' | 'repost'): void
+  /** Withdraws a {@link noteOwnReaction} whose write failed or changed nothing. */
+  cancelOwnReaction(postId: string, kind: 'like' | 'repost'): void
+  /**
    * Sign-out: stop, forget, sweep storage -- but only in a tab that has run a notifications
    * session since it last swept, so a STAFF tab's sign-out cannot wipe a participant's state
    * (and neither can a tab that has already signed its own participant out).
@@ -568,6 +575,8 @@ export function createNotificationsStore(
   ): Promise<'ok' | 'failed' | 'skipped'> {
     if (s.stopped || s.inFlight) return 'skipped'
     s.inFlight = true
+    // M-1: a post whose frame lands while this read is out keeps the frame's (newer) counts.
+    const readMark = s.model.readMark()
     let posts: readonly Post[]
     try {
       posts = await deps.fetchFeed()
@@ -589,7 +598,7 @@ export function createNotificationsStore(
     s.failures = 0
 
     // XC-002: narrow through the one sanctioned path before the model sees a post.
-    const events = s.model.ingestBatch(posts.map(toParticipantView))
+    const events = s.model.ingestBatch(posts.map(toParticipantView), readMark)
     if (s.loaded) {
       // A re-read: whatever is new since the last one is worth saying.
       for (const event of events) announce(event, deps.announceThrottleMs)
@@ -866,6 +875,18 @@ export function createNotificationsStore(
     }
   }
 
+  function noteOwnReaction(postId: string, kind: 'like' | 'repost'): void {
+    const s = session
+    if (s === undefined || s.stopped) return
+    s.model.noteOwnReaction(postId, kind)
+  }
+
+  function cancelOwnReaction(postId: string, kind: 'like' | 'repost'): void {
+    const s = session
+    if (s === undefined || s.stopped) return
+    s.model.cancelOwnReaction(postId, kind)
+  }
+
   function reset(): void {
     // A tab that has not run a notifications session since its last sweep (a STAFF tab, a
     // read-only participant, a tab that already signed its participant out) has nothing of its
@@ -902,6 +923,8 @@ export function createNotificationsStore(
     getAnnouncement: () => announcement,
     markAllRead,
     setPaused,
+    noteOwnReaction,
+    cancelOwnReaction,
     reset,
   }
 }

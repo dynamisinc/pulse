@@ -790,3 +790,13 @@ realtimeFeed.subscribeRemoved(({ postId }) => removedPosts.add(postId))
 defaultEngagementChangeSource.subscribeEngagementChanged(({ postId, counts, version }) => {
   postCountsStore.apply(postId, counts, version)
 })
+
+// Whenever the shared hub connection leaves `Connected` (a drop, a reconnect, an identity stop),
+// the push stream has a gap: a frame held from before it may have missed changes, so it stops
+// beating a fresher read when a card mounts (`postCountsStore.markGap`, Gate-1 M-3). Live builds
+// only: the mock source has no connection and no gaps.
+if (!USE_MOCK_DATA) {
+  realtimeConnection.onStateChange(state => {
+    if (state !== HubConnectionState.Connected) postCountsStore.markGap()
+  })
+}

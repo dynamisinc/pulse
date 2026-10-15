@@ -7,6 +7,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using FluentAssertions;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
@@ -15,6 +16,7 @@ using Pulse.WebApi.Features.Realtime;
 using Pulse.WebApi.Features.Social;
 using Pulse.WebApi.Features.Social.Engagement;
 using Pulse.WebApi.Features.Social.Follows;
+using Pulse.WebApi.Features.Social.Moderation;
 using Pulse.WebApi.Features.Social.Reactions;
 using Pulse.WebApi.Features.Social.Threads;
 using Pulse.WebApi.Tests.Data;
@@ -136,6 +138,30 @@ public sealed class PostEngagementChangedPushTests
     }
 
     [RequiresDockerFact]
+    public async Task ATakenDownReply_SendsItsParentsFrame_WithTheLowerReplyCount_AndAHigherVersion()
+    {
+        var world = await SeedWorldAsync(_fixture, baselineReply: 2);
+        var broadcaster = new RecordingEngagementBroadcaster();
+
+        await using var context = CreateScopedContext(_fixture, world.Exercise);
+        var reply = await CreateIngestService(context, world.Exercise, broadcaster)
+            .IngestAsync(Request(parentPostId: world.Post), Attribution(world));
+        var takedown = await CreateTakedownService(
+                context, world.Exercise, broadcaster, NullLogger<PostTakedownService>.Instance)
+            .TakeDownAsync(reply.Post!.Id, TakedownCategories.All[0], staffUserId: null);
+
+        takedown.Outcome.Should().Be(PostTakedownOutcome.Removed);
+        var frames = broadcaster.Changes;
+        frames.Should().HaveCount(2, "one frame for the reply, one for its takedown");
+        frames.Should().OnlyContain(
+            frame => frame.Change.PostId == world.Post.ToString() && frame.ExerciseId == world.Exercise);
+        frames[0].Change.Counts.Reply.Should().Be(3, "baseline 2 + the live reply");
+        frames[1].Change.Counts.Reply.Should().Be(2, "the taken-down reply no longer counts");
+        frames[1].Change.Version.Should().Be(
+            frames[0].Change.Version + 1, "the takedown stamp raises the version by one");
+    }
+
+    [RequiresDockerFact]
     public async Task ThePush_TargetsOnlyTheWritingExercise_AndAnotherExercisesRowsNeverMoveIt()
     {
         var worldA = await SeedWorldAsync(_fixture);
@@ -166,28 +192,45 @@ public sealed class PostEngagementChangedPushTests
     }
 
     [RequiresDockerFact]
-    public async Task AFailingBroadcaster_NeverFailsTheReaction_OrTheReply()
+    public async Task AFailingBroadcaster_NeverFailsTheReactionTheReplyOrTheTakedown_AndEachFailureIsLogged()
     {
         var world = await SeedWorldAsync(_fixture, baselineLike: 5);
         var broadcaster = new ThrowingEngagementBroadcaster();
+        var reactionLog = new CapturingLogger<ReactionService>();
+        var ingestLog = new CapturingLogger<PostIngestService>();
+        var takedownLog = new CapturingLogger<PostTakedownService>();
 
         await using var context = CreateScopedContext(_fixture, world.Exercise);
-        var like = await CreateReactionService(context, world, broadcaster).ReactAsync(world.Post, ReactionKinds.Like);
-        var reply = await CreateIngestService(context, world.Exercise, broadcaster)
+        var like = await CreateReactionService(context, world, broadcaster, reactionLog)
+            .ReactAsync(world.Post, ReactionKinds.Like);
+        var reply = await CreateIngestService(context, world.Exercise, broadcaster, ingestLog)
             .IngestAsync(Request(parentPostId: world.Post), Attribution(world));
+        var takedown = await CreateTakedownService(context, world.Exercise, broadcaster, takedownLog)
+            .TakeDownAsync(reply.Post!.Id, TakedownCategories.All[0], staffUserId: null);
 
-        broadcaster.Attempts.Should().Be(2, "precondition: both pushes were attempted and failed");
+        broadcaster.Attempts.Should().Be(3, "precondition: all three pushes were attempted and failed");
         like.Outcome.Should().Be(ReactionOutcome.Changed, "the like committed; a push fault is logged, not surfaced");
         like.State!.Counts.Like.Should().Be(6);
         reply.Outcome.Should().Be(PostIngestOutcome.Created, "the reply committed; a push fault is logged, not surfaced");
+        takedown.Outcome.Should().Be(PostTakedownOutcome.Removed, "the takedown committed; the fault is only logged");
         (await ReadReactionsAsync(_fixture, world.Post)).Should().ContainSingle(row => row.Kind == ReactionKinds.Like);
+
+        foreach (var entries in new[] { reactionLog.Entries, ingestLog.Entries, takedownLog.Entries })
+        {
+            var failure = entries.Should().ContainSingle(
+                entry => entry.Message.Contains("PostEngagementChanged push failed", StringComparison.Ordinal),
+                "Gate-1 L-5: a swallowed push failure must still be visible in the operational log").Subject;
+            failure.Level.Should().Be(LogLevel.Warning);
+            failure.Exception.Should().BeOfType<InvalidOperationException>();
+        }
     }
 
     // ---------------------------------------------------------------------------------------------
     // Harness
     // ---------------------------------------------------------------------------------------------
 
-    private static ReactionService CreateReactionService(PulseDbContext context, ReactionWorld world, IFeedBroadcaster broadcaster)
+    private static ReactionService CreateReactionService(
+        PulseDbContext context, ReactionWorld world, IFeedBroadcaster broadcaster, ILogger<ReactionService>? logger = null)
     {
         var exerciseContext = new ExerciseContext { CurrentExerciseId = world.Exercise };
         return new ReactionService(
@@ -204,10 +247,25 @@ public sealed class PostEngagementChangedPushTests
             new ExerciseClockService(TimeProvider.System),
             new PostEngagementReader(context, exerciseContext),
             broadcaster,
-            NullLogger<ReactionService>.Instance);
+            logger ?? NullLogger<ReactionService>.Instance);
     }
 
-    private static PostIngestService CreateIngestService(PulseDbContext context, Guid exerciseId, IFeedBroadcaster broadcaster)
+    private static PostTakedownService CreateTakedownService(
+        PulseDbContext context, Guid exerciseId, IFeedBroadcaster broadcaster, ILogger<PostTakedownService> logger)
+    {
+        var exerciseContext = new ExerciseContext { CurrentExerciseId = exerciseId };
+        return new PostTakedownService(
+            context,
+            exerciseContext,
+            new OrganizationContext { CurrentOrganizationId = Organization.DefaultOrganizationId },
+            new ExerciseClockService(TimeProvider.System),
+            broadcaster,
+            logger,
+            new PostEngagementReader(context, exerciseContext));
+    }
+
+    private static PostIngestService CreateIngestService(
+        PulseDbContext context, Guid exerciseId, IFeedBroadcaster broadcaster, ILogger<PostIngestService>? logger = null)
     {
         var exerciseContext = new ExerciseContext { CurrentExerciseId = exerciseId };
         return new PostIngestService(
@@ -215,7 +273,7 @@ public sealed class PostEngagementChangedPushTests
             exerciseContext,
             broadcaster,
             observers: null,
-            logger: NullLogger<PostIngestService>.Instance,
+            logger: logger ?? NullLogger<PostIngestService>.Instance,
             replyParentResolver: new ReplyParentResolver(context, exerciseContext),
             projector: null,
             engagementReader: new PostEngagementReader(context, exerciseContext));
@@ -235,6 +293,33 @@ public sealed class PostEngagementChangedPushTests
         Origin = "participant",
         ActingHumanId = world.ActingHumanId,
     };
+
+    /// <summary>One captured log line.</summary>
+    private sealed record LogEntry(LogLevel Level, string Message, Exception? Exception);
+
+    /// <summary>Records every log line (Gate-1 L-5: the swallowed push failure must be visible in the log).</summary>
+    private sealed class CapturingLogger<T> : ILogger<T>
+    {
+        private readonly ConcurrentQueue<LogEntry> _entries = new();
+
+        public IReadOnlyList<LogEntry> Entries => _entries.ToArray();
+
+        public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            ArgumentNullException.ThrowIfNull(formatter);
+            _entries.Enqueue(new LogEntry(logLevel, formatter(state, exception), exception));
+        }
+    }
 
     /// <summary>Returns a fixed session persona, standing in for the request's authenticated session.</summary>
     private sealed class StubSessionPersonaAccessor(CurrentSessionPersona sessionPersona) : ICurrentSessionPersonaAccessor

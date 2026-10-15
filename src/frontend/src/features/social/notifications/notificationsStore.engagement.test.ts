@@ -10,6 +10,8 @@
  *  - The badge moves while the tab is hidden (no read runs then; the frame does).
  *  - Frames that beat the baseline read are held and replayed after it.
  *  - A frame for someone else's post changes nothing; the session unsubscribes on stop.
+ *  - Gate-1 M-1: a read that started before a frame never withdraws (or re-announces) it.
+ *  - Gate-1 M-2: my own like / repost on my own post is silent (frame and read paths).
  *
  * Driven through `createNotificationsStore` with every side effect faked (as in
  * `notificationsStore.test.ts`), plus a fake engagement source.
@@ -190,6 +192,86 @@ describe('notificationsStore — live likes and reposts (DF-19)', () => {
     r.engagement.emit(frame('m1', 1, 0, 2)) // older: the newer held frame wins
     resolve([post('m1', ME, 1, 0)])
     await settle()
+    await advance(NOTIFICATION_PUBLISH_DELAY_MS)
+
+    expect(rows(r.store)).toEqual(['like:m1=1*'])
+  })
+
+  it('M-1: frame +1, a stale read, a fresh read: exactly one notification, the badge never dips', async () => {
+    const r = rig([post('m1', ME, 5, 0)])
+    r.store.start(CONFIG)
+    await settle()
+    let resolveStale: (posts: Post[]) => void = () => {}
+    r.fetchFeed.mockImplementationOnce(() => new Promise<Post[]>(done => { resolveStale = done }))
+    const badges: number[] = []
+    r.store.subscribe(() => badges.push(r.store.getSummary().unread))
+
+    // The first re-read starts (62.5 % of the interval at random() = 0.5) and stays on the wire.
+    await advance(NOTIFICATION_POLL_INTERVAL_MS * 0.625)
+    expect(r.fetchFeed).toHaveBeenCalledTimes(2)
+
+    r.engagement.emit(frame('m1', 6, 0, 1))
+    await advance(NOTIFICATION_PUBLISH_DELAY_MS)
+    expect(rows(r.store)).toEqual(['like:m1=1*'])
+    const announced = r.store.getAnnouncement()
+    expect(announced.text).toBe('1 new like')
+
+    // The stale read (it started before the frame) still says 5 likes.
+    resolveStale([post('m1', ME, 5, 0)])
+    await settle()
+    expect(rows(r.store)).toEqual(['like:m1=1*'])
+
+    // A fresh read agrees with the frame: nothing new to say.
+    r.feed.posts = [post('m1', ME, 6, 0)]
+    await advance(NOTIFICATION_POLL_INTERVAL_MS + NOTIFICATION_ANNOUNCE_THROTTLE_MS)
+    expect(r.fetchFeed.mock.calls.length).toBeGreaterThanOrEqual(3)
+    expect(rows(r.store)).toEqual(['like:m1=1*'])
+    expect(r.store.getAnnouncement().seq).toBe(announced.seq)
+    // Once the row showed (the announcement is spoken a moment before the coalesced publish),
+    // the badge never dipped back to 0.
+    const shown = badges.indexOf(1)
+    expect(shown).toBeGreaterThanOrEqual(0)
+    expect(badges.slice(shown).every(badge => badge >= 1)).toBe(true)
+    expect(r.store.getSummary().unread).toBe(1)
+  })
+
+  it('M-2: my own like and my own repost on my own post are silent, frame or read', async () => {
+    const r = rig([post('m1', ME, 2, 1)])
+    r.store.start(CONFIG)
+    await settle()
+
+    // Through the frame.
+    r.store.noteOwnReaction('m1', 'like')
+    r.engagement.emit(frame('m1', 3, 1, 1))
+    r.store.noteOwnReaction('m1', 'repost')
+    r.engagement.emit(frame('m1', 3, 2, 2))
+    await advance(NOTIFICATION_PUBLISH_DELAY_MS)
+    expect(rows(r.store)).toEqual([])
+    expect(r.store.getSummary().unread).toBe(0)
+    expect(r.store.getAnnouncement().text).toBe('')
+
+    // Through a read (no frame, e.g. while polling).
+    r.store.noteOwnReaction('m1', 'like')
+    r.feed.posts = [post('m1', ME, 4, 2)]
+    await advance(NOTIFICATION_POLL_INTERVAL_MS)
+    expect(rows(r.store)).toEqual([])
+    expect(r.store.getSummary().unread).toBe(0)
+
+    // Someone else's like still notifies.
+    r.engagement.emit(frame('m1', 5, 2, 3))
+    await advance(NOTIFICATION_PUBLISH_DELAY_MS)
+    expect(rows(r.store)).toEqual(['like:m1=1*'])
+    expect(r.store.getAnnouncement().text).toBe('1 new like')
+  })
+
+  it('M-2: a withdrawn own reaction does not swallow the next like', async () => {
+    const r = rig([post('m1', ME, 2, 0)])
+    r.store.start(CONFIG)
+    await settle()
+
+    r.store.noteOwnReaction('m1', 'like')
+    r.store.cancelOwnReaction('m1', 'like') // the write failed
+    r.engagement.emit(frame('m1', 3, 0, 1))
     await advance(NOTIFICATION_PUBLISH_DELAY_MS)
 
     expect(rows(r.store)).toEqual(['like:m1=1*'])

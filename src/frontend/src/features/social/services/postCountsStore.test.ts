@@ -15,7 +15,7 @@ import { act, renderHook } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { resetClientSession } from '@/core/auth/endSession'
 import type { Post } from '../types/post'
-import { postCountsStore, usePostCounts } from './postCountsStore'
+import { MAX_ENTRIES, postCountsStore, usePostCounts } from './postCountsStore'
 import { emitMockReactionEngagement, setMockEngagementForTests } from './mockEngagementChanges'
 import { postStore } from './postStore'
 import { defaultEngagementChangeSource } from './realtimeFeed'
@@ -37,7 +37,7 @@ describe('postCountsStore.apply (version-gated)', () => {
     expect(postCountsStore.apply('p1', { reply: 0, repost: 0, like: 5 }, 10)).toBe(true)
     expect(postCountsStore.apply('p1', { reply: 0, repost: 0, like: 4 }, 9)).toBe(false)
     expect(postCountsStore.apply('p1', { reply: 0, repost: 0, like: 4 }, 10)).toBe(false)
-    expect(postCountsStore.get('p1')).toEqual({ counts: { reply: 0, repost: 0, like: 5 }, version: 10 })
+    expect(postCountsStore.get('p1')).toMatchObject({ counts: { reply: 0, repost: 0, like: 5 }, version: 10 })
 
     expect(postCountsStore.apply('p1', { reply: 0, repost: 0, like: 4 }, 11)).toBe(true)
     expect(postCountsStore.get('p1')?.counts.like).toBe(4)
@@ -62,6 +62,17 @@ describe('postCountsStore.apply (version-gated)', () => {
     off()
     postCountsStore.apply('p1', SEED, 2)
     expect(p1).toHaveBeenCalledTimes(1)
+  })
+
+  it('L-3: holds at most MAX_ENTRIES posts, forgetting the oldest no card is reading first', () => {
+    postCountsStore.apply('read-by-a-card', SEED, 1)
+    const off = postCountsStore.subscribe('read-by-a-card', () => {})
+    for (let index = 0; index < MAX_ENTRIES; index += 1) postCountsStore.apply(`p${index}`, SEED, 1)
+
+    expect(postCountsStore.get('read-by-a-card')).toBeDefined()
+    expect(postCountsStore.get('p0')).toBeUndefined()
+    expect(postCountsStore.get(`p${MAX_ENTRIES - 1}`)).toBeDefined()
+    off()
   })
 
   it('stores only the three counts, whatever else the caller object carried', () => {
@@ -105,6 +116,22 @@ describe('usePostCounts', () => {
       postCountsStore.apply('p1', { reply: 1, repost: 2, like: 7 }, 8)
     })
     expect(result.current.like).toBe(7)
+  })
+
+  it('M-3: on mount a held frame beats the seed while the stream is unbroken, not after a gap', () => {
+    postCountsStore.apply('p1', { reply: 1, repost: 2, like: 9 }, 20)
+    const unbroken = renderHook(() => usePostCounts('p1', SEED))
+    expect(unbroken.result.current.like).toBe(9)
+    unbroken.unmount()
+
+    postCountsStore.markGap()
+    const afterGap = renderHook(() => usePostCounts('p1', { reply: 1, repost: 2, like: 11 }))
+    expect(afterGap.result.current.like).toBe(11)
+
+    act(() => {
+      postCountsStore.apply('p1', { reply: 1, repost: 2, like: 12 }, 21)
+    })
+    expect(afterGap.result.current.like).toBe(12)
   })
 
   it('ignores a stale frame', () => {

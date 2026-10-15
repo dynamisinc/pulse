@@ -304,7 +304,10 @@ public sealed partial class ReactionService
             ? await TryReadVersionAsync(exerciseId, postId)
             : null;
 
-        var state = await ReadStateAsync(postId, personaId, kind, baseline, cancellationToken);
+        // The write has committed; when a push is pending its counts come from this read, so a client that
+        // disconnects now must not cancel it (Gate-1 L-1). Without a push the request's token still applies.
+        var state = await ReadStateAsync(
+            postId, personaId, kind, baseline, version is null ? cancellationToken : CancellationToken.None);
 
         if (version is { } committedVersion)
         {

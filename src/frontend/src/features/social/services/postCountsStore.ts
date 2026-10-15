@@ -9,7 +9,8 @@
  * WHAT IT HOLDS. For each post a pushed `PostEngagementChanged` named: the SHOWN counts
  * `{ reply, repost, like }` and the frame's `version`. Nothing else - never who reacted and
  * never the viewer's own liked / reposted state (a push is one payload for the whole exercise;
- * `active` stays the card's own business).
+ * `active` stays the card's own business). At most {@link MAX_ENTRIES} posts are held; past that
+ * the oldest frame no mounted card is reading is forgotten first.
  *
  * VERSION-GATED. `apply(postId, counts, version)` keeps a frame only when its `version` is
  * HIGHER than the one held for that post. The server derives `version` from the database
@@ -17,13 +18,21 @@
  * two app instances agree: a replayed, duplicated or reordered (older) frame is dropped here
  * and can never wind a number back.
  *
- * READING IT. `usePostCounts(postId, seed)` returns the NEWEST of two sources, by the order this
- * card observed them:
- *  - the post's own `counts` from the read that rendered it (`seed`), and
- *  - the store's frame for the post.
- * A frame that arrives after the card's read wins; a re-read that re-seeds the card with
- * different numbers after the last frame wins in turn (e.g. after a reconnect, when frames were
- * missed while polling). With no frame for the post the seed is all there is.
+ * READING IT. `usePostCounts(postId, seed)` picks between the post's own `counts` from the read
+ * that rendered the card (`seed`) and the store's frame:
+ *  - WHILE MOUNTED, the most recently observed wins: a frame that arrives after the card's read
+ *    wins, and a re-read that re-seeds the card with different numbers wins in turn, until the
+ *    next frame.
+ *  - ON MOUNT (Gate-1 M-3), a held frame wins over the seed only while the push stream has been
+ *    CONTINUOUS since the frame arrived. Every change that moves a shown count pushes a frame
+ *    (like / repost / reply, and a reply takedown pushes its parent), so while the stream is
+ *    unbroken the newest frame is at least as new as any read - even a read that landed after it
+ *    carries the same numbers. When the stream breaks (the hub drops, reconnects or is stopped:
+ *    `markGap()`), frames may have been missed, so a held frame from before the gap no longer
+ *    beats a fresh seed on mount; a frame that arrives after the gap is trusted again. This is
+ *    the rule instead of comparing a receive time with each query's `dataUpdatedAt`: cards are fed
+ *    by several readers (feed, thread, profile, Pinned) and none of them hands the card its read
+ *    time.
  *
  * SIGN-OUT. `reset()` forgets every frame (called from `core/auth/endSession.ts`, so one
  * identity's numbers never decorate the next sign-in's cards on the same tab), and ALWAYS bumps a
@@ -34,10 +43,11 @@
  *
  * Where frames come from: `realtimeFeed.ts` applies every validated `PostEngagementChanged` from
  * the default engagement source (the shared hub connection, or the mock adapter under
- * `USE_MOCK_DATA`). Pure state; no network, no clock, no UI.
+ * `USE_MOCK_DATA`) and calls `markGap()` whenever the hub connection leaves `Connected`. Pure
+ * state; no network, no clock, no UI.
  */
 
-import { useState, useSyncExternalStore } from 'react'
+import { useCallback, useState, useSyncExternalStore } from 'react'
 
 /** The three shown counts a push carries (structurally the post model's `PostCounts`). */
 export interface EngagementCounts {
@@ -50,19 +60,43 @@ export interface EngagementCounts {
 export interface PostCountsEntry {
   readonly counts: EngagementCounts
   readonly version: number
+  /** The stream epoch the frame arrived in (see `markGap`). */
+  readonly epoch: number
 }
+
+/** Most posts the store holds a frame for (Gate-1 L-3). */
+export const MAX_ENTRIES = 500
 
 type Listener = () => void
 
+/** Insertion-ordered: the first key is the oldest frame. */
 const entries = new Map<string, PostCountsEntry>()
+const listeners = new Map<string, Set<Listener>>()
 // Bumped on EVERY reset (even an empty one): a late answer from an earlier identity is stale.
 let resetGeneration = 0
-const listeners = new Map<string, Set<Listener>>()
+// Bumped whenever the push stream breaks: frames from an earlier epoch may have missed changes.
+let streamEpoch = 0
 
 function notify(postId: string): void {
   const set = listeners.get(postId)
   if (set === undefined) return
   for (const listener of [...set]) listener()
+}
+
+/** Forgets the oldest frame no mounted card reads (else the oldest of all) once over the cap. */
+function enforceCap(): void {
+  if (entries.size <= MAX_ENTRIES) return
+  let victim: string | undefined
+  for (const postId of entries.keys()) {
+    if (!listeners.has(postId)) {
+      victim = postId
+      break
+    }
+  }
+  victim ??= entries.keys().next().value
+  if (victim === undefined) return
+  entries.delete(victim)
+  notify(victim)
 }
 
 /**
@@ -81,10 +115,13 @@ function apply(
   if (generation !== undefined && generation !== resetGeneration) return false
   const held = entries.get(postId)
   if (held !== undefined && version <= held.version) return false
+  entries.delete(postId) // re-insert at the newest end
   entries.set(postId, {
     counts: { reply: counts.reply, repost: counts.repost, like: counts.like },
     version,
+    epoch: streamEpoch,
   })
+  enforceCap()
   notify(postId)
   return true
 }
@@ -111,6 +148,20 @@ function subscribe(postId: string, listener: Listener): () => void {
 }
 
 /**
+ * The push stream broke (the hub connection left `Connected`): frames may be missed from here,
+ * so a frame held from before now stops beating a fresh read ON MOUNT. Mounted cards keep what
+ * they show (nothing is notified); a later frame for a post is trusted again.
+ */
+function markGap(): void {
+  streamEpoch += 1
+}
+
+/** Whether a held frame may beat a card's seed on mount (see the module header). */
+function isTrusted(entry: PostCountsEntry): boolean {
+  return entry.epoch === streamEpoch
+}
+
+/**
  * The current reset generation. Capture it before a request; if it changed by the time the
  * request answers, a session reset happened in between (see `apply`).
  */
@@ -130,7 +181,7 @@ function reset(): void {
 }
 
 /** The module-singleton store. See the module header for the contract. */
-export const postCountsStore = { apply, get, subscribe, generation, reset }
+export const postCountsStore = { apply, get, subscribe, markGap, generation, reset }
 
 /** A seed's numbers as one comparable key (a re-render with an equal object is not a re-read). */
 function seedKey(seed: EngagementCounts): string {
@@ -145,21 +196,22 @@ interface Observed {
 }
 
 /**
- * The counts a card shows for `postId`: the newest of its `seed` (the post's own `counts`) and the
- * store's frame, by observation order (see the module header). Re-renders only when a frame for
- * THIS post is accepted.
+ * The counts a card shows for `postId`: its `seed` (the post's own `counts`) or the store's frame
+ * (see the module header for the rule). Re-renders only when a frame for THIS post is accepted.
  */
 export function usePostCounts(postId: string, seed: EngagementCounts): EngagementCounts {
-  const entry = useSyncExternalStore(
-    listener => subscribe(postId, listener),
-    () => get(postId),
-    () => get(postId),
+  const subscribeToPost = useCallback(
+    (listener: Listener) => subscribe(postId, listener),
+    [postId],
   )
+  const getEntry = useCallback(() => get(postId), [postId])
+  const entry = useSyncExternalStore(subscribeToPost, getEntry, getEntry)
   const key = seedKey(seed)
   const [observed, setObserved] = useState<Observed>(() => ({
     entry,
     seedKey: key,
-    useSeed: entry === undefined,
+    // On mount a held frame wins only while the stream has been unbroken since it arrived.
+    useSeed: entry === undefined || !isTrusted(entry),
   }))
 
   let current = observed

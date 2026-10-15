@@ -49,6 +49,10 @@
  * never overwritten by an older frame. In MOCK mode a confirmed change also tells the mock
  * engagement source (`emitMockReactionEngagement`), which stands in for the server's push.
  *
+ * MY OWN REACTION NEVER NOTIFIES ME (Gate-1 M-2). Turning a like / repost ON tells the
+ * notifications store first (`noteOwnReaction`), so if the post is the viewer's own, the rise their
+ * write causes is absorbed silently; a write that fails or does not turn it on withdraws that.
+ *
  * NO IDENTITY, NO TIME ON THE WIRE (COR-001/COR-053): the service sends neither
  * `exerciseId` nor `personaId` nor a timestamp — the server derives all three.
  */
@@ -63,6 +67,7 @@ import {
 } from '../services/reactionService'
 import { emitMockReactionEngagement } from '../services/mockEngagementChanges'
 import { postCountsStore } from '../services/postCountsStore'
+import { notificationsStore } from '../notifications/notificationsStore'
 import { useTransientMessage, type UseTransientMessageResult } from './useTransientMessage'
 
 /** Options for {@link useReactionToggle}. */
@@ -121,7 +126,10 @@ export function useReactionToggle(options: UseReactionToggleOptions): UseReactio
   // (the stand-in for the next fetch reporting the viewer's state).
   const [seed] = useState(() => {
     const remembered = USE_MOCK_DATA ? mockReactionSnapshot(postId, kind) : undefined
-    return remembered ?? { active: initiallyActive, count: initialCount }
+    // Gate-1 H-1: the count seeds from the card's LIVE count (a frame held before this card mounted
+    // included), not the read's own number - `lastExternalRef` starts at the same value, so a
+    // seed from the stale read would never be corrected.
+    return remembered ?? { active: initiallyActive, count: options.externalCount ?? initialCount }
   })
   const [active, setActive] = useState(seed.active)
   const [count, setCount] = useState(seed.count)
@@ -173,6 +181,7 @@ export function useReactionToggle(options: UseReactionToggleOptions): UseReactio
     // A sign-out / sign-in while the write is out resets the live counts store; the late answer
     // then belongs to the previous identity and must not push numbers into the next one's store.
     const generation = postCountsStore.generation()
+    if (nextActive) notificationsStore.noteOwnReaction(postId, kind)
     const write = nextActive
       ? putReaction(postId, kind, previous)
       : deleteReaction(postId, kind, previous)
@@ -183,6 +192,7 @@ export function useReactionToggle(options: UseReactionToggleOptions): UseReactio
           // Reconcile onto the server's own answer (viewer flag + count).
           const confirmed = kind === 'like' ? state.viewer.liked : state.viewer.reposted
           commit({ active: confirmed, count: state.counts[kind] })
+          if (nextActive && !confirmed) notificationsStore.cancelOwnReaction(postId, kind)
           // Mock only, and only for a real state change (the server's rule).
           if (USE_MOCK_DATA && confirmed !== previous.active) {
             emitMockTelemetry(confirmed)
@@ -193,6 +203,7 @@ export function useReactionToggle(options: UseReactionToggleOptions): UseReactio
         () => {
           // Roll back EXACTLY, and tell the viewer (polite live region).
           commit(previous)
+          if (nextActive) notificationsStore.cancelOwnReaction(postId, kind)
           show(failureMessage)
         },
       )

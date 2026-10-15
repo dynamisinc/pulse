@@ -8,6 +8,11 @@
  *    counts alike - and NEVER the viewer's own liked / reposted state (`aria-pressed`).
  *  - An optimistic toggle in flight is not overwritten by an older frame; the server's answer
  *    reconciles it, and a newer frame after that still lands.
+ *  - Gate-1 H-1: a card that MOUNTS after a frame (a new card, or a remount from cached data)
+ *    shows the frame's numbers, toggles from them, and keeps following later frames.
+ *  - Gate-1 M-3: after a stream gap, a card mounting with a fresher read shows the read.
+ *  - Gate-1 M-2: turning a like on tells the notifications store first (and withdraws it when the
+ *    write fails), so the viewer's own reaction never notifies them.
  *
  * LIVE mode (`USE_MOCK_DATA` false) with the shared axios client mocked, as in
  * `PostActions.live.test.tsx`; the session / exercise hooks are mocked the same way.
@@ -19,6 +24,7 @@ import type { Session } from '@/core/auth'
 import { api } from '@/core/services/api'
 import { personaById, personaIdForHandle } from '@/features/personas'
 import { postCountsStore } from '../../services/postCountsStore'
+import { notificationsStore } from '../../notifications/notificationsStore'
 import { PostActions } from './PostActions'
 import type { PostView } from './types'
 
@@ -120,6 +126,73 @@ describe('PostActions — live engagement counts (DF-17)', () => {
     expect(row.querySelector('[data-action="reply"]')).toHaveTextContent('4')
     expect(row.querySelector('[data-action="repost"]')).toHaveTextContent('8')
     expect(row.querySelector('[data-action="like"]')).toHaveTextContent('43')
+  })
+
+  it('H-1: a card mounted AFTER a frame shows it, toggles from it, and follows later frames', async () => {
+    postCountsStore.apply(POST_ID, { reply: 4, repost: 9, like: 50 }, 6)
+    vi.mocked(api.put).mockResolvedValue({
+      data: {
+        postId: POST_ID,
+        kind: 'like',
+        active: true,
+        counts: { reply: 4, repost: 9, like: 51 },
+        viewer: { liked: true, reposted: false },
+      },
+    })
+    const user = userEvent.setup()
+    render(<PostActions post={buildPost()} variant="full" onReply={() => {}} />)
+
+    expect(screen.getByRole('button', { name: 'Like, 50' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Repost, 9' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Reply, 4' })).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Like, 50' }))
+    expect(await screen.findByRole('button', { name: 'Like, 51, liked' })).toBeInTheDocument()
+
+    push({ reply: 4, repost: 10, like: 52 }, 8)
+    expect(screen.getByRole('button', { name: 'Like, 52, liked' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Repost, 10' })).toBeInTheDocument()
+  })
+
+  it('H-1: a remount from cached (older) data shows the held frame, not the cached numbers', () => {
+    const cached = buildPost() // counts { reply: 3, repost: 7, like: 42 } from an earlier read
+    const first = render(<PostActions post={cached} variant="full" />)
+    push({ reply: 3, repost: 8, like: 45 }, 4)
+    expect(screen.getByRole('button', { name: 'Like, 45' })).toBeInTheDocument()
+    first.unmount()
+
+    render(<PostActions post={cached} variant="full" />)
+
+    expect(screen.getByRole('button', { name: 'Like, 45' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Repost, 8' })).toBeInTheDocument()
+  })
+
+  it('M-3: after a stream gap, a card mounting with a fresher read shows the read', () => {
+    postCountsStore.apply(POST_ID, { reply: 3, repost: 7, like: 45 }, 4)
+    postCountsStore.markGap() // the hub dropped: frames may have been missed since
+
+    render(<PostActions post={buildPost({ counts: { reply: 3, repost: 7, like: 47 } })} variant="full" />)
+    expect(screen.getByRole('button', { name: 'Like, 47' })).toBeInTheDocument()
+
+    // A frame after the gap is trusted again.
+    push({ reply: 3, repost: 7, like: 48 }, 5)
+    expect(screen.getByRole('button', { name: 'Like, 48' })).toBeInTheDocument()
+  })
+
+  it('M-2: turning a like on tells the notifications store first, and a failed write withdraws it', async () => {
+    const note = vi.spyOn(notificationsStore, 'noteOwnReaction')
+    const cancel = vi.spyOn(notificationsStore, 'cancelOwnReaction')
+    vi.mocked(api.put).mockRejectedValue(new Error('down'))
+    const user = userEvent.setup()
+    render(<PostActions post={buildPost()} variant="full" />)
+
+    await user.click(screen.getByRole('button', { name: 'Like, 42' }))
+
+    expect(note).toHaveBeenCalledWith(POST_ID, 'like')
+    expect(await screen.findByRole('button', { name: 'Like, 42' })).toHaveAttribute('aria-pressed', 'false')
+    expect(cancel).toHaveBeenCalledWith(POST_ID, 'like')
+    note.mockRestore()
+    cancel.mockRestore()
   })
 
   it('never overwrites an optimistic toggle in flight with an older frame', async () => {
