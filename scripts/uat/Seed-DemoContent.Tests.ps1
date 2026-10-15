@@ -3335,6 +3335,17 @@ Describe 'Demo feedback S1 (#510): -RunSheet, white noise, exercise pins and med
             @($script:Fake.Calls | ForEach-Object { "$($_.Method) $($_.Path)" }) | Should -Be @('GET /api/exercise-context')
         }
 
+        It 'an msel item that itself replies to a post is warned about (the import creates it top-level), in -WhatIf too; the run still loads' {
+            $path = Write-S1Pack 'msel-replies' { param($p) $p['runSheet']['items'][2]['posts'][0]['replyTo'] = [ordered]@{ postKey = 'p02' } }
+            $plan = Invoke-FakeSeed @{ PackPath = $path; WhatIf = $true; RunSheet = 'exceptMsel' }
+            $plan.Code | Should -Be 0
+            $plan.Text | Should -Match "\[WARN\] i03 is left for the MSEL import \(msel '3'\), but it replies to another post: an MSEL row cannot carry a reply, so the import creates it as a top-level post, out of its thread"
+            $run = Invoke-FakeSeed @{ PackPath = $path; RunSheet = 'exceptMsel' }
+            $run.Code | Should -Be 0 -Because $run.Text
+            $run.Text | Should -Match '\[WARN\] i03 is left for the MSEL import .*out of its thread'
+            (Invoke-FakeSeed @{ PackPath = $path; WhatIf = $true }).Text | Should -Not -Match 'out of its thread'   # -RunSheet all seeds it, reply and all
+        }
+
         It 'an exceptMsel run whose seeded item replies to an msel item exits 1 before any request, naming both items' {
             $path = Write-S1Pack 'msel-reply' { param($p) $p['runSheet']['items'][0]['msel'] = '1' }
             $run = Invoke-FakeSeed @{ PackPath = $path; RunSheet = 'exceptMsel' }

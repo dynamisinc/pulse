@@ -72,7 +72,8 @@
          An item left out is never created, adopted, re-pointed or self-checked, and its manifest entry stays as
          it is, so the import's items are never touched. A copy of it that an earlier run of this script loaded
          and the console could still fire is warned about: the import matches on Inject #, which that copy does
-         not carry, so it would add a second one. Handles become persona ids, media keys become
+         not carry, so it would add a second one. So is an msel item that replies to a post: an MSEL row cannot
+         carry the reply, so the import creates it top-level. Handles become persona ids, media keys become
          the uploaded asset ids, a reply to a seeded post becomes { postId }, a reply to an earlier post of
          the same item stays { sequence }, and a reply to a post of an earlier item becomes { injectPostId }.
          A 201 is recorded in the manifest at once. On a 429 it waits the Retry-After and retries. A 400
@@ -1908,8 +1909,9 @@ function Get-InjectPlan {
                 ($late -join ', '), ($ahead -join ', '), $(if ($ahead.Count -eq 1) { 's' } else { '' })))
     }
 
-    # The items -RunSheet leaves out (DF-16). One an earlier run of this script loaded, that the console could still
-    # fire, is the only thing said about them: the import matches on Inject #, which a seeded copy does not carry.
+    # The items -RunSheet leaves out (DF-16). Two things are said about one the import will create, never more: a copy an
+    # earlier run of this script loaded, that the console could still fire (the import matches on Inject #, which a
+    # seeded copy does not carry), and a reply the item makes (an MSEL row cannot carry one).
     $left = @(foreach ($item in @(Get-RunSheetItems -Pack $Pack -RunSheet $RunSheet -Left)) {
             $key = [string] $item['key']
             $msel = [string] $item['msel']
@@ -1917,6 +1919,9 @@ function Get-InjectPlan {
             $loaded = if ($entry -and $online) { $rowsById[[string] $entry['itemId']] } else { $null }
             if ($msel -and (Test-InjectArmable -Row $loaded)) {
                 $warnings.Add("$key is left for the MSEL import (msel '$msel'), but an earlier run of this script loaded it and it is still in the run sheet ($(Get-InjectStatusText -Row $loaded), $($loaded['id'])). The import matches on Inject #, which that copy does not carry, so it would add a second one: delete $($loaded['id']) in the console before the import.")
+            }
+            if ($msel -and @(Get-SeedList $item 'posts' | Where-Object { $_['replyTo'] }).Count -gt 0) {
+                $warnings.Add("$key is left for the MSEL import (msel '$msel'), but it replies to another post: an MSEL row cannot carry a reply, so the import creates it as a top-level post, out of its thread. To keep the thread, remove msel so the seed loads it.")
             }
             [pscustomobject]@{
                 Key = $key; Kind = [string] $item['kind']; Title = [string] $item['title']; PostCount = @(Get-SeedList $item 'posts').Count; Msel = $msel
@@ -3239,6 +3244,7 @@ function Invoke-DemoSeed {
         $repointPlan = @(Get-InjectRepointPlan -InjectPlan $injectPlan -PostPlan $postPlan)
         Write-SeedPlan -UploadPlan $uploadPlan -PersonaPlan $personaPlan -PostPlan $postPlan -Anchor $anchor -InjectPlan $injectPlan -Repoint $repointPlan `
             -ReloadFired:$ReloadFiredRunSheet -LeaveEngineRunning:$LeaveEngineRunning -TopLevel $topLevel -Offline -RunSheet $RunSheet -Pins $pinKeys -NoiseCount $noise.Count
+        foreach ($warning in @($injectPlan.Warnings)) { Write-SeedLine WARN $warning }
         if ($anchor.Error) { Write-SeedLine WARN "A live run would stop here: $($anchor.Error)" }
         elseif ($anchor.Anchor) { foreach ($problem in @(Test-SeedReplyTimes -PostPlan $postPlan -Anchor $anchor.Anchor)) { Write-SeedLine WARN "A live run would stop here: $problem" } }
         Write-Host "`nWhatIf: nothing was sent or written. Sign-in, uploads, edits, posts, pins, the run sheet, the white-noise pool and level, media marking and the pause tier were all skipped." -ForegroundColor Cyan
