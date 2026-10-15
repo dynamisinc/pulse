@@ -28,10 +28,14 @@
          after the resume must carry a scenario time that continues from the frozen minute (within 1 minute).
       4. With -IncludeRestart: this RESTARTS THE WHOLE UAT API APP SERVICE, so every exercise on it, including the
          demo exercise, loses its in-memory engine state. It asks for confirmation (ConfirmImpact High; -Confirm:
-         $false skips the prompt) and refuses unless demo-feedback/18 is detected (the pause-tier response carries
-         `persisted`) or -Force is passed. It freezes again, restarts (az), and watches for -RestartWaitMinutes
+         $false skips the prompt) and refuses unless demo-feedback/18 is detected or -Force is passed. Detection is a
+         non-destructive GET of story 18's POST-only route /api/steering/runtime-state/reset: 405 (route exists)
+         means 18 is deployed, 404 or anything else means pre-18. It is never POSTed. (The `persisted` field on the
+         pause-tier response is NOT a signal: story 17 adds it, defaulting to true, before persistence exists.) It freezes again, restarts (az), and watches for -RestartWaitMinutes
          (default 9, longer than the ~6-minute process handover seen on 2026-10-07). Freeze must survive: tier
-         freeze, overlay pause, the noise clock unmoved, /health 200. A restart that clears Freeze is a FAIL
+         freeze, overlay pause, no noise post while down, /health 200. With -NoisePersonaHandle (non-demo), after the
+         Resume a FRESH noise post must continue from the frozen minute (within 1 minute), proving the clock anchor
+         survived and not just the Freeze flag; otherwise clock continuity across the restart is a WARN "unverified". A restart that clears Freeze is a FAIL
          "expected until demo-feedback/18 is deployed". A PASS needs evidence the restart happened (a failed or
          non-200 /health during the wait); without it the result is a WARN "restart not observed; persistence not
          proven".
@@ -220,10 +224,32 @@ function Get-PauseTier {
 function Set-PauseTier([string] $Tier, [string] $OverlayRegister) {
     $body = @{ tier = $Tier; actingHumanId = $script:ActingHumanId }
     if ($OverlayRegister) { $body['overlayRegister'] = $OverlayRegister }
-    $r = Invoke-Staff POST '/api/steering/pause-tier' $body
-    # demo-feedback/18 adds `persisted` to the pause-tier response; its presence is how the restart check knows.
-    if ($r.Status -eq 200 -and $r.Json -is [System.Collections.IDictionary] -and $r.Json.Contains('persisted')) { $script:Story18Detected = $true }
-    return $r
+    Invoke-Staff POST '/api/steering/pause-tier' $body
+}
+
+function Test-Story18Deployed {
+    # Story 18 adds POST /api/steering/runtime-state/reset. A GET on a POST-only minimal-API route answers 405 when the
+    # route exists and 404 when it does not. Never POST it: that would reset the exercise's runtime state.
+    try { $r = Invoke-Staff GET '/api/steering/runtime-state/reset' } catch { return [pscustomobject]@{ Deployed = $false; Status = 'error' } }
+    [pscustomobject]@{ Deployed = $r.Status -eq 405; Status = $r.Status }
+}
+
+function Test-ClockContinuity($Anchor, [DateTimeOffset] $FrozeAt, [DateTimeOffset] $ResumedAt, [int] $AfterCount, [string] $Label) {
+    # Running time only: anchor -> Freeze, and Resume -> the fresh post. The frozen span must add nothing.
+    $next = Wait-NoisePost -AfterCount $AfterCount -TimeoutSeconds $NoiseWaitSeconds
+    if (-not $next) { Write-Check WARN "$Label`: no noise post within $NoiseWaitSeconds s of Resume; clock continuity unverified"; return }
+    if (-not $Anchor) { Write-Check WARN "$Label`: noise resumed, but there is no pre-Freeze anchor; clock continuity unverified"; return }
+    if ($next.Scenario -le $Anchor.Scenario) {
+        # lastPostedAt is a max: a new post that does not advance it was stamped at or before the frozen minute.
+        Write-Check FAIL "$Label`: a new noise post did not advance lastPostedAt past the pre-Freeze anchor: the scenario clock restarted behind the frozen minute"
+        return
+    }
+    $runningSeconds = ($FrozeAt - $Anchor.Wall).TotalSeconds + ($next.Wall - $ResumedAt).TotalSeconds
+    $drift = ($next.Scenario - $Anchor.Scenario).TotalSeconds - $runningSeconds
+    if ([math]::Abs($drift) -le $script:MinuteToleranceSeconds) {
+        Write-Check PASS "$Label`: scenario time continued from the frozen minute (drift $(Format-Seconds $drift), tolerance 1 min)"
+    }
+    else { Write-Check FAIL "$Label`: scenario minute moved across the Freeze: drift $(Format-Seconds $drift) (expected within 1 min)" }
 }
 
 function Get-NoiseState {
@@ -381,7 +407,6 @@ $script:StaffSecret = $null
 $script:OriginalTier = $null
 $script:TargetExerciseId = $null
 $script:Restarted = $false
-$script:Story18Detected = $false
 $script:OverlayReader = 'staff session'
 $script:Created = @{ InjectAttempted = $false; InjectId = $null; NoiseLevelBefore = $null; NoiseLevelChanged = $false; PoolAttempted = $false }
 $created = $script:Created
@@ -549,7 +574,6 @@ try {
     if ($freeze.Status -ne 200) { Stop-Run "Freeze -> $($freeze.Status) $($freeze.Content)" }
     if ((Get-Field $freeze.Json 'tier') -eq 'freeze' -and (Get-Field $freeze.Json 'clockFrozen')) { Write-Check PASS 'Freeze applied: tier freeze, clockFrozen true' }
     else { Write-Check FAIL "Freeze answered tier '$(Get-Field $freeze.Json 'tier')', clockFrozen $(Get-Field $freeze.Json 'clockFrozen')" }
-    Write-Check INFO $(if ($script:Story18Detected) { 'demo-feedback/18 detected (the pause-tier response carries persisted)' } else { 'pre-18: the pause-tier response has no persisted field' })
     Test-OverlayPause 'after Freeze'
 
     # ── 2. Hold ──────────────────────────────────────────────────────────────────────────────────────────
@@ -606,27 +630,20 @@ try {
     elseif (-not $noiseWrites) { Write-Check WARN 'minute continuity after Resume: not run (pass -NoisePersonaHandle <NPC handle> to run the noise checks)' }
     else {
         $afterCount = if ($noiseAtFreeze) { $noiseAtFreeze.PostedCount } else { 0 }
-        $next = Wait-NoisePost -AfterCount $afterCount -TimeoutSeconds $NoiseWaitSeconds
-        if (-not $next) { Write-Check WARN "no noise post within $NoiseWaitSeconds s of Resume; minute continuity not measured" }
-        elseif (-not $anchor) { Write-Check WARN "noise resumed (post at scenario $($next.Scenario.ToString('u'))), but there is no pre-Freeze anchor to compare with" }
-        else {
-            # Running time only: anchor -> Freeze, and Resume -> the post. The hold itself must add nothing.
-            $runningSeconds = ($frozeAt - $anchor.Wall).TotalSeconds + ($next.Wall - $resumedAt).TotalSeconds
-            $drift = ($next.Scenario - $anchor.Scenario).TotalSeconds - $runningSeconds
-            if ([math]::Abs($drift) -le $script:MinuteToleranceSeconds) {
-                Write-Check PASS "scenario time continued from the frozen minute (drift $(Format-Seconds $drift), tolerance 1 min)"
-            }
-            else { Write-Check FAIL "scenario minute moved across the Freeze: drift $(Format-Seconds $drift) after a $HoldSeconds s hold (expected within 1 min)" }
-        }
+        Test-ClockContinuity $anchor $frozeAt $resumedAt $afterCount 'after Resume'
     }
 
     # ── 4. Restart (opt-in) ──────────────────────────────────────────────────────────────────────────────
     if ($doRestart) {
-        Write-Step "4. Freeze survives an App Service restart ($(if ($script:Story18Detected) { 'demo-feedback/18 detected' } else { 'pre-18' }))"
-        if (-not $script:Story18Detected -and -not $Force) {
-            Stop-Run ('restart check refused: demo-feedback/18 is not detected (no persisted on the pause-tier response), so a ' +
+        $story18 = Test-Story18Deployed
+        Write-Step "4. Freeze survives an App Service restart ($(if ($story18.Deployed) { 'demo-feedback/18 detected' } else { 'pre-18' }))"
+        Write-Check INFO "GET /api/steering/runtime-state/reset -> $($story18.Status) (405: story 18's route exists; 404 or other: pre-18)"
+        if (-not $story18.Deployed -and -not $Force) {
+            Stop-Run ('restart check refused: demo-feedback/18 is not detected (story 18''s runtime-state/reset route is absent), so a ' +
                 'restart would clear Freeze (expected until demo-feedback/18 is deployed) and recycle the whole UAT API for nothing. Pass -Force to run it anyway.')
         }
+        $anchor2 = if ($noiseWrites) { Get-Anchor 'before the second Freeze' } else { $null }
+        $frozeAt2 = Get-Now
         $freeze2 = Set-PauseTier 'freeze' $Register
         if ($freeze2.Status -ne 200 -or (Get-Field $freeze2.Json 'tier') -ne 'freeze') { Stop-Run "second Freeze -> $($freeze2.Status) $($freeze2.Content)" }
         Write-Check PASS 'frozen again'
@@ -671,15 +688,23 @@ try {
             $n = Get-NoiseState
             if ($n -and $noiseFrozen) {
                 if ($n.PostedCount -eq $noiseFrozen.PostedCount -and "$($n.LastPostedAt)" -eq "$($noiseFrozen.LastPostedAt)") {
-                    Write-Check PASS 'scenario clock unchanged across the restart (no noise post, latest stamp unchanged)'
+                    Write-Check PASS 'no noise post across the restart (postedCount and latest stamp unchanged)'
                 }
-                else { Write-Check FAIL "scenario clock moved across the restart: postedCount $($noiseFrozen.PostedCount) -> $($n.PostedCount), lastPostedAt $($noiseFrozen.LastPostedAt) -> $($n.LastPostedAt)" }
+                else { Write-Check FAIL "noise moved across the restart while frozen: postedCount $($noiseFrozen.PostedCount) -> $($n.PostedCount), lastPostedAt $($noiseFrozen.LastPostedAt) -> $($n.LastPostedAt)" }
             }
             else { Write-Check WARN 'noise state unreadable; minute-after-restart check skipped' }
         }
+        $resumedAt2 = Get-Now
         $resume2 = Set-PauseTier $script:OriginalTier
         if ($resume2.Status -eq 200) { Write-Check PASS "resumed to '$($script:OriginalTier)'" } else { Write-Check FAIL "Resume after the restart -> $($resume2.Status)" }
         Test-OverlayNone 'after the restart Resume'
+        if (-not $cleared -and -not $noiseWrites) {
+            Write-Check WARN 'clock continuity across the restart unverified (needs a fresh noise post: pass -NoisePersonaHandle on a non-demo exercise)'
+        }
+        elseif (-not $cleared) {
+            $afterCount2 = if ($noiseFrozen) { $noiseFrozen.PostedCount } else { 0 }
+            Test-ClockContinuity $anchor2 $frozeAt2 $resumedAt2 $afterCount2 'across the restart'
+        }
     }
 }
 catch {

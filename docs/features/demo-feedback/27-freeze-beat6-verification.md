@@ -53,7 +53,7 @@ or a roster link.
 
 ## Tests
 
-`scripts/uat/Test-FreezeResume.Tests.ps1` (Pester 5, 31 tests) runs the real script against a simulated API: a fake
+`scripts/uat/Test-FreezeResume.Tests.ps1` (Pester 5, 35 tests) runs the real script against a simulated API: a fake
 wall clock (no real waiting), the pause tier and its scenario clock, the overlay, the noise knob (a post every 30 s
 stamped with scenario time), the inject queue with the Freeze fire refusal (DELETE checks `version`), staff tokens
 (a restart can drop them: 401), and an App Service restart whose handover shows as a failing `/health` and clears
@@ -72,7 +72,9 @@ in-memory state unless Freeze is persisted.
 - Demo exercise: refused when the name lookup lands on it; with an explicit `-ExerciseId` (compared as a GUID) there
   are zero noise writes and the overlay is read as the participant; a participant on another exercise falls back to
   the staff read with a WARN; a missing "Freeze check" exercise fails cleanly.
-- `-IncludeRestart`: refused before 18 unless `-Force`; with `-Force` before 18, FAIL "expected until
+- `-IncludeRestart`: refused before 18 unless `-Force`, including a 17-only deploy (the `persisted` contract field
+  present, persistence absent); Freeze restored with the wrong clock anchor (backwards or forwards) → FAIL on the
+  fresh post-restart noise post, or WARN "unverified" without `-NoisePersonaHandle`, never PASS; with `-Force` before 18, FAIL "expected until
   demo-feedback/18 is deployed"; with 18 and an observed restart, PASS; transport exceptions in the wait loop and a
   401 after the restart (re-sign-in) are survived; no observed restart → WARN "persistence not proven".
 - `-WhatIf` is a dry run: prints the plan, sends nothing (no sign-in, Freeze, noise, probe or restart).
@@ -104,8 +106,12 @@ Run: `Invoke-Pester scripts/uat/Test-FreezeResume.Tests.ps1 -Output Detailed`. T
   can carry a later scenario time than the live clock, so the max can sit still; run on an exercise whose clock has
   not been reset since its last noise post.
 - **Restart.** `-IncludeRestart` restarts the whole UAT API (every exercise, demo included): it asks for confirmation
-  (ConfirmImpact High) and refuses unless 18 is detected (`persisted` on the pause-tier response) or `-Force`. A PASS
-  needs an observed restart (a failing `/health` during the `-RestartWaitMinutes` window); otherwise WARN.
+  (ConfirmImpact High) and refuses unless 18 is detected or `-Force`. Detection: a non-destructive GET of story 18's
+  POST-only `/api/steering/runtime-state/reset` (405 = route exists = 18; 404/other = pre-18; never POSTed). The
+  `persisted` field is not used: story 17 adds it, defaulting to true, before persistence exists. A PASS needs an
+  observed restart (a failing `/health` during the wait); otherwise WARN. Clock continuity across the restart is
+  measured from a fresh noise post after the Resume (needs `-NoisePersonaHandle`, non-demo); unchanged counts while
+  down only show nothing posted, so without a fresh post it is WARN "unverified".
 
 ## Manual check (two browsers, Tom signs in)
 

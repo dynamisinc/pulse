@@ -84,7 +84,9 @@ BeforeAll {
         while ($global:FrzS.NextPostAt -le $target) {
             if (Test-SimNoiseRunning) {
                 $global:FrzS.PostedCount++
-                $global:FrzS.LastPostedAt = (Get-SimScenario $global:FrzS.NextPostAt).ToString('O')
+                # lastPostedAt is the MAX scenario time over noise posts, as the server reports it.
+                $stamp = Get-SimScenario $global:FrzS.NextPostAt
+                if ($stamp -gt [DateTimeOffset]::Parse($global:FrzS.LastPostedAt)) { $global:FrzS.LastPostedAt = $stamp.ToString('O') }
             }
             $global:FrzS.NextPostAt = $global:FrzS.NextPostAt.AddSeconds(30)
         }
@@ -94,6 +96,11 @@ BeforeAll {
             $global:FrzS.RestartAt = $null
             $global:FrzS.Handover = $global:FrzS.Wall
             if ($global:FrzS.Faults.SessionsLost) { $global:FrzS.Tokens.Clear() }
+            # Freeze restored, but with the wrong scenario-clock anchor (the flag survived, the clock did not).
+            switch ($global:FrzS.Faults.WrongAnchor) {
+                'back' { $global:FrzS.ScenarioBase = $global:FrzS.ScenarioBase.AddHours(-1) }
+                'forward' { $global:FrzS.ScenarioBase = $global:FrzS.ScenarioBase.AddMinutes(30) }
+            }
             if (-not $global:FrzS.Faults.FreezePersisted) {
                 $global:FrzS.Tier = 'running'
                 $global:FrzS.ScenarioBase = Get-SimScenario $global:FrzS.Wall
@@ -154,9 +161,12 @@ BeforeAll {
                 }
                 $S.Tier = $Body.tier
                 $state = @{ tier = $S.Tier; clockFrozen = [bool] $S.ClockFrozen }
-                if ($S.Faults.FreezePersisted) { $state['persisted'] = $true }
+                # Story 17 adds the `persisted` CONTRACT field (default true) before story 18 adds persistence.
+                if ($S.Faults.ContractPersisted -or $S.Faults.FreezePersisted) { $state['persisted'] = $true }
                 return New-Response 200 $state
             }
+            '^GET /api/steering/runtime-state/reset$' { return New-Response $(if ($S.Faults.FreezePersisted) { 405 } else { 404 }) $null }
+            '^POST /api/steering/runtime-state/reset$' { throw 'the script must never POST runtime-state/reset' }
             '^GET /api/overlay-state$' {
                 $state = if ($S.Tier -eq 'freeze' -and -not $S.Faults.OverlayMissing) { 'pause' } else { 'none' }
                 return New-Response 200 @{ state = $state; register = $S.Register; message = '' }
@@ -269,9 +279,8 @@ Describe 'Test-FreezeResume.ps1' {
             $r.Text | Should -Match 'PASS\s+inject fire refused while frozen'
             $r.Text | Should -Match 'PASS\s+no noise post while frozen'
             $r.Text | Should -Match 'PASS\s+scenario clock did not move while frozen'
-            $r.Text | Should -Match 'PASS\s+scenario time continued from the frozen minute'
+            $r.Text | Should -Match 'PASS\s+after Resume: scenario time continued from the frozen minute'
             $r.Text | Should -Match 'PASS\s+after Resume: overlay is back to none'
-            $r.Text | Should -Match 'INFO\s+pre-18'
             $global:FrzS.Tier | Should -Be 'engine'
             $global:FrzS.NoiseLevel | Should -Be 'off'
             $global:FrzS.PoolSize | Should -Be 0
@@ -321,7 +330,7 @@ Describe 'Test-FreezeResume.ps1' {
             $r = Invoke-FreezeScript
 
             $r.Code | Should -Be 1
-            $r.Text | Should -Match 'FAIL\s+scenario minute moved across the Freeze'
+            $r.Text | Should -Match 'FAIL\s+after Resume: scenario minute moved across the Freeze'
             $global:FrzS.Tier | Should -Be 'engine'
         }
 
@@ -503,6 +512,38 @@ Describe 'Test-FreezeResume.ps1' {
             $global:FrzS.Tier | Should -Be 'engine'
         }
 
+        It 'refuses the restart on a 17-only deploy (persisted field, no persistence) unless -Force' {
+            New-Server @{ ContractPersisted = $true }
+
+            $r = Invoke-FreezeScript @{ IncludeRestart = $true }
+
+            $r.Code | Should -Be 1
+            $r.Text | Should -Match 'runtime-state/reset -> 404'
+            $r.Text | Should -Match 'FAIL\s+restart check refused: demo-feedback/18 is not detected'
+            Should -Invoke Invoke-AppServiceRestart -Times 0 -Exactly
+            $global:FrzS.Tier | Should -Be 'engine'
+        }
+
+        It 'catches Freeze restored with the wrong clock anchor (<dir>)' -ForEach @(@{ dir = 'back' }, @{ dir = 'forward' }) {
+            New-Server @{ FreezePersisted = $true; WrongAnchor = $dir }
+
+            $r = Invoke-FreezeScript @{ IncludeRestart = $true }
+
+            $r.Code | Should -Be 1
+            $r.Text | Should -Match 'FAIL\s+across the restart: '
+            $r.Text | Should -Not -Match 'PASS\s+across the restart: scenario time continued'
+            $global:FrzS.Tier | Should -Be 'engine'
+        }
+
+        It 'reports clock continuity across the restart as unverified without -NoisePersonaHandle' {
+            New-Server @{ FreezePersisted = $true; WrongAnchor = 'back' }
+
+            $r = Invoke-FreezeScript @{ IncludeRestart = $true; NoisePersonaHandle = '' }
+
+            $r.Text | Should -Match 'WARN\s+clock continuity across the restart unverified'
+            $r.Text | Should -Not -Match 'PASS\s+across the restart: scenario time continued'
+        }
+
         It 'with -Force before 18, reports the cleared Freeze as expected until demo-feedback/18 is deployed' {
             $r = Invoke-FreezeScript @{ IncludeRestart = $true; Force = $true }
 
@@ -520,7 +561,9 @@ Describe 'Test-FreezeResume.ps1' {
             $r.Code | Should -Be 0
             $r.Text | Should -Match 'demo-feedback/18 detected'
             $r.Text | Should -Match 'PASS\s+Freeze survived the restart \(restart observed'
-            $r.Text | Should -Match 'PASS\s+scenario clock unchanged across the restart'
+            $r.Text | Should -Match 'PASS\s+no noise post across the restart'
+            $r.Text | Should -Match 'PASS\s+across the restart: scenario time continued from the frozen minute'
+            $global:FrzS.Calls | Should -Not -Contain 'POST /api/steering/runtime-state/reset'
             Should -Invoke Invoke-AppServiceRestart -Times 1 -Exactly
             $global:FrzS.Tier | Should -Be 'engine'
         }
