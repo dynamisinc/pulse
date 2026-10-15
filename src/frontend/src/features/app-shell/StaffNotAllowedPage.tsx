@@ -22,8 +22,8 @@
  * (COR-004/XC-002). Like every staff surface it mounts `StaffShellFrame`, the
  * COBRA theme boundary with the navy header (never confusable with a
  * participant view), and uses COBRA components and FontAwesome only. The
- * header carries just the refused surface's name — no launcher, switcher or
- * toolstrip tools, because there is no surface here to drive.
+ * header reads "Not allowed" — no launcher, switcher or toolstrip tools,
+ * because there is no surface here to drive.
  *
  * ## Accessibility (NFR-001)
  * The frame's work area is the page's one `<main>`; the page adds an `<h1>`.
@@ -71,7 +71,7 @@ export function StaffNotAllowedPage({
       sx={{ height: '100%', alignItems: 'center', paddingLeft: CobraStyles.Padding.MainWindow }}
     >
       <Typography sx={{ fontWeight: 700, color: staffShellTokens.header.textPrimary }}>
-        {surfaceLabel}
+        Not allowed
       </Typography>
     </Stack>
   )

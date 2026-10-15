@@ -167,6 +167,14 @@ describe('StaffRouteTree — a registered path the role may not open says so (DF
 
     expect(screen.getAllByRole('main')).toHaveLength(1)
   })
+
+  it('titles the COBRA header "Not allowed", not the refused surface', () => {
+    renderTree('controller', '/staff/console', '/staff/evaluate')
+
+    const header = screen.getByTestId('staff-shell-header')
+    expect(header).toHaveTextContent('Not allowed')
+    expect(header).not.toHaveTextContent('Evaluator Dashboard')
+  })
 })
 
 describe('StaffRouteTree — unknown paths fall back to the role default, never to /login', () => {

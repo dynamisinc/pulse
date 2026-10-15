@@ -108,8 +108,8 @@ function toFormErrors(error: OrgExerciseError): FormErrors {
   if (error.status === 401 || error.status === 403) {
     return {
       form:
-        'Your session is not allowed to create exercises. Only a planner or an organization '
-        + 'administrator can. Sign in again if you believe this is wrong.',
+        'Your session is not allowed to create exercises. Only a planner, controller or '
+        + 'organization administrator can. Sign in again if you believe this is wrong.',
     }
   }
   return {

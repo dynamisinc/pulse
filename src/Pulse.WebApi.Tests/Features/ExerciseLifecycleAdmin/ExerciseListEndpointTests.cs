@@ -176,12 +176,29 @@ public sealed class ExerciseListEndpointTests
 
     /// <summary>
     /// demo-feedback DF-20 (story 15): a Controller session MAY list — and sees exactly its own customer's
-    /// exercises, with the same positive control and unbounded control as the org-admin case above.
+    /// exercises, with the same positive control and unbounded control as the org-admin case above. The list
+    /// is ORG-WIDE on purpose: a run in the controller's own tenant that it holds NO assignment on is listed
+    /// too (that is what makes it "exercise management" rather than the switcher's own-assignments read).
     /// </summary>
     [RequiresDockerFact]
     public async Task List_AsController_ReturnsOnlyTheCallersOwnTenantsExercises()
     {
         var world = await OrgAdminTestWorld.SeedAsync(_fixture, ExerciseAdminRoles.Controller);
+
+        // A second run in the controller's OWN tenant, with no StaffAssignment for the caller (or anyone).
+        var unassigned = new Pulse.WebApi.Data.Entities.Exercise
+        {
+            Id = Guid.NewGuid(),
+            OrganizationId = world.OwnOrganizationId,
+            Name = $"Own Tenant Unassigned Run {Guid.NewGuid():N}",
+            TimeZone = "UTC",
+            Status = "build",
+        };
+        await using (var seed = _fixture.CreateContext())
+        {
+            seed.Exercises.Add(unassigned);
+            await seed.SaveChangesAsync();
+        }
 
         await using var factory = new OrgAdminProbeFactory(_fixture.ConnectionString!);
         using var client = OrgAdminTestWorld.CreateClient(factory, world.Token);
@@ -196,6 +213,16 @@ public sealed class ExerciseListEndpointTests
 
         listed.Select(row => row.ExerciseId).Should().Contain(
             world.OwnExercise.Id.ToString(), "positive control: the controller's own customer's run is listed");
+        listed.Select(row => row.ExerciseId).Should().Contain(
+            unassigned.Id.ToString(),
+            "DF-20 is deliberately org-wide: a controller sees every run its own organization owns, including "
+            + "one it holds no StaffAssignment on — the switcher's own-assignments read is the narrower view");
+        await using (var check = _fixture.CreateContext())
+        {
+            var callerAssignedToIt = await check.StaffAssignments.AsNoTracking()
+                .AnyAsync(a => a.ExerciseId == unassigned.Id);
+            callerAssignedToIt.Should().BeFalse("the control: nobody is assigned to that run");
+        }
         listed.Select(row => row.ExerciseId).Should().NotContain(
             world.OtherExercise.Id.ToString(),
             "widening the ROLE set must not widen the TENANT bound: customer Y's run is never listed");

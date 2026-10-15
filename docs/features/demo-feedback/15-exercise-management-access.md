@@ -55,7 +55,8 @@ real `Program` pipeline and the two-customer `OrgAdminTestWorld`):
   (controller is not an org admin), `.NoRoleSet_IsAWildcard_SoNoGlobalSuperAdminExists`
 - **Controller create (201, controller assignment, own tenant):**
   `ExerciseCreationEndpointTests.Create_AsController_PersistsAnExerciseInTheCallersOwnTenant_WithAControllerAssignment`
-- **Controller list (200, own tenant only) + second tenant:** `ExerciseListEndpointTests.List_AsController_ReturnsOnlyTheCallersOwnTenantsExercises`,
+- **Controller list (200, own tenant only, org-wide — an unassigned run of its own tenant is listed) + second tenant:**
+  `ExerciseListEndpointTests.List_AsController_ReturnsOnlyTheCallersOwnTenantsExercises`,
   `.List_AsControllerInASecondTenant_NeverSeesWhatAControllerInTheFirstTenantCreated` (a controller in tenant A creates;
   a controller in tenant B lists only its own run)
 - **Evaluator 403 on both:** `ExerciseCreationEndpointTests.Create_AsEvaluator_IsRefused`, `ExerciseListEndpointTests.List_AsEvaluator_IsRefused`
@@ -69,11 +70,13 @@ Linked — frontend (`src/frontend/src/features/`):
 
 - **Not-allowed page in `StaffRouteTree`:** `app-shell/StaffRouteTree.test.tsx` — "a registered path the role may not open
   says so (DF-20)": renders in place with an `h1` and no surface, names the roles in words, the button goes to the role's
-  default, takes route focus labelled "Not allowed: …", exactly one `main`; unknown paths (`/staff/does-not-exist`, bare
+  default, takes route focus labelled "Not allowed: …", exactly one `main`, the COBRA header reads "Not allowed"; unknown paths (`/staff/does-not-exist`, bare
   `/staff`, `/staff/plan/nested`) still redirect
 - **Role words:** `app-shell/staffRoleWords.test.ts` (every role has words, "org admin", natural join, empty list)
 - **Through the real entry:** `app-shell/RoleAwareEntry.staffRouting.test.tsx` (controller at `/staff/plan` and evaluator
   at `/staff/console` see the page; a participant/PIO on any typed staff path never sees it)
+- **Copy:** `exerciseLifecycleAdmin/components/CreateExerciseForm.test.tsx` (a refused create says "Only a planner,
+  controller or organization administrator can.")
 - **Exercise management with the shipped registry:** `exerciseLifecycleAdmin/orgAdminSurfaceFamily.test.tsx` — a controller
   reaches `/staff/exercises`; an evaluator sees "You need the planner, org admin or controller role to open Exercise
   Management." and the button goes to `/staff/evaluate`; an unknown `/staff/nope` still redirects; a participant/PIO never

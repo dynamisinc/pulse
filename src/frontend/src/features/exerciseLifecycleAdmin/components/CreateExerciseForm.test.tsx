@@ -279,7 +279,7 @@ describe('CreateExerciseForm — the other failures', () => {
 
     await waitFor(() => {
       expect(screen.getByTestId('create-exercise-error'))
-        .toHaveTextContent(/planner or an organization administrator/)
+        .toHaveTextContent('Only a planner, controller or organization administrator can.')
     })
     expect(nameField()).not.toHaveAttribute('aria-invalid', 'true')
   })
