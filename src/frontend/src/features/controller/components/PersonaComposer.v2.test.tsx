@@ -44,6 +44,10 @@ import { composeAsPersonaDraftStore } from '../hooks/useComposeAsPersona'
 import { MIXED_MEDIA_MESSAGE, TOO_MANY_IMAGES_MESSAGE } from '../media/attachmentRules'
 import { PersonaComposer, type PersonaComposerProps } from './PersonaComposer'
 
+// Demo-feedback story 11 (DF-14): the console's write controls render only for a controller
+// session, and this suite mounts none, so the read-only gate is fixed to "controller" here.
+vi.mock('@/features/controller/access/useCanControl', () => ({ useCanControl: () => true }))
+
 vi.mock('@/core/media/uploadMedia', async importOriginal => {
   const actual = await importOriginal<typeof import('@/core/media/uploadMedia')>()
   return { ...actual, uploadPickedMedia: vi.fn() }

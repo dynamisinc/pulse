@@ -18,7 +18,7 @@
  */
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ThemeProvider } from '@mui/material/styles'
 import { cobraTheme } from '@/theme/cobraTheme'
 import { ExerciseContextProvider } from '@/core/exerciseContext'
@@ -35,6 +35,10 @@ import { composeAsPersonaDraftStore } from '../hooks/useComposeAsPersona'
 import { PersonaComposer } from './PersonaComposer'
 import { ActivePersonaProvider } from '../hooks/useActivePersona'
 import { ControllerConsole } from './ControllerConsole'
+
+// Demo-feedback story 11 (DF-14): the console's write controls render only for a controller
+// session, and this suite mounts none, so the read-only gate is fixed to "controller" here.
+vi.mock('@/features/controller/access/useCanControl', () => ({ useCanControl: () => true }))
 
 /** The fixed exercise id `ExerciseContextProvider`'s mock resolver returns. */
 const EXERCISE_ID = 'ex-mock-0001'

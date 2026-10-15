@@ -8,7 +8,7 @@
  */
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ThemeProvider } from '@mui/material/styles'
 import { cobraTheme } from '@/theme/cobraTheme'
 import { ExerciseContextProvider } from '@/core/exerciseContext'
@@ -16,6 +16,10 @@ import { api } from '@/core/services/api'
 import { resetPauseStateForTest } from '../hooks/usePauseState'
 import { NoiseControl } from './NoiseControl'
 import { mockNoiseAdapter, resetNoiseMockForTest, subscribeMockNoiseState } from './noiseMock'
+
+// Demo-feedback story 11 (DF-14): the console's write controls render only for a controller
+// session, and this suite mounts none, so the read-only gate is fixed to "controller" here.
+vi.mock('@/features/controller/access/useCanControl', () => ({ useCanControl: () => true }))
 
 afterEach(() => {
   resetNoiseMockForTest()

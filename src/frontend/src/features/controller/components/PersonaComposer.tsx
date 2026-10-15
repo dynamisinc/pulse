@@ -136,6 +136,7 @@ import { EngagementBaselineSection } from './EngagementBaselineSection'
 import { PersonaComposerPreview } from './PersonaComposerPreview'
 import styles from './PersonaComposer.module.css'
 import emojiSkin from './PersonaComposerEmoji.module.css'
+import { useCanControl } from '../access'
 
 export interface PersonaComposerProps {
   /** The persona to post AS (persona-operation/02 input - never imported).
@@ -253,6 +254,7 @@ export function PersonaComposer({
   onClearReply,
   onRestoreReply,
 }: PersonaComposerProps) {
+  const canControl = useCanControl()
   const { timeZone } = useExerciseContext()
 
   // A reply to a post that has been taken down since the target was set can never succeed
@@ -400,6 +402,9 @@ export function PersonaComposer({
     setLibraryOpen(false)
     libraryButtonRef.current?.focus()
   }
+
+  // Story 11 (DF-14): no composer for a non-controller (the console never opens it for one).
+  if (!canControl) return null
 
   return (
     <form
