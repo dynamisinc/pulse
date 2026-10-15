@@ -34,6 +34,10 @@ import { renderRunSheet } from './runSheetTestHarness'
 import { getEmittedTelemetryEvents, resetTelemetryBuffer } from '@/core/telemetry'
 import type { InjectItemDto, InjectItemWrite } from './types'
 
+// Demo-feedback story 11 (DF-14): the console's write controls render only for a controller
+// session, and this suite mounts none, so the read-only gate is fixed to "controller" here.
+vi.mock('@/features/controller/access/useCanControl', () => ({ useCanControl: () => true }))
+
 const ME = MOCK_ME
 const PEER = 'human-controller-02'
 const STORAGE_KEY = `${FILTERS_STORAGE_PREFIX}ex-mock-0001`

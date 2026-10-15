@@ -24,8 +24,8 @@
  * chooses it. The status line is a polite live region, so a stop is announced without stealing
  * focus.
  *
- * NOT ROLE-GATED HERE. An evaluator sees the knob and a 403 comes back as words; hiding the write
- * affordance for evaluators is story 11's job (`noise/**` is on its list).
+ * READ-ONLY FOR NON-CONTROLLERS (story 11, DF-14). Without `useCanControl()` the level buttons are
+ * absent and the current level is shown as text instead; the rate, counts and status stay.
  */
 
 import { useId, useRef, type KeyboardEvent } from 'react'
@@ -44,6 +44,7 @@ import { usePauseState } from '../hooks/usePauseState'
 import { formatNoiseCounts, formatNoiseRate, noiseStatusLine } from './noiseStatus'
 import { NOISE_LEVEL_LABELS, NOISE_LEVELS, type NoiseLevel } from './noiseTypes'
 import { useNoiseState } from './useNoiseState'
+import { useCanControl } from '../access'
 
 const FONT = "'Figtree', system-ui, sans-serif"
 
@@ -68,6 +69,7 @@ function levelForKey(key: string, index: number): NoiseLevel | undefined {
 
 export function NoiseControl() {
   const { state, selectedLevel, loadError, saveError, setLevel } = useNoiseState()
+  const canControl = useCanControl()
   const { tier } = usePauseState()
   const { status: exerciseStatus } = useExerciseContext()
   const labelId = useId()
@@ -128,7 +130,7 @@ export function NoiseControl() {
           </Typography>
         </Stack>
 
-        <Box
+        {canControl ? <Box
           role="radiogroup"
           aria-labelledby={labelId}
           data-testid="noise-level-group"
@@ -178,7 +180,15 @@ export function NoiseControl() {
               </Box>
             )
           })}
-        </Box>
+        </Box> : (
+          <Typography
+            component="span"
+            data-testid="noise-level-readonly"
+            sx={{ fontSize: 12, fontWeight: 800, color: chrome.ink }}
+          >
+            {selectedLevel === undefined ? '' : NOISE_LEVEL_LABELS[selectedLevel]}
+          </Typography>
+        )}
 
         {state !== undefined && (
           <Typography

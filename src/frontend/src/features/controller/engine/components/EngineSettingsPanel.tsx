@@ -93,6 +93,7 @@ import {
 } from '../hooks/useEngineSettings'
 // D5 dark operator-chrome tokens (matches `ReviewQueue`'s/`EngineControlBar`'s `chrome`).
 import { consoleChrome as chrome } from '../../consoleChrome'
+import { useCanControl } from '../../access'
 
 /** Stable toolstrip-registry id for the console's "ENGINE" surface tool. */
 export const ENGINE_SETTINGS_TOOL_ID = 'engine-settings'
@@ -156,6 +157,8 @@ export interface EngineSettingsPanelProps {
  * await-then-apply + serialization contract this component relies on.
  */
 export function EngineSettingsPanel({ open, onClose }: EngineSettingsPanelProps) {
+  // Story 11 (DF-14): a non-controller reads the settings; the three levers are absent.
+  const canControl = useCanControl()
   const closeButtonRef = useRef<HTMLButtonElement | null>(null)
   const openerRef = useRef<Element | null>(null)
   const {
@@ -368,7 +371,7 @@ export function EngineSettingsPanel({ open, onClose }: EngineSettingsPanelProps)
               >
                 AUTONOMY DEFAULT
               </Typography>
-              <Stack
+              {canControl && <Stack
                 direction="row"
                 role="group"
                 aria-label="Exercise autonomy default"
@@ -404,7 +407,7 @@ export function EngineSettingsPanel({ open, onClose }: EngineSettingsPanelProps)
                     </Box>
                   )
                 })}
-              </Stack>
+              </Stack>}
 
               {pendingAutonomyDefault && (
                 <Typography
@@ -456,7 +459,7 @@ export function EngineSettingsPanel({ open, onClose }: EngineSettingsPanelProps)
               >
                 TIER POLICY
               </Typography>
-              <Stack direction="row" role="group" aria-label="Tier-policy mode" sx={{ gap: 0.75, flexWrap: 'wrap' }}>
+              {canControl && <Stack direction="row" role="group" aria-label="Tier-policy mode" sx={{ gap: 0.75, flexWrap: 'wrap' }}>
                 {TIER_POLICY_OPTIONS.map(option => {
                   const selected = settings.tierPolicyMode === option.value
                   return (
@@ -486,7 +489,7 @@ export function EngineSettingsPanel({ open, onClose }: EngineSettingsPanelProps)
                     </Box>
                   )
                 })}
-              </Stack>
+              </Stack>}
 
               {pendingTierPolicy && (
                 <Typography
@@ -538,7 +541,7 @@ export function EngineSettingsPanel({ open, onClose }: EngineSettingsPanelProps)
                 </Stack>
               )}
 
-              {settings.providerCutToFake ? (
+              {canControl && (settings.providerCutToFake ? (
                 <Box
                   component="button"
                   type="button"
@@ -590,13 +593,13 @@ export function EngineSettingsPanel({ open, onClose }: EngineSettingsPanelProps)
                 >
                   Cut to Fake
                 </Box>
-              )}
+              ))}
 
               {/* AC3/alreadyFake: the lever is genuinely INERT when the
                   configured provider is already Fake (every environment
                   today, including UAT) — say so plainly rather than leaving
                   a control that looks live but can never change anything. */}
-              {settings.alreadyFake && !settings.providerCutToFake && (
+              {canControl && settings.alreadyFake && !settings.providerCutToFake && (
                 <Stack
                   id={ALREADY_FAKE_NOTE_ID}
                   data-testid="provider-lever-already-fake-note"
@@ -624,7 +627,7 @@ export function EngineSettingsPanel({ open, onClose }: EngineSettingsPanelProps)
               )}
             </Stack>
 
-            {forbidden && (
+            {(forbidden || !canControl) && (
               <Stack
                 data-testid="engine-settings-readonly-note"
                 direction="row"

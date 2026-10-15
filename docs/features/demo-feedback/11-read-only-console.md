@@ -37,3 +37,25 @@ Server-side enforcement (#61, #377). A separate evaluator console layout.
 
 A table-driven test that renders the console as controller and as evaluator and asserts each listed control is present
 for one and absent for the other; Export present for both; the View only chip; registry rules test with the new role.
+
+**Built (`src/frontend/src/features/controller/access/readOnlyConsole.test.tsx`).** The real `ControllerConsoleRoute`
+under a real `SessionProvider`, only the session resolver replaced (as in `ControllerConsoleRoute.c6.test.tsx`), with a
+run sheet seeded into every state the row actions depend on (pending, held, skipped, failed):
+
+- **Table (28 controls x 2 roles):** the PERSONAS tool, the "Post as a persona" strip, Reply as…, Take down, Pin for
+  everyone, the Pause pill, the Escalation dial, the noise level buttons, the kill switch, "Simulate degraded (dev)",
+  the swamped-mode toggle, Batch approve, batch selection, Approve/Veto/Edit/Re-roll, StartEx/EndEx, Fire next, Add,
+  Import from Excel, row Fire/Retry/Release/Hold/Skip/Unskip/Delete/Move up/Move down and row Edit: each present for a
+  controller, absent (zero in the DOM) for an evaluator.
+- Export posts enabled for both roles; "View only" in the title row for the evaluator and never for the controller; the
+  evaluator keeps the run sheet rows (every row "View"), the live world, the review cards and the noise level and rate
+  as text; the editor opens in `view` mode with no Save or Add post.
+- **Keyboard:** for an evaluator the run sheet's N/F/H/S/A, the review queue's A/V/R/B/E, the live world's R and
+  Ctrl/⌘+K change and open nothing, E opens the item read-only, and the Keyboard help lists only ↑/↓ and E; a controller
+  still gets the palette from Ctrl+K.
+- **Controller unchanged:** the controller render's full control inventory (role, test id, accessible name, document
+  order; 153 controls) equals the list recorded on `feature/demo-feedback-w3` @ e5b8d76c before any gating.
+- **Registry:** seam S-3's existing `staffRouteRegistry.test.tsx` cases already assert the evaluator is admitted to
+  `/staff/console`, keeps `/staff/evaluate` as default and has the console in its launcher; not extended.
+- `TakedownAction.test.tsx`'s CTL-033 cases now drive the session gate instead of the identity mock; the 40 existing
+  console suites that mount no session fix the gate to "controller" with one `vi.mock` line each.

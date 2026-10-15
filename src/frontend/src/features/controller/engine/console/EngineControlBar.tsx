@@ -81,6 +81,7 @@ import { useEngineSettings, type EngineSettingsAutonomy } from '../hooks/useEngi
 import { useReviewQueue } from '../hooks/useReviewQueue'
 // D5 dark operator-chrome tokens (matches `ReviewQueue`'s `chrome`). Staff-only.
 import { consoleChrome as chrome } from '../../consoleChrome'
+import { useCanControl } from '../../access'
 
 /** The kill switch's cycle order + display copy (D5 §2 "Live / Suggest-only / STOP ENGINE"). */
 const MODE_CYCLE: readonly EngineMode[] = ['live', 'suggest-only', 'stop']
@@ -130,6 +131,8 @@ function labelFor(mode: EngineMode, autonomy: EngineSettingsAutonomy | null): st
 }
 
 export function EngineControlBar() {
+  // Story 11 (DF-14): the bar's write toggles are absent for a non-controller; its readouts stay.
+  const canControl = useCanControl()
   const engineControl = useEngineControl()
   const engineSettings = useEngineSettings()
   // Destructured so the effect below can depend on the STABLE `refetch`
@@ -201,8 +204,8 @@ export function EngineControlBar() {
         fontFamily: "'Figtree', system-ui, sans-serif",
       }}
     >
-      {/* a. Kill switch — always visible, text + icon + dot (never color-only). */}
-      <Box
+      {/* a. Kill switch — always visible to a controller, text + icon + dot (never color-only). */}
+      {canControl && <Box
         component="button"
         type="button"
         data-testid="engine-kill-switch"
@@ -232,7 +235,7 @@ export function EngineControlBar() {
           aria-hidden="true"
           sx={{ width: 7, height: 7, borderRadius: '50%', bgcolor: modeCopy.tone, flex: 'none' }}
         />
-      </Box>
+      </Box>}
 
       {/* b. Degrade-mode indicator — text + icon, only while degraded. Default healthy. */}
       {engineControl.degraded ? (
@@ -246,7 +249,7 @@ export function EngineControlBar() {
           <Typography component="span" sx={{ fontSize: 10.5, fontWeight: 700, color: chrome.amber }}>
             PROVIDER DEGRADED — clamped to Suggest
           </Typography>
-          <Box
+          {canControl && <Box
             component="button"
             type="button"
             data-testid="engine-degraded-restore"
@@ -262,9 +265,9 @@ export function EngineControlBar() {
             }}
           >
             Restore
-          </Box>
+          </Box>}
         </Stack>
-      ) : import.meta.env.DEV ? (
+      ) : import.meta.env.DEV && canControl ? (
         // Dev-only affordance: `degrade()` trips a safety clamp, so it must not
         // be reachable by an operator in a real (production) exercise build.
         <Box

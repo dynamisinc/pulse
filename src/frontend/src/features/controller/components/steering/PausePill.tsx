@@ -94,6 +94,7 @@ import {
 } from '../../hooks/usePauseState'
 // D5 dark operator-chrome tokens (matches `SwampedModeToggle`). Staff-only.
 import { consoleChrome as chrome } from '../../consoleChrome'
+import { useCanControl } from '../../access'
 
 /** The tiers a controller can SELECT to pause (excludes the `running` baseline). */
 type PauseChoice = Exclude<PauseTier, 'running'>
@@ -179,6 +180,7 @@ const TIER_DOT: Readonly<Record<PauseTier, string>> = {
  * popover (three radio tiers, guarded Freeze confirm, Resume while paused).
  */
 export function PausePill() {
+  const canControl = useCanControl()
   const {
     tier,
     label,
@@ -233,6 +235,9 @@ export function PausePill() {
     resume()
     closePopover()
   }
+
+  // Story 11 (DF-14): every pill action writes; a non-controller reads the tier on the header pill.
+  if (!canControl) return null
 
   return (
     <>

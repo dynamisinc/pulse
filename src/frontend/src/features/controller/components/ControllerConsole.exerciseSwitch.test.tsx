@@ -47,6 +47,10 @@ import { composeAsPersonaDraftStore } from '../hooks/useComposeAsPersona'
 import { ActivePersonaProvider, useActivePersona } from '../hooks/useActivePersona'
 import { ControllerConsole } from './ControllerConsole'
 
+// Demo-feedback story 11 (DF-14): the console's write controls render only for a controller
+// session, and this suite mounts none, so the read-only gate is fixed to "controller" here.
+vi.mock('@/features/controller/access/useCanControl', () => ({ useCanControl: () => true }))
+
 vi.mock('@/core/exerciseContext/exerciseContextResolver', async importOriginal => {
   const actual = await importOriginal<typeof import('@/core/exerciseContext/exerciseContextResolver')>()
   return { ...actual, resolveExerciseContext: vi.fn() }
