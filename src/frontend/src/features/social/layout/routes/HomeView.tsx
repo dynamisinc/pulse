@@ -94,6 +94,9 @@ export function HomeView() {
   const canUseFollowing = canCompose && !session.isReadOnly && session.personaId !== undefined
 
   const [feedTab, setFeedTab] = useState<FeedTabId>('all')
+  // What is actually shown. A session that LOSES the switch mid-view (it turns read-only,
+  // or its persona goes) falls back to All Posts instead of a hidden tab and a blank Home.
+  const activeTab: FeedTabId = canUseFollowing ? feedTab : 'all'
   // The Following and Pinned panels are mounted on FIRST switch and kept mounted after
   // that (hidden when inactive) -- so a one-shot mount telemetry / read fires when the
   // reader opens it, and its baseline + scroll position survive a switch back.
@@ -114,7 +117,7 @@ export function HomeView() {
     if (key !== 'ArrowRight' && key !== 'ArrowLeft' && key !== 'Home' && key !== 'End') return
     event.preventDefault()
     const count = FEED_TABS.length
-    const current = Math.max(0, FEED_TABS.findIndex(tab => tab.id === feedTab))
+    const current = Math.max(0, FEED_TABS.findIndex(tab => tab.id === activeTab))
     const nextIndex =
       key === 'Home'
         ? 0
@@ -139,7 +142,7 @@ export function HomeView() {
       {canUseFollowing && (
         <div className={styles.feedTabs} role="tablist" aria-label="Feed">
           {FEED_TABS.map(tab => {
-            const selected = tab.id === feedTab
+            const selected = tab.id === activeTab
             return (
               <button
                 key={tab.id}
@@ -169,7 +172,7 @@ export function HomeView() {
         role={canUseFollowing ? 'tabpanel' : undefined}
         id="social-feed-panel-all"
         aria-labelledby={canUseFollowing ? 'social-feed-tab-all' : undefined}
-        hidden={feedTab !== 'all'}
+        hidden={activeTab !== 'all'}
         data-testid="social-feed-panel-all"
       >
         <Feed
@@ -186,7 +189,7 @@ export function HomeView() {
           role="tabpanel"
           id="social-feed-panel-following"
           aria-labelledby="social-feed-tab-following"
-          hidden={feedTab !== 'following'}
+          hidden={activeTab !== 'following'}
           data-testid="social-feed-panel-following"
         >
           <Feed
@@ -204,7 +207,7 @@ export function HomeView() {
           role="tabpanel"
           id="social-feed-panel-pinned"
           aria-labelledby="social-feed-tab-pinned"
-          hidden={feedTab !== 'pinned'}
+          hidden={activeTab !== 'pinned'}
           data-testid="social-feed-panel-pinned"
         >
           <PinnedFeed

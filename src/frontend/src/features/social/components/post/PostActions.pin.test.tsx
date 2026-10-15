@@ -3,14 +3,16 @@
  * ---------------------------------------------------------------------------
  * The personal **Pin** action (demo-feedback story 07; DF-6, NFR-001, COR-015):
  *
- *  - it sits AFTER Like, uses the thumbtack, shows NO count, is named "Pin" / "Unpin" and
- *    carries `viewer.pinned` in `aria-pressed` (never colour-only);
+ *  - it sits AFTER Like, uses the thumbtack, shows NO count, keeps the STABLE name "Pin"
+ *    (ARIA toggle-button pattern) and carries `viewer.pinned` in `aria-pressed` (never
+ *    colour-only);
  *  - the toggle is OPTIMISTIC (pressed before the write settles), calls
  *    `PUT` / `DELETE /posts/{id}/reactions/pin`, and ROLLS BACK exactly on failure with a
  *    message in the card's polite live region; a second tap while pending is a no-op;
  *  - it is gated like Like: absent (not inert) on a read-only card;
- *  - a settled pin or like notifies a mounted Pinned tab (`viewerEngagement`), and a pin
- *    on one card shows on every other card of the same post (`pinState`).
+ *  - a settled pin or like notifies a mounted Pinned tab (`viewerEngagement`), a pin on one
+ *    card shows on every other card of the same post (`pinState`), and a LATER server read
+ *    that disagrees wins over an older confirmed pin.
  *
  * Real providers, mock mode (the Vitest default). Read-only / no-persona SESSIONS are
  * covered by `PostActions.sessionReadOnly.test.tsx` / `PostActions.noPersona.test.tsx`,
@@ -117,7 +119,7 @@ describe('PostActions — Pin anatomy (story 07)', () => {
     expect(pin.querySelector('svg')).toHaveAttribute('aria-hidden', 'true')
   })
 
-  it('reflects viewer.pinned: "Unpin", pressed, with the filled (active) style', async () => {
+  it('reflects viewer.pinned in aria-pressed (name stays "Pin"), with the filled style', async () => {
     await renderActions(
       <PostActions
         post={buildPost({ viewer: { liked: false, reposted: false, pinned: true } })}
@@ -125,9 +127,10 @@ describe('PostActions — Pin anatomy (story 07)', () => {
       />,
     )
 
-    const pin = screen.getByRole('button', { name: 'Unpin' })
+    const pin = screen.getByRole('button', { name: 'Pin' })
     expect(pin).toHaveAttribute('aria-pressed', 'true')
     expect(pin.className).toMatch(/actionButtonActive/)
+    expect(screen.queryByRole('button', { name: 'Unpin' })).not.toBeInTheDocument()
   })
 
   it('is absent (not inert) on a read-only card', async () => {
@@ -148,8 +151,8 @@ describe('PostActions — Pin toggle (optimistic + rollback)', () => {
 
     await user.click(screen.getByRole('button', { name: 'Pin' }))
 
-    // Optimistic: pressed before the server answers.
-    const pin = screen.getByRole('button', { name: 'Unpin' })
+    // Optimistic: pressed before the server answers; the name does not flip.
+    const pin = screen.getByRole('button', { name: 'Pin' })
     expect(pin).toHaveAttribute('aria-pressed', 'true')
     expect(put).toHaveBeenCalledTimes(1)
     expect(put.mock.calls[0]?.[0]).toBe('/posts/post-pin-1/reactions/pin')
@@ -163,7 +166,7 @@ describe('PostActions — Pin toggle (optimistic + rollback)', () => {
       write.resolve(pinBody('post-pin-1', true))
       await write.promise
     })
-    expect(screen.getByRole('button', { name: 'Unpin' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('button', { name: 'Pin' })).toHaveAttribute('aria-pressed', 'true')
     expect(events).toEqual([{ postId: 'post-pin-1', kind: 'pin', active: true }])
   })
 
@@ -179,9 +182,10 @@ describe('PostActions — Pin toggle (optimistic + rollback)', () => {
       />,
     )
 
-    await user.click(screen.getByRole('button', { name: 'Unpin' }))
+    await user.click(screen.getByRole('button', { name: 'Pin' }))
 
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Pin' })).toBeInTheDocument())
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Pin' })).toHaveAttribute('aria-pressed', 'false'))
     expect(del.mock.calls[0]?.[0]).toBe('/posts/post-pin-1/reactions/pin')
     expect(events).toEqual([{ postId: 'post-pin-1', kind: 'pin', active: false }])
   })
@@ -216,7 +220,57 @@ describe('PostActions — Pin toggle (optimistic + rollback)', () => {
     if (first === undefined) throw new Error('expected a Pin button')
     await user.click(first)
 
-    await waitFor(() => expect(screen.getAllByRole('button', { name: 'Unpin' })).toHaveLength(2))
+    await waitFor(() =>
+      expect(
+        screen.getAllByRole('button', { name: 'Pin' }).map(b => b.getAttribute('aria-pressed')),
+      ).toEqual(['true', 'true']))
+  })
+
+  it('lets a LATER server read override an older confirmed pin (fresher data wins)', async () => {
+    // Confirmed pinned earlier this session (e.g. on another card).
+    pinState.set('post-pin-1', true)
+    const { rerender } = await renderActions(
+      <PostActions
+        post={buildPost({ viewer: { liked: false, reposted: false, pinned: false } })}
+        variant="full"
+      />,
+    )
+    // The snapshot a card MOUNTS with may predate the pin (a frozen feed): the pin stands.
+    expect(screen.getByRole('button', { name: 'Pin' })).toHaveAttribute('aria-pressed', 'true')
+
+    // A newer read (a new viewer object) says it is not pinned: that wins, for every card.
+    rerender(
+      <ExerciseContextProvider>
+        <SessionProvider>
+          <PostActions
+            post={buildPost({ viewer: { liked: false, reposted: false, pinned: false } })}
+            variant="full"
+          />
+        </SessionProvider>
+      </ExerciseContextProvider>,
+    )
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Pin' })).toHaveAttribute('aria-pressed', 'false'))
+    expect(pinState.get('post-pin-1')).toBe(false)
+  })
+
+  it('keeps the confirmed pin when a re-render carries the SAME read', async () => {
+    pinState.set('post-pin-1', true)
+    const post = buildPost({ viewer: { liked: false, reposted: false, pinned: false } })
+    const tree = (
+      <ExerciseContextProvider>
+        <SessionProvider>
+          <PostActions post={post} variant="full" />
+        </SessionProvider>
+      </ExerciseContextProvider>
+    )
+    const { rerender } = render(tree)
+    await screen.findByTestId('post-actions')
+
+    rerender(tree)
+
+    expect(screen.getByRole('button', { name: 'Pin' })).toHaveAttribute('aria-pressed', 'true')
+    expect(pinState.get('post-pin-1')).toBe(true)
   })
 })
 

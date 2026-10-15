@@ -35,13 +35,16 @@
  * PIN (demo-feedback story 07, DF-6). After Like sits the viewer's PERSONAL pin
  * (FontAwesome thumbtack): `usePin` owns an optimistic toggle with exact rollback on
  * failure (the `useReaction` pattern) over `PUT`/`DELETE /api/posts/{id}/reactions/pin`.
- * It shows NO count (a pin is private and never counted). Its accessible name is "Pin" or
- * "Unpin" and `aria-pressed` carries `viewer.pinned`; ON is a filled icon (outline at rest)
- * plus the name and pressed state, never colour alone (NFR-001). It is gated exactly like
+ * It shows NO count (a pin is private and never counted). Its accessible name is a STABLE
+ * "Pin" and `aria-pressed` carries `viewer.pinned` (the ARIA toggle-button pattern: the name
+ * never flips to "Unpin", the pressed state says it); ON is a filled icon (outline at rest)
+ * plus the pressed state, never colour alone (NFR-001). It is gated exactly like
  * Like (writable session + bound persona + a non-read-only card) and is ABSENT otherwise -
  * with no count there is nothing to render inert. A failed pin shares the card's one
  * live region. When a pin or a like SETTLES the row tells a mounted Pinned tab
- * (`pinned/pinEvents.viewerEngagement`) so it re-reads without a reload.
+ * (`pinned/pinEvents.viewerEngagement`) so it re-reads without a reload. The row hands
+ * `usePin` its `post.viewer` object as the server snapshot, so a FRESHER read (a new
+ * object) overrides an older confirmed pin (see `usePin`).
  *
  * HIDDEN, NOT DISABLED (D1-011 / F3). There is NO Quote trigger, NO quote panel
  * (`QuoteComposer` is no longer mounted) and NO Share action — they are absent
@@ -159,6 +162,7 @@ function PostActionsRow({ post, variant, onReply }: PostActionsProps) {
   const pin = usePin({
     postId: post.id,
     initiallyPinned: post.viewer?.pinned === true,
+    serverSnapshot: post.viewer,
     notice,
   })
 
@@ -277,7 +281,7 @@ function PostActionsRow({ post, variant, onReply }: PostActionsProps) {
                 : styles.actionButton
             }
             data-action="pin"
-            aria-label={pin.pinned ? 'Unpin' : 'Pin'}
+            aria-label="Pin"
             aria-pressed={pin.pinned}
             onClick={pin.toggle}
           >

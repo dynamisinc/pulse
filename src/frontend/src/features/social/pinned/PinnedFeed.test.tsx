@@ -131,8 +131,20 @@ describe('PinnedFeed — order, marker, time (DF-5)', () => {
     expect(within(rowOf('post-seed-kward-correction')).queryByTestId('pinned-for-all-label')).toBeNull()
 
     // The personal state reaches the card's own actions.
-    expect(within(rowOf('post-seed-mvega-question')).getByRole('button', { name: 'Unpin' }))
+    expect(within(rowOf('post-seed-mvega-question')).getByRole('button', { name: 'Pin' }))
       .toHaveAttribute('aria-pressed', 'true')
+  })
+
+  it('ties the "Pinned" line to its card: the article is described by it', async () => {
+    resetMockPins({ exercisePins: ['post-seed-fw-advisory'] })
+    recordMockLike('post-seed-kward-correction', true)
+    await renderPinned()
+    await waitFor(() => expect(listedIds()).toHaveLength(2))
+
+    const pinnedArticle = within(rowOf('post-seed-fw-advisory')).getByRole('article')
+    expect(pinnedArticle).toHaveAccessibleDescription('Pinned')
+    const likedArticle = within(rowOf('post-seed-kward-correction')).getByRole('article')
+    expect(likedArticle).not.toHaveAttribute('aria-describedby')
   })
 
   it('renders every timestamp in scenario time (COR-053)', async () => {
@@ -228,10 +240,31 @@ describe('PinnedFeed — live updates', () => {
     await renderPinned()
     await waitFor(() => expect(listedIds()).toHaveLength(2))
 
-    await user.click(within(rowOf('post-seed-mvega-question')).getByRole('button', { name: 'Unpin' }))
+    await user.click(within(rowOf('post-seed-mvega-question')).getByRole('button', { name: 'Pin' }))
 
     await waitFor(() => expect(listedIds()).toEqual(['post-seed-kward-correction']))
     await waitFor(() => expect(document.activeElement).toBe(panel()))
+  })
+
+  it('does not pull focus back once the reader has moved it out of the tab', async () => {
+    const user = userEvent.setup()
+    recordMockLike('post-seed-kward-correction', true)
+    recordMockLike('post-seed-mvega-question', true)
+    await renderPinned(new FakePinSource(), <button type="button">Outside</button>)
+    await waitFor(() => expect(listedIds()).toHaveLength(2))
+
+    // Focus a card in the tab, then move focus to a real element outside the tab ...
+    act(() => within(rowOf('post-seed-mvega-question')).getByRole('button', { name: 'Pin' }).focus())
+    const outside = screen.getByRole('button', { name: 'Outside' })
+    await user.click(outside)
+    expect(outside).toHaveFocus()
+    // ... which then lets go of focus entirely.
+    act(() => outside.blur())
+
+    act(() => removedPosts.add('post-seed-mvega-question'))
+
+    expect(listedIds()).toEqual(['post-seed-kward-correction'])
+    expect(document.activeElement).not.toBe(panel())
   })
 
   it('liking or pinning a post elsewhere adds it without a reload', async () => {
@@ -266,7 +299,7 @@ describe('PinnedFeed — live updates', () => {
     // Pin it there: it is back, and the tab's own card agrees it is pinned.
     await user.click(within(other).getByRole('button', { name: 'Pin' }))
     await waitFor(() => expect(listedIds()).toEqual(['post-seed-kward-correction']))
-    expect(within(rowOf('post-seed-kward-correction')).getByRole('button', { name: 'Unpin' }))
-      .toBeInTheDocument()
+    expect(within(rowOf('post-seed-kward-correction')).getByRole('button', { name: 'Pin' }))
+      .toHaveAttribute('aria-pressed', 'true')
   })
 })

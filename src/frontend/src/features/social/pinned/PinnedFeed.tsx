@@ -14,7 +14,9 @@
  * so a video plays here exactly as it does on All Posts. A post pinned for everyone
  * (`pinnedForAll`) gets a small "Pinned" line with a thumbtack ABOVE the author line, in
  * fiction-safe words (never "controller" or "exercise control"); the word carries the
- * meaning, the icon is decoration (never colour- or icon-only, NFR-001). A post whose
+ * meaning, the icon is decoration (never colour- or icon-only, NFR-001). The card's own
+ * `<article>` points `aria-describedby` at that line, so a screen reader moving by article
+ * hears "Pinned" with the post. A post whose
  * author is not in the cast is skipped, as on the feed.
  *
  * TIME (COR-053). Every timestamp here is the card's own scenario-time header; this
@@ -91,10 +93,21 @@ const PinnedRow = memo(function PinnedRow({
   onHashtagOpen,
   onOpenProfile,
 }: PinnedRowProps) {
+  // The card is frozen (`PostCard` takes no aria props), so the label is tied to the card's
+  // own <article> here: moving by article, a screen reader hears "Pinned" as its description.
+  const labelId = useId()
+  const rowRef = useRef<HTMLLIElement>(null)
+  useLayoutEffect(() => {
+    const article = rowRef.current?.querySelector('article')
+    if (article === null || article === undefined) return
+    if (pinnedForAll) article.setAttribute('aria-describedby', labelId)
+    else article.removeAttribute('aria-describedby')
+  }, [pinnedForAll, labelId])
+
   return (
-    <li className={styles.row} data-pinned-post-id={post.id}>
+    <li ref={rowRef} className={styles.row} data-pinned-post-id={post.id}>
       {pinnedForAll && (
-        <p className={styles.pinnedLabel} data-testid="pinned-for-all-label">
+        <p id={labelId} className={styles.pinnedLabel} data-testid="pinned-for-all-label">
           <FontAwesomeIcon icon={faThumbtack} aria-hidden="true" className={styles.pinnedIcon} />
           <span>Pinned</span>
         </p>
@@ -159,6 +172,14 @@ export function PinnedFeed({
   // Focus continuity: remember which post holds focus; if its card leaves the tab while
   // focus fell to the page, give focus to the region (see the module header).
   const focusedPostIdRef = useRef<string | null>(null)
+  // Focus moved OUT of the tab to a real element: nothing to restore later. (A blur with no
+  // related target - the focused card being removed - keeps the memory.)
+  const handleBlur = (event: FocusEvent<HTMLElement>) => {
+    const next = event.relatedTarget
+    if (next instanceof Node && !event.currentTarget.contains(next)) {
+      focusedPostIdRef.current = null
+    }
+  }
   const handleFocus = (event: FocusEvent<HTMLElement>) => {
     const target = event.target
     focusedPostIdRef.current =
@@ -183,6 +204,7 @@ export function PinnedFeed({
       aria-labelledby={headingId}
       tabIndex={-1}
       onFocus={handleFocus}
+      onBlur={handleBlur}
       data-testid="pinned-feed"
     >
       <h1 id={headingId} className={styles.srOnly}>Pinned</h1>
