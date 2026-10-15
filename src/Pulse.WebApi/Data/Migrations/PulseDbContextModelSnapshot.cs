@@ -318,6 +318,64 @@ namespace Pulse.WebApi.Data.Migrations
                     b.ToTable("ExerciseDayWords");
                 });
 
+            modelBuilder.Entity("Pulse.WebApi.Data.Entities.ExerciseRuntimeState", b =>
+                {
+                    b.Property<Guid>("ExerciseId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<long?>("ClockElapsedAtAnchorTicks")
+                        .HasColumnType("bigint");
+
+                    b.Property<bool>("ClockFrozen")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false);
+
+                    b.Property<DateTimeOffset?>("ClockScenarioStart")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("ClockTimeZone")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<DateTimeOffset?>("ClockWallAnchorUtc")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("OverlayMessage")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<string>("OverlayRegister")
+                        .HasMaxLength(16)
+                        .HasColumnType("nvarchar(16)");
+
+                    b.Property<long>("OverlaySequence")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(0L);
+
+                    b.Property<string>("OverlayState")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(16)
+                        .HasColumnType("nvarchar(16)")
+                        .HasDefaultValue("none");
+
+                    b.Property<string>("PauseTier")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(16)
+                        .HasColumnType("nvarchar(16)")
+                        .HasDefaultValue("running");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.HasKey("ExerciseId");
+
+                    b.ToTable("ExerciseRuntimeStates");
+                });
+
             modelBuilder.Entity("Pulse.WebApi.Data.Entities.Follow", b =>
                 {
                     b.Property<Guid>("Id")
@@ -878,11 +936,22 @@ namespace Pulse.WebApi.Data.Migrations
                     b.Property<DateTimeOffset?>("DeletedAt")
                         .HasColumnType("datetimeoffset");
 
+                    b.Property<int>("EditCount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(0);
+
                     b.Property<Guid>("ExerciseId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("InjectId")
                         .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTimeOffset?>("LastEditedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<DateTimeOffset?>("LastEditedScenarioTime")
+                        .HasColumnType("datetimeoffset");
 
                     b.Property<Guid?>("MutationOf")
                         .HasColumnType("uniqueidentifier");
@@ -914,6 +983,44 @@ namespace Pulse.WebApi.Data.Migrations
                         .HasFilter("[PinnedForAllAt] IS NOT NULL");
 
                     b.ToTable("Posts");
+                });
+
+            modelBuilder.Entity("Pulse.WebApi.Data.Entities.PostEdit", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ActingHumanId")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int>("EditNumber")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("EditedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<DateTimeOffset>("EditedScenarioTime")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid>("ExerciseId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("PostId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("PreviousBody")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ExerciseId");
+
+                    b.HasIndex("PostId", "EditNumber")
+                        .IsUnique();
+
+                    b.ToTable("PostEdits");
                 });
 
             modelBuilder.Entity("Pulse.WebApi.Data.Entities.PostMediaItem", b =>
@@ -1271,6 +1378,15 @@ namespace Pulse.WebApi.Data.Migrations
                     b.Navigation("Posts");
                 });
 
+            modelBuilder.Entity("Pulse.WebApi.Data.Entities.ExerciseRuntimeState", b =>
+                {
+                    b.HasOne("Pulse.WebApi.Data.Entities.Exercise", null)
+                        .WithOne()
+                        .HasForeignKey("Pulse.WebApi.Data.Entities.ExerciseRuntimeState", "ExerciseId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("Pulse.WebApi.Data.Entities.InjectItemPost", b =>
                 {
                     b.HasOne("Pulse.WebApi.Data.Entities.InjectItem", null)
@@ -1334,6 +1450,15 @@ namespace Pulse.WebApi.Data.Migrations
                         .WithMany()
                         .HasForeignKey("ParentPostId")
                         .OnDelete(DeleteBehavior.Restrict);
+                });
+
+            modelBuilder.Entity("Pulse.WebApi.Data.Entities.PostEdit", b =>
+                {
+                    b.HasOne("Pulse.WebApi.Data.Entities.Post", null)
+                        .WithMany()
+                        .HasForeignKey("PostId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("Pulse.WebApi.Data.Entities.PostMediaItem", b =>

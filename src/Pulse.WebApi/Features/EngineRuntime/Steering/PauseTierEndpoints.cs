@@ -512,6 +512,14 @@ public sealed class PauseTierStateDto
     [JsonPropertyName("clockFrozen")]
     public required bool ClockFrozen { get; init; }
 
+    /// <summary>
+    /// Whether the change was written through to the exercise's runtime-state row (demo-feedback DF-24). <c>false</c>
+    /// only when the write-through failed (logged at Error; the console shows a warning chip). Defaults to <c>true</c>
+    /// until story 18 wires the write-through.
+    /// </summary>
+    [JsonPropertyName("persisted")]
+    public bool Persisted { get; init; } = true;
+
     /// <summary>Projects the registry's state for <paramref name="exerciseId"/> onto the wire shape.</summary>
     /// <param name="registry">The pause-tier registry.</param>
     /// <param name="exerciseId">The server-resolved exercise (COR-001).</param>
