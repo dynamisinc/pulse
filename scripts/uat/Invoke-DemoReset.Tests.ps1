@@ -43,6 +43,8 @@ BeforeAll {
             NoiseCounts = [System.Collections.Generic.Queue[int]]::new()  # postedCount per GET /api/staff/noise, then the last
             NoiseLast   = 0
             Restarted   = $false
+            Clock       = 0.0                     # the fake monotonic clock (seconds): sleeps and slow answers advance it
+            Delay       = 0                       # seconds each /health and pause-tier read takes after the restart
             Codes       = @{}                     # script name (or 'Reset-DemoState.ps1 -Restart') -> exit code
             Throws      = @{}                     # script name -> message it throws
             Log         = [System.Collections.Generic.List[string]]::new()
@@ -53,14 +55,19 @@ BeforeAll {
     }
 
     function Invoke-FakeWeb {
-        param($Uri, $Method, $Headers, $Body)
+        param($Uri, $Method, $Headers, $Body, $TimeoutSec)
         $fake = $global:ResetFake
         $u = [Uri] [string] $Uri
         $Method = ([string] $Method).ToUpperInvariant()     # the mocked cmdlet's -Method is a WebRequestMethod ('Post')
         $h = @{}
         if ($Headers) { foreach ($k in $Headers.Keys) { $h[$k] = [string] $Headers[$k] } }
         $text = if ($Body -is [byte[]]) { [Text.Encoding]::UTF8.GetString($Body) } elseif ($Body) { [string] $Body } else { '' }
-        $fake.Calls.Add([pscustomobject]@{ Method = $Method; Host = $u.Host; Path = $u.AbsolutePath; Headers = $h; Body = $text })
+        $fake.Calls.Add([pscustomobject]@{ Method = $Method; Host = $u.Host; Path = $u.AbsolutePath; Headers = $h; Body = $text; TimeoutSec = $TimeoutSec; At = $fake.Clock; AfterRestart = $fake.Restarted })
+        if ($fake.Restarted -and $fake.Delay -gt 0 -and $Method -eq 'GET' -and $u.AbsolutePath -in '/health', '/api/steering/pause-tier') {
+            # A slow answer: it takes Delay seconds, or times out at TimeoutSec (as the real cmdlet would).
+            if ($TimeoutSec -and $fake.Delay -gt $TimeoutSec) { $fake.Clock += $TimeoutSec; throw [System.Net.Http.HttpRequestException]::new("The request was canceled due to the configured HttpClient.Timeout of $TimeoutSec seconds elapsing.") }
+            $fake.Clock += $fake.Delay
+        }
         $fake.Log.Add("$Method $($u.AbsolutePath)")
         $reply = { param([int] $Status, $Json) [pscustomobject]@{ StatusCode = $Status; Content = $(if ($null -ne $Json) { ConvertTo-Json -InputObject $Json -Compress } else { '' }); Headers = @{} } }
         $authorized = $h['Authorization'] -ceq "Bearer $($fake.Token)"
@@ -137,9 +144,10 @@ AfterAll {
 Describe 'Invoke-DemoReset.ps1' {
     BeforeEach {
         $global:ResetFake = New-ResetFake
-        Mock Invoke-WebRequest { Invoke-FakeWeb -Uri $Uri -Method $Method -Headers $Headers -Body $Body }
+        Mock Invoke-WebRequest { Invoke-FakeWeb -Uri $Uri -Method $Method -Headers $Headers -Body $Body -TimeoutSec $TimeoutSec }
         Mock Invoke-DemoScript { Invoke-FakeScript -Name $Name -Arguments $Arguments }
-        Mock Start-Sleep { }
+        Mock Start-Sleep { $global:ResetFake.Clock += $Seconds }
+        Mock Get-MonotonicSeconds { $global:ResetFake.Clock }
         Mock Invoke-Az { throw 'az must not be called while PULSE_STAFF_SECRET is set' }
     }
 
@@ -204,6 +212,10 @@ Describe 'Invoke-DemoReset.ps1' {
             @{ Value = 'api fake test' }
             @{ Value = 'https://user:pw@api.fake.test' }
             @{ Value = 'http://api.fake.test' }
+            @{ Value = 'http://localhost:5000' }
+            @{ Value = 'https://api.fake.test:8443' }
+            @{ Value = 'https://api.fake.test:443/' }
+            @{ Value = 'api.fake.test:8443' }
             @{ Value = '   ' }
         ) {
             $run = Invoke-Reset -Extra @{ ApiHost = $Value }
@@ -404,8 +416,37 @@ Describe 'Invoke-DemoReset.ps1' {
         It 'the new process never answering within -RestartTimeoutMinutes fails step 1' {
             $run = Invoke-Reset -Extra @{ RestartTimeoutMinutes = 2; PollSeconds = 60 }
             $run.Code | Should -Be 1
-            Should -Invoke Start-Sleep -ParameterFilter { $Seconds -eq 60 } -Times 1 -Exactly
+            # Elapsed-time budget: polls at 0 and 60 s, sleeps of 60 s, and the deadline at 120 s.
+            Should -Invoke Start-Sleep -ParameterFilter { $Seconds -eq 60 } -Times 2 -Exactly
+            $run.Text | Should -Match 'waited ~2 min'
             $run.Text | Should -Match 'did not answer within 2 min'
+            Get-ScriptNames | Should -Be @('Reset-DemoState.ps1 -Restart')
+        }
+
+        It 'slow answers count against the budget: success is reported with the real elapsed time' {
+            $global:ResetFake.Delay = 10
+            'running', 'running' | ForEach-Object { $global:ResetFake.AfterRestart.Enqueue($_) }
+            $run = Invoke-Reset
+            $run.Code | Should -Be 0
+            # health 10 s + tier 10 s, sleep 20 s, health 10 s + tier 10 s = 60 s.
+            $run.Text | Should -Match 'the new process is serving after ~1 min'
+            Should -Invoke Start-Sleep -ParameterFilter { $Seconds -eq 20 } -Times 1 -Exactly
+        }
+
+        It 'very slow answers never stretch the wait past -RestartTimeoutMinutes: each timeout and sleep is capped to what is left' {
+            $global:ResetFake.Delay = 25
+            $run = Invoke-Reset -Extra @{ RestartTimeoutMinutes = 2; PollSeconds = 20 }
+            $run.Code | Should -Be 1
+            $run.Text | Should -Match 'did not answer within 2 min \(waited ~2 min'
+            $polls = @($global:ResetFake.Calls | Where-Object { $_.AfterRestart -and $_.Method -eq 'GET' -and $_.Path -in '/health', '/api/steering/pause-tier' })
+            $polls.Count | Should -BeGreaterThan 1
+            $begin = $polls[0].At
+            foreach ($call in $polls) {
+                $call.TimeoutSec | Should -BeLessOrEqual 30
+                ($call.At - $begin + $call.TimeoutSec) | Should -BeLessOrEqual 121
+            }
+            ($global:ResetFake.Clock - $begin) | Should -BeLessOrEqual 121
+            ($global:ResetFake.Clock - $begin) | Should -BeGreaterOrEqual 120
             Get-ScriptNames | Should -Be @('Reset-DemoState.ps1 -Restart')
         }
 

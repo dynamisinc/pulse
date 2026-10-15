@@ -53,7 +53,8 @@
     UAT scripts resolve it.
 
 .PARAMETER ApiHost
-    The API's host name, which the exercise is bound to (not the participant site). Plain http only for localhost.
+    The API's host name, which the exercise is bound to (not the participant site). An https URL is accepted and
+    reduced to its host; http:// and an explicit port are refused (https on 443 only).
 
 .PARAMETER SiteUrl
     The participant site, printed at the end.
@@ -170,8 +171,10 @@ function Resolve-ApiHost {
         slash, path and query are dropped. Returns @{ Host (the bare host, with a port only when not the default);
         BaseUrl (the origin this script calls) }. Only the bare host is passed to other scripts: Reset-DemoState.ps1
         prepends https:// itself, and Clear-DemoContent.ps1 looks the exercise up by host name. Anything else (another
-        scheme, a user name or password, characters a host name cannot hold) is refused with a clear error. Plain
-        http only for localhost: the staff secret and the session token must not travel in the clear.
+        scheme, a user name or password, characters a host name cannot hold) is refused with a clear error. So are
+        any http:// (localhost included) and any explicit port: the UAT scripts all target https on 443
+        (Reset-DemoState.ps1 always uses https://, and Clear-DemoContent.ps1 matches Exercises.Hostname, which
+        holds no port), so a value they would read differently is refused rather than half-run.
     #>
     param([AllowNull()] [AllowEmptyString()] [string] $ApiHost)
     $value = ([string] $ApiHost).Trim()
@@ -183,11 +186,14 @@ function Resolve-ApiHost {
         $uri.UserInfo -or $uri.HostNameType -notin 'Dns', 'IPv4' -or $uri.Host -notmatch '^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$') {
         throw "-ApiHost '$ApiHost' is not a host name or an http(s) URL. $hint"
     }
-    if ($uri.Scheme -eq 'http' -and -not $uri.IsLoopback) {
-        throw "-ApiHost '$ApiHost' uses plain http: only localhost may (the staff secret and the session token must not travel in the clear). Nothing was sent."
+    if ($uri.Scheme -ne 'https') {
+        throw "-ApiHost '$ApiHost' uses plain http: the UAT scripts use https only (localhost included; the staff secret and the session token must not travel in the clear). Nothing was sent."
     }
-    $hostName = if ($uri.IsDefaultPort) { $uri.Host } else { '{0}:{1}' -f $uri.Host, $uri.Port }
-    return [pscustomobject]@{ Host = $hostName.ToLowerInvariant(); BaseUrl = $uri.GetLeftPart([UriPartial]::Authority) }
+    # An explicit port, even :443: the authority as typed (before any path, query or fragment) ends in :digits.
+    if ($value -match '^[A-Za-z][A-Za-z0-9+.-]*://[^/?#]*:\d*(?:[/?#]|$)') {
+        throw "-ApiHost '$ApiHost' names a port: the UAT scripts use https on 443 only (Clear-DemoContent.ps1 looks the exercise up by a host name without a port). Nothing was sent."
+    }
+    return [pscustomobject]@{ Host = $uri.Host.ToLowerInvariant(); BaseUrl = 'https://' + $uri.Host.ToLowerInvariant() }
 }
 
 function Clear-WebErrorRecord {
@@ -460,7 +466,7 @@ function Test-ExercisePins {
     <# Check 6. Returns the GET /api/feed/pinned status for check 10. #>
     param([string] $BaseUrl, [string] $Token, [AllowNull()] [System.Collections.IDictionary] $Pack)
     $r = Invoke-PulseApi -BaseUrl $BaseUrl -Method GET -Path '/api/feed/pinned' -Token $Token
-    if ($null -eq $Pack) { Add-ReadyResult 6 'Exercise pins' SKIP 'no demo pack to compare against (-PackPath)'; return $r.Status }
+    if ($null -eq $Pack) { Add-ReadyResult 6 'Exercise pins' FAIL "expected the pack's pins pinned for everyone; $(Get-PackFailure)"; return $r.Status }
     $pins = @(Get-JsonList $Pack['pins'])
     $expected = "$($pins -join ', ') pinned for everyone"
     if ($r.Status -ne 200 -or $r.Json -isnot [System.Collections.IDictionary]) { Add-ReadyResult 6 'Exercise pins' FAIL "expected $expected; GET /api/feed/pinned answered $($r.Status)"; return $r.Status }
@@ -490,7 +496,7 @@ function Test-ExerciseLifecycle {
 function Test-RunSheet {
     <# Check 7. The API hides an item's Inject # (ExternalRef), so items are told apart by title (see the help). #>
     param([string] $BaseUrl, [string] $Token, [AllowNull()] [System.Collections.IDictionary] $Pack)
-    if ($null -eq $Pack) { Add-ReadyResult 7 'Run sheet' SKIP 'no demo pack to compare against (-PackPath)'; return }
+    if ($null -eq $Pack) { Add-ReadyResult 7 'Run sheet' FAIL "expected the seeded items pending and no MSEL-imported item; $(Get-PackFailure)"; return }
     $r = Invoke-PulseApi -BaseUrl $BaseUrl -Method GET -Path '/api/injects' -Token $Token
     if ($r.Status -ne 200 -or $r.Json -isnot [System.Collections.IDictionary]) { Add-ReadyResult 7 'Run sheet' FAIL "expected GET /api/injects 200; got $($r.Status)"; return }
     $queue = @((Get-JsonList $r.Json['items']) | Where-Object { $_ -is [System.Collections.IDictionary] })
@@ -583,6 +589,7 @@ function Test-ScenarioWindow {
     <# Check 9 (see the help: the server's scenario clock has no read route). #>
     param([object[]] $Found, [AllowNull()] [object] $TierState, [DateTimeOffset] $Now = [DateTimeOffset]::UtcNow)
     $note = 'the server''s scenario clock has no read route; the participant clock is the browser''s wall clock'
+    if ($script:PackError) { Add-ReadyResult 9 'Scenario clock' FAIL "expected a minute inside the pack's window; $(Get-PackFailure)"; return }
     if ($Found.Count -eq 0) { Add-ReadyResult 9 'Scenario clock' WARN "expected a minute inside the pack's window; no pack post is in the feed to read the anchor from ($note). Run Seed-DemoContent.ps1"; return }
     $nearest = $Found[0]
     $at = ConvertTo-Instant $nearest.Post['scenarioTime']
@@ -602,6 +609,7 @@ function Test-NewRoutes {
     if ($PinnedStatus -le 0) { Add-ReadyResult 10 'Route /api/feed/pinned' FAIL 'expected an answer, not 404; got no answer (see check 6)' }
     elseif ($PinnedStatus -eq 404) { Add-ReadyResult 10 'Route /api/feed/pinned' FAIL 'expected an answer, not 404; got 404: Wave 3 is not deployed on this host' }
     else { Add-ReadyResult 10 'Route /api/feed/pinned' PASS "expected an answer, not 404; got $PinnedStatus" }
+    if ($script:PackError) { Add-ReadyResult 10 'Route /api/posts/{id}/edits' FAIL "expected an answer for a seeded post; $(Get-PackFailure)"; return }
     if ($Found.Count -eq 0) { Add-ReadyResult 10 'Route /api/posts/{id}/edits' SKIP 'no seeded post in the feed to ask about'; return }
     $postId = [string] $Found[0].Post['id']
     $guid = [guid]::Empty
@@ -621,10 +629,31 @@ function Invoke-ReadyStep {
 }
 
 function Read-DemoPack {
+    <#
+    The demo pack, or $null after recording a FAIL ("demo pack could not be loaded: <reason>") and setting
+    $script:PackError, which makes the checks that need the pack (6, 7, 9 and the edits route in 10) FAIL too.
+    #>
     param([string] $Path)
-    if (-not $Path -or -not (Test-Path -LiteralPath $Path -PathType Leaf)) { Write-Host "  No demo pack at '$Path': the pins, run-sheet and anchor checks are skipped." -ForegroundColor Yellow; return $null }
-    try { return (Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json -AsHashtable) }
-    catch { Write-Host "  The demo pack at '$Path' is not JSON: the pins, run-sheet and anchor checks are skipped." -ForegroundColor Yellow; return $null }
+    $script:PackError = $null
+    $pack = $null
+    try {
+        if (-not $Path) { throw 'no -PackPath given' }
+        if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { throw "no file at '$Path'" }
+        $text = Get-Content -LiteralPath $Path -Raw -ErrorAction Stop
+        try { $pack = $text | ConvertFrom-Json -AsHashtable -ErrorAction Stop } catch { throw "'$Path' is not valid JSON" }
+        if ($pack -isnot [System.Collections.IDictionary]) { throw "'$Path' is not a demo pack (not a JSON object)" }
+        return $pack
+    }
+    catch {
+        $script:PackError = Get-PrintableText $_.Exception.Message -Max 200
+        Add-ReadyResult 0 'Demo pack' FAIL "demo pack could not be loaded: $($script:PackError). The pins, run-sheet, anchor and edits checks fail with it"
+        return $null
+    }
+}
+
+function Get-PackFailure {
+    <# The FAIL text for a check that needs the pack, when it could not be loaded. #>
+    return "demo pack could not be loaded: $($script:PackError)"
 }
 
 function Write-ReadyJson {
@@ -666,6 +695,7 @@ function Invoke-DemoReadyCheck {
     )
     $ProgressPreference = 'SilentlyContinue'
     $script:ReadyResults = [System.Collections.Generic.List[object]]::new()
+    $script:PackError = $null
     try { $resolved = Resolve-ApiHost -ApiHost $ApiHost }
     catch { Write-Host $_.Exception.Message -ForegroundColor Red; return 1 }
     $baseUrl = $resolved.BaseUrl
