@@ -31,31 +31,36 @@ post and cannot reply to anything. Every run also pins the pack's `pins` for eve
 pool with the pack's `noise`, leaves white noise **off** (turn it up on stage with the console's knob), and makes
 sure media marking (`watermarkEnabled`) is on.
 
-**Monday, rehearsal.** `Reset-DemoState.ps1`, then the demo command line. If you rehearse the import on this
-exercise, **do not fire what it creates**, and delete those items in the console afterwards (see the hazard).
+**Order ("Fire next").** The seed loads its items in pack order, each at the end of the queue. The on-stage import
+does not append: it places each item it creates just before the first pending item with a later planned minute
+(DF-18, story 14). So after the import the queue reads in pack order again, **as long as every seeded item has a
+`plannedMinute`**: the import cannot place its items around one without it, and the plan warns about such an
+item when an `exceptMsel` run leaves msel items out. The self-check checks the seeded items' order; the imported
+ones arrive later, on stage.
+
+**Monday, rehearsal.** `Reset-DemoState.ps1`, then the demo command line. Rehearsing the import on this exercise
+is fine: Tuesday's `Clear-DemoContent.ps1` archives what it created.
 
 **Tuesday morning, at least 1 hour before the demo** (time for a re-run, or for `-Restart`'s 8-minute wait):
 
 1. `pwsh scripts/uat/Clear-DemoContent.ps1`. It archives Monday's posts (Monday's pins and noise posts go with
-   them). The run sheet is not touched.
+   them) and the run-sheet items Monday's MSEL import created (the ones with an Inject #, fired ones included),
+   so the show's import creates them again. The items this script seeded are not touched.
 2. `pwsh scripts/uat/Reset-DemoState.ps1`.
-3. In the console, **delete every item Monday's import created** (pending, skipped and failed items can be
-   deleted), so the import creates them again on stage. If the rehearsal fired seeded items, first **Skip the
-   leftover unfired seeded items**. Then run the demo command line with `-ReloadFiredRunSheet`, or without it if
-   nothing was fired.
+3. If the rehearsal fired seeded items, first **Skip the leftover unfired seeded items** in the console. Then run
+   the demo command line with `-ReloadFiredRunSheet`, or without it if nothing was fired.
    The seed posts the opening feed again under new ids, anchored at now, and pins the new copies. A run-sheet
    item kept from Monday whose reply pointed at one of Monday's (now archived) posts is **re-pointed in place**
-   (`PUT /api/injects/{id}`:
-   same item, same place in the queue, console edits kept). A reply a controller re-targeted to another live
-   post is left alone. The self-check confirms "every run-sheet reply points at a live post", and every
-   self-check line must be ✅ (➖ lines are informational: the items left for the import, for example).
+   (`PUT /api/injects/{id}`: same item, same place in the queue, console edits kept). A reply a controller
+   re-targeted to another live post is left alone. The self-check confirms "every run-sheet reply points at a
+   live post", and every self-check line must be ✅ (➖ lines are informational: the items left for the import,
+   for example).
 4. Open the participant app and check that Trending shows `#WaterIssues` and the Pinned tab opens on the pins.
 
-**Hazard: an imported item FIRED in a rehearsal blocks the demo's import.** The import keys on the MSEL
-`Inject #` (DF-10). It creates nothing for a row whose `Inject #` is still on a live item, and it never changes a
-fired one ("already fired; not changed"). The server will not delete a fired item, so on Tuesday that row would
-create nothing. Rehearse the import on another exercise, or rehearse it without firing what it creates. This
-script never touches imported items, so it cannot repair this.
+**Never run `-RunSheet all` after the on-stage import.** It would load the msel items as well. The queue does not
+show an item's Inject #, so the seed cannot tell an imported item from its own: it adopts one only when kind, title,
+persona and text all match, and otherwise adds a second copy. The plan warns when an msel item an earlier run
+recorded is still armable while `exceptMsel` leaves it for the import.
 
 **Why Tuesday.** The participant app's scenario "now" is the browser's wall clock (`core/clock/exerciseClock.ts`,
 the Wave-0 mock), and Trending counts only the last 12 hours (`features/social/explore/trending.ts`). A Monday
@@ -71,7 +76,8 @@ So wait about 8 minutes, then run `pwsh scripts/uat/Reset-DemoState.ps1` (withou
 
 Run-of-show: `Clear-DemoContent.ps1` (optional), then `Reset-DemoState.ps1`, then this script. **After a
 rehearsal that fired the run sheet: add `-ReloadFiredRunSheet`.** Firing spends an item: the console cannot
-fire it again, the server will not delete a fired item, and neither reset script touches the inject queue. A
+fire it again, the server will not delete a fired item, and neither reset script touches an item this script
+seeded (`Clear-DemoContent.ps1` archives only the items an MSEL import created, the ones with an Inject #). A
 plain run reports each spent item (fired, firing, skipped, failed, or a burst held part-way) in the plan, and
 its self-check fails (❌) naming the switch. With `-ReloadFiredRunSheet` each spent item gets a fresh copy
 (pending, at the end of the queue); the manifest records the new id and keeps the old one as `superseded`, so it
@@ -130,11 +136,11 @@ Pack shape (all optional; `docs/demo/pack/schema/pack.schema.json`):
 | Step | Request | Rules |
 |---|---|---|
 | Before seeding | `PUT /api/staff/noise { level: off }`; `GET` then (only when off) `PUT /api/staff/chrome-settings` | Noise off before the first post, so a run that stops part-way still leaves it off. Media marking on before any media is posted: the PUT is a full replace with no version token, so it sends every field exactly as read with only `watermarkEnabled` changed; nothing is sent when it is already on |
-| 9. Pins | `PUT /api/staff/posts/{id}/pin` per pin | The post key resolves to the id step 8 used. Last listed first, so the Pinned tab (newest pin first, DF-5) reads in pack order while the exercise clock runs. A post already pinned answers 204 and keeps its pin; a 404 is a ❌ |
-| 10. Run sheet | as before | Only the items `-RunSheet` loads. A left-out item is never created, adopted, re-pointed, compared or self-checked, and its manifest entry stays, so the import's items are never touched. A seeded copy an earlier run left armable is warned about (the import would add a second one), and so is an msel item that replies to a post (an MSEL row cannot carry the reply, so the import creates it top-level: keep in-thread replies seeded) |
+| 9. Pins | `PUT /api/staff/posts/{id}/pin` per pin | The post key resolves to the id step 8 used. Last listed first, so the Pinned tab (newest pin first, DF-5) reads in pack order while the exercise clock runs. With the clock stopped, `PinService` stamps the later of the exercise's stored scenario time and the post's own, so the tab may follow the posts' own times, or its id tie-break. A post already pinned answers 204 and keeps its pin; a refused pin (a 404, a 5xx) is a ❌ |
+| 10. Run sheet | as before | Only the items `-RunSheet` loads. A left-out item is never created, adopted, re-pointed, compared or self-checked, and its manifest entry stays, so the import's items are never touched. The queue is read when an item loads, or when an msel item left out has a manifest entry (never with `none`). Plan warnings: a copy of an msel item an earlier run recorded and the console could still fire (delete it before the import, unless the import created it: the queue does not show Inject #); an msel item that replies to a post (an MSEL row cannot carry the reply, so the import creates it top-level: keep in-thread replies seeded); a seeded item without a `plannedMinute` while msel items are left out (the import cannot place around it, DF-18) |
 | 11. Noise pool | `PUT /api/staff/noise/pool` | `mode: replace` with the first 1,000 entries, `append` for any more; persona handles sent as ids. Each rejected entry is a warning (`noise[i] (@handle) was not loaded: <server's reason>`). A pack without `noise` leaves the server's pool alone |
-| 12. After seeding | `PUT /api/staff/noise { level: off }` | On every run, `-LeaveEngineRunning` included |
-| 13. Self-check | the feed read | `pinnedForAll` on every pin, the pool loaded, noise off, media marking on |
+| 12. After seeding | `PUT /api/staff/noise { level: off }` | On every run, `-LeaveEngineRunning` included. A run that began writing (step 5) but stops early, throws, or does not get a confirmed off here sends it once more on the way out |
+| 13. Self-check | the feed read | Every pin PUT accepted and `pinnedForAll` in the feed, the pool loaded, noise off, media marking on |
 
 Validation adds: noise handles and text (the post-text rules), pins naming pack posts, `msel` on post items only and
 unique ignoring case. With `exceptMsel`, a loaded item that replies to an msel item stops the run before any request,
@@ -175,11 +181,11 @@ Demo feedback S1 (#510), `docs/features/demo-feedback/S1-seed-script-update.md`.
 | AC | Evidence (`Context` › `It`) |
 |----|----|
 | **Schema and fixture** (`noise`, `pins`, `msel`; the fixture gains 3 noise entries, 2 pins and the msel-marked `i03`; existing packs stay valid) | pack validation and the JSON Schema › *<Name> -> <Code>* (19 cases: noise, pins and msel, one per rule), › *the JSON Schema takes noise, pins and msel, and refuses their bad shapes; a pack without them stays valid*. The fixture itself passes every older test (`i03` loaded under the default `all`) |
-| **Cross-checks** (noise handles like post handles; pins name `posts[].key`; `msel` on post items only, unique; with `exceptMsel` no loaded item may reply to an msel item, both named) | the `<Name> -> <Code>` cases above (noise handles are also in step 4's unknown-handle check); -RunSheet selection (pure) › *exceptMsel: a loaded item that replies to an msel item fails, naming both items; all and none pass*; -RunSheet end to end › *an exceptMsel run whose seeded item replies to an msel item exits 1 before any request, naming both items* |
-| **Noise pool and level** (replace, chunks of 1,000 then append; each rejection a warning with index and reason; no `noise` leaves the pool alone; level off at the end of every run) | white noise › *Get-NoisePoolChunks…*, *loads the pool with one replace… off before the first post and again at the end*, *a re-run replaces the pool again*, *a rejected entry is a warning…*, *a replace none of whose entries can be used is refused (400)…*, *more entries than one call takes go in chunks…*, *a pack without noise leaves the server's pool alone…*, *a run that stops part-way still leaves noise off…; -LeaveEngineRunning turns it off too*, *a server without white noise (404)…*. Real HTTP › *H-1* (level and pool over real HTTP) |
-| **Exercise pins** (`PUT /api/staff/posts/{id}/pin`, ids as the script resolves post keys; idempotent) | exercise pins › *pins each pin for everyone after the posts, last listed first, and reads them back from the feed*, *a re-run pins again harmlessly*, *a pin the server refuses (404: taken down)…*, *Set-ExercisePins: … PUT-only and GUID-only*. Real HTTP › *H-1* (a body-less PUT answered 204) |
+| **Cross-checks** (noise handles like post handles; pins name `posts[].key`; `msel` on post items only, unique; with `exceptMsel` no loaded item may reply to an msel item, both named) | the `<Name> -> <Code>` cases above (noise handles are also in step 4's unknown-handle check); -RunSheet selection (pure) › *exceptMsel: a loaded item that replies to an msel item fails, naming both items; all and none pass*; -RunSheet end to end › *an exceptMsel run whose seeded item replies to an msel item exits 1 before any request, naming both items*, *an unknown persona on an msel item exceptMsel leaves out still stops the run before any write*; white noise › *an unknown noise persona stops the run with the unknown-handle message before any write* |
+| **Noise pool and level** (replace, chunks of 1,000 then append; each rejection a warning with index and reason; no `noise` leaves the pool alone; level off at the end of every run) | white noise › *Get-NoisePoolChunks…*, *loads the pool with one replace… off before the first post and again at the end*, *a re-run replaces the pool again*, *a rejected entry is a warning…*, *a replace none of whose entries can be used is refused (400)…*, *more entries than one call takes go in chunks…*, *a refused first chunk sends no append…*, *a pack without noise leaves the server's pool alone…*, *a run that stops part-way still leaves noise off…; -LeaveEngineRunning turns it off too*, *L-2: noise turned up mid-run is turned off again on the way out when the run stops early; a clean run sends no extra call*, *L-2: an error after step 5… still turns noise off on the way out*, *L-2: a failure before step 5 writes nothing, white noise included*, *a server without white noise (404)…*. Real HTTP › *H-1* (level and pool over real HTTP) |
+| **Exercise pins** (`PUT /api/staff/posts/{id}/pin`, ids as the script resolves post keys; idempotent) | exercise pins › *pins each pin for everyone after the posts, last listed first, and reads them back from the feed*, *a re-run pins again harmlessly*, *a pin the server refuses (404: taken down)…*, *L-1: a pin PUT that failed fails the self-check even when the feed shows the post pinned*, *Set-ExercisePins: … PUT-only and GUID-only*. Real HTTP › *H-1* (a body-less PUT answered 204) |
 | **Media marking** (read first, change only `watermarkEnabled`, everything else sent back; no-op when on) | media marking › *already on: one read, nothing written*, *off: read, then one PUT before any media is posted…; a re-run sends nothing*, *New-ChromeSettingsBody echoes every field it read…*, *a read without the two switches writes nothing…*, *a refused write (400)…* |
-| **`-RunSheet all\|exceptMsel\|none`** (the selection in one function; left-out items not drift and never touched; `-WhatIf` reports the skip) | -RunSheet selection (pure) › *Test-RunSheetItemLoaded…*, *Get-RunSheetItems: -Left is exactly the complement…*, *plan: exceptMsel plans only the loaded items…*, *plan: a seeded copy of an msel item is warned about…*; -RunSheet end to end › *exceptMsel loads every item but the msel one…*, *exceptMsel never touches the MSEL import's item… on a re-run or a Tuesday re-seed*, *switching from all to exceptMsel…*, *none: no run-sheet request at all…*, *-WhatIf -RunSheet exceptMsel reports the skip and sends nothing*, *an msel item that itself replies to a post is warned about…* |
+| **`-RunSheet all\|exceptMsel\|none`** (the selection in one function; left-out items not drift and never touched; `-WhatIf` reports the skip) | -RunSheet selection (pure) › *Test-RunSheetItemLoaded…*, *Get-RunSheetItems: -Left is exactly the complement…*, *plan: exceptMsel plans only the loaded items…*, *plan: a seeded copy of an msel item is warned about…*; -RunSheet end to end › *exceptMsel loads every item but the msel one…*, *exceptMsel never touches the MSEL import's item… on a re-run or a Tuesday re-seed*, *switching from all to exceptMsel…*, *none: no run-sheet request at all…*, *-WhatIf -RunSheet exceptMsel reports the skip and sends nothing*, *an msel item that itself replies to a post is warned about…*, *exceptMsel with a seeded item that has no plannedMinute warns in the plan…*, *every item msel: the queue is still read when an earlier run recorded one…*; -RunSheet selection (pure) › *plan (DF-18): exceptMsel warns when a loaded item has no plannedMinute…* |
 | **Re-running is safe** | the re-run cases above (pool replaced, pins kept, marking not re-sent, imported items untouched) and End to end › *seeds everything, then a second run…* with the new fixture |
 
 Manual checks (🧑, not automated): a `-WhatIf` transcript against UAT, a full run against UAT with the
