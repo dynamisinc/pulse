@@ -16,7 +16,9 @@
  * the row updates from THIS response at once (`onPinnedChange`), without waiting for
  * the `PostPinChanged` broadcast, which only matters to OTHER consoles. On failure an
  * inline `role="alert"` beside the control shows the plain-text reason (never a
- * swallowed catch) with a Dismiss; the control stays usable to try again.
+ * swallowed catch) with a Dismiss; the control stays usable to try again. A success is
+ * announced through a polite live region ("Pinned for everyone" / "Unpinned"), which
+ * exists from the first click so its text change is spoken; untouched rows carry none.
  *
  * The persistent PINNED state is the row's own marker (thumbtack icon AND the words
  * "Pinned for everyone", never colour alone); this control only says what a click does.
@@ -36,7 +38,7 @@ import {
 } from '@fortawesome/free-solid-svg-icons'
 import { CobraLinkButton } from '@/theme/styledComponents'
 import type { LiveWorldPost } from './liveWorldModel'
-import { liveWorldTokens, monoMeta } from './liveWorldStyles'
+import { liveWorldTokens, monoMeta, srOnly } from './liveWorldStyles'
 import { PinForAllError, setPinnedForAll } from './pinForAllService'
 
 export interface PinForAllActionProps {
@@ -76,6 +78,8 @@ export function PinForAllAction({ post, onPinnedChange }: PinForAllActionProps) 
   const pinned = post.pinnedForAll === true
   const [pending, setPending] = useState(false)
   const [failure, setFailure] = useState<string | undefined>(undefined)
+  // `null` until the first click: the live region mounts then, BEFORE its text changes.
+  const [announcement, setAnnouncement] = useState<string | null>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
   const authorName = post.authorDisplayName
 
@@ -84,9 +88,11 @@ export function PinForAllAction({ post, onPinnedChange }: PinForAllActionProps) 
     const next = !pinned
     setPending(true)
     setFailure(undefined)
+    setAnnouncement('')
     setPinnedForAll(post.id, next).then(
       () => {
         setPending(false)
+        setAnnouncement(next ? 'Pinned for everyone' : 'Unpinned')
         onPinnedChange(post.id, next)
       },
       (error: unknown) => {
@@ -162,6 +168,16 @@ export function PinForAllAction({ post, onPinnedChange }: PinForAllActionProps) 
             <FontAwesomeIcon icon={faXmark} aria-hidden="true" />
             Dismiss
           </CobraLinkButton>
+        </Box>
+      )}
+      {announcement !== null && (
+        <Box
+          role="status"
+          aria-live="polite"
+          data-testid="live-world-pin-announcer"
+          sx={srOnly}
+        >
+          {announcement}
         </Box>
       )}
     </>

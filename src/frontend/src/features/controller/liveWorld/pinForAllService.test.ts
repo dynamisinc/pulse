@@ -112,6 +112,16 @@ describe('setPinnedForAll (live) - failures are plain text', () => {
     expect(error.message).toMatch(/could not be reached/)
   })
 
+  it('maps a timed-out request (ECONNABORTED / ETIMEDOUT) to the busy sentence', async () => {
+    const config = { headers: new AxiosHeaders() } as InternalAxiosRequestConfig
+    putMock.mockRejectedValueOnce(new AxiosError('timeout of 10000ms exceeded', 'ECONNABORTED', config))
+    expect((await failureOf(setPinnedForAll(POST_ID, true))).message)
+      .toBe('The server is busy right now. Try again in a moment.')
+    deleteMock.mockRejectedValueOnce(new AxiosError('timed out', 'ETIMEDOUT', config))
+    expect((await failureOf(setPinnedForAll(POST_ID, false))).message)
+      .toBe('The server is busy right now. Try again in a moment.')
+  })
+
   it('shows a short 400 message verbatim but never an HTML page', async () => {
     putMock.mockRejectedValueOnce(axiosFailure(400, { message: 'Post is a reply.' }))
     expect((await failureOf(setPinnedForAll(POST_ID, true))).message).toBe('Post is a reply.')

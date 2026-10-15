@@ -55,7 +55,9 @@
  * Every entry records whether it arrived LIVE (a realtime arrival, or a post first
  * seen by a sweep) or was part of the opening baseline: that is what the column's
  * unread tracking keys on. The pin-for-everyone state rides on the entry too and is
- * changed through `setPinned` (one entry, one re-rendered row).
+ * changed through `setPinned` (one entry, one re-rendered row). A read (baseline or sweep)
+ * that was already in flight when a pin changed keeps the newer local state for that
+ * post instead of reverting it to the server's older answer (pin generations, Gate-1 M1).
  *
  * ## Lifetime
  * Unmounting stops the timers, drops the queue, unsubscribes and releases the
@@ -167,6 +169,14 @@ export function useLiveWorldFeed({
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const loadedRef = useRef(false)
   const sweepInFlightRef = useRef(false)
+  // Pin generations (Gate-1 M1): a read that STARTED before a pin change must not revert
+  // it. `pinClockRef` ticks on every `setPinned`; `pinChangesRef` remembers, per post, the
+  // tick and the state of its latest change. A read snapshots the clock when it starts and,
+  // when it lands, keeps the newer local state for every post changed since. Cleared once
+  // no read is in flight (nothing can be stale then), so it stays small.
+  const pinClockRef = useRef(0)
+  const pinChangesRef = useRef(new Map<string, { readonly at: number; readonly pinned: boolean }>())
+  const readsInFlightRef = useRef(0)
 
   const syncMode = useCallback(() => {
     setMode(source.mode)
@@ -194,6 +204,8 @@ export function useLiveWorldFeed({
       if (!loadedRef.current || sweepInFlightRef.current) return
       sweepInFlightRef.current = true
     }
+    const startedAt = pinClockRef.current
+    readsInFlightRef.current += 1
     try {
       const posts = await resolveFeed('all', { includeReplies: true })
       if (!aliveRef.current) return
@@ -206,9 +218,14 @@ export function useLiveWorldFeed({
       // off the raw wire post too, so it survives a narrowing that predates the field.
       const entries = posts.map((post, index) => {
         const view = toParticipantView(post)
+        // A pin changed here after this read started is newer than the server's answer.
+        const change = pinChangesRef.current.get(view.id)
+        const pinnedForAll = change !== undefined && change.at > startedAt
+          ? change.pinned
+          : readPinnedForAll(post) || readPinnedForAll(view)
         return toEntry(view, base + posts.length - index, {
           live: kind === 'sweep',
-          pinnedForAll: readPinnedForAll(post) || readPinnedForAll(view),
+          pinnedForAll,
         })
       })
       const buffer = kind === 'sweep' && isReadingRef.current()
@@ -226,6 +243,8 @@ export function useLiveWorldFeed({
       }
     } finally {
       if (kind === 'sweep') sweepInFlightRef.current = false
+      readsInFlightRef.current -= 1
+      if (readsInFlightRef.current === 0) pinChangesRef.current.clear()
     }
   }, [])
 
@@ -307,6 +326,11 @@ export function useLiveWorldFeed({
   }, [])
 
   const setPinned = useCallback((postId: string, pinnedForAll: boolean) => {
+    // Only a read in flight can be stale: record the change for it (see `pinChangesRef`).
+    if (readsInFlightRef.current > 0) {
+      pinClockRef.current += 1
+      pinChangesRef.current.set(postId, { at: pinClockRef.current, pinned: pinnedForAll })
+    }
     setState(prev => applyPinChange(prev, postId, pinnedForAll))
   }, [])
 

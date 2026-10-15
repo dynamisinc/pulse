@@ -54,6 +54,11 @@ Implemented in (all under `src/frontend/src/features/controller/liveWorld/`):
   no-op before story 07, delegation to `realtimeFeed.subscribePinChanged` after, malformed events dropped.
 - [`liveWorldModel.pinUnread.test.ts`](../../../src/frontend/src/features/controller/liveWorld/liveWorldModel.pinUnread.test.ts):
   `live` / `pinnedForAll` on entries, refresh rules, `applyPinChange` identity.
+- Gate-1 follow-ups: `useLiveWorldFeed.test.tsx` "pin generations" (a sweep in flight never reverts a fresh
+  pin, M1); `LiveWorldColumn.pinUnread.test.tsx` adds arrived-while-closed unread + stored known ids (M2), the
+  dwell counting only while the tab is visible and the window focused, Mark all read `aria-disabled` keeping
+  focus (L1), the fake-timer 600 ms / arrival / 400 ms dwell (L2), Unpin-only on a taken-down pinned row (L3) and
+  the polite pin announcement (L8); `pinForAllService.test.ts` adds the timeout sentence (L7).
 - `liveWorldStyles.test.ts` (unread accent contrast), `liveWorldTwoWorlds.test.ts` (allowlist + exercise-scope
   guard updated), `LiveWorldColumn.test.tsx` / `TakedownAction.inColumn.test.tsx` (tab order now Reply as… → Pin for
   everyone → Take down).

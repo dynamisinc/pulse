@@ -31,6 +31,7 @@ import { at, createFakeSource, LOOKALIKE, post, view, type FakeSource } from './
 import { liveWorldTokens } from './liveWorldStyles'
 import type { PinChangedHandler, PinChangeSource } from './pinChangeSource'
 import { PinForAllError, setPinnedForAll } from './pinForAllService'
+import { ARRIVAL_BATCH_MS } from './useLiveWorldFeed'
 import { READ_DWELL_MS, unreadStorageKey } from './useLiveWorldUnread'
 
 vi.mock('@/features/social/services/feedService', async importOriginal => {
@@ -115,7 +116,43 @@ beforeEach(() => {
   window.localStorage.clear()
   FakeIntersectionObserver.instances = []
   vi.stubGlobal('IntersectionObserver', FakeIntersectionObserver)
+  // The controller is looking: the tab is visible and the window focused (see `attention`).
+  attention = { visible: true, focused: true }
+  Object.defineProperty(document, 'visibilityState', {
+    configurable: true,
+    get: () => (attention.visible ? 'visible' : 'hidden'),
+  })
+  Object.defineProperty(document, 'hasFocus', {
+    configurable: true,
+    value: () => attention.focused,
+  })
 })
+
+afterEach(() => {
+  // Back to jsdom's own (prototype) implementations.
+  delete (document as unknown as Record<string, unknown>).visibilityState
+  delete (document as unknown as Record<string, unknown>).hasFocus
+})
+
+let attention = { visible: true, focused: true }
+
+/** Hides / shows the tab, as the browser would (state first, then the event). */
+function setTabVisible(visible: boolean) {
+  attention.visible = visible
+  act(() => { document.dispatchEvent(new Event('visibilitychange')) })
+}
+
+/** Moves focus to another window and back. */
+function setWindowFocused(focused: boolean) {
+  attention.focused = focused
+  act(() => { window.dispatchEvent(new Event(focused ? 'focus' : 'blur')) })
+}
+
+/** Under FAKE timers: delivers one live arrival and lets its batch land. */
+function arriveNow(id: string, minute: number) {
+  act(() => source.emit(view(id, { scenarioTime: at(minute), text: `live ${id}` })))
+  act(() => { vi.advanceTimersByTime(ARRIVAL_BATCH_MS) })
+}
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -276,10 +313,36 @@ describe('AC — Pin for everyone / Unpin', () => {
     expect(await within(rowFor('held')).findByTestId('live-world-pinned')).toBeInTheDocument()
   })
 
-  it('offers no pin action on a taken-down row', async () => {
+  it('offers no Pin on a taken-down row', async () => {
     await loaded({ isRowRemoved: p => p.id === 'b-1' })
     expect(within(rowFor('b-1')).queryByTestId('live-world-pin')).toBeNull()
     expect(within(rowFor('b-2')).getByTestId('live-world-pin')).toBeInTheDocument()
+  })
+
+  it('offers Unpin ONLY on a taken-down row that is still pinned', async () => {
+    await loaded({ isRowRemoved: p => p.id === 'b-1' }, [
+      post('b-1', { scenarioTime: at(10), pinnedForAll: true } as Partial<Post>),
+      post('b-2', { scenarioTime: at(5), authorPersonaId: LOOKALIKE }),
+    ])
+    const pin = within(rowFor('b-1')).getByTestId('live-world-pin')
+    expect(pin).toHaveTextContent('Unpin')
+    await userEvent.setup().click(pin)
+    expect(mockedSetPinned).toHaveBeenCalledWith('b-1', false)
+    // Unpinned and taken down: no Pin is offered.
+    await waitFor(() => expect(within(rowFor('b-1')).queryByTestId('live-world-pin')).toBeNull())
+  })
+
+  it('announces a successful pin and unpin politely', async () => {
+    await loaded()
+    const row = within(rowFor('b-1'))
+    expect(row.queryByTestId('live-world-pin-announcer')).toBeNull() // untouched rows carry none
+    const user = userEvent.setup()
+    await user.click(row.getByTestId('live-world-pin'))
+    const region = row.getByTestId('live-world-pin-announcer')
+    expect(region).toHaveAttribute('aria-live', 'polite')
+    await waitFor(() => expect(region).toHaveTextContent('Pinned for everyone'))
+    await user.click(row.getByTestId('live-world-pin'))
+    await waitFor(() => expect(region).toHaveTextContent('Unpinned'))
   })
 })
 
@@ -352,33 +415,95 @@ describe('AC — Unread', () => {
     expect(rowFor('live-1')).toHaveAttribute('data-unread', 'true')
   })
 
-  it('a burst of arrivals does not restart a row\'s running dwell', async () => {
+  it('an arrival mid-dwell does not restart it: 600 ms, an arrival, 400 ms => read', async () => {
     await loaded()
     await arrive('live-1', 40)
     const io = observer()
-    act(() => io.report(rowFor('live-1'), 1))
-    // More arrivals land (each a re-render of the list) while live-1 is being read.
-    await arrive('live-2', 41)
-    await arrive('live-3', 42)
-    await waitFor(
-      () => expect(rowFor('live-1')).not.toHaveAttribute('data-unread'),
-      { timeout: READ_DWELL_MS * 3 },
-    )
-    expect(rowFor('live-2')).toHaveAttribute('data-unread', 'true')
+    vi.useFakeTimers()
+    try {
+      act(() => io.report(rowFor('live-1'), 1))
+      act(() => { vi.advanceTimersByTime(600) })
+      // An arrival lands (a re-render of the list) while live-1 is being read; its batch
+      // takes ARRIVAL_BATCH_MS of the remaining 400 ms.
+      arriveNow('live-2', 41)
+      expect(rowFor('live-2')).toHaveAttribute('data-unread', 'true')
+      expect(rowFor('live-1')).toHaveAttribute('data-unread', 'true')
+      act(() => { vi.advanceTimersByTime(400 - ARRIVAL_BATCH_MS - 1) })
+      expect(rowFor('live-1')).toHaveAttribute('data-unread', 'true')
+      act(() => { vi.advanceTimersByTime(1) })
+      expect(rowFor('live-1')).not.toHaveAttribute('data-unread')
+      expect(rowFor('live-2')).toHaveAttribute('data-unread', 'true')
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
-  it('Mark all read marks every listed row read; disabled at zero', async () => {
+  it('only counts the dwell while the tab is visible AND the window has focus', async () => {
+    await loaded()
+    await arrive('live-1', 40)
+    const io = observer()
+    vi.useFakeTimers()
+    try {
+      // The controller is in another window when the row comes into view: nothing counts.
+      setWindowFocused(false)
+      act(() => io.report(rowFor('live-1'), 1))
+      act(() => { vi.advanceTimersByTime(READ_DWELL_MS * 3) })
+      expect(rowFor('live-1')).toHaveAttribute('data-unread', 'true')
+
+      // Back in the window: the dwell starts from zero.
+      setWindowFocused(true)
+      act(() => { vi.advanceTimersByTime(READ_DWELL_MS / 2) })
+      // The tab is hidden half-way through: the dwell stops (and does not resume mid-way).
+      setTabVisible(false)
+      act(() => { vi.advanceTimersByTime(READ_DWELL_MS * 3) })
+      expect(rowFor('live-1')).toHaveAttribute('data-unread', 'true')
+
+      setTabVisible(true)
+      act(() => { vi.advanceTimersByTime(READ_DWELL_MS - 1) })
+      expect(rowFor('live-1')).toHaveAttribute('data-unread', 'true')
+      act(() => { vi.advanceTimersByTime(1) })
+      expect(rowFor('live-1')).not.toHaveAttribute('data-unread')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('an arrival while the controller is in another window stays unread', async () => {
+    await loaded()
+    vi.useFakeTimers()
+    try {
+      setWindowFocused(false)
+      arriveNow('away-1', 40)
+      act(() => observer().report(rowFor('away-1'), 1)) // in view, but nobody is looking
+      act(() => { vi.advanceTimersByTime(READ_DWELL_MS * 5) })
+      expect(rowFor('away-1')).toHaveAttribute('data-unread', 'true')
+      expect(unreadCountText()).toBe('1 unread')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('Mark all read marks every listed row read; aria-disabled (not disabled) at zero', async () => {
     await loaded()
     const markAll = screen.getByTestId('live-world-mark-all-read')
-    expect(markAll).toBeDisabled()
+    expect(markAll).toHaveAttribute('aria-disabled', 'true')
+    expect(markAll).not.toBeDisabled()
     await arrive('live-1', 40)
     await arrive('live-2', 41)
     expect(unreadCountText()).toBe('2 unread')
+    expect(screen.getByTestId('live-world-mark-all-read')).toHaveAttribute('aria-disabled', 'false')
 
-    await userEvent.setup().click(screen.getByTestId('live-world-mark-all-read'))
+    const user = userEvent.setup()
+    await user.click(screen.getByTestId('live-world-mark-all-read'))
     expect(screen.queryAllByTestId('live-world-unread')).toHaveLength(0)
     expect(unreadCountText()).toBe('0 unread')
-    expect(screen.getByTestId('live-world-mark-all-read')).toBeDisabled()
+    // Focus stays on the control (never dropped to <body>), which is now aria-disabled.
+    expect(screen.getByTestId('live-world-mark-all-read')).toHaveFocus()
+    expect(screen.getByTestId('live-world-mark-all-read')).toHaveAttribute('aria-disabled', 'true')
+    // Activating it at zero is a harmless no-op.
+    await user.keyboard('{Enter}')
+    expect(unreadCountText()).toBe('0 unread')
+    expect(screen.getByTestId('live-world-mark-all-read')).toHaveFocus()
   })
 
   it('works without IntersectionObserver (nothing read by sight; Mark all read still works)', async () => {
@@ -418,6 +543,34 @@ describe('AC — read state per browser and per exercise', () => {
     expect(rowFor('live-2')).not.toHaveAttribute('data-unread')
     expect(rowFor('b-1')).not.toHaveAttribute('data-unread')
     expect(unreadCountText()).toBe('1 unread')
+  })
+
+  it('a post that arrived while the console was closed is unread on the next visit', async () => {
+    const { unmount } = await loaded()
+    unmount() // the last visit knew b-1 and b-2
+
+    await loaded({}, [post('while-away', { scenarioTime: at(45) }), ...baseline()])
+    expect(rowFor('while-away')).toHaveAttribute('data-unread', 'true')
+    expect(rowFor('b-1')).not.toHaveAttribute('data-unread')
+    expect(rowFor('b-2')).not.toHaveAttribute('data-unread')
+    expect(unreadCountText()).toBe('1 unread')
+  })
+
+  it('a first visit (nothing stored) reads the whole baseline as read', async () => {
+    expect(window.localStorage.getItem(unreadStorageKey('ex-1'))).toBeNull()
+    await loaded({}, [post('never-seen', { scenarioTime: at(45) }), ...baseline()])
+    expect(screen.queryAllByTestId('live-world-unread')).toHaveLength(0)
+  })
+
+  it('stores the known ids beside the unread ones, bounded', async () => {
+    const { unmount } = await loaded()
+    await arrive('live-1', 40)
+    unmount()
+    const stored = JSON.parse(window.localStorage.getItem(unreadStorageKey('ex-1')) ?? '{}') as {
+      unread?: string[]; known?: string[]
+    }
+    expect(stored.unread).toEqual(['live-1'])
+    expect(stored.known).toEqual(['live-1', 'b-2', 'b-1'])
   })
 
   it('is scoped per exercise: another exercise remembers nothing of this one', async () => {

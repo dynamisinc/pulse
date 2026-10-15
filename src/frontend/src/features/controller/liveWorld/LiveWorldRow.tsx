@@ -49,7 +49,8 @@
  * line: a thumbtack icon AND the words "Pinned for everyone" (never colour alone). The
  * row's **Pin for everyone** / **Unpin** action (`PinForAllAction`) sits beside the other
  * actions, right before the `renderRowActions` slot where the console mounts *Take down*;
- * it is not rendered on a removed row (the server refuses to pin a taken-down post).
+ * on a removed row it is rendered only while the post is still pinned (Unpin only, never
+ * Pin: the server refuses to pin a taken-down post).
  *
  * UNREAD (story 08). An unread row (`unread`, decided by the column) is BOLD, has the
  * unread accent as its left bar and a "New" chip on the author line, so the state is in
@@ -384,7 +385,11 @@ export const LiveWorldRow = memo(function LiveWorldRow({
           <FontAwesomeIcon icon={faReply} aria-hidden="true" />
           Reply as…
         </CobraLinkButton>
-        {!removed && <PinForAllAction post={post} onPinnedChange={onPinnedChange} />}
+        {/* A taken-down row offers no Pin (the server refuses it); a taken-down row that is
+            still pinned offers Unpin only, so it can be cleared (Gate-1 L3). */}
+        {(!removed || post.pinnedForAll === true) && (
+          <PinForAllAction post={post} onPinnedChange={onPinnedChange} />
+        )}
         {renderRowActions?.(post)}
       </Stack>
     </Box>

@@ -47,6 +47,9 @@ export class PinForAllError extends Error {
   }
 }
 
+/** The sentence for a busy server or a timed-out request. */
+const BUSY_MESSAGE = 'The server is busy right now. Try again in a moment.'
+
 /** Longest server message shown (a sentence, never a page). */
 const MAX_SERVER_MESSAGE_LENGTH = 200
 
@@ -77,7 +80,7 @@ function messageForStatus(status: number, pin: boolean): string {
   if (status === 401) return 'Your console session has expired. Sign in again.'
   if (status === 403) return 'Only a controller assigned to this exercise can pin posts for everyone.'
   if (status === 408 || status === 429 || status === 502 || status === 503 || status === 504) {
-    return 'The server is busy right now. Try again in a moment.'
+    return BUSY_MESSAGE
   }
   return `The post was not ${pin ? 'pinned' : 'unpinned'} (the server answered ${status}).`
 }
@@ -86,6 +89,10 @@ function messageForStatus(status: number, pin: boolean): string {
 function toPinError(error: unknown, pin: boolean): PinForAllError {
   if (error instanceof PinForAllError) return error
   if (axios.isAxiosError(error)) {
+    // A request that timed out (our own bound, or the browser's) is "busy, try again".
+    if (error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT') {
+      return new PinForAllError(BUSY_MESSAGE)
+    }
     const status = error.response?.status
     if (status === undefined) {
       return new PinForAllError('The server could not be reached. Check the connection and try again.')

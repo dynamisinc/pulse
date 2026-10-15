@@ -741,9 +741,19 @@ function LiveWorldPanel({
         <CobraSecondaryButton
           size="small"
           data-testid="live-world-mark-all-read"
-          disabled={unreadCount === 0}
-          onClick={markAllRead}
-          sx={{ py: '1px', px: '10px', fontSize: 12, gap: '6px' }}
+          // `aria-disabled` + a no-op (not `disabled`): clicking it at zero, or the count
+          // reaching zero under it, must not drop keyboard focus to <body> (Gate-1 L1).
+          aria-disabled={unreadCount === 0}
+          onClick={() => {
+            if (unreadCount > 0) markAllRead()
+          }}
+          sx={{
+            py: '1px',
+            px: '10px',
+            fontSize: 12,
+            gap: '6px',
+            '&[aria-disabled="true"]': { opacity: 0.55, cursor: 'default' },
+          }}
         >
           <FontAwesomeIcon icon={faCheckDouble} aria-hidden="true" />
           Mark all read

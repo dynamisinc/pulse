@@ -414,3 +414,61 @@ describe('teardown', () => {
     expect(ids(result.current.rows)).toEqual(['a'])
   })
 })
+
+describe('pin generations (story 08 Gate-1 M1): a stale read never reverts a fresh pin', () => {
+  it('sweep in flight -> pin -> sweep resolves WITHOUT the flag -> the pin stays', async () => {
+    source.mode = 'polling'
+    mockedResolveFeed.mockResolvedValue([post('a', { scenarioTime: at(1) })])
+    const { result } = await mount()
+    expect(result.current.rows[0]?.pinnedForAll).toBe(false)
+
+    let finish: (posts: ReturnType<typeof post>[]) => void = () => {}
+    mockedResolveFeed.mockReturnValue(new Promise(resolve => {
+      finish = resolve
+    }))
+    await advance(POLLING_SWEEP_MS) // the sweep starts and stays in flight
+    expect(mockedResolveFeed).toHaveBeenCalledTimes(2)
+
+    act(() => result.current.setPinned('a', true))
+    expect(result.current.rows[0]?.pinnedForAll).toBe(true)
+
+    // The server answered before the pin landed: no pinnedForAll, fresh counts.
+    await act(async () => {
+      finish([post('a', { scenarioTime: at(1), counts: { reply: 0, repost: 0, like: 5 } })])
+      await vi.advanceTimersByTimeAsync(0)
+    })
+    expect(result.current.rows[0]?.view.counts.like).toBe(5) // the rest of the sweep applied
+    expect(result.current.rows[0]?.pinnedForAll).toBe(true) // the marker stays
+  })
+
+  it('an unpin during a sweep that still reports the post pinned stays unpinned', async () => {
+    source.mode = 'polling'
+    mockedResolveFeed.mockResolvedValue([post('a', { scenarioTime: at(1), pinnedForAll: true } as
+      Partial<ReturnType<typeof post>>)])
+    const { result } = await mount()
+    expect(result.current.rows[0]?.pinnedForAll).toBe(true)
+
+    let finish: (posts: ReturnType<typeof post>[]) => void = () => {}
+    mockedResolveFeed.mockReturnValue(new Promise(resolve => {
+      finish = resolve
+    }))
+    await advance(POLLING_SWEEP_MS)
+    act(() => result.current.setPinned('a', false))
+    await act(async () => {
+      finish([post('a', { scenarioTime: at(1), pinnedForAll: true } as
+        Partial<ReturnType<typeof post>>)])
+      await vi.advanceTimersByTimeAsync(0)
+    })
+    expect(result.current.rows[0]?.pinnedForAll).toBe(false)
+  })
+
+  it('a sweep that STARTS after the pin carries the server state as usual', async () => {
+    source.mode = 'polling'
+    mockedResolveFeed.mockResolvedValue([post('a', { scenarioTime: at(1) })])
+    const { result } = await mount()
+    act(() => result.current.setPinned('a', true))
+    // The server now says unpinned (another console unpinned it): the newer read wins.
+    await advance(POLLING_SWEEP_MS)
+    expect(result.current.rows[0]?.pinnedForAll).toBe(false)
+  })
+})
