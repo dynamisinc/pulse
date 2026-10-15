@@ -340,7 +340,15 @@ export function InjectMediaField({
             />
           </Box>
           {pasteOpen ? (
-            <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1 }}>
+            <Box
+              sx={{
+                display: 'flex',
+                alignItems: 'flex-start',
+                gap: 1,
+                // Labels sit above inputs (#493): drop the button to the input's middle.
+                '& > button': { mt: '28px' },
+              }}
+            >
               <Box sx={{ flex: 1 }}>
                 <RunSheetField
                   id={`${idPrefix}-add-media`}
