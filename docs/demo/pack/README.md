@@ -310,10 +310,12 @@ come five Pulse extension columns: `Pulse Media`, `Pulse Media Alt`, `Pulse Like
   file only). The generator reads `pack.json` and refuses to build if a `msel` value doesn't match the row number
   it assigns. It then re-reads the workbook with a Python mirror of the importer's rules, including story 14's
   rules for the alt and engagement columns. The output is byte-stable.
-- **Checked against the real importer** on 2026-10-15, before the four story-14 columns were added: the server's
-  own `MselWorkbookReader` and `MselImportPlanner` (ClosedXML 0.105.1) read the file as **34 rows, 8 social, 26
-  skipped, 0 failed and 0 warnings**, with minutes T+3 to T+18 as authored. The re-check against story 14's
-  importer runs once that story is finished.
+- **Checked against the real importer** on 2026-10-15, with story 14's code (branch
+  `build/demo-feedback/14-import-alt-engagement-order`). The server's own `MselWorkbookReader` and
+  `MselImportPlanner` (ClosedXML 0.105.1) read the file as **34 rows, 8 social, 26 skipped, 0 failed and 0
+  warnings**, with minutes T+3 to T+18 as authored. Every alt text and baseline comes through exactly as in
+  `pack.json`. Placed among the seven seeded items, all pending, `ImportQueuePlacement` gives
+  **rs01, rs02, … rs15** in story order.
 
 ### On stage: seed, dry run, import
 
