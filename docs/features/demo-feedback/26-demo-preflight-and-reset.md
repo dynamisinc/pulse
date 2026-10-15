@@ -89,7 +89,7 @@ Pester tests beside the scripts (`*.Tests.ps1`, same style as `Seed-DemoContent.
 
 ## Tests
 
-`Test-DemoReady.Tests.ps1` (51 tests, Pester 5, no network): a ready exercise passes all ten checks and is read-only
+`Test-DemoReady.Tests.ps1` (66 tests, Pester 5, no network): a ready exercise passes all ten checks and is read-only
 (only GETs besides sign-in/sign-out; sign-out also after a throw); sign-in body and `-ExerciseId`; check 1 health
 down / slow wake / schema 5xx / Wave 4 `persisted` true, absent, false; check 2 engine, running, injects, freeze;
 check 3 0 / 1 / 5 / 6 drafts; check 4 Fake, AzureOpenAI, cut to Fake; check 5 noise and watermark; check 6 missing
@@ -99,7 +99,7 @@ the window, 13 h old (WARN), frozen (WARN); check 10 edits 404 (WARN), seeded po
 script's exit code (1 on FAIL, 0 on WARN only); `-Json` contents and nothing written without it; no secret, token or
 SAS link in any stream (with `-Verbose -Debug`), the JSON file or `$Error`.
 
-`Invoke-DemoReset.Tests.ps1` (35 tests): order (reset route, Reset-DemoState, Clear, Seed `-RunSheet exceptMsel`,
+`Invoke-DemoReset.Tests.ps1` (44 tests): order (reset route, Reset-DemoState, Clear, Seed `-RunSheet exceptMsel`,
 Test-DemoReady) and each step's arguments; sign-out before step 2; stop on first failure at steps 2-5 (exit and
 throw), and at step 1 on 403/500, naming the step and the steps not run; fallback on 404: marker then `-Restart` then
 polling (no fixed wait), no marker when already off running, two consecutive `running` reads, `-Restart` exit not 3,
@@ -121,6 +121,12 @@ Clear-DemoContent takes its cutoff; a failed write, a level that reads back on, 
 run (and pauses the engine). Test-DemoReady cannot flag noise posts in the opening feed: `GET /api/feed` has no origin
 field, so check 5 adds a SKIP line with the noise post count and the last one's scenario time.
 
-Existing `Clear-DemoContent`, `Import-Roster` and `Seed-DemoContent` suites: 483 passed, unchanged (full scripts/uat run: 569 passed).
+PR #548 review, round 2: `-ApiHost` is normalized once before any request in both scripts (bare host or http(s)
+URL; scheme, trailing slash, path and query dropped; another scheme, user info, an invalid host or non-local plain
+http refused with "Nothing was sent"), and only the bare host goes to the child scripts. Test-DemoReady adds check 11,
+the exercise lifecycle (`GET /api/staff/exercise-lifecycle`, the signed-in exercise): `live` PASS, `staged` WARN
+(pre-start page until StartEx), anything else FAIL.
+
+Existing `Clear-DemoContent`, `Import-Roster` and `Seed-DemoContent` suites: 483 passed, unchanged (full scripts/uat run: 593 passed).
 
 **Manual (pending):** the live run on UAT, both scripts, Saturday 10/17 after the last merge (Tom).

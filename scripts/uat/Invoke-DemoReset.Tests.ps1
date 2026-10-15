@@ -60,7 +60,7 @@ BeforeAll {
         $h = @{}
         if ($Headers) { foreach ($k in $Headers.Keys) { $h[$k] = [string] $Headers[$k] } }
         $text = if ($Body -is [byte[]]) { [Text.Encoding]::UTF8.GetString($Body) } elseif ($Body) { [string] $Body } else { '' }
-        $fake.Calls.Add([pscustomobject]@{ Method = $Method; Path = $u.AbsolutePath; Headers = $h; Body = $text })
+        $fake.Calls.Add([pscustomobject]@{ Method = $Method; Host = $u.Host; Path = $u.AbsolutePath; Headers = $h; Body = $text })
         $fake.Log.Add("$Method $($u.AbsolutePath)")
         $reply = { param([int] $Status, $Json) [pscustomobject]@{ StatusCode = $Status; Content = $(if ($null -ne $Json) { ConvertTo-Json -InputObject $Json -Compress } else { '' }); Headers = @{} } }
         $authorized = $h['Authorization'] -ceq "Bearer $($fake.Token)"
@@ -122,7 +122,7 @@ BeforeAll {
         $arguments = @{ ApiHost = 'api.fake.test'; SiteUrl = 'https://site.fake.test'; StaffUsername = 'controller1'; LogDirectory = $logs; PollSeconds = 20; RestartTimeoutMinutes = 15; Subscription = 'sub'; ResourceGroup = 'rg'; WebAppName = 'app' }
         foreach ($key in $Extra.Keys) { $arguments[$key] = $Extra[$key] }
         $text = (& { $script:code = Invoke-DemoReset @arguments } *>&1 | Out-String)
-        $logFile = Get-ChildItem -LiteralPath $logs -Filter 'demo-reset-*.log' | Select-Object -First 1
+        $logFile = Get-ChildItem -LiteralPath $logs -Filter 'demo-reset-*.log' -ErrorAction SilentlyContinue | Select-Object -First 1
         return [pscustomobject]@{ Code = $script:code; Text = $text; LogFile = $logFile; LogText = $(if ($logFile) { Get-Content -LiteralPath $logFile.FullName -Raw } else { '' }) }
     }
 
@@ -180,6 +180,37 @@ Describe 'Invoke-DemoReset.ps1' {
             $byName['Test-DemoReady.ps1']['ExerciseId'] | Should -Be '11111111-2222-4333-8444-555555555555'
             $byName['Test-DemoReady.ps1']['Json'] | Should -BeTrue
             (Split-Path -Parent $byName['Test-DemoReady.ps1']['JsonPath']) | Should -Be $run.LogFile.DirectoryName
+        }
+    }
+
+    Describe '-ApiHost is normalized once, before any request (PR #548 review)' {
+        It '<Value>: every request goes to the origin, and every script gets the bare host api.fake.test' -ForEach @(
+            @{ Value = 'https://api.fake.test' }
+            @{ Value = 'https://api.fake.test/' }
+            @{ Value = 'api.fake.test/' }
+            @{ Value = 'HTTPS://Api.Fake.Test/swagger' }
+        ) {
+            $global:ResetFake.ResetStatus = 404          # the fallback passes -ApiHost to Reset-DemoState -Restart too
+            'running', 'running' | ForEach-Object { $global:ResetFake.AfterRestart.Enqueue($_) }
+            $run = Invoke-Reset -Extra @{ ApiHost = $Value }
+            $run.Code | Should -Be 0
+            @($global:ResetFake.Calls | ForEach-Object Host | Select-Object -Unique) | Should -Be 'api.fake.test'
+            @($global:ResetFake.Scripts).Count | Should -Be 5
+            foreach ($s in $global:ResetFake.Scripts) { $s.Arguments['ApiHost'] | Should -BeExactly 'api.fake.test' }
+        }
+
+        It '<Value> is refused before anything is sent: no request, no script, exit 1' -ForEach @(
+            @{ Value = 'ftp://api.fake.test' }
+            @{ Value = 'api fake test' }
+            @{ Value = 'https://user:pw@api.fake.test' }
+            @{ Value = 'http://api.fake.test' }
+            @{ Value = '   ' }
+        ) {
+            $run = Invoke-Reset -Extra @{ ApiHost = $Value }
+            $run.Code | Should -Be 1
+            $global:ResetFake.Calls | Should -BeNullOrEmpty
+            $global:ResetFake.Scripts | Should -BeNullOrEmpty
+            $run.Text | Should -Match 'Nothing was sent'
         }
     }
 

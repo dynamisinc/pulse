@@ -59,7 +59,10 @@ is the runtime reset (step 1); `Reset-DemoState.ps1 -Restart` only clears the in
 registration, storylines, autonomy, kill switch).
 
 **Expected `Test-DemoReady` output** on a ready exercise (exit 0). Any `FAIL` exits 1 and says what to do. `WARN`
-lines do not block: before Wave 4 is deployed, "Wave 4 schema" and the edits route are `WARN`.
+lines do not block: before Wave 4 is deployed, "Wave 4 schema" and the edits route are `WARN`, and check 11 is
+`WARN` when the exercise is `staged` (participants see the pre-start page until StartEx; the demo may start staged).
+Any other lifecycle state than `live` or `staged` (paused, completed, archived, build) fails. `-ApiHost` takes a bare
+host or an http(s) URL; both scripts reduce it to the bare host before any request and pass only that on.
 
 ```text
 Pulse demo pre-flight (read-only) — https://app-pulse-api-uat-dynamis.azurewebsites.net
@@ -71,6 +74,7 @@ Pulse demo pre-flight (read-only) — https://app-pulse-api-uat-dynamis.azureweb
   [PASS] 4. Generation provider — expected Fake (DF-38); got Fake
   [PASS] 5. White noise — expected off; got off (pool ...)
   [PASS] 5. Media marking — expected watermarkEnabled on; got on
+  [SKIP] 5. Noise posts in the opening feed — expected none newer than the seed anchor; the feed does not expose a post's origin, ...
   [PASS] 6. Exercise pins — expected p09, p10 pinned for everyone; got all 2
   [PASS] 7. Run sheet — expected the 7 seeded items pending and no MSEL-imported item (DF-16); got all 7 pending, ...
   [PASS] 8. Media (image) — expected 200 with image/*; got 206 image/jpeg from <storage host> (SAS reachable)
@@ -78,9 +82,10 @@ Pulse demo pre-flight (read-only) — https://app-pulse-api-uat-dynamis.azureweb
   [PASS] 9. Scenario clock — expected a minute inside the pack's window (0 to 720 after the seed anchor ...); got minute 4 (...)
   [PASS] 10. Route /api/feed/pinned — expected an answer, not 404; got 200
   [PASS] 10. Route /api/posts/{id}/edits — expected an answer, not 404; got 200 for seeded post p10
+  [PASS] 11. Exercise lifecycle — expected live; got live
 Signed out.
 
-READY — 15 checks, 0 warning(s), 0 skipped.
+READY — 17 checks, 0 warning(s), 1 skipped.
 ```
 
 What the API cannot show, and how the pre-flight copes (its help has the detail):

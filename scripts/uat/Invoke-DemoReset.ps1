@@ -126,17 +126,31 @@ function Get-PrintableText {
     return $text
 }
 
-function Resolve-ApiBaseUrl {
-    param([Parameter(Mandatory)] [string] $ApiHost)
-    $value = $ApiHost.Trim().TrimEnd('/')
+function Resolve-ApiHost {
+    <#
+    .SYNOPSIS
+        Normalizes -ApiHost ONCE, before any network call: a bare host name, or an http(s) URL whose scheme, trailing
+        slash, path and query are dropped. Returns @{ Host (the bare host, with a port only when not the default);
+        BaseUrl (the origin this script calls) }. Only the bare host is passed to other scripts: Reset-DemoState.ps1
+        prepends https:// itself, and Clear-DemoContent.ps1 looks the exercise up by host name. Anything else (another
+        scheme, a user name or password, characters a host name cannot hold) is refused with a clear error. Plain
+        http only for localhost: the staff secret and the session token must not travel in the clear.
+    #>
+    param([AllowNull()] [AllowEmptyString()] [string] $ApiHost)
+    $value = ([string] $ApiHost).Trim()
+    $hint = "Use the API's host name, e.g. app-pulse-api-uat-dynamis.azurewebsites.net (an https:// URL is accepted too). Nothing was sent."
+    if (-not $value) { throw "-ApiHost is empty. $hint" }
     if ($value -notmatch '^[A-Za-z][A-Za-z0-9+.-]*://') { $value = "https://$value" }
     $uri = $null
-    if (-not [Uri]::TryCreate($value, [UriKind]::Absolute, [ref] $uri)) { throw "-ApiHost '$ApiHost' is not a host name." }
-    if ($uri.Scheme -ne 'https' -and -not ($uri.Scheme -eq 'http' -and $uri.IsLoopback)) {
-        throw '-ApiHost must use https (plain http only for localhost): the staff secret and the session token must not travel in the clear.'
+    if (-not [Uri]::TryCreate($value, [UriKind]::Absolute, [ref] $uri) -or $uri.Scheme -notin 'https', 'http' -or
+        $uri.UserInfo -or $uri.HostNameType -notin 'Dns', 'IPv4' -or $uri.Host -notmatch '^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$') {
+        throw "-ApiHost '$ApiHost' is not a host name or an http(s) URL. $hint"
     }
-    if ($uri.AbsolutePath -ne '/' -or $uri.Query) { throw "-ApiHost must be a host name or an origin, without a path: '$ApiHost'." }
-    return $uri.GetLeftPart([UriPartial]::Authority)
+    if ($uri.Scheme -eq 'http' -and -not $uri.IsLoopback) {
+        throw "-ApiHost '$ApiHost' uses plain http: only localhost may (the staff secret and the session token must not travel in the clear). Nothing was sent."
+    }
+    $hostName = if ($uri.IsDefaultPort) { $uri.Host } else { '{0}:{1}' -f $uri.Host, $uri.Port }
+    return [pscustomobject]@{ Host = $hostName.ToLowerInvariant(); BaseUrl = $uri.GetLeftPart([UriPartial]::Authority) }
 }
 
 function Clear-WebErrorRecord {
@@ -522,8 +536,11 @@ function Invoke-DemoReset {
         [string] $WebAppName
     )
     $ProgressPreference = 'SilentlyContinue'
-    try { $baseUrl = Resolve-ApiBaseUrl -ApiHost $ApiHost }
+    # Normalized once, before any network call; only the bare host goes to the other scripts.
+    try { $resolved = Resolve-ApiHost -ApiHost $ApiHost }
     catch { Write-Host $_.Exception.Message -ForegroundColor Red; return 1 }
+    $baseUrl = $resolved.BaseUrl
+    $ApiHost = $resolved.Host
 
     $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
     if (-not (Test-Path -LiteralPath $LogDirectory)) { New-Item -ItemType Directory -Force -Path $LogDirectory | Out-Null }
