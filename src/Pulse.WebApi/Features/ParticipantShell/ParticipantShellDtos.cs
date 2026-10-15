@@ -39,7 +39,8 @@ public sealed record ChromeBannerConfig
 
 /// <summary>
 /// <c>GET /api/chrome-config</c> body — the compliance-chrome config (<c>chromeConfig.ts</c>): whether
-/// chrome is on, plus the top/bottom classification banners (COR-031, NFR-008).
+/// chrome is on, the top/bottom classification banners (COR-031, NFR-008), and whether participant media is
+/// marked (<see cref="Watermark"/>, demo-feedback/01).
 /// </summary>
 public sealed record ChromeConfigResponse
 {
@@ -51,6 +52,14 @@ public sealed record ChromeConfigResponse
 
     /// <summary>The bottom classification banner.</summary>
     public ChromeBannerConfig Bottom { get; init; } = new();
+
+    /// <summary>
+    /// Whether participant media carries the "EXERCISE" marking bands (NFR-008; demo-feedback DF-3): the exercise's
+    /// <c>WatermarkEnabled</c>, verbatim — NOT folded into <see cref="Enabled"/>. The participant client's rule is
+    /// <c>showBands = watermark || !enabled</c>, so chrome off still marks the media. Additive: the client guard
+    /// ignores unknown keys, so this field is safe to ship before the client reads it.
+    /// </summary>
+    public bool Watermark { get; init; }
 }
 
 /// <summary>

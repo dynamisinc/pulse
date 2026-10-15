@@ -7,7 +7,7 @@ using Pulse.WebApi.Data.Entities;
 /// <summary>
 /// The real engagement read (demo-polish B3, SOC-030 / SOC-021): REAL like and repost counts from ACTIVE
 /// <see cref="PostReaction"/> rows, REAL reply counts from non-deleted direct replies, and the viewing persona's own
-/// like/repost state, for a whole batch of posts at once. Scoped lifetime, matching the
+/// like/repost/pin state, for a whole batch of posts at once. Scoped lifetime, matching the
 /// <see cref="PulseDbContext"/> unit of work it reads through. The seeded baseline is NOT added here; the projector
 /// and the reaction endpoint add it (implementation.md §1.4).
 /// </summary>
@@ -22,6 +22,12 @@ using Pulse.WebApi.Data.Entities;
 /// <para>
 /// <b>Soft delete (DP-15, XC-010).</b> Only ACTIVE reactions count (<c>DeletedAt IS NULL</c>); un-liked history
 /// rows are ignored by the counts and by the viewer flags. Only replies that are not taken down count.
+/// </para>
+/// <para>
+/// <b>Counted kinds are named, never "all kinds" (demo-feedback DF-6).</b> The count aggregate filters to
+/// <see cref="ReactionKinds.Like"/> and <see cref="ReactionKinds.Repost"/> explicitly, so a personal
+/// <see cref="ReactionKinds.Pin"/> (or any future kind) can never move a displayed count. A pin is reported only as
+/// the viewer's own <see cref="PostEngagement.ViewerPinned"/> flag, and only to that viewer.
 /// </para>
 /// <para>
 /// <b>Batched, no N+1.</b> At most four round trips regardless of how many ids are asked for: the in-scope post
@@ -81,10 +87,13 @@ public sealed class PostEngagementReader : IPostEngagementReader
             return Empty;
         }
 
-        // 2. Active reactions per (post, kind): one grouped aggregate for both kinds.
+        // 2. Active reactions per (post, kind): one grouped aggregate over the two COUNTED kinds, named explicitly so
+        //    a personal pin never counts (DF-6).
         var reactionCounts = await _dbContext.PostReactions
             .AsNoTracking()
-            .Where(reaction => inScopePostIds.Contains(reaction.PostId) && reaction.DeletedAt == null)
+            .Where(reaction => inScopePostIds.Contains(reaction.PostId)
+                && reaction.DeletedAt == null
+                && (reaction.Kind == ReactionKinds.Like || reaction.Kind == ReactionKinds.Repost))
             .GroupBy(reaction => new { reaction.PostId, reaction.Kind })
             .Select(group => new { group.Key.PostId, group.Key.Kind, Count = group.Count() })
             .ToListAsync(cancellationToken);
@@ -125,6 +134,10 @@ public sealed class PostEngagementReader : IPostEngagementReader
             .Where(row => string.Equals(row.Kind, ReactionKinds.Repost, StringComparison.Ordinal))
             .Select(row => row.PostId)
             .ToHashSet();
+        var viewerPinned = viewerReactions
+            .Where(row => string.Equals(row.Kind, ReactionKinds.Pin, StringComparison.Ordinal))
+            .Select(row => row.PostId)
+            .ToHashSet();
 
         return inScopePostIds.ToDictionary(
             postId => postId,
@@ -133,6 +146,7 @@ public sealed class PostEngagementReader : IPostEngagementReader
                 RealRepost: reposts.GetValueOrDefault(postId),
                 RealReply: replies.GetValueOrDefault(postId),
                 ViewerLiked: viewerLiked.Contains(postId),
-                ViewerReposted: viewerReposted.Contains(postId)));
+                ViewerReposted: viewerReposted.Contains(postId),
+                ViewerPinned: viewerPinned.Contains(postId)));
     }
 }

@@ -131,7 +131,7 @@ public class ThreadReadEndpointTests
         var focusedJson = json["focused"]!;
         focusedJson["counts"]!["like"]!.GetValue<int>().Should().Be(RecordingPostProjector.ProjectedCounts.Like);
         focusedJson["media"]!.AsArray().Should().ContainSingle();
-        JsonNode.DeepEquals(focusedJson["viewer"], JsonNode.Parse("""{"liked":true,"reposted":false}""")).Should().BeTrue();
+        JsonNode.DeepEquals(focusedJson["viewer"], JsonNode.Parse("""{"liked":true,"reposted":false,"pinned":false}""")).Should().BeTrue();
 
         var replyJson = json["replies"]![0]!;
         replyJson["inReplyTo"]!["postId"]!.GetValue<string>().Should().Be(focused.Id.ToString());

@@ -42,6 +42,14 @@ public sealed class InjectItemWriteRequest
     /// <summary>PUT only: the version the editor last read. A stale version is a <c>409</c> (IQ-9).</summary>
     [JsonPropertyName("version")]
     public int? Version { get; init; }
+
+    /// <summary>
+    /// SERVER-SIDE ONLY: the MSEL <c>Inject #</c> an import keys the item on (demo-feedback DF-10), stored in
+    /// <c>InjectItem.ExternalRef</c>. Never bound from a request body (<see cref="JsonIgnoreAttribute"/>), so the console's
+    /// create and edit cannot set or clear it; only the import path fills it.
+    /// </summary>
+    [JsonIgnore]
+    public string? ExternalRef { get; init; }
 }
 
 /// <summary>One child post in an <see cref="InjectItemWriteRequest"/> — the frozen <c>InjectPostWrite</c>.</summary>

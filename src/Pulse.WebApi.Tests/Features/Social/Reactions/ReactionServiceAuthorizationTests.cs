@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Pulse.WebApi.Data;
+using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.Social.Engagement;
 using Pulse.WebApi.Features.Social.Follows;
@@ -72,7 +73,33 @@ public sealed class ReactionServiceAuthorizationTests
         var result = await service.ReactAsync(Guid.NewGuid(), "love");
 
         result.Outcome.Should().Be(ReactionOutcome.Invalid);
-        result.ValidationError.Should().Be("kind must be 'like' or 'repost'.");
+        result.ValidationError.Should().Be("kind must be 'like', 'repost' or 'pin'.");
+    }
+
+    [Theory]
+    [InlineData("staff")]
+    [InlineData("readonly")]
+    [InlineData("participant-ish")]
+    public async Task ThePinKind_FollowsTheSameParticipantOnlyAllowlist(string kind)
+    {
+        // demo-feedback/04 (DF-6): 'pin' is now a reaction kind, so a non-participant session is refused for the
+        // SAME reason as a like (403), never with a kind error (400). Acceptance for a participant is proven
+        // against real SQL in Pins/PersonalPinTests.
+        var service = CreateService(Exercise, Session(kind, Exercise));
+
+        var react = await service.ReactAsync(Guid.NewGuid(), ReactionKinds.Pin);
+        var unreact = await service.UnreactAsync(Guid.NewGuid(), ReactionKinds.Pin);
+
+        react.Outcome.Should().Be(ReactionOutcome.Forbidden, "a personal pin is participant-only (DF-6, DP-10)");
+        unreact.Outcome.Should().Be(ReactionOutcome.Forbidden);
+    }
+
+    [Fact]
+    public async Task ThePinKind_WithNoScope_FailsClosed()
+    {
+        var service = CreateService(null, Session("participant", Exercise));
+
+        (await service.ReactAsync(Guid.NewGuid(), ReactionKinds.Pin)).Outcome.Should().Be(ReactionOutcome.ScopeUnresolved);
     }
 
     private static CurrentSessionPersona Session(string kind, Guid exerciseId) => new()
