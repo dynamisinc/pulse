@@ -46,6 +46,9 @@ only**, a **15-minute** window, history visible to everyone, participants only (
       post or reply (`Post id`, `Edit number` with 0 = original, `Scenario time`, `Wall clock (UTC)`, `Text`,
       `Current` yes/no), as specified in WAVE-4.md "Export columns". Never-edited posts have no rows. Autofilter and
       frozen header; text as values, never formulas.
+- [ ] The `PostEdit.ExerciseId` is copied from the loaded, exercise-filtered `Post`, never from the request; the DB
+      does not tie them (17 Gate-1 L-1). `EditNumber` stays within 1..5 in code (L-3). A test proves an edit row always
+      carries its post's exercise.
 - [ ] Telemetry `post.edited` (postId, editNumber, wall + scenario time, session kind); no text.
 
 ## Out of Scope
