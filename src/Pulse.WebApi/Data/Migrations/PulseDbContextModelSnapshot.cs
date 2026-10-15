@@ -1383,7 +1383,7 @@ namespace Pulse.WebApi.Data.Migrations
                     b.HasOne("Pulse.WebApi.Data.Entities.Exercise", null)
                         .WithOne()
                         .HasForeignKey("Pulse.WebApi.Data.Entities.ExerciseRuntimeState", "ExerciseId")
-                        .OnDelete(DeleteBehavior.Cascade)
+                        .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });
 

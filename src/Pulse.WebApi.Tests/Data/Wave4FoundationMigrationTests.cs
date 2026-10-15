@@ -70,7 +70,7 @@ public class Wave4FoundationMigrationTests
     }
 
     [Fact]
-    public void ExerciseRuntimeState_IsKeyedByItsExercise_WithACascadeForeignKeyToExercises()
+    public void ExerciseRuntimeState_IsKeyedByItsExercise_WithARestrictForeignKeyToExercises()
     {
         using var context = ModelOnlyContext();
         var state = context.Model.FindEntityType(typeof(ExerciseRuntimeState))!;
@@ -80,7 +80,7 @@ public class Wave4FoundationMigrationTests
         var foreignKey = state.GetForeignKeys().Should().ContainSingle().Subject;
         foreignKey.PrincipalEntityType.ClrType.Should().Be(typeof(Exercise));
         foreignKey.Properties.Select(p => p.Name).Should().Equal(nameof(ExerciseRuntimeState.ExerciseId));
-        foreignKey.DeleteBehavior.Should().Be(DeleteBehavior.Cascade, "deleting an exercise removes its runtime state");
+        foreignKey.DeleteBehavior.Should().Be(DeleteBehavior.Restrict, "every FK is Restrict (XC-010): exercises are never hard-deleted");
         foreignKey.IsUnique.Should().BeTrue("one runtime-state row per exercise");
         typeof(IExerciseScoped).IsAssignableFrom(typeof(ExerciseRuntimeState)).Should().BeTrue();
     }

@@ -757,13 +757,14 @@ public class PulseDbContext : DbContext
         modelBuilder.Entity<ExerciseRuntimeState>(entity =>
         {
             // One row per exercise: the exercise id IS the key (so it is also the required, indexed scope column), and
-            // a cascade FK to Exercises (no navigation; Exercise carries no exercise filter, so no required-end warning).
+            // a Restrict FK to Exercises (XC-010: every FK is Restrict; exercises are never hard-deleted). No navigation;
+            // Exercise carries no exercise filter, so no required-end warning.
             entity.HasKey(e => e.ExerciseId);
             entity.Property(e => e.ExerciseId).ValueGeneratedNever();
             entity.HasOne<Exercise>()
                 .WithOne()
                 .HasForeignKey<ExerciseRuntimeState>(e => e.ExerciseId)
-                .OnDelete(DeleteBehavior.Cascade);
+                .OnDelete(DeleteBehavior.Restrict);
 
             entity.Property(e => e.PauseTier).IsRequired().HasMaxLength(ExerciseRuntimeState.MaxPauseTierLength)
                 .HasDefaultValue(ExerciseRuntimeState.DefaultPauseTier);

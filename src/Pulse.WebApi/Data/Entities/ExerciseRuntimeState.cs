@@ -8,7 +8,7 @@ namespace Pulse.WebApi.Data.Entities;
 /// <remarks>
 /// <para>
 /// <b>Keyed by its exercise.</b> <see cref="ExerciseId"/> is the primary key and a foreign key to <c>Exercises</c>
-/// (cascade delete), so there is at most one row per exercise. <see cref="IExerciseScoped"/>, so it inherits the
+/// (<c>Restrict</c>, XC-010: exercises are never hard-deleted), so there is at most one row per exercise. <see cref="IExerciseScoped"/>, so it inherits the
 /// central read filter and write guard; it carries no participant-visible content of its own.
 /// </para>
 /// <para>
@@ -47,7 +47,7 @@ public sealed class ExerciseRuntimeState : IExerciseScoped
     /// <summary>The <see cref="OverlayState"/> a new row starts with (and the column default): no holding page.</summary>
     public const string DefaultOverlayState = "none";
 
-    /// <summary>The owning exercise (COR-001) — also the primary key and a cascade foreign key to <c>Exercises</c>.</summary>
+    /// <summary>The owning exercise (COR-001) — also the primary key and a <c>Restrict</c> foreign key to <c>Exercises</c>.</summary>
     public Guid ExerciseId { get; set; }
 
     /// <summary>The pause tier's wire literal (<c>running</c> / <c>injects</c> / <c>engine</c> / <c>freeze</c>). Defaults to <c>running</c>.</summary>

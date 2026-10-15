@@ -16,7 +16,8 @@ namespace Pulse.WebApi.Data.Migrations
     /// idempotent deploy script's single batch names a column before it exists (lesson #413). The one new <c>NOT NULL</c>
     /// column on an existing table, <c>Posts.EditCount</c>, carries <c>DEFAULT 0</c>, so existing posts read "never edited"
     /// with no backfill; the two last-edit instants are nullable. <c>ExerciseRuntimeStates</c> is keyed by its exercise
-    /// (cascade FK to <c>Exercises</c>); <c>PostEdits.PostId</c> is a <c>Restrict</c> FK to <c>Posts</c> (XC-010).
+    /// (<c>Restrict</c> FK to <c>Exercises</c>); <c>PostEdits.PostId</c> is a <c>Restrict</c> FK to <c>Posts</c>. Every FK
+    /// is <c>Restrict</c> (XC-010).
     /// </remarks>
     public partial class DemoFeedbackWave4RuntimeAndEdits : Migration
     {
@@ -70,7 +71,7 @@ namespace Pulse.WebApi.Data.Migrations
                         column: x => x.ExerciseId,
                         principalTable: "Exercises",
                         principalColumn: "Id",
-                        onDelete: ReferentialAction.Cascade);
+                        onDelete: ReferentialAction.Restrict);
                 });
 
             migrationBuilder.CreateTable(

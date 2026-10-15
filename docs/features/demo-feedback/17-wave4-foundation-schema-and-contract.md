@@ -15,23 +15,26 @@ freezes both in **one migration**. This story lands the entities, the migration 
 ## Acceptance Criteria
 
 - [x] New entity `Data/Entities/ExerciseRuntimeState.cs` exactly as the WAVE-4 schema table: `ExerciseId` is the
-      primary key and an FK to `Exercises` (cascade delete), implements `IExerciseScoped`, `PauseTier` defaults to
+      primary key and an FK to `Exercises` (restrict, XC-010), implements `IExerciseScoped`, `PauseTier` defaults to
       `running`, `OverlayState` to `none`, `OverlaySequence` to 0, `ClockFrozen` to false. XML docs state that clock
       columns are all null (unstarted) or all set, and that the wall anchor is UTC.
 - [x] New entity `Data/Entities/PostEdit.cs`: `Id`, `ExerciseId` (`IExerciseScoped`), `PostId` (FK restrict),
-      `EditNumber` (1..5), `PreviousBody` (same max length constant as `Post.Body`), `EditedAt`, `EditedScenarioTime`,
+      `EditNumber` (1..5), `PreviousBody` (same max length as `Post.Body`: `nvarchar(max)`), `EditedAt`, `EditedScenarioTime`,
       `ActingHumanId` (same type as `Post.ActingHumanId`, nullable). Unique index (`PostId`, `EditNumber`).
 - [x] `Post` gains `EditCount` (int, default 0), `LastEditedAt` and `LastEditedScenarioTime` (nullable
       `DateTimeOffset`). `LastEditedAt` is documented as staff/export only (XC-002: never projected to a participant).
 - [x] `PulseDbContext` registers both sets; both are covered by the central exercise query filter and the write guard
-      (a test inserts a row for another exercise and it is refused; a read under exercise A never sees B's rows).
+      (a test saves a row with no resolved scope, `ExerciseId = Guid.Empty`, and the guard refuses it and persists
+      nothing; a read under exercise A never sees B's rows, by list, by id (IDOR) or by aggregate, and an unset scope
+      sees zero rows).
 - [x] **ONE migration `DemoFeedbackWave4RuntimeAndEdits`** + snapshot. It applies cleanly through the idempotent
       script (`dotnet ef migrations script --idempotent`) on top of `20261014202342_DemoFeedbackPinsNoiseImport`, and
       on a database that already has data (existing posts get `EditCount = 0`).
 - [x] Contract stubs compile and are referenced by nothing yet: `Features/Social/Editing/PostEditDtos.cs`
       (`EditPostRequest { text }`, `PostEditHistoryDto`, `PostEditedDto`, `PostEditedSummaryDto { count, scenarioTime }`),
       `PauseTierStateDto` gains `persisted` (default `true` until 18 wires it). camelCase on the wire.
-- [ ] No behaviour change: every existing backend test passes. **(Blocked, see Build notes: two XC-010 no-cascade invariant tests fail on the frozen cascade FK.)**
+- [x] No behaviour change: every existing backend test passes, including the XC-010 no-cascade invariants
+      (`DemoPolishSchemaModelTests`, `DemoPolishMigrationTests`), unchanged.
 
 ## Out of Scope
 
@@ -56,7 +59,7 @@ write guard for both new sets), migration applies on an empty database and on on
 
 **Linked (story 17 build):**
 
-- `Wave4FoundationMigrationTests.ExerciseRuntimeState_IsKeyedByItsExercise_WithACascadeForeignKeyToExercises` (AC-1)
+- `Wave4FoundationMigrationTests.ExerciseRuntimeState_IsKeyedByItsExercise_WithARestrictForeignKeyToExercises` (AC-1)
 - `Wave4FoundationMigrationTests.ExerciseRuntimeState_HasTheContractColumns_LengthsAndDefaults` (AC-1)
 - `Wave4FoundationMigrationTests.PostEdit_HasTheContractColumns_ARestrictForeignKeyToPosts_AndTheUniqueEditNumberIndex` (AC-2)
 - `Wave4FoundationMigrationTests.TheEditNumberKey_RefusesASecondRowForTheSameEdit_ButAllowsTheNextNumber` (AC-2)
@@ -81,7 +84,7 @@ write guard for both new sets), migration applies on an empty database and on on
 - `Wave4ContractStubTests.PostEditHistoryDto_SerializesThePostIdAndVersionsWithTheFrozenKeys` (AC-6)
 - `Wave4ContractStubTests.PostEditedDto_AndItsSummary_SerializeWithTheFrozenKeys` (AC-6)
 - `Wave4ContractStubTests.PauseTierStateDto_CarriesPersisted_DefaultingToTrue` (AC-6)
-- Full runs: `Pulse.Core.Tests` 404/404; `Pulse.WebApi.Tests` 4417/4419 (AC-7 blocked, see below)
+- Full runs green: `Pulse.WebApi.Tests` 4419/4419, `Pulse.Core.Tests` 404/404 (AC-7)
 
 **Build notes.** `Post.Body` has no max-length constant (it is `nvarchar(max)`), so `PostEdit.PreviousBody` is
 `nvarchar(max)` too (the model test pins "same as `Post.Body`"). The central write guard refuses an **empty**
@@ -89,9 +92,7 @@ write guard for both new sets), migration applies on an empty database and on on
 current context, so the write-guard tests prove the empty-scope refusal, and the cross-exercise half is proved on the
 read side (a B row is invisible under A, so it cannot be loaded and modified under A).
 
-**Open conflict (needs an orchestrator decision).** The frozen schema's `ExerciseRuntimeStates.ExerciseId` FK to
-`Exercises` with **cascade** delete violates the standing XC-010 invariant "every FK is Restrict/NoAction", pinned by
-`DemoPolishSchemaModelTests.EveryRelationalForeignKey_IsRestrictOrNoAction_SoNoCascadePathExists` and
-`DemoPolishMigrationTests.TheMigratedSchema_HasNoCascadingForeignKey_AtTheServer`; both fail. Built as frozen; not
-resolved by the builder. Either (a) exempt exactly this FK in both tests (runtime state is not exercise history; it is
-the table's only FK, so no multiple-cascade path), or (b) make the FK `Restrict` and regenerate the migration.
+**Resolved (orchestrator, option b).** The `ExerciseRuntimeStates.ExerciseId` → `Exercises` FK is **Restrict**, so the
+XC-010 "every FK is Restrict/NoAction" invariants stand unchanged and pass; the migration was regenerated under the same
+name. The write guard refuses an empty scope only (unchanged); cross-exercise protection is the read filter. Both
+accepted as built.
