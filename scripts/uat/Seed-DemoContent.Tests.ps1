@@ -3095,3 +3095,512 @@ Describe 'Retry-After' {
         Should -Invoke Start-Sleep -Times 1 -Exactly -ParameterFilter { $Seconds -eq 3 }
     }
 }
+
+Describe 'Demo feedback S1 (#510): -RunSheet, white noise, exercise pins and media marking' {
+    BeforeAll {
+        function Write-S1Pack {
+            <# A copy of the fixture pack with one change, in its own folder (the media files come along). #>
+            param([string] $Name, [scriptblock] $Mutate)
+            $root = Join-Path $TestDrive $Name
+            if (-not (Test-Path $root)) { Copy-Item -Recurse $script:FixtureRoot $root }
+            $pack = Get-FixturePack; & $Mutate $pack
+            Set-Content -LiteralPath (Join-Path $root 'pack.json') -Value (ConvertTo-SeedJson $pack)
+            return (Join-Path $root 'pack.json')
+        }
+        function Get-S1Manifest { ConvertFrom-SeedJson (Get-Content -LiteralPath (Join-Path $TestDrive 'manifests' "$($script:Fake.ExerciseId).json") -Raw) }
+        function Get-S1PersonaId([string] $Handle) { [string] (@($script:Fake.Personas.Values) | Where-Object handle -eq $Handle).id }
+        function Get-S1PostId([string] $Like) { [string] (@($script:Fake.Posts) | Where-Object { $_.text -like $Like } | Select-Object -First 1).id }
+        function Get-CallIndex {
+            <# Where a call sits in the fake's call log (-1 when absent): the first match, or the last with -Last. #>
+            param([string] $Method, [string] $Like, [switch] $Last)
+            $calls = @($script:Fake.Calls)
+            $found = -1
+            for ($i = 0; $i -lt $calls.Count; $i++) {
+                if ($calls[$i].Method -eq $Method -and $calls[$i].Path -like $Like) { $found = $i; if (-not $Last) { break } }
+            }
+            return $found
+        }
+        function Invoke-FakeOnly([string] $Uri, [string] $Method, [hashtable] $Headers, $Body, $Form, [string] $ContentType) {
+            Invoke-FakePulse -Fake $script:Fake -Uri $Uri -Method $Method -Headers $Headers -Body $Body -Form $Form -ContentType $ContentType
+        }
+        function Reset-S1Fake {
+            <# A fresh fake API and no manifest, for a second scenario inside one test. #>
+            $script:Fake = New-FakePulse
+            $env:PULSE_STAFF_SECRET = $script:Fake.Secret
+            Remove-Item -Recurse -Force (Join-Path $TestDrive 'manifests') -ErrorAction SilentlyContinue
+        }
+        $script:RealSeedLimits = ${function:Get-SeedLimits}
+    }
+    BeforeEach {
+        Reset-S1Fake
+        Mock Invoke-WebRequest { Invoke-FakeOnly -Uri $Uri -Method $Method -Headers $Headers -Body $Body -Form $Form -ContentType $ContentType }
+        Mock Invoke-MediaRangeRequest { 206 }
+        Mock Start-Sleep { }
+    }
+    AfterEach { $env:PULSE_STAFF_SECRET = $null }
+
+    Context 'pack validation and the JSON Schema' {
+        It '<Name> -> <Code>' -ForEach @(
+            @{ Name = 'noise not a list'; Code = 'type'; Mutate = { param($p) $p['noise'] = 'chatter' } }
+            @{ Name = 'noise entry not an object'; Code = 'type'; Mutate = { param($p) $p['noise'][0] = 'chatter' } }
+            @{ Name = 'noise entry with an unknown field'; Code = 'unknown-field'; Mutate = { param($p) $p['noise'][0]['media'] = @() } }
+            @{ Name = 'noise handle with @'; Code = 'handle-format'; Mutate = { param($p) $p['noise'][0]['persona'] = '@mvega_fh' } }
+            @{ Name = 'noise text missing'; Code = 'noise-text'; Mutate = { param($p) $p['noise'][1].Remove('text') } }
+            @{ Name = 'noise text blank'; Code = 'noise-text'; Mutate = { param($p) $p['noise'][1]['text'] = '   ' } }
+            @{ Name = 'noise text over 280 code points'; Code = 'noise-text'; Mutate = { param($p) $p['noise'][1]['text'] = "`u{1F30A}" * 281 } }
+            @{ Name = 'markup in noise text'; Code = 'markup'; Mutate = { param($p) $p['noise'][2]['text'] = 'Fair is <b>on</b> today' } }
+            @{ Name = 'over 1000 noise entries'; Code = 'noise-count'; Mutate = { param($p) $p['noise'] = @(1..1001 | ForEach-Object { [ordered]@{ persona = 'FulcoEM'; text = "chatter $_" } }) } }
+            @{ Name = 'pins not a list'; Code = 'type'; Mutate = { param($p) $p['pins'] = 'p01' } }
+            @{ Name = 'a pin naming no post'; Code = 'pin-ref'; Mutate = { param($p) $p['pins'] += 'p99' } }
+            @{ Name = 'a pin naming a run-sheet item'; Code = 'pin-ref'; Mutate = { param($p) $p['pins'] = @('i01') } }
+            @{ Name = 'a pin listed twice'; Code = 'duplicate-pin'; Mutate = { param($p) $p['pins'] += 'p02' } }
+            @{ Name = 'msel on a burst'; Code = 'inject-msel-kind'; Mutate = { param($p) $p['runSheet']['items'][1]['msel'] = '2' } }
+            @{ Name = 'msel blank'; Code = 'inject-msel'; Mutate = { param($p) $p['runSheet']['items'][2]['msel'] = ' ' } }
+            @{ Name = 'msel not a string'; Code = 'inject-msel'; Mutate = { param($p) $p['runSheet']['items'][2]['msel'] = 3 } }
+            @{ Name = 'msel over 64 characters'; Code = 'inject-msel'; Mutate = { param($p) $p['runSheet']['items'][2]['msel'] = 'M' * 65 } }
+            @{ Name = 'markup in msel'; Code = 'markup'; Mutate = { param($p) $p['runSheet']['items'][2]['msel'] = '<b>3' } }
+            @{ Name = 'two items with one msel (ignoring case and spaces, as the import matches)'; Code = 'duplicate-msel'; Mutate = { param($p) $p['runSheet']['items'][0]['msel'] = ' INJ-7'; $p['runSheet']['items'][2]['msel'] = 'inj-7' } }
+        ) {
+            $pack = Get-FixturePack
+            & $Mutate $pack
+            Get-PackCodes $pack | Should -Be @($Code)
+        }
+
+        It 'the JSON Schema takes noise, pins and msel, and refuses their bad shapes; a pack without them stays valid' {
+            Test-Json -Json (Get-Content -LiteralPath $script:FixturePath -Raw) -SchemaFile $script:SchemaPath | Should -BeTrue
+            $old = Get-FixturePack; $old.Remove('noise'); $old.Remove('pins'); $old['runSheet']['items'][2].Remove('msel')
+            Test-Json -Json (ConvertTo-SeedJson $old) -SchemaFile $script:SchemaPath | Should -BeTrue
+            Get-PackCodes $old | Should -BeNullOrEmpty
+            foreach ($mutate in @(
+                    { param($p) $p['noise'][0]['media'] = @() }
+                    { param($p) $p['noise'][0]['text'] = '  ' }
+                    { param($p) $p['noise'][0]['text'] = 'a <b>bold</b> claim' }
+                    { param($p) $p['noise'][0]['persona'] = '@mvega_fh' }
+                    { param($p) $p['noise'] = @(1..1001 | ForEach-Object { [ordered]@{ persona = 'FulcoEM'; text = "chatter $_" } }) }
+                    { param($p) $p['pins'] = @('p01', 'p01') }
+                    { param($p) $p['pins'] = @('has space') }
+                    { param($p) $p['runSheet']['items'][1]['msel'] = '2' }
+                    { param($p) $p['runSheet']['items'][2]['msel'] = '' }
+                    { param($p) $p['runSheet']['items'][2]['msel'] = 'M' * 65 }
+                    { param($p) $p['runSheet']['items'][2]['msel'] = 3 }
+                )) {
+                $bad = Get-FixturePack; & $mutate $bad
+                Test-Json -Json (ConvertTo-SeedJson $bad) -SchemaFile $script:SchemaPath -ErrorAction SilentlyContinue | Should -BeFalse -Because "$mutate"
+            }
+        }
+    }
+
+    Context '-RunSheet selection (pure)' {
+        It 'Test-RunSheetItemLoaded: all loads both, exceptMsel only the item without msel, none neither' {
+            $plain = [ordered]@{ key = 'a'; kind = 'post' }; $msel = [ordered]@{ key = 'b'; kind = 'post'; msel = '3' }
+            @('all', 'exceptMsel', 'none' | ForEach-Object { "$_=$(Test-RunSheetItemLoaded -Item $plain -RunSheet $_)/$(Test-RunSheetItemLoaded -Item $msel -RunSheet $_)" }) |
+                Should -Be @('all=True/True', 'exceptMsel=True/False', 'none=False/False')
+            { Test-RunSheetItemLoaded -Item $plain -RunSheet 'bursts' } | Should -Throw '*Unknown -RunSheet*'
+        }
+
+        It 'Get-RunSheetItems: -Left is exactly the complement, in pack order; all by default' {
+            $pack = Get-FixturePack
+            foreach ($mode in 'all', 'exceptMsel', 'none') {
+                $loaded = @(Get-RunSheetItems -Pack $pack -RunSheet $mode | ForEach-Object { $_['key'] })
+                $left = @(Get-RunSheetItems -Pack $pack -RunSheet $mode -Left | ForEach-Object { $_['key'] })
+                @($loaded + $left | Sort-Object) | Should -Be @('i01', 'i02', 'i03') -Because $mode
+            }
+            @(Get-RunSheetItems -Pack $pack -RunSheet exceptMsel | ForEach-Object { $_['key'] }) | Should -Be @('i01', 'i02')
+            @(Get-RunSheetItems -Pack $pack -RunSheet exceptMsel -Left | ForEach-Object { $_['key'] }) | Should -Be @('i03')
+            @(Get-RunSheetItems -Pack $pack | ForEach-Object { $_['key'] }) | Should -Be @('i01', 'i02', 'i03')
+        }
+
+        It 'exceptMsel: a loaded item that replies to an msel item fails, naming both items; all and none pass' {
+            $pack = Get-FixturePack
+            $pack['runSheet']['items'][0]['msel'] = '1'             # i01 for the import, but the burst i02 replies to it
+            Get-PackCodes $pack | Should -BeNullOrEmpty               # the pack itself is fine
+            $problems = @(Test-RunSheetSelection -Pack $pack -RunSheet exceptMsel)
+            $problems.Count | Should -Be 1
+            $problems[0].Code | Should -Be 'inject-reply-left-out'
+            $problems[0].Where | Should -Be 'runSheet.items[1].posts[2].replyTo.item'
+            $problems[0].Message | Should -BeExactly ("item 'i02' is seeded, but its post 3 replies to item 'i01', which -RunSheet exceptMsel leaves for the on-stage MSEL import (msel '1'). " +
+                "'i01' would not exist yet when 'i02' is created. Remove msel from 'i01', drop the reply, or run with -RunSheet all.")
+            Test-RunSheetSelection -Pack $pack -RunSheet all | Should -BeNullOrEmpty
+            Test-RunSheetSelection -Pack $pack -RunSheet none | Should -BeNullOrEmpty
+            Test-RunSheetSelection -Pack (Get-FixturePack) -RunSheet exceptMsel | Should -BeNullOrEmpty   # nothing replies to the fixture's i03
+        }
+
+        It 'plan: exceptMsel plans only the loaded items and lists the msel one as left out; none plans nothing' {
+            $pack = Get-FixturePack
+            $plan = Get-InjectPlan -Pack $pack -Manifest (New-SeedManifest) -Queue $null -PersonaIds $null -RunSheet exceptMsel
+            @($plan.Items | ForEach-Object Key) | Should -Be @('i01', 'i02')
+            @($plan.Left | ForEach-Object { "$($_.Key)|$($_.Msel)|$($_.Reason)" }) | Should -Be @("i03|3|left for the on-stage MSEL import (msel '3'; -RunSheet exceptMsel)")
+            $plan.ToCreate | Should -Be 2
+            $none = Get-InjectPlan -Pack $pack -Manifest (New-SeedManifest) -Queue $null -PersonaIds $null -RunSheet none
+            $none.Items | Should -BeNullOrEmpty
+            @($none.Left | ForEach-Object Key) | Should -Be @('i01', 'i02', 'i03')
+            $none.Left[0].Reason | Should -Be 'not loaded (-RunSheet none)'
+            (Get-InjectPlan -Pack $pack -Manifest (New-SeedManifest) -Queue $null -PersonaIds $null).Left | Should -BeNullOrEmpty
+        }
+
+        It 'plan: a seeded copy of an msel item is warned about while the console could fire it, and its id stays claimed' {
+            $pack = Get-FixturePack
+            $i03 = $pack['runSheet']['items'][2]
+            $row = [ordered]@{ id = 'item-3'; kind = 'post'; title = $i03['title']; status = 'pending'; firedCount = 0
+                posts = @([ordered]@{ id = 'item-3-p1'; sequence = 1; status = 'pending'; personaId = 'em'; text = $i03['posts'][0]['text'] }) }
+            $manifest = New-SeedManifest; $manifest['injects']['i03'] = [ordered]@{ itemId = 'item-3' }
+            $personas = @{ Newsline7 = 'n7'; FulcoEM = 'em'; mvega_fh = 'mv' }
+            $plan = Get-InjectPlan -Pack $pack -Manifest $manifest -Queue @($row) -PersonaIds $personas -RunSheet exceptMsel
+            ($plan.Warnings -join "`n") | Should -Match ("i03 is left for the MSEL import \(msel '3'\), but an earlier run of this script loaded it and it is still in the run sheet \(pending, item-3\)\. " +
+                'The import matches on Inject #, which that copy does not carry, so it would add a second one: delete item-3 in the console before the import\.')
+            $plan.Claimed.Contains('item-3') | Should -BeTrue           # no other pack item can adopt it
+            @($plan.Items | ForEach-Object Action) | Should -Be @('create', 'create')
+            $row['status'] = 'fired'; $row['firedCount'] = 1
+            @((Get-InjectPlan -Pack $pack -Manifest $manifest -Queue @($row) -PersonaIds $personas -RunSheet exceptMsel).Warnings) | Should -BeNullOrEmpty
+        }
+    }
+
+    Context '-RunSheet end to end' {
+        It 'exceptMsel loads every item but the msel one; the plan, the run and the self-check say so' {
+            $run = Invoke-FakeSeed @{ RunSheet = 'exceptMsel' }
+            $run.Code | Should -Be 0 -Because $run.Text
+            @(Get-FakeCalls POST '/api/injects' | ForEach-Object { (ConvertFrom-SeedJson $_.Body)['title'] }) | Should -Be @('Newsline follows up on the road closure', 'Residents pile on about the bridge')
+            $script:Fake.Injects.Count | Should -Be 2
+            @((Get-S1Manifest)['injects'].Keys) | Should -Be @('i01', 'i02')
+            $run.Text | Should -Match '; -RunSheet exceptMsel loads 2 of the run-sheet items'
+            $run.Text | Should -Match '- i03  post   "County opens the Fairhaven High shelter" \(1 post\); left for the on-stage MSEL import \(msel ''3''; -RunSheet exceptMsel\)'
+            $run.Text | Should -Match '\[SKIP\] i03 — left for the on-stage MSEL import'
+            $run.Text | Should -Match '✅ all 2 run-sheet item\(s\) are in the console''s queue with their posts'
+            $run.Text | Should -Match '➖ run-sheet item\(s\) left out by -RunSheet exceptMsel, not checked: i03 \(msel ''3''\)'
+        }
+
+        It 'exceptMsel never touches the MSEL import''s item: not adopted, re-pointed, compared or counted, on a re-run or a Tuesday re-seed' {
+            (Invoke-FakeSeed @{ RunSheet = 'exceptMsel' }).Code | Should -Be 0
+            # The on-stage import adds i03 from its MSEL row: same kind, title, persona and text, a perfect match.
+            $i03 = (Get-FixturePack)['runSheet']['items'][2]
+            $imported = New-FakeInjectItem -Fake $script:Fake -Request ([ordered]@{ kind = 'post'; title = $i03['title']; plannedMinute = 20
+                    posts = @([ordered]@{ personaId = (Get-S1PersonaId 'FulcoEM'); text = $i03['posts'][0]['text'] }) })
+            $script:Fake.Injects.Add($imported)
+            $again = Invoke-FakeSeed @{ RunSheet = 'exceptMsel' }
+            $again.Code | Should -Be 0 -Because $again.Text
+            $script:Fake.Posts.Clear()                                        # Tuesday: Clear-DemoContent archived the feed
+            $script:Fake.Calls.Clear()
+            $reseed = Invoke-FakeSeed @{ RunSheet = 'exceptMsel' }
+            $reseed.Code | Should -Be 0 -Because $reseed.Text
+            (Get-FakeCalls POST '/api/injects').Count | Should -Be 0
+            # Only i01 is re-pointed (to the new p02); the imported item is never written.
+            @($script:Fake.Calls | Where-Object { $_.Method -eq 'PUT' -and $_.Path -like '/api/injects/*' } | ForEach-Object Path) | Should -Be @("/api/injects/$($script:Fake.Injects[0].id)")
+            $script:Fake.Injects.Count | Should -Be 3
+            $script:Fake.Injects[2].version | Should -Be 1
+            (Get-S1Manifest)['injects'].Contains('i03') | Should -BeFalse
+            foreach ($text in $again.Text, $reseed.Text) {
+                $text | Should -Not -Match 'i03 differs|i03 is left for the MSEL import \(msel ''3''\), but|matches 2 items'
+                $text | Should -Match '✅ the armable run-sheet items are in pack order'
+            }
+        }
+
+        It 'switching from all to exceptMsel: the copy an earlier run loaded is warned about and left exactly as it is' {
+            (Invoke-FakeSeed).Code | Should -Be 0                             # -RunSheet all: the seed loaded i03 itself
+            $seeded = $script:Fake.Injects[2].id
+            $script:Fake.Calls.Clear()
+            $run = Invoke-FakeSeed @{ RunSheet = 'exceptMsel' }
+            $run.Code | Should -Be 0 -Because $run.Text
+            $run.Text | Should -Match "\[WARN\] i03 is left for the MSEL import \(msel '3'\), but an earlier run of this script loaded it and it is still in the run sheet \(pending, $seeded\)"
+            @($script:Fake.Calls | Where-Object { $_.Path -like '/api/injects*' -and $_.Method -ne 'GET' }) | Should -BeNullOrEmpty
+            $script:Fake.Injects.Count | Should -Be 3
+            (Get-S1Manifest)['injects']['i03']['itemId'] | Should -Be $seeded
+        }
+
+        It 'none: no run-sheet request at all, the manifest''s items stay, and everything else still seeds' {
+            (Invoke-FakeSeed).Code | Should -Be 0
+            $before = ConvertTo-SeedJson ((Get-S1Manifest)['injects'])
+            $script:Fake.Calls.Clear()
+            $run = Invoke-FakeSeed @{ RunSheet = 'none' }
+            $run.Code | Should -Be 0 -Because $run.Text
+            @($script:Fake.Calls | Where-Object { $_.Path -like '/api/injects*' }) | Should -BeNullOrEmpty
+            ConvertTo-SeedJson ((Get-S1Manifest)['injects']) | Should -Be $before
+            $run.Text | Should -Match 'Run sheet       -RunSheet none: none of the pack''s 3 item\(s\) is loaded, and the console''s queue is not read or touched'
+            $run.Text | Should -Match '➖ run-sheet item\(s\) left out by -RunSheet none, not checked: i01, i02, i03 \(msel ''3''\)'
+
+            Reset-S1Fake
+            $fresh = Invoke-FakeSeed @{ RunSheet = 'none' }
+            $fresh.Code | Should -Be 0 -Because $fresh.Text
+            $script:Fake.Injects.Count | Should -Be 0
+            $script:Fake.Posts.Count | Should -Be 3
+            $script:Fake.PinOrder.Count | Should -Be 2
+            $script:Fake.NoisePool.Count | Should -Be 3
+        }
+
+        It '-WhatIf -RunSheet exceptMsel reports the skip and sends nothing' {
+            $run = Invoke-FakeSeed @{ WhatIf = $true; RunSheet = 'exceptMsel' }
+            $run.Code | Should -Be 0
+            $run.Text | Should -Match 'Run sheet       2 item\(s\) to create \(4 scripted post\(s\), each pending in the console''s queue\); 0 already loaded; 1 left out by -RunSheet exceptMsel'
+            $run.Text | Should -Match '- i03  post   "County opens the Fairhaven High shelter" \(1 post\); left for the on-stage MSEL import \(msel ''3''; -RunSheet exceptMsel\)'
+            $run.Text | Should -Not -Match '\+ i03'
+            @($script:Fake.Calls | ForEach-Object { "$($_.Method) $($_.Path)" }) | Should -Be @('GET /api/exercise-context')
+        }
+
+        It 'an exceptMsel run whose seeded item replies to an msel item exits 1 before any request, naming both items' {
+            $path = Write-S1Pack 'msel-reply' { param($p) $p['runSheet']['items'][0]['msel'] = '1' }
+            $run = Invoke-FakeSeed @{ PackPath = $path; RunSheet = 'exceptMsel' }
+            $run.Code | Should -Be 1
+            $run.Text | Should -Match "runSheet\.items\[1\]\.posts\[2\]\.replyTo\.item: item 'i02' is seeded, but its post 3 replies to item 'i01'.*\[inject-reply-left-out\]"
+            $run.Text | Should -Match 'Nothing was sent'
+            $script:Fake.Calls.Count | Should -Be 0
+            (Invoke-FakeSeed @{ PackPath = $path; WhatIf = $true }).Code | Should -Be 0     # -RunSheet all loads i01 itself: fine
+        }
+    }
+
+    Context 'white noise' {
+        It 'Get-NoisePoolChunks: 2,500 entries go as replace 1,000, append 1,000, append 500, with offsets and persona ids' {
+            $entries = @(1..2500 | ForEach-Object { [ordered]@{ persona = 'FulcoEM'; text = "chatter $_" } })
+            $chunks = @(Get-NoisePoolChunks -Entries $entries -PersonaIds @{ FulcoEM = 'em-id' })
+            @($chunks | ForEach-Object { "$($_.Offset):$($_.Body.mode):$(@($_.Body.posts).Count)" }) | Should -Be @('0:replace:1000', '1000:append:1000', '2000:append:500')
+            $chunks[1].Body.posts[0]['text'] | Should -Be 'chatter 1001'
+            $chunks[0].Body.posts[0]['persona'] | Should -Be 'em-id'
+            @(Get-NoisePoolChunks -Entries @() -PersonaIds @{ FulcoEM = 'em-id' }) | Should -BeNullOrEmpty
+            { Get-NoisePoolChunks -Entries @([ordered]@{ persona = 'Nobody'; text = 'x' }) -PersonaIds @{ FulcoEM = 'em-id' } } | Should -Throw "*persona 'Nobody' has no id*"
+        }
+
+        It 'loads the pool with one replace (persona ids, text as written), and turns noise off before the first post and again at the end' {
+            $script:Fake.NoiseLevel = 'medium'                                # a rehearsal left it running
+            $run = Invoke-FakeSeed
+            $run.Code | Should -Be 0 -Because $run.Text
+            $pool = @(Get-FakeCalls PUT '/api/staff/noise/pool')
+            $pool.Count | Should -Be 1
+            $pool[0].Body | Should -BeExactly ('{"mode":"replace","posts":[' +
+                '{"persona":"' + (Get-S1PersonaId 'mvega_fh') + '","text":"Test fixture noise: anyone know if the farmers market is still on for Saturday?"},' +
+                '{"persona":"' + (Get-S1PersonaId 'Newsline7') + '","text":"Test fixture noise: traffic is slow on Route 9 this morning."},' +
+                '{"persona":"' + (Get-S1PersonaId 'FulcoEM') + '","text":"Test fixture noise: reminder, the county fair volunteer sign-up closes Friday."}]}')
+            $script:Fake.NoisePool.Count | Should -Be 3
+            $offs = @(Get-FakeCalls PUT '/api/staff/noise')
+            @($offs | ForEach-Object { (ConvertFrom-SeedJson $_.Body)['level'] }) | Should -Be @('off', 'off')
+            $script:Fake.NoiseLevel | Should -Be 'off'
+            # Off before anything is posted; the pool after the run sheet; off again after the pool.
+            (Get-CallIndex PUT '/api/staff/noise') | Should -BeLessThan (Get-CallIndex POST '/api/posts')
+            (Get-CallIndex PUT '/api/staff/noise/pool') | Should -BeGreaterThan (Get-CallIndex POST '/api/injects' -Last)
+            (Get-CallIndex PUT '/api/staff/noise' -Last) | Should -BeGreaterThan (Get-CallIndex PUT '/api/staff/noise/pool')
+            $run.Text | Should -Match '\[PASS\] 3 of 3 noise entries loaded; the pool holds 3'
+            $run.Text | Should -Match '✅ white-noise pool: 3 of the pack''s 3 entries loaded'
+            $run.Text | Should -Match '✅ white noise is off \(level ''off''; the pool holds 3 entries\)'
+        }
+
+        It 'a re-run replaces the pool again: the same pool, never doubled' {
+            (Invoke-FakeSeed).Code | Should -Be 0
+            (Invoke-FakeSeed).Code | Should -Be 0
+            @(Get-FakeCalls PUT '/api/staff/noise/pool' | ForEach-Object { (ConvertFrom-SeedJson $_.Body)['mode'] }) | Should -Be @('replace', 'replace')
+            $script:Fake.NoisePool.Count | Should -Be 3
+        }
+
+        It 'a rejected entry is a warning with its index and reason; the rest load, and the run passes' {
+            Mock Invoke-WebRequest {
+                # mvega_fh leaves the exercise between the handle check and the pool load: the server rejects noise[0].
+                if ($Method -eq 'PUT' -and ([Uri] $Uri).AbsolutePath -eq '/api/staff/noise/pool') {
+                    foreach ($id in @($script:Fake.Personas.Keys | Where-Object { $script:Fake.Personas[$_].handle -eq 'mvega_fh' })) { $script:Fake.Personas.Remove($id) }
+                }
+                Invoke-FakeOnly -Uri $Uri -Method $Method -Headers $Headers -Body $Body -Form $Form -ContentType $ContentType
+            }
+            $run = Invoke-FakeSeed
+            $run.Code | Should -Be 0 -Because $run.Text
+            $run.Text | Should -Match '\[WARN\] noise\[0\] \(@mvega_fh\) was not loaded: persona does not name a persona in this exercise\.'
+            $run.Text | Should -Match '\[PASS\] 2 of 3 noise entries loaded; the pool holds 2'
+            $run.Text | Should -Match '✅ white-noise pool: 2 of the pack''s 3 entries loaded; 1 rejected \(see the warnings\)'
+            $script:Fake.NoisePool.Count | Should -Be 2
+        }
+
+        It 'a replace none of whose entries can be used is refused (400): the pool stays, each rejection is listed, the self-check fails, noise still ends off' {
+            foreach ($n in 1..5) { $script:Fake.NoisePool.Add([ordered]@{ personaId = 'x'; text = "older $n" }) }
+            $script:Fake.NoiseLevel = 'low'
+            Mock Invoke-WebRequest {
+                if ($Method -eq 'PUT' -and ([Uri] $Uri).AbsolutePath -eq '/api/staff/noise/pool') {
+                    # For this one call no persona resolves: nothing is usable.
+                    $saved = $script:Fake.Personas; $script:Fake.Personas = [ordered]@{}
+                    try { return Invoke-FakeOnly -Uri $Uri -Method $Method -Headers $Headers -Body $Body -Form $Form -ContentType $ContentType }
+                    finally { $script:Fake.Personas = $saved }
+                }
+                Invoke-FakeOnly -Uri $Uri -Method $Method -Headers $Headers -Body $Body -Form $Form -ContentType $ContentType
+            }
+            $run = Invoke-FakeSeed
+            $run.Code | Should -Be 1
+            $script:Fake.NoisePool.Count | Should -Be 5
+            foreach ($i in 0..2) { $run.Text | Should -Match "\[WARN\] noise\[$i\] \(@\w+\) was not loaded: persona does not name a persona in this exercise\." }
+            $run.Text | Should -Match '\[FAIL\] white-noise pool: PUT /api/staff/noise/pool \(mode replace, entries 0 on\) answered 400 No entry could be used, so the pool was left unchanged'
+            $run.Text | Should -Match '❌ white-noise pool not loaded'
+            $script:Fake.NoiseLevel | Should -Be 'off'
+            $run.Text | Should -Match '✅ white noise is off'
+        }
+
+        It 'more entries than one call takes go in chunks (replace, then append); a rejection maps back to its index in noise' {
+            Mock Get-SeedLimits { $limits = & $script:RealSeedLimits; $limits.NoisePoolChunk = 2; $limits }
+            Mock Invoke-WebRequest {
+                # FulcoEM is unknown to the pool calls only: noise[2] is index 0 of the second call.
+                if ($Method -eq 'PUT' -and ([Uri] $Uri).AbsolutePath -eq '/api/staff/noise/pool') {
+                    $saved = $script:Fake.Personas
+                    $script:Fake.Personas = [ordered]@{}
+                    foreach ($key in $saved.Keys) { if ($saved[$key].handle -ne 'FulcoEM') { $script:Fake.Personas[$key] = $saved[$key] } }
+                    try { return Invoke-FakeOnly -Uri $Uri -Method $Method -Headers $Headers -Body $Body -Form $Form -ContentType $ContentType }
+                    finally { $script:Fake.Personas = $saved }
+                }
+                Invoke-FakeOnly -Uri $Uri -Method $Method -Headers $Headers -Body $Body -Form $Form -ContentType $ContentType
+            }
+            $run = Invoke-FakeSeed
+            $run.Code | Should -Be 0 -Because $run.Text
+            @(Get-FakeCalls PUT '/api/staff/noise/pool' | ForEach-Object { $b = ConvertFrom-SeedJson $_.Body; "$($b['mode']):$(@($b['posts']).Count)" }) | Should -Be @('replace:2', 'append:1')
+            $run.Text | Should -Match '\[WARN\] noise\[2\] \(@FulcoEM\) was not loaded: persona does not name a persona in this exercise\.'
+            $script:Fake.NoisePool.Count | Should -Be 2
+            $run.Text | Should -Match '✅ white-noise pool: 2 of the pack''s 3 entries loaded; 1 rejected'
+        }
+
+        It 'a pack without noise leaves the server''s pool alone, and still turns noise off, before seeding and at the end' {
+            $path = Write-S1Pack 'no-noise' { param($p) $p.Remove('noise') }
+            foreach ($n in 1..4) { $script:Fake.NoisePool.Add([ordered]@{ personaId = 'x'; text = "kept $n" }) }
+            $script:Fake.NoiseLevel = 'high'
+            $run = Invoke-FakeSeed @{ PackPath = $path }
+            $run.Code | Should -Be 0 -Because $run.Text
+            Get-FakeCalls PUT '/api/staff/noise/pool' | Should -BeNullOrEmpty
+            (Get-FakeCalls PUT '/api/staff/noise').Count | Should -Be 2
+            $script:Fake.NoisePool.Count | Should -Be 4
+            $script:Fake.NoiseLevel | Should -Be 'off'
+            $run.Text | Should -Match '\[SKIP\] the pack has no noise entries, so the server''s pool is left as it is'
+            $run.Text | Should -Match '➖ white-noise pool: none in the pack, the server''s pool left as it is'
+            $run.Text | Should -Match '✅ white noise is off \(level ''off''; the pool holds 4 entries\)'
+        }
+
+        It 'a run that stops part-way still leaves noise off (it went off before the first post); -LeaveEngineRunning turns it off too' {
+            $script:Fake.NoiseLevel = 'low'
+            $script:Fake.FailPostNumber = 2
+            (Invoke-FakeSeed).Code | Should -Be 1
+            $script:Fake.NoiseLevel | Should -Be 'off'
+            (Get-CallIndex PUT '/api/staff/noise') | Should -BeLessThan (Get-CallIndex POST '/api/posts')
+
+            Reset-S1Fake
+            $script:Fake.NoiseLevel = 'low'
+            (Invoke-FakeSeed @{ LeaveEngineRunning = $true }).Code | Should -Be 0
+            Get-FakeCalls POST '/api/steering/pause-tier' | Should -BeNullOrEmpty
+            $script:Fake.NoiseLevel | Should -Be 'off'
+        }
+
+        It 'a server without white noise (404) is reported; the run goes on and the self-check fails' {
+            Mock Invoke-WebRequest {
+                if (([Uri] $Uri).AbsolutePath -like '/api/staff/noise*') { return [pscustomobject]@{ StatusCode = 404; Content = ''; Headers = @{} } }
+                Invoke-FakeOnly -Uri $Uri -Method $Method -Headers $Headers -Body $Body -Form $Form -ContentType $ContentType
+            }
+            $run = Invoke-FakeSeed
+            $run.Code | Should -Be 1
+            $script:Fake.Posts.Count | Should -Be 3
+            $script:Fake.Injects.Count | Should -Be 3
+            $run.Text | Should -Match '\[FAIL\] white-noise pool: PUT /api/staff/noise/pool \(mode replace, entries 0 on\) answered 404: this API has no white noise'
+            $run.Text | Should -Match '❌ white noise may still be running: PUT /api/staff/noise -> 404: this API has no white noise \(deploy demo-feedback 05 first\)'
+        }
+    }
+
+    Context 'exercise pins' {
+        It 'pins each pin for everyone after the posts, last listed first, and reads them back from the feed' {
+            $run = Invoke-FakeSeed
+            $run.Code | Should -Be 0 -Because $run.Text
+            $p01 = Get-S1PostId 'Test fixture: river levels*'; $p02 = Get-S1PostId 'Test fixture: Harbor Road is closed*'
+            $puts = @($script:Fake.Calls | Where-Object { $_.Method -eq 'PUT' -and $_.Path -like '/api/staff/posts/*/pin' })
+            @($puts | ForEach-Object Path) | Should -Be @("/api/staff/posts/$p01/pin", "/api/staff/posts/$p02/pin")   # pins: [p02, p01]
+            @($puts | Where-Object { $_.Body }) | Should -BeNullOrEmpty
+            @($script:Fake.PinOrder) | Should -Be @($p01, $p02)          # p02 pinned last: the newest, so first on the Pinned tab
+            (Get-CallIndex PUT '/api/staff/posts/*/pin') | Should -BeGreaterThan (Get-CallIndex POST '/api/posts' -Last)
+            $run.Text | Should -Match "\[PASS\] p02 — pinned for everyone \($p02\)"
+            $run.Text | Should -Match '✅ all 2 pin\(s\) are pinned for everyone \(pinnedForAll in the feed\)'
+        }
+
+        It 'a re-run pins again harmlessly: the server keeps each pin as it was' {
+            (Invoke-FakeSeed).Code | Should -Be 0
+            $order = @($script:Fake.PinOrder)
+            $script:Fake.Calls.Clear()
+            (Invoke-FakeSeed).Code | Should -Be 0
+            @($script:Fake.Calls | Where-Object { $_.Method -eq 'PUT' -and $_.Path -like '/api/staff/posts/*/pin' }).Count | Should -Be 2
+            @($script:Fake.PinOrder) | Should -Be $order
+        }
+
+        It 'a pin the server refuses (404: taken down) is reported; the run goes on and the self-check fails' {
+            Mock Invoke-WebRequest {
+                $p01 = [string] (@($script:Fake.Posts) | Where-Object { $_.text -like 'Test fixture: river levels*' }).id
+                if ($Method -eq 'PUT' -and $p01 -and ([Uri] $Uri).AbsolutePath -eq "/api/staff/posts/$p01/pin") { return [pscustomobject]@{ StatusCode = 404; Content = ''; Headers = @{} } }
+                Invoke-FakeOnly -Uri $Uri -Method $Method -Headers $Headers -Body $Body -Form $Form -ContentType $ContentType
+            }
+            $run = Invoke-FakeSeed
+            $run.Code | Should -Be 1
+            $run.Text | Should -Match '\[FAIL\] p01 not pinned: 404: the post is not in this exercise, or it was taken down'
+            $run.Text | Should -Match '\[PASS\] p02 — pinned for everyone'
+            $script:Fake.Injects.Count | Should -Be 3
+            $run.Text | Should -Match '❌ pins not pinned for everyone: p01'
+        }
+
+        It 'Set-ExercisePins: a pin without a post id sends nothing; the pin route is PUT-only and GUID-only (never unpin)' {
+            Mock Invoke-WebRequest { throw 'no request expected' }
+            $result = @(Set-ExercisePins -Context @{ BaseUrl = 'https://x.test'; Token = 't' } -Keys @('p09') -PostIds @{ p01 = 'x' })
+            "$($result[0].Key):$($result[0].Ok):$($result[0].Detail)" | Should -Be 'p09:False:it has no post id (it was not posted)'
+            Should -Invoke Invoke-WebRequest -Times 0 -Exactly
+            $id = '11111111-2222-4333-8444-555555555555'
+            Test-SeedApiPath "/api/staff/posts/$id/pin" -Method PUT | Should -BeTrue
+            foreach ($method in 'GET', 'POST', 'PATCH', '') { Test-SeedApiPath "/api/staff/posts/$id/pin" -Method $method | Should -BeFalse -Because $method }
+            Test-SeedApiPath '/api/staff/posts/not-a-guid/pin' -Method PUT | Should -BeFalse
+            Test-SeedApiPath '/api/staff/posts/{id}/pin' -Method PUT | Should -BeFalse
+            Test-SeedApiPath "/api/staff/posts/$id" -Method PUT | Should -BeFalse
+            Test-SeedApiPath '/api/staff/noise/pool' | Should -BeTrue
+            Test-SeedApiPath '/api/staff/chrome-settings' | Should -BeTrue
+        }
+    }
+
+    Context 'media marking (watermarkEnabled)' {
+        It 'already on: one read, nothing written' {
+            $run = Invoke-FakeSeed
+            $run.Code | Should -Be 0 -Because $run.Text
+            (Get-FakeCalls GET '/api/staff/chrome-settings').Count | Should -Be 1
+            Get-FakeCalls PUT '/api/staff/chrome-settings' | Should -BeNullOrEmpty
+            $run.Text | Should -Match '✅ media marking is on \(watermarkEnabled was already on; nothing was sent\)'
+        }
+
+        It 'off: read, then one PUT before any media is posted, changing only watermarkEnabled and sending every other field back as read; a re-run sends nothing' {
+            $script:Fake.Chrome['watermarkEnabled'] = $false
+            $script:Fake.Chrome['bottomText'] = 'EXERCISE // EXERCISE'; $script:Fake.Chrome['bottomBg'] = '#FFD700'
+            $before = Copy-Map $script:Fake.Chrome
+            $run = Invoke-FakeSeed
+            $run.Code | Should -Be 0 -Because $run.Text
+            $puts = @(Get-FakeCalls PUT '/api/staff/chrome-settings')
+            $puts.Count | Should -Be 1
+            $body = ConvertFrom-SeedJson $puts[0].Body
+            @($body.Keys | Sort-Object) | Should -Be @('bottomBg', 'bottomFg', 'bottomText', 'chromeEnabled', 'topBg', 'topFg', 'topText', 'watermarkEnabled')   # no exerciseId
+            foreach ($field in 'chromeEnabled', 'topText', 'topFg', 'topBg', 'bottomText', 'bottomFg', 'bottomBg') { $body[$field] | Should -Be $before[$field] -Because $field }
+            $body['watermarkEnabled'] | Should -BeTrue
+            $script:Fake.Chrome['watermarkEnabled'] | Should -BeTrue
+            $script:Fake.Chrome['bottomText'] | Should -Be 'EXERCISE // EXERCISE'
+            (Get-CallIndex GET '/api/staff/chrome-settings') | Should -BeLessThan (Get-CallIndex PUT '/api/staff/chrome-settings')
+            (Get-CallIndex PUT '/api/staff/chrome-settings') | Should -BeLessThan (Get-CallIndex POST '/api/media')
+            $run.Text | Should -Match '✅ media marking is on \(watermarkEnabled turned on; every other chrome setting was sent back as read\)'
+            $script:Fake.Calls.Clear()
+            (Invoke-FakeSeed).Code | Should -Be 0
+            Get-FakeCalls PUT '/api/staff/chrome-settings' | Should -BeNullOrEmpty
+        }
+
+        It 'New-ChromeSettingsBody echoes every field it read, even one this script does not know (a full replace would clear it)' {
+            $current = [ordered]@{ exerciseId = 'e'; chromeEnabled = $false; watermarkEnabled = $false; topText = 'T'; bannerStyle = 'bold' }
+            ConvertTo-SeedJson (New-ChromeSettingsBody -Current $current) -Compress | Should -BeExactly '{"chromeEnabled":false,"watermarkEnabled":true,"topText":"T","bannerStyle":"bold"}'
+            $current['watermarkEnabled'] | Should -BeFalse
+        }
+
+        It 'a read without the two switches writes nothing, and the self-check fails' {
+            Mock Invoke-WebRequest {
+                if ($Method -eq 'GET' -and ([Uri] $Uri).AbsolutePath -eq '/api/staff/chrome-settings') { return [pscustomobject]@{ StatusCode = 200; Content = '{"exerciseId":"x"}'; Headers = @{} } }
+                Invoke-FakeOnly -Uri $Uri -Method $Method -Headers $Headers -Body $Body -Form $Form -ContentType $ContentType
+            }
+            $run = Invoke-FakeSeed
+            $run.Code | Should -Be 1
+            Get-FakeCalls PUT '/api/staff/chrome-settings' | Should -BeNullOrEmpty
+            $run.Text | Should -Match '❌ media marking is not confirmed on: GET /api/staff/chrome-settings answered without chromeEnabled and watermarkEnabled, so nothing was written'
+        }
+
+        It 'a refused write (400) is reported as the server wrote it; the run goes on and the self-check fails' {
+            $script:Fake.Chrome['watermarkEnabled'] = $false
+            Mock Invoke-WebRequest {
+                if ($Method -eq 'PUT' -and ([Uri] $Uri).AbsolutePath -eq '/api/staff/chrome-settings') { return [pscustomobject]@{ StatusCode = 400; Content = '"topFg must be a CSS hex colour."'; Headers = @{} } }
+                Invoke-FakeOnly -Uri $Uri -Method $Method -Headers $Headers -Body $Body -Form $Form -ContentType $ContentType
+            }
+            $run = Invoke-FakeSeed
+            $run.Code | Should -Be 1
+            $run.Text | Should -Match '\[FAIL\] media marking: PUT /api/staff/chrome-settings -> 400 topFg must be a CSS hex colour\.'
+            $run.Text | Should -Match '❌ media marking is not confirmed on'
+            $script:Fake.Posts.Count | Should -Be 3
+        }
+    }
+}
