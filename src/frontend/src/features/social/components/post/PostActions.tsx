@@ -96,6 +96,7 @@ import { useTransientMessage } from '../../hooks/useTransientMessage'
 import { usePin } from '../../pinned/usePin'
 import { viewerEngagement } from '../../pinned/pinEvents'
 import { formatMagnitude, spokenMagnitude } from '../../services/audience'
+import { usePostCounts } from '../../services/postCountsStore'
 import { ParticipantTooltip } from '../ParticipantTooltip'
 import type { PostCardVariant, PostView } from './types'
 import styles from './PostActions.module.css'
@@ -147,15 +148,19 @@ function PostActionsRow({ post, variant, onReply }: PostActionsProps) {
   // ONE failure-message channel for both toggles: a single live region per card,
   // and the most recent failure always replaces an older one.
   const notice = useTransientMessage()
+  // DF-17: the post's LIVE counts (its own, or a newer pushed frame). Numbers only.
+  const counts = usePostCounts(post.id, post.counts)
   const reaction = useReaction({
     postId: post.id,
     initialLikeCount: post.counts.like,
+    externalLikeCount: counts.like,
     initiallyLiked: post.viewer?.liked ?? false,
     notice,
   })
   const amplify = useAmplify({
     postId: post.id,
     initialRepostCount: post.counts.repost,
+    externalRepostCount: counts.repost,
     initiallyReposted: post.viewer?.reposted ?? false,
     notice,
   })
@@ -196,7 +201,7 @@ function PostActionsRow({ post, variant, onReply }: PostActionsProps) {
       key: 'reply',
       label: 'Reply',
       icon: faComment,
-      count: post.counts.reply,
+      count: counts.reply,
       // `onReply` is optional: omitted => inert text, never a focusable no-op button.
       interactive: canReply,
       onClick: canReply ? () => onReply(post.id) : undefined,
@@ -205,7 +210,7 @@ function PostActionsRow({ post, variant, onReply }: PostActionsProps) {
       key: 'repost',
       label: 'Repost',
       icon: faRetweet,
-      count: canRepost ? amplify.repostCount : post.counts.repost,
+      count: canRepost ? amplify.repostCount : counts.repost,
       activeSuffix: 'reposted',
       interactive: canRepost,
       pressed: canRepost ? amplify.repostedByViewer : undefined,
@@ -215,7 +220,7 @@ function PostActionsRow({ post, variant, onReply }: PostActionsProps) {
       key: 'like',
       label: 'Like',
       icon: faHeart,
-      count: canLike ? reaction.likeCount : post.counts.like,
+      count: canLike ? reaction.likeCount : counts.like,
       activeSuffix: 'liked',
       interactive: canLike,
       pressed: canLike ? reaction.likedByViewer : undefined,

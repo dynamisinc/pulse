@@ -56,6 +56,19 @@
  * would be someone else's state). Like a removal, a pin change is push-only: while polling there
  * is none, and the next read of the Pinned tab carries the truth.
  *
+ * DEMO-FEEDBACK DF-17 / DF-18 (story 14): `PostEngagementChanged`. After a like / repost changes
+ * state, or a reply lands, the hub pushes `PostEngagementChanged { postId, counts { reply, repost,
+ * like }, version }` to the exercise group. It is validated STRICTLY - a non-empty string `postId`,
+ * three non-negative integer counts and a non-negative integer `version`; anything else (a missing
+ * or negative count, a fractional or non-number version, a non-object) is dropped - and rebuilt as
+ * a fresh literal from those keys only (never `viewer`, `active` or who reacted). It is surfaced
+ * through `subscribeEngagementChanged`, a SEPARATE `EngagementChangeSource` interface shaped like
+ * `PinChangeSource`, so every existing `RealtimeFeed` fake keeps compiling. The app-wide default
+ * source (`defaultEngagementChangeSource`: this transport live, the mock adapter under
+ * `USE_MOCK_DATA`) is wired at the bottom of this file into `postCountsStore`, the version-gated
+ * store every post card reads. Push-only, like a removal: while polling there is none, and the next
+ * read of a surface carries the numbers.
+ *
  * IDENTITY CHANGE (COR-001). Two things happen when the identity on the tab changes (sign-out,
  * every sign-in; `resetClientSession()` runs both):
  *
@@ -93,6 +106,7 @@
  */
 
 import { getAccessToken } from '@/core/auth/tokenStore'
+import { USE_MOCK_DATA } from '@/core/config/mockData'
 import { registerSessionReset } from '@/core/auth/sessionReset'
 import { HubConnectionState, realtimeConnection } from '@/core/realtime/connection'
 import type { RealtimeConnection, RealtimeStateReason } from '@/core/realtime/connection'
@@ -101,6 +115,8 @@ import { toParticipantView } from '@/features/social'
 import type { ParticipantPostView, Post, PostInReplyTo, PostMedia } from '@/features/social'
 import { resolveFeed } from './feedService'
 import { removedPosts } from './removedPosts'
+import { postCountsStore } from './postCountsStore'
+import { mockEngagementChanges } from './mockEngagementChanges'
 
 /** The hub event carrying a newly-persisted post. Mirrors `SignalRFeedBroadcaster`'s constant. */
 const POST_RECEIVED_EVENT = 'PostReceived'
@@ -110,6 +126,9 @@ const POST_REMOVED_EVENT = 'PostRemoved'
 
 /** The hub event carrying an exercise pin change (DF-7). Mirrors the broadcaster's constant. */
 const POST_PIN_CHANGED_EVENT = 'PostPinChanged'
+
+/** The hub event carrying a post's new shown counts (DF-17). Mirrors the broadcaster's constant. */
+const POST_ENGAGEMENT_CHANGED_EVENT = 'PostEngagementChanged'
 
 /** Default polling cadence while degraded (NFR-003 fallback). */
 const DEFAULT_POLL_INTERVAL_MS = 5000
@@ -160,6 +179,33 @@ export interface PinChangeSource {
   ): () => void
 }
 
+/**
+ * A post's new shown counts (DF-17), as surfaced to subscribers: the post id, the three counts and
+ * the database-derived `version` (DF-18), NOTHING else (never who reacted, never `active`).
+ */
+export interface PostEngagementChangedEvent {
+  readonly postId: string
+  readonly counts: { readonly reply: number; readonly repost: number; readonly like: number }
+  readonly version: number
+}
+
+/** A subscriber that receives each validated `PostEngagementChanged`. */
+export type PostEngagementChangedHandler = (event: PostEngagementChangedEvent) => void
+
+/**
+ * The live-engagement surface of the feed transport (demo-feedback story 14). Shaped like
+ * {@link PinChangeSource}: a separate interface - not a new member of {@link RealtimeFeed} - so
+ * every existing `RealtimeFeed` fake keeps compiling. The app-wide default is
+ * {@link defaultEngagementChangeSource}.
+ */
+export interface EngagementChangeSource {
+  /**
+   * Registers a handler for each validated `PostEngagementChanged { postId, counts, version }`
+   * push. Returns an idempotent unsubscribe. Push-only (see the module header).
+   */
+  subscribeEngagementChanged(handler: PostEngagementChangedHandler): () => void
+}
+
 /** The social feed's real-time consumer surface. */
 export interface RealtimeFeed {
   /** Registers a handler for each newly-observed post. Returns an idempotent unsubscribe. */
@@ -185,7 +231,8 @@ export interface RealtimeFeed {
  * A {@link RealtimeFeed} that can also forget the identity it served. Kept off `RealtimeFeed`
  * itself: consumers and their test fakes never need it, only the session-reset registration.
  */
-export interface SessionResettableFeed extends RealtimeFeed, PinChangeSource {
+export interface SessionResettableFeed
+  extends RealtimeFeed, PinChangeSource, EngagementChangeSource {
   /**
    * The session is ending: forget everything scoped to the identity that is leaving - the
    * dedup set, the polling baseline, the in-flight poll flag - and make any `GET /feed` still on
@@ -310,6 +357,35 @@ function toPostPinChangedEvent(payload: unknown): PostPinChangedEvent | null {
   return { postId, pinnedForAll }
 }
 
+/** A non-negative integer (a count or a version): finite, whole, and not below zero. */
+function isNonNegativeInteger(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
+}
+
+/**
+ * Validates a raw `PostEngagementChanged` payload STRICTLY and rebuilds it as
+ * `{ postId, counts: { reply, repost, like }, version }`. Returns `null` (dropped) for anything
+ * but an object with a non-empty string `postId`, a `counts` object holding three non-negative
+ * integers and a non-negative integer `version`. A fresh literal from the known keys - never a
+ * spread - so nothing else the wire carried (a `viewer`, an `active`, an actor) rides along.
+ */
+export function toPostEngagementChangedEvent(payload: unknown): PostEngagementChangedEvent | null {
+  if (typeof payload !== 'object' || payload === null) return null
+  const { postId, counts, version } = payload as Record<string, unknown>
+  if (typeof postId !== 'string' || postId.length === 0) return null
+  if (typeof counts !== 'object' || counts === null) return null
+  const { reply, repost, like } = counts as Record<string, unknown>
+  if (
+    !isNonNegativeInteger(reply) ||
+    !isNonNegativeInteger(repost) ||
+    !isNonNegativeInteger(like)
+  ) {
+    return null
+  }
+  if (!isNonNegativeInteger(version)) return null
+  return { postId, counts: { reply, repost, like }, version }
+}
+
 /**
  * Drives the feed transport: real-time by default, polling fallback while
  * degraded, automatic recovery. See the module header for the guarantees.
@@ -322,6 +398,7 @@ class RealtimeFeedController implements SessionResettableFeed {
   private readonly handlers = new Set<PostStreamHandler>()
   private readonly removedHandlers = new Set<PostRemovedHandler>()
   private readonly pinChangedHandlers = new Set<PostPinChangedHandler>()
+  private readonly engagementHandlers = new Set<PostEngagementChangedHandler>()
   private readonly seenIds = new Set<string>()
   private currentMode: FeedTransportMode = 'connecting'
   private baselined = false
@@ -337,6 +414,7 @@ class RealtimeFeedController implements SessionResettableFeed {
   private unsubscribePush: (() => void) | null = null
   private unsubscribeRemoved: (() => void) | null = null
   private unsubscribePinChanged: (() => void) | null = null
+  private unsubscribeEngagement: (() => void) | null = null
   private unsubscribeState: (() => void) | null = null
 
   constructor(options: CreateRealtimeFeedOptions = {}) {
@@ -380,6 +458,16 @@ class RealtimeFeedController implements SessionResettableFeed {
     }
   }
 
+  subscribeEngagementChanged(handler: PostEngagementChangedHandler): () => void {
+    this.engagementHandlers.add(handler)
+    let active = true
+    return () => {
+      if (!active) return
+      active = false
+      this.engagementHandlers.delete(handler)
+    }
+  }
+
   async start(): Promise<void> {
     if (this.started) return
     this.started = true
@@ -394,6 +482,12 @@ class RealtimeFeedController implements SessionResettableFeed {
     this.unsubscribePinChanged = this.connection.subscribe(POST_PIN_CHANGED_EVENT, payload => {
       this.handlePinChangedPush(payload)
     })
+    this.unsubscribeEngagement = this.connection.subscribe(
+      POST_ENGAGEMENT_CHANGED_EVENT,
+      payload => {
+        this.handleEngagementPush(payload)
+      },
+    )
     this.unsubscribeState = this.connection.onStateChange((state, reason) => {
       this.handleStateChange(state, reason)
     })
@@ -429,6 +523,10 @@ class RealtimeFeedController implements SessionResettableFeed {
     if (this.unsubscribePinChanged !== null) {
       this.unsubscribePinChanged()
       this.unsubscribePinChanged = null
+    }
+    if (this.unsubscribeEngagement !== null) {
+      this.unsubscribeEngagement()
+      this.unsubscribeEngagement = null
     }
     if (this.unsubscribeState !== null) {
       this.unsubscribeState()
@@ -615,6 +713,19 @@ class RealtimeFeedController implements SessionResettableFeed {
     }
   }
 
+  private handleEngagementPush(payload: unknown): void {
+    const event = toPostEngagementChangedEvent(payload)
+    if (event === null) return
+    // Same isolation as a removal: one throwing consumer never starves the others.
+    for (const handler of [...this.engagementHandlers]) {
+      try {
+        handler(event)
+      } catch {
+        // Isolated.
+      }
+    }
+  }
+
   private handlePoll(posts: readonly Post[]): void {
     if (!this.baselined) {
       // First observation after degrading: adopt the current feed as the baseline
@@ -649,7 +760,17 @@ export function createRealtimeFeed(
  * Lazy: no side effects until started.
  */
 const appWideFeed = createRealtimeFeed()
-export const realtimeFeed: RealtimeFeed & PinChangeSource = appWideFeed
+export const realtimeFeed: RealtimeFeed & PinChangeSource & EngagementChangeSource = appWideFeed
+
+/**
+ * The app-wide `PostEngagementChanged` source (DF-17): the shared hub transport above in a real
+ * backend build, the mock adapter (`mockEngagementChanges`, which emits on a mock like / repost /
+ * reply) under `USE_MOCK_DATA`. The notifications store and the counts wiring below read it;
+ * tests inject a fake.
+ */
+export const defaultEngagementChangeSource: EngagementChangeSource = USE_MOCK_DATA
+  ? mockEngagementChanges
+  : realtimeFeed
 
 // The app-wide feed is identity-scoped state living for the life of the TAB: forget it whenever the
 // session ends (sign-out, every sign-in). A registration, not an import from `core/auth` into here
@@ -661,3 +782,21 @@ registerSessionReset(() => appWideFeed.resetForSession(), import.meta.hot)
 // here (not inside the controller) so an isolated `createRealtimeFeed()` in a test never writes to
 // global state. It only registers a handler; it touches neither the network nor the connection.
 realtimeFeed.subscribeRemoved(({ postId }) => removedPosts.add(postId))
+
+// Every valid `PostEngagementChanged` from the default source lands in the version-gated counts
+// store every post card reads (`usePostCounts`), so feed, thread, profile and Pinned cards all
+// move without a reload. Wired here for the same reason as the removal store above: an isolated
+// `createRealtimeFeed()` in a test never writes to global state.
+defaultEngagementChangeSource.subscribeEngagementChanged(({ postId, counts, version }) => {
+  postCountsStore.apply(postId, counts, version)
+})
+
+// Whenever the shared hub connection leaves `Connected` (a drop, a reconnect, an identity stop),
+// the push stream has a gap: a frame held from before it may have missed changes, so it stops
+// beating a fresher read when a card mounts (`postCountsStore.markGap`, Gate-1 M-3). Live builds
+// only: the mock source has no connection and no gaps.
+if (!USE_MOCK_DATA) {
+  realtimeConnection.onStateChange(state => {
+    if (state !== HubConnectionState.Connected) postCountsStore.markGap()
+  })
+}

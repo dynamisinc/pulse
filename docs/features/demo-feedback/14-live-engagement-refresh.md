@@ -84,3 +84,79 @@ and a `pin` send none; a reply sends the parent's frame; isolation across two ex
 not fail the write. Frontend: validator (good and malformed frames); store ordering (stale version dropped; reset on
 sign-out); `PostActions` numbers change on a push while `active` stays; optimistic toggle not overwritten; a like and
 a repost on my post notify live once each; repost row text.
+
+**Version formula (DF-18, documented on `PostEngagementChangedDto`):** `version = R + Rd + P + Pd`, where `R` = the
+post's `like` + `repost` reaction rows (active and soft-deleted), `Rd` = those with `DeletedAt` set, `P` = its direct
+replies (live and taken down), `Pd` = those with `DeletedAt` set. Rows are never un-deleted or hard-deleted, so every
+like, unlike, repost, un-repost, reply and reply takedown raises it by exactly one; pins are not counted; all four terms
+read through the exercise-scoped sets. The version is read before the counts.
+
+**Held frame vs a card's read (Gate-1 M-3).** A mounted card shows whichever it observed last: a frame that arrives
+after its read, or a re-read that re-seeds it after the last frame. On MOUNT, a held frame beats the card's read only
+while the push stream has been continuous since the frame arrived: every change that moves a shown count pushes a frame
+(like, repost, reply, and - added at Gate-1 - a reply takedown pushes its parent), so an unbroken stream's newest frame is
+at least as new as any read. When the hub connection leaves `Connected` (`postCountsStore.markGap()`), frames may have
+been missed, so a frame from before the gap no longer beats a fresh read on mount; a frame after the gap is trusted
+again. This replaces comparing a receive time with each query's `dataUpdatedAt`, which no card has (feed, thread,
+profile and Pinned feed cards through different readers).
+
+**Notifications (Gate-1 M-1 / M-2).** A feed read that started before a frame was applied never moves that post's
+counts (it would withdraw the notification and re-announce it). Turning a like / repost on registers it with the
+notifications store first, so the rise on the viewer's own post is absorbed into the baseline silently. A failed write,
+or one the server answers with a count no higher than the card held before the tap (a no-op), withdraws the note on
+settle, and an unmatched note expires after 15 s (`OWN_REACTION_TTL_MS`), so it can never swallow the next person's like
+(re-review N-1).
+
+**Known limit (re-review L-A).** A frame lost while the connection stays `Connected` (a send that failed server-side and
+was only logged) is not a gap the client can see: a card mounting after it can show the older held number until that
+post's next frame, or until a re-read re-seeds a mounted card.
+
+Backend (`src/Pulse.WebApi.Tests/Features/Social/Engagement/`):
+
+- `PostEngagementChangedPushTests.LikeUnlikeRepostUnrepost_EachSendOneFrame_WithTheShownCounts_AndAStrictlyHigherVersion`
+  (AC ReactionService, DTO counts = baseline + real, version monotonic)
+- `PostEngagementChangedPushTests.TheFramesCounts_EqualWhatTheCallReturns_AndTheVersionIsWhatAnotherInstanceReads`
+  (counts via `IPostEngagementReader`, version derived from the DB so two instances agree)
+- `PostEngagementChangedPushTests.ANoOpLike_AndAPin_SendNothing` (never for `pin`, never for a no-op)
+- `PostEngagementChangedPushTests.AReply_SendsItsParentsFrame_AfterItsOwnPostReceived_AndATopLevelPostSendsNone`
+  (AC PostIngestService)
+- `PostEngagementChangedPushTests.ThePush_TargetsOnlyTheWritingExercise_AndAnotherExercisesRowsNeverMoveIt` (isolation)
+- `PostEngagementChangedPushTests.ATakenDownReply_SendsItsParentsFrame_WithTheLowerReplyCount_AndAHigherVersion`
+  (optional takedown AC, done at Gate-1)
+- `PostEngagementChangedPushTests.AFailingBroadcaster_NeverFailsTheReactionTheReplyOrTheTakedown_AndEachFailureIsLogged`
+  (failure logged at Warning and swallowed, for all three pushes; Gate-1 L-5)
+- `PostEngagementChangedWireTests.PostEngagementChanged_SerializesToExactlyPostIdCountsAndVersion` (wire shape, XC-002)
+- `PostEngagementChangedWireTests.BroadcastPostEngagementChanged_SendsToTheOwningExercisesGroupOnly` (exercise group
+  only; a second exercise's group and the staff group get nothing)
+- `PostEngagementChangedWireTests.IFeedBroadcaster_DefaultEngagementChanged_IsANoOp_SoOlderDoublesStillWork`
+  (default interface method)
+
+Frontend (`src/frontend/src/features/social/`):
+
+- `services/realtimeFeed.engagementChanged.test.ts`: strict validator (good frame rebuilt with only `postId`/`counts`/
+  `version`; 18 malformed shapes dropped); `subscribeEngagementChanged` on the existing connection, handler isolation,
+  unsubscribe and `stop()`.
+- `services/postCountsStore.test.ts`: version gate (stale and equal versions dropped, per post), per-post listeners,
+  `usePostCounts` newest-of seed and store, reset on sign-out through `resetClientSession()`, the reset generation
+  (`pinState` pattern: a frame or mock toggle started before a reset is dropped), the 500-entry cap (Gate-1 L-3),
+  the mount rule across a stream gap (M-3), the default source wired
+  into the store, and the mock adapter emitting on a mock like / repost / reply.
+- `components/post/PostActions.liveCounts.test.tsx`: a push moves reply / repost / like numbers while `aria-pressed`
+  (`active`) stays; stale frame dropped; inert counts follow; an optimistic toggle in flight is not overwritten by an
+  older frame, and a newer frame after it settles still lands; Gate-1 H-1 (a card mounted after a frame, and a remount
+  from cached data, show the frame and follow later ones), M-3 (after a gap a fresher read wins on mount), M-2 (the
+  toggle registers / withdraws the own reaction with the notifications store), N-1 (a server no-op like releases the
+  note on settle; a real like keeps it).
+- `notifications/notificationsStore.engagement.test.ts`: a like and a repost on my post notify live once each (replayed
+  and stale frames and the next re-read do not re-notify); the badge moves while the tab is hidden; frames that beat
+  the baseline are held and replayed; someone else's post is ignored; unsubscribe on stop; Gate-1 M-1 (frame +1, stale
+  read, fresh read: one notification, the badge never dips) and M-2 (my own like and repost are silent through the
+  frame and the read; a withdrawn one does not swallow the next like); N-1 (a note released after a no-rise frame, and
+  an unmatched note after its 15 s TTL, both let the next +1 notify; a note matched inside the TTL stays silent).
+- `services/realtimeFeed.streamGap.test.ts` (re-review L-B): with a fake shared connection, `Reconnecting` /
+  `Disconnected` call `markGap()` so a held frame no longer wins on mount, `Connected` does not, and a frame after the
+  gap is trusted again.
+- `notifications/notificationText.test.ts` (repost row text) and `notifications/NotificationRow.repost.test.tsx`
+  (Repost label, sentence, excerpt, thread link).
+- Updated: `notifications/notificationsStore.test.ts` (announcement wording for reposts; the persisted record list now
+  holds a `repost:`-keyed record per own post).
