@@ -1,7 +1,7 @@
 # Story: Correct the "drafts leak to participants" statements
 
 **Feature:** Demo feedback cut (10/20)  ·  **Phase:** 1  ·  **Status:** Not Started
-**Requirements:** COR-001, XC-002 (staff-only data), AI governance  ·  **Decisions:** DF-38  ·  **Issue:** —
+**Requirements:** COR-001, XC-002 (staff-only data), AI governance  ·  **Decisions:** DF-38  ·  **Issue:** #546
 **Stack:** docs  ·  **World:** —  ·  **Review:** **Tom reviews the brief before it goes to the customer**  ·  **Priority:** Should  ·  **Wave:** 4  ·  **Effort:** S
 **Owner:** planning session · **Branch:** `build/demo-feedback/28-governance-docs` → readiness PR to `main`
 

@@ -16,7 +16,7 @@
 
 | Story | Owner | Stack | Files it owns | Depends on | When | Effort |
 |---|---|---|---|---|---|---|
-| [01 Load report](01-load-test-report.md) | planning session | tool + script + report | new `tools/Pulse.LoadTest/**`, new `scripts/uat/{New-LoadTestExercise,Remove-LoadTestExercise}.ps1`, `docs/demo/LOAD-TEST-REPORT.md` | none (runs against whatever is deployed Sat AM) | Build Fri, run Sat AM | M |
+| [01 Load report](01-load-test-report.md) (#547) | planning session | tool + script + report | new `tools/Pulse.LoadTest/**`, new `scripts/uat/{New-LoadTestExercise,Remove-LoadTestExercise}.ps1`, `docs/demo/LOAD-TEST-REPORT.md` | none (runs against whatever is deployed Sat AM) | Build Fri, run Sat AM | M |
 
 ## Risks
 

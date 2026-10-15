@@ -1,7 +1,7 @@
 # Story: COBRA muted-text token and a browser visual pass
 
 **Feature:** Demo feedback cut (10/20)  ·  **Phase:** 1  ·  **Status:** Not Started
-**Requirements:** NFR-001 (WCAG 2.1 AA), D0 two worlds  ·  **Decisions:** DF-37  ·  **Issue:** —
+**Requirements:** NFR-001 (WCAG 2.1 AA), D0 two worlds  ·  **Decisions:** DF-37  ·  **Issue:** #543
 **Stack:** frontend  ·  **World:** staff (token) + both (visual pass)  ·  **Review:** Tier-1  ·  **Priority:** Should  ·  **Wave:** 4  ·  **Effort:** S
 **Owner:** Wave 3 session · **Branch:** `build/demo-feedback/25-muted-token-visual-pass` → `feature/demo-feedback-w4-polish`
 

@@ -1,7 +1,7 @@
 # Story: Edit own post: participant UI and staff view
 
 **Feature:** Demo feedback cut (10/20)  ·  **Phase:** 1  ·  **Status:** Not Started
-**Requirements:** D1 parity (X edit), COR-053, NFR-001  ·  **Decisions:** DF-29..DF-33  ·  **Issue:** —
+**Requirements:** D1 parity (X edit), COR-053, NFR-001  ·  **Decisions:** DF-29..DF-33  ·  **Issue:** #538
 **Stack:** frontend  ·  **World:** participant (+ one staff chip)  ·  **Review:** Tier-1  ·  **Priority:** Must  ·  **Wave:** 4  ·  **Effort:** M
 **Owner:** planning session · **Branch:** `build/demo-feedback/20-edit-post-ui` → `feature/demo-feedback-w4`
 

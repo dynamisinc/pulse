@@ -1,7 +1,7 @@
 # Story: Edit own post: backend
 
 **Feature:** Demo feedback cut (10/20)  ·  **Phase:** 1  ·  **Status:** Not Started
-**Requirements:** D1 parity (X edit), COR-053, NFR-004, XC-002, XC-004  ·  **Decisions:** DF-29..DF-33  ·  **Issue:** —
+**Requirements:** D1 parity (X edit), COR-053, NFR-004, XC-002, XC-004  ·  **Decisions:** DF-29..DF-33  ·  **Issue:** #537
 **Stack:** backend  ·  **World:** participant (API)  ·  **Review:** Tier-1 (new write route; Gate-1 checks authz closely)  ·  **Priority:** Must  ·  **Wave:** 4  ·  **Effort:** M
 **Owner:** planning session · **Branch:** `build/demo-feedback/19-edit-post-api` → `feature/demo-feedback-w4`
 

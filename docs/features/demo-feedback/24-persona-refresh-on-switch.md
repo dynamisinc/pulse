@@ -1,7 +1,7 @@
 # Story: Persona list refreshes when the controller switches exercise
 
 **Feature:** Demo feedback cut (10/20)  ·  **Phase:** 1  ·  **Status:** Not Started
-**Requirements:** COR-001 (no cross-exercise bleed in the UI), CTL persona operation  ·  **Decisions:** none new  ·  **Issue:** —
+**Requirements:** COR-001 (no cross-exercise bleed in the UI), CTL persona operation  ·  **Decisions:** none new  ·  **Issue:** #542
 **Stack:** frontend  ·  **World:** staff  ·  **Review:** Tier-1  ·  **Priority:** Should  ·  **Wave:** 4  ·  **Effort:** S
 **Owner:** Wave 3 session · **Branch:** `build/demo-feedback/24-persona-refresh` → `feature/demo-feedback-w4-polish`
 

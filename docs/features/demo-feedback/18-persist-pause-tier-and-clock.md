@@ -1,7 +1,7 @@
 # Story: Pause tier, exercise clock and holding page survive a restart
 
 **Feature:** Demo feedback cut (10/20)  ·  **Phase:** 1  ·  **Status:** Not Started
-**Requirements:** COR-053, world-steering Freeze (#350/#351), #526 (restart resilience slice)  ·  **Decisions:** DF-24..DF-28  ·  **Issue:** —
+**Requirements:** COR-053, world-steering Freeze (#350/#351), #526 (restart resilience slice)  ·  **Decisions:** DF-24..DF-28  ·  **Issue:** #536
 **Stack:** backend  ·  **World:** foundation  ·  **Review:** Tier-1 (+ Tom reads the reset route)  ·  **Priority:** Must  ·  **Wave:** 4  ·  **Effort:** M
 **Owner:** planning session · **Branch:** `build/demo-feedback/18-persist-tier-clock` → `feature/demo-feedback-w4`
 

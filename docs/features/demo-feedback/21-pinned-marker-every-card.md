@@ -1,7 +1,7 @@
 # Story: "Pinned" marker on every card
 
 **Feature:** Demo feedback cut (10/20)  ·  **Phase:** 1  ·  **Status:** Not Started
-**Requirements:** feeds-discovery (Pinned), NFR-001  ·  **Decisions:** DF-5, DF-7, DF-34  ·  **Issue:** —
+**Requirements:** feeds-discovery (Pinned), NFR-001  ·  **Decisions:** DF-5, DF-7, DF-34  ·  **Issue:** #539
 **Stack:** frontend  ·  **World:** participant  ·  **Review:** Tier-1  ·  **Priority:** Must  ·  **Wave:** 4  ·  **Effort:** S
 **Owner:** Wave 3 session · **Branch:** `build/demo-feedback/21-pinned-marker` → `feature/demo-feedback-w4-polish`
 

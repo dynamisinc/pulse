@@ -1,7 +1,7 @@
 # Story: Exercise Management: rename, archive, minimal duplicate
 
 **Feature:** Demo feedback cut (10/20)  ·  **Phase:** 1  ·  **Status:** Not Started
-**Requirements:** COR-074, COR-075, exercise-build-golive/06 (duplicate, minimal slice)  ·  **Decisions:** DF-20, DF-35  ·  **Issue:** —
+**Requirements:** COR-074, COR-075, exercise-build-golive/06 (duplicate, minimal slice)  ·  **Decisions:** DF-20, DF-35  ·  **Issue:** #540
 **Stack:** fullstack  ·  **World:** staff  ·  **Review:** **Tier-2 (duplicate writes across exercise-scoped tables)**  ·  **Priority:** Should (duplicate: Could)  ·  **Wave:** 4  ·  **Effort:** M+
 **Owner:** Wave 3 session · **Branch:** `build/demo-feedback/22-exercise-rename-archive-duplicate` → `feature/demo-feedback-w4-polish`
 

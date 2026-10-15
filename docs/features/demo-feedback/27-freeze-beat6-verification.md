@@ -1,7 +1,7 @@
 # Story: Freeze and resume verified on UAT (demo beat 6)
 
 **Feature:** Demo feedback cut (10/20)  ·  **Phase:** 1  ·  **Status:** Not Started
-**Requirements:** world-steering/07 (#350), world-steering/08 (#351), COR-053  ·  **Decisions:** DF-26  ·  **Issue:** —
+**Requirements:** world-steering/07 (#350), world-steering/08 (#351), COR-053  ·  **Decisions:** DF-26  ·  **Issue:** #545
 **Stack:** script + manual  ·  **World:** both  ·  **Review:** Tier-1  ·  **Priority:** Must  ·  **Wave:** 4  ·  **Effort:** S
 **Owner:** planning session · **Branch:** `build/demo-feedback/27-freeze-verification` → readiness PR to `main`
 

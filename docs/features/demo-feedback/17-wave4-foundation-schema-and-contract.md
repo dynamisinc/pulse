@@ -1,7 +1,7 @@
 # Story: Wave 4 foundation: one migration and the frozen contract
 
 **Feature:** Demo feedback cut (10/20)  ·  **Phase:** 1  ·  **Status:** Not Started
-**Requirements:** COR-053, NFR-008 (restart resilience, #526 slice), D1 parity  ·  **Decisions:** DF-24..DF-27, DF-29..DF-33  ·  **Issue:** —
+**Requirements:** COR-053, NFR-008 (restart resilience, #526 slice), D1 parity  ·  **Decisions:** DF-24..DF-27, DF-29..DF-33  ·  **Issue:** #535
 **Stack:** backend  ·  **World:** foundation  ·  **Review:** **Tier-2 (schema)**  ·  **Priority:** Must  ·  **Wave:** 4  ·  **Effort:** S
 **Owner:** planning session · **Branch:** `build/demo-feedback/17-wave4-foundation` → `feature/demo-feedback-w4`
 

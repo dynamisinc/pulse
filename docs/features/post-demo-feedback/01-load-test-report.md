@@ -1,7 +1,7 @@
 # Story: Load-test report on UAT (PDF-03 slice)
 
 **Feature:** Post-demo customer feedback  ·  **Phase:** 2 (pulled forward)  ·  **Status:** Not Started
-**Requirements:** NFR-002 (burst legibility at 120 posts/min), #526  ·  **Decisions:** PDF-D1..PDF-D5  ·  **Issue:** —
+**Requirements:** NFR-002 (burst legibility at 120 posts/min), #526  ·  **Decisions:** PDF-D1..PDF-D5  ·  **Issue:** #547
 **Stack:** tool + script + report  ·  **World:** foundation  ·  **Review:** Tier-1  ·  **Priority:** Should  ·  **Effort:** M
 **Owner:** planning session · **Branch:** `build/post-demo-feedback/01-load-report` → PR to `main` (tool + scripts + report)
 

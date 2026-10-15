@@ -1,7 +1,7 @@
 # Story: Run sheet: mark an item fired without posting
 
 **Feature:** Demo feedback cut (10/20)  ·  **Phase:** 1  ·  **Status:** Not Started
-**Requirements:** inject queue (controller), PDF-07 context ("capture time, recipient, and remarks")  ·  **Decisions:** DF-36  ·  **Issue:** —
+**Requirements:** inject queue (controller), PDF-07 context ("capture time, recipient, and remarks")  ·  **Decisions:** DF-36  ·  **Issue:** #541
 **Stack:** fullstack  ·  **World:** staff  ·  **Review:** Tier-1  ·  **Priority:** Should  ·  **Wave:** 4  ·  **Effort:** S
 **Owner:** Wave 3 session · **Branch:** `build/demo-feedback/23-mark-fired` → `feature/demo-feedback-w4-polish`
 

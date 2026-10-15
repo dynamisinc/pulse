@@ -1,7 +1,7 @@
 # Story: Demo pre-flight check and one-shot reset
 
 **Feature:** Demo feedback cut (10/20)  ·  **Phase:** 1  ·  **Status:** Not Started
-**Requirements:** demo plan §7 (reset/seed calendar), §10 (fragile UAT state)  ·  **Decisions:** DF-16 (amended), DF-28, DF-38  ·  **Issue:** —
+**Requirements:** demo plan §7 (reset/seed calendar), §10 (fragile UAT state)  ·  **Decisions:** DF-16 (amended), DF-28, DF-38  ·  **Issue:** #544
 **Stack:** script  ·  **World:** ops  ·  **Review:** Tier-1  ·  **Priority:** Must  ·  **Wave:** 4  ·  **Effort:** S
 **Owner:** planning session · **Branch:** `build/demo-feedback/26-preflight-reset` → readiness PR to `main`
 
