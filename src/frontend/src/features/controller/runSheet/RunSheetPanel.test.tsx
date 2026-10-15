@@ -783,6 +783,27 @@ describe('RunSheetPanel — hold, skip, retry, delete, move, view', () => {
     expect(confirm).not.toHaveBeenCalled()
   })
 
+  it('Mark fired (DF-36) asks first, then the row reads "Marked fired" and nothing was posted', async () => {
+    await mountPanel()
+    press('Mark fired Alpha')
+    const dialog = screen.getByRole('dialog')
+    expect(dialog).toHaveTextContent('Mark as fired without posting? This can\'t be undone.')
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Mark fired' }))
+    await waitFor(() => expect(chipOf('Alpha')).toBe('Marked fired'))
+    const alpha = injectMock.snapshot().items.find(item => item.title === 'Alpha')
+    expect(alpha?.status).toBe('fired')
+    expect(alpha?.posts.some(post => post.firedPostId)).toBe(false)
+    expect(screen.queryByRole('button', { name: 'Mark fired Alpha' })).toBeNull()
+  })
+
+  it('Mark fired works under FREEZE (nothing reaches participants)', async () => {
+    injectMock.setPauseTier('freeze')
+    await mountPanel()
+    press('Mark fired Alpha')
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Mark fired' }))
+    await waitFor(() => expect(chipOf('Alpha')).toBe('Marked fired'))
+  })
+
   it('Delete is not offered for a fired item', async () => {
     await mountPanel()
     press('Fire Alpha')

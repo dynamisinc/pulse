@@ -568,6 +568,30 @@ export function createInjectMock(initial: InjectMockOptions = {}): InjectMock {
     return view(item)
   }
 
+  /**
+   * DF-36 "Mark fired": pending / held / failed -> fired WITHOUT publishing (server:
+   * `InjectQueueService.MarkFiredAsync`). Stale version 409 first, then the status 409. Allowed
+   * under FREEZE (nothing reaches participants). Children that never published -> skipped.
+   */
+  const doMarkFired = (id: string, expectedVersion: number, actorId: string): InjectItemDto => {
+    const item = findItem(id)
+    if (item.version !== expectedVersion) throw conflict(STALE_MESSAGE, item)
+    if (item.status !== 'pending' && item.status !== 'held' && item.status !== 'failed') {
+      throw conflict(`This item is ${item.status} and cannot be marked fired.`, item)
+    }
+    for (const post of item.posts) {
+      if (post.status === 'pending' || post.status === 'failed') post.status = 'skipped'
+    }
+    item.status = 'fired'
+    delete item.error
+    item.firedByHumanId = actorId
+    item.firedScenarioTime = scenarioNow().toISOString()
+    runtime.delete(item.id)
+    recount(item)
+    touch(item)
+    return view(item)
+  }
+
   // ----- create / update / delete / reorder -------------------------------
 
   /**
@@ -799,6 +823,7 @@ export function createInjectMock(initial: InjectMockOptions = {}): InjectMock {
     skip: id => via(() => doSkip(id)),
     unskip: id => via(() => doUnskip(id)),
     retry: id => via(() => doRetry(id, actorId)),
+    markFired: (id, expectedVersion) => via(() => doMarkFired(id, expectedVersion, actorId)),
   })
 
   const dispose = (): void => {
@@ -842,6 +867,7 @@ export function createInjectMock(initial: InjectMockOptions = {}): InjectMock {
     skip: id => self().skip(id),
     unskip: id => self().unskip(id),
     retry: id => self().retry(id),
+    markFired: (id, expectedVersion) => self().markFired(id, expectedVersion),
     reset,
     setPauseTier(tier) {
       pauseTier = tier

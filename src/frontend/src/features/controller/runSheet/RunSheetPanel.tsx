@@ -88,6 +88,7 @@ import {
   canDelete,
   canFire,
   canHold,
+  canMarkFired,
   canRelease,
   canRetry,
   canSkip,
@@ -366,6 +367,13 @@ function RunSheetPanelBody({ exerciseId }: { readonly exerciseId: string }) {
       return
     }
     void queue.retry(item.id).then(outcome => report('retry', outcome, item.id))
+  }
+
+  // DF-36: fired without posting (the row asked to confirm). Allowed under FREEZE: nothing is
+  // published.
+  const markFired = (item: InjectItemDto): void => {
+    if (!canMarkFired(item.status)) return
+    void queue.markFired(item.id, item.version).then(outcome => report('mark fired', outcome, item.id))
   }
 
   const toggleHold = (item: InjectItemDto): void => {
@@ -806,6 +814,7 @@ function RunSheetPanelBody({ exerciseId }: { readonly exerciseId: string }) {
                 onSkip={() => toggleSkip(item)}
                 onUnskip={() => toggleSkip(item)}
                 onRetry={() => retryItem(item)}
+                onMarkFired={() => markFired(item)}
                 onOpen={() => openEditor(item)}
                 onRequestDelete={() => setConfirmDeleteId(item.id)}
                 onConfirmDelete={() => confirmDelete(item)}

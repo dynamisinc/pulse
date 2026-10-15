@@ -10,8 +10,8 @@
  *     controller's fire / hold / skip / edit shows here within ~3 s, and a burst's
  *     "firing n/m" advances live. No SignalR on purpose (IQ-6: B5 is reworking the
  *     realtime groups in this push; the staff push moves there after the demo).
- *   - EXPOSES the mutations — fire, hold, release, skip, unskip, retry, remove
- *     (delete), create, update, reorder — each of which refreshes the list
+ *   - EXPOSES the mutations — fire, hold, release, skip, unskip, retry, markFired
+ *     (DF-36), remove (delete), create, update, reorder — each of which refreshes the list
  *     IMMEDIATELY (it patches the cache from the server's reply, then invalidates
  *     the query, which cancels any in-flight poll so a stale poll can't overwrite
  *     the fresher reply).
@@ -96,6 +96,8 @@ export interface UseInjectQueueResult {
   readonly skip: (id: string) => Promise<ActionOutcome<InjectItemDto>>
   readonly unskip: (id: string) => Promise<ActionOutcome<InjectItemDto>>
   readonly retry: (id: string) => Promise<ActionOutcome<InjectItemDto>>
+  /** DF-36: fired WITHOUT posting, with the version the row was read at (stale -> 409). */
+  readonly markFired: (id: string, version: number) => Promise<ActionOutcome<InjectItemDto>>
   readonly remove: (id: string, version: number) => Promise<ActionOutcome<void>>
   readonly create: (body: InjectItemWrite) => Promise<ActionOutcome<InjectItemDto>>
   readonly update: (
@@ -197,6 +199,11 @@ export function useInjectQueue(): UseInjectQueueResult {
     mutationFn: (id: string) => getInjectService().retry(id),
     ...itemHandlers,
   })
+  const { mutateAsync: markFiredAsync } = useMutation({
+    mutationFn: (vars: { id: string; version: number }) =>
+      getInjectService().markFired(vars.id, vars.version),
+    ...itemHandlers,
+  })
   const { mutateAsync: createAsync } = useMutation({
     mutationFn: (body: InjectItemWrite) => getInjectService().create(body),
     ...itemHandlers,
@@ -260,6 +267,10 @@ export function useInjectQueue(): UseInjectQueueResult {
     (id: string) => guarded(id, () => retryAsync(id)),
     [guarded, retryAsync],
   )
+  const markFired = useCallback(
+    (id: string, version: number) => guarded(id, () => markFiredAsync({ id, version })),
+    [guarded, markFiredAsync],
+  )
   const remove = useCallback(
     (id: string, version: number) => guarded(id, () => removeAsync({ id, version })),
     [guarded, removeAsync],
@@ -295,6 +306,7 @@ export function useInjectQueue(): UseInjectQueueResult {
     skip,
     unskip,
     retry,
+    markFired,
     remove,
     create,
     update,

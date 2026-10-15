@@ -682,6 +682,112 @@ public sealed partial class InjectQueueService
         return await StepForCallerAsync(item, caller, facts, time, parents, InjectActions.Retry, cancellationToken);
     }
 
+    /// <summary>
+    /// <c>POST /api/injects/{itemId}/mark-fired</c> (demo-feedback DF-36): records a <c>pending</c>, <c>held</c> or
+    /// <c>failed</c> item as <c>fired</c> WITHOUT publishing — the inject was delivered outside Pulse, or posted by hand.
+    /// It stamps <see cref="InjectItem.FiredByHumanId"/> and <see cref="InjectItem.FiredScenarioTime"/> (exercise clock),
+    /// sets every child that never published to <c>skipped</c> (a child that already went out keeps its post), bumps
+    /// the item version, and emits one <see cref="InjectTelemetry.MarkedFiredEventType"/> event in the same save.
+    /// </summary>
+    /// <remarks>
+    /// Nothing reaches participants: the funnel is never called and the item never becomes <c>firing</c>, so the burst
+    /// runner never sees it. That is why it is allowed under FREEZE and PAUSE INJECTS (unlike fire and retry). A stale
+    /// <paramref name="expectedVersion"/>, any other status, or a post of the item in flight right now is a <c>409</c>
+    /// with the item as it is; no undo.
+    /// </remarks>
+    /// <param name="itemId">The item id.</param>
+    /// <param name="expectedVersion">The item version the caller last read (required).</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The item as marked, or the refusal.</returns>
+    public async Task<InjectResult<InjectItemDto>> MarkFiredAsync(
+        Guid itemId,
+        int? expectedVersion,
+        CancellationToken cancellationToken = default)
+    {
+        var caller = await ResolveCallerAsync(cancellationToken);
+        if (caller is null)
+        {
+            return InjectResult.ScopeUnresolved<InjectItemDto>();
+        }
+
+        if (expectedVersion is null)
+        {
+            return InjectResult.Invalid<InjectItemDto>("expectedVersion is required.");
+        }
+
+        try
+        {
+            return await MarkFiredCoreAsync(itemId, expectedVersion.Value, caller, cancellationToken);
+        }
+        catch (Exception ex) when (InjectLockConflicts.IsLockConflict(ex))
+        {
+            LogLockConflict(ex, InjectActions.MarkFired, itemId);
+            return await CurrentItemConflictAsync(itemId, caller.ExerciseId, InjectActions.MarkFired, cancellationToken);
+        }
+    }
+
+    /// <summary>The body of a mark-fired once the caller is resolved; a lock conflict anywhere in it is the caller's 409.</summary>
+    private async Task<InjectResult<InjectItemDto>> MarkFiredCoreAsync(
+        Guid itemId,
+        int expectedVersion,
+        Caller caller,
+        CancellationToken cancellationToken)
+    {
+        var item = await LoadItemAsync(itemId, caller.ExerciseId, cancellationToken);
+        if (item is null)
+        {
+            return InjectResult.NotFound<InjectItemDto>();
+        }
+
+        var facts = await ReadExerciseFactsAsync(caller.ExerciseId, cancellationToken);
+        if (expectedVersion != item.Version)
+        {
+            return InjectResult.Conflict<InjectItemDto>(StaleVersionMessage, await ProjectAsync(item, facts, cancellationToken));
+        }
+
+        if (WhyNotMarkableFired(item) is { } refusal)
+        {
+            return InjectResult.Conflict<InjectItemDto>(refusal, await ProjectAsync(item, facts, cancellationToken));
+        }
+
+        var time = TimeFor(caller.ExerciseId, facts);
+        foreach (var child in InjectTransitions.LiveChildren(item)
+            .Where(post => post.Status is InjectPostStatuses.Pending or InjectPostStatuses.Failed))
+        {
+            child.Status = InjectPostStatuses.Skipped;
+        }
+
+        item.Status = InjectStatuses.Fired;
+        item.Error = null;
+        item.FiredByHumanId = caller.StaffUserId;
+        item.FiredScenarioTime = time.ScenarioTime;
+
+        // Its own event type, not an inject_action (so no action is passed to the save): one event, same unit of work.
+        _dbContext.TelemetryEvents.Add(InjectTelemetry.ForMarkedFired(item, caller.StaffUserId, time));
+        if (!await TrySaveAsync(item, action: null, caller.StaffUserId, time, cancellationToken))
+        {
+            return await ConflictWithCurrentAsync(itemId, caller.ExerciseId, facts, InjectActions.MarkFired, cancellationToken);
+        }
+
+        return InjectResult.Ok(await ProjectAsync(item, facts, cancellationToken));
+    }
+
+    /// <summary>
+    /// Why the item may not be marked fired, or <c>null</c> when it may: only <c>pending</c>, <c>held</c> or
+    /// <c>failed</c>, and never while one of its posts is being published (that post must land and be recorded).
+    /// </summary>
+    private static string? WhyNotMarkableFired(InjectItem item)
+    {
+        if (item.Status is not (InjectStatuses.Pending or InjectStatuses.Held or InjectStatuses.Failed))
+        {
+            return $"This item is {item.Status} and cannot be marked fired.";
+        }
+
+        return InjectTransitions.LiveChildren(item).Any(post => post.ClaimedAt is not null)
+            ? InjectTransitions.InFlightMessage
+            : null;
+    }
+
     // ---- the runner's entry point --------------------------------------------------------------------
 
     /// <summary>

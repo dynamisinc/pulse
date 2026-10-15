@@ -107,6 +107,17 @@ export function statusText(item: Pick<InjectItemDto, 'status' | 'firedCount' | '
     : STATUS_LABEL[item.status]
 }
 
+/** DF-36: the chip's word for an item marked fired without posting. */
+export const MARKED_FIRED_LABEL = 'Marked fired'
+
+/**
+ * DF-36: an item that was MARKED fired (delivered outside Pulse) rather than posted. Derived, not
+ * a wire status: `fired` with no child carrying a post id.
+ */
+export function isMarkedFired(item: Pick<InjectItemDto, 'status' | 'posts'>): boolean {
+  return item.status === 'fired' && !item.posts.some(post => post.firedPostId)
+}
+
 // ---------------------------------------------------------------------------
 // State-machine capabilities (what the UI may offer)
 // ---------------------------------------------------------------------------
@@ -124,6 +135,9 @@ export const canRelease = (status: InjectStatus): boolean => status === 'held'
 export const canSkip = (status: InjectStatus): boolean => status === 'pending' || status === 'held'
 export const canUnskip = (status: InjectStatus): boolean => status === 'skipped'
 export const canRetry = (status: InjectStatus): boolean => status === 'failed'
+/** DF-36: "Mark fired" (without posting) is offered for pending / held / failed. */
+export const canMarkFired = (status: InjectStatus): boolean =>
+  status === 'pending' || status === 'held' || status === 'failed'
 /** Delete is offered for pending / held / skipped only (the server also refuses fired/firing). */
 export const canDelete = (status: InjectStatus): boolean =>
   status === 'pending' || status === 'held' || status === 'skipped'
