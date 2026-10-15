@@ -13,9 +13,11 @@ using Pulse.WebApi.Data;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>OrgAdmin only, and that is the point.</b> This is the one read in the slice a planner cannot reach.
-/// <c>roles.ts</c> has always described <c>orgAdmin</c> as "a third, separate surface family"; a family that
-/// every planner could also walk into would be a bigger staff role, not a separate one. The gate is
+/// <b>OrgAdmin only, and that is the point.</b> This is the one read in the slice a planner or a controller
+/// cannot reach (both may create and list exercises — the controller since demo-feedback DF-20 — but neither
+/// may read the organization's staff roster). <c>roles.ts</c> has always described <c>orgAdmin</c> as "a
+/// third, separate surface family"; a family that every planner could also walk into would be a bigger staff
+/// role, not a separate one. The gate is
 /// <see cref="OrgAdminAuthorizationFilter.OrgAdminOnly"/>, and the service re-checks the same role itself.
 /// </para>
 /// <para>
@@ -64,7 +66,8 @@ public sealed class OrgStaffDirectoryService
             return null;
         }
 
-        // Defense in depth over OrgAdminOnly: a planner reaching this method directly must still be refused.
+        // Defense in depth over OrgAdminOnly: a planner or controller reaching this method directly must still
+        // be refused.
         if (!ExerciseAdminRoles.IsOrgAdmin(caller.Role))
         {
             return null;

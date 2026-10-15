@@ -46,16 +46,23 @@ public sealed class ExerciseAdminRolesTests
         ExerciseAdminRoles.IsOrgAdmin("").Should().BeFalse();
     }
 
-    /// <summary>COR-074/075: exercise administration is planner OR org-admin — and nothing else.</summary>
+    /// <summary>
+    /// COR-074/075 as widened by demo-feedback DF-20: exercise administration is planner, org-admin or
+    /// controller — and nothing else. The evaluator stays refused.
+    /// </summary>
     [Fact]
-    public void TheExerciseAdministratorSet_IsPlannerAndOrgAdmin_AndNothingElse()
+    public void TheExerciseAdministratorSet_IsPlannerOrgAdminAndController_AndNothingElse()
     {
         ExerciseAdminRoles.IsExerciseAdministrator(ExerciseAdminRoles.Planner).Should().BeTrue();
         ExerciseAdminRoles.IsExerciseAdministrator(ExerciseAdminRoles.OrgAdmin).Should().BeTrue();
+        ExerciseAdminRoles.IsExerciseAdministrator(ExerciseAdminRoles.Controller).Should().BeTrue(
+            "DF-20 (Tom, 2026-10-15): a controller may list and create its organization's exercises");
 
-        ExerciseAdminRoles.IsExerciseAdministrator(ExerciseAdminRoles.Controller).Should().BeFalse(
-            "story 01 AC5 and story 02 AC5 both name Controller and Evaluator as refused");
-        ExerciseAdminRoles.IsExerciseAdministrator(ExerciseAdminRoles.Evaluator).Should().BeFalse();
+        ExerciseAdminRoles.IsExerciseAdministrator(ExerciseAdminRoles.Evaluator).Should().BeFalse(
+            "DF-20 widened the set by the controller alone — an evaluator still writes nothing (COR-013)");
+        ExerciseAdminRoles.ExerciseAdministrators.Should().BeEquivalentTo(
+            new[] { ExerciseAdminRoles.Planner, ExerciseAdminRoles.OrgAdmin, ExerciseAdminRoles.Controller },
+            "the set is exactly these three; a fourth member would be a silent authorization change");
         ExerciseAdminRoles.IsExerciseAdministrator("pio").Should().BeFalse();
         ExerciseAdminRoles.IsExerciseAdministrator(null).Should().BeFalse();
     }
@@ -70,9 +77,14 @@ public sealed class ExerciseAdminRolesTests
         ExerciseAdminRoles.ExerciseAdministrators.Should().Contain(ExerciseAdminRoles.Planner);
         ExerciseAdminRoles.OrganizationAdministrators.Should().NotContain(
             ExerciseAdminRoles.Planner,
-            "the org-admin family is strictly narrower on one role and that asymmetry IS the separation — "
+            "the org-admin family is strictly narrower and that asymmetry IS the separation — "
             + "making the two sets equal, or making one contain the other, would silently delete story 03's "
             + "AC5 while every 'orgAdmin can reach it' test stayed green");
+
+        ExerciseAdminRoles.ExerciseAdministrators.Should().Contain(ExerciseAdminRoles.Controller);
+        ExerciseAdminRoles.OrganizationAdministrators.Should().NotContain(
+            ExerciseAdminRoles.Controller,
+            "DF-20 let a controller create and list exercises, not read the organization's staff roster");
     }
 
     /// <summary>

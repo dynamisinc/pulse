@@ -15,8 +15,9 @@
  * Every registry entry before this one was allowed for exactly one role, which
  * meant `SurfaceLauncher` always hit its `entries.length <= 1` degrade and
  * rendered the static brand lockup in production. This entry is allowed for
- * BOTH `planner` and `orgAdmin`, so a planner now has two destinations and the
- * launcher renders for real for the first time. That is behaviour nothing but a
+ * BOTH `planner` and `orgAdmin` (and, since demo-feedback DF-20, `controller`),
+ * so a planner now has two destinations and the launcher renders for real for
+ * the first time. That is behaviour nothing but a
  * no-props render inside the real route tree can see (a wired and an unwired
  * launcher are pixel-identical), which is what
  * `exerciseManagementLauncher.test.tsx` exists to pin.

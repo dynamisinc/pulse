@@ -25,8 +25,10 @@
  *     `RoleAwareEntry`'s fallback arm matched every org-admin and redirected
  *     them to `/login`, so the role existed in the type system, in the session
  *     and in the API and had nowhere to land.
- *  2. A `controller` / `evaluator` cannot reach `/staff/exercises` — mirroring
- *     the server's 403 rather than trusting it alone.
+ *  2. A `controller` CAN reach `/staff/exercises` (DF-20, seam S-4) and an
+ *     `evaluator` cannot — mirroring the server's gate rather than trusting it
+ *     alone. The evaluator is told why on the not-allowed page (story 15)
+ *     instead of being bounced silently.
  *  3. A PARTICIPANT typing `/staff/exercises` still lands on their participant
  *     surface. COR-004 is structural (`participantLocationBlindness.test.ts`),
  *     but every new staff path deserves the behavioural case too: the whole
@@ -34,6 +36,7 @@
  */
 import type { ComponentType, ReactNode } from 'react'
 import { render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
@@ -203,15 +206,39 @@ describe('the surface mirrors the server gate: planner yes, controller/evaluator
     expect(screen.getByTestId('pathname')).toHaveTextContent('/staff/exercises')
   })
 
-  it('an EVALUATOR at /staff/exercises is bounced to their own default surface', async () => {
+  it('an EVALUATOR at /staff/exercises sees the not-allowed page naming the three roles', async () => {
+    const user = userEvent.setup()
     primeSession('evaluator')
     renderAt('/staff/exercises')
 
-    expect(await screen.findByTestId('stub-evaluator-dashboard')).toBeInTheDocument()
+    expect(await screen.findByTestId('staff-not-allowed-page')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { level: 1, name: 'Not allowed' })).toBeInTheDocument()
+    expect(screen.getByText(
+      'You need the planner, org admin or controller role to open Exercise Management.',
+    )).toBeInTheDocument()
     expect(screen.queryByTestId('exercise-management-page')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('stub-evaluator-dashboard')).not.toBeInTheDocument()
+    // No silent bounce: the URL stays where the evaluator asked to go.
+    expect(screen.getByTestId('pathname')).toHaveTextContent('/staff/exercises')
+
+    // The one button goes to the evaluator's OWN default page.
+    await user.click(screen.getByRole('button', { name: 'Go to Evaluator Dashboard' }))
+    expect(await screen.findByTestId('stub-evaluator-dashboard')).toBeInTheDocument()
     await waitFor(() => {
       expect(screen.getByTestId('pathname')).toHaveTextContent('/staff/evaluate')
     })
+    expect(screen.queryByTestId('staff-not-allowed-page')).not.toBeInTheDocument()
+  })
+
+  it('an UNKNOWN /staff/nope still redirects to the default — the page is for registered paths only', async () => {
+    primeSession('evaluator')
+    renderAt('/staff/nope')
+
+    expect(await screen.findByTestId('stub-evaluator-dashboard')).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.getByTestId('pathname')).toHaveTextContent('/staff/evaluate')
+    })
+    expect(screen.queryByTestId('staff-not-allowed-page')).not.toBeInTheDocument()
   })
 })
 
@@ -225,6 +252,9 @@ describe('COR-004 — the new staff path adds no participant one', () => {
       expect(await screen.findByTestId('participant-surface')).toBeInTheDocument()
       expect(screen.getByTestId('participant-guard')).toBeInTheDocument()
       expect(screen.queryByTestId('exercise-management-page')).not.toBeInTheDocument()
+      // Nor the staff-only not-allowed page (story 15): a participant is never
+      // told which staff role a path needs.
+      expect(screen.queryByTestId('staff-not-allowed-page')).not.toBeInTheDocument()
       expect(screen.queryByTestId('exercise-switcher')).not.toBeInTheDocument()
       expect(screen.queryByTestId('login-sentinel')).not.toBeInTheDocument()
       // Not even a canonicalising redirect — the participant branch never reads

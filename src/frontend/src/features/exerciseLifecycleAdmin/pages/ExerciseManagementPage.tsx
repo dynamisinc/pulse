@@ -9,11 +9,12 @@
  * page). It owns the page's single `h1`.
  *
  * ## Who is here, and what they see
- * A PLANNER and an ORG-ADMIN both reach this surface (the two roles the server's
- * `ExerciseAdministrators` gate admits). The list is scoped to the caller's
- * ORGANIZATION, not to their assignments — an org-admin administers runs they
- * hold no `StaffAssignment` on, and a planner needs to see what already exists
- * before creating another. That is a different, strictly larger read than the
+ * A PLANNER, an ORG-ADMIN and (since demo-feedback DF-20) a CONTROLLER reach
+ * this surface (the three roles the server's `ExerciseAdministrators` gate
+ * admits). The list is scoped to the caller's ORGANIZATION, not to their
+ * assignments — an org-admin administers runs they hold no `StaffAssignment`
+ * on, and a planner or controller needs to see what already exists before
+ * creating another. That is a different, strictly larger read than the
  * exercise switcher's own-only `GET /api/staff/assignments`, on purpose.
  *
  * ## The four states, all real
