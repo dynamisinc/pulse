@@ -210,7 +210,7 @@ the media buttons (06).
 | **Fri 10/16** | Backend Gate 1 + Gate 2 → **umbrella PR to `main`** → deploy + reset. FE W2 live checks against UAT. C1–C3 content on #491 |
 | **Sat 10/17** | FE W2 merges → frontend deploy. W3: 12b, then 11; 13 in parallel. S1 seed script. Rehearsal 1 on a test seed |
 | **Sun 10/18** | Fixes. Manual UAT walk (`feature.md`). **Pencils down evening**: last backend + frontend deploy |
-| **Mon 10/19** | Final reset + seed (`-RunSheet bursts`), rehearsal 2 |
+| **Mon 10/19** | Final reset + seed (`-RunSheet exceptMsel`, DF-16 amended 10/15), rehearsal 2 |
 
 ### Integration seam (orchestrator-owned, never a wave story)
 
