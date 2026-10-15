@@ -53,6 +53,10 @@ import {
   type ReplyTarget,
 } from './ControllerConsole'
 
+// Demo-feedback story 11 (DF-14): the console's write controls render only for a controller
+// session, and this suite mounts none, so the read-only gate is fixed to "controller" here.
+vi.mock('@/features/controller/access/useCanControl', () => ({ useCanControl: () => true }))
+
 beforeEach(() => {
   setExerciseClock({ scenarioNow: () => new Date('2033-09-04T14:00:30Z') })
   postStore.resetForTests()

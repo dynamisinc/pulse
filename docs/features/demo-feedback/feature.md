@@ -36,6 +36,8 @@ cut to what fits before the Sunday freeze:
 | Read-only controller view for Feds and leads (both) | COR-013 (UI only; enforcement stays on #61 / #377) | 11 |
 | Volume knob on posts (notes A); white noise (Tom) | ambient chatter (lite, no AI) | 01, 05, 09, C3, S1 |
 | Emojis (both); bold unread posts (Tom); #493, #494, #495 | NFR-001, D1 polish | 08, 10, 12, 13 |
+| Counts and the notifications badge only update on reload (Tom, 10/15) | SOC-071, D1 notifications | 14 |
+| A controller cannot open Exercise Management (Tom, 10/15) | COR-074, COR-075 | 15 |
 
 ## Out of scope (roadmap slide)
 
@@ -55,14 +57,16 @@ media on the server.
 | 03 | [MSEL import into the run sheet (Cadence layout)](03-msel-import.md) | backend | Must | 1 | 01, S-1 | Complete | #499 |
 | 04 | [Pins: personal and exercise-wide](04-pins-backend.md) | backend | Must | 1 | 01 | Complete | #500 |
 | 05 | [White-noise pool and pacer](05-white-noise-backend.md) | backend | Must | 1 | 01 | Complete | #501 |
-| 06 | [EXERCISE bands on all participant media](06-media-watermark-bands.md) | frontend | Must | 2 | contract | In Review | #502 |
-| 07 | [Pinned tab and Pin action (participant)](07-pinned-tab.md) | frontend | Must | 2 | contract | In Review | #503 |
-| 08 | [Live world: pin for everyone and unread highlighting](08-live-world-pin-unread.md) | frontend | Must | 2 | contract | In Review | #504 |
-| 09 | [Console: white-noise knob and Export](09-console-noise-export.md) | frontend | Must | 2 | contract | In Review | #505 |
-| 10 | [Run sheet: import from Excel, and the #493 form fix](10-run-sheet-import.md) | frontend | Must | 2 | contract | In Review | #506 |
-| 11 | [Read-only console for evaluators](11-read-only-console.md) | frontend | Must | 3 | 08, 09, 10, 12b | Not Started | #507 |
-| 12 | [Emoji picker in both composers](12-emoji-picker.md) | frontend | Should | 2 / 3 (12b) | none | In Progress | #508 |
-| 13 | [Participant polish: tooltips (#494) and centered frame (#495)](13-participant-polish.md) | frontend | Should | 3 | 06, 07 | Not Started | #509 |
+| 06 | [EXERCISE bands on all participant media](06-media-watermark-bands.md) | frontend | Must | 2 | contract | Complete | #502 |
+| 07 | [Pinned tab and Pin action (participant)](07-pinned-tab.md) | frontend | Must | 2 | contract | Complete | #503 |
+| 08 | [Live world: pin for everyone and unread highlighting](08-live-world-pin-unread.md) | frontend | Must | 2 | contract | Complete | #504 |
+| 09 | [Console: white-noise knob and Export](09-console-noise-export.md) | frontend | Must | 2 | contract | Complete | #505 |
+| 10 | [Run sheet: import from Excel, and the #493 form fix](10-run-sheet-import.md) | frontend | Must | 2 | contract | Complete | #506 |
+| 11 | [Read-only console for evaluators](11-read-only-console.md) | frontend | Must | 3 | 08, 09, 10, 12b | In Review | #507 |
+| 12 | [Emoji picker in both composers](12-emoji-picker.md) | frontend | Should | 2 / 3 (12b) | none | Complete | #508 |
+| 13 | [Participant polish: tooltips (#494) and centered frame (#495)](13-participant-polish.md) | frontend | Should | 3 | 06, 07 | In Review | #509 |
+| 14 | [Live engagement refresh (counts, notifications, repost notification)](14-live-engagement-refresh.md) | fullstack | Must | 3 | 07 | In Review | #515 |
+| 15 | [Exercise management for controllers, and a "not allowed" page](15-exercise-management-access.md) | fullstack | Must | 3 | seam S-4 | In Review | #516 |
 | S1 | [Seed script: noise pool, exercise pins, watermark on](S1-seed-script-update.md) | script | Must | 3 | 04, 05 deployed | Not Started | #510 |
 | 16 | [MSEL import: alt text and engagement columns; slot in by planned minute](16-msel-import-alt-engagement-order.md) | backend | Must | 3 | 03 | In Review | #518 |
 | C | [Content: Kestrel MSEL file, noise pool (C1 burn-in dropped 10/15)](C-content-tasks.md) | content | Must | any | #491, 16 | Not Started | #511 |
@@ -82,3 +86,7 @@ media on the server.
    that writes (Export is allowed).
 7. Emoji picker in the participant composer and the persona composer; Live world highlights new posts until seen;
    #493, #494, #495 fixed.
+8. Two participant browsers: a like, a repost and a reply in one change the counts in the other without a reload; the
+   author's notifications badge goes up live, including "@x reposted your post".
+9. Sign in as a controller: Exercise Management opens and can create an exercise. As an evaluator, it shows "You need
+   the planner, org admin or controller role" instead of bouncing.

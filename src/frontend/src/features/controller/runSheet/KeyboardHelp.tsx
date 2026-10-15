@@ -10,12 +10,20 @@
 import { Box } from '@mui/material'
 import { consoleChrome as chrome } from '../consoleChrome'
 import { RUN_SHEET_SHORTCUTS } from './runSheetShortcuts'
+import { useCanControl } from '../access'
+
+/** The keys a non-controller's run sheet still honours (story 11, DF-14): move and open. */
+const READ_ONLY_KEYS: ReadonlySet<string> = new Set(['↑ / ↓', 'E'])
 
 export interface KeyboardHelpProps {
   readonly id: string
 }
 
 export function KeyboardHelp({ id }: KeyboardHelpProps) {
+  const canControl = useCanControl()
+  const shortcuts = canControl
+    ? RUN_SHEET_SHORTCUTS
+    : RUN_SHEET_SHORTCUTS.filter(shortcut => READ_ONLY_KEYS.has(shortcut.keys))
   return (
     <Box
       id={id}
@@ -32,7 +40,7 @@ export function KeyboardHelp({ id }: KeyboardHelpProps) {
       }}
     >
       <Box component="dl" sx={{ m: 0, display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '4px 12px' }}>
-        {RUN_SHEET_SHORTCUTS.map(shortcut => (
+        {shortcuts.map(shortcut => (
           <Box key={shortcut.keys} sx={{ display: 'contents' }}>
             <Box component="dt" sx={{ m: 0 }}>
               <Box

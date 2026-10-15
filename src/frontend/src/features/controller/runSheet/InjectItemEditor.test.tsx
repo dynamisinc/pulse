@@ -21,6 +21,10 @@ import { ThemeProvider } from '@mui/material/styles'
 import { cobraTheme } from '@/theme/cobraTheme'
 import { SEEDED_PERSONAS } from '@/features/personas'
 
+// Demo-feedback story 11 (DF-14): the console's write controls render only for a controller
+// session, and this suite mounts none, so the read-only gate is fixed to "controller" here.
+vi.mock('@/features/controller/access/useCanControl', () => ({ useCanControl: () => true }))
+
 // The editor's media field reads F0's library hook (`useMediaLibrary`), which needs the exercise
 // + query providers. These tests drive the EDITOR, not the library, so the hook is stubbed with
 // an empty library (the paste-an-id path, behind "Use media id"); the real library UI is covered

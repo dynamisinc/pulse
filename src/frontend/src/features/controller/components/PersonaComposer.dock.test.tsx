@@ -24,6 +24,10 @@ import { PersonaDockHost } from '../console/personaDockHost.tsx'
 import { composeAsPersonaDraftStore } from '../hooks/useComposeAsPersona'
 import { PersonaComposer } from './PersonaComposer'
 
+// Demo-feedback story 11 (DF-14): the console's write controls render only for a controller
+// session, and this suite mounts none, so the read-only gate is fixed to "controller" here.
+vi.mock('@/features/controller/access/useCanControl', () => ({ useCanControl: () => true }))
+
 /** The text field is named by its visible label: "Post as X" / "Reply as X". */
 const POST_FIELD = /^(Post|Reply) as Fairhaven Water$/
 

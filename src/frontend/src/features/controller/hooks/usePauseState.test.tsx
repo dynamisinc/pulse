@@ -47,7 +47,13 @@ import { pausableExerciseClock } from '../services/pausableExerciseClock'
 import * as livePauseTierActions from '../services/livePauseTierActions'
 import type { PauseTierServerState } from '../services/livePauseTierActions'
 import * as liveEngineControlActions from '../engine/services/liveEngineControlActions'
-import { resetPauseStateForTest, usePauseState, type PauseTier } from './usePauseState'
+import { resetClientSession } from '@/core/auth/endSession'
+import {
+  refreshPauseTierFromServer,
+  resetPauseStateForTest,
+  usePauseState,
+  type PauseTier,
+} from './usePauseState'
 
 vi.mock('@/core/exerciseContext', () => ({
   useExerciseContext: vi.fn(),
@@ -1122,5 +1128,108 @@ describe('usePauseState — live mode (server-authoritative; USE_MOCK_DATA=false
     expect(mockedFetchPauseTier).toHaveBeenCalledTimes(1)
     expect(first.result.current.tier).toBe('engine')
     expect(second.result.current.tier).toBe('engine')
+  })
+
+  // ---- the supersede guard is per-request, and sign-out starts fresh (#534 Copilot) ----
+
+  /** A server read the test resolves by hand, so it can act while the GET is in flight. */
+  function deferredFetch(): { resolve: (state: PauseTierServerState) => void } {
+    const handle: { resolve: (state: PauseTierServerState) => void } = { resolve: () => {} }
+    mockedFetchPauseTier.mockImplementationOnce(
+      () =>
+        new Promise<PauseTierServerState>(resolve => {
+          handle.resolve = resolve
+        }),
+    )
+    return handle
+  }
+
+  async function poll(): Promise<void> {
+    await act(async () => {
+      await refreshPauseTierFromServer('ex-mock-0001')
+    })
+  }
+
+  it('a controller action taken BEFORE a poll started never blocks that poll from adopting', async () => {
+    const { result } = renderHook(() => usePauseState())
+    await act(async () => {
+      await flushMicrotasks()
+    })
+    act(() => result.current.setTier('injects'))
+    await act(async () => {
+      await flushMicrotasks()
+    })
+
+    // Another controller froze the world afterwards; this tab's later poll sees it.
+    mockedFetchPauseTier.mockResolvedValueOnce(serverState('freeze', true))
+    await poll()
+
+    expect(result.current.tier).toBe('freeze')
+  })
+
+  it('a controller action DURING a poll drops that one result, and the next poll adopts again', async () => {
+    const { result } = renderHook(() => usePauseState())
+    await act(async () => {
+      await flushMicrotasks()
+    })
+
+    const inFlight = deferredFetch()
+    let pending: Promise<void> | undefined
+    act(() => {
+      pending = refreshPauseTierFromServer('ex-mock-0001')
+    })
+    // The controller acts while the GET is still in flight.
+    act(() => result.current.setTier('injects'))
+    await act(async () => {
+      inFlight.resolve(serverState('freeze', true))
+      await pending
+    })
+    expect(result.current.tier).toBe('injects')
+
+    mockedFetchPauseTier.mockResolvedValueOnce(serverState('freeze', true))
+    await poll()
+    expect(result.current.tier).toBe('freeze')
+  })
+
+  it('after sign-out the pause and engine state start fresh and an evaluator poll adopts the server tier', async () => {
+    const { result } = renderHook(() => usePauseState())
+    await act(async () => {
+      await flushMicrotasks()
+    })
+    // The controller pauses the engine, and a poll is still in flight when they sign out.
+    act(() => result.current.setTier('engine'))
+    await act(async () => {
+      await flushMicrotasks()
+    })
+    expect(engineControlStore.getSnapshot('ex-mock-0001').mode).toBe('stop')
+    const staleRead = deferredFetch()
+    let pending: Promise<void> | undefined
+    act(() => {
+      pending = refreshPauseTierFromServer('ex-mock-0001')
+    })
+
+    act(() => resetClientSession())
+    expect(result.current.tier).toBe('running')
+    expect(engineControlStore.getSnapshot('ex-mock-0001').mode).toBe('live')
+
+    // The previous session's read lands on nobody's console.
+    await act(async () => {
+      staleRead.resolve(serverState('freeze', true))
+      await pending
+    })
+    expect(result.current.tier).toBe('running')
+
+    // The evaluator's console mounts (resyncing again) and its poll adopts the server tier.
+    mockedFetchPauseTier.mockResolvedValueOnce(serverState('injects', false))
+    const evaluator = renderHook(() => usePauseState())
+    await act(async () => {
+      await flushMicrotasks()
+    })
+    expect(evaluator.result.current.tier).toBe('injects')
+
+    mockedFetchPauseTier.mockResolvedValueOnce(serverState('engine', false))
+    await poll()
+    expect(evaluator.result.current.tier).toBe('engine')
+    expect(engineControlStore.getSnapshot('ex-mock-0001').mode).toBe('stop')
   })
 })

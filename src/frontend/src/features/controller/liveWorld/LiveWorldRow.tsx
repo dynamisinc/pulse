@@ -84,6 +84,7 @@ import { LiveWorldMedia } from './LiveWorldMedia'
 import { toLiveWorldPost, type LiveWorldEntry, type LiveWorldPost } from './liveWorldModel'
 import { liveWorldTokens, monoMeta, srOnly } from './liveWorldStyles'
 import { PinForAllAction } from './PinForAllAction'
+import { useCanControl } from '../access'
 
 interface CountDef {
   readonly key: 'reply' | 'repost' | 'like' | 'share'
@@ -135,6 +136,7 @@ export const LiveWorldRow = memo(function LiveWorldRow({
   unread,
   onPinnedChange,
 }: LiveWorldRowProps) {
+  const canControl = useCanControl()
   const post = useMemo(
     () => toLiveWorldPost(entry.view, persona, entry.pinnedForAll),
     [entry.view, persona, entry.pinnedForAll],
@@ -361,7 +363,7 @@ export const LiveWorldRow = memo(function LiveWorldRow({
             This post was taken down. Replying to it is unavailable.
           </Box>
         )}
-        <CobraLinkButton
+        {canControl && <CobraLinkButton
           size="small"
           data-testid="live-world-reply-as"
           disabled={removed}
@@ -384,7 +386,7 @@ export const LiveWorldRow = memo(function LiveWorldRow({
         >
           <FontAwesomeIcon icon={faReply} aria-hidden="true" />
           Reply as…
-        </CobraLinkButton>
+        </CobraLinkButton>}
         {/* A taken-down row offers no Pin (the server refuses it); a taken-down row that is
             still pinned offers Unpin only, so it can be cleared (Gate-1 L3). */}
         {(!removed || post.pinnedForAll === true) && (

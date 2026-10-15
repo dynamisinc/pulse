@@ -2,8 +2,8 @@
  * features/social/notifications/notificationTypes.ts
  * ---------------------------------------------------------------------------
  * The vocabulary of the derived-notifications feature (demo-polish F7, story 16;
- * SOC-070 "lite", SOC-071 aggregation, NFR-001, COR-053): the three notification
- * types, the shape of one row, and the handful of tunables. Participant world --
+ * SOC-070 "lite", SOC-071 aggregation, NFR-001, COR-053): the notification types, the
+ * shape of one row, and the handful of tunables. Participant world --
  * plain types and constants, no UI, no clock, no network.
  *
  * THERE IS NO NOTIFICATION SERVICE. A row is *derived on the client* from the posts the
@@ -13,10 +13,12 @@
  *   reply    someone replied to a post of mine        (`inReplyTo.postId` is one of mine)
  *   mention  someone's post says `@myhandle`          (case-insensitive, on handle edges)
  *   like     one of my posts got new likes            (`counts.like` rose since I looked)
+ *   repost   one of my posts got new reposts          (`counts.repost` rose; demo-feedback DF-19)
  *
  * AGGREGATION (D1-005 / SOC-071). A row is one *group*, not one event: all the replies to
  * the same post of mine are ONE "Alex and 3 others replied to your post" row, all the
- * likes on one post are ONE "Your post got 5 new likes" row, and the mentions that are
+ * likes on one post are ONE "Your post got 5 new likes" row (reposts likewise), and the mentions
+ * that are
  * replies under the same post are one row. Top-level mentions each have their own post, so
  * they cannot group by subject: instead, more than {@link MENTION_STORM_THRESHOLD} of them
  * within {@link MENTION_STORM_WINDOW_MS} of scenario time fold into one rolling MENTION STORM
@@ -29,8 +31,8 @@
  * needs no cast and an item survives the cast loading late.
  */
 
-/** The three kinds of derived notification. */
-export type NotificationType = 'reply' | 'mention' | 'like'
+/** The kinds of derived notification (`repost` added by demo-feedback DF-19). */
+export type NotificationType = 'reply' | 'mention' | 'like' | 'repost'
 
 /**
  * One row of the notifications page: a *group* of same-type events about one subject post.
@@ -42,7 +44,7 @@ export interface NotificationItem {
   readonly id: string
   readonly type: NotificationType
   /**
-   * The post this row is ABOUT -- what activating it opens: my post (reply, like), or for
+   * The post this row is ABOUT -- what activating it opens: my post (reply, like, repost), or for
    * a mention the post that mentions me (or, when that is a reply, the post it replies to).
    */
   readonly subjectPostId: string
@@ -56,13 +58,16 @@ export interface NotificationItem {
   readonly at: string
   /** True while any event in the group has not been marked read. */
   readonly unread: boolean
-  /** Events in the group: replies, mentions, or (like) how many new likes. */
+  /** Events in the group: replies, mentions, or (like / repost) how many new likes / reposts. */
   readonly count: number
   /** The newest distinct actors (persona ids), newest first, at most {@link ACTOR_PREVIEW_MAX}. */
   readonly actorIds: readonly string[]
-  /** How many DISTINCT people are in the group (0 for a like row -- likes are anonymous). */
+  /**
+   * How many DISTINCT people are in the group (0 for a like or repost row -- neither the feed nor
+   * the engagement push says who liked or reposted, so those rows are anonymous).
+   */
   readonly actorCount: number
-  /** A short plain-text excerpt: the newest reply/mention, or (like) my own post. */
+  /** A short plain-text excerpt: the newest reply/mention, or (like / repost) my own post. */
   readonly excerpt: string
 }
 
@@ -84,7 +89,21 @@ export interface IngestResult {
   readonly event?: NotificationEvent
 }
 
-/** How often the feed is re-read to notice like-count rises (the story fixes it at 30 s). */
+/**
+ * The result of offering one `PostEngagementChanged` frame to the model (demo-feedback DF-19):
+ * whether anything visible changed, and every new unread event (a like rise and a repost rise can
+ * land in one frame).
+ */
+export interface EngagementObservation {
+  readonly changed: boolean
+  readonly events: readonly NotificationEvent[]
+}
+
+/**
+ * How often the feed is re-read to notice like-count rises (the story fixes it at 30 s). Since
+ * demo-feedback DF-19 a like or repost on my post is also noticed the moment its
+ * `PostEngagementChanged` push lands; the re-read remains the polling-fallback path.
+ */
 export const NOTIFICATION_POLL_INTERVAL_MS = 30_000
 
 /** Each later tick is spread +/- this fraction around the interval, so clients drift apart. */
@@ -111,6 +130,13 @@ export const NOTIFICATION_PUBLISH_DELAY_MS = 250
  * announcements in lock-step: the pill keeps up with the feed, this is the quieter channel.
  */
 export const NOTIFICATION_ANNOUNCE_THROTTLE_MS = 12_000
+
+/**
+ * How long a note of the viewer's own like / repost (Gate-1 M-2) waits for the rise it causes
+ * before it expires (N-1): the push lands within a second or two, so a note still unmatched after
+ * this never will be, and must not swallow the next person's like.
+ */
+export const OWN_REACTION_TTL_MS = 15_000
 
 /** Rows the page renders (newest first); the rest are summarized by a count, not drawn. */
 export const MAX_NOTIFICATION_ROWS = 100
@@ -152,8 +178,12 @@ export const MENTION_STORM_WINDOW_MS = 60_000
  */
 export const NOTIFICATION_READ_JITTER_MS = 2_000
 
-/** Most per-post like records remembered per persona (oldest forgotten first). */
-export const LIKE_RECORDS_CAP = 200
+/**
+ * Most per-post count records remembered per persona (oldest forgotten first). Each post of mine
+ * keeps two since demo-feedback DF-19 (its like record and its `repost:`-keyed repost record), so
+ * this is 200 posts' worth.
+ */
+export const LIKE_RECORDS_CAP = 400
 
 /** Arrivals held while the first feed read is in flight (oldest dropped past this). */
 export const PRELOAD_BUFFER_CAP = 500

@@ -18,7 +18,7 @@ using Pulse.WebApi.Features.ExerciseConfiguration.Lifecycle;
 /// deliberately OWN-ONLY: it filters by the caller's <c>StaffUserId</c> so a staff human never sees another's
 /// assignments, and it exists to populate the exercise switcher. This read is deliberately ORG-WIDE: an
 /// org-admin administers the customer's portfolio, including runs they hold no <c>StaffAssignment</c> on, and a
-/// planner needs to see what already exists before creating another. Neither is a superset of the other in a
+/// planner or controller (DF-20) needs to see what already exists before creating another. Neither is a superset of the other in a
 /// useful way (an assignment can point at an exercise this list also shows), and folding them together would
 /// mean either leaking unassigned exercises into the switcher or hiding the organization's own runs from its
 /// administrator. They stay two endpoints with two different bounds.

@@ -462,7 +462,7 @@ app.MapExerciseLifecycleEndpoints();    // story 03 — GET /api/staff/exercise-
 // route is scoped to the ONE server-resolved exercise, while these span the caller's whole customer tenant.
 // No route, query or body carries an organization id in any form — the tenant is always the caller's own,
 // resolved by app.UseOrganizationResolution() — so there is no IDOR surface on the org axis. Role-gated by
-// OrgAdminAuthorizationFilter: planner OR orgAdmin on the two exercise routes, orgAdmin ALONE on the
+// OrgAdminAuthorizationFilter: planner, orgAdmin OR controller (DF-20) on the two exercise routes, orgAdmin ALONE on the
 // staff-assignment read (COR-076 — orgAdmin is its own authorization family, not a bigger staff role).
 app.MapExerciseLifecycleAdminEndpoints();  // COR-074/075/076 POST+GET /api/org/exercises, GET /api/org/staff-assignments
 

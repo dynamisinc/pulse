@@ -21,7 +21,7 @@
  */
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { ThemeProvider } from '@mui/material/styles'
 import { cobraTheme } from '@/theme/cobraTheme'
 import { ExerciseContextProvider } from '@/core/exerciseContext'
@@ -29,6 +29,10 @@ import { ToolstripProvider } from '@/features/staffShell/toolRegistry'
 import { Toolstrip } from '@/features/staffShell/components/Toolstrip'
 import { ActivePersonaProvider } from '../hooks/useActivePersona'
 import { ControllerConsole } from './ControllerConsole'
+
+// Demo-feedback story 11 (DF-14): the console's write controls render only for a controller
+// session, and this suite mounts none, so the read-only gate is fixed to "controller" here.
+vi.mock('@/features/controller/access/useCanControl', () => ({ useCanControl: () => true }))
 
 function renderConsole() {
   return render(

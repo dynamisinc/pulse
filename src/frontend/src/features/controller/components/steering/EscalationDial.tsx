@@ -106,6 +106,7 @@ import { useStorylineTarget } from '../../hooks/useStorylineTarget'
 import type { StorylinePhase } from '../../services/storylineMock'
 // Dark operator-chrome tokens (matches `EngineControlBar`/`ReviewQueue`'s tokens). Staff-only.
 import { consoleChrome as chrome } from '../../consoleChrome'
+import { useCanControl } from '../../access'
 
 /**
  * The phases in which `Storyline.Tick` actually drives actual intensity
@@ -168,6 +169,7 @@ function DialPanel({ children }: { children: ReactNode }) {
  * D5-016/017).
  */
 export function EscalationDial() {
+  const canControl = useCanControl()
   const dial = useStorylineTarget()
   const trackRef = useRef<HTMLDivElement | null>(null)
   const isDraggingRef = useRef(false)
@@ -260,6 +262,9 @@ export function EscalationDial() {
     },
     [dial],
   )
+
+  // Story 11 (DF-14): the dial sets the target, so a non-controller gets none of it.
+  if (!canControl) return null
 
   // Gate-1 CR-002: before a live read is CONFIRMED, render NOTHING numeric —
   // an explicit, plain status instead of a fabricated calm/quiet world.

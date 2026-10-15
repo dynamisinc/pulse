@@ -81,6 +81,7 @@ import { useEngineSettings, type EngineSettingsAutonomy } from '../hooks/useEngi
 import { useReviewQueue } from '../hooks/useReviewQueue'
 // D5 dark operator-chrome tokens (matches `ReviewQueue`'s `chrome`). Staff-only.
 import { consoleChrome as chrome } from '../../consoleChrome'
+import { useCanControl } from '../../access'
 
 /** The kill switch's cycle order + display copy (D5 §2 "Live / Suggest-only / STOP ENGINE"). */
 const MODE_CYCLE: readonly EngineMode[] = ['live', 'suggest-only', 'stop']
@@ -129,7 +130,23 @@ function labelFor(mode: EngineMode, autonomy: EngineSettingsAutonomy | null): st
   return base
 }
 
+/**
+ * The engine mode as the SERVER reports it (story 11 H-1), for the read-only readout that stands
+ * in for the kill switch on a non-controller's console. Built from the settings snapshot, never
+ * from the local kill-switch store (which seeds 'live' and only knows THIS console's presses):
+ * stopped, else a clamp with no degraded reason (the kill switch's Suggest-only), else live.
+ * `null` before the first read: a guess would be worse than silence.
+ */
+function serverModeOf(autonomy: EngineSettingsAutonomy | null): EngineMode | null {
+  if (!autonomy) return null
+  if (autonomy.generationStopped) return 'stop'
+  if (autonomy.safetyClampActive && autonomy.degradedReason === null) return 'suggest-only'
+  return 'live'
+}
+
 export function EngineControlBar() {
+  // Story 11 (DF-14): the bar's write toggles are absent for a non-controller; its readouts stay.
+  const canControl = useCanControl()
   const engineControl = useEngineControl()
   const engineSettings = useEngineSettings()
   // Destructured so the effect below can depend on the STABLE `refetch`
@@ -148,6 +165,12 @@ export function EngineControlBar() {
     [demand.demand, demand.budget],
   )
   const allClear = pendingCount === 0 && timersUnder60sCount === 0
+  const serverMode = serverModeOf(autonomy)
+  const readoutTone = serverMode === null ? chrome.inkMuted : MODE_COPY[serverMode].tone
+  const readoutLabel =
+    serverMode === null
+      ? 'ENGINE · READING…'
+      : `${labelFor(serverMode, autonomy)}${autonomy?.degradedReason ? ' (DEGRADED)' : ''}`
 
   // The kill switch mutates the SAME server-side autonomy state
   // `engineSettings` describes, entirely outside that hook, so this label
@@ -201,8 +224,8 @@ export function EngineControlBar() {
         fontFamily: "'Figtree', system-ui, sans-serif",
       }}
     >
-      {/* a. Kill switch — always visible, text + icon + dot (never color-only). */}
-      <Box
+      {/* a. Kill switch — always visible to a controller, text + icon + dot (never color-only). */}
+      {canControl && <Box
         component="button"
         type="button"
         data-testid="engine-kill-switch"
@@ -232,7 +255,37 @@ export function EngineControlBar() {
           aria-hidden="true"
           sx={{ width: 7, height: 7, borderRadius: '50%', bgcolor: modeCopy.tone, flex: 'none' }}
         />
-      </Box>
+      </Box>}
+      {/* a'. Story 11 H-1: a non-controller sees the server's engine mode, not a switch. */}
+      {!canControl && (
+        <Box
+          component="span"
+          role="status"
+          data-testid="engine-mode-readout"
+          data-mode={serverMode ?? 'unknown'}
+          sx={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 0.75,
+            px: 1.25,
+            py: 0.5,
+            fontSize: 11,
+            fontWeight: 800,
+            letterSpacing: '0.06em',
+            color: chrome.ink,
+            bgcolor: chrome.panel,
+            border: `1px solid ${readoutTone}`,
+            borderRadius: '20px',
+          }}
+        >
+          <FontAwesomeIcon icon={faPowerOff} color={readoutTone} aria-hidden="true" />
+          {readoutLabel}
+          <Box
+            aria-hidden="true"
+            sx={{ width: 7, height: 7, borderRadius: '50%', bgcolor: readoutTone, flex: 'none' }}
+          />
+        </Box>
+      )}
 
       {/* b. Degrade-mode indicator — text + icon, only while degraded. Default healthy. */}
       {engineControl.degraded ? (
@@ -246,7 +299,7 @@ export function EngineControlBar() {
           <Typography component="span" sx={{ fontSize: 10.5, fontWeight: 700, color: chrome.amber }}>
             PROVIDER DEGRADED — clamped to Suggest
           </Typography>
-          <Box
+          {canControl && <Box
             component="button"
             type="button"
             data-testid="engine-degraded-restore"
@@ -262,9 +315,9 @@ export function EngineControlBar() {
             }}
           >
             Restore
-          </Box>
+          </Box>}
         </Stack>
-      ) : import.meta.env.DEV ? (
+      ) : import.meta.env.DEV && canControl ? (
         // Dev-only affordance: `degrade()` trips a safety clamp, so it must not
         // be reachable by an operator in a real (production) exercise build.
         <Box

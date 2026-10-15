@@ -176,6 +176,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useSyncExternalStore } from 'react'
+import { registerSessionReset } from '@/core/auth/sessionReset'
 import { setExerciseClock } from '@/core/clock'
 import { USE_MOCK_DATA } from '@/core/config/mockData'
 import { buildAndEmit } from '@/core/telemetry'
@@ -456,13 +457,68 @@ function authoritativeTier(server: PauseTierServerState): PauseTier {
 let resyncStarted = false
 
 /**
- * Whether a CONTROLLER has driven a tier change in this runtime. The in-flight
- * resync GET checks this before adopting: a response that lands after the
- * controller has already acted is stale and must never overwrite their newer
- * choice (nor drive the pausable clock behind it) — the same supersede rule the
- * POST's guarded revert uses.
+ * Bumped by everything that SUPERSEDES an in-flight server read: a controller's own
+ * tier change, and a session reset (sign-out / identity switch). A resync GET captures
+ * it when the request STARTS and adopts only if it is unchanged when the response
+ * lands — so a response that lands after the controller acted is stale and never
+ * overwrites their newer choice (nor drives the pausable clock behind it), the same
+ * supersede rule the POST's guarded revert uses; while an action taken BEFORE the GET
+ * started never blocks it (#534 Copilot: a once-set flag froze every later evaluator
+ * poll on a tab where a controller had acted). Never reset to 0, so a request from an
+ * earlier session can never match a later value.
  */
-let controllerActed = false
+let supersedeSequence = 0
+
+/**
+ * Reads the server's pause tier and adopts it, silently (no telemetry, no POST). The live-mode
+ * mount resync below runs it once per runtime; a read-only console (demo-feedback story 11,
+ * `access/useReadOnlyRefresh`) also runs it on an interval, because an evaluator never acts and
+ * would otherwise keep the tier it saw on load. A no-op under mock data (the mock tier is the
+ * in-tab store itself). Never rejects.
+ */
+export function refreshPauseTierFromServer(exerciseId: string): Promise<void> {
+  if (USE_MOCK_DATA) return Promise.resolve()
+  const startedAt = supersedeSequence
+  return fetchPauseTier()
+    .then(server => {
+      // Superseded: the controller acted (or the session ended) while the GET was
+      // in flight. Their choice is newer than this snapshot — never overwrite it.
+      if (supersedeSequence !== startedAt) return
+
+      // Never adopt a freeze the server itself reports as not applied.
+      const adopted = applyTierSequenced(authoritativeTier(server))
+      if (!adopted) return
+
+      if (adopted.transition.to === 'engine') {
+        // KNOWN GAP (world-steering follow-up, out of scope here): a FRESH
+        // console has no memory of the position another controller's
+        // Pause-engine displaced, so `engineModeBeforePause` seeds from this
+        // runtime's own default ('live'). A later Resume from this console can
+        // therefore restore 'live' over a suggest-only that predated it. Fixing
+        // it needs the kill-switch position itself to be server-authoritative
+        // (the frontend/backend autonomy-model alignment tracked separately),
+        // not more local memory.
+        engineModeBeforePause ??= engineControlStore.getSnapshot(exerciseId).mode
+        engineControlStore.adoptServerMode(exerciseId, 'stop')
+      } else if (
+        adopted.transition.to !== 'freeze' &&
+        (engineModeBeforePause !== null || adopted.transition.from === 'engine')
+      ) {
+        // The server LEFT the engine tier (story 11 Gate-1 L-B; a read-only console polls this):
+        // the silent mirror of `applyEngineTierMode`'s restore. The pause payload carries no
+        // kill-switch position, so the engine goes back to the position the engine tier
+        // displaced, or `live` when this runtime never saw it (a console opened mid-pause).
+        // `freeze` keeps the engine stopped and the debt, exactly as the controller path does.
+        const restore = engineModeBeforePause ?? 'live'
+        engineModeBeforePause = null
+        engineControlStore.adoptServerMode(exerciseId, restore)
+      }
+    })
+    .catch(() => {
+      // A failed/unrecognised resync leaves the local baseline untouched —
+      // never a guessed tier. The controller's own next action is authoritative.
+    })
+}
 
 /**
  * TEST-ONLY reset: returns the module store + ambient clock to the `running`
@@ -473,11 +529,33 @@ export function resetPauseStateForTest(): void {
   if (storeState.tier === 'freeze') pausableExerciseClock.resume()
   storeState = { tier: 'running', overlayRegister: 'out-of-fiction', refusal: null }
   resyncStarted = false
-  controllerActed = false
+  supersedeSequence = 0
   engineModeBeforePause = null
   transitionSequence = 0
   emitStoreChange()
 }
+
+/**
+ * Sign-out / identity-switch reset (registered with `core/auth/sessionReset` below): the
+ * pause fact is a module singleton that lives as long as the TAB, so without this the next
+ * sign-in on the same tab would start from the previous session's tier, refusal notice and
+ * displaced engine position, and its console would skip the mount resync. Unlike the test
+ * reset it never rewinds the sequences — it ADVANCES both, so any request still in flight
+ * from the ended session is superseded (its result lands on nobody's console).
+ */
+function resetPauseStateForSession(): void {
+  if (storeState.tier === 'freeze') pausableExerciseClock.resume()
+  storeState = { tier: 'running', overlayRegister: 'out-of-fiction', refusal: null }
+  resyncStarted = false
+  engineModeBeforePause = null
+  transitionSequence++
+  supersedeSequence++
+  emitStoreChange()
+}
+
+// Registered with `core/auth` (which cannot import this feature) rather than called from
+// `endSession`; the unregister is tied to Vite's hot replacement of this module.
+registerSessionReset(resetPauseStateForSession, import.meta.hot)
 
 // ---------------------------------------------------------------------------
 // The hook
@@ -596,7 +674,7 @@ export function usePauseState(): PauseState {
       const applied = applyTierSequenced(next)
       if (!applied) return
       const { transition, sequence } = applied
-      controllerActed = true
+      supersedeSequence++
 
       // A new controller action clears any prior refusal notice — it described an
       // older attempt and must never sit over a newer, successful one.
@@ -694,33 +772,7 @@ export function usePauseState(): PauseState {
   useEffect(() => {
     if (USE_MOCK_DATA || resyncStarted) return
     resyncStarted = true
-    fetchPauseTier()
-      .then(server => {
-        // Superseded: the controller acted while the GET was in flight. Their
-        // choice is newer than this snapshot — never overwrite it.
-        if (controllerActed) return
-
-        // Never adopt a freeze the server itself reports as not applied.
-        const adopted = applyTierSequenced(authoritativeTier(server))
-        if (!adopted) return
-
-        if (adopted.transition.to === 'engine') {
-          // KNOWN GAP (world-steering follow-up, out of scope here): a FRESH
-          // console has no memory of the position another controller's
-          // Pause-engine displaced, so `engineModeBeforePause` seeds from this
-          // runtime's own default ('live'). A later Resume from this console can
-          // therefore restore 'live' over a suggest-only that predated it. Fixing
-          // it needs the kill-switch position itself to be server-authoritative
-          // (the frontend/backend autonomy-model alignment tracked separately),
-          // not more local memory.
-          engineModeBeforePause ??= engineControlStore.getSnapshot(exerciseId).mode
-          engineControlStore.adoptServerMode(exerciseId, 'stop')
-        }
-      })
-      .catch(() => {
-        // A failed/unrecognised resync leaves the local baseline untouched —
-        // never a guessed tier. The controller's own next action is authoritative.
-      })
+    void refreshPauseTierFromServer(exerciseId)
   }, [exerciseId])
 
   const resume = useCallback(() => setTier('running'), [setTier])

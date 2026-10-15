@@ -11,7 +11,9 @@
  *    with the constants in `layout/frameMetrics.ts`;
  *  - the right rail hides first (`display: none`, so it also leaves the a11y tree),
  *    then the nav rail collapses to an icon rail;
- *  - the frame is LEFT-anchored and cannot overflow horizontally (a `0` min track,
+ *  - the frame is LEFT-anchored below 1280px and CENTRED from 1280px (demo-feedback 13,
+ *    #495, revisiting D1-005 / D1-013): resolved for a 1100px and a 1440px window from
+ *    the real media blocks, and it cannot overflow horizontally (a `0` min track,
  *    `overflow-x: clip`, no auto-margin centering);
  *  - every sticky / fixed thing that could meet the EXERCISE banners subtracts
  *    `--pulse-chrome-top` / `--pulse-chrome-bottom`;
@@ -30,6 +32,7 @@
  */
 import { beforeAll, describe, expect, it } from 'vitest'
 import {
+  FRAME_CENTRED_MIN_WIDTH,
   FRAME_MIN_WIDTH,
   MAIN_COLUMN_WIDTH,
   NAV_EXPANDED_MIN_WIDTH,
@@ -108,6 +111,58 @@ function baseRules(css: string): string {
 
 const squash = (css: string) => css.replace(/\s+/g, ' ')
 
+/** Every `@media (min-width: Npx)` breakpoint in `css`, ascending. */
+function minWidthQueries(css: string): number[] {
+  const widths = [...css.matchAll(/@media \(min-width: (\d+)px\)/g)].map(m => Number(m[1]))
+  return [...new Set(widths)].sort((a, b) => a - b)
+}
+
+/** The last value of `property` inside the `.frame { ... }` rule(s) of `rules`. */
+function frameValue(rules: string, property: string): string | undefined {
+  let value: string | undefined
+  for (const block of squash(rules).matchAll(/\.frame \{([^}]*)\}/g)) {
+    const found = new RegExp(`(?:^|;|\\s)${property}: ([^;]+);`).exec(block[1] ?? '')
+    if (found?.[1] !== undefined) value = found[1].trim()
+  }
+  return value
+}
+
+/**
+ * The `.frame` rule a window of `width` px gets: the base rules, then every
+ * `min-width` block it satisfies, in source (= ascending) order -- the cascade the
+ * browser applies, which jsdom cannot.
+ */
+function frameAt(width: number): { columns: string, justify: string } {
+  const layers = [
+    baseRules(css.channel),
+    ...minWidthQueries(css.channel)
+      .filter(min => width >= min)
+      .map(min => mediaBlock(css.channel, `min-width: ${min}px`)),
+  ]
+  let columns = ''
+  let justify = ''
+  for (const layer of layers) {
+    columns = frameValue(layer, 'grid-template-columns') ?? columns
+    justify = frameValue(layer, 'justify-content') ?? justify
+  }
+  return { columns, justify }
+}
+
+/** Width of the resolved tracks once the `minmax(0, 600px)` main track has grown to 600. */
+function trackTotal(columns: string): number {
+  return columns
+    .replace(/minmax\(0, (\d+)px\)/g, '$1px')
+    .split(' ')
+    .reduce((sum, track) => sum + Number.parseInt(track, 10), 0)
+}
+
+/** The frame's left offset in a window of `width` px (start: 0; center: half the spare). */
+function frameLeft(width: number): number {
+  const { columns, justify } = frameAt(width)
+  const spare = width - trackTotal(columns)
+  return justify === 'center' ? spare / 2 : 0
+}
+
 describe('frame metrics', () => {
   it('are the D1-013 numbers: 240 | 600 | 344, full frame at 1184', () => {
     expect(NAV_RAIL_WIDTH).toBe(240)
@@ -122,11 +177,22 @@ describe('frame metrics', () => {
     expect(NAV_RAIL_WIDTH + MAIN_COLUMN_WIDTH).toBe(NAV_EXPANDED_MIN_WIDTH)
   })
 
+  it('centres from 1280px (#495), above the full-frame threshold', () => {
+    expect(FRAME_CENTRED_MIN_WIDTH).toBe(1280)
+    expect(FRAME_CENTRED_MIN_WIDTH).toBeGreaterThan(FRAME_MIN_WIDTH)
+  })
+
   it('the block extractor finds the media blocks it is asked about (non-vacuity)', () => {
     expect(css.channel.length).toBeGreaterThan(500)
     expect(mediaBlock(css.channel, `min-width: ${NAV_EXPANDED_MIN_WIDTH}px`)).not.toBe('')
     expect(mediaBlock(css.channel, `min-width: ${FRAME_MIN_WIDTH}px`)).not.toBe('')
+    expect(mediaBlock(css.channel, `min-width: ${FRAME_CENTRED_MIN_WIDTH}px`)).not.toBe('')
     expect(mediaBlock(css.channel, 'min-width: 1px')).toBe('')
+    expect(minWidthQueries(css.channel)).toEqual([
+      NAV_EXPANDED_MIN_WIDTH,
+      FRAME_MIN_WIDTH,
+      FRAME_CENTRED_MIN_WIDTH,
+    ])
   })
 })
 
@@ -150,10 +216,37 @@ describe('three-column grid (SocialChannel.module.css)', () => {
     )
   })
 
-  it('is left-anchored (D1-013): start-justified, never auto-margin centered', () => {
-    const text = squash(css.channel)
-    expect(text).toContain('justify-content: start')
-    expect(text).not.toMatch(/margin:[^;]*auto/)
+  it('below 1280px the frame is left-anchored, as before (D1-013)', () => {
+    expect(frameValue(baseRules(css.channel), 'justify-content')).toBe('start')
+    expect(frameAt(1100)).toEqual({
+      columns: `${NAV_RAIL_WIDTH}px ${main}`,
+      justify: 'start',
+    })
+    expect(frameLeft(1100)).toBe(0)
+    // The full frame between 1184 and 1279px is still left-anchored.
+    expect(frameAt(1200).justify).toBe('start')
+    expect(frameLeft(FRAME_CENTRED_MIN_WIDTH - 1)).toBe(0)
+  })
+
+  it('from 1280px the full frame is centred like X (#495): 1440px leaves 128px each side', () => {
+    const block = squash(mediaBlock(css.channel, `min-width: ${FRAME_CENTRED_MIN_WIDTH}px`))
+    expect(block).toContain('justify-content: center')
+    // Centring changes no track: the 1280 block sets only the justification.
+    expect(block).not.toContain('grid-template-columns')
+
+    expect(frameAt(1440)).toEqual({
+      columns: `${NAV_RAIL_WIDTH}px ${main} ${RIGHT_RAIL_WIDTH}px`,
+      justify: 'center',
+    })
+    expect(trackTotal(frameAt(1440).columns)).toBe(FRAME_MIN_WIDTH)
+    const left = frameLeft(1440)
+    expect(left).toBe(128)
+    expect(1440 - FRAME_MIN_WIDTH - left).toBe(left)
+    expect(frameAt(FRAME_CENTRED_MIN_WIDTH).justify).toBe('center')
+  })
+
+  it('centres with the grid alone, never auto margins', () => {
+    expect(squash(css.channel)).not.toMatch(/margin:[^;]*auto/)
   })
 
   it('cannot scroll horizontally: a zero min track and overflow-x: clip', () => {
