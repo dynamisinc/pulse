@@ -176,6 +176,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useSyncExternalStore } from 'react'
+import { registerSessionReset } from '@/core/auth/sessionReset'
 import { setExerciseClock } from '@/core/clock'
 import { USE_MOCK_DATA } from '@/core/config/mockData'
 import { buildAndEmit } from '@/core/telemetry'
@@ -456,13 +457,17 @@ function authoritativeTier(server: PauseTierServerState): PauseTier {
 let resyncStarted = false
 
 /**
- * Whether a CONTROLLER has driven a tier change in this runtime. The in-flight
- * resync GET checks this before adopting: a response that lands after the
- * controller has already acted is stale and must never overwrite their newer
- * choice (nor drive the pausable clock behind it) — the same supersede rule the
- * POST's guarded revert uses.
+ * Bumped by everything that SUPERSEDES an in-flight server read: a controller's own
+ * tier change, and a session reset (sign-out / identity switch). A resync GET captures
+ * it when the request STARTS and adopts only if it is unchanged when the response
+ * lands — so a response that lands after the controller acted is stale and never
+ * overwrites their newer choice (nor drives the pausable clock behind it), the same
+ * supersede rule the POST's guarded revert uses; while an action taken BEFORE the GET
+ * started never blocks it (#534 Copilot: a once-set flag froze every later evaluator
+ * poll on a tab where a controller had acted). Never reset to 0, so a request from an
+ * earlier session can never match a later value.
  */
-let controllerActed = false
+let supersedeSequence = 0
 
 /**
  * Reads the server's pause tier and adopts it, silently (no telemetry, no POST). The live-mode
@@ -473,11 +478,12 @@ let controllerActed = false
  */
 export function refreshPauseTierFromServer(exerciseId: string): Promise<void> {
   if (USE_MOCK_DATA) return Promise.resolve()
+  const startedAt = supersedeSequence
   return fetchPauseTier()
     .then(server => {
-      // Superseded: the controller acted while the GET was in flight. Their
-      // choice is newer than this snapshot — never overwrite it.
-      if (controllerActed) return
+      // Superseded: the controller acted (or the session ended) while the GET was
+      // in flight. Their choice is newer than this snapshot — never overwrite it.
+      if (supersedeSequence !== startedAt) return
 
       // Never adopt a freeze the server itself reports as not applied.
       const adopted = applyTierSequenced(authoritativeTier(server))
@@ -523,11 +529,33 @@ export function resetPauseStateForTest(): void {
   if (storeState.tier === 'freeze') pausableExerciseClock.resume()
   storeState = { tier: 'running', overlayRegister: 'out-of-fiction', refusal: null }
   resyncStarted = false
-  controllerActed = false
+  supersedeSequence = 0
   engineModeBeforePause = null
   transitionSequence = 0
   emitStoreChange()
 }
+
+/**
+ * Sign-out / identity-switch reset (registered with `core/auth/sessionReset` below): the
+ * pause fact is a module singleton that lives as long as the TAB, so without this the next
+ * sign-in on the same tab would start from the previous session's tier, refusal notice and
+ * displaced engine position, and its console would skip the mount resync. Unlike the test
+ * reset it never rewinds the sequences — it ADVANCES both, so any request still in flight
+ * from the ended session is superseded (its result lands on nobody's console).
+ */
+function resetPauseStateForSession(): void {
+  if (storeState.tier === 'freeze') pausableExerciseClock.resume()
+  storeState = { tier: 'running', overlayRegister: 'out-of-fiction', refusal: null }
+  resyncStarted = false
+  engineModeBeforePause = null
+  transitionSequence++
+  supersedeSequence++
+  emitStoreChange()
+}
+
+// Registered with `core/auth` (which cannot import this feature) rather than called from
+// `endSession`; the unregister is tied to Vite's hot replacement of this module.
+registerSessionReset(resetPauseStateForSession, import.meta.hot)
 
 // ---------------------------------------------------------------------------
 // The hook
@@ -646,7 +674,7 @@ export function usePauseState(): PauseState {
       const applied = applyTierSequenced(next)
       if (!applied) return
       const { transition, sequence } = applied
-      controllerActed = true
+      supersedeSequence++
 
       // A new controller action clears any prior refusal notice — it described an
       // older attempt and must never sit over a newer, successful one.
