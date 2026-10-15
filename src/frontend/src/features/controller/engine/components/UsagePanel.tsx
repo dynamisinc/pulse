@@ -141,6 +141,8 @@ import {
   faTriangleExclamation,
   faXmark,
 } from '@fortawesome/free-solid-svg-icons'
+// D5 dark operator chrome: the shared token set (this file used to carry a stale local copy).
+import { consoleChrome as chrome } from '../../consoleChrome'
 import { useEngineSettings } from '../hooks/useEngineSettings'
 import {
   ENGINE_USAGE_WINDOW_PRESETS_MINUTES,
@@ -160,24 +162,6 @@ export const ENGINE_USAGE_PANEL_TITLE = 'AI generation usage'
 
 /** Flyout panel width — wider than the settings panel (a data-dense volume/cost view). */
 const PANEL_WIDTH_PX = 460
-
-/**
- * D5 dark operator-chrome tokens (matches `EngineSettingsPanel`'s/
- * `ReviewQueue`'s/`EngineControlBar`'s `chrome`).
- */
-const chrome = {
-  panel: '#0f1826',
-  card: '#111c2b',
-  cardBorder: '#1c2a3a',
-  line: '#28384b',
-  ink: '#e9eff7',
-  inkMuted: '#9db1c8',
-  inkFaint: '#63758b',
-  blue: '#4d97d1',
-  red: '#e42217',
-  amber: '#f5a623',
-  green: '#33a06f',
-} as const
 
 const WINDOW_LABELS: Record<number, string> = {
   1: '1 min',

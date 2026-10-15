@@ -20,6 +20,13 @@ import { alpha, createTheme } from '@mui/material/styles'
 
 // Extend MUI Theme interface with custom properties
 declare module '@mui/material/styles' {
+  interface TypeText {
+    /**
+     * COBRA muted text (demo-feedback 25, DF-37): secondary copy, hints, metadata. AA (>= 4.5:1)
+     * on white and on every light COBRA surface — see `COBRA_MUTED_TEXT`.
+     */
+    muted: string;
+  }
   interface Theme {
     cssStyling: {
       headerHeight: number;
@@ -139,6 +146,26 @@ declare module '@mui/material/Button' {
 const primaryContrastText = '#1a1a1a'
 
 /**
+ * The ONE COBRA muted-text value (demo-feedback 25, DF-37; #461 §1, #450 F-6; NFR-001).
+ *
+ * Cadence's `text.secondary` was #848482: 3.75:1 on white and 3.0:1 on `grid.main`, under the
+ * WCAG 2.1 AA 4.5:1 floor for normal text. Staff files worked around it with their own greys
+ * (#5c5c5a, #595957, #6b6b69). This value replaces those: 6.70:1 on white,
+ * 6.31:1 on `background.default`, 5.93:1 on `grid.light`, 5.44:1 on `grid.main`, 4.84:1 on
+ * `primary.light` (the "not started" chip) — `cobraTheme.contrast.test.ts` computes each one.
+ *
+ * `text.secondary` moves to the same value: MUI paints field labels, helper text and
+ * `color="text.secondary"` copy with it, so leaving it below AA would keep every new staff
+ * screen re-discovering the problem. `palette.text.muted` is the name staff code uses
+ * directly; `text.secondary` is the same token for MUI's own components.
+ *
+ * NOT for the dark console chrome (`features/controller/consoleChrome.ts` has its own inks)
+ * or the navy header (`staffShellTokens.header.textMuted`): a dark grey on a dark ground fails.
+ * Staff world only — participant surfaces never mount this theme.
+ */
+const COBRA_MUTED_TEXT = '#5c5c5a'
+
+/**
  * COBRA Breakpoints (staff / desktop-first surfaces).
  * Participant surfaces are mobile-first and define their own responsive rules.
  */
@@ -186,7 +213,8 @@ export const cobraTheme = createTheme({
     },
     text: {
       primary: '#1a1a1a',
-      secondary: '#848482',
+      secondary: COBRA_MUTED_TEXT,
+      muted: COBRA_MUTED_TEXT,
     },
     error: {
       main: '#e42217', // lava red
@@ -196,6 +224,8 @@ export const cobraTheme = createTheme({
       light: '#0000ff',
       dark: '#00008b',
     },
+    // A hairline, never text: decorative separators carry no contrast requirement (text uses
+    // `text.muted`). Kept at Cadence's grey so the staff chrome does not shift.
     divider: '#848482',
     success: {
       main: '#08682a',
@@ -203,7 +233,8 @@ export const cobraTheme = createTheme({
     buttonDelete: {
       contrastText: '#ffffff',
       dark: '#c11b17', // chilli pepper
-      light: '#ff0000',
+      // Hover fill. Was #ff0000 (white label 4.00:1, below AA — #461 §1); #d01f17 is 5.40:1.
+      light: '#d01f17',
       main: '#e42217', // lava red
     },
     buttonPrimary: {

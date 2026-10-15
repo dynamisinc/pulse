@@ -10,6 +10,7 @@
 import { Box, Stack, Typography, Chip, Button } from '@mui/material'
 import { useEvaluatorState } from '../../contexts/EvaluatorStateContext'
 import type { CoverageRowView } from '../../hooks/useMetrics'
+import { cobraTheme } from '@/theme/cobraTheme'
 
 const CHIP_STYLE: Record<CoverageRowView['chipVariant'], { border: string; background: string; color: string; dashed?: boolean }> = {
   addressed: { border: '#9ec9ab', background: '#eef7f0', color: '#256b43' },
@@ -30,7 +31,7 @@ export function CoveragePanel({ rows }: CoveragePanelProps) {
         <Typography sx={{ font: '800 11px ui-sans-serif,system-ui,sans-serif', letterSpacing: '.14em', color: '#4a4f55' }}>
           COVERAGE · MISSED OPPORTUNITIES
         </Typography>
-        <Typography sx={{ font: '500 11px ui-sans-serif,system-ui,sans-serif', color: '#848482' }}>
+        <Typography sx={{ font: '500 11px ui-sans-serif,system-ui,sans-serif', color: cobraTheme.palette.text.muted }}>
           unconfirmed items stay provisional and export as such until an evaluator confirms them
           (EVL-011)
         </Typography>
@@ -57,7 +58,7 @@ export function CoveragePanel({ rows }: CoveragePanelProps) {
             </Typography>
             <Box sx={{ flex: 1, minWidth: 0 }}>
               <Typography sx={{ font: '600 12px ui-sans-serif,system-ui,sans-serif' }}>{row.item.text}</Typography>
-              <Typography sx={{ font: '500 10.5px ui-sans-serif,system-ui,sans-serif', color: '#848482', mt: 0.25 }}>
+              <Typography sx={{ font: '500 10.5px ui-sans-serif,system-ui,sans-serif', color: cobraTheme.palette.text.muted, mt: 0.25 }}>
                 {row.item.sub}
               </Typography>
             </Box>
