@@ -98,8 +98,9 @@ Dates assume a demo on or near 2026-10-18; shift them if the date moves. 🧑 = 
   reactions. The biggest visual payoff for one story.
 - **`amplification/02`** — reposts appear in followers' feeds ("X reposted"), finishing
   `amplification/01` AC1.
-- **Exercise-creation UI** (`exercise-lifecycle-admin/01` frontend) — show setup as well as conduct.
-  Needs the Organization-tier Tier-2 sign-off first; the riskiest of the three.
+- ~~**Exercise-creation UI** (`exercise-lifecycle-admin/01` frontend)~~ — already shipped in #411
+  (`/staff/exercises`, merged 2026-08-03); controllers reach it too since demo-feedback DF-20. Still
+  needs the Organization-tier Tier-2 sign-off.
 
 ### Not in the demo
 
@@ -184,7 +185,7 @@ Built, reviewed and on `main`, but not Complete. Most need one observed round tr
 | `engine-telemetry-tuning/03` AI usage panel | #401 | The panel turns "0 calls, $0" into real numbers — after §8 |
 | `engine-telemetry-tuning/01` engine event types | #173 | Close-out pass: the taxonomy was ratified as built in #403/#405 |
 | `exercise-configuration/01–04` | #41 | Close-out pass: their status text predates #374's merge (it still says the umbrella has not merged) |
-| `staff-navigation/01–04`, `exercise-isolation/11`, `exercise-lifecycle-admin/01–03` | — | 🧑 **Tier-2 sign-off** on the Organization tier (customer-isolation boundary, backfill against live UAT data), then UAT. The exercise creation and list **frontend is not built** |
+| `staff-navigation/01–04`, `exercise-isolation/11`, `exercise-lifecycle-admin/01–03` | — | 🧑 **Tier-2 sign-off** on the Organization tier (customer-isolation boundary, backfill against live UAT data), then UAT. The exercise creation and list frontend **shipped in #411** (`/staff/exercises`); demo-feedback DF-20 admits controllers as well as planners and org admins |
 | `identity-auth-roles/01`, `persona-management/01–02` | #58, #53, #54 | Data and model seeded; the staff UIs were deferred |
 | `amplification/01` repost & quote | #101 | AC1 ("X reposted" in the audience's feed) moves to `amplification/02` |
 

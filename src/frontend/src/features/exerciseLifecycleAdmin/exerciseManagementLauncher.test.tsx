@@ -168,10 +168,11 @@ describe('the launcher is LIVE for a planner (no longer permanently degraded)', 
 
 describe('the degrade is intact for a single-surface role (the non-vacuity control)', () => {
   // The controller used to be a control here. Easy-login's participant-admin surface
-  // (Gate-2 W-3) gave the controller a second destination, so the controller flipped to a
-  // live launcher (asserted below) and the evaluator is the remaining single-surface role.
+  // (Gate-2 W-3) gave the controller a second destination, and demo-feedback seam S-3
+  // (DF-14) gave the evaluator the read-only console, so the org admin is the remaining
+  // single-surface role.
   it.each([
-    ['evaluator', '/staff/evaluate', 'stub-evaluator-dashboard'],
+    ['orgAdmin', '/staff/exercises', 'exercise-management-page'],
   ] as const)('a %s still gets the static lockup', async (role, path, surfaceTestId) => {
     // Without this control the cases above could be passing because the launcher
     // ALWAYS renders a button now — which would mean a one-destination menu that
@@ -186,7 +187,7 @@ describe('the degrade is intact for a single-surface role (the non-vacuity contr
 })
 
 describe('the launcher for a controller (easy-login participant-admin, Gate-2 W-3)', () => {
-  it('is live now: the controller has a second destination, Participants, under Administer', async () => {
+  it('is live now: the controller has Exercise Management and Participants under Administer', async () => {
     const user = userEvent.setup()
     renderTreeAt('controller', '/staff/console', '/staff/console')
     await screen.findByTestId('stub-controller-console')
@@ -198,8 +199,9 @@ describe('the launcher for a controller (easy-login participant-admin, Gate-2 W-
     expect(screen.getByTestId('surface-launcher-item-controller-console'))
       .toHaveAttribute('aria-current', 'page')
     expect(screen.getByTestId('surface-launcher-item-participant-admin')).toBeEnabled()
-    // Not the planner's or org admin's surfaces.
-    expect(screen.queryByTestId('surface-launcher-item-exercise-management')).not.toBeInTheDocument()
+    // DF-20 (seam S-4): controllers list and create exercises too.
+    expect(screen.getByTestId('surface-launcher-item-exercise-management')).toBeEnabled()
+    // Not the planner's workspace.
     expect(screen.queryByTestId('surface-launcher-item-planner-workspace')).not.toBeInTheDocument()
   })
 })

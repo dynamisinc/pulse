@@ -156,7 +156,10 @@ public sealed class OrgAdminSurfaceFamilyTests
         await AssertRoleIsRefusedAsync(ExerciseAdminRoles.Planner);
     }
 
-    /// <summary>AC5: a Controller is refused the org-admin family read.</summary>
+    /// <summary>
+    /// AC5: a Controller is refused the org-admin family read — still, after demo-feedback DF-20 let it create
+    /// and list exercises (story 15). The staff roster stays org-admin only.
+    /// </summary>
     [RequiresDockerFact]
     public async Task StaffAssignments_AsController_IsRefused()
     {

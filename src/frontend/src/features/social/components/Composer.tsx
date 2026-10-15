@@ -94,6 +94,7 @@ import {
   type UseComposePostResult,
 } from '../hooks/useComposePost'
 import { AttachButton, ComposerMediaTray } from './ComposerMedia'
+import { ParticipantTooltip } from './ParticipantTooltip'
 import styles from './Composer.module.css'
 
 export interface ComposerProps {
@@ -299,7 +300,9 @@ export function ComposerForm({
             onPick={compose.attachFiles}
             disabled={compose.isPublishing}
           />
-          <EmojiPickerButton {...emoji.buttonProps} className={styles.emojiButton} />
+          <ParticipantTooltip label="Add emoji">
+            <EmojiPickerButton {...emoji.buttonProps} className={styles.emojiButton} />
+          </ParticipantTooltip>
         </div>
 
         <div className={styles.meta}>

@@ -240,8 +240,8 @@ afterEach(() => {
 // ---------------------------------------------------------------------------
 
 describe('describeAnnouncement', () => {
-  const held = (reply: number, mention: number, like: number, events: number) =>
-    ({ events, amountByType: { reply, mention, like } })
+  const held = (reply: number, mention: number, like: number, events: number, repost = 0) =>
+    ({ events, amountByType: { reply, mention, like, repost } })
 
   it('says one noun when only one kind arrived, counting what arrived', () => {
     expect(describeAnnouncement(held(1, 0, 0, 1))).toBe('1 new reply')
@@ -249,6 +249,8 @@ describe('describeAnnouncement', () => {
     expect(describeAnnouncement(held(0, 1, 0, 1))).toBe('1 new mention')
     expect(describeAnnouncement(held(0, 3, 0, 3))).toBe('3 new mentions')
     expect(describeAnnouncement(held(0, 0, 5, 1))).toBe('5 new likes')
+    expect(describeAnnouncement(held(0, 0, 0, 1, 1))).toBe('1 new repost')
+    expect(describeAnnouncement(held(0, 0, 0, 2, 2))).toBe('2 new reposts')
   })
 
   it('says "notifications" when kinds are mixed, counting events', () => {
@@ -785,7 +787,11 @@ describe('stop / restart / reset', () => {
     await settle()
     stop()
     const stored = readPersisted(window.localStorage, KEY)
-    expect(stored.likes).toEqual([{ postId: 'm1', baseline: 2 }])
+    // demo-feedback DF-19: each post of mine keeps a like record and a `repost:`-keyed one.
+    expect(stored.likes).toEqual([
+      { postId: 'm1', baseline: 2 },
+      { postId: 'repost:m1', baseline: 0 },
+    ])
   })
 })
 
@@ -912,7 +918,8 @@ describe('state lives in localStorage and survives a closed tab (W-4)', () => {
 
     const stored = readPersisted(window.localStorage, KEY)
     expect(stored.readIds).toContain('r1') // tab A's mark survived tab B's write
-    expect(stored.likes.map(record => record.postId).sort()).toEqual(['fresh', 'm1'])
+    expect(stored.likes.map(record => record.postId).sort())
+      .toEqual(['fresh', 'm1', 'repost:fresh', 'repost:m1'])
   })
 })
 

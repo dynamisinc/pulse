@@ -23,10 +23,10 @@ using Pulse.WebApi.Features.EngineRuntime;
 /// </para>
 /// <para>
 /// <b>Two instances, one class, and they deliberately do not nest.</b>
-/// <see cref="ExerciseAdministrators"/> admits <c>planner</c> and <c>orgAdmin</c> (creation + the org-scoped
-/// exercise list); <see cref="OrgAdminOnly"/> admits <c>orgAdmin</c> alone (the org-admin surface family's own
-/// reads, COR-076 — a planner is refused, which is exactly what makes <c>orgAdmin</c> a separate family rather
-/// than a larger staff role). Both instances are immutable and stateless, so they are shared singletons
+/// <see cref="ExerciseAdministrators"/> admits <c>planner</c>, <c>orgAdmin</c> and (demo-feedback DF-20)
+/// <c>controller</c> (creation + the org-scoped exercise list); <see cref="OrgAdminOnly"/> admits <c>orgAdmin</c>
+/// alone (the org-admin surface family's own reads, COR-076 — a planner or controller is refused, which is
+/// exactly what makes <c>orgAdmin</c> a separate family rather than a larger staff role). Both instances are immutable and stateless, so they are shared singletons
 /// attached at the mapping call site with <c>AddEndpointFilter(filter)</c> — no DI registration.
 /// </para>
 /// <para>
@@ -44,8 +44,8 @@ public sealed class OrgAdminAuthorizationFilter : IEndpointFilter
     private OrgAdminAuthorizationFilter(IReadOnlySet<string> admittedRoles) => _admittedRoles = admittedRoles;
 
     /// <summary>
-    /// Admits <c>planner</c> and <c>orgAdmin</c> — the exercise-administration endpoints (COR-074 creation,
-    /// COR-075 list). A controller or evaluator session is refused with <c>403</c>.
+    /// Admits <c>planner</c>, <c>orgAdmin</c> and (DF-20) <c>controller</c> — the exercise-administration
+    /// endpoints (COR-074 creation, COR-075 list). An evaluator session is refused with <c>403</c>.
     /// </summary>
     public static OrgAdminAuthorizationFilter ExerciseAdministrators { get; } =
         new(ExerciseAdminRoles.ExerciseAdministrators);

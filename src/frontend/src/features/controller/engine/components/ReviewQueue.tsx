@@ -60,6 +60,15 @@ import { DraftDisposition, type EngineReviewItem } from '../models/reviewContrac
 import { useReviewQueue } from '../hooks/useReviewQueue'
 // D5 dark operator-chrome tokens (README §"Design Tokens"). Staff-only.
 import { consoleChrome as chrome } from '../../consoleChrome'
+import { useCanControl } from '../../access'
+
+/** The queue's one-line explanation. A non-controller (story 11 L-1) is not told to press keys. */
+const REVIEW_HINT_CONTROLLER =
+  'Engine drafts awaiting your call — approve (A) or veto (V). Expired timers hold the draft ' +
+  'for you; nothing posts without a decision.'
+const REVIEW_HINT_READ_ONLY =
+  "Engine drafts awaiting a controller's call. Expired timers hold the draft; nothing posts " +
+  'without a decision.'
 
 export interface ReviewQueueEditSlotProps {
   /** The burst being edited. */
@@ -132,6 +141,8 @@ function isReviewable(item: EngineReviewItem): boolean {
 }
 
 export function ReviewQueue({ editSlot }: ReviewQueueProps = {}) {
+  // Story 11 (DF-14): a non-controller reads the cards; every decision (A/V/E/R/B) is absent.
+  const canControl = useCanControl()
   const queue = useReviewQueue()
   const { items, nowMs, pendingCount, heldCount, timersUnder60sCount } = queue
   // Common-fields-only read (handle/displayName/avatar) — no `personaType`, so
@@ -206,6 +217,7 @@ export function ReviewQueue({ editSlot }: ReviewQueueProps = {}) {
         return
       }
 
+      if (!canControl) return
       const key = event.key.toLowerCase()
       if (key === 'b') {
         event.preventDefault()
@@ -246,7 +258,10 @@ export function ReviewQueue({ editSlot }: ReviewQueueProps = {}) {
           break
       }
     },
-    [editingItem, items, focusIndex, focusCard, runBatchApprove, toggleSelected, queue, editSlot],
+    [
+      editingItem, items, focusIndex, focusCard, runBatchApprove, toggleSelected, queue, editSlot,
+      canControl,
+    ],
   )
 
   const submitEdit = useCallback(
@@ -292,7 +307,7 @@ export function ReviewQueue({ editSlot }: ReviewQueueProps = {}) {
             REVIEW QUEUE
           </Typography>
           <Box sx={{ flex: 1 }} />
-          <Box
+          {canControl && <Box
             component="button"
             type="button"
             data-testid="batch-approve"
@@ -316,7 +331,7 @@ export function ReviewQueue({ editSlot }: ReviewQueueProps = {}) {
           >
             <FontAwesomeIcon icon={faListCheck} aria-hidden="true" />
             Batch approve [B]
-          </Box>
+          </Box>}
         </Stack>
 
         <Typography
@@ -339,8 +354,7 @@ export function ReviewQueue({ editSlot }: ReviewQueueProps = {}) {
         </Typography>
 
         <Typography sx={{ mt: 0.5, fontSize: 10.5, color: chrome.inkFaint, lineHeight: 1.4 }}>
-          Engine drafts awaiting your call — approve (A) or veto (V). Expired timers hold the draft
-          for you; nothing posts without a decision.
+          {canControl ? REVIEW_HINT_CONTROLLER : REVIEW_HINT_READ_ONLY}
         </Typography>
       </Box>
 
@@ -452,6 +466,7 @@ function ReviewCard({
   onEdit,
   onReroll,
 }: ReviewCardProps) {
+  const canControl = useCanControl()
   const isHeld = item.disposition === DraftDisposition.Held
   const reviewable = isReviewable(item)
   const avatarPersona: AvatarPersona = persona ?? fallbackAvatar(item.leadPersonaHandle)
@@ -482,7 +497,7 @@ function ReviewCard({
     >
       <Stack direction="row" sx={{ alignItems: 'flex-start', gap: 1 }}>
         {/* Batch-selection toggle */}
-        <Box
+        {canControl && <Box
           component="button"
           type="button"
           data-testid="select-toggle"
@@ -492,7 +507,7 @@ function ReviewCard({
           sx={{ mt: 0.25, bgcolor: 'transparent', border: 'none', p: 0, cursor: 'pointer', color: selected ? chrome.blue : chrome.inkFaint }}
         >
           <FontAwesomeIcon icon={selected ? faSquareCheck : faSquare} aria-hidden="true" />
-        </Box>
+        </Box>}
 
         <Box sx={{ mt: 0.25, flex: 'none' }}>
           <Avatar persona={avatarPersona} size={34} />
@@ -538,7 +553,7 @@ function ReviewCard({
           <CountdownRow countdown={countdown} isHeld={isHeld} />
 
           {/* Action row — only on the focused, reviewable card */}
-          {focused && reviewable && (
+          {canControl && focused && reviewable && (
             <Stack direction="row" data-testid="card-actions" sx={{ gap: 0.5, mt: 1, flexWrap: 'wrap' }}>
               <ActionButton icon={faCheck} label="Approve" hint="A" tone={chrome.green} onClick={e => { e.stopPropagation(); onApprove() }} />
               <ActionButton icon={faXmark} label="Veto" hint="V" tone={chrome.red} onClick={e => { e.stopPropagation(); onVeto() }} />

@@ -33,6 +33,10 @@
  *      reset the same way so a sign-in on the same tab never inherits the last session's.
  *      Also a leaf module (no imports).
  *
+ *   4b. FORGET THE LIVE ENGAGEMENT COUNTS (demo-feedback story 14): `postCountsStore` holds the
+ *      newest pushed `PostEngagementChanged` frame per post, a tab-lived singleton like the two
+ *      above, so one identity's numbers never decorate the next sign-in's cards. A leaf module too.
+ *
  *   5. RUN THE FEATURES' REGISTERED RESETS (`./sessionReset`, Wave 3 Gate-2 A L-5): state a
  *      feature keeps at module level for the life of the tab - the controller composer's unsent
  *      drafts and its unresolved "did that post go out?" questions - registers its reset
@@ -61,6 +65,7 @@
 import { queryClient } from '../services/queryClient'
 import { ownPostStore } from '@/features/social/services/ownPostStore'
 import { removedPosts } from '@/features/social/services/removedPosts'
+import { postCountsStore } from '@/features/social/services/postCountsStore'
 import { resetReplyIntent } from '@/features/social/services/replyIntent'
 import { logout } from './logout'
 import { runSessionResets } from './sessionReset'
@@ -87,6 +92,7 @@ export function resetClientSession(): void {
   queryClient.clear()
   ownPostStore.reset()
   removedPosts.reset()
+  postCountsStore.reset()
   resetReplyIntent()
   runSessionResets()
 }

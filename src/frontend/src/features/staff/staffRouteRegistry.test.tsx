@@ -148,22 +148,24 @@ describe('STAFF_ROUTE_REGISTRY — the participant-admin entry (easy-login, Gate
     }
   })
 
-  it('gives the controller a SECOND surface, which un-degrades the launcher for them', () => {
+  it('gives the controller more than one surface, which un-degrades the launcher for them', () => {
+    // DF-20 (seam S-4) adds exercise-management to the controller's set.
     expect(staffRoutesForRole(STAFF_ROUTE_REGISTRY, 'controller').map(e => e.id))
-      .toEqual(['controller-console', 'participant-admin'])
+      .toEqual(['controller-console', 'exercise-management', 'participant-admin'])
   })
 })
 
 describe('STAFF_ROUTE_REGISTRY — the exercise-management entry (COR-074/075/076)', () => {
   const entry = STAFF_ROUTE_REGISTRY.find(candidate => candidate.id === 'exercise-management')
 
-  it('mirrors the SERVER gate exactly: planner and orgAdmin, nobody else', () => {
-    // The server's `ExerciseAdminRoles.ExerciseAdministrators` admits planner OR
-    // orgAdmin to both `/api/org/exercises` routes. Listing a role here the API
-    // 403s would show that role a surface that cannot load; omitting one would
-    // hide a surface its holder is entitled to. Asserted as an exact set.
+  it('mirrors the SERVER gate exactly: planner, orgAdmin and controller, nobody else', () => {
+    // The server's `ExerciseAdminRoles.ExerciseAdministrators` admits planner, orgAdmin
+    // and (DF-20, demo-feedback story 15) controller to both `/api/org/exercises`
+    // routes. Listing a role here the API 403s would show that role a surface that
+    // cannot load; omitting one would hide a surface its holder is entitled to.
+    // Asserted as an exact set.
     expect(entry).toBeDefined()
-    expect([...(entry?.allowedRoles ?? [])].sort()).toEqual(['orgAdmin', 'planner'])
+    expect([...(entry?.allowedRoles ?? [])].sort()).toEqual(['controller', 'orgAdmin', 'planner'])
   })
 
   it('is the org-admin family home page, and does NOT displace the planner’s', () => {
@@ -184,11 +186,30 @@ describe('STAFF_ROUTE_REGISTRY — the exercise-management entry (COR-074/075/07
     expect(staffRoutesForRole(STAFF_ROUTE_REGISTRY, 'planner').length).toBeGreaterThanOrEqual(2)
   })
 
-  it('files itself under Administer, and is invisible to controller and evaluator', () => {
+  it('files itself under Administer, is offered to the controller, and is invisible to the evaluator', () => {
     expect(entry?.group).toBe('administer')
-    for (const role of ['controller', 'evaluator'] as const) {
-      expect(staffRoutesForRole(STAFF_ROUTE_REGISTRY, role).map(e => e.id))
-        .not.toContain('exercise-management')
-    }
+    expect(staffRoutesForRole(STAFF_ROUTE_REGISTRY, 'controller').map(e => e.id))
+      .toContain('exercise-management')
+    expect(staffRoutesForRole(STAFF_ROUTE_REGISTRY, 'evaluator').map(e => e.id))
+      .not.toContain('exercise-management')
+    // The controller's home page does not move.
+    expect(resolveDefaultStaffRoute(STAFF_ROUTE_REGISTRY, 'controller')?.id)
+      .toBe('controller-console')
+  })
+})
+
+describe('STAFF_ROUTE_REGISTRY — the controller-console entry (demo-feedback seam S-3, DF-14)', () => {
+  const entry = STAFF_ROUTE_REGISTRY.find(candidate => candidate.id === 'controller-console')
+
+  it('admits the evaluator read-only, but stays the controller’s home page only', () => {
+    expect([...(entry?.allowedRoles ?? [])].sort()).toEqual(['controller', 'evaluator'])
+    expect(entry?.isDefaultFor).toEqual(['controller'])
+    expect(resolveDefaultStaffRoute(STAFF_ROUTE_REGISTRY, 'evaluator')?.id)
+      .toBe('evaluator-dashboard')
+  })
+
+  it('lists the console in the evaluator’s launcher', () => {
+    expect(staffRoutesForRole(STAFF_ROUTE_REGISTRY, 'evaluator').map(e => e.id))
+      .toEqual(['controller-console', 'evaluator-dashboard'])
   })
 })

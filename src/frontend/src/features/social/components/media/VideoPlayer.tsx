@@ -104,6 +104,7 @@ import {
   requestElementFullscreen,
 } from './fullscreen'
 import { MediaFallbackTile } from './MediaFallbackTile'
+import { ParticipantTooltip } from '../ParticipantTooltip'
 import { UNPLAYABLE_VIDEO_MESSAGE } from './mediaCopy'
 import { SEEK_STEP_SECONDS, mediaAlt, singleMediaAspectRatio } from './mediaLayout'
 import { claimPlayback, pauseActivePlayback, releasePlayback } from './playbackCoordinator'
@@ -423,42 +424,48 @@ export function VideoPlayer({
 
         {!failed && (
           <div className={styles.corner}>
-            <button
-              type="button"
-              className={styles.control}
-              aria-label="Mute"
-              aria-pressed={muted}
-              data-testid="video-mute-toggle"
-              onClick={toggleMute}
-            >
-              <FontAwesomeIcon icon={muted ? faVolumeXmark : faVolumeHigh} aria-hidden="true" />
-            </button>
-            {variant === 'inline' && (
+            <ParticipantTooltip label="Mute">
               <button
                 type="button"
                 className={styles.control}
-                aria-label={fullscreen ? 'Exit full screen' : 'Expand'}
-                data-testid="video-expand"
-                onClick={() => void toggleFullscreen()}
+                aria-label="Mute"
+                aria-pressed={muted}
+                data-testid="video-mute-toggle"
+                onClick={toggleMute}
               >
-                <FontAwesomeIcon icon={fullscreen ? faCompress : faExpand} aria-hidden="true" />
+                <FontAwesomeIcon icon={muted ? faVolumeXmark : faVolumeHigh} aria-hidden="true" />
               </button>
+            </ParticipantTooltip>
+            {variant === 'inline' && (
+              <ParticipantTooltip label={fullscreen ? 'Exit full screen' : 'Expand'}>
+                <button
+                  type="button"
+                  className={styles.control}
+                  aria-label={fullscreen ? 'Exit full screen' : 'Expand'}
+                  data-testid="video-expand"
+                  onClick={() => void toggleFullscreen()}
+                >
+                  <FontAwesomeIcon icon={fullscreen ? faCompress : faExpand} aria-hidden="true" />
+                </button>
+              </ParticipantTooltip>
             )}
           </div>
         )}
       </div>
 
       {!failed && (
-        <button
-          type="button"
-          className={`${styles.control} ${styles.playToggle}`}
-          aria-label="Play"
-          aria-pressed={playing}
-          data-testid="video-play-toggle"
-          onClick={togglePlay}
-        >
-          <FontAwesomeIcon icon={playing ? faPause : faPlay} aria-hidden="true" />
-        </button>
+        <ParticipantTooltip label="Play">
+          <button
+            type="button"
+            className={`${styles.control} ${styles.playToggle}`}
+            aria-label="Play"
+            aria-pressed={playing}
+            data-testid="video-play-toggle"
+            onClick={togglePlay}
+          >
+            <FontAwesomeIcon icon={playing ? faPause : faPlay} aria-hidden="true" />
+          </button>
+        </ParticipantTooltip>
       )}
     </div>
   )

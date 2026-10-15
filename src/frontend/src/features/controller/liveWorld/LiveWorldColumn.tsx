@@ -147,6 +147,7 @@ import { liveWorldTokens, monoMeta, srOnly } from './liveWorldStyles'
 import { useLiveWorldFeed } from './useLiveWorldFeed'
 import { defaultPinChangeSource, type PinChangeSource } from './pinChangeSource'
 import { useLiveWorldUnread, useMarkReadWhenSeen } from './useLiveWorldUnread'
+import { useCanControl } from '../access'
 
 /** A scroll offset (px) at or below which the list counts as "at the top". */
 const TOP_THRESHOLD_PX = 4
@@ -259,6 +260,7 @@ function LiveWorldPanel({
   source,
   pinChangeSource = defaultPinChangeSource,
 }: LiveWorldPanelProps) {
+  const canControl = useCanControl()
   const { personas, loading: personasLoading, error: personasError } = usePersonas()
   const personaById = useMemo(
     () => new Map<string, Persona>(personas.map(persona => [persona.id, persona])),
@@ -519,7 +521,7 @@ function LiveWorldPanel({
       const next = rows[rows.indexOf(row) + (key === 'j' ? 1 : -1)]
       event.preventDefault()
       next?.focus()
-    } else if (key === 'r') {
+    } else if (key === 'r' && canControl) {
       const found = visible.find(item => item.entry.view.id === row.dataset.postId)
       if (found === undefined) return
       const post = toLiveWorldPost(found.entry.view, found.persona, found.entry.pinnedForAll)
@@ -533,7 +535,7 @@ function LiveWorldPanel({
       event.preventDefault()
       showNew(true)
     }
-  }, [visible, handleReply, pendingCount, showNew])
+  }, [visible, handleReply, pendingCount, showNew, canControl])
 
   const clearFilter = useCallback(() => {
     setFilter(ALL_POSTS_FILTER)
