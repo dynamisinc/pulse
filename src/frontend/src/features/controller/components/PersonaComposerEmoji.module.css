@@ -25,7 +25,11 @@
  *   --emoji-font          typography.fontFamily
  *
  * `.button` is the face-smile trigger drawn as a round COBRA secondary (outlined
- * cobalt) icon button, matching the composer's Upload / From library buttons.
+ * cobalt) icon button, matching the composer's Upload / From library buttons and
+ * mirroring `CobraSecondaryButton`'s states: border/icon `buttonPrimary.main`, hover
+ * `linkButton.light` fill with a `buttonPrimary.light` border, active
+ * `buttonPrimary.dark` fill with a `buttonPrimary.contrastText` icon (also pinned by
+ * the test).
  */
 
 .picker {
@@ -61,6 +65,11 @@
 .button[aria-expanded='true'] {
   background: #dbe9fa;
   border-color: #0000ff;
+}
+
+.button:active {
+  background: #00008b;
+  color: #ffffff;
 }
 
 .button:focus-visible {

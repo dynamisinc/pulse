@@ -62,10 +62,16 @@ with the COBRA skin
 - [`features/controller/components/PersonaComposer.emoji.test.tsx`](../../../src/frontend/src/features/controller/components/PersonaComposer.emoji.test.tsx)
   (composer mounted in the real `PersonaDockHost`): the face-smile button under the persona text field with the COBRA
   skin classes (not the participant skin); insert at the caret (focus kept, caret after the emoji, typing continues
-  there) and over a selection; the counter counts the emoji, can go over the limit, and Post is then disabled;
+  there) and over a selection; the counter counts the emoji, can go over the limit, and Post (enabled at the limit)
+  is then disabled;
   keyboard: Enter on the button opens with focus in the search box, arrows move the active emoji, typing searches,
-  Enter inserts and never fires the post; Escape (in the picker, and on the open trigger) closes only the picker,
+  Enter inserts; Ctrl/Cmd+Enter in the search box inserts and never posts (`onPublished` spy, with the same chord
+  from the text field as the positive control); Escape (in the picker, and on the open trigger) closes only the picker,
   returns focus to the text field with its selection intact and does **not** close the dock, while the next Escape
   from the text field still does; **no `fetch` and no `XMLHttpRequest` during picker use (spies)**; the skin sets
   **every** `--emoji-*` property the picker reads (both sets parsed from the stylesheets on disk), each value equals
-  the `cobraTheme` entry it mirrors, and the text/edge/ring pairs meet WCAG AA contrast.
+  the `cobraTheme` entry it mirrors, and the text/edge/ring pairs meet WCAG AA contrast; the trigger's rest, hover/open,
+  active and focus colours mirror `CobraSecondaryButton`'s; the button follows the text field in document order.
+- [`features/controller/components/PersonaComposer.emoji.inFlight.test.tsx`](../../../src/frontend/src/features/controller/components/PersonaComposer.emoji.inFlight.test.tsx)
+  (live mode, a hand-settled `publishPost`): while a post is out the button is disabled and a picker that was open
+  closes; once it settles the button works again and the picker stays closed.

@@ -18,7 +18,12 @@
  *  - the COBRA skin sets EVERY `--emoji-*` property the picker reads (both sets are
  *    parsed from the stylesheets on disk, so a property added to the picker later
  *    fails here until the skin sets it), each value is the COBRA palette entry it
- *    claims to mirror, and the text/edge pairs meet WCAG AA contrast.
+ *    claims to mirror, and the text/edge pairs meet WCAG AA contrast; the trigger's
+ *    rest / hover / active / focus colours mirror `CobraSecondaryButton`'s.
+ *  - Ctrl/Cmd+Enter in the picker's search box inserts the emoji and never posts (the
+ *    `onPublished` spy; the same chord from the text field does post).
+ * The in-flight lock (button disabled, an open picker closed while a post is out) is
+ * in `PersonaComposer.emoji.inFlight.test.tsx` (it needs the live-mode module mocks).
  */
 import { useState, type ReactNode } from 'react'
 import { render, screen, waitFor, within } from '@testing-library/react'
@@ -33,6 +38,7 @@ import { resetTelemetryBuffer } from '@/core/telemetry'
 import { contrastRatio } from '@/test/contrast'
 import { readSrcFile } from '@/test/readSource'
 import type { StaffPersona } from '@/features/personas'
+import type { Post } from '@/features/social'
 import { PersonaDockHost } from '../console/personaDockHost.tsx'
 import { composeAsPersonaDraftStore } from '../hooks/useComposeAsPersona'
 import { PersonaComposer } from './PersonaComposer'
@@ -69,8 +75,14 @@ function Providers({ children }: { children: ReactNode }) {
   )
 }
 
+interface DockOptions {
+  readonly onClose?: () => void
+  readonly onPublished?: (post: Post) => void
+  readonly charLimit?: number
+}
+
 /** The composer mounted in the real persona dock (whose Escape closes it). */
-async function renderInDock(onClose: () => void = () => {}, charLimit?: number) {
+async function renderInDock({ onClose = () => {}, onPublished, charLimit }: DockOptions = {}) {
   render(
     <Providers>
       <PersonaDockHost
@@ -83,6 +95,7 @@ async function renderInDock(onClose: () => void = () => {}, charLimit?: number) 
               actingHumanId="human-ctl-7"
               callSign="SIMCELL-3"
               {...(charLimit !== undefined ? { charLimit } : {})}
+              {...(onPublished !== undefined ? { onPublished } : {})}
             />
           ),
         }}
@@ -122,8 +135,12 @@ afterEach(() => {
 describe('PersonaComposer — emoji picker (story 12b)', () => {
   it('has a face-smile button under the text field, with the COBRA skin', async () => {
     const user = userEvent.setup()
-    await renderInDock()
+    const input = await renderInDock()
     const button = emojiButton()
+    // After the text field in document (and so Tab) order.
+    expect(
+      input.compareDocumentPosition(button) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
     expect(button.querySelector('svg.fa-face-smile')).toHaveAttribute('aria-hidden', 'true')
     expect(button).toHaveClass(skinClass('button'))
 
@@ -164,9 +181,15 @@ describe('PersonaComposer — emoji picker (story 12b)', () => {
 
   it('replaces a selection, and emoji can push the draft over the limit', async () => {
     const user = userEvent.setup()
-    const input = await renderInDock(undefined, 10)
+    const input = await renderInDock({ charLimit: 10 })
 
     await user.type(input, 'Stay safe!')
+    // Positive control: at the limit (10 of 10) Post is still available.
+    expect(screen.getByTestId('char-counter')).toHaveAttribute(
+      'aria-label',
+      '0 characters remaining',
+    )
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Post' })).toBeEnabled())
     input.setSelectionRange(5, 9)
     await user.click(emojiButton())
     await user.keyboard('folded{Enter}')
@@ -192,8 +215,9 @@ describe('PersonaComposer — emoji picker (story 12b)', () => {
   })
 
   it('is keyboard-operable: Enter opens, typing searches, arrows move, Enter inserts', async () => {
+    const onPublished = vi.fn<(post: Post) => void>()
     const user = userEvent.setup()
-    const input = await renderInDock()
+    const input = await renderInDock({ onPublished })
     await user.type(input, 'Rain ')
 
     emojiButton().focus()
@@ -220,15 +244,31 @@ describe('PersonaComposer — emoji picker (story 12b)', () => {
 
     expect(input).toHaveValue('Rain ☔')
     expect(input).toHaveFocus()
-    // Enter in the picker never fires the post.
-    expect(screen.queryByTestId('publishing')).not.toBeInTheDocument()
+
+    // Ctrl/Cmd+Enter in the search box - the form's "post now" chord - inserts the
+    // active emoji instead: the picker keeps it from reaching the form.
+    await user.click(emojiButton())
+    await user.keyboard('fire')
+    await user.keyboard('{Control>}{Enter}{/Control}')
+    expect(input).toHaveValue('Rain ☔🔥')
+    await user.click(emojiButton())
+    await user.keyboard('thumbs')
+    await user.keyboard('{Meta>}{Enter}{/Meta}')
+    expect(input).toHaveValue('Rain ☔🔥👍')
+    expect(onPublished).not.toHaveBeenCalled()
     expect(screen.queryByTestId('publish-success')).not.toBeInTheDocument()
+
+    // The same chord from the text field does post (so the spy above could catch one).
+    expect(input).toHaveFocus()
+    await user.keyboard('{Control>}{Enter}{/Control}')
+    await waitFor(() => expect(onPublished).toHaveBeenCalledTimes(1))
+    expect(onPublished.mock.calls[0]?.[0]?.text).toBe('Rain ☔🔥👍')
   })
 
   it('Escape closes only the picker and returns focus to the text field, never the dock', async () => {
     const onClose = vi.fn()
     const user = userEvent.setup()
-    const input = await renderInDock(onClose)
+    const input = await renderInDock({ onClose })
 
     await user.type(input, 'Boil water notice')
     input.setSelectionRange(5, 10)
@@ -293,6 +333,24 @@ function ruleBody(css: string, selector: string): string {
   return match[1]
 }
 
+/**
+ * The value of `property` in the first rule whose selector LIST contains `selector`
+ * (so `.button:hover` is found in `.button:hover, .button[aria-expanded='true'] {...}`).
+ */
+function declaration(css: string, selector: string, property: string): string {
+  for (const rule of stripComments(css).matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+    const selectors = (rule[1] ?? '').split(',').map(part => part.trim())
+    if (!selectors.includes(selector)) continue
+    for (const decl of (rule[2] ?? '').split(';')) {
+      const colon = decl.indexOf(':')
+      if (colon < 0) continue
+      if (decl.slice(0, colon).trim() !== property) continue
+      return decl.slice(colon + 1).trim().toLowerCase()
+    }
+  }
+  throw new Error(`${selector} { ${property} } not found`)
+}
+
 /** Every `--emoji-*` name the picker reads through `var(...)`. */
 function emojiPropertiesRead(css: string): string[] {
   const names = new Set<string>()
@@ -342,6 +400,27 @@ describe('PersonaComposerEmoji.module.css — the COBRA picker skin (story 12b)'
         value: expected[name]?.toLowerCase(),
       })
     }
+  })
+
+  it("draws the trigger in CobraSecondaryButton's colours (rest, hover/open, active, focus)", () => {
+    const { buttonPrimary, linkButton } = cobraTheme.palette
+    const at = (selector: string, property: string) => declaration(skinCss, selector, property)
+    const main = buttonPrimary.main.toLowerCase()
+
+    expect(at('.button', 'border')).toBe(`1px solid ${main}`)
+    expect(at('.button', 'color')).toBe(main)
+    for (const selector of ['.button:hover', ".button[aria-expanded='true']"]) {
+      expect(at(selector, 'background')).toBe(linkButton.light.toLowerCase())
+      expect(at(selector, 'border-color')).toBe(buttonPrimary.light.toLowerCase())
+    }
+    expect(at('.button:active', 'background')).toBe(buttonPrimary.dark.toLowerCase())
+    expect(at('.button:active', 'color')).toBe(buttonPrimary.contrastText.toLowerCase())
+    expect(at('.button:focus-visible', 'outline')).toBe(`2px solid ${main}`)
+
+    // The icon is a graphic: >= 3:1 on the dock's white, on the hover tint, and pressed.
+    expect(contrastRatio(main, cobraTheme.palette.background.paper)).toBeGreaterThanOrEqual(3)
+    expect(contrastRatio(main, linkButton.light)).toBeGreaterThanOrEqual(3)
+    expect(contrastRatio(buttonPrimary.contrastText, buttonPrimary.dark)).toBeGreaterThanOrEqual(3)
   })
 
   it('meets WCAG AA: text 4.5:1 and the search edge / focus ring 3:1', () => {

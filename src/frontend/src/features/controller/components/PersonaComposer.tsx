@@ -74,7 +74,9 @@
  * EMOJI (demo-feedback 12b, DF-15): the shared `core/emoji` face-smile button under the
  * text field opens the picker in flow below it; a pick goes in at the caret (or over the
  * selection) and counts toward the limit like any character. Its Escape closes only the
- * picker and returns focus to the text field (never the dock). COBRA skin:
+ * picker and returns focus to the text field (never the dock). Ctrl/Cmd+Enter in the
+ * picker's search box inserts the active emoji; it does not post. While a post is in
+ * flight the button is disabled and an open picker closes. COBRA skin:
  * `PersonaComposerEmoji.module.css`. No network: the emoji set is bundled text.
  *
  * INPUTS, NOT IMPORTS (Wave-1 parallel-build contract): `activePersona`
