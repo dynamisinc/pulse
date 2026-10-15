@@ -468,10 +468,15 @@ public sealed class ConstantChromeConfigProjection : IChromeConfigProjection
     };
 
     /// <inheritdoc />
+    /// <remarks>
+    /// The banners stay constant; <see cref="ChromeConfigResponse.Watermark"/> (demo-feedback/01) is the exercise's
+    /// stored <c>WatermarkEnabled</c> even here, so the media-marking flag is never a constant that disagrees with
+    /// the exercise's real NFR-008 state.
+    /// </remarks>
     public Task<ChromeConfigResponse> ProjectAsync(ExerciseShellConfigSource source, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(source);
-        return Task.FromResult(Constant);
+        return Task.FromResult(Constant with { Watermark = source.WatermarkEnabled });
     }
 }
 

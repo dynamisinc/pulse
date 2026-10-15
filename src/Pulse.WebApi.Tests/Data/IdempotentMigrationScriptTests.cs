@@ -44,6 +44,9 @@ public class IdempotentMigrationScriptTests
     /// <summary>The last migration before demo-polish B1 — the shape UAT holds when the demo backend deploys.</summary>
     private const string BeforeDemoPolish = "20260802124443_ExerciseCreatedAt";
 
+    /// <summary>The last migration before demo-feedback/01 — the shape UAT holds when the 10/20 feedback cut deploys.</summary>
+    private const string BeforeDemoFeedback = "20261013144332_EasyLoginSchema";
+
     private readonly MsSqlContainerFixture _fixture;
 
     public IdempotentMigrationScriptTests(MsSqlContainerFixture fixture)
@@ -113,6 +116,55 @@ public class IdempotentMigrationScriptTests
 
         (await database.AppliedMigrationsAsync()).Should().BeEquivalentTo(database.AllMigrations());
         await AssertDemoPolishSchemaOverLegacyRowsAsync(database, postId, personaId);
+    }
+
+    [RequiresDockerFact]
+    public async Task TheDeployScript_BringsUpDemoFeedback_OverLegacyRows_AndReplaysAsANoOp()
+    {
+        // demo-feedback/01 (lesson #413): the UAT shape on deploy day — an exercise, a post and a run-sheet item written
+        // before the pin / import-key / noise schema existed — taken forward by the SCRIPT, batch by batch.
+        await using var database = await ScriptDatabase.CreateAsync(_fixture);
+        await database.MigrateToAsync(BeforeDemoFeedback);
+
+        var exerciseId = await database.InsertTenantExerciseAsync();
+        var postId = await database.InsertLegacyPostAsync();
+        var injectItemId = await database.InsertLegacyInjectItemAsync(exerciseId);
+        var script = database.GenerateIdempotentScript();
+
+        // Both filtered indexes name a column this same migration adds, so each must reach the batch inside EXEC(N'…')
+        // — compiled only when it runs, after the ALTER that creates the column (#413).
+        script.Should().Contain("EXEC(N'CREATE INDEX [IX_Posts_ExerciseId_PinnedForAllAt]")
+            .And.Contain("EXEC(N'CREATE UNIQUE INDEX [IX_InjectItems_ExerciseId_ExternalRef]");
+
+        await database.ApplyScriptAsync(script);
+
+        (await database.AppliedMigrationsAsync()).Should().BeEquivalentTo(
+            database.AllMigrations(),
+            "the demo-feedback batch must compile and run in the script, not just under Migrate()");
+        await AssertDemoFeedbackSchemaOverLegacyRowsAsync(database, exerciseId, postId, injectItemId);
+
+        // The deploy re-applies the same script on every merge: a second apply must be a no-op.
+        await database.ApplyScriptAsync(script);
+
+        (await database.AppliedMigrationsAsync()).Should().BeEquivalentTo(database.AllMigrations());
+        await AssertDemoFeedbackSchemaOverLegacyRowsAsync(database, exerciseId, postId, injectItemId);
+    }
+
+    private static async Task AssertDemoFeedbackSchemaOverLegacyRowsAsync(
+        ScriptDatabase database, Guid exerciseId, Guid postId, Guid injectItemId)
+    {
+        (await database.TableExistsAsync("NoisePosts")).Should().BeTrue("the script must create [NoisePosts]");
+
+        (await database.ScalarAsync<string>($"SELECT [NoiseLevel] FROM [Exercises] WHERE [Id] = '{exerciseId}';"))
+            .Should().Be("off", "an existing exercise reads NoiseLevel = 'off' through the column DEFAULT");
+        (await database.ScalarAsync<int>(
+                $"SELECT COUNT(*) FROM [Posts] WHERE [Id] = '{postId}' AND [Body] = N'Legacy post' " +
+                "AND [PinnedForAllAt] IS NULL AND [PinnedForAllByHumanId] IS NULL;"))
+            .Should().Be(1, "an existing post survives untouched and is not pinned for everyone");
+        (await database.ScalarAsync<int>(
+                $"SELECT COUNT(*) FROM [InjectItems] WHERE [Id] = '{injectItemId}' AND [Title] = N'Legacy item' " +
+                "AND [ExternalRef] IS NULL;"))
+            .Should().Be(1, "an existing run-sheet item survives untouched with no MSEL reference");
     }
 
     private static async Task AssertDemoPolishSchemaOverLegacyRowsAsync(ScriptDatabase database, Guid postId, Guid personaId)
@@ -285,6 +337,45 @@ public class IdempotentMigrationScriptTests
                         N'participant', N'human-legacy', SYSDATETIMEOFFSET());
                 """);
             return id;
+        }
+
+        /// <summary>
+        /// Inserts one exercise via raw SQL in the post-tenant-tier, pre-demo-feedback schema (no <c>NoiseLevel</c>).
+        /// </summary>
+        public async Task<Guid> InsertTenantExerciseAsync()
+        {
+            var id = Guid.NewGuid();
+            await ExecuteNonQueryAsync(ConnectionString, $"""
+                INSERT INTO [Exercises] ([Id], [OrganizationId], [Name], [TimeZone], [Status])
+                VALUES ('{id}', '{Organization.DefaultOrganizationId}', N'Legacy Exercise {id:N}', N'UTC', N'live');
+                """);
+            return id;
+        }
+
+        /// <summary>Inserts one run-sheet item via raw SQL in the pre-demo-feedback schema (no <c>ExternalRef</c>).</summary>
+        public async Task<Guid> InsertLegacyInjectItemAsync(Guid exerciseId)
+        {
+            var id = Guid.NewGuid();
+            await ExecuteNonQueryAsync(ConnectionString, $"""
+                INSERT INTO [InjectItems] ([Id], [ExerciseId], [Kind], [Title], [Order], [Status], [Version],
+                                           [CreatedByHumanId], [CreatedAt], [UpdatedAt], [ShiftSeconds])
+                VALUES ('{id}', '{exerciseId}', N'post', N'Legacy item', 1, N'pending', 1, '{Guid.NewGuid()}',
+                        SYSDATETIMEOFFSET(), SYSDATETIMEOFFSET(), 0);
+                """);
+            return id;
+        }
+
+        /// <summary>Runs a scalar query — raw SQL, independent of the entity model.</summary>
+        public async Task<T> ScalarAsync<T>(string sql)
+        {
+            await using var connection = new SqlConnection(ConnectionString);
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText = sql;
+            var value = await command.ExecuteScalarAsync();
+            return value is T typed
+                ? typed
+                : throw new InvalidOperationException($"Expected a {typeof(T).Name} from: {sql}");
         }
 
         /// <summary>Inserts one persona via raw SQL in the pre-demo-polish schema (no avatar/banner/location).</summary>
