@@ -63,6 +63,21 @@
  * host (the ⌘K palette) can react to the selection itself (e.g. closing the
  * overlay) without this component needing to know anything about the host.
  *
+ * ## Exercise switch (demo-feedback 24, #542; #450 F-1)
+ * The console does not remount when the controller switches exercise (the
+ * scope commits in place), so this picker stays mounted across a switch. Its
+ * default list comes from `useStaffPersonas()`, which is keyed by the active
+ * exercise: the previous exercise's personas disappear in the render the scope
+ * changes and the new exercise's list replaces them without a reload. On top of
+ * that the picker itself:
+ *  - only treats the shared `activePersona` as SELECTED (the ACTIVE badge) while
+ *    that exact persona - same id AND same exercise - is in the list it is
+ *    showing. A persona selected in the exercise just left is therefore never
+ *    presented as the current selection under the new one, even though the
+ *    route-level `ActivePersonaProvider` (not owned here) still remembers it;
+ *  - resets its keyboard highlight to the top of the new list, so Enter can
+ *    never act on a row position carried over from the old one.
+ *
  * World: staff (COBRA console) — `@/theme/styledComponents` (CobraTextField)
  * + FontAwesome only; never participant-surface chrome (XC-002). This
  * component never touches a post or the participant-visible feed — it is
@@ -200,6 +215,20 @@ export function PersonaPicker({
   const [highlightedIndex, setHighlightedIndex] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
 
+  // The selection the picker SHOWS: the shared active persona, but only while
+  // that persona (same id, same exercise) is in the list on screen - see the
+  // module header's "Exercise switch". A persona left over from the previous
+  // exercise is cleared from view rather than badged in the new one.
+  const selectedPersonaId = useMemo(() => {
+    if (!activePersona) return null
+    const match = candidatePersonas.find(persona => persona.id === activePersona.id)
+    if (!match) return null
+    return match.exerciseId === activePersona.exerciseId ? match.id : null
+  }, [activePersona, candidatePersonas])
+  // Which exercise the list on screen belongs to (every persona in one read
+  // shares it). Used only to reset the keyboard highlight on a switch.
+  const listExerciseId = candidatePersonas[0]?.exerciseId
+
   const normalizedQuery = searchQuery.trim().toLowerCase()
   const isBrowsing = normalizedQuery === '' && typeFilter === 'all'
 
@@ -256,10 +285,11 @@ export function PersonaPicker({
 
   // The visible list changes shape on every keystroke/filter change — reset
   // the highlight to the top rather than let it point at a row that just
-  // scrolled out of the filtered set.
+  // scrolled out of the filtered set. An exercise switch replaces the list
+  // wholesale (possibly with one of the same length), so it resets too.
   useEffect(() => {
     setHighlightedIndex(0)
-  }, [flatRows.length, typeFilter, normalizedQuery])
+  }, [flatRows.length, typeFilter, normalizedQuery, listExerciseId])
 
   useEffect(() => {
     if (autoFocus) inputRef.current?.focus()
@@ -417,7 +447,7 @@ export function PersonaPicker({
                       key={row.persona.id}
                       row={row}
                       highlighted={index === highlightedIndex}
-                      isActive={activePersona?.id === row.persona.id}
+                      isActive={selectedPersonaId === row.persona.id}
                       onSelect={() => handleSelect(row.persona)}
                       onTogglePin={() => togglePinned(row.persona.id)}
                     />
