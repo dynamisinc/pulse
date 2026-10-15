@@ -36,3 +36,22 @@ Hiding Import for evaluators (11). Column mapping UI. Bursts from a spreadsheet.
 
 Preview → report rendering (failed first, skipped collapsed); apply; 400 reason; #493 label position and contrast
 (computed style or a DOM-order assertion); dialog focus and Escape.
+
+All in `src/frontend/src/features/controller/runSheet/` (Vitest + RTL, against the run sheet's mocks).
+
+- **AC-1 toolbar + dialog:** `import/RunSheetImportDialog.test.tsx` › "puts Import from Excel right after Add",
+  "opens a modal dialog with an .xlsx/.csv picker, the hint and Preview", "checks the file before upload"
+- **AC-2 preview:** `import/RunSheetImportDialog.test.tsx` › "posts a dry run and shows the counts and the rows, failed
+  first, skipped collapsed"; `import/importReport.test.ts` (ordering, counts, wording, client file check);
+  `import/importService.test.ts` (`POST /injects/import`, multipart `file`, `dryRun` always explicit, fail-closed
+  parse, no `exerciseId`)
+- **AC-3 apply + 400:** `import/RunSheetImportDialog.test.tsx` › "re-posts the same file with dryRun=false, shows the
+  result, Done closes, the sheet updates", "shows the server's reason on a 400…", "…when the import itself is
+  refused…", "a 409 asks to run the import again"; `import/importService.test.ts` (400 → server `detail`)
+- **AC-4 #493:** `RunSheetField.test.tsx` (label is a `<label for>` before the input box, no notch, computed colour
+  ≥ 4.5:1 on `panel`/`card`/`bg` at rest, focused and in error; every field of the "New scripted item" form)
+- **AC-5 mock adapter:** `import/importMock.test.ts` (refusals, dry run writes nothing, apply creates items in the
+  queue the poll reads, re-import never duplicates); `import/importService.test.ts` › `getInjectImportService`
+- **A11y:** `import/RunSheetImportDialog.test.tsx` › "starts with focus inside the dialog…", "Escape closes the
+  dialog", "run-sheet shortcuts do not fire from inside the dialog", "the result table has a caption and column
+  headers"
