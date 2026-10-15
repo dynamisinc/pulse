@@ -1,6 +1,6 @@
 # Story: Live world: pin for everyone and unread highlighting
 
-**Feature:** Demo feedback cut (10/20)  ·  **Phase:** 1  ·  **Status:** Not Started
+**Feature:** Demo feedback cut (10/20)  ·  **Phase:** 1  ·  **Status:** In Review
 **Requirements:** live-monitoring (lite), feeds-discovery (new: Pinned)  ·  **Decisions:** DF-7  ·  **Issue:** #504
 **Stack:** frontend  ·  **World:** staff  ·  **Review:** Tier-1  ·  **Priority:** Must  ·  **Wave:** 2  ·  **Effort:** M
 

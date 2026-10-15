@@ -1,6 +1,6 @@
 # Story: Console: white-noise knob and Export
 
-**Feature:** Demo feedback cut (10/20)  ·  **Phase:** 1  ·  **Status:** Not Started
+**Feature:** Demo feedback cut (10/20)  ·  **Phase:** 1  ·  **Status:** In Review
 **Requirements:** ambient chatter (lite), AAR export (lite)  ·  **Decisions:** DF-8, DF-12, DF-13  ·  **Issue:** #505
 **Stack:** frontend  ·  **World:** staff  ·  **Review:** Tier-1  ·  **Priority:** Must  ·  **Wave:** 2  ·  **Effort:** M
 

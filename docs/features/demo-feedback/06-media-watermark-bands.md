@@ -1,6 +1,6 @@
 # Story: EXERCISE bands on all participant media
 
-**Feature:** Demo feedback cut (10/20)  ·  **Phase:** 1  ·  **Status:** Not Started
+**Feature:** Demo feedback cut (10/20)  ·  **Phase:** 1  ·  **Status:** In Review
 **Requirements:** NFR-008  ·  **Decisions:** DF-3, DF-4  ·  **Issue:** #502 (closes #456 item 1)
 **Stack:** frontend  ·  **World:** participant  ·  **Review:** Tier-1  ·  **Priority:** Must  ·  **Wave:** 2  ·  **Effort:** M
 
