@@ -76,7 +76,9 @@
  *    presented as the current selection under the new one, even though the
  *    route-level `ActivePersonaProvider` (not owned here) still remembers it;
  *  - resets its keyboard highlight to the top of the new list, so Enter can
- *    never act on a row position carried over from the old one.
+ *    never act on a row position carried over from the old one;
+ *  - shows a "Loading personas…" status row (`persona-picker-loading`) while
+ *    the new list loads, never the "No personas match" empty state.
  *
  * World: staff (COBRA console) — `@/theme/styledComponents` (CobraTextField)
  * + FontAwesome only; never participant-surface chrome (XC-002). This
@@ -101,6 +103,7 @@ import {
   faCloudSun,
   faMagnifyingGlass,
   faNewspaper,
+  faSpinner,
   faThumbtack,
   faTriangleExclamation,
   faUser,
@@ -192,7 +195,11 @@ export function PersonaPicker({
   onSelect,
   autoFocus = true,
 }: PersonaPickerProps) {
-  const { personas: resolvedPersonas, error: resolveError } = useStaffPersonas()
+  const {
+    personas: resolvedPersonas,
+    loading: resolveLoading,
+    error: resolveError,
+  } = useStaffPersonas()
   const candidatePersonas = personasProp ?? resolvedPersonas
   // Only the DEFAULT (hook) data source can fail; a host-supplied `personas`
   // prop has already resolved. Surfaced explicitly so a failed staff read
@@ -200,6 +207,10 @@ export function PersonaPicker({
   // fail-closed state must be visible, never quietly indistinguishable from
   // an empty result (see `resolveStaffPersonas`).
   const resolutionFailed = personasProp === undefined && resolveError !== undefined
+  // The default list is still loading (first open, or the new exercise's list
+  // after a switch): say so, rather than "No personas match this search", which
+  // would read as an empty cast.
+  const resolutionLoading = personasProp === undefined && !resolutionFailed && resolveLoading
 
   const {
     activePersona,
@@ -411,7 +422,22 @@ export function PersonaPicker({
           </Stack>
         )}
 
-        {!resolutionFailed && flatRows.length === 0 && (
+        {resolutionLoading && flatRows.length === 0 && (
+          <Stack
+            component="li"
+            direction="row"
+            role="status"
+            data-testid="persona-picker-loading"
+            sx={{ alignItems: 'center', gap: 0.75, px: 1, py: 1.5, listStyle: 'none' }}
+          >
+            <FontAwesomeIcon icon={faSpinner} spin size="sm" />
+            <Typography sx={{ fontSize: 12.5, color: 'text.secondary' }}>
+              Loading personas…
+            </Typography>
+          </Stack>
+        )}
+
+        {!resolutionFailed && !resolutionLoading && flatRows.length === 0 && (
           <Typography
             data-testid="persona-picker-empty"
             sx={{ px: 1, py: 1.5, fontSize: 12.5, color: 'text.secondary' }}

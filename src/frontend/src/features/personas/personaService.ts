@@ -36,10 +36,11 @@
  * mock follow-edge store on every request rather than serving the frozen
  * seed-time number (WR-005 — see `withMockFollowEdges`).
  *
- * The STAFF hook is nonetheless KEYED client-side by the active exercise id
+ * Both hooks are nonetheless KEYED client-side by the active exercise id
  * (demo-feedback 24): not to scope the request (the server still does that), but
  * so an in-place exercise switch in the console discards the previous
- * exercise's list and re-reads, instead of serving it until a reload.
+ * exercise's list and re-reads, instead of serving it until a reload. (On a
+ * participant path the scope never changes, so the key is a no-op there.)
  *
  * CONTRACT v2 (demo-polish F0, implementation.md §1.5.6 / §1.11): both reads
  * accept the OPTIONAL `avatarUrl` / `bannerUrl` / `location` (validated only when
@@ -55,7 +56,11 @@
 import { useEffect, useState, useSyncExternalStore } from 'react'
 import type { AxiosAdapter } from 'axios'
 import { api } from '@/core/services/api'
-import { useExerciseContext } from '@/core/exerciseContext'
+// The LEAF module, not the `@/core/exerciseContext` barrel: dozens of test files
+// mock the barrel with only `useExerciseContext`, and reading a missing export
+// from a vitest module mock throws. The leaf keeps those suites on the real,
+// provider-less (unkeyed) path. The hook is the same one the barrel re-exports.
+import { useOptionalExerciseContext } from '@/core/exerciseContext/exerciseContext'
 import { USE_MOCK_DATA } from '@/core/config/mockData'
 // MOCK-SCAFFOLD-ONLY dependency (WR-005 — see `withMockFollowEdges` below). It
 // is consumed exclusively inside the `USE_MOCK_PERSONAS` adapters, mirroring
@@ -361,25 +366,37 @@ export function invalidatePersonas(): void {
  * the switcher re-resolves the scope IN PLACE (`useSetActiveExercise` ->
  * `useExerciseScopeRefresh`). A persona hook keyed on nothing kept serving the
  * exercise the controller had just left until a reload, so the ⌘K picker listed
- * the old cast and `ControllerConsole.openComposer` (whose `findExercisePersona`
+ * the old cast, `ControllerConsole.openComposer` (whose `findExercisePersona`
  * rejects a persona of another exercise) fell back to the palette for every
- * persona of the new one (#450 F-1). Reading the id here keys the store on it.
+ * persona of the new one (#450 F-1), and the docked review queue mapped the new
+ * exercise's drafts onto the old exercise's persona records. Reading the id here
+ * keys both persona reads on it.
  *
- * WHY TOLERANT. `useExerciseContext()` throws outside a provider (fail-closed,
- * COR-001). The persona hooks are also mounted in isolation (component tests, a
- * picker handed a cast), where there is no scope to key on: those keep the
- * previous, unkeyed behaviour. The ONLY thing `useExerciseContext()` can throw is
- * that missing-provider error, and it calls `useContext` before throwing, so the
- * hook call order is identical either way (a component cannot move in or out of
- * a provider without remounting). In the app every staff surface sits under the
- * provider (`features/app-shell/routes.tsx`), so the key is always present there.
+ * WHY OPTIONAL. The persona hooks are also mounted in isolation (component
+ * tests, a picker handed a cast), where there is no scope to key on: those keep
+ * the previous, unkeyed behaviour. `useOptionalExerciseContext()` is a plain
+ * `useContext` read that never throws. In the app every surface sits under the
+ * provider (`features/app-shell/routes.tsx`), so the key is always present
+ * there; on a participant path it never changes, so keying is a no-op.
  */
 function useActiveExerciseIdIfScoped(): string | undefined {
-  try {
-    return useExerciseContext().exerciseId
-  } catch {
-    return undefined
-  }
+  return useOptionalExerciseContext()?.exerciseId
+}
+
+/**
+ * Whether a resolved list answers for `scopeKey`. A persona carrying ANOTHER
+ * exercise's id means the server's session scope has already moved on (a switch
+ * landed server-side before this client re-resolved its scope): the list is not
+ * this exercise's and must not be shown under it. A persona with no `exerciseId`
+ * is accepted (the wire may omit it — same rule as the console's
+ * `findExercisePersona`); an unkeyed read (`scopeKey === undefined`) accepts all.
+ */
+function answersForScope(personas: readonly Persona[], scopeKey: string | undefined): boolean {
+  if (scopeKey === undefined) return true
+  return personas.every(persona => {
+    const personaExerciseId: string | undefined = persona.exerciseId
+    return personaExerciseId === undefined || personaExerciseId === scopeKey
+  })
 }
 
 /** The resolution state, stamped with the exercise it was loaded for. */
@@ -421,6 +438,8 @@ function unloadedState<T extends Persona>(
  *    DROPPED, never committed (and even if one were, the stamp would hide it).
  *  - A first read for the new exercise that FAILS leaves the list empty (fail
  *    closed); the previous exercise's list is never kept as a fallback.
+ *  - A read whose personas carry ANOTHER exercise's id is dropped and the
+ *    state reads as unloaded (see `answersForScope`).
  */
 function usePersonaResolution<T extends Persona>(
   resolve: () => Promise<T[]>,
@@ -444,6 +463,13 @@ function usePersonaResolution<T extends Persona>(
         // `cancelled`: the exercise switched (or the hook re-ran / unmounted)
         // while this read was in flight - it answers for a scope we have left.
         if (cancelled) return
+        // A list for another exercise is dropped, not shown: the state reads as
+        // UNLOADED for this exercise (empty + loading) — the scope refresh that
+        // follows a server-side switch re-keys the hook and reads again.
+        if (!answersForScope(resolved, scopeKey)) {
+          setState(unloadedState(scopeKey))
+          return
+        }
         setState({ scopeKey, personas: resolved, error: undefined, settled: true })
       })
       .catch((err: unknown) => {
@@ -481,9 +507,14 @@ function usePersonaResolution<T extends Persona>(
  * components that need only the common fields (name/handle/avatar/verified)
  * may use this too; anything that reads the archetype must use
  * {@link useStaffPersonas}.
+ *
+ * Keyed by the active exercise like the staff read (demo-feedback 24 Gate-1
+ * M-1): the console's docked review queue reads this one and does not remount
+ * on a switch. A no-op on a participant path, where the scope never changes.
  */
 export function usePersonas(): UsePersonasResult {
-  return usePersonaResolution(resolvePersonas, undefined)
+  const exerciseId = useActiveExerciseIdIfScoped()
+  return usePersonaResolution(resolvePersonas, exerciseId)
 }
 
 /**

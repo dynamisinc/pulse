@@ -12,11 +12,13 @@
  *    screen once B is active;
  *  - a persona selected in A is no longer shown as selected (no ACTIVE badge)
  *    under B, and the keyboard highlight is on B's first row;
+ *  - while B's list loads the picker shows a loading row, never the "No
+ *    personas match this search" empty state (Gate-1 S-2);
  *  - the selection check is by persona AND exercise: a same-id persona served
  *    for another exercise (the mock cast is identical in every exercise) is not
  *    badged as the selection either.
  *
- * `useExerciseContext` is mocked with a mutable scope; `api.get` answers with
+ * `useOptionalExerciseContext` is mocked with a mutable scope; `api.get` answers with
  * the cast of whichever exercise is active when the read is issued.
  */
 import type { ReactNode } from 'react'
@@ -32,8 +34,9 @@ import { PersonaPicker } from './PersonaPicker'
 
 const scope = vi.hoisted(() => ({ exerciseId: 'ex-a' }))
 
-vi.mock('@/core/exerciseContext', () => ({
-  useExerciseContext: () => ({
+vi.mock('@/core/exerciseContext/exerciseContext', async importOriginal => ({
+  ...(await importOriginal<typeof import('@/core/exerciseContext/exerciseContext')>()),
+  useOptionalExerciseContext: () => ({
     exerciseId: scope.exerciseId,
     exerciseName: 'Ex',
     timeZone: 'UTC',
@@ -134,6 +137,40 @@ describe('PersonaPicker — exercise switch (default data source)', () => {
     })
     expect(onSelect).toHaveBeenCalledTimes(1)
     expect(onSelect.mock.calls[0]?.[0]).toMatchObject({ id: 'b-1', exerciseId: 'ex-b' })
+  })
+})
+
+describe('PersonaPicker — loading state (Gate-1 S-2)', () => {
+  it('shows a loading row, not the empty-search message, while B\'s list loads', async () => {
+    const { rerender } = render(<Frame><PersonaPicker autoFocus={false} /></Frame>)
+    await screen.findByTestId('persona-picker-option-a-1')
+
+    // B's read is held open.
+    let releaseB: () => void = () => {}
+    vi.mocked(api.get).mockImplementationOnce(() => new Promise<GetResult>(resolve => {
+      releaseB = () => resolve({ data: CASTS['ex-b'] } as GetResult)
+    }))
+    scope.exerciseId = 'ex-b'
+    rerender(<Frame><PersonaPicker autoFocus={false} /></Frame>)
+
+    expect(screen.getByTestId('persona-picker-loading')).toHaveTextContent('Loading personas')
+    expect(screen.getByRole('status')).toBeInTheDocument()
+    expect(screen.queryByTestId('persona-picker-empty')).not.toBeInTheDocument()
+    expect(optionIds()).toEqual([])
+
+    await act(async () => releaseB())
+    expect(optionIds()).toEqual(['b-1', 'b-2'])
+    expect(screen.queryByTestId('persona-picker-loading')).not.toBeInTheDocument()
+  })
+
+  it('shows the empty-search message once loaded, not the loading row', async () => {
+    const user = userEvent.setup()
+    render(<Frame><PersonaPicker /></Frame>)
+    await screen.findByTestId('persona-picker-option-a-1')
+    await user.type(screen.getByTestId('persona-picker-search'), 'zzz-no-match')
+
+    expect(screen.getByTestId('persona-picker-empty')).toBeInTheDocument()
+    expect(screen.queryByTestId('persona-picker-loading')).not.toBeInTheDocument()
   })
 })
 

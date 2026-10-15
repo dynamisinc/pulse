@@ -15,26 +15,28 @@
  *  - a FAILED first read for B leaves the list empty (never A's list);
  *  - `invalidatePersonas()` (persona edit, Live world's unknown-author refresh)
  *    still re-reads, keeping the current exercise's list on screen meanwhile;
+ *  - a list whose personas carry ANOTHER exercise's id is dropped: the hook
+ *    reads as unloaded rather than show it (Gate-1 L-2);
+ *  - the participant `usePersonas()` read is keyed the same way (Gate-1 M-1);
  *  - with no exercise provider above it the hook still works, unkeyed.
  *
- * `useExerciseContext` is mocked at its module boundary with a mutable scope,
+ * `useOptionalExerciseContext` is mocked at its module boundary with a mutable scope,
  * and `api.get` is driven with deferred promises so arrival order is explicit.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { api } from '@/core/services/api'
-import { invalidatePersonas, useStaffPersonas } from './personaService'
+import { invalidatePersonas, usePersonas, useStaffPersonas } from './personaService'
 import type { StaffPersona } from './types'
 
 const scope = vi.hoisted(() => ({ exerciseId: 'ex-a', missingProvider: false }))
 
-vi.mock('@/core/exerciseContext', () => ({
-  useExerciseContext: () => {
-    if (scope.missingProvider) {
-      throw new Error('useExerciseContext() must be called within an <ExerciseContextProvider>.')
-    }
-    return { exerciseId: scope.exerciseId, exerciseName: 'Ex', timeZone: 'UTC', status: 'live' }
-  },
+vi.mock('@/core/exerciseContext/exerciseContext', async importOriginal => ({
+  ...(await importOriginal<typeof import('@/core/exerciseContext/exerciseContext')>()),
+  useOptionalExerciseContext: () =>
+    scope.missingProvider
+      ? undefined
+      : { exerciseId: scope.exerciseId, exerciseName: 'Ex', timeZone: 'UTC', status: 'live' },
 }))
 
 function staffPersona(id: string, exerciseId: string, displayName = `Persona ${id}`): StaffPersona {
@@ -171,6 +173,66 @@ describe('useStaffPersonas — keyed by the active exercise', () => {
     expect(reads).toHaveLength(3)
     await act(async () => read(2).resolve(A_PERSONAS))
     expect(ids(result.current.personas)).toEqual(['a-1', 'a-2'])
+  })
+})
+
+describe('a list for another exercise is dropped (Gate-1 L-2)', () => {
+  it('does not show A\'s personas when the read under B answers with them', async () => {
+    scope.exerciseId = 'ex-b'
+    const { result } = renderHook(() => useStaffPersonas())
+    // The server's session is still (or already) in A: its answer is not B's cast.
+    await act(async () => read(0).resolve(A_PERSONAS))
+
+    expect(result.current.personas).toEqual([])
+    expect(result.current.loading).toBe(true)
+    expect(result.current.error).toBeUndefined()
+  })
+
+  it('drops a mixed list too: one foreign persona is enough', async () => {
+    scope.exerciseId = 'ex-b'
+    const { result } = renderHook(() => useStaffPersonas())
+    await act(async () => read(0).resolve([...B_PERSONAS, staffPersona('a-9', 'ex-a')]))
+
+    expect(result.current.personas).toEqual([])
+  })
+
+  it('a refetch answered for another exercise empties the list instead of swapping it in', async () => {
+    scope.exerciseId = 'ex-b'
+    const { result } = renderHook(() => useStaffPersonas())
+    await act(async () => read(0).resolve(B_PERSONAS))
+    expect(ids(result.current.personas)).toEqual(['b-1'])
+
+    act(() => invalidatePersonas())
+    await act(async () => read(1).resolve(A_PERSONAS))
+
+    expect(result.current.personas).toEqual([])
+    expect(result.current.loading).toBe(true)
+  })
+
+  it('accepts personas that carry no exerciseId (the wire may omit it)', async () => {
+    scope.exerciseId = 'ex-b'
+    const { result } = renderHook(() => useStaffPersonas())
+    const { exerciseId: _omitted, ...withoutExercise } = staffPersona('b-7', 'ex-b')
+    await act(async () => read(0).resolve([withoutExercise]))
+
+    expect(ids(result.current.personas)).toEqual(['b-7'])
+  })
+})
+
+describe('usePersonas (participant projection) — keyed the same way (Gate-1 M-1)', () => {
+  it('switching A -> B discards A and loads B', async () => {
+    const { result, rerender } = renderHook(() => usePersonas())
+    await act(async () => read(0).resolve(A_PERSONAS))
+    expect(result.current.personas.map(p => p.id)).toEqual(['a-1', 'a-2'])
+
+    scope.exerciseId = 'ex-b'
+    rerender()
+    expect(result.current.personas).toEqual([])
+
+    await act(async () => read(1).resolve(B_PERSONAS))
+    expect(result.current.personas.map(p => p.id)).toEqual(['b-1'])
+    // Still the participant projection: no archetype tell.
+    expect(result.current.personas[0]).not.toHaveProperty('personaType')
   })
 })
 
