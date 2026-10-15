@@ -34,7 +34,8 @@ import { postStore } from '@/features/social/services/postStore'
 import { removedPosts } from '@/features/social/services/removedPosts'
 import { reviewStore } from '../engine/services/reviewStore'
 import { engineControlStore, useEngineControl } from '../engine/hooks/useEngineControl'
-import { engineSettingsStore } from '../engine/hooks/useEngineSettings'
+import { engineSettingsStore, MOCK_ENGINE_SETTINGS } from '../engine/hooks/useEngineSettings'
+import type { EngineSettingsAutonomy } from '../engine/services/engineSettingsActions'
 import { composeAsPersonaDraftStore } from '../hooks/useComposeAsPersona'
 import { resetPauseStateForTest } from '../hooks/usePauseState'
 import { resetNoiseMockForTest } from '../noise/noiseMock'
@@ -42,9 +43,16 @@ import { injectMock, MOCK_DEMO_SEED, MOCK_ME } from '../runSheet/injectMock'
 import type { InjectItemWrite } from '../runSheet/types'
 import { ControllerConsoleRoute } from '../ControllerConsoleRoute'
 import { resetSessionRole, setSessionRole } from '../lifecycle/lifecycle.sessionKit.testUtils'
+import { useReadOnlyRefresh } from './useReadOnlyRefresh'
 
 // Whole-console renders (MUI + emotion + several feature trees) are slow on a loaded box.
 vi.setConfig({ testTimeout: 60_000 })
+
+// The real polling hook, behind a spy, so a case can tell whether the console mounted it (L-A).
+vi.mock('./useReadOnlyRefresh', async importOriginal => {
+  const actual = await importOriginal<typeof import('./useReadOnlyRefresh')>()
+  return { ...actual, useReadOnlyRefresh: vi.fn(actual.useReadOnlyRefresh) }
+})
 
 vi.mock('@/core/auth/sessionResolver', async importOriginal => ({
   ...(await importOriginal<typeof import('@/core/auth/sessionResolver')>()),
@@ -172,6 +180,14 @@ async function degradeEngine(): Promise<void> {
   hook.unmount()
 }
 
+/** Seeds the mock exercise's engine settings with this autonomy (the server's view). */
+function serverAutonomy(autonomy: Partial<EngineSettingsAutonomy>): void {
+  engineSettingsStore.setForTests('ex-mock-0001', {
+    ...MOCK_ENGINE_SETTINGS,
+    autonomy: { ...MOCK_ENGINE_SETTINGS.autonomy, ...autonomy },
+  })
+}
+
 /** Lets anything a key press MIGHT have started actually start before asserting it did not. */
 async function quiet(): Promise<void> {
   await act(async () => {
@@ -295,12 +311,61 @@ describe('what an evaluator keeps', () => {
     expect(within(readout).queryByRole('button')).not.toBeInTheDocument()
   })
 
+  it.each([
+    [
+      'generation stopped (the local kill switch still says live)',
+      { generationStopped: true, safetyClampActive: true, effectiveLevel: null },
+      'stop',
+      'ENGINE · STOPPED',
+    ],
+    [
+      'a safety clamp with no degraded reason (the kill switch at Suggest-only)',
+      { safetyClampActive: true, degradedReason: null, effectiveLevel: 'suggest' },
+      'suggest-only',
+      'ENGINE · SUGGEST-ONLY',
+    ],
+    [
+      'a degraded clamp (L-G)',
+      { safetyClampActive: true, degradedReason: 'provider timeouts', effectiveLevel: 'suggest' },
+      'live',
+      'ENGINE · LIVE (SUGGEST) (DEGRADED)',
+    ],
+  ] as const)('M-A: the readout follows the server, not the local store: %s', async (
+    _case,
+    autonomy,
+    mode,
+    label,
+  ) => {
+    serverAutonomy(autonomy)
+    await renderConsole('evaluator')
+    // The local kill-switch store was never touched: it still seeds 'live'.
+    expect(engineControlStore.getSnapshot('ex-mock-0001').mode).toBe('live')
+    const readout = screen.getByTestId('engine-mode-readout')
+    expect(readout).toHaveAttribute('data-mode', mode)
+    expect(readout).toHaveTextContent(label)
+  })
+
   it('an evaluator reads the pause tier as a non-interactive status', async () => {
     await renderConsole('evaluator')
     const readout = screen.getByTestId('pause-readout')
     expect(readout.tagName).toBe('SPAN')
     expect(readout).toHaveAttribute('role', 'status')
     expect(readout).toHaveTextContent('Pause state: RUNNING')
+  })
+
+  it('L-E: a controller gets the pause pill, not the readout', async () => {
+    await renderConsole('controller')
+    expect(screen.getByTestId('pause-pill')).toBeInTheDocument()
+    expect(screen.queryByTestId('pause-readout')).not.toBeInTheDocument()
+  })
+
+  it.each([
+    ['controller', false],
+    ['evaluator', true],
+  ] as const)('L-A: a %s console mounts the read-only refresh: %s', async (role, mounted) => {
+    vi.mocked(useReadOnlyRefresh).mockClear()
+    await renderConsole(role)
+    expect(vi.mocked(useReadOnlyRefresh).mock.calls.length > 0).toBe(mounted)
   })
 
   it('L-1: the review queue does not tell an evaluator to press A or V', async () => {
@@ -328,6 +393,8 @@ describe('what an evaluator keeps', () => {
     fireEvent.click(screen.getByTestId('toolstrip-tool-engine-settings'))
     expect(await screen.findByRole('group', { name: 'Exercise autonomy default' })).toBeInTheDocument()
     expect(screen.getByRole('group', { name: 'Tier-policy mode' })).toBeInTheDocument()
+    // L-F: the provider lever too (the mock provider is already Fake, so Cut is shown, inert).
+    expect(screen.getByTestId('provider-lever-cut')).toBeInTheDocument()
     expect(screen.queryByTestId('engine-settings-readonly-note')).not.toBeInTheDocument()
     expect(screen.queryByTestId('autonomy-default-readonly')).not.toBeInTheDocument()
     expect(screen.queryByTestId('tier-policy-readonly')).not.toBeInTheDocument()

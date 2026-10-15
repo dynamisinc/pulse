@@ -167,7 +167,10 @@ export function EngineControlBar() {
   const allClear = pendingCount === 0 && timersUnder60sCount === 0
   const serverMode = serverModeOf(autonomy)
   const readoutTone = serverMode === null ? chrome.inkMuted : MODE_COPY[serverMode].tone
-  const readoutLabel = serverMode === null ? 'ENGINE · READING…' : labelFor(serverMode, autonomy)
+  const readoutLabel =
+    serverMode === null
+      ? 'ENGINE · READING…'
+      : `${labelFor(serverMode, autonomy)}${autonomy?.degradedReason ? ' (DEGRADED)' : ''}`
 
   // The kill switch mutates the SAME server-side autonomy state
   // `engineSettings` describes, entirely outside that hook, so this label

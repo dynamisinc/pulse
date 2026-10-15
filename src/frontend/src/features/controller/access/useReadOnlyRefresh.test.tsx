@@ -1,19 +1,20 @@
 /**
  * features/controller/access/useReadOnlyRefresh.test.tsx
  * ---------------------------------------------------------------------------
- * Demo-feedback story 11, Gate-1 M-3: a read-only console re-reads the pause tier and the engine
- * settings every 15 s while it is mounted, and stops on unmount; a controller's console never
- * polls. Fake timers; the two reads and the gate are mocked so each tick is counted exactly.
+ * Demo-feedback story 11, Gate-1 M-3 / L-D: a read-only console re-reads the pause tier and the
+ * engine settings every 15 s while it is mounted and the tab is visible, reads at once when the
+ * tab comes back, and stops on unmount. (Whether it is mounted at all - never for a controller,
+ * L-A - is asserted on the real console in `readOnlyConsole.test.tsx`.) Fake timers; the two
+ * reads are mocked so each tick is counted exactly.
  */
-import { renderHook } from '@testing-library/react'
+import { act, render, renderHook } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { refreshPauseTierFromServer } from '../hooks/usePauseState'
-import { useCanControl } from './useCanControl'
+import { ReadOnlyRefresh } from './ReadOnlyRefresh'
 import { READ_ONLY_REFRESH_MS, useReadOnlyRefresh } from './useReadOnlyRefresh'
 
 const { refetchEngineSettings } = vi.hoisted(() => ({ refetchEngineSettings: vi.fn() }))
 
-vi.mock('./useCanControl', () => ({ useCanControl: vi.fn(() => false) }))
 vi.mock('@/core/exerciseContext', () => ({
   useExerciseContext: () => ({ exerciseId: 'ex-1', timeZone: 'America/New_York' }),
 }))
@@ -24,17 +25,27 @@ vi.mock('../hooks/usePauseState', () => ({
   refreshPauseTierFromServer: vi.fn(() => Promise.resolve()),
 }))
 
-const mockedCanControl = vi.mocked(useCanControl)
 const mockedRefreshPause = vi.mocked(refreshPauseTierFromServer)
+
+let visibility: DocumentVisibilityState = 'visible'
+
+function setVisibility(next: DocumentVisibilityState): void {
+  visibility = next
+  act(() => {
+    document.dispatchEvent(new Event('visibilitychange'))
+  })
+}
 
 beforeEach(() => {
   vi.useFakeTimers()
-  mockedCanControl.mockReturnValue(false)
+  visibility = 'visible'
+  vi.spyOn(document, 'visibilityState', 'get').mockImplementation(() => visibility)
   refetchEngineSettings.mockClear()
   mockedRefreshPause.mockClear()
 })
 
 afterEach(() => {
+  vi.restoreAllMocks()
   vi.useRealTimers()
 })
 
@@ -43,7 +54,7 @@ describe('useReadOnlyRefresh (story 11 M-3)', () => {
     expect(READ_ONLY_REFRESH_MS).toBe(15_000)
   })
 
-  it('re-reads the pause tier and the engine settings for an evaluator on each tick', () => {
+  it('re-reads the pause tier and the engine settings on each tick', () => {
     renderHook(() => useReadOnlyRefresh())
     expect(refetchEngineSettings).not.toHaveBeenCalled()
     expect(mockedRefreshPause).not.toHaveBeenCalled()
@@ -68,15 +79,40 @@ describe('useReadOnlyRefresh (story 11 M-3)', () => {
 
     unmount()
     vi.advanceTimersByTime(READ_ONLY_REFRESH_MS * 4)
+    setVisibility('visible')
     expect(refetchEngineSettings).toHaveBeenCalledTimes(1)
     expect(mockedRefreshPause).toHaveBeenCalledTimes(1)
   })
 
-  it('never polls for a controller', () => {
-    mockedCanControl.mockReturnValue(true)
+  it('<ReadOnlyRefresh /> runs the same polling and renders nothing', () => {
+    const { container } = render(<ReadOnlyRefresh />)
+    expect(container).toBeEmptyDOMElement()
+    vi.advanceTimersByTime(READ_ONLY_REFRESH_MS)
+    expect(refetchEngineSettings).toHaveBeenCalledTimes(1)
+    expect(mockedRefreshPause).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('useReadOnlyRefresh and tab visibility (story 11 L-D)', () => {
+  it('skips the ticks while the tab is hidden', () => {
     renderHook(() => useReadOnlyRefresh())
-    vi.advanceTimersByTime(READ_ONLY_REFRESH_MS * 4)
+    setVisibility('hidden')
+    vi.advanceTimersByTime(READ_ONLY_REFRESH_MS * 3)
     expect(refetchEngineSettings).not.toHaveBeenCalled()
     expect(mockedRefreshPause).not.toHaveBeenCalled()
+  })
+
+  it('reads at once when the tab becomes visible again, then keeps ticking', () => {
+    renderHook(() => useReadOnlyRefresh())
+    setVisibility('hidden')
+    vi.advanceTimersByTime(READ_ONLY_REFRESH_MS * 2)
+
+    setVisibility('visible')
+    expect(refetchEngineSettings).toHaveBeenCalledTimes(1)
+    expect(mockedRefreshPause).toHaveBeenCalledTimes(1)
+
+    vi.advanceTimersByTime(READ_ONLY_REFRESH_MS)
+    expect(refetchEngineSettings).toHaveBeenCalledTimes(2)
+    expect(mockedRefreshPause).toHaveBeenCalledTimes(2)
   })
 })

@@ -494,6 +494,18 @@ export function refreshPauseTierFromServer(exerciseId: string): Promise<void> {
         // not more local memory.
         engineModeBeforePause ??= engineControlStore.getSnapshot(exerciseId).mode
         engineControlStore.adoptServerMode(exerciseId, 'stop')
+      } else if (
+        adopted.transition.to !== 'freeze' &&
+        (engineModeBeforePause !== null || adopted.transition.from === 'engine')
+      ) {
+        // The server LEFT the engine tier (story 11 Gate-1 L-B; a read-only console polls this):
+        // the silent mirror of `applyEngineTierMode`'s restore. The pause payload carries no
+        // kill-switch position, so the engine goes back to the position the engine tier
+        // displaced, or `live` when this runtime never saw it (a console opened mid-pause).
+        // `freeze` keeps the engine stopped and the debt, exactly as the controller path does.
+        const restore = engineModeBeforePause ?? 'live'
+        engineModeBeforePause = null
+        engineControlStore.adoptServerMode(exerciseId, restore)
       }
     })
     .catch(() => {
