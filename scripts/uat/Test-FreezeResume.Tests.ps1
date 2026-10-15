@@ -58,6 +58,12 @@ BeforeAll {
             Items          = @{}
             ActiveExercise = $null
             RestartAt      = $null
+            Tokens         = [System.Collections.Generic.HashSet[string]]::new()
+            TokenSeq       = 0
+            Logins         = 0
+            HealthCalls    = 0
+            PoolPersonas   = @()
+            InjectPersonas = @()
             Calls          = [System.Collections.Generic.List[string]]::new()
             TierPosts      = [System.Collections.Generic.List[string]]::new()
             Faults         = $Faults
@@ -86,6 +92,8 @@ BeforeAll {
         # The ~6-minute handover: the new process starts with an empty in-memory pause tier unless persisted (18).
         if ($global:FrzS.RestartAt -and ($global:FrzS.Wall - $global:FrzS.RestartAt).TotalMinutes -ge 6) {
             $global:FrzS.RestartAt = $null
+            $global:FrzS.Handover = $global:FrzS.Wall
+            if ($global:FrzS.Faults.SessionsLost) { $global:FrzS.Tokens.Clear() }
             if (-not $global:FrzS.Faults.FreezePersisted) {
                 $global:FrzS.Tier = 'running'
                 $global:FrzS.ScenarioBase = Get-SimScenario $global:FrzS.Wall
@@ -103,15 +111,22 @@ BeforeAll {
         if ($S.Faults.ThrowOn -and "$Method $Path" -match $S.Faults.ThrowOn) { throw "simulated network failure on $Method $Path" }
         $isParticipant = $Token -eq 'participant-token'
         $route = ($Path -split '\?')[0]
+        $query = if ($Path -match '\?(.*)$') { $Matches[1] } else { '' }
+        $preAuth = $route -in '/api/exercise-context', '/api/auth/staff/login', '/api/auth/login', '/api/auth/logout', '/health'
+        if (-not $preAuth -and -not $isParticipant -and -not $S.Tokens.Contains($Token)) { return New-Response 401 $null }
         switch -Regex ("$Method $route") {
             '^GET /api/exercise-context$' { return New-Response 200 @{ exerciseId = $global:FrzDemoId; exerciseName = 'Kestrel demo'; status = 'live' } }
             '^POST /api/auth/staff/login$' {
                 if ($Body.secret -ne $global:FrzSecret) { return New-Response 401 $null }
                 $S.ActiveExercise = $Body.exerciseId
-                return New-Response 200 @{ token = 'staff-token'; session = @{ actingHumanId = 'staff-human-1'; exerciseId = $Body.exerciseId } }
+                $S.Logins++
+                $S.TokenSeq++
+                $token = "staff-token-$($S.TokenSeq)"
+                [void] $S.Tokens.Add($token)
+                return New-Response 200 @{ token = $token; session = @{ actingHumanId = 'staff-human-1'; exerciseId = $Body.exerciseId } }
             }
             '^POST /api/auth/login$' { return New-Response 200 @{ token = 'participant-token'; session = @{ exerciseId = $global:FrzDemoId } } }
-            '^POST /api/auth/logout$' { return New-Response 204 $null }
+            '^POST /api/auth/logout$' { [void] $S.Tokens.Remove($Token); return New-Response 204 $null }
             '^GET /api/staff/assignments$' {
                 return New-Response 200 @(
                     @{ exerciseId = $global:FrzDemoId; exerciseName = 'Kestrel demo'; role = 'controller' }
@@ -131,12 +146,16 @@ BeforeAll {
                     $S.Register = if ($Body.overlayRegister -eq 'in-fiction') { 'in-fiction' } else { 'out-of-fiction' }
                 }
                 elseif ($Body.tier -ne 'freeze' -and $S.Tier -eq 'freeze') {
+                    if ($S.Faults.RestoreFails -eq 'throw') { throw 'simulated network failure on the restore' }
+                    if ($S.Faults.RestoreFails) { return New-Response 500 $null }
                     $S.ScenarioBase = Get-SimScenario $S.Wall
                     $S.WallBase = $S.Wall
                     $S.ClockFrozen = $false
                 }
                 $S.Tier = $Body.tier
-                return New-Response 200 @{ tier = $S.Tier; clockFrozen = [bool] $S.ClockFrozen }
+                $state = @{ tier = $S.Tier; clockFrozen = [bool] $S.ClockFrozen }
+                if ($S.Faults.FreezePersisted) { $state['persisted'] = $true }
+                return New-Response 200 $state
             }
             '^GET /api/overlay-state$' {
                 $state = if ($S.Tier -eq 'freeze' -and -not $S.Faults.OverlayMissing) { 'pause' } else { 'none' }
@@ -145,12 +164,32 @@ BeforeAll {
             '^GET /api/staff/noise$' {
                 return New-Response 200 @{ level = $S.NoiseLevel; poolSize = $S.PoolSize; postedCount = $S.PostedCount; lastPostedAt = $S.LastPostedAt; running = [bool] (Test-SimNoiseRunning) }
             }
-            '^PUT /api/staff/noise$' { $S.NoiseLevel = $Body.level; return New-Response 200 @{ level = $S.NoiseLevel } }
-            '^PUT /api/staff/noise/pool$' { $S.PoolSize = @($Body.posts).Count; return New-Response 200 @{ poolSize = $S.PoolSize } }
-            '^GET /api/personas$' { return New-Response 200 @(@{ id = '33333333-3333-4333-8333-333333333333'; handle = 'KestrelCoEM' }) }
+            '^PUT /api/staff/noise$' {
+                if ($S.Faults.NoiseRestoreFails -and $Body.level -ne 'low') { return New-Response 500 $null }
+                $S.NoiseLevel = $Body.level; return New-Response 200 @{ level = $S.NoiseLevel }
+            }
+            '^PUT /api/staff/noise/pool$' {
+                if ($S.Faults.PoolClearFails -and @($Body.posts).Count -eq 0) { return New-Response 500 $null }
+                if (@($Body.posts).Count -gt 0) { $S.PoolPersonas = @($Body.posts | ForEach-Object { $_.persona }) }
+                $S.PoolSize = @($Body.posts).Count; return New-Response 200 @{ poolSize = $S.PoolSize }
+            }
+            '^GET /api/personas$' {
+                # The PIO participant's org persona comes first: "the first persona" would be the wrong voice.
+                return New-Response 200 @(
+                    @{ id = '33333333-3333-4333-8333-333333333333'; handle = 'KestrelCoEM'; kind = 'org'; personaType = 'official' }
+                    @{ id = '44444444-4444-4444-8444-444444444444'; handle = 'MetroDesk9'; kind = 'org'; personaType = 'media' }
+                    @{ id = '55555555-5555-4555-8555-555555555555'; handle = 'mvega_fh'; kind = 'human'; personaType = 'citizen' }
+                )
+            }
             '^POST /api/injects$' {
+                if ($S.Faults.CreateLost) {
+                    $id = [guid]::NewGuid().ToString()
+                    $S.Items[$id] = @{ id = $id; title = $Body.title; status = 'pending'; version = 1 }
+                    throw 'simulated lost response on create'
+                }
                 $id = [guid]::NewGuid().ToString()
-                $S.Items[$id] = @{ id = $id; status = 'pending'; version = 1 }
+                $S.InjectPersonas = @($Body.posts | ForEach-Object { $_.personaId })
+                $S.Items[$id] = @{ id = $id; title = $Body.title; status = 'pending'; version = 1 }
                 return New-Response 201 $S.Items[$id]
             }
             '^POST /api/injects/[^/]+/skip$' {
@@ -166,8 +205,23 @@ BeforeAll {
                 return New-Response 409 @{ detail = "This item is $($item.status) and cannot be fired." }
             }
             '^GET /api/injects$' { return New-Response 200 @{ items = @($S.Items.Values); pauseTier = $S.Tier } }
-            '^DELETE /api/injects/[^/]+$' { $S.Items.Remove(($route -split '/')[3]); return New-Response 204 $null }
-            '^GET /health$' { return New-Response 200 $null }
+            '^DELETE /api/injects/[^/]+$' {
+                if ($S.Faults.DeleteFails) { return New-Response 500 $null }
+                $id = ($route -split '/')[3]
+                if (-not $S.Items.ContainsKey($id)) { return New-Response 404 $null }
+                if ($query -ne "version=$($S.Items[$id].version)") { return New-Response 409 @{ detail = 'stale version' } }
+                $S.Items.Remove($id); return New-Response 204 $null
+            }
+            '^GET /health$' {
+                $S.HealthCalls++
+                # A restart is visible as a failing /health around the handover, unless the fault hides it.
+                $inHandover = $S.RestartAt -and ($S.Wall - $S.RestartAt).TotalMinutes -ge 5
+                if ($inHandover -and -not $S.Faults.NoRestartEvidence) {
+                    if ($S.Faults.HealthThrows) { throw 'simulated connection reset during the restart' }
+                    return New-Response 503 $null
+                }
+                return New-Response 200 $null
+            }
             default { throw "simulator: unhandled $Method $route" }
         }
     }
@@ -176,7 +230,7 @@ BeforeAll {
         $env:PULSE_STAFF_SECRET = $global:FrzSecret
         $env:PULSE_PARTICIPANT_PASSWORD = 'not-a-real-password'
         try {
-            $output = & $global:FrzScriptFile @Parameters 6>&1 2>&1 | ForEach-Object { "$_" }
+            $output = & $global:FrzScriptFile @Parameters -Confirm:$false 6>&1 2>&1 | ForEach-Object { "$_" }
             $code = $LASTEXITCODE
         }
         finally {
@@ -214,11 +268,21 @@ Describe 'Test-FreezeResume.ps1' {
             $r.Text | Should -Match 'PASS\s+scenario clock did not move while frozen'
             $r.Text | Should -Match 'PASS\s+scenario time continued from the frozen minute'
             $r.Text | Should -Match 'PASS\s+after Resume: overlay is back to none'
+            $r.Text | Should -Match 'INFO\s+pre-18'
             $global:FrzS.Tier | Should -Be 'engine'
             $global:FrzS.NoiseLevel | Should -Be 'off'
             $global:FrzS.PoolSize | Should -Be 0
             $global:FrzS.Items.Count | Should -Be 0
             $global:FrzS.ActiveExercise | Should -Be $global:FrzCheckId
+            $global:FrzS.Tokens.Count | Should -Be 0 -Because 'every staff session is signed out'
+        }
+
+        It 'authors the test content as an NPC citizen persona, never the first (participant) persona' {
+            $r = Invoke-FreezeScript
+
+            $r.Code | Should -Be 0
+            $global:FrzS.PoolPersonas | Should -Be @('mvega_fh', 'mvega_fh', 'mvega_fh')
+            $global:FrzS.InjectPersonas | Should -Be @('55555555-5555-4555-8555-555555555555')
         }
 
         It 'freezes with the out-of-fiction register when asked' {
@@ -267,7 +331,7 @@ Describe 'Test-FreezeResume.ps1' {
     }
 
     Context 'the tier is always restored' {
-        It 'restores the tier it found (<tier>) after a step throws mid-hold' -ForEach @(
+        It 'restores the tier it found (<tier>) and cleans up after a step throws mid-hold' -ForEach @(
             @{ tier = 'engine' }, @{ tier = 'running' }, @{ tier = 'injects' }
         ) {
             New-Server @{ ThrowOn = '^POST /api/injects/[^/]+/fire$' }
@@ -278,8 +342,12 @@ Describe 'Test-FreezeResume.ps1' {
             $r.Code | Should -Be 1
             $r.Text | Should -Match 'FAIL\s+unexpected: simulated network failure'
             $r.Text | Should -Match "PASS\s+pause tier restored to '$tier'"
+            $r.Text | Should -Match 'PASS\s+test inject deleted'
             $global:FrzS.Tier | Should -Be $tier
             $global:FrzS.TierPosts[-1] | Should -Be $tier
+            $global:FrzS.Items.Count | Should -Be 0
+            $global:FrzS.NoiseLevel | Should -Be 'off'
+            $global:FrzS.PoolSize | Should -Be 0
         }
 
         It 'restores the tier when the overlay read throws right after Freeze' {
@@ -291,6 +359,18 @@ Describe 'Test-FreezeResume.ps1' {
             $global:FrzS.TierPosts | Should -Contain 'freeze'
             $global:FrzS.Tier | Should -Be 'engine'
             $global:FrzS.NoiseLevel | Should -Be 'off'
+        }
+
+        It 'fails loudly with the manual step when the restore POST answers <fault> after Freeze' -ForEach @(
+            @{ fault = '500'; value = $true }, @{ fault = 'a transport error'; value = 'throw' }
+        ) {
+            New-Server @{ RestoreFails = $value }
+
+            $r = Invoke-FreezeScript
+
+            $r.Code | Should -Be 1
+            $r.Text | Should -Match "FAIL\s+COULD NOT RESTORE the pause tier to 'engine'\. Open the console .* set the Pause pill back to 'engine' NOW"
+            $global:FrzS.Tier | Should -Be 'freeze'
         }
 
         It 'refuses an exercise that is already frozen and changes nothing' {
@@ -315,6 +395,46 @@ Describe 'Test-FreezeResume.ps1' {
         }
     }
 
+    Context 'cleanup failures are FAILs with a manual step' {
+        It 'fails when the test inject cannot be deleted' {
+            New-Server @{ DeleteFails = $true }
+
+            $r = Invoke-FreezeScript
+
+            $r.Code | Should -Be 1
+            $r.Text | Should -Match "FAIL\s+deleting the test inject -> 500\. Delete '\[freeze check\] fire refusal probe'"
+        }
+
+        It 'finds and deletes a test inject whose create response was lost' {
+            New-Server @{ CreateLost = $true }
+
+            $r = Invoke-FreezeScript
+
+            $r.Code | Should -Be 1 -Because 'the lost create is itself an unexpected failure'
+            $r.Text | Should -Match 'PASS\s+test inject deleted'
+            $global:FrzS.Items.Count | Should -Be 0
+            $global:FrzS.Tier | Should -Be 'engine'
+        }
+
+        It 'fails when the noise level cannot be restored' {
+            New-Server @{ NoiseRestoreFails = $true }
+
+            $r = Invoke-FreezeScript
+
+            $r.Code | Should -Be 1
+            $r.Text | Should -Match "FAIL\s+restoring the noise level -> 500\. Set the white-noise knob .* back to 'off'"
+        }
+
+        It 'fails when the test pool cannot be cleared' {
+            New-Server @{ PoolClearFails = $true }
+
+            $r = Invoke-FreezeScript
+
+            $r.Code | Should -Be 1
+            $r.Text | Should -Match 'FAIL\s+clearing the test noise pool -> 500\. Empty the white-noise pool'
+        }
+    }
+
     Context 'the demo exercise' {
         It 'refuses when the name lookup resolves to the demo exercise' {
             $r = Invoke-FreezeScript @{ ExerciseName = 'Kestrel demo' }
@@ -333,12 +453,18 @@ Describe 'Test-FreezeResume.ps1' {
             $global:FrzS.TierPosts.Count | Should -Be 0
         }
 
-        It 'runs against the demo exercise only when -ExerciseId names it, reading the overlay as the participant' {
-            $r = Invoke-FreezeScript @{ ExerciseId = $global:FrzDemoId; ParticipantUsername = 'pio1' }
+        It 'with an explicit demo -ExerciseId, makes zero noise writes and reads the overlay as the participant' {
+            $global:FrzS.PoolSize = 5   # the demo's own pool
+            $r = Invoke-FreezeScript @{ ExerciseId = $global:FrzDemoId.ToUpperInvariant(); ParticipantUsername = 'pio1' }
 
             $r.Code | Should -Be 0
             $r.Text | Should -Match 'WARN\s+running against the DEMO exercise'
+            $r.Text | Should -Match 'WARN\s+minute continuity after Resume: not run on the demo exercise'
             $r.Text | Should -Match 'overlay is pause, register in-fiction \(participant pio1\)'
+            $r.Text | Should -Match 'PASS\s+inject fire refused while frozen'
+            ($global:FrzS.Calls | Where-Object { $_ -match '^PUT /api/staff/noise' }).Count | Should -Be 0
+            $global:FrzS.NoiseLevel | Should -Be 'off'
+            $global:FrzS.PoolSize | Should -Be 5
             $global:FrzS.Tier | Should -Be 'engine'
         }
 
@@ -352,25 +478,76 @@ Describe 'Test-FreezeResume.ps1' {
     }
 
     Context '-IncludeRestart' {
-        It 'reports a restart that clears Freeze as expected until demo-feedback/18 is deployed' {
+        It 'refuses to restart before demo-feedback/18 is detected unless -Force' {
             $r = Invoke-FreezeScript @{ IncludeRestart = $true }
+
+            $r.Code | Should -Be 1
+            $r.Text | Should -Match 'FAIL\s+restart check refused: demo-feedback/18 is not detected'
+            Should -Invoke Invoke-AppServiceRestart -Times 0 -Exactly
+            $global:FrzS.Tier | Should -Be 'engine'
+        }
+
+        It 'with -Force before 18, reports the cleared Freeze as expected until demo-feedback/18 is deployed' {
+            $r = Invoke-FreezeScript @{ IncludeRestart = $true; Force = $true }
 
             $r.Code | Should -Be 1
             $r.Text | Should -Match "FAIL\s+the restart cleared Freeze \(tier now 'running'\): expected until demo-feedback/18 is deployed"
             $global:FrzS.Tier | Should -Be 'engine'
         }
 
-        It 'passes once Freeze is persisted (demo-feedback/18)' {
+        It 'passes once Freeze is persisted (18) and the restart was observed' {
             New-Server @{ FreezePersisted = $true }
 
             $r = Invoke-FreezeScript @{ IncludeRestart = $true }
 
             $r.Text | Should -Not -Match '\bFAIL\b'
             $r.Code | Should -Be 0
-            $r.Text | Should -Match 'PASS\s+Freeze held for 9 min after the restart'
+            $r.Text | Should -Match 'demo-feedback/18 detected'
+            $r.Text | Should -Match 'PASS\s+Freeze survived the restart \(restart observed'
             $r.Text | Should -Match 'PASS\s+scenario clock unchanged across the restart'
             Should -Invoke Invoke-AppServiceRestart -Times 1 -Exactly
             $global:FrzS.Tier | Should -Be 'engine'
+        }
+
+        It 'survives transport exceptions in the restart wait loop' {
+            New-Server @{ FreezePersisted = $true; HealthThrows = $true }
+
+            $r = Invoke-FreezeScript @{ IncludeRestart = $true }
+
+            $r.Code | Should -Be 0
+            $r.Text | Should -Match 'PASS\s+Freeze survived the restart \(restart observed'
+            $global:FrzS.Tier | Should -Be 'engine'
+        }
+
+        It 'signs in again on 401 after the restart and still restores the tier' {
+            New-Server @{ FreezePersisted = $true; SessionsLost = $true }
+
+            $r = Invoke-FreezeScript @{ IncludeRestart = $true }
+
+            $r.Code | Should -Be 0
+            $global:FrzS.Logins | Should -Be 2 -Because 'the first session was lost at the handover and the script signed in again'
+            $r.Text | Should -Match 'PASS\s+Freeze survived the restart'
+            $global:FrzS.Tier | Should -Be 'engine'
+            $global:FrzS.NoiseLevel | Should -Be 'off'
+        }
+
+        It 'warns instead of passing when no restart was observed' {
+            New-Server @{ FreezePersisted = $true; NoRestartEvidence = $true }
+
+            $r = Invoke-FreezeScript @{ IncludeRestart = $true }
+
+            $r.Text | Should -Match 'WARN\s+restart not observed .* persistence not proven'
+            $r.Text | Should -Not -Match 'PASS\s+Freeze survived the restart'
+            $global:FrzS.Tier | Should -Be 'engine'
+        }
+
+        It 'skips the restart under -WhatIf' {
+            New-Server @{ FreezePersisted = $true }
+
+            $r = Invoke-FreezeScript @{ IncludeRestart = $true; WhatIf = $true }
+
+            $r.Text | Should -Match 'WARN\s+-IncludeRestart declined'
+            Should -Invoke Invoke-AppServiceRestart -Times 0 -Exactly
         }
     }
 }
