@@ -101,11 +101,13 @@ public sealed record OverlayStateSnapshot(string State, string Register, string 
 /// an authoritative read alone could still be overwritten by a slower stale writer), which is why both are
 /// here.</para>
 ///
-/// <para><b>In-memory, not persisted.</b> A singleton runtime service, with the same accepted limitation
-/// <see cref="Clock.ExerciseClockService"/> and <see cref="PauseTierRegistry"/> already carry: an App Service
-/// restart clears the overlays (and the participant's next reconnect re-GETs, so it heals to <c>none</c> —
-/// never to a stuck holding page). It is deliberately NOT an
-/// <see cref="Pulse.WebApi.Data.IExerciseScoped"/> entity: no schema change belongs in a behaviour-only wave.</para>
+/// <para><b>Survives a restart (demo-feedback story 18, DF-26/DF-27).</b> The store itself stays an in-memory
+/// singleton, but every snapshot a pause transition publishes is written through to the exercise's
+/// <c>ExerciseRuntimeStates</c> row (state, register, message, sequence) by <see cref="PauseTierRegistry"/> right
+/// after the publish, and the startup rehydrator puts it back through <see cref="Restore"/>, so a participant who
+/// reloads after a restart mid-Freeze still lands on the holding page. The restored sequence also re-seeds the
+/// ticket counter, so the first publish after a restart is the persisted sequence + 1 and a client that saw a high
+/// sequence never drops the next frame.</para>
 ///
 /// <para><b>No telemetry (XC-004).</b> The ONE <c>steering_action</c> event per pause transition is emitted by
 /// the console (story 03/07). This store emits nothing, so a Freeze can never produce a competing or duplicate
@@ -189,6 +191,46 @@ public sealed class OverlayStateService
             exerciseId,
             candidate,
             (_, existing) => existing.Sequence >= sequence ? existing : candidate);
+    }
+
+    /// <summary>
+    /// Puts exercise <paramref name="exerciseId"/>'s persisted overlay back at startup (story 18, DF-27): the snapshot
+    /// becomes the current state (unless a newer write already landed) and the ticket counter is raised to at least
+    /// <see cref="OverlayStateSnapshot.Sequence"/>, so the next <see cref="NextSequence"/> is the persisted value + 1.
+    /// Never lowers the counter. Used only by the rehydrator; a live publish goes through <see cref="Apply"/>.
+    /// </summary>
+    /// <param name="exerciseId">The exercise the persisted row belongs to (COR-001); must not be <see cref="Guid.Empty"/>.</param>
+    /// <param name="snapshot">The persisted snapshot (state, register, message, sequence).</param>
+    /// <returns>The authoritative snapshot after the restore.</returns>
+    public OverlayStateSnapshot Restore(Guid exerciseId, OverlayStateSnapshot snapshot)
+    {
+        if (exerciseId == Guid.Empty)
+        {
+            throw new ArgumentException("An overlay-state restore must name an exercise (COR-001).", nameof(exerciseId));
+        }
+
+        ArgumentNullException.ThrowIfNull(snapshot);
+        ArgumentException.ThrowIfNullOrWhiteSpace(snapshot.State);
+        ArgumentException.ThrowIfNullOrWhiteSpace(snapshot.Register);
+        ArgumentOutOfRangeException.ThrowIfNegative(snapshot.Sequence);
+
+        var counter = _sequences.GetOrAdd(exerciseId, _ => new StrongBox<long>(0L));
+        long current;
+        do
+        {
+            current = Interlocked.Read(ref counter.Value);
+            if (current >= snapshot.Sequence)
+            {
+                break;
+            }
+        }
+        while (Interlocked.CompareExchange(ref counter.Value, snapshot.Sequence, current) != current);
+
+        var restored = snapshot with { Message = snapshot.Message ?? string.Empty };
+        return _states.AddOrUpdate(
+            exerciseId,
+            restored,
+            (_, existing) => existing.Sequence > restored.Sequence ? existing : restored);
     }
 
     /// <summary>
