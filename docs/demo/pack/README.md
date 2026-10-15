@@ -8,7 +8,9 @@
 
 | File | What it is |
 |---|---|
-| [`pack.json`](pack.json) | The pack (`pulse.demopack.v1`): persona profile edits, media, the opening feed and the run sheet |
+| [`pack.json`](pack.json) | The pack (`pulse.demopack.v1`): persona profile edits, media, the opening feed, the run sheet, the exercise pins and the white-noise pool |
+| [`kestrel-msel.xlsx`](kestrel-msel.xlsx) | The run sheet as a Cadence MSEL, for the on-stage import ([below](#demo-feedback-additions-1020-cut-511)) |
+| [`tools/build-kestrel-msel.py`](tools/build-kestrel-msel.py) | Builds and checks `kestrel-msel.xlsx` from `pack.json` |
 | [`MEDIA-SHOTLIST.md`](MEDIA-SHOTLIST.md) | What each photo, video, avatar and banner must show, with alt text and search terms |
 | [`CREDITS.md`](CREDITS.md) | Source, licence and URL per file (the stock rows are for Tom to fill in) |
 | `media/`, `avatars/`, `banners/` | The files. **23 are placeholders and 6 are generated drafts** (see the shot list) |
@@ -22,6 +24,7 @@
 | Run sheet | **15 items** (10 `post`, 5 `burst`) = 30 scripted posts, 10 of them replies, covering beats 2–5 |
 | Media | **3 videos** (each with a poster), **10 photos**, **9 avatars**, **4 banners** = 29 uploads |
 | Personas | All **9** cast handles get profile edits (display name, bio, location, verified, avatar; banners for the 5 orgs) |
+| Demo feedback | **100** white-noise posts, **2** exercise pins, and an MSEL of **34 rows** that brings in 8 of the 10 `post` items ([below](#demo-feedback-additions-1020-cut-511)) |
 
 ## The fiction
 
@@ -228,6 +231,103 @@ pwsh scripts/uat/Seed-DemoContent.ps1 -StaffUsername controller1 -ReloadFiredRun
   opens mid-story.
 - The pack uploads 29 files, under the server's 30-per-minute limit. S1 waits out a 429 if you add more.
 - Run order: `Clear-DemoContent.ps1` (optional), then `Reset-DemoState.ps1`, then `Seed-DemoContent.ps1`.
+
+## Demo feedback additions (10/20 cut, #511)
+
+Three additions for the demo-feedback features ([`implementation.md`](../../features/demo-feedback/implementation.md),
+tasks C2 and C3). They need S1's schema and seed update (#510). Until that lands, the schema and `-WhatIf` refuse
+the `noise`, `pins` and `msel` fields. Everything else in the pack validates as before.
+
+### White noise (`noise`: 100 posts)
+
+This is the pool the noise knob draws from (DF-12): **100 everyday posts, 25 from each of the four citizens**
+(`mvega_fh`, `tbrandt41`, `kwardFH`, `dreyes_fh`). These are the cast's only citizen personas, and no participant
+signs in as one (`New-DemoParticipant.ps1` binds the PIO to `KestrelCoEM` and warns against the citizens). Each
+keeps the voice it has in the feed: Marisol is a tired, practical nurse and mom, Tom writes in terse lower case,
+Keisha organizes the block and Dana asks questions. The topics are traffic, drizzle, school, sports, food, pets,
+errands, the rec center and the library. **Eight faint grumbles** about boiling and the taste of the water ("boil,
+cool, pour, repeat") are spread through the pool.
+
+- **Nothing in it moves the story.** It has no Mill Road, no rumor, no "lifted" or "all clear", no fire station or
+  high school, no mentions, no URLs and no hashtags (so Trending stays `#WaterIssues`). It also avoids
+  "exercise", "training" and "simulation".
+- **Order.** The array is interleaved so the same persona never posts twice in a row, and the grumbles sit at least
+  nine entries apart. The pacer works through the pool in this order, least-posted first.
+- **Sizing** (05 Gate-1): on High (15/min) the pool lasts about 7 minutes before an entry repeats, and on Low
+  (2/min) about 50.
+- **Checked with the server's own rules.** Every text is 1–280 code points, `PostSanitizer` leaves it unchanged and
+  every persona resolves.
+
+### Exercise pins (`pins`)
+
+The pins are `["p10", "p09"]`: the boil water advisory at its source (**p09**, @FairhavenWater) and County EM's
+share of it (**p10**, @KestrelCoEM, with the zone tip and the sign and pot photos). A controller would put these
+two in front of everyone: they carry the instructions every resident needs, from both verified accounts, which is
+also the lesson of beats 3 and 4. The Pinned tab shows the newest pin first, so if S1 pins in array order, p09
+leads. Only opening-feed posts can be pinned, because run-sheet posts don't exist at seed time. If you would rather
+pin "where to get water", swap p10 for p19.
+
+### The run sheet as a Cadence MSEL (`kestrel-msel.xlsx`)
+
+This file is for the import beat (DF-16). It renders the run sheet as a Cadence export would: sheet `MSEL`,
+Cadence's 16 columns in order plus the Pulse extension `Pulse Media`, and Cadence's formatting (styled header,
+alternating rows, autofilter). It adds a frozen header, and it also has Cadence's Phases and Objectives sheets.
+
+| Delivery Method | Rows |
+|---|---|
+| **Social Media** (imported) | **8** |
+| Phone | 11 |
+| Email | 5 |
+| Radio | 5 |
+| Verbal (in person: StartEx, the utility's general manager, EndEx) | 3 |
+| Written | 1 |
+| EAS / WEA (a contingency WEA) | 1 |
+| **Total** | **34**: Inject # 1–34, Scenario Day 1, StartEx 13:00 to EndEx 13:45 |
+
+- **The eight imported items** are the single-post items rs01, rs05, rs07, rs08, rs09, rs12, rs13 and rs15. In
+  `pack.json` each carries `"msel"` set to its Inject # (4, 9, 11, 13, 14, 17, 18 and 20). The generator copies each
+  item's persona (`From / Source` = `@handle`), post text (`Description`, word for word), notes and media from
+  `pack.json`, and places the row at StartEx + its `plannedMinute`. The import therefore gives the same T+3 to
+  T+18 (DF-11). `Pulse Media` names the library file the seed uploads: `news-mill-road.mp4` (rs01),
+  `scoop-brown-tap.mp4` (rs05) and `pio-statement-card.png` (rs08).
+- **rs03 and rs10 are seeded, not in the MSEL, because an MSEL row has no reply-to.** rs04's seven replies and
+  rs10 all hang off rs03, so rs03 has to be a seeded item they can reference. rs10 is itself a reply inside rs03's
+  thread. The bursts stay seeded too (DF-9: one social row is one post).
+- **Responsible Controller is blank on the social rows, on purpose.** The importer matches it against the
+  exercise's staff display names. A blank cell is silent and the item arrives unassigned, but a name that isn't a
+  staff display name on UAT puts a warning on its row. The non-social rows carry SimCell role names. They never warn,
+  because the importer skips those rows before it reads that column. Keep the run sheet's filter on **All**:
+  "Mine" hides unassigned items.
+- **Rebuild the file** after any change to those eight items or their timing:
+  `python3 docs/demo/pack/tools/build-kestrel-msel.py` (it needs `openpyxl`; add `--check` to check the committed
+  file only). The generator reads `pack.json` and refuses to build if a `msel` value doesn't match the row number
+  it assigns. It then re-reads the workbook with a Python mirror of the importer's rules. The output is
+  byte-stable.
+- **Checked against the real importer** on 2026-10-15: the server's own `MselWorkbookReader` and
+  `MselImportPlanner` (ClosedXML 0.105.1) read the file as **34 rows, 8 social, 26 skipped, 0 failed and 0
+  warnings**, with minutes T+3 to T+18 as authored.
+
+### On stage: seed, dry run, import
+
+1. **Seed without the MSEL items:** `pwsh scripts/uat/Seed-DemoContent.ps1 -StaffUsername controller1 -RunSheet
+   exceptMsel`. This loads every item without an `msel` (the five bursts plus rs03 and rs10), the noise pool with
+   the level set to Off, and the pins (S1, #510). The media upload is unchanged, so the three `Pulse Media` files
+   are in the library.
+2. **Run sheet → Import**, choose `kestrel-msel.xlsx` and run the **dry run**. It reports 34 rows: 8 to create,
+   26 skipped ("not a social-media inject (Delivery Method: Phone)" and so on) and none failed. The skip list is the
+   point: Pulse reads the exercise's own MSEL and takes only the rows meant for it.
+3. **Import.** The eight items appear within 3 seconds. Importing the same file again reports all eight
+   `unchanged` (DF-10 keys on `Inject #`).
+
+Imported items differ from seeded ones in three ways:
+
+- **Order.** An import appends after the existing items, so the eight land below the seven seeded items, out of
+  story order. Fire each row by its T+ minute rather than with "Fire next", or move the rows up first.
+- **No seeded baselines.** An MSEL row cannot carry `engagementBaseline`, so imported posts show real counts only.
+  This matters most for **rs05**, The Scoop's video, which had 962 / 718 / 141 in the table above and now starts
+  at 0. rs03 (still seeded, 1,840 likes) still shows the rumor outrunning the official word.
+- **Media alt text is the file name** (`news-mill-road`, `scoop-brown-tap`, `pio-statement-card`), not the pack's
+  description, because the importer has nowhere else to take it from.
 
 ## Editing rules (S1 and the schema enforce most of them)
 
