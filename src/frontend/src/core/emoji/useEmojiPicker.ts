@@ -7,7 +7,7 @@
  * only in the class names they hand `<EmojiPickerButton>` and `<EmojiPicker>`.
  *
  * WHAT IT OWNS
- *  - open/closed (forced closed while `disabled`, e.g. a publish is in flight);
+ *  - open/closed (closed - and kept closed - once `disabled`, e.g. a publish starts);
  *  - INSERTION: `pick(emoji)` splices the emoji into the CONTROLLED value at the text
  *    field's caret, or over its selection (`insertAtSelection`), and hands the new
  *    text to `onChange` - so it flows through the host's own state and counter, and
@@ -26,7 +26,7 @@
  * bundled text (`emojiData.ts`).
  */
 
-import { useId, useLayoutEffect, useRef, useState, type RefObject } from 'react'
+import { useEffect, useId, useLayoutEffect, useRef, useState, type RefObject } from 'react'
 import { insertAtSelection } from './insertAtSelection'
 
 /** The text field an emoji is inserted into. */
@@ -64,6 +64,8 @@ export interface EmojiPickerButtonBindings {
   readonly panelId: string
   /** Open, or close if open (the button's click). */
   readonly onToggle: () => void
+  /** Close while focus is on the button (Escape there); focus stays on the button. */
+  readonly onClose: () => void
 }
 
 export interface EmojiPickerController {
@@ -89,6 +91,12 @@ export function useEmojiPicker({
   const pendingFocus = useRef<PendingFocus | null>(null)
   const [open, setOpen] = useState(false)
   const isOpen = open && !disabled
+
+  // Going busy (a publish starts) closes the picker for good, so it cannot pop back
+  // open - and pull focus into its search box - when the host is idle again.
+  useEffect(() => {
+    if (disabled) setOpen(false)
+  }, [disabled])
 
   // After the commit that applied a pick (or an Escape), put the author back in the
   // text field. No dependency list on purpose: it is a cheap no-op unless a pick or
@@ -129,6 +137,7 @@ export function useEmojiPicker({
       disabled,
       panelId,
       onToggle: () => setOpen(!isOpen),
+      onClose: () => setOpen(false),
     },
     pickerProps: {
       id: panelId,

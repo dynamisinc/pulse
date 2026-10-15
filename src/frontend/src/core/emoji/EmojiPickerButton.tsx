@@ -9,7 +9,8 @@
  *
  * A11y: a real <button> (Enter/Space open it), named "Add emoji" by default, with
  * `aria-haspopup="dialog"`, `aria-expanded`, and `aria-controls` pointing at the
- * panel while it is open.
+ * panel while it is open. Escape on it while the picker is open closes the picker
+ * (and stops there, so a surrounding dialog stays open).
  */
 
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
@@ -28,6 +29,7 @@ export function EmojiPickerButton({
   disabled,
   panelId,
   onToggle,
+  onClose,
   className,
   label = 'Add emoji',
 }: EmojiPickerButtonProps) {
@@ -37,6 +39,14 @@ export function EmojiPickerButton({
       type="button"
       className={className}
       onClick={onToggle}
+      onKeyDown={event => {
+        // Escape on the button while the picker is open closes the picker only; it
+        // must not reach a surrounding dialog (ComposeModal would close).
+        if (event.key !== 'Escape' || !isOpen) return
+        event.preventDefault()
+        event.stopPropagation()
+        onClose()
+      }}
       disabled={disabled}
       aria-label={label}
       aria-haspopup="dialog"

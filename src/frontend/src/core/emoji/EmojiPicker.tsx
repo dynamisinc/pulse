@@ -15,12 +15,13 @@
  * there - the grid is a combobox-style listbox driven by `aria-activedescendant`:
  *   type            filter by name/keyword (the first match becomes active)
  *   arrow keys      move the active emoji through the grid (`gridNavigation.ts`)
- *   Enter           insert the active emoji (never submits the surrounding form)
+ *   Enter           insert the active emoji (never submits the surrounding form;
+ *                   ignored while an IME is composing)
  *   Escape          close; the host returns focus to the text field. Propagation
  *                   stops here, so a dialog around the composer stays open.
  *   Tab             leaves the picker, which closes it.
- * A pointer press on an emoji inserts it (the press does not steal focus); a press
- * anywhere outside the picker and its trigger closes it.
+ * A pointer press on an emoji inserts it. No press inside the panel (other than on the
+ * search box) moves focus; a press anywhere outside the picker and its trigger closes it.
  *
  * Screen readers hear the search box as a combobox, each emoji by its name ("thumbs
  * up"), and a polite count of matches while searching.
@@ -35,6 +36,7 @@ import {
   type ChangeEvent,
   type FocusEvent,
   type KeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
   type RefObject,
 } from 'react'
 import { EMOJI_CATEGORIES, EMOJI_COLUMNS, type EmojiCategory } from './emojiData'
@@ -135,6 +137,9 @@ export function EmojiPicker({
       // Never let Enter submit the composer's form from inside the picker.
       event.preventDefault()
       event.stopPropagation()
+      // An IME is composing (e.g. Japanese input in the search box): Enter commits
+      // the composition, it does not pick.
+      if (event.nativeEvent.isComposing) return
       const entry = results[activeIndex]
       if (entry !== undefined) onPick(entry.emoji)
       return
@@ -154,6 +159,14 @@ export function EmojiPicker({
     onDismiss()
   }
 
+  // A press anywhere in the panel except the search box (an emoji, a heading, the
+  // padding, a grid gap, the "no match" line) must not take focus: focus stays in the
+  // search box, so Escape and the arrows keep working and a surrounding dialog never
+  // receives it. The search box itself is left alone so its caret can be placed.
+  const handleMouseDown = (event: ReactMouseEvent<HTMLDivElement>) => {
+    if (event.target !== searchRef.current) event.preventDefault()
+  }
+
   const starts = groupStarts(groups)
 
   return (
@@ -166,6 +179,7 @@ export function EmojiPicker({
       data-testid="emoji-picker"
       onKeyDown={handleKeyDown}
       onBlur={handleBlur}
+      onMouseDown={handleMouseDown}
     >
       <input
         ref={searchRef}
@@ -184,7 +198,15 @@ export function EmojiPicker({
         onChange={handleQuery}
       />
 
-      <div id={listboxId} role="listbox" aria-label="Emoji" className={styles.list}>
+      {/* tabIndex -1: Chrome makes a scrollable box a Tab stop of its own; the grid is
+          driven from the search box, so Tab must leave the picker instead. */}
+      <div
+        id={listboxId}
+        role="listbox"
+        aria-label="Emoji"
+        className={styles.list}
+        tabIndex={-1}
+      >
         {groups.map((group, groupIndex) => {
           const start = starts[groupIndex] ?? 0
           if (group.emoji.length === 0) return null
@@ -204,9 +226,6 @@ export function EmojiPicker({
                       aria-label={entry.name}
                       title={entry.name}
                       className={isActive ? `${styles.option} ${styles.active}` : styles.option}
-                      // Keep focus in the search box: the pick hands focus back to the
-                      // text field itself.
-                      onMouseDown={event => event.preventDefault()}
                       onClick={() => onPick(entry.emoji)}
                     >
                       {entry.emoji}

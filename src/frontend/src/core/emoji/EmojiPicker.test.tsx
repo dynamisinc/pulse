@@ -12,11 +12,16 @@
  *  - Escape closes, returns focus to the text area with the selection intact, and does
  *    not reach an ancestor's key handler (a surrounding dialog stays open);
  *  - Tab out and a press outside close it without moving focus back;
+ *  - a press on a non-option part of the panel (a heading) does not move focus, so a
+ *    following Escape still returns focus to the text area (Gate-1 M-1);
+ *  - Escape on the trigger closes the picker and stops there (L-1); going busy closes
+ *    it for good (L-2); Enter during IME composition does nothing (L-3); the scrolling
+ *    listbox is not a Tab stop (L-4);
  *  - NO NETWORK: neither fetch nor XMLHttpRequest is touched during picker use, and
  *    the emoji are text, not images.
  */
 import { useRef, useState } from 'react'
-import { render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest'
 import { EmojiPicker, EmojiPickerButton, useEmojiPicker } from '.'
@@ -223,6 +228,71 @@ describe('EmojiPicker — keyboard and insertion', () => {
     render(<Harness disabled />)
     expect(screen.getByRole('button', { name: 'Add emoji' })).toBeDisabled()
     expect(screen.queryByRole('dialog', { name: 'Emoji picker' })).not.toBeInTheDocument()
+  })
+
+  it('stays closed when the host goes busy and then idle again (L-2)', async () => {
+    const user = userEvent.setup()
+    const { rerender } = render(<Harness />)
+    await openPicker(user)
+    rerender(<Harness disabled />)
+    expect(screen.queryByRole('dialog', { name: 'Emoji picker' })).not.toBeInTheDocument()
+    rerender(<Harness />)
+    expect(screen.queryByRole('dialog', { name: 'Emoji picker' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Add emoji' })).toHaveAttribute(
+      'aria-expanded',
+      'false',
+    )
+  })
+
+  it('a press on a heading keeps focus in the picker; Escape then returns it (M-1)', async () => {
+    const user = userEvent.setup()
+    render(<Harness initial="abc" />)
+    textBox().setSelectionRange(1, 1)
+    const picker = await openPicker(user)
+    const search = within(picker).getByRole('combobox')
+
+    await user.click(within(picker).getByText('Smileys'))
+    expect(search).toHaveFocus()
+    expect(picker).toBeInTheDocument()
+
+    await user.keyboard('{Escape}')
+    expect(screen.queryByRole('dialog', { name: 'Emoji picker' })).not.toBeInTheDocument()
+    expect(textBox()).toHaveFocus()
+    expect(textBox().selectionStart).toBe(1)
+  })
+
+  it('Escape on the open trigger closes the picker and stops there (L-1)', async () => {
+    const onOuterKeyDown = vi.fn()
+    const user = userEvent.setup()
+    render(<Harness onOuterKeyDown={onOuterKeyDown} />)
+    await openPicker(user)
+    const button = screen.getByRole('button', { name: 'Add emoji' })
+
+    await user.tab({ shift: true })
+    expect(button).toHaveFocus()
+    expect(screen.getByRole('dialog', { name: 'Emoji picker' })).toBeInTheDocument()
+    onOuterKeyDown.mockClear()
+
+    await user.keyboard('{Escape}')
+    expect(screen.queryByRole('dialog', { name: 'Emoji picker' })).not.toBeInTheDocument()
+    expect(button).toHaveFocus()
+    expect(onOuterKeyDown).not.toHaveBeenCalledWith('Escape')
+  })
+
+  it('ignores Enter while an IME is composing (L-3)', async () => {
+    const user = userEvent.setup()
+    render(<Harness initial="abc" />)
+    const picker = await openPicker(user)
+    fireEvent.keyDown(within(picker).getByRole('combobox'), { key: 'Enter', isComposing: true })
+    expect(textBox()).toHaveValue('abc')
+    expect(screen.getByRole('dialog', { name: 'Emoji picker' })).toBeInTheDocument()
+  })
+
+  it('does not make the scrolling listbox a Tab stop (L-4)', async () => {
+    const user = userEvent.setup()
+    render(<Harness />)
+    const picker = await openPicker(user)
+    expect(within(picker).getByRole('listbox')).toHaveAttribute('tabindex', '-1')
   })
 })
 

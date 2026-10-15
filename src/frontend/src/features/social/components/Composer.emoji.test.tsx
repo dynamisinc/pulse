@@ -183,6 +183,24 @@ describe('ComposeModal — emoji picker (story 12a)', () => {
     expect(screen.queryByTestId('compose-discard-confirm')).not.toBeInTheDocument()
     expect(input).toHaveFocus()
 
+    // A press on a non-option part of the panel keeps focus in the picker (Gate-1 M-1):
+    // the dialog never takes focus, so Escape still closes only the picker.
+    await user.click(within(dialog).getByRole('button', { name: 'Add emoji' }))
+    await user.click(within(dialog).getByText('Smileys'))
+    expect(within(dialog).getByRole('combobox', { name: 'Search emoji' })).toHaveFocus()
+    await user.keyboard('{Escape}')
+    expect(screen.queryByRole('dialog', { name: 'Emoji picker' })).not.toBeInTheDocument()
+    expect(input).toHaveFocus()
+
+    // Escape on the trigger while the picker is open closes only the picker (L-1).
+    await user.click(within(dialog).getByRole('button', { name: 'Add emoji' }))
+    within(dialog).getByRole('button', { name: 'Add emoji' }).focus()
+    await user.keyboard('{Escape}')
+    expect(screen.queryByRole('dialog', { name: 'Emoji picker' })).not.toBeInTheDocument()
+    expect(screen.getByRole('dialog', { name: 'New post' })).toBeInTheDocument()
+    expect(screen.queryByTestId('compose-discard-confirm')).not.toBeInTheDocument()
+    input.focus()
+
     // A second Escape, now in the text area, is the dialog's again (asks to discard).
     await user.keyboard('{Escape}')
     expect(screen.getByTestId('compose-discard-confirm')).toBeInTheDocument()

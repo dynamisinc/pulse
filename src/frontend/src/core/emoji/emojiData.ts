@@ -17,7 +17,7 @@
  * arrow keys move through ONE flat list (Up/Down = +/- a row). Every category holds
  * a multiple of {@link EMOJI_COLUMNS} entries, so each category starts a fresh row
  * and Up/Down land on the emoji visually above/below even across category headings.
- * `emojiData.test.ts` enforces this; keep it true when editing the list.
+ * `emojiLogic.test.ts` enforces this; keep it true when editing the list.
  *
  * SUPPORT. Entries are Unicode 13 or earlier and avoid skin-tone and ZWJ sequences,
  * so Windows 10/11 (Segoe UI Emoji), macOS/iOS and Android all draw them natively.
