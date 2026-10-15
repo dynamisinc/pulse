@@ -147,7 +147,7 @@ Describe 'Test-DemoReady.ps1' {
         It 'passes every check (1 to 10), each naming its expected value, and returns 0' {
             $run = Invoke-Ready
             $run.Code | Should -Be 0
-            @($run.Results | Where-Object status -ne 'PASS') | Should -BeNullOrEmpty
+            @($run.Results | Where-Object { $_.status -ne 'PASS' -and $_.check -ne 'Noise posts in the opening feed' }) | Should -BeNullOrEmpty
             @($run.Results.number | Sort-Object -Unique { [int] $_ }) | Should -Be @('1', '2', '3', '4', '5', '6', '7', '8', '9', '10')
             foreach ($result in $run.Results) { $result.detail | Should -Match 'expected' }
             $run.Text | Should -Match 'READY — '
@@ -297,6 +297,16 @@ Describe 'Test-DemoReady.ps1' {
             (Get-Result $run 5 'White noise').status | Should -Be 'FAIL'
             (Get-Result $run 5 'White noise').detail | Should -Match 'expected off; got low'
             $run.Code | Should -Be 1
+        }
+
+        It 'noise posts in the opening feed: SKIP (the feed has no origin field), with the noise count and last time; no effect on the exit code' {
+            $global:ReadyFake.Routes['GET /api/staff/noise'] = @{ Status = 200; Body = [ordered]@{ level = 'off'; poolSize = 40; postedCount = 7; lastPostedAt = '2026-10-20T13:55:00.0000000+00:00'; running = $false } }
+            $run = Invoke-Ready
+            $result = Get-Result $run 5 'Noise posts in the opening feed'
+            $result.status | Should -Be 'SKIP'
+            $result.detail | Should -Match 'does not expose a post''s origin'
+            $result.detail | Should -Match 'published 7 post\(s\), the last at scenario time 2026-10-20 13:55 UTC'
+            $run.Code | Should -Be 0
         }
 
         It 'media marking off is FAIL' {
@@ -498,7 +508,7 @@ Describe 'Test-DemoReady.ps1' {
             $doc.exerciseId | Should -Be $global:ReadyFake.ExerciseId
             $doc.counts.fail | Should -Be 0
             @($doc.results).Count | Should -BeGreaterThan 10
-            @($doc.results | Where-Object status -ne 'PASS') | Should -BeNullOrEmpty
+            @($doc.results | Where-Object { $_.status -ne 'PASS' -and $_.check -ne 'Noise posts in the opening feed' }) | Should -BeNullOrEmpty
 
             Mock Write-ReadyJson { }
             Invoke-Ready | Out-Null
