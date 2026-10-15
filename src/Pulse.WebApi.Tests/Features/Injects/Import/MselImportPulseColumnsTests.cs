@@ -219,6 +219,23 @@ public sealed class MselImportPulseColumnsTests
     }
 
     [Fact]
+    public void PulseEngagement_IsInTheFile_WhenAnyOfTheThreeHeadersIsPresent_EvenWithBlankCells()
+    {
+        static ImportCandidate PlanWith(params string[] extraHeaders)
+        {
+            string[] headers = ["Inject #", "Delivery Method", "From / Source", "Description", .. extraHeaders];
+            string[] cells = ["1", "Social Media", "@KestrelFire", "hello", .. extraHeaders.Select(_ => string.Empty)];
+            return MselImportPlanner.Plan(new MselTable(headers, [new MselRow(2, cells)]), Facts).Rows.Single().Candidate!;
+        }
+
+        PlanWith().EngagementInFile.Should().BeFalse("a plain Cadence export has none of the engagement headers");
+        PlanWith("Pulse Media", "Pulse Media Alt").EngagementInFile.Should().BeFalse();
+        PlanWith(" pulse REPLIES ").EngagementInFile.Should().BeTrue("one header, even with a blank cell, makes the file the source");
+        PlanWith("Pulse Likes", "Pulse Reposts", "Pulse Replies").EngagementInFile.Should().BeTrue();
+        PlanOne(Row()).Candidate!.EngagementInFile.Should().BeTrue();
+    }
+
+    [Fact]
     public void PulseEngagement_FromAnXlsx_AnIntegralNumberCellIsAccepted_AFractionalOneFails_AndATextCellIsParsed()
     {
         var rows = new[]

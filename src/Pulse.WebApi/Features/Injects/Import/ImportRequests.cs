@@ -20,14 +20,15 @@ public static class ImportRequests
     {
         ArgumentNullException.ThrowIfNull(candidate);
 
-        return Build(candidate, candidate.AssigneeId, childId: null, replyTo: null);
+        return Build(candidate, candidate.AssigneeId, childId: null, replyTo: null, Baseline(candidate));
     }
 
     /// <summary>
-    /// The edit body for a candidate whose item exists: the MSEL-owned fields from the file (alt text and engagement
-    /// baseline included, story 14: a blank engagement cell is "not set"); the child's identity and its reply target kept
-    /// as they are (the MSEL has no column for them); and, unless the file's <c>Responsible Controller</c> matched
-    /// someone, the item's current assignee kept too (blank or unmatched alike).
+    /// The edit body for a candidate whose item exists: the MSEL-owned fields from the file (alt text included); the
+    /// child's identity and its reply target kept as they are (the MSEL has no column for them); the engagement baseline
+    /// from the file when it has any engagement column (story 14: then a blank cell is "not set"), else kept as it is (a
+    /// plain Cadence export must not wipe console-set numbers); and, unless the file's <c>Responsible Controller</c>
+    /// matched someone, the item's current assignee kept too (blank or unmatched alike).
     /// </summary>
     /// <param name="candidate">The candidate.</param>
     /// <param name="item">The existing item, with its children loaded.</param>
@@ -45,9 +46,10 @@ public static class ImportRequests
             { ReplyToPostId: { } postId } => new InjectReplyToWriteRequest { PostId = postId.ToString() },
             _ => null,
         };
+        var baseline = candidate.EngagementInFile ? Baseline(candidate) : KeptBaseline(child);
 
         var assignee = candidate.KeepExistingAssignee ? item.AssigneeId : candidate.AssigneeId;
-        return Build(candidate, assignee, child?.Id, replyTo);
+        return Build(candidate, assignee, child?.Id, replyTo, baseline);
     }
 
     /// <summary>
@@ -137,11 +139,23 @@ public static class ImportRequests
                 Reply = candidate.BaselineReply,
             };
 
+    /// <summary>The child's own baseline, echoed unchanged (the pre-story-14 update body).</summary>
+    private static InjectEngagementBaselineWriteRequest? KeptBaseline(InjectItemPost? child) =>
+        child is null || (child.BaselineLike is null && child.BaselineRepost is null && child.BaselineReply is null)
+            ? null
+            : new InjectEngagementBaselineWriteRequest
+            {
+                Like = child.BaselineLike,
+                Repost = child.BaselineRepost,
+                Reply = child.BaselineReply,
+            };
+
     private static InjectItemWriteRequest Build(
         ImportCandidate candidate,
         Guid? assigneeId,
         Guid? childId,
-        InjectReplyToWriteRequest? replyTo) => new()
+        InjectReplyToWriteRequest? replyTo,
+        InjectEngagementBaselineWriteRequest? baseline) => new()
         {
             Kind = InjectKinds.Post,
             Title = candidate.Title,
@@ -164,7 +178,7 @@ public static class ImportRequests
                         })
                         .ToList(),
                     ReplyTo = replyTo,
-                    EngagementBaseline = Baseline(candidate),
+                    EngagementBaseline = baseline,
                 },
             ],
         };

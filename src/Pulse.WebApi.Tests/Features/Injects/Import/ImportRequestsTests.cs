@@ -72,6 +72,29 @@ public sealed class ImportRequestsTests
     }
 
     [Fact]
+    public void ForUpdate_WhenTheFileHasNoEngagementColumn_KeepsTheItemsBaseline_AndReportsNoChange()
+    {
+        var item = Item(media: [], like: 500, repost: 7, reply: null);
+        var plainCadence = Candidate([], like: null, repost: null, reply: null, engagementInFile: false);
+
+        var baseline = ImportRequests.ForUpdate(plainCadence, item).Posts!.Single()!.EngagementBaseline!;
+
+        (baseline.Like, baseline.Repost, baseline.Reply).Should().Be((500, 7, (int?)null), "a plain Cadence export says nothing about engagement");
+        Changes(item, plainCadence).Should().BeEmpty("so a console-set baseline is not a difference");
+        ImportRequests.ForUpdate(plainCadence, Item(media: [])).Posts!.Single()!.EngagementBaseline.Should().BeNull();
+    }
+
+    [Fact]
+    public void ForUpdate_WhenTheFileHasAnEngagementColumn_BlankCellsClearTheBaseline()
+    {
+        var item = Item(media: [], like: 500, repost: 7, reply: null);
+        var withColumns = Candidate([], like: null, repost: null, reply: null, engagementInFile: true);
+
+        ImportRequests.ForUpdate(withColumns, item).Posts!.Single()!.EngagementBaseline.Should().BeNull();
+        Changes(item, withColumns).Should().Equal(["engagement"], "the file is the source once any engagement column is present");
+    }
+
+    [Fact]
     public void Differences_AnAltOnlyChange_IsAltText_ADifferentFileIsMedia()
     {
         var item = Item(media: [new InjectMediaRef { MediaId = Photo.ToString(), Alt = "pio-statement-card" }]);
@@ -116,8 +139,10 @@ public sealed class ImportRequestsTests
         IReadOnlyList<PlannedMedia> media,
         int? like = null,
         int? repost = null,
-        int? reply = null) =>
-        new("7", "Statement card", null, 5, null, KeepExistingAssignee: true, Persona, "Boil water notice for zones 3-5.", media, like, repost, reply);
+        int? reply = null,
+        bool engagementInFile = true) =>
+        new("7", "Statement card", null, 5, null, KeepExistingAssignee: true, Persona, "Boil water notice for zones 3-5.", media, like, repost, reply,
+            engagementInFile);
 
     /// <summary>An existing imported item matching <see cref="Candidate"/> in every field but media and baseline.</summary>
     private static InjectItem Item(IList<InjectMediaRef> media, int? like = null, int? repost = null, int? reply = null)

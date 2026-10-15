@@ -170,6 +170,88 @@ public sealed class InjectImportAltEngagementOrderTests
     }
 
     [RequiresDockerFact]
+    public async Task ReImport_AFileWithNoEngagementColumns_KeepsTheConsoleSetBaseline()
+    {
+        await using var host = await StartAsync();
+        var seed = await SeedAsync(host);
+        var plain = PlainXlsx(PioRow());
+        await ImportAsync(host, plain, dryRun: false);
+        await ConsoleEditAsync(host, seed, "101", baseline: new { like = 500, reply = 3 });
+        var before = await SnapshotAsync(host, seed.ExerciseId);
+
+        var again = await ImportAsync(host, plain, dryRun: false);
+
+        (again.Rows[1].Status, again.Rows[1].Message).Should().Be(
+            ("unchanged", (string?)null), "a plain Cadence export (no Pulse Likes/Reposts/Replies header) says nothing about engagement");
+        (await SnapshotAsync(host, seed.ExerciseId)).Should().Be(before);
+
+        var retitled = await ImportAsync(host, PlainXlsx(PioRow() with { Title = "PIO: statement card (rev 2)" }), dryRun: false);
+
+        (retitled.Rows[1].Status, retitled.Rows[1].Message).Should().Be(("updated", "changed: title"));
+        await using var db = host.Db(seed.ExerciseId);
+        var pio = await ChildAsync(db, "101");
+        (pio.BaselineLike, pio.BaselineRepost, pio.BaselineReply).Should().Be(
+            (500, (int?)null, 3), "an update from a file without engagement columns keeps the baseline, as before story 14");
+    }
+
+    [RequiresDockerFact]
+    public async Task ReImport_TheEngagementColumnsPresentButBlank_ClearTheConsoleSetBaseline()
+    {
+        await using var host = await StartAsync();
+        var seed = await SeedAsync(host);
+        var blank = Xlsx(PioRow() with { PulseLikes = "", PulseReposts = "" });
+        await ImportAsync(host, blank, dryRun: false);
+        await ConsoleEditAsync(host, seed, "101", baseline: new { like = 500, reply = 3 });
+
+        var again = await ImportAsync(host, blank, dryRun: false);
+
+        (again.Rows[1].Status, again.Rows[1].Message).Should().Be(("updated", "changed: engagement"));
+        await using (var db = host.Db(seed.ExerciseId))
+        {
+            var pio = await ChildAsync(db, "101");
+            (pio.BaselineLike, pio.BaselineRepost, pio.BaselineReply).Should().Be(
+                ((int?)null, (int?)null, (int?)null), "with the columns present the file is the source, and blank is not set");
+        }
+
+        var before = await SnapshotAsync(host, seed.ExerciseId);
+        (await ImportAsync(host, blank, dryRun: false)).Rows[1].Status.Should().Be("unchanged");
+        (await SnapshotAsync(host, seed.ExerciseId)).Should().Be(before);
+    }
+
+    [RequiresDockerFact]
+    public async Task ReImport_WithoutThePulseMediaAltHeader_KeepsThePreStory14Rule_TheFileNameStemWins()
+    {
+        await using var host = await StartAsync();
+        var seed = await SeedAsync(host);
+        var plain = PlainXlsx(PioRow());
+        await ImportAsync(host, plain, dryRun: false);
+        await using (var db = host.Db(seed.ExerciseId))
+        {
+            (await ChildAsync(db, "101")).Media.Select(media => media.Alt).Should().Equal("pio-statement-card", "zones-map");
+        }
+
+        (await ImportAsync(host, plain, dryRun: false)).Rows[1].Status.Should().Be("unchanged");
+
+        await ConsoleEditAsync(host, seed, "101", alts: ["Edited in the console", "Edited map"]);
+        var again = await ImportAsync(host, plain, dryRun: false);
+
+        // Before story 14 the importer always wrote the stem, so a console-edited alt was reset (then reported as
+        // "changed: media"). Without the header that rule is kept; story 14 only names the change precisely.
+        (again.Rows[1].Status, again.Rows[1].Message).Should().Be(("updated", "changed: alt text"));
+        await using (var db = host.Db(seed.ExerciseId))
+        {
+            (await ChildAsync(db, "101")).Media.Select(media => media.Alt).Should().Equal("pio-statement-card", "zones-map");
+        }
+
+        await ConsoleEditAsync(host, seed, "101", alts: ["Edited in the console", "Edited map"]);
+        var withHeader = await ImportAsync(host, Xlsx(PioRow()), dryRun: false);
+
+        (withHeader.Rows[1].Status, withHeader.Rows[1].Message).Should().Be(("updated", "changed: alt text, engagement"));
+        await using var after = host.Db(seed.ExerciseId);
+        (await ChildAsync(after, "101")).Media.Select(media => media.Alt).Should().Equal([PioAlt, MapAlt], "with the header the file wins");
+    }
+
+    [RequiresDockerFact]
     public async Task DryRun_ReportsTheNewFailuresAndWarnings_AndWritesNothing_NorComputesOrder()
     {
         await using var host = await StartAsync();
@@ -392,6 +474,10 @@ public sealed class InjectImportAltEngagementOrderTests
     private static byte[] Xlsx(params MselRowSpec[] rows) =>
         MselFixture.Xlsx([StartEx(), .. rows], conduct: true, pulseMedia: true, pulseExtensions: true);
 
+    /// <summary>The same, with <c>Pulse Media</c> only: none of story 14's headers (a pre-story-14 Pulse file).</summary>
+    private static byte[] PlainXlsx(params MselRowSpec[] rows) =>
+        MselFixture.Xlsx([StartEx(), .. rows], conduct: true, pulseMedia: true);
+
     // ---- host ----
 
     private async Task<InjectTestHost> StartAsync()
@@ -438,6 +524,40 @@ public sealed class InjectImportAltEngagementOrderTests
             plannedMinute,
             posts = new[] { new { personaId = seed.Fire.ToString(), text = $"{title} #Kestrel" } },
         });
+    }
+
+    /// <summary>
+    /// A controller's console edit of an imported single post (the queue's own PUT): new alt texts and/or a new
+    /// baseline, everything else echoed as it is.
+    /// </summary>
+    private static async Task ConsoleEditAsync(InjectTestHost host, Seed seed, string externalRef, string[]? alts = null, object? baseline = null)
+    {
+        InjectItem item;
+        InjectItemPost child;
+        await using (var db = host.Db(seed.ExerciseId))
+        {
+            item = await db.InjectItems.SingleAsync(row => row.ExternalRef == externalRef);
+            child = await db.InjectItemPosts.SingleAsync(post => post.InjectItemId == item.Id && post.DeletedAt == null);
+        }
+
+        var media = child.Media.Select((stored, index) => new { mediaId = stored.MediaId, alt = alts?[index] ?? stored.Alt }).ToArray();
+        var keptBaseline = child.BaselineLike is null && child.BaselineRepost is null && child.BaselineReply is null
+            ? null
+            : new { like = child.BaselineLike, repost = child.BaselineRepost, reply = child.BaselineReply };
+        var response = await host.PutAsync(item.Id.ToString(), new
+        {
+            kind = item.Kind,
+            title = item.Title,
+            notes = item.Notes,
+            plannedMinute = item.PlannedMinute,
+            assigneeId = item.AssigneeId?.ToString(),
+            version = item.Version,
+            posts = new[]
+            {
+                new { id = child.Id.ToString(), personaId = child.PersonaId.ToString(), text = child.Text, media, engagementBaseline = baseline ?? keptBaseline },
+            },
+        });
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
     }
 
     private static async Task<Guid> AddPersonaAsync(InjectTestHost host, Guid exerciseId, string handle, string displayName)

@@ -317,6 +317,9 @@ public static class MselImportPlanner
         }
 
         // Engagement baseline (story 14, DF-17): blank is not set; anything but a whole number 0..MaxBaseline fails.
+        // A file with none of the three headers (a plain Cadence export) says nothing about engagement, so an update
+        // keeps the item's baseline as before story 14; with at least one, the file is the source for all three.
+        var engagementInFile = cells.Has(PulseLikesHeader) || cells.Has(PulseRepostsHeader) || cells.Has(PulseRepliesHeader);
         var like = ParseBaseline(cells, PulseLikesHeader);
         var repost = ParseBaseline(cells, PulseRepostsHeader);
         var reply = ParseBaseline(cells, PulseRepliesHeader);
@@ -360,7 +363,8 @@ public static class MselImportPlanner
             media,
             like.Value,
             repost.Value,
-            reply.Value);
+            reply.Value,
+            engagementInFile);
 
         return PlannedImportRow.ForCandidate(row.RowNumber, injectNumber, title, handle, planned.Minute, candidate, warnings);
     }
@@ -641,6 +645,9 @@ public static class MselImportPlanner
 
         public string this[string header] =>
             _columns.TryGetValue(header, out var index) && index < _row.Cells.Count ? _row.Cells[index] : string.Empty;
+
+        /// <summary>Whether the file's header row has <paramref name="header"/> at all (a blank cell still counts).</summary>
+        public bool Has(string header) => _columns.ContainsKey(header);
     }
 
     private sealed record PlannedMinuteResult(int? Minute, string? Warning);
@@ -697,6 +704,10 @@ public sealed record PlannedMedia(Guid AssetId, string Alt);
 /// <param name="BaselineLike">The <c>Pulse Likes</c> baseline (story 14), or <c>null</c> when the cell is blank.</param>
 /// <param name="BaselineRepost">The <c>Pulse Reposts</c> baseline (story 14), or <c>null</c> when the cell is blank.</param>
 /// <param name="BaselineReply">The <c>Pulse Replies</c> baseline (story 14), or <c>null</c> when the cell is blank.</param>
+/// <param name="EngagementInFile">
+/// Whether the file has at least one of the <c>Pulse Likes</c> / <c>Pulse Reposts</c> / <c>Pulse Replies</c> headers.
+/// Then the file is the source for all three (blank is not set); without any, an update keeps the item's baseline.
+/// </param>
 public sealed record ImportCandidate(
     string ExternalRef,
     string Title,
@@ -709,7 +720,8 @@ public sealed record ImportCandidate(
     IReadOnlyList<PlannedMedia> Media,
     int? BaselineLike,
     int? BaselineRepost,
-    int? BaselineReply);
+    int? BaselineReply,
+    bool EngagementInFile);
 
 /// <summary>One data row's plan: a final outcome (skipped/failed), or a candidate the queue decides on.</summary>
 public sealed class PlannedImportRow
