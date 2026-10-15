@@ -19,11 +19,19 @@ pwsh scripts/uat/Seed-DemoContent.ps1 -StaffUsername controller1 -ReloadFiredRun
 
 **Tuesday morning, at least 1 hour before the demo** (time for a re-run, or for `-Restart`'s 8-minute wait):
 
-1. `pwsh scripts/uat/Clear-DemoContent.ps1`. It archives Monday's posts. The run sheet is not touched.
+1. `pwsh scripts/uat/Clear-DemoContent.ps1` (try `-WhatIf` first). It archives Monday's posts, and every
+   run-sheet item an MSEL import created, fired or not, so the on-stage import of the Kestrel MSEL creates all
+   of them fresh. It lists their Inject #s before writing. Items this seed loaded, or that were written in
+   the console, have no Inject # and are not touched. Open consoles drop the archived items within about 3 s
+   (they poll the run sheet). The script prints a `-RestoreManifest` command that puts everything back, except
+   an imported item whose Inject # a newer import holds by then (it says which). An imported item publishing a
+   post at that very moment is left alone and named: run the script again a few seconds later.
+   After this step, check the MSEL with the import's **Preview** only: a real import before the show leaves the
+   on-stage import nothing to create. If that happened, run steps 1 to 4 again.
 2. `pwsh scripts/uat/Reset-DemoState.ps1`.
-3. If the rehearsal fired run-sheet items, first **Skip the leftover unfired items** in the console. Then run
-   `pwsh scripts/uat/Seed-DemoContent.ps1 -StaffUsername controller1 -ReloadFiredRunSheet`. If nothing was fired,
-   run the same command without the switch.
+3. If the rehearsal fired this seed's run-sheet items, first **Skip the leftover unfired items** in the console.
+   Then run `pwsh scripts/uat/Seed-DemoContent.ps1 -StaffUsername controller1 -ReloadFiredRunSheet`. If nothing
+   was fired, run the same command without the switch.
    The seed posts the opening feed again under new ids, anchored at now. A run-sheet item kept from Monday whose
    reply pointed at one of Monday's (now archived) posts is **re-pointed in place** (`PUT /api/injects/{id}`:
    same item, same place in the queue, console edits kept). A reply a controller re-targeted to another live
@@ -45,9 +53,10 @@ So wait about 8 minutes, then run `pwsh scripts/uat/Reset-DemoState.ps1` (withou
 
 Run-of-show: `Clear-DemoContent.ps1` (optional), then `Reset-DemoState.ps1`, then this script. **After a
 rehearsal that fired the run sheet: add `-ReloadFiredRunSheet`.** Firing spends an item: the console cannot
-fire it again, the server will not delete a fired item, and neither reset script touches the inject queue. A
-plain run reports each spent item (fired, firing, skipped, failed, or a burst held part-way) in the plan, and
-its self-check fails (❌) naming the switch. With `-ReloadFiredRunSheet` each spent item gets a fresh copy
+fire it again, the server will not delete a fired item, and neither reset script touches the items this
+script loads (`Clear-DemoContent.ps1` archives only the items an MSEL import created). A plain run reports
+each spent item (fired, firing, skipped, failed, or a burst held part-way) in the plan, and its self-check fails
+(❌) naming the switch. With `-ReloadFiredRunSheet` each spent item gets a fresh copy
 (pending, at the end of the queue); the manifest records the new id and keeps the old one as `superseded`, so it
 is never adopted again. The script never fires, deletes or reorders an old item, so the old ones stay visible in
 the console: the run sheet's status filter **Open** (pending, held, firing, failed) hides the fired and skipped
