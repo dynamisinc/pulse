@@ -1,0 +1,83 @@
+/*
+ * features/social/pinned/PinnedFeed.module.css
+ * ---------------------------------------------------------------------------
+ * The Pinned tab (demo-feedback story 07). Mirrors `pages/Feed.module.css` so the three
+ * Home tabs read as one column: left-anchored, ~600px, light palette only (the Social
+ * skin has no dark palette). Values mirror `tokens.ts`'s LIGHT_PALETTE. No COBRA / MUI.
+ */
+
+.feed {
+  --pn-bg: #fff;
+  --pn-ink: #0e1518;
+  /* 4.9:1 on white - AA for the 13px bold "Pinned" line and the 15px state text. */
+  --pn-ink-muted: #61707a;
+
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 600px;
+  margin: 0;
+  background: var(--pn-bg);
+  color: var(--pn-ink);
+  font-family: 'Figtree', system-ui, sans-serif;
+  text-align: left;
+}
+
+/* A programmatic focus target only (focus continuity), never a Tab stop: no ring. */
+.feed:focus {
+  outline: none;
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.row {
+  display: block;
+}
+
+/*
+ * "Pinned" above the author line. Indented to the card's content column (16px card
+ * padding + 42px avatar + 12px gap) so it reads as part of the card it heads. The WORD
+ * carries the meaning; the thumbtack is decoration (NFR-001).
+ */
+.pinnedLabel {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 600px;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 10px 16px 0 70px;
+  color: var(--pn-ink-muted);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.pinnedIcon {
+  width: 12px;
+  height: 12px;
+}
+
+.state {
+  padding: 32px 16px;
+  color: var(--pn-ink-muted);
+  font-size: 15px;
+  text-align: center;
+}
+
+.srOnly {
+  position: absolute;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  white-space: nowrap;
+}

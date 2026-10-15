@@ -51,9 +51,25 @@
  * happen once, not once per `<ReviewQueue>` instance. `resetForTests()` tears
  * the subscription down and clears the snapshot (test-only, prevents
  * cross-test pollution / duplicate `HubConnection` builds).
+ *
+ * THE SESSION ENDS (COR-001). This singleton lives as long as the TAB, but its snapshot, its
+ * GET and its hub connection all belong to ONE staff identity (and one exercise). So it
+ * registers a reset with `core/auth/sessionReset`, which `resetClientSession()` runs on
+ * sign-out and on every sign-in, alongside `core/realtime`'s own reset that STOPS the shared
+ * connection. The store then: detaches from the connection and marks itself not started (so the
+ * next `ensureStarted()` - the next console mount - does a full fresh start: GET, subscribe and
+ * `connection.start()`, which opens a new connection on the NEW token); forgets the previous
+ * identity's items (a GET that fails would otherwise leave them on screen under the new
+ * identity); and bumps `epoch`, so a GET still in flight for the old identity is discarded
+ * instead of landing in the new one's snapshot. If a console is STILL mounted (a listener is
+ * subscribed) it re-attaches itself - deferred a microtask, so the connection's stop has begun
+ * whatever order the resets ran in, and only when a session token is stored (a sign-out has
+ * just removed it: there is nothing to attach as).
  */
 
 import { api } from '@/core/services/api'
+import { getAccessToken } from '@/core/auth/tokenStore'
+import { registerSessionReset } from '@/core/auth/sessionReset'
 import { HubConnectionState, realtimeConnection } from '@/core/realtime/connection'
 import type { RealtimeConnection } from '@/core/realtime/connection'
 import {
@@ -209,6 +225,15 @@ let started = false
 let unsubscribePush: (() => void) | null = null
 let unsubscribeState: (() => void) | null = null
 
+/** The connection `ensureStarted` attached to, so a session reset can re-attach to the same one. */
+let attachedConnection: RealtimeConnection = realtimeConnection
+
+/**
+ * Bumped whenever the session ends. A GET carries the epoch it was issued in and is discarded
+ * if it moved, so a response for a previous identity can never land in the next one's snapshot.
+ */
+let epoch = 0
+
 function notify(): void {
   for (const listener of listeners) listener()
 }
@@ -232,8 +257,10 @@ function subscribe(listener: () => void): () => void {
  * PREVIOUS snapshot in place — never substitutes an empty/default queue.
  */
 async function refetch(): Promise<void> {
+  const issuedInEpoch = epoch
   try {
     const response = await api.get<unknown>(REVIEW_QUEUE_PATH)
+    if (issuedInEpoch !== epoch) return // for an identity that has since ended
     if (!isWireReviewItemArray(response.data)) return
     items = response.data.map(toEngineReviewItem)
     notify()
@@ -290,6 +317,7 @@ function removeItemOptimistically(draftId: string): void {
 function ensureStarted(connection: RealtimeConnection = realtimeConnection): void {
   if (started) return
   started = true
+  attachedConnection = connection
 
   unsubscribePush = connection.subscribe(REVIEW_ITEM_CHANGED_EVENT, payload => reconcile(payload))
   unsubscribeState = connection.onStateChange(state => {
@@ -303,16 +331,46 @@ function ensureStarted(connection: RealtimeConnection = realtimeConnection): voi
   })
 }
 
-/**
- * Tears the subscription down and clears the snapshot. Test-only — prevents a
- * live-mode test from leaking a subscription or stale items into the next.
- */
-function resetForTests(): void {
+/** Drops the push and connection-state subscriptions and marks the store not started. */
+function detach(): void {
   if (unsubscribePush !== null) unsubscribePush()
   if (unsubscribeState !== null) unsubscribeState()
   unsubscribePush = null
   unsubscribeState = null
   started = false
+}
+
+/**
+ * The session is ending (sign-out, or a sign-in replacing this identity): forget everything
+ * that belonged to it. See the module header ("THE SESSION ENDS"). Registered below with
+ * `core/auth/sessionReset`; synchronous and never throws.
+ */
+function resetForSession(): void {
+  const stillMounted = listeners.size > 0
+  const connection = attachedConnection
+  detach()
+  epoch += 1
+  if (items.length > 0) {
+    items = []
+    notify()
+  }
+  if (!stillMounted) return
+  // A console is still subscribed: nothing will call ensureStarted() for it again, so
+  // re-attach here. A microtask later, so core/realtime's stop() (registered before this,
+  // but the order is not ours to rely on) has begun; and only with a session to attach as.
+  void Promise.resolve().then(() => {
+    if (listeners.size > 0 && getAccessToken() !== null) ensureStarted(connection)
+  })
+}
+
+/**
+ * Tears the subscription down and clears the snapshot. Test-only — prevents a
+ * live-mode test from leaking a subscription or stale items into the next.
+ */
+function resetForTests(): void {
+  detach()
+  attachedConnection = realtimeConnection
+  epoch += 1
   items = []
   listeners.clear()
 }
@@ -325,3 +383,5 @@ export const liveReviewStore = {
   removeItemOptimistically,
   resetForTests,
 }
+
+registerSessionReset(resetForSession, import.meta.hot)

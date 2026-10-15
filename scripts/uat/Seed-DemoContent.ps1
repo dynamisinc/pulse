@@ -28,7 +28,23 @@
       6. Pauses the engine (pause tier "engine") so it does not react to the seeded posts. It reads the tier
          first and never loosens a stricter one: a frozen world stays frozen. Skip this with -LeaveEngineRunning.
       7. Uploads each media file once (POST /api/media): poster images first, then each video with its
-         posterMediaId. On a 429 it waits the Retry-After and retries.
+         posterMediaId. A 201 is recorded in the manifest at once. On a 429 it waits the Retry-After and
+         retries. A 400 stops the run and prints the server's reason. An upload is not idempotent either, so
+         after an uncertain outcome (no response, 408, a 5xx or an unreadable 2xx; a 503 can come after the
+         file was stored) it never simply sends it again: it re-reads GET /api/staff/media and adopts the asset
+         that upload stored, or stops and says so (wait about a minute and run the same command again). That
+         asset is the library row with the file's kind, name, size hints and poster that was not in the library
+         when the uploading run first read it and that the manifest does not claim, and whose bytes (and its
+         poster's), fetched from its signed URL, have the file's SHA-256. The manifest marks a file "pending"
+         before its upload is sent. A run that stopped on an uncertain upload, or was interrupted during one,
+         leaves the mark, and the next run looks for that upload the same way before it sends the file again
+         (when the file's bytes, and a video's poster's bytes, are still the ones it sent). A pending video keeps
+         its poster even though the library no longer lists it: the library hides an image once a video uses
+         it as its poster. Every such look-up runs before anything is sent. So a video found there keeps the
+         poster it carries, and no new copy of that poster is uploaded, even on a run by another staff user.
+         Each look-up download has one deadline, body included. The library returns at most
+         its newest 200 rows of a kind. "Not there" counts only when those rows reach back to before the
+         upload; otherwise the script cannot tell, and it stops.
       8. Edits persona profiles: PATCH /api/staff/personas/{id} as a JSON merge-patch, covering display name,
          bio, location, verified, avatar and banner. Only the fields that differ are sent.
       9. Posts the opening feed as controller-as-persona (POST /api/posts) in scenario-time order, with
@@ -72,6 +88,10 @@
     Linux and macOS. It maps pack files and media keys to asset ids, with each file's SHA-256, post keys
     to post ids, and run-sheet item keys to inject item ids. It holds no secret.
       - A re-run uploads nothing whose bytes are unchanged and posts nothing already in the feed.
+      - An upload whose outcome was uncertain is never simply sent again, in that run or the next. The media
+        library is checked for the asset it stored (see step 7), and that asset is adopted. If it is not there
+        yet, the run stops; the next run checks again and uploads the file only if it is still not there. So a
+        lost answer does not leave a second, unused copy of the file in the library.
       - Before posting, the feed is also matched by persona, text and parent. A lost manifest therefore does
         not duplicate posts either.
       - Posts archived since the last run (for example by Clear-DemoContent.ps1) are posted again, on a fresh
@@ -1123,13 +1143,100 @@ function Get-UploadPlan {
             $videoEntry = & $entryFor $video.File
             # Gate-1 L-1: offline (-WhatIf) there is no library; $verified is already true then.
             if ($null -ne $Library -and $videoEntry -and [string] $videoEntry['posterAssetId'] -eq $posterId -and $Library.Ids.Contains([string] $videoEntry['assetId'])) { $verified = $true }
+            # The video's last upload got no clear answer: if it landed, this poster is attached to it, and the library
+            # hides it. Keep it, so step 7 can find that upload (it checks the poster's bytes) instead of sending both again.
+            if ((Test-PendingUpload -Entry $videoEntry -Unit $video -PosterUnit $unit) -and [string] $videoEntry['pending']['posterAssetId'] -eq $posterId) { $verified = $true }
         }
         if ($verified) { & $decide $unit 'reuse' $posterId 'already uploaded' }
         else { & $decide $unit 'upload' $null 'no longer in the media library' }
     }
 
     foreach ($unit in $Units) {
-        [pscustomobject]@{ Unit = $unit; Action = $decision[$unit.File].Action; AssetId = $decision[$unit.File].AssetId; Reason = $decision[$unit.File].Reason }
+        $reason = $decision[$unit.File].Reason
+        # An earlier upload of these bytes got no clear answer (or its run was interrupted): step 7 looks first, by
+        # the same test (Test-PendingUpload), so the plan says exactly what the run will do.
+        $posterUnit = if ($unit.PosterFile) { $byFile[$unit.PosterFile] } else { $null }
+        if ($decision[$unit.File].Action -eq 'upload' -and (Test-PendingUpload -Entry (& $entryFor $unit.File) -Unit $unit -PosterUnit $posterUnit)) {
+            $lookFirst = 'an earlier upload of it got no clear answer, so the media library is checked for it first'
+            $reason = if ($reason -eq 'new file') { $lookFirst } else { "$reason; $lookFirst" }
+        }
+        # A poster sent again only for a video whose earlier upload step 7 looks for first: if that upload is found, it
+        # carries this poster, and the copy already uploaded is kept instead.
+        $entry = & $entryFor $unit.File
+        if ($decision[$unit.File].Action -eq 'upload' -and $unit.Roles.Contains('poster') -and $entry -and $entry['assetId'] -and [string] $entry['sha256'] -ceq $unit.Sha256) {
+            $pendingVideos = @($Units | Where-Object { $_.PosterFile -ceq $unit.File -and (Test-PendingUpload -Entry (& $entryFor $_.File) -Unit $_ -PosterUnit $unit) })
+            if ($pendingVideos.Count -gt 0) { $reason += "; kept instead if the earlier upload of $(@($pendingVideos.File) -join ', ') is found (it carries this poster)" }
+        }
+        [pscustomobject]@{ Unit = $unit; Action = $decision[$unit.File].Action; AssetId = $decision[$unit.File].AssetId; Reason = $reason }
+    }
+}
+
+function Test-PendingUpload {
+    <#
+    .SYNOPSIS
+        True when a manifest files entry carries a "pending" mark for an upload of exactly these bytes: the file's
+        SHA-256 and, for a video with a poster, the poster file's SHA-256. Step 7 then looks for that upload in the
+        media library before sending the file again, and the plan says so. Bytes, not ids: the poster may have been
+        uploaded again since (its library row hides while it is the poster of the upload that landed).
+    #>
+    param([AllowNull()] [object] $Entry, [Parameter(Mandatory)] [object] $Unit, [AllowNull()] [object] $PosterUnit)
+    if ($Entry -isnot [System.Collections.IDictionary] -or $Entry['pending'] -isnot [System.Collections.IDictionary]) { return $false }
+    $pending = $Entry['pending']
+    $posterSha = if ($PosterUnit) { $PosterUnit.Sha256 } else { '' }
+    return ([string] $pending['sha256'] -ceq $Unit.Sha256) -and ([string] $pending['posterSha256'] -ceq $posterSha)
+}
+
+function Get-MediaUploadFileName {
+    <#
+    .SYNOPSIS
+        The file name the server keeps for an upload of this file (MediaUploadService.SanitizeFileName): the name
+        the web cmdlet sends, without control characters, cut after the last path separator, trimmed, at most 255
+        characters. $null when the server's markup stripping could change it (a '<' in the name) or it would be
+        empty: then a library row of any name can be the upload (its bytes still have to match).
+    #>
+    param([Parameter(Mandatory)] [string] $Path)
+    $name = -join @([IO.Path]::GetFileName($Path).ToCharArray() | Where-Object { -not [char]::IsControl($_) })
+    $name = ($name -split '[\\/]')[-1].Trim()
+    if (-not $name -or $name.Contains('<')) { return $null }
+    if ($name.Length -gt 255) {
+        $name = $name.Substring(0, 255)
+        if ([char]::IsHighSurrogate($name[-1])) { $name = $name.Substring(0, 254) }
+    }
+    return $name
+}
+
+function Select-MediaUploadCandidates {
+    <#
+    .SYNOPSIS
+        The library rows (GET /api/staff/media, newest first) that could be the asset an upload of this file stored,
+        before any bytes are compared: the file's kind and name, the width, height and duration hints it was sent
+        with, and a poster exactly when one was sent. A row named in KnownIds (one the library already held before
+        the upload) or in Claimed (the manifest's and this run's assets) is never a candidate.
+    #>
+    param(
+        [AllowEmptyCollection()] [object[]] $Rows = @(),
+        [Parameter(Mandatory)] [object] $Unit,
+        [switch] $WithPoster,
+        [AllowEmptyCollection()] [string[]] $KnownIds = @(),
+        [AllowNull()] [System.Collections.Generic.HashSet[string]] $Claimed
+    )
+    $name = Get-MediaUploadFileName -Path $Unit.Path
+    # The hints step 7 sends: width and height when the pack has them, durationSec for a video only.
+    $hints = @{ width = $Unit.Width; height = $Unit.Height; durationSec = $(if ($Unit.Kind -eq 'video') { $Unit.DurationSec } else { $null }) }
+    foreach ($row in @($Rows)) {
+        if ($row -isnot [System.Collections.IDictionary]) { continue }
+        $id = [string] $row['id']
+        if (-not $id -or $KnownIds -contains $id -or ($Claimed -and $Claimed.Contains($id))) { continue }
+        if ([string] $row['kind'] -cne $Unit.Kind) { continue }
+        if ($null -ne $name -and [string] $row['fileName'] -cne $name) { continue }
+        $sameHints = $true
+        foreach ($hint in $hints.Keys) {
+            $sent = $hints[$hint]; $kept = $row[$hint]
+            if (($null -eq $sent) -ne ($null -eq $kept) -or ($null -ne $sent -and [double] $sent -ne [double] $kept)) { $sameHints = $false }
+        }
+        if (-not $sameHints) { continue }
+        if ([string]::IsNullOrEmpty([string] $row['posterUrl']) -eq [bool] $WithPoster) { continue }
+        $row
     }
 }
 
@@ -2039,7 +2146,8 @@ function New-InjectRequestBody {
 # ═══════════════════════════════════════════════════════════════════════════════════════════════════════════
 # Manifest: %LOCALAPPDATA%\Pulse\demo-seed\<exerciseId>.json (Windows), $HOME/.local/share/Pulse/demo-seed
 # elsewhere. Ids, hashes and times only: never a secret or a token. Sections: files and media (uploads), personas
-# (profile edits), posts (post key → post id) and injects (run-sheet item key → inject item id).
+# (profile edits), posts (post key → post id) and injects (run-sheet item key → inject item id). A files entry
+# carries "pending" while an upload of it has been sent but has no clear answer yet (step 7 looks for it first).
 # ═══════════════════════════════════════════════════════════════════════════════════════════════════════════
 
 function Get-SeedManifestDirectory {
@@ -2104,7 +2212,7 @@ function Update-SeedManifestMediaKeys {
     $view = [ordered]@{}
     foreach ($item in @(Get-SeedList $Pack 'media')) {
         $entry = $Manifest['files'][(Get-NormalizedPackFile $item['file'])]
-        if (-not $entry) { continue }
+        if (-not $entry -or -not $entry['assetId']) { continue }    # only a pending upload so far
         $row = [ordered]@{ assetId = $entry['assetId']; sha256 = $entry['sha256'] }
         if ($entry['posterAssetId']) { $row['posterAssetId'] = $entry['posterAssetId'] }
         $view[$item['key']] = $row
@@ -2293,6 +2401,114 @@ function Add-InjectItem {
     return & $result 'uncertain' $null 0 "$why; it is not in the run sheet now"
 }
 
+function Add-MediaAsset {
+    <#
+    .SYNOPSIS
+        POST /api/media for one file, made safe to stop and run again. Returns
+        @{ Outcome = created | adopted | refused | failed | uncertain; AssetId; Status; Detail; Others }.
+    .DESCRIPTION
+        An upload is NOT idempotent: sending the file again after an uncertain outcome could store it twice (a
+        second blob and row that nothing uses). So no response (a network failure or a timeout), a 408, a 5xx (a
+        503 also comes when the file WAS stored and only its read URL could not be signed) or a 2xx without a
+        readable asset never leads to a second POST. The media library is re-read instead (Find-UploadedMediaAsset)
+        and the asset this upload stored is adopted. If it is not there, or the library cannot tell, the outcome
+        stays 'uncertain' and the run stops; the file's "pending" mark makes the next run look again before it
+        uploads. A 429 has already been waited out and retried by Invoke-PulseApi (the rate limiter refused it, so
+        nothing was stored). A 400, 413 or 415 is a refusal: the server deletes whatever it had streamed.
+    #>
+    param(
+        [Parameter(Mandatory)] [hashtable] $Context,
+        [Parameter(Mandatory)] [System.Collections.IDictionary] $Form,
+        [Parameter(Mandatory)] [object] $Unit,
+        [AllowNull()] [object] $PosterUnit,
+        [AllowEmptyCollection()] [string[]] $KnownIds = @(),
+        [AllowNull()] [System.Collections.Generic.HashSet[string]] $Claimed
+    )
+    $result = { param($Outcome, $AssetId, $Status, $Detail, $Others) [pscustomobject]@{ Outcome = $Outcome; AssetId = $AssetId; Status = [int] $Status; Detail = $Detail; Others = [int] $Others } }
+    $timeout = if ($Unit.Kind -eq 'video') { 900 } else { 180 }
+    $response = $null
+    $why = $null
+    try { $response = Invoke-PulseApi -Context $Context -Method POST -Path '/api/media' -Form $Form -TimeoutSec $timeout }
+    catch { $why = $_.Exception.Message.TrimEnd('.') }
+    if ($response) {
+        $status = $response.Status
+        $isSuccess = $status -ge 200 -and $status -lt 300
+        if ($status -eq 201 -and $response.Json -is [System.Collections.IDictionary] -and $response.Json['id']) { return & $result 'created' ([string] $response.Json['id']) 201 $null 0 }
+        if ($status -eq 400) { return & $result 'refused' $null 400 (Get-ApiErrorText $response) 0 }
+        if (-not ($isSuccess -or $status -eq 408 -or $status -ge 500)) { return & $result 'failed' $null $status (Get-ApiErrorText $response) 0 }
+        $why = if ($isSuccess) { "POST /api/media answered $status without a readable asset" } else { "POST /api/media answered $status $(Get-ApiErrorText $response)" }
+    }
+
+    # Uncertain: the file may or may not be stored now. Look before doing anything else.
+    $found = Find-UploadedMediaAsset -Context $Context -Unit $Unit -PosterUnit $PosterUnit -KnownIds $KnownIds -Claimed $Claimed
+    switch ($found.Outcome) {
+        'found' { return & $result 'adopted' $found.AssetId 0 $why $found.Others }
+        'none' { return & $result 'uncertain' $null 0 "$why; it is not in the media library now" 0 }
+        default { return & $result 'uncertain' $null 0 "$why; $($found.Detail)" 0 }
+    }
+}
+
+function Find-UploadedMediaAsset {
+    <#
+    .SYNOPSIS
+        Looks in the media library for the asset an upload of this file stored when its answer was lost. Returns
+        @{ Outcome = found | none | unknown; AssetId; Others; Detail }.
+    .DESCRIPTION
+        A GET /api/staff/media row has no size, hash or uploader, but its url (and posterUrl) is pre-signed, so the
+        bytes themselves are compared. The candidates are the rows Select-MediaUploadCandidates keeps: the file's
+        kind, name, hints and poster, not in KnownIds (rows the library held before the upload: those of that name,
+        and its newest few) and not claimed. "Not there" needs proof too: a full page (Take rows) counts only when it
+        reaches one of the KnownIds, else the answer is 'unknown'. Each candidate's bytes, and its poster's, are fetched from the signed URL (Get-MediaUrlSha256,
+        no token) and must hash to the file's SHA-256 and the poster file's. The library lists the newest upload
+        first, so the first match is adopted; Others counts any further copies (an earlier attempt that also
+        landed). 'unknown' means the library or a candidate's URL did not answer, so it cannot tell: the caller must
+        not upload then.
+    #>
+    param(
+        [Parameter(Mandatory)] [hashtable] $Context,
+        [Parameter(Mandatory)] [object] $Unit,
+        [AllowNull()] [object] $PosterUnit,
+        [AllowEmptyCollection()] [string[]] $KnownIds = @(),
+        [AllowNull()] [System.Collections.Generic.HashSet[string]] $Claimed,
+        [int] $Take = 200
+    )
+    $result = { param($Outcome, $AssetId, $Others, $Detail) [pscustomobject]@{ Outcome = $Outcome; AssetId = $AssetId; Others = [int] $Others; Detail = $Detail } }
+    $response = $null
+    try { $response = Invoke-PulseApi -Context $Context -Method GET -Path "/api/staff/media?kind=$($Unit.Kind)&take=$Take" }
+    catch { return & $result 'unknown' $null 0 "re-reading the media library failed ($($_.Exception.Message.TrimEnd('.')))" }
+    if ($response.Status -ne 200 -or $null -eq $response.Json) { return & $result 'unknown' $null 0 "re-reading the media library answered $($response.Status)" }
+    # "Not there" is only as good as the page: anything but an array of readable rows proves nothing.
+    $rows = @($response.Json)
+    $unreadable = @($rows | Where-Object { $_ -isnot [System.Collections.IDictionary] -or -not $_['id'] -or -not $_['kind'] -or -not $_['url'] -or $_['fileName'] -isnot [string] })
+    if ($response.Json -isnot [System.Collections.IList] -or $unreadable.Count -gt 0) {
+        return & $result 'unknown' $null 0 're-reading the media library answered 200 with rows it cannot read'
+    }
+
+    $candidates = @(Select-MediaUploadCandidates -Rows $rows -Unit $Unit -WithPoster:($null -ne $PosterUnit) -KnownIds $KnownIds -Claimed $Claimed)
+    $timeout = if ($Unit.Kind -eq 'video') { 900 } else { 180 }
+    $found = [System.Collections.Generic.List[string]]::new()
+    foreach ($row in $candidates) {
+        $copy = Get-MediaUrlSha256 -Url ([string] $row['url']) -Bytes $Unit.Bytes -TimeoutSec $timeout
+        if ($copy.Status -ne 200) { return & $result 'unknown' $null 0 "the library's copy $($row['id']) answered $(if ($copy.Status) { $copy.Status } else { 'nothing' })" }
+        if ($copy.Sha256 -cne $Unit.Sha256) { continue }
+        if ($PosterUnit) {
+            $poster = Get-MediaUrlSha256 -Url ([string] $row['posterUrl']) -Bytes $PosterUnit.Bytes -TimeoutSec 180
+            if ($poster.Status -ne 200) { return & $result 'unknown' $null 0 "the poster of the library's copy $($row['id']) answered $(if ($poster.Status) { $poster.Status } else { 'nothing' })" }
+            if ($poster.Sha256 -cne $PosterUnit.Sha256) { continue }
+        }
+        $found.Add([string] $row['id'])
+    }
+    if ($found.Count -gt 0) { return & $result 'found' $found[0] ($found.Count - 1) $null }
+    # A FULL page is no proof of absence: newest first, the upload could sit below it. It is proof once the page reaches
+    # a row that was there before the upload (KnownIds): every newer row, the upload included, is then on the page.
+    $reachesBack = @($rows | Where-Object { $_ -is [System.Collections.IDictionary] -and $KnownIds -contains [string] $_['id'] }).Count -gt 0
+    if ($rows.Count -ge $Take -and -not $reachesBack) {
+        return & $result 'unknown' $null 0 ("the media library's newest $Take $($Unit.Kind)s do not reach back to before that upload, so they cannot show whether it is there " +
+            '(to send the file anyway, accepting a possible second copy, remove its "pending" mark from the manifest)')
+    }
+    return & $result 'none' $null 0 $null
+}
+
 function Invoke-MediaRangeRequest {
     <#
     .SYNOPSIS
@@ -2313,6 +2529,46 @@ function Invoke-MediaRangeRequest {
     }
     catch { Clear-SeedWebErrors -Exceptions @($_.Exception); return 0 }
     finally { $client.Dispose() }
+}
+
+function Get-MediaUrlSha256 {
+    <#
+    .SYNOPSIS
+        GET <url> and returns @{ Status; Sha256 }: the SHA-256 of the body when it is a 200 of exactly -Bytes bytes,
+        else $null (another file). Status is 0 on a network failure. Like Invoke-MediaRangeRequest: no Authorization
+        header (media URLs are pre-signed, and the session token never leaves the API host), and redirects are not
+        followed. A body longer than -Bytes is not read to the end. -TimeoutSec is ONE deadline for the whole
+        download, body included: HttpClient.Timeout stops covering the body once the headers are in
+        (ResponseHeadersRead), so a stalled body would otherwise hang the run. Past it, the result is Status 0.
+    #>
+    param([Parameter(Mandatory)] [string] $Url, [Parameter(Mandatory)] [long] $Bytes, [int] $TimeoutSec = 180)
+    $handler = [System.Net.Http.HttpClientHandler]::new()
+    $handler.AllowAutoRedirect = $false
+    $client = [System.Net.Http.HttpClient]::new($handler)
+    $client.Timeout = [System.Threading.Timeout]::InfiniteTimeSpan      # the deadline below bounds everything
+    $deadline = [System.Threading.CancellationTokenSource]::new([TimeSpan]::FromSeconds($TimeoutSec))
+    $hash = [System.Security.Cryptography.IncrementalHash]::CreateHash([System.Security.Cryptography.HashAlgorithmName]::SHA256)
+    try {
+        $response = $client.GetAsync($Url, [System.Net.Http.HttpCompletionOption]::ResponseHeadersRead, $deadline.Token).GetAwaiter().GetResult()
+        try {
+            $status = [int] $response.StatusCode
+            $length = $response.Content.Headers.ContentLength
+            if ($status -ne 200 -or ($null -ne $length -and $length -ne $Bytes)) { return [pscustomobject]@{ Status = $status; Sha256 = $null } }
+            $stream = $response.Content.ReadAsStreamAsync().GetAwaiter().GetResult()
+            $buffer = [byte[]]::new(81920)
+            $total = [long] 0
+            while (($read = $stream.ReadAsync($buffer, 0, $buffer.Length, $deadline.Token).GetAwaiter().GetResult()) -gt 0) {
+                $total += $read
+                if ($total -gt $Bytes) { return [pscustomobject]@{ Status = 200; Sha256 = $null } }
+                $hash.AppendData($buffer, 0, $read)
+            }
+            if ($total -ne $Bytes) { return [pscustomobject]@{ Status = 200; Sha256 = $null } }
+            return [pscustomobject]@{ Status = 200; Sha256 = [BitConverter]::ToString($hash.GetHashAndReset()).Replace('-', '').ToLowerInvariant() }
+        }
+        finally { $response.Dispose() }
+    }
+    catch { Clear-SeedWebErrors -Exceptions @($_.Exception); return [pscustomobject]@{ Status = 0; Sha256 = $null } }
+    finally { $hash.Dispose(); $deadline.Dispose(); $client.Dispose() }
 }
 
 function Get-PauseTierRank {
@@ -2654,7 +2910,8 @@ function Invoke-DemoSeed {
         $personaIds = @{}
         foreach ($handle in $personaByHandle.Keys) { $personaIds[$handle] = [string] $personaByHandle[$handle]['id'] }
 
-        $library = @{ Ids = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase); Complete = @{} }
+        # The rows are kept too: an upload whose answer is lost is looked for among the rows that were NOT here yet.
+        $library = @{ Ids = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase); Complete = @{}; Rows = @{} }
         foreach ($kind in 'image', 'video') {
             $response = Invoke-PulseApi -Context $context -Method GET -Path "/api/staff/media?kind=$kind&take=$($limits.LibraryTake)"
             if ($response.Status -eq 503) { Write-SeedLine FAIL 'the media store is unavailable (503): uploads and media posts would fail. Check the UAT blob storage first.'; return 1 }
@@ -2662,6 +2919,7 @@ function Invoke-DemoSeed {
             $rows = @($response.Json)
             foreach ($row in $rows) { [void] $library.Ids.Add([string] $row['id']) }
             $library.Complete[$kind] = $rows.Count -lt $limits.LibraryTake
+            $library.Rows[$kind] = $rows
         }
         Write-SeedLine PASS "media library: $($library.Ids.Count) asset(s)"
 
@@ -2785,45 +3043,142 @@ function Invoke-DemoSeed {
         # ── 6. Upload media: posters first, then images, then videos with posterMediaId ────────────────────────
         Write-Host "`n6. Upload media" -ForegroundColor Cyan
         $assetIds = @{}
-        foreach ($item in $uploadPlan) {
+        # Every asset the manifest accounts for, plus each one reused, uploaded or adopted below: never adopted as
+        # another file's lost upload.
+        $claimedAssets = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+        foreach ($known in @($manifest['files'].Values)) {
+            foreach ($field in 'assetId', 'posterAssetId') { if ($known -is [System.Collections.IDictionary] -and $known[$field]) { [void] $claimedAssets.Add([string] $known[$field]) } }
+        }
+        $me = $StaffUsername.ToLowerInvariant()
+        $posterOf = { param($Unit) if ($Unit.Kind -eq 'video' -and $Unit.PosterFile) { $units | Where-Object File -ceq $Unit.PosterFile | Select-Object -First 1 } else { $null } }
+
+        # Every look-up first, before anything is sent. An earlier run sent these bytes (and this poster's bytes) and got
+        # no clear answer, or stopped mid-upload: the asset may be in the library already. A video found here carries the
+        # poster it was sent with, so that poster is kept below, never sent again, even when this run's staff user could
+        # not reuse it for a NEW video upload (the server's same-uploader rule).
+        $early = @{}
+        foreach ($item in @($uploadPlan | Where-Object Action -eq 'upload')) {
             $unit = $item.Unit
-            if ($item.Action -eq 'reuse') { $assetIds[$unit.File] = $item.AssetId; Write-SeedLine SKIP "$($unit.File) — already uploaded ($($item.AssetId))"; continue }
-            $form = [ordered]@{ file = (Get-Item -LiteralPath $unit.Path); kind = $unit.Kind }
-            if ($null -ne $unit.Width) { $form['width'] = ([long] $unit.Width).ToString([Globalization.CultureInfo]::InvariantCulture) }
-            if ($null -ne $unit.Height) { $form['height'] = ([long] $unit.Height).ToString([Globalization.CultureInfo]::InvariantCulture) }
-            if ($unit.Kind -eq 'video' -and $null -ne $unit.DurationSec) { $form['durationSec'] = ([double] $unit.DurationSec).ToString('R', [Globalization.CultureInfo]::InvariantCulture) }
-            if ($unit.Kind -eq 'video' -and $unit.PosterFile) { $form['posterMediaId'] = $assetIds[$unit.PosterFile] }
-            $timeout = if ($unit.Kind -eq 'video') { 900 } else { 180 }
-            try { $response = Invoke-PulseApi -Context $context -Method POST -Path '/api/media' -Form $form -TimeoutSec $timeout }
-            catch { $response = [pscustomobject]@{ Status = 0; Json = $null; Text = "network error: $($_.Exception.Message)" } }
-            if ($response.Status -ne 201 -or -not $response.Json['id']) {
-                $why = switch ($response.Status) {
-                    400 { "400 $(Get-ApiErrorText $response)" }
-                    413 { '413: larger than the server accepts' }
-                    415 { "415 $(Get-ApiErrorText $response)" }
-                    429 { '429: still rate-limited after retries; wait a minute and run again with -Resume' }
-                    503 { '503: the media store is unavailable' }
-                    { $_ -in 401, 403 } { "$_ — this staff user may not upload in this exercise" }
-                    default { "$_ $(Get-ApiErrorText $response)" }
-                }
-                Write-SeedLine FAIL "$($unit.File): $why"
-                Write-Host '  Progress so far is in the manifest; fix the cause and run again (uploads already made are reused).' -ForegroundColor Yellow
+            $posterUnit = & $posterOf $unit
+            $previous = if ($manifest['files'].Contains($unit.File)) { $manifest['files'][$unit.File] } else { $null }
+            if (-not (Test-PendingUpload -Entry $previous -Unit $unit -PosterUnit $posterUnit)) { continue }
+            $earlier = $previous['pending']
+            $found = Find-UploadedMediaAsset -Context $context -Unit $unit -PosterUnit $posterUnit -KnownIds @(Get-SeedList $earlier 'knownIds') -Claimed $claimedAssets
+            if ($found.Outcome -eq 'unknown') {
+                Write-SeedLine FAIL "$($unit.File): an earlier upload of it got no clear answer, and the media library cannot tell now whether it was stored: $($found.Detail)."
+                Write-Host '  Nothing was sent for it. Wait about a minute, then run the same command again.' -ForegroundColor Yellow
                 return 1
             }
-            $assetId = [string] $response.Json['id']
-            $assetIds[$unit.File] = $assetId
-            $entry = [ordered]@{
-                assetId = $assetId; sha256 = $unit.Sha256; kind = $unit.Kind; bytes = $unit.Bytes
-                uploadedBy = $StaffUsername.ToLowerInvariant(); uploadedAt = Format-SeedInstant ([DateTimeOffset]::UtcNow)
+            if ($found.Outcome -eq 'found') {
+                # Recorded with what THAT upload sent: its uploader and its poster (the poster it carries).
+                [void] $claimedAssets.Add([string] $found.AssetId)
+                $early[$unit.File] = [pscustomobject]@{
+                    Outcome = 'adopted'; AssetId = $found.AssetId; Detail = 'an earlier upload of it got no clear answer'; Others = $found.Others
+                    UploadedBy = $(if ($earlier['uploadedBy']) { [string] $earlier['uploadedBy'] } else { $me })
+                    PosterAssetId = $(if ($posterUnit) { [string] $earlier['posterAssetId'] } else { $null })
+                }
             }
-            if ($unit.Kind -eq 'video' -and $unit.PosterFile) {
-                $entry['posterAssetId'] = $assetIds[$unit.PosterFile]
-                $entry['posterSha256'] = ($units | Where-Object File -ceq $unit.PosterFile | Select-Object -First 1).Sha256
+        }
+
+        foreach ($item in $uploadPlan) {
+            $unit = $item.Unit
+            if ($item.Action -eq 'reuse') {
+                $assetIds[$unit.File] = $item.AssetId
+                [void] $claimedAssets.Add([string] $item.AssetId)
+                Write-SeedLine SKIP "$($unit.File) — already uploaded ($($item.AssetId))"
+                continue
+            }
+            $posterUnit = & $posterOf $unit
+            $posterId = if ($posterUnit) { [string] $assetIds[$unit.PosterFile] } else { $null }
+            $previous = if ($manifest['files'].Contains($unit.File)) { $manifest['files'][$unit.File] } else { $null }
+            $marked = $null
+            $outcome = $early[$unit.File]                                           # found above: nothing to send
+
+            # A poster planned to be sent again only for its videos' uploads, when each of them was found above: no
+            # upload needs it any more, so the copy already uploaded stays (the found video carries its own poster).
+            if (-not $outcome -and $unit.Roles.Contains('poster') -and $previous -is [System.Collections.IDictionary] -and $previous['assetId'] -and [string] $previous['sha256'] -ceq $unit.Sha256) {
+                $sending = @($uploadPlan | Where-Object { $_.Unit.PosterFile -ceq $unit.File -and $_.Action -eq 'upload' -and -not $early.Contains($_.Unit.File) })
+                if ($sending.Count -eq 0) {
+                    $assetIds[$unit.File] = [string] $previous['assetId']
+                    [void] $claimedAssets.Add([string] $previous['assetId'])
+                    Write-SeedLine SKIP "$($unit.File) — kept ($($previous['assetId'])): its video's earlier upload was found in the media library, so no new upload needs it"
+                    continue
+                }
+            }
+
+            if (-not $outcome) {
+                $form = [ordered]@{ file = (Get-Item -LiteralPath $unit.Path); kind = $unit.Kind }
+                if ($null -ne $unit.Width) { $form['width'] = ([long] $unit.Width).ToString([Globalization.CultureInfo]::InvariantCulture) }
+                if ($null -ne $unit.Height) { $form['height'] = ([long] $unit.Height).ToString([Globalization.CultureInfo]::InvariantCulture) }
+                if ($unit.Kind -eq 'video' -and $null -ne $unit.DurationSec) { $form['durationSec'] = ([double] $unit.DurationSec).ToString('R', [Globalization.CultureInfo]::InvariantCulture) }
+                if ($posterUnit) { $form['posterMediaId'] = $posterId }
+                # Rows the library held before this upload: those of this name (none can be the asset it stores) and the
+                # newest few (a later look-up's page that reaches one of them reaches back past the upload).
+                $name = Get-MediaUploadFileName -Path $unit.Path
+                $before = @(@($library.Rows[$unit.Kind]) | Where-Object { $_ -is [System.Collections.IDictionary] })
+                $known = @(@($before | Where-Object { $null -eq $name -or [string] $_['fileName'] -ceq $name }) + @($before | Select-Object -First 10) |
+                        ForEach-Object { [string] $_['id'] } | Select-Object -Unique)
+                # Marked pending BEFORE it is sent: a run that stops, or is interrupted, before a clear answer leaves
+                # the mark, and the next run looks for this upload (above) before sending the file again.
+                $marked = [ordered]@{}
+                if ($previous -is [System.Collections.IDictionary]) { foreach ($key in $previous.Keys) { if ($key -ne 'pending') { $marked[$key] = $previous[$key] } } }
+                $marked['pending'] = [ordered]@{
+                    sha256 = $unit.Sha256; posterAssetId = $posterId; posterSha256 = $(if ($posterUnit) { $posterUnit.Sha256 } else { $null })
+                    knownIds = $known; uploadedBy = $me; sentAt = Format-SeedInstant ([DateTimeOffset]::UtcNow)
+                }
+                $manifest['files'][$unit.File] = $marked
+                Save-SeedManifest -Manifest $manifest -Path $manifestPath
+                $outcome = Add-MediaAsset -Context $context -Form $form -Unit $unit -PosterUnit $posterUnit -KnownIds $known -Claimed $claimedAssets
+                $outcome | Add-Member -NotePropertyName UploadedBy -NotePropertyValue $me
+                $outcome | Add-Member -NotePropertyName PosterAssetId -NotePropertyValue $posterId
+            }
+
+            switch ($outcome.Outcome) {
+                { $_ -in 'refused', 'failed' } {
+                    # A clear "no": nothing was stored, so the pending mark goes (an earlier one was looked for above).
+                    $kept = [ordered]@{}
+                    foreach ($key in $marked.Keys) { if ($key -ne 'pending') { $kept[$key] = $marked[$key] } }
+                    if ($kept.Count -gt 0) { $manifest['files'][$unit.File] = $kept } else { $manifest['files'].Remove($unit.File) }
+                    Save-SeedManifest -Manifest $manifest -Path $manifestPath
+                    $why = switch ($outcome.Status) {
+                        400 { "400 $($outcome.Detail)" }
+                        413 { '413: larger than the server accepts' }
+                        415 { "415 $($outcome.Detail)" }
+                        429 { '429: still rate-limited after retries; wait a minute and run again with -Resume' }
+                        { $_ -in 401, 403 } { "$_ — this staff user may not upload in this exercise" }
+                        default { "$_ $($outcome.Detail)" }
+                    }
+                    Write-SeedLine FAIL "$($unit.File): $why"
+                    Write-Host '  Progress so far is in the manifest; fix the cause and run again (uploads already made are reused).' -ForegroundColor Yellow
+                    return 1
+                }
+                'uncertain' {
+                    Write-SeedLine FAIL "$($unit.File): $($outcome.Detail)."
+                    Write-Host '  It may or may not have been stored, so it was NOT sent again (that could store it twice). Wait about a minute' -ForegroundColor Yellow
+                    Write-Host '  (the server may still be finishing it), then run the same command again. The media library is checked first,' -ForegroundColor Yellow
+                    Write-Host '  and the asset that upload stored (same kind, name and bytes) is adopted instead of sent again.' -ForegroundColor Yellow
+                    return 1
+                }
+            }
+            $assetId = [string] $outcome.AssetId
+            $assetIds[$unit.File] = $assetId
+            [void] $claimedAssets.Add($assetId)
+            # Recorded exactly as a 201 would be; an adopted asset says when it was adopted instead of uploaded.
+            $entry = [ordered]@{ assetId = $assetId; sha256 = $unit.Sha256; kind = $unit.Kind; bytes = $unit.Bytes; uploadedBy = $outcome.UploadedBy }
+            $entry[$(if ($outcome.Outcome -eq 'adopted') { 'adoptedAt' } else { 'uploadedAt' })] = Format-SeedInstant ([DateTimeOffset]::UtcNow)
+            if ($posterUnit) {
+                $entry['posterAssetId'] = $outcome.PosterAssetId
+                $entry['posterSha256'] = $posterUnit.Sha256
             }
             $manifest['files'][$unit.File] = $entry
             Update-SeedManifestMediaKeys -Manifest $manifest -Pack $pack
             Save-SeedManifest -Manifest $manifest -Path $manifestPath
-            Write-SeedLine PASS ("{0} — uploaded ({1}, {2}) -> {3}" -f $unit.File, $unit.Kind, (Format-Bytes $unit.Bytes), $assetId)
+            if ($outcome.Outcome -eq 'adopted') {
+                $extra = if ($outcome.Others -gt 0) { " ($($outcome.Others) more stored cop$(if ($outcome.Others -eq 1) { 'y' } else { 'ies' }) of it stay unused in the library; participants never see them)" } else { '' }
+                Write-SeedLine WARN ("{0} — {1}; the asset it stored (same kind, name and bytes) was found in the media library and adopted, not sent again -> {2}{3}" -f
+                    $unit.File, $outcome.Detail, $assetId, $extra)
+            }
+            else { Write-SeedLine PASS ("{0} — uploaded ({1}, {2}) -> {3}" -f $unit.File, $unit.Kind, (Format-Bytes $unit.Bytes), $assetId) }
         }
         Update-SeedManifestMediaKeys -Manifest $manifest -Pack $pack
         Save-SeedManifest -Manifest $manifest -Path $manifestPath

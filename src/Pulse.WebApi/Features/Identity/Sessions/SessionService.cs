@@ -2,9 +2,11 @@ namespace Pulse.WebApi.Features.Identity.Sessions;
 
 using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
+using Pulse.WebApi.Features.Identity.EasyLogin;
 
 /// <summary>
 /// The service behind the three session-lifecycle endpoints (story 03): <c>GET /api/session</c> (resolve the
@@ -30,6 +32,24 @@ using Pulse.WebApi.Data.Entities;
 /// <c>StaffLoginService</c>. The <c>session.expired</c> event is emitted only from <c>GET /api/session</c> (the
 /// bounded moment the client learns it must re-auth), never per-request in the middleware, to avoid spamming.
 /// </para>
+/// <para>
+/// <b>Participant day cap on refresh (easy-login story 06, EL-10, EL-11).</b> A <c>participant</c>-kind session's
+/// windows are recomputed on every refresh (see <see cref="ParticipantSessionCap"/>): the refresh window ends at the end
+/// of the CURRENT exercise day and the access expiry is <c>min(now + SessionLifetime, end of day)</c>, so a session can
+/// never slide into the next day. Once the day of the session's last issue or refresh has ended, refresh is the
+/// ordinary fail-closed 401 with no event; a row whose stored window was still open at that point (stamped under the
+/// old sliding rule) is also revoked, so it reads as ended in the audit trail and a retry stops at the revoked check. Refresh is deliberately NOT refused at EndEx (<c>completed</c>): the
+/// lifecycle gate already refuses participant data routes, and refusing refresh would bounce participants off the
+/// COR-054 EndEx overlay. Staff and read-only sessions renew exactly as before.
+/// </para>
+/// <para>
+/// <b>Only an enabled account renews (easy-login Gate-2 W-001, S-1).</b> A <c>participant</c>-kind session bound to an
+/// account renews only while an ENABLED account with that id exists in the session's OWN exercise. Fail closed: a
+/// disabled account, a missing one and one that belongs to another exercise are all refused exactly like a revoked
+/// session (the same 401, no event, no write). Disable ends the account's live sessions itself, committing before it
+/// sweeps (Gate-2 S-2); this is the defence in depth behind it, so a session that ever outlived a Disable would end
+/// within one access-token lifetime. Staff and read-only sessions carry no account and are not checked.
+/// </para>
 /// </remarks>
 public sealed class SessionService
 {
@@ -46,17 +66,39 @@ public sealed class SessionService
 
     private readonly PulseDbContext _dbContext;
     private readonly SessionOptions _options;
+    private readonly ExerciseFactsReader _exerciseFacts;
+    private readonly int _dayRolloverHour;
+    private readonly TimeProvider _timeProvider;
+    private readonly ILogger<SessionService> _logger;
 
-    /// <summary>Creates the service over its persistence context and the configured session lifetimes.</summary>
+    /// <summary>Creates the service over its persistence context, the configured session lifetimes and the day cap's inputs.</summary>
     /// <param name="dbContext">The persistence context the session mutation + its lifecycle event are written through.</param>
-    /// <param name="options">The short-lived session / refresh-window lifetimes used when renewing on refresh.</param>
-    public SessionService(PulseDbContext dbContext, IOptions<SessionOptions> options)
+    /// <param name="options">The short-lived session / refresh-window lifetimes used when renewing on refresh, and the participant day-cap switch.</param>
+    /// <param name="exerciseFacts">The easy-login exercise read (EL-17): the bound exercise's zone and stored scenario time on refresh.</param>
+    /// <param name="easyLoginOptions">The easy-login settings, for the exercise day's rollover hour.</param>
+    /// <param name="timeProvider">The server wall clock.</param>
+    /// <param name="logger">Logs the once-per-exercise time-zone fallback warning.</param>
+    public SessionService(
+        PulseDbContext dbContext,
+        IOptions<SessionOptions> options,
+        ExerciseFactsReader exerciseFacts,
+        IOptions<EasyLoginOptions> easyLoginOptions,
+        TimeProvider timeProvider,
+        ILogger<SessionService> logger)
     {
         ArgumentNullException.ThrowIfNull(dbContext);
         ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(exerciseFacts);
+        ArgumentNullException.ThrowIfNull(easyLoginOptions);
+        ArgumentNullException.ThrowIfNull(timeProvider);
+        ArgumentNullException.ThrowIfNull(logger);
 
         _dbContext = dbContext;
         _options = options.Value;
+        _exerciseFacts = exerciseFacts;
+        _dayRolloverHour = easyLoginOptions.Value.DayRolloverHour;
+        _timeProvider = timeProvider;
+        _logger = logger;
     }
 
     /// <summary>
@@ -85,7 +127,7 @@ public sealed class SessionService
             return SessionQueryResult.Absent();
         }
 
-        var now = DateTimeOffset.UtcNow;
+        var now = _timeProvider.GetUtcNow();
         if (session.IsLive(now))
         {
             return SessionQueryResult.Live(session);
@@ -107,8 +149,10 @@ public sealed class SessionService
     /// Renews a short-lived session for <c>POST /api/auth/refresh</c> from its refresh token, rotating BOTH
     /// tokens and preserving the exact binding (never re-scoping to a different exercise / account). Emits one
     /// <c>session.refreshed</c> XC-004 event in the same unit of work. Fails closed
-    /// (<see cref="RefreshOutcome.Invalid"/> → 401) on an absent/unknown refresh token, or one whose session is
-    /// revoked or whose refresh window has lapsed.
+    /// (<see cref="RefreshOutcome.Invalid"/> → 401, no event) on an absent/unknown refresh token, or one whose session
+    /// is revoked or whose refresh window has lapsed, or (a participant session) whose account is not an enabled account
+    /// of the session's own exercise, or (a capped participant session) whose exercise day has ended. In that last case
+    /// the session is also revoked (still no event), because its stored window was still open.
     /// </summary>
     /// <param name="rawRefreshToken">The presented raw refresh token, or <c>null</c> when none.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
@@ -124,7 +168,7 @@ public sealed class SessionService
         var session = await _dbContext.Sessions
             .SingleOrDefaultAsync(s => s.RefreshTokenHash == refreshHash, cancellationToken);
 
-        var now = DateTimeOffset.UtcNow;
+        var now = _timeProvider.GetUtcNow();
         if (session is null ||
             session.RevokedAt is not null ||
             session.RefreshExpiresAt is null ||
@@ -134,18 +178,61 @@ public sealed class SessionService
             return RefreshResult.Invalid();
         }
 
+        if (session.Kind == ParticipantKind
+            && session.AccountId is { } accountId
+            && !await IsEnabledAccountOfExerciseAsync(session.ExerciseId, accountId, cancellationToken))
+        {
+            // easy-login Gate-2 W-001 / S-1, fail closed: the bound account is disabled, gone, or not this exercise's.
+            // Refused exactly as a revoked session is: 401, no event, nothing written.
+            return RefreshResult.Invalid();
+        }
+
+        // The bound exercise's facts: the ONE exercise read on this path, through the easy-login reader (EL-17), shared
+        // by the participant day cap (zone) and the session.refreshed envelope (stored scenario time + zone). The id is
+        // the server-issued session's own binding, so a session for exercise A is only ever capped by A's zone.
+        var facts = await _exerciseFacts.GetAsync(session.ExerciseId, cancellationToken);
+
+        DateTimeOffset? endOfExerciseDay = null;
+        if (ParticipantSessionCap.AppliesTo(session.Kind, _options))
+        {
+            // The session's day is the day of its last issue or refresh (IssuedAt). Recomputing that day's end from the
+            // zone, rather than trusting the stored window alone, means a window stamped under other rules (option off,
+            // or before the cap shipped) cannot carry the session into the next day either.
+            endOfExerciseDay = ParticipantSessionCap.EndOfExerciseDay(
+                session.ExerciseId,
+                facts,
+                session.IssuedAt,
+                _dayRolloverHour,
+                _logger);
+
+            if (endOfExerciseDay.Value <= now)
+            {
+                // The exercise day is over → a full sign-in (tap the link again, or the new day's word). Same
+                // fail-closed 401 as a lapsed window, and no event (story 06 telemetry AC). The stored window was still
+                // open (the row predates the cap or was stamped with it off), so the row is ended here: RevokedAt marks
+                // it as over in the audit trail, its access token stops at once, and a retry fails at the revoked check
+                // above without another exercise read. Nothing else on the row changes.
+                session.RevokedAt = now;
+                await _dbContext.SaveChangesAsync(cancellationToken);
+                return RefreshResult.Invalid();
+            }
+        }
+
         // Rotate both references (the old ones can no longer be replayed) and renew the windows. The binding is
         // PRESERVED verbatim — no field except the token hashes / timestamps is touched, so refresh can never
         // re-scope to a different exercise or account.
+        var windows = ParticipantSessionCap.Windows(now, endOfExerciseDay, _options);
         var newSessionToken = SessionTokens.Generate();
         var newRefreshToken = SessionTokens.Generate();
         session.TokenHash = SessionTokens.Hash(newSessionToken);
         session.RefreshTokenHash = SessionTokens.Hash(newRefreshToken);
         session.IssuedAt = now;
-        session.ExpiresAt = now + _options.SessionLifetime;
-        session.RefreshExpiresAt = now + _options.RefreshLifetime;
+        session.ExpiresAt = windows.ExpiresAt;
+        session.RefreshExpiresAt = windows.RefreshExpiresAt;
 
-        await EmitLifecycleEventAsync(session, SessionRefreshedEventType, now, cancellationToken);
+        // The same session.refreshed event as before, built from the facts already read (no second exercise read).
+        AddLifecycleEvent(session, SessionRefreshedEventType, now, facts?.StoredScenarioTime, facts?.TimeZone);
+        await _dbContext.SaveChangesAsync(cancellationToken);
 
         return RefreshResult.Refreshed(session, newSessionToken, newRefreshToken);
     }
@@ -175,11 +262,25 @@ public sealed class SessionService
             return;
         }
 
-        var now = DateTimeOffset.UtcNow;
+        var now = _timeProvider.GetUtcNow();
         session.RevokedAt = now;
 
         await EmitLifecycleEventAsync(session, LogoutEventType, now, cancellationToken);
     }
+
+    /// <summary>
+    /// Whether an ENABLED account with <paramref name="accountId"/> exists in <paramref name="exerciseId"/>, the
+    /// session's own exercise. The read ignores the central filter on purpose and carries BOTH ids explicitly instead:
+    /// the filter is keyed on the refresh REQUEST's resolved scope, which is not the session's binding (it may be unset,
+    /// or another exercise). The explicit <c>ExerciseId</c> predicate is what keeps the check inside the session's own
+    /// exercise: an account of exercise A never satisfies a session bound to exercise B, whatever its state. The ids are
+    /// the server-issued session's own binding, never caller input.
+    /// </summary>
+    private Task<bool> IsEnabledAccountOfExerciseAsync(Guid exerciseId, Guid accountId, CancellationToken cancellationToken) =>
+        _dbContext.Accounts
+            .IgnoreQueryFilters()
+            .AsNoTracking()
+            .AnyAsync(a => a.ExerciseId == exerciseId && a.Id == accountId && a.DisabledAt == null, cancellationToken);
 
     /// <summary>
     /// Adds one XC-004 session-lifecycle event against the locked v0 envelope and persists it together with the
@@ -200,9 +301,23 @@ public sealed class SessionService
             .AsNoTracking()
             .FirstOrDefaultAsync(e => e.Id == session.ExerciseId, cancellationToken);
 
-        var scenarioTime = exercise?.CurrentScenarioTime ?? now;
-        var timeZone = exercise?.TimeZone ?? FallbackTimeZone;
+        AddLifecycleEvent(session, eventType, now, exercise?.CurrentScenarioTime, exercise?.TimeZone);
 
+        await _dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// Stages one XC-004 session-lifecycle event against the locked v0 envelope (the caller saves it with its session
+    /// mutation). Scenario time is the bound exercise's stored scenario time, falling back to the wall clock; the zone
+    /// falls back to UTC when the exercise could not be read.
+    /// </summary>
+    private void AddLifecycleEvent(
+        Session session,
+        string eventType,
+        DateTimeOffset now,
+        DateTimeOffset? storedScenarioTime,
+        string? timeZone)
+    {
         _dbContext.TelemetryEvents.Add(new TelemetryEvent
         {
             EventId = Guid.NewGuid().ToString(),
@@ -212,12 +327,10 @@ public sealed class SessionService
             Channel = SystemChannel,
             Actor = BuildActor(session),
             WallClockTime = now,
-            ScenarioTime = scenarioTime,
-            TimeZone = timeZone,
+            ScenarioTime = storedScenarioTime ?? now,
+            TimeZone = timeZone ?? FallbackTimeZone,
             EmittedAt = now,
         });
-
-        await _dbContext.SaveChangesAsync(cancellationToken);
     }
 
     /// <summary>

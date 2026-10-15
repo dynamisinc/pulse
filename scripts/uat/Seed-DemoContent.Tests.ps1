@@ -75,6 +75,10 @@ BeforeAll {
             Posts = [System.Collections.Generic.List[object]]::new()
             Calls = [System.Collections.Generic.List[object]]::new()
             FailPostNumber = 0; PostAttempts = 0; RateLimitFirstUpload = $false; Tier = 'running'
+            # POST /api/media: attempt number → 'lost-before-write' | 'lost-after-write' | '408-after-write' |
+            # '503-after-write' (stored, but its URL could not be signed: MediaUploadService's 503) | 'unreadable-201' |
+            # 'refused' (a 400; nothing stored).
+            MediaAttempts = 0; MediaFaults = @{}
             # The inject queue (inject-queue 06): live items in queue order, the staff roster, and per-attempt faults
             # for POST /api/injects (attempt number → 'rate-limited' | 'lost-before-write' | 'lost-after-write' |
             # '408-after-write' | '503-after-write' | 'unreadable-201').
@@ -259,12 +263,24 @@ BeforeAll {
                 return & $reply 200 (& $personaView $persona)
             }
             '^/api/staff/media$' {
+                # MediaLibraryService: newest first, posters hidden, and the StaffMediaAssetView shape (hints only when set).
                 $kind = [regex]::Match($query, 'kind=(\w+)').Groups[1].Value
                 $posters = @($Fake.Assets.Values | Where-Object poster | ForEach-Object poster)
-                return & $reply 200 @($Fake.Assets.Values | Where-Object { $_.kind -eq $kind -and $posters -notcontains $_.id } | ForEach-Object { [ordered]@{ id = $_.id; kind = $_.kind; url = (& $blob $_.id); fileName = $_.fileName; uploadedAtScenario = '2026-10-19T00:00:00.000Z' } })
+                $rows = @($Fake.Assets.Values | Where-Object { $_.kind -eq $kind -and $posters -notcontains $_.id } | ForEach-Object {
+                        $row = [ordered]@{ id = $_.id; kind = $_.kind; url = (& $blob $_.id); fileName = $_.fileName; uploadedAtScenario = '2026-10-19T00:00:00.000Z' }
+                        if ($_.poster) { $row['posterUrl'] = & $blob $_.poster }
+                        foreach ($hint in 'width', 'height', 'durationSec') { if ($null -ne $_[$hint]) { $row[$hint] = $_[$hint] } }
+                        $row
+                    })
+                [array]::Reverse($rows)
+                return & $reply 200 $rows
             }
             '^/api/media$' {
                 if ($Fake.RateLimitFirstUpload) { $Fake.RateLimitFirstUpload = $false; return & $reply 429 ([ordered]@{ error = 'rate-limited' }) @{ 'Retry-After' = @('7') } }
+                $Fake.MediaAttempts++
+                $fault = $Fake.MediaFaults[$Fake.MediaAttempts]
+                if ($fault -eq 'lost-before-write') { throw [System.Net.Http.HttpRequestException]::new('The response ended prematurely.') }
+                if ($fault -eq 'refused') { return & $reply 400 'The multipart body is malformed.' }
                 if (-not $Form -or $Form['file'] -isnot [IO.FileInfo]) { return & $reply 400 "A 'file' part is required." }
                 $sniff = Get-MediaSniff -Head (Read-FileHead -Path $Form['file'].FullName)
                 if (-not $sniff) { return & $reply 415 'Unsupported file type.' }
@@ -276,7 +292,18 @@ BeforeAll {
                     if ($sniff.Kind -ne 'video' -or -not $posterAsset -or $posterAsset.kind -ne 'image') { return & $reply 400 'posterMediaId does not name an image you uploaded in this exercise.' }
                 }
                 $id = [guid]::NewGuid().ToString()
-                $Fake.Assets[$id] = [ordered]@{ id = $id; kind = $sniff.Kind; poster = $poster; fileName = $Form['file'].Name }
+                $Fake.Assets[$id] = [ordered]@{
+                    id = $id; kind = $sniff.Kind; poster = $poster; fileName = $Form['file'].Name
+                    sha256 = (Get-FileSha256 -Path $Form['file'].FullName); bytes = $Form['file'].Length
+                    width = $(if ($Form.Contains('width')) { [int] $Form['width'] }); height = $(if ($Form.Contains('height')) { [int] $Form['height'] })
+                    durationSec = $(if ($Form.Contains('durationSec')) { [double]::Parse($Form['durationSec'], [Globalization.CultureInfo]::InvariantCulture) })
+                }
+                switch ($fault) {
+                    'lost-after-write' { throw [System.Net.Http.HttpRequestException]::new('The response ended prematurely.') }
+                    '408-after-write' { return & $reply 408 'Request timed out.' }
+                    '503-after-write' { return & $reply 503 ([ordered]@{ error = 'media-store-unavailable' }) }
+                    'unreadable-201' { return [pscustomobject]@{ StatusCode = 201; Content = '<html>gateway</html>'; Headers = @{} } }
+                }
                 $view = [ordered]@{ id = $id; kind = $sniff.Kind; url = (& $blob $id) }
                 if ($poster) { $view['posterUrl'] = & $blob $poster }
                 return & $reply 201 $view
@@ -474,6 +501,16 @@ BeforeAll {
                     if ($path -like '/blob/*') {
                         if ($request.Headers['Authorization']) { & $send $context 400 'token sent to the blob host'; continue }
                         if ($request.Headers['Range'] -eq 'bytes=0-1') { & $send $context 206 $null @{ 'Content-Range' = 'bytes 0-1/2' } ([byte[]] (1, 2)) } else { & $send $context 200 $null @{} ([byte[]] (1, 2)) }
+                        continue
+                    }
+                    if ($path -like '/stall/*') {
+                        # A 200 that promises 10 bytes, sends 2, then stalls until the test releases it (or 30 s pass).
+                        $stalled = $context.Response
+                        $stalled.StatusCode = 200; $stalled.ContentLength64 = 10
+                        $stalled.OutputStream.Write([byte[]] (1, 2), 0, 2); $stalled.OutputStream.Flush()
+                        $held = [Diagnostics.Stopwatch]::StartNew()
+                        while (-not $State.Release -and $held.Elapsed.TotalSeconds -lt 30) { Start-Sleep -Milliseconds 50 }
+                        try { $stalled.Abort() } catch { }
                         continue
                     }
                     if ($path -eq '/api/exercise-context') { & $send $context 200 ([ordered]@{ exerciseId = $State.ExerciseId; exerciseName = 'Listener'; timeZone = 'America/Chicago'; status = 'live' }); continue }
@@ -1324,6 +1361,391 @@ Describe 'End to end against the fake API' {
         Should -Invoke Invoke-MediaRangeRequest -Times 5 -Exactly
         Should -Invoke Invoke-MediaRangeRequest -ParameterFilter { $Url -like 'https://blob.fake.test/*' } -Times 5 -Exactly
         (Get-Command Invoke-MediaRangeRequest).Parameters.Keys | Should -Not -Contain 'Headers'
+    }
+}
+
+Describe 'Media upload: an uncertain outcome is looked up and adopted, never sent twice' {
+    BeforeAll {
+        function Get-SeedManifestFiles { (ConvertFrom-SeedJson (Get-Content -LiteralPath (Join-Path $TestDrive 'manifests' "$($script:Fake.ExerciseId).json") -Raw))['files'] }
+        function Get-FixtureUnit([string] $File) { Get-FixtureUnits | Where-Object File -eq $File }
+        function Add-FakeAsset {
+            <# An asset stored the way the fake's POST /api/media stores one (as if an upload had landed). #>
+            param($Unit, [string] $Poster)
+            $id = [guid]::NewGuid().ToString()
+            $script:Fake.Assets[$id] = [ordered]@{
+                id = $id; kind = $Unit.Kind; poster = $Poster; fileName = [IO.Path]::GetFileName($Unit.Path); sha256 = $Unit.Sha256; bytes = $Unit.Bytes
+                width = $Unit.Width; height = $Unit.Height; durationSec = $(if ($Unit.Kind -eq 'video') { $Unit.DurationSec })
+            }
+            return $id
+        }
+        function New-LibraryRow {
+            param([string] $Id, [string] $FileName = 'harbor-photo.jpg', [string] $Kind = 'image', [hashtable] $Set = @{})
+            $row = [ordered]@{ id = $Id; kind = $Kind; url = "https://blob.fake.test/post-media/$Id`?sig=SAS"; fileName = $FileName; uploadedAtScenario = '2026-10-19T00:00:00.000Z'; width = 96; height = 64 }
+            foreach ($key in $Set.Keys) { if ($null -eq $Set[$key]) { $row.Remove($key) } else { $row[$key] = $Set[$key] } }
+            return $row
+        }
+    }
+
+    Context 'end to end' {
+        BeforeEach {
+            $script:Fake = New-FakePulse
+            $env:PULSE_STAFF_SECRET = $script:Fake.Secret
+            Mock Invoke-WebRequest { Invoke-FakePulse -Fake $script:Fake -Uri $Uri -Method $Method -Headers $Headers -Body $Body -Form $Form -ContentType $ContentType }
+            Mock Invoke-MediaRangeRequest { 206 }
+            Mock Start-Sleep { }
+            # The signed URL's bytes: the fake keeps each stored file's SHA-256 and size.
+            Mock Get-MediaUrlSha256 {
+                $asset = $script:Fake.Assets[([Uri] $Url).AbsolutePath.Split('/')[-1]]
+                if (-not $asset) { return [pscustomobject]@{ Status = 404; Sha256 = $null } }
+                [pscustomobject]@{ Status = 200; Sha256 = $(if ($asset.bytes -eq $Bytes) { $asset.sha256 } else { $null }) }
+            }
+            Remove-Item -Recurse -Force (Join-Path $TestDrive 'manifests') -ErrorAction SilentlyContinue
+        }
+        AfterEach { $env:PULSE_STAFF_SECRET = $null }
+
+        It 'an uncertain upload (<Fault>) is never sent twice: the library is re-read and the stored asset adopted' -ForEach @(
+            @{ Fault = 'lost-after-write' }
+            @{ Fault = '408-after-write' }
+            @{ Fault = '503-after-write' }
+            @{ Fault = 'unreadable-201' }
+        ) {
+            $script:Fake.MediaFaults[1] = $Fault                                # the first upload: the video's poster
+            $run = Invoke-FakeSeed
+            $run.Code | Should -Be 0 -Because $run.Text
+            (Get-FakeCalls POST '/api/media').Count | Should -Be 5              # the poster once (adopted), then the other four
+            $script:Fake.Assets.Count | Should -Be 5                            # no second copy of the poster
+            (Get-FakeCalls GET '/api/staff/media').Count | Should -Be 3         # step 4's two reads, then the look-up
+            $poster = @($script:Fake.Assets.Values | Where-Object fileName -eq 'river-clip.poster.jpg')
+            $poster.Count | Should -Be 1
+            $run.Text | Should -Match 'media/river-clip\.poster\.jpg — POST /api/media .+; the asset it stored \(same kind, name and bytes\) was found in the media library and adopted, not sent again'
+            $entry = (Get-SeedManifestFiles)['media/river-clip.poster.jpg']
+            $entry['assetId'] | Should -Be $poster[0].id
+            $entry['sha256'] | Should -Be (Get-FixtureUnit 'media/river-clip.poster.jpg').Sha256
+            $entry['uploadedBy'] | Should -Be 'controller1'
+            $entry['adoptedAt'] | Should -Not -BeNullOrEmpty
+            $entry.Contains('pending') | Should -BeFalse
+            # The video went up with the adopted poster, and the posts and the self-check pass.
+            (Get-FakeCalls POST '/api/media' | Where-Object { $_.Form['kind'] -eq 'video' }).Form['posterMediaId'] | Should -Be $poster[0].id
+            $run.Text | Should -Match 'SEEDED'
+        }
+
+        It 'an uncertain VIDEO upload is adopted only with its poster, and the manifest keeps the poster link' {
+            $script:Fake.MediaFaults[5] = 'lost-after-write'                    # posters, images, then the video
+            $run = Invoke-FakeSeed
+            $run.Code | Should -Be 0 -Because $run.Text
+            (Get-FakeCalls POST '/api/media').Count | Should -Be 5
+            $script:Fake.Assets.Count | Should -Be 5
+            $files = Get-SeedManifestFiles
+            $video = @($script:Fake.Assets.Values | Where-Object kind -eq 'video')
+            $files['media/river-clip.mp4']['assetId'] | Should -Be $video[0].id
+            $files['media/river-clip.mp4']['posterAssetId'] | Should -Be $files['media/river-clip.poster.jpg']['assetId']
+            $files['media/river-clip.mp4']['posterSha256'] | Should -Be (Get-FixtureUnit 'media/river-clip.poster.jpg').Sha256
+            $video[0].poster | Should -Be $files['media/river-clip.poster.jpg']['assetId']
+            Should -Invoke Get-MediaUrlSha256 -Times 2 -Exactly                 # the video's bytes, then its poster's
+        }
+
+        It 'an uncertain upload that did not land stops without re-sending; the next run looks first, then uploads it once' {
+            $script:Fake.MediaFaults[2] = 'lost-before-write'                   # the harbor photo
+            $first = Invoke-FakeSeed
+            $first.Code | Should -Be 1
+            $first.Text | Should -Match ([regex]::Escape('[FAIL] media/harbor-photo.jpg: POST /api/media failed: The response ended prematurely; it is not in the media library now.'))
+            $first.Text | Should -Match 'NOT sent again'
+            $first.Text | Should -Match 'run the same command again'
+            (Get-FakeCalls POST '/api/media').Count | Should -Be 2
+            $script:Fake.Assets.Count | Should -Be 1                            # the poster only
+            $script:Fake.Posts.Count | Should -Be 0
+            $pending = (Get-SeedManifestFiles)['media/harbor-photo.jpg']['pending']
+            $pending['sha256'] | Should -Be (Get-FixtureUnit 'media/harbor-photo.jpg').Sha256
+            $pending['uploadedBy'] | Should -Be 'controller1'
+
+            $script:Fake.Calls.Clear()
+            $second = Invoke-FakeSeed
+            $second.Code | Should -Be 0 -Because $second.Text
+            $second.Text | Should -Match 'harbor-photo\.jpg .*an earlier upload of it got no clear answer, so the media library is checked for it first'
+            # Looked first (step 4's two reads, then the look-up), found nothing, then sent it once.
+            @($script:Fake.Calls | Where-Object { $_.Path -in '/api/staff/media', '/api/media' } | ForEach-Object { "$($_.Method) $($_.Path)" }) |
+                Should -Be @('GET /api/staff/media', 'GET /api/staff/media', 'GET /api/staff/media', 'POST /api/media', 'POST /api/media', 'POST /api/media', 'POST /api/media')
+            (Get-FakeCalls POST '/api/media')[0].Form['file'].Name | Should -Be 'harbor-photo.jpg'
+            $script:Fake.Assets.Count | Should -Be 5
+            @((Get-SeedManifestFiles).Values | Where-Object { $_.Contains('pending') }).Count | Should -Be 0
+        }
+
+        It 'an upload that landed after its run stopped is adopted by the next run, not sent again' {
+            $script:Fake.MediaFaults[2] = 'lost-before-write'
+            (Invoke-FakeSeed).Code | Should -Be 1
+            # The server finished storing it after the script had looked (a slow commit).
+            $late = Add-FakeAsset -Unit (Get-FixtureUnit 'media/harbor-photo.jpg')
+            $script:Fake.Calls.Clear()
+            $second = Invoke-FakeSeed
+            $second.Code | Should -Be 0 -Because $second.Text
+            $second.Text | Should -Match "media/harbor-photo\.jpg — an earlier upload of it got no clear answer; the asset it stored \(same kind, name and bytes\) was found in the media library and adopted, not sent again -> $late"
+            @(Get-FakeCalls POST '/api/media' | ForEach-Object { $_.Form['file'].Name }) | Should -Not -Contain 'harbor-photo.jpg'
+            $script:Fake.Assets.Count | Should -Be 5
+            $entry = (Get-SeedManifestFiles)['media/harbor-photo.jpg']
+            $entry['assetId'] | Should -Be $late
+            $entry['adoptedAt'] | Should -Not -BeNullOrEmpty
+            $entry.Contains('pending') | Should -BeFalse
+            # The post that shows the photo carries the adopted asset.
+            @($script:Fake.Posts | Where-Object { @($_.media | Where-Object { $_.mediaId -eq $late }).Count -gt 0 }).Count | Should -Be 1
+        }
+
+        It 'a VIDEO upload that landed after its run stopped: the next run keeps its poster (hidden by then) and adopts the video, sending neither again' {
+            $script:Fake.MediaFaults[5] = 'lost-before-write'                   # the video
+            (Invoke-FakeSeed).Code | Should -Be 1
+            $posterId = (Get-SeedManifestFiles)['media/river-clip.poster.jpg']['assetId']
+            # It landed late, with its poster, which the library now hides (MediaLibraryService: posters are not listed).
+            $late = Add-FakeAsset -Unit (Get-FixtureUnit 'media/river-clip.mp4') -Poster $posterId
+            $script:Fake.Calls.Clear()
+            $run = Invoke-FakeSeed
+            $run.Code | Should -Be 0 -Because $run.Text
+            $run.Text | Should -Match 'Media uploads   1 to upload'
+            $run.Text | Should -Match '\+ media/river-clip\.mp4  \(video, .+; an earlier upload of it got no clear answer, so the media library is checked for it first\)'
+            (Get-FakeCalls POST '/api/media').Count | Should -Be 0              # neither the poster nor the video again
+            $script:Fake.Assets.Count | Should -Be 5
+            $files = Get-SeedManifestFiles
+            $files['media/river-clip.mp4']['assetId'] | Should -Be $late
+            $files['media/river-clip.mp4']['posterAssetId'] | Should -Be $posterId
+            $files['media/river-clip.poster.jpg']['assetId'] | Should -Be $posterId
+        }
+
+        It 'a recovery run under ANOTHER staff user finds the late video first and keeps its poster: no replacement poster is sent' {
+            $script:Fake.MediaFaults[5] = 'lost-before-write'                   # the video
+            (Invoke-FakeSeed).Code | Should -Be 1
+            $posterId = (Get-SeedManifestFiles)['media/river-clip.poster.jpg']['assetId']
+            $late = Add-FakeAsset -Unit (Get-FixtureUnit 'media/river-clip.mp4') -Poster $posterId
+            # That earlier run was controller2's: this run (controller1) could not reuse its poster for a NEW video upload.
+            $path = Join-Path $TestDrive 'manifests' "$($script:Fake.ExerciseId).json"
+            $manifest = ConvertFrom-SeedJson (Get-Content -LiteralPath $path -Raw)
+            $manifest['files']['media/river-clip.poster.jpg']['uploadedBy'] = 'controller2'
+            $manifest['files']['media/river-clip.mp4']['pending']['uploadedBy'] = 'controller2'
+            Save-SeedManifest -Manifest $manifest -Path $path
+            $script:Fake.Calls.Clear()
+            $run = Invoke-FakeSeed
+            $run.Code | Should -Be 0 -Because $run.Text
+            $run.Text | Should -Match "\+ media/river-clip\.poster\.jpg .+same staff user.+; kept instead if the earlier upload of media/river-clip\.mp4 is found"
+            $run.Text | Should -Match ([regex]::Escape("media/river-clip.poster.jpg — kept ($posterId)"))
+            (Get-FakeCalls POST '/api/media').Count | Should -Be 0              # no replacement poster, no second video
+            $script:Fake.Assets.Count | Should -Be 5
+            $files = Get-SeedManifestFiles
+            $files['media/river-clip.mp4']['assetId'] | Should -Be $late
+            $files['media/river-clip.mp4']['posterAssetId'] | Should -Be $posterId
+            $files['media/river-clip.mp4']['uploadedBy'] | Should -Be 'controller2'
+            $files['media/river-clip.poster.jpg']['assetId'] | Should -Be $posterId
+        }
+
+        It 'plan and run agree: when the poster''s bytes changed, the video is not looked up first, and the plan does not say it is' {
+            $script:Fake.MediaFaults[5] = 'lost-before-write'
+            (Invoke-FakeSeed).Code | Should -Be 1
+            $root = Join-Path $TestDrive 'poster-changed'
+            Remove-Item -Recurse -Force $root -ErrorAction SilentlyContinue
+            Copy-Item -Recurse $script:FixtureRoot $root
+            $poster = Join-Path $root 'media/river-clip.poster.jpg'
+            [IO.File]::WriteAllBytes($poster, [IO.File]::ReadAllBytes($poster) + [byte[]] (0))   # same JPEG head, other bytes
+            $script:Fake.Calls.Clear()
+            $run = Invoke-FakeSeed @{ PackPath = (Join-Path $root 'pack.json') }
+            $run.Code | Should -Be 0 -Because $run.Text
+            $run.Text | Should -Not -Match 'river-clip\.mp4 .*checked for it first'
+            (Get-FakeCalls GET '/api/staff/media').Count | Should -Be 2         # step 4 only: nothing to look up
+            @(Get-FakeCalls POST '/api/media' | ForEach-Object { $_.Form['file'].Name }) | Should -Be @('river-clip.poster.jpg', 'river-clip.mp4')
+        }
+
+        It 'a next run that cannot tell whether the earlier upload landed sends nothing for it' {
+            $script:Fake.MediaFaults[2] = 'lost-before-write'
+            (Invoke-FakeSeed).Code | Should -Be 1
+            $late = Add-FakeAsset -Unit (Get-FixtureUnit 'media/harbor-photo.jpg')
+            Mock Get-MediaUrlSha256 { [pscustomobject]@{ Status = 0; Sha256 = $null } }   # its signed URL does not answer
+            $script:Fake.Calls.Clear()
+            $second = Invoke-FakeSeed
+            $second.Code | Should -Be 1
+            $second.Text | Should -Match ([regex]::Escape("[FAIL] media/harbor-photo.jpg: an earlier upload of it got no clear answer, and the media library cannot tell now whether it was stored: the library's copy $late answered nothing."))
+            $second.Text | Should -Match 'Nothing was sent for it'
+            (Get-FakeCalls POST '/api/media').Count | Should -Be 0
+            (Get-SeedManifestFiles)['media/harbor-photo.jpg']['pending'] | Should -Not -BeNullOrEmpty
+        }
+
+        It 'marks the file pending in the manifest BEFORE its upload is sent (an interrupted run leaves the mark)' {
+            $script:Seen = [System.Collections.Generic.List[object]]::new()
+            Mock Invoke-WebRequest {
+                if ($Method -eq 'POST' -and ([Uri] $Uri).AbsolutePath -eq '/api/media') {
+                    $files = (ConvertFrom-SeedJson (Get-Content -LiteralPath (Join-Path $TestDrive 'manifests' "$($script:Fake.ExerciseId).json") -Raw))['files']
+                    $script:Seen.Add([pscustomobject]@{ File = $Form['file'].Name; Pending = @($files.Keys | Where-Object { $files[$_].Contains('pending') }) })
+                }
+                Invoke-FakePulse -Fake $script:Fake -Uri $Uri -Method $Method -Headers $Headers -Body $Body -Form $Form -ContentType $ContentType
+            }
+            (Invoke-FakeSeed).Code | Should -Be 0
+            $script:Seen.Count | Should -Be 5
+            foreach ($seen in $script:Seen) {
+                $seen.Pending.Count | Should -Be 1 -Because "only $($seen.File) is in flight"
+                [IO.Path]::GetFileName($seen.Pending[0]) | Should -Be $seen.File
+            }
+        }
+
+        It 'a 400 still stops at once: no look-up, nothing sent again, and no pending mark left' {
+            $script:Fake.MediaFaults[1] = 'refused'
+            $run = Invoke-FakeSeed
+            $run.Code | Should -Be 1
+            $run.Text | Should -Match ([regex]::Escape('[FAIL] media/river-clip.poster.jpg: 400 The multipart body is malformed.'))
+            (Get-FakeCalls POST '/api/media').Count | Should -Be 1
+            (Get-FakeCalls GET '/api/staff/media').Count | Should -Be 2         # step 4 only: a refusal is not uncertain
+            Should -Invoke Get-MediaUrlSha256 -Times 0 -Exactly
+            (Get-SeedManifestFiles).Contains('media/river-clip.poster.jpg') | Should -BeFalse
+        }
+
+        It 'the plan (-WhatIf) says when a file will be looked for first' {
+            $script:Fake.MediaFaults[2] = 'lost-before-write'
+            (Invoke-FakeSeed).Code | Should -Be 1
+            $plan = Invoke-FakeSeed @{ WhatIf = $true }
+            $plan.Code | Should -Be 0
+            $plan.Text | Should -Match 'Media uploads   4 to upload'
+            $plan.Text | Should -Match '\+ media/harbor-photo\.jpg  \(image, .+; an earlier upload of it got no clear answer, so the media library is checked for it first\)'
+        }
+    }
+
+    Context 'Find-UploadedMediaAsset (stubbed HTTP)' {
+        BeforeAll {
+            $script:Photo = Get-FixtureUnit 'media/harbor-photo.jpg'
+            $script:Video = Get-FixtureUnit 'media/river-clip.mp4'
+            $script:PosterFile = Get-FixtureUnit 'media/river-clip.poster.jpg'
+            $script:Context = @{ BaseUrl = 'https://api.fake.test'; Token = 't' }
+        }
+        BeforeEach {
+            $script:Library = @()
+            $script:UrlSha = @{}                                                # asset id → the SHA-256 its signed URL serves
+            $script:LibraryStatus = 200
+            $script:LibraryJson = $null                                        # set to answer something other than the rows
+            Mock Invoke-PulseApi {
+                $json = if ($null -ne $script:LibraryJson) { , $script:LibraryJson } else { , @($script:Library) }   # the comma keeps an array an array
+                [pscustomobject]@{ Status = $script:LibraryStatus; Json = $json; Text = '[]' }
+            }
+            Mock Get-MediaUrlSha256 {
+                $id = ([Uri] $Url).AbsolutePath.Split('/')[-1]
+                if ($script:UrlSha.Contains($id)) { [pscustomobject]@{ Status = 200; Sha256 = $script:UrlSha[$id] } } else { [pscustomobject]@{ Status = 0; Sha256 = $null } }
+            }
+        }
+
+        It 'finds the new row with the file''s kind, name, hints and bytes' {
+            $script:Library = @(New-LibraryRow 'a1')
+            $script:UrlSha['a1'] = $script:Photo.Sha256
+            $found = Find-UploadedMediaAsset -Context $script:Context -Unit $script:Photo
+            $found.Outcome | Should -Be 'found'
+            $found.AssetId | Should -Be 'a1'
+            $found.Others | Should -Be 0
+            Should -Invoke Invoke-PulseApi -Times 1 -Exactly -ParameterFilter { $Method -eq 'GET' -and $Path -eq '/api/staff/media?kind=image&take=200' }
+        }
+
+        It 'never takes <Name>' -ForEach @(
+            @{ Name = 'a row the library already held before the upload'; Row = @{}; Known = @('a1'); Claimed = @(); Fetched = 0 }
+            @{ Name = 'a row the manifest (or this run) claims'; Row = @{}; Known = @(); Claimed = @('A1'); Fetched = 0 }
+            @{ Name = 'a row of another name'; Row = @{ fileName = 'harbor-photo (1).jpg' }; Known = @(); Claimed = @(); Fetched = 0 }
+            @{ Name = 'a row of another kind'; Row = @{ kind = 'video' }; Known = @(); Claimed = @(); Fetched = 0 }
+            @{ Name = 'a row with other size hints'; Row = @{ width = 97 }; Known = @(); Claimed = @(); Fetched = 0 }
+            @{ Name = 'a row without the hints the upload sent'; Row = @{ height = $null }; Known = @(); Claimed = @(); Fetched = 0 }
+            @{ Name = 'a row with a poster when none was sent'; Row = @{ posterUrl = 'https://blob.fake.test/post-media/p9?sig=SAS' }; Known = @(); Claimed = @(); Fetched = 0 }
+            @{ Name = 'a row with the name but other bytes'; Row = @{}; Known = @(); Claimed = @(); Fetched = 1; Sha = ('0' * 64) }
+        ) {
+            $script:Library = @(New-LibraryRow 'a1' -Set $Row)
+            $script:UrlSha['a1'] = $(if ($Sha) { $Sha } else { $script:Photo.Sha256 })
+            $claimedSet = [System.Collections.Generic.HashSet[string]]::new([string[]] $Claimed, [StringComparer]::OrdinalIgnoreCase)
+            $found = Find-UploadedMediaAsset -Context $script:Context -Unit $script:Photo -KnownIds $Known -Claimed $claimedSet
+            $found.Outcome | Should -Be 'none'
+            $found.AssetId | Should -BeNullOrEmpty
+            Should -Invoke Get-MediaUrlSha256 -Times $Fetched -Exactly
+        }
+
+        It 'a video is the upload only when its poster serves the poster file''s bytes too' {
+            $script:Library = @(New-LibraryRow 'v1' -FileName 'river-clip.mp4' -Kind 'video' -Set @{ durationSec = 1; posterUrl = 'https://blob.fake.test/post-media/p1?sig=SAS' })
+            $script:UrlSha['v1'] = $script:Video.Sha256
+            $script:UrlSha['p1'] = '0' * 64
+            (Find-UploadedMediaAsset -Context $script:Context -Unit $script:Video -PosterUnit $script:PosterFile).Outcome | Should -Be 'none'
+            $script:UrlSha['p1'] = $script:PosterFile.Sha256
+            (Find-UploadedMediaAsset -Context $script:Context -Unit $script:Video -PosterUnit $script:PosterFile).AssetId | Should -Be 'v1'
+            # Without a poster sent, a row that has one is not the upload.
+            (Find-UploadedMediaAsset -Context $script:Context -Unit $script:Video).Outcome | Should -Be 'none'
+        }
+
+        It 'two stored copies: the newest (listed first) is adopted, and the other is counted' {
+            $script:Library = @((New-LibraryRow 'b2'), (New-LibraryRow 'a1'))
+            $script:UrlSha['b2'] = $script:Photo.Sha256
+            $script:UrlSha['a1'] = $script:Photo.Sha256
+            $found = Find-UploadedMediaAsset -Context $script:Context -Unit $script:Photo
+            $found.AssetId | Should -Be 'b2'
+            $found.Others | Should -Be 1
+        }
+
+        It 'a FULL page with no match proves absence only when it reaches a row from before the upload' {
+            # 200 newer rows of other names (newest first): the upload, had it landed, could sit below this page.
+            $script:Library = @(1..200 | ForEach-Object { New-LibraryRow ('n{0:000}' -f $_) -FileName "other-$_.jpg" })
+            $cannot = Find-UploadedMediaAsset -Context $script:Context -Unit $script:Photo -KnownIds @('old1')
+            $cannot.Outcome | Should -Be 'unknown'
+            $cannot.Detail | Should -Match 'do not reach back to before that upload'
+            $cannot.Detail | Should -Match 'remove its "pending" mark'
+            # The page's last row predates the upload: everything newer is on it, so "not there" is proven.
+            (Find-UploadedMediaAsset -Context $script:Context -Unit $script:Photo -KnownIds @('n200')).Outcome | Should -Be 'none'
+            # A page under the cap is the whole library.
+            $script:Library = @($script:Library | Select-Object -First 199)
+            (Find-UploadedMediaAsset -Context $script:Context -Unit $script:Photo).Outcome | Should -Be 'none'
+        }
+
+        It 'cannot tell (<Name>) -> unknown, so the caller sends nothing' -ForEach @(
+            @{ Name = 'the library answers 503'; Status = 503; Throw = $false; UrlDown = $false }
+            @{ Name = 'the library does not answer'; Status = 200; Throw = $true; UrlDown = $false }
+            @{ Name = 'a candidate''s signed URL does not answer'; Status = 200; Throw = $false; UrlDown = $true }
+            @{ Name = 'a 200 that is an object, not rows'; Status = 200; Throw = $false; UrlDown = $false; Json = [ordered]@{ error = 'gateway' } }
+            @{ Name = 'a 200 with a row it cannot read'; Status = 200; Throw = $false; UrlDown = $false; Json = @('<html>', @{ id = 'z9'; kind = 'image'; url = 'https://blob.fake.test/post-media/z9'; fileName = 'other.jpg' }) }
+            @{ Name = 'a 200 with a row missing its id'; Status = 200; Throw = $false; UrlDown = $false; Json = @(, @{ kind = 'image'; url = 'https://blob.fake.test/post-media/z9'; fileName = 'other.jpg' }) }
+        ) {
+            $script:Library = @(New-LibraryRow 'a1')
+            if (-not $UrlDown) { $script:UrlSha['a1'] = $script:Photo.Sha256 }
+            if ($Json) { $script:LibraryJson = $Json; $script:Library = @() }
+            $script:LibraryStatus = $Status
+            if ($Throw) { Mock Invoke-PulseApi { throw 'GET /api/staff/media failed: Connection reset by peer.' } }
+            $found = Find-UploadedMediaAsset -Context $script:Context -Unit $script:Photo
+            $found.Outcome | Should -Be 'unknown'
+            $found.Detail | Should -Not -BeNullOrEmpty
+        }
+
+        It 'Get-MediaUploadFileName predicts the name the server keeps, or gives up when markup could change it' {
+            Get-MediaUploadFileName -Path (Join-Path 'media' 'river-clip.poster.jpg') | Should -BeExactly 'river-clip.poster.jpg'
+            Get-MediaUploadFileName -Path (Join-Path 'media' " spaced.jpg ") | Should -BeExactly 'spaced.jpg'
+            Get-MediaUploadFileName -Path ('x' * 300 + '.jpg') | Should -BeExactly ('x' * 255)
+            Get-MediaUploadFileName -Path 'a<b>.jpg' | Should -BeNullOrEmpty
+        }
+    }
+
+    Context 'Get-MediaUrlSha256 over real HTTP (no mocks)' {
+        It 'hashes the bytes without the token, stops at a different size, never follows a redirect, and reports no answer as 0' {
+            # The listener's /blob/* serves the two bytes 1, 2 and refuses (400) any request that carries a token.
+            $expected = [BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash([byte[]] (1, 2))).Replace('-', '').ToLowerInvariant()
+            $server = Start-SeedTestServer
+            try {
+                $got = Get-MediaUrlSha256 -Url "$($server.BaseUrl)/blob/a1" -Bytes 2
+                $got.Status | Should -Be 200
+                $got.Sha256 | Should -Be $expected
+                $other = Get-MediaUrlSha256 -Url "$($server.BaseUrl)/blob/a1" -Bytes 3
+                $other.Status | Should -Be 200
+                $other.Sha256 | Should -BeNullOrEmpty
+            }
+            finally { Stop-SeedTestServer $server }
+            $redirect = Start-SeedTestServer -Mode redirect
+            try { (Get-MediaUrlSha256 -Url "$($redirect.BaseUrl)/blob/a1" -Bytes 2).Status | Should -Be 307 }
+            finally { Stop-SeedTestServer $redirect }
+            $closed = Get-FreeTcpPort
+            (Get-MediaUrlSha256 -Url "http://localhost:$closed/blob/a1" -Bytes 2 -TimeoutSec 5).Status | Should -Be 0
+        }
+
+        It 'a body that stalls after its headers is cut off at the deadline (Status 0), not waited on' {
+            # HttpClient.Timeout stops at the headers with ResponseHeadersRead; -TimeoutSec must bound the body too.
+            $server = Start-SeedTestServer
+            try {
+                $watch = [Diagnostics.Stopwatch]::StartNew()
+                $got = Get-MediaUrlSha256 -Url "$($server.BaseUrl)/stall/a1" -Bytes 10 -TimeoutSec 2
+                $watch.Stop()
+                $got.Status | Should -Be 0
+                $got.Sha256 | Should -BeNullOrEmpty
+                $watch.Elapsed.TotalSeconds | Should -BeLessThan 15
+            }
+            finally { $server.State.Release = $true; Stop-SeedTestServer $server }
+        }
     }
 }
 

@@ -36,9 +36,14 @@ public sealed record PostInReplyToDto(
 /// <summary>The caller's own reaction state on a post — the server-side mirror of the frontend <c>PostViewerState</c>.</summary>
 /// <param name="Liked">Whether the caller's persona has liked the post.</param>
 /// <param name="Reposted">Whether the caller's persona has reposted the post.</param>
+/// <param name="Pinned">
+/// Whether the caller's persona has pinned the post for itself (demo-feedback DF-6, a <c>pin</c> reaction). Always on
+/// the wire alongside <paramref name="Liked"/> and <paramref name="Reposted"/>; nobody else's pin is ever reported.
+/// </param>
 public sealed record PostViewerStateDto(
     [property: JsonPropertyName("liked")] bool Liked,
-    [property: JsonPropertyName("reposted")] bool Reposted);
+    [property: JsonPropertyName("reposted")] bool Reposted,
+    [property: JsonPropertyName("pinned")] bool Pinned = false);
 
 /// <summary>
 /// One requested media attachment on <c>POST /api/posts</c> — the server-side mirror of the frontend

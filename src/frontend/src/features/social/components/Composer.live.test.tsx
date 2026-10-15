@@ -297,7 +297,9 @@ describe('Composer — what Retry may offer (H-1, M-5)', () => {
 
     finish(CREATED)
     await screen.findByText('Post published.')
-    expect(screen.getByLabelText('Post text')).toHaveFocus()
+    // Focus moves in a passive effect AFTER the commit that renders the notice, so wait
+    // for it rather than asserting in between (a loaded run can land there).
+    await waitFor(() => expect(screen.getByLabelText('Post text')).toHaveFocus())
   })
 })
 

@@ -36,6 +36,20 @@
  * it states the situation in TEXT, never by color. It exposes NO exercise
  * identity — a scope we could not confirm must not be presented as current.
  *
+ * ## THE FIRST REQUEST AT PAGE LOAD (easy-login Gate-2 W2-3)
+ * This provider makes the very first request of the app (`GET /exercise-context`), before the
+ * session provider below it exists. A signed-in participant whose phone dropped that one
+ * request used to land on the dead-end notice above ("Session unavailable") although their
+ * sign-in was fine, which is the same bounce `SessionProvider` was fixed for (W-5). So when a
+ * pair is STILL STORED (`getAccessToken() !== null`) and the MOUNT resolution failed without a
+ * definite answer, the provider renders the same neutral `ReconnectingState` with a Try again
+ * button instead, and the retry re-runs the same resolution. Definite answers keep today's
+ * behaviour: a `403` (the server refuses this account), a `404` (no such exercise for this
+ * host) and a missing token (signed out, or the refresh was refused and cleared it) all still
+ * land on `ExerciseScopeUnavailable`. A FAILED REFRESH after a switch is unchanged too: it
+ * fails closed to that notice, because a scope the server may have moved away from must never
+ * be served while the person waits.
+ *
  * There is no exercise list, no picker, and no simulation-status/admin
  * surface here (COR-004, XC-002) - `useExerciseContext()` returns exactly one
  * bound scope, never a collection. Story 04 later EXTENDS this same module
@@ -118,6 +132,10 @@ import {
   useState,
   type ReactNode,
 } from 'react'
+import { endRefreshCooldown } from '../services/api'
+import { ReconnectingState } from '../auth/ReconnectingState'
+import { httpStatusOf, signInPathForPage } from '../auth/reconnect'
+import { getAccessToken } from '../auth/tokenStore'
 import { resolveExerciseContext } from './exerciseContextResolver'
 import type { ExerciseScope } from './exerciseContextResolver'
 
@@ -132,6 +150,24 @@ type ExerciseContextState =
   | { readonly kind: 'loading' }
   | { readonly kind: 'ready'; readonly scope: ExerciseScope }
   | { readonly kind: 'error'; readonly error: unknown }
+  /** Signed in, but the first resolution got no definite answer: the Reconnecting screen. */
+  | {
+    readonly kind: 'reconnecting'
+    readonly retrying: boolean
+    readonly failedRetries: number
+  }
+
+/**
+ * Whether a failed MOUNT resolution should keep a signed-in person on the Reconnecting
+ * screen instead of the closed-door notice. See the module header, "THE FIRST REQUEST AT
+ * PAGE LOAD". A stored pair is the signal that the sign-in is intact; a `403` and a `404` are
+ * the server's definite answers and keep the notice.
+ */
+function shouldStayConnected(error: unknown): boolean {
+  if (getAccessToken() === null) return false
+  const status = httpStatusOf(error)
+  return status !== 403 && status !== 404
+}
 
 /**
  * Re-resolves the session's exercise scope FROM THE SERVER and commits the
@@ -248,7 +284,7 @@ export function ExerciseContextProvider({ children }: ExerciseContextProviderPro
    * refresh) learns the outcome; the failure is already logged + failed closed
    * by the time it re-throws.
    */
-  const resolve = useCallback(async (): Promise<ExerciseScope> => {
+  const resolve = useCallback(async (origin: 'mount' | 'refresh'): Promise<ExerciseScope> => {
     const attempt = attemptRef.current + 1
     attemptRef.current = attempt
     const mayCommit = () => !abandonedRef.current && attempt === attemptRef.current
@@ -271,8 +307,27 @@ export function ExerciseContextProvider({ children }: ExerciseContextProviderPro
         // console signal beats silence. A FAILED REFRESH lands here too: the
         // provider goes closed rather than continuing to serve a scope the
         // server may already have moved away from.
-        console.error('[exerciseContext] resolveExerciseContext failed; failing closed', error)
-        setState({ kind: 'error', error })
+        // Log a redacted message, NEVER the raw error: a failed request's AxiosError carries
+        // `config.headers.Authorization: Bearer <token>` (and a stored pair makes that the
+        // common case now that a no-answer failure keeps the person signed in), and an
+        // AxiosError is console- and `toJSON()`-inspectable. Same rule as `SessionProvider`.
+        console.error(
+          '[exerciseContext] resolveExerciseContext failed; failing closed',
+          error instanceof Error ? error.message : error,
+        )
+        setState(previous =>
+          origin === 'mount' && shouldStayConnected(error)
+            ? {
+              kind: 'reconnecting',
+              retrying: false,
+              // A failure that ends a retry counts; the first appearance is zero.
+              failedRetries:
+                previous.kind === 'reconnecting' && previous.retrying
+                  ? previous.failedRetries + 1
+                  : 0,
+            }
+            : { kind: 'error', error },
+        )
       }
       throw error
     }
@@ -284,11 +339,25 @@ export function ExerciseContextProvider({ children }: ExerciseContextProviderPro
     // The mount resolution's rejection is already handled inside `resolve`
     // (logged + failed closed); swallow it here so it is not ALSO an unhandled
     // rejection. Only an explicit refresh caller awaits the thrown error.
-    void resolve().catch(() => {})
+    void resolve('mount').catch(() => {})
 
     return () => {
       abandonedRef.current = true
     }
+  }, [resolve])
+
+  // The public refresh (a zero-argument function: see the module header). Stable, like
+  // `resolve`, so consumers' effects do not re-run.
+  const refresh = useCallback(() => resolve('refresh'), [resolve])
+
+  // "Try again" on the Reconnecting screen: the same MOUNT resolution, started by a person, so
+  // it may call the token refresh again even inside the cool-down a no-answer refresh started.
+  const retry = useCallback(() => {
+    endRefreshCooldown()
+    setState(previous =>
+      previous.kind === 'reconnecting' ? { ...previous, retrying: true } : previous,
+    )
+    void resolve('mount').catch(() => {})
   }, [resolve])
 
   // Still resolving: render NOTHING. No child is mounted, so nothing can read a
@@ -299,8 +368,20 @@ export function ExerciseContextProvider({ children }: ExerciseContextProviderPro
   // carries no scope. See the module header (WR-007) for why this is not `null`.
   if (state.kind === 'error') return <ExerciseScopeUnavailable />
 
+  // Signed in, first request unanswered: the same neutral screen the session provider shows.
+  if (state.kind === 'reconnecting') {
+    return (
+      <ReconnectingState
+        retrying={state.retrying}
+        failedRetries={state.failedRetries}
+        onRetry={retry}
+        signInPath={signInPathForPage()}
+      />
+    )
+  }
+
   return (
-    <ExerciseScopeRefreshContext.Provider value={resolve}>
+    <ExerciseScopeRefreshContext.Provider value={refresh}>
       <ExerciseContextInternal.Provider value={state.scope}>
         {children}
       </ExerciseContextInternal.Provider>

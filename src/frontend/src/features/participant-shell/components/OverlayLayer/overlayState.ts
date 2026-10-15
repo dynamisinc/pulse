@@ -63,6 +63,20 @@
  * leaving a participant with no holding page over a frozen world until the next
  * transition.
  *
+ * THE SESSION ENDS (COR-001). The live source is a TAB-lived singleton, but its snapshot, its
+ * sequence cutoff, its GET and its hub connection all belong to ONE participant identity (and
+ * its exercise). It therefore registers a reset with `core/auth/sessionReset`, which
+ * `resetClientSession()` runs on sign-out and on every sign-in, next to `core/realtime`'s own
+ * reset that STOPS the shared connection. The reset: detaches from the connection and marks the
+ * source not started (so the next `ensureStarted()` - the next shell mount - does a full fresh
+ * start: GET, subscribe and `connection.start()`, which opens a new connection on the NEW
+ * token); returns the snapshot to the safe `'none'` and the cutoff to 0 (a different exercise
+ * has its own sequence counter, and the previous identity's holding page must not outlive it);
+ * and bumps `fetchGeneration`, so a GET still in flight for the old identity is discarded.
+ * A shell that is STILL mounted (a listener is subscribed) re-attaches itself - deferred a
+ * microtask so the connection's stop has begun whatever order the resets ran in, and only when
+ * a session token is stored (a sign-out has just removed it: there is nothing to attach as).
+ *
  * This story owns the TYPES (`./types.ts`) and this resolution seam. It does
  * NOT build the triggers that set overlay state server-side — Break Fiction's
  * guarded control (world-steering #27) is still out of scope (STORY-UPDATES
@@ -89,6 +103,8 @@ import type { AxiosAdapter } from 'axios'
 import { api } from '@/core/services/api'
 import { useExerciseContext } from '@/core/exerciseContext'
 import { USE_MOCK_DATA } from '@/core/config/mockData'
+import { getAccessToken } from '@/core/auth/tokenStore'
+import { registerSessionReset } from '@/core/auth/sessionReset'
 import { HubConnectionState, realtimeConnection } from '@/core/realtime/connection'
 import type { RealtimeConnection } from '@/core/realtime/connection'
 import type { OverlayRegister, OverlayState, OverlayStateKind } from './types'
@@ -279,6 +295,9 @@ let liveStarted = false
 let unsubscribePush: (() => void) | null = null
 let unsubscribeConnectionState: (() => void) | null = null
 
+/** The connection `ensureStartedLive` attached to, so a session reset re-attaches to the same. */
+let attachedConnection: RealtimeConnection = realtimeConnection
+
 function notifyLive(): void {
   for (const listener of liveListeners) listener()
 }
@@ -405,6 +424,7 @@ function reconcileLive(payload: unknown): void {
 function ensureStartedLive(connection: RealtimeConnection = realtimeConnection): void {
   if (liveStarted) return
   liveStarted = true
+  attachedConnection = connection
 
   unsubscribePush = connection.subscribe(
     OVERLAY_STATE_CHANGED_EVENT,
@@ -421,13 +441,41 @@ function ensureStartedLive(connection: RealtimeConnection = realtimeConnection):
   })
 }
 
-/** Tears the subscription down and clears the snapshot. Test-only. */
-function resetLiveForTests(): void {
+/** Drops the push and connection-state subscriptions and marks the source not started. */
+function detachLive(): void {
   if (unsubscribePush !== null) unsubscribePush()
   if (unsubscribeConnectionState !== null) unsubscribeConnectionState()
   unsubscribePush = null
   unsubscribeConnectionState = null
   liveStarted = false
+}
+
+/**
+ * The session is ending (sign-out, or a sign-in replacing this identity): forget everything
+ * that belonged to it. See the module header ("THE SESSION ENDS"). Registered below with
+ * `core/auth/sessionReset`; synchronous and never throws.
+ */
+function resetLiveForSession(): void {
+  const stillMounted = liveListeners.size > 0
+  const connection = attachedConnection
+  detachLive()
+  // Never lowered, so a GET issued before this moment can tell it was superseded (CR-001).
+  fetchGeneration += 1
+  // Back to the safe 'none' AND to sequence 0: the next exercise counts its own sequence.
+  applyLive(DEFAULT_OVERLAY_STATE, 0)
+  if (!stillMounted) return
+  // A shell is still subscribed: nothing will call ensureStarted() for it again, so
+  // re-attach here. A microtask later, so core/realtime's stop() has begun; and only with a
+  // session to attach as.
+  void Promise.resolve().then(() => {
+    if (liveListeners.size > 0 && getAccessToken() !== null) ensureStartedLive(connection)
+  })
+}
+
+/** Tears the subscription down and clears the snapshot. Test-only. */
+function resetLiveForTests(): void {
+  detachLive()
+  attachedConnection = realtimeConnection
   liveSnapshot = DEFAULT_OVERLAY_STATE
   lastAppliedSequence = 0
   fetchGeneration = 0
@@ -487,3 +535,5 @@ export function useOverlayState(): OverlayState {
 
   return USE_MOCK_DATA ? data ?? DEFAULT_OVERLAY_STATE : live
 }
+
+registerSessionReset(resetLiveForSession, import.meta.hot)

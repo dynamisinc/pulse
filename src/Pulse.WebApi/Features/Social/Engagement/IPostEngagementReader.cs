@@ -10,7 +10,13 @@ namespace Pulse.WebApi.Features.Social.Engagement;
 /// <param name="RealReply">Non-deleted direct replies.</param>
 /// <param name="ViewerLiked">Whether the viewer persona has liked the post (false when there is no viewer).</param>
 /// <param name="ViewerReposted">Whether the viewer persona has reposted the post (false when there is no viewer).</param>
-public sealed record PostEngagement(int RealLike, int RealRepost, int RealReply, bool ViewerLiked, bool ViewerReposted);
+/// <param name="ViewerPinned">
+/// Whether the viewer persona has pinned the post for itself (demo-feedback DF-6; false when there is no viewer). A pin
+/// is never counted: there is no "real pin" count, and <paramref name="RealLike"/> / <paramref name="RealRepost"/>
+/// count only their own kind.
+/// </param>
+public sealed record PostEngagement(
+    int RealLike, int RealRepost, int RealReply, bool ViewerLiked, bool ViewerReposted, bool ViewerPinned = false);
 
 /// <summary>
 /// The engagement read seam (demo-polish B1 freezes it; B3 implements it as <c>PostEngagementReader</c>).
@@ -21,7 +27,8 @@ public interface IPostEngagementReader
     /// <summary>
     /// Reads REAL counts only (baseline is added by the projector). <c>RealReply</c> = non-deleted direct replies.
     /// Ids outside the current exercise scope are simply absent from the result. <c>ViewerLiked</c>/
-    /// <c>ViewerReposted</c> are false when <paramref name="viewerPersonaId"/> is null.
+    /// <c>ViewerReposted</c>/<c>ViewerPinned</c> are false when <paramref name="viewerPersonaId"/> is null. Counts
+    /// cover <c>like</c> and <c>repost</c> explicitly, never every kind, so a personal <c>pin</c> never moves them.
     /// </summary>
     /// <param name="postIds">The posts to read engagement for.</param>
     /// <param name="viewerPersonaId">The viewing persona, or null for no viewer state.</param>

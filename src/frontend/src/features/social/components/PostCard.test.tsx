@@ -166,6 +166,8 @@ describe('PostCard — action row (R-002)', () => {
       'reply',
       'repost',
       'like',
+      // demo-feedback story 07: the personal Pin follows Like (no count).
+      'pin',
     ])
     expect(buttons[0]).toHaveTextContent('3')
     expect(buttons[1]).toHaveTextContent('7')
@@ -187,6 +189,8 @@ describe('PostCard — action row (R-002)', () => {
       'reply',
       'repost',
       'like',
+      // demo-feedback story 07: the personal Pin follows Like (no count).
+      'pin',
     ])
     expect(screen.queryByRole('button', { name: /share/i })).not.toBeInTheDocument()
   })
@@ -220,11 +224,12 @@ describe('PostCard — readOnly variant (COR-015, D1-011)', () => {
     await renderWithExerciseContext(<PostCard post={buildPost()} onReply={vi.fn()} />)
 
     const actionsRegion = screen.getByTestId('post-actions')
-    expect(actionsRegion.querySelectorAll('button[data-action]')).toHaveLength(3)
-    // The Quote trigger is hidden (absent, not disabled; demo-polish F3), so the
-    // three canonical controls are the whole row.
+    // The three canonical controls plus the personal Pin (demo-feedback story 07).
+    expect(actionsRegion.querySelectorAll('button[data-action]')).toHaveLength(4)
+    // The Quote trigger is hidden (absent, not disabled; demo-polish F3), so those four
+    // controls are the whole row.
     expect(within(actionsRegion).queryByTestId('post-quote-trigger')).not.toBeInTheDocument()
-    expect(actionsRegion.querySelectorAll('button')).toHaveLength(3)
+    expect(actionsRegion.querySelectorAll('button')).toHaveLength(4)
   })
 })
 

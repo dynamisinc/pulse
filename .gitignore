@@ -28,6 +28,10 @@ appsettings.Local.json
 # Development-only Local media store (demo-polish BM; Azure:BlobStorage:LocalRootPath = ./.local-media)
 .local-media/
 
+# ---- UAT scripts ----
+# Import-Roster.ps1 writes participants' personal sign-in links here (bearer credentials): never commit them.
+scripts/uat/out/
+
 # ---- Editors / OS ----
 .vscode/*
 !.vscode/extensions.json

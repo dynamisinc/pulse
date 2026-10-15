@@ -83,6 +83,7 @@ describe('PostActions — anatomy (R-002, NFR-001)', () => {
       'reply',
       'repost',
       'like',
+      'pin',
     ])
     expect(screen.getByRole('button', { name: 'Reply, 3' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Repost, 7' })).toBeInTheDocument()
@@ -101,7 +102,7 @@ describe('PostActions — Quote and Share are hidden (F3, D1-011: absent, not di
 
     const region = screen.getByTestId('post-actions')
     expect(Array.from(region.querySelectorAll('[data-action]')).map(e => e.getAttribute('data-action')))
-      .toEqual(['reply', 'repost', 'like'])
+      .toEqual(['reply', 'repost', 'like', 'pin'])
     expect(screen.queryByRole('button', { name: /share/i })).not.toBeInTheDocument()
   })
 
@@ -416,7 +417,7 @@ describe('PostActions — Reply is a button only when it is wired (WR-002, F3)',
     expect(onReply).toHaveBeenCalledWith('post-r')
   })
 
-  it('leaves NO focusable element in the row but the wired controls (Repost and Like)', async () => {
+  it('leaves NO focusable element in the row but the wired controls (Repost, Like, Pin)', async () => {
     await renderActions(
       <PostActions
         post={buildPost({ counts: { reply: 1, repost: 2, like: 3, share: 4 } })}
@@ -425,10 +426,11 @@ describe('PostActions — Reply is a button only when it is wired (WR-002, F3)',
     )
 
     const region = screen.getByTestId('post-actions')
-    // Reply is unwired and Share/Quote are hidden: only the two toggles are controls.
+    // Reply is unwired and Share/Quote are hidden: only the three toggles are controls.
     expect(within(region).getAllByRole('button').map(b => b.getAttribute('data-action'))).toEqual([
       'repost',
       'like',
+      'pin',
     ])
     expect(region.querySelectorAll('[tabindex]')).toHaveLength(0)
   })

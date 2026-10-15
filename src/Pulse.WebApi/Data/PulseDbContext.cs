@@ -168,6 +168,15 @@ public class PulseDbContext : DbContext
     /// <summary>The per-exercise queue-membership token row (inject-queue/06). Exercise-scoped (<see cref="IExerciseScoped"/>).</summary>
     public DbSet<InjectQueueState> InjectQueueStates => Set<InjectQueueState>();
 
+    /// <summary>Participants' personal sign-in links, one per account (easy-login/01, EL-5). Exercise-scoped (<see cref="IExerciseScoped"/>).</summary>
+    public DbSet<ParticipantLink> ParticipantLinks => Set<ParticipantLink>();
+
+    /// <summary>The hashed "word for the day", one per exercise per local date (easy-login/01, EL-9). Exercise-scoped (<see cref="IExerciseScoped"/>).</summary>
+    public DbSet<ExerciseDayWord> ExerciseDayWords => Set<ExerciseDayWord>();
+
+    /// <summary>The white-noise post pool (demo-feedback/01, DF-12). Exercise-scoped (<see cref="IExerciseScoped"/>).</summary>
+    public DbSet<NoisePost> NoisePosts => Set<NoisePost>();
+
     /// <inheritdoc />
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -265,6 +274,12 @@ public class PulseDbContext : DbContext
             entity.Property(e => e.ComplianceChromeEnabled).IsRequired().HasDefaultValue(true);
             entity.Property(e => e.WatermarkEnabled).IsRequired().HasDefaultValue(true);
             entity.Property(e => e.IsPracticeMode).IsRequired().HasDefaultValue(false);
+
+            // demo-feedback/01 (DF-12): the white-noise level. Required-WITH-DEFAULT 'off' (the TimeZone/Status shape),
+            // so the migration adds it NOT NULL to the existing table and every existing exercise reads 'off'. The CLR
+            // initializer is also 'off', so EF always writes the value explicitly. No CHECK constraint; story 05 validates.
+            entity.Property(e => e.NoiseLevel).IsRequired().HasMaxLength(Exercise.MaxNoiseLevelLength)
+                .HasDefaultValue(Exercise.DefaultNoiseLevel);
         });
 
         modelBuilder.Entity<PersonaTemplate>(entity =>
@@ -365,6 +380,13 @@ public class PulseDbContext : DbContext
                 .HasForeignKey(e => e.ParentPostId)
                 .OnDelete(DeleteBehavior.Restrict);
             entity.HasIndex(e => e.ParentPostId);
+
+            // demo-feedback/01 (DF-7): the exercise pin. Both columns nullable, so existing rows read "not pinned". The
+            // index serves the Pinned tab's "this exercise's pins, newest first" read and is FILTERED to pinned rows, so
+            // it stays tiny. EF emits the filtered CREATE INDEX inside EXEC(N'...') in the idempotent script (#413).
+            entity.Property(e => e.PinnedForAllByHumanId).HasMaxLength(Post.MaxPinnedForAllByHumanIdLength);
+            entity.HasIndex(e => new { e.ExerciseId, e.PinnedForAllAt })
+                .HasFilter("[PinnedForAllAt] IS NOT NULL");
         });
 
         modelBuilder.Entity<Follow>(entity =>
@@ -527,6 +549,15 @@ public class PulseDbContext : DbContext
             // Login handle: bounded (index-key eligible) and unique PER EXERCISE, never globally (COR-004).
             entity.Property(e => e.Username).HasMaxLength(256);
             entity.HasIndex(e => new { e.ExerciseId, e.Username }).IsUnique();
+
+            // easy-login/01 (EL-1, EL-4, EL-8) — additive roster columns. Bounded free text (NFR-004), all NULLABLE
+            // so no existing row changes behaviour; PersonaAutoCreated is required-WITH-DEFAULT false, so the
+            // migration backfills existing rows to "not auto-created" and a raw insert that omits it is still valid.
+            // The default equals the CLR default, so EF's sentinel needs no override (contrast Persona.Castable).
+            entity.Property(e => e.Agency).HasMaxLength(Account.MaxAgencyLength);
+            entity.Property(e => e.JobRole).HasMaxLength(Account.MaxJobRoleLength);
+            entity.Property(e => e.Email).HasMaxLength(Account.MaxEmailLength);
+            entity.Property(e => e.PersonaAutoCreated).IsRequired().HasDefaultValue(false);
         });
 
         modelBuilder.Entity<SharedCredential>(entity =>
@@ -603,6 +634,14 @@ public class PulseDbContext : DbContext
             entity.Property(e => e.Notes).HasMaxLength(1024);
             entity.Property(e => e.Error).HasMaxLength(1024);
 
+            // demo-feedback/01 (DF-10): the MSEL `Inject #` an item was imported from — the import's idempotency key.
+            // Unique per exercise among LIVE items only: a soft-deleted item (XC-010) frees its reference, and console
+            // items (NULL) never collide. Scope leads the key (COR-001).
+            entity.Property(e => e.ExternalRef).HasMaxLength(InjectItem.MaxExternalRefLength);
+            entity.HasIndex(e => new { e.ExerciseId, e.ExternalRef })
+                .IsUnique()
+                .HasFilter("[ExternalRef] IS NOT NULL AND [DeletedAt] IS NULL");
+
             // IQ-9: the one optimistic-concurrency token for the whole item aggregate.
             entity.Property(e => e.Version).IsConcurrencyToken();
 
@@ -636,6 +675,68 @@ public class PulseDbContext : DbContext
             entity.HasKey(e => e.ExerciseId);
             entity.Property(e => e.ExerciseId).ValueGeneratedNever();
             entity.Property(e => e.Version).IsConcurrencyToken();
+        });
+
+        // ==========================================================================================
+        // easy-login/01 — the feature's ONE migration (EL-17). Both entities are IExerciseScoped, so the
+        // reflection loop below gives them the central read filter and GuardExerciseScope covers their writes;
+        // nothing here scopes them by hand. In each, the exercise-leading UNIQUE composite index doubles as the
+        // standard scoped lookup index, so no separate single-column ExerciseId index is added.
+        // ==========================================================================================
+        modelBuilder.Entity<ParticipantLink>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.ExerciseId).IsRequired();
+
+            // ONE link per account per exercise (EL-5): a reissue rotates the row in place. Scope leads the key.
+            entity.HasIndex(e => new { e.ExerciseId, e.AccountId }).IsUnique();
+
+            // The join lookup key: the SHA-256 of a 128-bit random token is globally unique. Bounded so it is
+            // index-key eligible; the hash is upper-case hex, so the case-insensitive collation changes nothing.
+            entity.Property(e => e.TokenHash).IsRequired().HasMaxLength(ParticipantLink.MaxTokenHashLength);
+            entity.HasIndex(e => e.TokenHash).IsUnique();
+
+            entity.Property(e => e.ProtectedToken).HasMaxLength(ParticipantLink.MaxProtectedTokenLength);
+        });
+
+        modelBuilder.Entity<ExerciseDayWord>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.ExerciseId).IsRequired();
+
+            // ONE word per exercise per local calendar date (EL-9); setting a date again replaces it in place.
+            // DateOnly maps to SQL `date`.
+            entity.HasIndex(e => new { e.ExerciseId, e.ForDate }).IsUnique();
+
+            entity.Property(e => e.WordHash).IsRequired().HasMaxLength(ExerciseDayWord.MaxWordHashLength);
+
+            // Concurrent writes to one date SERIALIZE (Copilot review on #486). Every rotation is ReplacedCount + 1
+            // and nothing else writes the row in place, so the count doubles as its optimistic-concurrency token: a
+            // rotation's UPDATE (and a clear's DELETE) carries `AND [ReplacedCount] = <the value read>`, so a writer
+            // whose read went stale matches no row and gets DbUpdateConcurrencyException instead of silently
+            // overwriting the other staff member's rotation and losing its increment. DayWordService re-reads and
+            // re-applies (bounded). Model-only: the existing int column, no DDL.
+            entity.Property(e => e.ReplacedCount).IsConcurrencyToken();
+        });
+
+        // ==========================================================================================
+        // demo-feedback/01 — the feature's ONE migration (DemoFeedbackPinsNoiseImport). NoisePost is IExerciseScoped,
+        // so the reflection loop below gives it the central read filter and GuardExerciseScope covers its writes;
+        // nothing here scopes it by hand. The exercise-leading composite index (the pacer's least-posted-first read,
+        // DF-13) doubles as the scoped lookup index, so no separate single-column ExerciseId index is added.
+        // PersonaId is a LOGICAL reference with no FK (house style — Follow, PostReaction).
+        // ==========================================================================================
+        modelBuilder.Entity<NoisePost>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.ExerciseId).IsRequired();
+
+            // Sized in UTF-16 code units like InjectItemPost.Text: the 280-code-point content limit is validated in code.
+            entity.Property(e => e.Text).IsRequired().HasMaxLength(NoisePost.MaxTextColumnLength);
+            entity.Property(e => e.PostedCount).IsRequired().HasDefaultValue(0);
+
+            // `Order` is a SQL reserved word — EF brackets it; raw SQL must too.
+            entity.HasIndex(e => new { e.ExerciseId, e.PostedCount, e.Order });
         });
 
         // ------------------------------------------------------------------------------------------

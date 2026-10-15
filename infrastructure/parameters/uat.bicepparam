@@ -9,7 +9,7 @@ using '../main.bicep'
 // Cost posture: Phase B0's backend (Pulse.WebApi + PulseDbContext) has landed, so this now deploys the
 // App Service host (app-pulse-api-uat), Azure SQL (sqldb-pulse-uat), and App Insights alongside the
 // Free-tier Static Web App. Storage (keyless blob media, demo-polish/01) is on for the demo;
-// Communication (email) stays gated off until a feature needs it. Before running the Deploy
+// Communication (keyless email of personal links, easy-login/13) is OFF until after the 10/20 demo. Before running the Deploy
 // Infrastructure workflow, ensure the SQL_ADMIN_PASSWORD, JWT_SECRET_KEY, and (for login go-live,
 // story login/06) BOOTSTRAP_SECRET + STAFF_IDENTITY_ACCOUNTS_JSON GitHub secrets are set on the uat
 // environment.
@@ -24,8 +24,15 @@ param location = 'centralus'
 // (allowSharedKeyAccess: false — no connection string or account key exists), and the App Service's
 // managed identity granted Storage Blob Data Contributor at account scope. The grant needs the deploy
 // SP's role-assignment write (already required by deployAi) and takes minutes to propagate — do not
-// smoke-test media uploads in the first ~10 minutes after the deploy. Communication stays off until
-// a feature needs email.
+// smoke-test media uploads in the first ~10 minutes after the deploy.
+// Communication (easy-login/13) is OFF until after the 10/20 demo (Tom, 2026-10-14: the code merges dark;
+// the email setup and its Tier-2 answers come after the demo). Flip deployCommunication to true then. When on: acs-pulse-uat + email-pulse-uat with the Azure-managed sender
+// domain (DoNotReply@<guid>.azurecomm.net, no DNS work), KEYLESS (disableLocalAuth: no connection string
+// or access key exists), and the App Service's managed identity granted "Communication and Email Service
+// Owner" on the Communication Service. Same deploy-SP role-assignment prerequisite and the same ~10 minute
+// propagation wait as storage. The app settings Email__Endpoint + Email__SenderAddress switch the roster's
+// "Email links" on. Azure-managed domains are capped at 5 emails/minute and 10/hour per subscription (not
+// raisable): fine for UAT testers, not for a real StartEx (that needs a verified custom domain + quota).
 param deployMonitoring = true
 param deployStorage = true
 param deployDatabase = true
@@ -117,4 +124,4 @@ param jwtSecretKey = readEnvironmentVariable('JWT_SECRET_KEY', '')
 // staff sign in. Set these as `uat` environment GitHub secrets before running Deploy Infrastructure.
 param bootstrapSecret = readEnvironmentVariable('BOOTSTRAP_SECRET', '')
 param staffIdentityAccountsJson = readEnvironmentVariable('STAFF_IDENTITY_ACCOUNTS_JSON', '')
-param emailConnectionString = readEnvironmentVariable('EMAIL_CONNECTION_STRING', '')
+// No email secret: email is keyless (easy-login/13). The former emailConnectionString param is gone.

@@ -7,13 +7,20 @@
  * STAFF world only.
  *
  * WHY A WRAPPER. `CobraTextField` gives its input a white (`background.paper`)
- * surface, which is right on a COBRA light page but leaves a floating label
- * unreadable when it sits over that white fill inside the dark console. This
- * wrapper:
- *   - ALWAYS floats the label (`shrink`), so the label lives on the dark panel
- *     (light `consoleChrome` ink on dark) and never overlays the white input;
- *   - recolours label / helper text from the shared `consoleChrome` tokens (no new
- *     hex values);
+ * surface, which is right on a COBRA light page but wrong for a floating label
+ * inside the dark console. This wrapper:
+ *   - renders the label as a real `<label for>` ABOVE the input, on the dark panel,
+ *     never in the outlined border's notch and never over the white fill (#493:
+ *     the old forced-`shrink` label sat on the input's white top edge in light
+ *     `inkMuted`, so the outline ran through it and it was barely readable). The
+ *     MUI `label` prop is deliberately NOT passed, so the outline has no notch.
+ *     Label colours come from the shared `consoleChrome` tokens and all clear
+ *     4.5:1 against every dark surface a field sits on (`panel`, `card`, `bg`):
+ *     `inkMuted` at rest (~8:1), `blue` while focused (~5.6:1), `amber` on error.
+ *     A required field shows a thin-space asterisk (aria-hidden, like MUI's) and
+ *     keeps the input's native `required`;
+ *   - recolours helper text from the shared `consoleChrome` tokens (no new hex
+ *     values);
  *   - shows an error as TEXT with an icon next to the field's own red outline —
  *     never colour alone (NFR-001) — and keeps an always-on `hint` (e.g. the
  *     "12/280" counter) beside it;
@@ -93,44 +100,67 @@ export function RunSheetField({
     ) : undefined
 
   return (
-    <CobraTextField
-      id={id}
-      label={label}
-      value={value}
-      onChange={event => onChange(event.target.value)}
-      onKeyDown={event => {
-        if (onEnter && event.key === 'Enter' && !multiline) {
-          event.preventDefault()
-          onEnter()
-        }
+    <Box
+      data-testid={`${id}-field`}
+      sx={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 0.5,
+        minWidth: 0,
+        // Focus tints the label (never on an error, which keeps its amber + icon + text).
+        '&:focus-within > label[data-error="false"]': { color: chrome.blue },
       }}
-      error={Boolean(error)}
-      helperText={helper}
-      multiline={multiline}
-      rows={rows}
-      select={select}
-      type={select ? undefined : type}
-      disabled={disabled}
-      required={required}
-      fullWidth
-      size="small"
-      slotProps={{
-        inputLabel: { shrink: true },
-        htmlInput: inputProps,
-        ...(select ? { select: { native: true } } : {}),
-      }}
-      sx={[
-        {
-          '& .MuiInputLabel-root': { color: chrome.inkMuted },
-          '& label.Mui-focused': { color: chrome.blue },
-          '& label.Mui-error': { color: chrome.amber },
-          '& .MuiFormHelperText-root': { color: chrome.inkMuted, mx: 0 },
-          '& .MuiInputBase-root.Mui-disabled': { opacity: 0.75 },
-        },
-        ...(sx === undefined ? [] : Array.isArray(sx) ? sx : [sx]),
-      ]}
     >
-      {children}
-    </CobraTextField>
+      <Box
+        component="label"
+        htmlFor={id}
+        id={`${id}-label`}
+        data-error={error ? 'true' : 'false'}
+        sx={{
+          fontSize: 12,
+          fontWeight: 600,
+          lineHeight: 1.4,
+          color: error ? chrome.amber : chrome.inkMuted,
+          overflowWrap: 'anywhere',
+        }}
+      >
+        {label}
+        {required ? <span aria-hidden="true">&thinsp;*</span> : null}
+      </Box>
+      <CobraTextField
+        id={id}
+        value={value}
+        onChange={event => onChange(event.target.value)}
+        onKeyDown={event => {
+          if (onEnter && event.key === 'Enter' && !multiline) {
+            event.preventDefault()
+            onEnter()
+          }
+        }}
+        error={Boolean(error)}
+        helperText={helper}
+        multiline={multiline}
+        rows={rows}
+        select={select}
+        type={select ? undefined : type}
+        disabled={disabled}
+        required={required}
+        fullWidth
+        size="small"
+        slotProps={{
+          htmlInput: inputProps,
+          ...(select ? { select: { native: true } } : {}),
+        }}
+        sx={[
+          {
+            '& .MuiFormHelperText-root': { color: chrome.inkMuted, mx: 0 },
+            '& .MuiInputBase-root.Mui-disabled': { opacity: 0.75 },
+          },
+          ...(sx === undefined ? [] : Array.isArray(sx) ? sx : [sx]),
+        ]}
+      >
+        {children}
+      </CobraTextField>
+    </Box>
   )
 }

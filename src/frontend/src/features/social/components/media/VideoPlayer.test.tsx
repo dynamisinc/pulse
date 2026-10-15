@@ -6,19 +6,22 @@
  * preload="metadata" / poster, `#t=0.1` without one, never autoplay), the
  * duration badge, keyboard handling (Space/K, ←/→ ±5 s, M, F; wrapper-only so the
  * native `<video>` is never double-handled), `aria-pressed` toggles, the
- * single-playing-video rule, no thread-open on click, the NFR-008 watermark slot
- * both ways, native fullscreen with the modal fallback, the unplayable-codec
- * message and the unsafe-URL placeholder.
+ * single-playing-video rule, no thread-open on click, the EXERCISE bands
+ * (demo-feedback 06: top + bottom, both ways, controls still reachable over them),
+ * native fullscreen with the modal fallback, the unplayable-codec message and the
+ * unsafe-URL placeholder.
  *
  * `useChromeConfig` is mocked at the module boundary (`isWatermarkRequired` stays
- * real) so the watermark is driven through the real derivation; `useOverlayState` is
- * mocked the same way so the Pause/EndEx behaviour can be driven.
+ * real) so the bands are driven through the real DF-3 derivation
+ * (`watermark || !enabled`); `useOverlayState` is mocked the same way so the
+ * Pause/EndEx behaviour can be driven.
  *
- * Gate-1 additions: the EXERCISE watermark also shows whenever the player is FULLSCREEN
- * (chrome on, banners hidden); a fullscreen of the bare `<video>` (Firefox / desktop
- * Safari / double-click) and iOS's native video fullscreen are exited and routed to the
- * modal; Download / Cast are disabled; media pauses behind the shell overlay; a failed
- * URL retries when it is re-minted; the modal fallback carries the position over.
+ * Gate-1 additions: the EXERCISE marking also shows whenever the player is FULLSCREEN
+ * (marking not otherwise required, banners hidden); a fullscreen of the bare `<video>`
+ * (Firefox / desktop Safari / double-click) and iOS's native video fullscreen are exited
+ * and routed to the modal; Download / Cast are disabled; media pauses behind the shell
+ * overlay; a failed URL retries when it is re-minted; the modal fallback carries the
+ * position over.
  */
 import type { ComponentProps } from 'react'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
@@ -31,7 +34,7 @@ import type { MediaElementStubs } from './mediaTestUtils'
 import { resetPlaybackForTests } from './playbackCoordinator'
 import { VideoPlayer } from './VideoPlayer'
 
-const chrome = vi.hoisted(() => ({ enabled: true }))
+const chrome = vi.hoisted(() => ({ enabled: true, watermark: false }))
 const overlay = vi.hoisted(() => ({ state: 'none' as 'none' | 'pause' | 'endex' | 'broadcast' }))
 
 vi.mock('@/features/participant-shell/chromeConfig', async importOriginal => {
@@ -39,7 +42,14 @@ vi.mock('@/features/participant-shell/chromeConfig', async importOriginal => {
   const banner = { text: 'BANNER', fg: '#fff', bg: '#000' }
   return {
     ...actual,
-    useChromeConfig: (): ChromeConfig => ({ enabled: chrome.enabled, top: banner, bottom: banner }),
+    // The shell's providers are "present": the bands read the (mocked) config.
+    useChromeConfigAvailable: () => true,
+    useChromeConfig: (): ChromeConfig => ({
+      enabled: chrome.enabled,
+      watermark: chrome.watermark,
+      top: banner,
+      bottom: banner,
+    }),
   }
 })
 
@@ -66,7 +76,9 @@ function video(overrides: Partial<PostMedia> = {}): PostMedia {
 let stubs: MediaElementStubs
 
 beforeEach(() => {
+  // Default: NOT required (banner on, watermark switch off) - the one unmarked state.
   chrome.enabled = true
+  chrome.watermark = false
   overlay.state = 'none'
   stubs = installMediaElementStubs()
   resetPlaybackForTests()
@@ -100,6 +112,11 @@ function setWebkitFullscreenElement(element: Element | null) {
 }
 
 type PlayerProps = Partial<ComponentProps<typeof VideoPlayer>>
+
+/** The EXERCISE bands overlay, or null when none is rendered. */
+function bands(): HTMLElement | null {
+  return screen.queryByTestId('exercise-bands')
+}
 
 function mount(media: PostMedia = video(), props: PlayerProps = {}) {
   const utils = render(<VideoPlayer media={media} {...props} />)
@@ -451,45 +468,114 @@ describe('VideoPlayer — clicking does not open the thread', () => {
   })
 })
 
-describe('VideoPlayer — EXERCISE watermark slot (NFR-008)', () => {
-  it('is present and EMPTY while the compliance chrome is on', () => {
-    chrome.enabled = true
-    mount()
+describe('VideoPlayer — EXERCISE bands (demo-feedback 06, DF-3/DF-4, NFR-008)', () => {
+  it('draws a top AND a bottom band reading EXERCISE EXERCISE EXERCISE when the watermark is on', () => {
+    chrome.watermark = true
+    const { wrapper } = mount()
 
-    const slot = screen.getByTestId('media-watermark-slot')
-    expect(slot).toBeEmptyDOMElement()
-    expect(slot).not.toHaveAttribute('role')
+    const overlay = bands()
+    expect(overlay).not.toBeNull()
+    expect(within(wrapper).getByTestId('exercise-band-top')).toHaveTextContent(
+      /^EXERCISE EXERCISE EXERCISE$/,
+    )
+    expect(within(wrapper).getByTestId('exercise-band-bottom')).toHaveTextContent(
+      /^EXERCISE EXERCISE EXERCISE$/,
+    )
+    // aria-hidden: the alt text names the player; the bands add nothing to it.
+    expect(overlay).toHaveAttribute('aria-hidden', 'true')
+    expect(screen.getByRole('group', { name: ALT })).toBe(wrapper)
   })
 
-  it('renders the text "EXERCISE" when the chrome is off', () => {
+  it('draws the bands when the compliance chrome is off, whatever the watermark switch says', () => {
     chrome.enabled = false
+    chrome.watermark = false
     mount()
 
-    const slot = screen.getByTestId('media-watermark-slot')
-    expect(slot).toHaveTextContent('EXERCISE')
-    expect(slot).toHaveAttribute('role', 'note')
-    expect(screen.getByRole('note', { name: 'Exercise watermark' })).toBe(slot)
+    expect(bands()).not.toBeNull()
   })
 
-  it('is the SAME reserved element either way, so toggling shifts nothing', () => {
-    chrome.enabled = true
+  it('renders NO band when not required (watermark off, banner on)', () => {
+    mount()
+
+    expect(bands()).toBeNull()
+    expect(screen.queryByText('EXERCISE EXERCISE EXERCISE')).not.toBeInTheDocument()
+  })
+
+  it('replaces the old single "EXERCISE" slot (no top-row slot, no note)', () => {
+    chrome.watermark = true
+    mount()
+
+    expect(screen.queryByTestId('media-watermark-slot')).not.toBeInTheDocument()
+    expect(screen.queryByRole('note')).not.toBeInTheDocument()
+  })
+
+  it('toggling the marking adds/removes ONLY the overlay - the frame, video and controls stay put', () => {
     const { rerender } = render(<VideoPlayer media={video()} />)
-    const slotOn = screen.getByTestId('media-watermark-slot')
-    const siblings = (el: HTMLElement) => Array.from(el.parentElement?.children ?? [])
-    const orderBefore = siblings(slotOn).map(node => node.getAttribute('data-testid'))
+    const wrapper = screen.getByTestId('video-player')
+    const styleBefore = wrapper.getAttribute('style')
+    const el = wrapper.querySelector('video')
+    const controlsBefore = screen.getAllByRole('button')
 
-    chrome.enabled = false
+    chrome.watermark = true
     rerender(<VideoPlayer media={video()} />)
 
-    expect(screen.getByTestId('media-watermark-slot')).toBe(slotOn)
-    expect(siblings(slotOn).map(node => node.getAttribute('data-testid'))).toEqual(orderBefore)
-    expect(slotOn).toHaveTextContent('EXERCISE')
+    expect(bands()).not.toBeNull()
+    expect(screen.getByTestId('video-player')).toBe(wrapper)
+    expect(wrapper.getAttribute('style')).toBe(styleBefore)
+    expect(wrapper.querySelector('video')).toBe(el)
+    expect(screen.getAllByRole('button')).toEqual(controlsBefore)
+
+    chrome.watermark = false
+    rerender(<VideoPlayer media={video()} />)
+    expect(bands()).toBeNull()
   })
 
-  it('stays on the wrapper that is fullscreened (the watermark is a child of it)', () => {
-    chrome.enabled = false
+  it('keeps the top controls row (duration, Mute, Expand) and Play visible and clickable over the bands', async () => {
+    const user = userEvent.setup()
+    chrome.watermark = true
+    mount()
+
+    // The controls are not inside the aria-hidden overlay, so they stay in the a11y tree.
+    const overlay = bands()
+    const mute = screen.getByRole('button', { name: 'Mute' })
+    const expand = screen.getByRole('button', { name: 'Expand' })
+    const play = screen.getByRole('button', { name: 'Play' })
+    for (const control of [mute, expand, play, screen.getByTestId('video-duration')]) {
+      expect(overlay).not.toContainElement(control)
+      expect(control).toBeVisible()
+    }
+
+    await user.click(mute)
+    expect(mute).toHaveAttribute('aria-pressed', 'true')
+    await user.click(play)
+    expect(stubs.play).toHaveBeenCalled()
+  })
+
+  it('keeps keyboard operation unchanged with the bands on (Space plays, M mutes)', async () => {
+    const user = userEvent.setup()
+    chrome.watermark = true
     const { wrapper } = mount()
-    expect(wrapper).toContainElement(screen.getByTestId('media-watermark-slot'))
+
+    wrapper.focus()
+    await user.keyboard(' ')
+    expect(stubs.play).toHaveBeenCalledTimes(1)
+    await user.keyboard('m')
+    expect(screen.getByRole('button', { name: 'Mute' })).toHaveAttribute('aria-pressed', 'true')
+  })
+
+  it('lifts the bottom band clear of the native control bar', () => {
+    chrome.watermark = true
+    mount()
+
+    expect(bands()).toHaveAttribute('data-clear-native-controls', 'true')
+  })
+
+  it('sits inside the wrapper that is fullscreened (the bands stay on screen in fullscreen)', () => {
+    chrome.watermark = true
+    const { wrapper } = mount()
+    const overlay = bands()
+    if (overlay === null) throw new Error('no bands')
+    expect(wrapper).toContainElement(overlay)
   })
 })
 
@@ -584,22 +670,35 @@ describe('VideoPlayer — Expand (native fullscreen, modal fallback)', () => {
 })
 
 describe('VideoPlayer — fullscreen never drops EXERCISE (NFR-008, Gate-1 H-2)', () => {
-  it('shows the EXERCISE watermark whenever the player is FULLSCREEN, even with the chrome ON', () => {
+  it('shows the EXERCISE bands whenever the player is FULLSCREEN, even when marking is not required', () => {
     chrome.enabled = true
+    chrome.watermark = false
     const { wrapper } = mount()
-    const slot = screen.getByTestId('media-watermark-slot')
-    expect(slot).toBeEmptyDOMElement()
+    expect(bands()).toBeNull()
 
     setFullscreenElement(wrapper)
 
-    expect(slot).toHaveTextContent('EXERCISE')
-    expect(slot).toHaveAttribute('role', 'note')
+    const overlay = bands()
+    if (overlay === null) throw new Error('no bands in fullscreen')
+    expect(wrapper).toContainElement(overlay)
+    expect(within(overlay).getAllByText('EXERCISE EXERCISE EXERCISE')).toHaveLength(2)
+    // The fullscreen controls stay reachable over the bands.
     expect(screen.getByRole('button', { name: 'Exit full screen' })).toBeInTheDocument()
 
     setFullscreenElement(null)
 
-    expect(slot).toBeEmptyDOMElement()
+    expect(bands()).toBeNull()
     expect(screen.getByRole('button', { name: 'Expand' })).toBeInTheDocument()
+  })
+
+  it('keeps the bands through fullscreen when the exercise requires them', () => {
+    chrome.watermark = true
+    const { wrapper } = mount()
+
+    setFullscreenElement(wrapper)
+    expect(bands()).not.toBeNull()
+    setFullscreenElement(null)
+    expect(bands()).not.toBeNull()
   })
 
   it('does not treat ANOTHER element\'s fullscreen as this player being fullscreen', () => {
@@ -609,7 +708,7 @@ describe('VideoPlayer — fullscreen never drops EXERCISE (NFR-008, Gate-1 H-2)'
 
     setFullscreenElement(other)
 
-    expect(screen.getByTestId('media-watermark-slot')).toBeEmptyDOMElement()
+    expect(bands()).toBeNull()
     expect(wrapper).toBeInTheDocument()
     other.remove()
   })
@@ -627,7 +726,7 @@ describe('VideoPlayer — fullscreen never drops EXERCISE (NFR-008, Gate-1 H-2)'
     expect(onRequestModal).toHaveBeenCalledWith(wrapper)
     // The inline video is paused for the hand-over; the wrapper is not "fullscreen".
     expect(stubs.pause).toHaveBeenCalled()
-    expect(screen.getByTestId('media-watermark-slot')).toBeEmptyDOMElement()
+    expect(bands()).toBeNull()
   })
 
   it('carries the position over when the bare <video> goes fullscreen mid-play', () => {
@@ -653,7 +752,7 @@ describe('VideoPlayer — fullscreen never drops EXERCISE (NFR-008, Gate-1 H-2)'
     expect(onRequestModal).not.toHaveBeenCalled()
   })
 
-  it('leaves a fullscreen of the WRAPPER alone (that path keeps the watermark)', () => {
+  it('leaves a fullscreen of the WRAPPER alone (that path keeps the bands)', () => {
     const onRequestModal = vi.fn()
     const exit = vi.fn().mockResolvedValue(undefined)
     document.exitFullscreen = exit
@@ -693,15 +792,15 @@ describe('VideoPlayer — fullscreen never drops EXERCISE (NFR-008, Gate-1 H-2)'
 describe('VideoPlayer — listeners and the legacy WebKit API (L-A)', () => {
   it('tracks fullscreen through the webkit-prefixed change event too', () => {
     const { wrapper } = mount()
-    expect(screen.getByTestId('media-watermark-slot')).toBeEmptyDOMElement()
+    expect(bands()).toBeNull()
 
     setWebkitFullscreenElement(wrapper)
 
-    expect(screen.getByTestId('media-watermark-slot')).toHaveTextContent('EXERCISE')
+    expect(bands()).not.toBeNull()
     expect(screen.getByRole('button', { name: 'Exit full screen' })).toBeInTheDocument()
 
     setWebkitFullscreenElement(null)
-    expect(screen.getByTestId('media-watermark-slot')).toBeEmptyDOMElement()
+    expect(bands()).toBeNull()
   })
 
   it('routes a webkit-prefixed fullscreen of the BARE <video> to the modal as well', () => {
@@ -982,13 +1081,15 @@ describe('VideoPlayer — unplayable and unsafe', () => {
     expect(retried.paused).toBe(true)
   })
 
-  it('keeps the watermark slot even when the video cannot play', () => {
-    chrome.enabled = false
+  it('draws NO bands over the unplayable message (it shows no footage; Gate-1 L-5)', () => {
+    chrome.watermark = true
     const { el } = mount()
+    expect(bands()).not.toBeNull()
 
     fireEvent.error(el)
 
-    expect(screen.getByTestId('media-watermark-slot')).toHaveTextContent('EXERCISE')
+    expect(screen.getByTestId('video-unplayable')).toBeInTheDocument()
+    expect(bands()).toBeNull()
   })
 
   it.each([
@@ -1006,9 +1107,11 @@ describe('VideoPlayer — unplayable and unsafe', () => {
 })
 
 describe('VideoPlayer — providers (the real stack)', () => {
-  it('resolves the real chrome config (chrome on by default => empty slot) under the shell providers', async () => {
+  it('renders under the real shell providers (query client + exercise scope), bands included', async () => {
+    chrome.watermark = true
     renderWithMediaProviders(<VideoPlayer media={video()} />)
 
-    expect(await screen.findByTestId('media-watermark-slot')).toBeEmptyDOMElement()
+    expect(await screen.findByTestId('video-player')).toBeInTheDocument()
+    expect(screen.getAllByText('EXERCISE EXERCISE EXERCISE')).toHaveLength(2)
   })
 })

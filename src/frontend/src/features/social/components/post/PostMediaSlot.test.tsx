@@ -148,7 +148,8 @@ describe('PostMediaSlot — video', () => {
 
     const dialog = await screen.findByRole('dialog')
     expect(within(dialog).getByRole('group', { name: 'A crew explains the advisory' })).toBeInTheDocument()
-    expect(within(dialog).getByTestId('media-watermark-slot')).toBeInTheDocument()
+    // demo-feedback 06: the EXERCISE bands replaced the single watermark slot.
+    expect(within(dialog).getByTestId('exercise-bands')).toBeInTheDocument()
 
     await user.keyboard('{Escape}')
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())

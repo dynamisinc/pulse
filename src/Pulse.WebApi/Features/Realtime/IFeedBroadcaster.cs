@@ -38,4 +38,23 @@ public interface IFeedBroadcaster
     /// <returns>A task that completes when the removal has been dispatched.</returns>
     Task BroadcastPostRemovedAsync(Guid exerciseId, Guid postId, CancellationToken cancellationToken = default) =>
         Task.CompletedTask;
+
+    /// <summary>
+    /// Tells the exercise's subscribers that a controller pinned a post for everyone, or cleared that pin
+    /// (demo-feedback DF-7), so every Pinned tab and console updates live. The payload is ONLY
+    /// <c>PostPinChanged { postId, pinnedForAll }</c>: never who pinned it, when, or any post content (XC-002). It goes
+    /// to the exercise-wide group, because participants are exactly who see exercise pins.
+    /// </summary>
+    /// <remarks>
+    /// A <b>default interface method</b> (a no-op), so the <see cref="IFeedBroadcaster"/> test doubles that predate
+    /// exercise pins keep compiling unchanged. <c>SignalRFeedBroadcaster</c> implements the real fan-out.
+    /// </remarks>
+    /// <param name="exerciseId">The owning exercise run whose subscribers receive the change (COR-001 scope).</param>
+    /// <param name="postId">The post whose exercise pin changed.</param>
+    /// <param name="pinnedForAll">Whether the post is now pinned for everyone.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>A task that completes when the change has been dispatched.</returns>
+    Task BroadcastPostPinChangedAsync(
+        Guid exerciseId, Guid postId, bool pinnedForAll, CancellationToken cancellationToken = default) =>
+        Task.CompletedTask;
 }

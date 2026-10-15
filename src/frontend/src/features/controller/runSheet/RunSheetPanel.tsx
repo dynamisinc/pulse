@@ -60,6 +60,7 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import {
   faBolt,
   faCircleInfo,
+  faFileExcel,
   faKeyboard,
   faPause,
   faPlus,
@@ -75,6 +76,7 @@ import { RunSheetButton } from './RunSheetButtons'
 import { RunSheetRow } from './RunSheetRow'
 import { InjectItemEditor, type EditorMode, type EditorSubmitResult } from './InjectItemEditor'
 import { KeyboardHelp } from './KeyboardHelp'
+import { RunSheetImportDialog } from './import/RunSheetImportDialog'
 import {
   InjectConflictError,
   InjectNotFoundError,
@@ -239,6 +241,9 @@ function RunSheetPanelBody({ exerciseId }: { readonly exerciseId: string }) {
   const [rowNotes, setRowNotes] = useState<Readonly<Record<string, string>>>({})
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
   const [helpOpen, setHelpOpen] = useState(false)
+  // Demo-feedback story 10: the "Import from Excel" dialog (mounted only while open, so it
+  // starts fresh every time). Imported items appear on the queue's next 3 s poll.
+  const [importOpen, setImportOpen] = useState(false)
   const editorKey = useRef(0)
   // The latest polled items, for decisions made AFTER an await (a render closure would be stale).
   const latestItems = useRef<readonly InjectItemDto[]>([])
@@ -615,6 +620,13 @@ function RunSheetPanelBody({ exerciseId }: { readonly exerciseId: string }) {
             onClick={openCreate}
           />
           <RunSheetButton
+            icon={faFileExcel}
+            label="Import from Excel"
+            ariaLabel="Import from Excel"
+            testId="import-from-excel"
+            onClick={() => setImportOpen(true)}
+          />
+          <RunSheetButton
             icon={faKeyboard}
             label="Keyboard"
             ariaLabel="Keyboard shortcuts"
@@ -822,6 +834,10 @@ function RunSheetPanelBody({ exerciseId }: { readonly exerciseId: string }) {
         {/* Keyed by the event id: a NEW node per announcement, so repeated words speak again. */}
         <span key={announcement.id}>{announcement.text}</span>
       </Box>
+
+      {/* Story 10: the import dialog (portalled; it stops its own key presses from reaching
+          the run sheet's keyboard shortcuts). */}
+      {importOpen ? <RunSheetImportDialog onClose={() => setImportOpen(false)} /> : null}
     </Box>
   )
 }

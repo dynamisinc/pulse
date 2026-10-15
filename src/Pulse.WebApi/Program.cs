@@ -10,10 +10,20 @@ using Pulse.WebApi.Features.ExerciseConfiguration.Lifecycle;
 using Pulse.WebApi.Features.ExerciseConfiguration.PracticeMode;
 using Pulse.WebApi.Features.ExerciseResolution;
 using Pulse.WebApi.Features.Identity.Accounts;
+using Pulse.WebApi.Features.Identity.DayWord;        // easy-login 05
+using Pulse.WebApi.Features.Identity.EasyLogin;      // easy-login 01
+using Pulse.WebApi.Features.Identity.LinkCards;      // easy-login 04
+using Pulse.WebApi.Features.Identity.LinkEmail;      // easy-login 13
+using Pulse.WebApi.Features.Identity.PersonalLinks;  // easy-login 03
+using Pulse.WebApi.Features.Identity.Roster;         // easy-login 02
 using Pulse.WebApi.Features.Identity.Sessions;
 using Pulse.WebApi.Features.Identity.SharedAccess;
 using Pulse.WebApi.Features.Identity.Staff;
 using Pulse.WebApi.Features.Injects;
+using Pulse.WebApi.Features.Injects.Import;         // demo-feedback 03
+using Pulse.WebApi.Features.Exports;                // demo-feedback 02
+using Pulse.WebApi.Features.Social.Pins;            // demo-feedback 04
+using Pulse.WebApi.Features.WhiteNoise;             // demo-feedback 05
 using Pulse.WebApi.Features.ExerciseLifecycleAdmin;
 using Pulse.WebApi.Features.Media; // demo-polish BM
 using Pulse.WebApi.Features.Ops.Bootstrap;
@@ -121,7 +131,7 @@ builder.Services.AddExerciseLifecycle();        // story 03 — COR-032 state ma
 // the bare Host header — so 12 routes and the SignalR hub were reachable with no credential at all. The
 // fallback policy applies to every endpoint that declares no authorization metadata of its own: minimal
 // APIs, MVC controllers (POST /api/telemetry) and hub endpoints alike, which an IEndpointFilter could not
-// have covered. The ONLY exceptions are the eleven routes in PreAuthAllowlist, each marked
+// have covered. The ONLY exceptions are the thirteen routes in PreAuthAllowlist, each marked
 // .AllowAnonymousPreAuth() at its own mapping call site.
 builder.Services.AddSessionAuthorization();
 
@@ -138,6 +148,23 @@ builder.Services.AddSharedReadOnly();
 // rotation-grace + brute-force lockout over story 06's SharedCredential. Reuses 06's "shared-login"
 // rate-limiter policy (registers no new limiter); staff endpoints are gated by ICurrentStaffSessionAccessor.
 builder.Services.AddSharedCredentialLifecycle();
+
+// Easy participant login (feature easy-login, #465; docs/features/easy-login/implementation.md). 01's
+// AddEasyLoginFoundation registers the shared kernel (options + startup check, Data Protection for the reprintable
+// link copy, token protector, join-URL builder, exercise-facts reader) and a fail-closed null link issuer that 03's
+// AddPersonalLinks REPLACES with the real one, whichever runs first. 02 roster provisioning, 04 link cards + QR and
+// 05 the day word add their own slices; 03 and 05 each add one named rate-limit policy (easy-login-join /
+// easy-login-word) under the single app.UseRateLimiter() above. 06's day-long participant sessions live inside
+// AddSessions (above) and need no line here. All depend on AddStaffIdentity, AddSessions and AddExerciseClock.
+// 13 (email the personal link) is additive and DARK until Email:Endpoint + Email:SenderAddress are usable: without
+// them the mailer is the fail-closed null one, POST /api/staff/roster/email-links answers 503 and the roster reports
+// capabilities.emailLinks: false. Keyless (the App Service's managed identity); no middleware, no migration.
+builder.Services.AddEasyLoginFoundation();
+builder.Services.AddRoster();
+builder.Services.AddPersonalLinks();
+builder.Services.AddLinkCards();
+builder.Services.AddDayWord();
+builder.Services.AddLinkEmail();
 
 // Exercise lifecycle administration (E1 exercise-lifecycle-admin, COR-074/075/076) — the ORGANIZATION-tier
 // staff slice: POST/GET /api/org/exercises and GET /api/org/staff-assignments. Registers the slice's three
@@ -243,6 +270,15 @@ builder.Services.AddPauseParticipantOverlay();  // #351 REPLACES #350's no-op pu
 builder.Services.AddStorylineSteering();        // #352 storyline target GET/POST
 builder.Services.AddInjects();                  // #452 scripted-post queue + InjectBurstRunner (needs the pause tier + post funnel above)
 
+// Demo feedback cut (#496), orchestrator seam S-2. All four use TryAdd, so the order among them is free; they sit
+// here because pins need the reactions, realtime hub and clock above, and import + white noise need AddInjects
+// (and, through it, the pause tier and the post funnel). White noise's pacer waits FirstSweepDelay (5 s) before its
+// first sweep, so WebApplicationFactory<Program> hosts do not hit the database the moment they start.
+builder.Services.AddPostExport();               // demo-feedback 02 GET /api/staff/exports/posts.xlsx
+builder.Services.AddInjectImport();             // demo-feedback 03 POST /api/injects/import
+builder.Services.AddPostPins();                 // demo-feedback 04 personal + exercise pins, GET /api/feed/pinned
+builder.Services.AddWhiteNoise();               // demo-feedback 05 noise pool + pacer, /api/staff/noise*
+
 // CORS: allow exactly the configured frontend origin (Authentication__FrontendBaseUrl — the same app
 // setting infrastructure/modules/webapp.bicep provisions for the Static Web App's URL). Fail closed
 // (no cross-origin access at all) when the key is unset/empty rather than falling open.
@@ -254,7 +290,10 @@ builder.Services.AddCors(options =>
     {
         if (!string.IsNullOrWhiteSpace(frontendBaseUrl))
         {
-            policy.WithOrigins(frontendBaseUrl).AllowAnyHeader().AllowAnyMethod();
+            // Content-Disposition is exposed so the console can read the post export's file name
+            // cross-origin (demo-feedback 02/09); without it the browser hides the header from script.
+            policy.WithOrigins(frontendBaseUrl).AllowAnyHeader().AllowAnyMethod()
+                .WithExposedHeaders("Content-Disposition");
         }
         else
         {
@@ -318,7 +357,7 @@ app.UseOrganizationResolution();
 // immediately after UseSessionAuthentication, which is what populates HttpContext.User for a live session.
 // WebApplication auto-inserts UseAuthorization() ahead of ALL user middleware when it is never called
 // explicitly; that placement would evaluate the fallback policy before the principal exists. The failure would
-// be SILENT and nastier than a total outage: the eleven allowlisted routes keep working (IAllowAnonymous
+// be SILENT and nastier than a total outage: the thirteen allowlisted routes keep working (IAllowAnonymous
 // short-circuits the middleware wherever it sits), so login still succeeds — and then every authenticated call
 // after it 401s. Calling it here is load-bearing, not stylistic — the same class of ordering constraint as
 // host-resolution-before-session-authentication above. From this line on, an endpoint is reachable without a
@@ -436,6 +475,11 @@ app.MapStaffAuthEndpoints();        // #62 POST /api/auth/staff/login, GET /api/
 app.MapSharedReadOnlyEndpoints();          // #63 POST /api/auth/shared (view-only session + ephemeral identity)
 app.MapAccountEndpoints();                 // #59 POST /api/auth/login, POST /api/staff/accounts[/import]
 app.MapSharedCredentialLifecycleEndpoints(); // #64 POST /api/staff/shared-credential/{rotate,revoke}
+app.MapPersonalLinkEndpoints();            // easy-login 03 POST /api/auth/join (pre-auth), POST /api/staff/roster/{id}/{link/reissue,link/revoke,disable,enable}
+app.MapDayWordEndpoints();                 // easy-login 05 POST /api/auth/word (pre-auth), GET/PUT/DELETE /api/staff/day-word
+app.MapRosterEndpoints();                  // easy-login 02 GET/POST /api/staff/roster, POST /api/staff/roster/import
+app.MapLinkCardEndpoints();                // easy-login 04 POST /api/staff/roster/cards
+app.MapLinkEmailEndpoints();               // easy-login 13 POST /api/staff/roster/email-links (503 until email is configured)
 app.MapBootstrapEndpoints();               // #308 POST /api/ops/bootstrap-exercise (secret-gated seed; 404 when unconfigured)
 app.MapEngineContentSeedEndpoints();       // #327 POST /api/ops/seed-engine-content (secret-gated engine drive path; 404 when unconfigured)
 
@@ -470,6 +514,15 @@ app.MapEngineReview();    // #286 GET queue + approve/edit/veto/re-roll/batch + 
 app.MapPauseTierSteering();   // #350 pause tier (Freeze reaches the real clock)
 app.MapStorylineSteering();   // #352 storyline actual/target read + target set
 app.MapInjects();             // #452 /api/injects* (staff gate; mutations controller-only)
+
+// Demo feedback cut (#496), seam S-2. Each slice carries its own gates inside its Map extension (staff filter, plus
+// the controller-role filter on every mutation). MapPostPins() stays at TOP LEVEL on purpose: a view-only session
+// must still read GET /api/feed/pinned; the personal pin rides the existing reaction route, which already sits
+// inside DenyReadOnlySessions() above.
+app.MapPostExport();          // demo-feedback 02 GET /api/staff/exports/posts.xlsx (any assigned staff)
+app.MapInjectImport();        // demo-feedback 03 POST /api/injects/import (controller)
+app.MapPostPins();            // demo-feedback 04 GET /api/feed/pinned; PUT/DELETE /api/staff/posts/{id}/pin (controller)
+app.MapWhiteNoise();          // demo-feedback 05 GET /api/staff/noise (any staff); PUT noise + noise/pool (controller)
 
 app.Run();
 

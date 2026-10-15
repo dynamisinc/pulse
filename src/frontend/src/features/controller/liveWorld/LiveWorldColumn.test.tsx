@@ -79,6 +79,8 @@ let source: FakeSource
 beforeEach(() => {
   scope = { exerciseId: 'ex-1', exerciseName: 'Exercise One', timeZone: 'America/New_York' }
   source = createFakeSource()
+  // Story 08's unread store is per browser: no test inherits another's read state.
+  window.localStorage.clear()
   mockedResolveFeed.mockReset()
   mockedInvalidatePersonas.mockClear()
   if (realUsePersonas) mockedUsePersonas.mockImplementation(realUsePersonas)
@@ -915,7 +917,9 @@ describe('AC5 — row actions', () => {
   it('renders no extra action when renderRowActions is absent (absent, not disabled)', async () => {
     await loaded()
     for (const row of screen.getAllByTestId('live-world-row')) {
-      expect(within(row).getAllByRole('button')).toHaveLength(1) // only Reply as…
+      // Only the column's own actions: Reply as… and (story 08) Pin for everyone.
+      expect(within(row).getAllByRole('button')).toHaveLength(2)
+      expect(within(row).getByTestId('live-world-pin')).toBeInTheDocument()
       expect(within(row).queryByRole('button', { name: /take down/i })).toBeNull()
     }
   })
@@ -1077,6 +1081,8 @@ describe('AC5 — row actions', () => {
     rows[0]?.focus()
     await user.tab()
     expect(within(rows[0] as HTMLElement).getByTestId('live-world-reply-as')).toHaveFocus()
+    await user.tab()
+    expect(within(rows[0] as HTMLElement).getByTestId('live-world-pin')).toHaveFocus()
     await user.tab()
     expect(within(rows[0] as HTMLElement).getByRole('button', { name: /^Take down/ }))
       .toHaveFocus()

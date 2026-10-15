@@ -37,6 +37,17 @@
  *      feature keeps at module level for the life of the tab - the controller composer's unsent
  *      drafts and its unresolved "did that post go out?" questions - registers its reset
  *      there, so this module imports no feature for it (core stays world-neutral).
+ *      `core/realtime` registers there too: it STOPS the shared hub connection (COR-001). The
+ *      server joins a connection to its identity's exercise and role groups once, at connect, so a
+ *      connection that outlived an identity switch on the tab would keep delivering the PREVIOUS
+ *      exercise to the next sign-in; the next consumer to start opens a new one on the new token.
+ *      (A registration, not an import: `core/auth` still imports nothing from `core/realtime`.)
+ *
+ * Steps 1 and 3-5 are also exported alone as `resetClientSession()` (easy-login 08
+ * Gate-1 W-1): the join page REPLACES one identity with another without a sign-out,
+ * so it must forget the previous user's client state exactly as sign-out does, but
+ * must not log out (the new pair is already stored). One function, two callers, so
+ * the two paths can never drift apart.
  *
  * NAVIGATION is the CALLER's job (the control does `void endSession()` then
  * `navigate(LOGIN_PATH)`) — this module has no router dependency, mirroring
@@ -61,10 +72,21 @@ import { runSessionResets } from './sessionReset'
  * afterward. Never throws.
  */
 export async function endSession(): Promise<void> {
+  resetClientSession()
+  await logout()
+}
+
+/**
+ * Forgets every piece of client state that belongs to the current identity (the
+ * React Query cache, the participant composer's and takedown's tab-lived singletons,
+ * and every feature reset registered with `./sessionReset`) WITHOUT touching the
+ * token store. Sign-out calls it before `logout()`; the join page
+ * calls it after storing a new identity's tokens. Synchronous; never throws.
+ */
+export function resetClientSession(): void {
   queryClient.clear()
   ownPostStore.reset()
   removedPosts.reset()
   resetReplyIntent()
   runSessionResets()
-  await logout()
 }

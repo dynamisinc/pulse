@@ -11,6 +11,7 @@ using System.Threading.Tasks;
 using FluentAssertions;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Routing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -92,7 +93,8 @@ internal sealed class InjectTestHost : IAsyncDisposable
         IFeedBroadcaster? broadcaster = null,
         bool hostedRunner = false,
         InjectBurstRunnerOptions? runnerOptions = null,
-        Action<IServiceCollection>? configureServices = null)
+        Action<IServiceCollection>? configureServices = null,
+        Action<IEndpointRouteBuilder>? mapEndpoints = null)
     {
         var caller = new CallerHolder();
         var time = new ManualTimeProvider(DateTimeOffset.UtcNow);
@@ -190,6 +192,7 @@ internal sealed class InjectTestHost : IAsyncDisposable
         });
         app.UseRateLimiter();
         app.MapInjects();
+        mapEndpoints?.Invoke(app); // a slice built on the queue (e.g. the MSEL import) maps its own routes here
         await app.StartAsync();
 
         return new InjectTestHost(app, caller, time, connectionString);

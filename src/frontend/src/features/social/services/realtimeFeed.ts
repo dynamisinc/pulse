@@ -46,6 +46,42 @@
  * is a push-only fact: while the transport is POLLING there is no `PostRemoved`, and the
  * post simply stops being returned by the next read (the server omits it).
  *
+ * DEMO-FEEDBACK DF-7 (story 07): `PostPinChanged`. When a controller pins a post for everyone
+ * (or clears it) the hub pushes `PostPinChanged { postId, pinnedForAll }` to the exercise group.
+ * It is validated like `PostRemoved` - rebuilt as exactly `{ postId, pinnedForAll }` (a
+ * non-object, an empty / non-string id or a non-boolean flag is dropped, and nothing else the
+ * wire carried rides along; never who pinned it) - and surfaced through `subscribePinChanged`,
+ * the FROZEN name story 08 (the console's live world) also uses. `PostReceived` keeps the post's
+ * `pinnedForAll` flag when it is `true`; `viewer` is still never copied from a broadcast (it
+ * would be someone else's state). Like a removal, a pin change is push-only: while polling there
+ * is none, and the next read of the Pinned tab carries the truth.
+ *
+ * IDENTITY CHANGE (COR-001). Two things happen when the identity on the tab changes (sign-out,
+ * every sign-in; `resetClientSession()` runs both):
+ *
+ * (1) The shared connection is STOPPED - it is joined to ONE identity's exercise groups for
+ * life. A consumer that is still started then hears `Disconnected` with reason `'stopped'`. That
+ * is NOT "auto-reconnect exhausted": it is not degraded and there is nothing to poll around, and
+ * giving up would leave the next identity with a feed that never goes real-time again. So the
+ * feed RE-ATTACHES: it asks the connection to start again, which builds a fresh connection on
+ * whatever token is then current with this feed's handlers still registered, and only falls back
+ * to polling if THAT fails. Not after a sign-out: with no token stored there is nothing to attach
+ * as (an empty-token negotiate is one pointless 401), so it waits for the next screen's start().
+ * A start that the stop OVERTOOK can settle late - the real library rejects it only once the old
+ * negotiate returns, possibly after the re-attach has connected - so a failed start never
+ * degrades the feed to polling while the connection is in fact up.
+ *
+ * (2) The feed's OWN identity-scoped state is forgotten (`resetForSession()`, registered with
+ * `core/auth/sessionReset` at the bottom of this module). `seenIds` and `baselined` describe
+ * what the previous identity's page held, and `pollInFlight` / a `GET /feed` still on the wire
+ * belong to its token. Left alone, B's first degraded poll would emit B's whole page as "new"
+ * (a spurious "N new posts" pill), A's late answer (the shared api client has no request
+ * timeout) would be delivered into B's stream, and A's in-flight flag would block B's polls
+ * until it landed. The reset bumps `pollGeneration`, so a poll answers only into the generation
+ * that issued it; clears the flag, the baseline and the dedup set; and the next degraded poll
+ * baselines silently. It does NOT touch subscriptions or timers: a feed that is still mounted
+ * keeps running and simply re-baselines on its next poll, and an unmounted one starts clean.
+ *
  * TESTABILITY (NFR-003 fallback + recovery). `createRealtimeFeed({ connection,
  * fetchFeed, pollIntervalMs, reconnectWindowMs })` lets RTL inject a fake
  * connection (to force "hub unreachable → polling" and "recover") and a fake
@@ -56,8 +92,10 @@
  * COBRA, no wall-clock (COR-053; scenario time rides on each post untouched).
  */
 
+import { getAccessToken } from '@/core/auth/tokenStore'
+import { registerSessionReset } from '@/core/auth/sessionReset'
 import { HubConnectionState, realtimeConnection } from '@/core/realtime/connection'
-import type { RealtimeConnection } from '@/core/realtime/connection'
+import type { RealtimeConnection, RealtimeStateReason } from '@/core/realtime/connection'
 import { parseMediaAssetView } from '@/core/media/mediaGuards'
 import { toParticipantView } from '@/features/social'
 import type { ParticipantPostView, Post, PostInReplyTo, PostMedia } from '@/features/social'
@@ -69,6 +107,9 @@ const POST_RECEIVED_EVENT = 'PostReceived'
 
 /** The hub event carrying a taken-down post's id (B6). Mirrors the broadcaster's constant. */
 const POST_REMOVED_EVENT = 'PostRemoved'
+
+/** The hub event carrying an exercise pin change (DF-7). Mirrors the broadcaster's constant. */
+const POST_PIN_CHANGED_EVENT = 'PostPinChanged'
 
 /** Default polling cadence while degraded (NFR-003 fallback). */
 const DEFAULT_POLL_INTERVAL_MS = 5000
@@ -90,6 +131,35 @@ export interface PostRemovedEvent {
 /** A subscriber that receives each validated `PostRemoved`. */
 export type PostRemovedHandler = (event: PostRemovedEvent) => void
 
+/**
+ * An exercise pin change (DF-7), as surfaced to subscribers: the post id and the new
+ * pinned-for-everyone flag, NOTHING else (never who pinned it or when).
+ */
+export interface PostPinChangedEvent {
+  readonly postId: string
+  readonly pinnedForAll: boolean
+}
+
+/** A subscriber that receives each validated `PostPinChanged`. */
+export type PostPinChangedHandler = (event: { postId: string; pinnedForAll: boolean }) => void
+
+/**
+ * The exercise-pin surface of the feed transport (demo-feedback story 07). A separate
+ * interface - not a new member of {@link RealtimeFeed} - so every existing `RealtimeFeed`
+ * fake keeps compiling; the app-wide {@link realtimeFeed} and {@link createRealtimeFeed}
+ * implement both.
+ */
+export interface PinChangeSource {
+  /**
+   * Registers a handler for each validated `PostPinChanged { postId, pinnedForAll }` push.
+   * Returns an idempotent unsubscribe. Push-only (see the module header). FROZEN name:
+   * story 08 subscribes through it.
+   */
+  subscribePinChanged(
+    handler: (e: { postId: string; pinnedForAll: boolean }) => void,
+  ): () => void
+}
+
 /** The social feed's real-time consumer surface. */
 export interface RealtimeFeed {
   /** Registers a handler for each newly-observed post. Returns an idempotent unsubscribe. */
@@ -109,6 +179,19 @@ export interface RealtimeFeed {
   stop(): void
   /** The active transport mode. */
   readonly mode: FeedTransportMode
+}
+
+/**
+ * A {@link RealtimeFeed} that can also forget the identity it served. Kept off `RealtimeFeed`
+ * itself: consumers and their test fakes never need it, only the session-reset registration.
+ */
+export interface SessionResettableFeed extends RealtimeFeed, PinChangeSource {
+  /**
+   * The session is ending: forget everything scoped to the identity that is leaving - the
+   * dedup set, the polling baseline, the in-flight poll flag - and make any `GET /feed` still on
+   * the wire answer into the void. Synchronous; never throws; touches no subscription or timer.
+   */
+  resetForSession(): void
 }
 
 /** Options for {@link createRealtimeFeed} — overrides used by tests. */
@@ -169,7 +252,7 @@ function toInReplyTo(value: unknown): PostInReplyTo | undefined {
  */
 function toParticipantPostView(payload: unknown): ParticipantPostView | null {
   if (typeof payload !== 'object' || payload === null) return null
-  const { id, authorPersonaId, text, scenarioTime, counts, media, inReplyTo } =
+  const { id, authorPersonaId, text, scenarioTime, counts, media, inReplyTo, pinnedForAll } =
     payload as Record<string, unknown>
   if (
     typeof id !== 'string' || id.length === 0 ||
@@ -195,6 +278,8 @@ function toParticipantPostView(payload: unknown): ParticipantPostView | null {
     counts: { reply, repost, like },
     ...(mediaList !== undefined ? { media: mediaList } : {}),
     ...(replyTo !== undefined ? { inReplyTo: replyTo } : {}),
+    // DF-7: `true` or absent - a `false` / malformed flag is simply not pinned.
+    ...(pinnedForAll === true ? { pinnedForAll: true as const } : {}),
   }
 }
 
@@ -213,25 +298,45 @@ function toPostRemovedEvent(payload: unknown): PostRemovedEvent | null {
 }
 
 /**
+ * Validates a raw `PostPinChanged` payload and rebuilds it as `{ postId, pinnedForAll }`.
+ * Returns `null` (dropped) for anything but an object with a non-empty string `postId` and a
+ * boolean `pinnedForAll`. A fresh literal from the two known keys - never a spread (XC-002).
+ */
+function toPostPinChangedEvent(payload: unknown): PostPinChangedEvent | null {
+  if (typeof payload !== 'object' || payload === null) return null
+  const { postId, pinnedForAll } = payload as Record<string, unknown>
+  if (typeof postId !== 'string' || postId.length === 0) return null
+  if (typeof pinnedForAll !== 'boolean') return null
+  return { postId, pinnedForAll }
+}
+
+/**
  * Drives the feed transport: real-time by default, polling fallback while
  * degraded, automatic recovery. See the module header for the guarantees.
  */
-class RealtimeFeedController implements RealtimeFeed {
+class RealtimeFeedController implements SessionResettableFeed {
   private readonly connection: RealtimeConnection
   private readonly fetchFeed: () => Promise<Post[]>
   private readonly pollIntervalMs: number
   private readonly reconnectWindowMs: number
   private readonly handlers = new Set<PostStreamHandler>()
   private readonly removedHandlers = new Set<PostRemovedHandler>()
+  private readonly pinChangedHandlers = new Set<PostPinChangedHandler>()
   private readonly seenIds = new Set<string>()
   private currentMode: FeedTransportMode = 'connecting'
   private baselined = false
   private started = false
   private pollInFlight = false
+  /**
+   * Bumped by `resetForSession()`. A poll captures it before awaiting `fetchFeed()` and answers
+   * only into the generation that issued it, so an answer for a previous identity is dropped.
+   */
+  private pollGeneration = 0
   private pollTimer: ReturnType<typeof setInterval> | null = null
   private reconnectWindowTimer: ReturnType<typeof setTimeout> | null = null
   private unsubscribePush: (() => void) | null = null
   private unsubscribeRemoved: (() => void) | null = null
+  private unsubscribePinChanged: (() => void) | null = null
   private unsubscribeState: (() => void) | null = null
 
   constructor(options: CreateRealtimeFeedOptions = {}) {
@@ -265,6 +370,16 @@ class RealtimeFeedController implements RealtimeFeed {
     }
   }
 
+  subscribePinChanged(handler: PostPinChangedHandler): () => void {
+    this.pinChangedHandlers.add(handler)
+    let active = true
+    return () => {
+      if (!active) return
+      active = false
+      this.pinChangedHandlers.delete(handler)
+    }
+  }
+
   async start(): Promise<void> {
     if (this.started) return
     this.started = true
@@ -276,8 +391,11 @@ class RealtimeFeedController implements RealtimeFeed {
     this.unsubscribeRemoved = this.connection.subscribe(POST_REMOVED_EVENT, payload => {
       this.handleRemovedPush(payload)
     })
-    this.unsubscribeState = this.connection.onStateChange(state => {
-      this.handleStateChange(state)
+    this.unsubscribePinChanged = this.connection.subscribe(POST_PIN_CHANGED_EVENT, payload => {
+      this.handlePinChangedPush(payload)
+    })
+    this.unsubscribeState = this.connection.onStateChange((state, reason) => {
+      this.handleStateChange(state, reason)
     })
 
     try {
@@ -285,8 +403,15 @@ class RealtimeFeedController implements RealtimeFeed {
       this.enterRealtime()
     } catch {
       // Hub unreachable on first connect (NFR-003) — degrade to polling immediately.
-      this.enterPolling()
+      this.degradeAfterFailedStart()
     }
+  }
+
+  resetForSession(): void {
+    this.pollGeneration += 1
+    this.pollInFlight = false
+    this.seenIds.clear()
+    this.baselined = false
   }
 
   stop(): void {
@@ -301,13 +426,17 @@ class RealtimeFeedController implements RealtimeFeed {
       this.unsubscribeRemoved()
       this.unsubscribeRemoved = null
     }
+    if (this.unsubscribePinChanged !== null) {
+      this.unsubscribePinChanged()
+      this.unsubscribePinChanged = null
+    }
     if (this.unsubscribeState !== null) {
       this.unsubscribeState()
       this.unsubscribeState = null
     }
   }
 
-  private handleStateChange(state: HubConnectionState): void {
+  private handleStateChange(state: HubConnectionState, reason?: RealtimeStateReason): void {
     if (!this.started) return
     switch (state) {
       case HubConnectionState.Connected:
@@ -317,11 +446,59 @@ class RealtimeFeedController implements RealtimeFeed {
         this.armReconnectWindow()
         break
       case HubConnectionState.Disconnected:
-        this.enterPolling()
+        if (reason === 'stopped') {
+          this.reattach()
+        } else {
+          this.enterPolling()
+        }
         break
       default:
         break
     }
+  }
+
+  /**
+   * The shared connection was stopped ON PURPOSE (the session's identity changed), not lost:
+   * start it again rather than degrade (see the module header). The connection builds a fresh
+   * connection on the then-current token and re-attaches this feed's handlers, so nothing is
+   * re-subscribed here. Success arrives as `Connected` (and is also handled here, for a
+   * connection that does not emit it); failure falls back to polling, whose recovery driver
+   * keeps retrying. A polling feed keeps its timer running meanwhile - it is the safety net
+   * until the connection is back.
+   */
+  private reattach(): void {
+    this.clearReconnectWindow()
+    if (this.currentMode === 'realtime') this.currentMode = 'connecting'
+    // A sign-out: logout() has already cleared the tokens (it runs synchronously right after the
+    // reset, ahead of this microtask), so there is no identity to attach as. Negotiating with an
+    // empty token would only earn a 401 on /hubs/exercise/negotiate; the next screen's start()
+    // connects, on the next identity's token. The screens are unmounting anyway.
+    if (getAccessToken() === null) return
+    this.connection.start().then(
+      () => {
+        if (this.started) this.enterRealtime()
+      },
+      () => {
+        this.degradeAfterFailedStart()
+      },
+    )
+  }
+
+  /**
+   * A `connection.start()` this feed made has rejected. Normally that means the hub is
+   * unreachable and the feed polls (NFR-003) - but a start that `stop()` overtook is rejected
+   * only once its old negotiate returns, which can be AFTER a re-attach has connected. Polling
+   * on top of a live connection would never end (the poll loop only restarts the connection when
+   * it is `Disconnected`), so if the connection is up the feed is simply real-time. A feed that
+   * has been stopped meanwhile does nothing (no poll timer may outlive `stop()`).
+   */
+  private degradeAfterFailedStart(): void {
+    if (!this.started) return
+    if (this.connection.state === HubConnectionState.Connected) {
+      this.enterRealtime()
+      return
+    }
+    this.enterPolling()
   }
 
   private enterRealtime(): void {
@@ -373,7 +550,14 @@ class RealtimeFeedController implements RealtimeFeed {
     // overlap — two concurrent polls could both observe baselined === false and race the
     // dedup/baseline state. Skip a tick while one is still running; the next cadence retries.
     if (this.pollInFlight) return
+    // Self-heal: polling is the fallback for a connection that is NOT up. If it is up, whatever
+    // degraded the feed has since been overtaken (a late-rejecting start), so stop polling.
+    if (this.connection.state === HubConnectionState.Connected) {
+      this.enterRealtime()
+      return
+    }
     this.pollInFlight = true
+    const generation = this.pollGeneration
     try {
       // Recovery driver: while degraded, keep trying to re-establish real-time. A
       // successful start() emits Connected via onStateChange → we return to push transport.
@@ -385,12 +569,17 @@ class RealtimeFeedController implements RealtimeFeed {
 
       try {
         const posts = await this.fetchFeed()
+        // The session ended while this read was on the wire: it is the PREVIOUS identity's
+        // page, and the baseline/dedup state it would land in is the next one's. Drop it.
+        if (generation !== this.pollGeneration) return
         this.handlePoll(posts)
       } catch {
         // Feed fetch failed while degraded — remain in polling; the next tick retries.
       }
     } finally {
-      this.pollInFlight = false
+      // Only the generation that set the flag may clear it: a stale tick finishing late must not
+      // release the flag a newer tick (the next identity's) is holding.
+      if (generation === this.pollGeneration) this.pollInFlight = false
     }
   }
 
@@ -409,6 +598,19 @@ class RealtimeFeedController implements RealtimeFeed {
         handler(event)
       } catch {
         // Isolated: one consumer's failure is not the removal's failure.
+      }
+    }
+  }
+
+  private handlePinChangedPush(payload: unknown): void {
+    const event = toPostPinChangedEvent(payload)
+    if (event === null) return
+    // Same isolation as a removal: one throwing consumer never starves the others.
+    for (const handler of [...this.pinChangedHandlers]) {
+      try {
+        handler(event)
+      } catch {
+        // Isolated.
       }
     }
   }
@@ -436,7 +638,9 @@ class RealtimeFeedController implements RealtimeFeed {
  * Creates an isolated feed transport. The app uses {@link realtimeFeed}; tests use
  * this to inject fakes.
  */
-export function createRealtimeFeed(options: CreateRealtimeFeedOptions = {}): RealtimeFeed {
+export function createRealtimeFeed(
+  options: CreateRealtimeFeedOptions = {},
+): SessionResettableFeed {
   return new RealtimeFeedController(options)
 }
 
@@ -444,7 +648,13 @@ export function createRealtimeFeed(options: CreateRealtimeFeedOptions = {}): Rea
  * The app-wide social feed transport, bound to the shared `realtimeConnection`.
  * Lazy: no side effects until started.
  */
-export const realtimeFeed: RealtimeFeed = createRealtimeFeed()
+const appWideFeed = createRealtimeFeed()
+export const realtimeFeed: RealtimeFeed & PinChangeSource = appWideFeed
+
+// The app-wide feed is identity-scoped state living for the life of the TAB: forget it whenever the
+// session ends (sign-out, every sign-in). A registration, not an import from `core/auth` into here
+// - `resetClientSession()` runs it with the other registered resets. See the module header (H-1).
+registerSessionReset(() => appWideFeed.resetForSession(), import.meta.hot)
 
 // Every valid `PostRemoved` on the app-wide transport is recorded in the session's removed-post
 // store (C5) — the one place `<Feed>` and the Explore baseline learn that a post must go. Wired

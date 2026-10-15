@@ -152,6 +152,7 @@ describe('BrandThemeProvider — the shell\'s own chrome is independent of the b
 
   const chromeConfig: ChromeConfig = {
     enabled: true,
+    watermark: false,
     top: { text: 'EXERCISE BANNER TOP', fg: '#eaf5e6', bg: '#2e6b2e' },
     bottom: { text: 'EXERCISE BANNER BOTTOM', fg: '#eaf5e6', bg: '#2e6b2e' },
   }

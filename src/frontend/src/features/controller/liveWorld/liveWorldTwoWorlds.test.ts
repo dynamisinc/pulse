@@ -14,7 +14,8 @@
  *   - COBRA is the control set: no raw MUI `Button` / `TextField` / `IconButton`;
  *   - no wall-clock read (`Date.now()`, `new Date()`): scenario time only;
  *   - `exerciseId` is read in exactly one place, as the React `key` that remounts
- *     the panel on an exercise switch (COR-001) — it is never passed anywhere.
+ *     the panel on an exercise switch (COR-001), and handed to that same panel as the
+ *     LOCAL unread-store scope (story 08: a `localStorage` key) — never sent anywhere.
  *
  * SCOPE. The glob covers EVERY non-test source file under this folder, nested
  * folders included (`./**` — C5's `TakedownAction.tsx` lands here and is held to
@@ -76,6 +77,11 @@ const ALLOWED_SOCIAL_IMPORTS: readonly { readonly pattern: RegExp; readonly why:
   {
     pattern: /^@\/features\/social\/components\/media\/(safeMediaUrl|formatDuration)$/,
     why: 'pure helpers only: the media URL allow-list (NFR-004) and the duration formatter',
+  },
+  {
+    pattern: /^@\/features\/social\/services\/realtimeFeed$/,
+    why: 'story 08: `pinChangeSource` registers a PostPinChanged handler on the ONE shared '
+      + 'realtime transport (story 07 `subscribePinChanged`); a service, no UI, no new connection',
   },
   {
     pattern: /^@\/features\/social\/services\/removedPosts$/,
@@ -287,15 +293,18 @@ describe('Live world column — the two-worlds guard', () => {
     expect(offenders).toEqual([])
   })
 
-  it('reads exerciseId in exactly one place: as the React key that remounts on a switch', () => {
+  it('reads exerciseId in exactly one place: the remount key + the local unread-store scope', () => {
     const occurrences = files.flatMap(file =>
       file.code
         .split('\n')
         .filter(line => /exerciseId/.test(line))
         .map(line => ({ file: file.path, line: line.trim() })))
-    expect(occurrences.map(o => o.file)).toEqual(['LiveWorldColumn.tsx', 'LiveWorldColumn.tsx'])
+    expect(occurrences.map(o => o.file))
+      .toEqual(['LiveWorldColumn.tsx', 'LiveWorldColumn.tsx', 'LiveWorldColumn.tsx'])
     expect(occurrences[0]?.line)
       .toMatch(/const \{ exerciseId, timeZone \} = useExerciseContext\(\)/)
-    expect(occurrences[1]?.line).toMatch(/key=\{exerciseId\}/)
+    expect(occurrences[1]?.line).toMatch(/^key=\{exerciseId\}$/)
+    // Story 08: the per-browser unread store's localStorage scope (never on the wire).
+    expect(occurrences[2]?.line).toMatch(/^readStateScope=\{exerciseId\}$/)
   })
 })

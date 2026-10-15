@@ -54,6 +54,12 @@ export const liveWorldTokens = {
    * toolbar surface, so it is never used for text — error words stay `ink`.
    */
   danger: staffShellTokens.accent.cadenceRed,
+  /**
+   * UNREAD accent (story 08): the COBRA primary-action cobalt, for an unread row's left
+   * bar and its "New" chip (text and border). Never the only signal: an unread row is
+   * also bold and carries the word "New".
+   */
+  unread: cobraTheme.palette.buttonPrimary.main,
 } as const
 
 /**

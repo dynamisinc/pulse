@@ -52,12 +52,14 @@ const mockGet = vi.mocked(api.get)
 /**
  * The EXACT body story 02's `ChromeConfigProjection` serves for a configured
  * exercise, keys and casing as ASP.NET Core's camelCase serializer emits them
- * (`ChromeConfigResponse` -> `{ enabled, top{text,fg,bg}, bottom{text,fg,bg} }`).
+ * (`ChromeConfigResponse` -> `{ enabled, top{text,fg,bg}, bottom{text,fg,bg}, watermark }`;
+ * demo-feedback/01 added `watermark`, and the client parses a body without it as `true`).
  * Deliberately per-exercise values that appear in NO shipped constant, so a
  * fallback cannot masquerade as a pass.
  */
 const BACKEND_BODY = {
   enabled: true,
+  watermark: false,
   top: {
     text: 'UNCLASSIFIED // ATLANTA CIE 2026',
     fg: '#f5f5f5',

@@ -122,6 +122,43 @@ public sealed class ChromeConfigProjectionTests
         config.Bottom.Bg.Should().NotBeNullOrWhiteSpace();
     }
 
+    [Theory]
+    [InlineData(true, true)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(false, false)]
+    public async Task ProjectAsync_ServesWatermark_EqualToWatermarkEnabled_AndLeavesEnabledToTheGuard(
+        bool chromeEnabled, bool watermarkEnabled)
+    {
+        // demo-feedback/01 (DF-3): the media-marking flag is WatermarkEnabled verbatim. `enabled` keeps coming from
+        // ComplianceChromeGuard.ResolveEffectiveChromeEnabled exactly as before — this field never feeds it.
+        var source = Source(configure: s => s with
+        {
+            ComplianceChromeEnabled = chromeEnabled,
+            WatermarkEnabled = watermarkEnabled,
+        });
+
+        var config = await Projection.ProjectAsync(source);
+
+        config.Watermark.Should().Be(watermarkEnabled);
+        config.Enabled.Should().Be(
+            ComplianceChromeGuard.ResolveEffectiveChromeEnabled(chromeEnabled, watermarkEnabled),
+            "enabled is unchanged by the watermark field");
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ConstantDefault_KeepsItsBanners_ButServesTheExercisesWatermark(bool watermarkEnabled)
+    {
+        var config = await new ConstantChromeConfigProjection().ProjectAsync(
+            Source(configure: s => s with { WatermarkEnabled = watermarkEnabled, ChromeTopText = "IGNORED BY THE CONSTANT" }));
+
+        config.Watermark.Should().Be(watermarkEnabled);
+        config.Enabled.Should().BeTrue();
+        config.Top.Text.Should().Be(ParticipantShellDefaults.ChromeTopText, "the constant default still ignores the banners");
+    }
+
     [Fact]
     public async Task ProjectAsync_WithANullSource_Throws()
     {

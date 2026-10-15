@@ -20,8 +20,11 @@
   min-width: 0;
 }
 
+/* `isolation: isolate`: the bands / badge / focus-ring z-indexes stay inside the tile and
+ * never paint over the sticky detail header (demo-feedback 06 Gate-1 M-2). */
 .tile {
   position: relative;
+  isolation: isolate;
   display: block;
   width: 100%;
   aspect-ratio: 1 / 1;
@@ -41,7 +44,8 @@
   filter: brightness(0.92);
 }
 
-/* Drawn inside the clipped tile: outline (forced-colors) + a white/accent ring over the photo. */
+/* Drawn inside the clipped tile: outline (forced-colors) + a white/accent ring over the photo
+ * and the EXERCISE bands. */
 .tileButton:focus-visible {
   outline: 3px solid var(--pc-accent);
   outline-offset: -3px;
@@ -49,7 +53,7 @@
 
 .tileButton:focus-visible::after {
   position: absolute;
-  z-index: 2;
+  z-index: 3;
   inset: 0;
   box-shadow: inset 0 0 0 3px #fff, inset 0 0 0 6px var(--pc-accent);
   content: '';
@@ -65,12 +69,12 @@
   object-fit: cover;
 }
 
-/* Icon + position, not colour alone, marks a video tile. */
+/* Icon + position, not colour alone, marks a video tile. Above the EXERCISE bands (z 1). */
 .playBadge {
   position: absolute;
   right: 8px;
   bottom: 8px;
-  z-index: 1;
+  z-index: 2;
   display: inline-flex;
   width: 28px;
   height: 28px;

@@ -20,6 +20,11 @@
  * there is nothing to forget. Resets run synchronously, in registration order; one that
  * throws is isolated so the others (and the logout that follows) still happen.
  *
+ * Registrants today: the notifications store, the controller composer and the live review-queue
+ * and overlay-state sources (features), and `core/realtime`, which stops the shared hub
+ * connection (COR-001) - a connection is joined to ONE identity's exercise groups for life, so
+ * it must not outlive an identity switch.
+ *
  * Existing session-scoped stores (`ownPostStore`, `removedPosts`, reply intent) are leaves
  * `endSession` calls directly; they are not migrated onto this registry.
  */
@@ -51,7 +56,10 @@ export function registerSessionReset(reset: SessionReset, hot?: HotModule): () =
   return unregister
 }
 
-/** Runs every registered reset. Called by `endSession`; never throws. */
+/**
+ * Runs every registered reset. Called by `resetClientSession` (sign-out and every
+ * sign-in); never throws.
+ */
 export function runSessionResets(): void {
   for (const reset of [...resets]) {
     try {

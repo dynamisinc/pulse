@@ -140,6 +140,10 @@ public class ExerciseRealtimeHubIsolationTests
         await connection.StartAsync();
         connection.State.Should().Be(HubConnectionState.Connected, "a resolved scope must join, not abort");
 
+        // StartAsync returns at the handshake; the hub joins exercise:{id} in OnConnectedAsync just after. Wait for
+        // that, so the broadcast below cannot race the join (a test race seen under CI load, not a product defect).
+        await server.Connected.WaitForConnectedAsync();
+
         var postForA = SamplePost();
         var postForB = SamplePost();
 
@@ -181,6 +185,7 @@ public class ExerciseRealtimeHubIsolationTests
         connection.On<JsonElement>("PostReceived", element => receivedRaw.TrySetResult(element.Clone()));
 
         await connection.StartAsync();
+        await server.Connected.WaitForConnectedAsync(); // the group join completes after the handshake; see above
 
         await using (var scope = server.Services.CreateAsyncScope())
         {
@@ -264,6 +269,12 @@ public class ExerciseRealtimeHubIsolationTests
 
         private readonly Guid? _hostResolvedExerciseId;
 
+        /// <summary>
+        /// Completes once the server has finished a connection's <c>OnConnectedAsync</c> (its group join). A test
+        /// awaits it after <c>StartAsync</c> and before broadcasting, so the send can never race the join.
+        /// </summary>
+        public HubConnectedSignal Connected { get; } = new();
+
         public RealtimeHostFactory(Guid? hostResolvedExerciseId)
         {
             _hostResolvedExerciseId = hostResolvedExerciseId;
@@ -289,6 +300,10 @@ public class ExerciseRealtimeHubIsolationTests
                 // reads (Context.GetHttpContext()?.GetHostResolvedExerciseId()). No DB is touched.
                 services.RemoveAll<IHostExerciseResolver>();
                 services.AddSingleton<IHostExerciseResolver>(new StubHostExerciseResolver(_hostResolvedExerciseId));
+
+                // Test-only: signal when OnConnectedAsync (and so the group join) has completed. StartAsync returns
+                // at the handshake, BEFORE the join, so a broadcast sent straight after it can miss the group.
+                services.Configure<HubOptions>(options => options.AddFilter(Connected));
             });
         }
 

@@ -1,0 +1,397 @@
+/*
+ * features/participantAdmin/cards/cardSheet.module.css
+ * ---------------------------------------------------------------------------
+ * Styles for the card-sheet PREVIEW (screen) and the PRINTED sheet (easy-login story 12,
+ * EL-15). CSS Module: every class is locally scoped by the build.
+ *
+ * TWO LOOKS IN ONE FILE, ON PURPOSE
+ *   - The preview OVERLAY and its toolbar are STAFF-world chrome; the toolbar is built
+ *     from COBRA components in `CardSheetPreview.tsx`. This file only positions it.
+ *   - The CARD and the PAGE are a neutral logistics artifact: plain black on white, no
+ *     COBRA colours, no brand skin, nothing that relies on a background colour. The card
+ *     must stay legible when the browser's "Background graphics" option is OFF (the
+ *     default), so it uses only text and BORDERS, never a background fill, to carry
+ *     meaning. (Borders and images print with graphics off; fills do not.)
+ *
+ * THE PAPER (US Letter portrait, 0.5in margins, set by the injected `@page` rule)
+ *   Printable area 7.5in x 10in. Eight cards per page, two columns by four rows, with a
+ *   0.1in gutter so each card's dashed cut-guide border is its own (no doubled lines).
+ *   Each page group is a fixed-height grid with a forced page break after it, so "eight
+ *   per page, a card never split" does not depend on how a browser fragments a grid.
+ *   The page is 9.9in tall, not 10in: a 0.1in slack so rounding can never push the last
+ *   row onto a new page and leave a blank sheet in between.
+ *     card = (7.5in - 0.1in) / 2 = 3.7in wide, (9.9in - 3 x 0.1in) / 4 = 2.4in tall.
+ *
+ * WHAT HIDES WHEN PRINTING (the shell is a fixed-height `overflow: hidden` column; printed
+ * as it stands it prints one screenful, so the sheet lives in a portal beside `#root`)
+ *   `html.sheetOpen` is toggled by `CardSheetPreview` ONLY while the preview is open. The
+ *   print rules are scoped to it, so printing the roster page with no preview open is
+ *   untouched. While it is open: `#root` is `display: none`, so are the toolbar, the
+ *   on-screen "personal sign-in links" banner and the skipped summary (`.screenOnly`), and
+ *   the overlay becomes ordinary in-flow content so the sheet can run over many pages.
+ *
+ * NOTE: there is deliberately NO `@page` rule in this file. `@page` cannot be scoped to a
+ * class, and routes are imported eagerly, so a rule here would force Letter with 0.5in
+ * margins on every print in the app from startup. `CardSheetPreview` injects it as a
+ * `<style>` only while the preview is open (`CARD_SHEET_PAGE_RULE` in `cardFormat.ts`).
+ */
+
+/* ------------------------------------------------------------------ overlay (screen) */
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1500;
+  display: flex;
+  flex-direction: column;
+  background: #e3e6ea;
+  color: #1a1a1a;
+  outline: none;
+}
+
+.screenOnly {
+  flex: none;
+}
+
+.stage {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 24px 16px 48px;
+}
+
+/* Loading / error / empty message that REPLACES the sheet. */
+.state {
+  box-sizing: border-box;
+  max-width: 40rem;
+  margin: 8vh auto 0;
+  padding: 20px 24px;
+  border: 1px solid #1a1a1a;
+  border-radius: 6px;
+  background: #fff;
+  font: 400 14px/1.5 Roboto, Arial, sans-serif;
+}
+
+.state > p {
+  margin: 0 0 8px;
+}
+
+.state > p:last-child {
+  margin-bottom: 0;
+}
+
+.stateTitle {
+  margin: 0 0 8px;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+/* ------------------------------------------------------------------ sheet + page */
+
+.sheet {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 24px;
+}
+
+/* On screen a page is drawn as the paper: the printable grid plus the 0.5in margin. */
+.page {
+  box-sizing: border-box;
+  display: grid;
+  flex: none;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-rows: repeat(4, minmax(0, 1fr));
+  gap: 0.1in;
+  width: 8.5in;
+  height: 10.9in;
+  padding: 0.5in;
+  background: #fff;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.35);
+}
+
+/* ------------------------------------------------------------------ the card */
+
+.card {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 3pt;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  padding: 0.08in 0.12in;
+  border: 1px dashed #000;
+  background: #fff;
+  color: #000;
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 9pt;
+  line-height: 1.2;
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+.card p,
+.card h3 {
+  margin: 0;
+}
+
+.cardHeader {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8pt;
+  border-bottom: 1px solid #000;
+  padding-bottom: 2pt;
+}
+
+.exercise {
+  display: -webkit-box;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 8pt;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+
+.training {
+  flex: none;
+  font-size: 7.5pt;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+/*
+ * No `min-height: 0` here, on purpose: if the text column ever outgrows its share, the
+ * body keeps its full height and the FOOTER is pushed down and clipped by the card's
+ * `overflow: hidden`. Losing the tail of the help line is better than text overlapping
+ * the sign-in name or the writing line.
+ */
+.cardBody {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: stretch;
+  gap: 0.12in;
+}
+
+/* At least 1.25in square so a phone camera reads it from paper. */
+.qr {
+  display: block;
+  flex: none;
+  align-self: center;
+  box-sizing: border-box;
+  width: 1.3in;
+  height: 1.3in;
+  min-width: 1.25in;
+  min-height: 1.25in;
+  background: #fff;
+}
+
+.qrMissing {
+  display: flex;
+  flex: none;
+  align-self: center;
+  box-sizing: border-box;
+  align-items: center;
+  justify-content: center;
+  width: 1.3in;
+  height: 1.3in;
+  padding: 0.08in;
+  border: 1px solid #000;
+  font-size: 8pt;
+  text-align: center;
+}
+
+.who {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  justify-content: center;
+  gap: 3pt;
+  min-width: 0;
+}
+
+/*
+ * The name and the affiliation are the only free text of unbounded length (a name may be
+ * 256 characters, agency and role 128 each), so they are CLAMPED: a pathological value
+ * ends in an ellipsis instead of pushing the sign-in name, the writing line or the link
+ * out of the card. The sign-in name (at most 32 characters) and the link are never
+ * clamped; they are credentials. A long name drops to a smaller face first (.nameLong,
+ * then .nameXLong) so only an extreme one is ever cut. The budget (2.4in card, 1.3in QR)
+ * leaves the text column about 1.58in: the worst realistic case below is a name on 3 lines
+ * at 11pt (0.5in), affiliation 2 lines (0.28in), a 2-line sign-in name (0.33in), the
+ * writing line (0.24in) and gaps (0.13in), about 1.5in.
+ */
+.name {
+  display: -webkit-box;
+  overflow: hidden;
+  font-size: 14pt;
+  font-weight: 700;
+  line-height: 1.1;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+
+.nameLong {
+  font-size: 11pt;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+}
+
+.nameXLong {
+  font-size: 9.5pt;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+}
+
+.affiliation {
+  display: -webkit-box;
+  overflow: hidden;
+  font-size: 8.5pt;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+
+.field {
+  font-size: 8.5pt;
+}
+
+.label {
+  font-weight: 700;
+}
+
+.signIn,
+.link {
+  font-family: ui-monospace, 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace;
+}
+
+.signIn {
+  font-size: 10pt;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.word {
+  display: flex;
+  align-items: flex-end;
+  gap: 4pt;
+  font-size: 8.5pt;
+}
+
+/* The blank to write today's word on: a border, so it prints with graphics off. */
+.writeLine {
+  flex: 1 1 auto;
+  min-width: 0.9in;
+  height: 0.24in;
+  border-bottom: 1.5px solid #000;
+}
+
+.cardFooter {
+  display: flex;
+  flex-direction: column;
+  gap: 2pt;
+}
+
+.link {
+  font-size: 6.5pt;
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+  word-break: break-all;
+}
+
+.help {
+  font-size: 7pt;
+  line-height: 1.15;
+}
+
+.site {
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+/* Visually hidden, still announced. */
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ------------------------------------------------------------------ print */
+
+@media print {
+  /*
+   * Only while the preview is open (the class is set on <html> by CardSheetPreview).
+   * The app shell sets html/body/#root to height: 100% and a fixed layout; undo that so
+   * the sheet can flow over as many pages as it needs.
+   */
+  html.sheetOpen,
+  html.sheetOpen body {
+    height: auto !important;
+    margin: 0 !important;
+    overflow: visible !important;
+    background: #fff !important;
+  }
+
+  /* Nothing from the staff shell prints. */
+  html.sheetOpen > body > :global(#root) {
+    display: none !important;
+  }
+
+  /* ...nor any other stray body-level portal (a toast layer, a tooltip, a menu). */
+  html.sheetOpen > body > :not(.overlay) {
+    display: none !important;
+  }
+
+  /* The toolbar, the on-screen banner and the skipped summary do not print. */
+  .screenOnly {
+    display: none !important;
+  }
+
+  /* The overlay stops being a fixed full-screen layer and becomes ordinary page flow. */
+  .overlay {
+    position: static !important;
+    display: block !important;
+    z-index: auto !important;
+    background: #fff !important;
+    overflow: visible !important;
+  }
+
+  .stage {
+    display: block !important;
+    padding: 0 !important;
+    overflow: visible !important;
+  }
+
+  .sheet {
+    display: block !important;
+  }
+
+  .page {
+    width: 7.5in;
+    height: 9.9in;
+    padding: 0;
+    box-shadow: none;
+    background: #fff;
+    break-after: page;
+    page-break-after: always;
+  }
+
+  .page:last-child {
+    break-after: auto;
+    page-break-after: auto;
+  }
+}

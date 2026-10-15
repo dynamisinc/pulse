@@ -23,8 +23,14 @@
  * `enabled` is config too — chrome-off is a legal per-exercise state
  * (D7-008/AC3). `isWatermarkRequired()` derives the NFR-008 invariant ("chrome
  * and watermark are never both off") from whatever config resolves; it does
- * NOT render a watermark itself — that is a participant-channel concern,
- * explicitly out of scope for this story.
+ * NOT render a watermark itself — that is a participant-channel concern
+ * (`social/components/media/ExerciseBands.tsx` draws the media bands).
+ *
+ * `watermark` (demo-feedback 06, DF-3): the exercise's media-marking switch
+ * (`Exercise.WatermarkEnabled`), decoupled from `enabled`. The mock defaults it
+ * to `true`, and a live body that LACKS the field (an API older than story 01)
+ * parses as `true` — every doubt resolves toward marking the media, never
+ * toward bare media.
  *
  * Exercise-scoped (XC-001): the React Query key includes the resolved
  * exercise's `exerciseId`, read from `useExerciseContext()` for KEYING only
@@ -39,15 +45,23 @@
  * World: participant. No COBRA, no UI — a pure data hook.
  */
 
-import { useQuery } from '@tanstack/react-query'
+import { useContext } from 'react'
+import { QueryClientContext, useQuery } from '@tanstack/react-query'
 import type { AxiosAdapter } from 'axios'
 import { api } from '@/core/services/api'
 import { useExerciseContext } from '@/core/exerciseContext'
 import { USE_MOCK_DATA } from '@/core/config/mockData'
 import type { ChromeBannerConfig, ChromeConfig } from './mountContract'
 
-/** Wire shape of the (future) `/chrome-config` response body. */
-type ChromeConfigResponseBody = ChromeConfig
+/**
+ * Wire shape of the `/chrome-config` response body. `watermark` is optional ON THE
+ * WIRE only: an API from before demo-feedback/01 omits it, and `parseChromeConfig`
+ * fills it in as `true` (fail toward marking). Consumers always see a full
+ * `ChromeConfig`.
+ */
+type ChromeConfigResponseBody = Omit<ChromeConfig, 'watermark'> & {
+  readonly watermark?: unknown
+}
 
 /**
  * The AC-canonical default banner copy (story 01's Acceptance Criteria). This
@@ -73,6 +87,8 @@ const DEFAULT_BANNER_BG = '#2e6b2e'
  */
 const DEFAULT_CHROME_CONFIG: ChromeConfig = {
   enabled: true,
+  // DF-3: the mock (and the loading/error fallback) marks media. Fail toward marking.
+  watermark: true,
   top: {
     text: DEFAULT_TOP_TEXT,
     fg: DEFAULT_BANNER_FG,
@@ -98,9 +114,10 @@ function isChromeBannerConfig(value: unknown): value is ChromeBannerConfig {
 /**
  * Runtime guard so this seam swaps to a live endpoint with no consumer
  * change: an out-of-shape response must fail closed, not be cast blindly to
- * `ChromeConfig`.
+ * `ChromeConfig`. `watermark` is not part of the shape check — see
+ * {@link parseChromeConfig}.
  */
-function isChromeConfig(value: unknown): value is ChromeConfig {
+function isChromeConfigBody(value: unknown): value is ChromeConfigResponseBody {
   if (typeof value !== 'object' || value === null) return false
   const candidate = value as Record<string, unknown>
   return (
@@ -108,6 +125,23 @@ function isChromeConfig(value: unknown): value is ChromeConfig {
     isChromeBannerConfig(candidate.top) &&
     isChromeBannerConfig(candidate.bottom)
   )
+}
+
+/**
+ * Validates a `/chrome-config` body and normalises `watermark` (DF-3): ONLY an
+ * explicit `false` turns media marking off. A missing field (an older API) or a
+ * malformed one parses as `true`, so a version skew can never strip the bands off
+ * participant media. Returns `undefined` for an out-of-shape body (the caller fails
+ * closed).
+ */
+function parseChromeConfig(value: unknown): ChromeConfig | undefined {
+  if (!isChromeConfigBody(value)) return undefined
+  return {
+    enabled: value.enabled,
+    top: value.top,
+    bottom: value.bottom,
+    watermark: value.watermark !== false,
+  }
 }
 
 /**
@@ -138,13 +172,14 @@ async function fetchChromeConfig(): Promise<ChromeConfig> {
     USE_MOCK_CHROME_CONFIG ? { adapter: mockAdapter } : undefined,
   )
 
-  if (!isChromeConfig(response.data)) {
+  const config = parseChromeConfig(response.data)
+  if (config === undefined) {
     throw new Error(
       'fetchChromeConfig: mock resolution returned a missing or invalid ChromeConfig',
     )
   }
 
-  return response.data
+  return config
 }
 
 /**
@@ -168,10 +203,42 @@ export function useChromeConfig(): ChromeConfig {
 }
 
 /**
- * The NFR-008 invariant: chrome and the in-content "EXERCISE" watermark are
- * never BOTH off. When compliance chrome is disabled (a legal state, AC3),
- * the watermark becomes the required fallback signal. This module only
- * exposes the signal — rendering the watermark is a participant-channel
- * concern, out of scope here.
+ * Whether participant media must carry the in-content "EXERCISE" marking
+ * (demo-feedback DF-3): `config.watermark || !config.enabled`.
+ *
+ *  - `watermark` — the exercise's own media-marking switch is on;
+ *  - `!enabled`  — the NFR-008 invariant: chrome and the in-content watermark are
+ *    never BOTH off. When compliance chrome is disabled (a legal state, AC3), the
+ *    watermark becomes the required fallback signal whatever the switch says.
+ *
+ * Only "watermark off AND banner on" leaves media unmarked. This module only exposes
+ * the signal — `ExerciseBands` (social media) and the overlay layer's watermark slot
+ * render it.
  */
-export const isWatermarkRequired = (config: ChromeConfig): boolean => !config.enabled
+export const isWatermarkRequired = (config: ChromeConfig): boolean =>
+  config.watermark || !config.enabled
+
+/**
+ * Whether `useChromeConfig()` can run here: a React Query client AND a resolved
+ * exercise scope are both above this component. Never throws.
+ *
+ * Inside the participant shell this is always `true`. It exists for the shared media
+ * marking (`ExerciseBands`, demo-feedback 06), which is mounted inside leaf media
+ * components that also render outside the shell (a component rendered on its own). Such
+ * a caller branches on this to a COMPONENT that calls `useChromeConfig()` (hooks stay
+ * unconditional) and otherwise fails toward marking, rather than crashing or showing
+ * bare media.
+ */
+export function useChromeConfigAvailable(): boolean {
+  const queryClient = useContext(QueryClientContext)
+  let hasExerciseScope: boolean
+  try {
+    // `useExerciseContext()` reads its context unconditionally and only THROWS outside a
+    // provider (fail-closed by design); here that answer is "not available", nothing more.
+    useExerciseContext()
+    hasExerciseScope = true
+  } catch {
+    hasExerciseScope = false
+  }
+  return queryClient !== undefined && hasExerciseScope
+}

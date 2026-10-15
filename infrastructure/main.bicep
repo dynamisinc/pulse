@@ -41,7 +41,7 @@ param deploySignalR bool = false
 @description('Azure SignalR SKU name. Free_F1 caps at 20 concurrent connections / 20k messages/day — fine for a smoke test; use Standard_S1 for real exercise load (burst legibility, SOC-071).')
 param signalRSkuName string = 'Free_F1'
 
-@description('Deploy ACS + Email Service resources. Off until email is needed.')
+@description('Deploy ACS + Email Service (keyless: disableLocalAuth, Azure-managed sender) and grant the App Service identity the email-sending role (easy-login story 13). Off by default: the API stays dark (Email:Endpoint empty -> 503, capabilities.emailLinks false).')
 param deployCommunication bool = false
 
 @description('Deploy the Azure AI Foundry (Cognitive Services) account + E8 model deployments. Off until the engine needs a live endpoint.')
@@ -100,7 +100,7 @@ param frontendUrl string = ''
 @description('Custom email domain (e.g., cobrasoftware.com). Leave empty to use Azure managed domain only.')
 param emailCustomDomain string = ''
 
-@description('Email sender address when deployCommunication=false (e.g., DoNotReply@xxx.azurecomm.net from shared ACS)')
+@description('Email sender address when deployCommunication=false (e.g., DoNotReply@xxx.azurecomm.net from a shared ACS). Without deployCommunication no Email__Endpoint is set, so email stays dark regardless.')
 param emailSenderAddress string = ''
 
 // Note: Defender for Cloud's security-contact email is passed straight to the
@@ -135,10 +135,6 @@ param bootstrapSecret string = ''
 @secure()
 @description('Phase-1 staff allowlist JSON array (Authentication:StaffIdentity:Accounts, story login/06). Empty -> no staff sign-in (fail closed). Threaded like jwtSecretKey, sourced from the STAFF_IDENTITY_ACCOUNTS_JSON GitHub secret; webapp.bicep expands it into the indexed app-setting keys the .NET options binder reads.')
 param staffIdentityAccountsJson string = ''
-
-@secure()
-@description('Azure Communication Services connection string for email')
-param emailConnectionString string = ''
 
 // ============================================================================
 // Resource Naming Convention (Azure CAF abbreviations, matches Cadence/C5)
@@ -358,9 +354,14 @@ module webApp 'modules/webapp.bicep' = if (deployWebApp) {
     #disable-next-line BCP318
     signalRConnectionString: deploySignalR ? signalR.outputs.connectionString! : ''
     frontendUrl: frontendUrl
-    emailConnectionString: emailConnectionString
+    // Email (easy-login/13) — KEYLESS: endpoint + sender only, read from module communication's outputs
+    // (the managed sender's domain is service-generated, so it cannot be a local). No connection string
+    // exists anywhere. The send right is granted by module communicationSenderRole below, which is what
+    // keeps this edge one-directional (webApp reads communication; the grant reads both).
     #disable-next-line BCP318
-    emailDefaultSenderAddress: deployCommunication ? communication.outputs.managedDomainSenderAddress! : emailSenderAddress
+    emailEndpoint: deployCommunication ? communication.outputs.emailEndpoint! : ''
+    #disable-next-line BCP318
+    emailSenderAddress: deployCommunication ? communication.outputs.managedDomainSenderAddress! : emailSenderAddress
     jwtSecretKey: jwtSecretKey
     bootstrapSecret: bootstrapSecret
     staffIdentityAccountsJson: staffIdentityAccountsJson
@@ -416,6 +417,22 @@ module communication 'modules/communication.bicep' = if (deployCommunication) {
     emailServiceName: emailServiceName
     emailCustomDomain: emailCustomDomain
     tags: tags
+  }
+}
+
+// Keyless email sending (easy-login/13): grants the App Service's system-assigned identity
+// "Communication and Email Service Owner" (09976791-48a7-449e-bb21-39d1a415f350) on the Communication
+// Service — the storage.bicep role-assignment pattern, in its own module because webApp reads
+// communication's outputs (a grant inside communication.bicep would be a webApp <-> communication cycle).
+// Skipped when there is no App Service. RBAC takes minutes to propagate: sends fail with 401/403
+// ("credential"/"401" in the API log) until it has.
+module communicationSenderRole 'modules/communication-sender-role.bicep' = if (deployCommunication && deployWebApp) {
+  name: 'communicationSenderRoleDeploy'
+  params: {
+    #disable-next-line BCP318
+    acsName: communication.outputs.acsName!
+    #disable-next-line BCP318
+    backendPrincipalId: webApp.outputs.principalId!
   }
 }
 
@@ -485,6 +502,9 @@ output logAnalyticsWorkspaceId string = deployMonitoring ? logAnalytics.outputs.
 output acsHostName string = deployCommunication ? communication.outputs.acsHostName! : ''
 #disable-next-line BCP318
 output emailSenderAddress string = deployCommunication ? communication.outputs.managedDomainSenderAddress! : emailSenderAddress
+// Email__Endpoint as deployed (empty = email dark). Not a secret: auth is the managed identity.
+#disable-next-line BCP318
+output emailEndpoint string = deployCommunication ? communication.outputs.emailEndpoint! : ''
 #disable-next-line BCP318
 output aiFoundryEndpoint string = deployAi ? ai.outputs.endpoint! : ''
 #disable-next-line BCP318

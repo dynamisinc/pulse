@@ -88,4 +88,49 @@ public sealed class Account : IExerciseScoped
 
     /// <summary>Reserved (story 07): wall-clock instant until which the account is locked out, or <c>null</c> when not locked.</summary>
     public DateTimeOffset? LockedOutUntil { get; set; }
+
+    // ------------------------------------------------------------------------------------------------------
+    // easy-login/01 (EL-1, EL-4, EL-8): additive roster columns. Every one is nullable or defaulted, so an
+    // account created before them (legacy import, bootstrap) reads null/false and keeps signing in exactly as it
+    // did with its password.
+    // ------------------------------------------------------------------------------------------------------
+
+    /// <summary>Maximum length of <see cref="Agency"/>.</summary>
+    public const int MaxAgencyLength = 128;
+
+    /// <summary>Maximum length of <see cref="JobRole"/>.</summary>
+    public const int MaxJobRoleLength = 128;
+
+    /// <summary>Maximum length of <see cref="Email"/> (the RFC 5321 path limit).</summary>
+    public const int MaxEmailLength = 254;
+
+    /// <summary>
+    /// The participant's agency as free text from the roster (sanitized on ingest), or <c>null</c>. Staff-only:
+    /// shown in the roster and on the printed card, never on a participant projection.
+    /// </summary>
+    public string? Agency { get; set; }
+
+    /// <summary>
+    /// The free-text job label from the roster CSV's <c>role</c> column ("EOC Liaison"), or <c>null</c>. NOT an
+    /// <c>ExerciseRole</c>: that is <see cref="Role"/> (EL-1). Staff-only.
+    /// </summary>
+    public string? JobRole { get; set; }
+
+    /// <summary>
+    /// The participant's email address, or <c>null</c>. Staff-only (XC-002): it appears on no participant
+    /// projection, telemetry payload, log line or error body.
+    /// </summary>
+    public string? Email { get; set; }
+
+    /// <summary>
+    /// Wall-clock instant staff disabled this person (EL-8), or <c>null</c> while enabled. A disabled account is
+    /// refused by every participant sign-in path (link, day word and password).
+    /// </summary>
+    public DateTimeOffset? DisabledAt { get; set; }
+
+    /// <summary>
+    /// Whether <see cref="PersonaId"/> is the citizen persona the roster auto-created for this person (EL-4), as
+    /// opposed to a bound org persona or a seeded one. Defaults to <c>false</c>.
+    /// </summary>
+    public bool PersonaAutoCreated { get; set; }
 }
