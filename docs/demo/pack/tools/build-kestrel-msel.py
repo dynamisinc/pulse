@@ -55,16 +55,16 @@ PULSE MEDIA, PULSE MEDIA ALT
     Pulse Media is the media-library file name: the base name of the pack file, which is what Seed-DemoContent.ps1
     uploads and what the server keeps (MediaUploadService.SanitizeFileName). rs01 news-mill-road.mp4, rs05
     scoop-brown-tap.mp4, rs08 pio-statement-card.png. The seed must have uploaded the media before the import, or
-    those rows fail. Pulse Media Alt (DF-17, story 14) carries each file's alt text, "|"-separated in the same order:
+    those rows fail. Pulse Media Alt (DF-21, story 16) carries each file's alt text, "|"-separated in the same order:
     the post's own media "alt" when the pack gives one, else the media item's "alt", trimmed, exactly what the seed
     sends. Without it the importer would fall back to the file-name stem ("pio-statement-card"), short of NFR-001.
 
-PULSE LIKES, PULSE REPOSTS, PULSE REPLIES (DF-17, story 14)
+PULSE LIKES, PULSE REPOSTS, PULSE REPLIES (DF-21, story 16)
     The post's engagementBaseline like / repost / reply as integer cells, blank when the pack gives none (rs08 and
     rs09 have no baseline on purpose: they show real counts, like the PIO's own post). So The Scoop's video (rs05)
     still outruns the official word after an import, as it does when seeded.
 
-ORDER (DF-18, story 14)
+ORDER (DF-22, story 16)
     The importer places each created item before the first PENDING item with a later planned minute, so with the
     seed's seven items (rs02, rs03, rs04, rs06, rs10, rs11, rs14) the run sheet comes out in story order and "Fire
     next" walks it in time. Nothing in this file controls that beyond the planned minutes.

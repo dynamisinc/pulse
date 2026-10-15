@@ -308,10 +308,10 @@ come five Pulse extension columns: `Pulse Media`, `Pulse Media Alt`, `Pulse Like
 - **Rebuild the file** after any change to those eight items or their timing:
   `python3 docs/demo/pack/tools/build-kestrel-msel.py` (it needs `openpyxl`; add `--check` to check the committed
   file only). The generator reads `pack.json` and refuses to build if a `msel` value doesn't match the row number
-  it assigns. It then re-reads the workbook with a Python mirror of the importer's rules, including story 14's
+  it assigns. It then re-reads the workbook with a Python mirror of the importer's rules, including story 16's
   rules for the alt and engagement columns. The output is byte-stable.
-- **Checked against the real importer** on 2026-10-15, with story 14's code (branch
-  `build/demo-feedback/14-import-alt-engagement-order`). The server's own `MselWorkbookReader` and
+- **Checked against the real importer** on 2026-10-15, with story 16's code (branch
+  `build/demo-feedback/16-import-alt-engagement-order`). The server's own `MselWorkbookReader` and
   `MselImportPlanner` (ClosedXML 0.105.1) read the file as **34 rows, 8 social, 26 skipped, 0 failed and 0
   warnings**, with minutes T+3 to T+18 as authored. Every alt text and baseline comes through exactly as in
   `pack.json`. Placed among the seven seeded items, all pending, `ImportQueuePlacement` gives
@@ -329,16 +329,16 @@ come five Pulse extension columns: `Pulse Media`, `Pulse Media Alt`, `Pulse Like
 3. **Import.** The eight items appear within 3 seconds, each in its place among the seeded items. Importing the
    same file again reports all eight `unchanged` (DF-10 keys on `Inject #`).
 
-An imported item matches the seeded one it replaces (story 14, #518):
+An imported item matches the seeded one it replaces (story 16, #518):
 
-- **Alt text and engagement (DF-17).** The import keeps each file's alt text from `Pulse Media Alt` and each
+- **Alt text and engagement (DF-21).** The import keeps each file's alt text from `Pulse Media Alt` and each
   post's baseline from the three engagement columns. So The Scoop's video (rs05) still starts at 962 / 718 / 141
   and outruns the official word, as in the table above.
-- **Time order (DF-18).** The import slots each new item in by planned minute, just before the first pending item
+- **Time order (DF-22).** The import slots each new item in by planned minute, just before the first pending item
   with a later minute. With the seven seeded items (rs02, rs03, rs04, rs06, rs10, rs11 and rs14), the run sheet
   comes out in story order, rs01 to rs15, and "Fire next" walks it in time. Fired items never move.
 
-Story 03's importer ignores columns it doesn't know. On a build without story 14, the file still imports, but
+Story 03's importer ignores columns it doesn't know. On a build without story 16, the file still imports, but
 without the alt text and engagement, and the items are appended at the end.
 
 ## Editing rules (S1 and the schema enforce most of them)
