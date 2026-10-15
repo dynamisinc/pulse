@@ -73,11 +73,13 @@ const REASON_TEXT: Readonly<Record<string, string>> = {
 }
 
 /**
- * The `failed` reasons that are KNOWN not to have been sent, and so are safe to send again:
- * refused, throttled, or never attempted. `timedOut` is deliberately absent (the provider may
- * have accepted the message), and so is any reason this build does not know.
+ * The `failed` reasons "Send again" re-posts: ONLY throttled (`rateLimited`) and never attempted
+ * (`notAttempted`), the two that never reached the provider and that simply waiting fixes.
+ * `timedOut` is deliberately absent (unconfirmed: the provider may have accepted the message),
+ * and so is `sendFailed` (a refusal or credential failure, which would most likely fail again;
+ * Copilot review on #487), and any reason this build does not know.
  */
-const RESENDABLE_REASONS: ReadonlySet<string> = new Set(['sendFailed', 'rateLimited', 'notAttempted'])
+const RESENDABLE_REASONS: ReadonlySet<string> = new Set(['rateLimited', 'notAttempted'])
 
 /** The readable text for a reason. */
 export function reasonText(reason: string | undefined): string {
@@ -138,10 +140,11 @@ export function summarizeResult(result: RosterEmailResultDto): EmailLinksSummary
 
 /**
  * The people KNOWN not to have been sent an email, who can simply be sent again: the
- * `failed` results whose reason is `rateLimited`, `notAttempted` or `sendFailed`, in result
- * order. Never a `skipped` one (sending again cannot fix a missing address or link), never a
- * `sent` one, and never a `timedOut` one or an unknown reason: those may already have been
- * delivered, and an emailed link cannot be recalled, so this never risks emailing twice.
+ * `failed` results whose reason is `rateLimited` or `notAttempted`, in result order. Never a
+ * `skipped` one (sending again cannot fix a missing address or link), never a `sent` one,
+ * never a `sendFailed` one (refused: it would most likely be refused again), and never a
+ * `timedOut` one or an unknown reason: those may already have been delivered, and an emailed
+ * link cannot be recalled, so this never risks emailing twice.
  */
 export function unsentIds(result: RosterEmailResultDto): string[] {
   return result.results

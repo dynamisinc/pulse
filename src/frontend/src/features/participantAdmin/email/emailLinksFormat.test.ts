@@ -75,7 +75,9 @@ describe('emailLinksFormat', () => {
     ])
   })
 
-  it('the unsent are exactly the failed ones: never a skipped or a sent person', () => {
+  it('the unsent are only rateLimited and notAttempted: never sendFailed, skipped or sent', () => {
+    // Copilot review on #487: "Send again" re-posts ONLY the two reasons that never
+    // reached the provider. A refusal (sendFailed) would likely be refused again.
     expect(unsentIds({
       results: [
         { participantId: 'sent', status: 'sent' },
@@ -84,7 +86,7 @@ describe('emailLinksFormat', () => {
         { participantId: 'late', status: 'failed', reason: 'notAttempted' },
         { participantId: 'refused', status: 'failed', reason: 'sendFailed' },
       ],
-    })).toEqual(['limited', 'late', 'refused'])
+    })).toEqual(['limited', 'late'])
     expect(unsentIds({ results: [{ participantId: 'a', status: 'sent' }] })).toEqual([])
   })
 

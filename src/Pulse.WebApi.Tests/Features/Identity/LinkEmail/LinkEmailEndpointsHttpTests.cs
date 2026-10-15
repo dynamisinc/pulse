@@ -24,8 +24,8 @@ using Pulse.WebApi.Tests.Data;
 /// staff-session accessor (<see cref="LinkEmailTestHost"/>). <c>200</c> in the frozen <c>RosterEmailResultDto</c> shape;
 /// <c>400</c> ProblemDetails for every other body shape and over the cap; <c>401</c> with no staff session (a participant
 /// session included); <c>403</c> for an evaluator or an unassigned staff user; <c>503</c> ProblemDetails ("Email delivery
-/// is not configured") when dark, before the body is read; and <c>Cache-Control: no-store</c> on every answer the
-/// handler writes. Plus the composition proof on the real <c>Program</c> host.
+/// is not configured") when dark, before the body is read; and <c>Cache-Control: no-store</c> on every answer, the
+/// staff gate's 401/403 included. Plus the composition proof on the real <c>Program</c> host.
 /// </summary>
 [Collection(MsSqlCollection.Name)]
 public sealed class LinkEmailEndpointsHttpTests
@@ -177,6 +177,12 @@ public sealed class LinkEmailEndpointsHttpTests
 
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden, "evaluators observe; they do not hand out credentials");
         garbage.StatusCode.Should().Be(HttpStatusCode.Forbidden, "the role gate runs before the body is read");
+        foreach (var refusal in new[] { response, garbage })
+        {
+            (refusal.Headers.CacheControl?.NoStore).Should().BeTrue(
+                "no-store runs FIRST, so the role gate's 403 is no-store too (Copilot review on #487)");
+        }
+
         mailer.Messages.Should().BeEmpty();
     }
 
@@ -193,6 +199,7 @@ public sealed class LinkEmailEndpointsHttpTests
         using var response = await LinkEmailTestHost.PostAsync(client, LinkEmailTestHost.EveryoneJson);
 
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (response.Headers.CacheControl?.NoStore).Should().BeTrue("the staff gate's 403 is no-store too");
     }
 
     [RequiresDockerFact]
@@ -208,11 +215,12 @@ public sealed class LinkEmailEndpointsHttpTests
         using var response = await LinkEmailTestHost.PostAsync(client, LinkEmailTestHost.EveryoneJson);
 
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized, "a participant's live session is not a staff session");
+        (response.Headers.CacheControl?.NoStore).Should().BeTrue("the staff gate's 401 is no-store too");
         mailer.Messages.Should().BeEmpty();
     }
 
     [Fact]
-    public async Task NoCredential_Is401_BeforeTheBodyTheMailerOrTheDatabaseIsTouched()
+    public async Task NoCredential_Is401_WithNoStore_BeforeTheBodyTheMailerOrTheDatabaseIsTouched()
     {
         var mailer = new FakeParticipantLinkMailer();
         await using var host = await LinkEmailTestHost.StartAsync(NeverConnects, new EphemeralDataProtectionProvider(), mailer);
@@ -224,6 +232,13 @@ public sealed class LinkEmailEndpointsHttpTests
 
         valid.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
         garbage.StatusCode.Should().Be(HttpStatusCode.Unauthorized, "the gate runs before the body is read");
+        foreach (var refusal in new[] { valid, garbage })
+        {
+            // Copilot review on #487: NoStoreEndpointFilter is the FIRST filter (as on the card and roster routes), so a
+            // refusal the staff gate writes before the handler runs is no-store too.
+            (refusal.Headers.CacheControl?.NoStore).Should().BeTrue("every answer of this route is no-store, the gate's 401 included");
+        }
+
         mailer.Messages.Should().BeEmpty();
     }
 
@@ -239,6 +254,7 @@ public sealed class LinkEmailEndpointsHttpTests
         using var response = await LinkEmailTestHost.PostAsync(client, LinkEmailTestHost.EveryoneJson);
 
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        (response.Headers.CacheControl?.NoStore).Should().BeTrue("the gate's 401 is no-store too");
     }
 
     [Fact]

@@ -76,7 +76,7 @@ public sealed class DayWordEndpointsHttpTests
         using var response = await client.SendAsync(request);
 
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized, "EL-13: no staff session is a 401, before any database access");
-        response.Headers.CacheControl?.NoStore.Should().BeTrue("every staff day-word response, refusals included, is no-store");
+        (response.Headers.CacheControl?.NoStore).Should().BeTrue("every staff day-word response, refusals included, is no-store");
     }
 
     [Fact]
@@ -89,7 +89,7 @@ public sealed class DayWordEndpointsHttpTests
 
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
         (await ReadDetailAsync(response)).Should().Be("A JSON body with signInName and word is required.");
-        response.Headers.CacheControl?.NoStore.Should().BeTrue("every word sign-in answer is no-store (Gate-2 S-3)");
+        (response.Headers.CacheControl?.NoStore).Should().BeTrue("every word sign-in answer is no-store (Gate-2 S-3)");
     }
 
     [Theory]
@@ -138,7 +138,7 @@ public sealed class DayWordEndpointsHttpTests
 
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
         (await response.Content.ReadAsByteArrayAsync()).Should().BeEmpty("the refusal is bodyless: it says nothing about which half was wrong");
-        response.Headers.CacheControl?.NoStore.Should().BeTrue("every word sign-in answer is no-store, refusals included (Gate-2 S-3)");
+        (response.Headers.CacheControl?.NoStore).Should().BeTrue("every word sign-in answer is no-store, refusals included (Gate-2 S-3)");
     }
 
     [Fact]
@@ -250,7 +250,7 @@ public sealed class DayWordEndpointsHttpTests
 
         using var put = await client.PutAsJsonAsync(StaffRoute, new { word = "Maple Harbor 42" });
         put.StatusCode.Should().Be(HttpStatusCode.OK);
-        put.Headers.CacheControl?.NoStore.Should().BeTrue();
+        (put.Headers.CacheControl?.NoStore).Should().BeTrue();
         var set = JsonDocument.Parse(await put.Content.ReadAsStringAsync()).RootElement;
         set.EnumerateObject().Select(p => p.Name).Should().BeEquivalentTo(["date", "word", "generated", "replaced", "setAt", "validUntil"]);
         set.GetProperty("word").GetString().Should().Be("Maple Harbor 42");
@@ -258,7 +258,7 @@ public sealed class DayWordEndpointsHttpTests
 
         using var get = await client.GetAsync(StaffRoute);
         get.StatusCode.Should().Be(HttpStatusCode.OK);
-        get.Headers.CacheControl?.NoStore.Should().BeTrue();
+        (get.Headers.CacheControl?.NoStore).Should().BeTrue();
         var statusJson = await get.Content.ReadAsStringAsync();
         var status = JsonDocument.Parse(statusJson).RootElement;
         status.EnumerateObject().Select(p => p.Name).Should().BeEquivalentTo(
@@ -268,7 +268,7 @@ public sealed class DayWordEndpointsHttpTests
 
         using var delete = await client.DeleteAsync(StaffRoute);
         delete.StatusCode.Should().Be(HttpStatusCode.NoContent);
-        delete.Headers.CacheControl?.NoStore.Should().BeTrue();
+        (delete.Headers.CacheControl?.NoStore).Should().BeTrue();
 
         using var again = await client.DeleteAsync(StaffRoute + "?date=2026-10-13");
         again.StatusCode.Should().Be(HttpStatusCode.NoContent, "idempotent");
@@ -296,7 +296,7 @@ public sealed class DayWordEndpointsHttpTests
         put.Content.Headers.ContentType?.MediaType.Should().Be("application/problem+json");
         (await ReadDetailAsync(put)).Should().Be(DayWordService.PastDateError);
         (await put.Content.ReadAsStringAsync()).Should().NotContainEquivalentOf("maple");
-        put.Headers.CacheControl?.NoStore.Should().BeTrue();
+        (put.Headers.CacheControl?.NoStore).Should().BeTrue();
         delete.StatusCode.Should().Be(HttpStatusCode.BadRequest);
         (await ReadDetailAsync(delete)).Should().Be(DayWordService.DateFormatError);
     }
@@ -312,7 +312,7 @@ public sealed class DayWordEndpointsHttpTests
         using var put = await client.PutAsJsonAsync(StaffRoute, new { });
 
         get.StatusCode.Should().Be(HttpStatusCode.Forbidden, "EL-13: evaluators observe; they do not hand out credentials");
-        get.Headers.CacheControl?.NoStore.Should().BeTrue();
+        (get.Headers.CacheControl?.NoStore).Should().BeTrue();
         put.StatusCode.Should().Be(HttpStatusCode.Forbidden);
     }
 
@@ -344,7 +344,7 @@ public sealed class DayWordEndpointsHttpTests
         readOnlyGet.StatusCode.Should().Be(HttpStatusCode.Unauthorized, "a shared view-only session is not a staff session");
         readOnlyPut.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
         readOnlyDelete.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
-        readOnlyGet.Headers.CacheControl?.NoStore.Should().BeTrue();
+        (readOnlyGet.Headers.CacheControl?.NoStore).Should().BeTrue();
         asAnonymous.StatusCode.Should().Be(HttpStatusCode.Unauthorized, "the default-deny gate refuses an anonymous staff call");
         (await ReadWordsAsync(_fixture, exercise.Id)).Should().BeEmpty();
     }
@@ -363,7 +363,7 @@ public sealed class DayWordEndpointsHttpTests
 
         using var signIn = await anonymous.PostAsJsonAsync(WordRoute, new { signInName = "JSmith", word = firstWord.ToUpperInvariant() });
         signIn.StatusCode.Should().Be(HttpStatusCode.OK);
-        signIn.Headers.CacheControl?.NoStore.Should().BeTrue(
+        (signIn.Headers.CacheControl?.NoStore).Should().BeTrue(
             "Gate-2 S-3: the 200 carries the session and refresh tokens, so no cache may keep it (as for /api/auth/join)");
         var envelope = JsonDocument.Parse(await signIn.Content.ReadAsStringAsync()).RootElement;
         envelope.EnumerateObject().Select(p => p.Name).Should().BeEquivalentTo(["token", "refreshToken", "session"]);
@@ -385,7 +385,7 @@ public sealed class DayWordEndpointsHttpTests
 
         oldWord.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
         (await oldWord.Content.ReadAsByteArrayAsync()).Should().BeEmpty();
-        oldWord.Headers.CacheControl?.NoStore.Should().BeTrue("the refusal is no-store too");
+        (oldWord.Headers.CacheControl?.NoStore).Should().BeTrue("the refusal is no-store too");
         newWord.StatusCode.Should().Be(HttpStatusCode.OK);
     }
 

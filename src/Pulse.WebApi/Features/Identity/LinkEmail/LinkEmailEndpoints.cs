@@ -7,7 +7,6 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using Microsoft.Net.Http.Headers;
 using Pulse.WebApi.Features.EngineRuntime;
 using Pulse.WebApi.Features.Identity.EasyLogin;
 using Pulse.WebApi.Features.Media;
@@ -27,17 +26,18 @@ using Pulse.WebApi.Features.Media;
 /// <see cref="IParticipantLinkMailer.IsConfigured"/>. No migration, nothing else depends on it.
 /// </para>
 /// <para>
-/// <b>Who may call it (EL-13).</b> <see cref="EngineCockpitStaffAuthorizationFilter"/> then
-/// <see cref="RosterStaffRoleFilter"/>, both BEFORE the handler: <c>401</c> with no staff session or no resolved
-/// exercise, <c>403</c> for a staff user not assigned there as controller or planner. So an unauthorized caller learns
-/// nothing, not even whether email is configured.
+/// <b>Who may call it (EL-13).</b> <see cref="NoStoreEndpointFilter"/> first, then
+/// <see cref="EngineCockpitStaffAuthorizationFilter"/> then <see cref="RosterStaffRoleFilter"/>, all BEFORE the handler
+/// (the card and roster routes' order): <c>401</c> with no staff session or no resolved exercise, <c>403</c> for a staff
+/// user not assigned there as controller or planner. So an unauthorized caller learns nothing, not even whether email
+/// is configured.
 /// </para>
 /// <para>
 /// <b>Status contract.</b> <c>200</c> <see cref="RosterEmailResultDto"/>; <c>400</c> ProblemDetails for a body that is
 /// not JSON, is malformed, has an unknown or repeated property, an explicit <c>null</c>, an empty or non-string
 /// <c>participantIds</c>, more than 100 ids, or (ids omitted) more than 100 eligible; <c>413</c> over
-/// <see cref="MaxRequestBodyBytes"/>; <c>503</c> when email or join links are not configured. Every response the
-/// handler writes carries <c>Cache-Control: no-store</c>.
+/// <see cref="MaxRequestBodyBytes"/>; <c>503</c> when email or join links are not configured. Every response carries
+/// <c>Cache-Control: no-store</c>, the gate's 401/403 included (Copilot review on #487: the filter runs first).
 /// </para>
 /// </remarks>
 public static class LinkEmailEndpoints
@@ -47,9 +47,6 @@ public static class LinkEmailEndpoints
 
     /// <summary>The largest request body accepted (16 KiB; 100 GUIDs are about 4 KB). Larger is a <c>413</c>.</summary>
     public const long MaxRequestBodyBytes = 16 * 1024;
-
-    /// <summary>The <c>Cache-Control</c> value on every handler response.</summary>
-    public const string NoStore = "no-store";
 
     /// <summary>The <c>detail</c> of a 400 for a body that is not the strict JSON shape (fixed text: no echo of the input).</summary>
     public const string MalformedBodyMessage =
@@ -93,8 +90,8 @@ public static class LinkEmailEndpoints
     }
 
     /// <summary>
-    /// Maps <c>POST /api/staff/roster/email-links</c> behind the staff gate and the controller-or-planner gate, with the
-    /// 16 KiB body limit.
+    /// Maps <c>POST /api/staff/roster/email-links</c> with <c>Cache-Control: no-store</c>, behind the staff gate and the
+    /// controller-or-planner gate, with the 16 KiB body limit.
     /// </summary>
     /// <param name="endpoints">The route builder.</param>
     /// <returns>The same route builder, for chaining.</returns>
@@ -102,7 +99,9 @@ public static class LinkEmailEndpoints
     {
         ArgumentNullException.ThrowIfNull(endpoints);
 
+        // No-store first, so the gate's 401/403 are not cached either; then assigned staff; then controller/planner.
         endpoints.MapPost(EmailLinksRoute, PostEmailLinksAsync)
+            .AddEndpointFilter<NoStoreEndpointFilter>()
             .AddEndpointFilter<EngineCockpitStaffAuthorizationFilter>()
             .AddEndpointFilter<RosterStaffRoleFilter>()
             .WithMetadata(new RequestSizeLimitAttribute(MaxRequestBodyBytes));
@@ -140,9 +139,7 @@ public static class LinkEmailEndpoints
         [FromServices] LinkEmailService service,
         CancellationToken cancellationToken)
     {
-        // The answer names who was emailed a credential: no cache, browser or proxy may keep it.
-        request.HttpContext.Response.Headers[HeaderNames.CacheControl] = NoStore;
-
+        // The answer names who was emailed a credential: NoStoreEndpointFilter has already marked this response no-store.
         // Dark until configured: answered before the body is read, so nothing is parsed, read or sent.
         if (!mailer.IsConfigured)
         {

@@ -135,6 +135,46 @@ public sealed class LinkEmailIsolationTests
     }
 
     [RequiresDockerFact]
+    public async Task TheSendTimeReRead_IsScopedToo_AParticipantNoLongerInTheCallersExercise_IsNotFound_AndNeverEmailed()
+    {
+        // Copilot review on #487: each participant is re-read just before their send. That re-read is a second read path,
+        // so it carries the same isolation as the first (central filter + explicit ExerciseId). Bob is planned in A, then
+        // his rows leave A (moved to B) while Alice's send is in flight: the re-read must not find him, so he is notFound
+        // (indistinguishable from an unknown id) and his credential never reaches an inbox from A.
+        var (exerciseA, exerciseB, staffOnA) = await TwoExercisesAsync();
+        var alice = await _world.SeedParticipantAsync(exerciseA, "Alice In A");
+        var bob = await _world.SeedParticipantAsync(exerciseA, "Bob Leaving A");
+        var mailer = new FakeParticipantLinkMailer
+        {
+            OnSend = async message =>
+            {
+                if (message.RecipientAddress == alice.Email)
+                {
+                    await _world.ChangeAccountAsync(bob.AccountId, account => account.ExerciseId = exerciseB);
+                    await _world.ChangeLinkAsync(bob.LinkId!.Value, link => link.ExerciseId = exerciseB);
+                }
+            },
+        };
+
+        var result = await _world.SendAsync(exerciseA, staffOnA, mailer);
+
+        result.Body!.Results.Select(r => (r.ParticipantId, r.Status, r.Reason)).Should().Equal(
+            [
+                (alice.AccountId.ToString(), RosterEmailStatuses.Sent, null),
+                (bob.AccountId.ToString(), RosterEmailStatuses.Skipped, RosterEmailSkipReasons.NotFound),
+            ],
+            "a participant who is no longer in the caller's exercise at send time reads exactly like an unknown id");
+        mailer.Messages.Select(m => m.RecipientAddress).Should().Equal([alice.Email]);
+        mailer.Messages.Should().NotContain(m => m.HtmlBody.Contains(bob.Token!, StringComparison.Ordinal));
+        (await _world.EmailEventsAsync(exerciseA)).Should().ContainSingle().Which.Target!.EntityId.Should().Be(alice.LinkId.ToString());
+        (await _world.EmailEventsAsync(exerciseB)).Should().BeEmpty();
+
+        await using var unfiltered = _world.Fixture.CreateContext();
+        (await unfiltered.Accounts.IgnoreQueryFilters().CountAsync(a => a.Id == bob.AccountId && a.ExerciseId == exerciseB))
+            .Should().Be(1, "Bob's row exists (in B), so the notFound is the scope closing the door, not a missing row");
+    }
+
+    [RequiresDockerFact]
     public async Task AnUnsetOrEmptyScope_ReadsNothing_SendsNothing_AndRecordsNothing()
     {
         var (_, exerciseB, _) = await TwoExercisesAsync();

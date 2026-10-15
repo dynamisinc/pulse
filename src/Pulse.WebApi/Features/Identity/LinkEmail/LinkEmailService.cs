@@ -56,14 +56,30 @@ public sealed class LinkEmailPacing
 /// <c>notFound</c> through the same path, so a cross-exercise id is indistinguishable from an unknown one.
 /// </para>
 /// <para>
+/// <b>Decided twice: planned, then re-checked at send time</b> (Copilot review on #487, 10/14). The plan (who is
+/// eligible, and the 100 cap) is read once, up front; a batch can then run for minutes, during which a roster import
+/// can change an address and a link can be revoked or reissued or an account disabled. So each planned send first
+/// RE-READS that one participant, through the same query (central filter, explicit <c>ExerciseId</c>, roster roles) and
+/// the same rules, and sends to the address and with the link on file AT THAT MOMENT. A participant who has become
+/// ineligible is <c>skipped</c> with the matching reason (no send, no event); one no longer on this exercise's roster is
+/// <c>notFound</c>; a reissued link is still active, so the email carries the NEW link (the old one is dead). The
+/// re-read is part of that send's work: it runs only once the batch budget has admitted the send, and the budget is
+/// checked again after it, immediately before the send, so a slow re-read cannot push a send past the budget. If the
+/// re-read itself fails (e.g. the database times out), that participant and everyone planned after them are
+/// <c>failed</c> / <c>notAttempted</c> with no call and no event, and the batch still answers <c>200</c> with what was
+/// really sent: a 500 would hide those sends, and a retry of the whole selection would email them twice.
+/// </para>
+/// <para>
 /// <b>Sending.</b> Sequential, in name order, with <see cref="LinkEmailPacing.SendPause"/> between sends. One failure
 /// never aborts the batch: a provider refusal, throttle, timeout, credential failure or any unexpected fault in one
-/// send becomes that participant's <c>failed</c> result (<see cref="RosterEmailFailureReasons"/>, generic; a timeout is
-/// <c>timedOut</c>, because the provider may have accepted it, so it is not offered for a blind resend) and the next
-/// one is attempted. The ONE exception is the provider's throttle: after the first <c>429</c> nobody else is attempted
-/// (the next send would only be throttled too, and on an Azure-managed domain the window is minutes long); everyone
-/// left is reported <c>failed</c> / <c>rateLimited</c> without a call and without an event, so staff can send again to
-/// just them later. No send is retried automatically. When the request is aborted the batch stops between sends.
+/// send becomes that participant's <c>failed</c> result (<see cref="RosterEmailFailureReasons"/>, generic; anything
+/// the provider may have accepted (a timeout, no HTTP response, a <c>408</c>, a <c>5xx</c>, any fault once the message
+/// was handed to the mailer) is <c>timedOut</c>, so it is not offered for a blind resend; <c>sendFailed</c> is only a
+/// send that cannot have left) and the next one is attempted. The ONE exception is the provider's throttle: after the
+/// first <c>429</c> nobody else is attempted (the next send would only be throttled too, and on an Azure-managed domain
+/// the window is minutes long); everyone left is reported <c>failed</c> / <c>rateLimited</c> without a call and without
+/// an event, so staff can send again to just them later. No send is retried automatically. When the request is aborted
+/// the batch stops between sends.
 /// </para>
 /// <para>
 /// <b>Telemetry (XC-004).</b> Every send ATTEMPT records exactly one <c>participant.link.emailed</c> event
@@ -221,8 +237,8 @@ public sealed partial class LinkEmailService
         }
 
         var requested = parsed.Accounts!;
-        var candidates = await LoadCandidatesAsync(requested, cancellationToken);
-        var plan = Plan(candidates);
+        var candidates = await LoadCandidatesAsync(exerciseId, requested, cancellationToken);
+        var plan = candidates.Select(Decide).ToList();
 
         if (requested.Everyone && plan.Count(step => step.Delivery is not null) > MaxParticipantsPerRequest)
         {
@@ -253,56 +269,59 @@ public sealed partial class LinkEmailService
         return LinkEmailResult.Ok(new RosterEmailResultDto { Results = results });
     }
 
-    /// <summary>Decides, for each considered participant in name order, whether they are skipped (and why) or emailed.</summary>
-    private List<PlannedStep> Plan(List<EmailCandidate> candidates)
+    /// <summary>
+    /// Decides whether one considered participant is skipped (and why) or emailed. The ONE eligibility rule: used to
+    /// plan the batch and again, on a fresh read, immediately before each send (<see cref="DecideNowAsync"/>).
+    /// </summary>
+    private PlannedStep Decide(EmailCandidate candidate)
     {
-        var plan = new List<PlannedStep>(candidates.Count);
-        foreach (var candidate in candidates)
+        if (candidate.DisabledAt is not null)
         {
-            var participantId = candidate.AccountId.ToString();
-
-            if (candidate.DisabledAt is not null)
-            {
-                plan.Add(PlannedStep.Skip(participantId, RosterEmailSkipReasons.Disabled));
-                continue;
-            }
-
-            var address = candidate.Email?.Trim();
-            if (!LinkEmailAddresses.IsDeliverable(address))
-            {
-                plan.Add(PlannedStep.Skip(participantId, RosterEmailSkipReasons.NoEmail));
-                continue;
-            }
-
-            var link = _linkDtoFactory.Create(candidate.Link);
-            if (!string.Equals(link.Status, RosterLinkStatuses.Active, StringComparison.Ordinal) || candidate.Link is null)
-            {
-                plan.Add(PlannedStep.Skip(participantId, RosterEmailSkipReasons.NoActiveLink));
-                continue;
-            }
-
-            if (link.NeedsReissue == true || link.JoinUrl is not { } joinUrl)
-            {
-                // Unrecoverable copy; or (rarely) the join base stopped being usable after the up-front check, in
-                // which case no URL can be built for this person either. Either way: no email, reissue or fix config.
-                plan.Add(PlannedStep.Skip(participantId, RosterEmailSkipReasons.TokenUnrecoverable));
-                continue;
-            }
-
-            plan.Add(new PlannedStep(participantId, Skipped: null, new Delivery(
-                candidate.Link.Id,
-                address!,
-                candidate.DisplayName,
-                candidate.Username,
-                joinUrl)));
+            return PlannedStep.Skip(candidate.AccountId, RosterEmailSkipReasons.Disabled);
         }
 
-        return plan;
+        var address = candidate.Email?.Trim();
+        if (!LinkEmailAddresses.IsDeliverable(address))
+        {
+            return PlannedStep.Skip(candidate.AccountId, RosterEmailSkipReasons.NoEmail);
+        }
+
+        var link = _linkDtoFactory.Create(candidate.Link);
+        if (!string.Equals(link.Status, RosterLinkStatuses.Active, StringComparison.Ordinal) || candidate.Link is null)
+        {
+            return PlannedStep.Skip(candidate.AccountId, RosterEmailSkipReasons.NoActiveLink);
+        }
+
+        if (link.NeedsReissue == true || link.JoinUrl is not { } joinUrl)
+        {
+            // Unrecoverable copy; or (rarely) the join base stopped being usable after the up-front check, in
+            // which case no URL can be built for this person either. Either way: no email, reissue or fix config.
+            return PlannedStep.Skip(candidate.AccountId, RosterEmailSkipReasons.TokenUnrecoverable);
+        }
+
+        return new PlannedStep(candidate.AccountId, Skipped: null, new Delivery(
+            candidate.Link.Id,
+            address!,
+            candidate.DisplayName,
+            candidate.Username,
+            joinUrl));
     }
 
     /// <summary>
-    /// Runs the plan: skips are reported as they are; each delivery is sent, one at a time, paced, within the batch
-    /// budget, with its event saved straight after the attempt.
+    /// Re-reads ONE planned participant immediately before their send and decides again (<see cref="Decide"/>), through
+    /// the same query as the plan: the central filter, the explicit <paramref name="exerciseId"/> predicate and the
+    /// roster roles. Not found there any more (removed, moved out of the exercise, no longer a roster role): <c>notFound</c>.
+    /// </summary>
+    private async Task<PlannedStep> DecideNowAsync(Guid exerciseId, Guid accountId, CancellationToken cancellationToken)
+    {
+        var current = await WithLinks(exerciseId, RosterAccounts(exerciseId).Where(account => account.Id == accountId))
+            .FirstOrDefaultAsync(cancellationToken);
+        return current is null ? PlannedStep.Skip(accountId, RosterEmailSkipReasons.NotFound) : Decide(current);
+    }
+
+    /// <summary>
+    /// Runs the plan: skips are reported as they are; each planned delivery is re-checked on a fresh read and sent, one
+    /// at a time, paced, within the batch budget, with its event saved straight after the attempt.
     /// </summary>
     private async Task<List<RosterEmailResultItemDto>> DeliverAsync(
         Guid exerciseId,
@@ -316,10 +335,11 @@ public sealed partial class LinkEmailService
         var results = new List<RosterEmailResultItemDto>(plan.Count);
         var attempted = 0;
         var throttled = false;
+        var reReadFailed = false;
 
         foreach (var step in plan)
         {
-            if (step.Delivery is not { } delivery)
+            if (step.Delivery is null)
             {
                 results.Add(Result(step.ParticipantId, RosterEmailStatuses.Skipped, step.Skipped));
                 continue;
@@ -332,8 +352,9 @@ public sealed partial class LinkEmailService
                 continue;
             }
 
-            // The first send always starts; after that, no new send starts once the budget is spent.
-            if (attempted > 0 && _timeProvider.GetElapsedTime(started) >= pacing.BatchBudget)
+            // The first send always starts; after that, no new send starts once the budget is spent. After a failed
+            // re-read nothing else is attempted either (the database is in trouble: stop, and report what was sent).
+            if (reReadFailed || (attempted > 0 && _timeProvider.GetElapsedTime(started) >= pacing.BatchBudget))
             {
                 results.Add(Result(step.ParticipantId, RosterEmailStatuses.Failed, RosterEmailFailureReasons.NotAttempted));
                 continue;
@@ -344,6 +365,38 @@ public sealed partial class LinkEmailService
             if (attempted > 0 && pacing.SendPause > TimeSpan.Zero)
             {
                 await Task.Delay(pacing.SendPause, _timeProvider, cancellationToken);
+            }
+
+            // The plan may be minutes old by now: send to what is on file NOW (address, link, enabled), or skip with the
+            // reason the same rules give. Part of this send's work, so the budget check above already admitted it.
+            PlannedStep current;
+#pragma warning disable CA1031 // A failed re-read must not discard the sends already made (a 500 would hide them).
+            try
+            {
+                current = await DecideNowAsync(exerciseId, step.AccountId, cancellationToken);
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                // The type only. Nothing was sent to this participant: notAttempted, as is everyone after them.
+                LogReReadFault(_logger, exception.GetType().Name);
+                reReadFailed = true;
+                results.Add(Result(step.ParticipantId, RosterEmailStatuses.Failed, RosterEmailFailureReasons.NotAttempted));
+                continue;
+            }
+#pragma warning restore CA1031
+
+            if (current.Delivery is not { } delivery)
+            {
+                results.Add(Result(current.ParticipantId, RosterEmailStatuses.Skipped, current.Skipped));
+                continue;
+            }
+
+            // The budget again, AFTER the re-read and immediately before the send: a slow re-read must not push a send
+            // past the budget (and the request past the front end's 230 s). The first send still always starts.
+            if (attempted > 0 && _timeProvider.GetElapsedTime(started) >= pacing.BatchBudget)
+            {
+                results.Add(Result(step.ParticipantId, RosterEmailStatuses.Failed, RosterEmailFailureReasons.NotAttempted));
+                continue;
             }
 
             attempted++;
@@ -376,42 +429,56 @@ public sealed partial class LinkEmailService
     }
 
     /// <summary>
-    /// Composes and sends one message. Any fault, of any type, becomes <see cref="LinkMailSendOutcome.Failed"/>: one
-    /// participant's failure must never abort the rest of the batch. The request token is NOT passed to the mailer, so
-    /// a send is never cut off half way (its outcome would be unknown); the mailer's own timeout bounds it.
+    /// Composes and sends one message. No fault, of any type, escapes: one participant's failure must never abort the
+    /// rest of the batch. A fault while COMPOSING (before anything reaches the mailer) is
+    /// <see cref="LinkMailSendOutcome.Failed"/>: nothing can have been sent. A fault thrown by the MAILER is
+    /// <see cref="LinkMailSendOutcome.TimedOut"/>: the message was handed over and may have left (Gate-1 W-1 on the #487
+    /// follow-ups). The request token is NOT passed to the mailer, so a send is never cut off half way (its outcome
+    /// would be unknown); the mailer's own timeout bounds it.
     /// </summary>
     private async Task<LinkMailSendOutcome> SendOneAsync(string exerciseName, Delivery delivery)
     {
 #pragma warning disable CA1031 // One participant's fault (including an unexpected one) must not stop the batch.
+        LinkEmailMessage message;
         try
         {
-            var message = LinkEmailComposer.Compose(
+            message = LinkEmailComposer.Compose(
                 delivery.Address,
                 exerciseName,
                 delivery.DisplayName,
                 delivery.SignInName,
                 delivery.JoinUrl);
-            return await _mailer.SendAsync(message, CancellationToken.None);
         }
         catch (Exception exception)
         {
             // The type only: an exception message from deeper down could carry the address or the URL.
-            LogUnexpectedSendFault(_logger, exception.GetType().Name);
+            LogUnexpectedSendFault(_logger, exception.GetType().Name, LinkMailSendOutcome.Failed);
             return LinkMailSendOutcome.Failed;
+        }
+
+        try
+        {
+            return await _mailer.SendAsync(message, CancellationToken.None);
+        }
+        catch (Exception exception)
+        {
+            // The mailer may have handed the message over before it threw: unconfirmed, not failed.
+            LogUnexpectedSendFault(_logger, exception.GetType().Name, LinkMailSendOutcome.TimedOut);
+            return LinkMailSendOutcome.TimedOut;
         }
 #pragma warning restore CA1031
     }
 
     /// <summary>
-    /// Reads the considered accounts with their link (if any) in one query, through the central exercise filter on
-    /// BOTH sets, ordered by name. With ids of which none parses there is nothing to read.
+    /// Reads the considered accounts with their link (if any) in one query (<see cref="WithLinks"/>), ordered by name.
+    /// With ids of which none parses there is nothing to read.
     /// </summary>
-    private async Task<List<EmailCandidate>> LoadCandidatesAsync(RequestedAccounts request, CancellationToken cancellationToken)
+    private async Task<List<EmailCandidate>> LoadCandidatesAsync(
+        Guid exerciseId,
+        RequestedAccounts request,
+        CancellationToken cancellationToken)
     {
-        // Roster accounts only (W-1): the same participant-world roles the roster lists. Any other account in the
-        // exercise (a bootstrap, staff-like or org-admin account) is never emailed and reads as notFound.
-        IQueryable<Account> accounts = _dbContext.Accounts.AsNoTracking()
-            .Where(account => account.Role == RosterRoles.Participant || account.Role == RosterRoles.Pio);
+        var accounts = RosterAccounts(exerciseId);
         if (!request.Everyone)
         {
             var ids = request.Entries
@@ -426,24 +493,40 @@ public sealed partial class LinkEmailService
             accounts = accounts.Where(account => ids.Contains(account.Id));
         }
 
-        // One link per account at most (the unique (ExerciseId, AccountId) index); a left join keeps accounts with none.
-        var query =
-            from account in accounts
-            join link in _dbContext.ParticipantLinks.AsNoTracking() on account.Id equals link.AccountId into links
-            from link in links.DefaultIfEmpty()
-            orderby account.DisplayName, account.Id
-            select new EmailCandidate
-            {
-                AccountId = account.Id,
-                DisplayName = account.DisplayName,
-                Username = account.Username,
-                Email = account.Email,
-                DisabledAt = account.DisabledAt,
-                Link = link,
-            };
-
-        return await query.ToListAsync(cancellationToken);
+        return await WithLinks(exerciseId, accounts).ToListAsync(cancellationToken);
     }
+
+    /// <summary>
+    /// The roster accounts of the exercise, through the central exercise filter AND an explicit
+    /// <paramref name="exerciseId"/> predicate. Roster accounts only (W-1): the same participant-world roles the roster
+    /// lists. Any other account in the exercise (a bootstrap, staff-like or org-admin account) is never emailed and reads
+    /// as notFound. The one source of both the plan and the send-time re-read.
+    /// </summary>
+    private IQueryable<Account> RosterAccounts(Guid exerciseId) =>
+        _dbContext.Accounts.AsNoTracking()
+            .Where(account => account.ExerciseId == exerciseId
+                && (account.Role == RosterRoles.Participant || account.Role == RosterRoles.Pio));
+
+    /// <summary>
+    /// <paramref name="accounts"/> with their link (if any), ordered by name. The link set carries the same two scope
+    /// layers (central filter, explicit <paramref name="exerciseId"/>). One link per account at most (the unique
+    /// (ExerciseId, AccountId) index); a left join keeps accounts with none.
+    /// </summary>
+    private IQueryable<EmailCandidate> WithLinks(Guid exerciseId, IQueryable<Account> accounts) =>
+        from account in accounts
+        join link in _dbContext.ParticipantLinks.AsNoTracking().Where(link => link.ExerciseId == exerciseId)
+            on account.Id equals link.AccountId into links
+        from link in links.DefaultIfEmpty()
+        orderby account.DisplayName, account.Id
+        select new EmailCandidate
+        {
+            AccountId = account.Id,
+            DisplayName = account.DisplayName,
+            Username = account.Username,
+            Email = account.Email,
+            DisabledAt = account.DisabledAt,
+            Link = link,
+        };
 
     private static RosterEmailResultItemDto Result(string participantId, string status, string? reason) =>
         new() { ParticipantId = participantId, Status = status, Reason = reason };
@@ -457,8 +540,17 @@ public sealed partial class LinkEmailService
     [LoggerMessage(
         EventId = 2,
         Level = LogLevel.Warning,
-        Message = "Link email send faulted unexpectedly ({ExceptionType}); reported as failed, the batch continues.")]
-    private static partial void LogUnexpectedSendFault(ILogger logger, string exceptionType);
+        Message = "Link email send faulted unexpectedly ({ExceptionType}); reported as {Outcome}, the batch continues.")]
+    private static partial void LogUnexpectedSendFault(
+        ILogger logger,
+        string exceptionType,
+        LinkMailSendOutcome outcome);
+
+    [LoggerMessage(
+        EventId = 3,
+        Level = LogLevel.Warning,
+        Message = "Link email re-read faulted ({ExceptionType}); the rest of the batch is not attempted.")]
+    private static partial void LogReReadFault(ILogger logger, string exceptionType);
 
     /// <summary>One considered account and its link row (or <c>null</c>), as read from the database.</summary>
     private sealed class EmailCandidate
@@ -482,10 +574,15 @@ public sealed partial class LinkEmailService
         public override string ToString() => "Delivery (withheld)";
     }
 
-    /// <summary>One participant's planned step: a skip reason, or a delivery.</summary>
-    private sealed record PlannedStep(string ParticipantId, string? Skipped, Delivery? Delivery)
+    /// <summary>
+    /// One participant's decided step: a skip reason, or a delivery. In the plan, a delivery only means "to be emailed";
+    /// what is sent comes from the send-time re-read.
+    /// </summary>
+    private sealed record PlannedStep(Guid AccountId, string? Skipped, Delivery? Delivery)
     {
-        public static PlannedStep Skip(string participantId, string reason) => new(participantId, reason, Delivery: null);
+        public string ParticipantId => AccountId.ToString();
+
+        public static PlannedStep Skip(Guid accountId, string reason) => new(accountId, reason, Delivery: null);
     }
 
     /// <summary>
