@@ -39,6 +39,13 @@
  * fresh counts) and left as the SAME object if it did not, so a memoized row
  * does not re-render for a no-op refresh.
  *
+ * ## Live arrivals and pins (story 08)
+ * Each entry also records `live` (it arrived after the opening baseline, so it is
+ * unread on arrival; kept from the first sighting through every refresh) and
+ * `pinnedForAll` (DF-7), which a refresh carries from the server and
+ * {@link applyPinChange} sets from a pin response or another console's
+ * `PostPinChanged` — one entry re-created, every other row's memo intact.
+ *
  * ## Staff projections
  * `toLiveWorldPost` joins a view with its author persona into the flat
  * `LiveWorldPost` the row renders and `renderRowActions` receives (C5's
@@ -100,6 +107,8 @@ export interface LiveWorldPost {
   readonly media?: readonly PostMedia[]
   /** Present when this post is a reply. */
   readonly inReplyTo?: PostInReplyTo
+  /** Present when a controller has pinned the post for everyone (DF-7, story 08). */
+  readonly pinnedForAll?: true
 }
 
 /** A post in the column's collections, with the values derived once at ingestion. */
@@ -111,6 +120,18 @@ export interface LiveWorldEntry {
   readonly seq: number
   /** Distinct normalized hashtags in the post text. */
   readonly tags: readonly string[]
+  /**
+   * True when the post ARRIVED LIVE (realtime, or first seen by a polling sweep) after the
+   * opening baseline read — what makes it UNREAD on arrival (story 08). A baseline post is
+   * `false`. Kept from the first sighting: a later refresh of the same post never flips it.
+   */
+  readonly live: boolean
+  /**
+   * Whether a controller has pinned the post FOR EVERYONE (DF-7). Seeded from the wire's
+   * `pinnedForAll` and then kept current by {@link applyPinChange} (this console's own pin
+   * response, and `PostPinChanged` from other consoles).
+   */
+  readonly pinnedForAll: boolean
 }
 
 /** The column's two collections (see the module header). Both newest-first. */
@@ -133,14 +154,38 @@ export const ALL_POSTS_FILTER: LiveWorldFilter = { kind: 'all' }
 // Entries and ordering
 // -----------------------------------------------------------------------------
 
+/**
+ * True when a wire object (a `Post` from the feed read, or a participant view) says it is
+ * pinned for everyone. Read STRUCTURALLY on purpose: `pinnedForAll` joins the shared post
+ * types with story 07, and this column must compile and work before and after that lands.
+ * Only a literal `true` counts (the wire omits the key when not pinned).
+ */
+export function readPinnedForAll(wire: object): boolean {
+  return 'pinnedForAll' in wire && wire.pinnedForAll === true
+}
+
+/** Options for {@link toEntry}. */
+export interface ToEntryOptions {
+  /** Arrived live (after the opening baseline): unread on arrival. Default `false`. */
+  readonly live?: boolean
+  /** Pinned for everyone. Default: read off the view ({@link readPinnedForAll}). */
+  readonly pinnedForAll?: boolean
+}
+
 /** Wraps a participant-safe view as an entry, deriving `ts` and `tags` once. */
-export function toEntry(view: ParticipantPostView, seq: number): LiveWorldEntry {
+export function toEntry(
+  view: ParticipantPostView,
+  seq: number,
+  options: ToEntryOptions = {},
+): LiveWorldEntry {
   const parsed = Date.parse(view.scenarioTime)
   return {
     view,
     ts: Number.isNaN(parsed) ? -Infinity : parsed,
     seq,
     tags: extractHashtags(view.text),
+    live: options.live ?? false,
+    pinnedForAll: options.pinnedForAll ?? readPinnedForAll(view),
   }
 }
 
@@ -191,8 +236,9 @@ function mergeSorted(
 
 /**
  * Replaces, by id, the entries of `list` whose content changed in `updates`
- * (keeping the existing `seq`/`ts`/`tags` when only counts or media moved).
- * Returns `list` itself when nothing changed.
+ * (keeping the existing `seq` and `live` — the post's arrival order and whether it
+ * arrived live never change on a refresh). A refresh carries the pin state the
+ * server now reports. Returns `list` itself when nothing changed.
  */
 function refreshContent(
   list: readonly LiveWorldEntry[],
@@ -203,11 +249,46 @@ function refreshContent(
     const existing = list[index]
     if (existing === undefined) continue
     const update = updates.get(existing.view.id)
-    if (update === undefined || sameContent(existing.view, update.view)) continue
+    if (
+      update === undefined ||
+      (update.pinnedForAll === existing.pinnedForAll && sameContent(existing.view, update.view))
+    ) {
+      continue
+    }
     if (next === null) next = [...list]
-    next[index] = { ...update, seq: existing.seq }
+    next[index] = { ...update, seq: existing.seq, live: existing.live }
   }
   return next ?? list
+}
+
+/** `list` with the entry `postId` re-pinned, or `list` itself when nothing changes. */
+function repin(
+  list: readonly LiveWorldEntry[],
+  postId: string,
+  pinnedForAll: boolean,
+): readonly LiveWorldEntry[] {
+  const index = list.findIndex(entry => entry.view.id === postId)
+  const existing = list[index]
+  if (existing === undefined || existing.pinnedForAll === pinnedForAll) return list
+  const next = [...list]
+  next[index] = { ...existing, pinnedForAll }
+  return next
+}
+
+/**
+ * Sets the pin-for-everyone state of one post (this console's own pin response, or
+ * another console's `PostPinChanged`). Only that entry gets a new identity, so only its
+ * memoized row re-renders. Pure: returns `state` itself when the post is unknown or the
+ * state is unchanged.
+ */
+export function applyPinChange(
+  state: LiveWorldState,
+  postId: string,
+  pinnedForAll: boolean,
+): LiveWorldState {
+  const rows = repin(state.rows, postId, pinnedForAll)
+  const pending = repin(state.pending, postId, pinnedForAll)
+  return rows === state.rows && pending === state.pending ? state : { rows, pending }
 }
 
 /**
@@ -353,6 +434,7 @@ export function unknownAuthorLabel(personaId: string): string {
 export function toLiveWorldPost(
   view: ParticipantPostView,
   author: Persona | undefined,
+  pinnedForAll = false,
 ): LiveWorldPost {
   const identity = author !== undefined
     ? {
@@ -376,6 +458,7 @@ export function toLiveWorldPost(
     counts: view.counts,
     ...(view.media != null && view.media.length > 0 ? { media: view.media } : {}),
     ...(view.inReplyTo != null ? { inReplyTo: view.inReplyTo } : {}),
+    ...(pinnedForAll ? { pinnedForAll: true as const } : {}),
   }
 }
 

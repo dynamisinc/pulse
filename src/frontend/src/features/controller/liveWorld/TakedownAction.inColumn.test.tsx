@@ -163,6 +163,9 @@ describe('TakedownAction through renderRowActions', () => {
     await user.tab()
     expect(within(lookalike).getByTestId('live-world-reply-as')).toHaveFocus()
     await user.tab()
+    // Story 08: Pin for everyone sits between Reply as… and Take down.
+    expect(within(lookalike).getByTestId('live-world-pin')).toHaveFocus()
+    await user.tab()
     expect(within(lookalike).getByTestId('takedown-trigger')).toHaveFocus()
   })
 
