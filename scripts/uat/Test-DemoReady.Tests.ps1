@@ -37,6 +37,7 @@ BeforeAll {
             [ordered]@{ key = 'p09'; persona = 'KestrelCoEM'; text = 'Pinned advisory p09'; minutesBeforeAnchor = 270 }
             [ordered]@{ key = 'p10'; persona = 'FairhavenWater'; text = 'Pinned distribution p10'; minutesBeforeAnchor = 262 }
         )
+        media    = @([ordered]@{ key = 'photo'; file = 'media/photo.jpg'; kind = 'image'; alt = 'The pack photo' })
         runSheet = [ordered]@{ items = @(
                 [ordered]@{ key = 'rs01'; kind = 'post'; msel = '4'; title = 'Beat 2 · BREAKING video'; plannedMinute = 3 }
                 [ordered]@{ key = 'rs02'; kind = 'burst'; title = 'Beat 2 · Residents react'; plannedMinute = 4 }
@@ -253,6 +254,13 @@ Describe 'Test-DemoReady.ps1' {
     }
 
     Describe 'Check 3: engine review queue' {
+        It 'a response that is not a JSON array is FAIL "unexpected shape" (L-2)' {
+            $global:ReadyFake.Routes['GET /api/engine/review-queue'] = @{ Status = 200; Body = [ordered]@{ items = @() } }
+            $run = Invoke-Ready
+            (Get-Result $run 3 'Engine review queue').status | Should -Be 'FAIL'
+            (Get-Result $run 3 'Engine review queue').detail | Should -Match 'unexpected shape'
+        }
+
         It '<Count> pending draft(s) is <Status>' -ForEach @(
             @{ Count = 0; Status = 'PASS' }
             @{ Count = 1; Status = 'WARN' }
@@ -314,6 +322,14 @@ Describe 'Test-DemoReady.ps1' {
     }
 
     Describe 'Check 7: run sheet (DF-16)' {
+        It 'two pending copies of one seeded item is WARN, naming it (L-6)' {
+            $global:ReadyFake.Routes['GET /api/injects'].Body.items += [ordered]@{ id = 'dup'; kind = 'burst'; title = 'Beat 2 · Residents react'; status = 'pending' }
+            $run = Invoke-Ready
+            (Get-Result $run 7 'Run sheet').status | Should -Be 'WARN'
+            (Get-Result $run 7 'Run sheet').detail | Should -Match 'duplicate pending copies of a seeded item: rs02 \(2 pending\)'
+            $run.Code | Should -Be 0
+        }
+
         It 'a seeded item that is not pending is FAIL' {
             $global:ReadyFake.Routes['GET /api/injects'].Body.items[0].status = 'fired'
             $run = Invoke-Ready
@@ -352,6 +368,29 @@ Describe 'Test-DemoReady.ps1' {
     }
 
     Describe 'Check 8: media (SAS reachable)' {
+        It 'prefers a pack image (by file name or alt) over a newer non-pack one, and falls back to any (L-6)' {
+            $other = [ordered]@{ id = 'bbbbbbbb-0000-4000-8000-000000000001'; text = 'A participant photo'; scenarioTime = [DateTimeOffset]::UtcNow.ToString('o'); media = @([ordered]@{ id = 'm9'; kind = 'image'; url = "https://media.fake.test/c/other.jpg?$($global:ReadyFake.Sas)"; alt = 'x' }) }
+            $global:ReadyFake.Routes['GET /api/feed'].Body = @($other) + @($global:ReadyFake.Routes['GET /api/feed'].Body)
+            $global:ReadyFake.Routes['GET /c/other.jpg'] = @{ Status = 206; Body = 'xx'; Raw = $true; ContentType = 'image/jpeg' }
+            Invoke-Ready | Out-Null
+            @($global:ReadyFake.Calls | Where-Object { $_.Host -eq 'media.fake.test' -and $_.Path -like '*.jpg' }).Path | Should -Be '/c/photo.jpg'
+
+            # Matched by alt alone too.
+            $global:ReadyFake.Calls.Clear()
+            $global:ReadyFake.Routes['GET /api/feed'].Body[1].media[0].url = "https://media.fake.test/c/renamed.jpg?$($global:ReadyFake.Sas)"
+            $global:ReadyFake.Routes['GET /api/feed'].Body[1].media[0].alt = 'The pack photo'
+            $global:ReadyFake.Routes['GET /c/renamed.jpg'] = @{ Status = 206; Body = 'xx'; Raw = $true; ContentType = 'image/jpeg' }
+            Invoke-Ready | Out-Null
+            @($global:ReadyFake.Calls | Where-Object { $_.Host -eq 'media.fake.test' -and $_.Path -like '*.jpg' }).Path | Should -Be '/c/renamed.jpg'
+
+            # No pack image in the feed: the first image of any kind.
+            $global:ReadyFake.Calls.Clear()
+            $global:ReadyFake.Routes['GET /api/feed'].Body[1].media[0].alt = 'not the pack'
+            $run = Invoke-Ready
+            @($global:ReadyFake.Calls | Where-Object { $_.Host -eq 'media.fake.test' -and $_.Path -like '*.jpg' }).Path | Should -Be '/c/other.jpg'
+            (Get-Result $run 8 'Media (image)').status | Should -Be 'PASS'
+        }
+
         It 'probes one image and one video with a ranged GET and WITHOUT the session token' {
             Invoke-Ready | Out-Null
             $media = @($global:ReadyFake.Calls | Where-Object Host -eq 'media.fake.test')
@@ -387,6 +426,12 @@ Describe 'Test-DemoReady.ps1' {
             $result.detail | Should -Match 'no read route'
         }
 
+        It 'prints the anchor in UTC (L-5)' {
+            $p10 = $global:ReadyFake.Routes['GET /api/feed'].Body[0]
+            $anchor = ([DateTimeOffset] $p10.scenarioTime).AddMinutes(262).UtcDateTime.ToString('yyyy-MM-dd HH:mm')
+            (Get-Result (Invoke-Ready) 9 'Scenario clock').detail | Should -Match ([regex]::Escape("seed anchor $anchor UTC"))
+        }
+
         It 'a seed older than the window (13 h) is WARN' {
             foreach ($post in $global:ReadyFake.Routes['GET /api/feed'].Body) { $post.scenarioTime = ([DateTimeOffset] $post.scenarioTime).AddHours(-13).ToString('o') }
             $run = Invoke-Ready
@@ -402,6 +447,16 @@ Describe 'Test-DemoReady.ps1' {
     }
 
     Describe 'Check 10: Wave 3/4 routes' {
+        It 'a pinned read that threw (no status) is FAIL, never PASS (L-1)' {
+            Mock Invoke-WebRequest {
+                if (([Uri] [string] $Uri).AbsolutePath -eq '/api/feed/pinned') { throw [System.Net.Http.HttpRequestException]::new('connection reset') }
+                Invoke-FakeWeb -Uri $Uri -Method $Method -Headers $Headers -Body $Body
+            }
+            $run = Invoke-Ready
+            (Get-Result $run 10 'Route /api/feed/pinned').status | Should -Be 'FAIL'
+            (Get-Result $run 10 'Route /api/feed/pinned').detail | Should -Match 'no answer'
+        }
+
         It 'GET /api/posts/{id}/edits 404 is a WARN until Wave 4 deploys, not a FAIL' {
             $global:ReadyFake.Routes.Remove(($global:ReadyFake.Routes.Keys | Where-Object { $_ -like '*/edits' }))
             $run = Invoke-Ready

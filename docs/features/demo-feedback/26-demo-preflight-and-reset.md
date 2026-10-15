@@ -89,7 +89,7 @@ Pester tests beside the scripts (`*.Tests.ps1`, same style as `Seed-DemoContent.
 
 ## Tests
 
-`Test-DemoReady.Tests.ps1` (45 tests, Pester 5, no network): a ready exercise passes all ten checks and is read-only
+`Test-DemoReady.Tests.ps1` (50 tests, Pester 5, no network): a ready exercise passes all ten checks and is read-only
 (only GETs besides sign-in/sign-out; sign-out also after a throw); sign-in body and `-ExerciseId`; check 1 health
 down / slow wake / schema 5xx / Wave 4 `persisted` true, absent, false; check 2 engine, running, injects, freeze;
 check 3 0 / 1 / 5 / 6 drafts; check 4 Fake, AzureOpenAI, cut to Fake; check 5 noise and watermark; check 6 missing
@@ -99,7 +99,7 @@ the window, 13 h old (WARN), frozen (WARN); check 10 edits 404 (WARN), seeded po
 script's exit code (1 on FAIL, 0 on WARN only); `-Json` contents and nothing written without it; no secret, token or
 SAS link in any stream (with `-Verbose -Debug`), the JSON file or `$Error`.
 
-`Invoke-DemoReset.Tests.ps1` (23 tests): order (reset route, Reset-DemoState, Clear, Seed `-RunSheet exceptMsel`,
+`Invoke-DemoReset.Tests.ps1` (29 tests): order (reset route, Reset-DemoState, Clear, Seed `-RunSheet exceptMsel`,
 Test-DemoReady) and each step's arguments; sign-out before step 2; stop on first failure at steps 2-5 (exit and
 throw), and at step 1 on 403/500, naming the step and the steps not run; fallback on 404: marker then `-Restart` then
 polling (no fixed wait), no marker when already off running, two consecutive `running` reads, `-Restart` exit not 3,
@@ -108,6 +108,13 @@ going past a failed preview; transcript file name and contents; no secret or tok
 stream (live, fallback, `-WhatIf`); `.gitignore` lists `scripts/uat/logs/`; `Reset-DemoState -Restart` help (DF-28);
 the real `Invoke-DemoScript` seam returns a child's exit code.
 
-Existing `Clear-DemoContent`, `Import-Roster` and `Seed-DemoContent` suites: 483 passed, unchanged.
+Gate-1 folds: M-1 a failure after step 1 sets pause tier `engine` (best effort) and prints the tier in red, or "pause
+the engine from the console"; none after a step 1 failure or under `-WhatIf`. M-2 step 1 polls `/health` then
+`/health/ready` first (slow wake goes on; never waking fails before any sign-in). L-1 a pinned read with no answer is a
+check 10 FAIL. L-2 a review queue that is not a JSON array is FAIL "unexpected shape". L-3/L-4 help notes (one-instance
+assumption; 17-without-18 keeps the marker, also in the timeout message). L-5 anchor printed in UTC. L-6 duplicate
+pending copies of a seeded item WARN; check 8 prefers a pack media item (file name or alt), falls back to any.
+
+Existing `Clear-DemoContent`, `Import-Roster` and `Seed-DemoContent` suites: 483 passed, unchanged (full scripts/uat run: 562 passed).
 
 **Manual (pending):** the live run on UAT, both scripts, Saturday 10/17 after the last merge (Tom).

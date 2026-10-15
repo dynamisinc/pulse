@@ -28,7 +28,8 @@
          expose an item's Inject # (ExternalRef), so the check goes by title: a pending or held item whose title
          is not a seeded pack item's FAILS (an import, a seeded copy of an msel item, or a console item), and a
          spent one WARNS (if an import created it, Clear-DemoContent.ps1 archives it).
-      8. Media: one image and one video from the feed answer a ranged GET with 200 or 206 and an image/* or
+      8. Media: one image and one video from the feed (a pack item, matched by its alt text or file name, when
+         there is one; otherwise any) answer a ranged GET with 200 or 206 and an image/* or
          video/* content type (the SAS links are reachable). Sent without the session token. The links themselves
          are never printed: they carry a SAS signature.
       9. Scenario clock. No API route reads the server's scenario clock, and the participant app's scenario "now"
@@ -398,6 +399,8 @@ function Test-ReviewQueue {
     param([string] $BaseUrl, [string] $Token)
     $r = Invoke-PulseApi -BaseUrl $BaseUrl -Method GET -Path '/api/engine/review-queue' -Token $Token
     if ($r.Status -ne 200) { Add-ReadyResult 3 'Engine review queue' FAIL "expected GET /api/engine/review-queue 200; got $($r.Status)"; return }
+    # The queue is a JSON array (ConvertFrom-Json hides that: [] is $null, a one-item array its item), so read the text.
+    if (-not $r.Text.TrimStart().StartsWith('[')) { Add-ReadyResult 3 'Engine review queue' FAIL 'expected 0 pending drafts; GET /api/engine/review-queue answered an unexpected shape (not a JSON array)'; return }
     $pending = @((Get-JsonList $r.Json) | Where-Object { $_ -is [System.Collections.IDictionary] -and $script:PendingDispositions -contains [string] $_['disposition'] })
     $byKind = ($script:PendingDispositions | ForEach-Object { $d = $_; "$d $(@($pending | Where-Object { $_['disposition'] -eq $d }).Count)" }) -join ', '
     $n = $pending.Count
@@ -482,6 +485,14 @@ function Test-RunSheet {
     if ($mselCopies.Count) { $problems.Add("$($mselCopies.Count) seeded cop$(if ($mselCopies.Count -eq 1) { 'y' } else { 'ies' }) of an msel item still armable ('$(($mselCopies | ForEach-Object { Get-PrintableText $_['title'] -Max 60 }) -join "', '")'): the import would add a second one; delete it in the console") }
     if ($unknownLive.Count) { $problems.Add("$($unknownLive.Count) item(s) the seed did not load, not spent ('$(($unknownLive | ForEach-Object { Get-PrintableText $_['title'] -Max 60 }) -join "', '")'): an MSEL import or a console item (the API does not show Inject #). Run Clear-DemoContent.ps1 -WhatIf: it lists the imported ones and archives them") }
     if ($problems.Count) { Add-ReadyResult 7 'Run sheet' FAIL "$expected; $($problems -join '; ')"; return }
+    $duplicates = @(foreach ($item in $seeded) {
+            $pending = @($queue | Where-Object { [string] $_['title'] -ceq [string] $item['title'] -and [string] $_['kind'] -ceq [string] $item['kind'] -and $_['status'] -eq 'pending' }).Count
+            if ($pending -gt 1) { "$($item['key']) ($pending pending)" }
+        })
+    if ($duplicates.Count) {
+        Add-ReadyResult 7 'Run sheet' WARN "$expected; duplicate pending copies of a seeded item: $($duplicates -join ', '). ""Fire next"" would fire each; Skip or delete the extra copies in the console"
+        return
+    }
     if ($unknownSpent.Count) {
         Add-ReadyResult 7 'Run sheet' WARN "$expected; the seeded items are pending, but $($unknownSpent.Count) spent item(s) the seed did not load remain ('$(($unknownSpent | ForEach-Object { Get-PrintableText $_['title'] -Max 60 }) -join "', '")'). If an MSEL import created them the on-stage import skips their rows: run Clear-DemoContent.ps1"
         return
@@ -501,14 +512,24 @@ function Find-PackPostsInFeed {
 }
 
 function Test-Media {
-    <# Check 8: one image and one video link from the feed, probed without the token. #>
-    param([string] $BaseUrl, [object[]] $Feed)
+    <#
+    Check 8: one image and one video link from the feed, probed without the token. A pack media item is preferred
+    (matched by the pack's alt text, or its file name in the link); any feed media of that kind is the fallback.
+    #>
+    param([string] $BaseUrl, [object[]] $Feed, [AllowNull()] [System.Collections.IDictionary] $Pack)
+    $packMedia = @(if ($Pack) { Get-JsonList $Pack['media'] | Where-Object { $_ -is [System.Collections.IDictionary] } })
     foreach ($kind in 'image', 'video') {
-        $media = $null
-        foreach ($post in $Feed) {
-            $media = @(Get-JsonList $post['media']) | Where-Object { $_ -is [System.Collections.IDictionary] -and $_['kind'] -eq $kind -and $_['url'] } | Select-Object -First 1
-            if ($media) { break }
-        }
+        $candidates = @(foreach ($post in $Feed) { Get-JsonList $post['media'] | Where-Object { $_ -is [System.Collections.IDictionary] -and $_['kind'] -eq $kind -and $_['url'] } })
+        $ofKind = @($packMedia | Where-Object { [string] $_['kind'] -eq $kind })
+        $alts = @($ofKind | ForEach-Object { [string] $_['alt'] } | Where-Object { $_ })
+        $files = @($ofKind | ForEach-Object { [IO.Path]::GetFileName([string] $_['file']) } | Where-Object { $_ })
+        $media = $candidates | Where-Object {
+            $path = try { [Uri]::UnescapeDataString(([Uri] [string] $_['url']).AbsolutePath) } catch { [string] $_['url'] }
+            $alts -ccontains [string] $_['alt'] -or @($files | Where-Object { $path.EndsWith("/$_", [StringComparison]::OrdinalIgnoreCase) }).Count
+        } | Select-Object -First 1
+        $source = 'a pack'
+        if (-not $media) { $media = $candidates | Select-Object -First 1; $source = 'a non-pack' }
+        if ($media -and $packMedia.Count -and $source -eq 'a non-pack') { Write-Host "    No pack $kind found in the feed; probing $source $kind instead." -ForegroundColor DarkGray }
         if (-not $media) { Add-ReadyResult 8 "Media ($kind)" FAIL "expected a pack $kind in the feed answering 200 with $kind/*; the feed has no $kind (did the seed run?)"; continue }
         $url = [string] $media['url']
         if ($url -notmatch '^https?://') { $url = "$BaseUrl/$($url.TrimStart('/'))" }
@@ -534,7 +555,7 @@ function Test-ScenarioWindow {
     if ($null -eq $at) { Add-ReadyResult 9 'Scenario clock' SKIP "post $($nearest.Key) has no readable scenarioTime ($note)"; return }
     $anchor = $at.AddMinutes($nearest.MinutesBeforeAnchor)
     $minute = [math]::Floor(($Now - $anchor).TotalMinutes)
-    $expected = "expected a minute inside the pack's window (0 to $($script:WindowMinutes) after the seed anchor $($anchor.ToString('yyyy-MM-dd HH:mm')) UTC)"
+    $expected = "expected a minute inside the pack's window (0 to $($script:WindowMinutes) after the seed anchor $($anchor.UtcDateTime.ToString('yyyy-MM-dd HH:mm')) UTC)"
     $frozen = $TierState -is [System.Collections.IDictionary] -and $TierState['clockFrozen'] -eq $true
     if ($frozen) { Add-ReadyResult 9 'Scenario clock' WARN "$expected; the server reports its clock FROZEN, so run-sheet and engine posts would be stamped behind ($note)"; return }
     if ($minute -ge 0 -and $minute -le $script:WindowMinutes) { Add-ReadyResult 9 'Scenario clock' PASS "$expected; got minute $minute ($note)" }
@@ -544,7 +565,8 @@ function Test-ScenarioWindow {
 function Test-NewRoutes {
     <# Check 10. #>
     param([string] $BaseUrl, [string] $Token, [int] $PinnedStatus, [object[]] $Found)
-    if ($PinnedStatus -eq 404) { Add-ReadyResult 10 'Route /api/feed/pinned' FAIL 'expected an answer, not 404; got 404: Wave 3 is not deployed on this host' }
+    if ($PinnedStatus -le 0) { Add-ReadyResult 10 'Route /api/feed/pinned' FAIL 'expected an answer, not 404; got no answer (see check 6)' }
+    elseif ($PinnedStatus -eq 404) { Add-ReadyResult 10 'Route /api/feed/pinned' FAIL 'expected an answer, not 404; got 404: Wave 3 is not deployed on this host' }
     else { Add-ReadyResult 10 'Route /api/feed/pinned' PASS "expected an answer, not 404; got $PinnedStatus" }
     if ($Found.Count -eq 0) { Add-ReadyResult 10 'Route /api/posts/{id}/edits' SKIP 'no seeded post in the feed to ask about'; return }
     $postId = [string] $Found[0].Post['id']
@@ -649,7 +671,7 @@ function Invoke-DemoReadyCheck {
             }
             catch { Write-Host "  $($_.Exception.Message): checks 8 to 10 see an empty feed." -ForegroundColor Yellow }
             $found = @(Find-PackPostsInFeed -Feed $feed -Pack $pack)
-            Invoke-ReadyStep 8 'Media' { Test-Media -BaseUrl $baseUrl -Feed $feed }
+            Invoke-ReadyStep 8 'Media' { Test-Media -BaseUrl $baseUrl -Feed $feed -Pack $pack }
             Invoke-ReadyStep 9 'Scenario clock' { Test-ScenarioWindow -Found $found -TierState $tierState }
             Invoke-ReadyStep 10 'Wave 3/4 routes' { Test-NewRoutes -BaseUrl $baseUrl -Token $token -PinnedStatus ([int] $pinnedStatus) -Found $found }
         }

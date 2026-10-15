@@ -37,6 +37,7 @@ BeforeAll {
             Tier        = 'engine'                # the old process's pause tier
             AfterRestart = [System.Collections.Generic.Queue[string]]::new()   # tiers the polls read after the restart
             MarkStatus  = 200
+            ReadyCodes  = [System.Collections.Generic.Queue[int]]::new()   # /health/ready answers, then 200
             Restarted   = $false
             Codes       = @{}                     # script name (or 'Reset-DemoState.ps1 -Restart') -> exit code
             Throws      = @{}                     # script name -> message it throws
@@ -64,6 +65,7 @@ BeforeAll {
             'POST /api/auth/staff/login' { return & $reply 200 ([ordered]@{ token = $fake.Token; session = [ordered]@{ actingHumanId = 'human-1' } }) }
             'POST /api/auth/logout' { return & $reply 204 $null }
             'GET /health' { return & $reply 200 $null }
+            'GET /health/ready' { return & $reply $(if ($fake.ReadyCodes.Count) { $fake.ReadyCodes.Dequeue() } else { 200 }) $null }
             'POST /api/steering/runtime-state/reset' {
                 if (-not $authorized) { return & $reply 401 $null }
                 if ($fake.ResetStatus -eq 200) { return & $reply 200 ([ordered]@{ tier = 'running'; clockFrozen = $false; persisted = $true }) }
@@ -192,6 +194,59 @@ Describe 'Invoke-DemoReset.ps1' {
             $run.Text | Should -Match "\[FAIL\] 1\. Runtime reset — POST /api/steering/runtime-state/reset -> $Status"
             $run.Text | Should -Match 'STOPPED at step 1\. Runtime reset'
             $global:ResetFake.Log[-1] | Should -Be 'POST /api/auth/logout'
+        }
+    }
+
+    Describe 'After a failure past step 1, the engine is paused (M-1)' {
+        It 'a failed step <Number> sets pause tier engine after the failure and prints the tier in red' -ForEach @(@{ Number = 3; Script = 'Clear-DemoContent.ps1' }, @{ Number = 5; Script = 'Test-DemoReady.ps1' }) {
+            $global:ResetFake.Codes[$Script] = 1
+            $global:ResetFake.Tier = 'running'
+            $run = Invoke-Reset
+            $run.Code | Should -Be 1
+            $failedAt = $global:ResetFake.Log.IndexOf("script $Script")
+            $posts = @(for ($i = 0; $i -lt $global:ResetFake.Calls.Count; $i++) { $global:ResetFake.Calls[$i] } ) | Where-Object { $_.Method -eq 'POST' -and $_.Path -eq '/api/steering/pause-tier' }
+            @($posts).Count | Should -Be 1
+            (@($posts)[0].Body | ConvertFrom-Json).tier | Should -Be 'engine'
+            $global:ResetFake.Log.LastIndexOf('POST /api/steering/pause-tier') | Should -BeGreaterThan $failedAt
+            $global:ResetFake.Log[-1] | Should -Be 'POST /api/auth/logout'
+            $run.Text | Should -Match 'Pause tier after the failure: engine'
+            $run.Text | Should -Match 'safe to re-run; the pause tier was set to engine'
+        }
+
+        It 'a refused pause tier says to pause the engine from the console' {
+            $global:ResetFake.Codes['Seed-DemoContent.ps1'] = 1
+            $global:ResetFake.MarkStatus = 500
+            $run = Invoke-Reset
+            $run.Text | Should -Match 'Pause tier after the failure: UNKNOWN .*Pause the engine from the console'
+        }
+
+        It 'no pause-tier call after a step 1 failure, or under -WhatIf' {
+            $global:ResetFake.ResetStatus = 403
+            Invoke-Reset | Out-Null
+            @($global:ResetFake.Calls | Where-Object { $_.Path -eq '/api/steering/pause-tier' }) | Should -BeNullOrEmpty
+            $global:ResetFake = New-ResetFake
+            $global:ResetFake.Codes['Clear-DemoContent.ps1'] = 1
+            Invoke-Reset -Extra @{ WhatIf = $true } | Out-Null
+            $global:ResetFake.Calls | Should -BeNullOrEmpty
+        }
+    }
+
+    Describe 'Step 1 waits for the API and serverless SQL first (M-2)' {
+        It 'polls /health then /health/ready before the first call, and goes on once SQL answers' {
+            503, 503 | ForEach-Object { $global:ResetFake.ReadyCodes.Enqueue($_) }
+            $run = Invoke-Reset
+            $run.Code | Should -Be 0
+            @($global:ResetFake.Log | Select-Object -First 5) | Should -Be @('GET /health', 'GET /health/ready', 'GET /health/ready', 'GET /health/ready', 'GET /api/exercise-context')
+            Should -Invoke Start-Sleep -Times 2 -Exactly
+        }
+
+        It 'SQL never waking fails step 1 before any sign-in or reset' {
+            1..12 | ForEach-Object { $global:ResetFake.ReadyCodes.Enqueue(503) }
+            $run = Invoke-Reset
+            $run.Code | Should -Be 1
+            @($global:ResetFake.Calls | Where-Object { $_.Method -eq 'POST' }) | Should -BeNullOrEmpty
+            $run.Text | Should -Match '/health/ready -> 503 after 2 min'
+            $global:ResetFake.Scripts | Should -BeNullOrEmpty
         }
     }
 

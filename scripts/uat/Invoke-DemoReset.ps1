@@ -15,12 +15,23 @@
            b. Reset-DemoState.ps1 -Restart (which restarts the App Service and exits 3);
            c. instead of a fixed 8-minute wait, it polls /health and GET /api/steering/pause-tier until the tier
               reads running twice in a row: only the NEW process, which starts empty, answers that. On
-              2026-10-07 a seed sent before the handover landed on the old process and was lost.
+              2026-10-07 a seed sent before the handover landed on the old process and was lost. This proof
+              assumes ONE instance (UAT's plan runs one): with several, the polls could reach a new instance
+              while an old one still serves. If story 17 is deployed without 18, the tier is persisted but not
+              cleared by a restart, so the marker survives it, running is never read, and the wait times out:
+              deploy 18 (the reset route), or set the tier to running in the console and run again.
+         Before its first call, step 1 waits for /health and then /health/ready (up to 2 minutes each): on
+         demo morning serverless SQL is usually paused and takes a while to wake.
       2. Reset-DemoState.ps1: the engine loop re-seed (with -AutoConfirmResponses if you pass it).
       3. Clear-DemoContent.ps1: archives old posts and the MSEL-imported run-sheet items, vetoes stale drafts.
       4. Seed-DemoContent.ps1 -RunSheet exceptMsel: the opening feed, pins, noise pool, media marking, the run
          sheet without the msel items (DF-16), and pause tier engine (DF-38).
-      5. Test-DemoReady.ps1: the pre-flight. Its results also go to scripts/uat/logs/demo-ready-<timestamp>.json.
+      5. Test-DemoReady.ps1: the pre-flight.
+
+    If a step after step 1 fails, the script makes a best-effort POST /api/steering/pause-tier { tier: engine }
+    before it exits, so a half-reset world (step 1 left the tier at running) does not leave the engine reacting,
+    and prints the tier it ended on in red (or says to pause the engine from the console if that call fails).
+ Its results also go to scripts/uat/logs/demo-ready-<timestamp>.json.
 
     -WhatIf prints the plan and each script's own preview, and writes nothing: no runtime reset and no restart
     (step 1 is described, not run), Reset-DemoState.ps1 -CheckOnly (its read-only mode; it has no -WhatIf),
@@ -311,6 +322,49 @@ function Wait-NewProcess {
     return [pscustomobject]@{ Ok = $false; Minutes = $TimeoutMinutes }
 }
 
+function Wait-ApiStatus {
+    <# Polls an anonymous route until it answers 200; returns the last status (0: no answer). #>
+    param([string] $BaseUrl, [string] $Path, [int] $Attempts = 12, [int] $DelaySeconds = 10)
+    $code = 0
+    for ($i = 1; $i -le $Attempts; $i++) {
+        try { $code = (Invoke-PulseApi -BaseUrl $BaseUrl -Method GET -Path $Path -TimeoutSec 90).Status } catch { $code = 0 }
+        if ($code -eq 200) { return $code }
+        if ($i -lt $Attempts) {
+            Write-Host "    $Path -> $code (attempt $i/$Attempts), retrying in ${DelaySeconds}s…" -ForegroundColor DarkGray
+            Start-Sleep -Seconds $DelaySeconds
+        }
+    }
+    return $code
+}
+
+function Connect-DemoStaff {
+    <# The host's exercise, the staff secret and the sign-in, as one call. The secret is dropped at once. #>
+    param([string] $BaseUrl, [string] $StaffUsername, [string] $Subscription, [string] $ResourceGroup, [string] $WebAppName)
+    $exerciseId = Get-ExerciseId -BaseUrl $BaseUrl
+    $secret = Get-StaffSecret -StaffUsername $StaffUsername -Subscription $Subscription -ResourceGroup $ResourceGroup -WebAppName $WebAppName
+    try { return (Connect-StaffSession -BaseUrl $BaseUrl -StaffUsername $StaffUsername -Secret $secret -ExerciseId $exerciseId) }
+    finally { $secret = $null }
+}
+
+function Set-EngineTierAfterFailure {
+    <#
+    .SYNOPSIS
+        After a failed step 2 to 5: best effort POST /api/steering/pause-tier { tier: engine }, so a half-reset world
+        never leaves the engine reacting. Never throws; prints the tier it ended on in red.
+    #>
+    param([string] $BaseUrl, [string] $StaffUsername, [string] $Subscription, [string] $ResourceGroup, [string] $WebAppName)
+    $session = $null
+    try {
+        $session = Connect-DemoStaff -BaseUrl $BaseUrl -StaffUsername $StaffUsername -Subscription $Subscription -ResourceGroup $ResourceGroup -WebAppName $WebAppName
+        $set = Invoke-PulseApi -BaseUrl $BaseUrl -Method POST -Path '/api/steering/pause-tier' -Token $session.Token -Body ([ordered]@{ tier = 'engine'; actingHumanId = $session.ActingHumanId })
+        $tier = if ($set.Json -is [System.Collections.IDictionary] -and $set.Json['tier']) { Get-PrintableText $set.Json['tier'] -Max 20 } else { $null }
+        if ($set.Status -eq 200 -and $tier) { Write-Host "  Pause tier after the failure: $tier (set engine, so the engine does not react to a half-reset world)." -ForegroundColor Red }
+        else { Write-Host "  Pause tier after the failure: UNKNOWN (POST /api/steering/pause-tier -> $($set.Status)). Pause the engine from the console." -ForegroundColor Red }
+    }
+    catch { Write-Host "  Pause tier after the failure: UNKNOWN ($(Get-PrintableText $_.Exception.Message -Max 200)). Pause the engine from the console." -ForegroundColor Red }
+    finally { if ($session) { Disconnect-StaffSession -BaseUrl $BaseUrl -Token $session.Token; $session.Token = $null } }
+}
+
 function Invoke-RuntimeReset {
     <#
     .SYNOPSIS
@@ -325,10 +379,12 @@ function Invoke-RuntimeReset {
     )
     $session = $null
     try {
-        $exerciseId = Get-ExerciseId -BaseUrl $BaseUrl
-        $secret = Get-StaffSecret -StaffUsername $StaffUsername -Subscription $Subscription -ResourceGroup $ResourceGroup -WebAppName $WebAppName
-        try { $session = Connect-StaffSession -BaseUrl $BaseUrl -StaffUsername $StaffUsername -Secret $secret -ExerciseId $exerciseId }
-        finally { $secret = $null }
+        # Serverless SQL is usually paused on demo morning: wake it before the first real call.
+        $health = Wait-ApiStatus -BaseUrl $BaseUrl -Path '/health'
+        if ($health -ne 200) { return [pscustomobject]@{ Ok = $false; Detail = "/health -> $health after 2 min: the App Service is down or still starting" } }
+        $ready = Wait-ApiStatus -BaseUrl $BaseUrl -Path '/health/ready'
+        if ($ready -ne 200) { return [pscustomobject]@{ Ok = $false; Detail = "/health/ready -> $ready after 2 min: serverless SQL has not woken; run again in a minute" } }
+        $session = Connect-DemoStaff -BaseUrl $BaseUrl -StaffUsername $StaffUsername -Subscription $Subscription -ResourceGroup $ResourceGroup -WebAppName $WebAppName
         Write-Host "    Signed in as $StaffUsername." -ForegroundColor DarkGray
 
         $reset = Invoke-PulseApi -BaseUrl $BaseUrl -Method POST -Path '/api/steering/runtime-state/reset' -Token $session.Token -Body ([ordered]@{ actingHumanId = $session.ActingHumanId })
@@ -363,7 +419,7 @@ function Invoke-RuntimeReset {
         # c. Wait for the new process instead of a fixed 8 minutes.
         Write-Host "    Waiting for the new process (polling every $PollSeconds s, at most $RestartTimeoutMinutes min)…" -ForegroundColor Cyan
         $wait = Wait-NewProcess -BaseUrl $BaseUrl -Token $session.Token -TimeoutMinutes $RestartTimeoutMinutes -PollSeconds $PollSeconds
-        if (-not $wait.Ok) { return [pscustomobject]@{ Ok = $false; Detail = "fallback: the new process did not answer within $RestartTimeoutMinutes min (the tier never read running twice). Check the App Service, then run again" } }
+        if (-not $wait.Ok) { return [pscustomobject]@{ Ok = $false; Detail = "fallback: the new process did not answer within $RestartTimeoutMinutes min (the tier never read running twice). Check the App Service, then run again. If story 17 is deployed without 18 the marker (pause tier engine) persists across the restart: set the tier to running in the console, or deploy 18" } }
         return [pscustomobject]@{ Ok = $true; Detail = "restart fallback: the new process is serving after ~$($wait.Minutes) min (tier running, clock unstarted)" }
     }
     catch { return [pscustomobject]@{ Ok = $false; Detail = $_.Exception.Message } }
@@ -490,8 +546,11 @@ function Invoke-DemoReset {
             Write-Host "WHATIF — $($failures.Count) preview(s) failed: $($failures -join '; ')." -ForegroundColor Red
         }
         else {
+            if ($failures[0] -notlike '1.*') {
+                Set-EngineTierAfterFailure -BaseUrl $baseUrl -StaffUsername $StaffUsername -Subscription $Subscription -ResourceGroup $ResourceGroup -WebAppName $WebAppName
+            }
             $remaining = @($plan | Where-Object { $_.Number -gt [int] ($failures[0] -replace '^(\d+)\..*$', '$1') } | ForEach-Object { "$($_.Number). $($_.Name)" })
-            Write-Host "STOPPED at step $($failures[0]). Not run: $(if ($remaining) { $remaining -join ', ' } else { 'nothing' }). Fix the cause and run again (every step is safe to re-run)." -ForegroundColor Red
+            Write-Host "STOPPED at step $($failures[0]). Not run: $(if ($remaining) { $remaining -join ', ' } else { 'nothing' }). Fix the cause and run again (every step is safe to re-run; the pause tier was set to engine above if the failure came after step 1)." -ForegroundColor Red
         }
     }
     finally {
