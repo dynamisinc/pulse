@@ -100,4 +100,20 @@ public sealed class Post : IExerciseScoped
     /// response.
     /// </summary>
     public string? PinnedForAllByHumanId { get; set; }
+
+    /// <summary>
+    /// How many times the author has edited this post (demo-feedback DF-29/DF-30; at most 5, enforced in code by story 19).
+    /// <c>NOT NULL DEFAULT 0</c>, so existing posts read "never edited". Doubles as the <c>PostEdited</c> push's monotonic
+    /// version (DF-33).
+    /// </summary>
+    public int EditCount { get; set; }
+
+    /// <summary>
+    /// When the last edit was applied — REAL wall clock (server UTC); <c>null</c> when never edited. Staff/export only
+    /// (XC-002): NEVER projected onto a participant response (participants see <see cref="LastEditedScenarioTime"/>).
+    /// </summary>
+    public DateTimeOffset? LastEditedAt { get; set; }
+
+    /// <summary>When the last edit was applied, in scenario time (COR-053); <c>null</c> when never edited.</summary>
+    public DateTimeOffset? LastEditedScenarioTime { get; set; }
 }
