@@ -31,10 +31,19 @@
  * `PostCard.module.css`) — required so the anchor and the overlay stay SIBLINGS
  * (WR-001) rather than one nesting the other, while the hashtag remains
  * independently clickable/focusable on top.
+ *
+ * EDITED TEXT (demo-feedback story 20, DF-31/DF-33). The text shown is read THROUGH
+ * `editedPostsStore`: when a `PostEdited` push (or the viewer's own save) carries newer text for
+ * this post, it replaces the `text` prop, so a card mounted anywhere (feed, thread, profile,
+ * Pinned) updates live without page wiring. The post id comes from the enclosing card
+ * (`useEnclosingPostId`) or the optional `postId` prop. Hashtags in the edited text are parsed
+ * exactly like any other body text.
  */
 
 import type { KeyboardEvent, MouseEvent, ReactNode } from 'react'
 import { parseHashtags } from '../../utils/hashtags'
+import { useEditedPost } from '../../edit/editedPostsStore'
+import { useEnclosingPostId } from '../../edit/useEnclosingPostId'
 import styles from './PostBody.module.css'
 
 const OPEN_KEYS = new Set(['Enter', ' ', 'Spacebar'])
@@ -99,10 +108,18 @@ function renderPostText(
 
 export interface PostBodyProps {
   readonly text: string
+  /** The post this body belongs to; defaults to the enclosing card's id (story 20). */
+  readonly postId?: string
   /** Fires with the normalized tag (no leading '#'); omit and hashtags are inert spans. */
   readonly onHashtagOpen?: (tag: string) => void
 }
 
-export function PostBody({ text, onHashtagOpen }: PostBodyProps) {
-  return <p className={styles.text}>{renderPostText(text, onHashtagOpen)}</p>
+export function PostBody({ text, postId, onHashtagOpen }: PostBodyProps) {
+  const { postId: resolvedId, anchorRef } = useEnclosingPostId(postId)
+  const edited = useEditedPost(resolvedId)
+  return (
+    <p ref={anchorRef} className={styles.text}>
+      {renderPostText(edited.text ?? text, onHashtagOpen)}
+    </p>
+  )
 }

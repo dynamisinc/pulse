@@ -56,6 +56,14 @@
  * would be someone else's state). Like a removal, a pin change is push-only: while polling there
  * is none, and the next read of the Pinned tab carries the truth.
  *
+ * DEMO-FEEDBACK DF-33 (story 20): `PostEdited`. An edit publishes one exercise-group push
+ * `{ postId, text, edited: { count, scenarioTime }, version }` (`version` = `count`, monotonic per
+ * post). It is validated strictly by `toPostEditedEvent` (non-empty string id, string text,
+ * `edited.count` a positive integer, `edited.scenarioTime` a parseable ISO instant, `version`
+ * equal to the count; anything else is dropped), rebuilt key by key, and surfaced through
+ * `subscribeEdited`. The app-wide singleton is wired (bottom of the file) to `editedPostsStore`,
+ * which is version-gated so a stale or replayed frame is dropped. Push-only, like a pin change.
+ *
  * IDENTITY CHANGE (COR-001). Two things happen when the identity on the tab changes (sign-out,
  * every sign-in; `resetClientSession()` runs both):
  *
@@ -101,6 +109,7 @@ import { toParticipantView } from '@/features/social'
 import type { ParticipantPostView, Post, PostInReplyTo, PostMedia } from '@/features/social'
 import { resolveFeed } from './feedService'
 import { removedPosts } from './removedPosts'
+import { editedPostsStore, type PostEditedEvent } from '../edit/editedPostsStore'
 
 /** The hub event carrying a newly-persisted post. Mirrors `SignalRFeedBroadcaster`'s constant. */
 const POST_RECEIVED_EVENT = 'PostReceived'
@@ -110,6 +119,9 @@ const POST_REMOVED_EVENT = 'PostRemoved'
 
 /** The hub event carrying an exercise pin change (DF-7). Mirrors the broadcaster's constant. */
 const POST_PIN_CHANGED_EVENT = 'PostPinChanged'
+
+/** The hub event carrying an edited post (DF-33). Mirrors the broadcaster's constant. */
+const POST_EDITED_EVENT = 'PostEdited'
 
 /** Default polling cadence while degraded (NFR-003 fallback). */
 const DEFAULT_POLL_INTERVAL_MS = 5000
@@ -160,6 +172,15 @@ export interface PinChangeSource {
   ): () => void
 }
 
+/**
+ * The edit surface of the feed transport (demo-feedback story 20). Separate from
+ * {@link RealtimeFeed} for the same reason as {@link PinChangeSource}.
+ */
+export interface PostEditSource {
+  /** Registers a handler for each validated `PostEdited` push. Idempotent unsubscribe. */
+  subscribeEdited(handler: (event: PostEditedEvent) => void): () => void
+}
+
 /** The social feed's real-time consumer surface. */
 export interface RealtimeFeed {
   /** Registers a handler for each newly-observed post. Returns an idempotent unsubscribe. */
@@ -185,7 +206,7 @@ export interface RealtimeFeed {
  * A {@link RealtimeFeed} that can also forget the identity it served. Kept off `RealtimeFeed`
  * itself: consumers and their test fakes never need it, only the session-reset registration.
  */
-export interface SessionResettableFeed extends RealtimeFeed, PinChangeSource {
+export interface SessionResettableFeed extends RealtimeFeed, PinChangeSource, PostEditSource {
   /**
    * The session is ending: forget everything scoped to the identity that is leaving - the
    * dedup set, the polling baseline, the in-flight poll flag - and make any `GET /feed` still on
@@ -298,6 +319,24 @@ function toPostRemovedEvent(payload: unknown): PostRemovedEvent | null {
 }
 
 /**
+ * Validates a raw `PostEdited` payload (DF-33) and rebuilds it field by field; `null` (dropped)
+ * for anything malformed. `version` must equal `edited.count` (the contract), the count must be a
+ * positive integer and the scenario time a parseable ISO instant. Never a spread (XC-002).
+ */
+export function toPostEditedEvent(payload: unknown): PostEditedEvent | null {
+  if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) return null
+  const { postId, text, edited, version } = payload as Record<string, unknown>
+  if (typeof postId !== 'string' || postId.length === 0) return null
+  if (typeof text !== 'string') return null
+  if (typeof edited !== 'object' || edited === null || Array.isArray(edited)) return null
+  const { count, scenarioTime } = edited as Record<string, unknown>
+  if (typeof count !== 'number' || !Number.isInteger(count) || count < 1) return null
+  if (typeof scenarioTime !== 'string' || Number.isNaN(Date.parse(scenarioTime))) return null
+  if (version !== count) return null
+  return { postId, text, edited: { count, scenarioTime }, version: count }
+}
+
+/**
  * Validates a raw `PostPinChanged` payload and rebuilds it as `{ postId, pinnedForAll }`.
  * Returns `null` (dropped) for anything but an object with a non-empty string `postId` and a
  * boolean `pinnedForAll`. A fresh literal from the two known keys - never a spread (XC-002).
@@ -322,6 +361,7 @@ class RealtimeFeedController implements SessionResettableFeed {
   private readonly handlers = new Set<PostStreamHandler>()
   private readonly removedHandlers = new Set<PostRemovedHandler>()
   private readonly pinChangedHandlers = new Set<PostPinChangedHandler>()
+  private readonly editedHandlers = new Set<(event: PostEditedEvent) => void>()
   private readonly seenIds = new Set<string>()
   private currentMode: FeedTransportMode = 'connecting'
   private baselined = false
@@ -337,6 +377,7 @@ class RealtimeFeedController implements SessionResettableFeed {
   private unsubscribePush: (() => void) | null = null
   private unsubscribeRemoved: (() => void) | null = null
   private unsubscribePinChanged: (() => void) | null = null
+  private unsubscribeEdited: (() => void) | null = null
   private unsubscribeState: (() => void) | null = null
 
   constructor(options: CreateRealtimeFeedOptions = {}) {
@@ -380,6 +421,16 @@ class RealtimeFeedController implements SessionResettableFeed {
     }
   }
 
+  subscribeEdited(handler: (event: PostEditedEvent) => void): () => void {
+    this.editedHandlers.add(handler)
+    let active = true
+    return () => {
+      if (!active) return
+      active = false
+      this.editedHandlers.delete(handler)
+    }
+  }
+
   async start(): Promise<void> {
     if (this.started) return
     this.started = true
@@ -393,6 +444,9 @@ class RealtimeFeedController implements SessionResettableFeed {
     })
     this.unsubscribePinChanged = this.connection.subscribe(POST_PIN_CHANGED_EVENT, payload => {
       this.handlePinChangedPush(payload)
+    })
+    this.unsubscribeEdited = this.connection.subscribe(POST_EDITED_EVENT, payload => {
+      this.handleEditedPush(payload)
     })
     this.unsubscribeState = this.connection.onStateChange((state, reason) => {
       this.handleStateChange(state, reason)
@@ -429,6 +483,10 @@ class RealtimeFeedController implements SessionResettableFeed {
     if (this.unsubscribePinChanged !== null) {
       this.unsubscribePinChanged()
       this.unsubscribePinChanged = null
+    }
+    if (this.unsubscribeEdited !== null) {
+      this.unsubscribeEdited()
+      this.unsubscribeEdited = null
     }
     if (this.unsubscribeState !== null) {
       this.unsubscribeState()
@@ -615,6 +673,18 @@ class RealtimeFeedController implements SessionResettableFeed {
     }
   }
 
+  private handleEditedPush(payload: unknown): void {
+    const event = toPostEditedEvent(payload)
+    if (event === null) return
+    for (const handler of [...this.editedHandlers]) {
+      try {
+        handler(event)
+      } catch {
+        // Isolated.
+      }
+    }
+  }
+
   private handlePoll(posts: readonly Post[]): void {
     if (!this.baselined) {
       // First observation after degrading: adopt the current feed as the baseline
@@ -649,7 +719,7 @@ export function createRealtimeFeed(
  * Lazy: no side effects until started.
  */
 const appWideFeed = createRealtimeFeed()
-export const realtimeFeed: RealtimeFeed & PinChangeSource = appWideFeed
+export const realtimeFeed: RealtimeFeed & PinChangeSource & PostEditSource = appWideFeed
 
 // The app-wide feed is identity-scoped state living for the life of the TAB: forget it whenever the
 // session ends (sign-out, every sign-in). A registration, not an import from `core/auth` into here
@@ -661,3 +731,9 @@ registerSessionReset(() => appWideFeed.resetForSession(), import.meta.hot)
 // here (not inside the controller) so an isolated `createRealtimeFeed()` in a test never writes to
 // global state. It only registers a handler; it touches neither the network nor the connection.
 realtimeFeed.subscribeRemoved(({ postId }) => removedPosts.add(postId))
+
+// Every valid `PostEdited` on the app-wide transport lands in the version-gated edited-posts store
+// (story 20): the one place `PostBody` / `PostHeader` / the Live world row learn a post's new text.
+realtimeFeed.subscribeEdited(event => {
+  editedPostsStore.apply(event)
+})

@@ -28,6 +28,10 @@
  *      same tab. Both modules are leaves (no imports beyond types) so this adds
  *      nothing to `core/auth`'s dependency graph.
  *
+ *   3b. FORGET THE EDITED-POST OVERLAY (demo-feedback story 20): `editedPostsStore` (a leaf, like
+ *      `removedPosts`) holds other authors' pushed edits and the viewer's own for the TAB, so it is
+ *      reset here and its generation bumped (a late save response is then ignored).
+ *
  *   4. FORGET THE SESSION'S TAKEN-DOWN POST IDS (demo-polish C5): `removedPosts` is the
  *      same kind of tab-lived module singleton (opaque ids that stop a post being shown),
  *      reset the same way so a sign-in on the same tab never inherits the last session's.
@@ -61,6 +65,7 @@
 import { queryClient } from '../services/queryClient'
 import { ownPostStore } from '@/features/social/services/ownPostStore'
 import { removedPosts } from '@/features/social/services/removedPosts'
+import { editedPostsStore } from '@/features/social/edit/editedPostsStore'
 import { resetReplyIntent } from '@/features/social/services/replyIntent'
 import { logout } from './logout'
 import { runSessionResets } from './sessionReset'
@@ -87,6 +92,7 @@ export function resetClientSession(): void {
   queryClient.clear()
   ownPostStore.reset()
   removedPosts.reset()
+  editedPostsStore.reset()
   resetReplyIntent()
   runSessionResets()
 }

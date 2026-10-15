@@ -46,6 +46,17 @@
  * `usePin` its `post.viewer` object as the server snapshot, so a FRESHER read (a new
  * object) overrides an older confirmed pin (see `usePin`).
  *
+ * EDIT (demo-feedback story 20, DF-29). On the viewer's OWN post, while
+ * `post.viewer.editableForSeconds` is above 0, the row shows an Edit button (FontAwesome `faPen`,
+ * accessible name and tooltip "Edit post"; a native `title` tooltip - the shared participant
+ * tooltip component of story 13 is not on this branch yet). `useEditWindow` counts the duration
+ * down from when the post was read and hides the button at 0 without a reload; no clock is ever
+ * rendered (COR-053). It opens `EditPostDialog`
+ * (text-only); a save reports the fresh window back here, and a refused one (window closed / edit
+ * limit) closes it. The row also SEEDS `editedPostsStore` with the card's own `post.edited`, so the
+ * header's "Edited" button works for any card without `PostCard` wiring. Like Pin it needs a
+ * writable session, so a read-only card never offers it.
+ *
  * HIDDEN, NOT DISABLED (D1-011 / F3). There is NO Quote trigger, NO quote panel
  * (`QuoteComposer` is no longer mounted) and NO Share action — they are absent
  * from the DOM, not greyed out. (`useAmplify().doQuote` and `amplify.quotePost`
@@ -80,13 +91,14 @@
  * No COBRA, no MUI.
  */
 
-import { useEffect, useRef } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import {
   faComment,
   faRetweet,
   faHeart,
   faThumbtack,
+  faPen,
   faCircleExclamation,
 } from '@fortawesome/free-solid-svg-icons'
 import type { IconDefinition } from '@fortawesome/fontawesome-svg-core'
@@ -96,6 +108,9 @@ import { useTransientMessage } from '../../hooks/useTransientMessage'
 import { usePin } from '../../pinned/usePin'
 import { viewerEngagement } from '../../pinned/pinEvents'
 import { formatMagnitude, spokenMagnitude } from '../../services/audience'
+import { EditPostDialog } from '../../edit/EditPostDialog'
+import { editedPostsStore, useEditedPost } from '../../edit/editedPostsStore'
+import { useEditWindow } from '../../edit/useEditWindow'
 import type { PostCardVariant, PostView } from './types'
 import styles from './PostActions.module.css'
 
@@ -166,6 +181,17 @@ function PostActionsRow({ post, variant, onReply }: PostActionsProps) {
     notice,
   })
 
+  // Edit (story 20). The card's own `edited` summary seeds the shared overlay store (a layout
+  // effect, so the header shows "Edited" in the same paint); a live push or save overrides it.
+  useLayoutEffect(() => {
+    editedPostsStore.noteBase(post.id, post.edited)
+  }, [post.id, post.edited])
+  const [windowSeconds, setWindowSeconds] = useState<number | undefined>(undefined)
+  // The Edit button that opened the dialog (focus returns to it); `null` = dialog closed.
+  const [editOpener, setEditOpener] = useState<HTMLElement | null>(null)
+  const editedView = useEditedPost(post.id)
+  const editOffered = useEditWindow(windowSeconds ?? post.viewer?.editableForSeconds)
+
   // A like SETTLED (pending true -> false): tell a mounted Pinned tab, which lists liked
   // posts too. The like hook is shared with every surface, so the row observes it rather
   // than threading a callback through it. A rolled-back like re-reads harmlessly.
@@ -187,6 +213,7 @@ function PostActionsRow({ post, variant, onReply }: PostActionsProps) {
   const canReply = !isReadOnly && onReply !== undefined
   // Gated exactly like Like (story 07). No count, so when it cannot act it is absent.
   const canPin = !isReadOnly && pin.canPin
+  const canEdit = !isReadOnly && !reaction.isReadOnly && editOffered
 
   // Canonical reply · repost · like order (R-002). A toggle shows the hook's own
   // optimistic total only while it is a live control; inert counts follow the post.
@@ -288,7 +315,31 @@ function PostActionsRow({ post, variant, onReply }: PostActionsProps) {
             <FontAwesomeIcon icon={faThumbtack} aria-hidden="true" className={styles.actionIcon} />
           </button>
         )}
+        {canEdit && (
+          <button
+            type="button"
+            className={styles.actionButton}
+            data-action="edit"
+            aria-label="Edit post"
+            aria-haspopup="dialog"
+            title="Edit post"
+            onClick={event => setEditOpener(event.currentTarget)}
+          >
+            <FontAwesomeIcon icon={faPen} aria-hidden="true" className={styles.actionIcon} />
+          </button>
+        )}
       </div>
+      {editOpener !== null && (
+        <EditPostDialog
+          postId={post.id}
+          initialText={editedView.text ?? post.text}
+          media={post.media}
+          returnFocusTo={editOpener}
+          onClose={() => setEditOpener(null)}
+          onSaved={result => setWindowSeconds(result.editableForSeconds)}
+          onRejected={() => setWindowSeconds(0)}
+        />
+      )}
       {/* Always mounted while a like / repost / pin control exists (only those can fail), so
           the region exists BEFORE its text changes — a live region injected with its
           content is announced unreliably. Empty when there is nothing to say. */}
