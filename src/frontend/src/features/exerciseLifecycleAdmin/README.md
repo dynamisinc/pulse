@@ -19,11 +19,18 @@ exercise. These are `/api/org/*` and span the caller's **customer tenant**:
 | `POST /api/org/exercises` | `planner`, `orgAdmin` or `controller` | `createOrgExercise()` |
 | `GET /api/org/exercises` | `planner`, `orgAdmin` or `controller` | `getOrgExercises()` |
 | `GET /api/org/staff-assignments` | `orgAdmin` **alone** | **not consumed yet** — see below |
+| `PATCH /api/org/exercises/{exerciseId}` | `planner`, `orgAdmin` or `controller` | `renameOrgExercise()` (story 22) |
+| `POST /api/org/exercises/{exerciseId}/archive` | `planner`, `orgAdmin` or `controller` | `archiveOrgExercise()` (story 22) |
 
-**No org route takes a route or query parameter, and no body carries an organization id.** That is
-deliberate: the tenant is always the caller's own, resolved server-side, so there is no IDOR surface
-on the org axis at all. Do not add `/api/org/exercises/{id}`; the backend asserts its absence
-structurally.
+**No org route takes an organization id, in a route, query or body.** The tenant is always the
+caller's own, resolved server-side. Until demo-feedback story 22 no org route took any parameter at
+all; story 22's row actions take an **exercise** id, and only on an explicit server allow-list
+(`ExerciseLifecycleAdminEndpoints.ExerciseIdRoutes`). Every allow-listed route authorizes the id
+against the caller's own tenant first and answers another customer's exercise with a bare `404`,
+indistinguishable from an id that does not exist (never `403`). The backend pins the list
+(`CompositionRootWiringTests.TheOrgTierRoutes_TakeOnlyAllowListedExerciseIds`) and drives every entry
+with a foreign-tenant id (`OrgExerciseByIdIsolationTests`). Do not add another by-id org call without
+both.
 
 ## Layout
 
@@ -31,10 +38,13 @@ structurally.
 ExerciseManagementRoute.tsx   the /staff/exercises route element (StaffShellFrame + page)
 pages/ExerciseManagementPage  work-area content: heading, create form, list; the 4 read states
 components/CreateExerciseForm self-contained; owns the 409 recovery
-components/OrgExerciseTable   a real <table>: name / status / hostname / created
+components/OrgExerciseTable   a real <table>: name / status / hostname / created / actions; archived last
+components/ExerciseRowActions Rename + Archive per row (story 22); "End the exercise first" when not completed
+components/RenameExerciseDialog / ArchiveExerciseDialog   the two row-action dialogs (COBRA)
 components/ExerciseStatusBadge icon + word + colour — never colour alone (NFR-001)
 hooks/useOrgExercises         React Query read;  key ['org','exercises']
 hooks/useCreateExercise       React Query write; invalidates that key on success
+hooks/useExerciseRowActions   rename / archive mutations; invalidate the same key
 services/orgExercisesService  the ONE mock/live flip point + wire validation
 types.ts                      OrgExercise / CreateExerciseInput / CreateExerciseResult
 ```
@@ -59,9 +69,10 @@ types.ts                      OrgExercise / CreateExerciseInput / CreateExercise
 
 ## Not built here (deliberate)
 
-- **Row actions** (open settings / duplicate / readiness dashboard) — story 02's row-action AC is
-  struck through as not built; every destination is a later story and the org tier exposes no by-id
-  route to hang them off. `exerciseId` is on every row already.
+- **Row actions beyond rename and archive** (open settings / readiness dashboard / duplicate). Story
+  22 added Rename and Archive (DF-35: archive is `completed → archived` only; other states show the
+  button disabled with the visible text "End the exercise first"; archived rows sort last and read
+  "Archived"). Duplicate (story 22's Could) is not built yet.
 - **The org-scoped staff-assignment view** (`GET /api/org/staff-assignments`, story 03 AC2's second
   half). The endpoint exists and is the only one gated on `orgAdmin` alone; no surface consumes it
   yet. **Flagged, not forgotten** — it is what would give `orgAdmin` a second destination and light

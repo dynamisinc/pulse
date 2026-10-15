@@ -15,13 +15,11 @@
  * hand-roll their structure the same way (`FieldGrid`, the planner section
  * nav), so this stays plain elements inside the COBRA theme.
  *
- * ## What this component does NOT have: row actions
- * Story 02's row-action AC ("navigate to that exercise's settings, duplicate
- * it, reach its readiness dashboard") is struck through in the story as not
- * built — every one of those destinations is a later story, and the org tier
- * deliberately exposes no by-id route to hang them off. A link to a page that
- * does not exist is worse than no link, so there are none here yet. The
- * `exerciseId` the AC says those links need is carried on every row already.
+ * ## Row actions (demo-feedback story 22, DF-35)
+ * A fifth column, "Actions", carries Rename and Archive per row
+ * (`ExerciseRowActions`). ARCHIVED rows sort LAST (a stable partition: the
+ * server's name order is kept within each group), and their status cell reads
+ * "Archived" as an icon plus the word, never colour alone.
  *
  * ## Time (COR-053 does not bind here — and this is why)
  * `createdAt` is SERVER WALL-CLOCK administrative metadata on a STAFF surface:
@@ -37,11 +35,13 @@
 
 import { Box, Stack, Typography } from '@mui/material'
 import { format, parseISO } from 'date-fns'
+import { ExerciseRowActions } from './ExerciseRowActions'
+import { sortArchivedLast } from './exerciseRowStatus'
 import { ExerciseStatusBadge } from './ExerciseStatusBadge'
 import type { OrgExercise } from '../types'
 
 export interface OrgExerciseTableProps {
-  /** The organization's exercises, in server order. */
+  /** The organization's exercises, in server order (archived ones are moved last here). */
   readonly exercises: readonly OrgExercise[]
 }
 
@@ -89,6 +89,8 @@ function CreatedCell({ createdAt }: { createdAt: string | undefined }) {
 
 /** The organization's exercises as a real, labelled table. See the module header. */
 export function OrgExerciseTable({ exercises }: OrgExerciseTableProps) {
+  const rows = sortArchivedLast(exercises)
+
   return (
     <Box
       sx={{
@@ -102,7 +104,7 @@ export function OrgExerciseTable({ exercises }: OrgExerciseTableProps) {
       <Box
         component="table"
         data-testid="org-exercise-table"
-        sx={{ width: '100%', borderCollapse: 'collapse', minWidth: 640 }}
+        sx={{ width: '100%', borderCollapse: 'collapse', minWidth: 820 }}
       >
         <Box
           component="caption"
@@ -129,10 +131,13 @@ export function OrgExerciseTable({ exercises }: OrgExerciseTableProps) {
             <Box component="th" scope="col" sx={{ ...CELL_SX, fontSize: 12, fontWeight: 700 }}>
               Created
             </Box>
+            <Box component="th" scope="col" sx={{ ...CELL_SX, fontSize: 12, fontWeight: 700 }}>
+              Actions
+            </Box>
           </Box>
         </Box>
         <Box component="tbody">
-          {exercises.map(exercise => (
+          {rows.map(exercise => (
             <Box
               component="tr"
               key={exercise.exerciseId}
@@ -173,6 +178,9 @@ export function OrgExerciseTable({ exercises }: OrgExerciseTableProps) {
               </Box>
               <Box component="td" sx={CELL_SX}>
                 <CreatedCell createdAt={exercise.createdAt} />
+              </Box>
+              <Box component="td" sx={CELL_SX}>
+                <ExerciseRowActions exercise={exercise} />
               </Box>
             </Box>
           ))}

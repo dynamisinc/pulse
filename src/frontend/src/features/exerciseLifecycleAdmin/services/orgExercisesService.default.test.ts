@@ -19,9 +19,13 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import {
   OrgExerciseError,
+  archiveOrgExercise,
   createOrgExercise,
   getOrgExercises,
+  isExerciseNotFoundError,
   isHostnameTakenError,
+  isNotCompletedError,
+  renameOrgExercise,
   resetOrgExerciseMocks,
 } from './orgExercisesService'
 
@@ -37,6 +41,7 @@ describe('getOrgExercises (default mock adapter)', () => {
       'ex-mock-0001',
       'ex-mock-0002',
       'ex-mock-0003',
+      'ex-mock-0004',
     ])
   })
 
@@ -127,5 +132,45 @@ describe('createOrgExercise (default mock adapter)', () => {
     const result = await createOrgExercise({ name: '<b>Bold</b> Drill' })
 
     expect(result.exercise.name).toBe('Bold Drill')
+  })
+})
+
+describe('row actions (default mock adapter, story 22)', () => {
+  it('RENAME THEN LIST: the new name is really in the next read', async () => {
+    const renamed = await renameOrgExercise('ex-mock-0002', '  <b>Ridgeline</b> Wildfire FSE  ')
+
+    expect(renamed.name).toBe('Ridgeline Wildfire FSE')
+    const row = (await getOrgExercises()).find(e => e.exerciseId === 'ex-mock-0002')
+    expect(row?.name).toBe('Ridgeline Wildfire FSE')
+  })
+
+  it('400s a blank or over-long name and renames nothing', async () => {
+    for (const name of ['   ', 'x'.repeat(201)]) {
+      const caught = await renameOrgExercise('ex-mock-0002', name).catch((error: unknown) => error)
+      expect((caught as OrgExerciseError).status).toBe(400)
+    }
+    const row = (await getOrgExercises()).find(e => e.exerciseId === 'ex-mock-0002')
+    expect(row?.name).toBe('Ridgeline Wildfire TTX')
+  })
+
+  it('404s an id the organization does not own', async () => {
+    const caught = await renameOrgExercise('ex-elsewhere', 'X').catch((error: unknown) => error)
+    expect(isExerciseNotFoundError(caught)).toBe(true)
+  })
+
+  it('ARCHIVE THEN LIST: a completed exercise is archived in the next read', async () => {
+    const archived = await archiveOrgExercise('ex-mock-0004')
+
+    expect(archived.status).toBe('archived')
+    const row = (await getOrgExercises()).find(e => e.exerciseId === 'ex-mock-0004')
+    expect(row?.status).toBe('archived')
+  })
+
+  it('409s not-completed for any other state, and changes nothing', async () => {
+    const caught = await archiveOrgExercise('ex-mock-0001').catch((error: unknown) => error)
+
+    expect(isNotCompletedError(caught)).toBe(true)
+    const row = (await getOrgExercises()).find(e => e.exerciseId === 'ex-mock-0001')
+    expect(row?.status).toBe('live')
   })
 })
