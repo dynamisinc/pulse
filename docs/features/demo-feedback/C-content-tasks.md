@@ -20,7 +20,7 @@ No product code. Done on the #491 branch so the pack, its media and its files me
 ## C2 — The Kestrel run sheet as a Cadence MSEL (DF-16)
 
 - `docs/demo/pack/kestrel-msel.xlsx` in Cadence's exact column layout (`implementation.md` → MSEL columns), sheet `MSEL`.
-- **Amended 10/15 (DF-16):** 8 of the 10 single posts (not rs03 or rs10, which other items reply to); each carried item is marked `msel` in pack.json. Fill `Pulse Media Alt` and `Pulse Likes` / `Pulse Reposts` / `Pulse Replies` from the pack (DF-17, story 14).
+- **Amended 10/15 (DF-16):** 8 of the 10 single posts (not rs03 or rs10, which other items reply to); each carried item is marked `msel` in pack.json. Fill `Pulse Media Alt` and `Pulse Likes` / `Pulse Reposts` / `Pulse Replies` from the pack (DF-21, story 16).
 - One social-media row per **single-post** run-sheet item, `Delivery Method = Social Media`, `From / Source` = the
   persona handle, `Description` = the post text, a plausible `Scenario Day/Time`, `Notes`, `Responsible Controller`.
 - About 25 non-social rows (phone call, email, radio, in-person, EAS) around them, so the skip is visible on stage,

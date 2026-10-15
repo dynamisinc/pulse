@@ -26,9 +26,9 @@
 | DF-14 | **Read-only console is UI only.** Evaluators are admitted to `/staff/console` (registry seam) and every write control is **absent, not disabled**, via one `useCanControl()` hook (`session.role === 'controller'`). Server-side enforcement stays on #61/#377. The backend already lets evaluators read every console endpoint (no 403 on `GET /api/injects`, `/api/steering/*`, `/api/engine/*`, `/api/feed`) | Tom 10/14 + backend map |
 | DF-15 | **Emoji picker**: a library is allowed only if it works with React 19, renders **native** emoji, and makes **no runtime network call** (exercise networks are locked down; NFR / #52). Self-host any data file under `public/`. Verify the current version and advisories before adding (candidates checked 10/14: `frimousse` 0.4.0 headless, `emoji-picker-react` 5.0.0; no advisories) | orchestrator |
 | DF-16 | **The on-stage import uses the Kestrel run sheet rendered as a Cadence MSEL** (C2), padded with non-social rows so the skip is visible. **Amended 10/15:** the MSEL carries 8 of the 10 single posts; rs03 (the impersonator post the rs04 pile-on replies to) and rs10 (the utility's answer inside that thread) stay seeded, because an MSEL row has no reply-to. Each MSEL-carried pack item is marked `msel: "<Inject #>"`, and the seed's demo mode `-RunSheet exceptMsel` loads everything except those (was `-RunSheet bursts`) | Tom 10/14, 10/15 |
-| DF-17 | **The importer reads `Pulse Media Alt`, `Pulse Likes`, `Pulse Reposts`, `Pulse Replies`** (Pulse extension columns, story 14), so an imported post keeps its alt text (NFR-001) and engagement baseline instead of the file name and zero | Tom 10/15 |
-| DF-18 | **An imported item is placed by planned minute among the pending items** (story 14), so "Fire next" fires imported and seeded items in time order; fired items never move | Tom 10/15 |
-| DF-19 | **`Clear-DemoContent.ps1` archives the run-sheet items an MSEL import created** (`ExternalRef` set), any status, fired included, in the same transaction as the post archive and restorable from its manifest, so a rehearsal's fired imports never block the show's import (DF-10 leaves fired items alone and the API cannot delete them). Deliberately wider than the API's delete (`WhyNotDeletable`) and writes no `inject.deleted` telemetry: a UAT ops action. Seeded and console items are never touched. An item mid-publish (a claimed, unrecorded post) is left alone | Tom 10/15 |
+| DF-21 | **The importer reads `Pulse Media Alt`, `Pulse Likes`, `Pulse Reposts`, `Pulse Replies`** (Pulse extension columns, story 16), so an imported post keeps its alt text (NFR-001) and engagement baseline instead of the file name and zero | Tom 10/15 |
+| DF-22 | **An imported item is placed by planned minute among the pending items** (story 16), so "Fire next" fires imported and seeded items in time order; fired items never move | Tom 10/15 |
+| DF-23 | **`Clear-DemoContent.ps1` archives the run-sheet items an MSEL import created** (`ExternalRef` set), any status, fired included, in the same transaction as the post archive and restorable from its manifest, so a rehearsal's fired imports never block the show's import (DF-10 leaves fired items alone and the API cannot delete them). Deliberately wider than the API's delete (`WhyNotDeletable`) and writes no `inject.deleted` telemetry: a UAT ops action. Seeded and console items are never touched. An item mid-publish (a claimed, unrecorded post) is left alone | Tom 10/15 |
 
 ## Where the brief met the code (10/14 map)
 
@@ -142,10 +142,10 @@ Cadence's export (`MselWorksheetBuilder` / `ExcelFormattingHelper.MselColumns`) 
 | `Notes` | no | item notes (≤ 500, truncated with a warning) |
 | `Responsible Controller` | no | assignee by display name from the assignee list, else unassigned with a warning |
 | `Pulse Media` (Pulse extension) | no | comma-separated media-library file names (≤ 4 images or 1 video); an unknown name fails the row |
-| `Pulse Media Alt` (Pulse extension, 14) | no | alt text per `Pulse Media` file, `\|`-separated, same order; blank entry ⇒ file-name stem; more entries than files fails the row, fewer warns; header absent ⇒ stems, as before 14 |
-| `Pulse Likes`, `Pulse Reposts`, `Pulse Replies` (Pulse extension, 14) | no | `engagementBaseline` like / repost / reply: whole number 0…1,000,000 (an integral numeric cell or invariant text), else the row fails; none of the three headers ⇒ a re-import keeps the item's baseline |
+| `Pulse Media Alt` (Pulse extension, 16) | no | alt text per `Pulse Media` file, `\|`-separated, same order; blank entry ⇒ file-name stem; more entries than files fails the row, fewer warns; header absent ⇒ stems, as before 16 |
+| `Pulse Likes`, `Pulse Reposts`, `Pulse Replies` (Pulse extension, 16) | no | `engagementBaseline` like / repost / reply: whole number 0…1,000,000 (an integral numeric cell or invariant text), else the row fails; none of the three headers ⇒ a re-import keeps the item's baseline |
 
-Order (DF-18, 14): a created item goes immediately before the first pending item whose `PlannedMinute` is greater than its own (ties after; no minute or no later pending item ⇒ end); non-pending items never move.
+Order (DF-22, 16): a created item goes immediately before the first pending item whose `PlannedMinute` is greater than its own (ties after; no minute or no later pending item ⇒ end); non-pending items never move.
 
 Limits: file ≤ 2 MiB, ≤ 2,000 data rows, `.xlsx` (magic bytes `PK`) or `.csv` (UTF-8, BOM tolerated, quoted
 multi-line cells). `?dryRun` returns the same report and writes nothing.
@@ -201,9 +201,9 @@ display name; blank for engine and white noise) · `Inject #` (the item's `Exter
 | 11 Read-only console | frontend | Must | new `controller/access/**`; gating lines in `ControllerConsole.tsx`, `PersonaComposer.tsx`, `runSheet/{RunSheetPanel,RunSheetRow,InjectItemEditor}.tsx`, `liveWorld/{TakedownAction,PinForAllAction}.tsx`, `steering/{PausePill,EscalationDial}.tsx`, `EngineControlBar`, `ReviewQueue.tsx`, `noise/**`, a "View only" chip | 08, 09, 10, 12 merged | 3 | M |
 | 13 Participant polish | frontend | Should | tooltips across `social/**` icon buttons; `SocialChannel.module.css`, `SocialChannel.layout.test.tsx`, `layout/frameMetrics.ts` (#495) | 06, 07 merged | 3 | S |
 | 12b Emoji in persona composer | frontend | Should | `controller/components/PersonaComposer.tsx` (one button) | 12 merged; before 11 | 3 | S |
-| 14 Import alt / engagement / order | backend | Must | `Features/Injects/Import/**` (+ tests); no migration, no `Program.cs` | 03 | 3 | S |
+| 16 Import alt / engagement / order | backend | Must | `Features/Injects/Import/**`; `Features/Injects/InjectQueueService.cs` (shared reorder helpers extracted, `WriteQueueOrder` / `ReadQueueTokenAsync` / `BumpQueue`, behaviour unchanged) (+ tests); no migration, no `Program.cs` | 03 | 3 | S |
 | S1 Seed script | script | Must | `scripts/uat/Seed-DemoContent.ps1` (+ `.Tests.ps1`, `README-seed.md`, `test-fixtures/demo-pack/**`), `docs/demo/pack/schema/pack.schema.json` | 04, 05 deployed | 3 | M |
-| C2–C3 Content (C1 dropped 10/15) | content | Must | `docs/demo/pack/**` except `schema/` (on the #491 branch) | none (C2 columns: 14) | any | — |
+| C2–C3 Content (C1 dropped 10/15) | content | Must | `docs/demo/pack/**` except `schema/` (on the #491 branch) | none (C2 columns: 16) | any | — |
 
 **Why 03 depends on 01:** `ExternalRef` is a column. **Why 11 is last:** it adds one gating line to files that 08, 09,
 10 and 12b own, so it runs after they merge, alone. **Why 13 waits:** its tooltips touch `PostActions.tsx` (07) and

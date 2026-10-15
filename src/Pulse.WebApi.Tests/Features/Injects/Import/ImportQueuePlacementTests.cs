@@ -10,7 +10,7 @@ using Pulse.WebApi.Features.Injects.Import;
 using Xunit;
 
 /// <summary>
-/// demo-feedback/14 (DF-18 order) — <see cref="ImportQueuePlacement"/>, pure: a created item goes immediately before the
+/// demo-feedback/16 (DF-22 order) — <see cref="ImportQueuePlacement"/>, pure: a created item goes immediately before the
 /// first PENDING item whose planned minute is greater than its own; ties after; no minute or no later pending item ⇒ the
 /// end; non-pending items and existing pending items never change their relative order.
 /// </summary>

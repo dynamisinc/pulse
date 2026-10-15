@@ -7,7 +7,7 @@ using Pulse.WebApi.Data.Entities;
 /// <summary>
 /// Turns an <see cref="ImportCandidate"/> into the ordinary <see cref="InjectItemWriteRequest"/> a console create or edit
 /// sends, so an imported row is judged by <see cref="InjectItemValidator"/> exactly as typed input is, and says what an
-/// update would change (DF-10). The alt text and engagement baseline of story 14 (DF-17) travel in the request's own
+/// update would change (DF-10). The alt text and engagement baseline of story 16 (DF-21) travel in the request's own
 /// <c>media[].alt</c> and <c>engagementBaseline</c>, so an imported item and a seeded item with the same values are
 /// stored identically.
 /// </summary>
@@ -26,7 +26,7 @@ public static class ImportRequests
     /// <summary>
     /// The edit body for a candidate whose item exists: the MSEL-owned fields from the file (alt text included); the
     /// child's identity and its reply target kept as they are (the MSEL has no column for them); the engagement baseline
-    /// from the file when it has any engagement column (story 14: then a blank cell is "not set"), else kept as it is (a
+    /// from the file when it has any engagement column (story 16: then a blank cell is "not set"), else kept as it is (a
     /// plain Cadence export must not wipe console-set numbers); and, unless the file's <c>Responsible Controller</c>
     /// matched someone, the item's current assignee kept too (blank or unmatched alike).
     /// </summary>
@@ -116,7 +116,7 @@ public static class ImportRequests
             changes.Add("alt text");
         }
 
-        // Story 14: "not set" IS zero (the participant count is baseline + real), so null and 0 are the same value here
+        // Story 16: "not set" IS zero (the participant count is baseline + real), so null and 0 are the same value here
         // and a console-set 0 against a blank cell is not a change.
         if ((child.BaselineLike ?? 0) != (post.BaselineLike ?? 0)
             || (child.BaselineRepost ?? 0) != (post.BaselineRepost ?? 0)
@@ -139,7 +139,7 @@ public static class ImportRequests
                 Reply = candidate.BaselineReply,
             };
 
-    /// <summary>The child's own baseline, echoed unchanged (the pre-story-14 update body).</summary>
+    /// <summary>The child's own baseline, echoed unchanged (the pre-story-16 update body).</summary>
     private static InjectEngagementBaselineWriteRequest? KeptBaseline(InjectItemPost? child) =>
         child is null || (child.BaselineLike is null && child.BaselineRepost is null && child.BaselineReply is null)
             ? null

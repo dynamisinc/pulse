@@ -12,7 +12,7 @@ using Pulse.WebApi.Features.Injects.Import;
 using Xunit;
 
 /// <summary>
-/// demo-feedback/14 (DF-17) — the Pulse extension columns <c>Pulse Media Alt</c>, <c>Pulse Likes</c>,
+/// demo-feedback/16 (DF-21) — the Pulse extension columns <c>Pulse Media Alt</c>, <c>Pulse Likes</c>,
 /// <c>Pulse Reposts</c> and <c>Pulse Replies</c> in <see cref="MselImportPlanner"/>, pure, over tables read from real
 /// Cadence-layout CSV and <c>.xlsx</c> files (<see cref="MselFixture"/>).
 /// </summary>

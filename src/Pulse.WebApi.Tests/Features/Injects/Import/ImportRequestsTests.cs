@@ -10,7 +10,7 @@ using Pulse.WebApi.Features.Injects.Import;
 using Xunit;
 
 /// <summary>
-/// demo-feedback/14 (DF-17 write path, DF-10 re-import) — <see cref="ImportRequests"/>, pure: alt text and the engagement
+/// demo-feedback/16 (DF-21 write path, DF-10 re-import) — <see cref="ImportRequests"/>, pure: alt text and the engagement
 /// baseline travel in the ordinary write body, so <see cref="InjectItemValidator.Parse"/> sees an imported row exactly as
 /// it sees a seeded (console) write; and the change comparison covers both.
 /// </summary>

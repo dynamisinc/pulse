@@ -146,7 +146,7 @@ public sealed class InjectImportEndpointTests
         await using var host = await StartAsync();
         var seeded = await SeedKestrelAsync(host);
 
-        // Planned before every imported row (minute 0; they are 5, 20, 1470), so DF-18 (story 14: created items go by
+        // Planned before every imported row (minute 0; they are 5, 20, 1470), so DF-22 (story 16: created items go by
         // planned minute among the pending items) still places all of them after it, in file order.
         var existing = await host.CreateOkAsync(new
         {
@@ -323,7 +323,7 @@ public sealed class InjectImportEndpointTests
         report.Rows[1].Status.Should().Be("created", "the filtered unique index frees a deleted item's ExternalRef");
         (await host.GetQueueAsync()).Items.Select(item => item.Title).Should().Equal(
             ["Boil water notice", "Resident photo", "Day two"],
-            "DF-18 (story 14): the re-created minute-5 item goes before the first pending item planned later (minute 20)");
+            "DF-22 (story 16): the re-created minute-5 item goes before the first pending item planned later (minute 20)");
     }
 
     [RequiresDockerFact]

@@ -10,7 +10,7 @@ using ClosedXML.Excel;
 
 /// <summary>
 /// Builds a real Cadence-layout MSEL file the way Cadence's <c>MselWorksheetBuilder</c> writes it: the 16 MSEL columns
-/// in order (+ optional conduct columns, the Pulse <c>Pulse Media</c> extension, and story 14's <c>Pulse Media Alt</c>,
+/// in order (+ optional conduct columns, the Pulse <c>Pulse Media</c> extension, and story 16's <c>Pulse Media Alt</c>,
 /// <c>Pulse Likes</c>, <c>Pulse Reposts</c>, <c>Pulse Replies</c>), sheet <c>MSEL</c>, <c>Inject #</c> as a NUMBER cell,
 /// times as <c>HH:mm</c> text; and the same rows as CSV with Cadence's own field escaping. In the <c>.xlsx</c> an
 /// engagement value that is a number is written as a NUMBER cell (as Excel stores a typed <c>962</c>: the double

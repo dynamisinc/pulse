@@ -19,8 +19,8 @@ using Pulse.WebApi.Tests.Data;
 using Xunit;
 
 /// <summary>
-/// demo-feedback/14 on real SQL — the MSEL import's alt text and engagement columns (DF-17) through the queue's write
-/// path (create / update / unchanged, dry run), and the planned-minute placement of created items (DF-18): interleaving
+/// demo-feedback/16 on real SQL — the MSEL import's alt text and engagement columns (DF-21) through the queue's write
+/// path (create / update / unchanged, dry run), and the planned-minute placement of created items (DF-22): interleaving
 /// among pending items, ties, unplanned rows, non-pending items fixed in place, several rows with one minute, re-import
 /// leaving positions alone, ONE queue-token bump and no item version bumped for a shift, and exercise isolation. The
 /// service is driven directly (a request scope of the host wired as <c>Program.cs</c> wires it); one end-to-end test goes
@@ -40,7 +40,7 @@ public sealed class InjectImportAltEngagementOrderTests
         _fixture = fixture;
     }
 
-    // ---- DF-17: alt text and engagement through the write path ----
+    // ---- DF-21: alt text and engagement through the write path ----
 
     [RequiresDockerFact]
     public async Task Create_StoresTheFilesAltTextAndEngagementBaseline()
@@ -191,7 +191,7 @@ public sealed class InjectImportAltEngagementOrderTests
         await using var db = host.Db(seed.ExerciseId);
         var pio = await ChildAsync(db, "101");
         (pio.BaselineLike, pio.BaselineRepost, pio.BaselineReply).Should().Be(
-            (500, (int?)null, 3), "an update from a file without engagement columns keeps the baseline, as before story 14");
+            (500, (int?)null, 3), "an update from a file without engagement columns keeps the baseline, as before story 16");
     }
 
     [RequiresDockerFact]
@@ -219,7 +219,7 @@ public sealed class InjectImportAltEngagementOrderTests
     }
 
     [RequiresDockerFact]
-    public async Task ReImport_WithoutThePulseMediaAltHeader_KeepsThePreStory14Rule_TheFileNameStemWins()
+    public async Task ReImport_WithoutThePulseMediaAltHeader_KeepsThePreStory16Rule_TheFileNameStemWins()
     {
         await using var host = await StartAsync();
         var seed = await SeedAsync(host);
@@ -235,8 +235,8 @@ public sealed class InjectImportAltEngagementOrderTests
         await ConsoleEditAsync(host, seed, "101", alts: ["Edited in the console", "Edited map"]);
         var again = await ImportAsync(host, plain, dryRun: false);
 
-        // Before story 14 the importer always wrote the stem, so a console-edited alt was reset (then reported as
-        // "changed: media"). Without the header that rule is kept; story 14 only names the change precisely.
+        // Before story 16 the importer always wrote the stem, so a console-edited alt was reset (then reported as
+        // "changed: media"). Without the header that rule is kept; story 16 only names the change precisely.
         (again.Rows[1].Status, again.Rows[1].Message).Should().Be(("updated", "changed: alt text"));
         await using (var db = host.Db(seed.ExerciseId))
         {
@@ -288,7 +288,7 @@ public sealed class InjectImportAltEngagementOrderTests
         (await TitlesAsync(host)).Should().Equal("Console T+10", "Fewer alts", "Orphan alt", "Console T+30");
     }
 
-    // ---- DF-18: created items slot in by planned minute ----
+    // ---- DF-22: created items slot in by planned minute ----
 
     [RequiresDockerFact]
     public async Task Apply_PlacesCreatedItemsByPlannedMinute_AmongThePendingItems_InOneSave()
@@ -335,7 +335,7 @@ public sealed class InjectImportAltEngagementOrderTests
                 "Imported T+50",          // no later pending item: the end
                 "Imported unplanned",     // no minute: the end
             ],
-            "DF-18: created items slot in by planned minute among the pending items");
+            "DF-22: created items slot in by planned minute among the pending items");
         queue.Items.Select(item => item.Order).Should().Equal(Enumerable.Range(1, 12));
 
         (await VersionsAsync(host, seed.ExerciseId)).Should().Contain(
@@ -474,7 +474,7 @@ public sealed class InjectImportAltEngagementOrderTests
     private static byte[] Xlsx(params MselRowSpec[] rows) =>
         MselFixture.Xlsx([StartEx(), .. rows], conduct: true, pulseMedia: true, pulseExtensions: true);
 
-    /// <summary>The same, with <c>Pulse Media</c> only: none of story 14's headers (a pre-story-14 Pulse file).</summary>
+    /// <summary>The same, with <c>Pulse Media</c> only: none of story 16's headers (a pre-story-16 Pulse file).</summary>
     private static byte[] PlainXlsx(params MselRowSpec[] rows) =>
         MselFixture.Xlsx([StartEx(), .. rows], conduct: true, pulseMedia: true);
 

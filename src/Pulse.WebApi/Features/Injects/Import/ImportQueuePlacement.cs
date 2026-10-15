@@ -4,7 +4,7 @@ using System.Collections.Generic;
 using Pulse.WebApi.Data.Entities;
 
 /// <summary>
-/// Where the items an MSEL import CREATES go in the run sheet (demo-feedback story 14, DF-18): by planned minute among
+/// Where the items an MSEL import CREATES go in the run sheet (demo-feedback story 16, DF-22): by planned minute among
 /// the pending items, so "Fire next" (the first pending item in order) fires imported and seeded items in time order.
 /// A pure function over the queue as the import read it — no I/O — so every rule is unit-testable.
 /// </summary>

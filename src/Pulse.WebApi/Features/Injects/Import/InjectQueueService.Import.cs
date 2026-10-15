@@ -19,13 +19,13 @@ using Pulse.WebApi.Features.Injects.Import;
 /// <para>
 /// <b>Create, update or leave alone (DF-10).</b> A candidate whose <c>Inject #</c> matches no live item's
 /// <see cref="InjectItem.ExternalRef"/> (case-insensitive, as the filtered unique index compares it) is created. One that
-/// matches an item that differs from the file (alt text and engagement baseline included, story 14) is updated while the
+/// matches an item that differs from the file (alt text and engagement baseline included, story 16) is updated while the
 /// item is editable (<see cref="InjectTransitions.WhyNotEditable"/>: pending, held or failed, nothing in flight) and left
 /// <c>unchanged</c> with the reason otherwise ("already fired; not changed"). A deleted item's <c>ExternalRef</c> is free
 /// again, because only live items are matched.
 /// </para>
 /// <para>
-/// <b>Order (DF-18, story 14).</b> Created items are placed by planned minute among the pending items
+/// <b>Order (DF-22, story 16).</b> Created items are placed by planned minute among the pending items
 /// (<see cref="ImportQueuePlacement"/>) and the whole order is written with <see cref="ReorderAsync"/>'s own mechanics:
 /// the queue token read before the membership, <c>Order</c> 1..n via <c>WriteQueueOrder</c>, no item version bumped
 /// for a shift, and one queue-token bump. Updated items keep their places (judged by their stored minute). Nothing is
@@ -112,7 +112,7 @@ public sealed partial class InjectQueueService
         var facts = await ReadExerciseFactsAsync(exerciseId, cancellationToken);
         var time = TimeFor(exerciseId, facts);
 
-        // ReorderAsync's rule (DF-18 rewrites the order): read the queue token BEFORE the membership, so a create or
+        // ReorderAsync's rule (DF-22 rewrites the order): read the queue token BEFORE the membership, so a create or
         // delete that lands after this read fails the save (and the import is re-planned) instead of being ordered around.
         // It is bumped only if the import creates something; a dry run reads nothing about order.
         var queueToken = dryRun ? null : await ReadQueueTokenAsync(exerciseId, cancellationToken);
@@ -180,7 +180,7 @@ public sealed partial class InjectQueueService
 
         if (createdItems.Count > 0)
         {
-            // DF-18: place the created items by planned minute among the pending items, then write the order exactly as
+            // DF-22: place the created items by planned minute among the pending items, then write the order exactly as
             // ReorderAsync does (Order 1..n, no item version bumped) with ONE queue-token bump, all in this one save.
             // The read is this exercise's live items only (the central filter plus the explicit ExerciseId predicate),
             // tracked so the new numbers are saved. An item this import updated keeps its place and is judged by its

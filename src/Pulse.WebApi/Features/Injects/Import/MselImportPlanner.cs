@@ -9,7 +9,7 @@ using Pulse.WebApi.Features.Social;
 /// <summary>
 /// Turns a read <see cref="MselTable"/> into one planned outcome per data row (demo-feedback story 03): the header check,
 /// the social filter (DF-9), the planned minute (DF-11), and the mapping of every social row onto a single-post run-sheet
-/// item — including the Pulse extension columns for alt text and the engagement baseline (story 14, DF-17). A pure
+/// item — including the Pulse extension columns for alt text and the engagement baseline (story 16, DF-21). A pure
 /// function over facts the service read IN SCOPE — no I/O, no DI — so every rule is unit-testable.
 /// </summary>
 /// <remarks>
@@ -67,18 +67,18 @@ public static class MselImportPlanner
     public const string PulseMediaHeader = "Pulse Media";
 
     /// <summary>
-    /// The Pulse extension column (story 14, DF-17): the alt text for each <see cref="PulseMediaHeader"/> file, separated
+    /// The Pulse extension column (story 16, DF-21): the alt text for each <see cref="PulseMediaHeader"/> file, separated
     /// by <see cref="AltSeparator"/>, in the same order.
     /// </summary>
     public const string PulseMediaAltHeader = "Pulse Media Alt";
 
-    /// <summary>The Pulse extension column (story 14, DF-17): the post's engagement baseline <c>like</c>.</summary>
+    /// <summary>The Pulse extension column (story 16, DF-21): the post's engagement baseline <c>like</c>.</summary>
     public const string PulseLikesHeader = "Pulse Likes";
 
-    /// <summary>The Pulse extension column (story 14, DF-17): the post's engagement baseline <c>repost</c>.</summary>
+    /// <summary>The Pulse extension column (story 16, DF-21): the post's engagement baseline <c>repost</c>.</summary>
     public const string PulseRepostsHeader = "Pulse Reposts";
 
-    /// <summary>The Pulse extension column (story 14, DF-17): the post's engagement baseline <c>reply</c>.</summary>
+    /// <summary>The Pulse extension column (story 16, DF-21): the post's engagement baseline <c>reply</c>.</summary>
     public const string PulseRepliesHeader = "Pulse Replies";
 
     /// <summary>The separator between the entries of a <see cref="PulseMediaAltHeader"/> cell.</summary>
@@ -310,15 +310,15 @@ public static class MselImportPlanner
             }
         }
 
-        // Alt text per file (story 14, DF-17; NFR-001), else the file-name stem.
+        // Alt text per file (story 16, DF-21; NFR-001), else the file-name stem.
         if (ApplyAltText(cells, media, warnings) is { } altFailure)
         {
             return Fail(altFailure, handle);
         }
 
-        // Engagement baseline (story 14, DF-17): blank is not set; anything but a whole number 0..MaxBaseline fails.
+        // Engagement baseline (story 16, DF-21): blank is not set; anything but a whole number 0..MaxBaseline fails.
         // A file with none of the three headers (a plain Cadence export) says nothing about engagement, so an update
-        // keeps the item's baseline as before story 14; with at least one, the file is the source for all three.
+        // keeps the item's baseline as before story 16; with at least one, the file is the source for all three.
         var engagementInFile = cells.Has(PulseLikesHeader) || cells.Has(PulseRepostsHeader) || cells.Has(PulseRepliesHeader);
         var like = ParseBaseline(cells, PulseLikesHeader);
         var repost = ParseBaseline(cells, PulseRepostsHeader);
@@ -370,7 +370,7 @@ public static class MselImportPlanner
     }
 
     /// <summary>
-    /// Story 14 (DF-17): sets each file's alt text from <c>Pulse Media Alt</c> — the cell sanitized as every text cell
+    /// Story 16 (DF-21): sets each file's alt text from <c>Pulse Media Alt</c> — the cell sanitized as every text cell
     /// is, split on <see cref="AltSeparator"/>, each entry trimmed. A blank cell or a blank entry keeps the file-name stem
     /// the media loop already put there; fewer entries than files leaves the rest on the stem with a warning; an entry
     /// longer than <see cref="InjectItemValidator.MaxAltLength"/> is truncated with a warning; alt text on a row without
@@ -430,7 +430,7 @@ public static class MselImportPlanner
     }
 
     /// <summary>
-    /// Story 14 (DF-17): one engagement column. Blank (after sanitizing) is not set. Otherwise the cell must be a whole
+    /// Story 16 (DF-21): one engagement column. Blank (after sanitizing) is not set. Otherwise the cell must be a whole
     /// number 0..<see cref="InjectItemValidator.MaxBaseline"/>: the readers write a numeric <c>.xlsx</c> cell in invariant
     /// shortest form (Excel's <c>962.0</c> reads <c>962</c>, a fraction keeps its decimals), and text is parsed with the
     /// invariant culture (sign, decimal point and exponent allowed; no thousands separator, so <c>1,5</c> is never 15).
@@ -683,7 +683,7 @@ public sealed record ImportAssignee(Guid Id, string DisplayName);
 /// <summary>One media reference a candidate asks for.</summary>
 /// <param name="AssetId">The library asset id.</param>
 /// <param name="Alt">
-/// The sanitized alt text: the file's <c>Pulse Media Alt</c> entry (story 14), else the file name without its extension.
+/// The sanitized alt text: the file's <c>Pulse Media Alt</c> entry (story 16), else the file name without its extension.
 /// </param>
 public sealed record PlannedMedia(Guid AssetId, string Alt);
 
@@ -701,9 +701,9 @@ public sealed record PlannedMedia(Guid AssetId, string Alt);
 /// <param name="PersonaId">The resolved persona.</param>
 /// <param name="Text">The sanitized post text.</param>
 /// <param name="Media">The media, in cell order.</param>
-/// <param name="BaselineLike">The <c>Pulse Likes</c> baseline (story 14), or <c>null</c> when the cell is blank.</param>
-/// <param name="BaselineRepost">The <c>Pulse Reposts</c> baseline (story 14), or <c>null</c> when the cell is blank.</param>
-/// <param name="BaselineReply">The <c>Pulse Replies</c> baseline (story 14), or <c>null</c> when the cell is blank.</param>
+/// <param name="BaselineLike">The <c>Pulse Likes</c> baseline (story 16), or <c>null</c> when the cell is blank.</param>
+/// <param name="BaselineRepost">The <c>Pulse Reposts</c> baseline (story 16), or <c>null</c> when the cell is blank.</param>
+/// <param name="BaselineReply">The <c>Pulse Replies</c> baseline (story 16), or <c>null</c> when the cell is blank.</param>
 /// <param name="EngagementInFile">
 /// Whether the file has at least one of the <c>Pulse Likes</c> / <c>Pulse Reposts</c> / <c>Pulse Replies</c> headers.
 /// Then the file is the source for all three (blank is not set); without any, an update keeps the item's baseline.

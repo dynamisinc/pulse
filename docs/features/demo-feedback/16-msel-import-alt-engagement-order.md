@@ -1,7 +1,7 @@
 # Story: MSEL import — alt text and engagement columns; imported items slot in by planned minute
 
 **Feature:** Demo feedback cut (10/20)  ·  **Phase:** 1  ·  **Status:** In Review
-**Requirements:** NFR-001 (alt text on participant media)  ·  **Decisions:** DF-16, DF-17, DF-18  ·  **Issue:** #518
+**Requirements:** NFR-001 (alt text on participant media)  ·  **Decisions:** DF-16, DF-21, DF-22  ·  **Issue:** #518
 **Stack:** backend  ·  **Review:** Tier-1  ·  **Priority:** Must  ·  **Wave:** 3  ·  **Effort:** S
 
 ## Context
@@ -28,21 +28,21 @@ Tom chose (10/15) to fix all three in the importer before the Sunday freeze (DF-
       files ⇒ the row **fails** ("Pulse Media Alt has N entries for M Pulse Media files"); fewer ⇒ the missing ones
       fall back to the stem with a **warning**. Each entry is trimmed and must fit `InjectItemValidator.MaxAltLength`
       (1,000) after the same sanitising the write path applies (longer ⇒ truncated with a warning, like `Title`).
-      Alt text with no `Pulse Media` ⇒ warning, ignored. Header absent ⇒ the stem, as before story 14 (on re-import
+      Alt text with no `Pulse Media` ⇒ warning, ignored. Header absent ⇒ the stem, as before story 16 (on re-import
       too); header present ⇒ the file wins.
 - [x] **`Pulse Likes`**, **`Pulse Reposts`**, **`Pulse Replies`**: the post's `engagementBaseline` (`like`, `repost`,
       `reply`). Each optional; blank ⇒ not set (0). A value must be a whole number 0…`InjectItemValidator.MaxBaseline`
       (1,000,000); a numeric cell is accepted as-is if it is integral (Excel stores `962` as `962.0`), text is parsed
       with invariant culture, and anything else (negative, fractional, too large, not a number) ⇒ the row **fails**
       with a message naming the column. None of the three headers present (a plain Cadence export) ⇒ a re-import keeps
-      the item's baseline, as before story 14; any one present ⇒ the file is the source for all three.
+      the item's baseline, as before story 16; any one present ⇒ the file is the source for all three.
 - [x] Both flow through the existing write path (`ImportRequests` → `InjectItemValidator.Parse`), so a seeded item
       and an imported item with the same values are indistinguishable.
 - [x] **Re-import (DF-10):** a changed alt text or baseline on an unfired item is an update (`status: 'updated'`); the
       same values ⇒ `unchanged`; fired items are left alone as today. `ImportRequests`' change comparison covers both.
 - [x] `?dryRun=true` reports the new failures and warnings and writes nothing.
 
-### Order (DF-18)
+### Order (DF-22)
 
 - [x] An item the import **creates** is placed by `PlannedMinute` among the existing **pending** items: immediately
       before the first pending item (in current `Order`) whose `PlannedMinute` is greater than its own. Ties go after
@@ -89,5 +89,5 @@ Where they live (`src/Pulse.WebApi.Tests/Features/Injects/Import/`; SQL tests ar
   present; dry run; placement in one save with one token bump and no version change; re-import keeps positions;
   isolation; end-to-end `.xlsx` over HTTP read back through `GET /api/injects`:
   [`InjectImportAltEngagementOrderTests.cs`](../../../src/Pulse.WebApi.Tests/Features/Injects/Import/InjectImportAltEngagementOrderTests.cs)
-- Story 03 expectations updated for DF-18: [`InjectImportEndpointTests.cs`](../../../src/Pulse.WebApi.Tests/Features/Injects/Import/InjectImportEndpointTests.cs)
+- Story 03 expectations updated for DF-22: [`InjectImportEndpointTests.cs`](../../../src/Pulse.WebApi.Tests/Features/Injects/Import/InjectImportEndpointTests.cs)
   (`Apply_AppendsOneSinglePostItemPerSocialRow_InFileOrder_AfterTheExistingItems`, `ADeletedItemsInjectNumber_CanBeImportedAgain`)

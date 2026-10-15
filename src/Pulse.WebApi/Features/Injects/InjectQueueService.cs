@@ -1032,7 +1032,7 @@ public sealed partial class InjectQueueService
 
     /// <summary>
     /// Reads (and tracks) the exercise's queue-membership token, or <c>null</c> before the first create. A caller that
-    /// must read the token BEFORE the membership but only bumps it later (the MSEL import, DF-18) reads it here and
+    /// must read the token BEFORE the membership but only bumps it later (the MSEL import, DF-22) reads it here and
     /// passes it to <see cref="BumpQueue"/>.
     /// </summary>
     private Task<InjectQueueState?> ReadQueueTokenAsync(Guid exerciseId, CancellationToken cancellationToken) =>
@@ -1052,7 +1052,7 @@ public sealed partial class InjectQueueService
 
     /// <summary>
     /// Writes a new queue order: the live items get <see cref="InjectItem.Order"/> 1..n in list order. Shared by
-    /// <see cref="ReorderAsync"/> and the MSEL import's planned-minute placement (DF-18). Order is presentation, not item
+    /// <see cref="ReorderAsync"/> and the MSEL import's planned-minute placement (DF-22). Order is presentation, not item
     /// state, so no item's <see cref="InjectItem.Version"/> changes (an open editor's version stays valid); the caller
     /// bumps the queue token in the same save. Only rows whose number actually changes are written.
     /// </summary>
