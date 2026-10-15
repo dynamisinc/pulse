@@ -71,6 +71,12 @@
  * first Esc closes just the picker and returns focus to its button; every control is
  * reachable by Tab. State is never colour-only.
  *
+ * EMOJI (demo-feedback 12b, DF-15): the shared `core/emoji` face-smile button under the
+ * text field opens the picker in flow below it; a pick goes in at the caret (or over the
+ * selection) and counts toward the limit like any character. Its Escape closes only the
+ * picker and returns focus to the text field (never the dock). COBRA skin:
+ * `PersonaComposerEmoji.module.css`. No network: the emoji set is bundled text.
+ *
  * INPUTS, NOT IMPORTS (Wave-1 parallel-build contract): `activePersona`
  * (persona-operation/02), `actingHumanId` + `callSign` (console-shell/01), and the
  * reply target are PROPS. This file imports NONE of those features. Its output seam,
@@ -108,6 +114,7 @@ import {
 } from '@/theme/styledComponents'
 import { useExerciseContext } from '@/core/exerciseContext'
 import { scenarioNow, formatScenarioTime } from '@/core/clock'
+import { EmojiPicker, EmojiPickerButton, useEmojiPicker } from '@/core/emoji'
 import { ACCEPT_ANY_MEDIA, VIDEO_FORMAT_HINT } from '@/core/media'
 import { wallClockNowIso } from '@/core/time/wallClock'
 import {
@@ -126,6 +133,7 @@ import { useLibraryAssetLookup } from '../media/useLibraryAssetLookup'
 import { EngagementBaselineSection } from './EngagementBaselineSection'
 import { PersonaComposerPreview } from './PersonaComposerPreview'
 import styles from './PersonaComposer.module.css'
+import emojiSkin from './PersonaComposerEmoji.module.css'
 
 export interface PersonaComposerProps {
   /** The persona to post AS (persona-operation/02 input - never imported).
@@ -279,6 +287,12 @@ export function PersonaComposer({
   const [libraryOpen, setLibraryOpen] = useState(false)
   // Step 2 of "Post again anyway...": armed once the controller has said they will check.
   const [repostArmed, setRepostArmed] = useState(false)
+  const emoji = useEmojiPicker({
+    targetRef: textInputRef,
+    value: compose.text,
+    onChange: compose.setText,
+    disabled: locked,
+  })
 
   // Opening the picker moves focus INTO it (the checked filter option), so a keyboard
   // user lands where the next Tab is the grid.
@@ -462,6 +476,8 @@ export function PersonaComposer({
         inputRef={textInputRef}
         slotProps={{ htmlInput: { readOnly: locked } }}
       />
+      <EmojiPickerButton {...emoji.buttonProps} className={emojiSkin.button} />
+      {emoji.isOpen && <EmojiPicker {...emoji.pickerProps} className={emojiSkin.picker} />}
 
       <section className={styles.attach} aria-label="Attachments">
         <div className={styles.attachActions}>

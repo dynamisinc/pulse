@@ -56,5 +56,16 @@ React ^18 || ^19, no advisories) fetches emojibase data from a CDN by default an
 `shipstyles` 1.0.0, no advisories) is a four-day-old major at 50 MB unpacked. A bundled list of 176 common emoji
 (Unicode <= 13, no skin-tone/ZWJ sequences) meets the bar with no network path at all.
 
-**12b (persona composer)**: not built yet - reuse `core/emoji` (`useEmojiPicker` + `EmojiPickerButton` +
-`EmojiPicker`) with a COBRA skin class that sets the `--emoji-*` properties.
+**12b (persona composer)** — reuses `core/emoji` unchanged (`useEmojiPicker` + `EmojiPickerButton` + `EmojiPicker`)
+with the COBRA skin
+[`features/controller/components/PersonaComposerEmoji.module.css`](../../../src/frontend/src/features/controller/components/PersonaComposerEmoji.module.css):
+- [`features/controller/components/PersonaComposer.emoji.test.tsx`](../../../src/frontend/src/features/controller/components/PersonaComposer.emoji.test.tsx)
+  (composer mounted in the real `PersonaDockHost`): the face-smile button under the persona text field with the COBRA
+  skin classes (not the participant skin); insert at the caret (focus kept, caret after the emoji, typing continues
+  there) and over a selection; the counter counts the emoji, can go over the limit, and Post is then disabled;
+  keyboard: Enter on the button opens with focus in the search box, arrows move the active emoji, typing searches,
+  Enter inserts and never fires the post; Escape (in the picker, and on the open trigger) closes only the picker,
+  returns focus to the text field with its selection intact and does **not** close the dock, while the next Escape
+  from the text field still does; **no `fetch` and no `XMLHttpRequest` during picker use (spies)**; the skin sets
+  **every** `--emoji-*` property the picker reads (both sets parsed from the stylesheets on disk), each value equals
+  the `cobraTheme` entry it mirrors, and the text/edge/ring pairs meet WCAG AA contrast.
