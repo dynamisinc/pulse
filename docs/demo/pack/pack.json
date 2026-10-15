@@ -467,7 +467,7 @@
       "baseline": {"like": 17}
     }
   ],
-  "pins": ["p10", "p09"],
+  "pins": ["p09", "p10"],
   "runSheet": {
     "items": [
       {

@@ -261,11 +261,12 @@ cool, pour, repeat") are spread through the pool.
 
 ### Exercise pins (`pins`)
 
-The pins are `["p10", "p09"]`: the boil water advisory at its source (**p09**, @FairhavenWater) and County EM's
+The pins are `["p09", "p10"]`: the boil water advisory at its source (**p09**, @FairhavenWater) and County EM's
 share of it (**p10**, @KestrelCoEM, with the zone tip and the sign and pot photos). A controller would put these
 two in front of everyone: they carry the instructions every resident needs, from both verified accounts, which is
-also the lesson of beats 3 and 4. The Pinned tab shows the newest pin first, so if S1 pins in array order, p09
-leads. Only opening-feed posts can be pinned, because run-sheet posts don't exist at seed time. If you would rather
+also the lesson of beats 3 and 4. The array is the Pinned tab's order: the seed pins the last-listed post first, so
+p09 leads (newest pin first, DF-5). That holds while the exercise clock runs; with the clock stopped both pins share
+one time and the tab orders them by post id. Only opening-feed posts can be pinned, because run-sheet posts don't exist at seed time. If you would rather
 pin "where to get water", swap p10 for p19.
 
 ### The run sheet as a Cadence MSEL (`kestrel-msel.xlsx`)
