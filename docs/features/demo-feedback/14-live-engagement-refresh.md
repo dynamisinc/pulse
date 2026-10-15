@@ -102,8 +102,14 @@ profile and Pinned feed cards through different readers).
 
 **Notifications (Gate-1 M-1 / M-2).** A feed read that started before a frame was applied never moves that post's
 counts (it would withdraw the notification and re-announce it). Turning a like / repost on registers it with the
-notifications store first, so the rise on the viewer's own post is absorbed into the baseline silently; a failed or
-no-op write withdraws it.
+notifications store first, so the rise on the viewer's own post is absorbed into the baseline silently. A failed write,
+or one the server answers with a count no higher than the card held before the tap (a no-op), withdraws the note on
+settle, and an unmatched note expires after 15 s (`OWN_REACTION_TTL_MS`), so it can never swallow the next person's like
+(re-review N-1).
+
+**Known limit (re-review L-A).** A frame lost while the connection stays `Connected` (a send that failed server-side and
+was only logged) is not a gap the client can see: a card mounting after it can show the older held number until that
+post's next frame, or until a re-read re-seeds a mounted card.
 
 Backend (`src/Pulse.WebApi.Tests/Features/Social/Engagement/`):
 
@@ -139,12 +145,17 @@ Frontend (`src/frontend/src/features/social/`):
   (`active`) stays; stale frame dropped; inert counts follow; an optimistic toggle in flight is not overwritten by an
   older frame, and a newer frame after it settles still lands; Gate-1 H-1 (a card mounted after a frame, and a remount
   from cached data, show the frame and follow later ones), M-3 (after a gap a fresher read wins on mount), M-2 (the
-  toggle registers / withdraws the own reaction with the notifications store).
+  toggle registers / withdraws the own reaction with the notifications store), N-1 (a server no-op like releases the
+  note on settle; a real like keeps it).
 - `notifications/notificationsStore.engagement.test.ts`: a like and a repost on my post notify live once each (replayed
   and stale frames and the next re-read do not re-notify); the badge moves while the tab is hidden; frames that beat
   the baseline are held and replayed; someone else's post is ignored; unsubscribe on stop; Gate-1 M-1 (frame +1, stale
   read, fresh read: one notification, the badge never dips) and M-2 (my own like and repost are silent through the
-  frame and the read; a withdrawn one does not swallow the next like).
+  frame and the read; a withdrawn one does not swallow the next like); N-1 (a note released after a no-rise frame, and
+  an unmatched note after its 15 s TTL, both let the next +1 notify; a note matched inside the TTL stays silent).
+- `services/realtimeFeed.streamGap.test.ts` (re-review L-B): with a fake shared connection, `Reconnecting` /
+  `Disconnected` call `markGap()` so a held frame no longer wins on mount, `Connected` does not, and a frame after the
+  gap is trusted again.
 - `notifications/notificationText.test.ts` (repost row text) and `notifications/NotificationRow.repost.test.tsx`
   (Repost label, sentence, excerpt, thread link).
 - Updated: `notifications/notificationsStore.test.ts` (announcement wording for reposts; the persisted record list now

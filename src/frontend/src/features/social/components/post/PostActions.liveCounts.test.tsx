@@ -13,6 +13,8 @@
  *  - Gate-1 M-3: after a stream gap, a card mounting with a fresher read shows the read.
  *  - Gate-1 M-2: turning a like on tells the notifications store first (and withdraws it when the
  *    write fails), so the viewer's own reaction never notifies them.
+ *  - N-1: a like the server answers with a count no higher than the card held before the tap (a
+ *    no-op) releases the note too; a real like keeps it for the rise it causes.
  *
  * LIVE mode (`USE_MOCK_DATA` false) with the shared axios client mocked, as in
  * `PostActions.live.test.tsx`; the session / exercise hooks are mocked the same way.
@@ -192,6 +194,37 @@ describe('PostActions — live engagement counts (DF-17)', () => {
     expect(await screen.findByRole('button', { name: 'Like, 42' })).toHaveAttribute('aria-pressed', 'false')
     expect(cancel).toHaveBeenCalledWith(POST_ID, 'like')
     note.mockRestore()
+    cancel.mockRestore()
+  })
+
+  it('N-1: a server no-op like releases the note on settle; a real like keeps it', async () => {
+    const cancel = vi.spyOn(notificationsStore, 'cancelOwnReaction')
+    const answer = (like: number) => ({
+      data: {
+        postId: POST_ID,
+        kind: 'like',
+        active: true,
+        counts: { reply: 3, repost: 7, like },
+        viewer: { liked: true, reposted: false },
+      },
+    })
+    const user = userEvent.setup()
+
+    // A stale cached card says 42, not liked; the server says it is already liked at 42.
+    vi.mocked(api.put).mockResolvedValueOnce(answer(42))
+    const stale = render(<PostActions post={buildPost()} variant="full" />)
+    await user.click(screen.getByRole('button', { name: 'Like, 42' }))
+    expect(await screen.findByRole('button', { name: 'Like, 42, liked' })).toBeInTheDocument()
+    expect(cancel).toHaveBeenCalledWith(POST_ID, 'like')
+    stale.unmount()
+
+    // A real like (42 -> 43) keeps the note for the frame it causes.
+    cancel.mockClear()
+    vi.mocked(api.put).mockResolvedValueOnce(answer(43))
+    render(<PostActions post={buildPost()} variant="full" />)
+    await user.click(screen.getByRole('button', { name: 'Like, 42' }))
+    expect(await screen.findByRole('button', { name: 'Like, 43, liked' })).toBeInTheDocument()
+    expect(cancel).not.toHaveBeenCalled()
     cancel.mockRestore()
   })
 

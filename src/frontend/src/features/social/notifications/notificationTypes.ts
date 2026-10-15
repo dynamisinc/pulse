@@ -131,6 +131,13 @@ export const NOTIFICATION_PUBLISH_DELAY_MS = 250
  */
 export const NOTIFICATION_ANNOUNCE_THROTTLE_MS = 12_000
 
+/**
+ * How long a note of the viewer's own like / repost (Gate-1 M-2) waits for the rise it causes
+ * before it expires (N-1): the push lands within a second or two, so a note still unmatched after
+ * this never will be, and must not swallow the next person's like.
+ */
+export const OWN_REACTION_TTL_MS = 15_000
+
 /** Rows the page renders (newest first); the rest are summarized by a count, not drawn. */
 export const MAX_NOTIFICATION_ROWS = 100
 

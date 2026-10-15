@@ -12,6 +12,8 @@
  *  - A frame for someone else's post changes nothing; the session unsubscribes on stop.
  *  - Gate-1 M-1: a read that started before a frame never withdraws (or re-announces) it.
  *  - Gate-1 M-2: my own like / repost on my own post is silent (frame and read paths).
+ *  - N-1: a note nothing matched (released on settle, or expired after OWN_REACTION_TTL_MS)
+ *    never swallows the next person's like.
  *
  * Driven through `createNotificationsStore` with every side effect faked (as in
  * `notificationsStore.test.ts`), plus a fake engagement source.
@@ -26,6 +28,7 @@ import type {
 } from '../services/realtimeFeed'
 import { createNotificationsStore, type NotificationsSessionConfig } from './notificationsStore'
 import {
+  OWN_REACTION_TTL_MS,
   NOTIFICATION_ANNOUNCE_THROTTLE_MS,
   NOTIFICATION_POLL_INTERVAL_MS,
   NOTIFICATION_PUBLISH_DELAY_MS,
@@ -250,10 +253,12 @@ describe('notificationsStore — live likes and reposts (DF-19)', () => {
     expect(r.store.getSummary().unread).toBe(0)
     expect(r.store.getAnnouncement().text).toBe('')
 
-    // Through a read (no frame, e.g. while polling).
+    // Through a read (no frame, e.g. while polling), which lands inside the note's TTL: the first
+    // re-read is due 62.5 % into the interval; note the like a few seconds before it.
+    await advance(NOTIFICATION_POLL_INTERVAL_MS * 0.625 - 3000)
     r.store.noteOwnReaction('m1', 'like')
     r.feed.posts = [post('m1', ME, 4, 2)]
-    await advance(NOTIFICATION_POLL_INTERVAL_MS)
+    await advance(5000)
     expect(rows(r.store)).toEqual([])
     expect(r.store.getSummary().unread).toBe(0)
 
@@ -274,6 +279,58 @@ describe('notificationsStore — live likes and reposts (DF-19)', () => {
     r.engagement.emit(frame('m1', 3, 0, 1))
     await advance(NOTIFICATION_PUBLISH_DELAY_MS)
 
+    expect(rows(r.store)).toEqual(['like:m1=1*'])
+  })
+
+  it('N-1: a note released on settle after a frame with no rise lets the next +1 notify', async () => {
+    const r = rig([post('m1', ME, 4, 0)])
+    r.store.start(CONFIG)
+    await settle()
+
+    // My like turned out to be a server no-op (the post was already liked): no rise anywhere.
+    r.store.noteOwnReaction('m1', 'like')
+    r.engagement.emit(frame('m1', 4, 0, 1))
+    await advance(NOTIFICATION_PUBLISH_DELAY_MS) // well inside the TTL
+    r.store.cancelOwnReaction('m1', 'like') // what useReactionToggle does on that settle
+
+    r.engagement.emit(frame('m1', 5, 0, 2)) // someone else likes it
+    await advance(NOTIFICATION_PUBLISH_DELAY_MS)
+
+    expect(rows(r.store)).toEqual(['like:m1=1*'])
+    expect(r.store.getAnnouncement().text).toBe('1 new like')
+  })
+
+  it('N-1: an unmatched note expires after OWN_REACTION_TTL_MS, so the next +1 notifies', async () => {
+    const r = rig([post('m1', ME, 4, 0)])
+    r.store.start(CONFIG)
+    await settle()
+
+    r.store.noteOwnReaction('m1', 'like')
+    r.engagement.emit(frame('m1', 4, 0, 1)) // no rise: nothing absorbs the note
+    await advance(OWN_REACTION_TTL_MS)
+
+    r.engagement.emit(frame('m1', 5, 0, 2))
+    await advance(NOTIFICATION_PUBLISH_DELAY_MS)
+
+    expect(rows(r.store)).toEqual(['like:m1=1*'])
+  })
+
+  it('N-1: a note matched within the TTL is still silent, and its later expiry changes nothing', async () => {
+    const r = rig([post('m1', ME, 4, 0)])
+    r.store.start(CONFIG)
+    await settle()
+
+    r.store.noteOwnReaction('m1', 'like')
+    await advance(OWN_REACTION_TTL_MS - 1000)
+    r.engagement.emit(frame('m1', 5, 0, 1)) // my own like's frame, just inside the TTL
+    await advance(NOTIFICATION_PUBLISH_DELAY_MS)
+    expect(rows(r.store)).toEqual([])
+
+    // The (already absorbed) note's timer fires: nothing is undone, and the next like notifies.
+    await advance(2000)
+    expect(rows(r.store)).toEqual([])
+    r.engagement.emit(frame('m1', 6, 0, 2))
+    await advance(NOTIFICATION_PUBLISH_DELAY_MS)
     expect(rows(r.store)).toEqual(['like:m1=1*'])
   })
 

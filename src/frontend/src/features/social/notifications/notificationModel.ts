@@ -57,8 +57,9 @@
  * MY OWN LIKE / REPOST IS SILENT (Gate-1 M-2). When the viewer starts liking or reposting a post,
  * the store tells the model ({@link NotificationModel.noteOwnReaction}); if the post is mine, the
  * next rise of that count (from the frame, or a read) absorbs one step into the baseline instead of
- * notifying. A write that fails or changes nothing withdraws it (`cancelOwnReaction`). It is never
- * persisted.
+ * notifying. A write that fails or changes nothing withdraws it (`cancelOwnReaction`), and a note
+ * nothing matched expires after `OWN_REACTION_TTL_MS` (`expireOwnReaction`, driven by the
+ * store), so a stray note can never swallow the next person's like. It is never persisted.
  *
  * REPOST RECORDS ride in the same bounded, persisted record list as the like records, under the
  * key `repost:<postId>` (the like record keeps the bare post id), so the persisted shape is
@@ -266,8 +267,10 @@ export class NotificationModel {
   private evictedFloorMs = -Infinity
   /** Bumped by every applied engagement frame (see `readMark`). */
   private frameTick = 0
-  /** My own likes / reposts not yet absorbed, by record key (see `noteOwnReaction`). */
-  private readonly ownPending = new Map<string, number>()
+  /** My own likes / reposts not yet absorbed: note ids by record key, oldest first. */
+  private readonly ownPending = new Map<string, number[]>()
+  /** The next own-reaction note id. */
+  private nextNoteId = 1
   /** Whether the persisted part (read ids / like records) changed since `takeDirty`. */
   private dirty = false
 
@@ -332,19 +335,38 @@ export class NotificationModel {
   /**
    * The viewer started liking / reposting `postId` (Gate-1 M-2). If the post is mine, the next rise
    * of that count absorbs one step silently into the baseline - my own reaction never notifies me.
+   * Returns the note's id (for {@link expireOwnReaction}; the store expires it after
+   * `OWN_REACTION_TTL_MS`), or `undefined` when the post is not mine (nothing was noted).
    */
-  noteOwnReaction(postId: string, kind: CountKind): void {
-    if (!this.mine.has(postId)) return
+  noteOwnReaction(postId: string, kind: CountKind): number | undefined {
+    if (!this.mine.has(postId)) return undefined
     const key = recordKey(kind, postId)
-    this.ownPending.set(key, (this.ownPending.get(key) ?? 0) + 1)
+    const id = this.nextNoteId
+    this.nextNoteId += 1
+    this.ownPending.set(key, [...(this.ownPending.get(key) ?? []), id])
+    return id
   }
 
-  /** Withdraws a {@link noteOwnReaction} whose write failed or changed nothing. */
+  /** Withdraws the newest {@link noteOwnReaction} for the post (its write failed / did nothing). */
   cancelOwnReaction(postId: string, kind: CountKind): void {
     const key = recordKey(kind, postId)
-    const pending = this.ownPending.get(key) ?? 0
-    if (pending <= 1) this.ownPending.delete(key)
-    else this.ownPending.set(key, pending - 1)
+    const notes = this.ownPending.get(key)
+    if (notes === undefined) return
+    this.setNotes(key, notes.slice(0, -1))
+  }
+
+  /** Forgets one note nothing matched in time (N-1); a no-op once it was absorbed or withdrawn. */
+  expireOwnReaction(noteId: number): void {
+    for (const [key, notes] of this.ownPending) {
+      if (!notes.includes(noteId)) continue
+      this.setNotes(key, notes.filter(id => id !== noteId))
+      return
+    }
+  }
+
+  private setNotes(key: string, notes: readonly number[]): void {
+    if (notes.length === 0) this.ownPending.delete(key)
+    else this.ownPending.set(key, [...notes])
   }
 
   /**
@@ -454,12 +476,11 @@ export class NotificationModel {
     let amount = previous !== undefined && value > previous ? value - previous : 0
 
     // M-2: the part of the rise that is MY OWN like / repost moves the baseline silently.
-    const own = this.ownPending.get(key) ?? 0
-    if (amount > 0 && own > 0) {
-      const absorbed = Math.min(own, amount)
+    const notes = this.ownPending.get(key) ?? []
+    if (amount > 0 && notes.length > 0) {
+      const absorbed = Math.min(notes.length, amount)
       amount -= absorbed
-      if (own - absorbed > 0) this.ownPending.set(key, own - absorbed)
-      else this.ownPending.delete(key)
+      this.setNotes(key, notes.slice(absorbed))
       record = { ...record, baseline: record.baseline + absorbed }
       this.setLikeRecord(record)
       changed = true

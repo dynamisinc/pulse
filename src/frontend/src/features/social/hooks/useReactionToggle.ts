@@ -51,7 +51,9 @@
  *
  * MY OWN REACTION NEVER NOTIFIES ME (Gate-1 M-2). Turning a like / repost ON tells the
  * notifications store first (`noteOwnReaction`), so if the post is the viewer's own, the rise their
- * write causes is absorbed silently; a write that fails or does not turn it on withdraws that.
+ * write causes is absorbed silently; a write that fails, does not turn it on, or answers a count
+ * no higher than the card held before the tap (a server no-op, e.g. after a stale cached read)
+ * withdraws that (N-1; the store also expires an unmatched note).
  *
  * NO IDENTITY, NO TIME ON THE WIRE (COR-001/COR-053): the service sends neither
  * `exerciseId` nor `personaId` nor a timestamp — the server derives all three.
@@ -192,7 +194,10 @@ export function useReactionToggle(options: UseReactionToggleOptions): UseReactio
           // Reconcile onto the server's own answer (viewer flag + count).
           const confirmed = kind === 'like' ? state.viewer.liked : state.viewer.reposted
           commit({ active: confirmed, count: state.counts[kind] })
-          if (nextActive && !confirmed) notificationsStore.cancelOwnReaction(postId, kind)
+          // N-1: no rise of mine is coming (not turned on, or a server no-op): release the note.
+          if (nextActive && (!confirmed || state.counts[kind] <= previous.count)) {
+            notificationsStore.cancelOwnReaction(postId, kind)
+          }
           // Mock only, and only for a real state change (the server's rule).
           if (USE_MOCK_DATA && confirmed !== previous.active) {
             emitMockTelemetry(confirmed)

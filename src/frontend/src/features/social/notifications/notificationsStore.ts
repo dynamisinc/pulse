@@ -135,6 +135,7 @@ import {
   NOTIFICATION_POLL_JITTER,
   NOTIFICATION_READ_JITTER_MS,
   NOTIFICATION_PUBLISH_DELAY_MS,
+  OWN_REACTION_TTL_MS,
   PRELOAD_BUFFER_CAP,
   type NotificationEvent,
   type NotificationItem,
@@ -244,7 +245,8 @@ export interface NotificationsStore {
   setPaused(paused: boolean): void
   /**
    * The viewer started liking / reposting `postId` (Gate-1 M-2): if it is their own post, the rise
-   * it causes is absorbed silently instead of notifying them. A no-op with no session.
+   * it causes is absorbed silently instead of notifying them. A note nothing matched expires after
+   * {@link OWN_REACTION_TTL_MS} (N-1). A no-op with no session.
    */
   noteOwnReaction(postId: string, kind: 'like' | 'repost'): void
   /** Withdraws a {@link noteOwnReaction} whose write failed or changed nothing. */
@@ -388,6 +390,8 @@ interface ActiveSession {
   buffer: ParticipantPostView[]
   /** Engagement frames held until the baseline lands: the newest per post (DF-19). */
   readonly pendingFrames: Map<string, PostEngagementChangedEvent>
+  /** The expiry timers of the viewer's own-reaction notes (N-1). */
+  readonly ownNoteTimers: Set<ReturnType<typeof setTimeout>>
   /**
    * A read was skipped because the tab was hidden or the shell overlay was up -- a poll tick, or
    * the baseline of a session that started held. Made up by {@link catchUpRead} when things clear.
@@ -733,6 +737,8 @@ export function createNotificationsStore(
     }
     s.buffer = []
     s.pendingFrames.clear()
+    for (const timer of s.ownNoteTimers) clearTimeout(timer)
+    s.ownNoteTimers.clear()
     clearAnnouncements()
   }
 
@@ -781,6 +787,7 @@ export function createNotificationsStore(
       inFlight: false,
       buffer: [],
       pendingFrames: new Map(),
+      ownNoteTimers: new Set(),
       missedWhileHidden: false,
       paused: overlayHeld,
       baselineTimer: undefined,
@@ -878,7 +885,14 @@ export function createNotificationsStore(
   function noteOwnReaction(postId: string, kind: 'like' | 'repost'): void {
     const s = session
     if (s === undefined || s.stopped) return
-    s.model.noteOwnReaction(postId, kind)
+    const noteId = s.model.noteOwnReaction(postId, kind)
+    if (noteId === undefined) return
+    // N-1: a note nothing matched in time expires, so it can never swallow someone else's like.
+    const timer = setTimeout(() => {
+      s.ownNoteTimers.delete(timer)
+      if (!s.stopped) s.model.expireOwnReaction(noteId)
+    }, OWN_REACTION_TTL_MS)
+    s.ownNoteTimers.add(timer)
   }
 
   function cancelOwnReaction(postId: string, kind: 'like' | 'repost'): void {

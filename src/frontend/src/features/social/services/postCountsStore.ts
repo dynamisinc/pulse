@@ -33,6 +33,10 @@
  *    the rule instead of comparing a receive time with each query's `dataUpdatedAt`: cards are fed
  *    by several readers (feed, thread, profile, Pinned) and none of them hands the card its read
  *    time.
+ *  - KNOWN LIMIT (Gate-1 L-A): a frame lost WHILE the connection stays `Connected` (a send that
+ *    failed server-side and was only logged) is not a gap the client can see. A card mounting
+ *    after it can then show the older held number until that post's next frame, or until a
+ *    re-read re-seeds a mounted card.
  *
  * SIGN-OUT. `reset()` forgets every frame (called from `core/auth/endSession.ts`, so one
  * identity's numbers never decorate the next sign-in's cards on the same tab), and ALWAYS bumps a
