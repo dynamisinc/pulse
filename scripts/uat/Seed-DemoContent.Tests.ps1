@@ -3247,11 +3247,24 @@ Describe 'Demo feedback S1 (#510): -RunSheet, white noise, exercise pins and med
             $personas = @{ Newsline7 = 'n7'; FulcoEM = 'em'; mvega_fh = 'mv' }
             $plan = Get-InjectPlan -Pack $pack -Manifest $manifest -Queue @($row) -PersonaIds $personas -RunSheet exceptMsel
             ($plan.Warnings -join "`n") | Should -Match ("i03 is left for the MSEL import \(msel '3'\), but an earlier run of this script loaded it and it is still in the run sheet \(pending, item-3\)\. " +
-                'The import matches on Inject #, which that copy does not carry, so it would add a second one: delete item-3 in the console before the import\.')
+                'A seeded copy carries no Inject #, so the import would add a second one: delete item-3 in the console before the import, unless the MSEL import created it ' +
+                '\(the queue does not expose Inject #\)\. Never run -RunSheet all after the on-stage import\.')
             $plan.Claimed.Contains('item-3') | Should -BeTrue           # no other pack item can adopt it
             @($plan.Items | ForEach-Object Action) | Should -Be @('create', 'create')
             $row['status'] = 'fired'; $row['firedCount'] = 1
             @((Get-InjectPlan -Pack $pack -Manifest $manifest -Queue @($row) -PersonaIds $personas -RunSheet exceptMsel).Warnings) | Should -BeNullOrEmpty
+        }
+
+        It 'plan (DF-18): exceptMsel warns when a loaded item has no plannedMinute while msel items are left out; all, or a fully planned sheet, do not' {
+            $pack = Get-FixturePack
+            $pack['runSheet']['items'][1].Remove('plannedMinute')
+            $plan = Get-InjectPlan -Pack $pack -Manifest (New-SeedManifest) -Queue $null -PersonaIds $null -RunSheet exceptMsel
+            ($plan.Warnings -join "`n") | Should -BeExactly ('i02 has no plannedMinute, but the on-stage MSEL import places each item it creates just before the first pending item with a later planned minute ' +
+                '(DF-18), so it cannot place its items around i02, and "Fire next" may leave pack order. Give every seeded item a plannedMinute.')
+            @((Get-InjectPlan -Pack $pack -Manifest (New-SeedManifest) -Queue $null -PersonaIds $null).Warnings) | Should -BeNullOrEmpty
+            @((Get-InjectPlan -Pack (Get-FixturePack) -Manifest (New-SeedManifest) -Queue $null -PersonaIds $null -RunSheet exceptMsel).Warnings) | Should -BeNullOrEmpty
+            $pack['runSheet']['items'][2].Remove('msel')                                          # nothing left for the import
+            @((Get-InjectPlan -Pack $pack -Manifest (New-SeedManifest) -Queue $null -PersonaIds $null -RunSheet exceptMsel).Warnings) | Should -BeNullOrEmpty
         }
     }
 
@@ -3267,6 +3280,41 @@ Describe 'Demo feedback S1 (#510): -RunSheet, white noise, exercise pins and med
             $run.Text | Should -Match '\[SKIP\] i03 — left for the on-stage MSEL import'
             $run.Text | Should -Match '✅ all 2 run-sheet item\(s\) are in the console''s queue with their posts'
             $run.Text | Should -Match '➖ run-sheet item\(s\) left out by -RunSheet exceptMsel, not checked: i03 \(msel ''3''\)'
+            # M-1: the seeded items are in pack order; the import slots its items in by planned minute (DF-18).
+            $run.Text | Should -Match '✅ the armable run-sheet items are in pack order in the console''s queue; the on-stage import slots the msel items in by planned minute \(DF-18\), so "Fire next" follows the pack when every seeded item has a plannedMinute'
+            $run.Text | Should -Not -Match 'has no plannedMinute'
+        }
+
+        It 'exceptMsel with a seeded item that has no plannedMinute warns in the plan (-WhatIf too) and still loads' {
+            $path = Write-S1Pack 'unplanned' { param($p) $p['runSheet']['items'][0].Remove('plannedMinute') }
+            ((Invoke-FakeSeed @{ PackPath = $path; WhatIf = $true; RunSheet = 'exceptMsel' }).Text) | Should -Match '\[WARN\] i01 has no plannedMinute, but the on-stage MSEL import places each item it creates'
+            $run = Invoke-FakeSeed @{ PackPath = $path; RunSheet = 'exceptMsel' }
+            $run.Code | Should -Be 0 -Because $run.Text
+            $run.Text | Should -Match '\[WARN\] i01 has no plannedMinute.*\(DF-18\)'
+            $script:Fake.Injects.Count | Should -Be 2
+        }
+
+        It 'every item msel: the queue is still read when an earlier run recorded one, so its seeded copy is warned about (not with none)' {
+            $path = Write-S1Pack 'all-msel' { param($p) $p['runSheet']['items'] = @($p['runSheet']['items'][2]) }
+            (Invoke-FakeSeed @{ PackPath = $path }).Code | Should -Be 0                 # -RunSheet all: the seed loaded i03 itself
+            $seeded = $script:Fake.Injects[0].id
+            $script:Fake.Calls.Clear()
+            $run = Invoke-FakeSeed @{ PackPath = $path; RunSheet = 'exceptMsel' }
+            $run.Code | Should -Be 0 -Because $run.Text
+            (Get-FakeCalls GET '/api/injects').Count | Should -BeGreaterThan 0
+            $run.Text | Should -Match "\[WARN\] i03 is left for the MSEL import \(msel '3'\), but an earlier run of this script loaded it and it is still in the run sheet \(pending, $seeded\)"
+            @($script:Fake.Calls | Where-Object { $_.Path -like '/api/injects*' -and $_.Method -ne 'GET' }) | Should -BeNullOrEmpty
+            $script:Fake.Calls.Clear()
+            (Invoke-FakeSeed @{ PackPath = $path; RunSheet = 'none' }).Code | Should -Be 0
+            @($script:Fake.Calls | Where-Object { $_.Path -like '/api/injects*' }) | Should -BeNullOrEmpty
+        }
+
+        It 'an unknown persona on an msel item exceptMsel leaves out still stops the run before any write (the import needs it too)' {
+            $path = Write-S1Pack 'msel-unknown-persona' { param($p) $p['runSheet']['items'][2]['posts'][0]['persona'] = 'NoSuchHandle' }
+            $run = Invoke-FakeSeed @{ PackPath = $path; RunSheet = 'exceptMsel' }
+            $run.Code | Should -Be 1
+            $run.Text | Should -Match 'unknown persona handle\(s\): NoSuchHandle\. Nothing was written\.'
+            @($script:Fake.Calls | Where-Object { $_.Method -ne 'GET' -and $_.Path -ne '/api/auth/staff/login' }) | Should -BeNullOrEmpty
         }
 
         It 'exceptMsel never touches the MSEL import''s item: not adopted, re-pointed, compared or counted, on a re-run or a Tuesday re-seed' {
@@ -3396,6 +3444,86 @@ Describe 'Demo feedback S1 (#510): -RunSheet, white noise, exercise pins and med
             (Invoke-FakeSeed).Code | Should -Be 0
             @(Get-FakeCalls PUT '/api/staff/noise/pool' | ForEach-Object { (ConvertFrom-SeedJson $_.Body)['mode'] }) | Should -Be @('replace', 'replace')
             $script:Fake.NoisePool.Count | Should -Be 3
+        }
+
+        It 'an unknown noise persona stops the run with the unknown-handle message before any write' {
+            $path = Write-S1Pack 'noise-unknown-persona' { param($p) $p['noise'][1]['persona'] = 'NoSuchHandle' }
+            $script:Fake.NoiseLevel = 'low'
+            $run = Invoke-FakeSeed @{ PackPath = $path }
+            $run.Code | Should -Be 1
+            $run.Text | Should -Match 'unknown persona handle\(s\): NoSuchHandle\. Nothing was written\.'
+            $run.Text | Should -Match 'Known handles in this exercise: FulcoEM, mvega_fh, Newsline7'
+            @($script:Fake.Calls | Where-Object { $_.Method -ne 'GET' -and $_.Path -ne '/api/auth/staff/login' }) | Should -BeNullOrEmpty
+            $script:Fake.NoiseLevel | Should -Be 'low'                        # nothing was written, noise included (step 5 was not reached)
+        }
+
+        It 'a refused first chunk sends no append (it would add to a pool it did not replace)' {
+            Mock Get-SeedLimits { $limits = & $script:RealSeedLimits; $limits.NoisePoolChunk = 2; $limits }
+            foreach ($n in 1..5) { $script:Fake.NoisePool.Add([ordered]@{ personaId = 'x'; text = "older $n" }) }
+            Mock Invoke-WebRequest {
+                # mvega_fh and Newsline7 unknown to the pool calls: the first chunk (noise[0], noise[1]) has nothing usable.
+                if ($Method -eq 'PUT' -and ([Uri] $Uri).AbsolutePath -eq '/api/staff/noise/pool') {
+                    $saved = $script:Fake.Personas
+                    $script:Fake.Personas = [ordered]@{}
+                    foreach ($key in $saved.Keys) { if ($saved[$key].handle -eq 'FulcoEM') { $script:Fake.Personas[$key] = $saved[$key] } }
+                    try { return Invoke-FakeOnly -Uri $Uri -Method $Method -Headers $Headers -Body $Body -Form $Form -ContentType $ContentType }
+                    finally { $script:Fake.Personas = $saved }
+                }
+                Invoke-FakeOnly -Uri $Uri -Method $Method -Headers $Headers -Body $Body -Form $Form -ContentType $ContentType
+            }
+            $run = Invoke-FakeSeed
+            $run.Code | Should -Be 1
+            @(Get-FakeCalls PUT '/api/staff/noise/pool' | ForEach-Object { (ConvertFrom-SeedJson $_.Body)['mode'] }) | Should -Be @('replace')
+            $script:Fake.NoisePool.Count | Should -Be 5
+            $run.Text | Should -Match '\[WARN\] noise\[0\] \(@mvega_fh\) was not loaded'
+            $run.Text | Should -Match '\[WARN\] noise\[1\] \(@Newsline7\) was not loaded'
+            $run.Text | Should -Not -Match 'noise\[2\]'
+            $run.Text | Should -Match '\[FAIL\] white-noise pool: PUT /api/staff/noise/pool \(mode replace, entries 0 on\) answered 400'
+            $run.Text | Should -Match '❌ white-noise pool not loaded'
+        }
+
+        It 'L-2: noise turned up mid-run is turned off again on the way out when the run stops early; a clean run sends no extra call' {
+            Mock Invoke-WebRequest {
+                # A controller turns the knob up while the seed is posting; then the second post fails and the run stops.
+                if ($Method -eq 'POST' -and ([Uri] $Uri).AbsolutePath -eq '/api/posts') { $script:Fake.NoiseLevel = 'medium' }
+                Invoke-FakeOnly -Uri $Uri -Method $Method -Headers $Headers -Body $Body -Form $Form -ContentType $ContentType
+            }
+            $script:Fake.FailPostNumber = 2
+            $stopped = Invoke-FakeSeed
+            $stopped.Code | Should -Be 1
+            $script:Fake.NoiseLevel | Should -Be 'off'
+            @(Get-FakeCalls PUT '/api/staff/noise').Count | Should -Be 2           # step 5, then the way out
+            (Get-CallIndex PUT '/api/staff/noise' -Last) | Should -BeGreaterThan (Get-CallIndex POST '/api/posts' -Last)
+            $stopped.Text | Should -Match '\[INFO\] white noise on the way out: level ''off'''
+
+            Reset-S1Fake
+            $clean = Invoke-FakeSeed
+            $clean.Code | Should -Be 0 -Because $clean.Text
+            @(Get-FakeCalls PUT '/api/staff/noise').Count | Should -Be 2           # step 5 and step 12 only
+            $clean.Text | Should -Not -Match 'on the way out'
+        }
+
+        It 'L-2: an error after step 5 (a request that throws) still turns noise off on the way out' {
+            Mock Invoke-WebRequest {
+                if ($Method -eq 'PATCH') { $script:Fake.NoiseLevel = 'high'; throw [System.Net.Http.HttpRequestException]::new('Connection reset by peer') }
+                Invoke-FakeOnly -Uri $Uri -Method $Method -Headers $Headers -Body $Body -Form $Form -ContentType $ContentType
+            }
+            $run = Invoke-FakeSeed
+            $run.Code | Should -Be 1
+            $run.Text | Should -Match '\[FAIL\] PATCH /api/staff/personas/[0-9a-f-]+ failed: Connection reset by peer'
+            $script:Fake.NoiseLevel | Should -Be 'off'
+            $run.Text | Should -Match '\[INFO\] white noise on the way out'
+        }
+
+        It 'L-2: a failure before step 5 writes nothing, white noise included' {
+            $script:Fake.NoiseLevel = 'low'
+            Mock Invoke-WebRequest {
+                if (([Uri] $Uri).AbsolutePath -eq '/api/staff/media') { throw [System.Net.Http.HttpRequestException]::new('Connection reset by peer') }
+                Invoke-FakeOnly -Uri $Uri -Method $Method -Headers $Headers -Body $Body -Form $Form -ContentType $ContentType
+            }
+            (Invoke-FakeSeed).Code | Should -Be 1                                  # step 4 read: nothing written yet
+            Get-FakeCalls PUT '/api/staff/noise' | Should -BeNullOrEmpty
+            $script:Fake.NoiseLevel | Should -Be 'low'
         }
 
         It 'a rejected entry is a warning with its index and reason; the rest load, and the run passes' {
@@ -3535,6 +3663,22 @@ Describe 'Demo feedback S1 (#510): -RunSheet, white noise, exercise pins and med
             $run.Text | Should -Match '\[PASS\] p02 — pinned for everyone'
             $script:Fake.Injects.Count | Should -Be 3
             $run.Text | Should -Match '❌ pins not pinned for everyone: p01'
+        }
+
+        It 'L-1: a pin PUT that failed fails the self-check even when the feed shows the post pinned' {
+            Mock Invoke-WebRequest {
+                # p01's pin lands, but the answer is a 500: the read-back alone would pass.
+                $answer = Invoke-FakeOnly -Uri $Uri -Method $Method -Headers $Headers -Body $Body -Form $Form -ContentType $ContentType
+                $p01 = [string] (@($script:Fake.Posts) | Where-Object { $_.text -like 'Test fixture: river levels*' }).id
+                if ($Method -eq 'PUT' -and $p01 -and ([Uri] $Uri).AbsolutePath -eq "/api/staff/posts/$p01/pin") { return [pscustomobject]@{ StatusCode = 500; Content = ''; Headers = @{} } }
+                $answer
+            }
+            $run = Invoke-FakeSeed
+            $run.Code | Should -Be 1
+            $script:Fake.PinOrder.Count | Should -Be 2                         # both are pinned on the server
+            $run.Text | Should -Match '\[FAIL\] p01 not pinned: 500'
+            $run.Text | Should -Match '❌ pins not pinned for everyone: p01 \(not accepted: 500'
+            $run.Text | Should -Not -Match '❌ pins not pinned for everyone: .*p02'
         }
 
         It 'Set-ExercisePins: a pin without a post id sends nothing; the pin route is PUT-only and GUID-only (never unpin)' {

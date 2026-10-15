@@ -35,7 +35,7 @@
     "pins": {
       "type": "array",
       "uniqueItems": true,
-      "description": "Keys of posts (from posts) a controller pins for everyone (PUT /api/staff/posts/{id}/pin, DF-7). They show first on every participant's Pinned tab, in this order.",
+      "description": "Keys of posts (from posts) a controller pins for everyone (PUT /api/staff/posts/{id}/pin, DF-7). They show first on every participant's Pinned tab, in this order while the exercise clock runs (with it stopped the server may order them by the posts' own scenario times).",
       "items": { "$ref": "#/definitions/key" }
     }
   },

@@ -62,18 +62,23 @@
          scenarioTime = anchor - minutesBeforeAnchor. Replies go after their parents. Engagement baselines
          are included.
      10. Pins each post the pack lists in pins for everyone (PUT /api/staff/posts/{id}/pin, DF-7), its id
-         resolved from the post key as step 9 resolved it. The last listed is pinned first: the Pinned tab shows the newest pin first
-         (DF-5), so it reads in pack order (while the exercise clock runs; a stopped clock gives the pins one
-         time). A post already pinned stays as it was (the server answers 204 and changes nothing). A 404 (the
-         post is gone or taken down) is reported, and the self-check fails on it.
+         resolved from the post key as step 9 resolved it. The last listed is pinned first: the Pinned tab shows
+         the newest pin first (DF-5), so it reads in pack order while the exercise clock runs. With the clock
+         stopped, the server stamps a pin with the later of the exercise's stored scenario time and the post's
+         own (PinService), so the tab may follow the posts' own times, or its id tie-break. A post already
+         pinned stays as it was (the server answers 204 and changes nothing). A refused pin (a 404: the post is
+         gone or taken down) is reported, and the self-check fails on it.
      11. Loads the run sheet: one POST /api/injects per run-sheet item, in pack order (each lands at the end
          of the console's queue, pending; nothing is fired). Which items it loads follows -RunSheet: all, or
          exceptMsel (every item WITHOUT an msel ref; the on-stage MSEL import adds the others, DF-16), or none.
          An item left out is never created, adopted, re-pointed or self-checked, and its manifest entry stays as
-         it is, so the import's items are never touched. A copy of it that an earlier run of this script loaded
-         and the console could still fire is warned about: the import matches on Inject #, which that copy does
-         not carry, so it would add a second one. So is an msel item that replies to a post: an MSEL row cannot
-         carry the reply, so the import creates it top-level. Handles become persona ids, media keys become
+         it is, so the import's items are never touched. A copy of it that an earlier run of this script recorded
+         and the console could still fire is warned about: a seeded copy carries no Inject #, so the import would
+         add a second one (the queue does not show Inject #, so it may also be an item the import made itself).
+         So is an msel item that replies to a post: an MSEL row cannot carry the reply, so the import creates it
+         top-level. And so is a loaded item without a plannedMinute while msel items are left out: the import
+         slots each item it creates in by planned minute (DF-18), and cannot place around one without it.
+         Handles become persona ids, media keys become
          the uploaded asset ids, a reply to a seeded post becomes { postId }, a reply to an earlier post of
          the same item stays { sequence }, and a reply to a post of an earlier item becomes { injectPostId }.
          A 201 is recorded in the manifest at once. On a 429 it waits the Retry-After and retries. A 400
@@ -107,10 +112,13 @@
          held before its release (see AFTER A REHEARSAL). Every reply of an armable item must point at a live
          post: not an earlier copy of its target, not an archived post, not a post of a superseded, spent or
          deleted item. A post outside a full 200-post feed window cannot be confirmed, and the line says how
-         many it did not check. The armable items must be in pack order in the console's
-         queue, because "Fire next" follows that order. Every pin must show pinnedForAll in the feed, the
-         white-noise pool must have loaded, white noise must be off and media marking on. It prints a ✅/❌
-         summary and exits 1 if any check failed.
+         many it did not check. The armable items it loaded must be in pack order in the console's queue,
+         because "Fire next" follows that order. (With exceptMsel the on-stage import then slots its items in by
+         planned minute, DF-18, so the queue reads in pack order again when every seeded item has a
+         plannedMinute.) Every pin must have been accepted and show pinnedForAll in the feed, the white-noise
+         pool must have loaded, white noise must be off and media marking on. It prints a ✅/❌ summary and
+         exits 1 if any check failed. However a run ends after step 6 began (an early stop, an error), it
+         turns white noise off once more on the way out unless step 13 already confirmed it off.
 
     RE-RUNNING IS SAFE. A manifest records what has been seeded, at
     %LOCALAPPDATA%\Pulse\demo-seed\<exerciseId>.json on Windows or $HOME/.local/share/Pulse/demo-seed on
@@ -138,8 +146,10 @@
         over). Pinning a post that is already pinned changes nothing. Media marking is written only when off.
 
     AFTER A REHEARSAL. Firing a run-sheet item in a rehearsal spends it: the console cannot fire it again, the
-    server refuses to delete a fired item, and neither Reset-DemoState.ps1 nor Clear-DemoContent.ps1 touches
-    the inject queue. So every run checks each loaded item's status. The plan lists any item that is fired,
+    server refuses to delete a fired item, and the reset scripts never touch an item this script seeded
+    (Reset-DemoState.ps1 leaves the inject queue alone; Clear-DemoContent.ps1 archives only the items an MSEL
+    import created, the ones with an Inject #, so a rehearsal's fired imports do not block the show's import).
+    So every run checks each loaded item's status. The plan lists any item that is fired,
     firing, skipped, failed or held part-way, and the self-check FAILS on it. Re-arm the run sheet with
     -ReloadFiredRunSheet: each spent item gets a fresh copy (POST /api/injects, with the same uncertain-create
     rules), the manifest records the new id and keeps the old one as superseded (never adopted again), and the
@@ -153,6 +163,9 @@
     put the fresh copies behind the untouched later items, and "Fire next" would go out of order. The plan
     warns about this, and the self-check fails on it. First Skip the remaining items in the console, then run
     with -ReloadFiredRunSheet: everything reloads, in pack order. Or drag the items into order in the console.
+    The on-stage MSEL import is the one writer that does not append: it places each item it creates just before
+    the first pending item with a later planned minute (DF-18, story 14). So give every seeded item a
+    plannedMinute; the plan warns when an exceptMsel run loads one without it.
 
     -Resume continues a partial run on its ORIGINAL scenario anchor. Without it, the script refuses to add
     posts next to ones already seeded, because their times would not line up. It says so and writes nothing.
@@ -1910,15 +1923,16 @@ function Get-InjectPlan {
     }
 
     # The items -RunSheet leaves out (DF-16). Two things are said about one the import will create, never more: a copy an
-    # earlier run of this script loaded, that the console could still fire (the import matches on Inject #, which a
-    # seeded copy does not carry), and a reply the item makes (an MSEL row cannot carry one).
+    # earlier run of this script recorded, that the console could still fire (the import matches on Inject #, which a
+    # seeded copy does not carry; the queue does not show Inject #, so it may also be one the import made, adopted by
+    # an earlier -RunSheet all run), and a reply the item makes (an MSEL row cannot carry one).
     $left = @(foreach ($item in @(Get-RunSheetItems -Pack $Pack -RunSheet $RunSheet -Left)) {
             $key = [string] $item['key']
             $msel = [string] $item['msel']
             $entry = & $entryFor $key
             $loaded = if ($entry -and $online) { $rowsById[[string] $entry['itemId']] } else { $null }
             if ($msel -and (Test-InjectArmable -Row $loaded)) {
-                $warnings.Add("$key is left for the MSEL import (msel '$msel'), but an earlier run of this script loaded it and it is still in the run sheet ($(Get-InjectStatusText -Row $loaded), $($loaded['id'])). The import matches on Inject #, which that copy does not carry, so it would add a second one: delete $($loaded['id']) in the console before the import.")
+                $warnings.Add("$key is left for the MSEL import (msel '$msel'), but an earlier run of this script loaded it and it is still in the run sheet ($(Get-InjectStatusText -Row $loaded), $($loaded['id'])). A seeded copy carries no Inject #, so the import would add a second one: delete $($loaded['id']) in the console before the import, unless the MSEL import created it (the queue does not expose Inject #). Never run -RunSheet all after the on-stage import.")
             }
             if ($msel -and @(Get-SeedList $item 'posts' | Where-Object { $_['replyTo'] }).Count -gt 0) {
                 $warnings.Add("$key is left for the MSEL import (msel '$msel'), but it replies to another post: an MSEL row cannot carry a reply, so the import creates it as a top-level post, out of its thread. To keep the thread, remove msel so the seed loads it.")
@@ -1928,6 +1942,14 @@ function Get-InjectPlan {
                 Reason = $(if ($msel) { "left for the on-stage MSEL import (msel '$msel'; -RunSheet $RunSheet)" } else { "not loaded (-RunSheet $RunSheet)" })
             }
         })
+
+    # Order with the import (DF-18, story 14): it places each item it creates just before the first pending item with a
+    # later planned minute, so the queue reads in pack order again only when every seeded item has one.
+    $unplanned = @($items | Where-Object { $null -eq $_.Item['plannedMinute'] } | ForEach-Object Key)
+    if ($unplanned.Count -gt 0 -and @($left | Where-Object Msel).Count -gt 0) {
+        $warnings.Add(("{0} ha{1} no plannedMinute, but the on-stage MSEL import places each item it creates just before the first pending item with a later planned minute (DF-18), so it cannot place its items around {0}, and ""Fire next"" may leave pack order. Give every seeded item a plannedMinute." -f
+                ($unplanned -join ', '), $(if ($unplanned.Count -eq 1) { 's' } else { 've' })))
+    }
 
     [pscustomobject]@{
         Items = $items.ToArray(); Warnings = $warnings.ToArray(); Online = $online; Claimed = $claimed; Left = $left
@@ -2967,10 +2989,11 @@ function Set-ExercisePins {
     <#
     .SYNOPSIS
         Pins each pack pin for everyone: PUT /api/staff/posts/{id}/pin with the post id step 9 resolved. The LAST
-        listed goes first: the Pinned tab shows the newest pin first (DF-5), so it then reads in pack order (while the
-        exercise clock runs; with it stopped the pins share one scenario time). Idempotent on the server: a post
-        already pinned answers 204 and keeps its pin and its time. Returns one @{ Key; PostId; Ok; Detail } per pin,
-        in pack order.
+        listed goes first: the Pinned tab shows the newest pin first (DF-5), so it then reads in pack order while the
+        exercise clock runs. With the clock stopped, PinService stamps the later of the exercise's stored scenario time
+        and the post's own, so the tab may follow the posts' own times, or its id tie-break. Idempotent on the server:
+        a post already pinned answers 204 and keeps its pin and its time. Returns one @{ Key; PostId; Ok; Detail } per
+        pin, in pack order.
     #>
     param(
         [Parameter(Mandatory)] [hashtable] $Context,
@@ -3133,7 +3156,7 @@ function Write-SeedPlan {
         $when = if ($Offline) { ' (-WhatIf cannot see statuses: a live run decides which items are spent)' } else { '' }
         Write-Host "  Reload          -ReloadFiredRunSheet: each loaded item that is fired, skipped, failed or held part-way gets a fresh copy; the old one is never touched$when"
     }
-    if ($Pins.Count -gt 0) { Write-Host ("  Pins            {0} post(s) pinned for everyone, in this order on the Pinned tab: {1} (one already pinned stays as it is)" -f $Pins.Count, ($Pins -join ', ')) }
+    if ($Pins.Count -gt 0) { Write-Host ("  Pins            {0} post(s) pinned for everyone, in this order on the Pinned tab while the exercise clock runs: {1} (one already pinned stays as it is)" -f $Pins.Count, ($Pins -join ', ')) }
     else { Write-Host '  Pins            none in the pack' }
     $level = 'level: off before seeding and again at the end (a seed never leaves noise running)'
     if ($NoiseCount -gt 0) { Write-Host ("  White noise     pool: replaced by the pack's {0} entr{1}; {2}" -f $NoiseCount, $(if ($NoiseCount -eq 1) { 'y' } else { 'ies' }), $level) }
@@ -3287,6 +3310,8 @@ function Invoke-DemoSeed {
     if (-not $context.Token) { return 1 }
     Write-SeedLine PASS "signed in as $StaffUsername"
 
+    $seedingStarted = $false                        # step 5 reached: writes have begun
+    $noiseEndedOff = $false                         # step 12 confirmed white noise off
     try {
         # ── 4. Read the current state; stop on an unknown handle or assignee before any write ─────────────────
         Write-Host "`n4. Read the exercise's personas, media library, feed and run sheet" -ForegroundColor Cyan
@@ -3328,11 +3353,13 @@ function Invoke-DemoSeed {
         $feed = @($response.Json)
         Write-SeedLine PASS "feed: $($feed.Count) post(s) and replies$(if ($feed.Count -ge $limits.FeedTake) { " (at the $($limits.FeedTake)-post cap)" })"
 
-        # The run sheet (inject queue, inject-queue 06): what is already loaded, and who the assignees are. Only when
-        # -RunSheet loads an item: with none (or a pack without one) the queue is not read at all.
+        # The run sheet (inject queue, inject-queue 06): what is already loaded, and who the assignees are. Read when
+        # -RunSheet loads an item, or leaves out an msel item an earlier run recorded (so the plan can warn about that
+        # seeded copy even when every item is msel). With none, or a pack without a run sheet, it is not read at all.
         $injectQueue = $null
         $assigneeIds = [hashtable]::new([StringComparer]::OrdinalIgnoreCase)
-        if ($sheetItems.Count -gt 0) {
+        $recordedLeft = @(Get-RunSheetItems -Pack $pack -RunSheet $RunSheet -Left | Where-Object { $_['msel'] -and $manifest['injects'].Contains([string] $_['key']) })
+        if ($sheetItems.Count -gt 0 -or ($RunSheet -ne 'none' -and $recordedLeft.Count -gt 0)) {
             $response = Invoke-PulseApi -Context $context -Method GET -Path '/api/injects'
             if ($response.Status -ne 200 -or $response.Json -isnot [System.Collections.IDictionary]) {
                 $hint = switch ($response.Status) {
@@ -3421,6 +3448,7 @@ function Invoke-DemoSeed {
         Save-SeedManifest -Manifest $manifest -Path $manifestPath
 
         # ── 5. Pause the engine first, so it does not react to the seeded posts ─────────────────────────────────
+        $seedingStarted = $true                     # from here on, the run ends with white noise off (see finally)
         $frozenWarning = 'the world is FROZEN. A frozen server clock falls behind: run-sheet fires and engine posts would be stamped in the past and never trend. ' +
             'Unless it was frozen on purpose just now, run Reset-DemoState.ps1 -Restart, wait ~8 minutes, run Reset-DemoState.ps1, then this script again.'
         $pause = $null
@@ -3820,6 +3848,7 @@ function Invoke-DemoSeed {
             else { Write-SeedLine FAIL "pause tier: $($pause.Detail)" }
         }
         $noiseOff = Set-NoiseLevelOff -Context $context
+        $noiseEndedOff = [bool] $noiseOff.Ok
         if ($noiseOff.Ok) { Write-SeedLine PASS "white noise: $($noiseOff.Detail)" } else { Write-SeedLine FAIL "white noise: $($noiseOff.Detail)" }
 
         # ── 13. Self-check ────────────────────────────────────────────────────────────────────────────────────────
@@ -3832,6 +3861,10 @@ function Invoke-DemoSeed {
         $liveFeedIds = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
         $selfFeedComplete = $false                                   # unknown until the feed read below succeeds
         foreach ($id in $postIds.Values) { if ($id) { [void] $liveFeedIds.Add([string] $id) } }
+        # Exercise pins: a PUT step 9 saw refused fails the pins line on its own; the rest are read back from the feed.
+        $unpinned = [System.Collections.Generic.List[string]]::new()
+        $refusedPins = @($pinResults | Where-Object { -not $_.Ok } | ForEach-Object { $unpinned.Add("$($_.Key) (not accepted: $($_.Detail))"); $_.Key })
+        $pinsNotRead = 'the feed could not be read'
         $response = Invoke-PulseApi -Context $context -Method GET -Path '/api/feed'
         if ($response.Status -ne 200) { & $check $false "GET /api/feed -> $($response.Status)" }
         else {
@@ -3872,20 +3905,21 @@ function Invoke-DemoSeed {
             $withMedia = @($postPlan.Items | Where-Object { @(Get-SeedList $_.Post 'media').Count -gt 0 }).Count
             & $check ($mediaShort.Count -eq 0) $(if ($mediaShort.Count) { "seeded posts missing media: $($mediaShort -join ', ')" } else { "all $withMedia seeded post(s) with media show their attachments" })
 
-            # Exercise pins, read back: the feed marks a post pinned for everyone with pinnedForAll (DF-7).
-            if ($pinKeys.Count -gt 0) {
-                $unpinned = [System.Collections.Generic.List[string]]::new()
-                $pinsUnchecked = 0
-                foreach ($key in $pinKeys) {
-                    $row = $byId[[string] $postIds[$key]]
-                    if (-not $row) { if ($selfFeedComplete) { $unpinned.Add("$key (not in the feed)") } else { $pinsUnchecked++ } }
-                    elseif ($row['pinnedForAll'] -ne $true) { $unpinned.Add($key) }
-                }
-                $pinText = if ($unpinned.Count) { "pins not pinned for everyone: $($unpinned -join ', ')" }
-                elseif ($pinsUnchecked) { "every pin that could be checked is pinned for everyone ($pinsUnchecked beyond the feed's newest $($limits.FeedTake) posts not checked)" }
-                else { "all $($pinKeys.Count) pin(s) are pinned for everyone (pinnedForAll in the feed)" }
-                & $check ($unpinned.Count -eq 0) $pinText
+            # Exercise pins, read back: the feed marks a post pinned for everyone with pinnedForAll (DF-7). A pin whose
+            # PUT was refused is already listed (below), whatever the feed shows.
+            $pinsUnchecked = 0; $pinsNotRead = ''
+            foreach ($key in @($pinKeys | Where-Object { $_ -notin $refusedPins })) {
+                $row = $byId[[string] $postIds[$key]]
+                if (-not $row) { if ($selfFeedComplete) { $unpinned.Add("$key (not in the feed)") } else { $pinsUnchecked++ } }
+                elseif ($row['pinnedForAll'] -ne $true) { $unpinned.Add($key) }
             }
+        }
+        if ($pinKeys.Count -gt 0) {
+            $pinText = if ($unpinned.Count) { "pins not pinned for everyone: $($unpinned -join ', ')" }
+            elseif ($pinsNotRead) { "pins accepted, but not read back: $pinsNotRead" }
+            elseif ($pinsUnchecked) { "every pin that could be checked is pinned for everyone ($pinsUnchecked beyond the feed's newest $($limits.FeedTake) posts not checked)" }
+            else { "all $($pinKeys.Count) pin(s) are pinned for everyone (pinnedForAll in the feed)" }
+            & $check ($unpinned.Count -eq 0) $pinText
         }
         $response = Invoke-PulseApi -Context $context -Method GET -Path '/api/personas'
         if ($response.Status -eq 200) {
@@ -3965,6 +3999,9 @@ function Invoke-DemoSeed {
                         ("the console's queue is out of pack order: {0} (order {1}) comes after {2} (order {3}), so ""Fire next"" would take {2} first. Drag them into pack order in the console, or Skip the remaining old items in the console and run again with -ReloadFiredRunSheet so the whole sheet reloads in order" -f
                             $inversion.PackFirst.Key, $inversion.PackFirst.Order, $inversion.QueuedAhead.Key, $inversion.QueuedAhead.Order)
                     }
+                    elseif (@($injectPlan.Left | Where-Object Msel).Count -gt 0) {
+                        "the armable run-sheet items are in pack order in the console's queue; the on-stage import slots the msel items in by planned minute (DF-18), so ""Fire next"" follows the pack when every seeded item has a plannedMinute"
+                    }
                     else { "the armable run-sheet items are in pack order in the console's queue (""Fire next"" follows the pack)" })
             }
         }
@@ -4015,6 +4052,14 @@ function Invoke-DemoSeed {
         return 1
     }
     finally {
+        # A seed never leaves white noise running. A run that began writing (step 5) but did not end with noise confirmed
+        # off at step 12 (an early stop, an error, a failed PUT) turns it off once more on the way out. Step 5 already
+        # turned it off, but someone may have turned it up since; Set-NoiseLevelOff never throws.
+        if ($seedingStarted -and -not $noiseEndedOff -and $context.Token) {
+            $lastTry = Set-NoiseLevelOff -Context $context
+            if ($lastTry.Ok) { Write-SeedLine INFO "white noise on the way out: $($lastTry.Detail)" }
+            else { Write-SeedLine WARN "white noise may still be running ($($lastTry.Detail)): turn it off with the console's knob." }
+        }
         $context.Token = $null
     }
 }
