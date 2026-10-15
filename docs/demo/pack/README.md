@@ -327,7 +327,9 @@ come five Pulse extension columns: `Pulse Media`, `Pulse Media Alt`, `Pulse Like
    26 skipped ("not a social-media inject (Delivery Method: Phone)" and so on) and none failed. The skip list is the
    point: Pulse reads the exercise's own MSEL and takes only the rows meant for it.
 3. **Import.** The eight items appear within 3 seconds, each in its place among the seeded items. Importing the
-   same file again reports all eight `unchanged` (DF-10 keys on `Inject #`).
+   same file again reports all eight `unchanged` (DF-10 keys on `Inject #`). Import **before** firing anything, or
+   between beats: a burst firing during the import changes the items the import moves, and after three tries it
+   answers "Run the import again" (nothing is written; just run it again once the burst has finished).
 
 An imported item matches the seeded one it replaces (story 16, #518):
 
