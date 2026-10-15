@@ -184,7 +184,7 @@ hand, and participants use the same feed. The engine can run on the offline gene
 | R7 | `docs/features/engine-generation-infra/MEASURED-RESULTS.md` (run of 2026-07-18) |
 | R8 | `AutonomyLevel.cs`, `AutoHoldPolicy.cs`, `EngineReviewService.cs`, `EngineCockpitControllerRoleFilter.cs`; `docs/features/autonomy-safety/03-kill-switch.md`, `07-cut-to-fake-provider.md` (#402); `engine-generation-infra/05-degraded-mode-fallback.md` |
 | R9 | `ContentGuard.cs`, `GenerateStage.cs`, `InjectionRedTeam.cs`, `LiveInjectionRedTeamTests.cs`; `docs/design/E8-ENGINE-ARCHITECTURE.md` §3.4, §8, §9 |
-| R10 | `ExerciseRealtimeHub.cs`, `EngineReviewBroadcaster.cs`, `NoiseBroadcaster.cs`; `ExerciseRealtimeHubRoleIsolationTests`, `EngineReviewBroadcasterScopeTests`; `docs/features/social-api/05-realtime-role-scoped-groups.md` (Complete; corrected 10/16) |
+| R10 | `ExerciseRealtimeHub.cs`, `EngineReviewBroadcaster.cs`, `NoiseBroadcaster.cs`; `ExerciseRealtimeHubRoleIsolationTests`, `EngineReviewBroadcasterScopeTests`; `docs/features/social-api/05-realtime-role-scoped-groups.md` (Complete; corrected 10/16); `docs/demo/PARTICIPANT-FIRST-DEMO-PLAN.md` (scorecard) |
 | R11 | `docs/00-MASTER-PRD.md` NFR-005, NFR-006; `docs/features/engine-runtime/05-live-provider-uat-golive.md` (no live traffic yet; production out of scope) |
 
 **Microsoft documentation** (all retrieved 2026-10-08; "page date" is the page's own `ms.date`)
