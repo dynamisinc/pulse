@@ -39,6 +39,8 @@ public class QueryFilterModelTests
     [InlineData(typeof(ParticipantLink))] // easy-login/01
     [InlineData(typeof(ExerciseDayWord))] // easy-login/01
     [InlineData(typeof(NoisePost))]       // demo-feedback/01
+    [InlineData(typeof(ExerciseRuntimeState))] // demo-feedback/17
+    [InlineData(typeof(PostEdit))]        // demo-feedback/17
     public void EveryExerciseScopedEntity_HasAGlobalQueryFilter(Type scopedType)
     {
         using var context = BuildModelOnlyContext();
