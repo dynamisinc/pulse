@@ -460,10 +460,7 @@ public sealed partial class InjectQueueService
             return InjectResult.Invalid<InjectQueueDto>(FullListMessage);
         }
 
-        for (var index = 0; index < ids.Count; index++)
-        {
-            byId[ids[index]].Order = index + 1;
-        }
+        WriteQueueOrder(ids.Select(id => byId[id]).ToList());
 
         var facts = await ReadExerciseFactsAsync(caller.ExerciseId, cancellationToken);
         var time = TimeFor(caller.ExerciseId, facts);
@@ -1030,10 +1027,20 @@ public sealed partial class InjectQueueService
     /// Bumps the exercise's queue-membership token (creating it on first use) in the current unit of work — see
     /// <see cref="InjectQueueState"/> for why it is a token row and not a serializable transaction.
     /// </summary>
-    private async Task BumpQueueAsync(Guid exerciseId, CancellationToken cancellationToken)
+    private async Task BumpQueueAsync(Guid exerciseId, CancellationToken cancellationToken) =>
+        BumpQueue(exerciseId, await ReadQueueTokenAsync(exerciseId, cancellationToken));
+
+    /// <summary>
+    /// Reads (and tracks) the exercise's queue-membership token, or <c>null</c> before the first create. A caller that
+    /// must read the token BEFORE the membership but only bumps it later (the MSEL import, DF-22) reads it here and
+    /// passes it to <see cref="BumpQueue"/>.
+    /// </summary>
+    private Task<InjectQueueState?> ReadQueueTokenAsync(Guid exerciseId, CancellationToken cancellationToken) =>
+        _dbContext.InjectQueueStates.FirstOrDefaultAsync(row => row.ExerciseId == exerciseId, cancellationToken);
+
+    /// <summary>Bumps a token read by <see cref="ReadQueueTokenAsync"/>, creating it when there was none.</summary>
+    private void BumpQueue(Guid exerciseId, InjectQueueState? state)
     {
-        var state = await _dbContext.InjectQueueStates
-            .FirstOrDefaultAsync(row => row.ExerciseId == exerciseId, cancellationToken);
         if (state is null)
         {
             _dbContext.InjectQueueStates.Add(new InjectQueueState { ExerciseId = exerciseId, Version = 1 });
@@ -1041,6 +1048,20 @@ public sealed partial class InjectQueueService
         }
 
         state.Version++;
+    }
+
+    /// <summary>
+    /// Writes a new queue order: the live items get <see cref="InjectItem.Order"/> 1..n in list order. Shared by
+    /// <see cref="ReorderAsync"/> and the MSEL import's planned-minute placement (DF-22). Order is presentation, not item
+    /// state, so no item's <see cref="InjectItem.Version"/> changes (an open editor's version stays valid); the caller
+    /// bumps the queue token in the same save. Only rows whose number actually changes are written.
+    /// </summary>
+    private static void WriteQueueOrder(IReadOnlyList<InjectItem> itemsInNewOrder)
+    {
+        for (var index = 0; index < itemsInNewOrder.Count; index++)
+        {
+            itemsInNewOrder[index].Order = index + 1;
+        }
     }
 
     /// <summary>The action event a controller's claim still owes, or <c>null</c> for a runner claim.</summary>

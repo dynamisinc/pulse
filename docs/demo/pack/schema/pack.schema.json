@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "urn:pulse:schema:pulse.demopack.v1",
   "title": "Pulse demo content pack (pulse.demopack.v1)",
-  "description": "The seed pack scripts/uat/Seed-DemoContent.ps1 loads into an exercise (demo-polish implementation.md section 1.10). File paths are relative to the folder that holds pack.json. This schema covers the SHAPE. The seeder also enforces the rules a JSON Schema cannot express, before it sends anything: keys are unique, every ref resolves, a reply comes after its parent in the array and not earlier in scenario time, text is at most 280 code points (an emoji counts once), each file exists inside the pack folder, its first bytes are JPEG/PNG/GIF/WebP (images) or MP4/WebM (videos) and match its kind, images are at most 5 MiB and videos at most 100 MiB, a post carries up to 4 images or exactly 1 video (never both), a burst's window holds 3 s between posts (at least 3 x (posts - 1) seconds), a run-sheet reply names an earlier post of its own item or a post of an EARLIER item (no loops), and every handle and run-sheet assignee exists in the exercise (checked after sign-in). Keys must also be unique ignoring case.",
+  "description": "The seed pack scripts/uat/Seed-DemoContent.ps1 loads into an exercise (demo-polish implementation.md section 1.10). File paths are relative to the folder that holds pack.json. This schema covers the SHAPE. The seeder also enforces the rules a JSON Schema cannot express, before it sends anything: keys are unique, every ref resolves, a reply comes after its parent in the array and not earlier in scenario time, text is at most 280 code points (an emoji counts once), each file exists inside the pack folder, its first bytes are JPEG/PNG/GIF/WebP (images) or MP4/WebM (videos) and match its kind, images are at most 5 MiB and videos at most 100 MiB, a post carries up to 4 images or exactly 1 video (never both), a burst's window holds 3 s between posts (at least 3 x (posts - 1) seconds), a run-sheet reply names an earlier post of its own item or a post of an EARLIER item (no loops), and every handle and run-sheet assignee exists in the exercise (checked after sign-in). Keys must also be unique ignoring case. Noise text follows the post-text rules (1 to 280 code points after trimming, no markup); each pin names a post key; msel values are unique ignoring case; and with -RunSheet exceptMsel no seeded run-sheet item may reply to an msel item (the on-stage MSEL import creates that one later).",
   "type": "object",
   "additionalProperties": false,
   "required": ["schema", "personas", "media", "posts"],
@@ -25,7 +25,19 @@
       "description": "The opening feed. Posted as controller-as-persona in scenario-time order (scenarioTime = anchor - minutesBeforeAnchor); ties keep array order.",
       "items": { "$ref": "#/definitions/post" }
     },
-    "runSheet": { "$ref": "#/definitions/runSheet" }
+    "runSheet": { "$ref": "#/definitions/runSheet" },
+    "noise": {
+      "type": "array",
+      "maxItems": 1000,
+      "description": "The white-noise pool (demo-feedback DF-12): posts the server's pacer publishes as background chatter (origin noise) while a controller has the noise level above off. The seeder REPLACES the exercise's pool with these (PUT /api/staff/noise/pool) and always leaves the level off. Absent: the server's pool is left as it is.",
+      "items": { "$ref": "#/definitions/noiseEntry" }
+    },
+    "pins": {
+      "type": "array",
+      "uniqueItems": true,
+      "description": "Keys of posts (from posts) a controller pins for everyone (PUT /api/staff/posts/{id}/pin, DF-7). They show first on every participant's Pinned tab, in this order while the exercise clock runs (with it stopped the server may order them by the posts' own scenario times).",
+      "items": { "$ref": "#/definitions/key" }
+    }
   },
   "definitions": {
     "key": {
@@ -184,6 +196,14 @@
       "properties": {
         "key": { "$ref": "#/definitions/key", "description": "Stable pack key: the seed manifest maps it to the created item id, so a re-run never duplicates." },
         "kind": { "enum": ["post", "burst"], "description": "post: exactly 1 post. burst: 2 to 20 posts the server releases across burstWindowSeconds." },
+        "msel": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "\\S",
+          "not": { "$ref": "#/definitions/markup" },
+          "description": "The MSEL Inject # the on-stage Cadence MSEL import creates this item from (DF-16). Post items only; unique ignoring case. With -RunSheet exceptMsel the seeder leaves this item for the import; with all it loads it like any other."
+        },
         "title": {
           "type": "string",
           "minLength": 1,
@@ -230,9 +250,24 @@
         },
         {
           "if": { "properties": { "kind": { "const": "burst" } } },
-          "then": { "properties": { "posts": { "minItems": 2 } } }
+          "then": { "properties": { "posts": { "minItems": 2 } }, "not": { "required": ["msel"] } }
         }
       ]
+    },
+    "noiseEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["persona", "text"],
+      "description": "One white-noise post: the persona's handle (the seeder sends its id) and its text.",
+      "properties": {
+        "persona": { "$ref": "#/definitions/handle" },
+        "text": {
+          "allOf": [{ "$ref": "#/definitions/postText" }],
+          "minLength": 1,
+          "pattern": "\\S",
+          "description": "1 to 280 code points after trimming; no markup."
+        }
+      }
     },
     "injectPost": {
       "type": "object",

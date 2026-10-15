@@ -68,7 +68,8 @@ media on the server.
 | 14 | [Live engagement refresh (counts, notifications, repost notification)](14-live-engagement-refresh.md) | fullstack | Must | 3 | 07 | In Review | #515 |
 | 15 | [Exercise management for controllers, and a "not allowed" page](15-exercise-management-access.md) | fullstack | Must | 3 | seam S-4 | In Review | #516 |
 | S1 | [Seed script: noise pool, exercise pins, watermark on](S1-seed-script-update.md) | script | Must | 3 | 04, 05 deployed | Not Started | #510 |
-| C | [Content: burned-in media, Kestrel MSEL file, noise pool](C-content-tasks.md) | content | Must | any | #491 | Not Started | #511 |
+| 16 | [MSEL import: alt text and engagement columns; slot in by planned minute](16-msel-import-alt-engagement-order.md) | backend | Must | 3 | 03 | In Review | #518 |
+| C | [Content: Kestrel MSEL file, noise pool (C1 burn-in dropped 10/15)](C-content-tasks.md) | content | Must | any | #491, 16 | Not Started | #511 |
 
 ## Manual UAT walk (Sun 10/18, before pencils down)
 

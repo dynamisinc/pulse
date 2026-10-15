@@ -25,11 +25,14 @@
 | DF-13 | Noise stops on **Freeze** (pause tier `Freeze` or a frozen clock), when the exercise clock is not running, and when the exercise lifecycle is not `staged` or `live` (EndEx, lifecycle pause; amended after 05 Gate-1). **Pause injects does not stop noise** (that is what the knob's Off is for). The pacer cycles the pool least-posted first, avoiding the same persona twice in a row | orchestrator |
 | DF-14 | **Read-only console is UI only.** Evaluators are admitted to `/staff/console` (registry seam) and every write control is **absent, not disabled**, via one `useCanControl()` hook (`session.role === 'controller'`). Server-side enforcement stays on #61/#377. The backend already lets evaluators read every console endpoint (no 403 on `GET /api/injects`, `/api/steering/*`, `/api/engine/*`, `/api/feed`) | Tom 10/14 + backend map |
 | DF-15 | **Emoji picker**: a library is allowed only if it works with React 19, renders **native** emoji, and makes **no runtime network call** (exercise networks are locked down; NFR / #52). Self-host any data file under `public/`. Verify the current version and advisories before adding (candidates checked 10/14: `frimousse` 0.4.0 headless, `emoji-picker-react` 5.0.0; no advisories) | orchestrator |
+| DF-16 | **The on-stage import uses the Kestrel run sheet rendered as a Cadence MSEL** (C2), padded with non-social rows so the skip is visible. **Amended 10/15:** the MSEL carries 8 of the 10 single posts; rs03 (the impersonator post the rs04 pile-on replies to) and rs10 (the utility's answer inside that thread) stay seeded, because an MSEL row has no reply-to. Each MSEL-carried pack item is marked `msel: "<Inject #>"`, and the seed's demo mode `-RunSheet exceptMsel` loads everything except those (was `-RunSheet bursts`) | Tom 10/14, 10/15 |
 | DF-17 | **Live engagement = one exercise-group push, no migration.** `PostEngagementChanged { postId, counts {reply, repost, like}, version }` after commit, from `ReactionService` (like/repost only, never `pin`) and from `PostIngestService` for a reply's parent. A default no-op method on `IFeedBroadcaster` keeps every fake compiling | Tom 10/15 + investigation |
 | DF-18 | **`version` is monotonic per post and derived from the database** (reaction rows + their `DeletedAt` stamps + reply count), so stale or reordered pushes drop on the client and two app instances agree. A push changes numbers only, never the viewer's own `active` state | orchestrator |
 | DF-19 | **A `repost` notification type** ("@x reposted your post") is added; likes and reposts on my posts notify live from the push instead of the 30 s re-read | Tom 10/15 |
 | DF-20 | **Controllers may list and create exercises** (`/staff/exercises` + `POST`/`GET /api/org/exercises`) besides planner and org admin; `GET /api/org/staff-assignments` stays org admin only. A registered staff path a role is not admitted to shows a "You need the … role" page instead of a silent redirect | Tom 10/15 |
-| DF-16 | **The on-stage import uses the Kestrel run sheet rendered as a Cadence MSEL** (C2), padded with non-social rows so the skip is visible. The seed then loads only the burst items (`-RunSheet bursts`) so the import does not duplicate them | Tom 10/14 |
+| DF-21 | **The importer reads `Pulse Media Alt`, `Pulse Likes`, `Pulse Reposts`, `Pulse Replies`** (Pulse extension columns, story 16), so an imported post keeps its alt text (NFR-001) and engagement baseline instead of the file name and zero | Tom 10/15 |
+| DF-22 | **An imported item is placed by planned minute among the pending items** (story 16), so "Fire next" fires imported and seeded items in time order; fired items never move | Tom 10/15 |
+| DF-23 | **`Clear-DemoContent.ps1` archives the run-sheet items an MSEL import created** (`ExternalRef` set), any status, fired included, in the same transaction as the post archive and restorable from its manifest, so a rehearsal's fired imports never block the show's import (DF-10 leaves fired items alone and the API cannot delete them). Deliberately wider than the API's delete (`WhyNotDeletable`) and writes no `inject.deleted` telemetry: a UAT ops action. Seeded and console items are never touched. An item mid-publish (a claimed, unrecorded post) is left alone | Tom 10/15 |
 
 ## Where the brief met the code (10/14 map)
 
@@ -143,6 +146,10 @@ Cadence's export (`MselWorksheetBuilder` / `ExcelFormattingHelper.MselColumns`) 
 | `Notes` | no | item notes (≤ 500, truncated with a warning) |
 | `Responsible Controller` | no | assignee by display name from the assignee list, else unassigned with a warning |
 | `Pulse Media` (Pulse extension) | no | comma-separated media-library file names (≤ 4 images or 1 video); an unknown name fails the row |
+| `Pulse Media Alt` (Pulse extension, 16) | no | alt text per `Pulse Media` file, `\|`-separated, same order; blank entry ⇒ file-name stem; more entries than files fails the row, fewer warns; header absent ⇒ stems, as before 16 |
+| `Pulse Likes`, `Pulse Reposts`, `Pulse Replies` (Pulse extension, 16) | no | `engagementBaseline` like / repost / reply: whole number 0…1,000,000 (an integral numeric cell or invariant text), else the row fails; none of the three headers ⇒ a re-import keeps the item's baseline |
+
+Order (DF-22, 16): a created item goes immediately before the first pending item whose `PlannedMinute` is greater than its own (ties after; no minute or no later pending item ⇒ end); non-pending items never move.
 
 Limits: file ≤ 2 MiB, ≤ 2,000 data rows, `.xlsx` (magic bytes `PK`) or `.csv` (UTF-8, BOM tolerated, quoted
 multi-line cells). `?dryRun` returns the same report and writes nothing.
@@ -200,8 +207,9 @@ display name; blank for engine and white noise) · `Inject #` (the item's `Exter
 | 12b Emoji in persona composer | frontend | Should | `controller/components/PersonaComposer.tsx` (one button) + a COBRA skin (new file under `controller/components/`; `core/emoji` unchanged, it already takes `className`) | 12 merged; before 11 | 3 | S |
 | 14 Live engagement | fullstack | Must | `Features/Realtime/{IFeedBroadcaster,SignalRFeedBroadcaster}.cs`, new `Features/Social/Engagement/PostEngagementChangedDto.cs` (+ a version helper beside `PostEngagementReader`), `Features/Social/Reactions/ReactionService.cs`, `Features/Social/PostIngestService.cs` (+ optional `Moderation/PostTakedownService.cs`); `social/services/{realtimeFeed.ts, new postCountsStore.ts}`, the mock feed adapter, `social/components/post/PostActions.tsx` (counts props only), `social/hooks/{useReactionToggle,useReaction,useAmplify}.ts`, `social/notifications/{notificationsStore,notificationModel,notificationTypes,notificationText}.ts` + `NotificationRow.tsx`, `core/auth/endSession.ts` (+ tests) | 07 merged | 3 | M |
 | 15 Exercise access | fullstack | Must | `Features/ExerciseLifecycleAdmin/**` (role set, filter docs, services' re-checks, + tests); `features/app-shell/StaffRouteTree.tsx` + a new not-allowed page under `features/app-shell/` (+ tests); `features/exerciseLifecycleAdmin/README.md`; `docs/features/exercise-lifecycle-admin/feature.md`, `docs/BUILD_PLAN.md` (stale lines) | seam S-4 | 3 | S |
+| 16 Import alt / engagement / order | backend | Must | `Features/Injects/Import/**`; `Features/Injects/InjectQueueService.cs` (shared reorder helpers extracted, `WriteQueueOrder` / `ReadQueueTokenAsync` / `BumpQueue`, behaviour unchanged) (+ tests); no migration, no `Program.cs` | 03 | 3 | S |
 | S1 Seed script | script | Must | `scripts/uat/Seed-DemoContent.ps1` (+ `.Tests.ps1`, `README-seed.md`, `test-fixtures/demo-pack/**`), `docs/demo/pack/schema/pack.schema.json` | 04, 05 deployed | 3 | M |
-| C1–C3 Content | content | Must | `docs/demo/pack/**` except `schema/` (on the #491 branch) | none | any | — |
+| C2–C3 Content (C1 dropped 10/15) | content | Must | `docs/demo/pack/**` except `schema/` (on the #491 branch) | none (C2 columns: 16) | any | — |
 
 **Why 03 depends on 01:** `ExternalRef` is a column. **Why 11 is last:** it adds one gating line to files that 08, 09,
 10 and 12b own, so it runs after they merge, alone. **Why 13 waits:** its tooltips touch `PostActions.tsx` (07) and
@@ -216,7 +224,7 @@ the media buttons (06).
 | **Fri 10/16** | Backend Gate 1 + Gate 2 → **umbrella PR to `main`** → deploy + reset. FE W2 live checks against UAT. C1–C3 content on #491 |
 | **Sat 10/17** | FE W2 merges → frontend deploy. W3: 12b, then 11; 13 in parallel. S1 seed script. Rehearsal 1 on a test seed |
 | **Sun 10/18** | Fixes. Manual UAT walk (`feature.md`). **Pencils down evening**: last backend + frontend deploy |
-| **Mon 10/19** | Final reset + seed (`-RunSheet bursts`), rehearsal 2 |
+| **Mon 10/19** | Final reset + seed (`-RunSheet exceptMsel`, DF-16 amended 10/15), rehearsal 2 |
 
 ### Integration seam (orchestrator-owned, never a wave story)
 
