@@ -19,8 +19,8 @@ needs. The backup site and switchover stay in #526.
 
 - [ ] `New-LoadTestExercise.ps1`: as a controller (Tom signs in / `PULSE_STAFF_SECRET`), creates an exercise named
       `Load test <date>` (`POST /api/org/exercises`), sets it staged/live with watermark on, imports a generated roster of
-      N participants (`Import-Roster.ps1`, auto-created citizen personas), loads a 200-post noise pool and one 240-post
-      burst item, and writes the join URLs to a git-ignored local file. Never touches another exercise.
+      N participants (`Import-Roster.ps1`, auto-created citizen personas), loads a 200-post noise pool and one valid
+      20-post burst item (the validator's `MaxBurstPosts`, at the minimum 3 s gap) to exercise the burst runner, and writes the join URLs to a git-ignored local file. Never touches another exercise.
 - [ ] `Remove-LoadTestExercise.ps1`: noise off, tier `engine`, lifecycle to completed then archived (story 22's route
       when deployed, else the lifecycle transition), and deletes the local token file.
 
@@ -32,7 +32,10 @@ needs. The backup site and switchover stay in #526.
       reads the feed every 30 s, likes or reposts about once a minute, posts about once every 5 minutes, replies
       occasionally; the mix is configurable.
 - [ ] Steps 20 → 40 → 100 users, 10 minutes each (PDF-D5); in each step a controller session sets noise High and fires
-      the burst at 120 posts/min for 2 minutes.
+      the 20-post burst item, and the harness itself drives the **120 posts/min** load for 2 minutes as paced
+      `controller-as-persona` writes (`POST /api/posts`, one every 0.5 s, round-robin over NPC personas). A single run-sheet
+      burst cannot reach that rate (`InjectItemValidator.MaxBurstPosts` = 20, `InjectBurstPacing.MinGapSeconds` = 3), and
+      UAT stays unchanged (PDF-D1).
 - [ ] Measures per step: p50/p95/p99 and error rate for `POST /api/posts`, `GET /api/feed`, reaction writes, join;
       **SignalR fan-out lag** (post accepted → `PostReceived` at every other client; p50/p95/max) and dropped/late
       frames; reconnects. Writes CSV + a JSON summary.

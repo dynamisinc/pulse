@@ -10,7 +10,7 @@
 | PDF-D2 | **The harness is a .NET 10 console app, `tools/Pulse.LoadTest`**, using `HttpClient` and `Microsoft.AspNetCore.SignalR.Client`, so it measures SignalR fan-out lag natively and needs nothing installed beyond the .NET SDK already on the box. No k6 | orchestrator |
 | PDF-D3 | **Load users are real participant logins** provisioned with `Import-Roster.ps1` into the throwaway exercise and joined through `POST /api/auth/join`, paced under the join limit (30/min, one global bucket behind the App Service proxy), so ~4 minutes for 100 users. The token file stays local and git-ignored | orchestrator |
 | PDF-D4 | **Stop rules:** abort a step when the error rate is above 5% or POST p95 above 5 s for 60 s; never run during a deploy; the demo exercise is never targeted (the harness refuses the demo exercise id) | orchestrator |
-| PDF-D5 | **Steps:** 20, 40, 100 concurrent participants, 10 minutes each, with white noise High (15/min) and a 120 posts/min burst for 2 minutes in each step (NFR-002 bar) | Tom 10/15 + #526 |
+| PDF-D5 | **Steps:** 20, 40, 100 concurrent participants, 10 minutes each, with white noise High (15/min) and a 120 posts/min burst for 2 minutes in each step (NFR-002 bar). The burst is **harness-paced** `controller-as-persona` writes, because one run-sheet burst is capped at 20 posts with a 3 s minimum gap; one valid 20-post burst item still runs per step to exercise the burst runner (amended 10/15 after the Copilot review on #548) | Tom 10/15 + #526 |
 
 ## Wave plan
 
