@@ -10,7 +10,8 @@
  *    (`viewerEngagement`) and on every `PostPinChanged` push, so pinning, unpinning,
  *    liking or unliking - or a controller pinning a post for everyone - updates the tab
  *    without a reload. Reads never overlap: a change that lands while one is on the wire
- *    queues exactly one more, and only the newest read's answer is applied.
+ *    queues exactly one more, and the in-flight answer is DISCARDED (it predates the
+ *    change), so only the newest read's answer is applied.
  *  - A `PostPinChanged` also PATCHES the listed post's `pinnedForAll` at once, so the
  *    "Pinned" marker moves before the re-read lands.
  *  - A failed FIRST read is `status: 'error'` (never an empty tab in its place); a failed
@@ -69,6 +70,10 @@ export function usePinnedFeed(pinChanges: PinChangeSource = realtimeFeed): UsePi
           try {
             const next = await resolvePinnedFeed()
             if (!aliveRef.current) return
+            // A change landed while this read was on the wire (it already patched the list and
+            // queued another pass): this answer predates it, so drop it instead of restoring
+            // the stale marker. The queued read applies the newer state.
+            if (queuedRef.current) continue
             setItems(next)
             setStatus('ready')
           } catch {

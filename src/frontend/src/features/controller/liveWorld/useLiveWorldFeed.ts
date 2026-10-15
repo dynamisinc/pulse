@@ -331,6 +331,17 @@ export function useLiveWorldFeed({
       pinClockRef.current += 1
       pinChangesRef.current.set(postId, { at: pinClockRef.current, pinned: pinnedForAll })
     }
+    // A live arrival still waiting in the batch queue is not in `state` yet, so
+    // `applyPinChange` cannot reach it: patch the queued view too, or the flush would insert
+    // the row with its older pin flag.
+    if (queueRef.current.some(view => view.id === postId)) {
+      queueRef.current = queueRef.current.map(view => {
+        if (view.id !== postId) return view
+        if (pinnedForAll) return { ...view, pinnedForAll: true }
+        const { pinnedForAll: _dropped, ...rest } = view
+        return rest
+      })
+    }
     setState(prev => applyPinChange(prev, postId, pinnedForAll))
   }, [])
 

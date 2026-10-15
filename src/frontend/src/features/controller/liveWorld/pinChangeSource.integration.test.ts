@@ -51,7 +51,9 @@ afterEach(async () => {
   realtimeFeed.stop()
 })
 
-describe('PostPinChanged -> realtimeFeed singleton -> defaultPinChangeSource (07 + 08)', () => {
+// The first case pays for a cold import of the whole realtimeFeed module graph (~8 s alone on
+// a Windows dev box, more under full-suite load), so the 10 s default is too tight.
+describe('PostPinChanged -> realtimeFeed singleton -> defaultPinChangeSource (07 + 08)', { timeout: 30_000 }, () => {
   it('delivers a push on the shared connection to the column seam as { postId, pinnedForAll }', async () => {
     const { realtimeFeed } = await import('@/features/social/services/realtimeFeed')
     const { defaultPinChangeSource } = await import('./pinChangeSource')
