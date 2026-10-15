@@ -14,6 +14,10 @@
  *      an object with exactly the participant-safe keys, no more;
  *   3. NARROWING — extra server-side keys smuggled onto a media item / inReplyTo /
  *      viewer are not passed through.
+ *
+ * Demo-feedback story 07 (DF-6/DF-7): the viewer state gained a THIRD key, `pinned`
+ * (the caller's own personal pin), and the view gained `pinnedForAll?: true`. Both are
+ * participant-safe; WHO pinned a post for everyone (and when) never is.
  */
 import { describe, expect, it } from 'vitest'
 import { toParticipantView } from '../services/postService'
@@ -41,7 +45,8 @@ const FULL_POST: Post = {
   inReplyTo: { postId: 'post-parent', authorHandle: 'FulcoEM' },
   linkPreview: { title: 'T', domain: 'example.news', imageLabel: 'L', imageUrl: '/i.png' },
   counts: { reply: 1, repost: 2, like: 3 },
-  viewer: { liked: true, reposted: false },
+  viewer: { liked: true, reposted: false, pinned: true },
+  pinnedForAll: true,
   createdWallClock: '2026-07-01T00:00:00.000Z',
   scenarioTime: '2033-09-04T13:15:00Z',
   origin: 'inject',
@@ -75,6 +80,9 @@ describe('XC-002 under contract v2 — types', () => {
     expect(view.viewer?.liked).toBe(true)
     expect(view.inReplyTo?.authorHandle).toBe('FulcoEM')
     expect(view.media?.[0]?.kind).toBe('video')
+    // Story 07: the personal pin and the pinned-for-everyone flag are readable too.
+    expect(view.viewer?.pinned).toBe(true)
+    expect(view.pinnedForAll).toBe(true)
   })
 })
 
@@ -90,6 +98,7 @@ describe('XC-002 under contract v2 — runtime', () => {
         'inReplyTo',
         'linkPreview',
         'media',
+        'pinnedForAll',
         'scenarioTime',
         'text',
         'viewer',
@@ -154,12 +163,42 @@ describe('XC-002 under contract v2 — narrowing of nested members', () => {
     const smuggled = {
       ...FULL_POST,
       inReplyTo: { postId: 'p', authorHandle: 'h', parentActingHumanId: 'human-secret' },
-      viewer: { liked: true, reposted: true, personaId: 'persona-secret' },
+      viewer: { liked: true, reposted: true, pinned: false, personaId: 'persona-secret' },
     } as unknown as Post
 
     const view = toParticipantView(smuggled)
 
     expect(Object.keys(view.inReplyTo ?? {}).sort()).toEqual(['authorHandle', 'postId'])
+    // The three documented viewer keys (story 07 added `pinned`), nothing else.
+    expect(Object.keys(view.viewer ?? {}).sort()).toEqual(['liked', 'pinned', 'reposted'])
+    expect(view.viewer?.pinned).toBe(false)
+  })
+
+  it('keeps a pre-pin viewer to exactly liked + reposted (no invented pinned key)', () => {
+    const view = toParticipantView({ ...FULL_POST, viewer: { liked: false, reposted: true } })
+
     expect(Object.keys(view.viewer ?? {}).sort()).toEqual(['liked', 'reposted'])
+  })
+
+  it('never carries who pinned a post for everyone, or when (DF-7, XC-002)', () => {
+    const smuggled = {
+      ...FULL_POST,
+      pinnedForAllAt: '2033-09-04T13:20:00Z',
+      pinnedForAllByHumanId: 'human-secret-controller',
+    } as unknown as Post
+
+    const view = toParticipantView(smuggled)
+
+    expect(view.pinnedForAll).toBe(true)
+    expect(Object.prototype.hasOwnProperty.call(view, 'pinnedForAllAt')).toBe(false)
+    expect(Object.prototype.hasOwnProperty.call(view, 'pinnedForAllByHumanId')).toBe(false)
+    expect(JSON.stringify(view)).not.toContain('human-secret-controller')
+  })
+
+  it('treats a false or null pinnedForAll as absent (the wire never sends false)', () => {
+    for (const value of [false, null]) {
+      const view = toParticipantView({ ...FULL_POST, pinnedForAll: value } as unknown as Post)
+      expect(Object.prototype.hasOwnProperty.call(view, 'pinnedForAll')).toBe(false)
+    }
   })
 })

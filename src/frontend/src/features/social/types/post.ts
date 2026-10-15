@@ -86,10 +86,17 @@ export interface PostInReplyTo {
  * The CALLER's own engagement state on a post. Present on feed/thread reads for
  * a persona-bound participant session; ABSENT on realtime broadcasts and for
  * staff sessions (so a missing `viewer` means "unknown", not "not liked").
+ *
+ * `pinned` (demo-feedback DF-6, story 07): the caller's own PERSONAL pin (a `pin`
+ * reaction nobody else can see). The server always sends it beside `liked` /
+ * `reposted`; it is typed optional only so the pre-pin client fixtures and the
+ * like/repost reconcile path (which never carry it) still type-check. Absent reads
+ * as "not pinned".
  */
 export interface PostViewerState {
   readonly liked: boolean
   readonly reposted: boolean
+  readonly pinned?: boolean
 }
 
 /**
@@ -148,6 +155,12 @@ export interface Post {
   readonly counts: PostCounts
   /** The caller's own like/repost state (contract v2). Participant-safe; absent when unknown. */
   readonly viewer?: PostViewerState
+  /**
+   * A controller pinned this post for EVERY participant (demo-feedback DF-7). `true`
+   * or absent, never `false` (the server omits it). Participant-safe: who pinned it
+   * and when are staff-only and never on any post shape.
+   */
+  readonly pinnedForAll?: true
   /** REAL wall-clock ISO instant the post was ingested. Telemetry-only —
    * never render this; see `@/core/time/wallClock`. */
   readonly createdWallClock: string
@@ -175,6 +188,8 @@ export interface ParticipantPostView {
   /** Baseline + real engagement (the server adds them; the client just renders). */
   readonly counts: PostCounts
   readonly viewer?: PostViewerState
+  /** Pinned for everyone by a controller (DF-7): `true` or absent. Never says who or when. */
+  readonly pinnedForAll?: true
   readonly scenarioTime: string
 }
 

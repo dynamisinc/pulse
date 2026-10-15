@@ -46,6 +46,16 @@
  * is a push-only fact: while the transport is POLLING there is no `PostRemoved`, and the
  * post simply stops being returned by the next read (the server omits it).
  *
+ * DEMO-FEEDBACK DF-7 (story 07): `PostPinChanged`. When a controller pins a post for everyone
+ * (or clears it) the hub pushes `PostPinChanged { postId, pinnedForAll }` to the exercise group.
+ * It is validated like `PostRemoved` - rebuilt as exactly `{ postId, pinnedForAll }` (a
+ * non-object, an empty / non-string id or a non-boolean flag is dropped, and nothing else the
+ * wire carried rides along; never who pinned it) - and surfaced through `subscribePinChanged`,
+ * the FROZEN name story 08 (the console's live world) also uses. `PostReceived` keeps the post's
+ * `pinnedForAll` flag when it is `true`; `viewer` is still never copied from a broadcast (it
+ * would be someone else's state). Like a removal, a pin change is push-only: while polling there
+ * is none, and the next read of the Pinned tab carries the truth.
+ *
  * IDENTITY CHANGE (COR-001). Two things happen when the identity on the tab changes (sign-out,
  * every sign-in; `resetClientSession()` runs both):
  *
@@ -98,6 +108,9 @@ const POST_RECEIVED_EVENT = 'PostReceived'
 /** The hub event carrying a taken-down post's id (B6). Mirrors the broadcaster's constant. */
 const POST_REMOVED_EVENT = 'PostRemoved'
 
+/** The hub event carrying an exercise pin change (DF-7). Mirrors the broadcaster's constant. */
+const POST_PIN_CHANGED_EVENT = 'PostPinChanged'
+
 /** Default polling cadence while degraded (NFR-003 fallback). */
 const DEFAULT_POLL_INTERVAL_MS = 5000
 
@@ -117,6 +130,35 @@ export interface PostRemovedEvent {
 
 /** A subscriber that receives each validated `PostRemoved`. */
 export type PostRemovedHandler = (event: PostRemovedEvent) => void
+
+/**
+ * An exercise pin change (DF-7), as surfaced to subscribers: the post id and the new
+ * pinned-for-everyone flag, NOTHING else (never who pinned it or when).
+ */
+export interface PostPinChangedEvent {
+  readonly postId: string
+  readonly pinnedForAll: boolean
+}
+
+/** A subscriber that receives each validated `PostPinChanged`. */
+export type PostPinChangedHandler = (event: { postId: string; pinnedForAll: boolean }) => void
+
+/**
+ * The exercise-pin surface of the feed transport (demo-feedback story 07). A separate
+ * interface - not a new member of {@link RealtimeFeed} - so every existing `RealtimeFeed`
+ * fake keeps compiling; the app-wide {@link realtimeFeed} and {@link createRealtimeFeed}
+ * implement both.
+ */
+export interface PinChangeSource {
+  /**
+   * Registers a handler for each validated `PostPinChanged { postId, pinnedForAll }` push.
+   * Returns an idempotent unsubscribe. Push-only (see the module header). FROZEN name:
+   * story 08 subscribes through it.
+   */
+  subscribePinChanged(
+    handler: (e: { postId: string; pinnedForAll: boolean }) => void,
+  ): () => void
+}
 
 /** The social feed's real-time consumer surface. */
 export interface RealtimeFeed {
@@ -143,7 +185,7 @@ export interface RealtimeFeed {
  * A {@link RealtimeFeed} that can also forget the identity it served. Kept off `RealtimeFeed`
  * itself: consumers and their test fakes never need it, only the session-reset registration.
  */
-export interface SessionResettableFeed extends RealtimeFeed {
+export interface SessionResettableFeed extends RealtimeFeed, PinChangeSource {
   /**
    * The session is ending: forget everything scoped to the identity that is leaving - the
    * dedup set, the polling baseline, the in-flight poll flag - and make any `GET /feed` still on
@@ -210,7 +252,7 @@ function toInReplyTo(value: unknown): PostInReplyTo | undefined {
  */
 function toParticipantPostView(payload: unknown): ParticipantPostView | null {
   if (typeof payload !== 'object' || payload === null) return null
-  const { id, authorPersonaId, text, scenarioTime, counts, media, inReplyTo } =
+  const { id, authorPersonaId, text, scenarioTime, counts, media, inReplyTo, pinnedForAll } =
     payload as Record<string, unknown>
   if (
     typeof id !== 'string' || id.length === 0 ||
@@ -236,6 +278,8 @@ function toParticipantPostView(payload: unknown): ParticipantPostView | null {
     counts: { reply, repost, like },
     ...(mediaList !== undefined ? { media: mediaList } : {}),
     ...(replyTo !== undefined ? { inReplyTo: replyTo } : {}),
+    // DF-7: `true` or absent - a `false` / malformed flag is simply not pinned.
+    ...(pinnedForAll === true ? { pinnedForAll: true as const } : {}),
   }
 }
 
@@ -254,6 +298,19 @@ function toPostRemovedEvent(payload: unknown): PostRemovedEvent | null {
 }
 
 /**
+ * Validates a raw `PostPinChanged` payload and rebuilds it as `{ postId, pinnedForAll }`.
+ * Returns `null` (dropped) for anything but an object with a non-empty string `postId` and a
+ * boolean `pinnedForAll`. A fresh literal from the two known keys - never a spread (XC-002).
+ */
+function toPostPinChangedEvent(payload: unknown): PostPinChangedEvent | null {
+  if (typeof payload !== 'object' || payload === null) return null
+  const { postId, pinnedForAll } = payload as Record<string, unknown>
+  if (typeof postId !== 'string' || postId.length === 0) return null
+  if (typeof pinnedForAll !== 'boolean') return null
+  return { postId, pinnedForAll }
+}
+
+/**
  * Drives the feed transport: real-time by default, polling fallback while
  * degraded, automatic recovery. See the module header for the guarantees.
  */
@@ -264,6 +321,7 @@ class RealtimeFeedController implements SessionResettableFeed {
   private readonly reconnectWindowMs: number
   private readonly handlers = new Set<PostStreamHandler>()
   private readonly removedHandlers = new Set<PostRemovedHandler>()
+  private readonly pinChangedHandlers = new Set<PostPinChangedHandler>()
   private readonly seenIds = new Set<string>()
   private currentMode: FeedTransportMode = 'connecting'
   private baselined = false
@@ -278,6 +336,7 @@ class RealtimeFeedController implements SessionResettableFeed {
   private reconnectWindowTimer: ReturnType<typeof setTimeout> | null = null
   private unsubscribePush: (() => void) | null = null
   private unsubscribeRemoved: (() => void) | null = null
+  private unsubscribePinChanged: (() => void) | null = null
   private unsubscribeState: (() => void) | null = null
 
   constructor(options: CreateRealtimeFeedOptions = {}) {
@@ -311,6 +370,16 @@ class RealtimeFeedController implements SessionResettableFeed {
     }
   }
 
+  subscribePinChanged(handler: PostPinChangedHandler): () => void {
+    this.pinChangedHandlers.add(handler)
+    let active = true
+    return () => {
+      if (!active) return
+      active = false
+      this.pinChangedHandlers.delete(handler)
+    }
+  }
+
   async start(): Promise<void> {
     if (this.started) return
     this.started = true
@@ -321,6 +390,9 @@ class RealtimeFeedController implements SessionResettableFeed {
     })
     this.unsubscribeRemoved = this.connection.subscribe(POST_REMOVED_EVENT, payload => {
       this.handleRemovedPush(payload)
+    })
+    this.unsubscribePinChanged = this.connection.subscribe(POST_PIN_CHANGED_EVENT, payload => {
+      this.handlePinChangedPush(payload)
     })
     this.unsubscribeState = this.connection.onStateChange((state, reason) => {
       this.handleStateChange(state, reason)
@@ -353,6 +425,10 @@ class RealtimeFeedController implements SessionResettableFeed {
     if (this.unsubscribeRemoved !== null) {
       this.unsubscribeRemoved()
       this.unsubscribeRemoved = null
+    }
+    if (this.unsubscribePinChanged !== null) {
+      this.unsubscribePinChanged()
+      this.unsubscribePinChanged = null
     }
     if (this.unsubscribeState !== null) {
       this.unsubscribeState()
@@ -526,6 +602,19 @@ class RealtimeFeedController implements SessionResettableFeed {
     }
   }
 
+  private handlePinChangedPush(payload: unknown): void {
+    const event = toPostPinChangedEvent(payload)
+    if (event === null) return
+    // Same isolation as a removal: one throwing consumer never starves the others.
+    for (const handler of [...this.pinChangedHandlers]) {
+      try {
+        handler(event)
+      } catch {
+        // Isolated.
+      }
+    }
+  }
+
   private handlePoll(posts: readonly Post[]): void {
     if (!this.baselined) {
       // First observation after degrading: adopt the current feed as the baseline
@@ -560,7 +649,7 @@ export function createRealtimeFeed(
  * Lazy: no side effects until started.
  */
 const appWideFeed = createRealtimeFeed()
-export const realtimeFeed: RealtimeFeed = appWideFeed
+export const realtimeFeed: RealtimeFeed & PinChangeSource = appWideFeed
 
 // The app-wide feed is identity-scoped state living for the life of the TAB: forget it whenever the
 // session ends (sign-out, every sign-in). A registration, not an import from `core/auth` into here
