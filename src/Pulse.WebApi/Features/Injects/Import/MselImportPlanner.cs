@@ -434,7 +434,7 @@ public static class MselImportPlanner
     /// number 0..<see cref="InjectItemValidator.MaxBaseline"/>: the readers write a numeric <c>.xlsx</c> cell in invariant
     /// shortest form (Excel's <c>962.0</c> reads <c>962</c>, a fraction keeps its decimals), and text is parsed with the
     /// invariant culture (sign, decimal point and exponent allowed; no thousands separator, so <c>1,5</c> is never 15).
-    /// Negative, fractional, too large or not a number is the row's failure, naming the column.
+    /// Negative, fractional at any precision, too large or not a number is the row's failure, naming the column.
     /// </summary>
     private static (int? Value, string? Error) ParseBaseline(RowCells cells, string header)
     {
@@ -443,7 +443,8 @@ public static class MselImportPlanner
             return (null, null);
         }
 
-        if (decimal.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var number)
+        if (IsWholeNumberText(value)
+            && decimal.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var number)
             && number == decimal.Truncate(number)
             && number is >= 0 and <= InjectItemValidator.MaxBaseline)
         {
@@ -453,6 +454,72 @@ public static class MselImportPlanner
         return (null, string.Create(
             CultureInfo.InvariantCulture,
             $"{header} '{value}' is not a whole number from 0 to {InjectItemValidator.MaxBaseline:N0}."));
+    }
+
+    /// <summary>
+    /// Whether invariant number text (optional sign, digits, optional <c>.</c> and digits, optional exponent) is a whole
+    /// number at ANY precision (Gate-1 L-2). <c>decimal</c> parsing rounds past 28 significant digits, so
+    /// <c>962.000…001</c> or <c>1e-30</c> would otherwise read as whole; here every digit from the decimal point on, once
+    /// the exponent has moved it, must be zero (<c>962.0</c>, <c>1e3</c> and <c>9620e-1</c> are whole).
+    /// </summary>
+    private static bool IsWholeNumberText(string value)
+    {
+        var index = 0;
+        if (index < value.Length && value[index] is '+' or '-')
+        {
+            index++;
+        }
+
+        var digits = new StringBuilder(value.Length);
+        var integerDigits = 0;
+        while (index < value.Length && char.IsAsciiDigit(value[index]))
+        {
+            digits.Append(value[index++]);
+            integerDigits++;
+        }
+
+        if (index < value.Length && value[index] == '.')
+        {
+            index++;
+            while (index < value.Length && char.IsAsciiDigit(value[index]))
+            {
+                digits.Append(value[index++]);
+            }
+        }
+
+        if (digits.Length == 0)
+        {
+            return false;
+        }
+
+        long exponent = 0;
+        if (index < value.Length && value[index] is 'e' or 'E')
+        {
+            // A bounded exponent: far past ±100,000 nothing but zero is in 0..MaxBaseline, and zero is not worth it.
+            if (!long.TryParse(value.AsSpan(index + 1), NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out exponent)
+                || exponent is > 100_000 or < -100_000)
+            {
+                return false;
+            }
+
+            index = value.Length;
+        }
+
+        if (index != value.Length)
+        {
+            return false;
+        }
+
+        var point = integerDigits + exponent;
+        for (var position = Math.Max(0L, point); position < digits.Length; position++)
+        {
+            if (digits[(int)position] != '0')
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static string Count(int count, string singular, string plural) =>

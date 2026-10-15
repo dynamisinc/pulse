@@ -172,6 +172,8 @@ public sealed class MselImportPulseColumnsTests
     [InlineData(" 1000000 ", 1_000_000)]
     [InlineData("+7", 7)]
     [InlineData("962.0", 962)]
+    [InlineData("962.00000000000000000000000000000000", 962)]
+    [InlineData("9620e-1", 962)]
     [InlineData("1e3", 1000)]
     public void PulseEngagement_AWholeNumberAsText_IsParsedWithTheInvariantCulture(string cell, int expected)
     {
@@ -203,6 +205,10 @@ public sealed class MselImportPulseColumnsTests
     [InlineData("Pulse Replies", "1E+30")]
     [InlineData("Pulse Replies", "0x10")]
     [InlineData("Pulse Likes", "962 likes")]
+    [InlineData("Pulse Likes", "1e-30")]
+    [InlineData("Pulse Reposts", "0.0000000000000000000000000000001")]
+    [InlineData("Pulse Replies", "962.0000000000000000000000000000001")]
+    [InlineData("Pulse Likes", "25e-1")]
     public void PulseEngagement_EveryInvalidValue_FailsTheRow_NamingTheColumn(string column, string value)
     {
         var spec = column switch
