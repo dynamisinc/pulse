@@ -201,6 +201,7 @@ until then, so I do not recommend it.
 
 - `media/pio-statement-card.png` on the PIO's laptop, and `media/news-mill-road.mp4` on the controller's laptop if
   you show the live upload in beat 2.
+- `kestrel-msel.xlsx` on the controller's laptop for the import beat ([below](#on-stage-seed-dry-run-import)).
 - The PIO participant posts as `KestrelCoEM` (`New-DemoParticipant.ps1 -PersonaHandle KestrelCoEM`, the
   default). Their profile will show the County EM posts from the opening feed as their own history. That is
   intended.
@@ -270,8 +271,9 @@ pin "where to get water", swap p10 for p19.
 ### The run sheet as a Cadence MSEL (`kestrel-msel.xlsx`)
 
 This file is for the import beat (DF-16). It renders the run sheet as a Cadence export would: sheet `MSEL`,
-Cadence's 16 columns in order plus the Pulse extension `Pulse Media`, and Cadence's formatting (styled header,
-alternating rows, autofilter). It adds a frozen header, and it also has Cadence's Phases and Objectives sheets.
+Cadence's 16 columns in order, and Cadence's formatting (styled header, alternating rows, autofilter). After them
+come five Pulse extension columns: `Pulse Media`, `Pulse Media Alt`, `Pulse Likes`, `Pulse Reposts` and
+`Pulse Replies`. It adds a frozen header, and it also has Cadence's Phases and Objectives sheets.
 
 | Delivery Method | Rows |
 |---|---|
@@ -286,10 +288,14 @@ alternating rows, autofilter). It adds a frozen header, and it also has Cadence'
 
 - **The eight imported items** are the single-post items rs01, rs05, rs07, rs08, rs09, rs12, rs13 and rs15. In
   `pack.json` each carries `"msel"` set to its Inject # (4, 9, 11, 13, 14, 17, 18 and 20). The generator copies each
-  item's persona (`From / Source` = `@handle`), post text (`Description`, word for word), notes and media from
-  `pack.json`, and places the row at StartEx + its `plannedMinute`. The import therefore gives the same T+3 to
-  T+18 (DF-11). `Pulse Media` names the library file the seed uploads: `news-mill-road.mp4` (rs01),
-  `scoop-brown-tap.mp4` (rs05) and `pio-statement-card.png` (rs08).
+  item's persona (`From / Source` = `@handle`), post text (`Description`, word for word), notes, media, alt text
+  and engagement baseline from `pack.json`, and places the row at StartEx + its `plannedMinute`. The import
+  therefore gives the same T+3 to T+18 (DF-11).
+- **The Pulse columns.** `Pulse Media` names the library file the seed uploads: `news-mill-road.mp4` (rs01),
+  `scoop-brown-tap.mp4` (rs05) and `pio-statement-card.png` (rs08). `Pulse Media Alt` carries the pack's alt text
+  for each file (`|`-separated when a post has several). `Pulse Likes`, `Pulse Reposts` and `Pulse Replies` carry
+  the post's `engagementBaseline` as whole numbers. They are blank for rs08 and rs09, which have no baseline on
+  purpose. The non-social rows leave all five blank.
 - **rs03 and rs10 are seeded, not in the MSEL, because an MSEL row has no reply-to.** rs04's seven replies and
   rs10 all hang off rs03, so rs03 has to be a seeded item they can reference. rs10 is itself a reply inside rs03's
   thread. The bursts stay seeded too (DF-9: one social row is one post).
@@ -301,11 +307,12 @@ alternating rows, autofilter). It adds a frozen header, and it also has Cadence'
 - **Rebuild the file** after any change to those eight items or their timing:
   `python3 docs/demo/pack/tools/build-kestrel-msel.py` (it needs `openpyxl`; add `--check` to check the committed
   file only). The generator reads `pack.json` and refuses to build if a `msel` value doesn't match the row number
-  it assigns. It then re-reads the workbook with a Python mirror of the importer's rules. The output is
-  byte-stable.
-- **Checked against the real importer** on 2026-10-15: the server's own `MselWorkbookReader` and
-  `MselImportPlanner` (ClosedXML 0.105.1) read the file as **34 rows, 8 social, 26 skipped, 0 failed and 0
-  warnings**, with minutes T+3 to T+18 as authored.
+  it assigns. It then re-reads the workbook with a Python mirror of the importer's rules, including story 14's
+  rules for the alt and engagement columns. The output is byte-stable.
+- **Checked against the real importer** on 2026-10-15, before the four story-14 columns were added: the server's
+  own `MselWorkbookReader` and `MselImportPlanner` (ClosedXML 0.105.1) read the file as **34 rows, 8 social, 26
+  skipped, 0 failed and 0 warnings**, with minutes T+3 to T+18 as authored. The re-check against story 14's
+  importer runs once that story is finished.
 
 ### On stage: seed, dry run, import
 
@@ -316,18 +323,20 @@ alternating rows, autofilter). It adds a frozen header, and it also has Cadence'
 2. **Run sheet → Import**, choose `kestrel-msel.xlsx` and run the **dry run**. It reports 34 rows: 8 to create,
    26 skipped ("not a social-media inject (Delivery Method: Phone)" and so on) and none failed. The skip list is the
    point: Pulse reads the exercise's own MSEL and takes only the rows meant for it.
-3. **Import.** The eight items appear within 3 seconds. Importing the same file again reports all eight
-   `unchanged` (DF-10 keys on `Inject #`).
+3. **Import.** The eight items appear within 3 seconds, each in its place among the seeded items. Importing the
+   same file again reports all eight `unchanged` (DF-10 keys on `Inject #`).
 
-Imported items differ from seeded ones in three ways:
+An imported item matches the seeded one it replaces (story 14, #518):
 
-- **Order.** An import appends after the existing items, so the eight land below the seven seeded items, out of
-  story order. Fire each row by its T+ minute rather than with "Fire next", or move the rows up first.
-- **No seeded baselines.** An MSEL row cannot carry `engagementBaseline`, so imported posts show real counts only.
-  This matters most for **rs05**, The Scoop's video, which had 962 / 718 / 141 in the table above and now starts
-  at 0. rs03 (still seeded, 1,840 likes) still shows the rumor outrunning the official word.
-- **Media alt text is the file name** (`news-mill-road`, `scoop-brown-tap`, `pio-statement-card`), not the pack's
-  description, because the importer has nowhere else to take it from.
+- **Alt text and engagement (DF-17).** The import keeps each file's alt text from `Pulse Media Alt` and each
+  post's baseline from the three engagement columns. So The Scoop's video (rs05) still starts at 962 / 718 / 141
+  and outruns the official word, as in the table above.
+- **Time order (DF-18).** The import slots each new item in by planned minute, just before the first pending item
+  with a later minute. With the seven seeded items (rs02, rs03, rs04, rs06, rs10, rs11 and rs14), the run sheet
+  comes out in story order, rs01 to rs15, and "Fire next" walks it in time. Fired items never move.
+
+Story 03's importer ignores columns it doesn't know. On a build without story 14, the file still imports, but
+without the alt text and engagement, and the items are appended at the end.
 
 ## Editing rules (S1 and the schema enforce most of them)
 

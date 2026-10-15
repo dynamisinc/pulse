@@ -12,9 +12,9 @@ WHAT THE FILE IS FOR (demo-feedback DF-16, task C2 of #511)
 WHAT IT CONTAINS
     * One StartEx row (the earliest Scenario Day / Scenario Time in the file) and an EndEx row.
     * One "Social Media" row for each of the 8 single-post run-sheet items that can travel through an MSEL:
-      rs01, rs05, rs07, rs08, rs09, rs12, rs13 and rs15. Their persona, post text, media, notes and planned minute
-      are READ FROM pack.json, so the MSEL cannot drift from the pack. Their Title, To / Target, Track, Expected
-      Action, Priority and Location are MSEL-only and live in SOCIAL_ROWS below.
+      rs01, rs05, rs07, rs08, rs09, rs12, rs13 and rs15. Their persona, post text, media and its alt text, engagement
+      baseline, notes and planned minute are READ FROM pack.json, so the MSEL cannot drift from the pack. Their Title,
+      To / Target, Track, Expected Action, Priority and Location are MSEL-only and live in SOCIAL_ROWS below.
       rs03 (the impersonator post that the rs04 burst replies to) and rs10 (the verified utility's reply inside
       rs03's thread) are NOT in the MSEL: an MSEL row has no reply-to, and rs03 must exist before rs04 and rs10 can
       reply to it. They stay seeded, like every burst.
@@ -36,9 +36,10 @@ INJECT NUMBERS
 CADENCE LAYOUT (MselWorksheetBuilder / ExcelFormattingHelper.MselColumns, read 2026-10-15)
     Sheet "MSEL"; columns, in order: Inject #, Title, Description, Scheduled Time, Scenario Day, Scenario Time,
     From / Source, To / Target, Delivery Method, Track, Phase, Expected Action, Notes, Priority, Location,
-    Responsible Controller; then the optional Pulse extension column "Pulse Media". Inject # is a NUMBER cell;
-    everything else is text, with times as "HH:mm" and Scenario Day / Priority as digit strings, exactly as Cadence
-    writes them. Header bold on light blue, centred, wrapped, Cadence's column widths; alternate rows AliceBlue;
+    Responsible Controller; then the optional Pulse extension columns "Pulse Media", "Pulse Media Alt",
+    "Pulse Likes", "Pulse Reposts" and "Pulse Replies" (Cadence ignores columns it does not know; so does Pulse's
+    importer for Cadence's). Inject # is a NUMBER cell; so are the three engagement cells. Everything else is text,
+    with times as "HH:mm" and Scenario Day / Priority as digit strings, exactly as Cadence writes them. Header bold on light blue, centred, wrapped, Cadence's column widths; alternate rows AliceBlue;
     autofilter. Added here (not in Cadence): a frozen header row. Cadence's "Phases" and "Objectives" sheets are
     included as an export with those options would have them.
     Cadence's delivery methods are Verbal, Phone, Email, Radio, Written, Simulation and Other; "Social Media" and
@@ -50,18 +51,34 @@ RESPONSIBLE CONTROLLER
     target exercise adds a warning to that row. The non-social rows carry SimCell role names because the importer
     skips them before it reads that column.
 
-PULSE MEDIA
-    The media-library file name: the base name of the pack file, which is what Seed-DemoContent.ps1 uploads and
-    what the server keeps (MediaUploadService.SanitizeFileName). rs01 news-mill-road.mp4, rs05 scoop-brown-tap.mp4,
-    rs08 pio-statement-card.png. The seed must have uploaded the media before the import, or those rows fail.
+PULSE MEDIA, PULSE MEDIA ALT
+    Pulse Media is the media-library file name: the base name of the pack file, which is what Seed-DemoContent.ps1
+    uploads and what the server keeps (MediaUploadService.SanitizeFileName). rs01 news-mill-road.mp4, rs05
+    scoop-brown-tap.mp4, rs08 pio-statement-card.png. The seed must have uploaded the media before the import, or
+    those rows fail. Pulse Media Alt (DF-17, story 14) carries each file's alt text, "|"-separated in the same order:
+    the post's own media "alt" when the pack gives one, else the media item's "alt", trimmed, exactly what the seed
+    sends. Without it the importer would fall back to the file-name stem ("pio-statement-card"), short of NFR-001.
+
+PULSE LIKES, PULSE REPOSTS, PULSE REPLIES (DF-17, story 14)
+    The post's engagementBaseline like / repost / reply as integer cells, blank when the pack gives none (rs08 and
+    rs09 have no baseline on purpose: they show real counts, like the PIO's own post). So The Scoop's video (rs05)
+    still outruns the official word after an import, as it does when seeded.
+
+ORDER (DF-18, story 14)
+    The importer places each created item before the first PENDING item with a later planned minute, so with the
+    seed's seven items (rs02, rs03, rs04, rs06, rs10, rs11, rs14) the run sheet comes out in story order and "Fire
+    next" walks it in time. Nothing in this file controls that beyond the planned minutes.
 
 THE CHECK (runs after every build, or alone with --check)
     Re-opens the workbook with openpyxl and applies a Python mirror of the importer (MselWorkbookReader +
     MselImportPlanner, src/Pulse.WebApi/Features/Injects/Import/): sheet choice, required headers, the cell-to-text
     rules, the social filter, DF-11 minutes, persona by handle, text length in code points after trimming (and no
     "<", so PostSanitizer cannot change a word), Title <= 120, Notes <= 500, unique Inject #, Pulse Media names
-    against the pack's library files (<= 4 images or exactly 1 video), Responsible Controller warnings. It also
-    checks that each social row's text, persona, media and minute equal the pack item, and prints the dry-run
+    against the pack's library files (<= 4 images or exactly 1 video), Pulse Media Alt (no more entries than files,
+    fewer or blank entries warn, each <= 1000 code points after trimming, alt with no media warns), the engagement
+    cells (blank, or a whole number 0 to 1,000,000), Responsible Controller warnings; and the non-social rows leave
+    every Pulse column blank. It also checks that each social row's text, persona, media, alt text, engagement and
+    minute equal the pack item, and prints the dry-run
     report the console would show: 34 rows, 8 social, 8 created, 26 skipped, 0 failed, 0 warnings on an exercise
     that has none of these Inject # values yet.
 
@@ -105,8 +122,12 @@ CADENCE_COLUMNS = [
     ("Phase", 20), ("Expected Action", 50), ("Notes", 40), ("Priority", 10), ("Location", 20),
     ("Responsible Controller", 20),
 ]
-PULSE_MEDIA_COLUMN = ("Pulse Media", 24)
-COLUMNS = CADENCE_COLUMNS + [PULSE_MEDIA_COLUMN]
+PULSE_COLUMNS = [
+    ("Pulse Media", 24), ("Pulse Media Alt", 60), ("Pulse Likes", 12), ("Pulse Reposts", 12), ("Pulse Replies", 12),
+]
+COLUMNS = CADENCE_COLUMNS + PULSE_COLUMNS
+ENGAGEMENT_COLUMNS = [("Pulse Likes", "like"), ("Pulse Reposts", "repost"), ("Pulse Replies", "reply")]
+ALT_SEPARATOR = "|"
 
 LIGHT_BLUE = "FFADD8E6"  # ClosedXML XLColor.LightBlue (MSEL header)
 ALICE_BLUE = "FFF0F8FF"  # XLColor.AliceBlue (even rows)
@@ -403,10 +424,13 @@ MAX_TITLE = 120
 MAX_NOTES = 500
 MAX_INJECT_NUMBER = 64
 MAX_IMAGES = 4
+MAX_ALT = 1000
+MAX_BASELINE = 1_000_000
 REQUIRED_HEADERS = ["Inject #", "Delivery Method", "From / Source", "Description"]
 KNOWN_HEADERS = [
     "Inject #", "Title", "Description", "Scheduled Time", "Scenario Day", "Scenario Time", "From / Source",
-    "Delivery Method", "Notes", "Responsible Controller", "Pulse Media",
+    "Delivery Method", "Notes", "Responsible Controller", "Pulse Media", "Pulse Media Alt", "Pulse Likes",
+    "Pulse Reposts", "Pulse Replies",
 ]
 
 
@@ -433,6 +457,7 @@ def load_pack() -> dict:
 def social_rows_from_pack(pack: dict) -> list[dict]:
     """The 8 social rows, read from the pack's run sheet (persona, text, media, notes, minute)."""
     media_files = {entry["key"]: entry["file"] for entry in pack["media"]}
+    media_alts = {entry["key"]: entry["alt"] for entry in pack["media"]}
     items = {item["key"]: item for item in pack["runSheet"]["items"]}
     rows = []
     for key, meta in SOCIAL_ROWS.items():
@@ -445,17 +470,24 @@ def social_rows_from_pack(pack: dict) -> list[dict]:
         if "replyTo" in post:
             raise SystemExit(f"{key} is a reply; an MSEL row has no reply-to")
         media = [Path(media_files[ref["ref"]]).name for ref in post.get("media", [])]
+        # The alt the seed sends: the post's own override when it has one, else the media item's; trimmed.
+        alts = [(ref.get("alt") or media_alts[ref["ref"]]).strip() for ref in post.get("media", [])]
+        if any(ALT_SEPARATOR in alt for alt in alts):
+            raise SystemExit(f"{key}: an alt text contains '{ALT_SEPARATOR}', the Pulse Media Alt separator")
+        baseline = post.get("engagementBaseline", {})
         rows.append(dict(
             id=key, minute=item["plannedMinute"], method=SOCIAL_MEDIA, title=meta["title"],
             description=post["text"], source="@" + post["persona"], target=PUBLIC_TARGET, track=SOCIAL_TRACK,
             expected=meta["expected"], notes=item.get("notes", ""), priority=meta["priority"],
-            location=PULSE_LOCATION, controller="", media=", ".join(media), pack_key=key))
+            location=PULSE_LOCATION, controller="", media=", ".join(media), alt=ALT_SEPARATOR.join(alts),
+            engagement=[baseline.get(field) for _, field in ENGAGEMENT_COLUMNS], pack_key=key))
     return rows
 
 
 def ordered_rows(pack: dict) -> list[dict]:
     """All rows in time order (non-social first on a tie), numbered 1..N, with {inject:id} references filled in."""
-    rows = [dict(row, media="", pack_key=None) for row in OTHER_ROWS] + social_rows_from_pack(pack)
+    rows = [dict(row, media="", alt="", engagement=[None, None, None], pack_key=None) for row in OTHER_ROWS]
+    rows += social_rows_from_pack(pack)
     rows.sort(key=lambda row: (row["minute"], row["method"] == SOCIAL_MEDIA))
     numbers = {row["id"]: index for index, row in enumerate(rows, start=1)}
     if len(numbers) != len(rows):
@@ -509,11 +541,14 @@ def build_workbook(rows: list[dict]) -> bytes:
             row["number"],  # a NUMBER cell, as Cadence writes InjectNumber
             row["title"], row["description"], clock(row["minute"]), str(SCENARIO_DAY), clock(row["minute"]),
             row["source"], row["target"], row["method"], row["track"], phase_for(row["minute"]), row["expected"],
-            row["notes"], row["priority"], row["location"], row["controller"], row["media"],
+            row["notes"], row["priority"], row["location"], row["controller"],
+            row["media"] or None, row["alt"] or None,  # the Pulse columns: truly empty when unused
         ]
+        text_columns = len(values)
+        values += row["engagement"]  # integers (NUMBER cells) or None
         for column, value in enumerate(values, start=1):
             cell = msel.cell(row=sheet_row, column=column, value=value)
-            if column > 1:
+            if 1 < column <= text_columns and value is not None:
                 cell.data_type = "s"  # text, never a formula or a number (Cadence writes strings)
             if sheet_row % 2 == 0:
                 cell.fill = PatternFill("solid", fgColor=ALICE_BLUE)
@@ -679,6 +714,8 @@ def check(path: Path, pack: dict, expected_rows: list[dict] | None) -> int:
         if any("<" in cell for cell in cells):
             problems.append(f"row {index}: a cell contains '<' (the sanitizer could change it)")
         if not is_social(method):
+            if any(get(cells, header).strip() for header, _ in PULSE_COLUMNS):
+                problems.append(f"row {index}: a non-social row has a Pulse column filled in")
             counts["skipped"] += 1
             report.append(f"  row {index:>2}  #{number:<3} skipped   T+{minute:<3} {method}")
             continue
@@ -691,6 +728,7 @@ def check(path: Path, pack: dict, expected_rows: list[dict] | None) -> int:
         title = clean(get(cells, "Title")) or f"Inject {number}"
         notes = clean(get(cells, "Notes"))
         media_cell = clean(get(cells, "Pulse Media"))
+        alt_cell = clean(get(cells, "Pulse Media Alt"))
         controller = clean(get(cells, "Responsible Controller"))
         if number is None:
             failure = "Inject # is empty"
@@ -714,6 +752,32 @@ def check(path: Path, pack: dict, expected_rows: list[dict] | None) -> int:
             images, videos = kinds.count("image"), kinds.count("video")
             if not failure and (images > MAX_IMAGES or videos > 1 or (videos and images)):
                 failure = "too many media"
+        files = [part.strip() for part in media_cell.split(",") if part.strip()] if media_cell else []
+        alts = [entry.strip() for entry in alt_cell.split(ALT_SEPARATOR)] if alt_cell else []
+        if not failure and len(alts) > len(files) and files:
+            failure = f"Pulse Media Alt has {len(alts)} entries for {len(files)} Pulse Media files"
+        if alts and not files:
+            warnings.append("Pulse Media Alt with no Pulse Media is ignored")
+        elif files and len(alts) < len(files):
+            warnings.append(f"Pulse Media Alt has {len(alts)} entries for {len(files)} files; the rest use the stem")
+        for position, alt in enumerate(alts):
+            if files and not alt:
+                warnings.append(f"Pulse Media Alt entry {position + 1} is blank; the file-name stem is used")
+            elif len(alt) > MAX_ALT:
+                warnings.append(f"Pulse Media Alt entry {position + 1} truncated to {MAX_ALT}")
+        baseline = {}
+        for header, field in ENGAGEMENT_COLUMNS:
+            raw = get(cells, header).strip()
+            if not raw:
+                continue
+            try:
+                amount = float(raw)
+            except ValueError:
+                amount = None
+            if amount is None or not amount.is_integer() or not 0 <= amount <= MAX_BASELINE:
+                failure = failure or f"{header} '{raw}' is not a whole number from 0 to {MAX_BASELINE:,}"
+            else:
+                baseline[field] = int(amount)
         if len(title) > MAX_TITLE:
             warnings.append("Title truncated")
         if notes and len(notes) > MAX_NOTES:
@@ -742,12 +806,21 @@ def check(path: Path, pack: dict, expected_rows: list[dict] | None) -> int:
                 problems.append(f"row {index}: persona {handle} is not {item['key']}'s {post['persona']}")
             if (media_cell or "") != media:
                 problems.append(f"row {index}: Pulse Media {media_cell!r} is not {item['key']}'s {media!r}")
+            media_alt = {m["key"]: m["alt"] for m in pack["media"]}
+            want_alts = [(ref.get("alt") or media_alt[ref["ref"]]).strip() for ref in post.get("media", [])]
+            if alts != want_alts:
+                problems.append(f"row {index}: Pulse Media Alt differs from {item['key']}'s alt text")
+            if baseline != post.get("engagementBaseline", {}):
+                problems.append(f"row {index}: engagement {baseline} is not {item['key']}'s "
+                                f"{post.get('engagementBaseline', {})}")
             if minute != item["plannedMinute"]:
                 problems.append(f"row {index}: T+{minute} is not {item['key']}'s plannedMinute {item['plannedMinute']}")
             if (notes or "") != item.get("notes", "").strip():
                 problems.append(f"row {index}: Notes differ from {item['key']}'s notes")
         report.append(f"  row {index:>2}  #{number:<3} {'failed' if failure else 'created':<9} T+{minute:<3} "
-                      f"@{handle} ({item['key'] if item else '?'}){' media: ' + media_cell if media_cell else ''}")
+                      f"@{handle} ({item['key'] if item else '?'}){' media: ' + media_cell if media_cell else ''}"
+                      f"{' alt: ' + str(len(alts)) if alts else ''}"
+                      f"{' engagement: ' + '/'.join(str(baseline.get(f, '-')) for _, f in ENGAGEMENT_COLUMNS) if baseline else ''}")
 
     if expected_rows is not None and len(expected_rows) != len(data):
         problems.append(f"{len(data)} data rows, expected {len(expected_rows)}")
