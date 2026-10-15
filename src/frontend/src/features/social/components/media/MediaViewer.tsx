@@ -54,6 +54,7 @@ import { SHELL_Z } from '@/features/participant-shell/mountContract'
 import type { PostMedia } from '../../types/post'
 import { ExerciseBands } from './ExerciseBands'
 import { MediaFallbackTile } from './MediaFallbackTile'
+import { ParticipantTooltip } from '../ParticipantTooltip'
 import { mediaAlt } from './mediaLayout'
 import { resolveSafeMediaUrl } from './safeMediaUrl'
 import { useFocusTrap } from './useFocusTrap'
@@ -219,31 +220,35 @@ export function MediaViewer({
 
         {total > 1 && (
           <div className={styles.pager}>
-            <button
-              type="button"
-              className={styles.navButton}
-              aria-label="Previous image"
-              aria-disabled={!hasPrevious}
-              data-testid="media-viewer-prev"
-              onClick={() => {
-                if (hasPrevious) go(-1)
-              }}
-            >
-              <FontAwesomeIcon icon={faChevronLeft} aria-hidden="true" />
-            </button>
+            <ParticipantTooltip label="Previous image" placement="top">
+              <button
+                type="button"
+                className={styles.navButton}
+                aria-label="Previous image"
+                aria-disabled={!hasPrevious}
+                data-testid="media-viewer-prev"
+                onClick={() => {
+                  if (hasPrevious) go(-1)
+                }}
+              >
+                <FontAwesomeIcon icon={faChevronLeft} aria-hidden="true" />
+              </button>
+            </ParticipantTooltip>
             <span className={styles.counter} aria-hidden="true">{index + 1} / {total}</span>
-            <button
-              type="button"
-              className={styles.navButton}
-              aria-label="Next image"
-              aria-disabled={!hasNext}
-              data-testid="media-viewer-next"
-              onClick={() => {
-                if (hasNext) go(1)
-              }}
-            >
-              <FontAwesomeIcon icon={faChevronRight} aria-hidden="true" />
-            </button>
+            <ParticipantTooltip label="Next image" placement="top">
+              <button
+                type="button"
+                className={styles.navButton}
+                aria-label="Next image"
+                aria-disabled={!hasNext}
+                data-testid="media-viewer-next"
+                onClick={() => {
+                  if (hasNext) go(1)
+                }}
+              >
+                <FontAwesomeIcon icon={faChevronRight} aria-hidden="true" />
+              </button>
+            </ParticipantTooltip>
           </div>
         )}
       </div>

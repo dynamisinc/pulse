@@ -1,0 +1,39 @@
+/*
+ * features/social/components/ParticipantTooltip.module.css
+ * ---------------------------------------------------------------------------
+ * The participant tooltip (demo-feedback story 13, #494): a small slate label in the
+ * Pulse skin, like X's icon tooltips. Not the MUI tooltip, no COBRA. Light only.
+ *
+ * The bubble is portalled to <body>, OUTSIDE the channel's `.tokens` scope, so it
+ * composes the shared token class itself and reads the same `--pc-*` palette.
+ * White (`--pc-bg`) on `--pc-ink-muted` (#61707a) is ~5.0:1 (WCAG AA for small text).
+ */
+
+/* The wrapper adds no box: layout, gaps and hit areas are the control's own. */
+.anchor {
+  display: contents;
+}
+
+.tooltip {
+  composes: tokens from '../theme/social.module.css';
+
+  position: fixed;
+  top: 0;
+  left: 0;
+  box-sizing: border-box;
+  max-width: min(320px, calc(100vw - 16px));
+  padding: 3px 8px;
+  border-radius: 4px;
+  background: var(--pc-ink-muted);
+  color: var(--pc-bg);
+  font-family: 'Figtree', system-ui, sans-serif;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 16px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  /* Never intercepts the pointer: it can sit beside a control without blocking a neighbour. */
+  pointer-events: none;
+  user-select: none;
+}

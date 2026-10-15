@@ -7,7 +7,7 @@
  * single 600px column with local `useState` navigation into a real
  * three-column app frame with working URLs.
  *
- * THE FRAME (D1-013, left-anchored; `layout/frameMetrics.ts`)
+ * THE FRAME (D1-013; left-anchored, centred from 1280px by #495; `layout/frameMetrics.ts`)
  *
  *     240px nav rail   |   600px main column   |   344px right rail
  *     `NavRail`            `SocialRoutes`          `RightRailContent`
