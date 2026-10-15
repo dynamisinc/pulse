@@ -36,6 +36,12 @@
  * mock follow-edge store on every request rather than serving the frozen
  * seed-time number (WR-005 — see `withMockFollowEdges`).
  *
+ * Both hooks are nonetheless KEYED client-side by the active exercise id
+ * (demo-feedback 24): not to scope the request (the server still does that), but
+ * so an in-place exercise switch in the console discards the previous
+ * exercise's list and re-reads, instead of serving it until a reload. (On a
+ * participant path the scope never changes, so the key is a no-op there.)
+ *
  * CONTRACT v2 (demo-polish F0, implementation.md §1.5.6 / §1.11): both reads
  * accept the OPTIONAL `avatarUrl` / `bannerUrl` / `location` (validated only when
  * present; `toParticipantPersona` forwards them), and `invalidatePersonas()` is the
@@ -47,9 +53,14 @@
  * exercise-scoped, story 01). Staff/data world — no UI, no COBRA.
  */
 
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { useEffect, useState, useSyncExternalStore } from 'react'
 import type { AxiosAdapter } from 'axios'
 import { api } from '@/core/services/api'
+// The LEAF module, not the `@/core/exerciseContext` barrel: dozens of test files
+// mock the barrel with only `useExerciseContext`, and reading a missing export
+// from a vitest module mock throws. The leaf keeps those suites on the real,
+// provider-less (unkeyed) path. The hook is the same one the barrel re-exports.
+import { useOptionalExerciseContext } from '@/core/exerciseContext/exerciseContext'
 import { USE_MOCK_DATA } from '@/core/config/mockData'
 // MOCK-SCAFFOLD-ONLY dependency (WR-005 — see `withMockFollowEdges` below). It
 // is consumed exclusively inside the `USE_MOCK_PERSONAS` adapters, mirroring
@@ -343,54 +354,151 @@ export function invalidatePersonas(): void {
   for (const listener of [...personaVersionListeners]) listener()
 }
 
+// ---------------------------------------------------------------------------
+// Exercise keying (demo-feedback 24, #542 / #450 F-1)
+// ---------------------------------------------------------------------------
+
+/**
+ * The active exercise id, or `undefined` when no `<ExerciseContextProvider>` is
+ * mounted above the caller.
+ *
+ * WHY. The staff console does NOT remount when the controller switches exercise:
+ * the switcher re-resolves the scope IN PLACE (`useSetActiveExercise` ->
+ * `useExerciseScopeRefresh`). A persona hook keyed on nothing kept serving the
+ * exercise the controller had just left until a reload, so the ⌘K picker listed
+ * the old cast, `ControllerConsole.openComposer` (whose `findExercisePersona`
+ * rejects a persona of another exercise) fell back to the palette for every
+ * persona of the new one (#450 F-1), and the docked review queue mapped the new
+ * exercise's drafts onto the old exercise's persona records. Reading the id here
+ * keys both persona reads on it.
+ *
+ * WHY OPTIONAL. The persona hooks are also mounted in isolation (component
+ * tests, a picker handed a cast), where there is no scope to key on: those keep
+ * the previous, unkeyed behaviour. `useOptionalExerciseContext()` is a plain
+ * `useContext` read that never throws. In the app every surface sits under the
+ * provider (`features/app-shell/routes.tsx`), so the key is always present
+ * there; on a participant path it never changes, so keying is a no-op.
+ */
+function useActiveExerciseIdIfScoped(): string | undefined {
+  return useOptionalExerciseContext()?.exerciseId
+}
+
+/**
+ * Whether a resolved list answers for `scopeKey`. A persona carrying ANOTHER
+ * exercise's id means the server's session scope has already moved on (a switch
+ * landed server-side before this client re-resolved its scope): the list is not
+ * this exercise's and must not be shown under it. A persona with no `exerciseId`
+ * is accepted (the wire may omit it — same rule as the console's
+ * `findExercisePersona`); an unkeyed read (`scopeKey === undefined`) accepts all.
+ */
+function answersForScope(personas: readonly Persona[], scopeKey: string | undefined): boolean {
+  if (scopeKey === undefined) return true
+  return personas.every(persona => {
+    const personaExerciseId: string | undefined = persona.exerciseId
+    return personaExerciseId === undefined || personaExerciseId === scopeKey
+  })
+}
+
+/** The resolution state, stamped with the exercise it was loaded for. */
+interface PersonaResolutionState<T extends Persona> {
+  /** The exercise this state belongs to (`undefined` = unkeyed, no provider). */
+  readonly scopeKey: string | undefined
+  /** The last successful read FOR `scopeKey`, or `null` before one landed. */
+  readonly personas: readonly T[] | null
+  readonly error: unknown
+  /** `false` until the first read for `scopeKey` settled (success or failure). */
+  readonly settled: boolean
+}
+
+/** One shared empty list, so an unloaded hook returns a stable reference. */
+const NO_PERSONAS: readonly never[] = []
+
+function unloadedState<T extends Persona>(
+  scopeKey: string | undefined,
+): PersonaResolutionState<T> {
+  return { scopeKey, personas: null, error: undefined, settled: false }
+}
+
 /**
  * Shared body for the two persona hooks: a thin useState/useEffect wrapper
  * over the supplied resolver (ordinary cacheable data; a later refactor may
  * move both to React Query, the project default). `resolve` must be a stable
  * module-level function reference — both call sites pass one. Re-resolves
- * whenever {@link invalidatePersonas} is called.
+ * whenever {@link invalidatePersonas} is called, and whenever `scopeKey` (the
+ * active exercise id, for the staff read) changes.
+ *
+ * ## Keyed by exercise (demo-feedback 24)
+ *  - The state is STAMPED with the exercise it was loaded for, and a render
+ *    under any other exercise reads it as unloaded: the list is empty and
+ *    `loading` is true from the very render the scope changes, before any
+ *    effect runs. Exercise A's personas are never returned while B is active.
+ *  - The effect depends on `scopeKey`, so a switch starts a fresh read for the
+ *    new exercise without a reload. Its cleanup marks the previous read
+ *    cancelled, so a response for exercise A that lands after the switch is
+ *    DROPPED, never committed (and even if one were, the stamp would hide it).
+ *  - A first read for the new exercise that FAILS leaves the list empty (fail
+ *    closed); the previous exercise's list is never kept as a fallback.
+ *  - A read whose personas carry ANOTHER exercise's id is dropped and the
+ *    state reads as unloaded (see `answersForScope`).
  */
-function usePersonaResolution<T extends Persona>(resolve: () => Promise<T[]>): {
+function usePersonaResolution<T extends Persona>(
+  resolve: () => Promise<T[]>,
+  scopeKey: string | undefined,
+): {
   readonly personas: readonly T[]
   readonly loading: boolean
   readonly error: unknown
 } {
-  const [personas, setPersonas] = useState<readonly T[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<unknown>(undefined)
+  const [state, setState] = useState<PersonaResolutionState<T>>(() => unloadedState(scopeKey))
   const version = useSyncExternalStore(subscribeToPersonaVersion, getPersonaVersion)
-  const loadedOnceRef = useRef(false)
 
   useEffect(() => {
     let cancelled = false
-    // Only the FIRST load shows a loading state; an invalidation refetch keeps
+    // A NEW exercise discards the old list outright (its first load shows the
+    // loading state again). An invalidation refetch for the SAME exercise keeps
     // the previous list visible until the new one lands.
-    if (!loadedOnceRef.current) setLoading(true)
+    setState(previous => (previous.scopeKey === scopeKey ? previous : unloadedState(scopeKey)))
     resolve()
       .then(resolved => {
+        // `cancelled`: the exercise switched (or the hook re-ran / unmounted)
+        // while this read was in flight - it answers for a scope we have left.
         if (cancelled) return
-        loadedOnceRef.current = true
-        setPersonas(resolved)
-        setError(undefined)
+        // A list for another exercise is dropped, not shown: the state reads as
+        // UNLOADED for this exercise (empty + loading) — the scope refresh that
+        // follows a server-side switch re-keys the hook and reads again.
+        if (!answersForScope(resolved, scopeKey)) {
+          setState(unloadedState(scopeKey))
+          return
+        }
+        setState({ scopeKey, personas: resolved, error: undefined, settled: true })
       })
       .catch((err: unknown) => {
         if (cancelled) return
-        // Fail closed on the FIRST load: the list is never populated before a
-        // successful resolve, so it stays EMPTY. After an `invalidatePersonas()`
-        // refetch the previously loaded list stays on screen instead (stale, but
-        // never cleared by a transient failure). Either way the error is surfaced
-        // to the caller.
-        setError(err)
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false)
+        // Fail closed on the FIRST load for this exercise: the list is never
+        // populated before a successful resolve, so it stays EMPTY. After an
+        // `invalidatePersonas()` refetch the previously loaded list FOR THIS
+        // EXERCISE stays on screen instead (stale, but never cleared by a
+        // transient failure). Either way the error is surfaced to the caller.
+        setState(previous => ({
+          scopeKey,
+          personas: previous.scopeKey === scopeKey ? previous.personas : null,
+          error: err,
+          settled: true,
+        }))
       })
     return () => {
       cancelled = true
     }
-  }, [resolve, version])
+  }, [resolve, version, scopeKey])
 
-  return { personas, loading, error }
+  // Render-time guard: state stamped for another exercise is never surfaced,
+  // not even for the one render between the scope change and the effect above.
+  const current = state.scopeKey === scopeKey ? state : unloadedState<T>(scopeKey)
+  return {
+    personas: current.personas ?? NO_PERSONAS,
+    loading: !current.settled,
+    error: current.error,
+  }
 }
 
 /**
@@ -399,9 +507,14 @@ function usePersonaResolution<T extends Persona>(resolve: () => Promise<T[]>): {
  * components that need only the common fields (name/handle/avatar/verified)
  * may use this too; anything that reads the archetype must use
  * {@link useStaffPersonas}.
+ *
+ * Keyed by the active exercise like the staff read (demo-feedback 24 Gate-1
+ * M-1): the console's docked review queue reads this one and does not remount
+ * on a switch. A no-op on a participant path, where the scope never changes.
  */
 export function usePersonas(): UsePersonasResult {
-  return usePersonaResolution(resolvePersonas)
+  const exerciseId = useActiveExerciseIdIfScoped()
+  return usePersonaResolution(resolvePersonas, exerciseId)
 }
 
 /**
@@ -411,9 +524,15 @@ export function usePersonas(): UsePersonasResult {
  * instead of a list whose `personaType` is silently `undefined`. (A failed
  * `invalidatePersonas()` refetch keeps the previously loaded list and reports the
  * error.)
+ *
+ * KEYED BY THE ACTIVE EXERCISE (demo-feedback 24, #542; #450 F-1): an in-place
+ * exercise switch discards the previous exercise's list in the same render and
+ * reads the new one, and a late answer for the exercise just left is dropped.
+ * See `usePersonaResolution`.
  */
 export function useStaffPersonas(): UseStaffPersonasResult {
-  return usePersonaResolution(resolveStaffPersonas)
+  const exerciseId = useActiveExerciseIdIfScoped()
+  return usePersonaResolution(resolveStaffPersonas, exerciseId)
 }
 
 /**
