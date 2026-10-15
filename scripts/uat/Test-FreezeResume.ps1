@@ -13,11 +13,13 @@
          Without -ExerciseId it first signs in on the DEMO exercise (staff sign-in needs an exercise id) only to
          read the controller's assignments, then switches the session to the throwaway exercise. That sign-in
          changes nothing on the demo exercise.
-      1. On a non-demo exercise: sets white noise to Low (loading a 3-post "[freeze check]" pool, authored by an
-         NPC persona, only if the pool is empty) and waits for one noise post, whose scenario time anchors the
-         minute check. On the DEMO exercise it makes NO noise change at all (no level change, no pool), so no
-         test post can reach the customer-demo feed; the post-Resume minute-continuity check is then a WARN "not
-         run on the demo exercise" and the run relies on clockFrozen, the overlay and the fire refusal.
+      1. Only when -NoisePersonaHandle names an NPC persona, and only on a non-demo exercise: sets white noise to
+         Low (loading a 3-post "[freeze check]" pool authored by that persona, only if the pool is empty) and waits
+         for one noise post, whose scenario time anchors the minute check. Otherwise it makes NO noise change at
+         all (no level change, no pool): without -NoisePersonaHandle it WARNs "pass -NoisePersonaHandle <NPC
+         handle> to run the noise checks"; on the DEMO exercise it WARNs "not run on the demo exercise", so no
+         test post can reach the customer-demo feed. The post-Resume minute-continuity check is then a WARN and the
+         run relies on clockFrozen, the overlay, the fire refusal and read-only noise reads.
          Then Freeze (POST /api/steering/pause-tier, tier freeze, -Register); GET /api/overlay-state must say pause.
       2. Holds the Freeze for -HoldSeconds (at least 90). Throughout: the tier stays freeze with clockFrozen
          true, no noise post is published and the latest noise stamp does not move (read-only). Midway it fires a
@@ -42,17 +44,23 @@
     is browser-local). The checks read the server clock through two staff signals instead: clockFrozen on
     GET /api/steering/pause-tier (read off the clock itself), and lastPostedAt on GET /api/staff/noise. That is
     the MAXIMUM scenario time over the exercise's noise posts (the server clock's stamp on the latest one), so it
-    only ever moves forward and moves only when a noise post is published.
+    only ever moves forward and moves only when a noise post is published. Caveat: after an earlier clock reset
+    (an App Service restart before demo-feedback/18, or a re-seed at scenario minute 0) older posts can carry a
+    LATER scenario time than the live clock, so lastPostedAt can sit still while new posts are stamped earlier;
+    the continuity check then WARNs or misreads. Run it on an exercise whose clock has not been reset since its
+    last noise post, or after a fresh noise post has advanced lastPostedAt.
 
     The overlay: participant sessions are host-bound, so a participant can only read the overlay of the
     exercise bound to -ApiHost. With -ParticipantUsername the overlay is read as that participant when the
     participant's exercise is the one under test; otherwise (the default throwaway exercise) it is read through
     the controller's own session, which serves the same projection, and the script says so with a WARN.
 
-    Personas: the staff persona list has no participant-binding field, so the test inject and the noise pool use
-    -NoisePersonaHandle if given, else the first individual citizen persona (the engine's NPC chatter voices) that
-    is not in -ExcludePersonaHandle (default: KestrelCoEM, the PIO participant's persona). With no such persona
-    the pool is not loaded and the fire probe is skipped (WARN).
+    Personas: the staff persona list exposes neither a participant binding nor `castable`, and roster participants
+    get citizen personas too, so the script never guesses an NPC. Noise writes happen only with an explicit
+    -NoisePersonaHandle. The fire-probe inject (skipped, so it can never publish, and deleted at the end) uses
+    -NoisePersonaHandle if given, else the first persona not in -ExcludePersonaHandle (default: KestrelCoEM).
+
+    -WhatIf is a real dry run: it prints the plan and exits before signing in or writing anything.
 
     Secrets: the staff secret comes from $env:PULSE_STAFF_SECRET, else a hidden prompt; the participant password
     from $env:PULSE_PARTICIPANT_PASSWORD, else a hidden prompt. Each is sent only in its sign-in body, to the
@@ -75,7 +83,8 @@
     How long to hold the Freeze. At least 90.
 
 .PARAMETER NoisePersonaHandle
-    The NPC persona the test inject and the noise pool post as (never a participant's persona).
+    The NPC persona (engine-castable, never a participant's) the noise pool posts as. Required for the noise and
+    minute-continuity checks; without it no noise setting is changed.
 
 .PARAMETER IncludeRestart
     Also check that Freeze survives an App Service restart. Restarts the whole UAT API (all exercises).
@@ -274,11 +283,11 @@ function Get-Anchor([string] $Label) {
     return $anchor
 }
 
-function Select-NpcPersona($Personas) {
+function Select-ProbePersona($Personas) {
+    # The fire probe never publishes (it is skipped first), so any persona outside the exclusions will do.
     $all = @($Personas | Where-Object { $_ -is [System.Collections.IDictionary] -and $_['id'] -and $_['handle'] })
     if ($NoisePersonaHandle) { return @($all | Where-Object { [string] $_['handle'] -ieq $NoisePersonaHandle })[0] }
-    $allowed = @($all | Where-Object { $h = [string] $_['handle']; -not ($ExcludePersonaHandle | Where-Object { $_ -ieq $h }) })
-    return @($allowed | Where-Object { $_['kind'] -eq 'human' -and $_['personaType'] -eq 'citizen' })[0]
+    return @($all | Where-Object { $h = [string] $_['handle']; -not ($ExcludePersonaHandle | Where-Object { $_ -ieq $h }) })[0]
 }
 
 function Disconnect-Token([string] $Token) {
@@ -378,6 +387,21 @@ $script:Created = @{ InjectAttempted = $false; InjectId = $null; NoiseLevelBefor
 $created = $script:Created
 $skipFailed = $false
 
+if ($WhatIfPreference) {
+    # A real dry run: no sign-in, no Freeze, no noise change, no probe inject, no restart.
+    Write-Step "What if: Test-FreezeResume.ps1 against $ApiHost (nothing is sent)"
+    $target = if ($ExerciseId) { "exercise $ExerciseId (explicit -ExerciseId)" } else { "the assigned exercise named '$ExerciseName' (never the demo exercise)" }
+    Write-Host "  - sign in as $StaffUsername and select $target; refuse if it is not live or already frozen"
+    if ($NoisePersonaHandle) { Write-Host "  - non-demo only: set noise to Low (a [freeze check] pool as @$NoisePersonaHandle if the pool is empty), then restore it" }
+    else { Write-Host '  - no noise change (no -NoisePersonaHandle)' }
+    Write-Host '  - create and skip a [freeze check] probe inject, then delete it at the end'
+    Write-Host "  - Freeze ($Register) for $HoldSeconds s: check overlay pause, clockFrozen, noise stopped, the probe fire refused"
+    Write-Host '  - Resume to the tier found: check overlay none and minute continuity'
+    if ($IncludeRestart) { Write-Host "  - freeze again and RESTART $WebAppName (the whole UAT API, every exercise), watch $RestartWaitMinutes min, resume" }
+    Write-Host '  - always restore the tier found, the noise level and pool, and sign out'
+    exit 0
+}
+
 $doRestart = $false
 if ($IncludeRestart) {
     $doRestart = $PSCmdlet.ShouldProcess($WebAppName,
@@ -473,15 +497,21 @@ try {
     $noise = Get-NoiseState
     if (-not $noise) { Write-Check WARN 'GET /api/staff/noise failed; the noise checks will be inconclusive' }
     $personas = Invoke-Staff GET '/api/personas'
-    $persona = Select-NpcPersona $personas.Json
-    if ($persona) { Write-Check INFO "NPC persona for the test content: @$($persona['handle'])" }
-    else { Write-Check WARN 'no NPC persona found (pass -NoisePersonaHandle): no noise pool is loaded and the fire probe is skipped' }
+    $persona = Select-ProbePersona $personas.Json
+    if ($persona) { Write-Check INFO "probe inject persona: @$($persona['handle']) (the probe is skipped and never publishes)" }
+    elseif ($NoisePersonaHandle) { Write-Check WARN "persona @$NoisePersonaHandle not found: no noise change, and the fire probe is skipped" }
+    else { Write-Check WARN 'no persona outside -ExcludePersonaHandle: the fire probe is skipped' }
 
     $anchor = $null
+    $noiseWrites = $false
     if ($isDemo) {
         Write-Check WARN 'noise is left untouched on the demo exercise (no level change, no pool), so the minute-continuity check is not run on the demo exercise'
     }
-    elseif ($noise) {
+    elseif (-not $NoisePersonaHandle) {
+        Write-Check WARN 'noise left untouched: pass -NoisePersonaHandle <NPC handle> to run the noise checks'
+    }
+    elseif ($noise -and $persona) {
+        $noiseWrites = $true
         $created.NoiseLevelBefore = $noise.Level
         if ($noise.PoolSize -eq 0 -and $persona) {
             $created.PoolAttempted = $true
@@ -573,6 +603,7 @@ try {
     Test-OverlayNone 'after Resume'
 
     if ($isDemo) { Write-Check WARN 'minute continuity after Resume: not run on the demo exercise (needs test noise)' }
+    elseif (-not $noiseWrites) { Write-Check WARN 'minute continuity after Resume: not run (pass -NoisePersonaHandle <NPC handle> to run the noise checks)' }
     else {
         $afterCount = if ($noiseAtFreeze) { $noiseAtFreeze.PostedCount } else { 0 }
         $next = Wait-NoisePost -AfterCount $afterCount -TimeoutSeconds $NoiseWaitSeconds

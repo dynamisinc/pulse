@@ -227,6 +227,9 @@ BeforeAll {
     }
 
     function Invoke-FreezeScript([hashtable] $Parameters = @{}) {
+        # The noise checks need an explicit NPC handle; tests opt out with NoisePersonaHandle = ''.
+        $Parameters = @{} + $Parameters
+        if (-not $Parameters.ContainsKey('NoisePersonaHandle')) { $Parameters['NoisePersonaHandle'] = 'mvega_fh' }
         $env:PULSE_STAFF_SECRET = $global:FrzSecret
         $env:PULSE_PARTICIPANT_PASSWORD = 'not-a-real-password'
         try {
@@ -277,12 +280,25 @@ Describe 'Test-FreezeResume.ps1' {
             $global:FrzS.Tokens.Count | Should -Be 0 -Because 'every staff session is signed out'
         }
 
-        It 'authors the test content as an NPC citizen persona, never the first (participant) persona' {
+        It 'authors the test content as the explicit -NoisePersonaHandle' {
             $r = Invoke-FreezeScript
 
             $r.Code | Should -Be 0
             $global:FrzS.PoolPersonas | Should -Be @('mvega_fh', 'mvega_fh', 'mvega_fh')
             $global:FrzS.InjectPersonas | Should -Be @('55555555-5555-4555-8555-555555555555')
+        }
+
+        It 'without -NoisePersonaHandle makes zero noise writes and keeps the other freeze signals' {
+            $r = Invoke-FreezeScript @{ NoisePersonaHandle = '' }
+
+            $r.Code | Should -Be 0
+            $r.Text | Should -Match 'WARN\s+noise left untouched: pass -NoisePersonaHandle <NPC handle> to run the noise checks'
+            $r.Text | Should -Match 'WARN\s+minute continuity after Resume: not run'
+            $r.Text | Should -Match 'PASS\s+inject fire refused while frozen'
+            $r.Text | Should -Match 'PASS\s+after Freeze: overlay is pause'
+            ($global:FrzS.Calls | Where-Object { $_ -match '^PUT /api/staff/noise' }).Count | Should -Be 0
+            $global:FrzS.InjectPersonas | Should -Not -Contain '33333333-3333-4333-8333-333333333333' -Because 'the excluded PIO persona is never used'
+            $global:FrzS.Tier | Should -Be 'engine'
         }
 
         It 'freezes with the out-of-fiction register when asked' {
@@ -541,13 +557,17 @@ Describe 'Test-FreezeResume.ps1' {
             $global:FrzS.Tier | Should -Be 'engine'
         }
 
-        It 'skips the restart under -WhatIf' {
+        It '-WhatIf is a dry run: prints the plan and sends nothing' {
             New-Server @{ FreezePersisted = $true }
 
             $r = Invoke-FreezeScript @{ IncludeRestart = $true; WhatIf = $true }
 
-            $r.Text | Should -Match 'WARN\s+-IncludeRestart declined'
+            $r.Code | Should -Be 0
+            $r.Text | Should -Match 'What if: .*nothing is sent'
+            $r.Text | Should -Match 'RESTART app-pulse-api-uat-dynamis'
+            Should -Invoke Invoke-Api -Times 0 -Exactly
             Should -Invoke Invoke-AppServiceRestart -Times 0 -Exactly
+            $global:FrzS.Calls.Count | Should -Be 0
         }
     }
 }

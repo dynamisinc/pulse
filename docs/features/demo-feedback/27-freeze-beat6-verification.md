@@ -53,15 +53,15 @@ or a roster link.
 
 ## Tests
 
-`scripts/uat/Test-FreezeResume.Tests.ps1` (Pester 5, 30 tests) runs the real script against a simulated API: a fake
+`scripts/uat/Test-FreezeResume.Tests.ps1` (Pester 5, 31 tests) runs the real script against a simulated API: a fake
 wall clock (no real waiting), the pause tier and its scenario clock, the overlay, the noise knob (a post every 30 s
 stamped with scenario time), the inject queue with the Freeze fire refusal (DELETE checks `version`), staff tokens
 (a restart can drop them: 401), and an App Service restart whose handover shows as a failing `/health` and clears
 in-memory state unless Freeze is persisted.
 
 - Pass path: exits 0, every check PASS, tier / noise level / pool / test inject all back as found, every session
-  signed out; the test content is authored by an NPC citizen persona, never the first (participant org) persona; the
-  out-of-fiction register; the staff secret never appears in the output.
+  signed out; the noise pool is authored by the explicit `-NoisePersonaHandle`; without it there are zero noise writes
+  (WARN) and the other freeze signals still run; the out-of-fiction register; the staff secret never appears.
 - Minute moved across the Freeze → FAIL. Overlay never shows pause → FAIL. Fire refused for another reason → FAIL.
 - Tier always restored: a step that throws mid-hold (found tier `engine`, `running`, `injects`; the inject, noise and
   pool are cleaned up too) and an overlay read throwing right after Freeze; a restore POST answering 500 or throwing
@@ -74,8 +74,8 @@ in-memory state unless Freeze is persisted.
   the staff read with a WARN; a missing "Freeze check" exercise fails cleanly.
 - `-IncludeRestart`: refused before 18 unless `-Force`; with `-Force` before 18, FAIL "expected until
   demo-feedback/18 is deployed"; with 18 and an observed restart, PASS; transport exceptions in the wait loop and a
-  401 after the restart (re-sign-in) are survived; no observed restart → WARN "persistence not proven"; `-WhatIf`
-  skips the restart.
+  401 after the restart (re-sign-in) are survived; no observed restart → WARN "persistence not proven".
+- `-WhatIf` is a dry run: prints the plan, sends nothing (no sign-in, Freeze, noise, probe or restart).
 
 Run: `Invoke-Pester scripts/uat/Test-FreezeResume.Tests.ps1 -Output Detailed`. The UAT run itself is the evidence.
 
@@ -95,9 +95,14 @@ Run: `Invoke-Pester scripts/uat/Test-FreezeResume.Tests.ps1 -Output Detailed`. T
   "Freeze check" exercise the overlay is read through the controller's session (same projection) with a WARN.
 - **Fire refusal.** A skipped `[freeze check]` post item (so it can never publish), fired mid-hold: expects `409` with
   the `InjectQueueService.FrozenMessage` detail. Deleted at the end.
-- **Personas.** The staff persona projection has no participant-binding field, so the test content uses
-  `-NoisePersonaHandle`, else the first individual citizen persona (the engine's NPC voices) not in
-  `-ExcludePersonaHandle` (default `KestrelCoEM`). No such persona → no pool, no fire probe (WARN).
+- **Personas.** The staff persona projection exposes neither a participant binding nor `castable`, and roster
+  participants get citizen personas (`CitizenPersonaFactory`), so the script never guesses an NPC: noise writes
+  (pool and level) happen only with an explicit `-NoisePersonaHandle`; without it they are skipped with a WARN. The
+  fire-probe inject (skipped first, so it never publishes) uses that handle, else the first persona outside
+  `-ExcludePersonaHandle` (default `KestrelCoEM`).
+- **`lastPostedAt` caveat.** After an earlier clock reset (a pre-18 restart, a re-seed at minute 0) older noise posts
+  can carry a later scenario time than the live clock, so the max can sit still; run on an exercise whose clock has
+  not been reset since its last noise post.
 - **Restart.** `-IncludeRestart` restarts the whole UAT API (every exercise, demo included): it asks for confirmation
   (ConfirmImpact High) and refuses unless 18 is detected (`persisted` on the pause-tier response) or `-Force`. A PASS
   needs an observed restart (a failing `/health` during the `-RestartWaitMinutes` window); otherwise WARN.
