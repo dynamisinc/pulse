@@ -107,7 +107,8 @@ public sealed partial class ParticipantPostProjector : IParticipantPostProjector
 
     /// <summary>
     /// The single participant-safe mapping. Reads only the post's id, author, body, scenario time, baseline
-    /// counts (summed into <c>counts</c>) and parent id — never its provenance (XC-002).
+    /// counts (summed into <c>counts</c>), parent id and whether it is pinned for everyone — never its provenance
+    /// or who pinned it (XC-002).
     /// </summary>
     private ParticipantPostDto Project(
         Post post,
@@ -148,7 +149,11 @@ public sealed partial class ParticipantPostProjector : IParticipantPostProjector
             InReplyTo = inReplyTo,
             Viewer = viewerPersonaId is null
                 ? null
-                : new PostViewerStateDto(real?.ViewerLiked ?? false, real?.ViewerReposted ?? false),
+                : new PostViewerStateDto(
+                    real?.ViewerLiked ?? false, real?.ViewerReposted ?? false, real?.ViewerPinned ?? false),
+
+            // demo-feedback DF-7: true while pinned for everyone, omitted otherwise. Who pinned it is staff-only.
+            PinnedForAll = ParticipantPostDto.PinnedForAllFlag(post),
         };
     }
 

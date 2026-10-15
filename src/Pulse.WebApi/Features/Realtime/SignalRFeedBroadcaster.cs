@@ -3,6 +3,7 @@ namespace Pulse.WebApi.Features.Realtime;
 using Microsoft.AspNetCore.SignalR;
 using Pulse.WebApi.Features.Social;
 using Pulse.WebApi.Features.Social.Moderation;
+using Pulse.WebApi.Features.Social.Pins;
 
 /// <summary>
 /// The SignalR-backed <see cref="IFeedBroadcaster"/> — the fan-out half of the contract-first seam story 02's
@@ -24,6 +25,9 @@ public sealed class SignalRFeedBroadcaster : IFeedBroadcaster
 
     /// <summary>The SignalR client method name a subscriber handles to drop a taken-down post (demo-polish B6).</summary>
     private const string PostRemovedEvent = "PostRemoved";
+
+    /// <summary>The SignalR client method name a subscriber handles when an exercise pin changes (demo-feedback DF-7).</summary>
+    private const string PostPinChangedEvent = "PostPinChanged";
 
     private readonly IHubContext<ExerciseRealtimeHub> _hubContext;
 
@@ -64,5 +68,22 @@ public sealed class SignalRFeedBroadcaster : IFeedBroadcaster
         await _hubContext.Clients
             .Group(ExerciseRealtimeHub.GroupNameFor(exerciseId))
             .SendAsync(PostRemovedEvent, PostRemovedDto.For(postId), cancellationToken: cancellationToken);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Sends <c>PostPinChanged</c> with <see cref="PostPinChangedDto"/> (the post id and the new flag, nothing else,
+    /// XC-002) to the exercise-wide group from <see cref="ExerciseRealtimeHub.GroupNameFor"/>, exactly as
+    /// <c>PostRemoved</c> does. Staff connections already belong to that group, so consoles receive it once too.
+    /// </remarks>
+    public async Task BroadcastPostPinChangedAsync(
+        Guid exerciseId,
+        Guid postId,
+        bool pinnedForAll,
+        CancellationToken cancellationToken = default)
+    {
+        await _hubContext.Clients
+            .Group(ExerciseRealtimeHub.GroupNameFor(exerciseId))
+            .SendAsync(PostPinChangedEvent, PostPinChangedDto.For(postId, pinnedForAll), cancellationToken: cancellationToken);
     }
 }

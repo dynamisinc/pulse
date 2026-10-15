@@ -60,6 +60,7 @@ public class ParticipantPostDto
         Media = source.Media;
         InReplyTo = source.InReplyTo;
         Viewer = source.Viewer;
+        PinnedForAll = source.PinnedForAll;
     }
 
     /// <summary>The post id.</summary>
@@ -103,12 +104,24 @@ public class ParticipantPostDto
     public PostViewerStateDto? Viewer { get; init; }
 
     /// <summary>
+    /// <c>true</c> while a controller has pinned the post for EVERY participant (an exercise pin, demo-feedback DF-7);
+    /// OMITTED from the wire otherwise (frozen <c>pinnedForAll?: true</c>), so it is never <c>false</c> or <c>null</c>
+    /// on the wire. Who pinned it (<see cref="Post.PinnedForAllByHumanId"/>) and when are staff-only and never carried
+    /// here (XC-002).
+    /// </summary>
+    [JsonPropertyName("pinnedForAll")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? PinnedForAll { get; init; }
+
+    /// <summary>
     /// The single server-side XC-002 narrowing — the server-side mirror of the frontend
     /// <c>toParticipantView</c> (retiring finding S2-2). Maps only participant-safe fields; it MUST NOT read
     /// or include <see cref="Post.Origin"/>, <see cref="Post.ActingHumanId"/>,
     /// <see cref="Post.CreatedWallClock"/>, or <see cref="Post.InjectId"/>. <see cref="ScenarioTime"/> is the
     /// persisted <see cref="Post.CreatedScenarioTime"/> emitted round-trip ISO-8601 — never re-derived from
-    /// the server clock (COR-053). Counts seed to zero for a freshly-read post.
+    /// the server clock (COR-053). Counts seed to zero for a freshly-read post. <see cref="PinnedForAll"/> is
+    /// <c>true</c> only when <see cref="Post.PinnedForAllAt"/> is set; <see cref="Post.PinnedForAllByHumanId"/> is
+    /// never read.
     /// </summary>
     /// <param name="post">The full post entity to narrow to the participant-safe shape.</param>
     /// <returns>The participant-safe projection of <paramref name="post"/>.</returns>
@@ -123,7 +136,20 @@ public class ParticipantPostDto
             Text = post.Body,
             ScenarioTime = post.CreatedScenarioTime.ToString("O"),
             Counts = new ParticipantPostCounts(0, 0, 0),
+            PinnedForAll = PinnedForAllFlag(post),
         };
+    }
+
+    /// <summary>
+    /// The wire value of <see cref="PinnedForAll"/> for <paramref name="post"/>: <c>true</c> while it is pinned for
+    /// everyone, else <c>null</c> (omitted). Reads <see cref="Post.PinnedForAllAt"/> only, never who pinned it.
+    /// </summary>
+    /// <param name="post">The post.</param>
+    /// <returns><c>true</c> or <c>null</c>.</returns>
+    public static bool? PinnedForAllFlag(Post post)
+    {
+        ArgumentNullException.ThrowIfNull(post);
+        return post.PinnedForAllAt is null ? null : true;
     }
 }
 
