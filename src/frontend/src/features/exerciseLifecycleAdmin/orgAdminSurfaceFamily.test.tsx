@@ -194,17 +194,13 @@ describe('the surface mirrors the server gate: planner yes, controller/evaluator
     expect(screen.queryByTestId('exercise-management-page')).not.toBeInTheDocument()
   })
 
-  it('a CONTROLLER at /staff/exercises is bounced to their own default surface', async () => {
+  it('a CONTROLLER at /staff/exercises reaches exercise management (DF-20, seam S-4)', async () => {
     primeSession('controller')
     renderAt('/staff/exercises')
 
-    // `allowedRoles` is the only gate: the route is never even registered for
-    // this role, so it cannot render — it can only redirect.
-    expect(await screen.findByTestId('stub-controller-console')).toBeInTheDocument()
-    expect(screen.queryByTestId('exercise-management-page')).not.toBeInTheDocument()
-    await waitFor(() => {
-      expect(screen.getByTestId('pathname')).toHaveTextContent('/staff/console')
-    })
+    expect(await screen.findByTestId('exercise-management-page')).toBeInTheDocument()
+    expect(screen.queryByTestId('stub-controller-console')).not.toBeInTheDocument()
+    expect(screen.getByTestId('pathname')).toHaveTextContent('/staff/exercises')
   })
 
   it('an EVALUATOR at /staff/exercises is bounced to their own default surface', async () => {

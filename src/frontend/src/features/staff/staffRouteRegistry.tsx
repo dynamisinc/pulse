@@ -91,7 +91,11 @@ const REGISTRY_TABLE = [
     label: 'Controller Console',
     icon: faSliders,
     element: <ControllerConsoleRoute />,
-    allowedRoles: ['controller'],
+    // Seam S-3 (demo-feedback DF-14): evaluators may open the console READ-ONLY. Story 11's
+    // `useCanControl()` removes every write control for them; the console is still nobody's
+    // home page but the controller's (the evaluator keeps `/staff/evaluate`). The API already
+    // lets an evaluator read every console endpoint; server-side write enforcement is #61/#377.
+    allowedRoles: ['controller', 'evaluator'],
     isDefaultFor: ['controller'],
     group: 'conduct',
     description: 'Drive the simulated world: personas, injects, steering and the review queue.',
@@ -111,9 +115,10 @@ const REGISTRY_TABLE = [
     // SURFACE #4, and the first one TWO roles may open (COR-074/075/076).
     //
     // `allowedRoles` mirrors the server's `ExerciseAdminRoles.ExerciseAdministrators`
-    // gate EXACTLY — planner OR org-admin. Widening it here would not grant
-    // anything (the endpoints 403), it would just show a controller a surface
-    // that fails; narrowing it would hide a surface its holder is entitled to.
+    // gate EXACTLY — planner, org-admin or (DF-20) controller. Widening it beyond
+    // the server would not grant anything (the endpoints 403), it would just show
+    // a surface that fails; narrowing it would hide a surface its holder is
+    // entitled to.
     //
     // `isDefaultFor: ['orgAdmin']` is what finally gives the org-admin family a
     // home page. Until COR-076, `RoleAwareEntry` fail-closed EVERY org-admin
@@ -126,7 +131,9 @@ const REGISTRY_TABLE = [
     label: 'Exercise Management',
     icon: faFolderOpen,
     element: <ExerciseManagementRoute />,
-    allowedRoles: ['planner', 'orgAdmin'],
+    // Seam S-4 (demo-feedback DF-20, Tom 10/15): controllers list and create exercises too.
+    // Story 15 widens the server's `ExerciseAdminRoles.ExerciseAdministrators` to match.
+    allowedRoles: ['planner', 'orgAdmin', 'controller'],
     isDefaultFor: ['orgAdmin'],
     group: 'administer',
     description: 'Create exercises and see every run your organization owns.',
