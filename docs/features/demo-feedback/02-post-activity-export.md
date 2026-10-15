@@ -37,8 +37,9 @@ posts. This story is the server half: one download of every post and reply in th
 - [ ] **Formula safety:** every text cell is written as a value (never `FormulaA1`/`FormulaR1C1`). A post whose text
       starts with `=`, `+`, `-` or `@` opens in Excel as that literal text (test reads the cell back and asserts it
       has no formula).
-- [ ] Up to 50,000 rows stream without loading the whole post table into memory at once (paged reads); above that,
-      `413` with a readable reason.
+- [ ] Up to 50,000 rows: paged reads, buffered build (the post table is never loaded into memory at once; the
+      workbook is built in one buffer and sent from it). Above that, `413` with a readable reason. One export runs at
+      a time per process; a second one while it runs gets `429` with a readable reason.
 
 ### Cross-cutting
 - [ ] **Isolation (XC-001):** every read goes through `IExerciseContext` and the central filter. An export from
@@ -55,6 +56,25 @@ The console button (09). Per-inject implementer sheets, charts, a second sheet, 
 Gate tests (401/403 per role, evaluator allowed), column order and header, author-type mapping per origin, a reply row,
 a taken-down row, formula-safety read-back, isolation A/B, telemetry, and the content headers. Read the generated
 bytes back with ClosedXML in the test.
+
+Linked (`src/Pulse.WebApi.Tests/Features/Exports/`):
+
+- AC 1 (gate, headers): `PostExportEndpointTests.Anonymous_Returns401_WithNoStore`, `ParticipantSession_Returns401_ItIsNotAStaffSession`,
+  `ReadOnlySession_Returns401_ItIsNotAStaffSession`, `StaffNotAssignedToTheExercise_Returns403`, `UnresolvedScope_Returns401`,
+  `AnyAssignedStaffRole_Gets200_WithTheXlsxHeaders` (controller, evaluator, planner), `Route_IsInTheStaffWorld`
+- AC 2 (sheet layout): `PostExportWorkbookTests.Sheet_IsPosts_WithTheFrozenColumnsInOrder_BoldFrozenHeader_AndAutofilterOverTheUsedRange`,
+  `Columns_HaveSensibleWidths_AndTextIsWrappedAboutSixtyWide`, `AnEmptyExport_StillHasTheHeaderAndAFilter`
+- AC 3-5 (rows, author type, posted by, inject #, counts, pinned, status): `PostExportEndpointTests.EveryPostAndReply_IncludingTakenDown_OneRowEach_OldestFirst_WithResolvedColumns`,
+  `PostExportWorkbookTests.AuthorType_MapsEveryOrigin_AndWritesAnUnknownOneRaw`, `PostedBy_IsBlankOnlyForEngineAndWhiteNoise`,
+  `Media_IsSummarisedReadably`, `ReplyTo_IsHandleAndPostId_OrTheIdAlone_OrBlank`
+- AC 6 (times): `PostExportWorkbookTests.WallClock_IsAnExcelDateTimeCell_AndCountsAreNumbers`, `ScenarioTime_IsFormattedInTheExercisesZone`,
+  `FileName_UsesTheExerciseSlug_AndTheUtcMinute`
+- AC 7 (formula safety): `PostExportWorkbookTests.FormulaLookingText_IsWrittenAsLiteralText_NeverAFormula`, `CleanText_DropsCharactersXmlCannotCarry_AndKeepsEverythingElse`
+- AC 8 (paged reads, buffered build, 413, 429): `PostExportEndpointTests.MoreThanOnePage_IsWrittenCompletelyInTheExactOrder_AcrossThePageBoundary`,
+  `MoreThanFiftyThousandPosts_Returns413_WithAReadableReason_AndNoTelemetry`, `ASecondExportWhileOneIsRunning_Returns429_WithAReadableReason`,
+  `ARefusedCaller_NeverTakesTheGate`, `PostExportWorkbookTests.Gate_AdmitsOneExportAtATime_AndALeaseReleasesOnlyOnce`
+- Isolation: `PostExportEndpointTests.ExportFromA_ContainsNoRowPersonaStaffNameOrInjectFromB`
+- Telemetry: `PostExportEndpointTests.OneDownloadedEvent_PerDownload_StaffActor_RowsOnly`
 
 ## Tech notes
 
