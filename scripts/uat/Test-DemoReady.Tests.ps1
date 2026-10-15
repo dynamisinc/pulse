@@ -69,6 +69,7 @@ BeforeAll {
         $fake.Routes['POST /api/auth/logout'] = @{ Status = 204; Body = $null }
         $fake.Routes['GET /api/steering/pause-tier'] = @{ Status = 200; Body = [ordered]@{ tier = 'engine'; clockFrozen = $false; persisted = $true } }
         $fake.Routes['GET /api/engine/review-queue'] = @{ Status = 200; Body = @() }
+        $fake.Routes['GET /api/staff/exercise-lifecycle'] = @{ Status = 200; Body = [ordered]@{ exerciseId = $fake.ExerciseId; state = 'live'; storedStatus = 'live' } }
         $fake.Routes['GET /api/engine/settings'] = @{ Status = 200; Body = [ordered]@{ provider = 'Fake'; effectiveProvider = 'Fake'; providerCutToFake = $false; alreadyFake = $true } }
         $fake.Routes['GET /api/staff/noise'] = @{ Status = 200; Body = [ordered]@{ level = 'off'; poolSize = 40; running = $false } }
         $fake.Routes['GET /api/staff/chrome-settings'] = @{ Status = 200; Body = [ordered]@{ watermarkEnabled = $true; brandName = 'Kestrel' } }
@@ -148,7 +149,7 @@ Describe 'Test-DemoReady.ps1' {
             $run = Invoke-Ready
             $run.Code | Should -Be 0
             @($run.Results | Where-Object { $_.status -ne 'PASS' -and $_.check -ne 'Noise posts in the opening feed' }) | Should -BeNullOrEmpty
-            @($run.Results.number | Sort-Object -Unique { [int] $_ }) | Should -Be @('1', '2', '3', '4', '5', '6', '7', '8', '9', '10')
+            @($run.Results.number | Sort-Object -Unique { [int] $_ }) | Should -Be @('1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11')
             foreach ($result in $run.Results) { $result.detail | Should -Match 'expected' }
             $run.Text | Should -Match 'READY — '
         }
@@ -374,6 +375,55 @@ Describe 'Test-DemoReady.ps1' {
         It 'spent earlier copies of seeded items are fine while a pending copy exists' {
             $global:ReadyFake.Routes['GET /api/injects'].Body.items += [ordered]@{ id = 'old'; kind = 'burst'; title = 'Beat 2 · Residents react'; status = 'fired' }
             (Get-Result (Invoke-Ready) 7 'Run sheet').status | Should -Be 'PASS'
+        }
+    }
+
+    Describe 'Check 11: exercise lifecycle' {
+        It '<State> is <Status>' -ForEach @(
+            @{ State = 'live'; Status = 'PASS'; Pattern = 'expected live; got live' }
+            @{ State = 'staged'; Status = 'WARN'; Pattern = 'participants see the pre-start page until StartEx' }
+            @{ State = 'paused'; Status = 'FAIL'; Pattern = 'expected live \(or staged\); got paused' }
+            @{ State = 'completed'; Status = 'FAIL'; Pattern = 'got completed' }
+            @{ State = 'build'; Status = 'FAIL'; Pattern = 'got build' }
+        ) {
+            $global:ReadyFake.Routes['GET /api/staff/exercise-lifecycle'].Body.state = $State
+            $run = Invoke-Ready
+            (Get-Result $run 11 'Exercise lifecycle').status | Should -Be $Status
+            (Get-Result $run 11 'Exercise lifecycle').detail | Should -Match $Pattern
+            $run.Code | Should -Be ([int] ($Status -eq 'FAIL'))
+        }
+
+        It 'is read with the signed-in session (so -ExerciseId is honoured)' {
+            Invoke-Ready | Out-Null
+            ($global:ReadyFake.Calls | Where-Object Path -eq '/api/staff/exercise-lifecycle').Headers['Authorization'] | Should -Be "Bearer $($global:ReadyFake.Token)"
+        }
+    }
+
+    Describe '-ApiHost is normalized before any request (PR #548 review)' {
+        It '<Value> is read as the bare host api.fake.test' -ForEach @(
+            @{ Value = 'https://api.fake.test' }
+            @{ Value = 'https://api.fake.test/' }
+            @{ Value = 'api.fake.test/' }
+            @{ Value = 'https://API.fake.test/swagger/index.html?x=1' }
+        ) {
+            $path = Join-Path $TestDrive "host-$([guid]::NewGuid().ToString('N')).json"
+            $run = Invoke-Ready -Extra @{ ApiHost = $Value; Json = $true; JsonPath = $path }
+            $run.Code | Should -Be 0
+            @($global:ReadyFake.Calls | Where-Object Host -ne 'media.fake.test' | ForEach-Object Host | Select-Object -Unique) | Should -Be 'api.fake.test'
+            (Get-Content -LiteralPath $path -Raw | ConvertFrom-Json).apiHost | Should -Be 'api.fake.test'
+        }
+
+        It '<Value> is refused before anything is sent' -ForEach @(
+            @{ Value = 'ftp://api.fake.test' }
+            @{ Value = 'not a host' }
+            @{ Value = 'https://user:pw@api.fake.test' }
+            @{ Value = 'http://api.fake.test' }
+            @{ Value = '   ' }
+        ) {
+            $run = Invoke-Ready -Extra @{ ApiHost = $Value }
+            $run.Code | Should -Be 1
+            $global:ReadyFake.Calls | Should -BeNullOrEmpty
+            $run.Text | Should -Match 'Nothing was sent'
         }
     }
 

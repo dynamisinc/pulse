@@ -5,7 +5,7 @@
     Demo pre-flight: a read-only yes/no on whether Pulse UAT is ready for the show (story 26, #544).
 
 .DESCRIPTION
-    Signs in as a staff controller the way Import-Roster.ps1 does, runs ten checks, signs out, and prints PASS /
+    Signs in as a staff controller the way Import-Roster.ps1 does, runs eleven checks, signs out, and prints PASS /
     WARN / FAIL (or SKIP, with the reason) per check, each with the value it expected. It exits 1 on any FAIL and 0
     otherwise. It writes nothing to Pulse: every request is a GET, apart from the sign-in and the sign-out.
 
@@ -40,6 +40,8 @@
          otherwise, or when the server says its clock is frozen.
      10. Wave 3 and 4 routes answer (not 404): GET /api/feed/pinned, and GET /api/posts/{a seeded post}/edits. A
          404 on the edits route is a WARN until Wave 4 (story 19) is deployed.
+     11. Exercise lifecycle (GET /api/staff/exercise-lifecycle, for the signed-in exercise): `live` PASS; `staged`
+         WARN (participants see the pre-start page until StartEx; the demo may start staged); anything else FAIL.
 
     SECRETS. The staff secret comes from $env:PULSE_STAFF_SECRET if set, otherwise from the API's App Service
     settings through YOUR az login (as Import-Roster.ps1 and Copy-StaffSecret.ps1 do). The secret and the session
@@ -161,18 +163,31 @@ function Get-JsonList {
 # HttpRequestMessage holds the Authorization header).
 # ═══════════════════════════════════════════════════════════════════════════════════════════════════════════
 
-function Resolve-ApiBaseUrl {
-    <# -ApiHost as an https origin. A bare host name gets https://. Plain http is for localhost only. #>
-    param([Parameter(Mandatory)] [string] $ApiHost)
-    $value = $ApiHost.Trim().TrimEnd('/')
+function Resolve-ApiHost {
+    <#
+    .SYNOPSIS
+        Normalizes -ApiHost ONCE, before any network call: a bare host name, or an http(s) URL whose scheme, trailing
+        slash, path and query are dropped. Returns @{ Host (the bare host, with a port only when not the default);
+        BaseUrl (the origin this script calls) }. Only the bare host is passed to other scripts: Reset-DemoState.ps1
+        prepends https:// itself, and Clear-DemoContent.ps1 looks the exercise up by host name. Anything else (another
+        scheme, a user name or password, characters a host name cannot hold) is refused with a clear error. Plain
+        http only for localhost: the staff secret and the session token must not travel in the clear.
+    #>
+    param([AllowNull()] [AllowEmptyString()] [string] $ApiHost)
+    $value = ([string] $ApiHost).Trim()
+    $hint = "Use the API's host name, e.g. app-pulse-api-uat-dynamis.azurewebsites.net (an https:// URL is accepted too). Nothing was sent."
+    if (-not $value) { throw "-ApiHost is empty. $hint" }
     if ($value -notmatch '^[A-Za-z][A-Za-z0-9+.-]*://') { $value = "https://$value" }
     $uri = $null
-    if (-not [Uri]::TryCreate($value, [UriKind]::Absolute, [ref] $uri)) { throw "-ApiHost '$ApiHost' is not a host name." }
-    if ($uri.Scheme -ne 'https' -and -not ($uri.Scheme -eq 'http' -and $uri.IsLoopback)) {
-        throw '-ApiHost must use https (plain http only for localhost): the staff secret and the session token must not travel in the clear.'
+    if (-not [Uri]::TryCreate($value, [UriKind]::Absolute, [ref] $uri) -or $uri.Scheme -notin 'https', 'http' -or
+        $uri.UserInfo -or $uri.HostNameType -notin 'Dns', 'IPv4' -or $uri.Host -notmatch '^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$') {
+        throw "-ApiHost '$ApiHost' is not a host name or an http(s) URL. $hint"
     }
-    if ($uri.AbsolutePath -ne '/' -or $uri.Query) { throw "-ApiHost must be a host name or an origin, without a path: '$ApiHost'." }
-    return $uri.GetLeftPart([UriPartial]::Authority)
+    if ($uri.Scheme -eq 'http' -and -not $uri.IsLoopback) {
+        throw "-ApiHost '$ApiHost' uses plain http: only localhost may (the staff secret and the session token must not travel in the clear). Nothing was sent."
+    }
+    $hostName = if ($uri.IsDefaultPort) { $uri.Host } else { '{0}:{1}' -f $uri.Host, $uri.Port }
+    return [pscustomobject]@{ Host = $hostName.ToLowerInvariant(); BaseUrl = $uri.GetLeftPart([UriPartial]::Authority) }
 }
 
 function Clear-WebErrorRecord {
@@ -459,6 +474,19 @@ function Test-ExercisePins {
     return $r.Status
 }
 
+function Test-ExerciseLifecycle {
+    <# Check 11: the lifecycle of the signed-in exercise (so -ExerciseId is honoured). #>
+    param([string] $BaseUrl, [string] $Token)
+    $r = Invoke-PulseApi -BaseUrl $BaseUrl -Method GET -Path '/api/staff/exercise-lifecycle' -Token $Token
+    if ($r.Status -ne 200 -or $r.Json -isnot [System.Collections.IDictionary]) { Add-ReadyResult 11 'Exercise lifecycle' FAIL "expected live; GET /api/staff/exercise-lifecycle answered $($r.Status)"; return }
+    $state = Get-PrintableText $r.Json['state'] -Max 20
+    switch -CaseSensitive ($state) {
+        'live' { Add-ReadyResult 11 'Exercise lifecycle' PASS 'expected live; got live' }
+        'staged' { Add-ReadyResult 11 'Exercise lifecycle' WARN 'expected live; got staged: participants see the pre-start page until StartEx (fine if the demo starts staged)' }
+        default { Add-ReadyResult 11 'Exercise lifecycle' FAIL "expected live (or staged); got $(if ($state) { $state } else { 'no state' }). Participants cannot use the exercise: move it to live in Exercise Management" }
+    }
+}
+
 function Test-RunSheet {
     <# Check 7. The API hides an item's Inject # (ExternalRef), so items are told apart by title (see the help). #>
     param([string] $BaseUrl, [string] $Token, [AllowNull()] [System.Collections.IDictionary] $Pack)
@@ -638,8 +666,10 @@ function Invoke-DemoReadyCheck {
     )
     $ProgressPreference = 'SilentlyContinue'
     $script:ReadyResults = [System.Collections.Generic.List[object]]::new()
-    try { $baseUrl = Resolve-ApiBaseUrl -ApiHost $ApiHost }
+    try { $resolved = Resolve-ApiHost -ApiHost $ApiHost }
     catch { Write-Host $_.Exception.Message -ForegroundColor Red; return 1 }
+    $baseUrl = $resolved.BaseUrl
+    $ApiHost = $resolved.Host
     if ($Json -and -not $JsonPath) { $JsonPath = Join-Path $PSScriptRoot 'logs' ('demo-ready-{0}.json' -f (Get-Date -Format 'yyyyMMdd-HHmmss')) }
 
     Write-Host "Pulse demo pre-flight (read-only) — $baseUrl" -ForegroundColor Cyan
@@ -668,6 +698,7 @@ function Invoke-DemoReadyCheck {
             Invoke-ReadyStep 5 'White noise and media marking' { Test-NoiseAndWatermark -BaseUrl $baseUrl -Token $token }
             $pinnedStatus = Invoke-ReadyStep 6 'Exercise pins' { Test-ExercisePins -BaseUrl $baseUrl -Token $token -Pack $pack }
             Invoke-ReadyStep 7 'Run sheet' { Test-RunSheet -BaseUrl $baseUrl -Token $token -Pack $pack }
+            Invoke-ReadyStep 11 'Exercise lifecycle' { Test-ExerciseLifecycle -BaseUrl $baseUrl -Token $token }
 
             $feed = @()
             try {
