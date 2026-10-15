@@ -49,7 +49,6 @@ vi.mock('@/core/exerciseContext', () => ({
 
 vi.mock('../../chromeConfig', () => ({
   useChromeConfig: vi.fn(),
-  isWatermarkRequired: (config: { enabled: boolean }) => !config.enabled,
 }))
 
 const CHROME_ENABLED: ChromeConfig = {

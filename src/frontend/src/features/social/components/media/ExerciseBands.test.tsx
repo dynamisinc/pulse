@@ -115,6 +115,20 @@ describe('ExerciseBands — what they draw (DF-4)', () => {
     expect(screen.getByRole('img')).toHaveAccessibleName('Floodwater on Main Street')
   })
 
+  it('is built of <span>s only, so it is valid inside a <button> tile (Gate-1 L-4)', () => {
+    render(
+      <button type="button" aria-label="Photo">
+        <ExerciseBands />
+      </button>,
+    )
+
+    const overlay = screen.getByTestId('exercise-bands')
+    expect(overlay.tagName).toBe('SPAN')
+    expect(overlay.querySelectorAll('*')).toHaveLength(4)
+    expect(overlay.querySelectorAll(':not(span)')).toHaveLength(0)
+    expect(screen.getByRole('button')).toHaveAccessibleName('Photo')
+  })
+
   it('marks the video variant so the bottom band clears the native control bar', () => {
     render(<ExerciseBands clearNativeControls />)
 
@@ -154,6 +168,7 @@ function composite(fg: string, alpha: number, bg: string): string {
 describe('ExerciseBands — stylesheet', () => {
   it('overlays the media box without taking layout space, and is click-through', () => {
     const bands = rule('.bands')
+    expect(bands).toMatch(/display:\s*flex/)
     expect(bands).toMatch(/position:\s*absolute/)
     expect(bands).toMatch(/inset:\s*0/)
     expect(bands).toMatch(/pointer-events:\s*none/)
@@ -208,6 +223,58 @@ describe('ExerciseBands — stylesheet', () => {
   })
 })
 
+// -----------------------------------------------------------------------------
+// Stacking in every host (Gate-1 L-3 / M-2), read off disk
+// -----------------------------------------------------------------------------
+
+function sheet(path: string): string {
+  return readSrcFile(path).replace(/\/\*[\s\S]*?\*\//g, '')
+}
+
+function ruleIn(css: string, selector: string): string {
+  const escaped = selector.replace(/[.*+?^${}()|[\]\\:]/g, '\\$&')
+  const body = new RegExp(`(?:^|})\\s*${escaped}\\s*\\{([^{}]*)\\}`).exec(css)?.[1]
+  if (body === undefined) throw new Error(`rule ${selector} not found`)
+  return body
+}
+
+function zIndex(body: string): number {
+  const match = /z-index:\s*(\d+)/.exec(body)
+  if (match?.[1] === undefined) throw new Error('no z-index')
+  return Number(match[1])
+}
+
+describe('ExerciseBands — stacking in every host', () => {
+  const bandsZ = zIndex(rule('.bands'))
+
+  it.each([
+    ['features/social/components/media/VideoPlayer.module.css', '.topBar'],
+    ['features/social/components/media/VideoPlayer.module.css', '.playToggle'],
+    ['features/social/components/media/MediaTabGrid.module.css', '.playBadge'],
+    ['features/social/components/media/MediaTabGrid.module.css', '.tileButton:focus-visible::after'],
+    ['features/social/components/media/MediaGrid.module.css', '.tile:focus-visible::after'],
+    ['features/social/components/ComposerMedia.module.css', '.videoBadge'],
+  ])('%s %s paints ABOVE the bands', (path, selector) => {
+    expect(zIndex(ruleIn(sheet(path), selector))).toBeGreaterThan(bandsZ)
+  })
+
+  it.each([
+    ['features/social/components/media/MediaGrid.module.css', '.cell'],
+    ['features/social/components/media/MediaTabGrid.module.css', '.tile'],
+    ['features/social/components/ComposerMedia.module.css', '.thumb'],
+    ['features/social/components/post/PostLinkCard.module.css', '.linkCardPhotoFrame'],
+    ['features/social/pages/Profile.module.css', '.banner'],
+  ])('%s %s isolates its stacking (z-indexes never escape over the sticky header)', (path, selector) => {
+    expect(ruleIn(sheet(path), selector)).toMatch(/isolation:\s*isolate/)
+  })
+
+  it('centres the composer "Video" badge between the bands (never over the bottom band; L-2)', () => {
+    const badge = ruleIn(sheet('features/social/components/ComposerMedia.module.css'), '.videoBadge')
+    expect(badge).toMatch(/top:\s*50%/)
+    expect(badge).not.toMatch(/bottom:/)
+  })
+})
+
 describe('Two worlds: no COBRA / MUI on any file that draws the bands', () => {
   it.each([
     'features/social/components/media/ExerciseBands.tsx',
@@ -216,6 +283,8 @@ describe('Two worlds: no COBRA / MUI on any file that draws the bands', () => {
     'features/social/components/media/MediaViewer.tsx',
     'features/social/components/media/VideoPlayer.tsx',
     'features/social/components/ComposerMedia.tsx',
+    'features/social/components/post/PostLinkCard.tsx',
+    'features/social/pages/Profile.tsx',
   ])('%s imports neither @/theme (COBRA) nor @mui', path => {
     const source = readSrcFile(path)
     expect(source).not.toMatch(/from\s+['"]@\/theme/)

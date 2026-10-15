@@ -20,8 +20,11 @@
   min-width: 0;
 }
 
+/* `isolation: isolate`: the bands / badge / focus-ring z-indexes stay inside the tile and
+ * never paint over the sticky detail header (demo-feedback 06 Gate-1 M-2). */
 .tile {
   position: relative;
+  isolation: isolate;
   display: block;
   width: 100%;
   aspect-ratio: 1 / 1;

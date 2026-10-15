@@ -45,8 +45,11 @@
   grid-template-rows: 1fr 1fr;
 }
 
+/* `isolation: isolate`: the bands / focus-ring z-indexes stay inside the tile and never
+ * paint over page chrome such as the sticky detail header (demo-feedback 06 Gate-1 M-2). */
 .cell {
   position: relative;
+  isolation: isolate;
   min-width: 0;
   min-height: 0;
   margin: 0;

@@ -25,8 +25,10 @@
   font-size: 13px;
 }
 
+/* `isolation: isolate` keeps the EXERCISE bands' z-index inside the frame (demo-feedback 06). */
 .linkCardPhotoFrame {
   position: relative;
+  isolation: isolate;
   width: 100%;
   aspect-ratio: 1.91 / 1;
   overflow: hidden;

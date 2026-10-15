@@ -132,6 +132,7 @@ import {
 import { FollowButton } from '../components/FollowButton'
 import { FeedSkeleton } from '../components/FeedSkeleton'
 import { ProfileSkeleton } from '../components/ProfileSkeleton'
+import { ExerciseBands } from '../components/media/ExerciseBands'
 import { MediaTabGrid } from '../components/media/MediaTabGrid'
 import { resolveFollowers, resolveFollowing } from '../services/followService'
 import { requestReplyFocus } from '../services/replyIntent'
@@ -555,7 +556,9 @@ export function Profile({ personaId, onOpenThread, onHashtagOpen, onOpenProfile 
   return (
     <section className={styles.profile} aria-labelledby="profile-name">
       {/* Decorative (the name/handle carry identity): the accent tint is the base, the
-          persona's banner photo covers it, and a failed load simply uncovers the tint. */}
+          persona's banner photo covers it, and a failed load simply uncovers the tint. The
+          photo carries the EXERCISE bands under the media rule (demo-feedback 06, M-4); the
+          plain tint is not media and has none. */}
       <div className={styles.banner} data-testid="profile-banner" aria-hidden="true">
         {bannerImage !== undefined && (
           <img
@@ -567,6 +570,7 @@ export function Profile({ personaId, onOpenThread, onHashtagOpen, onOpenProfile 
             onError={() => setFailedBannerUrl(bannerImage)}
           />
         )}
+        {bannerImage !== undefined && <ExerciseBands />}
       </div>
 
       <div className={styles.identity} data-testid="profile-identity">

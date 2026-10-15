@@ -27,9 +27,14 @@
  * box (it fills `inset: 0` of its nearest positioned ancestor): the feed/thread
  * image tiles (`MediaGrid`), the inline and expanded `VideoPlayer` (inside the
  * wrapper that is fullscreened, so it stays on screen in fullscreen), the
- * `MediaViewer` image, the profile Media tab (`MediaTabGrid`) and the composer's
- * attachment previews (`ComposerMedia`). Alt-text placeholders (no media shown) do
- * not get bands.
+ * `MediaViewer` image, the profile Media tab (`MediaTabGrid`), the composer's
+ * attachment previews (`ComposerMedia`), the link-preview image (`PostLinkCard`) and
+ * the persona banner photo (`pages/Profile.tsx`). Alt-text placeholders and the
+ * unplayable-video message (no media shown) do not get bands.
+ *
+ * STACKING: the overlay is `z-index: 1`; each host's controls / badges / focus ring sit
+ * above it (z >= 2), and each host box is `isolation: isolate`, so none of those
+ * z-indexes can paint over page chrome such as the sticky detail header.
  *
  * LOOK (`ExerciseBands.module.css`): the participant skin tokens — `--pc-bg` text on
  * a `--pc-ink` strip at 66% opacity, which is >= 4.5:1 over ANY media (the worst case,
@@ -67,22 +72,26 @@ export interface ExerciseBandsProps {
   readonly clearNativeControls?: boolean
 }
 
-/** The two bands themselves (always drawn; the callers decide whether). */
+/**
+ * The two bands themselves (always drawn; the callers decide whether). `<span>`s, laid
+ * out by the stylesheet (`display: flex`), because several hosts are `<button>` tiles,
+ * whose content model is phrasing content only.
+ */
 function Bands({ clearNativeControls }: { readonly clearNativeControls: boolean }) {
   return (
-    <div
+    <span
       className={`${styles.bands} ${clearNativeControls ? styles.clearControls : ''}`}
       aria-hidden="true"
       data-testid="exercise-bands"
       data-clear-native-controls={clearNativeControls ? 'true' : undefined}
     >
-      <div className={styles.band} data-testid="exercise-band-top">
+      <span className={styles.band} data-testid="exercise-band-top">
         <span className={styles.text}>{EXERCISE_BAND_TEXT}</span>
-      </div>
-      <div className={styles.band} data-testid="exercise-band-bottom">
+      </span>
+      <span className={styles.band} data-testid="exercise-band-bottom">
         <span className={styles.text}>{EXERCISE_BAND_TEXT}</span>
-      </div>
-    </div>
+      </span>
+    </span>
   )
 }
 

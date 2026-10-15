@@ -1081,15 +1081,15 @@ describe('VideoPlayer — unplayable and unsafe', () => {
     expect(retried.paused).toBe(true)
   })
 
-  it('keeps the EXERCISE bands even when the video cannot play (no native bar to clear then)', () => {
-    chrome.enabled = false
+  it('draws NO bands over the unplayable message (it shows no footage; Gate-1 L-5)', () => {
+    chrome.watermark = true
     const { el } = mount()
+    expect(bands()).not.toBeNull()
 
     fireEvent.error(el)
 
     expect(screen.getByTestId('video-unplayable')).toBeInTheDocument()
-    expect(bands()).not.toBeNull()
-    expect(bands()).not.toHaveAttribute('data-clear-native-controls')
+    expect(bands()).toBeNull()
   })
 
   it.each([

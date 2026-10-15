@@ -61,3 +61,10 @@ Where they live (`src/frontend/src/features/`):
   [`social/components/post/PostMediaSlot.test.tsx`](../../../src/frontend/src/features/social/components/post/PostMediaSlot.test.tsx) (Expand fallback modal)
 - Profile Media tab: [`social/components/media/MediaTabGrid.bands.test.tsx`](../../../src/frontend/src/features/social/components/media/MediaTabGrid.bands.test.tsx)
 - Composer previews: [`social/components/ComposerMedia.bands.test.tsx`](../../../src/frontend/src/features/social/components/ComposerMedia.bands.test.tsx)
+- Gate-1 fold-ins: real hooks under the real providers (`watermark: false` + chrome on => no bands after success; no
+  providers => bands): [`social/components/media/ExerciseBands.live.test.tsx`](../../../src/frontend/src/features/social/components/media/ExerciseBands.live.test.tsx);
+  link-preview photo: [`social/components/post/PostLinkCard.bands.test.tsx`](../../../src/frontend/src/features/social/components/post/PostLinkCard.bands.test.tsx);
+  persona banner photo: [`social/pages/Profile.bannerBands.test.tsx`](../../../src/frontend/src/features/social/pages/Profile.bannerBands.test.tsx);
+  in-fiction pause/EndEx slot back on the D7 chrome-off rule (chrome on + watermark on => no slot):
+  [`participant-shell/components/OverlayLayer/OverlayLayer.test.tsx`](../../../src/frontend/src/features/participant-shell/components/OverlayLayer/OverlayLayer.test.tsx);
+  stacking / isolation / span-only markup: `ExerciseBands.test.tsx`

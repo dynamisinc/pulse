@@ -42,7 +42,8 @@
  *    replace the earlier single "EXERCISE" slot in the top row. They are click-through
  *    and sit BELOW the top controls row (duration, Mute, Expand) and the Play button,
  *    which stay visible and clickable; the bottom band is lifted clear of the native
- *    control bar. Absolutely positioned, so showing/hiding them shifts nothing.
+ *    control bar. Absolutely positioned, so showing/hiding them shifts nothing. The
+ *    unplayable-video message shows no footage and carries no bands.
  *  - NO PATH SHOWS THE BARE VIDEO. We fullscreen the WRAPPER (so the bands child
  *    is on screen), `controlsList="nofullscreen nodownload noremoteplayback"` +
  *    `disablePictureInPicture` + `disableRemotePlayback` remove Chromium's fullscreen,
@@ -401,7 +402,8 @@ export function VideoPlayer({
         this player is fullscreen (the compliance banners are hidden then). A child of the
         wrapper that is fullscreened, so they stay on screen; below the controls in z-order.
       */}
-      <ExerciseBands force={fullscreen} clearNativeControls={!failed} />
+      {/* No bands over the unplayable message: it shows no footage (Gate-1 L-5). */}
+      {!failed && <ExerciseBands force={fullscreen} clearNativeControls />}
 
       {/*
         The overlay top row: duration | Mute . Expand. Painted ABOVE the bands, so the
