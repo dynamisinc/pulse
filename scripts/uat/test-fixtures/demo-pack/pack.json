@@ -108,7 +108,26 @@
             "replyTo": { "item": "i01", "sequence": 1 }
           }
         ]
+      },
+      {
+        "key": "i03",
+        "kind": "post",
+        "msel": "3",
+        "title": "County opens the Fairhaven High shelter",
+        "plannedMinute": 20,
+        "posts": [
+          {
+            "persona": "FulcoEM",
+            "text": "Test fixture inject: the shelter at Fairhaven High is open. Bring medications and pet supplies."
+          }
+        ]
       }
     ]
-  }
+  },
+  "noise": [
+    { "persona": "mvega_fh", "text": "Test fixture noise: anyone know if the farmers market is still on for Saturday?" },
+    { "persona": "Newsline7", "text": "Test fixture noise: traffic is slow on Route 9 this morning." },
+    { "persona": "FulcoEM", "text": "Test fixture noise: reminder, the county fair volunteer sign-up closes Friday." }
+  ],
+  "pins": ["p02", "p01"]
 }

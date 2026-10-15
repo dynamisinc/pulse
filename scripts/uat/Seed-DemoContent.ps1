@@ -4,7 +4,8 @@
 .SYNOPSIS
     Loads the demo's opening content into Pulse UAT through the public product APIs: media, persona profiles,
     backdated posts, replies and engagement baselines. It also loads the run sheet: the pack's scripted posts
-    become inject items in the console's server-side queue.
+    become inject items in the console's server-side queue. And it sets the exercise up for the demo: posts
+    pinned for everyone, the white-noise pool loaded with white noise left off, and media marking on.
 
 .DESCRIPTION
     Reads a pulse.demopack.v1 pack (docs/demo/pack/pack.json, implementation.md section 1.10) and:
@@ -15,18 +16,28 @@
          type the server accepts (judged by its first bytes, as the server does) and is within the server's
          size limits. The run-sheet items (runSheet.items) are checked against the inject queue's own rules
          (InjectItemValidator): kind, title, notes, planned minute, post counts, the burst window, text, media,
-         alt, replies and baselines. If anything fails, every problem is listed, nothing is sent and the script
-         exits 1.
+         alt, replies and baselines. The white-noise entries (noise) follow the post-text rules, each pin (pins)
+         names a pack post, and an msel ref sits on a post item only and is unique. With -RunSheet exceptMsel, no
+         item the run loads may reply to an msel item: the on-stage MSEL import creates that one later, so the
+         reply would have no parent (the message names both items). If anything fails, every problem is listed,
+         nothing is sent and the script exits 1.
       2. Reads GET /api/exercise-context (anonymous): the host's exerciseId and the timeZone every post needs.
-      3. With -WhatIf it stops here. It prints the plan (counts per step, and each run-sheet item it would
-         create with its kind, title and post count) and exits 0: no sign-in, no writes.
+      3. With -WhatIf it stops here. It prints the plan (counts per step, each run-sheet item it would create
+         with its kind, title and post count, and each one -RunSheet leaves out) and exits 0: no sign-in, no
+         writes.
       4. Signs in as a staff controller: POST /api/auth/staff/login with {username, secret, exerciseId}.
-      5. Checks every handle the pack names (posts and run-sheet posts) against GET /api/personas, and every
-         run-sheet assignee against GET /api/injects/assignees ("me", or a staff display name, ignoring case).
-         An unknown handle or assignee stops the run before any write, and the known ones are listed. It also
-         reads the current run sheet (GET /api/injects).
+      5. Checks every handle the pack names (posts, run-sheet posts and noise entries) against GET /api/personas,
+         and the assignee of every run-sheet item this run loads against GET /api/injects/assignees ("me", or a
+         staff display name, ignoring case). An unknown handle or assignee stops the run before any write, and
+         the known ones are listed. It also reads the current run sheet (GET /api/injects), unless -RunSheet
+         loads no item.
       6. Pauses the engine (pause tier "engine") so it does not react to the seeded posts. It reads the tier
          first and never loosens a stricter one: a frozen world stays frozen. Skip this with -LeaveEngineRunning.
+         Then, on every run, it turns white noise OFF (PUT /api/staff/noise { level: off }), so no noise post
+         lands among the seeded ones, and makes sure media marking is ON before any media is posted (DF-3): it
+         reads GET /api/staff/chrome-settings and, only when watermarkEnabled is false, sends PUT
+         /api/staff/chrome-settings with that one field changed and every other field exactly as read (the PUT
+         is a full replace and carries no version or ETag).
       7. Uploads each media file once (POST /api/media): poster images first, then each video with its
          posterMediaId. A 201 is recorded in the manifest at once. On a 429 it waits the Retry-After and
          retries. A 400 stops the run and prints the server's reason. An upload is not idempotent either, so
@@ -50,8 +61,24 @@
       9. Posts the opening feed as controller-as-persona (POST /api/posts) in scenario-time order, with
          scenarioTime = anchor - minutesBeforeAnchor. Replies go after their parents. Engagement baselines
          are included.
-     10. Loads the run sheet: one POST /api/injects per run-sheet item, in pack order (each lands at the end
-         of the console's queue, pending; nothing is fired). Handles become persona ids, media keys become
+     10. Pins each post the pack lists in pins for everyone (PUT /api/staff/posts/{id}/pin, DF-7), its id
+         resolved from the post key as step 9 resolved it. The last listed is pinned first: the Pinned tab shows
+         the newest pin first (DF-5), so it reads in pack order while the exercise clock runs. With the clock
+         stopped, the server stamps a pin with the later of the exercise's stored scenario time and the post's
+         own (PinService), so the tab may follow the posts' own times, or its id tie-break. A post already
+         pinned stays as it was (the server answers 204 and changes nothing). A refused pin (a 404: the post is
+         gone or taken down) is reported, and the self-check fails on it.
+     11. Loads the run sheet: one POST /api/injects per run-sheet item, in pack order (each lands at the end
+         of the console's queue, pending; nothing is fired). Which items it loads follows -RunSheet: all, or
+         exceptMsel (every item WITHOUT an msel ref; the on-stage MSEL import adds the others, DF-16), or none.
+         An item left out is never created, adopted, re-pointed or self-checked, and its manifest entry stays as
+         it is, so the import's items are never touched. A copy of it that an earlier run of this script recorded
+         and the console could still fire is warned about: a seeded copy carries no Inject #, so the import would
+         add a second one (the queue does not show Inject #, so it may also be an item the import made itself).
+         So is an msel item that replies to a post: an MSEL row cannot carry the reply, so the import creates it
+         top-level. And so is a loaded item without a plannedMinute while msel items are left out: the import
+         slots each item it creates in by planned minute (DF-22), and cannot place around one without it.
+         Handles become persona ids, media keys become
          the uploaded asset ids, a reply to a seeded post becomes { postId }, a reply to an earlier post of
          the same item stays { sequence }, and a reply to a post of an earlier item becomes { injectPostId }.
          A 201 is recorded in the manifest at once. On a 429 it waits the Retry-After and retries. A 400
@@ -70,18 +97,28 @@
          the fresh version; after a failed retry the queue is read once more, in case a slow PUT landed. If it
          still points at the dead target, that is a warning naming the item, and the self-check's reply line
          fails. Spent items are never edited (-ReloadFiredRunSheet's fresh copies already point at the new ids).
-     11. Checks the pause tier again (same rule) and reports what it found or set. The tier lives in
+     12. Loads the white-noise pool (DF-12): PUT /api/staff/noise/pool with the pack's noise entries, handles as
+         persona ids. The first 1,000 go with mode "replace", so they become the whole pool; any more follow
+         with mode "append" (1,000 per call, the server's limit). Each entry the server rejects is a warning with
+         its index in noise and the server's reason; the rest still load. A refused call stops the loading and
+         the self-check fails on it. A pack without noise leaves the server's pool as it is.
+     13. Checks the pause tier again (same rule) and reports what it found or set. The tier lives in
          memory, and every reset or restart sets it back to "running". After any reset, run this script
-         again or pause from the console.
-     12. Self-check. GET /api/feed must show at least the seeded top-level posts. Every media URL (post
+         again or pause from the console. Then it turns white noise OFF again, on every run (with
+         -LeaveEngineRunning too), so a seed never leaves noise running.
+     14. Self-check. GET /api/feed must show at least the seeded top-level posts. Every media URL (post
          media, posters, avatars, banners) must answer a ranged GET (Range: bytes=0-1) with 206. Every
          run-sheet item must be in GET /api/injects with the pack's post count, and armable: pending, or
          held before its release (see AFTER A REHEARSAL). Every reply of an armable item must point at a live
          post: not an earlier copy of its target, not an archived post, not a post of a superseded, spent or
          deleted item. A post outside a full 200-post feed window cannot be confirmed, and the line says how
-         many it did not check. The armable items must be in pack order in the console's
-         queue, because "Fire next" follows that order. It prints a ✅/❌ summary and exits 1 if any check
-         failed.
+         many it did not check. The armable items it loaded must be in pack order in the console's queue,
+         because "Fire next" follows that order. (With exceptMsel the on-stage import then slots its items in by
+         planned minute, DF-22, so the queue reads in pack order again when every seeded item has a
+         plannedMinute.) Every pin must have been accepted and show pinnedForAll in the feed, the white-noise
+         pool must have loaded, white noise must be off and media marking on. It prints a ✅/❌ summary and
+         exits 1 if any check failed. However a run ends after step 6 began (an early stop, an error), it
+         turns white noise off once more on the way out unless step 13 already confirmed it off.
 
     RE-RUNNING IS SAFE. A manifest records what has been seeded, at
     %LOCALAPPDATA%\Pulse\demo-seed\<exerciseId>.json on Windows or $HOME/.local/share/Pulse/demo-seed on
@@ -103,10 +140,16 @@
         created again. An item the manifest does not know is first matched against the queue by kind, title
         and posts (persona and text), so a lost manifest does not duplicate the run sheet either. Only an
         ARMABLE item is ever adopted: pending, or held with nothing out yet.
+      - An item -RunSheet leaves out is not drift and not missing: it is not planned, compared or checked at
+        all, and switching -RunSheet between runs never deletes anything.
+      - The white-noise pool is REPLACED, not added to, so a re-run leaves the same pool (its rotation starts
+        over). Pinning a post that is already pinned changes nothing. Media marking is written only when off.
 
     AFTER A REHEARSAL. Firing a run-sheet item in a rehearsal spends it: the console cannot fire it again, the
-    server refuses to delete a fired item, and neither Reset-DemoState.ps1 nor Clear-DemoContent.ps1 touches
-    the inject queue. So every run checks each loaded item's status. The plan lists any item that is fired,
+    server refuses to delete a fired item, and the reset scripts never touch an item this script seeded
+    (Reset-DemoState.ps1 leaves the inject queue alone; Clear-DemoContent.ps1 archives only the items an MSEL
+    import created, the ones with an Inject #, so a rehearsal's fired imports do not block the show's import).
+    So every run checks each loaded item's status. The plan lists any item that is fired,
     firing, skipped, failed or held part-way, and the self-check FAILS on it. Re-arm the run sheet with
     -ReloadFiredRunSheet: each spent item gets a fresh copy (POST /api/injects, with the same uncertain-create
     rules), the manifest records the new id and keeps the old one as superseded (never adopted again), and the
@@ -120,6 +163,9 @@
     put the fresh copies behind the untouched later items, and "Fire next" would go out of order. The plan
     warns about this, and the self-check fails on it. First Skip the remaining items in the console, then run
     with -ReloadFiredRunSheet: everything reloads, in pack order. Or drag the items into order in the console.
+    The on-stage MSEL import is the one writer that does not append: it places each item it creates just before
+    the first pending item with a later planned minute (DF-22, story 16). So give every seeded item a
+    plannedMinute; the plan warns when an exceptMsel run loads one without it.
 
     -Resume continues a partial run on its ORIGINAL scenario anchor. Without it, the script refuses to add
     posts next to ones already seeded, because their times would not line up. It says so and writes nothing.
@@ -178,9 +224,19 @@
     skipped, failed or held part-way, so the console has it to fire again. The old items stay as they are. An
     item that is still firing stops the run before any write.
 
+.PARAMETER RunSheet
+    Which run-sheet items this run loads (Test-RunSheetItemLoaded is the one place this is decided):
+      all         every item (the default).
+      exceptMsel  every item WITHOUT an msel ref: the demo setting (DF-16). The on-stage Cadence MSEL import
+                  adds the items with one, so the import does not duplicate them. A burst, and any single post a
+                  seeded item replies to, cannot travel through an MSEL, so those are seeded.
+      none        no item; the console's queue is not even read.
+    An item left out is never created, adopted, re-pointed or self-checked. With exceptMsel, a loaded item that
+    replies to an msel item stops the run at validation (its parent would not exist yet).
+
 .PARAMETER LeaveEngineRunning
     Do not touch the pause tier (the engine stays as it is, normally "running"). It is still read once, to
-    warn about a world left frozen.
+    warn about a world left frozen. White noise is still turned off.
 
 .PARAMETER AcceptUnverifiableFeed
     Post even when the feed is at its 200-post cap and this machine's manifest does not know some pack posts,
@@ -194,6 +250,12 @@
 
 .EXAMPLE
     pwsh scripts/uat/Seed-DemoContent.ps1 -StaffUsername controller1
+
+.EXAMPLE
+    pwsh scripts/uat/Seed-DemoContent.ps1 -StaffUsername controller1 -RunSheet exceptMsel
+
+    The demo seed (DF-16): everything except the run-sheet items with an msel ref, which the on-stage MSEL
+    import adds.
 
 .EXAMPLE
     pwsh scripts/uat/Seed-DemoContent.ps1 -StaffUsername controller1 -Resume
@@ -216,6 +278,7 @@ param(
     [switch] $WhatIf,
     [switch] $Resume,
     [switch] $ReloadFiredRunSheet,
+    [ValidateSet('all', 'exceptMsel', 'none')] [string] $RunSheet = 'all',
     [switch] $LeaveEngineRunning,
     [switch] $AcceptUnverifiableFeed,
     [string] $ManifestDirectory
@@ -231,6 +294,8 @@ $ErrorActionPreference = 'Stop'
 #   personas Features/Social/PersonaAdmin/PersonaProfilePatchParser.cs (PE-BE)
 #   injects  Features/Injects/InjectItemValidator.cs + InjectBurstPacing.cs (inject-queue 06); the console's
 #            mirror is src/frontend/src/features/controller/runSheet/injectRules.ts INJECT_LIMITS (07)
+#   msel     Features/Injects/Import/MselImportPlanner.cs (an Inject # is at most 64: InjectItem.ExternalRef)
+#   noise    Features/WhiteNoise/WhiteNoiseService.cs (1,000 entries per pool call; text 1 to 280 code points)
 # ═══════════════════════════════════════════════════════════════════════════════════════════════════════════
 
 function Get-SeedLimits {
@@ -240,14 +305,17 @@ function Get-SeedLimits {
         DisplayNameMax = 100; BioMax = 512; LocationMax = 100; HandleMax = 50
         InjectTitleMax = 120; InjectNotesMax = 500; PlannedMinuteMax = [int]::MaxValue
         BurstMinPosts = 2; BurstMaxPosts = 20; BurstWindowMin = 30; BurstWindowMax = 600; BurstWindowDefault = 90
-        BurstMinGapSeconds = 3
+        BurstMinGapSeconds = 3; MselMax = 64
+        # NoiseMax is the pack's cap (pack.schema.json maxItems); NoisePoolChunk the server's per-call limit.
+        NoiseMax = 1000; NoisePoolChunk = 1000
         FeedTake = 200; LibraryTake = 200
     }
 }
 
 function Get-SeedApiAllowlist {
-    # The ONLY API paths this script may call (story S1 "Public APIs only"). Seed-DemoContent.Tests.ps1 greps
-    # this file for any other API path, and Invoke-PulseApi refuses one at runtime.
+    # The ONLY API paths this script may call: story S1 "Public APIs only" (demo-polish 24), plus the routes the
+    # demo-feedback S1 story (#510) names. Seed-DemoContent.Tests.ps1 greps this file for any other API path, and
+    # Invoke-PulseApi refuses one at runtime.
     @(
         '/api/exercise-context'
         '/api/auth/staff/login'
@@ -261,6 +329,10 @@ function Get-SeedApiAllowlist {
         '/api/injects'
         '/api/injects/assignees'
         '/api/injects/{id}'
+        '/api/staff/noise/pool'
+        '/api/staff/noise'
+        '/api/staff/posts/{id}/pin'
+        '/api/staff/chrome-settings'
     )
 }
 
@@ -268,13 +340,16 @@ function Test-SeedApiPath {
     <#
     .SYNOPSIS
         True when the path is on the allowlist. An item route, /api/injects/{id}, is allowed for PUT only (re-pointing
-        a kept item's stale reply in place): never fire, hold, delete or reorder. Pass the method to allow it.
+        a kept item's stale reply in place): never fire, hold, delete or reorder. A post's pin route,
+        /api/staff/posts/{id}/pin, is allowed for PUT only too: the seed pins, never unpins. Pass the method to allow
+        either.
     #>
     param([Parameter(Mandatory)] [string] $Path, [string] $Method)
     $bare = ($Path -split '\?', 2)[0]
     $guid = '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}'
     if ($bare -cmatch "^/api/staff/personas/$guid`$") { return $true }
     if ($bare -cmatch "^/api/injects/$guid`$") { return $Method -ceq 'PUT' }
+    if ($bare -cmatch ('^' + ('/api/staff/posts/{id}/pin' -replace '\{id\}', $guid) + '$')) { return $Method -ceq 'PUT' }
     # The {id} entries are placeholders for the patterns above, never paths: a literal "{id}" matches nothing.
     return @(Get-SeedApiAllowlist | Where-Object { $_ -notmatch '[{}]' }) -ccontains $bare
 }
@@ -730,7 +805,7 @@ function Test-DemoPack {
         & $add 'type' 'pack' 'The pack must be a JSON object.'
         return $errors.ToArray()
     }
-    & $checkKeys $Pack @('$schema', 'schema', 'county', 'personas', 'media', 'posts', 'runSheet') 'pack'
+    & $checkKeys $Pack @('$schema', 'schema', 'county', 'personas', 'media', 'posts', 'runSheet', 'noise', 'pins') 'pack'
     if ($Pack['schema'] -cne 'pulse.demopack.v1') { & $add 'schema-id' 'pack.schema' "must be ""pulse.demopack.v1"" (found ""$($Pack['schema'])"")." }
     if ($Pack.Contains('county') -and (Get-JsonKind $Pack['county']) -ne 'string') { & $add 'type' 'pack.county' 'must be a string.' }
     foreach ($section in 'personas', 'media', 'posts') {
@@ -881,6 +956,8 @@ function Test-DemoPack {
         }
         $postCountOf = { param([int] $Index) if ((Get-JsonKind $items[$Index]['posts']) -eq 'array') { $items[$Index]['posts'].Count } else { 0 } }
         $seenItemKeys = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+        # The import matches an Inject # ignoring case, after trimming (MselImportPlanner, InjectQueueService.Import).
+        $seenMsel = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
         $itemEdges = @{}                                                    # item index → item indexes its posts reply to
         $forward = [System.Collections.Generic.List[object]]::new()        # replies naming a LATER item
         $replyForms = 'must be exactly one of { "postKey": "<pack post key>" }, { "sequence": <n> } (an earlier post of this item) or { "item": "<run-sheet item key>", "sequence": <n> }.'
@@ -888,13 +965,24 @@ function Test-DemoPack {
         for ($j = 0; $j -lt $items.Count; $j++) {
             $item = $items[$j]; $where = "runSheet.items[$j]"
             if ((Get-JsonKind $item) -ne 'object') { & $add 'type' $where 'must be an object.'; continue }
-            & $checkKeys $item @('key', 'kind', 'title', 'notes', 'plannedMinute', 'assignee', 'burstWindowSeconds', 'posts') $where
+            & $checkKeys $item @('key', 'kind', 'msel', 'title', 'notes', 'plannedMinute', 'assignee', 'burstWindowSeconds', 'posts') $where
             $key = $item['key']
             if ((Get-JsonKind $key) -ne 'string' -or $key -cnotmatch $keyPattern) { & $add 'key-format' "$where.key" "must be 1 to $($Limits.KeyMax) letters, digits, '_' or '-'." }
             elseif (-not $seenItemKeys.Add($key)) { & $add 'duplicate-key' "$where.key" "'$key' is already used by another run-sheet item (keys are compared ignoring case)." }
 
             $kind = $item['kind']
             if (@('post', 'burst') -cnotcontains $kind) { & $add 'inject-kind' "$where.kind" 'must be "post" (one post) or "burst" (2 to 20 posts released across a window).'; $kind = $null }
+
+            # msel: the MSEL Inject # the on-stage import creates this item from (DF-16). -RunSheet decides who loads it.
+            if ($item.Contains('msel')) {
+                $msel = $item['msel']
+                if ($kind -ceq 'burst') { & $add 'inject-msel-kind' "$where.msel" 'applies to a "post" item only: the MSEL import creates one single-post item per row (DF-9), never a burst.' }
+                if ((Get-JsonKind $msel) -ne 'string' -or $msel.Trim().Length -eq 0 -or (Get-CodePointCount $msel) -gt $Limits.MselMax) {
+                    & $add 'inject-msel' "$where.msel" "must be the MSEL Inject # the on-stage import creates this item from: 1 to $($Limits.MselMax) characters, not blank."
+                }
+                elseif (Find-SeedMarkup $msel) { & $add 'markup' "$where.msel" "msel $(& $markupMessage (Find-SeedMarkup $msel))" }
+                elseif (-not $seenMsel.Add($msel.Trim())) { & $add 'duplicate-msel' "$where.msel" "'$msel' is already the msel of another item; the import matches an Inject # ignoring case, so each is unique." }
+            }
 
             $title = $item['title']
             if ((Get-JsonKind $title) -ne 'string' -or $title.Trim().Length -eq 0 -or (Get-CodePointCount $title.Trim()) -gt $Limits.InjectTitleMax) {
@@ -1028,7 +1116,91 @@ function Test-DemoPack {
         }
     }
 
+    # ── noise (optional): the white-noise pool for PUT /api/staff/noise/pool (DF-12) ─────────────────────────────
+    # The server's rules (WhiteNoiseService): a persona of the exercise (checked after sign-in, like every handle) and
+    # text of 1 to 280 code points once sanitised and trimmed. The pack refuses markup, so trimming is the whole story.
+    if ($Pack.Contains('noise')) {
+        $noise = $Pack['noise']
+        if ((Get-JsonKind $noise) -ne 'array') { & $add 'type' 'pack.noise' 'must be a list of { "persona": "<handle>", "text": "..." } (use [] for none).' }
+        else {
+            if ($noise.Count -gt $Limits.NoiseMax) { & $add 'noise-count' 'pack.noise' "has $($noise.Count) entries; a pack carries at most $($Limits.NoiseMax)." }
+            for ($i = 0; $i -lt $noise.Count; $i++) {
+                $entry = $noise[$i]; $where = "noise[$i]"
+                if ((Get-JsonKind $entry) -ne 'object') { & $add 'type' $where 'must be an object like { "persona": "<handle>", "text": "..." }.'; continue }
+                & $checkKeys $entry @('persona', 'text') $where
+                [void] (& $checkHandle $entry['persona'] "$where.persona" 'handle-format')
+                $text = $entry['text']
+                if ((Get-JsonKind $text) -ne 'string' -or $text.Trim().Length -eq 0) { & $add 'noise-text' "$where.text" 'is required: 1 to 280 characters of text.' }
+                elseif ((Get-CodePointCount $text.Trim()) -gt $Limits.TextMax) { & $add 'noise-text' "$where.text" "is $(Get-CodePointCount $text.Trim()) characters; the limit is $($Limits.TextMax)." }
+                elseif (Find-SeedMarkup $text) { & $add 'markup' "$where.text" "text $(& $markupMessage (Find-SeedMarkup $text))" }
+            }
+        }
+    }
+
+    # ── pins (optional): pack posts a controller pins for everyone (PUT /api/staff/posts/{id}/pin, DF-7) ──────────
+    if ($Pack.Contains('pins')) {
+        $pins = $Pack['pins']
+        if ((Get-JsonKind $pins) -ne 'array') { & $add 'type' 'pack.pins' 'must be a list of post keys (use [] for none).' }
+        else {
+            $seenPins = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+            for ($i = 0; $i -lt $pins.Count; $i++) {
+                $pin = $pins[$i]
+                if ((Get-JsonKind $pin) -ne 'string' -or -not $postIndex.Contains($pin)) { & $add 'pin-ref' "pins[$i]" "names no post key in this pack: '$pin'." }
+                elseif (-not $seenPins.Add($pin)) { & $add 'duplicate-pin' "pins[$i]" "'$pin' is listed twice." }
+            }
+        }
+    }
+
     return $errors.ToArray()
+}
+
+function Test-RunSheetItemLoaded {
+    <#
+    .SYNOPSIS
+        Whether this run loads a run-sheet item, by -RunSheet. The ONE place the selection lives: validation
+        (Test-RunSheetSelection), the plan, the load, the self-check and the summaries all follow it.
+          all         every item.
+          exceptMsel  every item without an msel ref: the on-stage MSEL import creates those (DF-16).
+          none        no item.
+    #>
+    param([Parameter(Mandatory)] [System.Collections.IDictionary] $Item, [Parameter(Mandatory)] [string] $RunSheet)
+    switch ($RunSheet) {
+        'all' { return $true }
+        'exceptMsel' { return [string]::IsNullOrEmpty([string] $Item['msel']) }
+        'none' { return $false }
+    }
+    throw "Unknown -RunSheet '$RunSheet' (all, exceptMsel or none)."
+}
+
+function Test-RunSheetSelection {
+    <#
+    .SYNOPSIS
+        The rule that depends on -RunSheet, for a pack Test-DemoPack accepted: an item this run loads may not reply to
+        a post of an item it leaves out (with exceptMsel, an msel item, which the MSEL import creates later, on stage),
+        because that parent would not exist yet when the seed creates the reply. Emits one { Code, Where, Message }
+        per such reply, naming both items, as Test-DemoPack does; nothing when every loaded reply has its parent.
+    #>
+    param([Parameter(Mandatory)] [System.Collections.IDictionary] $Pack, [Parameter(Mandatory)] [string] $RunSheet)
+    $items = @(Get-RunSheetItems -Pack $Pack)
+    $leftOut = [hashtable]::new([StringComparer]::Ordinal)
+    foreach ($item in @(Get-RunSheetItems -Pack $Pack -RunSheet $RunSheet -Left)) { $leftOut[[string] $item['key']] = $item }
+    for ($j = 0; $j -lt $items.Count; $j++) {
+        $key = [string] $items[$j]['key']
+        if ($leftOut.Contains($key)) { continue }
+        $posts = @(Get-SeedList $items[$j] 'posts')
+        for ($k = 0; $k -lt $posts.Count; $k++) {
+            $reply = $posts[$k]['replyTo']
+            if ($reply -isnot [System.Collections.IDictionary] -or -not $reply.Contains('item')) { continue }
+            $parent = $leftOut[[string] $reply['item']]
+            if (-not $parent) { continue }
+            $target = [string] $reply['item']
+            $why = if ($parent['msel']) { "which -RunSheet $RunSheet leaves for the on-stage MSEL import (msel '$($parent['msel'])')" } else { "which -RunSheet $RunSheet does not load" }
+            [pscustomobject]@{
+                Code = 'inject-reply-left-out'; Where = "runSheet.items[$j].posts[$k].replyTo.item"
+                Message = "item '$key' is seeded, but its post $($k + 1) replies to item '$target', $why. '$target' would not exist yet when '$key' is created. Remove msel from '$target', drop the reply, or run with -RunSheet all."
+            }
+        }
+    }
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════════════════════════════════
@@ -1499,9 +1671,16 @@ function New-PostRequestBody {
 # ═══════════════════════════════════════════════════════════════════════════════════════════════════════════
 
 function Get-RunSheetItems {
-    <# The pack's run-sheet items (nothing when the pack has no runSheet). Always call it as @(Get-RunSheetItems …). #>
-    param([Parameter(Mandatory)] [System.Collections.IDictionary] $Pack)
-    if ($Pack['runSheet'] -is [System.Collections.IDictionary]) { Get-SeedList $Pack['runSheet'] 'items' }
+    <#
+    .SYNOPSIS
+        The pack's run-sheet items that -RunSheet loads (Test-RunSheetItemLoaded; every item by default), or with
+        -Left the ones it leaves out. Nothing when the pack has no runSheet. Always call it as @(Get-RunSheetItems …).
+    #>
+    param([Parameter(Mandatory)] [System.Collections.IDictionary] $Pack, [string] $RunSheet = 'all', [switch] $Left)
+    if ($Pack['runSheet'] -isnot [System.Collections.IDictionary]) { return }
+    foreach ($item in @(Get-SeedList $Pack['runSheet'] 'items')) {
+        if ((Test-RunSheetItemLoaded -Item $item -RunSheet $RunSheet) -ne [bool] $Left) { $item }
+    }
 }
 
 function Get-InjectChildIds {
@@ -1613,6 +1792,9 @@ function Get-InjectPlan {
                   superseded list (Replaces).
           refuse  -ReloadFired only: the manifest's item is still firing (a burst releasing its posts). The run
                   stops before any write.
+        Only the items -RunSheet loads are planned. The ones it leaves out are listed in Left with the reason,
+        and nothing else: not created, adopted, compared, re-pointed or checked, and their manifest entries (and
+        the claim on their ids) stay as they are. So the MSEL import's items are never touched.
     .PARAMETER Queue
         The items of GET /api/injects, or $null offline (-WhatIf: then the manifest alone decides, and nothing
         is known about statuses).
@@ -1622,7 +1804,8 @@ function Get-InjectPlan {
         [Parameter(Mandatory)] [System.Collections.IDictionary] $Manifest,
         [AllowNull()] [AllowEmptyCollection()] [object[]] $Queue,
         [AllowNull()] [hashtable] $PersonaIds,
-        [switch] $ReloadFired
+        [switch] $ReloadFired,
+        [string] $RunSheet = 'all'
     )
     $manifestItems = $Manifest['injects']
     $entryFor = { param($Key) if ($manifestItems -is [System.Collections.IDictionary] -and $manifestItems.Contains($Key)) { $manifestItems[$Key] } else { $null } }
@@ -1650,7 +1833,7 @@ function Get-InjectPlan {
         $Found[0]
     }
 
-    foreach ($item in @(Get-RunSheetItems -Pack $Pack)) {
+    foreach ($item in @(Get-RunSheetItems -Pack $Pack -RunSheet $RunSheet)) {
         $key = [string] $item['key']
         $entry = & $entryFor $key
         $manifestId = if ($entry) { [string] $entry['itemId'] } else { '' }
@@ -1739,8 +1922,37 @@ function Get-InjectPlan {
                 ($late -join ', '), ($ahead -join ', '), $(if ($ahead.Count -eq 1) { 's' } else { '' })))
     }
 
+    # The items -RunSheet leaves out (DF-16). Two things are said about one the import will create, never more: a copy an
+    # earlier run of this script recorded, that the console could still fire (the import matches on Inject #, which a
+    # seeded copy does not carry; the queue does not show Inject #, so it may also be one the import made, adopted by
+    # an earlier -RunSheet all run), and a reply the item makes (an MSEL row cannot carry one).
+    $left = @(foreach ($item in @(Get-RunSheetItems -Pack $Pack -RunSheet $RunSheet -Left)) {
+            $key = [string] $item['key']
+            $msel = [string] $item['msel']
+            $entry = & $entryFor $key
+            $loaded = if ($entry -and $online) { $rowsById[[string] $entry['itemId']] } else { $null }
+            if ($msel -and (Test-InjectArmable -Row $loaded)) {
+                $warnings.Add("$key is left for the MSEL import (msel '$msel'), but an earlier run of this script loaded it and it is still in the run sheet ($(Get-InjectStatusText -Row $loaded), $($loaded['id'])). A seeded copy carries no Inject #, so the import would add a second one: delete $($loaded['id']) in the console before the import, unless the MSEL import created it (the queue does not expose Inject #). Never run -RunSheet all after the on-stage import.")
+            }
+            if ($msel -and @(Get-SeedList $item 'posts' | Where-Object { $_['replyTo'] }).Count -gt 0) {
+                $warnings.Add("$key is left for the MSEL import (msel '$msel'), but it replies to another post: an MSEL row cannot carry a reply, so the import creates it as a top-level post, out of its thread. To keep the thread, remove msel so the seed loads it.")
+            }
+            [pscustomobject]@{
+                Key = $key; Kind = [string] $item['kind']; Title = [string] $item['title']; PostCount = @(Get-SeedList $item 'posts').Count; Msel = $msel
+                Reason = $(if ($msel) { "left for the on-stage MSEL import (msel '$msel'; -RunSheet $RunSheet)" } else { "not loaded (-RunSheet $RunSheet)" })
+            }
+        })
+
+    # Order with the import (DF-22, story 16): it places each item it creates just before the first pending item with a
+    # later planned minute, so the queue reads in pack order again only when every seeded item has one.
+    $unplanned = @($items | Where-Object { $null -eq $_.Item['plannedMinute'] } | ForEach-Object Key)
+    if ($unplanned.Count -gt 0 -and @($left | Where-Object Msel).Count -gt 0) {
+        $warnings.Add(("{0} ha{1} no plannedMinute, but the on-stage MSEL import places each item it creates just before the first pending item with a later planned minute (DF-22), so it cannot place its items around {0}, and ""Fire next"" may leave pack order. Give every seeded item a plannedMinute." -f
+                ($unplanned -join ', '), $(if ($unplanned.Count -eq 1) { 's' } else { 've' })))
+    }
+
     [pscustomobject]@{
-        Items = $items.ToArray(); Warnings = $warnings.ToArray(); Online = $online; Claimed = $claimed
+        Items = $items.ToArray(); Warnings = $warnings.ToArray(); Online = $online; Claimed = $claimed; Left = $left
         LandsLate = $late.ToArray()
         ToCreate = @($items | Where-Object Action -in 'create', 'reload').Count
         Done = @($items | Where-Object Action -in 'skip', 'adopt').Count
@@ -1921,7 +2133,7 @@ function Get-InjectRepointPlan {
     .SYNOPSIS
         What the plan expects to re-point in place: per kept, armable run-sheet item, the replies whose target will
         get a new id in this run (a pack post posted again, a run-sheet item created or reloaded), or (online) that
-        already differ from the target's current id. A prediction for the plan only; step 10 decides on the real
+        already differ from the target's current id. A prediction for the plan only; step 11 decides on the real
         ids (Get-InjectReplyRepairs). Offline (-WhatIf) only the manifest is known, so it sees less: it cannot
         tell that posts were archived, nor see the queue.
     #>
@@ -2674,6 +2886,189 @@ function Update-InjectReplies {
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════════════════════════════════
+# Demo-feedback steps (S1, #510): white noise (story 05, DF-12), exercise pins (04, DF-7) and media marking (01/06,
+# DF-3). Each returns a result instead of throwing: nothing after it depends on it, so the run goes on, reports it,
+# and the self-check fails on it. That way every run reaches its end, where white noise is turned off.
+# ═══════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+function Get-NoisePoolChunks {
+    <#
+    .SYNOPSIS
+        The pack's noise entries as PUT /api/staff/noise/pool bodies of at most -Size entries (the server's per-call
+        limit): the first replaces the pool, every later one appends to it. Handles become persona ids (step 5 has
+        checked them all). Offset is the chunk's first index in the pack's noise list, so a rejection's index maps
+        back to noise[Offset + index]. Pure.
+    #>
+    param(
+        [AllowEmptyCollection()] [object[]] $Entries = @(),
+        [Parameter(Mandatory)] [hashtable] $PersonaIds,
+        [int] $Size = 1000
+    )
+    for ($offset = 0; $offset -lt $Entries.Count; $offset += $Size) {
+        $posts = @(for ($i = $offset; $i -lt [math]::Min($offset + $Size, $Entries.Count); $i++) {
+                $handle = [string] $Entries[$i]['persona']
+                $personaId = [string] $PersonaIds[$handle]
+                if (-not $personaId) { throw "noise[$i]: persona '$handle' has no id." }
+                [ordered]@{ persona = $personaId; text = [string] $Entries[$i]['text'] }
+            })
+        [pscustomobject]@{ Offset = $offset; Body = [ordered]@{ mode = $(if ($offset -eq 0) { 'replace' } else { 'append' }); posts = $posts } }
+    }
+}
+
+function Import-NoisePool {
+    <#
+    .SYNOPSIS
+        Loads the white-noise pool from the pack (PUT /api/staff/noise/pool, in Get-NoisePoolChunks). The entries
+        REPLACE the server's pool, so a re-run leaves the same pool. Returns @{ Ok; PoolSize; Loaded; Rejected
+        (@{ Index, into the pack's noise list; Reason, the server's words }); Detail }.
+    .DESCRIPTION
+        A rejected entry is not a failure: the server applies the rest of the call and lists it, and the caller
+        warns about it. A refused call stops the loading: a 400 (a replace none of whose entries could be used
+        leaves the pool unchanged and still lists them), 401/403, 404, or no answer. Later chunks are not sent
+        then, since they would append to a pool the first one did not replace.
+    #>
+    param(
+        [Parameter(Mandatory)] [hashtable] $Context,
+        [Parameter(Mandatory)] [AllowEmptyCollection()] [object[]] $Entries,
+        [Parameter(Mandatory)] [hashtable] $PersonaIds,
+        [int] $ChunkSize = 1000
+    )
+    $rejected = [System.Collections.Generic.List[object]]::new()
+    $poolSize = $null
+    $result = { param([bool] $Ok, $Detail) [pscustomobject]@{ Ok = $Ok; PoolSize = $poolSize; Loaded = $Entries.Count - $rejected.Count; Rejected = $rejected.ToArray(); Detail = $Detail } }
+    try {
+        foreach ($chunk in @(Get-NoisePoolChunks -Entries $Entries -PersonaIds $PersonaIds -Size $ChunkSize)) {
+            $response = Invoke-PulseApi -Context $Context -Method PUT -Path '/api/staff/noise/pool' -Body $chunk.Body
+            # A 200 and a refused replace's 400 both carry poolSize and rejected (the 400 as ProblemDetails extensions).
+            if ($response.Json -is [System.Collections.IDictionary]) {
+                foreach ($rejection in @(Get-SeedList $response.Json 'rejected')) {
+                    $rejected.Add([pscustomobject]@{ Index = $chunk.Offset + [int] $rejection['index']; Reason = [string] $rejection['reason'] })
+                }
+                if ($null -ne $response.Json['poolSize']) { $poolSize = [int] $response.Json['poolSize'] }
+            }
+            if ($response.Status -eq 200) { continue }
+            $why = switch ($response.Status) {
+                400 { "400 $(Get-ApiErrorText $response -Full)" }
+                404 { '404: this API has no white noise (deploy demo-feedback 05 first)' }
+                { $_ -in 401, 403 } { "$_ — loading the noise pool needs a CONTROLLER assigned to this exercise" }
+                default { "$_ $(Get-ApiErrorText $response)" }
+            }
+            return & $result $false "PUT /api/staff/noise/pool (mode $($chunk.Body.mode), entries $($chunk.Offset) on) answered $why"
+        }
+    }
+    catch { return & $result $false $_.Exception.Message.TrimEnd('.') }
+    return & $result $true $null
+}
+
+function Set-NoiseLevelOff {
+    <#
+    .SYNOPSIS
+        Turns white noise off: PUT /api/staff/noise { level: off } (DF-12). The server changes nothing when the level
+        is already off, so every run sends it twice: before seeding (no noise post lands among the seeded ones, and a
+        run that stops part-way still leaves it off) and at the end. A seed never leaves noise running. Returns
+        @{ Ok; PoolSize; Detail }.
+    #>
+    param([Parameter(Mandatory)] [hashtable] $Context)
+    $result = { param([bool] $Ok, $PoolSize, $Detail) [pscustomobject]@{ Ok = $Ok; PoolSize = $PoolSize; Detail = $Detail } }
+    try { $response = Invoke-PulseApi -Context $Context -Method PUT -Path '/api/staff/noise' -Body ([ordered]@{ level = 'off' }) }
+    catch { return & $result $false $null $_.Exception.Message.TrimEnd('.') }
+    $state = $response.Json
+    if ($response.Status -eq 200 -and $state -is [System.Collections.IDictionary] -and [string] $state['level'] -ceq 'off') {
+        return & $result $true $state['poolSize'] "level 'off'; the pool holds $($state['poolSize']) entr$(if ($state['poolSize'] -eq 1) { 'y' } else { 'ies' })"
+    }
+    $why = switch ($response.Status) {
+        200 { "PUT /api/staff/noise answered 200 without level 'off'" }
+        404 { 'PUT /api/staff/noise -> 404: this API has no white noise (deploy demo-feedback 05 first)' }
+        { $_ -in 401, 403 } { "PUT /api/staff/noise -> $_ — turning white noise off needs a CONTROLLER assigned to this exercise" }
+        default { "PUT /api/staff/noise -> $_ $(Get-ApiErrorText $response)".TrimEnd() }
+    }
+    return & $result $false $null $why
+}
+
+function Set-ExercisePins {
+    <#
+    .SYNOPSIS
+        Pins each pack pin for everyone: PUT /api/staff/posts/{id}/pin with the post id step 9 resolved. The LAST
+        listed goes first: the Pinned tab shows the newest pin first (DF-5), so it then reads in pack order while the
+        exercise clock runs. With the clock stopped, PinService stamps the later of the exercise's stored scenario time
+        and the post's own, so the tab may follow the posts' own times, or its id tie-break. Idempotent on the server:
+        a post already pinned answers 204 and keeps its pin and its time. Returns one @{ Key; PostId; Ok; Detail } per
+        pin, in pack order.
+    #>
+    param(
+        [Parameter(Mandatory)] [hashtable] $Context,
+        [AllowEmptyCollection()] [string[]] $Keys = @(),
+        [Parameter(Mandatory)] [hashtable] $PostIds
+    )
+    $outcomes = @{}
+    for ($i = $Keys.Count - 1; $i -ge 0; $i--) {
+        $key = $Keys[$i]
+        $postId = [string] $PostIds[$key]
+        $outcome = { param([bool] $Ok, $Detail) [pscustomobject]@{ Key = $key; PostId = $postId; Ok = $Ok; Detail = $Detail } }
+        if (-not $postId) { $outcomes[$key] = & $outcome $false 'it has no post id (it was not posted)'; continue }
+        try { $response = Invoke-PulseApi -Context $Context -Method PUT -Path ('/api/staff/posts/{id}/pin' -replace '\{id\}', $postId) }
+        catch { $outcomes[$key] = & $outcome $false $_.Exception.Message.TrimEnd('.'); continue }
+        $outcomes[$key] = switch ($response.Status) {
+            { $_ -ge 200 -and $_ -lt 300 } { & $outcome $true $null }
+            404 { & $outcome $false '404: the post is not in this exercise, or it was taken down' }
+            { $_ -in 401, 403 } { & $outcome $false "$_ — pinning for everyone needs a CONTROLLER assigned to this exercise" }
+            default { & $outcome $false ("$_ $(Get-ApiErrorText $response)".TrimEnd()) }
+        }
+    }
+    foreach ($key in $Keys) { $outcomes[$key] }
+}
+
+function New-ChromeSettingsBody {
+    <#
+    .SYNOPSIS
+        The PUT /api/staff/chrome-settings body that turns media marking on and changes nothing else: every field of
+        the settings as GET read them, echoed as it is, except watermarkEnabled (true) and exerciseId (the server's
+        own scope, echoed for display; never an input). The PUT is a FULL replace, so a field left out would be
+        cleared (a banner text back to the shipped default). Pure.
+    #>
+    param([Parameter(Mandatory)] [System.Collections.IDictionary] $Current)
+    $body = [ordered]@{}
+    foreach ($name in @($Current.Keys)) { if ($name -cne 'exerciseId') { $body[$name] = $Current[$name] } }
+    $body['watermarkEnabled'] = $true
+    return $body
+}
+
+function Set-WatermarkOn {
+    <#
+    .SYNOPSIS
+        Makes sure media marking is on (DF-3: the participant app bands every image and video while the exercise's
+        watermarkEnabled is true). Reads GET /api/staff/chrome-settings and writes only when watermarkEnabled is
+        false: PUT /api/staff/chrome-settings with New-ChromeSettingsBody. The endpoint has no version or ETag, so
+        the read and the write go back to back. Returns @{ Ok; Changed; Detail }.
+    #>
+    param([Parameter(Mandatory)] [hashtable] $Context)
+    $result = { param([bool] $Ok, [bool] $Changed, $Detail) [pscustomobject]@{ Ok = $Ok; Changed = $Changed; Detail = $Detail } }
+    $refusal = {
+        param($Response, [string] $Call)
+        switch ($Response.Status) {
+            404 { "$Call -> 404 (this API has no chrome settings, or no exercise for this host)" }
+            { $_ -in 401, 403 } { "$Call -> $_ — the staff user must be assigned to this exercise" }
+            default { "$Call -> $_ $(Get-ApiErrorText $Response)".TrimEnd() }
+        }
+    }
+    try {
+        $read = Invoke-PulseApi -Context $Context -Method GET -Path '/api/staff/chrome-settings'
+        if ($read.Status -ne 200) { return & $result $false $false (& $refusal $read 'GET /api/staff/chrome-settings') }
+        $current = $read.Json
+        if ($current -isnot [System.Collections.IDictionary] -or $current['chromeEnabled'] -isnot [bool] -or $current['watermarkEnabled'] -isnot [bool]) {
+            return & $result $false $false 'GET /api/staff/chrome-settings answered without chromeEnabled and watermarkEnabled, so nothing was written'
+        }
+        if ($current['watermarkEnabled']) { return & $result $true $false 'watermarkEnabled was already on; nothing was sent' }
+        $write = Invoke-PulseApi -Context $Context -Method PUT -Path '/api/staff/chrome-settings' -Body (New-ChromeSettingsBody -Current $current)
+        if ($write.Status -eq 200 -and $write.Json -is [System.Collections.IDictionary] -and $write.Json['watermarkEnabled'] -eq $true) {
+            return & $result $true $true 'watermarkEnabled turned on; every other chrome setting was sent back as read'
+        }
+        return & $result $false $false (& $refusal $write 'PUT /api/staff/chrome-settings')
+    }
+    catch { return & $result $false $false $_.Exception.Message.TrimEnd('.') }
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════════════════════════════════
 # Output helpers
 # ═══════════════════════════════════════════════════════════════════════════════════════════════════════════
 
@@ -2693,7 +3088,8 @@ function Format-Bytes {
 function Write-SeedPlan {
     param(
         [object[]] $UploadPlan, [object[]] $PersonaPlan, [object] $PostPlan, [object] $Anchor,
-        [object] $InjectPlan, [object[]] $Repoint = @(), [switch] $ReloadFired, [switch] $LeaveEngineRunning, [int] $TopLevel, [switch] $Offline
+        [object] $InjectPlan, [object[]] $Repoint = @(), [switch] $ReloadFired, [switch] $LeaveEngineRunning, [int] $TopLevel, [switch] $Offline,
+        [string] $RunSheet = 'all', [AllowEmptyCollection()] [string[]] $Pins = @(), [int] $NoiseCount = 0
     )
     $uploads = @($UploadPlan | Where-Object Action -eq 'upload')
     $images = @($uploads | Where-Object { $_.Unit.Kind -eq 'image' }).Count
@@ -2720,15 +3116,20 @@ function Write-SeedPlan {
     foreach ($item in $toPost | Where-Object { $_.Reason -ne 'new' }) { Write-Host ("                    + {0}  {1}" -f $item.Key, $item.Reason) -ForegroundColor DarkGray }
 
     $sheetItems = @(if ($InjectPlan) { $InjectPlan.Items })
-    if ($sheetItems.Count -eq 0) { Write-Host '  Run sheet       none in the pack (nothing to load)' }
+    $leftItems = @(if ($InjectPlan) { $InjectPlan.Left })
+    if ($sheetItems.Count -eq 0 -and $leftItems.Count -eq 0) { Write-Host '  Run sheet       none in the pack (nothing to load)' }
+    elseif ($sheetItems.Count -eq 0 -and $RunSheet -eq 'none') {
+        Write-Host ("  Run sheet       -RunSheet none: none of the pack's {0} item(s) is loaded, and the console's queue is not read or touched" -f $leftItems.Count)
+    }
     else {
         $creating = @($sheetItems | Where-Object Action -in 'create', 'reload')
         $scripted = [long] ($creating | Measure-Object -Property PostCount -Sum).Sum
         $reloading = @($creating | Where-Object Action -eq 'reload').Count
         $spent = @($InjectPlan.NotArmable).Count
-        Write-Host ("  Run sheet       {0} item(s) to create ({1} scripted post(s), each pending in the console's queue{2}); {3} already loaded{4}" -f
+        Write-Host ("  Run sheet       {0} item(s) to create ({1} scripted post(s), each pending in the console's queue{2}); {3} already loaded{4}{5}" -f
             $creating.Count, $scripted, $(if ($reloading) { "; $reloading fresh cop$(if ($reloading -eq 1) { 'y' } else { 'ies' }) of spent items" }), $InjectPlan.Done,
-            $(if ($spent) { ", $spent of them NOT armable (the console has nothing to fire)" }))
+            $(if ($spent) { ", $spent of them NOT armable (the console has nothing to fire)" }),
+            $(if ($leftItems.Count) { "; $($leftItems.Count) left out by -RunSheet $RunSheet" }))
         foreach ($item in $creating) {
             $why = if ($item.Reason -ne 'new') { "; $($item.Reason)" } else { '' }
             Write-Host ("                    + {0}  {1,-5}  ""{2}"" ({3} post{4}){5}" -f $item.Key, $item.Kind, $item.Title, $item.PostCount, $(if ($item.PostCount -eq 1) { '' } else { 's' }), $why) -ForegroundColor DarkGray
@@ -2738,6 +3139,11 @@ function Write-SeedPlan {
             $mark = if ($item.Action -eq 'refuse') { 'x' } elseif ($item.Armable -eq $false) { '!' } else { '=' }
             $note = if ($mark -eq '!') { ' — NOT armable: the console has nothing to fire (rehearsal?)' } else { '' }
             Write-Host ("                    {0} {1}  {2}{3}" -f $mark, $item.Key, $item.Reason, $note) -ForegroundColor $(if ($mark -eq '=') { 'DarkGray' } else { 'Yellow' })
+        }
+        # - left out by -RunSheet: never created, adopted, re-pointed or checked (the MSEL import adds the msel ones)
+        foreach ($item in $leftItems) {
+            Write-Host ("                    - {0}  {1,-5}  ""{2}"" ({3} post{4}); {5}" -f $item.Key, $item.Kind, $item.Title, $item.PostCount,
+                $(if ($item.PostCount -eq 1) { '' } else { 's' }), $item.Reason) -ForegroundColor DarkGray
         }
     }
     $repointing = @($Repoint | Where-Object { $_ })
@@ -2750,10 +3156,17 @@ function Write-SeedPlan {
         $when = if ($Offline) { ' (-WhatIf cannot see statuses: a live run decides which items are spent)' } else { '' }
         Write-Host "  Reload          -ReloadFiredRunSheet: each loaded item that is fired, skipped, failed or held part-way gets a fresh copy; the old one is never touched$when"
     }
+    if ($Pins.Count -gt 0) { Write-Host ("  Pins            {0} post(s) pinned for everyone, in this order on the Pinned tab while the exercise clock runs: {1} (one already pinned stays as it is)" -f $Pins.Count, ($Pins -join ', ')) }
+    else { Write-Host '  Pins            none in the pack' }
+    $level = 'level: off before seeding and again at the end (a seed never leaves noise running)'
+    if ($NoiseCount -gt 0) { Write-Host ("  White noise     pool: replaced by the pack's {0} entr{1}; {2}" -f $NoiseCount, $(if ($NoiseCount -eq 1) { 'y' } else { 'ies' }), $level) }
+    else { Write-Host "  White noise     pool: none in the pack, so the server's pool is left as it is; $level" }
+    Write-Host '  Media marking   watermarkEnabled on before any media is posted: read first, written only when off, every other chrome setting sent back as read'
     if ($LeaveEngineRunning) { Write-Host '  Engine          left as it is (-LeaveEngineRunning)' }
     else { Write-Host '  Engine          pause tier: at least "engine" before the posts and again after seeding (a stricter tier is left as it is)' }
     $sheetCheck = if ($sheetItems.Count -gt 0) { "; every run-sheet item in GET /api/injects with its posts, and armable (pending, or held with nothing out)" } else { '' }
-    Write-Host ("  Self-check      GET /api/feed shows >= {0} top-level post(s); Range bytes=0-1 -> 206 on every media URL{1}" -f $TopLevel, $sheetCheck)
+    $pinCheck = if ($Pins.Count -gt 0) { '; pinnedForAll on every pin' } else { '' }
+    Write-Host ("  Self-check      GET /api/feed shows >= {0} top-level post(s); Range bytes=0-1 -> 206 on every media URL{1}{2}; white noise off; media marking on" -f $TopLevel, $sheetCheck, $pinCheck)
     if ($Offline) { Write-Host '  (Offline plan from the pack and the manifest. A live run first re-checks the feed, the media library, the personas and the run sheet.)' -ForegroundColor DarkGray }
 }
 
@@ -2773,6 +3186,7 @@ function Invoke-DemoSeed {
         [switch] $WhatIf,
         [switch] $Resume,
         [switch] $ReloadFiredRunSheet,
+        [ValidateSet('all', 'exceptMsel', 'none')] [string] $RunSheet = 'all',
         [switch] $LeaveEngineRunning,
         [switch] $AcceptUnverifiableFeed,
         [string] $ManifestDirectory
@@ -2792,6 +3206,8 @@ function Invoke-DemoSeed {
     try { $pack = ConvertFrom-SeedJson (Get-Content -LiteralPath $packFull -Raw) }
     catch { Write-SeedLine FAIL "$packFull is not valid JSON: $($_.Exception.Message)"; return 1 }
     $problems = @(Test-DemoPack -Pack $pack -PackRoot $packRoot -Limits $limits)
+    # The rule that depends on -RunSheet, once the pack itself is sound.
+    if ($problems.Count -eq 0) { $problems = @(Test-RunSheetSelection -Pack $pack -RunSheet $RunSheet) }
     if ($problems.Count -gt 0) {
         foreach ($problem in $problems) { Write-SeedLine FAIL ("{0}: {1}  [{2}]" -f $problem.Where, $problem.Message, $problem.Code) }
         Write-Host "`n$($problems.Count) problem(s) in $packFull. Nothing was sent." -ForegroundColor Red
@@ -2800,11 +3216,15 @@ function Invoke-DemoSeed {
     $units = @(Get-PackUploadUnits -Pack $pack -PackRoot $packRoot)
     $posts = @(Get-SeedList $pack 'posts')
     $topLevel = @($posts | Where-Object { -not $_['replyTo'] }).Count
-    $sheetItems = @(Get-RunSheetItems -Pack $pack)
-    $sheetPosts = [long] ($sheetItems | ForEach-Object { @(Get-SeedList $_ 'posts').Count } | Measure-Object -Sum).Sum
-    Write-SeedLine PASS ("{0}: {1} persona edit(s), {2} file(s) ({3}), {4} post(s) ({5} top-level), {6} run-sheet item(s) ({7} scripted post(s))" -f
+    $allSheetItems = @(Get-RunSheetItems -Pack $pack)
+    $sheetItems = @(Get-RunSheetItems -Pack $pack -RunSheet $RunSheet)          # the ones this run loads
+    $sheetPosts = [long] ($allSheetItems | ForEach-Object { @(Get-SeedList $_ 'posts').Count } | Measure-Object -Sum).Sum
+    $noise = @(Get-SeedList $pack 'noise')
+    $pinKeys = @(Get-SeedList $pack 'pins' | ForEach-Object { [string] $_ })
+    Write-SeedLine PASS ("{0}: {1} persona edit(s), {2} file(s) ({3}), {4} post(s) ({5} top-level), {6} run-sheet item(s) ({7} scripted post(s)), {8} noise entr{9}, {10} pin(s){11}" -f
         (Split-Path -Leaf $packFull), @(Get-SeedList $pack 'personas').Count, $units.Count, (Format-Bytes ([long] ($units | Measure-Object -Property Bytes -Sum).Sum)),
-        $posts.Count, $topLevel, $sheetItems.Count, $sheetPosts)
+        $posts.Count, $topLevel, $allSheetItems.Count, $sheetPosts, $noise.Count, $(if ($noise.Count -eq 1) { 'y' } else { 'ies' }), $pinKeys.Count,
+        $(if ($sheetItems.Count -ne $allSheetItems.Count) { "; -RunSheet $RunSheet loads $($sheetItems.Count) of the run-sheet items" }))
 
     # ── 2. Exercise context (anonymous) ──────────────────────────────────────────────────────────────────────
     Write-Host "`n2. Exercise context" -ForegroundColor Cyan
@@ -2843,13 +3263,14 @@ function Invoke-DemoSeed {
                 $fields = @($persona.Keys | Where-Object { $_ -ne 'handle' } | ForEach-Object { if ($_ -in 'avatar', 'banner') { "${_}MediaId" } else { $_ } })
                 [pscustomobject]@{ Handle = $persona['handle']; Fields = $fields }
             })
-        $injectPlan = Get-InjectPlan -Pack $pack -Manifest $manifest -Queue $null -PersonaIds $null -ReloadFired:$ReloadFiredRunSheet
+        $injectPlan = Get-InjectPlan -Pack $pack -Manifest $manifest -Queue $null -PersonaIds $null -ReloadFired:$ReloadFiredRunSheet -RunSheet $RunSheet
         $repointPlan = @(Get-InjectRepointPlan -InjectPlan $injectPlan -PostPlan $postPlan)
         Write-SeedPlan -UploadPlan $uploadPlan -PersonaPlan $personaPlan -PostPlan $postPlan -Anchor $anchor -InjectPlan $injectPlan -Repoint $repointPlan `
-            -ReloadFired:$ReloadFiredRunSheet -LeaveEngineRunning:$LeaveEngineRunning -TopLevel $topLevel -Offline
+            -ReloadFired:$ReloadFiredRunSheet -LeaveEngineRunning:$LeaveEngineRunning -TopLevel $topLevel -Offline -RunSheet $RunSheet -Pins $pinKeys -NoiseCount $noise.Count
+        foreach ($warning in @($injectPlan.Warnings)) { Write-SeedLine WARN $warning }
         if ($anchor.Error) { Write-SeedLine WARN "A live run would stop here: $($anchor.Error)" }
         elseif ($anchor.Anchor) { foreach ($problem in @(Test-SeedReplyTimes -PostPlan $postPlan -Anchor $anchor.Anchor)) { Write-SeedLine WARN "A live run would stop here: $problem" } }
-        Write-Host "`nWhatIf: nothing was sent or written. Sign-in, uploads, edits, posts, the run sheet and the pause tier were all skipped." -ForegroundColor Cyan
+        Write-Host "`nWhatIf: nothing was sent or written. Sign-in, uploads, edits, posts, pins, the run sheet, the white-noise pool and level, media marking and the pause tier were all skipped." -ForegroundColor Cyan
         return 0
     }
 
@@ -2889,6 +3310,8 @@ function Invoke-DemoSeed {
     if (-not $context.Token) { return 1 }
     Write-SeedLine PASS "signed in as $StaffUsername"
 
+    $seedingStarted = $false                        # step 5 reached: writes have begun
+    $noiseEndedOff = $false                         # step 12 confirmed white noise off
     try {
         # ── 4. Read the current state; stop on an unknown handle or assignee before any write ─────────────────
         Write-Host "`n4. Read the exercise's personas, media library, feed and run sheet" -ForegroundColor Cyan
@@ -2899,7 +3322,9 @@ function Invoke-DemoSeed {
         $named = [System.Collections.Generic.List[string]]::new()
         foreach ($persona in @(Get-SeedList $pack 'personas')) { $named.Add([string] $persona['handle']) }
         foreach ($post in $posts) { $named.Add([string] $post['persona']) }
-        foreach ($sheetItem in $sheetItems) { foreach ($sheetPost in @(Get-SeedList $sheetItem 'posts')) { $named.Add([string] $sheetPost['persona']) } }
+        # Every run-sheet item, loaded or not: an item left for the MSEL import needs its persona in the exercise too.
+        foreach ($sheetItem in $allSheetItems) { foreach ($sheetPost in @(Get-SeedList $sheetItem 'posts')) { $named.Add([string] $sheetPost['persona']) } }
+        foreach ($entry in $noise) { $named.Add([string] $entry['persona']) }
         $unknown = @($named | Sort-Object -Unique | Where-Object { -not $personaByHandle.Contains($_) })
         if ($unknown.Count -gt 0) {
             Write-SeedLine FAIL ("unknown persona handle(s): {0}. Nothing was written." -f ($unknown -join ', '))
@@ -2928,10 +3353,13 @@ function Invoke-DemoSeed {
         $feed = @($response.Json)
         Write-SeedLine PASS "feed: $($feed.Count) post(s) and replies$(if ($feed.Count -ge $limits.FeedTake) { " (at the $($limits.FeedTake)-post cap)" })"
 
-        # The run sheet (inject queue, inject-queue 06): what is already loaded, and who the assignees are.
+        # The run sheet (inject queue, inject-queue 06): what is already loaded, and who the assignees are. Read when
+        # -RunSheet loads an item, or leaves out an msel item an earlier run recorded (so the plan can warn about that
+        # seeded copy even when every item is msel). With none, or a pack without a run sheet, it is not read at all.
         $injectQueue = $null
         $assigneeIds = [hashtable]::new([StringComparer]::OrdinalIgnoreCase)
-        if ($sheetItems.Count -gt 0) {
+        $recordedLeft = @(Get-RunSheetItems -Pack $pack -RunSheet $RunSheet -Left | Where-Object { $_['msel'] -and $manifest['injects'].Contains([string] $_['key']) })
+        if ($sheetItems.Count -gt 0 -or ($RunSheet -ne 'none' -and $recordedLeft.Count -gt 0)) {
             $response = Invoke-PulseApi -Context $context -Method GET -Path '/api/injects'
             if ($response.Status -ne 200 -or $response.Json -isnot [System.Collections.IDictionary]) {
                 $hint = switch ($response.Status) {
@@ -2978,7 +3406,7 @@ function Invoke-DemoSeed {
                 $patch = Get-PersonaPatch -PackPersona $persona -Current $personaByHandle[$handle] -AvatarAssetId $avatar -BannerAssetId $banner -Applied $applied
                 [pscustomobject]@{ Handle = $handle; Fields = @($patch.Keys) }
             })
-        $injectPlan = Get-InjectPlan -Pack $pack -Manifest $manifest -Queue $injectQueue -PersonaIds $personaIds -ReloadFired:$ReloadFiredRunSheet
+        $injectPlan = Get-InjectPlan -Pack $pack -Manifest $manifest -Queue $injectQueue -PersonaIds $personaIds -ReloadFired:$ReloadFiredRunSheet -RunSheet $RunSheet
         # Which reply targets are dead (S1c L-1): only those are ever re-pointed. Retired = every post this machine
         # seeded before (snapshot now: step 8 overwrites the manifest's ids); superseded = every old copy of a
         # reloaded item, from the manifest and from this plan.
@@ -2989,7 +3417,7 @@ function Invoke-DemoSeed {
         $repointPlan = @(Get-InjectRepointPlan -InjectPlan $injectPlan -PostPlan $postPlan -Liveness $liveness)
         Write-Host "`nPlan" -ForegroundColor Cyan
         Write-SeedPlan -UploadPlan $uploadPlan -PersonaPlan $personaPlan -PostPlan $postPlan -Anchor $anchor -InjectPlan $injectPlan -Repoint $repointPlan `
-            -ReloadFired:$ReloadFiredRunSheet -LeaveEngineRunning:$LeaveEngineRunning -TopLevel $topLevel
+            -ReloadFired:$ReloadFiredRunSheet -LeaveEngineRunning:$LeaveEngineRunning -TopLevel $topLevel -RunSheet $RunSheet -Pins $pinKeys -NoiseCount $noise.Count
         foreach ($warning in @($postPlan.Warnings) + @($injectPlan.Warnings)) { Write-SeedLine WARN $warning }
         if ($anchor.Error) { Write-SeedLine FAIL "$($anchor.Error) Nothing was written."; return 1 }
         if ($injectPlan.Refused.Count -gt 0) {
@@ -3020,11 +3448,12 @@ function Invoke-DemoSeed {
         Save-SeedManifest -Manifest $manifest -Path $manifestPath
 
         # ── 5. Pause the engine first, so it does not react to the seeded posts ─────────────────────────────────
+        $seedingStarted = $true                     # from here on, the run ends with white noise off (see finally)
         $frozenWarning = 'the world is FROZEN. A frozen server clock falls behind: run-sheet fires and engine posts would be stamped in the past and never trend. ' +
             'Unless it was frozen on purpose just now, run Reset-DemoState.ps1 -Restart, wait ~8 minutes, run Reset-DemoState.ps1, then this script again.'
         $pause = $null
         if ($LeaveEngineRunning) {
-            Write-Host "`n5. Engine: left as it is (-LeaveEngineRunning)" -ForegroundColor Cyan
+            Write-Host "`n5. Before seeding: engine left as it is (-LeaveEngineRunning); white noise off; media marking on" -ForegroundColor Cyan
             # Not touched, but still looked at once: a world left frozen overnight is the demo-week hazard (S1c S-4).
             $tierNow = $null
             try { $tierNow = Invoke-PulseApi -Context $context -Method GET -Path '/api/steering/pause-tier' } catch { $tierNow = $null }
@@ -3034,11 +3463,17 @@ function Invoke-DemoSeed {
             }
         }
         else {
-            Write-Host "`n5. Pause the engine before seeding" -ForegroundColor Cyan
+            Write-Host "`n5. Before seeding: engine paused; white noise off; media marking on" -ForegroundColor Cyan
             $pause = Set-EnginePauseTier -Context $context -ActingHumanId $actingHumanId -TimeZone $exercise.TimeZone
             if ($pause.Ok) { Write-SeedLine PASS "pause tier: $($pause.Detail)" } else { Write-SeedLine WARN "pause tier not set ($($pause.Detail)); the engine may react to the seeded posts" }
             if ($pause.Tier -eq 'freeze') { Write-SeedLine WARN $frozenWarning }
         }
+        # White noise off before anything is posted (a noise post must not land among the seeded ones, and a run that
+        # stops part-way leaves it off), and media marking on before any media is posted (DF-3, NFR-008).
+        $noiseOff = Set-NoiseLevelOff -Context $context
+        if ($noiseOff.Ok) { Write-SeedLine PASS "white noise: $($noiseOff.Detail)" } else { Write-SeedLine WARN "white noise not turned off ($($noiseOff.Detail)); it is tried again at the end" }
+        $marking = Set-WatermarkOn -Context $context
+        if ($marking.Ok) { Write-SeedLine PASS "media marking: $($marking.Detail)" } else { Write-SeedLine FAIL "media marking: $($marking.Detail)" }
 
         # ── 6. Upload media: posters first, then images, then videos with posterMediaId ────────────────────────
         Write-Host "`n6. Upload media" -ForegroundColor Cyan
@@ -3265,13 +3700,26 @@ function Invoke-DemoSeed {
         $manifest['completedAt'] = Format-SeedInstant ([DateTimeOffset]::UtcNow)
         Save-SeedManifest -Manifest $manifest -Path $manifestPath
 
-        # ── 9. Run sheet: one inject item per pack item, through POST /api/injects (inject-queue 06) ───────────────
-        Write-Host "`n9. Load the run sheet (the console's inject queue)" -ForegroundColor Cyan
+        # ── 9. Exercise pins (demo-feedback 04, DF-7): the pack's pins, pinned for everyone ─────────────────────────
+        Write-Host "`n9. Pin posts for everyone" -ForegroundColor Cyan
+        $pinResults = @()
+        if ($pinKeys.Count -eq 0) { Write-SeedLine SKIP 'the pack pins no post' }
+        else {
+            $pinResults = @(Set-ExercisePins -Context $context -Keys $pinKeys -PostIds $postIds)
+            foreach ($pin in $pinResults) {
+                if ($pin.Ok) { Write-SeedLine PASS "$($pin.Key) — pinned for everyone ($($pin.PostId))" } else { Write-SeedLine FAIL "$($pin.Key) not pinned: $($pin.Detail)" }
+            }
+        }
+
+        # ── 10. Run sheet: one inject item per pack item -RunSheet loads, through POST /api/injects (inject-queue 06) ─
+        Write-Host "`n10. Load the run sheet (the console's inject queue)" -ForegroundColor Cyan
         $injectIds = @{}            # run-sheet item key → inject item id
         $injectPostIds = @{}        # run-sheet item key → its post ids in sequence order (for replies from later items)
         # Every id the manifest accounts for (current and superseded), plus each one adopted or created below.
         $claimedItems = $injectPlan.Claimed
-        if ($injectPlan.Items.Count -eq 0) { Write-SeedLine SKIP 'the pack has no run-sheet items' }
+        if ($injectPlan.Items.Count -eq 0 -and @($injectPlan.Left).Count -eq 0) { Write-SeedLine SKIP 'the pack has no run-sheet items' }
+        # Left out by -RunSheet (the MSEL import adds the msel ones on stage): never created, adopted, re-pointed or checked.
+        foreach ($left in @($injectPlan.Left)) { Write-SeedLine SKIP "$($left.Key) — $($left.Reason)" }
         if ($injectPlan.ToCreate -gt 0) {
             $manifest['completedAt'] = $null
             Save-SeedManifest -Manifest $manifest -Path $manifestPath
@@ -3378,16 +3826,33 @@ function Invoke-DemoSeed {
             Save-SeedManifest -Manifest $manifest -Path $manifestPath
         }
 
-        # ── 10. Engine paused after seeding (Decision 4) ──────────────────────────────────────────────────────────
+        # ── 11. White-noise pool (demo-feedback 05, DF-12): replaced by the pack's entries ──────────────────────────
+        Write-Host "`n11. Load the white-noise pool" -ForegroundColor Cyan
+        $noiseLoad = $null
+        if ($noise.Count -eq 0) { Write-SeedLine SKIP 'the pack has no noise entries, so the server''s pool is left as it is' }
+        else {
+            $noiseLoad = Import-NoisePool -Context $context -Entries $noise -PersonaIds $personaIds -ChunkSize $limits.NoisePoolChunk
+            foreach ($rejection in $noiseLoad.Rejected) {
+                $who = if ($rejection.Index -ge 0 -and $rejection.Index -lt $noise.Count) { " (@$($noise[$rejection.Index]['persona']))" } else { '' }
+                Write-SeedLine WARN ("noise[{0}]{1} was not loaded: {2}" -f $rejection.Index, $who, $rejection.Reason)
+            }
+            if ($noiseLoad.Ok) { Write-SeedLine PASS ("{0} of {1} noise entr{2} loaded; the pool holds {3}" -f $noiseLoad.Loaded, $noise.Count, $(if ($noise.Count -eq 1) { 'y' } else { 'ies' }), $noiseLoad.PoolSize) }
+            else { Write-SeedLine FAIL "white-noise pool: $($noiseLoad.Detail)" }
+        }
+
+        # ── 12. After seeding: engine paused (Decision 4), and white noise off on every run (DF-12) ─────────────────
+        Write-Host "`n12. After seeding: $(if ($LeaveEngineRunning) { 'engine left as it is; ' } else { 'engine paused; ' })white noise off" -ForegroundColor Cyan
         if (-not $LeaveEngineRunning) {
-            Write-Host "`n10. Pause the engine (pause tier engine)" -ForegroundColor Cyan
             $pause = Set-EnginePauseTier -Context $context -ActingHumanId $actingHumanId -TimeZone $exercise.TimeZone
             if ($pause.Ok) { Write-SeedLine PASS "pause tier $($pause.Detail) (it resets to 'running' on any reset or restart)" }
             else { Write-SeedLine FAIL "pause tier: $($pause.Detail)" }
         }
+        $noiseOff = Set-NoiseLevelOff -Context $context
+        $noiseEndedOff = [bool] $noiseOff.Ok
+        if ($noiseOff.Ok) { Write-SeedLine PASS "white noise: $($noiseOff.Detail)" } else { Write-SeedLine FAIL "white noise: $($noiseOff.Detail)" }
 
-        # ── 11. Self-check ────────────────────────────────────────────────────────────────────────────────────────
-        Write-Host "`n11. Self-check" -ForegroundColor Cyan
+        # ── 13. Self-check ────────────────────────────────────────────────────────────────────────────────────────
+        Write-Host "`n13. Self-check" -ForegroundColor Cyan
         $checks = [System.Collections.Generic.List[object]]::new()
         $check = { param([bool] $Ok, [string] $Text) $checks.Add([pscustomobject]@{ Ok = $Ok; Text = $Text }) }
 
@@ -3396,6 +3861,10 @@ function Invoke-DemoSeed {
         $liveFeedIds = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
         $selfFeedComplete = $false                                   # unknown until the feed read below succeeds
         foreach ($id in $postIds.Values) { if ($id) { [void] $liveFeedIds.Add([string] $id) } }
+        # Exercise pins: a PUT step 9 saw refused fails the pins line on its own; the rest are read back from the feed.
+        $unpinned = [System.Collections.Generic.List[string]]::new()
+        $refusedPins = @($pinResults | Where-Object { -not $_.Ok } | ForEach-Object { $unpinned.Add("$($_.Key) (not accepted: $($_.Detail))"); $_.Key })
+        $pinsNotRead = 'the feed could not be read'
         $response = Invoke-PulseApi -Context $context -Method GET -Path '/api/feed'
         if ($response.Status -ne 200) { & $check $false "GET /api/feed -> $($response.Status)" }
         else {
@@ -3435,6 +3904,22 @@ function Invoke-DemoSeed {
             }
             $withMedia = @($postPlan.Items | Where-Object { @(Get-SeedList $_.Post 'media').Count -gt 0 }).Count
             & $check ($mediaShort.Count -eq 0) $(if ($mediaShort.Count) { "seeded posts missing media: $($mediaShort -join ', ')" } else { "all $withMedia seeded post(s) with media show their attachments" })
+
+            # Exercise pins, read back: the feed marks a post pinned for everyone with pinnedForAll (DF-7). A pin whose
+            # PUT was refused is already listed (below), whatever the feed shows.
+            $pinsUnchecked = 0; $pinsNotRead = ''
+            foreach ($key in @($pinKeys | Where-Object { $_ -notin $refusedPins })) {
+                $row = $byId[[string] $postIds[$key]]
+                if (-not $row) { if ($selfFeedComplete) { $unpinned.Add("$key (not in the feed)") } else { $pinsUnchecked++ } }
+                elseif ($row['pinnedForAll'] -ne $true) { $unpinned.Add($key) }
+            }
+        }
+        if ($pinKeys.Count -gt 0) {
+            $pinText = if ($unpinned.Count) { "pins not pinned for everyone: $($unpinned -join ', ')" }
+            elseif ($pinsNotRead) { "pins accepted, but not read back: $pinsNotRead" }
+            elseif ($pinsUnchecked) { "every pin that could be checked is pinned for everyone ($pinsUnchecked beyond the feed's newest $($limits.FeedTake) posts not checked)" }
+            else { "all $($pinKeys.Count) pin(s) are pinned for everyone (pinnedForAll in the feed)" }
+            & $check ($unpinned.Count -eq 0) $pinText
         }
         $response = Invoke-PulseApi -Context $context -Method GET -Path '/api/personas'
         if ($response.Status -eq 200) {
@@ -3514,8 +3999,17 @@ function Invoke-DemoSeed {
                         ("the console's queue is out of pack order: {0} (order {1}) comes after {2} (order {3}), so ""Fire next"" would take {2} first. Drag them into pack order in the console, or Skip the remaining old items in the console and run again with -ReloadFiredRunSheet so the whole sheet reloads in order" -f
                             $inversion.PackFirst.Key, $inversion.PackFirst.Order, $inversion.QueuedAhead.Key, $inversion.QueuedAhead.Order)
                     }
+                    elseif (@($injectPlan.Left | Where-Object Msel).Count -gt 0) {
+                        "the armable run-sheet items are in pack order in the console's queue; the on-stage import slots the msel items in by planned minute (DF-22), so ""Fire next"" follows the pack when every seeded item has a plannedMinute"
+                    }
                     else { "the armable run-sheet items are in pack order in the console's queue (""Fire next"" follows the pack)" })
             }
+        }
+
+        # Left out by -RunSheet: neither checked nor counted against the run (the MSEL import adds the msel ones).
+        if (@($injectPlan.Left).Count -gt 0) {
+            $leftKeys = @($injectPlan.Left | ForEach-Object { if ($_.Msel) { "$($_.Key) (msel '$($_.Msel)')" } else { $_.Key } }) -join ', '
+            $checks.Add([pscustomobject]@{ Ok = $true; Text = "run-sheet item(s) left out by -RunSheet ${RunSheet}, not checked: $leftKeys"; Neutral = $true })
         }
 
         $failedProbes = @(foreach ($probe in $probes) {
@@ -3523,6 +4017,15 @@ function Invoke-DemoSeed {
                 if ($status -ne 206) { "$($probe.Label) -> $(if ($status) { $status } else { 'no response' })" }
             })
         & $check ($failedProbes.Count -eq 0) $(if ($failedProbes.Count) { "media URL(s) not answering 206 to Range bytes=0-1: $($failedProbes -join '; ')" } else { "all $($probes.Count) media URL(s) answered 206 to Range: bytes=0-1" })
+
+        # White noise (DF-12) and media marking (DF-3), from what steps 5, 11 and 12 were answered.
+        if ($noiseLoad) {
+            $rejectedNote = if ($noiseLoad.Rejected.Count) { "; $($noiseLoad.Rejected.Count) rejected (see the warnings)" } else { '' }
+            & $check ([bool] $noiseLoad.Ok) $(if ($noiseLoad.Ok) { "white-noise pool: $($noiseLoad.Loaded) of the pack's $($noise.Count) entries loaded$rejectedNote" } else { "white-noise pool not loaded: $($noiseLoad.Detail)" })
+        }
+        else { $checks.Add([pscustomobject]@{ Ok = $true; Text = 'white-noise pool: none in the pack, the server''s pool left as it is'; Neutral = $true }) }
+        & $check ([bool] $noiseOff.Ok) $(if ($noiseOff.Ok) { "white noise is off ($($noiseOff.Detail))" } else { "white noise may still be running: $($noiseOff.Detail)" })
+        & $check ([bool] $marking.Ok) $(if ($marking.Ok) { "media marking is on ($($marking.Detail))" } else { "media marking is not confirmed on: $($marking.Detail)" })
 
         if ($LeaveEngineRunning) { $checks.Add([pscustomobject]@{ Ok = $true; Text = 'engine left as it was (-LeaveEngineRunning)'; Neutral = $true }) }
         else { & $check ([bool] $pause.Ok) "engine pause tier: $($pause.Detail)" }
@@ -3549,6 +4052,14 @@ function Invoke-DemoSeed {
         return 1
     }
     finally {
+        # A seed never leaves white noise running. A run that began writing (step 5) but did not end with noise confirmed
+        # off at step 12 (an early stop, an error, a failed PUT) turns it off once more on the way out. Step 5 already
+        # turned it off, but someone may have turned it up since; Set-NoiseLevelOff never throws.
+        if ($seedingStarted -and -not $noiseEndedOff -and $context.Token) {
+            $lastTry = Set-NoiseLevelOff -Context $context
+            if ($lastTry.Ok) { Write-SeedLine INFO "white noise on the way out: $($lastTry.Detail)" }
+            else { Write-SeedLine WARN "white noise may still be running ($($lastTry.Detail)): turn it off with the console's knob." }
+        }
         $context.Token = $null
     }
 }
@@ -3564,6 +4075,7 @@ $seedArguments = @{
     WhatIf             = $WhatIf
     Resume             = $Resume
     ReloadFiredRunSheet = $ReloadFiredRunSheet
+    RunSheet           = $RunSheet
     LeaveEngineRunning = $LeaveEngineRunning
     AcceptUnverifiableFeed = $AcceptUnverifiableFeed
     ManifestDirectory  = $ManifestDirectory
