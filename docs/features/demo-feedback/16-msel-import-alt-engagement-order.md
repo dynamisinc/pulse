@@ -89,5 +89,8 @@ Where they live (`src/Pulse.WebApi.Tests/Features/Injects/Import/`; SQL tests ar
   present; dry run; placement in one save with one token bump and no version change; re-import keeps positions;
   isolation; end-to-end `.xlsx` over HTTP read back through `GET /api/injects`:
   [`InjectImportAltEngagementOrderTests.cs`](../../../src/Pulse.WebApi.Tests/Features/Injects/Import/InjectImportAltEngagementOrderTests.cs)
+- Races inside the import window on SQL (a console create, a reorder, the anchor firing — also when a delete left its
+  `Order` number unchanged — each retried and re-placed; a create right after the placement read pins the token read
+  before the membership): [`InjectImportRaceTests.cs`](../../../src/Pulse.WebApi.Tests/Features/Injects/Import/InjectImportRaceTests.cs)
 - Story 03 expectations updated for DF-22: [`InjectImportEndpointTests.cs`](../../../src/Pulse.WebApi.Tests/Features/Injects/Import/InjectImportEndpointTests.cs)
   (`Apply_AppendsOneSinglePostItemPerSocialRow_InFileOrder_AfterTheExistingItems`, `ADeletedItemsInjectNumber_CanBeImportedAgain`)

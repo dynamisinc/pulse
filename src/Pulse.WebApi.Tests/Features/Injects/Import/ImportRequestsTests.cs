@@ -112,6 +112,10 @@ public sealed class ImportRequestsTests
 
         Changes(item, Candidate([], like: 962, repost: null, reply: null)).Should().BeEmpty("0 and not set are the same count");
         Changes(item, Candidate([], like: 962, repost: 0, reply: 0)).Should().BeEmpty();
+        Changes(Item(media: [], like: 0, repost: 0, reply: null), Candidate([], like: null, repost: null, reply: null))
+            .Should().BeEmpty("a stored like and repost of 0 against blank cells is no change");
+        Changes(Item(media: []), Candidate([], like: 0, repost: 0, reply: null))
+            .Should().BeEmpty("cells of 0 against a like and repost that are not set is no change");
         Changes(item, Candidate([], like: 1000, repost: null, reply: 0)).Should().Equal("engagement");
         Changes(item, Candidate([], like: null, repost: null, reply: null)).Should().Equal(["engagement"], "a blank cell clears a set baseline");
         Changes(Item(media: []), Candidate([], like: 3, repost: null, reply: null)).Should().Equal("engagement");
