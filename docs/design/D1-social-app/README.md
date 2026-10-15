@@ -65,6 +65,8 @@ above all content, persisting across screens (PRT-010, NFR-001 text+icon severit
 
 Frame is **left-anchored** (D1-013): `240px nav rail | 600px main | 344px sidebar`
 (main is 952px on Messages; sidebar hidden there and in columns mode).
+> **Superseded by #495 (centred from 1280px):** the full frame is centred like X at 1280px and above;
+> below 1280px it stays left-anchored (demo-feedback story 13).
 
 **1. Nav rail (240px)** — Pulse heartbeat logomark; pill nav items Home / Explore(#) /
 Notifications (count badge: 3 normal · 5 alert · 99+ burst) / Messages / Profile; navy "Post"

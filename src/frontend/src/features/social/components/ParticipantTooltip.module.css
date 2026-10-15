@@ -33,7 +33,7 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  /* Never intercepts the pointer: it can sit beside a control without blocking a neighbour. */
-  pointer-events: none;
+  /* Hoverable (WCAG 1.4.13): the pointer can move onto the bubble and it stays open. */
+  pointer-events: auto;
   user-select: none;
 }

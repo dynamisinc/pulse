@@ -8,18 +8,19 @@
  *  - composer      "Add photos or video" (hover) and the emoji button (focus);
  *  - media         the viewer's "Next image" (hover + focus) and the video player's
  *                  Mute and Expand (focus);
- *  - nav rail      Home and Post BELOW 840px (icon rail: hover + focus), and nothing at
+ *  - nav rail      Home, the logo and Post BELOW 840px (icon rail: hover + focus), and nothing at
  *                  840px and up, where the label text is visible;
  *  - headers       the detail header's Back (focus).
  *
  * Each case checks the label matches the control's name (its `aria-label`, or the
  * leading name of a counted one), that the `aria-label` itself is unchanged, and that
  * leave / blur hides it. A source table then pins that EVERY control listed in the AC is
- * wrapped, including the ones not rendered here (attachment remove, video Play,
+ * wrapped, including the ones not rendered here (attachment remove, video Play, the
+ * icon rail's "Pulse home" logo and Sign out,
  * search clear, compose-modal Close, media viewer Previous).
  */
 import type { ReactNode } from 'react'
-import { render, screen, within } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -52,6 +53,9 @@ const tooltip = () => screen.queryByTestId('participant-tooltip')
 /** Waits out the hover dwell for the bubble. */
 const hovered = () =>
   screen.findByTestId('participant-tooltip', {}, { timeout: TOOLTIP_HOVER_DELAY_MS * 5 })
+
+/** Waits out the leave grace (WCAG 1.4.13 hoverable) for the bubble to go. */
+const gone = () => waitFor(() => expect(tooltip()).toBeNull())
 
 /** Moves keyboard focus to `target` with Tab (a real keyboard path, not `.focus()`). */
 async function tabTo(user: ReturnType<typeof userEvent.setup>, target: HTMLElement) {
@@ -113,7 +117,7 @@ describe('post actions (Reply, Repost, Like, Pin)', () => {
     await user.hover(reply)
     expect(await hovered()).toHaveTextContent(/^Reply$/)
     await user.unhover(reply)
-    expect(tooltip()).toBeNull()
+    await gone()
 
     await user.hover(like)
     expect(await hovered()).toHaveTextContent(/^Like$/)
@@ -121,7 +125,7 @@ describe('post actions (Reply, Repost, Like, Pin)', () => {
     expect(like.getAttribute('aria-label')?.startsWith('Like')).toBe(true)
     expect(like).toHaveAttribute('aria-label', 'Like, 42')
     await user.unhover(like)
-    expect(tooltip()).toBeNull()
+    await gone()
   })
 
   it('keyboard focus shows Repost and Pin at once, and blur hides them', async () => {
@@ -152,7 +156,7 @@ describe('composer (attach, emoji)', () => {
     await user.hover(attach)
     expect(await hovered()).toHaveTextContent('Add photos or video')
     await user.unhover(attach)
-    expect(tooltip()).toBeNull()
+    await gone()
 
     await tabTo(user, emoji)
     expect(tooltip()).toHaveTextContent('Add emoji')
@@ -187,7 +191,7 @@ describe('media (viewer previous / next, video controls)', () => {
     await user.hover(next)
     expect(await hovered()).toHaveTextContent('Next image')
     await user.unhover(next)
-    expect(tooltip()).toBeNull()
+    await gone()
 
     await tabTo(user, next)
     expect(tooltip()).toHaveTextContent('Next image')
@@ -236,7 +240,7 @@ function renderRail(onCompose = vi.fn()) {
 }
 
 describe('nav rail links and Post (only while the labels are hidden, below 840px)', () => {
-  it('below 840px: Home on keyboard focus, Post on hover; names unchanged', async () => {
+  it('below 840px: Home and the logo on keyboard focus, Post on hover; names unchanged', async () => {
     stubViewport({ iconRail: true })
     const user = userEvent.setup()
     const { home, post: postButton } = renderRail()
@@ -244,14 +248,20 @@ describe('nav rail links and Post (only while the labels are hidden, below 840px
     await tabTo(user, home)
     expect(tooltip()).toHaveTextContent(/^Home$/)
     expect(home).toHaveAccessibleName('Home')
+    // Back to the logo: one bubble, now naming it; blur hides it.
     await user.tab({ shift: true })
+    const logo = screen.getByRole('link', { name: 'Pulse home' })
+    expect(logo).toHaveFocus()
+    expect(screen.getAllByTestId('participant-tooltip')).toHaveLength(1)
+    expect(tooltip()).toHaveTextContent(/^Pulse home$/)
+    act(() => logo.blur())
     expect(tooltip()).toBeNull()
 
     await user.hover(postButton)
     expect(await hovered()).toHaveTextContent(/^Post$/)
     expect(postButton).toHaveAccessibleName('Post')
     await user.unhover(postButton)
-    expect(tooltip()).toBeNull()
+    await gone()
   })
 
   it('from 840px (labels visible) neither hover nor focus shows a tooltip', async () => {
@@ -307,6 +317,8 @@ describe('every icon-only participant control in the AC is wrapped', () => {
     ['layout/DetailHeader.tsx', 'label="Back"', 'aria-label="Back"'],
     ['layout/NavRail.tsx', 'label={item.label}', 'href={item.path}'],
     ['layout/NavRail.tsx', 'label="Post"', 'data-testid="nav-post-button"'],
+    ['layout/NavRail.tsx', 'label="Pulse home"', 'aria-label="Pulse home"'],
+    ['layout/AccountCard.tsx', 'label="Sign out"', 'onClick={handleSignOut}'],
   ]
 
   it.each(WRAPPED)('%s: <ParticipantTooltip %s> wraps the control', (file, label, control) => {
@@ -319,8 +331,10 @@ describe('every icon-only participant control in the AC is wrapped', () => {
     expect(inside).toContain(control)
   })
 
-  it('the nav rail tooltips are gated to the icon rail', () => {
-    const source = readSrcFile('features/social/layout/NavRail.tsx')
-    expect(source.match(/media=\{NAV_ICON_RAIL_QUERY\}/g)).toHaveLength(2)
+  it('the nav rail tooltips (logo, links, Post, Sign out) are gated to the icon rail', () => {
+    const rail = readSrcFile('features/social/layout/NavRail.tsx')
+    expect(rail.match(/media=\{NAV_ICON_RAIL_QUERY\}/g)).toHaveLength(3)
+    const card = readSrcFile('features/social/layout/AccountCard.tsx')
+    expect(card.match(/media=\{NAV_ICON_RAIL_QUERY\}/g)).toHaveLength(1)
   })
 })

@@ -42,9 +42,9 @@
  *
  * ICON RAIL. Below 840px the rail collapses to icons: every label stays in the DOM
  * (visually hidden), so each control keeps its accessible name at every width. In the
- * icon rail each link and Post also show their name in a `ParticipantTooltip` (to the
- * right) on hover and keyboard focus (demo-feedback 13, #494); from 840px the visible
- * text is the label, so no tooltip shows there.
+ * icon rail the logo ("Pulse home"), each link, Post and the account card's Sign out
+ * also show their name in a `ParticipantTooltip` (to the right) on hover and keyboard
+ * focus (demo-feedback 13, #494); from 840px no tooltip shows there.
  *
  * The logo/links/Post group is `sticky` below the shell's compliance banner and any
  * active alert (`--pulse-chrome-top` + `--pulse-alert-height`); the account card is
@@ -171,14 +171,16 @@ export function NavRail({
   return (
     <nav className={styles.rail} aria-label="Primary" data-testid="nav-rail">
       <div className={styles.top}>
-        <a
-          className={styles.logo}
-          href={HOME_PATH}
-          aria-label="Pulse home"
-          onClick={event => handleLinkClick(event, HOME_PATH)}
-        >
-          <PulseLogo size={32} />
-        </a>
+        <ParticipantTooltip label="Pulse home" placement="right" media={NAV_ICON_RAIL_QUERY}>
+          <a
+            className={styles.logo}
+            href={HOME_PATH}
+            aria-label="Pulse home"
+            onClick={event => handleLinkClick(event, HOME_PATH)}
+          >
+            <PulseLogo size={32} />
+          </a>
+        </ParticipantTooltip>
 
         <ul className={styles.list}>
           {items.map(item => {

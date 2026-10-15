@@ -28,9 +28,15 @@
  *    its text labels are visually hidden; above that the visible text IS the label).
  *  TOUCH IS UNAFFECTED: a touch pointer never shows it, and a tap's focus does not either.
  *
- * WHEN IT HIDES: pointer leave, blur, any press on the control, Escape (WCAG 1.4.13
- * "dismissible"; the key is not swallowed, so a dialog's own Escape still works), and any
- * scroll or resize (the bubble is positioned once, it does not chase the control).
+ * WHEN IT HIDES: blur, any press on the control, Escape (WCAG 1.4.13 "dismissible"; the
+ * key is not swallowed, so a dialog's own Escape still works), and pointer leave after a
+ * `TOOLTIP_HIDE_GRACE_MS` grace. The bubble itself takes the pointer, and moving onto it
+ * keeps it open (WCAG 1.4.13 "hoverable"). ONE AT A TIME: opening a tooltip closes any
+ * other that is open (a module-level handle).
+ *
+ * SCROLL AND RESIZE follow the control: the bubble is re-placed in the next animation
+ * frame (a keyboard focus that scrolls the control into view keeps its label), and it
+ * hides only once the control's box has left the viewport.
  *
  * NEVER COVERS THE CONTROL. The bubble sits beside the control's box, never over it:
  * `placement` ('bottom' by default, 'top', or 'right') with a gap, flipped to the
@@ -65,8 +71,24 @@ import styles from './ParticipantTooltip.module.css'
 /** Hover dwell before the label appears (ms). Keyboard focus shows it at once. */
 export const TOOLTIP_HOVER_DELAY_MS = 400
 
+/** Grace after the pointer leaves before the bubble hides, so it can reach the bubble (ms). */
+export const TOOLTIP_HIDE_GRACE_MS = 100
+
 /** Same layer as the media viewer, so the viewer's own controls are labelled above it. */
 const TOOLTIP_Z_INDEX = SHELL_Z.alertBar - 1
+
+/** The close function of the tooltip open right now, if any: only one is ever open. */
+let openTooltipClose: (() => void) | null = null
+
+/** True when `rect` still shows at least partly inside the window. */
+function inViewport(rect: DOMRect): boolean {
+  return (
+    rect.bottom >= 0 &&
+    rect.right >= 0 &&
+    rect.top <= window.innerHeight &&
+    rect.left <= window.innerWidth
+  )
+}
 
 /**
  * INPUT MODALITY: was the last interaction a key press (keyboard focus) or a pointer
@@ -127,47 +149,55 @@ export function ParticipantTooltip({
   const [open, setOpen] = useState(false)
   const anchorRef = useRef<HTMLSpanElement>(null)
   const bubbleRef = useRef<HTMLSpanElement>(null)
-  const hoverTimer = useRef<number | undefined>(undefined)
+  const showTimer = useRef<number | undefined>(undefined)
+  const hideTimer = useRef<number | undefined>(undefined)
 
-  const clearTimer = useCallback(() => {
-    if (hoverTimer.current !== undefined) {
-      window.clearTimeout(hoverTimer.current)
-      hoverTimer.current = undefined
-    }
+  const clearTimers = useCallback(() => {
+    window.clearTimeout(showTimer.current)
+    window.clearTimeout(hideTimer.current)
+    showTimer.current = undefined
+    hideTimer.current = undefined
   }, [])
 
   const hide = useCallback(() => {
-    clearTimer()
+    clearTimers()
     setOpen(false)
-  }, [clearTimer])
+  }, [clearTimers])
 
-  useEffect(() => clearTimer, [clearTimer])
+  /** Pointer left the control and the bubble: hide after the grace (hoverable, 1.4.13). */
+  const hideSoon = useCallback(() => {
+    window.clearTimeout(showTimer.current)
+    showTimer.current = undefined
+    window.clearTimeout(hideTimer.current)
+    hideTimer.current = window.setTimeout(() => {
+      hideTimer.current = undefined
+      setOpen(false)
+    }, TOOLTIP_HIDE_GRACE_MS)
+  }, [])
+
+  useEffect(() => clearTimers, [clearTimers])
   useEffect(trackModality, [])
 
-  // While open: Escape dismisses (in the capture phase, so a control that stops its own
-  // Escape -- the emoji button -- still drops the label; never swallowed), and a scroll or
-  // resize hides it.
+  // One at a time: opening this one closes whichever other tooltip is open.
   useEffect(() => {
     if (!open) return undefined
-    const onKey = (event: globalThis.KeyboardEvent) => {
-      if (event.key === 'Escape') hide()
-    }
-    document.addEventListener('keydown', onKey, true)
-    window.addEventListener('scroll', hide, true)
-    window.addEventListener('resize', hide)
+    if (openTooltipClose !== null && openTooltipClose !== hide) openTooltipClose()
+    openTooltipClose = hide
     return () => {
-      document.removeEventListener('keydown', onKey, true)
-      window.removeEventListener('scroll', hide, true)
-      window.removeEventListener('resize', hide)
+      if (openTooltipClose === hide) openTooltipClose = null
     }
   }, [open, hide])
 
-  // Place the bubble before paint, against the wrapped control's own box.
-  useLayoutEffect(() => {
+  /** Places the bubble against the control's box; hides it once the control is off screen. */
+  const reposition = useCallback(() => {
     const bubble = bubbleRef.current
     const control = anchorRef.current?.firstElementChild
-    if (!open || !bubble || !control) return
+    if (!bubble || !control) return
     const anchor = control.getBoundingClientRect()
+    if (!inViewport(anchor)) {
+      hide()
+      return
+    }
     const size = bubble.getBoundingClientRect()
     const position = placeTooltip(
       anchor,
@@ -178,20 +208,57 @@ export function ParticipantTooltip({
     bubble.style.top = `${position.top}px`
     bubble.style.left = `${position.left}px`
     bubble.dataset.placement = position.placement
-  }, [open, placement, label])
+  }, [hide, placement])
 
+  // While open: Escape dismisses (in the capture phase, so a control that stops its own
+  // Escape -- the emoji button -- still drops the label; never swallowed), and a scroll or
+  // resize re-places the bubble in the next frame (it follows the control).
+  useEffect(() => {
+    if (!open) return undefined
+    let frame: number | undefined
+    const follow = () => {
+      if (frame !== undefined) return
+      frame = window.requestAnimationFrame(() => {
+        frame = undefined
+        reposition()
+      })
+    }
+    const onKey = (event: globalThis.KeyboardEvent) => {
+      if (event.key === 'Escape') hide()
+    }
+    document.addEventListener('keydown', onKey, true)
+    window.addEventListener('scroll', follow, true)
+    window.addEventListener('resize', follow)
+    return () => {
+      if (frame !== undefined) window.cancelAnimationFrame(frame)
+      document.removeEventListener('keydown', onKey, true)
+      window.removeEventListener('scroll', follow, true)
+      window.removeEventListener('resize', follow)
+    }
+  }, [open, hide, reposition])
+
+  // Place the bubble before paint.
+  useLayoutEffect(() => {
+    if (open) reposition()
+  }, [open, label, reposition])
+
+  // The bubble is a React child of the anchor (through the portal), so moving from the
+  // control onto the bubble re-enters the anchor: a pending hide is cancelled there.
   const handlePointerEnter = (event: PointerEvent<HTMLSpanElement>) => {
-    if (event.pointerType === 'touch' || !mediaMatches(media)) return
-    clearTimer()
-    hoverTimer.current = window.setTimeout(() => {
-      hoverTimer.current = undefined
+    if (event.pointerType === 'touch') return
+    window.clearTimeout(hideTimer.current)
+    hideTimer.current = undefined
+    if (open || !mediaMatches(media)) return
+    window.clearTimeout(showTimer.current)
+    showTimer.current = window.setTimeout(() => {
+      showTimer.current = undefined
       setOpen(true)
     }, TOOLTIP_HOVER_DELAY_MS)
   }
 
   const handleFocus = () => {
     if (!modality.keyboard || !mediaMatches(media)) return
-    clearTimer()
+    clearTimers()
     setOpen(true)
   }
 
@@ -205,7 +272,7 @@ export function ParticipantTooltip({
       ref={anchorRef}
       className={styles.anchor}
       onPointerEnter={handlePointerEnter}
-      onPointerLeave={hide}
+      onPointerLeave={hideSoon}
       onPointerDown={hide}
       onFocus={handleFocus}
       onBlur={hide}

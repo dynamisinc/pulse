@@ -3,20 +3,26 @@
  * ---------------------------------------------------------------------------
  * The participant tooltip itself (demo-feedback story 13, #494): the pure placement
  * ("never covers the control"), and the component's show / hide rules on a plain button:
- * hover (after the dwell) and KEYBOARD focus show it; leave, blur, a press and Escape
- * hide it; a touch pointer and a tap's focus never show it; the `media` gate; the
- * bubble is aria-hidden so the control's `aria-label` stays its only accessible name;
- * and the skin is the participant one (tokens, contrast, no MUI / COBRA).
+ * hover (after the dwell) and KEYBOARD focus show it; leave (after a grace), blur, a
+ * press and Escape hide it; the bubble is hoverable (WCAG 1.4.13); a scroll re-places it
+ * and it hides only once the control leaves the viewport; only one is open at a time; a
+ * touch pointer and a tap's focus never show it; the `media` gate; the bubble is
+ * aria-hidden so the control's `aria-label` stays its only accessible name; and the skin
+ * is the participant one (tokens, contrast read from the token sheet, no MUI / COBRA).
  *
  * The tooltip on the real controls (post actions, composer, media viewer, nav rail,
  * headers) is pinned in `ParticipantTooltip.controls.test.tsx`.
  */
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { contrastRatio } from '@/test/contrast'
 import { readSrcFile } from '@/test/readSource'
-import { ParticipantTooltip, TOOLTIP_HOVER_DELAY_MS } from './ParticipantTooltip'
+import {
+  ParticipantTooltip,
+  TOOLTIP_HIDE_GRACE_MS,
+  TOOLTIP_HOVER_DELAY_MS,
+} from './ParticipantTooltip'
 import { TOOLTIP_GAP, placeTooltip, type TooltipPlacement, type TooltipRect } from './tooltipPlacement'
 
 const VIEWPORT = { width: 1280, height: 800 }
@@ -95,6 +101,11 @@ function renderButton(props: { media?: string } = {}) {
           <span aria-hidden="true">3</span>
         </button>
       </ParticipantTooltip>
+      <ParticipantTooltip label="Repost">
+        <button type="button" aria-label="Repost, 7">
+          <span aria-hidden="true">7</span>
+        </button>
+      </ParticipantTooltip>
     </div>,
   )
   return screen.getByRole('button', { name: 'Reply, 3' })
@@ -102,27 +113,51 @@ function renderButton(props: { media?: string } = {}) {
 
 const tooltip = () => screen.queryByTestId('participant-tooltip')
 
+/** Waits out the hover dwell for the bubble. */
+const shown = () =>
+  screen.findByTestId('participant-tooltip', {}, { timeout: TOOLTIP_HOVER_DELAY_MS * 5 })
+
+/** Waits out the leave grace for the bubble to go. */
+const gone = () => waitFor(() => expect(tooltip()).toBeNull())
+
+const pause = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
+
 afterEach(() => {
   vi.unstubAllGlobals()
+  vi.restoreAllMocks()
 })
 
 describe('ParticipantTooltip — when it shows and hides', () => {
-  it('shows on mouse hover after the dwell, and hides on leave', async () => {
+  it('shows on mouse hover after the dwell, and hides after a short grace on leave', async () => {
     const user = userEvent.setup()
     const button = renderButton()
 
     await user.hover(button)
     // Not instant: sweeping across a feed must not flash a label on every row.
     expect(tooltip()).toBeNull()
-    const bubble = await screen.findByTestId(
-      'participant-tooltip',
-      {},
-      { timeout: TOOLTIP_HOVER_DELAY_MS * 5 },
-    )
-    expect(bubble).toHaveTextContent('Reply')
+    expect(await shown()).toHaveTextContent('Reply')
 
     await user.unhover(button)
-    expect(tooltip()).toBeNull()
+    // The grace (WCAG 1.4.13 hoverable): still there the instant the pointer leaves...
+    expect(tooltip()).not.toBeNull()
+    // ...and gone once it has passed.
+    await gone()
+  })
+
+  it('is hoverable (WCAG 1.4.13): moving onto the bubble keeps it open', async () => {
+    const user = userEvent.setup()
+    const button = renderButton()
+    await user.hover(button)
+    const bubble = await shown()
+
+    // From the control onto the bubble (through the gap: a leave, then an enter).
+    await user.unhover(button)
+    await user.hover(bubble)
+    await pause(TOOLTIP_HIDE_GRACE_MS * 3)
+    expect(tooltip()).toBe(bubble)
+
+    await user.unhover(bubble)
+    await gone()
   })
 
   it('shows at once on keyboard focus, and hides on blur', async () => {
@@ -136,6 +171,50 @@ describe('ParticipantTooltip — when it shows and hides', () => {
 
     await user.tab({ shift: true })
     expect(tooltip()).toBeNull()
+  })
+
+  it('a scroll (focus scrolling the control into view) re-places it and it stays', async () => {
+    const user = userEvent.setup()
+    const button = renderButton()
+    await user.tab()
+    await user.tab()
+    const bubble = tooltip()
+    expect(bubble).not.toBeNull()
+
+    const measured = vi.spyOn(button, 'getBoundingClientRect')
+    fireEvent.scroll(document)
+    await pause(50) // past the next animation frame
+    expect(measured).toHaveBeenCalled() // re-placed against the control's new box
+    expect(tooltip()).toBe(bubble)
+  })
+
+  it('hides once a scroll has taken the control out of the viewport', async () => {
+    const user = userEvent.setup()
+    const button = renderButton()
+    await user.tab()
+    await user.tab()
+    expect(tooltip()).not.toBeNull()
+
+    vi.spyOn(button, 'getBoundingClientRect').mockReturnValue(
+      DOMRect.fromRect({ x: 10, y: -200, width: 34, height: 34 }),
+    )
+    fireEvent.scroll(window)
+    await gone()
+  })
+
+  it('only one is open at a time: opening another closes the first', async () => {
+    const user = userEvent.setup()
+    renderButton()
+    await user.tab()
+    await user.tab()
+    expect(tooltip()).toHaveTextContent('Reply')
+
+    await user.hover(screen.getByRole('button', { name: 'Repost, 7' }))
+    await waitFor(
+      () => expect(tooltip()).toHaveTextContent('Repost'),
+      { timeout: TOOLTIP_HOVER_DELAY_MS * 5 },
+    )
+    expect(screen.getAllByTestId('participant-tooltip')).toHaveLength(1)
   })
 
   it('is aria-hidden and not wired as a description: the aria-label stays the only name', async () => {
@@ -180,18 +259,24 @@ describe('ParticipantTooltip — when it shows and hides', () => {
     expect(tooltip()).toBeNull()
 
     await user.hover(button)
-    await screen.findByTestId('participant-tooltip', {}, { timeout: TOOLTIP_HOVER_DELAY_MS * 5 })
+    await shown()
     await user.click(button)
     expect(tooltip()).toBeNull()
   })
 
-  it('touch is unaffected: a touch pointer and a tap\'s focus show nothing', async () => {
+  it('a touch pointer over the control shows nothing, even past the dwell', async () => {
     const button = renderButton()
     fireEvent.pointerOver(button, { pointerType: 'touch' })
+    await pause(TOOLTIP_HOVER_DELAY_MS * 2)
+    expect(tooltip()).toBeNull()
+  })
+
+  it('a tap\'s focus is not keyboard focus and shows nothing', async () => {
+    const button = renderButton()
     fireEvent.pointerDown(button, { pointerType: 'touch' })
     button.focus()
-    await new Promise(resolve => setTimeout(resolve, TOOLTIP_HOVER_DELAY_MS * 2))
     expect(button).toHaveFocus()
+    await pause(TOOLTIP_HOVER_DELAY_MS * 2)
     expect(tooltip()).toBeNull()
   })
 
@@ -208,9 +293,17 @@ describe('ParticipantTooltip — when it shows and hides', () => {
   })
 })
 
+/** The value of a custom property declared in a stylesheet (`--name: value;`). */
+function cssVar(sheet: string, name: string): string {
+  const found = new RegExp(`${name}:\\s*([^;]+);`).exec(sheet)
+  if (found?.[1] === undefined) throw new Error(`${name} is not declared`)
+  return found[1].trim()
+}
+
 describe('ParticipantTooltip — participant skin, not MUI or COBRA', () => {
   const source = readSrcFile('features/social/components/ParticipantTooltip.tsx')
   const sheet = readSrcFile('features/social/components/ParticipantTooltip.module.css')
+  const tokens = readSrcFile('features/social/theme/social.module.css')
 
   it('imports no MUI and no COBRA staff component', () => {
     expect(source).not.toMatch(/from '@mui\//)
@@ -222,12 +315,16 @@ describe('ParticipantTooltip — participant skin, not MUI or COBRA', () => {
     expect(sheet).toMatch(/composes:\s*tokens from '\.\.\/theme\/social\.module\.css'/)
     expect(sheet).toContain('background: var(--pc-ink-muted)')
     expect(sheet).toContain('color: var(--pc-bg)')
-    expect(sheet).toContain('pointer-events: none')
+    // Hoverable (WCAG 1.4.13): the bubble takes the pointer.
+    expect(sheet).toContain('pointer-events: auto')
     expect(sheet).not.toMatch(/prefers-color-scheme|data-theme/)
   })
 
-  it('its text clears WCAG AA: white on the muted ink is at least 4.5:1', () => {
-    // `--pc-bg` / `--pc-ink-muted` in theme/social.module.css.
-    expect(contrastRatio('#ffffff', '#61707a')).toBeGreaterThanOrEqual(4.5)
+  it('its text clears WCAG AA: --pc-bg on --pc-ink-muted, as declared, is at least 4.5:1', () => {
+    const background = cssVar(tokens, '--pc-ink-muted')
+    const text = cssVar(tokens, '--pc-bg')
+    expect(background).toMatch(/^#[0-9a-f]{3,6}$/i)
+    const full = text.length === 4 ? `#${[...text.slice(1)].map(c => c + c).join('')}` : text
+    expect(contrastRatio(full, background)).toBeGreaterThanOrEqual(4.5)
   })
 })

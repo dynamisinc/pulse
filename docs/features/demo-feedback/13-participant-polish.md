@@ -35,20 +35,24 @@ Tooltip on hover and focus for a representative control of each kind; frame cent
 - `src/frontend/src/features/social/components/ParticipantTooltip.test.tsx`: the component and its geometry.
   `placeTooltip` puts the bubble below / above / to the right with a gap, flips at the viewport edge, slides to stay
   on screen, and never overlaps the control across a grid of positions and every placement. On a plain button: shows
-  on mouse hover only after the dwell and hides on leave; shows at once on keyboard (Tab) focus and hides on blur;
+  on mouse hover only after the dwell and hides after a ~100 ms grace on leave; is hoverable (moving onto the bubble
+  keeps it open, leaving it hides it; WCAG 1.4.13); shows at once on keyboard (Tab) focus and hides on blur; a scroll
+  re-places it in the next frame and it stays, and it hides once the control's box leaves the viewport; only one is
+  open at a time;
   is `aria-hidden`, not `role="tooltip"`, not `aria-describedby`, so the `aria-label` stays the only accessible name;
-  Escape hides it without swallowing the key; Enter and click hide it; a touch pointer and a tap's focus show
-  nothing; the `media` gate. Skin: no MUI / `@/theme` / Cobra imports, composes the participant `.tokens`, reads
-  `--pc-*`, light only, white on `--pc-ink-muted` is at least 4.5:1.
+  Escape hides it without swallowing the key; Enter and click hide it; a touch `pointerover` alone shows nothing
+  past the dwell, and a tap's focus shows nothing; the `media` gate. Skin: no MUI / `@/theme` / Cobra imports,
+  composes the participant `.tokens`, reads `--pc-*`, `pointer-events: auto`, light only, and `--pc-bg` on
+  `--pc-ink-muted` (both read from `theme/social.module.css`) is at least 4.5:1.
 - `src/frontend/src/features/social/components/ParticipantTooltip.controls.test.tsx`: the tooltip on the real
   controls. Post actions: Reply and Like on hover, Repost and Pin on keyboard focus, hidden on leave / blur, the
   counted `aria-label` ("Like, 42") unchanged and led by the tooltip text. Composer: "Add photos or video" on hover,
   "Add emoji" on focus. Media: the viewer's "Next image" on hover and focus; the video player's Mute then Expand on
-  focus (one bubble at a time). Nav rail with `matchMedia` pinned below 840px: Home on focus, Post on hover, names
-  unchanged; at 840px and up no tooltip on hover or focus; the icon-rail query is the complement of the 840px
+  focus (one bubble at a time). Nav rail with `matchMedia` pinned below 840px: Home and the "Pulse home" logo on focus (one
+  bubble at a time), Post on hover, names unchanged; at 840px and up no tooltip on hover or focus; the icon-rail query is the complement of the 840px
   breakpoint. Detail header Back on focus. A source table pins that every control in the AC is wrapped (including
-  attachment remove, video Play, search clear, compose-modal Close and viewer Previous) and that both nav rail
-  tooltips carry the icon-rail gate.
+  attachment remove, video Play, search clear, compose-modal Close, viewer Previous, the icon rail's logo and the
+  account card's Sign out) and that the nav rail and Sign out tooltips carry the icon-rail gate.
 - `src/frontend/src/features/social/SocialChannel.layout.test.tsx` (updated, #495): resolves the `.frame` rule for a
   given window width from the real stylesheet's base rules and `min-width` blocks. At 1100px: `240px minmax(0, 600px)`,
   `justify-content: start`, left offset 0 (and still start at 1200 / 1279px). At 1440px: the full 240 | 600 | 344
