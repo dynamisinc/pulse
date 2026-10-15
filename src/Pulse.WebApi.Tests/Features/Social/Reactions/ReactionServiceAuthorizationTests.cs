@@ -5,12 +5,14 @@ using System.Threading;
 using System.Threading.Tasks;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging.Abstractions;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.Social.Engagement;
 using Pulse.WebApi.Features.Social.Follows;
 using Pulse.WebApi.Features.Social.Reactions;
+using Pulse.WebApi.Tests.Features.Social;
 
 /// <summary>
 /// The reaction service's identity gate (DP-10) in isolation, model-only: every refusal here is decided BEFORE any
@@ -125,7 +127,9 @@ public sealed class ReactionServiceAuthorizationTests
             exerciseContext,
             new StubAccessor(sessionPersona),
             new ExerciseClockService(TimeProvider.System),
-            new PostEngagementReader(dbContext, exerciseContext));
+            new PostEngagementReader(dbContext, exerciseContext),
+            new FakeFeedBroadcaster(),
+            NullLogger<ReactionService>.Instance);
     }
 
     private sealed class StubAccessor : ICurrentSessionPersonaAccessor

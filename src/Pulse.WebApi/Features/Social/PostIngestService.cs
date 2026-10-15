@@ -9,6 +9,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.Realtime;
+using Pulse.WebApi.Features.Social.Engagement;
 using Pulse.WebApi.Features.Social.Threads;
 
 /// <summary>
@@ -54,6 +55,14 @@ using Pulse.WebApi.Features.Social.Threads;
 /// resolved through the <see cref="IReplyParentResolver"/> seam (DP-8). The seeded engagement baseline is honoured
 /// only for a staff <c>controller-as-persona</c> write and a scripted <c>inject</c> post (IQ-10). The broadcast carries the participant projection
 /// (<see cref="IParticipantPostProjector"/>), without viewer state.
+/// </para>
+/// <para>
+/// <b>Live reply counts (demo-feedback DF-17).</b> After a REPLY has committed (and its own <c>PostReceived</c> has
+/// gone out) the parent's new shown counts are pushed as <c>PostEngagementChanged</c> to the exercise group, with the
+/// parent's database-derived version (<see cref="PostEngagementVersion"/>), so every card showing the parent updates its
+/// reply count. A top-level post pushes nothing new. A failed read or broadcast is logged and swallowed: the reply is
+/// committed. It needs the <see cref="IPostEngagementReader"/> (DI always supplies one); a caller that constructs the
+/// service without one gets no parent push.
 /// </para>
 /// </remarks>
 public sealed partial class PostIngestService
@@ -133,6 +142,7 @@ public sealed partial class PostIngestService
     private readonly ILogger<PostIngestService> _logger;
     private readonly IReplyParentResolver? _replyParentResolver;
     private readonly IParticipantPostProjector? _projector;
+    private readonly IPostEngagementReader? _engagementReader;
 
     /// <summary>Creates the ingest service with its persistence, scope, and broadcast collaborators.</summary>
     /// <param name="dbContext">The persistence context the post and its telemetry event are written through.</param>
@@ -152,6 +162,10 @@ public sealed partial class PostIngestService
     /// view is used — <see cref="ParticipantPostDto.FromPost"/>'s fields with the seeded baseline counts, which is
     /// byte-identical to the pre-demo shape for every caller that sets no baseline and no parent.
     /// </param>
+    /// <param name="engagementReader">
+    /// The engagement read the feed projection uses, for a reply's parent push (DF-17). Optional: when absent (a test
+    /// that builds the service by hand), a reply pushes no parent counts.
+    /// </param>
     public PostIngestService(
         PulseDbContext dbContext,
         IExerciseContext exerciseContext,
@@ -159,7 +173,8 @@ public sealed partial class PostIngestService
         IEnumerable<IPostPublishedObserver>? observers = null,
         ILogger<PostIngestService>? logger = null,
         IReplyParentResolver? replyParentResolver = null,
-        IParticipantPostProjector? projector = null)
+        IParticipantPostProjector? projector = null,
+        IPostEngagementReader? engagementReader = null)
     {
         ArgumentNullException.ThrowIfNull(dbContext);
         ArgumentNullException.ThrowIfNull(exerciseContext);
@@ -172,6 +187,7 @@ public sealed partial class PostIngestService
         _logger = logger ?? NullLogger<PostIngestService>.Instance;
         _replyParentResolver = replyParentResolver;
         _projector = projector;
+        _engagementReader = engagementReader;
     }
 
     /// <summary>
@@ -427,8 +443,45 @@ public sealed partial class PostIngestService
         }
 #pragma warning restore CA1031
 
+        // 7b. DF-17: a reply moved its parent's reply count, so push the parent's new shown counts (after the reply's
+        //     own PostReceived, so a client sees the reply before the count that includes it). Same rules as above: no
+        //     request token, and a failure is logged, never surfaced.
+        if (parentPostId is { } committedParentId)
+        {
+            await BroadcastParentEngagementAsync(exerciseId, committedParentId);
+        }
+
         // 8. Hand the full post (and its projection) back to the endpoint, which shapes the response by caller role.
         return PostIngestResult.Created(post, participantView);
+    }
+
+    /// <summary>
+    /// Pushes <c>PostEngagementChanged</c> for a just-replied-to parent (DF-17): version first, then the shown counts
+    /// (<see cref="PostEngagementVersion.ReadChangeAsync"/>). Nothing when no engagement reader is available or the
+    /// parent no longer resolves (taken down meanwhile). Never throws: the reply has committed.
+    /// </summary>
+    private async Task BroadcastParentEngagementAsync(Guid exerciseId, Guid parentPostId)
+    {
+        if (_engagementReader is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var change = await PostEngagementVersion.ReadChangeAsync(
+                _dbContext, _engagementReader, parentPostId, CancellationToken.None);
+            if (change is not null)
+            {
+                await _broadcaster.BroadcastPostEngagementChangedAsync(exerciseId, change, CancellationToken.None);
+            }
+        }
+#pragma warning disable CA1031 // A push fault must never turn a committed reply into a failed request.
+        catch (Exception ex)
+        {
+            LogParentEngagementBroadcastFailed(ex, exerciseId, parentPostId);
+        }
+#pragma warning restore CA1031
     }
 
     /// <summary>
@@ -741,6 +794,12 @@ public sealed partial class PostIngestService
         Level = LogLevel.Warning,
         Message = "Post broadcast failed for post {PostId} in exercise {ExerciseId}. The post is committed; connected participants pick it up on their next feed read.")]
     private partial void LogPostBroadcastFailed(Exception exception, Guid exerciseId, Guid postId);
+
+    [LoggerMessage(
+        EventId = 6,
+        Level = LogLevel.Warning,
+        Message = "PostEngagementChanged push failed for reply parent {PostId} in exercise {ExerciseId}. The reply is committed; connected participants see the new count on their next read.")]
+    private partial void LogParentEngagementBroadcastFailed(Exception exception, Guid exerciseId, Guid postId);
 
     /// <summary>One validated attachment: the asset, its optional poster override, and the sanitized alt text.</summary>
     private sealed record RequestedMedia(Guid AssetId, Guid? PosterId, string Alt);
