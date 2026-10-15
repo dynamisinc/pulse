@@ -31,7 +31,7 @@ closes the finish items.
 The Wave 3 session asked for this list to check it for overlaps with its in-flight work. **Neither session edits
 the other's worktree or branch.** The owned-files column below is the contract between them.
 
-## Decisions (DF-24..DF-38)
+## Decisions (DF-24..DF-39)
 
 DF numbers continue after `main`'s DF-23 (`feature/demo-feedback-w3` used DF-17..DF-20, `main` DF-21..DF-23; no
 overlap).
@@ -44,7 +44,7 @@ overlap).
 | DF-27 | **The overlay sequence is monotonic across restarts.** It is persisted with the overlay snapshot, and the first sequence after a restore is the persisted value + 1, so a participant client that saw a high sequence never drops the next frame | orchestrator |
 | DF-28 | **A controller can reset an exercise's runtime state** (`POST /api/steering/runtime-state/reset`: tier Running, clock unstarted, overlay none, row deleted). The demo reset uses it instead of an App Service restart, so a reset no longer costs the 8-minute restart wait. An App Service restart no longer clears anything (README-seed and `Reset-DemoState -Restart` docs change) | orchestrator |
 | DF-29 | **Participants edit their own posts and replies, text only.** Media, reply target and author never change. Origin must be `participant`; engine, noise, inject and controller-as-persona posts are not editable; a taken-down post is not editable | Tom 10/15 |
-| DF-30 | **The edit window is 15 minutes of wall-clock time from `Post.CreatedWallClock`, at most 5 edits** (X parity), checked on the server. The participant never sees a wall-clock time (COR-053): the read gives `viewer.editableForSeconds` (own posts only) and the client counts that down | Tom 10/15 + orchestrator |
+| DF-30 | **The edit window is 15 minutes of wall-clock time from `Post.CreatedWallClock`, at most 5 edits** (X parity), checked on the server. The participant never sees a wall-clock time (COR-053): the read gives `viewer.editableForSeconds` (own posts only) and the client counts that down. **Amended 10/15 evening:** an edit is refused (409 `frozen`) whenever posting is refused: pause tier Freeze, a frozen clock, or a lifecycle that is paused or ended. The window keeps running meanwhile | Tom 10/15 + orchestrator |
 | DF-31 | **Edit history is visible to everyone, X-style.** The card shows "Edited"; "View edit history" lists every version with its scenario time, newest first. Staff see the same in Live world, and the export carries the edit count, the last edit's scenario time and the original text | Tom 10/15 |
 | DF-32 | **Controllers do not edit persona posts** (takedown + post a correction stay the staff tools). Controller editing stays on the roadmap | Tom 10/15 |
 | DF-33 | **An edit publishes one exercise-group push, `PostEdited`**, after commit, with the new text, the edit summary and `version = EditCount` (monotonic per post; a stale frame drops). It never re-notifies mentions and never moves counts. An identical text is a no-op (200, nothing written, nothing pushed) | orchestrator |
@@ -52,6 +52,7 @@ overlap).
 | DF-35 | **Exercise Management gets rename, archive and a minimal duplicate.** Rename and archive from row actions; archive follows the lifecycle (`completed → archived` only). Duplicate creates a new exercise in `build` with: settings columns (brand, chrome, watermark, channels, outlets, time zone; noise reset to `off`), personas, noise pool, run sheet (items reset to pending, fired/claim fields cleared), and the caller's staff assignment. **Not copied:** posts, reactions, pins, follows, roster accounts, links, day words, sessions, telemetry, engine review items. Media rows are re-keyed to the new exercise pointing at the **same blob** (no blob copy) | Tom 10/15 |
 | DF-36 | **"Mark fired" fires a run-sheet item without publishing** (an inject delivered outside Pulse or posted by hand): from `pending`, `held` or `failed`, controller only, behind a confirm. It stamps `FiredByHumanId` and `FiredScenarioTime`; the row shows "Marked fired" (derived: fired with no child post carrying a post id). Allowed under Freeze (nothing reaches participants). No undo | Tom 10/15 |
 | DF-37 | **One COBRA muted-text token** (AA on white and on the console surfaces) replaces the per-file grey constants; the below-AA `#848482` goes from staff text. Participant themes are untouched | Tom 10/15 |
+| DF-39 | **The export gains a second sheet, `Edit history`** (amends DF-8's one sheet): one row per version of every post or reply that has been edited, with post id, edit number (0 = original), scenario time, wall clock (UTC), text, and current (yes/no). Never-edited posts have no rows (their only version is on `Posts`). Text cells are values, never formulas | Tom 10/15 evening |
 | DF-38 | **AI for the demo: Fake provider, engine paused by the seed, beat 7 optional.** No §8 sign-off, no live provider. The pre-flight (26) fails if the tier is looser than `engine` | Tom 10/15 |
 
 ## Frozen wire contract
@@ -101,6 +102,12 @@ persisted: boolean   // false only when the write-through failed (logged at Erro
 
 `Edits` (int) · `Last edited (scenario)` · `Original text` (blank when never edited). Text cells stay text values
 (never formulas), as DF-8's gotcha.
+
+**Second sheet `Edit history` (DF-39):** `Post id` · `Edit number` (0 = original) · `Scenario time` · `Wall clock (UTC)` ·
+`Text` · `Current` (`yes`/`no`). One row per version of each edited post or reply, ordered by post then edit number;
+autofilter and frozen header like `Posts`. Version 0's times are the post's `CreatedScenarioTime` / `CreatedWallClock`;
+version n's are `PostEdit` n's `EditedScenarioTime` / `EditedAt`; its text is `PostEdit` n+1's `PreviousBody`, or the
+current `Body` for the last version.
 
 ### Telemetry (XC-004, counts only, no text, no names)
 

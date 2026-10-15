@@ -1,7 +1,7 @@
 # Story: Edit own post: backend
 
 **Feature:** Demo feedback cut (10/20)  ·  **Phase:** 1  ·  **Status:** Not Started
-**Requirements:** D1 parity (X edit), COR-053, NFR-004, XC-002, XC-004  ·  **Decisions:** DF-29..DF-33  ·  **Issue:** #537
+**Requirements:** D1 parity (X edit), COR-053, NFR-004, XC-002, XC-004  ·  **Decisions:** DF-29..DF-33, DF-39  ·  **Issue:** #537
 **Stack:** backend  ·  **World:** participant (API)  ·  **Review:** Tier-1 (new write route; Gate-1 checks authz closely)  ·  **Priority:** Must  ·  **Wave:** 4  ·  **Effort:** M
 **Owner:** planning session · **Branch:** `build/demo-feedback/19-edit-post-api` → `feature/demo-feedback-w4`
 
@@ -21,8 +21,9 @@ only**, a **15-minute** window, history visible to everyone, participants only (
       participant writes.
 - [ ] Text goes through `PostSanitizer.Sanitize` and the same length/empty rules as create (400 on violation).
 - [ ] Window and limit (DF-30): refused with 409 `{ reason: "window-closed" }` when `utcNow − CreatedWallClock >
-      15 min`, `{ reason: "edit-limit" }` when `EditCount == 5`, `{ reason: "frozen" }` under pause tier Freeze or a
-      frozen clock (same rule participants already hit for posting).
+      15 min`, `{ reason: "edit-limit" }` when `EditCount == 5`, `{ reason: "frozen" }` whenever posting is refused:
+      pause tier Freeze, a frozen clock, or a lifecycle that is paused or ended (Tom 10/15 evening). The 15-minute window
+      keeps running while edits are blocked.
 - [ ] Identical sanitized text ⇒ 200 with the current post, nothing written, nothing pushed (DF-33).
 - [ ] On a real edit, one transaction: insert `PostEdit { EditNumber = EditCount + 1, PreviousBody = old Body,
       EditedAt = utcNow, EditedScenarioTime = IExerciseClock.CurrentScenarioTime (fallback as create) }`, set
@@ -41,6 +42,10 @@ only**, a **15-minute** window, history visible to everyone, participants only (
       exercise; 404 for another exercise or a taken-down post. Scenario times only.
 - [ ] Export (`Features/Exports`): three columns appended to `Posts`: `Edits`, `Last edited (scenario)`,
       `Original text` (the `PreviousBody` of edit 1; blank when never edited). Text written as values, never formulas.
+- [ ] Export second sheet **`Edit history`** (DF-39, amends DF-8's one sheet): one row per version of every edited
+      post or reply (`Post id`, `Edit number` with 0 = original, `Scenario time`, `Wall clock (UTC)`, `Text`,
+      `Current` yes/no), as specified in WAVE-4.md "Export columns". Never-edited posts have no rows. Autofilter and
+      frozen header; text as values, never formulas.
 - [ ] Telemetry `post.edited` (postId, editNumber, wall + scenario time, session kind); no text.
 
 ## Out of Scope
@@ -67,4 +72,6 @@ staff session 403; engine/noise/controller-as-persona origin 403; taken down 404
 window closed at 15:01 (`FakeTimeProvider`); sixth edit refused; Freeze refused; identical text no-op with no push;
 sanitizer applied (a `<script>` edit stored inert); history order and texts across 3 edits; DTO `edited` and
 `editableForSeconds` (own only, never `LastEditedAt`); `PostEdited` wire shape and exercise-group-only target; failing
-broadcaster does not fail the edit; export columns (formula-looking edit stays text); telemetry has no text.
+broadcaster does not fail the edit; export columns (formula-looking edit stays text); `Edit history` sheet (rows per version, version texts and times
+match the history read, current flag on the last version only, never-edited posts absent, a `=` edit stays text);
+edit refused while the lifecycle is paused or ended, and the window still closes at 15:01 after a pause; telemetry has no text.

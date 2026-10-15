@@ -24,7 +24,7 @@ check once 19 is deployed.
       Esc cancels. Media is shown read-only ("Media can't be changed").
 - [ ] Save calls `PATCH /api/posts/{id}`; on success the card shows the new text immediately (own-post optimistic
       update, rolled back on failure). 409 reasons map to plain messages: "The 15-minute edit window has closed",
-      "You've reached the edit limit", "The exercise is paused". Other failures keep the dialog open with the error.
+      "You've reached the edit limit", "Posting is paused right now" (`frozen`: Freeze, or a paused/ended exercise). Other failures keep the dialog open with the error.
 - [ ] Every card (feed, thread, profile, Pinned) shows **"Edited"** after the time when `post.edited` is set
       (`PostHeader`); it is a button that opens **"Edit history"** (new `social/edit/EditHistoryDialog.tsx`), listing
       each version newest first with its scenario time ("Current" / "Original" labels). Text, not color, marks it.
