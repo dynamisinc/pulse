@@ -154,6 +154,8 @@ import { composeAsPersonaDraftStore } from '../hooks/useComposeAsPersona'
 import { useActivePersona } from '../hooks/useActivePersona'
 import { EscalationDial } from './steering/EscalationDial'
 import { PausePill } from './steering/PausePill'
+import { NoiseControl } from '../noise'
+import { ExportPostsButton } from '../export'
 import {
   DraftDisposition,
   DraftTimerDriver,
@@ -625,6 +627,8 @@ export function ControllerConsole(
                 </Typography>
                 <Box sx={{ flex: 1 }} />
                 {lifecycleSlot}
+                {/* demo-feedback 09: the post activity export (any staff role, DF-8). */}
+                <ExportPostsButton />
                 <Typography
                   data-testid="controller-callsign"
                   sx={{
@@ -661,13 +665,20 @@ export function ControllerConsole(
                   storyline escalation dial. PausePill drives usePauseState (the
                   header state pill reflects the tier); EscalationDial sets the
                   storyline target the engine will follow (loop deferred). Both
-                  are self-contained COBRA staff controls. */}
-              <Stack
-                data-testid="world-steering-panel"
-                sx={{ gap: 1.5, mt: 0.5, maxWidth: 520 }}
-              >
-                <PausePill />
-                <EscalationDial />
+                  are self-contained COBRA staff controls. The White noise knob
+                  (demo-feedback 09) sits BESIDE the pause pill, the two in one row. */}
+              <Stack data-testid="world-steering-panel" sx={{ gap: 1.5, mt: 0.5 }}>
+                <Stack
+                  direction="row"
+                  data-testid="world-steering-row"
+                  sx={{ alignItems: 'center', gap: 1.5, flexWrap: 'wrap' }}
+                >
+                  <PausePill />
+                  <NoiseControl />
+                </Stack>
+                <Box sx={{ maxWidth: 520 }}>
+                  <EscalationDial />
+                </Box>
               </Stack>
 
               {/* Main-area slots: Live world | Run sheet (split >= 1280px,

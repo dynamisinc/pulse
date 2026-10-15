@@ -55,7 +55,14 @@
  * `@/core/telemetry`'s `TelemetryOrigin`. NEVER participant-visible (XC-002);
  * staff-visible only, via the console's always-visible origin line (R-003).
  */
-export type PostOrigin = 'participant' | 'controller-as-persona' | 'engine' | 'inject'
+export type PostOrigin =
+  | 'participant'
+  | 'controller-as-persona'
+  | 'engine'
+  | 'inject'
+  // demo-feedback DF-12: a white-noise pool post released by the server pacer (staff label
+  // `NOISE · AUTO`). Participant surfaces never see an origin, so they show nothing new.
+  | 'noise'
 
 /**
  * A single media attachment on a post (contract v2, §1.5.3). `id` is the

@@ -353,6 +353,9 @@ export function originConsoleLabel(post: Post): string {
       return 'PARTICIPANT'
     case 'inject':
       return post.injectId ? `INJ-${post.injectId}` : 'INJ-unknown'
+    case 'noise':
+      // demo-feedback DF-12: a white-noise pool post, released by the server pacer.
+      return 'NOISE · AUTO'
     default: {
       // Exhaustiveness guard: a future 5th PostOrigin value fails the build
       // here rather than silently falling through unmapped.
