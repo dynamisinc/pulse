@@ -32,10 +32,14 @@ using Pulse.WebApi.Features.Injects.Import;
 /// pushed: open consoles pick the new order up on the run sheet's 3-second poll, exactly as they do after a reorder.
 /// </para>
 /// <para>
-/// <b>Concurrency.</b> Creates bump the queue-membership token once; every update bumps its item's version. A save that
-/// loses to another writer (a console edit, a create, a delete, a reorder, a fire, a second import inserting the same
-/// <c>Inject #</c>, or a deadlock victim) is rolled back whole and the import is re-planned against the run sheet as it
-/// is now, up to <see cref="MaxQueueAttempts"/> times; then it is a <c>409</c> and nothing is written.
+/// <b>Concurrency.</b> Creates bump the queue-membership token once; every update bumps its item's version; every item
+/// a creation shifts down (from the first created item's slot on) is written under its version token without a bump.
+/// The save is rolled back whole and the import re-planned against the run sheet as it is now, up to
+/// <see cref="MaxQueueAttempts"/> times (then a <c>409</c> and nothing written), only when another writer touched what
+/// it wrote: the queue token (a create, a delete, a reorder, another creating import), an item this import updates or
+/// shifts (an edit, a fire, a hold), or the same <c>Inject #</c> inserted by a second import; or when SQL Server makes
+/// it a deadlock victim. A write to any other item does not conflict: the result is as if it had landed just after the
+/// import (an edit or a release never moves an item, so a run sheet edited after an import looks the same).
 /// </para>
 /// <para>
 /// <b>Dry run.</b> The same plan, read without tracking and with nothing computed about order; the only write is the
@@ -183,26 +187,59 @@ public sealed partial class InjectQueueService
             // DF-22: place the created items by planned minute among the pending items, then write the order exactly as
             // ReorderAsync does (Order 1..n, no item version bumped) with ONE queue-token bump, all in this one save.
             // The read is this exercise's live items only (the central filter plus the explicit ExerciseId predicate),
-            // tracked so the new numbers are saved. An item this import updated keeps its place and is judged by its
-            // STORED minute (EF's original value); a created item by the minute it is created with.
+            // tracked so the new numbers are saved.
             var queue = await LiveItems(exerciseId).ToListAsync(cancellationToken);
-            var placed = ImportQueuePlacement.Place(
-                queue,
-                createdItems,
-                item =>
-                {
-                    var entry = _dbContext.Entry(item);
-                    return entry.State == EntityState.Added
-                        ? item.PlannedMinute
-                        : entry.Property(row => row.PlannedMinute).OriginalValue;
-                });
+            var placed = ImportQueuePlacement.Place(queue, createdItems, JudgedMinutes(queue, createdItems));
             WriteQueueOrder(placed);
+            WriteShiftedUnderTheirTokens(placed);
             BumpQueue(exerciseId, queueToken);
         }
 
         _dbContext.TelemetryEvents.Add(InjectImportTelemetry.Imported(exerciseId, caller.StaffUserId, result, time));
         await _dbContext.SaveChangesAsync(cancellationToken);
         return result;
+    }
+
+    /// <summary>
+    /// The minute each item is judged by in the placement, read once per item (Gate-1 L-1): a created item's own; an
+    /// existing item's STORED minute (EF's original value), so an item this import updated keeps its place and is judged
+    /// by the minute that put it there, not by a new one from the file.
+    /// </summary>
+    private Func<InjectItem, int?> JudgedMinutes(List<InjectItem> queue, List<InjectItem> created)
+    {
+        var minutes = new Dictionary<InjectItem, int?>(queue.Count + created.Count, ReferenceEqualityComparer.Instance);
+        foreach (var item in queue.Concat(created))
+        {
+            var entry = _dbContext.Entry(item);
+            minutes[item] = entry.State == EntityState.Added
+                ? item.PlannedMinute
+                : entry.Property(row => row.PlannedMinute).OriginalValue;
+        }
+
+        return item => minutes[item];
+    }
+
+    /// <summary>
+    /// Writes every existing item from the first created item's slot on — each one an insertion pushed down, the
+    /// anchors included — under its version token, even when its <c>Order</c> number happens to stay the same (a delete
+    /// leaves a gap in the numbers, so a shift can keep a number). A concurrent fire, hold or edit of such an item then
+    /// fails this save and the import is re-planned; no item's version is bumped.
+    /// </summary>
+    private void WriteShiftedUnderTheirTokens(IReadOnlyList<InjectItem> placed)
+    {
+        var shifting = false;
+        foreach (var item in placed)
+        {
+            var entry = _dbContext.Entry(item);
+            if (entry.State == EntityState.Added)
+            {
+                shifting = true;
+            }
+            else if (shifting)
+            {
+                entry.Property(row => row.Order).IsModified = true;
+            }
+        }
     }
 
     /// <summary>Decides (and, for a real import, applies) the outcome for a candidate whose item already exists.</summary>
