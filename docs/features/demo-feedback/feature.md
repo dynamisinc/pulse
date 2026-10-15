@@ -36,6 +36,8 @@ cut to what fits before the Sunday freeze:
 | Read-only controller view for Feds and leads (both) | COR-013 (UI only; enforcement stays on #61 / #377) | 11 |
 | Volume knob on posts (notes A); white noise (Tom) | ambient chatter (lite, no AI) | 01, 05, 09, C3, S1 |
 | Emojis (both); bold unread posts (Tom); #493, #494, #495 | NFR-001, D1 polish | 08, 10, 12, 13 |
+| Counts and the notifications badge only update on reload (Tom, 10/15) | SOC-071, D1 notifications | 14 |
+| A controller cannot open Exercise Management (Tom, 10/15) | COR-074, COR-075 | 15 |
 
 ## Out of scope (roadmap slide)
 
@@ -63,6 +65,8 @@ media on the server.
 | 11 | [Read-only console for evaluators](11-read-only-console.md) | frontend | Must | 3 | 08, 09, 10, 12b | Not Started | #507 |
 | 12 | [Emoji picker in both composers](12-emoji-picker.md) | frontend | Should | 2 / 3 (12b) | none | In Progress | #508 |
 | 13 | [Participant polish: tooltips (#494) and centered frame (#495)](13-participant-polish.md) | frontend | Should | 3 | 06, 07 | Not Started | #509 |
+| 14 | [Live engagement refresh (counts, notifications, repost notification)](14-live-engagement-refresh.md) | fullstack | Must | 3 | 07 | Not Started | #515 |
+| 15 | [Exercise management for controllers, and a "not allowed" page](15-exercise-management-access.md) | fullstack | Must | 3 | seam S-4 | Not Started | #516 |
 | S1 | [Seed script: noise pool, exercise pins, watermark on](S1-seed-script-update.md) | script | Must | 3 | 04, 05 deployed | Not Started | #510 |
 | C | [Content: burned-in media, Kestrel MSEL file, noise pool](C-content-tasks.md) | content | Must | any | #491 | Not Started | #511 |
 
@@ -81,3 +85,7 @@ media on the server.
    that writes (Export is allowed).
 7. Emoji picker in the participant composer and the persona composer; Live world highlights new posts until seen;
    #493, #494, #495 fixed.
+8. Two participant browsers: a like, a repost and a reply in one change the counts in the other without a reload; the
+   author's notifications badge goes up live, including "@x reposted your post".
+9. Sign in as a controller: Exercise Management opens and can create an exercise. As an evaluator, it shows "You need
+   the planner, org admin or controller role" instead of bouncing.

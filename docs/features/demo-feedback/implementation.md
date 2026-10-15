@@ -25,6 +25,10 @@
 | DF-13 | Noise stops on **Freeze** (pause tier `Freeze` or a frozen clock), when the exercise clock is not running, and when the exercise lifecycle is not `staged` or `live` (EndEx, lifecycle pause; amended after 05 Gate-1). **Pause injects does not stop noise** (that is what the knob's Off is for). The pacer cycles the pool least-posted first, avoiding the same persona twice in a row | orchestrator |
 | DF-14 | **Read-only console is UI only.** Evaluators are admitted to `/staff/console` (registry seam) and every write control is **absent, not disabled**, via one `useCanControl()` hook (`session.role === 'controller'`). Server-side enforcement stays on #61/#377. The backend already lets evaluators read every console endpoint (no 403 on `GET /api/injects`, `/api/steering/*`, `/api/engine/*`, `/api/feed`) | Tom 10/14 + backend map |
 | DF-15 | **Emoji picker**: a library is allowed only if it works with React 19, renders **native** emoji, and makes **no runtime network call** (exercise networks are locked down; NFR / #52). Self-host any data file under `public/`. Verify the current version and advisories before adding (candidates checked 10/14: `frimousse` 0.4.0 headless, `emoji-picker-react` 5.0.0; no advisories) | orchestrator |
+| DF-17 | **Live engagement = one exercise-group push, no migration.** `PostEngagementChanged { postId, counts {reply, repost, like}, version }` after commit, from `ReactionService` (like/repost only, never `pin`) and from `PostIngestService` for a reply's parent. A default no-op method on `IFeedBroadcaster` keeps every fake compiling | Tom 10/15 + investigation |
+| DF-18 | **`version` is monotonic per post and derived from the database** (reaction rows + their `DeletedAt` stamps + reply count), so stale or reordered pushes drop on the client and two app instances agree. A push changes numbers only, never the viewer's own `active` state | orchestrator |
+| DF-19 | **A `repost` notification type** ("@x reposted your post") is added; likes and reposts on my posts notify live from the push instead of the 30 s re-read | Tom 10/15 |
+| DF-20 | **Controllers may list and create exercises** (`/staff/exercises` + `POST`/`GET /api/org/exercises`) besides planner and org admin; `GET /api/org/staff-assignments` stays org admin only. A registered staff path a role is not admitted to shows a "You need the … role" page instead of a silent redirect | Tom 10/15 |
 | DF-16 | **The on-stage import uses the Kestrel run sheet rendered as a Cadence MSEL** (C2), padded with non-social rows so the skip is visible. The seed then loads only the burst items (`-RunSheet bursts`) so the import does not duplicate them | Tom 10/14 |
 
 ## Where the brief met the code (10/14 map)
@@ -193,7 +197,9 @@ display name; blank for engine and white noise) · `Inject #` (the item's `Exter
 | 12 Emoji picker | frontend | Should | new `core/emoji/**`, `social/components/Composer.tsx` (`ComposerForm` tools row + internal ref), `src/frontend/package.json` + lockfile, `public/emoji/**` if data is self-hosted | none | 2 | S |
 | 11 Read-only console | frontend | Must | new `controller/access/**`; gating lines in `ControllerConsole.tsx`, `PersonaComposer.tsx`, `runSheet/{RunSheetPanel,RunSheetRow,InjectItemEditor}.tsx`, `liveWorld/{TakedownAction,PinForAllAction}.tsx`, `steering/{PausePill,EscalationDial}.tsx`, `EngineControlBar`, `ReviewQueue.tsx`, `noise/**`, a "View only" chip | 08, 09, 10, 12 merged | 3 | M |
 | 13 Participant polish | frontend | Should | tooltips across `social/**` icon buttons; `SocialChannel.module.css`, `SocialChannel.layout.test.tsx`, `layout/frameMetrics.ts` (#495) | 06, 07 merged | 3 | S |
-| 12b Emoji in persona composer | frontend | Should | `controller/components/PersonaComposer.tsx` (one button) | 12 merged; before 11 | 3 | S |
+| 12b Emoji in persona composer | frontend | Should | `controller/components/PersonaComposer.tsx` (one button) + a COBRA skin (new file under `controller/components/`; `core/emoji` unchanged, it already takes `className`) | 12 merged; before 11 | 3 | S |
+| 14 Live engagement | fullstack | Must | `Features/Realtime/{IFeedBroadcaster,SignalRFeedBroadcaster}.cs`, new `Features/Social/Engagement/PostEngagementChangedDto.cs` (+ a version helper beside `PostEngagementReader`), `Features/Social/Reactions/ReactionService.cs`, `Features/Social/PostIngestService.cs` (+ optional `Moderation/PostTakedownService.cs`); `social/services/{realtimeFeed.ts, new postCountsStore.ts}`, the mock feed adapter, `social/components/post/PostActions.tsx` (counts props only), `social/hooks/{useReactionToggle,useReaction,useAmplify}.ts`, `social/notifications/{notificationsStore,notificationModel,notificationTypes,notificationText}.ts` + `NotificationRow.tsx`, `core/auth/endSession.ts` (+ tests) | 07 merged | 3 | M |
+| 15 Exercise access | fullstack | Must | `Features/ExerciseLifecycleAdmin/**` (role set, filter docs, services' re-checks, + tests); `features/app-shell/StaffRouteTree.tsx` + a new not-allowed page under `features/app-shell/` (+ tests); `features/exerciseLifecycleAdmin/README.md`; `docs/features/exercise-lifecycle-admin/feature.md`, `docs/BUILD_PLAN.md` (stale lines) | seam S-4 | 3 | S |
 | S1 Seed script | script | Must | `scripts/uat/Seed-DemoContent.ps1` (+ `.Tests.ps1`, `README-seed.md`, `test-fixtures/demo-pack/**`), `docs/demo/pack/schema/pack.schema.json` | 04, 05 deployed | 3 | M |
 | C1–C3 Content | content | Must | `docs/demo/pack/**` except `schema/` (on the #491 branch) | none | any | — |
 
@@ -218,7 +224,8 @@ the media buttons (06).
 |---|---|---|
 | S-1 Excel package | `src/Pulse.WebApi/Pulse.WebApi.csproj`: `ClosedXML` 0.105.1 | Before W1 (done on the umbrella 10/14) |
 | S-2 Backend composition root | `src/Pulse.WebApi/Program.cs`: `AddPostExport()/MapPostExport()`, `AddInjectImport()/MapInjectImport()`, `AddPostPins()/MapPostPins()`, `AddWhiteNoise()/MapWhiteNoise()` (after `AddInjects`/`AddPauseTierSteering`), one commit; `CompositionRootWiringTests` asserts each new route maps exactly once. **Also** add `.WithExposedHeaders("Content-Disposition")` to the CORS policy so story 09 can read the export file name cross-origin (02 Gate-1 M2). **Merge 01 with a real merge, never a squash**: 02-05 merged earlier 01 heads, and a squash would bring back the superseded migration file (02 Gate-1 M3) | After backend W1 merges |
-| S-3 Staff registry | `features/staff/staffRouteRegistry.tsx`: `/staff/console` `allowedRoles: ['controller', 'evaluator']` (default for controller only) + its test; a console entry in the evaluator's surface launcher | With 11 |
+| S-3 Staff registry | `features/staff/staffRouteRegistry.tsx`: `/staff/console` `allowedRoles: ['controller', 'evaluator']` (default for controller only) + its test; a console entry in the evaluator's surface launcher | Before 11 (on `feature/demo-feedback-w3`, 10/15) |
+| S-4 Staff registry | `features/staff/staffRouteRegistry.tsx`: `/staff/exercises` `allowedRoles: ['planner', 'orgAdmin', 'controller']` + its test | Before 15 (same commit as S-3) |
 
 ## Gotchas that will bite a parallel builder
 
@@ -261,3 +268,11 @@ the media buttons (06).
 ### Frontend integration branch (10/15)
 
 `feature/demo-feedback` became backend PR #513, so the frontend integrates on **`feature/demo-feedback-fe`** (cut from it) and goes to `main` in its own PR after #513, or stacked on it if #513 is still open. Merge order for Wave 2: 12a (done) → 07 → 08 (needs 07's `subscribePinChanged`) → 06 → 09 → 10 (after its H-1 CSV fix is re-checked). After the merges: the full frontend suite, plus one integration test proving story 08's `defaultPinChangeSource` receives a `PostPinChanged` from the real `realtimeFeed` (07 Gate-1 L10).
+
+### Wave 3 integration branch (10/15)
+
+Wave 3 integrates on **`feature/demo-feedback-w3`**, cut from the Wave 2 tip of `feature/demo-feedback-fe`, with builder
+worktrees `C:/Code/pulse-wt-df-NN`. Seams S-3 and S-4 land first in one orchestrator commit. Build order: **12b ∥ 13 ∥
+14 ∥ 15**, then **11 alone** after 12b merges (it adds gating lines to files 08, 09, 10 and 12b own). 13 and 14 both
+touch `PostActions.tsx` (13: tooltips around the buttons; 14: the counts props); the orchestrator resolves that merge.
+The PR goes to `main` after the Wave 2 frontend PR merges (or stacks on it if it is still open).
