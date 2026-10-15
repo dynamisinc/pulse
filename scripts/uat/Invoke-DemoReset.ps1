@@ -22,6 +22,12 @@
               deploy 18 (the reset route), or set the tier to running in the console and run again.
          Before its first call, step 1 waits for /health and then /health/ready (up to 2 minutes each): on
          demo morning serverless SQL is usually paused and takes a while to wake.
+         Then, still step 1, white noise goes OFF before anything else runs: PUT /api/staff/noise { level: off },
+         checked with GET, then GET /api/staff/noise is polled until postedCount has not moved for 10 s (at
+         most 90 s), so a noise post already in flight lands BEFORE Clear-DemoContent.ps1 takes its cutoff and is
+         archived with the rest. A rehearsal's noise level and pool survive the restart fallback, and step 2
+         restarts the clock, so without this noise could publish into the opening feed. If noise cannot be
+         turned off or does not settle, the run stops.
       2. Reset-DemoState.ps1: the engine loop re-seed (with -AutoConfirmResponses if you pass it).
       3. Clear-DemoContent.ps1: archives old posts and the MSEL-imported run-sheet items, vetoes stale drafts.
       4. Seed-DemoContent.ps1 -RunSheet exceptMsel: the opening feed, pins, noise pool, media marking, the run
@@ -147,7 +153,7 @@ function Invoke-PulseApi {
     <# One request to the API. Returns @{ Status; Json; Text }. Throws a readable error when no response arrives. #>
     param(
         [Parameter(Mandatory)] [string] $BaseUrl,
-        [Parameter(Mandatory)] [ValidateSet('GET', 'POST')] [string] $Method,
+        [Parameter(Mandatory)] [ValidateSet('GET', 'POST', 'PUT')] [string] $Method,
         [Parameter(Mandatory)] [string] $Path,
         [string] $Token,
         [AllowNull()] [object] $Body,
@@ -365,6 +371,46 @@ function Set-EngineTierAfterFailure {
     finally { if ($session) { Disconnect-StaffSession -BaseUrl $BaseUrl -Token $session.Token; $session.Token = $null } }
 }
 
+function Stop-WhiteNoise {
+    <#
+    .SYNOPSIS
+        Step 1, after the reset: white noise off (PUT, then GET to check), then wait until postedCount has been still
+        for -SettleSeconds, so an in-flight noise post lands before Clear-DemoContent.ps1 picks its cutoff. Returns
+        @{ Ok; Detail }. Signs out whatever happens.
+    #>
+    param(
+        [string] $BaseUrl, [string] $StaffUsername, [string] $Subscription, [string] $ResourceGroup, [string] $WebAppName,
+        [int] $SettleSeconds = 10, [int] $PollSeconds = 5, [int] $MaxSeconds = 90
+    )
+    $session = $null
+    try {
+        $session = Connect-DemoStaff -BaseUrl $BaseUrl -StaffUsername $StaffUsername -Subscription $Subscription -ResourceGroup $ResourceGroup -WebAppName $WebAppName
+        $put = Invoke-PulseApi -BaseUrl $BaseUrl -Method PUT -Path '/api/staff/noise' -Token $session.Token -Body ([ordered]@{ level = 'off' })
+        if ($put.Status -ne 200) { return [pscustomobject]@{ Ok = $false; Detail = "PUT /api/staff/noise { level: off } -> $($put.Status): white noise may still be running. Turn it off with the console's knob, then run again" } }
+        $read = Invoke-PulseApi -BaseUrl $BaseUrl -Method GET -Path '/api/staff/noise' -Token $session.Token
+        $level = if ($read.Json -is [System.Collections.IDictionary]) { Get-PrintableText $read.Json['level'] -Max 20 } else { $null }
+        if ($read.Status -ne 200 -or $level -cne 'off') { return [pscustomobject]@{ Ok = $false; Detail = "GET /api/staff/noise -> $($read.Status), level '$level' (expected off): white noise may still be running" } }
+        $count = [int] $read.Json['postedCount']
+        $first = $count
+        $still = 0
+        for ($waited = 0; $waited -lt $MaxSeconds; ) {
+            Start-Sleep -Seconds $PollSeconds
+            $waited += $PollSeconds
+            $poll = Invoke-PulseApi -BaseUrl $BaseUrl -Method GET -Path '/api/staff/noise' -Token $session.Token
+            if ($poll.Status -ne 200 -or $poll.Json -isnot [System.Collections.IDictionary]) { return [pscustomobject]@{ Ok = $false; Detail = "GET /api/staff/noise -> $($poll.Status) while waiting for noise to settle" } }
+            $now = [int] $poll.Json['postedCount']
+            if ($now -eq $count) { $still += $PollSeconds } else { $still = 0; $count = $now }
+            Write-Host "    noise off: postedCount $now, still for $still s" -ForegroundColor DarkGray
+            if ($still -ge $SettleSeconds) {
+                return [pscustomobject]@{ Ok = $true; Detail = "level off; postedCount still at $count for $still s ($($count - $first) landed while settling), so Clear-DemoContent.ps1's cutoff comes after the last noise post" }
+            }
+        }
+        return [pscustomobject]@{ Ok = $false; Detail = "white noise is off but postedCount kept moving for $MaxSeconds s ($first -> $count): something is still publishing noise. Check the console, then run again" }
+    }
+    catch { return [pscustomobject]@{ Ok = $false; Detail = $_.Exception.Message } }
+    finally { if ($session) { Disconnect-StaffSession -BaseUrl $BaseUrl -Token $session.Token; $session.Token = $null } }
+}
+
 function Invoke-RuntimeReset {
     <#
     .SYNOPSIS
@@ -498,7 +544,7 @@ function Invoke-DemoReset {
         $plan = @(Get-DemoResetPlan @planArguments)
 
         Write-Host "`nPlan:" -ForegroundColor Cyan
-        Write-Host '  1. Runtime reset: POST /api/steering/runtime-state/reset (story 18); on 404, Reset-DemoState.ps1 -Restart, then poll until the new process serves'
+        Write-Host '  1. Runtime reset: POST /api/steering/runtime-state/reset (story 18); on 404, Reset-DemoState.ps1 -Restart, then poll until the new process serves; then white noise off and settled'
         foreach ($step in $plan) {
             $note = if ($step.Run) { '' } else { '   (not run with -WhatIf)' }
             Write-Host "  $($step.Number). $($step.Name): $($step.Script) $(Format-StepArguments $step.Arguments)$note"
@@ -508,6 +554,7 @@ function Invoke-DemoReset {
         Write-Host "`n1. Runtime reset" -ForegroundColor Cyan
         if ($WhatIf) {
             Write-Host '    WhatIf: would POST /api/steering/runtime-state/reset as a staff controller (no sign-in now, nothing sent).'
+            Write-Host '    WhatIf: would then PUT /api/staff/noise { level: off } and wait until postedCount is still for 10 s.'
         }
         else {
             $resetArguments = @{
@@ -519,6 +566,15 @@ function Invoke-DemoReset {
             else {
                 Write-Host "  [FAIL] 1. Runtime reset — $($result.Detail)" -ForegroundColor Red
                 $failures.Add('1. Runtime reset')
+            }
+            if ($failures.Count -eq 0) {
+                Write-Host "`n1b. White noise off (before Clear-DemoContent.ps1 picks its cutoff)" -ForegroundColor Cyan
+                $noise = Stop-WhiteNoise -BaseUrl $baseUrl -StaffUsername $StaffUsername -Subscription $Subscription -ResourceGroup $ResourceGroup -WebAppName $WebAppName
+                if ($noise.Ok) { Write-Host "  [PASS] 1b. White noise off — $($noise.Detail)" -ForegroundColor Green }
+                else {
+                    Write-Host "  [FAIL] 1b. White noise off — $($noise.Detail)" -ForegroundColor Red
+                    $failures.Add('1b. White noise off')
+                }
             }
         }
 
@@ -546,10 +602,10 @@ function Invoke-DemoReset {
             Write-Host "WHATIF — $($failures.Count) preview(s) failed: $($failures -join '; ')." -ForegroundColor Red
         }
         else {
-            if ($failures[0] -notlike '1.*') {
+            if ($failures[0] -notmatch '^1\. ') {
                 Set-EngineTierAfterFailure -BaseUrl $baseUrl -StaffUsername $StaffUsername -Subscription $Subscription -ResourceGroup $ResourceGroup -WebAppName $WebAppName
             }
-            $remaining = @($plan | Where-Object { $_.Number -gt [int] ($failures[0] -replace '^(\d+)\..*$', '$1') } | ForEach-Object { "$($_.Number). $($_.Name)" })
+            $remaining = @($plan | Where-Object { $_.Number -gt [int] [regex]::Match($failures[0], '^\d+').Value } | ForEach-Object { "$($_.Number). $($_.Name)" })
             Write-Host "STOPPED at step $($failures[0]). Not run: $(if ($remaining) { $remaining -join ', ' } else { 'nothing' }). Fix the cause and run again (every step is safe to re-run; the pause tier was set to engine above if the failure came after step 1)." -ForegroundColor Red
         }
     }

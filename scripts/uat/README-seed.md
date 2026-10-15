@@ -41,6 +41,8 @@ pwsh scripts/uat/Test-DemoReady.ps1 -Json                                       
    none. Until story 18 is deployed the route answers 404 and the script falls back to `Reset-DemoState.ps1 -Restart`,
    then polls `/health` and the pause tier until the new process answers (it marks the old process first, so
    "running" can only come from the new one) instead of waiting a fixed 8 minutes.
+   Then white noise goes off (`PUT /api/staff/noise`, checked) and the script waits until no noise post has landed
+   for 10 s, so `Clear-DemoContent.ps1` (which archives posts older than the moment it starts) catches every one.
 2. `Reset-DemoState.ps1` (engine loop re-seed).
 3. `Clear-DemoContent.ps1` (old posts and MSEL-imported run-sheet items archived, stale drafts vetoed).
 4. `Seed-DemoContent.ps1 -RunSheet exceptMsel` (which sets pause tier `engine`, DF-38).

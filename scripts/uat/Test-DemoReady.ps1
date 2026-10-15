@@ -20,7 +20,8 @@
          WARN on 1 to 5, FAIL on more.
       4. Generation provider (GET /api/engine/settings): the effective provider is Fake (DF-38).
       5. White noise (GET /api/staff/noise) is `off`, and media marking (GET /api/staff/chrome-settings,
-         `watermarkEnabled`) is on.
+         `watermarkEnabled`) is on. Noise posts newer than the seed anchor cannot be flagged: GET /api/feed has no
+         origin field, so that line is a SKIP that reports the noise post count and the last one's scenario time.
       6. The pack's exercise pins (p09 and p10) are pinned for everyone (GET /api/feed/pinned, as staff), matched
          by the pack post's text.
       7. Run sheet (GET /api/injects): every seeded item (a pack item without an msel ref) is there and pending,
@@ -428,6 +429,11 @@ function Test-NoiseAndWatermark {
         $level = Get-PrintableText $noise.Json['level'] -Max 20
         if ($level -ceq 'off') { Add-ReadyResult 5 'White noise' PASS "expected off; got off (pool $([int] $noise.Json['poolSize']))" }
         else { Add-ReadyResult 5 'White noise' FAIL "expected off; got $level. Turn it off with the console's knob (turn it up on stage)" }
+        # Noise posts newer than the seed anchor would sit in the opening feed, but GET /api/feed has no origin field
+        # (only the write route's StaffPostDto does), so they cannot be picked out. Say so, with what the noise state knows.
+        $lastAt = ConvertTo-Instant $noise.Json['lastPostedAt']
+        $last = if ($lastAt) { "the last at scenario time $($lastAt.UtcDateTime.ToString('yyyy-MM-dd HH:mm')) UTC" } else { 'none yet' }
+        Add-ReadyResult 5 'Noise posts in the opening feed' SKIP "expected none newer than the seed anchor; the feed does not expose a post's origin, so they cannot be picked out. White noise has published $([int] $noise.Json['postedCount']) post(s), $last"
     }
     $chrome = Invoke-PulseApi -BaseUrl $BaseUrl -Method GET -Path '/api/staff/chrome-settings' -Token $Token
     if ($chrome.Status -ne 200 -or $chrome.Json -isnot [System.Collections.IDictionary]) { Add-ReadyResult 5 'Media marking' FAIL "expected GET /api/staff/chrome-settings 200; got $($chrome.Status)"; return }

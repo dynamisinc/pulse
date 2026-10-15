@@ -38,6 +38,10 @@ BeforeAll {
             AfterRestart = [System.Collections.Generic.Queue[string]]::new()   # tiers the polls read after the restart
             MarkStatus  = 200
             ReadyCodes  = [System.Collections.Generic.Queue[int]]::new()   # /health/ready answers, then 200
+            NoiseLevel  = 'off'
+            NoisePutStatus = 200
+            NoiseCounts = [System.Collections.Generic.Queue[int]]::new()  # postedCount per GET /api/staff/noise, then the last
+            NoiseLast   = 0
             Restarted   = $false
             Codes       = @{}                     # script name (or 'Reset-DemoState.ps1 -Restart') -> exit code
             Throws      = @{}                     # script name -> message it throws
@@ -80,6 +84,17 @@ BeforeAll {
                 if (-not $authorized) { return & $reply 401 $null }
                 if ($fake.MarkStatus -eq 200) { $fake.Tier = ($text | ConvertFrom-Json).tier }
                 return & $reply $fake.MarkStatus ([ordered]@{ tier = $fake.Tier; clockFrozen = $false })
+            }
+            'PUT /api/staff/noise' {
+                if (-not $authorized) { return & $reply 401 $null }
+                if ($fake.NoisePutStatus -ne 200) { return & $reply $fake.NoisePutStatus $null }
+                $fake.NoiseLevel = ($text | ConvertFrom-Json).level
+                return & $reply 200 ([ordered]@{ level = $fake.NoiseLevel; postedCount = $fake.NoiseLast; running = $false })
+            }
+            'GET /api/staff/noise' {
+                if (-not $authorized) { return & $reply 401 $null }
+                if ($fake.NoiseCounts.Count) { $fake.NoiseLast = $fake.NoiseCounts.Dequeue() }
+                return & $reply 200 ([ordered]@{ level = $fake.NoiseLevel; postedCount = $fake.NoiseLast; running = ($fake.NoiseLevel -ne 'off') })
             }
             default { return & $reply 404 $null }
         }
@@ -145,7 +160,7 @@ Describe 'Invoke-DemoReset.ps1' {
 
         It 'the runtime reset signs in as staff for the host''s exercise and signs out before step 2' {
             Invoke-Reset | Out-Null
-            $login = $global:ResetFake.Calls | Where-Object Path -eq '/api/auth/staff/login'
+            $login = $global:ResetFake.Calls | Where-Object Path -eq '/api/auth/staff/login' | Select-Object -First 1
             ($login.Body | ConvertFrom-Json).exerciseId | Should -Be $global:ResetFake.ExerciseId
             $logoutAt = $global:ResetFake.Log.IndexOf('POST /api/auth/logout')
             $logoutAt | Should -BeGreaterThan $global:ResetFake.Log.IndexOf('POST /api/steering/runtime-state/reset')
@@ -231,13 +246,73 @@ Describe 'Invoke-DemoReset.ps1' {
         }
     }
 
+    Describe 'White noise goes off and settles before Clear-DemoContent picks its cutoff (PR #548 review)' {
+        It 'a reset that starts with noise ON: PUT off, checked, polled until postedCount is still for 10 s, all before step 2' {
+            $global:ResetFake.NoiseLevel = 'low'
+            $global:ResetFake.NoiseLast = 5
+            5, 6, 6, 6 | ForEach-Object { $global:ResetFake.NoiseCounts.Enqueue($_) }   # one post lands while settling
+            $run = Invoke-Reset
+            $run.Code | Should -Be 0
+            $global:ResetFake.NoiseLevel | Should -Be 'off'
+            $put = @($global:ResetFake.Calls | Where-Object { $_.Method -eq 'PUT' -and $_.Path -eq '/api/staff/noise' })
+            $put.Count | Should -Be 1
+            ($put[0].Body | ConvertFrom-Json).level | Should -Be 'off'
+            $log = $global:ResetFake.Log
+            $log.IndexOf('PUT /api/staff/noise') | Should -BeGreaterThan $log.IndexOf('POST /api/steering/runtime-state/reset')
+            $log.LastIndexOf('GET /api/staff/noise') | Should -BeLessThan $log.IndexOf('script Reset-DemoState.ps1')
+            $log.LastIndexOf('GET /api/staff/noise') | Should -BeLessThan $log.IndexOf('script Clear-DemoContent.ps1')
+            # Read after the PUT (5), then 6 (moved), 6, 6: still for 10 s after three 5-second waits.
+            @($log | Where-Object { $_ -eq 'GET /api/staff/noise' }).Count | Should -Be 4
+            Should -Invoke Start-Sleep -ParameterFilter { $Seconds -eq 5 } -Times 3 -Exactly
+            $run.Text | Should -Match '\[PASS\] 1b\. White noise off — level off; postedCount still at 6 for 10 s \(1 landed while settling\)'
+        }
+
+        It 'the noise-off write failing (<Status>) stops the run before step 2, and the engine is paused' -ForEach @(@{ Status = 500 }, @{ Status = 403 }) {
+            $global:ResetFake.NoiseLevel = 'low'
+            $global:ResetFake.NoisePutStatus = $Status
+            $run = Invoke-Reset
+            $run.Code | Should -Be 1
+            $global:ResetFake.Scripts | Should -BeNullOrEmpty
+            $run.Text | Should -Match "\[FAIL\] 1b\. White noise off — PUT /api/staff/noise \{ level: off \} -> $Status"
+            $run.Text | Should -Match 'STOPPED at step 1b\. White noise off\. Not run: 2\. Engine re-seed, 3\. Clear old content, 4\. Seed the demo, 5\. Pre-flight'
+            @($global:ResetFake.Calls | Where-Object { $_.Method -eq 'POST' -and $_.Path -eq '/api/steering/pause-tier' }).Count | Should -Be 1
+            $run.Text | Should -Match 'Pause tier after the failure: engine'
+        }
+
+        It 'noise that reads back on after the PUT stops the run' {
+            Mock Invoke-WebRequest {
+                $r = Invoke-FakeWeb -Uri $Uri -Method $Method -Headers $Headers -Body $Body
+                if ("$Method" -eq 'Get' -and ([Uri] [string] $Uri).AbsolutePath -eq '/api/staff/noise') { $global:ResetFake.NoiseLevel = 'low'; return [pscustomobject]@{ StatusCode = 200; Content = '{"level":"low","postedCount":0}'; Headers = @{} } }
+                $r
+            }
+            $run = Invoke-Reset
+            $run.Code | Should -Be 1
+            $run.Text | Should -Match "level 'low' \(expected off\)"
+            $global:ResetFake.Scripts | Should -BeNullOrEmpty
+        }
+
+        It 'noise that never settles (postedCount keeps moving for 90 s) stops the run' {
+            1..40 | ForEach-Object { $global:ResetFake.NoiseCounts.Enqueue($_) }
+            $run = Invoke-Reset
+            $run.Code | Should -Be 1
+            $run.Text | Should -Match 'postedCount kept moving for 90 s'
+            $global:ResetFake.Scripts | Should -BeNullOrEmpty
+        }
+
+        It '-WhatIf only describes it' {
+            $run = Invoke-Reset -Extra @{ WhatIf = $true }
+            $run.Text | Should -Match 'WhatIf: would then PUT /api/staff/noise'
+            $global:ResetFake.Calls | Should -BeNullOrEmpty
+        }
+    }
+
     Describe 'Step 1 waits for the API and serverless SQL first (M-2)' {
         It 'polls /health then /health/ready before the first call, and goes on once SQL answers' {
             503, 503 | ForEach-Object { $global:ResetFake.ReadyCodes.Enqueue($_) }
             $run = Invoke-Reset
             $run.Code | Should -Be 0
             @($global:ResetFake.Log | Select-Object -First 5) | Should -Be @('GET /health', 'GET /health/ready', 'GET /health/ready', 'GET /health/ready', 'GET /api/exercise-context')
-            Should -Invoke Start-Sleep -Times 2 -Exactly
+            Should -Invoke Start-Sleep -ParameterFilter { $Seconds -eq 10 } -Times 2 -Exactly
         }
 
         It 'SQL never waking fails step 1 before any sign-in or reset' {
@@ -270,7 +345,6 @@ Describe 'Invoke-DemoReset.ps1' {
             )
             (($global:ResetFake.Calls | Where-Object { $_.Method -eq 'POST' -and $_.Path -eq '/api/steering/pause-tier' }).Body | ConvertFrom-Json).tier | Should -Be 'engine'
             # Four polls (engine, engine, running, running): three waits between them, never a fixed 8 minutes.
-            Should -Invoke Start-Sleep -Times 3 -Exactly
             Should -Invoke Start-Sleep -ParameterFilter { $Seconds -eq 20 } -Times 3 -Exactly
             $run.Text | Should -Match 'restart fallback: the new process is serving after ~1 min'
         }
@@ -299,7 +373,7 @@ Describe 'Invoke-DemoReset.ps1' {
         It 'the new process never answering within -RestartTimeoutMinutes fails step 1' {
             $run = Invoke-Reset -Extra @{ RestartTimeoutMinutes = 2; PollSeconds = 60 }
             $run.Code | Should -Be 1
-            Should -Invoke Start-Sleep -Times 1 -Exactly
+            Should -Invoke Start-Sleep -ParameterFilter { $Seconds -eq 60 } -Times 1 -Exactly
             $run.Text | Should -Match 'did not answer within 2 min'
             Get-ScriptNames | Should -Be @('Reset-DemoState.ps1 -Restart')
         }
