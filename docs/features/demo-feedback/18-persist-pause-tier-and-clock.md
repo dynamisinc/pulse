@@ -58,6 +58,16 @@ through downtime; the tier comes back exactly as set.
 - [ ] `docs/features/world-steering/` notes and the `PauseTierRegistry` XML docs no longer say "an App Service
       restart clears the tiers".
 
+### From the 10/15 reviews (story 17 Gate-1, PR #548 Copilot)
+
+- [ ] `GET /api/steering/runtime-state/reset` answers **405** (the route is POST-only), with a test: story 27's
+      `Test-FreezeResume.ps1` detects story 18 by that 405 (404 = pre-18).
+- [ ] The reset's hard delete of the `ExerciseRuntimeStates` row is documented as deliberate: machine state, not
+      in-fiction content or AAR evidence, so XC-010 retention does not apply (17 Gate-1 L-2).
+- [ ] The rehydrator's cross-exercise read uses the single documented `IgnoreQueryFilters` reader and is read-only;
+      all writes go through the scoped path (17 Gate-1 L-4). The all-null-or-all-set clock rule is enforced in code
+      (17 Gate-1 L-3).
+
 ### Cross-cutting
 
 - [ ] Isolation: restore and reset for exercise A never change B (test with two exercises).
