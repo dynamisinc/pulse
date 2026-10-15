@@ -96,6 +96,7 @@ import { useTransientMessage } from '../../hooks/useTransientMessage'
 import { usePin } from '../../pinned/usePin'
 import { viewerEngagement } from '../../pinned/pinEvents'
 import { formatMagnitude, spokenMagnitude } from '../../services/audience'
+import { ParticipantTooltip } from '../ParticipantTooltip'
 import type { PostCardVariant, PostView } from './types'
 import styles from './PostActions.module.css'
 
@@ -256,37 +257,48 @@ function PostActionsRow({ post, variant, onReply }: PostActionsProps) {
               : `${action.label}, ${spoken}`
 
           return (
-            <button
-              key={action.key}
-              type="button"
-              className={
-                isOn ? `${styles.actionButton} ${styles.actionButtonActive}` : styles.actionButton
-              }
-              data-action={action.key}
-              aria-label={label}
-              aria-pressed={action.pressed}
-              onClick={action.onClick}
-            >
-              <FontAwesomeIcon icon={action.icon} aria-hidden="true" className={styles.actionIcon} />
-              <span className={styles.actionCount}>{compact}</span>
-            </button>
+            <ParticipantTooltip key={action.key} label={action.label}>
+              <button
+                type="button"
+                className={
+                  isOn ? `${styles.actionButton} ${styles.actionButtonActive}` : styles.actionButton
+                }
+                data-action={action.key}
+                aria-label={label}
+                aria-pressed={action.pressed}
+                onClick={action.onClick}
+              >
+                <FontAwesomeIcon
+                  icon={action.icon}
+                  aria-hidden="true"
+                  className={styles.actionIcon}
+                />
+                <span className={styles.actionCount}>{compact}</span>
+              </button>
+            </ParticipantTooltip>
           )
         })}
         {canPin && (
-          <button
-            type="button"
-            className={
-              pin.pinned
-                ? `${styles.actionButton} ${styles.actionButtonActive}`
-                : styles.actionButton
-            }
-            data-action="pin"
-            aria-label="Pin"
-            aria-pressed={pin.pinned}
-            onClick={pin.toggle}
-          >
-            <FontAwesomeIcon icon={faThumbtack} aria-hidden="true" className={styles.actionIcon} />
-          </button>
+          <ParticipantTooltip label="Pin">
+            <button
+              type="button"
+              className={
+                pin.pinned
+                  ? `${styles.actionButton} ${styles.actionButtonActive}`
+                  : styles.actionButton
+              }
+              data-action="pin"
+              aria-label="Pin"
+              aria-pressed={pin.pinned}
+              onClick={pin.toggle}
+            >
+              <FontAwesomeIcon
+                icon={faThumbtack}
+                aria-hidden="true"
+                className={styles.actionIcon}
+              />
+            </button>
+          </ParticipantTooltip>
         )}
       </div>
       {/* Always mounted while a like / repost / pin control exists (only those can fail), so
