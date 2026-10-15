@@ -57,16 +57,16 @@ media on the server.
 | 03 | [MSEL import into the run sheet (Cadence layout)](03-msel-import.md) | backend | Must | 1 | 01, S-1 | Complete | #499 |
 | 04 | [Pins: personal and exercise-wide](04-pins-backend.md) | backend | Must | 1 | 01 | Complete | #500 |
 | 05 | [White-noise pool and pacer](05-white-noise-backend.md) | backend | Must | 1 | 01 | Complete | #501 |
-| 06 | [EXERCISE bands on all participant media](06-media-watermark-bands.md) | frontend | Must | 2 | contract | In Review | #502 |
-| 07 | [Pinned tab and Pin action (participant)](07-pinned-tab.md) | frontend | Must | 2 | contract | In Review | #503 |
-| 08 | [Live world: pin for everyone and unread highlighting](08-live-world-pin-unread.md) | frontend | Must | 2 | contract | In Review | #504 |
-| 09 | [Console: white-noise knob and Export](09-console-noise-export.md) | frontend | Must | 2 | contract | In Review | #505 |
-| 10 | [Run sheet: import from Excel, and the #493 form fix](10-run-sheet-import.md) | frontend | Must | 2 | contract | In Review | #506 |
-| 11 | [Read-only console for evaluators](11-read-only-console.md) | frontend | Must | 3 | 08, 09, 10, 12b | Not Started | #507 |
-| 12 | [Emoji picker in both composers](12-emoji-picker.md) | frontend | Should | 2 / 3 (12b) | none | In Progress | #508 |
-| 13 | [Participant polish: tooltips (#494) and centered frame (#495)](13-participant-polish.md) | frontend | Should | 3 | 06, 07 | Not Started | #509 |
-| 14 | [Live engagement refresh (counts, notifications, repost notification)](14-live-engagement-refresh.md) | fullstack | Must | 3 | 07 | Not Started | #515 |
-| 15 | [Exercise management for controllers, and a "not allowed" page](15-exercise-management-access.md) | fullstack | Must | 3 | seam S-4 | Not Started | #516 |
+| 06 | [EXERCISE bands on all participant media](06-media-watermark-bands.md) | frontend | Must | 2 | contract | Complete | #502 |
+| 07 | [Pinned tab and Pin action (participant)](07-pinned-tab.md) | frontend | Must | 2 | contract | Complete | #503 |
+| 08 | [Live world: pin for everyone and unread highlighting](08-live-world-pin-unread.md) | frontend | Must | 2 | contract | Complete | #504 |
+| 09 | [Console: white-noise knob and Export](09-console-noise-export.md) | frontend | Must | 2 | contract | Complete | #505 |
+| 10 | [Run sheet: import from Excel, and the #493 form fix](10-run-sheet-import.md) | frontend | Must | 2 | contract | Complete | #506 |
+| 11 | [Read-only console for evaluators](11-read-only-console.md) | frontend | Must | 3 | 08, 09, 10, 12b | In Review | #507 |
+| 12 | [Emoji picker in both composers](12-emoji-picker.md) | frontend | Should | 2 / 3 (12b) | none | Complete | #508 |
+| 13 | [Participant polish: tooltips (#494) and centered frame (#495)](13-participant-polish.md) | frontend | Should | 3 | 06, 07 | In Review | #509 |
+| 14 | [Live engagement refresh (counts, notifications, repost notification)](14-live-engagement-refresh.md) | fullstack | Must | 3 | 07 | In Review | #515 |
+| 15 | [Exercise management for controllers, and a "not allowed" page](15-exercise-management-access.md) | fullstack | Must | 3 | seam S-4 | In Review | #516 |
 | S1 | [Seed script: noise pool, exercise pins, watermark on](S1-seed-script-update.md) | script | Must | 3 | 04, 05 deployed | Not Started | #510 |
 | C | [Content: burned-in media, Kestrel MSEL file, noise pool](C-content-tasks.md) | content | Must | any | #491 | Not Started | #511 |
 

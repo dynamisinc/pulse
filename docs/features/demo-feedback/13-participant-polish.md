@@ -1,6 +1,6 @@
 # Story: Participant polish: tooltips (#494) and centered frame (#495)
 
-**Feature:** Demo feedback cut (10/20)  ·  **Phase:** 1  ·  **Status:** Not Started
+**Feature:** Demo feedback cut (10/20)  ·  **Phase:** 1  ·  **Status:** In Review
 **Requirements:** NFR-001, D1-005 / D1-013 (revisited)  ·  **Issue:** #509 (closes #494, #495)
 **Stack:** frontend  ·  **World:** participant  ·  **Review:** Tier-1  ·  **Priority:** Should  ·  **Wave:** 3  ·  **Effort:** S
 

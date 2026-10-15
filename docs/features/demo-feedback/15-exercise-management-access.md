@@ -1,6 +1,6 @@
 # Story: Exercise management for controllers, and a "not allowed" page
 
-**Feature:** Demo feedback cut (10/20)  ·  **Phase:** 1  ·  **Status:** Not Started
+**Feature:** Demo feedback cut (10/20)  ·  **Phase:** 1  ·  **Status:** In Review
 **Requirements:** COR-074, COR-075 (role set widened)  ·  **Decisions:** DF-20  ·  **Issue:** #516
 **Stack:** fullstack  ·  **World:** staff  ·  **Review:** Tier-2 (authorization change)  ·  **Priority:** Must  ·  **Wave:** 3  ·  **Effort:** S
 
