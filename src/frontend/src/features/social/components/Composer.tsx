@@ -61,13 +61,33 @@
  * CONTENT SECURITY (NFR-004): publishing sanitizes the body and every alt (in the
  * hook; the server sanitizes again). Nothing here uses `dangerouslySetInnerHTML`.
  *
+ * EMOJI (demo-feedback story 12a, DF-15). The tools row carries a face-smile button that
+ * opens the shared `core/emoji` picker IN FLOW below the toolbar (so the modal's
+ * `overflow: hidden` never clips it). A chosen emoji is spliced in at the text area's
+ * caret, or over its selection, through `compose.setText` - so it counts toward the
+ * limit like any typed character - and focus returns to the text area just past it.
+ * Escape closes the picker and returns focus to the text area without closing a
+ * surrounding dialog. The picker is skinned from this form's `--pc-*` tokens
+ * (`.emojiPicker` in `Composer.module.css`); no network, no images (native emoji).
+ * Because it lives in `ComposerForm`, Composer, ComposeModal and ReplyComposer all
+ * get it.
+ *
  * SCOPE: inline composer only — the MODAL wrapper is F1's. Author-identity
  * rendering, the "Posting as" org chip, and quote-post stay out of scope.
  */
 
-import { useEffect, useId, useRef, type FormEvent, type ReactNode, type Ref } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useRef,
+  type FormEvent,
+  type ReactNode,
+  type Ref,
+} from 'react'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faTriangleExclamation } from '@fortawesome/free-solid-svg-icons'
+import { EmojiPicker, EmojiPickerButton, useEmojiPicker } from '@/core/emoji'
 import {
   useComposePost,
   type UseComposePostOptions,
@@ -83,6 +103,12 @@ export interface ComposerProps {
    * publish (live mode too), so the host can react — close a modal, refresh a
    * list. The composer never touches the feed itself. */
   onPosted?: UseComposePostOptions['onPosted']
+}
+
+/** Point an optional caller ref (object or callback) at `node`. */
+function assignRef<T>(ref: Ref<T> | undefined, node: T | null) {
+  if (typeof ref === 'function') ref(node)
+  else if (ref !== null && ref !== undefined) ref.current = node
 }
 
 /** Ring geometry (a 30px SVG box; the arc depletes from the top, clockwise). */
@@ -168,6 +194,19 @@ export function ComposerForm({
   const formRef = useRef<HTMLFormElement>(null)
   const postButtonRef = useRef<HTMLButtonElement>(null)
   const attachButtonRef = useRef<HTMLButtonElement>(null)
+  // The text area, for the emoji picker's caret insertion; the caller's `inputRef`
+  // (the thread focuses the reply box through it) is kept pointed at it too.
+  const textRef = useRef<HTMLTextAreaElement | null>(null)
+  const setTextRef = useCallback((node: HTMLTextAreaElement | null) => {
+    textRef.current = node
+    assignRef(inputRef, node)
+  }, [inputRef])
+  const emoji = useEmojiPicker({
+    targetRef: textRef,
+    value: compose.text,
+    onChange: compose.setText,
+    disabled: compose.isPublishing,
+  })
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -208,7 +247,7 @@ export function ComposerForm({
       {header}
 
       <textarea
-        ref={inputRef}
+        ref={setTextRef}
         className={styles.input}
         value={compose.text}
         onChange={e => compose.setText(e.target.value)}
@@ -260,6 +299,7 @@ export function ComposerForm({
             onPick={compose.attachFiles}
             disabled={compose.isPublishing}
           />
+          <EmojiPickerButton {...emoji.buttonProps} className={styles.emojiButton} />
         </div>
 
         <div className={styles.meta}>
@@ -284,6 +324,8 @@ export function ComposerForm({
           </button>
         </div>
       </div>
+
+      {emoji.isOpen && <EmojiPicker {...emoji.pickerProps} className={styles.emojiPicker} />}
 
       {/* Why Post is disabled, in words, when the cause is something the author
           can fix in the tray (uploading / failed / no description). */}

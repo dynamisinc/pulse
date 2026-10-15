@@ -248,8 +248,9 @@ describe('ComposeModal', () => {
       // Post is the last control in DOM order and is now enabled; mark it unrendered.
       const post = within(dialog).getByRole('button', { name: 'Post' })
       post.setAttribute('data-test-unrendered', '')
-      const addPhotos = within(dialog).getByRole('button', { name: /^Add photos/ })
-      addPhotos.focus()
+      // The emoji button (story 12a) is the last rendered control before Post.
+      const addEmoji = within(dialog).getByRole('button', { name: 'Add emoji' })
+      addEmoji.focus()
 
       await user.tab()
 
