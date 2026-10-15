@@ -274,6 +274,50 @@ describe('PostActions — Pin toggle (optimistic + rollback)', () => {
   })
 })
 
+describe('PostActions — a session reset while a pin write is in flight', () => {
+  it('drops the late answer: nothing confirmed for the next identity, nothing announced', async () => {
+    const user = userEvent.setup()
+    const write = deferred<ReturnType<typeof pinBody>>()
+    vi.spyOn(api, 'put').mockImplementation(() => write.promise as never)
+    await renderActions(<PostActions post={buildPost()} variant="full" />)
+
+    await user.click(screen.getByRole('button', { name: 'Pin' }))
+    expect(screen.getByRole('button', { name: 'Pin' })).toHaveAttribute('aria-pressed', 'true')
+
+    // Sign-out / sign-in lands while the PUT is on the wire (an EMPTY store: the generation
+    // must still move).
+    act(() => pinState.reset())
+
+    await act(async () => {
+      write.resolve(pinBody('post-pin-1', true))
+      await write.promise
+    })
+
+    // The previous identity's answer does not repopulate the shared store or reach the tab ...
+    expect(pinState.get('post-pin-1')).toBeUndefined()
+    expect(events).toEqual([])
+    // ... and the optimistic value is still dropped: the card shows the post's own flag.
+    expect(screen.getByRole('button', { name: 'Pin' })).toHaveAttribute('aria-pressed', 'false')
+  })
+
+  it('control: with no reset, the same answer is recorded and announced', async () => {
+    const user = userEvent.setup()
+    const write = deferred<ReturnType<typeof pinBody>>()
+    vi.spyOn(api, 'put').mockImplementation(() => write.promise as never)
+    await renderActions(<PostActions post={buildPost()} variant="full" />)
+
+    await user.click(screen.getByRole('button', { name: 'Pin' }))
+    await act(async () => {
+      write.resolve(pinBody('post-pin-1', true))
+      await write.promise
+    })
+
+    expect(pinState.get('post-pin-1')).toBe(true)
+    expect(events).toEqual([{ postId: 'post-pin-1', kind: 'pin', active: true }])
+    expect(screen.getByRole('button', { name: 'Pin' })).toHaveAttribute('aria-pressed', 'true')
+  })
+})
+
 describe('PostActions — the Pinned tab hears likes too', () => {
   it('notifies once a like settles', async () => {
     const user = userEvent.setup()

@@ -98,12 +98,16 @@ export function usePin(options: UsePinOptions): UsePinResult {
     setPending(true)
     clear()
 
+    // A sign-out or sign-in while the write is in flight resets the shared store; the late
+    // answer then belongs to the previous identity and must not repopulate it.
+    const generation = pinState.generation()
     const write = next ? putPin(postId) : deletePin(postId)
     write
       .then(
         state => {
-          pinState.set(postId, state.active)
           setOptimistic(undefined)
+          if (pinState.generation() !== generation) return
+          pinState.set(postId, state.active)
           viewerEngagement.notify({ postId, kind: 'pin', active: state.active })
         },
         () => {

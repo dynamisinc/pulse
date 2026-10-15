@@ -472,3 +472,44 @@ describe('pin generations (story 08 Gate-1 M1): a stale read never reverts a fre
     expect(result.current.rows[0]?.pinnedForAll).toBe(false)
   })
 })
+
+describe('a pin change while an arrival waits in the batch queue', () => {
+  it('pinned before the flush: the queued arrival is inserted pinned for everyone', async () => {
+    const { result } = await mount()
+
+    act(() => source.emit(view('n1', { scenarioTime: at(5) })))
+    act(() => result.current.setPinned('n1', true))
+    expect(result.current.rows).toEqual([]) // still in the 150 ms queue
+
+    await advance(ARRIVAL_BATCH_MS)
+    expect(ids(result.current.rows)).toEqual(['n1'])
+    expect(result.current.rows[0]?.pinnedForAll).toBe(true)
+  })
+
+  it('unpinned before the flush: an arrival that came in pinned is inserted unpinned', async () => {
+    const { result } = await mount()
+
+    act(() => source.emit(view('n1', { scenarioTime: at(5), pinnedForAll: true })))
+    act(() => result.current.setPinned('n1', false))
+    expect(result.current.rows).toEqual([])
+
+    await advance(ARRIVAL_BATCH_MS)
+    expect(ids(result.current.rows)).toEqual(['n1'])
+    expect(result.current.rows[0]?.pinnedForAll).toBe(false)
+    expect(result.current.rows[0]?.view.pinnedForAll).toBeUndefined()
+  })
+
+  it('leaves other queued arrivals as they came', async () => {
+    const { result } = await mount()
+
+    act(() => {
+      source.emit(view('n1', { scenarioTime: at(5), pinnedForAll: true }))
+      source.emit(view('n2', { scenarioTime: at(6) }))
+    })
+    act(() => result.current.setPinned('n2', true))
+
+    await advance(ARRIVAL_BATCH_MS)
+    expect(ids(result.current.rows)).toEqual(['n2', 'n1'])
+    expect(result.current.rows.map(row => row.pinnedForAll)).toEqual([true, true])
+  })
+})

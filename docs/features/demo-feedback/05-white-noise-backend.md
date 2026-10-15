@@ -1,6 +1,6 @@
 # Story: White-noise pool and pacer
 
-**Feature:** Demo feedback cut (10/20)  ·  **Phase:** 1  ·  **Status:** In Review
+**Feature:** Demo feedback cut (10/20)  ·  **Phase:** 1  ·  **Status:** Complete
 **Requirements:** ambient chatter (lite, non-AI slice of #168)  ·  **Decisions:** DF-12, DF-13  ·  **Issue:** #501
 **Stack:** backend  ·  **Review:** Tier-1  ·  **Priority:** Must  ·  **Wave:** 1  ·  **Effort:** M
 

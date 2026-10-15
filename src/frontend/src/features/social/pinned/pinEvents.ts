@@ -60,6 +60,9 @@ export const viewerEngagement = {
 
 let confirmedPins = new Map<string, boolean>()
 const pinListeners = new Set<() => void>()
+// Bumped on EVERY reset (even an empty one), so a write that started under an earlier
+// identity can tell its answer is stale and must not repopulate the next viewer's state.
+let resetGeneration = 0
 
 /** The viewer's confirmed personal pins this session (see the module header). */
 export const pinState = {
@@ -80,8 +83,17 @@ export const pinState = {
       pinListeners.delete(listener)
     }
   },
-  /** Forgets everything (session reset; tests). */
+  /**
+   * The current reset generation. Capture it before a write; if it changed by the time the
+   * write answers, a session reset happened in between and the answer belongs to the
+   * previous identity (discard it).
+   */
+  generation(): number {
+    return resetGeneration
+  },
+  /** Forgets everything (session reset; tests). Always advances the generation. */
   reset(): void {
+    resetGeneration += 1
     if (confirmedPins.size === 0) return
     confirmedPins = new Map()
     for (const listener of [...pinListeners]) listener()
