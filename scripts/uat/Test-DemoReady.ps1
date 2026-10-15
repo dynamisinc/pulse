@@ -640,7 +640,7 @@ function Read-DemoPack {
         if (-not $Path) { throw 'no -PackPath given' }
         if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { throw "no file at '$Path'" }
         $text = Get-Content -LiteralPath $Path -Raw -ErrorAction Stop
-        try { $pack = $text | ConvertFrom-Json -AsHashtable -ErrorAction Stop } catch { throw "'$Path' is not valid JSON" }
+        try { $pack = ConvertFrom-Json -InputObject $text -AsHashtable -NoEnumerate -ErrorAction Stop } catch { throw "'$Path' is not valid JSON" }
         if ($pack -isnot [System.Collections.IDictionary]) { throw "'$Path' is not a demo pack (not a JSON object)" }
         return $pack
     }

@@ -383,6 +383,7 @@ Describe 'Test-DemoReady.ps1' {
             @{ Name = 'missing file'; Content = $null; Reason = 'no file at' }
             @{ Name = 'invalid JSON'; Content = '{ "pins": [ "p09", '; Reason = 'is not valid JSON' }
             @{ Name = 'not an object'; Content = '[1, 2]'; Reason = 'not a JSON object' }
+            @{ Name = 'single-object array'; Content = '[{}]'; Reason = 'not a JSON object' }
         ) {
             $path = Join-Path $TestDrive "pack-$([guid]::NewGuid().ToString('N')).json"
             if ($null -ne $Content) { Set-Content -LiteralPath $path -Value $Content }
