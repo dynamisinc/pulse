@@ -18,20 +18,28 @@ using Pulse.WebApi.Features.Injects.Import;
 /// <remarks>
 /// <para>
 /// <b>Create, update or leave alone (DF-10).</b> A candidate whose <c>Inject #</c> matches no live item's
-/// <see cref="InjectItem.ExternalRef"/> (case-insensitive, as the filtered unique index compares it) is created, appended
-/// after the existing items in file order. One that matches an item that differs from the file is updated while the item
-/// is editable (<see cref="InjectTransitions.WhyNotEditable"/>: pending, held or failed, nothing in flight) and left
+/// <see cref="InjectItem.ExternalRef"/> (case-insensitive, as the filtered unique index compares it) is created. One that
+/// matches an item that differs from the file (alt text and engagement baseline included, story 14) is updated while the
+/// item is editable (<see cref="InjectTransitions.WhyNotEditable"/>: pending, held or failed, nothing in flight) and left
 /// <c>unchanged</c> with the reason otherwise ("already fired; not changed"). A deleted item's <c>ExternalRef</c> is free
 /// again, because only live items are matched.
 /// </para>
 /// <para>
-/// <b>Concurrency.</b> Creates bump the queue-membership token once; every update bumps its item's version. A save that
-/// loses to another writer (a console edit, a reorder, a fire, a second import inserting the same <c>Inject #</c>, or a
-/// deadlock victim) is rolled back whole and the import is re-planned against the run sheet as it is now, up to
-/// <see cref="MaxQueueAttempts"/> times; then it is a <c>409</c> and nothing is written.
+/// <b>Order (DF-18, story 14).</b> Created items are placed by planned minute among the pending items
+/// (<see cref="ImportQueuePlacement"/>) and the whole order is written with <see cref="ReorderAsync"/>'s own mechanics:
+/// the queue token read before the membership, <c>Order</c> 1..n via <c>WriteQueueOrder</c>, no item version bumped
+/// for a shift, and one queue-token bump. Updated items keep their places (judged by their stored minute). Nothing is
+/// pushed: open consoles pick the new order up on the run sheet's 3-second poll, exactly as they do after a reorder.
 /// </para>
 /// <para>
-/// <b>Dry run.</b> The same plan, read without tracking; the only write is the <c>injects.imported</c> event.
+/// <b>Concurrency.</b> Creates bump the queue-membership token once; every update bumps its item's version. A save that
+/// loses to another writer (a console edit, a create, a delete, a reorder, a fire, a second import inserting the same
+/// <c>Inject #</c>, or a deadlock victim) is rolled back whole and the import is re-planned against the run sheet as it
+/// is now, up to <see cref="MaxQueueAttempts"/> times; then it is a <c>409</c> and nothing is written.
+/// </para>
+/// <para>
+/// <b>Dry run.</b> The same plan, read without tracking and with nothing computed about order; the only write is the
+/// <c>injects.imported</c> event.
 /// </para>
 /// </remarks>
 public sealed partial class InjectQueueService
@@ -104,6 +112,10 @@ public sealed partial class InjectQueueService
         var facts = await ReadExerciseFactsAsync(exerciseId, cancellationToken);
         var time = TimeFor(exerciseId, facts);
 
+        // ReorderAsync's rule (DF-18 rewrites the order): read the queue token BEFORE the membership, so a create or
+        // delete that lands after this read fails the save (and the import is re-planned) instead of being ordered around.
+        // It is bumped only if the import creates something; a dry run reads nothing about order.
+        var queueToken = dryRun ? null : await ReadQueueTokenAsync(exerciseId, cancellationToken);
         var existing = await LoadImportedItemsAsync(exerciseId, track: !dryRun, cancellationToken);
         var byRef = new Dictionary<string, InjectItem>(StringComparer.OrdinalIgnoreCase);
         foreach (var item in existing)
@@ -114,8 +126,7 @@ public sealed partial class InjectQueueService
         var candidates = plan.Rows.Where(row => row.Candidate is not null).Select(row => row.Candidate!).ToList();
         var baseFacts = await ReadImportReferenceFactsAsync(candidates, existing, exerciseId, facts, cancellationToken);
 
-        var nextOrder = (await LiveItems(exerciseId).MaxAsync(row => (int?)row.Order, cancellationToken) ?? 0) + 1;
-        var created = 0;
+        var createdItems = new List<InjectItem>();
         var reports = new List<InjectImportRowDto>(plan.Rows.Count);
 
         foreach (var row in plan.Rows)
@@ -150,15 +161,14 @@ public sealed partial class InjectQueueService
                         CreatedByHumanId = caller.StaffUserId,
                         CreatedAt = time.WallClock,
                         UpdatedAt = time.WallClock,
-                        Order = nextOrder++,
                         ExternalRef = request.ExternalRef,
                     };
                     ApplyItemFields(newItem, parse.Draft);
                     ApplyChildren(newItem, parse.Draft, time.WallClock);
                     _dbContext.InjectItems.Add(newItem);
+                    createdItems.Add(newItem); // its Order is set by the placement below
                 }
 
-                created++;
                 reports.Add(row.ToReport(InjectImportRowStatuses.Created, null));
                 continue;
             }
@@ -168,9 +178,26 @@ public sealed partial class InjectQueueService
 
         var result = InjectImportResultDto.From(dryRun, plan.SocialRows, reports);
 
-        if (!dryRun && created > 0)
+        if (createdItems.Count > 0)
         {
-            await BumpQueueAsync(exerciseId, cancellationToken);
+            // DF-18: place the created items by planned minute among the pending items, then write the order exactly as
+            // ReorderAsync does (Order 1..n, no item version bumped) with ONE queue-token bump, all in this one save.
+            // The read is this exercise's live items only (the central filter plus the explicit ExerciseId predicate),
+            // tracked so the new numbers are saved. An item this import updated keeps its place and is judged by its
+            // STORED minute (EF's original value); a created item by the minute it is created with.
+            var queue = await LiveItems(exerciseId).ToListAsync(cancellationToken);
+            var placed = ImportQueuePlacement.Place(
+                queue,
+                createdItems,
+                item =>
+                {
+                    var entry = _dbContext.Entry(item);
+                    return entry.State == EntityState.Added
+                        ? item.PlannedMinute
+                        : entry.Property(row => row.PlannedMinute).OriginalValue;
+                });
+            WriteQueueOrder(placed);
+            BumpQueue(exerciseId, queueToken);
         }
 
         _dbContext.TelemetryEvents.Add(InjectImportTelemetry.Imported(exerciseId, caller.StaffUserId, result, time));

@@ -145,7 +145,16 @@ public sealed class InjectImportEndpointTests
     {
         await using var host = await StartAsync();
         var seeded = await SeedKestrelAsync(host);
-        var existing = await host.CreateOkAsync(InjectTestHost.PostItem(seeded.FirePersona));
+
+        // Planned before every imported row (minute 0; they are 5, 20, 1470), so DF-18 (story 14: created items go by
+        // planned minute among the pending items) still places all of them after it, in file order.
+        var existing = await host.CreateOkAsync(new
+        {
+            kind = "post",
+            title = "Beat 3 photo",
+            plannedMinute = 0,
+            posts = new[] { new { personaId = seeded.FirePersona.ToString(), text = "The water from my tap is BROWN #WaterIssues" } },
+        });
         int queueVersionBefore;
         await using (var db = host.Db(seeded.ExerciseId))
         {
@@ -312,7 +321,9 @@ public sealed class InjectImportEndpointTests
         var report = await ImportOkAsync(host, file, dryRun: false);
 
         report.Rows[1].Status.Should().Be("created", "the filtered unique index frees a deleted item's ExternalRef");
-        (await host.GetQueueAsync()).Items.Select(item => item.Title).Should().Equal("Resident photo", "Day two", "Boil water notice");
+        (await host.GetQueueAsync()).Items.Select(item => item.Title).Should().Equal(
+            ["Boil water notice", "Resident photo", "Day two"],
+            "DF-18 (story 14): the re-created minute-5 item goes before the first pending item planned later (minute 20)");
     }
 
     [RequiresDockerFact]
