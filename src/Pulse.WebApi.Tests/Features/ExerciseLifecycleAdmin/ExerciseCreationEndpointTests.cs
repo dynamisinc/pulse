@@ -249,14 +249,51 @@ public sealed class ExerciseCreationEndpointTests
         telemetry.Should().Be(0, "a refused create emits no 'it happened' audit event");
     }
 
-    /// <summary>AC5: a Controller session cannot create an exercise.</summary>
+    /// <summary>
+    /// demo-feedback DF-20 (story 15): a Controller session MAY create an exercise. It gets a
+    /// <c>controller</c> assignment (AC3's "creator's own role" rule, unchanged), and the exercise is owned by
+    /// the controller's OWN server-resolved tenant — never the other customer's.
+    /// </summary>
     [RequiresDockerFact]
-    public async Task Create_AsController_IsRefused()
+    public async Task Create_AsController_PersistsAnExerciseInTheCallersOwnTenant_WithAControllerAssignment()
     {
-        await AssertRoleIsRefusedAsync(ExerciseAdminRoles.Controller);
+        var world = await OrgAdminTestWorld.SeedAsync(_fixture, ExerciseAdminRoles.Controller);
+
+        await using var factory = new OrgAdminProbeFactory(_fixture.ConnectionString!);
+        using var client = OrgAdminTestWorld.CreateClient(factory, world.Token);
+
+        var response = await client.PostAsJsonAsync(
+            ExerciseLifecycleAdminEndpoints.ExercisesRoute,
+            new { name = "Controller Created Run" });
+
+        response.StatusCode.Should().Be(
+            HttpStatusCode.Created,
+            "DF-20: the controller joined ExerciseAdministrators, so the filter AND the service re-check must "
+            + "both admit it — a 403 here means one of the two still carries the old planner/orgAdmin set");
+
+        var created = await response.Content.ReadFromJsonAsync<CreateExerciseWire>();
+        created.Should().NotBeNull();
+        created!.AssignedRole.Should().Be(
+            ExerciseAdminRoles.Controller,
+            "AC3: the auto-created assignment carries the CREATOR'S OWN role — a controller is not coerced "
+            + "onto planner, which would hand it the planner workspace it was never granted");
+        created.Exercise.Status.Should().Be(ExerciseLifecycleStates.Build);
+
+        var exerciseId = Guid.Parse(created.Exercise.ExerciseId);
+
+        await using var read = _fixture.CreateContext();
+        var exercise = await read.Exercises.AsNoTracking().SingleAsync(e => e.Id == exerciseId);
+        exercise.OrganizationId.Should().Be(
+            world.OwnOrganizationId,
+            "the tenant comes only from the server session (StaffCallerContext), for a controller as for anyone");
+        exercise.OrganizationId.Should().NotBe(world.OtherOrganizationId);
+
+        var assignment = await read.StaffAssignments.AsNoTracking().SingleAsync(a => a.ExerciseId == exerciseId);
+        assignment.StaffUserId.Should().Be(world.CallerStaffUserId);
+        assignment.Role.Should().Be(ExerciseAdminRoles.Controller, "the persisted assignment, not just the echo");
     }
 
-    /// <summary>AC5: an Evaluator session cannot create an exercise.</summary>
+    /// <summary>AC5 (and story 15): an Evaluator session still cannot create an exercise.</summary>
     [RequiresDockerFact]
     public async Task Create_AsEvaluator_IsRefused()
     {
@@ -403,7 +440,7 @@ public sealed class ExerciseCreationEndpointTests
             + "'disabled by default, never customer-facing' posture silently widened");
     }
 
-    /// <summary>Shared arrangement for AC5: a staff role that is not an exercise administrator gets a 403.</summary>
+    /// <summary>Shared arrangement for AC5: a staff role that is not an exercise administrator (the evaluator) gets a 403.</summary>
     private async Task AssertRoleIsRefusedAsync(string role)
     {
         var world = await OrgAdminTestWorld.SeedAsync(_fixture, role);
@@ -417,7 +454,8 @@ public sealed class ExerciseCreationEndpointTests
 
         response.StatusCode.Should().Be(
             HttpStatusCode.Forbidden,
-            "AC5: creation is Planner/OrgAdmin only, so a live, perfectly valid {0} session must be refused — "
+            "AC5 as widened by DF-20: creation is Planner/OrgAdmin/Controller only, so a live, perfectly "
+            + "valid {0} session must be refused — "
             + "a 201 here means the endpoint gates on 'any staff session' (exercise-configuration's open "
             + "question (a) gap) rather than on role, and a 401 would mean the session itself was not honored, "
             + "which would make this pass for the wrong reason",

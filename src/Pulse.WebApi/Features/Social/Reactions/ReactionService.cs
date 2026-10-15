@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.EngineRuntime.Clock;
+using Pulse.WebApi.Features.Realtime;
 using Pulse.WebApi.Features.Social.Engagement;
 using Pulse.WebApi.Features.Social.Follows;
 
@@ -21,6 +22,16 @@ using Pulse.WebApi.Features.Social.Follows;
 /// what it reports and emits: it never moves a displayed count (the engagement reader counts <c>like</c> and
 /// <c>repost</c> explicitly), its state is <see cref="PostViewerStateDto.Pinned"/>, and its XC-004 event is
 /// <c>post.pinned</c> / <c>post.unpinned</c> with <c>{"scope":"personal"}</c>.
+/// </para>
+/// <para>
+/// <b>Live engagement (demo-feedback DF-17 / DF-18).</b> After a like or repost add or remove that CHANGED state has
+/// committed, the service pushes <c>PostEngagementChanged { postId, counts, version }</c> to the exercise group
+/// through <see cref="IFeedBroadcaster"/>: the same shown counts this call returns (read through the one engagement
+/// reader, never a second counting query) and the database-derived version from <see cref="PostEngagementVersion"/>,
+/// read BEFORE the counts. Never for a <c>pin</c>, never for a no-op or a lost race, and the payload never carries
+/// <c>viewer</c>, <c>active</c>, the actor or a baseline / real split. The write has committed by then, so a failed
+/// version read or broadcast is logged and swallowed: it never fails the request (whose retry would be a no-op that
+/// pushes nothing), and connected participants pick the numbers up on their next read.
 /// </para>
 /// </remarks>
 /// <remarks>
@@ -78,7 +89,7 @@ using Pulse.WebApi.Features.Social.Follows;
 /// <c>wallClockTime</c> / <c>emittedAt</c>.
 /// </para>
 /// </remarks>
-public sealed class ReactionService
+public sealed partial class ReactionService
 {
     /// <summary>XC-004 <c>eventType</c> for a like / unlike (the shape the frontend already emits).</summary>
     private const string LikeEventType = "reaction";
@@ -128,8 +139,13 @@ public sealed class ReactionService
     private readonly ICurrentSessionPersonaAccessor _sessionPersonaAccessor;
     private readonly IExerciseClock _exerciseClock;
     private readonly IPostEngagementReader _engagementReader;
+    private readonly IFeedBroadcaster _feedBroadcaster;
+    private readonly ILogger<ReactionService> _logger;
 
-    /// <summary>Creates the service over its persistence, scope, session-identity, clock and engagement collaborators.</summary>
+    /// <summary>
+    /// Creates the service over its persistence, scope, session-identity, clock, engagement, fan-out and logging
+    /// collaborators.
+    /// </summary>
     /// <param name="dbContext">The persistence context the reaction and its telemetry event are written through.</param>
     /// <param name="exerciseContext">The server-authoritative exercise scope (COR-001), the sole scoping source.</param>
     /// <param name="sessionPersonaAccessor">Resolves the caller's session-bound persona (the reactor).</param>
@@ -137,24 +153,32 @@ public sealed class ReactionService
     /// <param name="engagementReader">
     /// The engagement read the feed uses too, so the counts this service returns equal what the next feed read shows.
     /// </param>
+    /// <param name="feedBroadcaster">The real-time fan-out that carries <c>PostEngagementChanged</c> (DF-17).</param>
+    /// <param name="logger">Operational log for a failed push (never telemetry).</param>
     public ReactionService(
         PulseDbContext dbContext,
         IExerciseContext exerciseContext,
         ICurrentSessionPersonaAccessor sessionPersonaAccessor,
         IExerciseClock exerciseClock,
-        IPostEngagementReader engagementReader)
+        IPostEngagementReader engagementReader,
+        IFeedBroadcaster feedBroadcaster,
+        ILogger<ReactionService> logger)
     {
         ArgumentNullException.ThrowIfNull(dbContext);
         ArgumentNullException.ThrowIfNull(exerciseContext);
         ArgumentNullException.ThrowIfNull(sessionPersonaAccessor);
         ArgumentNullException.ThrowIfNull(exerciseClock);
         ArgumentNullException.ThrowIfNull(engagementReader);
+        ArgumentNullException.ThrowIfNull(feedBroadcaster);
+        ArgumentNullException.ThrowIfNull(logger);
 
         _dbContext = dbContext;
         _exerciseContext = exerciseContext;
         _sessionPersonaAccessor = sessionPersonaAccessor;
         _exerciseClock = exerciseClock;
         _engagementReader = engagementReader;
+        _feedBroadcaster = feedBroadcaster;
+        _logger = logger;
     }
 
     /// <summary>
@@ -273,9 +297,75 @@ public sealed class ReactionService
             ? await ActivateAsync(exerciseId, postId, personaId, kind, scenarioTime, telemetryEvent, cancellationToken)
             : await DeactivateAsync(exerciseId, activeReaction!.Id, scenarioTime, telemetryEvent, cancellationToken);
 
-        var state = await ReadStateAsync(postId, personaId, kind, baseline, cancellationToken);
+        // 7. DF-17: a COUNTED kind that really changed state pushes the post's new shown counts. The version is read
+        //    FIRST and the counts second (PostEngagementVersion's remarks), and the counts are the very ones this call
+        //    returns. A pin, a no-op and a lost race push nothing.
+        var version = changed && IsCountedKind(kind)
+            ? await TryReadVersionAsync(exerciseId, postId)
+            : null;
+
+        // The write has committed; when a push is pending its counts come from this read, so a client that
+        // disconnects now must not cancel it (Gate-1 L-1). Without a push the request's token still applies.
+        var state = await ReadStateAsync(
+            postId, personaId, kind, baseline, version is null ? cancellationToken : CancellationToken.None);
+
+        if (version is { } committedVersion)
+        {
+            await BroadcastEngagementAsync(
+                exerciseId, postId, PostEngagementChangedDto.For(postId, state.Counts, committedVersion));
+        }
+
         return changed ? ReactionResult.Changed(state) : ReactionResult.Unchanged(state);
     }
+
+    /// <summary>Whether <paramref name="kind"/> moves a shown count (like, repost), unlike a personal pin (DF-6).</summary>
+    private static bool IsCountedKind(string kind) =>
+        string.Equals(kind, ReactionKinds.Like, StringComparison.Ordinal)
+        || string.Equals(kind, ReactionKinds.Repost, StringComparison.Ordinal);
+
+    /// <summary>
+    /// The post's database-derived version after the committed change, or <c>null</c> (logged) when it cannot be read:
+    /// the write has committed, so a failed read only means no push. The request's token is not used: a client that
+    /// disconnects now must not cancel the push its write caused.
+    /// </summary>
+    private async Task<long?> TryReadVersionAsync(Guid exerciseId, Guid postId)
+    {
+        try
+        {
+            return await PostEngagementVersion.ReadAsync(_dbContext, postId, CancellationToken.None);
+        }
+#pragma warning disable CA1031 // A failed post-commit read must never turn a committed reaction into a failed request.
+        catch (Exception ex)
+        {
+            LogEngagementBroadcastFailed(ex, exerciseId, postId);
+            return null;
+        }
+#pragma warning restore CA1031
+    }
+
+    /// <summary>
+    /// Sends <c>PostEngagementChanged</c> to the exercise group. A failure is logged and swallowed (the reaction has
+    /// committed; the same rule as every other broadcast). The request's token is not used, as above.
+    /// </summary>
+    private async Task BroadcastEngagementAsync(Guid exerciseId, Guid postId, PostEngagementChangedDto change)
+    {
+        try
+        {
+            await _feedBroadcaster.BroadcastPostEngagementChangedAsync(exerciseId, change, CancellationToken.None);
+        }
+#pragma warning disable CA1031 // A broadcast fault must never turn a committed reaction into a failed request.
+        catch (Exception ex)
+        {
+            LogEngagementBroadcastFailed(ex, exerciseId, postId);
+        }
+#pragma warning restore CA1031
+    }
+
+    [LoggerMessage(
+        EventId = 1,
+        Level = LogLevel.Warning,
+        Message = "PostEngagementChanged push failed for post {PostId} in exercise {ExerciseId}. The reaction is committed; connected participants see the new counts on their next read.")]
+    private partial void LogEngagementBroadcastFailed(Exception exception, Guid exerciseId, Guid postId);
 
     /// <summary>
     /// Inserts a new ACTIVE reaction and its event in one <c>SaveChanges</c>, folding a lost double-submit race on

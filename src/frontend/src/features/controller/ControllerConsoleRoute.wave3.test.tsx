@@ -44,6 +44,10 @@ import { composeAsPersonaDraftStore } from './hooks/useComposeAsPersona'
 import { ControllerConsoleRoute } from './ControllerConsoleRoute'
 import { injectMock } from './runSheet/injectMock'
 
+// Demo-feedback story 11 (DF-14): the console's write controls render only for a controller
+// session, and this suite mounts none, so the read-only gate is fixed to "controller" here.
+vi.mock('@/features/controller/access/useCanControl', () => ({ useCanControl: () => true }))
+
 // Whole-console renders (MUI + emotion + three feature trees) are slow on a loaded box.
 vi.setConfig({ testTimeout: 60_000 })
 

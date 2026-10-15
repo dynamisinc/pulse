@@ -56,6 +56,18 @@ describe('describeItem', () => {
     expect(describeItem(item({ type: 'like', count: 3, actorIds: [], actorCount: 0 }), []))
       .toBe('Your post got 3 new likes')
   })
+
+  it('repost (DF-19): built like a like row, anonymous, never an invented name', () => {
+    const repost = (over: Partial<NotificationItem>) =>
+      item({ id: 'repost:m1', type: 'repost', actorIds: [], actorCount: 0, ...over })
+    expect(describeItem(repost({ count: 1 }), [])).toBe('Your post got 1 new repost')
+    expect(describeItem(repost({ count: 4 }), [])).toBe('Your post got 4 new reposts')
+    // Should a repost row ever carry its actors, it names them: "@x reposted your post".
+    expect(describeItem(repost({ actorIds: ['a'], actorCount: 1 }), ['Alex Kim']))
+      .toBe('Alex Kim reposted your post')
+    expect(describeItem(repost({ actorIds: ['a', 'b'], actorCount: 3 }), ['Alex Kim', 'Sam Lee']))
+      .toBe('Alex Kim and 2 others reposted your post')
+  })
 })
 
 describe('the unread badge', () => {

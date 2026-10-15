@@ -52,6 +52,11 @@ export interface UseAmplifyOptions {
   readonly postId: string
   /** The post's current repost count — seeds `repostCount` (owned locally after). Default 0. */
   readonly initialRepostCount?: number
+  /**
+   * The post's LIVE repost count (demo-feedback DF-17, `usePostCounts`): a change moves
+   * `repostCount` only, never `repostedByViewer`, and not while a write is in flight.
+   */
+  readonly externalRepostCount?: number
   /** Whether the viewer already reposted this post (`post.viewer.reposted`). Default false. */
   readonly initiallyReposted?: boolean
   /** A shared failure-message channel (one live region per card); see `useReactionToggle`. */
@@ -99,6 +104,7 @@ const REPOST_FAILURE_MESSAGE = "Couldn't update your repost. Please try again."
 export function useAmplify({
   postId,
   initialRepostCount = 0,
+  externalRepostCount,
   initiallyReposted = false,
   notice,
 }: UseAmplifyOptions): UseAmplifyResult {
@@ -130,6 +136,7 @@ export function useAmplify({
     postId,
     kind: 'repost',
     initialCount: initialRepostCount,
+    externalCount: externalRepostCount,
     initiallyActive: initiallyReposted,
     canAct: canAmplify,
     failureMessage: REPOST_FAILURE_MESSAGE,

@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.Realtime;
+using Pulse.WebApi.Features.Social.Engagement;
 
 /// <summary>
 /// Controller takedown (demo-polish B6; CTL-025, XC-010, COR-001, XC-002). Soft-deletes one post in the
@@ -49,6 +50,13 @@ using Pulse.WebApi.Features.Realtime;
 /// push drop the post on their next feed read.
 /// </para>
 /// <para>
+/// <b>Live reply counts (demo-feedback DF-17).</b> Taking down a REPLY lowers its parent's shown reply count, so
+/// after <c>PostRemoved</c> the parent's new counts go out as <c>PostEngagementChanged</c> (the takedown stamp raises
+/// the parent's database-derived version by one, <see cref="PostEngagementVersion"/>). With that, every change that
+/// moves a shown count pushes a frame, which is what lets a client trust a held frame over an older read. A failure
+/// is logged and swallowed like the removal itself; a top-level takedown pushes nothing new.
+/// </para>
+/// <para>
 /// <b>No telemetry (DP-9).</b> The console emits the one <c>steering_action</c> event, carrying the takedown
 /// category. A server event here would double-count the action. The service writes an operational log line
 /// instead (who took which post down, and why), which is not an XC-004 event.
@@ -62,6 +70,7 @@ public sealed partial class PostTakedownService
     private readonly IExerciseClock _exerciseClock;
     private readonly IFeedBroadcaster _feedBroadcaster;
     private readonly ILogger<PostTakedownService> _logger;
+    private readonly IPostEngagementReader? _engagementReader;
 
     /// <summary>Creates the service over its persistence, scope, clock, fan-out and logging collaborators.</summary>
     /// <param name="dbContext">The persistence context. Its central exercise filter scopes every post read and update.</param>
@@ -70,13 +79,18 @@ public sealed partial class PostTakedownService
     /// <param name="exerciseClock">The native per-exercise scenario clock (COR-050).</param>
     /// <param name="feedBroadcaster">The real-time fan-out that carries <c>PostRemoved</c>.</param>
     /// <param name="logger">Operational log (the takedown record and broadcast failures). Never telemetry.</param>
+    /// <param name="engagementReader">
+    /// The engagement read the feed projection uses, for a taken-down reply's parent push (DF-17). Optional: without
+    /// it a takedown pushes no parent counts.
+    /// </param>
     public PostTakedownService(
         PulseDbContext dbContext,
         IExerciseContext exerciseContext,
         IOrganizationContext organizationContext,
         IExerciseClock exerciseClock,
         IFeedBroadcaster feedBroadcaster,
-        ILogger<PostTakedownService> logger)
+        ILogger<PostTakedownService> logger,
+        IPostEngagementReader? engagementReader = null)
     {
         ArgumentNullException.ThrowIfNull(dbContext);
         ArgumentNullException.ThrowIfNull(exerciseContext);
@@ -91,6 +105,7 @@ public sealed partial class PostTakedownService
         _exerciseClock = exerciseClock;
         _feedBroadcaster = feedBroadcaster;
         _logger = logger;
+        _engagementReader = engagementReader;
     }
 
     /// <summary>
@@ -130,7 +145,7 @@ public sealed partial class PostTakedownService
         var post = await _dbContext.Posts
             .AsNoTracking()
             .Where(candidate => candidate.Id == postId)
-            .Select(candidate => new { candidate.DeletedAt, candidate.CreatedScenarioTime })
+            .Select(candidate => new { candidate.DeletedAt, candidate.CreatedScenarioTime, candidate.ParentPostId })
             .FirstOrDefaultAsync(cancellationToken);
         if (post is null)
         {
@@ -176,7 +191,37 @@ public sealed partial class PostTakedownService
         }
 #pragma warning restore CA1031
 
+        // 7. DF-17: a taken-down reply lowered its parent's reply count; push the parent's new counts.
+        if (post.ParentPostId is { } parentPostId && _engagementReader is not null)
+        {
+            await BroadcastParentEngagementAsync(exerciseId, parentPostId, _engagementReader);
+        }
+
         return PostTakedownResult.Removed(deletedAt);
+    }
+
+    /// <summary>
+    /// Pushes <c>PostEngagementChanged</c> for a taken-down reply's parent (version first, then the shown counts).
+    /// Never throws: the takedown has committed. The request's token is not used, as for <c>PostRemoved</c>.
+    /// </summary>
+    private async Task BroadcastParentEngagementAsync(
+        Guid exerciseId, Guid parentPostId, IPostEngagementReader engagementReader)
+    {
+        try
+        {
+            var change = await PostEngagementVersion.ReadChangeAsync(
+                _dbContext, engagementReader, parentPostId, CancellationToken.None);
+            if (change is not null)
+            {
+                await _feedBroadcaster.BroadcastPostEngagementChangedAsync(exerciseId, change, CancellationToken.None);
+            }
+        }
+#pragma warning disable CA1031 // A push fault must never turn a committed takedown into a failed request.
+        catch (Exception ex)
+        {
+            LogParentEngagementBroadcastFailed(ex, exerciseId, parentPostId);
+        }
+#pragma warning restore CA1031
     }
 
     /// <summary>
@@ -234,4 +279,10 @@ public sealed partial class PostTakedownService
         Level = LogLevel.Warning,
         Message = "PostRemoved broadcast failed for post {PostId} in exercise {ExerciseId}. The takedown is committed; connected participants drop the post on their next feed read.")]
     private partial void LogPostRemovedBroadcastFailed(Exception exception, Guid exerciseId, Guid postId);
+
+    [LoggerMessage(
+        EventId = 3,
+        Level = LogLevel.Warning,
+        Message = "PostEngagementChanged push failed for taken-down reply's parent {PostId} in exercise {ExerciseId}. The takedown is committed; connected participants see the new count on their next read.")]
+    private partial void LogParentEngagementBroadcastFailed(Exception exception, Guid exerciseId, Guid postId);
 }

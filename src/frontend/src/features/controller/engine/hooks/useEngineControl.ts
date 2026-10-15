@@ -98,6 +98,7 @@
  */
 
 import { useCallback, useSyncExternalStore } from 'react'
+import { registerSessionReset } from '@/core/auth/sessionReset'
 import { scenarioNow } from '@/core/clock'
 import { USE_MOCK_DATA } from '@/core/config/mockData'
 import { useExerciseContext } from '@/core/exerciseContext'
@@ -171,6 +172,20 @@ function resetForTests(): void {
   stateByExercise.clear()
   listeners.clear()
 }
+
+/**
+ * Sign-out / identity-switch reset: forgets every exercise's kill-switch state (a module
+ * singleton that lives as long as the TAB), so the next sign-in on the same tab starts from the
+ * default rather than a position the previous session set or adopted (#534 Copilot). Keeps the
+ * listeners - a still-mounted subscriber re-reads the default.
+ */
+function resetForSession(): void {
+  if (stateByExercise.size === 0) return
+  stateByExercise.clear()
+  notify()
+}
+
+registerSessionReset(resetForSession, import.meta.hot)
 
 /**
  * Adopts a mode the SERVER already has, locally and SILENTLY — no telemetry, no

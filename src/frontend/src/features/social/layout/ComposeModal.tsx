@@ -59,6 +59,7 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faXmark } from '@fortawesome/free-solid-svg-icons'
 import { hasOtherModalMounted } from '@/core/a11y/modalPriority'
 import { Composer } from '../components/Composer'
+import { ParticipantTooltip } from '../components/ParticipantTooltip'
 import styles from './ComposeModal.module.css'
 
 export interface ComposeModalProps {
@@ -204,9 +205,11 @@ export function ComposeModal({ onClose, returnFocusRef }: ComposeModalProps) {
         onKeyDown={handleKeyDown}
       >
         <div className={styles.header}>
-          <button type="button" className={styles.close} aria-label="Close" onClick={requestClose}>
-            <FontAwesomeIcon icon={faXmark} aria-hidden="true" />
-          </button>
+          <ParticipantTooltip label="Close">
+            <button type="button" className={styles.close} aria-label="Close" onClick={requestClose}>
+              <FontAwesomeIcon icon={faXmark} aria-hidden="true" />
+            </button>
+          </ParticipantTooltip>
           <h2 id={titleId} className={styles.title}>New post</h2>
         </div>
 

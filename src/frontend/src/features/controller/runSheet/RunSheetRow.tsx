@@ -67,6 +67,7 @@ import {
 } from './injectRules'
 import { MESSAGES } from './injectMessages'
 import type { InjectItemDto } from './types'
+import { useCanControl } from '../access'
 
 export interface RunSheetRowProps {
   readonly item: InjectItemDto
@@ -152,6 +153,8 @@ export function RunSheetRow({
   onMoveDown,
   rowRef,
 }: RunSheetRowProps) {
+  // Story 11 (DF-14): a non-controller gets only View (read-only) on a row.
+  const canControl = useCanControl()
   const first = item.posts[0]
   const more = item.kind === 'burst' ? Math.max(0, item.total - 1) : 0
   const reason = item.status === 'failed' ? failureReason(item) : undefined
@@ -163,7 +166,7 @@ export function RunSheetRow({
   const frozenProps = fireDisabledReason
     ? { title: fireDisabledReason, describedBy: fireReasonId }
     : {}
-  const editable = isEditable(item.status)
+  const editable = canControl && isEditable(item.status)
   const assigneeName = item.assigneeName ?? nameOf(item.assigneeId ?? undefined)
 
   return (
@@ -289,7 +292,7 @@ export function RunSheetRow({
 
       {/* Actions */}
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, flexWrap: 'wrap' }}>
-        {canFire(item.status) ? (
+        {canControl && canFire(item.status) ? (
           <RunSheetButton
             kind="primary"
             icon={faBolt}
@@ -301,7 +304,7 @@ export function RunSheetRow({
             {...frozenProps}
           />
         ) : null}
-        {canRetry(item.status) ? (
+        {canControl && canRetry(item.status) ? (
           <RunSheetButton
             kind="primary"
             icon={faRotateRight}
@@ -313,7 +316,7 @@ export function RunSheetRow({
             {...frozenProps}
           />
         ) : null}
-        {canRelease(item.status) ? (
+        {canControl && canRelease(item.status) ? (
           <RunSheetButton
             icon={faPlay}
             label="Release"
@@ -323,7 +326,7 @@ export function RunSheetRow({
             onClick={onRelease}
           />
         ) : null}
-        {canHold(item.status) ? (
+        {canControl && canHold(item.status) ? (
           <RunSheetButton
             icon={faPause}
             label="Hold"
@@ -333,7 +336,7 @@ export function RunSheetRow({
             onClick={onHold}
           />
         ) : null}
-        {canSkip(item.status) ? (
+        {canControl && canSkip(item.status) ? (
           <RunSheetButton
             icon={faForwardStep}
             label="Skip"
@@ -343,7 +346,7 @@ export function RunSheetRow({
             onClick={onSkip}
           />
         ) : null}
-        {canUnskip(item.status) ? (
+        {canControl && canUnskip(item.status) ? (
           <RunSheetButton
             icon={faRotateLeft}
             label="Unskip"
@@ -361,7 +364,7 @@ export function RunSheetRow({
           testId="row-open"
           onClick={onOpen}
         />
-        {canDelete(item.status) && !confirmingDelete ? (
+        {canControl && canDelete(item.status) && !confirmingDelete ? (
           <RunSheetButton
             icon={faTrash}
             label="Delete"
@@ -372,20 +375,22 @@ export function RunSheetRow({
           />
         ) : null}
         <Box sx={{ flex: 1 }} />
-        <RunSheetIconButton
-          icon={faArrowUp}
-          ariaLabel={`Move ${item.title} up`}
-          disabled={busy || !canMoveUp}
-          testId="row-move-up"
-          onClick={onMoveUp}
-        />
-        <RunSheetIconButton
-          icon={faArrowDown}
-          ariaLabel={`Move ${item.title} down`}
-          disabled={busy || !canMoveDown}
-          testId="row-move-down"
-          onClick={onMoveDown}
-        />
+        {canControl && <>
+          <RunSheetIconButton
+            icon={faArrowUp}
+            ariaLabel={`Move ${item.title} up`}
+            disabled={busy || !canMoveUp}
+            testId="row-move-up"
+            onClick={onMoveUp}
+          />
+          <RunSheetIconButton
+            icon={faArrowDown}
+            ariaLabel={`Move ${item.title} down`}
+            disabled={busy || !canMoveDown}
+            testId="row-move-down"
+            onClick={onMoveDown}
+          />
+        </>}
       </Box>
 
       {/* Inline delete confirm (not a modal) */}
@@ -424,7 +429,7 @@ export function RunSheetRow({
           />
         </Box>
       ) : null}
-      {item.status === 'held' && !fireDisabledReason ? (
+      {canControl && item.status === 'held' && !fireDisabledReason ? (
         <Box component="span" sx={{ fontSize: 11, color: chrome.inkMuted }}>
           {MESSAGES.heldFireHint}
         </Box>

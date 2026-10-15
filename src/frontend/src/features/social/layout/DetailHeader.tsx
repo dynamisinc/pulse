@@ -22,6 +22,7 @@
 
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faArrowLeft } from '@fortawesome/free-solid-svg-icons'
+import { ParticipantTooltip } from '../components/ParticipantTooltip'
 import { useSocialNavigate } from './socialNavigation'
 import styles from './DetailHeader.module.css'
 
@@ -35,9 +36,11 @@ export function DetailHeader({ title }: DetailHeaderProps) {
 
   return (
     <header className={styles.header} data-testid="detail-header">
-      <button type="button" className={styles.back} aria-label="Back" onClick={() => back()}>
-        <FontAwesomeIcon icon={faArrowLeft} aria-hidden="true" />
-      </button>
+      <ParticipantTooltip label="Back">
+        <button type="button" className={styles.back} aria-label="Back" onClick={() => back()}>
+          <FontAwesomeIcon icon={faArrowLeft} aria-hidden="true" />
+        </button>
+      </ParticipantTooltip>
       {title !== undefined && <h1 className={styles.title}>{title}</h1>}
     </header>
   )
