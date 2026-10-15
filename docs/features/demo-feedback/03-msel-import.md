@@ -1,6 +1,6 @@
 # Story: MSEL import into the run sheet (Cadence layout)
 
-**Feature:** Demo feedback cut (10/20)  ·  **Phase:** 1  ·  **Status:** Not Started
+**Feature:** Demo feedback cut (10/20)  ·  **Phase:** 1  ·  **Status:** In Review
 **Requirements:** inject queue (new: bulk load)  ·  **Decisions:** DF-9, DF-10, DF-11, DF-16  ·  **Issue:** #499
 **Stack:** backend  ·  **Review:** Tier-1 (upload validation checked at Gate 1)  ·  **Priority:** Must  ·  **Wave:** 1  ·  **Effort:** M
 

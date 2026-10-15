@@ -52,9 +52,9 @@ media on the server.
 |---|-------|-------|----------|------|------------|--------|-------|
 | 01 | [Foundation: schema, contract, watermark flag](01-foundation-schema-and-contract.md) | backend | Must | 0 | none | In Review | #497 |
 | 02 | [Post activity export (.xlsx)](02-post-activity-export.md) | backend | Must | 1 | seam S-1 | In Review | #498 |
-| 03 | [MSEL import into the run sheet (Cadence layout)](03-msel-import.md) | backend | Must | 1 | 01, S-1 | Not Started | #499 |
-| 04 | [Pins: personal and exercise-wide](04-pins-backend.md) | backend | Must | 1 | 01 | Not Started | #500 |
-| 05 | [White-noise pool and pacer](05-white-noise-backend.md) | backend | Must | 1 | 01 | Not Started | #501 |
+| 03 | [MSEL import into the run sheet (Cadence layout)](03-msel-import.md) | backend | Must | 1 | 01, S-1 | In Review | #499 |
+| 04 | [Pins: personal and exercise-wide](04-pins-backend.md) | backend | Must | 1 | 01 | In Review | #500 |
+| 05 | [White-noise pool and pacer](05-white-noise-backend.md) | backend | Must | 1 | 01 | In Review | #501 |
 | 06 | [EXERCISE bands on all participant media](06-media-watermark-bands.md) | frontend | Must | 2 | contract | Not Started | #502 |
 | 07 | [Pinned tab and Pin action (participant)](07-pinned-tab.md) | frontend | Must | 2 | contract | Not Started | #503 |
 | 08 | [Live world: pin for everyone and unread highlighting](08-live-world-pin-unread.md) | frontend | Must | 2 | contract | Not Started | #504 |
