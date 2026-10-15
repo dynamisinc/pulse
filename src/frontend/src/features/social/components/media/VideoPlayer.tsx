@@ -7,7 +7,8 @@
  *
  *   <div role="group" aria-label={alt} tabindex=0>      the focusable wrapper
  *     <video controls playsInline preload="metadata" poster>   native controls
- *     top row: duration badge · EXERCISE watermark slot · Mute · Expand
+ *     <ExerciseBands>   EXERCISE bands, top + bottom (when required / fullscreen)
+ *     top row: duration badge · Mute · Expand   (above the bands, still clickable)
  *     centre: Play / Pause
  *   </div>
  *
@@ -31,15 +32,18 @@
  *    accessible name AND `aria-pressed` for their state; Expand swaps its
  *    label/icon when fullscreen. The focus ring is a white + dark double ring,
  *    visible over any footage.
- *  - EXERCISE WATERMARK SLOT (NFR-008): `data-testid="media-watermark-slot"` is
- *    ALWAYS in the DOM, in the overlay's top row, with the SAME flexible width
- *    whether empty or filled (so toggling never shifts the layout). It renders the
- *    text "EXERCISE" when `isWatermarkRequired(useChromeConfig())` (the compliance
- *    chrome is off) AND ALSO whenever this player is fullscreen: fullscreen hides the
- *    compliance banners, so without that the default chrome-ON exercise would show a
- *    full-screen video with no EXERCISE marking anywhere (the invariant is "chrome and
- *    watermark are never BOTH off"). It is an empty, invisible slot otherwise.
- *  - NO PATH SHOWS THE BARE VIDEO. We fullscreen the WRAPPER (so the watermark child
+ *  - EXERCISE BANDS (NFR-008, demo-feedback 06 / DF-3 / DF-4): the shared
+ *    `ExerciseBands` overlay draws `EXERCISE EXERCISE EXERCISE` across the top and the
+ *    bottom of the frame when `isWatermarkRequired(useChromeConfig())` (the exercise's
+ *    watermark switch is on, or the compliance chrome is off) AND ALSO whenever this
+ *    player is fullscreen: fullscreen hides the compliance banners, so without that a
+ *    watermark-off exercise would show a full-screen video with no EXERCISE marking
+ *    anywhere (the invariant is "chrome and watermark are never BOTH off"). The bands
+ *    replace the earlier single "EXERCISE" slot in the top row. They are click-through
+ *    and sit BELOW the top controls row (duration, Mute, Expand) and the Play button,
+ *    which stay visible and clickable; the bottom band is lifted clear of the native
+ *    control bar. Absolutely positioned, so showing/hiding them shifts nothing.
+ *  - NO PATH SHOWS THE BARE VIDEO. We fullscreen the WRAPPER (so the bands child
  *    is on screen), `controlsList="nofullscreen nodownload noremoteplayback"` +
  *    `disablePictureInPicture` + `disableRemotePlayback` remove Chromium's fullscreen,
  *    Download and Cast, and the rest is policed at runtime: a `fullscreenchange` whose
@@ -87,9 +91,9 @@ import {
   faVolumeHigh,
   faVolumeXmark,
 } from '@fortawesome/free-solid-svg-icons'
-import { isWatermarkRequired, useChromeConfig } from '@/features/participant-shell/chromeConfig'
 import { useOverlayState } from '@/features/participant-shell/components/OverlayLayer'
 import type { PostMedia } from '../../types/post'
+import { ExerciseBands } from './ExerciseBands'
 import { formatDuration } from './formatDuration'
 import {
   FULLSCREEN_CHANGE_EVENTS,
@@ -117,7 +121,7 @@ export interface VideoPlayerProps {
    * Called (with the player wrapper, for focus return, and — when it had started — the
    * playback position) when fullscreen has to happen IN THE APP instead: the browser has
    * no element-fullscreen API, refused it, or took the bare `<video>` fullscreen by its
-   * own route (which would drop the watermark). The owner opens the modal viewer.
+   * own route (which would drop the EXERCISE bands). The owner opens the modal viewer.
    */
   readonly onRequestModal?: (trigger: HTMLElement, startAt?: number) => void
   /** Resume position in seconds (the modal fallback carries it over). Default: the start. */
@@ -136,7 +140,6 @@ export function VideoPlayer({
   startAt,
 }: VideoPlayerProps) {
   const alt = mediaAlt(media)
-  const watermarkRequired = isWatermarkRequired(useChromeConfig())
   // A shell Pause / EndEx / break-fiction overlay covers the channel: media must stop.
   const overlayActive = useOverlayState().state !== 'none'
 
@@ -156,7 +159,7 @@ export function VideoPlayer({
   })
 
   /**
-   * Fullscreen has to happen IN THE APP (the modal viewer keeps the EXERCISE watermark;
+   * Fullscreen has to happen IN THE APP (the modal viewer keeps the EXERCISE bands;
    * a native fullscreen of the bare `<video>` cannot). Pauses the inline video and hands
    * its position over. A no-op in the already-expanded variant or without an owner.
    */
@@ -325,10 +328,6 @@ export function VideoPlayer({
     && Number.isFinite(media.durationSec) && media.durationSec > 0
     ? media.durationSec
     : metadataDuration
-  // NFR-008: chrome off => watermark. Fullscreen hides the compliance banners, so the in-content
-  // watermark is ALSO required while this player is fullscreen — "chrome and watermark are never
-  // both off" must hold in fullscreen too, not only when an exercise runs chrome-less.
-  const showWatermark = watermarkRequired || fullscreen
   const ratio = singleMediaAspectRatio(media.width, media.height)
   const frameStyle = { aspectRatio: ratio, '--vp-ratio': ratio } as CSSProperties
 
@@ -398,10 +397,15 @@ export function VideoPlayer({
       )}
 
       {/*
-        The overlay top row: duration | watermark slot | Mute . Expand. A flex row (not
-        three absolute pins), so the watermark can never collide with the controls at any
-        player width; the slot is `flex: 1` whether empty or filled, so toggling it moves
-        nothing. Click-through except the buttons.
+        NFR-008 / DF-4: the EXERCISE bands, when the exercise requires them and ALWAYS while
+        this player is fullscreen (the compliance banners are hidden then). A child of the
+        wrapper that is fullscreened, so they stay on screen; below the controls in z-order.
+      */}
+      <ExerciseBands force={fullscreen} clearNativeControls={!failed} />
+
+      {/*
+        The overlay top row: duration | Mute . Expand. Painted ABOVE the bands, so the
+        controls stay visible and clickable. Click-through except the buttons.
       */}
       <div className={styles.topBar}>
         {knownDuration !== undefined && (
@@ -414,17 +418,6 @@ export function VideoPlayer({
             {formatDuration(knownDuration)}
           </time>
         )}
-
-        {/* NFR-008: ALWAYS present at a fixed position (no layout shift); text only when the
-            chrome is off. */}
-        <div
-          className={styles.watermark}
-          data-testid="media-watermark-slot"
-          role={showWatermark ? 'note' : undefined}
-          aria-label={showWatermark ? 'Exercise watermark' : undefined}
-        >
-          {showWatermark ? <span className={styles.watermarkText}>EXERCISE</span> : null}
-        </div>
 
         {!failed && (
           <div className={styles.corner}>

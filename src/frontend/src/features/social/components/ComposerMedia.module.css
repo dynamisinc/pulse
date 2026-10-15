@@ -58,9 +58,11 @@
   object-fit: cover;
 }
 
-/* A word + an icon marks a video thumbnail: it is not just "a picture". */
+/* A word + an icon marks a video thumbnail: it is not just "a picture". Above the
+ * EXERCISE bands (z-index 1). */
 .videoBadge {
   position: absolute;
+  z-index: 2;
   left: 4px;
   bottom: 4px;
   display: inline-flex;

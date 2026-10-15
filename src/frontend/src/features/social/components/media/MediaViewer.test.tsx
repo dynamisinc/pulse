@@ -7,6 +7,10 @@
  * is not dropped out of the trap), announces each image's alt text, and RETURNS
  * focus to the thumbnail that opened it. Also the safe-URL fallback, the scroll
  * lock, and the video-in-viewer (modal fallback) path.
+ *
+ * demo-feedback 06: the EXERCISE bands on the viewer's image (hugging the image, not
+ * the stage) and on the expanded video, when required and not otherwise; the viewer
+ * stays fully keyboard-operable with them on.
  */
 import { useReducer, useState } from 'react'
 import { act, fireEvent, render, screen, within } from '@testing-library/react'
@@ -20,6 +24,8 @@ import { MediaViewer } from './MediaViewer'
 import { installMediaElementStubs } from './mediaTestUtils'
 import { resetPlaybackForTests } from './playbackCoordinator'
 
+const chromeCtl = vi.hoisted(() => ({ enabled: false, watermark: true }))
+
 const overlayCtl = vi.hoisted(() => ({
   state: 'none' as 'none' | 'pause' | 'endex' | 'broadcast',
   register: 'in-fiction' as 'in-fiction' | 'out-of-fiction',
@@ -30,7 +36,14 @@ vi.mock('@/features/participant-shell/chromeConfig', async importOriginal => {
   const banner = { text: 'BANNER', fg: '#fff', bg: '#000' }
   return {
     ...actual,
-    useChromeConfig: (): ChromeConfig => ({ enabled: false, top: banner, bottom: banner }),
+    // The shell's providers are "present": the bands read the (mocked) config.
+    useChromeConfigAvailable: () => true,
+    useChromeConfig: (): ChromeConfig => ({
+      enabled: chromeCtl.enabled,
+      watermark: chromeCtl.watermark,
+      top: banner,
+      bottom: banner,
+    }),
   }
 })
 
@@ -57,6 +70,8 @@ function image(n: number, overrides: Partial<PostMedia> = {}): PostMedia {
 const THREE = [image(1), image(2), image(3)]
 
 beforeEach(() => {
+  chromeCtl.enabled = false
+  chromeCtl.watermark = true
   installMediaElementStubs()
   resetPlaybackForTests()
   document.body.style.overflow = ''
@@ -395,13 +410,13 @@ describe('MediaViewer — a video (the fullscreen modal fallback)', () => {
     durationSec: 4,
   }
 
-  it('renders the expanded player (watermark slot included) and lets its own keys through', async () => {
+  it('renders the expanded player (EXERCISE bands included) and lets its own keys through', async () => {
     const user = userEvent.setup()
     render(<Harness items={[clip, image(2)]} />)
     const dialog = await openViewer(user)
 
     const player = within(dialog).getByRole('group', { name: 'A crew explains the advisory' })
-    expect(within(player).getByTestId('media-watermark-slot')).toHaveTextContent('EXERCISE')
+    expect(within(player).getAllByText('EXERCISE EXERCISE EXERCISE')).toHaveLength(2)
     expect(within(player).queryByRole('button', { name: 'Expand' })).not.toBeInTheDocument()
     expect(within(dialog).getByRole('status')).toHaveTextContent(
       'Video 1 of 2: A crew explains the advisory',
@@ -682,5 +697,104 @@ describe('MediaViewer — resuming a handed-over video (L-8)', () => {
     const video = screen.getByRole('group', { name: 'Clip' }).querySelector('video')
     expect(video?.getAttribute('src')).toBe('/mock-media/video/a.mp4#t=4.5')
     expect(video?.paused).toBe(true)
+  })
+})
+
+describe('MediaViewer — EXERCISE bands (demo-feedback 06, DF-4)', () => {
+  it('draws a top and a bottom band over the IMAGE (inside its frame) when required', async () => {
+    const user = userEvent.setup()
+    chromeCtl.enabled = true
+    chromeCtl.watermark = true
+    render(<Harness startIndex={1} />)
+    const dialog = await openViewer(user)
+
+    const frame = within(dialog).getByTestId('media-viewer-image-frame')
+    const img = within(dialog).getByRole('img')
+    const bands = within(frame).getByTestId('exercise-bands')
+    expect(frame).toContainElement(img)
+    expect(within(bands).getByTestId('exercise-band-top')).toHaveTextContent(/^EXERCISE EXERCISE EXERCISE$/)
+    expect(within(bands).getByTestId('exercise-band-bottom')).toHaveTextContent(/^EXERCISE EXERCISE EXERCISE$/)
+    expect(bands).toHaveAttribute('aria-hidden', 'true')
+    // The image keeps its alt text as its only name; the dialog's name is unchanged.
+    expect(img).toHaveAccessibleName('Photo 2 of the flooded street')
+    expect(dialog).toHaveAccessibleName('Media viewer')
+  })
+
+  it('keeps the bands as the user pages (every image is marked)', async () => {
+    const user = userEvent.setup()
+    chromeCtl.enabled = true
+    render(<Harness />)
+    const dialog = await openViewer(user)
+
+    for (const n of [1, 2, 3]) {
+      expect(within(dialog).getByRole('img')).toHaveAttribute('alt', `Photo ${n} of the flooded street`)
+      expect(within(dialog).getAllByText('EXERCISE EXERCISE EXERCISE')).toHaveLength(2)
+      await user.keyboard('{ArrowRight}')
+    }
+  })
+
+  it('draws them when the compliance chrome is off even with the watermark switch off', async () => {
+    const user = userEvent.setup()
+    chromeCtl.enabled = false
+    chromeCtl.watermark = false
+    render(<Harness />)
+    const dialog = await openViewer(user)
+
+    expect(within(dialog).getByTestId('exercise-bands')).toBeInTheDocument()
+  })
+
+  it('renders NO band when not required (watermark off, banner on); the image frame is unchanged', async () => {
+    const user = userEvent.setup()
+    chromeCtl.enabled = true
+    chromeCtl.watermark = false
+    render(<Harness />)
+    const dialog = await openViewer(user)
+
+    expect(within(dialog).queryByTestId('exercise-bands')).not.toBeInTheDocument()
+    expect(within(dialog).queryByText('EXERCISE EXERCISE EXERCISE')).not.toBeInTheDocument()
+    const frame = within(dialog).getByTestId('media-viewer-image-frame')
+    expect(frame.children).toHaveLength(1)
+    expect(frame.firstElementChild).toBe(within(dialog).getByRole('img'))
+  })
+
+  it('marks a video in the viewer (the in-app full screen) with the player\'s own bands', async () => {
+    const user = userEvent.setup()
+    chromeCtl.enabled = true
+    chromeCtl.watermark = true
+    const clip: PostMedia = {
+      id: 'v1',
+      kind: 'video',
+      url: '/mock-media/video/water-update.mp4',
+      alt: 'A crew explains the advisory',
+      durationSec: 4,
+    }
+    render(<Harness items={[clip]} />)
+    const dialog = await openViewer(user)
+
+    const player = within(dialog).getByRole('group', { name: 'A crew explains the advisory' })
+    expect(within(player).getByTestId('exercise-band-top')).toBeInTheDocument()
+    expect(within(player).getByTestId('exercise-band-bottom')).toBeInTheDocument()
+  })
+
+  it('stays keyboard-operable with the bands on: Esc closes and focus returns to the thumbnail', async () => {
+    const user = userEvent.setup()
+    chromeCtl.watermark = true
+    render(<Harness />)
+    await openViewer(user)
+
+    await user.keyboard('{Escape}')
+
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Thumbnail' })).toHaveFocus()
+  })
+
+  it('gives an unloadable image the alt-text placeholder WITHOUT bands (no media shown)', async () => {
+    const user = userEvent.setup()
+    chromeCtl.watermark = true
+    render(<Harness items={[image(1, { url: 'javascript:alert(1)' })]} />)
+    const dialog = await openViewer(user)
+
+    expect(within(dialog).getByTestId('media-fallback')).toBeInTheDocument()
+    expect(within(dialog).queryByTestId('exercise-bands')).not.toBeInTheDocument()
   })
 })

@@ -49,11 +49,13 @@ const mockUseChromeConfig = vi.mocked(useChromeConfig)
 
 const CHROME_ENABLED: ChromeConfig = {
   enabled: true,
+  watermark: false,
   top: { text: 'top', fg: '#000000', bg: '#ffffff' },
   bottom: { text: 'bottom', fg: '#000000', bg: '#ffffff' },
 }
 const CHROME_DISABLED: ChromeConfig = {
   enabled: false,
+  watermark: false,
   top: { text: 'top', fg: '#000000', bg: '#ffffff' },
   bottom: { text: 'bottom', fg: '#000000', bg: '#ffffff' },
 }

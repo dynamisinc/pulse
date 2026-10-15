@@ -2,7 +2,9 @@
  * features/participant-shell/chromeConfig.test.tsx
  * ---------------------------------------------------------------------------
  * Story 01 (compliance chrome) — pure NFR-008 invariant coverage
- * (`isWatermarkRequired`) plus boundary-mocked branch coverage for the
+ * (`isWatermarkRequired`, now the demo-feedback 06 / DF-3 rule
+ * `watermark || !enabled`, as a full truth table) plus boundary-mocked branch
+ * coverage for the
  * `useChromeConfig` mock seam (AC2/AC3; COR-001/XC-002, WAVE0-REVIEW
  * precedent 19). The sibling `chromeConfig.default.test.tsx` covers the
  * SHIPPED path through the real axios client + canned adapter.
@@ -46,16 +48,27 @@ function makeWrapper(queryClient: QueryClient) {
   }
 }
 
-describe('isWatermarkRequired (NFR-008 invariant — chrome and watermark never both off)', () => {
+describe('isWatermarkRequired (DF-3: watermark || !enabled; NFR-008 never both off)', () => {
   const banner = { text: 'X', fg: '#000000', bg: '#ffffff' }
 
-  it('is true when chrome is disabled - the watermark becomes the required fallback signal', () => {
-    const config: ChromeConfig = { enabled: false, top: banner, bottom: banner }
+  it.each([
+    // watermark, enabled (chrome/banner), required
+    [true, true, true],
+    [true, false, true],
+    [false, false, true],
+    [false, true, false],
+  ])('watermark=%s, chrome enabled=%s => required=%s', (watermark, enabled, required) => {
+    const config: ChromeConfig = { enabled, watermark, top: banner, bottom: banner }
+    expect(isWatermarkRequired(config)).toBe(required)
+  })
+
+  it('is true when chrome is disabled even with the watermark switch off (the fallback signal)', () => {
+    const config: ChromeConfig = { enabled: false, watermark: false, top: banner, bottom: banner }
     expect(isWatermarkRequired(config)).toBe(true)
   })
 
-  it('is false when chrome is enabled - the banners already carry the signal', () => {
-    const config: ChromeConfig = { enabled: true, top: banner, bottom: banner }
+  it('is false ONLY when the watermark switch is off and the banners are on', () => {
+    const config: ChromeConfig = { enabled: true, watermark: false, top: banner, bottom: banner }
     expect(isWatermarkRequired(config)).toBe(false)
   })
 })
@@ -68,6 +81,7 @@ describe('useChromeConfig (boundary-mocked branch)', () => {
   it('resolves a non-default config from a valid mocked response (not the DEFAULT_CHROME_CONFIG fallback)', async () => {
     const mockedConfig: ChromeConfig = {
       enabled: true,
+      watermark: false,
       top: { text: 'MOCK TOP BANNER', fg: '#101010', bg: '#202020' },
       bottom: { text: 'MOCK BOTTOM BANNER', fg: '#303030', bg: '#404040' },
     }
@@ -87,6 +101,8 @@ describe('useChromeConfig (boundary-mocked branch)', () => {
     const { result } = renderHook(() => useChromeConfig(), { wrapper: makeWrapper(queryClient) })
 
     expect(result.current.enabled).toBe(true)
+    // DF-3: the fallback marks media too (fail toward marking).
+    expect(result.current.watermark).toBe(true)
   })
 
   it('falls back to the safe-default config once a response with an out-of-shape body settles (never renders the bogus shape)', async () => {
@@ -107,7 +123,68 @@ describe('useChromeConfig (boundary-mocked branch)', () => {
     })
     expect(result.current.enabled).toBe(true)
     expect(result.current.top.text).toContain('UNCLASSIFIED')
+    expect(result.current.watermark).toBe(true)
   })
+
+  it('carries an explicit watermark=false from the server through (DF-3 switch off)', async () => {
+    mockGet.mockResolvedValue({
+      data: {
+        enabled: true,
+        watermark: false,
+        top: { text: 'LIVE TOP', fg: '#000000', bg: '#ffffff' },
+        bottom: { text: 'LIVE BOTTOM', fg: '#000000', bg: '#ffffff' },
+      },
+    } as Awaited<ReturnType<typeof api.get>>)
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+
+    const { result } = renderHook(() => useChromeConfig(), { wrapper: makeWrapper(queryClient) })
+
+    await waitFor(() => expect(result.current.top.text).toBe('LIVE TOP'))
+    expect(result.current.watermark).toBe(false)
+    expect(isWatermarkRequired(result.current)).toBe(false)
+  })
+
+  it('parses a body WITHOUT watermark (an older API) as watermark=true, keeping its banners', async () => {
+    mockGet.mockResolvedValue({
+      data: {
+        enabled: true,
+        top: { text: 'OLDER API TOP', fg: '#000000', bg: '#ffffff' },
+        bottom: { text: 'OLDER API BOTTOM', fg: '#000000', bg: '#ffffff' },
+      },
+    } as Awaited<ReturnType<typeof api.get>>)
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+
+    const { result } = renderHook(() => useChromeConfig(), { wrapper: makeWrapper(queryClient) })
+
+    // The body is ACCEPTED (its own banner text, not the default) ...
+    await waitFor(() => expect(result.current.top.text).toBe('OLDER API TOP'))
+    await waitFor(() => {
+      expect(queryClient.getQueryCache().findAll()[0]?.state.status).toBe('success')
+    })
+    // ... and the missing field fails toward marking.
+    expect(result.current.watermark).toBe(true)
+    expect(isWatermarkRequired(result.current)).toBe(true)
+  })
+
+  it.each([null, 'false', 0])(
+    'parses a malformed watermark (%j) as true - only an explicit false turns marking off',
+    async watermark => {
+      mockGet.mockResolvedValue({
+        data: {
+          enabled: true,
+          watermark,
+          top: { text: 'ODD TOP', fg: '#000000', bg: '#ffffff' },
+          bottom: { text: 'ODD BOTTOM', fg: '#000000', bg: '#ffffff' },
+        },
+      } as unknown as Awaited<ReturnType<typeof api.get>>)
+      const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+
+      const { result } = renderHook(() => useChromeConfig(), { wrapper: makeWrapper(queryClient) })
+
+      await waitFor(() => expect(result.current.top.text).toBe('ODD TOP'))
+      expect(result.current.watermark).toBe(true)
+    },
+  )
 
   it('never sends the exerciseId as a request URL substring or a params key (COR-001, XC-002, precedent 13)', async () => {
     mockGet.mockResolvedValue({
