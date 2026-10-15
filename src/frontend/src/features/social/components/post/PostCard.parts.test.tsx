@@ -91,8 +91,9 @@ describe('PostCard — composition and DOM hooks', () => {
     expect(before(link, actions)).toBe(true)
     expect(screen.getByTestId('post-open-target')).toBeInTheDocument()
     expect(screen.getByTestId('post-author-target')).toHaveAttribute('data-persona-id', 'persona-fulcoem')
-    // The canonical set; Reply is inert here (no `onReply`), so count by `data-action`.
-    expect(card.querySelectorAll('[data-action]')).toHaveLength(3)
+    // The canonical set plus the personal Pin (story 07); Reply is inert here (no
+    // `onReply`), so count by `data-action`.
+    expect(card.querySelectorAll('[data-action]')).toHaveLength(4)
   })
 
   it('shows "Replying to @handle" for a reply and nothing for a plain post', async () => {

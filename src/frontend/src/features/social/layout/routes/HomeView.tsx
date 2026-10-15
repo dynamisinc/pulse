@@ -1,8 +1,8 @@
 /**
  * features/social/layout/routes/HomeView.tsx
  * ---------------------------------------------------------------------------
- * The `/home` page: the inline composer, the All Posts / Following switch, and the
- * two feeds. This is the body of the old `SocialChannel` "feed region", lifted out
+ * The `/home` page: the inline composer, the All Posts / Following / Pinned switch,
+ * and the three panels. This is the body of the old `SocialChannel` "feed region", lifted out
  * so the router can keep it MOUNTED while another route is showing (see
  * `SocialRoutes`). Moving it did not change it -- every behavior below predates
  * F1 and is covered by the existing `SocialChannel.*` tests.
@@ -30,6 +30,14 @@
  * when the reader actually opens it, never at channel mount, and switching back
  * and forth costs no refetch and no duplicate event.
  *
+ * PINNED (demo-feedback story 07, DF-5). A third tab after Following lists the
+ * pinned feed (`pinned/PinnedFeed`): posts pinned for everyone first, then the
+ * viewer's own pins and likes. It is mounted LAZILY exactly like Following (on the
+ * first switch, then kept mounted and hidden) and offered under the SAME gate, so a
+ * view-only session still sees All Posts only. The arrow / Home / End handling is
+ * generalised to N tabs: Left/Right move to the previous / next tab and wrap,
+ * Home / End go to the first / last.
+ *
  * COR-015: a read-only / no-persona session is served All Posts regardless --
  * `useFeed` enforces that itself, so it is NOT re-implemented here. What IS
  * decided here is the AFFORDANCE: such a session gets NO switch at all, because a
@@ -49,11 +57,12 @@ import {
 } from '@/features/participant-shell/mountContract'
 import { Composer } from '../../components/Composer'
 import { Feed } from '../../pages/Feed'
+import { PinnedFeed } from '../../pinned/PinnedFeed'
 import { useSocialOpeners } from '../useSocialOpeners'
 import styles from './HomeView.module.css'
 
-/** The two mountable feed scopes, and the tablist that switches them. */
-type FeedTabId = 'all' | 'following'
+/** The mountable Home panels, and the tablist that switches them. */
+type FeedTabId = 'all' | 'following' | 'pinned'
 
 interface FeedTabSpec {
   readonly id: FeedTabId
@@ -63,7 +72,11 @@ interface FeedTabSpec {
 const FEED_TABS: readonly FeedTabSpec[] = [
   { id: 'all', label: 'All Posts' },
   { id: 'following', label: 'Following' },
+  { id: 'pinned', label: 'Pinned' },
 ]
+
+/** The lazily mounted panels (All Posts is always mounted). */
+type LazyTabId = Exclude<FeedTabId, 'all'>
 
 export function HomeView() {
   const { variant } = useShellContext()
@@ -77,42 +90,51 @@ export function HomeView() {
 
   // Whether the switch is OFFERED at all. See the module header: guarded on BOTH the
   // shell mount variant and the session, mirroring `<Feed>`/`useFeed`'s own
-  // `!isReadOnly && personaId !== undefined` predicate.
+  // `!isReadOnly && personaId !== undefined` predicate. The Pinned tab rides the same gate.
   const canUseFollowing = canCompose && !session.isReadOnly && session.personaId !== undefined
 
   const [feedTab, setFeedTab] = useState<FeedTabId>('all')
-  // The Following feed is mounted on FIRST switch and kept mounted after that
-  // (hidden when inactive) -- so its one-shot mount telemetry fires when the reader
-  // opens it, and its frozen baseline + scroll position survive a switch back.
-  const [followingMounted, setFollowingMounted] = useState(false)
+  // The Following and Pinned panels are mounted on FIRST switch and kept mounted after
+  // that (hidden when inactive) -- so a one-shot mount telemetry / read fires when the
+  // reader opens it, and its baseline + scroll position survive a switch back.
+  const [mounted, setMounted] = useState<ReadonlySet<LazyTabId>>(() => new Set())
 
   const selectFeedTab = useCallback((tab: FeedTabId) => {
-    if (tab === 'following') setFollowingMounted(true)
+    if (tab !== 'all') {
+      setMounted(prev => (prev.has(tab) ? prev : new Set(prev).add(tab)))
+    }
     setFeedTab(tab)
   }, [])
 
-  // Roving arrow-key navigation across the tablist (NFR-001) -- mirrors
-  // `HashtagFeed`/`Profile`'s tablists.
+  // Roving arrow-key navigation across the tablist (NFR-001), for any number of tabs:
+  // Left / Right move to the previous / next tab and wrap; Home / End go to the first /
+  // last. Selection follows focus, so the newly selected tab also takes focus.
   const handleFeedTabKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
     const { key } = event
     if (key !== 'ArrowRight' && key !== 'ArrowLeft' && key !== 'Home' && key !== 'End') return
     event.preventDefault()
-    if (key === 'Home') {
-      selectFeedTab('all')
-      return
-    }
-    if (key === 'End') {
-      selectFeedTab('following')
-      return
-    }
-    selectFeedTab(feedTab === 'all' ? 'following' : 'all')
+    const count = FEED_TABS.length
+    const current = Math.max(0, FEED_TABS.findIndex(tab => tab.id === feedTab))
+    const nextIndex =
+      key === 'Home'
+        ? 0
+        : key === 'End'
+          ? count - 1
+          : key === 'ArrowRight'
+            ? (current + 1) % count
+            : (current - 1 + count) % count
+    const next = FEED_TABS[nextIndex]
+    if (next === undefined) return
+    selectFeedTab(next.id)
+    const tablist = event.currentTarget.parentElement
+    tablist?.querySelector<HTMLButtonElement>(`#social-feed-tab-${next.id}`)?.focus()
   }
 
   return (
     <div className={styles.home}>
       {canCompose && <Composer />}
 
-      {/* All Posts <-> Following (SOC-081). Absent entirely for an observer /
+      {/* All Posts <-> Following <-> Pinned (SOC-081, story 07). Absent entirely for an observer /
           read-only / no-persona session -- see `canUseFollowing`. */}
       {canUseFollowing && (
         <div className={styles.feedTabs} role="tablist" aria-label="Feed">
@@ -159,7 +181,7 @@ export function HomeView() {
         />
       </div>
 
-      {followingMounted && (
+      {mounted.has('following') && (
         <div
           role="tabpanel"
           id="social-feed-panel-following"
@@ -170,6 +192,22 @@ export function HomeView() {
           <Feed
             key="feed-following"
             scope="following"
+            onOpenThread={openThread}
+            onHashtagOpen={openHashtag}
+            onOpenProfile={openProfile}
+          />
+        </div>
+      )}
+
+      {mounted.has('pinned') && (
+        <div
+          role="tabpanel"
+          id="social-feed-panel-pinned"
+          aria-labelledby="social-feed-tab-pinned"
+          hidden={feedTab !== 'pinned'}
+          data-testid="social-feed-panel-pinned"
+        >
+          <PinnedFeed
             onOpenThread={openThread}
             onHashtagOpen={openHashtag}
             onOpenProfile={openProfile}
