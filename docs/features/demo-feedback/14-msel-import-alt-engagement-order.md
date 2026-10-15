@@ -1,6 +1,6 @@
 # Story: MSEL import — alt text and engagement columns; imported items slot in by planned minute
 
-**Feature:** Demo feedback cut (10/20)  ·  **Phase:** 1  ·  **Status:** Not Started
+**Feature:** Demo feedback cut (10/20)  ·  **Phase:** 1  ·  **Status:** In Review
 **Requirements:** NFR-001 (alt text on participant media)  ·  **Decisions:** DF-16, DF-17, DF-18  ·  **Issue:** #518
 **Stack:** backend  ·  **Review:** Tier-1  ·  **Priority:** Must  ·  **Wave:** 3  ·  **Effort:** S
 
@@ -23,43 +23,43 @@ Tom chose (10/15) to fix all three in the importer before the Sunday freeze (DF-
 
 ### Columns (Pulse extensions, optional; headers matched like the others: case-insensitive, trimmed)
 
-- [ ] **`Pulse Media Alt`**: the alt text for each `Pulse Media` file, **separated by `|`**, in the same order. A
+- [x] **`Pulse Media Alt`**: the alt text for each `Pulse Media` file, **separated by `|`**, in the same order. A
       blank cell, or a blank entry in the list, falls back to today's file-name stem for that file. More entries than
       files ⇒ the row **fails** ("Pulse Media Alt has N entries for M Pulse Media files"); fewer ⇒ the missing ones
       fall back to the stem with a **warning**. Each entry is trimmed and must fit `InjectItemValidator.MaxAltLength`
       (1,000) after the same sanitising the write path applies (longer ⇒ truncated with a warning, like `Title`).
       Alt text with no `Pulse Media` ⇒ warning, ignored.
-- [ ] **`Pulse Likes`**, **`Pulse Reposts`**, **`Pulse Replies`**: the post's `engagementBaseline` (`like`, `repost`,
+- [x] **`Pulse Likes`**, **`Pulse Reposts`**, **`Pulse Replies`**: the post's `engagementBaseline` (`like`, `repost`,
       `reply`). Each optional; blank ⇒ not set (0). A value must be a whole number 0…`InjectItemValidator.MaxBaseline`
       (1,000,000); a numeric cell is accepted as-is if it is integral (Excel stores `962` as `962.0`), text is parsed
       with invariant culture, and anything else (negative, fractional, too large, not a number) ⇒ the row **fails**
       with a message naming the column.
-- [ ] Both flow through the existing write path (`ImportRequests` → `InjectItemValidator.Parse`), so a seeded item
+- [x] Both flow through the existing write path (`ImportRequests` → `InjectItemValidator.Parse`), so a seeded item
       and an imported item with the same values are indistinguishable.
-- [ ] **Re-import (DF-10):** a changed alt text or baseline on an unfired item is an update (`status: 'updated'`); the
+- [x] **Re-import (DF-10):** a changed alt text or baseline on an unfired item is an update (`status: 'updated'`); the
       same values ⇒ `unchanged`; fired items are left alone as today. `ImportRequests`' change comparison covers both.
-- [ ] `?dryRun=true` reports the new failures and warnings and writes nothing.
+- [x] `?dryRun=true` reports the new failures and warnings and writes nothing.
 
 ### Order (DF-18)
 
-- [ ] An item the import **creates** is placed by `PlannedMinute` among the existing **pending** items: immediately
+- [x] An item the import **creates** is placed by `PlannedMinute` among the existing **pending** items: immediately
       before the first pending item (in current `Order`) whose `PlannedMinute` is greater than its own. Ties go after
       the existing items with the same minute; several new items with the same minute keep their file row order. A new
       item with no `PlannedMinute`, or with no later pending item, goes at the end. Non-pending items (fired, failed,
       skipped, held…) keep their places and are never moved; existing pending items keep their relative order.
-- [ ] Items the import **updates** keep their place (no reordering of existing rows beyond the shift needed to
+- [x] Items the import **updates** keep their place (no reordering of existing rows beyond the shift needed to
       insert).
-- [ ] The new order is written in the same transaction as the created items, through the same mechanics as
+- [x] The new order is written in the same transaction as the created items, through the same mechanics as
       `ReorderAsync` (one queue-version bump, the run-sheet change broadcast staff consoles already receive), so an open
       console shows the new order without a reload. Item versions follow whatever `ReorderAsync` does today.
-- [ ] A dry run computes nothing about order and writes nothing.
+- [x] A dry run computes nothing about order and writes nothing.
 
 ### Cross-cutting
 
-- [ ] **Exercise isolation:** order is computed over this exercise's live items only (the central filter plus the
+- [x] **Exercise isolation:** order is computed over this exercise's live items only (the central filter plus the
       explicit `ExerciseId` predicate the import already uses on its reads).
-- [ ] **Telemetry (XC-004):** `injects.imported` is unchanged (counts only).
-- [ ] No migration (DF contract: one migration for the feature, already shipped). No change to `Program.cs`.
+- [x] **Telemetry (XC-004):** `injects.imported` is unchanged (counts only).
+- [x] No migration (DF contract: one migration for the feature, already shipped). No change to `Program.cs`.
 
 ## Out of Scope
 
