@@ -14,7 +14,7 @@
 // (Claude passthrough). `target has aiFoundryName` matches both and nothing else (SQL, Storage, the
 // managed-identity token endpoint all have other hosts).
 //
-// Severity map: Sev-2 = act now (errors / breaker, latency at the degraded-mode trip); Sev-3 = look soon
+// Severity map: Sev-2 = act now (errors / breaker, attempts timing out at the degraded-mode trip); Sev-3 = look soon
 // (latency warning, call-volume spend proxy).
 // ============================================================================
 
@@ -30,7 +30,8 @@ param aiFoundryName string
 @description('Resource naming suffix, e.g. pulse-uat (ag-<suffix>-provider, alert-<suffix>-provider-*).')
 param resourceSuffix string
 
-@description('The single email receiver on the action group (the provider owner). REQUIRED — an alert nobody receives is worse than none. Never echoed in outputs.')
+@description('The single email receiver on the action group (the provider owner). REQUIRED — an alert nobody receives is worse than none. @secure so it is not recorded in the deployment parameters/history; it is still visible on the action group resource itself (an email receiver is not a secret property).')
+@secure()
 @minLength(3)
 param alertOwnerEmail string
 
@@ -46,21 +47,35 @@ param errorRatePercentThreshold int = 20
 param errorMinimumCalls int = 5
 
 // Latency thresholds — keep these tied to their sources:
-//   * 5 s warning  ≈ 2x the measured Standard p95 of 2.7 s
+//   * 5 s warning (p95)  ≈ 2x the measured Standard p95 of 2.7 s
 //     (docs/features/engine-generation-infra/MEASURED-RESULTS.md).
-//   * 10 s alert   = the per-attempt degraded-mode trip, Generation:Resilience:AttemptTimeoutSeconds = 10
+//   * 10 s trip          = the per-attempt degraded-mode trip, Generation:Resilience:AttemptTimeoutSeconds = 10
 //     (src/Pulse.WebApi/appsettings.Generation.Example.json, asserted by
 //     src/Pulse.WebApi.Tests/ProviderLiveConfigTests.cs).
-// If the trip threshold moves, move latencyAlertMs with it. Note: an attempt the Polly timeout cancels is
-// recorded with a duration of ~AttemptTimeoutSeconds, so a 15-minute p95 above 10 s means more than ~5 % of
-// attempts are timing out — i.e. the breaker is being fed.
+// If the trip threshold moves, move latencyAlertMs with it.
+//
+// Why the Sev-2 latency alert is a TIMEOUT RATIO, not a p95: the Polly per-attempt timeout cancels an attempt
+// at AttemptTimeoutSeconds, so a timed-out attempt is recorded with a duration of ~latencyAlertMs and never
+// much above it. A "p95 > 10 s" test would sit exactly on that edge. Instead the rule counts attempts whose
+// duration is >= 95 % of latencyAlertMs (i.e. timed out, or about to) and fires when their share of all
+// attempts exceeds timeoutRatioPercentThreshold. ASSUMPTION to confirm on UAT (story AC7): timed-out attempts
+// appear as `dependencies` rows with a ~10 s duration.
 @description('Latency warning (Sev-3): 15-minute p95 of Foundry-host dependency duration, in ms. Default 5000 ≈ 2x the measured Standard p95 (MEASURED-RESULTS.md).')
 @minValue(1)
 param latencyWarningMs int = 5000
 
-@description('Latency alert (Sev-2): 15-minute p95 of Foundry-host dependency duration, in ms. Default 10000 = Generation:Resilience:AttemptTimeoutSeconds (the degraded-mode trip, ProviderLiveConfigTests). Move with that setting.')
+@description('Latency trip (Sev-2): the per-attempt timeout in ms. Attempts with duration >= 95 % of this count as timed out. Default 10000 = Generation:Resilience:AttemptTimeoutSeconds (the degraded-mode trip, ProviderLiveConfigTests). Move with that setting.')
 @minValue(1)
 param latencyAlertMs int = 10000
+
+@description('Latency trip (Sev-2): percentage of attempts in the 15-minute window that timed out (duration >= 95 % of latencyAlertMs) above which the alert fires. Default 5.')
+@minValue(1)
+@maxValue(100)
+param timeoutRatioPercentThreshold int = 5
+
+@description('Latency rules: minimum Foundry-host attempts in the window before either latency rule is evaluated (one slow call in a quiet window must not alert).')
+@minValue(1)
+param latencyMinimumCalls int = 5
 
 // Spend proxy sizing (MEASURED-RESULTS.md): a nominal active-storyline hour is ~375 four-post bursts
 // (one model call each) at ~$0.0016/burst on the Ambient tier (~$0.61/h). 750 calls/h is ~2x nominal,
@@ -75,28 +90,50 @@ param tags object = {}
 // Each query returns a row ONLY when its condition holds; every rule fires on "result rows > 0". The rule's
 // windowSize is the query time range, so the queries carry no timestamp filter of their own (in the portal,
 // set the time range to match when running one by hand).
+//
+// SAMPLING: Program.cs uses AddApplicationInsightsTelemetry() with default ADAPTIVE SAMPLING, so a stored row
+// can stand for several real calls. Every COUNT here is therefore sum(itemCount), never count(). The p95 in
+// the latency warning is deliberately UNWEIGHTED (percentile over the retained rows): adaptive sampling keeps
+// a representative sample, so the percentile is not biased by it — only absolute counts are.
 
 var providerCalls = 'dependencies\n| where target has "${aiFoundryName}"'
 
+// Breaker-open signature. RELIES ON: Polly's BrokenCircuitException propagating (directly or as an inner
+// exception) up to ReactionLoopHost.LogTickFailed, which logs it at Error -> an `exceptions` row. The
+// breaker's OnOpened hook does not log and an open breaker makes no HTTP call (so no dependency row). If a
+// future change catches and swallows the generation failure before the tick logs it, this branch goes BLIND
+// (the ratio branch still works); keep an Error-level log with the exception attached on that path.
 var errorQuery = join([
   '// Breaker-open signature: Polly BrokenCircuitException anywhere in a logged exception chain.'
   'let breakerHits = toscalar(exceptions'
   '    | where type has "BrokenCircuitException" or tostring(details) has "BrokenCircuitException"'
   '    | count);'
   providerCalls
-  '| summarize calls = count(), failed = countif(success == false)'
+  '| summarize calls = sum(itemCount), failed = sumif(itemCount, success == false)'
   '| extend failedPercent = iff(calls == 0, 0.0, 100.0 * failed / calls), breakerHits = breakerHits'
   '| where (calls >= ${errorMinimumCalls} and failedPercent > ${errorRatePercentThreshold}) or breakerHits > 0'
 ], '\n')
 
-var latencyQueryBase = join([
+var latencyWarningQuery = join([
   providerCalls
-  '| summarize calls = count(), p95DurationMs = percentile(duration, 95)'
+  '// p95 is unweighted by itemCount on purpose (see the SAMPLING note in provider-alerts.bicep).'
+  '| summarize calls = sum(itemCount), p95DurationMs = percentile(duration, 95)'
+  '| where calls >= ${latencyMinimumCalls} and p95DurationMs > ${latencyWarningMs}'
+], '\n')
+
+// 95 % of the per-attempt timeout, as an integer ms bound.
+var timedOutAtMs = latencyAlertMs * 95 / 100
+
+var timeoutRatioQuery = join([
+  providerCalls
+  '| summarize calls = sum(itemCount), timedOut = sumif(itemCount, duration >= ${timedOutAtMs})'
+  '| extend timedOutPercent = iff(calls == 0, 0.0, 100.0 * timedOut / calls)'
+  '| where calls >= ${latencyMinimumCalls} and timedOutPercent > ${timeoutRatioPercentThreshold}'
 ], '\n')
 
 var spendQuery = join([
   providerCalls
-  '| summarize calls = count()'
+  '| summarize calls = sum(itemCount)'
   '| where calls > ${callsPerHourThreshold}'
 ], '\n')
 
@@ -168,7 +205,7 @@ resource latencyWarningRule 'Microsoft.Insights/scheduledQueryRules@2023-03-15-p
   location: location
   properties: {
     displayName: 'Pulse provider: latency warning, p95 > ${latencyWarningMs} ms (${aiFoundryName})'
-    description: 'Sev-3. The 15-minute p95 of model-call attempt duration to ${aiFoundryName} exceeded ${latencyWarningMs} ms (~2x the measured Standard p95 of 2.7 s, engine-generation-infra/MEASURED-RESULTS.md). Not yet degrading; watch for the Sev-2 latency alert.'
+    description: 'Sev-3. With at least ${latencyMinimumCalls} attempts in 15 minutes, the p95 of model-call attempt duration to ${aiFoundryName} exceeded ${latencyWarningMs} ms (~2x the measured Standard p95 of 2.7 s, engine-generation-infra/MEASURED-RESULTS.md). Not yet degrading; watch for the Sev-2 latency alert.'
     severity: 3
     enabled: true
     evaluationFrequency: 'PT5M'
@@ -181,7 +218,7 @@ resource latencyWarningRule 'Microsoft.Insights/scheduledQueryRules@2023-03-15-p
     criteria: {
       allOf: [
         {
-          query: '${latencyQueryBase}\n| where p95DurationMs > ${latencyWarningMs}'
+          query: latencyWarningQuery
           timeAggregation: 'Count'
           operator: 'GreaterThan'
           threshold: 0
@@ -198,8 +235,8 @@ resource latencyAlertRule 'Microsoft.Insights/scheduledQueryRules@2023-03-15-pre
   name: 'alert-${resourceSuffix}-provider-latency'
   location: location
   properties: {
-    displayName: 'Pulse provider: latency at degraded-mode trip, p95 > ${latencyAlertMs} ms (${aiFoundryName})'
-    description: 'Sev-2. The 15-minute p95 of model-call attempt duration to ${aiFoundryName} exceeded ${latencyAlertMs} ms, the per-attempt degraded-mode trip (Generation:Resilience:AttemptTimeoutSeconds, ProviderLiveConfigTests). Attempts are timing out and feeding the circuit breaker. First response: docs/guide/troubleshooting.md "I got a provider alert".'
+    displayName: 'Pulse provider: attempts timing out, > ${timeoutRatioPercentThreshold}% at the ${latencyAlertMs} ms trip (${aiFoundryName})'
+    description: 'Sev-2. With at least ${latencyMinimumCalls} attempts in 15 minutes, more than ${timeoutRatioPercentThreshold}% of model-call attempts to ${aiFoundryName} ran to >= 95% of ${latencyAlertMs} ms, the per-attempt degraded-mode trip (Generation:Resilience:AttemptTimeoutSeconds, ProviderLiveConfigTests). Attempts are timing out and feeding the circuit breaker. First response: docs/guide/troubleshooting.md "I got a provider alert".'
     severity: 2
     enabled: true
     evaluationFrequency: 'PT5M'
@@ -212,7 +249,7 @@ resource latencyAlertRule 'Microsoft.Insights/scheduledQueryRules@2023-03-15-pre
     criteria: {
       allOf: [
         {
-          query: '${latencyQueryBase}\n| where p95DurationMs > ${latencyAlertMs}'
+          query: timeoutRatioQuery
           timeAggregation: 'Count'
           operator: 'GreaterThan'
           threshold: 0

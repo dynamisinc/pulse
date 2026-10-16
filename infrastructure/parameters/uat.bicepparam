@@ -132,6 +132,11 @@ param staffIdentityAccountsJson = readEnvironmentVariable('STAFF_IDENTITY_ACCOUN
 // aif-pulse-uat; requires deployMonitoring + deployAi (both on above). TIER-2 infra: Tom signs off.
 // The owner's address is NEVER typed here: it comes from the PULSE_ALERT_OWNER_EMAIL secret on the uat
 // GitHub environment (threaded by deploy-infrastructure.yml). An unset secret with alerts on FAILS the
-// deploy with a clear message, so set the secret before running Deploy Infrastructure.
-param deployProviderAlerts = true
+// deploy with a clear message.
+//
+// LANDS OFF on purpose: merging this changes nothing on UAT. Flip deployProviderAlerts to true in a ONE-LINE
+// FOLLOW-UP once Tom has created the PULSE_ALERT_OWNER_EMAIL secret on the uat environment (otherwise every
+// UAT infra deploy would fail until the secret exists). Thresholds can be overridden here for a forced test
+// fire (e.g. param providerAlertCallsPerHourThreshold = 1), then reverted; see infrastructure/README.md.
+param deployProviderAlerts = false
 param alertOwnerEmail = readEnvironmentVariable('PULSE_ALERT_OWNER_EMAIL', '')

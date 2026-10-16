@@ -17,7 +17,7 @@ template and flipped per environment in [`parameters/uat.bicepparam`](parameters
 | Toggle | Turns on | `main.bicep` default | UAT today |
 |---|---|---|---|
 | `deployMonitoring` | Log Analytics + Application Insights | `false` | `true` |
-| `deployProviderAlerts` | Email action group + scheduled log-query alerts on the live generation provider (errors/breaker, latency, call-volume spend proxy). Read-only over App Insights. **Requires `deployMonitoring` + `deployAi` and a non-empty `alertOwnerEmail`** (the deploy fails otherwise). See [Provider alerts](#provider-alerts-engine-telemetry-tuning-04) | `false` | `true` (Tier-2 infra, pending Tom's sign-off) |
+| `deployProviderAlerts` | Email action group + scheduled log-query alerts on the live generation provider (errors/breaker, latency, call-volume spend proxy). Read-only over App Insights. **Requires `deployMonitoring` + `deployAi` and a non-empty `alertOwnerEmail`** (the deploy fails otherwise). See [Provider alerts](#provider-alerts-engine-telemetry-tuning-04) | `false` | `false` (flips to `true` in a one-line follow-up once the `PULSE_ALERT_OWNER_EMAIL` secret exists; Tier-2 infra, Tom signs off) |
 | `deployStorage` | Storage account (keyless blob media, private `post-media` container) | `false` | `true` |
 | `deployDatabase` | Azure SQL server + database | `false` | `true` |
 | `deployBackend` | App Service / Function App (per `hostingModel`) | `false` | `true` |
@@ -292,17 +292,31 @@ one email action group (`ag-pulse-uat-provider`) and four scheduled log-query ru
 unrelated failing dependency (SQL, Storage, the identity endpoint) never trips them. The module only
 reads existing telemetry: no app setting, no `Generation__*` value, no new metric and no code change.
 
+**Status on UAT: OFF.** `uat.bicepparam` lands with `deployProviderAlerts = false`, so merging this
+deploys nothing. The flip to `true` is a one-line follow-up once Tom has created the
+`PULSE_ALERT_OWNER_EMAIL` secret on the `uat` GitHub environment (with alerts on and no secret, every
+UAT infra deploy fails by design).
+
 | Rule | Fires when | Severity | Window / every |
 |---|---|---|---|
-| `alert-pulse-uat-provider-errors` | more than 20 % of attempts failed (with at least 5 attempts), **or** a Polly `BrokenCircuitException` was logged (breaker open, engine degraded to Suggest) | Sev-2 | 15 min / 5 min |
-| `alert-pulse-uat-provider-latency-warning` | p95 attempt duration > 5 s (about 2x the measured Standard p95 of 2.7 s) | Sev-3 | 15 min / 5 min |
-| `alert-pulse-uat-provider-latency` | p95 attempt duration > 10 s (the per-attempt degraded-mode trip, `Generation:Resilience:AttemptTimeoutSeconds`) | Sev-2 | 15 min / 5 min |
+| `alert-pulse-uat-provider-errors` | at least 5 attempts and more than 20 % of them failed, **or** a Polly `BrokenCircuitException` was logged (breaker open, engine degraded to Suggest) | Sev-2 | 15 min / 5 min |
+| `alert-pulse-uat-provider-latency-warning` | at least 5 attempts and their p95 duration > 5 s (about 2x the measured Standard p95 of 2.7 s) | Sev-3 | 15 min / 5 min |
+| `alert-pulse-uat-provider-latency` | at least 5 attempts and more than 5 % of them ran to >= 95 % of 10 s, i.e. hit the per-attempt timeout (`Generation:Resilience:AttemptTimeoutSeconds`, the degraded-mode trip) | Sev-2 | 15 min / 5 min |
 | `alert-pulse-uat-provider-spend` | more than 750 model calls in an hour (about 2x a nominal active-storyline hour; about $1.20/h at the Ambient rate) | Sev-3 | 1 h / 15 min |
 
-All thresholds are module parameters (`errorRatePercentThreshold`, `errorMinimumCalls`,
-`latencyWarningMs`, `latencyAlertMs`, `callsPerHourThreshold`) with the defaults above, sourced from
-[`MEASURED-RESULTS.md`](../docs/features/engine-generation-infra/MEASURED-RESULTS.md). If the trip
-threshold (`AttemptTimeoutSeconds`) moves, move `latencyAlertMs` with it.
+The Sev-2 latency rule is a **timeout ratio**, not a p95: the Polly timeout cancels an attempt at 10 s,
+so a timed-out attempt is recorded at about 10 s and a "p95 > 10 s" test would sit exactly on that edge.
+
+**Sampling.** The API uses the App Insights SDK's default adaptive sampling, so one stored row can stand
+for several calls. Every count is `sum(itemCount)`, not `count()`. The p95 is computed over the
+retained rows (unweighted), which sampling does not bias.
+
+**Thresholds** are root parameters in `main.bicep`, defaults as above, sourced from
+[`MEASURED-RESULTS.md`](../docs/features/engine-generation-infra/MEASURED-RESULTS.md):
+`providerAlertCallsPerHourThreshold` (750), `providerAlertLatencyWarningMs` (5000),
+`providerAlertLatencyAlertMs` (10000) and `providerAlertTimeoutRatioPercentThreshold` (5). The error
+ratio (20 %) and the minimum-call guards (5) are module defaults. If the trip threshold
+(`AttemptTimeoutSeconds`) moves, move `providerAlertLatencyAlertMs` with it.
 
 **The spend rule is a call-volume proxy, not a dollar figure.** Token counts live in the SQL
 `TelemetryEvents` table (`engine.generated`), not in App Insights, so Azure Monitor cannot see cost.
@@ -310,9 +324,11 @@ For token-accurate cost use the AI generation usage panel (`GET /api/engine/usag
 
 **Who is told.** The action group has one email receiver: `alertOwnerEmail`, from the
 `PULSE_ALERT_OWNER_EMAIL` secret on the `uat` GitHub environment (read by `uat.bicepparam` with
-`readEnvironmentVariable`; never typed in the repo, never echoed in outputs). With
-`deployProviderAlerts = true`, an empty email, or `deployMonitoring`/`deployAi` off, **fails the deploy
-with a clear message**.
+`readEnvironmentVariable`). It is never typed in the repo and is in no template output. The workflow
+masks it in the job log, and it is a `@secure()` parameter, so it is not recorded in the deployment
+history. It **is** readable on the deployed action group to anyone with read access to the resource
+group, because an email receiver is not a secret property. With `deployProviderAlerts = true`, an empty
+email, or `deployMonitoring`/`deployAi` off, **fails the deploy with a clear message**.
 
 **First response to an alert:** see "I got a provider alert" in
 [`docs/guide/troubleshooting.md`](../docs/guide/troubleshooting.md#i-got-a-provider-alert) (drop the
@@ -334,18 +350,24 @@ time range "Last hour"), for example:
 ```kusto
 dependencies
 | where target has "aif-pulse-uat"
-| summarize calls = count(), failed = countif(success == false), p95DurationMs = percentile(duration, 95)
+| summarize calls = sum(itemCount), failed = sumif(itemCount, success == false),
+    timedOut = sumif(itemCount, duration >= 9500), p95DurationMs = percentile(duration, 95)
     by type, name, bin(timestamp, 15m)
 ```
 
 Expect the model calls (an HTTP `POST` to the deployment's chat-completions path) and no unrelated
-hosts. **Check this once on the first live hour:** if the same call shows up as two rows with different
-`type` values (for example an SDK-level span as well as the HTTP row), the counts double and the
-queries need a `type` filter; that has not been observed yet. To force a test fire, lower one threshold
-temporarily (pass a low `callsPerHourThreshold` or `latencyWarningMs` on the `providerAlerts` module
-call and redeploy, or edit the rule's query in the portal), confirm the email arrives, then revert.
-The action group's **Test** button in the portal checks the email path alone. Record the result in the
-story's Tests section.
+hosts. **Check two things on the first live hour:**
+
+- If the same call shows up as two rows with different `type` values (for example an SDK-level span as
+  well as the HTTP row), the counts double and the queries need a `type` filter. Not observed yet.
+- A timed-out attempt must appear as a row with a duration of about 10 s (`success == false`). The Sev-2
+  latency rule depends on it. Not observed yet.
+
+**Force a test fire.** Override one threshold in `uat.bicepparam` (for example
+`param providerAlertCallsPerHourThreshold = 1` or `param providerAlertLatencyWarningMs = 1`), redeploy,
+confirm the email arrives, then remove the line and redeploy. Editing the rule's query in the portal also
+works. The action group's **Test** button in the portal checks the email path alone. Record the result
+in the story's Tests section.
 
 ## Blob storage for post media (keyless)
 

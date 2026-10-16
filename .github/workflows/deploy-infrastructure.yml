@@ -69,8 +69,12 @@ jobs:
         env:
           BOOTSTRAP_SECRET: ${{ secrets.BOOTSTRAP_SECRET }}
           STAFF_IDENTITY_ACCOUNTS_JSON: ${{ secrets.STAFF_IDENTITY_ACCOUNTS_JSON }}
+          # Provider-alert owner email (engine-telemetry-tuning/04). GitHub already masks the exact secret
+          # value; registering it explicitly keeps it masked in what-if/--verbose output too. Skipped when unset.
+          PULSE_ALERT_OWNER_EMAIL: ${{ secrets.PULSE_ALERT_OWNER_EMAIL }}
         run: |
           if [ -n "$BOOTSTRAP_SECRET" ]; then echo "::add-mask::$BOOTSTRAP_SECRET"; fi
+          if [ -n "$PULSE_ALERT_OWNER_EMAIL" ]; then echo "::add-mask::$PULSE_ALERT_OWNER_EMAIL"; fi
           if [ -n "$STAFF_IDENTITY_ACCOUNTS_JSON" ]; then
             echo "$STAFF_IDENTITY_ACCOUNTS_JSON" | jq -r '.[]?.Secret // empty' | while IFS= read -r s; do
               [ -n "$s" ] && echo "::add-mask::$s"

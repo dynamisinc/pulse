@@ -62,11 +62,27 @@ param generationTenantBounded bool = false
 @description('TIER-2 HUMAN ASSERTION (NFR-005 §2 / ADP-025), NOT a derived value: the signer attests the contractual no-training terms covering this endpoint (Microsoft product terms for Azure OpenAI; the Anthropic Marketplace offer for Claude). Typed by the §8 signer in the environment parameter file alongside generationProviderLive; deliberately NOT derived from deployAi, for the same reason as generationTenantBounded. False by default (fail closed); a false assertion under a live provider throws at startup rather than egressing.')
 param generationNoTrainingAttested bool = false
 
-@description('Deploy the provider alert rules (engine-telemetry-tuning/04): an email action group + scheduled log-query rules over App Insights for generation errors/breaker, latency (5 s warn / 10 s trip) and a call-volume spend proxy. Read-only over existing telemetry. OFF by default; requires deployMonitoring AND deployAi (the deploy fails otherwise) and a non-empty alertOwnerEmail.')
+@description('Deploy the provider alert rules (engine-telemetry-tuning/04): an email action group + scheduled log-query rules over App Insights for generation errors/breaker, latency (5 s p95 warning / share of attempts timing out at the 10 s trip) and a call-volume spend proxy. Read-only over existing telemetry. OFF by default; requires deployMonitoring AND deployAi (the deploy fails otherwise) and a non-empty alertOwnerEmail.')
 param deployProviderAlerts bool = false
 
-@description('Email address of the provider owner who receives the provider alerts. Empty default so parameter sets that omit it still deploy with alerts off; deployProviderAlerts = true with an empty value FAILS the deploy. Sourced from the PULSE_ALERT_OWNER_EMAIL secret in CI; never a literal in this repo and never echoed in outputs.')
+@secure()
+@description('Email address of the provider owner who receives the provider alerts. Empty default so parameter sets that omit it still deploy with alerts off; deployProviderAlerts = true with an empty value FAILS the deploy. Sourced from the PULSE_ALERT_OWNER_EMAIL secret in CI (masked in the workflow log); never a literal in this repo and not in any template output. @secure keeps it out of the deployment parameters/history, but it is readable on the deployed action group (an email receiver is not a secret property).')
 param alertOwnerEmail string = ''
+
+// Provider-alert thresholds, exposed at the root so an environment (or a temporary forced test fire) can
+// override them in its .bicepparam without editing this template. Defaults and their sources are documented
+// in modules/provider-alerts.bicep (MEASURED-RESULTS.md; AttemptTimeoutSeconds / ProviderLiveConfigTests).
+@description('Provider alerts: spend-proxy threshold, Foundry-host model calls per hour (Sev-3). Default 750 ≈ 2x a nominal active-storyline hour.')
+param providerAlertCallsPerHourThreshold int = 750
+
+@description('Provider alerts: latency warning, 15-minute p95 attempt duration in ms (Sev-3). Default 5000 ≈ 2x the measured Standard p95.')
+param providerAlertLatencyWarningMs int = 5000
+
+@description('Provider alerts: the per-attempt timeout in ms the Sev-2 timeout-ratio rule measures against. Default 10000 = Generation:Resilience:AttemptTimeoutSeconds; move with it.')
+param providerAlertLatencyAlertMs int = 10000
+
+@description('Provider alerts: percentage of attempts at >= 95 % of providerAlertLatencyAlertMs (timed out) above which the Sev-2 alert fires. Default 5.')
+param providerAlertTimeoutRatioPercentThreshold int = 5
 
 // ============================================================================
 // SQL Parameters (only consumed when deployDatabase = true)
@@ -297,7 +313,7 @@ module appInsights 'modules/appinsights.bicep' = if (deployMonitoring) {
 }
 
 // Provider alert rules (engine-telemetry-tuning/04). Read-only over the appInsights component: an action
-// group + scheduled log-query rules on the Foundry host's `dependencies` rows. Gated by deployProviderAlerts
+// group + scheduled log-query rules (errors/breaker, latency warning, timeout ratio, spend proxy) on the Foundry host's `dependencies` rows. Gated by deployProviderAlerts
 // (default OFF). Turning it on without its prerequisites is a DEPLOY ERROR, not a silent no-op: no App
 // Insights (deployMonitoring) means nothing to query, no Foundry account (deployAi) means nothing to watch,
 // and an empty alertOwnerEmail means nobody is told. fail() sits in the untaken branch of if(), so with
@@ -321,6 +337,10 @@ module providerAlerts 'modules/provider-alerts.bicep' = if (deployProviderAlerts
     aiFoundryName: aiFoundryName
     resourceSuffix: resourceSuffix
     alertOwnerEmail: providerAlertsOwnerEmail
+    callsPerHourThreshold: providerAlertCallsPerHourThreshold
+    latencyWarningMs: providerAlertLatencyWarningMs
+    latencyAlertMs: providerAlertLatencyAlertMs
+    timeoutRatioPercentThreshold: providerAlertTimeoutRatioPercentThreshold
     tags: tags
   }
 }

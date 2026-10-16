@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.48.1.52935",
-      "templateHash": "3471325058703642801"
+      "templateHash": "6713025463491885576"
     }
   },
   "parameters": {
@@ -124,14 +124,42 @@
       "type": "bool",
       "defaultValue": false,
       "metadata": {
-        "description": "Deploy the provider alert rules (engine-telemetry-tuning/04): an email action group + scheduled log-query rules over App Insights for generation errors/breaker, latency (5 s warn / 10 s trip) and a call-volume spend proxy. Read-only over existing telemetry. OFF by default; requires deployMonitoring AND deployAi (the deploy fails otherwise) and a non-empty alertOwnerEmail."
+        "description": "Deploy the provider alert rules (engine-telemetry-tuning/04): an email action group + scheduled log-query rules over App Insights for generation errors/breaker, latency (5 s p95 warning / share of attempts timing out at the 10 s trip) and a call-volume spend proxy. Read-only over existing telemetry. OFF by default; requires deployMonitoring AND deployAi (the deploy fails otherwise) and a non-empty alertOwnerEmail."
       }
     },
     "alertOwnerEmail": {
-      "type": "string",
+      "type": "securestring",
       "defaultValue": "",
       "metadata": {
-        "description": "Email address of the provider owner who receives the provider alerts. Empty default so parameter sets that omit it still deploy with alerts off; deployProviderAlerts = true with an empty value FAILS the deploy. Sourced from the PULSE_ALERT_OWNER_EMAIL secret in CI; never a literal in this repo and never echoed in outputs."
+        "description": "Email address of the provider owner who receives the provider alerts. Empty default so parameter sets that omit it still deploy with alerts off; deployProviderAlerts = true with an empty value FAILS the deploy. Sourced from the PULSE_ALERT_OWNER_EMAIL secret in CI (masked in the workflow log); never a literal in this repo and not in any template output. @secure keeps it out of the deployment parameters/history, but it is readable on the deployed action group (an email receiver is not a secret property)."
+      }
+    },
+    "providerAlertCallsPerHourThreshold": {
+      "type": "int",
+      "defaultValue": 750,
+      "metadata": {
+        "description": "Provider alerts: spend-proxy threshold, Foundry-host model calls per hour (Sev-3). Default 750 ≈ 2x a nominal active-storyline hour."
+      }
+    },
+    "providerAlertLatencyWarningMs": {
+      "type": "int",
+      "defaultValue": 5000,
+      "metadata": {
+        "description": "Provider alerts: latency warning, 15-minute p95 attempt duration in ms (Sev-3). Default 5000 ≈ 2x the measured Standard p95."
+      }
+    },
+    "providerAlertLatencyAlertMs": {
+      "type": "int",
+      "defaultValue": 10000,
+      "metadata": {
+        "description": "Provider alerts: the per-attempt timeout in ms the Sev-2 timeout-ratio rule measures against. Default 10000 = Generation:Resilience:AttemptTimeoutSeconds; move with it."
+      }
+    },
+    "providerAlertTimeoutRatioPercentThreshold": {
+      "type": "int",
+      "defaultValue": 5,
+      "metadata": {
+        "description": "Provider alerts: percentage of attempts at >= 95 % of providerAlertLatencyAlertMs (timed out) above which the Sev-2 alert fires. Default 5."
       }
     },
     "sqlAdminLogin": {
@@ -631,6 +659,18 @@
           "alertOwnerEmail": {
             "value": "[variables('providerAlertsOwnerEmail')]"
           },
+          "callsPerHourThreshold": {
+            "value": "[parameters('providerAlertCallsPerHourThreshold')]"
+          },
+          "latencyWarningMs": {
+            "value": "[parameters('providerAlertLatencyWarningMs')]"
+          },
+          "latencyAlertMs": {
+            "value": "[parameters('providerAlertLatencyAlertMs')]"
+          },
+          "timeoutRatioPercentThreshold": {
+            "value": "[parameters('providerAlertTimeoutRatioPercentThreshold')]"
+          },
           "tags": {
             "value": "[variables('tags')]"
           }
@@ -642,7 +682,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.48.1.52935",
-              "templateHash": "1441488511365005996"
+              "templateHash": "14913297314702181833"
             }
           },
           "parameters": {
@@ -671,10 +711,10 @@
               }
             },
             "alertOwnerEmail": {
-              "type": "string",
+              "type": "securestring",
               "minLength": 3,
               "metadata": {
-                "description": "The single email receiver on the action group (the provider owner). REQUIRED — an alert nobody receives is worse than none. Never echoed in outputs."
+                "description": "The single email receiver on the action group (the provider owner). REQUIRED — an alert nobody receives is worse than none. @secure so it is not recorded in the deployment parameters/history; it is still visible on the action group resource itself (an email receiver is not a secret property)."
               }
             },
             "errorRatePercentThreshold": {
@@ -707,7 +747,24 @@
               "defaultValue": 10000,
               "minValue": 1,
               "metadata": {
-                "description": "Latency alert (Sev-2): 15-minute p95 of Foundry-host dependency duration, in ms. Default 10000 = Generation:Resilience:AttemptTimeoutSeconds (the degraded-mode trip, ProviderLiveConfigTests). Move with that setting."
+                "description": "Latency trip (Sev-2): the per-attempt timeout in ms. Attempts with duration >= 95 % of this count as timed out. Default 10000 = Generation:Resilience:AttemptTimeoutSeconds (the degraded-mode trip, ProviderLiveConfigTests). Move with that setting."
+              }
+            },
+            "timeoutRatioPercentThreshold": {
+              "type": "int",
+              "defaultValue": 5,
+              "minValue": 1,
+              "maxValue": 100,
+              "metadata": {
+                "description": "Latency trip (Sev-2): percentage of attempts in the 15-minute window that timed out (duration >= 95 % of latencyAlertMs) above which the alert fires. Default 5."
+              }
+            },
+            "latencyMinimumCalls": {
+              "type": "int",
+              "defaultValue": 5,
+              "minValue": 1,
+              "metadata": {
+                "description": "Latency rules: minimum Foundry-host attempts in the window before either latency rule is evaluated (one slow call in a quiet window must not alert)."
               }
             },
             "callsPerHourThreshold": {
@@ -725,9 +782,11 @@
           },
           "variables": {
             "providerCalls": "[format('dependencies\n| where target has \"{0}\"', parameters('aiFoundryName'))]",
-            "errorQuery": "[join(createArray('// Breaker-open signature: Polly BrokenCircuitException anywhere in a logged exception chain.', 'let breakerHits = toscalar(exceptions', '    | where type has \"BrokenCircuitException\" or tostring(details) has \"BrokenCircuitException\"', '    | count);', variables('providerCalls'), '| summarize calls = count(), failed = countif(success == false)', '| extend failedPercent = iff(calls == 0, 0.0, 100.0 * failed / calls), breakerHits = breakerHits', format('| where (calls >= {0} and failedPercent > {1}) or breakerHits > 0', parameters('errorMinimumCalls'), parameters('errorRatePercentThreshold'))), '\n')]",
-            "latencyQueryBase": "[join(createArray(variables('providerCalls'), '| summarize calls = count(), p95DurationMs = percentile(duration, 95)'), '\n')]",
-            "spendQuery": "[join(createArray(variables('providerCalls'), '| summarize calls = count()', format('| where calls > {0}', parameters('callsPerHourThreshold'))), '\n')]",
+            "errorQuery": "[join(createArray('// Breaker-open signature: Polly BrokenCircuitException anywhere in a logged exception chain.', 'let breakerHits = toscalar(exceptions', '    | where type has \"BrokenCircuitException\" or tostring(details) has \"BrokenCircuitException\"', '    | count);', variables('providerCalls'), '| summarize calls = sum(itemCount), failed = sumif(itemCount, success == false)', '| extend failedPercent = iff(calls == 0, 0.0, 100.0 * failed / calls), breakerHits = breakerHits', format('| where (calls >= {0} and failedPercent > {1}) or breakerHits > 0', parameters('errorMinimumCalls'), parameters('errorRatePercentThreshold'))), '\n')]",
+            "latencyWarningQuery": "[join(createArray(variables('providerCalls'), '// p95 is unweighted by itemCount on purpose (see the SAMPLING note in provider-alerts.bicep).', '| summarize calls = sum(itemCount), p95DurationMs = percentile(duration, 95)', format('| where calls >= {0} and p95DurationMs > {1}', parameters('latencyMinimumCalls'), parameters('latencyWarningMs'))), '\n')]",
+            "timedOutAtMs": "[div(mul(parameters('latencyAlertMs'), 95), 100)]",
+            "timeoutRatioQuery": "[join(createArray(variables('providerCalls'), format('| summarize calls = sum(itemCount), timedOut = sumif(itemCount, duration >= {0})', variables('timedOutAtMs')), '| extend timedOutPercent = iff(calls == 0, 0.0, 100.0 * timedOut / calls)', format('| where calls >= {0} and timedOutPercent > {1}', parameters('latencyMinimumCalls'), parameters('timeoutRatioPercentThreshold'))), '\n')]",
+            "spendQuery": "[join(createArray(variables('providerCalls'), '| summarize calls = sum(itemCount)', format('| where calls > {0}', parameters('callsPerHourThreshold'))), '\n')]",
             "actions": {
               "actionGroups": [
                 "[resourceId('Microsoft.Insights/actionGroups', format('ag-{0}-provider', parameters('resourceSuffix')))]"
@@ -799,7 +858,7 @@
               "location": "[parameters('location')]",
               "properties": {
                 "displayName": "[format('Pulse provider: latency warning, p95 > {0} ms ({1})', parameters('latencyWarningMs'), parameters('aiFoundryName'))]",
-                "description": "[format('Sev-3. The 15-minute p95 of model-call attempt duration to {0} exceeded {1} ms (~2x the measured Standard p95 of 2.7 s, engine-generation-infra/MEASURED-RESULTS.md). Not yet degrading; watch for the Sev-2 latency alert.', parameters('aiFoundryName'), parameters('latencyWarningMs'))]",
+                "description": "[format('Sev-3. With at least {0} attempts in 15 minutes, the p95 of model-call attempt duration to {1} exceeded {2} ms (~2x the measured Standard p95 of 2.7 s, engine-generation-infra/MEASURED-RESULTS.md). Not yet degrading; watch for the Sev-2 latency alert.', parameters('latencyMinimumCalls'), parameters('aiFoundryName'), parameters('latencyWarningMs'))]",
                 "severity": 3,
                 "enabled": true,
                 "evaluationFrequency": "PT5M",
@@ -812,7 +871,7 @@
                 "criteria": {
                   "allOf": [
                     {
-                      "query": "[format('{0}\n| where p95DurationMs > {1}', variables('latencyQueryBase'), parameters('latencyWarningMs'))]",
+                      "query": "[variables('latencyWarningQuery')]",
                       "timeAggregation": "Count",
                       "operator": "GreaterThan",
                       "threshold": 0,
@@ -833,8 +892,8 @@
               "name": "[format('alert-{0}-provider-latency', parameters('resourceSuffix'))]",
               "location": "[parameters('location')]",
               "properties": {
-                "displayName": "[format('Pulse provider: latency at degraded-mode trip, p95 > {0} ms ({1})', parameters('latencyAlertMs'), parameters('aiFoundryName'))]",
-                "description": "[format('Sev-2. The 15-minute p95 of model-call attempt duration to {0} exceeded {1} ms, the per-attempt degraded-mode trip (Generation:Resilience:AttemptTimeoutSeconds, ProviderLiveConfigTests). Attempts are timing out and feeding the circuit breaker. First response: docs/guide/troubleshooting.md \"I got a provider alert\".', parameters('aiFoundryName'), parameters('latencyAlertMs'))]",
+                "displayName": "[format('Pulse provider: attempts timing out, > {0}% at the {1} ms trip ({2})', parameters('timeoutRatioPercentThreshold'), parameters('latencyAlertMs'), parameters('aiFoundryName'))]",
+                "description": "[format('Sev-2. With at least {0} attempts in 15 minutes, more than {1}% of model-call attempts to {2} ran to >= 95% of {3} ms, the per-attempt degraded-mode trip (Generation:Resilience:AttemptTimeoutSeconds, ProviderLiveConfigTests). Attempts are timing out and feeding the circuit breaker. First response: docs/guide/troubleshooting.md \"I got a provider alert\".', parameters('latencyMinimumCalls'), parameters('timeoutRatioPercentThreshold'), parameters('aiFoundryName'), parameters('latencyAlertMs'))]",
                 "severity": 2,
                 "enabled": true,
                 "evaluationFrequency": "PT5M",
@@ -847,7 +906,7 @@
                 "criteria": {
                   "allOf": [
                     {
-                      "query": "[format('{0}\n| where p95DurationMs > {1}', variables('latencyQueryBase'), parameters('latencyAlertMs'))]",
+                      "query": "[variables('timeoutRatioQuery')]",
                       "timeAggregation": "Count",
                       "operator": "GreaterThan",
                       "threshold": 0,

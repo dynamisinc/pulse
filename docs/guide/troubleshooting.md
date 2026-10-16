@@ -221,7 +221,7 @@ The demo environment has two maintenance scripts in the Pulse repository under `
 ## I got a provider alert
 
 > This section is for the person who owns the AI provider (the address on the alert emails). It does
-> not affect players directly: the engine only drafts posts, and staff review them.
+> not affect players directly: the engine drafts posts, and in Suggest mode staff review every one.
 
 Pulse emails the provider owner when the AI service that writes engine drafts misbehaves. The email
 subject names the rule:
@@ -229,7 +229,7 @@ subject names the rule:
 - **generation errors / breaker open** (urgent): many calls to the AI service failed, or Pulse has
   stopped calling it for a while. When Pulse stops calling it, it also drops the engine to Suggest
   by itself.
-- **latency at degraded-mode trip** (urgent): calls are so slow that they time out.
+- **attempts timing out** (urgent): enough calls are so slow that they time out.
 - **latency warning**: calls are slower than normal but still work.
 - **call-volume spend proxy**: the engine made far more calls in the last hour than a normal exercise
   hour. This counts calls, not money. For the real cost, open the **USAGE** tool in the Controller
@@ -244,8 +244,8 @@ subject names the rule:
    service, without a restart. See [Provider](controller-guide.md#provider).
 3. Tell Dynamis support (below), with the alert email and the time.
 
-Alerts clear on their own when the problem stops. They are only turned on in the shared demo
-environment for now. How to silence or tune them is in `infrastructure/README.md` ("Provider
+Alerts clear on their own when the problem stops. They are being set up for the shared demo
+environment only, and are not switched on yet. How to silence or tune them is in `infrastructure/README.md` ("Provider
 alerts"), for Dynamis staff.
 
 ---
