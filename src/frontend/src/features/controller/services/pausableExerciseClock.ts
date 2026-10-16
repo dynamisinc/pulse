@@ -106,6 +106,9 @@ export function createPausableExerciseClock(
   }
 
   return {
+    // Wall time minus frozen time: still no scenario anchor (see IExerciseClock).
+    mirrorsWallClock: true,
+
     get isFrozen(): boolean {
       return frozenAtWallMs !== null
     },

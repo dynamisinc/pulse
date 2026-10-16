@@ -131,6 +131,10 @@ own stated practice (coin new IDs in the epic first, not in a downstream doc) â€
 - [ ] **Slugless lockout attribution:** a Person's failure counter goes up only when the attempt fails as a whole (no candidate verified). A success in org A never counts against the same email's Person in org B. Locked-out candidates are skipped without verification.
 - [ ] **The org choice is its own record:** `LoginChoice` (TokenHash, a 2-minute expiry, ConsumedAt) plus `LoginChoiceCandidate(ChoiceId, PersonId, OrganizationId)`, created in the A1 migration. `/login/choose` accepts only a candidate org, consumes the whole choice atomically (`ConsumedAt IS NULL`), and changes no credential. `CredentialToken` is not used for it.
 
+### Copilot review 5 fold (2026-10-16)
+- [ ] **Realtime scope on the console host (A1):** staff hub connections take their exercise from the session's `ExerciseId`, verified against a live staff enrollment. Participant connections keep the host binding, and the hub refuses org-scope sessions. `active-exercise` switching moves the connection's group. Tests cover a console-host connection and an exercise switch.
+- [ ] A credential change invalidates every unconsumed `LoginChoiceCandidate` for that person, so a choice verified against the old password can no longer mint a session (test).
+
 ## Out of Scope
 - **The dev/UAT-only idempotent seeder** granting a named human `orgAdmin` assignments across an
   organization's *existing* exercises â€” built in parallel, explicitly out of this story's scope, and

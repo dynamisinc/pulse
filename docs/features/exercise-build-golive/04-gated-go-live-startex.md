@@ -19,6 +19,9 @@ begins scenario content delivery (COR-043).
       machine (exercise-configuration COR-032).
 - [ ] The readiness dashboard (story 03) is surfaced at the go-live decision.
 
+### Copilot review 7 fold (2026-10-16)
+- [ ] The `FirstLiveAt` stamp itself is delivered in A1 (identity-auth-roles 16). This story keeps the controller-only gate and adds the readiness check; it does not re-implement the stamp.
+
 ## Out of Scope
 The clock mechanics (exercise-clock COR-050); content lock (story 05); the holding page (Paused,
 exercise-configuration); EndEx (exercise-clock COR-054).

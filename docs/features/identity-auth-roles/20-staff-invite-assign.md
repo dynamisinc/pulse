@@ -10,7 +10,7 @@ Today nothing creates staff enrollments except bootstrap and the creator. Org ad
 ## Acceptance Criteria
 - [ ] **Invite.** Given an org admin and an email, when they invite, then a `Person` is created (or the existing one reused) and a single-use `CredentialToken` (purpose `invite`, 7 days) is emailed via `IPulseMailer`; the invitee sets a password (policy §3.2, 12-character staff minimum) and is signed in.
 - [ ] **Assign.** Given a planner of exercise X (or an org admin), when they enroll a directory person as planner/controller/evaluator, then an `Enrollment` is created; the same person already holding a participant enrollment in X gets 409 `conflicting-enrollment`.
-- [ ] **Last planner.** Removing the last planner of an exercise is refused (409); removing a controller/evaluator succeeds and revokes that person's sessions for that exercise.
+- [ ] **Last planner.** Removing the last planner of an exercise is refused (409); removing a controller/evaluator succeeds and revokes that person's sessions for that exercise. If the removed controller is the **lead**, the same transaction also clears `IsLead`, swamped mode is turned off after commit (idempotent), and both are audited (Option A, design doc §1.1/§12).
 - [ ] **Org admin platform provisioning.** `POST /api/ops/organizations {name, adminEmail}` (bootstrap-secret gated) creates the org, its slug and first org-admin `Person` and sends an invite; an empty org admin can then sign in at `/o/{slug}`.
 - [ ] **Self-enroll.** An org admin may enroll themselves; it is audited as `org.enrollment.self-granted`.
 - [ ] **Emails** show the participant-facing/org name only, never an internal exercise name (#376).
@@ -24,7 +24,17 @@ Today nothing creates staff enrollments except bootstrap and the creator. Org ad
 - [ ] Removing a staff enrollment, or changing its role, revokes that person's live sessions on that exercise (access and refresh) in the same transaction, because `Session.Role` is persisted and survives refresh. A test covers both tokens.
 
 ### Lead controller UI (Tom, 2026-10-16)
-- [ ] The staff assignment screen marks the exercise's lead controller and lets a planner or org admin change it, using the A1 endpoint. The lead is shown with a text label and an icon, never color alone.
+- [ ] The staff assignment screen marks the exercise's lead controller and lets a planner change it (an org admin acts through their own enrollment), using the A1 endpoint. The lead is shown with a text label and an icon, never color alone.
+
+### Orchestrator re-review fold (2026-10-16, Option A)
+- [ ] Removing or demoting the **lead** controller is allowed. In one transaction it revokes that person's sessions on the exercise and clears `IsLead`. Swamped mode is turned off after commit, idempotently. All three are audited. Tests cover removal and demotion, each with swamped mode on beforehand: afterwards it is off, the exercise has no lead, and the old tokens get 401.
+
+### Copilot review 5 fold (2026-10-16)
+- [ ] Redeeming an invite sets the password but mints a session **only if a grant exists** (`OrgRole` or a staff enrollment in the org). Otherwise it shows an **"awaiting assignment"** page in COBRA staff styling, and normal sign-in works once the person is assigned. Tests cover both paths.
+- [ ] Enrollment removal or a role change also aborts the person's live SignalR connections on that exercise.
+
+### Copilot review 7 fold (2026-10-16)
+- [ ] The "awaiting assignment" rule applies to **staff** invites only. Participant invites (roster "add to directory", promoting a one-off) are redeemed on the issuing exercise's host in the participant skin, and mint a participant session on that enrollment. Tests cover both roster flows.
 
 ## Out of Scope
 Participant roster import and sign-in (easy-login); password reset (21); the directory page itself (19).

@@ -1,6 +1,6 @@
 # Story: Exercise report: time window scopes the whole report, print polish, threads
 
-**Feature:** Demo feedback cut (10/20)  ·  **Phase:** 1  ·  **Status:** In Review
+**Feature:** Demo feedback cut (10/20)  ·  **Phase:** 1  ·  **Status:** Complete
 **Requirements:** EVL-030 (lite), COR-053, NFR-001  ·  **Decisions:** DF-45, DF-46, DF-47  ·  **Issue:** #568
 **Stack:** backend + frontend  ·  **Review:** Tier-1  ·  **Priority:** Must  ·  **Wave:** 4  ·  **Effort:** M
 

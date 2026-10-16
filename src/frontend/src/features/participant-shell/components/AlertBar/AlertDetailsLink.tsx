@@ -22,21 +22,23 @@ import { Link, useInRouterContext } from 'react-router-dom'
 import { ALERTS_PATH } from './alertsRoute'
 
 export interface AlertDetailsLinkProps {
+  /** Optional class, e.g. the bar's touch hit-area class (story 05). */
+  readonly className?: string
   readonly style: CSSProperties
   readonly children: ReactNode
 }
 
-export function AlertDetailsLink({ style, children }: AlertDetailsLinkProps) {
+export function AlertDetailsLink({ className, style, children }: AlertDetailsLinkProps) {
   const inRouter = useInRouterContext()
   if (inRouter) {
     return (
-      <Link to={ALERTS_PATH} data-testid="pulse-alert-bar-details" style={style}>
+      <Link to={ALERTS_PATH} data-testid="pulse-alert-bar-details" className={className} style={style}>
         {children}
       </Link>
     )
   }
   return (
-    <a href={ALERTS_PATH} data-testid="pulse-alert-bar-details" style={style}>
+    <a href={ALERTS_PATH} data-testid="pulse-alert-bar-details" className={className} style={style}>
       {children}
     </a>
   )

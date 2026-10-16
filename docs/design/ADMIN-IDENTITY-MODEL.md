@@ -41,7 +41,8 @@ Organization (+ Slug: new, unique; used in the staff console URL, §1.2)
         ├── StaffUser           (1:1 facet sharing Person.Id; exists once the person has any staff enrollment)
         └── Enrollment*         (NEW table, replaces StaffAssignment; one row per person per exercise)
               ExerciseId, PersonId? (null = one-off participant),
-              Role ∈ planner|controller|evaluator|participant|pio, PersonaId? (participant roles)
+              Role ∈ planner|controller|evaluator|participant|pio, PersonaId? (participant roles),
+              IsLead (controller only), CreatedAt (the lead backfill orders by it)
               └── Account?      (participant roles only; Account.EnrollmentId is unique. The sign-in facet:
                                  Username, CredentialHash, lockout, Email; links and day words key on it)
 ```
@@ -90,19 +91,51 @@ Organization (+ Slug: new, unique; used in the staff console URL, §1.2)
   - It is valid only on a `controller` enrollment, enforced by a check constraint.
   - There is **at most one lead per exercise**, enforced by a filtered unique index on `(ExerciseId)` where
     `IsLead = 1`.
-  - Planners and org admins set it with `PUT /api/staff/enrollments/{id}/lead`. The endpoint arrives in A1;
-    the UI comes with A2 story 20. Setting a new lead clears the old one in the same transaction.
-  - It gates **swamped mode** (auto-send of expired timed drafts, D5 STORY-UPDATES) and the engine
-    **autonomy level** write: lead controller only, every other role gets 403.
-  - Like any other grant change, changing the lead revokes the affected sessions.
+  - **Who sets it:** a **planner** (an org admin does it through their own enrollment, with no org-scope twin
+    route, which fits "no implicit in-exercise powers"), using `PUT /api/staff/enrollments/{id}/lead`. The
+    endpoint arrives in A1; the UI comes with A2 story 20.
+  - **How it is set:** with a single `UPDATE … SET IsLead = CASE WHEN Id = @id THEN 1 ELSE 0 END`, so the
+    unique index cannot trip in between. A unique-index violation maps to 409 `lead-conflict`.
+  - **Read live, with no session revocation.** The lead gate reads `Enrollment.IsLead` on every request, as a
+    sibling of `EngineCockpitControllerRoleFilter`, which already reads the role live. It is keyed on the
+    session's `PersonId` and never on a body `actingHumanId`. `SessionDto.isLead` is computed when the DTO is
+    built and is never stored on the session. A lead change therefore revokes **no** sessions, so nobody is
+    signed out mid-incident.
+  - **Role change or removal of the lead** never hits the check constraint as a 500. **It is allowed (Option A,
+    signed off by Tom on 2026-10-16).** The transaction clears `IsLead`, and swamped mode is **turned off after commit** (see below),
+    and both changes are audited. The exercise then has no lead until a planner sets one, which shows as a
+    readiness warning.
+  - **Migration backfill:** exactly one lead per exercise that has any controller enrollment, namely the
+    earliest-created one (ties go to the lowest Id). So no exercise loses swamped mode on deploy.
+  - **Readiness warning** (§5.3): "no lead controller", meaning swamped mode and autonomy raises are
+    unavailable.
+  - **Duplicate:** the copied staff enrollments keep their `IsLead` flag.
+  - **The gate is raise-only (Option A, signed off by Tom on 2026-10-16, §12).** A lead is required to turn
+    swamped mode **on**, to raise autonomy (`autonomy-default` or `tier-policy` towards more autonomy), to use
+    `autonomy/restore` after a kill switch, and to use `generation-provider/restore`. **Any controller** may
+    turn swamped mode off, lower autonomy, use the kill switch, or use `cut-to-fake`: controls only ever lower.
   - It unblocks Session C's provider flip (#571).
-- **Revoking a grant revokes the sessions built on it.** `StaffCallerContext` authorizes from the persisted
+  - **Swamped mode is in memory** (`EngineAutonomyState`). "Turns swamped mode off"
+    therefore means: once the enrollment change commits, swamped mode is turned off **idempotently**, so a
+    failed flip retries on the next request. On rehydrate after a restart, an exercise with **no lead** comes
+    back with swamped mode **off**.
+  - **What counts as a raise** for `tier-policy`: a PUT is a raise if **any** tier moves towards more autonomy.
+    A mixed PUT (some tiers up, some down) needs the lead.
+  - **UI:** a non-lead controller sees an **OFF-only** swamped-mode control while swamped mode is on, so they
+    can always lower it (story 17; Session C is told too).
+- **Revoking a grant revokes the sessions built on it.** (A lead change is not a grant change; see above.) `StaffCallerContext` authorizes from the persisted
   `Session.Role`, and refresh preserves that role. So revoking `OrgRole`, disabling a Person, or removing
   or changing an `Enrollment` revokes, **in the same transaction**, every live session (access and refresh)
   that was minted from that grant:
   - org-scope sessions, for an `OrgRole` revoke;
   - all of the person's sessions, for a disable;
   - sessions on that exercise, for an enrollment change.
+
+  **This includes live realtime connections.** `ExerciseRealtimeHub` checks membership only on connect, and the
+  staff broadcasters send straight to the group. So revocation also **aborts every SignalR connection bound to
+  a revoked session id and removes it from its groups**, using a connection-to-session registry kept in the
+  hub's connect and disconnect handlers. A test covers a client connected *before* revocation, which stops
+  receiving staff broadcasts.
 
   Tests prove that the old access token and the old refresh token both stop working. *(Copilot review 4.)*
 - **The org admin grant is `Person.OrgRole = "orgAdmin"`. It is not an exercise role.** `orgAdmin` leaves the
@@ -191,6 +224,15 @@ Organization (+ Slug: new, unique; used in the staff console URL, §1.2)
 
   Separate origins (the staff console host and the per-exercise participant hosts) can legitimately hold one
   world each, which is the normal case.
+- **Realtime scope on the shared console host (A1, story 15).** `ExerciseRealtimeHub` derives its group from the
+  *host-resolved* exercise, which a shared console host cannot supply.
+  - **Staff hub connections** are scoped from the **session's `ExerciseId`**, verified against a live staff
+    `Enrollment`.
+  - **Participant connections** keep the host binding.
+  - **Org-scope sessions** (no exercise) are refused by the hub.
+  - **Switching exercise** (`active-exercise`) moves the connection to the new group: the client reconnects,
+    and the server drops the old group membership.
+  - Tests cover a connection from the console host and a switch between exercises.
 - **Staff console host.** An org-scope session has no exercise host to land on (story 15's frontend gap).
   **Decision (signed off):** one platform staff host (`console.<platform-domain>`, set by the config value
   `StaffConsole:Host`) serves the staff console for every org, with `/o/{slug}` for each org. **Per-exercise
@@ -284,6 +326,20 @@ mid-exercise.
   (exactly one is set), `OrganizationId`, `ExpiresAt`, `UsedAt?`, `IssuedByPersonId?`, `CreatedAt`.
   - Lifetime: invite 7 days, reset 60 min.
   - Single use. Issuing a new token voids the earlier unused tokens of the same purpose.
+  - **Any credential change** (a reset, an invite redeemed, an admin-set temporary password, or a password
+    change) invalidates, in the same transaction, **every** outstanding `CredentialToken` of **both** purposes for
+    that Person or Account, and every unconsumed `LoginChoiceCandidate` for that Person. An older invite link or
+    an org choice verified against the old password therefore cannot mint a session afterwards. Tests cover
+    reset followed by redeeming each older token and choice.
+  - **Staff invites without a grant.** For an invite issued from the **staff side** (org directory or staff
+    assignment), redeeming it sets the password, but a staff session is minted **only if the person has a
+    grant** (`OrgRole`, or a staff enrollment in that org). Otherwise the page shows an **"awaiting assignment"**
+    state in COBRA ("your account is ready; an administrator will add you to an exercise"), and the person can
+    sign in normally once assigned.
+  - **Participant invites** (roster import with "add to directory", or promoting a one-off, §2.2) carry the
+    exercise they were issued for. They are redeemed on **that exercise's host, inside the participant skin**:
+    redeeming sets the password and mints a **participant** session on that exercise's enrollment. They never
+    show "awaiting assignment". Tests cover both roster flows.
   - Using a token sets the password, **revokes every live session for that person or account**, and emits
     `identity.credential.changed`.
 - **Staff "forgot password":** `POST /api/auth/password/forgot {email, orgSlug?}` is pre-auth and allowlisted.
@@ -389,7 +445,7 @@ Freeze stays a pause tier (controller), not a state. A5 adds that Freeze and pau
 | **Reopen** | completed → live | everything; the scenario clock resumes where it stopped | nothing | **controller**; refused once archived. For "we ended by mistake". Audited |
 | **Archive** | completed → archived, **or build → archived when `FirstLiveAt` is set** (a reset exercise being retired) | everything (read-only) | live sessions revoked | planner or org admin |
 | **Unarchive** | archived → completed (or → build if it was archived from build) | everything | nothing | org admin only |
-| **Reset** | completed **or staged** → build | settings, chrome, sign-in methods, personas (with any live edits), staff library media, run sheet (all items back to *pending*), noise pool, **setup posts** (§5.4), accounts, enrollments, links, view-only code | **conduct data**: conduct posts and their edits, reactions, reposts, `PostMediaItem` rows and **participant-uploaded media** on them, conduct follows (`Follow.IsSetupContent = false`, §5.4), telemetry events, engine review items, inject queue state, runtime state (clock, pause tier), day words, every session | planner or org admin; typed-name confirmation. **The UI offers the AAR/report export first** (from completed). Refused in build, live, paused and archived |
+| **Reset** | completed **or staged** → build | settings, chrome, sign-in methods, personas (with any live edits), staff library media, run sheet (all items back to *pending*), noise pool, **setup posts** (§5.4), accounts, enrollments, links, view-only code | **conduct data**: conduct posts and their edits, reactions, reposts, `PostMediaItem` rows and **participant-uploaded media** on them, conduct follows (`Follow.IsSetupContent = false`, §5.4), telemetry events, engine review items, inject queue state, runtime state (clock, pause tier), day words, every session, and the in-memory engine autonomy state (swamped mode off, autonomy back to the exercise default) | planner or org admin; typed-name confirmation. **The UI offers the AAR/report export first** (from completed). Refused in build, live, paused and archived |
 | **Delete** | build → (gone) | — | the exercise and every exercise-scoped row and blob; the hostname is freed | planner or org admin; **only if `FirstLiveAt` is null** (never ran). An exercise that ran and was reset is retired by **archive from build** |
 | **Duplicate** | any → new build exercise | see 5.5 | — | planner on the source, or org admin |
 
@@ -419,7 +475,8 @@ Blocking items (stage is refused with 409 and the list):
 8. No run-sheet item is `needs-repair` (§5.4a).
 
 Warnings (shown, not blocking): no run sheet items; no opening feed; empty noise pool; personas missing avatars;
-participants with no sign-in yet issued; no evaluator enrolled.
+participants with no sign-in yet issued; no evaluator enrolled; **no lead controller** (swamped mode and autonomy
+raises unavailable until a planner sets one).
 
 ### Decision 5.4 — setup vs conduct posts
 `Post` gets **`IsSetupContent`** (bool, stamped server-side by the write path when the exercise is in
@@ -446,14 +503,17 @@ copies only setup follows.
   retained row references it**. Retained rows are:
   - a setup post's `PostMediaItem`;
   - a persona's `AvatarMediaId` or `BannerMediaId`;
-  - a run-sheet item's media.
+  - a run-sheet item's media. This is a **JSON column** (`InjectItemPost.Media`) and not a foreign key, so it is
+    checked by parsing the ids;
+  - the poster frames: `PostMediaItem.PosterMediaAssetId` and `MediaAsset.PosterMediaAssetId`. Both are
+    `Restrict` FKs, and a kept video keeps its poster.
 
   An asset still referenced by any of these is kept, untouched. This covers two cases:
   - Staff unstaged after a dry run and reused a participant's image in a setup post.
   - A persona's avatar points at the image.
 
   Every one of those FKs is `DeleteBehavior.Restrict`, so the check-then-delete runs in the reset
-  transaction, which makes it race-free. The reset preview lists the assets it keeps and why. Avatars a
+  transaction. That makes it fail-safe: a missed reference aborts the reset and never leaves a broken image. The reset preview lists the assets it keeps and why. Avatars a
   participant uploaded through `/api/me/avatar` are persona configuration and are always kept.
 - **Setup replies to conduct posts.** Here is how one can arise: a dry-run post in staged, then unstage,
   then a staff reply in build. Two rules handle it:
@@ -478,8 +538,13 @@ foreign-exercise parent when the inject fires, so both reset and duplicate must 
 ### Decision 5.5 — duplicate
 - **Copied, with new ids and every cross-reference remapped:**
   - settings, chrome and sign-in methods;
-  - personas, with avatar and banner media remapped. An avatar or banner that points at a
-    **participant-uploaded** asset (which is not copied) is **cleared to the default** on the copy;
+  - personas, with avatar and banner media remapped;
+  - **every asset referenced by a copied row**: setup-post attachments and their poster frames, persona
+    avatars and banners, and run-sheet JSON media. The copy is made **even if the asset was uploaded by a
+    participant** (e.g. reused from a dry run). The copied asset loses its participant uploader link
+    (`UploadedByAccountId` is set to null) and becomes staff library media in the new exercise. This
+    replaces the earlier "clear participant-media avatars" rule with the same "a referenced asset survives"
+    principle reset uses (§5.4b). Tests cover staged → unstage → reuse in a setup post → duplicate;
   - staff library media (blobs server-side copied into the new prefix);
   - the run sheet, all items pending except reply items that need repair (§5.4a);
   - the noise pool;
@@ -491,7 +556,7 @@ foreign-exercise parent when the inject fires, so both reset and duplicate must 
   - conduct posts (anything not `IsSetupContent`);
   - participant accounts, links, day words and sessions;
   - telemetry and conduct data;
-  - participant-uploaded media.
+  - participant-uploaded media that **no copied row references**.
 - **Optional:** "copy participant roster" re-creates **directory-linked** accounts with their persona bindings and
   no links. One-off accounts are not copied.
 - **New:** a hostname, a view-only code (generated, disabled), and the name "Copy of X". State: build.
@@ -605,21 +670,33 @@ Key: ✅ allowed · — refused (403; 404 where the bare-404 pattern applies) ·
 | Assign staff to an exercise | ✅ | ✅ (own exercise; cannot remove the last planner) | — | — | — | — |
 | Settings, chrome, practice mode, sign-in methods | via enrollment | ✅ | — **(change: today any staff)** | — | — | — |
 | Stage, unstage *(L)* | via enrollment | ✅ | — | — | — | — |
-| **Swamped mode, engine autonomy level** | via enrollment | — | **lead controller only** | — | — | — |
+| **Set lead controller** (`PUT /api/staff/enrollments/{id}/lead`) | via enrollment | ✅ | — | — | — | — |
+| **Swamped mode and autonomy writes**: `POST /api/engine/autonomy/swamped-mode`, `/api/engine/autonomy/restore`, `/api/engine/settings/autonomy-default`, `/api/engine/settings/tier-policy`, `/api/engine/generation-provider/restore` | via enrollment | — | **raise: lead controller only** (swamped on, autonomy up, restore, provider restore); **lower: any controller** (swamped off, autonomy down, kill switch, `cut-to-fake`). Signed off as Option A, §12 | — | — | — |
 | StartEx, pause/resume, EndEx, reopen, Freeze/pause tiers *(L)* | via enrollment | — | ✅ | — | — | — |
 | Roster: import, links, day word, email, participant reset/reissue, avatars | via enrollment | ✅ | ✅ | — | — | — |
 | View-only code rotate/revoke | via enrollment | ✅ | ✅ | — **(change: today any staff)** | — | — |
 | Personas: create, edit, archive | via enrollment | ✅ | ✅ | — | — | — |
 | Content pack upload/apply *(L: build)* | via enrollment | ✅ | — | — | — | — |
 | Run sheet edit | via enrollment | ✅ | ✅ | — | — | — |
-| Fire injects, post as persona, takedown, pin, noise, steering, engine review | via enrollment | — | ✅ | — | — | — |
+| **Setup authoring in build**: post as persona (backdated, setup posts), pin; the composer as used by build-golive/01 and persona-management/04 | via enrollment | ✅ | ✅ | — | — | — |
+| Conduct (staged/live): fire injects, post as persona, takedown, pin, noise, steering, engine review | via enrollment | — | ✅ | — | — | — |
 | Read everything in the exercise (console, feeds, report) | via enrollment | ✅ | ✅ | ✅ | — | — |
 | Sim writes (post, reply, react, follow, own avatar) *(L: live **or staged** (dry run); refused when paused or frozen)* | — | — | — | — | ✅ | — |
 | Read the fiction | — | — | — | — | ✅ | ✅ |
 
 "Via enrollment" means the org admin enrolls themselves (audited) and then holds that role's row.
-Evaluators are refused **every** write (#61), including future annotations until track 5 adds an
+Evaluators are refused **every exercise-content and administration** write (#61), including future annotations until track 5 adds an
 evaluator-only annotation route.
+**Self-service session operations stay open, with their own checks:**
+- **For every authenticated session, in either world:** `POST /api/auth/refresh`, `POST /api/auth/logout`,
+  `GET /api/session` and `/api/me/*` reads.
+- **For staff-world sessions only (evaluators and org admins included):** `GET /api/staff/assignments` and
+  `POST /api/staff/active-exercise`, limited to the caller's own staff enrollments. **Participant and readonly
+  sessions are refused**, even when the same Person holds a staff enrollment elsewhere. A participant link or
+  day-word session must never switch into staff privileges.
+
+None of these change exercise content. The matrix test lists them as explicit rows, including a participant
+session refused on both staff operations.
 
 **Recorded decision (#481), signed off:** **stage** = planner. **Archive** = planner or org admin. StartEx and
 EndEx stay controller-only. The narrowings on create exercise, settings and the view-only code are signed off.
@@ -646,11 +723,12 @@ the report export offered first; from `completed` **or `staged`**; planner or or
 
 | Kind | Item | Wave |
 |---|---|---|
-| **EF migration** | `AdminIdentityFoundation`:<br>• `People` table, with a backfill of one per `StaffUser` (same Id; legacy rows have a null Email until invited)<br>• `StaffUsers.Id` FK → `People.Id`<br>• `Organizations.Slug` (unique; backfilled from Name)<br>• **`Enrollments` table**: StaffAssignment rows migrated with the same Id, plus one per `Account` (Role and PersonaId copied); then **`StaffAssignments` is dropped** and **`Accounts.Role`/`Accounts.PersonaId` are dropped**<br>• `Accounts.EnrollmentId` (unique, non-null after backfill)<br>• `Sessions.PersonId`, **`Sessions.ExerciseId` nullable**<br>• `People.OrgRole`, with orgAdmin enrollments backfilled → planner + OrgRole<br>• `People` password and lockout columns (`PasswordHash`, `PasswordChangedAt`, `FailedLoginCount`, `LockedOutUntil`)<br>• `Enrollments.IsLead` (check: controller only; filtered unique index, one lead per exercise)<br>• `Sessions.Origin` (the cross-tab world backstop)<br>• `LoginChoices` + `LoginChoiceCandidates` (slugless org choice)<br>• **`OrgAuditEvents` table**<br>• `Exercises.FirstLiveAt` (backfilled from lifecycle telemetry where the status is past `staged`)<br>Hand-written SQL in `EXEC`, per OPERATE.md; reversible `Down` | A1 |
+| **EF migration** | `AdminIdentityFoundation`:<br>• `People` table, with a backfill of one per `StaffUser` (same Id; legacy rows have a null Email until invited)<br>• `StaffUsers.Id` FK → `People.Id`<br>• `Organizations.Slug` (unique; backfilled from Name)<br>• **`Enrollments` table**: StaffAssignment rows migrated with the same Id, plus one per `Account` (Role and PersonaId copied); then **`StaffAssignments` is dropped** and **`Accounts.Role`/`Accounts.PersonaId` are dropped**<br>• `Accounts.EnrollmentId` (unique, non-null after backfill)<br>• `Sessions.PersonId`, **`Sessions.ExerciseId` nullable**<br>• `People.OrgRole`, with orgAdmin enrollments backfilled → planner + OrgRole<br>• `People` password and lockout columns (`PasswordHash`, `PasswordChangedAt`, `FailedLoginCount`, `LockedOutUntil`)<br>• `Enrollments.IsLead` (check: controller only; filtered unique index, one lead per exercise; backfill: the earliest-created controller per exercise)<br>• `Sessions.Origin` (the cross-tab world backstop)<br>• `LoginChoices` + `LoginChoiceCandidates` (slugless org choice)<br>• **`OrgAuditEvents` table**<br>• **revoke every existing `Session` with `Role = 'orgAdmin'`** (exercise-scoped, which the new contract rejects; those people sign in again and get an org-scope session)<br>• `Exercises.FirstLiveAt` (from A1, **every transition into live sets it if null**, in the same transaction; backfill: for status live, paused, completed or archived = COALESCE(first transition to live, `exercise.bootstrapped` time, earliest post, `CreatedAt`, **and finally the migration's own run time**), so it is never null for an exercise that ran, even a legacy row whose `CreatedAt` is null and that has no events or posts; build and staged stay null unless a transition to live exists)<br>Hand-written SQL in `EXEC`, per OPERATE.md; reversible `Down` | A1 |
 | EF migration | `CredentialToken`; `People.AvatarBlobName`; `Exercises.SignInMethods`; `MediaAssets.UploadedByAccountId` | A2 |
 | EF migration | `Posts.IsSetupContent`, `Follows.IsSetupContent` (with the §5.4 backfill); `Exercises.ParticipantName` | A3 |
 | EF migration | `ContentPack`, `ContentPackItem`; persona archive column | A4 |
-| **Frozen shared type** | `Session` (frontend `sessionResolver.ts:47`) / `SessionDto`:<br>• `exerciseId` becomes nullable<br>• adds `personId`, `world: 'staff'\|'participant'` and **`scope: 'exercise'\|'org'`**<br>• `role` becomes `ExerciseRole \| 'orgAdmin'`, as a **discriminated union**: `'orgAdmin'` is valid only with `scope: 'org'`, and an `ExerciseRole` only with `scope: 'exercise'`<br>• a runtime validator `isSessionRole(scope, role)` replaces `isExerciseRole` at `sessionResolver.ts:114`, with tests that both variants pass and mixed combinations are rejected<br>`ExerciseRole` (`roles.ts`): `orgAdmin` leaves the exercise-role union (it becomes an `OrgRole`).<br>`StaffAssignment` (`features/staff/types.ts:36`) becomes `Enrollment`, with the same fields plus `personId`.<br>The staff login request takes `orgSlug?` + `email` instead of `exerciseId` + `username`.<br>Posted on the feature issue per C1.4 **before** A1 merges | A1 |
+| **Frozen shared type** | `Session` (frontend `sessionResolver.ts:47`) / `SessionDto`:<br>• `exerciseId` becomes nullable<br>• adds `personId`, `world: 'staff'\|'participant'` and **`scope: 'exercise'\|'org'`**<br>• `role` becomes `ExerciseRole \| 'orgAdmin'`, as a **discriminated union**: `'orgAdmin'` is valid only with `scope: 'org'`, and an `ExerciseRole` only with `scope: 'exercise'`<br>• **`isLead: boolean`**, computed when read: false for org-scope and participant sessions; the frontend `Enrollment` type also gets `isLead`<br>• a runtime validator `isSessionRole(scope, role)` replaces `isExerciseRole` at `sessionResolver.ts:114`, with tests that both variants pass and mixed combinations are rejected<br>`ExerciseRole` (`roles.ts`): `orgAdmin` leaves the exercise-role union (it becomes an `OrgRole`).<br>`StaffAssignment` (`features/staff/types.ts:36`) becomes `Enrollment`, with the same fields plus `personId`.<br>The staff login request takes `orgSlug?` + `email` instead of `exerciseId` + `username`.<br>Posted on the feature issue per C1.4 **before** A1 merges | A1 |
+| Frozen shared type (A3) | **Run-sheet status `needs-repair`** (§5.4a): `runSheet/types.ts:24`, `injectGuards.ts:101-113,139-152`, `injectRules.ts:132-134` and the backend inject status validation all accept it. The run sheet displays it, it is editable, and repair moves it to `pending`. Test: reset or duplicate → repair → stage | A3 |
 | Frozen shared type | `ExerciseScopeDto.exerciseName` becomes **`string \| null`** (C# `string?`), sourced from `ParticipantName`. **This changes the shape:** the frontend `ExerciseScope` type and the validator at `exerciseContextResolver.ts:205` must accept null, and every consumer (the header, cards, emails, the join page) renders brand-only. A null-name resolver test is required | A3 |
 | **Program.cs** | the `PulsePasswordIdentityProvider` registration; forwarded headers (**#480**) placed before the rate limiter; new route-group maps (one line per feature), in the end-of-wave wiring commit | A1, then each wave |
 | **App.tsx / staffRouteRegistry.tsx** | org console routes (people, exercise list), reset page, readiness; additive lines in the wiring commit | A2, A3 |
@@ -669,8 +747,8 @@ in A5 and touches `ReactionLoopHost`, so C should coordinate on that file.
 | **A1 Foundation** | `Person` (with password columns; chained provider, §1.3) + facet + `OrgAuditEvent` + cross-tab world rule + **`Enrollment` (replaces `StaffAssignment`; `Account` re-homed)** + org slug + `Session` changes + org-scope sign-in with slug or org choice (story 15) + `PulsePasswordIdentityProvider`; per-route and per-transition role checks (#377/#481/#61); the route × role matrix test; #480 forwarded headers | identity-auth-roles 01, 04, 05, 15; amendment notes on 02, 03, 10, 12 and easy-login 02, 03, 05 (readers move to `Enrollment`); exercise-lifecycle-admin 03; exercise-isolation 05 (switcher) | `16-person-and-enrollments`, `17-role-matrix-enforcement`, `18-forwarded-headers` |
 | **A2 People** | `POST /api/ops/organizations` (org + first admin invite); org directory UI; staff invite and assignment; admin and forgot-password reset; participant passwords and reset; sign-in methods; avatars (re-encode first); promote one-off; roster reconciliation | identity-auth-roles 08; easy-login 02 (reconciliation note) | `19-org-directory`, `20-staff-invite-assign`, `21-password-reset-flows`, `22-sign-in-methods`, `23-avatars`, `24-image-reencode` |
 | **A3 Exercise management** | Readiness; stage/unstage; StartEx gate; reopen; reset; delete; duplicate; participant name; view-only code UI | exercise-build-golive 01, 03, 04, 05, 06; exercise-lifecycle-admin 01–02 | `exercise-build-golive/07-reset-reopen`, `08-delete` |
-| **A4 Setup content** | Persona create, clone, archive; templates and casts; avatar library; content pack upload | persona-management 01, 02, 05 (03 is a duplicate of closed #18, so close it) | `persona-management/06-content-pack-upload` |
-| **A5 Lifecycle correctness** | #375, #379, #390, #376, #389, #485 | — | one story per issue |
+| **A4 Setup content** | Persona create, clone, archive; templates and casts; avatar library; content pack upload | persona-management 01, 02, 05 plus 03 (#55, the surviving owner of COR-022; #18 was closed as its duplicate) | `persona-management/06-content-pack-upload` |
+| **A5 Lifecycle correctness** | #375, #379 (plus Tom's 2026-10-16 add, tracked under #379: for participant-origin **post ingest** the server stamps scenario time from the existing chain (`IExerciseClock` ?? `Exercise.CurrentScenarioTime` ?? the parent post's time for replies, clamped) and ignores the client value; reactions and edits already do; see story 11), #390, #376, #389, #485 | — | one story per issue |
 
 **Done when** (C2): an org admin, starting from an empty org (created by `POST /api/ops/organizations`), can
 invite staff, import participants, create personas, seed content, stage, start, end and duplicate the
@@ -720,3 +798,76 @@ The story fixes include:
 
 **Added 2026-10-16 (Tom):** the lead controller is `Enrollment.IsLead` in A1 (§1.1, §8.2), at the orchestrator's
 request for Session C (#571).
+
+**Orchestrator adversarial review (2026-10-16) of `384bed2` and `35548f6`: 3 High, 6 Medium, 4 Low.** All are
+folded; Tom has since decided the policy half of H1 as Option A (§12). The folded items:
+- H1: the lead backfill and the readiness warning;
+- H2: the planner sets the lead, and org admins act through an enrollment;
+- H3: the lead is read live, with no session revocation;
+- M1: never a 500 (the interim 409 `is-lead` was superseded by Option A, §12);
+- M2: duplicate keeps `IsLead`;
+- M3: struck in story 07;
+- M4: the JSON run-sheet media and the poster FKs;
+- M5: the exact routes;
+- M6: `isLead` in the frozen types;
+- L1: one CASE UPDATE;
+- L2: the session `PersonId`;
+- L3: "fail-safe";
+- L4: reset clears the engine autonomy state.
+
+---
+
+## 12. Lead-controller gate semantics: **DECIDED, Option A (Tom, 2026-10-16)**
+
+**The problem (H1).** If the lead gate covers both directions, then once the lead's enrollment is removed,
+swamped auto-send keeps running and only the kill switch can stop it.
+
+| Option | Gate | Losing the lead |
+|---|---|---|
+| **A (chosen)** | **Raise-only.** A lead is needed to turn swamped mode on, raise autonomy (`autonomy-default` or `tier-policy` towards more autonomy), `autonomy/restore` after a kill switch, and `generation-provider/restore`. Turning swamped mode off, lowering autonomy, the kill switch and `cut-to-fake` stay open to **any controller**. This follows the "controls only ever lower" rule. | Allowed. Removing the lead's enrollment or changing its role clears `IsLead` in the transaction, and swamped mode is turned off **after commit**, idempotently (both audited). The exercise has no lead until a planner sets one, which shows as a readiness warning |
+| B (not chosen) | Lead in both directions | Refused: 409 `is-lead` until the lead is reassigned. Risk: if the lead walks away mid-incident, nobody can turn swamped mode off without a planner first |
+| C | Lead in both directions | Allowed with no safeguard. **Rejected**: swamped mode stays stuck on |
+
+Option A changes what Session C's §8 amendment (#571) says about who may turn swamped mode off.
+
+**Copilot review 5 (2026-10-16), on `c142345`, 7 findings, all accepted:**
+- revocation aborts live SignalR connections (§1.1);
+- staff hub scope comes from the session on the console host (§1.2);
+- a credential change invalidates every outstanding token and org choice (§3.3);
+- an invitee with no grant lands on "awaiting assignment" (§3.3);
+- duplicate copies every referenced asset, including participant-uploaded ones (§5.5);
+- a `FirstLiveAt` fallback for bootstrapped and legacy exercises (§9);
+- planners may author setup content in build (§8.2).
+
+**Copilot review 6 (2026-10-16), on `ad01aef`, 4 Low findings, all accepted:**
+- persona-management 03 (#55) restored as the surviving owner of COR-022;
+- evaluators are refused content and admin writes only, while self-service session operations stay open;
+- the `needs-repair` run-sheet contract is added to the A3 clearance;
+- `FirstLiveAt` falls back to the migration time as a last resort.
+
+**Copilot review 7 (2026-10-16), on `a7be1c3`: 1 open finding and 4 "previously missed", all accepted:**
+- staff session operations require a staff-world session (§8.2);
+- invite completion is split into staff ("awaiting assignment") and participant (exercise skin) paths (§3.3);
+- the `FirstLiveAt` stamp moves into A1 with the column (§9);
+- the migration revokes existing exercise-scoped `orgAdmin` sessions (§9);
+- staff can still read same-org staff avatars (story 19).
+
+**Orchestrator review (2026-10-16) of `bd5bfed..d512190`: 1 Critical, 1 High, 3 Medium, 3 Low, all accepted:**
+- **CR-001:** the participant client sends wall-clock time (the Wave-0 clock mock), while the server clock
+  freezes on Freeze and moves on Jump. So the ±window would 400 every participant post after a Freeze. It is
+  replaced by **server-stamped scenario time for participant-origin writes**.
+- **H-001:** the stamp's source and null behaviour are now defined.
+- **M-001:** "origin" and "role" are separated, and reactions and amplifies are covered.
+- **M-002:** swamped mode is in memory, so it flips after commit, idempotently.
+- **M-003:** a non-lead controller sees an OFF-only control.
+- **L-001:** Option A is now marked "chosen".
+- **L-002:** a mixed tier-policy PUT counts as a raise.
+- **L-003:** the A5 add is tracked under #379.
+
+**Orchestrator verification of `a8d6205` (2026-10-16): 1 High, 3 Low, all accepted.**
+- **H-1:** story 11 now reuses the existing server-side chain from `ReactionService` and `PostEditService`
+  (clock ?? stored scenario time ?? parent's time, clamped), instead of a new "UTC now" fallback. UTC now is the
+  last resort for a top-level post only. Reactions and edits already stamp server-side.
+- **L-1:** "clears `IsLead` in the transaction; swamped mode off after commit" is now worded consistently.
+- **L-2:** the refusal telemetry is stamped with server scenario time.
+- **L-3:** a test-stub note for the post-ingest tests.

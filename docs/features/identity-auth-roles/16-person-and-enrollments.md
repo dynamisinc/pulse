@@ -52,8 +52,28 @@ every other Phase-A story reads. Staff-world plumbing; no participant-visible ch
 
 ### Lead controller (Tom, 2026-10-16; ADMIN-IDENTITY-MODEL §1.1)
 - [ ] `Enrollment.IsLead` (bit, default 0) is in the A1 migration, with a check constraint (`IsLead = 1` only when `Role = 'controller'`) and a filtered unique index on `(ExerciseId) WHERE IsLead = 1`, so an exercise has at most one lead.
-- [ ] `PUT /api/staff/enrollments/{id}/lead` (planner or org admin; bare 404 cross-exercise or cross-org) sets the lead, clears the previous lead in the same transaction, revokes the affected sessions, and is audited. A non-controller target gets 409 `not-a-controller`.
+- [ ] `PUT /api/staff/enrollments/{id}/lead` (planner; org admins act through their own enrollment; bare 404 cross-exercise or cross-org) sets the lead and clears the previous one in a single `CASE` UPDATE, maps a unique violation to 409 `lead-conflict`, revokes **no** sessions, and is audited. A non-controller target gets 409 `not-a-controller`.
 - [ ] Session/`SessionDto` exposes `isLead` so Session C can gate the swamped-mode UI.
+
+### Orchestrator review fold (2026-10-16, ADMIN-IDENTITY-MODEL §1.1)
+- [ ] `isLead` is computed when the DTO is built, from the live `Enrollment.IsLead`, and is never stored on `Session`. It is false for org-scope and participant sessions, and the frontend `Enrollment` type carries it too.
+- [ ] Migration backfill: exactly one lead per exercise that has any controller, namely the earliest-created controller enrollment (ties go to the lowest Id). A migration test covers it.
+- [ ] Removing the lead's enrollment, or changing its role away from controller, never returns a 500 on the check constraint. **It is allowed (Option A, Tom, 2026-10-16).** The transaction clears `IsLead`, and swamped mode is turned off **after commit** (idempotent; see the M-002 fold below), and both are audited. The exercise then has no lead until a planner sets one. A test covers both the removal and the role-change paths.
+
+### Copilot review 5 fold (2026-10-16)
+- [ ] Grant revocation also aborts every SignalR connection bound to a revoked session id and removes it from its groups (a connection-to-session registry). A test covers a client connected before revocation, which stops receiving staff broadcasts.
+- [ ] `FirstLiveAt` backfill: for exercises in live, paused, completed or archived, it is COALESCE(first transition to live, the `exercise.bootstrapped` event, earliest post, `CreatedAt`), so it is never null. A migration test covers a bootstrapped live exercise with no lifecycle events.
+
+### Copilot review 6 fold (2026-10-16)
+- [ ] Final `FirstLiveAt` fallback: when the exercise's status is past staged and no lifecycle, bootstrap or post timestamp exists and `CreatedAt` is null, the backfill uses the migration's run time (`SYSUTCDATETIME()`), so a run is never mistaken for "never ran". A migration fixture covers an exercise with all four sources absent.
+
+### Copilot review 7 fold (2026-10-16)
+- [ ] **`FirstLiveAt` is stamped from A1.** Every transition into `live` (StartEx, plus any bootstrap path) sets `FirstLiveAt` if null, in the same transaction. Test: an exercise in build at A1 deploy runs afterwards, then is reset; delete is refused and archive-from-build is allowed.
+- [ ] **Existing exercise-scoped `orgAdmin` sessions are revoked** by the migration, because the new contract rejects `orgAdmin` with exercise scope. Test: an access and refresh pair from before the migration gets 401 afterwards, and a fresh sign-in mints an org-scope session.
+- [ ] `assignments` and `active-exercise` refuse participant and readonly sessions.
+
+### Orchestrator review fold (2026-10-16, M-002)
+- [ ] Swamped mode lives in memory (`EngineAutonomyState`). When the lead is removed or demoted, it is turned off **after** the enrollment change commits, **idempotently**, so a failed flip retries. On rehydrate, an exercise with no lead comes back with swamped mode off (test).
 
 ## Out of Scope
 Password sign-in itself and org choice (story 15 / 05); role enforcement (17); invite and directory UI (19-20);

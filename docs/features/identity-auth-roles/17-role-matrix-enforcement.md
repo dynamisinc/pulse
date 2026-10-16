@@ -15,7 +15,7 @@ route and per lifecycle transition and proves it with a route x role matrix test
       Any other role gets 403 and the state is unchanged.
 - [ ] **Narrowings land.** Create exercise is org admin only (planner/controller refused); settings, chrome, practice mode
       are planner only (controller refused); view-only code rotate/revoke is planner + controller (evaluator refused).
-- [ ] **Evaluator writes nothing (#61).** Every mutating route refuses `evaluator` with no state change; evaluator reads the
+- [ ] **Evaluator writes nothing (#61).** Every exercise-content and administration mutating route refuses `evaluator` with no state change; evaluator reads the
       exercise (console, feeds, report).
 - [ ] **Org admin has no implicit exercise power.** Org-scope session on an exercise-scoped route is refused; "via enrollment"
       rows apply only when the org admin holds that enrollment.
@@ -31,7 +31,22 @@ route and per lifecycle transition and proves it with a route x role matrix test
 - [ ] In the matrix, participant sim writes are allowed in `live` **and `staged`** (dry runs), and refused when paused or frozen. The matrix test asserts both.
 
 ### Lead controller (Tom, 2026-10-16; ADMIN-IDENTITY-MODEL §8.2)
-- [ ] The swamped-mode toggle and the engine autonomy-level write require a **lead** controller. Other controllers, planners and evaluators get 403. The route × role matrix gains a `lead controller` column, and the test asserts it.
+- [ ] *(Raise-only, Option A, signed off by Tom 2026-10-16; design doc §12.)* The five raise routes listed below require a **lead** controller. Other controllers, planners and evaluators get 403 on a raise, and any controller may lower. The matrix records this inside the controller column, as "raise: lead only; lower: any controller". There is no separate lead column. The test asserts both directions for the lead, a non-lead controller, a planner and an evaluator.
+
+### Orchestrator review fold (2026-10-16, ADMIN-IDENTITY-MODEL §8.2)
+- [ ] The lead gate is a filter that reads `Enrollment.IsLead` **live** on each request (a sibling of `EngineCockpitControllerRoleFilter`), keyed on the session's `PersonId` and never on a body `actingHumanId`.
+- [ ] The routes it covers: `POST /api/engine/autonomy/swamped-mode`, `/api/engine/autonomy/restore`, `/api/engine/settings/autonomy-default`, `/api/engine/settings/tier-policy` and `/api/engine/generation-provider/restore`, under **raise-only** semantics (Option A). Raising (swamped on, autonomy up, `autonomy/restore`, `generation-provider/restore`) requires the lead. Lowering (swamped off, autonomy down, the kill switch, `cut-to-fake`) is open to **any controller**. The test covers both directions for lead, non-lead controller, planner and evaluator.
+- [ ] The matrix includes a "set lead controller" row: planner ✅; every other role 403.
+
+### Copilot review 5 fold (2026-10-16)
+- [ ] Setup authoring is separate from conduct posting. In **build**, planners and controllers may post as a persona (setup and backdated posts) and pin, using the composer flows in build-golive/01 and persona-management/04. In **staged and live**, conduct posting is controller-only. The matrix test covers a planner posting in build (allowed) and in live (403).
+
+### Copilot review 6 fold (2026-10-16)
+- [ ] Self-service session operations are explicit rows in the matrix. `/api/auth/refresh`, `/api/auth/logout`, `GET /api/session` and `/api/me/*` reads are allowed for every authenticated session. `GET /api/staff/assignments` and `POST /api/staff/active-exercise` are allowed for **staff-world sessions only** (evaluators and org admins included; own enrollments only). **Participant and readonly sessions are refused on both**, even when the same Person is staff elsewhere. Tests cover an evaluator refreshing, logging out and switching between two of their own evaluator enrollments, and a participant session (link and day word) refused on both staff operations.
+
+### Orchestrator review fold (2026-10-16, M-003 / L-002)
+- [ ] `tier-policy`: a PUT is a **raise** if any tier moves towards more autonomy. A mixed PUT needs the lead (test).
+- [ ] UI (A1 frontend): while swamped mode is on, a **non-lead controller** sees an **OFF-only** swamped-mode control (the shipped `useSwampedMode` / engine-review-cockpit/03 hides it from non-leads today). Turning it on stays lead-only. Component test for lead, non-lead and planner.
 
 ## Out of Scope
 The new transitions themselves (reset/reopen/delete/unstage bodies: exercise-build-golive 07-08); the lifecycle write gate for participants (A5 #379).
