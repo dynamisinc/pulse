@@ -58,6 +58,13 @@ jobs:
         env:
           CI: 'true'
 
+      # @perf burst-legibility spec (mobile-tablet 07). `--if-present` keeps
+      # this a no-op until the test:e2e:perf script lands with story 07.
+      - name: Run e2e perf (@perf)
+        run: npm run test:e2e:perf --if-present
+        env:
+          CI: 'true'
+
       - name: Upload Playwright failure artifacts
         if: failure()
         uses: actions/upload-artifact@v7
