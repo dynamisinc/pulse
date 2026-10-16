@@ -12,16 +12,28 @@
  * smallest scroll that reveals it, so the focused field is not pushed away when
  * both fit). It does nothing where `visualViewport` is unsupported (the
  * keyboard's own Go/Enter key, set through `enterKeyHint`, still submits).
+ * Zoom-only resizes (scale != 1 or changed) and height growth are ignored.
  * Reduced-motion users get an instant jump rather than a smooth scroll.
  */
 import { useEffect, type RefObject } from 'react'
 
 export function useKeepSubmitVisible(containerRef: RefObject<HTMLElement | null>): void {
   useEffect(() => {
-    const viewport = window.visualViewport
-    if (!viewport) return undefined
+    const maybeViewport = window.visualViewport
+    if (!maybeViewport) return undefined
+    const viewport: VisualViewport = maybeViewport
+
+    // Pinch-zoom also fires `resize`. Only a keyboard (height shrinks at scale 1) counts.
+    let lastHeight = viewport.height
+    let lastScale = viewport.scale
 
     function reveal(): void {
+      const { height, scale } = viewport
+      const shrank = height < lastHeight
+      const zoomOnly = scale !== 1 || scale !== lastScale
+      lastHeight = height
+      lastScale = scale
+      if (zoomOnly || !shrank) return
       const container = containerRef.current
       const active = document.activeElement
       if (!container || !active || !container.contains(active)) return

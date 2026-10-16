@@ -14,8 +14,8 @@ has in-fiction and out-of-fiction registers (CTL-023); the exercise compliance c
 - [x] Given a pause or Freeze overlay in each register (in-fiction, out-of-fiction) at 360/390/768, when shown, then the message is fully visible without scrolling the page, the compliance chrome is not covered, and focus is trapped per existing `useOverlayFocusTrap`.
 - [x] Given EndEx and the holding page, when shown, then the severity/state is carried by text and icon, never color alone (NFR-001).
 - [x] Given the join link, when opened, then the page still sets `no-store`/`no-referrer` behavior (unchanged; asserted in `staticWebAppConfig.test.ts`) and the join token is not shown in any visible text.
-- [ ] The participant sign-out control's 44px hit area (audit: 40x40) is delivered by story 18; here only verify its confirmation fits the viewport at 360/390/768.
-  (Left open: the 44px hit area is story 02's, and the control has no confirmation step today, so there is nothing to verify here.)
+- [ ] The participant sign-out control's 44px hit area (audit: 40x40) was delivered by story 02 (#586); originally listed under story 18. Here only verify its confirmation fits the viewport at 360/390/768.
+  (Left open: the 44px hit area is done in story 02 (#586; originally listed under story 18), and the control has no confirmation step today, so there is nothing to verify here.)
 - [x] User guide: update the join/sign-in and holding-page sections of `docs/guide/participant-guide.md` and `docs/guide/troubleshooting.md` (player stuck on the holding page on a phone) if wording changes. (No user-visible wording changed; guide files left as is.)
 
 ## Out of Scope

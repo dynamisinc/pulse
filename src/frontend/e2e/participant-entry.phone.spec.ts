@@ -18,7 +18,8 @@
  *    seam: message fully visible without page scroll, not covered by / not
  *    covering the compliance chrome, focus on the dialog, state carried by an
  *    icon + heading text, no wall-clock date.
- * The sign-out control's 44px target is mobile-tablet story 02, not asserted here.
+ * The sign-out control's 44px target was delivered by story 02 (#586); originally listed
+ * under story 18. It is not asserted here.
  */
 import { test, expect, type Page } from '@playwright/test'
 import {
@@ -91,13 +92,24 @@ test.describe('participant sign-in', () => {
     await expect(word).toHaveAttribute('enterkeyhint', 'go')
   })
 
-  test('the submit button is on screen once a field is focused', async ({ page }) => {
-    await page.getByRole('textbox', { name: "Today's word" }).focus()
+  test('submit is brought back on screen when the keyboard shrinks the viewport', async ({ page }) => {
+    const word = page.getByRole('textbox', { name: "Today's word" })
+    await word.focus()
+    // Emulate the on-screen keyboard: a tiny layout viewport pushes the button below
+    // the fold, then a visualViewport resize (what a real keyboard fires) makes
+    // useKeepSubmitVisible scroll it back. Without the hook the button stays hidden.
     const submit = page.getByRole('button', { name: 'Sign in', exact: true })
-    const box = await boxOf(submit)
-    const viewport = page.viewportSize()
-    expect(box.y + box.height).toBeLessThanOrEqual((viewport?.height ?? 0) + 1)
-    expect(box.y).toBeGreaterThanOrEqual(0)
+    await page.setViewportSize({ width: page.viewportSize()?.width ?? 360, height: 330 })
+    await page.evaluate(() => {
+      const vv = window.visualViewport as unknown as { height: number } | null
+      if (vv) Object.defineProperty(vv, 'height', { configurable: true, value: 300 })
+      window.visualViewport?.dispatchEvent(new Event('resize'))
+    })
+    await expect.poll(async () => {
+      const box = await submit.boundingBox()
+      const h = await page.evaluate(() => window.innerHeight)
+      return box !== null && box.y >= 0 && box.y + box.height <= h
+    }).toBe(true)
   })
 
   test('a failed sign-in shows an icon + text error and no overflow', async ({ page }) => {
@@ -149,7 +161,7 @@ test.describe('holding page overlays', () => {
       expect(fits).toEqual({ v: true, h: true })
 
       // The card sits between the compliance banners, not under them.
-      const card = await boxOf(dialog.locator('h1'))
+      const card = await boxOf(dialog.getByTestId('pulse-overlay-card'))
       for (const id of ['pulse-compliance-chrome-top', 'pulse-compliance-chrome-bottom']) {
         const chrome = page.getByTestId(id)
         await expect(chrome).toBeVisible()

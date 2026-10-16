@@ -76,6 +76,7 @@
 import { useEffect, useId, useState, type CSSProperties, type RefObject } from 'react'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import {
+  faCircleXmark,
   faFlagCheckered,
   faPause,
   faTriangleExclamation,
@@ -129,6 +130,10 @@ const fullViewportStyle: CSSProperties = {
   alignItems: 'center',
   justifyContent: 'center',
   boxSizing: 'border-box',
+}
+
+const controlPageBaseStyle: CSSProperties = {
+  ...fullViewportStyle,
   // Phones (story 03): the fixed layer must clear the fixed compliance banners (z above
   // this layer, heights published as --pulse-chrome-*) and scroll its OWN content if a
   // short landscape viewport or large text makes the card taller than the space left.
@@ -141,7 +146,7 @@ const fullViewportStyle: CSSProperties = {
 }
 
 const inFictionPageStyle: CSSProperties = {
-  ...fullViewportStyle,
+  ...controlPageBaseStyle,
   zIndex: SHELL_Z.overlay,
   backgroundColor: '#f7f7f8',
   color: '#1a1a1a',
@@ -179,7 +184,7 @@ const inFictionBodyStyle: CSSProperties = {
 }
 
 const outOfFictionPageStyle: CSSProperties = {
-  ...fullViewportStyle,
+  ...controlPageBaseStyle,
   zIndex: SHELL_Z.overlay,
   backgroundColor: '#1b232c',
   color: '#e6edf3',
@@ -213,8 +218,8 @@ const breakFictionContainerStyle: CSSProperties = {
   zIndex: SHELL_Z.breakFiction,
   flexDirection: 'column',
   // The broadcast intentionally covers the compliance chrome (CTL-024, z above it): no
-  // inset, and the bars stay pinned while only the message region scrolls.
-  padding: 0,
+  // inset (it spreads the padding-free base), and the bars stay pinned while only the
+  // message region scrolls.
   overflowY: 'hidden',
   backgroundColor: '#0d0d0d',
   color: '#ffb300',
@@ -347,9 +352,9 @@ function InFictionMaintenancePage({ containerRef, variant }: ControlPageProps) {
       data-testid={testId}
       style={inFictionPageStyle}
     >
-      <div style={inFictionCardStyle}>
+      <div data-testid="pulse-overlay-card" style={inFictionCardStyle}>
         <div aria-hidden="true" style={stateIconStyle}>
-          <FontAwesomeIcon icon={variant === 'pause' ? faWrench : faFlagCheckered} />
+          <FontAwesomeIcon icon={variant === 'pause' ? faWrench : faCircleXmark} />
         </div>
         <h1
           id={headingId}
@@ -384,7 +389,7 @@ function OutOfFictionControlPage({ containerRef, variant }: ControlPageProps) {
       data-testid={testId}
       style={outOfFictionPageStyle}
     >
-      <div style={outOfFictionCardStyle}>
+      <div data-testid="pulse-overlay-card" style={outOfFictionCardStyle}>
         <div aria-hidden="true" style={stateIconStyle}>
           <FontAwesomeIcon icon={variant === 'pause' ? faPause : faFlagCheckered} />
         </div>

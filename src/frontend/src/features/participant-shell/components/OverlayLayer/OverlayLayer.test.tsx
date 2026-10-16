@@ -489,4 +489,26 @@ describe('OverlayLayer on phones (mobile-tablet story 03)', () => {
     expect(style.paddingBottom).toContain('--pulse-chrome-bottom')
     expect(style.overflowY).toBe('auto')
   })
+
+  it('the in-fiction EndEx page uses a neutral icon, not the flag; the flag is out-of-fiction only', () => {
+    mockUseOverlayState.mockReturnValue(overlayState({ state: 'endex', register: 'in-fiction' }))
+    const { unmount } = render(<OverlayLayer />)
+    expect(screen.getByTestId('pulse-overlay-endex-in-fiction').querySelector('svg'))
+      .toHaveAttribute('data-icon', 'circle-xmark')
+    unmount()
+
+    mockUseOverlayState.mockReturnValue(overlayState({ state: 'endex', register: 'out-of-fiction' }))
+    render(<OverlayLayer />)
+    expect(screen.getByTestId('pulse-overlay-endex-out-of-fiction').querySelector('svg'))
+      .toHaveAttribute('data-icon', 'flag-checkered')
+  })
+
+  it('the break-fiction layer has no compliance-chrome inset (CTL-024 covers the chrome)', () => {
+    mockUseOverlayState.mockReturnValue(overlayState({ state: 'broadcast', message: 'm' }))
+    render(<OverlayLayer />)
+    const style = screen.getByTestId('pulse-overlay-break-fiction').style
+    expect(style.cssText).not.toContain('--pulse-chrome')
+    expect(style.paddingTop).toBe('')
+    expect(style.paddingBottom).toBe('')
+  })
 })
