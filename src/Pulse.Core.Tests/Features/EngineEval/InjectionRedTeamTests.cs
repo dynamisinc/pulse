@@ -58,6 +58,19 @@ public class InjectionRedTeamTests
     }
 
     [Fact]
+    public void Catalog_CarriesAmbientPersonaBioSteeringCases()
+    {
+        // ambient-chatter story 01 (AC7): ambient posts publish without a click, so allow-listed persona bios that try
+        // to steer the ambient prompt are standing catalog entries — and, through the theories above, each is fenced
+        // and its obeyed form is caught by the guard.
+        var ambient = InjectionRedTeam.Catalog.Where(a => a.Name.StartsWith("ambient /", StringComparison.Ordinal)).ToList();
+
+        ambient.Should().HaveCountGreaterThanOrEqualTo(3);
+        ambient.Should().OnlyContain(a => a.WorldFeedPayload.StartsWith("Bio:", StringComparison.Ordinal));
+        ambient.Should().OnlyContain(a => !InjectionRedTeam.Obeyed(a.ObeyedTell).Clean);
+    }
+
+    [Fact]
     public void AnInCharacterReaction_PassesTheGuard_SoTheGateIsNotTriviallyGreen()
     {
         // The resisted form: a citizen reacting in-world, containing none of the attacker tells.

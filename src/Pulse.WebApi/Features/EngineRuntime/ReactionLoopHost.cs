@@ -486,6 +486,7 @@ public sealed partial class ReactionLoopDriver
             }
         }
 
+        var storylineIntents = 0;
         foreach (var (storyline, kind) in work)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -501,6 +502,8 @@ public sealed partial class ReactionLoopDriver
             {
                 continue;
             }
+
+            storylineIntents++;
 
             // Miss-safe (ADP-002a): an official post that was seen but not matched left this storyline's escalation
             // slowed — fewer voices this burst, never zero. The slow is spent only once a burst actually carries it
@@ -554,6 +557,14 @@ public sealed partial class ReactionLoopDriver
             }
         }
 
+        // 6. AMBIENT (ambient-chatter story 01) — the lowest-priority quiet-floor policy, AFTER all storyline work so it
+        //    yields to any storyline intent this tick. A no-op unless a controller set a non-off ambient policy.
+        var ambientPublished = await RunAmbientAsync(
+            new AmbientTickInputs(registration, scopedServices, dbContext, context, tickState, scenarioMinute, scenarioInstant, storylineIntents),
+            pendingEvents,
+            reviewItems,
+            cancellationToken).ConfigureAwait(false);
+
         await PersistAsync(dbContext, reviewStore, pendingEvents, reviewItems, cancellationToken).ConfigureAwait(false);
 
         // Broadcast AFTER commit so a freshly enqueued inject reaches the controller cockpit live (no manual
@@ -574,7 +585,7 @@ public sealed partial class ReactionLoopDriver
             }
         }
 
-        return new ReactionTickResult(scenarioMinute, observed.InactionTriggers.Count, reviewItems.Count);
+        return new ReactionTickResult(scenarioMinute, observed.InactionTriggers.Count, reviewItems.Count, ambientPublished);
     }
 
     /// <summary>Persists the tick's telemetry + review items in the scoped unit of work (one review item per burst, via the store).</summary>
@@ -955,4 +966,5 @@ public sealed partial class ReactionLoopDriver
 /// <param name="ScenarioMinute">The scenario minute the tick evaluated at.</param>
 /// <param name="InactionTriggers">How many inaction triggers observe surfaced this tick.</param>
 /// <param name="ReviewItemsEnqueued">How many review items (one per accepted burst) were enqueued this tick.</param>
-public sealed record ReactionTickResult(int ScenarioMinute, int InactionTriggers, int ReviewItemsEnqueued);
+/// <param name="AmbientPostsPublished">How many ambient posts the autonomous ambient path published this tick (ambient-chatter 01).</param>
+public sealed record ReactionTickResult(int ScenarioMinute, int InactionTriggers, int ReviewItemsEnqueued, int AmbientPostsPublished = 0);

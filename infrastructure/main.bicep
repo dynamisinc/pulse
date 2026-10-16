@@ -62,6 +62,9 @@ param generationTenantBounded bool = false
 @description('TIER-2 HUMAN ASSERTION (NFR-005 §2 / ADP-025), NOT a derived value: the signer attests the contractual no-training terms covering this endpoint (Microsoft product terms for Azure OpenAI; the Anthropic Marketplace offer for Claude). Typed by the §8 signer in the environment parameter file alongside generationProviderLive; deliberately NOT derived from deployAi, for the same reason as generationTenantBounded. False by default (fail closed); a false assertion under a live provider throws at startup rather than egressing.')
 param generationNoTrainingAttested bool = false
 
+@description('TIER-2 GOVERNANCE FLAG (ambient-chatter story 01, AC0): authorises autonomous ambient posting (engine posts that publish with no controller click, inside a controller-set tier policy). Maps to Generation__Governance__AmbientAutonomyAuthorized. False by default and must stay false until PROVIDER-GOVERNANCE.md §8 carries a second signed amendment naming autonomous ambient posting; the signer sets it in the same reviewed commit as that amendment. While false the settings API rejects ambient mode \'autonomous\' with 400 (\'off\' and \'review\' stay allowed).')
+param generationAmbientAutonomyAuthorized bool = false
+
 @description('Deploy the provider alert rules (engine-telemetry-tuning/04): an email action group + scheduled log-query rules over App Insights for generation errors/breaker, latency (5 s p95 warning / share of attempts timing out at the 10 s trip) and a call-volume spend proxy. Read-only over existing telemetry. OFF by default; requires deployMonitoring AND deployAi (the deploy fails otherwise) and a non-empty alertOwnerEmail.')
 param deployProviderAlerts bool = false
 
@@ -438,6 +441,9 @@ module webApp 'modules/webapp.bicep' = if (deployWebApp) {
     // The signer's §2 assertions, emptied along with the rest of the block when no endpoint exists.
     generationTenantBounded: deployAi && generationTenantBounded
     generationNoTrainingAttested: deployAi && generationNoTrainingAttested
+    // Not gated on deployAi: it authorises a POSTURE (autonomous ambient), whatever provider serves it, and it is
+    // false unless the §8 signer sets it.
+    generationAmbientAutonomyAuthorized: generationAmbientAutonomyAuthorized
     tags: tags
   }
 }
