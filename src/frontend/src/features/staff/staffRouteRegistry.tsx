@@ -175,7 +175,7 @@ const REGISTRY_TABLE = [
     label: 'Exercise Report',
     icon: faFilePdf,
     element: <ExerciseReportPage />,
-    allowedRoles: ['controller'],
+    allowedRoles: ['controller', 'evaluator'],
     group: 'conduct',
     description: 'A printable record of the posts, metrics and charts, to save as a PDF.',
   },
