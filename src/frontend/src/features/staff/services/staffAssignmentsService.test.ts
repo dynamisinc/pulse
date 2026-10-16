@@ -54,6 +54,25 @@ beforeEach(() => {
   mockPost.mockReset()
 })
 
+describe('getStaffAssignments — pre-A1 wire shape', () => {
+  it('accepts assignments without personId/isLead, defaulting them', async () => {
+    mockGet.mockResolvedValue({
+      data: [{ exerciseId: 'ex-0001', exerciseName: 'Coastal Surge', role: 'controller' }],
+    } as Awaited<ReturnType<typeof api.get>>)
+    const result = await getStaffAssignments()
+    expect(result).toEqual([
+      { exerciseId: 'ex-0001', exerciseName: 'Coastal Surge', role: 'controller', personId: '', isLead: false },
+    ])
+  })
+
+  it('still rejects a present-but-wrong isLead', async () => {
+    mockGet.mockResolvedValue({
+      data: [{ exerciseId: 'ex-0001', exerciseName: 'X', role: 'controller', isLead: 'yes' }],
+    } as Awaited<ReturnType<typeof api.get>>)
+    await expect(getStaffAssignments()).rejects.toThrow()
+  })
+})
+
 describe('getStaffAssignments — request shape', () => {
   it('GETs /staff/assignments', async () => {
     mockGet.mockResolvedValue({ data: VALID_LIST_BODY } as Awaited<ReturnType<typeof api.get>>)

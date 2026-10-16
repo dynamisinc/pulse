@@ -33,7 +33,14 @@
 
 import type { AxiosAdapter } from 'axios'
 import { api } from '../services/api'
-import { isSessionRole, type ExerciseRole, type OrgRole, type SessionScope } from './roles'
+import {
+  isParticipantRole,
+  isSessionRole,
+  type ExerciseRole,
+  type OrgRole,
+  type SessionRole,
+  type SessionScope,
+} from './roles'
 import { USE_MOCK_DATA } from '../config/mockData'
 import { SessionExpiredError } from './sessionExpiredError'
 
@@ -138,24 +145,60 @@ const mockAdapter: AxiosAdapter = config => Promise.resolve({
  */
 const USE_MOCK_SESSION = USE_MOCK_DATA
 
-function isValidBody(body: SessionResponseBody | null | undefined): body is SessionResponseBody {
-  if (!body) return false
+/** The wire body after tolerant defaulting: every field of the A1b SessionDto is present. */
+type NormalizedBody = SessionResponseBody
+
+/** The world a role belongs to: participant/pio are participant-world; everything else is staff. */
+function worldForRole(role: SessionRole): SessionWorld {
+  return isParticipantRole(role) ? 'participant' : 'staff'
+}
+
+/**
+ * Validates and normalizes a `/session` body, accepting BOTH wire shapes at once (docs/OPERATE.md
+ * "Frontend-before-backend": the client deploys before the server). The pre-A1 SessionDto carried
+ * only exerciseId/accountId/role/personaId/actingHumanId/isReadOnly/expiresAt, so an ABSENT
+ * (undefined) `scope` means `exercise`, `world` is derived from the role, `isLead` is `false` and
+ * `personId` is `null`. A field that IS present is validated fail-closed exactly as before: a
+ * wrong type, a mixed scope/role, or a `world` contradicting the role rejects.
+ */
+function normalizeBody(raw: Partial<SessionResponseBody> | null | undefined): NormalizedBody | null {
+  if (!raw || typeof raw !== 'object') return null
+  const scope = raw.scope === undefined ? 'exercise' : raw.scope
+  if (scope !== 'exercise' && scope !== 'org') return null
   // Scope and exercise binding must agree: exercise scope binds an exercise, org scope binds none.
-  const exerciseBindingOk = body.scope === 'org'
-    ? body.exerciseId === null
-    : typeof body.exerciseId === 'string' && body.exerciseId.length > 0
-  return (
-    exerciseBindingOk &&
-    (body.personId === null || (typeof body.personId === 'string' && body.personId.length > 0)) &&
-    (body.world === 'staff' || body.world === 'participant') &&
-    typeof body.isLead === 'boolean' &&
-    typeof body.accountId === 'string' && body.accountId.length > 0 &&
-    isSessionRole(body.scope, body.role) &&
-    (body.personaId === undefined || typeof body.personaId === 'string') &&
-    typeof body.actingHumanId === 'string' && body.actingHumanId.length > 0 &&
-    typeof body.isReadOnly === 'boolean' &&
-    typeof body.expiresAt === 'string' && !Number.isNaN(Date.parse(body.expiresAt))
-  )
+  const exerciseBindingOk = scope === 'org'
+    ? raw.exerciseId === null
+    : typeof raw.exerciseId === 'string' && raw.exerciseId.length > 0
+  if (!exerciseBindingOk) return null
+  if (!isSessionRole(scope, raw.role)) return null
+  const role: SessionRole = raw.role
+  const personId = raw.personId === undefined ? null : raw.personId
+  if (personId !== null && !(typeof personId === 'string' && personId.length > 0)) return null
+  const expectedWorld = worldForRole(role)
+  const world = raw.world === undefined ? expectedWorld : raw.world
+  if (world !== 'staff' && world !== 'participant') return null
+  // A world that contradicts the role (e.g. staff + participant) is never trusted (S-1).
+  if (world !== expectedWorld) return null
+  const isLead = raw.isLead === undefined ? false : raw.isLead
+  if (typeof isLead !== 'boolean') return null
+  if (!(typeof raw.accountId === 'string' && raw.accountId.length > 0)) return null
+  if (!(raw.personaId === undefined || typeof raw.personaId === 'string')) return null
+  if (!(typeof raw.actingHumanId === 'string' && raw.actingHumanId.length > 0)) return null
+  if (typeof raw.isReadOnly !== 'boolean') return null
+  if (!(typeof raw.expiresAt === 'string' && !Number.isNaN(Date.parse(raw.expiresAt)))) return null
+  return {
+    exerciseId: raw.exerciseId as string | null,
+    personId,
+    world,
+    scope,
+    isLead,
+    accountId: raw.accountId,
+    role,
+    personaId: raw.personaId,
+    actingHumanId: raw.actingHumanId,
+    isReadOnly: raw.isReadOnly,
+    expiresAt: raw.expiresAt,
+  }
 }
 
 /**
@@ -176,16 +219,16 @@ export function isSessionExpired(session: Session, now: Date): boolean {
  * fail closed rather than serve a default/expired session (COR-012, COR-001).
  */
 export async function resolveSession(): Promise<Session> {
-  const response = await api.get<SessionResponseBody>(
+  const response = await api.get<Partial<SessionResponseBody>>(
     '/session',
     USE_MOCK_SESSION ? { adapter: mockAdapter } : undefined,
   )
 
-  if (!isValidBody(response.data)) {
+  const body = normalizeBody(response.data)
+  if (!body) {
     throw new Error('resolveSession: resolution returned an empty or malformed session')
   }
 
-  const body = response.data
   const common = {
     personId: body.personId,
     world: body.world,
