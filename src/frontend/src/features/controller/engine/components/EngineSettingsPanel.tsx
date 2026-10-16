@@ -227,7 +227,11 @@ export function EngineSettingsPanel({ open, onClose }: EngineSettingsPanelProps)
   // serialization invariant that makes the "two mutations racing to
   // overwrite each other's field" bug class structurally unrepresentable.
   const anyRequestInFlight =
-    loading || pendingAutonomyDefault || pendingTierPolicy || pendingProviderLever || pendingAmbientPolicy
+    loading ||
+    pendingAutonomyDefault ||
+    pendingTierPolicy ||
+    pendingProviderLever ||
+    pendingAmbientPolicy
   const autonomyControlsDisabled = forbidden || anyRequestInFlight
   const tierControlsDisabled = forbidden || anyRequestInFlight
   // The CUT control is additionally disabled when the lever is INERT

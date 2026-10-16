@@ -29,7 +29,10 @@ export interface AmbientPolicyDto {
   readonly topicAllowList: readonly string[]
   /** Persona ids of THIS exercise. EMPTY means "nothing allowed". */
   readonly personaAllowList: readonly string[]
-  /** If exposed: whether `autonomous` is authorized here (AC0). Absent = unknown, derive from a 400. */
+  /**
+   * If exposed: whether `autonomous` is authorized here (AC0). Absent = unknown, derive from
+   * a 400.
+   */
   readonly autonomousAuthorized?: boolean
   /** Server topic vocabulary, if exposed; otherwise {@link FALLBACK_AMBIENT_TOPIC_VOCABULARY}. */
   readonly topicVocabulary?: readonly string[]

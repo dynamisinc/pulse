@@ -264,6 +264,9 @@ Known limitations / follow-ups: ~~`PromptAssembler` has no ambient mode~~ — **
 Allow-listed personas are voiced only if they are in the loop's seeded cast (`ReactionLoopRegistration.PersonasByHandle`)
 — now **reported** to the panel as `ambientPolicy.voiceablePersonaIds` (Gate-1 M-1). "Pause engine" still has no effect on
 storyline bursts (pre-existing; only ambient honours it).
+**Residual risk (NFR-005):** persona `VoiceNotes` stay unfenced in the trusted part of the prompt (fencing them would
+change every storyline prompt and its cache prefix). For that path the `ContentGuard` backstop is the only defence; it is
+red-teamed through the real path (Gate-1 M-2). Revisit before any production authorization.
 
 ### Gate-1 review fixes (branch `fix/ambient-be`, 2026-10-16) — status remains **Built (backend), NOT Complete**
 - **H-1 (addressed)** — ambient bursts no longer travel a storyline/escalation prompt. Additive

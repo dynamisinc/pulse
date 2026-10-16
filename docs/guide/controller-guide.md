@@ -631,13 +631,10 @@ The change applies from the next engine tick, with no restart.
 - **Autonomous**: ambient posts publish on their own, without a controller click, but only inside the limits and
   lists you set. They appear as ordinary posts from the engine and carry the same scenario time as everything else.
 
-**Autonomous may be refused.** Autonomous ambient posting needs separate sign-off for each environment
-(PROVIDER-GOVERNANCE §8). If it is not authorized, saving shows "Autonomous ambient posting is not authorized for this
-environment (PROVIDER-GOVERNANCE §8)" and the mode stays as it was. **Review** is still available.
-
-Autonomous needs PROVIDER-GOVERNANCE §8 amendment 2, which is not yet signed. Until it is, the **Autonomous** option
-is greyed out with a note explaining why. It also cannot be selected while the kill switch is stopped or the exercise
-is cut to Fake; the server refuses it and the panel shows the reason.
+**Autonomous may be unavailable.** Autonomous ambient posting needs separate sign-off for each environment
+(PROVIDER-GOVERNANCE §8 amendment 2, not yet signed). Until it is signed, the **Autonomous** option is greyed out with a
+note explaining why; **Review** is still available. Autonomous is also refused while the kill switch is in either mode,
+the engine is degraded, or the exercise is cut to Fake. Saving then shows the reason and the mode stays as it was.
 
 **Caps.** **Max per minute** and **Max per hour** bound how many ambient posts can publish. The per-minute cap cannot
 exceed the engine's overall posts-per-minute limit. The per-hour cap is also your spending cap for ambient content.
@@ -655,9 +652,10 @@ with empty lists. Check the section after any restart.
 **Stopping ambient posting.**
 
 - **Kill switch, degraded mode and Cut to Fake:** the kill switch (either **SUGGEST-ONLY** or **STOPPED**), the engine
-  going into degraded mode, and **Cut to Fake** all turn ambient **Off**, and stop posts within seconds, including any
-  already being written. Restoring the switch, the provider or normal operation does **not** turn ambient back on.
-  Only you can, by selecting the mode again.
+  going into degraded mode, and **Cut to Fake** all turn **Autonomous** ambient **Off**, and stop autonomous posts
+  within seconds, including any already being written. Restoring the switch, the provider or normal operation does
+  **not** turn it back on; only you can, by selecting the mode again. **Review** mode is not switched off: its drafts
+  still wait in the queue for a person (and come from Fake while cut). Only **STOPPED** halts ambient generation.
 - **Freeze, Pause engine, and any state other than live:** no ambient post publishes, and a post that finishes
   writing after the change is discarded, not posted late.
 - **EndEx:** ambient posting stops at EndEx, as it does at Freeze.

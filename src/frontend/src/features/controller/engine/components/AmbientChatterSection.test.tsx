@@ -259,7 +259,9 @@ describe('Ambient chatter section (live mode)', () => {
   it('shows the server message verbatim for a kill-switch/cut autonomous 400', async () => {
     const user = userEvent.setup()
     engineSettingsStore.setForTests(EXERCISE_ID, dto(policy({ mode: 'review' })))
-    postMock.mockRejectedValue(axios400('Ambient cannot be set to autonomous while the kill switch is active'))
+    postMock.mockRejectedValue(axios400(
+      'engine is stopped or cut to Fake — restore it before enabling autonomous ambient',
+    ))
     renderPanel()
 
     await screen.findByTestId('ambient-chatter-section')
@@ -267,7 +269,9 @@ describe('Ambient chatter section (live mode)', () => {
     await user.click(screen.getByTestId('ambient-save'))
     const error = await screen.findByTestId('ambient-error')
     expect(error).toHaveAttribute('role', 'alert')
-    expect(error).toHaveTextContent('while the kill switch is active')
+    expect(error).toHaveTextContent(
+      'engine is stopped or cut to Fake — restore it before enabling autonomous ambient',
+    )
   })
 
   it('labels personas not in the engine cast as text, with a helper note', async () => {

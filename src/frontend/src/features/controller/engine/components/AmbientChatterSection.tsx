@@ -64,7 +64,13 @@ export interface AmbientPersonaOption {
 /** Id of the unauthorized note; the disabled Autonomous option points at it. */
 const AUTONOMOUS_NOTE_ID = 'ambient-autonomous-unauthorized-note-text'
 
-const MODE_META: Readonly<Record<AmbientMode, { label: string; icon: IconDefinition; help: string }>> = {
+interface ModeMeta {
+  label: string
+  icon: IconDefinition
+  help: string
+}
+
+const MODE_META: Readonly<Record<AmbientMode, ModeMeta>> = {
   off: { label: 'Off', icon: faPowerOff, help: 'No ambient posts are generated or published.' },
   review: {
     label: 'Review',
@@ -84,7 +90,10 @@ export interface AmbientChatterSectionProps {
   readonly personasLoading?: boolean
   /** `false` for a non-controller: the section renders as read-only text. */
   readonly canControl: boolean
-  /** Any engine-settings request is in flight (shared serialization) or the session is forbidden. */
+  /**
+   * Any engine-settings request is in flight (shared serialization) or the session is
+   * forbidden.
+   */
   readonly disabled: boolean
   readonly pending: boolean
   readonly error: string | null
@@ -115,7 +124,17 @@ interface ChipListProps {
 }
 
 function ChipList(props: ChipListProps) {
-  const { testIdPrefix, groupLabel, options, selected, editable, disabled, onToggle, emptyOptionsText, optionNote } = props
+  const {
+    testIdPrefix,
+    groupLabel,
+    options,
+    selected,
+    editable,
+    disabled,
+    onToggle,
+    emptyOptionsText,
+    optionNote,
+  } = props
   return (
     <Stack sx={{ gap: 0.6 }}>
       {selected.length === 0 && (
@@ -125,7 +144,9 @@ function ChipList(props: ChipListProps) {
           sx={{ alignItems: 'center', gap: 0.6 }}
         >
           <FontAwesomeIcon icon={faBan} color={chrome.amber} aria-hidden="true" />
-          <Typography sx={{ fontSize: 11, fontWeight: 700, color: chrome.amber }}>Nothing allowed</Typography>
+          <Typography sx={{ fontSize: 11, fontWeight: 700, color: chrome.amber }}>
+            Nothing allowed
+          </Typography>
         </Stack>
       )}
       {options.length === 0 && (
@@ -194,7 +215,16 @@ function ChipList(props: ChipListProps) {
 }
 
 export function AmbientChatterSection(props: AmbientChatterSectionProps) {
-  const { policy, personas, personasLoading = false, canControl, disabled, pending, error, onSave } = props
+  const {
+    policy,
+    personas,
+    personasLoading = false,
+    canControl,
+    disabled,
+    pending,
+    error,
+    onSave,
+  } = props
 
   const [draft, setDraft] = useState<AmbientPolicyDraft>(() => ({
     mode: policy.mode,
@@ -265,7 +295,9 @@ export function AmbientChatterSection(props: AmbientChatterSectionProps) {
           {`Ambient mode: ${saved.label}`}
         </Typography>
       </Stack>
-      <Typography sx={{ fontSize: 10.5, color: chrome.inkMuted, lineHeight: 1.4 }}>{saved.help}</Typography>
+      <Typography sx={{ fontSize: 10.5, color: chrome.inkMuted, lineHeight: 1.4 }}>
+        {saved.help}
+      </Typography>
 
       {editing && (
         <Stack direction="row" role="group" aria-label="Ambient mode" sx={{ gap: 0.6, flexWrap: 'wrap' }}>
@@ -316,7 +348,8 @@ export function AmbientChatterSection(props: AmbientChatterSectionProps) {
         >
           <FontAwesomeIcon icon={faCircleInfo} color={chrome.inkFaint} aria-hidden="true" />
           <Typography sx={{ fontSize: 10.5, color: chrome.inkFaint, lineHeight: 1.4 }}>
-            Autonomous is not authorized for this environment (PROVIDER-GOVERNANCE §8); Review stays available.
+            Autonomous is not authorized for this environment (PROVIDER-GOVERNANCE §8); Review stays
+            available.
           </Typography>
         </Stack>
       )}
@@ -357,7 +390,9 @@ export function AmbientChatterSection(props: AmbientChatterSectionProps) {
       )}
 
       {/* Allow-lists. */}
-      <Typography sx={{ fontSize: 10.5, fontWeight: 700, color: chrome.inkMuted }}>Allowed topics</Typography>
+      <Typography sx={{ fontSize: 10.5, fontWeight: 700, color: chrome.inkMuted }}>
+        Allowed topics
+      </Typography>
       <ChipList
         testIdPrefix="ambient-topic"
         groupLabel="Allowed ambient topics"
@@ -369,7 +404,9 @@ export function AmbientChatterSection(props: AmbientChatterSectionProps) {
         emptyOptionsText="No topics available."
       />
 
-      <Typography sx={{ fontSize: 10.5, fontWeight: 700, color: chrome.inkMuted }}>Allowed personas</Typography>
+      <Typography sx={{ fontSize: 10.5, fontWeight: 700, color: chrome.inkMuted }}>
+        Allowed personas
+      </Typography>
       <Typography
         data-testid="ambient-persona-cast-help"
         sx={{ fontSize: 10.5, color: chrome.inkFaint, lineHeight: 1.4 }}
@@ -419,13 +456,17 @@ export function AmbientChatterSection(props: AmbientChatterSectionProps) {
           sx={{ alignItems: 'flex-start', gap: 0.6, p: 1, border: `1px solid ${chrome.red}`, borderRadius: '7px' }}
         >
           <FontAwesomeIcon icon={faTriangleExclamation} color={chrome.red} aria-hidden="true" />
-          <Typography sx={{ fontSize: 10.5, color: chrome.ink, lineHeight: 1.4 }}>{error}</Typography>
+          <Typography sx={{ fontSize: 10.5, color: chrome.ink, lineHeight: 1.4 }}>
+            {error}
+          </Typography>
         </Stack>
       )}
 
       <Stack data-testid="ambient-reset-note" direction="row" sx={{ alignItems: 'flex-start', gap: 0.6 }}>
         <FontAwesomeIcon icon={faCircleInfo} color={chrome.blue} aria-hidden="true" />
-        <Typography sx={{ fontSize: 10.5, color: chrome.inkMuted, lineHeight: 1.4 }}>{AMBIENT_RESET_NOTE}</Typography>
+        <Typography sx={{ fontSize: 10.5, color: chrome.inkMuted, lineHeight: 1.4 }}>
+          {AMBIENT_RESET_NOTE}
+        </Typography>
       </Stack>
     </Stack>
   )
