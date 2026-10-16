@@ -130,3 +130,18 @@ param jwtSecretKey = readEnvironmentVariable('JWT_SECRET_KEY', '')
 param bootstrapSecret = readEnvironmentVariable('BOOTSTRAP_SECRET', '')
 param staffIdentityAccountsJson = readEnvironmentVariable('STAFF_IDENTITY_ACCOUNTS_JSON', '')
 // No email secret: email is keyless (easy-login/13). The former emailConnectionString param is gone.
+
+// --- Provider alert rules (engine-telemetry-tuning/04, NFR-009) ---------------
+// Push alerts on the live generation provider (errors/breaker, latency 5 s warn / 10 s trip, call-volume
+// spend proxy), emailed to the provider owner. Read-only over appi-pulse-uat's `dependencies` rows for
+// aif-pulse-uat; requires deployMonitoring + deployAi (both on above). TIER-2 infra: Tom signs off.
+// The owner's address is NEVER typed here: it comes from the PULSE_ALERT_OWNER_EMAIL secret on the uat
+// GitHub environment (threaded by deploy-infrastructure.yml). An unset secret with alerts on FAILS the
+// deploy with a clear message.
+//
+// LANDS OFF on purpose: merging this changes nothing on UAT. Flip deployProviderAlerts to true in a ONE-LINE
+// FOLLOW-UP once Tom has created the PULSE_ALERT_OWNER_EMAIL secret on the uat environment (otherwise every
+// UAT infra deploy would fail until the secret exists). Thresholds can be overridden here for a forced test
+// fire (e.g. param providerAlertCallsPerHourThreshold = 1), then reverted; see infrastructure/README.md.
+param deployProviderAlerts = false
+param alertOwnerEmail = readEnvironmentVariable('PULSE_ALERT_OWNER_EMAIL', '')

@@ -53,6 +53,14 @@ export interface IExerciseClock {
    * poll); story 01's real provider should implement it.
    */
   subscribe?(listener: () => void): () => void
+  /**
+   * Optional: `true` when `scenarioNow()` follows the wall clock with no
+   * scenario anchor (the Wave-0 mock, the controller's pausable clock).
+   * Surfaces that format "now" itself (the participant dateline) render
+   * nothing under such a clock, because "now" would be the real date
+   * (COR-053; mobile-tablet story 17). Story 01's real provider omits it.
+   */
+  readonly mirrorsWallClock?: boolean
 }
 
 /**
@@ -61,6 +69,7 @@ export interface IExerciseClock {
  */
 const mockExerciseClock: IExerciseClock = {
   scenarioNow: () => new Date(),
+  mirrorsWallClock: true,
 }
 
 let activeClock: IExerciseClock = mockExerciseClock
@@ -82,6 +91,23 @@ export function getExerciseClock(): IExerciseClock {
  */
 export function setExerciseClock(clock: IExerciseClock): void {
   activeClock = clock
+}
+
+/**
+ * True while the active clock follows wall time with no scenario anchor
+ * (`mirrorsWallClock`): the default Wave-0 mock, or the controller's pausable
+ * clock (wall time minus frozen time). False once a real provider is installed.
+ *
+ * Why it exists (mobile-tablet story 17, COR-053): under the default clock
+ * `scenarioNow()` IS wall-clock time. A surface that renders "now" with no
+ * scenario anchor — the participant `ChannelNav` dateline — would show the
+ * real date ("OCT 16, 2026") beside posts stamped in scenario time
+ * ("Sep 4, 2033"). Such surfaces check this and render nothing until a real
+ * provider (exercise-clock story 01, #77) is installed. Timestamps that come
+ * FROM content (post.scenarioTime, alert.scenarioTime) are unaffected.
+ */
+export function isWallMirroringExerciseClock(): boolean {
+  return activeClock.mirrorsWallClock === true
 }
 
 /** Restores the default Wave-0 mock (wall-clock-mirroring) exercise clock. */

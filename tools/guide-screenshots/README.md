@@ -12,6 +12,9 @@ use placeholder tokens (`MockTkn…`).
 This tool is **not part of CI**. It has its own `package.json` (one dependency,
 `playwright-core`) and adds nothing to `src/frontend/package.json`.
 
+Browser e2e specs (Playwright, `src/frontend/e2e/`) reuse this server for the role / alerts
+/ overlay seams; see `src/frontend/e2e/README.md`.
+
 ## Run it
 
 Prerequisites: Node 22+, `src/frontend/node_modules` installed (`npm ci` in
