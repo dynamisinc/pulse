@@ -1,8 +1,9 @@
 /**
  * features/controller/report/types/report.ts
  * ---------------------------------------------------------------------------
- * The FROZEN response contract of `GET /api/staff/exports/report?includeNoise=` (demo-feedback
- * story 29, docs/features/demo-feedback/29-printable-exercise-report.md "Contract"). Copied
+ * The FROZEN response contract of `GET /api/staff/exports/report` (demo-feedback
+ * story 29 + the story 30 `postRecord`/filters,
+ * docs/features/demo-feedback/29-printable-exercise-report.md "Contract"). Copied
  * from the story; the backend builds the same shape. Do not widen it here: change the story first.
  *
  * Every time is an exercise-zone SCENARIO time already formatted by the server:
@@ -114,6 +115,28 @@ export interface ExerciseReport {
   injectResponses: ReportInjectResponse[]
   lookalikes: { verified: ReportAccount; lookalike: ReportAccount }[]
   posts: ReportPost[]
-  /** 0 when includeNoise=true. */
+  /** Noise posts left out by the source filter; 0 when `noise` is selected. */
   omittedNoiseCount: number
+  /** Story 30: what the post record matched, and whether it was withheld for size. */
+  postRecord: ReportPostRecord
+}
+
+/** The sources the record can be filtered by (`participant` includes controller-as-persona). */
+export type ReportSourceKey = 'participant' | 'scripted' | 'engine' | 'noise'
+
+/** Story 30 (DF-43/DF-44): the post record's filter echo. `withheld` => `posts` is []. */
+export interface ReportPostRecord {
+  matching: number
+  limit: number
+  withheld: boolean
+  sources: ReportSourceKey[]
+  from: string | null
+  to: string | null
+}
+
+/** The record filters; `from`/`to` are exercise-zone "yyyy-MM-dd HH:mm" or null. */
+export interface ReportFilters {
+  sources: ReportSourceKey[]
+  from: string | null
+  to: string | null
 }

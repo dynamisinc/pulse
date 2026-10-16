@@ -8,7 +8,7 @@ button beside Export posts). The controller uses the browser's **Print / Save as
 - `components/` — `ReportSheet` (header, At a glance, footer) composing `ActivityChart` (inline
   SVG), `InjectResponseTable`, `LookalikeSection` (omitted when empty), `PostRecord` / `ReportPostCard`.
   `report.module.css` is the sheet's own neutral print stylesheet (no COBRA, no brand skin).
-- `services/reportService.ts` — `GET /staff/exports/report?includeNoise=`; `reportMock.ts` serves
+- `services/reportService.ts` — `GET /staff/exports/report?sources=&from=&to=` (story 30 filters; `ReportFilterBar` in the toolbar); `reportMock.ts` serves
   the same shape under `USE_MOCK_DATA`; `reportFormat.ts` holds the pure helpers.
 - `types/report.ts` — the frozen contract. `hooks/useExerciseReport.ts` — React Query seam.
 

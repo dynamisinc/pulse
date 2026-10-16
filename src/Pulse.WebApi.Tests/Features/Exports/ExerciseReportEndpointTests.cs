@@ -12,13 +12,15 @@ using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.Exports;
 using Pulse.WebApi.Features.Media;
 using Pulse.WebApi.Tests.Data;
+using Pulse.WebApi.Tests.Features.ExerciseConfiguration.Lifecycle;
 using Pulse.WebApi.Tests.Features.Social;
 using Xunit;
 
 /// <summary>
 /// <c>GET /api/staff/exports/report</c> end to end over real SQL (demo-feedback story 29): the staff gate and the
 /// fail-closed scope, every section of the frozen contract, the noise toggle (DF-41), DF-42, media signing and its
-/// degradation, cross-exercise isolation, telemetry and the 5,000-post limit.
+/// degradation, cross-exercise isolation and telemetry; and story 30: the record filters (sources, scenario-time window,
+/// the noise alias), the withheld record and the 50,000-post ceiling.
 /// </summary>
 [Collection(MsSqlCollection.Name)]
 public sealed class ExerciseReportEndpointTests
@@ -256,6 +258,19 @@ public sealed class ExerciseReportEndpointTests
         posts.Should().HaveCount(8);
         posts.Select(p => p.GetProperty("id").GetString()).Should().NotContain(noise.ToString());
         root.GetProperty("omittedNoiseCount").GetInt32().Should().Be(1);
+
+        // The post record's applied filters (story 30): the defaults, nothing withheld.
+        var record = root.GetProperty("postRecord");
+        record.EnumerateObject().Select(p => p.Name).Should().Equal(
+            ["matching", "limit", "withheld", "sources", "from", "to"], "the frozen postRecord shape");
+        record.GetProperty("matching").GetInt32().Should().Be(8);
+        record.GetProperty("limit").GetInt32().Should().Be(5_000);
+        record.GetProperty("withheld").GetBoolean().Should().BeFalse();
+        record.GetProperty("sources").EnumerateArray().Select(s => s.GetString()).Should().Equal(
+            ["participant", "scripted", "engine"], "the default sources leave noise out (DF-41)");
+        record.GetProperty("from").ValueKind.Should().Be(JsonValueKind.Null);
+        record.GetProperty("to").ValueKind.Should().Be(JsonValueKind.Null);
+
         posts.Take(3).Select(p => p.GetProperty("id").GetString()).Should().Equal(
             injectPost.ToString(), reply.ToString(), lookalikePost.ToString());
 
@@ -528,11 +543,21 @@ public sealed class ExerciseReportEndpointTests
         events.Should().HaveCount(2, "one event per request");
     }
 
-    // ---- Limit -------------------------------------------------------------------------------------------------
+    // ---- Limits (story 30, DF-43) --------------------------------------------------------------------------------
+
+    [Fact]
+    public void Limits_AreFiveThousandListed_AndFiftyThousandInTheExercise()
+    {
+        ExerciseReportService.MaxListedPosts.Should().Be(5_000);
+        ExerciseReportService.MaxExercisePosts.Should().Be(50_000, "the same ceiling as the .xlsx export");
+        ExerciseReportLimits.Default.MaxListedPosts.Should().Be(ExerciseReportService.MaxListedPosts);
+        ExerciseReportLimits.Default.MaxExercisePosts.Should().Be(ExerciseReportService.MaxExercisePosts);
+    }
 
     [RequiresDockerFact]
-    public async Task MoreThanFiveThousandListedPosts_Returns413_WithAReadableReason_AndNoTelemetry()
+    public async Task MoreThanFiveThousandListedPosts_IsNot413_TheRecordIsWithheld()
     {
+        // The real limit, once, with bulk rows: 5,001 engine posts build a report with the record withheld.
         var exerciseId = await _seed.ExerciseAsync();
         var (token, _) = await _seed.StaffAsync(exerciseId, [(exerciseId, "controller")]);
         await _seed.BulkPostsAsync(exerciseId, ExerciseReportService.MaxListedPosts + 1);
@@ -540,9 +565,303 @@ public sealed class ExerciseReportEndpointTests
         await using var host = await ExerciseReportTestHost.StartAsync(_seed.ConnectionString, exerciseId);
         using var response = await host.GetReportAsync(token);
 
-        response.StatusCode.Should().Be(HttpStatusCode.RequestEntityTooLarge);
-        (await response.Content.ReadAsStringAsync()).Should().Contain("more than the printable report can hold");
+        response.StatusCode.Should().Be(HttpStatusCode.OK, "only an exercise above 50,000 posts is refused (DF-43)");
+        using var json = await ReadAsync(response);
+        var record = json.RootElement.GetProperty("postRecord");
+        record.GetProperty("matching").GetInt32().Should().Be(5_001);
+        record.GetProperty("withheld").GetBoolean().Should().BeTrue();
+        json.RootElement.GetProperty("posts").GetArrayLength().Should().Be(0);
+        json.RootElement.GetProperty("summary").GetProperty("posts").GetInt32().Should().Be(5_001);
+    }
+
+    [RequiresDockerFact]
+    public async Task MatchingAboveTheLimit_WithholdsTheRecord_TheSummaryStillBuilt_TelemetryZero()
+    {
+        var exerciseId = await _seed.ExerciseAsync();
+        var (token, _) = await _seed.StaffAsync(exerciseId, [(exerciseId, "evaluator")]);
+        var avatar = await _report.AssetAsync(exerciseId, MediaKinds.Image);
+        var persona = await _report.PersonaAsync(exerciseId, "resident", "Resident", avatarMediaId: avatar);
+        var first = await _seed.PostAsync(exerciseId, persona, 0, p => p.Origin = "participant");
+        await _seed.PostAsync(exerciseId, persona, 1, p => p.Origin = "engine");
+        await _seed.PostAsync(exerciseId, persona, 2, p => p.Origin = "engine");
+        await _seed.PostAsync(exerciseId, persona, 3, p => p.Origin = "noise");
+        var image = await _report.AssetAsync(exerciseId, MediaKinds.Image);
+        await _report.AttachAsync(exerciseId, first, image, 0, "alt");
+
+        await using var host = await ExerciseReportTestHost.StartAsync(
+            _seed.ConnectionString, exerciseId, limits: new ExerciseReportLimits { MaxListedPosts = 2 });
+
+        using (var withheld = await host.GetReportAsync(token))
+        {
+            withheld.StatusCode.Should().Be(HttpStatusCode.OK);
+            using var json = await ReadAsync(withheld);
+            var root = json.RootElement;
+            var record = root.GetProperty("postRecord");
+            record.GetProperty("matching").GetInt32().Should().Be(3);
+            record.GetProperty("limit").GetInt32().Should().Be(2);
+            record.GetProperty("withheld").GetBoolean().Should().BeTrue("3 matching posts are more than the limit");
+            root.GetProperty("posts").GetArrayLength().Should().Be(0, "a withheld record is empty, never truncated");
+            root.GetProperty("summary").GetProperty("posts").GetInt32().Should().Be(4, "the summary is built over every post");
+            root.GetProperty("activity").GetProperty("bins").GetArrayLength().Should().Be(1);
+            root.GetProperty("omittedNoiseCount").GetInt32().Should().Be(1);
+        }
+
+        var viewed = (await _seed.TelemetryAsync(exerciseId)).Should().ContainSingle(e => e.EventType == "export.report.viewed").Subject;
+        using (var payload = JsonDocument.Parse(viewed.Payload!))
+        {
+            payload.RootElement.GetProperty("posts").GetInt32().Should().Be(0, "the listed count, and nothing is listed");
+        }
+
+        // Narrowed to fit: the record is listed again.
+        using var narrowed = await host.GetReportAsync(token, "?sources=participant");
+        using var narrowedJson = await ReadAsync(narrowed);
+        narrowedJson.RootElement.GetProperty("postRecord").GetProperty("withheld").GetBoolean().Should().BeFalse();
+        var listed = narrowedJson.RootElement.GetProperty("posts").EnumerateArray().Should().ContainSingle().Subject;
+        listed.GetProperty("media")[0].GetProperty("url").GetString().Should().Be(FakeMediaUrlSigner.UrlFor(image));
+        listed.GetProperty("author").GetProperty("avatarUrl").GetString().Should().Be(FakeMediaUrlSigner.UrlFor(avatar));
+    }
+
+    [RequiresDockerFact]
+    public async Task MoreThanTheExerciseCeiling_Returns413_WithAReadableReason_AndNoTelemetry()
+    {
+        var exerciseId = await _seed.ExerciseAsync();
+        var (token, _) = await _seed.StaffAsync(exerciseId, [(exerciseId, "controller")]);
+        await _seed.BulkPostsAsync(exerciseId, 4);
+
+        await using var host = await ExerciseReportTestHost.StartAsync(
+            _seed.ConnectionString, exerciseId, limits: new ExerciseReportLimits { MaxExercisePosts = 3 });
+        using var response = await host.GetReportAsync(token, "?sources=participant");
+
+        response.StatusCode.Should().Be(HttpStatusCode.RequestEntityTooLarge, "the ceiling counts every post, whatever the filter");
+        var body = await response.Content.ReadAsStringAsync();
+        body.Should().Contain("This exercise has 4 posts, more than one report can read (3)");
         (await _seed.TelemetryAsync(exerciseId)).Should().BeEmpty();
+    }
+
+    [RequiresDockerFact]
+    public async Task AtTheExerciseCeiling_IsBuilt()
+    {
+        var exerciseId = await _seed.ExerciseAsync();
+        var (token, _) = await _seed.StaffAsync(exerciseId, [(exerciseId, "controller")]);
+        await _seed.BulkPostsAsync(exerciseId, 3);
+
+        await using var host = await ExerciseReportTestHost.StartAsync(
+            _seed.ConnectionString, exerciseId, limits: new ExerciseReportLimits { MaxExercisePosts = 3, MaxListedPosts = 3 });
+        using var response = await host.GetReportAsync(token);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        using var json = await ReadAsync(response);
+        json.RootElement.GetProperty("posts").GetArrayLength().Should().Be(3, "matching = limit is not withheld");
+        json.RootElement.GetProperty("postRecord").GetProperty("withheld").GetBoolean().Should().BeFalse();
+    }
+
+    // ---- Record filters (story 30, DF-44) ----------------------------------------------------------------------
+
+    [RequiresDockerTheory]
+    [InlineData("?sources=participant,bogus", "\"bogus\" is not a report source")]
+    [InlineData("?sources=", "Choose at least one source")]
+    [InlineData("?sources=,", "Choose at least one source")]
+    [InlineData("?from=2033-09-04T08:00", "is not a valid from time")]
+    [InlineData("?to=09/04/2033%2008:00", "is not a valid to time")]
+    [InlineData("?from=2033-09-04%2008:61", "is not a valid from time")]
+    [InlineData("?from=2033-09-04%2009:00&to=2033-09-04%2008:59", "after it ends at 2033-09-04 08:59")]
+    public async Task AnInvalidFilter_Returns400_WithAReadableReason_AndNoTelemetry(string query, string reason)
+    {
+        var exerciseId = await _seed.ExerciseAsync();
+        var (token, _) = await _seed.StaffAsync(exerciseId, [(exerciseId, "controller")]);
+        await using var host = await ExerciseReportTestHost.StartAsync(_seed.ConnectionString, exerciseId);
+
+        using var response = await host.GetReportAsync(token, query);
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        response.Content.Headers.ContentType!.MediaType.Should().Be("application/problem+json");
+        using var json = await ReadAsync(response);
+        json.RootElement.GetProperty("title").GetString().Should().Be("Invalid report filter");
+        json.RootElement.GetProperty("detail").GetString().Should().Contain(reason);
+        (await _seed.TelemetryAsync(exerciseId)).Should().BeEmpty();
+    }
+
+    [RequiresDockerFact]
+    public async Task Filters_ChangeOnlyTheRecord_EveryOtherSectionIsIdentical()
+    {
+        var exerciseId = await _seed.ExerciseAsync(timeZone: "America/Chicago");
+        var (token, _) = await _seed.StaffAsync(exerciseId, [(exerciseId, "controller")]);
+        var verified = await _report.PersonaAsync(exerciseId, "cityfire", "City Fire", verified: true);
+        var lookalike = await _report.PersonaAsync(exerciseId, "CityFire_Alerts", "City Fire Alerts");
+        var resident = await _report.PersonaAsync(exerciseId, "resident", "Resident");
+        await _report.AccountAsync(exerciseId, "participant", signedIn: true);
+        var item = await _report.InjectAsync(exerciseId, "Bridge closure", externalRef: "INJ-001", firedMinute: 0);
+
+        var inject = await _seed.PostAsync(exerciseId, verified, 0, p => { p.Origin = "inject"; p.InjectId = item.ToString(); p.BaselineLikeCount = 5; });
+        await _seed.PostAsync(exerciseId, resident, 4, p => { p.Origin = "participant"; p.ParentPostId = inject; });
+        var fake = await _seed.PostAsync(exerciseId, lookalike, 7, p => { p.Origin = "engine"; p.BaselineRepostCount = 2; });
+        await _seed.PostAsync(exerciseId, resident, 9, p => p.Origin = "noise");
+        await _seed.ReactionAsync(exerciseId, fake, ReactionKinds.Like);
+
+        await using var host = await ExerciseReportTestHost.StartAsync(
+            _seed.ConnectionString, exerciseId, utcNow: new DateTimeOffset(2026, 10, 16, 12, 0, 0, TimeSpan.Zero));
+
+        string[] queries =
+        [
+            string.Empty,
+            "?sources=noise",
+            "?sources=participant",
+            "?sources=scripted,engine&includeNoise=true",
+            "?from=2033-09-04%2008:05&to=2033-09-04%2008:06",
+            "?sources=engine&from=2033-09-04%2007:00",
+        ];
+
+        var sections = new List<string>();
+        foreach (var query in queries)
+        {
+            using var response = await host.GetReportAsync(token, query);
+            response.StatusCode.Should().Be(HttpStatusCode.OK, query);
+            using var json = await ReadAsync(response);
+            var root = json.RootElement;
+            sections.Add(string.Join(
+                '|',
+                root.GetProperty("exercise").GetRawText(),
+                root.GetProperty("summary").GetRawText(),
+                root.GetProperty("activity").GetRawText(),
+                root.GetProperty("injectResponses").GetRawText(),
+                root.GetProperty("lookalikes").GetRawText()));
+
+            root.GetProperty("summary").GetProperty("posts").GetInt32().Should().Be(4, query);
+            root.GetProperty("lookalikes")[0].GetProperty("lookalike").GetProperty("likes").GetInt32()
+                .Should().Be(1, "lookalike engagement is read for its own posts whether they are listed or not ({0})", query);
+        }
+
+        sections.Distinct().Should().ContainSingle("the summary, chart, inject responses and lookalikes never change with the filters (DF-43)");
+    }
+
+    [RequiresDockerFact]
+    public async Task SourceFilter_ListsTheChosenSources_ParticipantIncludesControllerAsPersona()
+    {
+        var exerciseId = await _seed.ExerciseAsync();
+        var (token, _) = await _seed.StaffAsync(exerciseId, [(exerciseId, "controller")]);
+        var persona = await _report.PersonaAsync(exerciseId, "resident", "Resident");
+        var participant = await _seed.PostAsync(exerciseId, persona, 0, p => p.Origin = "participant");
+        var asPersona = await _seed.PostAsync(exerciseId, persona, 1, p => p.Origin = "controller-as-persona");
+        var inject = await _seed.PostAsync(exerciseId, persona, 2, p => p.Origin = "inject");
+        var engine = await _seed.PostAsync(exerciseId, persona, 3, p => p.Origin = "engine");
+        var noise = await _seed.PostAsync(exerciseId, persona, 4, p => p.Origin = "noise");
+
+        await using var host = await ExerciseReportTestHost.StartAsync(_seed.ConnectionString, exerciseId);
+
+        async Task<(string?[] Ids, string?[] Sources, int Omitted, int Matching)> ListAsync(string query)
+        {
+            using var response = await host.GetReportAsync(token, query);
+            response.StatusCode.Should().Be(HttpStatusCode.OK, query);
+            using var json = await ReadAsync(response);
+            var root = json.RootElement;
+            return (
+                root.GetProperty("posts").EnumerateArray().Select(p => p.GetProperty("id").GetString()).ToArray(),
+                root.GetProperty("postRecord").GetProperty("sources").EnumerateArray().Select(s => s.GetString()).ToArray(),
+                root.GetProperty("omittedNoiseCount").GetInt32(),
+                root.GetProperty("postRecord").GetProperty("matching").GetInt32());
+        }
+
+        var asParticipant = await ListAsync("?sources=participant");
+        asParticipant.Ids.Should().Equal(
+            [participant.ToString(), asPersona.ToString()], "the participant source covers controller-as-persona");
+        asParticipant.Sources.Should().Equal("participant");
+        asParticipant.Omitted.Should().Be(1, "noise left out by the source filter");
+        asParticipant.Matching.Should().Be(2);
+
+        var scriptedOnly = await ListAsync("?sources=scripted");
+        scriptedOnly.Ids.Should().Equal(inject.ToString());
+
+        var engineAndNoise = await ListAsync("?sources=noise,%20ENGINE,engine");
+        engineAndNoise.Ids.Should().Equal(engine.ToString(), noise.ToString());
+        engineAndNoise.Sources.Should().Equal(["engine", "noise"], "canonical order, duplicates folded, case and spaces ignored");
+        engineAndNoise.Omitted.Should().Be(0, "noise is selected");
+
+        var all = await ListAsync("?sources=noise,engine,scripted,participant");
+        all.Ids.Should().HaveCount(5);
+        all.Sources.Should().Equal("participant", "scripted", "engine", "noise");
+    }
+
+    [RequiresDockerFact]
+    public async Task IncludeNoise_IsAnAliasThatAddsNoise_ToTheDefaultOrTheGivenSources()
+    {
+        var exerciseId = await _seed.ExerciseAsync();
+        var (token, _) = await _seed.StaffAsync(exerciseId, [(exerciseId, "controller")]);
+        var persona = await _report.PersonaAsync(exerciseId, "resident", "Resident");
+        await _seed.PostAsync(exerciseId, persona, 0, p => p.Origin = "participant");
+        await _seed.PostAsync(exerciseId, persona, 1, p => p.Origin = "engine");
+        var noise = await _seed.PostAsync(exerciseId, persona, 2, p => p.Origin = "noise");
+
+        await using var host = await ExerciseReportTestHost.StartAsync(_seed.ConnectionString, exerciseId);
+
+        using (var alias = await host.GetReportAsync(token, "?includeNoise=true"))
+        {
+            using var json = await ReadAsync(alias);
+            json.RootElement.GetProperty("postRecord").GetProperty("sources").EnumerateArray().Select(s => s.GetString())
+                .Should().Equal("participant", "scripted", "engine", "noise");
+            json.RootElement.GetProperty("posts").GetArrayLength().Should().Be(3);
+        }
+
+        using (var withSources = await host.GetReportAsync(token, "?sources=participant&includeNoise=true"))
+        {
+            using var json = await ReadAsync(withSources);
+            json.RootElement.GetProperty("postRecord").GetProperty("sources").EnumerateArray().Select(s => s.GetString())
+                .Should().Equal("participant", "noise");
+            json.RootElement.GetProperty("posts").EnumerateArray().Select(p => p.GetProperty("id").GetString())
+                .Should().HaveCount(2).And.Contain(noise.ToString());
+        }
+
+        using var aliasOff = await host.GetReportAsync(token, "?sources=noise&includeNoise=false");
+        using var offJson = await ReadAsync(aliasOff);
+        offJson.RootElement.GetProperty("posts").EnumerateArray().Select(p => p.GetProperty("id").GetString())
+            .Should().Equal([noise.ToString()], "includeNoise=false never removes a chosen source");
+    }
+
+    [RequiresDockerFact]
+    public async Task TimeWindow_IsInclusiveAtBothEnds_InTheExerciseZone()
+    {
+        // ScenarioStart is 13:00 UTC = 08:00 CDT. Posts at 08:04, 08:05, 08:05:59, 08:10, 08:10:30 and 08:11 CDT.
+        var exerciseId = await _seed.ExerciseAsync(timeZone: "America/Chicago");
+        var (token, _) = await _seed.StaffAsync(exerciseId, [(exerciseId, "controller")]);
+        var persona = await _report.PersonaAsync(exerciseId, "resident", "Resident");
+        await _seed.PostAsync(exerciseId, persona, 4, p => p.Origin = "participant");
+        var atFrom = await _seed.PostAsync(exerciseId, persona, 5, p => p.Origin = "participant");
+        var inFromMinute = await _seed.PostAsync(exerciseId, persona, 5, p =>
+        {
+            p.Origin = "engine";
+            p.CreatedScenarioTime = p.CreatedScenarioTime.AddSeconds(59);
+        });
+        var atTo = await _seed.PostAsync(exerciseId, persona, 10, p => p.Origin = "inject");
+        var inToMinute = await _seed.PostAsync(exerciseId, persona, 10, p =>
+        {
+            p.Origin = "participant";
+            p.CreatedScenarioTime = p.CreatedScenarioTime.AddSeconds(30);
+        });
+        await _seed.PostAsync(exerciseId, persona, 11, p => p.Origin = "participant");
+
+        await using var host = await ExerciseReportTestHost.StartAsync(_seed.ConnectionString, exerciseId);
+
+        using var response = await host.GetReportAsync(token, "?from=2033-09-04%2008:05&to=2033-09-04%2008:10");
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        using var json = await ReadAsync(response);
+        var root = json.RootElement;
+        root.GetProperty("posts").EnumerateArray().Select(p => p.GetProperty("id").GetString()).Should().Equal(
+            [atFrom.ToString(), inFromMinute.ToString(), atTo.ToString(), inToMinute.ToString()],
+            "both ends are inclusive to the printed minute, read in the exercise zone (CDT), not UTC");
+        var record = root.GetProperty("postRecord");
+        record.GetProperty("from").GetString().Should().Be("2033-09-04 08:05");
+        record.GetProperty("to").GetString().Should().Be("2033-09-04 08:10");
+        record.GetProperty("matching").GetInt32().Should().Be(4);
+        root.GetProperty("summary").GetProperty("posts").GetInt32().Should().Be(6);
+
+        // The same clock times read as UTC would select nothing: they are hours before the first post.
+        using var openEnded = await host.GetReportAsync(token, "?from=2033-09-04%2008:11");
+        using var openJson = await ReadAsync(openEnded);
+        openJson.RootElement.GetProperty("posts").GetArrayLength().Should().Be(1, "only the 08:11 post is at or after 08:11");
+        openJson.RootElement.GetProperty("postRecord").GetProperty("to").ValueKind.Should().Be(JsonValueKind.Null);
+
+        using var single = await host.GetReportAsync(token, "?from=2033-09-04%2008:05&to=2033-09-04%2008:05");
+        using var singleJson = await ReadAsync(single);
+        singleJson.RootElement.GetProperty("posts").GetArrayLength().Should().Be(2, "from = to is one whole minute");
     }
 
     private static async Task<JsonDocument> ReadAsync(HttpResponseMessage response) =>

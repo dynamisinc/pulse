@@ -5,14 +5,17 @@
  * same switch the posts export uses). STAFF world, no UI.
  *
  * An axios adapter for `GET /staff/exports/report` that answers with {@link MOCK_REPORT} in the
- * frozen contract's shape, so the page, the toolbar and the noise checkbox all work with no API.
- * `includeNoise=true` adds the noise posts to the list and zeroes `omittedNoiseCount`, as the
- * real endpoint does; the metrics are identical either way. Media URLs are inline SVG data URIs
+ * frozen contract's shape, so the page and the toolbar filters work with no API.
+ * `sources` and `from`/`to` filter the list as the real endpoint does (noise selected zeroes
+ * `omittedNoiseCount`); the metrics are identical whatever the filters are. Media URLs are
+ * inline SVG data URIs
  * (no network). Tests reuse {@link MOCK_REPORT} as their fixture.
  */
 
 import { AxiosHeaders, type AxiosAdapter } from 'axios'
-import type { ExerciseReport, ReportPost } from '../types/report'
+import type { ExerciseReport, ReportFilters, ReportPost, ReportSourceKey } from '../types/report'
+import { DEFAULT_REPORT_FILTERS, SOURCE_ORDER, orderedSources } from './reportFilters'
+import { seriesOf } from './reportFormat'
 
 /** A flat labelled picture, as a data URI, so the mock needs no network and no asset files. */
 function pictureUri(label: string, from: string, to: string): string {
@@ -257,19 +260,54 @@ export const MOCK_REPORT: ExerciseReport = {
   ],
   posts: LISTED_POSTS,
   omittedNoiseCount: 2,
+  postRecord: {
+    matching: LISTED_POSTS.length,
+    limit: 5000,
+    withheld: false,
+    sources: ['participant', 'scripted', 'engine'],
+    from: null,
+    to: null,
+  },
 }
 
-/** The report as the endpoint would answer for `includeNoise`. */
-export function mockReportFor(includeNoise: boolean): ExerciseReport {
-  if (!includeNoise) return MOCK_REPORT
+/** The report as the endpoint would answer for `filters` (sources, inclusive scenario window). */
+export function mockReportFor(filters: ReportFilters = DEFAULT_REPORT_FILTERS): ExerciseReport {
+  const sources = orderedSources(filters.sources)
   const posts = [...LISTED_POSTS, ...NOISE_POSTS]
+    .filter(post => sources.includes(seriesOf(post.source)))
+    .filter(post => filters.from === null || post.scenarioAt >= filters.from)
+    .filter(post => filters.to === null || post.scenarioAt <= filters.to)
     .sort((a, b) => a.scenarioAt.localeCompare(b.scenarioAt))
-  return { ...MOCK_REPORT, posts, omittedNoiseCount: 0 }
+  return {
+    ...MOCK_REPORT,
+    posts,
+    omittedNoiseCount: sources.includes('noise') ? 0 : MOCK_REPORT.omittedNoiseCount,
+    postRecord: {
+      matching: posts.length,
+      limit: 5000,
+      withheld: false,
+      sources,
+      from: filters.from,
+      to: filters.to,
+    },
+  }
+}
+
+/** Reads the wire params (`sources`, `from`, `to`) back into filters; unknown sources dropped. */
+export function filtersFromParams(params: unknown): ReportFilters {
+  const record = typeof params === 'object' && params !== null ? params as Record<string, unknown> : {}
+  const raw = typeof record.sources === 'string' ? record.sources.split(',') : []
+  const sources = SOURCE_ORDER.filter((key: ReportSourceKey) => raw.includes(key))
+  return {
+    sources: sources.length > 0 ? sources : DEFAULT_REPORT_FILTERS.sources,
+    from: typeof record.from === 'string' ? record.from : null,
+    to: typeof record.to === 'string' ? record.to : null,
+  }
 }
 
 export const mockReportAdapter: AxiosAdapter = config =>
   Promise.resolve({
-    data: mockReportFor(config.params?.includeNoise === true),
+    data: mockReportFor(filtersFromParams(config.params)),
     status: 200,
     statusText: 'OK',
     headers: new AxiosHeaders({ 'content-type': 'application/json' }),

@@ -32,13 +32,45 @@ public sealed class ExerciseReportDto
     [JsonPropertyName("lookalikes")]
     public required IReadOnlyList<ReportLookalikeDto> Lookalikes { get; init; }
 
-    /// <summary>The post record, in scenario order.</summary>
+    /// <summary>The post record, in scenario order; empty when <see cref="ReportPostRecordDto.Withheld"/>.</summary>
     [JsonPropertyName("posts")]
     public required IReadOnlyList<ReportPostDto> Posts { get; init; }
 
-    /// <summary>Noise posts left out of <see cref="Posts"/>; 0 when noise is included.</summary>
+    /// <summary>Noise posts left out of <see cref="Posts"/> because <c>noise</c> is not a selected source; 0 when it is.</summary>
     [JsonPropertyName("omittedNoiseCount")]
     public required int OmittedNoiseCount { get; init; }
+
+    /// <summary>How the post record was filtered and whether it fit (story 30, DF-43/DF-44).</summary>
+    [JsonPropertyName("postRecord")]
+    public required ReportPostRecordDto PostRecord { get; init; }
+}
+
+/// <summary>The post record's filters as applied, and whether the record fit under the limit (DF-43).</summary>
+public sealed class ReportPostRecordDto
+{
+    /// <summary>Posts matching the record filters.</summary>
+    [JsonPropertyName("matching")]
+    public required int Matching { get; init; }
+
+    /// <summary>The most posts the record lists (5,000).</summary>
+    [JsonPropertyName("limit")]
+    public required int Limit { get; init; }
+
+    /// <summary><c>true</c> when <see cref="Matching"/> is above <see cref="Limit"/>; the post list is then empty.</summary>
+    [JsonPropertyName("withheld")]
+    public required bool Withheld { get; init; }
+
+    /// <summary>The applied sources in canonical order: <c>participant</c>, <c>scripted</c>, <c>engine</c>, <c>noise</c>.</summary>
+    [JsonPropertyName("sources")]
+    public required IReadOnlyList<string> Sources { get; init; }
+
+    /// <summary>The applied window start, <c>yyyy-MM-dd HH:mm</c> in the exercise zone; <c>null</c> when open.</summary>
+    [JsonPropertyName("from")]
+    public required string? From { get; init; }
+
+    /// <summary>The applied window end (inclusive), <c>yyyy-MM-dd HH:mm</c> in the exercise zone; <c>null</c> when open.</summary>
+    [JsonPropertyName("to")]
+    public required string? To { get; init; }
 }
 
 /// <summary>The report header.</summary>

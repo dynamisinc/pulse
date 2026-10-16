@@ -3,13 +3,15 @@
  * ---------------------------------------------------------------------------
  * Fetches the printable exercise report (demo-feedback story 29). STAFF world, no UI.
  *
- * THE CALL. `GET /api/staff/exports/report?includeNoise=<bool>` through the shared axios client,
+ * THE CALL. `GET /api/staff/exports/report?sources=<csv>&from=&to=` through the shared axios
+ * client,
  * so the staff bearer token rides on it (and the silent refresh covers an expired one). The
  * answer is the frozen `ExerciseReport` JSON. The exercise is resolved by the SERVER from the
  * session; nothing here names an exercise (XC-001).
  *
  * ERRORS are sentences (`ReportError.message`): 401 (no session / no exercise), 404 (exercise
- * gone) and 413 (more than 5,000 listed posts) get readable text, the server's ProblemDetails
+ * gone), 400 (bad filter) and 413 (more than 50,000 posts) get readable text, the server's
+ * ProblemDetails
  * `detail` winning when it sent a safe one.
  *
  * MOCK <-> LIVE. Under `USE_MOCK_DATA` the request goes through `mockReportAdapter`, the same
@@ -20,7 +22,8 @@ import axios from 'axios'
 import { USE_MOCK_DATA } from '@/core/config/mockData'
 import { api } from '@/core/services/api'
 import { problemDetailFromBody } from '../../export/exportService'
-import type { ExerciseReport } from '../types/report'
+import type { ExerciseReport, ReportFilters } from '../types/report'
+import { orderedSources } from './reportFilters'
 import { mockReportAdapter } from './reportMock'
 
 /** The route, relative to the API base (`/api`). */
@@ -49,17 +52,25 @@ function messageForStatus(status: number): string {
     case 404:
       return 'This exercise no longer exists, so there is no report to show.'
     case 413:
-      return 'This exercise has too many posts for a printed report (the limit is 5,000 listed posts). Use Export posts for the full list.'
+      return 'This exercise has too many posts for a printed report (the limit is 50,000 posts). Use Export posts for the full list.'
     default:
       return `The report could not be built (the server answered ${status}).`
   }
 }
 
+/** Query params: `sources` always; `from`/`to` only when set. Times are sent as written. */
+export function reportParams(filters: ReportFilters): Record<string, string> {
+  const params: Record<string, string> = { sources: orderedSources(filters.sources).join(',') }
+  if (filters.from !== null) params.from = filters.from
+  if (filters.to !== null) params.to = filters.to
+  return params
+}
+
 /** Fetches the report; rejects with a {@link ReportError}. */
-export async function fetchExerciseReport(includeNoise: boolean): Promise<ExerciseReport> {
+export async function fetchExerciseReport(filters: ReportFilters): Promise<ExerciseReport> {
   try {
     const response = await api.get<ExerciseReport>(REPORT_PATH, {
-      params: { includeNoise },
+      params: reportParams(filters),
       timeout: REQUEST_TIMEOUT_MS,
       ...(USE_MOCK_DATA ? { adapter: mockReportAdapter } : {}),
     })

@@ -38,9 +38,14 @@ public sealed class ExerciseReportTestHost : IAsyncDisposable
     /// <param name="currentExerciseId">The server-resolved scope.</param>
     /// <param name="signingFailure">When set, every signer call throws it.</param>
     /// <param name="utcNow">When set, the server clock is pinned to this instant.</param>
+    /// <param name="limits">When set, lowered report limits (story 30), so the limits are tested without bulk rows.</param>
     /// <returns>The started host.</returns>
     public static async Task<ExerciseReportTestHost> StartAsync(
-        string connectionString, Guid? currentExerciseId, Exception? signingFailure = null, DateTimeOffset? utcNow = null)
+        string connectionString,
+        Guid? currentExerciseId,
+        Exception? signingFailure = null,
+        DateTimeOffset? utcNow = null,
+        ExerciseReportLimits? limits = null)
     {
         ArgumentNullException.ThrowIfNull(connectionString);
 
@@ -74,6 +79,11 @@ public sealed class ExerciseReportTestHost : IAsyncDisposable
         {
             builder.Services.RemoveAll<TimeProvider>();
             builder.Services.AddSingleton<TimeProvider>(new ManualTimeProvider(pinned));
+        }
+
+        if (limits is not null)
+        {
+            builder.Services.AddSingleton(limits);
         }
 
         builder.Services.RemoveAll<IExerciseContext>();

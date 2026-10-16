@@ -1,6 +1,6 @@
 # Story: Exercise report: filters, and large exercises never refused
 
-**Feature:** Demo feedback cut (10/20)  ·  **Phase:** 1  ·  **Status:** In Progress
+**Feature:** Demo feedback cut (10/20)  ·  **Phase:** 1  ·  **Status:** In Review
 **Requirements:** EVL-030 (lite), COR-053, NFR-001  ·  **Decisions:** DF-43, DF-44  ·  **Issue:** #561
 **Stack:** backend + frontend  ·  **Review:** Tier-1  ·  **Priority:** Must  ·  **Wave:** 4  ·  **Effort:** S–M
 
@@ -43,7 +43,7 @@ metrics and charts have no such problem, and refusing the whole report is the wr
 - [ ] Toolbar (screen only): source checkboxes (Participant, Scripted inject, Engine, Background noise) replacing the
       single noise checkbox, and From / To scenario-time fields bounded by the exercise window, with Clear. Changing
       a filter refetches; Print stays disabled while fetching (story 29 rule).
-- [ ] Above the post record, a one-line statement of the active filters ("Showing participant and scripted posts,
+- [ ] Above the post record, a one-line statement of the active filters ("Showing participant and scripted inject posts,
       10-15 09:00 – 10-15 10:00"), printed too.
 - [ ] When `withheld`: the record section prints "5,983 posts match. The printable record holds up to 5,000. Narrow
       the sources or the time window above." Summary and charts still render and print, so a summary-only report can
@@ -63,6 +63,30 @@ Paging the record across several PDFs; per-persona or per-inject filters; saving
 - Frontend: `features/controller/report/`; `useExerciseReport` takes a filter object (query key includes it);
   `reportService` serializes it.
 
+## Contract
+
+```ts
+// GET /api/staff/exports/report?sources=participant,scripted,engine,noise&from=yyyy-MM-dd HH:mm&to=yyyy-MM-dd HH:mm&includeNoise=bool
+// sources default: participant,scripted,engine. includeNoise=true adds noise (kept as an alias; false never removes it).
+// "participant" covers origins participant AND controller-as-persona; "scripted" = inject.
+// sources: comma list, case-insensitive, spaces and duplicates ignored; empty (or only commas) is a 400.
+// from/to: an empty value is the same as omitting it. Inclusive to the printed minute in the exercise zone
+// (to=10:00 keeps a post at 10:00:59); from = to selects one minute.
+// 400 (ProblemDetails, title "Invalid report filter", readable `detail`): unknown source, empty sources, unparsable
+// time, from > to. 413 only when the exercise has more than 50,000 posts (counted before the read, whatever the filter).
+interface ExerciseReport {
+  // ...everything as in story 29; omittedNoiseCount = noise posts left out because noise is not a selected source...
+  postRecord: {
+    matching: number          // posts matching the record filters
+    limit: number             // 5000
+    withheld: boolean         // matching > limit; posts is [] when true
+    sources: ('participant' | 'scripted' | 'engine' | 'noise')[]   // the sources applied, canonical order
+    from: string | null       // "yyyy-MM-dd HH:mm" exercise zone, as applied
+    to: string | null
+  }
+}
+```
+
 ## Dependencies
 
 Story 29 (merged, #551).
@@ -72,3 +96,44 @@ Story 29 (merged, #551).
 Backend: filter parsing (400s), summary invariance across filters, withheld above 5,000 (use a lowered limit seam or a
 test-only option), 413 above 50,000 via the count, source and window filtering, noise alias. Frontend: filter controls
 refetch with the right params, filter statement text, withheld message, summary still rendered when withheld.
+
+Frontend tests by page AC (`ExerciseReportPage.test.tsx`; the To field has no upper bound, because a live exercise
+keeps adding posts after the snapshot's `scenarioEnd`):
+
+- **Toolbar, source checkboxes and refetch:** "has four labelled source checkboxes with the first three checked",
+  "refetches with the right sources when one is unticked", "refetches with noise in sources when Background noise is
+  ticked", "does not let the last source be unchecked"; Print stays disabled while fetching: "disables Print while the
+  previous report is shown for a refetch", "disables Print while a cached report refreshes, so a stale record cannot be
+  saved".
+- **Toolbar, From / To with Clear:** "applies a valid window on blur, sends it as written, and Clear removes it",
+  "allows To after the snapshot scenarioEnd (a live exercise keeps growing)", "clears a stale From-after-To error and
+  applies From when To moves later".
+- **Filter statement:** "states the whole-exercise default above the record" and the window text asserted in the
+  "applies a valid window on blur..." test.
+- **Withheld:** "withholds the record but still renders summary and charts, with Print enabled".
+- **Labelled, keyboard-operable, readable rejection:** "rejects %s with an inline message and does not refetch" (bad
+  format, hour 25, before the exercise start), "rejects a From after the applied To", "describes the disabled last
+  source and keeps filters before Print in tab order".
+- **Errors:** "shows a 400 detail near the filters, keeps the last good sheet, and disables Print"; the 413 message in
+  "shows a readable message for a %i".
+
+Backend tests written (`src/Pulse.WebApi.Tests/Features/Exports/`):
+
+- AC endpoint (parameters, 400s): `ExerciseReportFilterTests.Absent_IsTheDefault_EverySourceButNoise_NoWindow`,
+  `.Sources_AreCanonical_AndIncludeNoiseOnlyAdds`, `.Invalid_GivesAReadableReason`, `.EmptyTimes_AreAnOpenWindow_AndEqualBoundsAreValid`,
+  `.Matches_IsInclusiveToThePrintedMinute_InTheExerciseZone`, `.EachOrigin_MatchesItsSource`;
+  `ExerciseReportEndpointTests.AnInvalidFilter_Returns400_WithAReadableReason_AndNoTelemetry`,
+  `.SourceFilter_ListsTheChosenSources_ParticipantIncludesControllerAsPersona`,
+  `.TimeWindow_IsInclusiveAtBothEnds_InTheExerciseZone`, `.IncludeNoise_IsAnAliasThatAddsNoise_ToTheDefaultOrTheGivenSources`
+- AC summary invariance: `ExerciseReportEndpointTests.Filters_ChangeOnlyTheRecord_EveryOtherSectionIsIdentical`,
+  `.IncludeNoise_ListsNoise_AndTheMetricsAreIdentical`
+- AC `postRecord` / withheld: `ExerciseReportEndpointTests.Report_CarriesEverySection_PerTheFrozenContract`,
+  `.MatchingAboveTheLimit_WithholdsTheRecord_TheSummaryStillBuilt_TelemetryZero`,
+  `.MoreThanFiveThousandListedPosts_IsNot413_TheRecordIsWithheld`, `.AtTheExerciseCeiling_IsBuilt`
+- AC `omittedNoiseCount`: `ExerciseReportEndpointTests.SourceFilter_ListsTheChosenSources_ParticipantIncludesControllerAsPersona`,
+  `.MatchingAboveTheLimit_WithholdsTheRecord_TheSummaryStillBuilt_TelemetryZero`
+- AC 413 above 50,000: `ExerciseReportEndpointTests.MoreThanTheExerciseCeiling_Returns413_WithAReadableReason_AndNoTelemetry`,
+  `.Limits_AreFiveThousandListed_AndFiftyThousandInTheExercise`
+- AC isolation / telemetry / time formatting unchanged: `ExerciseReportEndpointTests.ReportFromA_NeverShowsBsPostsPersonasMediaOrInjects`,
+  `.OneViewedEvent_PerRequest_StaffActor_PostsOnly`, `.MatchingAboveTheLimit_WithholdsTheRecord_TheSummaryStillBuilt_TelemetryZero`,
+  `.PreparedAt_IsTheServerClock_InTheExerciseZone_NotUtc`
