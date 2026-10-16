@@ -121,7 +121,9 @@ parsers accept both shapes:
   `planner`, which is what A1 migrates such people to; the old backend still authorizes them on the server.
 - **The A1 shape.**
 
-The old bundle ignores the new fields, so it keeps working against the new backend too. Do **not** cancel *Deploy
+The old bundle ignores the new fields, so it keeps working against the new backend too, **except for org admins**:
+it requires an exercise on every session, so org admins cannot use the console from the moment the backend lands until
+the new bundle is serving. Do **not** cancel *Deploy
 Backend* once its deploy job has started (see the cancel-and-re-dispatch rule above).
 
 **Staff and participants on one origin: use separate browser profiles.** A1 enforces one world per browser. Signing in
