@@ -243,4 +243,11 @@ describe('sw.js', () => {
     expect(await sw.fetchEvent(sw.request('/join', { mode: 'navigate' }))).toBe('passthrough')
     expect(await sw.fetchEvent(sw.request('/join/t', { mode: 'navigate' }))).toBe('passthrough')
   })
+
+  it('answers GET_BUILD_ID on the supplied port with its stamped build id', () => {
+    const sw = boot({ buildId: 'v9', precache: PRE })
+    const postMessage = vi.fn()
+    sw.listeners.message?.({ data: { type: 'GET_BUILD_ID' }, ports: [{ postMessage }] })
+    expect(postMessage).toHaveBeenCalledWith({ buildId: 'v9' })
+  })
 })

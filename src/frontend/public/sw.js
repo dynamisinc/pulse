@@ -106,7 +106,12 @@ self.addEventListener('activate', function (event) {
 })
 
 self.addEventListener('message', function (event) {
-  if (event.data && event.data.type === 'SKIP_WAITING') self.skipWaiting()
+  var data = event.data
+  if (data && data.type === 'SKIP_WAITING') self.skipWaiting()
+  // Lets the page tell whether a waiting worker is actually a newer build than the running one.
+  if (data && data.type === 'GET_BUILD_ID' && event.ports && event.ports[0]) {
+    event.ports[0].postMessage({ buildId: BUILD_ID })
+  }
 })
 
 self.addEventListener('fetch', function (event) {

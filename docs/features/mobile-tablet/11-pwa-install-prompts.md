@@ -31,3 +31,6 @@ Story 09 (brand + manifest); story 10 for installability on Chrome.
 ## Tests
 `InstallPrompt.test.tsx` (event handling, persistence key, standalone suppression), `e2e/pwa-install.spec.ts` dispatching a synthetic
 `beforeinstallprompt`. Manual on real iOS and Android.
+
+## Known limitations
+- iOS Home Screen apps do not share storage with Safari, so the installed app opens **signed out** (on `/login`), and personal-link-only players cannot paste their link into standalone mode. Tom may disable the iOS sheet alone by setting `IOS_INSTALL_PROMPT_ENABLED = false` in `src/frontend/src/features/pwa/install/installConfig.ts` (Android is unaffected).

@@ -1,6 +1,6 @@
 # Story: PWA: service worker (app shell only)
 
-**Feature:** Phones and tablets  ·  **Epic:** E1 (shell)  ·  **Phase:** 2  ·  **Status:** Built, pending wiring + real-device check (MT-D7)
+**Feature:** Phones and tablets  ·  **Epic:** E1 (shell)  ·  **Phase:** 2  ·  **Status:** Built and wired; pending real-device check (MT-D7)
 **Requirements:** XC-001, NFR-004, NFR-003 (degraded modes)  ·  **Design decisions:** none  ·  **Issue:** #524
 
 ## Context
@@ -14,7 +14,7 @@ and "missed while offline" is PDF-02 #525, a follow-up. Participant world mechan
 - [x] Given a new deploy, then the cache is versioned, old caches are deleted on activate, and the participant is offered an update (or it applies on next launch) without a forced reload during an exercise; a stale shell never calls a removed API shape without a recoverable error. _(Update applies on user "Refresh" or next launch. "Stale shell vs removed API shape" is not a worker concern; relies on the app's existing error states.)_
 - [x] Given development (`npm run dev`) and tests, then the worker is not registered; registration happens only in production builds and only from the participant subtree, never on staff routes. _(`import.meta.env.PROD` gate + staff-path gate; unit-tested.)_
 - [x] Given sign-out, then nothing in Cache Storage contains session or exercise data (assert the cache keys contain only static asset URLs). _(The worker only ever stores static shell URLs; asserted by key allow-list test. It stores nothing session-scoped, so there is nothing to purge on sign-out.)_
-- [ ] Given the static host, then `sw.js` is served with `Cache-Control: no-cache` and the SPA navigation fallback does not swallow it (check `staticwebapp.config.json`; edit is orchestrator-owned and flagged). _(NOT DONE, orchestrator-owned: `navigationFallback.exclude` already excludes `*.js`, so `/sw.js` is not swallowed, but a `/sw.js` route with `Cache-Control: no-cache` must be added. See report.)_
+- [x] Given the static host, then `sw.js` is served with `Cache-Control: no-cache` and the SPA navigation fallback does not swallow it (check `staticwebapp.config.json`; edit is orchestrator-owned and flagged). _(`/sw.js` no-cache route added to `staticwebapp.config.json` by the orchestrator.)_
 - [x] Content security (NFR-004): the existing CSP (if any) permits `worker-src 'self'`; no `importScripts` of third-party code. _(No CSP exists in the repo; `staticwebapp.config.json` has none. If one is added it needs `worker-src 'self'`. No importScripts.)_
 - [x] User guide: `docs/guide/troubleshooting.md` entry "app looks out of date / won't update on my phone". _(docs/guide/troubleshooting.md)_
 
@@ -32,3 +32,6 @@ Story 09 (`PwaRoot.tsx`).
 ## Tests
 `features/pwa/serviceWorker/register.test.ts` (gating logic), `e2e/pwa-sw.spec.ts` against `vite preview` (offline reload, cache
 key allow-list). Manual: Chrome DevTools Application tab.
+
+
+Kill switch: `public/sw-killswitch.js` + runbook in `docs/OPERATE.md` ("Retire the PWA service worker"). Same-build waiting workers do not trigger the update banner (build id compared via `GET_BUILD_ID`).

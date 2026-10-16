@@ -21,6 +21,7 @@ import {
   markDismissed,
   recordVisit,
 } from './installEnv'
+import { IOS_INSTALL_PROMPT_ENABLED } from './installConfig'
 
 /** The (non-standard) Chrome install event. */
 export interface BeforeInstallPromptEvent extends Event {
@@ -50,6 +51,7 @@ export function useInstallPrompt(
   useEffect(() => {
     setHidden(false)
     setIosEligible(false)
+    setDeferred(undefined) // a held event belongs to the previous exercise's session
     if (!exerciseId || isStandalone()) return
     if (isDismissed(exerciseId)) {
       setHidden(true)
@@ -57,6 +59,7 @@ export function useInstallPrompt(
     }
     const visits = recordVisit(exerciseId)
     if (
+      IOS_INSTALL_PROMPT_ENABLED &&
       detectPlatform(navigator.userAgent, navigator.maxTouchPoints) === 'ios-safari' &&
       visits >= IOS_VISIT_THRESHOLD
     ) {

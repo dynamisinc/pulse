@@ -38,6 +38,26 @@ export interface RegisterOptions {
   /** Test seams. */
   container?: ServiceWorkerContainer | undefined
   reload?: () => void
+  /** Resolves a worker's build id, or undefined if unknown. Test seam; defaults to postMessage. */
+  queryBuildId?: (w: ServiceWorker) => Promise<string | undefined>
+}
+
+/** Asks a worker for its stamped build id over a MessageChannel (1s timeout => unknown). */
+export function queryWorkerBuildId(w: ServiceWorker): Promise<string | undefined> {
+  return new Promise(resolve => {
+    const timer = setTimeout(() => resolve(undefined), 1000)
+    try {
+      const ch = new MessageChannel()
+      ch.port1.onmessage = (e: MessageEvent<{ buildId?: string }>) => {
+        clearTimeout(timer)
+        resolve(typeof e.data?.buildId === 'string' ? e.data.buildId : undefined)
+      }
+      w.postMessage({ type: 'GET_BUILD_ID' }, [ch.port2])
+    } catch {
+      clearTimeout(timer)
+      resolve(undefined)
+    }
+  })
 }
 
 export async function registerServiceWorker(
@@ -64,17 +84,25 @@ export async function registerServiceWorker(
     listeners.forEach(l => l())
   }
 
+  const queryId = opts.queryBuildId ?? queryWorkerBuildId
+  /** Offer the update unless the waiting worker is the SAME build as the running one (M-2). */
+  const offer = async (w: ServiceWorker) => {
+    const running = container.controller ? await queryId(container.controller) : undefined
+    const incoming = await queryId(w)
+    if (running !== undefined && running === incoming) return
+    set(true)
+  }
   const watched: Array<() => void> = []
   const watch = (w: ServiceWorker | null) => {
     if (!w) return
     const check = () => {
-      if (w.state === 'installed' && container.controller) set(true)
+      if (w.state === 'installed' && container.controller) void offer(w)
     }
     w.addEventListener('statechange', check)
     watched.push(() => w.removeEventListener('statechange', check))
     check()
   }
-  if (reg.waiting && container.controller) set(true)
+  if (reg.waiting && container.controller) await offer(reg.waiting)
   watch(reg.installing)
   const onUpdateFound = () => watch(reg.installing)
   reg.addEventListener('updatefound', onUpdateFound)

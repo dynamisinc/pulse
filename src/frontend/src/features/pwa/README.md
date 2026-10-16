@@ -15,6 +15,10 @@ no install telemetry (MT-D5), never "Pulse"/"Dynamis" once branded. No backend r
 
 ## Service worker (story 10)
 
+- Once installed, the worker controls `/staff/*` too (same origin, scope `/`). It is pass-through only
+  there: staff paths are never cached or answered, nothing staff-specific is stored.
+- Emergency retirement: `public/sw-killswitch.js` (see docs/OPERATE.md). Not stamped by the build.
+
 - `public/sw.js` hand-written, no dependency. Caches the built shell ONLY (`/index.html` + hashed
   `/assets/*`); everything else (`/api`, `/hubs`, media, `/join*`, `/staff/*`, non-GET, cross-origin) is
   network-only passthrough. Offline navigation falls back to the cached shell (no separate offline page,
@@ -27,6 +31,8 @@ no install telemetry (MT-D5), never "Pulse"/"Dynamis" once branded. No backend r
 - Hosting: `staticwebapp.config.json` must serve `/sw.js` with `Cache-Control: no-cache` (orchestrator-owned).
 
 ## Install prompt (story 11)
+
+- `install/installConfig.ts` `IOS_INSTALL_PROMPT_ENABLED` (default `true`): set `false` to disable only the iOS sheet; Android is unaffected.
 
 - `install/useInstallPrompt.ts` state machine (none | android | ios); `install/installEnv.ts` UA/standalone
   detection (iOS heuristic documented there) and per-exercise localStorage (`pulse:pwa:*:{exerciseId}`).

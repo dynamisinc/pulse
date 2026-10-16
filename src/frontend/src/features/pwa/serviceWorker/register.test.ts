@@ -2,7 +2,11 @@
  * features/pwa/serviceWorker/register.test.ts - registration gating + update flow (story 10).
  */
 import { describe, expect, it, vi } from 'vitest'
-import { registerServiceWorker } from './register'
+import { registerServiceWorker as realRegister, type RegisterOptions } from './register'
+
+/** Default build-id seam: unknown ids, no 1s timeouts. Individual tests override. */
+const registerServiceWorker = (o: RegisterOptions) =>
+  realRegister({ queryBuildId: async () => undefined, ...o })
 
 function fakeEnv(opts: { waiting?: boolean; controller?: boolean } = {}) {
   const regL: Record<string, () => void> = {}
@@ -94,7 +98,7 @@ describe('update flow', () => {
     e.regL.updatefound?.()
     w.state = 'installed'
     sl.statechange?.()
-    expect(c?.updateAvailable).toBe(true)
+    await vi.waitFor(() => expect(c?.updateAvailable).toBe(true))
     expect(spy).toHaveBeenCalled()
   })
 
@@ -133,5 +137,23 @@ describe('update flow', () => {
     const c = await registerServiceWorker({ enabled: true, pathname: '/', container: e.container })
     c?.dispose()
     expect(w.removeEventListener).toHaveBeenCalledWith('statechange', expect.any(Function))
+  })
+
+  it('suppresses the banner when the waiting worker is the same build as the running one', async () => {
+    const e = fakeEnv({ waiting: true })
+    const c = await registerServiceWorker({
+      enabled: true, pathname: '/', container: e.container,
+      queryBuildId: async () => 'abc123',
+    })
+    expect(c?.updateAvailable).toBe(false)
+  })
+
+  it('offers the update when the waiting build id differs', async () => {
+    const e = fakeEnv({ waiting: true })
+    const c = await registerServiceWorker({
+      enabled: true, pathname: '/', container: e.container,
+      queryBuildId: async w => (w === (e.reg.waiting as unknown) ? 'new' : 'old'),
+    })
+    expect(c?.updateAvailable).toBe(true)
   })
 })

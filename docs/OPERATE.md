@@ -72,6 +72,13 @@ Decided by Tom on 2026-10-14 (#486, Tier-2 items 3, 4 and 7):
 - **Shared devices: tap Sign out.** A participant session ends at midnight in the exercise time zone.
   A **View-only code** session also persists, but is not day-capped (accepted for the demo).
 
+## Retire the PWA service worker
+
+To retire the PWA service worker: copy `src/frontend/public/sw-killswitch.js` over `src/frontend/public/sw.js`
+and deploy. Every installed client unregisters on its next visit and reloads uncached (the kill switch
+deletes all `pulse-shell-*` caches, unregisters itself and reloads open windows). Keep it deployed for at
+least 30 days so infrequent devices also pick it up.
+
 ## Rollback
 
 **Frontend (deploy-only):**
