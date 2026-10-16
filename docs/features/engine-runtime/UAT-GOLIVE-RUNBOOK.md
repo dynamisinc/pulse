@@ -40,12 +40,13 @@ Read the job summary. Expect **only** these changes:
 - a change to the SQL server or database;
 - a change to `aif-pulse-uat`'s model deployments.
 
-### 1b. Login and join limiter permits for a single-venue exercise
+### 1b. Login and join limiter permits (set automatically; you only verify them)
 
 A1a (#480) makes the per-IP limiters key on the real client IP. Players on one venue's Wi-Fi share a single public
 IP behind its NAT, so they share **one** limiter bucket, and a room full of players joining at once could hit
-`429`. A1a's `webapp.bicep` raises these permits for UAT, so they also appear in the step-1 what-if as **added**
-app settings:
+`429`. A1a's `webapp.bicep` raises these permits for UAT. **You do not set them by hand:** the Deploy Infrastructure
+run sets them, and the next infra run would overwrite any manual value anyway. They appear in the step-1 what-if as
+**added** app settings:
 
 | App setting | UAT value |
 |---|---|
@@ -62,6 +63,10 @@ app settings:
 ## 2. Deploy Infrastructure: for real
 
 Run it again with **`what_if = false`**. When it finishes, the job summary should show `generationProvider = AzureOpenAI` and the attested posture as `true`/`true`.
+
+**Verify step 1b:** in the Azure portal, open `app-pulse-api-uat-dynamis`, then **Settings → Environment variables**
+(**Configuration → Application settings** on older portal views). Confirm the four limiter settings from step 1b are present
+with those values. If any is missing, stop and tell Session A; do not add it by hand.
 
 The app-setting change **restarts the App Service**. That clears the engine's in-memory state, including any per-exercise cut-to-Fake.
 
