@@ -107,4 +107,34 @@ describe('LiveWorldRow - Edited chip (story 20)', () => {
     expect(screen.getByTestId('live-world-text')).toHaveTextContent('Changed by the author')
     expect(screen.getByTestId('live-world-edited')).toBeInTheDocument()
   })
+
+  it('prefers fresher row data over a stale overlay (a missed edit refetched after a disconnect)', () => {
+    editedPostsStore.apply({
+      postId: 'post-lw-1',
+      text: 'Edit one',
+      edited: { count: 1, scenarioTime: '2033-09-04T10:05:00.000Z' },
+      version: 1,
+    })
+    renderRow(entryFor({
+      text: 'Edit two',
+      edited: { count: 2, scenarioTime: '2033-09-04T10:09:00.000Z' },
+    }))
+
+    expect(screen.getByTestId('live-world-text')).toHaveTextContent('Edit two')
+  })
+
+  it('keeps the overlay when it is at least as new as the row', () => {
+    editedPostsStore.apply({
+      postId: 'post-lw-1',
+      text: 'Edit two',
+      edited: { count: 2, scenarioTime: '2033-09-04T10:09:00.000Z' },
+      version: 2,
+    })
+    renderRow(entryFor({
+      text: 'Edit one',
+      edited: { count: 1, scenarioTime: '2033-09-04T10:05:00.000Z' },
+    }))
+
+    expect(screen.getByTestId('live-world-text')).toHaveTextContent('Edit two')
+  })
 })

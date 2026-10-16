@@ -157,8 +157,12 @@ export const LiveWorldRow = memo(function LiveWorldRow({
     [post.scenarioTime, timeZone],
   )
   const overlay = useEditedPost(post.id)
-  const edited = overlay.edited ?? entry.view.edited
-  const text = overlay.text ?? post.text
+  // Whichever carries the HIGHER edit count wins: a row refetched after missing a push (a
+  // disconnect) is newer than a stale overlay and must not be pulled back to the older edit.
+  const overlayIsCurrent =
+    overlay.edited !== undefined && overlay.edited.count >= (entry.view.edited?.count ?? 0)
+  const edited = overlayIsCurrent ? overlay.edited : entry.view.edited
+  const text = overlayIsCurrent ? (overlay.text ?? post.text) : post.text
   const [historyOpen, setHistoryOpen] = useState(false)
   const metaId = useId()
   const bodyId = useId()
