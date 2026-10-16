@@ -141,7 +141,10 @@ public sealed class OrganizationScopeSweepTests
         // allowlist authenticates, the IdP subject is resolved to its staff human (the same resolve-by-subject read
         // StaffLoginService claims) so a person who HAS a Pulse password is never signed in by the allowlist. The person
         // read that follows is bounded by that row's OrganizationId (.InOrganization), so it is not an exemption.
-        ["ResolutionRoot"] = 9,
+        // identity-auth-roles/15: +4 for OrgStaffLoginService — the email-first candidate read (People by email across
+        // orgs, capped at 5, disclosed only after the password verifies), the slug → organization resolution, the names
+        // of ONLY the organizations whose password verified (the org choice), and the IdP subject → staff human read.
+        ["ResolutionRoot"] = 13,
 
         // exercise-lifecycle-admin: +1 for OrganizationResolutionMiddleware, the production writer of
         // IOrganizationContext. It reads the authenticated caller's OWN StaffUser row (by the id their
@@ -150,7 +153,8 @@ public sealed class OrganizationScopeSweepTests
         // StaffAssignmentService sites already claim.
         ["OwnIdentity"] = 3,
 
-        ["TenantChecked"] = 2,
+        // identity-auth-roles/15: -1 — StaffAssignmentService's switch now reads the target exercise .InOrganization(...).
+        ["TenantChecked"] = 1,
 
         // exercise-lifecycle-admin (review finding WR-008): the tenant ROOT table joined the swept set, so
         // its one existing reader — BootstrapService.ResolveDefaultOrganizationAsync, a lookup by the FIXED
@@ -324,8 +328,9 @@ public sealed class OrganizationScopeSweepTests
     private static readonly IReadOnlyDictionary<string, int> ExpectedEnrollmentBypassCounts = new Dictionary<string, int>(StringComparer.Ordinal)
     {
         // StaffLoginService (1), StaffAssignmentService switcher list + switch (2), OrgStaffDirectoryService (1),
-        // OrgAdminSeedService (1), EnrollmentService grant check + org-admin target + previous lead + lead swap (4).
-        ["TenantChecked"] = 9,
+        // OrgAdminSeedService (1), EnrollmentService grant check + org-admin target + previous lead + lead swap (4),
+        // OrgStaffLoginService's landing enrollment (1, identity-auth-roles/15: own-only, joined to an InOrganization exercise).
+        ["TenantChecked"] = 10,
 
         // BootstrapService.ProvisionStaffAsync: the exercise this ops request itself created or host-resolved.
         ["ResolvedScope"] = 1,

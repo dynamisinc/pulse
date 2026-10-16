@@ -81,9 +81,9 @@ public sealed class StaffOrganizationBoundaryTests
         var refused = await service.SetActiveExerciseAsync(world.OtherCustomerExercise.Id);
 
         refused.Outcome.Should().Be(
-            SetActiveExerciseOutcome.NotAssigned,
-            "switching INTO another customer's exercise must fail closed. NotAssigned (403) — the same shape "
-            + "as an unassigned exercise — so the refusal discloses nothing about the other tenant's run");
+            SetActiveExerciseOutcome.NotFound,
+            "switching INTO another customer's exercise must fail closed. identity-auth-roles/15: the bare 404 — the "
+            + "same answer as a missing exercise — so the refusal discloses nothing about the other tenant's run");
         refused.Active.Should().BeNull("a refused switch must carry no exercise name or role");
 
         // Positive control: the SAME caller, same call, on their own organization's exercise.

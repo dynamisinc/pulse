@@ -13,8 +13,11 @@ using Moq;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.ExerciseResolution;
 using Pulse.WebApi.Features.Identity.Sessions;
+using Pulse.WebApi.Features.Identity.Staff;
 using Pulse.WebApi.Features.Realtime;
 using Pulse.WebApi.Tests.Data;
+using Pulse.WebApi.Tests.Features.ExerciseConfiguration.Lifecycle;
+using Pulse.WebApi.Tests.Features.Identity.Staff;
 using Pulse.WebApi.Tests.Helpers;
 using SignalRHttpContextFeature = Microsoft.AspNetCore.Http.Connections.Features.IHttpContextFeature;
 
@@ -53,74 +56,98 @@ public sealed class ExerciseRealtimeHubStaffGroupTests
 
         joined.Should().Equal(
             new[] { $"exercise:{exerciseA}", $"exercise:{exerciseA}:staff" },
-            "a live staff session assigned to the host-resolved exercise joins that exercise's group and its staff group");
+            "a live staff session enrolled in its session's exercise joins that exercise's group and its staff group");
     }
 
     [RequiresDockerFact]
-    public async Task LiveStaffSession_AssignedOnlyToAnotherExercise_GetsNoStaffGroup()
+    public async Task StaffSession_OnTheConsoleHost_JoinsItsSessionsExercise()
     {
-        // B5 AC5: a staff session whose assignment does not include the resolved exercise gets no staff group.
+        // identity-auth-roles/15 AC (realtime scope on the console host): the shared console host resolves NO
+        // exercise; a staff connection is scoped from its session's ExerciseId, verified against a live enrollment.
         var exerciseA = await SeedExerciseAsync();
-        var exerciseB = await SeedExerciseAsync();
-        var staff = await SeedStaffAsync(assignedTo: [exerciseB]);
+        var staff = await SeedStaffAsync(assignedTo: [exerciseA]);
 
-        var joined = await ConnectAsync(exerciseA, staff.Principal);
+        var (joined, aborted) = await ConnectWithAbortAsync(hostResolvedExerciseId: null, staff.Principal);
 
-        joined.Should().Equal(
-            new[] { $"exercise:{exerciseA}" },
-            "a staff user who is not assigned to the host-resolved exercise is not staff for that exercise");
+        aborted.Should().BeFalse("a verified staff session needs no host-resolved exercise");
+        joined.Should().Equal(new[] { $"exercise:{exerciseA}", $"exercise:{exerciseA}:staff" });
     }
 
     [RequiresDockerFact]
-    public async Task StaffAssignedToTwoExercises_JoinsOnlyTheHostResolvedExercisesGroups_NeverTheOther()
+    public async Task StaffAssignedToTwoExercises_JoinsOnlyItsSessionsExercise_NeverTheHostsOrTheOther()
     {
-        // B5 AC2/AC5 / COR-001: the staff group derives from the HOST-RESOLVED exercise — the same id the
-        // exercise-wide join uses — never from the assignment set and never from the session's ACTIVE exercise.
-        // The staff user is assigned to both A and B and the session is ACTIVE ON B (SeedStaffAsync binds the
-        // session to the first assignment), yet the connection is on A's host: it must join A's groups only.
-        // A staff group keyed on the session's exercise would join exercise:B:staff here and fail.
+        // identity-auth-roles/15 (supersedes B5's host-derived staff group): the session is ACTIVE ON B
+        // (SeedStaffAsync binds the session to the first assignment) while the connection arrives on A's host. The
+        // session wins (session > host, as for REST): B's groups only, never A's.
         var exerciseA = await SeedExerciseAsync();
         var exerciseB = await SeedExerciseAsync();
         var staff = await SeedStaffAsync(assignedTo: [exerciseB, exerciseA]);
 
         var joined = await ConnectAsync(exerciseA, staff.Principal);
 
-        joined.Should().Equal(new[] { $"exercise:{exerciseA}", $"exercise:{exerciseA}:staff" });
+        joined.Should().Equal(new[] { $"exercise:{exerciseB}", $"exercise:{exerciseB}:staff" });
         joined.Should().NotContain(
-            group => group.Contains(exerciseB.ToString(), StringComparison.OrdinalIgnoreCase),
-            "a connection on exercise A's host never joins exercise B's participant or staff group, even with "
-            + "the session active on B");
+            group => group.Contains(exerciseA.ToString(), StringComparison.OrdinalIgnoreCase),
+            "a staff connection joins its session's exercise only — the host never adds a second exercise");
     }
 
     [RequiresDockerFact]
-    public async Task RevokedStaffSession_GetsNoStaffGroup_EvenThoughThePrincipalStillSaysStaff()
+    public async Task StaffSession_BoundToAnExerciseWithoutALiveStaffEnrollment_IsAborted()
     {
-        // B5 AC6: the persisted row is re-verified — a revoked session is never staff.
+        // The session names exercise A but the staff user is enrolled only in B: unverifiable → refused (fail closed).
         var exerciseA = await SeedExerciseAsync();
-        var staff = await SeedStaffAsync(assignedTo: [exerciseA], configure: s => s.RevokedAt = DateTimeOffset.UtcNow.AddSeconds(-1));
+        var exerciseB = await SeedExerciseAsync();
+        var staff = await SeedStaffAsync(assignedTo: [exerciseB], configure: s => s.ExerciseId = exerciseA);
 
-        var joined = await ConnectAsync(exerciseA, staff.Principal);
+        var (joined, aborted) = await ConnectWithAbortAsync(exerciseA, staff.Principal);
 
-        joined.Should().Equal(new[] { $"exercise:{exerciseA}" }, "a revoked staff session is never admitted to the staff group");
+        aborted.Should().BeTrue();
+        joined.Should().BeEmpty("no live staff enrollment on the session's exercise — no group at all");
     }
 
     [RequiresDockerFact]
-    public async Task ExpiredStaffSession_GetsNoStaffGroup()
+    public async Task OrgScopeSession_IsRefusedByTheHub()
     {
-        // B5 AC6: an expired session is never staff.
+        // identity-auth-roles/15 AC: an org-scope session (ExerciseId null) has no exercise to be scoped to.
         var exerciseA = await SeedExerciseAsync();
-        var staff = await SeedStaffAsync(assignedTo: [exerciseA], configure: s => s.ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(-1));
+        var staff = await SeedStaffAsync(assignedTo: [exerciseA], configure: s => { s.ExerciseId = null; s.Role = "orgAdmin"; });
 
-        var joined = await ConnectAsync(exerciseA, staff.Principal);
+        var (joined, aborted) = await ConnectWithAbortAsync(hostResolvedExerciseId: null, staff.Principal);
+        var (joinedOnHost, abortedOnHost) = await ConnectWithAbortAsync(exerciseA, staff.Principal);
 
-        joined.Should().Equal(new[] { $"exercise:{exerciseA}" }, "an expired staff session is never admitted to the staff group");
+        aborted.Should().BeTrue();
+        joined.Should().BeEmpty();
+        abortedOnHost.Should().BeTrue("an exercise host never lends an org-scope session an exercise");
+        joinedOnHost.Should().BeEmpty();
+    }
+
+    [RequiresDockerTheory]
+    [InlineData("revoked")]
+    [InlineData("expired")]
+    [InlineData("participant-kind-row")]
+    public async Task UnverifiableStaffSessionRow_IsAborted_JoinsNoGroup(string defect)
+    {
+        // B5 AC6: the persisted row is re-verified — a revoked / expired / non-staff row is never staff, and
+        // (identity-auth-roles/15) a staff-kind principal never falls back to the host's exercise group.
+        var exerciseA = await SeedExerciseAsync();
+        Action<Session> configure = defect switch
+        {
+            "revoked" => s => s.RevokedAt = DateTimeOffset.UtcNow.AddSeconds(-1),
+            "expired" => s => s.ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(-1),
+            _ => s => s.Kind = "participant",
+        };
+        var staff = await SeedStaffAsync(assignedTo: [exerciseA], configure: configure);
+
+        var (joined, aborted) = await ConnectWithAbortAsync(exerciseA, staff.Principal);
+
+        aborted.Should().BeTrue();
+        joined.Should().BeEmpty();
     }
 
     [RequiresDockerFact]
-    public async Task StaffPrincipal_WithNoPersistedSession_GetsNoStaffGroup()
+    public async Task StaffPrincipal_WithNoPersistedSession_IsAborted()
     {
-        // A staff-shaped principal naming a session id that does not exist (never issued, or deleted) — the
-        // decision is the persisted session, not the claims.
+        // A staff-shaped principal naming a session id that does not exist — the decision is the persisted session.
         var exerciseA = await SeedExerciseAsync();
         var staff = await SeedStaffAsync(assignedTo: [exerciseA]);
         var phantom = SessionPrincipal.Create(new AuthenticatedSession
@@ -133,15 +160,15 @@ public sealed class ExerciseRealtimeHubStaffGroupTests
             ActingHumanId = $"human-{Guid.NewGuid():N}",
         });
 
-        var joined = await ConnectAsync(exerciseA, phantom);
+        var (joined, aborted) = await ConnectWithAbortAsync(exerciseA, phantom);
 
-        joined.Should().Equal(new[] { $"exercise:{exerciseA}" }, "a principal with no persisted live session is never staff");
+        aborted.Should().BeTrue();
+        joined.Should().BeEmpty("a principal with no persisted live session is never staff");
     }
 
     [RequiresDockerFact]
-    public async Task StaffPrincipal_NamingADifferentStaffUserThanItsSession_GetsNoStaffGroup()
+    public async Task StaffPrincipal_NamingADifferentStaffUserThanItsSession_IsAborted()
     {
-        // The principal's staff user must be the one the persisted session is bound to.
         var exerciseA = await SeedExerciseAsync();
         var staff = await SeedStaffAsync(assignedTo: [exerciseA]);
         var otherStaff = await SeedStaffAsync(assignedTo: [exerciseA]);
@@ -155,29 +182,17 @@ public sealed class ExerciseRealtimeHubStaffGroupTests
             ActingHumanId = $"human-{Guid.NewGuid():N}",
         });
 
-        var joined = await ConnectAsync(exerciseA, mismatched);
+        var (joined, aborted) = await ConnectWithAbortAsync(exerciseA, mismatched);
 
-        joined.Should().Equal(new[] { $"exercise:{exerciseA}" }, "a principal/session staff-user mismatch fails closed");
+        aborted.Should().BeTrue();
+        joined.Should().BeEmpty("a principal/session staff-user mismatch fails closed");
     }
 
     [RequiresDockerFact]
-    public async Task ParticipantKindSessionRow_ForAStaffUser_GetsNoStaffGroup()
+    public async Task StaffAssignedAcrossATenantBoundary_IsAborted()
     {
-        // The persisted row's kind is re-checked too: a participant-kind row is never staff, whatever the
-        // principal claims.
-        var exerciseA = await SeedExerciseAsync();
-        var staff = await SeedStaffAsync(assignedTo: [exerciseA], configure: s => s.Kind = "participant");
-
-        var joined = await ConnectAsync(exerciseA, staff.Principal);
-
-        joined.Should().Equal(new[] { $"exercise:{exerciseA}" }, "only a staff-kind persisted session is staff");
-    }
-
-    [RequiresDockerFact]
-    public async Task StaffAssignedAcrossATenantBoundary_GetsNoStaffGroup()
-    {
-        // COR-010: the reused StaffAssignmentService bounds assignments by the staff user's OWN organization, so a
-        // (mis-provisioned) assignment to another customer's exercise never yields that exercise's staff group.
+        // COR-010: the reused StaffAssignmentService bounds enrollments by the staff user's OWN organization, so a
+        // (mis-provisioned) enrollment in another customer's exercise never verifies a connection there.
         var otherOrganizationId = Guid.NewGuid();
         await using (var seed = _fixture.CreateContext())
         {
@@ -194,43 +209,106 @@ public sealed class ExerciseRealtimeHubStaffGroupTests
         var otherTenantsExercise = await SeedExerciseAsync(otherOrganizationId);
         var staff = await SeedStaffAsync(assignedTo: [otherTenantsExercise]);
 
-        var joined = await ConnectAsync(otherTenantsExercise, staff.Principal);
+        var (joined, aborted) = await ConnectWithAbortAsync(otherTenantsExercise, staff.Principal);
 
-        joined.Should().Equal(
-            new[] { $"exercise:{otherTenantsExercise}" },
-            "a staff user never gains another customer's staff group, even with an assignment row pointing there");
+        aborted.Should().BeTrue();
+        joined.Should().BeEmpty("a staff user never gains another customer's exercise, even with an enrollment row there");
+    }
+
+    [RequiresDockerFact]
+    public async Task ActiveExerciseSwitch_MovesTheConnection_OutOfTheOldGroups_AndTheReconnectJoinsTheNewExercise()
+    {
+        // identity-auth-roles/15 AC: switching exercise moves the connection's group — the server drops the old
+        // group membership (and closes the connection), and the client's reconnect joins the new exercise.
+        var exerciseA = await SeedExerciseAsync();
+        var exerciseB = await SeedExerciseAsync();
+        var staff = await SeedStaffAsync(assignedTo: [exerciseA, exerciseB]);
+        var registry = new SessionConnectionRegistry();
+
+        var (first, _) = await ConnectWithAbortAsync(null, staff.Principal, registry, "before-switch");
+        first.Should().Equal(new[] { $"exercise:{exerciseA}", $"exercise:{exerciseA}:staff" });
+
+        var removed = new List<(string ConnectionId, string Group)>();
+        var hubGroups = new Mock<IGroupManager>();
+        hubGroups
+            .Setup(g => g.RemoveFromGroupAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Callback<string, string, CancellationToken>((id, group, _) => removed.Add((id, group)))
+            .Returns(Task.CompletedTask);
+        var hubContext = new Mock<IHubContext<ExerciseRealtimeHub>>();
+        hubContext.SetupGet(h => h.Groups).Returns(hubGroups.Object);
+
+        await using (var context = _fixture.CreateContext())
+        {
+            var service = new StaffAssignmentService(
+                context,
+                new StubCurrentStaffSessionAccessor(new CurrentStaffSession { SessionId = staff.SessionId, StaffUserId = staff.StaffUserId }),
+                new SessionConnectionRevoker(registry, hubContext.Object));
+
+            var switched = await service.SetActiveExerciseAsync(exerciseB);
+            switched.Outcome.Should().Be(SetActiveExerciseOutcome.Ok);
+        }
+
+        removed.Should().BeEquivalentTo(
+            new[] { ("before-switch", $"exercise:{exerciseA}:staff"), ("before-switch", $"exercise:{exerciseA}") },
+            "the server drops the old exercise's group membership the moment the switch is committed");
+
+        var (reconnected, aborted) = await ConnectWithAbortAsync(null, staff.Principal, registry, "after-switch");
+        aborted.Should().BeFalse();
+        reconnected.Should().Equal(
+            new[] { $"exercise:{exerciseB}", $"exercise:{exerciseB}:staff" },
+            "the reconnect is scoped from the session row the switch persisted");
     }
 
     /// <summary>Runs <c>OnConnectedAsync</c> for one connection and returns the groups it joined, in order.</summary>
-    private async Task<IReadOnlyList<string>> ConnectAsync(Guid hostResolvedExerciseId, System.Security.Claims.ClaimsPrincipal principal)
+    private async Task<IReadOnlyList<string>> ConnectAsync(Guid? hostResolvedExerciseId, System.Security.Claims.ClaimsPrincipal principal)
+    {
+        var (joined, _) = await ConnectWithAbortAsync(hostResolvedExerciseId, principal);
+        return joined;
+    }
+
+    /// <summary>Runs <c>OnConnectedAsync</c>; returns the joined groups and whether the hub aborted the connection.</summary>
+    private async Task<(IReadOnlyList<string> Joined, bool Aborted)> ConnectWithAbortAsync(
+        Guid? hostResolvedExerciseId,
+        System.Security.Claims.ClaimsPrincipal principal,
+        SessionConnectionRegistry? registry = null,
+        string connectionId = ConnectionId)
     {
         var httpContext = new DefaultHttpContext { User = principal };
-        httpContext.SetHostResolvedExerciseId(hostResolvedExerciseId);
+        if (hostResolvedExerciseId is { } host)
+        {
+            httpContext.SetHostResolvedExerciseId(host);
+        }
 
         var httpContextFeature = new Mock<SignalRHttpContextFeature>();
         httpContextFeature.SetupGet(f => f.HttpContext).Returns(httpContext);
         var features = new FeatureCollection();
         features.Set<SignalRHttpContextFeature>(httpContextFeature.Object);
 
+        var aborted = false;
         var callerContext = new Mock<HubCallerContext>();
-        callerContext.SetupGet(c => c.ConnectionId).Returns(ConnectionId);
+        callerContext.SetupGet(c => c.ConnectionId).Returns(connectionId);
         callerContext.SetupGet(c => c.Features).Returns(features);
+        callerContext.SetupGet(c => c.Items).Returns(new Dictionary<object, object?>());
+        callerContext.Setup(c => c.Abort()).Callback(() => aborted = true);
 
         var joined = new List<string>();
         var groups = new Mock<IGroupManager>();
         groups
-            .Setup(g => g.AddToGroupAsync(ConnectionId, It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Setup(g => g.AddToGroupAsync(connectionId, It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .Callback<string, string, CancellationToken>((_, group, _) => joined.Add(group))
             .Returns(Task.CompletedTask);
 
         // No exercise scope: the hub's SignalR DI scope never carries the request's IExerciseContext.
         await using var dbContext = _fixture.CreateContext();
-        var hub = new ExerciseRealtimeHub(dbContext, NullLogger<ExerciseRealtimeHub>.Instance) { Context = callerContext.Object, Groups = groups.Object };
+        var hub = new ExerciseRealtimeHub(dbContext, NullLogger<ExerciseRealtimeHub>.Instance, registry)
+        {
+            Context = callerContext.Object,
+            Groups = groups.Object,
+        };
 
         await hub.OnConnectedAsync();
 
-        callerContext.Verify(c => c.Abort(), Times.Never, "a resolved host never aborts, staff or not");
-        return joined;
+        return (joined, aborted);
     }
 
     private async Task<Guid> SeedExerciseAsync(Guid? organizationId = null)

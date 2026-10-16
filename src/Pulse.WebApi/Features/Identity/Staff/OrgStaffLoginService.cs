@@ -351,17 +351,19 @@ public sealed partial class OrgStaffLoginService
         DateTimeOffset now,
         CancellationToken cancellationToken)
     {
-        // org-scope-exempt(ResolutionRoot): email-first sign-in IS the resolution of which organizations this human
-        // belongs to, before any tenant is known. Nothing is disclosed from it: a candidate's organization is revealed
-        // only after the password verified for that candidate (below), and the read is capped at MaxCandidates.
-        var candidates = email is null
-            ? []
-            : await _dbContext.People
+        List<Person> candidates = [];
+        if (email is not null)
+        {
+            // org-scope-exempt(ResolutionRoot): email-first sign-in IS the resolution of which organizations this human
+            // belongs to, before any tenant is known. Nothing is disclosed from it: a candidate's organization is
+            // revealed only after the password verified for that candidate (below), and the read is capped.
+            candidates = await _dbContext.People
                 .Where(p => p.Email == email)
                 .OrderBy(p => p.CreatedAt)
                 .ThenBy(p => p.Id)
                 .Take(MaxCandidates)
                 .ToListAsync(cancellationToken);
+        }
 
         if (candidates.Count == 0)
         {
@@ -444,6 +446,8 @@ public sealed partial class OrgStaffLoginService
         await _dbContext.SaveChangesAsync(cancellationToken);
 
         var organizationIds = verified.Select(v => v.Person.OrganizationId).ToList();
+        // org-scope-exempt(ResolutionRoot): by-id lookup of ONLY the organizations whose password just verified for
+        // this human (never an enumeration of the customer roster) — the resolution the org choice discloses.
         var organizations = await _dbContext.Organizations
             .AsNoTracking()
             .Where(o => organizationIds.Contains(o.Id))
@@ -619,6 +623,8 @@ public sealed partial class OrgStaffLoginService
     }
 
     private async Task<OrgRef?> FindOrganizationAsync(string slug, CancellationToken cancellationToken) =>
+        // org-scope-exempt(ResolutionRoot): this read IS the resolution — the URL slug to its tenant, exactly as a host
+        // header resolves to an exercise — performed before any tenant is known. One row by its unique slug.
         await _dbContext.Organizations
             .AsNoTracking()
             .Where(o => o.Slug == slug)
