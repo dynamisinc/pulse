@@ -40,7 +40,7 @@ internal sealed class VirtualParticipant : IAsyncDisposable
     private readonly RunClock _clock;
     private readonly ActivityMix _mix;
     private readonly string _timeZone;
-    private readonly Func<int, IReadOnlyCollection<int>> _otherClients;
+    private readonly Func<int, IReadOnlyDictionary<int, DateTimeOffset?>> _otherClients;
     private readonly Random _random;
     private readonly List<string> _recentPostIds = [];
     private HubConnection? _hub;
@@ -54,7 +54,7 @@ internal sealed class VirtualParticipant : IAsyncDisposable
         RunClock clock,
         ActivityMix mix,
         string timeZone,
-        Func<int, IReadOnlyCollection<int>> otherClients)
+        Func<int, IReadOnlyDictionary<int, DateTimeOffset?>> otherClients)
     {
         Id = id;
         Session = session;

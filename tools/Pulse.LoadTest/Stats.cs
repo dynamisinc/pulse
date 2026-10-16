@@ -95,12 +95,19 @@ internal sealed record SeriesSummary(
 
 /// <summary>One timed request.</summary>
 /// <param name="At">When the request started (UTC).</param>
-/// <param name="Step">The step index (0-based), or -1 outside a step (preflight, joins before step 1).</param>
+/// <param name="Step">The step index (0-based) when the request STARTED, or -1 outside a step.</param>
 /// <param name="Metric">The series: post, feed, reaction, join, controller-post, noise, inject-fire, ...</param>
 /// <param name="LatencyMs">Wall time to the response (or the failure).</param>
 /// <param name="Status">The HTTP status, or 0 when no response arrived.</param>
 /// <param name="Success">2xx.</param>
-internal sealed record RequestSample(DateTimeOffset At, int Step, string Metric, double LatencyMs, int Status, bool Success);
+internal sealed record RequestSample(DateTimeOffset At, int Step, string Metric, double LatencyMs, int Status, bool Success)
+{
+    /// <summary>
+    /// When the request finished (start + latency). Samples are logged at completion, so time windows (the stop rules)
+    /// select by this: a 30 s timeout that started 30 s ago is evidence NOW, not 30 s in the past.
+    /// </summary>
+    public DateTimeOffset CompletedAt => At + TimeSpan.FromMilliseconds(LatencyMs);
+}
 
 /// <summary>Thread-safe sink for every request sample of the run, in arrival order.</summary>
 internal sealed class SampleLog

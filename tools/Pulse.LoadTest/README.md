@@ -106,7 +106,9 @@ The harness checks the rules every 5 s, during the ramp and the step. Each check
 The short window is deliberate. A breach must last 60 s; a 5 s burst of errors does not trip a step. A window with
 fewer than 10 requests (or 10 POSTs, for the p95 rule) is never evidence. In practice the p95 rule is judged during
 the 120/min burst, and the error rule all the time. The ramp also stops after **10 failed joins in a row** (a 429
-included). When a rule trips, the harness aborts the step (or its ramp) and skips the later steps. The reason goes into `summary.json` (`stopReason`) and the exit code is 2. **Ctrl+C** once stops the load,
+included). When a rule trips, the harness aborts the step (or its ramp) and skips the later steps. A ramp that runs out
+of join links or attempts below the step's population also stops the run ("undersized population: N of M"). The step
+is never run short-handed as if it were full. The reason goes into `summary.json` (`stopReason`) and the exit code is 2. **Ctrl+C** once stops the load,
 turns noise off, closes every connection, signs out and writes a partial summary (exit 130). A second Ctrl+C exits at
 once. Remove-LoadTestExercise.ps1 still turns noise off.
 
@@ -157,7 +159,7 @@ Report a restart in the report's "Deviations" row, with its time from the `event
 | `summary.json` | Target, window, `completed`, `stopReason`, `interrupted`. Per step: users, series and fan-out figures, plus reconnects, closed connections, connect failures, and `events` (restart signs, tier re-applies, rebuilt connections) |
 | `steps.csv` | One row per step and series: count, errors, error rate, p50/p95/p99/max in ms. Also the `fan-out-lag` and `fan-out-end-to-end` rows |
 | `samples.csv` | Every timed request: time, step, users, metric, latency, status |
-| `fanout-drops.csv` | Every frame that never arrived: the post, the client, and how long after that client's (re)connect it was accepted |
+| `fanout-drops.csv` | Every frame that never arrived: the post, the client, and how long after that client's (re)connect it was accepted. The connect time is the one the client had when the post was sent (`clientConnectedAtSend`), so a later reconnect cannot rewrite it |
 
 The series are:
 
@@ -175,6 +177,9 @@ measured from the request being sent.
 
 - A frame later than 2 s is **late**.
 - A frame missing after 30 s is **dropped**.
+- A frame still pending when the run ends, on a post younger than 30 s, is **unfinished** (`framesUnfinished`). It
+  is not a drop and is not in `dropRate`. At the end the harness stops every writer first, then keeps the connections
+  open while those frames can still arrive: up to 30 s, or 5 s after Ctrl+C. Only then does it close them.
 - Frames for noise and burst-item posts are counted as `untrackedFrames`. They are not timed, because the harness does
   not know when the server accepted them.
 
@@ -182,11 +187,12 @@ A drop with `secondsAfterConnect` under about 1 s is a join-window artefact. The
 group in `OnConnectedAsync`, just after the client sees the connection as connected. Report such drops separately from
 real drops.
 
-**Connection counts** are per step:
+**Requests and connection events count in the step they started in.** Teardown is outside every step, so closing
+connections at the end is not counted as a loss. **Connection counts** are per step:
 
 - `reconnects` counts SignalR's automatic reconnect attempts. A burst of them across most clients at one moment means a
   server restart or a network blip. A steady trickle under load means connections are timing out.
-- `connectionsClosed` counts connections that ended for good, after the automatic reconnects gave up. They stop
+- `connectionsClosed` counts connections that ended for good during a step, after the automatic reconnects gave up. They stop
   receiving frames, so their missing frames show up as drops. They are rebuilt at the next step start, and the step's
   `events` say how many.
 - `connectFailures` counts hub connections that could not start at all, at a join or a rebuild.

@@ -170,7 +170,7 @@ internal sealed class LoadTestRunner : IDisposable
                     step.EndedAt = DateTimeOffset.UtcNow;
                     await SetNoiseAsync(api, staff, "off", CancellationToken.None);
                     runStop = $"step {stepIndex + 1} ({users} users): {rampStop}";
-                    Fail($"STOP RULE: {runStop}. Later steps skipped.");
+                    Fail($"STOPPED: {runStop}. Later steps skipped.");
                     break;
                 }
 
@@ -203,10 +203,10 @@ internal sealed class LoadTestRunner : IDisposable
         }
         finally
         {
-            await ShutdownAsync(api, staff);
+            await ShutdownAsync(api, staff, interrupted);
             if (Directory.Exists(outDir))
             {
-                _tracker.Sweep(DateTimeOffset.UtcNow, all: true);
+                _tracker.Finish(DateTimeOffset.UtcNow); // still-pending frames: unfinished, not dropped
                 var summary = BuildSummary(origin, target, targetName, startedAt, runStop, interrupted);
                 ResultWriter.Write(outDir, summary, _log.Snapshot(), _config.Steps, DropsCsv());
                 Info($"Results: {Path.GetFullPath(outDir)} (summary.json, steps.csv, samples.csv, fanout-drops.csv)");
@@ -318,8 +318,17 @@ internal sealed class LoadTestRunner : IDisposable
             }
         }
 
-        return null;
+        return UndersizedReason(_participants.Count, users);
     }
+
+    /// <summary>
+    /// The ramp ran out of links or attempts below the step's population: the step must not run as if it were full.
+    /// Returns the stop reason, or <c>null</c> when the population is complete.
+    /// </summary>
+    internal static string? UndersizedReason(int joined, int wanted) =>
+        joined >= wanted
+            ? null
+            : $"undersized population: {joined} of {wanted} users joined (join links or attempts ran out); the step was not run";
 
     /// <summary>
     /// Step start (M3): re-applies pause tier <c>engine</c> (idempotent) and checks for a UAT restart since the last step:
@@ -385,8 +394,12 @@ internal sealed class LoadTestRunner : IDisposable
         step.Event($"{closed.Length} closed connection(s) found at step start; {rebuilt} rebuilt.");
     }
 
-    private int[] OtherConnectedClients(int sender) =>
-        _participants.Values.Where(p => p.Id != sender && p.IsConnected).Select(p => p.Id).ToArray();
+    /// <summary>
+    /// The clients a post is expected at: every other connected client, each with its connection time NOW (at send), so a
+    /// later reconnect cannot rewrite how long it had been connected when it missed the post.
+    /// </summary>
+    private Dictionary<int, DateTimeOffset?> OtherConnectedClients(int sender) =>
+        _participants.Values.Where(p => p.Id != sender && p.IsConnected).ToDictionary(p => p.Id, p => p.ConnectedAt);
 
     private async Task<string?> RunStepAsync(PulseApi api, PulseSession staff, IReadOnlyList<string> npcPersonas, string timeZone, StepResult step, CancellationToken ct)
     {
@@ -544,10 +557,19 @@ internal sealed class LoadTestRunner : IDisposable
         return result;
     }
 
-    private async Task ShutdownAsync(PulseApi api, PulseSession staff)
+    /// <summary>
+    /// Ends the run in an order that measures nothing it should not: (1) stop every writer and wait for its in-flight
+    /// requests; (2) noise off; (3) move the clock out of the measured steps, so closing connections is not counted as a
+    /// loss in the last step; (4) keep the receivers open while frames for posts already written can still arrive — up
+    /// to the drop horizon, 5 s after Ctrl+C — then (5) close the connections and sign out. Frames still pending after
+    /// that are reported as unfinished by <see cref="FanOutTracker.Finish"/>, never as drops.
+    /// </summary>
+    private async Task ShutdownAsync(PulseApi api, PulseSession staff, bool interrupted)
     {
         await _activityCts.CancelAsync(); // stop every participant loop first: no new load while shutting down
-        using var grace = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        await Task.WhenAll(_activity.Select(t => t.ContinueWith(_ => { }, TaskScheduler.Default)));
+
+        using var grace = new CancellationTokenSource(TimeSpan.FromSeconds(90));
         if (_steps.Count > 0) // a dry run, or a stop before step 1, never touched the noise level
         {
             try
@@ -560,7 +582,19 @@ internal sealed class LoadTestRunner : IDisposable
             }
         }
 
-        await Task.WhenAll(_activity.Select(t => t.ContinueWith(_ => { }, TaskScheduler.Default)));
+        _clock.Step = -1; // teardown is not part of any step
+
+        var limit = interrupted ? TimeSpan.FromSeconds(5) : TimeSpan.FromSeconds(_config.FanOut.DroppedAfterSeconds);
+        var left = await DrainAsync(() =>
+        {
+            _tracker.Sweep(DateTimeOffset.UtcNow);
+            return _tracker.PendingPosts;
+        }, limit, TimeSpan.FromMilliseconds(250), CancellationToken.None);
+        if (left > 0)
+        {
+            Info($"  {left} post(s) still had frames in flight after the {limit.TotalSeconds:0} s drain: reported as unfinished.");
+        }
+
         await Parallel.ForEachAsync(_participants.Values, new ParallelOptions { MaxDegreeOfParallelism = 8 }, async (p, _) =>
         {
             await p.DisposeAsync();
@@ -568,6 +602,25 @@ internal sealed class LoadTestRunner : IDisposable
         });
         await api.LogoutAsync(staff, CancellationToken.None);
         Info($"Closed {_participants.Count} connections and signed out.");
+    }
+
+    /// <summary>
+    /// Waits until <paramref name="pending"/> reports 0, or <paramref name="limit"/> passes, polling every
+    /// <paramref name="poll"/>. Returns the last pending count.
+    /// </summary>
+    internal static async Task<int> DrainAsync(Func<int> pending, TimeSpan limit, TimeSpan poll, CancellationToken ct, Func<TimeSpan, CancellationToken, Task>? delay = null)
+    {
+        delay ??= Task.Delay;
+        var waited = TimeSpan.Zero;
+        var count = pending();
+        while (count > 0 && waited < limit)
+        {
+            await delay(poll, ct);
+            waited += poll;
+            count = pending();
+        }
+
+        return count;
     }
 
     private RunSummary BuildSummary(Uri origin, Guid target, string? targetName, DateTimeOffset startedAt, string? stopReason, bool interrupted)
@@ -614,17 +667,23 @@ internal sealed class LoadTestRunner : IDisposable
     }
 
     /// <summary>One row per missing frame: the post, the client, and how long after its (re)connect the post was accepted.</summary>
-    private string DropsCsv()
+    private string DropsCsv() => FormatDrops(_tracker.Drops);
+
+    /// <summary>
+    /// One row per missing frame: the post, the client, and that client's connection time AS IT STOOD WHEN THE POST WAS
+    /// SENT (a later reconnect does not rewrite it), with the seconds between that connect and the accept.
+    /// </summary>
+    internal static string FormatDrops(IReadOnlyList<DroppedFrames> drops)
     {
         var csv = new System.Text.StringBuilder();
-        csv.AppendLine("step,postId,acceptedAt,clientId,clientConnectedAt,secondsAfterConnect");
-        foreach (var drop in _tracker.Drops)
+        csv.AppendLine("step,postId,acceptedAt,clientId,clientConnectedAtSend,secondsAfterConnect");
+        foreach (var drop in drops)
         {
-            foreach (var client in drop.MissingClients)
+            foreach (var missing in drop.MissingClients)
             {
-                var connected = _participants.TryGetValue(client, out var p) ? p.ConnectedAt : null;
+                var connected = missing.ConnectedAtSend;
                 csv.Append(drop.Step + 1).Append(',').Append(drop.PostId).Append(',')
-                    .Append(drop.AcceptedAt.ToString("O", CultureInfo.InvariantCulture)).Append(',').Append(client).Append(',')
+                    .Append(drop.AcceptedAt.ToString("O", CultureInfo.InvariantCulture)).Append(',').Append(missing.ClientId).Append(',')
                     .Append(connected?.ToString("O", CultureInfo.InvariantCulture)).Append(',')
                     .Append(connected is { } c ? (drop.AcceptedAt - c).TotalSeconds.ToString("0.000", CultureInfo.InvariantCulture) : string.Empty)
                     .AppendLine();

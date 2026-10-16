@@ -65,17 +65,22 @@ internal sealed class PulseApi : IDisposable
     private readonly RunClock _clock;
 
     public PulseApi(Uri origin, TimeSpan timeout, SampleLog log, RunClock clock)
-    {
-        Origin = origin;
-        _log = log;
-        _clock = clock;
-        var handler = new SocketsHttpHandler
+        : this(origin, timeout, log, clock, new SocketsHttpHandler
         {
             AllowAutoRedirect = false,
             MaxConnectionsPerServer = 512,
             PooledConnectionLifetime = TimeSpan.FromMinutes(5),
             AutomaticDecompression = DecompressionMethods.All,
-        };
+        })
+    {
+    }
+
+    /// <summary>Tests pass their own handler.</summary>
+    internal PulseApi(Uri origin, TimeSpan timeout, SampleLog log, RunClock clock, HttpMessageHandler handler)
+    {
+        Origin = origin;
+        _log = log;
+        _clock = clock;
         _http = new HttpClient(handler) { BaseAddress = origin, Timeout = timeout };
         _http.DefaultRequestHeaders.Accept.ParseAdd("application/json");
         _http.DefaultRequestHeaders.UserAgent.ParseAdd("Pulse.LoadTest/1.0");
@@ -229,6 +234,9 @@ internal sealed class PulseApi : IDisposable
             request.Content = JsonContent.Create(body, options: SerializerOptions);
         }
 
+        // The step is captured with the start time, before the await: a request started in step 1 that finishes in
+        // step 2 belongs to step 1.
+        var step = _clock.Step;
         var started = DateTimeOffset.UtcNow;
         var watch = Stopwatch.StartNew();
         var status = 0;
@@ -259,7 +267,7 @@ internal sealed class PulseApi : IDisposable
 
         if (metric is not null)
         {
-            _log.Add(new RequestSample(started, _clock.Step, metric, Math.Round(watch.Elapsed.TotalMilliseconds, 1), status, status is >= 200 and < 300));
+            _log.Add(new RequestSample(started, step, metric, Math.Round(watch.Elapsed.TotalMilliseconds, 1), status, status is >= 200 and < 300));
         }
 
         return new ApiResult(status, json);

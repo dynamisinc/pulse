@@ -40,13 +40,15 @@ internal sealed class StopRuleEvaluator
 
     /// <summary>
     /// Evaluates one tick at <paramref name="now"/> over <paramref name="stepSamples"/> (the current step's samples;
-    /// only those inside the trailing window are used). Returns the stop reason, or <c>null</c> to carry on.
+    /// only those that COMPLETED inside the trailing window are used). Returns the stop reason, or <c>null</c> to carry on.
     /// </summary>
     public string? Evaluate(DateTimeOffset now, IReadOnlyCollection<RequestSample> stepSamples)
     {
         ArgumentNullException.ThrowIfNull(stepSamples);
         var from = now - TimeSpan.FromSeconds(_settings.WindowSeconds);
-        var window = stepSamples.Where(s => s.At > from && s.At <= now).ToArray();
+        // Select by COMPLETION time: samples are logged when they finish, so a slow request or a timeout lands in the
+        // window that sees it end (its start time is kept for reporting).
+        var window = stepSamples.Where(s => s.CompletedAt > from && s.CompletedAt <= now).ToArray();
 
         // Error rate.
         if (window.Length >= _settings.MinSamples)

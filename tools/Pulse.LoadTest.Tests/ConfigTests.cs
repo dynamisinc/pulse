@@ -118,16 +118,18 @@ public class FanOutTrackerTests
 {
     private static readonly DateTimeOffset T0 = new(2026, 10, 17, 9, 0, 0, TimeSpan.Zero);
 
+    internal static Dictionary<int, DateTimeOffset?> Clients(params int[] ids) => ids.ToDictionary(id => id, _ => (DateTimeOffset?)T0.AddMinutes(-5));
+
     [Fact]
     public void Lag_IsMeasuredFromAccept_ToEveryOtherClient()
     {
         var tracker = new FanOutTracker(new FanOutSettings());
-        tracker.Register(0, "p1", T0, T0.AddMilliseconds(100), [2, 3, 4]);
+        tracker.Register(0, "p1", T0, T0.AddMilliseconds(100), Clients(2, 3, 4));
         tracker.OnFrame(2, "p1", T0.AddMilliseconds(150));
         tracker.OnFrame(3, "p1", T0.AddMilliseconds(300));
         tracker.OnFrame(4, "p1", T0.AddMilliseconds(3100)); // late (> 2 s)
         tracker.OnFrame(1, "p1", T0.AddMilliseconds(120));  // the sender: ignored
-        tracker.Sweep(T0.AddMinutes(1), all: true);
+        tracker.Sweep(T0.AddMinutes(1));
 
         var summary = tracker.Summary(0);
         summary.FramesDelivered.Should().Be(3);
@@ -143,8 +145,8 @@ public class FanOutTrackerTests
     {
         var tracker = new FanOutTracker(new FanOutSettings());
         tracker.OnFrame(2, "p1", T0.AddMilliseconds(40));
-        tracker.Register(0, "p1", T0, T0.AddMilliseconds(90), [2]);
-        tracker.Sweep(T0.AddMinutes(1), all: true);
+        tracker.Register(0, "p1", T0, T0.AddMilliseconds(90), Clients(2));
+        tracker.Sweep(T0.AddMinutes(1));
 
         var summary = tracker.Summary(0);
         summary.FramesDelivered.Should().Be(1);
@@ -157,7 +159,7 @@ public class FanOutTrackerTests
     public void MissingFrames_AfterTheHorizon_AreDropped()
     {
         var tracker = new FanOutTracker(new FanOutSettings { DroppedAfterSeconds = 30 });
-        tracker.Register(1, "p1", T0, T0, [2, 3]);
+        tracker.Register(1, "p1", T0, T0, Clients(2, 3));
         tracker.OnFrame(2, "p1", T0.AddMilliseconds(50));
 
         tracker.Sweep(T0.AddSeconds(10));
@@ -189,7 +191,7 @@ public class ResultWriterTests
         {
             ["post"] = new("post", 10, 1, 0.1, 100, 200, 300, 400),
         };
-        var fan = new FanOutSummary(5, 1, 0, 0, 0, 10, 20, 30, 40, 50, 60);
+        var fan = new FanOutSummary(5, 1, 0, 0, 0, 0, 10, 20, 30, 40, 50, 60);
         var step = new StepSummary(1, 20, 20, 20, null, null, null, "error rate \"x\"", true, true, 240, series, fan, 2, 0, 0, []);
         var summary = new RunSummary("https://h/", "id", "Load test", DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch, false, "s", false, 0,
             new ConfigEcho([20], 10, 25, new(), new(), new(), new()), [step]);

@@ -7,20 +7,26 @@ using System.Collections.Concurrent;
 /// to <c>PostReceived</c> at every OTHER connected client. The server broadcasts before it answers, so a frame can land
 /// before the 201; that counts as 0 ms lag (and is counted as "early"). The time from the request being SENT is kept
 /// too, as end-to-end lag. Frames still missing after <see cref="FanOutSettings.DroppedAfterSeconds"/> are dropped;
-/// frames later than <see cref="FanOutSettings.LateAfterSeconds"/> are late.
+/// frames later than <see cref="FanOutSettings.LateAfterSeconds"/> are late. Frames still pending when the run ends
+/// before that horizon are UNFINISHED observations, reported apart from drops.
 /// </summary>
+/// <remarks>
+/// All state sits behind ONE lock: registration, frame arrival, early-frame buffering and sweeping can interleave from
+/// the SignalR receive threads and the harness, and a frame must never land in a buffer a registration already drained
+/// (it would then be settled as a drop). The work under the lock is a few dictionary operations per frame — at
+/// 120 posts/min × 100 clients that is about 200 frames/s, nowhere near contention.
+/// </remarks>
 internal sealed class FanOutTracker
 {
     private readonly FanOutSettings _settings;
-    private readonly ConcurrentDictionary<string, TrackedPost> _posts = new(StringComparer.OrdinalIgnoreCase);
+    private readonly object _gate = new();
+    private readonly Dictionary<string, TrackedPost> _posts = new(StringComparer.OrdinalIgnoreCase);
 
     // A frame can arrive before the harness knows the post id (before the 201): keep it, matched on registration.
-    private readonly ConcurrentDictionary<string, ConcurrentDictionary<int, DateTimeOffset>> _early = new(StringComparer.OrdinalIgnoreCase);
-    private readonly ConcurrentDictionary<int, StepFanOut> _steps = new();
-    private readonly ConcurrentQueue<DroppedFrames> _drops = new();
-
-    /// <summary>Every post with missing frames: which clients never got it (written to fanout-drops.csv).</summary>
-    public IReadOnlyList<DroppedFrames> Drops => _drops.ToArray();
+    private readonly Dictionary<string, EarlyFrames> _early = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<int, StepFanOut> _steps = [];
+    private readonly List<DroppedFrames> _drops = [];
+    private long _untracked;
 
     public FanOutTracker(FanOutSettings settings)
     {
@@ -28,29 +34,60 @@ internal sealed class FanOutTracker
         _settings = settings;
     }
 
-    /// <summary>Frames for posts the harness did not write (noise, the burst item): counted, not timed.</summary>
-    public long UntrackedFrames => Interlocked.Read(ref _untracked);
+    /// <summary>Every post with missing frames: which clients never got it (written to fanout-drops.csv).</summary>
+    public IReadOnlyList<DroppedFrames> Drops
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return [.. _drops];
+            }
+        }
+    }
 
-    private long _untracked;
+    /// <summary>Frames for posts the harness did not write (noise, the burst item): counted, not timed.</summary>
+    public long UntrackedFrames
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _untracked;
+            }
+        }
+    }
+
+    /// <summary>Registered posts still waiting for at least one frame.</summary>
+    public int PendingPosts
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _posts.Values.Count(p => p.Pending.Count > 0);
+            }
+        }
+    }
 
     /// <summary>
     /// Registers a post the harness wrote: sent at <paramref name="sentAt"/>, accepted at <paramref name="acceptedAt"/>,
-    /// expected at every client in <paramref name="expectedClients"/> (connected at accept time, sender excluded).
+    /// expected at every client in <paramref name="expectedClients"/> (connected when the post was sent, sender
+    /// excluded), each with that client's connection time AT SEND, kept for the drop record.
     /// </summary>
-    public void Register(int step, string postId, DateTimeOffset sentAt, DateTimeOffset acceptedAt, IReadOnlyCollection<int> expectedClients)
+    public void Register(int step, string postId, DateTimeOffset sentAt, DateTimeOffset acceptedAt, IReadOnlyDictionary<int, DateTimeOffset?> expectedClients)
     {
-        var post = new TrackedPost(step, sentAt, acceptedAt, new HashSet<int>(expectedClients));
-        _posts[postId] = post;
-        DrainEarly(postId, post);
-    }
-
-    private void DrainEarly(string postId, TrackedPost post)
-    {
-        if (_early.TryRemove(postId, out var early))
+        ArgumentNullException.ThrowIfNull(expectedClients);
+        lock (_gate)
         {
-            foreach (var (client, at) in early)
+            var post = new TrackedPost(step, sentAt, acceptedAt, new Dictionary<int, DateTimeOffset?>(expectedClients));
+            _posts[postId] = post;
+            if (_early.Remove(postId, out var early))
             {
-                post.Receive(client, at, Stats(post.Step), _settings);
+                foreach (var (client, at) in early.Frames)
+                {
+                    ReceiveLocked(post, client, at);
+                }
             }
         }
     }
@@ -58,100 +95,140 @@ internal sealed class FanOutTracker
     /// <summary>A <c>PostReceived</c> frame for <paramref name="postId"/> at client <paramref name="clientId"/>.</summary>
     public void OnFrame(int clientId, string postId, DateTimeOffset at)
     {
-        if (_posts.TryGetValue(postId, out var post))
+        lock (_gate)
         {
-            post.Receive(clientId, at, Stats(post.Step), _settings);
-            return;
-        }
+            if (_posts.TryGetValue(postId, out var post))
+            {
+                ReceiveLocked(post, clientId, at);
+                return;
+            }
 
-        // Unknown yet: either our POST's 201 has not come back, or the post is not ours. Hold it briefly.
-        var bucket = _early.GetOrAdd(postId, _ => new ConcurrentDictionary<int, DateTimeOffset>());
-        bucket.TryAdd(clientId, at);
+            // Unknown yet: either our POST's 201 has not come back, or the post is not ours. Hold it until the horizon.
+            if (!_early.TryGetValue(postId, out var bucket))
+            {
+                bucket = new EarlyFrames(at);
+                _early[postId] = bucket;
+            }
+
+            bucket.Frames.TryAdd(clientId, at);
+        }
     }
 
     /// <summary>
-    /// Settles everything older than the drop horizon at <paramref name="now"/> (or everything, with
-    /// <paramref name="all"/>): missing frames become dropped; held unknown frames become untracked.
+    /// Settles everything older than the drop horizon at <paramref name="now"/>: missing frames become dropped; held
+    /// unknown frames become untracked. Younger posts are left alone.
     /// </summary>
-    public void Sweep(DateTimeOffset now, bool all = false)
+    public void Sweep(DateTimeOffset now) => SettleLocked(now, finish: false);
+
+    /// <summary>
+    /// The end of the run: posts past the horizon are settled as in <see cref="Sweep"/>; frames still pending on younger
+    /// posts are UNFINISHED observations (the run ended before they could be judged), never drops.
+    /// </summary>
+    public void Finish(DateTimeOffset now) => SettleLocked(now, finish: true);
+
+    /// <summary>The fan-out numbers for one step.</summary>
+    public FanOutSummary Summary(int step)
+    {
+        lock (_gate)
+        {
+            return Stats(step).Summarize();
+        }
+    }
+
+    private void SettleLocked(DateTimeOffset now, bool finish)
     {
         var horizon = TimeSpan.FromSeconds(_settings.DroppedAfterSeconds);
-        foreach (var (id, post) in _posts)
+        lock (_gate)
         {
-            if (all || now - post.AcceptedAt >= horizon)
+            foreach (var (id, post) in _posts.ToArray())
             {
-                if (_posts.TryRemove(id, out _))
+                var expired = now - post.AcceptedAt >= horizon;
+                if (!expired && !finish)
                 {
-                    DrainEarly(id, post); // a frame that raced the registration is a delivery, not a drop
-                    var missing = post.Settle(Stats(post.Step));
-                    if (missing.Length > 0)
-                    {
-                        _drops.Enqueue(new DroppedFrames(post.Step, id, post.AcceptedAt, missing));
-                    }
+                    continue;
                 }
-            }
-        }
 
-        foreach (var (id, bucket) in _early)
-        {
-            if (_posts.TryGetValue(id, out var known))
-            {
-                DrainEarly(id, known); // a frame that raced the registration
-                continue;
+                _posts.Remove(id);
+                if (post.Pending.Count == 0)
+                {
+                    continue;
+                }
+
+                if (expired)
+                {
+                    Stats(post.Step).AddDropped(post.Pending.Count);
+                    _drops.Add(new DroppedFrames(
+                        post.Step,
+                        id,
+                        post.AcceptedAt,
+                        [.. post.Pending.OrderBy(p => p.Key).Select(p => new MissingFrame(p.Key, p.Value))]));
+                }
+                else
+                {
+                    Stats(post.Step).AddUnfinished(post.Pending.Count);
+                }
+
+                post.Pending.Clear();
             }
 
-            var oldest = bucket.Values.DefaultIfEmpty(now).Min();
-            if ((all || now - oldest >= horizon) && _early.TryRemove(id, out var removed))
+            foreach (var (id, bucket) in _early.ToArray())
             {
-                Interlocked.Add(ref _untracked, removed.Count);
+                if (finish || now - bucket.FirstSeen >= horizon)
+                {
+                    _early.Remove(id);
+                    _untracked += bucket.Frames.Count;
+                }
             }
         }
     }
 
-    /// <summary>The fan-out numbers for one step.</summary>
-    public FanOutSummary Summary(int step) => Stats(step).Summarize();
-
-    private StepFanOut Stats(int step) => _steps.GetOrAdd(step, _ => new StepFanOut());
-
-    private sealed class TrackedPost(int step, DateTimeOffset sentAt, DateTimeOffset acceptedAt, HashSet<int> pending)
+    private void ReceiveLocked(TrackedPost post, int client, DateTimeOffset at)
     {
-        private readonly object _gate = new();
+        if (!post.Pending.Remove(client))
+        {
+            return; // the sender, a duplicate, or a client that connected after the post was sent
+        }
 
+        var lag = (at - post.AcceptedAt).TotalMilliseconds;
+        Stats(post.Step).Add(Math.Max(0, lag), (at - post.SentAt).TotalMilliseconds, early: lag < 0, late: lag > _settings.LateAfterSeconds * 1000);
+    }
+
+    private StepFanOut Stats(int step)
+    {
+        if (!_steps.TryGetValue(step, out var stats))
+        {
+            stats = new StepFanOut();
+            _steps[step] = stats;
+        }
+
+        return stats;
+    }
+
+    private sealed class TrackedPost(int step, DateTimeOffset sentAt, DateTimeOffset acceptedAt, Dictionary<int, DateTimeOffset?> pending)
+    {
         public int Step { get; } = step;
+
+        public DateTimeOffset SentAt { get; } = sentAt;
 
         public DateTimeOffset AcceptedAt { get; } = acceptedAt;
 
-        public void Receive(int client, DateTimeOffset at, StepFanOut stats, FanOutSettings settings)
-        {
-            lock (_gate)
-            {
-                if (!pending.Remove(client))
-                {
-                    return; // the sender, a duplicate, or a client that connected after the accept
-                }
-            }
+        /// <summary>Client id → that client's connection time when the post was sent.</summary>
+        public Dictionary<int, DateTimeOffset?> Pending { get; } = pending;
+    }
 
-            var lag = (at - AcceptedAt).TotalMilliseconds;
-            stats.Add(Math.Max(0, lag), (at - sentAt).TotalMilliseconds, early: lag < 0, late: lag > settings.LateAfterSeconds * 1000);
-        }
+    private sealed class EarlyFrames(DateTimeOffset firstSeen)
+    {
+        public DateTimeOffset FirstSeen { get; } = firstSeen;
 
-        public int[] Settle(StepFanOut stats)
-        {
-            int[] missing;
-            lock (_gate)
-            {
-                missing = [.. pending];
-                pending.Clear();
-            }
-
-            stats.AddDropped(missing.Length);
-            return missing;
-        }
+        public Dictionary<int, DateTimeOffset> Frames { get; } = [];
     }
 }
 
 /// <summary>A post some expected clients never received.</summary>
-internal sealed record DroppedFrames(int Step, string PostId, DateTimeOffset AcceptedAt, IReadOnlyList<int> MissingClients);
+internal sealed record DroppedFrames(int Step, string PostId, DateTimeOffset AcceptedAt, IReadOnlyList<MissingFrame> MissingClients);
+
+/// <summary>A client that never received a post, with its connection time as it stood when the post was sent.</summary>
+internal sealed record MissingFrame(int ClientId, DateTimeOffset? ConnectedAtSend);
 
 /// <summary>Accumulates one step's fan-out samples.</summary>
 internal sealed class StepFanOut
@@ -161,6 +238,7 @@ internal sealed class StepFanOut
     private long _late;
     private long _early;
     private long _dropped;
+    private long _unfinished;
 
     public void Add(double lagMs, double endToEndMs, bool early, bool late)
     {
@@ -179,6 +257,8 @@ internal sealed class StepFanOut
 
     public void AddDropped(int count) => Interlocked.Add(ref _dropped, count);
 
+    public void AddUnfinished(int count) => Interlocked.Add(ref _unfinished, count);
+
     public FanOutSummary Summarize()
     {
         var lag = SeriesSummary.FromLatencies("fan-out-lag", _lags.ToArray());
@@ -189,6 +269,7 @@ internal sealed class StepFanOut
             delivered,
             Interlocked.Read(ref _late),
             dropped,
+            Interlocked.Read(ref _unfinished),
             Interlocked.Read(ref _early),
             delivered + dropped == 0 ? 0 : Math.Round((double)dropped / (delivered + dropped), 4),
             lag.P50Ms,
@@ -205,6 +286,7 @@ internal sealed record FanOutSummary(
     long FramesDelivered,
     long FramesLate,
     long FramesDropped,
+    long FramesUnfinished,
     long FramesBeforeAccept,
     double DropRate,
     double? LagP50Ms,
