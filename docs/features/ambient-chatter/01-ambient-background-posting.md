@@ -316,9 +316,9 @@ Status remains **Built (backend), NOT Complete**. No migration, no `Program.cs` 
   `Exercise.WorldName`; generic "An ordinary town on an ordinary day." when unset). Output side: new pure
   `Pulse.Core.Features.Ambient.Services.AmbientOutputFilter` runs in `GenerateStage` for ambient bursts as a third gate
   with the guard's semantics (re-roll, then drop; `engine.generated.guardResult = "drop"`; nothing published or queued).
-  A burst fails if any post contains a fixed incident term (`emergency, evacuat, outage, contamina, boil water,
-  officials, shelter, alert, warning, hazmat`; hyphens read as spaces), an active storyline hashtag, or a storyline
-  title keyword (≥ 5 letters, minus stop words) — exclusions built per request from `registration.Storylines`.
+  A burst fails if any post contains a fixed incident term, an active storyline hashtag, or a storyline title keyword
+  (≥ 5 letters, minus stop words) — exclusions built per request from `registration.Storylines`. Matching is at word
+  boundaries since Gate-1 W-A (see "Gate-1 follow-up" below for the vocabulary).
   Failing checks: `ambient:incident-term`, `ambient:sentiment`. The offline Fake now emits everyday small talk for an
   ambient request (additive `GenerationRequest.IsAmbient`, set by the assembler) — previously it emitted its tap-water
   incident lines as "ambient" chatter.
@@ -356,6 +356,39 @@ Status remains **Built (backend), NOT Complete**. No migration, no `Program.cs` 
 - **W-5** — disclosed residual, unchanged by this pass; carry the orchestrator review's wording into the amendment.
 - **Residual (disclose with W-3):** persona `VoiceNotes` still enter the ambient prompt, and the seeded residents' notes
   reference the incident (e.g. "is the water safe for my kids?"). The output filter is the backstop for that drift.
+
+### Gate-1 follow-up (#168, branch `feature/engine-golive-ambient-hardening`, 2026-10-16)
+
+No migration, no `Program.cs` change.
+
+- **W-A (filter false positives).** `AmbientOutputFilter` no longer matches raw substrings. A post (text + hashtag
+  list) is tokenized into lower-cased letter/digit words (hyphens, underscores, apostrophes, punctuation are
+  boundaries; a `#tag` is also read as one compact token). Per-exercise exclusions (storyline hashtags without `#`,
+  title keywords) match a whole word plus at most one inflection suffix (`s, es, ed, ing, er`): title word `water`
+  hits "water / waters / watered" but not "watermelon / waterfront"; hashtag `#Fire` hits "#fire / a fire / fires" but
+  not "fireworks / #fireworks" (a hashtag matches as a whole tag in text or hashtag list, never as the prefix of a
+  longer tag). Fixed vocabulary — words are consecutive tokens; `*` = word-start stem; other words whole-word +
+  inflection:
+  `emergenc*`, `evacuat*`, `evacuee*`, `contamina*`, `hazmat*`, `outage*`; `boil water`, `boil notice`,
+  `boil advisory`, `boil order`; `officials said`, `officials say`, `officials announced`, `officials confirmed`,
+  `officials warn*`, `officials urg*`; `shelter in place`; `weather alert`, `severe weather`, `alert issued`,
+  `warning issued`, `advisory issued`. Bare `officials`, `shelter`, `alert`, `warning` were dropped (sports officials,
+  animal shelter, "spoiler alert", "fair warning" collide with allow-listed topics). **Accepted false positives:** a
+  generic title word still drops its everyday use (for "Water main contamination fears", "a glass of water" / "the
+  dog's water bowl" are dropped — on-incident vocabulary for that exercise), and "boil water for the pasta" trips the
+  `boil water` phrase. Dropping chatter is free; leaking the incident is not.
+- **W-B (re-rolls count against the caps).** Each guard / diversity / ambient-filter re-roll is a real provider call.
+  The driver still records the burst's `intent.Count` at generation; once the burst is settled (dropped, queued, held
+  or published) it also records `(GenerateStageResult.Attempts − 1) × intent.Count` into the same wall-clock window, so
+  `maxPerMinute` / `maxPerHour` bound provider spend (posts requested), not only accepted bursts. The extra spend is
+  recorded after settlement so it limits the NEXT decision and never retro-holds the burst that already passed. A
+  provider call that throws mid-re-roll is not counted (the tick faults and is logged).
+- **S-1 (attribution).** The autonomous publish stamps `EngineBurst.AuthorizedBy` from the CURRENT policy snapshot
+  `PublishHold` just admitted (still inside the no-await block), not the tick-start snapshot.
+- **S-3.** The stored `citizen` archetype is compared case-insensitively in `IneligibleAmbientType`.
+- **S-2 (residual, doc only).** The exclusions come from `registration.Storylines`, frozen when the reaction loop is
+  seeded. A storyline injected at runtime must refresh the registration (and so the exclusions); until it does, only
+  the fixed vocabulary covers it.
 
 ## Tests (backend)
 - `AmbientPolicyValidatorTests.*` (AC0, AC1); `AmbientBehaviorTests.*` (AC4, white-noise overlap)
@@ -397,3 +430,11 @@ Status remains **Built (backend), NOT Complete**. No migration, no `Program.cs` 
   `.AnApprovedAmbientDraft_PublishesWithAmbientFloorTrigger_AndTheReviewedPublishPath` (S-1);
   `EngineAmbientPolicyServiceTests.NoAuthenticatedStaffUser_Is401_AndChangesNothing`,
   `.ASpoofedActingHumanId_DoesNotBecomeSetBy_OrTheAuditActor` (W-2); `AmbientPolicyRaiseTests.*` (W-1 helper)
+- Gate-1 follow-up: `AmbientOutputFilterTests.WaterStoryline_EverydayWordsThatOnlyContainATerm_Pass`,
+  `.StormStoryline_EverydayWordsThatOnlyContainATerm_Pass`, `.WaterStoryline_TruePositives_StillFail`,
+  `.WaterStoryline_TheStorylineHashtagInTheHashtagList_Fails_WithOrWithoutTheHash`, `.StormStoryline_TruePositives_StillFail`,
+  `.AGenericTitleWord_StillDropsAnOnIncidentEverydayUse_ByDesign`, `.AFixedIncidentTerm_Fails` (W-A);
+  `AmbientHardeningTests.ReRolledAttempts_CountAgainstTheHourlyCap_WithoutHoldingTheBurstThatPassed`,
+  `.ADroppedBurst_CountsEveryAttemptAgainstTheCaps`, `.AFirstTimeAcceptedBurst_CountsOnlyItsOwnPosts` (W-B);
+  `.AnAutonomousPublish_IsAuthorizedByTheCurrentPolicySetter_NotTheTickStartOne` (S-1);
+  `EngineAmbientPolicyServiceTests.ACitizenArchetype_IsEligible_WhateverItsStoredCase` (S-3)

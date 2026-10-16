@@ -161,7 +161,7 @@ public sealed partial class EngineReviewService
             return AmbientPolicyValidator.IsEligiblePersonaType(castType) ? null : castType.ToString();
         }
 
-        return string.Equals(profileType, AmbientEligibleProfileType, StringComparison.Ordinal) ? null : $"'{profileType}'";
+        return string.Equals(profileType, AmbientEligibleProfileType, StringComparison.OrdinalIgnoreCase) ? null : $"'{profileType}'";
     }
 
     /// <summary>

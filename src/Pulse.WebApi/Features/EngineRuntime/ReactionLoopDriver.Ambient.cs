@@ -180,6 +180,56 @@ public sealed partial class ReactionLoopDriver
             .GenerateAsync(BuildAmbientGenerateRequest(registration, intent, tier), cancellationToken)
             .ConfigureAwait(false);
 
+        // Gate-1 W-B: a guard / diversity / ambient-filter re-roll is a real provider call. The first attempt was counted
+        // above; the extra attempts are counted once this burst is settled (finally), so the caps bound provider spend
+        // for the NEXT decision without retro-holding the burst that already passed (PolicyStillAdmits).
+        try
+        {
+            return await SettleAmbientBurstAsync(
+                tick, registry, gate, window, intent, generated, draftId, ambientContext, publishPath, autonomous, pendingEvents, reviewItems, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        finally
+        {
+            RecordReRolls(window, generated, intent);
+        }
+    }
+
+    /// <summary>
+    /// Counts the re-roll attempts of a generated ambient burst (every attempt after the first, each a real provider call
+    /// of <see cref="GenerationIntent.Count"/> posts) into the ambient spend window (Gate-1 W-B), on the server wall clock.
+    /// </summary>
+    private void RecordReRolls(AmbientWindow window, GenerateStageResult generated, GenerationIntent intent)
+    {
+        var extraAttempts = Math.Max(0, generated.Attempts - 1);
+        if (extraAttempts > 0)
+        {
+            window.Record(_timeProvider.GetUtcNow(), extraAttempts * intent.Count);
+        }
+    }
+
+    /// <summary>
+    /// Routes a generated ambient burst: a dropped burst is recorded; a review-mode burst is re-checked and queued; an
+    /// autonomous burst is published post by post through the last-boundary re-check. Returns the published count.
+    /// </summary>
+    private async Task<int> SettleAmbientBurstAsync(
+        AmbientTickInputs tick,
+        EngineAmbientPolicyRegistry registry,
+        IEngineLifecyclePublishGate gate,
+        AmbientWindow window,
+        GenerationIntent intent,
+        GenerateStageResult generated,
+        Guid draftId,
+        EngineTelemetryContext ambientContext,
+        string? publishPath,
+        bool autonomous,
+        List<TelemetryEvent> pendingEvents,
+        List<EngineReviewItemEntity> reviewItems,
+        CancellationToken cancellationToken)
+    {
+        var registration = tick.Registration;
+        var exerciseId = registration.ExerciseId;
+
         // AC7: a guard (or diversity) failure publishes NOTHING; the engine.generated drop event is the count.
         if (generated.Disposition != GenerateDisposition.Accepted)
         {
@@ -210,7 +260,7 @@ public sealed partial class ReactionLoopDriver
         }
 
         var (published, held) = await PublishAmbientAsync(
-            tick, registry, gate, window, policy, intent, generated.Posts, draftId, ambientContext, pendingEvents, cancellationToken)
+            tick, registry, gate, window, intent, generated.Posts, draftId, ambientContext, pendingEvents, cancellationToken)
             .ConfigureAwait(false);
 
         tick.TickState.PostsThisMinute += published;
@@ -228,7 +278,6 @@ public sealed partial class ReactionLoopDriver
         EngineAmbientPolicyRegistry registry,
         IEngineLifecyclePublishGate gate,
         AmbientWindow window,
-        AmbientTierPolicy policy,
         GenerationIntent intent,
         IReadOnlyList<GeneratedPost> posts,
         Guid draftId,
@@ -258,7 +307,8 @@ public sealed partial class ReactionLoopDriver
             await gate.RefreshAsync(exerciseId, cancellationToken).ConfigureAwait(false);
 
             // ---- NO await from here to the publisher call ----------------------------------------------------
-            var held = PublishHold(tick.ScopedServices, registration, registry, gate, window, intent.AmbientTopicSeed, post.PersonaHandle);
+            var held = PublishHold(
+                tick.ScopedServices, registration, registry, gate, window, intent.AmbientTopicSeed, post.PersonaHandle, out var current);
             if (held is not null)
             {
                 if (held == EngineEventPayloads.HeldSafety)
@@ -278,7 +328,8 @@ public sealed partial class ReactionLoopDriver
                 Posts = [post with { ScenarioTime = CurrentScenarioTime(registration) }],
                 Trigger = EngineEventPayloads.AmbientFloorTrigger,
                 PublishPath = EngineEventPayloads.PublishPathAmbientAutonomous,
-                AuthorizedBy = policy.SetBy,
+                // Gate-1 S-1: the CURRENT policy's setter (the snapshot PublishHold just admitted), not the tick-start one.
+                AuthorizedBy = current.SetBy,
             };
             var result = await publisher.PublishBurstAsync(burst, cancellationToken).ConfigureAwait(false);
             published += result.Posts.Count(outcome => outcome.Outcome == EnginePublishOutcome.Published);
@@ -296,6 +347,8 @@ public sealed partial class ReactionLoopDriver
     /// published must still be allow-listed and of an eligible type, the burst's topic must still be allow-listed, both
     /// caps must still be above zero, and the spend already recorded must not exceed a cap lowered mid-flight. A policy
     /// narrowed between generation and publish therefore holds the post (<c>held:policy</c>). Synchronous: no await.
+    /// Gate-1 S-1: <paramref name="current"/> hands that same snapshot back so the publish is attributed to the policy's
+    /// CURRENT setter, never the tick-start one.
     /// </remarks>
     private string? PublishHold(
         IServiceProvider scopedServices,
@@ -304,14 +357,16 @@ public sealed partial class ReactionLoopDriver
         IEngineLifecyclePublishGate gate,
         AmbientWindow window,
         string? topic,
-        string personaHandle)
+        string personaHandle,
+        out AmbientTierPolicy current)
     {
         if (SafetyHeld(scopedServices, registration))
         {
+            current = registry.Get(registration.ExerciseId);
             return EngineEventPayloads.HeldSafety;
         }
 
-        var current = registry.Get(registration.ExerciseId);
+        current = registry.Get(registration.ExerciseId);
         if (current.Mode != AmbientPolicyMode.Autonomous
             || !registry.AutonomyAuthorized
             || !PolicyStillAdmits(current, registration, window, topic, [personaHandle]))

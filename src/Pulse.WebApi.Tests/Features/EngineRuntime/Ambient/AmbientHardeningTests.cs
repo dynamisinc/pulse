@@ -63,7 +63,7 @@ public sealed class AmbientHardeningTests
 
     public static IEnumerable<object[]> FilteredBursts =>
     [
-        ["fixed incident term", new GeneratedPost("@gen0", "the officials finally reopened the park playground", 0.4, [])],
+        ["fixed incident term", new GeneratedPost("@gen0", "officials said the park playground reopened", 0.4, [])],
         ["negative sentiment", new GeneratedPost("@gen0", "the new bakery line was so long this morning", -0.5, [])],
         ["active storyline hashtag", new GeneratedPost("@gen0", "lovely sunset over the lake #WaterIssues", 0.5, [])],
         ["storyline title keyword", new GeneratedPost("@gen0", "the fountain in the square is lovely, cold clean water", 0.5, [])],
@@ -87,6 +87,81 @@ public sealed class AmbientHardeningTests
             (await harness.PayloadsAsync(EngineEventTypes.Generated)).Single()
                 .GetProperty("guardResult").GetString().Should().Be("drop", "counted exactly like a guard failure");
         }
+    }
+
+    // ---- Gate-1 W-B: filter / guard re-rolls are counted against the ambient caps ---------------------
+
+    [Fact]
+    public async Task ReRolledAttempts_CountAgainstTheHourlyCap_WithoutHoldingTheBurstThatPassed()
+    {
+        await using var harness = await AmbientLoopHarness.CreateAsync();
+        // perHour 6 = one 2-post burst that took 3 attempts (2 + 2 re-rolls x 2 posts).
+        harness.SetPolicy(AmbientPolicyMode.Autonomous, perMinute: 10, perHour: 6);
+        var offending = new GeneratedPost("@gen0", "evacuation order on river road", 0.4, []);
+        harness.Provider.DuringGenerate = () => harness.Provider.Posts =
+            harness.Provider.Calls < GenerateStage.DefaultMaxAttempts
+                ? [offending, ScriptedGenerationProvider.CleanBurst[1]]
+                : ScriptedGenerationProvider.CleanBurst;
+
+        await harness.TickAsync();
+
+        harness.Provider.Calls.Should().Be(GenerateStage.DefaultMaxAttempts, "two filtered attempts, then a clean one");
+        harness.Publisher.Published.Should().HaveCount(2, "the accepted burst itself is not retro-held by its own re-rolls");
+
+        harness.Time.Advance(TimeSpan.FromSeconds(61));
+        await harness.TickAsync();
+
+        harness.Provider.Calls.Should().Be(
+            GenerateStage.DefaultMaxAttempts, "3 provider calls x 2 posts = 6 spent: the hourly cap is reached, no new call (W-B)");
+        harness.Publisher.Published.Should().HaveCount(2);
+    }
+
+    [Fact]
+    public async Task ADroppedBurst_CountsEveryAttemptAgainstTheCaps()
+    {
+        await using var harness = await AmbientLoopHarness.CreateAsync();
+        harness.SetPolicy(AmbientPolicyMode.Autonomous, perMinute: 10, perHour: 6);
+        harness.Provider.Posts = [new GeneratedPost("@gen0", "evacuation order on river road", 0.4, []), ScriptedGenerationProvider.CleanBurst[1]];
+
+        await harness.TickAsync();
+        harness.Provider.Calls.Should().Be(GenerateStage.DefaultMaxAttempts, "re-rolled to the budget, then dropped");
+
+        harness.Provider.Posts = ScriptedGenerationProvider.CleanBurst;
+        harness.Time.Advance(TimeSpan.FromSeconds(61));
+        await harness.TickAsync();
+
+        harness.Provider.Calls.Should().Be(GenerateStage.DefaultMaxAttempts, "every dropped attempt was a real call and is counted (W-B)");
+        harness.Publisher.Published.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task AFirstTimeAcceptedBurst_CountsOnlyItsOwnPosts()
+    {
+        await using var harness = await AmbientLoopHarness.CreateAsync();
+        harness.SetPolicy(AmbientPolicyMode.Autonomous, perMinute: 10, perHour: 4);
+
+        await harness.TickAsync();
+        harness.Time.Advance(TimeSpan.FromSeconds(61));
+        await harness.TickAsync();
+
+        harness.Provider.Calls.Should().Be(2, "with no re-rolls each burst spends 2 of the 4, so a second burst still fits");
+        harness.Publisher.Published.Should().HaveCount(4);
+    }
+
+    // ---- Gate-1 S-1: the autonomous publish names the CURRENT policy's setter ------------------------
+
+    [Fact]
+    public async Task AnAutonomousPublish_IsAuthorizedByTheCurrentPolicySetter_NotTheTickStartOne()
+    {
+        await using var harness = await AmbientLoopHarness.CreateAsync();
+        harness.SetPolicy(AmbientPolicyMode.Autonomous);
+        harness.Provider.DuringGenerate = () =>
+            harness.Ambient.Set(harness.ExerciseId, harness.Ambient.Get(harness.ExerciseId) with { SetBy = "controller-9" });
+
+        await harness.TickAsync();
+
+        harness.Publisher.Published.Should().NotBeEmpty()
+            .And.OnlyContain(burst => burst.AuthorizedBy == "controller-9", "the policy that admitted the post was re-set mid-flight");
     }
 
     // ---- W-4: the loop never voices an ineligible type ---------------------------------------------

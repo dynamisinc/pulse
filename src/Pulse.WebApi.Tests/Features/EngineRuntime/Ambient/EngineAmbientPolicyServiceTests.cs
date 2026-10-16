@@ -286,6 +286,22 @@ public sealed class EngineAmbientPolicyServiceTests
     }
 
     [Theory]
+    [InlineData("citizen")]
+    [InlineData("Citizen")]
+    [InlineData("CITIZEN")]
+    public async Task ACitizenArchetype_IsEligible_WhateverItsStoredCase(string profileType)
+    {
+        // Gate-1 S-3: the stored archetype is compared case-insensitively, so a "Citizen" row is not a spurious 400.
+        var exerciseId = Guid.NewGuid();
+        using var harness = new Harness(exerciseId);
+        var persona = await harness.SeedPersonaAsync(exerciseId, profileType);
+
+        var result = await harness.SetPolicyAsync(Request("review", personas: [persona.ToString()]));
+
+        result.Outcome.Should().Be(EngineReviewOutcome.Ok);
+    }
+
+    [Theory]
     [InlineData(PersonaType.Outlet, false)]
     [InlineData(PersonaType.Agency, false)]
     [InlineData(PersonaType.Troll, false)]

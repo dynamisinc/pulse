@@ -32,11 +32,13 @@ public class AmbientOutputFilterTests
     [InlineData("heard about the contaminated pond")]
     [InlineData("boil-water notice for the east side")]
     [InlineData("boil   water before drinking")]
-    [InlineData("why are officials so quiet")]
-    [InlineData("dropped donations at the shelter")]
-    [InlineData("got a phone alert this morning")]
-    [InlineData("weather warning for tonight")]
+    [InlineData("officials said the plant is fine")]
+    [InlineData("we were told to shelter-in-place")]
+    [InlineData("got a weather alert this morning")]
+    [InlineData("a warning issued for tonight")]
     [InlineData("a hazmat truck on 5th")]
+    [InlineData("so many evacuees at the school")]
+    [InlineData("power outages on my block again")]
     public void AFixedIncidentTerm_Fails(string text)
     {
         AmbientOutputFilter.Inspect([Post(text)], []).Should().Equal(AmbientOutputFilter.IncidentTermCheck);
@@ -63,6 +65,80 @@ public class AmbientOutputFilterTests
             .Should().Equal([AmbientOutputFilter.IncidentTermCheck], "false positives are accepted: dropping chatter is free");
     }
 
+    // ---- Gate-1 W-A: word-boundary matching, no substring false positives ---------------------------
+
+    private static readonly IReadOnlyList<string> WaterExclusions =
+        AmbientOutputFilter.BuildExclusions(["#FairhavenWater"], ["Water main contamination fears"]);
+
+    private static readonly IReadOnlyList<string> StormExclusions =
+        AmbientOutputFilter.BuildExclusions(["#Fire", "#StormWatch"], ["Storm knocks out power"]);
+
+    [Theory]
+    [InlineData("best watermelon of the summer at the farmers market")]
+    [InlineData("new cafe on the waterfront opened today")]
+    [InlineData("spoiler alert: the home team won in overtime")]
+    [InlineData("fair warning, the cardamom buns sell out by nine")]
+    [InlineData("the officials missed a call in the third inning")]
+    [InlineData("we adopted a dog from the animal shelter")]
+    [InlineData("loved the #FairhavenWaterfront sunset photos")]
+    public void WaterStoryline_EverydayWordsThatOnlyContainATerm_Pass(string text)
+    {
+        AmbientOutputFilter.Inspect([Post(text)], WaterExclusions)
+            .Should().BeEmpty("a term inside a longer word, or an everyday phrase, is not the incident (W-A)");
+    }
+
+    [Theory]
+    [InlineData("the team had a great brainstorm session")]
+    [InlineData("what a powerful choir performance")]
+    [InlineData("fireworks over the lake tonight")]
+    [InlineData("fireworks tonight", "#Fireworks")]
+    public void StormStoryline_EverydayWordsThatOnlyContainATerm_Pass(string text, string? hashtag = null)
+    {
+        var post = hashtag is null ? Post(text) : Post(text, 0.3, hashtag);
+
+        AmbientOutputFilter.Inspect([post], StormExclusions)
+            .Should().BeEmpty("brainstorm/powerful/fireworks only contain storm/power/fire (W-A)");
+    }
+
+    [Theory]
+    [InlineData("is the water safe to drink")]
+    [InlineData("the waters look murky")]
+    [InlineData("boil water notice for the east side")]
+    [InlineData("anyone following #FairhavenWater")]
+    [InlineData("fairhavenwater is trending")]
+    [InlineData("evacuation order for the river road")]
+    [InlineData("heard the pond was contaminated")]
+    public void WaterStoryline_TruePositives_StillFail(string text)
+    {
+        AmbientOutputFilter.Inspect([Post(text)], WaterExclusions).Should().Equal(AmbientOutputFilter.IncidentTermCheck);
+    }
+
+    [Fact]
+    public void WaterStoryline_TheStorylineHashtagInTheHashtagList_Fails_WithOrWithoutTheHash()
+    {
+        AmbientOutputFilter.Inspect([Post("lovely day", 0.3, "#FairhavenWater")], WaterExclusions).Should().NotBeEmpty();
+        AmbientOutputFilter.Inspect([Post("lovely day", 0.3, "fairhaven_water")], WaterExclusions).Should().NotBeEmpty();
+    }
+
+    [Theory]
+    [InlineData("the storm is almost here")]
+    [InlineData("still no power on elm street")]
+    [InlineData("the power went out again")]
+    [InlineData("a fire near the ridge #fire")]
+    [InlineData("the fires look closer")]
+    [InlineData("following #StormWatch tonight")]
+    public void StormStoryline_TruePositives_StillFail(string text)
+    {
+        AmbientOutputFilter.Inspect([Post(text)], StormExclusions).Should().Equal(AmbientOutputFilter.IncidentTermCheck);
+    }
+
+    [Fact]
+    public void AGenericTitleWord_StillDropsAnOnIncidentEverydayUse_ByDesign()
+    {
+        AmbientOutputFilter.Inspect([Post("poured a glass of water after my run")], WaterExclusions)
+            .Should().Equal([AmbientOutputFilter.IncidentTermCheck], "whole-word 'water' is on-incident vocabulary for this exercise");
+    }
+
     [Theory]
     [InlineData(-0.11)]
     [InlineData(-0.6)]
@@ -85,7 +161,7 @@ public class AmbientOutputFilterTests
     [Fact]
     public void BothChecks_AreReportedOnce_AndTheVerdictIsDeterministic()
     {
-        IReadOnlyList<GeneratedPost> burst = [Post("officials!", -0.5), Post("alert", -0.9)];
+        IReadOnlyList<GeneratedPost> burst = [Post("evacuation!", -0.5), Post("hazmat", -0.9)];
 
         var first = AmbientOutputFilter.Inspect(burst, []);
         var second = AmbientOutputFilter.Inspect(burst, []);
