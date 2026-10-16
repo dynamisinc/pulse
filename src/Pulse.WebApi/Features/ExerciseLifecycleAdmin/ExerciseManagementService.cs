@@ -8,7 +8,6 @@ using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.ExerciseConfiguration;
 using Pulse.WebApi.Features.ExerciseConfiguration.Lifecycle;
-using Pulse.WebApi.Features.Identity.Staff;
 
 /// <summary>
 /// Row actions on the org exercise list (demo-feedback story 22, DF-35): <b>rename</b>
@@ -57,24 +56,27 @@ public sealed class ExerciseManagementService
 
     private readonly PulseDbContext _dbContext;
     private readonly StaffCallerContext _staffCaller;
-    private readonly ICurrentStaffSessionAccessor _currentStaffSession;
+    private readonly ExerciseLifecycleService _lifecycle;
 
     /// <summary>Creates the service over its persistence context and the server-resolved caller seams.</summary>
     /// <param name="dbContext">The request-scoped unit of work every write goes through.</param>
     /// <param name="staffCaller">Resolves the caller's identity, role and tenant from the server-issued session.</param>
-    /// <param name="currentStaffSession">The staff-session seam the lifecycle service attributes its event with.</param>
+    /// <param name="lifecycle">
+    /// The request-scoped COR-032 lifecycle service (same <see cref="PulseDbContext"/> instance), entered through its
+    /// tenant-checked <c>TransitionTenantCheckedAsync</c>, never through the caller's active exercise scope.
+    /// </param>
     public ExerciseManagementService(
         PulseDbContext dbContext,
         StaffCallerContext staffCaller,
-        ICurrentStaffSessionAccessor currentStaffSession)
+        ExerciseLifecycleService lifecycle)
     {
         ArgumentNullException.ThrowIfNull(dbContext);
         ArgumentNullException.ThrowIfNull(staffCaller);
-        ArgumentNullException.ThrowIfNull(currentStaffSession);
+        ArgumentNullException.ThrowIfNull(lifecycle);
 
         _dbContext = dbContext;
         _staffCaller = staffCaller;
-        _currentStaffSession = currentStaffSession;
+        _lifecycle = lifecycle;
     }
 
     /// <summary>
@@ -166,16 +168,13 @@ public sealed class ExerciseManagementService
             JsonSerializer.Serialize(new ArchivedPayload { From = state }),
             now));
 
-        // The existing lifecycle service, bound to THIS authorized exercise rather than to the caller's active
-        // one. Its scope comes from the tenant-checked row above (never from the route value directly), and it
-        // shares this request's PulseDbContext so its one SaveChanges commits the status, its own transition
-        // event and the exercise.archived event staged above together.
-        var lifecycle = new ExerciseLifecycleService(
-            _dbContext,
-            new ExerciseContext { CurrentExerciseId = exercise.Id },
-            _currentStaffSession);
-
-        var transition = await lifecycle.TransitionAsync(
+        // The existing lifecycle service (resolved from DI, sharing this request's PulseDbContext), entered through
+        // its tenant-checked entry point: it re-reads the exercise bounded by the caller's server-resolved tenant,
+        // so its one SaveChanges commits the status, its own transition event and the exercise.archived event
+        // staged above together.
+        var transition = await _lifecycle.TransitionTenantCheckedAsync(
+            caller.OrganizationId,
+            exercise.Id,
             new ExerciseLifecycleTransitionRequest { To = ExerciseLifecycleStates.Archived },
             cancellationToken);
 

@@ -31,12 +31,12 @@ public sealed class OrgExerciseByIdIsolationTests
     /// How to call each allow-listed route with a valid body. Must cover the allow-list exactly, which
     /// <see cref="CompositionRootWiringTests"/> asserts (a plain fact, outside this SQL collection).
     /// </summary>
-    internal static readonly IReadOnlyDictionary<string, Func<HttpClient, Guid, Task<HttpResponseMessage>>> Callers =
-        new Dictionary<string, Func<HttpClient, Guid, Task<HttpResponseMessage>>>(StringComparer.Ordinal)
+    internal static readonly IReadOnlyDictionary<(string Method, string Route), Func<HttpClient, Guid, Task<HttpResponseMessage>>> Callers =
+        new Dictionary<(string Method, string Route), Func<HttpClient, Guid, Task<HttpResponseMessage>>>
         {
-            [ExerciseLifecycleAdminEndpoints.ExerciseByIdRoute] = (client, id) =>
+            [("PATCH", ExerciseLifecycleAdminEndpoints.ExerciseByIdRoute)] = (client, id) =>
                 client.PatchAsJsonAsync(new Uri($"/api/org/exercises/{id}", UriKind.Relative), new { name = "Cross Tenant" }),
-            [ExerciseLifecycleAdminEndpoints.ArchiveExerciseRoute] = (client, id) =>
+            [("POST", ExerciseLifecycleAdminEndpoints.ArchiveExerciseRoute)] = (client, id) =>
                 client.PostAsync(new Uri($"/api/org/exercises/{id}/archive", UriKind.Relative), content: null),
         };
 

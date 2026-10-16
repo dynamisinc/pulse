@@ -24,7 +24,7 @@ exercise. These are `/api/org/*` and span the caller's **customer tenant**:
 
 **No org route takes an organization id, in a route, query or body.** The tenant is always the
 caller's own, resolved server-side. Until demo-feedback story 22 no org route took any parameter at
-all; story 22's row actions take an **exercise** id, and only on an explicit server allow-list
+all; story 22's row actions take an **exercise** id, and only on an explicit server allow-list keyed by (HTTP method, route)
 (`ExerciseLifecycleAdminEndpoints.ExerciseIdRoutes`). Every allow-listed route authorizes the id
 against the caller's own tenant first and answers another customer's exercise with a bare `404`,
 indistinguishable from an id that does not exist (never `403`). The backend pins the list

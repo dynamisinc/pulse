@@ -72,15 +72,21 @@ public static class ExerciseLifecycleAdminEndpoints
     public const string ArchiveExerciseRoute = "/api/org/exercises/{exerciseId:guid}/archive";
 
     /// <summary>
-    /// The EXPLICIT allow-list of org-tier routes that take a route parameter (story 22) — every entry is an
-    /// exercise id that <see cref="ExerciseManagementService"/> authorizes against the caller's server-resolved
-    /// tenant before anything else happens, answering a foreign or unknown id with the same bare <c>404</c>.
-    /// <c>CompositionRootWiringTests</c> asserts that the parameterized org routes are EXACTLY this list, and
-    /// <c>OrgExerciseByIdIsolationTests</c> drives every entry with another customer's id and asserts the 404.
-    /// A new id-bearing org route therefore cannot land without being added here, and cannot be added here
-    /// without being proven to refuse another tenant.
+    /// The EXPLICIT allow-list of org-tier ENDPOINTS that take a route parameter (story 22), keyed by
+    /// (HTTP method, route template) so a new verb on an existing path is a new entry, not a free ride. Every entry
+    /// takes an exercise id that <see cref="ExerciseManagementService"/> authorizes against the caller's
+    /// server-resolved tenant before anything else happens, answering a foreign or unknown id with the same bare
+    /// <c>404</c>. <c>CompositionRootWiringTests</c> asserts that the parameterized org endpoints are EXACTLY this
+    /// set, and <c>OrgExerciseByIdIsolationTests</c> drives every entry with another customer's id and asserts the
+    /// 404. A new id-bearing org endpoint (a GET or DELETE on one of these paths included) therefore cannot land
+    /// without being added here, and cannot be added here without being proven to refuse another tenant.
     /// </summary>
-    public static IReadOnlyList<string> ExerciseIdRoutes { get; } = [ExerciseByIdRoute, ArchiveExerciseRoute];
+    public static IReadOnlySet<(string Method, string Route)> ExerciseIdRoutes { get; } =
+        new HashSet<(string Method, string Route)>
+        {
+            ("PATCH", ExerciseByIdRoute),
+            ("POST", ArchiveExerciseRoute),
+        };
 
     /// <summary>
     /// Registers the slice's three scoped services plus the shared per-request staff-caller resolver. All are

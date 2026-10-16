@@ -40,6 +40,23 @@ vi.mock('../services/orgExercisesService', async importOriginal => {
   }
 })
 
+// The real app mounts exactly one ExerciseContextProvider at the root; here the scope is
+// dictated so the rename hook's "is this the active exercise" branch can be driven.
+const { refreshScope } = vi.hoisted(() => ({ refreshScope: vi.fn<() => Promise<unknown>>() }))
+vi.mock('@/core/exerciseContext', async importOriginal => {
+  const actual = await importOriginal<typeof import('@/core/exerciseContext')>()
+  return {
+    ...actual,
+    useExerciseContext: () => ({
+      exerciseId: 'ex-l',
+      exerciseName: 'Harbor Live',
+      timeZone: 'UTC',
+      status: 'live',
+    }),
+    useExerciseScopeRefresh: () => refreshScope,
+  }
+})
+
 const mockList = vi.mocked(getOrgExercises)
 const mockRename = vi.mocked(renameOrgExercise)
 const mockArchive = vi.mocked(archiveOrgExercise)
@@ -56,6 +73,7 @@ function renderPage() {
   const queryClient = new QueryClient({
     defaultOptions: { mutations: { retry: false }, queries: { retry: false } },
   })
+  lastQueryClient = queryClient
   function Wrapper({ children }: { children: ReactNode }) {
     return (
       <QueryClientProvider client={queryClient}>
@@ -66,6 +84,8 @@ function renderPage() {
   return render(<ExerciseManagementPage />, { wrapper: Wrapper })
 }
 
+let lastQueryClient: QueryClient | undefined
+
 function actionsOf(exerciseId: string): HTMLElement {
   return screen.getByTestId(`org-exercise-actions-${exerciseId}`)
 }
@@ -73,6 +93,7 @@ function actionsOf(exerciseId: string): HTMLElement {
 beforeEach(() => {
   vi.resetAllMocks()
   mockList.mockResolvedValue(PORTFOLIO)
+  refreshScope.mockResolvedValue({})
 })
 
 describe('row actions per state', () => {
@@ -161,6 +182,52 @@ describe('the Rename dialog', () => {
     expect(mockRename).toHaveBeenCalledWith(LIVE.exerciseId, 'Harbor Live Two')
     expect(await screen.findByText('Harbor Live Two')).toBeInTheDocument()
     expect(mockList).toHaveBeenCalledTimes(2)
+    // LIVE is the ACTIVE exercise in this scope: the header's name re-resolves from the server.
+    expect(refreshScope).toHaveBeenCalledTimes(1)
+  })
+
+  it('renaming a NON-active exercise re-reads the switcher list but leaves the scope alone', async () => {
+    const user = userEvent.setup()
+    mockRename.mockResolvedValue({ ...BUILD, name: 'Zulu Two' })
+    renderPage()
+    await screen.findByTestId('org-exercise-table')
+    const client = lastQueryClient
+    if (client === undefined) throw new Error('no query client')
+    const invalidate = vi.spyOn(client, 'invalidateQueries')
+
+    await user.click(screen.getByRole('button', { name: `Rename ${BUILD.name}` }))
+    const dialog = await screen.findByTestId('rename-exercise-dialog')
+    const input = within(dialog).getByTestId('rename-exercise-input')
+    await user.clear(input)
+    await user.type(input, 'Zulu Two')
+    await user.click(within(dialog).getByTestId('rename-exercise-confirm'))
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('rename-exercise-dialog')).not.toBeInTheDocument()
+    })
+    const keys = invalidate.mock.calls.map(([filters]) => filters?.queryKey)
+    expect(keys).toContainEqual(['org', 'exercises'])
+    expect(keys).toContainEqual(['staff', 'assignments'])
+    expect(refreshScope).not.toHaveBeenCalled()
+  })
+
+  it('a 404 keeps the dialog open AND re-reads the org list (the row was stale)', async () => {
+    const user = userEvent.setup()
+    mockRename.mockRejectedValue(new OrgExerciseError('Not Found', { status: 404 }))
+    renderPage()
+    await screen.findByTestId('org-exercise-table')
+
+    await user.click(screen.getByRole('button', { name: `Rename ${BUILD.name}` }))
+    const dialog = await screen.findByTestId('rename-exercise-dialog')
+    const input = within(dialog).getByTestId('rename-exercise-input')
+    await user.clear(input)
+    await user.type(input, 'Gone')
+    await user.click(within(dialog).getByTestId('rename-exercise-confirm'))
+
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('no longer in your organization')
+    await waitFor(() => {
+      expect(mockList).toHaveBeenCalledTimes(2)
+    })
   })
 
   it('keeps a server 400 inside the dialog as text, with the typed value kept', async () => {
@@ -254,5 +321,9 @@ describe('the Archive confirm', () => {
     const alert = await within(dialog).findByRole('alert')
     expect(alert).toHaveTextContent('The exercise was not archived.')
     expect(alert).toHaveTextContent('End the exercise first.')
+    // The row said "completed" but the server disagrees: the list re-reads.
+    await waitFor(() => {
+      expect(mockList).toHaveBeenCalledTimes(2)
+    })
   })
 })

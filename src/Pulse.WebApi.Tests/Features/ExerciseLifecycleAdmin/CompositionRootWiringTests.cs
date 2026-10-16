@@ -119,11 +119,20 @@ public sealed class CompositionRootWiringTests
             .Where(endpoint => endpoint.RoutePattern.Parameters.Count > 0)
             .ToList();
 
-        parameterized.Select(endpoint => endpoint.RoutePattern.RawText).Distinct().Should().BeEquivalentTo(
+        // Keyed by (method, template): a new GET or DELETE on an allow-listed PATH is still a new endpoint and
+        // must earn its own entry (and its own foreign-tenant case below).
+        var pairs = parameterized
+            .SelectMany(endpoint => (endpoint.Metadata.GetMetadata<HttpMethodMetadata>()?.HttpMethods
+                    ?? ["(any)"])
+                .Select(method => (Method: method, Route: endpoint.RoutePattern.RawText ?? string.Empty)))
+            .ToList();
+
+        pairs.Should().OnlyHaveUniqueItems();
+        pairs.Should().BeEquivalentTo(
             ExerciseLifecycleAdminEndpoints.ExerciseIdRoutes,
-            "an /api/org/{{id}}-shaped route invites exactly the client-supplied scope COR-001 forbids one tier "
-            + "down. Only the allow-listed story-22 exercise routes may carry an id, each authorized against the "
-            + "caller's own server-resolved tenant");
+            "an /api/org/{{id}}-shaped endpoint invites exactly the client-supplied scope COR-001 forbids one tier "
+            + "down. Only the allow-listed story-22 (method, route) pairs may carry an id, each authorized against "
+            + "the caller's own server-resolved tenant");
 
         foreach (var endpoint in parameterized)
         {
@@ -134,14 +143,9 @@ public sealed class CompositionRootWiringTests
                 "guid", "{0}: a non-GUID never reaches the handler", endpoint.RoutePattern.RawText);
         }
 
-        CountRoutes(factory.Services.GetRequiredService<EndpointDataSource>(), "PATCH", ExerciseLifecycleAdminEndpoints.ExerciseByIdRoute)
-            .Should().Be(1, "rename is PATCH {0}, mapped once", ExerciseLifecycleAdminEndpoints.ExerciseByIdRoute);
-        CountRoutes(factory.Services.GetRequiredService<EndpointDataSource>(), "POST", ExerciseLifecycleAdminEndpoints.ArchiveExerciseRoute)
-            .Should().Be(1, "archive is POST {0}, mapped once", ExerciseLifecycleAdminEndpoints.ArchiveExerciseRoute);
-
         OrgExerciseByIdIsolationTests.Callers.Keys.Should().BeEquivalentTo(
             ExerciseLifecycleAdminEndpoints.ExerciseIdRoutes,
-            "every allow-listed route must be driven by the foreign-tenant 404 test");
+            "every allow-listed (method, route) must be driven by the foreign-tenant 404 test");
     }
 
     private static int CountRoutes(EndpointDataSource dataSource, string method, string rawText)
