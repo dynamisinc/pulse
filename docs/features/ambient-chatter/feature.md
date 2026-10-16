@@ -18,9 +18,14 @@ and the Haiku-tier model selection (engine-generation-infra).
 ## Stories
 | # | Story | Requirement(s) | Status | Issue |
 |---|-------|----------------|--------|-------|
-| 01 | Ambient background posting | ADP-005 | Not Started | #168 |
+| 01 | Ambient background posting (autonomous within a tier policy; review kept for storyline/escalation) | ADP-005 (+ADP-040/042 gates) | Not Started — rewritten 2026-10-16 for wave C2 | #168 |
 
 ## Dependencies
+**Wave C2 note (2026-10-16):** the story now publishes autonomously within a human-set tier policy
+(rate caps, topic/persona allow-lists, ContentGuard, kill switch <=5 s, lifecycle/Freeze). Policy lives in
+in-memory engine state (no schema/migration until C3, after A1); lifecycle is checked by the engine itself
+behind a seam until Session A's A5 gate lands.
+
 `storyline-model` (quiet-floor signal, ADP-011), `persona-voice-engine` (voiced ambient posts),
 `engine-generation-infra` (Haiku-tier selection), `reaction-loop` (generate/publish). E1 exercise
 clock + persona backdated history (COR-023) for scenario continuity.

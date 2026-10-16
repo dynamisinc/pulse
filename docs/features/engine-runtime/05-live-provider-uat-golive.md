@@ -1,6 +1,6 @@
 # Story: Live provider UAT go-live — Azure OpenAI, Ambient tier, suggest-only  `[backend]` `[TIER-2]`
 
-**Feature:** engine-runtime  ·  **Epic:** E8  ·  **Phase:** 2  ·  **Stack:** backend/infra  ·  **Status:** In Progress — built, Gate-1 + Gate-2 clean, **merged to `main`** (2026-07-29). NOT Complete: this story's DoD requires verified-in-UAT, which is outstanding. AC6 additionally blocked on the PROVIDER-GOVERNANCE.md §8 signature (no traffic has reached a live model; provider is still `Fake` in UAT, verified).
+**Feature:** engine-runtime  ·  **Epic:** E8  ·  **Phase:** 2  ·  **Stack:** backend/infra  ·  **Status:** In Progress — built, Gate-1 + Gate-2 clean, **merged to `main`** (2026-07-29). NOT Complete: this story's DoD requires verified-in-UAT, which is outstanding. AC6 was blocked on the PROVIDER-GOVERNANCE.md §8 signature — now signed (Tom Bull, 2026-10-16); PR #571 flips UAT to the live provider (Ambient tier). UAT verification waits on #571 merging after Session A's A1, then the UAT infra deploy.
 **Requirements:** NFR-005, ADP-025 (NFR-003, ADP-024)  ·  **Design decisions:** none  ·  **Issue:** #349
 
 > **⚠ TIER-2 — NFR-005 LLM data governance. Nothing egresses before a human signs `PROVIDER-GOVERNANCE.md` §8.**

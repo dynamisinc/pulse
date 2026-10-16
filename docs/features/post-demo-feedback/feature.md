@@ -14,7 +14,7 @@ slice is pulled forward into the demo window** (Tom, 10/15): the load-test repor
 
 | # | Story | Customer note (short) | Priority | Status | Issue | File |
 |---|---|---|---|---|---|---|
-| PDF-01 | Phones and tablets | "Viewable on smart phone"; "Optimized for iPad and iPhone" | Must (week after demo) | Not Started | #524 | — |
+| PDF-01 | Phones and tablets | "Viewable on smart phone"; "Optimized for iPad and iPhone" | Must (week after demo) | **In progress (B1)** | #524 | [mobile-tablet](../mobile-tablet/feature.md) |
 | PDF-02 | Offline: cached feed and media | "Basic offline functionality…" | Should | Not Started | #525 | — |
 | PDF-03 | Load test, restart resilience, backup site | "Stability!"; "Stress-test with post volume" | Must | **Slice in progress** | #526 | [01 load report](01-load-test-report.md) (slice, #547); restart resilience = [demo-feedback/18](../demo-feedback/18-persist-pause-tier-and-clock.md) |
 | PDF-04 | Facebook-style second channel | "Facebook clone - basically, twitter posts go to Facebook" | Could (needs a D-brief + epic number) | Not Started | #527 | — |
