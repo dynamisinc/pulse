@@ -196,6 +196,11 @@ test.describe('bottom tab bar (MT-D2)', () => {
     const boxes: Box[] = []
     for (const link of await bar.getByRole('link').all()) boxes.push(await boxOf(link))
     boxes.push(await boxOf(bar.getByRole('button', { name: 'Post' })))
+    // True >= 44px boxes (not 43.x), independent of the hit-test probe tolerance.
+    for (const b of boxes) {
+      expect(b.width).toBeGreaterThanOrEqual(44)
+      expect(b.height).toBeGreaterThanOrEqual(44)
+    }
     for (const [i, a] of boxes.entries()) {
       for (const b of boxes.slice(i + 1)) expect(boxesOverlap(a, b)).toBe(false)
     }
