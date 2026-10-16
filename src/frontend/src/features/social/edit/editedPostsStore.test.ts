@@ -83,6 +83,19 @@ describe('editedPostsStore base, pending and reset', () => {
     expect(editedPostsStore.get('p1').edited?.count).toBe(2)
   })
 
+  it('moves an override up to a fresher read\'s text instead of dropping it (no fall back)', () => {
+    editedPostsStore.apply(frame(1, 'v1 text'))
+
+    editedPostsStore.noteBase('p1', { count: 2, scenarioTime: '2033-09-04T10:02:00Z' }, 'v2 text')
+
+    // Another mounted card, still holding older props, reads the override: v2, not v1 or original.
+    expect(editedPostsStore.get('p1').text).toBe('v2 text')
+    expect(editedPostsStore.get('p1').edited?.count).toBe(2)
+    // A frame at or below the new version is stale.
+    expect(editedPostsStore.apply(frame(2, 'replay'))).toBe(false)
+    expect(editedPostsStore.apply(frame(3, 'v3 text'))).toBe(true)
+  })
+
   it('shows a pending text immediately, clears it, and lets the applied frame replace it', () => {
     editedPostsStore.setPendingText('p1', 'optimistic')
     expect(editedPostsStore.get('p1').text).toBe('optimistic')

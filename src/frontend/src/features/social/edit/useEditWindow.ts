@@ -6,23 +6,27 @@
  * down from the moment the post was READ and stops offering Edit at 0 without a reload. No
  * clock value is ever rendered: the hook answers only "is Edit still offered".
  *
- * One timeout for the whole remaining window (not a ticking interval): no re-render until it
- * fires. A fresh read with a new `seconds` value restarts it; `0` / absent is closed from the
- * start. The timer is cleared on unmount and on change.
+ * The countdown starts at the FIRST read of a post's seconds value (`editWindowClock`), so a
+ * remount never grants a fresh window. One timeout for the whole remaining window (not a
+ * ticking interval): no re-render until it fires. A fresh read with a new `seconds` value
+ * restarts it; `0` / absent is closed from the start. The timer is cleared on unmount and on change.
  */
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { remainingWindowMs } from './editWindowClock'
 
-export function useEditWindow(seconds: number | undefined): boolean {
-  // The `seconds` value whose window has run out; a different value is a different window.
-  const [expiredFor, setExpiredFor] = useState<number | null>(null)
-  const offered = seconds !== undefined && seconds > 0
+export function useEditWindow(postId: string, seconds: number | undefined): boolean {
+  // The window (post + seconds value) that has run out; a different value is a different window.
+  const [expiredKey, setExpiredKey] = useState<string | null>(null)
+  const key = `${postId}:${seconds ?? 'none'}`
+  // Counted from the FIRST time this value was read (a remount does not restart it).
+  const remainingMs = useMemo(() => remainingWindowMs(postId, seconds), [postId, seconds])
 
   useEffect(() => {
-    if (!offered || seconds === undefined) return undefined
-    const timer = setTimeout(() => setExpiredFor(seconds), seconds * 1000)
+    if (remainingMs <= 0) return undefined
+    const timer = setTimeout(() => setExpiredKey(key), remainingMs)
     return () => clearTimeout(timer)
-  }, [offered, seconds])
+  }, [remainingMs, key])
 
-  return offered && expiredFor !== seconds
+  return remainingMs > 0 && expiredKey !== key
 }

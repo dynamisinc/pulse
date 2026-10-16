@@ -18,9 +18,9 @@
  *    409 reasons ("The 15-minute edit window has closed", "You've reached the edit limit",
  *    "Posting is paused right now") and a generic one for the rest. A 409 also tells the parent
  *    (`onRejected`) so the card's Edit button stops offering a window the server closed.
- *  - Save is disabled for empty, unchanged or over-limit text, and while a save is in flight
- *    (`aria-disabled`, still focusable). Esc / Close / Cancel dismiss with no change; focus
- *    returns to the Edit button (`EditDialogShell`).
+ *  - Save is `aria-disabled` (still focusable; a press is ignored) for empty, unchanged or
+ *    over-limit text and while a save is in flight. Esc / Close / Cancel dismiss with no change;
+ *    focus returns to the Edit button (`EditDialogShell`).
  *
  * CONTENT SECURITY (NFR-004): the text goes to the server RAW; the server sanitizes (strip, never
  * encode) and its returned text is what the card shows. Rendered as plain React text everywhere.
@@ -192,8 +192,7 @@ export function EditPostDialog({
           <button
             type="submit"
             className={styles.save}
-            disabled={!canSave && !saving}
-            aria-disabled={saving ? true : undefined}
+            aria-disabled={!canSave || saving ? true : undefined}
           >
             {saving ? 'Saving…' : 'Save'}
           </button>

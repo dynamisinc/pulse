@@ -14,6 +14,7 @@
  * shortcuts (handled on the list container, which a portal still bubbles to) never fire from it.
  */
 
+import { useId } from 'react'
 import { Box, Dialog, DialogContent, DialogTitle, Stack, Typography } from '@mui/material'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faXmark } from '@fortawesome/free-solid-svg-icons'
@@ -30,6 +31,7 @@ export interface LiveWorldEditHistoryProps {
 }
 
 export function LiveWorldEditHistory({ postId, timeZone, onClose }: LiveWorldEditHistoryProps) {
+  const titleId = useId()
   const { history, isLoading, isError, refetch } = usePostEditHistory(postId)
   const versions = history === undefined
     ? []
@@ -42,13 +44,13 @@ export function LiveWorldEditHistory({ postId, timeZone, onClose }: LiveWorldEdi
       onClose={onClose}
       maxWidth="sm"
       fullWidth
-      aria-labelledby="live-world-edit-history-title"
+      aria-labelledby={titleId}
       data-testid="live-world-edit-history"
       onKeyDown={event => event.stopPropagation()}
       onClick={event => event.stopPropagation()}
     >
       <DialogTitle
-        id="live-world-edit-history-title"
+        id={titleId}
         sx={{
           fontFamily: liveWorldTokens.mono,
           fontSize: 14,

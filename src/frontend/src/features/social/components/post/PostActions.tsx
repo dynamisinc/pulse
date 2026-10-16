@@ -189,13 +189,13 @@ function PostActionsRow({ post, variant, onReply }: PostActionsProps) {
   // Edit (story 20). The card's own `edited` summary seeds the shared overlay store (a layout
   // effect, so the header shows "Edited" in the same paint); a live push or save overrides it.
   useLayoutEffect(() => {
-    editedPostsStore.noteBase(post.id, post.edited)
-  }, [post.id, post.edited])
+    editedPostsStore.noteBase(post.id, post.edited, post.text)
+  }, [post.id, post.edited, post.text])
   const [windowSeconds, setWindowSeconds] = useState<number | undefined>(undefined)
   // The Edit button that opened the dialog (focus returns to it); `null` = dialog closed.
   const [editOpener, setEditOpener] = useState<HTMLElement | null>(null)
   const editedView = useEditedPost(post.id)
-  const editOffered = useEditWindow(windowSeconds ?? post.viewer?.editableForSeconds)
+  const editOffered = useEditWindow(post.id, windowSeconds ?? post.viewer?.editableForSeconds)
 
   // A like SETTLED (pending true -> false): tell a mounted Pinned tab, which lists liked
   // posts too. The like hook is shared with every surface, so the row observes it rather

@@ -30,6 +30,7 @@ import { PostCard } from '../components/post/PostCard'
 import type { PostView } from '../components/post/types'
 import { resetMockReactions } from '../services/reactionService'
 import { editedPostsStore } from './editedPostsStore'
+import { resetEditWindowReads } from './editWindowClock'
 import { noteMockPostCreated, resetMockEditsForTests, setMockEditConflict } from './mockEdits'
 
 const ORIGINAL = 'Water looks fine to me'
@@ -90,6 +91,7 @@ beforeEach(() => {
   resetMockReactions()
   resetMockEditsForTests()
   editedPostsStore.resetForTests()
+  resetEditWindowReads()
   noteMockPostCreated('post-edit-1', ORIGINAL, '2033-09-04T13:15:00Z')
 })
 
@@ -149,6 +151,28 @@ describe('Edit action (DF-29)', () => {
     expect(screen.queryByRole('button', { name: 'Edit post' })).toBeNull()
   })
 
+  it('does not grant a fresh window when the card remounts (feed -> thread -> back)', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance'] })
+    const post = buildPost({ viewer: { liked: false, reposted: false, editableForSeconds: 30 } })
+    const first = render(wrap(<PostCard post={post} />))
+    await act(() => Promise.resolve())
+    expect(screen.getByRole('button', { name: 'Edit post' })).toBeInTheDocument()
+
+    act(() => {
+      vi.advanceTimersByTime(20_000)
+    })
+    first.unmount()
+    // The cached post still says 30 seconds; the remount must count from the FIRST read.
+    render(wrap(<PostCard post={post} />))
+    await act(() => Promise.resolve())
+    expect(screen.getByRole('button', { name: 'Edit post' })).toBeInTheDocument()
+
+    act(() => {
+      vi.advanceTimersByTime(11_000)
+    })
+    expect(screen.queryByRole('button', { name: 'Edit post' })).toBeNull()
+  })
+
   it('renders no wall-clock or countdown text', async () => {
     await renderCards(buildPost())
 
@@ -175,7 +199,7 @@ describe('Edit dialog', () => {
     expect(within(dialog).getByTestId('edit-post-media-note')).toHaveTextContent(
       "Media can't be changed",
     )
-    expect(within(dialog).getByRole('button', { name: 'Save' })).toBeDisabled()
+    expect(within(dialog).getByRole('button', { name: 'Save' })).toHaveAttribute('aria-disabled', 'true')
   })
 
   it('traps focus inside, closes on Esc and returns focus to the Edit button', async () => {
@@ -218,10 +242,10 @@ describe('Edit dialog', () => {
     const box = screen.getByRole('textbox', { name: 'Post text' })
 
     fireEvent.change(box, { target: { value: '   ' } })
-    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Save' })).toHaveAttribute('aria-disabled', 'true')
 
     fireEvent.change(box, { target: { value: 'x'.repeat(285) } })
-    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Save' })).toHaveAttribute('aria-disabled', 'true')
     expect(screen.getByTestId('edit-counter')).toHaveTextContent('5 characters over the limit')
   })
 })
@@ -279,7 +303,7 @@ describe('Save (DF-29)', () => {
     expect(screen.getByText(ORIGINAL, { selector: 'p' })).toBeInTheDocument()
     expect(screen.queryByText('Will fail', { selector: 'p' })).toBeNull()
     expect(screen.queryByTestId('post-edited')).toBeNull()
-    expect(screen.getByRole('button', { name: 'Save' })).not.toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Save' })).not.toHaveAttribute('aria-disabled')
   })
 
   it.each([

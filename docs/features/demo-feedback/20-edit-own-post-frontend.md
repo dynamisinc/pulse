@@ -76,12 +76,14 @@ Live world chip renders and opens history; axe check on both dialogs.
 Live check against story 19's deployed API: **pending 19 deploy** (everything above was built and tested against
 the frozen contract through the mock switches).
 
-- Edit tooltip is a native `title` plus the accessible name; story 13's tooltip component is not on this branch, swap it in at merge.
+- The Edit button uses story 13's `ParticipantTooltip` (merged from the umbrella) plus the accessible name.
+- The edit countdown starts at the first read of a post's seconds value (`edit/editWindowClock.ts`), so a remount does not grant a fresh window.
+- Quoted-post embeds are not `PostBody` and do not show edits live (known, out of scope).
 - The `PostCard` is untouched (story 21 owns it), so `PostHeader` / `PostBody` find their post through the enclosing
   `<article data-post-id>` (`edit/useEnclosingPostId.ts`) and `PostActions` seeds `editedPostsStore` with the card's
   `post.edited`. Once 21 merges, `PostCard` can pass `postId` explicitly (both parts accept it) and the seed can go.
 - Outside the owned list, minimal and necessary: `components/post/types.ts` (`PostView.edited`),
   `services/feedService.ts` (`toPostView` carries `edited`), `services/ownPostStore.ts` (an own just-published post keeps
-  `editableForSeconds` / `edited`), `core/auth/endSession.ts` (store reset, as the AC says), and the
+  `editableForSeconds` / `edited`), `core/auth/endSession.ts` (store reset, as the AC says; sits beside story 14's `postCountsStore` reset), and the
   `liveWorldTwoWorlds.test.ts` allowlist (two new leaf social modules).
 - No axe dependency exists in the repo, so the dialogs' accessibility is pinned with explicit role/label/focus assertions.

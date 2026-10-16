@@ -10,8 +10,9 @@
  *   - an optimistic text while their own save is in flight.
  *
  * `PostBody` and `PostHeader` read through it (`useEditedPost`), so a card mounted
- * ANYWHERE (feed, thread, profile, Pinned, a quoted card) updates without a reload and
- * without any page wiring - the same trick as `postCountsStore`'s version gate.
+ * ANYWHERE (feed, thread, profile, Pinned) updates without a reload and
+ * without any page wiring - the same trick as `postCountsStore`'s version gate. (A quoted
+ * embed is not a `PostBody` and does NOT show edits live.)
  *
  * VERSION GATE. `PostEdited.version` is the post's edit count, monotonic per post (DF-33).
  * A frame is applied only when its version is STRICTLY greater than the one held, so a
@@ -20,7 +21,8 @@
  *
  * BASE. `noteBase` records the `edited` summary a card was RENDERED with (from a feed or
  * thread read), so the header can show "Edited" before any push. When a fresher read
- * carries a higher count than the held override, the override is dropped (the read wins).
+ * carries a higher count than the held override, the read's text REPLACES the override (so
+ * every mounted card of the post moves up to it, none falls back to older text).
  *
  * RESET. The store is identity-scoped state living for the TAB, so `reset()` runs from
  * `core/auth/endSession.ts` (sign-out and every identity switch) and bumps a GENERATION: an
@@ -115,7 +117,11 @@ function apply(event: PostEditedEvent, expectedGeneration?: number): boolean {
 }
 
 /** Records the `edited` summary a card was rendered with (absent = never edited). */
-function noteBase(postId: string, edited: PostEditedSummary | null | undefined): void {
+function noteBase(
+  postId: string,
+  edited: PostEditedSummary | null | undefined,
+  text?: string,
+): void {
   const previous = bases.get(postId)
   if (edited == null) {
     if (previous === undefined) return
@@ -126,7 +132,16 @@ function noteBase(postId: string, edited: PostEditedSummary | null | undefined):
   if (previous?.count === edited.count && previous.scenarioTime === edited.scenarioTime) return
   bases.set(postId, edited)
   const held = overrides.get(postId)
-  if (held !== undefined && edited.count > held.version) overrides.delete(postId)
+  if (held !== undefined && edited.count > held.version) {
+    // The read is newer than the held override. Keep its text as the override (so a mounted card
+    // still on older text moves up, never back); without the read's text, the override can no
+    // longer be trusted and is dropped.
+    if (text !== undefined) {
+      overrides.set(postId, { text, edited: { ...edited }, version: edited.count })
+    } else {
+      overrides.delete(postId)
+    }
+  }
   changed(postId)
 }
 
