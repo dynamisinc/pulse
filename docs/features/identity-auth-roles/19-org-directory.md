@@ -20,6 +20,9 @@ An org admin needs to see and manage the people in their organization without as
 - [ ] Accessibility (NFR-001): WCAG 2.1 AA; keyboard-operable; status/error states are never color-only; async results announced via a live region.
 - [ ] User guide (C5 docs-as-done): `docs/guide/planner-guide.md` is updated in the same PR (and `tools/guide-screenshots` if a screen changed), or the PR states "no guide impact". (new "People" section).
 
+### Copilot review 4 fold (2026-10-16, ADMIN-IDENTITY-MODEL §1.1)
+- [ ] Revoking `OrgRole` revokes, in the same transaction, every live org-scope session (access and refresh) of that person. Disabling a person revokes all of their sessions. Tests prove that the old access token and the old refresh token both get 401 afterwards.
+
 ## Out of Scope
 Inviting staff (20); resets (21); avatars (23); deleting a person; MFA; SSO.
 

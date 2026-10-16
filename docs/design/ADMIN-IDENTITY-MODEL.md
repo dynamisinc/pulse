@@ -86,6 +86,15 @@ Organization (+ Slug: new, unique; used in the staff console URL, §1.2)
   The unique index above enforces it, and the service maps the violation to 409 `conflicting-enrollment`.
   A person who is a controller on Exercise A and a participant on Exercise B is fine. Being both
   inside one exercise would break evaluation integrity and the two-worlds rule.
+- **Revoking a grant revokes the sessions built on it.** `StaffCallerContext` authorizes from the persisted
+  `Session.Role`, and refresh preserves that role. So revoking `OrgRole`, disabling a Person, or removing
+  or changing an `Enrollment` revokes, **in the same transaction**, every live session (access and refresh)
+  that was minted from that grant:
+  - org-scope sessions, for an `OrgRole` revoke;
+  - all of the person's sessions, for a disable;
+  - sessions on that exercise, for an enrollment change.
+
+  Tests prove that the old access token and the old refresh token both stop working. *(Copilot review 4.)*
 - **The org admin grant is `Person.OrgRole = "orgAdmin"`. It is not an exercise role.** `orgAdmin` leaves the
   staff role vocabulary. Migration: every existing `orgAdmin` assignment sets the person's
   `OrgRole` and its `Enrollment` becomes `planner` on that exercise, so the person keeps the access they have today.
@@ -422,11 +431,20 @@ copies only setup follows.
 `CreatedWallClock < FirstLiveAt` breaks after a reopen or a reset, so the flag is explicit.
 
 ### Decision 5.4b — dependencies that survive reset (Copilot review 3)
-- **Persona media.** Before reset deletes participant-uploaded media attached to conduct posts, it clears
-  any retained `Persona.AvatarMediaId`/`BannerMediaId` that points at one of those assets back to the
-  default. Both FKs are `DeleteBehavior.Restrict`, so the delete would otherwise fail, or leave a broken
-  image if only the blob went. Avatars a participant uploaded through `/api/me/avatar` belong to the
-  persona's configuration, not to a post, so they are kept.
+- **Media that is still referenced survives.** *(Copilot review 4 replaced the earlier "clear persona
+  references" rule.)* Reset deletes a participant-uploaded `MediaAsset` (row and blob) **only when no
+  retained row references it**. Retained rows are:
+  - a setup post's `PostMediaItem`;
+  - a persona's `AvatarMediaId` or `BannerMediaId`;
+  - a run-sheet item's media.
+
+  An asset still referenced by any of these is kept, untouched. This covers two cases:
+  - Staff unstaged after a dry run and reused a participant's image in a setup post.
+  - A persona's avatar points at the image.
+
+  Every one of those FKs is `DeleteBehavior.Restrict`, so the check-then-delete runs in the reset
+  transaction, which makes it race-free. The reset preview lists the assets it keeps and why. Avatars a
+  participant uploaded through `/api/me/avatar` are persona configuration and are always kept.
 - **Setup replies to conduct posts.** Here is how one can arise: a dry-run post in staged, then unstage,
   then a staff reply in build. Two rules handle it:
   1. **Prevention at the source.** A post written in build may not reply to a conduct post. The write path
@@ -684,3 +702,7 @@ The story fixes include:
 - the last-admin rule also covering disable;
 - `no-store` as middleware placed before the auth and rate-limit gates;
 - #389 rescoped to refused privileged origins.
+
+**Copilot review 4 (2026-10-16), on `e1c0b9d`, 2 findings, both accepted:**
+- Reset keeps media that is still referenced, which supersedes clearing persona references (§5.4b).
+- Revoking a grant revokes the sessions minted from it (§1.1).

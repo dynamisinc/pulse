@@ -30,6 +30,10 @@ Exercises can only move forward today, and the demo reset is direct SQL in `Clea
 ### Copilot review 2 fold (2026-10-16, ADMIN-IDENTITY-MODEL §5.4)
 - [ ] `Follow.IsSetupContent` is stamped by the write path (true only while the exercise is in build). The A3 migration backfills `Posts` and `Follows` by the §5.4 rule (the first lifecycle transition out of build; participant-origin posts are always conduct; with no transition event, a row is conduct). Reset deletes only conduct follows.
 
+### Copilot review 4 fold (2026-10-16, ADMIN-IDENTITY-MODEL §5.4b)
+- [ ] **This supersedes the review-3 rule that cleared persona references.** Reset deletes a participant-uploaded `MediaAsset` (row and blob) only when no retained row references it: a setup `PostMediaItem`, a persona avatar or banner, or run-sheet media. A referenced asset survives untouched, and retained personas keep their images. The check and the delete run in the reset transaction. The reset preview lists the kept assets and why.
+- [ ] Reset-matrix test: staged dry run with a participant image → unstage → staff reuses the image in a setup post → complete → reset. The setup post and its image survive, and the conduct post is gone.
+
 ## Out of Scope
 Delete (08); multiple runs per exercise or run numbering (rejected, §5.2); evaluator annotations; the AAR export itself (E10).
 

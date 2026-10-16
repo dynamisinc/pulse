@@ -20,6 +20,9 @@ Today nothing creates staff enrollments except bootstrap and the creator. Org ad
 - [ ] Accessibility (NFR-001): WCAG 2.1 AA; keyboard-operable; status/error states are never color-only; async results announced via a live region.
 - [ ] User guide (C5 docs-as-done): `docs/guide/planner-guide.md` is updated in the same PR (and `tools/guide-screenshots` if a screen changed), or the PR states "no guide impact". (inviting and assigning staff); remove the matching "ask Dynamis support" line.
 
+### Copilot review 4 fold (2026-10-16, ADMIN-IDENTITY-MODEL §1.1)
+- [ ] Removing a staff enrollment, or changing its role, revokes that person's live sessions on that exercise (access and refresh) in the same transaction, because `Session.Role` is persisted and survives refresh. A test covers both tokens.
+
 ## Out of Scope
 Participant roster import and sign-in (easy-login); password reset (21); the directory page itself (19).
 
