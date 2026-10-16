@@ -263,10 +263,23 @@ describe('status vocabulary + state machine', () => {
   it('every status has a text label; a burst in flight carries its n/m', () => {
     expect(statusText(makeItem({ status: 'pending' }))).toBe('Pending')
     expect(statusText(makeItem({ status: 'held' }))).toBe('Held')
-    expect(statusText(makeItem({ status: 'fired' }))).toBe('Fired')
+    // A post that actually went out carries its published post id: "Fired".
+    const published = makePost({ status: 'fired', firedPostId: 'post-1' })
+    expect(statusText(makeItem({ status: 'fired', posts: [published] }))).toBe('Fired')
     expect(statusText(makeItem({ status: 'skipped' }))).toBe('Skipped')
     expect(statusText(makeItem({ status: 'failed' }))).toBe('Failed')
     expect(statusText(makeItem({ status: 'firing', firedCount: 3, total: 8 }))).toBe('Firing 3/8')
+  })
+
+  it('DF-36: an item marked fired (fired, no child with a post id) reads "Marked fired", not "Fired"', () => {
+    const skipped = makePost({ status: 'skipped' })
+    expect(statusText(makeItem({ status: 'fired', posts: [skipped] }))).toBe('Marked fired')
+    // A burst marked fired after some children went out still published: plain "Fired".
+    const mixed = [
+      makePost({ status: 'fired', firedPostId: 'post-1' }),
+      makePost({ id: 'injp-2', status: 'skipped' }),
+    ]
+    expect(statusText(makeItem({ status: 'fired', posts: mixed }))).toBe('Fired')
   })
 
   it('offers each action only where story 06 allows it', () => {

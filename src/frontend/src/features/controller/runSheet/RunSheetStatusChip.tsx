@@ -9,7 +9,8 @@
  *
  * "Marked fired" (DF-36) is not a wire status: it is `fired` with no child that
  * carries a post id (`isMarkedFired`) — an inject delivered outside Pulse. It gets
- * its own WORD and icon, so it never reads as a post that went out.
+ * its own WORD and icon, so it never reads as a post that went out. The word comes
+ * from the shared `statusText`, the same formatter the live-region announcer uses.
  */
 
 import { Box } from '@mui/material'
@@ -25,7 +26,7 @@ import {
   faTriangleExclamation,
 } from '@fortawesome/free-solid-svg-icons'
 import { consoleChrome as chrome } from '../consoleChrome'
-import { isMarkedFired, MARKED_FIRED_LABEL, statusText } from './injectRules'
+import { isMarkedFired, statusText } from './injectRules'
 import type { InjectItemDto, InjectStatus } from './types'
 
 interface Tone {
@@ -73,7 +74,7 @@ export function RunSheetStatusChip({ item }: RunSheetStatusChipProps) {
       }}
     >
       <FontAwesomeIcon icon={tone.icon} color={tone.color} aria-hidden="true" data-testid="status-icon" />
-      <span data-testid="status-text">{marked ? MARKED_FIRED_LABEL : statusText(item)}</span>
+      <span data-testid="status-text">{statusText(item)}</span>
     </Box>
   )
 }
