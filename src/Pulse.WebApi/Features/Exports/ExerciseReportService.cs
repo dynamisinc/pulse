@@ -142,6 +142,8 @@ public sealed partial class ExerciseReportService
     private const string TimeOfDayFormat = "HH:mm";
     private const string DateFormat = "yyyy-MM-dd";
 
+    private static readonly TimeSpan LastMinuteOfDay = new(23, 59, 0);
+
     private readonly PulseDbContext _dbContext;
     private readonly IExerciseContext _exerciseContext;
     private readonly PostEngagementReader _engagementReader;
@@ -400,7 +402,8 @@ public sealed partial class ExerciseReportService
         return new ReportDayDto
         {
             From = ExerciseReportFilter.Format(day)!,
-            To = ExerciseReportFilter.Format(day.AddDays(1).AddMinutes(-1))!,
+            // 23:59 inside the day itself: a post on 9999-12-31 must not overflow into a day that does not exist.
+            To = ExerciseReportFilter.Format(day.Add(LastMinuteOfDay))!,
         };
     }
 

@@ -283,6 +283,31 @@ public sealed class ExerciseReportScopeEndpointTests
     }
 
     [RequiresDockerFact]
+    public async Task LatestDay_OnTheLastRepresentableDay_DoesNotOverflow_AndAWindowExcludingItStillBuilds()
+    {
+        var exerciseId = await _seed.ExerciseAsync();
+        var (token, _) = await _seed.StaffAsync(exerciseId, [(exerciseId, "controller")]);
+        var persona = await _report.PersonaAsync(exerciseId, "resident", "Resident");
+
+        await _seed.PostAsync(exerciseId, persona, 0, p => p.Origin = "participant");
+        await _seed.PostAsync(exerciseId, persona, 0, p =>
+        {
+            p.Origin = "participant";
+            p.CreatedScenarioTime = new DateTimeOffset(9999, 12, 31, 12, 0, 0, TimeSpan.Zero);
+        });
+
+        await using var host = await ExerciseReportTestHost.StartAsync(_seed.ConnectionString, exerciseId, utcNow: Now);
+
+        foreach (var query in new[] { string.Empty, "?from=2033-09-04%2000:00&to=2033-09-04%2023:59" })
+        {
+            using var json = await GetJsonAsync(host, token, query);
+            var latest = json.RootElement.GetProperty("exercise").GetProperty("latestDay");
+            latest.GetProperty("from").GetString().Should().Be("9999-12-31 00:00", "the latest post is on the last day ({0})", query);
+            latest.GetProperty("to").GetString().Should().Be("9999-12-31 23:59");
+        }
+    }
+
+    [RequiresDockerFact]
     public async Task SpansMultipleDays_CountsListedTakedownAndEditTimes_ForTheWindowInEffect()
     {
         var exerciseId = await _seed.ExerciseAsync();

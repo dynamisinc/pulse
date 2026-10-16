@@ -308,7 +308,9 @@ public static class ExerciseReportBuilder
         ArgumentNullException.ThrowIfNull(authorHandles);
         ArgumentNullException.ThrowIfNull(posts);
 
-        var cutoff = deliveredAt.AddMinutes(ResponseWindowMinutes);
+        // Scenario times are client-supplied: an inject near DateTimeOffset.MaxValue must not overflow the cutoff.
+        var window = TimeSpan.FromMinutes(ResponseWindowMinutes);
+        var cutoff = deliveredAt <= DateTimeOffset.MaxValue - window ? deliveredAt + window : DateTimeOffset.MaxValue;
         var handles = authorHandles
             .Select(NormalizeHandle)
             .Where(handle => handle.Length > 0)

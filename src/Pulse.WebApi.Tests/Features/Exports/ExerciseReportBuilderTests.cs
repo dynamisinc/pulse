@@ -159,6 +159,18 @@ public sealed class ExerciseReportBuilderTests
     }
 
     [Fact]
+    public void FirstResponse_NearTheLastRepresentableInstant_DoesNotOverflowTheCutoff()
+    {
+        var delivered = DateTimeOffset.MaxValue.AddMinutes(-10);
+        var injectPost = new ReportPostFact(Guid.NewGuid(), Guid.NewGuid(), "inject", delivered, T0, null, "boil water");
+        var reply = new ReportPostFact(Guid.NewGuid(), Guid.NewGuid(), "participant", delivered.AddMinutes(5), T0, injectPost.Id, "ok");
+
+        var response = ExerciseReportBuilder.FirstResponse(delivered, new HashSet<Guid> { injectPost.Id }, [], [injectPost, reply]);
+
+        response.Should().Be(reply);
+    }
+
+    [Fact]
     public void FirstResponse_AnAtMentionOfAnInjectAuthor_Counts_CaseInsensitive()
     {
         var mention = Post(3, "participant", body: "Is this real @CityFire?");
