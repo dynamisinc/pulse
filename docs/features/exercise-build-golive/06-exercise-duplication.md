@@ -20,6 +20,12 @@ investment compounds (COR-045).
 ### Copilot review 2 fold (2026-10-16, ADMIN-IDENTITY-MODEL §5.5)
 - [ ] Duplicate copies only **setup** follows (`Follow.IsSetupContent`) between the copied personas, never conduct follows.
 
+### Orchestrator review fold (2026-10-16)
+- [ ] Copied staff enrollments keep their `IsLead` flag.
+
+### Copilot review 5 fold (2026-10-16)
+- [ ] Every asset a copied row references (setup-post attachments and posters, persona avatars and banners, run-sheet JSON media) is copied, **including participant-uploaded ones**. The copy has its uploader link cleared and becomes staff library media. This supersedes the earlier "clear participant-media avatars" rule. Test: staged → unstage → reuse a participant image in a setup post → duplicate; the copy's post shows the image from the new exercise's prefix.
+
 ## Out of Scope
 AAR export of the source (E10); template/cast library management (persona-management); the lifecycle
 of the new exercise (exercise-configuration).
@@ -47,7 +53,7 @@ Source: [`docs/design/ADMIN-IDENTITY-MODEL.md`](../../design/ADMIN-IDENTITY-MODE
 - [ ] **Planner of the source or org admin** may duplicate from any state; the result is a new exercise in `build` named "Copy of X", with a new hostname and a generated, disabled view-only code. Controllers and evaluators are refused.
 - [ ] **Copied with new ids and every reference remapped:** settings, chrome, sign-in methods; personas (avatar/banner remapped); staff library media (blobs server-side copied into the new prefix); run sheet (all items pending, except reply items needing repair); noise pool; follow graph between personas; staff enrollments (default on); **setup posts** (`IsSetupContent`) with their media, pins and baselines remapped.
 - [ ] **A setup post is copied only if its whole parent chain is setup.** A setup post whose parent chain includes a conduct post (dry-run post in `staged`, unstage, staff reply in `build`) is treated as conduct and not copied; its descendants are not copied either. Test: that sequence yields no copy of the reply.
-- [ ] **Persona avatar/banner pointing at participant-uploaded media is cleared to the default** on the copy (that asset is not copied).
+- [ ] ~~**Persona avatar/banner pointing at participant-uploaded media is cleared to the default** on the copy (that asset is not copied).~~ *(superseded by the Copilot review 5 fold: referenced assets are copied)*
 - [ ] **Run-sheet reply items:** a reply whose target is a setup post is remapped to the copied post; one whose target is a conduct post arrives `needs-repair` (§5.4a) and blocks staging until fixed.
 - [ ] **Never copied:** conduct posts, participant accounts, links, day words, sessions, telemetry, participant-uploaded media. Optional "copy participant roster" re-creates directory-linked accounts with persona bindings and no links; one-offs are not copied.
 - [ ] User guide (C5 docs-as-done): `docs/guide/planner-guide.md` is updated in the same PR, or the PR states "no guide impact".

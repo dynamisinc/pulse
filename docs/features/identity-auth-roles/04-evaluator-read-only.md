@@ -16,6 +16,9 @@ The Evaluator role can see all channels and all controller activity but **cannot
 - [ ] The console/monitoring surfaces expose evaluator variants with steering controls **absent, not
       disabled** (per D5 CTL-033 backlog; full variant is later).
 
+### Copilot review 6 fold (2026-10-16)
+- [ ] "Write-nothing" means exercise content and administration. An evaluator can still refresh, log out, read their own session and switch between their own enrollments (design doc §8.2).
+
 ## Out of Scope
 The evaluator dashboard/analytics (E10/D6); the read-only console variant build (live-monitoring
 CTL-033 backlog); DM observability plumbing (E2 SOC-062).

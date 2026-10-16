@@ -22,7 +22,7 @@ believable as these notes (COR-020).
 |---|-------|----------------|--------|-------|
 | 01 | Persona templates (create/edit/clone/archive, voice notes) | COR-020 | In Progress | #53 |
 | 02 | Casts & one-action seeding with derived state | COR-021 | In Progress | #54 |
-| 03 | Mid-exercise persona creation (≤60s) | COR-022 | Closed — duplicate (of closed #18) | #55 |
+| 03 | Mid-exercise persona creation (≤60s) (A4; #55 is the surviving owner of COR-022, and #18 was closed as its duplicate) | COR-022 | Not Started | #55 |
 | 04 | Pre-exercise backdated post history | COR-023 | Not Started | #56 |
 | 05 | Bundled avatar library + upload | COR-024 | Not Started | #57 |
 | 06 | Content pack upload and apply (pulse.demopack.v1) (A4, Tier-2) | COR-020, COR-021, COR-023, COR-024 | Not Started | #582 |
@@ -41,4 +41,4 @@ Phase-1-critical asset. Backdated content renders under the scenario-time rule (
 
 ## Scope update 2026-10-16 (ADMIN-IDENTITY-MODEL)
 
-Source: [`docs/design/ADMIN-IDENTITY-MODEL.md`](../../design/ADMIN-IDENTITY-MODEL.md) §6.1, §10. Stories **01, 02, 05** are amended (persona create service, archive column, idempotent seeding via `ContentPackItem`, avatars pass the re-encode pipeline). Story **03 is closed as a duplicate of closed #18** (status "Closed — duplicate"). New 06 is wave A4.
+Source: [`docs/design/ADMIN-IDENTITY-MODEL.md`](../../design/ADMIN-IDENTITY-MODEL.md) §6.1, §10. Stories **01, 02, 05** are amended (persona create service, archive column, idempotent seeding via `ContentPackItem`, avatars pass the re-encode pipeline). Story **03 (#55) stays open**: it is the surviving owner of COR-022 (#18 was closed as its duplicate) and builds on story 01's create service. New 06 is wave A4.
