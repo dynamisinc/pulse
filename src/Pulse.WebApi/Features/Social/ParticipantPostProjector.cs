@@ -6,6 +6,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.Media;
+using Pulse.WebApi.Features.Social.Editing;
 using Pulse.WebApi.Features.Social.Engagement;
 
 /// <summary>
@@ -39,6 +40,7 @@ public sealed partial class ParticipantPostProjector : IParticipantPostProjector
     private readonly IPostEngagementReader _engagementReader;
     private readonly IMediaUrlSigner _mediaUrlSigner;
     private readonly ILogger<ParticipantPostProjector> _logger;
+    private readonly TimeProvider _timeProvider;
 
     /// <summary>Creates the projector over the scoped persistence context and its read seams.</summary>
     /// <param name="dbContext">The request-scoped context whose global filter confines every lookup (COR-001).</param>
@@ -46,12 +48,17 @@ public sealed partial class ParticipantPostProjector : IParticipantPostProjector
     /// <param name="engagementReader">Real engagement counts and viewer state (B3, or the zero fallback).</param>
     /// <param name="mediaUrlSigner">Mints read URLs for in-scope media (BM, or the unconfigured fallback).</param>
     /// <param name="logger">Diagnostics for media the signer returned no URL for; optional.</param>
+    /// <param name="timeProvider">
+    /// The server wall clock for <c>viewer.editableForSeconds</c> (demo-feedback story 19); optional, the system clock
+    /// when absent.
+    /// </param>
     public ParticipantPostProjector(
         PulseDbContext dbContext,
         IExerciseContext exerciseContext,
         IPostEngagementReader engagementReader,
         IMediaUrlSigner mediaUrlSigner,
-        ILogger<ParticipantPostProjector>? logger = null)
+        ILogger<ParticipantPostProjector>? logger = null,
+        TimeProvider? timeProvider = null)
     {
         ArgumentNullException.ThrowIfNull(dbContext);
         ArgumentNullException.ThrowIfNull(exerciseContext);
@@ -63,6 +70,7 @@ public sealed partial class ParticipantPostProjector : IParticipantPostProjector
         _engagementReader = engagementReader;
         _mediaUrlSigner = mediaUrlSigner;
         _logger = logger ?? NullLogger<ParticipantPostProjector>.Instance;
+        _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
     /// <inheritdoc />
@@ -100,8 +108,11 @@ public sealed partial class ParticipantPostProjector : IParticipantPostProjector
 
         var mediaByPost = media.ToLookup(row => row.PostId);
 
+        // One wall-clock read per projection, shared by every post's editableForSeconds (story 19).
+        var utcNow = _timeProvider.GetUtcNow();
+
         return posts
-            .Select(post => Project(post, mediaByPost[post.Id], urls, signingFailed, replyParents, engagement, viewerPersonaId))
+            .Select(post => Project(post, mediaByPost[post.Id], urls, signingFailed, replyParents, engagement, viewerPersonaId, utcNow))
             .ToArray();
     }
 
@@ -109,6 +120,12 @@ public sealed partial class ParticipantPostProjector : IParticipantPostProjector
     /// The single participant-safe mapping. Reads only the post's id, author, body, scenario time, baseline
     /// counts (summed into <c>counts</c>), parent id and whether it is pinned for everyone — never its provenance
     /// or who pinned it (XC-002).
+    /// <para>
+    /// <b>demo-feedback story 19.</b> <c>edited</c> reads the edit count and the last edit's SCENARIO time only (never
+    /// the wall-clock <c>LastEditedAt</c>). <c>viewer.editableForSeconds</c> is set only on the viewer's own
+    /// participant-origin post: <c>Origin</c> and <c>CreatedWallClock</c> are read to decide that yes/no and to compute
+    /// a remaining DURATION, and neither value is ever projected (<see cref="PostEditRules"/>).
+    /// </para>
     /// </summary>
     private ParticipantPostDto Project(
         Post post,
@@ -117,7 +134,8 @@ public sealed partial class ParticipantPostProjector : IParticipantPostProjector
         bool signingFailed,
         IReadOnlyDictionary<Guid, string> replyParentHandles,
         IReadOnlyDictionary<Guid, PostEngagement> engagement,
-        Guid? viewerPersonaId)
+        Guid? viewerPersonaId,
+        DateTimeOffset utcNow)
     {
         var real = engagement.GetValueOrDefault(post.Id);
 
@@ -150,10 +168,18 @@ public sealed partial class ParticipantPostProjector : IParticipantPostProjector
             Viewer = viewerPersonaId is null
                 ? null
                 : new PostViewerStateDto(
-                    real?.ViewerLiked ?? false, real?.ViewerReposted ?? false, real?.ViewerPinned ?? false),
+                    real?.ViewerLiked ?? false,
+                    real?.ViewerReposted ?? false,
+                    real?.ViewerPinned ?? false,
+                    EditableForSeconds: PostEditRules.IsViewersOwnEditablePost(post, viewerPersonaId)
+                        ? PostEditRules.EditableForSeconds(post, utcNow)
+                        : null),
 
             // demo-feedback DF-7: true while pinned for everyone, omitted otherwise. Who pinned it is staff-only.
             PinnedForAll = ParticipantPostDto.PinnedForAllFlag(post),
+
+            // demo-feedback DF-31: { count, scenarioTime } once edited, else null. Scenario time only (COR-053).
+            Edited = PostEditRules.SummaryOf(post),
         };
     }
 

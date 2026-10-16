@@ -59,7 +59,8 @@
     Print the plan and each script's own preview; write nothing.
 
 .PARAMETER ApiHost
-    The API's host name, which the exercise is bound to.
+    The API's host name, which the exercise is bound to. An https URL is accepted and reduced to its host; http://
+    and an explicit port are refused before anything is sent (https on 443 only).
 
 .PARAMETER SiteUrl
     The participant site.
@@ -133,8 +134,10 @@ function Resolve-ApiHost {
         slash, path and query are dropped. Returns @{ Host (the bare host, with a port only when not the default);
         BaseUrl (the origin this script calls) }. Only the bare host is passed to other scripts: Reset-DemoState.ps1
         prepends https:// itself, and Clear-DemoContent.ps1 looks the exercise up by host name. Anything else (another
-        scheme, a user name or password, characters a host name cannot hold) is refused with a clear error. Plain
-        http only for localhost: the staff secret and the session token must not travel in the clear.
+        scheme, a user name or password, characters a host name cannot hold) is refused with a clear error. So are
+        any http:// (localhost included) and any explicit port: the UAT scripts all target https on 443
+        (Reset-DemoState.ps1 always uses https://, and Clear-DemoContent.ps1 matches Exercises.Hostname, which
+        holds no port), so a value they would read differently is refused rather than half-run.
     #>
     param([AllowNull()] [AllowEmptyString()] [string] $ApiHost)
     $value = ([string] $ApiHost).Trim()
@@ -146,11 +149,14 @@ function Resolve-ApiHost {
         $uri.UserInfo -or $uri.HostNameType -notin 'Dns', 'IPv4' -or $uri.Host -notmatch '^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$') {
         throw "-ApiHost '$ApiHost' is not a host name or an http(s) URL. $hint"
     }
-    if ($uri.Scheme -eq 'http' -and -not $uri.IsLoopback) {
-        throw "-ApiHost '$ApiHost' uses plain http: only localhost may (the staff secret and the session token must not travel in the clear). Nothing was sent."
+    if ($uri.Scheme -ne 'https') {
+        throw "-ApiHost '$ApiHost' uses plain http: the UAT scripts use https only (localhost included; the staff secret and the session token must not travel in the clear). Nothing was sent."
     }
-    $hostName = if ($uri.IsDefaultPort) { $uri.Host } else { '{0}:{1}' -f $uri.Host, $uri.Port }
-    return [pscustomobject]@{ Host = $hostName.ToLowerInvariant(); BaseUrl = $uri.GetLeftPart([UriPartial]::Authority) }
+    # An explicit port, even :443: the authority as typed (before any path, query or fragment) ends in :digits.
+    if ($value -match '^[A-Za-z][A-Za-z0-9+.-]*://[^/?#]*:\d*(?:[/?#]|$)') {
+        throw "-ApiHost '$ApiHost' names a port: the UAT scripts use https on 443 only (Clear-DemoContent.ps1 looks the exercise up by a host name without a port). Nothing was sent."
+    }
+    return [pscustomobject]@{ Host = $uri.Host.ToLowerInvariant(); BaseUrl = 'https://' + $uri.Host.ToLowerInvariant() }
 }
 
 function Clear-WebErrorRecord {
@@ -314,32 +320,44 @@ function Format-StepArguments {
     return ($parts -join ' ')
 }
 
+function Get-MonotonicSeconds {
+    <# Seconds on a monotonic clock (Stopwatch ticks): wall-clock changes cannot stretch or cut a wait. #>
+    return [Diagnostics.Stopwatch]::GetTimestamp() / [double] [Diagnostics.Stopwatch]::Frequency
+}
+
 function Wait-NewProcess {
     <#
     .SYNOPSIS
         After the fallback restart: polls /health and the pause tier until the tier reads running twice in a row.
-        The old process was marked (never running), so only the new process answers running.
+        The old process was marked (never running), so only the new process answers running. The budget is elapsed
+        time on a monotonic clock, not a number of polls: each request's timeout (at most 30 s) and each sleep are
+        capped to what is left, so a slow API cannot stretch the wait past -TimeoutMinutes. Returns @{ Ok; Minutes }
+        with the time actually spent.
     #>
     param([string] $BaseUrl, [string] $Token, [int] $TimeoutMinutes, [int] $PollSeconds)
-    $attempts = [int] [math]::Ceiling($TimeoutMinutes * 60 / $PollSeconds)
+    $budget = $TimeoutMinutes * 60
+    $start = Get-MonotonicSeconds
+    $left = { $budget - ((Get-MonotonicSeconds) - $start) }
+    $cap = { param([double] $Most) [int] [math]::Max(1, [math]::Min($Most, [math]::Ceiling((& $left)))) }
     $streak = 0
-    for ($i = 1; $i -le $attempts; $i++) {
+    while ((& $left) -gt 0) {
         $health = 0; $tier = '-'
-        try { $health = (Invoke-PulseApi -BaseUrl $BaseUrl -Method GET -Path '/health' -TimeoutSec 30).Status } catch { $health = 0 }
-        if ($health -eq 200) {
+        try { $health = (Invoke-PulseApi -BaseUrl $BaseUrl -Method GET -Path '/health' -TimeoutSec (& $cap 30)).Status } catch { $health = 0 }
+        if ($health -eq 200 -and (& $left) -gt 0) {
             try {
-                $read = Invoke-PulseApi -BaseUrl $BaseUrl -Method GET -Path '/api/steering/pause-tier' -Token $Token -TimeoutSec 30
+                $read = Invoke-PulseApi -BaseUrl $BaseUrl -Method GET -Path '/api/steering/pause-tier' -Token $Token -TimeoutSec (& $cap 30)
                 $tier = if ($read.Status -eq 200 -and $read.Json -is [System.Collections.IDictionary]) { Get-PrintableText $read.Json['tier'] -Max 20 } else { "($($read.Status))" }
             }
             catch { $tier = '(no answer)' }
         }
         $streak = if ($tier -eq 'running') { $streak + 1 } else { 0 }
-        $elapsed = [math]::Round(($i - 1) * $PollSeconds / 60, 1)
+        $elapsed = [math]::Round(((Get-MonotonicSeconds) - $start) / 60, 1)
         Write-Host "    ~$elapsed min: /health $health, pause tier $tier" -ForegroundColor DarkGray
         if ($streak -ge 2) { return [pscustomobject]@{ Ok = $true; Minutes = $elapsed } }
-        if ($i -lt $attempts) { Start-Sleep -Seconds $PollSeconds }
+        if ((& $left) -le 0) { break }
+        Start-Sleep -Seconds (& $cap $PollSeconds)
     }
-    return [pscustomobject]@{ Ok = $false; Minutes = $TimeoutMinutes }
+    return [pscustomobject]@{ Ok = $false; Minutes = [math]::Round(((Get-MonotonicSeconds) - $start) / 60, 1) }
 }
 
 function Wait-ApiStatus {
@@ -479,7 +497,7 @@ function Invoke-RuntimeReset {
         # c. Wait for the new process instead of a fixed 8 minutes.
         Write-Host "    Waiting for the new process (polling every $PollSeconds s, at most $RestartTimeoutMinutes min)…" -ForegroundColor Cyan
         $wait = Wait-NewProcess -BaseUrl $BaseUrl -Token $session.Token -TimeoutMinutes $RestartTimeoutMinutes -PollSeconds $PollSeconds
-        if (-not $wait.Ok) { return [pscustomobject]@{ Ok = $false; Detail = "fallback: the new process did not answer within $RestartTimeoutMinutes min (the tier never read running twice). Check the App Service, then run again. If story 17 is deployed without 18 the marker (pause tier engine) persists across the restart: set the tier to running in the console, or deploy 18" } }
+        if (-not $wait.Ok) { return [pscustomobject]@{ Ok = $false; Detail = "fallback: the new process did not answer within $RestartTimeoutMinutes min (waited ~$($wait.Minutes) min; the tier never read running twice). Check the App Service, then run again. If story 17 is deployed without 18 the marker (pause tier engine) persists across the restart: set the tier to running in the console, or deploy 18" } }
         return [pscustomobject]@{ Ok = $true; Detail = "restart fallback: the new process is serving after ~$($wait.Minutes) min (tier running, clock unstarted)" }
     }
     catch { return [pscustomobject]@{ Ok = $false; Detail = $_.Exception.Message } }

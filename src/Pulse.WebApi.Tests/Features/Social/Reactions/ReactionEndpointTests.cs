@@ -6,6 +6,7 @@ using System.Net;
 using System.Text.Json;
 using System.Threading.Tasks;
 using FluentAssertions;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.EngineRuntime.Clock;
@@ -501,7 +502,9 @@ public class ReactionEndpointTests
     [RequiresDockerFact]
     public async Task Unlike_AfterTheRunningClockIsGone_NeverPrecedesTheLikesOwnScenarioTime()
     {
-        // Like at running-clock post+30m; the host restarts (the in-memory clock is gone); the un-like's fallback
+        // Like at running-clock post+30m; the clock is then gone (a runtime reset, or a restart with no persisted
+        // runtime state: since demo-feedback/18 a plain restart RESTORES the clock, so the test deletes the persisted
+        // ExerciseRuntimeStates row to model the clock being gone); the un-like's fallback
         // would be the post's own time, i.e. BEFORE the like. The history must never show an un-like before its like
         // (L-1): the un-like is floored at the active row's own CreatedScenarioTime.
         var postScenarioTime = new DateTimeOffset(2033, 9, 4, 10, 0, 0, TimeSpan.Zero);
@@ -520,10 +523,18 @@ public class ReactionEndpointTests
             (await client.PutAsync(ReactionUri(world.Post, "like"), content: null)).StatusCode.Should().Be(HttpStatusCode.OK);
         }
 
+        // demo-feedback/18: the first host persisted the clock; remove that row so the restarted host has no clock.
+        await using (var context = _fixture.CreateContext())
+        {
+            await context.ExerciseRuntimeStates.IgnoreQueryFilters()
+                .Where(state => state.ExerciseId == world.Exercise)
+                .ExecuteDeleteAsync();
+        }
+
         await using (var restartedHost = CreateHost(_fixture))
         {
             restartedHost.Services.GetRequiredService<IExerciseClock>().CurrentScenarioTime(world.Exercise).Should().BeNull(
-                "the restarted host has lost the in-memory clock");
+                "the restarted host has no clock: no persisted runtime state to restore");
 
             using var client = restartedHost.CreateClientFor(world.Host, world.Token);
             (await client.DeleteAsync(ReactionUri(world.Post, "like"))).StatusCode.Should().Be(HttpStatusCode.OK);

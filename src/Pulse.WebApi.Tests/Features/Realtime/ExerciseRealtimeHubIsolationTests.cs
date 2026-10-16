@@ -265,7 +265,7 @@ public class ExerciseRealtimeHubIsolationTests
         // Syntactically valid but non-connecting: enough for the host to BUILD and register PulseDbContext;
         // the hub connection path never opens it.
         private const string DummyConnectionString =
-            "Server=nonexistent;Database=pulse;Trusted_Connection=False;";
+            "Server=nonexistent;Database=pulse;Trusted_Connection=False;Connect Timeout=1;";
 
         private readonly Guid? _hostResolvedExerciseId;
 
