@@ -60,7 +60,14 @@ function narrowInReplyTo(value: PostInReplyTo): PostInReplyTo {
 }
 
 function narrowViewer(value: PostViewerState): PostViewerState {
-  return { liked: value.liked, reposted: value.reposted }
+  return {
+    liked: value.liked,
+    reposted: value.reposted,
+    // DF-29: your own just-published post is editable (a duration, never a clock).
+    ...(typeof value.editableForSeconds === 'number'
+      ? { editableForSeconds: value.editableForSeconds }
+      : {}),
+  }
 }
 
 function narrowLinkPreview(value: PostLinkPreview): PostLinkPreview {
@@ -96,6 +103,9 @@ export function narrowCreatedPost(created: CreatedPostView): ParticipantPostView
     ...(created.inReplyTo != null ? { inReplyTo: narrowInReplyTo(created.inReplyTo) } : {}),
     ...(created.linkPreview != null ? { linkPreview: narrowLinkPreview(created.linkPreview) } : {}),
     ...(created.viewer != null ? { viewer: narrowViewer(created.viewer) } : {}),
+    ...(created.edited != null
+      ? { edited: { count: created.edited.count, scenarioTime: created.edited.scenarioTime } }
+      : {}),
   }
 }
 

@@ -52,6 +52,14 @@
  * on a removed row it is rendered only while the post is still pinned (Unpin only, never
  * Pin: the server refuses to pin a taken-down post).
  *
+ * EDITED (demo-feedback story 20, DF-31). An edited post carries an "Edited" chip on the author
+ * line
+ * (a COBRA link-button: pen icon AND the word, never colour alone) that opens the post's edit
+ * history in a COBRA-skinned dialog (`LiveWorldEditHistory`, never the participant dialog). The
+ * summary and the CURRENT text read through the shared `editedPostsStore` over the row's own
+ * `view.edited` / text, so a `PostEdited` push (the existing feed source's transport) updates a
+ * mounted row without a reload.
+ *
  * UNREAD (story 08). An unread row (`unread`, decided by the column) is BOLD, has the
  * unread accent as its left bar and a "New" chip on the author line, so the state is in
  * the accessible name too ("… New …"), never colour alone. `data-unread="true"` is what
@@ -62,7 +70,7 @@
  * not re-render it (NFR-002 / SOC-071). The caller should pass a stable `onReply`.
  */
 
-import { memo, useId, useMemo, type ReactNode } from 'react'
+import { memo, useId, useMemo, useState, type ReactNode } from 'react'
 import { Box, Stack, Typography } from '@mui/material'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import {
@@ -70,6 +78,7 @@ import {
   faCircleCheck,
   faComment,
   faHeart,
+  faPen,
   faReply,
   faRetweet,
   faShare,
@@ -84,6 +93,8 @@ import { LiveWorldMedia } from './LiveWorldMedia'
 import { toLiveWorldPost, type LiveWorldEntry, type LiveWorldPost } from './liveWorldModel'
 import { liveWorldTokens, monoMeta, srOnly } from './liveWorldStyles'
 import { PinForAllAction } from './PinForAllAction'
+import { LiveWorldEditHistory } from './LiveWorldEditHistory'
+import { useEditedPost } from '@/features/social/edit/editedPostsStore'
 import { useCanControl } from '../access'
 
 interface CountDef {
@@ -145,6 +156,10 @@ export const LiveWorldRow = memo(function LiveWorldRow({
     () => formatScenarioTime(post.scenarioTime, timeZone, { format: 'absolute' }),
     [post.scenarioTime, timeZone],
   )
+  const overlay = useEditedPost(post.id)
+  const edited = overlay.edited ?? entry.view.edited
+  const text = overlay.text ?? post.text
+  const [historyOpen, setHistoryOpen] = useState(false)
   const metaId = useId()
   const bodyId = useId()
   const removedNoteId = useId()
@@ -274,6 +289,33 @@ export const LiveWorldRow = memo(function LiveWorldRow({
           </Box>
         )}
         {' '}
+        {edited !== undefined && (
+          <CobraLinkButton
+            size="small"
+            data-testid="live-world-edited"
+            aria-haspopup="dialog"
+            aria-label="Edited, view edit history"
+            title="View edit history"
+            onClick={() => setHistoryOpen(true)}
+            sx={{
+              ...monoMeta,
+              minHeight: 0,
+              minWidth: 0,
+              px: '5px',
+              py: 0,
+              gap: '3px',
+              fontWeight: 700,
+              letterSpacing: '0.04em',
+              color: liveWorldTokens.ink,
+              border: `1px solid ${liveWorldTokens.panelBorder}`,
+              borderRadius: '2px',
+            }}
+          >
+            <FontAwesomeIcon icon={faPen} aria-hidden="true" />
+            Edited
+          </CobraLinkButton>
+        )}
+        {' '}
         {unread && (
           <Box
             component="span"
@@ -325,7 +367,7 @@ export const LiveWorldRow = memo(function LiveWorldRow({
           overflowWrap: 'anywhere',
         }}
       >
-        {post.text}
+        {text}
       </Typography>
 
       {post.media !== undefined && <LiveWorldMedia media={post.media} />}
@@ -394,6 +436,13 @@ export const LiveWorldRow = memo(function LiveWorldRow({
         )}
         {renderRowActions?.(post)}
       </Stack>
+      {historyOpen && (
+        <LiveWorldEditHistory
+          postId={post.id}
+          timeZone={timeZone}
+          onClose={() => setHistoryOpen(false)}
+        />
+      )}
     </Box>
   )
 })

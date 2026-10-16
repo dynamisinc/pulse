@@ -23,6 +23,7 @@
 import type { Persona } from '@/features/personas'
 import type {
   PostCounts,
+  PostEditedSummary,
   PostInReplyTo,
   PostLinkPreview,
   PostMedia,
@@ -54,6 +55,8 @@ export interface PostView {
   counts: PostCounts
   /** The caller's own like/repost state; absent when unknown (broadcasts, staff). */
   viewer?: PostViewerState
+  /** Edit summary (DF-31); absent when never edited. */
+  edited?: PostEditedSummary
   /** Scenario-time ISO instant this post was published (COR-053). */
   scenarioTime: string
 }
