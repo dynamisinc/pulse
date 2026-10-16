@@ -64,6 +64,33 @@ public static class AuthRateLimits
     public static int StaffLoginPerMinute(IConfiguration configuration) =>
         Read(configuration, "StaffLoginPerMinute", DefaultStaffLoginPerMinute);
 
+    /// <summary>The keys (relative to <see cref="SectionName"/>) this class reads.</summary>
+    public static readonly IReadOnlyList<string> Keys =
+        ["ParticipantLoginPerMinute", "SharedLoginPerMinute", "SessionPerMinute", "StaffLoginPerMinute"];
+
+    /// <summary>
+    /// Finds the configured keys whose value is present but refused (non-integer or non-positive), so a typo is
+    /// reported at startup instead of silently falling back to the default (orchestrator review L-3).
+    /// </summary>
+    /// <param name="configuration">The application configuration.</param>
+    /// <returns>The full configuration keys whose values were refused.</returns>
+    public static IReadOnlyList<string> FindRejectedKeys(IConfiguration configuration)
+    {
+        ArgumentNullException.ThrowIfNull(configuration);
+        var rejected = new List<string>();
+        foreach (var key in Keys)
+        {
+            var fullKey = $"{SectionName}:{key}";
+            var raw = configuration[fullKey];
+            if (raw is not null && !(int.TryParse(raw, out var value) && value > 0))
+            {
+                rejected.Add(fullKey);
+            }
+        }
+
+        return rejected;
+    }
+
     private static int Read(IConfiguration configuration, string key, int fallback)
     {
         ArgumentNullException.ThrowIfNull(configuration);

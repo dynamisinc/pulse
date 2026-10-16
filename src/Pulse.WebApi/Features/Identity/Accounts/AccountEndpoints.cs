@@ -61,6 +61,7 @@ public static class AccountEndpoints
         // Per-IP fixed-window limiter on the internet-facing participant login (NFR-009). Enforcement needs
         // app.UseRateLimiter() (orchestrator-owned, already wired for the staff/session policies). AddRateLimiter
         // is additive across features — this only adds a new named policy to the shared limiter.
+        AuthRateLimitsStartupCheck.Register(services);
         services.AddRateLimiter(options =>
         {
             options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;

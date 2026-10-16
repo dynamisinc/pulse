@@ -97,6 +97,7 @@ public static class SessionEndpoints
         // Per-IP fixed-window limiter on the session endpoints (NFR-009). Generous (60/min) because these
         // require an EXISTING valid token/refresh token (not credential guessing — that lockout is the login
         // stories' concern). Enforcement needs app.UseRateLimiter() (orchestrator-owned).
+        AuthRateLimitsStartupCheck.Register(services);
         services.AddRateLimiter(options =>
         {
             options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;

@@ -2,8 +2,13 @@ namespace Pulse.WebApi.Tests.Features.Identity.RateLimits;
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using FluentAssertions;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Pulse.WebApi.Features.Identity.RateLimits;
 using Xunit;
 
@@ -66,5 +71,67 @@ public sealed class AuthRateLimitsTests
         var act = () => AuthRateLimits.SessionPerMinute(null!);
 
         act.Should().Throw<ArgumentNullException>();
+    }
+
+    /// <summary>Orchestrator review L-3: a present-but-refused value is reported by key; a missing or valid one is not.</summary>
+    [Fact]
+    public void FindRejectedKeys_ReportsOnlyPresentRefusedValues()
+    {
+        var configuration = Config(new Dictionary<string, string?>
+        {
+            ["Authentication:RateLimits:SessionPerMinute"] = "abc",
+            ["Authentication:RateLimits:SharedLoginPerMinute"] = "0",
+            ["Authentication:RateLimits:StaffLoginPerMinute"] = "20",
+        });
+
+        AuthRateLimits.FindRejectedKeys(configuration).Should().BeEquivalentTo(
+            "Authentication:RateLimits:SessionPerMinute",
+            "Authentication:RateLimits:SharedLoginPerMinute");
+    }
+
+    /// <summary>No keys set: nothing to report.</summary>
+    [Fact]
+    public void FindRejectedKeys_NoKeys_IsEmpty()
+    {
+        AuthRateLimits.FindRejectedKeys(Config([])).Should().BeEmpty();
+    }
+
+    /// <summary>The startup check logs one warning per refused key, naming the key and never the value.</summary>
+    [Fact]
+    public async Task StartupCheck_LogsEachRefusedKey()
+    {
+        var configuration = Config(new Dictionary<string, string?> { ["Authentication:RateLimits:SessionPerMinute"] = "sixty" });
+        var logger = new RecordingLogger();
+        var check = new AuthRateLimitsStartupCheck(configuration, logger);
+
+        await check.StartAsync(CancellationToken.None);
+
+        logger.Messages.Should().ContainSingle()
+            .Which.Should().Contain("Authentication:RateLimits:SessionPerMinute").And.NotContain("sixty");
+    }
+
+    /// <summary>Registering from all four auth slices adds the hosted check once.</summary>
+    [Fact]
+    public void StartupCheck_Register_IsIdempotent()
+    {
+        var services = new ServiceCollection();
+
+        AuthRateLimitsStartupCheck.Register(services);
+        AuthRateLimitsStartupCheck.Register(services);
+
+        services.Count(d => d.ImplementationType == typeof(AuthRateLimitsStartupCheck)).Should().Be(1);
+    }
+
+    private sealed class RecordingLogger : ILogger<AuthRateLimitsStartupCheck>
+    {
+        public List<string> Messages { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
+            Messages.Add(formatter(state, exception));
     }
 }

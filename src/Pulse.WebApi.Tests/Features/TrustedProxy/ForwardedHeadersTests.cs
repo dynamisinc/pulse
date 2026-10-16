@@ -290,6 +290,29 @@ public sealed class ForwardedHeadersTests
             .WithMessage("*ASPNETCORE_FORWARDEDHEADERS_ENABLED*");
     }
 
+    /// <summary>
+    /// Orchestrator review L-1: the framework's startup filter reads <c>ForwardedHeaders_Enabled</c> (what the
+    /// prefixed env var becomes, and what an app setting or appsettings can set directly), so that spelling is
+    /// refused too.
+    /// </summary>
+    [Theory]
+    [InlineData("true")]
+    [InlineData("TRUE")]
+    public void FrameworkForwardedHeadersSwitch_UnprefixedSpelling_IsRefusedAtStartup(string value)
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["ForwardedHeaders_Enabled"] = value,
+                ["ForwardedHeaders:KnownNetworks:0"] = "10.0.0.0/8",
+            })
+            .Build();
+
+        var act = () => new ServiceCollection().AddPulseForwardedHeaders(configuration);
+
+        act.Should().Throw<InvalidOperationException>("the unprefixed key turns on the same trust-every-peer middleware");
+    }
+
     /// <summary>The switch set to false (or absent) is fine.</summary>
     [Fact]
     public void FrameworkForwardedHeadersSwitch_False_IsAllowed()

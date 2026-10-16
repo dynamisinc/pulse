@@ -70,6 +70,7 @@ public static class SharedReadOnlyEndpoints
         // Per-IP fixed-window limiter on the internet-facing shared login (NFR-009). Tight (5/minute) because a
         // shared password is a low-entropy human-shared secret — the most brute-forceable of the auth endpoints.
         // Enforcement needs app.UseRateLimiter() (orchestrator-owned); full lockout is story 07.
+        AuthRateLimitsStartupCheck.Register(services);
         services.AddRateLimiter(options =>
         {
             options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;

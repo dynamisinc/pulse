@@ -58,6 +58,7 @@ public static class StaffAuthEndpoints
 
         // Per-IP fixed-window limiter on the internet-facing staff login (NFR-009). Enforcement needs
         // app.UseRateLimiter() in the pipeline (orchestrator-owned) — documented in implementation.md.
+        AuthRateLimitsStartupCheck.Register(services);
         services.AddRateLimiter(options =>
         {
             options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;

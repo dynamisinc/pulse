@@ -54,8 +54,11 @@ public static class PulseForwardedHeadersExtensions
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(configuration);
 
-        // Defense in depth (Gate-1 M-2): the framework switch is documented as forbidden, and it is also refused here.
-        if (bool.TryParse(configuration["ASPNETCORE_FORWARDEDHEADERS_ENABLED"], out var frameworkSwitch) && frameworkSwitch)
+        // Defense in depth (Gate-1 M-2, orchestrator review L-1): the framework switch is documented as forbidden, and
+        // it is also refused here. The framework's ForwardedHeadersStartupFilter reads configuration["ForwardedHeaders_Enabled"]
+        // (case-insensitive), which the ASPNETCORE_FORWARDEDHEADERS_ENABLED env var feeds once its prefix is stripped,
+        // and which an app setting, an unprefixed env var or appsettings can also set. Check both spellings.
+        if (IsTrue(configuration["ForwardedHeaders_Enabled"]) || IsTrue(configuration["ASPNETCORE_FORWARDEDHEADERS_ENABLED"]))
         {
             throw new InvalidOperationException(
                 "ASPNETCORE_FORWARDEDHEADERS_ENABLED=true trusts forwarded headers from every client. Remove it and " +
@@ -156,6 +159,11 @@ public static class PulseForwardedHeadersExtensions
 
         return options;
     }
+
+    /// <summary>True only for a value that parses as a boolean <c>true</c> (case-insensitive).</summary>
+    /// <param name="value">The raw configuration value.</param>
+    /// <returns>Whether the value is <c>true</c>.</returns>
+    private static bool IsTrue(string? value) => bool.TryParse(value, out var parsed) && parsed;
 }
 
 /// <summary>
