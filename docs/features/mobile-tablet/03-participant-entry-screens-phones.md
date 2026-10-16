@@ -14,7 +14,7 @@ has in-fiction and out-of-fiction registers (CTL-023); the exercise compliance c
 - [ ] Given a pause or Freeze overlay in each register (in-fiction, out-of-fiction) at 360/390/768, when shown, then the message is fully visible without scrolling the page, the compliance chrome is not covered, and focus is trapped per existing `useOverlayFocusTrap`.
 - [ ] Given EndEx and the holding page, when shown, then the severity/state is carried by text and icon, never color alone (NFR-001).
 - [ ] Given the join link, when opened, then the page still sets `no-store`/`no-referrer` behavior (unchanged; asserted in `staticWebAppConfig.test.ts`) and the join token is not shown in any visible text.
-- [ ] Given the participant sign-out control, when opened on a phone, then the target is at least 44px and the confirmation fits the viewport.
+- [ ] The participant sign-out control's 44px hit area (audit: 40x40) is delivered by story 18; here only verify its confirmation fits the viewport at 360/390/768.
 - [ ] User guide: update the join/sign-in and holding-page sections of `docs/guide/participant-guide.md` and `docs/guide/troubleshooting.md` (player stuck on the holding page on a phone) if wording changes.
 
 ## Out of Scope
@@ -22,7 +22,7 @@ Changing the sign-in model, passwords (Session A), the PWA (09-11), alert bar (0
 
 ## Technical Notes
 Files: `features/login/pages/{JoinPage,ParticipantSignInPage}.*`, `participant-shell/components/OverlayLayer/*`,
-`ParticipantSignOutControl.tsx`. Use the guide-shots `overlay` override to trigger pause/Freeze/EndEx in e2e. Participant
+`ParticipantSignOutControl.tsx` (layout only; hit area in 18). Use the guide-shots `overlay` override to trigger pause/Freeze/EndEx in e2e. Participant
 world only: do not import COBRA. See `implementation.md` story 03.
 
 ## Dependencies

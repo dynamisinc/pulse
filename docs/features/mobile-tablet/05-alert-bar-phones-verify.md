@@ -1,4 +1,4 @@
-# Story: Alert bar on phones: verify and close remaining gaps
+# Story: Alert bar on phones: verify and touch-target gaps
 
 **Feature:** Phones and tablets  ·  **Epic:** E1  ·  **Phase:** 2  ·  **Status:** Not Started
 **Requirements:** PRT-010, PRT-012, NFR-001, COR-053  ·  **Design decisions:** D7-002  ·  **Issue:** #524
@@ -20,7 +20,12 @@ rebuild. Participant world; the EAS analog persists across every channel.
   Mitigation here: hide the dateline while only the default wall-mirroring clock is installed. It comes back
   once story 01 installs the real provider.
 
+## Audit result (2026-10-16, Chromium, 360/390/768, touch; `B1-audit-findings`)
+PR #562 **verified**: full text at all three widths (band 87px at 360/390, 47px at 768), `--pulse-alert-height` published, channel nav and page headers not
+overlapped, Details opens `/alerts`, no horizontal scroll. **Remaining gap G1:** "Details ->" link hit area 52x18 and the "+N more" chip 67x16, both under 44px.
+
 ## Acceptance Criteria
+- [ ] G1: Given "Details ->" and the "+N more" chip at 360/390/768 on a coarse pointer, when measured, then each has a hit area of at least 44x44 CSS px (extended hit area via padding or pseudo-element; the visual size and the wrapped layout are unchanged), and the bar's height and `--pulse-alert-height` still match.
 - [ ] G1: on a coarse pointer, "Details →" and "+N more" have hit areas of at least 44×44 CSS px. The visual size of the band does not grow.
 - [ ] G2: the `ChannelNav` dateline does not render while only the default (wall-mirroring) exercise clock is installed. It renders scenario time once a real clock is installed with `setExerciseClock`. Unit-tested both ways.
 - [ ] Given info, advisory and emergency alerts at 360, 390 and 768 px, when the bar renders, then the full message is visible (wrapped, never ellipsized), the severity chip shows icon plus text label, and nothing overlaps the channel nav or the compliance chrome (`expectNoHorizontalScroll` and bounding-box non-overlap).
@@ -29,7 +34,7 @@ rebuild. Participant world; the EAS analog persists across every channel.
 - [ ] Given an emergency alert together with a pause/Freeze overlay on a phone, when both are active, then neither hides the other's required text and the overlay's focus trap still works (interplay check).
 - [ ] Given an alert timestamp, then it renders in scenario time (COR-053); `expectNoWallClock` passes.
 - [ ] Accessibility (NFR-001): `role="status"` and live-region announce on change still fire at phone sizes; severity is never color-only; reduced-motion stops ticker rotation (verify, fix if not).
-- [ ] Any gap found is fixed in `AlertBar/*` or `ShellLayout`; if none is found the PR records "verified, no change" with the spec as evidence. User guide: `docs/guide/participant-guide.md` alert-bar section confirmed accurate; `participant-alert-bar` shot recaptured at phone sizes (story 08).
+- [ ] The e2e spec locks in the verified behavior so a regression fails; any further gap found is fixed in `AlertBar/*` or `ShellLayout`. User guide: `docs/guide/participant-guide.md` alert-bar section confirmed accurate; `participant-alert-bar` shot recaptured at phone sizes (story 08).
 
 ## Out of Scope
 Alerts history for expired/cleared alerts (needs the backend feed), alert content authoring, a redesign of the ticker (D7-002
@@ -37,7 +42,7 @@ stays), push notifications.
 
 ## Technical Notes
 Use the guide-shots `alerts` override to inject alerts in e2e. Files: `participant-shell/components/AlertBar/*`,
-`ShellLayout.tsx`, `ChannelNav.tsx`. Existing unit tests: `AlertBar.mobile.test.tsx`, `AlertsHistory.test.tsx`,
+`ShellLayout.tsx` (ChannelNav belongs to story 17). Existing unit tests: `AlertBar.mobile.test.tsx`, `AlertsHistory.test.tsx`,
 `ShellLayout.test.tsx`. See `implementation.md` story 05.
 
 ## Dependencies

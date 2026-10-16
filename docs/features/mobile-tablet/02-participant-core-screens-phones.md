@@ -24,7 +24,8 @@ needed, adds phone breakpoints rather than a parallel layout system.
 
 ## Acceptance Criteria
 - [ ] Given each of feed, thread, composer (modal), profile, Explore (search + trending) and Pinned at 360, 390 and 768 px, when loaded with mock data, then `expectNoHorizontalScroll` passes and no text or media is clipped or overlaps the bottom tab bar or the alert bar.
-- [ ] Given any interactive control on those screens (like, reply, repost, follow, post, tab, search clear, emoji, attach), when measured on a touch viewport, then its hit area is at least 44x44 CSS px via padding or an extended hit area, without enlarging the visual treatment.
+- [ ] G3 (audit): Given the thread view (`/i/status/:id`) at 360 and 390, when the focused post has media and the Pin action, then the card stays inside the column (media and Pin no longer clip at the right edge; offenders were `_focusedWrap`, `_postCard`, `_content`, `_openable`, header) and `expectNoHorizontalScroll` plus a per-element bounding-box check pass.
+- [ ] Hit areas (44px) on these screens are delivered by story 18, which runs after this one; this story must not shrink any control below its current size and leaves the post action row, composer buttons, Back and Followers link to 18.
 - [ ] Given the Explore tab on a phone, when opened, then Trending is reachable as the mobile tab (D1) and search results rows are tappable at 44px.
 - [ ] Given the composer is open on a phone and the on-screen keyboard is up, when typing, then the caret line and the Post button stay visible (visual-viewport aware) and respect safe-area insets (`env(safe-area-inset-*)`).
 - [ ] Scenario time (COR-053): every visible timestamp on these screens is scenario time in the exercise time zone (`expectNoWallClock`).
@@ -39,7 +40,7 @@ any desktop layout change beyond keeping it intact, PWA.
 ## Technical Notes
 Participant world; CSS Modules under `features/social`. `NavRail`/`RightRail` collapse and `frameMetrics.ts` are the first suspects.
 Specs live in `src/frontend/e2e/participant-*.spec.ts` using the story 01 kit. Reuse `--pulse-touch-min: 44px` defined on the social
-root. Do not touch `participant-shell/*` (story 05) or `login/*` (03). See `implementation.md` story 02.
+root. Do not touch `participant-shell/*` (stories 05, 17) or `login/*` (03). Hit-area work in this area is story 18. See `implementation.md` story 02.
 
 ## Dependencies
 Story 01.
