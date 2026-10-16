@@ -6,7 +6,10 @@
  * and growing back. `ComposeModal` publishes it as `--pulse-keyboard-inset`.
  */
 import { act, render, renderHook, screen } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { SessionProvider } from '@/core/auth'
+import { ExerciseContextProvider } from '@/core/exerciseContext'
 import { ComposeModal } from './ComposeModal'
 import { keyboardInset, useVisualViewportInset } from './useVisualViewportInset'
 
@@ -65,11 +68,20 @@ describe('useVisualViewportInset', () => {
 })
 
 describe('ComposeModal keyboard inset', () => {
-  it('publishes --pulse-keyboard-inset on the backdrop so the dialog stays above the keyboard', () => {
+  it('publishes --pulse-keyboard-inset on the backdrop so the dialog stays above the keyboard', async () => {
     vi.spyOn(window, 'innerHeight', 'get').mockReturnValue(800)
     const vv = stubViewport(800)
-    render(<ComposeModal onClose={() => {}} />)
-    const backdrop = screen.getByTestId('compose-backdrop')
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={client}>
+        <ExerciseContextProvider>
+          <SessionProvider>
+            <ComposeModal onClose={() => {}} />
+          </SessionProvider>
+        </ExerciseContextProvider>
+      </QueryClientProvider>,
+    )
+    const backdrop = await screen.findByTestId('compose-backdrop')
     expect(backdrop.style.getPropertyValue('--pulse-keyboard-inset')).toBe('0px')
     act(() => vv.resize(450))
     expect(backdrop.style.getPropertyValue('--pulse-keyboard-inset')).toBe('350px')

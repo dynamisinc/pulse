@@ -44,12 +44,10 @@ interface SetupOptions {
   showNotifications?: boolean
 }
 
-function setup({
-  path = '/home',
-  self = persona('dreyes_fh'),
-  onCompose,
-  showNotifications = true,
-}: SetupOptions = {}) {
+function setup(options: SetupOptions = {}) {
+  const { path = '/home', onCompose, showNotifications = true } = options
+  // `self: undefined` must mean "no persona", so do not default it away.
+  const self = 'self' in options ? options.self : persona('dreyes_fh')
   render(
     <MemorySocialNavigationProvider initialEntries={[path]}>
       <BottomTabBar

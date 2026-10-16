@@ -44,7 +44,9 @@ tab or lock your phone. If you are on a shared computer, select **Sign out** whe
 - **Edit your own post** within 15 minutes of posting, using **Edit post**. Everyone can see that a
   post was **Edited** and can read its edit history. *(Rolling out. You may not see this yet.)*
 - **Follow** accounts, and use **Home**, **Explore**, **Notifications** and **Profile** to find your
-  way around.
+  way around. On a tablet or computer they are on the left. On a phone they run along the
+  **bottom** of the screen, with the round **Post** button in the middle; a number on
+  **Notifications** shows how many you have not read yet.
 
 ![A post opened as a conversation, with replies below it.](img/participant-thread.png)
 
