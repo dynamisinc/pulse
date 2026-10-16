@@ -254,10 +254,13 @@ caution as story 07.
   register mid-Freeze and sees nothing should file it against a follow-up story, not this one.**
   Making it live needs either a register-only POST + publish, or the console re-POSTing the current
   tier on a register change — both un-specced here. Noted in `usePauseState.ts`'s module header.
-- **`OverlayStateService` is in-memory (a singleton), like `PauseTierRegistry`/`ExerciseClockService`.**
-  An App Service restart clears overlay state; the participant's next reconnect re-GETs and heals to
-  `'none'` (never a stuck holding page), and the client re-bases its sequence cutoff on that GET so
-  the restarted host's re-numbered pushes are still accepted.
+- **`OverlayStateService` survives a restart (demo-feedback/18, DF-26/DF-27).** It is still an in-memory
+  singleton for the hot reads, but each published snapshot (state, register, message, sequence) is written
+  through to the exercise's `ExerciseRuntimeStates` row with the tier and clock, and the startup rehydrator
+  restores it, so a participant reloading after a restart mid-Freeze still lands on the holding page. The
+  ticket counter is re-seeded from the persisted sequence, so the first push after a restart is the
+  persisted sequence + 1 (and the client still re-bases its cutoff on its reconnect GET). Only the
+  controller's runtime reset (`POST /api/steering/runtime-state/reset`) clears it.
 
 ## Tests
 - Unit (backend): `OverlayStateService` reflects Freeze/Resume transitions correctly, keyed

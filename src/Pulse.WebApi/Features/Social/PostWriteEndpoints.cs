@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Pulse.WebApi.Data.Entities;
+using Pulse.WebApi.Features.Social.Editing;
 using Pulse.WebApi.Features.Social.Follows;
 
 /// <summary>
@@ -309,6 +310,13 @@ public sealed class StaffPostDto
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public PostInReplyToDto? InReplyTo { get; init; }
 
+    /// <summary>
+    /// The "Edited" summary (demo-feedback DF-31, story 19): <c>{ count, scenarioTime }</c>, or <c>null</c> when never
+    /// edited — always on the wire, as on <see cref="ParticipantPostDto.Edited"/>. Scenario time only.
+    /// </summary>
+    [JsonPropertyName("edited")]
+    public PostEditedSummaryDto? Edited { get; init; }
+
     /// <summary>Projects a persisted staff-authored post to the staff response shape (provenance retained).</summary>
     /// <param name="post">The persisted post.</param>
     /// <returns>The staff-visible projection of <paramref name="post"/>.</returns>
@@ -340,6 +348,7 @@ public sealed class StaffPostDto
             InjectId = post.InjectId,
             Media = participantView?.Media,
             InReplyTo = participantView?.InReplyTo,
+            Edited = PostEditRules.SummaryOf(post),
         };
     }
 }

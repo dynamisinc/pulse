@@ -104,6 +104,35 @@ export interface PostViewerState {
   readonly liked: boolean
   readonly reposted: boolean
   readonly pinned?: boolean
+  /**
+   * Own posts only (demo-feedback DF-29): whole seconds left in the 15-minute edit
+   * window, `0` when it has closed or the edit limit is reached; absent on anyone
+   * else's post. A DURATION, never a wall-clock instant (COR-053): the client counts it
+   * down from when the post was read and hides Edit at 0.
+   */
+  readonly editableForSeconds?: number
+}
+
+/**
+ * "Edited" summary on a post (DF-31): how many times and the LAST edit's SCENARIO
+ * time. `null`/absent on the wire means never edited (the view omits the key).
+ */
+export interface PostEditedSummary {
+  readonly count: number
+  readonly scenarioTime: string
+}
+
+/** One version of a post in its edit history (newest first; original is `editNumber` 0). */
+export interface PostEditVersion {
+  readonly editNumber: number
+  readonly text: string
+  readonly scenarioTime: string
+}
+
+/** `GET /api/posts/{id}/edits` (DF-31). */
+export interface PostEditHistory {
+  readonly postId: string
+  readonly versions: readonly PostEditVersion[]
 }
 
 /**
@@ -168,6 +197,8 @@ export interface Post {
    * and when are staff-only and never on any post shape.
    */
   readonly pinnedForAll?: true
+  /** Edit summary (DF-31); absent when never edited. */
+  readonly edited?: PostEditedSummary | null
   /** REAL wall-clock ISO instant the post was ingested. Telemetry-only —
    * never render this; see `@/core/time/wallClock`. */
   readonly createdWallClock: string
@@ -197,6 +228,8 @@ export interface ParticipantPostView {
   readonly viewer?: PostViewerState
   /** Pinned for everyone by a controller (DF-7): `true` or absent. Never says who or when. */
   readonly pinnedForAll?: true
+  /** Edit summary (DF-31): present only when the post was edited. */
+  readonly edited?: PostEditedSummary
   readonly scenarioTime: string
 }
 

@@ -42,7 +42,7 @@ public sealed class SharedCredentialLifecycleEndpointsHttpTests
                     // never-connecting string — the staff-authz gate returns 401 before it is ever touched.
                     services.AddSharedCredentialLifecycle();
                     services.AddDbContext<PulseDbContext>(options =>
-                        options.UseSqlServer("Server=nonexistent;Database=pulse;Trusted_Connection=False;"));
+                        options.UseSqlServer("Server=nonexistent;Database=pulse;Trusted_Connection=False;Connect Timeout=1;"));
                     services.AddScoped<IExerciseContext, ExerciseContext>();
 
                     // The fail-closed default staff-session accessor (story 05): always "no staff session".

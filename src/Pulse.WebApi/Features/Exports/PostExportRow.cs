@@ -78,6 +78,49 @@ public sealed record PostExportRow
 
     /// <summary><c>Taken down at</c>: the takedown's scenario instant, <c>yyyy-MM-dd HH:mm</c>; blank for a live post.</summary>
     public required string TakenDownAt { get; init; }
+
+    /// <summary><c>Edits</c>: how many times the author edited the post (demo-feedback DF-31, story 19); 0 when never.</summary>
+    public int Edits { get; init; }
+
+    /// <summary><c>Last edited (scenario)</c>: the last edit's scenario instant, <c>yyyy-MM-dd HH:mm</c>; blank when never edited.</summary>
+    public string LastEditedAt { get; init; } = string.Empty;
+
+    /// <summary>
+    /// <c>Original text</c>: the text before the first edit (edit 1's <c>PreviousBody</c>), written as a literal text value;
+    /// blank when never edited.
+    /// </summary>
+    public string OriginalText { get; init; } = string.Empty;
+}
+
+/// <summary>
+/// One row of the export's second sheet, <c>Edit history</c> (demo-feedback DF-39, story 19): one version of an edited
+/// post or reply. Staff world only (it carries the wall clock). Never-edited posts have no rows.
+/// </summary>
+/// <remarks>
+/// Version 0 is the original (the post's <c>CreatedScenarioTime</c> / <c>CreatedWallClock</c>); version n is the text
+/// after edit n (<c>PostEdit</c> n's <c>EditedScenarioTime</c> / <c>EditedAt</c>), whose text is <c>PostEdit</c> n+1's
+/// <c>PreviousBody</c>, or the current body for the last version. The property order is the column order;
+/// <see cref="PostExportWorkbook.EditHistoryHeaders"/> is the matching header list.
+/// </remarks>
+public sealed record PostEditHistoryExportRow
+{
+    /// <summary><c>Post id</c>.</summary>
+    public required string PostId { get; init; }
+
+    /// <summary><c>Edit number</c>: 0 for the original, n for the text after edit n.</summary>
+    public required int EditNumber { get; init; }
+
+    /// <summary><c>Scenario time</c>: the version's scenario instant, <c>yyyy-MM-dd HH:mm</c>.</summary>
+    public required string ScenarioTime { get; init; }
+
+    /// <summary><c>Wall clock (UTC)</c>: the version's real instant, written as an Excel date-time cell.</summary>
+    public required DateTime WallClockUtc { get; init; }
+
+    /// <summary><c>Text</c>: the version's text, written as a literal text value (never a formula).</summary>
+    public required string Text { get; init; }
+
+    /// <summary><c>Current</c>: <c>yes</c> on the post's current (last) version, else <c>no</c>.</summary>
+    public required string Current { get; init; }
 }
 
 /// <summary>The readable labels and formats the export writes. Pure functions, so every mapping is unit-testable.</summary>
@@ -94,6 +137,12 @@ public static class PostExportLabels
 
     /// <summary>The <c>Pinned for all</c> value of a post a controller pinned for everyone.</summary>
     public const string Yes = "Yes";
+
+    /// <summary>The <c>Current</c> value of a post's current version on <c>Edit history</c> (DF-39).</summary>
+    public const string CurrentYes = "yes";
+
+    /// <summary>The <c>Current</c> value of an earlier version on <c>Edit history</c> (DF-39).</summary>
+    public const string CurrentNo = "no";
 
     /// <summary>The origin of an engine post.</summary>
     public const string EngineOrigin = "engine";

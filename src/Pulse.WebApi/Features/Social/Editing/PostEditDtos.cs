@@ -86,3 +86,14 @@ public sealed class PostEditedDto
     [JsonPropertyName("version")]
     public required int Version { get; init; }
 }
+
+/// <summary>
+/// The body of a <c>409</c> from <c>PATCH /api/posts/{postId}</c> (story 19): <c>{ reason }</c>, one of
+/// <c>window-closed</c>, <c>edit-limit</c> or <c>frozen</c> (<see cref="PostEditRefusalReasons"/>).
+/// </summary>
+public sealed class PostEditRefusalDto
+{
+    /// <summary>Why the edit was refused.</summary>
+    [JsonPropertyName("reason")]
+    public required string Reason { get; init; }
+}

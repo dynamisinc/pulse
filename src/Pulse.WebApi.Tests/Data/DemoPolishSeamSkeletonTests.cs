@@ -77,11 +77,15 @@ public class DemoPolishSeamSkeletonTests
 
         var dto = ParticipantPostDto.FromPost(post);
 
+        // demo-feedback story 19 (WAVE-4 frozen contract): the one deliberate addition is `edited`, frozen as
+        // `edited: {...} | null` and therefore always emitted — as the LAST key, `null` for a never-edited post.
+        static string WithEditedNull(string json) => json[..^1] + ",\"edited\":null}";
+
         JsonSerializer.Serialize(dto, WebOptions).Should().Be(
-            JsonSerializer.Serialize(golden, WebOptions),
+            WithEditedNull(JsonSerializer.Serialize(golden, WebOptions)),
             "FromPost's behaviour is UNCHANGED in B1 — media/inReplyTo/viewer stay null and are omitted");
         JsonSerializer.Serialize(dto, DefaultOptions).Should().Be(
-            JsonSerializer.Serialize(golden, DefaultOptions),
+            WithEditedNull(JsonSerializer.Serialize(golden, DefaultOptions)),
             "byte-identical under default serializer options too (the shape is independent of host config)");
 
         dto.Media.Should().BeNull("B1 implements no FromPost media behaviour");
@@ -96,7 +100,7 @@ public class DemoPolishSeamSkeletonTests
         using var document = JsonDocument.Parse(json);
 
         document.RootElement.EnumerateObject().Select(p => p.Name).Should().BeEquivalentTo(
-            ["id", "authorPersonaId", "text", "counts", "scenarioTime"],
+            ["id", "authorPersonaId", "text", "counts", "scenarioTime", "edited"],
             "the participant shape structurally omits provenance and the staff-only baselines (XC-002)");
         json.Should().NotContain("should-never-appear");
         document.RootElement.GetProperty("counts").GetProperty("like").GetInt32().Should().Be(

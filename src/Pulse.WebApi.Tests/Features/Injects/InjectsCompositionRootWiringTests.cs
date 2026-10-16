@@ -146,7 +146,7 @@ public sealed class InjectsCompositionRootWiringTests
         public ProbeFactory(bool resolveExercise = false)
         {
             _resolveExercise = resolveExercise;
-            Environment.SetEnvironmentVariable(ConnectionStringEnvVar, "Server=nonexistent;Database=pulse;Trusted_Connection=False;");
+            Environment.SetEnvironmentVariable(ConnectionStringEnvVar, "Server=nonexistent;Database=pulse;Trusted_Connection=False;Connect Timeout=1;");
         }
 
         protected override void ConfigureWebHost(IWebHostBuilder builder)
