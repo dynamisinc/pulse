@@ -67,13 +67,17 @@ public sealed class EngineAmbientGovernanceOptions
 /// content until a controller turns it back on (persistence is wave C3, after Session A's A1 schema).
 /// </para>
 /// <para>
-/// <b>Only a human raises it (§8.2).</b> <see cref="Set"/> is called only by the controller-role settings POST;
+/// <b>Only a human raises it (§8.2).</b> <see cref="TrySet"/> is called only by the controller-role settings POST;
 /// the engine can only ever LOWER a policy (<see cref="DemoteAutonomous"/>, on a safety clamp), never raise one.
 /// </para>
 /// </remarks>
 public sealed class EngineAmbientPolicyRegistry
 {
-    private readonly ConcurrentDictionary<Guid, AmbientTierPolicy> _policies = new();
+    // Each stored value is wrapped in a fresh Slot per write, so ConcurrentDictionary.TryUpdate (which compares with the
+    // value type's default equality) is a STRICT reference compare-and-set: AmbientTierPolicy is a record (value
+    // equality), the Slot is not. Every writer — Set, TrySet and DemoteAutonomous — CASes on the same slot identity,
+    // so they are mutually atomic (orchestrator review WR-5).
+    private readonly ConcurrentDictionary<Guid, Slot> _policies = new();
     private readonly bool _autonomyAuthorized;
     private readonly IReactionLoopRegistry? _loops;
 
@@ -91,18 +95,22 @@ public sealed class EngineAmbientPolicyRegistry
     /// <summary>Whether this deployment authorises <see cref="AmbientPolicyMode.Autonomous"/> (AC0).</summary>
     public bool AutonomyAuthorized => _autonomyAuthorized;
 
-    /// <summary>The exercise's policy, or <see cref="AmbientTierPolicy.Off"/> when none is set.</summary>
+    /// <summary>
+    /// The exercise's policy, or <see cref="AmbientTierPolicy.Off"/> (the same static instance) when none is set. The
+    /// returned instance is the snapshot <see cref="TrySet"/> compares against.
+    /// </summary>
     /// <param name="exerciseId">The exercise (COR-001); must not be empty.</param>
     /// <returns>The policy.</returns>
     public AmbientTierPolicy Get(Guid exerciseId)
     {
         EnsureScoped(exerciseId);
-        return _policies.TryGetValue(exerciseId, out var policy) ? policy : AmbientTierPolicy.Off;
+        return _policies.TryGetValue(exerciseId, out var slot) ? slot.Policy : AmbientTierPolicy.Off;
     }
 
     /// <summary>
-    /// Records the exercise's policy (a controller action) and returns the policy it displaced, atomically, so the
-    /// XC-004 from→to always describes a transition that really happened.
+    /// Records the exercise's policy unconditionally and returns the policy it displaced, atomically. Controller writes
+    /// go through <see cref="TrySet"/> (compare-and-set) instead; this blind write remains for test set-up and callers
+    /// that hold no snapshot.
     /// </summary>
     /// <param name="exerciseId">The exercise (COR-001); must not be empty.</param>
     /// <param name="policy">The validated policy.</param>
@@ -116,16 +124,48 @@ public sealed class EngineAmbientPolicyRegistry
         {
             if (_policies.TryGetValue(exerciseId, out var existing))
             {
-                if (_policies.TryUpdate(exerciseId, policy, existing))
+                if (_policies.TryUpdate(exerciseId, new Slot(policy), existing))
                 {
-                    return existing;
+                    return existing.Policy;
                 }
             }
-            else if (_policies.TryAdd(exerciseId, policy))
+            else if (_policies.TryAdd(exerciseId, new Slot(policy)))
             {
                 return AmbientTierPolicy.Off;
             }
         }
+    }
+
+    /// <summary>
+    /// Compare-and-set (orchestrator review WR-5): replaces the exercise's policy with <paramref name="next"/> ONLY if
+    /// the current policy is reference-equal to <paramref name="expected"/> — the snapshot the caller read through
+    /// <see cref="Get"/> (<see cref="AmbientTierPolicy.Off"/> when nothing is stored). Atomic with <see cref="Set"/> and
+    /// <see cref="DemoteAutonomous"/>: a demotion (or another writer) that lands between the caller's read and this call
+    /// makes it return <c>false</c> and change nothing, so a stale snapshot can never overwrite — and so never resurrect
+    /// — a policy the engine just lowered.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="AmbientTierPolicy"/> carries no version, so the comparison is by reference. Callers re-read with
+    /// <see cref="Get"/>, re-run every snapshot-dependent check, and retry a bounded number of times on <c>false</c>.
+    /// </remarks>
+    /// <param name="exerciseId">The exercise (COR-001); must not be empty.</param>
+    /// <param name="expected">The snapshot the caller's checks were evaluated against.</param>
+    /// <param name="next">The policy to store.</param>
+    /// <returns><c>true</c> when THIS call stored <paramref name="next"/>; <c>false</c> on a stale snapshot.</returns>
+    public bool TrySet(Guid exerciseId, AmbientTierPolicy expected, AmbientTierPolicy next)
+    {
+        EnsureScoped(exerciseId);
+        ArgumentNullException.ThrowIfNull(expected);
+        ArgumentNullException.ThrowIfNull(next);
+
+        if (_policies.TryGetValue(exerciseId, out var current))
+        {
+            return ReferenceEquals(current.Policy, expected)
+                && _policies.TryUpdate(exerciseId, new Slot(next), current);
+        }
+
+        // Nothing stored: the caller's snapshot is the resting Off instance Get returned, or it is stale.
+        return ReferenceEquals(expected, AmbientTierPolicy.Off) && _policies.TryAdd(exerciseId, new Slot(next));
     }
 
     /// <summary>
@@ -143,14 +183,14 @@ public sealed class EngineAmbientPolicyRegistry
 
         while (_policies.TryGetValue(exerciseId, out var existing))
         {
-            if (existing.Mode != AmbientPolicyMode.Autonomous)
+            if (existing.Policy.Mode != AmbientPolicyMode.Autonomous)
             {
                 break;
             }
 
-            if (_policies.TryUpdate(exerciseId, existing with { Mode = AmbientPolicyMode.Off }, existing))
+            if (_policies.TryUpdate(exerciseId, new Slot(existing.Policy with { Mode = AmbientPolicyMode.Off }), existing))
             {
-                demoted = existing;
+                demoted = existing.Policy;
                 return true;
             }
         }
@@ -215,6 +255,12 @@ public sealed class EngineAmbientPolicyRegistry
         {
             throw new ArgumentException("Ambient policy is exercise-scoped (COR-001).", nameof(exerciseId));
         }
+    }
+
+    /// <summary>A per-write identity around a policy, so the dictionary's compare-and-set compares by reference.</summary>
+    private sealed class Slot(AmbientTierPolicy policy)
+    {
+        public AmbientTierPolicy Policy { get; } = policy;
     }
 }
 

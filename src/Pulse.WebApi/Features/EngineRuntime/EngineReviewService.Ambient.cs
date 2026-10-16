@@ -20,6 +20,13 @@ public sealed partial class EngineReviewService
     internal const string AutonomousWhileSafetyHeldError =
         "engine is stopped or cut to Fake — restore it before enabling autonomous ambient";
 
+    /// <summary>The 400 message when every compare-and-set attempt met a concurrently-changed policy (WR-5).</summary>
+    internal const string AmbientPolicyConcurrentChangeError =
+        "the ambient policy changed while this request was being applied — reload the settings and try again";
+
+    /// <summary>How many read→check→compare-and-set attempts <see cref="SetAmbientPolicyAsync"/> makes before giving up (WR-5).</summary>
+    internal const int AmbientPolicyCasAttempts = 3;
+
     /// <summary>
     /// Sets the exercise's ambient-chatter policy (<c>POST /api/engine/settings/ambient-policy</c>). Controller-role
     /// only (the endpoint group's filter); scope from <see cref="Pulse.WebApi.Data.IExerciseContext"/> only (COR-001).
@@ -27,6 +34,9 @@ public sealed partial class EngineReviewService
     /// <see cref="EngineEventPayloads.AmbientPolicyChanged"/> payload (from→to + the acting human).
     /// </summary>
     /// <remarks>
+    /// The write is a compare-and-set against the snapshot the safety check read
+    /// (<see cref="EngineAmbientPolicyRegistry.TrySet"/>, orchestrator review WR-5), retried up to
+    /// <see cref="AmbientPolicyCasAttempts"/> times; exhausting them is a 400 with nothing mutated.
     /// Rejected with a 400 and NOTHING mutated: an unknown mode; <c>autonomous</c> while the governed
     /// <c>Generation:Governance:AmbientAutonomyAuthorized</c> flag is false (AC0); <c>autonomous</c> while the kill switch
     /// (either mode) or the cut to Fake is active for the exercise (Gate-1 L-1); a cap above the exercise's
@@ -89,17 +99,6 @@ public sealed partial class EngineReviewService
             return EngineSettingsResult.Invalid(validation.Error!);
         }
 
-        // Gate-1 L-1: autonomous cannot be (re-)selected while a safety lever is holding the engine — the kill switch in
-        // either mode (SafetyClampActive also covers a degraded clamp) or the cut to Fake. Accepting it would only have
-        // the loop demote it again on its next tick; rejecting it keeps "restore first" an explicit human step.
-        // (W-1: raising to autonomous will additionally be lead-only — see the TODO(A1c) on the route mapping in
-        // EngineReviewEndpoints.MapEngineReview and AmbientPolicyRaise.IsRaise.)
-        if (draft.Mode == AmbientPolicyMode.Autonomous
-            && (_autonomy.GetOrCreate(exerciseId).SafetyClampActive || _providerCut.IsCutToFake(exerciseId)))
-        {
-            return EngineSettingsResult.Invalid(AutonomousWhileSafetyHeldError);
-        }
-
         // Personas of THIS exercise only. The read goes through the central exercise filter, so an id from another
         // exercise is simply not found here — rejected like any unknown id, never accepted and never disclosed.
         if (draft.PersonaIds.Count > 0)
@@ -131,7 +130,40 @@ public sealed partial class EngineReviewService
 
         var actor = staffUserId.ToString();
         var policy = draft.ToPolicy(actor);
-        var from = _ambientPolicy.Set(exerciseId, policy);
+
+        // WR-5: compare-and-set. Read the snapshot, run every snapshot-dependent check against it, then TrySet against
+        // THAT snapshot; a demotion or another writer landing in between fails the swap, and the loop re-reads and
+        // re-checks (bounded). The persona/validation checks above do not depend on the snapshot, so they run once.
+        //
+        // A1c (Session A): the lead-only raise gate MUST live INSIDE this loop — call
+        // AmbientPolicyRaise.IsRaise(snapshot, request) on the snapshot just read, then TrySet(snapshot, next), and on a
+        // mismatch re-read and retry — so the raise check and the write are atomic. A pre-Set endpoint filter alone is a
+        // TOCTOU: the policy can change between the filter's read and this write.
+        AmbientTierPolicy? from = null;
+        for (var attempt = 0; attempt < AmbientPolicyCasAttempts && from is null; attempt++)
+        {
+            var snapshot = _ambientPolicy.Get(exerciseId);
+
+            // Gate-1 L-1: autonomous cannot be (re-)selected while a safety lever is holding the engine — the kill switch
+            // in either mode (SafetyClampActive also covers a degraded clamp) or the cut to Fake. Re-evaluated on every
+            // attempt, so a set that raced a kill-switch demotion re-reads the clamp and is rejected rather than
+            // resurrecting autonomous.
+            if (draft.Mode == AmbientPolicyMode.Autonomous
+                && (_autonomy.GetOrCreate(exerciseId).SafetyClampActive || _providerCut.IsCutToFake(exerciseId)))
+            {
+                return EngineSettingsResult.Invalid(AutonomousWhileSafetyHeldError);
+            }
+
+            if (_ambientPolicy.TrySet(exerciseId, snapshot, policy))
+            {
+                from = snapshot;
+            }
+        }
+
+        if (from is null)
+        {
+            return EngineSettingsResult.Invalid(AmbientPolicyConcurrentChangeError);
+        }
 
         await CommitSettingsEventAsync(
             EngineEventTypes.TierPolicyChanged,

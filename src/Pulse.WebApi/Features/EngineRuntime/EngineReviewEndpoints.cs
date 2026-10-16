@@ -140,8 +140,10 @@ public static class EngineReviewEndpoints
 
         // ambient-chatter story 01 (AC2) — on the SAME controller-role steering group as every other engine mutation.
         steering.MapPost("/api/engine/settings/ambient-policy", SetAmbientPolicyAsync);
-            // TODO(A1c): .AddEndpointFilter(LeadControllerRaiseFilter.AmbientPolicy) — raising ambient toward unreviewed
-            // output (AmbientPolicyRaise.IsRaise) is lead-only; lowering it to off/review stays open to any controller.
+            // TODO(A1c): raising ambient toward unreviewed output (AmbientPolicyRaise.IsRaise) is lead-only; lowering it to
+            // off/review stays open to any controller. WR-5: the raise check MUST run inside the compare-and-set loop in
+            // EngineReviewService.SetAmbientPolicyAsync (IsRaise(snapshot, request) then TrySet(snapshot, next), re-read
+            // and retry on mismatch). An endpoint filter here alone would be a TOCTOU against a concurrent write.
 
         // autonomy-safety story 07 (ADP-042) — the runtime EGRESS lever. Two routes, on the same controller-role
         // steering group as every other engine mutation. Deliberately a BINARY pair and not one route taking a
