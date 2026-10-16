@@ -421,6 +421,20 @@ copies only setup follows.
 - **Posts only:** a post whose `Origin` is `participant` is always conduct. Today nothing distinguishes them. `Origin` describes who posted, not when. Inferring from
 `CreatedWallClock < FirstLiveAt` breaks after a reopen or a reset, so the flag is explicit.
 
+### Decision 5.4b — dependencies that survive reset (Copilot review 3)
+- **Persona media.** Before reset deletes participant-uploaded media attached to conduct posts, it clears
+  any retained `Persona.AvatarMediaId`/`BannerMediaId` that points at one of those assets back to the
+  default. Both FKs are `DeleteBehavior.Restrict`, so the delete would otherwise fail, or leave a broken
+  image if only the blob went. Avatars a participant uploaded through `/api/me/avatar` belong to the
+  persona's configuration, not to a post, so they are kept.
+- **Setup replies to conduct posts.** Here is how one can arise: a dry-run post in staged, then unstage,
+  then a staff reply in build. Two rules handle it:
+  1. **Prevention at the source.** A post written in build may not reply to a conduct post. The write path
+     refuses it with 409 `reply-to-conduct`.
+  2. **Cleanup for rows that already exist.** Reset treats any post whose parent chain contains a conduct
+     post as conduct too, and deletes deepest-first (the `ParentPostId` FK is Restrict). The reset preview
+     lists these posts. Duplicate copies a setup post only if its whole parent chain is setup.
+
 ### Decision 5.4a — run-sheet items that reply to posts
 An `InjectItemPost.ReplyToPostId` can target a published post. `ReplyParentResolver` refuses a missing or
 foreign-exercise parent when the inject fires, so both reset and duplicate must handle these explicitly:
@@ -607,8 +621,8 @@ the report export offered first; from `completed` **or `staged`**; planner or or
 | EF migration | `CredentialToken`; `People.AvatarBlobName`; `Exercises.SignInMethods`; `MediaAssets.UploadedByAccountId` | A2 |
 | EF migration | `Posts.IsSetupContent`, `Follows.IsSetupContent` (with the §5.4 backfill); `Exercises.ParticipantName` | A3 |
 | EF migration | `ContentPack`, `ContentPackItem`; persona archive column | A4 |
-| **Frozen shared type** | `Session` (frontend `sessionResolver.ts:47` / `SessionDto`): `exerciseId` becomes nullable; adds `personId` and `world` (`staff`/`participant`). `ExerciseRole` (`roles.ts`): `orgAdmin` leaves the exercise-role union and becomes an `OrgRole`. `StaffAssignment` (`features/staff/types.ts:36`) becomes `Enrollment`, with the same fields plus `personId`. The staff login request takes `orgSlug?` + `email` instead of `exerciseId` + `username`. Posted on the feature issue per C1.4 **before** A1 merges | A1 |
-| Frozen shared type | `ExerciseScopeDto.exerciseName` changes its source to `ParticipantName` (same field name and shape) | A3 / A5 |
+| **Frozen shared type** | `Session` (frontend `sessionResolver.ts:47`) / `SessionDto`:<br>• `exerciseId` becomes nullable<br>• adds `personId`, `world: 'staff'\|'participant'` and **`scope: 'exercise'\|'org'`**<br>• `role` becomes `ExerciseRole \| 'orgAdmin'`, as a **discriminated union**: `'orgAdmin'` is valid only with `scope: 'org'`, and an `ExerciseRole` only with `scope: 'exercise'`<br>• a runtime validator `isSessionRole(scope, role)` replaces `isExerciseRole` at `sessionResolver.ts:114`, with tests that both variants pass and mixed combinations are rejected<br>`ExerciseRole` (`roles.ts`): `orgAdmin` leaves the exercise-role union (it becomes an `OrgRole`).<br>`StaffAssignment` (`features/staff/types.ts:36`) becomes `Enrollment`, with the same fields plus `personId`.<br>The staff login request takes `orgSlug?` + `email` instead of `exerciseId` + `username`.<br>Posted on the feature issue per C1.4 **before** A1 merges | A1 |
+| Frozen shared type | `ExerciseScopeDto.exerciseName` becomes **`string \| null`** (C# `string?`), sourced from `ParticipantName`. **This changes the shape:** the frontend `ExerciseScope` type and the validator at `exerciseContextResolver.ts:205` must accept null, and every consumer (the header, cards, emails, the join page) renders brand-only. A null-name resolver test is required | A3 |
 | **Program.cs** | the `PulsePasswordIdentityProvider` registration; forwarded headers (**#480**) placed before the rate limiter; new route-group maps (one line per feature), in the end-of-wave wiring commit | A1, then each wave |
 | **App.tsx / staffRouteRegistry.tsx** | org console routes (people, exercise list), reset page, readiness; additive lines in the wiring commit | A2, A3 |
 
@@ -655,3 +669,18 @@ in `025ba1b` and `90e194a`. Four were new and are folded in:
 - the `LoginChoice` record, kept separate from `CredentialToken` (§1.2, §3.3);
 - follow-edge provenance and the setup/conduct backfill (§5.4, §5.5);
 - staged dry-run writes in the role matrix (§8.2).
+
+**Copilot review 3 (2026-10-16), on `f2c3b66`, 9 findings, all accepted.** In the design doc:
+- reset dependencies, covering persona media and setup replies to conduct posts (§5.4b);
+- the org-scope session role as a discriminated union (§9);
+- the nullable `exerciseName` contract change (§9).
+
+In the stories:
+- build-golive 06, 07, 09, 10, 11 and 12;
+- identity-auth-roles 15, 16, 19, 25 and 26.
+
+The story fixes include:
+- control messages vs content broadcasts at EndEx;
+- the last-admin rule also covering disable;
+- `no-store` as middleware placed before the auth and rate-limit gates;
+- #389 rescoped to refused privileged origins.
