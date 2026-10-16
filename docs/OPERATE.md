@@ -100,6 +100,35 @@ not identity-preserving — it silently reclassifies). Read the specific migrati
 on it. UAT is a disposable playground: for anything non-trivial, re-seeding from a clean database is
 faster and more honest than unwinding a migration.
 
+### AdminIdentityFoundation (A1b): deploy order and rollback
+
+This migration replaces `StaffAssignments` with `People` + `Enrollments`. It also changes what a session
+can carry: an org-admin session has `exerciseId: null`, and the role is a union of exercise and org roles.
+
+**Deploy: frontend first.** The migration revokes every live `orgAdmin` session. After it, the only way to get the
+`orgAdmin` role is an org-scope session, and the bundle that is serving today rejects that session as invalid. Use
+**Cancel and re-dispatch** (above): cancel the auto-triggered *Deploy Backend* run, let *Deploy Frontend* finish,
+confirm the new bundle is serving, then re-dispatch *Deploy Backend*. Exercise-scoped sessions are unaffected either
+way (their new fields are additive). Everyone with an `orgAdmin` session must sign in again after the deploy.
+
+**Before the backend deploy, note the time.** Write down the UTC time just before you re-dispatch *Deploy Backend*.
+That is the point-in-time-restore (PITR) target if a rollback is needed.
+
+**Rollback order of preference:**
+
+1. **Forward-fix.** Preferred. Most problems after this deploy are code problems, not data problems, and a fix on
+   `main` redeploys in minutes without touching the data.
+2. **PITR to the noted time.** If the data is wrong, restore `sqldb-pulse-uat` to the time noted above (Azure portal
+   → the database → *Restore*, as a new database, then swap the connection string). Then redeploy the backend and
+   frontend from the commit before the merge, **backend first, frontend second**. Anything written after the noted
+   time is lost.
+3. **The migration's `Down`.** Last resort. It is reversible but **not loss-free**:
+   - `StaffAssignments` come back with the same ids, and `Accounts.Role` / `PersonaId` are restored from enrollments.
+   - A person who was both a planner and an org admin comes back as `orgAdmin` only.
+   - Org-scope sessions are deleted (they have no exercise to point at).
+   - Everything that exists only from A1 on is dropped: people's emails and passwords, org audit events, login
+     choices, organization slugs, `FirstLiveAt`.
+
 ## Incident log
 
 <!-- One dated line per incident: date · symptom · SHA · action taken. -->
