@@ -293,10 +293,12 @@ public class ExerciseRealtimeHubTests
     }
 
     [Fact]
-    public async Task OnConnectedAsync_StaffKindSessionWithNoStaffUser_NeverJoinsTheStaffGroup()
+    public async Task OnConnectedAsync_StaffKindSessionWithNoStaffUser_IsAborted_JoinsNoGroup()
     {
         // A staff-kind session must be bound to a StaffUser (the CurrentStaffSessionAccessor rule). Without one
-        // there is nobody whose assignments could be checked — fail closed, before any database work.
+        // there is nobody whose enrollments could be checked — fail closed, before any database work.
+        // identity-auth-roles/15: a staff connection is scoped from its verified session, so an unverifiable one is
+        // aborted rather than falling back to the host's exercise group.
         var exerciseId = Guid.NewGuid();
         var context = BuildHubContext(exerciseId, http => http.User = SessionPrincipal.Create(Session(exerciseId, "staff")));
         var groups = new RecordingGroupManager();
@@ -304,14 +306,16 @@ public class ExerciseRealtimeHubTests
         var hub = new ExerciseRealtimeHub(NoDatabaseContext(), NullHubLogger) { Context = context.Object, Groups = groups };
         await hub.OnConnectedAsync();
 
-        groups.Joined.Should().Equal(new[] { $"exercise:{exerciseId}" }, "a staff session with no staff user is never staff");
+        context.Verify(c => c.Abort(), Times.Once, "an unverifiable staff connection is refused");
+        groups.Joined.Should().BeEmpty("a staff session with no staff user is never staff, and never falls back to the host");
     }
 
     [Fact]
     public async Task OnConnectedAsync_UnresolvedHost_WithAStaffSession_StillAborts_NeverJoinsAnyGroup()
     {
-        // B5 AC6: the role dimension does not weaken the scope rule — no host-resolved exercise, no group, even
-        // for a staff session (staff sessions are not host-bound for REST, but the hub's groups are).
+        // B5 AC6 / identity-auth-roles/15: a staff connection on a host that resolves no exercise (the console host) is
+        // scoped from its SESSION, never the host — and one whose session cannot be verified (here the database is
+        // unreachable) joins nothing. The positive console-host case is ExerciseRealtimeHubStaffGroupTests.
         var context = BuildHubContext(
             hostResolvedExerciseId: null,
             http => http.User = SessionPrincipal.Create(Session(Guid.NewGuid(), "staff", staffUserId: Guid.NewGuid())));
@@ -325,10 +329,10 @@ public class ExerciseRealtimeHubTests
     }
 
     [Fact]
-    public async Task OnConnectedAsync_StaffCheckFails_JoinsTheExerciseGroupFirst_NeverTheStaffGroup_LogsAndAborts_DoesNotPropagate()
+    public async Task OnConnectedAsync_StaffCheckFails_JoinsNoGroup_LogsAndAborts_DoesNotPropagate()
     {
-        // Ordering (Gate-1 L-5): the exercise-wide join happens BEFORE the staff check, so PostReceived timing is
-        // never held up by it. Failure handling (Gate-2 L-1): a staff-kind principal sends the check to the
+        // identity-auth-roles/15: a staff connection's exercise IS the verified session's, so nothing is joined before
+        // the check completes. Failure handling (Gate-2 L-1): a staff-kind principal sends the check to the
         // database, which here throws on open (as a serverless SQL database resuming from auto-pause can). The
         // check must fail CLOSED — the staff join is never reached — AND the connection must be ABORTED rather
         // than the error rethrown: an exception escaping OnConnectedAsync makes SignalR close with
@@ -346,13 +350,11 @@ public class ExerciseRealtimeHubTests
         await connect.Should().NotThrowAsync(
             "a failed staff check is handled by aborting the connection — rethrowing would close it non-reconnectably");
         context.Verify(c => c.Abort(), Times.Once, "a staff check that cannot complete must drop the connection (reconnectable)");
-        groups.Joined.Should().Equal(
-            new[] { $"exercise:{exerciseId}" },
-            "the exercise-wide join precedes the check; a failed check never joins exercise:{id}:staff");
+        groups.Joined.Should().BeEmpty("a failed check joins neither exercise:{id} nor exercise:{id}:staff");
         logger.Entries.Should().ContainSingle(
                 entry => entry.Level == LogLevel.Warning && entry.Exception is InvalidOperationException,
                 "the swallowed failure must still be logged, with its exception")
-            .Which.Message.Should().Contain(exerciseId.ToString()).And.Contain(ConnectionId);
+            .Which.Message.Should().Contain(ConnectionId);
     }
 
     [Fact]
@@ -382,7 +384,7 @@ public class ExerciseRealtimeHubTests
             "the connection's own abort is not a check failure and must not be swallowed");
         context.Verify(c => c.Abort(), Times.Never, "the hub adds no abort of its own for a connection already aborting");
         logger.Entries.Should().BeEmpty("a cancellation from the connection's own abort is not logged as a check failure");
-        groups.Joined.Should().Equal(new[] { $"exercise:{exerciseId}" }, "a cancelled check never joins the staff group");
+        groups.Joined.Should().BeEmpty("a cancelled check joins no group");
     }
 
     [Fact]

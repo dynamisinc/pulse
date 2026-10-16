@@ -293,7 +293,7 @@ public sealed class StaffAssignmentServiceTests
     }
 
     [RequiresDockerFact]
-    public async Task SetActiveExercise_AssignmentPointingAtMissingExercise_Invalid()
+    public async Task SetActiveExercise_AssignmentPointingAtMissingExercise_IsTheBare404()
     {
         // R6 mitigation: a dangling assignment (references an exercise id with no Exercise row) must not let a
         // typo'd/dangling id take effect — the service validates the exercise resolves before persisting.
@@ -309,12 +309,13 @@ public sealed class StaffAssignmentServiceTests
 
         var result = await service.SetActiveExerciseAsync(danglingExerciseId);
 
-        result.Outcome.Should().Be(SetActiveExerciseOutcome.Invalid,
-            "an assignment referencing a non-existent exercise must not resolve as active (R6 service-layer FK check)");
+        result.Outcome.Should().Be(SetActiveExerciseOutcome.NotFound,
+            "an assignment referencing a non-existent exercise must not resolve as active (R6 service-layer FK check); "
+            + "identity-auth-roles/15 aligns a missing target to the bare 404 (ADMIN-IDENTITY-MODEL §7.2)");
     }
 
     [RequiresDockerFact]
-    public async Task SetActiveExercise_AssignmentPointingAtMissingExercise_Invalid_NoSessionChange_NoDanglingIdPersisted()
+    public async Task SetActiveExercise_AssignmentPointingAtMissingExercise_IsTheBare404_NoSessionChange_NoDanglingIdPersisted()
     {
         // R6 extension: proves the REJECTED outcome above is not merely a returned status — the session's
         // bound exercise must stay untouched (no dangling ExerciseId is ever stamped onto a Session row) and
@@ -330,7 +331,7 @@ public sealed class StaffAssignmentServiceTests
         {
             var service = ServiceFor(context, staffUserId, sessionId);
             var result = await service.SetActiveExerciseAsync(danglingExerciseId);
-            result.Outcome.Should().Be(SetActiveExerciseOutcome.Invalid);
+            result.Outcome.Should().Be(SetActiveExerciseOutcome.NotFound);
         }
 
         await using var verify = _fixture.CreateContext();

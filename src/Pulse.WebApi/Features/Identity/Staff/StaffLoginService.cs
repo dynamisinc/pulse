@@ -256,7 +256,7 @@ public sealed class StaffLoginService
     /// <c>channel: 'system'</c>, event type <c>login</c>. Off-envelope empty strings are null-omitted (the v0
     /// schema types the optional actor ids as <c>min(1).optional()</c>).
     /// </summary>
-    private static TelemetryEvent BuildLoginTelemetry(
+    internal static TelemetryEvent BuildLoginTelemetry(
         Guid exerciseId,
         string? role,
         string? actingHumanId,
@@ -370,4 +370,17 @@ public sealed class StaffLoginRequest
 
     /// <summary>The exercise being entered — the selected active exercise; validated against the caller's assignments.</summary>
     public string? ExerciseId { get; init; }
+
+    /// <summary>
+    /// identity-auth-roles/15 (ADMIN-IDENTITY-MODEL §1.2): the org sign-in handle — the person's email (or, for a legacy
+    /// allowlisted staffer with no email yet, their allowlist username). Used only by the org sign-in shape (no
+    /// <see cref="ExerciseId"/>); see <see cref="OrgStaffLoginService"/>.
+    /// </summary>
+    public string? Email { get; init; }
+
+    /// <summary>The org sign-in password — validated, never logged or persisted (NFR-009).</summary>
+    public string? Password { get; init; }
+
+    /// <summary>The organization's URL slug (<c>console.&lt;domain&gt;/o/{slug}</c>); absent for the email-first org choice.</summary>
+    public string? OrgSlug { get; init; }
 }
