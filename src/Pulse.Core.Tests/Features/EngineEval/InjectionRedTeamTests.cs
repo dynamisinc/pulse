@@ -92,16 +92,36 @@ public class InjectionRedTeamTests
 
     [Theory]
     [MemberData(nameof(PersonaVoiceNotesAttacks))]
-    public void PersonaVoiceNotesAttack_ReachesTheTrustedPromptUnfenced_AndItsObeyedFormIsCaught(InjectionAttack attack)
+    public void PersonaVoiceNotesAttack_NeverReachesTheAmbientPrompt_AndItsObeyedFormIsStillCaught(InjectionAttack attack)
     {
         var request = InjectionRedTeam.AssembleViaPersonaVoiceNotes(attack);
 
-        // The real path: the payload sits in the trusted cast block, NOT inside the fence — so layer 1 does not apply...
-        request.SystemPrompt.Should().Contain("  voice: " + attack.WorldFeedPayload,
-            "VoiceNotes are rendered verbatim into the persona dossier by PromptAssembler.AppendPersona");
+        // WR-1: the ambient prompt omits voice notes entirely — the autonomous path never carries the payload...
+        request.IsAmbient.Should().BeTrue();
+        request.SystemPrompt.Should().NotContain(attack.WorldFeedPayload,
+            "ambient prompts drop persona voice notes (orchestrator review WR-1)");
+        request.SystemPrompt.Should().NotContain("  voice: ");
         request.WorldFeed.Should().NotContain(attack.WorldFeedPayload);
 
-        // ...so the guard is the defence on this path: an obeyed tell is caught before anything can publish.
+        // ...and the guard stays as the second layer behind it.
+        InjectionRedTeam.Obeyed(attack.ObeyedTell).Clean
+            .Should().BeFalse($"an obeyed '{attack.Name}' must still be caught by the content guard");
+    }
+
+    [Theory]
+    [MemberData(nameof(PersonaVoiceNotesAttacks))]
+    public void PersonaVoiceNotesAttack_ReachesTheStorylinePromptUnfenced_AndItsObeyedFormIsCaught(InjectionAttack attack)
+    {
+        var request = InjectionRedTeam.AssembleStorylineViaPersonaVoiceNotes(attack);
+
+        // The residual (storyline prompts only): the payload sits in the trusted cast block, NOT inside the fence — so
+        // layer 1 does not apply...
+        request.IsAmbient.Should().BeFalse();
+        request.SystemPrompt.Should().Contain("  voice: " + attack.WorldFeedPayload,
+            "VoiceNotes are rendered verbatim into a storyline persona dossier by PromptAssembler.AppendPersona");
+        request.WorldFeed.Should().NotContain(attack.WorldFeedPayload);
+
+        // ...so the guard is the defence on this path: an obeyed tell is caught before it can reach a human.
         InjectionRedTeam.Obeyed(attack.ObeyedTell).Clean
             .Should().BeFalse($"an obeyed '{attack.Name}' via persona voice notes must be caught by the content guard");
     }

@@ -169,6 +169,44 @@ public class PromptAssemblerTests
     }
 
     [Fact]
+    public void Assemble_Ambient_OmitsPersonaVoiceNotes_ButKeepsTheStyleSignals()
+    {
+        // WR-1: seeded voice notes are routinely incident-specific ("is the water safe for my kids?"), so ambient prompts
+        // drop them entirely; the non-sensitive identity + style signals stay.
+        var input = AmbientInput() with
+        {
+            Personas =
+            [
+                new PersonaDossier
+                {
+                    Handle = "@ana",
+                    DisplayName = "Ana",
+                    Type = PersonaType.Resident,
+                    VoiceNotes = "VOICE_NOTES_MARKER is the water safe for my kids?",
+                    Style = new PersonaStyle { AvgLength = 90, EmojiRate = 0.3, HashtagRate = 0.4, CapsConvention = "lower" },
+                },
+            ],
+        };
+
+        var prompt = _assembler.Assemble(input).SystemPrompt;
+
+        prompt.Should().NotContain("VOICE_NOTES_MARKER");
+        prompt.Should().NotContain("water safe");
+        prompt.Should().NotContain("  voice: ");
+        prompt.Should().Contain("@ana (Ana) — type: Resident");
+        prompt.Should().Contain("style: ~90 chars, emoji 0.3, hashtags 0.4, caps lower");
+    }
+
+    [Fact]
+    public void Assemble_Storyline_StillCarriesPersonaVoiceNotes()
+    {
+        var prompt = _assembler.Assemble(Input()).SystemPrompt;
+
+        prompt.Should().Contain("  voice: anxious parent").And.Contain("  voice: calm neighbor",
+            "storyline prompts are unchanged by WR-1");
+    }
+
+    [Fact]
     public void Assemble_NonAmbient_KeepsTheStorylineFraming_AndRecentPosts()
     {
         var input = Input() with

@@ -91,9 +91,11 @@ public sealed class PromptAssembler : IPromptAssembler
           .AppendLine(" personas, each in their own voice");
         foreach (var persona in input.Personas)
         {
-            // Ambient chatter skips prior-post exemplars: a persona's recent posts are usually storyline reactions,
-            // and conditioning everyday small talk on them would pull the incident back into the background.
-            AppendPersona(sb, persona, includeRecentPosts: !ambient);
+            // Ambient chatter skips prior-post exemplars AND voice notes: a persona's recent posts are usually storyline
+            // reactions, and seeded voice notes are routinely incident-specific ("is the water safe for my kids?",
+            // "complains about mixed messaging") — conditioning everyday small talk on either pulls the incident back
+            // into the background (orchestrator review WR-1). Only the non-sensitive style signals remain.
+            AppendPersona(sb, persona, includeVoiceNotes: !ambient, includeRecentPosts: !ambient);
         }
 
         sb.AppendLine();
@@ -159,17 +161,18 @@ public sealed class PromptAssembler : IPromptAssembler
         sb.AppendLine("about the background-chatter topic above, as everyday small talk. Then call emit_posts.");
     }
 
-    private static void AppendPersona(StringBuilder sb, PersonaDossier p, bool includeRecentPosts)
+    private static void AppendPersona(StringBuilder sb, PersonaDossier p, bool includeVoiceNotes, bool includeRecentPosts)
     {
         sb.Append("- ").Append(p.Handle).Append(" (").Append(p.DisplayName).Append(") — type: ").Append(p.Type)
           .Append("; audience band: ").AppendLine(p.AudienceBand.ToString(CultureInfo.InvariantCulture));
 
-        // Persona voice notes are staff-authored dossier text and enter the TRUSTED stratum unfenced. They are NOT
-        // fenced like WorldFeedFence here on purpose: every storyline prompt carries them, so fencing would change all
-        // non-ambient prompts (and their cache prefix) materially. A hostile note that steers the model is instead
-        // caught downstream by ContentGuard before anything publishes — pinned by the red-team's PersonaVoiceNotes
-        // vector (InjectionRedTeam.AssembleViaPersonaVoiceNotes, ambient-chatter story 01 AC7).
-        if (!string.IsNullOrWhiteSpace(p.VoiceNotes))
+        // Persona voice notes are staff-authored dossier text and enter the TRUSTED stratum unfenced — STORYLINE prompts
+        // only. They are NOT fenced like WorldFeedFence here on purpose: every storyline prompt carries them, so fencing
+        // would change all storyline prompts (and their cache prefix) materially. A hostile note that steers a storyline
+        // burst is instead caught downstream by ContentGuard and lands in the human review queue — pinned by the
+        // red-team's PersonaVoiceNotes vector (InjectionRedTeam.AssembleViaPersonaVoiceNotes). Ambient prompts omit voice
+        // notes entirely (orchestrator review WR-1), so on the autonomous ambient path the payload never reaches the model.
+        if (includeVoiceNotes && !string.IsNullOrWhiteSpace(p.VoiceNotes))
         {
             sb.Append("  voice: ").AppendLine(p.VoiceNotes.Trim());
         }
