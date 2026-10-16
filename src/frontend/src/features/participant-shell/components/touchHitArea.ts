@@ -2,18 +2,23 @@
  * features/participant-shell/components/touchHitArea.ts
  * ---------------------------------------------------------------------------
  * Extended touch hit areas for compact participant-shell controls
- * (mobile-tablet stories 05 and 17; NFR-001, 44 px touch-target floor).
+ * (mobile-tablet story 05; NFR-001, 44 px touch-target floor).
  *
- * The shell chrome (alert bar "Details →" / "+N more", the channel strip links)
- * is deliberately compact: growing the visible control would thicken the EAS
- * band or the 38 px strip. Instead, on a COARSE pointer only (phones, tablets),
- * an invisible, absolutely-positioned `::after` centred on the control grows
- * its tappable box to at least 44×44 CSS px. Mouse users see and get exactly
+ * The alert bar's "Details →" / "+N more" are deliberately compact: growing
+ * the visible control would thicken the EAS band. Instead, on a COARSE
+ * pointer only (phones, tablets), an invisible, absolutely-positioned `::after`
+ * centred on the control grows its tappable box to at least 44×44 CSS px. Mouse users see and get exactly
  * the old layout; the visual treatment never changes.
  *
  * Usage: render `<style>{touchHitAreaCss('.my-class')}</style>` once and put
- * `my-class` on the control. The control becomes `position: relative` (its
- * pseudo-element's containing block); nothing else about it changes.
+ * `my-class` on the control. On coarse pointers the control becomes
+ * `position: relative` (its pseudo-element's containing block); nothing else
+ * about it changes.
+ *
+ * Use it only where the slop cannot be intercepted by a neighbour stacked
+ * above it. `ChannelNav` (story 17) reuses just {@link TOUCH_TARGET_MIN_PX}
+ * and grows its strip instead: a slop there was caught by the fixed
+ * compliance band and the social rail.
  *
  * World: participant. Plain CSS string; no MUI, no COBRA.
  */
@@ -28,10 +33,10 @@ export const TOUCH_TARGET_MIN_PX = 44
  */
 export function touchHitAreaCss(selector: string): string {
   return `
-${selector} {
-  position: relative;
-}
 @media (pointer: coarse) {
+  ${selector} {
+    position: relative;
+  }
   ${selector}::after {
     content: '';
     position: absolute;

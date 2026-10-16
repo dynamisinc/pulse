@@ -68,7 +68,7 @@ import {
   faNewspaper,
 } from '@fortawesome/free-solid-svg-icons'
 import { useExerciseContext } from '@/core/exerciseContext'
-import { isDefaultExerciseClock, useScenarioTime } from '@/core/clock'
+import { isWallMirroringExerciseClock, useScenarioTime } from '@/core/clock'
 import { useChannelNav, type ChannelIconId } from '../channelNavConfig'
 import { TOUCH_TARGET_MIN_PX } from './touchHitArea'
 
@@ -249,7 +249,7 @@ export function ChannelNav() {
   // COR-053 guard (mobile-tablet story 17): under the default wall-mirroring
   // clock "now" is the real date, not scenario time, so render no dateline at
   // all until a real exercise clock is installed (exercise-clock story 01).
-  const dateline = isDefaultExerciseClock() ? null : format(now, { format: 'dateline' })
+  const dateline = isWallMirroringExerciseClock() ? null : format(now, { format: 'dateline' })
   const mobileChannels = config.channels.slice(0, MAX_MOBILE_TABS)
 
   return (

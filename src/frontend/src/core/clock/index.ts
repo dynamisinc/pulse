@@ -30,6 +30,6 @@ export {
   getExerciseClock,
   setExerciseClock,
   resetExerciseClock,
-  isDefaultExerciseClock,
+  isWallMirroringExerciseClock,
 } from './exerciseClock'
 export type { IExerciseClock } from './exerciseClock'

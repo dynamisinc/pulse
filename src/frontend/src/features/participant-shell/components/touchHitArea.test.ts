@@ -1,5 +1,5 @@
 /**
- * touchHitArea.test.ts: the coarse-pointer 44 px hit-area CSS (mobile-tablet 05/17).
+ * touchHitArea.test.ts: the coarse-pointer 44 px hit-area CSS (mobile-tablet 05).
  * jsdom cannot hit-test, so this pins the generated CSS contract. The real
  * on-device measurement lives in the Playwright phone specs.
  */
@@ -9,12 +9,13 @@ import { TOUCH_TARGET_MIN_PX, touchHitAreaCss } from './touchHitArea'
 describe('touchHitAreaCss', () => {
   const css = touchHitAreaCss('.x-hit')
 
-  it('makes the control the containing block for its pseudo-element', () => {
-    expect(css).toMatch(/\.x-hit\s*\{\s*position:\s*relative;/)
+  it('makes the control the containing block on coarse pointers only', () => {
+    expect(css).toMatch(/@media \(pointer: coarse\)\s*\{\s*\.x-hit\s*\{\s*position:\s*relative;/)
+    expect(css.indexOf('position: relative')).toBeGreaterThan(css.indexOf('(pointer: coarse)'))
   })
 
   it('extends the hit area only on coarse pointers, never for a mouse', () => {
-    expect(css).toMatch(/@media \(pointer: coarse\)\s*\{\s*\.x-hit::after/)
+    expect(css).toContain('.x-hit::after')
     // The ::after rule exists only inside the media query.
     expect(css.indexOf('::after')).toBeGreaterThan(css.indexOf('(pointer: coarse)'))
   })

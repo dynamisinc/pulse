@@ -10,7 +10,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   getExerciseClock,
-  isDefaultExerciseClock,
+  isWallMirroringExerciseClock,
   resetExerciseClock,
   setExerciseClock,
   type IExerciseClock,
@@ -48,11 +48,16 @@ describe('exerciseClock', () => {
     expect(Math.abs(reading - Date.now())).toBeLessThan(5000)
   })
 
-  it('isDefaultExerciseClock is true only while the wall-mirroring default is active (story 17)', () => {
-    expect(isDefaultExerciseClock()).toBe(true)
+  it('isWallMirroringExerciseClock is true only while the wall-mirroring default is active (story 17)', () => {
+    expect(isWallMirroringExerciseClock()).toBe(true)
     setExerciseClock({ scenarioNow: () => new Date('2033-09-04T14:00:00Z') })
-    expect(isDefaultExerciseClock()).toBe(false)
+    expect(isWallMirroringExerciseClock()).toBe(false)
     resetExerciseClock()
-    expect(isDefaultExerciseClock()).toBe(true)
+    expect(isWallMirroringExerciseClock()).toBe(true)
+  })
+
+  it('treats any clock flagged mirrorsWallClock (e.g. the pausable clock) as wall-mirroring', () => {
+    setExerciseClock({ scenarioNow: () => new Date(), mirrorsWallClock: true })
+    expect(isWallMirroringExerciseClock()).toBe(true)
   })
 })
