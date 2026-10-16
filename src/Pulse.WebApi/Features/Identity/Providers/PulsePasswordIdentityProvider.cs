@@ -22,8 +22,9 @@ using Pulse.WebApi.Data.Entities;
 ///   whose person HAS a Pulse password is still rejected — Pulse stays authoritative for them.</description></item>
 /// </list>
 /// Invites and resets (<c>CredentialToken</c>) arrive in A2; until then no person carries a Pulse password, so the
-/// second step is what every sign-in takes. Lockout and the password policy (§3.2) are story 15's / A2's behaviour;
-/// A1 ships only the columns.
+/// second step is what every sign-in takes. The provider itself stays stateless: the per-person lockout (§3.2) is
+/// applied by each login funnel around it — <c>OrgStaffLoginService</c> and, for the people
+/// <see cref="FindPasswordPersonAsync"/> names, <c>StaffLoginService</c> — so one attempt is counted exactly once.
 /// </para>
 /// <para>
 /// <b>Never logs or returns the secret or the hash</b> (NFR-004 / NFR-009). The person read is bounded by the
@@ -57,19 +58,11 @@ public sealed class PulsePasswordIdentityProvider : IIdentityProvider
     {
         ArgumentNullException.ThrowIfNull(credentials);
 
-        var email = NormalizeEmail(credentials.Username);
-        if (email is not null && credentials.OrganizationId is { } organizationId && organizationId != Guid.Empty)
+        var person = await FindPasswordPersonAsync(_dbContext, credentials.Username, credentials.OrganizationId, cancellationToken);
+        if (person is { PasswordHash: { Length: > 0 } passwordHash, OrganizationId: var organizationId })
         {
-            var person = await _dbContext.People
-                .AsNoTracking()
-                .InOrganization(organizationId)
-                .FirstOrDefaultAsync(p => p.Email == email, cancellationToken);
-
-            if (person is { PasswordHash: { Length: > 0 } passwordHash })
-            {
-                // Step 1: Pulse is authoritative — verify, or reject. Never fall back.
-                return await AuthenticatePulsePasswordAsync(person, passwordHash, credentials.Secret, organizationId, cancellationToken);
-            }
+            // Step 1: Pulse is authoritative — verify, or reject. Never fall back.
+            return await AuthenticatePulsePasswordAsync(person, passwordHash, credentials.Secret, organizationId, cancellationToken);
         }
 
         // Step 2: the break-glass allowlist, for people with no Pulse password (every backfilled legacy staffer).
@@ -82,6 +75,40 @@ public sealed class PulsePasswordIdentityProvider : IIdentityProvider
         return await HasPulsePasswordAsync(fallback.Identity.ExternalSubject, cancellationToken)
             ? Rejected()
             : fallback;
+    }
+
+    /// <summary>
+    /// THE definition of "a person this provider is authoritative for": the <see cref="Person"/> named by
+    /// <paramref name="handle"/> (as an email) in the SERVER-resolved <paramref name="organizationId"/>, when that person
+    /// carries a Pulse password. Shared with the exercise-bound staff login (identity-auth-roles/15, Gate-1 M-3), which
+    /// applies the per-person lockout and disable to exactly these people — never to an allowlist-only staffer, whose
+    /// legacy behaviour stays unchanged. The row is TRACKED so the caller can record a failure or success on it in its
+    /// own unit of work.
+    /// </summary>
+    /// <param name="dbContext">The persistence context to read through.</param>
+    /// <param name="handle">The presented login handle.</param>
+    /// <param name="organizationId">The server-resolved organization; <c>null</c> / empty finds no one.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The person with a Pulse password, or <c>null</c>.</returns>
+    public static async Task<Person?> FindPasswordPersonAsync(
+        PulseDbContext dbContext,
+        string? handle,
+        Guid? organizationId,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(dbContext);
+
+        var email = NormalizeEmail(handle);
+        if (email is null || organizationId is not { } organization || organization == Guid.Empty)
+        {
+            return null;
+        }
+
+        var person = await dbContext.People
+            .InOrganization(organization)
+            .FirstOrDefaultAsync(p => p.Email == email, cancellationToken);
+
+        return person is { PasswordHash: { Length: > 0 } } ? person : null;
     }
 
     /// <summary>Normalizes a login handle to the stored email form, or <c>null</c> when it is not an email.</summary>
