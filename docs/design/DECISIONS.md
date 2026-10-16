@@ -153,6 +153,8 @@ above the focused post, replies below). Compare toggle and nested view removed f
 ### D1-005 — Layout anchors left, not centered
 User preferred the left-panel feel of columns mode: the frame is now left-anchored in every
 mode (nav rail hugs the viewport edge), instead of X-style centered.
+> **Superseded by #495 (centred from 1280px):** demo-feedback story 13 centres the full frame like X at
+> 1280px and above; below 1280px it stays left-anchored.
 
 ### D1-003 — Org account switcher is one-identity-at-a-time (SOC-006)
 Participants switch the "Posting as" chip (personal ↔ granted org accounts); never multiple

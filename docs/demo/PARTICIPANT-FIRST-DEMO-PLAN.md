@@ -66,7 +66,7 @@ non-AI workflows this audience will ask about: posting media, watching the feed,
 | Engine (review queue, steering, freeze, settings, usage) | ✅ Live on `Fake` | Verification debt #349–#354, #401, #402; live AI waits on §8 |
 | UAT | ⚠️ Healthy, fragile | Fixed yesterday (#413). Every backend deploy or restart drops in-memory engine state, and the reset scripts handle it ([operating notes](../BUILD_PLAN.md#uat-operating-notes)) |
 | CI on `main` | ❌ Red (flake) | Run 257 fails on `exerciseScopeRefreshComposition.test.tsx:195`. It is the same passive-`useEffect` mount-counter class that #412 fixed in two sibling tests |
-| Two-worlds leak | ⚠️ Real defect | Staff-only `ReviewItemChanged` (unpublished engine drafts) goes to the same SignalR group participants join (`EngineReviewBroadcaster.cs:73`, `ExerciseRealtimeHub.cs:76`). It is visible in a participant's devtools. Fix: `social-api/05` |
+| Two-worlds leak | ✅ Fixed (corrected 10/16) | Staff-only `ReviewItemChanged` (unpublished engine drafts) and `NoiseStateChanged` go only to `exercise:{id}:staff`, which the hub joins only after verifying, at connect time, a live staff session assigned to that exercise; participant connections never receive them. Fixed by demo-polish B5 (#423, `14810d3d`); proved by `ExerciseRealtimeHubRoleIsolationTests`, `EngineReviewBroadcasterScopeTests`. Story: `social-api/05` (Complete) |
 
 ### Screenshots (dev server, mock data, 2026-10-07)
 

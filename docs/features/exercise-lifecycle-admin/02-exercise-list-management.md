@@ -43,7 +43,9 @@ assignment on) and the natural home for the "duplicate this exercise" action (`C
 - [x] Given a Controller or Evaluator session, when they look for this surface, then it is not
       reachable — exercise list/management is Planner/OrgAdmin only (they already reach their
       individual assigned exercises through the existing exercise switcher, a different, narrower
-      concern).
+      concern). **Widened by DF-20 (demo-feedback story 15): controller admitted.** List/management is
+      now Planner/OrgAdmin/Controller and shows the controller's whole organization, including runs it is
+      not assigned to; an Evaluator is still refused (`403`, and the surface shows the "not allowed" page).
 
 ### Cross-cutting
 - [x] **Isolation (XC-001, org axis / COR-001):** see the fail-closed AC above; no exercise from
@@ -117,8 +119,10 @@ tenant bound closing the door rather than an empty table). Every guard was **neu
   — there is no by-id route to guess, which is a stronger guarantee than refusing one particular guess.
 - At the tier below, the standing `StaffOrganizationBoundaryTests` suite (`exercise-isolation/11` AC3).
 
-**AC5 — Controller/Evaluator cannot reach it; Planner can**
-- `ExerciseListEndpointTests.List_AsController_IsRefused (AC5)`
+**AC5 — Evaluator cannot reach it; Planner and (DF-20, demo-feedback story 15) Controller can**
+- `ExerciseListEndpointTests.List_AsController_ReturnsOnlyTheCallersOwnTenantsExercises (AC5, DF-20)` — own tenant
+  only, including an unassigned run of that tenant
+- `ExerciseListEndpointTests.List_AsControllerInASecondTenant_NeverSeesWhatAControllerInTheFirstTenantCreated (AC5, DF-20)`
 - `ExerciseListEndpointTests.List_AsEvaluator_IsRefused (AC5)`
 - `ExerciseListEndpointTests.List_AsPlanner_IsAdmitted_BecauseStory02IsPlannerOrOrgAdmin (AC5, positive control)`
 - `ExerciseListEndpointTests.List_WithNoSession_IsUnauthorized_NeverAnEmpty200 (AC5)`

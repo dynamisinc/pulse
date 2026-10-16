@@ -16,8 +16,8 @@ exercise. These are `/api/org/*` and span the caller's **customer tenant**:
 
 | Route | Who | This feature |
 |---|---|---|
-| `POST /api/org/exercises` | `planner` or `orgAdmin` | `createOrgExercise()` |
-| `GET /api/org/exercises` | `planner` or `orgAdmin` | `getOrgExercises()` |
+| `POST /api/org/exercises` | `planner`, `orgAdmin` or `controller` | `createOrgExercise()` |
+| `GET /api/org/exercises` | `planner`, `orgAdmin` or `controller` | `getOrgExercises()` |
 | `GET /api/org/staff-assignments` | `orgAdmin` **alone** | **not consumed yet** — see below |
 
 **No org route takes a route or query parameter, and no body carries an organization id.** That is
@@ -72,7 +72,27 @@ types.ts                      OrgExercise / CreateExerciseInput / CreateExercise
 ## Routing
 
 Registered as ONE entry in `@/features/staff/staffRouteRegistry` (`id: 'exercise-management'`,
-`path: '/staff/exercises'`, `group: 'administer'`, `allowedRoles: ['planner', 'orgAdmin']` — which
-mirrors the server's `ExerciseAdministrators` gate exactly). `isDefaultFor: ['orgAdmin']`: this is
-the org-admin's home page, and the first surface `orgAdmin` has ever had (before COR-076,
-`RoleAwareEntry` fail-closed every org-admin session to `/login`).
+`path: '/staff/exercises'`, `group: 'administer'`, `allowedRoles: ['planner', 'orgAdmin',
+'controller']` — which mirrors the server's `ExerciseAdministrators` gate exactly).
+`isDefaultFor: ['orgAdmin']`: this is the org-admin's home page, and the first surface `orgAdmin` has
+ever had (before COR-076, `RoleAwareEntry` fail-closed every org-admin session to `/login`).
+
+## DF-20 — controllers manage exercises too (demo-feedback story 15, 2026-10-15)
+
+Tom's UAT account is a controller; `/staff/exercises` admitted only planner and org admin, so it
+silently bounced him to the console. Decision DF-20 widened the gate on **both** sides at once:
+
+- **Server:** `ExerciseAdminRoles.ExerciseAdministrators` is now `planner`, `orgAdmin`,
+  `controller`. The endpoint filter and both services' re-checks read that one set, so they cannot
+  disagree. A controller who creates an exercise gets a `controller` assignment on it (the
+  unchanged "creator's own role" rule). `evaluator` is still `403`.
+  `GET /api/org/staff-assignments` is still **org admin only**.
+- **Client:** the registry entry admits `controller` (seam S-4). The controller's home stays
+  `/staff/console`; Exercise Management appears in its surface launcher.
+- **Isolation is unchanged.** Widening the role set did not widen the tenant bound: no id in an org
+  route, the tenant only from the server session, nothing across customers — the backend suites
+  carry a controller case for create and list in a second tenant.
+
+A role still not admitted (the evaluator, here) now sees the app-shell's COBRA not-allowed page
+("You need the planner, org admin or controller role to open Exercise Management") instead of a
+silent redirect.

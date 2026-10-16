@@ -105,7 +105,7 @@ describe('Edit action (DF-29)', () => {
     await renderCards(buildPost())
 
     const edit = screen.getByRole('button', { name: 'Edit post' })
-    expect(edit).toHaveAttribute('title', 'Edit post')
+    expect(edit).not.toHaveAttribute('title')
     expect(edit.querySelector('svg[data-icon="pen"]')).not.toBeNull()
   })
 

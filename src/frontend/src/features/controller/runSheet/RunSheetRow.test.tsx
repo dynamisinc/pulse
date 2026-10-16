@@ -19,6 +19,10 @@ import { RunSheetRow, type RunSheetRowProps } from './RunSheetRow'
 import { makeItem, makePost } from './runSheetTestHarness'
 import type { InjectItemDto, InjectStatus } from './types'
 
+// Demo-feedback story 11 (DF-14): the console's write controls render only for a controller
+// session, and this suite mounts none, so the read-only gate is fixed to "controller" here.
+vi.mock('@/features/controller/access/useCanControl', () => ({ useCanControl: () => true }))
+
 const persona = {
   displayName: 'Fairhaven Water Utility',
   handle: 'FairhavenWater',

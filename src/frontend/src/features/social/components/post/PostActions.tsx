@@ -48,10 +48,9 @@
  *
  * EDIT (demo-feedback story 20, DF-29). On the viewer's OWN post, while
  * `post.viewer.editableForSeconds` is above 0, the row shows an Edit button (FontAwesome `faPen`,
- * accessible name and tooltip "Edit post"; a native `title` tooltip - the shared participant
- * tooltip component of story 13 is not on this branch yet). `useEditWindow` counts the duration
- * down from when the post was read and hides the button at 0 without a reload; no clock is ever
- * rendered (COR-053). It opens `EditPostDialog`
+ * accessible name and tooltip "Edit post"; the story-13 `ParticipantTooltip`). `useEditWindow`
+ * counts the duration down from when the post was read and hides the button at 0 without a
+ * reload; no clock is ever rendered (COR-053). It opens `EditPostDialog`
  * (text-only); a save reports the fresh window back here, and a refused one (window closed / edit
  * limit) closes it. The row also SEEDS `editedPostsStore` with the card's own `post.edited`, so the
  * header's "Edited" button works for any card without `PostCard` wiring. Like Pin it needs a
@@ -111,6 +110,8 @@ import { formatMagnitude, spokenMagnitude } from '../../services/audience'
 import { EditPostDialog } from '../../edit/EditPostDialog'
 import { editedPostsStore, useEditedPost } from '../../edit/editedPostsStore'
 import { useEditWindow } from '../../edit/useEditWindow'
+import { usePostCounts } from '../../services/postCountsStore'
+import { ParticipantTooltip } from '../ParticipantTooltip'
 import type { PostCardVariant, PostView } from './types'
 import styles from './PostActions.module.css'
 
@@ -161,15 +162,19 @@ function PostActionsRow({ post, variant, onReply }: PostActionsProps) {
   // ONE failure-message channel for both toggles: a single live region per card,
   // and the most recent failure always replaces an older one.
   const notice = useTransientMessage()
+  // DF-17: the post's LIVE counts (its own, or a newer pushed frame). Numbers only.
+  const counts = usePostCounts(post.id, post.counts)
   const reaction = useReaction({
     postId: post.id,
     initialLikeCount: post.counts.like,
+    externalLikeCount: counts.like,
     initiallyLiked: post.viewer?.liked ?? false,
     notice,
   })
   const amplify = useAmplify({
     postId: post.id,
     initialRepostCount: post.counts.repost,
+    externalRepostCount: counts.repost,
     initiallyReposted: post.viewer?.reposted ?? false,
     notice,
   })
@@ -222,7 +227,7 @@ function PostActionsRow({ post, variant, onReply }: PostActionsProps) {
       key: 'reply',
       label: 'Reply',
       icon: faComment,
-      count: post.counts.reply,
+      count: counts.reply,
       // `onReply` is optional: omitted => inert text, never a focusable no-op button.
       interactive: canReply,
       onClick: canReply ? () => onReply(post.id) : undefined,
@@ -231,7 +236,7 @@ function PostActionsRow({ post, variant, onReply }: PostActionsProps) {
       key: 'repost',
       label: 'Repost',
       icon: faRetweet,
-      count: canRepost ? amplify.repostCount : post.counts.repost,
+      count: canRepost ? amplify.repostCount : counts.repost,
       activeSuffix: 'reposted',
       interactive: canRepost,
       pressed: canRepost ? amplify.repostedByViewer : undefined,
@@ -241,7 +246,7 @@ function PostActionsRow({ post, variant, onReply }: PostActionsProps) {
       key: 'like',
       label: 'Like',
       icon: faHeart,
-      count: canLike ? reaction.likeCount : post.counts.like,
+      count: canLike ? reaction.likeCount : counts.like,
       activeSuffix: 'liked',
       interactive: canLike,
       pressed: canLike ? reaction.likedByViewer : undefined,
@@ -283,50 +288,62 @@ function PostActionsRow({ post, variant, onReply }: PostActionsProps) {
               : `${action.label}, ${spoken}`
 
           return (
-            <button
-              key={action.key}
-              type="button"
-              className={
-                isOn ? `${styles.actionButton} ${styles.actionButtonActive}` : styles.actionButton
-              }
-              data-action={action.key}
-              aria-label={label}
-              aria-pressed={action.pressed}
-              onClick={action.onClick}
-            >
-              <FontAwesomeIcon icon={action.icon} aria-hidden="true" className={styles.actionIcon} />
-              <span className={styles.actionCount}>{compact}</span>
-            </button>
+            <ParticipantTooltip key={action.key} label={action.label}>
+              <button
+                type="button"
+                className={
+                  isOn ? `${styles.actionButton} ${styles.actionButtonActive}` : styles.actionButton
+                }
+                data-action={action.key}
+                aria-label={label}
+                aria-pressed={action.pressed}
+                onClick={action.onClick}
+              >
+                <FontAwesomeIcon
+                  icon={action.icon}
+                  aria-hidden="true"
+                  className={styles.actionIcon}
+                />
+                <span className={styles.actionCount}>{compact}</span>
+              </button>
+            </ParticipantTooltip>
           )
         })}
         {canPin && (
-          <button
-            type="button"
-            className={
-              pin.pinned
-                ? `${styles.actionButton} ${styles.actionButtonActive}`
-                : styles.actionButton
-            }
-            data-action="pin"
-            aria-label="Pin"
-            aria-pressed={pin.pinned}
-            onClick={pin.toggle}
-          >
-            <FontAwesomeIcon icon={faThumbtack} aria-hidden="true" className={styles.actionIcon} />
-          </button>
+          <ParticipantTooltip label="Pin">
+            <button
+              type="button"
+              className={
+                pin.pinned
+                  ? `${styles.actionButton} ${styles.actionButtonActive}`
+                  : styles.actionButton
+              }
+              data-action="pin"
+              aria-label="Pin"
+              aria-pressed={pin.pinned}
+              onClick={pin.toggle}
+            >
+              <FontAwesomeIcon
+                icon={faThumbtack}
+                aria-hidden="true"
+                className={styles.actionIcon}
+              />
+            </button>
+          </ParticipantTooltip>
         )}
         {canEdit && (
-          <button
-            type="button"
-            className={styles.actionButton}
-            data-action="edit"
-            aria-label="Edit post"
-            aria-haspopup="dialog"
-            title="Edit post"
-            onClick={event => setEditOpener(event.currentTarget)}
-          >
-            <FontAwesomeIcon icon={faPen} aria-hidden="true" className={styles.actionIcon} />
-          </button>
+          <ParticipantTooltip label="Edit post">
+            <button
+              type="button"
+              className={styles.actionButton}
+              data-action="edit"
+              aria-label="Edit post"
+              aria-haspopup="dialog"
+              onClick={event => setEditOpener(event.currentTarget)}
+            >
+              <FontAwesomeIcon icon={faPen} aria-hidden="true" className={styles.actionIcon} />
+            </button>
+          </ParticipantTooltip>
         )}
       </div>
       {editOpener !== null && (

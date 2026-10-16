@@ -36,8 +36,8 @@ public sealed class CreateExerciseRequest
 }
 
 /// <summary>
-/// One exercise row on an organization-administration surface (COR-075) — the minimum a planner or org-admin
-/// needs to tell two runs apart without opening either: name, lifecycle status, host and creation date.
+/// One exercise row on an organization-administration surface (COR-075) — the minimum a planner, org-admin or
+/// controller needs to tell two runs apart without opening either: name, lifecycle status, host and creation date.
 /// </summary>
 /// <remarks>
 /// Staff/platform world only (XC-002). It carries NO tenant id: the caller can only ever see their own
@@ -84,7 +84,8 @@ public sealed class CreateExerciseResponseDto
 
     /// <summary>
     /// The role of the <c>StaffAssignment</c> auto-created for the creator (COR-074 AC3) — their own role,
-    /// <c>planner</c> or <c>orgAdmin</c> — so they can reach the run through the exercise switcher immediately.
+    /// <c>planner</c>, <c>orgAdmin</c> or (DF-20) <c>controller</c> — so they can reach the run through the
+    /// exercise switcher immediately.
     /// </summary>
     [JsonPropertyName("assignedRole")]
     public required string AssignedRole { get; init; }

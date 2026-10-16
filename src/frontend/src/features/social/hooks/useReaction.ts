@@ -66,6 +66,11 @@ export interface UseReactionOptions {
   readonly postId: string
   /** The post's current like count — seeds `likeCount` (owned locally after). */
   readonly initialLikeCount: number
+  /**
+   * The post's LIVE like count (demo-feedback DF-17, `usePostCounts`): a change moves `likeCount`
+   * only, never `likedByViewer`, and not while a write is in flight (see `useReactionToggle`).
+   */
+  readonly externalLikeCount?: number
   /** Whether the viewer has already liked this post — seeds `likedByViewer`. */
   readonly initiallyLiked?: boolean
   /** A shared failure-message channel (one live region per card); see `useReactionToggle`. */
@@ -148,7 +153,7 @@ const LIKE_FAILURE_MESSAGE = "Couldn't update your like. Please try again."
  * only intended consumer.
  */
 export function useReaction(options: UseReactionOptions): UseReactionResult {
-  const { postId, initialLikeCount, initiallyLiked = false, notice } = options
+  const { postId, initialLikeCount, externalLikeCount, initiallyLiked = false, notice } = options
   const { exerciseId, timeZone } = useExerciseContext()
   const session = useSession()
 
@@ -182,6 +187,7 @@ export function useReaction(options: UseReactionOptions): UseReactionResult {
     postId,
     kind: 'like',
     initialCount: initialLikeCount,
+    externalCount: externalLikeCount,
     initiallyActive: initiallyLiked,
     canAct: canReact,
     failureMessage: LIKE_FAILURE_MESSAGE,

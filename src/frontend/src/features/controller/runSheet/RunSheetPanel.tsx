@@ -102,6 +102,7 @@ import { CREATE_LOCK, useInjectQueue, type ActionOutcome } from './useInjectQueu
 import { useRunSheetFilters } from './useRunSheetFilters'
 import { useStatusAnnouncer } from './useStatusAnnouncer'
 import type { InjectItemDto, InjectItemWrite } from './types'
+import { useCanControl } from '../access'
 
 /** The panel. No props: the frozen seam name (see the module header). */
 export function RunSheetPanel() {
@@ -210,6 +211,9 @@ function Banner({
 }
 
 function RunSheetPanelBody({ exerciseId }: { readonly exerciseId: string }) {
+  // Story 11 (DF-14): a non-controller reads the sheet; Fire next / Add / Import, every row write
+  // and every write shortcut are absent, and an item opens read-only.
+  const canControl = useCanControl()
   const { timeZone } = useExerciseContext()
   const queue = useInjectQueue()
   const {
@@ -383,7 +387,7 @@ function RunSheetPanelBody({ exerciseId }: { readonly exerciseId: string }) {
   const openEditor = (item: InjectItemDto): void => {
     setConfirmDeleteId(null)
     setEditor({
-      mode: isEditable(item.status) ? 'edit' : 'view',
+      mode: canControl && isEditable(item.status) ? 'edit' : 'view',
       itemId: item.id,
       base: item,
       key: ++editorKey.current,
@@ -502,6 +506,7 @@ function RunSheetPanelBody({ exerciseId }: { readonly exerciseId: string }) {
     if (event.repeat || event.key.length !== 1) return
 
     const key = event.key.toLowerCase()
+    if (!canControl && key !== 'e') return
     if (key === 'n') {
       event.preventDefault()
       fireNext()
@@ -601,31 +606,33 @@ function RunSheetPanelBody({ exerciseId }: { readonly exerciseId: string }) {
         </Box>
 
         <Box sx={{ mt: 1, display: 'flex', flexWrap: 'wrap', gap: 1, alignItems: 'center' }}>
-          <RunSheetButton
-            kind="primary"
-            icon={faBolt}
-            label="Fire next"
-            ariaLabel="Fire next pending item"
-            disabled={frozen || !nextPending}
-            title={frozen ? MESSAGES.worldFrozen : !nextPending ? 'Nothing pending in this view' : undefined}
-            describedBy={frozen ? reasonId : undefined}
-            testId="fire-next"
-            onClick={fireNext}
-          />
-          <RunSheetButton
-            icon={faPlus}
-            label="Add"
-            ariaLabel="Add item"
-            testId="add-item"
-            onClick={openCreate}
-          />
-          <RunSheetButton
-            icon={faFileExcel}
-            label="Import from Excel"
-            ariaLabel="Import from Excel"
-            testId="import-from-excel"
-            onClick={() => setImportOpen(true)}
-          />
+          {canControl && <>
+            <RunSheetButton
+              kind="primary"
+              icon={faBolt}
+              label="Fire next"
+              ariaLabel="Fire next pending item"
+              disabled={frozen || !nextPending}
+              title={frozen ? MESSAGES.worldFrozen : !nextPending ? 'Nothing pending in this view' : undefined}
+              describedBy={frozen ? reasonId : undefined}
+              testId="fire-next"
+              onClick={fireNext}
+            />
+            <RunSheetButton
+              icon={faPlus}
+              label="Add"
+              ariaLabel="Add item"
+              testId="add-item"
+              onClick={openCreate}
+            />
+            <RunSheetButton
+              icon={faFileExcel}
+              label="Import from Excel"
+              ariaLabel="Import from Excel"
+              testId="import-from-excel"
+              onClick={() => setImportOpen(true)}
+            />
+          </>}
           <RunSheetButton
             icon={faKeyboard}
             label="Keyboard"
