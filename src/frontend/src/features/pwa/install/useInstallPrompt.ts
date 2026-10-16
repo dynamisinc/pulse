@@ -8,10 +8,11 @@
  *   mode 'ios'      iOS Safari, >= 2 visits to this exercise, not standalone, not dismissed
  *
  * Fail closed: no `exerciseId` => 'none' (no per-exercise persistence possible, and the brand
- * must belong to a resolved exercise). Escape dismisses whichever surface is showing. Taps are
+ * must belong to a resolved exercise). Escape dismisses the surface only while focus is inside it
+ * (and the event is not already handled). Taps are
  * the only thing that calls `prompt()`. NO telemetry (MT-D5).
  */
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState, type RefObject } from 'react'
 import {
   IOS_VISIT_THRESHOLD,
   detectPlatform,
@@ -37,7 +38,10 @@ export interface InstallPromptState {
   dismiss(): void
 }
 
-export function useInstallPrompt(exerciseId: string | undefined): InstallPromptState {
+export function useInstallPrompt(
+  exerciseId: string | undefined,
+  surfaceRef: RefObject<HTMLElement | null>,
+): InstallPromptState {
   const [deferred, setDeferred] = useState<BeforeInstallPromptEvent | undefined>()
   const [hidden, setHidden] = useState(false)
   const [iosEligible, setIosEligible] = useState(false)
@@ -107,11 +111,15 @@ export function useInstallPrompt(exerciseId: string | undefined): InstallPromptS
   useEffect(() => {
     if (mode === 'none') return undefined
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') dismiss()
+      // Only when focus is inside our banner/sheet, and not when another dialog already
+      // handled this Escape - otherwise closing some OTHER dialog would dismiss us for good.
+      if (e.key !== 'Escape' || e.defaultPrevented) return
+      const surface = surfaceRef.current
+      if (surface && surface.contains(document.activeElement)) dismiss()
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
-  }, [mode, dismiss])
+  }, [mode, dismiss, surfaceRef])
 
   return { mode, install, dismiss }
 }

@@ -1,6 +1,7 @@
 /**
  * features/pwa/PwaRoot.test.tsx - PwaRoot gating: pre-brand + staff-route absence (story 09).
  */
+import { MemoryRouter } from 'react-router-dom'
 import { render, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { BrandTokens } from '@/features/participant-shell/brandTokens'
@@ -17,7 +18,15 @@ vi.mock('./manifest/brandIcons', async orig => ({
   },
 }))
 
-import { PwaRoot } from './PwaRoot'
+import { PwaRoot as Root } from './PwaRoot'
+
+function PwaRoot({ at = '/' }: { at?: string }) {
+  return (
+    <MemoryRouter initialEntries={[at]}>
+      <Root />
+    </MemoryRouter>
+  )
+}
 
 const brand: BrandTokens = {
   name: 'Bay Shield Network',
@@ -54,15 +63,13 @@ describe('PwaRoot', () => {
     const r2 = render(<PwaRoot />)
     expect(document.querySelector('[data-testid="pwa-dock"]')).not.toBeNull()
     r2.unmount()
-    window.history.pushState({}, '', '/staff/console')
-    render(<PwaRoot />)
+    render(<PwaRoot at="/staff/console" />)
     expect(document.querySelector('[data-testid="pwa-dock"]')).toBeNull()
   })
 
   it('renders no manifest on a staff route even with a resolved brand', async () => {
     hook.value = brand
-    window.history.pushState({}, '', '/staff/console')
-    render(<PwaRoot />)
+    render(<PwaRoot at="/staff/console" />)
     await new Promise(r => setTimeout(r, 0))
     expect(document.head.querySelector('link[rel="manifest"]')).toBeNull()
     expect(document.title).toBe('Pulse')

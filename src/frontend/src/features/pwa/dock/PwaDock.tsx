@@ -16,7 +16,11 @@
  * World: participant. No COBRA / MUI.
  */
 import type { ReactNode } from 'react'
+import { SHELL_Z } from '@/features/participant-shell/mountContract'
 import styles from './PwaDock.module.css'
+
+/** Above content + channel nav, but below the alert bar (banners must never cover it). */
+const DOCK_Z_INDEX = SHELL_Z.alertBar - 1
 
 export interface PwaDockProps {
   children?: ReactNode
@@ -24,7 +28,7 @@ export interface PwaDockProps {
 
 export function PwaDock({ children }: PwaDockProps) {
   return (
-    <div className={styles.dock} data-testid="pwa-dock">
+    <div className={styles.dock} style={{ zIndex: DOCK_Z_INDEX }} data-testid="pwa-dock">
       {children}
     </div>
   )

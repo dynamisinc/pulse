@@ -21,6 +21,8 @@
  *
  * No telemetry (MT-D5). No backend route.
  */
+import { useLocation } from 'react-router-dom'
+import { useOptionalExerciseContext } from '@/core/exerciseContext'
 import { useResolvedBrandConfig } from '@/features/participant-shell/brandTokens'
 import { ManifestHead } from './manifest/ManifestHead'
 import { isStaffPath } from './isStaffPath'
@@ -30,11 +32,13 @@ import { ServiceWorkerRegistrar } from './serviceWorker/ServiceWorkerRegistrar'
 
 export function PwaRoot() {
   const brand = useResolvedBrandConfig()
-  const onStaff = isStaffPath(window.location.pathname)
+  const { pathname } = useLocation() // PwaRoot is mounted under the Router (participantSurface)
+  const exerciseId = useOptionalExerciseContext()?.exerciseId
+  const onStaff = isStaffPath(pathname)
   const participantBrand = onStaff ? undefined : brand
   return (
     <>
-      <ManifestHead brand={participantBrand} />
+      <ManifestHead brand={participantBrand} exerciseId={exerciseId} />
       {participantBrand && (
         <PwaDock>
           <ServiceWorkerRegistrar />

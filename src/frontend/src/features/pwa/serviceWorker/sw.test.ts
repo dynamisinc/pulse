@@ -23,7 +23,12 @@ class FakeCache {
   }
 }
 
-function boot(opts: { buildId: string; precache: string[]; caches?: Map<string, FakeCache>; fetchImpl?: typeof fetch }) {
+function boot(opts: {
+  buildId: string
+  precache: string[]
+  caches?: Map<string, FakeCache>
+  fetchImpl?: typeof fetch
+}) {
   const listeners: Record<string, Listener> = {}
   const cacheMap = opts.caches ?? new Map<string, FakeCache>()
   const cachesApi = {
@@ -63,16 +68,27 @@ function boot(opts: { buildId: string; precache: string[]; caches?: Map<string, 
     fn({ waitUntil: (x: Promise<unknown>) => { p = x } })
     await p
   }
-  const request = (url: string, init: { method?: string; mode?: string } = {}) => ({
+  const request = (
+    url: string,
+    init: { method?: string; mode?: string; range?: string } = {},
+  ) => ({
     url: new URL(url, ORIGIN).href,
     method: init.method ?? 'GET',
     mode: init.mode ?? 'cors',
+    headers: new Headers(init.range ? { range: init.range } : {}),
   })
   /** Returns the response if the worker answered, or 'passthrough'. */
   const fetchEvent = async (req: ReturnType<typeof request>) => {
     let p: Promise<Response> | undefined
-    listeners.fetch?.({ request: req, respondWith: (x: Promise<Response>) => { p = x } })
-    return p ? await p : 'passthrough'
+    const extended: Array<Promise<unknown>> = []
+    listeners.fetch?.({
+      request: req,
+      respondWith: (x: Promise<Response>) => { p = x },
+      waitUntil: (x: Promise<unknown>) => { extended.push(x) },
+    })
+    const res = p ? await p : 'passthrough'
+    await Promise.all(extended)
+    return res
   }
   const cacheOf = (n: string): FakeCache => {
     const c = cacheMap.get(n)
@@ -80,7 +96,8 @@ function boot(opts: { buildId: string; precache: string[]; caches?: Map<string, 
     return c
   }
   return { listeners, cacheMap, cacheOf, fetchMock, skipWaiting, claim, request, fetchEvent,
-    install: () => waitFor(listeners.install as Listener), activate: () => waitFor(listeners.activate as Listener) }
+    install: () => waitFor(listeners.install as Listener),
+    activate: () => waitFor(listeners.activate as Listener) }
 }
 
 const PRE = ['/index.html', '/assets/index-abc.js', '/assets/index-abc.css']
@@ -143,7 +160,7 @@ describe('sw.js', () => {
 
   it('is passthrough for cross-origin requests (even /assets)', async () => {
     const sw = boot({ buildId: 'v1', precache: PRE })
-    const r = { url: 'https://cdn.example.com/assets/x.js', method: 'GET', mode: 'cors' }
+    const r = { ...sw.request('/assets/x.js'), url: 'https://cdn.example.com/assets/x.js' }
     expect(await sw.fetchEvent(r)).toBe('passthrough')
   })
 
@@ -195,7 +212,35 @@ describe('sw.js', () => {
     await sw.fetchEvent(sw.request('/assets/chunk-9.js'))
     await sw.fetchEvent(sw.request('/api/feed?exerciseId=x'))
     await sw.fetchEvent(sw.request('/join/tok', { mode: 'navigate' }))
-    const paths = [...sw.cacheMap.values()].flatMap(c => [...c.store.keys()]).map(k => new URL(k).pathname)
+    const paths = [...sw.cacheMap.values()]
+      .flatMap(c => [...c.store.keys()])
+      .map(k => new URL(k).pathname)
     expect(paths.every(p => p === '/index.html' || p.startsWith('/assets/'))).toBe(true)
+  })
+
+  it('passes through Range requests and does not cache non-200 (206) responses', async () => {
+    const sw = boot({ buildId: 'v1', precache: [] })
+    expect(await sw.fetchEvent(sw.request('/assets/video-1.mp4', { range: 'bytes=0-9' })))
+      .toBe('passthrough')
+    const sw2 = boot({
+      buildId: 'v1', precache: [],
+      fetchImpl: async () => new Response('part', { status: 206 }),
+    })
+    await sw2.fetchEvent(sw2.request('/assets/chunk-2.js'))
+    expect(await sw2.cacheOf('pulse-shell-v1').match(sw2.request('/assets/chunk-2.js')))
+      .toBeUndefined()
+  })
+
+  it('only treats hashed top-level /assets/ files as shell assets', async () => {
+    const sw = boot({ buildId: 'v1', precache: [] })
+    expect(await sw.fetchEvent(sw.request('/assets/sub/dir/x.js'))).toBe('passthrough')
+    expect(await sw.fetchEvent(sw.request('/assets/'))).toBe('passthrough')
+    expect(await sw.fetchEvent(sw.request('/assets/index-abc.js'))).toBeInstanceOf(Response)
+  })
+
+  it('/join keeps exact + /join/ prefix semantics for navigation', async () => {
+    const sw = boot({ buildId: 'v1', precache: [] })
+    expect(await sw.fetchEvent(sw.request('/join', { mode: 'navigate' }))).toBe('passthrough')
+    expect(await sw.fetchEvent(sw.request('/join/t', { mode: 'navigate' }))).toBe('passthrough')
   })
 })

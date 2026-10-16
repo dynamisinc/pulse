@@ -7,12 +7,14 @@
  *   - iOS Safari: a dismissible non-modal sheet with "Share -> Add to Home Screen" steps
  *     (FontAwesome icons + text; never color-only).
  * Skinned with `--pulse-brand-*` tokens; no COBRA, no MUI; actions are >= 44px; it never takes
- * focus (feed focus is preserved) and Escape dismisses. Copy uses the exercise brand name only,
+ * focus (feed focus is preserved) and Escape dismisses while focus is inside it. Copy uses the
+ * exercise brand name only,
  * never Pulse/Dynamis. Mounted by PwaRoot inside PwaDock, so it inherits PwaRoot's gates
  * (resolved brand, not `/staff/*`, signed-in subtree) and the dock's safe-zone placement above
  * the compliance footer / tab bar. Needs the exercise id (from the exercise context) for
  * per-exercise dismissal; with none it renders nothing. NO telemetry (MT-D5).
  */
+import { useRef } from 'react'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import {
   faArrowUpFromBracket,
@@ -30,12 +32,18 @@ export interface InstallPromptProps {
 }
 
 export function InstallPrompt({ brandName }: InstallPromptProps) {
+  const surfaceRef = useRef<HTMLElement>(null)
   const exerciseId = useOptionalExerciseContext()?.exerciseId
-  const { mode, install, dismiss } = useInstallPrompt(exerciseId)
+  const { mode, install, dismiss } = useInstallPrompt(exerciseId, surfaceRef)
 
   if (mode === 'android') {
     return (
-      <section className={styles.card} aria-label={`Add ${brandName} to your home screen`}>
+      <section
+        ref={surfaceRef}
+        className={styles.card}
+        role="region"
+        aria-label={`Add ${brandName} to your home screen`}
+      >
         <button type="button" className={styles.primary} onClick={() => void install()}>
           <FontAwesomeIcon icon={faDownload} aria-hidden="true" />
           <span>{`Add ${brandName} to your home screen`}</span>
@@ -50,9 +58,9 @@ export function InstallPrompt({ brandName }: InstallPromptProps) {
   if (mode === 'ios') {
     return (
       <section
+        ref={surfaceRef}
         className={styles.sheet}
-        role="dialog"
-        aria-modal="false"
+        role="region"
         aria-label={`Add ${brandName} to your home screen`}
       >
         <div className={styles.sheetHead}>

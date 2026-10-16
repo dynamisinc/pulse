@@ -51,7 +51,7 @@ beforeEach(() => {
 afterEach(() => setUa(realUa))
 
 describe('Android / Chrome', () => {
-  it('shows nothing until beforeinstallprompt, then a branded banner whose tap calls prompt()', async () => {
+  it('holds the event, then a branded banner whose tap calls prompt()', async () => {
     render(<InstallPrompt brandName="Bay Shield Network" />)
     expect(screen.queryByRole('button')).toBeNull()
     const evt = fireBip()
@@ -88,12 +88,31 @@ describe('Android / Chrome', () => {
     expect(screen.getByRole('button', { name: /Add Harbor News/ })).toBeInTheDocument()
   })
 
-  it('Escape dismisses without needing focus', () => {
+  it('Escape with focus inside the banner dismisses it', () => {
     render(<InstallPrompt brandName="Bay Shield" />)
     fireBip()
-    fireEvent.keyDown(document, { key: 'Escape' })
+    screen.getByRole('button', { name: 'Not now' }).focus()
+    fireEvent.keyDown(document.activeElement ?? document, { key: 'Escape' })
     expect(screen.queryByRole('button', { name: 'Not now' })).toBeNull()
     expect(localStorage.getItem(dismissKey('ex-a'))).toBe('1')
+  })
+
+  it('Escape elsewhere (focus outside, or already handled) does not dismiss', () => {
+    render(
+      <>
+        <button type="button">other dialog</button>
+        <InstallPrompt brandName="Bay Shield" />
+      </>,
+    )
+    fireBip()
+    screen.getByRole('button', { name: 'other dialog' }).focus()
+    fireEvent.keyDown(document.activeElement ?? document, { key: 'Escape' })
+    screen.getByRole('button', { name: 'Not now' }).focus()
+    const handled = new KeyboardEvent('keydown', { key: 'Escape', cancelable: true, bubbles: true })
+    handled.preventDefault()
+    document.activeElement?.dispatchEvent(handled)
+    expect(screen.getByRole('button', { name: 'Not now' })).toBeInTheDocument()
+    expect(localStorage.getItem(dismissKey('ex-a'))).toBeNull()
   })
 
   it('does not steal focus when it appears', () => {
@@ -137,38 +156,39 @@ describe('iOS Safari', () => {
 
   it('does not show on the first visit', () => {
     render(<InstallPrompt brandName="Bay Shield" />)
-    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(screen.queryByRole('region')).toBeNull()
     expect(localStorage.getItem(visitsKey('ex-a'))).toBe('1')
   })
 
   it('shows the Share -> Add to Home Screen sheet from the second visit, dismissible', () => {
     localStorage.setItem(visitsKey('ex-a'), '1')
     const { unmount } = render(<InstallPrompt brandName="Bay Shield" />)
-    const dlg = screen.getByRole('dialog', { name: /Add Bay Shield to your home screen/ })
+    const dlg = screen.getByRole('region', { name: /Add Bay Shield to your home screen/ })
     expect(dlg.textContent).toMatch(/Share/)
     expect(dlg.textContent).toMatch(/Add to Home Screen/)
     expect(dlg.querySelectorAll('svg').length).toBeGreaterThanOrEqual(2)
     fireEvent.click(screen.getByRole('button', { name: 'Close' }))
-    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(screen.queryByRole('region')).toBeNull()
     unmount()
     // next visit: never auto-reopens within the same exercise
     sessionStorage.clear()
     render(<InstallPrompt brandName="Bay Shield" />)
-    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(screen.queryByRole('region')).toBeNull()
   })
 
-  it('Escape closes the sheet', () => {
+  it('Escape closes the sheet when focus is inside it', () => {
     localStorage.setItem(visitsKey('ex-a'), '1')
     render(<InstallPrompt brandName="Bay Shield" />)
-    fireEvent.keyDown(document, { key: 'Escape' })
-    expect(screen.queryByRole('dialog')).toBeNull()
+    screen.getByRole('button', { name: 'Close' }).focus()
+    fireEvent.keyDown(document.activeElement ?? document, { key: 'Escape' })
+    expect(screen.queryByRole('region')).toBeNull()
   })
 
   it('is suppressed when launched from the home screen (navigator.standalone)', () => {
     localStorage.setItem(visitsKey('ex-a'), '5')
     Object.defineProperty(navigator, 'standalone', { value: true, configurable: true })
     render(<InstallPrompt brandName="Bay Shield" />)
-    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(screen.queryByRole('region')).toBeNull()
     Reflect.deleteProperty(navigator, 'standalone')
   })
 })

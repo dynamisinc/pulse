@@ -24,11 +24,17 @@ import { applyBrandHead } from './headTags'
 export interface ManifestHeadProps {
   /** The RESOLVED brand, or undefined to keep the head brand-neutral. */
   brand: BrandTokens | undefined
+  /** Active exercise id; makes the manifest `id` per exercise. */
+  exerciseId?: string | undefined
   /** Test seam; defaults to the canvas renderer. */
   renderer?: IconRenderer
 }
 
-export function ManifestHead({ brand, renderer = canvasIconRenderer }: ManifestHeadProps) {
+export function ManifestHead({
+  brand,
+  exerciseId,
+  renderer = canvasIconRenderer,
+}: ManifestHeadProps) {
   // Primitive deps so a re-created-but-equal token object does not churn blob URLs.
   const name = brand?.name
   const primary = brand?.colors.primary
@@ -55,7 +61,7 @@ export function ManifestHead({ brand, renderer = canvasIconRenderer }: ManifestH
     renderBrandIcons(resolved, renderer)
       .then(iconSet => {
         if (cancelled) return
-        const manifest = buildManifest(resolved, window.location.origin, iconSet.icons)
+        const manifest = buildManifest(resolved, window.location.origin, iconSet.icons, exerciseId)
         restore = applyBrandHead({
           manifestJson: JSON.stringify(manifest),
           title: manifest.name,
@@ -71,7 +77,7 @@ export function ManifestHead({ brand, renderer = canvasIconRenderer }: ManifestH
       cancelled = true
       restore?.()
     }
-  }, [name, primary, accent, surface, onSurface, logoSrc, logoAlt, renderer])
+  }, [name, primary, accent, surface, onSurface, logoSrc, logoAlt, renderer, exerciseId])
 
   return null
 }

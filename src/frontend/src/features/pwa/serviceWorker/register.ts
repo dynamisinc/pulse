@@ -12,7 +12,8 @@
  * UPDATE FLOW: a new worker installs and WAITS. We surface `updateAvailable`; only when the
  * participant taps "Refresh" do we post SKIP_WAITING and, once the new worker takes control,
  * reload (user-initiated, never forced mid-exercise). `controllerchange` caused by the very
- * first install (clients.claim) does NOT reload: we only reload after we asked for it.
+ * first install (clients.claim) does NOT reload. If a controller already existed at startup,
+ * a controllerchange (e.g. the update was accepted in another tab) reloads this tab too.
  *
  * No telemetry (MT-D5 is install-only, but this is infrastructure; nothing is emitted).
  */
@@ -63,12 +64,14 @@ export async function registerServiceWorker(
     listeners.forEach(l => l())
   }
 
+  const watched: Array<() => void> = []
   const watch = (w: ServiceWorker | null) => {
     if (!w) return
     const check = () => {
       if (w.state === 'installed' && container.controller) set(true)
     }
     w.addEventListener('statechange', check)
+    watched.push(() => w.removeEventListener('statechange', check))
     check()
   }
   if (reg.waiting && container.controller) set(true)
@@ -76,8 +79,16 @@ export async function registerServiceWorker(
   const onUpdateFound = () => watch(reg.installing)
   reg.addEventListener('updatefound', onUpdateFound)
 
+  // A controller present at startup means any later change is a real update (possibly accepted
+  // in ANOTHER tab): reload so this tab doesn't run a stale shell against the new worker. The
+  // first-install claim (no controller at startup) never reloads.
+  const hadController = Boolean(container.controller)
+  let reloaded = false
   const onControllerChange = () => {
-    if (applying) reload()
+    if ((applying || hadController) && !reloaded) {
+      reloaded = true
+      reload()
+    }
   }
   container.addEventListener('controllerchange', onControllerChange)
 
@@ -104,6 +115,7 @@ export async function registerServiceWorker(
       reg.removeEventListener('updatefound', onUpdateFound)
       container.removeEventListener('controllerchange', onControllerChange)
       document.removeEventListener('visibilitychange', onVisible)
+      watched.forEach(off => off())
       listeners.clear()
     },
   }

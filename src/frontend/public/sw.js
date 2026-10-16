@@ -56,13 +56,15 @@ function underPrefix(pathname, prefix) {
 /** 'asset' | 'navigation' | 'passthrough' for a request. Pure. */
 function classify(request, origin) {
   if (request.method !== 'GET') return 'passthrough'
+  // Range requests (media seeking etc.) are never ours; 206s must not reach the cache.
+  if (request.headers && request.headers.get && request.headers.get('range')) return 'passthrough'
   var url = new URL(request.url)
   if (url.origin !== origin) return 'passthrough'
   var path = url.pathname
-  if (path.indexOf('/assets/') === 0) return 'asset'
+  if (/^\/assets\/[\w.-]+$/.test(path)) return 'asset' // hashed files only
   if (request.mode === 'navigate') {
     for (var i = 0; i < NAV_DENY.length; i++) {
-      if (underPrefix(path, NAV_DENY[i]) || (NAV_DENY[i] === '/join' && path.indexOf('/join') === 0)) {
+      if (underPrefix(path, NAV_DENY[i])) {
         return 'passthrough'
       }
     }
@@ -115,7 +117,9 @@ self.addEventListener('fetch', function (event) {
         return cache.match(event.request).then(function (hit) {
           if (hit) return hit
           return fetch(event.request).then(function (res) {
-            if (res.ok && res.type === 'basic') cache.put(event.request, res.clone())
+            if (res.status === 200 && res.type === 'basic') {
+              event.waitUntil(cache.put(event.request, res.clone()))
+            }
             return res
           })
         })

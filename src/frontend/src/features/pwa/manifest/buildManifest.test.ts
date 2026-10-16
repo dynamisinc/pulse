@@ -38,6 +38,15 @@ describe('buildManifest', () => {
     expect(buildManifest(brand, 'https://x.example/', icons).start_url).toBe('https://x.example/')
   })
 
+  it('makes the id per exercise while start_url and scope stay the site root', () => {
+    const a = buildManifest(brand, 'https://x.example', icons, 'ex-a')
+    const b = buildManifest(brand, 'https://x.example', icons, 'ex-b')
+    expect(a.id).not.toBe(b.id)
+    expect(a.id).toContain('ex-a')
+    expect(a.start_url).toBe('https://x.example/')
+    expect(a.scope).toBe('https://x.example/')
+  })
+
   it('never leaks Pulse or Dynamis in the serialized JSON', () => {
     expect(JSON.stringify(m)).not.toMatch(/pulse|dynamis/i)
   })

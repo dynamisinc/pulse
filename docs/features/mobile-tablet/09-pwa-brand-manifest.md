@@ -35,3 +35,11 @@ none for build. Wiring commit for mounting.
 ## Tests
 `features/pwa/manifest/buildManifest.test.ts`, `ManifestHead.test.tsx`, and `e2e/pwa-manifest.spec.ts`. Manual: Chrome Android
 Lighthouse installability and iOS "Add to Home Screen" name/icon check.
+
+## Real-device checklist (MT-D7, Tom)
+- [ ] Android Chrome: install produces a **WebAPK** (Settings > Apps shows the installed app under the exercise brand name, not as a plain shortcut). If it only creates a shortcut, this becomes the C1 backend-manifest item.
+- [ ] iOS Safari: Share > Add to Home Screen shows the **brand icon and name** (not Pulse). If not, this becomes the C1 backend-manifest item.
+- [ ] Install exercise A, then exercise B on the same device: B installs with B's brand (manifest `id` is per exercise: `/?pwa=<exerciseId>`).
+
+## Known limitations
+- Pre-sign-in (join / sign-in pages) the static `index.html` head applies: iOS Share > Add to Home Screen from there gets the static title, description and author. MT-D4 means that page is not offered for install. While branded, the title, description, author, theme-color and icon are overridden and restored on sign-out.

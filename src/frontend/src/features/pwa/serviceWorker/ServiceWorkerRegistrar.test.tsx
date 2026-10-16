@@ -25,7 +25,9 @@ describe('ServiceWorkerRegistrar', () => {
   it('is disabled outside production by default (vitest is not PROD)', async () => {
     reg.fn.mockResolvedValue(undefined)
     render(<ServiceWorkerRegistrar />)
-    await waitFor(() => expect(reg.fn).toHaveBeenCalledWith(expect.objectContaining({ enabled: false })))
+    await waitFor(() =>
+      expect(reg.fn).toHaveBeenCalledWith(expect.objectContaining({ enabled: false })),
+    )
     expect(screen.queryByRole('status')).toBeNull()
   })
 

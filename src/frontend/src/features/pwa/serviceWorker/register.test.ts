@@ -10,7 +10,11 @@ function fakeEnv(opts: { waiting?: boolean; controller?: boolean } = {}) {
   const waiting = opts.waiting ? { postMessage: vi.fn() } : null
   const reg = {
     waiting,
-    installing: null as null | { state: string; addEventListener: (t: string, l: () => void) => void },
+    installing: null as null | {
+      state: string
+      addEventListener: (t: string, l: () => void) => void
+      removeEventListener: (t: string, l: () => void) => void
+    },
     addEventListener: (t: string, l: () => void) => { regL[t] = l },
     removeEventListener: vi.fn(),
     update: vi.fn(async () => undefined),
@@ -21,7 +25,10 @@ function fakeEnv(opts: { waiting?: boolean; controller?: boolean } = {}) {
     addEventListener: (t: string, l: () => void) => { contL[t] = l },
     removeEventListener: vi.fn(),
   }
-  return { reg, regL, contL, waiting, container: container as unknown as ServiceWorkerContainer, raw: container }
+  return {
+    reg, regL, contL, waiting, raw: container,
+    container: container as unknown as ServiceWorkerContainer,
+  }
 }
 
 describe('registerServiceWorker gating', () => {
@@ -33,7 +40,10 @@ describe('registerServiceWorker gating', () => {
 
   it('does nothing on staff routes', async () => {
     const e = fakeEnv()
-    expect(await registerServiceWorker({ enabled: true, pathname: '/staff/console', container: e.container })).toBeUndefined()
+    const c = await registerServiceWorker({
+      enabled: true, pathname: '/staff/console', container: e.container,
+    })
+    expect(c).toBeUndefined()
     expect(e.raw.register).not.toHaveBeenCalled()
   })
 
@@ -73,7 +83,11 @@ describe('update flow', () => {
     const e = fakeEnv()
     const c = await registerServiceWorker({ enabled: true, pathname: '/', container: e.container })
     const sl: Record<string, () => void> = {}
-    const w = { state: 'installing', addEventListener: (t: string, l: () => void) => { sl[t] = l } }
+    const w = {
+      state: 'installing',
+      addEventListener: (t: string, l: () => void) => { sl[t] = l },
+      removeEventListener: vi.fn(),
+    }
     e.reg.installing = w
     const spy = vi.fn()
     c?.subscribe(spy)
@@ -84,16 +98,40 @@ describe('update flow', () => {
     expect(spy).toHaveBeenCalled()
   })
 
-  it('applyUpdate posts SKIP_WAITING and reloads only after the new worker takes control', async () => {
+  it('applyUpdate posts SKIP_WAITING; reload only once the new worker takes control', async () => {
     const e = fakeEnv({ waiting: true })
     const reload = vi.fn()
     const c = await registerServiceWorker({ enabled: true, pathname: '/', container: e.container, reload })
-    e.contL.controllerchange?.() // not requested yet (e.g. first claim): no reload
-    expect(reload).not.toHaveBeenCalled()
     c?.applyUpdate()
     expect(e.waiting?.postMessage).toHaveBeenCalledWith({ type: 'SKIP_WAITING' })
     expect(reload).not.toHaveBeenCalled() // no forced reload until the worker has taken over
     e.contL.controllerchange?.()
     expect(reload).toHaveBeenCalledOnce()
+  })
+
+  it('reloads on controllerchange if a controller pre-existed (accepted in another tab)', async () => {
+    const e = fakeEnv()
+    const reload = vi.fn()
+    await registerServiceWorker({ enabled: true, pathname: '/', container: e.container, reload })
+    e.contL.controllerchange?.()
+    e.contL.controllerchange?.()
+    expect(reload).toHaveBeenCalledOnce()
+  })
+
+  it('never reloads on the first-install claim (no controller at startup)', async () => {
+    const e = fakeEnv({ controller: false })
+    const reload = vi.fn()
+    await registerServiceWorker({ enabled: true, pathname: '/', container: e.container, reload })
+    e.contL.controllerchange?.()
+    expect(reload).not.toHaveBeenCalled()
+  })
+
+  it('dispose removes statechange listeners', async () => {
+    const e = fakeEnv()
+    const w = { state: 'installing', addEventListener: vi.fn(), removeEventListener: vi.fn() }
+    e.reg.installing = w
+    const c = await registerServiceWorker({ enabled: true, pathname: '/', container: e.container })
+    c?.dispose()
+    expect(w.removeEventListener).toHaveBeenCalledWith('statechange', expect.any(Function))
   })
 })

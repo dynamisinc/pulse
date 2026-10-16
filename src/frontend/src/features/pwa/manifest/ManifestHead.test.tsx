@@ -32,6 +32,8 @@ beforeEach(() => {
   document.head.innerHTML = `
     <title>Pulse</title>
     <meta name="theme-color" content="#ffffff" />
+    <meta name="description" content="Pulse - local news" />
+    <meta name="author" content="Dynamis" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />`
   document.title = 'Pulse'
   created.length = 0
@@ -59,13 +61,14 @@ describe('ManifestHead', () => {
   })
 
   it('injects manifest + apple tags + theme/title/icon for a resolved brand', async () => {
-    render(<ManifestHead brand={brandA} renderer={renderer} />)
+    render(<ManifestHead brand={brandA} exerciseId="ex-a" renderer={renderer} />)
     await waitFor(() => expect(q('link[rel="manifest"]')).not.toBeNull())
     const href = q('link[rel="manifest"]')?.getAttribute('href') ?? ''
     expect(href).toMatch(/^blob:/)
     const json = await blobText.get(href)?.text()
     const manifest = JSON.parse(json ?? '{}')
     expect(manifest.name).toBe('Bay Shield Network')
+    expect(manifest.id).toContain('ex-a')
     expect(manifest.start_url).toBe(`${window.location.origin}/`)
     expect(q('meta[name="apple-mobile-web-app-title"]')?.getAttribute('content'))
       .toBe('Bay Shield Network')
@@ -74,6 +77,8 @@ describe('ManifestHead', () => {
     expect(q('meta[name="theme-color"]')?.getAttribute('content')).toBe('#2b5f75')
     expect(q('link[rel="icon"]')?.getAttribute('href')).toMatch(/^data:image\/png/)
     expect(document.title).toBe('Bay Shield Network')
+    expect(q('meta[name="description"]')?.getAttribute('content')).toBe('Bay Shield Network')
+    expect(q('meta[name="author"]')?.getAttribute('content')).toBe('Bay Shield Network')
     // no leak anywhere in the head
     expect(head().innerHTML).not.toMatch(/pulse|dynamis|favicon\.svg/i)
   })
@@ -87,6 +92,8 @@ describe('ManifestHead', () => {
     expect(q('meta[name="apple-mobile-web-app-title"]')).toBeNull()
     expect(revoked).toEqual(created)
     expect(document.title).toBe('Pulse')
+    expect(q('meta[name="description"]')?.getAttribute('content')).toBe('Pulse - local news')
+    expect(q('meta[name="author"]')?.getAttribute('content')).toBe('Dynamis')
     expect(q('meta[name="theme-color"]')?.getAttribute('content')).toBe('#ffffff')
     expect(q('link[rel="icon"]')?.getAttribute('href')).toBe('/favicon.svg')
   })

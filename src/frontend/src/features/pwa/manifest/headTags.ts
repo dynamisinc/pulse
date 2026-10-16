@@ -27,6 +27,8 @@ export interface BrandHeadSpec {
   readonly title: string
   readonly themeColor: string
   readonly touchIconHref: string
+  /** Brand-neutral description/author (the brand name); never the static Pulse/Dynamis copy. */
+  readonly description?: string
 }
 
 function ownedTags(): Element[] {
@@ -61,6 +63,14 @@ export function applyBrandHead(spec: BrandHeadSpec): () => void {
   themeMeta?.setAttribute('content', spec.themeColor)
   if (!themeMeta) addTag('meta', { name: 'theme-color', content: spec.themeColor })
 
+  // description + author carry static product copy: override while branded, restore after.
+  const overridden = (['description', 'author'] as const).map(name => {
+    const el = document.head.querySelector<HTMLMetaElement>(`meta[name="${name}"]`)
+    const prev = el?.getAttribute('content') ?? null
+    el?.setAttribute('content', spec.description ?? spec.title)
+    return { el, prev }
+  })
+
   // Hide the neutral Pulse favicon behind the brand icon for the session.
   const iconLinks = Array.from(
     document.head.querySelectorAll<HTMLLinkElement>('link[rel="icon"]:not([data-brand-pwa])'),
@@ -80,6 +90,9 @@ export function applyBrandHead(spec: BrandHeadSpec): () => void {
     removeBrandHeadTags()
     URL.revokeObjectURL(blobUrl)
     document.title = previousTitle
+    overridden.forEach(({ el, prev }) => {
+      if (el && prev !== null) el.setAttribute('content', prev)
+    })
     if (themeMeta && previousTheme !== null) themeMeta.setAttribute('content', previousTheme)
     iconLinks.forEach((l, i) => {
       const href = previousIconHrefs[i] ?? null

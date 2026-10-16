@@ -53,18 +53,22 @@ export function shortNameFor(name: string): string {
 }
 
 /**
- * Builds the manifest. `origin` is `window.location.origin` (e.g.
+ * Builds the manifest. `exerciseId` (when known) makes the manifest `id` per exercise.
+ * `origin` is `window.location.origin` (e.g.
  * `https://pulse.example`), without a trailing slash.
  */
 export function buildManifest(
   brand: BrandTokens,
   origin: string,
   icons: readonly ManifestIcon[],
+  exerciseId?: string,
 ): WebAppManifest {
   const root = `${origin.replace(/\/+$/, '')}/`
   const name = brand.name.trim()
   return {
-    id: root,
+    // Per-exercise identity: a reused device can install exercise B after A without B being
+    // treated as the same app (and shadowed by A's brand). start_url/scope stay the site root.
+    id: exerciseId ? `${root}?pwa=${encodeURIComponent(exerciseId)}` : root,
     name,
     short_name: shortNameFor(name),
     start_url: root,

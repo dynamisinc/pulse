@@ -31,7 +31,8 @@ describe('detectPlatform', () => {
 
 describe('isStandalone', () => {
   it('detects display-mode standalone and iOS navigator.standalone', () => {
-    const mm = (m: boolean) => ({ matchMedia: () => ({ matches: m }), navigator: {} }) as unknown as Window
+    const mm = (m: boolean) =>
+      ({ matchMedia: () => ({ matches: m }), navigator: {} }) as unknown as Window
     expect(isStandalone(mm(true))).toBe(true)
     expect(isStandalone(mm(false))).toBe(false)
     expect(isStandalone({ navigator: { standalone: true } } as unknown as Window)).toBe(true)

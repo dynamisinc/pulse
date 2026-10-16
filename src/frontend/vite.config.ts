@@ -23,7 +23,10 @@ function pulseSwStamp(): Plugin {
     closeBundle() {
       const swPath = path.join(outDir, 'sw.js')
       const htmlPath = path.join(outDir, 'index.html')
-      if (!fs.existsSync(swPath) || !fs.existsSync(htmlPath)) return
+      if (!fs.existsSync(swPath)) return
+      if (!fs.existsSync(htmlPath)) {
+        throw new Error('pulse-sw-stamp: dist/sw.js exists but dist/index.html is missing')
+      }
       const html = fs.readFileSync(htmlPath, 'utf8')
       const assets = Array.from(html.matchAll(/["'](\/assets\/[^"']+)["']/g), m => m[1])
       const list = Array.from(new Set(['/index.html', ...assets]))
@@ -32,6 +35,12 @@ function pulseSwStamp(): Plugin {
         .readFileSync(swPath, 'utf8')
         .replace("'__PULSE_BUILD_ID__'", () => `'${id}'`)
         .replace("'__PULSE_PRECACHE__'", () => `'${JSON.stringify(list)}'`)
+      if (sw.includes("'__PULSE_BUILD_ID__'")) {
+        throw new Error('pulse-sw-stamp: build id placeholder was not replaced in dist/sw.js')
+      }
+      if (sw.includes("'__PULSE_PRECACHE__'") || list.length < 2) {
+        throw new Error('pulse-sw-stamp: precache list not stamped (no /assets/* in index.html?)')
+      }
       fs.writeFileSync(swPath, sw)
     },
   }
