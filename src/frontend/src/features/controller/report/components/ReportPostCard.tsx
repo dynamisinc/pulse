@@ -11,6 +11,9 @@
  * keeps a post on one page. Images are plain `<img loading="eager">` so printing waits for
  * nothing extra.
  *
+ * THREADS (DF-47). A `nested` post prints indented with a left rule under its thread root (one
+ * level at any depth). The words "Replying to @x" stay, so the structure is in text too (NFR-001).
+ *
  * MEDIA. Image: the picture plus its alt text printed under an ALT TEXT label. Video: the poster
  * with a VIDEO label, a play glyph and the m:ss duration; a poster-less video is a plain tile
  * with the same label and duration. Every item prints its alt text.
@@ -20,9 +23,9 @@ import {
   avatarColor,
   formatDuration,
   initialsOf,
+  formatStamp,
   refLabel,
   sourceLabel,
-  timeOf,
 } from '../services/reportFormat'
 import type { ReportMedia, ReportPost } from '../types/report'
 import styles from './report.module.css'
@@ -79,9 +82,17 @@ function MediaItem({ item, captionId }: MediaItemProps) {
 
 export interface ReportPostCardProps {
   readonly post: ReportPost
+  /** DF-47: a reply printed under its listed thread root: one indent level with a left rule. */
+  readonly nested?: boolean
+  /** Story 31: "Edited · last at" / "Taken down at" carry their date when the report spans days. */
+  readonly spansMultipleDays?: boolean
 }
 
-export function ReportPostCard({ post }: ReportPostCardProps) {
+export function ReportPostCard({
+  post,
+  nested = false,
+  spansMultipleDays = false,
+}: ReportPostCardProps) {
   const { author } = post
   const mediaItems = post.media.map((item, index) => (
     <MediaItem key={`${post.id}-${index}`} item={item} captionId={`alt-${post.id}-${index}`} />
@@ -89,7 +100,11 @@ export function ReportPostCard({ post }: ReportPostCardProps) {
   const takenDown = post.takenDownAt !== null
   const participantish = post.source === 'participant' || post.source === 'controller-as-persona'
   return (
-    <article className={`${styles.post} ${takenDown ? styles.taken : ''}`} data-testid="report-post">
+    <article
+      className={`${styles.post} ${takenDown ? styles.taken : ''} ${nested ? styles.nested : ''}`}
+      data-testid="report-post"
+      data-nested={nested ? 'true' : undefined}
+    >
       <div className={styles.time}>
         {post.scenarioTime}
         {post.injectRef !== null && <small>{`Inject ${refLabel(post.injectRef)}`}</small>}
@@ -134,13 +149,13 @@ export function ReportPostCard({ post }: ReportPostCardProps) {
           {post.editCount !== null && post.editCount > 0 && (
             <span className={`${styles.tag} ${styles.tagEdited}`}>
               {post.lastEditedAt !== null
-                ? `Edited ${post.editCount}× · last at ${timeOf(post.lastEditedAt)}`
+                ? `Edited ${post.editCount}× · last at ${formatStamp(post.lastEditedAt, spansMultipleDays)}`
                 : `Edited ${post.editCount}×`}
             </span>
           )}
           {post.takenDownAt !== null && (
             <span className={`${styles.tag} ${styles.tagDown}`}>
-              {`Taken down at ${timeOf(post.takenDownAt)}`}
+              {`Taken down at ${formatStamp(post.takenDownAt, spansMultipleDays)}`}
             </span>
           )}
         </div>

@@ -296,4 +296,84 @@ public sealed class ExerciseReportBuilderTests
 
         ExerciseReportBuilder.SumShown(counts).Should().Be(2_148_000_005L).And.BeGreaterThan(int.MaxValue);
     }
+
+    // ---- Threads (story 31, DF-47) -------------------------------------------------------------------------------
+
+    [Fact]
+    public void Thread_RootsKeepTheirOrder_EachFollowedByItsListedDescendants_AtDepthOne()
+    {
+        var root = Guid.NewGuid();
+        var child = Guid.NewGuid();
+        var other = Guid.NewGuid();
+        var grandchild = Guid.NewGuid();
+        var sibling = Guid.NewGuid();
+
+        var slots = ExerciseReportBuilder.Thread(
+        [
+            new ReportThreadPost(root, null),
+            new ReportThreadPost(child, root),
+            new ReportThreadPost(other, null),
+            new ReportThreadPost(grandchild, child),
+            new ReportThreadPost(sibling, root),
+        ]);
+
+        slots.Select(slot => slot.Index).Should().Equal([0, 1, 3, 4, 2], "root, its descendants in input order, then the next root");
+        slots.Select(slot => slot.ThreadRootId).Should().Equal([root, root, root, root, other], "the grandchild's root is the top post");
+        slots.Select(slot => slot.Depth).Should().Equal([0, 1, 1, 1, 0], "one indent level at any depth");
+    }
+
+    [Fact]
+    public void Thread_AReplyWhoseParentIsNotListed_IsARoot_EvenWhenItsGrandparentIs()
+    {
+        var top = Guid.NewGuid();
+        var unlisted = Guid.NewGuid();
+        var reply = Guid.NewGuid();
+
+        var slots = ExerciseReportBuilder.Thread([new ReportThreadPost(top, null), new ReportThreadPost(reply, unlisted)]);
+
+        slots.Should().Equal(
+            [new ReportThreadSlot(0, top, 0), new ReportThreadSlot(1, reply, 0)],
+            "the walk stops at the first parent that is not listed");
+    }
+
+    [Fact]
+    public void Thread_ADescendantListedBeforeItsRoot_StillFollowsTheRoot()
+    {
+        // Scenario times are client-supplied this phase, so a reply can carry an earlier time than its parent.
+        var root = Guid.NewGuid();
+        var early = Guid.NewGuid();
+
+        var slots = ExerciseReportBuilder.Thread([new ReportThreadPost(early, root), new ReportThreadPost(root, null)]);
+
+        slots.Should().Equal([new ReportThreadSlot(1, root, 0), new ReportThreadSlot(0, root, 1)]);
+    }
+
+    [Fact]
+    public void Thread_AParentCycle_IsBrokenAtItsEarliestListedMember_AndEveryPostAppearsOnce()
+    {
+        var a = Guid.NewGuid();
+        var b = Guid.NewGuid();
+        var c = Guid.NewGuid();
+        var self = Guid.NewGuid();
+
+        var slots = ExerciseReportBuilder.Thread(
+        [
+            new ReportThreadPost(a, b),
+            new ReportThreadPost(b, a),
+            new ReportThreadPost(c, b),
+            new ReportThreadPost(self, self),
+        ]);
+
+        slots.Should().Equal(
+        [
+            new ReportThreadSlot(0, a, 0),
+            new ReportThreadSlot(1, a, 1),
+            new ReportThreadSlot(2, a, 1),
+            new ReportThreadSlot(3, self, 0),
+        ]);
+    }
+
+    [Fact]
+    public void Thread_NothingListed_IsEmpty() =>
+        ExerciseReportBuilder.Thread([]).Should().BeEmpty();
 }

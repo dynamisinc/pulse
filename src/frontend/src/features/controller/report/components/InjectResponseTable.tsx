@@ -4,10 +4,12 @@
  * "Inject response times" (story 29, DF-42): one row per delivered inject with the first
  * participant response, a bar proportional to the minutes it took (full width = the 30-minute
  * window) and who responded; an inject nobody answered shows a "No response in 30 min" pill.
- * The method note under the table states the rule in the words the story approves.
+ * Story 31: the inject's title prints ONCE (the MSEL number before it only when the inject has
+ * one), and times carry their date on a multi-day report. The method note under the table states
+ * the rule in the words the story approves.
  */
 
-import { refLabel, timeOf } from '../services/reportFormat'
+import { formatStamp, injectName } from '../services/reportFormat'
 import type { ReportInjectResponse } from '../types/report'
 import styles from './report.module.css'
 
@@ -22,9 +24,11 @@ export const RESPONSE_METHOD_NOTE =
 
 export interface InjectResponseTableProps {
   readonly rows: readonly ReportInjectResponse[]
+  /** Story 31: times carry their date when the report spans days. */
+  readonly spansMultipleDays?: boolean
 }
 
-export function InjectResponseTable({ rows }: InjectResponseTableProps) {
+export function InjectResponseTable({ rows, spansMultipleDays = false }: InjectResponseTableProps) {
   return (
     <section className={styles.section} aria-labelledby="report-injects-h">
       <h2 id="report-injects-h" className={styles.heading}>
@@ -52,13 +56,15 @@ export function InjectResponseTable({ rows }: InjectResponseTableProps) {
                 )
                 return (
                   <tr key={`${rowIndex}-${row.ref}`}>
-                    <td>{`${refLabel(row.ref)} ${row.title}`}</td>
-                    <td className={styles.tcell}>{timeOf(row.deliveredAt)}</td>
+                    <td>{injectName(row.ref, row.title)}</td>
+                    <td className={styles.tcell}>
+                      {formatStamp(row.deliveredAt, spansMultipleDays)}
+                    </td>
                     <td>
                       {responded ? (
                         <div className={styles.resp}>
                           <i style={{ width }} aria-hidden="true" />
-                          <span>{`${Math.round(row.responseMinutes ?? 0)} min · ${timeOf(row.firstResponseAt ?? '')}`}</span>
+                          <span>{`${Math.round(row.responseMinutes ?? 0)} min · ${formatStamp(row.firstResponseAt ?? '', spansMultipleDays)}`}</span>
                         </div>
                       ) : (
                         <span className={styles.none}>NO RESPONSE IN 30 MIN</span>

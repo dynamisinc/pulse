@@ -12,13 +12,17 @@
  * HOW IT PRINTS (mirrors the participant card sheet). The page renders in a portal beside
  * `#root`. While mounted it (1) adds `reportOpen` to `<html>` so `report.module.css` hides `#root`
  * and every other body child under `@media print` and lets the sheet flow over many pages,
- * (2) injects the `@page` rule (US Letter) as a `<style>` that exists ONLY while the page does
+ * (2) injects the `@page` rule (US Letter, margin 0: the sheet draws its own 0.5in margin, which
+ * also removes the browser's header/footer in Chromium and Edge) as a `<style>` that exists
+ * ONLY while the page does
  * (an `@page` rule cannot be scoped, so it is never in the stylesheet), and (3) makes the rest of
  * the body `inert` so keyboard and screen readers stay on the report. All undone on unmount.
  *
- * DATA. `useExerciseReport(filters)` (story 30): the source checkboxes and the From / To window
- * refetch with `sources`/`from`/`to` (the summary is identical whatever they are; only the post
- * record changes). States: loading, error (readable sentences), empty exercise, report. A 400
+ * DATA. `useExerciseReport(filters)` (stories 30, 31): the source checkboxes and the From / To
+ * window refetch with `sources`/`from`/`to`. The sources change only the post record; the WINDOW
+ * scopes every section (DF-45), so the exercise's own start is remembered from the unfiltered
+ * report (the window-scoped `scenarioStart` would otherwise block widening the window).
+ * States: loading, error (readable sentences), empty exercise, report. A 400
  * (bad filter) shows the server's reason beside the filters, keeps the last good sheet on
  * screen, and disables Print; the sheet's own filter statement says what it contains.
  */
@@ -81,6 +85,13 @@ export function ExerciseReportPage() {
   const [lastGood, setLastGood] = useState<ExerciseReport | undefined>(undefined)
   if (query.data !== undefined && query.data !== lastGood) setLastGood(query.data)
   const report = query.data ?? lastGood
+  // The exercise's real start, kept from the last UNFILTERED report (a window narrows it).
+  const [exerciseStart, setExerciseStart] = useState<string | null>(null)
+  // The echo (not the requested filters) says what this report really covers.
+  const unfiltered =
+    report !== undefined && report.postRecord.from === null && report.postRecord.to === null
+  const start = report?.exercise.scenarioStart ?? null
+  if (unfiltered && start !== null && start !== exerciseStart) setExerciseStart(start)
   const badFilter =
     query.isError && query.error instanceof ReportError && query.error.status === 400
   const serverError = badFilter && report !== undefined ? query.error.message : null
@@ -105,7 +116,8 @@ export function ExerciseReportPage() {
           <ReportFilterBar
             filters={filters}
             onChange={setFilters}
-            windowStart={report?.exercise.scenarioStart ?? null}
+            windowStart={exerciseStart ?? start}
+            latestDay={report?.exercise.latestDay ?? null}
             serverError={serverError}
           />
           <Box sx={{ flex: 1 }} />

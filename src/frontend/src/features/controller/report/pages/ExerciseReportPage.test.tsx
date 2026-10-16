@@ -66,28 +66,28 @@ describe('ExerciseReportPage', () => {
     expect(await screen.findByRole('heading', { level: 1, name: MOCK_REPORT.exercise.name }))
       .toBeInTheDocument()
     expect(screen.getByText(/EXERCISE · EXERCISE · EXERCISE/)).toBeInTheDocument()
-    expect(screen.getByText('09:00 – 11:00 (Eastern Time)')).toBeInTheDocument()
-    expect(screen.getByText('Thu 15 Oct 2026')).toBeInTheDocument()
+    expect(screen.getByText('2026-10-14 16:20 – 2026-10-15 10:30 (Eastern Time)')).toBeInTheDocument()
+    expect(screen.getByText('Wed 14 Oct 2026')).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'At a glance' })).toBeInTheDocument()
     expect(screen.getByText('Participants')).toBeInTheDocument()
     expect(screen.getByText('Posts taken down')).toBeInTheDocument()
     expect(screen.getByText('Posts edited')).toBeInTheDocument()
-    expect(screen.getByRole('group', { name: 'Where the 10 posts came from' })).toBeInTheDocument()
+    expect(screen.getByRole('group', { name: `Where the ${MOCK_REPORT.summary.posts} posts came from` })).toBeInTheDocument()
 
     const chart = screen.getByTestId('activity-chart')
     expect(chart).toHaveAttribute('aria-label', expect.stringContaining('stacked by source'))
-    expect(screen.getByText('Dashed lines mark key injects')).toBeInTheDocument()
-    expect(screen.getByText('#4 Lookalike rumor')).toBeInTheDocument()
+    expect(screen.getByText('Numbered dashed lines mark key injects')).toBeInTheDocument()
+    expect(screen.getByText('5 · 15 Oct 09:40 · #4 Lookalike says "don\'t boil"')).toBeInTheDocument()
 
     expect(screen.getByRole('heading', { name: /Inject response times/ })).toBeInTheDocument()
-    expect(screen.getByText('NO RESPONSE IN 30 MIN')).toBeInTheDocument()
+    expect(screen.getAllByText('NO RESPONSE IN 30 MIN').length).toBeGreaterThan(0)
     expect(screen.getByText(RESPONSE_METHOD_NOTE)).toBeInTheDocument()
     expect(RESPONSE_METHOD_NOTE).not.toMatch(/hashtag/i)
 
     expect(screen.getByRole('heading', { name: /Verified vs\. lookalike/ })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: /Post record/ })).toBeInTheDocument()
     expect(screen.getByTestId('omitted-noise-note')).toHaveTextContent('Background noise (2 posts)')
-    expect(screen.getByText('09:30')).toBeInTheDocument() // a half-hour group heading
+    expect(screen.getByText('15 Oct 2026 · 09:30')).toBeInTheDocument() // a half-hour group heading
     expect(screen.getAllByTestId('report-post')).toHaveLength(MOCK_REPORT.posts.length)
     expect(screen.getByText('All times are scenario time')).toBeInTheDocument()
   })
@@ -158,10 +158,10 @@ describe('ExerciseReportPage', () => {
     renderPage()
     await screen.findByTestId('report-sheet')
 
-    expect(screen.getByText('Edited 2× · last at 09:55')).toBeInTheDocument()
-    expect(screen.getByText('Edited 1× · last at 10:16')).toBeInTheDocument()
+    expect(screen.getByText('Edited 2× · last at 15 Oct 09:55')).toBeInTheDocument()
+    expect(screen.getByText('Edited 1× · last at 15 Oct 10:16')).toBeInTheDocument()
     expect(screen.getAllByText(/^Edited \d+×/)).toHaveLength(2)
-    expect(screen.getByText('Taken down at 10:21')).toBeInTheDocument()
+    expect(screen.getByText('Taken down at 15 Oct 10:21')).toBeInTheDocument()
     expect(screen.getByText('Replying to @KestrelCoEM')).toBeInTheDocument()
     expect(screen.getAllByText('Participant · posted by R. Okafor').length).toBeGreaterThan(0)
     expect(screen.getAllByText('UNVERIFIED').length).toBeGreaterThan(0)
@@ -212,6 +212,9 @@ describe('ExerciseReportPage', () => {
     expect(rule).not.toBeNull()
     expect(rule?.textContent).toContain('@page')
     expect(rule?.textContent).toContain('letter')
+    // Story 31 (DF-46): zero page margin removes the browser header/footer.
+    expect(rule?.textContent).toMatch(/margin:\s*0\s*;/)
+    expect(rule?.textContent).not.toMatch(/0\.\d+in/)
     expect(document.documentElement).toHaveClass('reportOpen')
 
     unmount()
@@ -257,7 +260,7 @@ describe('ExerciseReportPage', () => {
       ...MOCK_REPORT,
       summary: { ...MOCK_REPORT.summary, medianResponseMinutes: 5.7 },
       injectResponses: [{
-        ...(MOCK_REPORT.injectResponses[0] as ExerciseReport['injectResponses'][number]),
+        ...(MOCK_REPORT.injectResponses[1] as ExerciseReport['injectResponses'][number]),
         responseMinutes: 5.7,
       }],
     }))
@@ -271,7 +274,8 @@ describe('ExerciseReportPage', () => {
     stubApi()
     renderPage()
     await screen.findByTestId('report-sheet')
-    expect(screen.getAllByText(/15 Oct 2026/)).toHaveLength(2) // conducted + prepared, once each
+    expect(screen.getAllByText('15 Oct 2026')).toHaveLength(1) // the prepared date, once
+    expect(screen.getAllByText('Wed 14 Oct 2026')).toHaveLength(1) // conducted, once
     expect(screen.queryByText(/^Prepared 15 Oct 2026$/)).not.toBeInTheDocument()
   })
 
@@ -433,7 +437,7 @@ describe('ExerciseReportPage', () => {
       }))
       await waitFor(() => expect(screen.getByTestId('filter-statement')).toHaveTextContent(
         'Showing participant, scripted inject and engine posts, 10-15 09:00 – 10-15 10:00'))
-      await waitFor(() => expect(screen.getAllByTestId('report-post')).toHaveLength(5))
+      await waitFor(() => expect(screen.getAllByTestId('report-post')).toHaveLength(6))
 
       await user.click(screen.getByRole('button', { name: 'Clear' }))
       await waitFor(() => expect(lastParams(get)).toEqual({ sources: 'participant,scripted,engine' }))
@@ -443,7 +447,7 @@ describe('ExerciseReportPage', () => {
     it.each([
       ['not a time', /yyyy-MM-dd HH:mm/],
       ['2026-10-15 25:00', /yyyy-MM-dd HH:mm/],
-      ['2026-10-15 08:00', /2026-10-15 09:00 or later/],
+      ['2026-10-13 23:59', /2026-10-14 00:00 or later/],
     ])('rejects %s with an inline message and does not refetch', async (text, message) => {
       const get = stubApi()
       const user = userEvent.setup()
@@ -607,6 +611,151 @@ describe('ExerciseReportPage', () => {
       expect(alert).toHaveTextContent('The time window ends before it starts.')
       expect(screen.getByTestId('report-sheet')).toBeInTheDocument()
       expect(screen.getByRole('button', { name: PRINT })).toBeDisabled()
+    })
+  })
+  describe('story 31 report scope, print polish and threads', () => {
+    const lastParams = (get: ReturnType<typeof stubApi>) =>
+      (get.mock.lastCall?.[1] as { params: Record<string, string> }).params
+    const LATEST = 'Latest scenario day'
+
+    // Page AC: Latest scenario day fills From/To from exercise.latestDay and applies.
+    it('Latest scenario day fills From and To from latestDay and applies them', async () => {
+      const get = stubApi()
+      const user = userEvent.setup()
+      renderPage()
+      await screen.findByTestId('report-sheet')
+
+      await user.click(screen.getByRole('button', { name: LATEST }))
+
+      await waitFor(() => expect(lastParams(get)).toEqual({
+        sources: 'participant,scripted,engine',
+        from: '2026-10-15 00:00',
+        to: '2026-10-15 23:59',
+      }))
+      expect(screen.getByRole('textbox', { name: 'From (scenario time)' })).toHaveValue('2026-10-15 00:00')
+      expect(screen.getByRole('textbox', { name: 'To (scenario time)' })).toHaveValue('2026-10-15 23:59')
+    })
+
+    // Page AC: ... disabled when null.
+    it('disables Latest scenario day when the exercise has no latestDay', async () => {
+      stubApi(() => ({ ...MOCK_REPORT, exercise: { ...MOCK_REPORT.exercise, latestDay: null } }))
+      renderPage()
+      await screen.findByTestId('report-sheet')
+      expect(screen.getByRole('button', { name: LATEST })).toBeDisabled()
+    })
+
+    // On a one-day exercise the preset's 00:00 is before the first post; the field must accept
+    // the value the button itself filled in.
+    it('accepts the preset From on a one-day exercise when the field is blurred', async () => {
+      const oneDay = {
+        ...MOCK_REPORT,
+        exercise: {
+          ...MOCK_REPORT.exercise,
+          scenarioStart: '2026-10-15 09:00',
+          latestDay: { from: '2026-10-15 00:00', to: '2026-10-15 23:59' },
+        },
+      }
+      stubApi(() => oneDay)
+      const user = userEvent.setup()
+      renderPage()
+      await screen.findByTestId('report-sheet')
+      await user.click(screen.getByRole('button', { name: LATEST }))
+
+      await user.click(screen.getByRole('textbox', { name: 'From (scenario time)' }))
+      await user.tab()
+      expect(screen.queryByText(/or later/)).not.toBeInTheDocument()
+    })
+
+    // The window narrows scenarioStart; widening it again must still be accepted back to the
+    // real exercise start (kept from the unfiltered report).
+    it('still validates From against the exercise start after a window narrowed the header', async () => {
+      const get = stubApi()
+      const user = userEvent.setup()
+      renderPage()
+      await screen.findByTestId('report-sheet')
+      await user.click(screen.getByRole('button', { name: LATEST }))
+      await waitFor(() => expect(screen.getByTestId('window-filtered')).toBeInTheDocument())
+
+      const from = screen.getByRole('textbox', { name: 'From (scenario time)' })
+      await user.clear(from)
+      await user.type(from, '2026-10-14 16:30{Enter}')
+      await waitFor(() => expect(lastParams(get).from).toBe('2026-10-14 16:30'))
+    })
+
+    // Page AC: header window + conducted date reflect the window; "filtered" noted.
+    it('shows the window-scoped header and notes "filtered" only when a window is set', async () => {
+      stubApi()
+      const user = userEvent.setup()
+      renderPage()
+      await screen.findByTestId('report-sheet')
+      expect(screen.queryByTestId('window-filtered')).not.toBeInTheDocument()
+
+      await user.click(screen.getByRole('button', { name: LATEST }))
+
+      const filtered = await screen.findByTestId('window-filtered')
+      expect(filtered).toHaveTextContent('filtered')
+      expect(screen.getByText('09:04 – 10:30 (Eastern Time)')).toBeInTheDocument()
+      expect(screen.getByText('Thu 15 Oct 2026')).toBeInTheDocument()
+      // The window is one day: nothing below needs a date.
+      expect(screen.queryByText(/Taken down at 15 Oct/)).not.toBeInTheDocument()
+      expect(screen.getByText('Taken down at 10:21')).toBeInTheDocument()
+    })
+
+    // Page AC: inject table title once; ref only when non-null.
+    it('prints an inject title once, with the MSEL number before it only when there is one', async () => {
+      stubApi()
+      renderPage()
+      await screen.findByTestId('report-sheet')
+      const table = screen.getByRole('table')
+      expect(within(table).getByRole('cell', { name: 'Pressure drop' })).toBeInTheDocument()
+      expect(within(table).getByRole('cell', { name: 'Impersonator: brown water' })).toBeInTheDocument()
+      expect(within(table).getByRole('cell', { name: '#2 Boil-water advisory issued' })).toBeInTheDocument()
+      expect(within(table).queryByText(/Pressure drop Pressure drop/)).not.toBeInTheDocument()
+    })
+
+    // Page AC: dates on a multi-day span (inject table, chart key).
+    it('puts dates on inject times and the key when the report spans days', async () => {
+      stubApi()
+      renderPage()
+      await screen.findByTestId('report-sheet')
+      const table = screen.getByRole('table')
+      expect(within(table).getByText('15 Oct 09:04')).toBeInTheDocument()
+      expect(within(table).getByText('7 min · 15 Oct 09:11')).toBeInTheDocument()
+      const key = screen.getByTestId('marker-key')
+      expect(within(key).getByText('1 · 14 Oct 16:20 · Pressure drop')).toBeInTheDocument()
+      expect(within(key).getAllByRole('listitem')).toHaveLength(MOCK_REPORT.activity.injectMarkers.length)
+    })
+
+    // Page AC: threads (DF-47): indent, one level, root's group, unlisted parent at own time.
+    it('indents replies under their thread root, keeps a thread in its root group, and prints an unlisted-parent reply flat', async () => {
+      stubApi()
+      renderPage()
+      await screen.findByTestId('report-sheet')
+      const articleOf = (text: string) => {
+        const node = screen.getByText(text).closest('[data-testid="report-post"]')
+        if (node === null) throw new Error(`no post for ${text}`)
+        return node as HTMLElement
+      }
+      const reply = articleOf("Is formula OK if I use bottled water? I'm on Birch, which zone is that?")
+      const grandchild = articleOf('Birch is Zone 3. Formula made with bottled or boiled water is fine.')
+      const lateReply = articleOf('Please ignore this account. It is not affiliated with Fairhaven Water.')
+      const orphanReply = articleOf('Pressure is back on Birch, thank you.')
+      const root = articleOf('Free bottled water is available now at Elm Street Fire Station and Fairhaven High School until 8 PM. Bring ID showing an Eastside address. #WaterIssues')
+
+      expect(reply).toHaveAttribute('data-nested', 'true')
+      expect(grandchild).toHaveAttribute('data-nested', 'true') // a reply to a reply: one level only
+      expect(lateReply).toHaveAttribute('data-nested', 'true')
+      expect(root).not.toHaveAttribute('data-nested')
+      expect(orphanReply).not.toHaveAttribute('data-nested')
+      // NFR-001: the structure is in text as well as indentation.
+      expect(within(reply).getByText('Replying to @KestrelCoEM')).toBeInTheDocument()
+      expect(within(grandchild).getByText('Replying to @mvega_fh')).toBeInTheDocument()
+      expect(within(orphanReply).getByText('Replying to @tbrandt41')).toBeInTheDocument()
+      // The 10:02 reply sits under its 09:40 root in the same (09:30) group, never split.
+      const rootOfLate = articleOf('URGENT: Do NOT boil your water. Boiling concentrates the contaminants. Use only bottled water until further notice. #WaterIssues')
+      expect(lateReply.parentElement).toBe(rootOfLate.parentElement)
+      // The orphan reply lands in its own 10:30 group.
+      expect(orphanReply.parentElement?.previousElementSibling).toHaveTextContent('15 Oct 2026 · 10:30')
     })
   })
 })

@@ -1,6 +1,6 @@
 # Story: Exercise report: time window scopes the whole report, print polish, threads
 
-**Feature:** Demo feedback cut (10/20)  ·  **Phase:** 1  ·  **Status:** Not Started
+**Feature:** Demo feedback cut (10/20)  ·  **Phase:** 1  ·  **Status:** In Review
 **Requirements:** EVL-030 (lite), COR-053, NFR-001  ·  **Decisions:** DF-45, DF-46, DF-47  ·  **Issue:** #568
 **Stack:** backend + frontend  ·  **Review:** Tier-1  ·  **Priority:** Must  ·  **Wave:** 4  ·  **Effort:** M
 
@@ -48,36 +48,68 @@ The lookalike section's own rules are split out to [32](32-report-lookalike-sect
 
 **Backend** (`GET /api/staff/exports/report`)
 
-- [ ] With `from`/`to`, every section is built from the posts inside the window (summary, `bySource`, bins, busiest
+- [x] With `from`/`to`, every section is built from the posts inside the window (summary, `bySource`, bins, busiest
       window, inject responses and markers, lookalikes, `exercise.scenarioStart/End`, `conductedDate`). With no
       window, the output is byte-identical to today's (regression test).
-- [ ] An inject is in the window when its first post is; its response search still runs 30 minutes past `to`.
-- [ ] `injectResponses[].ref` and markers carry the MSEL `ExternalRef` only (`null` when there is none);
+- [x] An inject is in the window when its first post is; its response search still runs 30 minutes past `to`.
+- [x] `injectResponses[].ref` and markers carry the MSEL `ExternalRef` only (`null` when there is none);
       `title` is always the item's title. No other contract change for the ref.
-- [ ] New `exercise.latestDay: { from, to } | null`: the latest post's scenario date, 00:00–23:59, exercise zone.
-- [ ] New `exercise.spansMultipleDays: boolean` for the window in effect (drives date display).
-- [ ] Each post carries `threadRootId` (its top-most ancestor inside the listed set, else its own id) and
+- [x] New `exercise.latestDay: { from, to } | null`: the latest post's scenario date, 00:00–23:59, exercise zone.
+- [x] New `exercise.spansMultipleDays: boolean` for the window in effect (drives date display).
+- [x] Each post carries `threadRootId` (its top-most ancestor inside the listed set, else its own id) and
       `depth` (0 for a root, 1 for any listed descendant). Ordering of `posts` is: roots by scenario time, each followed
       by its listed descendants by scenario time.
-- [ ] Isolation, telemetry, 400s, 413 and the 5,000 withheld rule unchanged (the 5,000 counts listed posts).
+- [x] Isolation, telemetry, 400s, 413 and the 5,000 withheld rule unchanged (the 5,000 counts listed posts).
 
 **Page**
 
-- [ ] Toolbar: a **Latest scenario day** button fills From/To from `exercise.latestDay` and applies; disabled when
+- [x] Toolbar: a **Latest scenario day** button fills From/To from `exercise.latestDay` and applies; disabled when
       `null`.
-- [ ] Header scenario window and conducted date reflect the window; a "Scenario window" line notes "filtered" when a
+- [x] Header scenario window and conducted date reflect the window; a "Scenario window" line notes "filtered" when a
       window is set.
-- [ ] Inject table: title once; MSEL number shown before it only when `ref` is non-null.
-- [ ] Chart: inject markers are small numbered badges (1, 2, 3…) at the dashed lines; a key under the chart lists
+- [x] Inject table: title once; MSEL number shown before it only when `ref` is non-null.
+- [x] Chart: inject markers are small numbered badges (1, 2, 3…) at the dashed lines; a key under the chart lists
       "1 · 06:39 · Impersonator: brown water". No overlapping text at any marker density (collision test).
-- [ ] When `spansMultipleDays`, every printed time outside the half-hour group headings carries its date
+- [x] When `spansMultipleDays`, every printed time outside the half-hour group headings carries its date
       (inject table delivered/response times, "Taken down at", "Edited · last at").
-- [ ] Threads per DF-47: replies indented with a left rule under their listed parent; a reply to an unlisted parent
+- [x] Threads per DF-47: replies indented with a left rule under their listed parent; a reply to an unlisted parent
       prints at its own time; never more than one indent level.
-- [ ] Print per DF-46: media ≤ 2.5 in., poster-less tile ≤ 1.25 in., no orphaned section headings, no browser
+- [x] Print per DF-46: media ≤ 2.5 in., poster-less tile ≤ 1.25 in., no orphaned section headings, no browser
       header/footer in Chromium/Edge. Screen layout unchanged except threading.
-- [ ] NFR-001: thread structure is conveyed in text ("Replying to @x") as well as indentation; the numbered chart key
+- [x] NFR-001: thread structure is conveyed in text ("Replying to @x") as well as indentation; the numbered chart key
       is real text; dates are in the text, not only in tooltips.
+
+## Test coverage (AC → test)
+
+Backend (`src/Pulse.WebApi.Tests/Features/Exports/`; `Scope` = `ExerciseReportScopeEndpointTests`, `Endpoint` =
+`ExerciseReportEndpointTests`, `Builder` = `ExerciseReportBuilderTests`, `Filter` = `ExerciseReportFilterTests`):
+
+| AC | Tests |
+|---|---|
+| Window scopes every section; no-window unchanged | `Scope.TimeWindow_ScopesEverySection_HeaderSummaryChartInjectsLookalikesAndNoise`, `Scope.NoWindow_IsTheSameReport_AsAWindowEnclosingEveryPost` (full JSON, minus `postRecord.from/to`, with and without noise), `Endpoint.SourceFilters_ChangeOnlyTheRecord_EveryOtherSectionIsIdentical`, `Filter.InWindow_IsTimeOnly_WithTheSameMinuteTruncation_AndOpenWithoutAWindow` |
+| Inject in window by first post; response past `to` | `Scope.AnInject_IsInTheWindowWhenItsFirstPostIs_AndItsResponseIsFoundPastTo`, `Scope.SpansMultipleDays_CountsAFirstResponseAfterMidnight_PastTheWindow` |
+| `ref` = MSEL number or null; title once | `Scope.AnInject_IsInTheWindowWhenItsFirstPostIs_AndItsResponseIsFoundPastTo` (also: `posts[].injectRef` keeps its title fallback), `Endpoint.Report_CarriesEverySection_PerTheFrozenContract` |
+| `latestDay` | `Scope.LatestDay_IsTheLatestPostsScenarioDate_InTheExerciseZone_OverEveryPost` (America/Chicago), `Endpoint.EmptyExercise_Returns200_WithEmptySections` (null) |
+| `spansMultipleDays` | `Scope.SpansMultipleDays_CountsListedTakedownAndEditTimes_ForTheWindowInEffect`, `Scope.SpansMultipleDays_CountsAFirstResponseAfterMidnight_PastTheWindow` |
+| `threadRootId` / `depth` / order | `Scope.Threads_NestedRepliesFollowTheirRoot_AtDepthOne_AReplyToAnUnlistedParentIsARoot`, `Scope.Threads_AReplyToNoise_IsARootWhenNoiseIsExcluded_AndThreadsWhenIncluded`, `Builder.Thread_*` (5 cases incl. a parent cycle) |
+| Isolation, telemetry, 400/413, withheld unchanged | the existing story 29/30 suite, unchanged and passing |
+
+Page (`src/frontend/src/features/controller/report/`; `Page` = `pages/ExerciseReportPage.test.tsx`, `S31` =
+`components/ReportStory31.test.tsx`):
+
+| AC | Tests |
+|---|---|
+| Latest scenario day button | `Page` "Latest scenario day fills From and To from latestDay and applies them", "disables Latest scenario day when the exercise has no latestDay", "still validates From against the exercise start after a window narrowed the header" |
+| Header reflects window, "filtered" | `Page` "shows the window-scoped header and notes "filtered" only when a window is set" |
+| Inject title once, ref only when present | `Page` "prints an inject title once, with the MSEL number before it only when there is one"; `reportFormat.test.ts` `injectName` |
+| Numbered badges + key, no overlap | `services/markerLayout.test.ts` (numbering, 10 adjacent bins, spacing sweep, merged badges); `S31` key text, "numbers only on the chart", "never overlaps badges when ten injects sit in adjacent bins", "never lets an axis time label run into the next one, at any bin count" |
+| Dates on multi-day spans | `S31` "carries the date in the key on a multi-day report only", inject table multi-day / single-day cases; `Page` "puts dates on inject times and the key when the report spans days"; `reportFormat.test.ts` `formatStamp` |
+| Threads | `Page` "indents replies under their thread root, keeps a thread in its root group, and prints an unlisted-parent reply flat"; `reportFormat.test.ts` `orderThreads` / `groupByHalfHour` |
+| Print (DF-46) | `S31` "caps media at 2.5in and the poster-less tile at 1.25in, inside @media print", "gives the sheet 0.5in print padding and keeps headings with their first item", "never declares @page in the module"; `Page` "injects the @page rule on mount and removes it on unmount" (`margin: 0`) |
+| NFR-001 | covered by the thread ("Replying to @x" text), key (`<ol>` text) and date tests above |
+
+Not verifiable in CI: real Chromium/Edge print output (browser header/footer gone, ~3 pages for the 10/16 13-post
+report, margins repeated on every page). Checked by Tom on UAT.
 
 ## Out of Scope
 
