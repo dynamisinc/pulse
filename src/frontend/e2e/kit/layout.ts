@@ -36,7 +36,9 @@ export async function expectTouchTarget(locator: Locator, minPx = 44): Promise<v
     const r = el.getBoundingClientRect()
     const cx = r.left + r.width / 2
     const cy = r.top + r.height / 2
-    const half = min / 2 - 1
+    // Probe a quarter-pixel inside the min-size edge: a 44 px target passes,
+    // a 43 px one fails (a full-pixel inset would let 43 px through).
+    const half = min / 2 - 0.25
     const probes: Array<[number, number]> = [
       [cx, cy], [cx - half, cy], [cx + half, cy], [cx, cy - half], [cx, cy + half],
     ]

@@ -97,8 +97,12 @@ test.describe('participant critical path', () => {
     await expect(newest).toContainText(POST_TEXT)
     await expect(newest).toContainText('Dana Reyes')
     await expect(newest).toContainText('@dreyes_fh')
-    await expect(newest.getByRole('link').or(newest.getByText(/just now|2033/)).first())
-      .toBeVisible()
+    // The post carries its own scenario-time <time> stamp (COR-053): present,
+    // machine-readable and rendered as relative text for a fresh post.
+    const stamp = newest.locator('time').first()
+    await expect(stamp).toBeVisible()
+    await expect(stamp).toHaveAttribute('datetime', /^\d{4}-\d{2}-\d{2}T/)
+    await expect(stamp).toHaveText(/\S/)
     await expectNoWallClock(page)
     await expectNoHorizontalScroll(page)
 
