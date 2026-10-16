@@ -5,14 +5,16 @@
  * rendering & author identity"; SOC-002, D1-003, R-001, R-002, R-004), now a thin
  * COMPOSITION of the decomposed parts (demo-polish F0, implementation.md §4.3).
  * FROZEN after F0: Wave-2/3 stories edit the PART they own, never this file —
- * every slot is already mounted here.
+ * every slot is already mounted here. (Demo-feedback story 21 added the one new
+ * slot, the "Pinned" marker, with the live exercise-pin read that drives it.)
  *
  * This is the MOST-REUSED component in the Social surface: feeds, threads,
  * profiles, search results and amplification views all render posts through this
  * one card. `components/PostCard.tsx` re-exports it so every `@/features/social`
  * import is unchanged.
  *
- *   <article .postCard>                                     (PostCard.module.css)
+ *   <article .postCard [.pinned] [aria-describedby]>        (PostCard.module.css)
+ *     [<PinnedMarker/>]   "Pinned" above the author row (pinned for everyone) [21]
  *     <Avatar/>                                             (../Avatar, self-contained)
  *     <div .content>
  *       <div .openable>                          the stretched-link open region
@@ -69,7 +71,10 @@
  * `theme/social.module.css`'s header for the theming model).
  */
 
+import { useId } from 'react'
+import { usePinnedForAll } from '../../pinned/exercisePinState'
 import { Avatar } from '../Avatar'
+import { PinnedMarker } from './PinnedMarker'
 import { PostActions } from './PostActions'
 import { PostBody } from './PostBody'
 import { PostHeader } from './PostHeader'
@@ -95,8 +100,20 @@ export function PostCard({
     onOpen?.(post.id)
   }
 
+  // Pinned for everyone (story 21, DF-34): the read's flag, kept live by `PostPinChanged`
+  // through the shared per-post pin store - only THIS post's cards re-render on a change.
+  // A personal pin (`post.viewer.pinned`) never reaches here (DF-6: private).
+  const pinnedForAll = usePinnedForAll(post.id, post.pinnedForAll === true)
+  const markerId = useId()
+
   return (
-    <article className={styles.postCard} data-testid="post-card" data-post-id={post.id}>
+    <article
+      className={pinnedForAll ? `${styles.postCard} ${styles.pinned}` : styles.postCard}
+      data-testid="post-card"
+      data-post-id={post.id}
+      aria-describedby={pinnedForAll ? markerId : undefined}
+    >
+      {pinnedForAll && <PinnedMarker id={markerId} />}
       <div className={styles.avatarWrap}>
         <Avatar persona={post.author} />
       </div>

@@ -36,6 +36,22 @@
   text-align: left;
 }
 
+/*
+ * A card pinned for everyone (demo-feedback story 21): the "Pinned" line
+ * (`PinnedMarker`, `flex: 0 0 100%`) takes the first flex line and the avatar +
+ * content row wraps below it. `flex-basis: 0` on the content keeps it beside
+ * the avatar however long its text (a basis of `auto` could wrap it below).
+ * Only pinned cards get this class, so every other card's layout is untouched.
+ */
+.pinned {
+  flex-wrap: wrap;
+  row-gap: 6px;
+}
+
+.pinned > .content {
+  flex-basis: 0;
+}
+
 /* --------------------------------------------------------------------------
  * Avatar layout slot — `Avatar.tsx` itself is self-contained (inline styles,
  * no CSS Module dependency, so the staff console can reuse it without
