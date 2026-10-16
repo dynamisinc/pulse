@@ -20,10 +20,11 @@
  * only moves focus that was lost (on `<body>`) or still inside this row, so a
  * person who has already moved on is never pulled back.
  *
- * Who sees this: the page only mounts for the DF-20 roles (planner, org admin,
- * controller). An evaluator never reaches `/staff/exercises` (the not-allowed
- * page), so it never sees these actions; `orgAdminSurfaceFamily.test.tsx`
- * asserts that.
+ * Who sees which actions (story 17): Rename and Archive need `can('renameExercise')` /
+ * `can('archiveExercise')` (org admin, planner); a controller sees neither. The page only
+ * mounts for the DF-20 roles (planner, org admin, controller). An evaluator never reaches
+ * `/staff/exercises` (the not-allowed page), so it never sees these actions;
+ * `orgAdminSurfaceFamily.test.tsx` asserts that.
  *
  * World: STAFF (COBRA). FontAwesome only; MUI 9 `sx`-only system props.
  */
@@ -33,6 +34,7 @@ import { Stack, Typography } from '@mui/material'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faBoxArchive, faPen } from '@fortawesome/free-solid-svg-icons'
 import { CobraSecondaryButton } from '@/theme/styledComponents'
+import { usePermissions } from '@/core/auth'
 import { ArchiveExerciseDialog } from './ArchiveExerciseDialog'
 import { RenameExerciseDialog } from './RenameExerciseDialog'
 import { isArchivedStatus, isCompletedStatus } from './exerciseRowStatus'
@@ -60,6 +62,11 @@ export function ExerciseRowActions({ exercise }: ExerciseRowActionsProps) {
   const rowRef = useRef<HTMLDivElement>(null)
   const renameRef = useRef<HTMLButtonElement>(null)
   const reasonId = useId()
+  // Story 17: rename and archive are org-admin / planner; a controller would get a 403, so the
+  // actions are absent (a controller still sees the row's status in the table).
+  const permissions = usePermissions()
+  const canRename = permissions.can('renameExercise')
+  const canArchive = permissions.can('archiveExercise')
   const archived = isArchivedStatus(exercise.status)
   const completed = isCompletedStatus(exercise.status)
 
@@ -83,19 +90,21 @@ export function ExerciseRowActions({ exercise }: ExerciseRowActionsProps) {
       data-testid={`org-exercise-actions-${exercise.exerciseId}`}
       sx={{ alignItems: 'center', gap: 1, flexWrap: 'wrap' }}
     >
-      <CobraSecondaryButton
-        type="button"
-        size="small"
-        startIcon={<FontAwesomeIcon icon={faPen} aria-hidden="true" />}
-        ref={renameRef}
-        onClick={() => setOpen('rename')}
-        aria-label={`Rename ${exercise.name}`}
-        sx={ACTION_BUTTON_SX}
-      >
-        Rename
-      </CobraSecondaryButton>
+      {canRename && (
+        <CobraSecondaryButton
+          type="button"
+          size="small"
+          startIcon={<FontAwesomeIcon icon={faPen} aria-hidden="true" />}
+          ref={renameRef}
+          onClick={() => setOpen('rename')}
+          aria-label={`Rename ${exercise.name}`}
+          sx={ACTION_BUTTON_SX}
+        >
+          Rename
+        </CobraSecondaryButton>
+      )}
 
-      {archived ? null : (
+      {archived || !canArchive ? null : (
         <>
           <CobraSecondaryButton
             type="button"

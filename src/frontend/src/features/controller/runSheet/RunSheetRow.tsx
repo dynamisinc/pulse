@@ -70,7 +70,7 @@ import {
 } from './injectRules'
 import { MESSAGES } from './injectMessages'
 import type { InjectItemDto } from './types'
-import { useCanControl } from '../access'
+import { useCanControl, useCanEditContent } from '../access'
 
 export interface RunSheetRowProps {
   readonly item: InjectItemDto
@@ -161,6 +161,8 @@ export function RunSheetRow({
 }: RunSheetRowProps) {
   // Story 11 (DF-14): a non-controller gets only View (read-only) on a row.
   const canControl = useCanControl()
+  // Story 17: planners may also edit / delete / reorder injects; fire, hold, skip stay controller.
+  const canEdit = useCanEditContent()
   const first = item.posts[0]
   const more = item.kind === 'burst' ? Math.max(0, item.total - 1) : 0
   const reason = item.status === 'failed' ? failureReason(item) : undefined
@@ -172,7 +174,7 @@ export function RunSheetRow({
   const frozenProps = fireDisabledReason
     ? { title: fireDisabledReason, describedBy: fireReasonId }
     : {}
-  const editable = canControl && isEditable(item.status)
+  const editable = canEdit && isEditable(item.status)
   const assigneeName = item.assigneeName ?? nameOf(item.assigneeId ?? undefined)
 
   return (
@@ -373,7 +375,7 @@ export function RunSheetRow({
           testId="row-open"
           onClick={onOpen}
         />
-        {canControl && canDelete(item.status) && !confirmingDelete ? (
+        {canEdit && canDelete(item.status) && !confirmingDelete ? (
           <RunSheetButton
             icon={faTrash}
             label="Delete"
@@ -384,7 +386,7 @@ export function RunSheetRow({
           />
         ) : null}
         <Box sx={{ flex: 1 }} />
-        {canControl && <>
+        {canEdit && <>
           <RunSheetIconButton
             icon={faArrowUp}
             ariaLabel={`Move ${item.title} up`}

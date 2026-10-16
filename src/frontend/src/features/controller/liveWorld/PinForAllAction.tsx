@@ -40,7 +40,7 @@ import { CobraLinkButton } from '@/theme/styledComponents'
 import type { LiveWorldPost } from './liveWorldModel'
 import { liveWorldTokens, monoMeta, srOnly } from './liveWorldStyles'
 import { PinForAllError, setPinnedForAll } from './pinForAllService'
-import { useCanControl } from '../access'
+import { useCanStaffPin } from '../access'
 
 export interface PinForAllActionProps {
   /** The row's post; `post.pinnedForAll` is its current state. */
@@ -84,7 +84,8 @@ export function PinForAllAction({ post, onPinnedChange }: PinForAllActionProps) 
   const triggerRef = useRef<HTMLButtonElement>(null)
   const authorName = post.authorDisplayName
   // Story 11 (DF-14): absent for a non-controller; the row's "Pinned for everyone" marker stays.
-  const canControl = useCanControl()
+  // Story 17: pins follow the staff-posting rule (build: planner + controller).
+  const canControl = useCanStaffPin()
 
   function toggle(): void {
     if (pending) return

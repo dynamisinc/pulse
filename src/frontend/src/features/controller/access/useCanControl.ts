@@ -10,7 +10,8 @@
  * if..."). Read-only surfaces (the live world, the run sheet list, the review queue cards, the
  * noise level and rate, Export posts) stay.
  *
- * THE RULE: `useOptionalSession()?.role === 'controller'`. The role is the REAL signed-in
+ * THE RULE: `usePermissions().can('conductControl')` (`core/auth/rolePermissions.ts`, story 17):
+ * the session's role is `controller`. The role is the REAL signed-in
  * session's: staff routes sit under the `SessionProvider` that `app-shell/routes.tsx` hoists
  * above the staff tree, and it renders its children only once the session is resolved, so the
  * answer never flips after the first render. NOT `useControllerIdentity().role`: that is a
@@ -24,9 +25,35 @@
  * (#61 / #377, after the demo): an evaluator with a REST client can still write.
  */
 
-import { useOptionalSession } from '@/core/auth'
+import { usePermissions } from '@/core/auth'
+import { useExerciseContext } from '@/core/exerciseContext'
 
 /** True only when the signed-in session's role is `controller`. */
 export function useCanControl(): boolean {
-  return useOptionalSession()?.role === 'controller'
+  return usePermissions().can('conductControl')
+}
+
+/**
+ * True for a role that may author exercise content: inject create / update / delete / reorder /
+ * import and persona edit (planner or controller; story 17 widened these to planners). Conduct
+ * actions (fire, hold, skip, takedown...) stay on {@link useCanControl}.
+ */
+export function useCanEditContent(): boolean {
+  return usePermissions().can('editContent')
+}
+
+/**
+ * Staff posting as a persona: planner or controller while the exercise is in `build` (setup and
+ * backdated posts), controller only in any other state (story 17, Copilot 5 fold). Needs the
+ * exercise scope (`useExerciseContext`) for the lifecycle status.
+ */
+export function useCanStaffPost(): boolean {
+  const { status } = useExerciseContext()
+  return usePermissions().can('staffPost', status)
+}
+
+/** Pinning for everyone follows the same build-versus-conduct rule as {@link useCanStaffPost}. */
+export function useCanStaffPin(): boolean {
+  const { status } = useExerciseContext()
+  return usePermissions().can('staffPin', status)
 }

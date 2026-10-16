@@ -78,7 +78,7 @@ import {
   CobraPrimaryButton,
   CobraSecondaryButton,
 } from '@/theme/styledComponents'
-import { useOptionalSession } from '@/core/auth'
+import { usePermissions } from '@/core/auth'
 import { useExerciseContext } from '@/core/exerciseContext'
 import { EndExerciseDialog } from './EndExerciseDialog'
 import { useExerciseLifecycle } from './useExerciseLifecycle'
@@ -108,8 +108,9 @@ export const STATUS_CLEAR_MS = 5000
  * (see "ABSENT FOR NON-CONTROLLERS" above).
  */
 export function ExerciseLifecycleControl() {
-  const session = useOptionalSession()
-  if (session?.role !== 'controller') return null
+  // Story 17: StartEx / EndEx are controller-only (a planner would get a 403).
+  const permissions = usePermissions()
+  if (!permissions.can('startExercise') && !permissions.can('endExercise')) return null
   return <ExerciseLifecycleControlBody />
 }
 
