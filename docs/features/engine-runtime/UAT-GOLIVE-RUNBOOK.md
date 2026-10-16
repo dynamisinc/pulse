@@ -15,6 +15,22 @@
 | You can reach the bootstrap secret | The `uat` environment secret `BOOTSTRAP_SECRET`, which step 3 needs. |
 | Optional: provider alerts | If you want alerts on in the same run, first create the `PULSE_ALERT_OWNER_EMAIL` secret and merge the one-line `deployProviderAlerts = true` change (issue #590). Otherwise skip it; alerts stay off. |
 
+## 0b. Capture the current app settings (before any deploy)
+
+The infra run **replaces the App Service's whole app-settings list** (`siteConfig.appSettings`). Any setting that
+exists only in the portal, and not in the bicep, is **deleted** by the deploy. This was already true before the
+go-live; it matters now because Sunday's run is the first big settings change.
+
+In Cloud Shell, after `az account set` to the Pulse subscription (the one you used for the §8 checks):
+
+```bash
+az webapp config appsettings list \
+  -n app-pulse-api-uat-dynamis -g rg-pulse-uat-centralus \
+  --query "[].name" -o tsv | sort > uat-appsettings-before.txt
+```
+
+Keep the file for step 1. Do not paste values anywhere; the names are enough.
+
 ## 1. Deploy Infrastructure: what-if first
 
 GitHub, then **Actions**, then **Deploy Infrastructure**, then **Run workflow**: `environment = uat`, **`what_if = true`**.
@@ -34,6 +50,11 @@ Read the job summary. Expect **only** these changes:
 
 > ⚠ **Never set `ASPNETCORE_FORWARDEDHEADERS_ENABLED=true`.** It trusts forwarded headers from *any* client, so anyone
 > could spoof their IP past the login limiter. The three `KnownNetworks` entries above are the only forwarded-headers settings.
+
+**Compare with step 0b.** Every name in `uat-appsettings-before.txt` must appear in the what-if, either unchanged or
+as a listed change. A name that is in the file but **missing or shown as removed** in the what-if is a portal-only
+setting the deploy would wipe. **Do not deploy** until it is resolved (added to the bicep by its owner, or confirmed
+as safe to drop).
 
 **Stop and ask before deploying if the what-if shows anything else**, especially:
 - any delete;
@@ -99,6 +120,12 @@ Expect a 200 response carrying the `exerciseId` and persona counts. A 404 means 
    - That machine gets `429`.
    - A second machine can still log in.
    - Before this infra run A1a's code is a no-op; after it, the limiter keys on the real client IP.
+   - **If both machines are throttled together**, the App Service front end's peer IP is outside the three
+     `KnownNetworks` ranges, so forwarded headers are ignored. This fails safe (it is the pre-A1a behaviour) but
+     means #480 is not working. It does not block the go-live. Note it and report it to Session A. To find the
+     real peer, optionally set `Logging__LogLevel__Microsoft.AspNetCore.HttpOverrides = Debug` in the portal for a
+     few minutes, repeat one login, and look for an "Unknown proxy" line in the log stream; then remove the setting
+     (the next infra run would wipe it anyway, see step 0b).
 6. **The kill switch works.** Engage FullStop.
    - Nothing new publishes.
    - Restore afterwards (lead controller).
