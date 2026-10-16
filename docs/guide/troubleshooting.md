@@ -13,6 +13,7 @@ exactly what Pulse shows on screen.
 - [Cards, email and import problems](#cards-email-and-import-problems)
 - [After a server restart](#after-a-server-restart)
 - [Resetting a demo exercise (Dynamis staff only)](#resetting-a-demo-exercise-dynamis-staff-only)
+- [I got a provider alert](#i-got-a-provider-alert)
 - [Who to contact](#who-to-contact)
 
 ---
@@ -214,6 +215,38 @@ The demo environment has two maintenance scripts in the Pulse repository under `
   run sheet, media and the scenario clock. It changes nothing.
 
 `scripts/uat/README-seed.md` has the full instructions.
+
+---
+
+## I got a provider alert
+
+> This section is for the person who owns the AI provider (the address on the alert emails). It does
+> not affect players directly: the engine only drafts posts, and staff review them.
+
+Pulse emails the provider owner when the AI service that writes engine drafts misbehaves. The email
+subject names the rule:
+
+- **generation errors / breaker open** (urgent): many calls to the AI service failed, or Pulse has
+  stopped calling it for a while. When Pulse stops calling it, it also drops the engine to Suggest
+  by itself.
+- **latency at degraded-mode trip** (urgent): calls are so slow that they time out.
+- **latency warning**: calls are slower than normal but still work.
+- **call-volume spend proxy**: the engine made far more calls in the last hour than a normal exercise
+  hour. This counts calls, not money. For the real cost, open the **USAGE** tool in the Controller
+  Console.
+
+**First response, in the Controller Console of each running exercise:**
+
+1. Move the engine switch to **ENGINE · SUGGEST-ONLY** or **ENGINE · STOPPED**. See
+   [The engine switch (kill switch)](controller-guide.md#the-engine-switch-kill-switch).
+2. If the AI service is failing or the call count keeps climbing, select **Cut to Fake** in the
+   **ENGINE** panel. Pulse switches drafting to the offline generator, which does not call the AI
+   service, without a restart. See [Provider](controller-guide.md#provider).
+3. Tell Dynamis support (below), with the alert email and the time.
+
+Alerts clear on their own when the problem stops. They are only turned on in the shared demo
+environment for now. How to silence or tune them is in `infrastructure/README.md` ("Provider
+alerts"), for Dynamis staff.
 
 ---
 

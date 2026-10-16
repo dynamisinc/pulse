@@ -1,6 +1,6 @@
 # Story: Provider alert rules (errors, latency, spend)
 
-**Feature:** Engine telemetry & tuning  ·  **Epic:** E8 (cross-cutting: NFR-009 monitoring/alerting; brief track 7)  ·  **Phase:** 2 (v1) — engine go-live wave C1  ·  **Status:** Not Started
+**Feature:** Engine telemetry & tuning  ·  **Epic:** E8 (cross-cutting: NFR-009 monitoring/alerting; brief track 7)  ·  **Phase:** 2 (v1) — engine go-live wave C1  ·  **Status:** Built, NOT Complete — authored on `feature/engine-golive-alert-rules` (`bicep build` / `build-params` / `lint` clean, `main.json` regenerated). Still needs **Tom's Tier-2 infra sign-off** and **UAT verification** (a `what-if`, the deploy, and a forced test fire reaching the owner's inbox — AC7). Nothing deployed yet.
 **Requirements:** ADP-041 (operational counterpart), NFR-003 (degraded-mode trip), NFR-005 (governed provider)  ·  **Design decisions:** none  ·  **Issue:** —
 
 > **TIER-2 / infra change: Tom Bull must sign off before merge** (`docs/NEXT-WAVE-SESSION-BRIEF.md` C5: "Tom signs off schema, isolation, security and infra changes").
@@ -46,13 +46,13 @@ cost-per-call envelope) which needs no code change, and records the token-accura
 profile is stable (~992 in / ~200 out per 4-post burst; `engine-generation-infra/MEASURED-RESULTS.md`).
 
 ## Acceptance Criteria
-- [ ] **Gated, default off.** Given `infrastructure/main.bicep`, when it is deployed with defaults (and
+- [x] **Gated, default off.** Given `infrastructure/main.bicep`, when it is deployed with defaults (and
       for every environment parameter file that omits it), then NO alert rule and NO action group is
       created: a new `param deployProviderAlerts bool = false` gates a single new module call, and it
       additionally requires `deployMonitoring && deployAi` (an alert on a provider that is not deployed,
       or with no App Insights to read, is a deploy error, not a silent no-op). `parameters/uat.bicepparam`
       sets it `true`; nothing else does. `what-if` against a non-UAT parameter set shows zero alert resources.
-- [ ] **Owner email is a parameter, never a literal.** Given the action group, when it is authored, then
+- [x] **Owner email is a parameter, never a literal.** Given the action group, when it is authored, then
       its single email receiver comes from the module's required `alertOwnerEmail` param, fed by a ROOT
       `param alertOwnerEmail string = ''` in `main.bicep` (an empty default, so parameter sets that omit it
       still deploy with alerts off — ARM requires undefaulted params even when the consuming module is
@@ -61,23 +61,23 @@ profile is stable (~992 in / ~200 out per 4-post burst; `engine-generation-infra
       `deployProviderAlerts = true` with an empty `alertOwnerEmail` **fails the deploy with a clear message**
       (an alert nobody receives is worse than none). `grep -rn "@" infrastructure/ | grep -i "alert"` finds no
       hard-coded address.
-- [ ] **Error alert.** Given Foundry-host dependencies in `appi-<suffix>`, when the failed-call ratio over a
+- [x] **Error alert.** Given Foundry-host dependencies in `appi-<suffix>`, when the failed-call ratio over a
       15-minute window exceeds a threshold (param, default 20 %) with a minimum call count (param, default 5)
       — or the breaker-open signature (`BrokenCircuitException`) appears — then a Sev-2 alert fires to the
       action group. The query is scoped to the Foundry host by `target has '<aiFoundryName>'` (taken from the
       module parameter, not re-typed), so an unrelated failing dependency (SQL, Storage) never trips it.
-- [ ] **Latency alert, against the real thresholds.** Given the same dependencies, when the 15-minute p95 of
+- [x] **Latency alert, against the real thresholds.** Given the same dependencies, when the 15-minute p95 of
       `duration` exceeds **5 s** (≈2x the measured Standard p95 of 2.7 s, `MEASURED-RESULTS.md`) a Sev-3
       warning fires, and when it exceeds **10 s** (the per-attempt degraded-mode trip threshold,
       `AttemptTimeoutSeconds`, asserted in `ProviderLiveConfigTests`) a Sev-2 alert fires. Both thresholds
       are bicep params with those defaults, and a code comment cites the two source documents so a future
       change to the trip threshold knows to move the alert with it.
-- [ ] **Spend alert (call-volume proxy).** Given the Foundry-host call count per hour, when it exceeds a
+- [x] **Spend alert (call-volume proxy).** Given the Foundry-host call count per hour, when it exceeds a
       threshold param (default sized from `MEASURED-RESULTS.md`: nominal active-storyline hour ≈ 375 bursts,
       so alert at ~2x = 750 calls/h; ≈ $1.20/h at the Ambient rate of $0.0016/burst) a Sev-3 alert fires; the
       rule's description states plainly that it is a call-volume proxy and points at the usage panel
       (`GET /api/engine/usage`, story 03) for token-accurate cost.
-- [ ] **No live-egress side effect and no new telemetry.** Given the deployed module, when reviewed, then it
+- [x] **No live-egress side effect and no new telemetry.** Given the deployed module, when reviewed, then it
       only READS existing App Insights data (scheduled query rules, `Microsoft.Insights/scheduledQueryRules`,
       scoped to the `appInsights` component id) — no app-setting change, no `Generation__*` change, no new
       custom metric, no code change, no EF/schema change. The module has no parameter that can reach a
@@ -86,7 +86,7 @@ profile is stable (~992 in / ~200 out per 4-post burst; `engine-generation-infra
       owner runs the documented verification (temporarily lower the latency or call-count threshold param, or
       run the `KQL` in the portal against the last hour's real traffic), then the query returns the expected
       rows and a test fire reaches the owner's inbox; the result is recorded in the story's Tests section.
-- [ ] **Docs.** `infrastructure/README.md` gains the toggle row (`deployProviderAlerts`) and a short
+- [x] **Docs.** `infrastructure/README.md` gains the toggle row (`deployProviderAlerts`) and a short
       "Provider alerts" section (what fires, who is told, how to silence); `docs/guide/troubleshooting.md`
       gains a short "I got a provider alert" entry linking to the engine kill switch / cut-to-Fake lever
       (autonomy-safety 03/07) as the first response. (Docs-as-done, brief C5.)
@@ -129,3 +129,57 @@ traffic to alert on; Tom's infra sign-off. Independent of stories 01-03 code.
   `what-if` with defaults shows none; the empty-email case fails with the message.
 - Manual: run each KQL against UAT's last hour; temporarily lower a threshold to force one fire; confirm the
   email arrives; revert. Record the result here.
+
+### Test record (2026-10-16, build only; no Azure call made)
+- `bicep build infrastructure/main.bicep`: clean (exit 0, no diagnostics), Bicep CLI 0.48.1 (the
+  version `main.json` was already generated with). `main.json` regenerated from it.
+- `bicep build-params infrastructure/parameters/uat.bicepparam`: clean (exit 0).
+- `bicep lint` on `main.bicep` and `modules/provider-alerts.bicep`: clean.
+- `grep -rn "@" infrastructure/ | grep -i "alert"`: matches only bicep decorators (`@description`,
+  `@minLength`, ...) and resource type strings; **no email address**.
+- **Not yet run (needs Azure, Tom's call):** `what-if` with UAT params (expect 1 action group + 4 rules),
+  `what-if` with defaults (expect none), the empty-email fail message, the KQL against live traffic, and
+  the forced test fire. Record them here.
+
+## Tasks
+- [x] `infrastructure/modules/provider-alerts.bicep` — action group + scheduled query rules (errors/breaker,
+      latency warning, latency trip, spend proxy), thresholds as params with the AC defaults.
+- [x] `infrastructure/main.bicep` — `deployProviderAlerts` (default false), `alertOwnerEmail` (default `''`),
+      `fail()` guard (alerts on requires `deployMonitoring && deployAi` and a non-empty email), module call.
+- [x] `infrastructure/parameters/uat.bicepparam` — new block at the end of the file (clear of PR #571's lines).
+- [x] `.github/workflows/deploy-infrastructure.yml` — `PULSE_ALERT_OWNER_EMAIL` secret into the What-If and
+      Deploy steps (Tom-signed infra; flag in the PR).
+- [x] Regenerate `infrastructure/main.json`.
+- [x] Docs: `infrastructure/README.md` (toggle row, CI secret, "Provider alerts" section),
+      `docs/guide/troubleshooting.md` ("I got a provider alert").
+- [ ] Tom: create the `PULSE_ALERT_OWNER_EMAIL` secret on the `uat` GitHub environment.
+- [ ] Tom: Tier-2 infra sign-off.
+- [ ] UAT: what-if, deploy, run the KQL on live traffic, force one fire, record it above (AC7).
+
+## Build notes
+- **Four rule resources, not three.** A scheduled query rule carries one severity, and the latency AC
+  needs a Sev-3 warning (5 s) and a Sev-2 alert (10 s), so latency is two rules. Three alert *kinds*,
+  four `scheduledQueryRules`.
+- **Rule shape.** Each KQL returns a row only when its condition holds; every rule fires on result
+  rows > 0 (`timeAggregation: Count`, `GreaterThan 0`, 1 of 1 periods, `autoMitigate`). The rule window
+  is the query time range (errors/latency 15 min every 5 min; spend 1 h every 15 min).
+  `skipQueryValidation: false`.
+- **What the queries match.** `dependencies | where target has "<aiFoundryName>"`, taken from the
+  module param (fed by main.bicep's `aiFoundryName` var). The App Insights SDK records each outbound
+  HTTP attempt from the typed `HttpClient` (`AddHttpProvider`, `engine-generation` pipeline) with
+  `target` = the request host, so retries count as separate rows and Polly-timed-out attempts show up
+  as failures with a ~10 s duration. The Claude passthrough host (`<name>.services.ai.azure.com`) also
+  matches. **No `type` or `name` filter**: not needed for correctness, and the exact values could not
+  be confirmed without live data. The README's verification query groups by `type, name` so the first
+  live hour can confirm there is exactly one row per call.
+- **Breaker signature.** The `OnOpened` hook does not log, and an open breaker makes no HTTP call, so
+  there is no dependency row for it. The error rule therefore also counts `exceptions` rows whose `type`
+  or `details` contain `BrokenCircuitException` (a rejected call surfaces in the tick's logged
+  exception chain). `engine-generation` is the only Polly circuit breaker in `src/`, so the match is
+  specific to it. Best-effort text match, as the story says.
+- **Fail-clearly.** `main.bicep` computes the owner email through a nested `if()` whose untaken branches
+  call `fail()`; ARM evaluates only the taken branch, so with alerts off nothing fails. The module also
+  has `@minLength(3)` on `alertOwnerEmail` as a backstop. The error text is confirmed by the compiled
+  template only; the live deploy failure is in the UAT checklist above.
+- **Owner email** is a plain (not `@secure()`) string, as the AC specifies. It comes from a GitHub
+  secret, so Actions masks it in logs, and it is in no output.

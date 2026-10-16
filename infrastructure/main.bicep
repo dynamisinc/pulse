@@ -62,6 +62,12 @@ param generationTenantBounded bool = false
 @description('TIER-2 HUMAN ASSERTION (NFR-005 §2 / ADP-025), NOT a derived value: the signer attests the contractual no-training terms covering this endpoint (Microsoft product terms for Azure OpenAI; the Anthropic Marketplace offer for Claude). Typed by the §8 signer in the environment parameter file alongside generationProviderLive; deliberately NOT derived from deployAi, for the same reason as generationTenantBounded. False by default (fail closed); a false assertion under a live provider throws at startup rather than egressing.')
 param generationNoTrainingAttested bool = false
 
+@description('Deploy the provider alert rules (engine-telemetry-tuning/04): an email action group + scheduled log-query rules over App Insights for generation errors/breaker, latency (5 s warn / 10 s trip) and a call-volume spend proxy. Read-only over existing telemetry. OFF by default; requires deployMonitoring AND deployAi (the deploy fails otherwise) and a non-empty alertOwnerEmail.')
+param deployProviderAlerts bool = false
+
+@description('Email address of the provider owner who receives the provider alerts. Empty default so parameter sets that omit it still deploy with alerts off; deployProviderAlerts = true with an empty value FAILS the deploy. Sourced from the PULSE_ALERT_OWNER_EMAIL secret in CI; never a literal in this repo and never echoed in outputs.')
+param alertOwnerEmail string = ''
+
 // ============================================================================
 // SQL Parameters (only consumed when deployDatabase = true)
 // ============================================================================
@@ -286,6 +292,35 @@ module appInsights 'modules/appinsights.bicep' = if (deployMonitoring) {
     // reference is only reached when logAnalytics is actually deployed.
     #disable-next-line BCP318
     logAnalyticsWorkspaceId: logAnalytics.outputs.id
+    tags: tags
+  }
+}
+
+// Provider alert rules (engine-telemetry-tuning/04). Read-only over the appInsights component: an action
+// group + scheduled log-query rules on the Foundry host's `dependencies` rows. Gated by deployProviderAlerts
+// (default OFF). Turning it on without its prerequisites is a DEPLOY ERROR, not a silent no-op: no App
+// Insights (deployMonitoring) means nothing to query, no Foundry account (deployAi) means nothing to watch,
+// and an empty alertOwnerEmail means nobody is told. fail() sits in the untaken branch of if(), so with
+// alerts off (or correctly configured) it is never evaluated.
+var providerAlertsOwnerEmail = !deployProviderAlerts
+  ? alertOwnerEmail
+  : !(deployMonitoring && deployAi)
+      ? fail('deployProviderAlerts = true requires deployMonitoring = true AND deployAi = true (an alert on a provider that is not deployed, or with no App Insights to read, is a deploy error).')
+      : empty(trim(alertOwnerEmail))
+          ? fail('deployProviderAlerts = true requires alertOwnerEmail (set the PULSE_ALERT_OWNER_EMAIL secret on the GitHub environment). An alert nobody receives is worse than none.')
+          : alertOwnerEmail
+
+module providerAlerts 'modules/provider-alerts.bicep' = if (deployProviderAlerts) {
+  name: 'providerAlertsDeploy'
+  params: {
+    location: location
+    // Ternary-guarded so a missing App Insights surfaces as the clear fail() message above, never as a
+    // null-reference deploy error.
+    #disable-next-line BCP318
+    appInsightsId: deployMonitoring ? appInsights.outputs.id! : ''
+    aiFoundryName: aiFoundryName
+    resourceSuffix: resourceSuffix
+    alertOwnerEmail: providerAlertsOwnerEmail
     tags: tags
   }
 }

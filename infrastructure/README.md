@@ -17,6 +17,7 @@ template and flipped per environment in [`parameters/uat.bicepparam`](parameters
 | Toggle | Turns on | `main.bicep` default | UAT today |
 |---|---|---|---|
 | `deployMonitoring` | Log Analytics + Application Insights | `false` | `true` |
+| `deployProviderAlerts` | Email action group + scheduled log-query alerts on the live generation provider (errors/breaker, latency, call-volume spend proxy). Read-only over App Insights. **Requires `deployMonitoring` + `deployAi` and a non-empty `alertOwnerEmail`** (the deploy fails otherwise). See [Provider alerts](#provider-alerts-engine-telemetry-tuning-04) | `false` | `true` (Tier-2 infra, pending Tom's sign-off) |
 | `deployStorage` | Storage account (keyless blob media, private `post-media` container) | `false` | `true` |
 | `deployDatabase` | Azure SQL server + database | `false` | `true` |
 | `deployBackend` | App Service / Function App (per `hostingModel`) | `false` | `true` |
@@ -104,7 +105,7 @@ Two `workflow_dispatch` / event-driven workflows under [`.github/workflows/`](..
 
 | Workflow | Trigger | Purpose | Required secrets |
 |---|---|---|---|
-| [`deploy-infrastructure.yml`](../.github/workflows/deploy-infrastructure.yml) | manual | Runs the Bicep deploy (same flow as the CLI above) | `AZURE_CREDENTIALS`; once backend toggles are on: `SQL_ADMIN_PASSWORD`, `JWT_SECRET_KEY`, `SECURITY_CONTACT_EMAIL` (email is keyless: `EMAIL_CONNECTION_STRING` is no longer mapped and can be deleted); for login go-live (story login/06): `BOOTSTRAP_SECRET`, `STAFF_IDENTITY_ACCOUNTS_JSON` |
+| [`deploy-infrastructure.yml`](../.github/workflows/deploy-infrastructure.yml) | manual | Runs the Bicep deploy (same flow as the CLI above) | `AZURE_CREDENTIALS`; once backend toggles are on: `SQL_ADMIN_PASSWORD`, `JWT_SECRET_KEY`, `SECURITY_CONTACT_EMAIL` (email is keyless: `EMAIL_CONNECTION_STRING` is no longer mapped and can be deleted); for login go-live (story login/06): `BOOTSTRAP_SECRET`, `STAFF_IDENTITY_ACCOUNTS_JSON`; for provider alerts (engine-telemetry-tuning/04): `PULSE_ALERT_OWNER_EMAIL` |
 | [`deploy-frontend.yml`](../.github/workflows/deploy-frontend.yml) | push to `main` (`src/frontend/**`) + manual | Lints, type-checks, tests, builds the Vite SPA, publishes to `stapp-pulse-uat` | `AZURE_STATIC_WEB_APPS_API_TOKEN` |
 
 The security-contact email for Defender is passed to `defender.bicep` directly from the
@@ -281,6 +282,70 @@ the OpenAI surface's `cognitiveservices.azure.com`), data-plane role **`Cognitiv
   PULSE_LIVE_FOUNDRY=1 dotnet test --filter ProviderComparisonTests
   ```
   See [`docs/features/engine-generation-infra/PROVIDER-COMPARISON.md`](../docs/features/engine-generation-infra/PROVIDER-COMPARISON.md).
+
+## Provider alerts (engine-telemetry-tuning 04)
+
+`deployProviderAlerts = true` deploys [`modules/provider-alerts.bicep`](modules/provider-alerts.bicep):
+one email action group (`ag-pulse-uat-provider`) and four scheduled log-query rules over
+`appi-pulse-uat`. Every query reads the auto-collected `dependencies` rows whose `target has
+"aif-pulse-uat"` (the Foundry host; each row is one model-call **attempt**, retries included), so an
+unrelated failing dependency (SQL, Storage, the identity endpoint) never trips them. The module only
+reads existing telemetry: no app setting, no `Generation__*` value, no new metric and no code change.
+
+| Rule | Fires when | Severity | Window / every |
+|---|---|---|---|
+| `alert-pulse-uat-provider-errors` | more than 20 % of attempts failed (with at least 5 attempts), **or** a Polly `BrokenCircuitException` was logged (breaker open, engine degraded to Suggest) | Sev-2 | 15 min / 5 min |
+| `alert-pulse-uat-provider-latency-warning` | p95 attempt duration > 5 s (about 2x the measured Standard p95 of 2.7 s) | Sev-3 | 15 min / 5 min |
+| `alert-pulse-uat-provider-latency` | p95 attempt duration > 10 s (the per-attempt degraded-mode trip, `Generation:Resilience:AttemptTimeoutSeconds`) | Sev-2 | 15 min / 5 min |
+| `alert-pulse-uat-provider-spend` | more than 750 model calls in an hour (about 2x a nominal active-storyline hour; about $1.20/h at the Ambient rate) | Sev-3 | 1 h / 15 min |
+
+All thresholds are module parameters (`errorRatePercentThreshold`, `errorMinimumCalls`,
+`latencyWarningMs`, `latencyAlertMs`, `callsPerHourThreshold`) with the defaults above, sourced from
+[`MEASURED-RESULTS.md`](../docs/features/engine-generation-infra/MEASURED-RESULTS.md). If the trip
+threshold (`AttemptTimeoutSeconds`) moves, move `latencyAlertMs` with it.
+
+**The spend rule is a call-volume proxy, not a dollar figure.** Token counts live in the SQL
+`TelemetryEvents` table (`engine.generated`), not in App Insights, so Azure Monitor cannot see cost.
+For token-accurate cost use the AI generation usage panel (`GET /api/engine/usage`).
+
+**Who is told.** The action group has one email receiver: `alertOwnerEmail`, from the
+`PULSE_ALERT_OWNER_EMAIL` secret on the `uat` GitHub environment (read by `uat.bicepparam` with
+`readEnvironmentVariable`; never typed in the repo, never echoed in outputs). With
+`deployProviderAlerts = true`, an empty email, or `deployMonitoring`/`deployAi` off, **fails the deploy
+with a clear message**.
+
+**First response to an alert:** see "I got a provider alert" in
+[`docs/guide/troubleshooting.md`](../docs/guide/troubleshooting.md#i-got-a-provider-alert) (drop the
+engine to Suggest or Stopped, or Cut to Fake).
+
+**Silence.**
+
+- One rule, temporarily:
+  `az monitor scheduled-query update -g rg-pulse-uat-centralus -n alert-pulse-uat-provider-spend --disabled true`
+  (`--disabled false` to re-enable). A redeploy re-enables it.
+- All of them: set `deployProviderAlerts = false` in `uat.bicepparam` and redeploy. Note that the deploy is
+  incremental, so the existing rules stay; delete them as well
+  (`az monitor scheduled-query delete -g rg-pulse-uat-centralus -n <rule>` for each rule, then
+  `az monitor action-group delete -g rg-pulse-uat-centralus -n ag-pulse-uat-provider`).
+
+**Verify on UAT (with live traffic).** Run the queries by hand in the portal (`appi-pulse-uat` → Logs,
+time range "Last hour"), for example:
+
+```kusto
+dependencies
+| where target has "aif-pulse-uat"
+| summarize calls = count(), failed = countif(success == false), p95DurationMs = percentile(duration, 95)
+    by type, name, bin(timestamp, 15m)
+```
+
+Expect the model calls (an HTTP `POST` to the deployment's chat-completions path) and no unrelated
+hosts. **Check this once on the first live hour:** if the same call shows up as two rows with different
+`type` values (for example an SDK-level span as well as the HTTP row), the counts double and the
+queries need a `type` filter; that has not been observed yet. To force a test fire, lower one threshold
+temporarily (pass a low `callsPerHourThreshold` or `latencyWarningMs` on the `providerAlerts` module
+call and redeploy, or edit the rule's query in the portal), confirm the email arrives, then revert.
+The action group's **Test** button in the portal checks the email path alone. Record the result in the
+story's Tests section.
 
 ## Blob storage for post media (keyless)
 
