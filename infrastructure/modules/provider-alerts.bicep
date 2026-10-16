@@ -93,8 +93,9 @@ param tags object = {}
 //
 // SAMPLING: Program.cs uses AddApplicationInsightsTelemetry() with default ADAPTIVE SAMPLING, so a stored row
 // can stand for several real calls. Every COUNT here is therefore sum(itemCount), never count(). The p95 in
-// the latency warning is deliberately UNWEIGHTED (percentile over the retained rows): adaptive sampling keeps
-// a representative sample, so the percentile is not biased by it — only absolute counts are.
+// the latency warning is WEIGHTED too — percentilew(duration, itemCount, 95): adaptive sampling changes its
+// rate within a window (it samples harder under load, which is exactly when latency rises), so an unweighted
+// percentile over the retained rows would under-represent the high-volume, high-latency periods.
 
 var providerCalls = 'dependencies\n| where target has "${aiFoundryName}"'
 
@@ -116,8 +117,8 @@ var errorQuery = join([
 
 var latencyWarningQuery = join([
   providerCalls
-  '// p95 is unweighted by itemCount on purpose (see the SAMPLING note in provider-alerts.bicep).'
-  '| summarize calls = sum(itemCount), p95DurationMs = percentile(duration, 95)'
+  '// p95 weighted by itemCount (adaptive sampling; see the SAMPLING note in provider-alerts.bicep).'
+  '| summarize calls = sum(itemCount), p95DurationMs = percentilew(duration, itemCount, 95)'
   '| where calls >= ${latencyMinimumCalls} and p95DurationMs > ${latencyWarningMs}'
 ], '\n')
 

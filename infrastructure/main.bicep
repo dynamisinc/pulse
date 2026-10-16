@@ -73,15 +73,20 @@ param alertOwnerEmail string = ''
 // override them in its .bicepparam without editing this template. Defaults and their sources are documented
 // in modules/provider-alerts.bicep (MEASURED-RESULTS.md; AttemptTimeoutSeconds / ProviderLiveConfigTests).
 @description('Provider alerts: spend-proxy threshold, Foundry-host model calls per hour (Sev-3). Default 750 ≈ 2x a nominal active-storyline hour.')
+@minValue(1)
 param providerAlertCallsPerHourThreshold int = 750
 
 @description('Provider alerts: latency warning, 15-minute p95 attempt duration in ms (Sev-3). Default 5000 ≈ 2x the measured Standard p95.')
+@minValue(1)
 param providerAlertLatencyWarningMs int = 5000
 
 @description('Provider alerts: the per-attempt timeout in ms the Sev-2 timeout-ratio rule measures against. Default 10000 = Generation:Resilience:AttemptTimeoutSeconds; move with it.')
+@minValue(1)
 param providerAlertLatencyAlertMs int = 10000
 
 @description('Provider alerts: percentage of attempts at >= 95 % of providerAlertLatencyAlertMs (timed out) above which the Sev-2 alert fires. Default 5.')
+@minValue(1)
+@maxValue(100)
 param providerAlertTimeoutRatioPercentThreshold int = 5
 
 // ============================================================================

@@ -133,8 +133,12 @@ Group B — what runs autonomously, and what never does
       holds because ambient posts are ordinary posts in the participant skin.
 - [ ] **AC10 User guide (docs-as-done).** `docs/guide/controller-guide.md` §10 "The AI engine" gains an "Ambient
       chatter" subsection (what autonomous means, the caps, the allow-lists, the three modes, resets to Off on
-      restart, kill switch / Freeze / EndEx behaviour); the stale line "the AI engine is not stopped by EndEx"
-      (and its "before EndEx" workaround) is updated to match AC5; `docs/guide/planner-guide.md` mentions
+      restart, kill switch / Freeze / EndEx behaviour); the EndEx warning ("the AI engine is not stopped by
+      EndEx", ~L162-169) gains ONLY an exception for ambient posting ("ambient posting stops at EndEx and
+      Freeze", per AC5). The warning itself and its manual close-out workaround (white noise Off, Pause engine,
+      ENGINE · STOPPED, Swamped mode off, before EndEx) STAY for non-ambient bursts: late approvals and
+      Swamped-mode auto-sends are not covered by the ambient-only gate and remain until those paths are
+      lifecycle-gated (Session A's A5); `docs/guide/planner-guide.md` mentions
       choosing the allow-lists at setup if relevant; the settings-panel screenshot is re-captured
       (`tools/guide-screenshots`).
 

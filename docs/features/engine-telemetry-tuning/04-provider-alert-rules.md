@@ -124,7 +124,7 @@ profile is stable (~992 in / ~200 out per 4-post burst; `engine-generation-infra
   (a workflow edit — flag it in the PR; it is not an orchestrator-owned file but is Tom-signed infra).
 - **No orchestrator-owned file** (`Program.cs`, `App.tsx`, `staffRouteRegistry.tsx`) is touched.
 - **No schema / EF migration** (C1 rule 1).
-- Query shape (illustrative): `dependencies | where target has '<aiFoundryName>' | summarize p95=percentile(duration,95), calls=count(), failed=countif(success == false) by bin(timestamp, 15m)`.
+- Query shape (illustrative): `dependencies | where target has '<aiFoundryName>' | summarize p95=percentile(duration,95), calls=count(), failed=countif(success == false) by bin(timestamp, 15m)`. (As built, counts use `sum(itemCount)` and the p95 uses `percentilew(duration, itemCount, 95)` because App Insights adaptive sampling is on; see Build notes.)
   Latency is `duration` in ms. Use `evaluationFrequency` 5 min / `windowSize` 15 min; `skipQueryValidation`
   off so a bad table name fails at deploy.
 - See `implementation.md` (story 04 row) for the wave.
@@ -148,6 +148,9 @@ traffic to alert on; Tom's infra sign-off. Independent of stories 01-03 code.
   `@minLength`, ...) and resource type strings; **no email address**.
 - Re-run after the Gate-1 fixes (Bicep CLI 0.48.1): `build` exit 0, `build-params` exit 0, `lint` on
   `main.bicep` and the module exit 0, no diagnostics; `main.json` regenerated.
+- Re-run after the Copilot (PR #585) fixes, i.e. the weighted p95 `percentilew(duration, itemCount, 95)`
+  and the root threshold `@minValue`/`@maxValue` decorators (Bicep CLI 0.48.1): `build`, `build-params`
+  and `lint` exit 0, no diagnostics; `main.json` regenerated. The KQL is still not run against live data.
 - **Not yet run (needs Azure, Tom's call):** `what-if` with UAT params (expect 1 action group + 4 rules),
   `what-if` with defaults (expect none), the empty-email fail message, the KQL against live traffic, and
   the forced test fire. Record them here.
@@ -186,8 +189,10 @@ traffic to alert on; Tom's infra sign-off. Independent of stories 01-03 code.
   `target` = the request host, so retries count as separate rows and Polly-timed-out attempts are
   expected to show up as failures with a ~10 s duration (to confirm on UAT, AC7).
   **Sampling (Gate-1 H-1):** `Program.cs` uses default adaptive sampling, so every count is
-  `sum(itemCount)` / `sumif(itemCount, ...)`. The 5 s p95 stays unweighted (a percentile over the retained
-  rows is not biased by sampling); a comment in the module says so. The Claude passthrough host (`<name>.services.ai.azure.com`) also
+  `sum(itemCount)` / `sumif(itemCount, ...)`. **Corrected (Copilot, PR #585):** the 5 s p95 is weighted
+  too, `percentilew(duration, itemCount, 95)`. The earlier claim that an unweighted percentile is unbiased
+  was wrong: adaptive sampling changes its rate within a window, so unweighted rows under-represent busy
+  periods. The module comment says so. The Claude passthrough host (`<name>.services.ai.azure.com`) also
   matches. **No `type` or `name` filter**: not needed for correctness, and the exact values could not
   be confirmed without live data. The README's verification query groups by `type, name` so the first
   live hour can confirm there is exactly one row per call.

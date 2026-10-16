@@ -308,8 +308,9 @@ The Sev-2 latency rule is a **timeout ratio**, not a p95: the Polly timeout canc
 so a timed-out attempt is recorded at about 10 s and a "p95 > 10 s" test would sit exactly on that edge.
 
 **Sampling.** The API uses the App Insights SDK's default adaptive sampling, so one stored row can stand
-for several calls. Every count is `sum(itemCount)`, not `count()`. The p95 is computed over the
-retained rows (unweighted), which sampling does not bias.
+for several calls, and the sampling rate changes within a window. Every count is `sum(itemCount)`, not
+`count()`, and the p95 is weighted the same way: `percentilew(duration, itemCount, 95)`. An unweighted
+percentile would under-represent the busy (more heavily sampled) periods.
 
 **Thresholds** are root parameters in `main.bicep`, defaults as above, sourced from
 [`MEASURED-RESULTS.md`](../docs/features/engine-generation-infra/MEASURED-RESULTS.md):
@@ -351,7 +352,7 @@ time range "Last hour"), for example:
 dependencies
 | where target has "aif-pulse-uat"
 | summarize calls = sum(itemCount), failed = sumif(itemCount, success == false),
-    timedOut = sumif(itemCount, duration >= 9500), p95DurationMs = percentile(duration, 95)
+    timedOut = sumif(itemCount, duration >= 9500), p95DurationMs = percentilew(duration, itemCount, 95)
     by type, name, bin(timestamp, 15m)
 ```
 

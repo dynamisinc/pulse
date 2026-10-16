@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.48.1.52935",
-      "templateHash": "6713025463491885576"
+      "templateHash": "12560805794102145535"
     }
   },
   "parameters": {
@@ -137,6 +137,7 @@
     "providerAlertCallsPerHourThreshold": {
       "type": "int",
       "defaultValue": 750,
+      "minValue": 1,
       "metadata": {
         "description": "Provider alerts: spend-proxy threshold, Foundry-host model calls per hour (Sev-3). Default 750 ≈ 2x a nominal active-storyline hour."
       }
@@ -144,6 +145,7 @@
     "providerAlertLatencyWarningMs": {
       "type": "int",
       "defaultValue": 5000,
+      "minValue": 1,
       "metadata": {
         "description": "Provider alerts: latency warning, 15-minute p95 attempt duration in ms (Sev-3). Default 5000 ≈ 2x the measured Standard p95."
       }
@@ -151,6 +153,7 @@
     "providerAlertLatencyAlertMs": {
       "type": "int",
       "defaultValue": 10000,
+      "minValue": 1,
       "metadata": {
         "description": "Provider alerts: the per-attempt timeout in ms the Sev-2 timeout-ratio rule measures against. Default 10000 = Generation:Resilience:AttemptTimeoutSeconds; move with it."
       }
@@ -158,6 +161,8 @@
     "providerAlertTimeoutRatioPercentThreshold": {
       "type": "int",
       "defaultValue": 5,
+      "minValue": 1,
+      "maxValue": 100,
       "metadata": {
         "description": "Provider alerts: percentage of attempts at >= 95 % of providerAlertLatencyAlertMs (timed out) above which the Sev-2 alert fires. Default 5."
       }
@@ -682,7 +687,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.48.1.52935",
-              "templateHash": "14913297314702181833"
+              "templateHash": "14801026605549372483"
             }
           },
           "parameters": {
@@ -783,7 +788,7 @@
           "variables": {
             "providerCalls": "[format('dependencies\n| where target has \"{0}\"', parameters('aiFoundryName'))]",
             "errorQuery": "[join(createArray('// Breaker-open signature: Polly BrokenCircuitException anywhere in a logged exception chain.', 'let breakerHits = toscalar(exceptions', '    | where type has \"BrokenCircuitException\" or tostring(details) has \"BrokenCircuitException\"', '    | count);', variables('providerCalls'), '| summarize calls = sum(itemCount), failed = sumif(itemCount, success == false)', '| extend failedPercent = iff(calls == 0, 0.0, 100.0 * failed / calls), breakerHits = breakerHits', format('| where (calls >= {0} and failedPercent > {1}) or breakerHits > 0', parameters('errorMinimumCalls'), parameters('errorRatePercentThreshold'))), '\n')]",
-            "latencyWarningQuery": "[join(createArray(variables('providerCalls'), '// p95 is unweighted by itemCount on purpose (see the SAMPLING note in provider-alerts.bicep).', '| summarize calls = sum(itemCount), p95DurationMs = percentile(duration, 95)', format('| where calls >= {0} and p95DurationMs > {1}', parameters('latencyMinimumCalls'), parameters('latencyWarningMs'))), '\n')]",
+            "latencyWarningQuery": "[join(createArray(variables('providerCalls'), '// p95 weighted by itemCount (adaptive sampling; see the SAMPLING note in provider-alerts.bicep).', '| summarize calls = sum(itemCount), p95DurationMs = percentilew(duration, itemCount, 95)', format('| where calls >= {0} and p95DurationMs > {1}', parameters('latencyMinimumCalls'), parameters('latencyWarningMs'))), '\n')]",
             "timedOutAtMs": "[div(mul(parameters('latencyAlertMs'), 95), 100)]",
             "timeoutRatioQuery": "[join(createArray(variables('providerCalls'), format('| summarize calls = sum(itemCount), timedOut = sumif(itemCount, duration >= {0})', variables('timedOutAtMs')), '| extend timedOutPercent = iff(calls == 0, 0.0, 100.0 * timedOut / calls)', format('| where calls >= {0} and timedOutPercent > {1}', parameters('latencyMinimumCalls'), parameters('timeoutRatioPercentThreshold'))), '\n')]",
             "spendQuery": "[join(createArray(variables('providerCalls'), '| summarize calls = sum(itemCount)', format('| where calls > {0}', parameters('callsPerHourThreshold'))), '\n')]",
