@@ -254,4 +254,13 @@ public sealed class ExerciseReportBuilderTests
 
         pairs.Should().ContainSingle().Which.Verified.Should().Be(cityFire);
     }
+
+    [Fact]
+    public void SumShown_PassesInt32Max_WithoutOverflow()
+    {
+        // 2,148 posts at the permitted 1,000,000-like baseline, below the 5,000-post limit (Copilot #551).
+        var counts = Enumerable.Repeat((1_000_000, 0), 2_148).Append((0, 5));
+
+        ExerciseReportBuilder.SumShown(counts).Should().Be(2_148_000_005L).And.BeGreaterThan(int.MaxValue);
+    }
 }

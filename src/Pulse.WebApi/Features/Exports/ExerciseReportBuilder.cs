@@ -351,4 +351,22 @@ public static class ExerciseReportBuilder
     public static string NormalizeHandle(string? handle) => (handle ?? string.Empty).Trim().TrimStart('@');
 
     private static bool IsHandleChar(char character) => char.IsLetterOrDigit(character) || character == '_';
+
+    /// <summary>
+    /// Sums shown engagement (baseline + real) over many posts in 64-bit: a 1,000,000 baseline on a few thousand posts
+    /// passes <see cref="int.MaxValue"/> well below the 5,000-post limit.
+    /// </summary>
+    /// <param name="counts">Each post's baseline and real count.</param>
+    /// <returns>The total.</returns>
+    public static long SumShown(IEnumerable<(int Baseline, int Real)> counts)
+    {
+        ArgumentNullException.ThrowIfNull(counts);
+        long total = 0;
+        foreach (var (baseline, real) in counts)
+        {
+            total += (long)baseline + real;
+        }
+
+        return total;
+    }
 }

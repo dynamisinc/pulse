@@ -370,6 +370,33 @@ public sealed class ExerciseReportEndpointTests
         byId[neverEdited.ToString()].GetProperty("lastEditedAt").ValueKind.Should().Be(JsonValueKind.Null);
     }
 
+    // ---- Inject posts need the server-stamped origin (Copilot #551) ----------------------------------------------
+
+    [RequiresDockerFact]
+    public async Task InjectDelivery_IgnoresNonInjectPostsThatNameTheItem()
+    {
+        var exerciseId = await _seed.ExerciseAsync(timeZone: "America/Chicago");
+        var (token, _) = await _seed.StaffAsync(exerciseId, [(exerciseId, "controller")]);
+        var utility = await _report.PersonaAsync(exerciseId, "utility", "Utility", verified: true);
+        var resident = await _report.PersonaAsync(exerciseId, "resident", "Resident");
+        var item = await _report.InjectAsync(exerciseId, "Advisory", externalRef: "INJ-001", firedMinute: 10);
+
+        // A participant post naming the fired item, earlier than the real inject post: it is not the delivery, and its
+        // author must not join the @mention rule.
+        await _seed.PostAsync(exerciseId, resident, 0, p => { p.Origin = "participant"; p.InjectId = item.ToString(); });
+        await _seed.PostAsync(exerciseId, utility, 10, p => { p.Origin = "inject"; p.InjectId = item.ToString(); });
+        await _seed.PostAsync(exerciseId, utility, 12, p => { p.Origin = "participant"; p.Body = "Thanks @resident"; });
+
+        await using var host = await ExerciseReportTestHost.StartAsync(_seed.ConnectionString, exerciseId);
+        using var response = await host.GetReportAsync(token);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        using var json = await ReadAsync(response);
+        var row = json.RootElement.GetProperty("injectResponses").EnumerateArray().Single();
+        row.GetProperty("deliveredAt").GetString().Should().Be("2033-09-04 08:10", "the inject-origin post is the delivery");
+        row.GetProperty("firstResponseAt").ValueKind.Should().Be(JsonValueKind.Null, "@resident is not an inject author");
+    }
+
     // ---- Noise toggle (DF-41) ------------------------------------------------------------------------------------
 
     [RequiresDockerFact]
