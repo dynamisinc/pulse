@@ -11,33 +11,48 @@
  *  - `AlertBar` publishes `alertSummary` (severity label + message of the alert
  *    it shows). The pause dialog mirrors it in a visually-hidden description,
  *    because `aria-modal` hides the bar from assistive tech.
+ *
+ * Single-instance assumption: ONE `AlertBar` and ONE `OverlayLayer` are mounted per
+ * shell (module-level state, not per-instance). Two bars would overwrite each
+ * other's `alertSummary`. `overlay` is `'pause'` for a pause page and `'cover'`
+ * for EndEx / break-fiction: in both cases the bar goes inert and holds its
+ * ticker so a rotating polite live region is not heard under an `aria-modal`
+ * dialog; only pause leaves the bar visible.
  */
 import { useSyncExternalStore } from 'react'
 
+export type OverlayKind = 'none' | 'pause' | 'cover'
+
 interface BridgeState {
+  readonly overlay: OverlayKind
   readonly pauseActive: boolean
+  readonly overlayActive: boolean
   readonly alertSummary: string
 }
 
-let state: BridgeState = { pauseActive: false, alertSummary: '' }
+function make(overlay: OverlayKind, alertSummary: string): BridgeState {
+  return { overlay, pauseActive: overlay === 'pause', overlayActive: overlay !== 'none', alertSummary }
+}
+
+let state: BridgeState = make('none', '')
 const listeners = new Set<() => void>()
 
-function update(next: Partial<BridgeState>): void {
-  const merged = { ...state, ...next }
-  if (merged.pauseActive === state.pauseActive && merged.alertSummary === state.alertSummary) return
-  state = merged
+function update(overlay: OverlayKind, alertSummary: string): void {
+  if (overlay === state.overlay && alertSummary === state.alertSummary) return
+  state = make(overlay, alertSummary)
   listeners.forEach(listener => listener())
 }
 
 export const alertPauseBridge = {
-  setPauseActive: (pauseActive: boolean) => update({ pauseActive }),
-  setAlertSummary: (alertSummary: string) => update({ alertSummary }),
+  setOverlay: (overlay: OverlayKind) => update(overlay, state.alertSummary),
+  setPauseActive: (active: boolean) => update(active ? 'pause' : 'none', state.alertSummary),
+  setAlertSummary: (alertSummary: string) => update(state.overlay, alertSummary),
   subscribe(listener: () => void): () => void {
     listeners.add(listener)
     return () => { listeners.delete(listener) }
   },
   getSnapshot: (): BridgeState => state,
-  reset: () => update({ pauseActive: false, alertSummary: '' }),
+  reset: () => update('none', ''),
 }
 
 export function useAlertPauseBridge(): BridgeState {

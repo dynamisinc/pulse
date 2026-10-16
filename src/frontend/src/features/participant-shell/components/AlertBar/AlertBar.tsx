@@ -368,16 +368,16 @@ export function AlertBar() {
   // treatment, and only when there is more than one alert to rotate through.
   const [tickerIndex, setTickerIndex] = useState(0)
   const reduceMotion = usePrefersReducedMotion()
-  const { pauseActive } = useAlertPauseBridge()
+  const { overlayActive } = useAlertPauseBridge()
   useEffect(() => {
     // prefers-reduced-motion (NFR-001): the ticker holds on its current alert;
     // every alert stays reachable through "Details →" (/alerts).
-    if (treatment !== 'ticker' || alerts.length <= 1 || reduceMotion || pauseActive) return
+    if (treatment !== 'ticker' || alerts.length <= 1 || reduceMotion || overlayActive) return
     const id = setInterval(() => {
       setTickerIndex(current => (current + 1) % alerts.length)
     }, ROTATE_INTERVAL_MS)
     return () => clearInterval(id)
-  }, [treatment, alerts.length, reduceMotion, pauseActive])
+  }, [treatment, alerts.length, reduceMotion, overlayActive])
   // A shrinking alert list can leave a stale index — wrap it back in range
   // rather than indexing out of bounds.
   const safeTickerIndex = alerts.length === 0 ? 0 : tickerIndex % alerts.length
@@ -443,7 +443,7 @@ export function AlertBar() {
         role="status"
         aria-live={liveAnnounceLevel}
         aria-atomic="true"
-        inert={pauseActive}
+        inert={overlayActive}
         data-testid="pulse-alert-bar"
         data-alert-severity={activeAlert?.severity ?? 'none'}
         data-alert-treatment={dataTreatment}

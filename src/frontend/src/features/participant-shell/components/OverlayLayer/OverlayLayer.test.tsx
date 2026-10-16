@@ -121,6 +121,10 @@ describe('OverlayLayer — z-order (COR-065)', () => {
   })
 })
 
+afterEach(() => {
+  act(() => alertPauseBridge.reset())
+})
+
 describe('OverlayLayer — pause leaves the alert bar visible; EndEx covers it (Tom, 10/16)', () => {
   const inset = 'calc(var(--pulse-chrome-top, 0px) + var(--pulse-alert-height, 0px))'
 
@@ -161,6 +165,43 @@ describe('OverlayLayer — pause leaves the alert bar visible; EndEx covers it (
     expect(alertPauseBridge.getSnapshot().pauseActive).toBe(false)
   })
 
+  it('renders a transparent aria-hidden shield over exactly the alert band, only while paused', () => {
+    mockUseOverlayState.mockReturnValue(overlayState({ state: 'pause', register: 'in-fiction' }))
+    const { rerender } = render(<OverlayLayer />)
+    const shield = screen.getByTestId('pulse-overlay-pause-alert-shield')
+    expect(shield).toHaveAttribute('aria-hidden', 'true')
+    expect(shield.style.top).toBe('var(--pulse-chrome-top, 0px)')
+    expect(shield.style.height).toBe('var(--pulse-alert-height, 0px)')
+    expect(shield.style.zIndex).toBe(String(SHELL_Z.overlay))
+    mockUseOverlayState.mockReturnValue(overlayState({ state: 'endex', register: 'in-fiction' }))
+    rerender(<OverlayLayer />)
+    expect(screen.queryByTestId('pulse-overlay-pause-alert-shield')).not.toBeInTheDocument()
+  })
+
+  it('marks EndEx and break-fiction as covering overlays for the alert bar', () => {
+    mockUseOverlayState.mockReturnValue(overlayState({ state: 'endex', register: 'in-fiction' }))
+    const { rerender } = render(<OverlayLayer />)
+    expect(alertPauseBridge.getSnapshot())
+      .toMatchObject({ overlayActive: true, pauseActive: false })
+    mockUseOverlayState.mockReturnValue(
+      overlayState({ state: 'broadcast', message: 'x' }))
+    rerender(<OverlayLayer />)
+    expect(alertPauseBridge.getSnapshot())
+      .toMatchObject({ overlayActive: true, pauseActive: false })
+  })
+
+  it('announces an alert that changes while paused, but not the one present at open', () => {
+    act(() => alertPauseBridge.setAlertSummary('ADVISORY: Road closed.'))
+    mockUseOverlayState.mockReturnValue(overlayState({ state: 'pause', register: 'in-fiction' }))
+    render(<OverlayLayer />)
+    const live = screen.getByTestId('pulse-overlay-pause-alert-live')
+    expect(live).toBeEmptyDOMElement()
+    expect(live).toHaveAttribute('aria-live', 'polite')
+    act(() => alertPauseBridge.setAlertSummary('EMERGENCY: Evacuate now.'))
+    expect(live).toHaveTextContent('Alert changed. EMERGENCY: Evacuate now.')
+    expect(live).toHaveAttribute('aria-live', 'assertive')
+  })
+
   it('mirrors the active alert into the pause dialog description (and not into EndEx)', () => {
     act(() => alertPauseBridge.setAlertSummary('EMERGENCY: Evacuate now.'))
     mockUseOverlayState.mockReturnValue(overlayState({ state: 'pause', register: 'out-of-fiction' }))
@@ -170,7 +211,6 @@ describe('OverlayLayer — pause leaves the alert bar visible; EndEx covers it (
     mockUseOverlayState.mockReturnValue(overlayState({ state: 'endex', register: 'out-of-fiction' }))
     rerender(<OverlayLayer />)
     expect(screen.queryByTestId('pulse-overlay-pause-alert-mirror')).not.toBeInTheDocument()
-    act(() => alertPauseBridge.reset())
   })
 })
 
@@ -219,7 +259,8 @@ describe('OverlayLayer — break-fiction (CTL-024/D7-003)', () => {
   })
 
   it('applies the black field / amber hazard treatment and renders both hazard-stripe bars', () => {
-    mockUseOverlayState.mockReturnValue(overlayState({ state: 'broadcast', message: 'x' }))
+    mockUseOverlayState.mockReturnValue(
+      overlayState({ state: 'broadcast', message: 'x' }))
 
     render(<OverlayLayer />)
 
@@ -229,7 +270,8 @@ describe('OverlayLayer — break-fiction (CTL-024/D7-003)', () => {
   })
 
   it('has no dismiss control — no button or link anywhere in the broadcast', () => {
-    mockUseOverlayState.mockReturnValue(overlayState({ state: 'broadcast', message: 'x' }))
+    mockUseOverlayState.mockReturnValue(
+      overlayState({ state: 'broadcast', message: 'x' }))
 
     render(<OverlayLayer />)
 
@@ -241,7 +283,8 @@ describe('OverlayLayer — break-fiction (CTL-024/D7-003)', () => {
   it('ticks the wall-clock display forward once a second while broadcasting — never frozen', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2032-04-01T08:00:00Z'))
-    mockUseOverlayState.mockReturnValue(overlayState({ state: 'broadcast', message: 'x' }))
+    mockUseOverlayState.mockReturnValue(
+      overlayState({ state: 'broadcast', message: 'x' }))
 
     render(<OverlayLayer />)
     const initialText = screen.getByTestId('pulse-overlay-break-fiction').textContent ?? ''
@@ -259,7 +302,8 @@ describe('OverlayLayer — break-fiction (CTL-024/D7-003)', () => {
 
   it('reserves no NFR-008 watermark slot — forbidden from carrying that signal even when chrome is off', () => {
     mockUseChromeConfig.mockReturnValue(CHROME_DISABLED)
-    mockUseOverlayState.mockReturnValue(overlayState({ state: 'broadcast', message: 'x' }))
+    mockUseOverlayState.mockReturnValue(
+      overlayState({ state: 'broadcast', message: 'x' }))
 
     render(<OverlayLayer />)
 
@@ -267,7 +311,8 @@ describe('OverlayLayer — break-fiction (CTL-024/D7-003)', () => {
   })
 
   it('is announced as role="alertdialog" with aria-modal, and receives focus on activation', () => {
-    mockUseOverlayState.mockReturnValue(overlayState({ state: 'broadcast', message: 'x' }))
+    mockUseOverlayState.mockReturnValue(
+      overlayState({ state: 'broadcast', message: 'x' }))
 
     render(<OverlayLayer />)
 

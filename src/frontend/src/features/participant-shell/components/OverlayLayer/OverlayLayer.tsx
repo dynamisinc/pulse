@@ -74,7 +74,7 @@
  * inline style, mirroring `ComplianceChrome.tsx`.
  */
 
-import { useEffect, useId, useState, type CSSProperties, type RefObject } from 'react'
+import { useEffect, useId, useRef, useState, type CSSProperties, type RefObject } from 'react'
 import { SHELL_Z } from '../../mountContract'
 import { useChromeConfig } from '../../chromeConfig'
 import { alertPauseBridge, useAlertPauseBridge } from '../../alertPauseBridge'
@@ -318,15 +318,61 @@ function ExerciseWatermarkSlot() {
 function usePausedAlertMirror(variant: 'pause' | 'endex') {
   const id = useId()
   const { alertSummary } = useAlertPauseBridge()
-  if (variant !== 'pause' || alertSummary === '') return { describedBy: undefined, mirror: null }
+  // Changes AFTER the dialog opened are announced through a live region; the
+  // value present at open is covered by aria-describedby (no double speech).
+  const seen = useRef(alertSummary)
+  const [changed, setChanged] = useState('')
+  useEffect(() => {
+    if (alertSummary === seen.current) return
+    seen.current = alertSummary
+    setChanged(alertSummary === '' ? '' : `Alert changed. ${alertSummary}`)
+  }, [alertSummary])
+  if (variant !== 'pause') return { describedBy: undefined, mirror: null }
+  const urgent = alertSummary.startsWith('EMERGENCY')
   return {
-    describedBy: id,
+    describedBy: alertSummary === '' ? undefined : id,
     mirror: (
-      <p id={id} data-testid="pulse-overlay-pause-alert-mirror" style={visuallyHiddenStyle}>
-        Active alert. {alertSummary}
-      </p>
+      <>
+        {alertSummary !== '' && (
+          <p id={id} data-testid="pulse-overlay-pause-alert-mirror" style={visuallyHiddenStyle}>
+            Active alert. {alertSummary}
+          </p>
+        )}
+        <div
+          role={urgent ? 'alert' : 'status'}
+          aria-live={urgent ? 'assertive' : 'polite'}
+          aria-atomic="true"
+          data-testid="pulse-overlay-pause-alert-live"
+          style={visuallyHiddenStyle}
+        >
+          {changed}
+        </div>
+      </>
     ),
   }
+}
+
+/**
+ * The alert bar stays visible above a PAUSE page but is `inert`, and an inert
+ * element is invisible to hit-testing, so a tap on it would fall through to the
+ * feed scrolled underneath. This transparent shield covers exactly the bar band
+ * and swallows those taps (CR-001).
+ */
+function AlertBandShield() {
+  return (
+    <div
+      aria-hidden="true"
+      data-testid="pulse-overlay-pause-alert-shield"
+      style={{
+        position: 'fixed',
+        left: 0,
+        right: 0,
+        top: 'var(--pulse-chrome-top, 0px)',
+        height: 'var(--pulse-alert-height, 0px)',
+        zIndex: SHELL_Z.overlay,
+      }}
+    />
+  )
 }
 
 interface ControlPageProps {
@@ -484,9 +530,9 @@ export function OverlayLayer() {
   // Tell the alert bar a PAUSE is up (it goes inert and holds the ticker).
   const isPause = state === 'pause'
   useEffect(() => {
-    alertPauseBridge.setPauseActive(isPause)
-    return () => alertPauseBridge.setPauseActive(false)
-  }, [isPause])
+    alertPauseBridge.setOverlay(isPause ? 'pause' : isActive ? 'cover' : 'none')
+    return () => alertPauseBridge.setOverlay('none')
+  }, [isPause, isActive])
 
   if (state === 'none') return null
 
@@ -503,9 +549,12 @@ export function OverlayLayer() {
   const PageComponent = register === 'in-fiction' ? InFictionMaintenancePage : OutOfFictionControlPage
 
   return (
-    <PageComponent
-      containerRef={containerRef}
-      variant={state}
-    />
+    <>
+      <PageComponent
+        containerRef={containerRef}
+        variant={state}
+      />
+      {state === 'pause' && <AlertBandShield />}
+    </>
   )
 }

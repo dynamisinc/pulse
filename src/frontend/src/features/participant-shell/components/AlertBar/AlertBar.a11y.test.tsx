@@ -150,6 +150,13 @@ describe('AlertBar: held (inert, not rotating) while a pause overlay is up', () 
     expect(bar).not.toHaveAttribute('inert')
   })
 
+  it('is also inert while a covering overlay (EndEx / break-fiction) is up', () => {
+    mockUseAlerts.mockReturnValue([makeAlert({ id: 'e', severity: 'emergency', message: 'Evacuate now.' })])
+    render(<AlertBar />)
+    act(() => alertPauseBridge.setOverlay('cover'))
+    expect(screen.getByTestId('pulse-alert-bar')).toHaveAttribute('inert')
+  })
+
   it('publishes severity label + message for the pause dialog, clearing on unmount', () => {
     mockUseAlerts.mockReturnValue([makeAlert({ id: 'e', severity: 'emergency', message: 'Evacuate now.' })])
     const { unmount } = render(<AlertBar />)

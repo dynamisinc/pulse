@@ -243,8 +243,10 @@ type Rect = { x: number, y: number, width: number, height: number }
 async function topmostLayerAt(page: Page, x: number, y: number): Promise<string> {
   return page.evaluate(([px, py]) => {
     const el = document.elementFromPoint(px as number, py as number)
-    return el?.closest('[data-testid="pulse-alert-bar"]') ? 'bar'
-      : el?.closest('[data-shell-layer="overlay"]') ? 'overlay' : 'other'
+    return el?.closest('[data-testid="pulse-overlay-pause-alert-shield"]') ? 'shield'
+      : el?.closest('[data-testid="pulse-shell-content-region"]') ? 'content'
+        : el?.closest('[data-testid="pulse-alert-bar"]') ? 'bar'
+          : el?.closest('[data-shell-layer="overlay"]') ? 'overlay' : 'other'
   }, [x, y])
 }
 
@@ -253,8 +255,9 @@ async function expectLayerOnTop(page: Page, box: Rect, layer: string, what: stri
   const cx = box.x + box.width / 2
   for (const y of [box.y + 1, box.y + box.height / 2, box.y + box.height - 1]) {
     const hit = await topmostLayerAt(page, cx, y)
-    // An inert bar is skipped by hit-testing, so for it assert "not under the overlay".
-    const ok = layer === 'bar-inert' ? hit !== 'overlay' : hit === layer
+    // An inert bar is skipped by hit-testing: the pause click shield must be what is hit,
+    // never the feed underneath.
+    const ok = layer === 'bar-inert' ? hit === 'shield' : hit === layer
     expect(ok, `${what} is covered at y=${Math.round(y)} (hit: ${hit})`).toBe(true)
   }
 }
@@ -295,6 +298,35 @@ test.describe('alert bar: emergency + pause overlay interplay (Tom, 10/16)', () 
       })
       expect(inside, `focus escaped the overlay after Tab #${i + 1}`).toBe(true)
     }
+  })
+
+  test('taps on the inert bar band never reach the feed scrolled underneath', async ({ page }) => {
+    await seedOverlay(page, { state: 'pause', register: 'in-fiction', message: '' })
+    await openFeedWith(page, [EMERGENCY])
+    await page.evaluate(() => {
+      const spacer = document.createElement('div')
+      spacer.style.height = '3000px'
+      document.body.appendChild(spacer)
+      window.scrollTo(0, 600)
+    })
+    const band = await boxOf(page.getByTestId('pulse-alert-bar'))
+    const before = await page.evaluate(() => document.body.innerText)
+    for (const frac of [0.05, 0.5, 0.95]) {
+      const x = band.x + band.width * (0.1 + frac * 0.8)
+      const y = band.y + band.height * frac
+      expect(await topmostLayerAt(page, x, y), `band point ${frac}`).toBe('shield')
+      await page.touchscreen.tap(x, y)
+    }
+    await expect(page).toHaveURL(/\/home$/)
+    expect(await page.evaluate(() => document.body.innerText)).toBe(before)
+  })
+
+  test('an alert change during pause is announced in the dialog live region', async ({ page }) => {
+    await seedOverlay(page, { state: 'pause', register: 'in-fiction', message: '' })
+    await openFeedWith(page, [EMERGENCY])
+    const live = page.getByTestId('pulse-overlay-pause-alert-live')
+    await expect(live).toBeEmpty()
+    await expect(live).toHaveAttribute('aria-live', 'assertive')
   })
 
   test('pause holds the ticker rotation', async ({ page }) => {
