@@ -9,6 +9,7 @@ exactly what Pulse shows on screen.
 - [A player is stuck on the holding page](#a-player-is-stuck-on-the-holding-page)
 - [A player still sees the feed after EndEx](#a-player-still-sees-the-feed-after-endex)
 - [The feed is not updating](#the-feed-is-not-updating)
+- [The app looks out of date on a phone](#the-app-looks-out-of-date-on-a-phone)
 - [Staff cannot sign in](#staff-cannot-sign-in)
 - [Cards, email and import problems](#cards-email-and-import-problems)
 - [After a server restart](#after-a-server-restart)
@@ -124,6 +125,25 @@ page) stays on screen until the player reloads. New AI-engine posts can still ap
 
 If many players have problems at the same time, check your venue's network first, then
 [contact support](#who-to-contact).
+
+---
+
+## The app looks out of date on a phone
+
+A phone or tablet keeps a small copy of the app's screens (not any exercise content) so it opens
+quickly on weak Wi-Fi. After a new version is published, the device can keep showing the old screens
+until it picks up the update.
+
+When a new version is ready, the player sees a small banner, **A fresh version is ready**, with
+**Refresh** and **Later**. Nothing reloads by itself during an exercise.
+
+1. Ask the player to tap **Refresh** when it suits them. The page reloads once on the new version.
+2. If they tapped **Later**, the update is also picked up the next time they close the app completely
+   and open it again.
+3. If the banner never appears, ask them to close the app completely (swipe it away) and reopen it
+   while online. An app added to the home screen can take one extra launch to update.
+4. Still stale? Open the link again in the phone's browser and sign in, or clear the site's data in
+   the browser settings, then join again with the personal link or **Today's word**.
 
 ---
 
