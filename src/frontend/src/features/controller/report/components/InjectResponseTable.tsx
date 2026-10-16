@@ -1,7 +1,7 @@
 /**
  * features/controller/report/components/InjectResponseTable.tsx
  * ---------------------------------------------------------------------------
- * "Inject response times" (story 17, DF-25): one row per delivered inject with the first
+ * "Inject response times" (story 29, DF-42): one row per delivered inject with the first
  * participant response, a bar proportional to the minutes it took (full width = the 30-minute
  * window) and who responded; an inject nobody answered shows a "No response in 30 min" pill.
  * The method note under the table states the rule in the words the story approves.
@@ -11,7 +11,7 @@ import { refLabel, timeOf } from '../services/reportFormat'
 import type { ReportInjectResponse } from '../types/report'
 import styles from './report.module.css'
 
-/** The DF-25 window, in scenario minutes. */
+/** The DF-42 window, in scenario minutes. */
 const WINDOW_MINUTES = 30
 /** Pixel width of a full-window bar. */
 const FULL_BAR_PX = 180

@@ -24,7 +24,8 @@
  *
  * In the icon rail (narrow viewports) the name/handle/label text becomes visually
  * hidden but stays in the accessibility tree: the accessible names do not change
- * with the viewport.
+ * with the viewport. There, Sign out also shows its name in a `ParticipantTooltip` on
+ * hover and keyboard focus (demo-feedback 13, #494).
  *
  * NFR-001: both controls are real `<button>`s; the avatar is decorative (the
  * name beside it carries the identity).
@@ -39,6 +40,8 @@ import { endSession } from '@/core/auth'
 import { LOGIN_PATH } from '@/features/app-shell/constants'
 import type { Persona } from '@/features/personas'
 import { Avatar } from '../components/Avatar'
+import { ParticipantTooltip } from '../components/ParticipantTooltip'
+import { NAV_ICON_RAIL_QUERY } from './frameMetrics'
 import styles from './AccountCard.module.css'
 
 export interface AccountCardProps {
@@ -59,15 +62,18 @@ export function AccountCard({ persona }: AccountCardProps) {
     navigate(LOGIN_PATH)
   }
 
+  // In the icon rail the label is visually hidden, so the tooltip names the icon there.
   const signOut = (
-    <button type="button" className={styles.signOut} onClick={handleSignOut}>
-      <FontAwesomeIcon
-        icon={faRightFromBracket}
-        aria-hidden="true"
-        className={styles.signOutIcon}
-      />
-      <span className={styles.signOutLabel}>Sign out</span>
-    </button>
+    <ParticipantTooltip label="Sign out" placement="right" media={NAV_ICON_RAIL_QUERY}>
+      <button type="button" className={styles.signOut} onClick={handleSignOut}>
+        <FontAwesomeIcon
+          icon={faRightFromBracket}
+          aria-hidden="true"
+          className={styles.signOutIcon}
+        />
+        <span className={styles.signOutLabel}>Sign out</span>
+      </button>
+    </ParticipantTooltip>
   )
 
   if (persona === undefined) {

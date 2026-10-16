@@ -11,7 +11,7 @@ using Pulse.WebApi.Features.Media;
 using Pulse.WebApi.Features.Social.Engagement;
 
 /// <summary>
-/// The printable exercise report (demo-feedback story 17): <c>GET /api/staff/exports/report?includeNoise=false</c>.
+/// The printable exercise report (demo-feedback story 29): <c>GET /api/staff/exports/report?includeNoise=false</c>.
 /// STAFF world. Minimal-API extension methods; the orchestrator wires <see cref="AddExerciseReport"/> and
 /// <see cref="MapExerciseReport"/> into <c>Program.cs</c>.
 /// </summary>
@@ -78,7 +78,7 @@ public static class ExerciseReportEndpoints
 
     /// <summary>Builds the report. The filters have already admitted the caller.</summary>
     /// <param name="service">The report service.</param>
-    /// <param name="includeNoise">Whether white-noise posts are listed (default <c>false</c>, DF-24).</param>
+    /// <param name="includeNoise">Whether white-noise posts are listed (default <c>false</c>, DF-41).</param>
     /// <param name="cancellationToken">The request-aborted token.</param>
     /// <returns>200, 401, 404 or 413.</returns>
     private static async Task<IResult> GetReportAsync(

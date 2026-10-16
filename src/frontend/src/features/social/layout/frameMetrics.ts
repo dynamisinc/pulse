@@ -1,8 +1,10 @@
 /**
  * features/social/layout/frameMetrics.ts
  * ---------------------------------------------------------------------------
- * The three-column frame's fixed measurements (demo-polish F1; D1-013 "frame
- * is left-anchored: 240px nav rail | 600px main | 344px sidebar").
+ * The three-column frame's fixed measurements (demo-polish F1; D1-013 "240px nav
+ * rail | 600px main | 344px sidebar"). D1-013 first LEFT-anchored the frame (D1-005);
+ * demo-feedback 13 (#495) revisited that: from `FRAME_CENTRED_MIN_WIDTH` (1280px) the
+ * full frame is CENTRED in the window like X, and below it the frame stays left-anchored.
  *
  * WHY THESE ARE TS CONSTANTS WHEN THE LAYOUT IS CSS. A CSS Module cannot import a
  * `.ts` value, so `SocialChannel.module.css` hand-mirrors every number below. The
@@ -18,6 +20,7 @@
  *   < NAV_EXPANDED_MIN_WIDTH   icon rail (NAV_RAIL_COLLAPSED) + main
  *   >= NAV_EXPANDED_MIN_WIDTH  full nav rail (NAV_RAIL_WIDTH) + main        (= 840)
  *   >= FRAME_MIN_WIDTH         nav rail + main + sidebar (the full frame)   (= 1184)
+ *   >= FRAME_CENTRED_MIN_WIDTH the full frame, centred in the window         (= 1280)
  *
  * The right rail is the FIRST thing to go as the viewport narrows (it is
  * `display: none`, so it also leaves the accessibility tree rather than just
@@ -43,3 +46,17 @@ export const FRAME_MIN_WIDTH = NAV_RAIL_WIDTH + MAIN_COLUMN_WIDTH + RIGHT_RAIL_W
 
 /** Viewport width at which the nav rail shows labels: 240 + 600 (px). */
 export const NAV_EXPANDED_MIN_WIDTH = NAV_RAIL_WIDTH + MAIN_COLUMN_WIDTH
+
+/**
+ * Viewport width from which the full frame is CENTRED in the window, like X (px;
+ * demo-feedback 13, #495, revisiting D1-005 / D1-013). Below it the frame is
+ * left-anchored, exactly as before.
+ */
+export const FRAME_CENTRED_MIN_WIDTH = 1280
+
+/**
+ * The media query for the ICON rail (below `NAV_EXPANDED_MIN_WIDTH`), where the nav
+ * labels are visually hidden: the exact complement of the CSS `min-width: 840px` rule.
+ * The rail's tooltips show only while it matches (demo-feedback 13, #494).
+ */
+export const NAV_ICON_RAIL_QUERY = `not all and (min-width: ${NAV_EXPANDED_MIN_WIDTH}px)`

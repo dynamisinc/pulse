@@ -72,7 +72,7 @@ public sealed class ExerciseReportResult
 }
 
 /// <summary>
-/// Builds the printable exercise report (demo-feedback story 17, DF-23..DF-25): header, summary, 5-minute activity
+/// Builds the printable exercise report (demo-feedback story 29, DF-40..DF-42): header, summary, 5-minute activity
 /// bins, inject response times, verified-vs-lookalike pairs and the post record for the resolved exercise. Staff world
 /// only; the endpoint's staff gate admits any role assigned to the exercise. Scoped lifetime, matching the request's
 /// <see cref="PulseDbContext"/>.
@@ -87,7 +87,7 @@ public sealed class ExerciseReportResult
 /// signer refuses to mint a URL outside the scope (and that refusal is never absorbed).
 /// </para>
 /// <para>
-/// <b>Noise (DF-24).</b> Noise posts are always read for the metrics and the chart; their text and media are read only
+/// <b>Noise (DF-41).</b> Noise posts are always read for the metrics and the chart; their text and media are read only
 /// when they are listed. The 413 limit counts the <em>listed</em> posts.
 /// </para>
 /// <para>
@@ -172,7 +172,7 @@ public sealed partial class ExerciseReportService
     }
 
     /// <summary>Builds the report for the resolved exercise and records one viewed event.</summary>
-    /// <param name="includeNoise">Whether white-noise posts are listed (they are always counted, DF-24).</param>
+    /// <param name="includeNoise">Whether white-noise posts are listed (they are always counted, DF-41).</param>
     /// <param name="cancellationToken">The request-aborted token.</param>
     /// <returns>The result the endpoint maps to a status.</returns>
     public async Task<ExerciseReportResult> BuildAsync(bool includeNoise, CancellationToken cancellationToken = default)

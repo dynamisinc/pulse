@@ -41,7 +41,10 @@
  * `notifications/unreadBadge.ts`, which keeps the seen and the heard text together.
  *
  * ICON RAIL. Below 840px the rail collapses to icons: every label stays in the DOM
- * (visually hidden), so each control keeps its accessible name at every width.
+ * (visually hidden), so each control keeps its accessible name at every width. In the
+ * icon rail the logo ("Pulse home"), each link, Post and the account card's Sign out
+ * also show their name in a `ParticipantTooltip` (to the right) on hover and keyboard
+ * focus (demo-feedback 13, #494); from 840px no tooltip shows there.
  *
  * The logo/links/Post group is `sticky` below the shell's compliance banner and any
  * active alert (`--pulse-chrome-top` + `--pulse-alert-height`); the account card is
@@ -65,7 +68,9 @@ import {
 import type { Persona } from '@/features/personas'
 import { formatUnreadBadge, notificationsLinkName } from '../notifications/unreadBadge'
 import { useNotificationsSummary } from '../notifications/useNotifications'
+import { ParticipantTooltip } from '../components/ParticipantTooltip'
 import { AccountCard } from './AccountCard'
+import { NAV_ICON_RAIL_QUERY } from './frameMetrics'
 import { PulseLogo } from './PulseLogo'
 import {
   EXPLORE_PATH,
@@ -166,14 +171,16 @@ export function NavRail({
   return (
     <nav className={styles.rail} aria-label="Primary" data-testid="nav-rail">
       <div className={styles.top}>
-        <a
-          className={styles.logo}
-          href={HOME_PATH}
-          aria-label="Pulse home"
-          onClick={event => handleLinkClick(event, HOME_PATH)}
-        >
-          <PulseLogo size={32} />
-        </a>
+        <ParticipantTooltip label="Pulse home" placement="right" media={NAV_ICON_RAIL_QUERY}>
+          <a
+            className={styles.logo}
+            href={HOME_PATH}
+            aria-label="Pulse home"
+            onClick={event => handleLinkClick(event, HOME_PATH)}
+          >
+            <PulseLogo size={32} />
+          </a>
+        </ParticipantTooltip>
 
         <ul className={styles.list}>
           {items.map(item => {
@@ -181,43 +188,55 @@ export function NavRail({
             const isBell = item.id === 'notifications'
             return (
               <li key={item.id}>
-                <a
-                  className={active ? `${styles.link} ${styles.linkActive}` : styles.link}
-                  href={item.path}
-                  aria-current={active ? 'page' : undefined}
-                  // The bell's name carries the count ("Notifications, 3 unread"); the badge
-                  // below is the same count as visible TEXT, so it is hidden from AT.
-                  aria-label={isBell ? notificationsLinkName(unread) : undefined}
-                  onClick={event => handleLinkClick(event, item.path)}
+                <ParticipantTooltip
+                  label={item.label}
+                  placement="right"
+                  media={NAV_ICON_RAIL_QUERY}
                 >
-                  <FontAwesomeIcon icon={item.icon} aria-hidden="true" className={styles.icon} />
-                  <span className={styles.label}>{item.label}</span>
-                  {isBell && unread > 0 && (
-                    <span
-                      className={styles.badge}
-                      aria-hidden="true"
-                      data-testid="notifications-badge"
-                    >
-                      {formatUnreadBadge(unread)}
-                    </span>
-                  )}
-                </a>
+                  <a
+                    className={active ? `${styles.link} ${styles.linkActive}` : styles.link}
+                    href={item.path}
+                    aria-current={active ? 'page' : undefined}
+                    // The bell's name carries the count ("Notifications, 3 unread"); the badge
+                    // below is the same count as visible TEXT, so it is hidden from AT.
+                    aria-label={isBell ? notificationsLinkName(unread) : undefined}
+                    onClick={event => handleLinkClick(event, item.path)}
+                  >
+                    <FontAwesomeIcon icon={item.icon} aria-hidden="true" className={styles.icon} />
+                    <span className={styles.label}>{item.label}</span>
+                    {isBell && unread > 0 && (
+                      <span
+                        className={styles.badge}
+                        aria-hidden="true"
+                        data-testid="notifications-badge"
+                      >
+                        {formatUnreadBadge(unread)}
+                      </span>
+                    )}
+                  </a>
+                </ParticipantTooltip>
               </li>
             )
           })}
         </ul>
 
         {onCompose !== undefined && (
-          <button
-            ref={postButtonRef}
-            type="button"
-            className={styles.post}
-            data-testid="nav-post-button"
-            onClick={onCompose}
-          >
-            <FontAwesomeIcon icon={faFeatherPointed} aria-hidden="true" className={styles.postIcon} />
-            <span className={styles.postLabel}>Post</span>
-          </button>
+          <ParticipantTooltip label="Post" placement="right" media={NAV_ICON_RAIL_QUERY}>
+            <button
+              ref={postButtonRef}
+              type="button"
+              className={styles.post}
+              data-testid="nav-post-button"
+              onClick={onCompose}
+            >
+              <FontAwesomeIcon
+                icon={faFeatherPointed}
+                aria-hidden="true"
+                className={styles.postIcon}
+              />
+              <span className={styles.postLabel}>Post</span>
+            </button>
+          </ParticipantTooltip>
         )}
       </div>
 

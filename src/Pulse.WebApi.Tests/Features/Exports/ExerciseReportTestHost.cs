@@ -21,7 +21,7 @@ using Pulse.WebApi.Tests.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Tests.Features.Social;
 
 /// <summary>
-/// A minimal host wired the way the orchestrator will wire story 17 into <c>Program.cs</c>: this story's own
+/// A minimal host wired the way the orchestrator will wire story 29 into <c>Program.cs</c>: this story's own
 /// <see cref="ExerciseReportEndpoints.AddExerciseReport"/> / <see cref="ExerciseReportEndpoints.MapExerciseReport"/>,
 /// over the shared migrated real SQL Server, with the REAL staff-session accessor (as <see cref="PostExportTestHost"/>).
 /// The resolved exercise scope is fixed per host, and the media signer is the scope-checking

@@ -9,13 +9,13 @@
  *     201 -> { exercise: OrgExerciseDto, assignedRole }
  *     400 -> invalid (e.g. a missing/blank name)
  *     401 -> no authenticated staff session / no resolvable tenant
- *     403 -> a controller or evaluator session
+ *     403 -> an evaluator session (a controller is admitted since DF-20)
  *     409 -> the proposed hostname is already taken (GLOBALLY, across customers)
  *
  *   GET /api/org/exercises
  *     200 -> OrgExerciseDto[]
  *     401 -> no authenticated staff session / no resolvable tenant
- *     403 -> a controller or evaluator session
+ *     403 -> an evaluator session (a controller is admitted since DF-20)
  *
  * ## `/api/org/*`, and NO id in any route (COR-001 on the org axis)
  * Every other staff read in this app is `/api/staff/*` and is scoped to the ONE

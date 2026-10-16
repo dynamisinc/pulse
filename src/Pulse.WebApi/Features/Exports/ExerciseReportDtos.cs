@@ -4,7 +4,7 @@ using System.Collections.Generic;
 using System.Text.Json.Serialization;
 
 /// <summary>
-/// The response of <c>GET /api/staff/exports/report</c> (demo-feedback story 17): the frozen <c>ExerciseReport</c>
+/// The response of <c>GET /api/staff/exports/report</c> (demo-feedback story 29): the frozen <c>ExerciseReport</c>
 /// contract, field for field. STAFF world only (XC-002): it carries provenance (source, posted by, inject ref) that
 /// never reaches a participant. Every time is an exercise-zone scenario time preformatted by the server
 /// (<c>yyyy-MM-dd HH:mm</c> or <c>HH:mm</c>); <see cref="ReportExerciseDto.PreparedAt"/> is the one wall clock, also shown
@@ -24,7 +24,7 @@ public sealed class ExerciseReportDto
     [JsonPropertyName("activity")]
     public required ReportActivityDto Activity { get; init; }
 
-    /// <summary>One row per delivered inject (DF-25).</summary>
+    /// <summary>One row per delivered inject (DF-42).</summary>
     [JsonPropertyName("injectResponses")]
     public required IReadOnlyList<ReportInjectResponseDto> InjectResponses { get; init; }
 
@@ -69,7 +69,7 @@ public sealed class ReportExerciseDto
     public required string PreparedAt { get; init; }
 }
 
-/// <summary>The At a glance metrics. Noise always counts (DF-24), whatever the list shows.</summary>
+/// <summary>The At a glance metrics. Noise always counts (DF-41), whatever the list shows.</summary>
 public sealed class ReportSummaryDto
 {
     /// <summary>Participant accounts that signed in at least once.</summary>
@@ -201,7 +201,7 @@ public sealed class ReportInjectMarkerDto
     public required int BinIndex { get; init; }
 }
 
-/// <summary>One delivered inject and its first participant response (DF-25).</summary>
+/// <summary>One delivered inject and its first participant response (DF-42).</summary>
 public sealed class ReportInjectResponseDto
 {
     /// <summary>The MSEL Inject # (DF-10), else the item title.</summary>

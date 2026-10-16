@@ -1,8 +1,8 @@
 /**
  * features/controller/report/components/PostRecord.tsx
  * ---------------------------------------------------------------------------
- * The "Post record" section (story 17): posts and replies in scenario-time order, grouped under
- * their scenario half-hour. When white noise was left out of the list (DF-24) a note says how
+ * The "Post record" section (story 29): posts and replies in scenario-time order, grouped under
+ * their scenario half-hour. When white noise was left out of the list (DF-41) a note says how
  * many posts and that they are still counted in the metrics and the chart.
  */
 

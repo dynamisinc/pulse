@@ -1,7 +1,7 @@
 /**
  * features/controller/report/components/ExerciseReportButton.tsx
  * ---------------------------------------------------------------------------
- * The console's **Exercise report** button (demo-feedback story 17), beside Export posts in the
+ * The console's **Exercise report** button (demo-feedback story 29), beside Export posts in the
  * title row. STAFF world: a COBRA button, FontAwesome icon, MUI 9 `sx`-only.
  *
  * It navigates to the printable report (`/staff/console/report`) in the SAME tab. Staff tokens

@@ -70,7 +70,8 @@ describe('Composer — emoji picker (story 12a)', () => {
     const form = await screen.findByTestId('composer')
     const button = within(form).getByRole('button', { name: 'Add emoji' })
     const attach = within(form).getByRole('button', { name: 'Add photos or video' })
-    expect(button.parentElement).toBe(attach.parentElement)
+    // Same tools row (each sits in its tooltip's box-less wrapper, story 13).
+    expect(button.closest('div')).toBe(attach.closest('div'))
     // FontAwesome face-smile, decorative.
     expect(button.querySelector('svg.fa-face-smile')).toHaveAttribute('aria-hidden', 'true')
   })

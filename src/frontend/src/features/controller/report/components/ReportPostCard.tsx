@@ -1,7 +1,7 @@
 /**
  * features/controller/report/components/ReportPostCard.tsx
  * ---------------------------------------------------------------------------
- * One post in the printed record (story 17): time (+ inject ref), avatar (image or initials),
+ * One post in the printed record (story 29): time (+ inject ref), avatar (image or initials),
  * name, handle, VERIFIED / UNVERIFIED chip, "Replying to", the text, media, shown counts and the
  * provenance tags (source, edited, taken down). Staff-world provenance: none of it reaches a
  * participant.

@@ -1,7 +1,7 @@
 /**
  * features/controller/report/components/ActivityChart.tsx
  * ---------------------------------------------------------------------------
- * The "Activity over time" chart of the printed exercise report (story 17): posts per 5 scenario
+ * The "Activity over time" chart of the printed exercise report (story 29): posts per 5 scenario
  * minutes, stacked by source with background noise at the BOTTOM (so participant posts sit on
  * top where they are easiest to see), key injects as dashed vertical lines labeled with their
  * ref. Inline SVG, no chart library.

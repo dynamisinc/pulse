@@ -1,7 +1,7 @@
 /**
  * features/controller/report/hooks/useExerciseReport.ts
  * ---------------------------------------------------------------------------
- * React Query seam for the exercise report (story 17). One query per `includeNoise` value, so
+ * React Query seam for the exercise report (story 29). One query per `includeNoise` value, so
  * ticking "Include background noise" refetches with `includeNoise=true` (the previous list stays
  * on screen while it loads). `retry: false`: a 401/404/413 will not fix itself, and the page
  * shows the reason. A report is a snapshot, so it is not refetched on focus.

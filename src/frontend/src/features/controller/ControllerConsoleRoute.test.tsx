@@ -14,7 +14,7 @@
  *    bridge): the suspended banner appears and Resume clears it; FREEZE disables Fire with
  *    "World frozen". Without the bridge the mock queue would never see the tier.
  */
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -30,6 +30,10 @@ import { resetPauseStateForTest } from './hooks/usePauseState'
 import { reviewStore } from './engine/services/reviewStore'
 import { engineControlStore } from './engine/hooks/useEngineControl'
 import { injectMock } from './runSheet/injectMock'
+
+// Demo-feedback story 11 (DF-14): the console's write controls render only for a controller
+// session, and this suite mounts none, so the read-only gate is fixed to "controller" here.
+vi.mock('@/features/controller/access/useCanControl', () => ({ useCanControl: () => true }))
 
 beforeEach(() => {
   setExerciseClock({ scenarioNow: () => new Date('2033-09-04T14:00:30Z') })

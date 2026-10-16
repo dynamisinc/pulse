@@ -1,7 +1,7 @@
 /**
  * features/controller/report/pages/ExerciseReportPage.test.tsx
  * ---------------------------------------------------------------------------
- * Story 17 (printable exercise report), the page: every section renders from a fixture, the noise
+ * Story 29 (printable exercise report), the page: every section renders from a fixture, the noise
  * checkbox refetches with includeNoise=true, every media item prints its alt text, a poster-less
  * video is a plain tile, the edited tag appears only when editCount > 0, the lookalike section is
  * omitted when empty, the print button calls window.print, and the `@page` rule exists only while

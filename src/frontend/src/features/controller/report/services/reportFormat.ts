@@ -1,7 +1,7 @@
 /**
  * features/controller/report/services/reportFormat.ts
  * ---------------------------------------------------------------------------
- * Pure presentation helpers for the printed exercise report (story 17): labels, grouping by
+ * Pure presentation helpers for the printed exercise report (story 29): labels, grouping by
  * scenario half-hour, chart scaling, durations. No React, no clock, no time-zone conversion:
  * the server sends exercise-zone scenario times already formatted ("yyyy-MM-dd HH:mm" / "HH:mm")
  * and these helpers only slice and group those strings.

@@ -1,7 +1,7 @@
-# controller/report — printable exercise report (demo-feedback story 17, #550)
+# controller/report — printable exercise report (demo-feedback story 29, #550)
 
 Staff-world page at `/staff/console/report` (opened in a new tab by the **Exercise report**
-button beside Export posts). The controller uses the browser's **Print / Save as PDF** (DF-23).
+button beside Export posts). The controller uses the browser's **Print / Save as PDF** (DF-40).
 
 - `pages/ExerciseReportPage.tsx` — COBRA toolbar (screen only) + the sheet in a portal; injects
   the `@page` Letter rule and the `html.reportOpen` print scope only while mounted.

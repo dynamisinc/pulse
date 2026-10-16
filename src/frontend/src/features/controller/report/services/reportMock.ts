@@ -1,7 +1,7 @@
 /**
  * features/controller/report/services/reportMock.ts
  * ---------------------------------------------------------------------------
- * The MOCK exercise report (demo-feedback story 17), used only when `USE_MOCK_DATA` is on (the
+ * The MOCK exercise report (demo-feedback story 29), used only when `USE_MOCK_DATA` is on (the
  * same switch the posts export uses). STAFF world, no UI.
  *
  * An axios adapter for `GET /staff/exports/report` that answers with {@link MOCK_REPORT} in the

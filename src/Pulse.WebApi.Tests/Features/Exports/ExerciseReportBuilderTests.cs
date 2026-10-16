@@ -8,8 +8,8 @@ using Pulse.WebApi.Features.Exports;
 using Xunit;
 
 /// <summary>
-/// The exercise report's pure rules (demo-feedback story 17): source mapping, 5-minute bins (noise always counted,
-/// DF-24), the DF-25 inject response rule, lookalike pairing, the median and the busiest window.
+/// The exercise report's pure rules (demo-feedback story 29): source mapping, 5-minute bins (noise always counted,
+/// DF-41), the DF-42 inject response rule, lookalike pairing, the median and the busiest window.
 /// </summary>
 public sealed class ExerciseReportBuilderTests
 {
@@ -61,7 +61,7 @@ public sealed class ExerciseReportBuilderTests
         bins[0].Should().BeEquivalentTo(new { Participant = 2, Scripted = 1, Engine = 0, Noise = 0 });
         bins[1].Should().BeEquivalentTo(new { Participant = 0, Scripted = 0, Engine = 1, Noise = 0 });
         bins[2].Total.Should().Be(0);
-        bins[3].Noise.Should().Be(2, "noise is always counted in the chart, even when it is left out of the list (DF-24)");
+        bins[3].Noise.Should().Be(2, "noise is always counted in the chart, even when it is left out of the list (DF-41)");
     }
 
     [Fact]
@@ -112,7 +112,7 @@ public sealed class ExerciseReportBuilderTests
         ExerciseReportBuilder.BinIndex(T0, T0.AddMinutes(-1)).Should().Be(-1);
     }
 
-    // ---- DF-25 -------------------------------------------------------------------------------------------------
+    // ---- DF-42 -------------------------------------------------------------------------------------------------
 
     [Fact]
     public void FirstResponse_ADirectReplyToAnInjectPost_Counts()
@@ -139,7 +139,7 @@ public sealed class ExerciseReportBuilderTests
         var hashtag = Post(3, "participant", body: "#cityfire #KestrelFlood stay safe");
 
         ExerciseReportBuilder.FirstResponse(T0, new HashSet<Guid>(), ["cityfire"], [hashtag])
-            .Should().BeNull("a shared hashtag would match everything (DF-25)");
+            .Should().BeNull("a shared hashtag would match everything (DF-42)");
     }
 
     [Fact]
@@ -175,7 +175,7 @@ public sealed class ExerciseReportBuilderTests
         var reply = Post(2, origin, parent: injectPost.Id, body: "@cityfire");
 
         ExerciseReportBuilder.FirstResponse(T0, new HashSet<Guid> { injectPost.Id }, ["cityfire"], [reply])
-            .Should().BeNull("only a participant post is a response (DF-25)");
+            .Should().BeNull("only a participant post is a response (DF-42)");
     }
 
     [Fact]

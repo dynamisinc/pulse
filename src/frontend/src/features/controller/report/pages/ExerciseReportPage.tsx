@@ -1,7 +1,7 @@
 /**
  * features/controller/report/pages/ExerciseReportPage.tsx
  * ---------------------------------------------------------------------------
- * The printable exercise report page (demo-feedback story 17; DF-23: PDF through the browser's
+ * The printable exercise report page (demo-feedback story 29; DF-40: PDF through the browser's
  * Print / Save as PDF). Route `/staff/console/report` (staff; the same controller-only guard as
  * the console, declared in `staffRouteRegistry.tsx`).
  *

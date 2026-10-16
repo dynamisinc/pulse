@@ -16,8 +16,8 @@ using Pulse.WebApi.Tests.Features.Social;
 using Xunit;
 
 /// <summary>
-/// <c>GET /api/staff/exports/report</c> end to end over real SQL (demo-feedback story 17): the staff gate and the
-/// fail-closed scope, every section of the frozen contract, the noise toggle (DF-24), DF-25, media signing and its
+/// <c>GET /api/staff/exports/report</c> end to end over real SQL (demo-feedback story 29): the staff gate and the
+/// fail-closed scope, every section of the frozen contract, the noise toggle (DF-41), DF-42, media signing and its
 /// degradation, cross-exercise isolation, telemetry and the 5,000-post limit.
 /// </summary>
 [Collection(MsSqlCollection.Name)]
@@ -98,7 +98,7 @@ public sealed class ExerciseReportEndpointTests
         root.GetProperty("posts").GetArrayLength().Should().Be(0);
     }
 
-    // ---- The report (AC endpoint, posts, media, activity, DF-25, lookalikes, editCount) --------------------------
+    // ---- The report (AC endpoint, posts, media, activity, DF-42, lookalikes, editCount) --------------------------
 
     [RequiresDockerFact]
     public async Task Report_CarriesEverySection_PerTheFrozenContract()
@@ -154,7 +154,7 @@ public sealed class ExerciseReportEndpointTests
         await _seed.PostAsync(exerciseId, cityFire, 21, p => { p.Origin = "inject"; p.InjectId = unfired.ToString(); });
         await _seed.PostAsync(exerciseId, cityFire, 22, p => { p.Origin = "inject"; p.InjectId = deleted.ToString(); });
 
-        // A participant @mention 31 minutes after the shelter post: outside DF-25's window.
+        // A participant @mention 31 minutes after the shelter post: outside DF-42's window.
         await _seed.PostAsync(exerciseId, resident, 51, p => { p.Origin = "participant"; p.Body = "@cityfire where is the shelter"; });
 
         await _seed.ReactionAsync(exerciseId, injectPost, ReactionKinds.Like);
@@ -197,7 +197,7 @@ public sealed class ExerciseReportEndpointTests
         exercise.GetProperty("preparedAt").GetString().Should().MatchRegex(@"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$");
         exercise.TryGetProperty("preparedAtUtc", out _).Should().BeFalse("the field was renamed (W-003)");
 
-        // Summary: every post counted, noise included (DF-24).
+        // Summary: every post counted, noise included (DF-41).
         var summary = root.GetProperty("summary");
         summary.GetProperty("participants").GetInt32().Should().Be(2, "signed-in participant-world accounts only");
         summary.GetProperty("posts").GetInt32().Should().Be(9);
@@ -227,7 +227,7 @@ public sealed class ExerciseReportEndpointTests
         markers.Select(m => m.GetProperty("binIndex").GetInt32()).Should().Equal(0, 4);
         markers[1].GetProperty("at").GetString().Should().Be("2033-09-04 08:20");
 
-        // DF-25.
+        // DF-42.
         var responses = root.GetProperty("injectResponses").EnumerateArray().ToArray();
         responses.Should().HaveCount(2);
         responses[0].GetProperty("ref").GetString().Should().Be("INJ-007");
@@ -328,7 +328,7 @@ public sealed class ExerciseReportEndpointTests
         json.RootElement.GetProperty("exercise").GetProperty("preparedAt").GetString().Should().Be("2026-10-15 21:30");
     }
 
-    // ---- Noise toggle (DF-24) ------------------------------------------------------------------------------------
+    // ---- Noise toggle (DF-41) ------------------------------------------------------------------------------------
 
     [RequiresDockerFact]
     public async Task IncludeNoise_ListsNoise_AndTheMetricsAreIdentical()
@@ -365,7 +365,7 @@ public sealed class ExerciseReportEndpointTests
         b.RootElement.GetProperty("omittedNoiseCount").GetInt32().Should().Be(0);
 
         a.RootElement.GetProperty("summary").GetRawText().Should().Be(
-            b.RootElement.GetProperty("summary").GetRawText(), "metrics are identical either way (DF-24)");
+            b.RootElement.GetProperty("summary").GetRawText(), "metrics are identical either way (DF-41)");
         a.RootElement.GetProperty("activity").GetRawText().Should().Be(b.RootElement.GetProperty("activity").GetRawText());
     }
 

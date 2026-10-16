@@ -31,6 +31,8 @@ appsettings.Local.json
 # ---- UAT scripts ----
 # Import-Roster.ps1 writes participants' personal sign-in links here (bearer credentials): never commit them.
 scripts/uat/out/
+# Invoke-DemoReset.ps1 transcripts and Test-DemoReady.ps1 -Json results (run-of-show logs).
+scripts/uat/logs/
 
 # ---- Editors / OS ----
 .vscode/*

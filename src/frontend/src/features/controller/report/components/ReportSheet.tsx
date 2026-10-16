@@ -1,7 +1,7 @@
 /**
  * features/controller/report/components/ReportSheet.tsx
  * ---------------------------------------------------------------------------
- * The printable exercise report SHEET (demo-feedback story 17), reproducing the approved
+ * The printable exercise report SHEET (demo-feedback story 29), reproducing the approved
  * "Pulse Exercise Media Record" mockup: EXERCISE marking band, header, At a glance (stat grid
  * plus the source split bar), Activity over time, Inject response times, Verified vs. lookalike
  * (omitted when there are no pairs), Post record, footer.

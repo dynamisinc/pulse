@@ -2,7 +2,7 @@
  * features/controller/report/types/report.ts
  * ---------------------------------------------------------------------------
  * The FROZEN response contract of `GET /api/staff/exports/report?includeNoise=` (demo-feedback
- * story 17, docs/features/demo-feedback/17-printable-exercise-report.md "Contract"). Copied
+ * story 29, docs/features/demo-feedback/29-printable-exercise-report.md "Contract"). Copied
  * from the story; the backend builds the same shape. Do not widen it here: change the story first.
  *
  * Every time is an exercise-zone SCENARIO time already formatted by the server:

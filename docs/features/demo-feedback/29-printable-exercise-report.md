@@ -1,7 +1,7 @@
 # Story: Printable exercise report (posts, metrics and charts, saved as PDF)
 
 **Feature:** Demo feedback cut (10/20)  ·  **Phase:** 1  ·  **Status:** In Review
-**Requirements:** EVL-030 (lite), COR-053, NFR-001  ·  **Decisions:** DF-23, DF-24, DF-25  ·  **Issue:** #550
+**Requirements:** EVL-030 (lite), COR-053, NFR-001  ·  **Decisions:** DF-40, DF-41, DF-42  ·  **Issue:** #550
 **Stack:** backend + frontend  ·  **Review:** Tier-1  ·  **Priority:** Must  ·  **Wave:** 3  ·  **Effort:** M
 
 ## Context
@@ -19,13 +19,13 @@ and no participant brand skin. The on-screen toolbar above the sheet uses COBRA 
 
 ## Decisions
 
-- **DF-23 · PDF through the browser.** The page renders the report and the controller uses the browser's
+- **DF-40 · PDF through the browser.** The page renders the report and the controller uses the browser's
   Print → Save as PDF (same approach as the participant card sheet). No server-side PDF or `.docx` library this cut;
   white-labeling and a Word export come later.
-- **DF-24 · Noise out of the list, in the numbers.** White-noise posts are left out of the post record by default
+- **DF-41 · Noise out of the list, in the numbers.** White-noise posts are left out of the post record by default
   (a toolbar checkbox puts them back) and are always counted in the metrics and the activity chart. Engine posts are
   always listed, tagged `Engine`.
-- **DF-25 · Inject response rule.** For each delivered inject (fired, not deleted, with at least one post), the first
+- **DF-42 · Inject response rule.** For each delivered inject (fired, not deleted, with at least one post), the first
   response is the earliest **participant** post (origin `participant`) within 30 scenario minutes of the inject's
   first post that either replies directly to one of the inject's posts or mentions the `@handle` of one of their
   authors. Shared hashtags do not count (one storyline hashtag would match everything). The rule is printed under
@@ -44,7 +44,7 @@ and no participant brand skin. The on-screen toolbar above the sheet uses COBRA 
       Avatars are signed URLs or `null`.
 - [ ] Activity: 5-minute bins from the first to the last post's scenario minute, each split into participant
       (incl. controller-as-persona), scripted, engine and noise.
-- [ ] Inject responses follow DF-25; an inject with no response has `firstResponseAt: null`. Median response
+- [ ] Inject responses follow DF-42; an inject with no response has `firstResponseAt: null`. Median response
       minutes covers responded injects only (`null` when none).
 - [ ] Lookalikes: an unverified persona is paired with a verified one when its handle starts with the verified
       handle (case-insensitive, longer), and both authored posts in the exercise. Engagement = shown likes and
@@ -133,7 +133,7 @@ controller notes (aar-export 03), per-participant scoring, rumor/correction char
 
 - Backend: new `Features/Exports/ExerciseReport*` beside `PostExportService`; reuse its lookups (personas, humans,
   inject refs), `PostEngagementReader` (concrete, not the interface — see story 02), `ExerciseFactsReader`,
-  `PostExportLabels` and `IMediaUrlSigner`. Pure functions for binning, the DF-25 rule, lookalike pairing and the
+  `PostExportLabels` and `IMediaUrlSigner`. Pure functions for binning, the DF-42 rule, lookalike pairing and the
   median, so each is unit-testable. `Program.cs` wiring is orchestrator-owned.
 - Frontend: `features/controller/report/` (page, components, service, hook, types). Charts are inline SVG, no
   chart library. The button sits beside `ExportPostsButton` in `ControllerConsole`.
@@ -145,16 +145,16 @@ Story 02 (export service and gate). Post editing (tomorrow) fills `editCount` in
 
 ## Tests
 
-Backend: report builder unit tests (bins, DF-25, lookalikes, median, noise toggle), endpoint isolation (cross-exercise),
+Backend: report builder unit tests (bins, DF-42, lookalikes, median, noise toggle), endpoint isolation (cross-exercise),
 401/413, telemetry payload.
 
 Backend tests (`src/Pulse.WebApi.Tests/Features/Exports/`):
-- `ExerciseReportBuilderTests` — bins, source split, busiest window, cap (AC activity); DF-25 reply, @mention,
+- `ExerciseReportBuilderTests` — bins, source split, busiest window, cap (AC activity); DF-42 reply, @mention,
   hashtag-only, 30-minute cutoff, non-participant ignored (AC inject responses); median incl. none responded;
   lookalike pairing (AC lookalikes).
 - `ExerciseReportEndpointTests.Report_CarriesEverySection_PerTheFrozenContract` (AC endpoint, posts order/counts,
-  media/posters/avatars, activity, DF-25, lookalikes, editCount null);
-  `.IncludeNoise_ListsNoise_AndTheMetricsAreIdentical` (AC endpoint, DF-24);
+  media/posters/avatars, activity, DF-42, lookalikes, editCount null);
+  `.IncludeNoise_ListsNoise_AndTheMetricsAreIdentical` (AC endpoint, DF-41);
   `.ASigningFailure_DegradesToNullUrls_NotA500` (AC media);
   `.UnresolvedScope_Returns401_AndRecordsNothing`, `.Anonymous_And_Participant_Return401_UnassignedStaff403`,
   `.ReportFromA_NeverShowsBsPostsPersonasMediaOrInjects` (AC isolation);

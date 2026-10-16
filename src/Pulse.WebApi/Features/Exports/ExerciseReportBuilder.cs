@@ -4,8 +4,8 @@ using System.Collections.Generic;
 using System.Linq;
 
 /// <summary>
-/// One post as the report's pure functions see it (demo-feedback story 17): enough to bin it, to test it against the
-/// DF-25 response rule and to order it. Read once per report from the scoped <c>Posts</c> set.
+/// One post as the report's pure functions see it (demo-feedback story 29): enough to bin it, to test it against the
+/// DF-42 response rule and to order it. Read once per report from the scoped <c>Posts</c> set.
 /// </summary>
 /// <param name="Id">The post id.</param>
 /// <param name="AuthorPersonaId">The authoring persona.</param>
@@ -58,7 +58,7 @@ public enum ReportSeries
 }
 
 /// <summary>
-/// The exercise report's pure logic (demo-feedback story 17): source mapping, 5-minute binning, the DF-25 inject
+/// The exercise report's pure logic (demo-feedback story 29): source mapping, 5-minute binning, the DF-42 inject
 /// response rule, lookalike pairing, the median and the busiest window. No I/O and no clock, so every rule is
 /// unit-testable on its own; <see cref="ExerciseReportService"/> reads the rows and formats the times.
 /// </summary>
@@ -73,10 +73,10 @@ public static class ExerciseReportBuilder
     /// </summary>
     public const int MaxBins = 10_000;
 
-    /// <summary>The DF-25 window: a response counts within this many scenario minutes of the inject's first post.</summary>
+    /// <summary>The DF-42 window: a response counts within this many scenario minutes of the inject's first post.</summary>
     public const int ResponseWindowMinutes = 30;
 
-    /// <summary>The participant origin, the only origin that can respond to an inject (DF-25).</summary>
+    /// <summary>The participant origin, the only origin that can respond to an inject (DF-42).</summary>
     public const string ParticipantOrigin = "participant";
 
     /// <summary>The controller-as-persona origin.</summary>
@@ -105,7 +105,7 @@ public static class ExerciseReportBuilder
         _ => ScriptedSource,
     };
 
-    /// <summary>The chart series of a stored origin (controller-as-persona counts with participants, DF-24 chart).</summary>
+    /// <summary>The chart series of a stored origin (controller-as-persona counts with participants, DF-41 chart).</summary>
     /// <param name="origin">The stored origin.</param>
     /// <returns>The series.</returns>
     public static ReportSeries Series(string? origin) => origin switch
@@ -116,7 +116,7 @@ public static class ExerciseReportBuilder
         _ => ReportSeries.Scripted,
     };
 
-    /// <summary>Whether a post of this origin is white noise (left out of the list by default, DF-24).</summary>
+    /// <summary>Whether a post of this origin is white noise (left out of the list by default, DF-41).</summary>
     /// <param name="origin">The stored origin.</param>
     /// <returns><c>true</c> for <c>noise</c>.</returns>
     public static bool IsNoise(string? origin) => string.Equals(origin, PostExportLabels.NoiseOrigin, StringComparison.Ordinal);
@@ -131,7 +131,7 @@ public static class ExerciseReportBuilder
     }
 
     /// <summary>
-    /// Bins every post (all sources, noise included, DF-24) into 5-minute bins from the bin holding the earliest
+    /// Bins every post (all sources, noise included, DF-41) into 5-minute bins from the bin holding the earliest
     /// post to the bin holding the latest, empty bins included, at most <see cref="MaxBins"/>.
     /// </summary>
     /// <param name="posts">Every post in the exercise.</param>
@@ -201,7 +201,7 @@ public static class ExerciseReportBuilder
     }
 
     /// <summary>
-    /// The DF-25 rule: the earliest <b>participant</b> post (origin <c>participant</c>) within
+    /// The DF-42 rule: the earliest <b>participant</b> post (origin <c>participant</c>) within
     /// <see cref="ResponseWindowMinutes"/> scenario minutes of the inject's first post (both ends inclusive) that either
     /// replies directly to one of the inject's posts or mentions the <c>@handle</c> of one of their authors. A shared
     /// hashtag is not a match. Ties go to the earlier wall clock, then the lower id.

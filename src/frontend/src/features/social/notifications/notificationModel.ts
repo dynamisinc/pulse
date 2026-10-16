@@ -12,7 +12,10 @@
  *                boundaries: `@dreyes_fh` and `@DREYES_FH,` match, `@dreyes_fhx` and
  *                `me@dreyes_fh.org` do not);
  *   (c) like     one aggregated row per post of mine whose `counts.like` rose since the
- *                viewer last looked ("Your post got 3 new likes").
+ *                viewer last looked ("Your post got 3 new likes");
+ *   (d) repost   the same, for `counts.repost` (demo-feedback DF-19): one aggregated row per
+ *                post of mine. A repost names no one: neither the push nor the feed says WHO
+ *                reposted, so the row never invents a name (see `notificationText`).
  * My own activity never notifies me (no row for my own reply under my own post, or for a
  * post of mine that names me). A post that is both a reply to mine and names me is ONE row,
  * a reply -- the mention would only restate it.
@@ -37,9 +40,30 @@
  * oldest-first stream of pushes produce the same rows. Storms are rows like any other: the
  * GROUPS_CAP bound, taken-down members, "Mark all read" and the announcements all apply.
  *
- * COUNTS ARRIVE ONLY WITH A READ. A pushed post carries the counts it had when it was
- * broadcast; for a post already known to be mine they are ignored (see `ingest`), so only a
- * feed read can move a like count -- or lower a baseline.
+ * COUNTS ARRIVE WITH A READ OR AN ENGAGEMENT PUSH. A pushed POST carries the counts it had when
+ * it was broadcast; for a post already known to be mine they are ignored (see `ingest`). Counts
+ * move through a feed read, or (demo-feedback DF-19) through {@link observeEngagement}: a
+ * `PostEngagementChanged` frame for one of my posts, applied only when its `version` is higher
+ * than the last frame applied to that post, so a replayed or stale frame never notifies twice and
+ * a like or repost is announced the moment it lands instead of on the next 30 s read. A read and a
+ * frame that both carry the same rise announce it once: the second sees no rise.
+ *
+ * A READ NEVER UNDOES A NEWER FRAME (Gate-1 M-1). Every applied frame bumps a tick; the store
+ * captures {@link NotificationModel.readMark} when a feed read STARTS and passes it to
+ * {@link NotificationModel.ingestBatch}. A post of mine whose last frame was applied after that
+ * read started keeps the frame's counts: the read's are older, and letting them through would
+ * withdraw the notification the frame raised and re-announce it on the next fresh read.
+ *
+ * MY OWN LIKE / REPOST IS SILENT (Gate-1 M-2). When the viewer starts liking or reposting a post,
+ * the store tells the model ({@link NotificationModel.noteOwnReaction}); if the post is mine, the
+ * next rise of that count (from the frame, or a read) absorbs one step into the baseline instead of
+ * notifying. A write that fails or changes nothing withdraws it (`cancelOwnReaction`), and a note
+ * nothing matched expires after `OWN_REACTION_TTL_MS` (`expireOwnReaction`, driven by the
+ * store), so a stray note can never swallow the next person's like. It is never persisted.
+ *
+ * REPOST RECORDS ride in the same bounded, persisted record list as the like records, under the
+ * key `repost:<postId>` (the like record keeps the bare post id), so the persisted shape is
+ * unchanged and an old stored state loads as-is (its posts simply have no repost baseline yet).
  *
  * IDEMPOTENT. Every post carries an id, and re-offering one (the baseline read, a realtime
  * echo, the 30 s re-read) never double-counts. The 30 s re-read feeds the same `ingest`.
@@ -71,6 +95,7 @@ import {
   MENTION_STORM_WINDOW_MS,
   MINE_CAP,
   READ_IDS_CAP,
+  type EngagementObservation,
   type IngestResult,
   type NotificationEvent,
   type NotificationItem,
@@ -93,6 +118,30 @@ export interface NotificationModelOptions {
 
 /** No change -- shared, so the common "unrelated post" path allocates nothing. */
 const NO_CHANGE: IngestResult = { changed: false }
+
+/** No change from an engagement frame. */
+const NO_OBSERVATION: EngagementObservation = { changed: false, events: [] }
+
+/** The counted kinds a row is kept per own post for. */
+type CountKind = 'like' | 'repost'
+
+/** A counted kind's record key: a like keeps the bare post id (stored shape), a repost a prefix. */
+function recordKey(kind: CountKind, postId: string): string {
+  return kind === 'like' ? postId : `repost:${postId}`
+}
+
+/** What offering one post produced: whether anything changed, and every new unread event. */
+interface Offered {
+  readonly changed: boolean
+  readonly events: readonly NotificationEvent[]
+}
+
+const NOTHING_OFFERED: Offered = { changed: false, events: [] }
+
+function offered(result: IngestResult): Offered {
+  if (result.event !== undefined) return { changed: result.changed, events: [result.event] }
+  return result.changed ? { changed: true, events: [] } : NOTHING_OFFERED
+}
 
 /** One reply/mention event inside a group. */
 interface Member {
@@ -128,11 +177,17 @@ interface Group {
   item: NotificationItem | undefined
 }
 
-/** One of my posts: what the like row and the thread URL need. */
+/** One of my posts: what the like / repost rows and the thread URL need. */
 interface MyPost {
   readonly excerpt: string
   /** The like count last seen. */
   likes: number
+  /** The repost count last seen. */
+  reposts: number
+  /** The `version` of the newest engagement frame applied to this post (-1: none yet). */
+  version: number
+  /** The model's frame tick when a frame was last applied to this post (0: never). */
+  frameTick: number
 }
 
 /** Collapses whitespace and truncates to the excerpt length (adds an ellipsis when cut). */
@@ -210,6 +265,12 @@ export class NotificationModel {
    * also keeps a re-read of the feed from "discovering" (and announcing) an evicted row again.
    */
   private evictedFloorMs = -Infinity
+  /** Bumped by every applied engagement frame (see `readMark`). */
+  private frameTick = 0
+  /** My own likes / reposts not yet absorbed: note ids by record key, oldest first. */
+  private readonly ownPending = new Map<string, number[]>()
+  /** The next own-reaction note id. */
+  private nextNoteId = 1
   /** Whether the persisted part (read ids / like records) changed since `takeDirty`. */
   private dirty = false
 
@@ -240,69 +301,193 @@ export class NotificationModel {
    * viewer had already seen. Only a feed READ may move a count.
    */
   ingest(post: ParticipantPostView): IngestResult {
-    return this.offer(post, false)
+    const result = this.offer(post, false)
+    const [event] = result.events
+    if (event !== undefined) return { changed: result.changed, event }
+    return result.changed ? { changed: true } : NO_CHANGE
   }
 
   /**
    * Offers a batch (a feed read): my own posts first, then everyone else's. Returns the
    * NEW unread events, in order -- what the store announces for a re-read.
    */
-  ingestBatch(posts: readonly ParticipantPostView[]): NotificationEvent[] {
+  ingestBatch(posts: readonly ParticipantPostView[], readMark?: number): NotificationEvent[] {
     const events: NotificationEvent[] = []
     for (const post of posts) {
       if (post.authorPersonaId !== this.selfPersonaId) continue
-      const event = this.offer(post, true).event
-      if (event !== undefined) events.push(event)
+      events.push(...this.offer(post, true, readMark).events)
     }
     for (const post of posts) {
       if (post.authorPersonaId === this.selfPersonaId) continue
-      const event = this.offer(post, true).event
-      if (event !== undefined) events.push(event)
+      events.push(...this.offer(post, true).events)
     }
     return events
   }
 
-  private offer(post: ParticipantPostView, fromRead: boolean): IngestResult {
-    if (this.isRemoved(post.id)) return NO_CHANGE
-    if (post.authorPersonaId === this.selfPersonaId) {
-      return !fromRead && this.mine.has(post.id) ? NO_CHANGE : this.observeOwn(post)
-    }
-    return this.observeOther(post)
+  /**
+   * The frame tick to capture when a feed read STARTS and hand back to {@link ingestBatch}: a post
+   * of mine whose frame was applied after it keeps the frame's (newer) counts (Gate-1 M-1).
+   */
+  readMark(): number {
+    return this.frameTick
   }
 
-  /** One of MY posts: remember it, and track how its like count moved. */
-  private observeOwn(post: ParticipantPostView): IngestResult {
-    const like = post.counts.like
+  /**
+   * The viewer started liking / reposting `postId` (Gate-1 M-2). If the post is mine, the next rise
+   * of that count absorbs one step silently into the baseline - my own reaction never notifies me.
+   * Returns the note's id (for {@link expireOwnReaction}; the store expires it after
+   * `OWN_REACTION_TTL_MS`), or `undefined` when the post is not mine (nothing was noted).
+   */
+  noteOwnReaction(postId: string, kind: CountKind): number | undefined {
+    if (!this.mine.has(postId)) return undefined
+    const key = recordKey(kind, postId)
+    const id = this.nextNoteId
+    this.nextNoteId += 1
+    this.ownPending.set(key, [...(this.ownPending.get(key) ?? []), id])
+    return id
+  }
+
+  /** Withdraws the newest {@link noteOwnReaction} for the post (its write failed / did nothing). */
+  cancelOwnReaction(postId: string, kind: CountKind): void {
+    const key = recordKey(kind, postId)
+    const notes = this.ownPending.get(key)
+    if (notes === undefined) return
+    this.setNotes(key, notes.slice(0, -1))
+  }
+
+  /** Forgets one note nothing matched in time (N-1); a no-op once it was absorbed or withdrawn. */
+  expireOwnReaction(noteId: number): void {
+    for (const [key, notes] of this.ownPending) {
+      if (!notes.includes(noteId)) continue
+      this.setNotes(key, notes.filter(id => id !== noteId))
+      return
+    }
+  }
+
+  private setNotes(key: string, notes: readonly number[]): void {
+    if (notes.length === 0) this.ownPending.delete(key)
+    else this.ownPending.set(key, [...notes])
+  }
+
+  /**
+   * Applies a `PostEngagementChanged` frame (demo-feedback DF-19) to one of MY posts: the like and
+   * repost counts move exactly as a read would move them (rises are announced, an unlike lowers the
+   * baseline), but only when `version` is higher than the last frame applied to that post, so a
+   * replayed, duplicated or reordered frame changes nothing and never notifies twice. A frame for a
+   * post that is not (yet) known to be mine is ignored: the next read baselines it. The reply count
+   * is not read here -- replies notify through the arriving reply itself, which names its author.
+   */
+  observeEngagement(
+    postId: string,
+    counts: { readonly like: number; readonly repost: number },
+    version: number,
+  ): EngagementObservation {
+    if (this.isRemoved(postId)) return NO_OBSERVATION
+    const own = this.mine.get(postId)
+    if (own === undefined || version <= own.version) return NO_OBSERVATION
+    own.version = version
+    this.frameTick += 1
+    own.frameTick = this.frameTick
+    const result = this.applyCounts(postId, own, counts.like, counts.repost)
+    return result.changed || result.events.length > 0 ? result : NO_OBSERVATION
+  }
+
+  private offer(post: ParticipantPostView, fromRead: boolean, readMark?: number): Offered {
+    if (this.isRemoved(post.id)) return NOTHING_OFFERED
+    if (post.authorPersonaId === this.selfPersonaId) {
+      if (!fromRead && this.mine.has(post.id)) return NOTHING_OFFERED
+      // M-1: a read that started before this post's last frame carries older counts.
+      const known = this.mine.get(post.id)
+      if (known !== undefined && readMark !== undefined && known.frameTick > readMark) {
+        return NOTHING_OFFERED
+      }
+      return this.observeOwn(post)
+    }
+    return offered(this.observeOther(post))
+  }
+
+  /** One of MY posts: remember it, and track how its like and repost counts moved. */
+  private observeOwn(post: ParticipantPostView): Offered {
     const known = this.mine.get(post.id)
-    const previous = known?.likes
     if (known === undefined) {
-      this.mine.set(post.id, { excerpt: toExcerpt(post.text), likes: like })
+      const own: MyPost = {
+        excerpt: toExcerpt(post.text),
+        likes: post.counts.like,
+        reposts: post.counts.repost,
+        version: -1,
+        frameTick: 0,
+      }
+      this.mine.set(post.id, own)
       if (this.mine.size > MINE_CAP) {
         const oldest = this.mine.keys().next()
         if (oldest.done !== true) this.mine.delete(oldest.value)
       }
-    } else {
-      known.likes = like
+      // First sight: track both counts with no previous value (they become the baselines).
+      const like = this.trackCount('like', post.id, undefined, own.likes)
+      const repost = this.trackCount('repost', post.id, undefined, own.reposts)
+      return { changed: true, events: [...like.events, ...repost.events] }
     }
-    let changed = known === undefined || previous !== like
+    return this.applyCounts(post.id, known, post.counts.like, post.counts.repost)
+  }
 
-    let record = this.likes.get(post.id)
+  /** Moves a known own post's like and repost counts to the given values (a read or a frame). */
+  private applyCounts(postId: string, own: MyPost, like: number, repost: number): Offered {
+    const previousLikes = own.likes
+    const previousReposts = own.reposts
+    own.likes = like
+    own.reposts = repost
+    const likeResult = this.trackCount('like', postId, previousLikes, like)
+    const repostResult = this.trackCount('repost', postId, previousReposts, repost)
+    const changed = previousLikes !== like || previousReposts !== repost
+      || likeResult.changed || repostResult.changed
+    const events = [...likeResult.events, ...repostResult.events]
+    if (!changed && events.length === 0) return NOTHING_OFFERED
+    return { changed: true, events }
+  }
+
+  /**
+   * The baseline bookkeeping for one counted kind of one of my posts (the like rule, shared by the
+   * repost row): the first count seen is the baseline (no retroactive rows); a count below the
+   * baseline (an unlike / un-repost) pulls it down so the next rise is still noticed; a rise SEEN
+   * in this session (`value > previous`) is an event of that size, stamped `riseAt` now.
+   */
+  private trackCount(
+    kind: CountKind,
+    postId: string,
+    previous: number | undefined,
+    value: number,
+  ): Offered {
+    const key = recordKey(kind, postId)
+    let changed = false
+    let record = this.likes.get(key)
     if (record === undefined) {
-      // First sight: this count IS the baseline -- no retroactive likes.
-      record = { postId: post.id, baseline: like }
+      // First sight: this count IS the baseline -- no retroactive likes / reposts.
+      record = { postId: key, baseline: value }
       this.setLikeRecord(record)
       changed = true
-    } else if (like < record.baseline) {
-      // Someone unliked: follow the count down so the next rise is still noticed.
-      record = { postId: post.id, baseline: like, ...(record.read ? { read: record.read } : {}) }
+    } else if (value < record.baseline) {
+      // Someone unliked / un-reposted: follow the count down so the next rise is still noticed.
+      record = { postId: key, baseline: value, ...(record.read ? { read: record.read } : {}) }
       this.setLikeRecord(record)
       changed = true
     }
 
     // A rise SEEN in this session (not merely a higher count than a stored baseline).
-    const rose = previous !== undefined && like > previous
-    if (like > record.baseline) {
-      if (rose || record.riseAt === undefined) {
+    let amount = previous !== undefined && value > previous ? value - previous : 0
+
+    // M-2: the part of the rise that is MY OWN like / repost moves the baseline silently.
+    const notes = this.ownPending.get(key) ?? []
+    if (amount > 0 && notes.length > 0) {
+      const absorbed = Math.min(notes.length, amount)
+      amount -= absorbed
+      this.setNotes(key, notes.slice(absorbed))
+      record = { ...record, baseline: record.baseline + absorbed }
+      this.setLikeRecord(record)
+      changed = true
+    }
+
+    if (value > record.baseline) {
+      if (amount > 0 || record.riseAt === undefined) {
         // Stamp when the rise was first seen; a reloaded rise that already has a stamp keeps it.
         record = { ...record, riseAt: this.now() }
         this.setLikeRecord(record)
@@ -310,7 +495,7 @@ export class NotificationModel {
       }
     } else if (record.riseAt !== undefined) {
       record = {
-        postId: post.id,
+        postId: key,
         baseline: record.baseline,
         ...(record.read ? { read: record.read } : {}),
       }
@@ -318,8 +503,8 @@ export class NotificationModel {
       changed = true
     }
 
-    if (rose) return { changed: true, event: { type: 'like', amount: like - previous } }
-    return changed ? { changed } : NO_CHANGE
+    if (amount > 0) return { changed: true, events: [{ type: kind, amount }] }
+    return changed ? { changed: true, events: [] } : NOTHING_OFFERED
   }
 
   /** Someone else's post: a reply to one of mine, else a mention of me, else nothing. */
@@ -614,7 +799,8 @@ export class NotificationModel {
     }
 
     if (this.mine.delete(postId)) {
-      if (this.likes.delete(postId)) this.dirty = true
+      if (this.likes.delete(recordKey('like', postId))) this.dirty = true
+      if (this.likes.delete(recordKey('repost', postId))) this.dirty = true
       changed = true
     }
 
@@ -631,7 +817,7 @@ export class NotificationModel {
 
   /**
    * Marks every current row read: all reply/mention events are remembered as read, and each
-   * pending like row becomes an acknowledged one with the baseline moved up to the count.
+   * pending like / repost row becomes an acknowledged one with the baseline moved up to the count.
    */
   markAllRead(): void {
     for (const group of this.groups.values()) {
@@ -639,17 +825,23 @@ export class NotificationModel {
       group.item = undefined
     }
     for (const [postId, post] of this.mine) {
-      const record = this.likes.get(postId)
-      if (record === undefined) continue
-      const pending = Math.max(0, post.likes - record.baseline)
-      if (pending === 0) continue
-      this.setLikeRecord({
-        postId,
-        baseline: post.likes,
-        read: { count: pending, at: record.riseAt ?? this.now() },
-      })
+      this.acknowledge(recordKey('like', postId), post.likes)
+      this.acknowledge(recordKey('repost', postId), post.reposts)
     }
     this.dirty = true
+  }
+
+  /** Moves one counted record's baseline up to `count`; what was pending becomes the read row. */
+  private acknowledge(key: string, count: number): void {
+    const record = this.likes.get(key)
+    if (record === undefined) return
+    const pending = Math.max(0, count - record.baseline)
+    if (pending === 0) return
+    this.setLikeRecord({
+      postId: key,
+      baseline: count,
+      read: { count: pending, at: record.riseAt ?? this.now() },
+    })
   }
 
   /**
@@ -695,18 +887,21 @@ export class NotificationModel {
     }
 
     for (const [postId, post] of this.mine) {
-      const record = this.likes.get(postId)
-      if (record === undefined) continue
-      const pending = Math.max(0, post.likes - record.baseline)
-      const row = pending > 0
-        ? this.buildLikeItem(postId, post, pending, record.riseAt ?? this.now(), true)
-        : record.read !== undefined
-          ? this.buildLikeItem(postId, post, record.read.count, record.read.at, false)
-          : undefined
-      if (row === undefined) continue
-      const item = this.reuse(row)
-      next.set(item.id, item)
-      sortKey.set(item.id, toMs(item.at))
+      for (const kind of ['like', 'repost'] as const) {
+        const record = this.likes.get(recordKey(kind, postId))
+        if (record === undefined) continue
+        const count = kind === 'like' ? post.likes : post.reposts
+        const pending = Math.max(0, count - record.baseline)
+        const row = pending > 0
+          ? this.buildCountItem(kind, postId, post, pending, record.riseAt ?? this.now(), true)
+          : record.read !== undefined
+            ? this.buildCountItem(kind, postId, post, record.read.count, record.read.at, false)
+            : undefined
+        if (row === undefined) continue
+        const item = this.reuse(row)
+        next.set(item.id, item)
+        sortKey.set(item.id, toMs(item.at))
+      }
     }
 
     this.lastItems = next
@@ -756,7 +951,9 @@ export class NotificationModel {
     }
   }
 
-  private buildLikeItem(
+  /** A like or repost row: anonymous (no actor is known), one per post of mine. */
+  private buildCountItem(
+    kind: CountKind,
     postId: string,
     post: MyPost,
     count: number,
@@ -764,8 +961,8 @@ export class NotificationModel {
     unread: boolean,
   ): NotificationItem {
     return {
-      id: `like:${postId}`,
-      type: 'like',
+      id: `${kind}:${postId}`,
+      type: kind,
       subjectPostId: postId,
       subjectHandle: this.selfHandle,
       at,

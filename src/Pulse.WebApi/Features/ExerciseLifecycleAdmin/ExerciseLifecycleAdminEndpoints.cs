@@ -23,9 +23,10 @@ using Microsoft.Extensions.DependencyInjection;
 /// </para>
 /// <para>
 /// <b>Two different gates, on purpose (COR-076).</b> The two exercise routes carry
-/// <see cref="OrgAdminAuthorizationFilter.ExerciseAdministrators"/> (planner OR org-admin — stories 01/02 both
-/// say "a Planner or OrgAdmin session"); the staff-assignment read carries
-/// <see cref="OrgAdminAuthorizationFilter.OrgAdminOnly"/>, which refuses a planner too. That asymmetry is what
+/// <see cref="OrgAdminAuthorizationFilter.ExerciseAdministrators"/> (planner, org-admin or controller — stories
+/// 01/02 said "a Planner or OrgAdmin session"; demo-feedback DF-20 added the controller); the staff-assignment
+/// read carries <see cref="OrgAdminAuthorizationFilter.OrgAdminOnly"/>, which refuses a planner and a controller
+/// too. That asymmetry is what
 /// makes <c>orgAdmin</c> a separate authorization family rather than a larger staff role.
 /// </para>
 /// <para>

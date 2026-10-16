@@ -44,6 +44,10 @@ import * as liveStorylineActions from '../../services/liveStorylineActions'
 import { liveStorylineStore } from '../../services/liveStorylineStore'
 import { EscalationDial } from './EscalationDial'
 
+// Demo-feedback story 11 (DF-14): the console's write controls render only for a controller
+// session, and this suite mounts none, so the read-only gate is fixed to "controller" here.
+vi.mock('@/features/controller/access/useCanControl', () => ({ useCanControl: () => true }))
+
 /**
  * Toggled per-describe-block. Default `true` (mock mode — matches every
  * pre-existing test above/below). The live-mode block near the bottom flips

@@ -1,7 +1,7 @@
 /**
  * features/controller/report/components/LookalikeSection.tsx
  * ---------------------------------------------------------------------------
- * "Verified vs. lookalike" (story 17, SOC-052): each verified account beside its unverified
+ * "Verified vs. lookalike" (story 29, SOC-052): each verified account beside its unverified
  * lookalike, with shown likes and reposts as bars on one shared scale and the numbers in text.
  * Omitted entirely by the caller when the report has no pairs. Verification is labeled in words
  * (VERIFIED / UNVERIFIED), never by color alone.

@@ -275,7 +275,7 @@ builder.Services.AddInjects();                  // #452 scripted-post queue + In
 // (and, through it, the pause tier and the post funnel). White noise's pacer waits FirstSweepDelay (5 s) before its
 // first sweep, so WebApplicationFactory<Program> hosts do not hit the database the moment they start.
 builder.Services.AddPostExport();               // demo-feedback 02 GET /api/staff/exports/posts.xlsx
-builder.Services.AddExerciseReport();           // demo-feedback 17 GET /api/staff/exports/report
+builder.Services.AddExerciseReport();           // demo-feedback 29 GET /api/staff/exports/report
 builder.Services.AddInjectImport();             // demo-feedback 03 POST /api/injects/import
 builder.Services.AddPostPins();                 // demo-feedback 04 personal + exercise pins, GET /api/feed/pinned
 builder.Services.AddWhiteNoise();               // demo-feedback 05 noise pool + pacer, /api/staff/noise*
@@ -463,7 +463,7 @@ app.MapExerciseLifecycleEndpoints();    // story 03 — GET /api/staff/exercise-
 // route is scoped to the ONE server-resolved exercise, while these span the caller's whole customer tenant.
 // No route, query or body carries an organization id in any form — the tenant is always the caller's own,
 // resolved by app.UseOrganizationResolution() — so there is no IDOR surface on the org axis. Role-gated by
-// OrgAdminAuthorizationFilter: planner OR orgAdmin on the two exercise routes, orgAdmin ALONE on the
+// OrgAdminAuthorizationFilter: planner, orgAdmin OR controller (DF-20) on the two exercise routes, orgAdmin ALONE on the
 // staff-assignment read (COR-076 — orgAdmin is its own authorization family, not a bigger staff role).
 app.MapExerciseLifecycleAdminEndpoints();  // COR-074/075/076 POST+GET /api/org/exercises, GET /api/org/staff-assignments
 
@@ -521,7 +521,7 @@ app.MapInjects();             // #452 /api/injects* (staff gate; mutations contr
 // must still read GET /api/feed/pinned; the personal pin rides the existing reaction route, which already sits
 // inside DenyReadOnlySessions() above.
 app.MapPostExport();          // demo-feedback 02 GET /api/staff/exports/posts.xlsx (any assigned staff)
-app.MapExerciseReport();      // demo-feedback 17 GET /api/staff/exports/report (any assigned staff)
+app.MapExerciseReport();      // demo-feedback 29 GET /api/staff/exports/report (any assigned staff)
 app.MapInjectImport();        // demo-feedback 03 POST /api/injects/import (controller)
 app.MapPostPins();            // demo-feedback 04 GET /api/feed/pinned; PUT/DELETE /api/staff/posts/{id}/pin (controller)
 app.MapWhiteNoise();          // demo-feedback 05 GET /api/staff/noise (any staff); PUT noise + noise/pool (controller)

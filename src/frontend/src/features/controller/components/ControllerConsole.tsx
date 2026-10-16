@@ -142,6 +142,8 @@ import { hasOtherModalMounted } from '@/core/a11y/modalPriority'
 import { useRegisterSurfaceTool, useToolstrip } from '@/features/staffShell/toolRegistry'
 import { staffShellTokens } from '@/features/staffShell/staffShellTokens'
 import { useControllerIdentity } from '../identity/controllerIdentity'
+import { useCanControl, ViewOnlyChip } from '../access'
+import { ReadOnlyRefresh } from '../access/ReadOnlyRefresh'
 import { CommandPalette, type CommandPalettePersonaSlot } from '../console/CommandPalette'
 // The component lives in `personaDockHost.tsx`; the shared ids/types in the
 // sibling `personaDockHost.ts`. A bare `./personaDockHost` specifier resolves
@@ -330,6 +332,23 @@ export interface ControllerConsoleProps {
   lifecycleSlot?: ReactNode
 }
 
+/**
+ * Registers the "Personas" surface tool (the ⌘K palette's toolstrip twin). A component, not a
+ * bare hook call, so the console can leave it unmounted for a non-controller (story 11, DF-14).
+ * As a child of the console its registration effect still runs before ENGINE / USAGE register,
+ * so the toolstrip order is unchanged.
+ */
+function PersonasTool({ personaCount }: { personaCount: number }) {
+  useRegisterSurfaceTool({
+    id: PERSONAS_TOOL_ID,
+    label: 'PERSONAS',
+    icon: faMasksTheater,
+    tooltip: 'Post as persona (⌘K) — search a persona and compose',
+    badge: personaCount > 0 ? { count: personaCount, escalating: false } : undefined,
+  })
+  return null
+}
+
 export function ControllerConsole(
   {
     renderPersonaResults,
@@ -342,6 +361,8 @@ export function ControllerConsole(
   }: ControllerConsoleProps = {},
 ) {
   const identity = useControllerIdentity()
+  // Story 11 (DF-14): false for an evaluator, whose console has no write control at all.
+  const canControl = useCanControl()
   const { exerciseId, timeZone } = useExerciseContext()
   const { isActive, toggleTool } = useToolstrip()
   // The console's root element: the reference point for "is some OTHER modal on top of
@@ -376,14 +397,6 @@ export function ControllerConsole(
   // The shared "operating as" seam the route mounts above this console. The
   // console selects into it when a slot opens the composer (see `openComposer`).
   const { activePersona, selectPersona } = useActivePersona()
-
-  useRegisterSurfaceTool({
-    id: PERSONAS_TOOL_ID,
-    label: 'PERSONAS',
-    icon: faMasksTheater,
-    tooltip: 'Post as persona (⌘K) — search a persona and compose',
-    badge: personaCount > 0 ? { count: personaCount, escalating: false } : undefined,
-  })
 
   // The "ENGINE" consult-on-demand tool (feature: autonomy-safety, story 06) —
   // the console admin surface for the exercise autonomy default + tier-policy
@@ -441,6 +454,7 @@ export function ControllerConsole(
   // with only the palette open, the chord still closes it.
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      if (!canControl) return
       if ((event.metaKey || event.ctrlKey) && (event.key === 'k' || event.key === 'K')) {
         event.preventDefault()
         const root = rootRef.current
@@ -450,7 +464,7 @@ export function ControllerConsole(
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [toggleTool])
+  }, [toggleTool, canControl])
 
   // The persona-dock host opens once a persona is selected (from the palette,
   // or — at integration — from the picker). Persona content mounts into its
@@ -555,6 +569,7 @@ export function ControllerConsole(
     Parameters<ConsoleSlotContext['openComposer']>,
     void
   >(opts => {
+    if (!canControl) return
     const requestedId = opts?.personaId ?? activePersona?.id
     const persona =
       requestedId === undefined ? undefined : findExercisePersona(personas, requestedId, exerciseId)
@@ -627,10 +642,11 @@ export function ControllerConsole(
                   CONTROLLER CONSOLE
                 </Typography>
                 <Box sx={{ flex: 1 }} />
+                <ViewOnlyChip />
                 {lifecycleSlot}
                 {/* demo-feedback 09: the post activity export (any staff role, DF-8). */}
                 <ExportPostsButton />
-                {/* demo-feedback 17: the printable exercise report, in a new tab. */}
+                {/* demo-feedback 29: the printable exercise report, in a new tab. */}
                 <ExerciseReportButton />
                 <Typography
                   data-testid="controller-callsign"
@@ -646,7 +662,7 @@ export function ControllerConsole(
               </Stack>
 
               {/* Shortcut strip — the one place the console says how to start. */}
-              <Stack
+              {canControl && <Stack
                 direction="row"
                 data-testid="console-shortcut-strip"
                 sx={{
@@ -662,7 +678,7 @@ export function ControllerConsole(
                 <Box component="span">/</Box>
                 <Box component="kbd" sx={KBD_SX}>Ctrl+K</Box>
                 <Box component="span">Post as a persona</Box>
-              </Stack>
+              </Stack>}
 
               {/* World-steering (world-steering feature): the tiered-pause control + the
                   storyline escalation dial. PausePill drives usePauseState (the
@@ -760,8 +776,9 @@ export function ControllerConsole(
       {/* One invisible driver per CountingDown item — the safety demo (see
           `DraftTimerDriver`'s module header). Auto-HOLDs by default; the ONLY
           timeout auto-send is swamped(lead) on a still-effectively-Delayed-auto
-          draft, and a STOP/Suggest-only/degraded engine holds even then. */}
-      {countingDownItems.map(item => (
+          draft, and a STOP/Suggest-only/degraded engine holds even then. A timeout can
+          publish, so an evaluator's console runs no drivers (story 11). */}
+      {canControl && countingDownItems.map(item => (
         <DraftTimerDriver
           key={item.draftId}
           item={item}
@@ -772,14 +789,19 @@ export function ControllerConsole(
         />
       ))}
 
+      {canControl && <PersonasTool personaCount={personaCount} />}
+      {/* A non-controller never acts, so it re-reads the pause tier and engine settings on a
+          timer; a controller's console mounts (and subscribes to) none of it. */}
+      {!canControl && <ReadOnlyRefresh />}
+
       <CommandPalette
-        open={paletteOpen}
+        open={canControl && paletteOpen}
         onClose={closePalette}
         onSelectPersona={handleSelectPersona}
         renderPersonaResults={renderPersonaResults}
       />
 
-      <PersonaDockHost open={dockPersonaOpen} onClose={closeDock} slots={dockSlots} />
+      <PersonaDockHost open={canControl && dockPersonaOpen} onClose={closeDock} slots={dockSlots} />
 
       <EngineSettingsPanel open={engineSettingsOpen} onClose={closeEngineSettings} />
 

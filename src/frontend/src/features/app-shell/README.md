@@ -40,9 +40,12 @@ the hand-off inside `RoleAwareEntry`**:
 - **Staff (controller/evaluator/planner)** → the nested `StaffRouteTree` over the injected
   **staff route registry**, mounted inside a **COBRA hand-off**
   (`ThemeProvider(cobraTheme)`) next to the `ExerciseSwitcher` (exercise-isolation/05).
-  Staff-only. An unknown or role-unauthorized staff path redirects to that role's
-  **default surface** (never to `/login` — a signed-in controller who mistypes lands on
-  their console).
+  Staff-only. An unknown staff path redirects to that role's **default surface** (never
+  to `/login` — a signed-in controller who mistypes lands on their console). A
+  **registered** staff path the role may not open renders the COBRA
+  `StaffNotAllowedPage` instead ("You need the planner, org admin or controller role to
+  open Exercise Management", with a button to the role's default) — demo-feedback story
+  15, DF-20; before it, that path redirected silently.
 - **Expired / unsupported role / staff role with no reachable surface** → fail closed to
   the login entry (`/login`).
 - **Unresolved** → the root providers fail closed to `null`; `RootFailClosedBoundary`
@@ -53,7 +56,9 @@ the hand-off inside `RoleAwareEntry`**:
 | File | Role |
 |------|------|
 | `RoleAwareEntry.tsx` | Layer 1: the role-aware world decision + guard/switcher composition + fail-closed boundary. Imports **no** location API, so the participant branch cannot read the URL. The registry, the guard, and the switcher are **injected as props** (IoC) — see below. |
-| `StaffRouteTree.tsx` | Layer 2: the nested staff `<Routes>`. The **only** module here that reads the location. Registers one route per registry entry the role is allowed to open; everything else redirects to the role's default surface. |
+| `StaffRouteTree.tsx` | Layer 2: the nested staff `<Routes>`. The **only** module here that reads the location. Registers one route per registry entry the role is allowed to open, the not-allowed page at the path of every entry it is not, and redirects everything else to the role's default surface. |
+| `StaffNotAllowedPage.tsx` | The COBRA "not allowed" page (story 15, DF-20): `<main>` + `<h1>`, "You need the … role to open …", and a button to the role's default page. Staff-only — only `StaffRouteTree` renders it. |
+| `staffRoleWords.ts` | Pure wording for that page: each staff role in words (`orgAdmin` → "org admin") and the natural join ("planner, org admin or controller"). |
 | `staffRouting.ts` | The registry **contract**: `StaffRouteEntry` / `StaffRouteRegistry` / `StaffRouteGroup` / `StaffSurfaceRole`, the group ordering + labels, and the pure resolvers (`staffRoutesForRole`, `resolveDefaultStaffRoute`, `isStaffSurfaceRole`, `toDescendantRoutePath`). No surfaces, no router, no theme. |
 | `RouteFocusScope.tsx` | Shared programmatic focus target (NFR-001). Used once for the participant world and once per staff route. |
 | `routes.tsx` | `createRoleAwareRoutes(config)` → `RouteObject[]` the orchestrator splices into `App.tsx`. Establishes the world-neutral `ExerciseContextProvider > SessionProvider > RoleAwareEntry` stack, plus the two real, pre-auth login routes (`/login` → `ParticipantSignInPage`, `/staff/login` → `StaffSignInPage`; feature: login, story 04). The catch-all **must stay a splat** — the staff tree is a descendant `<Routes>`. |
@@ -79,7 +84,8 @@ later. Do not add a second visibility check anywhere — it will drift.
 | `RoleAwareEntry.staffRouting.test.tsx` | COR-004 (participant location-blindness across 8 typed paths, incl. no canonicalising redirect), staff deep links, `allowedRoles` gating, unknown-path → role default, expired/unsupported → `/login`. |
 | `participantLocationBlindness.test.ts` | The structural half of COR-004: no module on the participant render path imports a location API. Self-proving — the same scan must find location reads in `StaffRouteTree.tsx`. |
 | `registryIsTheOnlySeam.test.ts` | No concrete surface literal in any routing-glue module. |
-| `StaffRouteTree.test.tsx` | Deep links, gating, the unknown-path fallback, per-route focus, and the "one entry is the whole edit" behaviour. |
+| `StaffRouteTree.test.tsx` | Deep links, gating, the not-allowed page for a registered path (wording, button, focus, one `main`), the unknown-path fallback, per-route focus, and the "one entry is the whole edit" behaviour. |
+| `staffRoleWords.test.ts` | Role words and the natural join used by the not-allowed page. |
 | `staffRouting.test.ts` | The pure resolvers + the `STAFF_SURFACE_ROLES` ≡ core `STAFF_ROLES` drift guard. |
 
 ## Inversion of control (why surfaces + guard + switcher are props)

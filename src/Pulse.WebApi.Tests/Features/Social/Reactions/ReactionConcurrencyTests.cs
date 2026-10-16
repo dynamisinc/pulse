@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.Extensions.Logging.Abstractions;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.EngineRuntime.Clock;
@@ -15,6 +16,7 @@ using Pulse.WebApi.Features.Social.Engagement;
 using Pulse.WebApi.Features.Social.Follows;
 using Pulse.WebApi.Features.Social.Reactions;
 using Pulse.WebApi.Tests.Data;
+using Pulse.WebApi.Tests.Features.Social;
 using static Pulse.WebApi.Tests.Features.Social.Reactions.ReactionTestSeed;
 
 /// <summary>
@@ -170,7 +172,9 @@ public class ReactionConcurrencyTests
                 ActingHumanId = world.ActingHumanId,
             }),
             new ExerciseClockService(TimeProvider.System),
-            new PostEngagementReader(context, exerciseContext));
+            new PostEngagementReader(context, exerciseContext),
+            new FakeFeedBroadcaster(),
+            NullLogger<ReactionService>.Instance);
     }
 
     /// <summary>Returns a fixed session persona, standing in for the request's authenticated session.</summary>

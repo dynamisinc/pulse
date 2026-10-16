@@ -1,16 +1,18 @@
 /*
  * features/social/SocialChannel.module.css
  * ---------------------------------------------------------------------------
- * The Social channel's APP FRAME (demo-polish F1; D1-013): a left-anchored
- * three-column grid -- 240px nav rail | 600px main | 344px right rail. CSS Module,
- * locally scoped, NO COBRA / MUI (participant world).
+ * The Social channel's APP FRAME (demo-polish F1; D1-013): a three-column grid --
+ * 240px nav rail | 600px main | 344px right rail -- left-anchored below 1280px and
+ * centred from 1280px (demo-feedback 13, #495). CSS Module, locally scoped, NO COBRA /
+ * MUI (participant world).
  *
- * MOBILE-FIRST, three states, every width mirrored in `layout/frameMetrics.ts`
+ * MOBILE-FIRST, four states, every width mirrored in `layout/frameMetrics.ts`
  * (`SocialChannel.layout.test.tsx` checks the two agree):
  *
  *   base            68px icon rail + main (flexible, max 600px)
  *   >= 840px        240px nav rail + main                (= NAV_EXPANDED_MIN_WIDTH)
  *   >= 1184px       240px nav rail + main + 344px sidebar (= FRAME_MIN_WIDTH)
+ *   >= 1280px       the same frame, centred in the window (= FRAME_CENTRED_MIN_WIDTH)
  *
  * The right rail hides first (`display: none` in `RightRail.module.css`), then the
  * nav rail collapses to icons (`NavRail.module.css`); the grid below just gives each
@@ -19,8 +21,13 @@
  * clip` on `.main` (clip, not hidden, so the sticky headers inside still stick to
  * the viewport) guarantees the page never scrolls horizontally from 390 to 1440px.
  *
- * LEFT-ANCHORED (D1-013): `justify-content: start` and no auto margins -- at 1440px
- * the frame hugs the left edge and the remainder is blank, exactly as designed.
+ * ANCHORING (D1-013, revisited by #495). Below 1280px the grid is `justify-content:
+ * start`: the frame hugs the left edge (between 1184 and 1279px the spare width is under
+ * 100px, too little to centre usefully). From 1280px it is `justify-content: center`,
+ * so at 1440px the 1184px frame sits in the middle with equal space on both sides, as
+ * on X. Centring is done by the grid alone -- never auto margins, which would fight the
+ * `minmax(0, 600px)` track -- and the tracks keep their widths (the free space goes to
+ * the sides, after the main track has grown to its 600px max).
  *
  * TOKENS. The root composes the shared `.tokens` class, which declares the `--pc-*`
  * palette and `--pc-accent: var(--pulse-ac, ...)` (the per-exercise accent hook,
@@ -59,6 +66,13 @@
 @media (min-width: 1184px) {
   .frame {
     grid-template-columns: 240px minmax(0, 600px) 344px;
+  }
+}
+
+/* Centred like X from 1280px (#495); the tracks are unchanged. */
+@media (min-width: 1280px) {
+  .frame {
+    justify-content: center;
   }
 }
 

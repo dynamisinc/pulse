@@ -93,7 +93,11 @@ const REGISTRY_TABLE = [
     label: 'Controller Console',
     icon: faSliders,
     element: <ControllerConsoleRoute />,
-    allowedRoles: ['controller'],
+    // Seam S-3 (demo-feedback DF-14): evaluators may open the console READ-ONLY. Story 11's
+    // `useCanControl()` removes every write control for them; the console is still nobody's
+    // home page but the controller's (the evaluator keeps `/staff/evaluate`). The API already
+    // lets an evaluator read every console endpoint; server-side write enforcement is #61/#377.
+    allowedRoles: ['controller', 'evaluator'],
     isDefaultFor: ['controller'],
     group: 'conduct',
     description: 'Drive the simulated world: personas, injects, steering and the review queue.',
@@ -113,9 +117,10 @@ const REGISTRY_TABLE = [
     // SURFACE #4, and the first one TWO roles may open (COR-074/075/076).
     //
     // `allowedRoles` mirrors the server's `ExerciseAdminRoles.ExerciseAdministrators`
-    // gate EXACTLY — planner OR org-admin. Widening it here would not grant
-    // anything (the endpoints 403), it would just show a controller a surface
-    // that fails; narrowing it would hide a surface its holder is entitled to.
+    // gate EXACTLY — planner, org-admin or (DF-20) controller. Widening it beyond
+    // the server would not grant anything (the endpoints 403), it would just show
+    // a surface that fails; narrowing it would hide a surface its holder is
+    // entitled to.
     //
     // `isDefaultFor: ['orgAdmin']` is what finally gives the org-admin family a
     // home page. Until COR-076, `RoleAwareEntry` fail-closed EVERY org-admin
@@ -128,7 +133,9 @@ const REGISTRY_TABLE = [
     label: 'Exercise Management',
     icon: faFolderOpen,
     element: <ExerciseManagementRoute />,
-    allowedRoles: ['planner', 'orgAdmin'],
+    // Seam S-4 (demo-feedback DF-20, Tom 10/15): controllers list and create exercises too.
+    // Story 15 widens the server's `ExerciseAdminRoles.ExerciseAdministrators` to match.
+    allowedRoles: ['planner', 'orgAdmin', 'controller'],
     isDefaultFor: ['orgAdmin'],
     group: 'administer',
     description: 'Create exercises and see every run your organization owns.',
@@ -140,7 +147,7 @@ const REGISTRY_TABLE = [
     // `allowedRoles` mirrors the server gate for the roster / day-word / cards endpoints
     // exactly: `controller` OR `planner` assigned to the exercise. An evaluator or an
     // org-admin would get a 403 on every call, so the surface is simply not offered
-    // (and a typed URL redirects to their own default, like any other gated path).
+    // (a typed URL shows the "not allowed" page, like any other gated path; DF-20).
     //
     // No `isDefaultFor`: it is nobody's home page. The planner and controller keep
     // `/staff/plan` and `/staff/console`; they gain this as a second destination
@@ -159,7 +166,7 @@ const REGISTRY_TABLE = [
     description: 'Who can sign in: the roster, personal links, today\'s word and printable cards.',
   },
   {
-    // SURFACE #6 (demo-feedback 17, #550): the printable exercise report, opened in a NEW TAB by
+    // SURFACE #6 (demo-feedback 29, #550): the printable exercise report, opened in a NEW TAB by
     // the console's "Exercise report" button. Same guard as the console (`controller`), the role
     // that sees the button. A printed document: the page mounts its own COBRA toolbar and a
     // neutral sheet in a portal, so there is no StaffShellFrame here. Nobody's home page.
