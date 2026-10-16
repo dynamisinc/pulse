@@ -192,6 +192,59 @@ PR (#571) or by Session A's A1 work, which must be on `main` before #571 merges:
 Wider autonomy than this (autonomous ambient posting under a tier policy, wave C2 / #168) needs its
 own amendment to this section before it reaches the live provider.
 
+#### Amendment 2: autonomous ambient posting (#168): DRAFT, UNSIGNED
+
+> **Status: DRAFT, not signed.** Nothing in this subsection is authorized until the signer ticks the box
+> below and enters a name and date. Signing is paired with one reviewed commit that sets the governed
+> flag `Generation:Governance:AmbientAutonomyAuthorized = true` for `uat` only, the same pattern as
+> `generationTenantBounded`. Until then the #168 code is merged **dark**: the ambient policy defaults to
+> `off`, and the settings API rejects `mode = autonomous` with a 400 ("not authorized by
+> PROVIDER-GOVERNANCE §8"). `review` mode needs no amendment: it uses the existing review queue, and
+> silence still holds.
+
+**What this would authorize.** On `uat`, with the live provider, ambient background posts (trigger
+`AmbientFloor` only) may publish **without per-post human review** when a controller has set that exercise's
+ambient policy to `autonomous`. All of these conditions must hold, and #168's acceptance criteria enforce
+and test each one:
+
+- **Off by default; a human turns it on.** The policy is per exercise, starts `off`, and resets to `off`
+  on every restart. Only a controller with a staff session can set it, and the change is logged with who
+  made it, the old value and the new value. The engine never raises it itself, and restoring after the
+  kill switch never re-enables it.
+- **Bounded volume.** `maxPerMinute` and `maxPerHour` caps apply. `maxPerMinute` can never exceed the
+  exercise's `MaxEnginePostsPerMinute`.
+- **Bounded content.**
+  - Topics come only from a fixed server-side vocabulary (local colour, everyday traffic, food, sports,
+    community events, and similar), filtered by the exercise's topic allow-list.
+  - Personas come only from the exercise's persona allow-list, and only this exercise's personas.
+  - An empty allow-list means nothing is allowed.
+  - Every burst passes the existing `ContentGuard` fiction and injection guard on the tenant-bounded
+    provider. A guard failure publishes nothing.
+  - There is no post-hoc topic classifier: the topic is enforced when the seed is chosen, with the
+    guard as backstop.
+- **Never storyline or escalation.** Only the `AmbientFloor` trigger can take the autonomous path.
+  Inaction, official-response and amplification content, and anything storyline-bound or escalating,
+  always goes through review. A timed-out draft is held, never auto-sent.
+- **Every clamp stops it within 5 s.** The engine re-checks immediately before each publish, and
+  in-flight ambient bursts are discarded when any of these is active:
+  - the kill switch, in either mode;
+  - degraded mode;
+  - cut-to-`Fake`.
+- **Lifecycle.** Nothing ambient publishes unless the exercise is `live` and not frozen or paused, and
+  nothing publishes after EndEx. A draft that finishes after the state changed is discarded.
+- **Labelled and invisible until published.** Posts carry `Origin = engine`, and telemetry adds
+  `publishPath = ambient-autonomous`. Participants never see a draft. Times show in scenario time.
+- **Limit (same as above).** A burst already handed to the publisher runs to completion. The kill switch
+  stops every later publish.
+
+**Not authorized by this amendment:** production; autonomous storyline, response or escalation content;
+`AutonomyLevel.Auto`; replies or DMs from ambient personas; any change to the provider, tier or residency.
+
+| | |
+|---|---|
+| Autonomous ambient posting authorized on **`uat`** under the conditions above | ☐ |
+| Signer / date | |
+
 ### Evidence (compiled by `engine-runtime/05` — verify, don't take on trust)
 
 | # | Item | Evidence | Where to verify |
