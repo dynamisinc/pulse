@@ -79,11 +79,10 @@ internal static class PersonalLinkSeed
             ExerciseId = exerciseId,
             Username = $"user{id:N}"[..30],
             DisplayName = "Pat Participant",
-            Role = role,
-            PersonaId = personaId,
             CredentialHash = withPassword ? new ParticipantPasswordHasher().Hash(Password) : null,
             CreatedAt = DateTimeOffset.UtcNow,
             DisabledAt = disabledAt,
+            Enrollment = new Enrollment { Id = Guid.NewGuid(), ExerciseId = exerciseId, Role = role, PersonaId = personaId },
         };
 
         await using var seed = fixture.CreateContext();
@@ -143,10 +142,10 @@ internal static class PersonalLinkSeed
 
         await using var seed = fixture.CreateContext();
         seed.StaffUsers.Add(StaffTenantSeed.StaffUserFor(staffUserId));
-        seed.StaffAssignments.Add(new StaffAssignment
+        seed.Enrollments.Add(new Enrollment
         {
             Id = Guid.NewGuid(),
-            StaffUserId = staffUserId,
+            PersonId = staffUserId,
             ExerciseId = exerciseId,
             Role = role,
             CreatedAt = DateTimeOffset.UtcNow,

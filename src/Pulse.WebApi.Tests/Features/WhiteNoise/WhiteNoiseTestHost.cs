@@ -199,10 +199,10 @@ internal sealed class WhiteNoiseTestHost : IAsyncDisposable
         foreach (var (id, role) in new[] { (controller, "controller"), (evaluator, "evaluator") })
         {
             db.StaffUsers.Add(StaffTenantSeed.StaffUserFor(id));
-            db.StaffAssignments.Add(new StaffAssignment
+            db.Enrollments.Add(new Enrollment
             {
                 Id = Guid.NewGuid(),
-                StaffUserId = id,
+                PersonId = id,
                 ExerciseId = exerciseId,
                 Role = role,
                 CreatedAt = DateTimeOffset.UtcNow,

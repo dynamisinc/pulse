@@ -39,8 +39,8 @@ public class AccountAndSharedCredentialIsolationTests
         ExerciseId = exerciseId,
         Username = $"user_{id:N}",
         DisplayName = $"Account {id:N}",
-        Role = "participant",
         CreatedAt = DateTimeOffset.UtcNow,
+        Enrollment = new Enrollment { Id = Guid.NewGuid(), ExerciseId = exerciseId, Role = "participant" },
     };
 
     private static SharedCredential NewSharedCredential(Guid id, Guid exerciseId) => new()

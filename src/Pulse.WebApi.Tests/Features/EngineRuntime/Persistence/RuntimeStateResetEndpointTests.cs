@@ -260,10 +260,10 @@ public sealed class RuntimeStateResetEndpointTests
             Status = "live",
         });
         context.StaffUsers.Add(StaffTenantSeed.StaffUserFor(seed.StaffUserId));
-        context.StaffAssignments.Add(new StaffAssignment
+        context.Enrollments.Add(new Enrollment
         {
             Id = Guid.NewGuid(),
-            StaffUserId = seed.StaffUserId,
+            PersonId = seed.StaffUserId,
             ExerciseId = seed.ExerciseId,
             Role = role,
             CreatedAt = DateTimeOffset.UtcNow,

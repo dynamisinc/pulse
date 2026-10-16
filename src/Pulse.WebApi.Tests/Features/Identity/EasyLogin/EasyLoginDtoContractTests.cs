@@ -355,7 +355,8 @@ public sealed class EasyLoginDtoContractTests
               "token": "session-token", "refreshToken": "refresh-token",
               "session": {
                 "exerciseId": "{{exerciseId}}", "accountId": "{{accountId}}", "role": "pio", "personaId": "{{personaId}}",
-                "actingHumanId": "{{accountId}}", "isReadOnly": false, "expiresAt": "{{expiresAt:O}}"
+                "actingHumanId": "{{accountId}}", "isReadOnly": false, "expiresAt": "{{expiresAt:O}}",
+                "personId": null, "world": "participant", "scope": "exercise", "isLead": false
               }
             }
             """);

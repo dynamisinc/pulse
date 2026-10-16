@@ -53,10 +53,10 @@ internal static class RosterSeed
             Name = $"Roster {world.ExerciseId:N}",
             TimeZone = "America/New_York",
         });
-        seed.StaffAssignments.Add(new StaffAssignment
+        seed.Enrollments.Add(new Enrollment
         {
             Id = Guid.NewGuid(),
-            StaffUserId = world.StaffUserId,
+            PersonId = world.StaffUserId,
             ExerciseId = world.ExerciseId,
             Role = staffRole,
             CreatedAt = DateTimeOffset.UtcNow,
@@ -92,11 +92,10 @@ internal static class RosterSeed
             ExerciseId = exerciseId,
             Username = username,
             DisplayName = displayName,
-            Role = role,
             Agency = agency,
             Email = email,
-            PersonaId = personaId,
             CreatedAt = DateTimeOffset.UtcNow,
+            Enrollment = new Enrollment { Id = Guid.NewGuid(), ExerciseId = exerciseId, Role = role, PersonaId = personaId },
         };
 
         await using var seed = fixture.CreateContext();

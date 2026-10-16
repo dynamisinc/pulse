@@ -53,7 +53,10 @@ public sealed class StaffIdentityRegistrationTests
         using var scope = provider.CreateScope();
 
         scope.ServiceProvider.GetRequiredService<IIdentityProvider>()
-            .Should().BeOfType<DynamisIdentityProvider>("the Phase-1 Dynamis provider is registered behind the seam");
+            .Should().BeOfType<PulsePasswordIdentityProvider>(
+                "identity-auth-roles/16: the Pulse password provider is the default, chained in front of the Dynamis allowlist");
+        scope.ServiceProvider.GetRequiredService<DynamisIdentityProvider>()
+            .Should().NotBeNull("the Dynamis allowlist stays registered as the chain's break-glass fallback");
     }
 
     [Fact]

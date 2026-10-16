@@ -223,10 +223,10 @@ internal sealed class InjectTestHost : IAsyncDisposable
             var staff = StaffTenantSeed.StaffUserFor(staffUserId);
             staff.DisplayName = "Casey Controller";
             db.StaffUsers.Add(staff);
-            db.StaffAssignments.Add(new StaffAssignment
+            db.Enrollments.Add(new Enrollment
             {
                 Id = Guid.NewGuid(),
-                StaffUserId = staffUserId,
+                PersonId = staffUserId,
                 ExerciseId = exerciseId,
                 Role = role,
                 CreatedAt = DateTimeOffset.UtcNow,
@@ -251,10 +251,10 @@ internal sealed class InjectTestHost : IAsyncDisposable
         var staff = StaffTenantSeed.StaffUserFor(staffUserId);
         staff.DisplayName = displayName;
         db.StaffUsers.Add(staff);
-        db.StaffAssignments.Add(new StaffAssignment
+        db.Enrollments.Add(new Enrollment
         {
             Id = Guid.NewGuid(),
-            StaffUserId = staffUserId,
+            PersonId = staffUserId,
             ExerciseId = exerciseId,
             Role = role,
             CreatedAt = DateTimeOffset.UtcNow,

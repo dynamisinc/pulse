@@ -248,9 +248,9 @@ public sealed class ExerciseReportSeed
             ExerciseId = exerciseId,
             Username = $"user-{id:N}",
             DisplayName = $"Player {id:N}",
-            Role = role,
             CreatedAt = PostExportSeed.WallStart,
             LastLoginAt = signedIn ? PostExportSeed.WallStart : null,
+            Enrollment = new Enrollment { Id = Guid.NewGuid(), ExerciseId = exerciseId, Role = role },
         });
         await seed.SaveChangesAsync();
         return id;

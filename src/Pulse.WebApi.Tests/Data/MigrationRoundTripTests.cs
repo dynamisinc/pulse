@@ -539,28 +539,27 @@ public class MigrationRoundTripTests
                 ExerciseId = exerciseId,
                 Username = "jferry",
                 DisplayName = "Jordan Ferry",
-                Role = "pio",
-                PersonaId = personaId,
                 ActingHumanId = "human-42",
                 CredentialHash = "hashed-credential",
                 CreatedAt = createdAt,
                 LastLoginAt = lastLoginAt,
                 FailedLoginCount = 2,
                 LockedOutUntil = lockedOutUntil,
+                Enrollment = new Enrollment { Id = Guid.NewGuid(), ExerciseId = exerciseId, Role = "pio", PersonaId = personaId },
             });
             await writeContext.SaveChangesAsync();
         }
 
         // IgnoreQueryFilters: persistence round-trip, not an isolation test (see Persona_RoundTrips).
         await using var readContext = _fixture.CreateContext();
-        var reloaded = await readContext.Accounts.IgnoreQueryFilters().SingleAsync(a => a.Id == accountId);
+        var reloaded = await readContext.Accounts.Include(account => account.Enrollment).IgnoreQueryFilters().SingleAsync(a => a.Id == accountId);
 
         reloaded.ExerciseId.Should().Be(exerciseId);
         reloaded.ExerciseId.Should().NotBe(Guid.Empty, "scoped rows must carry a real ExerciseId");
         reloaded.Username.Should().Be("jferry");
         reloaded.DisplayName.Should().Be("Jordan Ferry");
-        reloaded.Role.Should().Be("pio");
-        reloaded.PersonaId.Should().Be(personaId);
+        reloaded.Enrollment.Role.Should().Be("pio");
+        reloaded.Enrollment.PersonaId.Should().Be(personaId);
         reloaded.ActingHumanId.Should().Be("human-42");
         reloaded.CredentialHash.Should().Be("hashed-credential");
         reloaded.CreatedAt.Should().Be(createdAt);
@@ -633,6 +632,7 @@ public class MigrationRoundTripTests
                 DisplayName = "Jane Controller",
                 CreatedAt = createdAt,
                 LastLoginAt = lastLoginAt,
+                Person = new Person { Id = staffUserId, OrganizationId = Organization.DefaultOrganizationId, DisplayName = "Test Person", CreatedAt = DateTimeOffset.UtcNow },
             });
             await writeContext.SaveChangesAsync();
         }
@@ -648,7 +648,7 @@ public class MigrationRoundTripTests
     }
 
     [RequiresDockerFact]
-    public async Task StaffAssignment_RoundTrips()
+    public async Task Enrollment_RoundTrips()
     {
         var staffUserId = Guid.NewGuid();
         var exerciseId = Guid.NewGuid();
@@ -657,10 +657,18 @@ public class MigrationRoundTripTests
 
         await using (var writeContext = _fixture.CreateContext())
         {
-            writeContext.StaffAssignments.Add(new StaffAssignment
+            // identity-auth-roles/16: an enrollment's person is a real foreign key.
+            writeContext.People.Add(new Person
+            {
+                Id = staffUserId,
+                OrganizationId = Organization.DefaultOrganizationId,
+                DisplayName = "Round Trip Evaluator",
+                CreatedAt = createdAt,
+            });
+            writeContext.Enrollments.Add(new Enrollment
             {
                 Id = assignmentId,
-                StaffUserId = staffUserId,
+                PersonId = staffUserId,
                 ExerciseId = exerciseId,
                 Role = "evaluator",
                 CreatedAt = createdAt,
@@ -669,9 +677,9 @@ public class MigrationRoundTripTests
         }
 
         await using var readContext = _fixture.CreateContext();
-        var reloaded = await readContext.StaffAssignments.SingleAsync(a => a.Id == assignmentId);
+        var reloaded = await readContext.Enrollments.IgnoreQueryFilters().SingleAsync(a => a.Id == assignmentId);
 
-        reloaded.StaffUserId.Should().Be(staffUserId);
+        reloaded.PersonId.Should().Be(staffUserId);
         reloaded.ExerciseId.Should().Be(exerciseId);
         reloaded.Role.Should().Be("evaluator");
         reloaded.CreatedAt.Should().Be(createdAt);

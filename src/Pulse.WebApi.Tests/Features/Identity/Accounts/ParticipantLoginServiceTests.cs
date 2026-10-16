@@ -67,11 +67,11 @@ public sealed class ParticipantLoginServiceTests
             ExerciseId = exerciseId,
             Username = username,
             DisplayName = $"Display {username}",
-            Role = role,
             ActingHumanId = actingHumanId,
             CredentialHash = password is null ? null : _hasher.Hash(password),
             CreatedAt = DateTimeOffset.UtcNow,
             DisabledAt = disabledAt,
+            Enrollment = new Enrollment { Id = Guid.NewGuid(), ExerciseId = exerciseId, Role = role },
         };
 
         await using var seed = _fixture.CreateContext();

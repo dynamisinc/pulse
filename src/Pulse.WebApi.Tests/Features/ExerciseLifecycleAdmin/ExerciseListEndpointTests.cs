@@ -185,7 +185,7 @@ public sealed class ExerciseListEndpointTests
     {
         var world = await OrgAdminTestWorld.SeedAsync(_fixture, ExerciseAdminRoles.Controller);
 
-        // A second run in the controller's OWN tenant, with no StaffAssignment for the caller (or anyone).
+        // A second run in the controller's OWN tenant, with no Enrollment for the caller (or anyone).
         var unassigned = new Pulse.WebApi.Data.Entities.Exercise
         {
             Id = Guid.NewGuid(),
@@ -216,10 +216,10 @@ public sealed class ExerciseListEndpointTests
         listed.Select(row => row.ExerciseId).Should().Contain(
             unassigned.Id.ToString(),
             "DF-20 is deliberately org-wide: a controller sees every run its own organization owns, including "
-            + "one it holds no StaffAssignment on — the switcher's own-assignments read is the narrower view");
+            + "one it holds no Enrollment on — the switcher's own-assignments read is the narrower view");
         await using (var check = _fixture.CreateContext())
         {
-            var callerAssignedToIt = await check.StaffAssignments.AsNoTracking()
+            var callerAssignedToIt = await check.Enrollments.IgnoreQueryFilters().AsNoTracking()
                 .AnyAsync(a => a.ExerciseId == unassigned.Id);
             callerAssignedToIt.Should().BeFalse("the control: nobody is assigned to that run");
         }

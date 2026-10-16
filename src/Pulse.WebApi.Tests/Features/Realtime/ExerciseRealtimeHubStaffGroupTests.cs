@@ -186,6 +186,7 @@ public sealed class ExerciseRealtimeHubStaffGroupTests
                 Id = otherOrganizationId,
                 Name = $"Other customer {otherOrganizationId:N}",
                 CreatedAt = DateTimeOffset.UtcNow,
+                Slug = $"org-{Guid.NewGuid():N}",
             });
             await seed.SaveChangesAsync();
         }
@@ -266,10 +267,10 @@ public sealed class ExerciseRealtimeHubStaffGroupTests
             seed.StaffUsers.Add(StaffTenantSeed.StaffUserFor(staffUserId));
             foreach (var exerciseId in assignedTo)
             {
-                seed.StaffAssignments.Add(new StaffAssignment
+                seed.Enrollments.Add(new Enrollment
                 {
                     Id = Guid.NewGuid(),
-                    StaffUserId = staffUserId,
+                    PersonId = staffUserId,
                     ExerciseId = exerciseId,
                     Role = "controller",
                     CreatedAt = DateTimeOffset.UtcNow,

@@ -376,10 +376,10 @@ public sealed class ModerationSeeder
         seed.StaffUsers.Add(StaffTenantSeed.StaffUserFor(staffUserId));
         foreach (var (exerciseId, role) in assignments)
         {
-            seed.StaffAssignments.Add(new StaffAssignment
+            seed.Enrollments.Add(new Enrollment
             {
                 Id = Guid.NewGuid(),
-                StaffUserId = staffUserId,
+                PersonId = staffUserId,
                 ExerciseId = exerciseId,
                 Role = role,
                 CreatedAt = DateTimeOffset.UtcNow,

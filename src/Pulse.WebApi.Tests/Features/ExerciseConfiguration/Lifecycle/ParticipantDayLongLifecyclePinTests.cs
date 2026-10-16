@@ -61,8 +61,8 @@ public sealed class ParticipantDayLongLifecyclePinTests
                 ExerciseId = exerciseId,
                 Username = $"pin{accountId:N}"[..30],
                 DisplayName = "Pat Participant",
-                Role = "participant",
                 CreatedAt = DateTimeOffset.UtcNow,
+                Enrollment = new Enrollment { Id = Guid.NewGuid(), ExerciseId = exerciseId, Role = "participant" },
             });
             await seed.SaveChangesAsync();
         }

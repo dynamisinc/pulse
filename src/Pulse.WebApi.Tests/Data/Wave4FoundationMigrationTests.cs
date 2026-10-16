@@ -57,7 +57,10 @@ public class Wave4FoundationMigrationTests
         index.Should().BeGreaterThan(0, "DemoFeedbackWave4RuntimeAndEdits exists as Wave 4's one migration");
         migrations.Count(m => m.EndsWith("_" + MigrationName, StringComparison.Ordinal)).Should().Be(1);
         migrations[index - 1].Should().Be(PreviousMigration, "it is applied directly on top of the Wave 0 migration");
-        index.Should().Be(migrations.Count - 1, "it is the latest migration — stories 18-25 never add one");
+        // identity-auth-roles/16: AdminIdentityFoundation (the A1 seam migration, orchestrator-cleared) now follows it;
+        // Wave 4's stories 18-25 still never added one of their own.
+        migrations.Skip(index + 1).Should().AllSatisfy(
+            later => later.Should().EndWith("_AdminIdentityFoundation", "the only migration after Wave 4's is the A1 seam"));
     }
 
     [Fact]

@@ -81,6 +81,8 @@ public sealed class BootstrapServiceTests
             "live",
             "a bootstrapped exercise is created running — exercise-configuration story 01a moved that seed onto " +
             "the COR-032 vocabulary, where the legacy 'active' is spelled 'live'");
+        exercise.FirstLiveAt.Should().NotBeNull(
+            "identity-auth-roles/16: an exercise created directly in live has been live since it was created");
     }
 
     /// <summary>
@@ -315,7 +317,7 @@ public sealed class BootstrapServiceTests
             });
 
             login.Outcome.Should().Be(StaffLoginOutcome.Authenticated,
-                "bootstrapping the StaffAssignment unblocks POST /api/auth/staff/login for the allowlisted identity");
+                "bootstrapping the Enrollment unblocks POST /api/auth/staff/login for the allowlisted identity");
         }
 
         await using (var loginContext = _fixture.CreateContext())
@@ -383,8 +385,8 @@ public sealed class BootstrapServiceTests
         await using var read = _fixture.CreateContext();
         (await read.StaffUsers.CountAsync(u => u.ExternalSubject == allowlisted.ExternalSubject))
             .Should().Be(1, "the StaffUser is not duplicated across re-runs");
-        (await read.StaffAssignments.CountAsync(a => a.StaffUserId == firstStaffUserId && a.ExerciseId == exerciseId))
-            .Should().Be(1, "the StaffAssignment is not duplicated across re-runs");
+        (await read.Enrollments.IgnoreQueryFilters().CountAsync(a => a.PersonId == firstStaffUserId && a.ExerciseId == exerciseId))
+            .Should().Be(1, "the Enrollment is not duplicated across re-runs");
     }
 
     [RequiresDockerFact]
@@ -405,6 +407,7 @@ public sealed class BootstrapServiceTests
                 ExternalSubject = subject,
                 DisplayName = "Prior Login",
                 CreatedAt = DateTimeOffset.UtcNow,
+                Person = new Person { Id = preExistingId, OrganizationId = Organization.DefaultOrganizationId, DisplayName = "Test Person", CreatedAt = DateTimeOffset.UtcNow },
             });
             await seed.SaveChangesAsync();
         }
@@ -714,15 +717,21 @@ public sealed class BootstrapServiceTests
 
         await using (var read = _fixture.CreateContext())
         {
-            var assignment = await read.StaffAssignments.AsNoTracking()
+            var assignment = await read.Enrollments.IgnoreQueryFilters().AsNoTracking()
                 .SingleAsync(a => a.ExerciseId == exerciseId);
 
             // The drift guard that actually matters. Both server-side role sets compare case-insensitively, so a
             // lowercase "orgadmin" would authorize perfectly well here and then fail closed to /login in the UI,
             // because the frontend's isExerciseRole() tests EXACT membership of the frozen six-role vocabulary
             // (core/auth/roles.ts). Asserting the persisted spelling is the only place that split-brain is visible.
-            assignment.Role.Should().Be(ExerciseAdminRoles.OrgAdmin);
-            assignment.Role.Should().Be("orgAdmin", "the frozen Session.role vocabulary is camelCase");
+            //
+            // identity-auth-roles/16: orgAdmin is no longer an exercise role. The grant lands on the person, in the exact
+            // camelCase spelling (the org-scope Session.role vocabulary), and the in-exercise access is a planner
+            // enrollment — exactly how the AdminIdentityFoundation migration maps a pre-existing orgAdmin assignment.
+            assignment.Role.Should().Be("planner");
+            var person = await read.People.AsNoTracking().SingleAsync(p => p.Id == assignment.PersonId);
+            person.OrgRole.Should().Be(ExerciseAdminRoles.OrgAdmin);
+            person.OrgRole.Should().Be("orgAdmin", "the frozen Session.role vocabulary is camelCase");
         }
     }
 

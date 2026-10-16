@@ -52,6 +52,7 @@ public sealed class StaffAssignmentServiceTests
             ExternalSubject = subject,
             DisplayName = "Staffer",
             CreatedAt = DateTimeOffset.UtcNow,
+            Person = new Person { Id = staffUserId, OrganizationId = Organization.DefaultOrganizationId, DisplayName = "Test Person", CreatedAt = DateTimeOffset.UtcNow },
         });
         await seed.SaveChangesAsync();
     }
@@ -59,10 +60,10 @@ public sealed class StaffAssignmentServiceTests
     private async Task SeedAssignmentAsync(Guid staffUserId, Guid exerciseId, string role)
     {
         await using var seed = _fixture.CreateContext();
-        seed.StaffAssignments.Add(new StaffAssignment
+        seed.Enrollments.Add(new Enrollment
         {
             Id = Guid.NewGuid(),
-            StaffUserId = staffUserId,
+            PersonId = staffUserId,
             ExerciseId = exerciseId,
             Role = role,
             CreatedAt = DateTimeOffset.UtcNow,
@@ -149,7 +150,7 @@ public sealed class StaffAssignmentServiceTests
         // a staff user provisioned but not yet assigned to anything must not error or fail closed here.
         var staffUserId = Guid.NewGuid();
         await SeedStaffUserAsync(staffUserId, $"idp|{staffUserId:N}");
-        // Deliberately no StaffAssignment rows seeded.
+        // Deliberately no Enrollment rows seeded.
 
         await using var context = _fixture.CreateContext();
         var service = ServiceFor(context, staffUserId, Guid.NewGuid());

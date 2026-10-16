@@ -186,8 +186,8 @@ public class WriteGuardTests
             ExerciseId = Guid.Empty,
             Username = $"user_{accountId:N}",
             DisplayName = "This should never reach the database.",
-            Role = "participant",
             CreatedAt = DateTimeOffset.UtcNow,
+            Enrollment = new Enrollment { Id = Guid.NewGuid(), ExerciseId = Guid.Empty, Role = "participant" },
         });
 
         var act = async () => await writeContext.SaveChangesAsync();
@@ -242,8 +242,8 @@ public class WriteGuardTests
                 ExerciseId = exerciseId,
                 Username = $"user_{accountId:N}",
                 DisplayName = "A validly-scoped account saves fine.",
-                Role = "participant",
                 CreatedAt = DateTimeOffset.UtcNow,
+                Enrollment = new Enrollment { Id = Guid.NewGuid(), ExerciseId = exerciseId, Role = "participant" },
             });
             writeContext.SharedCredentials.Add(new SharedCredential
             {

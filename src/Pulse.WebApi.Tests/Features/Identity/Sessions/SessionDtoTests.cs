@@ -51,8 +51,8 @@ public class SessionDtoTests
         using var document = JsonDocument.Parse(json);
 
         document.RootElement.EnumerateObject().Select(p => p.Name).Should().BeEquivalentTo(
-            ["exerciseId", "accountId", "role", "personaId", "actingHumanId", "isReadOnly", "expiresAt"],
-            "the frozen Session wire shape has exactly these seven camelCase keys, no more, no fewer");
+            ["exerciseId", "accountId", "role", "personaId", "actingHumanId", "isReadOnly", "expiresAt", "personId", "world", "scope", "isLead"],
+            "the Session wire shape (frozen seven + the identity-auth-roles/16 additions) has exactly these camelCase keys");
     }
 
     [Fact]
@@ -69,8 +69,8 @@ public class SessionDtoTests
             "the frozen client validator accepts `undefined | string` but rejects `null` for personaId, so an " +
             "absent persona must OMIT the key entirely from the JSON — not serialize it as a null value");
         keys.Should().BeEquivalentTo(
-            ["exerciseId", "accountId", "role", "actingHumanId", "isReadOnly", "expiresAt"],
-            "the remaining six keys must still be present when personaId is omitted");
+            ["exerciseId", "accountId", "role", "actingHumanId", "isReadOnly", "expiresAt", "personId", "world", "scope", "isLead"],
+            "every other key must still be present when personaId is omitted");
     }
 
     [Theory]

@@ -60,7 +60,7 @@ public sealed class StaffOrganizationBoundaryTests
         assignments!.Select(a => a.ExerciseId).Should().BeEquivalentTo(
             [world.OwnExercise.Id.ToString()],
             "a staff human spans EXERCISES but never CUSTOMERS — the switcher must list only their own "
-            + "organization's runs, even though a StaffAssignment row exists for the other customer's");
+            + "organization's runs, even though a Enrollment row exists for the other customer's");
     }
 
     [RequiresDockerFact]
@@ -259,12 +259,14 @@ public sealed class StaffOrganizationBoundaryTests
             Id = ownOrganizationId,
             Name = $"Customer X {ownOrganizationId:N}",
             CreatedAt = DateTimeOffset.UtcNow,
+            Slug = $"org-{Guid.NewGuid():N}",
         });
         seed.Organizations.Add(new Organization
         {
             Id = otherOrganizationId,
             Name = $"Customer Y {otherOrganizationId:N}",
             CreatedAt = DateTimeOffset.UtcNow,
+            Slug = $"org-{Guid.NewGuid():N}",
         });
         seed.Exercises.Add(ownExercise);
         seed.Exercises.Add(otherCustomerExercise);
@@ -275,9 +277,10 @@ public sealed class StaffOrganizationBoundaryTests
             ExternalSubject = externalSubject,
             DisplayName = "Cross-Tenant Controller",
             CreatedAt = DateTimeOffset.UtcNow,
+            Person = new Person { Id = staffUserId, OrganizationId = ownOrganizationId, DisplayName = "Test Person", CreatedAt = DateTimeOffset.UtcNow },
         });
-        seed.StaffAssignments.Add(NewAssignment(staffUserId, ownExercise.Id));
-        seed.StaffAssignments.Add(NewAssignment(staffUserId, otherCustomerExercise.Id));
+        seed.Enrollments.Add(NewAssignment(staffUserId, ownExercise.Id));
+        seed.Enrollments.Add(NewAssignment(staffUserId, otherCustomerExercise.Id));
         await seed.SaveChangesAsync();
 
         return new CrossTenantWorld(
@@ -317,10 +320,10 @@ public sealed class StaffOrganizationBoundaryTests
         Status = "active",
     };
 
-    private static StaffAssignment NewAssignment(Guid staffUserId, Guid exerciseId) => new()
+    private static Enrollment NewAssignment(Guid staffUserId, Guid exerciseId) => new()
     {
         Id = Guid.NewGuid(),
-        StaffUserId = staffUserId,
+        PersonId = staffUserId,
         ExerciseId = exerciseId,
         Role = "controller",
         CreatedAt = DateTimeOffset.UtcNow,

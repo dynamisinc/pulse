@@ -65,11 +65,12 @@ public sealed class StaffLoginServiceTests
             ExternalSubject = subject,
             DisplayName = displayName,
             CreatedAt = DateTimeOffset.UtcNow,
+            Person = new Person { Id = staffUserId, OrganizationId = Organization.DefaultOrganizationId, DisplayName = "Test Person", CreatedAt = DateTimeOffset.UtcNow },
         });
-        seed.StaffAssignments.Add(new StaffAssignment
+        seed.Enrollments.Add(new Enrollment
         {
             Id = Guid.NewGuid(),
-            StaffUserId = staffUserId,
+            PersonId = staffUserId,
             ExerciseId = exerciseId,
             Role = role,
             CreatedAt = DateTimeOffset.UtcNow,

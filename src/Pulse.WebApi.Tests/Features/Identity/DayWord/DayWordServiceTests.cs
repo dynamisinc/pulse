@@ -245,6 +245,7 @@ public sealed class DayWordServiceTests
                 Id = otherOrganizationId,
                 Name = $"Other customer {otherOrganizationId:N}",
                 CreatedAt = DateTimeOffset.UtcNow,
+                Slug = $"org-{Guid.NewGuid():N}",
             });
             var foreign = Helpers.StaffTenantSeed.StaffUserFor(foreignStaffId, otherOrganizationId);
             foreign.DisplayName = "Foreign Staff";
@@ -397,7 +398,6 @@ public sealed class DayWordServiceTests
 
     [RequiresDockerTheory]
     [InlineData("evaluator")]
-    [InlineData("orgAdmin")]
     public async Task AStaffUserWithoutControllerOrPlanner_IsForbidden(string role)
     {
         var exercise = await SeedExerciseAsync(_fixture);

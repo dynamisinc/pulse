@@ -152,6 +152,7 @@ internal static class OrgAdminSeedTestKit
     {
         Id = id,
         Name = $"Seeder Customer {id:N}",
+        Slug = $"org-{id:N}",
         CreatedAt = DateTimeOffset.UtcNow,
     };
 
@@ -172,24 +173,31 @@ internal static class OrgAdminSeedTestKit
     /// <param name="organizationId">The owning tenant.</param>
     /// <param name="externalSubject">The IdP subject (uniquely indexed).</param>
     /// <returns>An unsaved staff-user row.</returns>
-    public static StaffUser NewStaffUser(Guid organizationId, string externalSubject) => new()
+    public static StaffUser NewStaffUser(Guid organizationId, string externalSubject)
     {
-        Id = Guid.NewGuid(),
-        OrganizationId = organizationId,
-        ExternalSubject = externalSubject,
-        DisplayName = $"Pre-seeded Human {Guid.NewGuid():N}",
-        CreatedAt = DateTimeOffset.UtcNow,
-    };
+        var id = Guid.NewGuid();
+        return new StaffUser
+        {
+            Id = id,
+            OrganizationId = organizationId,
+            ExternalSubject = externalSubject,
+            DisplayName = $"Pre-seeded Human {id:N}",
+            CreatedAt = DateTimeOffset.UtcNow,
+
+            // identity-auth-roles/16: the staff facet shares its Person's primary key.
+            Person = new Person { Id = id, OrganizationId = organizationId, DisplayName = $"Pre-seeded Human {id:N}", CreatedAt = DateTimeOffset.UtcNow },
+        };
+    }
 
     /// <summary>An assignment granting <paramref name="role"/> on one exercise.</summary>
     /// <param name="staffUserId">The staff human.</param>
     /// <param name="exerciseId">The exercise.</param>
     /// <param name="role">The role literal stored verbatim.</param>
     /// <returns>An unsaved assignment row.</returns>
-    public static StaffAssignment NewAssignment(Guid staffUserId, Guid exerciseId, string role) => new()
+    public static Enrollment NewAssignment(Guid staffUserId, Guid exerciseId, string role) => new()
     {
         Id = Guid.NewGuid(),
-        StaffUserId = staffUserId,
+        PersonId = staffUserId,
         ExerciseId = exerciseId,
         Role = role,
         CreatedAt = DateTimeOffset.UtcNow,

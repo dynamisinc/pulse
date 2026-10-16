@@ -293,8 +293,8 @@ public sealed class PostExportSeed
             ExerciseId = exerciseId,
             Username = $"user-{id:N}",
             DisplayName = displayName,
-            Role = "participant",
             CreatedAt = WallStart,
+            Enrollment = new Enrollment { Id = Guid.NewGuid(), ExerciseId = exerciseId, Role = "participant" },
         });
         await seed.SaveChangesAsync();
         return id;
@@ -325,10 +325,10 @@ public sealed class PostExportSeed
         seed.StaffUsers.Add(staffUser);
         foreach (var (exerciseId, role) in assignments)
         {
-            seed.StaffAssignments.Add(new StaffAssignment
+            seed.Enrollments.Add(new Enrollment
             {
                 Id = Guid.NewGuid(),
-                StaffUserId = staffUserId,
+                PersonId = staffUserId,
                 ExerciseId = exerciseId,
                 Role = role,
                 CreatedAt = DateTimeOffset.UtcNow,

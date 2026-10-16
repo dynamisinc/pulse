@@ -93,10 +93,9 @@ public sealed class ParticipantPersonaBindingServiceTests
             ExerciseId = seeded.ExerciseId,
             Username = seeded.Username,
             DisplayName = "Participant One",
-            Role = "participant",
-            PersonaId = null,
             CredentialHash = _participantHasher.Hash(Password),
             CreatedAt = DateTimeOffset.UtcNow,
+            Enrollment = new Enrollment { Id = Guid.NewGuid(), ExerciseId = seeded.ExerciseId, Role = "participant", PersonaId = null },
         });
         await context.SaveChangesAsync();
 
@@ -129,7 +128,7 @@ public sealed class ParticipantPersonaBindingServiceTests
 
         await using (var read = _fixture.CreateContext(ScopeFor(seeded.ExerciseId)))
         {
-            (await read.Accounts.AsNoTracking().SingleAsync(a => a.Id == seeded.AccountId)).PersonaId
+            (await read.Accounts.Include(account => account.Enrollment).AsNoTracking().SingleAsync(a => a.Id == seeded.AccountId)).Enrollment.PersonaId
                 .Should().Be(seeded.FirstPersonaId, "the binding is persisted onto Account.PersonaId (AC2)");
         }
 
@@ -226,7 +225,7 @@ public sealed class ParticipantPersonaBindingServiceTests
         }
 
         await using var read = _fixture.CreateContext(ScopeFor(seeded.ExerciseId));
-        (await read.Accounts.AsNoTracking().SingleAsync(a => a.Id == seeded.AccountId)).PersonaId
+        (await read.Accounts.Include(account => account.Enrollment).AsNoTracking().SingleAsync(a => a.Id == seeded.AccountId)).Enrollment.PersonaId
             .Should().Be(seeded.FirstPersonaId, "the binding is unchanged after the idempotent re-run");
     }
 
@@ -265,7 +264,7 @@ public sealed class ParticipantPersonaBindingServiceTests
         }
 
         await using var read = _fixture.CreateContext(ScopeFor(seeded.ExerciseId));
-        (await read.Accounts.AsNoTracking().SingleAsync(a => a.Id == seeded.AccountId)).PersonaId
+        (await read.Accounts.Include(account => account.Enrollment).AsNoTracking().SingleAsync(a => a.Id == seeded.AccountId)).Enrollment.PersonaId
             .Should().Be(seeded.SecondPersonaId);
     }
 
@@ -294,7 +293,7 @@ public sealed class ParticipantPersonaBindingServiceTests
 
         await using var read = _fixture.CreateContext();
 
-        (await read.Accounts.IgnoreQueryFilters().SingleAsync(a => a.Id == exerciseA.AccountId)).PersonaId
+        (await read.Accounts.Include(account => account.Enrollment).IgnoreQueryFilters().SingleAsync(a => a.Id == exerciseA.AccountId)).Enrollment.PersonaId
             .Should().BeNull("the rejected cross-exercise bind wrote nothing — the account is still unbound");
 
         // The persona DOES exist (in exercise B), so the rejection is the exercise predicate closing the door.
@@ -333,7 +332,7 @@ public sealed class ParticipantPersonaBindingServiceTests
         }
 
         await using var read = _fixture.CreateContext();
-        (await read.Accounts.IgnoreQueryFilters().SingleAsync(a => a.Id == exerciseA.AccountId)).PersonaId
+        (await read.Accounts.Include(account => account.Enrollment).IgnoreQueryFilters().SingleAsync(a => a.Id == exerciseA.AccountId)).Enrollment.PersonaId
             .Should().BeNull("the account is still unbound after the rejected cross-exercise id bind");
     }
 
@@ -380,7 +379,7 @@ public sealed class ParticipantPersonaBindingServiceTests
         }
 
         await using var read = _fixture.CreateContext();
-        (await read.Accounts.IgnoreQueryFilters().AnyAsync(a => a.Username == unknown))
+        (await read.Accounts.Include(account => account.Enrollment).IgnoreQueryFilters().AnyAsync(a => a.Username == unknown))
             .Should().BeFalse("no account is ever created by the binding endpoint");
     }
 
@@ -407,7 +406,7 @@ public sealed class ParticipantPersonaBindingServiceTests
             "another exercise's account is invisible to a bind on this host — the endpoint can never reach across exercises");
 
         await using var read = _fixture.CreateContext();
-        (await read.Accounts.IgnoreQueryFilters().SingleAsync(a => a.Id == exerciseB.AccountId)).PersonaId
+        (await read.Accounts.Include(account => account.Enrollment).IgnoreQueryFilters().SingleAsync(a => a.Id == exerciseB.AccountId)).Enrollment.PersonaId
             .Should().BeNull("exercise B's account was not touched by a call made against exercise A's host");
     }
 
@@ -456,7 +455,7 @@ public sealed class ParticipantPersonaBindingServiceTests
         }
 
         await using var read = _fixture.CreateContext();
-        (await read.Accounts.IgnoreQueryFilters().SingleAsync(a => a.Id == seeded.AccountId)).PersonaId
+        (await read.Accounts.Include(account => account.Enrollment).IgnoreQueryFilters().SingleAsync(a => a.Id == seeded.AccountId)).Enrollment.PersonaId
             .Should().BeNull("a rejected call must write nothing at all");
     }
 

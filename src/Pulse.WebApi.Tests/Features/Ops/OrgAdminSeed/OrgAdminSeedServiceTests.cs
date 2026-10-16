@@ -46,9 +46,13 @@ public sealed class OrgAdminSeedServiceTests
         {
             var incumbent = OrgAdminSeedTestKit.NewStaffUser(world.OrganizationId, $"idp|{incumbentId:N}");
             incumbent.Id = incumbentId;
+            incumbent.Person!.Id = incumbentId;
+
+            // identity-auth-roles/16: the org-admin grant is Person.OrgRole; the in-exercise access a planner enrollment.
+            incumbent.Person.OrgRole = ExerciseAdminRoles.OrgAdmin;
             seed.StaffUsers.Add(incumbent);
-            seed.StaffAssignments.Add(OrgAdminSeedTestKit.NewAssignment(
-                incumbentId, world.ExerciseIds[0], ExerciseAdminRoles.OrgAdmin));
+            seed.Enrollments.Add(OrgAdminSeedTestKit.NewAssignment(
+                incumbentId, world.ExerciseIds[0], ExerciseAdminRoles.Planner));
             await seed.SaveChangesAsync();
         }
 
@@ -80,8 +84,13 @@ public sealed class OrgAdminSeedServiceTests
         var assignments = await AssignmentsOfAsync(world.StaffUserId);
         assignments.Should().HaveCount(2);
         assignments.Should().OnlyContain(
-            a => a.Role == ExerciseAdminRoles.OrgAdmin,
-            "the role literal is the frozen frontend vocabulary, emitted in camelCase exactly as roles.ts spells it");
+            a => a.Role == ExerciseAdminRoles.Planner,
+            "identity-auth-roles/16: the in-exercise access is a planner enrollment (orgAdmin is no exercise role)");
+        await using (var read = _fixture.CreateContext())
+        {
+            (await read.People.SingleAsync(p => p.Id == world.StaffUserId)).OrgRole.Should().Be(
+                ExerciseAdminRoles.OrgAdmin, "the org-admin grant lands on the person, in the camelCase roles.ts spelling");
+        }
         assignments.Select(a => a.ExerciseId).Should().BeEquivalentTo(world.ExerciseIds);
     }
 
@@ -205,10 +214,13 @@ public sealed class OrgAdminSeedServiceTests
 
         await using (var delete = _fixture.CreateContext())
         {
-            var assignments = await delete.StaffAssignments
-                .Where(a => a.StaffUserId == world.StaffUserId)
+            var assignments = await delete.Enrollments.IgnoreQueryFilters()
+                .Where(a => a.PersonId == world.StaffUserId)
                 .ToListAsync();
-            delete.StaffAssignments.RemoveRange(assignments);
+            delete.Enrollments.RemoveRange(assignments);
+
+            // identity-auth-roles/16: the org-admin grant itself is Person.OrgRole — deleting it again is clearing that.
+            (await delete.People.SingleAsync(p => p.Id == world.StaffUserId)).OrgRole = null;
             await delete.SaveChangesAsync();
         }
 
@@ -252,7 +264,7 @@ public sealed class OrgAdminSeedServiceTests
 
         await using (var seed = _fixture.CreateContext())
         {
-            seed.StaffAssignments.Add(OrgAdminSeedTestKit.NewAssignment(
+            seed.Enrollments.Add(OrgAdminSeedTestKit.NewAssignment(
                 world.StaffUserId, world.ExerciseIds[0], ExerciseAdminRoles.Controller));
             await seed.SaveChangesAsync();
         }
@@ -347,12 +359,12 @@ public sealed class OrgAdminSeedServiceTests
     }
 
     /// <summary>Reads back every assignment held by one staff human, independently of the seeder's context.</summary>
-    private async Task<List<StaffAssignment>> AssignmentsOfAsync(Guid staffUserId)
+    private async Task<List<Enrollment>> AssignmentsOfAsync(Guid staffUserId)
     {
         await using var read = _fixture.CreateContext();
-        return await read.StaffAssignments
+        return await read.Enrollments.IgnoreQueryFilters()
             .AsNoTracking()
-            .Where(a => a.StaffUserId == staffUserId)
+            .Where(a => a.PersonId == staffUserId)
             .ToListAsync();
     }
 

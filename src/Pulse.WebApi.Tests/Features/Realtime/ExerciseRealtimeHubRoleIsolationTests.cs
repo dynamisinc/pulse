@@ -170,6 +170,49 @@ public sealed class ExerciseRealtimeHubRoleIsolationTests
     }
 
     [RequiresDockerFact]
+    public async Task RevokingTheGrant_CutsAStaffConnectionOpenedBeforeIt_SoItReceivesNoFurtherStaffBroadcast()
+    {
+        // identity-auth-roles/16 (Copilot review fold A): staff membership is checked only at connect, so the
+        // grant-revoke rule must also cut the live connection. A controller connects, a planner removes the
+        // controller's enrollment, and the controller's connection is aborted and out of the staff group.
+        var kit = new Pulse.WebApi.Tests.Features.Identity.Enrollments.EnrollmentTestKit(_fixture);
+        var exercise = await SeedExerciseAsync();
+        var org = Organization.DefaultOrganizationId;
+        var (planner, _) = await kit.SeedStaffAsync(org, exercise.Id, "planner");
+        var (controller, controllerEnrollment) = await kit.SeedStaffAsync(org, exercise.Id, "controller");
+        var (plannerSession, _) = await kit.SeedStaffSessionAsync(planner, exercise.Id, "planner");
+        var (_, controllerToken) = await kit.SeedStaffSessionAsync(controller, exercise.Id, "controller");
+
+        using var host = new RealtimeRoleHost(_fixture.ConnectionString!);
+        await using var staff = await ConnectAsync(host, exercise.Hostname, controllerToken);
+        await staff.WaitUntilInGroupAsync(host, $"exercise:{exercise.Id}:staff");
+        var before = await BroadcastReviewItemAsync(host, exercise.Id);
+        await staff.WaitForAsync(ReviewItemChanged, before);
+
+        var closed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        staff.Connection.Closed += _ =>
+        {
+            closed.TrySetResult();
+            return Task.CompletedTask;
+        };
+
+        var revoker = host.Services.GetRequiredService<ISessionConnectionRevoker>();
+        var (service, context) = kit.ServiceFor(plannerSession, planner, org, exercise.Id, revoker);
+        await using (context)
+        {
+            (await service.RevokeAsync(controllerEnrollment)).Outcome.Should().Be(
+                Pulse.WebApi.Features.Identity.Enrollments.EnrollmentOutcome.Ok);
+        }
+
+        (await Task.WhenAny(closed.Task, Task.Delay(DeliveryTimeout))).Should().Be(
+            closed.Task, "the revoked session's live hub connection is aborted");
+
+        var after = await BroadcastReviewItemAsync(host, exercise.Id);
+        await Task.Delay(250);
+        staff.Frames.Should().NotContain((ReviewItemChanged, after), "a revoked grant receives no further staff broadcast");
+    }
+
+    [RequiresDockerFact]
     public async Task ExpiredStaffToken_IsRejected_NeverConnects()
     {
         // B5 AC6: an invalid/expired token yields a participant-or-rejected connection, never staff. Here the
@@ -344,10 +387,10 @@ public sealed class ExerciseRealtimeHubRoleIsolationTests
         seed.StaffUsers.Add(StaffTenantSeed.StaffUserFor(staffUserId));
         foreach (var exerciseId in assignedTo)
         {
-            seed.StaffAssignments.Add(new StaffAssignment
+            seed.Enrollments.Add(new Enrollment
             {
                 Id = Guid.NewGuid(),
-                StaffUserId = staffUserId,
+                PersonId = staffUserId,
                 ExerciseId = exerciseId,
                 Role = "controller",
                 CreatedAt = DateTimeOffset.UtcNow,
@@ -451,6 +494,8 @@ public sealed class ExerciseRealtimeHubRoleIsolationTests
 
             Frames.Should().Contain((eventName, id), $"{eventName} {id} should have been delivered within {DeliveryTimeout}");
         }
+
+        public HubConnection Connection => _connection;
 
         public ValueTask DisposeAsync() => _connection.DisposeAsync();
 

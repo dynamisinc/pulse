@@ -201,9 +201,9 @@ public sealed class LoginRequestLimitTests
             ExerciseId = exerciseId,
             Username = username,
             DisplayName = "Kestrel User",
-            Role = "participant",
             CredentialHash = new ParticipantPasswordHasher().Hash(Password),
             CreatedAt = DateTimeOffset.UtcNow,
+            Enrollment = new Enrollment { Id = Guid.NewGuid(), ExerciseId = exerciseId, Role = "participant" },
         });
         await seed.SaveChangesAsync();
         return (host, username);
