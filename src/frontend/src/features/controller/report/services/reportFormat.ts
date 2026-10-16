@@ -78,25 +78,79 @@ export interface PostGroup {
   readonly key: string
   readonly label: string
   readonly posts: readonly ReportPost[]
+  /** Ids of the posts in this group that print indented under their thread root (DF-47). */
+  readonly nestedIds: ReadonlySet<string>
 }
 
 /**
- * Groups posts (already in scenario order) under their scenario half-hour. A run that crosses
- * midnight keeps separate groups per day (the label then carries the date).
+ * Orders posts into threads (DF-47): roots by scenario time (ties keep the given order), each
+ * followed by its listed descendants by scenario time. A post is NESTED only when its thread
+ * root is really in the list, is not itself and is a root (one indent level at any depth); any
+ * other post is treated as its own root and prints at its own time, so no post is ever dropped.
+ * This does not trust the server's order: it re-derives the thread order from `threadRootId`.
+ */
+export function orderThreads(
+  posts: readonly ReportPost[],
+): { post: ReportPost; nested: boolean }[] {
+  const byId = new Map(posts.map(post => [post.id, post]))
+  const indexOf = new Map(posts.map((post, index) => [post.id, index]))
+  const byTime = (a: ReportPost, b: ReportPost) =>
+    a.scenarioAt.localeCompare(b.scenarioAt) || (indexOf.get(a.id) ?? 0) - (indexOf.get(b.id) ?? 0)
+  // Nested only under a listed post that is itself a root, so a malformed chain or cycle can
+  // never hide a post: it prints as a root instead.
+  const isNested = (post: ReportPost) => {
+    const root = byId.get(post.threadRootId)
+    return post.threadRootId !== post.id && root !== undefined && root.threadRootId === root.id
+  }
+
+  const children = new Map<string, ReportPost[]>()
+  const roots: ReportPost[] = []
+  for (const post of posts) {
+    if (isNested(post)) {
+      const list = children.get(post.threadRootId) ?? []
+      list.push(post)
+      children.set(post.threadRootId, list)
+    } else {
+      roots.push(post)
+    }
+  }
+  roots.sort(byTime)
+  const ordered: { post: ReportPost; nested: boolean }[] = []
+  for (const root of roots) {
+    ordered.push({ post: root, nested: false })
+    for (const child of (children.get(root.id) ?? []).sort(byTime)) {
+      ordered.push({ post: child, nested: true })
+    }
+  }
+  return ordered
+}
+
+/**
+ * Groups posts under their scenario half-hour. A thread stays whole in its ROOT's group (a reply
+ * never moves the thread). A run that crosses midnight keeps separate groups per day (the label
+ * then carries the date).
  */
 export function groupByHalfHour(posts: readonly ReportPost[]): PostGroup[] {
-  const groups: { key: string; label: string; posts: ReportPost[] }[] = []
+  const groups: { key: string; label: string; posts: ReportPost[]; nestedIds: Set<string> }[] = []
   const days = new Set(posts.map(post => dateOf(post.scenarioAt)))
-  for (const post of posts) {
-    const half = halfHourOf(timeOf(post.scenarioAt))
-    const day = dateOf(post.scenarioAt)
+  const rootAt = new Map(posts.map(post => [post.id, post.scenarioAt]))
+  for (const { post, nested } of orderThreads(posts)) {
+    const at = nested ? rootAt.get(post.threadRootId) ?? post.scenarioAt : post.scenarioAt
+    const half = halfHourOf(timeOf(at))
+    const day = dateOf(at)
     const key = `${day} ${half}`
-    const last = groups[groups.length - 1]
-    if (last !== undefined && last.key === key) {
-      last.posts.push(post)
-    } else {
-      groups.push({ key, label: days.size > 1 ? `${formatDay(day)} · ${half}` : half, posts: [post] })
+    let group = groups[groups.length - 1]
+    if (group === undefined || group.key !== key) {
+      group = {
+        key,
+        label: days.size > 1 ? `${formatDay(day)} · ${half}` : half,
+        posts: [],
+        nestedIds: new Set<string>(),
+      }
+      groups.push(group)
     }
+    group.posts.push(post)
+    if (nested) group.nestedIds.add(post.id)
   }
   return groups
 }
@@ -105,6 +159,23 @@ export function groupByHalfHour(posts: readonly ReportPost[]): PostGroup[] {
 export function formatDuration(seconds: number): string {
   const total = Math.max(0, Math.round(seconds))
   return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`
+}
+
+/**
+ * A printed scenario time. On a multi-day report (`spansMultipleDays`) it carries its date,
+ * "15 Oct 06:39" (the year is the header's job); otherwise just "06:39". Read as written.
+ */
+export function formatStamp(stamp: string, spansMultipleDays: boolean): string {
+  if (!spansMultipleDays) return timeOf(stamp)
+  const parts = parseYmd(stamp)
+  const month = parts === null ? undefined : MONTHS[parts.m - 1]
+  if (parts === null || month === undefined) return stamp
+  return `${parts.d} ${month} ${timeOf(stamp)}`
+}
+
+/** An inject's printed name: the MSEL ref before the title only when there is one. */
+export function injectName(ref: string | null, title: string): string {
+  return ref !== null && ref.length > 0 ? `${refLabel(ref)} ${title}` : title
 }
 
 /** "#4" for a bare number, otherwise the ref as written ("I-04"). */
@@ -171,8 +242,12 @@ export function addMinutes(time: string, minutes: number): string {
   return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`
 }
 
-/** The page rule: US Letter portrait. Injected only while the report page is mounted. */
-export const REPORT_PAGE_RULE = '@page { size: letter portrait; margin: 0.6in 0.55in; }'
+/**
+ * The page rule: US Letter portrait, ZERO page margin (DF-46: Chromium and Edge drop the browser's
+ * header and footer when the margin is 0; the sheet draws its own 0.5in margin in print CSS).
+ * Injected only while the report page is mounted.
+ */
+export const REPORT_PAGE_RULE = '@page { size: letter portrait; margin: 0; }'
 
 /** Marks the injected `@page` style (found, and asserted on, by tests). */
 export const REPORT_PAGE_STYLE_ATTR = 'data-exercise-report-page'
@@ -237,7 +312,7 @@ export function chartSummary(activity: ExerciseReport['activity']): string {
     }
   }
   const markers = injectMarkers.length > 0
-    ? ` Key injects: ${injectMarkers.map(m => `${refLabel(m.ref)} ${m.title} at ${axisLabel(m.at, mode === 'date' ? 'dateTime' : mode)}`).join('; ')}.`
+    ? ` Key injects: ${injectMarkers.map(m => `${injectName(m.ref, m.title)} at ${axisLabel(m.at, mode === 'date' ? 'dateTime' : mode)}`).join('; ')}.`
     : ''
   return (
     `Posts per ${binWidthLabel(binMinutes)} from ${axisLabel(first.start, mode)} to ` +
