@@ -162,3 +162,9 @@ Deferred follow-ups (tracked, not blockers to this story's Complete status):
   rate-limited today against the direct connection IP; behind Azure App Service the real client IP
   arrives via a forwarded header, so true per-IP partitioning needs forwarded-headers wiring that
   trusts only the platform proxy. Tracked as a `/security-review` item before the umbrella→main PR.
+
+## Scope update 2026-10-16 (ADMIN-IDENTITY-MODEL)
+
+**Amendment note (Complete/finished story; ACs unchanged).** Source: [`docs/design/ADMIN-IDENTITY-MODEL.md`](../../design/ADMIN-IDENTITY-MODEL.md) §1.1 (accepted cost). Wave A1,
+delivered under `16-person-and-enrollments`. Change: session minting reads Enrollment.Role (not Account.Role); Session.ExerciseId becomes nullable and Session.PersonId is added (story 15/16). This story's readers move to `Enrollment`; its
+existing ACs and test suite are the regression net and must stay green. No new ACs.

@@ -207,3 +207,9 @@ null-OMITTED on the telemetry actor (off the locked v0 envelope) rather than emi
 
 `EnginePublishServiceTests.PublishBurst_IngestsThroughB1_WithEngineOrigin_ScopedToTheBurstExercise` —
 extended as the regression guard that the engine's session-less publish path still works.
+
+## Scope update 2026-10-16 (ADMIN-IDENTITY-MODEL)
+
+**Amendment note (Complete/finished story; ACs unchanged).** Source: [`docs/design/ADMIN-IDENTITY-MODEL.md`](../../design/ADMIN-IDENTITY-MODEL.md) §1.1 (accepted cost). Wave A1,
+delivered under `16-person-and-enrollments`. Change: attribution derives role and persona from Account.Enrollment.*; the acting PersonId is recorded where the person is a directory person. This story's readers move to `Enrollment`; its
+existing ACs and test suite are the regression net and must stay green. No new ACs.

@@ -170,3 +170,10 @@ production middleware. Every guard below was **neutered and watched go red**.
 **Composition root (so this cannot ship merged-but-dead)**
 - `CompositionRootWiringTests.ProgramCs_MapsTheThreeOrgAdministrationRoutes_ExactlyOnceEach`
 - `CompositionRootWiringTests.ProgramCs_CallsAddExerciseLifecycleAdmin_SoEveryHandlerDependencyResolves`
+
+## Scope update 2026-10-16 (ADMIN-IDENTITY-MODEL)
+
+Source: [`docs/design/ADMIN-IDENTITY-MODEL.md`](../../design/ADMIN-IDENTITY-MODEL.md) §8.2, §7.1 (Tier-2 signed off by Tom, 2026-10-16). Wave A3 (role check in identity 17).
+- [ ] **Create exercise is org admin only.** Given a planner or controller (who can today), when they call create, then 403; the org-scope session of an org admin succeeds. The creator is enrolled as `planner` via `Enrollment` (not `StaffAssignment`).
+- [ ] Org-scope creation is recorded in `OrgAuditEvent`.
+- [ ] User guide (C5 docs-as-done): `docs/guide/planner-guide.md` is updated in the same PR, or the PR states "no guide impact".

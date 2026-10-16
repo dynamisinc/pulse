@@ -117,3 +117,7 @@ reaction/view/DM/login is emitted by creating an exercise) — but story 01's cr
 an auditable staff action and should be logged the same way other staff actions are
 (`ParticipantAdminFlyout`'s `actor.kind: 'system'` + `actingHumanId` precedent). Accessibility
 (NFR-001) applies to every staff surface here exactly as it does everywhere else in the staff world.
+
+## Scope update 2026-10-16 (ADMIN-IDENTITY-MODEL)
+
+Source: [`docs/design/ADMIN-IDENTITY-MODEL.md`](../../design/ADMIN-IDENTITY-MODEL.md). Stories **01** (create = org admin only; creator enrolled via `Enrollment`), **02** (row actions defined by exercise-build-golive 06-08) and **03** (org scope routing by `Person.OrgRole`; assignment view reads `Enrollment`) carry scope-update sections. No new stories here; the new lifecycle transitions live in `exercise-build-golive`. A1 stories need orchestrator clearance first for the EF migration, `Program.cs`, `App.tsx` / `staffRouteRegistry.tsx` and frozen-type changes (`Session`, `ExerciseRole`, `StaffAssignment` -> `Enrollment`, staff login request).
