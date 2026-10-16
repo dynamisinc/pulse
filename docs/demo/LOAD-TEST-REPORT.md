@@ -66,8 +66,11 @@ POST p95, the fan-out p95 and late or dropped frames as the evidence›.
   ‹"none up to 100 users"›.
 - **What saturated first:** ‹App Service CPU / memory / SQL CPU or workers / SignalR (fan-out lag or drops while CPU
   had headroom) / the client›. Evidence: ‹the metrics CSV rows and steps.csv rows that show it›.
-- **Feed reads:** `GET /api/feed` returns the whole feed as one unpaged array, so its cost grows with the posts written.
-  ‹Did feed p95 grow step over step faster than the user count?›
+- **Feed reads:** `GET /api/feed` returns at most the newest 200 top-level posts (`PostReadService.FeedTake` = 200 in
+  the code this template was written against). The response size stops growing once the exercise passes 200 posts,
+  which happens early in step 1, so feed cost tracks the request rate and the database, not the run's post count.
+  ‹Deployed cap checked: FeedTake = __ in the deployed commit. Did feed p95 grow step over step faster than the user
+  count?›
 - **Join limit:** joins share one 30/min bucket behind the App Service proxy (#480). 100 participants take about
   4 minutes to sign in. ‹Any 429s?›
 - **Serverless SQL:** ‹resume delay at the start; did auto-scale track the load?›

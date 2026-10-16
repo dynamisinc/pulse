@@ -234,3 +234,130 @@ public class RunnerReviewTests
         }
     }
 }
+
+/// <summary>Regression tests for the second Copilot pass on PR #557.</summary>
+public class SecondPassTests
+{
+    private static readonly DateTimeOffset T0 = new(2026, 10, 17, 9, 0, 0, TimeSpan.Zero);
+
+    // Deadline = accept (T0) + 30 s. One frame just before it, one just after; each processed either before any sweep,
+    // or after a sweep that has already settled the post. The verdict must not depend on that order.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Finding2_AFrameBeforeTheDeadline_IsDelivered_WhateverTheSweepTiming(bool sweptFirst)
+    {
+        var tracker = new FanOutTracker(new FanOutSettings { DroppedAfterSeconds = 30 });
+        tracker.Register(0, "p1", T0, T0, FanOutTrackerTests.Clients(2));
+        if (sweptFirst)
+        {
+            tracker.Sweep(T0.AddSeconds(31)); // settles the post before the frame is processed
+        }
+
+        tracker.OnFrame(2, "p1", T0.AddSeconds(29.9));
+        tracker.Sweep(T0.AddSeconds(45));
+
+        var summary = tracker.Summary(0);
+        summary.FramesDelivered.Should().Be(1);
+        summary.FramesLate.Should().Be(1);
+        summary.FramesDropped.Should().Be(0);
+        tracker.Drops.Should().BeEmpty();
+        tracker.UntrackedFrames.Should().Be(0);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Finding2_AFrameAfterTheDeadline_IsDropped_WhateverTheSweepTiming(bool sweptFirst)
+    {
+        var tracker = new FanOutTracker(new FanOutSettings { DroppedAfterSeconds = 30 });
+        tracker.Register(0, "p1", T0, T0, FanOutTrackerTests.Clients(2));
+        if (sweptFirst)
+        {
+            tracker.Sweep(T0.AddSeconds(31));
+        }
+
+        tracker.OnFrame(2, "p1", T0.AddSeconds(30.1));
+        tracker.Sweep(T0.AddSeconds(45));
+
+        var summary = tracker.Summary(0);
+        summary.FramesDelivered.Should().Be(0);
+        summary.FramesDropped.Should().Be(1);
+        tracker.Drops.Should().ContainSingle().Which.MissingClients.Should().Equal(new MissingFrame(2, T0.AddMinutes(-5)));
+        tracker.UntrackedFrames.Should().Be(0, "a frame for a known post is never 'untracked'");
+    }
+
+    [Fact]
+    public void Finding2_AFrameExactlyAtTheDeadline_IsDelivered()
+    {
+        var tracker = new FanOutTracker(new FanOutSettings { DroppedAfterSeconds = 30 });
+        tracker.Register(0, "p1", T0, T0, FanOutTrackerTests.Clients(2));
+        tracker.OnFrame(2, "p1", T0.AddSeconds(30));
+        tracker.Sweep(T0.AddSeconds(60));
+        tracker.Summary(0).FramesDropped.Should().Be(0);
+    }
+
+    [Fact]
+    public void Finding2_FinishAfterTheDeadline_DropsTheLateFrame()
+    {
+        var tracker = new FanOutTracker(new FanOutSettings { DroppedAfterSeconds = 30 });
+        tracker.Register(0, "p1", T0, T0, FanOutTrackerTests.Clients(2, 3));
+        tracker.OnFrame(2, "p1", T0.AddSeconds(1));
+        tracker.OnFrame(3, "p1", T0.AddSeconds(31)); // after the deadline, no sweep yet
+        tracker.Finish(T0.AddSeconds(32));
+
+        var summary = tracker.Summary(0);
+        summary.FramesDelivered.Should().Be(1);
+        summary.FramesDropped.Should().Be(1);
+        summary.FramesUnfinished.Should().Be(0);
+    }
+
+    [Fact]
+    public void Finding4_TwoSeparatedSpikesWithQuietTrafficBetween_DoNotStop()
+    {
+        // Low background traffic (1 request every 2 s: under 10 per 15 s window), with two 5 s spikes of failing
+        // requests 50 s apart. Before the fix, the quiet windows left the breach clock running, so the second spike
+        // looked like "60 s sustained".
+        var samples = new List<RequestSample>();
+        void Add(DateTimeOffset from, DateTimeOffset to, double perSecond, bool ok)
+        {
+            for (var at = from; at < to; at += TimeSpan.FromSeconds(1 / perSecond))
+            {
+                samples.Add(new RequestSample(at, 0, Metrics.Feed, 50, ok ? 200 : 503, ok));
+            }
+        }
+
+        Add(T0, T0.AddMinutes(4), 0.5, true);                                   // quiet background
+        Add(T0.AddSeconds(60), T0.AddSeconds(65), 8, false);                    // spike 1
+        Add(T0.AddSeconds(115), T0.AddSeconds(120), 8, false);                  // spike 2, 55 s later
+
+        var evaluator = new StopRuleEvaluator(new StopRuleSettings());
+        for (var now = T0; now <= T0.AddMinutes(4); now += TimeSpan.FromSeconds(5))
+        {
+            evaluator.Evaluate(now, samples).Should().BeNull($"no sustained breach at {now:HH:mm:ss}");
+        }
+    }
+
+    [Fact]
+    public void Finding4_TheP95ClockAlsoRestarts_WhenPostsThinOut()
+    {
+        var samples = new List<RequestSample>();
+        void Posts(DateTimeOffset from, DateTimeOffset to, double perSecond, double latency)
+        {
+            for (var at = from; at < to; at += TimeSpan.FromSeconds(1 / perSecond))
+            {
+                samples.Add(new RequestSample(at, 0, Metrics.ControllerPost, latency, 201, true));
+            }
+        }
+
+        Posts(T0, T0.AddSeconds(40), 2, 7000);                 // 40 s slow
+        Posts(T0.AddSeconds(40), T0.AddSeconds(80), 0.2, 7000); // too few POSTs to judge
+        Posts(T0.AddSeconds(80), T0.AddSeconds(110), 2, 7000);  // 30 s slow again
+
+        var evaluator = new StopRuleEvaluator(new StopRuleSettings());
+        for (var now = T0; now <= T0.AddSeconds(150); now += TimeSpan.FromSeconds(5))
+        {
+            evaluator.Evaluate(now, samples).Should().BeNull();
+        }
+    }
+}

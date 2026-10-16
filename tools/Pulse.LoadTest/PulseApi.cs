@@ -148,7 +148,7 @@ internal sealed class PulseApi : IDisposable
 
     // ── Participant ──────────────────────────────────────────────────────────────────────────────────────────────
 
-    /// <summary>GET /api/feed — the whole All feed (an unpaged array of ParticipantPostDto).</summary>
+    /// <summary>GET /api/feed — the All feed: at most the newest PostReadService.FeedTake (200) top-level posts.</summary>
     public Task<ApiResult> GetFeedAsync(PulseSession session, CancellationToken ct) => SendAsync(HttpMethod.Get, "/api/feed", session, null, Metrics.Feed, ct);
 
     /// <summary>POST /api/posts as a participant (origin participant; the author is the session's persona).</summary>

@@ -104,7 +104,8 @@ The harness checks the rules every 5 s, during the ramp and the step. Each check
 - **POST `/api/posts` p95 above 5 s for 60 s in a row**. This counts participant posts, replies and controller posts.
 
 The short window is deliberate. A breach must last 60 s; a 5 s burst of errors does not trip a step. A window with
-fewer than 10 requests (or 10 POSTs, for the p95 rule) is never evidence. In practice the p95 rule is judged during
+fewer than 10 requests (or 10 POSTs, for the p95 rule) is not evidence and restarts that rule's 60 s clock, so two
+short spikes with quiet traffic between them never add up to a sustained breach. In practice the p95 rule is judged during
 the 120/min burst, and the error rule all the time. The ramp also stops after **10 failed joins in a row** (a 429
 included). When a rule trips, the harness aborts the step (or its ramp) and skips the later steps. A ramp that runs out
 of join links or attempts below the step's population also stops the run ("undersized population: N of M"). The step
@@ -199,8 +200,11 @@ connections at the end is not counted as a loss. **Connection counts** are per s
 
 Read drops against these counts: drops from closed clients are not fan-out lag.
 
-The feed is one unpaged array (`PostReadService.GetFeedAsync`). Feed latency therefore grows with the post count across
-the run, so read `feed` p95 per step against the posts already written.
+The feed returns at most the newest 200 top-level posts: `PostReadService.FeedTake` = 200, applied with `Take`. The
+noise, the burst item and the paced writes pass 200 posts early in step 1, so from then on each `GET /api/feed`
+returns a full page of the same size. A rise in `feed` p95 between steps therefore reflects request rate and server or
+database load, not a growing response. **Before the run, check the cap in the deployed commit**
+(`src/Pulse.WebApi/Features/Social/PostReadService.cs`, `FeedTake`) and note it in the report.
 
 ## Configuration
 

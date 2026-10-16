@@ -8,7 +8,8 @@ using System.Collections.Concurrent;
 /// before the 201; that counts as 0 ms lag (and is counted as "early"). The time from the request being SENT is kept
 /// too, as end-to-end lag. Frames still missing after <see cref="FanOutSettings.DroppedAfterSeconds"/> are dropped;
 /// frames later than <see cref="FanOutSettings.LateAfterSeconds"/> are late. Frames still pending when the run ends
-/// before that horizon are UNFINISHED observations, reported apart from drops.
+/// before that horizon are UNFINISHED observations, reported apart from drops. The verdict on a frame depends only on
+/// its ARRIVAL time against the post's deadline (accept + the drop horizon) — never on when a sweep happens to run.
 /// </summary>
 /// <remarks>
 /// All state sits behind ONE lock: registration, frame arrival, early-frame buffering and sweeping can interleave from
@@ -25,7 +26,10 @@ internal sealed class FanOutTracker
     // A frame can arrive before the harness knows the post id (before the 201): keep it, matched on registration.
     private readonly Dictionary<string, EarlyFrames> _early = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<int, StepFanOut> _steps = [];
-    private readonly List<DroppedFrames> _drops = [];
+
+    // Posts already settled, kept so a frame processed after its post was swept is still judged by ITS arrival time:
+    // before the deadline it is a delivery (the drop is undone), after it the frame stays dropped (never "untracked").
+    private readonly Dictionary<string, TrackedPost> _settled = new(StringComparer.OrdinalIgnoreCase);
     private long _untracked;
 
     public FanOutTracker(FanOutSettings settings)
@@ -41,7 +45,14 @@ internal sealed class FanOutTracker
         {
             lock (_gate)
             {
-                return [.. _drops];
+                return [.. _settled
+                    .Where(p => p.Value.Missing.Count > 0)
+                    .OrderBy(p => p.Value.AcceptedAt)
+                    .Select(p => new DroppedFrames(
+                        p.Value.Step,
+                        p.Key,
+                        p.Value.AcceptedAt,
+                        [.. p.Value.Missing.OrderBy(m => m.Key).Select(m => new MissingFrame(m.Key, m.Value))]))];
             }
         }
     }
@@ -103,6 +114,18 @@ internal sealed class FanOutTracker
                 return;
             }
 
+            if (_settled.TryGetValue(postId, out var settled))
+            {
+                // Swept already. The verdict follows the frame's ARRIVAL time, not the sweep's timing.
+                if (at <= Deadline(settled) && settled.Missing.Remove(clientId, out _))
+                {
+                    Stats(settled.Step).AddDropped(-1);
+                    Deliver(settled, at);
+                }
+
+                return; // after the deadline: it was rightly settled as dropped
+            }
+
             // Unknown yet: either our POST's 201 has not come back, or the post is not ours. Hold it until the horizon.
             if (!_early.TryGetValue(postId, out var bucket))
             {
@@ -149,21 +172,18 @@ internal sealed class FanOutTracker
                 }
 
                 _posts.Remove(id);
-                if (post.Pending.Count == 0)
-                {
-                    continue;
-                }
-
                 if (expired)
                 {
+                    // Pending here means: no frame by the deadline (frames after it were left pending on arrival).
                     Stats(post.Step).AddDropped(post.Pending.Count);
-                    _drops.Add(new DroppedFrames(
-                        post.Step,
-                        id,
-                        post.AcceptedAt,
-                        [.. post.Pending.OrderBy(p => p.Key).Select(p => new MissingFrame(p.Key, p.Value))]));
+                    foreach (var (client, connectedAt) in post.Pending)
+                    {
+                        post.Missing[client] = connectedAt;
+                    }
+
+                    _settled[id] = post;
                 }
-                else
+                else if (post.Pending.Count > 0)
                 {
                     Stats(post.Step).AddUnfinished(post.Pending.Count);
                 }
@@ -184,11 +204,23 @@ internal sealed class FanOutTracker
 
     private void ReceiveLocked(TrackedPost post, int client, DateTimeOffset at)
     {
+        if (at > Deadline(post))
+        {
+            return; // arrived after the deadline: it stays pending and is settled as dropped, whatever the sweep timing
+        }
+
         if (!post.Pending.Remove(client))
         {
             return; // the sender, a duplicate, or a client that connected after the post was sent
         }
 
+        Deliver(post, at);
+    }
+
+    private DateTimeOffset Deadline(TrackedPost post) => post.AcceptedAt + TimeSpan.FromSeconds(_settings.DroppedAfterSeconds);
+
+    private void Deliver(TrackedPost post, DateTimeOffset at)
+    {
         var lag = (at - post.AcceptedAt).TotalMilliseconds;
         Stats(post.Step).Add(Math.Max(0, lag), (at - post.SentAt).TotalMilliseconds, early: lag < 0, late: lag > _settings.LateAfterSeconds * 1000);
     }
@@ -214,6 +246,9 @@ internal sealed class FanOutTracker
 
         /// <summary>Client id → that client's connection time when the post was sent.</summary>
         public Dictionary<int, DateTimeOffset?> Pending { get; } = pending;
+
+        /// <summary>After settling: the clients with no frame by the deadline (same shape as <see cref="Pending"/>).</summary>
+        public Dictionary<int, DateTimeOffset?> Missing { get; } = [];
     }
 
     private sealed class EarlyFrames(DateTimeOffset firstSeen)

@@ -8,9 +8,10 @@ namespace Pulse.LoadTest;
 ///   <item><description>POST /api/posts p95 above <see cref="StopRuleSettings.MaxPostP95Ms"/> (5 s),</description></item>
 /// </list>
 /// each SUSTAINED for <see cref="StopRuleSettings.SustainSeconds"/> (60 s): a rule trips only when every tick across
-/// that span saw it breached. The window is short on purpose: a 60 s lookback on top of a 60 s sustain would keep a
-/// few seconds of errors "in breach" for a whole minute and trip on them. A window with fewer than <see cref="StopRuleSettings.MinSamples"/> requests (or POSTs,
-/// for the p95 rule) never counts as a breach and resets nothing either way — it is simply not evidence.
+/// that span saw it breached, with enough samples. The window is short on purpose: a 60 s lookback on top of a 60 s
+/// sustain would keep a few seconds of errors "in breach" for a whole minute and trip on them. A window with fewer than
+/// <see cref="StopRuleSettings.MinSamples"/> requests (or POSTs, for the p95 rule) is not evidence of a continuing
+/// breach, so it RESETS that rule's sustain clock.
 /// </summary>
 internal sealed class StopRuleEvaluator
 {
@@ -72,6 +73,12 @@ internal sealed class StopRuleEvaluator
                 _errorBreachSince = null;
             }
         }
+        else
+        {
+            // Not enough evidence in this window: the breach is not proven continuous, so the sustain clock restarts.
+            // Otherwise two short spikes with quiet traffic between them would add up to a "sustained" breach.
+            _errorBreachSince = null;
+        }
 
         // POST p95.
         var posts = window.Where(s => PostMetrics.Contains(s.Metric)).Select(s => s.LatencyMs).ToArray();
@@ -95,6 +102,10 @@ internal sealed class StopRuleEvaluator
             {
                 _p95BreachSince = null;
             }
+        }
+        else
+        {
+            _p95BreachSince = null; // as above: too few POSTs is not evidence of a continuing breach
         }
 
         return null;
