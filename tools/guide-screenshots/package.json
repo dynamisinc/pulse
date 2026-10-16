@@ -1,0 +1,17 @@
+{
+  "name": "pulse-guide-screenshots",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Captures user-guide screenshots from the Pulse frontend running on mock data. Not part of CI.",
+  "type": "module",
+  "scripts": {
+    "capture": "node capture.mjs",
+    "serve": "node serve.mjs"
+  },
+  "dependencies": {
+    "playwright-core": "1.56.1"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
