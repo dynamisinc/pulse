@@ -33,4 +33,11 @@ public sealed class StaffAssignmentDto
     /// </summary>
     [JsonPropertyName("personId")]
     public required string PersonId { get; init; }
+
+    /// <summary>
+    /// Whether this enrollment is the exercise's lead controller — read live from <c>Enrollment.IsLead</c>
+    /// (identity-auth-roles/16 orchestrator fold: the frontend <c>Enrollment</c> type carries it too).
+    /// </summary>
+    [JsonPropertyName("isLead")]
+    public required bool IsLead { get; init; }
 }

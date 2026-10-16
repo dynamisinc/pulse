@@ -18,6 +18,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Pulse.WebApi.Features.Identity.Enrollments;
 using Pulse.WebApi.Tests.Data;
+using Pulse.WebApi.Tests.Features.ExerciseConfiguration.Lifecycle;
 
 /// <summary>
 /// identity-auth-roles/16 (#572) over the REAL <c>Program</c> host (plus this slice's not-yet-wired
@@ -96,6 +97,29 @@ public sealed class EnrollmentHttpTests
         rows[0].GetProperty("exerciseId").GetString().Should().Be(own.ToString());
         rows[0].GetProperty("role").GetString().Should().Be("planner");
         rows[0].GetProperty("personId").GetString().Should().Be(admin.ToString());
+        rows[0].GetProperty("isLead").GetBoolean().Should().BeFalse("the Enrollment wire type carries the live lead flag");
+    }
+
+    [RequiresDockerTheory]
+    [InlineData("participant")]
+    [InlineData("readonly")]
+    public async Task TheTwoStaffRoutes_RefuseANonStaffWorldSession(string kind)
+    {
+        var org = await _kit.SeedOrganizationAsync();
+        var exercise = await _kit.SeedExerciseAsync(org);
+        var token = $"nonstaff-{Guid.NewGuid():N}";
+        await using (var seed = _kit.ReadContext())
+        {
+            seed.Sessions.Add(Pulse.WebApi.Tests.Helpers.TestSessions.NewSession(token, exercise, kind: kind, isReadOnly: kind == "readonly"));
+            await seed.SaveChangesAsync();
+        }
+
+        using var host = new EnrollmentHost(_fixture.ConnectionString!);
+        using var list = await Client(host, token).GetAsync("/api/staff/assignments");
+        using var enter = await Client(host, token).PostAsJsonAsync("/api/staff/active-exercise", new { exerciseId = exercise.ToString() });
+
+        list.StatusCode.Should().BeOneOf([HttpStatusCode.Unauthorized, HttpStatusCode.Forbidden], "only a staff-world session lists enrollments");
+        enter.StatusCode.Should().BeOneOf([HttpStatusCode.Unauthorized, HttpStatusCode.Forbidden], "only a staff-world session can switch");
     }
 
     [RequiresDockerFact]

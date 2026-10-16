@@ -118,7 +118,7 @@ public sealed class StaffAssignmentService
             where a.PersonId == current.StaffUserId
             join e in _dbContext.Exercises.AsNoTracking().InOrganization(callerOrganizationId) on a.ExerciseId equals e.Id
             orderby e.Name
-            select new { a.ExerciseId, ExerciseName = e.Name, a.Role }).ToListAsync(cancellationToken);
+            select new { a.ExerciseId, ExerciseName = e.Name, a.Role, a.IsLead }).ToListAsync(cancellationToken);
 
         var personId = current.StaffUserId.ToString();
         return rows
@@ -128,6 +128,7 @@ public sealed class StaffAssignmentService
                 ExerciseName = r.ExerciseName,
                 Role = r.Role,
                 PersonId = personId,
+                IsLead = r.IsLead,
             })
             .ToList();
     }
@@ -279,6 +280,7 @@ public sealed class StaffAssignmentService
             ExerciseName = exercise.Name,
             Role = assignment.Role,
             PersonId = current.StaffUserId.ToString(),
+            IsLead = assignment.IsLead,
         });
     }
 }
