@@ -37,3 +37,14 @@ establishes; it does not invent a second one.
 ## Tests
 - Integration: cloning copies world definition and config but not participant data or conduct history;
   the clone is isolated.
+
+## Scope update 2026-10-16 (ADMIN-IDENTITY-MODEL)
+
+Source: [`docs/design/ADMIN-IDENTITY-MODEL.md`](../../design/ADMIN-IDENTITY-MODEL.md) §5.5, §5.4a, §8.2, Q4 (Tier-2 signed off by Tom, 2026-10-16). Wave A3. Amends C2's "never posts" to "never **conduct** posts".
+- [ ] **Planner of the source or org admin** may duplicate from any state; the result is a new exercise in `build` named "Copy of X", with a new hostname and a generated, disabled view-only code. Controllers and evaluators are refused.
+- [ ] **Copied with new ids and every reference remapped:** settings, chrome, sign-in methods; personas (avatar/banner remapped); staff library media (blobs server-side copied into the new prefix); run sheet (all items pending, except reply items needing repair); noise pool; follow graph between personas; staff enrollments (default on); **setup posts** (`IsSetupContent`) with their media, pins and baselines remapped.
+- [ ] **Persona avatar/banner pointing at participant-uploaded media is cleared to the default** on the copy (that asset is not copied).
+- [ ] **Run-sheet reply items:** a reply whose target is a setup post is remapped to the copied post; one whose target is a conduct post arrives `needs-repair` (§5.4a) and blocks staging until fixed.
+- [ ] **Never copied:** conduct posts, participant accounts, links, day words, sessions, telemetry, participant-uploaded media. Optional "copy participant roster" re-creates directory-linked accounts with persona bindings and no links; one-offs are not copied.
+- [ ] User guide (C5 docs-as-done): `docs/guide/planner-guide.md` is updated in the same PR, or the PR states "no guide impact".
+- [ ] Foreign-exercise and foreign-org source ids return the bare 404.

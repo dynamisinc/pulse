@@ -34,3 +34,10 @@ roles (Director authority). Drives E8 dormancy and scheduled content.
 ## Tests
 - Integration: Staged opens participant access with clock stopped + scenario content held; StartEx
   starts the clock and scenario delivery; both are Director-gated and logged.
+
+## Scope update 2026-10-16 (ADMIN-IDENTITY-MODEL)
+
+Source: [`docs/design/ADMIN-IDENTITY-MODEL.md`](../../design/ADMIN-IDENTITY-MODEL.md) §5.1, §5.2, §8.2 (Tier-2 signed off by Tom, 2026-10-16). Wave A3 (role checks land in identity 17, A1).
+- [ ] **StartEx is controller-only.** Given a staged exercise, when a controller starts it, then it goes live and sets `Exercise.FirstLiveAt` if null; planner, evaluator and org-scope sessions get 403 and no state change. **Stage** (build -> staged) is planner-only and requires no blocking readiness item; **unstage** is story 07.
+- [ ] Every transition emits `exercise.lifecycle.transitioned` with the actor `PersonId` and role.
+- [ ] User guide (C5 docs-as-done): `docs/guide/controller-guide.md` is updated in the same PR, or the PR states "no guide impact".

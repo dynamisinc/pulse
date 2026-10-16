@@ -1,6 +1,6 @@
 # Story: Mid-exercise persona creation (≤60s)
 
-**Feature:** Persona management & cast libraries  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Not Started
+**Feature:** Persona management & cast libraries  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Closed — duplicate
 **Requirements:** COR-022  ·  **Design decisions:** none  ·  **Issue:** #55
 
 ## Context
@@ -33,3 +33,7 @@ Story 01 (persona fields); exercise-isolation. Consumed by E7 persona-operation/
 ## Tests
 - Integration: quick-create yields a usable exercise-scoped persona; per-exercise handle uniqueness
   enforced.
+
+## Scope update 2026-10-16 (ADMIN-IDENTITY-MODEL)
+
+**Closed as a duplicate of closed #18** (decision recorded in the design doc §10, wave A4). Status: Closed — duplicate. Do not build; the mid-exercise create path is the persona create service in story 01 and the controller console.

@@ -30,3 +30,12 @@ cred); persona-management (seeding); exercise-configuration (chrome). Gates stor
 
 ## Tests
 - Component: the dashboard reflects each item's status; incomplete items surface (not color-only).
+
+## Scope update 2026-10-16 (ADMIN-IDENTITY-MODEL)
+
+Source: [`docs/design/ADMIN-IDENTITY-MODEL.md`](../../design/ADMIN-IDENTITY-MODEL.md) §5.3, §5.4a, §3.4, §8.4 (Tier-2 signed off by Tom, 2026-10-16). Wave A3. The readiness checklist (§5.3) is now defined; stage is refused with 409 and the list while any **blocking** item is open.
+- [ ] **Blocking items:** (1) at least one controller enrollment; (2) a participant-facing name is set (story 09); (3) at least one participant `Account`, or the view-only code is enabled; (4) every participant account is bound to a persona; (5) at least one participant sign-in method is on, if participant accounts exist (identity 22); (6) time zone and scenario start time set; (7) chrome and watermark valid (`ComplianceChromeGuard`); (8) no run-sheet item is `needs-repair` (§5.4a).
+- [ ] **Warnings (shown, not blocking):** no run sheet items; no opening feed; empty noise pool; personas missing avatars; participants with no sign-in issued yet; no evaluator enrolled.
+- [ ] Each item has a label and icon (never color-only), links to the fixing screen, and is exercise-scoped and planner/controller/evaluator-readable.
+- [ ] Foreign-exercise and foreign-org readiness reads return the bare 404.
+- [ ] User guide (C5 docs-as-done): `docs/guide/planner-guide.md` is updated in the same PR, or the PR states "no guide impact".
