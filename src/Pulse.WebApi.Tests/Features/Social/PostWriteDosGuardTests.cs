@@ -62,7 +62,7 @@ public sealed class PostWriteDosGuardModelTests
         private const string ConnectionStringEnvVar = "ConnectionStrings__DefaultConnection";
 
         public DummyDatabaseFactory() =>
-            Environment.SetEnvironmentVariable(ConnectionStringEnvVar, "Server=nonexistent;Database=pulse;Trusted_Connection=False;");
+            Environment.SetEnvironmentVariable(ConnectionStringEnvVar, "Server=nonexistent;Database=pulse;Trusted_Connection=False;Connect Timeout=1;");
 
         protected override void Dispose(bool disposing)
         {

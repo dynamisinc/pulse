@@ -18,7 +18,8 @@
  * state machine (`injectRules.can*`): Fire (pending) · Hold (pending/firing) ·
  * Release (held) · Skip (pending/held) · Unskip (skipped) · Retry (failed) · Edit
  * (pending/held/failed) or View (fired/firing/skipped, opens read-only) · Delete
- * (pending/held/skipped; an INLINE confirm, not a modal) · Move up/down.
+ * (pending/held/skipped; an INLINE confirm, not a modal) · Move up/down · Mark
+ * fired (pending/held/failed; DF-36, behind a confirm — `MarkFiredAction`).
  *
  * FIRE has no confirmation dialog (CTL-034). It is disabled while ANY action on
  * the row is in flight (`busy`) and, under FREEZE, with the reason "World frozen"
@@ -53,10 +54,12 @@ import { consoleChrome as chrome } from '../consoleChrome'
 import { RunSheetButton, RunSheetIconButton } from './RunSheetButtons'
 import { RunSheetStatusChip } from './RunSheetStatusChip'
 import { PersonaLine } from './PersonaLine'
+import { MarkFiredAction } from './MarkFiredAction'
 import {
   canDelete,
   canFire,
   canHold,
+  canMarkFired,
   canRelease,
   canRetry,
   canSkip,
@@ -102,6 +105,8 @@ export interface RunSheetRowProps {
   readonly onSkip: () => void
   readonly onUnskip: () => void
   readonly onRetry: () => void
+  /** DF-36: mark the item fired without posting (called after the confirm). */
+  readonly onMarkFired: () => void
   /** Opens the editor (read-only when the item is no longer editable). */
   readonly onOpen: () => void
   readonly onRequestDelete: () => void
@@ -145,6 +150,7 @@ export function RunSheetRow({
   onSkip,
   onUnskip,
   onRetry,
+  onMarkFired,
   onOpen,
   onRequestDelete,
   onConfirmDelete,
@@ -355,6 +361,9 @@ export function RunSheetRow({
             testId="row-unskip"
             onClick={onUnskip}
           />
+        ) : null}
+        {canControl && canMarkFired(item.status) ? (
+          <MarkFiredAction title={item.title} disabled={busy} onConfirm={onMarkFired} />
         ) : null}
         <RunSheetButton
           icon={editable ? faPen : faEye}

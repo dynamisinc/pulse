@@ -1,6 +1,6 @@
 # Story: Casts & one-action seeding with derived state
 
-**Feature:** Persona management & cast libraries  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** In Progress
+**Feature:** Persona management & cast libraries  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Not Started
 **Requirements:** COR-021  ·  **Design decisions:** none  ·  **Issue:** #54
 
 ## Context

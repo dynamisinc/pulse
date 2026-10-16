@@ -84,6 +84,16 @@ const ALLOWED_SOCIAL_IMPORTS: readonly { readonly pattern: RegExp; readonly why:
       + 'realtime transport (story 07 `subscribePinChanged`); a service, no UI, no new connection',
   },
   {
+    pattern: /^@\/features\/social\/edit\/editedPostsStore$/,
+    why: 'story 20: the leaf, version-gated edited-post overlay (a store + hook, no UI) the row '
+      + 'reads so a PostEdited push updates its text and "Edited" chip',
+  },
+  {
+    pattern: /^@\/features\/social\/edit\/usePostEditHistory$/,
+    why: 'story 20: the React Query read of a post\'s edit history (a hook over a service, no UI); '
+      + 'the staff dialog renders it in COBRA, never the participant dialog',
+  },
+  {
     pattern: /^@\/features\/social\/services\/removedPosts$/,
     why: 'C5: the pure removed-post id store the console wires into `isRowRemoved` / '
       + 'TakedownAction (a store, no UI)',

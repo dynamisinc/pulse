@@ -66,8 +66,7 @@ describe('ExerciseReportPage', () => {
     expect(screen.getByRole('heading', { name: 'At a glance' })).toBeInTheDocument()
     expect(screen.getByText('Participants')).toBeInTheDocument()
     expect(screen.getByText('Posts taken down')).toBeInTheDocument()
-    // postsEdited is null in the fixture: the stat is hidden.
-    expect(screen.queryByText('Posts edited')).not.toBeInTheDocument()
+    expect(screen.getByText('Posts edited')).toBeInTheDocument()
     expect(screen.getByRole('group', { name: 'Where the 10 posts came from' })).toBeInTheDocument()
 
     const chart = screen.getByTestId('activity-chart')
@@ -154,9 +153,9 @@ describe('ExerciseReportPage', () => {
     renderPage()
     await screen.findByTestId('report-sheet')
 
-    expect(screen.getByText('Edited 2×')).toBeInTheDocument()
-    expect(screen.getByText('Edited 1×')).toBeInTheDocument()
-    expect(screen.getAllByText(/^Edited \d+×$/)).toHaveLength(2)
+    expect(screen.getByText('Edited 2× · last at 09:55')).toBeInTheDocument()
+    expect(screen.getByText('Edited 1× · last at 10:16')).toBeInTheDocument()
+    expect(screen.getAllByText(/^Edited \d+×/)).toHaveLength(2)
     expect(screen.getByText('Taken down at 10:21')).toBeInTheDocument()
     expect(screen.getByText('Replying to @KestrelCoEM')).toBeInTheDocument()
     expect(screen.getAllByText('Participant · posted by R. Okafor').length).toBeGreaterThan(0)
@@ -170,6 +169,14 @@ describe('ExerciseReportPage', () => {
 
     expect(screen.queryByRole('heading', { name: /Verified vs\. lookalike/ })).not.toBeInTheDocument()
     expect(screen.getByRole('heading', { name: /Post record/ })).toBeInTheDocument()
+  })
+
+  it('hides Posts edited when an older server sends null', async () => {
+    stubApi(() => ({ ...MOCK_REPORT, summary: { ...MOCK_REPORT.summary, postsEdited: null } }))
+    renderPage()
+    await screen.findByTestId('report-sheet')
+
+    expect(screen.queryByText('Posts edited')).not.toBeInTheDocument()
   })
 
   it('shows Posts edited when the count is not null', async () => {

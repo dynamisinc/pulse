@@ -20,6 +20,7 @@ import { Box, Stack, Typography } from '@mui/material'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faCircleCheck, faTriangleExclamation } from '@fortawesome/free-solid-svg-icons'
 import type { StageContent, WorldChannel } from '../types'
+import { cobraTheme } from '@/theme/cobraTheme'
 
 const SEAL_BLUE = '#2D9CDB'
 
@@ -242,7 +243,7 @@ export function ParticipantStageFrame({ stage, activeChannel, showOrigins, size 
                     sx={{
                       font: '600 9px ui-monospace,Menlo,monospace',
                       letterSpacing: '.06em',
-                      color: '#848482',
+                      color: cobraTheme.palette.text.muted,
                       mt: 0.625,
                       borderTop: '1px dashed #e3e7ea',
                       pt: 0.5,

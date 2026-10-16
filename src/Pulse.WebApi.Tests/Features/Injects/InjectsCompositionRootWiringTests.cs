@@ -44,6 +44,7 @@ public sealed class InjectsCompositionRootWiringTests
         { "POST", "/api/injects/{id:guid}/skip" },
         { "POST", "/api/injects/{id:guid}/unskip" },
         { "POST", "/api/injects/{id:guid}/retry" },
+        { "POST", "/api/injects/{itemId:guid}/mark-fired" }, // demo-feedback DF-36
     };
 
     [Fact]
@@ -113,7 +114,11 @@ public sealed class InjectsCompositionRootWiringTests
         using var factory = new ProbeFactory(resolveExercise: true);
         using var client = factory.CreateClient();
 
-        using var request = new HttpRequestMessage(new HttpMethod(method), pattern.Replace("{id:guid}", AnyId, StringComparison.Ordinal));
+        using var request = new HttpRequestMessage(
+            new HttpMethod(method),
+            pattern
+                .Replace("{id:guid}", AnyId, StringComparison.Ordinal)
+                .Replace("{itemId:guid}", AnyId, StringComparison.Ordinal));
         using var response = await client.SendAsync(request);
 
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized, "{0} {1}: participants and anonymous callers are refused", method, pattern);
@@ -146,7 +151,7 @@ public sealed class InjectsCompositionRootWiringTests
         public ProbeFactory(bool resolveExercise = false)
         {
             _resolveExercise = resolveExercise;
-            Environment.SetEnvironmentVariable(ConnectionStringEnvVar, "Server=nonexistent;Database=pulse;Trusted_Connection=False;");
+            Environment.SetEnvironmentVariable(ConnectionStringEnvVar, "Server=nonexistent;Database=pulse;Trusted_Connection=False;Connect Timeout=1;");
         }
 
         protected override void ConfigureWebHost(IWebHostBuilder builder)

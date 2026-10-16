@@ -47,6 +47,9 @@ public class IdempotentMigrationScriptTests
     /// <summary>The last migration before demo-feedback/01 — the shape UAT holds when the 10/20 feedback cut deploys.</summary>
     private const string BeforeDemoFeedback = "20261013144332_EasyLoginSchema";
 
+    /// <summary>The last migration before demo-feedback/17 (Wave 4) — the shape UAT holds when the Wave 4 cut deploys.</summary>
+    private const string BeforeWave4 = "20261014202342_DemoFeedbackPinsNoiseImport";
+
     private readonly MsSqlContainerFixture _fixture;
 
     public IdempotentMigrationScriptTests(MsSqlContainerFixture fixture)
@@ -148,6 +151,47 @@ public class IdempotentMigrationScriptTests
 
         (await database.AppliedMigrationsAsync()).Should().BeEquivalentTo(database.AllMigrations());
         await AssertDemoFeedbackSchemaOverLegacyRowsAsync(database, exerciseId, postId, injectItemId);
+    }
+
+    [RequiresDockerFact]
+    public async Task TheDeployScript_BringsUpWave4_OverExistingPostsAndExercises_AndReplaysAsANoOp()
+    {
+        // demo-feedback/17 (lesson #413): the UAT shape on Wave 4 deploy day — an exercise and a post written before the
+        // runtime-state / edit-tracking schema existed — taken forward by the SCRIPT, batch by batch, as sqlcmd -b runs it.
+        await using var database = await ScriptDatabase.CreateAsync(_fixture);
+        await database.MigrateToAsync(BeforeWave4);
+
+        var exerciseId = await database.InsertTenantExerciseAsync();
+        var postId = await database.InsertLegacyPostAsync();
+        var script = database.GenerateIdempotentScript();
+
+        await database.ApplyScriptAsync(script);
+
+        (await database.AppliedMigrationsAsync()).Should().BeEquivalentTo(
+            database.AllMigrations(),
+            "the Wave 4 batch must compile and run in the script, not just under Migrate()");
+        await AssertWave4SchemaOverLegacyRowsAsync(database, exerciseId, postId);
+
+        // The deploy re-applies the same script on every merge: a second apply must be a no-op.
+        await database.ApplyScriptAsync(script);
+
+        (await database.AppliedMigrationsAsync()).Should().BeEquivalentTo(database.AllMigrations());
+        await AssertWave4SchemaOverLegacyRowsAsync(database, exerciseId, postId);
+    }
+
+    private static async Task AssertWave4SchemaOverLegacyRowsAsync(ScriptDatabase database, Guid exerciseId, Guid postId)
+    {
+        (await database.TableExistsAsync("ExerciseRuntimeStates")).Should().BeTrue("the script must create [ExerciseRuntimeStates]");
+        (await database.TableExistsAsync("PostEdits")).Should().BeTrue("the script must create [PostEdits]");
+
+        (await database.ScalarAsync<int>(
+                $"SELECT COUNT(*) FROM [Posts] WHERE [Id] = '{postId}' AND [Body] = N'Legacy post' " +
+                "AND [EditCount] = 0 AND [LastEditedAt] IS NULL AND [LastEditedScenarioTime] IS NULL;"))
+            .Should().Be(1, "an existing post survives untouched and reads EditCount = 0 through the column DEFAULT");
+        (await database.ScalarAsync<int>($"SELECT COUNT(*) FROM [Exercises] WHERE [Id] = '{exerciseId}';"))
+            .Should().Be(1, "an existing exercise survives untouched");
+        (await database.ScalarAsync<int>($"SELECT COUNT(*) FROM [ExerciseRuntimeStates] WHERE [ExerciseId] = '{exerciseId}';"))
+            .Should().Be(0, "the migration writes no runtime-state rows: an exercise with no row reads as running, unstarted");
     }
 
     private static async Task AssertDemoFeedbackSchemaOverLegacyRowsAsync(

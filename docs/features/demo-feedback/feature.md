@@ -62,14 +62,14 @@ media on the server.
 | 08 | [Live world: pin for everyone and unread highlighting](08-live-world-pin-unread.md) | frontend | Must | 2 | contract | Complete | #504 |
 | 09 | [Console: white-noise knob and Export](09-console-noise-export.md) | frontend | Must | 2 | contract | Complete | #505 |
 | 10 | [Run sheet: import from Excel, and the #493 form fix](10-run-sheet-import.md) | frontend | Must | 2 | contract | Complete | #506 |
-| 11 | [Read-only console for evaluators](11-read-only-console.md) | frontend | Must | 3 | 08, 09, 10, 12b | In Review | #507 |
+| 11 | [Read-only console for evaluators](11-read-only-console.md) | frontend | Must | 3 | 08, 09, 10, 12b | Complete | #507 |
 | 12 | [Emoji picker in both composers](12-emoji-picker.md) | frontend | Should | 2 / 3 (12b) | none | Complete | #508 |
-| 13 | [Participant polish: tooltips (#494) and centered frame (#495)](13-participant-polish.md) | frontend | Should | 3 | 06, 07 | In Review | #509 |
-| 14 | [Live engagement refresh (counts, notifications, repost notification)](14-live-engagement-refresh.md) | fullstack | Must | 3 | 07 | In Review | #515 |
-| 15 | [Exercise management for controllers, and a "not allowed" page](15-exercise-management-access.md) | fullstack | Must | 3 | seam S-4 | In Review | #516 |
+| 13 | [Participant polish: tooltips (#494) and centered frame (#495)](13-participant-polish.md) | frontend | Should | 3 | 06, 07 | Complete | #509 |
+| 14 | [Live engagement refresh (counts, notifications, repost notification)](14-live-engagement-refresh.md) | fullstack | Must | 3 | 07 | Complete | #515 |
+| 15 | [Exercise management for controllers, and a "not allowed" page](15-exercise-management-access.md) | fullstack | Must | 3 | seam S-4 | Complete | #516 |
 | S1 | [Seed script: noise pool, exercise pins, watermark on](S1-seed-script-update.md) | script | Must | 3 | 04, 05 deployed | Not Started | #510 |
 | 16 | [MSEL import: alt text and engagement columns; slot in by planned minute](16-msel-import-alt-engagement-order.md) | backend | Must | 3 | 03 | In Review | #518 |
-| 29 | [Printable exercise report (PDF via print)](29-printable-exercise-report.md) | backend + frontend | Must | 3 | 02 | In Review | #550 |
+| 29 | [Printable exercise report (PDF via print)](29-printable-exercise-report.md) | backend + frontend | Must | 3 | 02 | Complete | #550 |
 | C | [Content: Kestrel MSEL file, noise pool (C1 burn-in dropped 10/15)](C-content-tasks.md) | content | Must | any | #491, 16 | Not Started | #511 |
 
 ## Manual UAT walk (Sun 10/18, before pencils down)

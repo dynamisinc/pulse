@@ -5,6 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using Pulse.WebApi.Features.EngineRuntime.Clock;
+using Pulse.WebApi.Features.EngineRuntime.Persistence;
 
 /// <summary>The tiered-pause state (CTL-023, D5-014/1.3) — exactly one tier is active per exercise.</summary>
 public enum PauseTier
@@ -115,10 +116,16 @@ public enum PauseTierOutcome
 /// unchanged. Surfaced verbatim on the <c>409</c> body so the console can tell a controller WHY their Freeze did
 /// not take — never staff-internal jargon and never a bare status code (NFR-001: the console renders it as text).
 /// </param>
+/// <param name="Persisted">
+/// Whether an APPLIED change was written through to the exercise's runtime-state row (demo-feedback DF-24).
+/// <c>false</c> only when that write failed (logged at Error; the tier still stands). Always <c>true</c> for
+/// <see cref="PauseTierOutcome.Unchanged"/> and the refusals, which write nothing.
+/// </param>
 public sealed record PauseTierResult(
     PauseTierOutcome Outcome,
     PauseTierTransition? Transition,
-    string? Reason = null);
+    string? Reason = null,
+    bool Persisted = true);
 
 /// <summary>
 /// The server-authoritative tiered-pause registry (feature: world-steering, story 07; CTL-023, COR-001,
@@ -150,9 +157,15 @@ public sealed record PauseTierResult(
 /// recorded, so a throwing clock can never leave a recorded tier behind.</para>
 ///
 /// <para><b>Isolation (COR-001).</b> Isolation is structural: there is no shared tier, so a Freeze on exercise A
-/// records A's tier and freezes A's clock and can never touch exercise B's. This is an in-memory runtime service
-/// (a singleton), not a persisted <see cref="Pulse.WebApi.Data.IExerciseScoped"/> entity — the same accepted
-/// limitation <see cref="ExerciseClockService"/> already has: an App Service restart clears the tiers.</para>
+/// records A's tier and freezes A's clock and can never touch exercise B's.</para>
+///
+/// <para><b>Survives a restart (demo-feedback story 18, DF-24/DF-26).</b> The tiers live in memory (a singleton)
+/// for the hot reads, and every APPLIED change is written through — tier, clock anchor and overlay snapshot, one
+/// row per exercise in <c>ExerciseRuntimeStates</c> — by <see cref="IExerciseRuntimeStatePersister"/>, AFTER the
+/// in-memory apply and the overlay publish and OUTSIDE <c>_gate</c>, awaited. A failed write is logged at Error and
+/// reported as <see cref="PauseTierResult.Persisted"/> = <c>false</c>; it never rolls the tier back. At startup the
+/// rehydrator puts each tier back exactly as persisted through <see cref="Restore"/>, so an App Service restart no
+/// longer clears the tiers; only the controller's runtime reset (<see cref="ResetAsync"/>, DF-28) does.</para>
 ///
 /// <para><b>No telemetry here (XC-004).</b> The ONE <c>steering_action</c> event per transition is emitted by the
 /// console (<c>usePauseState</c>, story 03) and is deliberately NOT duplicated server-side now that a live POST
@@ -162,6 +175,7 @@ public sealed partial class PauseTierRegistry
 {
     private readonly IExerciseClock _clock;
     private readonly IPauseOverlayPublisher _overlayPublisher;
+    private readonly IExerciseRuntimeStatePersister _persister;
     private readonly ILogger<PauseTierRegistry> _logger;
     private readonly ConcurrentDictionary<Guid, PauseTier> _tiers = new();
 
@@ -179,13 +193,31 @@ public sealed partial class PauseTierRegistry
         IExerciseClock clock,
         IPauseOverlayPublisher overlayPublisher,
         ILogger<PauseTierRegistry> logger)
+        : this(clock, overlayPublisher, new NullExerciseRuntimeStatePersister(), logger)
+    {
+    }
+
+    /// <summary>
+    /// Creates the registry with the runtime-state write-through (demo-feedback story 18) — the constructor DI uses.
+    /// </summary>
+    /// <param name="clock">The native per-exercise scenario clock a Freeze/Unfreeze drives.</param>
+    /// <param name="overlayPublisher">The participant-overlay seam.</param>
+    /// <param name="persister">Writes the applied state through to the exercise's runtime-state row.</param>
+    /// <param name="logger">Logs the transition and the "clock not started" edge case.</param>
+    public PauseTierRegistry(
+        IExerciseClock clock,
+        IPauseOverlayPublisher overlayPublisher,
+        IExerciseRuntimeStatePersister persister,
+        ILogger<PauseTierRegistry> logger)
     {
         ArgumentNullException.ThrowIfNull(clock);
         ArgumentNullException.ThrowIfNull(overlayPublisher);
+        ArgumentNullException.ThrowIfNull(persister);
         ArgumentNullException.ThrowIfNull(logger);
 
         _clock = clock;
         _overlayPublisher = overlayPublisher;
+        _persister = persister;
         _logger = logger;
     }
 
@@ -229,7 +261,10 @@ public sealed partial class PauseTierRegistry
     /// would HIDE a real stop from participants. A presentation typo must never block a safety action, so this
     /// coerces instead of refusing the Freeze.
     /// </param>
-    /// <param name="cancellationToken">Cancels the overlay publish.</param>
+    /// <param name="cancellationToken">
+    /// Accepted for API shape; deliberately NOT passed to the overlay publish or the write-through, which run on
+    /// <see cref="CancellationToken.None"/> once the tier is applied (Gate-1 M-1 / M-A).
+    /// </param>
     /// <returns>The outcome plus the completed transition when one happened.</returns>
     public async Task<PauseTierResult> SetTierAsync(
         Guid exerciseId,
@@ -286,20 +321,133 @@ public sealed partial class PauseTierRegistry
         // order.
         try
         {
-            await _overlayPublisher.PublishAsync(transition, cancellationToken).ConfigureAwait(false);
+            // Re-review M-A: CancellationToken.None — the tier is already applied, so a request abort must neither
+            // skip the participant publish nor (by throwing) the write-through below.
+            await _overlayPublisher.PublishAsync(transition, CancellationToken.None).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             LogOverlayPublishFailed(ex, transition.ExerciseId, transition.To);
         }
 
-        return new PauseTierResult(PauseTierOutcome.Applied, transition);
+        // DF-24: write the tier, clock anchor and overlay snapshot through — AFTER the in-memory apply and the overlay
+        // publish (so the row carries the snapshot participants were sent), OUTSIDE _gate, awaited. The persister
+        // never throws (cancellation aside) and never rolls back: a failed write is logged at Error by it and reported
+        // to the console as persisted:false while the applied tier stands.
+        //
+        // Gate-1 M-1: deliberately CancellationToken.None, never the request's token — the in-memory change is already
+        // applied, so a client that disconnects (RequestAborted) must not leave the row behind the world.
+        var persisted = await _persister.PersistAsync(transition.ExerciseId, CancellationToken.None).ConfigureAwait(false);
+
+        return new PauseTierResult(PauseTierOutcome.Applied, transition, Persisted: persisted);
+    }
+
+    /// <summary>
+    /// Puts exercise <paramref name="exerciseId"/>'s persisted <paramref name="tier"/> back at startup (story 18,
+    /// DF-26) — in memory only: no clock effect (the rehydrator restores the clock from its own anchor), no overlay
+    /// publish and no write-through (the row it came from is already current). Used only by the rehydrator.
+    /// </summary>
+    /// <param name="exerciseId">The exercise the persisted row belongs to (COR-001); must not be empty.</param>
+    /// <param name="tier">The persisted tier.</param>
+    public void Restore(Guid exerciseId, PauseTier tier)
+    {
+        if (exerciseId == Guid.Empty)
+        {
+            throw new ArgumentException("A pause-tier restore must name an exercise (COR-001).", nameof(exerciseId));
+        }
+
+        lock (_gate)
+        {
+            if (tier == PauseTier.Running)
+            {
+                _tiers.TryRemove(exerciseId, out _);
+            }
+            else
+            {
+                _tiers[exerciseId] = tier;
+            }
+        }
+    }
+
+    /// <summary>
+    /// The in-memory half of the controller's runtime reset (DF-28) for exercise <paramref name="exerciseId"/>: the
+    /// tier goes back to <see cref="PauseTier.Running"/>, the scenario clock is CLEARED to unstarted (through
+    /// <see cref="IExerciseClockPersistence.Clear"/>; a clock without it is at least unfrozen), and the participant
+    /// overlay is re-published as <c>none</c> with the next sequence — ALWAYS, even when the tier was already
+    /// Running, so every connected participant converges on no holding page. Idempotent. Deleting the persisted row
+    /// is the caller's job (<c>RuntimeStateResetService</c>). Never touches another exercise.
+    /// </summary>
+    /// <param name="exerciseId">The server-resolved exercise (COR-001); must not be <see cref="Guid.Empty"/>.</param>
+    /// <param name="actingHumanId">The staff human behind the reset (staff-side attribution only, XC-002).</param>
+    /// <param name="cancellationToken">
+    /// Accepted for API shape; the overlay publish runs on <see cref="CancellationToken.None"/> once the in-memory
+    /// reset is applied (M-A), so an aborted request can never skip it or the caller's row delete.
+    /// </param>
+    /// <returns>The tier the exercise was in before the reset.</returns>
+    public async Task<PauseTier> ResetAsync(
+        Guid exerciseId, string actingHumanId, CancellationToken cancellationToken = default)
+    {
+        if (exerciseId == Guid.Empty)
+        {
+            throw new ArgumentException("A runtime reset must name an exercise (COR-001).", nameof(exerciseId));
+        }
+
+        ArgumentException.ThrowIfNullOrWhiteSpace(actingHumanId);
+
+        PauseTier from;
+        lock (_gate)
+        {
+            from = GetTier(exerciseId);
+            _tiers.TryRemove(exerciseId, out _);
+
+            if (_clock is IExerciseClockPersistence persistableClock)
+            {
+                persistableClock.Clear(exerciseId);
+            }
+            else if (_clock.IsFrozen(exerciseId))
+            {
+                try
+                {
+                    _clock.Unfreeze(exerciseId);
+                }
+                catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+                {
+                    LogClockEffectFailed(ex, PauseTier.Running, exerciseId);
+                }
+            }
+        }
+
+        LogRuntimeReset(exerciseId, from, actingHumanId);
+
+        var transition = new PauseTierTransition(
+            exerciseId, from, PauseTier.Running, actingHumanId, OverlayStateWire.InFiction);
+
+        // Best-effort, exactly as SetTierAsync's publish (WR-004): a failed push never undoes the reset.
+        try
+        {
+            // Re-review M-A: CancellationToken.None — the tier is already applied, so a request abort must neither
+            // skip the participant publish nor (by throwing) the write-through below.
+            await _overlayPublisher.PublishAsync(transition, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            LogOverlayPublishFailed(ex, exerciseId, PauseTier.Running);
+        }
+
+        return from;
     }
 
     /// <summary>
     /// TEST-ONLY reset: clears every exercise's recorded tier. Production has one long-lived registry per host.
     /// </summary>
     internal void ResetForTests() => _tiers.Clear();
+
+    /// <summary>Source-generated runtime-reset audit log (CA1848).</summary>
+    [LoggerMessage(
+        Level = LogLevel.Information,
+        Message = "Runtime state for exercise {ExerciseId} was RESET (tier {From} -> Running, clock cleared, overlay " +
+                  "none) by {ActingHumanId}.")]
+    private partial void LogRuntimeReset(Guid exerciseId, PauseTier from, string actingHumanId);
 
     /// <summary>Source-generated tier-transition audit log (CA1848: no per-call allocation).</summary>
     [LoggerMessage(

@@ -234,6 +234,8 @@ const WRITE_CONTROLS: ReadonlyArray<readonly [string, () => HTMLElement[]]> = [
   ['Run sheet row: Skip', () => all('row-skip')],
   ['Run sheet row: Unskip', () => all('row-unskip')],
   ['Run sheet row: Delete', () => all('row-delete')],
+  // Demo-feedback story 23 (DF-36).
+  ['Run sheet row: Mark fired', () => all('row-mark-fired')],
   ['Run sheet row: Move up', () => all('row-move-up')],
   ['Run sheet row: Move down', () => all('row-move-down')],
   [
@@ -547,6 +549,7 @@ describe('a controller sees no change at all', () => {
 /**
  * The controller console's controls with the seed above, recorded on `feature/demo-feedback-w3`
  * @ e5b8d76c (before any story 11 gating). If this list changes, the controller's console changed.
+ * Since then, deliberately: story 23 (DF-36) adds "Mark fired" on pending / held / failed rows.
  *
  * Later addition: the header identity badge is now the exercise-switcher menu button (the dev mock
  * seam returns 2+ assignments), so it appears first. It is not a story-11 gated control.
@@ -669,6 +672,7 @@ const CONTROLLER_CONTROLS_BEFORE_STORY_11: readonly string[] = [
   'button|row-fire|Fire Pending one',
   'button|row-hold|Hold Pending one',
   'button|row-skip|Skip Pending one',
+  'button|row-mark-fired|Mark fired Pending one',
   'button|row-open|Edit Pending one',
   'button|row-delete|Delete Pending one',
   'button|row-move-up|Move Pending one up',
@@ -676,12 +680,14 @@ const CONTROLLER_CONTROLS_BEFORE_STORY_11: readonly string[] = [
   'button|row-fire|Fire Pending two',
   'button|row-hold|Hold Pending two',
   'button|row-skip|Skip Pending two',
+  'button|row-mark-fired|Mark fired Pending two',
   'button|row-open|Edit Pending two',
   'button|row-delete|Delete Pending two',
   'button|row-move-up|Move Pending two up',
   'button|row-move-down|Move Pending two down',
   'button|row-release|Release Held three',
   'button|row-skip|Skip Held three',
+  'button|row-mark-fired|Mark fired Held three',
   'button|row-open|Edit Held three',
   'button|row-delete|Delete Held three',
   'button|row-move-up|Move Held three up',
@@ -692,6 +698,7 @@ const CONTROLLER_CONTROLS_BEFORE_STORY_11: readonly string[] = [
   'button|row-move-up|Move Skipped four up',
   'button|row-move-down|Move Skipped four down',
   'button|row-retry|Retry Failed five',
+  'button|row-mark-fired|Mark fired Failed five',
   'button|row-open|Edit Failed five',
   'button|row-move-up|Move Failed five up',
   'button|row-move-down|Move Failed five down',

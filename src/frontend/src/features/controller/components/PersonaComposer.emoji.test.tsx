@@ -391,7 +391,7 @@ describe('PersonaComposerEmoji.module.css — the COBRA picker skin (story 12b)'
       '--emoji-line': palette.divider,
       '--emoji-control-line': palette.primary.dark,
       '--emoji-ink': palette.text.primary,
-      '--emoji-ink-muted': palette.primary.dark,
+      '--emoji-ink-muted': palette.text.muted,
       '--emoji-accent': palette.buttonPrimary.main,
       '--emoji-hover': palette.linkButton.light,
       '--emoji-radius': `${String(shape.borderRadius)}px`,

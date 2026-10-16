@@ -177,6 +177,12 @@ public class PulseDbContext : DbContext
     /// <summary>The white-noise post pool (demo-feedback/01, DF-12). Exercise-scoped (<see cref="IExerciseScoped"/>).</summary>
     public DbSet<NoisePost> NoisePosts => Set<NoisePost>();
 
+    /// <summary>Per-exercise steering runtime state that survives a restart (demo-feedback/17, DF-24). Exercise-scoped (<see cref="IExerciseScoped"/>).</summary>
+    public DbSet<ExerciseRuntimeState> ExerciseRuntimeStates => Set<ExerciseRuntimeState>();
+
+    /// <summary>The edit history of participants' own posts (demo-feedback/17, DF-29..DF-31). Exercise-scoped (<see cref="IExerciseScoped"/>).</summary>
+    public DbSet<PostEdit> PostEdits => Set<PostEdit>();
+
     /// <inheritdoc />
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -387,6 +393,10 @@ public class PulseDbContext : DbContext
             entity.Property(e => e.PinnedForAllByHumanId).HasMaxLength(Post.MaxPinnedForAllByHumanIdLength);
             entity.HasIndex(e => new { e.ExerciseId, e.PinnedForAllAt })
                 .HasFilter("[PinnedForAllAt] IS NOT NULL");
+
+            // demo-feedback/17 (DF-29..DF-31): edit tracking. EditCount is required-WITH-DEFAULT so the migration adds it
+            // NOT NULL DEFAULT 0 to a table that already holds rows; the two last-edit instants are nullable by type.
+            entity.Property(e => e.EditCount).IsRequired().HasDefaultValue(0);
         });
 
         modelBuilder.Entity<Follow>(entity =>
@@ -737,6 +747,54 @@ public class PulseDbContext : DbContext
 
             // `Order` is a SQL reserved word — EF brackets it; raw SQL must too.
             entity.HasIndex(e => new { e.ExerciseId, e.PostedCount, e.Order });
+        });
+
+        // ==========================================================================================
+        // demo-feedback/17 — Wave 4's ONE migration (DemoFeedbackWave4RuntimeAndEdits). Both entities are
+        // IExerciseScoped, so the reflection loop below gives them the central read filter and GuardExerciseScope
+        // covers their writes; nothing here scopes them by hand.
+        // ==========================================================================================
+        modelBuilder.Entity<ExerciseRuntimeState>(entity =>
+        {
+            // One row per exercise: the exercise id IS the key (so it is also the required, indexed scope column), and
+            // a Restrict FK to Exercises (XC-010: every FK is Restrict; exercises are never hard-deleted). No navigation;
+            // Exercise carries no exercise filter, so no required-end warning.
+            entity.HasKey(e => e.ExerciseId);
+            entity.Property(e => e.ExerciseId).ValueGeneratedNever();
+            entity.HasOne<Exercise>()
+                .WithOne()
+                .HasForeignKey<ExerciseRuntimeState>(e => e.ExerciseId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.Property(e => e.PauseTier).IsRequired().HasMaxLength(ExerciseRuntimeState.MaxPauseTierLength)
+                .HasDefaultValue(ExerciseRuntimeState.DefaultPauseTier);
+            entity.Property(e => e.ClockTimeZone).HasMaxLength(ExerciseRuntimeState.MaxClockTimeZoneLength);
+            entity.Property(e => e.ClockFrozen).IsRequired().HasDefaultValue(false);
+            entity.Property(e => e.OverlayState).IsRequired().HasMaxLength(ExerciseRuntimeState.MaxOverlayStateLength)
+                .HasDefaultValue(ExerciseRuntimeState.DefaultOverlayState);
+            entity.Property(e => e.OverlayRegister).HasMaxLength(ExerciseRuntimeState.MaxOverlayRegisterLength);
+            entity.Property(e => e.OverlayMessage).HasMaxLength(ExerciseRuntimeState.MaxOverlayMessageLength);
+            entity.Property(e => e.OverlaySequence).IsRequired().HasDefaultValue(0L);
+        });
+
+        modelBuilder.Entity<PostEdit>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+
+            // IExerciseScoped: required scope + the standard scoped lookup index (house style — PostMediaItem).
+            entity.Property(e => e.ExerciseId).IsRequired();
+            entity.HasIndex(e => e.ExerciseId);
+
+            // PreviousBody and ActingHumanId are unbounded like Post.Body / Post.ActingHumanId (nvarchar(max)).
+            entity.Property(e => e.PreviousBody).IsRequired();
+
+            // One row per edit number per post: the database is the last word under a concurrent double-submit.
+            entity.HasIndex(e => new { e.PostId, e.EditNumber }).IsUnique();
+
+            entity.HasOne<Post>()
+                .WithMany()
+                .HasForeignKey(e => e.PostId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         // ------------------------------------------------------------------------------------------

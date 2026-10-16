@@ -137,12 +137,12 @@ describe('participantAdmin (staff roster) — source guards', () => {
     expect(offenders((_p, s) => /document\s*\.\s*cookie/.test(code(s)))).toEqual([])
   })
 
-  it('hard-codes no colour: theme tokens everywhere except the one TODO(#461) override', () => {
+  it('hard-codes no colour: theme tokens everywhere, muted text included', () => {
     const hex = /#[0-9a-fA-F]{3,8}\b/
-    // `MUTED_TEXT` (rosterStyles.ts) is the single, tagged exception.
-    expect(offenders((path, s) => path !== './components/people/rosterStyles.ts' && hex.test(code(s))))
-      .toEqual([])
-    expect(SOURCES['./components/people/rosterStyles.ts']).toContain('TODO(#461)')
+    // The old TODO(#461) exception is gone: `MUTED_TEXT` is the COBRA `text.muted` token
+    // (demo-feedback 25), so no file here carries a hex.
+    expect(offenders((_path, s) => hex.test(code(s)))).toEqual([])
+    expect(SOURCES['./components/people/rosterStyles.ts']).toContain('palette.text.muted')
   })
 
   it('never injects raw HTML', () => {

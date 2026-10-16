@@ -411,6 +411,25 @@ export function useExerciseContext(): ExerciseScope {
 }
 
 /**
+ * The bound exercise scope, or `undefined` when no `ExerciseContextProvider` is
+ * mounted above the caller. A plain `useContext` read that never throws.
+ *
+ * NOT a substitute for `useExerciseContext()`: anything that renders, fetches or
+ * stamps on the scope must keep the throwing hook (fail-closed, COR-001). This
+ * exists for a seam that is legitimately mounted both inside and outside the
+ * provider and only uses the id as a CLIENT-SIDE cache key - today the persona
+ * reads (`features/personas/personaService.ts`, demo-feedback 24), which key
+ * their list on the active exercise so an in-place switch re-reads it, and stay
+ * unkeyed in an isolated mount (component tests, a picker handed a cast).
+ */
+// Colocated with the provider by design - see the eslint note on
+// `useExerciseContext` above.
+// eslint-disable-next-line react-refresh/only-export-components
+export function useOptionalExerciseContext(): ExerciseScope | undefined {
+  return useContext(ExerciseContextInternal)
+}
+
+/**
  * Returns the provider's server-authoritative re-resolution function
  * (staff-navigation/04, COR-073).
  *

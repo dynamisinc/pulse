@@ -74,6 +74,26 @@ public static class InjectBurstPlanner
     public const string ParentNotFiredMessage =
         "Fire the parent first: the scripted post this one replies to has not been published.";
 
+    /// <summary>
+    /// The readable failure for a reply whose scripted parent was MARKED fired (demo-feedback DF-36): that parent will
+    /// never be published, so "fire the parent first" would be a dead end.
+    /// </summary>
+    public const string ParentMarkedFiredMessage =
+        "The post this replies to was marked fired, not posted. Edit this item to reply to the real post.";
+
+    /// <summary>
+    /// The failure for a reply whose scripted parent in another item is unpublished: <see cref="ParentMarkedFiredMessage"/>
+    /// when that parent was marked fired, else <see cref="ParentNotFiredMessage"/>.
+    /// </summary>
+    /// <param name="target">The scripted parent post id.</param>
+    /// <param name="markedFiredParents">The scripted parent ids whose item was marked fired without publishing them.</param>
+    /// <returns>The message.</returns>
+    public static string UnpublishedParentMessage(Guid target, IReadOnlySet<Guid> markedFiredParents)
+    {
+        ArgumentNullException.ThrowIfNull(markedFiredParents);
+        return markedFiredParents.Contains(target) ? ParentMarkedFiredMessage : ParentNotFiredMessage;
+    }
+
     /// <summary>Decides the next publishing step for <paramref name="item"/>.</summary>
     /// <param name="item">The item, with its children loaded.</param>
     /// <param name="now">The current server instant.</param>
@@ -85,10 +105,21 @@ public static class InjectBurstPlanner
     public static InjectStep Next(
         InjectItem item,
         DateTimeOffset now,
-        IReadOnlyDictionary<Guid, Guid?> externalParentPostIds)
+        IReadOnlyDictionary<Guid, Guid?> externalParentPostIds) =>
+        Next(item, now, new InjectReplyParents(externalParentPostIds, new HashSet<Guid>()));
+
+    /// <summary>Decides the next publishing step for <paramref name="item"/>.</summary>
+    /// <param name="item">The item, with its children loaded.</param>
+    /// <param name="now">The current server instant.</param>
+    /// <param name="parents">
+    /// The publish state of every scripted reply target in ANOTHER item, and which of them were marked fired (DF-36).
+    /// </param>
+    /// <returns>The step.</returns>
+    public static InjectStep Next(InjectItem item, DateTimeOffset now, InjectReplyParents parents)
     {
         ArgumentNullException.ThrowIfNull(item);
-        ArgumentNullException.ThrowIfNull(externalParentPostIds);
+        ArgumentNullException.ThrowIfNull(parents);
+        var externalParentPostIds = parents.PostIds;
 
         var children = InjectTransitions.LiveChildren(item);
         var next = children.FirstOrDefault(post => post.Status == InjectPostStatuses.Pending);
@@ -139,7 +170,8 @@ public static class InjectBurstPlanner
 
         return externalParentPostIds.TryGetValue(target, out var parentPostId) && parentPostId is { } published
             ? new InjectStep(InjectStepKind.Publish, next, lateness, published)
-            : new InjectStep(InjectStepKind.Fail, next, lateness, Error: ParentNotFiredMessage);
+            : new InjectStep(
+                InjectStepKind.Fail, next, lateness, Error: UnpublishedParentMessage(target, parents.MarkedFired));
     }
 
     /// <summary>The instant <paramref name="child"/> is due: release + its offset + the item's accumulated shift.</summary>
@@ -176,3 +208,12 @@ public static class InjectBurstPlanner
         return (now - release).TotalSeconds - (child.DueOffsetSeconds ?? 0);
     }
 }
+
+/// <summary>
+/// The publish state of the scripted reply parents an item's posts point at in OTHER items: each target's published
+/// post id (<c>null</c> when it has not been published), and the targets whose item was marked fired without
+/// publishing them (demo-feedback DF-36), so a reply to one gets a message that is not a dead end.
+/// </summary>
+/// <param name="PostIds">Each target's published post id, or <c>null</c>. A missing target is unpublished.</param>
+/// <param name="MarkedFired">The targets whose item is <c>fired</c> although the target itself was never published.</param>
+public sealed record InjectReplyParents(IReadOnlyDictionary<Guid, Guid?> PostIds, IReadOnlySet<Guid> MarkedFired);

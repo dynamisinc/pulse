@@ -12,12 +12,12 @@
  *
  * RENDERING. Each item is a `<PostCard>` - the same card, actions and media as the feed,
  * so a video plays here exactly as it does on All Posts. A post pinned for everyone
- * (`pinnedForAll`) gets a small "Pinned" line with a thumbtack ABOVE the author line, in
- * fiction-safe words (never "controller" or "exercise control"); the word carries the
- * meaning, the icon is decoration (never colour- or icon-only, NFR-001). The card's own
- * `<article>` points `aria-describedby` at that line, so a screen reader moving by article
- * hears "Pinned" with the post. A post whose
- * author is not in the cast is skipped, as on the feed.
+ * (`pinnedForAll`) shows the card's own shared "Pinned" marker (`PinnedMarker`, story 21)
+ * above the author line, exactly as on every other surface: fiction-safe words, the word
+ * carries the meaning and the thumbtack is decoration (NFR-001), and the card's `<article>`
+ * is described by it. `usePinnedFeed` patches `pinnedForAll` on a `PostPinChanged` push, so
+ * the marker moves at once. A post whose author is not in the cast is skipped, as on the
+ * feed.
  *
  * TIME (COR-053). Every timestamp here is the card's own scenario-time header; this
  * component renders no time of its own.
@@ -42,8 +42,6 @@ import {
   useSyncExternalStore,
   type FocusEvent,
 } from 'react'
-import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import { faThumbtack } from '@fortawesome/free-solid-svg-icons'
 import { usePersonas, type Persona } from '@/features/personas'
 import {
   useShellContext,
@@ -75,7 +73,6 @@ export interface PinnedFeedProps {
 
 interface PinnedRowProps {
   readonly post: PostView
-  readonly pinnedForAll: boolean
   readonly variant: 'full' | 'readOnly'
   readonly onOpenThread?: (id: string) => void
   readonly onReply?: (id: string) => void
@@ -83,35 +80,20 @@ interface PinnedRowProps {
   readonly onOpenProfile?: (personaId: string) => void
 }
 
-/** One item: the optional "Pinned" line, then the card. Memoized like the feed's rows. */
+/**
+ * One item: the card, which draws its own "Pinned" marker (story 21). Memoized like the
+ * feed's rows.
+ */
 const PinnedRow = memo(function PinnedRow({
   post,
-  pinnedForAll,
   variant,
   onOpenThread,
   onReply,
   onHashtagOpen,
   onOpenProfile,
 }: PinnedRowProps) {
-  // The card is frozen (`PostCard` takes no aria props), so the label is tied to the card's
-  // own <article> here: moving by article, a screen reader hears "Pinned" as its description.
-  const labelId = useId()
-  const rowRef = useRef<HTMLLIElement>(null)
-  useLayoutEffect(() => {
-    const article = rowRef.current?.querySelector('article')
-    if (article === null || article === undefined) return
-    if (pinnedForAll) article.setAttribute('aria-describedby', labelId)
-    else article.removeAttribute('aria-describedby')
-  }, [pinnedForAll, labelId])
-
   return (
-    <li ref={rowRef} className={styles.row} data-pinned-post-id={post.id}>
-      {pinnedForAll && (
-        <p id={labelId} className={styles.pinnedLabel} data-testid="pinned-for-all-label">
-          <FontAwesomeIcon icon={faThumbtack} aria-hidden="true" className={styles.pinnedIcon} />
-          <span>Pinned</span>
-        </p>
-      )}
+    <li className={styles.row} data-pinned-post-id={post.id}>
       <PostCard
         post={post}
         variant={variant}
@@ -126,7 +108,6 @@ const PinnedRow = memo(function PinnedRow({
 
 interface PinnedRowModel {
   readonly view: PostView
-  readonly pinnedForAll: boolean
 }
 
 export function PinnedFeed({
@@ -155,10 +136,8 @@ export function PinnedFeed({
       if (removed.has(item.post.id)) continue
       const author = personaById.get(item.post.authorPersonaId)
       if (author === undefined) continue
-      out.push({
-        view: toPostView(item.post, author),
-        pinnedForAll: item.post.pinnedForAll === true,
-      })
+      // `toPostView` carries `pinnedForAll`, so the card shows its own marker.
+      out.push({ view: toPostView(item.post, author) })
     }
     return out
   }, [items, removed, personaById])
@@ -214,7 +193,6 @@ export function PinnedFeed({
           <PinnedRow
             key={row.view.id}
             post={row.view}
-            pinnedForAll={row.pinnedForAll}
             variant={cardVariant}
             onOpenThread={onOpenThread}
             onReply={onOpenThread !== undefined ? handleReply : undefined}

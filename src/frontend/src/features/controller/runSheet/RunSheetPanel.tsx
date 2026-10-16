@@ -54,6 +54,7 @@ import {
   useState,
   type KeyboardEvent,
   type ReactNode,
+  type Ref,
 } from 'react'
 import { Box } from '@mui/material'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
@@ -88,6 +89,7 @@ import {
   canDelete,
   canFire,
   canHold,
+  canMarkFired,
   canRelease,
   canRetry,
   canSkip,
@@ -155,12 +157,25 @@ interface SegmentedProps<T extends string> {
   readonly value: T
   readonly options: readonly SegmentOption<T>[]
   readonly onChange: (value: T) => void
+  /** The group element (to focus its pressed option from outside). */
+  readonly groupRef?: Ref<HTMLDivElement>
 }
 
 /** A small toggle group: each option is a COBRA button with `aria-pressed` + a check when on. */
-function Segmented<T extends string>({ label, value, options, onChange }: SegmentedProps<T>) {
+function Segmented<T extends string>({
+  label,
+  value,
+  options,
+  onChange,
+  groupRef,
+}: SegmentedProps<T>) {
   return (
-    <Box role="group" aria-label={label} sx={{ display: 'inline-flex', gap: 0.5, alignItems: 'center' }}>
+    <Box
+      ref={groupRef}
+      role="group"
+      aria-label={label}
+      sx={{ display: 'inline-flex', gap: 0.5, alignItems: 'center' }}
+    >
       {options.map(option => (
         <RunSheetButton
           key={option.value}
@@ -252,6 +267,11 @@ function RunSheetPanelBody({ exerciseId }: { readonly exerciseId: string }) {
   // The latest polled items, for decisions made AFTER an await (a render closure would be stale).
   const latestItems = useRef<readonly InjectItemDto[]>([])
   const rowRefs = useRef(new Map<string, HTMLLIElement>())
+  // DF-36: where focus goes once a "Mark fired" settles AND the list it changed has committed (the
+  // marked row may have left the current filter). `focusRequest` re-runs the effect that reads it.
+  const pendingMarkFocus = useRef<{ readonly id: string; readonly index: number } | null>(null)
+  const [focusRequest, setFocusRequest] = useState(0)
+  const statusFilterRef = useRef<HTMLDivElement>(null)
 
   const { items, pauseTier } = queue
   const frozen = pauseTier === 'freeze'
@@ -478,6 +498,38 @@ function RunSheetPanelBody({ exerciseId }: { readonly exerciseId: string }) {
     rowRefs.current.get(id)?.focus()
   }
 
+  // DF-36: fired without posting (the row asked to confirm). Allowed under FREEZE: nothing is
+  // published. Once it settles, focus is restored by the effect below, AFTER the updated list
+  // commits: the marked row may be gone (e.g. under the Open filter), and its "Mark fired" button
+  // is gone either way, so a keyboard user must never be left with focus nowhere.
+  const markFired = (item: InjectItemDto): void => {
+    if (!canMarkFired(item.status)) return
+    const index = Math.max(0, visible.findIndex(candidate => candidate.id === item.id))
+    void queue.markFired(item.id, item.version).then(outcome => {
+      report('mark fired', outcome, item.id)
+      pendingMarkFocus.current = { id: item.id, index }
+      setFocusRequest(n => n + 1)
+    })
+  }
+
+  // Runs once the list that reflects the mark has committed: the marked row if it is still shown,
+  // else the row that took its place (or the new last row), else, with nothing left in view, the
+  // current Status filter button (a stable toolbar control, and the reason the row left).
+  useEffect(() => {
+    const target = pendingMarkFocus.current
+    if (focusRequest === 0 || !target) return
+    pendingMarkFocus.current = null
+    const row =
+      visible.find(candidate => candidate.id === target.id) ??
+      visible[Math.min(target.index, visible.length - 1)]
+    if (row) {
+      setSelectedId(row.id)
+      rowRefs.current.get(row.id)?.focus()
+      return
+    }
+    statusFilterRef.current?.querySelector<HTMLElement>('[aria-pressed="true"]')?.focus()
+  }, [focusRequest, visible])
+
   const moveSelection = (delta: 1 | -1): void => {
     if (visible.length === 0) return
     const index = selected ? visible.findIndex(item => item.id === selected.id) : -1
@@ -595,6 +647,7 @@ function RunSheetPanelBody({ exerciseId }: { readonly exerciseId: string }) {
           />
           <Segmented<RunSheetFilters['status']>
             label="Status"
+            groupRef={statusFilterRef}
             value={filters.status}
             options={[
               { value: 'open', label: 'Open' },
@@ -806,6 +859,7 @@ function RunSheetPanelBody({ exerciseId }: { readonly exerciseId: string }) {
                 onSkip={() => toggleSkip(item)}
                 onUnskip={() => toggleSkip(item)}
                 onRetry={() => retryItem(item)}
+                onMarkFired={() => markFired(item)}
                 onOpen={() => openEditor(item)}
                 onRequestDelete={() => setConfirmDeleteId(item.id)}
                 onConfirmDelete={() => confirmDelete(item)}

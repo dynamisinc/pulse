@@ -23,6 +23,7 @@
 import type { Persona } from '@/features/personas'
 import type {
   PostCounts,
+  PostEditedSummary,
   PostInReplyTo,
   PostLinkPreview,
   PostMedia,
@@ -54,6 +55,14 @@ export interface PostView {
   counts: PostCounts
   /** The caller's own like/repost state; absent when unknown (broadcasts, staff). */
   viewer?: PostViewerState
+  /** Edit summary (DF-31); absent when never edited. */
+  edited?: PostEditedSummary
+  /**
+   * Pinned for everyone by a controller (DF-7): `true` or absent, as the read said. The card
+   * shows its "Pinned" marker from this plus the live pin state (story 21). Never says who
+   * or when; a personal pin is `viewer.pinned`, never this.
+   */
+  pinnedForAll?: true
   /** Scenario-time ISO instant this post was published (COR-053). */
   scenarioTime: string
 }

@@ -30,11 +30,19 @@ never the alert bar. In pilot mode the content arrives via platform notification
 - [x] Accessibility: `role="status"`; severity carried by chip text; a live-region announce fires on
       state change (NFR-001). Timestamp renders in **scenario time** (COR-053), never wall-clock. —
       `AlertBar.test.tsx`
+- [x] **Mobile (390px):** the ticker/band rows **wrap** instead of ellipsizing — the message is never
+      truncated, and the timestamp + Details drop to a second line when they no longer fit (D7-002's
+      one-line form holds wherever it fits). The shell reserves the bar's published height
+      (`--pulse-alert-height`) in its flow, so the in-flow channel nav never sits under it. —
+      `AlertBar.mobile.test.tsx`, `ShellLayout.test.tsx`
+- [x] **Details →** opens `/alerts` (client-side under the router): a reserved social route that lists
+      every active alert, most severe first, with chip + full message + scenario time (it previously
+      fell through to `/:handle` — "This account doesn't exist"). — `AlertBar.mobile.test.tsx`,
+      `AlertsHistory.test.tsx`, `SocialRoutes.test.tsx`
 
 ## Out of Scope
-Alert **content** patterns and the alerts-history page (channel-side, PRT-012 stub, D2) — the
-**Details →** link renders now but does not yet navigate anywhere or emit view telemetry; both land
-with the alerts-history page (later); publishing an alert (world-steering CTL-020/CTL-021 attention
+Alert **content** patterns; a full alerts HISTORY (expired/cleared alerts — needs the backend
+`/alerts` feed; the `/alerts` view lists the active set today) and its view telemetry (PRT-012, D2); publishing an alert (world-steering CTL-020/CTL-021 attention
 levers / SOC-072 notifications); the break-fiction overlay (story 05 — real-world, not an alert).
 
 ## Technical Notes

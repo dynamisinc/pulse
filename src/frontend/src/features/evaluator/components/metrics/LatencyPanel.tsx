@@ -11,6 +11,7 @@
 import { Box, Stack, Typography, LinearProgress, Chip, Tooltip } from '@mui/material'
 import { evidenceChipPalette } from '../../hooks/useMetrics'
 import type { LatencyRow } from '../../types'
+import { cobraTheme } from '@/theme/cobraTheme'
 
 interface LatencyPanelProps {
   rows: LatencyRow[];
@@ -24,7 +25,7 @@ export function LatencyPanel({ rows }: LatencyPanelProps) {
           <Typography sx={{ font: '800 11px ui-sans-serif,system-ui,sans-serif', letterSpacing: '.14em', color: '#4a4f55' }}>
             RESPONSE LATENCY
           </Typography>
-          <Typography sx={{ font: '500 11px ui-sans-serif,system-ui,sans-serif', color: '#848482' }}>
+          <Typography sx={{ font: '500 11px ui-sans-serif,system-ui,sans-serif', color: cobraTheme.palette.text.muted }}>
             time from prompt to first official response · off-platform responses included via
             controller markers (CTL-026)
           </Typography>
@@ -41,7 +42,7 @@ export function LatencyPanel({ rows }: LatencyPanelProps) {
           borderBottom: '1px solid #eceff2',
           font: '800 9px ui-sans-serif,system-ui,sans-serif',
           letterSpacing: '.12em',
-          color: '#848482',
+          color: cobraTheme.palette.text.muted,
         }}
       >
         <span>PROMPT</span>
@@ -67,7 +68,7 @@ export function LatencyPanel({ rows }: LatencyPanelProps) {
           >
             <Box>
               <Typography sx={{ font: '600 12px ui-sans-serif,system-ui,sans-serif' }}>{row.prompt}</Typography>
-              <Typography sx={{ font: '500 10.5px ui-monospace,Menlo,monospace', color: '#848482', mt: 0.25 }}>
+              <Typography sx={{ font: '500 10.5px ui-monospace,Menlo,monospace', color: cobraTheme.palette.text.muted, mt: 0.25 }}>
                 {row.promptTime}
               </Typography>
             </Box>

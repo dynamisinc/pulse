@@ -451,8 +451,15 @@ public class PostMediaWriteTests
         response.StatusCode.Should().Be(HttpStatusCode.Created);
 
         var body = await response.Content.ReadAsStringAsync();
-        var broadcast = JsonSerializer.Serialize(factory.Broadcaster.Calls.Single().Post, new JsonSerializerOptions(JsonSerializerDefaults.Web));
-        body.Should().Be(broadcast, "the participant 201 and PostReceived are one projection");
+        var broadcastPost = factory.Broadcaster.Calls.Single().Post;
+        broadcastPost.Viewer.Should().BeNull("PostReceived is one payload for everyone and stays viewer-free");
+
+        // demo-feedback story 19: the creator's 201 is that same projection plus ONLY its own viewer state (the full
+        // edit window), so Edit shows on the fresh post.
+        var expected = JsonSerializer.Serialize(
+            broadcastPost.WithViewer(new PostViewerStateDto(false, false, false, EditableForSeconds: 900)),
+            new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        body.Should().Be(expected, "the participant 201 and PostReceived are one projection, plus the creator's viewer state");
     }
 
     // ---------------------------------------------------------------------------------------------

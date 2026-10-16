@@ -9,7 +9,7 @@
 .feed {
   --pn-bg: #fff;
   --pn-ink: #0e1518;
-  /* 4.9:1 on white - AA for the 13px bold "Pinned" line and the 15px state text. */
+  /* 4.9:1 on white - AA for the 15px state text. (The "Pinned" line is the card's own now.) */
   --pn-ink-muted: #61707a;
 
   box-sizing: border-box;
@@ -37,30 +37,6 @@
 
 .row {
   display: block;
-}
-
-/*
- * "Pinned" above the author line. Indented to the card's content column (16px card
- * padding + 42px avatar + 12px gap) so it reads as part of the card it heads. The WORD
- * carries the meaning; the thumbtack is decoration (NFR-001).
- */
-.pinnedLabel {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  max-width: 600px;
-  box-sizing: border-box;
-  margin: 0;
-  padding: 10px 16px 0 70px;
-  color: var(--pn-ink-muted);
-  font-size: 13px;
-  font-weight: 700;
-  line-height: 1.2;
-}
-
-.pinnedIcon {
-  width: 12px;
-  height: 12px;
 }
 
 .state {

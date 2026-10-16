@@ -158,6 +158,23 @@ describe('live service — routes and verbs', () => {
     },
   )
 
+  it('POST /injects/{id}/mark-fired sends { expectedVersion } (DF-36)', async () => {
+    postMock.mockResolvedValue({ data: makeItem({ status: 'fired' }) })
+    const marked = await service.markFired('inj-1', 5)
+    expect(postMock).toHaveBeenCalledWith('/injects/inj-1/mark-fired', { expectedVersion: 5 })
+    expect(marked.status).toBe('fired')
+  })
+
+  it('a refused mark-fired (409) is a typed conflict with the current item', async () => {
+    const current = makeItem({ status: 'fired', version: 6 })
+    postMock.mockRejectedValue(
+      axiosError(409, { detail: 'This item is fired and cannot be marked fired.', item: current }),
+    )
+    const error = await service.markFired('inj-1', 5).catch((e: unknown) => e)
+    expect(error).toBeInstanceOf(InjectConflictError)
+    expect((error as InjectConflictError).item?.version).toBe(6)
+  })
+
   it('encodes the id into the path', async () => {
     postMock.mockResolvedValue({ data: item })
     await service.fire('inj/9 ?x')
@@ -181,6 +198,7 @@ describe('live service — no exerciseId, no acting human, in any request (COR-0
     for (const action of ['fire', 'hold', 'release', 'skip', 'unskip', 'retry'] as const) {
       await service[action]('inj-1')
     }
+    await service.markFired('inj-1', 1)
 
     const text = allRequestText()
     expect(text).not.toMatch(/exerciseId/i)

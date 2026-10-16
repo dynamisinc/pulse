@@ -61,7 +61,7 @@ overlap).
 
 | Entity | Change |
 |---|---|
-| **new** `ExerciseRuntimeState` (`ExerciseRuntimeStates`), `IExerciseScoped` | `ExerciseId` (PK + FK to `Exercises`, cascade), `PauseTier` nvarchar(16) not null default `running`, `ClockScenarioStart` datetimeoffset null, `ClockTimeZone` nvarchar(64) null, `ClockElapsedAtAnchorTicks` bigint null, `ClockWallAnchorUtc` datetimeoffset null, `ClockFrozen` bit not null default 0, `OverlayState` nvarchar(16) not null default `none`, `OverlayRegister` nvarchar(16) null, `OverlayMessage` nvarchar(500) null, `OverlaySequence` bigint not null default 0, `UpdatedAt` datetimeoffset not null. Clock columns are all null (unstarted) or all set |
+| **new** `ExerciseRuntimeState` (`ExerciseRuntimeStates`), `IExerciseScoped` | `ExerciseId` (PK + FK to `Exercises`, **restrict**: XC-010, no cascading FKs; amended 10/15 at story 17 build), `PauseTier` nvarchar(16) not null default `running`, `ClockScenarioStart` datetimeoffset null, `ClockTimeZone` nvarchar(64) null, `ClockElapsedAtAnchorTicks` bigint null, `ClockWallAnchorUtc` datetimeoffset null, `ClockFrozen` bit not null default 0, `OverlayState` nvarchar(16) not null default `none`, `OverlayRegister` nvarchar(16) null, `OverlayMessage` nvarchar(500) null, `OverlaySequence` bigint not null default 0, `UpdatedAt` datetimeoffset not null. Clock columns are all null (unstarted) or all set |
 | `Post` | `EditCount` int not null default 0; `LastEditedAt` datetimeoffset null (wall clock, staff/export only); `LastEditedScenarioTime` datetimeoffset null |
 | **new** `PostEdit` (`PostEdits`), `IExerciseScoped` | `Id` guid PK, `ExerciseId` not null, `PostId` FK to `Posts` (restrict), `EditNumber` int (1..5), `PreviousBody` (same max length as `Post.Body`), `EditedAt` datetimeoffset (wall), `EditedScenarioTime` datetimeoffset, `ActingHumanId` (same type as `Post.ActingHumanId`, nullable). Unique index (`PostId`, `EditNumber`) |
 
@@ -180,9 +180,10 @@ re-runs `CompositionRootWiringTests`.
   version. Hashtag/trending reads recompute from `Body` as they do today.
 - **Never show wall clock to a participant.** `editableForSeconds` is a duration; history shows scenario times.
 - **A test pins `PostViewerState` keys** (`post.provenance.test.ts`); 20 updates it for `editableForSeconds`.
-- **Duplicate writes across exercises.** The `PulseDbContext` write guard refuses rows for an exercise other than
-  the current context: read under the source exercise, write under the new one, never `IgnoreQueryFilters` on a
-  write. Media read must authorize by the `MediaAsset` row, not a blob path prefix; 22 proves a re-keyed row serves.
+- **Duplicate writes across exercises.** The `PulseDbContext` write guard only refuses an **empty** `ExerciseId`; it
+  does NOT refuse a row stamped with another exercise's id (corrected 10/15 at story 17 build). So 22 must set every
+  copied row's `ExerciseId` to the new exercise explicitly, read under the source exercise, never `IgnoreQueryFilters`
+  on a write, and prove with a test that no source row changed. Media read must authorize by the `MediaAsset` row, not a blob path prefix; 22 proves a re-keyed row serves.
 - **Mark fired publishes nothing.** It must not go through the post funnel or the burst runner.
 
 ## Risks

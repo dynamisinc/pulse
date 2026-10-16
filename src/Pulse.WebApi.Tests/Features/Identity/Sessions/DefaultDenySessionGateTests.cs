@@ -377,7 +377,7 @@ public sealed class DefaultDenySessionGateTests
             _acceptedToken = acceptedToken;
             Environment.SetEnvironmentVariable(
                 ConnectionStringEnvVar,
-                "Server=nonexistent;Database=pulse;Trusted_Connection=False;");
+                "Server=nonexistent;Database=pulse;Trusted_Connection=False;Connect Timeout=1;");
         }
 
         protected override void ConfigureWebHost(IWebHostBuilder builder)

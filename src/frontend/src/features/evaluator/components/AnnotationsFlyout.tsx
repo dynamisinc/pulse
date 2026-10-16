@@ -14,6 +14,7 @@ import { CobraPrimaryButton } from '@/theme/styledComponents'
 import { useToolstrip } from '@/features/staffShell/toolRegistry'
 import { useEvaluatorState } from '../contexts/EvaluatorStateContext'
 import type { AnnotationCategory } from '../types'
+import { cobraTheme } from '@/theme/cobraTheme'
 
 const CATEGORY_COLORS: Record<AnnotationCategory, { bg: string; fg: string }> = {
   STRENGTH: { bg: '#eef7f0', fg: '#256b43' },
@@ -46,12 +47,12 @@ export function AnnotationsFlyout() {
         <Typography sx={{ font: '800 11px ui-sans-serif,system-ui,sans-serif', letterSpacing: '.14em', color: '#4a4f55' }}>
           ANNOTATIONS
         </Typography>
-        <IconButton size="small" onClick={() => toggleTool('annotations')} sx={{ color: '#848482' }}>
+        <IconButton size="small" onClick={() => toggleTool('annotations')} sx={{ color: cobraTheme.palette.text.muted }}>
           <FontAwesomeIcon icon={faXmark} size="sm" />
         </IconButton>
       </Stack>
 
-      <Typography sx={{ font: '500 11px/1.5 ui-sans-serif,system-ui,sans-serif', color: '#848482', px: 2, pt: 1.25, pb: 0.75 }}>
+      <Typography sx={{ font: '500 11px/1.5 ui-sans-serif,system-ui,sans-serif', color: cobraTheme.palette.text.muted, px: 2, pt: 1.25, pb: 0.75 }}>
         Bookmarked moments with your notes. Push sends them to Cadence as observation evidence
         (EVL-021) — scoring stays in Cadence.
       </Typography>
@@ -67,7 +68,7 @@ export function AnnotationsFlyout() {
                   size="small"
                   sx={{ fontWeight: 800, fontSize: 8.5, letterSpacing: '.08em', borderRadius: '999px', bgcolor: colors.bg, color: colors.fg }}
                 />
-                <Typography sx={{ font: '600 10px ui-monospace,Menlo,monospace', color: '#848482' }}>{a.time}</Typography>
+                <Typography sx={{ font: '600 10px ui-monospace,Menlo,monospace', color: cobraTheme.palette.text.muted }}>{a.time}</Typography>
                 <Box sx={{ flex: 1 }} />
                 {a.pushed ? (
                   <Stack direction="row" sx={{ alignItems: 'center', gap: 0.5, color: '#256b43' }}>
@@ -85,7 +86,7 @@ export function AnnotationsFlyout() {
                 )}
               </Stack>
               <Typography sx={{ font: '500 12px/1.5 ui-sans-serif,system-ui,sans-serif', mt: 0.75 }}>{a.note}</Typography>
-              <Typography sx={{ font: '500 10px ui-sans-serif,system-ui,sans-serif', color: '#848482', mt: 0.5 }}>
+              <Typography sx={{ font: '500 10px ui-sans-serif,system-ui,sans-serif', color: cobraTheme.palette.text.muted, mt: 0.5 }}>
                 ⚓ {a.anchor}
               </Typography>
             </Box>

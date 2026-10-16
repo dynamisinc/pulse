@@ -138,3 +138,14 @@ public sealed class InjectReorderRequest
     [JsonPropertyName("ids")]
     public IReadOnlyList<string?>? Ids { get; init; }
 }
+
+/// <summary>
+/// The <c>POST /api/injects/{itemId}/mark-fired</c> body (demo-feedback DF-36): the item version the console last read.
+/// Nullable so a missing field is a readable validation <c>400</c>; a stale version is a <c>409</c> (IQ-9).
+/// </summary>
+public sealed class InjectMarkFiredRequest
+{
+    /// <summary>The item version the caller last read.</summary>
+    [JsonPropertyName("expectedVersion")]
+    public int? ExpectedVersion { get; init; }
+}

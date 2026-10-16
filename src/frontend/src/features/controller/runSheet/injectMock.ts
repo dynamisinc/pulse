@@ -156,6 +156,14 @@ export interface InjectMock extends InjectService {
 /** The server's readable refusals (story 06), so a detail shown in the console reads the same. */
 const FROZEN_MESSAGE = 'The world is frozen. Resume the exercise before firing.'
 const STALE_MESSAGE = 'Changed by someone else. Refresh to see the latest version.'
+const PARENT_NOT_FIRED_MESSAGE = 'Fire the parent first'
+/**
+ * DF-36: a reply whose scripted parent was MARKED fired (its item is `fired`, the parent post never
+ * published). "Fire the parent first" would be a dead end, so the server says this instead
+ * (`InjectBurstPlanner.ParentMarkedFiredMessage`, matched verbatim).
+ */
+export const PARENT_MARKED_FIRED_MESSAGE =
+  'The post this replies to was marked fired, not posted. Edit this item to reply to the real post.'
 
 /** Matches `resolveMockControllerIdentity('ex-mock-0001')` so "Mine" works in `npm run dev`. */
 export const MOCK_ME = 'human-controller-01'
@@ -320,6 +328,14 @@ export function createInjectMock(initial: InjectMockOptions = {}): InjectMock {
     return undefined
   }
 
+  /**
+   * Why a reply cannot go out while its scripted parent is unpublished (server:
+   * `InjectBurstPlanner.UnpublishedParentMessage`): the parent's item is `fired` although the
+   * parent never published -> it was marked fired (DF-36) and never will; else fire it first.
+   */
+  const unpublishedParentMessage = (parentItem: InjectItemDto): string =>
+    parentItem.status === 'fired' ? PARENT_MARKED_FIRED_MESSAGE : PARENT_NOT_FIRED_MESSAGE
+
   type Publish = 'fired' | 'failed' | 'waiting'
 
   /** The in-process publish (stands in for `PostIngestService.IngestAsync`). */
@@ -336,7 +352,7 @@ export function createInjectMock(initial: InjectMockOptions = {}): InjectMock {
         // An earlier child of the SAME burst that has not fired yet: wait for it.
         if (parent.item.id === item.id && parent.post.status === 'pending') return 'waiting'
         post.status = 'failed'
-        post.error = 'Fire the parent first'
+        post.error = unpublishedParentMessage(parent.item)
         return 'failed'
       }
     }
@@ -480,7 +496,9 @@ export function createInjectMock(initial: InjectMockOptions = {}): InjectMock {
     const only = item.posts[0]
     if (item.kind === 'post' && only?.replyTo && 'injectPostId' in only.replyTo) {
       const parent = findPost(only.replyTo.injectPostId)
-      if (parent && parent.post.status !== 'fired') throw conflict('Fire the parent first', item)
+      if (parent && parent.post.status !== 'fired') {
+        throw conflict(unpublishedParentMessage(parent.item), item)
+      }
     }
     // Who pressed Fire the FIRST time stays on the item (a re-fired held burst keeps its starter).
     item.firedByHumanId ??= actorId
@@ -564,6 +582,33 @@ export function createInjectMock(initial: InjectMockOptions = {}): InjectMock {
     } else {
       release(item, actorId)
     }
+    touch(item)
+    return view(item)
+  }
+
+  /**
+   * DF-36 "Mark fired": pending / held / failed -> fired WITHOUT publishing (server:
+   * `InjectTransitions.MarkFired`). Stale version 409 first, then the status 409. Allowed
+   * under FREEZE (nothing reaches participants). Children that never published -> skipped. The
+   * fire stamps are set only when the item never started (a started one keeps who fired it).
+   */
+  const doMarkFired = (id: string, expectedVersion: number, actorId: string): InjectItemDto => {
+    const item = findItem(id)
+    if (item.version !== expectedVersion) throw conflict(STALE_MESSAGE, item)
+    if (item.status !== 'pending' && item.status !== 'held' && item.status !== 'failed') {
+      throw conflict(`This item is ${item.status} and cannot be marked fired.`, item)
+    }
+    for (const post of item.posts) {
+      if (post.status === 'pending' || post.status === 'failed') post.status = 'skipped'
+    }
+    item.status = 'fired'
+    delete item.error
+    if (item.firedByHumanId === undefined) {
+      item.firedByHumanId = actorId
+      item.firedScenarioTime = scenarioNow().toISOString()
+    }
+    runtime.delete(item.id)
+    recount(item)
     touch(item)
     return view(item)
   }
@@ -799,6 +844,7 @@ export function createInjectMock(initial: InjectMockOptions = {}): InjectMock {
     skip: id => via(() => doSkip(id)),
     unskip: id => via(() => doUnskip(id)),
     retry: id => via(() => doRetry(id, actorId)),
+    markFired: (id, expectedVersion) => via(() => doMarkFired(id, expectedVersion, actorId)),
   })
 
   const dispose = (): void => {
@@ -842,6 +888,7 @@ export function createInjectMock(initial: InjectMockOptions = {}): InjectMock {
     skip: id => self().skip(id),
     unskip: id => self().unskip(id),
     retry: id => self().retry(id),
+    markFired: (id, expectedVersion) => self().markFired(id, expectedVersion),
     reset,
     setPauseTier(tier) {
       pauseTier = tier

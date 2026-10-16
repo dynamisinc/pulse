@@ -1,5 +1,6 @@
 namespace Pulse.WebApi.Features.ExerciseLifecycleAdmin;
 
+using System.Collections.Generic;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -18,8 +19,14 @@ using Microsoft.Extensions.DependencyInjection;
 /// <b>The route prefix says which tier this is.</b> <c>/api/org/*</c> — not <c>/api/staff/*</c> — because every
 /// existing <c>/api/staff/*</c> endpoint is scoped to the one server-resolved exercise, while these are scoped
 /// to the caller's CUSTOMER TENANT and deliberately span exercises. No route, query or body here carries an
-/// organization id in any form: the tenant is always the caller's own, resolved server-side, so there is no
-/// IDOR surface on the org axis at all.
+/// organization id in any form: the tenant is always the caller's own, resolved server-side.
+/// </para>
+/// <para>
+/// <b>Exercise ids on the org tier (demo-feedback story 22).</b> Until story 22 no org route took any parameter.
+/// The row actions (rename, archive) need one: an EXERCISE id, never an organization id. Each is on the explicit
+/// <see cref="ExerciseIdRoutes"/> allow-list and is authorized by <see cref="ExerciseManagementService"/> against
+/// the caller's server-resolved tenant (<c>InOrganization</c>) before anything else; another customer's id is a
+/// bare <c>404</c>, indistinguishable from an id that does not exist, never a <c>403</c>.
 /// </para>
 /// <para>
 /// <b>Two different gates, on purpose (COR-076).</b> The two exercise routes carry
@@ -56,6 +63,32 @@ public static class ExerciseLifecycleAdminEndpoints
     public const string StaffAssignmentsRoute = "/api/org/staff-assignments";
 
     /// <summary>
+    /// One of the caller's organization's exercises, by id (demo-feedback story 22): <c>PATCH</c> renames it.
+    /// The id is authorized against the caller's own tenant; another customer's id is a bare <c>404</c>.
+    /// </summary>
+    public const string ExerciseByIdRoute = "/api/org/exercises/{exerciseId:guid}";
+
+    /// <summary>Archives one of the caller's organization's exercises (<c>completed → archived</c> only; story 22).</summary>
+    public const string ArchiveExerciseRoute = "/api/org/exercises/{exerciseId:guid}/archive";
+
+    /// <summary>
+    /// The EXPLICIT allow-list of org-tier ENDPOINTS that take a route parameter (story 22), keyed by
+    /// (HTTP method, route template) so a new verb on an existing path is a new entry, not a free ride. Every entry
+    /// takes an exercise id that <see cref="ExerciseManagementService"/> authorizes against the caller's
+    /// server-resolved tenant before anything else happens, answering a foreign or unknown id with the same bare
+    /// <c>404</c>. <c>CompositionRootWiringTests</c> asserts that the parameterized org endpoints are EXACTLY this
+    /// set, and <c>OrgExerciseByIdIsolationTests</c> drives every entry with another customer's id and asserts the
+    /// 404. A new id-bearing org endpoint (a GET or DELETE on one of these paths included) therefore cannot land
+    /// without being added here, and cannot be added here without being proven to refuse another tenant.
+    /// </summary>
+    public static IReadOnlySet<(string Method, string Route)> ExerciseIdRoutes { get; } =
+        new HashSet<(string Method, string Route)>
+        {
+            ("PATCH", ExerciseByIdRoute),
+            ("POST", ArchiveExerciseRoute),
+        };
+
+    /// <summary>
     /// Registers the slice's three scoped services plus the shared per-request staff-caller resolver. All are
     /// Scoped, matching the <c>PulseDbContext</c> unit of work they read and write through — and the resolver
     /// memoizes within the request, so the endpoint filter and the service it gates share one lookup.
@@ -70,6 +103,7 @@ public static class ExerciseLifecycleAdminEndpoints
         services.AddScoped<ExerciseCreationService>();
         services.AddScoped<ExerciseListService>();
         services.AddScoped<OrgStaffDirectoryService>();
+        services.AddScoped<ExerciseManagementService>();
 
         return services;
     }
@@ -90,6 +124,14 @@ public static class ExerciseLifecycleAdminEndpoints
         endpoints.MapGet(StaffAssignmentsRoute, ListStaffAssignmentsAsync)
             .AddEndpointFilter(OrgAdminAuthorizationFilter.OrgAdminOnly);
 
+        // Story 22 row actions. Same role gate as create/list (DF-20 set); the id is authorized against the
+        // caller's tenant inside the service, so the filter's 401/403 never depends on the id at all.
+        endpoints.MapPatch(ExerciseByIdRoute, RenameExerciseAsync)
+            .AddEndpointFilter(OrgAdminAuthorizationFilter.ExerciseAdministrators);
+
+        endpoints.MapPost(ArchiveExerciseRoute, ArchiveExerciseAsync)
+            .AddEndpointFilter(OrgAdminAuthorizationFilter.ExerciseAdministrators);
+
         return endpoints;
     }
 
@@ -106,10 +148,9 @@ public static class ExerciseLifecycleAdminEndpoints
 
         return result.Outcome switch
         {
-            // 201 with NO Location header, deliberately. There is no by-id route to point at — and there
-            // must not be one: an /api/org/exercises/{id} shape would put a client-supplied identifier on
-            // the org tier, which is exactly what TheOrgTierRoutes_TakeNoRouteParameters guards against. A
-            // Location pointing at a route that 404s would be worse than none.
+            // 201 with NO Location header, deliberately: there is no GET-by-id route to point at (story 22's
+            // by-id routes are PATCH and POST actions only), and a Location that 404s on GET would be worse
+            // than none.
             CreateExerciseOutcome.Created when result.Response is { } response =>
                 Results.Json(response, statusCode: StatusCodes.Status201Created),
             CreateExerciseOutcome.Invalid => Results.BadRequest(result.Error),
@@ -121,6 +162,39 @@ public static class ExerciseLifecycleAdminEndpoints
             _ => Results.StatusCode(StatusCodes.Status500InternalServerError),
         };
     }
+
+    /// <summary>Renames one of the caller's organization's exercises (story 22).</summary>
+    private static async Task<IResult> RenameExerciseAsync(
+        Guid exerciseId,
+        [FromBody] RenameExerciseRequest? request,
+        [FromServices] ExerciseManagementService managementService,
+        CancellationToken cancellationToken) =>
+        ToResult(await managementService.RenameAsync(exerciseId, request, cancellationToken));
+
+    /// <summary>Archives one of the caller's organization's exercises (story 22; completed only).</summary>
+    private static async Task<IResult> ArchiveExerciseAsync(
+        Guid exerciseId,
+        [FromServices] ExerciseManagementService managementService,
+        CancellationToken cancellationToken) =>
+        ToResult(await managementService.ArchiveAsync(exerciseId, cancellationToken));
+
+    /// <summary>
+    /// Maps a row-action result to a status. <c>NotFound</c> is a BARE 404 with no body, the same for another
+    /// customer's exercise as for an id that never existed, so the response discloses nothing about either.
+    /// </summary>
+    private static IResult ToResult(ExerciseManagementResult result) => result.Outcome switch
+    {
+        ExerciseManagementOutcome.Ok when result.Exercise is { } exercise => Results.Ok(exercise),
+        ExerciseManagementOutcome.Invalid => Results.BadRequest(result.Error),
+        ExerciseManagementOutcome.Unauthenticated => Results.Unauthorized(),
+        ExerciseManagementOutcome.Forbidden => Results.StatusCode(StatusCodes.Status403Forbidden),
+        ExerciseManagementOutcome.NotFound => Results.NotFound(),
+        ExerciseManagementOutcome.NotCompleted => Results.Conflict(
+            new ExerciseActionConflictDto { Reason = ExerciseManagementService.NotCompletedReason }),
+
+        // Unreachable: an Ok outcome always carries a row. Fail closed rather than 200 an empty body.
+        _ => Results.StatusCode(StatusCodes.Status500InternalServerError),
+    };
 
     /// <summary>Lists the caller's organization's exercises (COR-075). A <c>null</c> result fails closed to 401.</summary>
     private static async Task<IResult> ListExercisesAsync(

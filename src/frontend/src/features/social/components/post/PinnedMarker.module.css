@@ -1,0 +1,34 @@
+/*
+ * features/social/components/post/PinnedMarker.module.css
+ * ---------------------------------------------------------------------------
+ * The "Pinned" line above a card's author row (demo-feedback story 21). Reads the card's
+ * `--pc-*` tokens (declared on `.postCard`, PostCard.module.css), so it follows the Pulse
+ * skin. It spans the card's full width as the first flex line of a pinned card, indented to
+ * the content column (42px avatar + the card's 12px / 8px gap) so the word sits over the
+ * author name, as X does. `--pc-ink-muted` is 4.9:1 on `--pc-bg`: AA for 13px bold.
+ */
+
+.marker {
+  display: flex;
+  flex: 0 0 100%;
+  align-items: center;
+  gap: 6px;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0 0 0 54px;
+  color: var(--pc-ink-muted);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.icon {
+  width: 12px;
+  height: 12px;
+}
+
+@media (max-width: 420px) {
+  .marker {
+    padding-left: 50px;
+  }
+}
