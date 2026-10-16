@@ -28,9 +28,9 @@ engine-review-cockpit (#34–36) and world-steering; produces exactly what they 
 | 02 | Auto-HOLD-on-timeout wiring (never auto-send) | ADP-040 / D5-014/1.1 | Complete | #170 |
 | 03 | Kill switch (drop to Suggest / stop) | ADP-042 | Complete | #171 |
 | 04 | Controller-workload contract (≤6/min demand) | CTL-034 / D5-014/2.7 | Complete | #172 |
-| 05 | Engine settings API (autonomy default + tier policy, runtime-settable) | ADP §2.3 / ADP-025 | In Progress — built, Gate-2 clean; DoD needs verified-in-UAT | #353 |
-| 06 | Engine settings panel (console admin surface) | ADP §2.3 | In Progress — built + merged to main, gates clean; DoD needs verified-in-UAT | #354 |
-| 07 | Cut generation to the Fake provider (runtime egress safety lever) | ADP-042 / NFR-005/ADP-025 | In Progress — backend (edges 6a+6b) AND frontend (edge 7) both built and integrated; edge 7's own Gate-1 (0 Criticals, 4 Warnings) folded and closed; full-stack Gate-2 clean (0 Criticals, 3 Warnings, 3 Suggestions — WR-G2-007 folding in parallel, S-3 accepted as a known gap); UAT is the sole remaining gate, blocked on both the unsigned `PROVIDER-GOVERNANCE.md` §8 signature and a pre-existing `databaseDeploy` infra defect | #402 |
+| 05 | Engine settings API (autonomy default + tier policy, runtime-settable) | ADP §2.3 / ADP-025 | In Progress — built, Gate-2 clean; DoD needs verified-in-UAT (§8 signed; waits on PR #571 merging (after Session A's A1) and the UAT infra deploy) | #353 |
+| 06 | Engine settings panel (console admin surface) | ADP §2.3 | In Progress — built + merged to main, gates clean; DoD needs verified-in-UAT (§8 signed; waits on PR #571 merging (after Session A's A1) and the UAT infra deploy) | #354 |
+| 07 | Cut generation to the Fake provider (runtime egress safety lever) | ADP-042 / NFR-005/ADP-025 | In Progress — backend (edges 6a+6b) AND frontend (edge 7) both built and integrated; edge 7's own Gate-1 (0 Criticals, 4 Warnings) folded and closed; full-stack Gate-2 clean (0 Criticals, 3 Warnings, 3 Suggestions — WR-G2-007 folding in parallel, S-3 accepted as a known gap); UAT verification is the sole remaining gate; §8 is signed (2026-10-16) and it waits on PR #571 merging (after Session A's A1) and the UAT infra deploy | #402 |
 
 **Delivered** as the pure-backend `Pulse.Core/Features/Autonomy/*` slice (see its `README.md`): the
 `EngineAutonomyState` aggregate (level resolution + kill switch + degraded-mode clamp), the pure
