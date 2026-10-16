@@ -53,6 +53,10 @@ Capitals, accents, spaces and punctuation in the word do not matter.
 
 The player tried too many times in a short period. Ask them to wait a minute and try again.
 
+The limit counts tries **per device**, so one player's mistakes do not lock out the rest of the room, even when
+everyone is on the same venue Wi-Fi. If many players see this at once, contact support. It may mean the
+server cannot see individual devices.
+
 ### The exercise is not open to players
 
 Players can only sign in while the exercise is **Staged**, **Live** or **Paused**. Check the state on

@@ -17,18 +17,13 @@ using Pulse.WebApi.Tests.Data;
 /// address and client B is refused with client A's 429.
 /// </summary>
 /// <remarks>
-/// <b>Skipped until the orchestrator wires the two Program.cs lines</b> (this story may not edit
-/// <c>Program.cs</c>). Before wiring it fails red, which is the point; remove <see cref="PendingWiring"/> from
-/// the attribute in the same commit as the wiring. Real SQL because the real pipeline's host resolution runs a
+/// Proves the <b>real</b> <c>Program.cs</c> wiring order (forwarded headers first, before the rate limiter).
+/// It was written before the wiring and failed red until the two Program.cs lines landed. Real SQL because the real pipeline's host resolution runs a
 /// lookup on every request; every login is a null body (400) so no account is seeded.
 /// </remarks>
 [Collection(MsSqlCollection.Name)]
 public sealed class ForwardedHeadersPipelineOrderTests
 {
-    /// <summary>The skip reason, removed when Program.cs wires the slice.</summary>
-    public const string PendingWiring =
-        "Pending orchestrator Program.cs wiring of AddPulseForwardedHeaders/UsePulseForwardedHeaders (identity-auth-roles/18).";
-
     private const string ProxyIp = "10.0.0.4";
 
     private readonly MsSqlContainerFixture _fixture;
@@ -38,7 +33,7 @@ public sealed class ForwardedHeadersPipelineOrderTests
     public ForwardedHeadersPipelineOrderTests(MsSqlContainerFixture fixture) => _fixture = fixture;
 
     /// <summary>AC-3 + AC-5 through Program: client A trips its own limit; client B behind the same proxy does not.</summary>
-    [RequiresDockerFact(Skip = PendingWiring)]
+    [RequiresDockerFact]
     public async Task RealPipeline_ForwardedHeadersRunBeforeTheRateLimiter_SoClientsBehindTheProxyGetSeparateBuckets()
     {
         _fixture.ConnectionString.Should().NotBeNull("the Docker-gated MsSql fixture must have started");

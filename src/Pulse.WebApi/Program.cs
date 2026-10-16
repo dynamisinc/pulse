@@ -38,6 +38,7 @@ using Pulse.WebApi.Features.Social.Moderation; // demo-polish B6
 using Pulse.WebApi.Features.Social.PersonaAdmin; // demo-polish PE-BE
 using Pulse.WebApi.Features.Social.Reactions;  // demo-polish B3
 using Pulse.WebApi.Features.Social.Editing;
+using Pulse.WebApi.Features.TrustedProxy; // identity-auth-roles/18 (#480)
 
 // Pulse.WebApi — the first runtime for the Pulse.Core engine (docs/BACKEND_ROADMAP.md §4, Phase B0).
 // This composition root is orchestrator-owned from here on: only a story that adds a *new* DI
@@ -93,6 +94,8 @@ builder.Services.AddExerciseResolution();
 // AddStaffIdentity is listed first as the intended order). Both AddRateLimiter calls accumulate distinct
 // named policies under the single app.UseRateLimiter() below.
 builder.Services.AddStaffIdentity(builder.Configuration);
+// identity-auth-roles/18 (#480): trusted-proxy forwarded headers. A no-op unless ForwardedHeaders:KnownNetworks/KnownProxies are set.
+builder.Services.AddPulseForwardedHeaders(builder.Configuration);
 builder.Services.AddSessions(builder.Configuration);
 
 // Per-exercise configuration (E1 exercise-configuration, story 01b). REQUIRED, not optional: the six
@@ -315,6 +318,10 @@ builder.Services.AddCors(options =>
 builder.Services.AddApplicationInsightsTelemetry();
 
 var app = builder.Build();
+
+// identity-auth-roles/18 (#480): MUST be the first middleware — before CORS, exercise resolution, session
+// authentication and the rate limiter — so every per-IP partition sees the real client, not the front end.
+app.UsePulseForwardedHeaders();
 
 app.UseCors(FrontendCorsPolicy);
 

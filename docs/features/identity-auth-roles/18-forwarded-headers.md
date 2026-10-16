@@ -1,6 +1,6 @@
 # Story: Forwarded headers so the per-IP rate limiter sees the client (#480)
 
-**Feature:** Identity, auth & roles  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Not Started
+**Feature:** Identity, auth & roles  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** In Review
 **Requirements:** NFR-009, COR-012 (+ #480)  ·  **Design decisions:** ADMIN-IDENTITY-MODEL §3.2, §9  ·  **Issue:** #480
 **Stack:** backend  ·  **Review tier:** Tier-2 (security)  ·  **Wave:** A1
 
@@ -14,7 +14,7 @@ or no one. The lockout policy ([`docs/design/ADMIN-IDENTITY-MODEL.md`](../../des
 - [ ] Given a request from an untrusted source with a spoofed `X-Forwarded-For`, then the header is ignored (trusts only the platform proxy).
 - [ ] Given forwarded headers middleware, then it is registered **before** the rate limiter in the pipeline (asserted by a test).
 - [ ] Given `X-Forwarded-Proto`, then HTTPS redirection / secure-cookie logic sees the original scheme.
-- [ ] Given 6 failed staff logins from one client IP, then the limiter trips for that IP only; a second client IP is unaffected.
+- [ ] Given the existing staff-login limit (10 per minute) is exceeded from one client IP (the 11th attempt), then the limiter trips for that IP only; a second client IP behind the same proxy is unaffected. *(Corrected from "6 failed logins": the existing limit is 10/min and this story does not change limiters.)*
 - [ ] Isolation: the limiter partition never mixes exercises or orgs; no per-route foreign-exercise/org test is needed as no route is added (stated).
 - [ ] User guide (C5 docs-as-done): `docs/OPERATE.md` (trusted-proxy config) is updated in the same PR; no `docs/guide/` page changes ("no guide impact").
 
