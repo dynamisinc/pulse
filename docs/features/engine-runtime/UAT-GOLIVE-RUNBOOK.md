@@ -29,6 +29,7 @@ Read the job summary. Expect **only** these changes:
 | | **Add** `ForwardedHeaders__KnownNetworks__0 = 10.0.0.0/8` | A1a (#480): trusted-proxy ranges, so the per-IP login limiter sees the real client IP |
 | | **Add** `ForwardedHeaders__KnownNetworks__1 = 172.16.0.0/12` | A1a (#480) |
 | | **Add** `ForwardedHeaders__KnownNetworks__2 = 192.168.0.0/16` | A1a (#480). No `KnownProxies`; `ForwardLimit` stays at the code default of 1 |
+| | **Add** the four limiter permits from step 1b (`SessionPerMinute = 120`, `WordPermitPerMinute = 30`, `ParticipantLoginPerMinute = 30`, `SharedLoginPerMinute = 20`) | A1a (#480): single-venue permits |
 | Action group and four `scheduledQueryRules` (`ag-…-provider`, errors / latency / timeouts / spend) | **Create**, only if you enabled alerts | #585 / #590 |
 
 > ⚠ **Never set `ASPNETCORE_FORWARDEDHEADERS_ENABLED=true`.** It trusts forwarded headers from *any* client, so anyone
@@ -39,20 +40,24 @@ Read the job summary. Expect **only** these changes:
 - a change to the SQL server or database;
 - a change to `aif-pulse-uat`'s model deployments.
 
-### 1b. Raise the login and join limiter permits for a single-venue exercise (values pending Tom)
+### 1b. Login and join limiter permits for a single-venue exercise
 
 A1a (#480) makes the per-IP limiters key on the real client IP. Players on one venue's Wi-Fi share a single public
-IP behind its NAT, so they would share **one** limiter bucket, and a room full of players joining at once could hit
-`429`. Before the demo, raise the join, day-word and login permits for UAT.
+IP behind its NAT, so they share **one** limiter bucket, and a room full of players joining at once could hit
+`429`. A1a's `webapp.bicep` raises these permits for UAT, so they also appear in the step-1 what-if as **added**
+app settings:
 
-| App setting | Value |
+| App setting | UAT value |
 |---|---|
-| `Authentication__EasyLogin__JoinPermitPerMinute` | **pending Tom** |
-| *(day-word equivalent; Session A to confirm the key)* | **pending Tom** |
-| *(staff and participant login equivalents; Session A to confirm the keys)* | **pending Tom** |
+| `Authentication__RateLimits__SessionPerMinute` | **120** |
+| `Authentication__EasyLogin__WordPermitPerMinute` | **30** |
+| `Authentication__RateLimits__ParticipantLoginPerMinute` | **30** |
+| `Authentication__RateLimits__SharedLoginPerMinute` | **20** |
+| `Authentication__EasyLogin__JoinPermitPerMinute` | not set; stays at the default of 30 |
+| Staff login | not set; stays at the default of 10 (smoke check 5 relies on this) |
 
-Session A is confirming the exact keys and proposing values, and the orchestrator will relay them once Tom picks.
-They land as additional rows in the step-1 expected what-if.
+> These values are **demo-sized** (one room, a few dozen players). A 100-person StartEx on one venue's NAT needs the
+> larger set, which Session A can supply. Raise them before that exercise, not on Sunday.
 
 ## 2. Deploy Infrastructure: for real
 
