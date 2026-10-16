@@ -256,13 +256,13 @@ public sealed class ReportAccountDto
     [JsonPropertyName("verified")]
     public required bool Verified { get; init; }
 
-    /// <summary>Shown likes summed over the persona's posts.</summary>
+    /// <summary>Shown likes summed over the persona's posts (64-bit: the sum can pass <see cref="int.MaxValue"/>).</summary>
     [JsonPropertyName("likes")]
-    public required int Likes { get; init; }
+    public required long Likes { get; init; }
 
-    /// <summary>Shown reposts summed over the persona's posts.</summary>
+    /// <summary>Shown reposts summed over the persona's posts (64-bit).</summary>
     [JsonPropertyName("reposts")]
-    public required int Reposts { get; init; }
+    public required long Reposts { get; init; }
 }
 
 /// <summary>One post in the record.</summary>

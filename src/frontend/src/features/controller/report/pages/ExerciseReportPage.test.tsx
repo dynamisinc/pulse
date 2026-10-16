@@ -290,4 +290,32 @@ describe('ExerciseReportPage', () => {
     await waitFor(() =>
       expect(screen.getByRole('button', { name: 'Print / Save as PDF' })).toBeEnabled())
   })
+
+  it('disables Print while a cached report refreshes, so a stale record cannot be saved', async () => {
+    let calls = 0
+    let release: (value: AxiosResponse<ExerciseReport>) => void = () => undefined
+    vi.spyOn(api, 'get').mockImplementation((_url, config) => {
+      calls += 1
+      // The third call is the refresh of the cached includeNoise=false result: hold it open.
+      if (calls === 3) return new Promise(resolve => { release = resolve })
+      return Promise.resolve(ok(mockReportFor(config?.params?.includeNoise === true)))
+    })
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findByTestId('report-sheet')
+    const checkbox = screen.getByRole('checkbox', { name: 'Include background noise' })
+
+    await user.click(checkbox)
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Print / Save as PDF' })).toBeEnabled())
+
+    // Back to the cached setting: its data shows at once (not placeholder)
+    // while staleTime 0 refetches it.
+    await user.click(checkbox)
+    expect(screen.getByRole('button', { name: 'Print / Save as PDF' })).toBeDisabled()
+
+    release(ok(mockReportFor(false)))
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Print / Save as PDF' })).toBeEnabled())
+  })
 })

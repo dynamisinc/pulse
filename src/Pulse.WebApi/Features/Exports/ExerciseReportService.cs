@@ -225,6 +225,15 @@ public sealed partial class ExerciseReportService
             .ToListAsync(cancellationToken);
 
         var listed = posts.Where(post => includeNoise || !ExerciseReportBuilder.IsNoise(post.Origin)).ToList();
+
+        // Posts keep arriving between the count and this read, so the limit is checked again on what was read.
+        if (listed.Count > MaxListedPosts)
+        {
+            return ExerciseReportResult.TooManyPosts(
+                $"This exercise has {listed.Count.ToString("N0", CultureInfo.InvariantCulture)} posts to list, more than "
+                + "the printable report can hold (5,000). Use the spreadsheet export instead.");
+        }
+
         var postFacts = posts.ConvertAll(post => new ReportPostFact(
             post.Id, post.AuthorPersonaId, post.Origin, post.CreatedScenarioTime, post.CreatedWallClock, post.ParentPostId, post.Body));
 
@@ -335,11 +344,14 @@ public sealed partial class ExerciseReportService
         IReadOnlyList<ReportActivityBin> bins,
         TimeZoneInfo zone)
     {
-        // An inject's posts are those whose InjectId names the item (InjectPostRequestFactory writes item.Id).
+        // An inject's posts are those whose InjectId names the item (InjectPostRequestFactory writes item.Id) AND whose
+        // origin is the server-stamped "inject": InjectId is accepted on ordinary posts too, so a participant or
+        // controller post naming a fired item must not move its delivery time or add its author to the @mention rule.
         var postsByInject = new Dictionary<Guid, List<PostRow>>();
         foreach (var post in posts)
         {
-            if (Guid.TryParse(post.InjectId, out var itemId) && lookups.Injects.TryGetValue(itemId, out var item) && item.Delivered)
+            if (string.Equals(post.Origin, ExerciseReportBuilder.InjectOrigin, StringComparison.Ordinal)
+                && Guid.TryParse(post.InjectId, out var itemId) && lookups.Injects.TryGetValue(itemId, out var item) && item.Delivered)
             {
                 if (!postsByInject.TryGetValue(itemId, out var list))
                 {
@@ -422,14 +434,11 @@ public sealed partial class ExerciseReportService
         IReadOnlyDictionary<Guid, PostEngagement> engagement)
     {
         var persona = lookups.Personas[personaId];
-        var likes = 0;
-        var reposts = 0;
-        foreach (var post in posts.Where(post => post.AuthorPersonaId == personaId))
-        {
-            var real = engagement.GetValueOrDefault(post.Id);
-            likes += post.BaselineLikeCount + (real?.RealLike ?? 0);
-            reposts += post.BaselineRepostCount + (real?.RealRepost ?? 0);
-        }
+        var authored = posts.Where(post => post.AuthorPersonaId == personaId).ToList();
+        var likes = ExerciseReportBuilder.SumShown(authored.Select(post =>
+            (post.BaselineLikeCount, engagement.GetValueOrDefault(post.Id)?.RealLike ?? 0)));
+        var reposts = ExerciseReportBuilder.SumShown(authored.Select(post =>
+            (post.BaselineRepostCount, engagement.GetValueOrDefault(post.Id)?.RealRepost ?? 0)));
 
         return new ReportAccountDto
         {

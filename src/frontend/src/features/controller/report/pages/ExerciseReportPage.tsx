@@ -114,7 +114,9 @@ export function ExerciseReportPage() {
             size="small"
             startIcon={<FontAwesomeIcon icon={faPrint} aria-hidden="true" />}
             onClick={() => window.print()}
-            disabled={report === undefined || query.isError || query.isPlaceholderData}
+            disabled={
+              report === undefined || query.isError || query.isPlaceholderData || query.isFetching
+            }
           >
             Print / Save as PDF
           </CobraPrimaryButton>
