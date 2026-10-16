@@ -66,7 +66,8 @@ param deployAi = true
 // leaving it on indefinitely.
 //
 // SIGNED 2026-10-16 (Tom Bull) — PROVIDER-GOVERNANCE.md §8, uat / Ambient; Suggest default,
-// Delayed-auto + lead-controller swamped mode authorized (§8 "Authorized autonomy" amendment).
+// Delayed-auto + swamped mode authorized: lead-only to turn on, any controller to turn off
+// (§8 "Authorized autonomy" amendment).
 param generationProviderLive = true
 
 // The two §2 governance attestations, asserted HERE BY A HUMAN — deliberately not derived from deployAi,

@@ -162,19 +162,30 @@ reachable. See "Authorized autonomy (amendment at signing)" below.*
 #### Authorized autonomy (amendment at signing, 2026-10-16, Tom Bull)
 
 The posture above predates #353. With #353 on `main`, a controller can raise the exercise's autonomy
-default to **Delayed-auto** and a lead controller can turn on **swamped mode**. Under both, `AutoHoldPolicy`
-publishes an expired Delayed-auto draft that has no controller decision. The signer **authorizes** that
-on `uat` with the live provider, on these conditions, all already enforced in code:
+default to **Delayed-auto** and the exercise's **lead controller** can turn on **swamped mode**. Under both,
+`AutoHoldPolicy` publishes an expired Delayed-auto draft that has no controller decision. The signer
+**authorizes** that on `uat` with the live provider, on these conditions. Each is enforced in code by this
+PR (#571) or by Session A's A1 work, which must be on `main` before #571 merges:
 
 - **Suggest is the default.** Every AI draft needs a human approve unless a controller deliberately
   raises the exercise to Delayed-auto.
 - **Silence is never approval.** Without swamped mode, an expired Delayed-auto draft is **held**, never
   sent (`AutoHoldPolicy.Decide`, pinned by `AutoHoldPolicyTests`).
-- **Swamped mode is the only auto-send path.** It is an explicit, lead-controller-gated action on the
-  controller-role steering group, and it applies only to drafts whose effective level is still
+- **Swamped mode is the only auto-send path.** It applies only to drafts whose effective level is still
   Delayed-auto.
-- **Every safety clamp overrides it.** The kill switch, degraded mode, and the cut-to-`Fake` egress lever
-  (#402) drop the effective level, so in-flight countdowns hold instead of sending.
+- **Raising is lead-only; lowering is open to any controller** (raise-only lead gate, Tom's decision
+  2026-10-16; A1 stories 16-17, #572/#573, `Enrollment.IsLead`):
+  - Only the exercise's lead controller may turn swamped mode **on**, raise autonomy, restore after the
+    kill switch, or restore the generation provider after a cut. Anyone else gets `403`.
+  - Any assigned controller may turn swamped mode **off**, lower autonomy, engage the kill switch, or cut
+    generation to `Fake`.
+  - Removing or demoting the lead clears `IsLead` and turns swamped mode off in the same transaction,
+    and both changes are audited.
+- **Every safety clamp overrides it.** The kill switch and degraded mode drop the effective level, so
+  in-flight countdowns hold instead of sending. Cutting generation to `Fake` (#402) also holds them: an
+  expired Delayed-auto draft in a cut exercise is held even under swamped mode. The cut is re-checked
+  immediately before every automatic publish (hold-on-cut, this PR). A burst already handed to the
+  publisher cannot be recalled; the kill switch is the stop for that.
 - **Participants never see a draft;** an auto-sent post is logged as engine-sourced.
 
 Wider autonomy than this (autonomous ambient posting under a tier policy, wave C2 / #168) needs its
@@ -250,7 +261,7 @@ verification pass).
 | Fail-closed gate verified (§3 — `ProviderLiveConfigTests` green in CI, evidence ii) | ☑ |
 | Measured p95 within the degraded-mode threshold (§5 — evidence iii) | ☑ |
 | `InjectionRedTeam` green against the live provider (§6 — evidence iv) | ☑ |
-| Approved to flip `Generation:Provider` off `Fake` for **`uat`** — Ambient tier; Suggest default, Delayed-auto + lead-controller swamped mode authorized (see amendment) | ☑ |
+| Approved to flip `Generation:Provider` off `Fake` for **`uat`** — Ambient tier; Suggest default, Delayed-auto + swamped mode authorized (lead-only to turn on, any controller to turn off; see amendment) | ☑ |
 | Signer / date | **Tom Bull — 2026-10-16** |
 
 ### Pre-signing verification against Azure (2026-10-16, run by the signer in Cloud Shell, `Shared SandBox`)
