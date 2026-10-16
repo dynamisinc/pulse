@@ -28,7 +28,7 @@ import {
   getStaffAssignments,
   setActiveExercise,
 } from '@/features/staff/services/staffAssignmentsService'
-import type { StaffAssignment } from '@/features/staff/types'
+import type { Enrollment } from '@/features/staff/types'
 import { ExerciseIdentityBadge } from './ExerciseIdentityBadge'
 
 const mockRefreshExerciseScope = vi.fn()
@@ -54,17 +54,21 @@ const SCOPE: ExerciseScope = {
   status: 'live',
 }
 
-const ALPHA: StaffAssignment = {
+const ALPHA: Enrollment = {
   exerciseId: 'ex-alpha',
   exerciseName: 'Alpha Exercise',
   role: 'controller',
+  personId: 'person-1',
+  isLead: false,
 }
-const BRAVO: StaffAssignment = {
+const BRAVO: Enrollment = {
   exerciseId: 'ex-bravo',
   exerciseName: 'Bravo Exercise',
   role: 'evaluator',
+  personId: 'person-1',
+  isLead: false,
 }
-const TWO: StaffAssignment[] = [ALPHA, BRAVO]
+const TWO: Enrollment[] = [ALPHA, BRAVO]
 
 function renderBadge() {
   const queryClient = new QueryClient({
@@ -209,9 +213,9 @@ describe('ExerciseIdentityBadge — switcher with two or more assignments', () =
   })
 
   it('can be dismissed with Escape while a switch is pending; reopening still shows pending', async () => {
-    let release: (value: StaffAssignment) => void = () => undefined
+    let release: (value: Enrollment) => void = () => undefined
     mockSetActiveExercise.mockReturnValue(
-      new Promise<StaffAssignment>(resolve => {
+      new Promise<Enrollment>(resolve => {
         release = resolve
       }),
     )
@@ -252,7 +256,7 @@ describe('ExerciseIdentityBadge — switcher with two or more assignments', () =
 
     // From now on the assignments refetch is slow (resetQueries clears + refetches).
     mockGetAssignments.mockImplementation(
-      () => new Promise<StaffAssignment[]>(resolve => setTimeout(() => resolve(TWO), 150)),
+      () => new Promise<Enrollment[]>(resolve => setTimeout(() => resolve(TWO), 150)),
     )
     await user.click(screen.getByTestId('staff-header-exercise-item-ex-bravo'))
 

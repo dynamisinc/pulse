@@ -46,7 +46,7 @@ import { resolveExerciseContext } from '@/core/exerciseContext/exerciseContextRe
 import type { ExerciseScope } from '@/core/exerciseContext'
 import { setActiveExercise } from '../services/staffAssignmentsService'
 import { StaffAssignmentError } from '../services/staffAssignmentsService'
-import type { StaffAssignment } from '../types'
+import type { Enrollment } from '../types'
 import { useSetActiveExercise } from './useSetActiveExercise'
 
 vi.mock('@/core/exerciseContext/exerciseContextResolver', () => ({
@@ -78,9 +78,9 @@ const SCOPES: Record<ExerciseKey, ExerciseScope> = {
   },
 }
 
-const ASSIGNMENTS: Record<ExerciseKey, StaffAssignment> = {
-  alpha: { exerciseId: 'ex-alpha', exerciseName: 'Alpha Exercise', role: 'controller' },
-  bravo: { exerciseId: 'ex-bravo', exerciseName: 'Bravo Exercise', role: 'controller' },
+const ASSIGNMENTS: Record<ExerciseKey, Enrollment> = {
+  alpha: { exerciseId: 'ex-alpha', exerciseName: 'Alpha Exercise', role: 'controller', personId: 'person-1', isLead: false },
+  bravo: { exerciseId: 'ex-bravo', exerciseName: 'Bravo Exercise', role: 'controller', personId: 'person-1', isLead: false },
 }
 
 /**
@@ -168,7 +168,7 @@ function SurfaceSubtree({ children }: { children: ReactNode }) {
  * observer callbacks are not a reliable way to observe the outcome. The
  * mutation's own promise settles regardless of who is still mounted.
  */
-let switchToBravo: (() => Promise<StaffAssignment>) | undefined
+let switchToBravo: (() => Promise<Enrollment>) | undefined
 
 /**
  * The switch control, driving the real `useSetActiveExercise`.

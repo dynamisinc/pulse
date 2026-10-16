@@ -6,7 +6,7 @@
  * backend contract built in identity-auth-roles/05:
  *
  *   GET /api/staff/assignments
- *     200 -> StaffAssignmentDto[]  ({ exerciseId, exerciseName, role })
+ *     200 -> StaffAssignmentDto[]  ({ exerciseId, exerciseName, role, personId, isLead })
  *     401 -> no authenticated staff session
  *
  *   POST /api/staff/active-exercise  { exerciseId }
@@ -51,7 +51,7 @@ import axios, { AxiosError, type AxiosAdapter } from 'axios'
 import { api } from '@/core/services/api'
 import { USE_MOCK_DATA } from '@/core/config/mockData'
 import { isExerciseRole } from '@/core/auth'
-import type { StaffAssignment } from '../types'
+import type { Enrollment } from '../types'
 
 /** The two endpoints this seam consumes, relative to the shared client's `/api` base URL. */
 const ASSIGNMENTS_ENDPOINT = '/staff/assignments'
@@ -62,6 +62,8 @@ interface StaffAssignmentBody {
   readonly exerciseId: string
   readonly exerciseName: string
   readonly role: string
+  readonly personId: string
+  readonly isLead: boolean
 }
 
 /**
@@ -102,9 +104,9 @@ export class StaffAssignmentError extends Error {
  * CONFIG, not product copy. Deleted once the mock/live flip point is removed.
  */
 const MOCK_ASSIGNMENTS: readonly StaffAssignmentBody[] = [
-  { exerciseId: 'ex-mock-0001', exerciseName: 'Coastal Surge (Mock Exercise)', role: 'controller' },
-  { exerciseId: 'ex-mock-0002', exerciseName: 'Ridgeline Wildfire TTX', role: 'evaluator' },
-  { exerciseId: 'ex-mock-0003', exerciseName: 'Harbor Freeze Tabletop', role: 'planner' },
+  { exerciseId: 'ex-mock-0001', exerciseName: 'Coastal Surge (Mock Exercise)', role: 'controller', personId: 'person-mock-staff', isLead: true },
+  { exerciseId: 'ex-mock-0002', exerciseName: 'Ridgeline Wildfire TTX', role: 'evaluator', personId: 'person-mock-staff', isLead: false },
+  { exerciseId: 'ex-mock-0003', exerciseName: 'Harbor Freeze Tabletop', role: 'planner', personId: 'person-mock-staff', isLead: false },
 ]
 
 /**
@@ -171,7 +173,9 @@ function isAssignmentBody(value: unknown): value is StaffAssignmentBody {
   return (
     typeof body.exerciseId === 'string' && body.exerciseId.length > 0 &&
     typeof body.exerciseName === 'string' && body.exerciseName.length > 0 &&
-    typeof body.role === 'string' && body.role.length > 0
+    typeof body.role === 'string' && body.role.length > 0 &&
+    typeof body.personId === 'string' && body.personId.length > 0 &&
+    typeof body.isLead === 'boolean'
   )
 }
 
@@ -180,19 +184,25 @@ function isAssignmentListBody(value: unknown): value is StaffAssignmentBody[] {
 }
 
 /**
- * Builds a typed `StaffAssignment` from a validated wire body. Runtime guard
+ * Builds a typed `Enrollment` from a validated wire body. Runtime guard
  * so this seam swaps to a live endpoint with no consumer change: an
  * out-of-vocabulary `role` fails closed (throws) rather than being cast
  * blindly into `ExerciseRole` (same precedent as
  * `exerciseContextResolver.ts`'s `isExerciseStatus`).
  */
-function toAssignment(body: StaffAssignmentBody): StaffAssignment {
+function toAssignment(body: StaffAssignmentBody): Enrollment {
   if (!isExerciseRole(body.role)) {
     throw new StaffAssignmentError(
       `staffAssignmentsService: unknown role "${body.role}" for exercise ${body.exerciseId}`,
     )
   }
-  return { exerciseId: body.exerciseId, exerciseName: body.exerciseName, role: body.role }
+  return {
+    exerciseId: body.exerciseId,
+    exerciseName: body.exerciseName,
+    role: body.role,
+    personId: body.personId,
+    isLead: body.isLead,
+  }
 }
 
 /** Pulls a human-readable reason off a server error body (string or object). */
@@ -238,7 +248,7 @@ function toStaffAssignmentError(error: unknown, fallbackMessage: string): StaffA
  * failure (401/network) or a malformed response body (fail closed — never a
  * default/partial list).
  */
-export async function getStaffAssignments(): Promise<StaffAssignment[]> {
+export async function getStaffAssignments(): Promise<Enrollment[]> {
   let data: unknown
   try {
     const response = await api.get<StaffAssignmentBody[]>(
@@ -261,14 +271,14 @@ export async function getStaffAssignments(): Promise<StaffAssignment[]> {
 
 /**
  * Switches the caller's active exercise to `exerciseId`. Validated
- * SERVER-SIDE against the caller's own `StaffAssignment` set — an exercise
+ * SERVER-SIDE against the caller's own `Enrollment` set — an exercise
  * the caller does not hold a role on is rejected (403). This seam never
  * grants access; it only selects among assignments the caller already has,
  * and thereby drives the staff arm of the `ExerciseContext.CurrentExerciseId`
  * scope seam for the caller's subsequent requests. Throws
  * `StaffAssignmentError` on failure (fail closed — never a silent no-op).
  */
-export async function setActiveExercise(exerciseId: string): Promise<StaffAssignment> {
+export async function setActiveExercise(exerciseId: string): Promise<Enrollment> {
   let data: unknown
   try {
     const response = await api.post<StaffAssignmentBody>(

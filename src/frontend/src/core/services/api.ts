@@ -133,6 +133,7 @@ import {
   getTokenGeneration,
 } from '../auth/tokenStore'
 import { installCrossTabSessionSync } from '../auth/crossTabSessionSync'
+import { installWorldSync } from '../auth/worldSync'
 
 /**
  * Internal per-request flags this module attaches to a config object. Not
@@ -176,6 +177,7 @@ export const api = axios.create({
 // Another tab signing in as someone else, or signing out, reloads this one so its
 // UI follows the shared token store (installed once per page; see its header).
 installCrossTabSessionSync()
+installWorldSync()
 
 // ---------------------------------------------------------------------------
 // Request interceptor — attach the stored access token.

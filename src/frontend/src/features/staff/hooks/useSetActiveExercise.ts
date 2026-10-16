@@ -82,7 +82,7 @@
 import { useMutation, useQueryClient, type UseMutationResult } from '@tanstack/react-query'
 import { useExerciseScopeRefresh } from '@/core/exerciseContext'
 import { setActiveExercise, StaffAssignmentError } from '../services/staffAssignmentsService'
-import type { StaffAssignment } from '../types'
+import type { Enrollment } from '../types'
 
 /**
  * Switches the caller's active exercise. `mutate(exerciseId)` /
@@ -94,14 +94,14 @@ import type { StaffAssignment } from '../types'
  * on success. See the module header for the ordering guarantee.
  */
 export function useSetActiveExercise(): UseMutationResult<
-  StaffAssignment,
+  Enrollment,
   StaffAssignmentError,
   string
 > {
   const queryClient = useQueryClient()
   const refreshExerciseScope = useExerciseScopeRefresh()
 
-  return useMutation<StaffAssignment, StaffAssignmentError, string>({
+  return useMutation<Enrollment, StaffAssignmentError, string>({
     mutationFn: setActiveExercise,
     onSuccess: async () => {
       // 1. Nothing issued under the prior scope may still be in flight — the

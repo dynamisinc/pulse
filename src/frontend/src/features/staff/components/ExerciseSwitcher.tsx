@@ -93,7 +93,7 @@ import { useExerciseContext } from '@/core/exerciseContext'
 import { useStaffAssignments } from '../hooks/useStaffAssignments'
 import { useSetActiveExercise } from '../hooks/useSetActiveExercise'
 import { friendlyErrorMessage, sameExercise } from './switcherShared'
-import type { StaffAssignment } from '../types'
+import type { Enrollment } from '../types'
 
 /** A `role="alert"` block pairing an icon with a message (never color alone). */
 function SwitcherAlert({ message, testId }: { message: string; testId: string }) {
@@ -113,7 +113,7 @@ function SwitcherAlert({ message, testId }: { message: string; testId: string })
 }
 
 interface AssignmentRowProps {
-  assignment: StaffAssignment
+  assignment: Enrollment
   isActive: boolean
   disabled: boolean
   onSelect: () => void
@@ -214,7 +214,7 @@ export function ExerciseSwitcher() {
   const switchMutation = useSetActiveExercise()
   // See module header "WHY `justSwitchedTo` SURVIVES": a PROVISIONAL, local echo
   // of the switch response — never the mechanism, never authoritative.
-  const [justSwitchedTo, setJustSwitchedTo] = useState<StaffAssignment | null>(null)
+  const [justSwitchedTo, setJustSwitchedTo] = useState<Enrollment | null>(null)
 
   // CONVERGENCE. The moment the provider re-resolves to a different exercise,
   // the server-resolved scope is the only truth this row may show — drop the
@@ -227,7 +227,7 @@ export function ExerciseSwitcher() {
 
   const activeExerciseId = justSwitchedTo?.exerciseId ?? scope.exerciseId
 
-  const handleSelect = (assignment: StaffAssignment) => {
+  const handleSelect = (assignment: Enrollment) => {
     if (sameExercise(assignment.exerciseId, activeExerciseId) || switchMutation.isPending) return
     switchMutation.mutate(assignment.exerciseId, {
       onSuccess: switched => setJustSwitchedTo(switched),

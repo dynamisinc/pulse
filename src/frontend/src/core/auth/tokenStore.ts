@@ -114,10 +114,12 @@
  * console-signal precedent, which never includes secret material either).
  *
  * World: platform/foundation. Pure `core/` module — no UI, no COBRA, no
- * participant skin. Zero imports (a dependency-free leaf), so the shared
- * axios client can depend on it without creating a `core/services <->
- * core/auth` import cycle (see `core/services/api.ts`'s own header).
+ * participant skin. Imports only the dependency-free `worldBroadcast` leaf, so it
+ * stays a leaf and the shared axios client can depend on it without creating a
+ * `core/services <-> core/auth` import cycle (see `core/services/api.ts`'s own header).
  */
+
+import { announceWorldSignIn } from './worldBroadcast'
 
 const ACCESS_TOKEN_KEY = 'pulse.auth.token'
 const REFRESH_TOKEN_KEY = 'pulse.auth.refreshToken'
@@ -352,6 +354,9 @@ export function setTokens(pair: TokenPair, options?: SetTokensOptions): void {
   // Last, so a tab woken by the marker's `storage` event reads a complete pair.
   pageMarker = newSessionMarker()
   writeItem(target, SESSION_MARKER_KEY, pageMarker)
+  // One world per origin: tell the tabs of the OTHER world to sign themselves out. Participant
+  // sign-ins persist (`localStorage`); every staff sign-in uses `sessionStorage`.
+  announceWorldSignIn(target === 'persistent' ? 'participant' : 'staff')
 }
 
 /**

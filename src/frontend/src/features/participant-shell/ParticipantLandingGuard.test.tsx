@@ -28,7 +28,7 @@
 import { render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { describe, expect, it, vi } from 'vitest'
-import type { ExerciseSession, Session, SessionRole } from '@/core/auth'
+import type { ExerciseRole, ExerciseSession, Session, SessionRole } from '@/core/auth'
 import { withRole } from '@/core/auth/withRole.testUtils'
 import { useExerciseContext, type ExerciseScope } from '@/core/exerciseContext'
 import { useRole, useSession } from '@/core/auth'

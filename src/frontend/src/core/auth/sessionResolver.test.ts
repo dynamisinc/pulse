@@ -25,6 +25,10 @@ function validBody(overrides: Record<string, unknown> = {}) {
   return {
     data: {
       exerciseId: 'ex-0042',
+      personId: null,
+      world: 'participant',
+      scope: 'exercise',
+      isLead: false,
       accountId: 'acct-123',
       role: 'pio',
       personaId: 'persona-x',
@@ -48,6 +52,10 @@ describe('resolveSession', () => {
 
     expect(session).toEqual({
       exerciseId: 'ex-0042',
+      personId: null,
+      world: 'participant',
+      scope: 'exercise',
+      isLead: false,
       accountId: 'acct-123',
       role: 'pio',
       personaId: 'persona-x',
@@ -69,6 +77,42 @@ describe('resolveSession', () => {
 
   it('fails closed when the role is outside the known vocabulary', async () => {
     mockGet.mockResolvedValue(validBody({ role: 'superuser' }))
+    await expect(resolveSession()).rejects.toThrow()
+  })
+
+  it('resolves an org-scope orgAdmin session with a null exerciseId and a person', async () => {
+    mockGet.mockResolvedValue(validBody({
+      exerciseId: null, scope: 'org', role: 'orgAdmin', world: 'staff', personId: 'person-9',
+      personaId: undefined,
+    }))
+    const session = await resolveSession()
+    expect(session.scope).toBe('org')
+    expect(session.exerciseId).toBeNull()
+    expect(session.role).toBe('orgAdmin')
+    expect(session.personId).toBe('person-9')
+    expect(session.world).toBe('staff')
+  })
+
+  it('resolves a staff exercise session carrying isLead and personId', async () => {
+    mockGet.mockResolvedValue(validBody({
+      role: 'controller', world: 'staff', personId: 'person-3', isLead: true,
+    }))
+    const session = await resolveSession()
+    expect(session).toMatchObject({
+      scope: 'exercise', role: 'controller', world: 'staff', personId: 'person-3', isLead: true,
+    })
+  })
+
+  it.each([
+    ['orgAdmin role on exercise scope', { role: 'orgAdmin' }],
+    ['exercise role on org scope', { scope: 'org', exerciseId: null, role: 'controller' }],
+    ['org scope still bound to an exercise', { scope: 'org', role: 'orgAdmin' }],
+    ['exercise scope with a null exercise', { exerciseId: null }],
+    ['unknown scope', { scope: 'global' }],
+    ['unknown world', { world: 'admin' }],
+    ['non-boolean isLead', { isLead: 'yes' }],
+  ])('fails closed on an invalid combination: %s', async (_name, overrides) => {
+    mockGet.mockResolvedValue(validBody(overrides))
     await expect(resolveSession()).rejects.toThrow()
   })
 

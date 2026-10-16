@@ -34,7 +34,8 @@ import { useTheme } from '@mui/material/styles'
 import { faClipboardCheck, faSliders } from '@fortawesome/free-solid-svg-icons'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { useSession, useRole } from '@/core/auth'
-import type { ExerciseSession, Session } from '@/core/auth'
+import type { ExerciseSession, Session, SessionRole } from '@/core/auth'
+import { withRole } from '@/core/auth/withRole.testUtils'
 import { useExerciseContext } from '@/core/exerciseContext'
 import type { ExerciseScope } from '@/core/exerciseContext'
 import { RoleAwareEntry, type RoleAwareEntryProps } from './RoleAwareEntry'
@@ -81,8 +82,9 @@ const SCOPE: ExerciseScope = {
 }
 
 /** Drives the mocked hooks to a resolved session for `role` (default: valid). */
-function primeSession(overrides: Partial<ExerciseSession> = {}) {
-  const session: Session = { ...BASE_SESSION, ...overrides }
+function primeSession(overrides: Partial<Omit<ExerciseSession, 'role'>> & { role?: SessionRole } = {}) {
+  const { role = 'participant', ...rest } = overrides
+  const session: Session = withRole({ ...BASE_SESSION, ...rest }, role)
   vi.mocked(useSession).mockReturnValue(session)
   vi.mocked(useRole).mockReturnValue(session.role)
   vi.mocked(useExerciseContext).mockReturnValue(SCOPE)

@@ -48,7 +48,7 @@ export interface OrgExercise {
 
 /**
  * The `POST /api/org/exercises` success body (COR-074): the new exercise plus
- * the role of the `StaffAssignment` the server minted for its creator, so they
+ * the role of the `Enrollment` the server minted for its creator, so they
  * can reach the run through the exercise switcher with no extra provisioning.
  */
 export interface CreateExerciseResult {
