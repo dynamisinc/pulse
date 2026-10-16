@@ -67,6 +67,11 @@ accounts are part of the exercise.
 
 ![An alert bar across the top of the exercise feed.](img/participant-alert-bar.png)
 
+Tap **Details →** on the alert bar to read every active alert in full, with the scenario time each
+one was issued. Use the back arrow to return to the feed.
+
+![The Alerts page, listing each active alert with its severity, full message and scenario time.](img/participant-alerts.png)
+
 ## 6. "We'll be right back" or "EXERCISE PAUSED"
 
 ![The holding page that players see while the exercise is paused.](img/participant-holding-page.png)
