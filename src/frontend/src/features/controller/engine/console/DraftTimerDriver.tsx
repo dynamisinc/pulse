@@ -73,6 +73,12 @@ export interface DraftTimerDriverProps {
   readonly swampedMode: boolean
   /** The engine's current safety-adjusted disposition (`useEngineControl().effective`). */
   readonly effective: EffectiveAutonomy
+  /**
+   * Whether generation is cut to the Fake provider (`useEngineSettings().settings
+   * .providerCutToFake`, ADP-042). While true an expiry HOLDs even under swamped
+   * mode (hold-on-cut, mirrors the server). Defaults to false.
+   */
+  readonly providerCutToFake?: boolean
   /** The clock/identity/exercise inputs for a swamped-mode auto-publish. */
   readonly ctx: DraftTimerDriverContext
 }
@@ -86,6 +92,7 @@ export function DraftTimerDriver({
   countdown,
   swampedMode,
   effective,
+  providerCutToFake = false,
   ctx,
 }: DraftTimerDriverProps) {
   const onResolve = useCallback(
@@ -101,7 +108,7 @@ export function DraftTimerDriver({
     [item, ctx],
   )
 
-  useDraftTimer(countdown, effective, swampedMode, { onResolve })
+  useDraftTimer(countdown, effective, swampedMode, { onResolve }, providerCutToFake)
 
   return null
 }

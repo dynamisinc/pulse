@@ -14,8 +14,9 @@
  * hook-mock precedent.
  */
 import { render, screen, fireEvent } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useSwampedMode, type UseSwampedModeResult } from '../hooks/useSwampedMode'
+import { useEngineSettings } from '../hooks/useEngineSettings'
 import { SwampedModeToggle } from './SwampedModeToggle'
 
 // Demo-feedback story 11 (DF-14): the console's write controls render only for a controller
@@ -26,7 +27,21 @@ vi.mock('../hooks/useSwampedMode', () => ({
   useSwampedMode: vi.fn(),
 }))
 
+vi.mock('../hooks/useEngineSettings', () => ({
+  useEngineSettings: vi.fn(),
+}))
+
 const mockedUseSwampedMode = vi.mocked(useSwampedMode)
+const mockedUseEngineSettings = vi.mocked(useEngineSettings)
+
+/** Stubs only the field the toggle reads (`settings.providerCutToFake`). */
+function stubSettings(providerCutToFake: boolean): void {
+  mockedUseEngineSettings.mockReturnValue({
+    settings: { providerCutToFake },
+  } as unknown as ReturnType<typeof useEngineSettings>)
+}
+
+beforeEach(() => stubSettings(false))
 
 function stub(overrides: Partial<UseSwampedModeResult> = {}): UseSwampedModeResult {
   return {
@@ -84,5 +99,17 @@ describe('SwampedModeToggle — non-lead controller (COR-015 absent, not disable
     expect(screen.getByTestId('swamped-mode-active-banner')).toHaveTextContent(
       'TIMEOUT AUTO-SEND IS ACTIVE',
     )
+  })
+})
+
+describe('SwampedModeToggle — hold-on-cut qualifier (ADP-042)', () => {
+  it('says auto-send is SUSPENDED (text, not colour) while cut to Fake', () => {
+    stubSettings(true)
+    mockedUseSwampedMode.mockReturnValue(stub({ swampedMode: true }))
+    render(<SwampedModeToggle />)
+
+    const banner = screen.getByTestId('swamped-mode-active-banner')
+    expect(banner).toHaveTextContent(/SUSPENDED while generation is cut to Fake/)
+    expect(banner).not.toHaveTextContent(/publish instead of holding/)
   })
 })

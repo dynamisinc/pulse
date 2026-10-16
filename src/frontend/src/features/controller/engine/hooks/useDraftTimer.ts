@@ -158,7 +158,8 @@ function buildLabel(
 /**
  * Ticks a Delayed-auto draft's countdown in scenario time, reporting the live
  * disposition + label and resolving the terminal outcome (HOLD by default; the
- * swamped auto-send only via `decide()`). `swampedMode` is an INPUT — story 03
+ * swamped auto-send only via `decide()`). `providerCutToFake` (ADP-042 hold-on-cut)
+ * suspends that auto-send: an expiry while cut HOLDs. `swampedMode` is an INPUT — story 03
  * supplies it at integration; this hook never imports it (keeps the two files
  * disjoint). See the module header for the full safety contract.
  */
@@ -167,6 +168,7 @@ export function useDraftTimer(
   effective: EffectiveAutonomy,
   swampedMode: boolean,
   options: UseDraftTimerOptions = {},
+  providerCutToFake = false,
 ): UseDraftTimerResult {
   const { onResolve, now: nowFn = scenarioNow, tickMs = DEFAULT_TICK_MS } = options
 
@@ -189,7 +191,13 @@ export function useDraftTimer(
 
   // The LIVE disposition + display reads — delegated to the pure safety policy;
   // the precedence is NEVER re-derived here.
-  const disposition = decide(countdown, effective, currentScenarioMinute, swampedMode)
+  const disposition = decide(
+    countdown,
+    effective,
+    currentScenarioMinute,
+    swampedMode,
+    providerCutToFake,
+  )
   const hasExpired = countdown.hasExpired(currentScenarioMinute)
   const minutesRemaining = countdown.minutesRemaining(currentScenarioMinute)
   const label = buildLabel(disposition, hasExpired, countdown.remainingMs(nowMs))
@@ -200,7 +208,13 @@ export function useDraftTimer(
   // so a fresh countdown (re-roll) can resolve anew.
   const resolvedKeyRef = useRef<string | null>(null)
   useEffect(() => {
-    const evaluation = evaluate(countdown, effective, currentScenarioMinute, swampedMode)
+    const evaluation = evaluate(
+      countdown,
+      effective,
+      currentScenarioMinute,
+      swampedMode,
+      providerCutToFake,
+    )
     const event = evaluation.event
     if (!event) return
 
@@ -215,6 +229,7 @@ export function useDraftTimer(
     effective,
     currentScenarioMinute,
     swampedMode,
+    providerCutToFake,
     timeZone,
     actingHumanId,
     scenarioTimeIso,

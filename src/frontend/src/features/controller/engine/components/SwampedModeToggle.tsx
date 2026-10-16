@@ -27,6 +27,7 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faTriangleExclamation, faToggleOn, faToggleOff } from '@fortawesome/free-solid-svg-icons'
 import { Box, Stack, Typography } from '@mui/material'
 import { useSwampedMode } from '../hooks/useSwampedMode'
+import { useEngineSettings } from '../hooks/useEngineSettings'
 // D5 dark operator-chrome tokens (matches `ReviewQueue`'s `chrome`). Staff-only.
 import { consoleChrome as chrome } from '../../consoleChrome'
 import { useCanControl } from '../../access'
@@ -34,6 +35,8 @@ import { useCanControl } from '../../access'
 export function SwampedModeToggle() {
   const { swampedMode, isLead, setSwampedMode } = useSwampedMode()
   const canControl = useCanControl()
+  // Hold-on-cut (ADP-042): while cut to Fake, expiries hold even under swamped mode.
+  const providerCutToFake = useEngineSettings().settings?.providerCutToFake ?? false
 
   return (
     <Stack
@@ -108,7 +111,9 @@ export function SwampedModeToggle() {
             TIMEOUT AUTO-SEND IS ACTIVE
           </Typography>
           <Typography component="span" sx={{ fontSize: 10.5, color: chrome.inkMuted }}>
-            — swamped mode is on; expired timers publish instead of holding.
+            {providerCutToFake
+              ? '— swamped mode is on, but auto-send is SUSPENDED while generation is cut to Fake; expired timers hold.'
+              : '— swamped mode is on; expired timers publish instead of holding.'}
           </Typography>
         </Stack>
       )}

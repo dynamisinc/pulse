@@ -458,7 +458,9 @@ export function EngineSettingsPanel({ open, onClose }: EngineSettingsPanelProps)
               )}
               {autonomy.swampedMode && (
                 <Typography sx={{ fontSize: 10.5, color: chrome.inkFaint }}>
-                  Swamped mode is on for this exercise (timeout auto-send is active).
+                  Swamped mode is on for this exercise {settings?.providerCutToFake
+                    ? '(timeout auto-send is SUSPENDED while generation is cut to Fake; expiries hold).'
+                    : '(timeout auto-send is active).'}
                 </Typography>
               )}
             </Stack>

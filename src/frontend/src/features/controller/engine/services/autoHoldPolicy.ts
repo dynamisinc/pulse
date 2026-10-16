@@ -25,7 +25,9 @@
  *   2. An explicit controller decision wins: Approved → Publish; Vetoed → Hold.
  *   3. No decision + not yet expired → AwaitDecision.
  *   4. No decision + expired → Hold, UNLESS swamped mode is on AND the effective
- *      level is still Delayed-auto (the sole auto-send path).
+ *      level is still Delayed-auto AND the exercise is NOT cut to Fake (the sole
+ *      auto-send path). Hold-on-cut (ADP-042): an active provider cut to Fake is
+ *      one more clamp on the AUTO path only — it never overrides an approval (2).
  *
  * Consumed by: story 02's `useDraftTimer` (terminal action on tick) and story
  * 01's `useReviewQueue` (deriving held/pending state for the inline count).
@@ -49,6 +51,7 @@ export function decide(
   effective: EffectiveAutonomy,
   currentScenarioMinute: number,
   swampedMode: boolean,
+  providerCutToFake = false,
 ): TimeoutDisposition {
   // A full stop (kill switch) suspends everything outstanding — nothing publishes.
   if (effective.generationStopped) {
@@ -71,8 +74,10 @@ export function decide(
 
   // Expired with no decision. Silence is never approval → HOLD, unless swamped
   // mode is explicitly on and the draft is still effectively Delayed-auto (a
-  // safety clamp having lowered it suspends this).
-  const autoSend = swampedMode && effective.level === AutonomyLevel.DelayedAuto
+  // safety clamp having lowered it suspends this) and the exercise is not cut to
+  // Fake (hold-on-cut: a pre-cut live draft must never auto-send after the cut).
+  const autoSend =
+    swampedMode && !providerCutToFake && effective.level === AutonomyLevel.DelayedAuto
   return autoSend ? TimeoutDisposition.Publish : TimeoutDisposition.Hold
 }
 
@@ -113,8 +118,15 @@ export function evaluate(
   effective: EffectiveAutonomy,
   currentScenarioMinute: number,
   swampedMode: boolean,
+  providerCutToFake = false,
 ): TimeoutEvaluation {
-  const disposition = decide(countdown, effective, currentScenarioMinute, swampedMode)
+  const disposition = decide(
+    countdown,
+    effective,
+    currentScenarioMinute,
+    swampedMode,
+    providerCutToFake,
+  )
 
   // Only an on-expiry, no-decision resolution is an autonomy-layer transition to
   // log here.
