@@ -8,8 +8,9 @@
 Clients learn that an exercise paused, froze, ended or reopened only on refresh (tracker #390, [`docs/design/ADMIN-IDENTITY-MODEL.md`](../../design/ADMIN-IDENTITY-MODEL.md) §10). Lifecycle changes should be pushed over the existing SignalR hub.
 
 ## Acceptance Criteria
-- [ ] Given any lifecycle transition or pause tier change, when it commits, then a `lifecycle.changed` message with the new state and tier is sent to that exercise's hub group only.
+- [ ] Given any lifecycle transition or pause tier change, when it commits, then a `lifecycle.changed` message with the new state and tier is sent to that exercise's hub group only. `lifecycle.changed` (and the Freeze overlay) is a control message and is **always delivered**, including at/after EndEx; the story 10 gate refuses only simulation-content broadcasts.
 - [ ] Given a connected participant client, when Freeze starts, then the composer disables with an announced message; on resume it re-enables, without a page reload.
+- [ ] Given EndEx, then the order is: commit the transition, broadcast `lifecycle.changed` (state `completed`) to all of the exercise's connections, then disconnect participant connections (the participant client has shown the ended state before the socket closes). Staff connections stay connected, so a later reopen is observed live by the console.
 - [ ] Given a connected staff console, the state indicator updates within 2 s.
 - [ ] A client that reconnects after a missed message re-reads the state before accepting input.
 - [ ] A foreign-exercise and a foreign-org client never receive another exercise's lifecycle messages.
@@ -29,4 +30,7 @@ Both worlds. Hub group per exercise, `core/realtime/` feed hook, participant com
 Wave A5, after 10 and 11.
 
 ## Tests
-Hub integration test; RTL for composer disable/enable and live region; isolation tests.
+Hub integration test (EndEx: participants receive `lifecycle.changed` then are disconnected; staff receive it and stay connected, then see reopen); RTL for composer disable/enable and live region; isolation tests.
+
+### Copilot review 3 fold (2026-10-16)
+- Changed: `lifecycle.changed` is always delivered (never refused by the story 10 content gate); added the EndEx ordering AC and test, aligned with story 10.

@@ -9,7 +9,8 @@ The internal exercise name can leak the scenario (for example "HURREX-26 Cat 4 L
 
 ## Acceptance Criteria
 - [ ] `Exercise.ParticipantName` (nullable, 80 characters max) is editable by the planner in settings.
-- [ ] `ExerciseScopeDto.exerciseName` projects `ParticipantName` and **never falls back to the internal `Name`**; when unset it is null and participants see no exercise name (the brand header stands alone). Same field name and shape (frozen type, source change cleared by the orchestrator).
+- [ ] `ExerciseScopeDto.exerciseName` projects `ParticipantName` and **never falls back to the internal `Name`**; when unset it is null and participants see no exercise name (the brand header stands alone). Same field name; the type changes to `string | null` (see the coordinated-change AC below).
+- [ ] **Coordinated frozen-type change (null name):** `ExerciseScopeDto.exerciseName` becomes `string | null` (C# `string?`); the frontend `ExerciseScope` / `ExerciseContextResponseBody` type becomes `string | null`; and `isValidResponseBody` in `core/exerciseContext/exerciseContextResolver.ts` (~205), which today requires a non-empty string, accepts null (and still rejects a non-string, non-null value or an empty string). All consumers (brand header, cards, emails, join page, exercise-context provider) render brand-only when null, with no placeholder and no internal-name fallback. Needs orchestrator frozen-type clearance, posted on the feature issue before A3 merges (brief C1.4).
 - [ ] Cards, link/invite/reset emails and the join page use the same projection; none can contain the internal name.
 - [ ] Readiness blocking item 2: stage is refused until `ParticipantName` is set (story 03).
 - [ ] A projection test walks every participant DTO and email template asserting the internal `Name` never appears.
@@ -29,4 +30,7 @@ Both worlds. Paths: `Exercise` entity, `ExerciseScopeDto`, settings panel (COBRA
 Wave A3, after A1; can run with 07, 08. Readiness item consumed by 03.
 
 ## Tests
-Projection leak test; readiness test; RTL for header with and without name; foreign-exercise/org tests.
+Resolver test: a response body with `exerciseName: null` resolves (and `''`/numeric is rejected); type-check across all `exerciseName` consumers; projection leak test; readiness test; RTL for header with and without name; foreign-exercise/org tests.
+
+### Copilot review 3 fold (2026-10-16)
+- Changed: null `exerciseName` is a frozen-contract change (DTO `string?`, frontend type, resolver validator) with a coordinated-change AC, null-name resolver test and clearance note; all consumers render brand-only when null.

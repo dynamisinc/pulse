@@ -253,3 +253,6 @@ The `Session` migration (`ExerciseId` nullable, `PersonId` added), the staff log
 - [ ] User guide: `docs/guide/getting-started.md` (sign-in by org URL / choose org) updated in the same PR.
 
 Depends on `16-person-and-enrollments`.
+
+### Copilot review 3 fold (2026-10-16)
+- [ ] **Org-scope session contract (frozen type; clearance with story 16):** the minted org session serializes as `{world: 'staff', scope: 'org', role: 'orgAdmin', exerciseId: null, ...}`; `SessionDto` gains `world` and `scope`, and `role` is `ExerciseRole | 'orgAdmin'` with `'orgAdmin'` valid only for `scope: 'org'`. The frontend resolver validates with `isSessionRole(scope, role)` (replacing `isExerciseRole` in `sessionResolver.ts`), defined in story 16. Test: the org-login response round-trips through the resolver; an exercise-scope session claiming `orgAdmin` is rejected. Listed in the frozen-type clearance note (story 16).

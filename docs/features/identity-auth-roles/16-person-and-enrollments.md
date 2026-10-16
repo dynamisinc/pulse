@@ -58,7 +58,7 @@ the A2/A3/A4 columns (their own migrations). No participant-facing change.
 Staff world. Paths: `Pulse.WebApi/Data/Entities/` (Person, Enrollment), `Features/Identity/`,
 `ExerciseCreationService.cs` (creator is enrolled, no longer a `StaffAssignment`). Frontend:
 `features/staff/types.ts` `StaffAssignment` becomes `Enrollment` (+ `personId`); `core/auth/roles.ts` drops
-`orgAdmin` from `ExerciseRole`. **Orchestrator clearance required first (A1):** the EF migration `AdminIdentityFoundation`, `Program.cs` edits, `App.tsx` / `staffRouteRegistry.tsx` edits and every frozen-type change (`Session`/`SessionDto`, `ExerciseRole`, `StaffAssignment` -> `Enrollment`, the staff login request) go through the orchestrator; post the frozen-type changes on the feature issue before A1 merges (brief C1.4). Builders export one `Add*()`/`Map*()` line each; they do not edit `Program.cs`. Design doc §9 lists the migration contents.
+`orgAdmin` from `ExerciseRole`. **Orchestrator clearance required first (A1):** the EF migration `AdminIdentityFoundation`, `Program.cs` edits, `App.tsx` / `staffRouteRegistry.tsx` edits and every frozen-type change (`Session`/`SessionDto` incl. the new `world`/`scope`/`role` union below and the `isSessionRole` validator replacing `isExerciseRole` in `core/auth/sessionResolver.ts`, `ExerciseRole`, `StaffAssignment` -> `Enrollment`, the staff login request) go through the orchestrator; post the frozen-type changes on the feature issue before A1 merges (brief C1.4). Builders export one `Add*()`/`Map*()` line each; they do not edit `Program.cs`. Design doc §9 lists the migration contents.
 
 ## Dependencies
 Wave A1, first. Blocks 15, 17 and every later A story. Sessions B and C: no engine schema change before this migration is on main.
@@ -66,3 +66,6 @@ Wave A1, first. Blocks 15, 17 and every later A story. Sessions B and C: no engi
 ## Tests
 Migration up/down test; unique-index and check-constraint tests; sweep test (`TenantChecked`/ResolutionRoot counts);
 isolation suite extended with foreign-org Person/Enrollment cases; regression: identity 02/03/05/10/12 and easy-login 02/03/05 suites.
+
+### Copilot review 3 fold (2026-10-16)
+- [ ] **Session contract: org-scope role representation (frozen type).** `SessionDto` / frontend `Session` / `SessionResponseBody` gain `world: 'staff' | 'participant'` and `scope: 'exercise' | 'org'`. `role` becomes `ExerciseRole | 'orgAdmin'`, where `'orgAdmin'` is valid **only** with `scope: 'org'` and an `ExerciseRole` is valid **only** with `scope: 'exercise'`. The frontend type is a discriminated union on `scope` (`ExerciseSession | OrgSession`; `OrgSession.exerciseId` is null). `ExerciseRole` itself stays orgAdmin-free. A runtime validator `isSessionRole(scope, role)` replaces `isExerciseRole` in `isValidBody` (`sessionResolver.ts` ~114) and fails closed on any other combination. Tests: both variants resolve; rejected: `orgAdmin` with `scope 'exercise'`, an `ExerciseRole` with `scope 'org'`, unknown scope, unknown role, missing `world`. All three type changes are listed in the frozen-type clearance note above.

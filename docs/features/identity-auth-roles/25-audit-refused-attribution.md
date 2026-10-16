@@ -5,11 +5,11 @@
 **Stack:** backend  ·  **Review tier:** Tier-2 (security)  ·  **Wave:** A5
 
 ## Context
-`POST /api/posts` already derives identity server-side (story 12). When a caller tries to attribute a post to a persona or role they do not hold, the refusal is currently silent. A5 requires every refused attribution to be audited ([`docs/design/ADMIN-IDENTITY-MODEL.md`](../../design/ADMIN-IDENTITY-MODEL.md) §10; tracker #389).
+`POST /api/posts` already derives identity server-side (story 12). A participant's body-supplied persona is **ignored**, not refused (a stale client or mid-exercise rebinding is a client bug), and a staff session may select any in-exercise persona (`PostAttributionResolver.cs` ~180-194, 267-270); story 12 preserved that and this story does not change it. What *is* refused is a participant (non-staff) session **claiming a privileged origin** (`controller-as-persona`, `inject`, `engine`; ~237-242, 403), and that refusal is currently silent. #389 requires it to be audited ([`docs/design/ADMIN-IDENTITY-MODEL.md`](../../design/ADMIN-IDENTITY-MODEL.md) §10; tracker #389).
 
 ## Acceptance Criteria
-- [ ] Given a participant or staff caller who submits a persona they are not bound to, when the request is refused, then an `identity.attribution.refused` event is recorded with the actor `PersonId`/`AccountId`, claimed persona, exercise, and wall + scenario time.
-- [ ] The refusal response is unchanged and does not reveal whether the persona exists (uniform error).
+- [ ] Given a participant session whose request body claims a privileged origin (`controller-as-persona`, `inject` or `engine`), when the request is refused (403), then an `identity.attribution.refused` telemetry event is recorded with the **claimed origin**, the actor account (`AccountId`, and the acting human), the outcome (`refused`), the exercise, and wall + scenario time. Participant persona mismatches and staff persona choices are not refusals and emit no such event; the persona-ignore and staff-any-persona behavior is unchanged (regression test).
+- [ ] The refusal response is unchanged and reveals nothing beyond today's message (no persona or account lookups are exposed).
 - [ ] The audit write never fails the refusal and cannot be triggered by an unauthenticated caller.
 - [ ] Events are visible in the controller audit/telemetry view of that exercise only; a foreign-exercise and a foreign-org attempt create no event in the victim exercise.
 - [ ] Telemetry (XC-004): the action emits an event (wall + scenario time, acting `PersonId` and role, channel `system`) per the v0 schema, in the same unit of work as the mutation.
@@ -26,4 +26,7 @@ Backend. `CurrentSessionAccessor`, `PostIngestService`, telemetry emitter. **Orc
 Wave A5, after identity 12 and A1.
 
 ## Tests
-Refusal tests asserting the event; no-leak test; isolation tests.
+Refusal tests asserting the event for each claimed origin; regression tests that a participant persona mismatch is still ignored (no event) and staff may still pick any in-exercise persona; no-leak test; isolation tests.
+
+### Copilot review 3 fold (2026-10-16)
+- Changed: Context and audit AC rewritten. Persona mismatch (participant, ignored) and staff persona choice are unchanged behavior; the audited refusal is a participant claiming a privileged origin, with the claimed origin, actor account and outcome recorded. Issue #389 context is consistent (title "Audit refused attribution attempts" still holds: the refused attempts are the privileged-origin claims).

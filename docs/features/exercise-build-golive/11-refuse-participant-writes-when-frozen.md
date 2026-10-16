@@ -5,12 +5,12 @@
 **Stack:** backend  ·  **Review tier:** Tier-2 (correctness, security)  ·  **Wave:** A5
 
 ## Context
-Sim writes are lifecycle-gated: only in `live` and not Freeze ([`docs/design/ADMIN-IDENTITY-MODEL.md`](../../design/ADMIN-IDENTITY-MODEL.md) §5.1 "A5 adds that Freeze and pause refuse participant writes", tracker #379). Pause tiers per D5-amended CTL-023.
+Sim writes are lifecycle-gated: allowed in `live` and `staged` (dry runs), refused when paused or at the Freeze tier ([`docs/design/ADMIN-IDENTITY-MODEL.md`](../../design/ADMIN-IDENTITY-MODEL.md) §5.1 "A5 adds that Freeze and pause refuse participant writes", tracker #379). Pause tiers per D5-amended CTL-023.
 
 ## Acceptance Criteria
 - [ ] Given Freeze world (and the tier that pauses participant activity), when a participant posts, replies, reacts, follows or uploads an avatar, then the request is refused (409 `exercise-frozen`) with no state change and a participant-visible, in-fiction-safe message.
 - [ ] Given Pause injects or Pause engine only, participant writes remain allowed (per tier definitions).
-- [ ] Given `build`, `staged`, `completed` or `archived`, participant writes are refused; readonly sessions remain read-only.
+- [ ] Given `live` or `staged` (and not paused or Freeze), participant writes are allowed. Given `build`, `completed` or `archived`, or lifecycle `paused`, or the Freeze pause tier, participant writes are refused; readonly sessions remain read-only.
 - [ ] Controller and staff writes are unaffected by Freeze except where the matrix says otherwise.
 - [ ] Refusals are telemetered (XC-004) with the actor and tier; no content from the refused body is stored.
 - [ ] Isolation (XC-001/002, COR-001/002/007; brief C5): every new route has a foreign-exercise test **and** a foreign-org test; a cross-tenant id returns the same bare 404 as a missing id (the bare-404 pattern, design doc §7.2); id-taking org routes join the `CompositionRootWiringTests` allow-list.
@@ -18,7 +18,7 @@ Sim writes are lifecycle-gated: only in `live` and not Freeze ([`docs/design/ADM
 - [ ] Two worlds: participant message uses the brand skin; no COBRA.
 - [ ] User guide (C5): `controller-guide.md` (tiers) and `participant-guide.md` updated in the same PR.
 
-### Copilot review 2 fold (2026-10-16, ADMIN-IDENTITY-MODEL §8.2)
+### Copilot review 2 fold (2026-10-16, ADMIN-IDENTITY-MODEL §8.2) (superseded in place by review 3: the AC above now says the same)
 - [ ] Participant sim writes stay **allowed in `staged`** (dry runs, matching `ExerciseLifecycleStates.BehaviourOf(Staged)` today) and in `live`. They are refused only when paused or frozen. The route × role matrix test (story 17) encodes staged as allowed.
 
 ## Out of Scope
@@ -32,3 +32,6 @@ Wave A5, after identity 17 (matrix) and A3.
 
 ## Tests
 Tier x state x route matrix tests; participant RTL for the message.
+
+### Copilot review 3 fold (2026-10-16)
+- Fixed in place: the Context and the lifecycle AC no longer say live-only or refuse `staged`; writes are allowed in `live` and `staged`, refused when paused/Freeze and in build/completed/archived. The review-2 note is now consistent, not contradictory.

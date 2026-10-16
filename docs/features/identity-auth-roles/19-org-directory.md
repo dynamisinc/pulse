@@ -9,8 +9,8 @@ An org admin needs to see and manage the people in their organization without as
 
 ## Acceptance Criteria
 - [ ] **List.** Given an org-scope session, when `GET /api/org/people` is called, then it returns only `Person` rows of the caller's organization (name, email, org role, enrollments summary, disabled flag), paged and searchable by name/email.
-- [ ] **Grant / revoke org admin.** Given an org admin, when they set or clear `OrgRole = orgAdmin` on a person, then it persists, is audited, and the **last org admin cannot be removed** (409).
-- [ ] **Disable / enable.** Given an org admin disables a person, then `DisabledAt` is set, all that person's sessions are revoked, and sign-in returns the uniform 401; enabling reverses it.
+- [ ] **Grant / revoke org admin.** Given an org admin, when they set or clear `OrgRole = orgAdmin` on a person, then it persists, is audited, and the **last org admin cannot be removed** (409 `last-org-admin`). The safeguard counts **enabled** org admins (`OrgRole = orgAdmin` and `DisabledAt` null) and applies to revoking the role and to disabling a person.
+- [ ] **Disable / enable.** Given an org admin disables a person, then `DisabledAt` is set, all that person's sessions are revoked, and sign-in returns the uniform 401; enabling reverses it. Disabling the last enabled org admin is refused with 409 `last-org-admin` (a disabled admin does not count toward the minimum).
 - [ ] **Role gating.** Planner, controller, evaluator, participant and readonly sessions are refused (403) on every `/api/org/people*` route (route x role matrix, story 17).
 - [ ] **Directory shows people only.** One-off participants (`Enrollment.PersonId` null) never appear in the directory.
 - [ ] Isolation (XC-001/002, COR-001/002/007; brief C5): every new route has a foreign-exercise test **and** a foreign-org test; a cross-tenant id returns the same bare 404 as a missing id (the bare-404 pattern, design doc §7.2); id-taking org routes join the `CompositionRootWiringTests` allow-list.
@@ -30,4 +30,7 @@ Staff world. Paths: `Features/Org/People/*` (backend), `features/orgAdmin/` dire
 Wave A2, after A1 (16, 17). Can run with 22, 24.
 
 ## Tests
-Endpoint tests (incl. foreign-org, last-admin, disabled sign-in); RTL for the directory page; role-matrix entries.
+Endpoint tests (incl. foreign-org, last-admin: revoke-role and disable of the last enabled admin both 409 `last-org-admin`; with two admins, one already disabled, revoking/disabling the other is refused; disabled sign-in); RTL for the directory page; role-matrix entries.
+
+### Copilot review 3 fold (2026-10-16)
+- Changed: last-admin safeguard now also covers disabling a person, counts enabled org admins only, and returns 409 `last-org-admin`; tests added.
