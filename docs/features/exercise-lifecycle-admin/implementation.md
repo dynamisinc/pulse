@@ -147,3 +147,7 @@ finding:
 One migration, one nullable column: `20260802124443_ExerciseCreatedAt` adds `Exercise.CreatedAt`
 (`datetimeoffset NULL`), because story 02's AC2 requires a created date and nothing carried one. Nullable
 with no backfill on purpose — see story 02.
+
+## Scope update 2026-10-16 (ADMIN-IDENTITY-MODEL)
+
+Wave A1 (03) and A3 (01, 02): the role check on create comes from `identity-auth-roles/17`; the org list/staff-assignments reads switch from `StaffAssignment` to `Enrollment` (`TenantChecked`). File footprints are unchanged; no new wave-plan rows.

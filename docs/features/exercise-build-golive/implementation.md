@@ -32,3 +32,18 @@
 | 03 Readiness dashboard | ReadinessDashboard, useReadiness | readiness inputs | 04 | 2 | M |
 | 05 Content lock | content lock | 04 | 06 | 3 | M |
 | 06 Duplication | cloneExercise | 01; exercise-configuration | 05 | 3 | M |
+
+## Scope update 2026-10-16 (ADMIN-IDENTITY-MODEL)
+
+Source: [`docs/design/ADMIN-IDENTITY-MODEL.md`](../../design/ADMIN-IDENTITY-MODEL.md) §5.
+
+| Story | Files it owns | Depends-on | Can-run-with | Wave | Effort |
+|-------|---------------|------------|--------------|------|--------|
+| 09 Participant name | `Exercise.ParticipantName`, `ExerciseScopeDto`, settings field | A1 | 07, 08 | A3 | S |
+| 07 Reset/reopen/unstage/unarchive | `Features/ExerciseLifecycleAdmin/Reset*`, `LifecycleEndpoints.cs`, `Clear-DemoContent.ps1`, confirm dialog | A1 (16, 17) | 08, 09 | A3 | L |
+| 08 Delete | `ExerciseDelete*.cs`, list row action | 07 (shared transaction/outbox helper) | 09 | A3 | M |
+| 10 Hub + loop gate | `ReactionLoopHost`, hub | A3, A1 | 11 (disjoint) | A5 | M |
+| 11 Frozen write gate | participant write filter | identity 17, A3 | 10 | A5 | M |
+| 12 Push lifecycle | hub group message, composer + header | 10, 11 | — | A5 | M |
+
+Reuse: `PulseDbContext` central filter for every delete, blob outbox, `ComplianceChromeGuard`, COBRA type-to-confirm, SignalR feed hook, telemetry emitter. The A3 migration (`Posts.IsSetupContent`, `Exercises.ParticipantName`) is orchestrator-owned. Stories 01/03/04/05/06 edits ride in wave A3 alongside.
