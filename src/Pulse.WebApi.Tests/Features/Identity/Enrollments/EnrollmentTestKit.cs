@@ -6,6 +6,8 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.EngineRuntime;
@@ -148,14 +150,30 @@ public sealed class EnrollmentTestKit
         Guid callerPersonId,
         Guid organizationId,
         Guid? exerciseScope,
-        ISessionConnectionRevoker? revoker = null)
+        ISessionConnectionRevoker? revoker = null,
+        ISwampedModeSwitch? swamped = null,
+        IInterceptor? interceptor = null)
     {
         var exerciseContext = new ExerciseContext { CurrentExerciseId = exerciseScope };
         var organizationContext = new OrganizationContext { CurrentOrganizationId = organizationId };
-        var context = _fixture.CreateContext(exerciseContext, organizationContext);
+        PulseDbContext context;
+        if (interceptor is null)
+        {
+            context = _fixture.CreateContext(exerciseContext, organizationContext);
+        }
+        else
+        {
+            var options = new DbContextOptionsBuilder<PulseDbContext>()
+                .UseSqlServer(_fixture.ConnectionString!)
+                .AddInterceptors(interceptor)
+                .Options;
+            context = new PulseDbContext(options, exerciseContext, organizationContext);
+        }
+
         var accessor = new FixedStaffSessionAccessor(callerSessionId, callerPersonId);
         var caller = new StaffCallerContext(context, accessor, organizationContext);
-        var service = new EnrollmentService(context, caller, exerciseContext, TimeProvider.System, Swamped, revoker ?? Revoker);
+        var service = new EnrollmentService(
+            context, caller, exerciseContext, TimeProvider.System, swamped ?? Swamped, revoker ?? Revoker);
         return (service, context);
     }
 
@@ -190,6 +208,28 @@ public sealed class RecordingSwampedModeSwitch : ISwampedModeSwitch
         Calls.Enqueue((exerciseId, actingHumanId));
         return WasOn;
     }
+}
+
+/// <summary>A swamped-mode switch whose flip always throws (the post-commit failure path).</summary>
+public sealed class ThrowingSwampedModeSwitch : ISwampedModeSwitch
+{
+    public int Attempts { get; private set; }
+
+    public bool TurnOff(Guid exerciseId, string actingHumanId)
+    {
+        Attempts++;
+        throw new InvalidOperationException("Simulated autonomy-registry failure.");
+    }
+}
+
+/// <summary>Fails every save on the context it is attached to (the enrollment change never commits).</summary>
+public sealed class FailingSaveInterceptor : SaveChangesInterceptor
+{
+    public override ValueTask<InterceptionResult<int>> SavingChangesAsync(
+        DbContextEventData eventData,
+        InterceptionResult<int> result,
+        CancellationToken cancellationToken = default) =>
+        throw new DbUpdateException("Simulated commit failure.");
 }
 
 /// <summary>Records the session ids whose hub connections the service asked to cut.</summary>

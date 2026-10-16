@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
+using Pulse.WebApi.Features.EngineRuntime;
 using Pulse.WebApi.Features.Identity.Enrollments;
 
 using Pulse.WebApi.Tests.Data;
@@ -287,9 +288,79 @@ public sealed class EnrollmentServiceTests
         var changed = await read.Enrollments.IgnoreQueryFilters().SingleAsync(e => e.Id == leadEnrollment);
         changed.Role.Should().Be("evaluator");
         changed.IsLead.Should().BeFalse();
-        _kit.Swamped.Calls.Should().ContainSingle();
+        _kit.Swamped.Calls.Should().ContainSingle().Which.ExerciseId.Should().Be(exercise, "a committed demotion of the lead turns swamped mode off");
         (await read.OrgAuditEvents.IgnoreQueryFilters()
                 .CountAsync(a => a.ExerciseId == exercise && a.Kind == EnrollmentService.LeadReleasedAuditKind))
             .Should().Be(1);
+        (await read.TelemetryEvents.IgnoreQueryFilters()
+                .CountAsync(t => t.ExerciseId == exercise && t.EventType == EnrollmentService.SwampedModeOffEventType))
+            .Should().Be(1, "the flip is recorded once, after it happened");
+    }
+
+    [RequiresDockerFact]
+    public async Task Revoke_OfTheLead_WhenTheSaveFails_DoesNotTurnSwampedModeOff()
+    {
+        var org = await _kit.SeedOrganizationAsync();
+        var exercise = await _kit.SeedExerciseAsync(org);
+        var (planner, _) = await _kit.SeedStaffAsync(org, exercise, "planner");
+        var (_, leadEnrollment) = await _kit.SeedStaffAsync(org, exercise, "controller", isLead: true);
+        var (plannerSession, _) = await _kit.SeedStaffSessionAsync(planner, exercise, "planner");
+
+        var (service, context) = _kit.ServiceFor(plannerSession, planner, org, exercise, interceptor: new FailingSaveInterceptor());
+        await using (context)
+        {
+            var act = () => service.RevokeAsync(leadEnrollment);
+            await act.Should().ThrowAsync<DbUpdateException>();
+        }
+
+        _kit.Swamped.Calls.Should().BeEmpty("swamped mode is turned off only after the enrollment change commits (M-002)");
+        await using var read = _kit.ReadContext();
+        (await read.Enrollments.IgnoreQueryFilters().SingleAsync(e => e.Id == leadEnrollment)).IsLead.Should().BeTrue(
+            "the failed change left the lead in place");
+        (await read.TelemetryEvents.IgnoreQueryFilters()
+                .CountAsync(t => t.ExerciseId == exercise && t.EventType == EnrollmentService.SwampedModeOffEventType))
+            .Should().Be(0);
+    }
+
+    [RequiresDockerFact]
+    public async Task ChangeRole_OfTheLead_WhenTheSwampedFlipThrows_StillSucceeds_AndRecordsNoFlip()
+    {
+        var org = await _kit.SeedOrganizationAsync();
+        var exercise = await _kit.SeedExerciseAsync(org);
+        var (planner, _) = await _kit.SeedStaffAsync(org, exercise, "planner");
+        var (_, leadEnrollment) = await _kit.SeedStaffAsync(org, exercise, "controller", isLead: true);
+        var (plannerSession, _) = await _kit.SeedStaffSessionAsync(planner, exercise, "planner");
+        var throwing = new ThrowingSwampedModeSwitch();
+
+        var (service, context) = _kit.ServiceFor(plannerSession, planner, org, exercise, swamped: throwing);
+        await using (context)
+        {
+            (await service.ChangeRoleAsync(leadEnrollment, "evaluator")).Outcome.Should().Be(
+                EnrollmentOutcome.Ok, "the grant change has committed; a failed in-memory flip never fails it");
+        }
+
+        throwing.Attempts.Should().Be(1);
+        await using var read = _kit.ReadContext();
+        var changed = await read.Enrollments.IgnoreQueryFilters().SingleAsync(e => e.Id == leadEnrollment);
+        changed.Role.Should().Be("evaluator");
+        changed.IsLead.Should().BeFalse();
+        (await read.OrgAuditEvents.IgnoreQueryFilters()
+                .CountAsync(a => a.ExerciseId == exercise && a.Kind == EnrollmentService.LeadReleasedAuditKind))
+            .Should().Be(1, "the lead release is part of the committed enrollment change");
+        (await read.OrgAuditEvents.IgnoreQueryFilters()
+                .CountAsync(a => a.ExerciseId == exercise && a.Kind == EnrollmentService.SwampedModeOffAuditKind))
+            .Should().Be(0, "no record claims a flip that did not happen");
+    }
+
+    [Fact]
+    public void Rehydrate_AnExerciseWithNoLead_ComesBackWithSwampedModeOff()
+    {
+        // Swamped mode is in-memory only: neither ExerciseRuntimeStateRehydrator nor any store persists it, so after a
+        // restart every exercise's autonomy state is created fresh — swamped OFF by construction, lead or no lead.
+        var registry = new EngineAutonomyRegistry();
+        var exercise = Guid.NewGuid();
+
+        registry.GetOrCreate(exercise).SwampedModeEnabled.Should().BeFalse(
+            "a rehydrated exercise (with no lead) never comes back in swamped mode");
     }
 }

@@ -4,6 +4,8 @@ using System.Globalization;
 using System.Text.Json;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.EngineRuntime;
@@ -34,8 +36,18 @@ using Pulse.WebApi.Features.Realtime;
 /// seam the A2 staff-assignment UI (story 20) maps, and they already enforce one-role-per-exercise (409
 /// <c>conflicting-enrollment</c>) and the grant-revoke rule.
 /// </para>
+/// <para>
+/// <b>Losing the lead (M-002 / M-1).</b> Swamped mode lives in the in-memory engine autonomy registry, outside this
+/// unit of work, so it is turned OFF only AFTER the enrollment change commits — a failed save never lowers autonomy for
+/// a change that did not happen. The flip is idempotent (OFF is a fixed point), runs on every committed lead release,
+/// and a failure is logged, never surfaced: the grant change has already committed. Its record is split by what each
+/// half describes: the <c>enrollment.lead.released</c> event + audit are part of the enrollment change and are staged
+/// in the SAME unit of work; the <c>engine.swamped-mode.turned-off</c> event + audit describe the in-memory flip, so
+/// they are written after the flip (a second, small save) and carry the real <c>wasOn</c>. A failed flip therefore
+/// leaves no "turned off" record claiming otherwise, and a failed follow-up save is logged without failing the request.
+/// </para>
 /// </remarks>
-public sealed class EnrollmentService
+public sealed partial class EnrollmentService
 {
     /// <summary>The 409 error code for a second enrollment of one person in one exercise.</summary>
     public const string ConflictingEnrollmentError = "conflicting-enrollment";
@@ -99,6 +111,7 @@ public sealed class EnrollmentService
     private readonly TimeProvider _timeProvider;
     private readonly ISwampedModeSwitch _swampedMode;
     private readonly ISessionConnectionRevoker _connectionRevoker;
+    private readonly ILogger<EnrollmentService> _logger;
 
     /// <summary>Creates the service.</summary>
     /// <param name="dbContext">The request-scoped persistence context (one unit of work).</param>
@@ -107,14 +120,17 @@ public sealed class EnrollmentService
     /// <param name="timeProvider">The server wall clock.</param>
     /// <param name="swampedMode">The OFF-only swamped-mode seam used when an exercise loses its lead.</param>
     /// <param name="connectionRevoker">Cuts the live hub connections of the sessions a grant change revokes.</param>
+    /// <param name="logger">Logs a post-commit swamped-mode flip that failed (never surfaced to the caller).</param>
     public EnrollmentService(
         PulseDbContext dbContext,
         StaffCallerContext staffCaller,
         IExerciseContext exerciseContext,
         TimeProvider timeProvider,
         ISwampedModeSwitch swampedMode,
-        ISessionConnectionRevoker connectionRevoker)
+        ISessionConnectionRevoker connectionRevoker,
+        ILogger<EnrollmentService>? logger = null)
     {
+        _logger = logger ?? NullLogger<EnrollmentService>.Instance;
         ArgumentNullException.ThrowIfNull(swampedMode);
         ArgumentNullException.ThrowIfNull(connectionRevoker);
         _swampedMode = swampedMode;
@@ -358,13 +374,14 @@ public sealed class EnrollmentService
 
         var now = _timeProvider.GetUtcNow();
         var previousRole = enrollment.Role;
-        ReleaseLeadIfLost(caller, exercise, enrollment, newRole: staffRole, now);
+        var leadReleased = ReleaseLeadIfLost(caller, exercise, enrollment, newRole: staffRole, now);
         enrollment.Role = staffRole;
 
         var revoked = await RevokeExerciseSessionsAsync(exercise.Id, [enrollment.PersonId], now, cancellationToken);
         Record(caller, exercise, enrollment, RoleChangedEventType, RoleChangedAuditKind, RolePayload(staffRole, previousRole), now);
         await _dbContext.SaveChangesAsync(cancellationToken);
         await _connectionRevoker.RevokeAsync(revoked, cancellationToken);
+        await TurnSwampedModeOffAfterCommitAsync(caller, exercise, enrollment, leadReleased, now, cancellationToken);
 
         return EnrollmentResult.Ok(enrollment);
     }
@@ -393,12 +410,13 @@ public sealed class EnrollmentService
         var (enrollment, exercise) = target.Value;
         var now = _timeProvider.GetUtcNow();
 
-        ReleaseLeadIfLost(caller, exercise, enrollment, newRole: null, now);
+        var leadReleased = ReleaseLeadIfLost(caller, exercise, enrollment, newRole: null, now);
         _dbContext.Enrollments.Remove(enrollment);
         var revoked = await RevokeExerciseSessionsAsync(exercise.Id, [enrollment.PersonId], now, cancellationToken);
         Record(caller, exercise, enrollment, RevokedEventType, RevokedAuditKind, RolePayload(role: null, enrollment.Role), now);
         await _dbContext.SaveChangesAsync(cancellationToken);
         await _connectionRevoker.RevokeAsync(revoked, cancellationToken);
+        await TurnSwampedModeOffAfterCommitAsync(caller, exercise, enrollment, leadReleased, now, cancellationToken);
 
         return EnrollmentResult.Ok(enrollment);
     }
@@ -406,34 +424,86 @@ public sealed class EnrollmentService
     /// <summary>
     /// THE last-lead policy, isolated here so it is one edit to change (Tom, 2026-10-16, Option A): when the lead's
     /// enrollment is removed (<paramref name="newRole"/> <c>null</c>) or moved off <c>controller</c>, the change is
-    /// ALLOWED — the lead flag is cleared (so the check constraint never fires) and the exercise's swamped mode is
-    /// turned OFF, both recorded (XC-004 + org audit) in the caller's unit of work. The exercise then has no lead until
-    /// a planner sets one. A no-op for any other enrollment or change.
+    /// ALLOWED — the lead flag is cleared (so the check constraint never fires) and the release is recorded (XC-004 +
+    /// org audit) in the caller's unit of work. Swamped mode is NOT touched here: the caller turns it off only after the
+    /// save commits (<see cref="TurnSwampedModeOffAfterCommitAsync"/>). The exercise then has no lead until a planner
+    /// sets one. A no-op for any other enrollment or change.
     /// </summary>
-    private void ReleaseLeadIfLost(StaffCaller caller, Exercise exercise, Enrollment enrollment, string? newRole, DateTimeOffset now)
+    /// <returns>Whether the lead was released, i.e. whether swamped mode must be turned off once the change commits.</returns>
+    private bool ReleaseLeadIfLost(StaffCaller caller, Exercise exercise, Enrollment enrollment, string? newRole, DateTimeOffset now)
     {
         if (!enrollment.IsLead || string.Equals(newRole, EnrollmentRoles.Controller, StringComparison.Ordinal))
         {
-            return;
+            return false;
         }
 
         enrollment.IsLead = false;
-
-        // Swamped mode lives in the in-memory engine autonomy registry, not in this unit of work. Turning it OFF is the
-        // safe direction (it only ever lowers autonomy) and idempotent, so it happens before the save.
-        var swampedWasOn = _swampedMode.TurnOff(exercise.Id, caller.StaffUserId.ToString());
 
         var leadPayload = string.Create(
             CultureInfo.InvariantCulture,
             $"{{\"enrollmentId\":{JsonSerializer.Serialize(enrollment.Id.ToString())}," +
             $"\"newRole\":{JsonSerializer.Serialize(newRole)}}}");
         Record(caller, exercise, enrollment, LeadReleasedEventType, LeadReleasedAuditKind, leadPayload, now);
+        return true;
+    }
+
+    /// <summary>
+    /// Turns the exercise's swamped mode OFF after a committed lead release (M-002): idempotent, so it is simply called
+    /// for every committed release. Then records the flip (XC-004 + org audit, with the real <c>wasOn</c>) in a small
+    /// follow-up save. Neither the flip nor its record can fail the request — the enrollment change has already
+    /// committed — so a failure of either is logged and swallowed.
+    /// </summary>
+    private async Task TurnSwampedModeOffAfterCommitAsync(
+        StaffCaller caller,
+        Exercise exercise,
+        Enrollment enrollment,
+        bool leadReleased,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        if (!leadReleased)
+        {
+            return;
+        }
+
+        bool swampedWasOn;
+        try
+        {
+            swampedWasOn = _swampedMode.TurnOff(exercise.Id, caller.StaffUserId.ToString());
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            // The grant change has committed; a failed in-memory flip must never fail it.
+            LogSwampedModeOffFailed(exercise.Id, exception);
+            return;
+        }
 
         var swampedPayload = string.Create(
             CultureInfo.InvariantCulture,
             $"{{\"reason\":\"lead-released\",\"wasOn\":{(swampedWasOn ? "true" : "false")}}}");
         Record(caller, exercise, enrollment, SwampedModeOffEventType, SwampedModeOffAuditKind, swampedPayload, now);
+
+        try
+        {
+            await _dbContext.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException exception)
+        {
+            LogSwampedModeRecordFailed(exercise.Id, exception);
+        }
     }
+
+    [LoggerMessage(
+        EventId = 1,
+        Level = LogLevel.Error,
+        Message = "Swamped mode could not be turned off for exercise {ExerciseId} after its lead was released; the enrollment change has committed.")]
+    private partial void LogSwampedModeOffFailed(Guid exerciseId, Exception exception);
+
+    [LoggerMessage(
+        EventId = 2,
+        Level = LogLevel.Error,
+        Message = "Swamped mode was turned off for exercise {ExerciseId}, but its telemetry/audit record could not be saved.")]
+    private partial void LogSwampedModeRecordFailed(Guid exerciseId, Exception exception);
 
     private static string RolePayload(string? role, string? previousRole) => string.Create(
         CultureInfo.InvariantCulture,
