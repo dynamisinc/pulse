@@ -150,3 +150,33 @@ test.describe('alert bar: advisory ticker', () => {
     await expectNoHorizontalScroll(page)
   })
 })
+
+/**
+ * Copilot #584: a SHORT alert fits on one line, so the band can be shorter
+ * than 44 px. A centred 44 px hit area must then still sit fully inside the
+ * band; otherwise the compliance banner above (higher z-index) or the channel
+ * nav below wins the tap. The long-message fixtures above mask this case.
+ */
+test.describe('alert bar: short single-line alerts', () => {
+  const SHORT_EMERGENCY: SeedAlert = { ...EMERGENCY, id: 'e2e-short-e', message: 'Evacuate now.' }
+  const SHORT_ADVISORY: SeedAlert = { ...ADVISORY, id: 'e2e-short-a', message: 'Boil water.' }
+
+  for (const [label, alerts, controls] of [
+    ['emergency band', [SHORT_ADVISORY, SHORT_EMERGENCY], ['pulse-alert-bar-details', 'pulse-alert-bar-more-chip']],
+    ['advisory ticker', [SHORT_ADVISORY], ['pulse-alert-bar-details']],
+  ] as const) {
+    test(`${label}: every 44px target fits inside the band`, async ({ page }) => {
+      await openFeedWith(page, alerts)
+      const band = await boxOf(page.getByTestId('pulse-alert-bar'))
+      for (const id of controls) {
+        const control = page.getByTestId(id)
+        await expectTouchTarget(control, 44)
+        const box = await boxOf(control)
+        const cy = box.y + box.height / 2
+        expect(cy - 22, `${id} 44px target pokes above the band`).toBeGreaterThanOrEqual(band.y - 0.5)
+        expect(cy + 22, `${id} 44px target pokes below the band`)
+          .toBeLessThanOrEqual(band.y + band.height + 0.5)
+      }
+    })
+  }
+})

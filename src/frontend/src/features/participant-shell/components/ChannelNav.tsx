@@ -70,7 +70,7 @@ import {
 import { useExerciseContext } from '@/core/exerciseContext'
 import { isWallMirroringExerciseClock, useScenarioTime } from '@/core/clock'
 import { useChannelNav, type ChannelIconId } from '../channelNavConfig'
-import { TOUCH_TARGET_MIN_PX } from './touchHitArea'
+import { TOUCH_TARGET_MIN_PX, touchTargetCss } from './touchTarget'
 
 /** Maps the closed wire icon identifier to a concrete FontAwesome icon (FA-only, D icons). */
 const CHANNEL_ICON_MAP: Record<ChannelIconId, IconDefinition> = {
@@ -198,24 +198,16 @@ const NAV_STYLES = `
     display: none;
   }
 }
-/* Touch (tablet) strip: links measured 43x28 at 768 px. An invisible hit-slop
-   would spill into the fixed compliance band above and the social rail below
-   (both win the tap), so on a coarse pointer the strip grows to the 44 px
-   touch floor and each link fills it (mobile-tablet 17, NFR-001). Mouse
-   layouts keep the 38 px strip. */
+/* Touch (tablet) strip: links measured 43x28 at 768 px. On a coarse pointer
+   the strip grows to the 44 px touch floor and each link fills it
+   (mobile-tablet 17, NFR-001; see touchTarget.ts for why not a hit-slop).
+   Mouse layouts keep the 38 px strip. */
 @media (pointer: coarse) {
   .pulse-channel-nav-strip {
     height: ${TOUCH_TARGET_MIN_PX}px;
   }
-  .pulse-channel-nav-link {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    min-width: ${TOUCH_TARGET_MIN_PX}px;
-    min-height: ${TOUCH_TARGET_MIN_PX}px;
-  }
 }
-`
+${touchTargetCss('.pulse-channel-nav-link')}`
 
 export function ChannelNav() {
   const config = useChannelNav()

@@ -118,7 +118,7 @@ import { AlertDetailsLink } from './AlertDetailsLink'
 import { SeverityChip } from './SeverityChip'
 import { SEVERITY_META, chipBaseStyle } from './severityMeta'
 import type { Alert } from './alertTypes'
-import { touchHitAreaCss } from '../touchHitArea'
+import { touchTargetCss } from '../touchTarget'
 
 /** Ticker auto-rotation interval (SHELL-CONTRACT.md §2: "~3.5s"). */
 const ROTATE_INTERVAL_MS = 3500
@@ -127,12 +127,13 @@ const ROTATE_INTERVAL_MS = 3500
 const SCROLL_COLLAPSE_THRESHOLD_PX = 8
 
 /**
- * Class on the compact band controls ("Details →", "+N more") that extends
- * their tap box to 44 px on coarse pointers without growing the band
- * (mobile-tablet story 05, gap G1: they measured 52×18 and 67×16 on phones).
+ * Class on the compact band controls ("Details →", "+N more") that makes them
+ * real 44 px targets on coarse pointers (mobile-tablet story 05, gap G1: they
+ * measured 52×18 and 67×16 on phones). The band grows to fit them, so the
+ * target never pokes under the compliance banner (Copilot review on #584).
  */
-const TOUCH_HIT_CLASS = 'pulse-alert-bar-hit'
-const TOUCH_HIT_STYLES = touchHitAreaCss(`.${TOUCH_HIT_CLASS}`)
+const TOUCH_TARGET_CLASS = 'pulse-alert-bar-hit'
+const TOUCH_TARGET_STYLES = touchTargetCss(`.${TOUCH_TARGET_CLASS}`)
 
 const detailsLinkStyle: CSSProperties = {
   fontFamily: "'Figtree', system-ui, sans-serif",
@@ -261,12 +262,25 @@ const tapToExpandStyle: CSSProperties = {
   cursor: 'pointer',
 }
 
+/**
+ * The "+N more" control is a transparent button around a visible pill, so on
+ * coarse pointers only the button grows to 44 px; the pill keeps its size.
+ */
+const moreButtonStyle: CSSProperties = {
+  background: 'none',
+  border: 'none',
+  padding: 0,
+  margin: 0,
+  color: 'inherit',
+  font: 'inherit',
+  cursor: 'pointer',
+  flexShrink: 0,
+}
+
 const moreChipStyle: CSSProperties = {
   ...chipBaseStyle,
   backgroundColor: 'rgba(255, 255, 255, 0.18)',
   color: '#ffffff',
-  border: 'none',
-  cursor: 'pointer',
   fontFamily: "'JetBrains Mono', 'Courier New', monospace",
 }
 
@@ -409,7 +423,7 @@ export function AlertBar() {
   return (
     <>
       {/* Outside the live region so the stylesheet is never part of an announcement. */}
-      <style>{TOUCH_HIT_STYLES}</style>
+      <style>{TOUCH_TARGET_STYLES}</style>
       <div
         ref={hostRef}
         role="status"
@@ -431,7 +445,7 @@ export function AlertBar() {
                 {format(activeAlert.scenarioTime)}
               </span>
               <AlertDetailsLink
-                className={TOUCH_HIT_CLASS}
+                className={TOUCH_TARGET_CLASS}
                 style={{ ...detailsLinkStyle, color: '#ffffff' }}
               >
                 Details →
@@ -443,10 +457,10 @@ export function AlertBar() {
                   aria-expanded={stackExpanded}
                   aria-controls="pulse-alert-bar-stack"
                   data-testid="pulse-alert-bar-more-chip"
-                  className={TOUCH_HIT_CLASS}
-                  style={moreChipStyle}
+                  className={TOUCH_TARGET_CLASS}
+                  style={moreButtonStyle}
                 >
-                  +{otherAlerts.length} more
+                  <span style={moreChipStyle}>+{otherAlerts.length} more</span>
                 </button>
               )}
             </div>
@@ -486,7 +500,7 @@ export function AlertBar() {
               <span data-testid="pulse-alert-bar-timestamp" style={timestampStyle}>
                 {format(activeAlert.scenarioTime)}
               </span>
-              <AlertDetailsLink className={TOUCH_HIT_CLASS} style={detailsLinkStyle}>
+              <AlertDetailsLink className={TOUCH_TARGET_CLASS} style={detailsLinkStyle}>
                 Details →
               </AlertDetailsLink>
             </div>

@@ -176,7 +176,7 @@ describe('AlertBar — touch targets on phones (mobile-tablet 05, gap G1)', () =
     expect(screen.getByTestId('pulse-alert-bar-more-chip')).toHaveClass('pulse-alert-bar-hit')
 
     const style = container.querySelector('style')
-    expect(style?.textContent).toContain('.pulse-alert-bar-hit::after')
+    expect(style?.textContent).toMatch(/\.pulse-alert-bar-hit\s*\{[^}]*min-height:\s*44px/)
     // Never inside role="status": a stylesheet must not join an announcement.
     expect(screen.getByTestId('pulse-alert-bar').contains(style)).toBe(false)
   })
