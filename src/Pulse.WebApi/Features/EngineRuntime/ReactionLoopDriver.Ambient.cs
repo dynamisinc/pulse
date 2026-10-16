@@ -219,6 +219,16 @@ public sealed partial class ReactionLoopDriver
     {
         var registration = tick.Registration;
         var exerciseId = registration.ExerciseId;
+
+        // Gate-1 L-7, defence in depth for AC8: ONLY an AmbientFloor intent may ever publish without a controller click.
+        // RunAmbientCoreAsync only ever hands this method an AmbientBehavior intent, but the invariant is enforced HERE,
+        // at the publish funnel's doorstep, so a future caller can never route a storyline intent through it.
+        if (intent.Trigger != ReactionTriggerKind.AmbientFloor)
+        {
+            LogAmbientPublishRefused(exerciseId, intent.Trigger);
+            return (0, EngineEventPayloads.HeldPolicy);
+        }
+
         var publisher = tick.ScopedServices.GetRequiredService<IEnginePublishService>();
         var burstPosts = BuildAmbientBurstPosts(registration, intent, posts);
         var published = 0;
@@ -526,6 +536,12 @@ public sealed partial class ReactionLoopDriver
         Level = LogLevel.Error,
         Message = "Ambient chatter skipped this tick for exercise {ExerciseId} after a fault; nothing was published by the failed step.")]
     private partial void LogAmbientFailed(Exception exception, Guid exerciseId);
+
+    [LoggerMessage(
+        EventId = 3,
+        Level = LogLevel.Error,
+        Message = "Autonomous publish refused for exercise {ExerciseId}: trigger {Trigger} is not ambient-floor; nothing was published.")]
+    private partial void LogAmbientPublishRefused(Guid exerciseId, ReactionTriggerKind trigger);
 
     /// <summary>The per-tick inputs the ambient branch reads (all server-derived; COR-001).</summary>
     private sealed record AmbientTickInputs(
