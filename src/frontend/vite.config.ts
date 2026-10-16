@@ -21,6 +21,8 @@ export default defineConfig({
     environment: 'jsdom',
     setupFiles: './src/test/setup.ts',
     include: ['src/**/*.{test,spec}.{ts,tsx}'],
+    // Playwright specs (e2e/**) run via `npm run test:e2e`, never under Vitest.
+    exclude: ['node_modules/**', 'dist/**', 'e2e/**'],
     // The suite is populated per-story by testing-agent (see docs/ORCHESTRATION_MECHANICS.md);
     // an empty/early tree must not fail CI. Real per-story test coverage is enforced at the
     // code-review gate, not here.
