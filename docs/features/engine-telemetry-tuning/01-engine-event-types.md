@@ -144,6 +144,41 @@ E1 XC-004 v0 emitter (base schema); every E8 feature (emits these); E10 + E9 INT
   actor + channel.
 - Unit: event types validate against the XC-004 v0 envelope; `rumor.*` + lineage fields reserved.
 
+## Ambient-chatter additions (ambient-chatter story 01, #168) — additive, no new event type
+
+Recorded here because this file is the taxonomy of record. #168 adds **no new event type** and changes no
+existing field; every addition below is a nullable/new key that is **null-omitted** on every non-ambient event,
+so storyline payloads are byte-for-byte unchanged (`EngineEventPayloads.cs`).
+
+**`engine.tier_policy_changed` now has two payload shapes, told apart by a `policy` discriminator.**
+
+| Shape | When | Keys |
+|---|---|---|
+| Tier-policy mode (pre-existing, `TierPolicyChanged`) | `POST /api/engine/settings/tier-policy` | `fromMode` / `toMode` (`auto` / `standard` / `ambient`), `scenarioMinute`. **Never** carries `policy`. |
+| Ambient-chatter policy (`AmbientPolicyChanged`) | `POST /api/engine/settings/ambient-policy`, or the engine/request path lowering an autonomous policy on a safety lever | `policy: "ambient"` (always), `fromMode` / `toMode` (`off` / `review` / `autonomous`), `maxPerMinute`, `maxPerHour`, `topicAllowList` (topic keys), `personaAllowList` (persona instance-id strings), `reason` (`controller` \| `safety-clamp`), `scenarioMinute`. |
+
+A consumer distinguishes them by the presence of `policy == "ambient"`; the `ambient` **tier-policy mode** literal
+(`toMode: "ambient"` without a `policy` key) is the unrelated pre-existing tier-role selection. Actor: the acting
+controller for `reason: controller` and for a request-path safety demotion (the human who pulled the kill switch /
+cut to Fake); `actor.kind: "engine"` with no `actingHumanId` when the reaction loop itself demotes (e.g. a degraded
+clamp observed on a tick).
+
+**New nullable keys on existing payloads (null-omitted unless the event is ambient):**
+
+| Payload | Key | Values |
+|---|---|---|
+| `engine.decided` | `trigger` | `ambient-floor` (the quiet-floor ambient burst) |
+| `engine.decided` | `publishPath` | `ambient-autonomous` when the burst takes the autonomous path; omitted for review-mode ambient (queue path) |
+| `engine.decided` | `heldReason` | `held:lifecycle` — a due ambient burst was not generated because the lifecycle / Freeze / Pause-engine gate was closed (recorded once per hold episode) |
+| `engine.generated` | `trigger` | `ambient-floor` |
+| `engine.generated` | `publishPath` | `ambient-autonomous` (autonomous path only) |
+| `engine.generated` | `heldReason` | `held:lifecycle` \| `held:safety` \| `held:policy` — an accepted autonomous draft was discarded at the last boundary before publish (gate closed, kill switch / degraded / cut to Fake, or the policy stopped being autonomous / a non-ambient-floor intent reached the autonomous funnel) |
+| `engine.published` | `trigger` | `ambient-floor` |
+| `engine.published` | `publishPath` | `ambient-autonomous` — published with no controller click |
+
+Ambient `engine.decided` / `engine.generated` carry `storyline` = the empty GUID (ambient belongs to no storyline)
+and `engine.decided.toneMix` = `ambient`.
+
 ## Build notes
 
 **Status detail.** Built and merged to the umbrella `feature/engine-telemetry-tuning` (head `c79c2a8`).
