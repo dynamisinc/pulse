@@ -69,8 +69,12 @@ jobs:
         env:
           BOOTSTRAP_SECRET: ${{ secrets.BOOTSTRAP_SECRET }}
           STAFF_IDENTITY_ACCOUNTS_JSON: ${{ secrets.STAFF_IDENTITY_ACCOUNTS_JSON }}
+          # Provider-alert owner email (engine-telemetry-tuning/04). GitHub already masks the exact secret
+          # value; registering it explicitly keeps it masked in what-if/--verbose output too. Skipped when unset.
+          PULSE_ALERT_OWNER_EMAIL: ${{ secrets.PULSE_ALERT_OWNER_EMAIL }}
         run: |
           if [ -n "$BOOTSTRAP_SECRET" ]; then echo "::add-mask::$BOOTSTRAP_SECRET"; fi
+          if [ -n "$PULSE_ALERT_OWNER_EMAIL" ]; then echo "::add-mask::$PULSE_ALERT_OWNER_EMAIL"; fi
           if [ -n "$STAFF_IDENTITY_ACCOUNTS_JSON" ]; then
             echo "$STAFF_IDENTITY_ACCOUNTS_JSON" | jq -r '.[]?.Secret // empty' | while IFS= read -r s; do
               [ -n "$s" ] && echo "::add-mask::$s"
@@ -95,6 +99,10 @@ jobs:
           # lets no staff sign in.
           BOOTSTRAP_SECRET: ${{ secrets.BOOTSTRAP_SECRET }}
           STAFF_IDENTITY_ACCOUNTS_JSON: ${{ secrets.STAFF_IDENTITY_ACCOUNTS_JSON }}
+          # Provider alert rules (engine-telemetry-tuning/04): the owner email the action group notifies.
+          # Read by uat.bicepparam via readEnvironmentVariable; with deployProviderAlerts = true an unset
+          # secret fails the deploy with a clear message (an alert nobody receives is worse than none).
+          PULSE_ALERT_OWNER_EMAIL: ${{ secrets.PULSE_ALERT_OWNER_EMAIL }}
         run: |
           echo "## Infrastructure What-If Preview" >> $GITHUB_STEP_SUMMARY
           echo "**Environment:** ${{ github.event.inputs.environment }}" >> $GITHUB_STEP_SUMMARY
@@ -121,6 +129,8 @@ jobs:
           # lets no staff sign in.
           BOOTSTRAP_SECRET: ${{ secrets.BOOTSTRAP_SECRET }}
           STAFF_IDENTITY_ACCOUNTS_JSON: ${{ secrets.STAFF_IDENTITY_ACCOUNTS_JSON }}
+          # Provider alert rules (engine-telemetry-tuning/04) — see the What-If step above.
+          PULSE_ALERT_OWNER_EMAIL: ${{ secrets.PULSE_ALERT_OWNER_EMAIL }}
         run: |
           az deployment group create \
             --resource-group ${{ steps.env.outputs.resource_group }} \
