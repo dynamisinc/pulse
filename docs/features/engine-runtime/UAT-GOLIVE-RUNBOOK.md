@@ -26,8 +26,13 @@ Read the job summary. Expect **only** these changes:
 | App Service `app-pulse-api-uat-dynamis`, app settings | `Generation__Provider`: `Fake` → `AzureOpenAI` | #571 (`generationProviderLive = true`) |
 | | `Generation__Governance__TenantBounded`: `false` → `true` | #571, the §8 attestation |
 | | `Generation__Governance__NoTrainingAttested`: `false` → `true` | #571, the §8 attestation |
-| | A1a's forwarded-headers / trusted-proxy settings (#480) | Session A. **Confirm the exact keys against A1a's PR before running.** |
+| | **Add** `ForwardedHeaders__KnownNetworks__0 = 10.0.0.0/8` | A1a (#480): trusted-proxy ranges, so the per-IP login limiter sees the real client IP |
+| | **Add** `ForwardedHeaders__KnownNetworks__1 = 172.16.0.0/12` | A1a (#480) |
+| | **Add** `ForwardedHeaders__KnownNetworks__2 = 192.168.0.0/16` | A1a (#480). No `KnownProxies`; `ForwardLimit` stays at the code default of 1 |
 | Action group and four `scheduledQueryRules` (`ag-…-provider`, errors / latency / timeouts / spend) | **Create**, only if you enabled alerts | #585 / #590 |
+
+> ⚠ **Never set `ASPNETCORE_FORWARDEDHEADERS_ENABLED=true`.** It trusts forwarded headers from *any* client, so anyone
+> could spoof their IP past the login limiter. The three `KnownNetworks` entries above are the only forwarded-headers settings.
 
 **Stop and ask before deploying if the what-if shows anything else**, especially:
 - any delete;
@@ -65,7 +70,11 @@ Expect a 200 response carrying the `exerciseId` and persona counts. A 404 means 
    - The next burst uses Fake (no new calls in the usage panel).
    - The swamped banner, if swamped mode is on, reads **TIMEOUT AUTO-SEND IS SUSPENDED**.
    - Restore afterwards (lead controller).
-5. **The kill switch works.** Engage FullStop.
+5. **The login limiter keys on the real client IP (A1a).** Make 11 rapid bad staff logins from one machine.
+   - That machine gets `429`.
+   - A second machine can still log in.
+   - Before this infra run A1a's code is a no-op; after it, the limiter keys on the real client IP.
+6. **The kill switch works.** Engage FullStop.
    - Nothing new publishes.
    - Restore afterwards (lead controller).
 
