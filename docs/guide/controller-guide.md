@@ -152,8 +152,24 @@ start too early, **Pause** the world ([section 9](#9-pausing-and-freezing)) whil
 2. In **End the exercise?**, read the exercise name, then type `END` in **Type END to confirm**.
 3. Select **End exercise** (the red button). The state pill changes to **ENDEX**.
 
-EndEx cannot be undone from the console. After EndEx the world stops: white noise stops, a Freeze is refused, and
-participants see an end-of-exercise page.
+EndEx cannot be undone from the console. After EndEx, white noise stops, a Freeze is refused, and anyone who opens
+or reloads Pulse sees the end-of-exercise page.
+
+> **Important: EndEx does not yet close the world on its own.** Two gaps remain today:
+>
+> - **Open tabs are not told.** A player who already has the feed (or the holding page) open keeps seeing it until
+>   they reload. Nothing is pushed to their screen at EndEx.
+> - **The AI engine is not stopped by EndEx.** Engine posts (for example, a burst you approve late, or one Swamped
+>   mode auto-sends) can still reach a feed that is already open.
+>
+> Close out by hand, in this order:
+>
+> 1. Set **white noise** to **Off** ([section 8](#8-white-noise-background-chatter)).
+> 2. Stop the engine: **Pause engine** ([section 9](#9-pausing-and-freezing)) and set the engine switch to
+>    **ENGINE · STOPPED** ([section 10](#10-the-ai-engine)). Turn **Swamped mode** off. Do this before EndEx.
+> 3. Select **End exercise** as above.
+> 4. Announce EndEx in the room or on your bridge, and ask players to **reload or close** their Pulse tabs. A reload
+>    shows the end-of-exercise page.
 
 ### Who can start and end
 
@@ -485,7 +501,7 @@ The **Pause** pill in the steering row shows the current state in words: **RUNNI
 |---|---|---|---|
 | **Pause injects** ("World keeps living") | Bursts in progress are suspended. Manual **Fire** still works | Keeps running | Nothing changes |
 | **Pause engine** ("No new AI content") | The AI engine stops drafting | Keeps running | Nothing changes |
-| **Freeze world** ("Participants notice — guarded") | Everything: firing, white noise, the engine and posting | **Stops** | A holding page |
+| **Freeze world** ("Participants notice — guarded") | Firing, white noise and the engine. Participants cannot post through the app (see the note below) | **Stops** | A holding page |
 
 ### To pause injects or the engine
 
@@ -513,6 +529,12 @@ The header reads **WORLD FROZEN**. On the run sheet, **Fire** and **Retry** are 
 
 Participants see the holding page at once, without refreshing, and it stays if they refresh.
 
+> **Note: Freeze does not lock posting on the server yet.** The holding page stops players from using the app, but
+> Pulse does not refuse a post that is already on its way (for example, one sent from a tab that has not yet shown
+> the holding page, or one sent the moment the Freeze lands). Your own **post as persona** panel is **not** locked
+> during a Freeze either: anything you post goes into the world. If a stray post lands during a Freeze, take it
+> down ([section 7](#7-moderation-taking-a-post-down)) and do not post as a persona until you resume.
+
 ### To resume
 
 1. Select the **Pause** pill.
@@ -537,7 +559,8 @@ frozen time does not count.
 
 Pulse has an optional AI engine that drafts reactions from citizen and media personas when a storyline escalates
 (for example, when the official account stays silent too long). **Nothing the engine drafts reaches participants
-until a controller approves it.**
+until a controller approves it**, with one exception: while the lead controller has **Swamped mode** on, an
+undecided Delayed-auto burst posts when its countdown ends (see below).
 
 > **Important:** In every environment today the engine runs on **Fake**, an offline stand-in that writes canned
 > text and calls no AI service. The live AI provider is switched off pending a governance sign-off. Everything in
@@ -570,7 +593,7 @@ Open **ENGINE** on the toolstrip to see and change the engine settings.
 
 - **Suggest** (the default): every burst waits in the queue for a decision.
 - **Delayed-auto**: each burst shows a countdown. If nobody decides before it ends, the burst is **held, not
-  posted** ("timer expired — held for you").
+  posted** ("timer expired — held for you"), unless Swamped mode is on.
 - Fully automatic posting cannot be selected in this version.
 
 **Swamped mode** (in the engine bar) is the only way an undecided burst posts when its countdown ends. Only the
@@ -607,7 +630,8 @@ or Peak phase.
 ## 11. Personas
 
 Personas are the simulated accounts: agencies, news outlets, citizens, bad actors. They are set up before the
-exercise by your planner or setup team; there is no "new persona" button in the console.
+exercise by your setup team or Dynamis support; there is no "new persona" button in the console, and planners
+cannot create them either.
 
 ### To edit a persona's profile
 

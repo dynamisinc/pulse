@@ -24,7 +24,7 @@ check (`Test-DemoReady`) and the one-shot reset (`Invoke-DemoReset`) are all mer
 These are the gaps between a demo and a paid exercise:
 
 1. **Three server-side authorization holes.** Staff roles are not enforced on the configuration and
-   lifecycle writes, and EndEx does not stop realtime content. See A4.
+   lifecycle writes (any assigned staff member, including an evaluator, can make them), and EndEx does not stop realtime content. See A4.
 2. **One channel out of eight.** Seven of the D0 brands (portal, Newsline 7, Courier-Ledger,
    National Wire, Scoop, Wire Room, Weather Desk) exist only as disabled nav entries.
 3. **The evaluator dashboard shows canned data.** It makes no API calls, even in production builds,
@@ -66,7 +66,7 @@ session) is fixed. These remain open:
 
 | Pri | # | Finding | Evidence |
 |---|---|---|---|
-| **P0** | #377 / #481 / #61 | Settings, chrome, practice-mode and **lifecycle** writes check only "assigned staff", never the role, so **an evaluator can rewrite the world or POST EndEx**. | `LifecycleEndpoints.cs:57-58` uses `EngineCockpitStaffAuthorizationFilter`. The fix already exists in the codebase: `EngineCockpitControllerRoleFilter`, used by the engine, inject, pin, moderation and noise routes. |
+| **P0** | #377 / #481 / #61 | Settings, chrome, practice-mode and **lifecycle** writes check only "assigned staff", never the role, so **an evaluator can rewrite the world or POST EndEx**. | `LifecycleEndpoints.cs:57-58` and `ExerciseSettingsEndpoints.cs:54-57` use `EngineCockpitStaffAuthorizationFilter` only. The fix is **per-route and per-transition**, not a blanket controller gate: `EngineCockpitControllerRoleFilter` rejects planners, but Exercise Settings is the planner's home surface (`staffRouteRegistry.tsx:85`, `allowedRoles: ['planner']`). Planners keep configuration writes; StartEx/EndEx need a controller; evaluators are refused every write. |
 | **P0** | #375 | EndEx does not stop content reaching connected participants. `/hubs/exercise` is not lifecycle-gated, and `ReactionLoopHost` never checks lifecycle. | `ExerciseLifecycleGatingMiddleware.cs:31` names the hub as a "known RISK". |
 | P1 | #379 | Participants can still post during Freeze or a pause. | No check in `PostIngestService` or `PostWriteEndpoints`. PR #558 confirms it. |
 | P1 | #376 / #180 | Participants see the **internal** exercise name, and so do printed cards and emails. DF-22 rename makes this more visible. | `ExerciseScopeDto.cs:67`, `LinkCardService.cs:271` |
@@ -273,7 +273,7 @@ Deliver `docs/design/ADMIN-IDENTITY-MODEL.md` and get Tom's sign-off before buil
 
 | Wave | Stories |
 |---|---|
-| **A1 Foundation** (one migration) | People and enrollments schema; the frozen contract; the role model replaces the ad-hoc staff assignment. Also folds in the **controller-role gate on every config and lifecycle write** (#377, #481, #61), with a **route × role matrix test**, and **#480** forwarded headers |
+| **A1 Foundation** (one migration) | People and enrollments schema; the frozen contract; the role model replaces the ad-hoc staff assignment. Also folds in **per-route and per-transition role checks** on config and lifecycle writes (#377, #481, #61): planners keep configuration writes (settings, chrome, practice mode); a controller is required for StartEx and EndEx (and for pause and Freeze, as today); evaluators are refused every write; who may stage and archive is an explicit decision to record (#481). Prove it with a **route × role matrix test**. Plus **#480** forwarded headers |
 | **A2 People** | Org directory UI (org admin); staff invite and role assignment per exercise; admin password reset; staff forgot-password; participant passwords and reset; participant reissue (existing); staff and participant avatars |
 | **A3 Exercise management** | Build workspace and readiness checklist; Staged → Live; reopen and reset; delete; duplicate; view-only code set and rotate; assign staff from the exercise |
 | **A4 Setup content** | Create, clone and archive personas (templates and casts); persona avatar library; content seeding upload |
@@ -450,3 +450,57 @@ The screenshots are captured from mock data by [`tools/guide-screenshots`](../to
   - a "?" drawer in the COBRA staff shell that renders the matching guide page for the current route;
   - a natural small story for Session A once its screens settle;
   - **never on participant surfaces.**
+
+## C7. Optional: an orchestrator session over A, B and C
+
+You can run the three sessions independently, using the C6 prompts, with Tom enforcing the C1
+rules. **Recommended instead:** one light orchestrator session that coordinates and never builds.
+Why:
+- **The real risks are coordination risks:** migrations, the wiring files, and the A → B/C dependencies.
+- **One owner enforces C1** instead of three sessions each trying to follow it.
+- **Tom gets one queue of sign-off requests** instead of three sessions asking separately.
+
+```text
+You are the ORCHESTRATOR for Pulse's post-demo build (repo dynamisinc/pulse). You coordinate;
+you do NOT write product code, open product PRs, or merge anything. Merging is Tom's.
+
+Read first: docs/NEXT-WAVE-SESSION-BRIEF.md (all of Parts B and C, especially C1 coordination
+rules and C6 kickoff prompts), CLAUDE.md, docs/FEATURE_ORCHESTRATION_PLAYBOOK.md.
+
+1. Spawn three child sessions with create_session (same environment, repo dynamisinc/pulse,
+   default branch), titled "Pulse A · Administration", "Pulse B · Mobile & tablet",
+   "Pulse C · AI engine go-live", tag all "pulse-postdemo". Give each its C6 kickoff prompt
+   verbatim plus: "An orchestrator session coordinates you. Before (a) adding an EF migration,
+   (b) editing Program.cs / App.tsx / staffRouteRegistry.tsx, or (c) changing a frozen shared type,
+   stop and state it clearly in your reply so the orchestrator can clear it." Do not use
+   permission_mode "plan" for children.
+   - Session C's first step is a human gate (PROVIDER-GOVERNANCE §8). Spawn it anyway; it does
+     read-only prep until Tom confirms the signature.
+
+2. Hold the coordination state in working notes and enforce C1:
+   - MIGRATION TOKEN: exactly one session may have an unmerged migration. Session A holds it
+     first (wave A1). Session C may not add schema until A1 is merged on main.
+   - WIRING FILES: one session at a time; it must merge main first and keep the change additive.
+   - FROZEN CONTRACTS: when A changes a shared type, tell B and C to merge main before touching it.
+   - DEPENDENCIES: B's evaluator-tablet wave waits for A's role model + real evaluator data;
+     C's C2 autonomy must self-check lifecycle until A5's lifecycle gate lands.
+
+3. Cadence: check each child with get_session / list_events (kinds: assistant, result) about every
+   45 minutes using send_later; do not busy-poll. On each check: note progress, blocked states,
+   open PRs (CI status, Copilot review requested?), and any C1 rule about to be broken. Steer with
+   send_message (priority "next") only when needed; interrupt_session only to stop a rule breach.
+
+4. Human gates: collect every Tier-2 sign-off request and question from the children into ONE
+   consolidated list for Tom (who, what decision, options, recommendation, what is blocked).
+   Relay Tom's answers back verbatim to the right child. Never answer a sign-off yourself.
+
+5. PRs: when a child opens a PR, check it requested a Copilot review and that tracker close-out
+   (C5) is planned. Recommend a merge order to Tom when several are ready (migrations first, then
+   wiring, then the rest). After each merge to main, tell the other children to merge main.
+
+6. Every few hours (and when Tom asks), give Tom a short status: per session — wave, last
+   milestone, open PR(s), blockers, next step; plus the pending sign-off list.
+
+Start by confirming with Tom: (a) PRs #553, #558 and #560 are merged, (b) whether §8 is signed yet.
+Then spawn the three sessions.
+```

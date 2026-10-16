@@ -42,7 +42,9 @@ state](getting-started.md#exercise-states)), **Hostname** and **Created** date.
 
 1. Open **Exercise Management**.
 2. In **Exercise name**, enter the name your team will use, for example "Harbor Freeze Tabletop".
-   Players never see this name. You set the name players see later, as the *world name*.
+   **Players can see this name**: it appears on the player sign-in page, on printed sign-in cards and
+   in link emails. Use a name that is safe for players to read, with no internal codes or notes. The
+   *world name*, which you set later, does not hide it.
 3. Leave **Hostname (optional)** blank unless Dynamis support has given you a specific web address
    for this exercise. When it is blank, Pulse allocates a hostname for you. A hostname must be
    unique across the whole platform. If yours is taken, Pulse says so under the field and keeps
@@ -103,7 +105,8 @@ button. You can move between the three sections before you save and nothing is l
 the form with unsaved changes, the section list shows a notice.
 
 1. Select **Identity & schedule** and fill in:
-   - **Exercise name**: what your planning team calls the exercise. Players never see it.
+   - **Exercise name**: what your planning team calls the exercise. **Players can see it** (sign-in
+     page, cards and emails), and the world name does not replace it. Keep it player-safe.
    - **World name**: the place players think they are in, for example "Metro Atlanta".
    - **Locale**: how dates and numbers are written for players, for example `en-US`.
    - **Time zone**: one zone for the whole exercise, written like `America/New_York`. Every date and
@@ -145,9 +148,12 @@ This section saves on its own. Its **Revert changes** button only affects this s
 
 ## Practice mode
 
-Use practice mode for a rehearsal, such as a controller dry run or a load test. A practice exercise's
-data is left out of evaluation exports, so it never mixes into the after-action record of a real
-exercise.
+Use practice mode for a rehearsal, such as a controller dry run or a load test. Practice mode marks
+the exercise's data as rehearsal data, not part of the after-action record of a real exercise.
+
+> **Important:** Today, **Export posts** and the **Exercise report** do not check practice mode yet.
+> They still include everything from a practice exercise. Keep rehearsal downloads separate from
+> real ones: save them in their own folder and put "REHEARSAL" in the file name.
 
 ![The Practice / sandbox section, showing the current state and the practice checkbox.](img/practice-mode.png)
 
@@ -195,8 +201,9 @@ a permission. Use **Filter participants** to search by name, agency or sign-in n
 - **Most players get a citizen persona.** Leave the persona handle blank and Pulse creates one named
   after them, such as `@jane_smith`. The roster marks it **Auto citizen**.
 - **A player can operate an organization persona.** Enter the handle of an organization persona that
-  already exists in this exercise, such as `FulcoEM`. The roster marks it **Org**. Create organization
-  personas in the Controller Console first. See the [Controller guide](controller-guide.md).
+  already exists in this exercise, such as `FulcoEM`. The roster marks it **Org**. The Controller
+  Console can edit personas but cannot create them, so ask your setup team or Dynamis support to
+  create the organization persona before you assign a player to it.
 
 A persona handle is public and a sign-in name is private, so the two are never the same. For example,
 Madonna signs in as `madonna` and posts as `@madonna_2`.
@@ -382,9 +389,10 @@ controller role, ask a controller to run the import, or ask Dynamis support for 
 
 ### Before you import
 
-- **Create the personas first.** Pulse matches each row's **From / Source** to a persona in this
-  exercise, by handle (a leading `@` is ignored) or by exact display name. A row whose persona is not
-  found fails.
+- **Make sure the personas exist first.** Pulse cannot create personas from the console, so ask your
+  setup team or Dynamis support to create any that are missing. Pulse matches each row's
+  **From / Source** to a persona in this exercise, by handle (a leading `@` is ignored) or by exact
+  display name. A row whose persona is not found fails.
 - **Check the Delivery Method.** Only rows whose **Delivery Method** is "Social Media", "Social",
   "Pulse", or contains "social" are imported. All other rows are skipped and reported as skipped.
 - **Keep posts short.** The **Description** becomes the post text, up to 280 characters.
@@ -436,7 +444,8 @@ Work through this list the day before the exercise and again on the morning.
 
 **Exercise setup**
 
-- [ ] **Exercise Settings > Identity & schedule**: the world name and time zone are right.
+- [ ] **Exercise Settings > Identity & schedule**: the world name and time zone are right, and the
+  exercise name is safe for players to see.
 - [ ] **Theming & outlets**: the brand name and colours look right to players.
 - [ ] **Compliance chrome**: the banners or the watermark (or both) are on, with the right wording.
 - [ ] **Practice / sandbox** matches the event: on for a rehearsal, off for the real exercise.
@@ -469,7 +478,10 @@ Work through this list the day before the exercise and again on the morning.
 ## After the exercise
 
 1. **End the exercise.** A controller selects **End exercise** in the Controller Console. The exercise
-   moves to **Completed**, players see an end-of-exercise page, and nobody can sign in.
+   moves to **Completed** and nobody can sign in. EndEx does not yet stop the AI engine or update
+   tabs players already have open, so the controller stops white noise and the engine first, and
+   staff ask players to reload or close their tabs. A reload shows the end-of-exercise page. See
+   [Ending the exercise](controller-guide.md#ending-the-exercise-endex).
 2. **Print the exercise report.** In the Controller Console, select **Exercise report**. The report
    opens in a new tab and shows the scenario window, an at-a-glance summary, activity charts, how
    players responded to injects, any lookalike-account activity, and the full post record. All times
@@ -480,4 +492,5 @@ Work through this list the day before the exercise and again on the morning.
 4. **Archive the exercise.** On **Exercise Management**, select **Archive** for the completed
    exercise. *(Rolling out. See [Archiving an exercise](#archiving-an-exercise).)*
 
-Practice exercises are left out of evaluation exports. See [Practice mode](#practice-mode).
+The post export and the report do not yet leave out practice exercises. If this was a rehearsal, label
+and file its downloads separately. See [Practice mode](#practice-mode).

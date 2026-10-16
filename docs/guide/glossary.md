@@ -19,7 +19,9 @@ is closed out, read-only for staff, and cannot be reopened.
 
 **Autonomy.** How much the AI engine may do without a person. With **Suggest**, every draft waits for
 a controller. With **Delayed-auto**, each draft carries a countdown. If nobody acts before it runs
-out, the draft is held for a controller. Pulse never publishes a draft just because nobody answered.
+out, the draft is held for a controller. Pulse does not publish a draft just because nobody answered,
+with one exception: while the lead controller has **Swamped mode** on, a Delayed-auto draft posts when
+its countdown ends.
 
 **Build.** The first exercise state. You are preparing content and players cannot get in.
 
@@ -33,8 +35,9 @@ newspaper, wire, press room and weather are not available yet.
 **Citizen persona.** The persona Pulse creates for a player who is not operating an organization
 account. It is named after them, for example `@jane_smith`. The roster marks it **Auto citizen**.
 
-**Completed.** The exercise state after **EndEx**. Players see an end-of-exercise page and nobody
-can sign in.
+**Completed.** The exercise state after **EndEx**. Players who open or reload Pulse see an
+end-of-exercise page, and nobody can sign in. A tab that was already open is not updated by itself:
+ask players to reload or close it.
 
 **Compliance chrome.** The exercise markings on every player screen: the top and bottom banners and
 the in-content **EXERCISE** watermark. At least one of them must be on. Set them under
@@ -46,7 +49,9 @@ the in-content **EXERCISE** watermark. At least one of them must be on. Set them
 **Day word.** See *Today's word*.
 
 **EndEx.** The end of the exercise. A controller selects **End exercise** and types END to confirm.
-The exercise moves to **Completed** and this cannot be undone.
+The exercise moves to **Completed** and this cannot be undone. EndEx does not yet stop the AI engine
+or update open player tabs, so controllers close out by hand; see the
+[Controller guide](controller-guide.md#ending-the-exercise-endex).
 
 **Evaluator Dashboard.** The evaluators' screen. *It is not on live data yet.*
 
@@ -73,7 +78,8 @@ practice content and uses no live AI service. It is used for demonstrations and 
 
 **Holding page.** The page that replaces the feed on every player screen while the world is frozen
 or the exercise is paused. In fiction it reads "We'll be right back". Out of fiction it reads
-"EXERCISE PAUSED". It clears by itself when the exercise resumes.
+"EXERCISE PAUSED". After a Freeze it clears by itself when the controller resumes. If the exercise
+was paused rather than frozen, an open tab may need a reload after it resumes.
 
 **Hostname.** The web address an exercise answers on. Each hostname is unique across Pulse.
 
@@ -105,7 +111,9 @@ screen. See the [Participant guide](participant-guide.md).
 
 **Pause tiers.** The three levels of hold in the Controller Console:
 **Pause injects** (the world keeps living), **Pause engine** (no new AI content) and **Freeze world**
-(everything stops, the scenario clock stops, and players see the holding page). The staff header shows
+(injects, white noise and the engine stop, the scenario clock stops, and players see the holding page).
+Freeze does not yet lock posting on the server; see the
+[Controller guide](controller-guide.md#9-pausing-and-freezing). The staff header shows
 INJECTS PAUSED, ENGINE PAUSED or WORLD FROZEN.
 
 **Paused.** The exercise state in which the world is held and players see the holding page.
@@ -124,8 +132,9 @@ players.
 **PIO.** A participant role for public information officers. For now it works the same as
 participant.
 
-**Practice mode (Practice / sandbox).** Marks an exercise as a rehearsal, so that its data is left out
-of evaluation exports. Players never see it.
+**Practice mode (Practice / sandbox).** Marks an exercise as a rehearsal. Players never see it. The
+settings panel says its data is excluded from evaluation exports, but today **Export posts** and the
+**Exercise report** still include it, so label and file rehearsal downloads separately.
 
 **Preview as participant.** A staff-header button that shows the real player feed, read-only, inside
 a staff screen.
@@ -170,4 +179,4 @@ reply, like or pin.
 does not stand out too much. Controllers set it to **Off**, **Low**, **Medium** or **High**.
 
 **World name.** The place name players see, for example "Metro Atlanta". Set it under **Exercise
-Settings > Identity & schedule**.
+Settings > Identity & schedule**. It does not hide the exercise name, which players can also see.

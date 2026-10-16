@@ -7,6 +7,7 @@ exactly what Pulse shows on screen.
 
 - [A player cannot join](#a-player-cannot-join)
 - [A player is stuck on the holding page](#a-player-is-stuck-on-the-holding-page)
+- [A player still sees the feed after EndEx](#a-player-still-sees-the-feed-after-endex)
 - [The feed is not updating](#the-feed-is-not-updating)
 - [Staff cannot sign in](#staff-cannot-sign-in)
 - [Cards, email and import problems](#cards-email-and-import-problems)
@@ -78,16 +79,29 @@ your staff session. Test player links in a different browser or a private window
 
 The holding page reads **"We'll be right back"** (in fiction) or **"EXERCISE PAUSED"** (out of
 fiction). It appears on every player screen while the world is frozen or the exercise is paused, and
-it clears by itself when the exercise resumes. Players cannot dismiss it, and they do not need to
-refresh.
+after a Freeze it clears by itself when the controller resumes. Players cannot dismiss it. If the
+exercise was **paused** (header **PAUSED**) rather than frozen, resuming is not pushed to open tabs
+yet, so ask players to reload.
 
 1. **Look at the staff header.** If it shows **WORLD FROZEN** or **PAUSED**, the holding page is
    correct. A controller resumes the world from the pause control in the Controller Console. See the
    [Controller guide](controller-guide.md).
 2. **If the header shows LIVE but a player still sees the holding page**, ask the player to reload
    the page. This can happen after a network drop.
-3. **If the header shows ENDEX**, the exercise is over. Players see an end-of-exercise page instead,
-   and that is final.
+3. **If the header shows ENDEX**, the exercise is over. Ask the player to reload. They then see the
+   end-of-exercise page, and that is final. See the next section.
+
+---
+
+## A player still sees the feed after EndEx
+
+This is expected today. EndEx does not update a tab that is already open, so the feed (or the holding
+page) stays on screen until the player reloads. New AI-engine posts can still appear in it.
+
+1. **Ask the player to reload the page, or close the tab.** A reload shows the end-of-exercise page.
+2. **If new posts are still arriving**, a controller should set the engine switch to
+   **ENGINE · STOPPED** and set white noise to **Off**. See
+   [Ending the exercise](controller-guide.md#ending-the-exercise-endex).
 
 ---
 

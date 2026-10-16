@@ -70,8 +70,10 @@ accounts are part of the exercise.
 ![The holding page that players see while the exercise is paused.](img/participant-holding-page.png)
 
 If the feed is replaced by a holding page, exercise control has paused the exercise. **This is
-normal.** Keep the page open. It clears by itself when the exercise resumes. When the exercise is
-over, you will see an end-of-exercise page.
+normal.** Keep the page open. It usually clears by itself when the exercise resumes; if exercise staff
+say the exercise has resumed and you still see it, reload the page. When exercise staff
+announce the end of the exercise (EndEx), reload the page or close the tab. Reloading shows an
+end-of-exercise page. Until you reload, the feed may stay on screen.
 
 ## 7. Need help?
 

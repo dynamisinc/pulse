@@ -74,7 +74,7 @@ Every exercise moves through these states, in this order. The state appears as a
 | **Staged** | Ready to go. Players can sign in and the background world can run, but the scenario has not started. | The exercise's social network. |
 | **Live** | **StartEx** has happened. The scenario clock runs and scripted content fires. | The live exercise. |
 | **Paused** | The world is on hold. | A holding page. |
-| **Completed** | **EndEx** has happened. The exercise is over. | An end-of-exercise page. Nobody can sign in. |
+| **Completed** | **EndEx** has happened. The exercise is over. | An end-of-exercise page once they reload; an already-open tab is not updated by itself. Nobody can sign in. |
 | **Archived** | Closed out and read-only for staff. This state is final. | Nothing. |
 
 An exercise only moves forward. The one exception is that a paused exercise can go back to Live. A
@@ -173,7 +173,8 @@ This is the usual sequence. Each step links to the detailed instructions.
 6. **Check everything** with the [pre-exercise checklist](planner-guide.md#pre-exercise-checklist),
    including **Preview as participant**.
 7. **Run the exercise.** The exercise is staged, players sign in, and a controller selects **Start
-   exercise**. Controllers drive the world from the console and select **End exercise** at EndEx.
-   [Controller guide](controller-guide.md)
+   exercise**. Controllers drive the world from the console and close out at EndEx: stop
+   white noise and the engine, select **End exercise**, then ask players to reload or close their
+   tabs. [Controller guide](controller-guide.md#ending-the-exercise-endex)
 8. **Close out.** Print the exercise report, export posts, and archive the exercise.
    [How to](planner-guide.md#after-the-exercise)
