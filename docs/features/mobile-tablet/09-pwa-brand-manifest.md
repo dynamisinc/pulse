@@ -38,10 +38,11 @@ Lighthouse installability and iOS "Add to Home Screen" name/icon check.
 
 ## Real-device checklist (MT-D7, Tom)
 - [ ] Android Chrome: install produces a **WebAPK** (Settings > Apps shows the installed app under the exercise brand name, not as a plain shortcut). If it only creates a shortcut, this becomes the C1 backend-manifest item.
-- [ ] iOS Safari: Share > Add to Home Screen shows the **brand icon and name** (not Pulse). If not, this becomes the C1 backend-manifest item.
+- [ ] *(Deferred to #606: the iOS install sheet is off, Tom 10/16.)* iOS Safari: Share > Add to Home Screen shows the **brand icon and name** (not Pulse). If not, this becomes the C1 backend-manifest item.
 - [ ] Android: confirm the blob-URL manifest and `data:` icons still produce a WebAPK rather than a shortcut (Chrome sometimes downgrades installs whose manifest is not a normal URL).
 - [ ] Manifest/icon verification on both platforms: home-screen icon is the brand logo or generated initial (no Pulse favicon), label is the brand short name, splash/theme colour is the brand primary.
 - [ ] Install exercise A, then exercise B on the same device: B installs with B's brand (manifest `id` is per exercise: `/?pwa=<exerciseId>`).
+- [ ] After install, DevTools > Application (Android, via `chrome://inspect`) shows `sw.js` **activated**. The precache is all-or-nothing and fetches without credentials. If one stamped asset 404s (a deploy race) or UAT sits behind SWA password protection, install fails silently: no service worker, no offline shell, no update banner (orchestrator M-4).
 
 ## Known limitations
 - Pre-sign-in (join / sign-in pages) the static `index.html` head applies: iOS Share > Add to Home Screen from there gets the static title, description and author. MT-D4 means that page is not offered for install. While branded, the title, description, author, theme-color and icon are overridden and restored on sign-out.
