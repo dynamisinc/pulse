@@ -66,6 +66,13 @@
 
 import axios from 'axios'
 import { api } from '@/core/services/api'
+import {
+  AMBIENT_MODES,
+  AMBIENT_AUTONOMOUS_NOT_AUTHORIZED_MESSAGE,
+  type AmbientPolicyDto,
+  type AmbientPolicyDraft,
+  type AmbientPolicyRequestBody,
+} from '../models/ambientPolicyContract'
 
 // ---------------------------------------------------------------------------
 // Wire / public types (the ONE shape all three endpoints share)
@@ -142,6 +149,13 @@ export interface EngineSettingsDto {
   readonly inMemoryState: boolean
   /** Honest reset-on-restart note — surface it, never hide it. */
   readonly inMemoryStateNote: string
+  /**
+   * Ambient-chatter policy (#168, AC2) — PROVISIONAL contract, see
+   * `models/ambientPolicyContract.ts`. Optional on the type so a server
+   * without the field (or an older fixture) degrades to "section hidden"
+   * rather than a malformed-response failure; validated when present.
+   */
+  readonly ambientPolicy?: AmbientPolicyDto
 }
 
 /** Request context shared by both mutating endpoints — no client `exerciseId` (COR-001). */
@@ -189,6 +203,24 @@ function isWireAutonomy(value: unknown): value is EngineSettingsAutonomy {
   )
 }
 
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every(v => typeof v === 'string')
+}
+
+function isWireAmbientPolicy(value: unknown): value is AmbientPolicyDto {
+  if (typeof value !== 'object' || value === null) return false
+  const a = value as Record<string, unknown>
+  return (
+    typeof a.mode === 'string' && (AMBIENT_MODES as readonly string[]).includes(a.mode) &&
+    typeof a.maxPerMinute === 'number' &&
+    typeof a.maxPerHour === 'number' &&
+    isStringArray(a.topicAllowList) &&
+    isStringArray(a.personaAllowList) &&
+    (a.autonomousAuthorized === undefined || typeof a.autonomousAuthorized === 'boolean') &&
+    (a.topicVocabulary === undefined || isStringArray(a.topicVocabulary))
+  )
+}
+
 /**
  * Validates every property this module's TYPE declares — including the three
  * story-07 additions (`effectiveProvider`/`providerCutToFake`/`alreadyFake`).
@@ -214,7 +246,8 @@ function isWireEngineSettings(value: unknown): value is EngineSettingsDto {
     isWireAutonomy(s.autonomy) &&
     typeof s.tierPolicyMode === 'string' && TIER_POLICY_MODES.has(s.tierPolicyMode) &&
     typeof s.inMemoryState === 'boolean' &&
-    typeof s.inMemoryStateNote === 'string'
+    typeof s.inMemoryStateNote === 'string' &&
+    (s.ambientPolicy === undefined || isWireAmbientPolicy(s.ambientPolicy))
   )
 }
 
@@ -245,6 +278,9 @@ const AUTONOMY_DEFAULT_PATH = '/engine/settings/autonomy-default'
 
 /** `POST /api/engine/settings/tier-policy`. */
 const TIER_POLICY_PATH = '/engine/settings/tier-policy'
+
+/** `POST /api/engine/settings/ambient-policy` (ambient-chatter #168). */
+const AMBIENT_POLICY_PATH = '/engine/settings/ambient-policy'
 
 /** `POST /api/engine/generation-provider/cut-to-fake` (story 07). */
 const CUT_TO_FAKE_PATH = '/engine/generation-provider/cut-to-fake'
@@ -291,6 +327,30 @@ export async function setTierPolicyMode(
     mode,
     timeZone: ctx.timeZone,
   })
+  return parseSettings(response.data)
+}
+
+/**
+ * Sets the exercise's ambient-chatter policy (#168, AC2). Controller-role only.
+ * Same body conventions as the other POSTs (`actingHumanId`, `timeZone`); no
+ * client `exerciseId` (COR-001). ASSUMES a 200 returns the identical
+ * `EngineSettingsDto` (with the new `ambientPolicy`), like its siblings. A 400
+ * for `autonomous` means PROVIDER-GOVERNANCE §8 has not authorized it here.
+ */
+export async function setAmbientPolicy(
+  draft: AmbientPolicyDraft,
+  ctx: EngineSettingsActionContext,
+): Promise<EngineSettingsDto> {
+  const body: AmbientPolicyRequestBody = {
+    mode: draft.mode,
+    maxPerMinute: draft.maxPerMinute,
+    maxPerHour: draft.maxPerHour,
+    topicAllowList: draft.topicAllowList,
+    personaAllowList: draft.personaAllowList,
+    actingHumanId: ctx.actingHumanId,
+    timeZone: ctx.timeZone,
+  }
+  const response = await api.post<unknown>(AMBIENT_POLICY_PATH, body)
   return parseSettings(response.data)
 }
 
@@ -381,4 +441,25 @@ export function describeSettingsError(error: unknown): EngineSettingsActionError
   }
 
   return { status: null, message: 'The engine settings change could not be applied. Try again.' }
+}
+
+/**
+ * Describes a rejected ambient-policy save. A 400 while requesting `autonomous`
+ * whose body names authorization/governance (or is empty) becomes the fixed
+ * not-authorized message (AC0); any other 400 (e.g. cap above the global cap,
+ * foreign persona) is surfaced verbatim; everything else reuses
+ * {@link describeSettingsError}.
+ */
+export function describeAmbientPolicyError(
+  error: unknown,
+  requestedMode: AmbientPolicyDraft['mode'],
+): EngineSettingsActionError {
+  if (axios.isAxiosError(error) && error.response?.status === 400 && requestedMode === 'autonomous') {
+    const body: unknown = error.response.data
+    const text = typeof body === 'string' ? body : ''
+    if (text.trim().length === 0 || /authori|governance/i.test(text)) {
+      return { status: 400, message: AMBIENT_AUTONOMOUS_NOT_AUTHORIZED_MESSAGE }
+    }
+  }
+  return describeSettingsError(error)
 }
