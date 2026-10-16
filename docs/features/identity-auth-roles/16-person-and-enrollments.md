@@ -58,7 +58,7 @@ every other Phase-A story reads. Staff-world plumbing; no participant-visible ch
 ### Orchestrator review fold (2026-10-16, ADMIN-IDENTITY-MODEL §1.1)
 - [ ] `isLead` is computed when the DTO is built, from the live `Enrollment.IsLead`, and is never stored on `Session`. It is false for org-scope and participant sessions, and the frontend `Enrollment` type carries it too.
 - [ ] Migration backfill: exactly one lead per exercise that has any controller, namely the earliest-created controller enrollment (ties go to the lowest Id). A migration test covers it.
-- [ ] Removing the lead's enrollment, or changing its role away from controller, never returns a 500 on the check constraint. It is refused with 409 `is-lead` for now. The final last-lead rule is pending Tom (design doc §12), so keep it isolated in one service method.
+- [ ] Removing the lead's enrollment, or changing its role away from controller, never returns a 500 on the check constraint. **It is allowed (Option A, Tom, 2026-10-16).** In the same transaction it clears `IsLead` and turns swamped mode off, and both are audited. The exercise then has no lead until a planner sets one. A test covers both the removal and the role-change paths.
 
 ## Out of Scope
 Password sign-in itself and org choice (story 15 / 05); role enforcement (17); invite and directory UI (19-20);

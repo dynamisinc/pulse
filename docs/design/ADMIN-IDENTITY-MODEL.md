@@ -100,16 +100,19 @@ Organization (+ Slug: new, unique; used in the staff console URL, §1.2)
     session's `PersonId` and never on a body `actingHumanId`. `SessionDto.isLead` is computed when the DTO is
     built and is never stored on the session. A lead change therefore revokes **no** sessions, so nobody is
     signed out mid-incident.
-  - **Role change or removal of the lead** never hits the check constraint as a 500. Until the last-lead rule
-    is decided (see below), the service refuses it with 409 `is-lead`: reassign the lead first.
+  - **Role change or removal of the lead** never hits the check constraint as a 500. **It is allowed (Option A,
+    signed off by Tom on 2026-10-16).** In the same transaction it clears `IsLead` and **turns swamped mode off**,
+    and both changes are audited. The exercise then has no lead until a planner sets one, which shows as a
+    readiness warning.
   - **Migration backfill:** exactly one lead per exercise that has any controller enrollment, namely the
     earliest-created one (ties go to the lowest Id). So no exercise loses swamped mode on deploy.
   - **Readiness warning** (§5.3): "no lead controller", meaning swamped mode and autonomy raises are
     unavailable.
   - **Duplicate:** the copied staff enrollments keep their `IsLead` flag.
-  - **The gate itself** (which swamped-mode and autonomy writes need a lead, and what happens when the lead is
-    lost) is **PENDING Tom's decision**, put to him through the orchestrator on 2026-10-16. The options are in
-    §12.
+  - **The gate is raise-only (Option A, signed off by Tom on 2026-10-16, §12).** A lead is required to turn
+    swamped mode **on**, to raise autonomy (`autonomy-default` or `tier-policy` towards more autonomy), to use
+    `autonomy/restore` after a kill switch, and to use `generation-provider/restore`. **Any controller** may
+    turn swamped mode off, lower autonomy, use the kill switch, or use `cut-to-fake`: controls only ever lower.
   - It unblocks Session C's provider flip (#571).
 - **Revoking a grant revokes the sessions built on it.** (A lead change is not a grant change; see above.) `StaffCallerContext` authorizes from the persisted
   `Session.Role`, and refresh preserves that role. So revoking `OrgRole`, disabling a Person, or removing
@@ -626,7 +629,7 @@ Key: ✅ allowed · — refused (403; 404 where the bare-404 pattern applies) ·
 | Settings, chrome, practice mode, sign-in methods | via enrollment | ✅ | — **(change: today any staff)** | — | — | — |
 | Stage, unstage *(L)* | via enrollment | ✅ | — | — | — | — |
 | **Set lead controller** (`PUT /api/staff/enrollments/{id}/lead`) | via enrollment | ✅ | — | — | — | — |
-| **Swamped mode and autonomy writes**: `POST /api/engine/autonomy/swamped-mode`, `/api/engine/autonomy/restore`, `/api/engine/settings/autonomy-default`, `/api/engine/settings/tier-policy`, `/api/engine/generation-provider/restore` | via enrollment | — | **lead controller; exact direction semantics PENDING (§12)**. The kill switch and `generation-provider/cut-to-fake` stay open to any controller | — | — | — |
+| **Swamped mode and autonomy writes**: `POST /api/engine/autonomy/swamped-mode`, `/api/engine/autonomy/restore`, `/api/engine/settings/autonomy-default`, `/api/engine/settings/tier-policy`, `/api/engine/generation-provider/restore` | via enrollment | — | **raise: lead controller only** (swamped on, autonomy up, restore, provider restore); **lower: any controller** (swamped off, autonomy down, kill switch, `cut-to-fake`). Signed off as Option A, §12 | — | — | — |
 | StartEx, pause/resume, EndEx, reopen, Freeze/pause tiers *(L)* | via enrollment | — | ✅ | — | — | — |
 | Roster: import, links, day word, email, participant reset/reissue, avatars | via enrollment | ✅ | ✅ | — | — | — |
 | View-only code rotate/revoke | via enrollment | ✅ | ✅ | — **(change: today any staff)** | — | — |
@@ -743,7 +746,7 @@ The story fixes include:
 request for Session C (#571).
 
 **Orchestrator adversarial review (2026-10-16) of `384bed2` and `35548f6`: 3 High, 6 Medium, 4 Low.** All are
-folded except the policy half of H1, which is pending Tom (§12). The folded items:
+folded; Tom has since decided the policy half of H1 as Option A (§12). The folded items:
 - H1: the lead backfill and the readiness warning;
 - H2: the planner sets the lead, and org admins act through an enrollment;
 - H3: the lead is read live, with no session revocation;
@@ -760,7 +763,7 @@ folded except the policy half of H1, which is pending Tom (§12). The folded ite
 
 ---
 
-## 12. Pending decision: lead-controller gate semantics (for Tom, through the orchestrator)
+## 12. Lead-controller gate semantics: **DECIDED, Option A (Tom, 2026-10-16)**
 
 **The problem (H1).** If the lead gate covers both directions, then once the lead's enrollment is removed,
 swamped auto-send keeps running and only the kill switch can stop it.
