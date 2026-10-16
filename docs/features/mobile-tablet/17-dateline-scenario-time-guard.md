@@ -1,6 +1,6 @@
 # Story: Channel nav dateline never shows wall-clock time
 
-**Feature:** Phones and tablets  ·  **Epic:** E1  ·  **Phase:** 2  ·  **Status:** Not Started
+**Feature:** Phones and tablets  ·  **Epic:** E1  ·  **Phase:** 2  ·  **Status:** In Review
 **Requirements:** COR-053, COR-061/062, NFR-001  ·  **Design decisions:** none  ·  **Issue:** #524
 
 ## Context

@@ -1,6 +1,6 @@
 # Story: Participant critical-path e2e at 360/390/768
 
-**Feature:** Phones and tablets  ·  **Epic:** E2  ·  **Phase:** 2  ·  **Status:** Not Started
+**Feature:** Phones and tablets  ·  **Epic:** E2  ·  **Phase:** 2  ·  **Status:** In Review
 **Requirements:** XC-004, NFR-001, COR-053  ·  **Design decisions:** none  ·  **Issue:** #524
 
 ## Context

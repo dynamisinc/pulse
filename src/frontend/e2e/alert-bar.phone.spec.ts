@@ -97,6 +97,22 @@ test.describe('alert bar: emergency + advisory', () => {
     await expectTouchTarget(page.getByTestId('pulse-alert-bar-more-chip'), 44)
   })
 
+  test('the Details hit-slop stays inside the band', async ({ page }) => {
+    // The invisible coarse-pointer ::after must not spill onto the compliance
+    // chrome above or the channel nav below (those would win the tap).
+    const details = await boxOf(page.getByTestId('pulse-alert-bar-details'))
+    const band = await boxOf(page.getByTestId('pulse-alert-bar'))
+    const cx = details.x + details.width / 2
+    for (const y of [band.y + 1, band.y + band.height - 1]) {
+      const inside = await page.evaluate(([x, py]) => {
+        const hit = document.elementFromPoint(x as number, py as number)
+        return !!hit?.closest('[data-testid="pulse-alert-bar"]')
+      }, [cx, y])
+      expect(inside, `point (${Math.round(cx)},${Math.round(y)}) is outside the alert band`)
+        .toBe(true)
+    }
+  })
+
   test('Details opens /alerts (most severe first) and Back returns', async ({ page }) => {
     await page.getByTestId('pulse-alert-bar-details').click()
     await expect(page).toHaveURL(/\/alerts$/)

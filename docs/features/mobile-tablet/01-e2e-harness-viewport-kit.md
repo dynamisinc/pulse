@@ -1,6 +1,6 @@
 # Story: Browser e2e harness and viewport kit
 
-**Feature:** Phones and tablets  ·  **Epic:** cross-cutting  ·  **Phase:** 2  ·  **Status:** Not Started
+**Feature:** Phones and tablets  ·  **Epic:** cross-cutting  ·  **Phase:** 2  ·  **Status:** In Review
 **Requirements:** NFR-001, XC-001  ·  **Design decisions:** none  ·  **Issue:** —
 
 ## Context

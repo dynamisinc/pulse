@@ -1,6 +1,6 @@
 # Story: Alert bar on phones: verify and touch-target gaps
 
-**Feature:** Phones and tablets  ·  **Epic:** E1  ·  **Phase:** 2  ·  **Status:** Not Started
+**Feature:** Phones and tablets  ·  **Epic:** E1  ·  **Phase:** 2  ·  **Status:** In Progress (G1 + e2e in review; reduced-motion, overlay-interplay and live-region ACs open)
 **Requirements:** PRT-010, PRT-012, NFR-001, COR-053  ·  **Design decisions:** D7-002  ·  **Issue:** #524
 
 ## Context

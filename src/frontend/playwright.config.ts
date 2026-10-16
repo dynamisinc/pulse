@@ -40,7 +40,7 @@ export default defineConfig({
   use: {
     baseURL: BASE_URL,
     launchOptions: { ...(executablePath ? { executablePath } : {}) },
-    reducedMotion: 'reduce',
+    contextOptions: { reducedMotion: 'reduce' },
     timezoneId: 'America/New_York',
     locale: 'en-US',
     trace: 'retain-on-failure',

@@ -27,12 +27,12 @@ Status: all Not Started. B1 audit (2026-10-16) folded in: PR #562 alert bar veri
 
 | # | Story | Wave (brief) | Requirement(s) | Status | Issue |
 |---|-------|--------------|----------------|--------|-------|
-| 01 | [Browser e2e harness and viewport kit](01-e2e-harness-viewport-kit.md) | B1 | NFR-001, XC-001 | Not Started | — |
+| 01 | [Browser e2e harness and viewport kit](01-e2e-harness-viewport-kit.md) | B1 | NFR-001, XC-001 | In Review | — |
 | 02 | [Participant core screens on phones (feed, thread, composer, profile, Explore, Pinned)](02-participant-core-screens-phones.md) | B1 | NFR-001, NFR-002, COR-053, D0 §4.6 | Not Started | — |
 | 03 | [Participant entry screens on phones (join, sign-in, holding page)](03-participant-entry-screens-phones.md) | B1 | NFR-001, D0 §4.6 | Not Started | — |
 | 04 | [Media viewer and composer media on phones](04-media-viewer-phones.md) | B1 | NFR-001, NFR-008 | Not Started | — |
-| 05 | [Alert bar on phones: verify and touch-target gaps](05-alert-bar-phones-verify.md) | B1 | PRT-010, PRT-012, NFR-001 | Not Started | — |
-| 06 | [Participant critical-path e2e at 360/390/768](06-participant-critical-path-e2e.md) | B1 | XC-004, NFR-001 | Not Started | — |
+| 05 | [Alert bar on phones: verify and touch-target gaps](05-alert-bar-phones-verify.md) | B1 | PRT-010, PRT-012, NFR-001 | In Progress | — |
+| 06 | [Participant critical-path e2e at 360/390/768](06-participant-critical-path-e2e.md) | B1 | XC-004, NFR-001 | In Review | — |
 | 07 | [Burst legibility at 120 posts/min on a mid-range phone](07-burst-legibility-phone.md) | B1 | NFR-002, SOC-071 | Not Started | — |
 | 08 | [Phone/tablet guide screenshots and participant guide](08-guide-screenshots-participant.md) | B1 | docs-as-done | Not Started | — |
 | 09 | [PWA: per-exercise brand manifest](09-pwa-brand-manifest.md) | B2 | COR-066, COR-030, XC-002 | Not Started | — |
@@ -43,7 +43,7 @@ Status: all Not Started. B1 audit (2026-10-16) folded in: PR #562 alert bar veri
 | 14 | [Console keyboard shortcuts and touch alternatives](14-console-touch-and-keyboard.md) | B3 | NFR-001 | Not Started | — |
 | 15 | [Takedown, Freeze and EndEx confirms stay deliberate on touch](15-deliberate-confirms-touch.md) | B3 | CTL-025, CTL-023, CTL-024 | Not Started | — |
 | 16 | [Controller tablet e2e and guide screenshots](16-controller-tablet-e2e-guide.md) | B3 | NFR-001, docs-as-done | Not Started | — |
-| 17 | [Channel nav dateline never shows wall-clock time](17-dateline-scenario-time-guard.md) | B1 (audit G2) | COR-053, COR-061/062 | Not Started | — |
+| 17 | [Channel nav dateline never shows wall-clock time](17-dateline-scenario-time-guard.md) | B1 (audit G2) | COR-053, COR-061/062 | In Review | — |
 | 18 | [Participant touch targets at 44px](18-participant-touch-targets.md) | B1 (audit G4) | NFR-001 | Not Started | — |
 
 ### Deferred / follow-ups (not decomposed; do not build in this pass)
