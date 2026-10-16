@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Pulse.WebApi.Features.Identity.Sessions;
+using Pulse.WebApi.Features.Identity.RateLimits;
 
 /// <summary>
 /// The account slice HTTP surface + composition-root seams (story 02, COR-011): the participant credential login
@@ -68,7 +69,9 @@ public static class AccountEndpoints
                     partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
                     factory: _ => new FixedWindowRateLimiterOptions
                     {
-                        PermitLimit = 10,
+                        // Configurable (Authentication:RateLimits:ParticipantLoginPerMinute); default 10 — see AuthRateLimits.
+                        PermitLimit = AuthRateLimits.ParticipantLoginPerMinute(
+                            httpContext.RequestServices.GetRequiredService<IConfiguration>()),
                         Window = TimeSpan.FromMinutes(1),
                         QueueLimit = 0,
                     }));

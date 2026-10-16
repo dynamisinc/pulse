@@ -101,8 +101,22 @@ scheme (`X-Forwarded-Proto`), but **only from peers you configure**:
   configured.
 - **Shared networks still share a limit.** The limiters partition on the client's **public** IP. Everyone behind
   one NAT (venue Wi-Fi, an agency VPN, a corporate proxy) is one client to Pulse. For a large single-site exercise,
-  raise the per-policy permits ahead of StartEx without a deploy (e.g. `Authentication__EasyLogin__JoinPermitPerMinute`
-  for personal links; see each policy's options) and stagger sign-ins.
+  raise the per-policy permits ahead of StartEx without a deploy and stagger sign-ins. Every sign-in limiter is a
+  fixed 1-minute window per public IP:
+
+  | App setting | Routes | Default |
+  |---|---|---|
+  | `Authentication__EasyLogin__JoinPermitPerMinute` | `POST /api/auth/join` (personal link / QR) | 30 |
+  | `Authentication__EasyLogin__WordPermitPerMinute` | `POST /api/auth/word` (day word) | 10 |
+  | `Authentication__RateLimits__ParticipantLoginPerMinute` | `POST /api/auth/login` | 10 |
+  | `Authentication__RateLimits__SharedLoginPerMinute` | `POST /api/auth/shared` (view-only code) | 5 |
+  | `Authentication__RateLimits__SessionPerMinute` | `GET /api/session`, `POST /api/auth/refresh`, `/logout` | 60 |
+  | `Authentication__RateLimits__StaffLoginPerMinute` | `POST /api/auth/staff/login` | 10 |
+
+  A missing, non-integer or non-positive value keeps the default, so a typo never disables a limiter. Changing an
+  app setting restarts the App Service worker. Do it ~30 minutes before StartEx, and put the defaults back after
+  the sign-in rush: higher limits give a guesser on the same network more tries, and the day word is the
+  weakest credential.
 
 ## Rollback
 
