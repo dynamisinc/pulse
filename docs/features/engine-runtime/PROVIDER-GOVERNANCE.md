@@ -247,6 +247,10 @@ and test each one:
     applies to storyline prompts only.
   - The incident vocabulary is a snapshot taken when the exercise's engine is seeded. A storyline or hashtag
     injected later is not excluded until the engine is re-seeded.
+  - The output filter is deterministic, so it can be evaded by drift: lookalike letters from other alphabets,
+    percent-encoded or digit-prefixed hashtags, split words ("wa ter"), leetspeak, and paraphrase. It catches
+    the model's ordinary wording, not deliberate evasion. This is accepted for `uat`.
+  - Persona display names are staff-authored text that also appears in the ambient prompt.
 - **Never storyline or escalation.** Only the `AmbientFloor` trigger can take the autonomous path.
   Inaction, official-response and amplification content, and anything storyline-bound or escalating,
   always goes through review. A timed-out draft is held, never auto-sent.
