@@ -23,7 +23,7 @@ scenario test).
 |---|-------|----------------|--------|-------|
 | 01 | Voice-diversity & fidelity checks | ADP-021 | Complete | #175 |
 | 02 | Prompt-injection red-team suite (release-gating) | ADP-024 | Complete | #176 |
-| 03 | Latency/cost SLO measurement | NFR-002/003 | Pending (needs live-provider pass) | #177 |
+| 03 | Latency/cost SLO measurement | NFR-002/003 | Not Started — refreshed 2026-10-16 for the live provider (§8 signed, PR #571): out-of-CI UAT measurement + the existing in-CI threshold assertion | #177 |
 | 04 | Scenario reaction-correctness tests | §12.4 / ADP-001/002a / CTL-034 | Blocked (needs the full loop) | #178 |
 
 **Story 02 delivered:** the maintained injection red-team suite ships as `Pulse.Core/Features/EngineEval/

@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.48.1.52935",
-      "templateHash": "5487305365681791357"
+      "templateHash": "12560805794102145535"
     }
   },
   "parameters": {
@@ -118,6 +118,53 @@
       "defaultValue": false,
       "metadata": {
         "description": "TIER-2 HUMAN ASSERTION (NFR-005 §2 / ADP-025), NOT a derived value: the signer attests the contractual no-training terms covering this endpoint (Microsoft product terms for Azure OpenAI; the Anthropic Marketplace offer for Claude). Typed by the §8 signer in the environment parameter file alongside generationProviderLive; deliberately NOT derived from deployAi, for the same reason as generationTenantBounded. False by default (fail closed); a false assertion under a live provider throws at startup rather than egressing."
+      }
+    },
+    "deployProviderAlerts": {
+      "type": "bool",
+      "defaultValue": false,
+      "metadata": {
+        "description": "Deploy the provider alert rules (engine-telemetry-tuning/04): an email action group + scheduled log-query rules over App Insights for generation errors/breaker, latency (5 s p95 warning / share of attempts timing out at the 10 s trip) and a call-volume spend proxy. Read-only over existing telemetry. OFF by default; requires deployMonitoring AND deployAi (the deploy fails otherwise) and a non-empty alertOwnerEmail."
+      }
+    },
+    "alertOwnerEmail": {
+      "type": "securestring",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Email address of the provider owner who receives the provider alerts. Empty default so parameter sets that omit it still deploy with alerts off; deployProviderAlerts = true with an empty value FAILS the deploy. Sourced from the PULSE_ALERT_OWNER_EMAIL secret in CI (masked in the workflow log); never a literal in this repo and not in any template output. @secure keeps it out of the deployment parameters/history, but it is readable on the deployed action group (an email receiver is not a secret property)."
+      }
+    },
+    "providerAlertCallsPerHourThreshold": {
+      "type": "int",
+      "defaultValue": 750,
+      "minValue": 1,
+      "metadata": {
+        "description": "Provider alerts: spend-proxy threshold, Foundry-host model calls per hour (Sev-3). Default 750 ≈ 2x a nominal active-storyline hour."
+      }
+    },
+    "providerAlertLatencyWarningMs": {
+      "type": "int",
+      "defaultValue": 5000,
+      "minValue": 1,
+      "metadata": {
+        "description": "Provider alerts: latency warning, 15-minute p95 attempt duration in ms (Sev-3). Default 5000 ≈ 2x the measured Standard p95."
+      }
+    },
+    "providerAlertLatencyAlertMs": {
+      "type": "int",
+      "defaultValue": 10000,
+      "minValue": 1,
+      "metadata": {
+        "description": "Provider alerts: the per-attempt timeout in ms the Sev-2 timeout-ratio rule measures against. Default 10000 = Generation:Resilience:AttemptTimeoutSeconds; move with it."
+      }
+    },
+    "providerAlertTimeoutRatioPercentThreshold": {
+      "type": "int",
+      "defaultValue": 5,
+      "minValue": 1,
+      "maxValue": 100,
+      "metadata": {
+        "description": "Provider alerts: percentage of attempts at >= 95 % of providerAlertLatencyAlertMs (timed out) above which the Sev-2 alert fires. Default 5."
       }
     },
     "sqlAdminLogin": {
@@ -261,7 +308,8 @@
     "generationProvider": "[if(variables('generationLive'), 'AzureOpenAI', 'Fake')]",
     "generationResidency": "[parameters('location')]",
     "blobServiceUri": "[format('https://{0}.blob.{1}', variables('storageName'), environment().suffixes.storage)]",
-    "blobStorageContainerName": "post-media"
+    "blobStorageContainerName": "post-media",
+    "providerAlertsOwnerEmail": "[if(not(parameters('deployProviderAlerts')), parameters('alertOwnerEmail'), if(not(and(parameters('deployMonitoring'), parameters('deployAi'))), fail('deployProviderAlerts = true requires deployMonitoring = true AND deployAi = true (an alert on a provider that is not deployed, or with no App Insights to read, is a deploy error).'), if(empty(trim(parameters('alertOwnerEmail'))), fail('deployProviderAlerts = true requires alertOwnerEmail (set the PULSE_ALERT_OWNER_EMAIL secret on the GitHub environment). An alert nobody receives is worse than none.'), parameters('alertOwnerEmail'))))]"
   },
   "resources": [
     {
@@ -590,6 +638,349 @@
       },
       "dependsOn": [
         "[resourceId('Microsoft.Resources/deployments', 'logAnalyticsDeploy')]"
+      ]
+    },
+    {
+      "condition": "[parameters('deployProviderAlerts')]",
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "providerAlertsDeploy",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "appInsightsId": "[if(parameters('deployMonitoring'), createObject('value', reference(resourceId('Microsoft.Resources/deployments', 'appInsightsDeploy'), '2025-04-01').outputs.id.value), createObject('value', ''))]",
+          "aiFoundryName": {
+            "value": "[variables('aiFoundryName')]"
+          },
+          "resourceSuffix": {
+            "value": "[variables('resourceSuffix')]"
+          },
+          "alertOwnerEmail": {
+            "value": "[variables('providerAlertsOwnerEmail')]"
+          },
+          "callsPerHourThreshold": {
+            "value": "[parameters('providerAlertCallsPerHourThreshold')]"
+          },
+          "latencyWarningMs": {
+            "value": "[parameters('providerAlertLatencyWarningMs')]"
+          },
+          "latencyAlertMs": {
+            "value": "[parameters('providerAlertLatencyAlertMs')]"
+          },
+          "timeoutRatioPercentThreshold": {
+            "value": "[parameters('providerAlertTimeoutRatioPercentThreshold')]"
+          },
+          "tags": {
+            "value": "[variables('tags')]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.48.1.52935",
+              "templateHash": "14801026605549372483"
+            }
+          },
+          "parameters": {
+            "location": {
+              "type": "string",
+              "metadata": {
+                "description": "Azure region for the scheduled query rules (the App Insights component region)."
+              }
+            },
+            "appInsightsId": {
+              "type": "string",
+              "metadata": {
+                "description": "Resource id of the Application Insights component the rules query (scope of every rule)."
+              }
+            },
+            "aiFoundryName": {
+              "type": "string",
+              "metadata": {
+                "description": "AI Foundry account name (e.g. aif-pulse-uat). Used ONLY as the KQL `target has` filter that scopes every query to the Foundry host; never called."
+              }
+            },
+            "resourceSuffix": {
+              "type": "string",
+              "metadata": {
+                "description": "Resource naming suffix, e.g. pulse-uat (ag-<suffix>-provider, alert-<suffix>-provider-*)."
+              }
+            },
+            "alertOwnerEmail": {
+              "type": "securestring",
+              "minLength": 3,
+              "metadata": {
+                "description": "The single email receiver on the action group (the provider owner). REQUIRED — an alert nobody receives is worse than none. @secure so it is not recorded in the deployment parameters/history; it is still visible on the action group resource itself (an email receiver is not a secret property)."
+              }
+            },
+            "errorRatePercentThreshold": {
+              "type": "int",
+              "defaultValue": 20,
+              "minValue": 1,
+              "maxValue": 100,
+              "metadata": {
+                "description": "Error alert: failed-attempt percentage over the 15-minute window above which the Sev-2 alert fires."
+              }
+            },
+            "errorMinimumCalls": {
+              "type": "int",
+              "defaultValue": 5,
+              "minValue": 1,
+              "metadata": {
+                "description": "Error alert: minimum Foundry-host attempts in the window before the failure ratio is evaluated (keeps one failed call in a quiet window from paging)."
+              }
+            },
+            "latencyWarningMs": {
+              "type": "int",
+              "defaultValue": 5000,
+              "minValue": 1,
+              "metadata": {
+                "description": "Latency warning (Sev-3): 15-minute p95 of Foundry-host dependency duration, in ms. Default 5000 ≈ 2x the measured Standard p95 (MEASURED-RESULTS.md)."
+              }
+            },
+            "latencyAlertMs": {
+              "type": "int",
+              "defaultValue": 10000,
+              "minValue": 1,
+              "metadata": {
+                "description": "Latency trip (Sev-2): the per-attempt timeout in ms. Attempts with duration >= 95 % of this count as timed out. Default 10000 = Generation:Resilience:AttemptTimeoutSeconds (the degraded-mode trip, ProviderLiveConfigTests). Move with that setting."
+              }
+            },
+            "timeoutRatioPercentThreshold": {
+              "type": "int",
+              "defaultValue": 5,
+              "minValue": 1,
+              "maxValue": 100,
+              "metadata": {
+                "description": "Latency trip (Sev-2): percentage of attempts in the 15-minute window that timed out (duration >= 95 % of latencyAlertMs) above which the alert fires. Default 5."
+              }
+            },
+            "latencyMinimumCalls": {
+              "type": "int",
+              "defaultValue": 5,
+              "minValue": 1,
+              "metadata": {
+                "description": "Latency rules: minimum Foundry-host attempts in the window before either latency rule is evaluated (one slow call in a quiet window must not alert)."
+              }
+            },
+            "callsPerHourThreshold": {
+              "type": "int",
+              "defaultValue": 750,
+              "minValue": 1,
+              "metadata": {
+                "description": "Spend proxy (Sev-3): Foundry-host model calls per hour above which the alert fires. Default 750 ≈ 2x the nominal active-storyline hour (375 bursts, MEASURED-RESULTS.md) ≈ $1.20/h at the Ambient rate."
+              }
+            },
+            "tags": {
+              "type": "object",
+              "defaultValue": {}
+            }
+          },
+          "variables": {
+            "providerCalls": "[format('dependencies\n| where target has \"{0}\"', parameters('aiFoundryName'))]",
+            "errorQuery": "[join(createArray('// Breaker-open signature: Polly BrokenCircuitException anywhere in a logged exception chain.', 'let breakerHits = toscalar(exceptions', '    | where type has \"BrokenCircuitException\" or tostring(details) has \"BrokenCircuitException\"', '    | count);', variables('providerCalls'), '| summarize calls = sum(itemCount), failed = sumif(itemCount, success == false)', '| extend failedPercent = iff(calls == 0, 0.0, 100.0 * failed / calls), breakerHits = breakerHits', format('| where (calls >= {0} and failedPercent > {1}) or breakerHits > 0', parameters('errorMinimumCalls'), parameters('errorRatePercentThreshold'))), '\n')]",
+            "latencyWarningQuery": "[join(createArray(variables('providerCalls'), '// p95 weighted by itemCount (adaptive sampling; see the SAMPLING note in provider-alerts.bicep).', '| summarize calls = sum(itemCount), p95DurationMs = percentilew(duration, itemCount, 95)', format('| where calls >= {0} and p95DurationMs > {1}', parameters('latencyMinimumCalls'), parameters('latencyWarningMs'))), '\n')]",
+            "timedOutAtMs": "[div(mul(parameters('latencyAlertMs'), 95), 100)]",
+            "timeoutRatioQuery": "[join(createArray(variables('providerCalls'), format('| summarize calls = sum(itemCount), timedOut = sumif(itemCount, duration >= {0})', variables('timedOutAtMs')), '| extend timedOutPercent = iff(calls == 0, 0.0, 100.0 * timedOut / calls)', format('| where calls >= {0} and timedOutPercent > {1}', parameters('latencyMinimumCalls'), parameters('timeoutRatioPercentThreshold'))), '\n')]",
+            "spendQuery": "[join(createArray(variables('providerCalls'), '| summarize calls = sum(itemCount)', format('| where calls > {0}', parameters('callsPerHourThreshold'))), '\n')]",
+            "actions": {
+              "actionGroups": [
+                "[resourceId('Microsoft.Insights/actionGroups', format('ag-{0}-provider', parameters('resourceSuffix')))]"
+              ]
+            },
+            "oneOfOne": {
+              "numberOfEvaluationPeriods": 1,
+              "minFailingPeriodsToAlert": 1
+            }
+          },
+          "resources": [
+            {
+              "type": "Microsoft.Insights/actionGroups",
+              "apiVersion": "2023-01-01",
+              "name": "[format('ag-{0}-provider', parameters('resourceSuffix'))]",
+              "location": "Global",
+              "properties": {
+                "groupShortName": "PulseProv",
+                "enabled": true,
+                "emailReceivers": [
+                  {
+                    "name": "provider-owner",
+                    "emailAddress": "[parameters('alertOwnerEmail')]",
+                    "useCommonAlertSchema": true
+                  }
+                ]
+              },
+              "tags": "[parameters('tags')]"
+            },
+            {
+              "type": "Microsoft.Insights/scheduledQueryRules",
+              "apiVersion": "2023-03-15-preview",
+              "name": "[format('alert-{0}-provider-errors', parameters('resourceSuffix'))]",
+              "location": "[parameters('location')]",
+              "properties": {
+                "displayName": "[format('Pulse provider: generation errors / breaker open ({0})', parameters('aiFoundryName'))]",
+                "description": "[format('Sev-2. Fires when more than {0}% of model-call attempts to {1} failed over 15 minutes (with at least {2} attempts), or when a Polly BrokenCircuitException was logged (the engine-generation breaker is open and the engine has degraded to Suggest). First response: docs/guide/troubleshooting.md \"I got a provider alert\".', parameters('errorRatePercentThreshold'), parameters('aiFoundryName'), parameters('errorMinimumCalls'))]",
+                "severity": 2,
+                "enabled": true,
+                "evaluationFrequency": "PT5M",
+                "windowSize": "PT15M",
+                "scopes": [
+                  "[parameters('appInsightsId')]"
+                ],
+                "skipQueryValidation": false,
+                "autoMitigate": true,
+                "criteria": {
+                  "allOf": [
+                    {
+                      "query": "[variables('errorQuery')]",
+                      "timeAggregation": "Count",
+                      "operator": "GreaterThan",
+                      "threshold": 0,
+                      "failingPeriods": "[variables('oneOfOne')]"
+                    }
+                  ]
+                },
+                "actions": "[variables('actions')]"
+              },
+              "tags": "[parameters('tags')]",
+              "dependsOn": [
+                "[resourceId('Microsoft.Insights/actionGroups', format('ag-{0}-provider', parameters('resourceSuffix')))]"
+              ]
+            },
+            {
+              "type": "Microsoft.Insights/scheduledQueryRules",
+              "apiVersion": "2023-03-15-preview",
+              "name": "[format('alert-{0}-provider-latency-warning', parameters('resourceSuffix'))]",
+              "location": "[parameters('location')]",
+              "properties": {
+                "displayName": "[format('Pulse provider: latency warning, p95 > {0} ms ({1})', parameters('latencyWarningMs'), parameters('aiFoundryName'))]",
+                "description": "[format('Sev-3. With at least {0} attempts in 15 minutes, the p95 of model-call attempt duration to {1} exceeded {2} ms (~2x the measured Standard p95 of 2.7 s, engine-generation-infra/MEASURED-RESULTS.md). Not yet degrading; watch for the Sev-2 latency alert.', parameters('latencyMinimumCalls'), parameters('aiFoundryName'), parameters('latencyWarningMs'))]",
+                "severity": 3,
+                "enabled": true,
+                "evaluationFrequency": "PT5M",
+                "windowSize": "PT15M",
+                "scopes": [
+                  "[parameters('appInsightsId')]"
+                ],
+                "skipQueryValidation": false,
+                "autoMitigate": true,
+                "criteria": {
+                  "allOf": [
+                    {
+                      "query": "[variables('latencyWarningQuery')]",
+                      "timeAggregation": "Count",
+                      "operator": "GreaterThan",
+                      "threshold": 0,
+                      "failingPeriods": "[variables('oneOfOne')]"
+                    }
+                  ]
+                },
+                "actions": "[variables('actions')]"
+              },
+              "tags": "[parameters('tags')]",
+              "dependsOn": [
+                "[resourceId('Microsoft.Insights/actionGroups', format('ag-{0}-provider', parameters('resourceSuffix')))]"
+              ]
+            },
+            {
+              "type": "Microsoft.Insights/scheduledQueryRules",
+              "apiVersion": "2023-03-15-preview",
+              "name": "[format('alert-{0}-provider-latency', parameters('resourceSuffix'))]",
+              "location": "[parameters('location')]",
+              "properties": {
+                "displayName": "[format('Pulse provider: attempts timing out, > {0}% at the {1} ms trip ({2})', parameters('timeoutRatioPercentThreshold'), parameters('latencyAlertMs'), parameters('aiFoundryName'))]",
+                "description": "[format('Sev-2. With at least {0} attempts in 15 minutes, more than {1}% of model-call attempts to {2} ran to >= 95% of {3} ms, the per-attempt degraded-mode trip (Generation:Resilience:AttemptTimeoutSeconds, ProviderLiveConfigTests). Attempts are timing out and feeding the circuit breaker. First response: docs/guide/troubleshooting.md \"I got a provider alert\".', parameters('latencyMinimumCalls'), parameters('timeoutRatioPercentThreshold'), parameters('aiFoundryName'), parameters('latencyAlertMs'))]",
+                "severity": 2,
+                "enabled": true,
+                "evaluationFrequency": "PT5M",
+                "windowSize": "PT15M",
+                "scopes": [
+                  "[parameters('appInsightsId')]"
+                ],
+                "skipQueryValidation": false,
+                "autoMitigate": true,
+                "criteria": {
+                  "allOf": [
+                    {
+                      "query": "[variables('timeoutRatioQuery')]",
+                      "timeAggregation": "Count",
+                      "operator": "GreaterThan",
+                      "threshold": 0,
+                      "failingPeriods": "[variables('oneOfOne')]"
+                    }
+                  ]
+                },
+                "actions": "[variables('actions')]"
+              },
+              "tags": "[parameters('tags')]",
+              "dependsOn": [
+                "[resourceId('Microsoft.Insights/actionGroups', format('ag-{0}-provider', parameters('resourceSuffix')))]"
+              ]
+            },
+            {
+              "type": "Microsoft.Insights/scheduledQueryRules",
+              "apiVersion": "2023-03-15-preview",
+              "name": "[format('alert-{0}-provider-spend', parameters('resourceSuffix'))]",
+              "location": "[parameters('location')]",
+              "properties": {
+                "displayName": "[format('Pulse provider: call-volume spend proxy, > {0} calls/h ({1})', parameters('callsPerHourThreshold'), parameters('aiFoundryName'))]",
+                "description": "[format('Sev-3. CALL-VOLUME PROXY, NOT A DOLLAR FIGURE: more than {0} model-call attempts to {1} in the last hour (~2x a nominal active-storyline hour of 375 bursts; ~$1.20/h at the Ambient rate of $0.0016/burst, engine-generation-infra/MEASURED-RESULTS.md). Retries count as calls. For token-accurate cost open the AI generation usage panel (GET /api/engine/usage, engine-telemetry-tuning/03).', parameters('callsPerHourThreshold'), parameters('aiFoundryName'))]",
+                "severity": 3,
+                "enabled": true,
+                "evaluationFrequency": "PT15M",
+                "windowSize": "PT1H",
+                "scopes": [
+                  "[parameters('appInsightsId')]"
+                ],
+                "skipQueryValidation": false,
+                "autoMitigate": true,
+                "criteria": {
+                  "allOf": [
+                    {
+                      "query": "[variables('spendQuery')]",
+                      "timeAggregation": "Count",
+                      "operator": "GreaterThan",
+                      "threshold": 0,
+                      "failingPeriods": "[variables('oneOfOne')]"
+                    }
+                  ]
+                },
+                "actions": "[variables('actions')]"
+              },
+              "tags": "[parameters('tags')]",
+              "dependsOn": [
+                "[resourceId('Microsoft.Insights/actionGroups', format('ag-{0}-provider', parameters('resourceSuffix')))]"
+              ]
+            }
+          ],
+          "outputs": {
+            "actionGroupId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.Insights/actionGroups', format('ag-{0}-provider', parameters('resourceSuffix')))]"
+            },
+            "ruleNames": {
+              "type": "array",
+              "value": [
+                "[format('alert-{0}-provider-errors', parameters('resourceSuffix'))]",
+                "[format('alert-{0}-provider-latency-warning', parameters('resourceSuffix'))]",
+                "[format('alert-{0}-provider-latency', parameters('resourceSuffix'))]",
+                "[format('alert-{0}-provider-spend', parameters('resourceSuffix'))]"
+              ]
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Resources/deployments', 'appInsightsDeploy')]"
       ]
     },
     {

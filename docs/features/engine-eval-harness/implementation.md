@@ -11,7 +11,7 @@
 |-------|----------|-----------------------|----------------------------------|
 | 01 Voice-diversity checks | Run the shared §5.3 metric over a burst corpus as regression + human spot-check log. | `eval/voiceDiversity.test` | regression report; shares the metric with voice-engine 04 |
 | 02 Injection red-team | Maintained gating suite of world-feed attacks; asserts isolation holds. | `eval/injectionRedteam.test`, attack fixtures | the release-gate contract |
-| 03 Latency/cost SLO | p50/p95 + per-burst cost per provider/model vs the envelope. | `eval/latencyCostSlo` | SLO thresholds (validates the breaker threshold) |
+| 03 Latency/cost SLO | Two layers (refreshed 2026-10-16, live provider signed): (a) the in-CI threshold assertion already in `ProviderLiveConfigTests` (Fake, no key) — only its recorded p95 constants get updated; (b) an out-of-CI measurement against UAT live via `eval/live-provider.runsettings` / `MeasuredCostLatencyTests` (PROVIDER-GOVERNANCE §6), appended to `MEASURED-RESULTS.md`. Cost priced from `Generation:Pricing` (reuse the usage panel's table). Alerting is engine-telemetry-tuning 04, not here. | `MeasuredCostLatencyTests.cs`, `ProviderLiveConfigTests.cs` (constants only), `engine-generation-infra/MEASURED-RESULTS.md` | SLO thresholds (validates the breaker threshold) |
 | 04 Scenario reaction-correctness | Scripted end-to-end scenarios over the reaction loop. | `eval/scenarios/*.test` | the correctness gate (miss-safe + kill-switch gating) |
 
 ## Reuse map
@@ -27,7 +27,7 @@
 |-------|---------------|------------|--------------|------|--------|
 | 01 Voice-diversity checks | eval/voiceDiversity.test | voice-engine 04 (metric) | 02, 03 | 1 | S |
 | 02 Injection red-team | eval/injectionRedteam.test | generation-infra 03 (boundary) | 01, 03 | 1 | M |
-| 03 Latency/cost SLO | eval/latencyCostSlo | generation-infra 01/04/05/06 | 01, 02 | 2 | S |
+| 03 Latency/cost SLO | MeasuredCostLatencyTests.cs; ProviderLiveConfigTests.cs (constants); MEASURED-RESULTS.md | generation-infra 01/04/05/06; PR #571 (UAT live) | engine-telemetry-tuning 04 (disjoint) | C1 | S |
 | 04 Scenario reaction-correctness | eval/scenarios/* | reaction-loop + behaviors + autonomy-safety | — | 3 | L |
 
 01–03 can run once their targets exist (metric, boundary, provider). 04 is last — it needs the whole
