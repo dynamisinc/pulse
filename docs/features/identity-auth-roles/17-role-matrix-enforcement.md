@@ -31,7 +31,12 @@ route and per lifecycle transition and proves it with a route x role matrix test
 - [ ] In the matrix, participant sim writes are allowed in `live` **and `staged`** (dry runs), and refused when paused or frozen. The matrix test asserts both.
 
 ### Lead controller (Tom, 2026-10-16; ADMIN-IDENTITY-MODEL §8.2)
-- [ ] The swamped-mode toggle and the engine autonomy-level write require a **lead** controller. Other controllers, planners and evaluators get 403. The route × role matrix gains a `lead controller` column, and the test asserts it.
+- [ ] *(Direction semantics PENDING Tom, design doc §12.)* The swamped-mode toggle and the engine autonomy-level write require a **lead** controller. Other controllers, planners and evaluators get 403. The route × role matrix gains a `lead controller` column, and the test asserts it.
+
+### Orchestrator review fold (2026-10-16, ADMIN-IDENTITY-MODEL §8.2)
+- [ ] The lead gate is a filter that reads `Enrollment.IsLead` **live** on each request (a sibling of `EngineCockpitControllerRoleFilter`), keyed on the session's `PersonId` and never on a body `actingHumanId`.
+- [ ] The routes it covers: `POST /api/engine/autonomy/swamped-mode`, `/api/engine/autonomy/restore`, `/api/engine/settings/autonomy-default`, `/api/engine/settings/tier-policy` and `/api/engine/generation-provider/restore`, with direction semantics per the decision in §12. The kill switch and `cut-to-fake` stay open to any controller.
+- [ ] The matrix includes a "set lead controller" row: planner ✅; every other role 403.
 
 ## Out of Scope
 The new transitions themselves (reset/reopen/delete/unstage bodies: exercise-build-golive 07-08); the lifecycle write gate for participants (A5 #379).

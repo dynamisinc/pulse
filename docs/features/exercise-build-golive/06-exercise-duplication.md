@@ -20,6 +20,9 @@ investment compounds (COR-045).
 ### Copilot review 2 fold (2026-10-16, ADMIN-IDENTITY-MODEL §5.5)
 - [ ] Duplicate copies only **setup** follows (`Follow.IsSetupContent`) between the copied personas, never conduct follows.
 
+### Orchestrator review fold (2026-10-16)
+- [ ] Copied staff enrollments keep their `IsLead` flag.
+
 ## Out of Scope
 AAR export of the source (E10); template/cast library management (persona-management); the lifecycle
 of the new exercise (exercise-configuration).

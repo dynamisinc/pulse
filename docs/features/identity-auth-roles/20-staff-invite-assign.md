@@ -24,7 +24,7 @@ Today nothing creates staff enrollments except bootstrap and the creator. Org ad
 - [ ] Removing a staff enrollment, or changing its role, revokes that person's live sessions on that exercise (access and refresh) in the same transaction, because `Session.Role` is persisted and survives refresh. A test covers both tokens.
 
 ### Lead controller UI (Tom, 2026-10-16)
-- [ ] The staff assignment screen marks the exercise's lead controller and lets a planner or org admin change it, using the A1 endpoint. The lead is shown with a text label and an icon, never color alone.
+- [ ] The staff assignment screen marks the exercise's lead controller and lets a planner change it (an org admin acts through their own enrollment), using the A1 endpoint. The lead is shown with a text label and an icon, never color alone.
 
 ## Out of Scope
 Participant roster import and sign-in (easy-login); password reset (21); the directory page itself (19).

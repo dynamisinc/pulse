@@ -90,13 +90,28 @@ Organization (+ Slug: new, unique; used in the staff console URL, §1.2)
   - It is valid only on a `controller` enrollment, enforced by a check constraint.
   - There is **at most one lead per exercise**, enforced by a filtered unique index on `(ExerciseId)` where
     `IsLead = 1`.
-  - Planners and org admins set it with `PUT /api/staff/enrollments/{id}/lead`. The endpoint arrives in A1;
-    the UI comes with A2 story 20. Setting a new lead clears the old one in the same transaction.
-  - It gates **swamped mode** (auto-send of expired timed drafts, D5 STORY-UPDATES) and the engine
-    **autonomy level** write: lead controller only, every other role gets 403.
-  - Like any other grant change, changing the lead revokes the affected sessions.
+  - **Who sets it:** a **planner** (an org admin does it through their own enrollment, with no org-scope twin
+    route, which fits "no implicit in-exercise powers"), using `PUT /api/staff/enrollments/{id}/lead`. The
+    endpoint arrives in A1; the UI comes with A2 story 20.
+  - **How it is set:** with a single `UPDATE … SET IsLead = CASE WHEN Id = @id THEN 1 ELSE 0 END`, so the
+    unique index cannot trip in between. A unique-index violation maps to 409 `lead-conflict`.
+  - **Read live, with no session revocation.** The lead gate reads `Enrollment.IsLead` on every request, as a
+    sibling of `EngineCockpitControllerRoleFilter`, which already reads the role live. It is keyed on the
+    session's `PersonId` and never on a body `actingHumanId`. `SessionDto.isLead` is computed when the DTO is
+    built and is never stored on the session. A lead change therefore revokes **no** sessions, so nobody is
+    signed out mid-incident.
+  - **Role change or removal of the lead** never hits the check constraint as a 500. Until the last-lead rule
+    is decided (see below), the service refuses it with 409 `is-lead`: reassign the lead first.
+  - **Migration backfill:** exactly one lead per exercise that has any controller enrollment, namely the
+    earliest-created one (ties go to the lowest Id). So no exercise loses swamped mode on deploy.
+  - **Readiness warning** (§5.3): "no lead controller", meaning swamped mode and autonomy raises are
+    unavailable.
+  - **Duplicate:** the copied staff enrollments keep their `IsLead` flag.
+  - **The gate itself** (which swamped-mode and autonomy writes need a lead, and what happens when the lead is
+    lost) is **PENDING Tom's decision**, put to him through the orchestrator on 2026-10-16. The options are in
+    §12.
   - It unblocks Session C's provider flip (#571).
-- **Revoking a grant revokes the sessions built on it.** `StaffCallerContext` authorizes from the persisted
+- **Revoking a grant revokes the sessions built on it.** (A lead change is not a grant change; see above.) `StaffCallerContext` authorizes from the persisted
   `Session.Role`, and refresh preserves that role. So revoking `OrgRole`, disabling a Person, or removing
   or changing an `Enrollment` revokes, **in the same transaction**, every live session (access and refresh)
   that was minted from that grant:
@@ -389,7 +404,7 @@ Freeze stays a pause tier (controller), not a state. A5 adds that Freeze and pau
 | **Reopen** | completed → live | everything; the scenario clock resumes where it stopped | nothing | **controller**; refused once archived. For "we ended by mistake". Audited |
 | **Archive** | completed → archived, **or build → archived when `FirstLiveAt` is set** (a reset exercise being retired) | everything (read-only) | live sessions revoked | planner or org admin |
 | **Unarchive** | archived → completed (or → build if it was archived from build) | everything | nothing | org admin only |
-| **Reset** | completed **or staged** → build | settings, chrome, sign-in methods, personas (with any live edits), staff library media, run sheet (all items back to *pending*), noise pool, **setup posts** (§5.4), accounts, enrollments, links, view-only code | **conduct data**: conduct posts and their edits, reactions, reposts, `PostMediaItem` rows and **participant-uploaded media** on them, conduct follows (`Follow.IsSetupContent = false`, §5.4), telemetry events, engine review items, inject queue state, runtime state (clock, pause tier), day words, every session | planner or org admin; typed-name confirmation. **The UI offers the AAR/report export first** (from completed). Refused in build, live, paused and archived |
+| **Reset** | completed **or staged** → build | settings, chrome, sign-in methods, personas (with any live edits), staff library media, run sheet (all items back to *pending*), noise pool, **setup posts** (§5.4), accounts, enrollments, links, view-only code | **conduct data**: conduct posts and their edits, reactions, reposts, `PostMediaItem` rows and **participant-uploaded media** on them, conduct follows (`Follow.IsSetupContent = false`, §5.4), telemetry events, engine review items, inject queue state, runtime state (clock, pause tier), day words, every session, and the in-memory engine autonomy state (swamped mode off, autonomy back to the exercise default) | planner or org admin; typed-name confirmation. **The UI offers the AAR/report export first** (from completed). Refused in build, live, paused and archived |
 | **Delete** | build → (gone) | — | the exercise and every exercise-scoped row and blob; the hostname is freed | planner or org admin; **only if `FirstLiveAt` is null** (never ran). An exercise that ran and was reset is retired by **archive from build** |
 | **Duplicate** | any → new build exercise | see 5.5 | — | planner on the source, or org admin |
 
@@ -417,6 +432,8 @@ Blocking items (stage is refused with 409 and the list):
 6. The time zone and scenario start time are set.
 7. Chrome and watermark are valid (`ComplianceChromeGuard`).
 8. No run-sheet item is `needs-repair` (§5.4a).
+
+Also a warning: **no lead controller** (swamped mode and autonomy raises unavailable).
 
 Warnings (shown, not blocking): no run sheet items; no opening feed; empty noise pool; personas missing avatars;
 participants with no sign-in yet issued; no evaluator enrolled.
@@ -446,14 +463,17 @@ copies only setup follows.
   retained row references it**. Retained rows are:
   - a setup post's `PostMediaItem`;
   - a persona's `AvatarMediaId` or `BannerMediaId`;
-  - a run-sheet item's media.
+  - a run-sheet item's media. This is a **JSON column** (`InjectItemPost.Media`) and not a foreign key, so it is
+    checked by parsing the ids;
+  - the poster frames: `PostMediaItem.PosterMediaAssetId` and `MediaAsset.PosterMediaAssetId`. Both are
+    `Restrict` FKs, and a kept video keeps its poster.
 
   An asset still referenced by any of these is kept, untouched. This covers two cases:
   - Staff unstaged after a dry run and reused a participant's image in a setup post.
   - A persona's avatar points at the image.
 
   Every one of those FKs is `DeleteBehavior.Restrict`, so the check-then-delete runs in the reset
-  transaction, which makes it race-free. The reset preview lists the assets it keeps and why. Avatars a
+  transaction. That makes it fail-safe: a missed reference aborts the reset and never leaves a broken image. The reset preview lists the assets it keeps and why. Avatars a
   participant uploaded through `/api/me/avatar` are persona configuration and are always kept.
 - **Setup replies to conduct posts.** Here is how one can arise: a dry-run post in staged, then unstage,
   then a staff reply in build. Two rules handle it:
@@ -605,7 +625,8 @@ Key: ✅ allowed · — refused (403; 404 where the bare-404 pattern applies) ·
 | Assign staff to an exercise | ✅ | ✅ (own exercise; cannot remove the last planner) | — | — | — | — |
 | Settings, chrome, practice mode, sign-in methods | via enrollment | ✅ | — **(change: today any staff)** | — | — | — |
 | Stage, unstage *(L)* | via enrollment | ✅ | — | — | — | — |
-| **Swamped mode, engine autonomy level** | via enrollment | — | **lead controller only** | — | — | — |
+| **Set lead controller** (`PUT /api/staff/enrollments/{id}/lead`) | via enrollment | ✅ | — | — | — | — |
+| **Swamped mode and autonomy writes**: `POST /api/engine/autonomy/swamped-mode`, `/api/engine/autonomy/restore`, `/api/engine/settings/autonomy-default`, `/api/engine/settings/tier-policy`, `/api/engine/generation-provider/restore` | via enrollment | — | **lead controller; exact direction semantics PENDING (§12)**. The kill switch and `generation-provider/cut-to-fake` stay open to any controller | — | — | — |
 | StartEx, pause/resume, EndEx, reopen, Freeze/pause tiers *(L)* | via enrollment | — | ✅ | — | — | — |
 | Roster: import, links, day word, email, participant reset/reissue, avatars | via enrollment | ✅ | ✅ | — | — | — |
 | View-only code rotate/revoke | via enrollment | ✅ | ✅ | — **(change: today any staff)** | — | — |
@@ -646,11 +667,11 @@ the report export offered first; from `completed` **or `staged`**; planner or or
 
 | Kind | Item | Wave |
 |---|---|---|
-| **EF migration** | `AdminIdentityFoundation`:<br>• `People` table, with a backfill of one per `StaffUser` (same Id; legacy rows have a null Email until invited)<br>• `StaffUsers.Id` FK → `People.Id`<br>• `Organizations.Slug` (unique; backfilled from Name)<br>• **`Enrollments` table**: StaffAssignment rows migrated with the same Id, plus one per `Account` (Role and PersonaId copied); then **`StaffAssignments` is dropped** and **`Accounts.Role`/`Accounts.PersonaId` are dropped**<br>• `Accounts.EnrollmentId` (unique, non-null after backfill)<br>• `Sessions.PersonId`, **`Sessions.ExerciseId` nullable**<br>• `People.OrgRole`, with orgAdmin enrollments backfilled → planner + OrgRole<br>• `People` password and lockout columns (`PasswordHash`, `PasswordChangedAt`, `FailedLoginCount`, `LockedOutUntil`)<br>• `Enrollments.IsLead` (check: controller only; filtered unique index, one lead per exercise)<br>• `Sessions.Origin` (the cross-tab world backstop)<br>• `LoginChoices` + `LoginChoiceCandidates` (slugless org choice)<br>• **`OrgAuditEvents` table**<br>• `Exercises.FirstLiveAt` (backfilled from lifecycle telemetry where the status is past `staged`)<br>Hand-written SQL in `EXEC`, per OPERATE.md; reversible `Down` | A1 |
+| **EF migration** | `AdminIdentityFoundation`:<br>• `People` table, with a backfill of one per `StaffUser` (same Id; legacy rows have a null Email until invited)<br>• `StaffUsers.Id` FK → `People.Id`<br>• `Organizations.Slug` (unique; backfilled from Name)<br>• **`Enrollments` table**: StaffAssignment rows migrated with the same Id, plus one per `Account` (Role and PersonaId copied); then **`StaffAssignments` is dropped** and **`Accounts.Role`/`Accounts.PersonaId` are dropped**<br>• `Accounts.EnrollmentId` (unique, non-null after backfill)<br>• `Sessions.PersonId`, **`Sessions.ExerciseId` nullable**<br>• `People.OrgRole`, with orgAdmin enrollments backfilled → planner + OrgRole<br>• `People` password and lockout columns (`PasswordHash`, `PasswordChangedAt`, `FailedLoginCount`, `LockedOutUntil`)<br>• `Enrollments.IsLead` (check: controller only; filtered unique index, one lead per exercise; backfill: the earliest-created controller per exercise)<br>• `Sessions.Origin` (the cross-tab world backstop)<br>• `LoginChoices` + `LoginChoiceCandidates` (slugless org choice)<br>• **`OrgAuditEvents` table**<br>• `Exercises.FirstLiveAt` (backfilled from lifecycle telemetry where the status is past `staged`)<br>Hand-written SQL in `EXEC`, per OPERATE.md; reversible `Down` | A1 |
 | EF migration | `CredentialToken`; `People.AvatarBlobName`; `Exercises.SignInMethods`; `MediaAssets.UploadedByAccountId` | A2 |
 | EF migration | `Posts.IsSetupContent`, `Follows.IsSetupContent` (with the §5.4 backfill); `Exercises.ParticipantName` | A3 |
 | EF migration | `ContentPack`, `ContentPackItem`; persona archive column | A4 |
-| **Frozen shared type** | `Session` (frontend `sessionResolver.ts:47`) / `SessionDto`:<br>• `exerciseId` becomes nullable<br>• adds `personId`, `world: 'staff'\|'participant'` and **`scope: 'exercise'\|'org'`**<br>• `role` becomes `ExerciseRole \| 'orgAdmin'`, as a **discriminated union**: `'orgAdmin'` is valid only with `scope: 'org'`, and an `ExerciseRole` only with `scope: 'exercise'`<br>• a runtime validator `isSessionRole(scope, role)` replaces `isExerciseRole` at `sessionResolver.ts:114`, with tests that both variants pass and mixed combinations are rejected<br>`ExerciseRole` (`roles.ts`): `orgAdmin` leaves the exercise-role union (it becomes an `OrgRole`).<br>`StaffAssignment` (`features/staff/types.ts:36`) becomes `Enrollment`, with the same fields plus `personId`.<br>The staff login request takes `orgSlug?` + `email` instead of `exerciseId` + `username`.<br>Posted on the feature issue per C1.4 **before** A1 merges | A1 |
+| **Frozen shared type** | `Session` (frontend `sessionResolver.ts:47`) / `SessionDto`:<br>• `exerciseId` becomes nullable<br>• adds `personId`, `world: 'staff'\|'participant'` and **`scope: 'exercise'\|'org'`**<br>• `role` becomes `ExerciseRole \| 'orgAdmin'`, as a **discriminated union**: `'orgAdmin'` is valid only with `scope: 'org'`, and an `ExerciseRole` only with `scope: 'exercise'`<br>• **`isLead: boolean`**, computed when read: false for org-scope and participant sessions; the frontend `Enrollment` type also gets `isLead`<br>• a runtime validator `isSessionRole(scope, role)` replaces `isExerciseRole` at `sessionResolver.ts:114`, with tests that both variants pass and mixed combinations are rejected<br>`ExerciseRole` (`roles.ts`): `orgAdmin` leaves the exercise-role union (it becomes an `OrgRole`).<br>`StaffAssignment` (`features/staff/types.ts:36`) becomes `Enrollment`, with the same fields plus `personId`.<br>The staff login request takes `orgSlug?` + `email` instead of `exerciseId` + `username`.<br>Posted on the feature issue per C1.4 **before** A1 merges | A1 |
 | Frozen shared type | `ExerciseScopeDto.exerciseName` becomes **`string \| null`** (C# `string?`), sourced from `ParticipantName`. **This changes the shape:** the frontend `ExerciseScope` type and the validator at `exerciseContextResolver.ts:205` must accept null, and every consumer (the header, cards, emails, the join page) renders brand-only. A null-name resolver test is required | A3 |
 | **Program.cs** | the `PulsePasswordIdentityProvider` registration; forwarded headers (**#480**) placed before the rate limiter; new route-group maps (one line per feature), in the end-of-wave wiring commit | A1, then each wave |
 | **App.tsx / staffRouteRegistry.tsx** | org console routes (people, exercise list), reset page, readiness; additive lines in the wiring commit | A2, A3 |
@@ -720,3 +741,34 @@ The story fixes include:
 
 **Added 2026-10-16 (Tom):** the lead controller is `Enrollment.IsLead` in A1 (§1.1, §8.2), at the orchestrator's
 request for Session C (#571).
+
+**Orchestrator adversarial review (2026-10-16) of `384bed2` and `35548f6`: 3 High, 6 Medium, 4 Low.** All are
+folded except the policy half of H1, which is pending Tom (§12). The folded items:
+- H1: the lead backfill and the readiness warning;
+- H2: the planner sets the lead, and org admins act through an enrollment;
+- H3: the lead is read live, with no session revocation;
+- M1: 409 `is-lead`;
+- M2: duplicate keeps `IsLead`;
+- M3: struck in story 07;
+- M4: the JSON run-sheet media and the poster FKs;
+- M5: the exact routes;
+- M6: `isLead` in the frozen types;
+- L1: one CASE UPDATE;
+- L2: the session `PersonId`;
+- L3: "fail-safe";
+- L4: reset clears the engine autonomy state.
+
+---
+
+## 12. Pending decision: lead-controller gate semantics (for Tom, through the orchestrator)
+
+**The problem (H1).** If the lead gate covers both directions, then once the lead's enrollment is removed,
+swamped auto-send keeps running and only the kill switch can stop it.
+
+| Option | Gate | Losing the lead |
+|---|---|---|
+| **A (recommended)** | **Raise-only.** A lead is needed to turn swamped mode on, raise autonomy (`autonomy-default` or `tier-policy` towards more autonomy), `autonomy/restore` after a kill switch, and `generation-provider/restore`. Turning swamped mode off, lowering autonomy, the kill switch and `cut-to-fake` stay open to **any controller**. This follows the "controls only ever lower" rule. | Allowed. Removing the lead's enrollment or changing its role clears `IsLead` **and turns swamped mode off** in the same transaction (audited). The exercise has no lead until a planner sets one, which shows as a readiness warning |
+| B | Lead in both directions | Refused: 409 `is-lead` until the lead is reassigned (today's interim behaviour). Risk: if the lead walks away mid-incident, nobody can turn swamped mode off without a planner first |
+| C | Lead in both directions | Allowed with no safeguard. **Rejected**: swamped mode stays stuck on |
+
+Option A changes what Session C's §8 amendment (#571) says about who may turn swamped mode off.
