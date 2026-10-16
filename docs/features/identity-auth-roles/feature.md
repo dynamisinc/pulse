@@ -41,6 +41,17 @@ non-negotiables (staff vs participant worlds).
 | 13 | `POST /api/telemetry` server-stamps `exerciseId` from session scope | XC-004 (+COR-001) | Not Started | #362 |
 | 14 | Anonymous-access regression suite | COR-012 (+COR-001) | Not Started | #367 |
 | 15 | Org-level authentication for OrgAdmin (session with no exercise scope) | COR-077 (new) | Not Started | — |
+| 16 | Person, StaffUser facet and Enrollments (replaces StaffAssignment) — A1, Tier-2 | COR-010, COR-011, COR-012, COR-014, COR-077 | Not Started | #572 |
+| 17 | Role-matrix enforcement + route x role matrix test (#377/#481/#61) — A1, Tier-2 | COR-010, COR-013 | Not Started | #573 |
+| 18 | Forwarded headers for the per-IP limiter (#480) — A1, Tier-2 | NFR-009, COR-012 | Not Started | #480 |
+| 19 | Org directory (people list, org-admin grants) — A2 | COR-010, COR-077, COR-017 | Not Started | #574 |
+| 20 | Staff invite and assign to exercises — A2, Tier-2 | COR-010, COR-011, COR-077 | Not Started | #575 |
+| 21 | Password reset flows (CredentialToken, forgot, admin reset, temp password, policy) — A2, Tier-2 | COR-011, COR-017, COR-012, NFR-009 | Not Started | #576 |
+| 22 | Per-exercise sign-in methods — A2 | COR-011, COR-017, COR-015 | Not Started | #577 |
+| 23 | Avatars (participant self-upload, staff set, moderation) — A2, Tier-2 | COR-017, SOC-001, COR-024, NFR-004 | Not Started | #578 |
+| 24 | Image re-encode and EXIF strip (SkiaSharp) — A2, Tier-2 | NFR-004, NFR-009 | Not Started | #579 |
+| 25 | Audit refused attribution attempts (#389) — A5 | COR-018, XC-004, NFR-009 | Not Started | #389 |
+| 26 | Cache-Control: no-store on auth routes (#485) — A5 | NFR-009, COR-012 | Not Started | #485 |
 
 ## Dependencies
 
@@ -110,3 +121,7 @@ Foundation, spanning staff and participant worlds. Read-only sessions still get 
 so telemetry can count views/reach without per-user provisioning (COR-015). The shared credential is
 an internet-facing secret and is treated as such (COR-016/NFR-009). Fake sign-up UI is omitted
 normatively — phishing-pattern optics on a government training site (COR-011).
+
+## Scope update 2026-10-16 (ADMIN-IDENTITY-MODEL)
+
+Source: [`docs/design/ADMIN-IDENTITY-MODEL.md`](../../design/ADMIN-IDENTITY-MODEL.md) (Tier-2 signed off 2026-10-16). Stories **01, 04, 05, 08, 15** are amended with scope-update sections (roles become `Person.OrgRole` + per-`Enrollment` role; evaluator write-nothing proved by the matrix; chained Pulse/Dynamis provider; admin panel becomes people/roster scope; org-scope session, org slug and org choice). Stories **02, 03, 10, 12** carry amendment notes only (their readers move to `Enrollment`; ACs unchanged). New stories 16-26 are cut by wave in the design doc §10. A1 stories need orchestrator clearance first for the EF migration, `Program.cs`, `App.tsx` / `staffRouteRegistry.tsx` and frozen-type changes (`Session`, `ExerciseRole`, `StaffAssignment` -> `Enrollment`, staff login request).

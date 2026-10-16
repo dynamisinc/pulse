@@ -182,3 +182,7 @@ AC5 day boundary; XC-ISO isolation, XC-TEL telemetry, XC-SEC content security an
   `.B_TodaysWordTypedIntoTheNameBox_IsNotRecorded`, `.WithNoWordSet_TheNameIsStillChecked_AgainstTheDecoy_AndKept`,
   `.SetAndReplace_EmitCredentialRotated_WithFirstGeneratedAndDate`, `.Clear_EmitsCredentialRevoked_AndANoOpClearEmitsNothing`,
   `.TheWord_SetOrAttempted_AppearsInNoEventLogLineOrResponseBody_ButTheOneTimeSetResult` (XC-TEL)
+
+## Scope update 2026-10-16 (ADMIN-IDENTITY-MODEL)
+
+**Amendment note (story built; ACs unchanged unless stated).** Source: [`docs/design/ADMIN-IDENTITY-MODEL.md`](../../design/ADMIN-IDENTITY-MODEL.md) §1.1, §2.2 (Tier-2 signed off by Tom, 2026-10-16). Day-word sign-in keys on `Account` -> `Enrollment`; role/persona reads move to `Enrollment` (wave A1). The day word is wiped by reset (exercise-build-golive 07). Existing ACs unchanged.

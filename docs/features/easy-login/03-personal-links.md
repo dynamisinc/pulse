@@ -152,3 +152,7 @@ Telemetry, AC-9 Authorization and abuse.
 - **AC-9** `ParticipantAccessTests.StaffRoutes_AreGated_401WithoutAStaffSession_403ForAnEvaluator_AndAnotherExercisesStaffFindsNothing`,
   `.StaffRoutes_AnUnknownOrMalformedId_Is404`; `JoinEndpointsHttpTests.Join_Route_IsPreAuth_BodyLimited_AndOnItsOwnRateLimitPolicy`;
   `ParticipantLinkServiceTests.AddPersonalLinks_RegistersTheEasyLoginJoinRateLimitPolicy`.
+
+## Scope update 2026-10-16 (ADMIN-IDENTITY-MODEL)
+
+**Amendment note (story built; ACs unchanged unless stated).** Source: [`docs/design/ADMIN-IDENTITY-MODEL.md`](../../design/ADMIN-IDENTITY-MODEL.md) §1.1, §2.2 (Tier-2 signed off by Tom, 2026-10-16). Links key on `Account`, which is now the sign-in facet of an `Enrollment`; role/persona reads move to `Enrollment` (wave A1). Existing ACs unchanged.

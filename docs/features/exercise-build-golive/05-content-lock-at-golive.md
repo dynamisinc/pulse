@@ -29,3 +29,10 @@ Story 04 (go-live); E7 (conduct edits); E9/INT-003 (Phase 4 MSEL consistency).
 ## Tests
 - Integration: go-live locks/versions Build content; a conduct edit is recorded as an attributed
   controller action.
+
+## Scope update 2026-10-16 (ADMIN-IDENTITY-MODEL)
+
+Source: [`docs/design/ADMIN-IDENTITY-MODEL.md`](../../design/ADMIN-IDENTITY-MODEL.md) §6.1, §5.4 (Tier-2 signed off by Tom, 2026-10-16). Wave A3.
+- [ ] **Content packs are build-only.** Given an exercise not in `build`, when a content pack is uploaded or applied, then it is refused (409 `content-locked`), so pack posts are always setup content; to add pack content to a staged exercise, unstage first. (The upload story is persona-management 06.)
+- [ ] The lock message names "unstage" as the way back to editing.
+- [ ] User guide (C5 docs-as-done): `docs/guide/planner-guide.md` is updated in the same PR, or the PR states "no guide impact".

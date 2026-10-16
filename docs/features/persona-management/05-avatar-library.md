@@ -35,3 +35,8 @@ Stories 01/03 (avatar pick); exercise-isolation story 02 (media URLs); content-s
 ## Tests
 - Integration: avatar pick from library and validated upload; uploaded avatar served via access-checked
   URL.
+
+## Scope update 2026-10-16 (ADMIN-IDENTITY-MODEL)
+
+Source: [`docs/design/ADMIN-IDENTITY-MODEL.md`](../../design/ADMIN-IDENTITY-MODEL.md) §4.1 (Tier-2 signed off by Tom, 2026-10-16). Wave A4. Library avatars are uploaded through `MediaUploadService` and therefore pass through the re-encode / EXIF-strip pipeline (identity-auth-roles 24). A persona whose avatar is cleared by moderation or duplication falls back to the default avatar.
+- [ ] User guide (C5 docs-as-done): `docs/guide/planner-guide.md` is updated in the same PR, or the PR states "no guide impact".

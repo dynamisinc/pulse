@@ -41,3 +41,10 @@ Organization/library; exercise-isolation story 03 (instances). Feeds E7 persona-
 
 ## Tests
 - Integration: CRUD + clone/archive on a template with all fields; type drives verification defaults.
+
+## Scope update 2026-10-16 (ADMIN-IDENTITY-MODEL)
+
+Source: [`docs/design/ADMIN-IDENTITY-MODEL.md`](../../design/ADMIN-IDENTITY-MODEL.md) §6.1, §8.2 (Tier-2 signed off by Tom, 2026-10-16). Wave A4.
+- [ ] **Persona create service.** There is no staff persona-create endpoint today; add `POST /api/staff/personas` (planner or controller; evaluator refused), reused by the content-pack applier. Create/edit/clone/archive carry a persona **archive column** (soft; nothing hard-deleted, XC-010).
+- [ ] Foreign-exercise and foreign-org persona ids return the bare 404.
+- [ ] User guide (C5 docs-as-done): `docs/guide/planner-guide.md` is updated in the same PR, or the PR states "no guide impact".

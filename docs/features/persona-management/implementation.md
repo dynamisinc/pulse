@@ -31,3 +31,14 @@ feature's management/write backend — template CRUD, a cast-seeding API, person
 | 02 Casts & seeding | CastBuilder, seedCast | 01; SOC-054 | 03 | 2 | M |
 | 03 Mid-exercise create | persona create | 01 | 02 | 2 | S |
 | 04 Backdated history | BackdatedComposer | 01; E2 post model; COR-053 | — | 3 | M |
+
+## Scope update 2026-10-16 (ADMIN-IDENTITY-MODEL)
+
+Source: [`docs/design/ADMIN-IDENTITY-MODEL.md`](../../design/ADMIN-IDENTITY-MODEL.md) §6.1.
+
+| Story | Files it owns | Depends-on | Can-run-with | Wave | Effort |
+|-------|---------------|------------|--------------|------|--------|
+| 01 (amended) persona create service + archive | `Features/Personas/*` create service | A1 | 05 | A4 | M |
+| 06 Content pack upload | `Features/ContentPacks/*`, `ContentPackApplier`, upload panel | 01, build-golive 05/07 (IsSetupContent), identity 24 | 02 | A4 | L |
+
+Reuse: `MediaUploadService`, `InjectQueueService`, post ingest with backdate, noise-pool service, `ContentPackItem` idempotency. A4 migration (`ContentPack`, `ContentPackItem`, persona archive column) is orchestrator-owned.
