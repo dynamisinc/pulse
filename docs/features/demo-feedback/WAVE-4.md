@@ -73,6 +73,7 @@ Only story 17 touches the snapshot. Stories 18-25 never add a migration; if one 
 |---|---|---|
 | `POST /api/steering/runtime-state/reset` → 200 `PauseTierStateDto` | controller (`EngineCockpitStaffAuthorizationFilter` + `EngineCockpitControllerRoleFilter`) | 18 |
 | `PATCH /api/posts/{postId:guid}` `{ text }` → 200 `ParticipantPostDto`; 403 not yours / not participant origin; 404 other exercise or taken down; 409 `{ reason: "window-closed" \| "edit-limit" \| "frozen" }`; 400 empty or too long | participant session that authored it | 19 |
+| `PATCH /api/posts/{postId:guid}` notes (19 Gate-1, 10/16) | an **ended** exercise (completed/archived/build) is refused **403 by the lifecycle gate** before the handler; `409 frozen` covers Freeze, a frozen clock and `paused`. Two edits colliding on (PostId, EditNumber): the loser gets **409 with no body** = concurrent edit, re-read (story 20 shows its generic error). `viewer.editableForSeconds` keeps counting during Freeze/pause; the server answers `frozen` | 19 |
 | `GET /api/posts/{postId:guid}/edits` → 200 `PostEditHistoryDto` | any session in the exercise (participant or staff) | 19 |
 | `PATCH /api/org/exercises/{exerciseId:guid}` `{ name }` → 200 org exercise row | planner, org admin, controller (DF-20 set) | 22 |
 | `POST /api/org/exercises/{exerciseId:guid}/archive` → 200 / 409 `{ reason: "not-completed" }` | same | 22 |
