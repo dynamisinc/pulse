@@ -500,7 +500,7 @@ public sealed class BootstrapService
             {
                 Id = newStaffUserId,
                 OrganizationId = organizationId,
-                DisplayName = staff.DisplayName,
+                DisplayName = Person.BoundDisplayName(staff.DisplayName),
                 CreatedAt = now,
             };
             staffUser = new StaffUser

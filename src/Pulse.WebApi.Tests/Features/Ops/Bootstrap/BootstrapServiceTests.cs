@@ -340,6 +340,39 @@ public sealed class BootstrapServiceTests
     }
 
     [RequiresDockerFact]
+    public async Task Bootstrap_Staff_DisplayNameLongerThanThePersonColumn_IsTruncated_NotA500()
+    {
+        // L-5: the allowlist display name is unbounded, People.DisplayName is nvarchar(200).
+        var longName = new string('N', 300);
+        var allowlisted = new DynamisStaffAccount
+        {
+            Username = $"ctrl-{Guid.NewGuid():N}",
+            Secret = "staff-secret",
+            ExternalSubject = $"idp|{Guid.NewGuid():N}",
+            DisplayName = longName,
+        };
+
+        Guid staffUserId;
+        await using (var context = _fixture.CreateContext())
+        {
+            var result = await NewService(context, allowlisted).BootstrapAsync(
+                new BootstrapExerciseRequest
+                {
+                    Hostname = NewHostname(),
+                    ExerciseName = "UAT",
+                    Staff = new BootstrapStaffRequest { Username = allowlisted.Username, Role = "controller" },
+                },
+                Secret);
+            result.Staff!.Created.Should().BeTrue("an over-long display name must not fail the save");
+            staffUserId = result.Staff.StaffUserId;
+        }
+
+        await using var read = _fixture.CreateContext();
+        var person = await read.People.SingleAsync(p => p.Id == staffUserId);
+        person.DisplayName.Should().Be(new string('N', Person.MaxDisplayNameLength), "it is truncated to the column length");
+    }
+
+    [RequiresDockerFact]
     public async Task Bootstrap_Staff_SecondCall_ReusesAssignment_NoDuplicate()
     {
         var host = NewHostname();

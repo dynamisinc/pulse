@@ -27,6 +27,28 @@ public sealed class Person : IOrganizationOwned
     /// <summary>The schema bound of <see cref="DisplayName"/>.</summary>
     public const int MaxDisplayNameLength = 200;
 
+    /// <summary>
+    /// Bounds a display name taken from a longer source (an IdP identity, the staff allowlist, a bootstrap document —
+    /// <see cref="StaffUser.DisplayName"/> is unbounded) to the <see cref="DisplayName"/> column, so an over-long name is
+    /// truncated rather than failing the save (L-5). Never splits a surrogate pair. The migration backfill applies the
+    /// same <c>LEFT(…, 200)</c>.
+    /// </summary>
+    /// <param name="displayName">The source display name.</param>
+    /// <returns>The name, at most <see cref="MaxDisplayNameLength"/> characters.</returns>
+    public static string BoundDisplayName(string displayName)
+    {
+        ArgumentNullException.ThrowIfNull(displayName);
+        if (displayName.Length <= MaxDisplayNameLength)
+        {
+            return displayName;
+        }
+
+        var length = char.IsHighSurrogate(displayName[MaxDisplayNameLength - 1])
+            ? MaxDisplayNameLength - 1
+            : MaxDisplayNameLength;
+        return displayName[..length];
+    }
+
     /// <summary>The schema bound of <see cref="OrgRole"/>.</summary>
     public const int MaxOrgRoleLength = 32;
 
