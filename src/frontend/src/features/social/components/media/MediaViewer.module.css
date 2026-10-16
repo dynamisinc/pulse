@@ -22,6 +22,10 @@
   display: flex;
   box-sizing: border-box;
   flex-direction: column;
+  /* Landscape phones: keep content and controls out of the notch / home-indicator
+   * side insets (story 04). 0px on a device without them. */
+  padding-right: env(safe-area-inset-right, 0px);
+  padding-left: env(safe-area-inset-left, 0px);
   background: rgb(6 9 11 / 96%);
   color: #fff;
   font-family: 'Figtree', system-ui, sans-serif;
@@ -60,11 +64,11 @@
   max-width: 100%;
   max-height: calc(
     100vh - var(--pulse-chrome-top, 0px) - var(--pulse-alert-height, 0px)
-    - var(--pulse-chrome-bottom, 0px) - 140px
+    - var(--pulse-chrome-bottom, 0px) - env(safe-area-inset-bottom, 0px) - 140px
   );
   max-height: calc(
     100dvh - var(--pulse-chrome-top, 0px) - var(--pulse-alert-height, 0px)
-    - var(--pulse-chrome-bottom, 0px) - 140px
+    - var(--pulse-chrome-bottom, 0px) - env(safe-area-inset-bottom, 0px) - 140px
   );
   object-fit: contain;
 }
@@ -141,6 +145,24 @@
   outline: 3px solid #fff;
   outline-offset: 2px;
   box-shadow: 0 0 0 6px #000;
+}
+
+/*
+ * Phones / tablets (coarse pointer): Close and the pager are real 44px boxes with a
+ * little more room between them (they are already 44px tall; this keeps the floor
+ * explicit and spaces the targets so a thumb cannot hit the neighbour). Mouse layout is
+ * unchanged. The toolbar is a flow box below the stage, so nothing here pokes outside it.
+ */
+@media (pointer: coarse) {
+  .closeButton,
+  .navButton {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .pager {
+    gap: 6px;
+  }
 }
 
 /* Visually hidden, still announced. */
