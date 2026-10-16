@@ -70,6 +70,7 @@ public static class PreAuthAllowlist
         "GET /api/exercise-context",
         "POST /api/auth/login",
         "POST /api/auth/staff/login",
+        "POST /api/auth/staff/login/choose",
         "POST /api/auth/shared",
         "POST /api/auth/join",
         "POST /api/auth/word",

@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Pulse.WebApi.Features.Identity.EasyLogin;
 using Pulse.WebApi.Features.Identity.Providers;
 using Pulse.WebApi.Features.Identity.Sessions;
 
@@ -26,6 +27,9 @@ public static class StaffAuthEndpoints
     /// for enforcement — see the <c>Program.cs</c> ordering note in this feature's implementation.md.
     /// </summary>
     public const string StaffLoginRateLimitPolicy = "staff-login";
+
+    /// <summary>The org-choice route (identity-auth-roles/15) — pre-auth, allowlisted.</summary>
+    public const string ChooseRoute = "/api/auth/staff/login/choose";
 
     /// <summary>
     /// Registers the staff-identity slice: the provider-agnostic <see cref="IIdentityProvider"/> (Phase-1
@@ -53,6 +57,9 @@ public static class StaffAuthEndpoints
         services.AddScoped<IIdentityProvider, PulsePasswordIdentityProvider>();
 
         services.AddScoped<StaffLoginService>();
+
+        // identity-auth-roles/15: the org sign-in ({orgSlug?, email, password}) and the org choice.
+        services.AddScoped<OrgStaffLoginService>();
         services.AddScoped<StaffAssignmentService>();
 
         // Fail-closed default until story 03 (Wave 2) provides the real, auth-scheme-backed accessor. TryAdd
@@ -88,7 +95,16 @@ public static class StaffAuthEndpoints
         // PRE-AUTH (identity-auth-roles/11, PreAuthAllowlist): establishes the staff session, so it cannot
         // require one; anti-enumeration 401/403s behind the staff-login rate-limiter. The two staff endpoints
         // below stay gated (they already fail closed via ICurrentStaffSessionAccessor, unchanged).
+        //
+        // identity-auth-roles/15: both sign-in routes answer Cache-Control: no-store (the 200s carry session tokens or a
+        // choice token), and the org choice shares the login's per-IP limiter and body limit.
         endpoints.MapPost("/api/auth/staff/login", StaffLoginAsync)
+            .AddEndpointFilter<NoStoreEndpointFilter>()
+            .RequireRateLimiting(StaffLoginRateLimitPolicy)
+            .WithLoginBodyLimit()
+            .AllowAnonymousPreAuth();
+        endpoints.MapPost(ChooseRoute, StaffLoginChooseAsync)
+            .AddEndpointFilter<NoStoreEndpointFilter>()
             .RequireRateLimiting(StaffLoginRateLimitPolicy)
             .WithLoginBodyLimit()
             .AllowAnonymousPreAuth();
@@ -106,11 +122,22 @@ public static class StaffAuthEndpoints
     private static async Task<IResult> StaffLoginAsync(
         StaffLoginRequest? request,
         StaffLoginService loginService,
+        OrgStaffLoginService orgLoginService,
+        HttpContext httpContext,
         CancellationToken cancellationToken)
     {
         if (request is null)
         {
             return Results.BadRequest("A JSON login body is required.");
+        }
+
+        // identity-auth-roles/15: a body naming no exercise but an email / password / slug is the ORG sign-in. Every
+        // other body takes the exercise-bound path below, unchanged.
+        if (OrgStaffLoginService.IsOrgShape(request))
+        {
+            var orgResult = await orgLoginService.LoginAsync(
+                request, httpContext.Connection.RemoteIpAddress?.ToString(), cancellationToken);
+            return ToResult(orgResult);
         }
 
         var result = await loginService.LoginAsync(request, cancellationToken);
@@ -126,6 +153,32 @@ public static class StaffAuthEndpoints
             _ => Results.StatusCode(StatusCodes.Status500InternalServerError),
         };
     }
+
+    /// <summary>
+    /// Redeems an org choice (identity-auth-roles/15). 400 on a malformed body; the uniform empty 401 on every refusal.
+    /// </summary>
+    private static async Task<IResult> StaffLoginChooseAsync(
+        StaffLoginChooseRequest? request,
+        OrgStaffLoginService orgLoginService,
+        CancellationToken cancellationToken)
+    {
+        if (request is null)
+        {
+            return Results.BadRequest("A JSON choice body is required.");
+        }
+
+        return ToResult(await orgLoginService.ChooseAsync(request, cancellationToken));
+    }
+
+    private static IResult ToResult(OrgStaffLoginResult result) => result.Outcome switch
+    {
+        OrgStaffLoginOutcome.Authenticated when result.Issued is { } issued =>
+            Results.Ok(StaffLoginResponseDto.From(issued, result.IsLead)),
+        OrgStaffLoginOutcome.ChoiceRequired when result.Choice is { } choice => Results.Ok(choice),
+        OrgStaffLoginOutcome.Invalid => Results.BadRequest(result.ValidationError),
+        OrgStaffLoginOutcome.Rejected => Results.Unauthorized(),
+        _ => Results.StatusCode(StatusCodes.Status500InternalServerError),
+    };
 
     /// <summary>
     /// Returns the authenticated staff user's own assignments across exercises (staff-only). Fails closed with
