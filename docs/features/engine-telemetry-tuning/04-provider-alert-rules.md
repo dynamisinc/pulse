@@ -1,9 +1,9 @@
 # Story: Provider alert rules (errors, latency, spend)
 
-**Feature:** Engine telemetry & tuning  ·  **Epic:** E8 (cross-cutting: NFR-009 monitoring/alerting; brief track 7)  ·  **Phase:** 2 (v1) — engine go-live wave C1  ·  **Status:** Built, NOT Complete — authored on `feature/engine-golive-alert-rules` (`bicep build` / `build-params` / `lint` clean, `main.json` regenerated). Gate-1 review fixes folded (sampling-weighted counts, timeout-ratio Sev-2 latency rule, min-call guards, root thresholds, secure/masked owner email). **Lands OFF on UAT** (`deployProviderAlerts = false` in `uat.bicepparam`): merging activates nothing. Still needs **Tom's Tier-2 infra sign-off**, the `PULSE_ALERT_OWNER_EMAIL` secret on the `uat` environment, the **one-line follow-up flip** to `true`, and **UAT verification** (a `what-if`, the deploy, and a forced test fire reaching the owner's inbox — AC7). Nothing deployed yet.
-**Requirements:** ADP-041 (operational counterpart), NFR-003 (degraded-mode trip), NFR-005 (governed provider)  ·  **Design decisions:** none  ·  **Issue:** —
+**Feature:** Engine telemetry & tuning  ·  **Epic:** E8 (cross-cutting: NFR-009 monitoring/alerting; brief track 7)  ·  **Phase:** 2 (v1) — engine go-live wave C1  ·  **Status:** Merged (inert), NOT Complete — merged to `main` in #585 (2026-10-16) after **Tom's Tier-2 infra sign-off (Tom Bull, 2026-10-16)**. `bicep build` / `build-params` / `lint` clean; Gate-1 clean on re-review; CI green. **Inert on UAT** (`deployProviderAlerts = false`): nothing deployed yet. Remaining (issue #590): the `PULSE_ALERT_OWNER_EMAIL` secret on the `uat` environment, the one-line flip to `true`, Deploy Infrastructure (what-if first), and a forced test fire reaching the owner's inbox (AC7).
+**Requirements:** ADP-041 (operational counterpart), NFR-003 (degraded-mode trip), NFR-005 (governed provider)  ·  **Design decisions:** none  ·  **Issue:** #590
 
-> **TIER-2 / infra change: Tom Bull must sign off before merge** (`docs/NEXT-WAVE-SESSION-BRIEF.md` C5: "Tom signs off schema, isolation, security and infra changes").
+> **TIER-2 / infra change: signed off by Tom Bull, 2026-10-16; merged in PR #585.** (`docs/NEXT-WAVE-SESSION-BRIEF.md` C5: "Tom signs off schema, isolation, security and infra changes".)
 > Counts toward track 7 (monitoring and alerting, `NEXT-WAVE-SESSION-BRIEF.md` B1 "Production").
 
 ## Context
@@ -171,7 +171,7 @@ traffic to alert on; Tom's infra sign-off. Independent of stories 01-03 code.
 - [x] Docs: `infrastructure/README.md` (toggle row, CI secret, "Provider alerts" section),
       `docs/guide/troubleshooting.md` ("I got a provider alert").
 - [ ] Tom: create the `PULSE_ALERT_OWNER_EMAIL` secret on the `uat` GitHub environment.
-- [ ] Tom: Tier-2 infra sign-off.
+- [x] Tom: Tier-2 infra sign-off (Tom Bull, 2026-10-16; merged in #585).
 - [ ] Follow-up (one line): set `deployProviderAlerts = true` in `uat.bicepparam` once the secret exists.
 - [ ] UAT: what-if, deploy, run the KQL on live traffic, force one fire, record it above (AC7).
 
