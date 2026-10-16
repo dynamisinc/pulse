@@ -11,7 +11,7 @@ route and per lifecycle transition and proves it with a route x role matrix test
 
 ## Acceptance Criteria
 - [ ] **Transitions are role-checked.** Given the lifecycle endpoint, then stage/unstage = planner; archive = planner or
-      org admin; StartEx, pause/resume, EndEx, reopen, Freeze/pause tiers = controller; unarchive = org admin only.
+      org admin; StartEx, pause/resume, EndEx, reopen, Freeze/pause tiers = controller; unarchive = org admin only (returns to the prior state). Archive is also allowed from `build` when `FirstLiveAt` is set (planner or org admin).
       Any other role gets 403 and the state is unchanged.
 - [ ] **Narrowings land.** Create exercise is org admin only (planner/controller refused); settings, chrome, practice mode
       are planner only (controller refused); view-only code rotate/revoke is planner + controller (evaluator refused).

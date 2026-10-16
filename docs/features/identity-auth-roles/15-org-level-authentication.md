@@ -233,8 +233,7 @@ The `Session` migration (`ExerciseId` nullable, `PersonId` added), the staff log
 
 - [ ] **Org-scope session has a nullable `Session.ExerciseId`.** Null means org scope; it is structurally
       distinct from `Guid.Empty` (the refused "unresolved" sentinel). Resolves AC 2's open design question.
-- [ ] **Only `/api/org/*` and `/api/session` accept an org-scope session;** every exercise-scoped route
-      fails closed on it (`CurrentExerciseId` stays null).
+- [ ] **An org-scope session is accepted only by `/api/org/*`, `/api/session`, `/api/me/*`, `GET /api/staff/assignments` (the person's own enrollments) and `POST /api/staff/active-exercise`** (own same-org enrollment only; a foreign or missing target is the bare 404, so an org admin can enter an exercise). Every other exercise-scoped route fails closed on it (`CurrentExerciseId` stays null).
 - [ ] **Org slug in the URL.** Given `console.<domain>/o/{slug}`, when `POST /api/auth/staff/login
       {orgSlug, email, password}` verifies, then the session is minted (org scope for an org admin, else the
       person's most recently used staff enrollment in that org; neither -> uniform 401).
@@ -245,8 +244,7 @@ The `Session` migration (`ExerciseId` nullable, `PersonId` added), the staff log
       lockout apply to each.
 - [ ] **Active-exercise switch never crosses orgs** and only selects a staff-role `Enrollment`, never one with an
       `Account`. Changing org means signing in again.
-- [ ] **Telemetry:** an org-scope login attempt is auditable (resolves the unresolved XC-004 AC; decided in
-      story 16's schema work).
+- [ ] **Audit via `OrgAuditEvent` (design doc §7.5).** Org-scope sign-in success and refusal, and org choice, are written to `OrgAuditEvent` (`IOrganizationScoped`; not `TelemetryEvent`, whose `ExerciseId` is non-nullable). A sign-in attempt with no resolvable org (unknown email, no slug) goes only to the structured application log and still counts against the per-IP limiter. Resolves the unresolved XC-004 AC.
 - [ ] Foreign-org and foreign-exercise tests on the login/choose/switch routes; responses use the uniform 401.
 - [ ] User guide: `docs/guide/getting-started.md` (sign-in by org URL / choose org) updated in the same PR.
 

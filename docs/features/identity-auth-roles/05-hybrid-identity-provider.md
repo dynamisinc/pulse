@@ -176,3 +176,4 @@ amendment note for the follow-on work (built under story 16). Program.cs registr
       credential gets the uniform 401. Given a valid Person email/password, then login succeeds via
       `PulsePasswordIdentityProvider` and the hash is upgraded if the work factor is stale.
 - [ ] User guide: sign-in section of `docs/guide/getting-started.md` updated in the same PR.
+- [ ] **Chained providers in A1 (design doc §1.3).** If the `Person` has a `PasswordHash`, `PulsePasswordIdentityProvider` is authoritative with no fallback; otherwise the Dynamis allowlist is tried, keyed on `StaffUser.ExternalSubject`, so legacy staff sign in exactly as today. A2's invite flow gives legacy staff a Pulse password, after which the fallback no longer applies to them; customer deployments turn the fallback off once everyone is invited.
