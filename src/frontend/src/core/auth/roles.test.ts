@@ -15,10 +15,10 @@ import {
   isStaffRole,
   canWriteInSim,
   isExerciseRole,
-  type ExerciseRole,
+  type SessionRole,
 } from './roles'
 
-const ALL: ExerciseRole[] = [
+const ALL: SessionRole[] = [
   'participant',
   'pio',
   'controller',

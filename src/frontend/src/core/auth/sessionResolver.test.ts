@@ -117,6 +117,10 @@ describe('resolveSession', () => {
 describe('isSessionExpired', () => {
   const base: Session = {
     exerciseId: 'ex-1',
+    scope: 'exercise',
+    personId: null,
+    world: 'participant',
+    isLead: false,
     accountId: 'acct-1',
     role: 'participant',
     actingHumanId: 'human-1',

@@ -46,7 +46,7 @@ export function useNotificationsEligibility(): NotificationsEligibility {
   const session = useSession()
   const { self, loading } = useSocialDirectory()
 
-  if (!affordancesAvailable(variant) || session.isReadOnly || session.personaId === undefined) {
+  if (!affordancesAvailable(variant) || session.isReadOnly || session.personaId === undefined || session.exerciseId === null) {
     return { kind: 'unavailable' }
   }
   if (self === undefined) return loading ? { kind: 'pending' } : { kind: 'failed' }

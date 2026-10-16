@@ -69,6 +69,10 @@ const SCOPE: ExerciseScope = {
 
 const SESSION: Session = {
   exerciseId: 'ex-mock-0001',
+  scope: 'exercise',
+  personId: null,
+  world: 'participant',
+  isLead: false,
   accountId: 'acct-test',
   role: 'participant',
   actingHumanId: 'human-test',

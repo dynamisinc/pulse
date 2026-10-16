@@ -13,7 +13,7 @@
  * isolation is enforced server-side (COR-001).
  */
 
-export type { ExerciseRole } from './roles'
+export type { ExerciseRole, OrgRole, SessionRole, SessionScope } from './roles'
 export {
   PARTICIPANT_ROLES,
   STAFF_ROLES,
@@ -21,6 +21,9 @@ export {
   isStaffRole,
   canWriteInSim,
   isExerciseRole,
+  isOrgRole,
+  isSessionRole,
+  ORG_ROLES,
   useRole,
 } from './roles'
 
@@ -31,7 +34,7 @@ export { ReadOnlySessionScope, useOptionalSession } from './session'
 export type { ReadOnlySessionScopeProps } from './session'
 
 export { resolveSession, isSessionExpired, SESSION_TTL_MS } from './sessionResolver'
-export type { Session } from './sessionResolver'
+export type { Session, ExerciseSession, OrgSession, SessionWorld } from './sessionResolver'
 export { SessionExpiredError } from './sessionExpiredError'
 
 export { getAccessToken, getRefreshToken, setTokens, clearTokens } from './tokenStore'

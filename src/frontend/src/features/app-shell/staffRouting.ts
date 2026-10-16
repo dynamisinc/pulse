@@ -46,7 +46,7 @@
 
 import type { ReactNode } from 'react'
 import type { IconDefinition } from '@fortawesome/fontawesome-svg-core'
-import type { ExerciseRole } from '@/core/auth'
+import type { SessionRole } from '@/core/auth'
 
 /**
  * The roles that can reach a REGISTERED SURFACE in this route tree:
@@ -83,7 +83,7 @@ import type { ExerciseRole } from '@/core/auth'
  * XC-002 half this type carries.
  */
 export type StaffSurfaceRole = Extract<
-  ExerciseRole,
+  SessionRole,
   'controller' | 'evaluator' | 'planner' | 'orgAdmin'
 >
 
@@ -107,8 +107,8 @@ export const STAFF_SURFACE_ROLES: readonly StaffSurfaceRole[] = [
  * for still resolves to `undefined` in {@link resolveDefaultStaffRoute} and
  * fails closed at the caller (`RoleAwareEntry`).
  */
-export function isStaffSurfaceRole(role: ExerciseRole): role is StaffSurfaceRole {
-  return (STAFF_SURFACE_ROLES as readonly ExerciseRole[]).includes(role)
+export function isStaffSurfaceRole(role: SessionRole): role is StaffSurfaceRole {
+  return (STAFF_SURFACE_ROLES as readonly SessionRole[]).includes(role)
 }
 
 /**

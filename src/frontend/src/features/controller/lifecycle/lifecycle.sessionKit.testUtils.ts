@@ -39,6 +39,10 @@ export function resetSessionRole(): void {
 export async function resolveSession(): Promise<Session> {
   return {
     exerciseId: 'ex-mock-0001',
+    scope: 'exercise',
+    personId: null,
+    world: 'participant',
+    isLead: false,
     accountId: `acct-${role}`,
     role,
     actingHumanId: `human-${role}`,

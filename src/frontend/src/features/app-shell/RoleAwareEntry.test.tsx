@@ -34,7 +34,7 @@ import { useTheme } from '@mui/material/styles'
 import { faClipboardCheck, faSliders } from '@fortawesome/free-solid-svg-icons'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { useSession, useRole } from '@/core/auth'
-import type { Session } from '@/core/auth'
+import type { ExerciseSession, Session } from '@/core/auth'
 import { useExerciseContext } from '@/core/exerciseContext'
 import type { ExerciseScope } from '@/core/exerciseContext'
 import { RoleAwareEntry, type RoleAwareEntryProps } from './RoleAwareEntry'
@@ -59,8 +59,12 @@ const StubGuard: ComponentType<{ children: ReactNode }> = ({ children }) => (
   <div data-testid="participant-guard">{children}</div>
 )
 
-const BASE_SESSION: Session = {
+const BASE_SESSION: ExerciseSession = {
   exerciseId: 'ex-mock-0001',
+  scope: 'exercise',
+  personId: null,
+  world: 'participant',
+  isLead: false,
   accountId: 'acct-test',
   role: 'participant',
   personaId: 'persona-test',
@@ -77,7 +81,7 @@ const SCOPE: ExerciseScope = {
 }
 
 /** Drives the mocked hooks to a resolved session for `role` (default: valid). */
-function primeSession(overrides: Partial<Session> = {}) {
+function primeSession(overrides: Partial<ExerciseSession> = {}) {
   const session: Session = { ...BASE_SESSION, ...overrides }
   vi.mocked(useSession).mockReturnValue(session)
   vi.mocked(useRole).mockReturnValue(session.role)
