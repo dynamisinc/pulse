@@ -223,3 +223,31 @@ confirmed by reading the current test tree) rather than a new top-level test pro
 - **XC-004** — a new case in `StaffLoginServiceTests` proving an org-level login attempt (success and
   failure) still emits exactly one telemetry event, under whatever schema change AC2/the telemetry
   cross-cutting AC lands on.
+
+## Scope update 2026-10-16 (ADMIN-IDENTITY-MODEL)
+
+Source: [`docs/design/ADMIN-IDENTITY-MODEL.md`](../../design/ADMIN-IDENTITY-MODEL.md) §1.2, §7, §8.1 (Tier-2 signed off). Wave A1. **The ACs above stay and are refined as follows.**
+The `Session` migration (`ExerciseId` nullable, `PersonId` added), the staff login request change
+(`orgSlug?` + `email` replaces `exerciseId` + `username`), and the frozen `SessionDto` change
+(`exerciseId` nullable, `personId`, `world`) need **orchestrator clearance first**.
+
+- [ ] **Org-scope session has a nullable `Session.ExerciseId`.** Null means org scope; it is structurally
+      distinct from `Guid.Empty` (the refused "unresolved" sentinel). Resolves AC 2's open design question.
+- [ ] **Only `/api/org/*` and `/api/session` accept an org-scope session;** every exercise-scoped route
+      fails closed on it (`CurrentExerciseId` stays null).
+- [ ] **Org slug in the URL.** Given `console.<domain>/o/{slug}`, when `POST /api/auth/staff/login
+      {orgSlug, email, password}` verifies, then the session is minted (org scope for an org admin, else the
+      person's most recently used staff enrollment in that org; neither -> uniform 401).
+- [ ] **Email-first org choice.** Given no slug, when the password verifies for more than one org, then the
+      response is `200 {choose:[{slug,orgName}], choiceToken}` listing only orgs whose password verified;
+      `choiceToken` is single-use, 2 minutes, bound to those person ids; `POST /api/auth/staff/login/choose`
+      mints the session. None verifies -> uniform 401. Candidates capped at 5; per-IP limiter and per-person
+      lockout apply to each.
+- [ ] **Active-exercise switch never crosses orgs** and only selects a staff-role `Enrollment`, never one with an
+      `Account`. Changing org means signing in again.
+- [ ] **Telemetry:** an org-scope login attempt is auditable (resolves the unresolved XC-004 AC; decided in
+      story 16's schema work).
+- [ ] Foreign-org and foreign-exercise tests on the login/choose/switch routes; responses use the uniform 401.
+- [ ] User guide: `docs/guide/getting-started.md` (sign-in by org URL / choose org) updated in the same PR.
+
+Depends on `16-person-and-enrollments`.

@@ -29,3 +29,21 @@ Story 01 (roles); exercise-isolation (scoped read). Relates to E10 evaluator sur
 
 ## Tests
 - Integration: every sim write path is denied for Evaluator; reads across channels succeed.
+
+## Scope update 2026-10-16 (ADMIN-IDENTITY-MODEL)
+
+Source: [`docs/design/ADMIN-IDENTITY-MODEL.md`](../../design/ADMIN-IDENTITY-MODEL.md) §8.2 (role matrix), §8.1. Wave A1. Tier-2 (security).
+
+- [ ] **Evaluator write-nothing is proved by the route x role matrix, not by per-endpoint spot checks.**
+      Given every mutating staff/participant route enumerated at startup, when the `evaluator` role calls
+      each, then it is refused (403; bare 404 where the bare-404 pattern applies) with no state change.
+      The matrix test is owned by story 17 and must list this story's routes; a new write route with no
+      matrix entry fails the build.
+- [ ] **Evaluator is refused every write including future annotations** (#61) until track 5 adds an
+      evaluator-only annotation route (explicitly out of scope here).
+- [ ] **Evaluator read access is unchanged:** console, feeds, report read within the evaluator's own
+      `Enrollment` exercise only; a foreign-exercise and a foreign-org read return the bare 404.
+- [ ] User guide: `docs/guide/` evaluator/roles section states evaluators are read-only; updated in the
+      same PR.
+
+Depends on `17-role-matrix-enforcement`.
