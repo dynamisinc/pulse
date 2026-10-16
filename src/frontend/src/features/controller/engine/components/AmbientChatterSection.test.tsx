@@ -278,6 +278,61 @@ describe('Ambient chatter section (live mode)', () => {
     await waitFor(() => expect(postMock).toHaveBeenCalledTimes(2))
   })
 
+  it('widening while already autonomous asks to confirm; cancel keeps the draft and focuses Save', async () => {
+    const user = userEvent.setup()
+    engineSettingsStore.setForTests(EXERCISE_ID, dto(policy({ mode: 'autonomous' })))
+    postMock.mockResolvedValue({ data: dto(policy({ mode: 'autonomous', maxPerMinute: 3 })) })
+    renderPanel()
+
+    await screen.findByTestId('ambient-chatter-section')
+    await user.clear(screen.getByTestId('ambient-max-per-minute'))
+    await user.type(screen.getByTestId('ambient-max-per-minute'), '3')
+    await user.click(screen.getByTestId('ambient-save'))
+
+    expect(screen.getByRole('alertdialog')).toHaveTextContent(
+      'This widens what posts without review. Apply?',
+    )
+    expect(postMock).not.toHaveBeenCalled()
+    expect(screen.getByTestId('ambient-autonomous-cancel')).toHaveFocus()
+
+    await user.keyboard('{Escape}')
+    expect(screen.queryByRole('alertdialog')).toBeNull()
+    expect(postMock).not.toHaveBeenCalled()
+    expect(screen.getByTestId('ambient-save')).toHaveFocus()
+
+    await user.click(screen.getByTestId('ambient-save'))
+    await user.click(screen.getByTestId('ambient-autonomous-confirm-button'))
+    await waitFor(() => expect(postMock).toHaveBeenCalledTimes(1))
+  })
+
+  it('adding a topic while autonomous confirms; removing one saves immediately', async () => {
+    const user = userEvent.setup()
+    engineSettingsStore.setForTests(
+      EXERCISE_ID,
+      dto(policy({ mode: 'autonomous', topicAllowList: ['local-color'] })),
+    )
+    postMock.mockResolvedValue({ data: dto(policy({ mode: 'autonomous' })) })
+    renderPanel()
+
+    await screen.findByTestId('ambient-chatter-section')
+    await user.click(screen.getByTestId('ambient-topic-local-color'))
+    await user.click(screen.getByTestId('ambient-save'))
+    expect(screen.queryByRole('alertdialog')).toBeNull()
+    await waitFor(() => expect(postMock).toHaveBeenCalledTimes(1))
+  })
+
+  it('unchanged autonomous save does not confirm', async () => {
+    const user = userEvent.setup()
+    engineSettingsStore.setForTests(EXERCISE_ID, dto(policy({ mode: 'autonomous' })))
+    postMock.mockResolvedValue({ data: dto(policy({ mode: 'autonomous' })) })
+    renderPanel()
+
+    await screen.findByTestId('ambient-chatter-section')
+    await user.click(screen.getByTestId('ambient-save'))
+    expect(screen.queryByRole('alertdialog')).toBeNull()
+    await waitFor(() => expect(postMock).toHaveBeenCalledTimes(1))
+  })
+
   it('review saves immediately with no confirmation', async () => {
     const user = userEvent.setup()
     engineSettingsStore.setForTests(EXERCISE_ID, dto(policy({ mode: 'off' })))

@@ -633,7 +633,7 @@ The change applies from the next engine tick, with no restart.
 
 **Turning Autonomous on needs a confirmation.** Selecting **Autonomous** and saving first asks: "Autonomous ambient
 posts publish without review, within your caps and allow-lists. Turn on?" Choose **Confirm** to save, or **Cancel** to
-keep the current mode. Lowering to **Off** or **Review** saves immediately, with no confirmation. Once the lead role
+keep the current mode. The confirmation also appears when Autonomous is already on and you widen it: higher caps, or more topics or personas in the allow-lists (swapping one for another counts as adding). It then asks: "This widens what posts without review. Apply?" Lowering caps, removing entries, or switching to **Off** or **Review** saves immediately, with no confirmation. Once the lead role
 ships, raising to Autonomous will become lead-only; lowering will stay open to any controller.
 
 **Autonomous may be unavailable.** Autonomous ambient posting needs separate sign-off for each environment

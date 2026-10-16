@@ -53,6 +53,7 @@ import {
   type AmbientPolicyDraft,
   type AmbientPolicyDto,
 } from '../models/ambientPolicyContract'
+import { ambientRaiseKind, type AmbientRaiseKind } from '../models/ambientRaise'
 
 /** A persona the controller can allow-list (id is what goes on the wire). */
 export interface AmbientPersonaOption {
@@ -275,13 +276,20 @@ export function AmbientChatterSection(props: AmbientChatterSectionProps) {
 
   // S-4: RAISING to Autonomous needs a deliberate confirm step (same inline Back/Confirm
   // pattern as the Freeze guard in PausePill). Lowering to Off/Review saves immediately.
-  const [confirmingAutonomous, setConfirmingAutonomous] = useState(false)
+  // SG-6: also confirmed when already Autonomous and the draft WIDENS caps / allow-lists.
+  const [confirmingAutonomous, setConfirmingAutonomous] = useState<AmbientRaiseKind>(null)
   const confirmCancelRef = useRef<HTMLButtonElement>(null)
   const saveButtonRef = useRef<HTMLButtonElement>(null)
 
   const save = () => {
-    if (draft.mode === 'autonomous' && policy.mode !== 'autonomous') {
-      setConfirmingAutonomous(true)
+    if (perMinute === null || perHour === null) return
+    const kind = ambientRaiseKind(policy, {
+      ...draft,
+      maxPerMinute: perMinute,
+      maxPerHour: perHour,
+    })
+    if (kind) {
+      setConfirmingAutonomous(kind)
       return
     }
     doSave()
@@ -291,7 +299,7 @@ export function AmbientChatterSection(props: AmbientChatterSectionProps) {
   // On close, return focus to Save (it is only re-mounted after the prompt unmounts).
   const restoreSaveFocus = useRef(false)
   useEffect(() => {
-    if (confirmingAutonomous) confirmCancelRef.current?.focus()
+    if (confirmingAutonomous !== null) confirmCancelRef.current?.focus()
     else if (restoreSaveFocus.current) {
       restoreSaveFocus.current = false
       saveButtonRef.current?.focus()
@@ -299,19 +307,20 @@ export function AmbientChatterSection(props: AmbientChatterSectionProps) {
   }, [confirmingAutonomous])
 
   const cancelAutonomous = () => {
-    setConfirmingAutonomous(false)
-    setDraft(d => ({ ...d, mode: policy.mode }))
+    // Cancelling a mode switch snaps back; cancelling a widening keeps the draft for editing.
+    if (confirmingAutonomous === 'switch') setDraft(d => ({ ...d, mode: policy.mode }))
+    setConfirmingAutonomous(null)
     restoreSaveFocus.current = true
   }
 
   const confirmAutonomous = () => {
-    setConfirmingAutonomous(false)
+    setConfirmingAutonomous(null)
     doSave()
   }
 
   // The prompt must not outlive the choice it guards (mode changed, new server policy, error).
   useEffect(() => {
-    if (draft.mode !== 'autonomous') setConfirmingAutonomous(false)
+    if (draft.mode !== 'autonomous') setConfirmingAutonomous(null)
   }, [draft.mode])
 
   return (
@@ -466,7 +475,7 @@ export function AmbientChatterSection(props: AmbientChatterSectionProps) {
         emptyOptionsText={personasLoading ? 'Loading personas…' : 'No personas in this exercise.'}
       />
 
-      {editing && confirmingAutonomous && (
+      {editing && confirmingAutonomous !== null && (
         <Stack
           data-testid="ambient-autonomous-confirm"
           role="alertdialog"
@@ -482,8 +491,9 @@ export function AmbientChatterSection(props: AmbientChatterSectionProps) {
               id="ambient-autonomous-confirm-text"
               sx={{ fontSize: 11.5, fontWeight: 700, color: chrome.ink, lineHeight: 1.4 }}
             >
-              Autonomous ambient posts publish without review, within your caps and allow-lists.
-              Turn on?
+              {confirmingAutonomous === 'widen'
+                ? 'This widens what posts without review. Apply?'
+                : 'Autonomous ambient posts publish without review, within your caps and allow-lists. Turn on?'}
             </Typography>
           </Stack>
           <Stack direction="row" sx={{ gap: 1 }}>
@@ -506,7 +516,7 @@ export function AmbientChatterSection(props: AmbientChatterSectionProps) {
         </Stack>
       )}
 
-      {editing && !confirmingAutonomous && (
+      {editing && confirmingAutonomous === null && (
         <CobraPrimaryButton
           ref={saveButtonRef}
           data-testid="ambient-save"
