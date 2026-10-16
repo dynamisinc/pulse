@@ -191,6 +191,7 @@ public sealed class RoleMatrixTests
         // ---- Pre-auth: sign-in, refresh, logout, secret-gated ops (self-service; SelfServiceSessionTests). ----
         PreAuth("POST /api/auth/login");
         PreAuth("POST /api/auth/staff/login");
+        PreAuth("POST /api/auth/staff/login/choose"); // identity-auth-roles/15: org sign-in org choice (choice token)
         PreAuth("POST /api/auth/shared");
         PreAuth("POST /api/auth/join");
         PreAuth("POST /api/auth/word");

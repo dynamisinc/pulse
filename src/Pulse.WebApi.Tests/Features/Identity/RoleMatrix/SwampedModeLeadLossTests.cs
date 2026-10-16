@@ -58,7 +58,7 @@ public sealed class SwampedModeLeadLossTests
     }
 
     [RequiresDockerFact]
-    public async Task AFailedFlip_IsRetried_AndNeverFailsTheCommittedChange()
+    public async Task AFailedFlip_NeverFailsTheCommittedChange_AndIsLeftForTheNextGatedRequestToHeal()
     {
         var org = await _kit.SeedOrganizationAsync();
         var exercise = await _kit.SeedExerciseAsync(org);
@@ -73,7 +73,12 @@ public sealed class SwampedModeLeadLossTests
             (await service.ChangeRoleAsync(leadEnrollment, "evaluator")).Outcome.Should().Be(EnrollmentOutcome.Ok);
         }
 
-        _kit.Swamped.Calls.Should().ContainSingle("two failed attempts are retried until the flip lands");
+        // A1b's post-commit flip is attempted once and a failure is logged, never retried in-request and never
+        // surfaced: the change committed. Recovery is AFlipThatNeverLanded_IsHealedByTheNextGatedStaffRequest.
+        _kit.Swamped.Calls.Should().BeEmpty("the one post-commit attempt failed");
+        await using var verify = _kit.ReadContext();
+        (await verify.Enrollments.IgnoreQueryFilters().SingleAsync(e => e.Id == leadEnrollment)).IsLead
+            .Should().BeFalse("the lead release committed with the role change");
     }
 
     [RequiresDockerFact]
