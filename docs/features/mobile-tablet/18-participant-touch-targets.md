@@ -34,3 +34,5 @@ Stories 01, 02.
 
 ## Implementation notes
 Real layout space on `@media (pointer: coarse)` (min 44px via `--pulse-touch-min`, published by `SocialBrandScope`), no pseudo-element slop (PR #584 lesson): action rows, composer buttons, Back and Followers grow a little taller on touch devices. Profile "Following" is plain text, not a control. Sign out was done in story 02. SG-005: the thread focused post's bottom margin now grows by 6% of its layout height (ResizeObserver) so the 1.06 scale never reaches the first reply.
+
+*Gate-1 note (10/16):* the SG-005 focused-post margin fix (ThreadView `ResizeObserver`) applies on **all pointers**. It is a bug fix, since the scaled card also overlapped the first reply on desktop, not a density change. AC5's "mouse layout unchanged" covers the 44 px rules only. Deferred: a unit test that pins the observer math with a stubbed `ResizeObserver` (S-004), and a drift guard tying `FOCUSED_SCALE` to the CSS `scale(1.06)` (S-002).

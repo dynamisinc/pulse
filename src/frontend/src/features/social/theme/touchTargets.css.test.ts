@@ -18,9 +18,9 @@ const media = readSrcFile('features/social/components/ComposerMedia.module.css')
 const header = readSrcFile('features/social/layout/DetailHeader.module.css')
 const profile = readSrcFile('features/social/pages/Profile.module.css')
 
-/** The text of every `@media (pointer: coarse) { ... }` block (brace-balanced). */
-function coarseBlocks(css: string): string {
-  const out: string[] = []
+/** Each `@media (pointer: coarse) { ... }` block as [whole block, its body] (brace-balanced). */
+function coarseBlockList(css: string): Array<[string, string]> {
+  const out: Array<[string, string]> = []
   let from = 0
   for (;;) {
     const at = css.indexOf('@media (pointer: coarse)', from)
@@ -32,17 +32,36 @@ function coarseBlocks(css: string): string {
       if (css[i] === '{') depth++
       else if (css[i] === '}' && --depth === 0) break
     }
-    out.push(css.slice(open + 1, i))
+    out.push([css.slice(at, i + 1), css.slice(open + 1, i)])
     from = i
   }
-  return out.join('\n')
+  return out
 }
 
-const outsideCoarse = (css: string): string => css.replace(coarseBlocks(css), '')
+/** The bodies of every coarse block, joined. */
+const coarseBlocks = (css: string): string => coarseBlockList(css).map(([, body]) => body).join('\n')
+
+/** The CSS with every coarse block removed, one block at a time. */
+const outsideCoarse = (css: string): string =>
+  coarseBlockList(css).reduce((rest, [whole]) => rest.replace(whole, ''), css)
+
+/**
+ * True when a rule INSIDE a coarse block lists `sel` in its selector list AND that same
+ * rule's declarations use the touch minimum (not merely a neighbouring rule).
+ */
+function coarseRuleUsesTouchMin(css: string, sel: string): boolean {
+  const rule = /([^{}]+)\{([^{}]*)\}/g
+  for (const match of coarseBlocks(css).matchAll(rule)) {
+    const selectors = (match[1] ?? '').split(',').map(part => part.trim())
+    if (selectors.includes(sel) && (match[2] ?? '').includes('var(--pulse-touch-min, 44px)')) return true
+  }
+  return false
+}
 
 const CASES: Array<[string, string, string]> = [
   ['PostActions .actionButton', actions, '.actionButton'],
   ['Composer .postButton', composer, '.postButton'],
+  ['Composer .retryButton', composer, '.retryButton'],
   ['Composer .emojiButton', composer, '.emojiButton'],
   ['ComposerMedia .attachButton', media, '.attachButton'],
   ['DetailHeader .back', header, '.back'],
@@ -51,9 +70,7 @@ const CASES: Array<[string, string, string]> = [
 
 describe('touch-target CSS contract', () => {
   it.each(CASES)('%s: grows to --pulse-touch-min only on a coarse pointer', (_n, css, sel) => {
-    const coarse = coarseBlocks(css)
-    expect(coarse).toContain(sel)
-    expect(coarse).toContain('var(--pulse-touch-min, 44px)')
+    expect(coarseRuleUsesTouchMin(css, sel)).toBe(true)
   })
 
   it.each(CASES)('%s: desktop rules never mention the touch minimum', (_n, css) => {

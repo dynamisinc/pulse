@@ -25,8 +25,9 @@
  *   - the profile "Following" count, which is plain text and not a control;
  *   - read-only/inert action counts (not interactive).
  *
- * Focus ring (NFR-001): the focus-visible outline is unchanged by this story; the targets
- * grow as real layout space, so no clip container can hide it (asserted for Back / Post).
+ * Focus ring (NFR-001): the custom focus-visible ring (2px solid) is asserted on Back and
+ * Post, reached by keyboard. Clipping is ruled out by construction: the targets grow as real
+ * layout space and no overflow container is added.
  */
 import { test, expect, type Locator, type Page } from '@playwright/test'
 import { boxOf, boxesOverlap, expectNoHorizontalScroll, expectTouchTarget } from './kit'
@@ -74,9 +75,17 @@ async function expectComposerTools(scope: Locator, submit: string, what: string)
 
 async function expectBackFocusRing(page: Page): Promise<void> {
   const back = page.getByRole('button', { name: /^Back/ }).first()
-  await back.focus()
-  const outline = await back.evaluate(el => getComputedStyle(el).outlineStyle)
-  expect(outline, 'Back focus ring missing').not.toBe('none')
+  // Keyboard focus (not .focus()) so :focus-visible applies; then assert the CUSTOM ring,
+  // which the browser's default 'auto' outline would not satisfy.
+  for (let i = 0; i < 15 && !(await back.evaluate(el => el === document.activeElement)); i++) {
+    await page.keyboard.press('Tab')
+  }
+  await expect(back).toBeFocused()
+  const ring = await back.evaluate(el => {
+    const style = getComputedStyle(el)
+    return { style: style.outlineStyle, width: style.outlineWidth }
+  })
+  expect(ring, 'Back custom focus ring missing').toEqual({ style: 'solid', width: '2px' })
 }
 
 test.describe('participant touch targets (coarse pointer)', () => {
@@ -97,7 +106,7 @@ test.describe('participant touch targets (coarse pointer)', () => {
     await expectTarget(page.getByRole('button', { name: /^Back/ }).first(), 'thread Back')
     await expectBackFocusRing(page)
     await page.getByRole('textbox', { name: /reply/i }).fill('On my way.')
-    const composer = page.getByRole('textbox', { name: /reply/i }).locator('xpath=ancestor::*[contains(@class,"composer")][1]')
+    const composer = page.getByTestId('reply-composer')
     await expectComposerTools(composer, 'Reply', 'reply composer')
     await expectNoHorizontalScroll(page)
   })
@@ -105,14 +114,18 @@ test.describe('participant touch targets (coarse pointer)', () => {
   test('thread: the enlarged focused post stays clear of the first reply (SG-005)', async ({ page }) => {
     await page.goto(THREAD_URL)
     const focused = page.getByTestId('thread-focused')
-    await expect(focused.locator('img').first()).toBeVisible()
+    const media = focused.locator('img').first()
+    await expect(media).toBeVisible()
+    // Wait for the image to finish loading so the card has its final height.
+    await expect.poll(() => media.evaluate(el => (el as HTMLImageElement).complete)).toBe(true)
     // The transform does not take layout space, so the VISUAL bottom (getBoundingClientRect)
     // must still sit above the next sibling's top.
     const gap = await focused.evaluate(el => {
       const next = el.nextElementSibling
-      return next ? next.getBoundingClientRect().top - el.getBoundingClientRect().bottom : 999
+      return next ? next.getBoundingClientRect().top - el.getBoundingClientRect().bottom : null
     })
-    expect(gap, 'focused post touches the content below it').toBeGreaterThanOrEqual(12)
+    expect(gap, 'the focused post has no following sibling to measure against').not.toBeNull()
+    expect(gap ?? 0, 'focused post touches the content below it').toBeGreaterThanOrEqual(12)
   })
 
   test('composer modal: Add photos/video, Add emoji, Post, no overflow', async ({ page }) => {
@@ -137,8 +150,8 @@ test.describe('participant touch targets (coarse pointer)', () => {
       await page.keyboard.press('Tab')
     }
     await expect(post).toBeFocused()
-    expect(await post.evaluate(el => getComputedStyle(el).outlineStyle), 'Post focus ring missing')
-      .not.toBe('none')
+    expect(await post.evaluate(el => getComputedStyle(el).outlineStyle), 'Post custom focus ring missing')
+      .toBe('solid')
     await expectNoHorizontalScroll(page)
   })
 
