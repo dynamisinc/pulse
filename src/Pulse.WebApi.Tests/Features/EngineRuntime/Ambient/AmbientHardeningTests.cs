@@ -10,6 +10,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Pulse.Core.Features.Ambient.Models;
 using Pulse.Core.Features.Ambient.Services;
+using Pulse.Core.Features.Autonomy.Models;
 using Pulse.Core.Features.Generation.Models;
 using Pulse.Core.Features.Generation.Services;
 using Pulse.Core.Features.Storylines.Models;
@@ -146,6 +147,70 @@ public sealed class AmbientHardeningTests
 
         harness.Provider.Calls.Should().Be(2, "with no re-rolls each burst spends 2 of the 4, so a second burst still fits");
         harness.Publisher.Published.Should().HaveCount(4);
+    }
+
+    // ---- SG-2: every attempt is counted BEFORE its provider call --------------------------------------
+
+    [Fact]
+    public async Task AnAttemptThatThrows_IsStillCountedAgainstTheCaps()
+    {
+        await using var harness = await AmbientLoopHarness.CreateAsync();
+        // perHour 4 = two 2-post attempts: a filtered first attempt, then a re-roll whose provider call throws.
+        harness.SetPolicy(AmbientPolicyMode.Autonomous, perMinute: 10, perHour: 4);
+        harness.Provider.Posts = [new GeneratedPost("@gen0", "evacuation order on river road", 0.4, []), ScriptedGenerationProvider.CleanBurst[1]];
+        harness.Provider.DuringGenerate = () =>
+        {
+            if (harness.Provider.Calls == 2)
+            {
+                throw new InvalidOperationException("provider failed mid re-roll");
+            }
+        };
+
+        await harness.TickAsync();
+        harness.Provider.Calls.Should().Be(2, "the second attempt's call threw");
+
+        harness.Provider.DuringGenerate = null;
+        harness.Provider.Posts = ScriptedGenerationProvider.CleanBurst;
+        harness.Time.Advance(TimeSpan.FromSeconds(61));
+        await harness.TickAsync();
+
+        harness.Provider.Calls.Should().Be(2, "both attempts were counted up front (SG-2): 4 of 4 spent, no new call");
+        harness.Publisher.Published.Should().BeEmpty();
+    }
+
+    // ---- SG-3: a kill-switch FULL STOP mid-generation discards the review draft ----------------------
+
+    [Fact]
+    public async Task AReviewDraft_FinishingAfterAFullStop_IsDiscarded_NotQueued()
+    {
+        await using var harness = await AmbientLoopHarness.CreateAsync();
+        harness.SetPolicy(AmbientPolicyMode.Review);
+        harness.Provider.DuringGenerate = () =>
+            harness.Autonomy.GetOrCreate(harness.ExerciseId).EngageKillSwitch(KillSwitchMode.FullStop, "lead-1", 0);
+
+        await harness.TickAsync();
+
+        (await harness.ReviewItemsAsync()).Should().BeEmpty("STOPPED halts generation, so its draft is never queued (SG-3)");
+        (await harness.PayloadsAsync(EngineEventTypes.Generated)).Single()
+            .GetProperty("heldReason").GetString().Should().Be(EngineEventPayloads.HeldSafety);
+    }
+
+    [Fact]
+    public async Task AReviewDraft_FinishingAfterSuggestOnlyOrACutToFake_IsStillQueued()
+    {
+        foreach (var lever in new[] { "suggest-only", "cut" })
+        {
+            await using var harness = await AmbientLoopHarness.CreateAsync();
+            harness.SetPolicy(AmbientPolicyMode.Review);
+            harness.Provider.DuringGenerate = lever == "cut"
+                ? () => harness.Cut.Cut(harness.ExerciseId)
+                : () => harness.Autonomy.GetOrCreate(harness.ExerciseId).EngageKillSwitch(KillSwitchMode.DropToSuggest, "lead-1", 0);
+
+            await harness.TickAsync();
+
+            (await harness.ReviewItemsAsync()).Should().ContainSingle(
+                $"review drafts still wait for a human under {lever} — only a full stop discards them (SG-3)");
+        }
     }
 
     // ---- Gate-1 S-1: the autonomous publish names the CURRENT policy's setter ------------------------

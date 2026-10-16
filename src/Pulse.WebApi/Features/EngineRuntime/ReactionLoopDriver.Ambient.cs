@@ -170,41 +170,30 @@ public sealed partial class ReactionLoopDriver
         window.ClearHeld();
         pendingEvents.Add(BuildAmbientDecidedEvent(ambientContext, intent, tick.TickState.PostsThisMinute, publishPath, heldReason: null));
 
-        // The per-minute / per-hour budget is spent at GENERATION (a call costs money whether or not it publishes), on
-        // the server wall clock, so a scenario time-jump can never reset the spend window.
-        window.Record(now, intent.Count);
-
         var draftId = Guid.NewGuid();
         var tier = _tierPolicy.ResolveTier(exerciseId, intent.Tier);
-        var generated = await _generateStage
-            .GenerateAsync(BuildAmbientGenerateRequest(registration, intent, tier), cancellationToken)
-            .ConfigureAwait(false);
 
-        // Gate-1 W-B: a guard / diversity / ambient-filter re-roll is a real provider call. The first attempt was counted
-        // above; the extra attempts are counted once this burst is settled (finally), so the caps bound provider spend
-        // for the NEXT decision without retro-holding the burst that already passed (PolicyStillAdmits).
+        // The per-minute / per-hour budget is spent at GENERATION (a call costs money whether or not it publishes), on
+        // the server wall clock, so a scenario time-jump can never reset the spend window. SG-2 (supersedes the Gate-1
+        // W-B after-the-fact count): EVERY attempt — the first and each guard / diversity / ambient-filter re-roll — is
+        // counted BEFORE its provider call through the stage's BeforeAttempt hook, so a call that throws is counted too.
+        // The burst's own re-roll spend is tracked as in-flight and excused by PolicyStillAdmits, so an accepted burst
+        // is never retro-held by its own re-rolls; it bounds the NEXT decision. EndBurst clears the in-flight mark.
+        var generateRequest = BuildAmbientGenerateRequest(registration, intent, tier) with
+        {
+            BeforeAttempt = attempt => window.RecordAttempt(_timeProvider.GetUtcNow(), intent.Count, isReRoll: attempt > 1),
+        };
+
         try
         {
+            var generated = await _generateStage.GenerateAsync(generateRequest, cancellationToken).ConfigureAwait(false);
             return await SettleAmbientBurstAsync(
                 tick, registry, gate, window, intent, generated, draftId, ambientContext, publishPath, autonomous, pendingEvents, reviewItems, cancellationToken)
                 .ConfigureAwait(false);
         }
         finally
         {
-            RecordReRolls(window, generated, intent);
-        }
-    }
-
-    /// <summary>
-    /// Counts the re-roll attempts of a generated ambient burst (every attempt after the first, each a real provider call
-    /// of <see cref="GenerationIntent.Count"/> posts) into the ambient spend window (Gate-1 W-B), on the server wall clock.
-    /// </summary>
-    private void RecordReRolls(AmbientWindow window, GenerateStageResult generated, GenerationIntent intent)
-    {
-        var extraAttempts = Math.Max(0, generated.Attempts - 1);
-        if (extraAttempts > 0)
-        {
-            window.Record(_timeProvider.GetUtcNow(), extraAttempts * intent.Count);
+            window.EndBurst();
         }
     }
 
@@ -244,7 +233,7 @@ public sealed partial class ReactionLoopDriver
             // the queue add, the current policy: a draft the world or the policy no longer admits is discarded and
             // recorded (heldReason), never queued for a controller to approve into a closed exercise.
             await gate.RefreshAsync(exerciseId, cancellationToken).ConfigureAwait(false);
-            var reviewHeld = ReviewQueueHold(registration, registry, gate, window, intent);
+            var reviewHeld = ReviewQueueHold(tick.ScopedServices, registration, registry, gate, window, intent);
             if (reviewHeld is not null)
             {
                 pendingEvents.Add(BuildAmbientGeneratedEvent(ambientContext, draftId, generated, publishPath: null, reviewHeld));
@@ -382,13 +371,25 @@ public sealed partial class ReactionLoopDriver
     /// not have been turned off or narrowed (<see cref="PolicyStillAdmits"/>) and the lifecycle gate (refreshed by the
     /// caller immediately before) must be open. <c>null</c> = queue it.
     /// </summary>
+    /// <remarks>
+    /// Orchestrator review SG-3: a kill-switch FULL STOP (<c>IsGenerationStopped</c>) that lands while the draft was
+    /// generating holds it (<c>held:safety</c>) — STOPPED halts generation, so nothing it produced is queued. The softer
+    /// levers (kill switch Suggest-only, degraded mode, cut to Fake) do NOT: review drafts still wait for a human under
+    /// them, exactly as the controller guide describes, so they are deliberately not checked here.
+    /// </remarks>
     private string? ReviewQueueHold(
+        IServiceProvider scopedServices,
         ReactionLoopRegistration registration,
         EngineAmbientPolicyRegistry registry,
         IEngineLifecyclePublishGate gate,
         AmbientWindow window,
         GenerationIntent intent)
     {
+        if (GenerationStopped(scopedServices, registration))
+        {
+            return EngineEventPayloads.HeldSafety;
+        }
+
         var current = registry.Get(registration.ExerciseId);
         if (current.Mode == AmbientPolicyMode.Off
             || !PolicyStillAdmits(current, registration, window, intent.AmbientTopicSeed, intent.Personas.Select(p => p.Handle)))
@@ -418,10 +419,12 @@ public sealed partial class ReactionLoopDriver
         }
 
         // The burst was counted at generation, so its own posts are inside these windows already: only a cap LOWERED
-        // below what was really spent holds it.
+        // below what was really spent holds it. The burst's own re-roll attempts (SG-2: counted before each call) are
+        // excused here, so a burst that passed on a re-roll is not retro-held by its own re-rolls.
         var now = _timeProvider.GetUtcNow();
-        if (window.CountSince(now - TimeSpan.FromMinutes(1)) > current.MaxPerMinute
-            || window.CountSince(now - TimeSpan.FromHours(1)) > current.MaxPerHour)
+        var ownReRolls = window.InFlightReRollPosts;
+        if (window.CountSince(now - TimeSpan.FromMinutes(1)) - ownReRolls > current.MaxPerMinute
+            || window.CountSince(now - TimeSpan.FromHours(1)) - ownReRolls > current.MaxPerHour)
         {
             return false;
         }
@@ -466,6 +469,15 @@ public sealed partial class ReactionLoopDriver
 
         return scopedServices.GetService<IGenerationProviderCutRegistry>()?.IsCutToFake(exerciseId) ?? false;
     }
+
+    /// <summary>
+    /// Whether the kill switch's FULL STOP is active for the exercise (SG-3) — the loop's own autonomy state or the
+    /// shared registry's. Unlike <see cref="SafetyHeld"/> it ignores Suggest-only, degraded mode and the cut to Fake.
+    /// </summary>
+    private static bool GenerationStopped(IServiceProvider scopedServices, ReactionLoopRegistration registration) =>
+        registration.Autonomy.IsGenerationStopped
+        || (scopedServices.GetService<EngineAutonomyRegistry>() is { } autonomy
+            && autonomy.GetOrCreate(registration.ExerciseId).IsGenerationStopped);
 
     /// <summary>Lowers an autonomous policy to off and records it once (actor: the engine), as the request levers do.</summary>
     private void DemoteAndRecord(
@@ -726,6 +738,41 @@ public sealed partial class ReactionLoopDriver
         private readonly Queue<(DateTimeOffset At, int Count)> _generated = new();
         private readonly Lock _gate = new();
         private string? _lastHeld;
+        private int _inFlightReRollPosts;
+
+        /// <summary>The posts the in-flight burst's own re-roll attempts recorded (SG-2); 0 between bursts.</summary>
+        public int InFlightReRollPosts
+        {
+            get
+            {
+                lock (_gate)
+                {
+                    return _inFlightReRollPosts;
+                }
+            }
+        }
+
+        /// <summary>Records one generation attempt BEFORE its provider call (SG-2); a re-roll is also marked in-flight.</summary>
+        public void RecordAttempt(DateTimeOffset at, int count, bool isReRoll)
+        {
+            Record(at, count);
+            if (isReRoll)
+            {
+                lock (_gate)
+                {
+                    _inFlightReRollPosts += count;
+                }
+            }
+        }
+
+        /// <summary>Ends the in-flight burst: its re-rolls stay counted in the window but are no longer excused.</summary>
+        public void EndBurst()
+        {
+            lock (_gate)
+            {
+                _inFlightReRollPosts = 0;
+            }
+        }
 
         public void Record(DateTimeOffset at, int count)
         {

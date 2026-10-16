@@ -92,6 +92,10 @@ public sealed class GenerateStage
         {
             cancellationToken.ThrowIfCancellationRequested();
 
+            // SG-2: the caller accounts for each attempt BEFORE the (paid) provider call is made, so a call that throws
+            // or a burst that is later dropped is still counted.
+            request.BeforeAttempt?.Invoke(attempt);
+
             var result = await _provider.GenerateAsync(generationRequest, cancellationToken);
             lastResult = result;
 
@@ -186,6 +190,13 @@ public sealed record GenerateStageRequest
 
     /// <summary>The bounded re-roll budget before a failing burst is dropped (defaults to <see cref="GenerateStage.DefaultMaxAttempts"/>).</summary>
     public int MaxAttempts { get; init; } = GenerateStage.DefaultMaxAttempts;
+
+    /// <summary>
+    /// Optional hook invoked with the 1-based attempt number immediately BEFORE each provider call (orchestrator review
+    /// SG-2) — the ambient path counts every attempt into its spend window up front. <c>null</c> (the default) for
+    /// storyline bursts; it never changes the stage's own behaviour.
+    /// </summary>
+    public Action<int>? BeforeAttempt { get; init; }
 }
 
 /// <summary>Whether the generate stage produced a surfaceable burst or dropped it after exhausting re-rolls.</summary>

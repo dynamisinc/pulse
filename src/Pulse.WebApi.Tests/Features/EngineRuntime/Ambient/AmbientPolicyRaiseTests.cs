@@ -87,4 +87,54 @@ public sealed class AmbientPolicyRaiseTests
         AmbientPolicyRaise.IsRaise(Current(current), Request(mode, perMinute: 60, perHour: 999, topics: [AmbientTopics.Sports]))
             .Should().BeFalse("only movement toward unreviewed output is lead-only");
     }
+
+    // ---- SG-7: swaps, nulls and reorders ------------------------------------------------------------
+
+    [Fact]
+    public void AutonomousToAutonomous_SwappingAPersonaOrATopic_AtTheSameCount_IsARaise()
+    {
+        var current = Current(AmbientPolicyMode.Autonomous);
+
+        AmbientPolicyRaise.IsRaise(current, Request("autonomous", personas: [PersonaB.ToString()]))
+            .Should().BeTrue("removing A and adding B adds a persona, whatever the count");
+        AmbientPolicyRaise.IsRaise(current, Request("autonomous", topics: [AmbientTopics.Sports]))
+            .Should().BeTrue("removing food and adding sports adds a topic, whatever the count");
+    }
+
+    [Fact]
+    public void NullAllowLists_AreTreatedAsEmpty_SoNeverARaise_FromAutonomous()
+    {
+        var current = Current(AmbientPolicyMode.Autonomous);
+        var request = new EngineAmbientPolicyRequest
+        {
+            ActingHumanId = "c",
+            Mode = "autonomous",
+            MaxPerMinute = 4,
+            MaxPerHour = 40,
+            TopicAllowList = null,
+            PersonaAllowList = null,
+        };
+
+        AmbientPolicyRaise.IsRaise(current, request).Should().BeFalse("omitted lists mean none — a narrowing");
+        AmbientPolicyRaise.IsRaise(Current(AmbientPolicyMode.Review), request)
+            .Should().BeTrue("but entering autonomous from another mode is a raise whatever the lists");
+    }
+
+    [Fact]
+    public void AutonomousToAutonomous_ReorderedLists_AreNotARaise()
+    {
+        var current = Current(AmbientPolicyMode.Autonomous) with
+        {
+            TopicAllowList = [AmbientTopics.Food, AmbientTopics.Sports],
+            PersonaAllowList = [PersonaA, PersonaB],
+        };
+
+        AmbientPolicyRaise.IsRaise(
+                current,
+                Request(
+                    "autonomous",
+                    topics: [AmbientTopics.Sports, AmbientTopics.Food],
+                    personas: [PersonaB.ToString(), PersonaA.ToString()]))
+            .Should().BeFalse("the same entries in another order add nothing");
+    }
 }
