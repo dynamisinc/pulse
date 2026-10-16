@@ -204,9 +204,11 @@ own amendment to this section before it reaches the live provider.
 >
 > **Prerequisites before signing** (from the orchestrator's review of #603):
 > 1. #603 (ambient chatter, merged dark) and its hardening follow-up are merged to `main`.
-> 2. The raise to `autonomous` is lead-only in code (Session A's lead gate, `Enrollment.IsLead`). If that
->    is not wired at signing time, the signer must strike "lead controller" below and accept that any
->    assigned controller can raise it.
+> 2. The raise to `autonomous` is lead-only in code (Session A's lead gate in A1c, `Enrollment.IsLead`,
+>    expected on `main` about Sun 10/18 12:00 UTC). If it is not yet wired when signing, the signer picks one:
+>    - **sign on condition:** this authorization takes effect only once A1c's lead gate is merged and the
+>      flag commit lands after it; or
+>    - **strike "lead-controller only"** below and accept that any assigned controller can raise it.
 
 **What this would authorize.** On `uat`, with the live provider, ambient background posts (trigger
 `AmbientFloor` only) may publish **without per-post human review** when a controller has set that exercise's
@@ -216,9 +218,10 @@ and test each one:
 - **Off by default; a human turns it on.** The policy is per exercise, starts `off`, and resets to `off`
   on every restart. Raising it to `autonomous` is **lead-controller only** (the same raise-only rule as
   amendment 1); any controller can lower it to `review` or `off`. The change is logged with the old value,
-  the new value and who made it. **Disclosure:** "who" is the acting-human id the console sends, on a
-  staff session; it is not yet a server-verified per-person identity, so it is as reliable as the
-  existing shared-account pattern used elsewhere in the engine. The engine never raises the policy itself,
+  the new value and who made it. "Who" is the server-verified staff identity from the session token
+  (`StaffUserId`), not a value the console sends; a request with no staff session is refused. A "raise" is
+  turning `autonomous` on, or, while it is on, raising a cap or adding a topic or persona. The engine never
+  raises the policy itself,
   and restoring after the kill switch never re-enables it.
 - **Bounded volume.** `maxPerMinute` and `maxPerHour` caps apply. `maxPerMinute` can never exceed the
   exercise's `MaxEnginePostsPerMinute`.
@@ -233,11 +236,12 @@ and test each one:
     provider. A guard failure publishes nothing.
   - The ambient prompt carries the setting only, never the incident narrative.
   - A deterministic output filter drops any ambient post that mentions the incident (the storyline's
-    hashtags and a fixed incident vocabulary) or whose tone is not calm or grateful. There is no
-    model-based topic classifier.
+    hashtags, words from its title, and a fixed incident vocabulary) or whose tone is negative. There is
+    no model-based topic classifier.
   - **Residual risk:** persona voice notes are staff-authored text placed in the trusted part of the
-    prompt without fencing. For that path the phrase-based `ContentGuard` and the output filter are the
-    only defence. It is red-teamed through the real path; it is accepted for `uat` only.
+    prompt without fencing, and some seeded residents' notes mention the incident. For that path the
+    phrase-based `ContentGuard` and the output filter are the only defence. It is red-teamed through the
+    real path; it is accepted for `uat` only.
 - **Never storyline or escalation.** Only the `AmbientFloor` trigger can take the autonomous path.
   Inaction, official-response and amplification content, and anything storyline-bound or escalating,
   always goes through review. A timed-out draft is held, never auto-sent.
