@@ -17,15 +17,25 @@
  *     401 -> no authenticated staff session / no resolvable tenant
  *     403 -> an evaluator session (a controller is admitted since DF-20)
  *
- * ## `/api/org/*`, and NO id in any route (COR-001 on the org axis)
+ *   PATCH /api/org/exercises/{exerciseId}          { name }     (story 22)
+ *     200 -> OrgExerciseDto (renamed)
+ *     400 -> the settings name rule refused the name
+ *     404 -> no such exercise in the caller's organization
+ *   POST  /api/org/exercises/{exerciseId}/archive               (story 22)
+ *     200 -> OrgExerciseDto (archived)
+ *     404 -> no such exercise in the caller's organization
+ *     409 -> { reason: "not-completed" } (only a completed exercise archives)
+ *
+ * ## `/api/org/*`, and ids only where the server allow-lists them
  * Every other staff read in this app is `/api/staff/*` and is scoped to the ONE
- * server-resolved exercise. These two span the caller's whole CUSTOMER TENANT,
- * which is why they sit on their own prefix — and why NEITHER takes a route,
- * query or body parameter naming an exercise or an organization. There is no
- * `/api/org/exercises/{id}`, deliberately: no client-supplied identifier on the
- * org tier means no IDOR surface on the org axis at all. Do not add one here to
- * "save a round trip"; the backend asserts the absence structurally
- * (`TheOrgTierRoutes_TakeNoRouteParameters_...`).
+ * server-resolved exercise. These span the caller's whole CUSTOMER TENANT, which
+ * is why they sit on their own prefix. No call here ever names an ORGANIZATION.
+ * The list and create calls take no id at all; the two story-22 row actions take
+ * an EXERCISE id, which the server authorizes against the caller's own tenant
+ * (another customer's exercise is a 404, indistinguishable from a missing one).
+ * The backend pins that list (`ExerciseLifecycleAdminEndpoints.ExerciseIdRoutes`,
+ * `TheOrgTierRoutes_TakeOnlyAllowListedExerciseIds`); do not add another by-id
+ * call here without it.
  *
  * ## NFR-004 — the server is the sanitizer, and this module renders nothing
  * `name` is free text. It is sanitized ON INGEST server-side (markup STRIPPED,
@@ -68,8 +78,20 @@ import type { CreateExerciseInput, CreateExerciseResult, OrgExercise } from '../
 const ORG_EXERCISES_ENDPOINT = '/org/exercises'
 
 const HTTP_BAD_REQUEST = 400
+const HTTP_NOT_FOUND = 404
 const HTTP_CONFLICT = 409
 const HTTP_CREATED = 201
+
+/** The server's 409 reason when archive is asked of a not-completed exercise (story 22). */
+export const NOT_COMPLETED_REASON = 'not-completed'
+
+/** The server's name bound (`ExerciseSettingsFieldRules.MaxNameLength`), mirrored by the mock. */
+const MAX_NAME_LENGTH = 200
+
+/** The by-id org route for one exercise (story 22). The id is URL-encoded; it is never a scope. */
+function orgExerciseEndpoint(exerciseId: string): string {
+  return `${ORG_EXERCISES_ENDPOINT}/${encodeURIComponent(exerciseId)}`
+}
 
 /** Wire shape of one exercise row (`OrgExerciseDto`, verbatim field names). */
 interface OrgExerciseBody {
@@ -99,18 +121,22 @@ interface CreateExerciseResponseBody {
 export interface OrgExerciseErrorInit {
   readonly status?: number
   readonly serverMessage?: string
+  /** The machine-readable `reason` of a 409 body (story 22), when the server sent one. */
+  readonly reason?: string
   readonly cause?: unknown
 }
 
 export class OrgExerciseError extends Error {
   readonly status?: number
   readonly serverMessage?: string
+  readonly reason?: string
 
   constructor(message: string, init: OrgExerciseErrorInit = {}) {
     super(message)
     this.name = 'OrgExerciseError'
     this.status = init.status
     this.serverMessage = init.serverMessage
+    this.reason = init.reason
     if (init.cause !== undefined) {
       this.cause = init.cause
     }
@@ -125,6 +151,18 @@ export class OrgExerciseError extends Error {
  */
 export function isHostnameTakenError(error: unknown): boolean {
   return error instanceof OrgExerciseError && error.status === HTTP_CONFLICT
+}
+
+/** True when archive was refused because the exercise is not completed (409 `not-completed`). */
+export function isNotCompletedError(error: unknown): boolean {
+  return error instanceof OrgExerciseError
+    && error.status === HTTP_CONFLICT
+    && error.reason === NOT_COMPLETED_REASON
+}
+
+/** True when the exercise is not in the caller's organization (or no longer exists). */
+export function isExerciseNotFoundError(error: unknown): boolean {
+  return error instanceof OrgExerciseError && error.status === HTTP_NOT_FOUND
 }
 
 // ---------------------------------------------------------------------------
@@ -160,6 +198,14 @@ const SEED_MOCK_EXERCISES: readonly OrgExerciseBody[] = [
     status: 'build',
     hostname: 'harbor-freeze',
     createdAt: '2026-07-19T16:45:00.000Z',
+  },
+  {
+    // A completed run, so the story-22 Archive action is reachable in dev.
+    exerciseId: 'ex-mock-0004',
+    name: 'Riverbend Flood FSE',
+    status: 'completed',
+    hostname: 'riverbend-flood',
+    createdAt: '2026-04-02T08:00:00.000Z',
   },
 ]
 
@@ -200,14 +246,86 @@ function mockError(
   statusText: string,
   message: string,
   config: InternalAxiosRequestConfig,
+  data: unknown = { message },
 ): AxiosError {
   return new AxiosError(
     message,
     undefined,
     config,
     undefined,
-    { status, statusText, data: { message }, headers: {}, config },
+    { status, statusText, data, headers: {}, config },
   )
+}
+
+/** Reads the exercise id out of a by-id mock URL (`/org/exercises/{id}[/archive]`). */
+function mockExerciseIdFromUrl(url: string | undefined): string {
+  const match = /\/org\/exercises\/([^/]+)/.exec(url ?? '')
+  return match?.[1] !== undefined ? decodeURIComponent(match[1]) : ''
+}
+
+function mockOk(data: unknown, config: InternalAxiosRequestConfig) {
+  return Promise.resolve({ data, status: 200, statusText: 'OK', headers: {}, config })
+}
+
+function mockNotFound(config: InternalAxiosRequestConfig): Promise<never> {
+  // The live 404 is bare: the same for another customer's exercise as for a missing one.
+  return Promise.reject(mockError(HTTP_NOT_FOUND, 'Not Found', 'Not found.', config, ''))
+}
+
+/**
+ * `PATCH /api/org/exercises/{id}`: the settings name rule (trim, strip markup,
+ * 1..200) and the 404 for an id this organization does not own.
+ */
+const renameMockAdapter: AxiosAdapter = config => {
+  const current = mockExercises.find(e => e.exerciseId === mockExerciseIdFromUrl(config.url))
+  if (current === undefined) {
+    return mockNotFound(config)
+  }
+
+  let parsed: unknown
+  try {
+    parsed = typeof config.data === 'string' ? JSON.parse(config.data) : config.data
+  } catch {
+    parsed = undefined
+  }
+  const body = (parsed ?? {}) as { name?: unknown }
+  const name = typeof body.name === 'string' ? body.name.replace(/<[^>]*>/g, '').trim() : ''
+  if (name.length === 0) {
+    return Promise.reject(mockError(HTTP_BAD_REQUEST, 'Bad Request', 'name is required.', config))
+  }
+  if (name.length > MAX_NAME_LENGTH) {
+    return Promise.reject(mockError(
+      HTTP_BAD_REQUEST,
+      'Bad Request',
+      `name must be at most ${MAX_NAME_LENGTH} characters.`,
+      config,
+    ))
+  }
+
+  const renamed: OrgExerciseBody = { ...current, name }
+  mockExercises = mockExercises.map(e => (e.exerciseId === current.exerciseId ? renamed : e))
+  return mockOk(renamed, config)
+}
+
+/** `POST /api/org/exercises/{id}/archive`: completed only, else 409 `not-completed`. */
+const archiveMockAdapter: AxiosAdapter = config => {
+  const current = mockExercises.find(e => e.exerciseId === mockExerciseIdFromUrl(config.url))
+  if (current === undefined) {
+    return mockNotFound(config)
+  }
+  if (current.status !== 'completed' && current.status !== 'complete') {
+    return Promise.reject(mockError(
+      HTTP_CONFLICT,
+      'Conflict',
+      'The exercise is not completed.',
+      config,
+      { reason: NOT_COMPLETED_REASON },
+    ))
+  }
+
+  const archived: OrgExerciseBody = { ...current, status: 'archived' }
+  mockExercises = mockExercises.map(e => (e.exerciseId === current.exerciseId ? archived : e))
+  return mockOk(archived, config)
 }
 
 /** `GET /api/org/exercises` — the caller's organization's portfolio. */
@@ -352,6 +470,15 @@ function extractServerMessage(data: unknown): string | undefined {
   return undefined
 }
 
+/** Pulls the machine-readable `reason` off a 409 body (`{ reason: "not-completed" }`). */
+function extractReason(data: unknown): string | undefined {
+  if (typeof data === 'object' && data !== null) {
+    const reason = (data as Record<string, unknown>).reason
+    if (typeof reason === 'string' && reason.length > 0) return reason
+  }
+  return undefined
+}
+
 /** Translates any thrown transport failure into an `OrgExerciseError`. */
 function toOrgExerciseError(error: unknown, fallbackMessage: string): OrgExerciseError {
   if (error instanceof OrgExerciseError) {
@@ -361,6 +488,7 @@ function toOrgExerciseError(error: unknown, fallbackMessage: string): OrgExercis
     return new OrgExerciseError(error.message, {
       status: error.response?.status,
       serverMessage: extractServerMessage(error.response?.data),
+      reason: extractReason(error.response?.data),
       cause: error,
     })
   }
@@ -449,4 +577,52 @@ export async function createOrgExercise(
     exercise: toOrgExercise(body.exercise),
     assignedRole: body.assignedRole,
   }
+}
+
+/**
+ * Renames one of the caller's organization's exercises (story 22). The server
+ * applies the exercise-settings name rule; a refused name is a 400 whose reason
+ * is on `serverMessage`. Throws `OrgExerciseError`.
+ */
+export async function renameOrgExercise(exerciseId: string, name: string): Promise<OrgExercise> {
+  let data: unknown
+  try {
+    const response = await api.patch<OrgExerciseBody>(
+      orgExerciseEndpoint(exerciseId),
+      { name: name.trim() },
+      USE_MOCK_ORG_EXERCISES ? { adapter: renameMockAdapter } : undefined,
+    )
+    data = response.data
+  } catch (error) {
+    throw toOrgExerciseError(error, 'Could not rename the exercise.')
+  }
+
+  if (!isOrgExerciseBody(data)) {
+    throw new OrgExerciseError('renameOrgExercise: response was empty or malformed.')
+  }
+  return toOrgExercise(data)
+}
+
+/**
+ * Archives one of the caller's organization's exercises (story 22). Only a
+ * completed exercise archives; anything else is a 409 the caller recognises
+ * with {@link isNotCompletedError}. Throws `OrgExerciseError`.
+ */
+export async function archiveOrgExercise(exerciseId: string): Promise<OrgExercise> {
+  let data: unknown
+  try {
+    const response = await api.post<OrgExerciseBody>(
+      `${orgExerciseEndpoint(exerciseId)}/archive`,
+      undefined,
+      USE_MOCK_ORG_EXERCISES ? { adapter: archiveMockAdapter } : undefined,
+    )
+    data = response.data
+  } catch (error) {
+    throw toOrgExerciseError(error, 'Could not archive the exercise.')
+  }
+
+  if (!isOrgExerciseBody(data)) {
+    throw new OrgExerciseError('archiveOrgExercise: response was empty or malformed.')
+  }
+  return toOrgExercise(data)
 }

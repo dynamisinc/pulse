@@ -56,6 +56,7 @@
 
 import { createContext, createElement, useContext, useMemo, type ReactNode } from 'react'
 import { matchPath } from 'react-router-dom'
+import { ALERTS_PATH } from '@/features/participant-shell/components/AlertBar/alertsRoute'
 
 // ---------------------------------------------------------------------------
 // Route vocabulary
@@ -71,6 +72,13 @@ export const EXPLORE_PATH = '/explore'
 export const NOTIFICATIONS_PATH = '/notifications'
 
 /**
+ * The alerts "Details" route (PRT-012) -- the shell alert bar's link target. The
+ * shell owns the path constant (its bar links to it); re-exported here so the
+ * channel's route vocabulary stays complete in one place.
+ */
+export { ALERTS_PATH }
+
+/**
  * The handle segment used for a thread link built from a post id ALONE.
  *
  * `/:handle/status/:id` is the thread route, but the callbacks threaded into the
@@ -83,14 +91,15 @@ export const THREAD_HANDLE_PLACEHOLDER = 'i'
 
 /**
  * First path segments that are NEVER a persona handle: routes the channel owns
- * (`home`, `explore`, `notifications`, `hashtag`), and the app-level `login` / `staff` prefixes
- * (a participant typing `/staff` must land on Home, not on an "account doesn't
- * exist" profile -- COR-004). Compared case-insensitively.
+ * (`home`, `explore`, `notifications`, `alerts`, `hashtag`), and the app-level
+ * `login` / `staff` prefixes (a participant typing `/staff` must land on Home, not
+ * on an "account doesn't exist" profile -- COR-004). Compared case-insensitively.
  */
 export const SOCIAL_RESERVED_SEGMENTS: readonly string[] = [
   'home',
   'explore',
   'notifications',
+  'alerts',
   'hashtag',
   'login',
   'join',
@@ -122,6 +131,7 @@ export const SOCIAL_ROUTE_PATTERNS = {
   home: HOME_PATH,
   explore: EXPLORE_PATH,
   notifications: NOTIFICATIONS_PATH,
+  alerts: ALERTS_PATH,
   hashtag: '/hashtag/:tag',
   thread: '/:handle/status/:id',
   profile: '/:handle',
@@ -132,6 +142,7 @@ export const socialPaths = {
   home: (): string => HOME_PATH,
   explore: (): string => EXPLORE_PATH,
   notifications: (): string => NOTIFICATIONS_PATH,
+  alerts: (): string => ALERTS_PATH,
   /** `tag` is the normalized tag (no leading `#`). */
   hashtag: (tag: string): string => `/hashtag/${encodeURIComponent(tag)}`,
   profile: (handle: string): string => `/${encodeURIComponent(handle)}`,
@@ -152,6 +163,7 @@ export type SocialRouteKind =
   | 'home'
   | 'explore'
   | 'notifications'
+  | 'alerts'
   | 'hashtag'
   | 'thread'
   | 'profile'
@@ -197,6 +209,7 @@ export function matchSocialRoute(pathname: string): SocialRouteKind {
   if (matchPath(SOCIAL_ROUTE_PATTERNS.home, pathname)) return 'home'
   if (matchPath(SOCIAL_ROUTE_PATTERNS.explore, pathname)) return 'explore'
   if (matchPath(SOCIAL_ROUTE_PATTERNS.notifications, pathname)) return 'notifications'
+  if (matchPath(SOCIAL_ROUTE_PATTERNS.alerts, pathname)) return 'alerts'
   const hashtag = matchPath(SOCIAL_ROUTE_PATTERNS.hashtag, pathname)
   if (hashtag) {
     return normalizeHashtagParam(decodeParam(hashtag.params.tag)) === undefined

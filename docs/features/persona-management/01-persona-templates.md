@@ -1,6 +1,6 @@
 # Story: Persona templates (create / edit / clone / archive)
 
-**Feature:** Persona management & cast libraries  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** In Progress
+**Feature:** Persona management & cast libraries  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Not Started
 **Requirements:** COR-020 (SOC-054)  ·  **Design decisions:** none  ·  **Issue:** #53
 
 ## Context

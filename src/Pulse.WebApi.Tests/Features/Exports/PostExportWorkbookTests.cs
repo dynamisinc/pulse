@@ -20,6 +20,9 @@ public sealed class PostExportWorkbookTests
         "Scenario time", "Wall clock (UTC)", "Author handle", "Author name", "Author type", "Posted by", "Inject #",
         "Post id", "Reply to", "Text", "Media", "Likes", "Reposts", "Replies", "Shown likes", "Shown reposts",
         "Shown replies", "Pinned for all", "Status", "Taken down at",
+
+        // demo-feedback story 19 (DF-31): appended after the DF-8 columns.
+        "Edits", "Last edited (scenario)", "Original text",
     ];
 
     [Fact]
@@ -28,14 +31,14 @@ public sealed class PostExportWorkbookTests
         var bytes = Write(Row("first"), Row("second"));
 
         using var workbook = ExportWorkbookReader.Open(bytes);
-        workbook.Worksheets.Should().ContainSingle("the export is one sheet (DF-8)")
-            .Which.Name.Should().Be("Posts");
+        workbook.Worksheets.Select(w => w.Name).Should().Equal(
+            ["Posts", "Edit history"], "Posts first, then DF-39's Edit history sheet (amending DF-8's one sheet)");
 
         var sheet = workbook.Worksheet("Posts");
         Enumerable.Range(1, ExpectedHeaders.Length)
             .Select(c => sheet.Cell(1, c).GetString())
             .Should().Equal(ExpectedHeaders, "the columns are frozen in implementation.md, in this order");
-        sheet.Cell(1, ExpectedHeaders.Length + 1).IsEmpty().Should().BeTrue("there is no column beyond Taken down at");
+        sheet.Cell(1, ExpectedHeaders.Length + 1).IsEmpty().Should().BeTrue("there is no column beyond Original text");
 
         for (var c = 1; c <= ExpectedHeaders.Length; c++)
         {
@@ -44,7 +47,7 @@ public sealed class PostExportWorkbookTests
 
         sheet.SheetView.SplitRow.Should().Be(1, "the header row is frozen");
         sheet.AutoFilter.IsEnabled.Should().BeTrue();
-        sheet.AutoFilter.Range.RangeAddress.ToString().Should().Be("A1:T3", "the filter covers the header and every data row");
+        sheet.AutoFilter.Range.RangeAddress.ToString().Should().Be("A1:W3", "the filter covers the header and every data row");
     }
 
     [Fact]

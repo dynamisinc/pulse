@@ -72,6 +72,17 @@ describe('SocialRoutes — each route renders its page', () => {
     expect(await screen.findByRole('heading', { name: '#café' })).toBeInTheDocument()
   })
 
+  it('/alerts renders the alerts view (the alert bar Details target), never a profile', async () => {
+    renderChannel({ entries: ['/alerts'], beside: <RouterProbe /> })
+    expect(await screen.findByTestId('social-alerts-region')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { level: 1, name: 'Alerts' })).toBeInTheDocument()
+    expect(screen.getByTestId('detail-header')).toBeInTheDocument()
+    expect(screen.queryByTestId('social-profile-region')).not.toBeInTheDocument()
+    expect(screen.queryByText(/doesn.t exist/i)).not.toBeInTheDocument()
+    expect(mainRoute()).toBe('alerts')
+    expect(routerLocation()).toBe('/alerts')
+  })
+
   it('/:handle renders that persona\'s profile', async () => {
     renderChannel({ entries: ['/FulcoEM'] })
     expect(await screen.findByRole('heading', { name: /Fulton County EM/ })).toBeInTheDocument()

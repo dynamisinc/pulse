@@ -617,6 +617,42 @@ public class PostWriteEndpointTests
     }
 
     [RequiresDockerFact]
+    public async Task ParticipantCreator_Gets201WithTheFullEditWindow_ButTheBroadcastStaysViewerFree()
+    {
+        var world = await SeedWorldAsync();
+
+        await using var factory = CreateFactory();
+        using var participant = factory.CreateClientFor(world.Host, world.ParticipantToken);
+
+        var response = await participant.PostAsync(
+            PostsUri, JsonContent(ValidRequestBody(world.ParticipantPersona, "participant")));
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+
+        // demo-feedback story 19 (Copilot PR #558): the creator's OWN 201 carries its viewer state with the full
+        // 15-minute edit window, so Edit shows on a fresh post without waiting for the next feed read.
+        using (var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync()))
+        {
+            var viewer = document.RootElement.GetProperty("viewer");
+            viewer.GetProperty("editableForSeconds").GetInt32().Should().Be(900);
+            viewer.GetProperty("liked").GetBoolean().Should().BeFalse();
+            viewer.GetProperty("reposted").GetBoolean().Should().BeFalse();
+            viewer.GetProperty("pinned").GetBoolean().Should().BeFalse();
+        }
+
+        // ...but the PostReceived payload every exercise member receives stays viewer-free.
+        var call = factory.Broadcaster.Calls.Should().ContainSingle().Subject;
+        call.Post.Viewer.Should().BeNull("the broadcast is one payload for everyone; viewer state is caller-specific");
+        JsonSerializer.Serialize(call.Post).Should().NotContain("viewer").And.NotContain("editableForSeconds");
+
+        // A staff (controller-as-persona) 201 never carries a viewer countdown.
+        using var staff = factory.CreateClientFor(world.Host, world.StaffToken);
+        var staffResponse = await staff.PostAsync(PostsUri, JsonContent(ValidRequestBody(
+            world.OtherPersona, "controller-as-persona", actingHumanId: "controller-1", text: "Staff post")));
+        staffResponse.StatusCode.Should().Be(HttpStatusCode.Created);
+        (await staffResponse.Content.ReadAsStringAsync()).Should().NotContain("editableForSeconds");
+    }
+
+    [RequiresDockerFact]
     public async Task Broadcaster_IsInvokedExactlyOnce_WithTheParticipantSafePayload()
     {
         var world = await SeedWorldAsync();

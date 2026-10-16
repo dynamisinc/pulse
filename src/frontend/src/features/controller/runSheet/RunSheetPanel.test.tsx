@@ -783,6 +783,64 @@ describe('RunSheetPanel — hold, skip, retry, delete, move, view', () => {
     expect(confirm).not.toHaveBeenCalled()
   })
 
+  it('Mark fired (DF-36) asks first, then the row reads "Marked fired" and nothing was posted', async () => {
+    await mountPanel()
+    press('Mark fired Alpha')
+    const dialog = screen.getByRole('dialog')
+    expect(dialog).toHaveTextContent('Mark as fired without posting? This can\'t be undone.')
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Mark fired' }))
+    await waitFor(() => expect(chipOf('Alpha')).toBe('Marked fired'))
+    const alpha = injectMock.snapshot().items.find(item => item.title === 'Alpha')
+    expect(alpha?.status).toBe('fired')
+    expect(alpha?.posts.some(post => post.firedPostId)).toBe(false)
+    expect(screen.queryByRole('button', { name: 'Mark fired Alpha' })).toBeNull()
+  })
+
+  it('after a confirmed Mark fired, focus returns to the row', async () => {
+    await mountPanel()
+    press('Mark fired Bravo')
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Mark fired' }))
+    await waitFor(() => expect(chipOf('Bravo')).toBe('Marked fired'))
+    await waitFor(() => expect(document.activeElement).toBe(rowOf('Bravo')))
+    expect(rowOf('Bravo')).toHaveAttribute('aria-current', 'true')
+  })
+
+  it('under the OPEN filter the marked row leaves the view: focus moves to the row that took its place', async () => {
+    await mountPanel()
+    press('Status: Open')
+    press('Mark fired Bravo')
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Mark fired' }))
+    await waitFor(() => expect(rowTitles()).toEqual(['Alpha', 'Charlie', 'Delta']))
+    await waitFor(() => expect(document.activeElement).toBe(rowOf('Charlie')))
+    expect(rowOf('Charlie')).toHaveAttribute('aria-current', 'true')
+
+    // The LAST row leaves: focus moves to the new last row.
+    press('Mark fired Delta')
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Mark fired' }))
+    await waitFor(() => expect(rowTitles()).toEqual(['Alpha', 'Charlie']))
+    await waitFor(() => expect(document.activeElement).toBe(rowOf('Charlie')))
+  })
+
+  it('under the OPEN filter, marking the only open item leaves focus on the Status filter, not nowhere', async () => {
+    injectMock.reset({ seed: [single('Solo')] })
+    await mountPanel()
+    press('Status: Open')
+    press('Mark fired Solo')
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Mark fired' }))
+    await screen.findByTestId('run-sheet-filtered-empty')
+    await waitFor(() =>
+      expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Status: Open' })),
+    )
+  })
+
+  it('Mark fired works under FREEZE (nothing reaches participants)', async () => {
+    injectMock.setPauseTier('freeze')
+    await mountPanel()
+    press('Mark fired Alpha')
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Mark fired' }))
+    await waitFor(() => expect(chipOf('Alpha')).toBe('Marked fired'))
+  })
+
   it('Delete is not offered for a fired item', async () => {
     await mountPanel()
     press('Fire Alpha')

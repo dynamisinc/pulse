@@ -34,10 +34,15 @@ export const consoleChrome = {
   line: '#28384b',
   /** Primary text. */
   ink: '#e9eff7',
-  /** Secondary text (labels, hints). */
+  /** Secondary text (labels, hints). AA: 8.69:1 on `bg`, 8.11:1 on `panel`, 7.80:1 on `card`. */
   inkMuted: '#9db1c8',
-  /** Tertiary text (metadata, disabled copy). */
-  inkFaint: '#63758b',
+  /**
+   * Tertiary text (metadata, disabled copy). Was #63758b: 4.05:1 on `bg`, 3.77:1 on `panel`,
+   * 3.63:1 on `card` — below AA for the 10-12px copy it paints (demo-feedback 25, #461 §1).
+   * #7f91a7 is 5.92:1 / 5.52:1 / 5.32:1, still a step dimmer than `inkMuted`.
+   * `theme/cobraTheme.contrast.test.ts` computes both inks on all three surfaces.
+   */
+  inkFaint: '#7f91a7',
   /** Interactive/informational accent. */
   blue: '#4d97d1',
   /** Stop / destructive tone. */

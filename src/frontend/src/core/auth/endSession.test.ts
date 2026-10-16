@@ -14,6 +14,7 @@ import { logout } from './logout'
 import { queryClient } from '../services/queryClient'
 import { ownPostStore } from '@/features/social/services/ownPostStore'
 import { removedPosts } from '@/features/social/services/removedPosts'
+import { editedPostsStore } from '@/features/social/edit/editedPostsStore'
 import { registerSessionReset } from './sessionReset'
 import {
   consumeReplyFocus,
@@ -114,6 +115,24 @@ describe('endSession', () => {
     // Silent (Gate-2 B L-3): a notify is a blocking update that can repaint a taken-down post
     // for a frame before the navigation to /login commits; the consumers are about to unmount.
     expect(heard).not.toHaveBeenCalled()
+  })
+
+  it('forgets the edited-post overlay and bumps its generation (story 20)', async () => {
+    editedPostsStore.apply({
+      postId: 'p-edit',
+      text: 'edited',
+      edited: { count: 1, scenarioTime: '2033-09-04T10:01:00Z' },
+      version: 1,
+    })
+    const generation = editedPostsStore.getGeneration()
+    const reset = vi.spyOn(editedPostsStore, 'reset')
+
+    await endSession()
+
+    expect(reset).toHaveBeenCalledTimes(1)
+    expect(editedPostsStore.get('p-edit')).toEqual({})
+    expect(editedPostsStore.getGeneration()).toBe(generation + 1)
+    reset.mockRestore()
   })
 
   it('clears the removed ids SYNCHRONOUSLY too, before awaiting logout()', async () => {

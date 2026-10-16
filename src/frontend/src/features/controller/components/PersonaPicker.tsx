@@ -63,6 +63,23 @@
  * host (the ⌘K palette) can react to the selection itself (e.g. closing the
  * overlay) without this component needing to know anything about the host.
  *
+ * ## Exercise switch (demo-feedback 24, #542; #450 F-1)
+ * The console does not remount when the controller switches exercise (the
+ * scope commits in place), so this picker stays mounted across a switch. Its
+ * default list comes from `useStaffPersonas()`, which is keyed by the active
+ * exercise: the previous exercise's personas disappear in the render the scope
+ * changes and the new exercise's list replaces them without a reload. On top of
+ * that the picker itself:
+ *  - only treats the shared `activePersona` as SELECTED (the ACTIVE badge) while
+ *    that exact persona - same id AND same exercise - is in the list it is
+ *    showing. A persona selected in the exercise just left is therefore never
+ *    presented as the current selection under the new one, even though the
+ *    route-level `ActivePersonaProvider` (not owned here) still remembers it;
+ *  - resets its keyboard highlight to the top of the new list, so Enter can
+ *    never act on a row position carried over from the old one;
+ *  - shows a "Loading personas…" status row (`persona-picker-loading`) while
+ *    the new list loads, never the "No personas match" empty state.
+ *
  * World: staff (COBRA console) — `@/theme/styledComponents` (CobraTextField)
  * + FontAwesome only; never participant-surface chrome (XC-002). This
  * component never touches a post or the participant-visible feed — it is
@@ -86,6 +103,7 @@ import {
   faCloudSun,
   faMagnifyingGlass,
   faNewspaper,
+  faSpinner,
   faThumbtack,
   faTriangleExclamation,
   faUser,
@@ -177,7 +195,11 @@ export function PersonaPicker({
   onSelect,
   autoFocus = true,
 }: PersonaPickerProps) {
-  const { personas: resolvedPersonas, error: resolveError } = useStaffPersonas()
+  const {
+    personas: resolvedPersonas,
+    loading: resolveLoading,
+    error: resolveError,
+  } = useStaffPersonas()
   const candidatePersonas = personasProp ?? resolvedPersonas
   // Only the DEFAULT (hook) data source can fail; a host-supplied `personas`
   // prop has already resolved. Surfaced explicitly so a failed staff read
@@ -185,6 +207,10 @@ export function PersonaPicker({
   // fail-closed state must be visible, never quietly indistinguishable from
   // an empty result (see `resolveStaffPersonas`).
   const resolutionFailed = personasProp === undefined && resolveError !== undefined
+  // The default list is still loading (first open, or the new exercise's list
+  // after a switch): say so, rather than "No personas match this search", which
+  // would read as an empty cast.
+  const resolutionLoading = personasProp === undefined && !resolutionFailed && resolveLoading
 
   const {
     activePersona,
@@ -199,6 +225,20 @@ export function PersonaPicker({
   const [typeFilter, setTypeFilter] = useState<TypeFilter>('all')
   const [highlightedIndex, setHighlightedIndex] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
+
+  // The selection the picker SHOWS: the shared active persona, but only while
+  // that persona (same id, same exercise) is in the list on screen - see the
+  // module header's "Exercise switch". A persona left over from the previous
+  // exercise is cleared from view rather than badged in the new one.
+  const selectedPersonaId = useMemo(() => {
+    if (!activePersona) return null
+    const match = candidatePersonas.find(persona => persona.id === activePersona.id)
+    if (!match) return null
+    return match.exerciseId === activePersona.exerciseId ? match.id : null
+  }, [activePersona, candidatePersonas])
+  // Which exercise the list on screen belongs to (every persona in one read
+  // shares it). Used only to reset the keyboard highlight on a switch.
+  const listExerciseId = candidatePersonas[0]?.exerciseId
 
   const normalizedQuery = searchQuery.trim().toLowerCase()
   const isBrowsing = normalizedQuery === '' && typeFilter === 'all'
@@ -256,10 +296,11 @@ export function PersonaPicker({
 
   // The visible list changes shape on every keystroke/filter change — reset
   // the highlight to the top rather than let it point at a row that just
-  // scrolled out of the filtered set.
+  // scrolled out of the filtered set. An exercise switch replaces the list
+  // wholesale (possibly with one of the same length), so it resets too.
   useEffect(() => {
     setHighlightedIndex(0)
-  }, [flatRows.length, typeFilter, normalizedQuery])
+  }, [flatRows.length, typeFilter, normalizedQuery, listExerciseId])
 
   useEffect(() => {
     if (autoFocus) inputRef.current?.focus()
@@ -381,7 +422,22 @@ export function PersonaPicker({
           </Stack>
         )}
 
-        {!resolutionFailed && flatRows.length === 0 && (
+        {resolutionLoading && flatRows.length === 0 && (
+          <Stack
+            component="li"
+            direction="row"
+            role="status"
+            data-testid="persona-picker-loading"
+            sx={{ alignItems: 'center', gap: 0.75, px: 1, py: 1.5, listStyle: 'none' }}
+          >
+            <FontAwesomeIcon icon={faSpinner} spin size="sm" />
+            <Typography sx={{ fontSize: 12.5, color: 'text.secondary' }}>
+              Loading personas…
+            </Typography>
+          </Stack>
+        )}
+
+        {!resolutionFailed && !resolutionLoading && flatRows.length === 0 && (
           <Typography
             data-testid="persona-picker-empty"
             sx={{ px: 1, py: 1.5, fontSize: 12.5, color: 'text.secondary' }}
@@ -417,7 +473,7 @@ export function PersonaPicker({
                       key={row.persona.id}
                       row={row}
                       highlighted={index === highlightedIndex}
-                      isActive={activePersona?.id === row.persona.id}
+                      isActive={selectedPersonaId === row.persona.id}
                       onSelect={() => handleSelect(row.persona)}
                       onTogglePin={() => togglePinned(row.persona.id)}
                     />

@@ -126,7 +126,7 @@ public sealed class Wave1bIntegrationCompositionTests
         {
             _environment = environment;
             _settings = settings ?? new Dictionary<string, string?>();
-            Environment.SetEnvironmentVariable(ConnectionStringEnvVar, "Server=nonexistent;Database=pulse;Trusted_Connection=False;");
+            Environment.SetEnvironmentVariable(ConnectionStringEnvVar, "Server=nonexistent;Database=pulse;Trusted_Connection=False;Connect Timeout=1;");
         }
 
         /// <summary>The host's final service collection (Program.cs plus the framework), once the host is built.</summary>

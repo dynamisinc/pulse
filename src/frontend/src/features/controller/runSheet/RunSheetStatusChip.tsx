@@ -1,11 +1,16 @@
 /**
  * features/controller/runSheet/RunSheetStatusChip.tsx
  * ---------------------------------------------------------------------------
- * The run sheet's status chip: pending · held · firing n/m · fired · skipped ·
- * failed. STAFF world. NEVER colour-only (NFR-001): every status is an ICON plus
+ * The run sheet's status chip: pending · held · firing n/m · fired · marked
+ * fired · skipped · failed. STAFF world. NEVER colour-only (NFR-001): every status is an ICON plus
  * its TEXT word (the burst chip also carries its live count — "Firing 3/8").
  * The tone colours the icon and the border; the text stays high-contrast ink so
  * the label is legible whatever the tone.
+ *
+ * "Marked fired" (DF-36) is not a wire status: it is `fired` with no child that
+ * carries a post id (`isMarkedFired`) — an inject delivered outside Pulse. It gets
+ * its own WORD and icon, so it never reads as a post that went out. The word comes
+ * from the shared `statusText`, the same formatter the live-region announcer uses.
  */
 
 import { Box } from '@mui/material'
@@ -14,13 +19,14 @@ import type { IconDefinition } from '@fortawesome/fontawesome-svg-core'
 import {
   faBolt,
   faCheck,
+  faClipboardCheck,
   faClock,
   faForwardStep,
   faPause,
   faTriangleExclamation,
 } from '@fortawesome/free-solid-svg-icons'
 import { consoleChrome as chrome } from '../consoleChrome'
-import { statusText } from './injectRules'
+import { isMarkedFired, statusText } from './injectRules'
 import type { InjectItemDto, InjectStatus } from './types'
 
 interface Tone {
@@ -37,17 +43,21 @@ const TONES: Readonly<Record<InjectStatus, Tone>> = {
   failed: { icon: faTriangleExclamation, color: chrome.red },
 }
 
+const MARKED_FIRED_TONE: Tone = { icon: faClipboardCheck, color: chrome.green }
+
 export interface RunSheetStatusChipProps {
-  readonly item: Pick<InjectItemDto, 'status' | 'firedCount' | 'total'>
+  readonly item: Pick<InjectItemDto, 'status' | 'firedCount' | 'total' | 'posts'>
 }
 
 export function RunSheetStatusChip({ item }: RunSheetStatusChipProps) {
-  const tone = TONES[item.status]
+  const marked = isMarkedFired(item)
+  const tone = marked ? MARKED_FIRED_TONE : TONES[item.status]
   return (
     <Box
       component="span"
       data-testid="status-chip"
       data-status={item.status}
+      data-marked-fired={marked ? 'true' : undefined}
       sx={{
         display: 'inline-flex',
         alignItems: 'center',

@@ -125,21 +125,6 @@ const VISUALLY_HIDDEN = {
   border: 0,
 } as const
 
-/**
- * COBRA's `text.secondary` (#848482) is 3.75:1 on white, under the 4.5:1 AA floor
- * for small text, and it is what MUI paints a text field's label and helper text
- * with. The live word-rule hint and the date hint are real instructions, not
- * decoration, so on THIS panel's fields they use the primary text colour. (An
- * error keeps its own, already-AA, error colour.)
- *
- * TODO(#461): remove this override when the COBRA theme's `text.secondary` is
- * darkened to AA; every COBRA field then gets the fix and this goes away.
- */
-const READABLE_FIELD_SX = {
-  '& .MuiInputLabel-root:not(.Mui-focused):not(.Mui-error)': { color: 'text.primary' },
-  '& .MuiFormHelperText-root:not(.Mui-error)': { color: 'text.primary' },
-} as const
-
 type WordSource = 'generate' | 'typed'
 
 type ConfirmState =
@@ -689,7 +674,7 @@ function DayWordPanelBody() {
             select: { native: true },
             inputLabel: { shrink: true },
           }}
-          sx={{ maxWidth: 320, ...READABLE_FIELD_SX }}
+          sx={{ maxWidth: 320 }}
         >
           {dates.map(date => (
             <option key={date} value={date}>
@@ -730,7 +715,7 @@ function DayWordPanelBody() {
                 maxLength: 128,
               },
             }}
-            sx={{ flex: '1 1 260px', maxWidth: 420, ...READABLE_FIELD_SX }}
+            sx={{ flex: '1 1 260px', maxWidth: 420 }}
           />
           <CobraSecondaryButton
             disabled={!canSetTyped}

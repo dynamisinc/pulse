@@ -682,6 +682,85 @@ public sealed partial class InjectQueueService
         return await StepForCallerAsync(item, caller, facts, time, parents, InjectActions.Retry, cancellationToken);
     }
 
+    /// <summary>
+    /// <c>POST /api/injects/{itemId}/mark-fired</c> (demo-feedback DF-36): records a <c>pending</c>, <c>held</c> or
+    /// <c>failed</c> item as <c>fired</c> WITHOUT publishing — the inject was delivered outside Pulse, or posted by hand.
+    /// The rule is <see cref="InjectTransitions.MarkFired"/> (children that never published → <c>skipped</c>; the fired
+    /// stamps, exercise clock, only when the item never started). Bumps the item version and emits one
+    /// <see cref="InjectTelemetry.MarkedFiredEventType"/> event (the acting controller) in the same save.
+    /// </summary>
+    /// <remarks>
+    /// Nothing reaches participants: the funnel is never called and the item never becomes <c>firing</c>, so the burst
+    /// runner never sees it. That is why it is allowed under FREEZE and PAUSE INJECTS (unlike fire and retry). A stale
+    /// <paramref name="expectedVersion"/>, any other status, or a post of the item in flight right now is a <c>409</c>
+    /// with the item as it is; no undo.
+    /// </remarks>
+    /// <param name="itemId">The item id.</param>
+    /// <param name="expectedVersion">The item version the caller last read (required).</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The item as marked, or the refusal.</returns>
+    public async Task<InjectResult<InjectItemDto>> MarkFiredAsync(
+        Guid itemId,
+        int? expectedVersion,
+        CancellationToken cancellationToken = default)
+    {
+        var caller = await ResolveCallerAsync(cancellationToken);
+        if (caller is null)
+        {
+            return InjectResult.ScopeUnresolved<InjectItemDto>();
+        }
+
+        if (expectedVersion is null)
+        {
+            return InjectResult.Invalid<InjectItemDto>("expectedVersion is required.");
+        }
+
+        try
+        {
+            return await MarkFiredCoreAsync(itemId, expectedVersion.Value, caller, cancellationToken);
+        }
+        catch (Exception ex) when (InjectLockConflicts.IsLockConflict(ex))
+        {
+            LogLockConflict(ex, InjectActions.MarkFired, itemId);
+            return await CurrentItemConflictAsync(itemId, caller.ExerciseId, InjectActions.MarkFired, cancellationToken);
+        }
+    }
+
+    /// <summary>The body of a mark-fired once the caller is resolved; a lock conflict anywhere in it is the caller's 409.</summary>
+    private async Task<InjectResult<InjectItemDto>> MarkFiredCoreAsync(
+        Guid itemId,
+        int expectedVersion,
+        Caller caller,
+        CancellationToken cancellationToken)
+    {
+        var item = await LoadItemAsync(itemId, caller.ExerciseId, cancellationToken);
+        if (item is null)
+        {
+            return InjectResult.NotFound<InjectItemDto>();
+        }
+
+        var facts = await ReadExerciseFactsAsync(caller.ExerciseId, cancellationToken);
+        if (expectedVersion != item.Version)
+        {
+            return InjectResult.Conflict<InjectItemDto>(StaleVersionMessage, await ProjectAsync(item, facts, cancellationToken));
+        }
+
+        var time = TimeFor(caller.ExerciseId, facts);
+        if (InjectTransitions.MarkFired(item, caller.StaffUserId, time.ScenarioTime) is { } refusal)
+        {
+            return InjectResult.Conflict<InjectItemDto>(refusal, await ProjectAsync(item, facts, cancellationToken));
+        }
+
+        // Its own event type, not an inject_action (so no action is passed to the save): one event, same unit of work.
+        _dbContext.TelemetryEvents.Add(InjectTelemetry.ForMarkedFired(item, caller.StaffUserId, time));
+        if (!await TrySaveAsync(item, action: null, caller.StaffUserId, time, cancellationToken))
+        {
+            return await ConflictWithCurrentAsync(itemId, caller.ExerciseId, facts, InjectActions.MarkFired, cancellationToken);
+        }
+
+        return InjectResult.Ok(await ProjectAsync(item, facts, cancellationToken));
+    }
+
     // ---- the runner's entry point --------------------------------------------------------------------
 
     /// <summary>
@@ -744,7 +823,7 @@ public sealed partial class InjectQueueService
         Caller caller,
         ExerciseFacts facts,
         InjectEventTime time,
-        IReadOnlyDictionary<Guid, Guid?> parents,
+        InjectReplyParents parents,
         string action,
         CancellationToken cancellationToken)
     {
@@ -775,7 +854,7 @@ public sealed partial class InjectQueueService
         InjectItem item,
         Guid attributedHuman,
         InjectEventTime time,
-        IReadOnlyDictionary<Guid, Guid?> parents,
+        InjectReplyParents parents,
         string? action,
         bool hasPendingChanges,
         CancellationToken cancellationToken)
@@ -1268,9 +1347,10 @@ public sealed partial class InjectQueueService
 
     /// <summary>
     /// For a single post whose reply parent is another scripted post: the refusal when that parent has not been
-    /// published yet ("Fire the parent first"), else <c>null</c>.
+    /// published yet ("Fire the parent first", or, when the parent was marked fired (DF-36), "edit this item to reply
+    /// to the real post"), else <c>null</c>.
     /// </summary>
-    private static string? ParentRefusal(InjectItem item, IReadOnlyDictionary<Guid, Guid?> parents)
+    private static string? ParentRefusal(InjectItem item, InjectReplyParents parents)
     {
         var children = InjectTransitions.LiveChildren(item);
         if (children.Count == 0 || children[0].ReplyToInjectPostId is not { } target)
@@ -1278,9 +1358,9 @@ public sealed partial class InjectQueueService
             return null;
         }
 
-        return parents.TryGetValue(target, out var published) && published is not null
+        return parents.PostIds.TryGetValue(target, out var published) && published is not null
             ? null
-            : InjectBurstPlanner.ParentNotFiredMessage;
+            : InjectBurstPlanner.UnpublishedParentMessage(target, parents.MarkedFired);
     }
 
     // ---- reads and projections -----------------------------------------------------------------------
@@ -1469,9 +1549,10 @@ public sealed partial class InjectQueueService
 
     /// <summary>
     /// For each pending child's scripted reply target in ANOTHER item: its published post id, or <c>null</c> when it
-    /// has not fired. Read in scope, so a target in another exercise is simply absent (unpublished).
+    /// has not fired, plus which unpublished targets belong to an item that was marked fired (DF-36). Read in scope, so
+    /// a target in another exercise is simply absent (unpublished).
     /// </summary>
-    private async Task<IReadOnlyDictionary<Guid, Guid?>> ReadExternalParentsAsync(
+    private async Task<InjectReplyParents> ReadExternalParentsAsync(
         InjectItem item,
         CancellationToken cancellationToken)
     {
@@ -1486,14 +1567,38 @@ public sealed partial class InjectQueueService
 
         if (targets.Count == 0)
         {
-            return new Dictionary<Guid, Guid?>();
+            return new InjectReplyParents(new Dictionary<Guid, Guid?>(), new HashSet<Guid>());
         }
 
-        return await _dbContext.InjectItemPosts
+        var rows = await _dbContext.InjectItemPosts
             .AsNoTracking()
             .Where(post => targets.Contains(post.Id) && post.ExerciseId == item.ExerciseId)
-            .Select(post => new { post.Id, post.FiredPostId })
-            .ToDictionaryAsync(row => row.Id, row => row.FiredPostId, cancellationToken);
+            .Select(post => new { post.Id, post.FiredPostId, post.InjectItemId })
+            .ToListAsync(cancellationToken);
+
+        // DF-36: an unpublished parent whose ITEM is fired was marked fired, so it will never be published. Its own
+        // single-table read, never a join (the lock-order reason is on LoadItemAsync).
+        var unpublishedItemIds = rows
+            .Where(row => row.FiredPostId is null)
+            .Select(row => row.InjectItemId)
+            .Distinct()
+            .ToList();
+        var firedItemIds = unpublishedItemIds.Count == 0
+            ? new HashSet<Guid>()
+            : (await _dbContext.InjectItems
+                .AsNoTracking()
+                .Where(parent => unpublishedItemIds.Contains(parent.Id)
+                    && parent.ExerciseId == item.ExerciseId
+                    && parent.Status == InjectStatuses.Fired)
+                .Select(parent => parent.Id)
+                .ToListAsync(cancellationToken))
+                .ToHashSet();
+
+        return new InjectReplyParents(
+            rows.ToDictionary(row => row.Id, row => row.FiredPostId),
+            rows.Where(row => row.FiredPostId is null && firedItemIds.Contains(row.InjectItemId))
+                .Select(row => row.Id)
+                .ToHashSet());
     }
 
     /// <summary>

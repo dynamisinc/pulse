@@ -1,6 +1,7 @@
 namespace Pulse.WebApi.Features.Realtime;
 
 using Pulse.WebApi.Features.Social;
+using Pulse.WebApi.Features.Social.Editing;
 using Pulse.WebApi.Features.Social.Engagement;
 
 /// <summary>
@@ -57,6 +58,25 @@ public interface IFeedBroadcaster
     /// <returns>A task that completes when the change has been dispatched.</returns>
     Task BroadcastPostPinChangedAsync(
         Guid exerciseId, Guid postId, bool pinnedForAll, CancellationToken cancellationToken = default) =>
+        Task.CompletedTask;
+
+    /// <summary>
+    /// Tells the exercise's subscribers that a participant edited their own post or reply (demo-feedback DF-33, story
+    /// 19), after the edit committed. The payload is ONLY <c>PostEdited { postId, text, edited { count, scenarioTime },
+    /// version }</c> (<see cref="PostEditedDto"/>): the new text, the edit summary in SCENARIO time and the monotonic
+    /// <c>version</c> (= the edit count) a client uses to drop a stale frame. Never who edited it, the wall clock or the
+    /// previous text (XC-002). It goes to the exercise-wide group only.
+    /// </summary>
+    /// <remarks>
+    /// A <b>default interface method</b> (a no-op), so the <see cref="IFeedBroadcaster"/> test doubles that predate
+    /// editing keep compiling unchanged. <c>SignalRFeedBroadcaster</c> implements the real fan-out.
+    /// </remarks>
+    /// <param name="exerciseId">The owning exercise run whose subscribers receive the edit (COR-001 scope).</param>
+    /// <param name="edited">The participant-safe edit frame.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>A task that completes when the frame has been dispatched.</returns>
+    Task BroadcastPostEditedAsync(
+        Guid exerciseId, PostEditedDto edited, CancellationToken cancellationToken = default) =>
         Task.CompletedTask;
 
     /// <summary>

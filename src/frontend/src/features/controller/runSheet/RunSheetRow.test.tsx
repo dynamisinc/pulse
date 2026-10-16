@@ -10,8 +10,10 @@
  *  - a failed row shows the server's reason and a Retry;
  *  - which action buttons exist follows the state machine, each with an accessible name;
  *  - Fire is disabled while busy and, under FREEZE, with the reason "World frozen".
+ *  - Demo-feedback story 23 (DF-36): "Mark fired" on pending / held / failed rows, behind a
+ *    confirm; a fired item with no child post id reads "Marked fired"; an evaluator gets none.
  */
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, within } from '@testing-library/react'
 import { ThemeProvider } from '@mui/material/styles'
 import { cobraTheme } from '@/theme/cobraTheme'
@@ -20,8 +22,16 @@ import { makeItem, makePost } from './runSheetTestHarness'
 import type { InjectItemDto, InjectStatus } from './types'
 
 // Demo-feedback story 11 (DF-14): the console's write controls render only for a controller
-// session, and this suite mounts none, so the read-only gate is fixed to "controller" here.
-vi.mock('@/features/controller/access/useCanControl', () => ({ useCanControl: () => true }))
+// session, and this suite mounts none, so the read-only gate is "controller" here unless a case
+// flips it to an evaluator.
+const access = vi.hoisted(() => ({ canControl: true }))
+vi.mock('@/features/controller/access/useCanControl', () => ({
+  useCanControl: () => access.canControl,
+}))
+
+beforeEach(() => {
+  access.canControl = true
+})
 
 const persona = {
   displayName: 'Fairhaven Water Utility',
@@ -52,6 +62,7 @@ function props(item: InjectItemDto, overrides: Partial<RunSheetRowProps> = {}): 
     onSkip: vi.fn(),
     onUnskip: vi.fn(),
     onRetry: vi.fn(),
+    onMarkFired: vi.fn(),
     onOpen: vi.fn(),
     onRequestDelete: vi.fn(),
     onConfirmDelete: vi.fn(),
@@ -82,7 +93,11 @@ describe('RunSheetRow — status as text + icon (NFR-001)', () => {
     { status: 'pending', text: 'Pending' },
     { status: 'held', text: 'Held' },
     { status: 'firing', text: 'Firing 3/8', extra: { firedCount: 3, total: 8 } },
-    { status: 'fired', text: 'Fired' },
+    {
+      status: 'fired',
+      text: 'Fired',
+      extra: { posts: [makePost({ status: 'fired', firedPostId: 'post-1' })] },
+    },
     { status: 'skipped', text: 'Skipped' },
     { status: 'failed', text: 'Failed' },
   ]
@@ -106,6 +121,89 @@ describe('RunSheetRow — status as text + icon (NFR-001)', () => {
       unmount()
     }
     expect(icons.size).toBe(cases.length)
+  })
+})
+
+describe('RunSheetRow — "Marked fired" (DF-36)', () => {
+  it('a fired item with no child post id reads "Marked fired" — text and its own icon', () => {
+    renderRow(makeItem({ status: 'fired', posts: [makePost({ status: 'skipped' })] }))
+    const chip = screen.getByTestId('status-chip')
+    expect(within(chip).getByTestId('status-text')).toHaveTextContent('Marked fired')
+    expect(chip).toHaveAttribute('data-status', 'fired')
+    expect(chip).toHaveAttribute('data-marked-fired', 'true')
+    const marked = within(chip).getByTestId('status-icon').getAttribute('data-icon')
+    renderRow(makeItem({ status: 'fired', posts: [makePost({ status: 'fired', firedPostId: 'p-1' })] }))
+    const posted = screen.getAllByTestId('status-icon')[1]?.getAttribute('data-icon')
+    expect(marked).not.toBe(posted)
+  })
+
+  it('a fired item where any child carries a post id stays "Fired"', () => {
+    renderRow(makeItem({
+      kind: 'burst',
+      status: 'fired',
+      posts: [
+        makePost({ id: 'a', status: 'fired', firedPostId: 'p-1' }),
+        makePost({ id: 'b', sequence: 2, status: 'skipped' }),
+      ],
+    }))
+    expect(screen.getByTestId('status-text')).toHaveTextContent(/^Fired$/)
+    expect(screen.getByTestId('status-chip')).not.toHaveAttribute('data-marked-fired')
+  })
+
+  it.each(['pending', 'held', 'failed'] as const)('a %s row offers "Mark fired" (icon + text)', status => {
+    renderRow(makeItem({ status, title: 'Item' }))
+    const button = screen.getByRole('button', { name: 'Mark fired Item' })
+    expect(button).toHaveTextContent('Mark fired')
+    expect(button.querySelector('svg')).not.toBeNull()
+  })
+
+  it.each(['firing', 'fired', 'skipped'] as const)('a %s row has no "Mark fired"', status => {
+    renderRow(makeItem({ status, title: 'Item' }))
+    expect(screen.queryByRole('button', { name: 'Mark fired Item' })).toBeNull()
+  })
+
+  it('asks first; Cancel changes nothing, confirming marks it once', () => {
+    const { p } = renderRow(makeItem({ title: 'Item' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Mark fired Item' }))
+    const dialog = screen.getByRole('dialog')
+    expect(dialog).toHaveTextContent('Mark as fired without posting? This can\'t be undone.')
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+    expect(p.onMarkFired).not.toHaveBeenCalled()
+    expect(screen.queryByRole('dialog')).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Mark fired Item' }))
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Mark fired' }))
+    expect(p.onMarkFired).toHaveBeenCalledTimes(1)
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
+  it('a key press inside the confirm never reaches the run sheet shortcuts', () => {
+    const onKeyDown = vi.fn()
+    const p = props(makeItem({ title: 'Item' }))
+    render(
+      <ThemeProvider theme={cobraTheme}>
+        <ul onKeyDown={onKeyDown}>
+          <RunSheetRow {...p} />
+        </ul>
+      </ThemeProvider>,
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Mark fired Item' }))
+    fireEvent.keyDown(screen.getByRole('dialog'), { key: 'f' })
+    expect(onKeyDown).not.toHaveBeenCalled()
+  })
+
+  it('is disabled while an action on the row is in flight, and allowed under FREEZE', () => {
+    const { unmount } = renderRow(makeItem({ title: 'Item' }), { busy: true })
+    expect(screen.getByRole('button', { name: 'Mark fired Item' })).toBeDisabled()
+    unmount()
+    renderRow(makeItem({ title: 'Item' }), { fireDisabledReason: 'World frozen' })
+    expect(screen.getByRole('button', { name: 'Mark fired Item' })).toBeEnabled()
+  })
+
+  it.each(['pending', 'held', 'failed'] as const)('an evaluator gets no "Mark fired" on a %s row', status => {
+    access.canControl = false
+    renderRow(makeItem({ status, title: 'Item' }))
+    expect(screen.queryByRole('button', { name: 'Mark fired Item' })).toBeNull()
   })
 })
 

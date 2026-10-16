@@ -203,6 +203,23 @@ describe('ShellLayout — z-order / stacking-context contract (AC3)', () => {
   })
 })
 
+describe('ShellLayout — alert-bar inset (PRT-010 mobile overlap)', () => {
+  it('reserves the fixed alert bar\'s published height in the shell flow, below the chrome inset', async () => {
+    setExerciseClock(fixedClock(new Date('2026-06-01T00:00:00Z')))
+
+    renderShell(<span data-testid="probe">content</span>)
+
+    await waitFor(() => expect(screen.getByTestId('probe')).toBeInTheDocument())
+
+    // The bar is position: fixed (reserves no space) and can wrap to several
+    // lines on a phone; without this inset the in-flow channel nav slid under it.
+    const root = screen.getByTestId('pulse-shell-root')
+    expect(root.style.paddingTop).toBe(
+      'calc(var(--pulse-chrome-top, 0px) + var(--pulse-alert-height, 0px))',
+    )
+  })
+})
+
 describe('ShellLayout — exercise-scoped, no leak into the content region (AC4, XC-001/002)', () => {
   it('never renders the exercise id, name, or any exercise/admin/picker concept into the content region', async () => {
     setExerciseClock(fixedClock(new Date('2026-06-01T00:00:00Z')))

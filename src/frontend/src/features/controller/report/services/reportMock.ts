@@ -44,7 +44,8 @@ function post(overrides: Partial<ReportPost> & Pick<ReportPost, 'id' | 'scenario
     replies: 0,
     pinnedForAll: false,
     takenDownAt: null,
-    editCount: null,
+    editCount: 0,
+    lastEditedAt: null,
     ...overrides,
   }
 }
@@ -134,6 +135,7 @@ const LISTED_POSTS: ReportPost[] = [
     reposts: 112,
     replies: 9,
     editCount: 2,
+    lastEditedAt: '2026-10-15 09:55',
   }),
   post({
     id: 'p-6',
@@ -183,6 +185,7 @@ const LISTED_POSTS: ReportPost[] = [
     reposts: 33,
     replies: 5,
     editCount: 1,
+    lastEditedAt: '2026-10-15 10:16',
     takenDownAt: '2026-10-15 10:21',
   }),
 ]
@@ -203,7 +206,7 @@ export const MOCK_REPORT: ExerciseReport = {
     injectsDelivered: 3,
     medianResponseMinutes: 8,
     busiestWindow: { start: '2026-10-15 10:05', posts: 3 },
-    postsEdited: null,
+    postsEdited: 2,
     postsTakenDown: 1,
     bySource: { participant: 3, scripted: 3, engine: 2, noise: 2 },
   },

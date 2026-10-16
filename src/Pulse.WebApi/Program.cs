@@ -3,6 +3,7 @@ using Pulse.Core.Core.Extensions;
 using Pulse.WebApi.Data.Extensions;
 using Pulse.WebApi.Features.EngineRuntime;
 using Pulse.WebApi.Features.EngineRuntime.Clock;
+using Pulse.WebApi.Features.EngineRuntime.Persistence;
 using Pulse.WebApi.Features.EngineRuntime.Steering;
 using Pulse.WebApi.Features.ExerciseConfiguration;
 using Pulse.WebApi.Features.ExerciseConfiguration.Chrome;
@@ -36,6 +37,7 @@ using Pulse.WebApi.Features.Social;
 using Pulse.WebApi.Features.Social.Moderation; // demo-polish B6
 using Pulse.WebApi.Features.Social.PersonaAdmin; // demo-polish PE-BE
 using Pulse.WebApi.Features.Social.Reactions;  // demo-polish B3
+using Pulse.WebApi.Features.Social.Editing;
 
 // Pulse.WebApi — the first runtime for the Pulse.Core engine (docs/BACKEND_ROADMAP.md §4, Phase B0).
 // This composition root is orchestrator-owned from here on: only a story that adds a *new* DI
@@ -211,6 +213,7 @@ builder.Services.AddSocialFeedRead();      // #270 GET /api/feed (+ BP's project
 builder.Services.AddSocialPostWrite();     // #271 POST /api/posts (sanitize + stamp + telemetry + broadcast)
 builder.Services.AddSocialPersonaRead();   // #273 GET /api/personas
 builder.Services.AddSocialRealtimeHub();   // #272 exercise-grouped hub + IFeedBroadcaster impl
+builder.Services.AddPostEditing();         // demo-feedback/19 edit own post (S-5; after the realtime hub)
 builder.Services.AddSocialModeration();    // demo-polish B6
 builder.Services.AddSocialThreads();       // demo-polish B2
 builder.Services.AddSocialReactions();     // demo-polish B3
@@ -224,6 +227,10 @@ builder.Services.AddPersonaAdmin();       // demo-polish PE-BE
 // ExerciseRealtimeHub — no second hub) + the auto-HOLD scenario tick, and REPLACES the generation NoOp
 // IProviderHealthListener with the degrade-only autonomy fan-out listener — so it MUST run after
 // AddEngineGeneration (above). Both consume AddExerciseClock + AddEngineRuntimeSeams.
+// Demo feedback Wave 4, seam S-5 (orchestrator-wired). AddExerciseRuntimePersistence registers the startup
+// rehydrator, which MUST be the first ticking hosted service so a restored pause tier, clock and holding page are
+// in place before the reaction loop, review tick, burst runner or noise pacer run (demo-feedback/18, DF-24..DF-28).
+builder.Services.AddExerciseRuntimePersistence(); // demo-feedback/18 restart-proof pause tier, clock, overlay
 builder.Services.AddReactionLoopHost();    // #285 reaction-loop host + IEnginePublishService
 builder.Services.AddEngineReview();        // #286 review queue API + autonomy/safety wiring + SignalR push
 
@@ -425,6 +432,9 @@ app.MapSocialThreadEndpoints();   // #270 GET /api/threads/{postId}
 // /api/posts; reactions (demo-polish B3) are the next line; follows and BM's POST /api/media apply it inside
 // their own Map extensions. Any FUTURE sim-write (e.g. DMs) must do the same.
 app.MapGroup(string.Empty).DenyReadOnlySessions().MapSocialPostEndpoints();
+// demo-feedback/19 (S-5): NOT inside DenyReadOnlySessions — the PATCH carries its own deny filter and the history
+// GET must stay readable by view-only sessions.
+app.MapPostEditing();
 app.MapGroup(string.Empty).DenyReadOnlySessions().MapSocialReactionEndpoints(); // demo-polish B3
 
 app.MapSocialPersonaEndpoints();  // #273 GET /api/personas
@@ -513,6 +523,7 @@ app.MapEngineReview();    // #286 GET queue + approve/edit/veto/re-roll/batch + 
 // GET /api/overlay-state and the push rides the already-mapped /hubs/exercise, so it is service-registration
 // only (above).
 app.MapPauseTierSteering();   // #350 pause tier (Freeze reaches the real clock)
+app.MapRuntimeStateReset();   // demo-feedback/18 POST /api/steering/runtime-state/reset (S-5; controller only)
 app.MapStorylineSteering();   // #352 storyline actual/target read + target set
 app.MapInjects();             // #452 /api/injects* (staff gate; mutations controller-only)
 

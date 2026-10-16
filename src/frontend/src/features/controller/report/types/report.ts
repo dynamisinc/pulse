@@ -50,8 +50,10 @@ export interface ReportPost {
   replies: number
   pinnedForAll: boolean
   takenDownAt: string | null
-  /** Null until post editing lands. */
+  /** Times the author edited the post; 0 when never edited (null only from an older server). */
   editCount: number | null
+  /** The last edit's scenario time, "yyyy-MM-dd HH:mm"; null when never edited. */
+  lastEditedAt: string | null
 }
 
 export interface ReportActivityBin {

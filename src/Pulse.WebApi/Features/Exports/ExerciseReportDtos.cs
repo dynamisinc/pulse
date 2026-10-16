@@ -128,7 +128,7 @@ public sealed class ReportSummaryDto
     [JsonPropertyName("busiestWindow")]
     public required ReportBusiestWindowDto? BusiestWindow { get; init; }
 
-    /// <summary>Always <c>null</c> until post editing lands.</summary>
+    /// <summary>Posts edited at least once, taken-down posts included.</summary>
     [JsonPropertyName("postsEdited")]
     public required int? PostsEdited { get; init; }
 
@@ -364,9 +364,13 @@ public sealed class ReportPostDto
     [JsonPropertyName("takenDownAt")]
     public required string? TakenDownAt { get; init; }
 
-    /// <summary>Always <c>null</c> until post editing lands.</summary>
+    /// <summary>How many times the author edited the post (<c>Post.EditCount</c>); 0 when never edited.</summary>
     [JsonPropertyName("editCount")]
     public required int? EditCount { get; init; }
+
+    /// <summary>The last edit's scenario time, <c>yyyy-MM-dd HH:mm</c>; <c>null</c> when never edited.</summary>
+    [JsonPropertyName("lastEditedAt")]
+    public required string? LastEditedAt { get; init; }
 }
 
 /// <summary>A post's author.</summary>

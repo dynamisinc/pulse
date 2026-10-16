@@ -26,6 +26,7 @@ import { useToolstrip } from '@/features/staffShell/toolRegistry'
 import { useEvaluatorState } from '../contexts/EvaluatorStateContext'
 import { useAarManifest } from '../hooks/useAarExport'
 import { useMetrics } from '../hooks/useMetrics'
+import { cobraTheme } from '@/theme/cobraTheme'
 
 const MANIFEST_ICONS: Record<string, IconDefinition> = {
   'timeline-log': faClockRotateLeft,
@@ -67,12 +68,12 @@ export function AarExportPanel() {
         <Typography sx={{ font: '800 11px ui-sans-serif,system-ui,sans-serif', letterSpacing: '.14em', color: '#4a4f55' }}>
           AAR EXPORT
         </Typography>
-        <IconButton size="small" onClick={() => toggleTool('aar-export')} sx={{ color: '#848482' }}>
+        <IconButton size="small" onClick={() => toggleTool('aar-export')} sx={{ color: cobraTheme.palette.text.muted }}>
           <FontAwesomeIcon icon={faXmark} size="sm" />
         </IconButton>
       </Stack>
 
-      <Typography sx={{ font: '500 11px/1.5 ui-sans-serif,system-ui,sans-serif', color: '#848482', px: 2, pt: 1.25, pb: 0.5 }}>
+      <Typography sx={{ font: '500 11px/1.5 ui-sans-serif,system-ui,sans-serif', color: cobraTheme.palette.text.muted, px: 2, pt: 1.25, pb: 0.5 }}>
         One package, everything an AAR needs (EVL-030). Contents:
       </Typography>
 
@@ -82,7 +83,7 @@ export function AarExportPanel() {
             <FontAwesomeIcon icon={MANIFEST_ICONS[item.id] ?? faGaugeHigh} style={{ color: '#1e3a5f', width: 12 }} />
             <Box>
               <Typography sx={{ font: '600 12px ui-sans-serif,system-ui,sans-serif' }}>{item.name}</Typography>
-              <Typography sx={{ font: '500 10.5px ui-sans-serif,system-ui,sans-serif', color: '#848482' }}>{item.detail}</Typography>
+              <Typography sx={{ font: '500 10.5px ui-sans-serif,system-ui,sans-serif', color: cobraTheme.palette.text.muted }}>{item.detail}</Typography>
             </Box>
           </Stack>
         ))}

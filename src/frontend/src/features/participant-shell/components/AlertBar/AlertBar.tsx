@@ -28,7 +28,8 @@
  * space. Otherwise the host picks one of two TREATMENTS across the whole
  * active set (SHELL-CONTRACT.md §2, D7-002):
  *  - **`ticker`** (the decided DEFAULT, D7-002) — used whenever no active
- *    alert is `emergency`. A dark `#14181c` one-line bar; a severity chip
+ *    alert is `emergency`. A dark `#14181c` bar (one line on desktop widths;
+ *    wraps on a phone — see "Mobile wrapping" below); a severity chip
  *    (icon + LABEL) using this alert's palette, a monospace message, the
  *    scenario timestamp, and the Details link. With more than one alert, it
  *    auto-rotates every {@link ROTATE_INTERVAL_MS} through ALL of them — the
@@ -45,13 +46,22 @@
  * does not collapse" (only the alternate, unshipped "band" treatment
  * height-collapses) — yet the story's own AC requires "info/advisory
  * collapse on scroll ... re-expand on tap". This component reconciles the
- * two the same way: the ticker's HEIGHT never changes (it is always exactly
- * one line, per D7-002), but its CONTENT DENSITY does — scrolling past
+ * two the same way: the ticker does not height-collapse into a band, but its
+ * CONTENT DENSITY drops — scrolling past
  * {@link SCROLL_COLLAPSE_THRESHOLD_PX} hides the secondary anatomy (scenario
  * timestamp + Details link), leaving only the chip + message as a compact
- * strip; tapping that compact strip re-expands the full anatomy until the
- * next scroll re-collapses it. The emergency band ignores scroll entirely —
- * it never collapses, by contract.
+ * strip (message clamped to two lines); tapping that compact strip re-expands
+ * the full anatomy until the next scroll re-collapses it. The emergency band
+ * ignores scroll entirely — it never collapses, by contract.
+ *
+ * ## Mobile wrapping (D0 §4.6 mobile-first, PRT-010 readability)
+ * D7-002's "one-line ticker" holds wherever it fits. On a phone (390px) the
+ * one-line form left ~3 characters of message ("Boi…"), so each row WRAPS:
+ * the message is never ellipsized, and the timestamp + Details link drop to
+ * a second line when they no longer fit beside it (`rowStyle` /
+ * `messageStyle`). The bar's height therefore varies with content, which the
+ * published `--pulse-alert-height` already reports — `ShellLayout` reserves
+ * it in the shell's flow so nothing in-flow (the channel nav) sits under it.
  *
  * ## Accessibility (NFR-001 hard gate)
  * The host is `role="status"` (a polite, atomic live region by ARIA default;
@@ -99,15 +109,15 @@
  */
 
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
-import type { IconDefinition } from '@fortawesome/fontawesome-svg-core'
-import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import { faBullhorn, faCircleInfo, faTriangleExclamation } from '@fortawesome/free-solid-svg-icons'
 import { useExerciseContext } from '@/core/exerciseContext'
 import { useScenarioTime } from '@/core/clock'
 import { SHELL_ALERT_HEIGHT_VAR, SHELL_CHROME_TOP_VAR, SHELL_Z } from '../../mountContract'
 import { useAlerts } from './useAlerts'
 import { useExitFullscreenOnNewAlert } from './useExitFullscreenOnNewAlert'
-import type { Alert, AlertSeverity } from './alertTypes'
+import { AlertDetailsLink } from './AlertDetailsLink'
+import { SeverityChip } from './SeverityChip'
+import { SEVERITY_META, chipBaseStyle } from './severityMeta'
+import type { Alert } from './alertTypes'
 
 /** Ticker auto-rotation interval (SHELL-CONTRACT.md §2: "~3.5s"). */
 const ROTATE_INTERVAL_MS = 3500
@@ -115,73 +125,15 @@ const ROTATE_INTERVAL_MS = 3500
 /** Scroll distance past which the ticker collapses to its compact strip. */
 const SCROLL_COLLAPSE_THRESHOLD_PX = 8
 
-/**
- * Placeholder alerts-history target (PRT-012). The history PAGE is out of
- * scope for this story — only the link-through affordance is required.
- */
-const ALERTS_HISTORY_HREF = '/alerts'
-
-interface SeverityMeta {
-  readonly label: string
-  readonly icon: IconDefinition
-  /** Chip background — D1/D2 palette (info/advisory), or emergency's translucent-on-red pill. */
-  readonly chipBg: string
-  /** Chip icon/text color. */
-  readonly chipFg: string
-}
-
-/**
- * Exact palettes per story AC / SHELL-CONTRACT.md §2: info `#edf3f9/#3d6a96`,
- * advisory `#fff3dd/#8a5a00` (D1/D2's `#b97a00` fg darkened to `#8a5a00` for WCAG
- * AA — DECISIONS.md D7-012). Emergency's chip is a solid white pill with dark-red
- * `#8f150c` text (the D7 mockup `.ab-emg .chip` spec): it stays legible against the
- * solid `#b3261e` band and clears WCAG AA (dark-red on white). The band itself
- * carries the "solid #b3261e, white text" requirement for the message.
- */
-const SEVERITY_META: Record<AlertSeverity, SeverityMeta> = {
-  info: { label: 'INFO', icon: faCircleInfo, chipBg: '#edf3f9', chipFg: '#3d6a96' },
-  advisory: { label: 'ADVISORY', icon: faTriangleExclamation, chipBg: '#fff3dd', chipFg: '#8a5a00' },
-  emergency: { label: 'EMERGENCY', icon: faBullhorn, chipBg: '#fff', chipFg: '#8f150c' },
-}
-
-const chipBaseStyle: CSSProperties = {
-  display: 'inline-flex',
-  alignItems: 'center',
-  gap: '6px',
-  padding: '2px 8px',
-  borderRadius: '999px',
-  fontFamily: "'Figtree', system-ui, sans-serif",
-  fontWeight: 700,
-  fontSize: '11px',
-  letterSpacing: '0.06em',
-  whiteSpace: 'nowrap',
-  flexShrink: 0,
-}
-
-/**
- * The severity chip: icon + LABEL text + color, together (NFR-001 — severity
- * is never color-only). Shared by both the ticker and the emergency band.
- */
-function SeverityChip({ severity }: { severity: AlertSeverity }) {
-  const meta = SEVERITY_META[severity]
-  return (
-    <span
-      data-testid="pulse-alert-bar-chip"
-      data-alert-severity={severity}
-      style={{ ...chipBaseStyle, backgroundColor: meta.chipBg, color: meta.chipFg }}
-    >
-      <FontAwesomeIcon icon={meta.icon} aria-hidden="true" />
-      {meta.label}
-    </span>
-  )
-}
-
 const detailsLinkStyle: CSSProperties = {
   fontFamily: "'Figtree', system-ui, sans-serif",
   fontWeight: 600,
   fontSize: '12px',
   whiteSpace: 'nowrap',
   flexShrink: 0,
+  // Pins the link to the row's trailing edge -- including when the row wraps on
+  // a phone and the timestamp + link drop to their own second line.
+  marginLeft: 'auto',
   // Ticker default — a legible accent against the dark #14181c ticker bg.
   // The emergency band overrides this to white (see its inline usage below).
   color: '#8ab4f8',
@@ -195,21 +147,53 @@ const timestampStyle: CSSProperties = {
   flexShrink: 0,
 }
 
+/**
+ * One alert row. WRAPS (mobile-first, D0 §4.6): on a desktop-width bar every
+ * part fits on one line exactly as before; on a phone the fixed-width parts
+ * (timestamp, Details link) drop to a second line instead of squeezing the
+ * message to a few ellipsized characters. See {@link messageStyle}.
+ */
 const rowStyle: CSSProperties = {
   display: 'flex',
+  flexWrap: 'wrap',
   alignItems: 'center',
-  gap: '10px',
+  columnGap: '10px',
+  rowGap: '4px',
   minWidth: 0,
 }
 
+/**
+ * The alert message. Never truncated -- the EAS analog must be READABLE
+ * (PRT-010, NFR-001). It wraps across lines; `overflowWrap: anywhere` also
+ * breaks a single unbroken token (a long URL) rather than overflowing.
+ *
+ * The `12rem` flex-basis is what drives the row's wrapping: it keeps the message
+ * on the chip's line with at least ~12rem of width, and once the timestamp + link
+ * no longer fit beside that, flexbox moves THEM to the next line (the message
+ * then grows to take the whole remaining width of its line).
+ */
 const messageStyle: CSSProperties = {
   fontFamily: "'JetBrains Mono', 'Courier New', monospace",
   fontSize: '13px',
-  overflow: 'hidden',
-  textOverflow: 'ellipsis',
-  whiteSpace: 'nowrap',
+  lineHeight: 1.35,
+  whiteSpace: 'normal',
+  overflowWrap: 'anywhere',
   minWidth: 0,
-  flex: '1 1 auto',
+  flex: '1 1 12rem',
+}
+
+/**
+ * The collapsed (scrolled) ticker's message: clamped to two lines so the compact
+ * strip stays compact, but still far more than the old one-line ellipsis. The
+ * FULL text stays available -- the strip's button `aria-label` carries it, and a
+ * tap re-expands the bar.
+ */
+const collapsedMessageStyle: CSSProperties = {
+  ...messageStyle,
+  display: '-webkit-box',
+  WebkitLineClamp: 2,
+  WebkitBoxOrient: 'vertical',
+  overflow: 'hidden',
 }
 
 const hostBaseStyle: CSSProperties = {
@@ -255,7 +239,8 @@ const noneHostStyle: CSSProperties = {
 /** Unstyled-button reset so the collapsed tap target reads as ticker content, not a control. */
 const tapToExpandStyle: CSSProperties = {
   ...rowStyle,
-  flex: '1 1 auto',
+  // A <button> shrink-wraps by default; full width gives the row room to wrap.
+  width: '100%',
   minWidth: 0,
   background: 'none',
   border: 'none',
@@ -433,13 +418,9 @@ export function AlertBar() {
             <span data-testid="pulse-alert-bar-timestamp" style={timestampStyle}>
               {format(activeAlert.scenarioTime)}
             </span>
-            <a
-              href={ALERTS_HISTORY_HREF}
-              data-testid="pulse-alert-bar-details"
-              style={{ ...detailsLinkStyle, color: '#ffffff' }}
-            >
+            <AlertDetailsLink style={{ ...detailsLinkStyle, color: '#ffffff' }}>
               Details →
-            </a>
+            </AlertDetailsLink>
             {otherAlerts.length > 0 && (
               <button
                 type="button"
@@ -476,7 +457,7 @@ export function AlertBar() {
             style={tapToExpandStyle}
           >
             <SeverityChip severity={activeAlert.severity} />
-            <span data-testid="pulse-alert-bar-message" style={messageStyle}>
+            <span data-testid="pulse-alert-bar-message" style={collapsedMessageStyle}>
               {activeAlert.message}
             </span>
           </button>
@@ -489,9 +470,7 @@ export function AlertBar() {
             <span data-testid="pulse-alert-bar-timestamp" style={timestampStyle}>
               {format(activeAlert.scenarioTime)}
             </span>
-            <a href={ALERTS_HISTORY_HREF} data-testid="pulse-alert-bar-details" style={detailsLinkStyle}>
-              Details →
-            </a>
+            <AlertDetailsLink style={detailsLinkStyle}>Details →</AlertDetailsLink>
           </div>
         )
       )}

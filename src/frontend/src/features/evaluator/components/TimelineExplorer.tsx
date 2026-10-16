@@ -17,6 +17,7 @@ import { useEvaluatorState } from '../contexts/EvaluatorStateContext'
 import { useTimelineEvents } from '../hooks/useTimelineEvents'
 import { scenarioClock } from '../services/scenarioTime'
 import type { TimelineChannel, TimelineFilters, WorldChannel } from '../types'
+import { cobraTheme } from '@/theme/cobraTheme'
 
 const CHANNEL_PALETTE: Record<TimelineChannel, { bg: string; fg: string }> = {
   PULSE: { bg: '#eef3f9', fg: '#1e3a5f' },
@@ -57,7 +58,7 @@ export function TimelineExplorer() {
       >
         {FILTER_GROUPS.map(group => (
           <Stack key={group.key} direction="row" sx={{ alignItems: 'center', gap: 0.75 }}>
-            <Typography sx={{ font: '800 9px ui-sans-serif,system-ui,sans-serif', letterSpacing: '.12em', color: '#848482' }}>
+            <Typography sx={{ font: '800 9px ui-sans-serif,system-ui,sans-serif', letterSpacing: '.12em', color: cobraTheme.palette.text.muted }}>
               {group.label}
             </Typography>
             {group.options.map(option => {
@@ -90,7 +91,7 @@ export function TimelineExplorer() {
           sx={{ width: 150, '& .MuiOutlinedInput-root': { borderRadius: '999px' } }}
         />
         <Box sx={{ flex: 1 }} />
-        <Typography sx={{ font: '600 10.5px ui-monospace,Menlo,monospace', color: '#848482' }}>
+        <Typography sx={{ font: '600 10.5px ui-monospace,Menlo,monospace', color: cobraTheme.palette.text.muted }}>
           {events.length} EVENTS
         </Typography>
       </Stack>
@@ -170,7 +171,7 @@ export function TimelineExplorer() {
                       }}
                     />
                   )}
-                  <Typography sx={{ font: '600 9.5px ui-monospace,Menlo,monospace', color: '#848482' }}>
+                  <Typography sx={{ font: '600 9.5px ui-monospace,Menlo,monospace', color: cobraTheme.palette.text.muted }}>
                     {event.origin}
                   </Typography>
                 </Stack>
@@ -183,7 +184,7 @@ export function TimelineExplorer() {
                   <IconButton
                     size="small"
                     onClick={() => openAnnotation(`${event.actor} · ${scenarioClock(event.t)}`)}
-                    sx={{ border: '1px solid #c4c4c4', borderRadius: '6px', color: '#848482', '&:hover': { color: '#1e3a5f', borderColor: '#1e3a5f' } }}
+                    sx={{ border: '1px solid #c4c4c4', borderRadius: '6px', color: cobraTheme.palette.text.muted, '&:hover': { color: '#1e3a5f', borderColor: '#1e3a5f' } }}
                   >
                     <FontAwesomeIcon icon={faFlag} size="2xs" />
                   </IconButton>

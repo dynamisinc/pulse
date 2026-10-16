@@ -59,7 +59,6 @@ public sealed class ReactionLoopHost : BackgroundService
     private readonly TimeProvider _timeProvider;
     private readonly ReactionLoopHostOptions _options;
     private readonly ILogger<ReactionLoopHost> _logger;
-    private readonly HashSet<Guid> _startedClocks = [];
 
     /// <summary>Cached high-performance log delegate for a per-exercise tick fault (avoids CA1848 boxing).</summary>
     private static readonly Action<ILogger, Guid, Exception?> LogTickFailed =
@@ -190,20 +189,17 @@ public sealed class ReactionLoopHost : BackgroundService
     }
 
     /// <summary>
-    /// Starts an exercise's scenario clock once, on first sight. Never restarts an already-running or frozen
-    /// clock (that would reset the scenario minute) — a controller/seed path or a test may have already
-    /// started, jumped, or frozen it. See <see cref="ShouldStartClock"/>: that guard is load-bearing for the
+    /// Starts an exercise's scenario clock whenever nothing has started it — checked on EVERY tick through
+    /// <see cref="ShouldStartClock"/> alone. Never restarts an already-running or frozen clock (that would reset the
+    /// scenario minute): a controller/seed path, a test, or the startup rehydrator (demo-feedback/18) may have
+    /// already started, jumped, frozen or restored it. Deliberately keeps NO per-host "already started" memo: the
+    /// controller's runtime reset (DF-28) clears a clock back to unstarted without a restart, and the next tick must
+    /// then start it again (a memo would leave it unstarted, stopping white noise and pinning the engine at minute 0
+    /// until the next App Service restart). See <see cref="ShouldStartClock"/>: that guard is load-bearing for the
     /// tiered pause.
     /// </summary>
     private void EnsureClockStarted(ReactionLoopRegistration registration)
     {
-        if (_startedClocks.Contains(registration.ExerciseId))
-        {
-            return;
-        }
-
-        _startedClocks.Add(registration.ExerciseId);
-
         if (ShouldStartClock(_exerciseClock, registration.ExerciseId))
         {
             _exerciseClock.Start(registration.ExerciseId, registration.ScenarioStart, registration.TimeZoneInfo);

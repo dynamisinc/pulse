@@ -14,6 +14,7 @@ using Microsoft.Extensions.Options;
 using Pulse.WebApi.Features.Exports;
 using Pulse.WebApi.Features.Injects.Import;
 using Pulse.WebApi.Features.Realtime;
+using Pulse.WebApi.Features.Social.Editing;
 using Pulse.WebApi.Features.Social.Pins;
 using Pulse.WebApi.Features.WhiteNoise;
 using Xunit;
@@ -60,6 +61,8 @@ public sealed class DemoFeedbackCompositionRootWiringTests
             ("GET", WhiteNoiseEndpoints.NoiseRoute, "05 MapWhiteNoise()"),
             ("PUT", WhiteNoiseEndpoints.NoiseRoute, "05 MapWhiteNoise()"),
             ("PUT", WhiteNoiseEndpoints.PoolRoute, "05 MapWhiteNoise()"),
+            ("PATCH", PostEditEndpoints.EditRoute, "19 MapPostEditing()"),
+            ("GET", PostEditEndpoints.HistoryRoute, "19 MapPostEditing()"),
         ];
 
         foreach (var (method, route, story) in expected)
@@ -141,7 +144,7 @@ public sealed class DemoFeedbackCompositionRootWiringTests
     {
         private const string ConnectionStringEnvVar = "ConnectionStrings__DefaultConnection";
         private const string DummyConnectionString =
-            "Server=nonexistent;Database=pulse;Trusted_Connection=False;";
+            "Server=nonexistent;Database=pulse;Trusted_Connection=False;Connect Timeout=1;";
 
         private readonly string? _frontendBaseUrl;
 

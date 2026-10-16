@@ -25,6 +25,8 @@
  *   POST   /injects/reorder               -> InjectQueueDto    (body: { ids })
  *   POST   /injects/{id}/fire             -> InjectItemDto
  *   POST   /injects/{id}/hold|release|skip|unskip|retry -> InjectItemDto
+ *   POST   /injects/{id}/mark-fired       -> InjectItemDto     (body: { expectedVersion })
+ *          demo-feedback DF-36: pending/held/failed -> fired WITHOUT publishing
  *
  * NO `exerciseId` in any request, query string or body (COR-001): the server
  * resolves the exercise from the session, and a cross-exercise id is
@@ -73,6 +75,11 @@ export interface InjectService {
   skip(id: string): Promise<InjectItemDto>
   unskip(id: string): Promise<InjectItemDto>
   retry(id: string): Promise<InjectItemDto>
+  /**
+   * `POST /injects/{id}/mark-fired` (DF-36): records the item as fired WITHOUT posting anything,
+   * from pending / held / failed only (anything else, or a stale version -> 409).
+   */
+  markFired(id: string, expectedVersion: number): Promise<InjectItemDto>
 }
 
 const INJECTS_PATH = '/injects'
@@ -158,6 +165,12 @@ export function createLiveInjectService(): InjectService {
       const route = `${INJECTS_PATH}/reorder`
       const data = await call(() => api.post<unknown>(route, { ids }))
       return expectQueue(data, `POST /api${route}`)
+    },
+
+    async markFired(id, expectedVersion) {
+      const route = `${itemPath(id)}/mark-fired`
+      const data = await call(() => api.post<unknown>(route, { expectedVersion }))
+      return expectItem(data, `POST /api${route}`)
     },
 
     fire: id => transition(id, 'fire'),
