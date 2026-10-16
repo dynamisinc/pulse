@@ -12,6 +12,10 @@ vi.mock('@/core/exerciseContext', () => ({
 const emit = vi.hoisted(() => vi.fn())
 vi.mock('@/core/telemetry/mockSink', () => ({ emitTelemetryEvent: emit }))
 
+// The iOS sheet ships OFF (Tom, 10/16); pin it ON here so the sheet's behaviour stays covered
+// for when the flag is flipped back. The off path is covered in iosFlag.test.tsx.
+vi.mock('./installConfig', () => ({ IOS_INSTALL_PROMPT_ENABLED: true }))
+
 import { InstallPrompt } from './InstallPrompt'
 import { dismissKey, visitsKey } from './installEnv'
 

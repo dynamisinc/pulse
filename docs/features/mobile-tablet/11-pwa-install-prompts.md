@@ -33,4 +33,4 @@ Story 09 (brand + manifest); story 10 for installability on Chrome.
 `beforeinstallprompt`. Manual on real iOS and Android.
 
 ## Known limitations
-- iOS Home Screen apps do not share storage with Safari, so the installed app opens **signed out** (on `/login`), and personal-link-only players cannot paste their link into standalone mode. Tom may disable the iOS sheet alone by setting `IOS_INSTALL_PROMPT_ENABLED = false` in `src/frontend/src/features/pwa/install/installConfig.ts` (Android is unaffected).
+- iOS Home Screen apps do not share storage with Safari, so the installed app opens **signed out** (on `/login`), and personal-link-only players cannot paste their link into standalone mode. **Decision (Tom, 10/16): "iOS prompt off for now."** The iOS sheet ships disabled (`IOS_INSTALL_PROMPT_ENABLED = false` in `src/frontend/src/features/pwa/install/installConfig.ts`). The Android banner is unaffected. Follow-up: #606 covers session handoff into the installed app, a neutral or branded sign-in when standalone, and a path for personal-link players.
