@@ -3,8 +3,8 @@
  * ---------------------------------------------------------------------------
  * CSS contract for participant touch targets (mobile-tablet story 18; NFR-001).
  * jsdom applies no stylesheets, so the contract is asserted on the real CSS text (read off disk
- * with `readSrcFile`, since Vitest blanks `*.css` imports): each control's >= 44px sizing lives ONLY inside `@media (pointer: coarse)` (a
- * mouse layout is unchanged), reads the shared `--pulse-touch-min` (fallback 44px), and uses
+ * with `readSrcFile`, since Vitest blanks `*.css` imports): each control's >= 44px sizing
+ * lives ONLY inside `@media (pointer: coarse)` (a mouse layout is unchanged), reads the shared `--pulse-touch-min` (fallback 44px), and uses
  * real layout space -- never an invisible `::before`/`::after` slop that neighbours could
  * intercept (Copilot, PR #584).
  */
