@@ -356,8 +356,9 @@ public sealed partial class ReactionLoopDriver
 
     /// <summary>
     /// The generate request for an ambient burst: the ordinary <see cref="GenerateStage"/> input with a server-authored
-    /// "storyline" brief built ONLY from the allow-listed topic seed (never free text), framed as everyday background
-    /// life with no incident, no officials and zero intensity.
+    /// brief built ONLY from the allow-listed topic seed (never free text) and flagged
+    /// <see cref="StorylineBrief.IsAmbient"/>, so the assembler frames it as everyday background life — no storyline,
+    /// no incident, no officials, no escalation text — rather than as a storyline to advance.
     /// </summary>
     private static GenerateStageRequest BuildAmbientGenerateRequest(
         ReactionLoopRegistration registration,
@@ -374,12 +375,15 @@ public sealed partial class ReactionLoopDriver
             ExerciseBrief = registration.ExerciseBrief,
             Storyline = new StorylineBrief
             {
-                Title = $"Everyday background chatter about {topic} (not about any incident)",
-                Expectation = "Nothing: this is ordinary daily life. Do not mention the incident, officials, emergencies or any storyline.",
+                // With IsAmbient the assembler reads Title as the topic seed phrase and ignores the storyline-only
+                // fields (expectation, minutes since response, intensity, phase).
+                Title = topic,
+                Expectation = string.Empty,
                 MinutesSinceLastOfficialResponse = 0,
                 Intensity = 0,
                 Phase = "AMBIENT",
                 ToneMix = intent.ToneMix,
+                IsAmbient = true,
             },
             Personas = intent.Personas,
             Tier = tier,

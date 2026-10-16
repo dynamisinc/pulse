@@ -74,13 +74,15 @@ public sealed record AmbientDecideInput
 /// </remarks>
 public static class AmbientBehavior
 {
-    /// <summary>The ambient tone: calm everyday life with a little warmth, no worry or anger.</summary>
+    /// <summary>
+    /// The ambient tone: calm everyday life with a little warmth — and nothing else. No worry or anger, and no
+    /// speculation or skepticism either: those are the vocabulary of a crowd reacting to an incident, which background
+    /// chatter must never read as.
+    /// </summary>
     public static ToneMix AmbientMix { get; } = new()
     {
-        Calm = 0.6,
-        Gratitude = 0.2,
-        Speculation = 0.1,
-        Skepticism = 0.1,
+        Calm = 0.75,
+        Gratitude = 0.25,
     };
 
     /// <summary>

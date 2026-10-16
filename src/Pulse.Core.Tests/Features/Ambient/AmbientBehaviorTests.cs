@@ -166,4 +166,19 @@ public class AmbientBehaviorTests
         AmbientBehavior.Decide(Input(Policy(), enginePosts: 0, rate: tight))!.Count.Should().Be(2,
             "never more than the global cap even when the policy and cast allow more");
     }
+
+    [Fact]
+    public void TheAmbientMix_IsCalmAndGratitudeOnly()
+    {
+        // Gate-1 H-1: speculation / skepticism / worry / anger are the vocabulary of a crowd reacting to an incident.
+        var mix = AmbientBehavior.AmbientMix;
+
+        mix.Calm.Should().BePositive();
+        mix.Gratitude.Should().BePositive();
+        mix.Worry.Should().Be(0);
+        mix.Anger.Should().Be(0);
+        mix.Speculation.Should().Be(0);
+        mix.Skepticism.Should().Be(0);
+        (mix.Calm + mix.Gratitude).Should().BeApproximately(1.0, 1e-9);
+    }
 }

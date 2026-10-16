@@ -91,7 +91,9 @@ public sealed class AmbientAutonomousPublishTests
         await harness.TickAsync();
 
         var prompt = harness.Provider.LastRequest!.SystemPrompt;
-        prompt.Should().Contain("not about any incident");
+        prompt.Should().Contain("## Background chatter — topic: ");
+        prompt.Should().NotContain("Officials have", "an ambient prompt carries no official-response escalation text (H-1)");
+        prompt.Should().NotContain("Storyline you are advancing");
         (prompt.Contains(AmbientTopics.SeedPhrase(AmbientTopics.Food), StringComparison.Ordinal)
             || prompt.Contains(AmbientTopics.SeedPhrase(AmbientTopics.Sports), StringComparison.Ordinal))
             .Should().BeTrue("the topic seed is one of the allow-listed topics' server-authored phrases");

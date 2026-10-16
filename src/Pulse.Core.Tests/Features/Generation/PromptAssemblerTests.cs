@@ -93,4 +93,97 @@ public class PromptAssemblerTests
         prompt.IndexOf("## Cast", StringComparison.Ordinal)
             .Should().BeLessThan(prompt.IndexOf("## Storyline", StringComparison.Ordinal));
     }
+
+    // ---- Ambient chatter (ambient-chatter story 01, Gate-1 H-1) -----------------------------------------------
+
+    private const string AmbientSeed = "cooking, restaurants and local food spots";
+
+    private static PromptAssemblyInput AmbientInput() => Input() with
+    {
+        Storyline = new StorylineBrief
+        {
+            Title = AmbientSeed,
+            Expectation = string.Empty,
+            MinutesSinceLastOfficialResponse = 0,
+            Intensity = 0,
+            ToneMix = new ToneMix { Calm = 0.75, Gratitude = 0.25 },
+            IsAmbient = true,
+        },
+        Personas =
+        [
+            new PersonaDossier
+            {
+                Handle = "@ana",
+                DisplayName = "Ana",
+                Type = PersonaType.Resident,
+                VoiceNotes = "anxious parent",
+                RecentPosts = ["RECENT_STORYLINE_POST is the tap water safe??"],
+            },
+        ],
+    };
+
+    [Theory]
+    [InlineData("Officials have")]
+    [InlineData("Storyline you are advancing")]
+    [InlineData("unfolding situation")]
+    [InlineData("Public expectation")]
+    [InlineData("Minutes since any official response")]
+    [InlineData("Current intensity")]
+    [InlineData("advancing the storyline")]
+    [InlineData("React to anything relevant in the world feed")]
+    public void Assemble_Ambient_CarriesNoStorylineOrEscalationFraming(string forbidden)
+    {
+        var prompt = _assembler.Assemble(AmbientInput()).SystemPrompt;
+
+        prompt.Should().NotContain(forbidden, "ambient chatter is everyday life, never a storyline or an escalation");
+    }
+
+    [Fact]
+    public void Assemble_Ambient_CarriesTheTopicSeed_TheBackgroundSetting_AndTheTask()
+    {
+        var prompt = _assembler.Assemble(AmbientInput()).SystemPrompt;
+
+        prompt.Should().Contain("## Background chatter — topic: " + AmbientSeed);
+        prompt.Should().Contain("Ordinary daily life only");
+        prompt.Should().Contain("## Setting (background only");
+        prompt.Should().Contain("Fictional town of Rivermead", "the exercise brief remains, demoted to background setting");
+        prompt.Should().Contain("UNTRUSTED DATA", "the absolute rules are shared by every prompt");
+        prompt.Should().Contain("@ana").And.Contain("emit_posts");
+    }
+
+    [Fact]
+    public void Assemble_Ambient_SkipsPersonaRecentPosts()
+    {
+        var prompt = _assembler.Assemble(AmbientInput()).SystemPrompt;
+
+        prompt.Should().NotContain("RECENT_STORYLINE_POST", "storyline exemplars would pull the incident into small talk");
+        prompt.Should().NotContain("recent posts:");
+    }
+
+    [Fact]
+    public void Assemble_NonAmbient_KeepsTheStorylineFraming_AndRecentPosts()
+    {
+        var input = Input() with
+        {
+            Personas =
+            [
+                new PersonaDossier
+                {
+                    Handle = "@ana",
+                    DisplayName = "Ana",
+                    Type = PersonaType.Resident,
+                    RecentPosts = ["RECENT_STORYLINE_POST"],
+                },
+            ],
+        };
+
+        var prompt = _assembler.Assemble(input).SystemPrompt;
+
+        prompt.Should().Contain("unfolding situation");
+        prompt.Should().Contain("## Storyline you are advancing");
+        prompt.Should().Contain("Public expectation");
+        prompt.Should().Contain("Officials have been silent for 35 minutes");
+        prompt.Should().Contain("RECENT_STORYLINE_POST");
+        prompt.Should().NotContain("Background chatter");
+    }
 }
