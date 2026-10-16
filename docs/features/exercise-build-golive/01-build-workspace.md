@@ -32,3 +32,10 @@ readiness dashboard (story 03).
 
 ## Tests
 - Integration: Build-authored content is staff-only/unpublished; visible only after go-live/fire.
+
+## Scope update 2026-10-16 (ADMIN-IDENTITY-MODEL)
+
+Source: [`docs/design/ADMIN-IDENTITY-MODEL.md`](../../design/ADMIN-IDENTITY-MODEL.md) §5.4, §5.2, §6.1 (Tier-2 signed off by Tom, 2026-10-16). Wave A3.
+- [ ] **Setup content is stamped in build only.** Given the exercise is in `build`, when a post is written (composer, backdated, or content pack), then the server sets `Post.IsSetupContent = true`; posts written in `staged` or later are conduct (`false`). The client cannot set the flag.
+- [ ] **Staged-state edits.** Planners who need to add setup content after staging must **unstage** first (story 07); the workspace says so.
+- [ ] User guide (C5 docs-as-done): `docs/guide/planner-guide.md` is updated in the same PR, or the PR states "no guide impact".

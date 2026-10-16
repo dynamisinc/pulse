@@ -402,3 +402,7 @@ Every surface-adding story would touch these, so no builder owns them. The orche
 | Four backend builders in one wave | Merge friction | EL-17 collision control; disjoint folders; only the seam commit touches shared files. |
 | `localStorage` for participant tokens widens an XSS blast radius (NFR-004) | A stored script could read a participant token | Participant-only; staff unchanged; existing sanitizer + CSP posture; story 07 is Tier-2 reviewed. |
 | Auto-created personas clutter the controller persona picker | Noise for controllers | `PersonaAutoCreated` lets a later change group or hide them; not fixed this week. |
+
+## Scope update 2026-10-16 (ADMIN-IDENTITY-MODEL)
+
+Amendment notes only (no new stories or wave rows): readers of `Account.Role` / `Account.PersonaId` move to `Account.Enrollment.*` in wave A1; roster reconciliation (story 02) is wave A2 and is delivered with `identity-auth-roles` 19-20.

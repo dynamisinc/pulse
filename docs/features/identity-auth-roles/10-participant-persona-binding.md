@@ -213,3 +213,9 @@ All under `src/Pulse.WebApi.Tests/Features/Ops/Bootstrap/`. DB-backed tests are 
 
 Frontend: no change was required — `useComposePost.ts` already derives `canPost` from `session.personaId`
 and `Composer.tsx` already renders the absent case (AC4), so no frontend test was added.
+
+## Scope update 2026-10-16 (ADMIN-IDENTITY-MODEL)
+
+**Amendment note (Complete/finished story; ACs unchanged).** Source: [`docs/design/ADMIN-IDENTITY-MODEL.md`](../../design/ADMIN-IDENTITY-MODEL.md) §1.1 (accepted cost). Wave A1,
+delivered under `16-person-and-enrollments`. Change: persona binding reads and writes Enrollment.PersonaId (Account.PersonaId is dropped). This story's readers move to `Enrollment`; its
+existing ACs and test suite are the regression net and must stay green. No new ACs.

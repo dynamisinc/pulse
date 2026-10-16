@@ -126,3 +126,9 @@ tenant bound closing the door rather than an empty table). Every guard was **neu
 - `ExerciseListEndpointTests.List_AsEvaluator_IsRefused (AC5)`
 - `ExerciseListEndpointTests.List_AsPlanner_IsAdmitted_BecauseStory02IsPlannerOrOrgAdmin (AC5, positive control)`
 - `ExerciseListEndpointTests.List_WithNoSession_IsUnauthorized_NeverAnEmpty200 (AC5)`
+
+## Scope update 2026-10-16 (ADMIN-IDENTITY-MODEL)
+
+Source: [`docs/design/ADMIN-IDENTITY-MODEL.md`](../../design/ADMIN-IDENTITY-MODEL.md) §5.1, §5.2, §8.2 (Tier-2 signed off by Tom, 2026-10-16). Wave A3. Row actions (not built in #411) are now defined and delivered by exercise-build-golive 06-08.
+- [ ] Row actions respect the matrix: rename/archive/reset/delete planner or org admin; unarchive org admin only; duplicate planner (source) or org admin; actions that are not available for the exercise's lifecycle state are absent, not disabled.
+- [ ] User guide (C5 docs-as-done): `docs/guide/planner-guide.md` is updated in the same PR, or the PR states "no guide impact".
