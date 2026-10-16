@@ -150,3 +150,9 @@ Deferred / tracked follow-ups (not blockers to Complete):
 
 Markdown status flipped to Complete. Not closing the GitHub issue — it closes when the umbrella→main
 PR merges.
+
+## Scope update 2026-10-16 (ADMIN-IDENTITY-MODEL)
+
+**Amendment note (Complete/finished story; ACs unchanged).** Source: [`docs/design/ADMIN-IDENTITY-MODEL.md`](../../design/ADMIN-IDENTITY-MODEL.md) §1.1 (accepted cost). Wave A1,
+delivered under `16-person-and-enrollments`. Change: Account.Role and Account.PersonaId move to Enrollment; account creation also creates the linked Enrollment. This story's readers move to `Enrollment`; its
+existing ACs and test suite are the regression net and must stay green. No new ACs.

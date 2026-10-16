@@ -74,3 +74,7 @@ Tracked follow-ups (not blockers to Complete):
 
 Markdown status flipped to Complete. Not closing the GitHub issue — it closes when the umbrella→main
 PR merges.
+
+## Scope update 2026-10-16 (ADMIN-IDENTITY-MODEL)
+
+**Amendment note (Complete story; ACs unchanged).** Source: [`docs/design/ADMIN-IDENTITY-MODEL.md`](../../design/ADMIN-IDENTITY-MODEL.md) §1.2 (Tier-2 signed off by Tom, 2026-10-16). Wave A1. The switcher reads `Enrollment` (staff roles only) instead of `StaffAssignment`, never selects an enrollment that has an `Account`, and **never crosses orgs** (changing org means signing in again). Org-scope sessions may call `GET /api/staff/assignments` and `POST /api/staff/active-exercise` for their own same-org enrollments; a foreign or missing target is the bare 404. Existing ACs and the isolation suite are the regression net.
