@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Pulse.WebApi.Features.EngineRuntime;
+using Pulse.WebApi.Features.Identity.RoleMatrix;
 
 /// <summary>
 /// <c>POST /api/injects/import?dryRun=true|false</c> (multipart field <c>file</c>) — the MSEL import into the run sheet
@@ -70,13 +71,14 @@ public static class InjectImportEndpoints
     {
         ArgumentNullException.ThrowIfNull(endpoints);
 
-        var controllerOnly = endpoints
+        // identity-auth-roles/17 (§8.2): a run-sheet import is a run-sheet EDIT — planner or controller (planner added).
+        var runSheetEdit = endpoints
             .MapGroup(string.Empty)
             .AddEndpointFilter<EngineCockpitStaffAuthorizationFilter>()
             .MapGroup(string.Empty)
-            .AddEndpointFilter<EngineCockpitControllerRoleFilter>();
+            .RequireExerciseRole(ExerciseRoleFilter.PlannerOrController);
 
-        controllerOnly.MapPost(ImportRoute, ImportAsync)
+        runSheetEdit.MapPost(ImportRoute, ImportAsync)
             .WithMetadata(new RequestSizeLimitAttribute(MselLimits.MaxRequestBytes))
             .DisableAntiforgery();
 

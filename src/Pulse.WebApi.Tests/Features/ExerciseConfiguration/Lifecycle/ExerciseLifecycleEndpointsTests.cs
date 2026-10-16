@@ -63,8 +63,6 @@ public sealed class ExerciseLifecycleEndpointsTests
     [RequiresDockerTheory]
     [InlineData("build", "live")]
     [InlineData("staged", "completed")]
-    [InlineData("live", "archived")]
-    [InlineData("archived", "live")]
     [InlineData("live", "live")]
     public async Task Transition_Disallowed_Returns409AndChangesNothing(string from, string to)
     {
@@ -76,6 +74,26 @@ public sealed class ExerciseLifecycleEndpointsTests
 
         response.StatusCode.Should().Be(
             HttpStatusCode.Conflict, "'{0}' -> '{1}' is not a COR-032 transition", from, to);
+        (await ReadStatusAsync(exerciseId)).Should().Be(from, "a refused transition leaves the state untouched");
+    }
+
+    /// <summary>
+    /// identity-auth-roles/17 (deliberate update): this host's caller is a CONTROLLER, and archiving is the planner's
+    /// edge while unarchive is no exercise role's — so these two now answer 403 from the per-transition role gate,
+    /// before the state machine is consulted. The state is still untouched.
+    /// </summary>
+    [RequiresDockerTheory]
+    [InlineData("live", "archived")]
+    [InlineData("archived", "live")]
+    public async Task Transition_OnAnEdgeTheControllerDoesNotOwn_Returns403AndChangesNothing(string from, string to)
+    {
+        var exerciseId = await SeedAsync(from);
+        await using var host = await StartAsync(exerciseId);
+
+        var response = await host.Client.PostAsJsonAsync(
+            new Uri(TransitionRoute, UriKind.Relative), new { to });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
         (await ReadStatusAsync(exerciseId)).Should().Be(from, "a refused transition leaves the state untouched");
     }
 

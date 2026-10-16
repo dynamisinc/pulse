@@ -625,6 +625,9 @@ public sealed class EngineReviewEndpointsTests
                 PersonId = staffUserId,
                 ExerciseId = exerciseId,
                 Role = "controller",
+
+                // identity-auth-roles/17: the suite's controller is the exercise's LEAD — the raise routes need it.
+                IsLead = true,
                 CreatedAt = DateTimeOffset.UtcNow,
             });
             await context.SaveChangesAsync();

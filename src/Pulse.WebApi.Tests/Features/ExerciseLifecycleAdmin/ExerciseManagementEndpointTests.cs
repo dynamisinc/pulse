@@ -32,11 +32,14 @@ public sealed class ExerciseManagementEndpointTests
 
     // ---------------------------------------------------------------- rename
 
-    /// <summary>AC rename: the DF-20 role set (planner, org admin, controller) renames its own organization's exercise.</summary>
+    /// <summary>
+    /// AC rename, as narrowed by identity-auth-roles/17 (§8.2): the org admin and the exercise's own planner rename it;
+    /// the controller is refused (<see cref="Rename_ByAController_Is403_AndChangesNothing"/>).
+    /// </summary>
     [RequiresDockerFact]
     public async Task Rename_ByEachAdministratorRole_RenamesTheExercise_AndEmitsOneRenamedEventWithNoText()
     {
-        foreach (var role in new[] { ExerciseAdminRoles.Planner, ExerciseAdminRoles.OrgAdmin, ExerciseAdminRoles.Controller })
+        foreach (var role in new[] { ExerciseAdminRoles.Planner, ExerciseAdminRoles.OrgAdmin })
         {
             var world = await OrgAdminTestWorld.SeedAsync(_fixture, role);
             await using var factory = new OrgAdminProbeFactory(_fixture.ConnectionString!);
@@ -44,7 +47,7 @@ public sealed class ExerciseManagementEndpointTests
 
             var response = await client.PatchAsJsonAsync(ByIdUri(world.OwnExercise.Id), new { name = "  Renamed Run  " });
 
-            response.StatusCode.Should().Be(HttpStatusCode.OK, "{0} is in the DF-20 set", role);
+            response.StatusCode.Should().Be(HttpStatusCode.OK, "{0} may rename (§8.2)", role);
             var row = await response.Content.ReadFromJsonAsync<OrgExerciseWire>();
             row!.ExerciseId.Should().Be(world.OwnExercise.Id.ToString());
             row.Name.Should().Be("Renamed Run", "the settings rule trims");
@@ -62,6 +65,27 @@ public sealed class ExerciseManagementEndpointTests
             renamed.Payload.Should().NotContain("Renamed", "telemetry carries counts only, never the name");
             renamed.Payload.Should().NotContain(world.OwnExercise.Name);
         }
+    }
+
+    /// <summary>identity-auth-roles/17 (§8.2, deliberate narrowing of DF-20): a controller may not rename or archive.</summary>
+    [RequiresDockerFact]
+    public async Task Rename_ByAController_Is403_AndChangesNothing()
+    {
+        var world = await OrgAdminTestWorld.SeedAsync(_fixture, ExerciseAdminRoles.Controller);
+        await using var factory = new OrgAdminProbeFactory(_fixture.ConnectionString!);
+        using var client = OrgAdminTestWorld.CreateClient(factory, world.Token);
+
+        var rename = await client.PatchAsJsonAsync(ByIdUri(world.OwnExercise.Id), new { name = "Controller Rename" });
+        rename.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+
+        await SetStatusAsync(world.OwnExercise.Id, "completed");
+        var archive = await client.PostAsync(ArchiveUri(world.OwnExercise.Id), content: null);
+        archive.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+
+        await using var read = _fixture.CreateContext();
+        var row = await read.Exercises.AsNoTracking().SingleAsync(e => e.Id == world.OwnExercise.Id);
+        row.Name.Should().Be(world.OwnExercise.Name);
+        row.Status.Should().Be("completed");
     }
 
     /// <summary>AC rename: the settings name validator is reused — the same inputs pass and fail with the same reasons.</summary>
@@ -146,7 +170,8 @@ public sealed class ExerciseManagementEndpointTests
     [RequiresDockerFact]
     public async Task Archive_ACompletedExercise_ArchivesIt_AndEmitsExerciseArchived()
     {
-        var world = await OrgAdminTestWorld.SeedAsync(_fixture, ExerciseAdminRoles.Controller);
+        // identity-auth-roles/17: archive is the planner's or the org admin's (was a controller under DF-20).
+        var world = await OrgAdminTestWorld.SeedAsync(_fixture, ExerciseAdminRoles.Planner);
         await SetStatusAsync(world.OwnExercise.Id, "completed");
         await using var factory = new OrgAdminProbeFactory(_fixture.ConnectionString!);
         using var client = OrgAdminTestWorld.CreateClient(factory, world.Token);

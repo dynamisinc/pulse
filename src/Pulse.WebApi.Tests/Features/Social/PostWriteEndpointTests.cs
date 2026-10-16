@@ -775,6 +775,18 @@ public class PostWriteEndpointTests
         seed.Personas.Add(NewPersona(world.OtherPersona, exerciseId));
         seed.Sessions.Add(participantSession);
         seed.Sessions.Add(staffSession);
+
+        // identity-auth-roles/17: a staff post-as-persona now needs a live controller (or, in build, planner)
+        // ENROLLMENT on the exercise — an unenrolled staff session is refused (403), so the operator is seeded enrolled.
+        seed.StaffUsers.Add(StaffTenantSeed.StaffUserFor(staffUserId));
+        seed.Enrollments.Add(new Enrollment
+        {
+            Id = Guid.NewGuid(),
+            ExerciseId = exerciseId,
+            PersonId = staffUserId,
+            Role = "controller",
+            CreatedAt = DateTimeOffset.UtcNow,
+        });
         await seed.SaveChangesAsync();
 
         return world;

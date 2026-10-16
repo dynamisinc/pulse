@@ -8,6 +8,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Features.Identity.SharedAccess;
+using Pulse.WebApi.Features.Identity.RoleMatrix;
 
 /// <summary>
 /// The follow-graph HTTP surface (SOC-051, <c>profiles-social-graph/07</c>): the follow/unfollow writes plus
@@ -74,7 +75,11 @@ public static class FollowEndpoints
         ArgumentNullException.ThrowIfNull(endpoints);
 
         // Sim WRITES: guarded by the read-only write filter at map time (COR-015).
-        var writes = endpoints.MapGroup(string.Empty).DenyReadOnlySessions();
+        // identity-auth-roles/17 (§8.2): a STAFF follow-as-persona is authoring — planner or controller in build,
+        // controller otherwise, never an evaluator. Participant callers pass through to the service unchanged.
+        var writes = endpoints.MapGroup(string.Empty)
+            .DenyReadOnlySessions()
+            .AddEndpointFilter(StaffAuthoringRoleFilter.PersonaAuthoring);
         writes.MapPost("/api/personas/{personaId:guid}/follow", FollowAsync);
         writes.MapDelete("/api/personas/{personaId:guid}/follow", UnfollowAsync);
 

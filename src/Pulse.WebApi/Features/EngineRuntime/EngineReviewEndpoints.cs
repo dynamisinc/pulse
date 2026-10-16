@@ -125,18 +125,26 @@ public static class EngineReviewEndpoints
         steering.MapPost("/api/engine/review/{draftId:guid}/veto", VetoAsync);
         steering.MapPost("/api/engine/review/{draftId:guid}/re-roll", ReRollAsync);
         steering.MapPost("/api/engine/review/batch-approve", BatchApproveAsync);
-        steering.MapPost("/api/engine/autonomy/swamped-mode", SetSwampedModeAsync);
+        // identity-auth-roles/17 (ADMIN-IDENTITY-MODEL §12, Option A): the five autonomy RAISES additionally need the
+        // LEAD controller (LeadControllerRaiseFilter, read live); lowering — swamped off, autonomy down, the kill switch,
+        // cut-to-fake — stays open to any controller.
+        steering.MapPost("/api/engine/autonomy/swamped-mode", SetSwampedModeAsync)
+            .AddEndpointFilter(LeadControllerRaiseFilter.SwampedMode);
         steering.MapPost("/api/engine/autonomy/kill-switch", EngageKillSwitchAsync);
-        steering.MapPost("/api/engine/autonomy/restore", RestoreAsync);
-        steering.MapPost("/api/engine/settings/autonomy-default", SetAutonomyDefaultAsync);
-        steering.MapPost("/api/engine/settings/tier-policy", SetTierPolicyAsync);
+        steering.MapPost("/api/engine/autonomy/restore", RestoreAsync)
+            .AddEndpointFilter(LeadControllerRaiseFilter.AlwaysRaise);
+        steering.MapPost("/api/engine/settings/autonomy-default", SetAutonomyDefaultAsync)
+            .AddEndpointFilter(LeadControllerRaiseFilter.AutonomyDefault);
+        steering.MapPost("/api/engine/settings/tier-policy", SetTierPolicyAsync)
+            .AddEndpointFilter(LeadControllerRaiseFilter.TierPolicy);
 
         // autonomy-safety story 07 (ADP-042) — the runtime EGRESS lever. Two routes, on the same controller-role
         // steering group as every other engine mutation. Deliberately a BINARY pair and not one route taking a
         // provider name: there is no route, field, or literal anywhere here that selects a provider, so the wire
         // shape itself cannot become a chooser by a later, smaller change (NFR-005 / ADP-025).
         steering.MapPost("/api/engine/generation-provider/cut-to-fake", CutGenerationToFakeAsync);
-        steering.MapPost("/api/engine/generation-provider/restore", RestoreGenerationProviderAsync);
+        steering.MapPost("/api/engine/generation-provider/restore", RestoreGenerationProviderAsync)
+            .AddEndpointFilter(LeadControllerRaiseFilter.AlwaysRaise);
 
         return endpoints;
     }
