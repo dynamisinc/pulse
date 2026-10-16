@@ -204,7 +204,7 @@ public sealed class ExerciseReportEndpointTests
         summary.GetProperty("replies").GetInt32().Should().Be(1);
         summary.GetProperty("injectsDelivered").GetInt32().Should().Be(2, "unfired and deleted items are not delivered");
         summary.GetProperty("medianResponseMinutes").GetDouble().Should().Be(6, "only responded injects count");
-        summary.GetProperty("postsEdited").ValueKind.Should().Be(JsonValueKind.Null);
+        summary.GetProperty("postsEdited").GetInt32().Should().Be(0, "nothing in this seed was edited");
         summary.GetProperty("postsTakenDown").GetInt32().Should().Be(1);
         var bySource = summary.GetProperty("bySource");
         bySource.GetProperty("participant").GetInt32().Should().Be(3, "participant + controller-as-persona");
@@ -269,7 +269,8 @@ public sealed class ExerciseReportEndpointTests
         first.GetProperty("replies").GetInt32().Should().Be(1);
         first.GetProperty("pinnedForAll").GetBoolean().Should().BeTrue();
         first.GetProperty("takenDownAt").ValueKind.Should().Be(JsonValueKind.Null);
-        first.GetProperty("editCount").ValueKind.Should().Be(JsonValueKind.Null, "editing has not landed");
+        first.GetProperty("editCount").GetInt32().Should().Be(0);
+        first.GetProperty("lastEditedAt").ValueKind.Should().Be(JsonValueKind.Null, "never edited");
         first.GetProperty("replyToHandle").ValueKind.Should().Be(JsonValueKind.Null);
         var author = first.GetProperty("author");
         author.GetProperty("handle").GetString().Should().Be("@cityfire");
@@ -326,6 +327,47 @@ public sealed class ExerciseReportEndpointTests
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         using var json = await ReadAsync(response);
         json.RootElement.GetProperty("exercise").GetProperty("preparedAt").GetString().Should().Be("2026-10-15 21:30");
+    }
+
+    // ---- Edits (DF-29 Post.EditCount / LastEditedScenarioTime) --------------------------------------------------
+
+    [RequiresDockerFact]
+    public async Task Edits_CarryTheCountAndLastEditTime_AndPostsEditedCountsTakenDownPosts()
+    {
+        var exerciseId = await _seed.ExerciseAsync(timeZone: "America/Chicago");
+        var (token, _) = await _seed.StaffAsync(exerciseId, [(exerciseId, "controller")]);
+        var persona = await _report.PersonaAsync(exerciseId, "resident", "Resident");
+        var edited = await _seed.PostAsync(exerciseId, persona, 0, p =>
+        {
+            p.Origin = "participant";
+            p.EditCount = 2;
+            p.LastEditedAt = PostExportSeed.ScenarioStart.AddHours(9);
+            p.LastEditedScenarioTime = PostExportSeed.ScenarioStart.AddMinutes(5);
+        });
+        var editedThenTakenDown = await _seed.PostAsync(exerciseId, persona, 1, p =>
+        {
+            p.Origin = "participant";
+            p.EditCount = 1;
+            p.LastEditedScenarioTime = PostExportSeed.ScenarioStart.AddMinutes(2);
+            p.DeletedAt = PostExportSeed.ScenarioStart.AddMinutes(3);
+        });
+        var neverEdited = await _seed.PostAsync(exerciseId, persona, 2, p => p.Origin = "participant");
+
+        await using var host = await ExerciseReportTestHost.StartAsync(_seed.ConnectionString, exerciseId);
+        using var response = await host.GetReportAsync(token);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        using var json = await ReadAsync(response);
+        var root = json.RootElement;
+        root.GetProperty("summary").GetProperty("postsEdited").GetInt32().Should().Be(2, "a taken-down post still counts");
+
+        var byId = root.GetProperty("posts").EnumerateArray().ToDictionary(post => post.GetProperty("id").GetString()!);
+        var first = byId[edited.ToString()];
+        first.GetProperty("editCount").GetInt32().Should().Be(2);
+        first.GetProperty("lastEditedAt").GetString().Should().Be("2033-09-04 08:05", "scenario time in the exercise zone, never the wall clock");
+        byId[editedThenTakenDown.ToString()].GetProperty("editCount").GetInt32().Should().Be(1);
+        byId[neverEdited.ToString()].GetProperty("editCount").GetInt32().Should().Be(0);
+        byId[neverEdited.ToString()].GetProperty("lastEditedAt").ValueKind.Should().Be(JsonValueKind.Null);
     }
 
     // ---- Noise toggle (DF-41) ------------------------------------------------------------------------------------

@@ -221,7 +221,9 @@ public sealed partial class ExerciseReportService
                 post.BaselineLikeCount,
                 post.BaselineRepostCount,
                 post.BaselineReplyCount,
-                post.PinnedForAllAt))
+                post.PinnedForAllAt,
+                post.EditCount,
+                post.LastEditedScenarioTime))
             .ToListAsync(cancellationToken);
 
         var listed = posts.Where(post => includeNoise || !ExerciseReportBuilder.IsNoise(post.Origin)).ToList();
@@ -281,7 +283,7 @@ public sealed partial class ExerciseReportService
                 BusiestWindow = busiest is null
                     ? null
                     : new ReportBusiestWindowDto { Start = FormatAt(busiest.Start, zone), Posts = busiest.Total },
-                PostsEdited = null,
+                PostsEdited = posts.Count(post => post.EditCount > 0),
                 PostsTakenDown = posts.Count(post => post.DeletedAt is not null),
                 BySource = new ReportSourceCountsDto
                 {
@@ -498,7 +500,8 @@ public sealed partial class ExerciseReportService
                 Replies = post.BaselineReplyCount + (real?.RealReply ?? 0),
                 PinnedForAll = post.PinnedForAllAt is not null,
                 TakenDownAt = post.DeletedAt is { } deletedAt ? FormatAt(deletedAt, zone) : null,
-                EditCount = null,
+                EditCount = post.EditCount,
+                LastEditedAt = post.EditCount > 0 && post.LastEditedScenarioTime is { } editedAt ? FormatAt(editedAt, zone) : null,
             };
         }).ToArray();
     }
@@ -767,7 +770,9 @@ public sealed partial class ExerciseReportService
         int BaselineLikeCount,
         int BaselineRepostCount,
         int BaselineReplyCount,
-        DateTimeOffset? PinnedForAllAt);
+        DateTimeOffset? PinnedForAllAt,
+        int EditCount,
+        DateTimeOffset? LastEditedScenarioTime);
 
     /// <summary>One media item with its asset and effective poster.</summary>
     private sealed record MediaRow(Guid PostId, int Order, string Alt, MediaAsset Asset, MediaAsset? Poster);

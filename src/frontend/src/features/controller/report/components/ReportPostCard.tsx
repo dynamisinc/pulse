@@ -126,7 +126,11 @@ export function ReportPostCard({ post }: ReportPostCardProps) {
             {sourceLabel(post.source, post.postedBy)}
           </span>
           {post.editCount !== null && post.editCount > 0 && (
-            <span className={`${styles.tag} ${styles.tagEdited}`}>{`Edited ${post.editCount}×`}</span>
+            <span className={`${styles.tag} ${styles.tagEdited}`}>
+              {post.lastEditedAt !== null
+                ? `Edited ${post.editCount}× · last at ${timeOf(post.lastEditedAt)}`
+                : `Edited ${post.editCount}×`}
+            </span>
           )}
           {post.takenDownAt !== null && (
             <span className={`${styles.tag} ${styles.tagDown}`}>
