@@ -91,6 +91,14 @@ provider goes reachable. Building it now (ahead of that signature) means the saf
       steering/autonomy-change taxonomy entry is an **open question to align with
       `engine-telemetry-tuning/01-engine-event-types.md` (#173)** before either vocabulary is
       finalized — flag it for that alignment, do not fork the taxonomy unilaterally in this story.
+- [x] **Hold-on-cut (swamped-mode auto-send suspended):** while an exercise is cut to Fake, an expired
+      Delayed-auto countdown with no decision is **held** ("timer expired — held for you", one
+      `engine.reviewed` hold-on-expiry, nothing published) even under swamped mode, so a live draft
+      generated before the cut never auto-sends after it. The cut is re-checked immediately before each
+      auto-send publish, so a cut that lands in the middle of a swamped tick holds every later expiry in
+      that tick. Explicit controller approvals (approve / edit / batch) still publish during a cut. A
+      countdown held during a cut **stays held** after a restore (no second `engine.reviewed`); only
+      countdowns still running at the restore resume the ordinary swamped-mode rule.
 
 ## Out of Scope
 - **Selecting any provider other than the startup-configured one.** Not a smaller version of this
@@ -340,6 +348,11 @@ orchestrator sign-off, not a builder-assignable file.
 | `GenerationProviderSelectorTests.ACutInOneExercise_NeverChangesAnotherExercisesResolution` | AC1, AC6 |
 | `GenerationProviderSelectorTests.AnUnscopedRequest_FailsClosedToFake_AndNeverEgresses` | AC6 |
 | `GenerationProviderSelectorTests.NameAndGovernance_DescribeTheConfiguredDeployment_EvenWhileACutIsActive` | AC5 |
+| `EngineReviewSafetyInvariantTests.AutoHold_CutToFake_HoldsEvenUnderSwampedMode_WhileUncutSiblingExerciseStillAutoSends` | AC9 (hold-on-cut), AC6 |
+| `EngineReviewSafetyInvariantTests.AutoHold_CutLandsMidTick_LaterExpiredItemHolds_NotPublished` | AC9 (hold-on-cut) |
+| `EngineReviewSafetyInvariantTests.AutoHold_CutCompletesWhileQueueIsRetrieved_ExpiredItemHolds_NotPublished` | AC9 (hold-on-cut) |
+| `EngineReviewSafetyInvariantTests.Approve_WhileCutToFake_StillPublishes` | AC9 (hold-on-cut) |
+| `EngineReviewSafetyInvariantTests.AutoHold_AfterRestore_HeldCountdownStaysHeld_NewExpiryResumesSwampedAutoSend` | AC9 (hold-on-cut) |
 | `GenerationProviderSelectorTests.Cut_IsIdempotent_AndOnlyReportsTheRealTransition` | AC3 |
 | `GenerationProviderSelectorTests.ThroughAddEngineGeneration_TheCutRegistryIsASingleSharedInstance` | AC1 |
 | `AddEngineGenerationTests.*` (4, rewritten to assert what the selector WRAPS) | AC1, AC2 |

@@ -618,6 +618,10 @@ The **ENGINE** panel shows **RUNNING ON:** and the provider in use. **Cut to Fak
 offline generator without a restart; it is greyed out today because the exercise is already on Fake. The **USAGE**
 tool shows the provider, model and call counts; select **Refresh** to update it.
 
+While the exercise is cut to Fake, Swamped mode does not post anything on its own: a burst whose countdown ends is
+**held** for you, as if Swamped mode were off. Bursts you approve still post. A burst held during a cut stays held
+after you restore the provider; approve or veto it yourself.
+
 ### Steering a storyline
 
 The escalation dial in the steering row shows each storyline's actual intensity and phase. Click, drag or use the

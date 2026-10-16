@@ -208,9 +208,88 @@ public sealed class EngineReviewSafetyInvariantTests
         await harness.Service.EvaluateAutoHoldAsync();
 
         heldDuringCut.Disposition.Should().Be(DraftDisposition.Held, "a countdown already resolved to HOLD stays held after a restore");
+        Action((await harness.ReviewedEventsAsync(heldDuringCut.DraftId)).Should().ContainSingle(
+            "the restore never re-resolves a held countdown — its one hold-on-expiry decision is the only engine.reviewed").Subject)
+            .Should().Be("hold-on-expiry");
         harness.Publisher.Bursts.Should().ContainSingle("after the restore the ordinary swamped-mode rule resumes for still-running countdowns")
             .Which.DraftId.Should().Be(laterCountdown.DraftId);
         laterCountdown.Disposition.Should().Be(DraftDisposition.Published);
+    }
+
+    [Fact]
+    public async Task AutoHold_CutLandsMidTick_LaterExpiredItemHolds_NotPublished()
+    {
+        var exerciseId = Guid.NewGuid();
+        var first = Countdown(exerciseId, started: 0, minutes: 3);
+        var second = Countdown(exerciseId, started: 0, minutes: 3);
+        using var harness = Build(exerciseId, first, second);
+
+        var state = harness.Registry.GetOrCreate(exerciseId);
+        state.SetStorylineOverride(first.StorylineId, AutonomyLevel.DelayedAuto, "lead-1", 0);
+        state.SetStorylineOverride(second.StorylineId, AutonomyLevel.DelayedAuto, "lead-1", 0);
+        state.SetSwampedMode(enabled: true, "lead-1", 0);
+        harness.Advance(minutes: 4);
+
+        // The controller cuts to Fake while the swamped tick is awaiting the FIRST burst's publish.
+        harness.Publisher.OnPublish = _ => harness.ProviderCut.Cut(exerciseId);
+
+        await harness.Service.EvaluateAutoHoldAsync();
+
+        var published = harness.Publisher.Bursts.Should().ContainSingle(
+            "only the burst whose publish was already under way when the cut landed reaches the feed").Subject;
+        var (sent, held) = published.DraftId == first.DraftId ? (first, second) : (second, first);
+
+        sent.Disposition.Should().Be(DraftDisposition.Published);
+        Action((await harness.ReviewedEventsAsync(sent.DraftId)).Should().ContainSingle().Subject).Should().Be("auto-send");
+
+        held.Disposition.Should().Be(
+            DraftDisposition.Held,
+            "a cut that lands mid-tick holds every later expiry — the cut is re-checked before each auto-send publish");
+        var reviewed = await harness.ReviewedEventsAsync(held.DraftId);
+        Action(reviewed.Should().ContainSingle("exactly one engine.reviewed per resolution").Subject).Should().Be("hold-on-expiry");
+        reviewed[0].Actor.ActingHumanId.Should().BeNull("a hold-on-cut is silence, not a human decision");
+    }
+
+    [Fact]
+    public async Task AutoHold_CutCompletesWhileQueueIsRetrieved_ExpiredItemHolds_NotPublished()
+    {
+        var exerciseId = Guid.NewGuid();
+        var item = Countdown(exerciseId, started: 0, minutes: 3);
+        using var harness = Build(exerciseId, item);
+
+        var state = harness.Registry.GetOrCreate(exerciseId);
+        state.SetStorylineOverride(item.StorylineId, AutonomyLevel.DelayedAuto, "lead-1", 0);
+        state.SetSwampedMode(enabled: true, "lead-1", 0);
+        harness.Advance(minutes: 4);
+
+        // The tick has already read "not cut"; the cut completes while the queue query is being awaited.
+        harness.Store.OnGetQueue = () => harness.ProviderCut.Cut(exerciseId);
+
+        await harness.Service.EvaluateAutoHoldAsync();
+
+        harness.Publisher.Bursts.Should().BeEmpty(
+            "a cut that completes before the auto-send publish holds the expiry — the cut is re-checked at the last boundary");
+        item.Disposition.Should().Be(DraftDisposition.Held);
+        Action((await harness.ReviewedEventsAsync(item.DraftId)).Should().ContainSingle("exactly one engine.reviewed per resolution").Subject)
+            .Should().Be("hold-on-expiry");
+    }
+
+    [Fact]
+    public async Task Approve_WhileCutToFake_StillPublishes()
+    {
+        var exerciseId = Guid.NewGuid();
+        var item = Countdown(exerciseId, started: 0, minutes: 5);
+        using var harness = Build(exerciseId, item);
+        harness.ProviderCut.Cut(exerciseId);
+
+        var result = await harness.Service.ApproveAsync(item.DraftId, Input("controller-7"));
+
+        result.Outcome.Should().Be(EngineReviewOutcome.Ok);
+        harness.Publisher.Bursts.Should().ContainSingle(
+            "hold-on-cut suspends only the timeout auto-send — an explicit approve still publishes")
+            .Which.DraftId.Should().Be(item.DraftId);
+        item.Disposition.Should().Be(DraftDisposition.Published);
+        Action((await harness.ReviewedEventsAsync(item.DraftId)).Should().ContainSingle().Subject).Should().Be("approve");
     }
 
     // ==== (c) Kill switch + degraded clamp only LOWER; suspend countdowns; never auto-recover =========
@@ -513,8 +592,9 @@ public sealed class EngineReviewSafetyInvariantTests
             TierPolicy = new EngineTierPolicyRegistry();
             ProviderCut = providerCut ?? new GenerationProviderCutRegistry();
 
+            Store = new FakeReviewStore(items);
             Service = new EngineReviewService(
-                new FakeReviewStore(items),
+                Store,
                 _db,
                 context,
                 clock,
@@ -532,6 +612,8 @@ public sealed class EngineReviewSafetyInvariantTests
         public EngineReviewService Service { get; }
 
         public RecordingPublishService Publisher { get; }
+
+        public FakeReviewStore Store { get; }
 
         public EngineAutonomyRegistry Registry { get; }
 
@@ -565,8 +647,14 @@ public sealed class EngineReviewSafetyInvariantTests
             return Task.CompletedTask;
         }
 
-        public Task<IReadOnlyList<EngineReviewItemEntity>> GetQueueAsync(CancellationToken cancellationToken = default) =>
-            Task.FromResult<IReadOnlyList<EngineReviewItemEntity>>(_items.Values.ToList());
+        /// <summary>An optional side effect run while the queue is being retrieved (e.g. a cut completing during the await).</summary>
+        public Action? OnGetQueue { get; set; }
+
+        public Task<IReadOnlyList<EngineReviewItemEntity>> GetQueueAsync(CancellationToken cancellationToken = default)
+        {
+            OnGetQueue?.Invoke();
+            return Task.FromResult<IReadOnlyList<EngineReviewItemEntity>>(_items.Values.ToList());
+        }
 
         public Task<EngineReviewItemEntity?> FindAsync(Guid draftId, CancellationToken cancellationToken = default) =>
             Task.FromResult(_items.GetValueOrDefault(draftId));
@@ -597,9 +685,13 @@ public sealed class EngineReviewSafetyInvariantTests
     {
         public List<EngineBurst> Bursts { get; } = new();
 
+        /// <summary>An optional side effect run on each publish (e.g. a cut to Fake landing mid-tick).</summary>
+        public Action<EngineBurst>? OnPublish { get; set; }
+
         public Task<EngineBurstPublishResult> PublishBurstAsync(EngineBurst burst, CancellationToken cancellationToken = default)
         {
             Bursts.Add(burst);
+            OnPublish?.Invoke(burst);
             return Task.FromResult(new EngineBurstPublishResult
             {
                 Posts = burst.Posts

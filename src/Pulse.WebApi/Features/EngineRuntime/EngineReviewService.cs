@@ -863,6 +863,16 @@ public sealed partial class EngineReviewService
             return;
         }
 
+        // Hold-on-cut, re-checked at the last boundary before the publish (M-1 / PR #571): the tick reads the cut once
+        // up front, but a cut to Fake can complete while the queue query or this item's lookup is awaited, or while a
+        // swamped tick awaits an earlier burst's publish. Re-reading it here holds the expiry exactly as a cut seen up
+        // front would. Explicit approvals never pass through here, so they keep publishing during a cut.
+        if (_providerCut.IsCutToFake(exerciseId))
+        {
+            await ResolveOnTickAsync(item, exerciseId, DraftDisposition.Held, EngineReviewAction.HoldOnExpiry, mutate: null, cancellationToken);
+            return;
+        }
+
         // Once the publish has been attempted, its record is written with CancellationToken.None: posts may be live,
         // so a host shutdown at this point must not leave the item counting down to be sent again on restart.
         EngineBurstPublishResult publishResult;
