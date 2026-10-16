@@ -1,7 +1,7 @@
 # Story: Staff shell frame, toolstrip and flyouts at tablet sizes
 
 **Feature:** Phones and tablets  ·  **Epic:** E1 (staff shell)  ·  **Phase:** 2  ·  **Status:** Not Started
-**Requirements:** COR-018, NFR-001  ·  **Design decisions:** D7-011 (toolstrip dock)  ·  **Issue:** —
+**Requirements:** COR-018, NFR-001  ·  **Design decisions:** D7-011 (toolstrip dock); tablet: pending TABLET-AMENDMENT sign-off ([`D5-controller-console/TABLET-AMENDMENT.md`](../../design/D5-controller-console/TABLET-AMENDMENT.md))  ·  **Issue:** —
 
 ## Context
 The shared staff shell (`StaffShellFrame`: header, work area `minmax(0,1fr) STAFF_TOOLSTRIP_WIDTH_PX`, right-edge toolstrip) hosts the console, planner
