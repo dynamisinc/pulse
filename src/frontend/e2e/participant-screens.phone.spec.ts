@@ -15,10 +15,9 @@
  *
  * Screenshots: set SCREENSHOT_DIR to also write one PNG per screen and viewport.
  *
- * KNOWN MOCK LIMIT (MT-D8): a COLD load of /notifications redirects to /home because the
- * shell-state query is still loading and reports the least-affordance `readOnly` variant,
- * which the Notifications page treats as "not available". So these tests reach the page
- * by clicking the tab (the real user path), exactly as the audit found it working.
+ * MT-D8: a COLD load of /notifications used to redirect to /home (the shell-state query
+ * was still loading and reported its least-affordance `readOnly` placeholder). The shell
+ * now marks the variant `variantPending` and the page waits; covered by the cold-load test.
  */
 import { test, expect, type Locator, type Page } from '@playwright/test'
 import {
@@ -159,6 +158,15 @@ test.describe('core screens: layout, scenario time, no clipping', () => {
     await expectScreenSound(page)
     await expectClearOfTabBar(page)
     await snap(page, 'notifications', testInfo)
+  })
+
+  test('notifications on a cold load / reload stays on the page (MT-D8)', async ({ page }) => {
+    await page.goto('/notifications')
+    await expect(page.getByRole('heading', { name: 'Notifications', level: 1 })).toBeVisible()
+    await expect(page).toHaveURL(/\/notifications$/)
+    await page.reload()
+    await expect(page.getByRole('heading', { name: 'Notifications', level: 1 })).toBeVisible()
+    await expect(page).toHaveURL(/\/notifications$/)
   })
 })
 

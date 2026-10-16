@@ -459,6 +459,21 @@ describe('absent, not inert (D1-011)', () => {
   )
 })
 
+describe('cold load of /notifications (MT-D8)', () => {
+  it('waits while the shell variant is unresolved: no redirect to Home, no page view yet', async () => {
+    seed(OWN, REPLY_FULCO)
+    renderChannel({
+      entries: ['/notifications'],
+      variant: 'readOnly', // the shell's least-affordance placeholder while pending
+      variantPending: true,
+      beside: <RouterProbe />,
+    })
+    expect(await screen.findByTestId('notifications-resolving')).toHaveAttribute('aria-busy', 'true')
+    expect(screen.getByTestId('router-location')).toHaveTextContent('/notifications')
+    expect(screen.queryByTestId('notifications-page')).not.toBeInTheDocument()
+  })
+})
+
 describe('sign-out', () => {
   it('the registered session reset sweeps BOTH stores and removes the bell', async () => {
     const user = userEvent.setup()

@@ -41,6 +41,8 @@ export interface RenderChannelOptions {
   /** The REAL router's entries (the app's address bar). Defaults to `['/home']`. */
   entries?: string[]
   variant?: ShellVariant
+  /** The shell has not resolved the variant yet (cold load; MT-D8). */
+  variantPending?: boolean
   /** Mount the channel under the memory navigation provider (C6's preview). */
   memory?: { initialEntries?: string[] }
   /** Render extra content beside the channel inside the router (probes). */
@@ -60,11 +62,11 @@ export interface RenderChannelOptions {
 }
 
 export function renderChannel(options: RenderChannelOptions = {}): RenderResult {
-  const { variant = 'full', memory, beside, parentRoute, appRoutes = false } = options
+  const { variant = 'full', variantPending, memory, beside, parentRoute, appRoutes = false } = options
   const entries = options.entries ?? [parentRoute ?? '/home']
   setExerciseClock({ scenarioNow: () => SCENARIO_NOW })
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  const mount: ShellMountProps = { variant, scenarioNow: SCENARIO_NOW }
+  const mount: ShellMountProps = { variant, scenarioNow: SCENARIO_NOW, variantPending }
 
   const channel = <SocialChannel />
   const stack = (
