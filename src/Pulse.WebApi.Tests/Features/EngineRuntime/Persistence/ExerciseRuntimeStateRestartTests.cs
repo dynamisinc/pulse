@@ -26,10 +26,12 @@ using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.EngineRuntime.Persistence;
 using Pulse.WebApi.Features.EngineRuntime.Steering;
 using Pulse.WebApi.Features.EngineRuntime.Telemetry;
+using Pulse.WebApi.Features.Identity.Staff;
 using Pulse.WebApi.Features.Realtime;
 using Pulse.WebApi.Features.Social;
 using Pulse.WebApi.Features.WhiteNoise;
 using Pulse.WebApi.Tests.Data;
+using Pulse.WebApi.Tests.Features.Identity.Staff;
 using Xunit;
 
 /// <summary>
@@ -300,6 +302,79 @@ public sealed class ExerciseRuntimeStateRestartTests
         (await CountEventsAsync(frozen, null)).Should().Be(0, "a restored Freeze still halts the engine: the tick is skipped");
     }
 
+    [RequiresDockerFact]
+    public async Task AfterARuntimeReset_TheNextLoopTick_StartsTheClockAgain_SoNoiseCanRun()
+    {
+        var time = new FakeTimeProvider(WallStart);
+        var exerciseId = await SeedExerciseAsync();
+        await using var process = StartProcess(time, withReactionLoop: true);
+        var clock = process.GetRequiredService<IExerciseClock>();
+        var registry = process.GetRequiredService<PauseTierRegistry>();
+        process.GetRequiredService<IReactionLoopRegistry>().Register(Registration(exerciseId));
+
+        var host = process.GetServices<IHostedService>().OfType<ReactionLoopHost>().Single();
+        await host.StartAsync(CancellationToken.None);
+        try
+        {
+            // The loop's first tick starts the clock; then the controller freezes and later resets the exercise.
+            await NudgeUntilAsync(time, () => Task.FromResult(clock.IsRunning(exerciseId)));
+            clock.Jump(exerciseId, 30);
+            await registry.SetTierAsync(exerciseId, PauseTier.Freeze, "controller-1");
+
+            // The body of POST /api/steering/runtime-state/reset, in the route's scope shape.
+            await using (var scope = process.CreateAsyncScope())
+            {
+                ((ExerciseContext)scope.ServiceProvider.GetRequiredService<IExerciseContext>()).CurrentExerciseId = exerciseId;
+                var state = await scope.ServiceProvider.GetRequiredService<RuntimeStateResetService>().ResetAsync();
+                state!.Tier.Should().Be("running");
+            }
+
+            clock.IsRunning(exerciseId).Should().BeFalse("the reset clears the clock to unstarted");
+
+            await NudgeUntilAsync(time, () => Task.FromResult(clock.IsRunning(exerciseId)));
+        }
+        finally
+        {
+            await host.StopAsync(CancellationToken.None);
+        }
+
+        clock.IsRunning(exerciseId).Should().BeTrue("the loop restarts a reset clock without an App Service restart");
+        clock.CurrentScenarioMinute(exerciseId).Should().Be(0, "it starts afresh at minute 0, not at the pre-reset minute");
+        WhiteNoiseService.IsTierOrClockStopped(registry, clock, exerciseId).Should().BeFalse(
+            "with the tier Running and the clock running again, white noise can run (DF-13)");
+    }
+
+    [RequiresDockerFact]
+    public async Task TheLoop_NeverStartsAFrozenClock_NorRestartsARunningOne_AcrossManyTicks()
+    {
+        var time = new FakeTimeProvider(WallStart);
+        var running = await SeedExerciseAsync();
+        var frozen = await SeedExerciseAsync();
+        await using var process = StartProcess(time, withReactionLoop: true);
+        var clock = (IExerciseClockPersistence)process.GetRequiredService<IExerciseClock>();
+        clock.Restore(running, new ExerciseClockAnchor(ScenarioStart, TimeZoneInfo.Utc, TimeSpan.FromMinutes(20), WallStart, Frozen: false));
+        clock.Restore(frozen, new ExerciseClockAnchor(ScenarioStart, TimeZoneInfo.Utc, TimeSpan.FromMinutes(20), WallStart, Frozen: true));
+        var loops = process.GetRequiredService<IReactionLoopRegistry>();
+        loops.Register(Registration(running));
+        loops.Register(Registration(frozen));
+
+        var host = process.GetServices<IHostedService>().OfType<ReactionLoopHost>().Single();
+        await host.StartAsync(CancellationToken.None);
+        try
+        {
+            await NudgeUntilAsync(time, async () => await CountEventsAsync(running, EngineEventTypes.Measured) >= 3);
+        }
+        finally
+        {
+            await host.StopAsync(CancellationToken.None);
+        }
+
+        var exerciseClock = process.GetRequiredService<IExerciseClock>();
+        exerciseClock.CurrentScenarioMinute(running).Should().Be(20, "several ticks never restart a running (restored) clock");
+        exerciseClock.IsFrozen(frozen).Should().BeTrue("a frozen clock is never started or unfrozen by the loop");
+        exerciseClock.CurrentScenarioMinute(frozen).Should().Be(20);
+    }
+
     // ---- process + data helpers --------------------------------------------------------------------------------
 
     /// <summary>One "process": the runtime singletons wired as Program.cs wires them, over the shared database.</summary>
@@ -325,6 +400,7 @@ public sealed class ExerciseRuntimeStateRestartTests
             services.AddEngineGeneration(new ConfigurationBuilder().Build()); // Fake provider
             services.AddEngineRuntimeSeams();
             services.AddReactionLoopHost();
+            services.AddScoped<ICurrentStaffSessionAccessor>(_ => new StubCurrentStaffSessionAccessor(null));
         }
 
         return services.BuildServiceProvider();
@@ -370,6 +446,18 @@ public sealed class ExerciseRuntimeStateRestartTests
         await using var context = _fixture.CreateContext(new ExerciseContext { CurrentExerciseId = exerciseId });
         return await context.TelemetryEvents.CountAsync(e => eventType == null || e.EventType == eventType);
     }
+
+    private static async Task NudgeUntilAsync(FakeTimeProvider time, Func<Task<bool>> condition) =>
+        await WaitUntilAsync(async () =>
+        {
+            if (await condition())
+            {
+                return true;
+            }
+
+            time.Advance(LoopTick);
+            return false;
+        });
 
     private static async Task WaitUntilAsync(Func<Task<bool>> condition)
     {

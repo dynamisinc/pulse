@@ -123,6 +123,8 @@ All under `src/Pulse.WebApi.Tests/Features/EngineRuntime/Persistence/` (Docker-g
   - `RuntimeStateResetEndpointTests.ResetRoute_IsMappedExactlyOnce_AsAPost` / `Post_NoStaffSession_Is401_AndResetsNothing` / `Post_UnresolvedScope_Is401` / `Post_AsEvaluator_Is403_AndResetsNothing` (AC-9 filters)
   - `RuntimeStateResetEndpointTests.Post_AfterAFreeze_ResetsTierClockAndOverlay_DeletesTheRow_AndEmitsOneEvent` (AC-9, AC-14 telemetry)
   - `RuntimeStateResetEndpointTests.Post_IsIdempotent` (AC-9)
+  - `ExerciseRuntimeStateRestartTests.AfterARuntimeReset_TheNextLoopTick_StartsTheClockAgain_SoNoiseCanRun` (AC-9 follow-through: `ReactionLoopHost.EnsureClockStarted` now relies on `ShouldStartClock` alone, with no per-host started-clock memo, so a reset clock restarts on the next tick without an App Service restart)
+  - `ExerciseRuntimeStateRestartTests.TheLoop_NeverStartsAFrozenClock_NorRestartsARunningOne_AcrossManyTicks` (AC-7 with the memo removed)
   - `ExerciseClockPersistenceTests.Clear_LeavesTheClockUnstarted_AndOnlyThatExercise` (AC-9)
 - **From the 10/15 reviews**
   - `RuntimeStateResetEndpointTests.Get_OnTheResetRoute_Answers405` (AC-11)
