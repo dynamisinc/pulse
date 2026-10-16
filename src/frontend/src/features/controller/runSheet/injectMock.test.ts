@@ -917,7 +917,9 @@ describe('mark fired without posting (demo-feedback story 23, DF-36)', () => {
       expect(marked.status).toBe('fired')
       expect(marked.version).toBe(before.version + 1)
       expect(marked.firedByHumanId).toBe(mock.me)
-      expect(marked.firedScenarioTime).toBeDefined()
+      // A never-started item is stamped now; the failed one keeps what its fire recorded.
+      if (id !== failed.id) expect(marked.firedScenarioTime).toBeDefined()
+      else expect(marked.firedScenarioTime).toBe(before.firedScenarioTime)
       expect(marked.error).toBeUndefined()
       expect(marked.posts.map(post => post.status)).toEqual(['skipped'])
       expect(marked.posts.some(post => post.firedPostId)).toBe(false)
@@ -939,6 +941,22 @@ describe('mark fired without posting (demo-feedback story 23, DF-36)', () => {
     }
     const stale = await conflictOf(mock.markFired(pending.id, pending.version + 1))
     expect(stale.item?.status).toBe('pending')
+  })
+
+  it('a started burst keeps who fired it; only a never-started item takes the marker', async () => {
+    const mock = makeMock([burst(2), single('Fresh')])
+    const [started, fresh] = mock.snapshot().items
+    if (!started || !fresh) throw new Error('seed missing')
+    const fired = await mock.as('human-controller-02').fire(started.id)
+    const held = await mock.hold(started.id)
+
+    const marked = await mock.markFired(started.id, held.version)
+    expect(marked.firedByHumanId).toBe('human-controller-02')
+    expect(marked.firedScenarioTime).toBe(fired.firedScenarioTime)
+
+    const markedFresh = await mock.markFired(fresh.id, fresh.version)
+    expect(markedFresh.firedByHumanId).toBe(mock.me)
+    mock.dispose()
   })
 
   it('is allowed under FREEZE (nothing reaches participants)', async () => {

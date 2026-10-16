@@ -369,13 +369,6 @@ function RunSheetPanelBody({ exerciseId }: { readonly exerciseId: string }) {
     void queue.retry(item.id).then(outcome => report('retry', outcome, item.id))
   }
 
-  // DF-36: fired without posting (the row asked to confirm). Allowed under FREEZE: nothing is
-  // published.
-  const markFired = (item: InjectItemDto): void => {
-    if (!canMarkFired(item.status)) return
-    void queue.markFired(item.id, item.version).then(outcome => report('mark fired', outcome, item.id))
-  }
-
   const toggleHold = (item: InjectItemDto): void => {
     if (canRelease(item.status)) {
       void queue.release(item.id).then(outcome => report('release', outcome, item.id))
@@ -484,6 +477,16 @@ function RunSheetPanelBody({ exerciseId }: { readonly exerciseId: string }) {
   const focusRow = (id: string): void => {
     setSelectedId(id)
     rowRefs.current.get(id)?.focus()
+  }
+
+  // DF-36: fired without posting (the row asked to confirm). Allowed under FREEZE: nothing is
+  // published. Once it settles, focus returns to the row (its "Mark fired" button is gone).
+  const markFired = (item: InjectItemDto): void => {
+    if (!canMarkFired(item.status)) return
+    void queue.markFired(item.id, item.version).then(outcome => {
+      report('mark fired', outcome, item.id)
+      focusRow(item.id)
+    })
   }
 
   const moveSelection = (delta: 1 | -1): void => {

@@ -124,6 +124,138 @@ public sealed class InjectMarkFiredTests
         (await CountPostsAsync(host, seeded.ExerciseId)).Should().Be(1, "only the post the burst fired before the hold");
     }
 
+    [RequiresDockerFact]
+    public async Task MarkFired_AFailedBurst_WithOneFiredAndOneFailedChild_KeepsThePost_SkipsTheFailure_AndTheOriginalStamps()
+    {
+        var spy = new SpyPublisher();
+        await using var host = await StartAsync(spy);
+        var seeded = await ActAsControllerAsync(host);
+        var item = await host.CreateOkAsync(InjectTestHost.BurstItem(seeded.PersonaIds, count: 2));
+        var firing = await host.ActionOkAsync(item.Guid, "fire"); // post 1 goes out now
+        spy.Refuse = true;
+        host.Time.Advance(TimeSpan.FromMinutes(5));
+        await host.Runner.RunTickAsync(); // post 2 is refused by the funnel
+        var failed = (await host.GetQueueAsync()).Items.Single(i => i.Id == item.Id);
+        failed.Status.Should().Be("failed");
+        failed.Posts.Select(post => post.Status).Should().Equal("fired", "failed");
+        var callsBefore = spy.Calls;
+        var marker = await host.AddStaffAsync(seeded.ExerciseId, "controller", "Morgan Marker");
+        host.ActAs(seeded.ExerciseId, marker);
+
+        var marked = await MarkFiredOkAsync(host, item.Guid, failed.Version);
+
+        marked.Status.Should().Be("fired");
+        marked.Posts.Select(post => post.Status).Should().Equal("fired", "skipped");
+        marked.Posts[0].FiredPostId.Should().Be(failed.Posts[0].FiredPostId, "the post that went out keeps its record");
+        marked.Posts[1].FiredPostId.Should().BeNull();
+        marked.FiredByHumanId.Should().Be(seeded.StaffUserId.ToString(), "a started item keeps who pressed Fire (L-2)");
+        marked.FiredScenarioTime.Should().Be(firing.FiredScenarioTime, "and when it was fired");
+        spy.Calls.Should().Be(callsBefore);
+        (await CountPostsAsync(host, seeded.ExerciseId)).Should().Be(1);
+        (await MarkedFiredEventsAsync(host, seeded.ExerciseId)).Should().ContainSingle()
+            .Which.Actor.ActingHumanId.Should().Be(marker.ToString(), "the event records who marked it");
+    }
+
+    [RequiresDockerFact]
+    public async Task MarkFired_AnItemThatNeverStarted_IsStampedByTheMarker()
+    {
+        await using var host = await StartAsync(new SpyPublisher());
+        var seeded = await ActAsControllerAsync(host);
+        var item = await host.CreateOkAsync(InjectTestHost.BurstItem(seeded.PersonaIds, count: 2));
+        var held = await host.ActionOkAsync(item.Guid, "hold");
+        var marker = await host.AddStaffAsync(seeded.ExerciseId, "controller", "Morgan Marker");
+        host.ActAs(seeded.ExerciseId, marker);
+
+        var marked = await MarkFiredOkAsync(host, item.Guid, held.Version);
+
+        marked.FiredByHumanId.Should().Be(marker.ToString(), "nobody pressed Fire, so the marker is recorded (L-2)");
+        marked.FiredScenarioTime.Should().NotBeNull();
+    }
+
+    [RequiresDockerFact]
+    public async Task MarkFired_WhileAPostOfTheItemIsInFlight_Is409InFlight_VersionUnchanged_NoEvent()
+    {
+        var spy = new SpyPublisher();
+        await using var host = await StartAsync(spy);
+        var seeded = await ActAsControllerAsync(host);
+        var item = await host.CreateOkAsync(InjectTestHost.BurstItem(seeded.PersonaIds, count: 3));
+        await host.ActionOkAsync(item.Guid, "fire");
+        var held = await host.ActionOkAsync(item.Guid, "hold");
+        await using (var db = host.Db(seeded.ExerciseId))
+        {
+            var second = await db.InjectItemPosts.SingleAsync(post => post.InjectItemId == item.Guid && post.Sequence == 2);
+            second.ClaimedAt = host.Time.GetUtcNow(); // a runner step mid-publish
+            await db.SaveChangesAsync();
+        }
+
+        var refused = await MarkFiredAsync(host, item.Guid, held.Version);
+
+        refused.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        var problem = await InjectTestHost.ReadProblemAsync(refused);
+        problem.Detail.Should().Be(InjectTransitions.InFlightMessage);
+        problem.Item!.Status.Should().Be("held");
+        problem.Item.Version.Should().Be(held.Version, "a refusal changes nothing");
+        (await MarkedFiredEventsAsync(host, seeded.ExerciseId)).Should().BeEmpty();
+    }
+
+    // ---- M-1: a reply to a post that was marked fired is not a dead end -------------------------------
+
+    [RequiresDockerFact]
+    public async Task Fire_AReplyWhoseScriptedParentWasMarkedFired_Is409_WithTheMarkedFiredMessage()
+    {
+        var spy = new SpyPublisher();
+        await using var host = await StartAsync(spy);
+        var seeded = await ActAsControllerAsync(host);
+        var parent = await host.CreateOkAsync(InjectTestHost.PostItem(seeded.PersonaIds[0]));
+        var reply = await host.CreateOkAsync(InjectTestHost.PostItem(
+            seeded.PersonaIds[1], "replying", new { injectPostId = parent.Posts[0].Id }));
+        await MarkFiredOkAsync(host, parent.Guid, parent.Version);
+
+        var refused = await host.ActionAsync(reply.Guid, "fire");
+
+        refused.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        var problem = await InjectTestHost.ReadProblemAsync(refused);
+        problem.Detail.Should().Be(InjectBurstPlanner.ParentMarkedFiredMessage);
+        problem.Detail.Should().Be(
+            "The post this replies to was marked fired, not posted. Edit this item to reply to the real post.");
+        problem.Item!.Status.Should().Be("pending", "a refused fire changes nothing");
+        spy.Calls.Should().Be(0);
+    }
+
+    [RequiresDockerFact]
+    public async Task ABurstChildReplyingToAMarkedFiredPost_FailsWithTheMarkedFiredMessage()
+    {
+        await using var host = await StartAsync(new SpyPublisher());
+        var seeded = await ActAsControllerAsync(host);
+        var parent = await host.CreateOkAsync(InjectTestHost.PostItem(seeded.PersonaIds[0]));
+        var burst = await host.CreateOkAsync(new
+        {
+            kind = "burst",
+            title = "Replies",
+            burstWindowSeconds = 90,
+            posts = new object[]
+            {
+                new { personaId = seeded.PersonaIds[1].ToString(), text = "first #WaterIssues" },
+                new
+                {
+                    personaId = seeded.PersonaIds[2].ToString(),
+                    text = "replying #WaterIssues",
+                    replyTo = new { injectPostId = parent.Posts[0].Id },
+                },
+            },
+        });
+        await MarkFiredOkAsync(host, parent.Guid, parent.Version);
+
+        await host.ActionOkAsync(burst.Guid, "fire"); // post 1 goes out now
+        host.Time.Advance(TimeSpan.FromMinutes(5));
+        await host.Runner.RunTickAsync();
+
+        var settled = (await host.GetQueueAsync()).Items.Single(i => i.Id == burst.Id);
+        settled.Status.Should().Be("failed");
+        settled.Posts[1].Status.Should().Be("failed");
+        settled.Posts[1].Error.Should().Be(InjectBurstPlanner.ParentMarkedFiredMessage);
+    }
+
     // ---- AC 1: any other status is 409 with the existing refusal shape ---------------------------------
 
     [RequiresDockerFact]

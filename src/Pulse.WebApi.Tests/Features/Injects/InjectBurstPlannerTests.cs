@@ -181,6 +181,22 @@ public sealed class InjectBurstPlannerTests
     }
 
     [Fact]
+    public void AReplyToAPostInAnotherItemThatWasMarkedFired_FailsWithTheMarkedFiredMessage_NotADeadEnd()
+    {
+        var item = Released(Item(), T0, 0, 10, 20);
+        var markedParent = Guid.NewGuid();
+        Children(item)[0].ReplyToInjectPostId = markedParent;
+        var parents = new InjectReplyParents(
+            new Dictionary<Guid, Guid?> { [markedParent] = null },
+            new HashSet<Guid> { markedParent });
+
+        var step = InjectBurstPlanner.Next(item, T0, parents);
+
+        step.Kind.Should().Be(InjectStepKind.Fail);
+        step.Error.Should().Be(InjectBurstPlanner.ParentMarkedFiredMessage, "\"fire the parent first\" can never succeed (DF-36)");
+    }
+
+    [Fact]
     public void AReplyToAFiredPostInAnotherItem_PublishesAsAReplyToIt()
     {
         var item = Released(Item(), T0, 0, 10, 20);

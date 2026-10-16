@@ -685,9 +685,9 @@ public sealed partial class InjectQueueService
     /// <summary>
     /// <c>POST /api/injects/{itemId}/mark-fired</c> (demo-feedback DF-36): records a <c>pending</c>, <c>held</c> or
     /// <c>failed</c> item as <c>fired</c> WITHOUT publishing — the inject was delivered outside Pulse, or posted by hand.
-    /// It stamps <see cref="InjectItem.FiredByHumanId"/> and <see cref="InjectItem.FiredScenarioTime"/> (exercise clock),
-    /// sets every child that never published to <c>skipped</c> (a child that already went out keeps its post), bumps
-    /// the item version, and emits one <see cref="InjectTelemetry.MarkedFiredEventType"/> event in the same save.
+    /// The rule is <see cref="InjectTransitions.MarkFired"/> (children that never published → <c>skipped</c>; the fired
+    /// stamps, exercise clock, only when the item never started). Bumps the item version and emits one
+    /// <see cref="InjectTelemetry.MarkedFiredEventType"/> event (the acting controller) in the same save.
     /// </summary>
     /// <remarks>
     /// Nothing reaches participants: the funnel is never called and the item never becomes <c>firing</c>, so the burst
@@ -745,22 +745,11 @@ public sealed partial class InjectQueueService
             return InjectResult.Conflict<InjectItemDto>(StaleVersionMessage, await ProjectAsync(item, facts, cancellationToken));
         }
 
-        if (WhyNotMarkableFired(item) is { } refusal)
+        var time = TimeFor(caller.ExerciseId, facts);
+        if (InjectTransitions.MarkFired(item, caller.StaffUserId, time.ScenarioTime) is { } refusal)
         {
             return InjectResult.Conflict<InjectItemDto>(refusal, await ProjectAsync(item, facts, cancellationToken));
         }
-
-        var time = TimeFor(caller.ExerciseId, facts);
-        foreach (var child in InjectTransitions.LiveChildren(item)
-            .Where(post => post.Status is InjectPostStatuses.Pending or InjectPostStatuses.Failed))
-        {
-            child.Status = InjectPostStatuses.Skipped;
-        }
-
-        item.Status = InjectStatuses.Fired;
-        item.Error = null;
-        item.FiredByHumanId = caller.StaffUserId;
-        item.FiredScenarioTime = time.ScenarioTime;
 
         // Its own event type, not an inject_action (so no action is passed to the save): one event, same unit of work.
         _dbContext.TelemetryEvents.Add(InjectTelemetry.ForMarkedFired(item, caller.StaffUserId, time));
@@ -770,22 +759,6 @@ public sealed partial class InjectQueueService
         }
 
         return InjectResult.Ok(await ProjectAsync(item, facts, cancellationToken));
-    }
-
-    /// <summary>
-    /// Why the item may not be marked fired, or <c>null</c> when it may: only <c>pending</c>, <c>held</c> or
-    /// <c>failed</c>, and never while one of its posts is being published (that post must land and be recorded).
-    /// </summary>
-    private static string? WhyNotMarkableFired(InjectItem item)
-    {
-        if (item.Status is not (InjectStatuses.Pending or InjectStatuses.Held or InjectStatuses.Failed))
-        {
-            return $"This item is {item.Status} and cannot be marked fired.";
-        }
-
-        return InjectTransitions.LiveChildren(item).Any(post => post.ClaimedAt is not null)
-            ? InjectTransitions.InFlightMessage
-            : null;
     }
 
     // ---- the runner's entry point --------------------------------------------------------------------
@@ -850,7 +823,7 @@ public sealed partial class InjectQueueService
         Caller caller,
         ExerciseFacts facts,
         InjectEventTime time,
-        IReadOnlyDictionary<Guid, Guid?> parents,
+        InjectReplyParents parents,
         string action,
         CancellationToken cancellationToken)
     {
@@ -881,7 +854,7 @@ public sealed partial class InjectQueueService
         InjectItem item,
         Guid attributedHuman,
         InjectEventTime time,
-        IReadOnlyDictionary<Guid, Guid?> parents,
+        InjectReplyParents parents,
         string? action,
         bool hasPendingChanges,
         CancellationToken cancellationToken)
@@ -1374,9 +1347,10 @@ public sealed partial class InjectQueueService
 
     /// <summary>
     /// For a single post whose reply parent is another scripted post: the refusal when that parent has not been
-    /// published yet ("Fire the parent first"), else <c>null</c>.
+    /// published yet ("Fire the parent first", or, when the parent was marked fired (DF-36), "edit this item to reply
+    /// to the real post"), else <c>null</c>.
     /// </summary>
-    private static string? ParentRefusal(InjectItem item, IReadOnlyDictionary<Guid, Guid?> parents)
+    private static string? ParentRefusal(InjectItem item, InjectReplyParents parents)
     {
         var children = InjectTransitions.LiveChildren(item);
         if (children.Count == 0 || children[0].ReplyToInjectPostId is not { } target)
@@ -1384,9 +1358,9 @@ public sealed partial class InjectQueueService
             return null;
         }
 
-        return parents.TryGetValue(target, out var published) && published is not null
+        return parents.PostIds.TryGetValue(target, out var published) && published is not null
             ? null
-            : InjectBurstPlanner.ParentNotFiredMessage;
+            : InjectBurstPlanner.UnpublishedParentMessage(target, parents.MarkedFired);
     }
 
     // ---- reads and projections -----------------------------------------------------------------------
@@ -1575,9 +1549,10 @@ public sealed partial class InjectQueueService
 
     /// <summary>
     /// For each pending child's scripted reply target in ANOTHER item: its published post id, or <c>null</c> when it
-    /// has not fired. Read in scope, so a target in another exercise is simply absent (unpublished).
+    /// has not fired, plus which unpublished targets belong to an item that was marked fired (DF-36). Read in scope, so
+    /// a target in another exercise is simply absent (unpublished).
     /// </summary>
-    private async Task<IReadOnlyDictionary<Guid, Guid?>> ReadExternalParentsAsync(
+    private async Task<InjectReplyParents> ReadExternalParentsAsync(
         InjectItem item,
         CancellationToken cancellationToken)
     {
@@ -1592,14 +1567,38 @@ public sealed partial class InjectQueueService
 
         if (targets.Count == 0)
         {
-            return new Dictionary<Guid, Guid?>();
+            return new InjectReplyParents(new Dictionary<Guid, Guid?>(), new HashSet<Guid>());
         }
 
-        return await _dbContext.InjectItemPosts
+        var rows = await _dbContext.InjectItemPosts
             .AsNoTracking()
             .Where(post => targets.Contains(post.Id) && post.ExerciseId == item.ExerciseId)
-            .Select(post => new { post.Id, post.FiredPostId })
-            .ToDictionaryAsync(row => row.Id, row => row.FiredPostId, cancellationToken);
+            .Select(post => new { post.Id, post.FiredPostId, post.InjectItemId })
+            .ToListAsync(cancellationToken);
+
+        // DF-36: an unpublished parent whose ITEM is fired was marked fired, so it will never be published. Its own
+        // single-table read, never a join (the lock-order reason is on LoadItemAsync).
+        var unpublishedItemIds = rows
+            .Where(row => row.FiredPostId is null)
+            .Select(row => row.InjectItemId)
+            .Distinct()
+            .ToList();
+        var firedItemIds = unpublishedItemIds.Count == 0
+            ? new HashSet<Guid>()
+            : (await _dbContext.InjectItems
+                .AsNoTracking()
+                .Where(parent => unpublishedItemIds.Contains(parent.Id)
+                    && parent.ExerciseId == item.ExerciseId
+                    && parent.Status == InjectStatuses.Fired)
+                .Select(parent => parent.Id)
+                .ToListAsync(cancellationToken))
+                .ToHashSet();
+
+        return new InjectReplyParents(
+            rows.ToDictionary(row => row.Id, row => row.FiredPostId),
+            rows.Where(row => row.FiredPostId is null && firedItemIds.Contains(row.InjectItemId))
+                .Select(row => row.Id)
+                .ToHashSet());
     }
 
     /// <summary>

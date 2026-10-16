@@ -570,8 +570,9 @@ export function createInjectMock(initial: InjectMockOptions = {}): InjectMock {
 
   /**
    * DF-36 "Mark fired": pending / held / failed -> fired WITHOUT publishing (server:
-   * `InjectQueueService.MarkFiredAsync`). Stale version 409 first, then the status 409. Allowed
-   * under FREEZE (nothing reaches participants). Children that never published -> skipped.
+   * `InjectTransitions.MarkFired`). Stale version 409 first, then the status 409. Allowed
+   * under FREEZE (nothing reaches participants). Children that never published -> skipped. The
+   * fire stamps are set only when the item never started (a started one keeps who fired it).
    */
   const doMarkFired = (id: string, expectedVersion: number, actorId: string): InjectItemDto => {
     const item = findItem(id)
@@ -584,8 +585,10 @@ export function createInjectMock(initial: InjectMockOptions = {}): InjectMock {
     }
     item.status = 'fired'
     delete item.error
-    item.firedByHumanId = actorId
-    item.firedScenarioTime = scenarioNow().toISOString()
+    if (item.firedByHumanId === undefined) {
+      item.firedByHumanId = actorId
+      item.firedScenarioTime = scenarioNow().toISOString()
+    }
     runtime.delete(item.id)
     recount(item)
     touch(item)

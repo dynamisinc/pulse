@@ -796,6 +796,15 @@ describe('RunSheetPanel — hold, skip, retry, delete, move, view', () => {
     expect(screen.queryByRole('button', { name: 'Mark fired Alpha' })).toBeNull()
   })
 
+  it('after a confirmed Mark fired, focus returns to the row', async () => {
+    await mountPanel()
+    press('Mark fired Bravo')
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Mark fired' }))
+    await waitFor(() => expect(chipOf('Bravo')).toBe('Marked fired'))
+    await waitFor(() => expect(document.activeElement).toBe(rowOf('Bravo')))
+    expect(rowOf('Bravo')).toHaveAttribute('aria-current', 'true')
+  })
+
   it('Mark fired works under FREEZE (nothing reaches participants)', async () => {
     injectMock.setPauseTier('freeze')
     await mountPanel()
