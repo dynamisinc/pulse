@@ -17,6 +17,9 @@ per-item status (COR-042).
 - [ ] The dashboard is exercise-scoped, staff-only (XC-002), and reflects live state as build progresses.
 - [ ] Incomplete critical items are visible so a Director can judge go-live readiness (story 04).
 
+### Orchestrator review fold (2026-10-16, ADMIN-IDENTITY-MODEL §5.3)
+- [ ] Warning, not blocking: **no lead controller**. Swamped mode and autonomy raises are unavailable until a planner sets a lead.
+
 ## Out of Scope
 The go-live action itself (story 04); the underlying items' own features (network readiness
 exercise-isolation/09, provisioning identity-auth-roles, etc.) — this story aggregates their status.

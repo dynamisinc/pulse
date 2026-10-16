@@ -22,6 +22,9 @@ Staff and participants need to recover access without Dynamis support ([`docs/de
 - [ ] Accessibility (NFR-001): WCAG 2.1 AA; keyboard-operable; status/error states are never color-only; async results announced via a live region.
 - [ ] User guide (C5 docs-as-done): `docs/guide/getting-started.md` is updated in the same PR (and `tools/guide-screenshots` if a screen changed), or the PR states "no guide impact". and `troubleshooting.md` (forgot password; temporary password card workflow).
 
+### Copilot review 5 fold (2026-10-16)
+- [ ] Any credential change (reset, invite redeemed, temporary password set, password change) invalidates, in the same transaction, **every** outstanding `CredentialToken` of both purposes for that identity, and every unconsumed `LoginChoiceCandidate`. Tests cover reset followed by redeeming an older invite, an older reset link and an older org choice; all three fail.
+
 ## Out of Scope
 TOTP/MFA for org admins; HIBP breach check (#490); participant reissue of links/day word (easy-login, unchanged).
 
