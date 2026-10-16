@@ -24,7 +24,10 @@
   left: 0;
   z-index: 40;
   box-sizing: border-box;
-  padding: 0 env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px)
+  /* Only the part of the home-indicator inset NOT already covered by the bottom banner
+     (`--pulse-chrome-bottom` already includes its own safe-area padding): no double pad. */
+  padding: 0 env(safe-area-inset-right, 0px)
+    max(0px, calc(env(safe-area-inset-bottom, 0px) - var(--pulse-chrome-bottom, 0px)))
     env(safe-area-inset-left, 0px);
   /* A hairline ABOVE the bar drawn as a shadow, so it adds no height beyond the 56px the
      frame reserves. */

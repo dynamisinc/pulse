@@ -198,6 +198,7 @@ export function ComposeModal({ onClose, returnFocusRef }: ComposeModalProps) {
       className={styles.backdrop}
       data-testid="compose-backdrop"
       style={{ '--pulse-keyboard-inset': `${keyboardInsetPx}px` } as CSSProperties}
+      data-keyboard-open={keyboardInsetPx > 0 ? 'true' : undefined}
       onMouseDown={handleBackdropMouseDown}
     >
       <div

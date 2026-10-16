@@ -474,6 +474,56 @@ describe('cold load of /notifications (MT-D8)', () => {
   })
 })
 
+describe('MT-D8 transitions: pending, then settled', () => {
+  const viewEvents = () =>
+    getEmittedTelemetryEvents().filter(e =>
+      e.eventType === 'view' && e.target?.entityType === 'notifications')
+
+  it('pending -> settled readOnly: redirects Home; nothing emitted while resolving', async () => {
+    seed(OWN, REPLY_FULCO)
+    const view = renderChannel({
+      entries: ['/notifications'],
+      variant: 'readOnly',
+      variantPending: true,
+      beside: <RouterProbe />,
+    })
+    expect(await screen.findByTestId('notifications-resolving')).toBeInTheDocument()
+    expect(viewEvents()).toHaveLength(0)
+
+    act(() => view.setShellMount({ variant: 'readOnly', variantPending: false }))
+
+    await waitFor(() => expect(screen.getByTestId('router-location')).toHaveTextContent('/home'))
+    expect(screen.queryByTestId('notifications-page')).not.toBeInTheDocument()
+    expect(viewEvents()).toHaveLength(0)
+  })
+
+  it('pending -> settled full: renders the page and emits its page view exactly once', async () => {
+    seed(OWN, REPLY_FULCO)
+    const view = renderChannel({
+      entries: ['/notifications'],
+      variant: 'readOnly',
+      variantPending: true,
+      beside: <RouterProbe />,
+    })
+    expect(await screen.findByTestId('notifications-resolving')).toBeInTheDocument()
+    expect(viewEvents()).toHaveLength(0)
+
+    act(() => view.setShellMount({ variant: 'full', variantPending: false }))
+
+    expect(await screen.findByTestId('notifications-page')).toBeInTheDocument()
+    expect(screen.getByTestId('router-location')).toHaveTextContent('/notifications')
+    await waitFor(() => expect(viewEvents()).toHaveLength(1))
+    // Still exactly one after the page has settled and re-rendered.
+    await act(async () => { await Promise.resolve() })
+    expect(viewEvents()).toHaveLength(1)
+  })
+
+  it('the resolving placeholder has an accessible name', async () => {
+    renderChannel({ entries: ['/notifications'], variant: 'readOnly', variantPending: true })
+    expect(await screen.findByLabelText('Loading notifications')).toBeInTheDocument()
+  })
+})
+
 describe('sign-out', () => {
   it('the registered session reset sweeps BOTH stores and removes the bell', async () => {
     const user = userEvent.setup()

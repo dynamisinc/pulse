@@ -85,7 +85,9 @@
  */
 @media (max-width: 599px) {
   .frame {
-    --pulse-tabbar-height: calc(56px + env(safe-area-inset-bottom, 0px));
+    --pulse-tabbar-height: calc(
+      56px + max(0px, calc(env(safe-area-inset-bottom, 0px) - var(--pulse-chrome-bottom, 0px)))
+    );
 
     grid-template-columns: minmax(0, 1fr);
     padding-bottom: var(--pulse-tabbar-height);

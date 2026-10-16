@@ -245,4 +245,16 @@ test.describe('bottom tab bar (MT-D2)', () => {
     await expect(page.getByRole('dialog')).toHaveCount(0)
     await expect(post).toBeFocused()
   })
+
+  test('Sign out stays reachable on phones (the shell row) and is a 44px target (WR-002)', async ({ page }) => {
+    test.skip(!isPhone(page), 'phone only')
+    await openFeed(page)
+    const signOut = page.getByRole('button', { name: 'Sign out' })
+    await expect(signOut).toHaveCount(1)
+    await expect(signOut).toBeVisible()
+    await expectTouchTarget(signOut, 44)
+    const box = await boxOf(signOut)
+    expect(box.height).toBeGreaterThanOrEqual(44)
+    expect(box.width).toBeGreaterThanOrEqual(44)
+  })
 })

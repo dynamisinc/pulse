@@ -202,7 +202,10 @@ describe('BottomTabBar: CSS contract (phones only, fixed, safe-area, 44px)', () 
 
   it('the frame reserves the bar height + inset so no content sits under it', () => {
     expect(TAB_BAR_HEIGHT).toBe(56)
-    expect(frameCss).toContain('--pulse-tabbar-height: calc(56px + env(safe-area-inset-bottom, 0px))')
+    // Only the part of the inset the bottom banner does not already cover (no double padding).
+    const uncovered = 'max(0px, calc(env(safe-area-inset-bottom, 0px) - var(--pulse-chrome-bottom, 0px)))'
+    expect(frameCss).toContain(`--pulse-tabbar-height: calc( 56px + ${uncovered} )`)
+    expect(squash(css)).toContain(`env(safe-area-inset-right, 0px) ${uncovered}`)
     expect(frameCss).toContain('padding-bottom: var(--pulse-tabbar-height)')
   })
 

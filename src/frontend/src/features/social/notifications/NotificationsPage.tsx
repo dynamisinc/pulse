@@ -65,7 +65,7 @@ export function NotificationsPage() {
   if (eligibility.kind === 'unavailable') return <SocialRedirect to={HOME_PATH} />
   // Shell variant not resolved yet (cold load): render nothing, emit nothing,
   // redirect nothing until it is (MT-D8).
-  if (eligibility.kind === 'resolving') return <div aria-busy="true" data-testid="notifications-resolving" />
+  if (eligibility.kind === 'resolving') return <div aria-busy="true" aria-label="Loading notifications" data-testid="notifications-resolving" />
   return <NotificationsBody castFailed={eligibility.kind === 'failed'} />
 }
 

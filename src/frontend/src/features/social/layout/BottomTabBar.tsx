@@ -31,7 +31,7 @@
  * no COBRA, no MUI.
  */
 
-import type { MouseEvent, Ref } from 'react'
+import type { Ref } from 'react'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import type { IconDefinition } from '@fortawesome/fontawesome-svg-core'
 import {
@@ -48,7 +48,9 @@ import {
   EXPLORE_PATH,
   HOME_PATH,
   NOTIFICATIONS_PATH,
+  soleSegment,
   socialPaths,
+  useSocialLinkClick,
   useSocialNavigation,
 } from './socialNavigation'
 import styles from './BottomTabBar.module.css'
@@ -71,20 +73,14 @@ interface TabSpec {
   readonly icon: IconDefinition
 }
 
-/** The single path segment of `pathname`, lower-cased, or `undefined` if it has more/none. */
-function soleSegment(pathname: string): string | undefined {
-  const segments = pathname.split('/').filter(segment => segment !== '')
-  const [only] = segments
-  return segments.length === 1 && only !== undefined ? only.toLowerCase() : undefined
-}
-
 export function BottomTabBar({
   onCompose,
   postButtonRef,
   self,
   showNotifications = false,
 }: BottomTabBarProps) {
-  const { location, navigate, kind } = useSocialNavigation()
+  const { location } = useSocialNavigation()
+  const handleLinkClick = useSocialLinkClick()
   const { available: notificationsAvailable, unread } = useNotificationsSummary()
   const current = soleSegment(location.pathname)
 
@@ -98,16 +94,8 @@ export function BottomTabBar({
     : undefined
 
   const isActive = (tab: TabSpec): boolean => {
-    if (current === undefined) return false
-    if (tab.id === 'profile') return self !== undefined && current === self.handle.toLowerCase()
-    return current === tab.id
-  }
-
-  const handleLinkClick = (event: MouseEvent<HTMLAnchorElement>, path: string) => {
-    const modified = event.metaKey || event.ctrlKey || event.shiftKey || event.altKey
-    if (kind === 'browser' && (modified || event.button !== 0)) return
-    event.preventDefault()
-    navigate(path)
+    // Derived from the tab's own path (not its id), so the two can never drift apart.
+    return current !== undefined && current === soleSegment(tab.path)
   }
 
   const renderTab = (tab: TabSpec) => {

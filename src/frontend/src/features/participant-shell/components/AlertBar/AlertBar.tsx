@@ -213,7 +213,8 @@ const hostBaseStyle: CSSProperties = {
   top: `var(${SHELL_CHROME_TOP_VAR}, 0px)`,
   zIndex: SHELL_Z.alertBar,
   boxSizing: 'border-box',
-  padding: '6px 14px',
+  // Clears a landscape notch under viewport-fit=cover (WR-001); 14px elsewhere.
+  padding: '6px max(14px, env(safe-area-inset-right, 0px)) 6px max(14px, env(safe-area-inset-left, 0px))',
 }
 
 const tickerHostStyle: CSSProperties = {

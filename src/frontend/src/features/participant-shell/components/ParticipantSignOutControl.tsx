@@ -51,6 +51,11 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faRightFromBracket } from '@fortawesome/free-solid-svg-icons'
 import { endSession } from '@/core/auth'
 import { LOGIN_PATH } from '@/features/app-shell/constants'
+import { touchTargetCss } from './touchTarget'
+
+/** Coarse pointers get a >= 44px target (WR-002); a mouse sees no change. */
+const SIGN_OUT_CLASS = 'pulse-shell-signout'
+const SIGN_OUT_TOUCH_STYLES = touchTargetCss(`.${SIGN_OUT_CLASS}`)
 
 /** Quiet, shell-chrome row — mirrors `ChannelNav.tsx`'s own palette/typography. */
 const rowStyle: CSSProperties = {
@@ -92,7 +97,8 @@ export function ParticipantSignOutControl() {
 
   return (
     <div style={rowStyle}>
-      <button type="button" style={buttonStyle} onClick={handleSignOut}>
+      <style>{SIGN_OUT_TOUCH_STYLES}</style>
+      <button type="button" className={SIGN_OUT_CLASS} style={buttonStyle} onClick={handleSignOut}>
         <FontAwesomeIcon icon={faRightFromBracket} aria-hidden="true" />
         <span>Sign out</span>
       </button>

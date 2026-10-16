@@ -317,9 +317,11 @@ describe('sticky / fixed offsets honour the shell chrome insets AND the alert ba
     const text = squash(css.compose)
     expect(text).toContain('position: fixed')
     expect(text).toContain(`top: ${topOffset}`)
-    // Story 02: the bottom edge is the banner inset PLUS the on-screen keyboard's inset
-    // (`--pulse-keyboard-inset`, 0px without a keyboard), so the banner stays cleared.
-    expect(text).toContain(`bottom: calc(${bottom} + var(--pulse-keyboard-inset, 0px))`)
+    // Story 02 (SG-002): the bottom edge is the HIGHER of the banner inset and the on-screen
+    // keyboard's inset (`--pulse-keyboard-inset`, 0px without a keyboard). Not their sum: the
+    // keyboard already covers the banner. With the keyboard up the safe-area padding is dropped.
+    expect(text).toContain(`bottom: max(${bottom}, var(--pulse-keyboard-inset, 0px))`)
+    expect(text).toContain(".backdrop[data-keyboard-open='true'] { padding-bottom: 8px; }")
   })
 
   it('the skip link surfaces below banner + alert, not behind either', () => {

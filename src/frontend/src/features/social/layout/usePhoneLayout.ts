@@ -17,16 +17,30 @@
 import { useSyncExternalStore } from 'react'
 import { PHONE_QUERY } from './frameMetrics'
 
+/**
+ * The MediaQueryList is created ONCE (lazily) and reused by `subscribe` and `getSnapshot`
+ * (SG-001), not rebuilt on every snapshot read. Keyed on the `matchMedia` function so a test
+ * that swaps `window.matchMedia` gets a fresh list.
+ */
+let cached: { factory: typeof window.matchMedia, list: MediaQueryList } | undefined
+
+function phoneList(): MediaQueryList | undefined {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return undefined
+  if (cached === undefined || cached.factory !== window.matchMedia) {
+    cached = { factory: window.matchMedia, list: window.matchMedia(PHONE_QUERY) }
+  }
+  return cached.list
+}
+
 function subscribe(onChange: () => void): () => void {
-  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return () => {}
-  const list = window.matchMedia(PHONE_QUERY)
+  const list = phoneList()
+  if (list === undefined) return () => {}
   list.addEventListener('change', onChange)
   return () => list.removeEventListener('change', onChange)
 }
 
 function getSnapshot(): boolean {
-  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return false
-  return window.matchMedia(PHONE_QUERY).matches
+  return phoneList()?.matches ?? false
 }
 
 export function usePhoneLayout(): boolean {

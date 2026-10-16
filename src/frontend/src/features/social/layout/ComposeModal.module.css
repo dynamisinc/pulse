@@ -17,8 +17,10 @@
      publishes its height; 0px when none). */
   top: calc(var(--pulse-chrome-top, 0px) + var(--pulse-alert-height, 0px));
   right: 0;
-  /* Raised by the on-screen keyboard's height (visualViewport; 0 without one). */
-  bottom: calc(var(--pulse-chrome-bottom, 0px) + var(--pulse-keyboard-inset, 0px));
+  /* Raised to the on-screen keyboard's top edge when that is higher than the banner
+     (visualViewport inset; 0 without one). The keyboard already sits over the banner, so
+     the two are not added (SG-002). */
+  bottom: max(var(--pulse-chrome-bottom, 0px), var(--pulse-keyboard-inset, 0px));
   left: 0;
   z-index: 50;
   display: flex;
@@ -144,4 +146,10 @@
   .backdrop {
     padding: 8px 8px calc(8px + env(safe-area-inset-bottom, 0px));
   }
+}
+
+/* Keyboard up: it covers the home-indicator area, so the safe-area padding would only waste
+ * room above the keyboard (SG-002). Higher specificity than the rules above. */
+.backdrop[data-keyboard-open='true'] {
+  padding-bottom: 8px;
 }
