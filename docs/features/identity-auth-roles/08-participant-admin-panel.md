@@ -48,3 +48,19 @@ Stories 01/02/03; exercise-isolation; console-shell (future host). Audit via tel
 
 ## Tests
 - Integration: reset/unlock/force-logout/reassign work and are audit-logged; panel is staff-only.
+
+## Scope update 2026-10-16 (ADMIN-IDENTITY-MODEL)
+
+Source: [`docs/design/ADMIN-IDENTITY-MODEL.md`](../../design/ADMIN-IDENTITY-MODEL.md) §3.3, §2.2, §8.2. Wave A2. **This story's scope moves from "login triage" to the people/roster
+scope**; it is partly taken up by `easy-login` and by the new A2 stories 19-23.
+
+- [ ] **Participant reset is a roster action.** Given a planner or controller (never evaluator) on a roster row,
+      when they choose "Reset password", then a reset link is emailed (story 21); for a participant with no
+      email, a one-time temporary password is shown once, works for one sign-in and forces a change.
+- [ ] **Unlock, force-logout, reassign role/affiliation** act on the participant's `Enrollment`/`Account`
+      within the caller's exercise only; foreign-exercise and foreign-org ids return the bare 404.
+- [ ] **Staff never see or choose another person's password.**
+- [ ] Every action is audit-logged (XC-004) with the acting `PersonId` and role.
+- [ ] User guide: `docs/guide/planner-guide.md` and `controller-guide.md` updated in the same PR.
+
+Out of scope here: the org directory UI (19), staff invite (20), sign-in methods (22).

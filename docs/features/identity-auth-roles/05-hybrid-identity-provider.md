@@ -159,3 +159,21 @@ Deferred follow-ups (tracked, not blockers to this story's Complete status):
   constant-time, fail-closed credential check against configured entries) — not a real Entra/AD/SSO
   integration. That is by design for Phase 1 (see Context/Out of Scope), but is flagged here for
   Tier-2 human sign-off alongside the schema/isolation review this story already carries.
+
+## Scope update 2026-10-16 (ADMIN-IDENTITY-MODEL)
+
+Source: [`docs/design/ADMIN-IDENTITY-MODEL.md`](../../design/ADMIN-IDENTITY-MODEL.md) §1.1, §1.3, §3.1. Wave A1. Tier-2. **Status of this story stays Complete**; the following is an
+amendment note for the follow-on work (built under story 16). Program.cs registration and the
+`StaffAssignment` -> `Enrollment` change need **orchestrator clearance first**.
+
+- Readers of `StaffAssignment` (staff login, active-exercise switch, `StaffCallerContext`) move to
+  `Enrollment` (staff roles only). Existing ACs and test suites are unchanged and are the regression net.
+- `IIdentityProvider` gains a second implementation, **`PulsePasswordIdentityProvider`** (Person email +
+  `PasswordHasher<Person>` hash, PBKDF2-HMAC-SHA512 V3, auto-rehash on verify), which becomes the default.
+- The config-allowlist **`DynamisIdentityProvider` stays as an ops-only break-glass**, disabled by config in
+  customer deployments. Entra/SSO remains a future provider behind the same seam (COR-014).
+- [ ] Given a customer deployment config, when the break-glass provider is disabled, then a config-allowlist
+      credential gets the uniform 401. Given a valid Person email/password, then login succeeds via
+      `PulsePasswordIdentityProvider` and the hash is upgraded if the work factor is stale.
+- [ ] User guide: sign-in section of `docs/guide/getting-started.md` updated in the same PR.
+- [ ] **Chained providers in A1 (design doc §1.3).** If the `Person` has a `PasswordHash`, `PulsePasswordIdentityProvider` is authoritative with no fallback; otherwise the Dynamis allowlist is tried, keyed on `StaffUser.ExternalSubject`, so legacy staff sign in exactly as today. A2's invite flow gives legacy staff a Pulse password, after which the fallback no longer applies to them; customer deployments turn the fallback off once everyone is invited.
