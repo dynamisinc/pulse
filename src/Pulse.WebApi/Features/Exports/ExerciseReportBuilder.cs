@@ -41,6 +41,17 @@ public sealed record ReportActivityBin(DateTimeOffset Start, int Participant, in
 /// <param name="Verified">Whether the persona carries the verified badge.</param>
 public sealed record ReportLookalikeCandidate(Guid Id, string Handle, bool Verified);
 
+/// <summary>A listed post as threading sees it (DF-47): its id and its direct parent.</summary>
+/// <param name="Id">The post id.</param>
+/// <param name="ParentPostId">The direct parent, for a reply (listed or not).</param>
+public sealed record ReportThreadPost(Guid Id, Guid? ParentPostId);
+
+/// <summary>One listed post's place in the threaded record (DF-47).</summary>
+/// <param name="Index">The post's index in the listed input.</param>
+/// <param name="ThreadRootId">The top-most ancestor reachable through listed parents, else the post's own id.</param>
+/// <param name="Depth">0 for a thread root, 1 for any listed descendant (never more).</param>
+public sealed record ReportThreadSlot(int Index, Guid ThreadRootId, int Depth);
+
 /// <summary>The chart series a post counts in.</summary>
 public enum ReportSeries
 {
@@ -297,7 +308,9 @@ public static class ExerciseReportBuilder
         ArgumentNullException.ThrowIfNull(authorHandles);
         ArgumentNullException.ThrowIfNull(posts);
 
-        var cutoff = deliveredAt.AddMinutes(ResponseWindowMinutes);
+        // Scenario times are client-supplied: an inject near DateTimeOffset.MaxValue must not overflow the cutoff.
+        var window = TimeSpan.FromMinutes(ResponseWindowMinutes);
+        var cutoff = deliveredAt <= DateTimeOffset.MaxValue - window ? deliveredAt + window : DateTimeOffset.MaxValue;
         var handles = authorHandles
             .Select(NormalizeHandle)
             .Where(handle => handle.Length > 0)
@@ -425,6 +438,85 @@ public static class ExerciseReportBuilder
     /// <param name="handle">The stored handle.</param>
     /// <returns>The bare handle, or empty.</returns>
     public static string NormalizeHandle(string? handle) => (handle ?? string.Empty).Trim().TrimStart('@');
+
+    /// <summary>
+    /// Threads the listed record (DF-47). Each post's root is found by walking parents only while the parent is itself
+    /// listed, so a reply whose parent is not listed (outside the window, another source, excluded noise or another
+    /// exercise) is a root. The result keeps the roots in their input order, each immediately followed by its listed
+    /// descendants in their input order (depth 1 at any nesting). A parent cycle (impossible in practice) is broken at
+    /// its earliest-listed member, so every post appears exactly once.
+    /// </summary>
+    /// <param name="listed">The listed posts, in record order (scenario time, wall clock, id).</param>
+    /// <returns>One slot per listed post, in threaded order.</returns>
+    public static IReadOnlyList<ReportThreadSlot> Thread(IReadOnlyList<ReportThreadPost> listed)
+    {
+        ArgumentNullException.ThrowIfNull(listed);
+
+        var indexOf = new Dictionary<Guid, int>(listed.Count);
+        for (var i = 0; i < listed.Count; i++)
+        {
+            indexOf.TryAdd(listed[i].Id, i);
+        }
+
+        var roots = new int[listed.Count];
+        for (var i = 0; i < listed.Count; i++)
+        {
+            roots[i] = RootOf(i, listed, indexOf);
+        }
+
+        var descendants = new Dictionary<int, List<int>>();
+        for (var i = 0; i < listed.Count; i++)
+        {
+            if (roots[i] != i)
+            {
+                if (!descendants.TryGetValue(roots[i], out var list))
+                {
+                    list = [];
+                    descendants[roots[i]] = list;
+                }
+
+                list.Add(i);
+            }
+        }
+
+        var slots = new List<ReportThreadSlot>(listed.Count);
+        for (var i = 0; i < listed.Count; i++)
+        {
+            if (roots[i] != i)
+            {
+                continue;
+            }
+
+            slots.Add(new ReportThreadSlot(i, listed[i].Id, 0));
+            if (descendants.TryGetValue(i, out var children))
+            {
+                slots.AddRange(children.Select(child => new ReportThreadSlot(child, listed[i].Id, 1)));
+            }
+        }
+
+        return slots;
+    }
+
+    /// <summary>The index of a listed post's thread root: up through listed parents, a cycle broken at its earliest member.</summary>
+    private static int RootOf(int start, IReadOnlyList<ReportThreadPost> listed, Dictionary<Guid, int> indexOf)
+    {
+        var chain = new List<int> { start };
+        var seen = new HashSet<int> { start };
+        var current = start;
+        while (listed[current].ParentPostId is { } parent && indexOf.TryGetValue(parent, out var parentIndex))
+        {
+            if (!seen.Add(parentIndex))
+            {
+                // A cycle: its members are the chain from the repeated post on; the earliest-listed one is the root.
+                return chain.Skip(chain.IndexOf(parentIndex)).Min();
+            }
+
+            chain.Add(parentIndex);
+            current = parentIndex;
+        }
+
+        return current;
+    }
 
     private static bool IsHandleChar(char character) => char.IsLetterOrDigit(character) || character == '_';
 

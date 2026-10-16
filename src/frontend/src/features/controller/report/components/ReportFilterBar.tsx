@@ -13,13 +13,16 @@
  *    inline message and leaves the applied filters (and so the query) untouched. Clear empties
  *    both. A server 400 reason (`serverError`) is shown here, beside the filters it is about.
  *
- * Filters change only the post record; the summary and charts never change with them.
+ * Story 31 (DF-45): the window now scopes the WHOLE report, not just the record. The sources
+ * still change only the record (DF-44). "Latest scenario day" fills From/To with 00:00-23:59 of
+ * the latest post's scenario date (`latestDay`, from the server) and applies at once; it is
+ * disabled while the exercise has no posts (`latestDay` null).
  */
 
 import { useId, useState, type KeyboardEvent } from 'react'
 import { Box, Checkbox, FormControlLabel, FormGroup, FormLabel } from '@mui/material'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import { faCircleExclamation, faRotateLeft } from '@fortawesome/free-solid-svg-icons'
+import { faCalendarDay, faCircleExclamation, faRotateLeft } from '@fortawesome/free-solid-svg-icons'
 import { CobraSecondaryButton, CobraTextField } from '@/theme/styledComponents'
 import { SOURCE_LABELS, SOURCE_ORDER, orderedSources, parseTimeField } from '../services/reportFilters'
 import type { ReportFilters, ReportSourceKey } from '../types/report'
@@ -34,6 +37,8 @@ export interface ReportFilterBarProps {
   readonly windowStart: string | null
   /** The server's readable reason for a 400, or null. */
   readonly serverError: string | null
+  /** Story 31: the latest post's scenario day (00:00 to 23:59, "yyyy-MM-dd HH:mm"), or null. */
+  readonly latestDay?: { readonly from: string; readonly to: string } | null
 }
 
 type TimeField = 'from' | 'to'
@@ -53,6 +58,7 @@ export function ReportFilterBar({
   onChange,
   windowStart,
   serverError,
+  latestDay = null,
 }: ReportFilterBarProps) {
   const [draft, setDraft] = useState<Record<TimeField, string>>({
     from: filters.from ?? '',
@@ -108,6 +114,16 @@ export function ReportFilterBar({
     setDraft({ from: '', to: '' })
     setErrors({ from: null, to: null })
     if (filters.from !== null || filters.to !== null) onChange({ ...filters, from: null, to: null })
+  }
+
+  /** Story 31: one click to the latest scenario day; applied together (one refetch). */
+  function applyLatestDay() {
+    if (latestDay === null) return
+    setDraft({ from: latestDay.from, to: latestDay.to })
+    setErrors({ from: null, to: null })
+    if (latestDay.from !== filters.from || latestDay.to !== filters.to) {
+      onChange({ ...filters, from: latestDay.from, to: latestDay.to })
+    }
   }
 
   const hint = 'yyyy-MM-dd HH:mm'
@@ -176,6 +192,16 @@ export function ReportFilterBar({
       <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1.5, alignItems: 'flex-start' }}>
         {timeField('from', 'From (scenario time)')}
         {timeField('to', 'To (scenario time)')}
+        <CobraSecondaryButton
+          size="small"
+          onClick={applyLatestDay}
+          disabled={latestDay === null}
+          onMouseDown={event => event.preventDefault()}
+          startIcon={<FontAwesomeIcon icon={faCalendarDay} aria-hidden="true" />}
+          sx={{ mt: '3px' }}
+        >
+          Latest scenario day
+        </CobraSecondaryButton>
         <CobraSecondaryButton
           size="small"
           onClick={clearWindow}
