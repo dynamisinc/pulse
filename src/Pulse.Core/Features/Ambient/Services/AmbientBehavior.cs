@@ -161,14 +161,18 @@ public static class AmbientBehavior
         return RateGovernance.WithinCap(input.RateConfig, Math.Max(0, input.EnginePostsThisMinute), desired).Allowed;
     }
 
-    /// <summary>The cast members the policy allow-lists, in allow-list order (only personas the loop can voice).</summary>
+    /// <summary>
+    /// The cast members the policy allow-lists, in allow-list order — only personas the loop can voice AND whose type is
+    /// ambient-eligible (<see cref="AmbientPolicyValidator.EligiblePersonaTypes"/>, orchestrator review W-4), so a
+    /// policy that somehow names an outlet or agency still never gives it an ambient voice.
+    /// </summary>
     private static List<AmbientCastMember> EligibleCast(AmbientTierPolicy policy, IReadOnlyList<AmbientCastMember> cast)
     {
         var eligible = new List<AmbientCastMember>();
         foreach (var personaId in policy.PersonaAllowList)
         {
             var member = cast.FirstOrDefault(c => c.PersonaId == personaId);
-            if (member is not null)
+            if (member is not null && AmbientPolicyValidator.IsEligiblePersonaType(member.Dossier.Type))
             {
                 eligible.Add(member);
             }

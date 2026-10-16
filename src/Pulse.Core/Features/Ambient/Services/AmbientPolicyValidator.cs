@@ -1,6 +1,7 @@
 namespace Pulse.Core.Features.Ambient.Services;
 
 using Pulse.Core.Features.Ambient.Models;
+using Pulse.Core.Features.Generation.Models;
 
 /// <summary>
 /// The wire literals for <see cref="AmbientPolicyMode"/> (<c>off</c> / <c>review</c> / <c>autonomous</c>) and their
@@ -62,6 +63,20 @@ public static class AmbientPolicyValidator
 
     /// <summary>The most persona ids one policy may name (a sanity bound on the request, not a product limit).</summary>
     public const int MaxPersonaAllowListLength = 500;
+
+    /// <summary>
+    /// The persona types that may voice ambient chatter (orchestrator review W-4): ordinary members of the public only —
+    /// <see cref="PersonaType.Resident"/> and <see cref="PersonaType.Helper"/>. An outlet, agency, troll or bot posting
+    /// "everyday" content would read as institutional or adversarial speech, which background colour must never be.
+    /// <b>Pending Tom's confirmation</b> of the exact set; this constant is the single place to change it (the settings
+    /// POST, the loop's eligible cast, the publish re-check and the settings DTO's <c>voiceablePersonaIds</c> all read it).
+    /// </summary>
+    public static IReadOnlyList<PersonaType> EligiblePersonaTypes { get; } = [PersonaType.Resident, PersonaType.Helper];
+
+    /// <summary>Whether <paramref name="type"/> may voice ambient chatter (<see cref="EligiblePersonaTypes"/>).</summary>
+    /// <param name="type">The persona's engine type.</param>
+    /// <returns><c>true</c> for an eligible type.</returns>
+    public static bool IsEligiblePersonaType(PersonaType type) => EligiblePersonaTypes.Contains(type);
 
     /// <summary>
     /// Validates a requested policy. Rejects (never clamps): an unknown mode; <c>autonomous</c> when

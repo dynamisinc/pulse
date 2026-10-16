@@ -181,4 +181,29 @@ public class AmbientBehaviorTests
         mix.Skepticism.Should().Be(0);
         (mix.Calm + mix.Gratitude).Should().BeApproximately(1.0, 1e-9);
     }
+
+    [Theory]
+    [InlineData(PersonaType.Outlet)]
+    [InlineData(PersonaType.Agency)]
+    [InlineData(PersonaType.Troll)]
+    [InlineData(PersonaType.Bot)]
+    public void AnAllowListedPersonaOfAnIneligibleType_IsNeverVoiced(PersonaType type)
+    {
+        // Orchestrator review W-4: only Resident / Helper may voice ambient chatter, whatever the allow-list says.
+        var outlet = new AmbientCastMember(Guid.NewGuid(), new PersonaDossier { Handle = "@desk", DisplayName = "Desk", Type = type });
+        var helper = new AmbientCastMember(Guid.NewGuid(), new PersonaDossier { Handle = "@help", DisplayName = "Help", Type = PersonaType.Helper });
+        var input = Input(Policy(personas: [outlet.PersonaId, helper.PersonaId])) with { Cast = [outlet, helper] };
+
+        var intent = AmbientBehavior.Decide(input);
+
+        intent!.Personas.Select(p => p.Handle).Should().Equal(["@help"], "an ineligible type is filtered out of the eligible cast");
+        AmbientBehavior.Decide(Input(Policy(personas: [outlet.PersonaId])) with { Cast = [outlet] })
+            .Should().BeNull("an allow-list of only ineligible personas allows nothing");
+    }
+
+    [Fact]
+    public void EligiblePersonaTypes_AreResidentAndHelperOnly()
+    {
+        AmbientPolicyValidator.EligiblePersonaTypes.Should().BeEquivalentTo([PersonaType.Resident, PersonaType.Helper]);
+    }
 }

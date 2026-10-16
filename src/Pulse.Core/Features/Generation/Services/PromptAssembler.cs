@@ -40,6 +40,7 @@ public sealed class PromptAssembler : IPromptAssembler
             PostCount = postCount,
             SystemPrompt = BuildSystemPrompt(input, postCount),
             WorldFeed = WorldFeedFence.Fence(input.WorldPosts),
+            IsAmbient = input.Storyline.IsAmbient,
         };
     }
 
@@ -52,7 +53,9 @@ public sealed class PromptAssembler : IPromptAssembler
         sb.AppendLine("You are the crowd-simulation engine for a closed emergency-management training exercise.");
         if (ambient)
         {
-            // Ambient chatter is NOT a reaction to anything: everyday life, with the exercise brief demoted to setting.
+            // Ambient chatter is NOT a reaction to anything: everyday life, with the brief demoted to setting. The ambient
+            // caller passes a SETTING-ONLY brief (AmbientSettingBrief: the place name, never the incident narrative —
+            // orchestrator review W-3), and AmbientOutputFilter checks the output side.
             sb.AppendLine("You generate short social-media posts authored BY simulated members of the public about their");
             sb.AppendLine("ordinary everyday lives. You are not a chat assistant and you never speak as yourself.");
             sb.AppendLine();

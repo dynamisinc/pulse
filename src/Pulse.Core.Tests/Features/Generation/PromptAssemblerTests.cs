@@ -152,6 +152,14 @@ public class PromptAssemblerTests
     }
 
     [Fact]
+    public void Assemble_FlagsTheTransportRequest_AmbientOnlyForAnAmbientBrief()
+    {
+        // The offline Fake reads this flag to emit everyday small talk instead of incident lines (W-3).
+        _assembler.Assemble(AmbientInput()).IsAmbient.Should().BeTrue();
+        _assembler.Assemble(Input()).IsAmbient.Should().BeFalse();
+    }
+
+    [Fact]
     public void Assemble_Ambient_SkipsPersonaRecentPosts()
     {
         var prompt = _assembler.Assemble(AmbientInput()).SystemPrompt;
