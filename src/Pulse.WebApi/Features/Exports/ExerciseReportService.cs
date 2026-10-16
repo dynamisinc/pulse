@@ -354,11 +354,9 @@ public sealed partial class ExerciseReportService
                 InjectMarkers = injects.Markers,
             },
             InjectResponses = injects.Responses,
-            Lookalikes = pairs.Select(pair => new ReportLookalikeDto
-            {
-                Verified = ToAccount(pair.Verified.Id, scoped, lookups, engagement),
-                Lookalike = ToAccount(pair.Lookalike.Id, scoped, lookups, engagement),
-            }).ToArray(),
+            Lookalikes = pairs.Select(pair => ToLookalike(
+                ToAccount(pair.Verified.Id, scoped, lookups, engagement),
+                ToAccount(pair.Lookalike.Id, scoped, lookups, engagement))).ToArray(),
             Posts = BuildPosts(posts, listed, lookups, engagement, media, avatars, urls, zone),
             OmittedNoiseCount = includeNoise ? 0 : scoped.Count(post => ExerciseReportBuilder.IsNoise(post.Origin)),
             PostRecord = new ReportPostRecordDto
@@ -538,6 +536,13 @@ public sealed partial class ExerciseReportService
         return new InjectSection(responses, markers, ExerciseReportBuilder.Median(minutes), respondedAt);
     }
 
+    private static ReportLookalikeDto ToLookalike(ReportAccountDto verified, ReportAccountDto lookalike) => new()
+    {
+        Verified = verified,
+        Lookalike = lookalike,
+        Outdrew = ExerciseReportBuilder.LookalikeOutdrew(verified.Likes + verified.Reposts, lookalike.Likes + lookalike.Reposts),
+    };
+
     private static ReportAccountDto ToAccount(
         Guid personaId,
         List<PostRow> posts,
@@ -558,6 +563,7 @@ public sealed partial class ExerciseReportService
             Verified = persona.Verified,
             Likes = likes,
             Reposts = reposts,
+            Posts = authored.Count,
         };
     }
 

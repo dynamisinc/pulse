@@ -434,6 +434,23 @@ public static class ExerciseReportBuilder
             .ToArray();
     }
 
+    /// <summary>The DF-48 floor: a lookalike verdict needs at least this much engagement (likes + reposts).</summary>
+    public const long LookalikeVerdictMinimum = 10;
+
+    /// <summary>
+    /// The DF-48 rule (story 32): the lookalike out-drew the verified account when its shown likes + reposts are at least
+    /// <see cref="LookalikeVerdictMinimum"/> and at least 1.5 times the verified account's. Below that the difference is
+    /// noise and the page prints the numbers with no verdict.
+    /// </summary>
+    /// <param name="verifiedTotal">The verified account's likes + reposts.</param>
+    /// <param name="lookalikeTotal">The lookalike's likes + reposts.</param>
+    /// <returns><c>true</c> when the report may say the lookalike drew more.</returns>
+    public static bool LookalikeOutdrew(long verifiedTotal, long lookalikeTotal)
+    {
+        // 2 x lookalike >= 3 x verified is "at least 1.5x" with no rounding; decimal so the doubling cannot overflow.
+        return lookalikeTotal >= LookalikeVerdictMinimum && (decimal)lookalikeTotal * 2 >= (decimal)verifiedTotal * 3;
+    }
+
     /// <summary>A handle without its leading <c>@</c> and surrounding whitespace.</summary>
     /// <param name="handle">The stored handle.</param>
     /// <returns>The bare handle, or empty.</returns>
