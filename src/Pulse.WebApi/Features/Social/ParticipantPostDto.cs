@@ -154,6 +154,19 @@ public class ParticipantPostDto
     }
 
     /// <summary>
+    /// A copy of this post with <paramref name="viewer"/> as its caller-specific viewer state (demo-feedback story 19:
+    /// the creator's own <c>POST /api/posts</c> 201). The source is left untouched, so a payload already handed to the
+    /// <c>PostReceived</c> broadcast stays viewer-free.
+    /// </summary>
+    /// <param name="viewer">The caller's viewer state.</param>
+    /// <returns>A new instance carrying <paramref name="viewer"/>.</returns>
+    public ParticipantPostDto WithViewer(PostViewerStateDto viewer)
+    {
+        ArgumentNullException.ThrowIfNull(viewer);
+        return new ParticipantPostDto(this) { Viewer = viewer };
+    }
+
+    /// <summary>
     /// The wire value of <see cref="PinnedForAll"/> for <paramref name="post"/>: <c>true</c> while it is pinned for
     /// everyone, else <c>null</c> (omitted). Reads <see cref="Post.PinnedForAllAt"/> only, never who pinned it.
     /// </summary>
