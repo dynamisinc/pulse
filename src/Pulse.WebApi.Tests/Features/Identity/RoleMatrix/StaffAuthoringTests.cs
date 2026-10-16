@@ -41,6 +41,7 @@ public sealed class StaffAuthoringTests
             authorPersonaId = world.PersonaId.ToString(),
             actingHumanId = "ignored-server-stamps-the-session-person",
             timeZone = "UTC",
+            scenarioTime = "2026-10-16T09:05:00Z",
             text = $"Setup or conduct post as {role} in {state}",
         });
 
@@ -88,7 +89,7 @@ public sealed class StaffAuthoringTests
         using var host = new RoleMatrixHost(_fixture.ConnectionString!);
         using var client = world.Client(host, await world.TokenForAsync(role));
 
-        using var response = await client.PostAsJsonAsync("/api/posts", new { text = $"A {role} post during {state}", timeZone = "UTC" });
+        using var response = await client.PostAsJsonAsync("/api/posts", new { text = $"A {role} post during {state}", timeZone = "UTC", scenarioTime = "2026-10-16T09:05:00Z" });
 
         response.StatusCode.Should().Be(HttpStatusCode.Created, "participant sim writes are allowed in live and in staged dry runs");
     }

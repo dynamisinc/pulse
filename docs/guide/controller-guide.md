@@ -173,7 +173,8 @@ or reloads Pulse sees the end-of-exercise page.
 
 ### Who can start and end
 
-Only **controllers** see **Start exercise** and **End exercise**. Evaluators and planners do not. Treat StartEx and
+Only **controllers** see **Start exercise** and **End exercise**. Evaluators and planners do not, and Pulse
+refuses those actions from any other role. Staging the exercise and archiving it are planner tasks. Treat StartEx and
 EndEx as a controller call made on the exercise director's word, exactly as you would in Cadence.
 
 ## 4. Posting as a persona
@@ -597,7 +598,10 @@ Open **ENGINE** on the toolstrip to see and change the engine settings.
 - Fully automatic posting cannot be selected in this version.
 
 **Swamped mode** (in the engine bar) is the only way an undecided burst posts when its countdown ends. Only the
-exercise's lead controller can turn it on. While it is on, a **TIMEOUT AUTO-SEND IS ACTIVE** banner stays on screen.
+exercise's lead controller can turn it on. Any controller can turn it off. The same rule applies to the
+other engine controls: only the lead can raise autonomy, change the tier policy towards more engine choice, or
+restore the engine or the generation provider; any controller can lower autonomy, use the engine switch, or cut
+generation to the offline provider. While it is on, a **TIMEOUT AUTO-SEND IS ACTIVE** banner stays on screen.
 Use it only when the lead decides the cell cannot keep up.
 
 ### The engine switch (kill switch)

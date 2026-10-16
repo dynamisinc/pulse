@@ -60,3 +60,24 @@ Wave A1 after 16 (reads `Enrollment.Role`). Feeds identity 04 and exercise-lifec
 
 ## Tests
 `RoleMatrixTests` (the matrix), per-transition tests, the standing isolation suite with foreign-org cases.
+
+All under `src/Pulse.WebApi.Tests/Features/Identity/RoleMatrix/` unless noted.
+- `RoleMatrixTests.EveryMappedMutatingRoute_HasAnExplicitMatrixRow_AndEveryRowIsMapped` (AC5: unlisted route fails)
+- `RoleMatrixTests.PreAuthRows_AreExactlyTheAnonymousAllowlistedMutatingRoutes` (AC5, self-service rows)
+- `RoleMatrixTests.EveryProbedRoute_AnswersEachRoleAsTheMatrixSays` (AC2, AC3, AC4, AC5; orgAdmin/planner/controller/lead/evaluator/participant/pio/readonly/anonymous)
+- `LifecycleTransitionRoleTests.Transition_IsAppliedOnlyForItsRole_AndARefusalLeavesTheStateUnchanged` (AC1, AC4, telemetry AC)
+- `LifecycleTransitionRoleTests.NotYetBuiltTransitions_AreAlreadyRoleChecked_TheRightRoleReachesTheStateMachine` (AC1: unstage/reopen)
+- `LifecycleTransitionRoleTests.ArchiveFromBuild_IsAllowedForThePlannerOnlyOnceTheExerciseHasGoneLive` (AC1)
+- `LifecycleTransitionRoleTests.AnOrgAdmin_ActsInTheExerciseOnlyThroughTheEnrollmentTheyHold` (AC4)
+- `OrgRowActionRoleTests.CreateExercise_IsOrgAdminOnly` (AC2)
+- `OrgRowActionRoleTests.Rename_ByAPlanner_ReachesOnlyTheirOwnExercise_AndEveryOtherIdIsTheSameBare404` (bare-404, isolation AC)
+- `OrgRowActionRoleTests.Archive_OnTheOrgTier_IsAllowedFromBuildOnceTheExerciseHasGoneLive` (AC1)
+- `OrgRowActionRoleTests.SetLead_IsPlannerOnly` (orchestrator fold: set-lead row)
+- `LeadControllerGateTests.RaiseNeedsTheLead_LowerIsAnyController_PlannerAndEvaluatorNeither` (lead folds, L-002)
+- `LeadControllerGateTests.ANonLead_ClaimingTheLeadsIdInTheBody_IsStillRefused_AndAPromotionTakesEffectLiveWithoutReSignIn` (lead filter live, session-keyed)
+- `StaffAuthoringTests.StaffPostAsPersona_FollowsSetupVsConduct`, `StaffAuthoringTests.StaffPin_FollowsSetupVsConduct` (Copilot 5 fold)
+- `StaffAuthoringTests.ParticipantSimPost_IsAcceptedInLiveAndStaged` (Copilot 2 fold, live + staged half)
+- `SelfServiceSessionTests.AnEvaluator_Refreshes_ReadsItsSession_SwitchesBetweenItsOwnEnrollments_AndLogsOut`, `SelfServiceSessionTests.AParticipantSession_IsRefusedOnBothStaffOperations_EvenWhenThePersonIsStaffElsewhere` (Copilot 6 fold)
+- `SelfServiceSessionTests.AnEvaluator_ReadsTheExercise` (AC3 reads)
+- `SwampedModeLeadLossTests.*` (story 16 M-002 verified/fixed here; M-003 backend half)
+

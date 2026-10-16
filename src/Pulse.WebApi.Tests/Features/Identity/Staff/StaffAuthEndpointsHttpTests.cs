@@ -106,14 +106,16 @@ public sealed class StaffAuthEndpointsHttpTests
     }
 
     [Fact]
-    public async Task StaffActiveExercise_NonGuidBody_Returns400()
+    public async Task StaffActiveExercise_NonGuidBody_WithNoStaffSession_Is401BeforeTheBodyIsValidated()
     {
         using var host = await StartHostAsync();
         using var client = host.GetTestClient();
 
         var response = await client.PostAsJsonAsync("/api/staff/active-exercise", new { exerciseId = "not-a-guid" });
 
-        response.StatusCode.Should().Be(HttpStatusCode.BadRequest, "a non-GUID exerciseId is a 400 at the endpoint");
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized,
+            "identity-auth-roles/17: the staff-world gate refuses a non-staff caller before the body is validated, so a "
+            + "participant or read-only session cannot probe the switch");
     }
 
     [Fact]
