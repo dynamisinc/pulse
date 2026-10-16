@@ -393,4 +393,73 @@ public sealed class InjectTransitionsTests
 
         InjectTransitions.LiveChildren(item).Select(post => post.Sequence).Should().Equal(1, 3);
     }
+
+    // ---- mark fired (demo-feedback DF-36) ----
+
+    [Theory]
+    [InlineData(InjectStatuses.Pending)]
+    [InlineData(InjectStatuses.Held)]
+    [InlineData(InjectStatuses.Failed)]
+    public void MarkFired_FromPendingHeldOrFailed_IsFired_ChildrenSkipped_AndAFreshItemIsStamped(string status)
+    {
+        var item = Item(status: status);
+        item.Error = status == InjectStatuses.Failed ? "refused" : null;
+        var marker = Guid.NewGuid();
+
+        InjectTransitions.MarkFired(item, marker, T0).Should().BeNull();
+
+        item.Status.Should().Be(InjectStatuses.Fired);
+        item.Error.Should().BeNull();
+        Children(item).Select(post => post.Status).Should().OnlyContain(s => s == InjectPostStatuses.Skipped);
+        item.FiredByHumanId.Should().Be(marker, "an item that never started is stamped by whoever marked it");
+        item.FiredScenarioTime.Should().Be(T0);
+    }
+
+    [Fact]
+    public void MarkFired_AStartedBurst_KeepsWhatWentOut_AndTheOriginalFireStamps()
+    {
+        var (item, published) = HeldAfterFirstPost();
+        var firer = Guid.NewGuid();
+        item.FiredByHumanId = firer;
+        item.FiredScenarioTime = T0;
+        var failed = Children(item)[1];
+        failed.Status = InjectPostStatuses.Failed;
+
+        InjectTransitions.MarkFired(item, Guid.NewGuid(), T0.AddMinutes(10)).Should().BeNull();
+
+        item.Status.Should().Be(InjectStatuses.Fired);
+        published.Status.Should().Be(InjectPostStatuses.Fired, "a post that went out keeps its record");
+        published.FiredPostId.Should().NotBeNull();
+        failed.Status.Should().Be(InjectPostStatuses.Skipped);
+        Children(item)[2].Status.Should().Be(InjectPostStatuses.Skipped);
+        item.FiredByHumanId.Should().Be(firer, "a started item keeps who pressed Fire");
+        item.FiredScenarioTime.Should().Be(T0, "and when");
+    }
+
+    [Theory]
+    [InlineData(InjectStatuses.Firing)]
+    [InlineData(InjectStatuses.Fired)]
+    [InlineData(InjectStatuses.Skipped)]
+    public void MarkFired_FromAnyOtherStatus_IsRefused_AndChangesNothing(string status)
+    {
+        var item = Item(status: status);
+
+        InjectTransitions.MarkFired(item, Guid.NewGuid(), T0).Should().Be($"This item is {status} and cannot be marked fired.");
+
+        item.Status.Should().Be(status);
+        item.FiredByHumanId.Should().BeNull();
+        Children(item).Select(post => post.Status).Should().OnlyContain(s => s == InjectPostStatuses.Pending);
+    }
+
+    [Fact]
+    public void MarkFired_WhileAPostIsBeingPublished_IsRefused_AndChangesNothing()
+    {
+        var item = Item(status: InjectStatuses.Held);
+        Children(item)[1].ClaimedAt = T0;
+
+        InjectTransitions.MarkFired(item, Guid.NewGuid(), T0).Should().Be(InjectTransitions.InFlightMessage);
+
+        item.Status.Should().Be(InjectStatuses.Held);
+        Children(item).Select(post => post.Status).Should().OnlyContain(s => s == InjectPostStatuses.Pending);
+    }
 }

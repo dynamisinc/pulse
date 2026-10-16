@@ -88,6 +88,7 @@ import {
   canDelete,
   canFire,
   canHold,
+  canMarkFired,
   canRelease,
   canRetry,
   canSkip,
@@ -478,6 +479,16 @@ function RunSheetPanelBody({ exerciseId }: { readonly exerciseId: string }) {
     rowRefs.current.get(id)?.focus()
   }
 
+  // DF-36: fired without posting (the row asked to confirm). Allowed under FREEZE: nothing is
+  // published. Once it settles, focus returns to the row (its "Mark fired" button is gone).
+  const markFired = (item: InjectItemDto): void => {
+    if (!canMarkFired(item.status)) return
+    void queue.markFired(item.id, item.version).then(outcome => {
+      report('mark fired', outcome, item.id)
+      focusRow(item.id)
+    })
+  }
+
   const moveSelection = (delta: 1 | -1): void => {
     if (visible.length === 0) return
     const index = selected ? visible.findIndex(item => item.id === selected.id) : -1
@@ -806,6 +817,7 @@ function RunSheetPanelBody({ exerciseId }: { readonly exerciseId: string }) {
                 onSkip={() => toggleSkip(item)}
                 onUnskip={() => toggleSkip(item)}
                 onRetry={() => retryItem(item)}
+                onMarkFired={() => markFired(item)}
                 onOpen={() => openEditor(item)}
                 onRequestDelete={() => setConfirmDeleteId(item.id)}
                 onConfirmDelete={() => confirmDelete(item)}

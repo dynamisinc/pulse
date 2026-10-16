@@ -86,4 +86,7 @@ public static class InjectActions
 
     /// <summary>A failed item's failed posts were re-fired.</summary>
     public const string Retry = "retry";
+
+    /// <summary>An item was recorded as fired WITHOUT publishing (demo-feedback DF-36).</summary>
+    public const string MarkFired = "mark_fired";
 }

@@ -901,3 +901,69 @@ describe('the mock refuses a mixed or multi-video media set like the server (400
     await expect(mock.create(withMedia('mock-media-canned-flood', 'who-knows'))).resolves.toBeDefined()
   })
 })
+
+describe('mark fired without posting (demo-feedback story 23, DF-36)', () => {
+  it('pending, held and failed become fired with no post, stamped by the caller', async () => {
+    const mock = makeMock([single('Pending'), single('Held'), single('Failed')])
+    const [pending, held, failed] = mock.snapshot().items
+    if (!pending || !held || !failed) throw new Error('seed missing')
+    await mock.hold(held.id)
+    mock.failNextPublish('Media asset not found')
+    await mock.fire(failed.id)
+
+    for (const id of [pending.id, held.id, failed.id]) {
+      const before = item(mock, id)
+      const marked = await mock.markFired(id, before.version)
+      expect(marked.status).toBe('fired')
+      expect(marked.version).toBe(before.version + 1)
+      expect(marked.firedByHumanId).toBe(mock.me)
+      // A never-started item is stamped now; the failed one keeps what its fire recorded.
+      if (id !== failed.id) expect(marked.firedScenarioTime).toBeDefined()
+      else expect(marked.firedScenarioTime).toBe(before.firedScenarioTime)
+      expect(marked.error).toBeUndefined()
+      expect(marked.posts.map(post => post.status)).toEqual(['skipped'])
+      expect(marked.posts.some(post => post.firedPostId)).toBe(false)
+    }
+  })
+
+  it('fired, firing and skipped are refused (409 + the current item), as is a stale version', async () => {
+    const mock = makeMock([single('Fired'), single('Skipped'), single('Pending')])
+    const [fired, skipped, pending] = mock.snapshot().items
+    if (!fired || !skipped || !pending) throw new Error('seed missing')
+    await mock.fire(fired.id)
+    await mock.skip(skipped.id)
+
+    for (const id of [fired.id, skipped.id]) {
+      const current = item(mock, id)
+      const error = await conflictOf(mock.markFired(id, current.version))
+      expect(error.detail).toBe(`This item is ${current.status} and cannot be marked fired.`)
+      expect(error.item?.status).toBe(current.status)
+    }
+    const stale = await conflictOf(mock.markFired(pending.id, pending.version + 1))
+    expect(stale.item?.status).toBe('pending')
+  })
+
+  it('a started burst keeps who fired it; only a never-started item takes the marker', async () => {
+    const mock = makeMock([burst(2), single('Fresh')])
+    const [started, fresh] = mock.snapshot().items
+    if (!started || !fresh) throw new Error('seed missing')
+    const fired = await mock.as('human-controller-02').fire(started.id)
+    const held = await mock.hold(started.id)
+
+    const marked = await mock.markFired(started.id, held.version)
+    expect(marked.firedByHumanId).toBe('human-controller-02')
+    expect(marked.firedScenarioTime).toBe(fired.firedScenarioTime)
+
+    const markedFresh = await mock.markFired(fresh.id, fresh.version)
+    expect(markedFresh.firedByHumanId).toBe(mock.me)
+    mock.dispose()
+  })
+
+  it('is allowed under FREEZE (nothing reaches participants)', async () => {
+    const mock = makeMock([single('A')])
+    const [a] = mock.snapshot().items
+    if (!a) throw new Error('seed missing')
+    mock.setPauseTier('freeze')
+    expect((await mock.markFired(a.id, a.version)).status).toBe('fired')
+  })
+})

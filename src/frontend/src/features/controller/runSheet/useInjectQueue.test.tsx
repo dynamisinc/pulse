@@ -211,6 +211,27 @@ describe('useInjectQueue — mutations', () => {
     expect(result.current.items.map(i => i.title)).toEqual(['C2', 'A'])
   })
 
+  it('markFired (DF-36) marks the row fired at once, with no post, and a stale version is a 409', async () => {
+    const { result } = await mount()
+    await settle()
+    const [a, b] = result.current.items
+    if (!a || !b) throw new Error('no items')
+
+    await act(async () => {
+      expect((await result.current.markFired(a.id, a.version)).status).toBe('ok')
+    })
+    const marked = result.current.items.find(i => i.id === a.id)
+    expect(marked?.status).toBe('fired')
+    expect(marked?.posts.every(post => !post.firedPostId)).toBe(true)
+
+    await act(async () => {
+      const outcome = await result.current.markFired(b.id, b.version - 1)
+      expect(outcome.status).toBe('error')
+      if (outcome.status === 'error') expect(outcome.error).toBeInstanceOf(InjectConflictError)
+    })
+    expect(result.current.items.find(i => i.id === b.id)?.status).toBe('pending')
+  })
+
   it('a double press sends ONE request: the second resolves `busy`, nothing else is sent', async () => {
     const fire = vi.spyOn(injectMock, 'fire')
     const { result } = await mount()
