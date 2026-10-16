@@ -216,8 +216,9 @@ What was built (no schema change, no EF migration, no `Program.cs` edit):
 - **AC0** — `EngineAmbientGovernanceOptions` bound from `Generation:Governance` (separate from `GenerationOptions`, so the
   NFR-005 startup gate is untouched). `autonomous` is rejected 400 with *"mode 'autonomous' is not authorized by
   PROVIDER-GOVERNANCE §8 …"* while false. Bicep: root param `generationAmbientAutonomyAuthorized` (default false) →
-  `webapp.bicep` → app setting `Generation__Governance__AmbientAutonomyAuthorized`; `uat.bicepparam` unchanged (omitted =
-  false); `main.json` regenerated with Bicep 0.48.1. The loop also re-checks the flag before every autonomous publish
+  `webapp.bicep` → app setting `Generation__Governance__AmbientAutonomyAuthorized`; `uat.bicepparam` now states it
+  explicitly as `false` (Gate-1 L-5, "NOT authorized until PROVIDER-GOVERNANCE §8 amendment 2 is signed"); `main.json`
+  regenerated with Bicep 0.48.1 (re-verified byte-identical after L-5). The loop also re-checks the flag before every autonomous publish
   (defence in depth).
 - **AC1** — `Pulse.Core/Features/Ambient`: `AmbientTierPolicy` (+ `AmbientPolicyMode`), fixed vocabulary `AmbientTopics`
   (`local-color, traffic-mundane, food, sports, community-events, pets, local-business, family-school`), pure
@@ -259,11 +260,35 @@ What was built (no schema change, no EF migration, no `Program.cs` edit):
   controller who set the policy (via new optional `EngineBurst.Trigger/PublishPath/AuthorizedBy`). The report row already
   labels `engine` (`ExerciseReportBuilder.Source`) — no change. Post scenario time = the exercise clock instant ("O").
 
-Known limitations / follow-ups: `PromptAssembler` has no ambient mode, so the ambient brief is phrased through the
-existing storyline-shaped prompt (title/expectation say "not about any incident"; the escalation line reads "officials
-have just responded"); a dedicated ambient prompt section is a follow-up. Allow-listed personas are voiced only if they
-are in the loop's seeded cast (`ReactionLoopRegistration.PersonasByHandle`). "Pause engine" still has no effect on
+Known limitations / follow-ups: ~~`PromptAssembler` has no ambient mode~~ — **addressed by Gate-1 H-1** (below).
+Allow-listed personas are voiced only if they are in the loop's seeded cast (`ReactionLoopRegistration.PersonasByHandle`)
+— now **reported** to the panel as `ambientPolicy.voiceablePersonaIds` (Gate-1 M-1). "Pause engine" still has no effect on
 storyline bursts (pre-existing; only ambient honours it).
+
+### Gate-1 review fixes (branch `fix/ambient-be`, 2026-10-16) — status remains **Built (backend), NOT Complete**
+- **H-1 (addressed)** — ambient bursts no longer travel a storyline/escalation prompt. Additive
+  `StorylineBrief.IsAmbient` (default `false`), set by `ReactionLoopDriver.BuildAmbientGenerateRequest` (no magic
+  Phase/Title strings drive behaviour). With it, `PromptAssembler` uses an everyday-life opening, puts the exercise
+  brief under "## Setting (background only …)", replaces the storyline / public-expectation / minutes-since-response /
+  intensity / escalation block with "## Background chatter — topic: {seed phrase}. Ordinary daily life only …", drops
+  "advance the storyline / react to the world feed" from the task, and skips persona recent-post exemplars. Storyline
+  prompts are unchanged. `AmbientBehavior.AmbientMix` is now Calm 0.75 + Gratitude 0.25 only.
+- **M-1 (addressed)** — additive `ambientPolicy.voiceablePersonaIds` (GUID strings, or `null` when the exercise has no
+  registered loop): the loop cast's persona ids. POST validation unchanged (any persona of this exercise), so the panel
+  can label the rest "not in engine cast".
+- **M-2 (addressed)** — `InjectionAttack.Vector` (`WorldFeed` default | `PersonaVoiceNotes`); the four ambient bio cases
+  run the REAL unfenced path (`PersonaDossier.VoiceNotes` → `PromptAssembler.AppendPersona`) via
+  `InjectionRedTeam.AssembleViaPersonaVoiceNotes`, and an obeyed burst is dropped end to end through `GenerateStage`.
+  VoiceNotes are deliberately **not** fenced: it would change every storyline prompt (and its cache prefix); the reason
+  is commented at `AppendPersona`. The guard is the defence on that path.
+- **L-1** — `autonomous` is rejected 400 (*"engine is stopped or cut to Fake — restore it before enabling autonomous
+  ambient"*) while the kill switch (either mode; `SafetyClampActive`, which also covers a degraded clamp) or the cut to
+  Fake is active. Review mode stays selectable.
+- **L-5** — explicit `param generationAmbientAutonomyAuthorized = false` in `uat.bicepparam`.
+- **L-6** — the ambient `engine.tier_policy_changed` shape and the new nullable `trigger` / `publishPath` / `heldReason`
+  keys are documented in `engine-telemetry-tuning/01-engine-event-types.md`.
+- **L-7** — `PublishAmbientAsync` refuses (logs + `held:policy`, publishes nothing) any intent whose trigger is not
+  `AmbientFloor`. Defence in depth; unreachable today, so it has no dedicated test (the method is private).
 
 ### AC10 backend facts (for the frontend PR's guide section)
 - Three modes: **Off** (default; also after every restart), **Review** (drafts enter the review queue, never auto-sent),
@@ -279,6 +304,17 @@ storyline bursts (pre-existing; only ambient honours it).
 ## Tests (backend)
 - `AmbientPolicyValidatorTests.*` (AC0, AC1); `AmbientBehaviorTests.*` (AC4, white-noise overlap)
 - `InjectionRedTeamTests.Catalog_CarriesAmbientPersonaBioSteeringCases` + the catalog theories (AC7)
+- `InjectionRedTeamTests.Catalog_CarriesPersonaVoiceNotesVectorCases`,
+  `.PersonaVoiceNotesAttack_ReachesTheTrustedPromptUnfenced_AndItsObeyedFormIsCaught`,
+  `GenerateStageTests.GenerateAsync_AmbientBurst_SteeredViaPersonaVoiceNotes_ObeyedOutputIsDropped` (AC7, Gate-1 M-2)
+- `PromptAssemblerTests.Assemble_Ambient_CarriesNoStorylineOrEscalationFraming`,
+  `.Assemble_Ambient_CarriesTheTopicSeed_TheBackgroundSetting_AndTheTask`, `.Assemble_Ambient_SkipsPersonaRecentPosts`,
+  `.Assemble_NonAmbient_KeepsTheStorylineFraming_AndRecentPosts`; `AmbientBehaviorTests.TheAmbientMix_IsCalmAndGratitudeOnly`
+  (AC4/AC7, Gate-1 H-1)
+- `EngineAmbientPolicyRegistryTests.TheSettingsSnapshot_ReportsTheLoopCast_AsVoiceablePersonaIds_OnlyForThisExercise`,
+  `.TheSettingsSnapshot_VoiceablePersonaIds_IsNull_WhenNoLoopIsRegistered` (AC2, Gate-1 M-1)
+- `EngineAmbientPolicyServiceTests.Autonomous_WhileTheKillSwitchIsEngaged_Is400_AndChangesNothing`,
+  `.Autonomous_WhileCutToFake_Is400_AndIsAcceptedAgainAfterRestore` (AC2/AC6, Gate-1 L-1)
 - `EngineAmbientPolicyRegistryTests.*` (AC0 flag binding/committed false, AC1 registry, AC5 interim gate)
 - `EngineAmbientPolicyServiceTests.*` (AC0, AC2, AC3 foreign persona/unresolved scope, AC6 request-path demotion)
 - `AmbientAutonomousPublishTests.*` (AC4-AC9 through the real driver; both kill-switch modes, degraded, cut-to-Fake,
