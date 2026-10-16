@@ -9,7 +9,7 @@
  * The countdown starts at the FIRST read of a post's seconds value (`editWindowClock`), so a
  * remount never grants a fresh window. One timeout for the whole remaining window (not a
  * ticking interval): no re-render until it fires. A fresh read with a new `seconds` value
- * restarts it; `0` / absent is closed from the start. The timer is cleared on unmount and on change.
+ * restarts it; `0` / absent is closed from the start. The timer is cleared on unmount/change.
  */
 
 import { useEffect, useMemo, useState } from 'react'
