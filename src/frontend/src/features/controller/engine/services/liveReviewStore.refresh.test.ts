@@ -44,7 +44,7 @@ class PushConnection implements RealtimeConnection {
     this.handler = handler
     return () => {}
   }
-  onStateChange(): () => void {
+  onStateChange(_handler?: (state: HubConnectionState) => void): () => void {
     return () => {}
   }
   stop(): Promise<void> {
@@ -55,6 +55,18 @@ class PushConnection implements RealtimeConnection {
   }
   push(payload: unknown): void {
     this.handler?.(payload)
+  }
+}
+
+/** A PushConnection whose connection-state changes the test can drive (hub Connected). */
+class StatefulConnection extends PushConnection {
+  private stateHandler: ((state: HubConnectionState) => void) | null = null
+  override onStateChange(handler: (state: HubConnectionState) => void): () => void {
+    this.stateHandler = handler
+    return () => {}
+  }
+  emitState(state: HubConnectionState): void {
+    this.stateHandler?.(state)
   }
 }
 
@@ -234,5 +246,114 @@ describe('stale-response guard', () => {
     older.resolve([wireItem('old')])
     await settle()
     expect(ids()).toEqual(['new'])
+  })
+})
+
+describe('invalidation - trailing refresh', () => {
+  it('hub Connected during the initial GET => one trailing GET reveals a pre-join draft', async () => {
+    const connection = new StatefulConnection()
+    const first = deferred()
+    const trailing = deferred()
+    getMock.mockReturnValueOnce(first.promise).mockReturnValueOnce(trailing.promise)
+    liveReviewStore.ensureStarted(connection as unknown as RealtimeConnection)
+    await settle()
+    expect(getMock).toHaveBeenCalledTimes(1)
+
+    connection.emitState(HubConnectionState.Connected)
+    connection.emitState(HubConnectionState.Connected) // collapses into one trailing GET
+    await settle()
+    expect(getMock).toHaveBeenCalledTimes(1)
+
+    first.resolve([]) // predates draft X, no push was delivered for it
+    await settle()
+    expect(ids()).toEqual([])
+    expect(getMock).toHaveBeenCalledTimes(2)
+
+    trailing.resolve([wireItem('x', 'queued')])
+    await settle()
+    expect(ids()).toEqual(['x'])
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(getMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('expiry nudges during an in-flight GET still coalesce (no extra GET)', async () => {
+    const connection = new StatefulConnection()
+    const first = deferred()
+    getMock.mockReturnValueOnce(first.promise)
+    liveReviewStore.ensureStarted(connection as unknown as RealtimeConnection)
+    await settle()
+    for (let i = 0; i < 3; i += 1) liveReviewStore.requestExpiryRefresh()
+    void liveReviewStore.refetch()
+    await settle()
+    first.resolve([])
+    await settle()
+    expect(getMock).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('exhausted stale retries - backed-off reconciliation', () => {
+  it('recovers a server-only draft after three conflicting GETs, then stops', async () => {
+    const connection = new PushConnection()
+    const g1 = deferred()
+    const g2 = deferred()
+    const g3 = deferred()
+    getMock
+      .mockReturnValueOnce(g1.promise)
+      .mockReturnValueOnce(g2.promise)
+      .mockReturnValueOnce(g3.promise)
+      .mockResolvedValue({ data: ['a', 'b', 'c', 'd'].map(d => wireItem(d, 'queued')) })
+    liveReviewStore.ensureStarted(connection as unknown as RealtimeConnection)
+    await settle()
+
+    const withA = [wireItem('a', 'queued')]
+    connection.push(wireItem('b', 'queued'))
+    g1.resolve(withA)
+    await settle()
+    connection.push(wireItem('c', 'queued'))
+    g2.resolve(withA)
+    await settle()
+    connection.push(wireItem('d', 'queued'))
+    g3.resolve(withA)
+    await settle()
+    expect(getMock).toHaveBeenCalledTimes(3)
+    expect(ids()).toEqual(['b', 'c', 'd']) // A still hidden
+
+    await vi.advanceTimersByTimeAsync(1999)
+    expect(getMock).toHaveBeenCalledTimes(3)
+    await vi.advanceTimersByTimeAsync(1)
+    await settle()
+    expect(getMock).toHaveBeenCalledTimes(4)
+    expect(ids().sort()).toEqual(['a', 'b', 'c', 'd'])
+
+    await vi.advanceTimersByTimeAsync(120_000) // success cancels the reconciliation
+    expect(getMock).toHaveBeenCalledTimes(4)
+  })
+
+  it('keeps retrying with backoff (2 s, 5 s, 15 s cap) while GETs keep conflicting', async () => {
+    const connection = new PushConnection()
+    let n = 0
+    getMock.mockImplementation(() => {
+      n += 1
+      connection.push(wireItem(`p${n}`, 'queued')) // a push lands during every GET
+      return Promise.resolve({ data: [] })
+    })
+    liveReviewStore.ensureStarted(connection as unknown as RealtimeConnection)
+    await settle()
+    const base = getMock.mock.calls.length
+    expect(base).toBe(3)
+    await vi.advanceTimersByTimeAsync(2000)
+    expect(getMock.mock.calls.length).toBe(base + 3)
+    await vi.advanceTimersByTimeAsync(4999)
+    expect(getMock.mock.calls.length).toBe(base + 3)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(getMock.mock.calls.length).toBe(base + 6)
+    await vi.advanceTimersByTimeAsync(15_000)
+    expect(getMock.mock.calls.length).toBe(base + 9)
+    await vi.advanceTimersByTimeAsync(15_000)
+    expect(getMock.mock.calls.length).toBe(base + 12)
+    liveReviewStore.resetForTests() // clears the pending timer
+    getMock.mockClear()
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(getMock).not.toHaveBeenCalled()
   })
 })
