@@ -16,6 +16,13 @@ using Pulse.Core.Features.Autonomy.Models;
 /// they hold instead of sending, even under swamped mode. Timers are evaluated in scenario time
 /// (COR-050/051), so a freeze holds the deadline and a time-jump that carries the deadline past resolves to
 /// a HOLD, not a missed auto-send.</para>
+///
+/// <para><b>Hold-on-cut.</b> An active generation-provider cut to Fake (the ADP-042 manual egress brake) is
+/// treated as one more safety clamp on the auto paths: while the exercise is cut, an expired countdown with no
+/// controller decision HOLDs even under swamped mode, so a live draft generated before the cut can never
+/// auto-send after it. Like DropToSuggest, the cut suspends only the AUTO path — an explicit controller
+/// approval is a manual publish and still publishes. A countdown already resolved to HOLD while cut stays held
+/// after a restore (it is no longer counting down); only still-running countdowns resume the ordinary rules.</para>
 /// </summary>
 public static class AutoHoldPolicy
 {
@@ -28,15 +35,26 @@ public static class AutoHoldPolicy
     ///   <see cref="TimeoutDisposition.Publish"/>; <see cref="ControllerDecision.Vetoed"/> →
     ///   <see cref="TimeoutDisposition.Hold"/>.</item>
     ///   <item>No decision + not yet expired → <see cref="TimeoutDisposition.AwaitDecision"/>.</item>
-    ///   <item>No decision + expired → <see cref="TimeoutDisposition.Hold"/>, unless swamped mode is on and
-    ///   the effective level is still Delayed-auto, which is the sole auto-send path.</item>
+    ///   <item>No decision + expired → <see cref="TimeoutDisposition.Hold"/>, unless swamped mode is on, the
+    ///   effective level is still Delayed-auto, AND the exercise is not cut to Fake — the sole auto-send path.</item>
     /// </list>
     /// </summary>
+    /// <param name="countdown">The draft's countdown snapshot.</param>
+    /// <param name="effective">The draft's safety-adjusted effective autonomy.</param>
+    /// <param name="currentScenarioMinute">The current scenario minute (COR-050/051).</param>
+    /// <param name="swampedMode">Whether the lead-gated swamped mode (#36) is on for the exercise.</param>
+    /// <param name="providerCutToFake">
+    /// Whether the exercise's generation is currently cut to the Fake provider (ADP-042). A cut is a safety
+    /// clamp on the auto paths: it suspends the swamped-mode auto-send (expiry → HOLD) but never overrides an
+    /// explicit controller approval. Defaults to false (no cut).
+    /// </param>
+    /// <returns>The disposition for the countdown.</returns>
     public static TimeoutDisposition Decide(
         DelayedAutoCountdown countdown,
         EffectiveAutonomy effective,
         int currentScenarioMinute,
-        bool swampedMode)
+        bool swampedMode,
+        bool providerCutToFake = false)
     {
         ArgumentNullException.ThrowIfNull(countdown);
         ArgumentOutOfRangeException.ThrowIfNegative(currentScenarioMinute);
@@ -64,8 +82,9 @@ public static class AutoHoldPolicy
         }
 
         // Expired with no decision. Silence is never approval → HOLD, unless swamped mode is explicitly on
-        // and the draft is still effectively Delayed-auto (a safety clamp having lowered it suspends this).
-        var autoSend = swampedMode && effective.Level == AutonomyLevel.DelayedAuto;
+        // and the draft is still effectively Delayed-auto (a safety clamp having lowered it suspends this) and
+        // the exercise is not cut to Fake (hold-on-cut: a pre-cut live draft must never auto-send after the cut).
+        var autoSend = swampedMode && !providerCutToFake && effective.Level == AutonomyLevel.DelayedAuto;
         return autoSend ? TimeoutDisposition.Publish : TimeoutDisposition.Hold;
     }
 
@@ -74,15 +93,26 @@ public static class AutoHoldPolicy
     /// decision</i> (the auto-HOLD, or the swamped-mode auto-send), also returns the
     /// <see cref="DraftTimeoutResolved"/> event to log (XC-004 <c>engine.reviewed</c> hold-on-expiry /
     /// auto-send). While the countdown is still running, or when the outcome is a human approve/veto (logged
-    /// on the review-action path, not here), the event is null. The disposition is always returned.
+    /// on the review-action path, not here), the event is null. The disposition is always returned. An expiry
+    /// held because the exercise is cut to Fake is the ordinary hold-on-expiry transition (not via swamped mode).
     /// </summary>
+    /// <param name="countdown">The draft's countdown snapshot.</param>
+    /// <param name="effective">The draft's safety-adjusted effective autonomy.</param>
+    /// <param name="currentScenarioMinute">The current scenario minute (COR-050/051).</param>
+    /// <param name="swampedMode">Whether the lead-gated swamped mode (#36) is on for the exercise.</param>
+    /// <param name="providerCutToFake">
+    /// Whether the exercise's generation is currently cut to the Fake provider (ADP-042); see
+    /// <see cref="Decide"/>. Defaults to false (no cut).
+    /// </param>
+    /// <returns>The disposition, the swamped-mode flag, and the transition event (if any).</returns>
     public static TimeoutEvaluation Evaluate(
         DelayedAutoCountdown countdown,
         EffectiveAutonomy effective,
         int currentScenarioMinute,
-        bool swampedMode)
+        bool swampedMode,
+        bool providerCutToFake = false)
     {
-        var disposition = Decide(countdown, effective, currentScenarioMinute, swampedMode);
+        var disposition = Decide(countdown, effective, currentScenarioMinute, swampedMode, providerCutToFake);
 
         // Only an on-expiry, no-decision resolution is an autonomy-layer transition to log here.
         var isTimeoutTransition = countdown.Decision == ControllerDecision.None

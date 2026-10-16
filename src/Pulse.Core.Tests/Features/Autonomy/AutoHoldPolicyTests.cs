@@ -109,4 +109,42 @@ public class AutoHoldPolicyTests
         AutoHoldPolicy.Evaluate(Countdown(ControllerDecision.Approved), Delayed, 108, false)
             .Event.Should().BeNull("a human approve/veto is logged on the review-action path, not the timeout path");
     }
+
+    // ---- Hold-on-cut: an active provider cut to Fake clamps the auto path (ADP-042) ---------------
+
+    [Fact]
+    public void OnExpiry_UnderSwampedMode_WhileCutToFake_Holds()
+    {
+        AutoHoldPolicy.Decide(Countdown(), Delayed, currentScenarioMinute: 105, swampedMode: true, providerCutToFake: true)
+            .Should().Be(TimeoutDisposition.Hold, "a pre-cut live draft must never auto-send after the exercise is cut to Fake");
+    }
+
+    [Fact]
+    public void ApprovedDraft_WhileCutToFake_StillPublishes()
+    {
+        AutoHoldPolicy.Decide(
+                Countdown(ControllerDecision.Approved), Delayed, currentScenarioMinute: 130, swampedMode: true, providerCutToFake: true)
+            .Should().Be(TimeoutDisposition.Publish, "an explicit approval is a manual publish — the cut suspends only the auto path");
+    }
+
+    [Fact]
+    public void BeforeExpiry_WhileCutToFake_StillAwaitsDecision()
+    {
+        AutoHoldPolicy.Decide(Countdown(), Delayed, currentScenarioMinute: 103, swampedMode: true, providerCutToFake: true)
+            .Should().Be(TimeoutDisposition.AwaitDecision, "the cut does not resolve a still-running countdown early");
+    }
+
+    [Fact]
+    public void Evaluate_OnExpiryWhileCutToFake_LogsAHoldTransition_NotViaSwamped()
+    {
+        var countdown = Countdown();
+
+        var result = AutoHoldPolicy.Evaluate(countdown, Delayed, currentScenarioMinute: 108, swampedMode: true, providerCutToFake: true);
+
+        result.Disposition.Should().Be(TimeoutDisposition.Hold);
+        result.ViaSwampedMode.Should().BeFalse();
+        result.Event.Should().NotBeNull("a hold-on-cut is the ordinary hold-on-expiry transition to log");
+        result.Event!.Disposition.Should().Be(TimeoutDisposition.Hold);
+        result.Event.ViaSwampedMode.Should().BeFalse();
+    }
 }

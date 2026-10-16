@@ -760,7 +760,10 @@ public sealed partial class EngineReviewService
     /// — held for you", surfaces in NEEDS YOU) — it NEVER auto-sends. The ONLY auto-send-on-expiry path is
     /// swamped mode explicitly enabled AND the draft still effectively Delayed-auto; a kill switch or degraded
     /// clamp lowers the effective level below Delayed-auto, so the countdown suspends (holds) even under
-    /// swamped mode. Each resolution emits exactly one <c>engine.reviewed</c> (hold-on-expiry / auto-send) and
+    /// swamped mode. Likewise, while the exercise is cut to Fake (<see cref="IGenerationProviderCutRegistry"/>,
+    /// ADP-042) an expired countdown HOLDs even under swamped mode (hold-on-cut), so a live draft generated before
+    /// the cut never auto-sends after it; explicit controller approvals are unaffected, and a countdown already
+    /// held stays held after a restore. Each resolution emits exactly one <c>engine.reviewed</c> (hold-on-expiry / auto-send) and
     /// pushes the change. Callers (the tick host) set <see cref="IExerciseContext.CurrentExerciseId"/> before
     /// invoking, so this operates entirely within one exercise's scope (COR-001).
     /// </summary>
@@ -774,6 +777,7 @@ public sealed partial class EngineReviewService
 
         var state = _autonomy.GetOrCreate(exerciseId);
         var swamped = state.SwampedModeEnabled;
+        var cutToFake = _providerCut.IsCutToFake(exerciseId);
         var currentMinute = _clock.CurrentScenarioMinute(exerciseId);
 
         var queue = await _store.GetQueueAsync(cancellationToken);
@@ -794,7 +798,7 @@ public sealed partial class EngineReviewService
                 candidate.CountdownDecision ?? ControllerDecision.None);
 
             var effective = state.ResolveEffective(candidate.StorylineId);
-            var evaluation = AutoHoldPolicy.Evaluate(countdown, effective, currentMinute, swamped);
+            var evaluation = AutoHoldPolicy.Evaluate(countdown, effective, currentMinute, swamped, cutToFake);
 
             // Only an on-expiry, no-decision transition returns an event to act on here; while the countdown
             // is still running the display tick is driven client-side (the frozen useReviewQueue's own clock).

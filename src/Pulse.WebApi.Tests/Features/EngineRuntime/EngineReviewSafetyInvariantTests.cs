@@ -143,6 +143,76 @@ public sealed class EngineReviewSafetyInvariantTests
         item.Disposition.Should().Be(DraftDisposition.Held);
     }
 
+    // ==== (b') Hold-on-cut: a provider cut to Fake suspends the swamped auto-send (ADP-042) ==========
+
+    [Fact]
+    public async Task AutoHold_CutToFake_HoldsEvenUnderSwampedMode_WhileUncutSiblingExerciseStillAutoSends()
+    {
+        // Two exercises share ONE process-wide cut registry (as in production); only A is cut.
+        var cuts = new GenerationProviderCutRegistry();
+        var exerciseA = Guid.NewGuid();
+        var exerciseB = Guid.NewGuid();
+        var itemA = Countdown(exerciseA, started: 0, minutes: 3);
+        var itemB = Countdown(exerciseB, started: 0, minutes: 3);
+        using var harnessA = new Harness(exerciseA, new[] { itemA }, cuts);
+        using var harnessB = new Harness(exerciseB, new[] { itemB }, cuts);
+
+        foreach (var (harness, item, exerciseId) in new[] { (harnessA, itemA, exerciseA), (harnessB, itemB, exerciseB) })
+        {
+            var state = harness.Registry.GetOrCreate(exerciseId);
+            state.SetStorylineOverride(item.StorylineId, AutonomyLevel.DelayedAuto, "lead-1", 0);
+            state.SetSwampedMode(enabled: true, "lead-1", 0);
+            harness.Advance(minutes: 4);
+        }
+
+        // The live draft was generated (and its countdown started) BEFORE the cut.
+        cuts.Cut(exerciseA);
+
+        await harnessA.Service.EvaluateAutoHoldAsync();
+        await harnessB.Service.EvaluateAutoHoldAsync();
+
+        harnessA.Publisher.Bursts.Should().BeEmpty(
+            "while an exercise is cut to Fake, a pre-cut Delayed-auto draft must never auto-send — even under swamped mode");
+        itemA.Disposition.Should().Be(DraftDisposition.Held, "the expiry resolves to the ordinary 'timer expired — held for you'");
+        var reviewedA = await harnessA.ReviewedEventsAsync(itemA.DraftId);
+        Action(reviewedA.Should().ContainSingle("exactly one engine.reviewed per decision").Subject).Should().Be("hold-on-expiry");
+        reviewedA[0].Actor.ActingHumanId.Should().BeNull("a hold-on-cut is still silence, not a human decision");
+
+        harnessB.Publisher.Bursts.Should().ContainSingle("the cut is per-exercise (COR-001) — an uncut sibling keeps its swamped auto-send")
+            .Which.DraftId.Should().Be(itemB.DraftId);
+        itemB.Disposition.Should().Be(DraftDisposition.Published);
+        Action((await harnessB.ReviewedEventsAsync(itemB.DraftId)).Should().ContainSingle().Subject).Should().Be("auto-send");
+    }
+
+    [Fact]
+    public async Task AutoHold_AfterRestore_HeldCountdownStaysHeld_NewExpiryResumesSwampedAutoSend()
+    {
+        var exerciseId = Guid.NewGuid();
+        var heldDuringCut = Countdown(exerciseId, started: 0, minutes: 3);
+        var laterCountdown = Countdown(exerciseId, started: 0, minutes: 6);
+        using var harness = Build(exerciseId, heldDuringCut, laterCountdown);
+
+        var state = harness.Registry.GetOrCreate(exerciseId);
+        state.SetStorylineOverride(heldDuringCut.StorylineId, AutonomyLevel.DelayedAuto, "lead-1", 0);
+        state.SetStorylineOverride(laterCountdown.StorylineId, AutonomyLevel.DelayedAuto, "lead-1", 0);
+        state.SetSwampedMode(enabled: true, "lead-1", 0);
+
+        harness.ProviderCut.Cut(exerciseId);
+        harness.Advance(minutes: 4);
+        await harness.Service.EvaluateAutoHoldAsync();
+        heldDuringCut.Disposition.Should().Be(DraftDisposition.Held);
+        laterCountdown.Disposition.Should().Be(DraftDisposition.CountingDown, "its deadline has not passed yet");
+
+        harness.ProviderCut.Restore(exerciseId);
+        harness.Advance(minutes: 3);
+        await harness.Service.EvaluateAutoHoldAsync();
+
+        heldDuringCut.Disposition.Should().Be(DraftDisposition.Held, "a countdown already resolved to HOLD stays held after a restore");
+        harness.Publisher.Bursts.Should().ContainSingle("after the restore the ordinary swamped-mode rule resumes for still-running countdowns")
+            .Which.DraftId.Should().Be(laterCountdown.DraftId);
+        laterCountdown.Disposition.Should().Be(DraftDisposition.Published);
+    }
+
     // ==== (c) Kill switch + degraded clamp only LOWER; suspend countdowns; never auto-recover =========
 
     [Fact]
@@ -425,7 +495,7 @@ public sealed class EngineReviewSafetyInvariantTests
         private readonly PulseDbContext _db;
         private readonly ManualTimeProvider _time;
 
-        public Harness(Guid exerciseId, EngineReviewItemEntity[] items)
+        public Harness(Guid exerciseId, EngineReviewItemEntity[] items, GenerationProviderCutRegistry? providerCut = null)
         {
             var context = new ExerciseContext { CurrentExerciseId = exerciseId };
 
@@ -441,6 +511,7 @@ public sealed class EngineReviewSafetyInvariantTests
             Publisher = new RecordingPublishService();
             Registry = new EngineAutonomyRegistry();
             TierPolicy = new EngineTierPolicyRegistry();
+            ProviderCut = providerCut ?? new GenerationProviderCutRegistry();
 
             Service = new EngineReviewService(
                 new FakeReviewStore(items),
@@ -454,7 +525,7 @@ public sealed class EngineReviewSafetyInvariantTests
                 TierPolicy,
                 new FakeGenerationProvider(),
                 Options.Create(new GenerationOptions()),
-                new GenerationProviderCutRegistry(),
+                ProviderCut,
                 NullLogger<EngineReviewService>.Instance);
         }
 
@@ -465,6 +536,8 @@ public sealed class EngineReviewSafetyInvariantTests
         public EngineAutonomyRegistry Registry { get; }
 
         public EngineTierPolicyRegistry TierPolicy { get; }
+
+        public GenerationProviderCutRegistry ProviderCut { get; }
 
         public void Advance(int minutes) => _time.Advance(TimeSpan.FromMinutes(minutes));
 
