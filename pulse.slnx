@@ -6,4 +6,8 @@
     <Project Path="src/Pulse.WebApi.Tests/Pulse.WebApi.Tests.csproj" />
     <Project Path="src/Pulse.WebApi/Pulse.WebApi.csproj" />
   </Folder>
+  <Folder Name="/tools/">
+    <Project Path="tools/Pulse.LoadTest.Tests/Pulse.LoadTest.Tests.csproj" />
+    <Project Path="tools/Pulse.LoadTest/Pulse.LoadTest.csproj" />
+  </Folder>
 </Solution>

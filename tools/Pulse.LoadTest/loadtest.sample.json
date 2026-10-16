@@ -1,0 +1,40 @@
+{
+  // Copy to loadtest.json (git-ignored) and fill in the three values marked FILL. Comments are allowed.
+  "apiHost": "FILL: the hostname bound to the LOAD-TEST exercise (New-LoadTestExercise.ps1 -ExerciseHost)",
+  "joinUrlFile": "FILL: scripts/uat/out/loadtest-join-urls-<timestamp>.csv",
+  "demoExerciseId": "FILL: the demo exercise id (Test-DemoReady.ps1 prints it); the harness refuses to run against it",
+  "staffUsername": "controller1",
+  "steps": [20, 40, 100],
+  "stepMinutes": 10,
+  "joinsPerMinute": 25,
+  "npcNamePrefix": "Load NPC",
+  "outputDirectory": "loadtest-results",
+  "activity": {
+    "feedReadSeconds": 30,
+    "reactionMeanSeconds": 60,
+    "repostShare": 0.3,
+    "postMeanSeconds": 300,
+    "replyShare": 0.25
+  },
+  "burst": {
+    "noiseHigh": true,
+    "fireBurstItem": true,
+    "burstItemTitlePrefix": "Load burst",
+    "burstItemAtMinute": 1,
+    "pacedStartMinute": 2,
+    "postsPerMinute": 120,
+    "durationMinutes": 2
+  },
+  "stopRules": {
+    "maxErrorRate": 0.05,
+    "maxPostP95Ms": 5000,
+    "sustainSeconds": 60,
+    "windowSeconds": 15,
+    "minSamples": 10
+  },
+  "fanOut": {
+    "lateAfterSeconds": 2,
+    "droppedAfterSeconds": 30
+  },
+  "requestTimeoutSeconds": 30
+}
