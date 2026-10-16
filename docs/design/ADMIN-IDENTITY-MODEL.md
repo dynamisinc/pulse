@@ -123,6 +123,12 @@ Organization (+ Slug: new, unique; used in the staff console URL, §1.2)
   - all of the person's sessions, for a disable;
   - sessions on that exercise, for an enrollment change.
 
+  **This includes live realtime connections.** `ExerciseRealtimeHub` checks membership only on connect, and the
+  staff broadcasters send straight to the group. So revocation also **aborts every SignalR connection bound to
+  a revoked session id and removes it from its groups**, using a connection-to-session registry kept in the
+  hub's connect and disconnect handlers. A test covers a client connected *before* revocation, which stops
+  receiving staff broadcasts.
+
   Tests prove that the old access token and the old refresh token both stop working. *(Copilot review 4.)*
 - **The org admin grant is `Person.OrgRole = "orgAdmin"`. It is not an exercise role.** `orgAdmin` leaves the
   staff role vocabulary. Migration: every existing `orgAdmin` assignment sets the person's
@@ -210,6 +216,15 @@ Organization (+ Slug: new, unique; used in the staff console URL, §1.2)
 
   Separate origins (the staff console host and the per-exercise participant hosts) can legitimately hold one
   world each, which is the normal case.
+- **Realtime scope on the shared console host (A1, story 15).** `ExerciseRealtimeHub` derives its group from the
+  *host-resolved* exercise, which a shared console host cannot supply.
+  - **Staff hub connections** are scoped from the **session's `ExerciseId`**, verified against a live staff
+    `Enrollment`.
+  - **Participant connections** keep the host binding.
+  - **Org-scope sessions** (no exercise) are refused by the hub.
+  - **Switching exercise** (`active-exercise`) moves the connection to the new group: the client reconnects,
+    and the server drops the old group membership.
+  - Tests cover a connection from the console host and a switch between exercises.
 - **Staff console host.** An org-scope session has no exercise host to land on (story 15's frontend gap).
   **Decision (signed off):** one platform staff host (`console.<platform-domain>`, set by the config value
   `StaffConsole:Host`) serves the staff console for every org, with `/o/{slug}` for each org. **Per-exercise
@@ -303,6 +318,15 @@ mid-exercise.
   (exactly one is set), `OrganizationId`, `ExpiresAt`, `UsedAt?`, `IssuedByPersonId?`, `CreatedAt`.
   - Lifetime: invite 7 days, reset 60 min.
   - Single use. Issuing a new token voids the earlier unused tokens of the same purpose.
+  - **Any credential change** (a reset, an invite redeemed, an admin-set temporary password, or a password
+    change) invalidates, in the same transaction, **every** outstanding `CredentialToken` of **both** purposes for
+    that Person or Account, and every unconsumed `LoginChoiceCandidate` for that Person. An older invite link or
+    an org choice verified against the old password therefore cannot mint a session afterwards. Tests cover
+    reset followed by redeeming each older token and choice.
+  - **An invite without a grant.** Redeeming an invite sets the password, but a session is minted **only if the
+    person has a grant** (`OrgRole`, or a staff enrollment in that org). Otherwise the page shows an
+    **"awaiting assignment"** state ("your account is ready; an administrator will add you to an exercise"),
+    and the person can sign in normally once assigned.
   - Using a token sets the password, **revokes every live session for that person or account**, and emits
     `identity.credential.changed`.
 - **Staff "forgot password":** `POST /api/auth/password/forgot {email, orgSlug?}` is pre-auth and allowlisted.
@@ -501,8 +525,13 @@ foreign-exercise parent when the inject fires, so both reset and duplicate must 
 ### Decision 5.5 — duplicate
 - **Copied, with new ids and every cross-reference remapped:**
   - settings, chrome and sign-in methods;
-  - personas, with avatar and banner media remapped. An avatar or banner that points at a
-    **participant-uploaded** asset (which is not copied) is **cleared to the default** on the copy;
+  - personas, with avatar and banner media remapped;
+  - **every asset referenced by a copied row**: setup-post attachments and their poster frames, persona
+    avatars and banners, and run-sheet JSON media. The copy is made **even if the asset was uploaded by a
+    participant** (e.g. reused from a dry run). The copied asset loses its participant uploader link
+    (`UploadedByAccountId` is set to null) and becomes staff library media in the new exercise. This
+    replaces the earlier "clear participant-media avatars" rule with the same "a referenced asset survives"
+    principle reset uses (§5.4b). Tests cover staged → unstage → reuse in a setup post → duplicate;
   - staff library media (blobs server-side copied into the new prefix);
   - the run sheet, all items pending except reply items that need repair (§5.4a);
   - the noise pool;
@@ -514,7 +543,7 @@ foreign-exercise parent when the inject fires, so both reset and duplicate must 
   - conduct posts (anything not `IsSetupContent`);
   - participant accounts, links, day words and sessions;
   - telemetry and conduct data;
-  - participant-uploaded media.
+  - participant-uploaded media that **no copied row references**.
 - **Optional:** "copy participant roster" re-creates **directory-linked** accounts with their persona bindings and
   no links. One-off accounts are not copied.
 - **New:** a hostname, a view-only code (generated, disabled), and the name "Copy of X". State: build.
@@ -636,7 +665,8 @@ Key: ✅ allowed · — refused (403; 404 where the bare-404 pattern applies) ·
 | Personas: create, edit, archive | via enrollment | ✅ | ✅ | — | — | — |
 | Content pack upload/apply *(L: build)* | via enrollment | ✅ | — | — | — | — |
 | Run sheet edit | via enrollment | ✅ | ✅ | — | — | — |
-| Fire injects, post as persona, takedown, pin, noise, steering, engine review | via enrollment | — | ✅ | — | — | — |
+| **Setup authoring in build**: post as persona (backdated, setup posts), pin; the composer as used by build-golive/01 and persona-management/04 | via enrollment | ✅ | ✅ | — | — | — |
+| Conduct (staged/live): fire injects, post as persona, takedown, pin, noise, steering, engine review | via enrollment | — | ✅ | — | — | — |
 | Read everything in the exercise (console, feeds, report) | via enrollment | ✅ | ✅ | ✅ | — | — |
 | Sim writes (post, reply, react, follow, own avatar) *(L: live **or staged** (dry run); refused when paused or frozen)* | — | — | — | — | ✅ | — |
 | Read the fiction | — | — | — | — | ✅ | ✅ |
@@ -670,7 +700,7 @@ the report export offered first; from `completed` **or `staged`**; planner or or
 
 | Kind | Item | Wave |
 |---|---|---|
-| **EF migration** | `AdminIdentityFoundation`:<br>• `People` table, with a backfill of one per `StaffUser` (same Id; legacy rows have a null Email until invited)<br>• `StaffUsers.Id` FK → `People.Id`<br>• `Organizations.Slug` (unique; backfilled from Name)<br>• **`Enrollments` table**: StaffAssignment rows migrated with the same Id, plus one per `Account` (Role and PersonaId copied); then **`StaffAssignments` is dropped** and **`Accounts.Role`/`Accounts.PersonaId` are dropped**<br>• `Accounts.EnrollmentId` (unique, non-null after backfill)<br>• `Sessions.PersonId`, **`Sessions.ExerciseId` nullable**<br>• `People.OrgRole`, with orgAdmin enrollments backfilled → planner + OrgRole<br>• `People` password and lockout columns (`PasswordHash`, `PasswordChangedAt`, `FailedLoginCount`, `LockedOutUntil`)<br>• `Enrollments.IsLead` (check: controller only; filtered unique index, one lead per exercise; backfill: the earliest-created controller per exercise)<br>• `Sessions.Origin` (the cross-tab world backstop)<br>• `LoginChoices` + `LoginChoiceCandidates` (slugless org choice)<br>• **`OrgAuditEvents` table**<br>• `Exercises.FirstLiveAt` (backfilled from lifecycle telemetry where the status is past `staged`)<br>Hand-written SQL in `EXEC`, per OPERATE.md; reversible `Down` | A1 |
+| **EF migration** | `AdminIdentityFoundation`:<br>• `People` table, with a backfill of one per `StaffUser` (same Id; legacy rows have a null Email until invited)<br>• `StaffUsers.Id` FK → `People.Id`<br>• `Organizations.Slug` (unique; backfilled from Name)<br>• **`Enrollments` table**: StaffAssignment rows migrated with the same Id, plus one per `Account` (Role and PersonaId copied); then **`StaffAssignments` is dropped** and **`Accounts.Role`/`Accounts.PersonaId` are dropped**<br>• `Accounts.EnrollmentId` (unique, non-null after backfill)<br>• `Sessions.PersonId`, **`Sessions.ExerciseId` nullable**<br>• `People.OrgRole`, with orgAdmin enrollments backfilled → planner + OrgRole<br>• `People` password and lockout columns (`PasswordHash`, `PasswordChangedAt`, `FailedLoginCount`, `LockedOutUntil`)<br>• `Enrollments.IsLead` (check: controller only; filtered unique index, one lead per exercise; backfill: the earliest-created controller per exercise)<br>• `Sessions.Origin` (the cross-tab world backstop)<br>• `LoginChoices` + `LoginChoiceCandidates` (slugless org choice)<br>• **`OrgAuditEvents` table**<br>• `Exercises.FirstLiveAt` (backfill: for status live, paused, completed or archived = COALESCE(first transition to live, `exercise.bootstrapped` time, earliest post, `CreatedAt`), so it is never null for an exercise that ran; build and staged stay null unless a transition to live exists)<br>Hand-written SQL in `EXEC`, per OPERATE.md; reversible `Down` | A1 |
 | EF migration | `CredentialToken`; `People.AvatarBlobName`; `Exercises.SignInMethods`; `MediaAssets.UploadedByAccountId` | A2 |
 | EF migration | `Posts.IsSetupContent`, `Follows.IsSetupContent` (with the §5.4 backfill); `Exercises.ParticipantName` | A3 |
 | EF migration | `ContentPack`, `ContentPackItem`; persona archive column | A4 |
@@ -775,3 +805,12 @@ swamped auto-send keeps running and only the kill switch can stop it.
 | C | Lead in both directions | Allowed with no safeguard. **Rejected**: swamped mode stays stuck on |
 
 Option A changes what Session C's §8 amendment (#571) says about who may turn swamped mode off.
+
+**Copilot review 5 (2026-10-16), on `c142345`, 7 findings, all accepted:**
+- revocation aborts live SignalR connections (§1.1);
+- staff hub scope comes from the session on the console host (§1.2);
+- a credential change invalidates every outstanding token and org choice (§3.3);
+- an invitee with no grant lands on "awaiting assignment" (§3.3);
+- duplicate copies every referenced asset, including participant-uploaded ones (§5.5);
+- a `FirstLiveAt` fallback for bootstrapped and legacy exercises (§9);
+- planners may author setup content in build (§8.2).

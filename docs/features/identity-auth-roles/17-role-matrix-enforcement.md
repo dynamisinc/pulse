@@ -38,6 +38,9 @@ route and per lifecycle transition and proves it with a route x role matrix test
 - [ ] The routes it covers: `POST /api/engine/autonomy/swamped-mode`, `/api/engine/autonomy/restore`, `/api/engine/settings/autonomy-default`, `/api/engine/settings/tier-policy` and `/api/engine/generation-provider/restore`, under **raise-only** semantics (Option A). Raising (swamped on, autonomy up, `autonomy/restore`, `generation-provider/restore`) requires the lead. Lowering (swamped off, autonomy down, the kill switch, `cut-to-fake`) is open to **any controller**. The test covers both directions for lead, non-lead controller, planner and evaluator.
 - [ ] The matrix includes a "set lead controller" row: planner ✅; every other role 403.
 
+### Copilot review 5 fold (2026-10-16)
+- [ ] Setup authoring is separate from conduct posting. In **build**, planners and controllers may post as a persona (setup and backdated posts) and pin, using the composer flows in build-golive/01 and persona-management/04. In **staged and live**, conduct posting is controller-only. The matrix test covers a planner posting in build (allowed) and in live (403).
+
 ## Out of Scope
 The new transitions themselves (reset/reopen/delete/unstage bodies: exercise-build-golive 07-08); the lifecycle write gate for participants (A5 #379).
 

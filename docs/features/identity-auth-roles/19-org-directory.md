@@ -23,6 +23,9 @@ An org admin needs to see and manage the people in their organization without as
 ### Copilot review 4 fold (2026-10-16, ADMIN-IDENTITY-MODEL §1.1)
 - [ ] Revoking `OrgRole` revokes, in the same transaction, every live org-scope session (access and refresh) of that person. Disabling a person revokes all of their sessions. Tests prove that the old access token and the old refresh token both get 401 afterwards.
 
+### Copilot review 5 fold (2026-10-16)
+- [ ] Disable and OrgRole revocation also abort the person's live SignalR connections (shared registry from story 16). A test uses a connection opened before the change.
+
 ## Out of Scope
 Inviting staff (20); resets (21); avatars (23); deleting a person; MFA; SSO.
 

@@ -29,6 +29,10 @@ Today nothing creates staff enrollments except bootstrap and the creator. Org ad
 ### Orchestrator re-review fold (2026-10-16, Option A)
 - [ ] Removing or demoting the **lead** controller is allowed. In one transaction it revokes that person's sessions on the exercise, clears `IsLead` and turns swamped mode off, and all three are audited. Tests cover removal and demotion, each with swamped mode on beforehand: afterwards it is off, the exercise has no lead, and the old tokens get 401.
 
+### Copilot review 5 fold (2026-10-16)
+- [ ] Redeeming an invite sets the password but mints a session **only if a grant exists** (`OrgRole` or a staff enrollment in the org). Otherwise it shows an **"awaiting assignment"** page in COBRA staff styling, and normal sign-in works once the person is assigned. Tests cover both paths.
+- [ ] Enrollment removal or a role change also aborts the person's live SignalR connections on that exercise.
+
 ## Out of Scope
 Participant roster import and sign-in (easy-login); password reset (21); the directory page itself (19).
 
