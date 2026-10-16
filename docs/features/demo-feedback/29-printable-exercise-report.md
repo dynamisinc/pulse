@@ -1,6 +1,6 @@
 # Story: Printable exercise report (posts, metrics and charts, saved as PDF)
 
-**Feature:** Demo feedback cut (10/20)  ·  **Phase:** 1  ·  **Status:** In Review
+**Feature:** Demo feedback cut (10/20)  ·  **Phase:** 1  ·  **Status:** Complete
 **Requirements:** EVL-030 (lite), COR-053, NFR-001  ·  **Decisions:** DF-40, DF-41, DF-42  ·  **Issue:** #550
 **Stack:** backend + frontend  ·  **Review:** Tier-1  ·  **Priority:** Must  ·  **Wave:** 3  ·  **Effort:** M
 
