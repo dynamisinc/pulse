@@ -740,7 +740,7 @@ in A5 and touches `ReactionLoopHost`, so C should coordinate on that file.
 | **A2 People** | `POST /api/ops/organizations` (org + first admin invite); org directory UI; staff invite and assignment; admin and forgot-password reset; participant passwords and reset; sign-in methods; avatars (re-encode first); promote one-off; roster reconciliation | identity-auth-roles 08; easy-login 02 (reconciliation note) | `19-org-directory`, `20-staff-invite-assign`, `21-password-reset-flows`, `22-sign-in-methods`, `23-avatars`, `24-image-reencode` |
 | **A3 Exercise management** | Readiness; stage/unstage; StartEx gate; reopen; reset; delete; duplicate; participant name; view-only code UI | exercise-build-golive 01, 03, 04, 05, 06; exercise-lifecycle-admin 01–02 | `exercise-build-golive/07-reset-reopen`, `08-delete` |
 | **A4 Setup content** | Persona create, clone, archive; templates and casts; avatar library; content pack upload | persona-management 01, 02, 05 plus 03 (#55, the surviving owner of COR-022; #18 was closed as its duplicate) | `persona-management/06-content-pack-upload` |
-| **A5 Lifecycle correctness** | #375, #379, #390, #376, #389, #485 | — | one story per issue |
+| **A5 Lifecycle correctness** | #375, #379 (plus Tom's 2026-10-16 add: reject a participant `scenarioTime` outside [clock − 10 min, clock + 2 min] with 400), #390, #376, #389, #485 | — | one story per issue |
 
 **Done when** (C2): an org admin, starting from an empty org (created by `POST /api/ops/organizations`), can
 invite staff, import participants, create personas, seed content, stage, start, end and duplicate the

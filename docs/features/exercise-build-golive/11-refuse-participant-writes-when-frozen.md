@@ -21,6 +21,10 @@ Sim writes are lifecycle-gated: allowed in `live` and `staged` (dry runs), refus
 ### Copilot review 2 fold (2026-10-16, ADMIN-IDENTITY-MODEL §8.2) (superseded in place by review 3: the AC above now says the same)
 - [ ] Participant sim writes stay **allowed in `staged`** (dry runs, matching `ExerciseLifecycleStates.BehaviourOf(Staged)` today) and in `live`. They are refused only when paused or frozen. The route × role matrix test (story 17) encodes staged as allowed.
 
+### Tom decision (2026-10-16, via orchestrator): bounded participant `scenarioTime`
+- [ ] **A participant `scenarioTime` out of range is rejected.** Today `PostIngestService.cs` (~281-287) only runs `TryParse` and stores the client's value as-is, so a year 9999 is accepted; #583 only stopped it crashing the report. For **participant and PIO** origins the server validates the value against the exercise's **current scenario clock**: it must be within **[clock − 10 min, clock + 2 min]** (the 2-minute margin covers client and network skew). Anything outside gets 400 `scenario-time-out-of-range`, nothing is written, and a telemetry event records the refusal. **Staff origins are unaffected:** controller-as-persona, inject and engine posts, plus build-time setup and backdated posts, keep their existing rules.
+- [ ] Tests: year 9999 → 400; clock + 3 min → 400; clock − 11 min → 400; clock ± 1 min → accepted; a staff backdated setup post in build → accepted. The window is a named constant that tests can override.
+
 ## Out of Scope
 Changing tier semantics; client-side optimistic UI beyond showing the refusal.
 
