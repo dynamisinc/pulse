@@ -20,9 +20,12 @@ needed, adds phone breakpoints rather than a parallel layout system.
   - `ChannelNav` strip link is 43×28 at 768; the profile "N Followers" link is 101×19
 
   Inline text links (author names, "Sign in here.") are exempt under the WCAG 2.5.8 inline exception.
-- At 360/390 the shell uses the left `NavRail`, not a bottom tab bar. D1 does not specify either pattern, so the rail stays.
+- At 360/390 the social app uses the left `NavRail` (about 56 px, roughly 15% of the width). **Decision MT-D2 (Tom, 10/16): phones get a bottom tab bar** instead.
+- `/notifications` redirects to `/home` in the mock (MT-D8): find out whether that is a flag or a bug.
 
 ## Acceptance Criteria
+- [ ] MT-D2: below the phone breakpoint, the social `NavRail` is replaced by a fixed **bottom tab bar** with Home, Explore, Notifications (with its unread badge, not colour-only), Profile and a prominent compose (Post) action. Each item is a 44 px target with an icon plus an accessible name, `aria-current` marks the current tab, and it respects `env(safe-area-inset-bottom)`. Feed content is padded so the bar never covers the last post or the composer. The rail is unchanged at tablet and desktop widths. The bar does not collide with the shell's channel nav (`participant-shell` is out of scope here; if the two overlap, report it rather than editing the shell).
+- [ ] MT-D8: `/notifications` reached from the new tab either renders Notifications or, if it is intentionally flagged off, the tab is hidden while the flag is off. The finding is recorded in the PR.
 - [ ] Given each of feed, thread, composer (modal), profile, Explore (search + trending) and Pinned at 360, 390 and 768 px, when loaded with mock data, then `expectNoHorizontalScroll` passes and no text or media is clipped or overlaps the bottom tab bar or the alert bar.
 - [ ] G3 (audit): Given the thread view (`/i/status/:id`) at 360 and 390, when the focused post has media and the Pin action, then the card stays inside the column (media and Pin no longer clip at the right edge; offenders were `_focusedWrap`, `_postCard`, `_content`, `_openable`, header) and `expectNoHorizontalScroll` plus a per-element bounding-box check pass.
 - [ ] Hit areas (44px) on these screens are delivered by story 18, which runs after this one; this story must not shrink any control below its current size and leaves the post action row, composer buttons, Back and Followers link to 18.
