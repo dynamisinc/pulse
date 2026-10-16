@@ -262,8 +262,9 @@ export const MOCK_ENGINE_SETTINGS: EngineSettingsDto = {
   tierPolicyMode: 'auto',
   inMemoryState: true,
   inMemoryStateNote:
-    'Autonomy default, tier-policy mode and the generation-provider cut are held in process ' +
-    'memory; a restart resets them to suggest / auto / the startup-configured provider.',
+    'Autonomy default, tier-policy mode, the generation-provider cut and the ambient-chatter ' +
+    'policy are held in process memory; a restart resets them to suggest / auto / the ' +
+    'startup-configured provider / ambient Off.',
   // Dark by default (#168 AC1/AC0). `autonomousAuthorized: false` mirrors an
   // ungoverned environment, so mock mode exercises the rejection path too.
   ambientPolicy: { ...DEFAULT_AMBIENT_POLICY, autonomousAuthorized: false },

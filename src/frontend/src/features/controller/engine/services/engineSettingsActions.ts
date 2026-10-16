@@ -217,7 +217,8 @@ function isWireAmbientPolicy(value: unknown): value is AmbientPolicyDto {
     isStringArray(a.topicAllowList) &&
     isStringArray(a.personaAllowList) &&
     (a.autonomousAuthorized === undefined || typeof a.autonomousAuthorized === 'boolean') &&
-    (a.topicVocabulary === undefined || isStringArray(a.topicVocabulary))
+    (a.topicVocabulary === undefined || isStringArray(a.topicVocabulary)) &&
+    (a.voiceablePersonaIds == null || isStringArray(a.voiceablePersonaIds))
   )
 }
 

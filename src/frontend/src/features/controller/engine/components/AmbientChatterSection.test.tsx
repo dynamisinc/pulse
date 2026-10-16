@@ -239,6 +239,55 @@ describe('Ambient chatter section (live mode)', () => {
     )
   })
 
+  it('disables Autonomous (described by the note) when not authorized; Review stays enabled', async () => {
+    engineSettingsStore.setForTests(EXERCISE_ID, dto(policy({ autonomousAuthorized: false })))
+    renderPanel()
+
+    const auto = await screen.findByTestId('ambient-mode-autonomous')
+    expect(auto).toBeDisabled()
+    const note = screen.getByTestId('ambient-autonomous-unauthorized-note')
+    expect(auto.getAttribute('aria-describedby')).toBe(note.id)
+    expect(screen.getByTestId('ambient-mode-review')).not.toBeDisabled()
+  })
+
+  it('leaves Autonomous enabled when authorization is true or unknown', async () => {
+    engineSettingsStore.setForTests(EXERCISE_ID, dto(policy({ autonomousAuthorized: true })))
+    renderPanel()
+    expect(await screen.findByTestId('ambient-mode-autonomous')).not.toBeDisabled()
+  })
+
+  it('shows the server message verbatim for a kill-switch/cut autonomous 400', async () => {
+    const user = userEvent.setup()
+    engineSettingsStore.setForTests(EXERCISE_ID, dto(policy({ mode: 'review' })))
+    postMock.mockRejectedValue(axios400('Ambient cannot be set to autonomous while the kill switch is active'))
+    renderPanel()
+
+    await screen.findByTestId('ambient-chatter-section')
+    await user.click(screen.getByTestId('ambient-mode-autonomous'))
+    await user.click(screen.getByTestId('ambient-save'))
+    const error = await screen.findByTestId('ambient-error')
+    expect(error).toHaveAttribute('role', 'alert')
+    expect(error).toHaveTextContent('while the kill switch is active')
+  })
+
+  it('labels personas not in the engine cast as text, with a helper note', async () => {
+    engineSettingsStore.setForTests(EXERCISE_ID, dto(policy({ voiceablePersonaIds: ['p-1'] })))
+    renderPanel()
+
+    await screen.findByTestId('ambient-chatter-section')
+    expect(screen.getByTestId('ambient-persona-p-2-note')).toHaveTextContent('not in engine cast')
+    expect(screen.queryByTestId('ambient-persona-p-1-note')).toBeNull()
+    expect(screen.getByTestId('ambient-persona-cast-help')).toHaveTextContent(/only personas in the engine cast/i)
+  })
+
+  it.each([undefined, null])('shows no cast labels when voiceablePersonaIds is %s', async value => {
+    engineSettingsStore.setForTests(EXERCISE_ID, dto(policy({ voiceablePersonaIds: value })))
+    renderPanel()
+
+    await screen.findByTestId('ambient-chatter-section')
+    expect(screen.queryByTestId('ambient-persona-p-2-note')).toBeNull()
+  })
+
   it('blocks Save on non-integer caps', async () => {
     const user = userEvent.setup()
     engineSettingsStore.setForTests(EXERCISE_ID, dto())
@@ -273,17 +322,11 @@ describe('Ambient chatter section (mock mode)', () => {
     expect(postMock).not.toHaveBeenCalled()
   })
 
-  it('rejects autonomous with the not-authorized message while the mock policy is unauthorized', async () => {
-    const user = userEvent.setup()
+  it('greys out Autonomous while the mock policy is unauthorized', async () => {
     renderPanel()
 
-    await screen.findByTestId('ambient-chatter-section')
-    await user.click(screen.getByTestId('ambient-mode-autonomous'))
-    await user.click(screen.getByTestId('ambient-save'))
-
-    expect(await screen.findByTestId('ambient-error')).toHaveTextContent(
-      AMBIENT_AUTONOMOUS_NOT_AUTHORIZED_MESSAGE,
-    )
+    expect(await screen.findByTestId('ambient-mode-autonomous')).toBeDisabled()
+    expect(screen.getByTestId('ambient-autonomous-unauthorized-note')).toBeInTheDocument()
     expect(screen.getByTestId('ambient-mode-status')).toHaveTextContent('Ambient mode: Off')
   })
 })
