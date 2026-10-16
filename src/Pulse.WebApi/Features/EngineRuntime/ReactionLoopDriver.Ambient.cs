@@ -52,6 +52,12 @@ using Pulse.WebApi.Features.EngineRuntime.Telemetry;
 /// </remarks>
 public sealed partial class ReactionLoopDriver
 {
+    /// <summary>
+    /// The <c>storylineTag</c> a review-mode ambient draft carries. Together with <see cref="Guid.Empty"/> as its storyline
+    /// id it is how the approve path recognises an ambient draft (no schema column; S-1).
+    /// </summary>
+    internal const string AmbientStorylineTag = "#ambient";
+
     private readonly ConcurrentDictionary<Guid, AmbientWindow> _ambientWindows = new();
 
     /// <summary>
@@ -183,6 +189,18 @@ public sealed partial class ReactionLoopDriver
 
         if (!autonomous)
         {
+            // W-7: generation takes seconds, and the world can close (EndEx, Freeze, Pause engine) or the policy can be
+            // turned off / narrowed meanwhile. Re-run the lifecycle gate (the one await) and then, with no await before
+            // the queue add, the current policy: a draft the world or the policy no longer admits is discarded and
+            // recorded (heldReason), never queued for a controller to approve into a closed exercise.
+            await gate.RefreshAsync(exerciseId, cancellationToken).ConfigureAwait(false);
+            var reviewHeld = ReviewQueueHold(registration, registry, gate, window, intent);
+            if (reviewHeld is not null)
+            {
+                pendingEvents.Add(BuildAmbientGeneratedEvent(ambientContext, draftId, generated, publishPath: null, reviewHeld));
+                return 0;
+            }
+
             var item = BuildAmbientReviewItem(exerciseId, intent, generated.Posts, draftId);
             reviewItems.Add(item);
             tick.TickState.DemandMeter.Record(DemandEventKind.QueueFire, tick.ScenarioMinute);
@@ -192,7 +210,7 @@ public sealed partial class ReactionLoopDriver
         }
 
         var (published, held) = await PublishAmbientAsync(
-            tick, registry, gate, policy, intent, generated.Posts, draftId, ambientContext, pendingEvents, cancellationToken)
+            tick, registry, gate, window, policy, intent, generated.Posts, draftId, ambientContext, pendingEvents, cancellationToken)
             .ConfigureAwait(false);
 
         tick.TickState.PostsThisMinute += published;
@@ -209,6 +227,7 @@ public sealed partial class ReactionLoopDriver
         AmbientTickInputs tick,
         EngineAmbientPolicyRegistry registry,
         IEngineLifecyclePublishGate gate,
+        AmbientWindow window,
         AmbientTierPolicy policy,
         GenerationIntent intent,
         IReadOnlyList<GeneratedPost> posts,
@@ -239,7 +258,7 @@ public sealed partial class ReactionLoopDriver
             await gate.RefreshAsync(exerciseId, cancellationToken).ConfigureAwait(false);
 
             // ---- NO await from here to the publisher call ----------------------------------------------------
-            var held = PublishHold(tick.ScopedServices, registration, registry, gate);
+            var held = PublishHold(tick.ScopedServices, registration, registry, gate, window, intent.AmbientTopicSeed, post.PersonaHandle);
             if (held is not null)
             {
                 if (held == EngineEventPayloads.HeldSafety)
@@ -272,23 +291,102 @@ public sealed partial class ReactionLoopDriver
     /// The synchronous last-boundary re-check (AC5/AC6/AC8). Safety first (so a kill switch is reported as such even
     /// though its request path also demoted the policy), then the policy, then the lifecycle gate. <c>null</c> = publish.
     /// </summary>
-    private static string? PublishHold(
+    /// <remarks>
+    /// Orchestrator review W-6: the policy half reads the CURRENT policy snapshot, not just its mode — the persona being
+    /// published must still be allow-listed and of an eligible type, the burst's topic must still be allow-listed, both
+    /// caps must still be above zero, and the spend already recorded must not exceed a cap lowered mid-flight. A policy
+    /// narrowed between generation and publish therefore holds the post (<c>held:policy</c>). Synchronous: no await.
+    /// </remarks>
+    private string? PublishHold(
         IServiceProvider scopedServices,
         ReactionLoopRegistration registration,
         EngineAmbientPolicyRegistry registry,
-        IEngineLifecyclePublishGate gate)
+        IEngineLifecyclePublishGate gate,
+        AmbientWindow window,
+        string? topic,
+        string personaHandle)
     {
         if (SafetyHeld(scopedServices, registration))
         {
             return EngineEventPayloads.HeldSafety;
         }
 
-        if (registry.Get(registration.ExerciseId).Mode != AmbientPolicyMode.Autonomous || !registry.AutonomyAuthorized)
+        var current = registry.Get(registration.ExerciseId);
+        if (current.Mode != AmbientPolicyMode.Autonomous
+            || !registry.AutonomyAuthorized
+            || !PolicyStillAdmits(current, registration, window, topic, [personaHandle]))
         {
             return EngineEventPayloads.HeldPolicy;
         }
 
         return gate.CanPublish(registration.ExerciseId) ? null : EngineEventPayloads.HeldLifecycle;
+    }
+
+    /// <summary>
+    /// The synchronous re-check before a REVIEW-mode ambient draft is queued (orchestrator review W-7): the policy must
+    /// not have been turned off or narrowed (<see cref="PolicyStillAdmits"/>) and the lifecycle gate (refreshed by the
+    /// caller immediately before) must be open. <c>null</c> = queue it.
+    /// </summary>
+    private string? ReviewQueueHold(
+        ReactionLoopRegistration registration,
+        EngineAmbientPolicyRegistry registry,
+        IEngineLifecyclePublishGate gate,
+        AmbientWindow window,
+        GenerationIntent intent)
+    {
+        var current = registry.Get(registration.ExerciseId);
+        if (current.Mode == AmbientPolicyMode.Off
+            || !PolicyStillAdmits(current, registration, window, intent.AmbientTopicSeed, intent.Personas.Select(p => p.Handle)))
+        {
+            return EngineEventPayloads.HeldPolicy;
+        }
+
+        return gate.CanPublish(registration.ExerciseId) ? null : EngineEventPayloads.HeldLifecycle;
+    }
+
+    /// <summary>
+    /// Whether the CURRENT policy still admits content on <paramref name="topic"/> voiced by <paramref name="personaHandles"/>:
+    /// both caps above zero; the spend already recorded in the rolling windows not above either cap; the topic still
+    /// allow-listed; and every persona still allow-listed, in the loop's cast, and of an ambient-eligible type
+    /// (<see cref="AmbientPolicyValidator.EligiblePersonaTypes"/>). Pure in-memory; no await.
+    /// </summary>
+    private bool PolicyStillAdmits(
+        AmbientTierPolicy current,
+        ReactionLoopRegistration registration,
+        AmbientWindow window,
+        string? topic,
+        IEnumerable<string> personaHandles)
+    {
+        if (current.MaxPerMinute <= 0 || current.MaxPerHour <= 0)
+        {
+            return false;
+        }
+
+        // The burst was counted at generation, so its own posts are inside these windows already: only a cap LOWERED
+        // below what was really spent holds it.
+        var now = _timeProvider.GetUtcNow();
+        if (window.CountSince(now - TimeSpan.FromMinutes(1)) > current.MaxPerMinute
+            || window.CountSince(now - TimeSpan.FromHours(1)) > current.MaxPerHour)
+        {
+            return false;
+        }
+
+        if (topic is null || !current.TopicAllowList.Contains(topic, StringComparer.Ordinal))
+        {
+            return false;
+        }
+
+        foreach (var handle in personaHandles)
+        {
+            if (!registration.PersonasByHandle.TryGetValue(handle, out var persona)
+                || !current.PersonaAllowList.Contains(persona.InstanceId)
+                || !AmbientPolicyValidator.IsEligiblePersonaType(persona.Dossier.Type))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /// <summary>
@@ -370,6 +468,12 @@ public sealed partial class ReactionLoopDriver
     /// <see cref="StorylineBrief.IsAmbient"/>, so the assembler frames it as everyday background life — no storyline,
     /// no incident, no officials, no escalation text — rather than as a storyline to advance.
     /// </summary>
+    /// <remarks>
+    /// Orchestrator review W-3: the prompt's brief is the SETTING only (<see cref="AmbientSettingBrief"/> over the
+    /// registration's place name), never <see cref="ReactionLoopRegistration.ExerciseBrief"/>, which narrates the
+    /// incident; and the active storylines' hashtags + title keywords ride along as output exclusions for
+    /// <see cref="AmbientOutputFilter"/>, so a post that drifts into the incident is dropped like a guard failure.
+    /// </remarks>
     private static GenerateStageRequest BuildAmbientGenerateRequest(
         ReactionLoopRegistration registration,
         GenerationIntent intent,
@@ -382,7 +486,7 @@ public sealed partial class ReactionLoopDriver
         return new GenerateStageRequest
         {
             ExerciseId = registration.ExerciseId,
-            ExerciseBrief = registration.ExerciseBrief,
+            ExerciseBrief = AmbientSettingBrief.Build(registration.AmbientPlaceName),
             Storyline = new StorylineBrief
             {
                 // With IsAmbient the assembler reads Title as the topic seed phrase and ignores the storyline-only
@@ -397,6 +501,9 @@ public sealed partial class ReactionLoopDriver
             },
             Personas = intent.Personas,
             Tier = tier,
+            AmbientExclusions = AmbientOutputFilter.BuildExclusions(
+                registration.Storylines.SelectMany(storyline => storyline.Hashtags),
+                registration.Storylines.Select(storyline => storyline.Title)),
         };
     }
 
@@ -434,7 +541,7 @@ public sealed partial class ReactionLoopDriver
             CountdownStartedScenarioMinute = null,
             CountdownMinutes = null,
             CountdownDecision = null,
-            StorylineTag = "#ambient",
+            StorylineTag = AmbientStorylineTag,
             StorylineBrief = $"Ambient chatter · {topic}",
             ActionLabel = $"ambient · {topic}",
             Posts = draftPosts,

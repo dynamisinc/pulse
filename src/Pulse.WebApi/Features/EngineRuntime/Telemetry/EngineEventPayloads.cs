@@ -21,6 +21,13 @@ public static class EngineEventPayloads
     /// <summary>The <c>publishPath</c> literal for content published autonomously by the ambient policy (AC9).</summary>
     public const string PublishPathAmbientAutonomous = "ambient-autonomous";
 
+    /// <summary>
+    /// The <c>publishPath</c> literal for a REVIEW-mode ambient draft a controller approved (orchestrator review S-1), so
+    /// the AAR can tell reviewed ambient chatter from autonomous ambient chatter and from storyline content. Carried on
+    /// <c>engine.published</c> with <c>trigger = ambient-floor</c>.
+    /// </summary>
+    public const string PublishPathAmbientReviewed = "ambient-reviewed";
+
     /// <summary>The <c>heldReason</c> for ambient content not published because the lifecycle / Freeze / Pause-engine gate was closed (AC5).</summary>
     public const string HeldLifecycle = "held:lifecycle";
 
@@ -216,7 +223,10 @@ public static class EngineEventPayloads
         [JsonPropertyName("trigger")]
         public string? Trigger { get; init; }
 
-        /// <summary><see cref="PublishPathAmbientAutonomous"/> for a post published with no controller click; null-omitted otherwise (AC9).</summary>
+        /// <summary>
+        /// <see cref="PublishPathAmbientAutonomous"/> for a post published with no controller click;
+        /// <see cref="PublishPathAmbientReviewed"/> for a controller-approved ambient draft (S-1); null-omitted otherwise (AC9).
+        /// </summary>
         [JsonPropertyName("publishPath")]
         public string? PublishPath { get; init; }
     }

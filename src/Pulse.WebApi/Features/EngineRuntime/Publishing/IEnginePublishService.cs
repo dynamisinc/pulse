@@ -57,14 +57,16 @@ public sealed record EngineBurst
     public required IReadOnlyList<EngineBurstPost> Posts { get; init; }
 
     /// <summary>
-    /// The decide trigger literal for the <c>engine.published</c> payload — set ONLY by the ambient autonomous path
-    /// (<c>ambient-floor</c>, ambient-chatter story 01 AC9); <c>null</c> (omitted) for every reviewed publish.
+    /// The decide trigger literal for the <c>engine.published</c> payload — <c>ambient-floor</c> for an ambient post,
+    /// autonomous or controller-approved (ambient-chatter story 01 AC9, review S-1); <c>null</c> (omitted) for every
+    /// storyline publish.
     /// </summary>
     public string? Trigger { get; init; }
 
     /// <summary>
     /// The <c>publishPath</c> literal for the <c>engine.published</c> payload — <c>ambient-autonomous</c> for a post
-    /// published with no controller click; <c>null</c> (omitted) for every reviewed publish (AC9).
+    /// published with no controller click, <c>ambient-reviewed</c> for a controller-approved ambient draft (S-1);
+    /// <c>null</c> (omitted) for every storyline publish (AC9).
     /// </summary>
     public string? PublishPath { get; init; }
 

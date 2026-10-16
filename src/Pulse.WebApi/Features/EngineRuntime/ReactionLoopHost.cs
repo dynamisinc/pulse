@@ -240,6 +240,13 @@ public sealed class ReactionLoopRegistration
     /// <summary>The fictional world + scenario brief (trusted engine context for the system prompt).</summary>
     public required string ExerciseBrief { get; init; }
 
+    /// <summary>
+    /// The fictional place name ambient chatter is set in (e.g. the exercise's world name), or <c>null</c>. Ambient
+    /// prompts carry ONLY this, via <c>AmbientSettingBrief</c> — never <see cref="ExerciseBrief"/>, which narrates the
+    /// incident (ambient-chatter story 01, orchestrator review W-3). Optional; <c>null</c> gives a generic setting.
+    /// </summary>
+    public string? AmbientPlaceName { get; init; }
+
     /// <summary>The exercise IANA time zone (XC-008), e.g. <c>America/Chicago</c> — the telemetry envelope zone.</summary>
     public required string TimeZone { get; init; }
 

@@ -1320,6 +1320,8 @@ public sealed partial class EngineReviewService
             })
             .ToList();
 
+        // S-1: an approved ambient draft is still ambient chatter — tag it so the AAR can tell it apart.
+        var ambient = IsAmbientDraft(item);
         var burst = new EngineBurst
         {
             ExerciseId = exerciseId,
@@ -1327,6 +1329,8 @@ public sealed partial class EngineReviewService
             DraftId = item.DraftId,
             TimeZone = timeZone,
             Posts = posts,
+            Trigger = ambient ? EngineEventPayloads.AmbientFloorTrigger : null,
+            PublishPath = ambient ? EngineEventPayloads.PublishPathAmbientReviewed : null,
         };
 
         return await _publisher.PublishBurstAsync(burst, cancellationToken);
