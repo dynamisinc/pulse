@@ -45,7 +45,8 @@ internal sealed record StepSummary(
     FanOutSummary FanOut,
     long Reconnects,
     long ConnectionsClosed,
-    long ConnectFailures);
+    long ConnectFailures,
+    IReadOnlyList<string> Events);
 
 /// <summary>Writes summary.json, steps.csv (one row per step and series), samples.csv (every request) and fanout-drops.csv.</summary>
 internal static class ResultWriter

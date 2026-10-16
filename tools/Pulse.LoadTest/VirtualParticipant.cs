@@ -77,6 +77,17 @@ internal sealed class VirtualParticipant : IAsyncDisposable
     /// <summary>When the hub connection last (re)connected: a frame missing right after it is a join-window artifact.</summary>
     public DateTimeOffset? ConnectedAt { get; private set; }
 
+    /// <summary>The connection is closed for good: SignalR's automatic reconnects gave up (or it never connected).</summary>
+    public bool IsClosed => _hub is null || _hub.State == HubConnectionState.Disconnected;
+
+    /// <summary>Replaces a closed connection with a new one (step start). Returns whether it connected.</summary>
+    public async Task<bool> RebuildAsync(CancellationToken ct)
+    {
+        await DisposeAsync();
+        _hub = null;
+        return await ConnectAsync(ct);
+    }
+
     /// <summary>Opens the hub connection. Returns false (and counts a failure) when it cannot connect.</summary>
     public async Task<bool> ConnectAsync(CancellationToken ct)
     {

@@ -1,13 +1,15 @@
 namespace Pulse.LoadTest;
 
 /// <summary>
-/// PDF-D4 stop rules, evaluated on a tick (every few seconds) over a trailing window of the step's requests:
+/// PDF-D4 stop rules, evaluated on a tick (every few seconds) over a SHORT trailing window (15 s) of the step's
+/// requests — during the ramp as well as the timed step:
 /// <list type="bullet">
 ///   <item><description>error rate above <see cref="StopRuleSettings.MaxErrorRate"/> (5%), or</description></item>
 ///   <item><description>POST /api/posts p95 above <see cref="StopRuleSettings.MaxPostP95Ms"/> (5 s),</description></item>
 /// </list>
 /// each SUSTAINED for <see cref="StopRuleSettings.SustainSeconds"/> (60 s): a rule trips only when every tick across
-/// that span saw it breached. A window with fewer than <see cref="StopRuleSettings.MinSamples"/> requests (or POSTs,
+/// that span saw it breached. The window is short on purpose: a 60 s lookback on top of a 60 s sustain would keep a
+/// few seconds of errors "in breach" for a whole minute and trip on them. A window with fewer than <see cref="StopRuleSettings.MinSamples"/> requests (or POSTs,
 /// for the p95 rule) never counts as a breach and resets nothing either way — it is simply not evidence.
 /// </summary>
 internal sealed class StopRuleEvaluator

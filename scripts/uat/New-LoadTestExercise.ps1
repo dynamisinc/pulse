@@ -69,10 +69,10 @@
     Runs the local and read-only checks and prints the plan. Signs in to nothing and writes nothing.
 
 .EXAMPLE
-    pwsh scripts/uat/New-LoadTestExercise.ps1 -ExerciseHost pulse-loadtest-api.cobrasoftware.com -WhatIf
+    pwsh scripts/uat/New-LoadTestExercise.ps1 -ExerciseHost pulse-loadtest-api.<your-uat-domain> -WhatIf
 
 .EXAMPLE
-    $env:PULSE_STAFF_SECRET = Get-Clipboard; pwsh scripts/uat/New-LoadTestExercise.ps1 -ExerciseHost pulse-loadtest-api.cobrasoftware.com; $env:PULSE_STAFF_SECRET = $null
+    $env:PULSE_STAFF_SECRET = Get-Clipboard; pwsh scripts/uat/New-LoadTestExercise.ps1 -ExerciseHost pulse-loadtest-api.<your-uat-domain>; $env:PULSE_STAFF_SECRET = $null
 #>
 [CmdletBinding()]
 param(

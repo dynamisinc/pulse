@@ -182,6 +182,16 @@ internal sealed class PulseApi : IDisposable
     public Task<ApiResult> SetNoiseAsync(PulseSession staff, string level, CancellationToken ct) =>
         SendAsync(HttpMethod.Put, "/api/staff/noise", staff, new { level }, Metrics.Noise, ct);
 
+    /// <summary>GET /api/staff/noise — {level, ratePerMinute, poolSize, postedCount, running}.</summary>
+    public Task<ApiResult> GetNoiseAsync(PulseSession staff, CancellationToken ct) => SendAsync(HttpMethod.Get, "/api/staff/noise", staff, null, null, ct);
+
+    /// <summary>GET /api/steering/pause-tier — {tier, clockFrozen, persisted (Wave 4)}.</summary>
+    public Task<ApiResult> GetPauseTierAsync(PulseSession staff, CancellationToken ct) => SendAsync(HttpMethod.Get, "/api/steering/pause-tier", staff, null, null, ct);
+
+    /// <summary>POST /api/steering/pause-tier {tier, actingHumanId} (controller; idempotent for the same tier).</summary>
+    public Task<ApiResult> SetPauseTierAsync(PulseSession staff, string tier, CancellationToken ct) =>
+        SendAsync(HttpMethod.Post, "/api/steering/pause-tier", staff, new { tier, actingHumanId = staff.ActingHumanId }, null, ct);
+
     /// <summary>GET /api/injects — the run sheet ({items: [{id, kind, title, status, order, ...}], pauseTier}).</summary>
     public Task<ApiResult> GetInjectsAsync(PulseSession staff, CancellationToken ct) => SendAsync(HttpMethod.Get, "/api/injects", staff, null, null, ct);
 

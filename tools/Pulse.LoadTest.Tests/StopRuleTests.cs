@@ -51,9 +51,52 @@ public class StopRuleTests
         var (reason, at) = Run(new StopRuleEvaluator(new StopRuleSettings()), samples, T0, T0.AddMinutes(6));
 
         reason.Should().NotBeNull().And.StartWith("error rate");
-        // The trailing 60 s window passes 5% halfway into the bad traffic (minute 2.5); the rule then needs 60 more
-        // seconds of breach, so it trips at minute 3.5, at the 5 s tick granularity.
-        at.Should().BeOnOrAfter(T0.AddMinutes(3.5)).And.BeBefore(T0.AddMinutes(3.6));
+        // The 15 s window passes 5% halfway into it (about 7.5 s after minute 2); the rule then needs 60 s of breach.
+        at.Should().BeOnOrAfter(T0.AddMinutes(3).AddSeconds(5)).And.BeOnOrBefore(T0.AddMinutes(3).AddSeconds(15));
+    }
+
+    [Fact]
+    public void Defaults_AreAShortWindowWithASixtySecondSustain()
+    {
+        var settings = new StopRuleSettings();
+        settings.WindowSeconds.Should().Be(15);
+        settings.SustainSeconds.Should().Be(60);
+        settings.Validate().Should().BeEmpty();
+        new StopRuleSettings { WindowSeconds = 90 }.Validate().Should().Contain(p => p.Contains("must not exceed", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void AFiveSecondErrorBurst_WithDefaults_DoesNotStop()
+    {
+        // 5 s of total failure in the middle of healthy traffic. With a 60 s lookback this stayed "in breach" for a
+        // minute and tripped the step (M2); with the 15 s window it is in breach for about 20 s.
+        var samples = Traffic(T0, T0.AddMinutes(2), 4, _ => true);
+        samples.AddRange(Traffic(T0.AddMinutes(2), T0.AddMinutes(2).AddSeconds(5), 4, _ => false));
+        samples.AddRange(Traffic(T0.AddMinutes(2).AddSeconds(5), T0.AddMinutes(6), 4, _ => true));
+
+        Run(new StopRuleEvaluator(new StopRuleSettings()), samples, T0, T0.AddMinutes(6)).Reason.Should().BeNull();
+    }
+
+    [Fact]
+    public void SixtySecondsOfBreach_WithDefaults_Stops()
+    {
+        var samples = Traffic(T0, T0.AddMinutes(1), 4, _ => true);
+        samples.AddRange(Traffic(T0.AddMinutes(1), T0.AddMinutes(4), 4, _ => false));
+
+        var (reason, at) = Run(new StopRuleEvaluator(new StopRuleSettings()), samples, T0, T0.AddMinutes(4));
+
+        reason.Should().StartWith("error rate");
+        at.Should().BeOnOrAfter(T0.AddMinutes(2)).And.BeOnOrBefore(T0.AddMinutes(2).AddSeconds(10));
+    }
+
+    [Fact]
+    public void FortySecondsOfFailures_WithDefaults_DoesNotStop()
+    {
+        var samples = Traffic(T0, T0.AddMinutes(1), 4, _ => true);
+        samples.AddRange(Traffic(T0.AddMinutes(1), T0.AddMinutes(1).AddSeconds(40), 4, _ => false));
+        samples.AddRange(Traffic(T0.AddMinutes(1).AddSeconds(40), T0.AddMinutes(4), 4, _ => true));
+
+        Run(new StopRuleEvaluator(new StopRuleSettings()), samples, T0, T0.AddMinutes(4)).Reason.Should().BeNull();
     }
 
     [Fact]
@@ -98,7 +141,8 @@ public class StopRuleTests
         var (reason, at) = Run(new StopRuleEvaluator(new StopRuleSettings()), samples, T0, T0.AddMinutes(4));
 
         reason.Should().NotBeNull().And.StartWith("POST /api/posts p95");
-        at.Should().BeAfter(T0.AddMinutes(2)).And.BeBefore(T0.AddMinutes(2.5));
+        // p95 of a 15 s window goes slow within about 15 s of minute 1; then 60 s of breach.
+        at.Should().BeOnOrAfter(T0.AddMinutes(2)).And.BeOnOrBefore(T0.AddMinutes(2).AddSeconds(20));
     }
 
     [Fact]
@@ -119,7 +163,7 @@ public class StopRuleTests
     [Fact]
     public void TooFewSamples_NeverStops()
     {
-        // Every request fails, but only 10 in each 60 s window (< 20 minimum).
+        // Every request fails, but only about 2 in each 15 s window (< 10 minimum).
         var samples = Traffic(T0, T0.AddMinutes(5), 1.0 / 6, _ => false);
         Run(new StopRuleEvaluator(new StopRuleSettings()), samples, T0, T0.AddMinutes(5)).Reason.Should().BeNull();
     }

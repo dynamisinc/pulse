@@ -93,8 +93,7 @@ public class ConfigTests
 
     [Theory]
     [InlineData("loadtest-api.example.com", "https://loadtest-api.example.com/")]
-    [InlineData("https://loadtest-api.example.com/", "https://loadtest-api.example.com/")]
-    [InlineData("http://localhost:5000", "http://localhost:5000/")]
+    [InlineData("https://LoadTest-API.example.com/", "https://loadtest-api.example.com/")]
     public void ApiHost_IsNormalizedToAnOrigin(string raw, string expected)
     {
         LoadTestConfig.TryNormalizeApiHost(raw, out var origin, out _).Should().BeTrue();
@@ -103,10 +102,15 @@ public class ConfigTests
 
     [Theory]
     [InlineData("http://loadtest-api.example.com")]
+    [InlineData("http://localhost:5000")]
+    [InlineData("loadtest-api.example.com:8443")]
+    [InlineData("https://loadtest-api.example.com:443")]
+    [InlineData("10.1.2.3")]
+    [InlineData("https://[::1]")]
     [InlineData("https://loadtest-api.example.com/api")]
     [InlineData("https://user:pw@loadtest-api.example.com")]
     [InlineData("ftp://loadtest-api.example.com")]
-    public void ApiHost_PlainHttpOrAPath_IsRefused(string raw) =>
+    public void ApiHost_PlainHttpAPortAnIpOrAPath_IsRefused(string raw) =>
         LoadTestConfig.TryNormalizeApiHost(raw, out _, out _).Should().BeFalse();
 }
 
@@ -186,7 +190,7 @@ public class ResultWriterTests
             ["post"] = new("post", 10, 1, 0.1, 100, 200, 300, 400),
         };
         var fan = new FanOutSummary(5, 1, 0, 0, 0, 10, 20, 30, 40, 50, 60);
-        var step = new StepSummary(1, 20, 20, 20, null, null, null, "error rate \"x\"", true, true, 240, series, fan, 2, 0, 0);
+        var step = new StepSummary(1, 20, 20, 20, null, null, null, "error rate \"x\"", true, true, 240, series, fan, 2, 0, 0, []);
         var summary = new RunSummary("https://h/", "id", "Load test", DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch, false, "s", false, 0,
             new ConfigEcho([20], 10, 25, new(), new(), new(), new()), [step]);
 

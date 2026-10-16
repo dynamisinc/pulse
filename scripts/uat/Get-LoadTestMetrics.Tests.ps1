@@ -57,6 +57,26 @@ Describe 'Get-LoadTestMetrics.ps1' {
         $window.To | Should -Be ([DateTimeOffset] '2026-10-17T09:15:00Z')
     }
 
+    It 'reads summary timestamps with their own offset (no local-time shift)' {
+        $summary = Join-Path $TestDrive 'summary-offset.json'
+        '{ "startedAt": "2026-10-17T03:30:00.5-05:00", "endedAt": "2026-10-17T11:10:00+02:00" }' | Set-Content -LiteralPath $summary
+        $stamps = Get-SummaryTimestamps -Path $summary
+        $stamps.StartedAt | Should -BeOfType [string]
+        $stamps.StartedAt | Should -Be '2026-10-17T03:30:00.5-05:00'
+        $window = Resolve-MetricWindow -SummaryPath $summary -PadMinutes 0
+        $window.From | Should -Be ([DateTimeOffset]::Parse('2026-10-17T08:30:00.5Z', [Globalization.CultureInfo]::InvariantCulture))
+        $window.To | Should -Be ([DateTimeOffset]::Parse('2026-10-17T09:10:00Z', [Globalization.CultureInfo]::InvariantCulture))
+        $window.From.Offset | Should -Be ([TimeSpan]::Zero)
+    }
+
+    It 'converts az timestamps as UTC whether they arrive as strings or DateTime values' {
+        (ConvertTo-UtcInstant '2026-10-17T08:30:00Z').ToString('o') | Should -Be '2026-10-17T08:30:00.0000000+00:00'
+        (ConvertTo-UtcInstant '2026-10-17T08:30:00').ToString('o') | Should -Be '2026-10-17T08:30:00.0000000+00:00'
+        $utc = [datetime]::SpecifyKind([datetime]::new(2026, 10, 17, 8, 30, 0), [DateTimeKind]::Utc)
+        (ConvertTo-UtcInstant $utc).ToString('o') | Should -Be '2026-10-17T08:30:00.0000000+00:00'
+        (ConvertTo-UtcInstant $utc.ToLocalTime()).ToString('o') | Should -Be '2026-10-17T08:30:00.0000000+00:00'
+    }
+
     It 'a metric az cannot read is a WARN; the rest are written' {
         Mock Invoke-Az { if ("$args" -match 'sessions_percent') { throw 'az monitor failed: metric not supported' }; return $script:AzJson }
         $text = (& { $script:code = Invoke-LoadTestMetrics -Start '2026-10-17T08:30:00Z' -End '2026-10-17T09:00:00Z' -OutFile (Join-Path $TestDrive 'w.csv') } *>&1 | Out-String)

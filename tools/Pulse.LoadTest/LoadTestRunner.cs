@@ -161,8 +161,19 @@ internal sealed class LoadTestRunner : IDisposable
                 _steps.Add(step);
 
                 Info($"Step {stepIndex + 1}/{_config.Steps.Count}: ramping to {users} users at {_config.JoinsPerMinute}/min.");
-                await RampAsync(api, joinQueue, pacer, users, target, timeZone, cancel);
+                await RebuildClosedConnectionsAsync(step, cancel);
+                var rampStop = await RampAsync(api, joinQueue, pacer, users, target, timeZone, stepIndex, cancel);
                 step.Joined = _participants.Count;
+                if (rampStop is not null)
+                {
+                    step.StopReason = rampStop;
+                    step.EndedAt = DateTimeOffset.UtcNow;
+                    await SetNoiseAsync(api, staff, "off", CancellationToken.None);
+                    runStop = $"step {stepIndex + 1} ({users} users): {rampStop}";
+                    Fail($"STOP RULE: {runStop}. Later steps skipped.");
+                    break;
+                }
+
                 step.Connected = _participants.Values.Count(p => p.IsConnected);
 
                 step.StartedAt = DateTimeOffset.UtcNow;
@@ -220,8 +231,24 @@ internal sealed class LoadTestRunner : IDisposable
             .ToList();
     }
 
-    private async Task RampAsync(PulseApi api, Queue<JoinEntry> queue, JoinPacer pacer, int users, Guid target, string timeZone, CancellationToken ct)
+    /// <summary>
+    /// Joins until <paramref name="users"/> are in. The stop rules run here too (every join, and every 5 s of a 429
+    /// wait), over the ramp's own requests — the joins and the load of the users already in — and
+    /// <see cref="JoinFailureGuard"/> stops after <see cref="JoinFailureGuard.DefaultLimit"/> failed joins in a row. Returns
+    /// the stop reason, or <c>null</c>.
+    /// </summary>
+    private async Task<string?> RampAsync(PulseApi api, Queue<JoinEntry> queue, JoinPacer pacer, int users, Guid target, string timeZone, int stepIndex, CancellationToken ct)
     {
+        var rampStart = DateTimeOffset.UtcNow;
+        var evaluator = new StopRuleEvaluator(_config.StopRules);
+        var failures = new JoinFailureGuard(JoinFailureGuard.DefaultLimit);
+        string? Check()
+        {
+            _tracker.Sweep(DateTimeOffset.UtcNow);
+            var samples = _log.ForStep(stepIndex).Where(s => s.At >= rampStart).ToArray();
+            return evaluator.Evaluate(DateTimeOffset.UtcNow, samples) is { } reason ? "during the ramp: " + reason : null;
+        }
+
         var attemptsLeft = (users - _participants.Count) * 3;
         while (_participants.Count < users && queue.Count > 0 && attemptsLeft-- > 0)
         {
@@ -234,21 +261,40 @@ internal sealed class LoadTestRunner : IDisposable
             var entry = queue.Dequeue();
             pacer.Record(DateTimeOffset.UtcNow);
             var result = await api.JoinAsync(entry.Token, ct);
+            var joined = result.Success && result.Json is not null;
+            if (failures.Record(joined) is { } tripped)
+            {
+                return "during the ramp: " + tripped;
+            }
+
             if (result.Status == 429)
             {
                 Warn("Join answered 429 (the global join bucket is full; someone else may be signing in). Waiting a minute.");
                 queue.Enqueue(entry);
-                await Task.Delay(TimeSpan.FromMinutes(1), ct);
+                for (var waited = 0; waited < 60; waited += 5)
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(5), ct);
+                    if (Check() is { } during429)
+                    {
+                        return during429;
+                    }
+                }
+
                 continue;
             }
 
-            if (!result.Success || result.Json is null)
+            if (!joined)
             {
                 Warn($"Join failed ({result.Status}) for one participant link; skipping it.");
+                if (Check() is { } afterFailure)
+                {
+                    return afterFailure;
+                }
+
                 continue;
             }
 
-            var session = PulseSession.FromLoginJson(result.Json);
+            var session = PulseSession.FromLoginJson(result.Json!);
             if (TargetGuard.CheckSession(session.ExerciseId, target) is { } mismatch)
             {
                 await api.LogoutAsync(session, CancellationToken.None);
@@ -265,7 +311,78 @@ internal sealed class LoadTestRunner : IDisposable
             {
                 Info($"  {_participants.Count} joined, {_participants.Values.Count(p => p.IsConnected)} connected.");
             }
+
+            if (Check() is { } reason)
+            {
+                return reason;
+            }
         }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Step start (M3): re-applies pause tier <c>engine</c> (idempotent) and checks for a UAT restart since the last step:
+    /// the tier reading back as <c>running</c> (the in-memory default after a restart, until Wave 4 persists it), or white
+    /// noise not running after High (the scenario clock is not running). A stopped clock is restarted with Freeze →
+    /// Engine paused, as New-LoadTestExercise.ps1 does. Everything found goes into the step's events.
+    /// </summary>
+    private static async Task CheckTierAndClockAsync(PulseApi api, PulseSession staff, StepResult step, CancellationToken ct)
+    {
+        var before = await api.GetPauseTierAsync(staff, ct);
+        var tier = (string?)before.Json?["tier"];
+        var persisted = before.Json?["persisted"] is { } p ? p.ToString() : "absent (pre-Wave 4: tier and clock live in memory)";
+        if (!before.Success)
+        {
+            step.Event($"GET /api/steering/pause-tier answered {before.Status}.");
+        }
+        else if (tier != "engine")
+        {
+            step.Event($"RESTART SUSPECTED: pause tier read back as '{tier}' (setup left 'engine'; persisted: {persisted}).");
+        }
+
+        var set = await api.SetPauseTierAsync(staff, "engine", ct);
+        if (!set.Success)
+        {
+            step.Event($"Re-applying pause tier 'engine' answered {set.Status}.");
+        }
+    }
+
+    private static async Task EnsureNoiseRunningAsync(PulseApi api, PulseSession staff, ApiResult noise, StepResult step, CancellationToken ct)
+    {
+        if (!noise.Success || (bool?)noise.Json?["running"] != false)
+        {
+            return;
+        }
+
+        step.Event("RESTART SUSPECTED: white noise is High but not running (scenario clock stopped). Restarting the clock with Freeze → Engine paused.");
+        var freeze = await api.SetPauseTierAsync(staff, "freeze", ct);
+        var resume = await api.SetPauseTierAsync(staff, "engine", ct);
+        var after = await api.GetNoiseAsync(staff, ct);
+        step.Event((bool?)after.Json?["running"] == true
+            ? "Clock restarted: white noise running."
+            : $"Clock NOT restarted (freeze {freeze.Status}, engine {resume.Status}, noise running={(bool?)after.Json?["running"]}): this step runs without white noise.");
+    }
+
+    /// <summary>L5: a connection SignalR gave up on (closed after its automatic reconnects) is rebuilt at a step start.</summary>
+    private async Task RebuildClosedConnectionsAsync(StepResult step, CancellationToken ct)
+    {
+        var closed = _participants.Values.Where(p => p.IsClosed).ToArray();
+        if (closed.Length == 0)
+        {
+            return;
+        }
+
+        var rebuilt = 0;
+        foreach (var participant in closed)
+        {
+            if (await participant.RebuildAsync(ct))
+            {
+                rebuilt++;
+            }
+        }
+
+        step.Event($"{closed.Length} closed connection(s) found at step start; {rebuilt} rebuilt.");
     }
 
     private int[] OtherConnectedClients(int sender) =>
@@ -279,9 +396,12 @@ internal sealed class LoadTestRunner : IDisposable
         var evaluator = new StopRuleEvaluator(_config.StopRules);
         using var stepCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
 
+        await CheckTierAndClockAsync(api, staff, step, ct);
         if (burst.NoiseHigh)
         {
-            step.NoiseHigh = (await SetNoiseAsync(api, staff, "high", ct)).Success;
+            var noise = await SetNoiseAsync(api, staff, "high", ct);
+            step.NoiseHigh = noise.Success;
+            await EnsureNoiseRunningAsync(api, staff, noise, step, ct);
         }
 
         var burstItemTask = burst.FireBurstItem
@@ -475,7 +595,8 @@ internal sealed class LoadTestRunner : IDisposable
                 _tracker.Summary(step.Index),
                 _counters.Reconnects(step.Index),
                 _counters.ClosedCount(step.Index),
-                _counters.ConnectFailures(step.Index));
+                _counters.ConnectFailures(step.Index),
+                step.Events);
         }).ToList();
 
         return new RunSummary(
@@ -552,5 +673,13 @@ internal sealed class LoadTestRunner : IDisposable
         public bool BurstItemFired { get; set; }
 
         public int PacedPostsSent;
+
+        public List<string> Events { get; } = [];
+
+        public void Event(string message)
+        {
+            Events.Add($"{DateTimeOffset.UtcNow:O} {message}");
+            Console.WriteLine($"{DateTimeOffset.Now:HH:mm:ss} NOTE step {Index + 1}: {message}");
+        }
     }
 }

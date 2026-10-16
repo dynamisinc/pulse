@@ -18,8 +18,8 @@
        used. Each step that fails is reported and the rest still run.
     4. Signs out; deletes the join-URL file(s): -JoinUrlFile, or every scripts/uat/out/loadtest-join-urls-*.csv.
     5. Reports what is left: the archived exercise row with its participant accounts (archived exercises serve no
-       participant route), and the host name still bound to the App Service (the az command to unbind it is printed,
-       not run).
+       participant route), and the host name still bound to the App Service. The az sequence that unbinds it is printed,
+       not run: ssl unbind, delete the managed certificate, hostname delete.
 
     Exit code 0 when everything above succeeded, 1 otherwise.
 
@@ -39,7 +39,7 @@
     Checks and prints the plan. Signs in to nothing, changes nothing, deletes nothing.
 
 .EXAMPLE
-    pwsh scripts/uat/Remove-LoadTestExercise.ps1 -ExerciseHost pulse-loadtest-api.cobrasoftware.com -WhatIf
+    pwsh scripts/uat/Remove-LoadTestExercise.ps1 -ExerciseHost pulse-loadtest-api.<your-uat-domain> -WhatIf
 #>
 [CmdletBinding()]
 param(
@@ -71,6 +71,15 @@ function Get-JoinUrlFiles {
     if (Test-Path -LiteralPath $out -PathType Container) {
         Get-ChildItem -LiteralPath $out -Filter $script:LoadTestJoinFilePattern -File | ForEach-Object { $_.FullName }
     }
+}
+
+function Get-UnbindCommands {
+    <# The az sequence that removes the host name from the App Service: SNI binding, managed certificate, host name. Printed, never run. #>
+    param([Parameter(Mandatory)] [string] $ResourceGroup, [Parameter(Mandatory)] [string] $WebAppName, [Parameter(Mandatory)] [string] $HostName)
+    "`$thumb = az webapp config ssl list --resource-group $ResourceGroup --query `"[?subjectName=='$HostName'].thumbprint | [0]`" -o tsv"
+    "az webapp config ssl unbind --resource-group $ResourceGroup --name $WebAppName --certificate-thumbprint `$thumb"
+    "az webapp config ssl delete --resource-group $ResourceGroup --certificate-thumbprint `$thumb"
+    "az webapp config hostname delete --resource-group $ResourceGroup --webapp-name $WebAppName --hostname $HostName"
 }
 
 function Invoke-RemoveLoadTestExercise {
@@ -162,8 +171,9 @@ function Invoke-RemoveLoadTestExercise {
     Write-Host ''
     Write-Host 'Left in place (by design):' -ForegroundColor Cyan
     Write-Host "  - Exercise '$(Get-PrintableText $target.Name -Max 80)' ($($target.Id)), lifecycle $(if ($state) { $state } else { 'unknown' }), with its roster accounts, posts and telemetry. An archived exercise serves no participant route; there is no delete route."
-    Write-Host "  - The host name $($load.Host), still bound to the App Service and owned by this exercise. To unbind it:"
-    Write-Host "      az webapp config hostname delete --resource-group $ResourceGroup --webapp-name $WebAppName --hostname $($load.Host)"
+    Write-Host "  - The host name $($load.Host), still bound to the App Service (with its managed certificate) and owned by this"
+    Write-Host '    exercise in Pulse. To unbind it, in this order (certificate binding, certificate, host name):'
+    foreach ($line in Get-UnbindCommands -ResourceGroup $ResourceGroup -WebAppName $WebAppName -HostName $load.Host) { Write-Host "      $line" }
     Write-Host '  Then run Test-DemoReady.ps1 on the demo exercise.'
     if ($failures -gt 0) { Write-Host "NOT CLEAN — $failures step(s) failed (above)." -ForegroundColor Red; return 1 }
     Write-Host 'DONE.' -ForegroundColor Green

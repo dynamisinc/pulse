@@ -9,7 +9,7 @@ if (args.Contains("--help") || args.Contains("-h"))
           dotnet run --project tools/Pulse.LoadTest -- --config loadtest.json [overrides]
 
         Overrides:
-          --api-host <host>            host bound to the LOAD-TEST exercise (https; http for localhost only)
+          --api-host <host>            host bound to the LOAD-TEST exercise (https on 443, a DNS name)
           --join-urls <file>           join-URL file from scripts/uat/New-LoadTestExercise.ps1
           --demo-exercise-id <guid>    the demo exercise: the harness refuses to run against it (required)
           --staff-username <name>      controller login (secret: PULSE_STAFF_SECRET or a hidden prompt)
@@ -56,6 +56,12 @@ catch (InvalidOperationException ex)
 {
     Console.Error.WriteLine($"FAIL {ex.Message}");
     return 1;
+}
+catch (OperationCanceledException) when (cancel.IsCancellationRequested)
+{
+    // Ctrl+C during the preflight (before any step started): no load was sent, nothing to undo.
+    Console.Error.WriteLine("Interrupted during the preflight: no load was sent.");
+    return 130;
 }
 
 /// <summary>The staff secret: PULSE_STAFF_SECRET, otherwise a hidden prompt. Never echoed or logged.</summary>

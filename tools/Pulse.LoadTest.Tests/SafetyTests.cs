@@ -124,6 +124,40 @@ public class JoinPacerTests
     }
 }
 
+public class JoinFailureGuardTests
+{
+    [Fact]
+    public void TenFailuresInARow_StopTheRamp()
+    {
+        var guard = new JoinFailureGuard(JoinFailureGuard.DefaultLimit);
+        for (var i = 1; i < 10; i++)
+        {
+            guard.Record(false).Should().BeNull();
+        }
+
+        guard.Record(false).Should().Be("10 joins failed in a row");
+    }
+
+    [Fact]
+    public void ASuccess_ResetsTheCount()
+    {
+        var guard = new JoinFailureGuard(3);
+        guard.Record(false).Should().BeNull();
+        guard.Record(false).Should().BeNull();
+        guard.Record(true).Should().BeNull();
+        guard.Record(false).Should().BeNull();
+        guard.Record(false).Should().BeNull();
+        guard.Record(false).Should().NotBeNull();
+    }
+
+    [Fact]
+    public void ALimitBelowOne_IsRejected()
+    {
+        var act = () => new JoinFailureGuard(0);
+        act.Should().Throw<ArgumentOutOfRangeException>();
+    }
+}
+
 public class JoinUrlFileTests
 {
     private const string Header = "\"name\",\"signInName\",\"joinUrl\"\r\n";

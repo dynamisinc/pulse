@@ -125,6 +125,31 @@ internal sealed class JoinPacer
     }
 }
 
+/// <summary>
+/// M1: stops the ramp after <c>limit</c> failed joins in a row (any non-2xx, a 429 included, or no answer). One success
+/// resets the count. A UAT that collapses mid-ramp then stops the run by itself.
+/// </summary>
+internal sealed class JoinFailureGuard
+{
+    public const int DefaultLimit = 10;
+
+    private readonly int _limit;
+    private int _consecutive;
+
+    public JoinFailureGuard(int limit)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(limit, 1);
+        _limit = limit;
+    }
+
+    /// <summary>Records one join. Returns the stop reason when the limit is reached, else <c>null</c>.</summary>
+    public string? Record(bool success)
+    {
+        _consecutive = success ? 0 : _consecutive + 1;
+        return _consecutive >= _limit ? $"{_consecutive} joins failed in a row" : null;
+    }
+}
+
 /// <summary>One participant row of the join-URL file.</summary>
 internal sealed record JoinEntry(string Name, string SignInName, string Token);
 

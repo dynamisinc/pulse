@@ -101,7 +101,13 @@ Describe 'Remove-LoadTestExercise.ps1' {
         $tier.tier | Should -Be 'engine'
         $tier.actingHumanId | Should -Be 'human-1'
         Test-Path -LiteralPath $script:JoinFile | Should -BeFalse
+        $run.Text | Should -Match ([regex]::Escape("az webapp config ssl list --resource-group rg --query `"[?subjectName=='load.fake.test'].thumbprint | [0]`" -o tsv"))
+        $run.Text | Should -Match 'az webapp config ssl unbind --resource-group rg --name app --certificate-thumbprint \$thumb'
+        $run.Text | Should -Match 'az webapp config ssl delete --resource-group rg --certificate-thumbprint \$thumb'
         $run.Text | Should -Match 'az webapp config hostname delete --resource-group rg --webapp-name app --hostname load.fake.test'
+        # In that order: binding, certificate, host name.
+        $run.Text.IndexOf('ssl unbind') | Should -BeLessThan $run.Text.IndexOf('ssl delete')
+        $run.Text.IndexOf('ssl delete') | Should -BeLessThan $run.Text.IndexOf('hostname delete')
         $run.Text | Should -Match 'Test-DemoReady.ps1'
     }
 

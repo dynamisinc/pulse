@@ -29,8 +29,8 @@
     "maxErrorRate": 0.05,
     "maxPostP95Ms": 5000,
     "sustainSeconds": 60,
-    "windowSeconds": 60,
-    "minSamples": 20
+    "windowSeconds": 15,
+    "minSamples": 10
   },
   "fanOut": {
     "lateAfterSeconds": 2,

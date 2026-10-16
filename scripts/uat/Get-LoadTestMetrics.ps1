@@ -80,6 +80,34 @@ function Get-MetricPlan {
     )
 }
 
+function Get-SummaryTimestamps {
+    <# startedAt / endedAt of a harness summary.json, as the raw ISO-8601 strings (System.Text.Json: no DateTime conversion). #>
+    param([Parameter(Mandatory)] [string] $Path)
+    $document = [System.Text.Json.JsonDocument]::Parse((Get-Content -LiteralPath $Path -Raw))
+    try {
+        $root = $document.RootElement
+        $read = {
+            param([string] $Name)
+            $value = [System.Text.Json.JsonElement]::new()
+            if ($root.ValueKind -ne 'Object' -or -not $root.TryGetProperty($Name, [ref] $value) -or $value.ValueKind -ne 'String') { throw "The summary has no $Name." }
+            $value.GetString()
+        }
+        return [pscustomobject]@{ StartedAt = & $read 'startedAt'; EndedAt = & $read 'endedAt' }
+    }
+    finally { $document.Dispose() }
+}
+
+function ConvertTo-UtcInstant {
+    <# A timestamp from az JSON: a string (parsed with its offset; none means UTC) or a DateTime ConvertFrom-Json made. #>
+    param([Parameter(Mandatory)] [object] $Value)
+    if ($Value -is [DateTimeOffset]) { return $Value.ToUniversalTime() }
+    if ($Value -is [datetime]) {
+        $kind = if ($Value.Kind -eq 'Unspecified') { [datetime]::SpecifyKind($Value, 'Utc') } else { $Value }
+        return ([DateTimeOffset] $kind).ToUniversalTime()
+    }
+    return [DateTimeOffset]::Parse([string] $Value, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::AssumeUniversal).ToUniversalTime()
+}
+
 function Resolve-MetricWindow {
     <# The window as UTC DateTimeOffsets: from -SummaryPath (padded) or -Start/-End. Throws a readable error. #>
     param([string] $Start, [string] $End, [string] $SummaryPath, [int] $PadMinutes)
@@ -93,9 +121,11 @@ function Resolve-MetricWindow {
     if (-not $SummaryPath -and -not $Start) { throw 'Give -Start (and -End), or -SummaryPath with a harness summary.json.' }
     if ($SummaryPath) {
         if (-not (Test-Path -LiteralPath $SummaryPath -PathType Leaf)) { throw "No summary at '$SummaryPath'." }
-        $summary = Get-Content -LiteralPath $SummaryPath -Raw | ConvertFrom-Json -AsHashtable
-        $from = (& $parse ([string] $summary['startedAt']) 'startedAt').AddMinutes(-$PadMinutes)
-        $to = (& $parse ([string] $summary['endedAt']) 'endedAt').AddMinutes($PadMinutes)
+        # Read the timestamps as the strings they are (with their offset). ConvertFrom-Json would turn them into local
+        # DateTime values first, and [string] of those drops the offset, so the window would shift by the UTC offset.
+        $stamps = Get-SummaryTimestamps -Path $SummaryPath
+        $from = (& $parse $stamps.StartedAt 'startedAt').AddMinutes(-$PadMinutes)
+        $to = (& $parse $stamps.EndedAt 'endedAt').AddMinutes($PadMinutes)
     }
     else {
         $from = & $parse $Start '-Start'
@@ -117,7 +147,7 @@ function ConvertTo-MetricRows {
             foreach ($point in @($series['data'])) {
                 if ($point -isnot [System.Collections.IDictionary]) { continue }
                 [pscustomobject][ordered]@{
-                    timestamp = ([DateTimeOffset] $point['timeStamp']).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+                    timestamp = (ConvertTo-UtcInstant $point['timeStamp']).ToString('yyyy-MM-ddTHH:mm:ssZ')
                     resource  = $Resource
                     metric    = $name
                     unit      = [string] $metric['unit']

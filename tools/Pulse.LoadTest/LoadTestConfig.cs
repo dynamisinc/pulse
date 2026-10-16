@@ -19,7 +19,7 @@ internal sealed class LoadTestConfig
 
     /// <summary>
     /// The API host bound to the LOAD-TEST exercise (not the demo's host): every participant call, the SignalR hub and
-    /// the controller session go here. https, or http for localhost only.
+    /// the controller session go here. https on 443, a DNS name (no port, no IP), as the UAT scripts.
     /// </summary>
     public string? ApiHost { get; set; }
 
@@ -125,8 +125,8 @@ internal sealed class LoadTestConfig
     }
 
     /// <summary>
-    /// The API host as an origin: a bare host gets https://. Plain http only for a loopback host; no path, query, user
-    /// info. Mirrors the UAT scripts' -ApiHost rules so a secret-bearing call never travels in the clear.
+    /// The API host as an origin: a bare host gets https://. https on 443 only, a DNS name, no path, query or user info.
+    /// Mirrors the UAT scripts' Resolve-ApiHost so a secret-bearing call never travels in the clear.
     /// </summary>
     public static bool TryNormalizeApiHost(string raw, out Uri origin, out string error)
     {
@@ -139,13 +139,26 @@ internal sealed class LoadTestConfig
 
         if (!Uri.TryCreate(value, UriKind.Absolute, out var uri) || (uri.Scheme != Uri.UriSchemeHttps && uri.Scheme != Uri.UriSchemeHttp))
         {
-            error = $"apiHost '{raw}' is not a host name or an http(s) URL.";
+            error = $"apiHost '{raw}' is not a host name or an https URL.";
             return false;
         }
 
-        if (uri.Scheme == Uri.UriSchemeHttp && !uri.IsLoopback)
+        if (uri.Scheme != Uri.UriSchemeHttps)
         {
-            error = $"apiHost '{raw}' uses plain http: https only (http for localhost only).";
+            error = $"apiHost '{raw}' uses plain http: https only, as the UAT scripts (the staff secret must not travel in the clear).";
+            return false;
+        }
+
+        // As the UAT scripts' Resolve-ApiHost: a DNS host name on 443, no explicit port (even :443), no IP literal.
+        if (System.Text.RegularExpressions.Regex.IsMatch(value, @"^[A-Za-z][A-Za-z0-9+.-]*://[^/?#]*:\d*(?:[/?#]|$)"))
+        {
+            error = $"apiHost '{raw}' names a port: https on 443 only.";
+            return false;
+        }
+
+        if (uri.HostNameType != UriHostNameType.Dns)
+        {
+            error = $"apiHost '{raw}' is an IP address: use the host name bound to the load-test exercise (Pulse resolves the exercise from it).";
             return false;
         }
 
@@ -155,7 +168,7 @@ internal sealed class LoadTestConfig
             return false;
         }
 
-        origin = new Uri(uri.GetLeftPart(UriPartial.Authority));
+        origin = new Uri("https://" + uri.IdnHost.ToLowerInvariant() + "/");
         error = string.Empty;
         return true;
     }
@@ -323,11 +336,17 @@ internal sealed class StopRuleSettings
 
     public double SustainSeconds { get; set; } = 60;
 
-    /// <summary>The trailing window the rates are computed over.</summary>
-    public double WindowSeconds { get; set; } = 60;
+    /// <summary>
+    /// The short trailing window each tick's rates are computed over. Kept well under <see cref="SustainSeconds"/>, so
+    /// "sustained for 60 s" means 60 s of breach, not a few seconds of errors stretched by a long lookback.
+    /// </summary>
+    public double WindowSeconds { get; set; } = 15;
 
-    /// <summary>Fewer requests than this in the window never trip a rule (one early failure is not a trend).</summary>
-    public int MinSamples { get; set; } = 20;
+    /// <summary>
+    /// Fewer requests than this in the window never count as evidence. 10 in 15 s: 20 users make about 15 requests in
+    /// 15 s outside the burst (feed every 30 s, a reaction a minute).
+    /// </summary>
+    public int MinSamples { get; set; } = 10;
 
     public IEnumerable<string> Validate()
     {
@@ -335,6 +354,7 @@ internal sealed class StopRuleSettings
         if (MaxPostP95Ms <= 0) { yield return "stopRules.maxPostP95Ms must be above 0."; }
         if (SustainSeconds < 0) { yield return "stopRules.sustainSeconds must be 0 or more."; }
         if (WindowSeconds <= 0) { yield return "stopRules.windowSeconds must be above 0."; }
+        if (SustainSeconds > 0 && WindowSeconds > SustainSeconds) { yield return "stopRules.windowSeconds must not exceed stopRules.sustainSeconds."; }
         if (MinSamples < 1) { yield return "stopRules.minSamples must be at least 1."; }
     }
 }

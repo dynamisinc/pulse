@@ -71,6 +71,15 @@ needs. The backup site and switchover stay in #526.
   through the reaction loop or a Freeze, so the setup sets the pause tier to Freeze and then Engine paused.
 - **Burst items fire once.** The setup makes three (one per step). The harness creates one if none is left.
 - **Archive.** The existing lifecycle route allows completed → archived, so teardown archives without story 22.
+- **Gate-1 fold-ins.**
+  - The stop rules use a 15 s window with the 60 s sustain, so a 5 s error burst no longer trips a step.
+  - The stop rules also run during the ramp, and the ramp stops after 10 failed joins in a row.
+  - Each step re-applies tier `engine` and logs restart signs: a tier read-back of `running`, or noise not running. On
+    noise not running it restarts the clock.
+  - Connections SignalR closed for good are rebuilt at the next step start.
+  - The harness accepts the same host values as the scripts: https on 443, a DNS name, no port.
+  - Summary timestamps are read with their own offset.
+  - Teardown prints the full unbind sequence.
 - **Files.** `scripts/uat/Get-LoadTestMetrics.ps1` is the metrics helper. `scripts/uat/LoadTest.Common.ps1` holds the helpers the setup and teardown scripts share.
 - **Projects** are in `pulse.slnx`. CI builds and tests them; the tests are pure unit tests that run in under a second.
 - **SignalR client** is 10.0.13. Version 10.0.10 pulls `Microsoft.AspNetCore.SignalR.Common` with advisory

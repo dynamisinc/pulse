@@ -26,9 +26,9 @@ host name to the same App Service. This adds a binding and changes no app settin
 still a UAT change, so PDF-D1 makes it Tom's call.
 
 ```bash
-RG=rg-pulse-uat-centralus; APP=app-pulse-api-uat-dynamis; HOST=pulse-loadtest-api.cobrasoftware.com
+RG=rg-pulse-uat-centralus; APP=app-pulse-api-uat-dynamis; HOST=pulse-loadtest-api.<your-uat-domain>
 az webapp show -g $RG -n $APP --query customDomainVerificationId -o tsv   # → TXT asuid.pulse-loadtest-api
-# DNS (cobrasoftware.com): CNAME pulse-loadtest-api → app-pulse-api-uat-dynamis.azurewebsites.net
+# DNS (<your-uat-domain>): CNAME pulse-loadtest-api → app-pulse-api-uat-dynamis.azurewebsites.net
 #                          TXT   asuid.pulse-loadtest-api → <the id above>
 az webapp config hostname add -g $RG --webapp-name $APP --hostname $HOST
 az webapp config ssl create   -g $RG --name $APP --hostname $HOST        # free managed certificate (Basic and up)
@@ -54,8 +54,8 @@ pwsh scripts/uat/Test-DemoReady.ps1
 pwsh scripts/uat/Copy-StaffSecret.ps1 controller1; $env:PULSE_STAFF_SECRET = Get-Clipboard
 
 # 2. Create the load-test exercise. Preview first (read-only), then for real.
-pwsh scripts/uat/New-LoadTestExercise.ps1 -ExerciseHost pulse-loadtest-api.cobrasoftware.com -WhatIf
-pwsh scripts/uat/New-LoadTestExercise.ps1 -ExerciseHost pulse-loadtest-api.cobrasoftware.com
+pwsh scripts/uat/New-LoadTestExercise.ps1 -ExerciseHost pulse-loadtest-api.<your-uat-domain> -WhatIf
+pwsh scripts/uat/New-LoadTestExercise.ps1 -ExerciseHost pulse-loadtest-api.<your-uat-domain>
 #    → prints the join-URL file (scripts/uat/out/loadtest-join-urls-<ts>.csv) and the next command
 
 # 3. Configure: copy the sample and fill apiHost, joinUrlFile and demoExerciseId.
@@ -72,8 +72,8 @@ dotnet run --project tools/Pulse.LoadTest -c Release -- --config tools/Pulse.Loa
 pwsh scripts/uat/Get-LoadTestMetrics.ps1 -SummaryPath (Get-ChildItem loadtest-results/run-*/summary.json | Select-Object -Last 1)
 
 # 7. Teardown. Preview first, then for real. Also deletes the join-URL file.
-pwsh scripts/uat/Remove-LoadTestExercise.ps1 -ExerciseHost pulse-loadtest-api.cobrasoftware.com -WhatIf
-pwsh scripts/uat/Remove-LoadTestExercise.ps1 -ExerciseHost pulse-loadtest-api.cobrasoftware.com
+pwsh scripts/uat/Remove-LoadTestExercise.ps1 -ExerciseHost pulse-loadtest-api.<your-uat-domain> -WhatIf
+pwsh scripts/uat/Remove-LoadTestExercise.ps1 -ExerciseHost pulse-loadtest-api.<your-uat-domain>
 #    Optional: unbind the host name (the command is printed).
 
 # 8. The demo is unharmed.
@@ -88,8 +88,8 @@ Then fill in [`docs/demo/LOAD-TEST-REPORT.md`](../../docs/demo/LOAD-TEST-REPORT.
 
 | Minute | Action |
 |---|---|
-| Before | Ramp: joins at 25/min, evenly spaced (`POST /api/auth/join`). Each user opens one SignalR connection to `/hubs/exercise` with the session token as `access_token`, like the web client's `accessTokenFactory` |
-| 0 | `PUT /api/staff/noise {level: high}` (15/min), from the controller session |
+| Before | Connections SignalR closed for good since the last step are rebuilt. Then the ramp: joins at 25/min, evenly spaced (`POST /api/auth/join`). Each new user opens one SignalR connection to `/hubs/exercise` with the session token as `access_token`, like the web client's `accessTokenFactory`. The stop rules run during the ramp too |
+| 0 | Reads the pause tier and re-applies `engine` (idempotent; a read-back of `running` means a restart, see below). Then `PUT /api/staff/noise {level: high}` (15/min) from the controller session. If noise reports `running: false`, the scenario clock stopped: the harness restarts it with Freeze → Engine paused |
 | 1 | Fires the next pending `Load burst…` item (`POST /api/injects/{id}/fire`): 20 posts over 57 s. If none is left, it creates one first |
 | 2–4 | **120 posts/min**: `POST /api/posts` as `controller-as-persona`, one every 0.5 s, round-robin over the NPC personas. The loop is open, so a slow server does not lower the rate |
 | 0–10 | Every user reads the feed every 30 s, likes or reposts about once a minute, and posts about every 5 minutes. About a quarter of the posts are replies |
@@ -97,13 +97,16 @@ Then fill in [`docs/demo/LOAD-TEST-REPORT.md`](../../docs/demo/LOAD-TEST-REPORT.
 
 ## Stop rules (PDF-D4)
 
-The harness checks the rules every 5 s over the trailing 60 s window of the step:
+The harness checks the rules every 5 s, during the ramp and the step. Each check looks at a short trailing window of
+15 s:
 
 - **error rate above 5%** (any non-2xx answer, or no answer) **for 60 s in a row**, or
 - **POST `/api/posts` p95 above 5 s for 60 s in a row**. This counts participant posts, replies and controller posts.
 
-A window with fewer than 20 requests is never evidence. When a rule trips, the harness aborts the step and skips the
-later steps. The reason goes into `summary.json` (`stopReason`) and the exit code is 2. **Ctrl+C** once stops the load,
+The short window is deliberate. A breach must last 60 s; a 5 s burst of errors does not trip a step. A window with
+fewer than 10 requests (or 10 POSTs, for the p95 rule) is never evidence. In practice the p95 rule is judged during
+the 120/min burst, and the error rule all the time. The ramp also stops after **10 failed joins in a row** (a 429
+included). When a rule trips, the harness aborts the step (or its ramp) and skips the later steps. The reason goes into `summary.json` (`stopReason`) and the exit code is 2. **Ctrl+C** once stops the load,
 turns noise off, closes every connection, signs out and writes a partial summary (exit 130). A second Ctrl+C exits at
 once. Remove-LoadTestExercise.ps1 still turns noise off.
 
@@ -114,6 +117,25 @@ The harness also **refuses to run** (exit 1) when any of these is true:
 - No demo id is configured.
 - A join returns a session for another exercise.
 - The join pace is set above 25/min.
+- `apiHost` uses http, names a port (even `:443`), or is an IP address. These are the UAT scripts' host rules: https on
+  443, a DNS name.
+
+## If UAT restarts mid-run
+
+An App Service restart drops every SignalR connection and empties Pulse's in-memory state. Until Wave 4 deploys (story
+17/18), that state includes the pause tier and the scenario clock.
+
+- **Connections.** Each client reconnects by itself (`reconnects` in the step). One that gives up is counted in
+  `connectionsClosed` and rebuilt at the next step start (see the step's `events`).
+- **Pause tier.** Before Wave 4 it comes back as `running`. At each step start the harness reads it, logs
+  `RESTART SUSPECTED` in the step's `events` when it is not `engine`, and re-applies `engine`. After Wave 4 the tier
+  persists (the read-back carries `persisted: true`), so the read-back stays `engine`.
+- **Clock.** Before Wave 4 the clock stops, and with it white noise. The harness sees noise `running: false` after
+  High, logs it, and restarts the clock with Freeze → Engine paused. A Freeze shows the pause overlay to the load
+  users for an instant. Only the load-test exercise sees it.
+- **Sessions** are stored in the database and survive a restart.
+
+Report a restart in the report's "Deviations" row, with its time from the `events` entry.
 
 ## What to watch during the run
 
@@ -123,12 +145,16 @@ The harness also **refuses to run** (exit 1) when any of these is true:
 - **Azure portal → sqldb-pulse-uat**: CPU % and workers %. It is serverless, so the first minutes include the resume.
 - The UAT web app **cannot show the load-test exercise**: its pages and live updates follow the demo's host. Do not
   switch the console to it.
+- **Audit trail on the demo exercise.** New-LoadTestExercise.ps1 signs in to the demo exercise once, only to call the
+  create route, and then signs out. That leaves two staff audit events in the demo exercise's telemetry: a staff
+  sign-in and a sign-out by `controller1`. Nothing else in the demo exercise changes. The harness and
+  Remove-LoadTestExercise.ps1 never sign in to it.
 
 ## Reading the results
 
 | File | Contents |
 |---|---|
-| `summary.json` | Target, window, `completed`, `stopReason`, `interrupted`. Per step: users, series and fan-out figures, plus reconnects, closed connections and connect failures |
+| `summary.json` | Target, window, `completed`, `stopReason`, `interrupted`. Per step: users, series and fan-out figures, plus reconnects, closed connections, connect failures, and `events` (restart signs, tier re-applies, rebuilt connections) |
 | `steps.csv` | One row per step and series: count, errors, error rate, p50/p95/p99/max in ms. Also the `fan-out-lag` and `fan-out-end-to-end` rows |
 | `samples.csv` | Every timed request: time, step, users, metric, latency, status |
 | `fanout-drops.csv` | Every frame that never arrived: the post, the client, and how long after that client's (re)connect it was accepted |
@@ -155,6 +181,17 @@ measured from the request being sent.
 A drop with `secondsAfterConnect` under about 1 s is a join-window artefact. The hub adds a connection to its exercise
 group in `OnConnectedAsync`, just after the client sees the connection as connected. Report such drops separately from
 real drops.
+
+**Connection counts** are per step:
+
+- `reconnects` counts SignalR's automatic reconnect attempts. A burst of them across most clients at one moment means a
+  server restart or a network blip. A steady trickle under load means connections are timing out.
+- `connectionsClosed` counts connections that ended for good, after the automatic reconnects gave up. They stop
+  receiving frames, so their missing frames show up as drops. They are rebuilt at the next step start, and the step's
+  `events` say how many.
+- `connectFailures` counts hub connections that could not start at all, at a join or a rebuild.
+
+Read drops against these counts: drops from closed clients are not fan-out lag.
 
 The feed is one unpaged array (`PostReadService.GetFeedAsync`). Feed latency therefore grows with the post count across
 the run, so read `feed` p95 per step against the posts already written.
