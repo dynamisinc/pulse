@@ -159,3 +159,32 @@ describe('AlertBar — Details link target (PRT-012)', () => {
     },
   )
 })
+
+describe('AlertBar — touch targets on phones (mobile-tablet 05, gap G1)', () => {
+  it('gives "Details →" and "+N more" the coarse-pointer hit-area class, with its stylesheet outside the live region', () => {
+    mockUseAlerts.mockReturnValue([
+      makeAlert({ id: 'e1', severity: 'emergency' }),
+      makeAlert({ id: 'a2', severity: 'advisory' }),
+    ])
+    const { container } = render(
+      <MemoryRouter>
+        <AlertBar />
+      </MemoryRouter>,
+    )
+
+    expect(screen.getByTestId('pulse-alert-bar-details')).toHaveClass('pulse-alert-bar-hit')
+    expect(screen.getByTestId('pulse-alert-bar-more-chip')).toHaveClass('pulse-alert-bar-hit')
+
+    const style = container.querySelector('style')
+    expect(style?.textContent).toMatch(/\.pulse-alert-bar-hit\s*\{[^}]*min-height:\s*44px/)
+    // Never inside role="status": a stylesheet must not join an announcement.
+    expect(screen.getByTestId('pulse-alert-bar').contains(style)).toBe(false)
+  })
+
+  it('gives the ticker "Details →" the same hit-area class', () => {
+    mockUseAlerts.mockReturnValue([makeAlert({ severity: 'info' })])
+    render(<AlertBar />)
+
+    expect(screen.getByTestId('pulse-alert-bar-details')).toHaveClass('pulse-alert-bar-hit')
+  })
+})

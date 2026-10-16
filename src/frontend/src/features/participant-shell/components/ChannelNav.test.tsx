@@ -427,6 +427,19 @@ describe('ChannelNav — scenario dateline (COR-053/061/062)', () => {
     expect(screen.getByText(expectedDateline)).toBeInTheDocument()
   })
 
+  it('renders NO dateline while only the default wall-mirroring clock is installed (COR-053, story 17)', () => {
+    resetExerciseClock()
+    mockUseChannelNav.mockReturnValue(TWO_CHANNEL_CONFIG)
+
+    const { container } = render(<ChannelNav />)
+
+    // The default clock's "now" is the real date; showing it beside
+    // scenario-time posts would leak wall-clock time into the fiction.
+    expect(container.querySelector('.pulse-channel-nav-dateline')).toBeNull()
+    // The strip itself (channel links) still renders.
+    expect(screen.getByTestId('pulse-channel-nav-strip')).toBeInTheDocument()
+  })
+
   it('never renders the exercise id, name, or status alongside the dateline (no exercise/admin leak)', () => {
     setExerciseClock(fixedClock(new Date('2026-07-16T14:00:00Z')))
     mockUseChannelNav.mockReturnValue(TWO_CHANNEL_CONFIG)
@@ -436,6 +449,20 @@ describe('ChannelNav — scenario dateline (COR-053/061/062)', () => {
     const bodyText = document.body.textContent ?? ''
     expect(bodyText).not.toContain(DEFAULT_EXERCISE_SCOPE.exerciseId)
     expect(bodyText).not.toContain(DEFAULT_EXERCISE_SCOPE.exerciseName)
+  })
+})
+
+describe('ChannelNav — touch targets (mobile-tablet 17)', () => {
+  it('grows the strip and its links to the 44 px touch floor on coarse pointers only', () => {
+    mockUseChannelNav.mockReturnValue(TWO_CHANNEL_CONFIG)
+    const { container } = render(<ChannelNav />)
+
+    const styleText = container.querySelector('style')?.textContent ?? ''
+    const coarse = styleText.slice(styleText.indexOf('@media (pointer: coarse)'))
+    expect(coarse).toMatch(/\.pulse-channel-nav-strip\s*\{\s*height:\s*44px/)
+    expect(coarse).toMatch(/\.pulse-channel-nav-link\s*\{[^}]*min-height:\s*44px/)
+    // The default (mouse) strip keeps its 38 px height.
+    expect(styleText.slice(0, styleText.indexOf('@media'))).toContain('height: 38px')
   })
 })
 

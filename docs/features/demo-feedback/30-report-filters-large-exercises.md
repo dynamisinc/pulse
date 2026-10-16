@@ -1,6 +1,6 @@
 # Story: Exercise report: filters, and large exercises never refused
 
-**Feature:** Demo feedback cut (10/20)  ·  **Phase:** 1  ·  **Status:** In Review
+**Feature:** Demo feedback cut (10/20)  ·  **Phase:** 1  ·  **Status:** Complete
 **Requirements:** EVL-030 (lite), COR-053, NFR-001  ·  **Decisions:** DF-43, DF-44  ·  **Issue:** #561
 **Stack:** backend + frontend  ·  **Review:** Tier-1  ·  **Priority:** Must  ·  **Wave:** 4  ·  **Effort:** S–M
 
