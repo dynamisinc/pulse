@@ -248,7 +248,7 @@ Deliver `docs/design/ADMIN-IDENTITY-MODEL.md` and get Tom's sign-off before buil
 3. **Credentials:**
    - password hashing and policy;
    - staff "forgot password" and admin reset, using emailed one-time links through the existing
-     Azure Communication Services path (easy-login story 06);
+     Azure Communication Services path (`docs/features/easy-login/13-email-delivery.md`);
    - participant passwords alongside links and the day word: which sign-in methods are allowed
      for each exercise?
 4. **Avatars:**
