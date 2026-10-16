@@ -65,7 +65,7 @@ media on the server.
 | 13 | [Participant polish: tooltips (#494) and centered frame (#495)](13-participant-polish.md) | frontend | Should | 3 | 06, 07 | Not Started | #509 |
 | S1 | [Seed script: noise pool, exercise pins, watermark on](S1-seed-script-update.md) | script | Must | 3 | 04, 05 deployed | Not Started | #510 |
 | 16 | [MSEL import: alt text and engagement columns; slot in by planned minute](16-msel-import-alt-engagement-order.md) | backend | Must | 3 | 03 | In Review | #518 |
-| 17 | [Printable exercise report (PDF via print)](17-printable-exercise-report.md) | backend + frontend | Must | 3 | 02 | In Progress | #550 |
+| 17 | [Printable exercise report (PDF via print)](17-printable-exercise-report.md) | backend + frontend | Must | 3 | 02 | In Review | #550 |
 | C | [Content: Kestrel MSEL file, noise pool (C1 burn-in dropped 10/15)](C-content-tasks.md) | content | Must | any | #491, 16 | Not Started | #511 |
 
 ## Manual UAT walk (Sun 10/18, before pencils down)

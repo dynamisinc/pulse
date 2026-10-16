@@ -148,9 +148,10 @@ describe('STAFF_ROUTE_REGISTRY — the participant-admin entry (easy-login, Gate
     }
   })
 
-  it('gives the controller a SECOND surface, which un-degrades the launcher for them', () => {
+  it('gives the controller more than one surface, which un-degrades the launcher for them', () => {
+    // 'exercise-report' (demo-feedback 17) is the printable report, opened in a new tab.
     expect(staffRoutesForRole(STAFF_ROUTE_REGISTRY, 'controller').map(e => e.id))
-      .toEqual(['controller-console', 'participant-admin'])
+      .toEqual(['controller-console', 'participant-admin', 'exercise-report'])
   })
 })
 

@@ -1,6 +1,6 @@
 # Story: Printable exercise report (posts, metrics and charts, saved as PDF)
 
-**Feature:** Demo feedback cut (10/20)  ·  **Phase:** 1  ·  **Status:** In Progress
+**Feature:** Demo feedback cut (10/20)  ·  **Phase:** 1  ·  **Status:** In Review
 **Requirements:** EVL-030 (lite), COR-053, NFR-001  ·  **Decisions:** DF-23, DF-24, DF-25  ·  **Issue:** #550
 **Stack:** backend + frontend  ·  **Review:** Tier-1  ·  **Priority:** Must  ·  **Wave:** 3  ·  **Effort:** M
 
@@ -76,12 +76,14 @@ and no participant brand skin. The on-screen toolbar above the sheet uses COBRA 
 ## Contract (frozen for this story)
 
 Times are **exercise-zone scenario times preformatted by the server** (as in story 02): `"yyyy-MM-dd HH:mm"`
-(`*At`, `start`) or `"HH:mm"` (`*Time` labels). The client never converts time zones.
+(`*At`, `start`) or `"HH:mm"` (`*Time` labels). The client never converts time zones. The one exception to
+"scenario time" is `exercise.preparedAt`, the server's wall clock when the report was built, formatted the same way
+in the exercise's zone (W-003: never UTC, which reads as tomorrow on a US evening print).
 
 ```ts
 interface ExerciseReport {
   exercise: { name: string; timeZone: string; scenarioStart: string | null; scenarioEnd: string | null;
-              conductedDate: string | null /* "yyyy-MM-dd" of scenarioStart */; preparedAtUtc: string }
+              conductedDate: string | null /* "yyyy-MM-dd" of scenarioStart */; preparedAt: string /* "yyyy-MM-dd HH:mm", exercise zone */ }
   summary: {
     participants: number            // participant accounts that signed in at least once
     posts: number                   // top-level + replies, all sources, taken-down included
@@ -144,5 +146,21 @@ Story 02 (export service and gate). Post editing (tomorrow) fills `editCount` in
 ## Tests
 
 Backend: report builder unit tests (bins, DF-25, lookalikes, median, noise toggle), endpoint isolation (cross-exercise),
-401/413, telemetry payload. Frontend: page renders each section from a fixture; noise toggle refetches; alt text
+401/413, telemetry payload.
+
+Backend tests (`src/Pulse.WebApi.Tests/Features/Exports/`):
+- `ExerciseReportBuilderTests` — bins, source split, busiest window, cap (AC activity); DF-25 reply, @mention,
+  hashtag-only, 30-minute cutoff, non-participant ignored (AC inject responses); median incl. none responded;
+  lookalike pairing (AC lookalikes).
+- `ExerciseReportEndpointTests.Report_CarriesEverySection_PerTheFrozenContract` (AC endpoint, posts order/counts,
+  media/posters/avatars, activity, DF-25, lookalikes, editCount null);
+  `.IncludeNoise_ListsNoise_AndTheMetricsAreIdentical` (AC endpoint, DF-24);
+  `.ASigningFailure_DegradesToNullUrls_NotA500` (AC media);
+  `.UnresolvedScope_Returns401_AndRecordsNothing`, `.Anonymous_And_Participant_Return401_UnassignedStaff403`,
+  `.ReportFromA_NeverShowsBsPostsPersonasMediaOrInjects` (AC isolation);
+  `.OneViewedEvent_PerRequest_StaffActor_PostsOnly` (AC telemetry);
+  `.MoreThanFiveThousandListedPosts_Returns413_WithAReadableReason_AndNoTelemetry` (AC 413);
+  `.EmptyExercise_Returns200_WithEmptySections`; `.PreparedAt_IsTheServerClock_InTheExerciseZone_NotUtc` (W-003).
+
+Frontend: page renders each section from a fixture; noise toggle refetches; alt text
 printed for every media item; poster-less video tile; never color-only labels.
