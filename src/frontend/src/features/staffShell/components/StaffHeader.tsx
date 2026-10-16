@@ -34,11 +34,13 @@
  *      reach two or more surfaces, and the original static, non-interactive
  *      lockup otherwise — see that file's module header for the full IoC
  *      rationale (no registry import here, ever) and the degrade rule.
- *   2. Exercise identity badge — exercise name + role/cell. STATIC DURING
- *      CONDUCT (COR-005): this is plain, non-interactive text — there is no
- *      switcher control here at all (the switcher UX is out of scope for
- *      this story; it is a separate, pre-conduct-only surface E1 owns), so a
- *      Live/active exercise can never show one, by construction.
+ *   2. Exercise identity badge — exercise name + role/cell. With ONE exercise
+ *      assignment it is plain, non-interactive text (COR-005). With TWO OR MORE
+ *      it becomes the exercise SWITCHER: a menu button (chevron, `aria-haspopup`)
+ *      listing each assignment, the active one marked "Active" in text + a check.
+ *      It reuses `features/staff`'s `useStaffAssignments` / `useSetActiveExercise`
+ *      — see `ExerciseIdentityBadge.tsx`. (Replaces the old panel that was
+ *      mounted above the console.)
  *   3. Dual clock pair — SCENARIO (from `useScenarioTime`, sourced from the
  *      exercise clock, never wall-clock) and LOCAL (real wall-clock time,
  *      ticking ~1s — staff surfaces are EXEMPT from the participant
@@ -98,6 +100,7 @@ import { staffShellTokens } from '../staffShellTokens'
 import { useStaffPresence, useStaffRoleCell } from '../staffHeaderMocks'
 import { STATE_PILL_CONFIG, type StatePillConfig } from './statePillConfig'
 import { SurfaceLauncher } from './SurfaceLauncher'
+import { ExerciseIdentityBadge } from './ExerciseIdentityBadge'
 
 /**
  * Classification marking shown in every staff header (SHELL-CONTRACT §1
@@ -218,7 +221,7 @@ export function StaffHeader({
   role: launcherRole,
   currentPath,
 }: StaffHeaderProps) {
-  const { exerciseName, timeZone, status } = useExerciseContext()
+  const { timeZone, status } = useExerciseContext()
   // NOTE: this `role`/`cell` pair is the identity-badge's display seam (e.g.
   // "CONTROLLER" / "SIMCELL-1", derived from the controller identity's call sign —
   // see staffHeaderMocks.ts) — a different thing from the launcher's
@@ -270,39 +273,10 @@ export function StaffHeader({
         currentPath={currentPath}
       />
 
-      {/* 2. Exercise identity badge — static during conduct (COR-005): plain
-          text only, never a switcher control (out of scope for this story). */}
-      <Box
-        data-testid="staff-header-identity-badge"
-        title="Exercise identity — static while conduct is live (COR-005)"
-        sx={{
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'flex-start',
-          gap: '1px',
-          background: 'rgba(255, 255, 255, 0.08)',
-          border: '1px solid rgba(255, 255, 255, 0.22)',
-          borderRadius: '8px',
-          px: 1.375,
-          py: 0.625,
-          minWidth: 0,
-        }}
-      >
-        <Typography sx={{ fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap' }}>
-          {exerciseName}
-        </Typography>
-        <Typography
-          sx={{
-            fontSize: 9.5,
-            fontWeight: 700,
-            letterSpacing: '0.08em',
-            color: staffShellTokens.header.textMuted,
-            whiteSpace: 'nowrap',
-          }}
-        >
-          {role} · {cell}
-        </Typography>
-      </Box>
+      {/* 2. Exercise identity badge — static text with one assignment; the
+          exercise switcher menu button with two or more (see
+          ExerciseIdentityBadge.tsx). */}
+      <ExerciseIdentityBadge role={role} cell={cell} />
 
       {/* 3. Dual clock pair — SCENARIO (COR-053) + LOCAL (wall, staff-exempt). */}
       <Stack direction="row" sx={{ alignItems: 'center', gap: 1.75, px: 0.5, flex: 'none' }}>

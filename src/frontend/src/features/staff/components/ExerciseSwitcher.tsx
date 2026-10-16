@@ -92,7 +92,7 @@ import CobraStyles from '@/theme/CobraStyles'
 import { useExerciseContext } from '@/core/exerciseContext'
 import { useStaffAssignments } from '../hooks/useStaffAssignments'
 import { useSetActiveExercise } from '../hooks/useSetActiveExercise'
-import type { StaffAssignmentError } from '../services/staffAssignmentsService'
+import { friendlyErrorMessage, sameExercise } from './switcherShared'
 import type { StaffAssignment } from '../types'
 
 /** A `role="alert"` block pairing an icon with a message (never color alone). */
@@ -110,39 +110,6 @@ function SwitcherAlert({ message, testId }: { message: string; testId: string })
       <Typography variant="body2">{message}</Typography>
     </Stack>
   )
-}
-
-/** Maps a thrown assignment-seam error to clear, status-aware staff-facing copy. */
-function friendlyErrorMessage(error: StaffAssignmentError, fallback: string): string {
-  switch (error.status) {
-    case 401:
-      return 'Your staff session is not active. Sign in to the console and try again.'
-    case 403:
-      return 'You are not assigned to that exercise.'
-    case 400:
-      return error.serverMessage
-        ? `That exercise could not be selected: ${error.serverMessage}`
-        : 'That exercise could not be selected.'
-    default:
-      return error.status === undefined
-        ? 'Could not reach the server. Check your connection and try again.'
-        : (error.serverMessage ?? fallback)
-  }
-}
-
-/**
- * Compares two exercise ids for identity, CASE-INSENSITIVELY. An exercise id is
- * an opaque GUID string on the wire, but the API surface has historically
- * emitted it in mixed casing (SQL Server materializes a `uniqueidentifier` to
- * an UPPERCASE string when `.ToString()` runs server-side inside a query, vs.
- * .NET's lowercase `Guid.ToString()` after materialization). The
- * `/api/staff/assignments`, `/api/session`, and `/api/exercise-context`
- * responses must all agree for the active row to be marked correctly; comparing
- * case-insensitively here is a defensive backstop so a future casing drift on
- * any of them can never silently mis-mark the active exercise as switchable.
- */
-function sameExercise(a: string, b: string): boolean {
-  return a.toLowerCase() === b.toLowerCase()
 }
 
 interface AssignmentRowProps {

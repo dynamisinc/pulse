@@ -112,7 +112,6 @@ function renderAt(path: string) {
                   participantSurface={<div data-testid="participant-surface" />}
                   staffRoutes={STAFF_ROUTE_REGISTRY}
                   participantGuard={StubParticipantGuard}
-                  staffSwitcher={<div data-testid="exercise-switcher" />}
                 />
               </ExerciseContextProvider>
             )}

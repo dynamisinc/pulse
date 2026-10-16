@@ -35,6 +35,7 @@
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { describe, expect, it } from 'vitest'
 import { ExerciseContextProvider } from '@/core/exerciseContext'
 import { StaffShellFrame } from '@/features/staffShell/StaffShellFrame'
@@ -43,20 +44,28 @@ import { Toolstrip } from '@/features/staffShell/components/Toolstrip'
 import { ToolstripProvider } from '@/features/staffShell/toolRegistry'
 import { EvaluatorDashboardPage } from './EvaluatorDashboardPage'
 
+// The header's identity badge reads the staff assignments (React Query) to decide
+// whether it is a switcher, so every render needs a QueryClientProvider.
+function newQueryClient() {
+  return new QueryClient({ defaultOptions: { queries: { retry: false } } })
+}
+
 function renderEvaluatorStaffComposition() {
   return render(
-    <MemoryRouter>
-      <ExerciseContextProvider>
-        <ToolstripProvider>
-          <StaffShellFrame
-            header={<StaffHeader surfaceName="Evaluator Dashboard" />}
-            toolstrip={<Toolstrip />}
-          >
-            <EvaluatorDashboardPage />
-          </StaffShellFrame>
-        </ToolstripProvider>
-      </ExerciseContextProvider>
-    </MemoryRouter>,
+    <QueryClientProvider client={newQueryClient()}>
+      <MemoryRouter>
+        <ExerciseContextProvider>
+          <ToolstripProvider>
+            <StaffShellFrame
+              header={<StaffHeader surfaceName="Evaluator Dashboard" />}
+              toolstrip={<Toolstrip />}
+            >
+              <EvaluatorDashboardPage />
+            </StaffShellFrame>
+          </ToolstripProvider>
+        </ExerciseContextProvider>
+      </MemoryRouter>
+    </QueryClientProvider>,
   )
 }
 

@@ -53,7 +53,6 @@ const SURFACES: RoleAwareEntryProps = {
   participantSurface: <div data-testid="participant-surface" />,
   staffRoutes: [],
   participantGuard: StubGuard,
-  staffSwitcher: <div data-testid="staff-switcher" />,
 }
 
 type Adapter = (config: InternalAxiosRequestConfig) => Promise<AxiosResponse>

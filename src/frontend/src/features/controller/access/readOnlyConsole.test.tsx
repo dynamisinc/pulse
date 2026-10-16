@@ -550,8 +550,12 @@ describe('a controller sees no change at all', () => {
  * The controller console's controls with the seed above, recorded on `feature/demo-feedback-w3`
  * @ e5b8d76c (before any story 11 gating). If this list changes, the controller's console changed.
  * Since then, deliberately: story 23 (DF-36) adds "Mark fired" on pending / held / failed rows.
+ *
+ * Later addition: the header identity badge is now the exercise-switcher menu button (the dev mock
+ * seam returns 2+ assignments), so it appears first. It is not a story-11 gated control.
  */
 const CONTROLLER_CONTROLS_BEFORE_STORY_11: readonly string[] = [
+  'button|staff-header-identity-badge|Switch exercise — current: Coastal Surge (Mock Exercise), CONTROLLER SIMCELL-1',
   'button|staff-header-preview-toggle|Preview as participant',
   'button|staff-header-sign-out|Sign out',
   'button|engine-kill-switch|ENGINE · LIVE (SUGGEST) — activate to switch to ENGINE · SUGGEST-ONLY',

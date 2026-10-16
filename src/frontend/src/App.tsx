@@ -69,7 +69,7 @@ import { ShellLayout } from './features/participant-shell/ShellLayout'
 import { ParticipantLandingGuard } from '@/features/participant-shell'
 import { SocialChannel } from './features/social'
 import { SocialBrandScope } from './features/social/theme/SocialBrandScope'
-import { ExerciseSwitcherSlot, STAFF_ROUTE_REGISTRY } from '@/features/staff'
+import { STAFF_ROUTE_REGISTRY } from '@/features/staff'
 import { createRoleAwareRoutes } from './features/app-shell'
 
 // The two staff route compositions this file used to define now live with their
@@ -110,11 +110,6 @@ const router = createBrowserRouter(
     // never grows a route per surface again.
     staffRoutes: STAFF_ROUTE_REGISTRY,
     participantGuard: ParticipantLandingGuard,
-    // Visibility-gated: the switcher only appears above the staff console when
-    // the caller has >1 exercise to switch between (see ExerciseSwitcherSlot);
-    // a single-exercise staff member gets a clean console (the header identity
-    // badge already shows their exercise).
-    staffSwitcher: <ExerciseSwitcherSlot />,
   }),
 )
 
