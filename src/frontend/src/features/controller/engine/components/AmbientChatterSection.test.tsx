@@ -218,6 +218,7 @@ describe('Ambient chatter section (live mode)', () => {
     await screen.findByTestId('ambient-chatter-section')
     await user.click(screen.getByTestId('ambient-mode-autonomous'))
     await user.click(screen.getByTestId('ambient-save'))
+    await user.click(screen.getByTestId('ambient-autonomous-confirm-button'))
 
     const error = await screen.findByTestId('ambient-error')
     expect(within(error).getByText(AMBIENT_AUTONOMOUS_NOT_AUTHORIZED_MESSAGE)).toBeInTheDocument()
@@ -228,6 +229,66 @@ describe('Ambient chatter section (live mode)', () => {
     expect(screen.getByTestId('ambient-mode-autonomous')).toHaveAttribute('aria-pressed', 'false')
     // Review stays available.
     expect(screen.getByTestId('ambient-mode-review')).not.toBeDisabled()
+  })
+
+  it('autonomous save requires confirmation; cancel keeps the mode and posts nothing', async () => {
+    const user = userEvent.setup()
+    engineSettingsStore.setForTests(EXERCISE_ID, dto(policy({ mode: 'review' })))
+    renderPanel()
+
+    await screen.findByTestId('ambient-chatter-section')
+    await user.click(screen.getByTestId('ambient-mode-autonomous'))
+    await user.click(screen.getByTestId('ambient-save'))
+
+    const dialog = screen.getByRole('alertdialog')
+    expect(dialog).toHaveTextContent(
+      'Autonomous ambient posts publish without review, within your caps and allow-lists. Turn on?',
+    )
+    expect(postMock).not.toHaveBeenCalled()
+    expect(screen.getByTestId('ambient-autonomous-cancel')).toHaveFocus()
+
+    await user.click(screen.getByTestId('ambient-autonomous-cancel'))
+    expect(screen.queryByRole('alertdialog')).toBeNull()
+    expect(postMock).not.toHaveBeenCalled()
+    expect(screen.getByTestId('ambient-mode-status')).toHaveTextContent('Ambient mode: Review')
+    expect(screen.getByTestId('ambient-mode-review')).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByTestId('ambient-save')).toHaveFocus()
+  })
+
+  it('confirming autonomous saves it; lowering to off saves with no confirmation', async () => {
+    const user = userEvent.setup()
+    engineSettingsStore.setForTests(EXERCISE_ID, dto(policy({ mode: 'review' })))
+    postMock.mockImplementation((_url: string, body: { mode: string }) =>
+      Promise.resolve({ data: dto(policy({ mode: body.mode as AmbientPolicyDto['mode'] })) }),
+    )
+    renderPanel()
+
+    await screen.findByTestId('ambient-chatter-section')
+    await user.click(screen.getByTestId('ambient-mode-autonomous'))
+    await user.click(screen.getByTestId('ambient-save'))
+    await user.click(screen.getByTestId('ambient-autonomous-confirm-button'))
+    await waitFor(() => expect(postMock).toHaveBeenCalledTimes(1))
+    await waitFor(() =>
+      expect(screen.getByTestId('ambient-mode-status')).toHaveTextContent('Ambient mode: Autonomous'),
+    )
+
+    await user.click(screen.getByTestId('ambient-mode-off'))
+    await user.click(screen.getByTestId('ambient-save'))
+    expect(screen.queryByRole('alertdialog')).toBeNull()
+    await waitFor(() => expect(postMock).toHaveBeenCalledTimes(2))
+  })
+
+  it('review saves immediately with no confirmation', async () => {
+    const user = userEvent.setup()
+    engineSettingsStore.setForTests(EXERCISE_ID, dto(policy({ mode: 'off' })))
+    postMock.mockResolvedValue({ data: dto(policy({ mode: 'review' })) })
+    renderPanel()
+
+    await screen.findByTestId('ambient-chatter-section')
+    await user.click(screen.getByTestId('ambient-mode-review'))
+    await user.click(screen.getByTestId('ambient-save'))
+    expect(screen.queryByRole('alertdialog')).toBeNull()
+    await waitFor(() => expect(postMock).toHaveBeenCalledTimes(1))
   })
 
   it('notes that autonomous is not authorized when the server says so', async () => {
@@ -267,6 +328,7 @@ describe('Ambient chatter section (live mode)', () => {
     await screen.findByTestId('ambient-chatter-section')
     await user.click(screen.getByTestId('ambient-mode-autonomous'))
     await user.click(screen.getByTestId('ambient-save'))
+    await user.click(screen.getByTestId('ambient-autonomous-confirm-button'))
     const error = await screen.findByTestId('ambient-error')
     expect(error).toHaveAttribute('role', 'alert')
     expect(error).toHaveTextContent(
@@ -274,14 +336,14 @@ describe('Ambient chatter section (live mode)', () => {
     )
   })
 
-  it('labels personas not in the engine cast as text, with a helper note', async () => {
+  it('labels personas not eligible for ambient as text, with a helper note', async () => {
     engineSettingsStore.setForTests(EXERCISE_ID, dto(policy({ voiceablePersonaIds: ['p-1'] })))
     renderPanel()
 
     await screen.findByTestId('ambient-chatter-section')
-    expect(screen.getByTestId('ambient-persona-p-2-note')).toHaveTextContent('not in engine cast')
+    expect(screen.getByTestId('ambient-persona-p-2-note')).toHaveTextContent('not eligible for ambient')
     expect(screen.queryByTestId('ambient-persona-p-1-note')).toBeNull()
-    expect(screen.getByTestId('ambient-persona-cast-help')).toHaveTextContent(/only personas in the engine cast/i)
+    expect(screen.getByTestId('ambient-persona-cast-help')).toHaveTextContent(/only residents and helpers in the engine cast/i)
   })
 
   it.each([undefined, null])('shows no cast labels when voiceablePersonaIds is %s', async value => {
