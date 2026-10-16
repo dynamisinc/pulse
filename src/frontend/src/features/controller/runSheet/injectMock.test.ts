@@ -966,4 +966,46 @@ describe('mark fired without posting (demo-feedback story 23, DF-36)', () => {
     mock.setPauseTier('freeze')
     expect((await mock.markFired(a.id, a.version)).status).toBe('fired')
   })
+
+  // The server's `InjectBurstPlanner.ParentMarkedFiredMessage`, verbatim.
+  const MARKED_PARENT =
+    'The post this replies to was marked fired, not posted. Edit this item to reply to the real post.'
+
+  it('a single-post reply to a MARKED-fired parent is a 409 that says so, not "Fire the parent first"', async () => {
+    const mock = makeMock([single('Parent')])
+    const [parent] = mock.snapshot().items
+    const parentPostId = parent?.posts[0]?.id
+    if (!parent || !parentPostId) throw new Error('seed missing')
+    const reply = await mock.create({
+      kind: 'post',
+      title: 'Reply',
+      posts: [post('re', { replyTo: { injectPostId: parentPostId } })],
+    })
+    await mock.markFired(parent.id, parent.version)
+
+    const conflict = await conflictOf(mock.fire(reply.id))
+    expect(conflict.detail).toBe(MARKED_PARENT)
+    expect(conflict.item?.status).toBe('pending')
+  })
+
+  it('a burst child replying to a MARKED-fired parent fails with the same message', async () => {
+    const mock = makeMock([single('Parent')])
+    const [parent] = mock.snapshot().items
+    const parentPostId = parent?.posts[0]?.id
+    if (!parent || !parentPostId) throw new Error('seed missing')
+    const replies = await mock.create({
+      kind: 'burst',
+      title: 'Replies',
+      burstWindowSeconds: 60,
+      // The reply is the FIRST child, so it is published at release (no timers needed).
+      posts: [post('re', { replyTo: { injectPostId: parentPostId } }), post('plain')],
+    })
+    await mock.markFired(parent.id, parent.version)
+
+    await mock.fire(replies.id)
+    const child = item(mock, replies.id).posts[0]
+    expect(child?.status).toBe('failed')
+    expect(child?.error).toBe(MARKED_PARENT)
+    mock.dispose()
+  })
 })

@@ -100,15 +100,21 @@ export const STATUS_LABEL: Readonly<Record<InjectStatus, string>> = {
   failed: 'Failed',
 }
 
-/** The chip's text: "Firing 3/8" for a burst in flight, else the plain label. */
-export function statusText(item: Pick<InjectItemDto, 'status' | 'firedCount' | 'total'>): string {
-  return item.status === 'firing'
-    ? `${STATUS_LABEL.firing} ${item.firedCount}/${item.total}`
-    : STATUS_LABEL[item.status]
-}
-
-/** DF-36: the chip's word for an item marked fired without posting. */
+/** DF-36: the status word for an item marked fired without posting. */
 export const MARKED_FIRED_LABEL = 'Marked fired'
+
+/**
+ * The status words, shared by the chip AND the live-region announcements: "Firing 3/8" for a
+ * burst in flight, "Marked fired" for an item marked fired without posting (DF-36), else the
+ * plain label. One formatter, so the chip and a screen reader never disagree.
+ */
+export function statusText(
+  item: Pick<InjectItemDto, 'status' | 'firedCount' | 'total' | 'posts'>,
+): string {
+  if (item.status === 'firing') return `${STATUS_LABEL.firing} ${item.firedCount}/${item.total}`
+  if (isMarkedFired(item)) return MARKED_FIRED_LABEL
+  return STATUS_LABEL[item.status]
+}
 
 /**
  * DF-36: an item that was MARKED fired (delivered outside Pulse) rather than posted. Derived, not
