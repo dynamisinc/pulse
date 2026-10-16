@@ -115,8 +115,10 @@ selection on `<EngineControlBar>` across a Pause-engine/Resume cycle — Pause e
 before pausing loses that nuance on Resume (a documented, accepted gap, mirroring
 `useEngineControl.ts`'s own "KNOWN GAP" comment style); multi-controller conflict resolution for
 simultaneous tier changes (last-write-wins is acceptable; no locking/CRDT); surviving an App
-Service restart (in-memory state only, the same accepted limitation `ExerciseClockService` already
-has).
+Service restart (in-memory state only at the time; **superseded by
+[demo-feedback/18](../demo-feedback/18-persist-pause-tier-and-clock.md)**: the tier, the clock anchor and
+the holding page are written through to `ExerciseRuntimeStates` and restored at startup, so a restart no
+longer clears them; the controller's `POST /api/steering/runtime-state/reset` does).
 
 ## Technical Notes
 Staff world (COBRA). **Backend** (new files, under

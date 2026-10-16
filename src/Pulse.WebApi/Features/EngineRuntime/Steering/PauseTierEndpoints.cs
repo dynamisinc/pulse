@@ -13,6 +13,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.EngineRuntime.Clock;
+using Pulse.WebApi.Features.EngineRuntime.Persistence;
 using Pulse.WebApi.Features.ExerciseConfiguration.Lifecycle;
 
 /// <summary>
@@ -55,10 +56,12 @@ using Pulse.WebApi.Features.ExerciseConfiguration.Lifecycle;
 public static class PauseTierEndpoints
 {
     /// <summary>
-    /// Registers the pause-tier services: the per-exercise <see cref="PauseTierRegistry"/> (Singleton — it is
-    /// in-memory runtime state, like <see cref="ExerciseClockService"/>) and the
-    /// <see cref="IPauseOverlayPublisher"/> seam's no-op default via <c>TryAddSingleton</c>, so story 08 can
-    /// replace it (<c>RemoveAll</c> + <c>AddSingleton</c>) in either wiring order without a conflict.
+    /// Registers the pause-tier services: the per-exercise <see cref="PauseTierRegistry"/> (Singleton — its hot
+    /// state is in memory, like <see cref="ExerciseClockService"/>), the <see cref="IPauseOverlayPublisher"/> seam's
+    /// no-op default via <c>TryAddSingleton</c>, so story 08 can replace it (<c>RemoveAll</c> + <c>AddSingleton</c>)
+    /// in either wiring order without a conflict, and likewise the no-op
+    /// <see cref="IExerciseRuntimeStatePersister"/> default that demo-feedback story 18's
+    /// <c>AddExerciseRuntimePersistence()</c> replaces with the real write-through.
     /// Prerequisites the orchestrator wires first: <c>AddExerciseScoping()</c> (COR-001 scope),
     /// <c>AddExerciseClock()</c> (<see cref="IExerciseClock"/>), and B2's <c>AddStaffIdentity()</c> (the gate).
     /// </summary>
@@ -70,6 +73,7 @@ public static class PauseTierEndpoints
 
         services.TryAddSingleton<PauseTierRegistry>();
         services.TryAddSingleton<IPauseOverlayPublisher, NullPauseOverlayPublisher>();
+        services.TryAddSingleton<IExerciseRuntimeStatePersister, NullExerciseRuntimeStatePersister>();
 
         return services;
     }
@@ -199,8 +203,10 @@ public static class PauseTierEndpoints
 
         return result.Outcome switch
         {
+            // persisted:false only when the APPLIED change's write-through failed (DF-24; logged at Error, the tier
+            // stands). Unchanged writes nothing and reports true.
             PauseTierOutcome.Applied or PauseTierOutcome.Unchanged =>
-                Results.Ok(PauseTierStateDto.From(registry, scope.Value)),
+                Results.Ok(PauseTierStateDto.From(registry, scope.Value, result.Persisted)),
 
             // Every REFUSAL — whichever layer produced it — is a 409 carrying the same {outcome, reason} body, so
             // the console's guarded revert fires and it has exactly one 409 parser. Never a 200 claiming a pause
@@ -514,8 +520,8 @@ public sealed class PauseTierStateDto
 
     /// <summary>
     /// Whether the change was written through to the exercise's runtime-state row (demo-feedback DF-24). <c>false</c>
-    /// only when the write-through failed (logged at Error; the console shows a warning chip). Defaults to <c>true</c>
-    /// until story 18 wires the write-through.
+    /// only when the write-through failed (logged at Error; the console shows a warning chip). A read (the resync
+    /// <c>GET</c>) and an unchanged set write nothing and report <c>true</c>.
     /// </summary>
     [JsonPropertyName("persisted")]
     public bool Persisted { get; init; } = true;
@@ -523,8 +529,9 @@ public sealed class PauseTierStateDto
     /// <summary>Projects the registry's state for <paramref name="exerciseId"/> onto the wire shape.</summary>
     /// <param name="registry">The pause-tier registry.</param>
     /// <param name="exerciseId">The server-resolved exercise (COR-001).</param>
+    /// <param name="persisted">Whether the change behind this response was written through (DF-24).</param>
     /// <returns>The staff-only state projection.</returns>
-    public static PauseTierStateDto From(PauseTierRegistry registry, Guid exerciseId)
+    public static PauseTierStateDto From(PauseTierRegistry registry, Guid exerciseId, bool persisted = true)
     {
         ArgumentNullException.ThrowIfNull(registry);
 
@@ -532,6 +539,7 @@ public sealed class PauseTierStateDto
         {
             Tier = PauseTierWire.ToWire(registry.GetTier(exerciseId)),
             ClockFrozen = registry.IsClockFrozen(exerciseId),
+            Persisted = persisted,
         };
     }
 }
