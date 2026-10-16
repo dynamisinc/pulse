@@ -190,20 +190,42 @@ describe('OverlayLayer — pause leaves the alert bar visible; EndEx covers it (
       .toMatchObject({ overlayActive: true, pauseActive: false })
   })
 
-  it('announces an alert that changes while paused, but not the one present at open', () => {
-    act(() => alertPauseBridge.setAlertSummary('ADVISORY: Road closed.'))
+  it('announces mid-pause changes in fixed-politeness regions, not the alert present at open', () => {
+    act(() => alertPauseBridge.setAlert('ADVISORY: Road closed.', 'advisory'))
     mockUseOverlayState.mockReturnValue(overlayState({ state: 'pause', register: 'in-fiction' }))
     render(<OverlayLayer />)
-    const live = screen.getByTestId('pulse-overlay-pause-alert-live')
-    expect(live).toBeEmptyDOMElement()
-    expect(live).toHaveAttribute('aria-live', 'polite')
-    act(() => alertPauseBridge.setAlertSummary('EMERGENCY: Evacuate now.'))
-    expect(live).toHaveTextContent('Alert changed. EMERGENCY: Evacuate now.')
-    expect(live).toHaveAttribute('aria-live', 'assertive')
+    const polite = screen.getByTestId('pulse-overlay-pause-alert-live')
+    const assertive = screen.getByTestId('pulse-overlay-pause-alert-live-assertive')
+    expect(polite).toHaveAttribute('role', 'status')
+    expect(polite).toHaveAttribute('aria-live', 'polite')
+    expect(assertive).toHaveAttribute('aria-live', 'assertive')
+    expect(assertive).not.toHaveAttribute('role')
+    expect(polite).toBeEmptyDOMElement()
+    expect(assertive).toBeEmptyDOMElement()
+
+    act(() => alertPauseBridge.setAlert('ADVISORY: Shelters open.', 'advisory'))
+    expect(polite).toHaveTextContent('Alert changed. ADVISORY: Shelters open.')
+    expect(assertive).toBeEmptyDOMElement()
+
+    // advisory -> emergency lands in the assertive region; roles never flip.
+    act(() => alertPauseBridge.setAlert('EMERGENCY: Evacuate now.', 'emergency'))
+    expect(assertive).toHaveTextContent('Alert changed. EMERGENCY: Evacuate now.')
+    expect(polite).toBeEmptyDOMElement()
+    expect(polite).toHaveAttribute('aria-live', 'polite')
+    expect(assertive).toHaveAttribute('aria-live', 'assertive')
+  })
+
+  it('announces "Alert cleared." politely when the alert clears mid-pause', () => {
+    act(() => alertPauseBridge.setAlert('EMERGENCY: Evacuate now.', 'emergency'))
+    mockUseOverlayState.mockReturnValue(overlayState({ state: 'pause', register: 'in-fiction' }))
+    render(<OverlayLayer />)
+    act(() => alertPauseBridge.setAlert('', null))
+    expect(screen.getByTestId('pulse-overlay-pause-alert-live')).toHaveTextContent('Alert cleared.')
+    expect(screen.getByTestId('pulse-overlay-pause-alert-live-assertive')).toBeEmptyDOMElement()
   })
 
   it('mirrors the active alert into the pause dialog description (and not into EndEx)', () => {
-    act(() => alertPauseBridge.setAlertSummary('EMERGENCY: Evacuate now.'))
+    act(() => alertPauseBridge.setAlert('EMERGENCY: Evacuate now.', 'emergency'))
     mockUseOverlayState.mockReturnValue(overlayState({ state: 'pause', register: 'out-of-fiction' }))
     const { rerender } = render(<OverlayLayer />)
     const dialog = screen.getByTestId('pulse-overlay-pause-out-of-fiction')

@@ -416,10 +416,11 @@ export function AlertBar() {
   const activeSummary = activeAlert
     ? `${SEVERITY_META[activeAlert.severity].label}: ${activeAlert.message}`
     : ''
+  const activeSeverity = activeAlert?.severity ?? null
   useEffect(() => {
-    alertPauseBridge.setAlertSummary(activeSummary)
-    return () => alertPauseBridge.setAlertSummary('')
-  }, [activeSummary])
+    alertPauseBridge.setAlert(activeSummary, activeSeverity)
+    return () => alertPauseBridge.setAlert('', null)
+  }, [activeSummary, activeSeverity])
   const liveAnnounceLevel = activeAlert?.severity === 'emergency' ? 'assertive' : 'polite'
   const otherAlerts =
     activeAlert && treatment === 'emergencyBand'

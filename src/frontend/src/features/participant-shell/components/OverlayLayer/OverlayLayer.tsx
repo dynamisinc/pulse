@@ -317,18 +317,28 @@ function ExerciseWatermarkSlot() {
  */
 function usePausedAlertMirror(variant: 'pause' | 'endex') {
   const id = useId()
-  const { alertSummary } = useAlertPauseBridge()
-  // Changes AFTER the dialog opened are announced through a live region; the
-  // value present at open is covered by aria-describedby (no double speech).
+  const { alertSummary, alertSeverity } = useAlertPauseBridge()
+  // Changes AFTER the dialog opened are announced through two always-mounted
+  // regions with FIXED politeness (never flip role/aria-live on a mounted
+  // region); the value present at open is covered by aria-describedby.
   const seen = useRef(alertSummary)
-  const [changed, setChanged] = useState('')
+  const [polite, setPolite] = useState('')
+  const [assertive, setAssertive] = useState('')
   useEffect(() => {
     if (alertSummary === seen.current) return
     seen.current = alertSummary
-    setChanged(alertSummary === '' ? '' : `Alert changed. ${alertSummary}`)
-  }, [alertSummary])
+    if (alertSummary === '') {
+      setAssertive('')
+      setPolite('Alert cleared.')
+    } else if (alertSeverity === 'emergency') {
+      setPolite('')
+      setAssertive(`Alert changed. ${alertSummary}`)
+    } else {
+      setAssertive('')
+      setPolite(`Alert changed. ${alertSummary}`)
+    }
+  }, [alertSummary, alertSeverity])
   if (variant !== 'pause') return { describedBy: undefined, mirror: null }
-  const urgent = alertSummary.startsWith('EMERGENCY')
   return {
     describedBy: alertSummary === '' ? undefined : id,
     mirror: (
@@ -339,13 +349,21 @@ function usePausedAlertMirror(variant: 'pause' | 'endex') {
           </p>
         )}
         <div
-          role={urgent ? 'alert' : 'status'}
-          aria-live={urgent ? 'assertive' : 'polite'}
+          role="status"
+          aria-live="polite"
           aria-atomic="true"
           data-testid="pulse-overlay-pause-alert-live"
           style={visuallyHiddenStyle}
         >
-          {changed}
+          {polite}
+        </div>
+        <div
+          aria-live="assertive"
+          aria-atomic="true"
+          data-testid="pulse-overlay-pause-alert-live-assertive"
+          style={visuallyHiddenStyle}
+        >
+          {assertive}
         </div>
       </>
     ),

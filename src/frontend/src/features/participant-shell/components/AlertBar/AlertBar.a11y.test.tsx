@@ -160,9 +160,10 @@ describe('AlertBar: held (inert, not rotating) while a pause overlay is up', () 
   it('publishes severity label + message for the pause dialog, clearing on unmount', () => {
     mockUseAlerts.mockReturnValue([makeAlert({ id: 'e', severity: 'emergency', message: 'Evacuate now.' })])
     const { unmount } = render(<AlertBar />)
-    expect(alertPauseBridge.getSnapshot().alertSummary).toBe('EMERGENCY: Evacuate now.')
+    expect(alertPauseBridge.getSnapshot())
+      .toMatchObject({ alertSummary: 'EMERGENCY: Evacuate now.', alertSeverity: 'emergency' })
     unmount()
-    expect(alertPauseBridge.getSnapshot().alertSummary).toBe('')
+    expect(alertPauseBridge.getSnapshot()).toMatchObject({ alertSummary: '', alertSeverity: null })
   })
 
   it('holds ticker rotation while paused and resumes afterwards', () => {

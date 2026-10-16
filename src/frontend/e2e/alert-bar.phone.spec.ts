@@ -311,22 +311,37 @@ test.describe('alert bar: emergency + pause overlay interplay (Tom, 10/16)', () 
     })
     const band = await boxOf(page.getByTestId('pulse-alert-bar'))
     const before = await page.evaluate(() => document.body.innerText)
-    for (const frac of [0.05, 0.5, 0.95]) {
-      const x = band.x + band.width * (0.1 + frac * 0.8)
-      const y = band.y + band.height * frac
-      expect(await topmostLayerAt(page, x, y), `band point ${frac}`).toBe('shield')
-      await page.touchscreen.tap(x, y)
+    const points = [0.05, 0.5, 0.95].map(frac => ({
+      x: band.x + band.width * (0.1 + frac * 0.8),
+      y: band.y + band.height * frac,
+    }))
+    // Non-vacuous: without the shield the band points fall through to the feed.
+    const setShield = (show: boolean) => page.evaluate(display => {
+      const el = document.querySelector<HTMLElement>(
+        '[data-testid="pulse-overlay-pause-alert-shield"]')
+      if (el) el.style.display = display
+    }, show ? '' : 'none')
+    await setShield(false)
+    const bare = await Promise.all(points.map(pt => topmostLayerAt(page, pt.x, pt.y)))
+    expect(bare, 'without the shield some band point must hit the feed').toContain('content')
+    await setShield(true)
+    for (const pt of points) {
+      expect(await topmostLayerAt(page, pt.x, pt.y), 'band point').toBe('shield')
+      await page.touchscreen.tap(pt.x, pt.y)
     }
     await expect(page).toHaveURL(/\/home$/)
     expect(await page.evaluate(() => document.body.innerText)).toBe(before)
   })
 
-  test('an alert change during pause is announced in the dialog live region', async ({ page }) => {
+  test('the pause dialog has empty polite and assertive alert-change regions at open', async ({ page }) => {
     await seedOverlay(page, { state: 'pause', register: 'in-fiction', message: '' })
     await openFeedWith(page, [EMERGENCY])
     const live = page.getByTestId('pulse-overlay-pause-alert-live')
+    const assertive = page.getByTestId('pulse-overlay-pause-alert-live-assertive')
     await expect(live).toBeEmpty()
-    await expect(live).toHaveAttribute('aria-live', 'assertive')
+    await expect(live).toHaveAttribute('aria-live', 'polite')
+    await expect(assertive).toBeEmpty()
+    await expect(assertive).toHaveAttribute('aria-live', 'assertive')
   })
 
   test('pause holds the ticker rotation', async ({ page }) => {

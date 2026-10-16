@@ -20,6 +20,7 @@
  * dialog; only pause leaves the bar visible.
  */
 import { useSyncExternalStore } from 'react'
+import type { AlertSeverity } from './components/AlertBar/alertTypes'
 
 export type OverlayKind = 'none' | 'pause' | 'cover'
 
@@ -28,31 +29,48 @@ interface BridgeState {
   readonly pauseActive: boolean
   readonly overlayActive: boolean
   readonly alertSummary: string
+  readonly alertSeverity: AlertSeverity | null
 }
 
-function make(overlay: OverlayKind, alertSummary: string): BridgeState {
-  return { overlay, pauseActive: overlay === 'pause', overlayActive: overlay !== 'none', alertSummary }
+function make(
+  overlay: OverlayKind,
+  alertSummary: string,
+  alertSeverity: AlertSeverity | null,
+): BridgeState {
+  return {
+    overlay,
+    pauseActive: overlay === 'pause',
+    overlayActive: overlay !== 'none',
+    alertSummary,
+    alertSeverity,
+  }
 }
 
-let state: BridgeState = make('none', '')
+let state: BridgeState = make('none', '', null)
 const listeners = new Set<() => void>()
 
-function update(overlay: OverlayKind, alertSummary: string): void {
-  if (overlay === state.overlay && alertSummary === state.alertSummary) return
-  state = make(overlay, alertSummary)
+function update(
+  overlay: OverlayKind,
+  alertSummary: string,
+  alertSeverity: AlertSeverity | null,
+): void {
+  if (overlay === state.overlay && alertSummary === state.alertSummary
+    && alertSeverity === state.alertSeverity) return
+  state = make(overlay, alertSummary, alertSeverity)
   listeners.forEach(listener => listener())
 }
 
 export const alertPauseBridge = {
-  setOverlay: (overlay: OverlayKind) => update(overlay, state.alertSummary),
-  setPauseActive: (active: boolean) => update(active ? 'pause' : 'none', state.alertSummary),
-  setAlertSummary: (alertSummary: string) => update(state.overlay, alertSummary),
+  setOverlay: (overlay: OverlayKind) => update(overlay, state.alertSummary, state.alertSeverity),
+  setPauseActive: (active: boolean) => update(active ? 'pause' : 'none', state.alertSummary, state.alertSeverity),
+  setAlert: (alertSummary: string, alertSeverity: AlertSeverity | null) =>
+    update(state.overlay, alertSummary, alertSeverity),
   subscribe(listener: () => void): () => void {
     listeners.add(listener)
     return () => { listeners.delete(listener) }
   },
   getSnapshot: (): BridgeState => state,
-  reset: () => update('none', ''),
+  reset: () => update('none', '', null),
 }
 
 export function useAlertPauseBridge(): BridgeState {
