@@ -42,3 +42,14 @@ The spec; run locally and attach numbers. Mark `@perf` so it can be excluded fro
   the list is not windowed: after loading 231 rows the page holds about 9,900 DOM nodes, so the "DOM bounded" part is not met.
 - Hot path: each arrival re-renders every feed row (jsxDEV, `formatAbsolute`, `compareNewestFirst` in `feedService.ts`).
   Memoizing `FeedRow` / not re-assembling the view on every store change is the likely fix (story 02's files).
+
+## Follow-up note (perf fix)
+- Root cause was not the arrival itself: `FeedRow` was already memoized and a buffered arrival re-renders no row. The
+  cost was every `PostHeader` owning a 30 s `useScenarioTime` interval and re-rendering (with a fresh
+  `Intl.DateTimeFormat` for the absolute title) on each tick. Fixed with a shared ticker, `useRelativeScenarioTime`
+  (`core/clock/scenarioTime.ts`), that re-renders a row only when its relative text changes; the absolute title is
+  memoized and `Intl.DateTimeFormat` is cached; the rendered list is a memoized `FeedList`. Pinned by
+  `Feed.renderCount.test.tsx` and `useRelativeScenarioTime.test.tsx`. Remaining arrival cost is the explore store
+  consumers (`TrendingPanel`, `SearchBox`), a possible follow-up.
+- Still open: the DOM grows unbounded after loading a burst (231 rows, about 9.9k nodes). List windowing is a
+  follow-up, to be linked to #524.

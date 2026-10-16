@@ -14,7 +14,8 @@
  * simply no mark and no substitute label.
  *
  * SCENARIO TIME (COR-053): the relative "2h ago" string and the absolute tooltip
- * (`title`) both render via `useScenarioTime()` from `@/core/clock`, bound to
+ * (`title`) render via `useRelativeScenarioTime()` / `formatScenarioTime()` from `@/core/clock`,
+ * bound to
  * `useExerciseContext().timeZone`. Never wall-clock. The `<time dateTime>` is the
  * scenario instant itself.
  *
@@ -49,10 +50,10 @@
  * `data-persona-id` on the overlay.
  */
 
-import { useState, type MouseEvent } from 'react'
+import { useMemo, useState, type MouseEvent } from 'react'
 import type { Persona } from '@/features/personas'
 import { useExerciseContext } from '@/core/exerciseContext'
-import { useScenarioTime } from '@/core/clock'
+import { formatScenarioTime, useRelativeScenarioTime } from '@/core/clock'
 import { VerifiedMark } from '../VerifiedMark'
 import { EditHistoryDialog } from '../../edit/EditHistoryDialog'
 import { useEditedPost } from '../../edit/editedPostsStore'
@@ -71,15 +72,19 @@ export interface PostHeaderProps {
 
 export function PostHeader({ author, scenarioTime, postId, onOpenProfile }: PostHeaderProps) {
   const { timeZone } = useExerciseContext()
-  const { format } = useScenarioTime(timeZone)
 
   const { postId: resolvedId, anchorRef } = useEnclosingPostId(postId)
   const { edited } = useEditedPost(resolvedId)
   // The "Edited" button that opened the history (focus returns to it); `null` = closed.
   const [historyOpener, setHistoryOpener] = useState<HTMLElement | null>(null)
 
-  const relativeTime = format(scenarioTime, { format: 'relative' })
-  const absoluteTime = format(scenarioTime, { format: 'absolute' })
+  // Relative text rides the shared ticker and re-renders this header only when the text
+  // changes; the absolute title depends only on the instant + zone (burst legibility).
+  const relativeTime = useRelativeScenarioTime(scenarioTime, timeZone)
+  const absoluteTime = useMemo(
+    () => formatScenarioTime(scenarioTime, timeZone, { format: 'absolute' }),
+    [scenarioTime, timeZone],
+  )
 
   /**
    * The author overlay's activation (SOC-050). It is a real `<button>` that is

@@ -49,7 +49,7 @@
  * later, outside this story.
  */
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState, useSyncExternalStore } from 'react'
 import { getExerciseClock } from './exerciseClock'
 
 /**
@@ -201,6 +201,73 @@ export function useScenarioTime(
 }
 
 // -----------------------------------------------------------------------------
+// Shared relative-time ticker (burst legibility, NFR-002 / SOC-071)
+// -----------------------------------------------------------------------------
+//
+// `useScenarioTime` gives every caller its OWN 30 s interval and re-renders the
+// caller on every tick. For a feed of hundreds of rows that is hundreds of timers
+// and hundreds of component re-renders per tick, a long task on a phone. The ticker
+// below is ONE interval (plus one clock subscription) shared by every
+// `useRelativeScenarioTime` caller, holding the same kind of `now` snapshot
+// `useScenarioTime` holds. Each caller subscribes with a snapshot that is the
+// formatted STRING, so React re-renders a row only when its text actually changes
+// ("2m ago" -> "3m ago"), not on every tick.
+
+let sharedNow: Date | undefined
+const sharedListeners = new Set<() => void>()
+let sharedStop: (() => void) | undefined
+
+function sharedTick(): void {
+  const next = scenarioNow()
+  if (sharedNow !== undefined && sharedNow.getTime() === next.getTime()) return
+  sharedNow = next
+  for (const listener of Array.from(sharedListeners)) listener()
+}
+
+function sharedSubscribe(listener: () => void): () => void {
+  sharedListeners.add(listener)
+  if (sharedListeners.size === 1) {
+    const id = setInterval(sharedTick, DEFAULT_REFRESH_MS)
+    const unsubscribeClock = getExerciseClock().subscribe?.(sharedTick)
+    sharedStop = () => {
+      clearInterval(id)
+      unsubscribeClock?.()
+    }
+    sharedTick()
+  }
+  return () => {
+    sharedListeners.delete(listener)
+    if (sharedListeners.size === 0) {
+      sharedStop?.()
+      sharedStop = undefined
+    }
+  }
+}
+
+function sharedSnapshot(): Date {
+  // With nobody subscribed the cached snapshot can be arbitrarily stale (or from a
+  // previous clock), so read the clock; while subscribed the tick owns it.
+  if (sharedListeners.size === 0 || sharedNow === undefined) sharedNow = scenarioNow()
+  return sharedNow
+}
+
+/**
+ * The `'relative'` rendering of `instant` ("2m ago"), kept current on the shared
+ * ticker above. Same text as `useScenarioTime(timeZone).format(instant, { format:
+ * 'relative' })`, but the component re-renders ONLY when that text changes.
+ */
+export function useRelativeScenarioTime(
+  instant: Date | string | number,
+  timeZone: string = DEFAULT_SCENARIO_TIME_ZONE,
+): string {
+  const getSnapshot = useCallback(
+    () => formatScenarioTime(instant, timeZone, { format: 'relative', now: sharedSnapshot() }),
+    [instant, timeZone],
+  )
+  return useSyncExternalStore(sharedSubscribe, getSnapshot, getSnapshot)
+}
+
+// -----------------------------------------------------------------------------
 // Internals
 // -----------------------------------------------------------------------------
 
@@ -208,12 +275,21 @@ function toDate(instant: Date | string | number): Date {
   return instant instanceof Date ? instant : new Date(instant)
 }
 
+/** `Intl.DateTimeFormat` construction is expensive; one per locale + zone is enough. */
+const absoluteFormatters = new Map<string, Intl.DateTimeFormat>()
+
 function formatAbsolute(date: Date, timeZone: string, locale: string): string {
-  return new Intl.DateTimeFormat(locale, {
-    timeZone,
-    dateStyle: 'medium',
-    timeStyle: 'short',
-  }).format(date)
+  const key = `${locale}|${timeZone}`
+  let formatter = absoluteFormatters.get(key)
+  if (formatter === undefined) {
+    formatter = new Intl.DateTimeFormat(locale, {
+      timeZone,
+      dateStyle: 'medium',
+      timeStyle: 'short',
+    })
+    absoluteFormatters.set(key, formatter)
+  }
+  return formatter.format(date)
 }
 
 function formatDateline(date: Date, timeZone: string, locale: string): string {
