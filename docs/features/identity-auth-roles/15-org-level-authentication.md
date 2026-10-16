@@ -1,6 +1,6 @@
 # Story: Org-level authentication for OrgAdmin (a session with no exercise scope)
 
-**Feature:** Identity, auth & roles  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Not Started
+**Feature:** Identity, auth & roles  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** In Progress
 **Requirements:** COR-077 (new — see below)  ·  **Design decisions:** none  ·  **Issue:** —
 **Stack:** backend  ·  **Review:** Tier-2 (the authentication path + the session model — this story asks the
 schema to represent a session with an organization scope but **no** exercise scope, which nothing in

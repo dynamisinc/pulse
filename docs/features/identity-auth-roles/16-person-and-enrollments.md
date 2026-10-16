@@ -1,6 +1,6 @@
 # Story: Person, StaffUser facet and Enrollments (replaces StaffAssignment)
 
-**Feature:** Identity, auth & roles  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Not Started
+**Feature:** Identity, auth & roles  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** In Progress
 **Requirements:** COR-010, COR-011, COR-012, COR-014, COR-077  ·  **Design decisions:** ADMIN-IDENTITY-MODEL §1.1, §1.2, §8.1  ·  **Issue:** #572
 **Stack:** backend (+ frozen-type changes on the frontend)  ·  **Review tier:** Tier-2 (schema, isolation)  ·  **Wave:** A1
 
