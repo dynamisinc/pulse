@@ -864,21 +864,28 @@ public sealed partial class EngineReviewService
         }
 
         // Hold-on-cut, re-checked at the last boundary before the publish (M-1 / PR #571): the tick reads the cut once
-        // up front, but a cut to Fake can complete while the queue query or this item's lookup is awaited, or while a
-        // swamped tick awaits an earlier burst's publish. Re-reading it here holds the expiry exactly as a cut seen up
-        // front would. Explicit approvals never pass through here, so they keep publishing during a cut.
-        if (_providerCut.IsCutToFake(exerciseId))
-        {
-            await ResolveOnTickAsync(item, exerciseId, DraftDisposition.Held, EngineReviewAction.HoldOnExpiry, mutate: null, cancellationToken);
-            return;
-        }
-
+        // up front, but a cut to Fake can complete while the queue query, this item's lookup or the burst's persona
+        // lookup is awaited, or while a swamped tick awaits an earlier burst's publish. So the burst is prepared
+        // FIRST and the cut is re-read as the last statement before the publisher is invoked, with no await in
+        // between; a cut found there holds the expiry exactly as a cut seen up front would. Explicit approvals never
+        // pass through here, so they keep publishing during a cut.
+        //
+        // Residual semantics: a cut prevents every automatic publish whose publisher call BEGINS after the cut
+        // completes. A burst already handed to the publisher cannot be recalled by a cut — the kill switch is the
+        // stop for that.
+        //
         // Once the publish has been attempted, its record is written with CancellationToken.None: posts may be live,
-        // so a host shutdown at this point must not leave the item counting down to be sent again on restart.
-        EngineBurstPublishResult publishResult;
+        // so a host shutdown at this point must not leave the item counting down to be sent again on restart. A cut
+        // found before the publisher call means NOTHING was attempted, so that hold is recorded after the try with
+        // the tick's own token (and, being outside it, can never be recorded twice by the fault handlers below).
+        EngineBurstPublishResult? publishResult = null;
         try
         {
-            publishResult = await PublishBurstAsync(item, exerciseId, input: null, leadTextOverride: null, cancellationToken);
+            var burst = await PrepareBurstAsync(item, exerciseId, input: null, leadTextOverride: null, cancellationToken);
+            if (!_providerCut.IsCutToFake(exerciseId))
+            {
+                publishResult = await _publisher.PublishBurstAsync(burst, cancellationToken);
+            }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -917,6 +924,13 @@ public sealed partial class EngineReviewService
             return;
         }
 #pragma warning restore CA1031
+
+        if (publishResult is null)
+        {
+            // Cut to Fake before the publisher was invoked: nothing was published. Hold it like any cut expiry.
+            await ResolveOnTickAsync(item, exerciseId, DraftDisposition.Held, EngineReviewAction.HoldOnExpiry, mutate: null, cancellationToken);
+            return;
+        }
 
         if (IsPublishFullySuccessful(publishResult))
         {
@@ -1227,7 +1241,8 @@ public sealed partial class EngineReviewService
             return EngineReviewActionResult.AlreadyResolved();
         }
 
-        var publishResult = await PublishBurstAsync(item, exerciseId, input, leadTextOverride, cancellationToken);
+        var burst = await PrepareBurstAsync(item, exerciseId, input, leadTextOverride, cancellationToken);
+        var publishResult = await _publisher.PublishBurstAsync(burst, cancellationToken);
 
         // WR-002 / SG-001: record the burst as Published ONLY when every post genuinely reached the feed. A post
         // that comes back Invalid (which also covers an unresolved persona handle — SG-001) or ScopeUnresolved
@@ -1290,8 +1305,8 @@ public sealed partial class EngineReviewService
     private static bool IsPublishFullySuccessful(EngineBurstPublishResult result) =>
         result.Posts.Count > 0 && result.Posts.All(p => p.Outcome == EnginePublishOutcome.Published);
 
-    /// <summary>Publishes the burst through story 01's single funnel (one decision per burst, SOC-003), resolving persona handles + server scenario time, and returns the per-post outcome so the caller can gate on genuine success (WR-002).</summary>
-    private async Task<EngineBurstPublishResult> PublishBurstAsync(
+    /// <summary>Prepares the burst for story 01's single publish funnel (one decision per burst, SOC-003), resolving persona handles + server scenario time. The caller hands it to <see cref="IEnginePublishService.PublishBurstAsync"/> and gates on the per-post outcome (WR-002); preparing it separately lets the automatic path re-check the provider cut immediately before that call.</summary>
+    private async Task<EngineBurst> PrepareBurstAsync(
         EngineReviewItemEntity item,
         Guid exerciseId,
         EngineReviewActionInput? input,
@@ -1316,7 +1331,7 @@ public sealed partial class EngineReviewService
             })
             .ToList();
 
-        var burst = new EngineBurst
+        return new EngineBurst
         {
             ExerciseId = exerciseId,
             StorylineId = item.StorylineId,
@@ -1324,8 +1339,6 @@ public sealed partial class EngineReviewService
             TimeZone = timeZone,
             Posts = posts,
         };
-
-        return await _publisher.PublishBurstAsync(burst, cancellationToken);
     }
 
     /// <summary>Resolves the burst's persona handles to their scoped persona-instance ids (keyed by the '@'-stripped handle).</summary>

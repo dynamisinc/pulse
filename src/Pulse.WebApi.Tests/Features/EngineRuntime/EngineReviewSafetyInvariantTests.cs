@@ -275,6 +275,34 @@ public sealed class EngineReviewSafetyInvariantTests
     }
 
     [Fact]
+    public async Task AutoHold_CutCompletesDuringPersonaLookup_ExpiredItemHolds_NotPublished()
+    {
+        var exerciseId = Guid.NewGuid();
+        var item = Countdown(exerciseId, started: 0, minutes: 3);
+        using var harness = Build(exerciseId, item);
+
+        var state = harness.Registry.GetOrCreate(exerciseId);
+        state.SetStorylineOverride(item.StorylineId, AutonomyLevel.DelayedAuto, "lead-1", 0);
+        state.SetSwampedMode(enabled: true, "lead-1", 0);
+        harness.Advance(minutes: 4);
+
+        // The item has been re-read as still expired and undecided; the cut completes while the burst's persona
+        // handles are being resolved: after every earlier re-check, before the publisher is invoked (PR #571).
+        harness.Db.OnPersonaLookup = () => harness.ProviderCut.Cut(exerciseId);
+
+        await harness.Service.EvaluateAutoHoldAsync();
+
+        harness.Db.PersonaLookups.Should().BePositive("the cut must land during the persona lookup for this to prove anything");
+        harness.Publisher.Bursts.Should().BeEmpty(
+            "the cut is re-read as the last statement before the publisher call, so a cut completing mid-lookup holds the expiry");
+        item.Disposition.Should().Be(DraftDisposition.Held);
+        var reviewed = await harness.ReviewedEventsAsync(item.DraftId);
+        Action(reviewed.Should().ContainSingle("exactly one engine.reviewed per resolution").Subject).Should().Be("hold-on-expiry");
+        reviewed[0].Actor.ActingHumanId.Should().BeNull("a hold-on-cut is silence, not a human decision");
+        item.ActionLabel.Should().Be("reply → @mvega_fh", "nothing was attempted, so no 'check the feed' publish reason is recorded");
+    }
+
+    [Fact]
     public async Task Approve_WhileCutToFake_StillPublishes()
     {
         var exerciseId = Guid.NewGuid();
@@ -571,7 +599,6 @@ public sealed class EngineReviewSafetyInvariantTests
     /// </summary>
     private sealed class Harness : IDisposable
     {
-        private readonly PulseDbContext _db;
         private readonly ManualTimeProvider _time;
 
         public Harness(Guid exerciseId, EngineReviewItemEntity[] items, GenerationProviderCutRegistry? providerCut = null)
@@ -581,7 +608,7 @@ public sealed class EngineReviewSafetyInvariantTests
             var options = new DbContextOptionsBuilder<PulseDbContext>()
                 .UseInMemoryDatabase(Guid.NewGuid().ToString())
                 .Options;
-            _db = new PulseDbContext(options, context);
+            Db = new HookedPulseDbContext(options, context);
 
             _time = new ManualTimeProvider(ScenarioStart);
             var clock = new ExerciseClockService(_time);
@@ -595,7 +622,7 @@ public sealed class EngineReviewSafetyInvariantTests
             Store = new FakeReviewStore(items);
             Service = new EngineReviewService(
                 Store,
-                _db,
+                Db,
                 context,
                 clock,
                 new EngineTelemetryEmitter(),
@@ -611,6 +638,9 @@ public sealed class EngineReviewSafetyInvariantTests
 
         public EngineReviewService Service { get; }
 
+        /// <summary>The in-memory context the service writes through (telemetry sink + persona lookup seam).</summary>
+        public HookedPulseDbContext Db { get; }
+
         public RecordingPublishService Publisher { get; }
 
         public FakeReviewStore Store { get; }
@@ -624,13 +654,43 @@ public sealed class EngineReviewSafetyInvariantTests
         public void Advance(int minutes) => _time.Advance(TimeSpan.FromMinutes(minutes));
 
         public async Task<List<TelemetryEvent>> ReviewedEventsAsync(Guid draftId) =>
-            await _db.TelemetryEvents
+            await Db.TelemetryEvents
                 .IgnoreQueryFilters()
                 .Where(e => e.EventType == "engine.reviewed"
                     && e.Target != null && e.Target.EntityId == draftId.ToString())
                 .ToListAsync();
 
-        public void Dispose() => _db.Dispose();
+        public void Dispose() => Db.Dispose();
+    }
+
+    /// <summary>
+    /// The real <see cref="PulseDbContext"/> with one test seam: <see cref="OnPersonaLookup"/> runs when the
+    /// <see cref="PulseDbContext.Personas"/> set is taken for a query (the review service's persona-handle
+    /// resolution), so a test can complete a provider cut in the middle of that lookup.
+    /// </summary>
+    private sealed class HookedPulseDbContext : PulseDbContext
+    {
+        public HookedPulseDbContext(DbContextOptions<PulseDbContext> options, IExerciseContext exerciseContext)
+            : base(options, exerciseContext)
+        {
+        }
+
+        /// <summary>An optional side effect run each time the persona set is taken (e.g. a cut completing mid-lookup).</summary>
+        public Action? OnPersonaLookup { get; set; }
+
+        /// <summary>How many times the persona set was taken.</summary>
+        public int PersonaLookups { get; private set; }
+
+        public override DbSet<TEntity> Set<TEntity>()
+        {
+            if (typeof(TEntity) == typeof(Persona))
+            {
+                PersonaLookups++;
+                OnPersonaLookup?.Invoke();
+            }
+
+            return base.Set<TEntity>();
+        }
     }
 
     /// <summary>An in-memory <see cref="IEngineReviewStore"/> keyed by draft id — returns the same entity instances the tests hold.</summary>
