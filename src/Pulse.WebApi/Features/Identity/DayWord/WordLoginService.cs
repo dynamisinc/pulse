@@ -218,6 +218,7 @@ public sealed class WordLoginService
         //    (Gate-1 W-1), so the statements run never reveal that the word was right. Tracked, because a success
         //    records LastLoginAt; on a refusal it is left unmodified, so the refusal's save writes only its event.
         var account = await _dbContext.Accounts
+            .Include(a => a.Enrollment)
             .FirstOrDefaultAsync(a => a.ExerciseId == exerciseId && a.Username == signInName, cancellationToken);
 
         // 6. Everything must hold: today's word, a participant-accessible exercise (EL-11: Staged / Live / Paused; an
@@ -226,7 +227,7 @@ public sealed class WordLoginService
             || !ExerciseLifecycleStates.IsParticipantAccessible(facts.Status)
             || account is null
             || account.DisabledAt is not null
-            || !ParticipantSessionRequests.IsParticipantWorldRole(account.Role))
+            || !ParticipantSessionRequests.IsParticipantWorldRole(account.Enrollment.Role))
         {
             return await RejectAsync(exerciseId, facts, storedHash, signInName, word, now, cancellationToken);
         }

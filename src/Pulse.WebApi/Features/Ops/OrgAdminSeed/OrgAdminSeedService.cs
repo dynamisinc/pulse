@@ -18,7 +18,7 @@ using Pulse.WebApi.Features.Identity.Providers;
 /// <c>orgAdmin</c> — the role <c>Features/ExerciseLifecycleAdmin</c> gates the whole organization tier on
 /// (COR-076) and which, until now, <b>nothing anywhere could provision</b>:
 /// <c>BootstrapService.CanonicalStaffRoles</c> accepts only <c>controller</c>/<c>evaluator</c>/<c>planner</c>,
-/// staff login requires a pre-existing <see cref="StaffAssignment"/>, and
+/// staff login requires a pre-existing <see cref="Enrollment"/>, and
 /// <c>ExerciseCreationService</c> copies the CREATOR's role — so the org-admin surface was reachable only by
 /// hand-inserting a database row.
 /// </summary>
@@ -57,7 +57,7 @@ using Pulse.WebApi.Features.Identity.Providers;
 /// </para>
 /// <para>
 /// <b>Non-clobbering, like every other seed path here.</b> An existing <see cref="StaffUser"/> is reused and
-/// never re-homed onto another tenant; an existing <see cref="StaffAssignment"/> is left exactly as it is — a
+/// never re-homed onto another tenant; an existing <see cref="Enrollment"/> is left exactly as it is — a
 /// controller who happens to be this account would silently LOSE cockpit access if the seeder overwrote their
 /// role. When every exercise is already assigned, the seeder refuses and logs what a human must do instead.
 /// </para>
@@ -180,13 +180,21 @@ public sealed partial class OrgAdminSeedService
             return OrgAdminSeedResult.NoExercisesInOrganization(organizationId);
         }
 
-        var alreadyAssignedExerciseIds = staffUser is null
-            ? new HashSet<Guid>()
-            : (await _dbContext.StaffAssignments
-                    .Where(a => a.StaffUserId == staffUser.Id)
-                    .Select(a => a.ExerciseId)
-                    .ToListAsync(cancellationToken))
-                .ToHashSet();
+        // identity-auth-roles/16: the human's existing enrollments (StaffUser.Id == Person.Id). The ops context has no
+        // exercise scope, so the central filter is bypassed and the read is confined to the tenant's own exercises.
+        var tenantExerciseIds = exercises.Select(e => e.Id).ToList();
+        var alreadyAssignedExerciseIds = new HashSet<Guid>();
+        if (staffUser is not null)
+        {
+            // org-scope-exempt(TenantChecked): own-only (this human's PersonId) and confined to the ids of the
+            // exercises just read through .InOrganization(organizationId), so no other customer's row is seen.
+            var enrolledExerciseIds = await _dbContext.Enrollments
+                .IgnoreQueryFilters()
+                .Where(a => a.PersonId == staffUser.Id && tenantExerciseIds.Contains(a.ExerciseId))
+                .Select(a => a.ExerciseId)
+                .ToListAsync(cancellationToken);
+            alreadyAssignedExerciseIds.UnionWith(enrolledExerciseIds);
+        }
 
         var targets = exercises.Where(e => !alreadyAssignedExerciseIds.Contains(e.Id)).ToList();
         if (targets.Count == 0)
@@ -204,9 +212,10 @@ public sealed partial class OrgAdminSeedService
 
         if (staffUser is null)
         {
+            var newStaffUserId = Guid.NewGuid();
             staffUser = new StaffUser
             {
-                Id = Guid.NewGuid(),
+                Id = newStaffUserId,
                 OrganizationId = organizationId,
 
                 // VERBATIM from the allowlist — the exact values DynamisIdentityProvider resolves on a real
@@ -215,18 +224,35 @@ public sealed partial class OrgAdminSeedService
                 DisplayName = credential.DisplayName,
                 Username = credential.Username,
                 CreatedAt = now,
+
+                // identity-auth-roles/16: the staff facet shares its Person's primary key.
+                Person = new Person
+                {
+                    Id = newStaffUserId,
+                    OrganizationId = organizationId,
+                    DisplayName = credential.DisplayName,
+                    CreatedAt = now,
+                },
             };
             _dbContext.StaffUsers.Add(staffUser);
         }
 
+        // identity-auth-roles/16 (ADMIN-IDENTITY-MODEL §1.1): the org-admin grant is Person.OrgRole, not an exercise
+        // role. The person row is tracked (created just above, or loaded here) and the grant rides the one SaveChanges.
+        var person = staffUser.Person
+            ?? await _dbContext.People.InOrganization(organizationId).FirstAsync(p => p.Id == staffUser.Id, cancellationToken);
+        person.OrgRole = Person.OrgAdminRole;
+
         foreach (var exercise in targets)
         {
-            _dbContext.StaffAssignments.Add(new StaffAssignment
+            // The in-exercise access is a PLANNER enrollment — exactly how the AdminIdentityFoundation migration maps
+            // every pre-existing orgAdmin assignment, so a seeded admin and a migrated one are indistinguishable.
+            _dbContext.Enrollments.Add(new Enrollment
             {
                 Id = Guid.NewGuid(),
-                StaffUserId = staffUser.Id,
+                PersonId = staffUser.Id,
                 ExerciseId = exercise.Id,
-                Role = ExerciseAdminRoles.OrgAdmin,
+                Role = EnrollmentRoles.Planner,
                 CreatedAt = now,
             });
 
@@ -248,20 +274,18 @@ public sealed partial class OrgAdminSeedService
     /// — the "there is already an org admin, do nothing" condition.
     /// </summary>
     /// <remarks>
-    /// <see cref="StaffAssignment"/> carries no tenant of its own (it is the cross-exercise access record), so
+    /// <see cref="Enrollment"/> carries no tenant of its own (it is the cross-exercise access record), so
     /// the tenant bound is applied to the <see cref="StaffUser"/> side of the join and fails closed to zero rows
     /// on an unresolved tenant — which would make the seeder try to seed rather than wrongly stand down.
     /// </remarks>
     private async Task<bool> OrganizationHasAnOrgAdminAsync(Guid organizationId, CancellationToken cancellationToken)
     {
-        // No exemption marker: this read carries its tenant bound inline, which is what the sweep asks for.
-        var tenantStaffUserIds = _dbContext.StaffUsers.InOrganization(organizationId).Select(u => u.Id);
-
-        // The Role column matches case-insensitively under the CI collation, so a hand-seeded "orgadmin" row
-        // still counts as an existing administrator (ExerciseAdminRoles matches case-insensitively too).
-        return await _dbContext.StaffAssignments
-            .Where(a => a.Role == ExerciseAdminRoles.OrgAdmin && tenantStaffUserIds.Contains(a.StaffUserId))
-            .AnyAsync(cancellationToken);
+        // identity-auth-roles/16: the org-admin grant is Person.OrgRole. No exemption marker: this read carries its
+        // tenant bound inline, which is what the sweep asks for. The OrgRole column matches case-insensitively under
+        // the CI collation, so a hand-seeded "orgadmin" value still counts as an existing administrator.
+        return await _dbContext.People
+            .InOrganization(organizationId)
+            .AnyAsync(p => p.OrgRole == Person.OrgAdminRole, cancellationToken);
     }
 
     /// <summary>

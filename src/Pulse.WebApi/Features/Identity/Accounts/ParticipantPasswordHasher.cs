@@ -34,7 +34,7 @@ public sealed class ParticipantPasswordHasher
     /// <see cref="PasswordHasher{TUser}"/> implementation ignores the instance entirely (its salt is random,
     /// derived per call), so a shared, empty subject is safe and stateless.
     /// </summary>
-    private static readonly Account HashSubject = new() { Username = string.Empty, DisplayName = string.Empty, Role = string.Empty };
+    private static readonly Account HashSubject = new() { Username = string.Empty, DisplayName = string.Empty };
 
     private readonly PasswordHasher<Account> _hasher = new();
     private readonly string _decoyHash;

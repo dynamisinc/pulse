@@ -107,19 +107,27 @@ public sealed class StaffAssignmentService
         // compares assignment.exerciseId against the resolved scope's exerciseId, so an uppercase/lowercase
         // split makes the active exercise fail to match. Materialize, then ToString() in memory for one
         // consistent (lowercase) casing across the whole API surface.
+        //
+        // identity-auth-roles/16: the caller's STAFF enrollments (StaffUser.Id == Person.Id). This read is CROSS-exercise
+        // by design (the switcher lists every exercise the caller may enter), so the central exercise filter is
+        // bypassed explicitly and the tenant bound is the InOrganization join on Exercise below.
         var rows = await (
-            from a in _dbContext.StaffAssignments.AsNoTracking()
-            where a.StaffUserId == current.StaffUserId
+            // org-scope-exempt(TenantChecked): own-only (PersonId == the caller's session-carried id) and every row
+            // must inner-join an Exercise of the caller's OWN organization, so no other customer's exercise is listed.
+            from a in _dbContext.Enrollments.IgnoreQueryFilters().AsNoTracking().Where(EnrollmentRoles.IsStaffEnrollment)
+            where a.PersonId == current.StaffUserId
             join e in _dbContext.Exercises.AsNoTracking().InOrganization(callerOrganizationId) on a.ExerciseId equals e.Id
             orderby e.Name
             select new { a.ExerciseId, ExerciseName = e.Name, a.Role }).ToListAsync(cancellationToken);
 
+        var personId = current.StaffUserId.ToString();
         return rows
             .Select(r => new StaffAssignmentDto
             {
                 ExerciseId = r.ExerciseId.ToString(),
                 ExerciseName = r.ExerciseName,
                 Role = r.Role,
+                PersonId = personId,
             })
             .ToList();
     }
@@ -147,15 +155,30 @@ public sealed class StaffAssignmentService
             return SetActiveExerciseResult.Unauthenticated();
         }
 
-        // Authorization: the caller must be assigned to the target exercise. Rejecting an unassigned exercise
-        // is the crux of this endpoint (COR-005) — it fails closed to 403.
-        var assignment = await _dbContext.StaffAssignments
+        // identity-auth-roles/16: an ORG-SCOPE session (no exercise bound) may enter only its own same-org
+        // enrollment, and any other target — foreign, missing, or not enrolled — is the bare 404 (ADMIN-IDENTITY-MODEL
+        // §1.2, the bare-404 pattern). An exercise-bound session keeps its pre-existing 400/403 contract unchanged.
+        // Session is unscoped; this is the caller's own row by the id the accessor authenticated.
+        var isOrgScope = await _dbContext.Sessions
             .AsNoTracking()
-            .FirstOrDefaultAsync(a => a.StaffUserId == current.StaffUserId && a.ExerciseId == exerciseId, cancellationToken);
+            .AnyAsync(s => s.Id == current.SessionId && s.ExerciseId == null, cancellationToken);
+
+        // Authorization: the caller must hold a STAFF enrollment in the target exercise (never one with an account,
+        // so a staff session can never cross into the participant world). Rejecting an unassigned exercise is the
+        // crux of this endpoint (COR-005) — it fails closed. The read is cross-exercise (the target is not the
+        // session's scope), so the central exercise filter is bypassed and the exercise is named explicitly.
+        // org-scope-exempt(TenantChecked): own-only (PersonId == the caller's session-carried id), and the
+        // cross-customer case is refused below by the explicit `exercise.OrganizationId != callerOrganizationId`
+        // comparison before anything is persisted or disclosed.
+        var assignment = await _dbContext.Enrollments
+            .IgnoreQueryFilters()
+            .AsNoTracking()
+            .Where(EnrollmentRoles.IsStaffEnrollment)
+            .FirstOrDefaultAsync(a => a.PersonId == current.StaffUserId && a.ExerciseId == exerciseId, cancellationToken);
 
         if (assignment is null)
         {
-            return SetActiveExerciseResult.NotAssigned();
+            return isOrgScope ? SetActiveExerciseResult.NotFound() : SetActiveExerciseResult.NotAssigned();
         }
 
         // exercise-isolation/11 AC3 (COR-010): the caller's own CUSTOMER tenant, resolved server-side.
@@ -180,7 +203,9 @@ public sealed class StaffAssignmentService
 
         if (exercise is null)
         {
-            return SetActiveExerciseResult.Invalid("exerciseId does not resolve to a known exercise.");
+            return isOrgScope
+                ? SetActiveExerciseResult.NotFound()
+                : SetActiveExerciseResult.Invalid("exerciseId does not resolve to a known exercise.");
         }
 
         // exercise-isolation/11 AC3 (COR-010): the tenant bound, applied EXPLICITLY because Exercise carries
@@ -190,7 +215,7 @@ public sealed class StaffAssignmentService
         // cross-customer selection discloses nothing beyond "you may not have this".
         if (exercise.OrganizationId != callerOrganizationId)
         {
-            return SetActiveExerciseResult.NotAssigned();
+            return isOrgScope ? SetActiveExerciseResult.NotFound() : SetActiveExerciseResult.NotAssigned();
         }
 
         // Load the persisted staff session row to update (Session is unscoped → findable regardless of scope).
@@ -222,6 +247,10 @@ public sealed class StaffAssignmentService
         session.ExerciseId = exerciseId;
         session.Role = assignment.Role;
 
+        // identity-auth-roles/16: the person is the caller (shared key) — stamped here too so a pre-migration row gains
+        // it on its first switch. (The lead flag is never stored on the session; it is read live.)
+        session.PersonId ??= current.StaffUserId;
+
         _dbContext.TelemetryEvents.Add(new TelemetryEvent
         {
             EventId = Guid.NewGuid().ToString(),
@@ -249,6 +278,7 @@ public sealed class StaffAssignmentService
             ExerciseId = exerciseId.ToString(),
             ExerciseName = exercise.Name,
             Role = assignment.Role,
+            PersonId = current.StaffUserId.ToString(),
         });
     }
 }
@@ -267,6 +297,12 @@ public enum SetActiveExerciseOutcome
 
     /// <summary>The caller is not assigned to the requested exercise — the endpoint returns 403 (fail closed).</summary>
     NotAssigned,
+
+    /// <summary>
+    /// An ORG-SCOPE caller named an exercise that is not its own same-org staff enrollment (foreign, missing, or not
+    /// enrolled) — the bare 404 (identity-auth-roles/16).
+    /// </summary>
+    NotFound,
 }
 
 /// <summary>
@@ -316,4 +352,9 @@ public sealed class SetActiveExerciseResult
     /// <returns>A not-assigned result.</returns>
     public static SetActiveExerciseResult NotAssigned() =>
         new(SetActiveExerciseOutcome.NotAssigned, null, null);
+
+    /// <summary>The bare-404 result for an org-scope caller whose target is not its own same-org enrollment.</summary>
+    /// <returns>A not-found result.</returns>
+    public static SetActiveExerciseResult NotFound() =>
+        new(SetActiveExerciseOutcome.NotFound, null, null);
 }

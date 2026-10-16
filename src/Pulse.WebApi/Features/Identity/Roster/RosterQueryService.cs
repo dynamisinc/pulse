@@ -94,8 +94,8 @@ public sealed class RosterQueryService
 
         var rows = await (
             from account in _dbContext.Accounts.AsNoTracking()
-            where account.Role == RosterRoles.Participant || account.Role == RosterRoles.Pio
-            join persona in _dbContext.Personas.AsNoTracking() on account.PersonaId equals (Guid?)persona.Id into personas
+            where account.Enrollment.Role == RosterRoles.Participant || account.Enrollment.Role == RosterRoles.Pio
+            join persona in _dbContext.Personas.AsNoTracking() on account.Enrollment.PersonaId equals (Guid?)persona.Id into personas
             from persona in personas.DefaultIfEmpty()
             join link in _dbContext.ParticipantLinks.AsNoTracking() on account.Id equals link.AccountId into links
             from link in links.DefaultIfEmpty()
@@ -103,6 +103,7 @@ public sealed class RosterQueryService
             select new
             {
                 Account = account,
+                ExerciseRole = account.Enrollment.Role,
                 PersonaId = (Guid?)persona!.Id,
                 PersonaHandle = persona.Handle,
                 PersonaDisplayName = persona.DisplayName,
@@ -124,6 +125,7 @@ public sealed class RosterQueryService
         var participants = rows
             .Select(row => RosterEntryProjection.Create(
                 row.Account,
+                row.ExerciseRole,
                 row.PersonaId is { } personaId
                     ? new RosterPersonaRef(personaId, row.PersonaHandle, row.PersonaDisplayName, row.PersonaKind)
                     : null,
@@ -148,11 +150,12 @@ internal static class RosterEntryProjection
 {
     /// <summary>Builds the entry. Optional fields are omitted (null), never written as empty strings.</summary>
     /// <param name="account">The account, read under the central filter.</param>
+    /// <param name="exerciseRole">The account's enrollment role (identity-auth-roles/16: it lives on the enrollment).</param>
     /// <param name="persona">Its persona, or <c>null</c>.</param>
     /// <param name="link">Its link state (<see cref="RosterLinkDtoFactory"/>).</param>
     /// <param name="liveSessions">Its live-session count.</param>
     /// <returns>The entry.</returns>
-    public static RosterEntryDto Create(Account account, RosterPersonaRef? persona, RosterLinkDto link, int liveSessions) => new()
+    public static RosterEntryDto Create(Account account, string exerciseRole, RosterPersonaRef? persona, RosterLinkDto link, int liveSessions) => new()
     {
         Id = account.Id.ToString(),
         Name = account.DisplayName,
@@ -160,7 +163,7 @@ internal static class RosterEntryProjection
         Role = Optional(account.JobRole),
         Email = Optional(account.Email),
         SignInName = account.Username,
-        ExerciseRole = string.Equals(account.Role, RosterRoles.Pio, StringComparison.OrdinalIgnoreCase)
+        ExerciseRole = string.Equals(exerciseRole, RosterRoles.Pio, StringComparison.OrdinalIgnoreCase)
             ? RosterRoles.Pio
             : RosterRoles.Participant,
         Persona = persona is null

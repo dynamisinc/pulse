@@ -99,6 +99,7 @@ public sealed partial class ExerciseRealtimeHub : Hub
 
     private readonly PulseDbContext _dbContext;
     private readonly ILogger<ExerciseRealtimeHub> _logger;
+    private readonly SessionConnectionRegistry? _connections;
 
     /// <summary>Creates the hub over the persistence context its staff-membership check reads through.</summary>
     /// <param name="dbContext">
@@ -106,13 +107,21 @@ public sealed partial class ExerciseRealtimeHub : Hub
     /// (unscoped access records); never touched for a participant, read-only or anonymous connection.
     /// </param>
     /// <param name="logger">Diagnostics logger (a failed staff check is logged; never token material).</param>
-    public ExerciseRealtimeHub(PulseDbContext dbContext, ILogger<ExerciseRealtimeHub> logger)
+    /// <param name="connections">
+    /// identity-auth-roles/16: the connection → session registry the grant-revoke rule uses to cut a revoked session's
+    /// live connections. Optional so a host without it (and the unit tests) still constructs the hub.
+    /// </param>
+    public ExerciseRealtimeHub(
+        PulseDbContext dbContext,
+        ILogger<ExerciseRealtimeHub> logger,
+        SessionConnectionRegistry? connections = null)
     {
         ArgumentNullException.ThrowIfNull(dbContext);
         ArgumentNullException.ThrowIfNull(logger);
 
         _dbContext = dbContext;
         _logger = logger;
+        _connections = connections;
     }
 
     /// <summary>
@@ -161,6 +170,14 @@ public sealed partial class ExerciseRealtimeHub : Hub
         // queries and must not delay it.
         await Groups.AddToGroupAsync(Context.ConnectionId, GroupNameFor(exerciseId.Value));
 
+        // identity-auth-roles/16: remember which session this connection was opened under, so revoking that session
+        // also cuts this connection (membership is otherwise only checked here, at connect time).
+        if (_connections is not null && SessionPrincipal.Read(httpContext.User) is { } connectingSession)
+        {
+            _connections.Register(connectingSession.SessionId, exerciseId.Value, Context);
+            Context.Items[RegisteredSessionItemKey] = connectingSession.SessionId;
+        }
+
         // Only a connection the check positively verifies ever reaches the staff join. A check that cannot
         // complete (e.g. a transient database error) is logged and the connection ABORTED — never rethrown, and
         // never treated as verified. Rethrowing would make SignalR close with allowReconnect:false, which the JS
@@ -197,6 +214,21 @@ public sealed partial class ExerciseRealtimeHub : Hub
     /// <param name="exerciseId">The host-resolved exercise the connection's exercise-wide join used.</param>
     /// <param name="cancellationToken">The connection-aborted token.</param>
     /// <returns><c>true</c> only for a verified staff connection on its assigned exercise.</returns>
+    /// <summary>Forgets this connection in the session registry (identity-auth-roles/16).</summary>
+    /// <param name="exception">The disconnect cause, if any.</param>
+    /// <returns>A task.</returns>
+    public override Task OnDisconnectedAsync(Exception? exception)
+    {
+        if (_connections is not null && Context.Items.TryGetValue(RegisteredSessionItemKey, out var value) && value is Guid sessionId)
+        {
+            _connections.Unregister(sessionId, Context.ConnectionId);
+        }
+
+        return base.OnDisconnectedAsync(exception);
+    }
+
+    private const string RegisteredSessionItemKey = "pulse:registered-session-id";
+
     private async Task<bool> IsVerifiedStaffForExerciseAsync(HttpContext httpContext, Guid exerciseId, CancellationToken cancellationToken)
     {
         // The principal is assigned ONLY by SessionAuthenticationMiddleware, ONLY for a token it resolved to a

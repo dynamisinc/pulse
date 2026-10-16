@@ -90,14 +90,15 @@ public sealed class StaffCallerContext
         // filtered, and it is confined to the one row the accessor already authenticated. The staff-kind and
         // staff-user re-checks cost nothing on the happy path and keep this safe against any future accessor
         // regression that handed back a session that is not the caller's own staff session.
-        var role = await _dbContext.Sessions
+        var row = await _dbContext.Sessions
             .AsNoTracking()
             .Where(session => session.Id == current.SessionId
                 && session.StaffUserId == current.StaffUserId
                 && session.Kind == StaffSessionKind)
-            .Select(session => session.Role)
+            .Select(session => new { session.Role, session.ExerciseId })
             .FirstOrDefaultAsync(cancellationToken);
 
+        var role = row?.Role;
         if (string.IsNullOrWhiteSpace(role))
         {
             return null;
@@ -118,6 +119,7 @@ public sealed class StaffCallerContext
             SessionId = current.SessionId,
             Role = role,
             OrganizationId = tenant,
+            IsOrgScope = row!.ExerciseId is null,
         };
 
         return _resolved;
@@ -141,4 +143,10 @@ public sealed class StaffCaller
 
     /// <summary>The caller's OWN customer tenant (COR-010) — the only organization they may ever read or write.</summary>
     public required Guid OrganizationId { get; init; }
+
+    /// <summary>
+    /// Whether the caller's session is ORG-SCOPE (no exercise bound — identity-auth-roles/16). Org-scope actions are
+    /// additionally recorded as <c>OrgAuditEvent</c>s (ADMIN-IDENTITY-MODEL §7.5).
+    /// </summary>
+    public bool IsOrgScope { get; init; }
 }

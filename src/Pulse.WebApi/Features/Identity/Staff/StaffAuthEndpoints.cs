@@ -46,7 +46,11 @@ public static class StaffAuthEndpoints
 
         // The seam: a future Entra/AD/SSO/Cadence-federation provider replaces this concrete registration with
         // no call-site change (login depends on IIdentityProvider, never DynamisIdentityProvider).
-        services.AddScoped<IIdentityProvider, DynamisIdentityProvider>();
+        //
+        // identity-auth-roles/16 (ADMIN-IDENTITY-MODEL §1.3): the Pulse password provider is the default, chained in
+        // front of the Dynamis allowlist (registered concretely as its fallback) for the A1→A2 interim.
+        services.AddScoped<DynamisIdentityProvider>();
+        services.AddScoped<IIdentityProvider, PulsePasswordIdentityProvider>();
 
         services.AddScoped<StaffLoginService>();
         services.AddScoped<StaffAssignmentService>();
@@ -114,7 +118,7 @@ public static class StaffAuthEndpoints
         return result.Outcome switch
         {
             StaffLoginOutcome.Authenticated when result.Issued is { } issued =>
-                Results.Ok(StaffLoginResponseDto.From(issued)),
+                Results.Ok(StaffLoginResponseDto.From(issued, result.IsLead)),
             StaffLoginOutcome.Invalid => Results.BadRequest(result.ValidationError),
             StaffLoginOutcome.Rejected => Results.Unauthorized(),
             StaffLoginOutcome.NotAssigned => Results.StatusCode(StatusCodes.Status403Forbidden),
@@ -157,6 +161,8 @@ public static class StaffAuthEndpoints
             SetActiveExerciseOutcome.Invalid => Results.BadRequest(result.ValidationError),
             SetActiveExerciseOutcome.Unauthenticated => Results.Unauthorized(),
             SetActiveExerciseOutcome.NotAssigned => Results.StatusCode(StatusCodes.Status403Forbidden),
+            // identity-auth-roles/16: the bare 404 (no body) for an org-scope caller's foreign or missing target.
+            SetActiveExerciseOutcome.NotFound => Results.NotFound(),
             _ => Results.StatusCode(StatusCodes.Status500InternalServerError),
         };
     }

@@ -160,7 +160,9 @@ public sealed class ParticipantLoginService
         // 4. Resolve the account within the host-resolved scope. The GLOBAL query filter confines this to the
         //    resolved exercise — a handle from another exercise is simply invisible (the isolation guarantee).
         //    Tracked (not AsNoTracking): a successful login updates LastLoginAt.
+        //    identity-auth-roles/16: the enrollment (role + persona) is loaded with it, under the same filter.
         var account = await _dbContext.Accounts
+            .Include(a => a.Enrollment)
             .FirstOrDefaultAsync(a => a.Username == username, cancellationToken);
 
         // 5. Verify the credential. Verify() runs an equivalent PBKDF2 derivation even when the account is unknown
@@ -186,13 +188,14 @@ public sealed class ParticipantLoginService
             {
                 ExerciseId = scope.Value,
                 Kind = ParticipantSessionKind,
-                Role = account.Role,
+                Role = account.Enrollment.Role,
                 PrincipalId = account.Id.ToString(),
                 ActingHumanId = string.IsNullOrEmpty(account.ActingHumanId) ? account.Id.ToString() : account.ActingHumanId,
                 IsReadOnly = false,
                 AccountId = account.Id,
                 StaffUserId = null,
-                PersonaId = account.PersonaId,
+                PersonaId = account.Enrollment.PersonaId,
+                PersonId = account.Enrollment.PersonId,
             },
             cancellationToken);
 

@@ -162,6 +162,7 @@ public sealed class ParticipantPersonaBindingService
         //    (COR-001). Tracked — this is the row being mutated.
         var account = await _dbContext.Accounts
             .IgnoreQueryFilters()
+            .Include(a => a.Enrollment)
             .FirstOrDefaultAsync(a => a.ExerciseId == exerciseId && a.Username == username, cancellationToken);
         if (account is null)
         {
@@ -185,13 +186,14 @@ public sealed class ParticipantPersonaBindingService
         }
 
         var resolvedPersonaId = resolution.PersonaId!.Value;
-        var previousPersonaId = account.PersonaId;
+        // identity-auth-roles/16: the persona binding lives on the account's enrollment.
+        var previousPersonaId = account.Enrollment.PersonaId;
         var changed = previousPersonaId != resolvedPersonaId;
 
         // 8. Bind (assignment is idempotent — an unchanged value leaves the row unmodified) and emit exactly one
         //    XC-004 event in the SAME unit of work. One server wall-clock read stamps the event.
         var now = DateTimeOffset.UtcNow;
-        account.PersonaId = resolvedPersonaId;
+        account.Enrollment.PersonaId = resolvedPersonaId;
 
         _dbContext.TelemetryEvents.Add(BuildBoundTelemetry(
             exercise, account, resolvedPersonaId, resolution.Handle!, previousPersonaId, changed, now));

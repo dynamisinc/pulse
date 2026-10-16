@@ -5,6 +5,7 @@ using System.Globalization;
 using System.Linq;
 using Microsoft.EntityFrameworkCore;
 using Pulse.WebApi.Data;
+using Pulse.WebApi.Data.Entities;
 
 /// <summary>
 /// The org-scoped staff-assignment view behind <c>GET /api/org/staff-assignments</c> (COR-076) — the second
@@ -77,12 +78,18 @@ public sealed class OrgStaffDirectoryService
 
         // Guids are projected raw and stringified in memory below (SQL Server renders uniqueidentifier
         // UPPERCASE inside a translated ToString(), which would mismatch every other endpoint's casing).
+        //
+        // identity-auth-roles/16: the org's STAFF enrollments across every exercise (Enrollment replaces
+        // StaffAssignment; StaffUser.Id == Person.Id). Cross-exercise by design, so the central exercise filter is
+        // bypassed explicitly and the tenant bound is the two InOrganization joins below.
         var rows = await (
-            from assignment in _dbContext.StaffAssignments.AsNoTracking()
+            // org-scope-exempt(TenantChecked): every row must inner-join BOTH an Exercise and a StaffUser of the
+            // caller's OWN server-resolved organization, so no other customer's enrollment can be listed.
+            from assignment in _dbContext.Enrollments.IgnoreQueryFilters().AsNoTracking().Where(EnrollmentRoles.IsStaffEnrollment)
             join exercise in _dbContext.Exercises.AsNoTracking().InOrganization(tenant)
                 on assignment.ExerciseId equals exercise.Id
             join staffUser in _dbContext.StaffUsers.AsNoTracking().InOrganization(tenant)
-                on assignment.StaffUserId equals staffUser.Id
+                on assignment.PersonId equals (Guid?)staffUser.Id
             orderby exercise.Name, staffUser.DisplayName
             select new AssignmentRow(
                 assignment.ExerciseId,

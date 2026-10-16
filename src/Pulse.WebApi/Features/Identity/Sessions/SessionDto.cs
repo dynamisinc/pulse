@@ -17,18 +17,44 @@ using Pulse.WebApi.Data.Entities;
 /// serializer config. <see cref="PersonaId"/> is OMITTED (not null) when absent — the frozen client validator
 /// accepts <c>undefined | string</c> but rejects <c>null</c> — via
 /// <see cref="JsonIgnoreCondition.WhenWritingNull"/>. Wave-0 freezes the shape only; the endpoint is story 03.
+/// <para>
+/// <b>identity-auth-roles/16 frozen-type change (ADMIN-IDENTITY-MODEL §9, cleared by the orchestrator).</b>
+/// <c>exerciseId</c> is now <c>string | null</c> (null = org scope, ALWAYS written), and the shape gains
+/// <c>personId</c> (<c>string | null</c>, always written), <c>world</c> (<c>'staff' | 'participant'</c>),
+/// <c>scope</c> (<c>'exercise' | 'org'</c>) and <c>isLead</c>. <c>role</c> is <c>ExerciseRole | 'orgAdmin'</c>, where
+/// <c>'orgAdmin'</c> appears only with <c>scope: 'org'</c> and an exercise role only with <c>scope: 'exercise'</c>.
+/// </para>
 /// </remarks>
 public sealed class SessionDto
 {
-    /// <summary>The bound exercise id (COR-012).</summary>
+    /// <summary>The bound exercise id (COR-012), or <c>null</c> for an org-scope session (written as <c>null</c>).</summary>
     [JsonPropertyName("exerciseId")]
-    public required string ExerciseId { get; init; }
+    public required string? ExerciseId { get; init; }
+
+    /// <summary>The person the session was minted for, or <c>null</c> (one-off participant, read-only viewer).</summary>
+    [JsonPropertyName("personId")]
+    public required string? PersonId { get; init; }
+
+    /// <summary>The session's world: <c>staff</c> (staff sessions) or <c>participant</c> (participant and read-only).</summary>
+    [JsonPropertyName("world")]
+    public required string World { get; init; }
+
+    /// <summary>The session's scope: <c>exercise</c>, or <c>org</c> when no exercise is bound.</summary>
+    [JsonPropertyName("scope")]
+    public required string Scope { get; init; }
+
+    /// <summary>
+    /// Whether the session's person holds the exercise's lead-controller enrollment — read LIVE from
+    /// <c>Enrollment.IsLead</c> when the DTO is built, never stored on the session.
+    /// </summary>
+    [JsonPropertyName("isLead")]
+    public required bool IsLead { get; init; }
 
     /// <summary>The bound principal id (named account / staff user / ephemeral read-only identity).</summary>
     [JsonPropertyName("accountId")]
     public required string AccountId { get; init; }
 
-    /// <summary>The session role — the <c>ExerciseRole</c> string vocabulary.</summary>
+    /// <summary>The session role — an <c>ExerciseRole</c> (exercise scope) or <c>orgAdmin</c> (org scope only).</summary>
     [JsonPropertyName("role")]
     public required string Role { get; init; }
 
@@ -49,6 +75,12 @@ public sealed class SessionDto
     [JsonPropertyName("expiresAt")]
     public required string ExpiresAt { get; init; }
 
+    /// <summary>The <c>scope</c> value of a session bound to an exercise.</summary>
+    public const string ExerciseScope = "exercise";
+
+    /// <summary>The <c>scope</c> value of an org-scope session (no exercise bound).</summary>
+    public const string OrgScope = "org";
+
     /// <summary>
     /// Projects a persisted <see cref="Session"/> to the frozen wire shape. The wire <c>accountId</c> is the
     /// session's canonical <see cref="Session.PrincipalId"/> (uniform across kinds); <c>personaId</c> is
@@ -56,14 +88,19 @@ public sealed class SessionDto
     /// never re-derived. No staff-only / provenance field is read (XC-002).
     /// </summary>
     /// <param name="session">The persisted session to project.</param>
+    /// <param name="isLead">The LIVE lead flag of the session's enrollment (false for every non-staff session).</param>
     /// <returns>The frozen participant-safe session projection.</returns>
-    public static SessionDto FromSession(Session session)
+    public static SessionDto FromSession(Session session, bool isLead = false)
     {
         ArgumentNullException.ThrowIfNull(session);
 
         return new SessionDto
         {
-            ExerciseId = session.ExerciseId.ToString(),
+            ExerciseId = session.ExerciseId?.ToString(),
+            PersonId = session.PersonId?.ToString(),
+            World = SessionIssuer.WorldOf(session.Kind),
+            Scope = session.ExerciseId is null ? OrgScope : ExerciseScope,
+            IsLead = isLead,
             AccountId = session.PrincipalId,
             Role = session.Role,
             PersonaId = session.PersonaId?.ToString(),

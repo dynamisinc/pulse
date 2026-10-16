@@ -1,5 +1,7 @@
 namespace Pulse.WebApi.Features.Identity.Sessions;
 
+using Microsoft.AspNetCore.Http;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Pulse.WebApi.Data;
@@ -36,6 +38,13 @@ using Pulse.WebApi.Features.Identity.EasyLogin;
 /// request's own bound exercise through <see cref="ExerciseFactsReader"/>, and only when the cap applies; staff and
 /// read-only sessions are stamped exactly as before.
 /// </para>
+/// <para>
+/// <b>One world per browser origin — the server backstop (identity-auth-roles/16, ADMIN-IDENTITY-MODEL §1.2).</b> The
+/// request's <c>Origin</c> header is stamped onto <see cref="Session.Origin"/>. Minting a session for person P in one
+/// world (staff, or participant) revokes, in the SAME unit of work, P's live sessions of the OTHER world minted from
+/// the same origin. Separate origins (the console host and the exercise hosts) legitimately hold one world each, and
+/// a session with no person or no origin revokes nothing.
+/// </para>
 /// </remarks>
 public sealed class SessionIssuer : ISessionIssuer
 {
@@ -45,6 +54,7 @@ public sealed class SessionIssuer : ISessionIssuer
     private readonly int _dayRolloverHour;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<SessionIssuer> _logger;
+    private readonly IHttpContextAccessor? _httpContextAccessor;
 
     /// <summary>Creates the issuer over its persistence context, the configured session lifetimes and the day cap's inputs.</summary>
     /// <param name="dbContext">The persistence context the <see cref="Session"/> row is written through.</param>
@@ -53,13 +63,18 @@ public sealed class SessionIssuer : ISessionIssuer
     /// <param name="easyLoginOptions">The easy-login settings, for the exercise day's rollover hour.</param>
     /// <param name="timeProvider">The server wall clock.</param>
     /// <param name="logger">Logs the once-per-exercise time-zone fallback warning.</param>
+    /// <param name="httpContextAccessor">
+    /// The current request, for its <c>Origin</c> header (the one-world-per-origin backstop). Optional: without it
+    /// no origin is stamped and nothing is revoked across worlds.
+    /// </param>
     public SessionIssuer(
         PulseDbContext dbContext,
         IOptions<SessionOptions> options,
         ExerciseFactsReader exerciseFacts,
         IOptions<EasyLoginOptions> easyLoginOptions,
         TimeProvider timeProvider,
-        ILogger<SessionIssuer> logger)
+        ILogger<SessionIssuer> logger,
+        IHttpContextAccessor? httpContextAccessor = null)
     {
         ArgumentNullException.ThrowIfNull(dbContext);
         ArgumentNullException.ThrowIfNull(options);
@@ -74,6 +89,7 @@ public sealed class SessionIssuer : ISessionIssuer
         _dayRolloverHour = easyLoginOptions.Value.DayRolloverHour;
         _timeProvider = timeProvider;
         _logger = logger;
+        _httpContextAccessor = httpContextAccessor;
     }
 
     /// <inheritdoc />
@@ -109,12 +125,15 @@ public sealed class SessionIssuer : ISessionIssuer
             PersonaId = request.PersonaId,
             ActingHumanId = request.ActingHumanId,
             IsReadOnly = request.IsReadOnly,
+            PersonId = request.PersonId,
+            Origin = ReadOrigin(),
             IssuedAt = now,
             ExpiresAt = windows.ExpiresAt,
             RefreshExpiresAt = windows.RefreshExpiresAt,
         };
 
         _dbContext.Sessions.Add(session);
+        await RevokeOtherWorldSessionsAsync(session, now, cancellationToken);
         await _dbContext.SaveChangesAsync(cancellationToken);
 
         return new SessionIssueResult
@@ -140,13 +159,72 @@ public sealed class SessionIssuer : ISessionIssuer
             return null;
         }
 
-        var facts = await _exerciseFacts.GetAsync(request.ExerciseId, cancellationToken);
+        // A participant session always carries its host-resolved exercise; an org-scope request is never a
+        // participant one, so there is no day to cap without an exercise.
+        if (request.ExerciseId is not { } exerciseId)
+        {
+            return null;
+        }
+
+        var facts = await _exerciseFacts.GetAsync(exerciseId, cancellationToken);
 
         return ParticipantSessionCap.EndOfExerciseDay(
-            request.ExerciseId,
+            exerciseId,
             facts,
             now,
             _dayRolloverHour,
             _logger);
+    }
+
+    /// <summary>The world a session kind belongs to: <c>staff</c> for staff sessions, <c>participant</c> otherwise.</summary>
+    /// <param name="kind">A <see cref="Session.Kind"/> value.</param>
+    /// <returns><c>staff</c> or <c>participant</c>.</returns>
+    public static string WorldOf(string kind) =>
+        string.Equals(kind, StaffKind, StringComparison.Ordinal) ? StaffWorld : ParticipantWorld;
+
+    /// <summary>The staff world.</summary>
+    public const string StaffWorld = "staff";
+
+    /// <summary>The participant world (participant and read-only sessions).</summary>
+    public const string ParticipantWorld = "participant";
+
+    private const string StaffKind = "staff";
+
+    /// <summary>
+    /// Reads the request's <c>Origin</c> header, bounded to <see cref="Session.MaxOriginLength"/>; <c>null</c> when
+    /// absent, blank, oversized, or when there is no request.
+    /// </summary>
+    private string? ReadOrigin()
+    {
+        var origin = _httpContextAccessor?.HttpContext?.Request.Headers.Origin.ToString().Trim();
+        return string.IsNullOrEmpty(origin) || origin.Length > Session.MaxOriginLength ? null : origin;
+    }
+
+    /// <summary>
+    /// Stages the revocation of the person's live OTHER-world sessions minted from the same origin (the server
+    /// backstop of the one-world-per-origin rule). A no-op without a person or an origin.
+    /// </summary>
+    private async Task RevokeOtherWorldSessionsAsync(Session minted, DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        if (minted.PersonId is not { } personId || minted.Origin is not { } origin)
+        {
+            return;
+        }
+
+        var mintedIsStaff = string.Equals(minted.Kind, StaffKind, StringComparison.Ordinal);
+
+        // Session is unscoped (looked up pre-scope); the person + origin predicate confines this to the one human.
+        var others = await _dbContext.Sessions
+            .Where(s => s.PersonId == personId
+                && s.Origin == origin
+                && s.RevokedAt == null
+                && s.Id != minted.Id
+                && (mintedIsStaff ? s.Kind != StaffKind : s.Kind == StaffKind))
+            .ToListAsync(cancellationToken);
+
+        foreach (var other in others.Where(other => other.IsLive(now)))
+        {
+            other.RevokedAt = now;
+        }
     }
 }

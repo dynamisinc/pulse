@@ -114,8 +114,10 @@ public sealed class StaffLoginService
         var scenarioTime = exercise.CurrentScenarioTime ?? now;
 
         // 3. Authenticate through the provider-agnostic seam. Never logs the secret.
+        //    identity-auth-roles/16: the credentials carry the exercise's organization so the chained Pulse password
+        //    provider can resolve the Person by (org, email); the Dynamis provider ignores it.
         var authentication = await _identityProvider.AuthenticateAsync(
-            new StaffCredentials { Username = username, Secret = request.Secret },
+            new StaffCredentials { Username = username, Secret = request.Secret, OrganizationId = exercise.OrganizationId },
             cancellationToken);
 
         if (authentication.Outcome != StaffAuthenticationOutcome.Authenticated || authentication.Identity is null)
@@ -139,9 +141,10 @@ public sealed class StaffLoginService
 
         if (staffUser is null)
         {
+            var newStaffUserId = Guid.NewGuid();
             staffUser = new StaffUser
             {
-                Id = Guid.NewGuid(),
+                Id = newStaffUserId,
                 // exercise-isolation/11 (COR-010): a first-seen staff human joins the CUSTOMER that owns the
                 // exercise they are logging in to — the only tenant the server can attribute them to here,
                 // and never a client-supplied value. (A multi-customer IdP that carries an org claim plugs in
@@ -151,6 +154,16 @@ public sealed class StaffLoginService
                 DisplayName = identity.DisplayName,
                 Username = identity.Username,
                 CreatedAt = now,
+
+                // identity-auth-roles/16: the staff facet SHARES its Person's primary key, so a first-seen staff
+                // human gets their Person in the same unit of work (no email until invited, A2).
+                Person = new Person
+                {
+                    Id = newStaffUserId,
+                    OrganizationId = exercise.OrganizationId,
+                    DisplayName = identity.DisplayName,
+                    CreatedAt = now,
+                },
             };
             _dbContext.StaffUsers.Add(staffUser);
         }
@@ -178,11 +191,18 @@ public sealed class StaffLoginService
             return StaffLoginResult.NotAssigned();
         }
 
-        // 5. Authorization: the staff user must be assigned to the selected exercise. StaffAssignment is the
-        //    cross-exercise access record (COR-005, unscoped) — the role is per-exercise.
-        var assignment = await _dbContext.StaffAssignments
+        // 5. Authorization: the staff user must hold a STAFF enrollment in the selected exercise (identity-auth-roles/16:
+        //    Enrollment replaces StaffAssignment; StaffUser.Id == Person.Id). Login runs before any exercise scope
+        //    exists, so the central exercise filter would match nothing — it is bypassed and the exercise is named
+        //    explicitly instead.
+        // org-scope-exempt(TenantChecked): the cross-customer case was refused just above by the explicit
+        // `staffUser.OrganizationId != exercise.OrganizationId` comparison, so this read only ever sees the caller's
+        // own enrollment in an exercise of the caller's own organization.
+        var assignment = await _dbContext.Enrollments
+            .IgnoreQueryFilters()
             .AsNoTracking()
-            .FirstOrDefaultAsync(a => a.StaffUserId == staffUser.Id && a.ExerciseId == exerciseId, cancellationToken);
+            .Where(EnrollmentRoles.IsStaffEnrollment)
+            .FirstOrDefaultAsync(a => a.PersonId == staffUser.Id && a.ExerciseId == exerciseId, cancellationToken);
 
         if (assignment is null)
         {
@@ -223,10 +243,12 @@ public sealed class StaffLoginService
                 AccountId = null,
                 StaffUserId = staffUser.Id,
                 PersonaId = null,
+                PersonId = staffUser.Id,
             },
             cancellationToken);
 
-        return StaffLoginResult.Authenticated(issued);
+        // isLead is read LIVE from the enrollment (never stored on the session) — here, the one just authorized.
+        return StaffLoginResult.Authenticated(issued, assignment.IsLead);
     }
 
     /// <summary>
@@ -308,11 +330,15 @@ public sealed class StaffLoginResult
     /// <summary>A successful login carrying the issued session.</summary>
     /// <param name="issued">The issuer result.</param>
     /// <returns>An authenticated result.</returns>
-    public static StaffLoginResult Authenticated(SessionIssueResult issued)
+    /// <param name="isLead">Whether the authorizing enrollment is the exercise's lead controller (read live).</param>
+    public static StaffLoginResult Authenticated(SessionIssueResult issued, bool isLead = false)
     {
         ArgumentNullException.ThrowIfNull(issued);
-        return new StaffLoginResult(StaffLoginOutcome.Authenticated, issued, null);
+        return new StaffLoginResult(StaffLoginOutcome.Authenticated, issued, null) { IsLead = isLead };
     }
+
+    /// <summary>Whether the session's enrollment is the lead controller (projected onto <c>Session.isLead</c>).</summary>
+    public bool IsLead { get; private init; }
 
     /// <summary>A rejected request (bad body / unknown exercise).</summary>
     /// <param name="validationError">The human-readable reason.</param>
