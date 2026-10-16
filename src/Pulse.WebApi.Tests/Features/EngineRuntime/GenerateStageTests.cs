@@ -122,4 +122,41 @@ public sealed class GenerateStageTests
         result.Disposition.Should().Be(GenerateDisposition.Dropped);
         result.Posts.Should().BeEmpty();
     }
+
+    public static IEnumerable<object[]> PersonaVoiceNotesAttacks =>
+        InjectionRedTeam.Catalog
+            .Where(attack => attack.Vector == InjectionVector.PersonaVoiceNotes)
+            .Select(attack => new object[] { attack.Name });
+
+    [Theory]
+    [MemberData(nameof(PersonaVoiceNotesAttacks))]
+    public async Task GenerateAsync_AmbientBurst_SteeredViaPersonaVoiceNotes_ObeyedOutputIsDropped(string attackName)
+    {
+        // Gate-1 M-2 (ambient-chatter story 01, AC7): the hostile payload travels the REAL unfenced path — the persona's
+        // VoiceNotes through PromptAssembler.AppendPersona into an ambient prompt — and the provider obeys it. The guard
+        // must drop the burst so nothing can reach the autonomous publish path.
+        var attack = InjectionRedTeam.Catalog.Single(a => a.Name == attackName);
+        var provider = new StubGenerationProvider([new GeneratedPost("@gen0", "lovely morning at the bakery — " + attack.ObeyedTell, 0.2, [])]);
+        var stage = new GenerateStage(provider, new PromptAssembler());
+        var request = new GenerateStageRequest
+        {
+            ExerciseId = ExerciseId,
+            ExerciseBrief = "The fictional town of Cedar Falls on an ordinary weekday.",
+            Storyline = new StorylineBrief
+            {
+                Title = "cooking, restaurants and local food spots",
+                Expectation = string.Empty,
+                ToneMix = new ToneMix { Calm = 0.75, Gratitude = 0.25 },
+                IsAmbient = true,
+            },
+            Personas = [Dossier("@rosa") with { VoiceNotes = attack.WorldFeedPayload }],
+            Tier = GenerationTier.Ambient,
+        };
+
+        var result = await stage.GenerateAsync(request);
+
+        provider.LastRequest!.SystemPrompt.Should().Contain(attack.WorldFeedPayload, "the payload really took the persona path");
+        result.Disposition.Should().Be(GenerateDisposition.Dropped, "an obeyed persona-bio steer never surfaces");
+        result.Posts.Should().BeEmpty();
+    }
 }
