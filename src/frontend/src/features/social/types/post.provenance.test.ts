@@ -45,8 +45,9 @@ const FULL_POST: Post = {
   inReplyTo: { postId: 'post-parent', authorHandle: 'FulcoEM' },
   linkPreview: { title: 'T', domain: 'example.news', imageLabel: 'L', imageUrl: '/i.png' },
   counts: { reply: 1, repost: 2, like: 3 },
-  viewer: { liked: true, reposted: false, pinned: true },
+  viewer: { liked: true, reposted: false, pinned: true, editableForSeconds: 600 },
   pinnedForAll: true,
+  edited: { count: 2, scenarioTime: '2033-09-04T13:20:00Z' },
   createdWallClock: '2026-07-01T00:00:00.000Z',
   scenarioTime: '2033-09-04T13:15:00Z',
   origin: 'inject',
@@ -94,6 +95,7 @@ describe('XC-002 under contract v2 — runtime', () => {
       [
         'authorPersonaId',
         'counts',
+        'edited',
         'id',
         'inReplyTo',
         'linkPreview',
@@ -163,15 +165,36 @@ describe('XC-002 under contract v2 — narrowing of nested members', () => {
     const smuggled = {
       ...FULL_POST,
       inReplyTo: { postId: 'p', authorHandle: 'h', parentActingHumanId: 'human-secret' },
-      viewer: { liked: true, reposted: true, pinned: false, personaId: 'persona-secret' },
+      viewer: {
+        liked: true,
+        reposted: true,
+        pinned: false,
+        editableForSeconds: 30,
+        personaId: 'persona-secret',
+      },
+      edited: { count: 1, scenarioTime: '2033-09-04T13:20:00Z', editedAt: '2026-07-01T00:00:00Z' },
     } as unknown as Post
 
     const view = toParticipantView(smuggled)
 
     expect(Object.keys(view.inReplyTo ?? {}).sort()).toEqual(['authorHandle', 'postId'])
-    // The three documented viewer keys (story 07 added `pinned`), nothing else.
-    expect(Object.keys(view.viewer ?? {}).sort()).toEqual(['liked', 'pinned', 'reposted'])
+    // The four documented viewer keys (story 07 added `pinned`, story 20 `editableForSeconds`).
+    expect(Object.keys(view.viewer ?? {}).sort()).toEqual([
+      'editableForSeconds',
+      'liked',
+      'pinned',
+      'reposted',
+    ])
     expect(view.viewer?.pinned).toBe(false)
+    expect(view.viewer?.editableForSeconds).toBe(30)
+    // `edited` is exactly { count, scenarioTime }: no wall-clock `editedAt` rides along.
+    expect(Object.keys(view.edited ?? {}).sort()).toEqual(['count', 'scenarioTime'])
+  })
+
+  it('treats `edited: null` as never edited (the key is omitted)', () => {
+    const view = toParticipantView({ ...FULL_POST, edited: null })
+
+    expect(Object.prototype.hasOwnProperty.call(view, 'edited')).toBe(false)
   })
 
   it('keeps a pre-pin viewer to exactly liked + reposted (no invented pinned key)', () => {

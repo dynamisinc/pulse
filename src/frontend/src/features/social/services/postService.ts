@@ -69,6 +69,8 @@ import { wallClockNowIso } from '@/core/time/wallClock'
 import { USE_MOCK_DATA } from '@/core/config/mockData'
 import { getMockMediaAsset } from '@/core/media/mockMediaRegistry'
 import { personaIdForHandle } from '@/features/personas'
+import { EDIT_WINDOW_SECONDS } from '../edit/editLimits'
+import { noteMockPostCreated } from '../edit/mockEdits'
 import { sanitizeText } from './sanitize'
 import { narrowMedia } from './narrowMedia'
 import type {
@@ -206,7 +208,13 @@ export function createPost(input: CreatePostInput): Post {
     // A reply records its parent; `postStore.appendPost` links it (resolves the
     // parent's author handle into `inReplyTo` and bumps the parent's reply count).
     ...(input.parentPostId !== undefined ? { parentPostId: input.parentPostId } : {}),
+    // DF-29 (MOCK only: the server stamps the real window): a participant's own new post
+    // is editable for the full window, as a DURATION (never a clock, COR-053).
+    ...(USE_MOCK_DATA && input.origin === 'participant'
+      ? { viewer: { liked: false, reposted: false, editableForSeconds: EDIT_WINDOW_SECONDS } }
+      : {}),
   }
+  if (USE_MOCK_DATA && input.origin === 'participant') noteMockPostCreated(id, text, input.scenarioTime)
 
   // XC-004: actor.kind is always 'persona' - even an engine- or inject-origin
   // post is attributed to the persona account it was posted AS; `origin` (on
@@ -261,6 +269,10 @@ export function toParticipantView(post: Post): ParticipantPostView {
     ...(post.viewer != null ? { viewer: narrowViewer(post.viewer) } : {}),
     // DF-7: `true` or absent. Anything else (a `false`/`null` from a lenient backend) is absent.
     ...(post.pinnedForAll === true ? { pinnedForAll: true as const } : {}),
+    // DF-31: `edited: null` (or absent) is never edited; the view omits the key.
+    ...(post.edited != null
+      ? { edited: { count: post.edited.count, scenarioTime: post.edited.scenarioTime } }
+      : {}),
   }
 }
 
@@ -274,6 +286,10 @@ function narrowViewer(viewer: PostViewerState): PostViewerState {
     liked: viewer.liked,
     reposted: viewer.reposted,
     ...(typeof viewer.pinned === 'boolean' ? { pinned: viewer.pinned } : {}),
+    // DF-29: own posts only; a duration in seconds (never a wall-clock instant).
+    ...(typeof viewer.editableForSeconds === 'number'
+      ? { editableForSeconds: viewer.editableForSeconds }
+      : {}),
   }
 }
 
@@ -331,7 +347,14 @@ export function hasWellFormedV2Members(value: object): boolean {
       (isRecord(viewer) &&
         typeof viewer.liked === 'boolean' &&
         typeof viewer.reposted === 'boolean' &&
-        (isAbsent(viewer.pinned) || typeof viewer.pinned === 'boolean'))) &&
+        (isAbsent(viewer.pinned) || typeof viewer.pinned === 'boolean') &&
+        isOptionalNumber(viewer.editableForSeconds))) &&
+    // DF-31: `edited` is `{ count, scenarioTime }` or null/absent; anything else fails closed.
+    (isAbsent(p.edited) ||
+      (isRecord(p.edited) &&
+        typeof p.edited.count === 'number' && Number.isInteger(p.edited.count) &&
+        p.edited.count > 0 &&
+        typeof p.edited.scenarioTime === 'string' && p.edited.scenarioTime.length > 0)) &&
     // DF-7: `pinnedForAll` is `true` or absent on the wire; a stray boolean is tolerated
     // (`toParticipantView` keeps only `true`), anything else fails closed.
     (isAbsent(p.pinnedForAll) || typeof p.pinnedForAll === 'boolean')

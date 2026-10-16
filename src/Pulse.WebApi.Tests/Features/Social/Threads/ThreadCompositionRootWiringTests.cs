@@ -81,7 +81,7 @@ public sealed class ThreadCompositionRootWiringTests
     private static ServiceCollection BaseServices()
     {
         var services = new ServiceCollection();
-        services.AddDbContext<PulseDbContext>(options => options.UseSqlServer("Server=nonexistent;Database=pulse;Trusted_Connection=False;"));
+        services.AddDbContext<PulseDbContext>(options => options.UseSqlServer("Server=nonexistent;Database=pulse;Trusted_Connection=False;Connect Timeout=1;"));
         services.AddScoped<IExerciseContext>(_ => new ExerciseContext { CurrentExerciseId = Guid.NewGuid() });
         return services;
     }
@@ -102,7 +102,7 @@ public sealed class ThreadCompositionRootWiringTests
         public DummyDatabaseFactory(bool resolveEveryHost = false)
         {
             _resolveEveryHost = resolveEveryHost;
-            Environment.SetEnvironmentVariable(ConnectionStringEnvVar, "Server=nonexistent;Database=pulse;Trusted_Connection=False;");
+            Environment.SetEnvironmentVariable(ConnectionStringEnvVar, "Server=nonexistent;Database=pulse;Trusted_Connection=False;Connect Timeout=1;");
         }
 
         protected override void ConfigureWebHost(IWebHostBuilder builder)

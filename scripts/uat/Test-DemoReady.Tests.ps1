@@ -378,6 +378,29 @@ Describe 'Test-DemoReady.ps1' {
         }
     }
 
+    Describe 'The demo pack (PR #548 review)' {
+        It 'a pack that cannot be loaded (<Name>) is a FAIL, and the checks that need it FAIL instead of SKIP' -ForEach @(
+            @{ Name = 'missing file'; Content = $null; Reason = 'no file at' }
+            @{ Name = 'invalid JSON'; Content = '{ "pins": [ "p09", '; Reason = 'is not valid JSON' }
+            @{ Name = 'not an object'; Content = '[1, 2]'; Reason = 'not a JSON object' }
+            @{ Name = 'single-object array'; Content = '[{}]'; Reason = 'not a JSON object' }
+        ) {
+            $path = Join-Path $TestDrive "pack-$([guid]::NewGuid().ToString('N')).json"
+            if ($null -ne $Content) { Set-Content -LiteralPath $path -Value $Content }
+            $run = Invoke-Ready -Extra @{ PackPath = $path }
+            $run.Code | Should -Be 1
+            (Get-Result $run 0 'Demo pack').status | Should -Be 'FAIL'
+            (Get-Result $run 0 'Demo pack').detail | Should -Match "demo pack could not be loaded: .*$Reason"
+            foreach ($dependent in @(@(6, 'Exercise pins'), @(7, 'Run sheet'), @(9, 'Scenario clock'), @(10, 'Route /api/posts*'))) {
+                $result = Get-Result $run $dependent[0] $dependent[1]
+                $result.status | Should -Be 'FAIL'
+                $result.detail | Should -Match 'demo pack could not be loaded'
+            }
+            @($run.Results | Where-Object status -eq 'SKIP' | Where-Object check -ne 'Noise posts in the opening feed') | Should -BeNullOrEmpty
+            $run.Text | Should -Match 'NOT READY'
+        }
+    }
+
     Describe 'Check 11: exercise lifecycle' {
         It '<State> is <Status>' -ForEach @(
             @{ State = 'live'; Status = 'PASS'; Pattern = 'expected live; got live' }
@@ -418,6 +441,9 @@ Describe 'Test-DemoReady.ps1' {
             @{ Value = 'not a host' }
             @{ Value = 'https://user:pw@api.fake.test' }
             @{ Value = 'http://api.fake.test' }
+            @{ Value = 'http://localhost:5000' }
+            @{ Value = 'https://api.fake.test:8443' }
+            @{ Value = 'https://api.fake.test:443/' }
             @{ Value = '   ' }
         ) {
             $run = Invoke-Ready -Extra @{ ApiHost = $Value }

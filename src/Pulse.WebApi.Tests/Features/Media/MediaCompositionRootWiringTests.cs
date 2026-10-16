@@ -271,7 +271,7 @@ public sealed class MediaCompositionRootWiringTests
         {
             _environment = environment;
             _settings = settings ?? [];
-            Environment.SetEnvironmentVariable(ConnectionStringEnvVar, "Server=nonexistent;Database=pulse;Trusted_Connection=False;");
+            Environment.SetEnvironmentVariable(ConnectionStringEnvVar, "Server=nonexistent;Database=pulse;Trusted_Connection=False;Connect Timeout=1;");
         }
 
         protected override void ConfigureWebHost(IWebHostBuilder builder)

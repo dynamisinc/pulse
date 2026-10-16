@@ -27,7 +27,7 @@ public sealed class AccountRegistrationTests
 
         // Cross-wave / B0 collaborators the graph needs at runtime, stubbed here.
         services.AddDbContext<PulseDbContext>(options =>
-            options.UseSqlServer("Server=nonexistent;Database=pulse;Trusted_Connection=False;"));
+            options.UseSqlServer("Server=nonexistent;Database=pulse;Trusted_Connection=False;Connect Timeout=1;"));
         services.AddScoped<IExerciseContext, ExerciseContext>();
         services.AddScoped<ISessionIssuer, RecordingSessionIssuer>();
         services.AddScoped<ICurrentStaffSessionAccessor, NullCurrentStaffSessionAccessor>();

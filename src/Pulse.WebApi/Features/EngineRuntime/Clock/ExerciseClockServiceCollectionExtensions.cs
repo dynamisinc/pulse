@@ -22,6 +22,10 @@ public static class ExerciseClockServiceCollectionExtensions
     ///   engine reads the current scope's exercise minute via <see cref="Pulse.WebApi.Data.IExerciseContext"/>
     ///   (registered by <c>AddExerciseScoping</c>, a prerequisite).</item>
     /// </list>
+    /// The clock's change hook <see cref="IExerciseClockChangeSink"/> is registered as the no-op
+    /// <see cref="NullExerciseClockChangeSink"/> via <c>TryAddSingleton</c>; story 18's
+    /// <c>AddExerciseRuntimePersistence()</c> replaces it (in either wiring order) with the queue that writes the
+    /// anchor through to <c>ExerciseRuntimeStates</c>.
     /// A <see cref="TimeProvider"/> is registered (<see cref="TimeProvider.System"/>) only if the host has not
     /// already supplied one, so the monotonic time source is swappable for tests.
     /// </summary>
@@ -32,6 +36,7 @@ public static class ExerciseClockServiceCollectionExtensions
         ArgumentNullException.ThrowIfNull(services);
 
         services.TryAddSingleton(TimeProvider.System);
+        services.TryAddSingleton<IExerciseClockChangeSink, NullExerciseClockChangeSink>();
         services.TryAddSingleton<IExerciseClock, ExerciseClockService>();
         services.TryAddScoped<IScenarioClock, ScenarioClockAdapter>();
 

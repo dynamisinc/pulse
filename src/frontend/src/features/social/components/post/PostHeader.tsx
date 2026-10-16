@@ -37,28 +37,46 @@
  *    only the identity group, never the whole card.
  * Omitted ⇒ no button at all (WR-002: never a focusable no-op).
  *
+ * EDITED (demo-feedback story 20, DF-31). When the post has been edited, an "Edited" BUTTON follows
+ * the time ("· Edited"); text, not colour, marks it, and it is part of the header's accessible
+ * text. It opens the "Edit history" dialog (`EditHistoryDialog`: every version, newest first, in
+ * scenario time). The summary is read through `editedPostsStore` (seeded from the card's own data
+ * by `PostActions`, updated live by `PostEdited` pushes), keyed by the enclosing card's post id
+ * (`useEnclosingPostId`) or the optional `postId` prop. Like the author overlay it sits above the
+ * card's open target (`z-index: 2`) and stops propagation, and it is a SIBLING, never nested.
+ *
  * DOM hooks (tests + e2e depend on them): `data-testid="post-author-target"` and
  * `data-persona-id` on the overlay.
  */
 
-import type { MouseEvent } from 'react'
+import { useState, type MouseEvent } from 'react'
 import type { Persona } from '@/features/personas'
 import { useExerciseContext } from '@/core/exerciseContext'
 import { useScenarioTime } from '@/core/clock'
 import { VerifiedMark } from '../VerifiedMark'
+import { EditHistoryDialog } from '../../edit/EditHistoryDialog'
+import { useEditedPost } from '../../edit/editedPostsStore'
+import { useEnclosingPostId } from '../../edit/useEnclosingPostId'
 import styles from './PostHeader.module.css'
 
 export interface PostHeaderProps {
   readonly author: Persona
   /** Scenario-time ISO instant the post was published (COR-053). */
   readonly scenarioTime: string
+  /** The post this header belongs to; defaults to the enclosing card's id (story 20). */
+  readonly postId?: string
   /** Fires with the AUTHOR's persona id; omit and the identity renders as inert text. */
   readonly onOpenProfile?: (personaId: string) => void
 }
 
-export function PostHeader({ author, scenarioTime, onOpenProfile }: PostHeaderProps) {
+export function PostHeader({ author, scenarioTime, postId, onOpenProfile }: PostHeaderProps) {
   const { timeZone } = useExerciseContext()
   const { format } = useScenarioTime(timeZone)
+
+  const { postId: resolvedId, anchorRef } = useEnclosingPostId(postId)
+  const { edited } = useEditedPost(resolvedId)
+  // The "Edited" button that opened the history (focus returns to it); `null` = closed.
+  const [historyOpener, setHistoryOpener] = useState<HTMLElement | null>(null)
 
   const relativeTime = format(scenarioTime, { format: 'relative' })
   const absoluteTime = format(scenarioTime, { format: 'absolute' })
@@ -76,7 +94,7 @@ export function PostHeader({ author, scenarioTime, onOpenProfile }: PostHeaderPr
   }
 
   return (
-    <header className={styles.header}>
+    <header ref={anchorRef} className={styles.header}>
       {/*
         The author identity group. Its contents are NON-interactive; when
         `onOpenProfile` is supplied the transparent `.authorTarget` overlay below
@@ -106,6 +124,31 @@ export function PostHeader({ author, scenarioTime, onOpenProfile }: PostHeaderPr
       <time className={styles.time} dateTime={scenarioTime} title={absoluteTime}>
         {relativeTime}
       </time>
+      {edited !== undefined && resolvedId !== null && (
+        <>
+          <span className={styles.dot} aria-hidden="true">·</span>
+          <button
+            type="button"
+            className={styles.editedButton}
+            data-testid="post-edited"
+            aria-label="Edited, view edit history"
+            aria-haspopup="dialog"
+            onClick={event => {
+              event.stopPropagation()
+              setHistoryOpener(event.currentTarget)
+            }}
+          >
+            Edited
+          </button>
+          {historyOpener !== null && (
+            <EditHistoryDialog
+              postId={resolvedId}
+              onClose={() => setHistoryOpener(null)}
+              returnFocusTo={historyOpener}
+            />
+          )}
+        </>
+      )}
     </header>
   )
 }
