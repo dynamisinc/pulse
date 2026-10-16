@@ -2,18 +2,20 @@
  * features/social/theme/touchTargets.css.test.ts
  * ---------------------------------------------------------------------------
  * CSS contract for participant touch targets (mobile-tablet story 18; NFR-001).
- * jsdom applies no stylesheets, so the contract is asserted on the real CSS text (Vite
- * `?raw`): each control's >= 44px sizing lives ONLY inside `@media (pointer: coarse)` (a
+ * jsdom applies no stylesheets, so the contract is asserted on the real CSS text (read off disk
+ * with `readSrcFile`, since Vitest blanks `*.css` imports): each control's >= 44px sizing lives ONLY inside `@media (pointer: coarse)` (a
  * mouse layout is unchanged), reads the shared `--pulse-touch-min` (fallback 44px), and uses
  * real layout space -- never an invisible `::before`/`::after` slop that neighbours could
  * intercept (Copilot, PR #584).
  */
 import { describe, expect, it } from 'vitest'
-import actions from '../components/post/PostActions.module.css?raw'
-import composer from '../components/Composer.module.css?raw'
-import media from '../components/ComposerMedia.module.css?raw'
-import header from '../layout/DetailHeader.module.css?raw'
-import profile from '../pages/Profile.module.css?raw'
+import { readSrcFile } from '@/test/readSource'
+
+const actions = readSrcFile('features/social/components/post/PostActions.module.css')
+const composer = readSrcFile('features/social/components/Composer.module.css')
+const media = readSrcFile('features/social/components/ComposerMedia.module.css')
+const header = readSrcFile('features/social/layout/DetailHeader.module.css')
+const profile = readSrcFile('features/social/pages/Profile.module.css')
 
 /** The text of every `@media (pointer: coarse) { ... }` block (brace-balanced). */
 function coarseBlocks(css: string): string {

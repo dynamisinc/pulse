@@ -137,7 +137,7 @@ const FOCUSED_SCALE = 1.06
  * A transform does not take layout space, so the card used to spill `6%` of its own
  * height into its 16 px margin and touched the first reply on tall media.
  */
-export function focusedOverflowPx(layoutHeight: number): number {
+function focusedOverflowPx(layoutHeight: number): number {
   return Math.ceil(layoutHeight * (FOCUSED_SCALE - 1))
 }
 
