@@ -68,8 +68,9 @@ import {
   faNewspaper,
 } from '@fortawesome/free-solid-svg-icons'
 import { useExerciseContext } from '@/core/exerciseContext'
-import { useScenarioTime } from '@/core/clock'
+import { isWallMirroringExerciseClock, useScenarioTime } from '@/core/clock'
 import { useChannelNav, type ChannelIconId } from '../channelNavConfig'
+import { TOUCH_TARGET_MIN_PX, touchTargetCss } from './touchTarget'
 
 /** Maps the closed wire icon identifier to a concrete FontAwesome icon (FA-only, D icons). */
 const CHANNEL_ICON_MAP: Record<ChannelIconId, IconDefinition> = {
@@ -197,7 +198,16 @@ const NAV_STYLES = `
     display: none;
   }
 }
-`
+/* Touch (tablet) strip: links measured 43x28 at 768 px. On a coarse pointer
+   the strip grows to the 44 px touch floor and each link fills it
+   (mobile-tablet 17, NFR-001; see touchTarget.ts for why not a hit-slop).
+   Mouse layouts keep the 38 px strip. */
+@media (pointer: coarse) {
+  .pulse-channel-nav-strip {
+    height: ${TOUCH_TARGET_MIN_PX}px;
+  }
+}
+${touchTargetCss('.pulse-channel-nav-link')}`
 
 export function ChannelNav() {
   const config = useChannelNav()
@@ -228,7 +238,10 @@ export function ChannelNav() {
   if (config.channels.length === 0) return null
   if (config.hideWhenSingleChannel && config.channels.length <= 1) return null
 
-  const dateline = format(now, { format: 'dateline' })
+  // COR-053 guard (mobile-tablet story 17): under the default wall-mirroring
+  // clock "now" is the real date, not scenario time, so render no dateline at
+  // all until a real exercise clock is installed (exercise-clock story 01).
+  const dateline = isWallMirroringExerciseClock() ? null : format(now, { format: 'dateline' })
   const mobileChannels = config.channels.slice(0, MAX_MOBILE_TABS)
 
   return (
@@ -262,7 +275,7 @@ export function ChannelNav() {
             )
           })}
         </ul>
-        <span className="pulse-channel-nav-dateline">{dateline}</span>
+        {dateline && <span className="pulse-channel-nav-dateline">{dateline}</span>}
       </nav>
 
       {/* Mobile: 56px bottom tab bar, up to 5 slots, icon + label. */}
