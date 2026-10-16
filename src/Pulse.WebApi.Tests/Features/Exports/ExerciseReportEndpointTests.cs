@@ -92,6 +92,8 @@ public sealed class ExerciseReportEndpointTests
         var root = json.RootElement;
         root.GetProperty("exercise").GetProperty("name").GetString().Should().Be("Empty Run");
         root.GetProperty("exercise").GetProperty("scenarioStart").ValueKind.Should().Be(JsonValueKind.Null);
+        root.GetProperty("exercise").GetProperty("latestDay").ValueKind.Should().Be(JsonValueKind.Null, "no posts, no latest day");
+        root.GetProperty("exercise").GetProperty("spansMultipleDays").GetBoolean().Should().BeFalse();
         root.GetProperty("summary").GetProperty("posts").GetInt32().Should().Be(0);
         root.GetProperty("summary").GetProperty("busiestWindow").ValueKind.Should().Be(JsonValueKind.Null);
         root.GetProperty("summary").GetProperty("medianResponseMinutes").ValueKind.Should().Be(JsonValueKind.Null);
@@ -225,7 +227,9 @@ public sealed class ExerciseReportEndpointTests
         bins[2].GetProperty("noise").GetInt32().Should().Be(1, "noise is in the numbers even when out of the list");
         bins[1].GetProperty("participant").GetInt32().Should().Be(2);
         var markers = activity.GetProperty("injectMarkers").EnumerateArray().ToArray();
-        markers.Select(m => m.GetProperty("ref").GetString()).Should().Equal("INJ-007", "Shelter opens");
+        markers.Select(m => m.GetProperty("ref").GetString()).Should().Equal(
+            ["INJ-007", null], "the ref is the MSEL number only, null without one (story 31)");
+        markers.Select(m => m.GetProperty("title").GetString()).Should().Equal("Bridge closure", "Shelter opens");
         markers.Select(m => m.GetProperty("binIndex").GetInt32()).Should().Equal(0, 4);
         markers[1].GetProperty("at").GetString().Should().Be("2033-09-04 08:20");
 
@@ -238,7 +242,8 @@ public sealed class ExerciseReportEndpointTests
         responses[0].GetProperty("firstResponseAt").GetString().Should().Be("2033-09-04 08:06");
         responses[0].GetProperty("responseMinutes").GetDouble().Should().Be(6);
         responses[0].GetProperty("respondedAsHandle").GetString().Should().Be("@resident_ann");
-        responses[1].GetProperty("ref").GetString().Should().Be("Shelter opens", "no external ref: the title");
+        responses[1].GetProperty("ref").ValueKind.Should().Be(JsonValueKind.Null, "no external ref: null, the title is not repeated (story 31)");
+        responses[1].GetProperty("title").GetString().Should().Be("Shelter opens");
         responses[1].GetProperty("firstResponseAt").ValueKind.Should().Be(JsonValueKind.Null, "the @mention came after 30 minutes");
         responses[1].GetProperty("responseMinutes").ValueKind.Should().Be(JsonValueKind.Null);
         responses[1].GetProperty("respondedAsHandle").ValueKind.Should().Be(JsonValueKind.Null);
@@ -311,6 +316,10 @@ public sealed class ExerciseReportEndpointTests
         replyDto.GetProperty("parentPostId").GetString().Should().Be(injectPost.ToString());
         replyDto.GetProperty("author").GetProperty("avatarUrl").ValueKind.Should().Be(JsonValueKind.Null);
         replyDto.GetProperty("text").GetString().Should().Be("Which bridge?");
+        replyDto.GetProperty("threadRootId").GetString().Should().Be(injectPost.ToString(), "the parent is listed (DF-47)");
+        replyDto.GetProperty("depth").GetInt32().Should().Be(1);
+        first.GetProperty("threadRootId").GetString().Should().Be(injectPost.ToString());
+        first.GetProperty("depth").GetInt32().Should().Be(0);
 
         posts[2].GetProperty("source").GetString().Should().Be("controller-as-persona");
 
@@ -727,7 +736,7 @@ public sealed class ExerciseReportEndpointTests
     }
 
     [RequiresDockerFact]
-    public async Task Filters_ChangeOnlyTheRecord_EveryOtherSectionIsIdentical()
+    public async Task SourceFilters_ChangeOnlyTheRecord_EveryOtherSectionIsIdentical()
     {
         var exerciseId = await _seed.ExerciseAsync(timeZone: "America/Chicago");
         var (token, _) = await _seed.StaffAsync(exerciseId, [(exerciseId, "controller")]);
@@ -752,7 +761,8 @@ public sealed class ExerciseReportEndpointTests
             "?sources=noise",
             "?sources=participant",
             "?sources=scripted,engine&includeNoise=true",
-            "?from=2033-09-04%2008:05&to=2033-09-04%2008:06",
+
+            // A window enclosing every post is the same report as no window (DF-45).
             "?sources=engine&from=2033-09-04%2007:00",
         ];
 
@@ -776,7 +786,7 @@ public sealed class ExerciseReportEndpointTests
                 .Should().Be(1, "lookalike engagement is read for its own posts whether they are listed or not ({0})", query);
         }
 
-        sections.Distinct().Should().ContainSingle("the summary, chart, inject responses and lookalikes never change with the filters (DF-43)");
+        sections.Distinct().Should().ContainSingle("the sources never change the summary, chart, inject responses or lookalikes (DF-44)");
     }
 
     [RequiresDockerFact]
@@ -896,7 +906,7 @@ public sealed class ExerciseReportEndpointTests
         record.GetProperty("from").GetString().Should().Be("2033-09-04 08:05");
         record.GetProperty("to").GetString().Should().Be("2033-09-04 08:10");
         record.GetProperty("matching").GetInt32().Should().Be(4);
-        root.GetProperty("summary").GetProperty("posts").GetInt32().Should().Be(6);
+        root.GetProperty("summary").GetProperty("posts").GetInt32().Should().Be(4, "the window scopes the summary too (DF-45)");
 
         // The same clock times read as UTC would select nothing: they are hours before the first post.
         using var openEnded = await host.GetReportAsync(token, "?from=2033-09-04%2008:11");
