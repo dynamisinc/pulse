@@ -270,6 +270,39 @@ public sealed class ForwardedHeadersTests
         act.Should().Throw<InvalidOperationException>("a mistyped trusted-proxy entry must not be dropped silently");
     }
 
+    /// <summary>Gate-1 M-2: the framework trust-every-peer switch is refused at startup.</summary>
+    [Theory]
+    [InlineData("true")]
+    [InlineData("True")]
+    public void FrameworkForwardedHeadersSwitch_IsRefusedAtStartup(string value)
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["ASPNETCORE_FORWARDEDHEADERS_ENABLED"] = value,
+                ["ForwardedHeaders:KnownNetworks:0"] = "10.0.0.0/8",
+            })
+            .Build();
+
+        var act = () => new ServiceCollection().AddPulseForwardedHeaders(configuration);
+
+        act.Should().Throw<InvalidOperationException>("that switch trusts forwarded headers from any client")
+            .WithMessage("*ASPNETCORE_FORWARDEDHEADERS_ENABLED*");
+    }
+
+    /// <summary>The switch set to false (or absent) is fine.</summary>
+    [Fact]
+    public void FrameworkForwardedHeadersSwitch_False_IsAllowed()
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["ASPNETCORE_FORWARDEDHEADERS_ENABLED"] = "false" })
+            .Build();
+
+        var act = () => new ServiceCollection().AddPulseForwardedHeaders(configuration);
+
+        act.Should().NotThrow();
+    }
+
     /// <summary>The pipeline half refuses to run without its DI half.</summary>
     [Fact]
     public void UseWithoutAdd_Throws()

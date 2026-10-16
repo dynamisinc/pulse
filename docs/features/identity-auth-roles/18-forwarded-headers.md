@@ -16,7 +16,7 @@ or no one. The lockout policy ([`docs/design/ADMIN-IDENTITY-MODEL.md`](../../des
 - [ ] Given `X-Forwarded-Proto`, then HTTPS redirection / secure-cookie logic sees the original scheme.
 - [ ] Given the existing staff-login limit (10 per minute) is exceeded from one client IP (the 11th attempt), then the limiter trips for that IP only; a second client IP behind the same proxy is unaffected. *(Corrected from "6 failed logins": the existing limit is 10/min and this story does not change limiters.)*
 - [ ] Isolation: the limiter partition never mixes exercises or orgs; no per-route foreign-exercise/org test is needed as no route is added (stated).
-- [ ] User guide (C5 docs-as-done): `docs/OPERATE.md` (trusted-proxy config) is updated in the same PR; no `docs/guide/` page changes ("no guide impact").
+- [ ] User guide (C5 docs-as-done): `docs/OPERATE.md` (trusted-proxy config and shared-NAT note) and `docs/guide/troubleshooting.md` ("Too many tries" counts per network address) are updated in the same PR.
 
 ## Out of Scope
 New limiters; MFA; HIBP breach checks (#490).
@@ -42,7 +42,7 @@ Linked (`src/Pulse.WebApi.Tests/Features/TrustedProxy/`):
 - `ForwardedHeadersTests.TrustedProxy_ForwardedProto_RestoresHttpsScheme` (AC-4)
 - `ForwardedHeadersTests.InvalidConfiguration_FailsFast`, `ForwardedHeadersTests.UseWithoutAdd_Throws` (config safety)
 - `ForwardedHeadersPipelineOrderTests.RealPipeline_ForwardedHeadersRunBeforeTheRateLimiter_SoClientsBehindTheProxyGetSeparateBuckets`
-  (AC-3, AC-5 over the real `Program`) — **skipped until the orchestrator wires `Program.cs`**; remove the `Skip` in the
+  (AC-3, AC-5 over the real `Program`) — active since the wiring commit (passes against the real `Program`).
   wiring commit. Verified red against the current (unwired) `Program`.
 
 AC-5 note: the staff-login limiter is 10 attempts/minute per IP (unchanged; new limiters are out of scope), so the tests

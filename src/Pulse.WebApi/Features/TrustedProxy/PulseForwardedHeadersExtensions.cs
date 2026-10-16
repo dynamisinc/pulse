@@ -42,13 +42,25 @@ public static class PulseForwardedHeadersExtensions
     /// <param name="services">The service collection to register into.</param>
     /// <param name="configuration">The application configuration.</param>
     /// <returns>The same collection, for chaining.</returns>
-    /// <exception cref="InvalidOperationException">The configuration section is invalid.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// The configuration section is invalid, or <c>ASPNETCORE_FORWARDEDHEADERS_ENABLED</c> is set to true (that
+    /// framework switch installs a trust-every-peer forwarded-headers middleware ahead of this one, so the host
+    /// refuses to start rather than silently letting any client forge its IP).
+    /// </exception>
     public static IServiceCollection AddPulseForwardedHeaders(
         this IServiceCollection services,
         IConfiguration configuration)
     {
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(configuration);
+
+        // Defense in depth (Gate-1 M-2): the framework switch is documented as forbidden, and it is also refused here.
+        if (bool.TryParse(configuration["ASPNETCORE_FORWARDEDHEADERS_ENABLED"], out var frameworkSwitch) && frameworkSwitch)
+        {
+            throw new InvalidOperationException(
+                "ASPNETCORE_FORWARDEDHEADERS_ENABLED=true trusts forwarded headers from every client. Remove it and " +
+                "configure ForwardedHeaders:KnownNetworks / KnownProxies instead (docs/OPERATE.md, trusted proxy).");
+        }
 
         var settings = new PulseForwardedHeadersOptions();
         configuration.GetSection(PulseForwardedHeadersOptions.SectionName).Bind(settings);

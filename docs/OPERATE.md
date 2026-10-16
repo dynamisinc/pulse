@@ -93,11 +93,16 @@ scheme (`X-Forwarded-Proto`), but **only from peers you configure**:
   cannot connect from those ranges directly. If the app is ever put behind another hop (Front Door, App
   Gateway), add that hop and revisit `ForwardLimit`.
 - **Never set `ASPNETCORE_FORWARDEDHEADERS_ENABLED=true`.** That framework switch adds its own forwarded-headers
-  middleware that trusts **every** peer, so any client could forge its IP and dodge the limiter.
+  middleware that trusts **every** peer, so the trust list stops protecting the limiter. The host now refuses to
+  start if it is set.
 - `X-Forwarded-Host` is never honored: the request host selects the exercise, so it must not be client-settable.
 - **Check it worked:** after a deploy, two people on different networks should each get their own staff-login
   limit (10 failed attempts per minute). If one person's failures lock out the other, the networks are not
   configured.
+- **Shared networks still share a limit.** The limiters partition on the client's **public** IP. Everyone behind
+  one NAT (venue Wi-Fi, an agency VPN, a corporate proxy) is one client to Pulse. For a large single-site exercise,
+  raise the per-policy permits ahead of StartEx without a deploy (e.g. `Authentication__EasyLogin__JoinPermitPerMinute`
+  for personal links; see each policy's options) and stagger sign-ins.
 
 ## Rollback
 

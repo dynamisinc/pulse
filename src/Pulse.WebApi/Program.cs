@@ -400,13 +400,9 @@ app.UseAuthorization();
 // probe, the only test that can see it (a slice-composed host fixes its own scope, so it cannot).
 app.UseExerciseLifecycleGating();
 
-// Rate limiting (identity-auth-roles/05 staff-login + /03 session-endpoints policies). NOTE (Gate-1,
-// tracked for /security-review before the umbrella→main PR): the staff-login limiter partitions on
-// Connection.RemoteIpAddress, which behind the Azure App Service reverse proxy is the platform proxy's
-// address — so the "per-IP" partition collapses to one global bucket unless forwarded-headers handling that
-// trusts ONLY the platform proxy (NEVER client-supplied X-Forwarded-For, which would let an attacker evade
-// the limit) is wired ahead of this. That config is a deployment/security decision finalized under
-// /security-review. Separately, the always-on session middleware's per-request token lookup is not covered
+// Rate limiting (identity-auth-roles/05 staff-login + /03 session-endpoints policies). The per-IP partitions see
+// the real client because UsePulseForwardedHeaders() runs first and trusts ONLY the configured platform ranges
+// (identity-auth-roles/18, #480); clients behind one NAT still share a bucket (docs/OPERATE.md). Separately, the always-on session middleware's per-request token lookup is not covered
 // by these per-endpoint policies — a global per-IP limiter / edge-WAF is a /security-review item too.
 app.UseRateLimiter();
 
