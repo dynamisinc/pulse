@@ -12,7 +12,13 @@
  * time"). "Prepared" (`preparedAt`, exercise zone) is printed once, in the meta list.
  */
 
-import { binWidthLabel, formatDay, formatDayWithWeekday, formatWindow, timeOf } from '../services/reportFormat'
+import {
+  binWidthLabel,
+  formatDay,
+  formatDayWithWeekday,
+  formatStamp,
+  formatWindow,
+} from '../services/reportFormat'
 import type { ExerciseReport } from '../types/report'
 import { ActivityChart } from './ActivityChart'
 import { InjectResponseTable } from './InjectResponseTable'
@@ -44,6 +50,9 @@ export function ReportSheet({ report }: ReportSheetProps) {
   const { exercise, summary } = report
   const sourceTotal = SOURCE_ROWS.reduce((sum, row) => sum + summary.bySource[row.key], 0)
   const busiest = summary.busiestWindow
+  // Story 31 (DF-45): a window scopes every section, so the header says so.
+  const windowed = report.postRecord.from !== null || report.postRecord.to !== null
+  const spans = exercise.spansMultipleDays
 
   return (
     <div className={styles.sheet} data-testid="report-sheet">
@@ -61,6 +70,9 @@ export function ReportSheet({ report }: ReportSheetProps) {
               <dt>Scenario window</dt>
               <dd>
                 {formatWindow(exercise.scenarioStart, exercise.scenarioEnd, exercise.timeZone)}
+                {windowed && (
+                  <span className={styles.filtered} data-testid="window-filtered">{' · filtered'}</span>
+                )}
               </dd>
             </div>
             <div>
@@ -87,7 +99,7 @@ export function ReportSheet({ report }: ReportSheetProps) {
             />
             <Stat
               value={busiest !== null ? busiest.posts.toLocaleString('en-US') : '—'}
-              label={busiest !== null ? `Busiest 5 minutes (${timeOf(busiest.start)})` : 'Busiest 5 minutes'}
+              label={busiest !== null ? `Busiest 5 minutes (${formatStamp(busiest.start, spans)})` : 'Busiest 5 minutes'}
             />
             {summary.postsEdited !== null && (
               <Stat value={summary.postsEdited.toLocaleString('en-US')} label="Posts edited" />
@@ -119,10 +131,10 @@ export function ReportSheet({ report }: ReportSheetProps) {
           <h2 id="report-activity-h" className={styles.heading}>
             Activity over time <small>{`Posts per ${binWidthLabel(report.activity.binMinutes)}, by source`}</small>
           </h2>
-          <ActivityChart activity={report.activity} />
+          <ActivityChart activity={report.activity} spansMultipleDays={spans} />
         </section>
 
-        <InjectResponseTable rows={report.injectResponses} />
+        <InjectResponseTable rows={report.injectResponses} spansMultipleDays={spans} />
 
         {report.lookalikes.length > 0 && <LookalikeSection pairs={report.lookalikes} />}
 
@@ -130,6 +142,7 @@ export function ReportSheet({ report }: ReportSheetProps) {
           posts={report.posts}
           omittedNoiseCount={report.omittedNoiseCount}
           postRecord={report.postRecord}
+          spansMultipleDays={spans}
         />
 
         <footer className={styles.foot}>

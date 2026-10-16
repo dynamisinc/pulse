@@ -5,9 +5,9 @@ using System.Globalization;
 using System.Linq;
 
 /// <summary>
-/// The post record's filters (demo-feedback story 30, DF-44): which sources are listed and an inclusive scenario-time
-/// window in the exercise zone. They narrow only the post record; the summary, activity, inject responses and
-/// lookalikes are always built over every post (DF-43).
+/// The report's filters (demo-feedback stories 30 and 31, DF-44/DF-45): which sources are listed and an inclusive
+/// scenario-time window in the exercise zone. The sources narrow only the post record (DF-44); the window scopes the
+/// whole report (DF-45), so the service tests every section's posts with <see cref="InWindow"/>.
 /// </summary>
 /// <remarks>
 /// The window is compared against each post's scenario time as the report prints it: converted to the exercise zone
@@ -65,6 +65,9 @@ public sealed class ExerciseReportFilter
 
     /// <summary>Whether noise posts are listed.</summary>
     public bool IncludesNoise => _series.Contains(ReportSeries.Noise);
+
+    /// <summary>Whether a window bound is set (either end); without one, <see cref="InWindow"/> admits every post.</summary>
+    public bool HasWindow => From is not null || To is not null;
 
     /// <summary>
     /// Parses the query parameters. A missing <paramref name="sources"/> means the default sources;
@@ -150,13 +153,21 @@ public sealed class ExerciseReportFilter
     public bool Matches(string? origin, DateTimeOffset scenarioTime, TimeZoneInfo zone)
     {
         ArgumentNullException.ThrowIfNull(zone);
+        return _series.Contains(ExerciseReportBuilder.Series(origin)) && InWindow(scenarioTime, zone);
+    }
 
-        if (!_series.Contains(ExerciseReportBuilder.Series(origin)))
-        {
-            return false;
-        }
+    /// <summary>
+    /// Whether a scenario instant's printed minute (exercise zone, truncated to the minute) is inside the window, both
+    /// ends inclusive; always <c>true</c> without a window. Time only: the sources play no part (DF-45).
+    /// </summary>
+    /// <param name="scenarioTime">The scenario instant.</param>
+    /// <param name="zone">The exercise zone.</param>
+    /// <returns><c>true</c> when the instant is in the window.</returns>
+    public bool InWindow(DateTimeOffset scenarioTime, TimeZoneInfo zone)
+    {
+        ArgumentNullException.ThrowIfNull(zone);
 
-        if (From is null && To is null)
+        if (!HasWindow)
         {
             return true;
         }
