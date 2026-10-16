@@ -380,8 +380,8 @@ public sealed partial class EnrollmentService
         var revoked = await RevokeExerciseSessionsAsync(exercise.Id, [enrollment.PersonId], now, cancellationToken);
         Record(caller, exercise, enrollment, RoleChangedEventType, RoleChangedAuditKind, RolePayload(staffRole, previousRole), now);
         await _dbContext.SaveChangesAsync(cancellationToken);
-        await _connectionRevoker.RevokeAsync(revoked, cancellationToken);
         await TurnSwampedModeOffAfterCommitAsync(caller, exercise, enrollment, leadReleased, now, cancellationToken);
+        await CutRevokedConnectionsAfterCommitAsync(revoked, cancellationToken);
 
         return EnrollmentResult.Ok(enrollment);
     }
@@ -415,8 +415,8 @@ public sealed partial class EnrollmentService
         var revoked = await RevokeExerciseSessionsAsync(exercise.Id, [enrollment.PersonId], now, cancellationToken);
         Record(caller, exercise, enrollment, RevokedEventType, RevokedAuditKind, RolePayload(role: null, enrollment.Role), now);
         await _dbContext.SaveChangesAsync(cancellationToken);
-        await _connectionRevoker.RevokeAsync(revoked, cancellationToken);
         await TurnSwampedModeOffAfterCommitAsync(caller, exercise, enrollment, leadReleased, now, cancellationToken);
+        await CutRevokedConnectionsAfterCommitAsync(revoked, cancellationToken);
 
         return EnrollmentResult.Ok(enrollment);
     }
@@ -487,11 +487,34 @@ public sealed partial class EnrollmentService
         {
             await _dbContext.SaveChangesAsync(cancellationToken);
         }
-        catch (DbUpdateException exception)
+        catch (Exception exception) when (exception is not OperationCanceledException)
         {
             LogSwampedModeRecordFailed(exercise.Id, exception);
         }
     }
+
+    /// <summary>
+    /// Cuts the live hub connections of the sessions the committed change revoked. Runs after the swamped-mode flip so
+    /// a failure here can never skip it, and never fails the request: the sessions are already revoked in the database,
+    /// so a connection that survives is refused on its next authenticated call.
+    /// </summary>
+    private async Task CutRevokedConnectionsAfterCommitAsync(IReadOnlyCollection<Guid> revoked, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _connectionRevoker.RevokeAsync(revoked, cancellationToken);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            LogConnectionCutFailed(revoked.Count, exception);
+        }
+    }
+
+    [LoggerMessage(
+        EventId = 3,
+        Level = LogLevel.Error,
+        Message = "{Count} revoked session(s) could not have their live connections cut; the enrollment change has committed.")]
+    private partial void LogConnectionCutFailed(int count, Exception exception);
 
     [LoggerMessage(
         EventId = 1,

@@ -108,8 +108,11 @@ can carry: an org-admin session has `exerciseId: null`, and the role is a union 
 **Deploy: frontend first.** The migration revokes every live `orgAdmin` session. After it, the only way to get the
 `orgAdmin` role is an org-scope session, and the bundle that is serving today rejects that session as invalid. Use
 **Cancel and re-dispatch** (above): cancel the auto-triggered *Deploy Backend* run, let *Deploy Frontend* finish,
-confirm the new bundle is serving, then re-dispatch *Deploy Backend*. Exercise-scoped sessions are unaffected either
-way (their new fields are additive). Everyone with an `orgAdmin` session must sign in again after the deploy.
+confirm the new bundle is serving, then re-dispatch *Deploy Backend*. This is safe because the new bundle's session and
+staff-assignment parsers accept **both** shapes: the pre-A1 one (no `scope`, `world`, `isLead` or `personId`; those
+default to an exercise session, the world implied by the role, not lead, and no person) and the A1 one. So exercise
+sessions keep working while the old backend is still serving. Everyone with an `orgAdmin` session must sign in again
+after the deploy.
 
 **Before the backend deploy, note the time.** Write down the UTC time just before you re-dispatch *Deploy Backend*.
 That is the point-in-time-restore (PITR) target if a rollback is needed.
@@ -121,7 +124,8 @@ That is the point-in-time-restore (PITR) target if a rollback is needed.
 2. **PITR to the noted time.** If the data is wrong, restore `sqldb-pulse-uat` to the time noted above (Azure portal
    → the database → *Restore*, as a new database, then swap the connection string). Then redeploy the backend and
    frontend from the commit before the merge, **backend first, frontend second**. Anything written after the noted
-   time is lost.
+   time is lost. The new bundle also reads the restored pre-A1 session shape, so the order between the two
+   redeploys does not break exercise sessions; org-scope sign-in simply stops working once the backend is back.
 3. **The migration's `Down`.** Last resort. It is reversible but **not loss-free**:
    - `StaffAssignments` come back with the same ids, and `Accounts.Role` / `PersonaId` are restored from enrollments.
    - A person who was both a planner and an org admin comes back as `orgAdmin` only.
