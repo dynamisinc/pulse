@@ -11,6 +11,15 @@
  *    `aria-describedby` so a screen reader hears it too. An ARCHIVED row has no
  *    Archive button at all: it is already archived, and its status cell says so.
  *
+ * ## Focus after a successful archive
+ * MUI returns focus to the control that opened a dialog, but a successful
+ * archive REMOVES that control (the row re-reads as archived) and moves the row
+ * to the end of the table, so focus would fall to `<body>` and a keyboard user
+ * would lose their place. So once the dialog has closed AND the refreshed row
+ * reads archived, focus goes to this row's Rename button, which survives. It
+ * only moves focus that was lost (on `<body>`) or still inside this row, so a
+ * person who has already moved on is never pulled back.
+ *
  * Who sees this: the page only mounts for the DF-20 roles (planner, org admin,
  * controller). An evaluator never reaches `/staff/exercises` (the not-allowed
  * page), so it never sees these actions; `orgAdminSurfaceFamily.test.tsx`
@@ -19,7 +28,7 @@
  * World: STAFF (COBRA). FontAwesome only; MUI 9 `sx`-only system props.
  */
 
-import { useId, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { Stack, Typography } from '@mui/material'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faBoxArchive, faPen } from '@fortawesome/free-solid-svg-icons'
@@ -46,12 +55,30 @@ export interface ExerciseRowActionsProps {
 /** One row's actions and the dialogs they open. See the module header. */
 export function ExerciseRowActions({ exercise }: ExerciseRowActionsProps) {
   const [open, setOpen] = useState<'rename' | 'archive' | null>(null)
+  // Set by a successful archive; consumed once the row has re-read as archived.
+  const [focusRenameAfterArchive, setFocusRenameAfterArchive] = useState(false)
+  const rowRef = useRef<HTMLDivElement>(null)
+  const renameRef = useRef<HTMLButtonElement>(null)
   const reasonId = useId()
   const archived = isArchivedStatus(exercise.status)
   const completed = isCompletedStatus(exercise.status)
 
+  // See "Focus after a successful archive" in the module header. Runs after the
+  // commit that both unmounts the dialog (MUI's own focus restore runs first) and
+  // shows the row archived (its DOM move has already happened).
+  useEffect(() => {
+    if (!focusRenameAfterArchive || open !== null || !archived) return
+    setFocusRenameAfterArchive(false)
+    const active = document.activeElement
+    const focusWasLost = active === null || active === document.body
+    if (focusWasLost || (rowRef.current?.contains(active) ?? false)) {
+      renameRef.current?.focus()
+    }
+  }, [focusRenameAfterArchive, open, archived])
+
   return (
     <Stack
+      ref={rowRef}
       direction="row"
       data-testid={`org-exercise-actions-${exercise.exerciseId}`}
       sx={{ alignItems: 'center', gap: 1, flexWrap: 'wrap' }}
@@ -60,6 +87,7 @@ export function ExerciseRowActions({ exercise }: ExerciseRowActionsProps) {
         type="button"
         size="small"
         startIcon={<FontAwesomeIcon icon={faPen} aria-hidden="true" />}
+        ref={renameRef}
         onClick={() => setOpen('rename')}
         aria-label={`Rename ${exercise.name}`}
         sx={ACTION_BUTTON_SX}
@@ -98,7 +126,14 @@ export function ExerciseRowActions({ exercise }: ExerciseRowActionsProps) {
         <RenameExerciseDialog exercise={exercise} onClose={() => setOpen(null)} />
       )}
       {open === 'archive' && (
-        <ArchiveExerciseDialog exercise={exercise} onClose={() => setOpen(null)} />
+        <ArchiveExerciseDialog
+          exercise={exercise}
+          onClose={() => setOpen(null)}
+          onArchived={() => {
+            setFocusRenameAfterArchive(true)
+            setOpen(null)
+          }}
+        />
       )}
     </Stack>
   )

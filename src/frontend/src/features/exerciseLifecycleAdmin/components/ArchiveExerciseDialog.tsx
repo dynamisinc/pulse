@@ -33,12 +33,22 @@ const PENDING_SX = {
 export interface ArchiveExerciseDialogProps {
   /** The completed row being archived. */
   readonly exercise: OrgExercise
-  /** Closes the dialog (after success, or on Cancel / Esc when nothing is in flight). */
+  /** Closes the dialog on Cancel / Esc when nothing is in flight. */
   readonly onClose: () => void
+  /**
+   * Closes the dialog after a successful archive, once the list has re-read. The
+   * control that opened the dialog is gone by then, so the row restores focus
+   * itself (`ExerciseRowActions`). Falls back to `onClose` when not given.
+   */
+  readonly onArchived?: () => void
 }
 
 /** The archive confirm. See the module header. */
-export function ArchiveExerciseDialog({ exercise, onClose }: ArchiveExerciseDialogProps) {
+export function ArchiveExerciseDialog({
+  exercise,
+  onClose,
+  onArchived,
+}: ArchiveExerciseDialogProps) {
   const archive = useArchiveExercise()
   const titleId = useId()
   const bodyId = useId()
@@ -59,7 +69,7 @@ export function ArchiveExerciseDialog({ exercise, onClose }: ArchiveExerciseDial
 
   const confirm = () => {
     if (pending) return
-    archive.mutate(exercise.exerciseId, { onSuccess: () => onClose() })
+    archive.mutate(exercise.exerciseId, { onSuccess: () => (onArchived ?? onClose)() })
   }
 
   return (

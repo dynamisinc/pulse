@@ -44,7 +44,9 @@ components/RenameExerciseDialog / ArchiveExerciseDialog   the two row-action dia
 components/ExerciseStatusBadge icon + word + colour — never colour alone (NFR-001)
 hooks/useOrgExercises         React Query read;  key ['org','exercises']
 hooks/useCreateExercise       React Query write; invalidates that key on success
-hooks/useExerciseRowActions   rename / archive mutations; invalidate the same key
+hooks/useExerciseRowActions   rename / archive mutations; invalidate the same key + the switcher's;
+                              on the ACTIVE exercise also re-resolve the scope (header) and, for a
+                              rename, re-read the settings block (its save is a full replace)
 services/orgExercisesService  the ONE mock/live flip point + wire validation
 types.ts                      OrgExercise / CreateExerciseInput / CreateExerciseResult
 ```
