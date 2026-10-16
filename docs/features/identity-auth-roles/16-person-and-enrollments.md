@@ -58,7 +58,7 @@ every other Phase-A story reads. Staff-world plumbing; no participant-visible ch
 ### Orchestrator review fold (2026-10-16, ADMIN-IDENTITY-MODEL §1.1)
 - [ ] `isLead` is computed when the DTO is built, from the live `Enrollment.IsLead`, and is never stored on `Session`. It is false for org-scope and participant sessions, and the frontend `Enrollment` type carries it too.
 - [ ] Migration backfill: exactly one lead per exercise that has any controller, namely the earliest-created controller enrollment (ties go to the lowest Id). A migration test covers it.
-- [ ] Removing the lead's enrollment, or changing its role away from controller, never returns a 500 on the check constraint. **It is allowed (Option A, Tom, 2026-10-16).** In the same transaction it clears `IsLead` and turns swamped mode off, and both are audited. The exercise then has no lead until a planner sets one. A test covers both the removal and the role-change paths.
+- [ ] Removing the lead's enrollment, or changing its role away from controller, never returns a 500 on the check constraint. **It is allowed (Option A, Tom, 2026-10-16).** The transaction clears `IsLead`, and swamped mode is turned off **after commit** (idempotent; see the M-002 fold below), and both are audited. The exercise then has no lead until a planner sets one. A test covers both the removal and the role-change paths.
 
 ### Copilot review 5 fold (2026-10-16)
 - [ ] Grant revocation also aborts every SignalR connection bound to a revoked session id and removes it from its groups (a connection-to-session registry). A test covers a client connected before revocation, which stops receiving staff broadcasts.
@@ -71,6 +71,9 @@ every other Phase-A story reads. Staff-world plumbing; no participant-visible ch
 - [ ] **`FirstLiveAt` is stamped from A1.** Every transition into `live` (StartEx, plus any bootstrap path) sets `FirstLiveAt` if null, in the same transaction. Test: an exercise in build at A1 deploy runs afterwards, then is reset; delete is refused and archive-from-build is allowed.
 - [ ] **Existing exercise-scoped `orgAdmin` sessions are revoked** by the migration, because the new contract rejects `orgAdmin` with exercise scope. Test: an access and refresh pair from before the migration gets 401 afterwards, and a fresh sign-in mints an org-scope session.
 - [ ] `assignments` and `active-exercise` refuse participant and readonly sessions.
+
+### Orchestrator review fold (2026-10-16, M-002)
+- [ ] Swamped mode lives in memory (`EngineAutonomyState`). When the lead is removed or demoted, it is turned off **after** the enrollment change commits, **idempotently**, so a failed flip retries. On rehydrate, an exercise with no lead comes back with swamped mode off (test).
 
 ## Out of Scope
 Password sign-in itself and org choice (story 15 / 05); role enforcement (17); invite and directory UI (19-20);
