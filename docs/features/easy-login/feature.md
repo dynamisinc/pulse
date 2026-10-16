@@ -108,3 +108,7 @@ Run on UAT after the backend seam deploy and the frontend deploy, on a real phon
 * Ending all sessions that used the word when it is rotated: not built; rotation only stops new sign-ins (open question).
 * Group or hide auto-created citizen personas in the controller persona picker: follow-up.
 * SSO or federation for participants: a future direction (COR-014).
+
+## Scope update 2026-10-16 (ADMIN-IDENTITY-MODEL)
+
+Source: [`docs/design/ADMIN-IDENTITY-MODEL.md`](../../design/ADMIN-IDENTITY-MODEL.md). Stories 02, 03 and 05 carry amendment notes: role/persona reads move to `Enrollment` (A1); story 02 gains roster reconciliation by email within the org, the "add to directory" import option and promote-one-off (A2). Existing ACs and statuses are unchanged.

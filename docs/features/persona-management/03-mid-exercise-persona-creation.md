@@ -33,3 +33,7 @@ Story 01 (persona fields); exercise-isolation. Consumed by E7 persona-operation/
 ## Tests
 - Integration: quick-create yields a usable exercise-scoped persona; per-exercise handle uniqueness
   enforced.
+
+## Scope update 2026-10-16 (ADMIN-IDENTITY-MODEL)
+
+~~Closed as a duplicate of closed #18.~~ **Corrected (Copilot review 6):** #18 was closed as a duplicate *of #55*, so **this story (#55) is the surviving owner of COR-022** and stays open (wave A4). It builds on the persona create service from story 01: mid-exercise creation in ≤60s from the controller console.
