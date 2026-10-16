@@ -32,11 +32,17 @@ public sealed class ExerciseReportDto
     [JsonPropertyName("lookalikes")]
     public required IReadOnlyList<ReportLookalikeDto> Lookalikes { get; init; }
 
-    /// <summary>The post record, in scenario order; empty when <see cref="ReportPostRecordDto.Withheld"/>.</summary>
+    /// <summary>
+    /// The post record, threaded (DF-47): thread roots in scenario order, each followed by its listed descendants in
+    /// scenario order; empty when <see cref="ReportPostRecordDto.Withheld"/>.
+    /// </summary>
     [JsonPropertyName("posts")]
     public required IReadOnlyList<ReportPostDto> Posts { get; init; }
 
-    /// <summary>Noise posts left out of <see cref="Posts"/> because <c>noise</c> is not a selected source; 0 when it is.</summary>
+    /// <summary>
+    /// Noise posts in the window left out of <see cref="Posts"/> because <c>noise</c> is not a selected source; 0 when
+    /// it is.
+    /// </summary>
     [JsonPropertyName("omittedNoiseCount")]
     public required int OmittedNoiseCount { get; init; }
 
@@ -84,11 +90,17 @@ public sealed class ReportExerciseDto
     [JsonPropertyName("timeZone")]
     public required string TimeZone { get; init; }
 
-    /// <summary>The first post's scenario time, <c>yyyy-MM-dd HH:mm</c>; <c>null</c> when there are no posts.</summary>
+    /// <summary>
+    /// The first post's scenario time, <c>yyyy-MM-dd HH:mm</c>, over the posts in the window in effect (DF-45);
+    /// <c>null</c> when there are none.
+    /// </summary>
     [JsonPropertyName("scenarioStart")]
     public required string? ScenarioStart { get; init; }
 
-    /// <summary>The last post's scenario time, <c>yyyy-MM-dd HH:mm</c>; <c>null</c> when there are no posts.</summary>
+    /// <summary>
+    /// The last post's scenario time, <c>yyyy-MM-dd HH:mm</c>, over the posts in the window in effect (DF-45);
+    /// <c>null</c> when there are none.
+    /// </summary>
     [JsonPropertyName("scenarioEnd")]
     public required string? ScenarioEnd { get; init; }
 
@@ -99,9 +111,40 @@ public sealed class ReportExerciseDto
     /// <summary>The server's wall clock when the report was built, in the exercise's zone, <c>yyyy-MM-dd HH:mm</c>.</summary>
     [JsonPropertyName("preparedAt")]
     public required string PreparedAt { get; init; }
+
+    /// <summary>
+    /// The scenario date of the exercise's latest post (every post, every source, whatever the filters), 00:00 to 23:59
+    /// in the exercise zone, as window bounds (<see cref="ExerciseReportFilter.TimeFormat"/>); <c>null</c> when the
+    /// exercise has no posts (story 31, the "Latest scenario day" preset).
+    /// </summary>
+    [JsonPropertyName("latestDay")]
+    public required ReportDayDto? LatestDay { get; init; }
+
+    /// <summary>
+    /// Whether the times the report prints for the window in effect fall on more than one exercise-zone date: the
+    /// in-window posts' scenario times, the inject first-response times and the listed posts' takedown and last-edit
+    /// times. <c>false</c> when there are none.
+    /// </summary>
+    [JsonPropertyName("spansMultipleDays")]
+    public required bool SpansMultipleDays { get; init; }
 }
 
-/// <summary>The At a glance metrics. Noise always counts (DF-41), whatever the list shows.</summary>
+/// <summary>One scenario day as window bounds, <c>yyyy-MM-dd HH:mm</c> in the exercise zone.</summary>
+public sealed class ReportDayDto
+{
+    /// <summary>The day's first minute, <c>yyyy-MM-dd 00:00</c>.</summary>
+    [JsonPropertyName("from")]
+    public required string From { get; init; }
+
+    /// <summary>The day's last minute, <c>yyyy-MM-dd 23:59</c>.</summary>
+    [JsonPropertyName("to")]
+    public required string To { get; init; }
+}
+
+/// <summary>
+/// The At a glance metrics, over the posts in the window in effect (DF-45). Noise always counts (DF-41), whatever the
+/// list shows.
+/// </summary>
 public sealed class ReportSummaryDto
 {
     /// <summary>Participant accounts that signed in at least once.</summary>
@@ -216,9 +259,9 @@ public sealed class ReportActivityBinDto
 /// <summary>A delivered inject on the activity chart.</summary>
 public sealed class ReportInjectMarkerDto
 {
-    /// <summary>The MSEL Inject # (DF-10), else the item title.</summary>
+    /// <summary>The MSEL Inject # (DF-10); <c>null</c> when the item has none (the title is never repeated here).</summary>
     [JsonPropertyName("ref")]
-    public required string Ref { get; init; }
+    public required string? Ref { get; init; }
 
     /// <summary>The item title.</summary>
     [JsonPropertyName("title")]
@@ -236,9 +279,9 @@ public sealed class ReportInjectMarkerDto
 /// <summary>One delivered inject and its first participant response (DF-42).</summary>
 public sealed class ReportInjectResponseDto
 {
-    /// <summary>The MSEL Inject # (DF-10), else the item title.</summary>
+    /// <summary>The MSEL Inject # (DF-10); <c>null</c> when the item has none (the title is never repeated here).</summary>
     [JsonPropertyName("ref")]
-    public required string Ref { get; init; }
+    public required string? Ref { get; init; }
 
     /// <summary>The item title.</summary>
     [JsonPropertyName("title")]
@@ -371,6 +414,17 @@ public sealed class ReportPostDto
     /// <summary>The last edit's scenario time, <c>yyyy-MM-dd HH:mm</c>; <c>null</c> when never edited.</summary>
     [JsonPropertyName("lastEditedAt")]
     public required string? LastEditedAt { get; init; }
+
+    /// <summary>
+    /// The post's thread root (DF-47): its top-most ancestor reached through parents that are themselves listed, else
+    /// its own id.
+    /// </summary>
+    [JsonPropertyName("threadRootId")]
+    public required string ThreadRootId { get; init; }
+
+    /// <summary>0 for a thread root, 1 for any listed descendant (one indent level at any nesting, DF-47).</summary>
+    [JsonPropertyName("depth")]
+    public required int Depth { get; init; }
 }
 
 /// <summary>A post's author.</summary>
