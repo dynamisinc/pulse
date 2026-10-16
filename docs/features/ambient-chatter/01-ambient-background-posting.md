@@ -298,11 +298,64 @@ red-teamed through the real path (Gate-1 M-2). Revisit before any production aut
   **Autonomous** (publishes without a click; only selectable when the deployment flag is on, else the API answers 400).
 - Caps: per-minute ≤ the exercise's MaxEnginePostsPerMinute (60 by default); per-hour ≤ 60 × that; counted per
   generated post on a rolling wall-clock window (the per-hour cap is the ambient spend cap).
-- Allow-lists: topics from the fixed list above; personas of this exercise only (and only those in the engine's seeded
-  cast are voiced). Empty = nothing.
+- Allow-lists: topics from the fixed list above; personas of this exercise only, and only ordinary members of the public
+  (Resident / Helper — an outlet, agency, troll or bot is rejected 400); only those in the engine's seeded cast are
+  voiced. Empty = nothing.
 - Ambient fills the quiet floor only after white noise and participant posts are counted.
 - Ambient posting stops at EndEx, any non-live state, Freeze and Pause engine; the kill switch (either mode), a degraded
   provider and Cut to Fake switch ambient to **Off** — restoring the engine does not turn it back on.
+
+### Orchestrator review hardening (branch `feature/engine-golive-ambient-hardening`, 2026-10-16) — before §8 amendment 2
+
+Status remains **Built (backend), NOT Complete**. No migration, no `Program.cs` change.
+
+**Done**
+- **W-3 (never storyline, now enforced on both sides).** The ambient prompt no longer carries the exercise brief (which
+  narrates the incident): `ReactionLoopDriver.BuildAmbientGenerateRequest` passes `AmbientSettingBrief.Build(placeName)`
+  — the fictional place name only (new optional `ReactionLoopRegistration.AmbientPlaceName`, seeded from
+  `Exercise.WorldName`; generic "An ordinary town on an ordinary day." when unset). Output side: new pure
+  `Pulse.Core.Features.Ambient.Services.AmbientOutputFilter` runs in `GenerateStage` for ambient bursts as a third gate
+  with the guard's semantics (re-roll, then drop; `engine.generated.guardResult = "drop"`; nothing published or queued).
+  A burst fails if any post contains a fixed incident term (`emergency, evacuat, outage, contamina, boil water,
+  officials, shelter, alert, warning, hazmat`; hyphens read as spaces), an active storyline hashtag, or a storyline
+  title keyword (≥ 5 letters, minus stop words) — exclusions built per request from `registration.Storylines`.
+  Failing checks: `ambient:incident-term`, `ambient:sentiment`. The offline Fake now emits everyday small talk for an
+  ambient request (additive `GenerationRequest.IsAmbient`, set by the assembler) — previously it emitted its tap-water
+  incident lines as "ambient" chatter.
+- **S-2 (sentiment).** Folded into the filter. A generated post carries a continuous sentiment (−1…+1), not a tone
+  category, so "Calm or Gratitude only" is enforced as `Sentiment ≥ −0.1` (`AmbientOutputFilter.MinSentiment`).
+- **W-4 (eligible personas).** `AmbientPolicyValidator.EligiblePersonaTypes` = Resident, Helper (**pending Tom's
+  confirmation**; the single constant). Enforced in the POST (400 naming the persona id, handle and type: the engine
+  cast's type when the persona is in the cast, otherwise its stored archetype — only `citizen` maps to an eligible type),
+  in `AmbientBehavior.EligibleCast`, and at the publish re-check. `ambientPolicy.voiceablePersonaIds` = engine cast ∩
+  eligible types (semantics change only; same key and shape).
+- **W-6 (publish re-check reads the current policy).** The no-await block before each publish now also requires, under
+  the CURRENT policy: the post's persona still allow-listed, in the cast and of an eligible type; the burst's topic still
+  allow-listed; both caps > 0; and the spend already recorded in the rolling windows not above either cap. Otherwise
+  `held:policy`.
+- **W-7 (review drafts into a closed world).** Before a review-mode draft is queued: lifecycle gate refreshed (the one
+  await), then synchronously the policy (not off, still admits the topic/personas/caps) and `CanPublish`. Otherwise the
+  draft is discarded with `engine.generated.heldReason` = `held:policy` / `held:lifecycle`.
+- **W-2 (attribution).** `POST /api/engine/settings/ambient-policy` resolves the caller through
+  `ICurrentStaffSessionAccessor` (verified session token) and stamps `SetBy` — hence every autonomous post's
+  `engine.published` actor `actingHumanId` / `EngineBurst.AuthorizedBy` — and the audit event's acting human with the
+  `StaffUser.Id`. The body's `actingHumanId` is still required (wire compatibility) but not trusted. No staff session →
+  401.
+- **S-1 (AAR tagging).** An approved review-mode ambient draft publishes with `trigger = "ambient-floor"` and
+  `publishPath = "ambient-reviewed"` (recognised by storyline id `Guid.Empty` + tag `#ambient`; no schema column).
+- **W-1 helper.** Pure `AmbientPolicyRaise.IsRaise(AmbientTierPolicy current, EngineAmbientPolicyRequest request)`. A
+  **raise** (lead-only once A1c lands): (a) the requested mode is `autonomous` and the current mode is not; or (b) both
+  are `autonomous` and the request raises `maxPerMinute` or `maxPerHour` or adds any topic or persona. Everything else
+  is **not** a raise: off ↔ review, lowering caps, removing entries, autonomous → review/off; an unparseable mode is not a
+  raise (validation 400s), an unparseable persona entry counts as an addition.
+
+**Pending**
+- **W-1 lead gate** — not built (Session A's A1c / `Enrollment.IsLead` is not on `main`). One marked
+  `// TODO(A1c): .AddEndpointFilter(LeadControllerRaiseFilter.AmbientPolicy)` sits on the route mapping in
+  `EngineReviewEndpoints.MapEngineReview`; Session A wires the filter (calling `AmbientPolicyRaise.IsRaise`) and its test.
+- **W-5** — disclosed residual, unchanged by this pass; carry the orchestrator review's wording into the amendment.
+- **Residual (disclose with W-3):** persona `VoiceNotes` still enter the ambient prompt, and the seeded residents' notes
+  reference the incident (e.g. "is the water safe for my kids?"). The output filter is the backstop for that drift.
 
 ## Tests (backend)
 - `AmbientPolicyValidatorTests.*` (AC0, AC1); `AmbientBehaviorTests.*` (AC4, white-noise overlap)
@@ -328,3 +381,19 @@ red-teamed through the real path (Gate-1 M-2). Revisit before any production aut
 - Docker-gated (`[RequiresDockerFact]`): `AmbientPolicyIsolationTests.*` (AC3 foreign exercise, foreign org, 401, body
   `exerciseId` ignored, foreign persona — real `Program` + real sessions), `AmbientRealPublishTests.*` (AC9 real SQL
   publish), `EngineSettingsEndpointsTests` (route added to the #297 role-gate drift guard + contract key)
+- Orchestrator review hardening: `AmbientOutputFilterTests.*`, `AmbientSettingBriefTests.*` (W-3/S-2);
+  `PromptAssemblerTests.Assemble_FlagsTheTransportRequest_AmbientOnlyForAnAmbientBrief` (W-3);
+  `AmbientBehaviorTests.AnAllowListedPersonaOfAnIneligibleType_IsNeverVoiced`, `.EligiblePersonaTypes_AreResidentAndHelperOnly`,
+  `EngineAmbientPolicyServiceTests.APersonaOfAnIneligibleArchetype_Is400_NamingThePersonaAndItsType`,
+  `.APersonaInTheEngineCast_IsJudgedByItsEngineType`,
+  `EngineAmbientPolicyRegistryTests.TheSettingsSnapshot_VoiceablePersonaIds_IsTheCast_IntersectedWithEligibleTypes`,
+  `AmbientHardeningTests.AnAllowListedOutlet_IsNeverVoiced_EvenIfThePolicyNamesIt` (W-4);
+  `AmbientHardeningTests.TheAmbientPrompt_CarriesThePlaceName_NeverTheIncidentBrief`,
+  `.WithNoPlaceName_TheAmbientPrompt_UsesTheGenericSetting`,
+  `.AnAmbientPostThatDriftsTowardTheIncident_IsDroppedLikeAGuardFailure` (W-3/S-2);
+  `.APolicyNarrowedBetweenGenerationAndPublish_HoldsThePublish`, `.APersonaRemovedAfterTheFirstPost_HoldsTheRestOfTheBurst` (W-6);
+  `.AReviewDraft_FinishingAfterFreeze_IsDiscarded_NotQueued`, `.AReviewDraft_FinishingAfterEndEx_IsDiscarded_NotQueued`,
+  `.AReviewDraft_WhosePolicyWasTurnedOffMidGeneration_IsDiscarded` (W-7);
+  `.AnApprovedAmbientDraft_PublishesWithAmbientFloorTrigger_AndTheReviewedPublishPath` (S-1);
+  `EngineAmbientPolicyServiceTests.NoAuthenticatedStaffUser_Is401_AndChangesNothing`,
+  `.ASpoofedActingHumanId_DoesNotBecomeSetBy_OrTheAuditActor` (W-2); `AmbientPolicyRaiseTests.*` (W-1 helper)

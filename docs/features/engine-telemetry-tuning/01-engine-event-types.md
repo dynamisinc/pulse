@@ -173,11 +173,16 @@ clamp observed on a tick).
 | `engine.generated` | `trigger` | `ambient-floor` |
 | `engine.generated` | `publishPath` | `ambient-autonomous` (autonomous path only) |
 | `engine.generated` | `heldReason` | `held:lifecycle` \| `held:safety` \| `held:policy` — an accepted autonomous draft was discarded at the last boundary before publish (gate closed, kill switch / degraded / cut to Fake, or the policy stopped being autonomous / a non-ambient-floor intent reached the autonomous funnel) |
-| `engine.published` | `trigger` | `ambient-floor` |
-| `engine.published` | `publishPath` | `ambient-autonomous` — published with no controller click |
+| `engine.generated` | `heldReason` (review mode) | `held:lifecycle` \| `held:policy` — an accepted REVIEW-mode ambient draft was discarded instead of queued because the world closed (EndEx / Freeze / Pause engine) or the policy was turned off / narrowed while it generated (orchestrator review W-7) |
+| `engine.generated` | `guardResult` | unchanged values; an ambient burst is also `drop` when it fails the ambient output filter (incident term, storyline hashtag/keyword, or negative sentiment — review W-3/S-2) |
+| `engine.published` | `trigger` | `ambient-floor` — for autonomous AND controller-approved ambient posts (review S-1) |
+| `engine.published` | `publishPath` | `ambient-autonomous` — published with no controller click; `ambient-reviewed` — a review-mode ambient draft a controller approved (review S-1) |
 
 Ambient `engine.decided` / `engine.generated` carry `storyline` = the empty GUID (ambient belongs to no storyline)
-and `engine.decided.toneMix` = `ambient`.
+and `engine.decided.toneMix` = `ambient`. The ambient policy's acting human (`AmbientPolicyChanged` actor, and the
+`engine.published` actor `actingHumanId` on an autonomous ambient post) is the authenticated `StaffUser.Id` from the
+verified session, not a client-supplied value (review W-2). A controller-approved ambient post keeps the default engine
+actor (no `actingHumanId`); the approval's own decision event names the human.
 
 ## Build notes
 
