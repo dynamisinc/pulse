@@ -42,3 +42,8 @@ Story 01 (templates); exercise-isolation story 03 (instances); SOC-054 (magnitud
 ## Tests
 - Integration: seeding a cast instantiates all personas with varied followers + pre-exercise join
   dates.
+
+## Scope update 2026-10-16 (ADMIN-IDENTITY-MODEL)
+
+Source: [`docs/design/ADMIN-IDENTITY-MODEL.md`](../../design/ADMIN-IDENTITY-MODEL.md) §6.1 (Tier-2 signed off by Tom, 2026-10-16). Wave A4. Cast seeding goes through the same persona create service and `ContentPackItem` idempotency as the content-pack applier (story 06): re-seeding updates in place and never duplicates.
+- [ ] User guide (C5 docs-as-done): `docs/guide/planner-guide.md` is updated in the same PR, or the PR states "no guide impact".

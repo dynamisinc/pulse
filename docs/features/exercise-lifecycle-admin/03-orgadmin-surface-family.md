@@ -202,3 +202,10 @@ here.
    that already has an exercise to seed the assignment against.
 2. **Assignment ADMINISTRATION is read-only.** AC2 says "read/administer"; only the read is built, and no AC
    describes a write.
+
+## Scope update 2026-10-16 (ADMIN-IDENTITY-MODEL)
+
+Source: [`docs/design/ADMIN-IDENTITY-MODEL.md`](../../design/ADMIN-IDENTITY-MODEL.md) §1.2, §7.1 (Tier-2 signed off by Tom, 2026-10-16). Wave A1.
+- [ ] `RoleAwareEntry` routes by `Person.OrgRole` and the org-scope session (not by an `orgAdmin` assignment); the staff-assignment view reads `Enrollment`. An org admin enters an exercise through `POST /api/staff/active-exercise` for their own enrollment, and leaves to org scope the same way.
+- [ ] `App.tsx` / `staffRouteRegistry.tsx` changes go through the orchestrator wiring commit.
+- [ ] User guide (C5 docs-as-done): `docs/guide/getting-started.md` is updated in the same PR, or the PR states "no guide impact".

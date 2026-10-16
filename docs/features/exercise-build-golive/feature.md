@@ -26,6 +26,12 @@ and the exercise clock (COR-050).
 | 04 | Gated go-live: Staged, then StartEx→Live | COR-043 | Not Started | #74 |
 | 05 | Content lock at go-live | COR-044 | Not Started | #75 |
 | 06 | Exercise duplication | COR-045 | Not Started | #76 |
+| 07 | Reset, reopen, unstage, unarchive (A3, Tier-2) | COR-043, COR-032 | Not Started | #580 |
+| 08 | Delete an exercise that never ran (A3, Tier-2) | COR-032, COR-074 | Not Started | #581 |
+| 09 | Participant-facing exercise name, no fallback (#180/#376) (A3, Tier-2) | COR-032, COR-053, SOC-001 | Not Started | #376 |
+| 10 | Lifecycle gate for the hub and reaction loop (#375) (A5) | COR-032, COR-043, CTL-023 | Not Started | #375 |
+| 11 | Refuse participant writes in Freeze/pause (#379) (A5) | CTL-023, COR-032, SOC-001 | Not Started | #379 |
+| 12 | Push lifecycle changes to connected clients (#390) (A5) | COR-032, CTL-023, NFR-002 | Not Started | #390 |
 
 ## Dependencies
 Exercise-configuration lifecycle (COR-032); exercise-clock (StartEx starts the clock, COR-050);
@@ -40,3 +46,7 @@ world for familiarization; **StartEx (Staged → Live)** starts the clock and sc
 (COR-043). The readiness dashboard aggregates world completeness including network readiness (COR-009)
 and a load rehearsal (NFR-002). Duplication clones the world (cast/theming/filler/scheduled content)
 but not participant data or conduct history (COR-045).
+
+## Scope update 2026-10-16 (ADMIN-IDENTITY-MODEL)
+
+Source: [`docs/design/ADMIN-IDENTITY-MODEL.md`](../../design/ADMIN-IDENTITY-MODEL.md). Stories **01, 03, 04, 05, 06** are amended (setup content stamped in build; readiness checklist with 8 blocking items; StartEx controller-only and stage planner-only; content packs build-only; duplicate per §5.5 incl. setup posts, cleared participant-media avatars and needs-repair reply items). New 07-09 are wave A3; 10-12 are wave A5 (#375, #379, #390); #376 is covered by 09; #389 and #485 live in `identity-auth-roles` 25 and 26.
