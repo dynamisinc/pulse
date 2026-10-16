@@ -161,7 +161,9 @@ function worldForRole(role: SessionRole): SessionWorld {
  * `personId` is `null`. A field that IS present is validated fail-closed exactly as before: a
  * wrong type, a mixed scope/role, or a `world` contradicting the role rejects.
  */
-function normalizeBody(raw: Partial<SessionResponseBody> | null | undefined): NormalizedBody | null {
+function normalizeBody(
+  raw: Partial<SessionResponseBody> | null | undefined,
+): NormalizedBody | null {
   if (!raw || typeof raw !== 'object') return null
   const scope = raw.scope === undefined ? 'exercise' : raw.scope
   if (scope !== 'exercise' && scope !== 'org') return null

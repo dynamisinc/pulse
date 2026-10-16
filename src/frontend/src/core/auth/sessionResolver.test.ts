@@ -95,7 +95,9 @@ describe('resolveSession', () => {
   })
 
   it('derives participant world from a participant role when world is absent', async () => {
-    mockGet.mockResolvedValue(validBody({ world: undefined, scope: undefined, isLead: undefined, personId: undefined }))
+    mockGet.mockResolvedValue(validBody({
+      world: undefined, scope: undefined, isLead: undefined, personId: undefined,
+    }))
     const s = await resolveSession()
     expect(s).toMatchObject({ world: 'participant', scope: 'exercise', isLead: false, personId: null })
   })

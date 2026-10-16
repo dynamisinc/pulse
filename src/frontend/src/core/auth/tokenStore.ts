@@ -338,6 +338,11 @@ export function setTokens(pair: TokenPair, options?: SetTokensOptions): void {
   const target: Area = options?.persist === true ? 'persistent' : 'session'
   const other: Area = target === 'persistent' ? 'session' : 'persistent'
 
+  // A staff sign-in displaces a participant's persistent pair: capture its access token BEFORE the
+  // pair is removed, so THIS tab can log that participant session out on the server (W-1). The
+  // participant tabs cannot: by the time they hear the world signal the pair is already gone.
+  const displacedParticipantToken = target === 'session' ? readItem('persistent', ACCESS_TOKEN_KEY) : null
+
   generation++
   // This page's session now lives in `target`, whatever it was before (W-6). The sticky
   // record (W2-1) has done its job: the tokens themselves say where the session lives.
@@ -357,6 +362,25 @@ export function setTokens(pair: TokenPair, options?: SetTokensOptions): void {
   // One world per origin: tell the tabs of the OTHER world to sign themselves out. Participant
   // sign-ins persist (`localStorage`); every staff sign-in uses `sessionStorage`.
   announceWorldSignIn(target === 'persistent' ? 'participant' : 'staff')
+  if (displacedParticipantToken !== null) postDisplacedLogout(displacedParticipantToken)
+}
+
+/**
+ * Fire-and-forget `POST /auth/logout` for the participant session a staff sign-in just displaced
+ * (W-1). Same request as `worldSync`'s default poster: the OUTGOING token is passed as an explicit
+ * `Authorization` header, so the shared client's request interceptor attaches nothing (it never
+ * sends the NEW staff token), and `/auth/logout` is excluded from the 401 refresh-and-retry path,
+ * so a refusal can never clear the new tokens. Errors are swallowed. The dynamic import keeps this
+ * module a leaf (no static `core/services <-> core/auth` cycle).
+ */
+function postDisplacedLogout(token: string): void {
+  void import('../services/api')
+    .then(({ api }) => api.post(
+      '/auth/logout',
+      undefined,
+      { headers: { Authorization: `Bearer ${token}` } },
+    ))
+    .catch(() => undefined)
 }
 
 /**
