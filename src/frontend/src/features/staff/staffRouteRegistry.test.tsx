@@ -148,10 +148,11 @@ describe('STAFF_ROUTE_REGISTRY — the participant-admin entry (easy-login, Gate
     }
   })
 
-  it('gives the controller more than one surface, which un-degrades the launcher for them', () => {
-    // DF-20 (seam S-4) adds exercise-management to the controller's set.
+  it('gives the controller more than one surface, so the launcher shows', () => {
+    // DF-20 (seam S-4) adds exercise-management; 'exercise-report' (demo-feedback 29) is the
+    // printable report.
     expect(staffRoutesForRole(STAFF_ROUTE_REGISTRY, 'controller').map(e => e.id))
-      .toEqual(['controller-console', 'exercise-management', 'participant-admin'])
+      .toEqual(['controller-console', 'exercise-management', 'participant-admin', 'exercise-report'])
   })
 })
 
@@ -208,8 +209,8 @@ describe('STAFF_ROUTE_REGISTRY — the controller-console entry (demo-feedback s
       .toBe('evaluator-dashboard')
   })
 
-  it('lists the console in the evaluator’s launcher', () => {
+  it('lists the console and the exercise report in the evaluator’s launcher', () => {
     expect(staffRoutesForRole(STAFF_ROUTE_REGISTRY, 'evaluator').map(e => e.id))
-      .toEqual(['controller-console', 'evaluator-dashboard'])
+      .toEqual(['controller-console', 'evaluator-dashboard', 'exercise-report'])
   })
 })
