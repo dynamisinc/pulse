@@ -17,8 +17,15 @@
  *    (`setMockExercisePin`) add and remove the marker on mounted cards without a reload;
  *  - a push wakes only the cards showing that post (burst legibility);
  *  - a held push beats an older read on mount; a re-read that changes the flag wins after it;
- *  - a hub gap (the shared connection leaving Connected) drops held pushes, so cards fall back
- *    to their reads (Gate-1 M-1); a session reset (`runSessionResets`) forgets them too.
+ *  - a hub gap (the shared connection leaving Connected) KEEPS the held state, and the
+ *    recovery (back to Connected) makes ONE authoritative read of the exercise pins
+ *    (`resolvePinnedFeed`, story 07's `GET /api/feed/pinned`) that pins and unpins the cards to
+ *    match it, including changes missed during the gap (#553 Copilot, replacing Gate-1 M-1's
+ *    drop). A late answer after a session reset is ignored, a failed read keeps the state, and
+ *    mock mode makes no read. A session reset (`runSessionResets`) forgets held pushes.
+ *
+ * `USE_MOCK_DATA` is a getter the recovery tests switch off for the hub transition only (the
+ * store reads it when the hub comes back), so the cards and providers stay on mock data.
  */
 import { Profiler, type ReactNode } from 'react'
 import { act, render, screen, waitFor, within } from '@testing-library/react'
@@ -36,11 +43,28 @@ import { realtimeFeed } from '../../services/realtimeFeed'
 import { toPostView } from '../../services/feedService'
 import type { ParticipantPostView } from '../../types/post'
 import { exercisePinState } from '../../pinned/exercisePinState'
+import { resolvePinnedFeed } from '../../pinned/pinnedFeedService'
+import type { PinnedFeedItem, PinnedFeedReason } from '../../pinned/types'
 import { pinState } from '../../pinned/pinEvents'
 import { resetMockPins, setMockExercisePin } from '../../pinned/mockPins'
 import { resetMockReactions } from '../../services/reactionService'
 import { PostCard } from './PostCard'
 import type { PostCardVariant, PostView } from './types'
+
+/** A live binding the recovery tests flip: `USE_MOCK_DATA` is read through a getter. */
+const flag = vi.hoisted(() => ({ mock: true }))
+
+vi.mock('@/core/config/mockData', () => ({
+  get USE_MOCK_DATA() {
+    return flag.mock
+  },
+  warnIfMockDataActive: () => undefined,
+}))
+
+vi.mock('../../pinned/pinnedFeedService', async importOriginal => ({
+  ...(await importOriginal<typeof import('../../pinned/pinnedFeedService')>()),
+  resolvePinnedFeed: vi.fn(),
+}))
 
 type PinHandler = (event: { postId: string; pinnedForAll: boolean }) => void
 
@@ -48,10 +72,62 @@ let pinHandlers: PinHandler[] = []
 let stateListeners: RealtimeStateListener[] = []
 
 /** The shared hub connection reports a state, exactly as its `onStateChange` does. */
-function hubState(state: HubConnectionState) {
+function hubState(state: HubConnectionState, reason?: 'stopped') {
   act(() => {
-    for (const listener of [...stateListeners]) listener(state)
+    for (const listener of [...stateListeners]) listener(state, reason)
   })
+}
+
+/** The hub comes back in LIVE mode (the store reads the mock switch at that moment). */
+function hubRecoversLive() {
+  flag.mock = false
+  try {
+    hubState(HubConnectionState.Connected)
+  } finally {
+    flag.mock = true
+  }
+}
+
+const resolvePinnedFeedMock = vi.mocked(resolvePinnedFeed)
+
+/** One `GET /api/feed/pinned` item, participant-safe, as the read seam returns it. */
+function pinnedItem(id: string, reason: PinnedFeedReason = 'exercise'): PinnedFeedItem {
+  return {
+    reason,
+    post: {
+      id,
+      authorPersonaId: author().id,
+      text: `post ${id}`,
+      counts: { reply: 0, repost: 0, like: 0 },
+      scenarioTime: '2033-09-04T13:15:00Z',
+      ...(reason === 'exercise' ? { pinnedForAll: true as const } : {}),
+    },
+  }
+}
+
+/** A recovery read the test answers (or fails) when it chooses. */
+function deferredRead() {
+  let resolve: (items: PinnedFeedItem[]) => void = () => {}
+  let reject: (error: Error) => void = () => {}
+  const promise = new Promise<PinnedFeedItem[]>((res, rej) => {
+    resolve = res
+    reject = rej
+  })
+  resolvePinnedFeedMock.mockReturnValueOnce(promise)
+  return {
+    answer: async (items: PinnedFeedItem[]) => {
+      await act(async () => {
+        resolve(items)
+        await promise
+      })
+    },
+    fail: async (error: Error) => {
+      await act(async () => {
+        reject(error)
+        await promise.catch(() => undefined)
+      })
+    },
+  }
 }
 
 /** Delivers a `PostPinChanged` exactly as the shared transport's fan-out does. */
@@ -91,6 +167,9 @@ function Providers({ children }: { children: ReactNode }) {
 async function renderCards(node: ReactNode) {
   const utils = render(<Providers>{node}</Providers>)
   await screen.findAllByTestId('post-actions')
+  // The card subscribes in a passive effect, which can land after its DOM under a loaded
+  // parallel run: wait until the store's sources are attached before pushing at it.
+  await waitFor(() => expect(pinHandlers.length).toBeGreaterThan(0))
   return utils
 }
 
@@ -107,6 +186,9 @@ function markerIn(postId: string): HTMLElement | null {
 }
 
 beforeEach(() => {
+  flag.mock = true
+  resolvePinnedFeedMock.mockReset()
+  resolvePinnedFeedMock.mockResolvedValue([])
   pinHandlers = []
   exercisePinState.resetForTests()
   vi.spyOn(realtimeFeed, 'subscribePinChanged').mockImplementation(handler => {
@@ -315,28 +397,27 @@ describe('PostCard — the marker follows the live pin state', () => {
   })
 })
 
-describe('PostCard — a hub gap drops held pushes (Gate-1 M-1)', () => {
-  it('a card mounting after a gap trusts its read, not the push held from before it', async () => {
+describe('PostCard — a hub gap keeps the held state (#553 Copilot)', () => {
+  it('a card mounting after a gap still sees the push held from before it', async () => {
     const first = await renderCards(<PostCard post={view({ id: 'post-elsewhere' })} variant="full" />)
     pushPinChanged('post-pinned-1', true)
-    // The hub drops: an unpin may have been missed while it was down.
     hubState(HubConnectionState.Reconnecting)
     first.unmount()
 
     await renderCards(<PostCard post={view()} variant="full" />)
-    expect(markerIn('post-pinned-1')).toBeNull()
+    expect(markerIn('post-pinned-1')).not.toBeNull()
   })
 
-  it('a mounted card returns to its read when the hub drops', async () => {
+  it('a mounted card keeps its pushed marker while the hub is down', async () => {
     await renderCards(<PostCard post={view()} variant="full" />)
     pushPinChanged('post-pinned-1', true)
     expect(markerIn('post-pinned-1')).not.toBeNull()
 
     hubState(HubConnectionState.Disconnected)
-    expect(markerIn('post-pinned-1')).toBeNull()
+    expect(markerIn('post-pinned-1')).not.toBeNull()
   })
 
-  it('a push after the gap is held and shown again; Connected itself drops nothing', async () => {
+  it('a push after the gap is held and shown; Connected itself drops nothing', async () => {
     await renderCards(<PostCard post={view()} variant="full" />)
     hubState(HubConnectionState.Reconnecting)
     hubState(HubConnectionState.Connected)
@@ -345,5 +426,142 @@ describe('PostCard — a hub gap drops held pushes (Gate-1 M-1)', () => {
 
     hubState(HubConnectionState.Connected)
     expect(markerIn('post-pinned-1')).not.toBeNull()
+  })
+
+  it('mock mode makes no recovery read and keeps the state', async () => {
+    await renderCards(<PostCard post={view()} variant="full" />)
+    pushPinChanged('post-pinned-1', true)
+    hubState(HubConnectionState.Reconnecting)
+    hubState(HubConnectionState.Connected)
+
+    expect(resolvePinnedFeedMock).not.toHaveBeenCalled()
+    expect(markerIn('post-pinned-1')).not.toBeNull()
+  })
+})
+
+describe('PostCard — recovery reconciles from one authoritative read (#553 Copilot)', () => {
+  it('reads once, only on the way back from a gap (not on a first connect or a deliberate stop)', async () => {
+    await renderCards(<PostCard post={view()} variant="full" />)
+    hubRecoversLive()
+    hubState(HubConnectionState.Disconnected, 'stopped')
+    hubRecoversLive()
+    expect(resolvePinnedFeedMock).not.toHaveBeenCalled()
+
+    hubState(HubConnectionState.Reconnecting)
+    hubState(HubConnectionState.Disconnected)
+    hubRecoversLive()
+    expect(resolvePinnedFeedMock).toHaveBeenCalledTimes(1)
+    expect(resolvePinnedFeedMock).toHaveBeenCalledWith()
+  })
+
+  it('a push, a gap, then a read that still has it pinned: the marker stays the whole time', async () => {
+    await renderCards(<PostCard post={view()} variant="full" />)
+    pushPinChanged('post-pinned-1', true)
+    expect(markerIn('post-pinned-1')).not.toBeNull()
+
+    hubState(HubConnectionState.Reconnecting)
+    expect(markerIn('post-pinned-1')).not.toBeNull()
+
+    const read = deferredRead()
+    hubRecoversLive()
+    expect(markerIn('post-pinned-1')).not.toBeNull()
+    await read.answer([pinnedItem('post-pinned-1')])
+    expect(markerIn('post-pinned-1')).not.toBeNull()
+    expect(resolvePinnedFeedMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('an unpin missed during the gap: the read clears the marker (pushed or from the read)', async () => {
+    await renderCards(
+      <>
+        <PostCard post={view({ pinnedForAll: true })} variant="full" />
+        <PostCard post={view({ id: 'post-pushed' })} variant="full" />
+      </>,
+    )
+    pushPinChanged('post-pushed', true)
+    expect(markerIn('post-pinned-1')).not.toBeNull()
+    expect(markerIn('post-pushed')).not.toBeNull()
+
+    hubState(HubConnectionState.Reconnecting)
+    const read = deferredRead()
+    hubRecoversLive()
+    await read.answer([])
+
+    expect(markerIn('post-pinned-1')).toBeNull()
+    expect(markerIn('post-pushed')).toBeNull()
+  })
+
+  it('a pin missed during the gap: the read adds the marker on mounted cards (exercise pins only)', async () => {
+    const unchangedRenders = vi.fn()
+    await renderCards(
+      <>
+        <PostCard post={view()} variant="full" />
+        <PostCard post={view({ id: 'post-personal' })} variant="full" />
+        <Profiler id="unchanged" onRender={unchangedRenders}>
+          <PostCard post={view({ id: 'post-unchanged' })} variant="full" />
+        </Profiler>
+      </>,
+    )
+    await waitFor(() => expect(screen.getAllByTestId('post-card')).toHaveLength(3))
+    pushPinChanged('post-unchanged', false)
+    unchangedRenders.mockClear()
+
+    hubState(HubConnectionState.Reconnecting)
+    const read = deferredRead()
+    hubRecoversLive()
+    // `post-personal` is on the viewer's Pinned tab for their OWN pin: never the marker (DF-6).
+    await read.answer([pinnedItem('post-pinned-1'), pinnedItem('post-personal', 'pin')])
+
+    expect(markerIn('post-pinned-1')).not.toBeNull()
+    expect(markerIn('post-personal')).toBeNull()
+    expect(markerIn('post-unchanged')).toBeNull()
+    // Only changed ids are woken: the held unpin already matched the read.
+    expect(unchangedRenders).not.toHaveBeenCalled()
+  })
+
+  it('a pin read for a post not on screen is held for a card that mounts later', async () => {
+    const first = await renderCards(<PostCard post={view({ id: 'post-elsewhere' })} variant="full" />)
+    hubState(HubConnectionState.Reconnecting)
+    const read = deferredRead()
+    hubRecoversLive()
+    await read.answer([pinnedItem('post-pinned-1')])
+    first.unmount()
+
+    await renderCards(<PostCard post={view()} variant="full" />)
+    expect(markerIn('post-pinned-1')).not.toBeNull()
+  })
+
+  it('a push that lands while the read is in flight is newer than the read and stays', async () => {
+    await renderCards(<PostCard post={view()} variant="full" />)
+    hubState(HubConnectionState.Reconnecting)
+    const read = deferredRead()
+    hubRecoversLive()
+    pushPinChanged('post-pinned-1', false)
+
+    await read.answer([pinnedItem('post-pinned-1')])
+    expect(markerIn('post-pinned-1')).toBeNull()
+  })
+
+  it('a late read after a session reset is ignored', async () => {
+    await renderCards(<PostCard post={view()} variant="full" />)
+    hubState(HubConnectionState.Reconnecting)
+    const read = deferredRead()
+    hubRecoversLive()
+
+    act(() => runSessionResets())
+    await read.answer([pinnedItem('post-pinned-1')])
+    expect(markerIn('post-pinned-1')).toBeNull()
+  })
+
+  it('a failed read keeps the last-known state and logs', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    await renderCards(<PostCard post={view()} variant="full" />)
+    pushPinChanged('post-pinned-1', true)
+    hubState(HubConnectionState.Reconnecting)
+    const read = deferredRead()
+    hubRecoversLive()
+
+    await read.fail(new Error('503'))
+    expect(markerIn('post-pinned-1')).not.toBeNull()
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('[pinned]'), '503')
   })
 })
