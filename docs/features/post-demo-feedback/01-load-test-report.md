@@ -1,6 +1,6 @@
 # Story: Load-test report on UAT (PDF-03 slice)
 
-**Feature:** Post-demo customer feedback  ·  **Phase:** 2 (pulled forward)  ·  **Status:** Not Started
+**Feature:** Post-demo customer feedback  ·  **Phase:** 2 (pulled forward)  ·  **Status:** In Review
 **Requirements:** NFR-002 (burst legibility at 120 posts/min), #526  ·  **Decisions:** PDF-D1..PDF-D5  ·  **Issue:** #547
 **Stack:** tool + script + report  ·  **World:** foundation  ·  **Review:** Tier-1  ·  **Priority:** Should  ·  **Effort:** M
 **Owner:** planning session · **Branch:** `build/post-demo-feedback/01-load-report` → PR to `main` (tool + scripts + report)
@@ -17,40 +17,73 @@ needs. The backup site and switchover stay in #526.
 
 ### Setup and teardown scripts
 
-- [ ] `New-LoadTestExercise.ps1`: as a controller (Tom signs in / `PULSE_STAFF_SECRET`), creates an exercise named
+- [x] `New-LoadTestExercise.ps1`: as a controller (Tom signs in / `PULSE_STAFF_SECRET`), creates an exercise named
       `Load test <date>` (`POST /api/org/exercises`), sets it staged/live with watermark on, imports a generated roster of
       N participants (`Import-Roster.ps1`, auto-created citizen personas), loads a 200-post noise pool and one valid
       20-post burst item (the validator's `MaxBurstPosts`, at the minimum 3 s gap) to exercise the burst runner, and writes the join URLs to a git-ignored local file. Never touches another exercise.
-- [ ] `Remove-LoadTestExercise.ps1`: noise off, tier `engine`, lifecycle to completed then archived (story 22's route
+- [x] `Remove-LoadTestExercise.ps1`: noise off, tier `engine`, lifecycle to completed then archived (story 22's route
       when deployed, else the lifecycle transition), and deletes the local token file.
 
 ### Harness (`tools/Pulse.LoadTest`, .NET 10 console)
 
-- [ ] Reads the join URL file, joins users at ≤ 25/min, and **refuses to run** if the target exercise id equals the
+- [x] Reads the join URL file, joins users at ≤ 25/min, and **refuses to run** if the target exercise id equals the
       demo exercise id (configured) or the exercise name does not start with `Load test`.
-- [ ] Each virtual participant holds one SignalR connection (the real hub, `accessTokenFactory` as the web client),
+- [x] Each virtual participant holds one SignalR connection (the real hub, `accessTokenFactory` as the web client),
       reads the feed every 30 s, likes or reposts about once a minute, posts about once every 5 minutes, replies
       occasionally; the mix is configurable.
-- [ ] Steps 20 → 40 → 100 users, 10 minutes each (PDF-D5); in each step a controller session sets noise High and fires
+- [x] Steps 20 → 40 → 100 users, 10 minutes each (PDF-D5); in each step a controller session sets noise High and fires
       the 20-post burst item, and the harness itself drives the **120 posts/min** load for 2 minutes as paced
       `controller-as-persona` writes (`POST /api/posts`, one every 0.5 s, round-robin over NPC personas). A single run-sheet
       burst cannot reach that rate (`InjectItemValidator.MaxBurstPosts` = 20, `InjectBurstPacing.MinGapSeconds` = 3), and
       UAT stays unchanged (PDF-D1).
-- [ ] Measures per step: p50/p95/p99 and error rate for `POST /api/posts`, `GET /api/feed`, reaction writes, join;
+- [x] Measures per step: p50/p95/p99 and error rate for `POST /api/posts`, `GET /api/feed`, reaction writes, join;
       **SignalR fan-out lag** (post accepted → `PostReceived` at every other client; p50/p95/max) and dropped/late
       frames; reconnects. Writes CSV + a JSON summary.
-- [ ] Stop rules (PDF-D4) enforced automatically, with the reason in the summary.
-- [ ] Unit tests for the stats maths, the demo-exercise refusal and the stop rules.
+- [x] Stop rules (PDF-D4) enforced automatically, with the reason in the summary.
+- [x] Unit tests for the stats maths, the demo-exercise refusal and the stop rules.
 
-### Run and report (Saturday 10/17 AM)
+### Run and report (Saturday 10/17 AM) — pending Tom's Saturday run
 
-- [ ] Tom runs it; `az monitor metrics` for the App Service (CPU, memory, HTTP 5xx, connections) and SQL (CPU %,
+- [ ] *(pending Tom's Saturday run; the helper is built: `scripts/uat/Get-LoadTestMetrics.ps1`)* Tom runs it; `az monitor metrics` for the App Service (CPU, memory, HTTP 5xx, connections) and SQL (CPU %,
       workers, data IO) are pulled for the window by a helper in the script.
-- [ ] `docs/demo/LOAD-TEST-REPORT.md`: setup, the numbers per step, where it bends (first step that breaks the NFR-002
+- [ ] *(pending Tom's Saturday run; the template with every section is in place)* `docs/demo/LOAD-TEST-REPORT.md`: setup, the numbers per step, where it bends (first step that breaks the NFR-002
       bar or the stop rules) and why (CPU, SQL, SignalR), a **recommended SKU/scale and whether Azure SignalR Service is
       needed** for 50 / 100 / 200 participants with a cost line, and a one-slide summary.
-- [ ] Afterwards `Remove-LoadTestExercise.ps1` runs and `Test-DemoReady.ps1` (demo-feedback/26) passes on the demo
+- [ ] *(pending Tom's Saturday run)* Afterwards `Remove-LoadTestExercise.ps1` runs and `Test-DemoReady.ps1` (demo-feedback/26) passes on the demo
       exercise.
+
+## Build notes (10/16)
+
+- **A second host name is required (changes the plan).** Pulse takes a participant's exercise from the request's host
+  name. `JoinLoginService` gets its scope from host resolution only. `SessionAuthenticationMiddleware` returns 403 when
+  a participant session and the host disagree. `ExerciseRealtimeHub` adds a connection to the host-resolved exercise
+  group, staff connections included. The UAT API host is bound to the demo exercise, so a throwaway exercise's
+  participants cannot join or receive `PostReceived` through it. `New-LoadTestExercise.ps1 -ExerciseHost` creates the
+  exercise with an extra host name, and the harness targets only that host. Binding the host name (CNAME + `asuid` TXT
+  record + `az webapp config hostname add` + managed certificate) is a UAT App Service change. It adds a binding and
+  changes no app setting. PDF-D1 makes it Tom's call before Saturday. The steps are in the runbook. An exercise keeps
+  its host name (there is no route to change it), so each re-run needs a fresh one.
+- **Import-Roster.ps1 imports into the host's exercise.** The setup runs it with `-ApiHost <ExerciseHost>`, so it never
+  imports into the demo.
+- **Personas.** A new exercise has none. NPC authors for the noise pool, the burst items and the paced writes are 20
+  extra roster rows (`Load NPC nn`, auto-created citizen personas) that are never joined.
+- **Scenario clock.** White noise needs a running exercise clock (`WhiteNoiseService.IsStopped`). The clock starts only
+  through the reaction loop or a Freeze, so the setup sets the pause tier to Freeze and then Engine paused.
+- **Burst items fire once.** The setup makes three (one per step). The harness creates one if none is left.
+- **Archive.** The existing lifecycle route allows completed → archived, so teardown archives without story 22.
+- **Gate-1 fold-ins.**
+  - The stop rules use a 15 s window with the 60 s sustain, so a 5 s error burst no longer trips a step.
+  - The stop rules also run during the ramp, and the ramp stops after 10 failed joins in a row.
+  - Each step re-applies tier `engine` and logs restart signs: a tier read-back of `running`, or noise not running. On
+    noise not running it restarts the clock.
+  - Connections SignalR closed for good are rebuilt at the next step start.
+  - The harness accepts the same host values as the scripts: https on 443, a DNS name, no port.
+  - Summary timestamps are read with their own offset.
+  - Teardown prints the full unbind sequence.
+- **Files.** `scripts/uat/Get-LoadTestMetrics.ps1` is the metrics helper. `scripts/uat/LoadTest.Common.ps1` holds the helpers the setup and teardown scripts share.
+- **Projects** are in `pulse.slnx`. CI builds and tests them; the tests are pure unit tests that run in under a second.
+- **SignalR client** is 10.0.13. Version 10.0.10 pulls `Microsoft.AspNetCore.SignalR.Common` with advisory
+  GHSA-334f-vvp4-7g6p.
 
 ## Out of Scope
 

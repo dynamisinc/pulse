@@ -62,7 +62,9 @@ registration, storylines, autonomy, kill switch).
 lines do not block: before Wave 4 is deployed, "Wave 4 schema" and the edits route are `WARN`, and check 11 is
 `WARN` when the exercise is `staged` (participants see the pre-start page until StartEx; the demo may start staged).
 Any other lifecycle state than `live` or `staged` (paused, completed, archived, build) fails. `-ApiHost` takes a bare
-host or an http(s) URL; both scripts reduce it to the bare host before any request and pass only that on.
+host or an https URL; both scripts reduce it to the bare host before any request and pass only that on. `http://`
+(localhost included) and an explicit port are refused: the UAT scripts use https on 443 only. A demo pack that
+cannot be loaded fails the pre-flight, with the pins, run-sheet, anchor and edits checks.
 
 ```text
 Pulse demo pre-flight (read-only) — https://app-pulse-api-uat-dynamis.azurewebsites.net

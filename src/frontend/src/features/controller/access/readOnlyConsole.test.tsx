@@ -559,6 +559,7 @@ const CONTROLLER_CONTROLS_BEFORE_STORY_11: readonly string[] = [
   'switch|swamped-mode-enable-toggle|Swamped mode is off — turn on timeout auto-send',
   'button|lifecycle-end|End exercise',
   'button|export-posts|Export posts',
+  'button|exercise-report|Exercise report',
   'button|pause-pill|Pause control — current state: RUNNING',
   'radio|noise-level-off|Off',
   'radio|noise-level-low|Low',

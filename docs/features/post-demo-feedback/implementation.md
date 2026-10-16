@@ -16,7 +16,7 @@
 
 | Story | Owner | Stack | Files it owns | Depends on | When | Effort |
 |---|---|---|---|---|---|---|
-| [01 Load report](01-load-test-report.md) (#547) | planning session | tool + script + report | new `tools/Pulse.LoadTest/**`, new `scripts/uat/{New-LoadTestExercise,Remove-LoadTestExercise}.ps1`, `docs/demo/LOAD-TEST-REPORT.md` | none (runs against whatever is deployed Sat AM) | Build Fri, run Sat AM | M |
+| [01 Load report](01-load-test-report.md) (#547) | planning session | tool + script + report | new `tools/Pulse.LoadTest/**` (+ `tools/Pulse.LoadTest.Tests`), new `scripts/uat/{New-LoadTestExercise,Remove-LoadTestExercise,Get-LoadTestMetrics,LoadTest.Common}.ps1` (+ Pester), `docs/demo/LOAD-TEST-REPORT.md` | none (runs against whatever is deployed Sat AM) | Build Fri, run Sat AM | M |
 
 ## Risks
 
@@ -26,3 +26,4 @@
 | Join rate limit throttles provisioning | Pace at 25/min; never raise the limit on UAT for the test |
 | SQL serverless cost over the free limit | `freeLimitExhaustionBehavior: BillOverUsage`; a 40-minute run is a small charge; noted in the report |
 | Load posts pollute the export or trending on the demo exercise | Separate exercise; `Remove-LoadTestExercise.ps1` ends and archives it |
+| Participant joins and SignalR groups are host-bound, and the UAT API host is the demo's (found at build, 10/16) | Bind one extra host name to the App Service for the load-test exercise (`New-LoadTestExercise.ps1 -ExerciseHost`); runbook in `tools/Pulse.LoadTest/README.md`. Without it the participant half cannot run on UAT |
