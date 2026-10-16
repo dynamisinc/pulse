@@ -207,4 +207,59 @@ describe('ExerciseIdentityBadge — switcher with two or more assignments', () =
 
     expect(await screen.findByRole('menu')).toBeInTheDocument()
   })
+
+  it('can be dismissed with Escape while a switch is pending; reopening still shows pending', async () => {
+    let release: (value: StaffAssignment) => void = () => undefined
+    mockSetActiveExercise.mockReturnValue(
+      new Promise<StaffAssignment>(resolve => {
+        release = resolve
+      }),
+    )
+    const user = userEvent.setup()
+    renderBadge()
+
+    const trigger = await screen.findByRole('button', { name: /switch exercise/i })
+    await user.click(trigger)
+    await user.click(await screen.findByTestId('staff-header-exercise-item-ex-bravo'))
+    expect(await screen.findByTestId('staff-header-switching')).toBeInTheDocument()
+
+    await user.keyboard('{Escape}')
+    await waitFor(() => expect(screen.queryByRole('menu')).not.toBeInTheDocument())
+    await waitFor(() => expect(trigger).toHaveFocus())
+
+    await user.click(trigger)
+    expect(await screen.findByTestId('staff-header-switching')).toBeInTheDocument()
+    expect(screen.getByTestId('staff-header-exercise-item-ex-bravo')).toHaveAttribute(
+      'aria-disabled',
+      'true',
+    )
+    expect(screen.getByTestId('staff-header-exercise-item-ex-alpha')).toHaveAttribute(
+      'aria-disabled',
+      'true',
+    )
+    expect(mockSetActiveExercise).toHaveBeenCalledTimes(1)
+    release(BRAVO)
+  })
+
+  it('keeps focus on the badge button after a successful switch with a delayed refetch', async () => {
+    mockSetActiveExercise.mockResolvedValue(BRAVO)
+    const user = userEvent.setup()
+    renderBadge()
+
+    const trigger = await screen.findByRole('button', { name: /switch exercise/i })
+    await user.click(trigger)
+    await screen.findByRole('menu')
+
+    // From now on the assignments refetch is slow (resetQueries clears + refetches).
+    mockGetAssignments.mockImplementation(
+      () => new Promise<StaffAssignment[]>(resolve => setTimeout(() => resolve(TWO), 150)),
+    )
+    await user.click(screen.getByTestId('staff-header-exercise-item-ex-bravo'))
+
+    await waitFor(() => expect(screen.queryByRole('menu')).not.toBeInTheDocument())
+    await new Promise(resolve => setTimeout(resolve, 300))
+    const after = screen.getByRole('button', { name: /switch exercise/i })
+    expect(after).toBe(trigger)
+    expect(after).toHaveFocus()
+  })
 })

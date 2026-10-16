@@ -20,6 +20,10 @@
  *    calls the SAME `useSetActiveExercise` mutation `ExerciseSwitcher` uses (scope
  *    re-resolve, cache reset and all); the menu closes on success and stays open
  *    on failure with the error shown inside it (`role="alert"`, icon + text).
+ *  - The menu can always be dismissed, even mid-switch (no keyboard trap); the
+ *    switch keeps running and reopening shows it still pending.
+ *  - The last-known assignments are retained while a post-switch refetch runs, so
+ *    the trigger is never unmounted and focus returns to it.
  *  - Keyboard: Enter/Space open the trigger; arrows move; Escape closes and MUI
  *    restores focus to the trigger; the trigger has a visible focus ring.
  *
@@ -120,13 +124,16 @@ function SwitchableBadge({ role, cell, assignments }: SwitchableBadgeProps) {
   const activeExerciseId = justSwitchedTo?.exerciseId ?? scope.exerciseId
   const displayName = justSwitchedTo?.exerciseName ?? scope.exerciseName
 
+  // Dismissal is ALWAYS allowed (Esc, Tab, backdrop): a slow or stalled switch must
+  // never trap a keyboard user in the modal menu. Closing does not cancel the
+  // mutation; reopening shows the still-pending state with items disabled.
   const handleClose = () => {
-    if (switchMutation.isPending) return
     setAnchorEl(null)
   }
 
   const handleOpen = (target: HTMLElement) => {
-    switchMutation.reset()
+    // Keep a pending switch's state so a second switch cannot start on reopen.
+    if (!switchMutation.isPending) switchMutation.reset()
     setAnchorEl(target)
   }
 
@@ -277,7 +284,14 @@ function SwitchableBadge({ role, cell, assignments }: SwitchableBadgeProps) {
 export function ExerciseIdentityBadge({ role, cell }: ExerciseIdentityBadgeProps) {
   const { exerciseName } = useExerciseContext()
   const assignmentsQuery = useStaffAssignments()
-  const assignments = assignmentsQuery.isSuccess ? assignmentsQuery.data : []
+  // The switch mutation's `resetQueries()` clears the assignments while they refetch.
+  // Keep the last-known list so `SwitchableBadge` (the menu, the trigger, and the
+  // focus target) stays mounted through the reset instead of being swapped out.
+  const [lastKnown, setLastKnown] = useState<StaffAssignment[]>([])
+  if (assignmentsQuery.isSuccess && assignmentsQuery.data !== lastKnown) {
+    setLastKnown(assignmentsQuery.data)
+  }
+  const assignments = assignmentsQuery.isSuccess ? assignmentsQuery.data : lastKnown
 
   if (assignments.length >= MIN_ASSIGNMENTS_TO_SWITCH) {
     return <SwitchableBadge role={role} cell={cell} assignments={assignments} />
