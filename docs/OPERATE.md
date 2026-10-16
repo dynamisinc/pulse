@@ -72,6 +72,33 @@ Decided by Tom on 2026-10-14 (#486, Tier-2 items 3, 4 and 7):
 - **Shared devices: tap Sign out.** A participant session ends at midnight in the exercise time zone.
   A **View-only code** session also persists, but is not day-capped (accepted for the demo).
 
+## Trusted proxy (forwarded headers, #480)
+
+Behind App Service every request arrives from the platform front end, so without forwarded headers every
+per-IP rate limiter (staff login, join link, day word, ...) shares **one** bucket — a 100-person StartEx can
+lock everyone out. `UsePulseForwardedHeaders()` restores the client IP (`X-Forwarded-For`) and the original
+scheme (`X-Forwarded-Proto`), but **only from peers you configure**:
+
+| App setting | Meaning |
+|---|---|
+| `ForwardedHeaders__KnownNetworks__0`, `__1`, ... | Trusted proxy networks, CIDR (e.g. `10.0.0.0/8`) |
+| `ForwardedHeaders__KnownProxies__0`, `__1`, ... | Trusted proxy addresses (e.g. `10.0.0.4`) |
+| `ForwardedHeaders__ForwardLimit` | Hops honored, right to left. Default `1` (the single front end); leave it |
+
+- **Unset = trust no one.** With no entries the middleware is not added at all, so the limiter keeps the
+  proxy-collapsed behavior. Do not leave UAT unset before a large exercise.
+- **App Service (Linux):** the front end's internal addresses are not published. Microsoft's guidance for
+  Linux App Service is to trust the private ranges the platform uses: `10.0.0.0/8`, `172.16.0.0/12`,
+  `192.168.0.0/16`. This is safe here because the worker is reachable only through the front end; a client
+  cannot connect from those ranges directly. If the app is ever put behind another hop (Front Door, App
+  Gateway), add that hop and revisit `ForwardLimit`.
+- **Never set `ASPNETCORE_FORWARDEDHEADERS_ENABLED=true`.** That framework switch adds its own forwarded-headers
+  middleware that trusts **every** peer, so any client could forge its IP and dodge the limiter.
+- `X-Forwarded-Host` is never honored: the request host selects the exercise, so it must not be client-settable.
+- **Check it worked:** after a deploy, two people on different networks should each get their own staff-login
+  limit (10 failed attempts per minute). If one person's failures lock out the other, the networks are not
+  configured.
+
 ## Rollback
 
 **Frontend (deploy-only):**

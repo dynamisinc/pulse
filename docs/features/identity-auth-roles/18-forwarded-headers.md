@@ -30,3 +30,28 @@ Wave A1; independent of 16/17 (can run with them). Required before 15's login li
 
 ## Tests
 Integration tests with a test server and forged headers; pipeline-order test.
+
+Linked (`src/Pulse.WebApi.Tests/Features/TrustedProxy/`):
+- `ForwardedHeadersTests.TrustedProxy_ForwardedFor_BecomesTheClientIp` (AC-1)
+- `ForwardedHeadersTests.TrustedProxy_ClientPrependedEntry_IsNotUsed` (AC-1, AC-2)
+- `ForwardedHeadersTests.TrustedNetwork_Ipv4MappedPeer_IsTrusted` (AC-1)
+- `ForwardedHeadersTests.UntrustedSource_SpoofedHeaders_AreIgnored` (AC-2)
+- `ForwardedHeadersTests.NoConfiguration_TrustsNoOne_IncludingLoopback` (AC-2)
+- `ForwardedHeadersTests.UntrustedSource_RotatingSpoofedForwardedFor_CannotEscapeItsBucket` (AC-2)
+- `ForwardedHeadersTests.ClientsBehindTrustedProxy_GetSeparateStaffLoginBuckets` (AC-1, AC-5)
+- `ForwardedHeadersTests.TrustedProxy_ForwardedProto_RestoresHttpsScheme` (AC-4)
+- `ForwardedHeadersTests.InvalidConfiguration_FailsFast`, `ForwardedHeadersTests.UseWithoutAdd_Throws` (config safety)
+- `ForwardedHeadersPipelineOrderTests.RealPipeline_ForwardedHeadersRunBeforeTheRateLimiter_SoClientsBehindTheProxyGetSeparateBuckets`
+  (AC-3, AC-5 over the real `Program`) — **skipped until the orchestrator wires `Program.cs`**; remove the `Skip` in the
+  wiring commit. Verified red against the current (unwired) `Program`.
+
+AC-5 note: the staff-login limiter is 10 attempts/minute per IP (unchanged; new limiters are out of scope), so the tests
+exhaust 10 and assert the 11th trips for that client only. The "6 failures" figure belongs to the A2 per-account lockout.
+
+AC-6 (isolation, stated): no route is added and no data is read. The limiter partition key is the client IP only — it
+carries no exercise or org identity, so it cannot mix exercises or orgs. `X-Forwarded-Host` is deliberately not honored
+because the request host selects the exercise (COR-001).
+
+`Program.cs` wiring (orchestrator): `builder.Services.AddPulseForwardedHeaders(builder.Configuration);` with the other
+`Add*` calls, and `app.UsePulseForwardedHeaders();` as the FIRST middleware, directly after `builder.Build()` and before
+`app.UseCors(...)` (so before exercise resolution, session auth and `UseRateLimiter()`).
