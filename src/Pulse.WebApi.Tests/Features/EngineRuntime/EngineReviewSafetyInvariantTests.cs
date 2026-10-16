@@ -302,6 +302,102 @@ public sealed class EngineReviewSafetyInvariantTests
         item.ActionLabel.Should().Be("reply → @mvega_fh", "nothing was attempted, so no 'check the feed' publish reason is recorded");
     }
 
+    // The whole auto-send policy is re-decided at the last boundary (PR #571): a safety change that completes while
+    // the burst's persona handles are resolved stops the publish, resolving as the up-front policy would.
+
+    [Fact]
+    public async Task AutoHold_KillSwitchDropToSuggestDuringPersonaLookup_Holds_NotPublished()
+    {
+        var exerciseId = Guid.NewGuid();
+        var item = Countdown(exerciseId, started: 0, minutes: 3);
+        using var harness = Build(exerciseId, item);
+        var state = SwampedDelayedAuto(harness, exerciseId, item);
+
+        harness.Db.OnPersonaLookup = () => state.EngageKillSwitch(KillSwitchMode.DropToSuggest, "lead-1", 4);
+
+        await harness.Service.EvaluateAutoHoldAsync();
+
+        harness.Db.PersonaLookups.Should().BePositive("the kill switch must land during the persona lookup for this to prove anything");
+        harness.Publisher.Bursts.Should().BeEmpty("the effective autonomy is re-read immediately before the publisher call");
+        item.Disposition.Should().Be(DraftDisposition.Held);
+        Action((await harness.ReviewedEventsAsync(item.DraftId)).Should().ContainSingle("exactly one engine.reviewed per resolution").Subject)
+            .Should().Be("hold-on-expiry");
+    }
+
+    [Fact]
+    public async Task AutoHold_KillSwitchFullStopDuringPersonaLookup_StaysSuspended_NotPublished_NoEvent()
+    {
+        var exerciseId = Guid.NewGuid();
+        var item = Countdown(exerciseId, started: 0, minutes: 3);
+        using var harness = Build(exerciseId, item);
+        var state = SwampedDelayedAuto(harness, exerciseId, item);
+
+        harness.Db.OnPersonaLookup = () => state.EngageKillSwitch(KillSwitchMode.FullStop, "lead-1", 4);
+
+        await harness.Service.EvaluateAutoHoldAsync();
+
+        harness.Db.PersonaLookups.Should().BePositive("the full stop must land during the persona lookup for this to prove anything");
+        harness.Publisher.Bursts.Should().BeEmpty("a full stop found at the last boundary stops the automatic publish");
+        item.Disposition.Should().Be(
+            DraftDisposition.CountingDown,
+            "a full stop suspends the countdown unresolved, exactly as the tick treats a full stop seen up front");
+        (await harness.ReviewedEventsAsync(item.DraftId)).Should().BeEmpty("a suspended countdown is not a resolution");
+    }
+
+    [Fact]
+    public async Task AutoHold_FullStopSeenUpFront_LeavesCountdownSuspended_NotPublished_NoEvent()
+    {
+        var exerciseId = Guid.NewGuid();
+        var item = Countdown(exerciseId, started: 0, minutes: 3);
+        using var harness = Build(exerciseId, item);
+        var state = SwampedDelayedAuto(harness, exerciseId, item);
+        state.EngageKillSwitch(KillSwitchMode.FullStop, "lead-1", 0);
+
+        await harness.Service.EvaluateAutoHoldAsync();
+
+        harness.Publisher.Bursts.Should().BeEmpty();
+        item.Disposition.Should().Be(DraftDisposition.CountingDown, "the existing FullStop semantics: suspended, unresolved");
+        (await harness.ReviewedEventsAsync(item.DraftId)).Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task AutoHold_SwampedModeTurnedOffDuringPersonaLookup_Holds_NotPublished()
+    {
+        var exerciseId = Guid.NewGuid();
+        var item = Countdown(exerciseId, started: 0, minutes: 3);
+        using var harness = Build(exerciseId, item);
+        var state = SwampedDelayedAuto(harness, exerciseId, item);
+
+        harness.Db.OnPersonaLookup = () => state.SetSwampedMode(enabled: false, "lead-1", 4);
+
+        await harness.Service.EvaluateAutoHoldAsync();
+
+        harness.Db.PersonaLookups.Should().BePositive("swamped-off must land during the persona lookup for this to prove anything");
+        harness.Publisher.Bursts.Should().BeEmpty("swamped mode is re-read immediately before the publisher call");
+        item.Disposition.Should().Be(DraftDisposition.Held);
+        Action((await harness.ReviewedEventsAsync(item.DraftId)).Should().ContainSingle("exactly one engine.reviewed per resolution").Subject)
+            .Should().Be("hold-on-expiry");
+    }
+
+    [Fact]
+    public async Task AutoHold_DegradedClampDuringPersonaLookup_Holds_NotPublished()
+    {
+        var exerciseId = Guid.NewGuid();
+        var item = Countdown(exerciseId, started: 0, minutes: 3);
+        using var harness = Build(exerciseId, item);
+        var state = SwampedDelayedAuto(harness, exerciseId, item);
+
+        harness.Db.OnPersonaLookup = () => state.DegradeToSuggest("generation provider circuit opened", 4);
+
+        await harness.Service.EvaluateAutoHoldAsync();
+
+        harness.Db.PersonaLookups.Should().BePositive("the degraded clamp must land during the persona lookup for this to prove anything");
+        harness.Publisher.Bursts.Should().BeEmpty("the degraded clamp is re-read immediately before the publisher call");
+        item.Disposition.Should().Be(DraftDisposition.Held);
+        Action((await harness.ReviewedEventsAsync(item.DraftId)).Should().ContainSingle("exactly one engine.reviewed per resolution").Subject)
+            .Should().Be("hold-on-expiry");
+    }
+
     [Fact]
     public async Task Approve_WhileCutToFake_StillPublishes()
     {
@@ -558,6 +654,16 @@ public sealed class EngineReviewSafetyInvariantTests
     }
 
     private static Harness Build(Guid exerciseId, params EngineReviewItemEntity[] items) => new(exerciseId, items);
+
+    /// <summary>Puts the item on the sole auto-send path (Delayed-auto + swamped mode) and advances past its expiry.</summary>
+    private static EngineAutonomyState SwampedDelayedAuto(Harness harness, Guid exerciseId, EngineReviewItemEntity item)
+    {
+        var state = harness.Registry.GetOrCreate(exerciseId);
+        state.SetStorylineOverride(item.StorylineId, AutonomyLevel.DelayedAuto, "lead-1", 0);
+        state.SetSwampedMode(enabled: true, "lead-1", 0);
+        harness.Advance(minutes: 4);
+        return state;
+    }
 
     private static EngineReviewItemEntity Queued(Guid exerciseId) => new()
     {

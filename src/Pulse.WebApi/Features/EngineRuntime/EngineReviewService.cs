@@ -809,7 +809,7 @@ public sealed partial class EngineReviewService
 
             if (evaluation.Disposition == TimeoutDisposition.Publish)
             {
-                await AutoSendOnTickAsync(candidate, exerciseId, cancellationToken);
+                await AutoSendOnTickAsync(candidate, countdown, currentMinute, exerciseId, cancellationToken);
             }
             else
             {
@@ -851,9 +851,26 @@ public sealed partial class EngineReviewService
     /// two DbContexts; closing it needs an atomic claim (a rowversion or a conditional update), a follow-up tracked
     /// with WR-001.
     /// </para>
+    /// <para>
+    /// <b>The whole auto-send policy is re-decided at the last boundary (PR #571).</b> The tick's up-front
+    /// <see cref="AutoHoldPolicy.Evaluate"/> used a snapshot of the effective autonomy, swamped mode and the provider
+    /// cut. Any of them can change while this item's lookup or its burst's persona lookup is awaited, so the same
+    /// pure policy is re-run with FRESH inputs immediately before the publisher call, and the burst is published only
+    /// if it still says Publish. Otherwise the item resolves exactly as the up-front policy would for those inputs:
+    /// a DropToSuggest kill switch, a degraded clamp, swamped mode turned off or a cut HOLD it (one
+    /// <c>engine.reviewed</c> hold-on-expiry); a FullStop kill switch leaves it suspended — still counting down,
+    /// unresolved, no event — just as the tick leaves a FullStop countdown. Nothing is published in either case.
+    /// </para>
     /// </remarks>
+    /// <param name="candidate">The untracked queue-snapshot row whose countdown expired.</param>
+    /// <param name="countdown">The countdown snapshot the tick evaluated (re-evaluated here with fresh inputs).</param>
+    /// <param name="currentMinute">The scenario minute the tick evaluated the expiry at.</param>
+    /// <param name="exerciseId">The resolved exercise scope.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
     private async Task AutoSendOnTickAsync(
         EngineReviewItemEntity candidate,
+        DelayedAutoCountdown countdown,
+        int currentMinute,
         Guid exerciseId,
         CancellationToken cancellationToken)
     {
@@ -863,29 +880,48 @@ public sealed partial class EngineReviewService
             return;
         }
 
-        // Hold-on-cut, re-checked at the last boundary before the publish (M-1 / PR #571): the tick reads the cut once
-        // up front, but a cut to Fake can complete while the queue query, this item's lookup or the burst's persona
-        // lookup is awaited, or while a swamped tick awaits an earlier burst's publish. So the burst is prepared
-        // FIRST and the cut is re-read as the last statement before the publisher is invoked, with no await in
-        // between; a cut found there holds the expiry exactly as a cut seen up front would. Explicit approvals never
-        // pass through here, so they keep publishing during a cut.
+        // The auto-send policy, re-decided at the last boundary before the publish (M-1 / PR #571): the tick reads the
+        // effective autonomy, swamped mode and the provider cut once up front, but the kill switch (DropToSuggest or
+        // FullStop), a degraded-mode clamp, swamped mode being turned off, or a cut to Fake can complete while the
+        // queue query, this item's lookup or the burst's persona lookup is awaited, or while a swamped tick awaits an
+        // earlier burst's publish. So the burst is prepared FIRST and the pure AutoHoldPolicy is re-run on FRESH
+        // inputs as the last step before the publisher is invoked, with no await in between; anything but Publish
+        // there resolves the expiry exactly as the up-front policy would for those inputs. Explicit approvals never
+        // pass through here, so they keep their own semantics (an approve still publishes during a cut).
         //
-        // Residual semantics: a cut prevents every automatic publish whose publisher call BEGINS after the cut
-        // completes. A burst already handed to the publisher runs to completion: neither a cut nor the kill switch
-        // interrupts it (EnginePublishService observes only its cancellation token, not autonomy state). Both stop
-        // every LATER automatic publish.
+        // Residual semantics: a burst already handed to the publisher runs to completion: neither the kill switch,
+        // degraded mode, swamped-off nor a cut interrupts it (EnginePublishService observes only its cancellation
+        // token, not autonomy state). Every automatic publish whose publisher call BEGINS after one of them completes
+        // is stopped.
         //
         // Once the publish has been attempted, its record is written with CancellationToken.None: posts may be live,
-        // so a host shutdown at this point must not leave the item counting down to be sent again on restart. A cut
-        // found before the publisher call means NOTHING was attempted, so that hold is recorded after the try with
-        // the tick's own token (and, being outside it, can never be recorded twice by the fault handlers below).
+        // so a host shutdown at this point must not leave the item counting down to be sent again on restart. A
+        // re-decision found before the publisher call means NOTHING was attempted, so that hold is recorded after the
+        // try with the tick's own token (and, being outside it, can never be recorded twice by the fault handlers
+        // below).
         EngineBurstPublishResult? publishResult = null;
+        var suspendedByFullStop = false;
         try
         {
             var burst = await PrepareBurstAsync(item, exerciseId, input: null, leadTextOverride: null, cancellationToken);
-            if (!_providerCut.IsCutToFake(exerciseId))
+
+            // NO await between this re-decision and the publisher call.
+            var state = _autonomy.GetOrCreate(exerciseId);
+            var recheck = AutoHoldPolicy.Evaluate(
+                countdown,
+                state.ResolveEffective(item.StorylineId),
+                currentMinute,
+                state.SwampedModeEnabled,
+                _providerCut.IsCutToFake(exerciseId));
+            if (recheck.Disposition == TimeoutDisposition.Publish)
             {
                 publishResult = await _publisher.PublishBurstAsync(burst, cancellationToken);
+            }
+            else
+            {
+                // A FullStop yields no timeout transition (Event is null): the tick leaves such a countdown
+                // suspended and unresolved, so the same is done here. Every other non-Publish outcome is a HOLD.
+                suspendedByFullStop = recheck.Event is null;
             }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -926,9 +962,17 @@ public sealed partial class EngineReviewService
         }
 #pragma warning restore CA1031
 
+        if (suspendedByFullStop)
+        {
+            // FullStop engaged before the publisher was invoked: nothing was published, and — exactly like the tick's
+            // own FullStop handling — the countdown stays suspended (counting down, unresolved, no engine.reviewed).
+            return;
+        }
+
         if (publishResult is null)
         {
-            // Cut to Fake before the publisher was invoked: nothing was published. Hold it like any cut expiry.
+            // Kill switch (DropToSuggest), degraded clamp, swamped mode off or a cut to Fake before the publisher was
+            // invoked: nothing was published. Hold it exactly as the up-front policy would.
             await ResolveOnTickAsync(item, exerciseId, DraftDisposition.Held, EngineReviewAction.HoldOnExpiry, mutate: null, cancellationToken);
             return;
         }
