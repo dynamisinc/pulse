@@ -1,6 +1,6 @@
 # Story: AI generation usage panel
 
-**Feature:** Engine telemetry & tuning  ·  **Epic:** E8  ·  **Phase:** 2 (v1)  ·  **Status:** In Progress (built + Gate-2 clean; awaiting UAT verification)
+**Feature:** Engine telemetry & tuning  ·  **Epic:** E8  ·  **Phase:** 2 (v1)  ·  **Status:** In Progress (built + Gate-2 clean; awaiting UAT verification — unblocked: §8 signed 2026-10-16, PR #571 flips UAT live)
 **Requirements:** ADP-041  ·  **Design decisions:** none  ·  **Issue:** #401
 
 ## Context
@@ -34,12 +34,7 @@ Also resolved this session: the infrastructure blocker that gated §8's provisio
 made `main.bicep` non-idempotent against the live UAT SQL server; the fix moved it to the child
 resource (PR #404), and a full provisioning deploy then succeeded, so the App Service now carries its
 managed identity and all eleven `Generation__*` settings, with `Generation__Provider = Fake`. §8
-itself is still an unsigned human sign-off (its evidence boxes are unticked and the document is
-otherwise unchanged) — this fix clears one of the mechanical preconditions for eventually signing it,
-it does not sign it. Treat §8 as **signed for planning purposes** (Tom's instruction this session):
-plan and build this story against a world where a live provider will eventually be flipped on, rather
-than treating that flip as indefinitely hypothetical — but do not write or imply that §8 has actually
-been signed.
+was an unsigned human sign-off when this story was written. **Update 2026-10-16: §8 is now signed (Tom Bull); PR #571 flips UAT to the live provider (Ambient tier, suggest-only), so the "0 calls, $0" to "N calls, $Y" transition this panel verifies is now observable on UAT.**
 
 Emission already exists and is out of scope here — `EngineEventPayloads.Generated`
 (`src/Pulse.WebApi/Features/EngineRuntime/Telemetry/EngineEventPayloads.cs:83`), emitted by
