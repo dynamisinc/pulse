@@ -4,6 +4,7 @@ using System.Collections.Concurrent;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.EngineRuntime.Steering;
@@ -25,6 +26,13 @@ using Pulse.WebApi.Features.EngineRuntime.Steering;
 /// <b>Never throws, never rolls back</b> (see <see cref="IExerciseRuntimeStatePersister"/>): a failed write is logged
 /// at Error — never with the row's content — and returns <c>false</c>.
 /// </para>
+/// <para>
+/// <b>Transient failures are retried (Gate-1 CR-1).</b> A serverless database that is resuming answers 40613 and
+/// friends for a few seconds; each write makes up to <see cref="ExerciseRuntimePersistenceOptions.WriteAttempts"/>
+/// attempts with a short doubling backoff (re-composing the row each time, so a retry writes the newest state) before
+/// it reports failure. Non-transient failures are not retried. The clock write queue calls this same method, so its
+/// writes inherit the retry.
+/// </para>
 /// </remarks>
 public sealed partial class ExerciseRuntimeStateWriter : IExerciseRuntimeStatePersister
 {
@@ -33,6 +41,7 @@ public sealed partial class ExerciseRuntimeStateWriter : IExerciseRuntimeStatePe
     private readonly IExerciseClock _clock;
     private readonly OverlayStateService _overlayState;
     private readonly ILogger<ExerciseRuntimeStateWriter> _logger;
+    private readonly ExerciseRuntimePersistenceOptions _options;
     private readonly ConcurrentDictionary<Guid, SemaphoreSlim> _gates = new();
 
     /// <summary>Creates the writer.</summary>
@@ -41,12 +50,14 @@ public sealed partial class ExerciseRuntimeStateWriter : IExerciseRuntimeStatePe
     /// <param name="clock">The clock; persisted only when it implements <see cref="IExerciseClockPersistence"/>.</param>
     /// <param name="overlayState">The participant overlay store.</param>
     /// <param name="logger">Logs a failed write at Error.</param>
+    /// <param name="options">Retry tuning; defaults apply when <c>null</c>.</param>
     public ExerciseRuntimeStateWriter(
         IExerciseRuntimeStateStore store,
         PauseTierReader tierReader,
         IExerciseClock clock,
         OverlayStateService overlayState,
-        ILogger<ExerciseRuntimeStateWriter> logger)
+        ILogger<ExerciseRuntimeStateWriter> logger,
+        IOptions<ExerciseRuntimePersistenceOptions>? options = null)
     {
         ArgumentNullException.ThrowIfNull(store);
         ArgumentNullException.ThrowIfNull(tierReader);
@@ -59,6 +70,7 @@ public sealed partial class ExerciseRuntimeStateWriter : IExerciseRuntimeStatePe
         _clock = clock;
         _overlayState = overlayState;
         _logger = logger;
+        _options = options?.Value ?? new ExerciseRuntimePersistenceOptions();
     }
 
     /// <summary>
@@ -86,12 +98,14 @@ public sealed partial class ExerciseRuntimeStateWriter : IExerciseRuntimeStatePe
         await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            await _store.UpsertAsync(Compose(exerciseId), cancellationToken).ConfigureAwait(false);
-            return true;
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            LogWriteFailed(ex, exerciseId);
+            var failure = await WithRetriesAsync(
+                token => _store.UpsertAsync(Compose(exerciseId), token), exerciseId, cancellationToken).ConfigureAwait(false);
+            if (failure is null)
+            {
+                return true;
+            }
+
+            LogWriteFailed(failure, exerciseId);
             return false;
         }
         finally
@@ -114,12 +128,14 @@ public sealed partial class ExerciseRuntimeStateWriter : IExerciseRuntimeStatePe
         await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            await _store.DeleteAsync(exerciseId, auditEvent, cancellationToken).ConfigureAwait(false);
-            return true;
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            LogDeleteFailed(ex, exerciseId);
+            var failure = await WithRetriesAsync(
+                token => _store.DeleteAsync(exerciseId, auditEvent, token), exerciseId, cancellationToken).ConfigureAwait(false);
+            if (failure is null)
+            {
+                return true;
+            }
+
+            LogDeleteFailed(failure, exerciseId);
             return false;
         }
         finally
@@ -127,6 +143,45 @@ public sealed partial class ExerciseRuntimeStateWriter : IExerciseRuntimeStatePe
             gate.Release();
         }
     }
+
+    /// <summary>
+    /// Runs <paramref name="operation"/> up to <see cref="ExerciseRuntimePersistenceOptions.WriteAttempts"/> times,
+    /// retrying only TRANSIENT failures (<see cref="TransientSqlErrors"/>) after a doubling backoff.
+    /// </summary>
+    /// <returns><c>null</c> on success; otherwise the final failure.</returns>
+    private async Task<Exception?> WithRetriesAsync(
+        Func<CancellationToken, Task> operation, Guid exerciseId, CancellationToken cancellationToken)
+    {
+        var attempts = Math.Max(1, _options.WriteAttempts);
+        var delay = TimeSpan.FromMilliseconds(Math.Max(0, _options.WriteRetryInitialDelayMilliseconds));
+
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                await operation(cancellationToken).ConfigureAwait(false);
+                return null;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                if (attempt >= attempts || !TransientSqlErrors.IsTransient(ex))
+                {
+                    return ex;
+                }
+
+                LogWriteRetrying(ex, exerciseId, attempt, attempts, (int)delay.TotalMilliseconds);
+                await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
+                delay += delay;
+            }
+        }
+    }
+
+    /// <summary>Source-generated Warning for a transient write failure about to be retried (CA1848).</summary>
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "A transient SQL failure hit the runtime-state write for exercise {ExerciseId} (attempt {Attempt} of " +
+                  "{Attempts}); retrying in {DelayMs} ms.")]
+    private partial void LogWriteRetrying(Exception exception, Guid exerciseId, int attempt, int attempts, int delayMs);
 
     /// <summary>Source-generated Error for a failed write-through (CA1848). Never logs the row's content.</summary>
     [LoggerMessage(

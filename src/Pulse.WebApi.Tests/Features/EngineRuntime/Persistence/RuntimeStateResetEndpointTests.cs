@@ -379,6 +379,7 @@ public sealed class RuntimeStateResetEndpointTests
 
             // Story 18 FIRST, where S-5 puts it (before every ticking hosted service).
             builder.Services.AddExerciseRuntimePersistence();
+            builder.Services.Configure<ExerciseRuntimePersistenceOptions>(options => options.RehydrateRetryBudgetSeconds = 0);
 
             builder.Services.AddExerciseClock();
             builder.Services.AddPauseTierSteering();

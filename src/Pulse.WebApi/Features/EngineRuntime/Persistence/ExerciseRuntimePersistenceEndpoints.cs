@@ -4,6 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Pulse.WebApi.Features.EngineRuntime.Clock;
@@ -49,6 +50,11 @@ public static class ExerciseRuntimePersistenceEndpoints
         ArgumentNullException.ThrowIfNull(services);
 
         services.TryAddSingleton(TimeProvider.System);
+
+        // Retry tuning (Gate-1 CR-1) from EngineRuntime:Persistence when the host has configuration; defaults otherwise.
+        services.AddOptions<ExerciseRuntimePersistenceOptions>()
+            .Configure<IServiceProvider>((options, provider) =>
+                provider.GetService<IConfiguration>()?.GetSection(ExerciseRuntimePersistenceOptions.SectionName).Bind(options));
         services.TryAddSingleton<OverlayStateService>();
         services.TryAddSingleton<PauseTierReader>(provider =>
             exerciseId => provider.GetRequiredService<PauseTierRegistry>().GetTier(exerciseId));

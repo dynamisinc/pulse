@@ -390,6 +390,7 @@ public sealed class ExerciseRuntimeStateRestartTests
         services.AddSignalR();
         services.AddPauseParticipantOverlay();
         services.AddExerciseRuntimePersistence();
+        services.Configure<ExerciseRuntimePersistenceOptions>(options => options.RehydrateRetryBudgetSeconds = 0);
 
         if (withReactionLoop)
         {

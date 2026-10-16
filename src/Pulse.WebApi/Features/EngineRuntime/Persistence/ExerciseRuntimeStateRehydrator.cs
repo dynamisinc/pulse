@@ -3,7 +3,9 @@ namespace Pulse.WebApi.Features.EngineRuntime.Persistence;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Hosting;
+using System.Diagnostics;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.EngineRuntime.Steering;
 
@@ -29,6 +31,18 @@ using Pulse.WebApi.Features.EngineRuntime.Steering;
 /// is logged and skipped while every other exercise is restored.
 /// </para>
 /// <para>
+/// <b>Serverless resume (Gate-1 CR-1).</b> UAT's database auto-pauses; the first connection after a pause fails with
+/// 40613 while it wakes. A TRANSIENT read failure (<see cref="TransientSqlErrors"/>) is therefore retried with a
+/// doubling backoff for up to <see cref="ExerciseRuntimePersistenceOptions.RehydrateRetryBudgetSeconds"/> (default
+/// 90 s, inside App Service's 230 s start limit), each retry logged at Warning. A non-transient failure (no connection
+/// string, unknown host, missing table) fails fast with no retry.
+/// </para>
+/// <para>
+/// <b>Fail-safe Freeze (Gate-1 M-2).</b> A row whose clock is frozen but whose tier is not <c>freeze</c> can only come
+/// from a partly failed Freeze write; it is restored as Freeze, with the stored holding page (or the default
+/// in-fiction pause page), and logged at Warning, so a restart never silently un-freezes a world.
+/// </para>
+/// <para>
 /// <b>Isolation (COR-001).</b> The read is the store's one documented cross-exercise reader (read-only); each row is
 /// applied to its OWN exercise's in-memory state, keyed by the row's id, so restoring A never touches B.
 /// </para>
@@ -40,6 +54,7 @@ public sealed partial class ExerciseRuntimeStateRehydrator : IHostedService
     private readonly IExerciseClock _clock;
     private readonly OverlayStateService _overlayState;
     private readonly ILogger<ExerciseRuntimeStateRehydrator> _logger;
+    private readonly ExerciseRuntimePersistenceOptions _options;
 
     /// <summary>Creates the rehydrator.</summary>
     /// <param name="store">The durable row store (its cross-exercise reader).</param>
@@ -47,12 +62,14 @@ public sealed partial class ExerciseRuntimeStateRehydrator : IHostedService
     /// <param name="clock">The clock to restore anchors into (when it implements <see cref="IExerciseClockPersistence"/>).</param>
     /// <param name="overlayState">The overlay store to restore holding pages into.</param>
     /// <param name="logger">Logs every restored and skipped row.</param>
+    /// <param name="options">Retry tuning; defaults apply when <c>null</c>.</param>
     public ExerciseRuntimeStateRehydrator(
         IExerciseRuntimeStateStore store,
         PauseTierRegistry pauseTiers,
         IExerciseClock clock,
         OverlayStateService overlayState,
-        ILogger<ExerciseRuntimeStateRehydrator> logger)
+        ILogger<ExerciseRuntimeStateRehydrator> logger,
+        IOptions<ExerciseRuntimePersistenceOptions>? options = null)
     {
         ArgumentNullException.ThrowIfNull(store);
         ArgumentNullException.ThrowIfNull(pauseTiers);
@@ -65,6 +82,7 @@ public sealed partial class ExerciseRuntimeStateRehydrator : IHostedService
         _clock = clock;
         _overlayState = overlayState;
         _logger = logger;
+        _options = options?.Value ?? new ExerciseRuntimePersistenceOptions();
     }
 
     /// <summary>Restores every persisted exercise; never throws for a data or database fault.</summary>
@@ -86,22 +104,11 @@ public sealed partial class ExerciseRuntimeStateRehydrator : IHostedService
     /// <returns>How many exercises were restored.</returns>
     public async Task<int> RehydrateAsync(CancellationToken cancellationToken = default)
     {
-        System.Collections.Generic.IReadOnlyList<PersistedExerciseRuntimeState> rows;
-        try
-        {
-            rows = await _store.ReadAllForRehydrationAsync(cancellationToken).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        var rows = await ReadWithRetriesAsync(cancellationToken).ConfigureAwait(false);
+        if (rows is null)
         {
             return 0;
         }
-#pragma warning disable CA1031 // Startup must never fail because of runtime state.
-        catch (Exception ex)
-        {
-            LogReadFailed(ex);
-            return 0;
-        }
-#pragma warning restore CA1031
 
         var persistableClock = _clock as IExerciseClockPersistence;
         var restored = 0;
@@ -120,6 +127,8 @@ public sealed partial class ExerciseRuntimeStateRehydrator : IHostedService
                 LogSkippedUnparseable(exerciseId, reason);
                 continue;
             }
+
+            snapshot = FailSafeFreeze(snapshot);
 
             try
             {
@@ -158,10 +167,118 @@ public sealed partial class ExerciseRuntimeStateRehydrator : IHostedService
         return restored;
     }
 
+    /// <summary>
+    /// M-2: a frozen clock under a non-Freeze tier is a partly failed Freeze write — restore it as Freeze, with the
+    /// stored holding page or the default in-fiction pause page (keeping the stored sequence, so DF-27 still holds).
+    /// </summary>
+    private ExerciseRuntimeStateSnapshot FailSafeFreeze(ExerciseRuntimeStateSnapshot snapshot)
+    {
+        if (snapshot.Clock is not { Frozen: true } || snapshot.Tier == PauseTier.Freeze)
+        {
+            return snapshot;
+        }
+
+        LogFailSafeFreeze(snapshot.ExerciseId, snapshot.Tier);
+        var overlay = snapshot.Overlay.State == OverlayStateWire.Pause
+            ? snapshot.Overlay
+            : new OverlayStateSnapshot(OverlayStateWire.Pause, OverlayStateWire.InFiction, string.Empty, snapshot.Overlay.Sequence);
+        return snapshot with { Tier = PauseTier.Freeze, Overlay = overlay };
+    }
+
+    /// <summary>
+    /// Reads every row, retrying TRANSIENT failures within the configured budget (CR-1). Returns <c>null</c> when the
+    /// read finally failed (already logged) or startup was cancelled.
+    /// </summary>
+    private async Task<System.Collections.Generic.IReadOnlyList<PersistedExerciseRuntimeState>?> ReadWithRetriesAsync(
+        CancellationToken cancellationToken)
+    {
+        var budget = TimeSpan.FromSeconds(Math.Max(0, _options.RehydrateRetryBudgetSeconds));
+        var delay = TimeSpan.FromMilliseconds(Math.Max(1, _options.RehydrateRetryInitialDelayMilliseconds));
+        var maxDelay = TimeSpan.FromSeconds(15);
+        var stopwatch = Stopwatch.StartNew();
+
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                var rows = await _store.ReadAllForRehydrationAsync(cancellationToken).ConfigureAwait(false);
+                if (attempt > 1)
+                {
+                    LogReadRecovered(attempt, (int)stopwatch.Elapsed.TotalSeconds);
+                }
+
+                return rows;
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                return null;
+            }
+#pragma warning disable CA1031 // Startup must never fail because of runtime state.
+            catch (Exception ex)
+            {
+                var remaining = budget - stopwatch.Elapsed;
+                if (!TransientSqlErrors.IsTransient(ex))
+                {
+                    LogReadFailed(ex);
+                    return null;
+                }
+
+                if (remaining <= TimeSpan.Zero)
+                {
+                    LogReadGaveUp(ex, attempt, (int)budget.TotalSeconds);
+                    return null;
+                }
+
+                var wait = delay < remaining ? delay : remaining;
+                LogReadRetrying(ex, attempt, (int)wait.TotalMilliseconds, (int)remaining.TotalSeconds);
+                try
+                {
+                    await Task.Delay(wait, cancellationToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    return null;
+                }
+
+                delay = delay + delay > maxDelay ? maxDelay : delay + delay;
+            }
+#pragma warning restore CA1031
+        }
+    }
+
+    /// <summary>Source-generated Warning: a transient read failure will be retried (CA1848).</summary>
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "The runtime-state rehydrator hit a transient SQL failure (attempt {Attempt}; the database may be " +
+                  "resuming); retrying in {DelayMs} ms, {RemainingSeconds} s of the retry budget left.")]
+    private partial void LogReadRetrying(Exception exception, int attempt, int delayMs, int remainingSeconds);
+
+    /// <summary>Source-generated Information: the read succeeded after retries (CA1848).</summary>
+    [LoggerMessage(
+        Level = LogLevel.Information,
+        Message = "The runtime-state rehydrator read ExerciseRuntimeStates on attempt {Attempt} after {ElapsedSeconds} s.")]
+    private partial void LogReadRecovered(int attempt, int elapsedSeconds);
+
+    /// <summary>Source-generated Error: the retry budget ran out (CA1848).</summary>
+    [LoggerMessage(
+        Level = LogLevel.Error,
+        Message = "The runtime-state rehydrator GAVE UP after {Attempts} attempts ({BudgetSeconds} s budget) of transient " +
+                  "SQL failures; every exercise starts Running with an unstarted clock and no holding page (the " +
+                  "pre-restart state is NOT restored).")]
+    private partial void LogReadGaveUp(Exception exception, int attempts, int budgetSeconds);
+
+    /// <summary>Source-generated Warning: a frozen clock under a non-Freeze tier was restored as Freeze (CA1848).</summary>
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "The runtime-state row for exercise {ExerciseId} has a FROZEN clock but tier {Tier} (a partly failed " +
+                  "Freeze write); restored fail-safe as Freeze with the holding page.")]
+    private partial void LogFailSafeFreeze(Guid exerciseId, PauseTier tier);
+
     /// <summary>Source-generated Error: the table could not be read; every exercise starts Running (CA1848).</summary>
     [LoggerMessage(
         Level = LogLevel.Error,
-        Message = "The runtime-state rehydrator could not read ExerciseRuntimeStates; every exercise starts Running " +
+        Message = "The runtime-state rehydrator could not read ExerciseRuntimeStates (a non-transient failure, not " +
+                  "retried); every exercise starts Running " +
                   "with an unstarted clock and no holding page (the pre-restart state is NOT restored).")]
     private partial void LogReadFailed(Exception exception);
 

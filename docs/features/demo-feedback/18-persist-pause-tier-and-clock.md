@@ -132,4 +132,11 @@ All under `src/Pulse.WebApi.Tests/Features/EngineRuntime/Persistence/` (Docker-g
   - `ExerciseRuntimeStateRehydratorTests.Restoring_WritesNothing` (AC-13 read-only reader); `ExerciseRuntimeStateMappingTests.*` (AC-13 all-null-or-all-set clock rule, L-3)
 - **Cross-cutting**
   - `RuntimeStateResetEndpointTests.Post_ResetsOnlyTheResolvedExercise`, `ExerciseRuntimeStateRestartTests.Restart_RestoresEachExercise_OnlyFromItsOwnRow`, `OverlayStateServiceRestoreTests.Restore_ForA_NeverTouchesB` (isolation)
+- **Gate-1 fixes (CR-1 serverless resume, M-1, M-2, L-3)** — `TransientRetryTests`:
+  - `TheTransientSqlErrors_AreRecognised_EvenWrapped` / `NonTransientFailures_AreNotRetried` (the 40613-family classifier)
+  - `Rehydrator_RetriesTwo40613s_ThenRestoresTheFreeze` / `Rehydrator_ANonTransientFailure_FailsFast_WithNoRetry` / `Rehydrator_GivesUp_WhenTheBudgetRunsOut_AndSaysSo` / `Rehydrator_WithAZeroBudget_DoesNotRetry` (budget `EngineRuntime:Persistence:RehydrateRetryBudgetSeconds`, default 90)
+  - `Writer_RetriesATransientFailure_AndReportsPersisted` / `Writer_DoesNotRetryANonTransientFailure` / `Writer_GivesUpAfterTheConfiguredAttempts` / `TheResetDelete_RetriesATransientFailure` (the clock queue writes through the same writer)
+  - `ACancelledRequest_StillPersistsTheAppliedChange_M1`
+  - `Rehydrator_AFrozenClockUnderANonFreezeTier_RestoresFailSafeAsFreeze` (M-2)
+  - L-3: the reset does the in-memory reset first; staff and exercise-facts reads are best-effort with the existing fallbacks
 - **Waiting on seam S-5 (skipped until `Program.cs` is wired):** `RuntimePersistenceCompositionTests.ProgramCs_RegistersTheRehydrator_BeforeEveryTickingHostedService`, `RuntimePersistenceCompositionTests.ProgramCs_MapsTheRuntimeResetRoute_ExactlyOnce`.

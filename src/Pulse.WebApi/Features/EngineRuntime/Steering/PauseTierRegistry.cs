@@ -329,7 +329,10 @@ public sealed partial class PauseTierRegistry
         // publish (so the row carries the snapshot participants were sent), OUTSIDE _gate, awaited. The persister
         // never throws (cancellation aside) and never rolls back: a failed write is logged at Error by it and reported
         // to the console as persisted:false while the applied tier stands.
-        var persisted = await _persister.PersistAsync(transition.ExerciseId, cancellationToken).ConfigureAwait(false);
+        //
+        // Gate-1 M-1: deliberately CancellationToken.None, never the request's token — the in-memory change is already
+        // applied, so a client that disconnects (RequestAborted) must not leave the row behind the world.
+        var persisted = await _persister.PersistAsync(transition.ExerciseId, CancellationToken.None).ConfigureAwait(false);
 
         return new PauseTierResult(PauseTierOutcome.Applied, transition, Persisted: persisted);
     }

@@ -96,17 +96,24 @@ public sealed class RuntimeStateResetService
         }
 
         var exerciseId = scope.Value;
-        var staff = await _staffSession.GetCurrentStaffSessionAsync(cancellationToken).ConfigureAwait(false);
-        var facts = await _exerciseFacts.GetAsync(exerciseId, cancellationToken).ConfigureAwait(false);
 
-        // Read BEFORE the clear: the event is stamped with the scenario instant the reset happened at (COR-053).
+        // Read BEFORE the clear (in memory): the event is stamped with the scenario instant the reset happened at.
         var now = _timeProvider.GetUtcNow();
         var clockWasStarted = _clock.IsRunning(exerciseId) || _clock.IsFrozen(exerciseId);
         var clockWasFrozen = _clock.IsFrozen(exerciseId);
-        var scenarioTime = _clock.CurrentScenarioTime(exerciseId) ?? facts?.StoredScenarioTime ?? now;
+        var clockScenarioTime = _clock.CurrentScenarioTime(exerciseId);
 
+        // Gate-1 L-3: nothing that needs SQL may block the reset. The staff session was already resolved by the
+        // route's filters (so this read is normally cached), but it is best-effort all the same.
+        var staff = await TryAsync(() => _staffSession.GetCurrentStaffSessionAsync(cancellationToken)).ConfigureAwait(false);
         var actingHumanId = staff?.StaffUserId.ToString() ?? "unknown-staff";
+
+        // The in-memory reset FIRST (tier, clock, overlay publish).
         var previousTier = await _pauseTiers.ResetAsync(exerciseId, actingHumanId, cancellationToken).ConfigureAwait(false);
+
+        // Best-effort facts for the event, with the existing fallbacks (scenario time, then UTC).
+        var facts = await TryAsync(() => _exerciseFacts.GetAsync(exerciseId, cancellationToken)).ConfigureAwait(false);
+        var scenarioTime = clockScenarioTime ?? facts?.StoredScenarioTime ?? now;
 
         var auditEvent = new TelemetryEvent
         {
@@ -137,9 +144,27 @@ public sealed class RuntimeStateResetService
             EmittedAt = now,
         };
 
-        var persisted = await _persister.DeleteAsync(exerciseId, auditEvent, cancellationToken).ConfigureAwait(false);
+        // Gate-1 M-1: CancellationToken.None — the in-memory reset is already applied, so a disconnecting client must
+        // not leave the row (and a later restart) behind it.
+        var persisted = await _persister.DeleteAsync(exerciseId, auditEvent, CancellationToken.None).ConfigureAwait(false);
 
         return PauseTierStateDto.From(_pauseTiers, exerciseId, persisted);
+    }
+
+    /// <summary>Runs a best-effort read: any failure but cancellation yields <c>null</c> (the caller has a fallback).</summary>
+    private static async Task<T?> TryAsync<T>(Func<Task<T?>> read)
+        where T : class
+    {
+        try
+        {
+            return await read().ConfigureAwait(false);
+        }
+#pragma warning disable CA1031 // Best-effort by design (Gate-1 L-3): SQL being down must not block a reset.
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return null;
+        }
+#pragma warning restore CA1031
     }
 
     /// <summary>The <c>steering.runtime_reset</c> payload: what the reset cleared (flags only, no text, no names).</summary>

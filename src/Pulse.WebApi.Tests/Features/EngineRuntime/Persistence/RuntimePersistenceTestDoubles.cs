@@ -40,11 +40,25 @@ internal sealed class InMemoryRuntimeStateStore : IExerciseRuntimeStateStore
 
     public Exception? FailReadWith { get; set; }
 
+    /// <summary>Failures thrown, in order, by the next upserts/deletes (before <see cref="FailWith"/> is consulted).</summary>
+    public ConcurrentQueue<Exception> FailNextWrites { get; } = new();
+
+    /// <summary>Failures thrown, in order, by the next rehydration reads.</summary>
+    public ConcurrentQueue<Exception> FailNextReads { get; } = new();
+
     public int UpsertCount;
+
+    public int ReadCount;
 
     public Task UpsertAsync(ExerciseRuntimeStateSnapshot snapshot, CancellationToken cancellationToken = default)
     {
         Interlocked.Increment(ref UpsertCount);
+        cancellationToken.ThrowIfCancellationRequested();
+        if (FailNextWrites.TryDequeue(out var next))
+        {
+            throw next;
+        }
+
         if (FailWith is not null)
         {
             throw FailWith;
@@ -56,6 +70,12 @@ internal sealed class InMemoryRuntimeStateStore : IExerciseRuntimeStateStore
 
     public Task<bool> DeleteAsync(Guid exerciseId, TelemetryEvent? auditEvent, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (FailNextWrites.TryDequeue(out var next))
+        {
+            throw next;
+        }
+
         if (FailWith is not null)
         {
             throw FailWith;
@@ -67,6 +87,12 @@ internal sealed class InMemoryRuntimeStateStore : IExerciseRuntimeStateStore
     public Task<IReadOnlyList<PersistedExerciseRuntimeState>> ReadAllForRehydrationAsync(
         CancellationToken cancellationToken = default)
     {
+        Interlocked.Increment(ref ReadCount);
+        if (FailNextReads.TryDequeue(out var next))
+        {
+            throw next;
+        }
+
         if (FailReadWith is not null)
         {
             throw FailReadWith;
@@ -94,4 +120,42 @@ internal sealed class RecordingPersister : IExerciseRuntimeStatePersister
 
     public Task<bool> DeleteAsync(Guid exerciseId, TelemetryEvent? auditEvent, CancellationToken cancellationToken = default) =>
         Task.FromResult(Result);
+}
+
+/// <summary>
+/// Builds a real <see cref="Microsoft.Data.SqlClient.SqlException"/> carrying a given error number (e.g. 40613, a
+/// serverless database resuming) through SqlClient's internal factories — the type has no public constructor.
+/// Test-only reflection over Microsoft.Data.SqlClient 6.x.
+/// </summary>
+internal static class SqlExceptionFactory
+{
+    public static Microsoft.Data.SqlClient.SqlException Create(int number, string message = "Database is not currently available.")
+    {
+        const System.Reflection.BindingFlags Any =
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Static;
+        var errorType = typeof(Microsoft.Data.SqlClient.SqlError);
+        var errorCtor = errorType.GetConstructors(Any).OrderByDescending(c => c.GetParameters().Length).First();
+        var args = errorCtor.GetParameters().Select(p => p.ParameterType switch
+        {
+            var t when t == typeof(int) && p.Name == "infoNumber" => (object?)number,
+            var t when t == typeof(int) => 0,
+            var t when t == typeof(uint) => 0u,
+            var t when t == typeof(byte) => (byte)0,
+            var t when t == typeof(string) && p.Name == "errorMessage" => message,
+            var t when t == typeof(string) => "server",
+            _ => null,
+        }).ToArray();
+        var error = (Microsoft.Data.SqlClient.SqlError)errorCtor.Invoke(args);
+
+        var collection = (Microsoft.Data.SqlClient.SqlErrorCollection)Activator.CreateInstance(
+            typeof(Microsoft.Data.SqlClient.SqlErrorCollection), nonPublic: true)!;
+        typeof(Microsoft.Data.SqlClient.SqlErrorCollection).GetMethod("Add", Any)!.Invoke(collection, [error]);
+
+        var create = typeof(Microsoft.Data.SqlClient.SqlException).GetMethods(Any)
+            .Where(m => m.Name == "CreateException")
+            .OrderBy(m => m.GetParameters().Length)
+            .First(m => m.GetParameters()[0].ParameterType == typeof(Microsoft.Data.SqlClient.SqlErrorCollection));
+        var createArgs = create.GetParameters().Select((p, i) => i == 0 ? collection : p.ParameterType == typeof(string) ? "16.0" : (p.HasDefaultValue ? p.DefaultValue : null)).ToArray();
+        return (Microsoft.Data.SqlClient.SqlException)create.Invoke(null, createArgs)!;
+    }
 }
