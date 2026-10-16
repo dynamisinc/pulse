@@ -3,6 +3,7 @@ namespace Pulse.WebApi.Features.Identity.Accounts;
 using Microsoft.EntityFrameworkCore;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
+using Pulse.WebApi.Features.Identity.EasyLogin;
 using Pulse.WebApi.Features.Identity.Sessions;
 
 /// <summary>
@@ -171,8 +172,11 @@ public sealed class ParticipantLoginService
         var authenticated = _passwordHasher.Verify(account?.CredentialHash, request.Password);
 
         // easy-login/03 (EL-8): a person staff have DISABLED is refused here too, deliberately AFTER Verify() has run,
-        // so the timing, the 401 and the failure event are exactly those of a wrong password.
-        if (account is null || !authenticated || account.DisabledAt is not null)
+        // so the timing, the 401 and the failure event are exactly those of a wrong password. Likewise a legacy account
+        // whose enrollment carries a STAFF role (migrated by AdminIdentityFoundation; no longer creatable): this path
+        // mints participant-world sessions only (XC-002), the same gate the join-link and day-word paths apply.
+        if (account is null || !authenticated || account.DisabledAt is not null
+            || !ParticipantSessionRequests.IsParticipantWorldRole(account.Enrollment.Role))
         {
             // Fail closed: no session, and a failure event with NO session identity (target = the sanitized
             // attempted handle for audit). One SaveChanges — the write-guard runs here against the valid scope.

@@ -111,8 +111,10 @@ can carry: an org-admin session has `exerciseId: null`, and the role is a union 
 confirm the new bundle is serving, then re-dispatch *Deploy Backend*. This is safe because the new bundle's session and
 staff-assignment parsers accept **both** shapes: the pre-A1 one (no `scope`, `world`, `isLead` or `personId`; those
 default to an exercise session, the world implied by the role, not lead, and no person) and the A1 one. So exercise
-sessions keep working while the old backend is still serving. Everyone with an `orgAdmin` session must sign in again
-after the deploy.
+sessions keep working while the old backend is still serving. The one exception: between the two deploys, an old-backend
+`orgAdmin` session (role `orgAdmin`, no `scope`) is read as an exercise session and refused, so org admins cannot use the
+console in that window. Keep the window short. Everyone with an `orgAdmin` session must sign in again after the deploy
+anyway, because the migration revokes those sessions.
 
 **Before the backend deploy, note the time.** Write down the UTC time just before you re-dispatch *Deploy Backend*.
 That is the point-in-time-restore (PITR) target if a rollback is needed.
