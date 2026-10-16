@@ -125,8 +125,25 @@ Organization (+ Slug: new, unique; used in the staff console URL, §1.2)
     - None verifies → the uniform 401.
 
     Because orgs are disclosed only after the password verifies for that org, the response does not reveal
-    which orgs an email belongs to. Every verify runs PBKDF2, so the per-IP limiter (#480) and the
-    per-person lockout apply to each candidate, and the work per request is capped at 5 candidates.
+    which orgs an email belongs to. Every verify runs PBKDF2, so the per-IP limiter (#480) applies and
+    the work per request is capped at 5 candidates. Candidates that are currently locked out are skipped
+    without being verified.
+  - **Lockout attribution, slugless sign-in.** A Person's failure counter goes up **only when the attempt
+    fails as a whole**, that is, when no candidate verifies. In that case every candidate that was tried
+    gets one failure. When any candidate verifies, the other candidates' counters are left alone. So five
+    good sign-ins to org A never lock out the same email's Person in org B, while a guesser working through
+    email-only attempts still runs into every candidate's lockout. With a slug there is exactly one
+    candidate and the normal rule applies.
+  - **The org-choice record** is its own table, **`LoginChoice`**: `Id`, `TokenHash` (SHA-256), `ExpiresAt`
+    (2 min), `ConsumedAt?`, `CreatedFromIpHash`. Its child table **`LoginChoiceCandidate`** holds
+    `(ChoiceId, PersonId, OrganizationId)`, one row per password-verified Person. Neither table is scoped;
+    `LoginChoice` is a resolution root looked up by hash.
+    - `POST /api/auth/staff/login/choose {choiceToken, orgSlug}` mints a session only when the slug matches
+      a candidate row.
+    - It consumes the **whole** choice, in one statement guarded by `ConsumedAt IS NULL`, so a token can
+      never be used for a second org.
+    - It changes no credential. `CredentialToken` is not involved, and its purposes stay
+      `invite|reset`.
   - **What the session is minted on:** an org-scope session if the person is an org admin, otherwise their
     most recently used staff enrollment in that org. With neither, the response is the uniform 401.
   - **Switching:** the existing `POST /api/staff/active-exercise` switches between the person's enrollments
@@ -244,7 +261,7 @@ mid-exercise.
 
 ### Decision 3.3 — one-time tokens for invite and reset
 - **New `CredentialToken` table** (not scoped; it is a resolution root, looked up by hash like
-  `ParticipantLink`): `Id`, `TokenHash` (SHA-256), `Purpose ∈ invite|reset|org-choice`, `PersonId?` / `AccountId?`
+  `ParticipantLink`): `Id`, `TokenHash` (SHA-256), `Purpose ∈ invite|reset`, `PersonId?` / `AccountId?`
   (exactly one is set), `OrganizationId`, `ExpiresAt`, `UsedAt?`, `IssuedByPersonId?`, `CreatedAt`.
   - Lifetime: invite 7 days, reset 60 min.
   - Single use. Issuing a new token voids the earlier unused tokens of the same purpose.
@@ -353,7 +370,7 @@ Freeze stays a pause tier (controller), not a state. A5 adds that Freeze and pau
 | **Reopen** | completed → live | everything; the scenario clock resumes where it stopped | nothing | **controller**; refused once archived. For "we ended by mistake". Audited |
 | **Archive** | completed → archived, **or build → archived when `FirstLiveAt` is set** (a reset exercise being retired) | everything (read-only) | live sessions revoked | planner or org admin |
 | **Unarchive** | archived → completed (or → build if it was archived from build) | everything | nothing | org admin only |
-| **Reset** | completed **or staged** → build | settings, chrome, sign-in methods, personas (with any live edits), staff library media, run sheet (all items back to *pending*), noise pool, **setup posts** (§5.4), accounts, enrollments, links, view-only code | **conduct data**: conduct posts and their edits, reactions, reposts, `PostMediaItem` rows and **participant-uploaded media** on them, follows created after `FirstLiveAt`, telemetry events, engine review items, inject queue state, runtime state (clock, pause tier), day words, every session | planner or org admin; typed-name confirmation. **The UI offers the AAR/report export first** (from completed). Refused in build, live, paused and archived |
+| **Reset** | completed **or staged** → build | settings, chrome, sign-in methods, personas (with any live edits), staff library media, run sheet (all items back to *pending*), noise pool, **setup posts** (§5.4), accounts, enrollments, links, view-only code | **conduct data**: conduct posts and their edits, reactions, reposts, `PostMediaItem` rows and **participant-uploaded media** on them, conduct follows (`Follow.IsSetupContent = false`, §5.4), telemetry events, engine review items, inject queue state, runtime state (clock, pause tier), day words, every session | planner or org admin; typed-name confirmation. **The UI offers the AAR/report export first** (from completed). Refused in build, live, paused and archived |
 | **Delete** | build → (gone) | — | the exercise and every exercise-scoped row and blob; the hostname is freed | planner or org admin; **only if `FirstLiveAt` is null** (never ran). An exercise that ran and was reset is retired by **archive from build** |
 | **Duplicate** | any → new build exercise | see 5.5 | — | planner on the source, or org admin |
 
@@ -388,7 +405,20 @@ participants with no sign-in yet issued; no evaluator enrolled.
 ### Decision 5.4 — setup vs conduct posts
 `Post` gets **`IsSetupContent`** (bool, stamped server-side by the write path when the exercise is in
 **`build`**). Reset keeps setup posts (the opening feed, pre-exercise history) and deletes every other post.
-Posts written in `staged` (dry runs) count as conduct, which is what makes reset from staged useful (§5.2). Today nothing distinguishes them. `Origin` describes who posted, not when. Inferring from
+Posts written in `staged` (dry runs) count as conduct, which is what makes reset from staged useful (§5.2).
+
+**`Follow` gets the same flag.** `Follow.IsSetupContent` is stamped by the same rule: true only when the
+exercise is in `build`. `FirstLiveAt` cannot separate setup follows from conduct ones, because it is null
+during the first staged dry run and stays set across a reset. Reset deletes conduct follows, and duplicate
+copies only setup follows.
+
+**Backfill for existing rows** (in the A3 migration, applied to both `Posts` and `Follows`):
+- **Exercise currently in `build`:** every row is setup.
+- **Otherwise:** a row is setup when its `CreatedWallClock` is earlier than the exercise's first
+  `exercise.lifecycle.transitioned` telemetry event out of `build` (to staged, or straight to live for
+  legacy rows). If there is no such event, the row is conduct, which fails safe: reset deletes it and
+  duplicate does not copy it.
+- **Posts only:** a post whose `Origin` is `participant` is always conduct. Today nothing distinguishes them. `Origin` describes who posted, not when. Inferring from
 `CreatedWallClock < FirstLiveAt` breaks after a reopen or a reset, so the flag is explicit.
 
 ### Decision 5.4a — run-sheet items that reply to posts
@@ -411,7 +441,7 @@ foreign-exercise parent when the inject fires, so both reset and duplicate must 
   - staff library media (blobs server-side copied into the new prefix);
   - the run sheet, all items pending except reply items that need repair (§5.4a);
   - the noise pool;
-  - the follow graph between personas;
+  - **setup** follows (`IsSetupContent`) between the copied personas, never conduct follows;
   - **staff enrollments** (default on, so the team is carried over);
   - **setup posts** (`IsSetupContent`: the opening feed and pre-exercise history), with their media, pins
     and baselines remapped. *Signed off: this amends C2's "never posts" to "never conduct posts".*
@@ -541,7 +571,7 @@ Key: ✅ allowed · — refused (403; 404 where the bare-404 pattern applies) ·
 | Run sheet edit | via enrollment | ✅ | ✅ | — | — | — |
 | Fire injects, post as persona, takedown, pin, noise, steering, engine review | via enrollment | — | ✅ | — | — | — |
 | Read everything in the exercise (console, feeds, report) | via enrollment | ✅ | ✅ | ✅ | — | — |
-| Sim writes (post, reply, react, follow, own avatar) *(L: live, not frozen)* | — | — | — | — | ✅ | — |
+| Sim writes (post, reply, react, follow, own avatar) *(L: live **or staged** (dry run); refused when paused or frozen)* | — | — | — | — | ✅ | — |
 | Read the fiction | — | — | — | — | ✅ | ✅ |
 
 "Via enrollment" means the org admin enrolls themselves (audited) and then holds that role's row.
@@ -573,9 +603,9 @@ the report export offered first; from `completed` **or `staged`**; planner or or
 
 | Kind | Item | Wave |
 |---|---|---|
-| **EF migration** | `AdminIdentityFoundation`:<br>• `People` table, with a backfill of one per `StaffUser` (same Id; legacy rows have a null Email until invited)<br>• `StaffUsers.Id` FK → `People.Id`<br>• `Organizations.Slug` (unique; backfilled from Name)<br>• **`Enrollments` table**: StaffAssignment rows migrated with the same Id, plus one per `Account` (Role and PersonaId copied); then **`StaffAssignments` is dropped** and **`Accounts.Role`/`Accounts.PersonaId` are dropped**<br>• `Accounts.EnrollmentId` (unique, non-null after backfill)<br>• `Sessions.PersonId`, **`Sessions.ExerciseId` nullable**<br>• `People.OrgRole`, with orgAdmin enrollments backfilled → planner + OrgRole<br>• `People` password and lockout columns (`PasswordHash`, `PasswordChangedAt`, `FailedLoginCount`, `LockedOutUntil`)<br>• `Sessions.Origin` (the cross-tab world backstop)<br>• **`OrgAuditEvents` table**<br>• `Exercises.FirstLiveAt` (backfilled from lifecycle telemetry where the status is past `staged`)<br>Hand-written SQL in `EXEC`, per OPERATE.md; reversible `Down` | A1 |
+| **EF migration** | `AdminIdentityFoundation`:<br>• `People` table, with a backfill of one per `StaffUser` (same Id; legacy rows have a null Email until invited)<br>• `StaffUsers.Id` FK → `People.Id`<br>• `Organizations.Slug` (unique; backfilled from Name)<br>• **`Enrollments` table**: StaffAssignment rows migrated with the same Id, plus one per `Account` (Role and PersonaId copied); then **`StaffAssignments` is dropped** and **`Accounts.Role`/`Accounts.PersonaId` are dropped**<br>• `Accounts.EnrollmentId` (unique, non-null after backfill)<br>• `Sessions.PersonId`, **`Sessions.ExerciseId` nullable**<br>• `People.OrgRole`, with orgAdmin enrollments backfilled → planner + OrgRole<br>• `People` password and lockout columns (`PasswordHash`, `PasswordChangedAt`, `FailedLoginCount`, `LockedOutUntil`)<br>• `Sessions.Origin` (the cross-tab world backstop)<br>• `LoginChoices` + `LoginChoiceCandidates` (slugless org choice)<br>• **`OrgAuditEvents` table**<br>• `Exercises.FirstLiveAt` (backfilled from lifecycle telemetry where the status is past `staged`)<br>Hand-written SQL in `EXEC`, per OPERATE.md; reversible `Down` | A1 |
 | EF migration | `CredentialToken`; `People.AvatarBlobName`; `Exercises.SignInMethods`; `MediaAssets.UploadedByAccountId` | A2 |
-| EF migration | `Posts.IsSetupContent`; `Exercises.ParticipantName` | A3 |
+| EF migration | `Posts.IsSetupContent`, `Follows.IsSetupContent` (with the §5.4 backfill); `Exercises.ParticipantName` | A3 |
 | EF migration | `ContentPack`, `ContentPackItem`; persona archive column | A4 |
 | **Frozen shared type** | `Session` (frontend `sessionResolver.ts:47` / `SessionDto`): `exerciseId` becomes nullable; adds `personId` and `world` (`staff`/`participant`). `ExerciseRole` (`roles.ts`): `orgAdmin` leaves the exercise-role union and becomes an `OrgRole`. `StaffAssignment` (`features/staff/types.ts:36`) becomes `Enrollment`, with the same fields plus `personId`. The staff login request takes `orgSlug?` + `email` instead of `exerciseId` + `username`. Posted on the feature issue per C1.4 **before** A1 merges | A1 |
 | Frozen shared type | `ExerciseScopeDto.exerciseName` changes its source to `ParticipantName` (same field name and shape) | A3 / A5 |
@@ -618,3 +648,10 @@ exercise, with no Dynamis help. Every "ask Dynamis support" line this work remov
 - the A1 password columns and the chained interim provider (§1.3, §9).
 
 None of them changes a Tier-2 decision in §8. They close gaps in how those decisions are implemented.
+
+**Copilot review 2 (2026-10-16), on `3d64da4`, 11 findings.** Seven repeated findings that were already fixed
+in `025ba1b` and `90e194a`. Four were new and are folded in:
+- cross-org lockout attribution (§1.2);
+- the `LoginChoice` record, kept separate from `CredentialToken` (§1.2, §3.3);
+- follow-edge provenance and the setup/conduct backfill (§5.4, §5.5);
+- staged dry-run writes in the role matrix (§8.2).
