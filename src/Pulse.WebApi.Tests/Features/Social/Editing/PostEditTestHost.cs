@@ -20,6 +20,7 @@ using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Data.Extensions;
 using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.EngineRuntime.Steering;
+using Pulse.WebApi.Features.ExerciseConfiguration.Lifecycle;
 using Pulse.WebApi.Features.Identity.SharedAccess;
 using Pulse.WebApi.Features.Identity.Staff;
 using Pulse.WebApi.Features.Media;
@@ -146,6 +147,10 @@ internal sealed class PostEditTestHost : IAsyncDisposable
         builder.Services.AddSocialThreads();
         builder.Services.AddPostEditing();
 
+        // As Program.cs: the COR-032 participant gate covers /api/posts, so build/completed/archived are refused (403)
+        // before the edit handler runs (Gate-1 M-1).
+        builder.Services.AddExerciseLifecycle();
+
         builder.Services.RemoveAll<IMediaUrlSigner>();
         builder.Services.AddScoped<IMediaUrlSigner>(sp => new FakeMediaUrlSigner(sp.GetRequiredService<IExerciseContext>(), new SignerProbe()));
 
@@ -181,6 +186,7 @@ internal sealed class PostEditTestHost : IAsyncDisposable
         builder.Services.AddSingleton<IReadOnlySessionProbe>(new StubReadOnlyProbe(caller));
 
         var app = builder.Build();
+        app.UseExerciseLifecycleGating();
         app.MapSocialFeedEndpoints();
         app.MapSocialThreadEndpoints();
         app.MapPostEditing();
@@ -241,7 +247,7 @@ internal sealed class PostEditTestHost : IAsyncDisposable
     }
 
     /// <summary>Seeds an exercise in <paramref name="status"/> with the stored scenario time.</summary>
-    public async Task<Guid> SeedExerciseAsync(string status = "live")
+    public async Task<Guid> SeedExerciseAsync(string status = "live", bool withStoredScenarioTime = true)
     {
         var id = Guid.NewGuid();
         await using var db = Db(id);
@@ -253,7 +259,7 @@ internal sealed class PostEditTestHost : IAsyncDisposable
             Hostname = $"edit-{id:N}.example.com",
             TimeZone = "UTC",
             Status = status,
-            CurrentScenarioTime = StoredScenarioTime,
+            CurrentScenarioTime = withStoredScenarioTime ? StoredScenarioTime : null,
         });
         await db.SaveChangesAsync();
         return id;

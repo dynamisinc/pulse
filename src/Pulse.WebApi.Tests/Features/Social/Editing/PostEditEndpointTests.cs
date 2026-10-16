@@ -331,23 +331,28 @@ public sealed class PostEditEndpointTests
     }
 
     [RequiresDockerFact]
-    public async Task PausedOrEndedLifecycle_RefusesTheEdit_WithFrozen()
+    public async Task PausedLifecycle_IsRefused409Frozen_AndAnEndedOneIs403FromTheLifecycleGate()
     {
         await using var host = await PostEditTestHost.StartAsync(ConnectionString);
         var (_, exerciseId, personaId) = await StartWithParticipantAsync(host);
         var postId = await host.SeedPostAsync(exerciseId, personaId);
 
-        foreach (var status in new[] { "paused", "completed" })
+        await host.SetStatusAsync(exerciseId, "paused");
+        using (var paused = await host.EditAsync(postId, "While paused"))
         {
-            await host.SetStatusAsync(exerciseId, status);
+            paused.StatusCode.Should().Be(HttpStatusCode.Conflict, "paused is served (holding page) but posting is refused");
+            (await JsonOf(paused))["reason"]!.GetValue<string>().Should().Be("frozen");
+        }
 
-            using var response = await host.EditAsync(postId, "While " + status);
-
-            response.StatusCode.Should().Be(HttpStatusCode.Conflict, $"posting is refused while {status}");
-            (await JsonOf(response))["reason"]!.GetValue<string>().Should().Be("frozen");
+        await host.SetStatusAsync(exerciseId, "completed");
+        using (var completed = await host.EditAsync(postId, "After EndEx"))
+        {
+            completed.StatusCode.Should().Be(HttpStatusCode.Forbidden,
+                "ExerciseLifecycleGatingMiddleware refuses /api/posts in completed before the handler runs (COR-032)");
         }
 
         (await host.ReadPostAsync(postId)).EditCount.Should().Be(0);
+        host.Broadcaster.Edited.Should().BeEmpty();
     }
 
     [RequiresDockerFact]

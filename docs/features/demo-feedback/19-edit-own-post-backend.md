@@ -22,8 +22,10 @@ only**, a **15-minute** window, history visible to everyone, participants only (
 - [x] Text goes through `PostSanitizer.Sanitize` and the same length/empty rules as create (400 on violation).
 - [x] Window and limit (DF-30): refused with 409 `{ reason: "window-closed" }` when `utcNow − CreatedWallClock >
       15 min`, `{ reason: "edit-limit" }` when `EditCount == 5`, `{ reason: "frozen" }` whenever posting is refused:
-      pause tier Freeze, a frozen clock, or a lifecycle that is paused or ended (Tom 10/15 evening). The 15-minute window
-      keeps running while edits are blocked.
+      pause tier Freeze, a frozen clock, or a `paused` lifecycle (Tom 10/15 evening). An ended (`completed`/`archived`) or
+      `build` exercise never reaches the handler: `ExerciseLifecycleGatingMiddleware` answers `/api/posts` with 403 first
+      (the service still refuses it as `frozen`, defence in depth; Gate-1 M-1). The 15-minute window keeps running while
+      edits are blocked.
 - [x] Identical sanitized text ⇒ 200 with the current post, nothing written, nothing pushed (DF-33).
 - [x] On a real edit, one transaction: insert `PostEdit { EditNumber = EditCount + 1, PreviousBody = old Body,
       EditedAt = utcNow, EditedScenarioTime = IExerciseClock.CurrentScenarioTime (fallback as create) }`, set
@@ -80,7 +82,7 @@ match the history read, current flag on the last version only, never-edited post
 edit refused while the lifecycle is paused or ended, and the window still closes at 15:01 after a pause; telemetry has no text.
 
 **Linked tests (story 19 build).** E = `Editing/PostEditEndpointTests`, C = `Editing/PostEditContractTests`,
-W = `Editing/PostEditWorkbookTests`, X = `Editing/PostEditExportEndToEndTests` (real SQL tests are `[RequiresDockerFact]`;
+W = `Editing/PostEditWorkbookTests`, R = `Editing/PostEditRaceTests`, X = `Editing/PostEditExportEndToEndTests` (real SQL tests are `[RequiresDockerFact]`;
 the wall clock is the repo's hand-advanced `ManualTimeProvider`, its stand-in for `FakeTimeProvider`).
 
 - AC-1 (route, who may edit): E.OwnPost_Edit_Returns200_WritesOneEditRow_AndUpdatesThePostInOneTransaction,
@@ -92,10 +94,14 @@ the wall clock is the repo's hand-advanced `ManualTimeProvider`, its stand-in fo
   E.EmptyMissingOrTooLongText_Returns400_AndWritesNothing
 - AC-3 (window, limit, frozen): E.Window_IsOpenAt14m59_AndClosedAt15m01, E.SixthEdit_IsRefused_WithEditLimit,
   E.FreezeTier_RefusesTheEdit_WithFrozen, E.FrozenClock_RefusesTheEdit_WithFrozen,
-  E.PausedOrEndedLifecycle_RefusesTheEdit_WithFrozen, E.TheWindowKeepsRunningThroughAPause_AndStillClosesAt15m01,
+  E.PausedLifecycle_IsRefused409Frozen_AndAnEndedOneIs403FromTheLifecycleGate,
+  R.AnEndedLifecycle_IsStillRefusedByTheServiceItself_DefenceInDepthBehindTheGate, E.TheWindowKeepsRunningThroughAPause_AndStillClosesAt15m01,
   C.Window_ClosesStrictlyAfterFifteenMinutes, C.EditableForSeconds_CountsDown_AndIsZeroWhenClosedOrAtTheLimit
 - AC-4 (identical no-op): E.IdenticalSanitizedText_Is200_WithNothingWrittenAndNothingPushed
-- AC-5 (one transaction): E.OwnPost_Edit_Returns200_WritesOneEditRow_AndUpdatesThePostInOneTransaction
+- AC-5 (one transaction): E.OwnPost_Edit_Returns200_WritesOneEditRow_AndUpdatesThePostInOneTransaction,
+  R.ATakedownBetweenReadAndWrite_Is404_WithNothingWrittenAndNothingPushed,
+  R.TwoEditsCollidingOnTheSameEditNumber_OneWins_TheOtherIsABodilessConflict_NothingPartial,
+  R.WithNoClockAndNoStoredScenarioTime_TheEditTimeIsThePostsScenarioTime_NeverTheWallClock
 - AC-6 (PostEdited push): E.ARealEdit_PushesOnePostEdited_ToItsExerciseOnly_AndNeverAPostReceived,
   E.AFailingBroadcaster_DoesNotFailTheEdit, C.SignalRBroadcaster_SendsPostEdited_ToTheExerciseGroupOnly_WithTheFrozenShape,
   C.DefaultInterfaceMethod_IsANoOp_ForOlderBroadcasterDoubles
@@ -120,4 +126,7 @@ the wall clock is the repo's hand-advanced `ManualTimeProvider`, its stand-in fo
 `ExerciseLifecycleBehaviour.ParticipantWritesAccepted == false`): `POST /api/posts` itself has no server-side
 Freeze/paused refusal to reuse. `ParticipantPostProjector.cs` (not in the wave-plan row) carries the read-side
 `edited` / `editableForSeconds` because every feed/thread/Pinned/Live-world read goes through it. A concurrent
-double-submit that loses at the (`PostId`, `EditNumber`) unique index is a bodiless 409 and writes nothing.
+double-submit is a bodiless 409 and writes nothing: the post row changes through a conditional UPDATE (live and still at
+the read edit count) inside the edit's transaction, with the (`PostId`, `EditNumber`) unique index behind it; a takedown
+between read and write is a 404 with no push (Gate-1 L-3/L-5). With no clock and no stored exercise time, the edit's
+scenario time falls back to the post's `CreatedScenarioTime`, never the wall clock (Gate-1 L-2).

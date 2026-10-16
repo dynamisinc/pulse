@@ -148,7 +148,9 @@ public sealed partial class PostEditService
 
         // 3. The post, through the central filter AND an explicit predicate. Another exercise's post and a taken-down
         //    post are both 404 (never confirming the id exists elsewhere).
+        // Untracked: the write below is a conditional UPDATE, never a tracked save of this snapshot.
         var post = await _dbContext.Posts
+            .AsNoTracking()
             .SingleOrDefaultAsync(p => p.Id == postId && p.ExerciseId == exerciseId, cancellationToken);
         if (post is null || post.DeletedAt is not null)
         {
@@ -216,7 +218,11 @@ public sealed partial class PostEditService
             return PostEditResult.Refused(PostEditRefusalReasons.EditLimit);
         }
 
-        var scenarioTime = _exerciseClock?.CurrentScenarioTime(exerciseId) ?? facts?.StoredScenarioTime ?? now;
+        // Scenario time only (COR-053): the live clock, else the stored exercise time, else the post's own creation
+        // scenario time — NEVER the wall clock (Gate-1 L-2).
+        var scenarioTime = _exerciseClock?.CurrentScenarioTime(exerciseId)
+            ?? facts?.StoredScenarioTime
+            ?? post.CreatedScenarioTime;
 
         var edit = new PostEdit
         {
@@ -232,6 +238,43 @@ public sealed partial class PostEditService
             ActingHumanId = string.IsNullOrEmpty(session.ActingHumanId) ? null : session.ActingHumanId,
         };
 
+        // One transaction (Gate-1 L-3/L-5). The post row is changed by a CONDITIONAL update that re-checks, inside the
+        // transaction, that the post is still live (a takedown since the read is a 404) and still at the edit count
+        // this request read (a concurrent edit already took this edit number: a bodiless 409). SQL Server's update
+        // lock serializes two racers on the row, so the loser sees zero rows and nothing of it is written; the
+        // (PostId, EditNumber) unique index stays the last word behind it.
+        await using var transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken);
+        var expectedCount = post.EditCount;
+        var updated = await _dbContext.Posts
+            .Where(p => p.Id == post.Id
+                && p.ExerciseId == exerciseId
+                && p.DeletedAt == null
+                && p.EditCount == expectedCount)
+            .ExecuteUpdateAsync(
+                setters => setters
+                    .SetProperty(p => p.Body, body)
+                    .SetProperty(p => p.EditCount, editNumber)
+                    .SetProperty(p => p.LastEditedAt, (DateTimeOffset?)now)
+                    .SetProperty(p => p.LastEditedScenarioTime, (DateTimeOffset?)scenarioTime),
+                cancellationToken);
+
+        if (updated == 0)
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            var takenDown = await _dbContext.Posts
+                .AsNoTracking()
+                .Where(p => p.Id == post.Id && p.ExerciseId == exerciseId)
+                .Select(p => p.DeletedAt != null)
+                .FirstOrDefaultAsync(cancellationToken);
+            if (takenDown)
+            {
+                return PostEditResult.NotFound();
+            }
+
+            LogConcurrentEdit(post.Id, editNumber);
+            return PostEditResult.Conflict();
+        }
+
         post.Body = body;
         post.EditCount = editNumber;
         post.LastEditedAt = now;
@@ -243,11 +286,12 @@ public sealed partial class PostEditService
         try
         {
             await _dbContext.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
         }
         catch (DbUpdateException ex) when (IsUniqueViolation(ex))
         {
-            // A concurrent double-submit of the same post lost the race at the (PostId, EditNumber) unique index.
-            // Nothing of this attempt was written.
+            // Backstop: the unique index refused a duplicate edit number. The transaction rolls back on dispose, so
+            // the post row's update above is undone too and nothing of this attempt is written.
             LogConcurrentEdit(post.Id, editNumber);
             return PostEditResult.Conflict();
         }
