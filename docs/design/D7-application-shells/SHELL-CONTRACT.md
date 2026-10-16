@@ -54,6 +54,7 @@ SIMULATED"). Staff: `UNCLASSIFIED // FOUO`. One config token per deployment, per
 Z-order, bottom → top: content · channel nav · alert bar · pause/EndEx pages · compliance chrome · **break-fiction broadcast** (covers everything).
 
 - **Break-fiction (CTL-024):** black field, amber hazard-stripe bars, monospace, "REAL-WORLD MESSAGE · EXERCISE CONTROL", message, **wall-clock time** (the only participant surface ever showing real time), "remains until cleared" line. NO dismiss affordance, no logo, no product type or color from either world. The console only *triggers* it.
+- **Alert bar under overlays (Tom, 10/16):** a **pause** page starts *below* the compliance chrome and the alert bar (`top: chrome-top + alert-height`), so the EAS band stays visible but is `inert` (not interactive, ticker held); its severity label and message are mirrored into the pause dialog's accessible description because `aria-modal` hides the bar from assistive tech. **EndEx** and **break-fiction** cover the bar entirely (`top: 0`).
 - **Pause (CTL-023):** in-fiction = neutral "We'll be right back" maintenance page (system-ui, no exercise language); out-of-fiction = slate/mono "EXERCISE PAUSED" control page, scenario-clock-stopped line.
 - **EndEx (COR-054):** in-fiction = "This service is no longer available"; out-of-fiction = "ENDEX" + hot-wash logistics.
 - Only break-fiction gets the alarm treatment; pause/EndEx control pages share a calm slate/mono family.

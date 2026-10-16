@@ -112,6 +112,8 @@ import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from
 import { useExerciseContext } from '@/core/exerciseContext'
 import { useScenarioTime } from '@/core/clock'
 import { SHELL_ALERT_HEIGHT_VAR, SHELL_CHROME_TOP_VAR, SHELL_Z } from '../../mountContract'
+import { usePrefersReducedMotion } from '@/core/hooks/usePrefersReducedMotion'
+import { alertPauseBridge, useAlertPauseBridge } from '../../alertPauseBridge'
 import { useAlerts } from './useAlerts'
 import { useExitFullscreenOnNewAlert } from './useExitFullscreenOnNewAlert'
 import { AlertDetailsLink } from './AlertDetailsLink'
@@ -119,25 +121,6 @@ import { SeverityChip } from './SeverityChip'
 import { SEVERITY_META, chipBaseStyle } from './severityMeta'
 import type { Alert } from './alertTypes'
 import { touchTargetCss } from '../touchTarget'
-
-const REDUCED_MOTION_QUERY = '(prefers-reduced-motion: reduce)'
-
-/** Live `prefers-reduced-motion: reduce`; false where `matchMedia` is missing (jsdom). */
-function usePrefersReducedMotion(): boolean {
-  const read = () =>
-    typeof window !== 'undefined' && typeof window.matchMedia === 'function'
-      && window.matchMedia(REDUCED_MOTION_QUERY).matches
-  const [reduce, setReduce] = useState(read)
-  useEffect(() => {
-    if (typeof window.matchMedia !== 'function') return
-    const query = window.matchMedia(REDUCED_MOTION_QUERY)
-    const onChange = () => setReduce(query.matches)
-    onChange()
-    query.addEventListener('change', onChange)
-    return () => query.removeEventListener('change', onChange)
-  }, [])
-  return reduce
-}
 
 /** Ticker auto-rotation interval (SHELL-CONTRACT.md §2: "~3.5s"). */
 const ROTATE_INTERVAL_MS = 3500
@@ -385,15 +368,16 @@ export function AlertBar() {
   // treatment, and only when there is more than one alert to rotate through.
   const [tickerIndex, setTickerIndex] = useState(0)
   const reduceMotion = usePrefersReducedMotion()
+  const { pauseActive } = useAlertPauseBridge()
   useEffect(() => {
     // prefers-reduced-motion (NFR-001): the ticker holds on its current alert;
     // every alert stays reachable through "Details →" (/alerts).
-    if (treatment !== 'ticker' || alerts.length <= 1 || reduceMotion) return
+    if (treatment !== 'ticker' || alerts.length <= 1 || reduceMotion || pauseActive) return
     const id = setInterval(() => {
       setTickerIndex(current => (current + 1) % alerts.length)
     }, ROTATE_INTERVAL_MS)
     return () => clearInterval(id)
-  }, [treatment, alerts.length, reduceMotion])
+  }, [treatment, alerts.length, reduceMotion, pauseActive])
   // A shrinking alert list can leave a stale index — wrap it back in range
   // rather than indexing out of bounds.
   const safeTickerIndex = alerts.length === 0 ? 0 : tickerIndex % alerts.length
@@ -428,6 +412,14 @@ export function AlertBar() {
   // reserved space" still holds — the region is present but invisible.
   const activeAlert =
     treatment === 'none' ? null : pickActiveAlert(alerts, hasEmergency, safeTickerIndex)
+  // Mirror the shown alert for the pause dialog (aria-modal hides this bar from AT).
+  const activeSummary = activeAlert
+    ? `${SEVERITY_META[activeAlert.severity].label}: ${activeAlert.message}`
+    : ''
+  useEffect(() => {
+    alertPauseBridge.setAlertSummary(activeSummary)
+    return () => alertPauseBridge.setAlertSummary('')
+  }, [activeSummary])
   const liveAnnounceLevel = activeAlert?.severity === 'emergency' ? 'assertive' : 'polite'
   const otherAlerts =
     activeAlert && treatment === 'emergencyBand'
@@ -451,6 +443,7 @@ export function AlertBar() {
         role="status"
         aria-live={liveAnnounceLevel}
         aria-atomic="true"
+        inert={pauseActive}
         data-testid="pulse-alert-bar"
         data-alert-severity={activeAlert?.severity ?? 'none'}
         data-alert-treatment={dataTreatment}

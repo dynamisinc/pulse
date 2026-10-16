@@ -203,6 +203,11 @@ test.describe('alert bar: ticker rotation and reduced motion', () => {
     await page.clock.runFor(3600)
     await expect(bar.getByTestId('pulse-alert-bar-message')).not.toHaveText(first)
     await expect(bar).toContainText('ADVISORY')
+    // The published height still tracks the bar after the text swapped.
+    await expect.poll(async () => {
+      const h = (await boxOf(bar)).height
+      return Math.abs((await publishedAlertHeight(page)) - h)
+    }).toBeLessThanOrEqual(1)
   })
 
   test('holds on one alert with prefers-reduced-motion: reduce', async ({ page }) => {
@@ -218,10 +223,11 @@ test.describe('alert bar: ticker rotation and reduced motion', () => {
   })
 })
 
-test.describe('alert bar: emergency live region at phone sizes', () => {
-  test('is a single role=status node, assertive, carrying the full text and severity label', async ({ page }) => {
+test.describe('alert bar: emergency live region at phone, tablet sizes', () => {
+  test('the bar is one role=status node, assertive, carrying the full text and severity label', async ({ page }) => {
     await openFeedWith(page, [EMERGENCY])
     await expect(page.getByTestId('pulse-alert-bar')).toHaveCount(1)
+    await expect(page.getByRole('status').filter({ hasText: EMERGENCY.message })).toHaveCount(1)
     const bar = page.getByTestId('pulse-alert-bar')
     await expect(bar).toHaveAttribute('role', 'status')
     await expect(bar).toHaveAttribute('aria-live', 'assertive')
@@ -231,30 +237,54 @@ test.describe('alert bar: emergency live region at phone sizes', () => {
   })
 })
 
-test.describe('alert bar: emergency + pause overlay interplay', () => {
-  test('both texts stay legible and the focus trap holds', async ({ page }) => {
+type Rect = { x: number, y: number, width: number, height: number }
+
+/** Which shell layer is topmost at a point: the alert bar, the overlay, or neither. */
+async function topmostLayerAt(page: Page, x: number, y: number): Promise<string> {
+  return page.evaluate(([px, py]) => {
+    const el = document.elementFromPoint(px as number, py as number)
+    return el?.closest('[data-testid="pulse-alert-bar"]') ? 'bar'
+      : el?.closest('[data-shell-layer="overlay"]') ? 'overlay' : 'other'
+  }, [x, y])
+}
+
+/** Top and bottom edges plus the centre of a box all hit the expected layer. */
+async function expectLayerOnTop(page: Page, box: Rect, layer: string, what: string): Promise<void> {
+  const cx = box.x + box.width / 2
+  for (const y of [box.y + 1, box.y + box.height / 2, box.y + box.height - 1]) {
+    const hit = await topmostLayerAt(page, cx, y)
+    // An inert bar is skipped by hit-testing, so for it assert "not under the overlay".
+    const ok = layer === 'bar-inert' ? hit !== 'overlay' : hit === layer
+    expect(ok, `${what} is covered at y=${Math.round(y)} (hit: ${hit})`).toBe(true)
+  }
+}
+
+test.describe('alert bar: emergency + pause overlay interplay (Tom, 10/16)', () => {
+  test('pause keeps the alert visible and inert; focus trap holds; Details does nothing', async ({ page }) => {
     await seedOverlay(page, { state: 'pause', register: 'out-of-fiction', message: '' })
     await openFeedWith(page, [EMERGENCY])
     const overlay = page.getByTestId('pulse-overlay-pause-out-of-fiction')
-    await expect(overlay).toBeVisible()
-    await expect(overlay.getByRole('heading', { name: 'EXERCISE PAUSED' })).toBeVisible()
+    const heading = overlay.getByRole('heading', { name: 'EXERCISE PAUSED' })
+    await expect(heading).toBeVisible()
 
-    // The emergency text must still be on screen: the opaque overlay may not
-    // paint over the bar, and the bar may not cover the overlay's heading.
     const bar = page.getByTestId('pulse-alert-bar')
     const message = bar.getByTestId('pulse-alert-bar-message')
     await expect(message).toBeVisible()
-    const heading = overlay.getByRole('heading', { name: 'EXERCISE PAUSED' })
-    const topmostAt = (box: { x: number, y: number, width: number, height: number }) =>
-      page.evaluate(({ x, y }) => {
-        const el = document.elementFromPoint(x, y)
-        return el?.closest('[data-testid="pulse-alert-bar"]') ? 'bar'
-          : el?.closest('[data-shell-layer="overlay"]') ? 'overlay' : 'other'
-      }, { x: box.x + box.width / 2, y: box.y + box.height / 2 })
-    expect(await topmostAt(await boxOf(message)), 'emergency text is painted over').toBe('bar')
-    expect(await topmostAt(await boxOf(heading)), 'overlay heading is covered').toBe('overlay')
+    await expect(bar).toHaveAttribute('inert', '')
+    await expectLayerOnTop(page, await boxOf(message), 'bar-inert', 'emergency text')
+    await expectLayerOnTop(page, await boxOf(heading), 'overlay', 'overlay heading')
     expect(boxesOverlap(await boxOf(message), await boxOf(heading))).toBe(false)
+    expect(boxesOverlap(await boxOf(bar), await boxOf(overlay.locator('h1')))).toBe(false)
     await expectNoHorizontalScroll(page)
+
+    // Assistive tech: the dialog's description carries the alert.
+    await expect(overlay).toHaveAccessibleDescription(
+      `Active alert. EMERGENCY: ${EMERGENCY.message}`)
+
+    // Inert: tapping Details navigates nowhere.
+    const details = await boxOf(page.getByTestId('pulse-alert-bar-details'))
+    await page.touchscreen.tap(details.x + details.width / 2, details.y + details.height / 2)
+    await expect(page).toHaveURL(/\/home$/)
 
     // Focus trap: focus lands in the overlay and Tab never leaves it.
     for (let i = 0; i < 6; i++) {
@@ -265,6 +295,26 @@ test.describe('alert bar: emergency + pause overlay interplay', () => {
       })
       expect(inside, `focus escaped the overlay after Tab #${i + 1}`).toBe(true)
     }
+  })
+
+  test('pause holds the ticker rotation', async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: 'no-preference' })
+    await page.clock.install()
+    await seedOverlay(page, { state: 'pause', register: 'in-fiction', message: '' })
+    await openFeedWith(page, [ADVISORY, ADVISORY_2])
+    const message = page.getByTestId('pulse-alert-bar').getByTestId('pulse-alert-bar-message')
+    const first = await message.innerText()
+    await page.clock.runFor(20000)
+    await expect(message).toHaveText(first)
+  })
+
+  test('EndEx covers the alert bar entirely', async ({ page }) => {
+    await seedOverlay(page, { state: 'endex', register: 'out-of-fiction', message: '' })
+    await openFeedWith(page, [EMERGENCY])
+    const overlay = page.getByTestId('pulse-overlay-endex-out-of-fiction')
+    await expect(overlay).toBeVisible()
+    const bar = await boxOf(page.getByTestId('pulse-alert-bar'))
+    await expectLayerOnTop(page, bar, 'overlay', 'alert band under EndEx')
   })
 })
 
@@ -288,6 +338,7 @@ test.describe('alert bar: scroll restoration on Back (AC3)', () => {
     await page.goBack()
     await expect(page).toHaveURL(/\/home$/)
     await expect(page.getByRole('tab', { name: 'All Posts' })).toBeVisible()
-    await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(target - 5)
+    await expect.poll(async () => Math.abs((await page.evaluate(() => window.scrollY)) - target))
+      .toBeLessThanOrEqual(5)
   })
 })

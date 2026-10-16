@@ -4,8 +4,9 @@
  * none -> first-alert transition and later changes (assertive for emergency,
  * polite otherwise), and prefers-reduced-motion must stop ticker rotation.
  */
-import { act, render, screen } from '@testing-library/react'
+import { act, cleanup, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { alertPauseBridge } from '../../alertPauseBridge'
 import { AlertBar } from './AlertBar'
 import { useAlerts } from './useAlerts'
 import type { Alert } from './alertTypes'
@@ -52,7 +53,9 @@ function stubMatchMedia(reduce: boolean) {
 afterEach(() => {
   vi.useRealTimers()
   vi.unstubAllGlobals()
+  cleanup()
   mockUseAlerts.mockReset()
+  alertPauseBridge.reset()
 })
 
 describe('AlertBar: prefers-reduced-motion stops ticker rotation', () => {
@@ -131,5 +134,43 @@ describe('AlertBar: live region announces changes (NFR-001)', () => {
     expect(host).toHaveAttribute('aria-live', 'assertive')
     expect(host).toHaveTextContent('Shelter in place.')
     expect(host).toHaveTextContent('EMERGENCY')
+  })
+})
+
+describe('AlertBar: held (inert, not rotating) while a pause overlay is up', () => {
+  it('is inert only while paused, and stays visible with its text', () => {
+    mockUseAlerts.mockReturnValue([makeAlert({ id: 'e', severity: 'emergency', message: 'Evacuate now.' })])
+    render(<AlertBar />)
+    const bar = screen.getByTestId('pulse-alert-bar')
+    expect(bar).not.toHaveAttribute('inert')
+    act(() => alertPauseBridge.setPauseActive(true))
+    expect(bar).toHaveAttribute('inert')
+    expect(bar).toHaveTextContent('Evacuate now.')
+    act(() => alertPauseBridge.setPauseActive(false))
+    expect(bar).not.toHaveAttribute('inert')
+  })
+
+  it('publishes severity label + message for the pause dialog, clearing on unmount', () => {
+    mockUseAlerts.mockReturnValue([makeAlert({ id: 'e', severity: 'emergency', message: 'Evacuate now.' })])
+    const { unmount } = render(<AlertBar />)
+    expect(alertPauseBridge.getSnapshot().alertSummary).toBe('EMERGENCY: Evacuate now.')
+    unmount()
+    expect(alertPauseBridge.getSnapshot().alertSummary).toBe('')
+  })
+
+  it('holds ticker rotation while paused and resumes afterwards', () => {
+    vi.useFakeTimers()
+    stubMatchMedia(false)
+    mockUseAlerts.mockReturnValue([
+      makeAlert({ id: 'a1', severity: 'info', message: 'First alert message.' }),
+      makeAlert({ id: 'a2', severity: 'advisory', message: 'Second alert message.' }),
+    ])
+    render(<AlertBar />)
+    act(() => alertPauseBridge.setPauseActive(true))
+    act(() => { vi.advanceTimersByTime(20000) })
+    expect(screen.getByTestId('pulse-alert-bar-message')).toHaveTextContent('First alert message.')
+    act(() => alertPauseBridge.setPauseActive(false))
+    act(() => { vi.advanceTimersByTime(3500) })
+    expect(screen.getByTestId('pulse-alert-bar-message')).toHaveTextContent('Second alert message.')
   })
 })
