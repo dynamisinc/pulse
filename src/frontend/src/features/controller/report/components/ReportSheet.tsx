@@ -12,7 +12,13 @@
  * time"). "Prepared" (`preparedAt`, exercise zone) is printed once, in the meta list.
  */
 
-import { binWidthLabel, formatDay, formatDayWithWeekday, formatWindow, timeOf } from '../services/reportFormat'
+import {
+  binWidthLabel,
+  formatDay,
+  formatDayWithWeekday,
+  formatStamp,
+  formatWindow,
+} from '../services/reportFormat'
 import type { ExerciseReport } from '../types/report'
 import { ActivityChart } from './ActivityChart'
 import { InjectResponseTable } from './InjectResponseTable'
@@ -93,7 +99,7 @@ export function ReportSheet({ report }: ReportSheetProps) {
             />
             <Stat
               value={busiest !== null ? busiest.posts.toLocaleString('en-US') : '—'}
-              label={busiest !== null ? `Busiest 5 minutes (${timeOf(busiest.start)})` : 'Busiest 5 minutes'}
+              label={busiest !== null ? `Busiest 5 minutes (${formatStamp(busiest.start, spans)})` : 'Busiest 5 minutes'}
             />
             {summary.postsEdited !== null && (
               <Stat value={summary.postsEdited.toLocaleString('en-US')} label="Posts edited" />

@@ -57,8 +57,15 @@ function labelFor(numbers: readonly number[]): string {
   return numbers.length === 2 ? `${first}, ${last}` : `${first}–${last}`
 }
 
-/** Lays out the badges. `markers` may be in any order; numbers follow left-to-right position. */
-export function layoutMarkerBadges(markers: readonly MarkerInput[]): MarkerLayout {
+/**
+ * Lays out the badges. `markers` may be in any order; numbers follow left-to-right position.
+ * With `bounds`, each badge is kept inside [min, max] BEFORE its row is chosen, so an edge clamp
+ * can never make two badges in one row overlap.
+ */
+export function layoutMarkerBadges(
+  markers: readonly MarkerInput[],
+  bounds?: { readonly min: number; readonly max: number },
+): MarkerLayout {
   const order = markers
     .map((marker, index) => ({ x: marker.x, index }))
     .sort((a, b) => a.x - b.x || a.index - b.index)
@@ -85,7 +92,10 @@ export function layoutMarkerBadges(markers: readonly MarkerInput[]): MarkerLayou
   const badges: PlacedBadge[] = clusters.map(cluster => {
     const label = labelFor(cluster.numbers)
     const width = badgeWidth(label)
-    const x = cluster.xs.reduce((sum, value) => sum + value, 0) / cluster.xs.length
+    const mean = cluster.xs.reduce((sum, value) => sum + value, 0) / cluster.xs.length
+    const x = bounds === undefined
+      ? mean
+      : Math.min(Math.max(mean, bounds.min + width / 2), bounds.max - width / 2)
     const left = x - width / 2
     let row = rowEnds.findIndex(end => left >= end + GAP)
     if (row < 0) {

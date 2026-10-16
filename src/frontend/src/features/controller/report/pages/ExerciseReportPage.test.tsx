@@ -226,6 +226,7 @@ describe('ExerciseReportPage', () => {
   it('shows a loading state, then the empty-exercise state for a report with no posts', async () => {
     stubApi(() => ({
       ...MOCK_REPORT,
+      exercise: { ...MOCK_REPORT.exercise, latestDay: null },
       summary: { ...MOCK_REPORT.summary, posts: 0 },
       posts: [],
       omittedNoiseCount: 0,
@@ -642,6 +643,21 @@ describe('ExerciseReportPage', () => {
       renderPage()
       await screen.findByTestId('report-sheet')
       expect(screen.getByRole('button', { name: LATEST })).toBeDisabled()
+    })
+
+    // DF-45 scopes summary.posts to the window: a window with no posts is not an empty exercise.
+    it('keeps the sheet (and its filter statement) for a window that matches no posts', async () => {
+      stubApi(() => ({
+        ...MOCK_REPORT,
+        summary: { ...MOCK_REPORT.summary, posts: 0 },
+        posts: [],
+        omittedNoiseCount: 0,
+        postRecord: { ...MOCK_REPORT.postRecord, matching: 0, from: '2026-10-15 03:00', to: '2026-10-15 04:00' },
+      }))
+      renderPage()
+      expect(await screen.findByTestId('report-sheet')).toBeInTheDocument()
+      expect(screen.queryByTestId('report-empty')).not.toBeInTheDocument()
+      expect(screen.getByTestId('filter-statement')).toBeInTheDocument()
     })
 
     // On a one-day exercise the preset's 00:00 is before the first post; the field must accept

@@ -11,6 +11,9 @@ import { render, screen, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { ActivityChart } from './ActivityChart'
 import { InjectResponseTable } from './InjectResponseTable'
+import { PostRecord } from './PostRecord'
+import { ReportSheet } from './ReportSheet'
+import { MOCK_REPORT } from '../services/reportMock'
 import type { ExerciseReport } from '../types/report'
 
 function activityWith(markers: ExerciseReport['activity']['injectMarkers']): ExerciseReport['activity'] {
@@ -162,5 +165,62 @@ describe('report.module.css print rules (story 31, DF-46)', () => {
 
   it('never declares @page in the module (it is injected only while the page is mounted)', () => {
     expect(css).not.toMatch(/^\s*@page\s*\{/m)
+  })
+})
+
+describe('Copilot review folds (story 31)', () => {
+  it('keeps edge badges inside the chart without overlapping a row neighbour', () => {
+    const indexes = [0, 20, 40, 60, 80, 100, 120, 140, 160, 289, 299]
+    const activity: ExerciseReport['activity'] = {
+      binMinutes: 5,
+      bins: Array.from({ length: 300 }, () => ({ start: '2026-10-15 09:00', participant: 1, scripted: 0, engine: 0, noise: 0 })),
+      injectMarkers: indexes.map((binIndex, index) => ({
+        ref: null, title: `Inject ${index + 1}`, at: '2026-10-15 09:00', binIndex,
+      })),
+    }
+    render(<ActivityChart activity={activity} />)
+    const rects = screen.getAllByTestId('marker-badge').map(group => {
+      const rect = group.querySelector('rect')
+      const x = Number(rect?.getAttribute('x'))
+      return { x, right: x + Number(rect?.getAttribute('width')), y: Number(rect?.getAttribute('y')) }
+    })
+    for (const rect of rects) {
+      expect(rect.x).toBeGreaterThanOrEqual(0)
+      expect(rect.right).toBeLessThanOrEqual(680)
+    }
+    for (const a of rects) {
+      for (const b of rects) {
+        if (a !== b && a.y === b.y) expect(a.right <= b.x || b.right <= a.x).toBe(true)
+      }
+    }
+  })
+
+  it('dates a reply after midnight that prints under its root from the day before', () => {
+    const base = MOCK_REPORT.posts[0]
+    if (base === undefined) throw new Error('mock has no posts')
+    const root = { ...base, id: 'r', threadRootId: 'r', depth: 0, parentPostId: null, scenarioAt: '2026-10-14 23:50', scenarioTime: '23:50' }
+    const reply = { ...base, id: 'c', threadRootId: 'r', depth: 1, parentPostId: 'r', scenarioAt: '2026-10-15 00:05', scenarioTime: '00:05' }
+    render(
+      <PostRecord
+        posts={[root, reply]}
+        omittedNoiseCount={0}
+        postRecord={MOCK_REPORT.postRecord}
+        spansMultipleDays
+      />,
+    )
+    const cards = screen.getAllByTestId('report-post')
+    expect(cards[0]).not.toHaveTextContent('14 Oct 23:50')
+    expect(cards[1]).toHaveTextContent('15 Oct 00:05')
+  })
+
+  it('dates the busiest window on a multi-day report', () => {
+    render(<ReportSheet
+      report={{
+        ...MOCK_REPORT,
+        exercise: { ...MOCK_REPORT.exercise, spansMultipleDays: true },
+        summary: { ...MOCK_REPORT.summary, busiestWindow: { start: '2026-10-15 10:05', posts: 3 } },
+      }}
+    />)
+    expect(screen.getByText('Busiest 5 minutes (15 Oct 10:05)')).toBeInTheDocument()
   })
 })

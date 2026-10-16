@@ -14,7 +14,7 @@
  * match and how to narrow it. The summary and charts above are unaffected.
  */
 
-import { groupByHalfHour } from '../services/reportFormat'
+import { dateOf, groupByHalfHour, type PostGroup } from '../services/reportFormat'
 import { describeFilters } from '../services/reportFilters'
 import type { ReportPost, ReportPostRecord } from '../types/report'
 import { ReportPostCard } from './ReportPostCard'
@@ -26,6 +26,11 @@ export interface PostRecordProps {
   readonly postRecord: ReportPostRecord
   /** Story 31: times inside cards carry their date when the report spans days. */
   readonly spansMultipleDays?: boolean
+}
+
+/** The day of a group's heading: its thread root's, the group's first post. */
+function headingDay(group: PostGroup): string {
+  return dateOf(group.posts[0]?.scenarioAt ?? '')
 }
 
 export function PostRecord({
@@ -66,6 +71,7 @@ export function PostRecord({
                 post={post}
                 nested={group.nestedIds.has(post.id)}
                 spansMultipleDays={spansMultipleDays}
+                showDate={dateOf(post.scenarioAt) !== headingDay(group)}
               />
             ))}
           </div>

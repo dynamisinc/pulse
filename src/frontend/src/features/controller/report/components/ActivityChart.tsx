@@ -88,7 +88,10 @@ export function ActivityChart({ activity, spansMultipleDays = false }: ActivityC
   }
 
   const markerX = (binIndex: number) => X0 + binIndex * barWidth + barWidth / 2
-  const layout = layoutMarkerBadges(injectMarkers.map(marker => ({ x: markerX(marker.binIndex) })))
+  const layout = layoutMarkerBadges(
+    injectMarkers.map(marker => ({ x: markerX(marker.binIndex) })),
+    { min: 0, max: VIEW_WIDTH },
+  )
   // Extra badge rows grow the viewBox upward, so the plot never moves.
   const topExtra = Math.max(0, layout.rows - 1) * ROW_STEP
   const keyRows = injectMarkers
@@ -142,19 +145,17 @@ export function ActivityChart({ activity, spansMultipleDays = false }: ActivityC
         ))}
         {layout.badges.map(badge => {
           const cy = 9 - badge.row * ROW_STEP
-          // Kept inside the viewBox, so a wide merged badge on an edge bin is never clipped.
-          const cx = Math.min(Math.max(badge.x, badge.width / 2), VIEW_WIDTH - badge.width / 2)
           return (
             <g key={badge.label} data-testid="marker-badge">
               <rect
                 className={styles.injBadge}
-                x={cx - badge.width / 2}
+                x={badge.x - badge.width / 2}
                 y={cy - BADGE_HEIGHT / 2}
                 width={badge.width}
                 height={BADGE_HEIGHT}
                 rx={BADGE_HEIGHT / 2}
               />
-              <text className={styles.injNum} x={cx} y={cy + 3.5} textAnchor="middle">
+              <text className={styles.injNum} x={badge.x} y={cy + 3.5} textAnchor="middle">
                 {badge.label}
               </text>
             </g>

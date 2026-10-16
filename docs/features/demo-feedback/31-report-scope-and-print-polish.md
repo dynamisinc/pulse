@@ -107,6 +107,7 @@ Page (`src/frontend/src/features/controller/report/`; `Page` = `pages/ExerciseRe
 | Threads | `Page` "indents replies under their thread root, keeps a thread in its root group, and prints an unlisted-parent reply flat"; `reportFormat.test.ts` `orderThreads` / `groupByHalfHour` |
 | Print (DF-46) | `S31` "caps media at 2.5in and the poster-less tile at 1.25in, inside @media print", "gives the sheet 0.5in print padding and keeps headings with their first item", "never declares @page in the module"; `Page` "injects the @page rule on mount and removes it on unmount" (`margin: 0`) |
 | NFR-001 | covered by the thread ("Replying to @x" text), key (`<ol>` text) and date tests above |
+| Review folds (PR #583) | `Page` "keeps the sheet (and its filter statement) for a window that matches no posts", "accepts the preset From on a one-day exercise when the field is blurred"; `S31` "keeps edge badges inside the chart without overlapping a row neighbour", "dates a reply after midnight…", "dates the busiest window on a multi-day report"; `reportFormat.test.ts` "never drops a post whose threadRootId names a non-root or forms a cycle" |
 
 Not verifiable in CI: real Chromium/Edge print output (browser header/footer gone, ~3 pages for the 10/16 13-post
 report, margins repeated on every page). Checked by Tom on UAT.

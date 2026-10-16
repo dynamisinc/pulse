@@ -86,12 +86,18 @@ export interface ReportPostCardProps {
   readonly nested?: boolean
   /** Story 31: "Edited · last at" / "Taken down at" carry their date when the report spans days. */
   readonly spansMultipleDays?: boolean
+  /**
+   * Story 31: the post's own time carries its date (a reply after midnight printed under its
+   * root's half-hour heading from the day before).
+   */
+  readonly showDate?: boolean
 }
 
 export function ReportPostCard({
   post,
   nested = false,
   spansMultipleDays = false,
+  showDate = false,
 }: ReportPostCardProps) {
   const { author } = post
   const mediaItems = post.media.map((item, index) => (
@@ -106,7 +112,7 @@ export function ReportPostCard({
       data-nested={nested ? 'true' : undefined}
     >
       <div className={styles.time}>
-        {post.scenarioTime}
+        {showDate ? formatStamp(post.scenarioAt, true) : post.scenarioTime}
         {post.injectRef !== null && <small>{`Inject ${refLabel(post.injectRef)}`}</small>}
       </div>
       {author.avatarUrl !== null ? (

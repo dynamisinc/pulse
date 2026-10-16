@@ -75,6 +75,14 @@ function usePrintScoping(overlayRef: React.RefObject<HTMLDivElement | null>): vo
   }, [overlayRef])
 }
 
+/**
+ * Nothing published in the whole exercise. A window that matches no posts is NOT empty
+ * (DF-45 scopes `summary.posts` to the window): the sheet still prints, saying so.
+ */
+function isEmptyExercise(report: ExerciseReport): boolean {
+  return report.exercise.latestDay === null && report.summary.posts === 0
+}
+
 export function ExerciseReportPage() {
   const [filters, setFilters] = useState<ReportFilters>(DEFAULT_REPORT_FILTERS)
   const overlayRef = useRef<HTMLDivElement>(null)
@@ -169,7 +177,7 @@ export function ExerciseReportPage() {
               <p>{query.error instanceof Error ? query.error.message : 'The refresh failed.'}</p>
             </div>
           )}
-          {report !== undefined && report.summary.posts === 0 && report.posts.length === 0 && (
+          {report !== undefined && isEmptyExercise(report) && (
             <div className={styles.state} data-testid="report-empty">
               <h2>{report.exercise.name}</h2>
               <p>
@@ -177,7 +185,7 @@ export function ExerciseReportPage() {
               </p>
             </div>
           )}
-          {report !== undefined && !(report.summary.posts === 0 && report.posts.length === 0) && (
+          {report !== undefined && !isEmptyExercise(report) && (
             <ReportSheet report={report} />
           )}
         </div>
