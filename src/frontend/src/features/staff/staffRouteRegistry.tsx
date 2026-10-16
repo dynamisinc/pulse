@@ -51,6 +51,7 @@
 
 import {
   faClipboardCheck,
+  faFilePdf,
   faFolderOpen,
   faGear,
   faSliders,
@@ -58,6 +59,7 @@ import {
 } from '@fortawesome/free-solid-svg-icons'
 import type { StaffRouteRegistry } from '@/features/app-shell'
 import { ControllerConsoleRoute } from '@/features/controller'
+import { ExerciseReportPage } from '@/features/controller/report'
 import { EvaluatorDashboardRoute } from '@/features/evaluator'
 import { ExerciseManagementRoute } from '@/features/exerciseLifecycleAdmin'
 import { ParticipantAdminSurface } from '@/features/participantAdmin'
@@ -162,6 +164,20 @@ const REGISTRY_TABLE = [
     allowedRoles: ['planner', 'controller'],
     group: 'administer',
     description: 'Who can sign in: the roster, personal links, today\'s word and printable cards.',
+  },
+  {
+    // SURFACE #6 (demo-feedback 29, #550): the printable exercise report, opened in a NEW TAB by
+    // the console's "Exercise report" button. Same guard as the console (`controller`), the role
+    // that sees the button. A printed document: the page mounts its own COBRA toolbar and a
+    // neutral sheet in a portal, so there is no StaffShellFrame here. Nobody's home page.
+    id: 'exercise-report',
+    path: '/staff/console/report',
+    label: 'Exercise Report',
+    icon: faFilePdf,
+    element: <ExerciseReportPage />,
+    allowedRoles: ['controller'],
+    group: 'conduct',
+    description: 'A printable record of the posts, metrics and charts, to save as a PDF.',
   },
 ] as const satisfies StaffRouteRegistry
 

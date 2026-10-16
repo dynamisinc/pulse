@@ -158,6 +158,7 @@ import { EscalationDial } from './steering/EscalationDial'
 import { PausePill } from './steering/PausePill'
 import { NoiseControl } from '../noise'
 import { ExportPostsButton } from '../export'
+import { ExerciseReportButton } from '../report'
 import {
   DraftDisposition,
   DraftTimerDriver,
@@ -645,6 +646,8 @@ export function ControllerConsole(
                 {lifecycleSlot}
                 {/* demo-feedback 09: the post activity export (any staff role, DF-8). */}
                 <ExportPostsButton />
+                {/* demo-feedback 29: the printable exercise report, in a new tab. */}
+                <ExerciseReportButton />
                 <Typography
                   data-testid="controller-callsign"
                   sx={{
