@@ -14,14 +14,33 @@
  * has NO default-brand fallback), so it never advertises a placeholder or Pulse
  * identity.
  *
+ * Story 10 adds the service-worker registrar (production-only) inside a shared bottom `PwaDock`
+ * (stories 10/11 banners stack there). Same gates: resolved brand, never on `/staff/*`.
+ *
+ * Story 11 adds `<InstallPrompt />` (Android banner / iOS sheet) in the same dock.
+ *
  * No telemetry (MT-D5). No backend route.
  */
 import { useResolvedBrandConfig } from '@/features/participant-shell/brandTokens'
 import { ManifestHead } from './manifest/ManifestHead'
 import { isStaffPath } from './isStaffPath'
+import { PwaDock } from './dock/PwaDock'
+import { InstallPrompt } from './install/InstallPrompt'
+import { ServiceWorkerRegistrar } from './serviceWorker/ServiceWorkerRegistrar'
 
 export function PwaRoot() {
   const brand = useResolvedBrandConfig()
   const onStaff = isStaffPath(window.location.pathname)
-  return <ManifestHead brand={onStaff ? undefined : brand} />
+  const participantBrand = onStaff ? undefined : brand
+  return (
+    <>
+      <ManifestHead brand={participantBrand} />
+      {participantBrand && (
+        <PwaDock>
+          <ServiceWorkerRegistrar />
+          <InstallPrompt brandName={participantBrand.name} />
+        </PwaDock>
+      )}
+    </>
+  )
 }

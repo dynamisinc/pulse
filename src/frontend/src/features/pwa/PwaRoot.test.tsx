@@ -45,6 +45,20 @@ describe('PwaRoot', () => {
     await waitFor(() => expect(document.head.querySelector('link[rel="manifest"]')).not.toBeNull())
   })
 
+  it('mounts the banner dock only once the brand resolves and never on staff routes', async () => {
+    hook.value = undefined
+    const { unmount } = render(<PwaRoot />)
+    expect(document.querySelector('[data-testid="pwa-dock"]')).toBeNull()
+    unmount()
+    hook.value = brand
+    const r2 = render(<PwaRoot />)
+    expect(document.querySelector('[data-testid="pwa-dock"]')).not.toBeNull()
+    r2.unmount()
+    window.history.pushState({}, '', '/staff/console')
+    render(<PwaRoot />)
+    expect(document.querySelector('[data-testid="pwa-dock"]')).toBeNull()
+  })
+
   it('renders no manifest on a staff route even with a resolved brand', async () => {
     hook.value = brand
     window.history.pushState({}, '', '/staff/console')

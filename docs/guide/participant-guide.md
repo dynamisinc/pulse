@@ -32,6 +32,22 @@ Pulse runs in your web browser on a phone, tablet or computer. There is no app t
 Once you are signed in, you stay signed in for the rest of the exercise day, even if you close the
 tab or lock your phone. If you are on a shared computer, select **Sign out** when you finish.
 
+### Add it to your home screen (optional)
+
+Once you are signed in, you can put the exercise on your phone's home screen so it opens like an app.
+You may be offered this automatically; you can always say no.
+
+- **Android (Chrome):** tap **Add [exercise name] to your home screen** on the banner near the bottom
+  of the screen, then confirm. If you do not see the banner, open the Chrome menu and choose
+  **Add to Home screen** or **Install app**.
+- **iPhone or iPad (Safari):** tap the **Share** button (a square with an arrow pointing up) in
+  Safari's toolbar, scroll down, choose **Add to Home Screen**, then tap **Add**. On your second visit
+  a short reminder sheet shows these steps; close it with the **X**.
+
+If you close the banner or sheet it will not come back for this exercise.
+
+_Screenshots to follow (Android banner and iOS sheet via mock overrides)._
+
 ## 4. What you can do
 
 ![The exercise feed, showing posts with reply, repost, like and pin buttons.](img/participant-feed.png)
