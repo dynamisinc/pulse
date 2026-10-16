@@ -54,7 +54,8 @@ describe('phone media CSS', () => {
     expect(viewer).toMatch(/\.image\s*\{[^}]*env\(safe-area-inset-bottom/)
   })
 
-  it('the viewer controls keep a 44px floor on touch', () => {
-    expect(coarseBlock(viewer)).toMatch(/min-height:\s*44px/)
+  it('the viewer controls are 44px tall everywhere', () => {
+    expect(/\.closeButton,\s*\.navButton\s*\{([^}]*)\}/.exec(viewer)?.[1] ?? '')
+      .toMatch(/min-width:\s*44px;[^}]*height:\s*44px/)
   })
 })

@@ -19,7 +19,7 @@
  *  - scenario time only: no real wall-clock date anywhere.
  */
 import { test, expect, type Locator, type Page } from '@playwright/test'
-import { boxOf, expectNoHorizontalScroll, expectNoWallClock, expectTouchTarget } from './kit'
+import { boxOf, boxesOverlap, expectNoHorizontalScroll, expectNoWallClock, expectTouchTarget } from './kit'
 
 async function openFeed(page: Page): Promise<void> {
   await page.goto('/home')
@@ -126,6 +126,27 @@ test.describe('media viewer', () => {
     await expectNoWallClock(page)
   })
 
+  test('Back closes the viewer, stays on /home, focus returns to the tile', async ({ page }) => {
+    await openFeed(page)
+    const opener = gridWith(page, 2).getByTestId('media-tile').first()
+    await opener.scrollIntoViewIfNeeded()
+    await opener.click()
+    await expect(page.getByTestId('media-viewer')).toBeVisible()
+    await page.goBack()
+    await expect(page.getByTestId('media-viewer')).toBeHidden()
+    await expect(page).toHaveURL(/\/home$/)
+    await expect(opener).toBeFocused()
+
+    // Close pops its own entry: a following Back leaves the page's own history alone
+    // (about:blank / previous), it must not re-open or close anything else.
+    await opener.click()
+    await expect(page.getByTestId('media-viewer')).toBeVisible()
+    await page.getByTestId('media-viewer-close').click()
+    await expect(page.getByTestId('media-viewer')).toBeHidden()
+    await expect(page).toHaveURL(/\/home$/)
+    await expect(opener).toBeFocused()
+  })
+
   test('landscape: controls stay on screen and the bands stay visible', async ({ page }) => {
     await openFeed(page)
     const opener = gridWith(page, 2).getByTestId('media-tile').first()
@@ -158,7 +179,7 @@ test.describe('media viewer', () => {
   test('the page does not disable pinch-zoom', async ({ page }) => {
     await openFeed(page)
     const content = await page.locator('meta[name="viewport"]').getAttribute('content')
-    expect(content ?? '').not.toMatch(/user-scalable\s*=\s*(no|0)|maximum-scale\s*=\s*1(\.0)?\b/i)
+    expect(content ?? '').not.toMatch(/user-scalable\s*=\s*(no|0)|maximum-scale\s*=\s*1(\.0+)?(?![\d.])/i)
   })
 })
 
@@ -186,6 +207,10 @@ test.describe('video', () => {
       paused: v.paused, autoplay: v.autoplay,
     }))
     expect(state).toEqual({ paused: true, autoplay: false })
+    // Still not started a moment later (no deferred auto-start, with or without sound).
+    await page.waitForTimeout(300)
+    expect(await player.locator('video').evaluate((v: HTMLVideoElement) => v.paused || v.muted))
+      .toBe(true)
     for (const id of ['video-mute-toggle', 'video-expand', 'video-play-toggle']) {
       const control = player.getByTestId(id)
       await expect(control).toBeVisible()
@@ -220,22 +245,16 @@ test.describe('composer attach preview', () => {
     await expect(card).toBeVisible()
     await expect(card.getByText('Uploaded')).toBeVisible()
     const remove = card.getByRole('button', { name: /^(Remove|Cancel upload of) flood\.png/ })
-    // Not expectTouchTarget: the card sits at a fractional y, so the browser pixel-snaps the
-    // button and the kit's quarter-pixel edge probe can land just outside it. Assert the
-    // box itself, plus that the button wins a hit test at its centre.
+    await expectTouchTarget(remove, 44)
     const c = await boxOf(card)
     const r = await boxOf(remove)
-    expect(r.width).toBeGreaterThanOrEqual(43.9)
-    expect(r.height).toBeGreaterThanOrEqual(43.9)
-    await expect(remove).toBeVisible()
-    expect(await remove.evaluate(el => {
-      const b = el.getBoundingClientRect()
-      const hit = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2)
-      return hit === el || el.contains(hit)
-    })).toBe(true)
     expect(r.y).toBeGreaterThanOrEqual(c.y - 0.5)
     expect(r.y + r.height).toBeLessThanOrEqual(c.y + c.height + 0.5)
+    expect(r.x).toBeGreaterThanOrEqual(c.x - 0.5)
     expect(r.x + r.width).toBeLessThanOrEqual(c.x + c.width + 0.5)
+    // It never sits on top of the alt-text field.
+    const alt = await boxOf(card.getByRole('textbox'))
+    expect(boxesOverlap(r, alt), 'Remove overlaps the alt-text field').toBe(false)
     await expect(card.getByTestId('exercise-bands')).toBeVisible()
     await expectNoHorizontalScroll(page)
   })

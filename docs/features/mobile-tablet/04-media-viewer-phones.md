@@ -10,7 +10,7 @@ Photos and video are central to the scenario (customer notes). The full-screen `
 
 ## Acceptance Criteria
 - [x] Given a post with 1-4 images at 360/390/768, when the grid renders, then tiles keep their aspect without overflow and each tile is a tap target of at least 44x44.
-- [x] Given the media viewer opened on a phone in portrait and landscape, when displayed, then the close, next and previous controls are at least 44px, sit inside the safe area, are keyboard-operable, and Escape/back closes with focus returned to the originating tile. (Hardware/Android back is not simulated; Escape and Close are.)
+- [x] Given the media viewer opened on a phone in portrait and landscape, when displayed, then the close, next and previous controls are at least 44px, sit inside the safe area, are keyboard-operable, and Escape/back closes with focus returned to the originating tile. Back (history) closes the viewer and returns focus to the tile (`useViewerHistory`; unit + e2e `page.goBack()`); Close/Escape pop the entry they pushed. Safe-area insets read 0 until `viewport-fit=cover` lands (PR #586); `.viewer` already adds `env(safe-area-inset-top/left/right/bottom)` so it takes effect then. A real-device check of the hardware back button is still advised (MT-D7).
 - [x] Given a video post, when played on a phone, then the controls are at least 44px, playback does not auto-start with sound, only one video plays at a time (`playbackCoordinator`), and fullscreen/exit works under touch. (Playwright serves a decodable clip; native-fullscreen under touch is not driven by e2e: needs a real device, MT-D7.)
 - [x] Watermark slot (NFR-008): the EXERCISE band is visible and uncropped in the grid, the viewer and the composer preview at all three widths; chrome and watermark are never both off.
 - [x] Content security (NFR-004): the composer attach flow on a phone (camera roll picker) still enforces the existing MIME/size validation and shows the existing error text; no new upload path is added.
@@ -28,4 +28,4 @@ Files: `features/social/components/media/*`, `components/ComposerMedia.*`. Use `
 Story 01.
 
 ## Tests
-`e2e/media-viewer.phone.spec.ts`; existing `ComposerMedia.bands.test.tsx` and media tests stay green.
+`e2e/media-viewer.phone.spec.ts`; existing `ComposerMedia.bands.test.tsx` and media tests stay green; `playbackCoordinator.test.ts` (one video at a time), `useViewerHistory.test.tsx` and `mediaPhone.css.test.ts`.

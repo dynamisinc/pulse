@@ -15,7 +15,9 @@
   composes: tokens from '../../theme/social.module.css';
 
   position: fixed;
-  top: calc(var(--pulse-chrome-top, 0px) + var(--pulse-alert-height, 0px));
+  top: calc(
+    var(--pulse-chrome-top, 0px) + var(--pulse-alert-height, 0px) + env(safe-area-inset-top, 0px)
+  );
   right: 0;
   bottom: var(--pulse-chrome-bottom, 0px);
   left: 0;
@@ -145,24 +147,6 @@
   outline: 3px solid #fff;
   outline-offset: 2px;
   box-shadow: 0 0 0 6px #000;
-}
-
-/*
- * Phones / tablets (coarse pointer): Close and the pager are real 44px boxes with a
- * little more room between them (they are already 44px tall; this keeps the floor
- * explicit and spaces the targets so a thumb cannot hit the neighbour). Mouse layout is
- * unchanged. The toolbar is a flow box below the stage, so nothing here pokes outside it.
- */
-@media (pointer: coarse) {
-  .closeButton,
-  .navButton {
-    min-width: 44px;
-    min-height: 44px;
-  }
-
-  .pager {
-    gap: 6px;
-  }
 }
 
 /* Visually hidden, still announced. */
