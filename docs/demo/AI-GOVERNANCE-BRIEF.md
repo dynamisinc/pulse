@@ -4,6 +4,12 @@
 **From:** Dynamis (Tom Bull) · **Facts as of:** 2026-10-08 (Pulse `main` at `2d08edf`; Microsoft pages
 retrieved the same day). References such as [R1] and [M1] point to the sources at the end.
 
+> **Corrected 10/16.** Earlier copies listed "a known defect to fix before live use": unapproved drafts
+> sent over the real-time connection participants share. That defect was fixed in Pulse on 2026-10-08,
+> just after the snapshot this brief describes. The item is removed from "What remains for your approval",
+> and §3 now states the current position ("Drafts stay on the staff side"), with source R10 updated to match.
+> Nothing else has changed.
+
 ## Summary
 
 Pulse has an optional AI engine that drafts simulated social-media posts for controllers to review. **It
@@ -117,12 +123,13 @@ without it.
 - **Fiction by design.** Approved drafts post as fictional personas on the social channel only. Rumor and
   worry are intended, because they are the training stress. In the current demo cast, the engine does
   not voice the impersonator or the rumor outlet [R5].
+- **Drafts stay on the staff side.** The server sends unapproved drafts and other staff-only real-time
+  updates only to connections it has verified, when they connect, as a signed-in staff member assigned to
+  that exercise, so participant connections never receive them. Evidence: the automated tests
+  `ExerciseRealtimeHubRoleIsolationTests` and `EngineReviewBroadcasterScopeTests` [R10].
 
 **What remains for your approval**
 
-- **A known defect to fix before live use.** Unapproved drafts are also sent over the real-time
-  connection participants share. The app does not show them, but browser developer tools do. The fix is
-  not started [R10].
 - **Autonomy.** Allow Suggest only (our recommendation), or also Delayed-auto.
 - **Disclosure.** Participants cannot tell AI-drafted posts from controller-written ones; staff records
   can. Decide whether the participant briefing should say so.
@@ -177,7 +184,7 @@ hand, and participants use the same feed. The engine can run on the offline gene
 | R7 | `docs/features/engine-generation-infra/MEASURED-RESULTS.md` (run of 2026-07-18) |
 | R8 | `AutonomyLevel.cs`, `AutoHoldPolicy.cs`, `EngineReviewService.cs`, `EngineCockpitControllerRoleFilter.cs`; `docs/features/autonomy-safety/03-kill-switch.md`, `07-cut-to-fake-provider.md` (#402); `engine-generation-infra/05-degraded-mode-fallback.md` |
 | R9 | `ContentGuard.cs`, `GenerateStage.cs`, `InjectionRedTeam.cs`, `LiveInjectionRedTeamTests.cs`; `docs/design/E8-ENGINE-ARCHITECTURE.md` §3.4, §8, §9 |
-| R10 | `docs/demo/PARTICIPANT-FIRST-DEMO-PLAN.md` (scorecard); `docs/features/social-api/05-realtime-role-scoped-groups.md` (Not Started); `EngineReviewBroadcaster.cs` |
+| R10 | `ExerciseRealtimeHub.cs`, `EngineReviewBroadcaster.cs`, `NoiseBroadcaster.cs`; `ExerciseRealtimeHubRoleIsolationTests`, `EngineReviewBroadcasterScopeTests`; `docs/features/social-api/05-realtime-role-scoped-groups.md` (Complete; corrected 10/16); `docs/demo/PARTICIPANT-FIRST-DEMO-PLAN.md` (scorecard) |
 | R11 | `docs/00-MASTER-PRD.md` NFR-005, NFR-006; `docs/features/engine-runtime/05-live-provider-uat-golive.md` (no live traffic yet; production out of scope) |
 
 **Microsoft documentation** (all retrieved 2026-10-08; "page date" is the page's own `ms.date`)
