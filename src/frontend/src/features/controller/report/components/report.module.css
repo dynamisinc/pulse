@@ -314,9 +314,31 @@
   stroke-dasharray: 2 2;
 }
 
-.chart text.injLabel {
+/* Story 31: numbered badge at the top of an inject's dashed line. */
+.injBadge {
   fill: var(--ink);
-  font-weight: 500;
+}
+
+.chart text.injNum {
+  fill: #fff;
+  font: 700 9px var(--mono);
+}
+
+/* The real-text key under the chart: "1 · 06:39 · #2 Title". */
+.markerKey {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 2px;
+  font: 400 12.5px/1.4 var(--mono);
+  color: var(--ink);
+  break-inside: avoid;
+}
+
+.filtered {
+  font-weight: 600;
+  color: var(--mark);
 }
 
 .fillPt { fill: var(--s-pt); }
@@ -575,6 +597,13 @@
   white-space: pre-wrap;
 }
 
+/* DF-47: a reply under its listed thread root: one indent level, a left rule. */
+.nested {
+  margin-left: 28px;
+  padding-left: 14px;
+  border-left: 3px solid var(--rule);
+}
+
 .taken .text {
   text-decoration: line-through;
   text-decoration-color: var(--down);
@@ -813,10 +842,18 @@
     overflow: visible !important;
   }
 
+  /*
+   * DF-46. The page rule is `@page { margin: 0 }` (which is what removes the browser's header and
+   * footer in Chromium/Edge), so the sheet draws the paper margin itself. `clone` repeats the
+   * padding on every page fragment instead of only the first and last.
+   */
   .sheet {
     max-width: none;
     box-shadow: none;
     font-size: 11pt;
+    padding: 0.5in;
+    -webkit-box-decoration-break: clone;
+    box-decoration-break: clone;
   }
 
   .inner {
@@ -842,6 +879,46 @@
 
   .photo {
     max-width: 3.6in;
+  }
+
+  /* DF-46: media prints at most 2.5in tall, whole (contain) and centered. */
+  .frame {
+    max-height: 2.5in;
+  }
+
+  .frame img {
+    max-height: 2.5in;
+    object-fit: contain;
+    object-position: center;
+    margin: 0 auto;
+  }
+
+  /* A poster-less video / missing image is only a tile: 1.25in. */
+  .plain {
+    aspect-ratio: auto;
+    height: 1.25in;
+    max-height: 1.25in;
+  }
+
+  /* No orphaned headings: a heading stays with the item after it. */
+  .heading,
+  .hour {
+    break-after: avoid;
+    page-break-after: avoid;
+  }
+
+  .heading + .method,
+  .heading + .tablewrap,
+  .method + .omit,
+  .hour + .feed {
+    break-before: avoid;
+  }
+
+  /* The record's filter statement and notes stay with its first group too. */
+  .method,
+  .omit {
+    break-after: avoid;
+    page-break-after: avoid;
   }
 
   /* A four-image post with long alt text must stay well under one page (about 7in). */
