@@ -8,7 +8,7 @@
  * MUI 9 `sx`-only system props. Never a participant-skinned surface.
  *
  * SHOWS / EDITS the exercise's ambient policy (contract:
- * `../models/ambientPolicyContract.ts`, PROVISIONAL):
+ * `../models/ambientPolicyContract.ts`):
  *  - MODE `off | review | autonomous` — always TEXT + ICON, never colour alone
  *    (NFR-001). A "current mode" status line shows the SAVED server value; the
  *    segmented control below it edits a local draft that is only committed by
@@ -61,6 +61,9 @@ export interface AmbientPersonaOption {
   readonly handle: string
 }
 
+/** Id of the unauthorized note; the disabled Autonomous option points at it. */
+const AUTONOMOUS_NOTE_ID = 'ambient-autonomous-unauthorized-note-text'
+
 const MODE_META: Readonly<Record<AmbientMode, { label: string; icon: IconDefinition; help: string }>> = {
   off: { label: 'Off', icon: faPowerOff, help: 'No ambient posts are generated or published.' },
   review: {
@@ -107,10 +110,12 @@ interface ChipListProps {
   readonly disabled: boolean
   readonly onToggle: (id: string) => void
   readonly emptyOptionsText: string
+  /** Optional per-option annotation (text, never colour-only), e.g. "not in engine cast". */
+  readonly optionNote?: (id: string) => string | null
 }
 
 function ChipList(props: ChipListProps) {
-  const { testIdPrefix, groupLabel, options, selected, editable, disabled, onToggle, emptyOptionsText } = props
+  const { testIdPrefix, groupLabel, options, selected, editable, disabled, onToggle, emptyOptionsText, optionNote } = props
   return (
     <Stack sx={{ gap: 0.6 }}>
       {selected.length === 0 && (
@@ -160,6 +165,15 @@ function ChipList(props: ChipListProps) {
                 <Stack direction="row" sx={{ alignItems: 'center', gap: 0.5 }}>
                   {on && <FontAwesomeIcon icon={faCheck} aria-hidden="true" />}
                   <Box component="span">{option.label}</Box>
+                  {optionNote?.(option.id) && (
+                    <Box
+                      component="span"
+                      data-testid={`${testIdPrefix}-${option.id}-note`}
+                      sx={{ fontWeight: 500, fontSize: 10, color: chrome.inkFaint }}
+                    >
+                      {`— ${optionNote(option.id)}`}
+                    </Box>
+                  )}
                 </Stack>
               </Box>
             )
@@ -212,6 +226,9 @@ export function AmbientChatterSection(props: AmbientChatterSectionProps) {
 
   const vocabulary = policy.topicVocabulary ?? FALLBACK_AMBIENT_TOPIC_VOCABULARY
   const topicOptions = vocabulary.map(id => ({ id, label: topicLabel(id) }))
+  const voiceable = policy.voiceablePersonaIds ?? null
+  const personaNote = (id: string): string | null =>
+    voiceable !== null && !voiceable.includes(id) ? 'not in engine cast' : null
   const personaOptions = personas.map(p => ({ id: p.id, label: `${p.displayName} (${p.handle})` }))
 
   const perMinute = parseCap(perMinuteText)
@@ -255,6 +272,8 @@ export function AmbientChatterSection(props: AmbientChatterSectionProps) {
           {AMBIENT_MODES.map(mode => {
             const meta = MODE_META[mode]
             const selected = draft.mode === mode
+            const blocked = mode === 'autonomous' && policy.autonomousAuthorized === false
+            const modeDisabled = controlsDisabled || blocked
             return (
               <Box
                 key={mode}
@@ -262,7 +281,8 @@ export function AmbientChatterSection(props: AmbientChatterSectionProps) {
                 type="button"
                 data-testid={`ambient-mode-${mode}`}
                 aria-pressed={selected}
-                disabled={controlsDisabled}
+                aria-describedby={blocked ? AUTONOMOUS_NOTE_ID : undefined}
+                disabled={modeDisabled}
                 onClick={() => setDraft(d => ({ ...d, mode }))}
                 sx={{
                   px: 1,
@@ -273,8 +293,8 @@ export function AmbientChatterSection(props: AmbientChatterSectionProps) {
                   bgcolor: selected ? chrome.card : 'transparent',
                   border: `1px solid ${selected ? chrome.blue : chrome.line}`,
                   borderRadius: '7px',
-                  cursor: controlsDisabled ? 'not-allowed' : 'pointer',
-                  opacity: controlsDisabled ? 0.5 : 1,
+                  cursor: modeDisabled ? 'not-allowed' : 'pointer',
+                  opacity: modeDisabled ? 0.5 : 1,
                 }}
               >
                 <Stack direction="row" sx={{ alignItems: 'center', gap: 0.5 }}>
@@ -289,6 +309,7 @@ export function AmbientChatterSection(props: AmbientChatterSectionProps) {
 
       {policy.autonomousAuthorized === false && (
         <Stack
+          id={AUTONOMOUS_NOTE_ID}
           data-testid="ambient-autonomous-unauthorized-note"
           direction="row"
           sx={{ alignItems: 'flex-start', gap: 0.6 }}
@@ -349,7 +370,14 @@ export function AmbientChatterSection(props: AmbientChatterSectionProps) {
       />
 
       <Typography sx={{ fontSize: 10.5, fontWeight: 700, color: chrome.inkMuted }}>Allowed personas</Typography>
+      <Typography
+        data-testid="ambient-persona-cast-help"
+        sx={{ fontSize: 10.5, color: chrome.inkFaint, lineHeight: 1.4 }}
+      >
+        Only personas in the engine cast post ambient chatter.
+      </Typography>
       <ChipList
+        optionNote={personaNote}
         testIdPrefix="ambient-persona"
         groupLabel="Allowed ambient personas"
         options={personaOptions}

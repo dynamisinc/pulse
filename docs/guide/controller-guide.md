@@ -626,14 +626,18 @@ The change applies from the next engine tick, with no restart.
 **The three modes**
 
 - **Off** (the default): no ambient posts are generated or published.
-- **Review**: ambient drafts go to the review queue like any other draft. A draft whose countdown ends is held, never
-  sent.
+- **Review**: ambient drafts go to the review queue like any other draft. They have no countdown: each waits in the
+  queue until a person approves or rejects it. Silence never publishes an ambient post.
 - **Autonomous**: ambient posts publish on their own, without a controller click, but only inside the limits and
   lists you set. They appear as ordinary posts from the engine and carry the same scenario time as everything else.
 
 **Autonomous may be refused.** Autonomous ambient posting needs separate sign-off for each environment
 (PROVIDER-GOVERNANCE §8). If it is not authorized, saving shows "Autonomous ambient posting is not authorized for this
 environment (PROVIDER-GOVERNANCE §8)" and the mode stays as it was. **Review** is still available.
+
+Autonomous needs PROVIDER-GOVERNANCE §8 amendment 2, which is not yet signed. Until it is, the **Autonomous** option
+is greyed out with a note explaining why. It also cannot be selected while the kill switch is stopped or the exercise
+is cut to Fake; the server refuses it and the panel shows the reason.
 
 **Caps.** **Max per minute** and **Max per hour** bound how many ambient posts can publish. The per-minute cap cannot
 exceed the engine's overall posts-per-minute limit. The per-hour cap is also your spending cap for ambient content.
@@ -642,20 +646,25 @@ exceed the engine's overall posts-per-minute limit. The per-hour cap is also you
 list means **Nothing allowed**, never "everything", so with an empty list nothing is posted. Set both before relying
 on Autonomous.
 
+Only personas in the engine's cast are voiced. Any persona that is not in the cast is marked **not in engine cast**
+in the persona list; you can tick it, but it will not post ambient chatter.
+
 **Resets on restart.** The ambient policy is held in server memory. If the server restarts it goes back to **Off**,
 with empty lists. Check the section after any restart.
 
 **Stopping ambient posting.**
 
-- **Kill switch:** either **SUGGEST-ONLY** or **STOPPED** stops ambient posts within seconds, including any already
-  being written. Moving the switch back to **LIVE** does not turn ambient back on. Only you can, by selecting the mode
-  again.
+- **Kill switch, degraded mode and Cut to Fake:** the kill switch (either **SUGGEST-ONLY** or **STOPPED**), the engine
+  going into degraded mode, and **Cut to Fake** all turn ambient **Off**, and stop posts within seconds, including any
+  already being written. Restoring the switch, the provider or normal operation does **not** turn ambient back on.
+  Only you can, by selecting the mode again.
 - **Freeze, Pause engine, and any state other than live:** no ambient post publishes, and a post that finishes
   writing after the change is discarded, not posted late.
 - **EndEx:** ambient posting stops at EndEx, as it does at Freeze.
 
-Ambient chatter and [white noise](#8-white-noise-background-chatter) are different features. Check the white noise
-level before you turn on Autonomous, so the quiet periods are not filled twice.
+Ambient chatter and [white noise](#8-white-noise-background-chatter) are different features. White-noise posts count
+toward the quiet floor, so ambient never double-fills a quiet period: if white noise has already covered the quiet,
+ambient adds nothing for it.
 
 ### Provider
 

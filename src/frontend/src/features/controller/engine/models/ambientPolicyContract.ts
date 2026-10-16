@@ -5,8 +5,7 @@
  * (story `docs/features/ambient-chatter/01-ambient-background-posting.md`, #168,
  * AC1 + AC2). STAFF world — pure types/constants, no UI.
  *
- * PROVISIONAL CONTRACT. The backend is being built in parallel; this file is
- * the single seam to adjust when it lands:
+ * Wire contract (server is authoritative):
  *
  *   GET  /api/engine/settings                    -> EngineSettingsDto gains `ambientPolicy`
  *   POST /api/engine/settings/ambient-policy      body `AmbientPolicyRequestBody`
@@ -34,6 +33,11 @@ export interface AmbientPolicyDto {
   readonly autonomousAuthorized?: boolean
   /** Server topic vocabulary, if exposed; otherwise {@link FALLBACK_AMBIENT_TOPIC_VOCABULARY}. */
   readonly topicVocabulary?: readonly string[]
+  /**
+   * Persona ids the engine loop actually voices. Only these post ambient chatter.
+   * Absent or `null` = unknown (no loop registered / older server): show no labels.
+   */
+  readonly voiceablePersonaIds?: readonly string[] | null
 }
 
 /** The editable subset sent on POST (plus the acting human / time zone added by the service). */
@@ -54,10 +58,8 @@ export interface AmbientPolicyRequestBody extends AmbientPolicyDraft {
 export const AMBIENT_MODES: readonly AmbientMode[] = ['off', 'review', 'autonomous']
 
 /**
- * TODO(ambient-chatter #168): align with the backend's fixed topic vocabulary
- * (AC1). Used only when `ambientPolicy.topicVocabulary` is absent. Values are
- * the story's examples (local color, traffic-mundane, food, sports, community
- * events); the real ids may differ.
+ * Mirrors the server's fixed topic vocabulary (AC1). Used only when
+ * `ambientPolicy.topicVocabulary` is absent.
  */
 export const FALLBACK_AMBIENT_TOPIC_VOCABULARY: readonly string[] = [
   'local-color',
@@ -65,6 +67,9 @@ export const FALLBACK_AMBIENT_TOPIC_VOCABULARY: readonly string[] = [
   'food',
   'sports',
   'community-events',
+  'pets',
+  'local-business',
+  'family-school',
 ]
 
 /** Shown when a save of `autonomous` is rejected with a 400 (AC0 / PROVIDER-GOVERNANCE §8). */
