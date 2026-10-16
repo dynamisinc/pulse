@@ -1,7 +1,7 @@
 # Story: Controller notes in the exercise report
 
 **Feature:** AAR export package  ·  **Epic:** E10  ·  **Phase:** 4  ·  **Status:** Not Started · backlog
-**Requirements:** EVL-030 (adjacent)  ·  **Design decisions:** none  ·  **Issue:** —
+**Requirements:** EVL-030 (adjacent)  ·  **Design decisions:** none  ·  **Issue:** #556
 
 ## Context
 Raised at the 10/15 internal demo while mocking up the printable exercise report (the "pretty" companion
