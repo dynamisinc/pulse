@@ -145,6 +145,8 @@ job. That is the point-in-time-restore (PITR) target if a rollback is needed.
    - `StaffAssignments` come back with the same ids, and `Accounts.Role` / `PersonaId` are restored from enrollments.
    - A person who was both a planner and an org admin comes back as `orgAdmin` only.
    - Org-scope sessions are deleted (they have no exercise to point at).
+   - A person who holds an `OrgRole` but has no enrollments loses admin access entirely: the pre-A1 schema keeps
+     org-admin access only on per-exercise rows. Re-grant it by hand after `Down` if needed.
    - Everything that exists only from A1 on is dropped: people's emails and passwords, org audit events, login
      choices, organization slugs, `FirstLiveAt`.
 
