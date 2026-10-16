@@ -288,6 +288,11 @@ public class AmbientOutputFilterTests
     [InlineData("hmm \u2622")]
     [InlineData("on my way \U0001F6A8")]
     [InlineData("careful out there \u26A0\uFE0F")]
+    [InlineData("sirens everywhere \U0001F692")]
+    [InlineData("there goes another \U0001F691")]
+    [InlineData("help \U0001F198")]
+    [InlineData("yikes \u2620\uFE0F")]
+    [InlineData("yikes \u2620\U000E0101")] // supplementary variation selector stripped by the rune fold
     public void AnIncidentEmoji_Fails_WithOrWithoutTheVariationSelector(string text)
     {
         AmbientOutputFilter.Inspect([Post(text)], []).Should().Equal(AmbientOutputFilter.IncidentTermCheck);
@@ -325,5 +330,29 @@ public class AmbientOutputFilterTests
     public void Fold_AppliesNfkc_StripsFormatAndMarks_AndLowerCases()
     {
         AmbientOutputFilter.Fold("\uFF37a\u200Bter Contaminación ☣\uFE0F").Should().Be("water contaminacion ☣");
+    }
+
+    [Fact]
+    public void Fold_StripsSupplementaryPlaneTagCharactersAndVariationSelectors()
+    {
+        AmbientOutputFilter.Fold("wa\U000E0020ter").Should().Be("water", "a tag character (U+E0020, Cf) is a surrogate pair and must be removed as one rune");
+        AmbientOutputFilter.Fold("water\U000E0101").Should().Be("water", "a supplementary variation selector (U+E0101, Mn) must be removed");
+        AmbientOutputFilter.Tokenize("is the wa\U000E007Fter safe").Should().Equal("is", "the", "water", "safe");
+    }
+
+    [Fact]
+    public void ASupplementaryPlaneCfInsideAStorylineKeyword_StillFails()
+    {
+        AmbientOutputFilter.Inspect([Post("is the wa\U000E0020ter ok today")], WaterExclusions)
+            .Should().Equal(AmbientOutputFilter.IncidentTermCheck);
+        AmbientOutputFilter.Inspect([Post("is the water\U000E0101 ok today")], WaterExclusions)
+            .Should().Equal(AmbientOutputFilter.IncidentTermCheck);
+    }
+
+    [Fact]
+    public void AFireEmoji_IsDeliberatelyNotAnIncidentEmoji()
+    {
+        AmbientOutputFilter.Inspect([Post("this pizza \U0001F525")], [])
+            .Should().BeEmpty("🔥 is everyday praise on allow-listed topics and is deliberately not denylisted");
     }
 }

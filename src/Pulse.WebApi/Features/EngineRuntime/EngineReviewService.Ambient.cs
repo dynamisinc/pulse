@@ -36,7 +36,10 @@ public sealed partial class EngineReviewService
     /// <remarks>
     /// The write is a compare-and-set against the snapshot the safety check read
     /// (<see cref="EngineAmbientPolicyRegistry.TrySet"/>, orchestrator review WR-5), retried up to
-    /// <see cref="AmbientPolicyCasAttempts"/> times; exhausting them is a 400 with nothing mutated.
+    /// <see cref="AmbientPolicyCasAttempts"/> times; exhausting them is a 400 with nothing mutated. After a successful
+    /// autonomous swap the safety levers are re-checked (orchestrator delta-review W-2): a lever that landed between the
+    /// check and the swap demotes the policy straight back to off (an engine-attributed audit event, after the
+    /// controller's) and the request is the same safety 400.
     /// Rejected with a 400 and NOTHING mutated: an unknown mode; <c>autonomous</c> while the governed
     /// <c>Generation:Governance:AmbientAutonomyAuthorized</c> flag is false (AC0); <c>autonomous</c> while the kill switch
     /// (either mode) or the cut to Fake is active for the exercise (Gate-1 L-1); a cap above the exercise's
@@ -148,8 +151,7 @@ public sealed partial class EngineReviewService
             // in either mode (SafetyClampActive also covers a degraded clamp) or the cut to Fake. Re-evaluated on every
             // attempt, so a set that raced a kill-switch demotion re-reads the clamp and is rejected rather than
             // resurrecting autonomous.
-            if (draft.Mode == AmbientPolicyMode.Autonomous
-                && (_autonomy.GetOrCreate(exerciseId).SafetyClampActive || _providerCut.IsCutToFake(exerciseId)))
+            if (draft.Mode == AmbientPolicyMode.Autonomous && SafetyHeldForAmbient(exerciseId))
             {
                 return EngineSettingsResult.Invalid(AutonomousWhileSafetyHeldError);
             }
@@ -172,8 +174,26 @@ public sealed partial class EngineReviewService
             BuildAmbientChange(from.Mode, policy, EngineEventPayloads.AmbientPolicyChanged.ReasonController, exerciseId),
             cancellationToken);
 
+        // Orchestrator delta-review W-2: re-check the safety levers AFTER the swap. A kill switch / cut to Fake that lands
+        // between the in-loop check and TrySet runs its own demotion while the policy is not yet autonomous (a no-op), so
+        // the swap would then store autonomous under an engaged lever. The lever is visible here, so the policy is
+        // lowered again at once — recorded as an ENGINE demotion (no acting human) — and the request gets the same 400
+        // as the pre-check. The controller's swap stays on the record above: it really was live, however briefly.
+        if (policy.Mode == AmbientPolicyMode.Autonomous && SafetyHeldForAmbient(exerciseId))
+        {
+            await DemoteAutonomousAmbientAsync(exerciseId, new EngineReviewActionInput(null, request.TimeZone), cancellationToken);
+            return EngineSettingsResult.Invalid(AutonomousWhileSafetyHeldError);
+        }
+
         return EngineSettingsResult.Ok(BuildSettings(exerciseId));
     }
+
+    /// <summary>
+    /// Whether a safety lever holds the engine for the exercise — the kill switch in either mode (or a degraded clamp,
+    /// via <see cref="Pulse.Core.Features.Autonomy.Services.EngineAutonomyState.SafetyClampActive"/>) or the cut to Fake — so autonomous ambient is refused.
+    /// </summary>
+    private bool SafetyHeldForAmbient(Guid exerciseId) =>
+        _autonomy.GetOrCreate(exerciseId).SafetyClampActive || _providerCut.IsCutToFake(exerciseId);
 
     /// <summary>
     /// The stored persona archetype (the frontend <c>PersonaType</c> union) that maps to an ambient-eligible engine type

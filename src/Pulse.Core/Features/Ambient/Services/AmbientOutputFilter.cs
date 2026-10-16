@@ -23,9 +23,19 @@ using Pulse.Core.Features.Generation.Models;
 /// <b>Normalisation (orchestrator review SG-1).</b> Before anything is matched, every string — post text, hashtags, and
 /// the storyline hashtags/titles the exclusions are built from — is folded by <see cref="Fold"/>: Unicode NFKC (so
 /// fullwidth <c>ＷＡＴＥＲ</c> reads as <c>WATER</c>), every format character (category Cf — zero-width space/joiner,
-/// soft hyphen, bidi marks) removed (so <c>w&#x200B;ater</c> reads as <c>water</c>), diacritics folded (FormD, every
-/// non-spacing mark — which includes the emoji variation selectors — removed, so <c>contaminación</c> reads as
-/// <c>contaminacion</c> and hits <c>contamina*</c>), and lower-cased (invariant).
+/// soft hyphen, bidi marks, and the supplementary-plane tag characters U+E0020–U+E007F) removed (so <c>w&#x200B;ater</c>
+/// reads as <c>water</c>), diacritics folded (FormD, every non-spacing mark — which includes the variation selectors
+/// U+FE00–U+FE0F and the supplement U+E0100–U+E01EF — and every enclosing mark removed, so <c>contaminación</c> reads as
+/// <c>contaminacion</c> and hits <c>contamina*</c>), and lower-cased (invariant). The fold walks Unicode scalar values
+/// (<see cref="Rune"/>), not UTF-16 chars, so a supplementary-plane Cf/Mn character (a surrogate pair) is classified and
+/// removed rather than surviving as two "surrogate" chars that split the word (orchestrator delta-review W-1).
+/// </para>
+/// <para>
+/// <b>Accepted residuals (drift only).</b> This is a drift guard against a model wandering onto the incident, not an
+/// adversarial filter; these evasions are known and accepted: homoglyphs (Cyrillic <c>а</c> in "wаter" is not folded to
+/// Latin), percent-encoding or digit noise (<c>%23FairhavenWater</c>, a leading digit run <c>2FairhavenWater</c>), split
+/// words (<c>wa ter</c>), leetspeak (<c>w4ter</c>), and paraphrase ("the stuff from the tap tastes off"). Ambient input
+/// is staff-authored and the model is prompted off-incident; the filter catches honest drift.
 /// </para>
 /// <para>
 /// <b>Word-boundary matching (Gate-1 W-A).</b> The folded post (text + hashtag list) is split into
@@ -73,8 +83,9 @@ using Pulse.Core.Features.Generation.Models;
 /// </para>
 /// <para>
 /// <b>Incident emoji (SG-1).</b> A post whose folded text or hashtags carry any of <see cref="IncidentEmoji"/> (🚱 ☣ ☢ 🚨
-/// ⚠, variation selectors already stripped by the fold) fails. 💧 is deliberately NOT listed: it is common in innocuous
-/// posts (weather, gardening, the seeded "Fairhaven strong. 💧" bio).
+/// ⚠ 🚒 🚑 🆘 ☠, variation selectors already stripped by the fold) fails. 💧 is deliberately NOT listed: it is common in
+/// innocuous posts (weather, gardening, the seeded "Fairhaven strong. 💧" bio). 🔥 is deliberately NOT listed either: it
+/// is everyday praise on allow-listed topics ("this pizza 🔥", "the striker is 🔥").
 /// </para>
 /// <para>
 /// <b>Title keywords (WR-3).</b> A title word of at least <see cref="MinTitleKeywordLength"/> (4) letters that is not a
@@ -200,7 +211,7 @@ public static class AmbientOutputFilter
 
     /// <summary>
     /// Incident emoji (SG-1): any of these in a post's folded text or hashtags fails it. Stored without variation
-    /// selectors (the fold strips them from the post). 💧 is deliberately absent — see the type remarks.
+    /// selectors (the fold strips them from the post). 💧 and 🔥 are deliberately absent — see the type remarks.
     /// </summary>
     public static IReadOnlyList<string> IncidentEmoji { get; } =
     [
@@ -209,6 +220,10 @@ public static class AmbientOutputFilter
         "\u2622",     // ☢ radioactive
         "\U0001F6A8", // 🚨 police-car light
         "\u26A0",     // ⚠ warning sign
+        "\U0001F692", // 🚒 fire engine
+        "\U0001F691", // 🚑 ambulance
+        "\U0001F198", // 🆘 squared SOS
+        "\u2620",     // ☠ skull and crossbones
     ];
 
     private static readonly HashSet<string> TitleStopWords = new(StringComparer.Ordinal)
@@ -344,9 +359,11 @@ public static class AmbientOutputFilter
     }
 
     /// <summary>
-    /// The SG-1 fold every matched string goes through: Unicode NFKC, format characters (category Cf — zero-width
-    /// space/joiner, soft hyphen, bidi marks) removed, diacritics folded (FormD with every non-spacing mark — including
-    /// emoji variation selectors — removed, then recomposed), and lower-cased (invariant). Pure.
+    /// The SG-1 fold every matched string goes through: Unicode NFKC, then — walking Unicode scalar values (runes), so
+    /// supplementary-plane characters are classified correctly — every format character (category Cf: zero-width
+    /// space/joiner, soft hyphen, bidi marks, the tag characters U+E0020–U+E007F), every non-spacing mark (Mn:
+    /// diacritics after FormD, the variation selectors U+FE00–U+FE0F and U+E0100–U+E01EF) and every enclosing mark (Me:
+    /// the keycap U+20E3) removed, then recomposed and lower-cased (invariant). Emoji themselves (So) are kept. Pure.
     /// </summary>
     /// <param name="text">The text.</param>
     /// <returns>The folded text (empty for null/empty input).</returns>
@@ -359,15 +376,20 @@ public static class AmbientOutputFilter
 
         var decomposed = text.Normalize(NormalizationForm.FormKC).Normalize(NormalizationForm.FormD);
         var sb = new StringBuilder(decomposed.Length);
-        foreach (var ch in decomposed)
+        // Walk Unicode scalar values (Runes), NOT UTF-16 chars (orchestrator delta-review W-1): a supplementary-plane
+        // format/mark character (tag characters U+E0020–U+E007F are Cf; variation selectors supplement
+        // U+E0100–U+E01EF are Mn) is a surrogate pair, and each half reads as category Surrogate to the char API — so
+        // a char walk let "wa\U000E0020ter" survive and split the word. Emoji themselves (So) are kept, so the
+        // incident-emoji denylist still matches.
+        foreach (var rune in decomposed.EnumerateRunes())
         {
-            var category = CharUnicodeInfo.GetUnicodeCategory(ch);
-            if (category is UnicodeCategory.Format or UnicodeCategory.NonSpacingMark)
+            var category = Rune.GetUnicodeCategory(rune);
+            if (category is UnicodeCategory.Format or UnicodeCategory.NonSpacingMark or UnicodeCategory.EnclosingMark)
             {
                 continue;
             }
 
-            sb.Append(ch);
+            sb.Append(rune.ToString());
         }
 
         return sb.ToString().Normalize(NormalizationForm.FormC).ToLower(CultureInfo.InvariantCulture);

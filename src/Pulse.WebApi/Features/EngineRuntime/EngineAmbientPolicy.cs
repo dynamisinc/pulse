@@ -75,7 +75,7 @@ public sealed class EngineAmbientPolicyRegistry
 {
     // Each stored value is wrapped in a fresh Slot per write, so ConcurrentDictionary.TryUpdate (which compares with the
     // value type's default equality) is a STRICT reference compare-and-set: AmbientTierPolicy is a record (value
-    // equality), the Slot is not. Every writer — Set, TrySet and DemoteAutonomous — CASes on the same slot identity,
+    // equality), the Slot is not. Every writer — Set (test-only), TrySet and DemoteAutonomous — CASes on the same slot identity,
     // so they are mutually atomic (orchestrator review WR-5).
     private readonly ConcurrentDictionary<Guid, Slot> _policies = new();
     private readonly bool _autonomyAuthorized;
@@ -108,14 +108,15 @@ public sealed class EngineAmbientPolicyRegistry
     }
 
     /// <summary>
-    /// Records the exercise's policy unconditionally and returns the policy it displaced, atomically. Controller writes
-    /// go through <see cref="TrySet"/> (compare-and-set) instead; this blind write remains for test set-up and callers
-    /// that hold no snapshot.
+    /// TEST SET-UP ONLY. Records the exercise's policy unconditionally and returns the policy it displaced, atomically.
+    /// Internal (visible to <c>Pulse.WebApi.Tests</c> only) so no production writer can bypass the compare-and-set:
+    /// controller writes go through <see cref="TrySet"/>, engine lowering through <see cref="DemoteAutonomous"/>
+    /// (orchestrator delta-review item 3).
     /// </summary>
     /// <param name="exerciseId">The exercise (COR-001); must not be empty.</param>
     /// <param name="policy">The validated policy.</param>
     /// <returns>The previous policy.</returns>
-    public AmbientTierPolicy Set(Guid exerciseId, AmbientTierPolicy policy)
+    internal AmbientTierPolicy Set(Guid exerciseId, AmbientTierPolicy policy)
     {
         EnsureScoped(exerciseId);
         ArgumentNullException.ThrowIfNull(policy);

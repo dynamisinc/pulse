@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
@@ -235,6 +236,45 @@ public sealed class EngineAmbientPolicyServiceTests
         harness.Ambient.Get(exerciseId).Mode.Should().Be(AmbientPolicyMode.Review, "review drafts already wait for a human");
     }
 
+    // ---- orchestrator delta-review W-2: a lever landing between the safety check and the swap ---------
+
+    [Fact]
+    public async Task ACutToFake_LandingBetweenTheSafetyCheckAndTheSwap_IsCaughtByThePostCheck_AndDemotedByTheEngine()
+    {
+        // The cut reads "not cut" for the in-loop pre-check, then "cut" — exactly a cut that lands after the check
+        // and before TrySet (its own demotion ran while the policy was not yet autonomous, so it was a no-op).
+        var exerciseId = Guid.NewGuid();
+        var cut = new CutAfterFirstReadRegistry();
+        using var harness = new Harness(exerciseId, providerCut: cut);
+
+        var result = await harness.SetPolicyAsync(Request("autonomous"));
+
+        result.Outcome.Should().Be(EngineReviewOutcome.Invalid, "the post-swap re-check returns the same 400 as the pre-check");
+        result.ValidationError.Should().Be(EngineReviewService.AutonomousWhileSafetyHeldError);
+        harness.Ambient.Get(exerciseId).Mode.Should().Be(
+            AmbientPolicyMode.Off, "autonomous must never survive under an engaged safety lever");
+
+        var events = await harness.EventsAsync(exerciseId);
+        events.Should().HaveCount(2, "the controller's swap really was live, and the engine's demotion follows it");
+        using var demotion = JsonDocument.Parse(events.Last().Payload!);
+        demotion.RootElement.GetProperty("fromMode").GetString().Should().Be("autonomous");
+        demotion.RootElement.GetProperty("toMode").GetString().Should().Be("off");
+        demotion.RootElement.GetProperty("reason").GetString().Should().Be("safety-clamp");
+        events.Last().Actor.Kind.Should().Be("engine");
+        events.Last().Actor.ActingHumanId.Should().BeNull("the engine lowered it, not a human");
+    }
+
+    [Fact]
+    public async Task NoLeverEngaged_AutonomousSurvivesThePostCheck()
+    {
+        var exerciseId = Guid.NewGuid();
+        using var harness = new Harness(exerciseId);
+
+        (await harness.SetPolicyAsync(Request("autonomous"))).Outcome.Should().Be(EngineReviewOutcome.Ok);
+        harness.Ambient.Get(exerciseId).Mode.Should().Be(AmbientPolicyMode.Autonomous);
+        (await harness.EventsAsync(exerciseId)).Should().ContainSingle("no lever, no demotion");
+    }
+
     // ---- orchestrator review W-2: attribution from the verified session, never the body -------------
 
     [Fact]
@@ -365,7 +405,11 @@ public sealed class EngineAmbientPolicyServiceTests
         private readonly string _dbName = $"ambient-svc-{Guid.NewGuid():N}";
         private readonly PulseDbContext _db;
 
-        public Harness(Guid? currentExerciseId, bool authorized = true, IReactionLoopRegistry? loops = null)
+        public Harness(
+            Guid? currentExerciseId,
+            bool authorized = true,
+            IReactionLoopRegistry? loops = null,
+            IGenerationProviderCutRegistry? providerCut = null)
         {
             var context = new ExerciseContext { CurrentExerciseId = currentExerciseId };
             _db = new PulseDbContext(Options(), context);
@@ -390,7 +434,7 @@ public sealed class EngineAmbientPolicyServiceTests
                 new EngineTierPolicyRegistry(),
                 new ClaudeNamedProvider(),
                 Microsoft.Extensions.Options.Options.Create(new GenerationOptions()),
-                new GenerationProviderCutRegistry(),
+                providerCut ?? new GenerationProviderCutRegistry(),
                 NullLogger<EngineReviewService>.Instance,
                 Ambient);
         }
@@ -432,6 +476,18 @@ public sealed class EngineAmbientPolicyServiceTests
 
         private DbContextOptions<PulseDbContext> Options() =>
             new DbContextOptionsBuilder<PulseDbContext>().UseInMemoryDatabase(_dbName).Options;
+    }
+
+    /// <summary>Reads "not cut" on the first <see cref="IsCutToFake"/> call and "cut" on every later one (delta-review W-2).</summary>
+    private sealed class CutAfterFirstReadRegistry : IGenerationProviderCutRegistry
+    {
+        private int _reads;
+
+        public bool IsCutToFake(Guid exerciseId) => Interlocked.Increment(ref _reads) > 1;
+
+        public bool Cut(Guid exerciseId) => true;
+
+        public bool Restore(Guid exerciseId) => true;
     }
 
     /// <summary>A non-Fake provider NAME, so the cut-to-Fake lever really cuts (it is a no-op when already Fake).</summary>

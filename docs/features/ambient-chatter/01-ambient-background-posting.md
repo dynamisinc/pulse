@@ -458,6 +458,36 @@ No migration, no `Program.cs` change.
   added or edited at runtime is NOT excluded until the registration is refreshed; until then only the fixed vocabulary
   (+ emoji) covers it. Disclose with the §8 amendment; a live refresh is a follow-up.
 
+### Orchestrator delta-review on #607 (branch `feature/engine-golive-ambient-hardening`, 2026-10-16)
+- **W-1 (supplementary-plane fold).** `AmbientOutputFilter.Fold` walked UTF-16 chars, so a supplementary-plane Cf/Mn
+  character (tag characters U+E0020–E007F, variation selectors U+E0100–E01EF — each a surrogate pair, read as category
+  *Surrogate* per char) survived and split a word (`wa\u{E0020}ter`). It now walks `string.EnumerateRunes()` and drops
+  every Format (Cf), NonSpacingMark (Mn) and EnclosingMark (Me) rune; emoji (So) are kept, so the emoji denylist still
+  matches. **Accepted residuals (drift only — the filter is a drift guard, not an adversarial one), now in the XML
+  header:** homoglyphs (Cyrillic `а`), percent-encoding / digit noise (`%23FairhavenWater`, a leading digit run),
+  split words (`wa ter`), leetspeak (`w4ter`), paraphrase.
+- **W-2 (post-swap safety re-check — gap closed).** The L-1 check ran inside the CAS loop but BEFORE `TrySet`. A kill
+  switch / cut to Fake landing between the check and the swap ran its own demotion while the policy was not yet
+  autonomous (a no-op), so the swap then stored `autonomous` under an engaged lever. After a successful autonomous swap
+  `SetAmbientPolicyAsync` now re-checks the levers; if one is engaged it calls `DemoteAutonomous` (an
+  **engine-attributed** `engine.tier_policy_changed`, reason `safety-clamp`, no acting human — after the controller's
+  own event, since the swap really was live) and answers the same 400 as the pre-check.
+- **Item 3 (blind write test-only).** `EngineAmbientPolicyRegistry.Set` is now `internal` (`InternalsVisibleTo
+  Pulse.WebApi.Tests` added to `Pulse.WebApi.csproj`); production writers use `TrySet` (controller) and
+  `DemoteAutonomous` (engine) only.
+- **Item 4 (emoji).** The denylist adds 🚒 🚑 🆘 ☠. 🔥 is deliberately NOT listed: it is everyday praise on allow-listed
+  topics ("this pizza 🔥").
+- **Item 6a (persona DisplayName in the ambient prompt — closed).** A persona's `DisplayName` is staff-authored text in
+  the TRUSTED stratum, unfenced. On the ambient path it is now reduced like `AmbientSettingBrief` (letters/digits/space
+  and `' . -`, whitespace collapsed, capped at 60 — `AmbientSettingBrief.CleanName`) so a hostile name cannot open a new
+  prompt section. Storyline prompts keep it verbatim (cache-prefix stability; ContentGuard + the review queue backstop
+  them, as for voice notes). The handle is carried as-is on both paths.
+- **Item 6b (disclosed; follow-up).** A topic allow-list whose seed phrases overlap the storyline exclusions (e.g. a
+  "water"-titled storyline with a topic that naturally talks about water) makes every ambient burst fail the output
+  filter and drop — burning up to 3 attempts per burst, all of which now count against the caps (SG-2). Ambient then
+  goes silent with no error surfaced to the controller. **Follow-up:** warn at policy-set time when an allow-listed
+  topic's seed overlaps the active storylines' exclusions.
+
 ## Tests (backend)
 - `AmbientPolicyValidatorTests.*` (AC0, AC1); `AmbientBehaviorTests.*` (AC4, white-noise overlap)
 - `InjectionRedTeamTests.Catalog_CarriesAmbientPersonaBioSteeringCases` + the catalog theories (AC7)
@@ -524,3 +554,10 @@ No migration, no `Program.cs` change.
   `AmbientPolicyRaiseTests.AutonomousToAutonomous_SwappingAPersonaOrATopic_AtTheSameCount_IsARaise`,
   `.NullAllowLists_AreTreatedAsEmpty_SoNeverARaise_FromAutonomous`, `.AutonomousToAutonomous_ReorderedLists_AreNotARaise`,
   Docker-gated `AmbientPolicyIsolationTests.ASpoofedActingHumanId_IsNotRecorded_TheVerifiedStaffUserIs` (SG-7)
+- #607 delta-review: `AmbientOutputFilterTests.Fold_StripsSupplementaryPlaneTagCharactersAndVariationSelectors`,
+  `.ASupplementaryPlaneCfInsideAStorylineKeyword_StillFails` (W-1); `.AnIncidentEmoji_Fails_WithOrWithoutTheVariationSelector`
+  (🚒 🚑 🆘 ☠ cases), `.AFireEmoji_IsDeliberatelyNotAnIncidentEmoji` (item 4);
+  `EngineAmbientPolicyServiceTests.ACutToFake_LandingBetweenTheSafetyCheckAndTheSwap_IsCaughtByThePostCheck_AndDemotedByTheEngine`,
+  `.NoLeverEngaged_AutonomousSurvivesThePostCheck` (W-2);
+  `PromptAssemblerTests.Assemble_Ambient_CleansThePersonaDisplayName_SoItCannotOpenAPromptSection`,
+  `.Assemble_Storyline_KeepsThePersonaDisplayNameVerbatim` (item 6a)

@@ -2,6 +2,7 @@ namespace Pulse.Core.Features.Generation.Services;
 
 using System.Globalization;
 using System.Text;
+using Pulse.Core.Features.Ambient.Services;
 using Pulse.Core.Features.Generation.Models;
 
 /// <summary>Turns a storyline + cast + world context into a provider-neutral <see cref="GenerationRequest"/> (story 02).</summary>
@@ -95,7 +96,7 @@ public sealed class PromptAssembler : IPromptAssembler
             // reactions, and seeded voice notes are routinely incident-specific ("is the water safe for my kids?",
             // "complains about mixed messaging") — conditioning everyday small talk on either pulls the incident back
             // into the background (orchestrator review WR-1). Only the non-sensitive style signals remain.
-            AppendPersona(sb, persona, includeVoiceNotes: !ambient, includeRecentPosts: !ambient);
+            AppendPersona(sb, persona, includeVoiceNotes: !ambient, includeRecentPosts: !ambient, cleanDisplayName: ambient);
         }
 
         sb.AppendLine();
@@ -161,9 +162,19 @@ public sealed class PromptAssembler : IPromptAssembler
         sb.AppendLine("about the background-chatter topic above, as everyday small talk. Then call emit_posts.");
     }
 
-    private static void AppendPersona(StringBuilder sb, PersonaDossier p, bool includeVoiceNotes, bool includeRecentPosts)
+    private static void AppendPersona(
+        StringBuilder sb,
+        PersonaDossier p,
+        bool includeVoiceNotes,
+        bool includeRecentPosts,
+        bool cleanDisplayName)
     {
-        sb.Append("- ").Append(p.Handle).Append(" (").Append(p.DisplayName).Append(") — type: ").Append(p.Type)
+        // The display name is staff-authored text in the TRUSTED stratum, unfenced. On the ambient path (which can
+        // publish autonomously) it is reduced like the setting brief — letters/digits/space and ' . -, length-capped —
+        // so a hostile name cannot open a new prompt section. Storyline prompts keep it verbatim (cache-prefix stability;
+        // ContentGuard + the review queue backstop them, as for voice notes).
+        var displayName = cleanDisplayName ? AmbientSettingBrief.CleanName(p.DisplayName) : p.DisplayName;
+        sb.Append("- ").Append(p.Handle).Append(" (").Append(displayName).Append(") — type: ").Append(p.Type)
           .Append("; audience band: ").AppendLine(p.AudienceBand.ToString(CultureInfo.InvariantCulture));
 
         // Persona voice notes are staff-authored dossier text and enter the TRUSTED stratum unfenced — STORYLINE prompts

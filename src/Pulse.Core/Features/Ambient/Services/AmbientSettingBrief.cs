@@ -31,6 +31,15 @@ public static class AmbientSettingBrief
             : $"The fictional community of {name}, on an ordinary day.";
     }
 
+    /// <summary>
+    /// Reduces a staff-authored name (a place name, or a persona display name on the ambient path) to letters, digits,
+    /// spaces and <c>' . -</c>, whitespace collapsed, capped at <see cref="MaxPlaceNameLength"/> — so no newline,
+    /// <c>#</c> or markup can open a new prompt section. May return empty.
+    /// </summary>
+    /// <param name="name">The name, or <c>null</c>.</param>
+    /// <returns>The cleaned name (empty when nothing survives).</returns>
+    public static string CleanName(string? name) => Clean(name);
+
     private static string Clean(string? placeName)
     {
         if (string.IsNullOrWhiteSpace(placeName))

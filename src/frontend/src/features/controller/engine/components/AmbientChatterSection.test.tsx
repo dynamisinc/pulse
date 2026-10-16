@@ -305,7 +305,33 @@ describe('Ambient chatter section (live mode)', () => {
     await waitFor(() => expect(postMock).toHaveBeenCalledTimes(1))
   })
 
-  it('adding a topic while autonomous confirms; removing one saves immediately', async () => {
+  it('adding a topic while autonomous asks to confirm the widening, then saves it', async () => {
+    const user = userEvent.setup()
+    engineSettingsStore.setForTests(
+      EXERCISE_ID,
+      dto(policy({ mode: 'autonomous', topicAllowList: ['local-color'] })),
+    )
+    postMock.mockResolvedValue({
+      data: dto(policy({ mode: 'autonomous', topicAllowList: ['local-color', 'food'] })),
+    })
+    renderPanel()
+
+    await screen.findByTestId('ambient-chatter-section')
+    await user.click(screen.getByTestId('ambient-topic-food'))
+    await user.click(screen.getByTestId('ambient-save'))
+
+    expect(screen.getByRole('alertdialog')).toHaveTextContent(
+      'This widens what posts without review. Apply?',
+    )
+    expect(postMock).not.toHaveBeenCalled()
+
+    await user.click(screen.getByTestId('ambient-autonomous-confirm-button'))
+    await waitFor(() => expect(postMock).toHaveBeenCalledTimes(1))
+    const [, body] = postMock.mock.calls[0] as [string, Record<string, unknown>]
+    expect(body.topicAllowList).toEqual(expect.arrayContaining(['local-color', 'food']))
+  })
+
+  it('removing a topic while autonomous narrows it, so it saves with no confirmation', async () => {
     const user = userEvent.setup()
     engineSettingsStore.setForTests(
       EXERCISE_ID,
