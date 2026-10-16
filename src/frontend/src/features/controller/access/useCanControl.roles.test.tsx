@@ -28,7 +28,7 @@ vi.mock('@/core/auth/session', async importOriginal => ({
 const scope = vi.hoisted(() => ({ status: 'live' as string }))
 vi.mock('@/core/exerciseContext', async importOriginal => ({
   ...(await importOriginal<typeof import('@/core/exerciseContext')>()),
-  useExerciseContext: () => ({
+  useOptionalExerciseContext: () => ({
     exerciseId: 'ex-mock-0001',
     exerciseName: 'Test',
     timeZone: 'UTC',

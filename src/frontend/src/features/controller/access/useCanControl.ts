@@ -26,7 +26,7 @@
  */
 
 import { usePermissions } from '@/core/auth'
-import { useExerciseContext } from '@/core/exerciseContext'
+import { useOptionalExerciseContext } from '@/core/exerciseContext'
 
 /** True only when the signed-in session's role is `controller`. */
 export function useCanControl(): boolean {
@@ -44,16 +44,18 @@ export function useCanEditContent(): boolean {
 
 /**
  * Staff posting as a persona: planner or controller while the exercise is in `build` (setup and
- * backdated posts), controller only in any other state (story 17, Copilot 5 fold). Needs the
- * exercise scope (`useExerciseContext`) for the lifecycle status.
+ * backdated posts), controller only in any other state (story 17, Copilot 5 fold). Reads the
+ * lifecycle status off the exercise scope (unknown status fails closed for a planner).
  */
 export function useCanStaffPost(): boolean {
-  const { status } = useExerciseContext()
+  // Non-throwing: outside an exercise scope the status is unknown, so a planner fails closed.
+  const status = useOptionalExerciseContext()?.status
   return usePermissions().can('staffPost', status)
 }
 
 /** Pinning for everyone follows the same build-versus-conduct rule as {@link useCanStaffPost}. */
 export function useCanStaffPin(): boolean {
-  const { status } = useExerciseContext()
+  // Non-throwing: outside an exercise scope the status is unknown, so a planner fails closed.
+  const status = useOptionalExerciseContext()?.status
   return usePermissions().can('staffPin', status)
 }
