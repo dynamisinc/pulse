@@ -10,12 +10,19 @@
  * `omittedNoiseCount`); the metrics are identical whatever the filters are. Media URLs are
  * inline SVG data URIs
  * (no network). Tests reuse {@link MOCK_REPORT} as their fixture.
+ *
+ * STORY 31. The mock is a MULTI-DAY exercise (14-15 Oct; `spansMultipleDays`, `latestDay` set),
+ * with injects close together (dense chart markers, some without an MSEL ref) and nested replies
+ * in SERVER THREAD ORDER: a reply to a reply (depth 1 under the root), a thread whose reply falls
+ * in a later half-hour than its root, and a reply to an unlisted parent (prints at its own time).
+ * A `from`/`to` window narrows the exercise dates, injects and posts the way the server now does;
+ * the counts and the bins are not recomputed (the dev mock is not the server).
  */
 
 import { AxiosHeaders, type AxiosAdapter } from 'axios'
 import type { ExerciseReport, ReportFilters, ReportPost, ReportSourceKey } from '../types/report'
 import { DEFAULT_REPORT_FILTERS, SOURCE_ORDER, orderedSources } from './reportFilters'
-import { seriesOf } from './reportFormat'
+import { addMinutesToStamp, dateOf, seriesOf } from './reportFormat'
 
 /** A flat labelled picture, as a data URI, so the mock needs no network and no asset files. */
 function pictureUri(label: string, from: string, to: string): string {
@@ -46,6 +53,8 @@ function post(overrides: Partial<ReportPost> & Pick<ReportPost, 'id' | 'scenario
     takenDownAt: null,
     editCount: 0,
     lastEditedAt: null,
+    threadRootId: overrides.id,
+    depth: 0,
     ...overrides,
   }
 }
@@ -74,6 +83,14 @@ const NOISE_POSTS: ReportPost[] = [
 ]
 
 const LISTED_POSTS: ReportPost[] = [
+  post({
+    id: 'p-0',
+    scenarioAt: '2026-10-14 16:20',
+    text: 'Fairhaven Water Utility is monitoring a pressure drop on the Eastside main. No action is needed yet.',
+    injectRef: 'Pressure drop',
+    likes: 21,
+    reposts: 4,
+  }),
   post({
     id: 'p-1',
     scenarioAt: '2026-10-15 09:04',
@@ -111,8 +128,24 @@ const LISTED_POSTS: ReportPost[] = [
     author: MARISOL,
     replyToHandle: '@KestrelCoEM',
     parentPostId: 'p-2',
+    threadRootId: 'p-2',
+    depth: 1,
     likes: 14,
     replies: 2,
+  }),
+  // A reply to a reply: depth 1 under the root, never a second indent level.
+  post({
+    id: 'p-3b',
+    scenarioAt: '2026-10-15 09:20',
+    text: 'Birch is Zone 3. Formula made with bottled or boiled water is fine.',
+    author: EM,
+    source: 'participant',
+    postedBy: 'R. Okafor',
+    replyToHandle: '@mvega_fh',
+    parentPostId: 'p-3',
+    threadRootId: 'p-2',
+    depth: 1,
+    likes: 9,
   }),
   post({
     id: 'p-4',
@@ -123,6 +156,20 @@ const LISTED_POSTS: ReportPost[] = [
     likes: 203,
     reposts: 158,
     replies: 37,
+  }),
+  // The thread stays in its ROOT's 09:30 group even though this reply is at 10:02.
+  post({
+    id: 'p-4r',
+    scenarioAt: '2026-10-15 10:02',
+    text: 'Please ignore this account. It is not affiliated with Fairhaven Water.',
+    author: EM,
+    source: 'participant',
+    postedBy: 'R. Okafor',
+    replyToHandle: '@FairhavenWaterUpd',
+    parentPostId: 'p-4',
+    threadRootId: 'p-4',
+    depth: 1,
+    likes: 31,
   }),
   post({
     id: 'p-5',
@@ -188,73 +235,94 @@ const LISTED_POSTS: ReportPost[] = [
     lastEditedAt: '2026-10-15 10:16',
     takenDownAt: '2026-10-15 10:21',
   }),
+  // A reply whose parent (a noise post) is not listed: prints at its own time, not indented.
+  post({
+    id: 'p-9',
+    scenarioAt: '2026-10-15 10:30',
+    text: 'Pressure is back on Birch, thank you.',
+    author: MARISOL,
+    source: 'participant',
+    replyToHandle: '@tbrandt41',
+    parentPostId: 'n-2',
+    likes: 2,
+  }),
+]
+
+const EXERCISE_START = '2026-10-14 16:00'
+
+/** The bin (30 scenario minutes from `EXERCISE_START`) an inject's time falls in. */
+function binIndexOf(stamp: string): number {
+  const minutes = (day: string, time: string) =>
+    Date.UTC(Number(day.slice(0, 4)), Number(day.slice(5, 7)) - 1, Number(day.slice(8, 10)),
+      Number(time.slice(0, 2)), Number(time.slice(3, 5))) / 60000
+  const at = minutes(stamp.slice(0, 10), stamp.slice(11))
+  const start = minutes(EXERCISE_START.slice(0, 10), EXERCISE_START.slice(11))
+  return Math.floor((at - start) / 30)
+}
+
+/** Key injects: several close together (dense chart markers); some have no MSEL number. */
+const INJECTS: ReadonlyArray<{
+  ref: string | null
+  title: string
+  at: string
+  responseAt: string | null
+  responseMinutes: number | null
+}> = [
+  { ref: null, title: 'Pressure drop', at: '2026-10-14 16:20', responseAt: null, responseMinutes: null },
+  { ref: '2', title: 'Boil-water advisory issued', at: '2026-10-15 09:04', responseAt: '2026-10-15 09:11', responseMinutes: 7 },
+  { ref: null, title: 'Impersonator: brown water', at: '2026-10-15 09:12', responseAt: '2026-10-15 09:20', responseMinutes: 8 },
+  { ref: '3', title: 'Hospital asks about dialysis', at: '2026-10-15 09:25', responseAt: null, responseMinutes: null },
+  { ref: '4', title: 'Lookalike says "don\'t boil"', at: '2026-10-15 09:40', responseAt: '2026-10-15 09:52', responseMinutes: 12 },
+  { ref: '6', title: 'School closure rumor', at: '2026-10-15 09:48', responseAt: null, responseMinutes: null },
+  { ref: '9', title: 'Second break on Mill Road', at: '2026-10-15 10:06', responseAt: null, responseMinutes: null },
 ]
 
 export const MOCK_REPORT: ExerciseReport = {
   exercise: {
     name: 'Fairhaven Boil-Water Advisory',
     timeZone: 'America/New_York',
-    scenarioStart: '2026-10-15 09:00',
-    scenarioEnd: '2026-10-15 11:00',
-    conductedDate: '2026-10-15',
+    scenarioStart: '2026-10-14 16:20',
+    scenarioEnd: '2026-10-15 10:30',
+    conductedDate: '2026-10-14',
     preparedAt: '2026-10-15 14:30',
+    latestDay: { from: '2026-10-15 00:00', to: '2026-10-15 23:59' },
+    spansMultipleDays: true,
   },
   summary: {
     participants: 6,
-    posts: 10,
-    replies: 1,
-    injectsDelivered: 3,
+    posts: 14,
+    replies: 4,
+    injectsDelivered: 7,
     medianResponseMinutes: 8,
     busiestWindow: { start: '2026-10-15 10:05', posts: 3 },
     postsEdited: 2,
     postsTakenDown: 1,
-    bySource: { participant: 3, scripted: 3, engine: 2, noise: 2 },
+    bySource: { participant: 6, scripted: 4, engine: 1, noise: 2 },
   },
   activity: {
-    binMinutes: 5,
-    bins: Array.from({ length: 24 }, (_, index) => {
-      const total = 9 * 60 + index * 5
-      const hh = String(Math.floor(total / 60)).padStart(2, '0')
-      const mm = String(total % 60).padStart(2, '0')
-      return {
-        start: `2026-10-15 ${hh}:${mm}`,
-        participant: index % 5 === 0 ? 1 : 0,
-        scripted: index % 3 === 0 ? 1 : 0,
-        engine: index % 7 === 0 ? 1 : 0,
-        noise: 1,
-      }
-    }),
-    injectMarkers: [
-      { ref: '4', title: 'Lookalike rumor', at: '2026-10-15 09:40', binIndex: 8 },
-      { ref: '9', title: 'Mill Rd break', at: '2026-10-15 10:06', binIndex: 13 },
-    ],
+    binMinutes: 30,
+    bins: Array.from({ length: 38 }, (_, index) => ({
+      start: addMinutesToStamp(EXERCISE_START, index * 30),
+      participant: index % 5 === 0 ? 1 : 0,
+      scripted: index % 3 === 0 ? 1 : 0,
+      engine: index % 7 === 0 ? 1 : 0,
+      noise: 1,
+    })),
+    injectMarkers: INJECTS.map(inject => ({
+      ref: inject.ref,
+      title: inject.title,
+      at: inject.at,
+      binIndex: binIndexOf(inject.at),
+    })),
   },
-  injectResponses: [
-    {
-      ref: '2',
-      title: 'Boil-water advisory issued',
-      deliveredAt: '2026-10-15 09:04',
-      firstResponseAt: '2026-10-15 09:11',
-      responseMinutes: 7,
-      respondedAsHandle: '@KestrelCoEM',
-    },
-    {
-      ref: '4',
-      title: 'Lookalike says "don\'t boil"',
-      deliveredAt: '2026-10-15 09:40',
-      firstResponseAt: '2026-10-15 09:52',
-      responseMinutes: 12,
-      respondedAsHandle: '@KestrelCoEM',
-    },
-    {
-      ref: '9',
-      title: 'Second break on Mill Road',
-      deliveredAt: '2026-10-15 10:06',
-      firstResponseAt: null,
-      responseMinutes: null,
-      respondedAsHandle: null,
-    },
-  ],
+  injectResponses: INJECTS.map(inject => ({
+    ref: inject.ref,
+    title: inject.title,
+    deliveredAt: inject.at,
+    firstResponseAt: inject.responseAt,
+    responseMinutes: inject.responseMinutes,
+    respondedAsHandle: inject.responseAt === null ? null : '@KestrelCoEM',
+  })),
   lookalikes: [
     {
       verified: { handle: '@FairhavenWater', displayName: 'Fairhaven Water Utility', verified: true, likes: 412, reposts: 230 },
@@ -273,16 +341,64 @@ export const MOCK_REPORT: ExerciseReport = {
   },
 }
 
+/**
+ * The server's thread order for the listed posts: each root (a post whose parent is not listed)
+ * by scenario time, followed by its listed descendants by scenario time, with `threadRootId` /
+ * `depth` re-derived for THIS list (a reply to an unlisted parent becomes a root).
+ */
+function threaded(posts: readonly ReportPost[]): ReportPost[] {
+  const byId = new Map(posts.map(item => [item.id, item]))
+  const rootOf = (item: ReportPost): ReportPost => {
+    let current = item
+    for (;;) {
+      const parent = current.parentPostId === null ? undefined : byId.get(current.parentPostId)
+      if (parent === undefined) return current
+      current = parent
+    }
+  }
+  const byTime = (a: ReportPost, b: ReportPost) => a.scenarioAt.localeCompare(b.scenarioAt)
+  const withRoots = posts.map(item => {
+    const root = rootOf(item)
+    return { ...item, threadRootId: root.id, depth: root.id === item.id ? 0 : 1 }
+  })
+  return withRoots
+    .filter(item => item.depth === 0)
+    .sort(byTime)
+    .flatMap(root => [
+      root,
+      ...withRoots
+        .filter(item => item.depth === 1 && item.threadRootId === root.id)
+        .sort(byTime),
+    ])
+}
+
 /** The report as the endpoint would answer for `filters` (sources, inclusive scenario window). */
 export function mockReportFor(filters: ReportFilters = DEFAULT_REPORT_FILTERS): ExerciseReport {
   const sources = orderedSources(filters.sources)
-  const posts = [...LISTED_POSTS, ...NOISE_POSTS]
-    .filter(post => sources.includes(seriesOf(post.source)))
-    .filter(post => filters.from === null || post.scenarioAt >= filters.from)
-    .filter(post => filters.to === null || post.scenarioAt <= filters.to)
-    .sort((a, b) => a.scenarioAt.localeCompare(b.scenarioAt))
+  const inWindow = (stamp: string) =>
+    (filters.from === null || stamp >= filters.from) && (filters.to === null || stamp <= filters.to)
+  const windowed = [...LISTED_POSTS, ...NOISE_POSTS].filter(item => inWindow(item.scenarioAt))
+  const posts = threaded(windowed.filter(item => sources.includes(seriesOf(item.source))))
+  const stamps = windowed.map(item => item.scenarioAt).sort()
+  const first = stamps[0] ?? null
+  const last = stamps[stamps.length - 1] ?? null
+  const isWindowed = filters.from !== null || filters.to !== null
   return {
     ...MOCK_REPORT,
+    exercise: isWindowed
+      ? {
+        ...MOCK_REPORT.exercise,
+        scenarioStart: first,
+        scenarioEnd: last,
+        conductedDate: first === null ? null : dateOf(first),
+        spansMultipleDays: first !== null && last !== null && dateOf(first) !== dateOf(last),
+      }
+      : MOCK_REPORT.exercise,
+    activity: {
+      ...MOCK_REPORT.activity,
+      injectMarkers: MOCK_REPORT.activity.injectMarkers.filter(marker => inWindow(marker.at)),
+    },
+    injectResponses: MOCK_REPORT.injectResponses.filter(row => inWindow(row.deliveredAt)),
     posts,
     omittedNoiseCount: sources.includes('noise') ? 0 : MOCK_REPORT.omittedNoiseCount,
     postRecord: {

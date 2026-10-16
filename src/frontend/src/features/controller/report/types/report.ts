@@ -10,6 +10,13 @@
  * "yyyy-MM-dd HH:mm" (`*At`, `start`) or "HH:mm" (`*Time`). The client never converts zones.
  * Handles arrive with their "@" prefix. STAFF world only: provenance (origin, posted by,
  * inject ref) never reaches a participant.
+ *
+ * STORY 31 (DF-45/DF-47) AMENDS the contract: `from`/`to` now scope EVERY section (so
+ * `exercise.scenarioStart/End/conductedDate` are the in-window min/max); `exercise.latestDay`
+ * and `exercise.spansMultipleDays` are new; `injectResponses[].ref` and marker `ref` are the MSEL
+ * number only (null when there is none; `title` is always the title); each post carries
+ * `threadRootId` + `depth` (0 root, 1 listed descendant) and `posts` arrives in thread order
+ * (each root by time, then its listed descendants by time).
  */
 
 export interface ReportAccount {
@@ -54,6 +61,10 @@ export interface ReportPost {
   editCount: number | null
   /** The last edit's scenario time, "yyyy-MM-dd HH:mm"; null when never edited. */
   lastEditedAt: string | null
+  /** Story 31: the top-most ancestor inside the listed set, else this post's own id. */
+  threadRootId: string
+  /** Story 31: 0 for a root, 1 for any listed descendant (never more). */
+  depth: number
 }
 
 export interface ReportActivityBin {
@@ -65,14 +76,16 @@ export interface ReportActivityBin {
 }
 
 export interface ReportInjectMarker {
-  ref: string
+  /** The MSEL number only; null when the inject has none (story 31). */
+  ref: string | null
   title: string
   at: string
   binIndex: number
 }
 
 export interface ReportInjectResponse {
-  ref: string
+  /** The MSEL number only; null when the inject has none (story 31). */
+  ref: string | null
   title: string
   deliveredAt: string
   firstResponseAt: string | null
@@ -103,6 +116,10 @@ export interface ExerciseReport {
     conductedDate: string | null
     /** "yyyy-MM-dd HH:mm" in the exercise zone. */
     preparedAt: string
+    /** Story 31: the latest post scenario day, 00:00 to 23:59 ("yyyy-MM-dd HH:mm"), or null. */
+    latestDay: { from: string; to: string } | null
+    /** Story 31: printed times fall on more than one exercise-zone date (drives date display). */
+    spansMultipleDays: boolean
   }
   summary: ReportSummary
   activity: {

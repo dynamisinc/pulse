@@ -65,8 +65,14 @@ export function parseTimeField(
   if (!isValidStamp(text)) {
     return { ok: false, message: 'Use the format yyyy-MM-dd HH:mm, for example 2026-10-15 09:30.' }
   }
-  if (windowStart !== null && text < windowStart) {
-    return { ok: false, message: `Must be ${windowStart} or later (the exercise starts then).` }
+  // The lower bound is the start of the exercise's first scenario DAY, so a whole-day window
+  // (the "Latest scenario day" preset on a one-day exercise) is always accepted.
+  const earliest = windowStart === null ? null : `${windowStart.slice(0, 10)} 00:00`
+  if (earliest !== null && text < earliest) {
+    return {
+      ok: false,
+      message: `Must be ${earliest} or later (the exercise starts on ${earliest.slice(0, 10)}).`,
+    }
   }
   if (windowEnd !== null && text > windowEnd) {
     return { ok: false, message: `Must be ${windowEnd} or earlier (the exercise ends then).` }
