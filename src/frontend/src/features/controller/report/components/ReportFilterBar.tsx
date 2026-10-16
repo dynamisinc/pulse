@@ -79,9 +79,10 @@ export function ReportFilterBar({
     const mine = parseTimeField(draft[field], windowStart, null)
     const theirs = parseTimeField(draft[other], windowStart, null)
     const mineValue = mine.ok ? mine.value : null
-    const theirValue = theirs.ok ? theirs.value : null
+    // An invalid other draft is not what gets sent: its APPLIED value is, so check against that.
+    const theirValue = theirs.ok ? theirs.value : filters[other]
     const [low, high] = field === 'from' ? [mineValue, theirValue] : [theirValue, mineValue]
-    const inverted = mine.ok && theirs.ok && low !== null && high !== null && low > high
+    const inverted = mine.ok && low !== null && high !== null && low > high
 
     setErrors(current => ({
       ...current,

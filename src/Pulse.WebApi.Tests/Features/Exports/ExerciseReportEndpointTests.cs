@@ -630,8 +630,9 @@ public sealed class ExerciseReportEndpointTests
         var image = await _report.AssetAsync(exerciseId, MediaKinds.Image);
         await _report.AttachAsync(exerciseId, first, image, 0, "alt");
 
+        var probe = new SignerProbe();
         await using var host = await ExerciseReportTestHost.StartAsync(
-            _seed.ConnectionString, exerciseId, limits: new ExerciseReportLimits { MaxListedPosts = 2 });
+            _seed.ConnectionString, exerciseId, limits: new ExerciseReportLimits { MaxListedPosts = 2 }, signerProbe: probe);
 
         using (var withheld = await host.GetReportAsync(token))
         {
@@ -653,6 +654,8 @@ public sealed class ExerciseReportEndpointTests
         {
             payload.RootElement.GetProperty("posts").GetInt32().Should().Be(0, "the listed count, and nothing is listed");
         }
+
+        probe.Calls.Should().BeEmpty("a withheld record reads and signs no media or avatars");
 
         // Narrowed to fit: the record is listed again.
         using var narrowed = await host.GetReportAsync(token, "?sources=participant");
@@ -904,6 +907,54 @@ public sealed class ExerciseReportEndpointTests
         using var single = await host.GetReportAsync(token, "?from=2033-09-04%2008:05&to=2033-09-04%2008:05");
         using var singleJson = await ReadAsync(single);
         singleJson.RootElement.GetProperty("posts").GetArrayLength().Should().Be(2, "from = to is one whole minute");
+    }
+
+    [RequiresDockerFact]
+    public async Task NarrowedRecord_ReadsAndSignsOnlyTheListedPostsMedia_AcrossIdBatches()
+    {
+        // Four posts at 08:00..08:03 CDT, each with media; the window lists 08:01..08:03, read one id per batch.
+        var exerciseId = await _seed.ExerciseAsync(timeZone: "America/Chicago");
+        var (token, _) = await _seed.StaffAsync(exerciseId, [(exerciseId, "controller")]);
+        var persona = await _report.PersonaAsync(exerciseId, "resident", "Resident");
+
+        var images = new List<Guid>();
+        var posts = new List<Guid>();
+        for (var minute = 0; minute < 3; minute++)
+        {
+            var post = await _seed.PostAsync(exerciseId, persona, minute, p => p.Origin = "participant");
+            var image = await _report.AssetAsync(exerciseId, MediaKinds.Image);
+            await _report.AttachAsync(exerciseId, post, image, order: 0, alt: $"image {minute}");
+            posts.Add(post);
+            images.Add(image);
+        }
+
+        // The last listed post: a video whose asset poster is signed, then an image, inserted out of slot order.
+        var videoPost = await _seed.PostAsync(exerciseId, persona, 3, p => p.Origin = "participant");
+        var poster = await _report.AssetAsync(exerciseId, MediaKinds.Image);
+        var video = await _report.AssetAsync(exerciseId, MediaKinds.Video, a => a.PosterMediaAssetId = poster);
+        var trailing = await _report.AssetAsync(exerciseId, MediaKinds.Image);
+        await _report.AttachAsync(exerciseId, videoPost, trailing, order: 1, alt: "trailing image");
+        await _report.AttachAsync(exerciseId, videoPost, video, order: 0, alt: "video");
+
+        var probe = new SignerProbe();
+        await using var host = await ExerciseReportTestHost.StartAsync(
+            _seed.ConnectionString, exerciseId, limits: new ExerciseReportLimits { IdChunk = 1 }, signerProbe: probe);
+        using var response = await host.GetReportAsync(token, "?from=2033-09-04%2008:01&to=2033-09-04%2008:03");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        using var json = await ReadAsync(response);
+        var listed = json.RootElement.GetProperty("posts").EnumerateArray().ToArray();
+        listed.Select(p => p.GetProperty("id").GetString()).Should().Equal(
+            posts[1].ToString(), posts[2].ToString(), videoPost.ToString());
+        listed[0].GetProperty("media").EnumerateArray().Should().ContainSingle()
+            .Which.GetProperty("url").GetString().Should().Be(FakeMediaUrlSigner.UrlFor(images[1]), "each batch keeps its own post's media");
+        listed[1].GetProperty("media")[0].GetProperty("url").GetString().Should().Be(FakeMediaUrlSigner.UrlFor(images[2]));
+        var videoMedia = listed[2].GetProperty("media").EnumerateArray().ToArray();
+        videoMedia.Select(m => m.GetProperty("alt").GetString()).Should().Equal(["video", "trailing image"], "slot order is kept");
+        videoMedia[0].GetProperty("url").GetString().Should().Be(FakeMediaUrlSigner.UrlFor(poster), "a video still carries its poster");
+
+        probe.Calls.Should().ContainSingle("one signer call per report").Which.Should().BeEquivalentTo(
+            [images[1], images[2], poster, trailing], "only the listed posts' media is read and signed; 08:00's image is not");
     }
 
     private static async Task<JsonDocument> ReadAsync(HttpResponseMessage response) =>

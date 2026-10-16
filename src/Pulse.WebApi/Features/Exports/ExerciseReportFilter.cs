@@ -200,4 +200,7 @@ public sealed class ExerciseReportLimits
 
     /// <summary>The most posts in the exercise the report reads; above it the request is refused with 413.</summary>
     public int MaxExercisePosts { get; init; } = ExerciseReportService.MaxExercisePosts;
+
+    /// <summary>Post ids per batched engagement or media read (at least 1).</summary>
+    public int IdChunk { get; init; } = ExerciseReportService.IdChunk;
 }

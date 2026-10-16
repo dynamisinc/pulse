@@ -123,8 +123,11 @@ public sealed partial class ExerciseReportService
     /// <summary>The XC-004 event type.</summary>
     public const string ViewedEventType = "export.report.viewed";
 
-    /// <summary>Ids per <c>Contains</c> read (EF Core 10 expands a parameter collection into scalar parameters).</summary>
-    private const int IdChunk = 500;
+    /// <summary>
+    /// Ids per <c>Contains</c> read (EF Core 10 expands a parameter collection into scalar parameters, and SQL Server
+    /// accepts at most 2,100 per command). The default for <see cref="ExerciseReportLimits.IdChunk"/>.
+    /// </summary>
+    public const int IdChunk = 500;
 
     private const string SystemActorKind = "system";
     private const string SystemChannel = "system";
@@ -183,6 +186,7 @@ public sealed partial class ExerciseReportService
         _exerciseClock = exerciseClock;
         _logger = logger ?? NullLogger<ExerciseReportService>.Instance;
         _limits = limits ?? ExerciseReportLimits.Default;
+        ArgumentOutOfRangeException.ThrowIfLessThan(_limits.IdChunk, 1, nameof(limits));
     }
 
     /// <summary>Builds the report for the resolved exercise and records one viewed event.</summary>
@@ -650,7 +654,7 @@ public sealed partial class ExerciseReportService
     private async Task<IReadOnlyDictionary<Guid, PostEngagement>> ReadEngagementAsync(Guid[] ids, CancellationToken cancellationToken)
     {
         var all = new Dictionary<Guid, PostEngagement>();
-        foreach (var chunk in ids.Chunk(IdChunk))
+        foreach (var chunk in ids.Chunk(_limits.IdChunk))
         {
             var page = await _engagementReader.GetAsync(chunk, viewerPersonaId: null, cancellationToken);
             foreach (var (id, value) in page)
@@ -663,9 +667,12 @@ public sealed partial class ExerciseReportService
     }
 
     /// <summary>
-    /// ONE query: the media items with their assets and effective posters (the item's override wins, DP-3), joined
-    /// through the scoped sets, so no item, asset or poster from another exercise can join; kept for the listed posts
-    /// only. Nothing is read when nothing is listed (an empty or withheld record).
+    /// The listed posts' media items with their assets and effective posters (the item's override wins, DP-3), read in
+    /// batches of <see cref="ExerciseReportLimits.IdChunk"/> listed post ids: each batch is one query restricted in SQL
+    /// to its ids, so no other post's media is loaded and no command passes SQL Server's parameter limit. Every join
+    /// runs through the scoped sets, so no item, asset or poster from another exercise can join. Each post falls in
+    /// exactly one batch, and slot order is applied per post when the record is built. Nothing is read when nothing
+    /// is listed (an empty or withheld record).
     /// </summary>
     private async Task<ILookup<Guid, MediaRow>> ReadMediaAsync(
         HashSet<Guid> listedIds, bool includeNoise, CancellationToken cancellationToken)
@@ -675,21 +682,25 @@ public sealed partial class ExerciseReportService
             return Array.Empty<MediaRow>().ToLookup(row => row.PostId);
         }
 
-        var rows = await (
-                from item in _dbContext.PostMediaItems.AsNoTracking()
-                join post in _dbContext.Posts.AsNoTracking() on item.PostId equals post.Id
-                where includeNoise || post.Origin != PostExportLabels.NoiseOrigin
-                join asset in _dbContext.MediaAssets.AsNoTracking() on item.MediaAssetId equals asset.Id
-                join poster in _dbContext.MediaAssets.AsNoTracking()
-                    on item.PosterMediaAssetId ?? asset.PosterMediaAssetId equals (Guid?)poster.Id into posters
-                from poster in posters.DefaultIfEmpty()
-                select new { item.PostId, item.Order, item.Alt, Asset = asset, Poster = poster })
-            .ToListAsync(cancellationToken);
+        var rows = new List<MediaRow>();
+        foreach (var chunk in listedIds.Chunk(_limits.IdChunk))
+        {
+            var page = await (
+                    from item in _dbContext.PostMediaItems.AsNoTracking()
+                    where chunk.Contains(item.PostId)
+                    join post in _dbContext.Posts.AsNoTracking() on item.PostId equals post.Id
+                    where includeNoise || post.Origin != PostExportLabels.NoiseOrigin
+                    join asset in _dbContext.MediaAssets.AsNoTracking() on item.MediaAssetId equals asset.Id
+                    join poster in _dbContext.MediaAssets.AsNoTracking()
+                        on item.PosterMediaAssetId ?? asset.PosterMediaAssetId equals (Guid?)poster.Id into posters
+                    from poster in posters.DefaultIfEmpty()
+                    select new { item.PostId, item.Order, item.Alt, Asset = asset, Poster = poster })
+                .ToListAsync(cancellationToken);
 
-        return rows
-            .Where(row => listedIds.Contains(row.PostId))
-            .Select(row => new MediaRow(row.PostId, row.Order, row.Alt, row.Asset, row.Poster))
-            .ToLookup(row => row.PostId);
+            rows.AddRange(page.Select(row => new MediaRow(row.PostId, row.Order, row.Alt, row.Asset, row.Poster)));
+        }
+
+        return rows.ToLookup(row => row.PostId);
     }
 
     /// <summary>The avatar asset per listed author, read through the scoped sets.</summary>

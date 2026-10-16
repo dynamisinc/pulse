@@ -507,6 +507,36 @@ describe('ExerciseReportPage', () => {
       expect(from).not.toHaveAccessibleDescription('From must not be after To.')
     })
 
+    it.each([
+      ['To', 'From', '2026-10-15 09:30', '2026-10-15 10:00', '2026-10-15 11:00'],
+      ['From', 'To', '2026-10-15 11:30', '2026-10-15 10:00', '2026-10-15 11:00'],
+    ])('never sends an inverted window when committing %s while %s is invalid',
+      async (committing, other, value, appliedFrom, appliedTo) => {
+        const get = stubApi()
+        const user = userEvent.setup()
+        renderPage()
+        await screen.findByTestId('report-sheet')
+        const fieldOf = (name: string) =>
+          screen.getByRole('textbox', { name: `${name} (scenario time)` })
+        await user.type(fieldOf('From'), `${appliedFrom}{Enter}`)
+        await user.type(fieldOf('To'), `${appliedTo}{Enter}`)
+        await waitFor(() => expect(lastParams(get).to).toBe(appliedTo))
+        const calls = get.mock.calls.length
+
+        await user.clear(fieldOf(other))
+        await user.type(fieldOf(other), 'garbage')
+        await user.clear(fieldOf(committing))
+        await user.type(fieldOf(committing), `${value}{Enter}`)
+
+        expect(get.mock.calls.length).toBe(calls)
+        expect(fieldOf(committing)).toHaveAccessibleDescription('From must not be after To.')
+        expect(lastParams(get)).toEqual({
+          sources: 'participant,scripted,engine',
+          from: appliedFrom,
+          to: appliedTo,
+        })
+      })
+
     it('describes the disabled last source and keeps filters before Print in tab order', async () => {
       stubApi()
       const user = userEvent.setup()
