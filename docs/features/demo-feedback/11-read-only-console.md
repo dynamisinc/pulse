@@ -1,6 +1,6 @@
 # Story: Read-only console for evaluators
 
-**Feature:** Demo feedback cut (10/20)  ·  **Phase:** 1  ·  **Status:** In Review
+**Feature:** Demo feedback cut (10/20)  ·  **Phase:** 1  ·  **Status:** Complete
 **Requirements:** COR-013 (UI half only)  ·  **Decisions:** DF-14  ·  **Issue:** #507
 **Stack:** frontend  ·  **World:** staff  ·  **Review:** Tier-1  ·  **Priority:** Must  ·  **Wave:** 3  ·  **Effort:** M
 

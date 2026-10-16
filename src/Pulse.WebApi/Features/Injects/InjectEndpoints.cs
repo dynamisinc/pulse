@@ -10,7 +10,8 @@ using Pulse.WebApi.Features.EngineRuntime;
 
 /// <summary>
 /// The scripted-post queue API (inject-queue story 06) on <c>/api/injects*</c> — the frozen 06 ↔ 07 wire contract:
-/// author, edit, delete, reorder, read, fire, hold, release, skip, unskip and retry.
+/// author, edit, delete, reorder, read, fire, hold, release, skip, unskip and retry — plus mark-fired (demo-feedback
+/// DF-36: record an item as fired without publishing).
 /// </summary>
 /// <remarks>
 /// <para>
@@ -33,8 +34,8 @@ using Pulse.WebApi.Features.EngineRuntime;
 /// <para>
 /// <b>Rate-limited where it publishes (NFR-009).</b> <c>fire</c>, <c>retry</c> and <c>release</c> require the
 /// <see cref="InjectFireRateLimiterPolicy"/> (per staff user; generous enough that a presenter never meets it — a
-/// <c>429</c> is ProblemDetails with a readable <c>detail</c>). Reads, authoring, hold, skip and unskip publish nothing
-/// and are not limited; runner-paced burst posts are not requests at all.
+/// <c>429</c> is ProblemDetails with a readable <c>detail</c>). Reads, authoring, hold, skip, unskip and mark-fired
+/// publish nothing and are not limited; runner-paced burst posts are not requests at all.
 /// </para>
 /// </remarks>
 public static class InjectEndpoints
@@ -105,6 +106,7 @@ public static class InjectEndpoints
         controllerOnly.MapPost("/api/injects/{id:guid}/unskip", UnskipAsync);
         controllerOnly.MapPost("/api/injects/{id:guid}/retry", RetryAsync)
             .RequireRateLimiting(InjectFireRateLimiterPolicy.PolicyName);
+        controllerOnly.MapPost("/api/injects/{itemId:guid}/mark-fired", MarkFiredAsync); // DF-36: publishes nothing
 
         return endpoints;
     }
@@ -158,6 +160,13 @@ public static class InjectEndpoints
 
     private static async Task<IResult> RetryAsync(Guid id, InjectQueueService service, CancellationToken cancellationToken) =>
         ToResult(await service.RetryAsync(id, cancellationToken));
+
+    private static async Task<IResult> MarkFiredAsync(
+        Guid itemId,
+        InjectMarkFiredRequest? request,
+        InjectQueueService service,
+        CancellationToken cancellationToken) =>
+        ToResult(await service.MarkFiredAsync(itemId, request?.ExpectedVersion, cancellationToken));
 
     /// <summary>Maps a service result onto exactly one status — fail closed, never a default/empty <c>200</c>.</summary>
     private static IResult ToResult<TValue>(InjectResult<TValue> result)

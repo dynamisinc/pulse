@@ -18,6 +18,7 @@ export {
   ExerciseContextProvider,
   useExerciseContext,
   useExerciseScopeRefresh,
+  useOptionalExerciseContext,
 } from './exerciseContext'
 export type { ExerciseContextProviderProps, ExerciseScopeRefresh } from './exerciseContext'
 export type { ExerciseScope, ExerciseStatus } from './exerciseContextResolver'

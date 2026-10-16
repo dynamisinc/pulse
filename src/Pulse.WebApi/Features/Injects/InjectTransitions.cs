@@ -18,6 +18,8 @@ using Pulse.WebApi.Data.Entities;
 ///   <item><c>unskip</c>: <c>skipped → pending</c>, or <c>→ held</c> when anything already went out.</item>
 ///   <item><c>retry</c>: <c>failed →</c> re-fire the failed posts.</item>
 ///   <item><c>fire</c>: <c>pending|held →</c> publishing (a held item may be fired directly: release + fire).</item>
+///   <item><c>mark fired</c> (demo-feedback DF-36): <c>pending|held|failed → fired</c> WITHOUT publishing; children
+///   that never published are skipped; refused while a post is in flight. No undo.</item>
 ///   <item>edit: only while <c>pending|held|failed</c> and no post is in flight (posts that already went out are
 ///   immutable and must be kept); delete: only while <c>pending|held|skipped|failed</c>.</item>
 /// </list>
@@ -247,6 +249,49 @@ public static class InjectTransitions
             post.Status = InjectPostStatuses.Pending;
         }
 
+        return null;
+    }
+
+    /// <summary>
+    /// <c>mark fired</c> (demo-feedback DF-36): <c>pending|held|failed → fired</c> WITHOUT publishing — the inject was
+    /// delivered outside Pulse. Every child that never published (<c>pending</c> or <c>failed</c>) becomes
+    /// <c>skipped</c>; a child that already went out keeps its post. The item's error is cleared. The fired stamps
+    /// (<see cref="InjectItem.FiredByHumanId"/>, <see cref="InjectItem.FiredScenarioTime"/>) are set only when the item
+    /// never started: an item that was released keeps who pressed Fire and when (the caller's event records who marked
+    /// it). Refused while one of its posts is being published — that post must land and be recorded first.
+    /// </summary>
+    /// <param name="item">The item to mutate.</param>
+    /// <param name="actingHumanId">The controller marking it.</param>
+    /// <param name="scenarioTime">The exercise scenario instant of the mark.</param>
+    /// <returns>A refusal message, or <c>null</c> when applied.</returns>
+    public static string? MarkFired(InjectItem item, Guid actingHumanId, DateTimeOffset scenarioTime)
+    {
+        ArgumentNullException.ThrowIfNull(item);
+
+        if (item.Status is not (InjectStatuses.Pending or InjectStatuses.Held or InjectStatuses.Failed))
+        {
+            return $"This item is {item.Status} and cannot be marked fired.";
+        }
+
+        var children = LiveChildren(item);
+        if (children.Any(post => post.ClaimedAt is not null))
+        {
+            return InFlightMessage;
+        }
+
+        foreach (var post in children.Where(post => post.Status is InjectPostStatuses.Pending or InjectPostStatuses.Failed))
+        {
+            post.Status = InjectPostStatuses.Skipped;
+        }
+
+        if (!HasStarted(item))
+        {
+            item.FiredByHumanId = actingHumanId;
+            item.FiredScenarioTime = scenarioTime;
+        }
+
+        item.Status = InjectStatuses.Fired;
+        item.Error = null;
         return null;
     }
 

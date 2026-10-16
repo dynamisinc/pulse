@@ -17,8 +17,8 @@
  *   --emoji-line          palette.divider              panel hairline
  *   --emoji-control-line  palette.primary.dark         search box edge (>= 3:1, WCAG 1.4.11)
  *   --emoji-ink           palette.text.primary         text
- *   --emoji-ink-muted     palette.primary.dark         headings / placeholder / "no match"
- *                         (text.secondary #848482 is under 4.5:1 on white for 12px text)
+ *   --emoji-ink-muted     palette.text.muted           headings / placeholder / "no match"
+ *                         (the COBRA muted-text token, demo-feedback 25: AA on both surfaces)
  *   --emoji-accent        palette.buttonPrimary.main   active-emoji ring, focus ring
  *   --emoji-hover         palette.linkButton.light     hover / active tint (CobraSecondaryButton's)
  *   --emoji-radius        shape.borderRadius (4px)     COBRA's square-ish panels
@@ -38,7 +38,7 @@
   --emoji-line: #848482;
   --emoji-control-line: #696969;
   --emoji-ink: #1a1a1a;
-  --emoji-ink-muted: #696969;
+  --emoji-ink-muted: #5c5c5a;
   --emoji-accent: #0020c2;
   --emoji-hover: #dbe9fa;
   --emoji-radius: 4px;

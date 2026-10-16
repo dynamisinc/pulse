@@ -13,6 +13,7 @@ import type { KeyboardEvent } from 'react'
 import { CobraTextField } from '@/theme/styledComponents'
 import { useEvaluatorState } from '../contexts/EvaluatorStateContext'
 import type { AnnotationCategory } from '../types'
+import { cobraTheme } from '@/theme/cobraTheme'
 
 interface CategoryOption {
   category: AnnotationCategory;
@@ -68,11 +69,11 @@ export function AnnotationCapture() {
         <Typography sx={{ font: '800 10px ui-sans-serif,system-ui,sans-serif', letterSpacing: '.12em', color: '#4a4f55' }}>
           NEW ANNOTATION
         </Typography>
-        <Typography sx={{ font: '500 10.5px ui-sans-serif,system-ui,sans-serif', color: '#848482' }}>
+        <Typography sx={{ font: '500 10.5px ui-sans-serif,system-ui,sans-serif', color: cobraTheme.palette.text.muted }}>
           ⚓ {annotationAnchor}
         </Typography>
         <Box sx={{ flex: 1 }} />
-        <Typography sx={{ font: '600 9.5px ui-monospace,Menlo,monospace', color: '#848482' }}>
+        <Typography sx={{ font: '600 9.5px ui-monospace,Menlo,monospace', color: cobraTheme.palette.text.muted }}>
           ENTER saves · ESC cancels
         </Typography>
       </Stack>
@@ -111,7 +112,7 @@ export function AnnotationCapture() {
                 borderRadius: '999px',
                 border: `1px solid ${selected ? colors.border : '#c4c4c4'}`,
                 bgcolor: selected ? colors.bg : 'transparent',
-                color: selected ? colors.fg : '#848482',
+                color: selected ? colors.fg : cobraTheme.palette.text.muted,
               }}
             />
           )

@@ -12,6 +12,7 @@ import { useEvaluatorState } from '../contexts/EvaluatorStateContext'
 import { useWorldStage } from '../hooks/useWorldStage'
 import { ParticipantStageFrame } from './ParticipantStageFrame'
 import type { WorldChannel } from '../types'
+import { cobraTheme } from '@/theme/cobraTheme'
 
 const CHANNELS: { value: WorldChannel; label: string }[] = [
   { value: 'portal', label: 'PORTAL' },
@@ -28,7 +29,7 @@ export function WorldView() {
         <Typography sx={{ font: '800 11px ui-sans-serif,system-ui,sans-serif', letterSpacing: '.14em', color: '#4a4f55' }}>
           WORLD VIEW
         </Typography>
-        <Typography sx={{ font: '500 11px ui-sans-serif,system-ui,sans-serif', color: '#848482' }}>
+        <Typography sx={{ font: '500 11px ui-sans-serif,system-ui,sans-serif', color: cobraTheme.palette.text.muted }}>
           as participants see it now · read-only
         </Typography>
         <Box sx={{ flex: 1 }} />

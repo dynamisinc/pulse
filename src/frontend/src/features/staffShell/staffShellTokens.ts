@@ -26,9 +26,9 @@
  *
  * ## Why everything else is SOURCED from cobraTheme, not re-hardcoded
  * The work-area background (`#f8f8f8`), white panels (`#fff`), Cadence red
- * (`#e42217`), and secondary gray (`#848482`) all already exist as COBRA
- * theme palette entries (`background.default` / `background.paper` /
- * `error.main` / `text.secondary`) — see `@/theme/cobraTheme`. This module
+ * (`#e42217`), and muted secondary text (the AA `text.muted` token, demo-feedback
+ * 25) all already exist as COBRA theme palette entries (`background.default` /
+ * `background.paper` / `error.main` / `text.muted`) — see `@/theme/cobraTheme`. This module
  * REFERENCES those, so if the COBRA palette is ever retuned, this frame
  * follows it automatically instead of drifting out of sync with a second,
  * hardcoded copy of the same colors.
@@ -55,6 +55,9 @@ export const STAFF_TOOLSTRIP_WIDTH_PX = 56
 const NAVY_HEADER_BACKGROUND = '#1e3a5f'
 const NAVY_HEADER_BORDER = '#16293f'
 const NAVY_HEADER_TEXT_PRIMARY = '#eef3f9'
+// Light-on-navy muted ink: 4.72:1 on the header, 6.06:1 on its border (AA; pinned by
+// `theme/cobraTheme.contrast.test.ts`). NOT `cobraTheme.palette.text.muted`: that is a dark
+// grey for light surfaces and would fail on navy.
 const NAVY_HEADER_TEXT_MUTED = '#93a8c2'
 
 /**
@@ -104,7 +107,7 @@ export const staffShellTokens = {
   accent: {
     /** Cadence red — cobraTheme.palette.error.main. */
     cadenceRed: cobraTheme.palette.error.main,
-    /** Secondary gray text — cobraTheme.palette.text.secondary. */
-    secondaryText: cobraTheme.palette.text.secondary,
+    /** Secondary gray text — the COBRA muted-text token, cobraTheme.palette.text.muted (AA). */
+    secondaryText: cobraTheme.palette.text.muted,
   },
 } as const

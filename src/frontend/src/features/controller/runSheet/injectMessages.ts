@@ -36,6 +36,8 @@ export const MESSAGES = {
   heldFireHint: 'Held. Release it first.',
   /** A 429 with no server `detail`: calm guidance, not a failure. */
   rateLimited: 'Too many fires in a few seconds. Try again in a moment.',
+  /** DF-36: the "Mark fired" confirm. */
+  markFiredConfirm: 'Mark as fired without posting? This can\'t be undone.',
 } as const
 
 /** AC "Fire on cue": a 409 from a concurrent fire. */
@@ -49,6 +51,7 @@ export type InjectAction =
   | 'skip'
   | 'unskip'
   | 'retry'
+  | 'mark fired'
   | 'delete'
   | 'save'
   | 'reorder'
