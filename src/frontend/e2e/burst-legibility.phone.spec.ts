@@ -52,7 +52,7 @@ const KNOWN_THRESHOLD_FAILURE = false
 
 async function anchorTop(page: Page): Promise<{ id: string, top: number }> {
   return page.evaluate(() => {
-    const rows = Array.from(document.querySelectorAll('ul li'))
+    const rows = Array.from(document.querySelectorAll('[data-feed-post-id]'))
     const row = rows.find(r => {
       const b = r.getBoundingClientRect()
       return b.top > 60 && b.bottom < window.innerHeight
@@ -84,9 +84,18 @@ test.describe('burst legibility @perf', () => {
     await page.evaluate(() => window.scrollTo(0, 500))
     await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(300)
 
+    // Warm-up pass (W-001): a short mid-feed burst exercises the arrival path so Vite's
+    // lazy transforms and the JIT are warm before the measured run; then clear it.
+    await injectBurst(page, RATE_PER_MIN, 6, 'warm-arrival')
+    await expect(pill).toBeVisible()
+    await pill.click()
+    await expect(pill).toHaveCount(0)
+    await page.evaluate(() => window.scrollTo(0, 500))
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(300)
+
     // Reader is mid-feed. Record the anchor, then burst.
     const scrollBefore = await page.evaluate(() => window.scrollY)
-    const rowsBefore = await page.locator('ul li').count()
+    const rowsBefore = await page.locator('[data-feed-post-id]').count()
     const anchorBefore = await anchorTop(page)
     await startProbe(page)
     const injected = await injectBurst(page, RATE_PER_MIN, BURST_SECONDS)
@@ -100,6 +109,7 @@ test.describe('burst legibility @perf', () => {
       `(${[...new Set(metrics.announcements)].join(' | ')})`)
 
     expect(injected).toBe(Math.round(BURST_SECONDS * RATE_PER_MIN / 60))
+    expect(metrics.longTaskObserved, 'longtask PerformanceObserver registered').toBe(true)
     expect(metrics.frameCount, 'rAF sampler ran').toBeGreaterThan(BURST_SECONDS)
 
     // 2. Scroll anchoring: nothing moved under the reader, no rows inserted.
@@ -107,7 +117,7 @@ test.describe('burst legibility @perf', () => {
     const anchorAfter = await anchorTop(page)
     expect(anchorAfter.id).toBe(anchorBefore.id)
     expect(Math.abs(anchorAfter.top - anchorBefore.top), 'visible post jumped').toBeLessThanOrEqual(1)
-    expect(await page.locator('ul li').count(), 'rows were inserted under the reader').toBe(rowsBefore)
+    expect(await page.locator('[data-feed-post-id]').count(), 'rows were inserted under the reader').toBe(rowsBefore)
 
     // 3. Pill aggregates; live region aggregated (NFR-001, SOC-071).
     await expect(pill).toBeVisible()
@@ -133,6 +143,6 @@ test.describe('burst legibility @perf', () => {
     await expectNoWallClock(page)
     await expect(page.getByText(/Sep 4, 2033/).first()).toBeVisible()
     const domNodes = await page.evaluate(() => document.getElementsByTagName('*').length)
-    console.log(`[burst] after load: rows=${await page.locator('ul li').count()} domNodes=${domNodes}`)
+    console.log(`[burst] after load: rows=${await page.locator('[data-feed-post-id]').count()} domNodes=${domNodes}`)
   })
 })

@@ -9,7 +9,7 @@ least 10 min). Today this has only been reasoned about on desktop. Measure on an
 frontend defects; larger findings become issues. Participant world.
 
 ## Acceptance Criteria
-- [x] Given a 4x CPU-throttled Chromium at 390x844 with touch, when `injectBurst` streams 120 posts/min for 10 minutes of accelerated mock time through the feed stream seam, then the main thread has no single long task over 200 ms attributable to feed rendering and the p95 frame time stays under 50 ms (thresholds recorded in the spec, adjustable by Tom).
+- [~] (60 s real time = 120 posts, not 10 min accelerated; ALL long tasks are counted, not only feed-attributable ones, which is conservative) Given a 4x CPU-throttled Chromium at 390x844 with touch, when `injectBurst` streams 120 posts/min for 10 minutes of accelerated mock time through the feed stream seam, then the main thread has no single long task over 200 ms attributable to feed rendering and the p95 frame time stays under 50 ms (thresholds recorded in the spec, adjustable by Tom).
 - [x] Given the burst, when the participant is scrolled down reading, then the visible post under the finger does not jump (scroll anchoring holds) and `NewPostsPill` shows an aggregated count instead of inserting rows.
 - [ ] (NOT MET / not asserted) Given the burst while scrolled to the top, then newest posts appear without layout shift larger than one post height and the list's DOM node count stays bounded (windowing or capped history, documented).
 - [x] Given a screen reader, when posts arrive in a burst, then the live region announces an aggregate ("N new posts") rather than every post (NFR-001, SOC-071 aggregation).
@@ -53,3 +53,9 @@ The spec; run locally and attach numbers. Mark `@perf` so it can be excluded fro
   consumers (`TrendingPanel`, `SearchBox`), a possible follow-up.
 - Still open: the DOM grows unbounded after loading a burst (231 rows, about 9.9k nodes). List windowing is a
   follow-up, to be linked to #524.
+- POST-FIX measured (warm-up pass before the probe; 4x CPU, 390x844, Vite dev build; 3 runs): long task max 77 / 59 /
+  119 ms (2-4 tasks > 50 ms in two runs, 20 in a noisy third), p95 frame 16.8 / 16.8 / 33.3 ms. Pre-fix: max 97-206 ms.
+- The warm-up also exposed a real layout shift: the pill's wrapper added ~33 px of in-flow height on the first
+  arrival, pushing the reader's content down. `NewPostsPill.module.css` `.liveRegion` is now `height: 0` (the pill
+  floats, still sticky); the spec's anchor assertion covers it.
+- `@perf` is excluded from `npm run test:e2e` (`--grep-invert @perf`); run it with `npm run test:e2e:perf`.

@@ -26,6 +26,7 @@ interface ProbeState {
   frames: number[]
   announcements: string[]
   active: boolean
+  longTaskObserved: boolean
 }
 
 export interface BurstMetrics {
@@ -37,8 +38,10 @@ export interface BurstMetrics {
   readonly frameCount: number
   readonly frameP95Ms: number
   readonly frameMaxMs: number
-  /** Non-empty text updates observed inside any aria-live region. */
+  /** Non-empty text updates observed inside the pill's polite live region. */
   readonly announcements: readonly string[]
+  /** The longtask PerformanceObserver registered (else a clean run proves nothing). */
+  readonly longTaskObserved: boolean
 }
 
 /** Throttle the CPU of a Chromium page (4 = a mid-range phone, MT-D6). */
@@ -56,15 +59,21 @@ export async function installProbes(page: Page): Promise<void> {
       frames: number[]
       announcements: string[]
       active: boolean
+      longTaskObserved: boolean
     }
-    const probe: Probe = { longTasks: [], frames: [], announcements: [], active: false }
+    const probe: Probe = {
+      longTasks: [], frames: [], announcements: [], active: false, longTaskObserved: false,
+    }
     ;(window as unknown as { __burstProbe: Probe }).__burstProbe = probe
     try {
       new PerformanceObserver(list => {
         if (!probe.active) return
         for (const e of list.getEntries()) probe.longTasks.push(e.duration)
       }).observe({ type: 'longtask', buffered: false })
-    } catch { /* longtask unsupported: the spec asserts it was observed */ }
+      // Set only after observe() succeeded; the spec asserts it so an unsupported
+      // browser cannot pass with a silent "no long tasks".
+      probe.longTaskObserved = true
+    } catch { /* leaves longTaskObserved false; the spec fails loudly */ }
     let last = 0
     const tick = (t: number) => {
       if (probe.active && last !== 0) probe.frames.push(t - last)
@@ -78,7 +87,8 @@ export async function installProbes(page: Page): Promise<void> {
         const seen = new Set<Element>()
         for (const r of records) {
           const node = r.target instanceof Element ? r.target : r.target.parentElement
-          const region = node?.closest('[aria-live]')
+          // Only the pill's own polite region counts as an announcement (S-002).
+          const region = node?.closest('[data-testid="new-posts-live"]')
           if (!region || seen.has(region)) continue
           seen.add(region)
           const text = (region.textContent ?? '').trim()
@@ -104,6 +114,8 @@ export async function startProbe(page: Page): Promise<void> {
 
 /** Stop recording and summarise. */
 export async function readProbe(page: Page): Promise<BurstMetrics> {
+  // Let the last frame / mutation records / long-task entries flush before deactivating.
+  await page.waitForTimeout(150)
   return page.evaluate(() => {
     const p = (window as unknown as { __burstProbe: ProbeState }).__burstProbe
     p.active = false
@@ -118,6 +130,7 @@ export async function readProbe(page: Page): Promise<BurstMetrics> {
       frameP95Ms: at(0.95),
       frameMaxMs: frames[frames.length - 1] ?? 0,
       announcements: p.announcements.slice(),
+      longTaskObserved: p.longTaskObserved,
     }
   })
 }
@@ -148,7 +161,7 @@ export async function injectBurst(
           const scenario = new Date(Date.UTC(2033, 8, 4, 15, 0, 0) + n * 1000).toISOString()
           mod.postStore.appendPost({
             id: `${prefix}-${n}`,
-            exerciseId: 'exercise-mock',
+            exerciseId: 'ex-mock-0001',
             authorPersonaId: personaId,
             actingHumanId: 'human-burst',
             text: `Burst update ${n}: crews are reporting conditions on Elm St. #Burst`,

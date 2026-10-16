@@ -50,7 +50,7 @@
  */
 
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react'
-import { getExerciseClock } from './exerciseClock'
+import { getExerciseClock, onExerciseClockSwapped } from './exerciseClock'
 
 /**
  * Neutral default zone when a consumer doesn't (yet) supply one. Deliberately
@@ -224,16 +224,44 @@ function sharedTick(): void {
   for (const listener of Array.from(sharedListeners)) listener()
 }
 
+/** Wires the interval, the ACTIVE clock's change-notification, visibility and clock swaps. */
+function sharedStart(): () => void {
+  let unsubscribeClock = getExerciseClock().subscribe?.(sharedTick)
+  const id = setInterval(sharedTick, DEFAULT_REFRESH_MS)
+  // A backgrounded tab throttles timers: catch up the moment it is visible again.
+  const onVisible = () => {
+    if (document.visibilityState === 'visible') sharedTick()
+  }
+  document.addEventListener('visibilitychange', onVisible)
+  // The exercise clock object itself was replaced: follow the new one.
+  const stopSwap = onExerciseClockSwapped(() => {
+    unsubscribeClock?.()
+    unsubscribeClock = getExerciseClock().subscribe?.(sharedTick)
+    sharedTick()
+  })
+  return () => {
+    clearInterval(id)
+    unsubscribeClock?.()
+    document.removeEventListener('visibilitychange', onVisible)
+    stopSwap()
+  }
+}
+
 function sharedSubscribe(listener: () => void): () => void {
   sharedListeners.add(listener)
   if (sharedListeners.size === 1) {
-    const id = setInterval(sharedTick, DEFAULT_REFRESH_MS)
-    const unsubscribeClock = getExerciseClock().subscribe?.(sharedTick)
-    sharedStop = () => {
-      clearInterval(id)
-      unsubscribeClock?.()
-    }
+    sharedStop = sharedStart()
+    // The first subscriber's snapshot may predate this moment: refresh and notify.
+    sharedNow = undefined
     sharedTick()
+  } else {
+    // Seed from the live clock, not a possibly-stale snapshot. Re-broadcast only when
+    // the minute moved (a per-subscriber ms difference would make N mounts cost N^2
+    // snapshot reads); within a minute the relative strings cannot differ.
+    const fresh = scenarioNow().getTime()
+    const minuteMoved = sharedNow === undefined
+      || Math.floor(fresh / 60_000) !== Math.floor(sharedNow.getTime() / 60_000)
+    if (minuteMoved) sharedTick()
   }
   return () => {
     sharedListeners.delete(listener)
@@ -245,8 +273,11 @@ function sharedSubscribe(listener: () => void): () => void {
 }
 
 function sharedSnapshot(): Date {
-  // With nobody subscribed the cached snapshot can be arbitrarily stale (or from a
-  // previous clock), so read the clock; while subscribed the tick owns it.
+  // While subscribed the tick owns the snapshot. With nobody subscribed it can be
+  // stale (or from a previous clock), so read the clock. It is deliberately NOT cached
+  // for a tick: React calls getSnapshot twice per render and a cached value would need
+  // its own invalidation; two reads can only differ if a whole-minute boundary falls
+  // between them (microseconds apart), and the render is then re-run by React.
   if (sharedListeners.size === 0 || sharedNow === undefined) sharedNow = scenarioNow()
   return sharedNow
 }
