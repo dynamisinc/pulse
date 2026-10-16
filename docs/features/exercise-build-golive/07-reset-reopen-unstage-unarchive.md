@@ -12,7 +12,7 @@ Exercises can only move forward today, and the demo reset is direct SQL in `Clea
 - [ ] **Reopen** (completed -> live): controller; refused once archived; the scenario clock resumes where it stopped; audited.
 - [ ] **Unarchive** (archived -> completed, or -> build if it was archived from build): org admin only; restores read-write per the prior state; nothing else changes.
 - [ ] **Archive** is allowed from `completed`, and from `build` when `FirstLiveAt` is set (a reset exercise being retired); planner or org admin; live sessions revoked.
-- [ ] **Reset** (completed **or staged** -> build): planner or org admin, typed-name confirmation; refused in build, live, paused and archived. Keeps settings, chrome, sign-in methods, personas (with live edits), staff library media, run sheet (items back to *pending*), noise pool, **setup posts** (`IsSetupContent`), accounts, enrollments, links and the view-only code. Hard-deletes conduct posts and edits, reactions, reposts, `PostMediaItem` rows and participant-uploaded media on them, follows created after `FirstLiveAt`, telemetry events, engine review items, inject-queue state, runtime state (clock, pause tier), day words and every session.
+- [ ] **Reset** (completed **or staged** -> build): planner or org admin, typed-name confirmation; refused in build, live, paused and archived. Keeps settings, chrome, sign-in methods, personas (with live edits), staff library media, run sheet (items back to *pending*), noise pool, **setup posts** (`IsSetupContent`), accounts, enrollments, links and the view-only code. Hard-deletes conduct posts and edits, reactions, reposts, `PostMediaItem` rows and participant-uploaded media on them, conduct follows (`Follow.IsSetupContent = false`), telemetry events, engine review items, inject-queue state, runtime state (clock, pause tier), day words and every session.
 - [ ] **Reset from staged** clears a dry run (posts, reactions, telemetry, sessions, day words made while staged) and keeps everything authored in build, because `IsSetupContent` is stamped only in build.
 - [ ] **Run-sheet reply items (§5.4a):** an item whose reply target was a deleted conduct post becomes `needs-repair` ("reply target removed by reset"), cannot fire, and blocks staging (readiness item 8); items targeting setup posts return to `pending`.
 - [ ] **Reset dialog guidance:** it offers the AAR/report export first (from completed) and says: to keep a run, don't reset; duplicate and run again in the copy (duplicating then resetting the source still destroys the run).
@@ -23,6 +23,9 @@ Exercises can only move forward today, and the demo reset is direct SQL in `Clea
 - [ ] Two worlds (D0 §2): the surface uses COBRA (`@/theme/styledComponents`), is desktop-first, FontAwesome only, MUI 9 `sx`-only, and is never confusable with a participant view.
 - [ ] Accessibility (NFR-001): WCAG 2.1 AA; keyboard-operable; status/error states are never color-only; async results announced via a live region.
 - [ ] User guide (C5 docs-as-done): `docs/guide/planner-guide.md` (reset, reopen, unstage, unarchive; the "ask Dynamis" lines removed) updated in the same PR, screenshots re-captured.
+
+### Copilot review 2 fold (2026-10-16, ADMIN-IDENTITY-MODEL §5.4)
+- [ ] `Follow.IsSetupContent` is stamped by the write path (true only while the exercise is in build). The A3 migration backfills `Posts` and `Follows` by the §5.4 rule (the first lifecycle transition out of build; participant-origin posts are always conduct; with no transition event, a row is conduct). Reset deletes only conduct follows.
 
 ## Out of Scope
 Delete (08); multiple runs per exercise or run numbering (rejected, §5.2); evaluator annotations; the AAR export itself (E10).

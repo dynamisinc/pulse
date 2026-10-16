@@ -47,6 +47,9 @@ every other Phase-A story reads. Staff-world plumbing; no participant-visible ch
 - [ ] Telemetry (XC-004): the action emits an event (wall + scenario time, acting `PersonId` and role, channel `system`) per the v0 schema, in the same unit of work as the mutation.
 - [ ] User guide (C5 docs-as-done): `docs/guide/planner-guide.md` is updated in the same PR (and the screenshot list in `tools/guide-screenshots` if a screen changed), or the PR states "no guide impact".
 
+### Copilot review 2 fold (2026-10-16)
+- [ ] The A1 migration also creates `LoginChoices` and `LoginChoiceCandidates` (ADMIN-IDENTITY-MODEL §1.2, §9).
+
 ## Out of Scope
 Password sign-in itself and org choice (story 15 / 05); role enforcement (17); invite and directory UI (19-20);
 the A2/A3/A4 columns (their own migrations). No participant-facing change.

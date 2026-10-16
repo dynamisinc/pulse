@@ -27,6 +27,9 @@ route and per lifecycle transition and proves it with a route x role matrix test
 - [ ] Telemetry (XC-004): the action emits an event (wall + scenario time, acting `PersonId` and role, channel `system`) per the v0 schema, in the same unit of work as the mutation.
 - [ ] User guide (C5 docs-as-done): `docs/guide/planner-guide.md` (role table) and `controller-guide.md` are updated in the same PR, or the PR states "no guide impact".
 
+### Copilot review 2 fold (2026-10-16, ADMIN-IDENTITY-MODEL §8.2)
+- [ ] In the matrix, participant sim writes are allowed in `live` **and `staged`** (dry runs), and refused when paused or frozen. The matrix test asserts both.
+
 ## Out of Scope
 The new transitions themselves (reset/reopen/delete/unstage bodies: exercise-build-golive 07-08); the lifecycle write gate for participants (A5 #379).
 

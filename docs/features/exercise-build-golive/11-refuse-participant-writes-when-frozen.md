@@ -1,7 +1,7 @@
 # Story: Refuse participant writes in Freeze and pause (#379)
 
 **Feature:** Exercise build & go-live  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Not Started
-**Requirements:** CTL-023, COR-032, SOC-001  ·  **Design decisions:** ADMIN-IDENTITY-MODEL §5.1, §8.2 (L: live, not frozen), §10 (A5)  ·  **Issue:** #379
+**Requirements:** CTL-023, COR-032, SOC-001  ·  **Design decisions:** ADMIN-IDENTITY-MODEL §5.1, §8.2 (L: live or staged (dry run); refused when paused or frozen), §10 (A5)  ·  **Issue:** #379
 **Stack:** backend  ·  **Review tier:** Tier-2 (correctness, security)  ·  **Wave:** A5
 
 ## Context
@@ -17,6 +17,9 @@ Sim writes are lifecycle-gated: only in `live` and not Freeze ([`docs/design/ADM
 - [ ] Accessibility (NFR-001): the refusal message is announced in a live region and is not color-only.
 - [ ] Two worlds: participant message uses the brand skin; no COBRA.
 - [ ] User guide (C5): `controller-guide.md` (tiers) and `participant-guide.md` updated in the same PR.
+
+### Copilot review 2 fold (2026-10-16, ADMIN-IDENTITY-MODEL §8.2)
+- [ ] Participant sim writes stay **allowed in `staged`** (dry runs, matching `ExerciseLifecycleStates.BehaviourOf(Staged)` today) and in `live`. They are refused only when paused or frozen. The route × role matrix test (story 17) encodes staged as allowed.
 
 ## Out of Scope
 Changing tier semantics; client-side optimistic UI beyond showing the refusal.

@@ -127,6 +127,10 @@ own stated practice (coin new IDs in the epic first, not in a downstream doc) �
       telemetry axis, a distinct org-tier event store, or something else) — that decision belongs to
       whoever picks this story up, informed by whatever shape Acceptance Criterion 2 above lands on.
 
+### Copilot review 2 fold (2026-10-16, ADMIN-IDENTITY-MODEL §1.2)
+- [ ] **Slugless lockout attribution:** a Person's failure counter goes up only when the attempt fails as a whole (no candidate verified). A success in org A never counts against the same email's Person in org B. Locked-out candidates are skipped without verification.
+- [ ] **The org choice is its own record:** `LoginChoice` (TokenHash, a 2-minute expiry, ConsumedAt) plus `LoginChoiceCandidate(ChoiceId, PersonId, OrganizationId)`, created in the A1 migration. `/login/choose` accepts only a candidate org, consumes the whole choice atomically (`ConsumedAt IS NULL`), and changes no credential. `CredentialToken` is not used for it.
+
 ## Out of Scope
 - **The dev/UAT-only idempotent seeder** granting a named human `orgAdmin` assignments across an
   organization's *existing* exercises — built in parallel, explicitly out of this story's scope, and
