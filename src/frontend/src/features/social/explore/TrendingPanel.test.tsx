@@ -115,6 +115,9 @@ describe('TrendingPanel — live, not a mount-time snapshot (M1)', () => {
     renderExplore(<TrendingPanel />)
 
     const panel = await screen.findByTestId('trending-panel')
+    // The panel mounts before the feed read settles: wait for the rows, not just the
+    // panel, or a loaded CI runner reads an empty panel (flaky "Unable to find trending-row").
+    await screen.findAllByTestId('trending-row')
     const tags = () =>
       screen.getAllByTestId('trending-row').map(row =>
         within(row).getByRole('link').getAttribute('data-tag'),
