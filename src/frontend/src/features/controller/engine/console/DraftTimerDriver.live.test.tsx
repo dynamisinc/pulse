@@ -195,20 +195,56 @@ describe('DraftTimerDriver (LIVE) - display-only, the server is the authority', 
     expect(reviewActions.autoPublish).not.toHaveBeenCalled()
   })
 
-  it('refetches the review queue on expiry and keeps polling until unmounted', async () => {
+  it('several expired drivers share ONE poller: one GET at expiry, then one per 3 s', async () => {
     vi.useFakeTimers()
     try {
-      const { unmount } = renderDriver(true, false)
+      // The server keeps the draft CountingDown (e.g. FullStop), so the queue stays expired.
+      serverQueue = [wireItem('counting-down')]
+      const countdown = makeCountdown()
+      const { unmount } = render(
+        <>
+          {[0, 1, 2].map(n => (
+            <DraftTimerDriver
+              key={n}
+              item={makeItem(countdown)}
+              countdown={countdown}
+              swampedMode={true}
+              effective={runningAutonomy(AutonomyLevel.DelayedAuto)}
+              ctx={CTX}
+            />
+          ))}
+        </>,
+      )
       expect(getSpy).toHaveBeenCalledTimes(1)
       await act(async () => {
         await vi.advanceTimersByTimeAsync(3000)
       })
       expect(getSpy).toHaveBeenCalledTimes(2)
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(3000)
+      })
+      expect(getSpy).toHaveBeenCalledTimes(3)
+      // Polling is queue-level: it does not depend on any one driver staying mounted.
       unmount()
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(9000)
+        await vi.advanceTimersByTimeAsync(3000)
       })
-      expect(getSpy).toHaveBeenCalledTimes(2)
+      expect(getSpy).toHaveBeenCalledTimes(4)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('the shared poller stops once the server resolves the item', async () => {
+    vi.useFakeTimers()
+    try {
+      serverQueue = [wireItem('held')]
+      renderDriver(true, false)
+      expect(getSpy).toHaveBeenCalledTimes(1)
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(30_000)
+      })
+      expect(getSpy).toHaveBeenCalledTimes(1)
     } finally {
       vi.useRealTimers()
     }

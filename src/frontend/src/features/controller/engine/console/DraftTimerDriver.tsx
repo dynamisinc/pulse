@@ -37,8 +37,9 @@
  * the server (`EngineReviewService.EvaluateAutoHoldAsync`) decides and performs the expiry
  * outcome and emits its own `engine.reviewed`; this driver takes NO terminal action (no
  * telemetry, no `autoPublish`, no Held flip) and instead refetches the review queue when the
- * countdown reaches 0 (then every few seconds until the item resolves), so the item's terminal
- * state always comes from the server queue. Until then the card shows "resolving…".
+ * countdown reaches 0 by nudging the store's single shared expiry scheduler (it polls,
+ * coalesced and backed off, while any item is expired; drivers never poll themselves), so the
+ * item's terminal state always comes from the server queue. Until then the card shows "resolving…".
  *
  * `ctx` intentionally omits `scenarioTime` — `autoPublish` needs the SCENARIO
  * instant at the moment of resolution (COR-053), not whenever this component
@@ -92,9 +93,6 @@ export interface DraftTimerDriverProps {
   readonly ctx: DraftTimerDriverContext
 }
 
-/** How often (ms) to re-pull the live queue while an expired item awaits the server's verdict. */
-const EXPIRY_REFETCH_MS = 3000
-
 /**
  * Drives one `CountingDown` item's countdown via `useDraftTimer`, wiring its
  * terminal outcome to the review store / publish pipeline. Renders nothing.
@@ -132,13 +130,10 @@ export function DraftTimerDriver({
     providerCutToFake,
   )
 
-  // LIVE: once the countdown hits 0, pull the server's queue promptly, and keep re-pulling
-  // until the item's terminal state arrives (this driver unmounts when it leaves CountingDown).
+  // LIVE: once the countdown hits 0, nudge the ONE shared, queue-level expiry scheduler
+  // (idempotent). This driver never polls itself: N expired drafts => one GET in flight.
   useEffect(() => {
-    if (!displayOnly || !hasExpired) return
-    void liveReviewStore.refetch()
-    const id = setInterval(() => void liveReviewStore.refetch(), EXPIRY_REFETCH_MS)
-    return () => clearInterval(id)
+    if (displayOnly && hasExpired) liveReviewStore.requestExpiryRefresh()
   }, [displayOnly, hasExpired])
 
   return null
