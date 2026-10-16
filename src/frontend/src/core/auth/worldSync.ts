@@ -26,6 +26,7 @@
  */
 import {
   WORLD_CHANNEL_NAME,
+  TAB_ID,
   WORLD_SIGNAL_KEY,
   parseWorldSignal,
   type World,
@@ -90,7 +91,7 @@ export function installWorldSync(options: WorldSyncOptions = {}): () => void {
   const navigate = options.navigate ?? ((path: string) => window.location.assign(path))
 
   const handle = (signal: WorldSignal | null): void => {
-    if (!signal) return
+    if (!signal || signal.source === TAB_ID) return
     const mine = currentWorld()
     if (mine === null || mine === signal.world) return
 

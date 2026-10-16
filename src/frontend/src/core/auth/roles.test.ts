@@ -15,6 +15,7 @@ import {
   isStaffRole,
   canWriteInSim,
   isExerciseRole,
+  isSessionRole,
   type SessionRole,
 } from './roles'
 
@@ -76,10 +77,20 @@ describe('canWriteInSim (COR-013)', () => {
 })
 
 describe('isExerciseRole (wire guard)', () => {
-  it('accepts every known role', () => {
-    for (const role of ALL) {
+  it('accepts every exercise role but not orgAdmin (an org role)', () => {
+    for (const role of ALL.filter(r => r !== 'orgAdmin')) {
       expect(isExerciseRole(role)).toBe(true)
     }
+    expect(isExerciseRole('orgAdmin')).toBe(false)
+  })
+
+  it('isSessionRole pairs scope with role and rejects mixed combinations', () => {
+    expect(isSessionRole('exercise', 'controller')).toBe(true)
+    expect(isSessionRole('org', 'orgAdmin')).toBe(true)
+    expect(isSessionRole('exercise', 'orgAdmin')).toBe(false)
+    expect(isSessionRole('org', 'controller')).toBe(false)
+    expect(isSessionRole('global', 'controller')).toBe(false)
+    expect(isSessionRole(undefined, 'orgAdmin')).toBe(false)
   })
 
   it('rejects an out-of-vocabulary or non-string value (fail-closed)', () => {

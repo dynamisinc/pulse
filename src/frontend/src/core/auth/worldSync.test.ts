@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { clearTokens, getAccessToken, setTokens } from './tokenStore'
 import {
   WORLD_CHANNEL_NAME,
+  TAB_ID,
   WORLD_SIGNAL_KEY,
   announceWorldSignIn,
   parseWorldSignal,
@@ -138,6 +139,14 @@ describe('installWorldSync receiver', () => {
 
     expect(getAccessToken()).toBeNull()
     expect(navigate).toHaveBeenCalledWith('/staff/login')
+  })
+
+  it('ignores its own echo (same-context channels deliver to each other)', () => {
+    setTokens({ token: 'staff-tok' })
+    const { channel, postLogout } = setup()
+    channel.deliver({ world: 'participant', at: 'now', source: TAB_ID })
+    expect(postLogout).not.toHaveBeenCalled()
+    expect(getAccessToken()).toBe('staff-tok')
   })
 
   it('uninstalling closes the channel', () => {

@@ -29,7 +29,12 @@ export type World = 'staff' | 'participant'
 export interface WorldSignal {
   readonly world: World
   readonly at: string
+  /** The announcing tab's id, so a tab can ignore its own echo (same-context channels deliver). */
+  readonly source?: string
 }
+
+/** A random id for this tab/page load. */
+export const TAB_ID: string = Math.random().toString(36).slice(2)
 
 /** Narrowing parser for a received message (channel data or storage value). */
 export function parseWorldSignal(value: unknown): WorldSignal | null {
@@ -42,14 +47,14 @@ export function parseWorldSignal(value: unknown): WorldSignal | null {
     }
   }
   if (typeof candidate !== 'object' || candidate === null) return null
-  const { world, at } = candidate as Record<string, unknown>
+  const { world, at, source } = candidate as Record<string, unknown>
   if ((world !== 'staff' && world !== 'participant') || typeof at !== 'string') return null
-  return { world, at }
+  return { world, at, source: typeof source === 'string' ? source : undefined }
 }
 
 /** Announces that this tab just signed in as `world`. Best effort; never throws. */
 export function announceWorldSignIn(world: World): void {
-  const signal: WorldSignal = { world, at: new Date().toISOString() }
+  const signal: WorldSignal = { world, at: new Date().toISOString(), source: TAB_ID }
   try {
     if (typeof BroadcastChannel !== 'undefined') {
       const channel = new BroadcastChannel(WORLD_CHANNEL_NAME)

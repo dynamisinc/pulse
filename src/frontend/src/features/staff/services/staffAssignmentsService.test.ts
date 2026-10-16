@@ -33,8 +33,8 @@ const mockGet = vi.mocked(api.get)
 const mockPost = vi.mocked(api.post)
 
 const VALID_LIST_BODY = [
-  { exerciseId: 'ex-0001', exerciseName: 'Coastal Surge', role: 'controller' },
-  { exerciseId: 'ex-0002', exerciseName: 'Ridgeline Wildfire', role: 'evaluator' },
+  { exerciseId: 'ex-0001', exerciseName: 'Coastal Surge', role: 'controller', personId: 'person-1', isLead: true },
+  { exerciseId: 'ex-0002', exerciseName: 'Ridgeline Wildfire', role: 'evaluator', personId: 'person-1', isLead: false },
 ]
 
 /** Builds a real AxiosError carrying a response (so `axios.isAxiosError` is true). */
@@ -72,8 +72,8 @@ describe('getStaffAssignments — response parsing', () => {
     const result = await getStaffAssignments()
 
     expect(result).toEqual([
-      { exerciseId: 'ex-0001', exerciseName: 'Coastal Surge', role: 'controller' },
-      { exerciseId: 'ex-0002', exerciseName: 'Ridgeline Wildfire', role: 'evaluator' },
+      { exerciseId: 'ex-0001', exerciseName: 'Coastal Surge', role: 'controller', personId: 'person-1', isLead: true },
+      { exerciseId: 'ex-0002', exerciseName: 'Ridgeline Wildfire', role: 'evaluator', personId: 'person-1', isLead: false },
     ])
   })
 
@@ -131,7 +131,7 @@ describe('getStaffAssignments — transport error translation', () => {
 describe('setActiveExercise — request shape', () => {
   it('POSTs /staff/active-exercise with the chosen exerciseId', async () => {
     mockPost.mockResolvedValue({
-      data: { exerciseId: 'ex-0002', exerciseName: 'Ridgeline Wildfire', role: 'evaluator' },
+      data: { exerciseId: 'ex-0002', exerciseName: 'Ridgeline Wildfire', role: 'evaluator', personId: 'person-1', isLead: false },
     } as Awaited<ReturnType<typeof api.post>>)
 
     await setActiveExercise('ex-0002')
@@ -146,12 +146,12 @@ describe('setActiveExercise — request shape', () => {
 describe('setActiveExercise — response parsing', () => {
   it('returns the newly-active assignment', async () => {
     mockPost.mockResolvedValue({
-      data: { exerciseId: 'ex-0002', exerciseName: 'Ridgeline Wildfire', role: 'evaluator' },
+      data: { exerciseId: 'ex-0002', exerciseName: 'Ridgeline Wildfire', role: 'evaluator', personId: 'person-1', isLead: false },
     } as Awaited<ReturnType<typeof api.post>>)
 
     const result = await setActiveExercise('ex-0002')
 
-    expect(result).toEqual({ exerciseId: 'ex-0002', exerciseName: 'Ridgeline Wildfire', role: 'evaluator' })
+    expect(result).toEqual({ exerciseId: 'ex-0002', exerciseName: 'Ridgeline Wildfire', role: 'evaluator', personId: 'person-1', isLead: false })
   })
 
   it('fails closed (throws) on a malformed/empty response body', async () => {
