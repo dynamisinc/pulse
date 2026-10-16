@@ -60,7 +60,7 @@ public class AmbientOutputFilterTests
         var exclusions = AmbientOutputFilter.BuildExclusions([], ["Water-main fears near the treatment plant"]);
 
         exclusions.Should().Contain(["water", "fears", "treatment", "plant"]);
-        exclusions.Should().NotContain(["main", "near", "the"], "words under five letters are too common to be a signal");
+        exclusions.Should().NotContain(["main", "near", "the"], "stop words and words under four letters are not a signal");
         AmbientOutputFilter.Inspect([Post("watered the garden at dawn")], exclusions)
             .Should().Equal([AmbientOutputFilter.IncidentTermCheck], "false positives are accepted: dropping chatter is free");
     }
@@ -188,5 +188,142 @@ public class AmbientOutputFilterTests
 
         AmbientOutputFilter.Inspect(ambient.Posts, []).Should().BeEmpty("the offline Fake emits everyday small talk for ambient");
         AmbientOutputFilter.Inspect(storyline.Posts, []).Should().NotBeEmpty("its incident lines are exactly what the filter exists for");
+    }
+
+    // ---- WR-3: four-letter title keywords, widened fixed vocabulary -----------------------------------
+
+    [Theory]
+    [InlineData("Gas leak on Elm", "leak")]
+    [InlineData("Brush fire near the ridge", "fire")]
+    [InlineData("Boil notice for the east side", "boil")]
+    public void AFourLetterTitleWord_IsNowAKeyword(string title, string keyword)
+    {
+        AmbientOutputFilter.BuildExclusions([], [title]).Should().Contain(keyword, "MinTitleKeywordLength is 4 (WR-3)");
+    }
+
+    [Fact]
+    public void FourLetterFunctionWords_AndGenericNouns_AreNotKeywords()
+    {
+        var exclusions = AmbientOutputFilter.BuildExclusions([], ["News from the city with more over that main town area"]);
+
+        exclusions.Should().BeEmpty("four-letter function words and generic place/report nouns are stop words");
+    }
+
+    [Theory]
+    [InlineData("smoke from the wildfire is everywhere")]
+    [InlineData("two firefighters on our street")]
+    [InlineData("the creek flooded the underpass")]
+    [InlineData("pretty sure there is a leak somewhere")]
+    [InlineData("heard an explosion downtown")]
+    [InlineData("the storm is rolling in")]
+    [InlineData("tornado sirens again")]
+    [InlineData("hurricane prep at the store")]
+    [InlineData("felt that earthquake?")]
+    [InlineData("they quarantined the building")]
+    [InlineData("an outbreak at the school")]
+    [InlineData("school lockdown this morning")]
+    [InlineData("reports of casualties")]
+    [InlineData("there is a house fire on oak")]
+    [InlineData("brush fire up the ridge")]
+    [InlineData("the fire department just went by")]
+    [InlineData("smells like a gas leak")]
+    [InlineData("a chemical spill on the highway")]
+    [InlineData("oil spill at the marina")]
+    [InlineData("toxic fumes near the plant")]
+    [InlineData("reports of an active shooter")]
+    [InlineData("shots fired near the park")]
+    [InlineData("power is out on my block")]
+    [InlineData("the power out here is annoying")]
+    [InlineData("missing person flyer at the cafe")]
+    public void AWidenedFixedIncidentTerm_Fails(string text)
+    {
+        AmbientOutputFilter.Inspect([Post(text)], []).Should().Equal(AmbientOutputFilter.IncidentTermCheck);
+    }
+
+    [Theory]
+    [InlineData("time to fire up the grill for the weekend")]
+    [InlineData("our striker is on fire this season")]
+    [InlineData("fireworks over the lake tonight")]
+    [InlineData("the new stadium floodlights look great")]
+    [InlineData("gas prices dropped a little this week")]
+    [InlineData("she is shooting 40 percent from three this year")]
+    [InlineData("best three point shooter in the league")]
+    [InlineData("spilled my coffee all over the counter")]
+    [InlineData("this chili is exploding with flavor")]
+    [InlineData("the crowd exploded after the goal")]
+    [InlineData("our point guard is back from a sports injury")]
+    [InlineData("chemical-free shampoo for the dog")]
+    [InlineData("what a lights out performance by the band")]
+    [InlineData("great brainstorm session at the library")]
+    public void EverydaySportsFoodAndPetsPhrases_Pass_UnderTheWidenedVocabulary(string text)
+    {
+        AmbientOutputFilter.Inspect([Post(text)], [])
+            .Should().BeEmpty("phrase-only terms keep everyday sports/food/pets speech out of the fixed vocabulary (WR-3)");
+    }
+
+    // ---- SG-1: Unicode folding, incident emoji, hashtag digit runs ------------------------------------
+
+    [Theory]
+    [InlineData("is the w\u200Bater ok today")]     // zero-width space
+    [InlineData("is the w\u200Dater ok today")]     // zero-width joiner
+    [InlineData("is the wa\u00ADter ok today")]     // soft hyphen
+    [InlineData("is the \uFF37\uFF21\uFF34\uFF25\uFF32 ok today")] // fullwidth WATER
+    public void ObfuscatedStorylineKeyword_IsFoldedAndFails(string text)
+    {
+        AmbientOutputFilter.Inspect([Post(text)], WaterExclusions).Should().Equal(AmbientOutputFilter.IncidentTermCheck);
+    }
+
+    [Theory]
+    [InlineData("contaminación del agua")]
+    [InlineData("évacuation du quartier")]
+    [InlineData("EMERGÉNCIA na cidade")]
+    public void Diacritics_AreFolded_SoTheStemsStillHit(string text)
+    {
+        AmbientOutputFilter.Inspect([Post(text)], []).Should().Equal(AmbientOutputFilter.IncidentTermCheck);
+    }
+
+    [Theory]
+    [InlineData("lovely morning \U0001F6B1")]
+    [InlineData("hmm \u2623\uFE0F")]
+    [InlineData("hmm \u2622")]
+    [InlineData("on my way \U0001F6A8")]
+    [InlineData("careful out there \u26A0\uFE0F")]
+    public void AnIncidentEmoji_Fails_WithOrWithoutTheVariationSelector(string text)
+    {
+        AmbientOutputFilter.Inspect([Post(text)], []).Should().Equal(AmbientOutputFilter.IncidentTermCheck);
+    }
+
+    [Fact]
+    public void AnIncidentEmoji_InTheHashtagList_Fails_ButAWaterDroplet_Passes()
+    {
+        AmbientOutputFilter.Inspect([Post("lovely morning", 0.3, "\U0001F6A8")], []).Should().NotBeEmpty();
+        AmbientOutputFilter.Inspect([Post("watered the tomatoes \U0001F4A7 so green")], [])
+            .Should().BeEmpty("the droplet is common in innocuous posts and is deliberately not an incident emoji");
+    }
+
+    [Theory]
+    [InlineData("anyone following #FairhavenWater2")]
+    [InlineData("anyone following #FairhavenWater2026")]
+    public void AStorylineHashtag_WithATrailingDigitRun_Fails(string text)
+    {
+        var exclusions = AmbientOutputFilter.BuildExclusions(["#FairhavenWater"], []);
+
+        AmbientOutputFilter.Inspect([Post(text)], exclusions).Should().Equal(AmbientOutputFilter.IncidentTermCheck);
+        AmbientOutputFilter.Inspect([Post("lovely day", 0.3, "#FairhavenWater2")], exclusions).Should().NotBeEmpty();
+    }
+
+    [Fact]
+    public void AStorylineHashtag_ThatItselfEndsInDigits_StillMatchesExactly()
+    {
+        var exclusions = AmbientOutputFilter.BuildExclusions(["#Storm2026"], []);
+
+        AmbientOutputFilter.Inspect([Post("following #Storm2026 tonight")], exclusions).Should().NotBeEmpty();
+        AmbientOutputFilter.Inspect([Post("following #FairhavenFair2026 tonight")], exclusions).Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Fold_AppliesNfkc_StripsFormatAndMarks_AndLowerCases()
+    {
+        AmbientOutputFilter.Fold("\uFF37a\u200Bter Contaminación ☣\uFE0F").Should().Be("water contaminacion ☣");
     }
 }

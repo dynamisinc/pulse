@@ -14,16 +14,25 @@ using Pulse.Core.Features.Generation.Models;
 /// A burst fails, as a whole, when ANY post:
 /// </para>
 /// <list type="number">
-/// <item><description>names a term from <see cref="FixedIncidentTerms"/>;</description></item>
+/// <item><description>names a term from <see cref="FixedIncidentTerms"/> or carries an <see cref="IncidentEmoji"/>;</description></item>
 /// <item><description>names one of the active storylines' hashtags (in its text or its hashtag list, with or without
 /// the <c>#</c>) or a keyword derived from a storyline title (<see cref="BuildExclusions"/>);</description></item>
 /// <item><description>has a <see cref="GeneratedPost.Sentiment"/> below <see cref="MinSentiment"/>.</description></item>
 /// </list>
 /// <para>
-/// <b>Word-boundary matching (Gate-1 W-A).</b> The post (text + hashtag list) is lower-cased (invariant) and split into
+/// <b>Normalisation (orchestrator review SG-1).</b> Before anything is matched, every string — post text, hashtags, and
+/// the storyline hashtags/titles the exclusions are built from — is folded by <see cref="Fold"/>: Unicode NFKC (so
+/// fullwidth <c>ＷＡＴＥＲ</c> reads as <c>WATER</c>), every format character (category Cf — zero-width space/joiner,
+/// soft hyphen, bidi marks) removed (so <c>w&#x200B;ater</c> reads as <c>water</c>), diacritics folded (FormD, every
+/// non-spacing mark — which includes the emoji variation selectors — removed, so <c>contaminación</c> reads as
+/// <c>contaminacion</c> and hits <c>contamina*</c>), and lower-cased (invariant).
+/// </para>
+/// <para>
+/// <b>Word-boundary matching (Gate-1 W-A).</b> The folded post (text + hashtag list) is split into
 /// word tokens — runs of letters/digits, so hyphens, underscores, apostrophes and punctuation separate words
 /// (<c>boil-water</c> reads as <c>boil water</c>). A hashtag is ALSO read as one compact token (<c>#Fairhaven_Water</c>
-/// → <c>fairhavenwater</c>). Nothing is matched as a raw substring any more:
+/// → <c>fairhavenwater</c>), and a hashtag may carry a trailing digit run (SG-1: <c>#FairhavenWater2</c> still hits the
+/// <c>fairhavenwater</c> exclusion). Nothing is matched as a raw substring any more:
 /// </para>
 /// <list type="bullet">
 /// <item><description><b>Per-exercise exclusions</b> (storyline hashtags without the <c>#</c>, title keywords) match a
@@ -43,6 +52,37 @@ using Pulse.Core.Features.Generation.Models;
 /// "fair warning" — everyday speech). They are replaced by incident-shaped phrases ("officials said", "shelter in place",
 /// "weather alert", "warning issued", …). <c>boil water</c> stays a phrase (it also catches "boil water notice"); a
 /// cooking post that says "boil water for the pasta" is a known, accepted false positive.
+/// </para>
+/// <para>
+/// <b>Vocabulary widening (orchestrator review WR-3).</b> Added as whole words (with the simple inflections):
+/// <c>wildfire</c>, <c>flood</c> (NOT a <c>flood*</c> stem — "floodlights" is sports), <c>leak</c>, <c>explosion</c>,
+/// <c>storm</c> ("brainstorm" is already safe by the word-boundary rule), <c>tornado</c>, <c>hurricane</c>,
+/// <c>earthquake</c>, <c>outbreak</c>, <c>lockdown</c>; as word-start stems <c>firefighter*</c>, <c>quarantin*</c>
+/// (quarantine/quarantined — "quarantined" is not a listed inflection of "quarantine") and <c>casualt*</c>
+/// (casualty/casualties). Deliberately PHRASE-ONLY, because the bare word is everyday speech on an allow-listed topic:
+/// <c>fire</c> ("fire up the grill", "the striker is on fire" — so only "house fire", "brush fire", "fire department",
+/// "firefighters", "wildfire"; a storyline whose title or hashtag says "fire" still excludes the bare word through the
+/// per-exercise title keywords), <c>gas</c> ("gas leak" — "gas prices" is traffic small talk), <c>shooting/shooter</c>
+/// ("shooting 40% from three" is sports — so "active shooter", "mass shooting", "school shooting", "shots fired"),
+/// <c>spill</c> ("spilled my coffee" — so "chemical spill", "oil spill", "fuel spill"), <c>chemical</c> and <c>toxic</c>
+/// ("chemical-free", "a toxic ex" — so "chemical leak", "chemical release", "toxic fumes", "toxic smoke"),
+/// <c>power out</c> / <c>power is out</c> (the bare "power" is "powerful"-adjacent everyday speech). <c>explod*</c> is
+/// NOT a stem ("the crowd exploded" is sports), and <c>injur*</c> is left out entirely ("sports injury"). <c>lights
+/// out</c> is left out ("lights-out performance"). Accepted false positives of the whole-word additions: "my roof
+/// leaks", "the team stormed back", "a flood of emails" — dropping background chatter costs nothing.
+/// </para>
+/// <para>
+/// <b>Incident emoji (SG-1).</b> A post whose folded text or hashtags carry any of <see cref="IncidentEmoji"/> (🚱 ☣ ☢ 🚨
+/// ⚠, variation selectors already stripped by the fold) fails. 💧 is deliberately NOT listed: it is common in innocuous
+/// posts (weather, gardening, the seeded "Fairhaven strong. 💧" bio).
+/// </para>
+/// <para>
+/// <b>Title keywords (WR-3).</b> A title word of at least <see cref="MinTitleKeywordLength"/> (4) letters that is not a
+/// stop word is a keyword — so "leak", "fire", "boil" in a storyline title now count. Three-letter words (gas, flu,
+/// dam) still do not: at three letters the false-positive rate on everyday speech is too high; the fixed phrases above
+/// ("gas leak") and the storyline's own hashtags cover them. The stop-word list carries the common four-letter function
+/// words (with, from, that, …) and a few generic place/report nouns (<c>main</c>, <c>town</c>, <c>city</c>,
+/// <c>news</c>) — "water main" is caught by <c>water</c>, and "main street" is everyday.
 /// </para>
 /// <para>
 /// <b>Known, accepted false positives.</b> Storyline title words are generic by nature: for the starter scenario's
@@ -78,7 +118,7 @@ public static class AmbientOutputFilter
     public const string SentimentCheck = "ambient:sentiment";
 
     /// <summary>The shortest storyline-title word kept as a keyword (shorter words are too common to be a signal).</summary>
-    public const int MinTitleKeywordLength = 5;
+    public const int MinTitleKeywordLength = 4;
 
     /// <summary>The simple inflection suffixes a whole-word term may carry and still match (<c>water</c> → <c>waters</c>).</summary>
     public static IReadOnlyList<string> InflectionSuffixes { get; } = ["s", "es", "ed", "ing", "er"];
@@ -121,6 +161,54 @@ public static class AmbientOutputFilter
         "alert issued",
         "warning issued",
         "advisory issued",
+
+        // WR-3 widening — whole words (with simple inflections) / word-start stems. See the type remarks.
+        "wildfire",
+        "firefighter*",
+        "flood",
+        "leak",
+        "explosion",
+        "storm",
+        "tornado",
+        "hurricane",
+        "earthquake",
+        "quarantin*",
+        "outbreak",
+        "lockdown",
+        "casualt*",
+
+        // WR-3 widening — phrase-only (the bare word is everyday speech on an allow-listed topic).
+        "house fire",
+        "brush fire",
+        "fire department",
+        "gas leak",
+        "chemical leak",
+        "chemical release",
+        "chemical spill",
+        "oil spill",
+        "fuel spill",
+        "toxic fumes",
+        "toxic smoke",
+        "active shooter",
+        "mass shooting",
+        "school shooting",
+        "shots fired",
+        "power out",
+        "power is out",
+        "missing person",
+    ];
+
+    /// <summary>
+    /// Incident emoji (SG-1): any of these in a post's folded text or hashtags fails it. Stored without variation
+    /// selectors (the fold strips them from the post). 💧 is deliberately absent — see the type remarks.
+    /// </summary>
+    public static IReadOnlyList<string> IncidentEmoji { get; } =
+    [
+        "\U0001F6B1", // 🚱 non-potable water
+        "\u2623",     // ☣ biohazard
+        "\u2622",     // ☢ radioactive
+        "\U0001F6A8", // 🚨 police-car light
+        "\u26A0",     // ⚠ warning sign
     ];
 
     private static readonly HashSet<string> TitleStopWords = new(StringComparer.Ordinal)
@@ -128,14 +216,22 @@ public static class AmbientOutputFilter
         "about", "after", "again", "against", "before", "being", "below", "between", "could", "during", "every",
         "their", "there", "these", "those", "through", "under", "until", "where", "which", "while", "would",
         "still", "other", "should",
+
+        // WR-3: four-letter keywords are now kept, so the common four-letter function words are stop words...
+        "also", "amid", "been", "come", "does", "done", "down", "each", "even", "from", "have", "here", "into", "just",
+        "like", "more", "most", "much", "must", "near", "only", "over", "said", "says", "some", "such", "than", "that",
+        "them", "then", "they", "this", "upon", "very", "were", "what", "when", "will", "with", "your",
+
+        // ...plus generic place/report nouns that are everyday on an allow-listed topic ("main street", "town hall").
+        "main", "town", "city", "area", "news",
     };
 
     private static readonly IReadOnlyList<string[]> ParsedFixedTerms =
         FixedIncidentTerms.Select(term => term.Split(' ', StringSplitOptions.RemoveEmptyEntries)).ToList();
 
     /// <summary>
-    /// The per-exercise exclusions derived from the active storylines: every hashtag (lower-cased letters/digits only,
-    /// without <c>#</c>) and every title word of at least <see cref="MinTitleKeywordLength"/> letters that is not a
+    /// The per-exercise exclusions derived from the active storylines: every hashtag (folded, letters/digits only,
+    /// without <c>#</c>) and every (folded) title word of at least <see cref="MinTitleKeywordLength"/> letters that is not a
     /// stop word. Each is matched as a whole word (with simple inflections) by <see cref="MentionsIncident"/>.
     /// </summary>
     /// <param name="storylineHashtags">The active storylines' hashtags.</param>
@@ -225,6 +321,11 @@ public static class AmbientOutputFilter
             return true;
         }
 
+        if (CarriesIncidentEmoji(post.Text) || (post.Hashtags ?? []).Any(CarriesIncidentEmoji))
+        {
+            return true;
+        }
+
         foreach (var term in exclusions)
         {
             if (term.Length == 0)
@@ -233,7 +334,7 @@ public static class AmbientOutputFilter
             }
 
             if (sequences.Any(tokens => tokens.Any(token => WordMatches(token, term)))
-                || compactTags.Any(tag => WordMatches(tag, term)))
+                || compactTags.Any(tag => WordMatches(tag, term) || WordMatches(TrimTrailingDigits(tag), term)))
             {
                 return true;
             }
@@ -242,7 +343,37 @@ public static class AmbientOutputFilter
         return false;
     }
 
-    /// <summary>Lower-case (invariant), hyphens/underscores/whitespace collapsed to single spaces, trimmed.</summary>
+    /// <summary>
+    /// The SG-1 fold every matched string goes through: Unicode NFKC, format characters (category Cf — zero-width
+    /// space/joiner, soft hyphen, bidi marks) removed, diacritics folded (FormD with every non-spacing mark — including
+    /// emoji variation selectors — removed, then recomposed), and lower-cased (invariant). Pure.
+    /// </summary>
+    /// <param name="text">The text.</param>
+    /// <returns>The folded text (empty for null/empty input).</returns>
+    public static string Fold(string? text)
+    {
+        if (string.IsNullOrEmpty(text))
+        {
+            return string.Empty;
+        }
+
+        var decomposed = text.Normalize(NormalizationForm.FormKC).Normalize(NormalizationForm.FormD);
+        var sb = new StringBuilder(decomposed.Length);
+        foreach (var ch in decomposed)
+        {
+            var category = CharUnicodeInfo.GetUnicodeCategory(ch);
+            if (category is UnicodeCategory.Format or UnicodeCategory.NonSpacingMark)
+            {
+                continue;
+            }
+
+            sb.Append(ch);
+        }
+
+        return sb.ToString().Normalize(NormalizationForm.FormC).ToLower(CultureInfo.InvariantCulture);
+    }
+
+    /// <summary>Folded (<see cref="Fold"/>), hyphens/underscores/whitespace collapsed to single spaces, trimmed.</summary>
     /// <param name="text">The text.</param>
     /// <returns>The normalised text.</returns>
     public static string Normalize(string? text)
@@ -254,7 +385,7 @@ public static class AmbientOutputFilter
 
         var sb = new StringBuilder(text.Length);
         var lastWasSpace = true;
-        foreach (var ch in text.ToLower(CultureInfo.InvariantCulture))
+        foreach (var ch in Fold(text))
         {
             if (char.IsWhiteSpace(ch) || ch is '-' or '_')
             {
@@ -275,7 +406,7 @@ public static class AmbientOutputFilter
     }
 
     /// <summary>
-    /// Splits text into lower-cased (invariant) word tokens: maximal runs of letters/digits. Everything else
+    /// Splits text into folded (<see cref="Fold"/>) word tokens: maximal runs of letters/digits. Everything else
     /// (whitespace, punctuation, <c>#</c>, hyphens, underscores, apostrophes) is a boundary.
     /// </summary>
     /// <param name="text">The text.</param>
@@ -289,7 +420,7 @@ public static class AmbientOutputFilter
         }
 
         var sb = new StringBuilder();
-        foreach (var ch in text.ToLower(CultureInfo.InvariantCulture))
+        foreach (var ch in Fold(text))
         {
             if (char.IsLetterOrDigit(ch))
             {
@@ -310,17 +441,27 @@ public static class AmbientOutputFilter
         return tokens;
     }
 
-    /// <summary>Lower-cased letters/digits only (<c>#Fairhaven_Water</c> → <c>fairhavenwater</c>).</summary>
+    /// <summary>Folded letters/digits only (<c>#Fairhaven_Water</c> → <c>fairhavenwater</c>).</summary>
     private static string Compact(string? text) =>
         string.IsNullOrEmpty(text)
             ? string.Empty
-            : new string(text.ToLower(CultureInfo.InvariantCulture).Where(char.IsLetterOrDigit).ToArray());
+            : new string(Fold(text).Where(char.IsLetterOrDigit).ToArray());
+
+    /// <summary>A compact hashtag without its trailing digit run (<c>fairhavenwater2</c> → <c>fairhavenwater</c>; SG-1).</summary>
+    private static string TrimTrailingDigits(string tag) => tag.TrimEnd('0', '1', '2', '3', '4', '5', '6', '7', '8', '9');
+
+    /// <summary>Whether the folded <paramref name="text"/> carries any <see cref="IncidentEmoji"/> (SG-1).</summary>
+    private static bool CarriesIncidentEmoji(string? text)
+    {
+        var folded = Fold(text);
+        return folded.Length > 0 && IncidentEmoji.Any(emoji => folded.Contains(emoji, StringComparison.Ordinal));
+    }
 
     /// <summary>Each <c>#tag</c> in free text, compacted (so an underscore tag still reads as one tag).</summary>
     private static IEnumerable<string> HashtagTokens(string? text) =>
         string.IsNullOrEmpty(text)
             ? []
-            : text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)
+            : Fold(text).Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)
                 .Where(chunk => chunk.StartsWith('#'))
                 .Select(Compact)
                 .Where(tag => tag.Length > 0);
