@@ -40,10 +40,16 @@ public sealed record PostInReplyToDto(
 /// Whether the caller's persona has pinned the post for itself (demo-feedback DF-6, a <c>pin</c> reaction). Always on
 /// the wire alongside <paramref name="Liked"/> and <paramref name="Reposted"/>; nobody else's pin is ever reported.
 /// </param>
+/// <param name="EditableForSeconds">
+/// demo-feedback DF-30 (story 19): seconds left in the edit window, <c>0</c> when it has closed or the post is at the
+/// edit limit. Set ONLY on the viewer's own participant-origin posts and OMITTED otherwise. A duration, never a
+/// wall-clock time (COR-053).
+/// </param>
 public sealed record PostViewerStateDto(
     [property: JsonPropertyName("liked")] bool Liked,
     [property: JsonPropertyName("reposted")] bool Reposted,
-    [property: JsonPropertyName("pinned")] bool Pinned = false);
+    [property: JsonPropertyName("pinned")] bool Pinned = false,
+    [property: JsonPropertyName("editableForSeconds"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? EditableForSeconds = null);
 
 /// <summary>
 /// One requested media attachment on <c>POST /api/posts</c> — the server-side mirror of the frontend

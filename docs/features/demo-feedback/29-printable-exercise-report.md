@@ -1,6 +1,6 @@
 # Story: Printable exercise report (posts, metrics and charts, saved as PDF)
 
-**Feature:** Demo feedback cut (10/20)  ·  **Phase:** 1  ·  **Status:** In Review
+**Feature:** Demo feedback cut (10/20)  ·  **Phase:** 1  ·  **Status:** Complete
 **Requirements:** EVL-030 (lite), COR-053, NFR-001  ·  **Decisions:** DF-40, DF-41, DF-42  ·  **Issue:** #550
 **Stack:** backend + frontend  ·  **Review:** Tier-1  ·  **Priority:** Must  ·  **Wave:** 3  ·  **Effort:** M
 
@@ -49,7 +49,10 @@ and no participant brand skin. The on-screen toolbar above the sheet uses COBRA 
 - [ ] Lookalikes: an unverified persona is paired with a verified one when its handle starts with the verified
       handle (case-insensitive, longer), and both authored posts in the exercise. Engagement = shown likes and
       reposts summed over that persona's posts.
-- [ ] `editCount` is `null` on every post and `summary.postsEdited` is `null` until post editing lands.
+- [ ] `editCount` is `Post.EditCount` (0 when never edited) and `lastEditedAt` the last edit's scenario time
+      (`Post.LastEditedScenarioTime`, exercise zone; `null` when never edited); `summary.postsEdited` counts posts
+      with `EditCount > 0`, taken-down posts included. The card tag reads "Edited N× · last at HH:mm". (Needs the
+      Wave 4 schema, story 17-wave4; on main without it these were `null`.)
 - [ ] Isolation (XC-001/COR-001): an unresolved scope returns 401 before any read; every read goes through the
       scoped sets or is bounded explicitly as in `PostExportService`; a cross-exercise attempt cannot see another
       exercise's posts, personas or media.
@@ -91,7 +94,7 @@ interface ExerciseReport {
     injectsDelivered: number
     medianResponseMinutes: number | null
     busiestWindow: { start: string; posts: number } | null   // the max 5-minute bin
-    postsEdited: number | null      // null until editing lands
+    postsEdited: number | null      // posts with EditCount > 0; null only from a pre-Wave-4 server
     postsTakenDown: number
     bySource: { participant: number; scripted: number; engine: number; noise: number }
   }
@@ -118,6 +121,7 @@ interface ReportPost {
            alt: string; durationSec: number | null; width: number | null; height: number | null }[]
   likes: number; reposts: number; replies: number
   pinnedForAll: boolean; takenDownAt: string | null; editCount: number | null
+  lastEditedAt: string | null /* "yyyy-MM-dd HH:mm", last edit's scenario time */
 }
 ```
 
@@ -141,7 +145,7 @@ controller notes (aar-export 03), per-participant scoring, rumor/correction char
 
 ## Dependencies
 
-Story 02 (export service and gate). Post editing (tomorrow) fills `editCount` in a follow-up.
+Story 02 (export service and gate). Wave 4 schema (`Post.EditCount`, `LastEditedScenarioTime`) for the edit fields, wired on `feature/demo-feedback-w4`.
 
 ## Tests
 

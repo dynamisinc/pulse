@@ -1,0 +1,299 @@
+/*
+ * features/social/edit/EditDialogs.module.css
+ * ---------------------------------------------------------------------------
+ * The participant skin for the two edit dialogs (story 20): the in-skin modal shell, the edit
+ * form and the history list. Light palette only (the Social skin has no dark palette). The
+ * dialogs are PORTALED to <body> (a card's stacking context must never trap them), so the
+ * palette is declared here on `.backdrop` instead of inherited from a card; the accent reads the
+ * shared per-exercise `--pulse-ac` hook (COR-030). Mirrors `ComposeModal.module.css` /
+ * `Composer.module.css`; keep the palette values in sync by hand. No COBRA, no MUI.
+ */
+
+.backdrop {
+  --pc-bg: #fff;
+  --pc-panel: #f3f5f6;
+  --pc-line: #e5e8ea;
+  --pc-control-line: #7b8993;
+  --pc-ink: #0e1518;
+  --pc-ink-muted: #61707a;
+  --pc-hover: rgba(14, 21, 24, .045);
+  --pc-accent: var(--pulse-ac, #1e3a5f);
+  --pc-low: #a35f00;
+  --pc-over: #c02a2a;
+
+  position: fixed;
+  top: calc(var(--pulse-chrome-top, 0px) + var(--pulse-alert-height, 0px));
+  right: 0;
+  bottom: var(--pulse-chrome-bottom, 0px);
+  left: 0;
+  z-index: 60;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 5vh 8px 8px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: rgba(14, 21, 24, .45);
+}
+
+.dialog {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 560px;
+  border-radius: 16px;
+  background: var(--pc-bg);
+  color: var(--pc-ink);
+  font-family: 'Figtree', system-ui, sans-serif;
+  box-shadow: 0 8px 32px rgba(14, 21, 24, .35);
+  outline: none;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--pc-line);
+}
+
+.title {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 800;
+}
+
+.close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: none;
+  border-radius: 999px;
+  background: none;
+  color: var(--pc-ink);
+  font-size: 18px;
+  cursor: pointer;
+}
+
+.close:hover {
+  background: var(--pc-hover);
+}
+
+.close:focus-visible,
+.cancel:focus-visible,
+.save:focus-visible,
+.emojiButton:focus-visible {
+  outline: 2px solid var(--pc-accent);
+  outline-offset: 2px;
+}
+
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 16px 16px;
+}
+
+.input {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 110px;
+  padding: 10px 12px;
+  border: 1px solid var(--pc-control-line);
+  border-radius: 10px;
+  background: var(--pc-bg);
+  color: var(--pc-ink);
+  font-family: inherit;
+  font-size: 17px;
+  line-height: 1.4;
+  resize: vertical;
+}
+
+.input:focus-visible {
+  outline: 2px solid var(--pc-accent);
+  outline-offset: 1px;
+}
+
+.input[readonly] {
+  opacity: .7;
+}
+
+.mediaNote {
+  margin: 0;
+  color: var(--pc-ink-muted);
+  font-size: 13px;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.emojiButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: none;
+  color: var(--pc-accent);
+  font-size: 16px;
+  cursor: pointer;
+}
+
+.emojiButton:hover,
+.emojiButton[aria-expanded='true'] {
+  background: var(--pc-hover);
+}
+
+.emojiButton:disabled {
+  opacity: .5;
+  cursor: not-allowed;
+}
+
+.emojiPicker {
+  --emoji-bg: var(--pc-bg);
+  --emoji-panel: var(--pc-panel);
+  --emoji-line: var(--pc-line);
+  --emoji-control-line: var(--pc-control-line);
+  --emoji-ink: var(--pc-ink);
+  --emoji-ink-muted: var(--pc-ink-muted);
+  --emoji-accent: var(--pc-accent);
+  --emoji-hover: var(--pc-hover);
+  --emoji-radius: 14px;
+  --emoji-font: inherit;
+}
+
+/* The length counter: the NUMBER and the words carry the state; colour only echoes them. */
+.counter {
+  margin: 0;
+  color: var(--pc-ink-muted);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.counterLow {
+  color: var(--pc-low);
+}
+
+.counterOver {
+  color: var(--pc-over);
+  font-weight: 700;
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.cancel,
+.save {
+  padding: 8px 20px;
+  border-radius: 999px;
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.cancel {
+  border: 1px solid var(--pc-ink-muted);
+  background: none;
+  color: var(--pc-ink);
+}
+
+.save {
+  border: 1px solid var(--pc-accent);
+  background: var(--pc-accent);
+  color: #fff;
+}
+
+.save:disabled,
+.save[aria-disabled='true'] {
+  opacity: .5;
+  cursor: not-allowed;
+}
+
+.error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 6px 10px;
+  border-left: 3px solid var(--pc-ink-muted);
+  border-radius: 4px;
+  background: var(--pc-panel);
+  color: var(--pc-ink);
+  font-size: 14px;
+}
+
+.status {
+  margin: 0;
+  color: var(--pc-ink-muted);
+  font-size: 14px;
+}
+
+.versions {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.version {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--pc-line);
+}
+
+.version:last-child {
+  border-bottom: none;
+}
+
+.versionMeta {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  color: var(--pc-ink-muted);
+  font-size: 13px;
+}
+
+.versionLabel {
+  padding: 0 6px;
+  border: 1px solid var(--pc-ink-muted);
+  border-radius: 4px;
+  color: var(--pc-ink);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.versionText {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.srOnly {
+  position: absolute;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  white-space: nowrap;
+}

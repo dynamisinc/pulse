@@ -65,7 +65,7 @@ public sealed class ResponseReactionCompositionRootWiringTests
     {
         private const string ConnectionStringEnvVar = "ConnectionStrings__DefaultConnection";
         private const string DummyConnectionString =
-            "Server=nonexistent;Database=pulse;Trusted_Connection=False;";
+            "Server=nonexistent;Database=pulse;Trusted_Connection=False;Connect Timeout=1;";
 
         public WiringProbeFactory()
             => Environment.SetEnvironmentVariable(ConnectionStringEnvVar, DummyConnectionString);

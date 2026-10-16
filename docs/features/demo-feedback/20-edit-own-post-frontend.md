@@ -1,6 +1,6 @@
 # Story: Edit own post: participant UI and staff view
 
-**Feature:** Demo feedback cut (10/20)  ·  **Phase:** 1  ·  **Status:** Not Started
+**Feature:** Demo feedback cut (10/20)  ·  **Phase:** 1  ·  **Status:** In Review
 **Requirements:** D1 parity (X edit), COR-053, NFR-001  ·  **Decisions:** DF-29..DF-33  ·  **Issue:** #538
 **Stack:** frontend  ·  **World:** participant (+ one staff chip)  ·  **Review:** Tier-1  ·  **Priority:** Must  ·  **Wave:** 4  ·  **Effort:** M
 **Owner:** planning session · **Branch:** `build/demo-feedback/20-edit-post-ui` → `feature/demo-feedback-w4`
@@ -16,38 +16,38 @@ check once 19 is deployed.
 
 ### Participant (brand skin, never COBRA)
 
-- [ ] `PostActions` shows an **Edit** button (FontAwesome `faPen`, tooltip and accessible name "Edit post", same
+- [x] `PostActions` shows an **Edit** button (FontAwesome `faPen`, tooltip and accessible name "Edit post", same
       tooltip pattern as story 13) only when `post.viewer.editableForSeconds > 0`. The client counts the seconds down
       from when the post was read and hides Edit at 0 without a reload; no wall-clock time is ever rendered (COR-053).
-- [ ] Edit opens an in-skin dialog (new `social/edit/EditPostDialog.tsx`) prefilled with the text, the composer's
+- [x] Edit opens an in-skin dialog (new `social/edit/EditPostDialog.tsx`) prefilled with the text, the composer's
       length counter and emoji button (`core/emoji`), Save / Cancel, focus trapped and returned to the Edit button,
       Esc cancels. Media is shown read-only ("Media can't be changed").
-- [ ] Save calls `PATCH /api/posts/{id}`; on success the card shows the new text immediately (own-post optimistic
+- [x] Save calls `PATCH /api/posts/{id}`; on success the card shows the new text immediately (own-post optimistic
       update, rolled back on failure). 409 reasons map to plain messages: "The 15-minute edit window has closed",
       "You've reached the edit limit", "Posting is paused right now" (`frozen`: Freeze, or a paused/ended exercise). Other failures keep the dialog open with the error.
-- [ ] Every card (feed, thread, profile, Pinned) shows **"Edited"** after the time when `post.edited` is set
+- [x] Every card (feed, thread, profile, Pinned) shows **"Edited"** after the time when `post.edited` is set
       (`PostHeader`); it is a button that opens **"Edit history"** (new `social/edit/EditHistoryDialog.tsx`), listing
       each version newest first with its scenario time ("Current" / "Original" labels). Text, not color, marks it.
-- [ ] Live: `realtimeFeed.ts` subscribes to `PostEdited` on the existing connection with a strict validator
+- [x] Live: `realtimeFeed.ts` subscribes to `PostEdited` on the existing connection with a strict validator
       (`postId` string, `text` string, `edited.count` positive integer, `edited.scenarioTime` ISO string, `version`
       = count); a new leaf store `social/edit/editedPostsStore.ts` (`useSyncExternalStore`, version-gated, reset on
       sign-out in `core/auth/endSession.ts`) overrides text and `edited` for that post; `PostBody` and `PostHeader`
       read through it, so a mounted card anywhere updates without a reload. A stale or replayed frame is dropped.
-- [ ] Hashtags and mentions in the edited text render like any post body (existing `PostBody` parsing).
-- [ ] Mocks: the mock post service implements PATCH, history and emits `PostEdited`, so the mock demo shows it.
+- [x] Hashtags and mentions in the edited text render like any post body (existing `PostBody` parsing).
+- [x] Mocks: the mock post service implements PATCH, history and emits `PostEdited`, so the mock demo shows it.
 
 ### Staff (COBRA)
 
-- [ ] `LiveWorldRow` shows an "Edited" chip (COBRA) when `edited` is set, opening the same history list rendered in
+- [x] `LiveWorldRow` shows an "Edited" chip (COBRA) when `edited` is set, opening the same history list rendered in
       COBRA styling (a staff-skinned wrapper; never the participant dialog's brand skin). Live world picks up
       `PostEdited` on its existing feed source.
 
 ### Cross-cutting
 
-- [ ] Two worlds: participant pieces live under `social/**` in the brand skin; the staff chip under
+- [x] Two worlds: participant pieces live under `social/**` in the brand skin; the staff chip under
       `controller/liveWorld/**` in COBRA. FontAwesome only; MUI 9 `sx`-only.
-- [ ] Accessibility: dialogs labelled, keyboard operable, "Edited" announced as part of the post's accessible text.
-- [ ] `post.provenance.test.ts` updated for the `editableForSeconds` viewer key.
+- [x] Accessibility: dialogs labelled, keyboard operable, "Edited" announced as part of the post's accessible text.
+- [x] `post.provenance.test.ts` updated for the `editableForSeconds` viewer key.
 
 ## Out of Scope
 
@@ -70,3 +70,20 @@ Owned files per [`WAVE-4.md`](WAVE-4.md#wave-plan): `social/components/post/{Pos
 optimistic update and rollback; 409 messages; Edited label and history dialog order; `PostEdited` validator (good and
 malformed); store version gate and sign-out reset; a mounted feed card and thread card both update on a frame;
 Live world chip renders and opens history; axe check on both dialogs.
+
+## Build Notes (story 20 builder)
+
+Live check against story 19's deployed API: **pending 19 deploy** (everything above was built and tested against
+the frozen contract through the mock switches).
+
+- The Edit button uses story 13's `ParticipantTooltip` (merged from the umbrella) plus the accessible name.
+- The edit countdown starts at the first read of a post's seconds value (`edit/editWindowClock.ts`), so a remount does not grant a fresh window.
+- Quoted-post embeds are not `PostBody` and do not show edits live (known, out of scope).
+- The `PostCard` is untouched (story 21 owns it), so `PostHeader` / `PostBody` find their post through the enclosing
+  `<article data-post-id>` (`edit/useEnclosingPostId.ts`) and `PostActions` seeds `editedPostsStore` with the card's
+  `post.edited`. Once 21 merges, `PostCard` can pass `postId` explicitly (both parts accept it) and the seed can go.
+- Outside the owned list, minimal and necessary: `components/post/types.ts` (`PostView.edited`),
+  `services/feedService.ts` (`toPostView` carries `edited`), `services/ownPostStore.ts` (an own just-published post keeps
+  `editableForSeconds` / `edited`), `core/auth/endSession.ts` (store reset, as the AC says; sits beside story 14's `postCountsStore` reset), and the
+  `liveWorldTwoWorlds.test.ts` allowlist (two new leaf social modules).
+- No axe dependency exists in the repo, so the dialogs' accessibility is pinned with explicit role/label/focus assertions.

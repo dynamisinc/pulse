@@ -111,6 +111,11 @@ public sealed class PostExportResult
 /// The <c>Shown</c> columns add the seeded baseline exactly as <c>ParticipantPostProjector</c> does.
 /// </para>
 /// <para>
+/// <b>Edits (demo-feedback story 19, DF-31/DF-39).</b> Each page also reads its edited posts' <see cref="PostEdit"/> rows
+/// (one batched read through the scoped set) for the three <c>Posts</c> edit columns and the <c>Edit history</c> sheet:
+/// one row per version of every edited post, in export order then edit number. Never-edited posts add no history rows.
+/// </para>
+/// <para>
 /// <b>Telemetry (XC-004).</b> One <c>export.posts.downloaded</c> event per built workbook, actor the staff human, and
 /// a payload of <c>{ rows }</c> only: no text, no names.
 /// </para>
@@ -213,8 +218,9 @@ public sealed class PostExportService
         using var workbook = new PostExportWorkbook();
         foreach (var page in orderedIds.Chunk(PageSize))
         {
-            var rows = await ReadPageAsync(page, lookups, zone, cancellationToken);
+            var (rows, historyRows) = await ReadPageAsync(page, lookups, zone, cancellationToken);
             workbook.AddRows(rows);
+            workbook.AddEditHistoryRows(historyRows);
         }
 
         // One buffer, handed to the response as-is: no second full copy of the file (Gate-1 M1).
@@ -293,7 +299,7 @@ public sealed class PostExportService
         return new ExportLookups(personas, humans, staffRoles, injects);
     }
 
-    private async Task<List<PostExportRow>> ReadPageAsync(
+    private async Task<(List<PostExportRow> Rows, List<PostEditHistoryExportRow> HistoryRows)> ReadPageAsync(
         Guid[] page,
         ExportLookups lookups,
         TimeZoneInfo zone,
@@ -316,8 +322,21 @@ public sealed class PostExportService
                 post.BaselineLikeCount,
                 post.BaselineRepostCount,
                 post.BaselineReplyCount,
-                post.PinnedForAllAt))
+                post.PinnedForAllAt,
+                post.EditCount,
+                post.LastEditedScenarioTime))
             .ToDictionaryAsync(post => post.Id, cancellationToken);
+
+        // demo-feedback story 19: every PostEdit of this page's edited posts, in one read through the scoped set.
+        var editedIds = posts.Values.Where(post => post.EditCount > 0).Select(post => post.Id).ToArray();
+        var editRows = editedIds.Length == 0
+            ? []
+            : await _dbContext.PostEdits
+                .AsNoTracking()
+                .Where(edit => editedIds.Contains(edit.PostId))
+                .Select(edit => new EditRow(edit.PostId, edit.EditNumber, edit.PreviousBody, edit.EditedAt, edit.EditedScenarioTime))
+                .ToListAsync(cancellationToken);
+        var editsByPost = editRows.ToLookup(edit => edit.PostId);
 
         var engagement = await _engagementReader.GetAsync(page, viewerPersonaId: null, cancellationToken);
 
@@ -348,6 +367,7 @@ public sealed class PostExportService
                 .ToDictionaryAsync(post => post.Id, post => post.AuthorPersonaId, cancellationToken);
 
         var rows = new List<PostExportRow>(page.Length);
+        var historyRows = new List<PostEditHistoryExportRow>();
         foreach (var id in page)
         {
             // A post that vanished between the id read and this page cannot happen (nothing is hard-deleted, XC-010),
@@ -398,10 +418,67 @@ public sealed class PostExportService
                 PinnedForAll = post.PinnedForAllAt is null ? string.Empty : PostExportLabels.Yes,
                 Status = post.DeletedAt is null ? PostExportLabels.Live : PostExportLabels.TakenDown,
                 TakenDownAt = PostExportLabels.ScenarioTime(post.DeletedAt, zone),
+                Edits = post.EditCount,
+                LastEditedAt = post.EditCount > 0 ? PostExportLabels.ScenarioTime(post.LastEditedScenarioTime, zone) : string.Empty,
+                OriginalText = post.EditCount > 0
+                    ? editsByPost[post.Id].FirstOrDefault(edit => edit.EditNumber == 1)?.PreviousBody ?? string.Empty
+                    : string.Empty,
             });
+
+            if (post.EditCount > 0)
+            {
+                historyRows.AddRange(EditHistoryRows(post, editsByPost[post.Id], zone));
+            }
         }
 
-        return rows;
+        return (rows, historyRows);
+    }
+
+    /// <summary>
+    /// The <c>Edit history</c> rows of one edited post (DF-39), edit number ascending: version 0 at the post's creation
+    /// times, version n at <c>PostEdit</c> n's times; version n's text is <c>PostEdit</c> n+1's <c>PreviousBody</c>, or
+    /// the current body for the last version, which alone is <c>Current = yes</c>.
+    /// </summary>
+    private static IEnumerable<PostEditHistoryExportRow> EditHistoryRows(PageRow post, IEnumerable<EditRow> edits, TimeZoneInfo zone)
+    {
+        var byNumber = edits.ToDictionary(edit => edit.EditNumber);
+        for (var number = 0; number <= post.EditCount; number++)
+        {
+            var isCurrent = number == post.EditCount;
+            var text = isCurrent
+                ? post.Body
+                : byNumber.TryGetValue(number + 1, out var next) ? next.PreviousBody : string.Empty;
+
+            DateTimeOffset scenario;
+            DateTimeOffset wall;
+            if (number == 0)
+            {
+                scenario = post.CreatedScenarioTime;
+                wall = post.CreatedWallClock;
+            }
+            else if (byNumber.TryGetValue(number, out var edit))
+            {
+                scenario = edit.EditedScenarioTime;
+                wall = edit.EditedAt;
+            }
+            else
+            {
+                // A missing edit row cannot happen (the edit and the count are written in one transaction); the post's
+                // own last-edit time is the safest stand-in if it ever did.
+                scenario = post.LastEditedScenarioTime ?? post.CreatedScenarioTime;
+                wall = post.CreatedWallClock;
+            }
+
+            yield return new PostEditHistoryExportRow
+            {
+                PostId = post.Id.ToString(),
+                EditNumber = number,
+                ScenarioTime = PostExportLabels.ScenarioTime(scenario, zone),
+                WallClockUtc = wall.UtcDateTime,
+                Text = text,
+                Current = isCurrent ? PostExportLabels.CurrentYes : PostExportLabels.CurrentNo,
+            };
+        }
     }
 
     private static string ResolvePostedBy(PageRow post, ExportLookups lookups)
@@ -498,7 +575,17 @@ public sealed class PostExportService
         int BaselineLikeCount,
         int BaselineRepostCount,
         int BaselineReplyCount,
-        DateTimeOffset? PinnedForAllAt);
+        DateTimeOffset? PinnedForAllAt,
+        int EditCount,
+        DateTimeOffset? LastEditedScenarioTime);
+
+    /// <summary>One <c>PostEdit</c> the export reads (story 19).</summary>
+    private sealed record EditRow(
+        Guid PostId,
+        int EditNumber,
+        string PreviousBody,
+        DateTimeOffset EditedAt,
+        DateTimeOffset EditedScenarioTime);
 
     /// <summary>The opaque XC-004 payload: the row count only.</summary>
     private sealed class DownloadedPayload

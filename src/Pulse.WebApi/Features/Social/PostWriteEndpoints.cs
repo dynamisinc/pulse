@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Pulse.WebApi.Data.Entities;
+using Pulse.WebApi.Features.Social.Editing;
 using Pulse.WebApi.Features.Social.Follows;
 
 /// <summary>
@@ -164,8 +165,18 @@ public static class PostWriteEndpoints
                 // media URLs, inReplyTo; no viewer, no provenance, no baseline field). The staff body borrows its
                 // media/inReplyTo and keeps the provenance the console reads off its own write.
                 var participantView = result.ParticipantView ?? ParticipantPostDto.FromPost(post);
-                return string.Equals(post.Origin, "participant", StringComparison.Ordinal)
-                    ? Results.Json(participantView, statusCode: StatusCodes.Status201Created)
+
+                // demo-feedback story 19: the creator's OWN 201 carries its viewer state with the full edit window, so
+                // Edit shows on a fresh post without waiting for the next feed read. A copy: the broadcast payload
+                // (the same projection) stays viewer-free.
+                return string.Equals(post.Origin, PostEditRules.ParticipantOrigin, StringComparison.Ordinal)
+                    ? Results.Json(
+                        participantView.WithViewer(new PostViewerStateDto(
+                            Liked: false,
+                            Reposted: false,
+                            Pinned: false,
+                            EditableForSeconds: (int)PostEditRules.Window.TotalSeconds)),
+                        statusCode: StatusCodes.Status201Created)
                     : Results.Json(StaffPostDto.FromPost(post, participantView), statusCode: StatusCodes.Status201Created);
 
             default:
@@ -309,6 +320,13 @@ public sealed class StaffPostDto
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public PostInReplyToDto? InReplyTo { get; init; }
 
+    /// <summary>
+    /// The "Edited" summary (demo-feedback DF-31, story 19): <c>{ count, scenarioTime }</c>, or <c>null</c> when never
+    /// edited — always on the wire, as on <see cref="ParticipantPostDto.Edited"/>. Scenario time only.
+    /// </summary>
+    [JsonPropertyName("edited")]
+    public PostEditedSummaryDto? Edited { get; init; }
+
     /// <summary>Projects a persisted staff-authored post to the staff response shape (provenance retained).</summary>
     /// <param name="post">The persisted post.</param>
     /// <returns>The staff-visible projection of <paramref name="post"/>.</returns>
@@ -340,6 +358,7 @@ public sealed class StaffPostDto
             InjectId = post.InjectId,
             Media = participantView?.Media,
             InReplyTo = participantView?.InReplyTo,
+            Edited = PostEditRules.SummaryOf(post),
         };
     }
 }

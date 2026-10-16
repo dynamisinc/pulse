@@ -323,7 +323,7 @@ public sealed class SteeringCompositionRootWiringTests
             _acceptedToken = acceptedToken;
             Environment.SetEnvironmentVariable(
                 ConnectionStringEnvVar,
-                "Server=nonexistent;Database=pulse;Trusted_Connection=False;");
+                "Server=nonexistent;Database=pulse;Trusted_Connection=False;Connect Timeout=1;");
         }
 
         protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -402,7 +402,7 @@ public sealed class SteeringCompositionRootWiringTests
     {
         private const string ConnectionStringEnvVar = "ConnectionStrings__DefaultConnection";
         private const string DummyConnectionString =
-            "Server=nonexistent;Database=pulse;Trusted_Connection=False;";
+            "Server=nonexistent;Database=pulse;Trusted_Connection=False;Connect Timeout=1;";
 
         public WiringProbeFactory()
             => Environment.SetEnvironmentVariable(ConnectionStringEnvVar, DummyConnectionString);

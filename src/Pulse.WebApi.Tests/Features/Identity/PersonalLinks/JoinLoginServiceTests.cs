@@ -251,7 +251,7 @@ public sealed class JoinLoginServiceTests
     {
         // A never-connecting database: the 400 must return before any read or write.
         await using var context = new PulseDbContext(
-            new DbContextOptionsBuilder<PulseDbContext>().UseSqlServer("Server=nonexistent;Database=none;").Options);
+            new DbContextOptionsBuilder<PulseDbContext>().UseSqlServer("Server=nonexistent;Database=none;Connect Timeout=1;").Options);
         var issuer = new RecordingSessionIssuer();
         var service = ServiceFor(context, Guid.NewGuid(), issuer);
 

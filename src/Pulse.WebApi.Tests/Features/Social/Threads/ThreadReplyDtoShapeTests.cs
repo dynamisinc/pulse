@@ -10,6 +10,7 @@ using System.Text.Json.Serialization;
 using FluentAssertions;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.Social;
+using Pulse.WebApi.Features.Social.Editing;
 using Pulse.WebApi.Features.Social.Threads;
 
 /// <summary>
@@ -106,8 +107,9 @@ public class ThreadReplyDtoShapeTests
         var node = JsonNode.Parse(json)!.AsObject();
 
         node.Select(p => p.Key).Should().BeEquivalentTo(
-            new[] { "id", "authorPersonaId", "text", "counts", "scenarioTime", "replyToPersonaId", "status" },
-            "a tombstone has no media, inReplyTo or viewer");
+            new[] { "id", "authorPersonaId", "text", "counts", "scenarioTime", "edited", "replyToPersonaId", "status" },
+            "a tombstone has no media, inReplyTo or viewer (edited is always on the wire, null here: story 19)");
+        node["edited"].Should().BeNull("a tombstone never carries an edit summary");
         node["text"]!.GetValue<string>().Should().BeEmpty();
         node["status"]!.GetValue<string>().Should().Be("taken-down");
         node["scenarioTime"]!.GetValue<string>().Should().Be(reply.CreatedScenarioTime.ToString("O"), "scenario time is emitted round-trip (COR-053)");
@@ -150,6 +152,7 @@ public class ThreadReplyDtoShapeTests
         InReplyTo = new PostInReplyToDto(Guid.NewGuid().ToString(), "parent_handle"),
         Viewer = new PostViewerStateDto(true, true, true),
         PinnedForAll = true,
+        Edited = new PostEditedSummaryDto { Count = 2, ScenarioTime = new DateTimeOffset(2033, 9, 4, 14, 5, 0, TimeSpan.FromHours(-5)).ToString("O") },
     };
 
     private static PropertyInfo[] JsonProperties(Type type) => type

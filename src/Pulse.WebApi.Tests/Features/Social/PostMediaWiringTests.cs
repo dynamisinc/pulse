@@ -200,7 +200,7 @@ public sealed class PostMediaWiringTests
         private const string ConnectionStringEnvVar = "ConnectionStrings__DefaultConnection";
 
         public WiringProbeFactory() => Environment.SetEnvironmentVariable(
-            ConnectionStringEnvVar, "Server=nonexistent;Database=pulse;Trusted_Connection=False;");
+            ConnectionStringEnvVar, "Server=nonexistent;Database=pulse;Trusted_Connection=False;Connect Timeout=1;");
 
         protected override void Dispose(bool disposing)
         {

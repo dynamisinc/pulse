@@ -42,7 +42,7 @@ public sealed class SharedReadOnlyEndpointsHttpTests
                     // DbContext uses a never-connecting string — every path asserted here returns before it.
                     services.AddSharedReadOnly();
                     services.AddDbContext<PulseDbContext>(options =>
-                        options.UseSqlServer("Server=nonexistent;Database=pulse;Trusted_Connection=False;"));
+                        options.UseSqlServer("Server=nonexistent;Database=pulse;Trusted_Connection=False;Connect Timeout=1;"));
                     services.AddScoped<IExerciseContext, ExerciseContext>();
                     services.AddScoped<ISessionIssuer, RecordingSessionIssuer>();
                 });

@@ -209,7 +209,7 @@ public sealed class RosterEndpointsGateHttpTests
         using var host = await RosterHttpHost.StartAsync(services =>
         {
             services.AddDbContext<PulseDbContext>(options =>
-                options.UseSqlServer("Server=nonexistent;Database=pulse;Trusted_Connection=False;"));
+                options.UseSqlServer("Server=nonexistent;Database=pulse;Trusted_Connection=False;Connect Timeout=1;"));
             services.AddScoped<IExerciseContext>(_ => new ExerciseContext { CurrentExerciseId = Guid.NewGuid() });
             services.AddScoped<ICurrentStaffSessionAccessor, NullCurrentStaffSessionAccessor>();
         });
