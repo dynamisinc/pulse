@@ -153,8 +153,26 @@ public class PulseDbContext : DbContext
     /// <summary>Staff human identities (COR-005/COR-014). NOT exercise-scoped — a staff human spans exercises.</summary>
     public DbSet<StaffUser> StaffUsers => Set<StaffUser>();
 
-    /// <summary>Staff role-on-one-exercise assignments (COR-005). NOT exercise-scoped — cross-exercise by design.</summary>
-    public DbSet<StaffAssignment> StaffAssignments => Set<StaffAssignment>();
+    /// <summary>
+    /// The humans (identity-auth-roles/16, ADMIN-IDENTITY-MODEL §1.1). <see cref="IOrganizationOwned"/> resolution
+    /// root — NOT centrally filtered; every read is <c>InOrganization</c>-bounded or carries a sweep exemption.
+    /// </summary>
+    public DbSet<Person> People => Set<Person>();
+
+    /// <summary>
+    /// Every role a person holds in an exercise (identity-auth-roles/16) — replaces <c>StaffAssignment</c>.
+    /// Exercise-scoped (<see cref="IExerciseScoped"/>); cross-exercise org reads are explicit and TenantChecked.
+    /// </summary>
+    public DbSet<Enrollment> Enrollments => Set<Enrollment>();
+
+    /// <summary>Organization-tier audit records (ADMIN-IDENTITY-MODEL §7.5). Org-scoped (<see cref="IOrganizationScoped"/>).</summary>
+    public DbSet<OrgAuditEvent> OrgAuditEvents => Set<OrgAuditEvent>();
+
+    /// <summary>Single-use slugless sign-in org choices (ADMIN-IDENTITY-MODEL §1.2). Unscoped resolution root, looked up by token hash.</summary>
+    public DbSet<LoginChoice> LoginChoices => Set<LoginChoice>();
+
+    /// <summary>The password-verified candidates of a <see cref="LoginChoice"/>. Unscoped, read only through its choice.</summary>
+    public DbSet<LoginChoiceCandidate> LoginChoiceCandidates => Set<LoginChoiceCandidate>();
 
     /// <summary>Persisted server-side sessions (COR-012). NOT exercise-scoped — looked up by opaque token pre-scope-resolution.</summary>
     public DbSet<Session> Sessions => Set<Session>();
@@ -205,6 +223,11 @@ public class PulseDbContext : DbContext
             // confused for one another on a staff/platform surface.
             entity.Property(e => e.Name).IsRequired().HasMaxLength(200);
             entity.HasIndex(e => e.Name).IsUnique();
+
+            // identity-auth-roles/16: the org slug in the staff console URL (ADMIN-IDENTITY-MODEL §1.2). Unique,
+            // bounded, backfilled from Name by the AdminIdentityFoundation migration.
+            entity.Property(e => e.Slug).IsRequired().HasMaxLength(Organization.MaxSlugLength);
+            entity.HasIndex(e => e.Slug).IsUnique();
 
             // NOT IOrganizationOwned / IOrganizationScoped: Organization IS the tenant scope, exactly as
             // Exercise is the exercise scope. It carries no filter of its own.
@@ -595,16 +618,6 @@ public class PulseDbContext : DbContext
             entity.HasIndex(e => e.OrganizationId);
         });
 
-        modelBuilder.Entity<StaffAssignment>(entity =>
-        {
-            entity.HasKey(e => e.Id);
-
-            // NOT IExerciseScoped: cross-exercise by design (COR-005). ExerciseId is a PLAIN column.
-            // One role per (staff user, exercise); plus a reverse index for "who is assigned to exercise X".
-            entity.HasIndex(e => new { e.StaffUserId, e.ExerciseId }).IsUnique();
-            entity.HasIndex(e => e.ExerciseId);
-        });
-
         modelBuilder.Entity<Session>(entity =>
         {
             entity.HasKey(e => e.Id);
@@ -619,7 +632,150 @@ public class PulseDbContext : DbContext
                 .HasFilter("[RefreshTokenHash] IS NOT NULL");
 
             // Bound exercise is a plain column; indexed for the story-07 revoke-all-by-exercise query.
+            // Nullable since identity-auth-roles/16: NULL = org scope (never Guid.Empty — see the property doc).
             entity.HasIndex(e => e.ExerciseId);
+
+            // identity-auth-roles/16: the person the session was minted for (grant-revoke + cross-world revocation
+            // key) and the minting origin (bounded). The lead flag is NOT stored here: it is read live from the
+            // enrollment whenever the session is projected (a lead change revokes nothing).
+            entity.HasIndex(e => e.PersonId);
+            entity.Property(e => e.Origin).HasMaxLength(Session.MaxOriginLength);
+        });
+
+        // ==========================================================================================
+        // identity-auth-roles/16 — ADMIN-IDENTITY-MODEL A1 (the AdminIdentityFoundation migration). Person (org-owned
+        // resolution root) + the shared-key StaffUser facet; Enrollment (IExerciseScoped — the reflection loop below
+        // gives it the central filter) replacing StaffAssignment, with Account re-homed onto it; OrgAuditEvent
+        // (IOrganizationScoped — the org loop below filters it); LoginChoice(+Candidate), unscoped resolution roots.
+        // Every foreign key is Restrict: no cascade path, no stray hard delete (XC-010).
+        // ==========================================================================================
+        modelBuilder.Entity<Person>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+
+            // IOrganizationOwned: required + indexed. NO global filter — a resolution root (see the entity doc).
+            entity.Property(e => e.OrganizationId).IsRequired();
+            entity.HasIndex(e => e.OrganizationId);
+
+            // Email is unique PER ORGANIZATION (Tom, Q2). Filtered so the legacy NULL-email rows backfilled from
+            // StaffUsers do not collide. Case-insensitive under the model collation; stored normalized anyway.
+            entity.Property(e => e.Email).HasMaxLength(Person.MaxEmailLength);
+            entity.HasIndex(e => new { e.OrganizationId, e.Email })
+                .IsUnique()
+                .HasFilter("[Email] IS NOT NULL");
+
+            entity.Property(e => e.DisplayName).IsRequired().HasMaxLength(Person.MaxDisplayNameLength);
+            entity.Property(e => e.PasswordHash).HasMaxLength(Person.MaxPasswordHashLength);
+            entity.Property(e => e.FailedLoginCount).IsRequired().HasDefaultValue(0);
+            entity.Property(e => e.OrgRole).HasMaxLength(Person.MaxOrgRoleLength);
+
+            // The org-level grant vocabulary: orgAdmin or nothing.
+            entity.ToTable(table => table.HasCheckConstraint(
+                "CK_People_OrgRole",
+                "[OrgRole] IS NULL OR [OrgRole] = 'orgAdmin'"));
+        });
+
+        // The staff facet shares the person's primary key (StaffUser.Id == Person.Id): a 1:1 FK on the PK.
+        modelBuilder.Entity<StaffUser>()
+            .HasOne(e => e.Person)
+            .WithOne()
+            .HasForeignKey<StaffUser>(e => e.Id)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<Enrollment>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+
+            // IExerciseScoped: required scope + the standard scoped lookup index (house style).
+            entity.Property(e => e.ExerciseId).IsRequired();
+            entity.HasIndex(e => e.ExerciseId);
+
+            entity.Property(e => e.Role).IsRequired().HasMaxLength(Enrollment.MaxRoleLength);
+            entity.Property(e => e.IsLead).IsRequired().HasDefaultValue(false);
+
+            // One person, ONE role per exercise — enforced by the database itself, so being staff and a participant
+            // in one exercise is impossible (ADMIN-IDENTITY-MODEL §1.1). Filtered: one-off participants have no person.
+            entity.HasIndex(e => new { e.ExerciseId, e.PersonId })
+                .IsUnique()
+                .HasFilter("[PersonId] IS NOT NULL");
+
+            // At most one lead controller per exercise. A separately-named index on the same column as the plain
+            // scope index above (EF keys index identity on the column set unless the name differs).
+            entity.HasIndex(e => e.ExerciseId, "IX_Enrollments_ExerciseId_Lead")
+                .IsUnique()
+                .HasFilter("[IsLead] = 1");
+
+            // The cross-exercise "this person's enrollments" read (switcher, staff sign-in).
+            entity.HasIndex(e => e.PersonId);
+
+            entity.HasOne<Person>()
+                .WithMany()
+                .HasForeignKey(e => e.PersonId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.ToTable(table =>
+            {
+                // orgAdmin is NOT an exercise role any more (it is Person.OrgRole).
+                table.HasCheckConstraint(
+                    "CK_Enrollments_Role",
+                    "[Role] IN ('planner', 'controller', 'evaluator', 'participant', 'pio')");
+
+                // A persona belongs to a participant-world enrollment only.
+                table.HasCheckConstraint(
+                    "CK_Enrollments_PersonaId_ParticipantRolesOnly",
+                    "[PersonaId] IS NULL OR [Role] IN ('participant', 'pio')");
+
+                // The lead flag is valid only on a controller.
+                table.HasCheckConstraint(
+                    "CK_Enrollments_IsLead_ControllerOnly",
+                    "[IsLead] = 0 OR [Role] = 'controller'");
+            });
+        });
+
+        // Account is the participant sign-in facet of exactly one enrollment (unique, non-null).
+        modelBuilder.Entity<Account>(entity =>
+        {
+            entity.HasOne(e => e.Enrollment)
+                .WithOne()
+                .HasForeignKey<Account>(e => e.EnrollmentId)
+                .IsRequired()
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(e => e.EnrollmentId).IsUnique();
+        });
+
+        modelBuilder.Entity<OrgAuditEvent>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+
+            // IOrganizationScoped: required tenant; the org reflection loop below gives it the central filter.
+            entity.Property(e => e.OrganizationId).IsRequired();
+            entity.HasIndex(e => new { e.OrganizationId, e.OccurredAt });
+
+            entity.Property(e => e.Kind).IsRequired().HasMaxLength(OrgAuditEvent.MaxKindLength);
+            entity.Property(e => e.Outcome).IsRequired().HasMaxLength(OrgAuditEvent.MaxOutcomeLength);
+            entity.Property(e => e.Payload).IsRequired().HasColumnType("nvarchar(max)");
+        });
+
+        modelBuilder.Entity<LoginChoice>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.TokenHash).IsRequired().HasMaxLength(LoginChoice.MaxHashLength);
+            entity.HasIndex(e => e.TokenHash).IsUnique();
+            entity.Property(e => e.CreatedFromIpHash).IsRequired().HasMaxLength(LoginChoice.MaxHashLength);
+        });
+
+        modelBuilder.Entity<LoginChoiceCandidate>(entity =>
+        {
+            entity.HasKey(e => new { e.ChoiceId, e.PersonId });
+
+            entity.HasOne<LoginChoice>()
+                .WithMany()
+                .HasForeignKey(e => e.ChoiceId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Person>()
+                .WithMany()
+                .HasForeignKey(e => e.PersonId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         // ==========================================================================================

@@ -1,7 +1,8 @@
 namespace Pulse.WebApi.Data.Entities;
 
 /// <summary>
-/// A staff human identity (controller / evaluator / planner) authenticated through
+/// The STAFF FACET of a <see cref="Entities.Person"/> (identity-auth-roles/16: one row per person who holds any
+/// staff enrollment, sharing the person's id) — a staff human identity (controller / evaluator / planner) authenticated through
 /// <c>IIdentityProvider</c> — the Dynamis IdP in Phase 1, a future Entra/AD/SSO/Cadence-federation provider
 /// behind the same interface (COR-014). A staff human SPANS exercises (COR-005), so this is deliberately
 /// <b>NOT</b> <see cref="IExerciseScoped"/>.
@@ -14,7 +15,7 @@ namespace Pulse.WebApi.Data.Entities;
 /// <b>no participant-visible content</b>; it is an identity, not content. It therefore does not implement
 /// the marker, so the B0 global query filter never confines it to one exercise and the write-guard never
 /// demands an <c>ExerciseId</c>. Content isolation still holds: the moment a staff user selects an active
-/// exercise (<see cref="StaffAssignment"/>, story 05) that populates <c>ExerciseContext.CurrentExerciseId</c>,
+/// exercise (a staff <see cref="Enrollment"/>, story 05/16) that populates <c>ExerciseContext.CurrentExerciseId</c>,
 /// and every <see cref="IExerciseScoped"/> content query is scoped from then on.
 /// </para>
 /// <para>
@@ -44,7 +45,7 @@ public sealed class StaffUser : IOrganizationOwned
     /// <see cref="IOrganizationScoped"/>. Like <see cref="Exercise"/>, this is a RESOLUTION ROOT: staff login
     /// looks a human up by <see cref="ExternalSubject"/> BEFORE any session, exercise or tenant exists, so a
     /// tenant filter here could only ever return zero rows and lock every staff human out. Exactly the same
-    /// shape as <see cref="Session"/>/<see cref="StaffAssignment"/> being unscoped on the inner tier because
+    /// shape as <see cref="Session"/> being unscoped on the inner tier because
     /// they are looked up pre-scope. Cross-tenant reachability is instead bounded explicitly, at the two
     /// places it matters, by <see cref="OrganizationScope.InOrganization{TEntity}"/> and by
     /// <c>StaffAssignmentService</c>'s org check.
@@ -69,4 +70,13 @@ public sealed class StaffUser : IOrganizationOwned
 
     /// <summary>Reserved (story 05): wall-clock instant of the last successful staff login, or <c>null</c> if never.</summary>
     public DateTimeOffset? LastLoginAt { get; set; }
+
+    /// <summary>
+    /// The <see cref="Entities.Person"/> this staff facet belongs to (identity-auth-roles/16, ADMIN-IDENTITY-MODEL
+    /// §1.1). The facet SHARES the person's primary key — <c>StaffUser.Id == Person.Id</c>, enforced by a foreign
+    /// key — so every existing staff id (sessions, link issuers, day-word setters, telemetry actor ids) stays
+    /// valid. Set it when creating a staff human so the person row is inserted in the same unit of work; it is
+    /// not loaded by default.
+    /// </summary>
+    public Person? Person { get; set; }
 }

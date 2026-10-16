@@ -47,20 +47,19 @@ public sealed class Account : IExerciseScoped
     public required string DisplayName { get; set; }
 
     /// <summary>
-    /// The account's role for this exercise — the <c>ExerciseRole</c> union value as a string
-    /// (<c>participant</c> / <c>pio</c> / <c>controller</c> / <c>evaluator</c> / <c>planner</c> /
-    /// <c>orgAdmin</c>), stored VERBATIM as the frozen frontend vocabulary (<c>core/auth/roles.ts</c>) so it
-    /// flows onto the frozen <c>Session.role</c> wire field with no case-mapping. Matches the house pattern
-    /// for frontend-union columns (<see cref="Persona.Kind"/>, <see cref="Post.Origin"/>).
+    /// The participant-role <see cref="Entities.Enrollment"/> this account is the sign-in facet of
+    /// (identity-auth-roles/16, ADMIN-IDENTITY-MODEL §1.1). Unique and non-null: one account per enrollment. The
+    /// account's role and persona live on the enrollment (<c>Enrollment.Role</c> / <c>Enrollment.PersonaId</c>) —
+    /// they moved off this table in the <c>AdminIdentityFoundation</c> migration.
     /// </summary>
-    public required string Role { get; set; }
+    public Guid EnrollmentId { get; set; }
 
     /// <summary>
-    /// The <see cref="Persona"/> this account posts as, or <c>null</c> when the account has no bound persona
-    /// (e.g. a staff-adjacent role). Nullable to mirror the optional <c>Session.personaId</c> wire field. A
-    /// plain id reference (no navigation), matching <see cref="Persona.PersonaTemplateId"/>.
+    /// The enrollment carrying this account's role and persona. Required. Readers that need the role or persona
+    /// either project through it (EF joins on the scoped table) or <c>Include</c> it on an entity load; creators
+    /// set it so the enrollment is inserted in the same unit of work.
     /// </summary>
-    public Guid? PersonaId { get; set; }
+    public Enrollment Enrollment { get; set; } = null!;
 
     /// <summary>
     /// The individual human behind the (possibly shared) account for per-human attribution (COR-018).
@@ -112,7 +111,7 @@ public sealed class Account : IExerciseScoped
 
     /// <summary>
     /// The free-text job label from the roster CSV's <c>role</c> column ("EOC Liaison"), or <c>null</c>. NOT an
-    /// <c>ExerciseRole</c>: that is <see cref="Role"/> (EL-1). Staff-only.
+    /// <c>ExerciseRole</c>: that is <c>Enrollment.Role</c> (EL-1). Staff-only.
     /// </summary>
     public string? JobRole { get; set; }
 
@@ -129,7 +128,7 @@ public sealed class Account : IExerciseScoped
     public DateTimeOffset? DisabledAt { get; set; }
 
     /// <summary>
-    /// Whether <see cref="PersonaId"/> is the citizen persona the roster auto-created for this person (EL-4), as
+    /// Whether the enrollment's persona is the citizen persona the roster auto-created for this person (EL-4), as
     /// opposed to a bound org persona or a seeded one. Defaults to <c>false</c>.
     /// </summary>
     public bool PersonaAutoCreated { get; set; }
