@@ -219,8 +219,11 @@ and test each one:
   amendment 1); any controller can lower it to `review` or `off`. The change is logged with the old value,
   the new value and who made it. "Who" is the server-verified staff identity from the session token
   (`StaffUserId`), not a value the console sends; a request with no staff session is refused. A "raise" is
-  turning `autonomous` on, or, while it is on, raising a cap or adding a topic or persona. The engine never
-  raises the policy itself,
+  turning `autonomous` on, or, while it is on, raising a cap or adding a topic or persona. The lead check and
+  the policy write are atomic (compare-and-set), so a concurrent change cannot slip between them. Approving,
+  editing or vetoing an ambient **review** draft, and the automatic demotion, are attributed to the session
+  person by Session A's A1c on all engine draft routes (a prerequisite above). The engine never raises the
+  policy itself,
   and restoring after the kill switch never re-enables it.
 - **Bounded volume.** `maxPerMinute` and `maxPerHour` caps apply. `maxPerMinute` can never exceed the
   exercise's `MaxEnginePostsPerMinute`.
@@ -240,7 +243,10 @@ and test each one:
   - **Residual risk:** persona voice notes are staff-authored text placed in the trusted part of the
     prompt without fencing, and some seeded residents' notes mention the incident. For that path the
     phrase-based `ContentGuard` and the output filter are the only defence. It is red-teamed through the
-    real path; it is accepted for `uat` only.
+    real path; it is accepted for `uat` only. Ambient prompts omit voice notes entirely, so this residual
+    applies to storyline prompts only.
+  - The incident vocabulary is a snapshot taken when the exercise's engine is seeded. A storyline or hashtag
+    injected later is not excluded until the engine is re-seeded.
 - **Never storyline or escalation.** Only the `AmbientFloor` trigger can take the autonomous path.
   Inaction, official-response and amplification content, and anything storyline-bound or escalating,
   always goes through review. A timed-out draft is held, never auto-sent.
