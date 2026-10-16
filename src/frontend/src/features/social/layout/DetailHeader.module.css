@@ -45,6 +45,15 @@
   outline-offset: 2px;
 }
 
+/* Touch target (mobile-tablet story 18, NFR-001): 44x44 on a COARSE pointer. The header's
+ * min-height (53px) already contains it, so the bar does not grow. */
+@media (pointer: coarse) {
+  .back {
+    width: var(--pulse-touch-min, 44px);
+    height: var(--pulse-touch-min, 44px);
+  }
+}
+
 .title {
   margin: 0;
   color: var(--pc-ink);

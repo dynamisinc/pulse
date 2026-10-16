@@ -239,6 +239,14 @@
   cursor: not-allowed;
 }
 
+/* Touch target (mobile-tablet story 18, NFR-001): 44x44 of real space on a COARSE pointer. */
+@media (pointer: coarse) {
+  .attachButton {
+    width: var(--pulse-touch-min, 44px);
+    height: var(--pulse-touch-min, 44px);
+  }
+}
+
 @media (max-width: 420px) {
   .thumb {
     width: 56px;

@@ -107,7 +107,7 @@
  * handlers' functional no-op.
  */
 
-import { useCallback, useEffect, useMemo, useRef } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faBan } from '@fortawesome/free-solid-svg-icons'
 import { buildAndEmit } from '@/core/telemetry'
@@ -127,6 +127,19 @@ import { useThread, type ThreadReplyView } from '../hooks/useThread'
 import { useSocialDirectory } from '../layout/socialDirectory'
 import { ReplyComposer } from './ReplyComposer'
 import styles from './ThreadView.module.css'
+
+/** The focused post's enlargement; MUST equal the `scale()` in `.focusedWrap`. */
+const FOCUSED_SCALE = 1.06
+
+/**
+ * The extra bottom space (px) a top-left `scale(FOCUSED_SCALE)` of a box `layoutHeight`
+ * tall needs so the enlarged post stops short of the first reply (mobile-tablet SG-005).
+ * A transform does not take layout space, so the card used to spill `6%` of its own
+ * height into its 16 px margin and touched the first reply on tall media.
+ */
+export function focusedOverflowPx(layoutHeight: number): number {
+  return Math.ceil(layoutHeight * (FOCUSED_SCALE - 1))
+}
 
 /** Mirrors `Feed.tsx`'s local `CardVariant` — the two `<PostCard>` render
  * modes a shell variant maps to (COR-015/D1-011). */
@@ -209,6 +222,21 @@ export function ThreadView({
   // The reply composer's text area: focused when a card's reply button was the way
   // into this thread (`replyIntent`), and by the focused card's own reply button.
   const composerInputRef = useRef<HTMLTextAreaElement>(null)
+
+  // SG-005: extra bottom margin that absorbs the focused post's scale overflow. A callback
+  // ref (the wrapper is conditional) observes the LAYOUT height (`offsetHeight` ignores the
+  // transform), so late media / reflow keep it exact. No ResizeObserver (jsdom): stays 0.
+  const [focusedExtra, setFocusedExtra] = useState(0)
+  const focusedObserver = useRef<ResizeObserver | null>(null)
+  const focusedWrapRef = useCallback((el: HTMLDivElement | null) => {
+    focusedObserver.current?.disconnect()
+    focusedObserver.current = null
+    if (!el || typeof ResizeObserver === 'undefined') return
+    const measure = () => setFocusedExtra(focusedOverflowPx(el.offsetHeight))
+    measure()
+    focusedObserver.current = new ResizeObserver(measure)
+    focusedObserver.current.observe(el)
+  }, [])
   const focusComposer = useCallback(() => {
     composerInputRef.current?.focus()
   }, [])
@@ -328,7 +356,12 @@ export function ThreadView({
       })}
 
       {focusedView && (
-        <div className={styles.focusedWrap} data-testid="thread-focused">
+        <div
+          ref={focusedWrapRef}
+          className={styles.focusedWrap}
+          style={focusedExtra > 0 ? { marginBottom: `${16 + focusedExtra}px` } : undefined}
+          data-testid="thread-focused"
+        >
           <PostCard
             post={focusedView}
             variant={cardVariant}
