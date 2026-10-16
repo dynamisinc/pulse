@@ -50,6 +50,11 @@ every other Phase-A story reads. Staff-world plumbing; no participant-visible ch
 ### Copilot review 2 fold (2026-10-16)
 - [ ] The A1 migration also creates `LoginChoices` and `LoginChoiceCandidates` (ADMIN-IDENTITY-MODEL §1.2, §9).
 
+### Lead controller (Tom, 2026-10-16; ADMIN-IDENTITY-MODEL §1.1)
+- [ ] `Enrollment.IsLead` (bit, default 0) is in the A1 migration, with a check constraint (`IsLead = 1` only when `Role = 'controller'`) and a filtered unique index on `(ExerciseId) WHERE IsLead = 1`, so an exercise has at most one lead.
+- [ ] `PUT /api/staff/enrollments/{id}/lead` (planner or org admin; bare 404 cross-exercise or cross-org) sets the lead, clears the previous lead in the same transaction, revokes the affected sessions, and is audited. A non-controller target gets 409 `not-a-controller`.
+- [ ] Session/`SessionDto` exposes `isLead` so Session C can gate the swamped-mode UI.
+
 ## Out of Scope
 Password sign-in itself and org choice (story 15 / 05); role enforcement (17); invite and directory UI (19-20);
 the A2/A3/A4 columns (their own migrations). No participant-facing change.

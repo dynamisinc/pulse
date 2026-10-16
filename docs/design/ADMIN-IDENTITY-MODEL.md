@@ -86,6 +86,16 @@ Organization (+ Slug: new, unique; used in the staff console URL, §1.2)
   The unique index above enforces it, and the service maps the violation to 409 `conflicting-enrollment`.
   A person who is a controller on Exercise A and a participant on Exercise B is fine. Being both
   inside one exercise would break evaluation integrity and the two-worlds rule.
+- **Lead controller (signed off by Tom, 2026-10-16).** `Enrollment.IsLead` (bit, default 0):
+  - It is valid only on a `controller` enrollment, enforced by a check constraint.
+  - There is **at most one lead per exercise**, enforced by a filtered unique index on `(ExerciseId)` where
+    `IsLead = 1`.
+  - Planners and org admins set it with `PUT /api/staff/enrollments/{id}/lead`. The endpoint arrives in A1;
+    the UI comes with A2 story 20. Setting a new lead clears the old one in the same transaction.
+  - It gates **swamped mode** (auto-send of expired timed drafts, D5 STORY-UPDATES) and the engine
+    **autonomy level** write: lead controller only, every other role gets 403.
+  - Like any other grant change, changing the lead revokes the affected sessions.
+  - It unblocks Session C's provider flip (#571).
 - **Revoking a grant revokes the sessions built on it.** `StaffCallerContext` authorizes from the persisted
   `Session.Role`, and refresh preserves that role. So revoking `OrgRole`, disabling a Person, or removing
   or changing an `Enrollment` revokes, **in the same transaction**, every live session (access and refresh)
@@ -595,6 +605,7 @@ Key: ✅ allowed · — refused (403; 404 where the bare-404 pattern applies) ·
 | Assign staff to an exercise | ✅ | ✅ (own exercise; cannot remove the last planner) | — | — | — | — |
 | Settings, chrome, practice mode, sign-in methods | via enrollment | ✅ | — **(change: today any staff)** | — | — | — |
 | Stage, unstage *(L)* | via enrollment | ✅ | — | — | — | — |
+| **Swamped mode, engine autonomy level** | via enrollment | — | **lead controller only** | — | — | — |
 | StartEx, pause/resume, EndEx, reopen, Freeze/pause tiers *(L)* | via enrollment | — | ✅ | — | — | — |
 | Roster: import, links, day word, email, participant reset/reissue, avatars | via enrollment | ✅ | ✅ | — | — | — |
 | View-only code rotate/revoke | via enrollment | ✅ | ✅ | — **(change: today any staff)** | — | — |
@@ -635,7 +646,7 @@ the report export offered first; from `completed` **or `staged`**; planner or or
 
 | Kind | Item | Wave |
 |---|---|---|
-| **EF migration** | `AdminIdentityFoundation`:<br>• `People` table, with a backfill of one per `StaffUser` (same Id; legacy rows have a null Email until invited)<br>• `StaffUsers.Id` FK → `People.Id`<br>• `Organizations.Slug` (unique; backfilled from Name)<br>• **`Enrollments` table**: StaffAssignment rows migrated with the same Id, plus one per `Account` (Role and PersonaId copied); then **`StaffAssignments` is dropped** and **`Accounts.Role`/`Accounts.PersonaId` are dropped**<br>• `Accounts.EnrollmentId` (unique, non-null after backfill)<br>• `Sessions.PersonId`, **`Sessions.ExerciseId` nullable**<br>• `People.OrgRole`, with orgAdmin enrollments backfilled → planner + OrgRole<br>• `People` password and lockout columns (`PasswordHash`, `PasswordChangedAt`, `FailedLoginCount`, `LockedOutUntil`)<br>• `Sessions.Origin` (the cross-tab world backstop)<br>• `LoginChoices` + `LoginChoiceCandidates` (slugless org choice)<br>• **`OrgAuditEvents` table**<br>• `Exercises.FirstLiveAt` (backfilled from lifecycle telemetry where the status is past `staged`)<br>Hand-written SQL in `EXEC`, per OPERATE.md; reversible `Down` | A1 |
+| **EF migration** | `AdminIdentityFoundation`:<br>• `People` table, with a backfill of one per `StaffUser` (same Id; legacy rows have a null Email until invited)<br>• `StaffUsers.Id` FK → `People.Id`<br>• `Organizations.Slug` (unique; backfilled from Name)<br>• **`Enrollments` table**: StaffAssignment rows migrated with the same Id, plus one per `Account` (Role and PersonaId copied); then **`StaffAssignments` is dropped** and **`Accounts.Role`/`Accounts.PersonaId` are dropped**<br>• `Accounts.EnrollmentId` (unique, non-null after backfill)<br>• `Sessions.PersonId`, **`Sessions.ExerciseId` nullable**<br>• `People.OrgRole`, with orgAdmin enrollments backfilled → planner + OrgRole<br>• `People` password and lockout columns (`PasswordHash`, `PasswordChangedAt`, `FailedLoginCount`, `LockedOutUntil`)<br>• `Enrollments.IsLead` (check: controller only; filtered unique index, one lead per exercise)<br>• `Sessions.Origin` (the cross-tab world backstop)<br>• `LoginChoices` + `LoginChoiceCandidates` (slugless org choice)<br>• **`OrgAuditEvents` table**<br>• `Exercises.FirstLiveAt` (backfilled from lifecycle telemetry where the status is past `staged`)<br>Hand-written SQL in `EXEC`, per OPERATE.md; reversible `Down` | A1 |
 | EF migration | `CredentialToken`; `People.AvatarBlobName`; `Exercises.SignInMethods`; `MediaAssets.UploadedByAccountId` | A2 |
 | EF migration | `Posts.IsSetupContent`, `Follows.IsSetupContent` (with the §5.4 backfill); `Exercises.ParticipantName` | A3 |
 | EF migration | `ContentPack`, `ContentPackItem`; persona archive column | A4 |
@@ -706,3 +717,6 @@ The story fixes include:
 **Copilot review 4 (2026-10-16), on `e1c0b9d`, 2 findings, both accepted:**
 - Reset keeps media that is still referenced, which supersedes clearing persona references (§5.4b).
 - Revoking a grant revokes the sessions minted from it (§1.1).
+
+**Added 2026-10-16 (Tom):** the lead controller is `Enrollment.IsLead` in A1 (§1.1, §8.2), at the orchestrator's
+request for Session C (#571).
