@@ -40,8 +40,17 @@ shortcut strip and the world-steering panel (`PausePill`, `NoiseControl`, `Escal
 | Export posts, Exercise report | title row | "More" (⋯) menu in the title row | "More" (⋯) menu |
 | Personas / ENGINE / USAGE / Participant admin | toolstrip flyouts | unchanged (one at a time, D7-011) | full-height flyouts over the pane |
 
+**Signed variants (Tom, 10/16).** Two viewports get a different arrangement from the generic
+band:
+- **Large landscape (≥ 1180 wide, e.g. 1180×820): side by side.** Live world | Run sheet share the
+  main area (about 414px each) next to the docked 296px Review queue. Tom expects to revisit this
+  after hands-on use, so it is chosen by **one layout constant**, not a code fork (see D5-022).
+- **Tall portrait (≥ 820 wide and ≥ 1100 tall, e.g. 820×1180): stacked.** Live world sits above
+  a docked Review queue (split about 60/40). Run sheet is a tab beside Live world in the upper
+  region. 768×1024 portrait keeps the full tab switcher.
+
 Rules:
-- **One pane switcher.** It follows the ARIA tabs pattern, with tabs at least 44px tall. All panes
+- **One pane switcher**, wherever panes collapse. It follows the ARIA tabs pattern, with tabs at least 44px tall. All panes
   stay mounted and are hidden when inactive, so scroll position, a half-typed edit, and the active
   tab survive a tab switch or a rotation.
 - Every tab carries a **text badge**: Live world "N new" (from `useLiveWorldUnread`), Run sheet
@@ -66,7 +75,27 @@ TABLET LANDSCAPE  1024x768 / 1180x820
 |                                                | 296px, docked       |    |
 +------------------------------------------------+---------------------+----+
 
-TABLET PORTRAIT  768x1024 / 820x1180
+TABLET LANDSCAPE, LARGE  1180x820  (initial choice; layout constant)
++---------------------------------------------------------------------------+----+
+| header 56px                                                               | T  |
++---------------------------------------------------------------------------+ O  |
+| command band (sticky): kill switch . demand . review counts . Pause . End | O  |
++------------------------+------------------------+-------------------------+ L  |
+| LIVE WORLD . 12 new    | RUN SHEET . 3 due      | REVIEW QUEUE (5) 296px  | S  |
+| ~414px                 | ~414px                 | docked                  | T  |
++------------------------+------------------------+-------------------------+----+
+
+TABLET PORTRAIT, TALL  820x1180  (stacked)
++--------------------------------------------------+----+
+| header / command band (sticky, 2 rows)           | T  |
++--------------------------------------------------+ O  |
+| [Live world . 12 new] [Run sheet . 3 due]        | O  |
+|   upper pane (~60%)                              | L  |
++--------------------------------------------------+ S  |
+| REVIEW QUEUE (5) . docked lower (~40%)           | T  |
++--------------------------------------------------+----+
+
+TABLET PORTRAIT  768x1024 (full tab switcher)
 +--------------------------------------------------+----+
 | PULSE v | Bay Shield | SCN 09:33 | (o) RUNNING |..| T  |  header (wall clock,
 +--------------------------------------------------+ O  |  presence, preview -> ..)
@@ -168,26 +197,33 @@ text and an underline, not by colour alone.
 - **D5-021: Tablet bands.** Landscape covers 1024–1279 and portrait covers 768–1023, selected by
   width. Touch sizing is gated separately by `(pointer: coarse)`. Desktop at 1280 and up does not
   change.
-- **D5-022: One pane switcher.** Live world and Run sheet become tabs at tablet sizes. The review
-  queue stays docked at 296px in landscape and becomes a badged tab in portrait. Panes stay
-  mounted.
+- **D5-022: Tablet pane layouts, chosen by one constant.** A single layout table (for example
+  `CONSOLE_TABLET_LAYOUTS` keyed by viewport band) picks the arrangement, so changing a layout is
+  a one-line config edit, not a code fork. Signed initial values:
+  - 1024–1179 landscape: one switcher (Live world / Run sheet) plus docked 296px Review queue.
+  - ≥ 1180 landscape: **side by side** (Live world | Run sheet, about 414px each) plus docked
+    Review queue. Expected to be revisited after hands-on use.
+  - Tall portrait (≥ 820 wide and ≥ 1100 tall): **stacked**, with the Live world / Run sheet
+    switcher above a docked Review queue.
+  - Other portrait (768–1023): full tab switcher, with Review as a badged tab.
+
+  Panes stay mounted in every arrangement.
 - **D5-023: Command band.** The kill switch, demand and needs-review readout, Pause/Freeze and
   EndEx share one sticky strip. It is never tabbed, never in overflow, and never covered.
   Kill switch and EndEx sit at opposite ends.
 - **D5-024: Touch parity.** Every shortcut has a visible 44px control (table in §4). Hints show
   the platform modifier, ⌘ on iPadOS.
 - **D5-025: Deliberate confirms on touch.** Two taps minimum, no destructive autofocus, confirm
-  placed away from the trigger, 400ms arming delay.
-- **D5-026: Tablet secondary controls.** Steering becomes a collapsed disclosure row. Export and
-  Report go to a "More" menu.
+  placed away from the trigger, 400ms arming delay. **The kill switch's STOP → Live re-arm needs a
+  confirm on touch** (Tom, 10/16). Stopping stays one tap.
+- **D5-026: Tablet secondary controls.** Steering (escalation dial and noise) becomes a disclosure
+  row, **collapsed by default, one tap away** (Tom, 10/16). Export and Report go to a "More" menu.
 
-## Open questions for Tom
+## Answers from Tom (10/16), folded into §2 and D5-022/025/026
 
-1. **820x1180 portrait.** Use tabs, as proposed, or split the pane vertically with the Live world
-   above a docked Review queue (the tall screen could afford it)?
-2. **1180x820 landscape.** Keep one switcher, as proposed, or show Live world and Run sheet side
-   by side (about 414px each)?
-3. **Kill-switch re-arm.** Today one tap cycles Live → Suggest-only → STOP → Live. Should the
-   STOP → Live step need a confirm on touch? Stopping would stay one tap.
-4. **Steering collapsed by default.** Is it acceptable for the escalation dial to be one tap away
-   on tablet?
+1. **820×1180 portrait:** "I think stacked view initially." Tall portrait uses the stacked layout
+   (Live world / Run sheet above a docked Review queue).
+2. **1180×820 landscape:** "side by side, probably will change after playing with it though."
+   Side by side is the initial value of the layout constant (D5-022).
+3. **STOP → Live confirm on touch:** "yes" (D5-025).
+4. **Escalation dial one tap away by default:** "yes" (D5-026).
