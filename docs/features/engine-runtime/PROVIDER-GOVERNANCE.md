@@ -144,10 +144,10 @@ default (Azure OpenAI in-tenant is the v1 default; Claude is the per-deployment 
 
 ## 8. Sign-off
 
-> **Status: UNSIGNED — this is the hard stop.** `engine-runtime/05` has prepared everything below and
-> deliberately stopped here. Evidence is compiled and linked so signing is a **one-step human action**;
-> nothing in the repo ticks a box. Until the boxes below are ticked and signer + date entered,
-> `generationProviderLive` stays `false` and the UAT App Service resolves `Generation:Provider = Fake`.
+> **Status: SIGNED — Tom Bull, 2026-10-16 — `uat` only, Ambient tier, suggest-only.** The three
+> `uat.bicepparam` parameters (`generationProviderLive`, `generationTenantBounded`,
+> `generationNoTrainingAttested`) were set to `true` in the same commit that recorded this signature.
+> CI and production stay on `Fake`. The text below is kept as the pre-signing record.
 
 **Environment requested:** `uat` (`app-pulse-api-uat-dynamis` → `aif-pulse-uat`,
 `rg-pulse-uat-centralus`). CI and production are **not** in scope and stay on `Fake`.
@@ -222,9 +222,21 @@ verification pass).
 
 | | |
 |---|---|
-| Governance contract reviewed (§2 — evidence i) | ☐ |
-| Fail-closed gate verified (§3 — `ProviderLiveConfigTests` green in CI, evidence ii) | ☐ |
-| Measured p95 within the degraded-mode threshold (§5 — evidence iii) | ☐ |
-| `InjectionRedTeam` green against the live provider (§6 — evidence iv) | ☐ |
-| Approved to flip `Generation:Provider` off `Fake` for `<environment>` — requested: **`uat`**, Ambient tier, suggest-only | ☐ |
-| Signer / date | |
+| Governance contract reviewed (§2 — evidence i) | ☑ |
+| Fail-closed gate verified (§3 — `ProviderLiveConfigTests` green in CI, evidence ii) | ☑ |
+| Measured p95 within the degraded-mode threshold (§5 — evidence iii) | ☑ |
+| `InjectionRedTeam` green against the live provider (§6 — evidence iv) | ☑ |
+| Approved to flip `Generation:Provider` off `Fake` for **`uat`** — Ambient tier, suggest-only | ☑ |
+| Signer / date | **Tom Bull — 2026-10-16** |
+
+### Pre-signing verification against Azure (2026-10-16, run by the signer in Cloud Shell, `Shared SandBox`)
+
+Provisioning half deployed by **Deploy Infrastructure** run #12
+([37951107243](https://github.com/dynamisinc/pulse/actions/runs/37951107243), 2026-10-09, real deploy,
+not what-if) from `2435702`, with `deployAi = true` and all three live-traffic params `false`.
+
+| Check | Expected | Observed |
+|---|---|---|
+| (i) App Service identity role on `aif-pulse-uat` | `Cognitive Services OpenAI User` at account scope | `Cognitive Services OpenAI User` at `…/Microsoft.CognitiveServices/accounts/aif-pulse-uat` ✅ |
+| (i) Keyless + residency | `localAuthDisabled: true`, `centralus` | `true`, `centralus` ✅ |
+| (iv) Ambient model version drift (§6) | `gpt-5.4-mini` `2026-03-17` | `gpt-5.4-mini` `2026-03-17` ✅ (no drift; no §6 re-run needed) |

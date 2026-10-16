@@ -64,7 +64,9 @@ param deployAi = true
 // Cost, once live: ~$0.61/exercise-hour at the measured Ambient rate while a storyline is active
 // (MEASURED-RESULTS.md). Cheap, not free — flip it back to false after a verification pass rather than
 // leaving it on indefinitely.
-param generationProviderLive = false
+//
+// SIGNED 2026-10-16 (Tom Bull) — PROVIDER-GOVERNANCE.md §8, uat / Ambient / suggest-only.
+param generationProviderLive = true
 
 // The two §2 governance attestations, asserted HERE BY A HUMAN — deliberately not derived from deployAi,
 // so GenerationGovernance.Validate remains an independent startup gate that can actually fire rather than
@@ -86,8 +88,9 @@ param generationProviderLive = false
 // them asserts nothing (fail closed). Harmless today: with generationProviderLive = false the App Service
 // resolves Generation:Provider = Fake, whose in-process posture is compliant by construction and never
 // runs the governance gate.
-param generationTenantBounded = false
-param generationNoTrainingAttested = false
+// Attested by the §8 signer (Tom Bull, 2026-10-16) after verifying evidence (i) against Azure.
+param generationTenantBounded = true
+param generationNoTrainingAttested = true
 
 // Flip to true (with deployAi) to also deploy the Claude-on-Foundry tiers for the E8 provider
 // comparison. Requires a Claude-eligible subscription; the Anthropic Marketplace offer is auto-accepted
