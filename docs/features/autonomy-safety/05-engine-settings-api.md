@@ -1,6 +1,6 @@
 # Story: Engine settings API (autonomy default + tier policy, runtime-settable)
 
-**Feature:** Autonomy & safety  ·  **Epic:** E8  ·  **Phase:** 2 (v1)  ·  **Status:** In Progress — built, Gate-1 + Gate-2 clean, **merged to `main`** (2026-07-29). NOT Complete: this story's DoD requires verified-in-UAT, which is outstanding. UAT is unblocked: §8 signed 2026-10-16 (Tom Bull), PR #571 flips UAT to the live provider (Ambient tier, suggest-only). UAT precondition satisfied 2026-07-29: the deployed staff assignment role is confirmed `controller`.
+**Feature:** Autonomy & safety  ·  **Epic:** E8  ·  **Phase:** 2 (v1)  ·  **Status:** In Progress — built, Gate-1 + Gate-2 clean, **merged to `main`** (2026-07-29). NOT Complete: this story's DoD requires verified-in-UAT, which is outstanding. §8 signed 2026-10-16 (Tom Bull); UAT verification waits on PR #571 (the live-provider flip, Ambient tier) merging after Session A's A1, then the UAT infra deploy. UAT precondition satisfied 2026-07-29: the deployed staff assignment role is confirmed `controller`.
 **Requirements:** ADP §2.3 (v1 subset), ADP-025/NFR-005 (governed tier boundary)  ·  **Design decisions:** none  ·  **Issue:** #353
 
 ## Context

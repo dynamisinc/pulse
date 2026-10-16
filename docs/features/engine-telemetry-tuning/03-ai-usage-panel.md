@@ -1,6 +1,6 @@
 # Story: AI generation usage panel
 
-**Feature:** Engine telemetry & tuning  ·  **Epic:** E8  ·  **Phase:** 2 (v1)  ·  **Status:** In Progress (built + Gate-2 clean; awaiting UAT verification — unblocked: §8 signed 2026-10-16, PR #571 flips UAT live)
+**Feature:** Engine telemetry & tuning  ·  **Epic:** E8  ·  **Phase:** 2 (v1)  ·  **Status:** In Progress (built + Gate-2 clean; awaiting UAT verification — §8 signed 2026-10-16; waits on PR #571 merging (after Session A's A1) and the UAT infra deploy)
 **Requirements:** ADP-041  ·  **Design decisions:** none  ·  **Issue:** #401
 
 ## Context
@@ -34,7 +34,7 @@ Also resolved this session: the infrastructure blocker that gated §8's provisio
 made `main.bicep` non-idempotent against the live UAT SQL server; the fix moved it to the child
 resource (PR #404), and a full provisioning deploy then succeeded, so the App Service now carries its
 managed identity and all eleven `Generation__*` settings, with `Generation__Provider = Fake`. §8
-was an unsigned human sign-off when this story was written. **Update 2026-10-16: §8 is now signed (Tom Bull); PR #571 flips UAT to the live provider (Ambient tier, suggest-only), so the "0 calls, $0" to "N calls, $Y" transition this panel verifies is now observable on UAT.**
+was an unsigned human sign-off when this story was written. **Update 2026-10-16: §8 is now signed (Tom Bull). PR #571 flips UAT to the live provider (Ambient tier), but it is a draft that merges only after Session A's A1, and the flip then takes effect only after a separate Deploy Infrastructure run. Until both happen UAT stays on `Fake`, so the "0 calls, $0" to "N calls, $Y" transition this panel verifies is not yet observable.**
 
 Emission already exists and is out of scope here — `EngineEventPayloads.Generated`
 (`src/Pulse.WebApi/Features/EngineRuntime/Telemetry/EngineEventPayloads.cs:83`), emitted by
