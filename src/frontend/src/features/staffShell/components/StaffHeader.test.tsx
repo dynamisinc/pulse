@@ -47,10 +47,11 @@
  * covered by `core/auth/endSession.test.ts`) so this file only asserts that the
  * control CALLS it, never re-tests its internals.
  */
-import type { ReactElement } from 'react'
+import type { ReactElement, ReactNode } from 'react'
 import { act, render as rtlRender, renderHook, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { StaffHeader, STAFF_CLASSIFICATION } from './StaffHeader'
 import { useExerciseContext } from '@/core/exerciseContext'
@@ -75,9 +76,20 @@ vi.mock('react-router-dom', async importOriginal => {
   return { ...actual, useNavigate: () => mockNavigate }
 })
 
-/** Wraps every `render(<StaffHeader ... />)` call site in a real Router. */
+/**
+ * Wraps every `render(<StaffHeader ... />)` call site in a real Router and a
+ * QueryClientProvider (the identity badge reads the staff assignments).
+ */
 function render(ui: ReactElement) {
-  return rtlRender(ui, { wrapper: MemoryRouter })
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  function Wrapper({ children }: { children: ReactNode }) {
+    return (
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>{children}</MemoryRouter>
+      </QueryClientProvider>
+    )
+  }
+  return rtlRender(ui, { wrapper: Wrapper })
 }
 
 const BASE_SCOPE: ExerciseScope = {

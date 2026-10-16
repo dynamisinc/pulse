@@ -93,7 +93,6 @@ const SURFACES: RoleAwareEntryProps = {
     },
   ],
   participantGuard: StubGuard,
-  staffSwitcher: <div data-testid="exercise-switcher" />,
 }
 
 function renderAt(initialEntry: string) {

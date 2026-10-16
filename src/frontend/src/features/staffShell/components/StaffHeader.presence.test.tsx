@@ -13,6 +13,7 @@
  */
 import { render, screen, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { describe, expect, it, vi } from 'vitest'
 import { StaffHeader } from './StaffHeader'
 import type { StaffPresenceMember } from '../staffHeaderMocks'
@@ -40,12 +41,20 @@ vi.mock('../staffHeaderMocks', async importOriginal => {
   return { ...actual, useStaffPresence: () => ROSTER }
 })
 
+// The header's identity badge reads the staff assignments (React Query) to decide
+// whether it is a switcher, so every render needs a QueryClientProvider.
+function newQueryClient() {
+  return new QueryClient({ defaultOptions: { queries: { retry: false } } })
+}
+
 describe('StaffHeader — a non-empty presence roster', () => {
   it('renders a labelled "Staff presence" group with one accessible avatar per member', () => {
     render(
-      <MemoryRouter>
-        <StaffHeader surfaceName="Controller Console" />
-      </MemoryRouter>,
+      <QueryClientProvider client={newQueryClient()}>
+        <MemoryRouter>
+          <StaffHeader surfaceName="Controller Console" />
+        </MemoryRouter>
+      </QueryClientProvider>,
     )
 
     const group = screen.getByRole('group', { name: 'Staff presence' })

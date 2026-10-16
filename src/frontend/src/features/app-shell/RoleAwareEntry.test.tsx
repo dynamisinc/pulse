@@ -58,7 +58,6 @@ vi.mock('@/core/exerciseContext', async importOriginal => {
 const StubGuard: ComponentType<{ children: ReactNode }> = ({ children }) => (
   <div data-testid="participant-guard">{children}</div>
 )
-const stubSwitcher = <div data-testid="exercise-switcher" />
 
 const BASE_SESSION: Session = {
   exerciseId: 'ex-mock-0001',
@@ -126,7 +125,6 @@ function renderEntry(props: Partial<RoleAwareEntryProps> = {}) {
     participantSurface: <div data-testid="participant-surface" />,
     staffRoutes: STUB_STAFF_ROUTES,
     participantGuard: StubGuard,
-    staffSwitcher: stubSwitcher,
     ...props,
   }
   return render(
@@ -171,23 +169,23 @@ describe('RoleAwareEntry — participant / pio', () => {
 })
 
 describe('RoleAwareEntry — staff', () => {
-  it('routes a controller to the console surface WITH the switcher', () => {
+  it('routes a controller to the console surface with NO exercise-switcher panel above it', () => {
     primeSession({ role: 'controller' })
     renderEntry()
 
     expect(screen.getByTestId('staff-surface-controller')).toBeInTheDocument()
-    expect(screen.getByTestId('exercise-switcher')).toBeInTheDocument()
+    expect(screen.queryByTestId('exercise-switcher')).not.toBeInTheDocument()
     // No participant world leaks in.
     expect(screen.queryByTestId('participant-guard')).not.toBeInTheDocument()
     expect(screen.queryByTestId('participant-surface')).not.toBeInTheDocument()
   })
 
-  it('routes an evaluator to the evaluator surface WITH the switcher', () => {
+  it('routes an evaluator to the evaluator surface with NO exercise-switcher panel above it', () => {
     primeSession({ role: 'evaluator' })
     renderEntry()
 
     expect(screen.getByTestId('staff-surface-evaluator')).toBeInTheDocument()
-    expect(screen.getByTestId('exercise-switcher')).toBeInTheDocument()
+    expect(screen.queryByTestId('exercise-switcher')).not.toBeInTheDocument()
   })
 
   it('mounts the staff surface UNDER the COBRA theme (two-worlds)', () => {

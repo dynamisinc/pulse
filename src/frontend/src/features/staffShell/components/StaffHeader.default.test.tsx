@@ -18,18 +18,27 @@
  */
 import { render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { describe, expect, it } from 'vitest'
 import { StaffHeader } from './StaffHeader'
 import { ExerciseContextProvider } from '@/core/exerciseContext'
 
+// The header's identity badge reads the staff assignments (React Query) to decide
+// whether it is a switcher, so every render needs a QueryClientProvider.
+function newQueryClient() {
+  return new QueryClient({ defaultOptions: { queries: { retry: false } } })
+}
+
 describe('StaffHeader — shipped default (real ExerciseContextProvider, DEV mock resolution)', () => {
   it('renders the identity badge and a LIVE state pill for the mock-resolved active exercise', async () => {
     render(
-      <MemoryRouter>
-        <ExerciseContextProvider>
-          <StaffHeader surfaceName="Controller Console" />
-        </ExerciseContextProvider>
-      </MemoryRouter>,
+      <QueryClientProvider client={newQueryClient()}>
+        <MemoryRouter>
+          <ExerciseContextProvider>
+            <StaffHeader surfaceName="Controller Console" />
+          </ExerciseContextProvider>
+        </MemoryRouter>
+      </QueryClientProvider>,
     )
 
     await waitFor(() => expect(screen.getByTestId('staff-header-identity-badge')).toBeInTheDocument())
@@ -41,11 +50,13 @@ describe('StaffHeader — shipped default (real ExerciseContextProvider, DEV moc
 
   it('shows the controller call sign as the cell (one source, demo-polish C4) and no faked presence', async () => {
     render(
-      <MemoryRouter>
-        <ExerciseContextProvider>
-          <StaffHeader surfaceName="Controller Console" />
-        </ExerciseContextProvider>
-      </MemoryRouter>,
+      <QueryClientProvider client={newQueryClient()}>
+        <MemoryRouter>
+          <ExerciseContextProvider>
+            <StaffHeader surfaceName="Controller Console" />
+          </ExerciseContextProvider>
+        </MemoryRouter>
+      </QueryClientProvider>,
     )
 
     const badge = await screen.findByTestId('staff-header-identity-badge')

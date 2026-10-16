@@ -132,12 +132,6 @@ export interface RoleAwareEntryProps {
    * this world-neutral glue never imports a not-yet-merged sibling module.
    */
   participantGuard: ComponentType<{ children: ReactNode }>
-  /**
-   * The composed cross-exercise switcher (`exercise-isolation/05`) — a COBRA
-   * staff-only control. Injected by the orchestrator from `@/features/staff`
-   * (as an element), rendered ONLY on the staff branch under the COBRA hand-off.
-   */
-  staffSwitcher: ReactNode
 }
 
 /**
@@ -162,7 +156,6 @@ function RoleRouter({
   participantSurface,
   staffRoutes,
   participantGuard: ParticipantGuard,
-  staffSwitcher,
 }: RoleAwareEntryProps) {
   // Routes on the RESOLVED session/scope ONLY (COR-004) — there is no
   // client-supplied exerciseId anywhere here. A missing/unresolved session or
@@ -205,7 +198,6 @@ function RoleRouter({
     }
     return (
       <StaffWorldHandoff>
-        {staffSwitcher}
         <StaffRouteTree
           routes={staffRoutes}
           role={role}

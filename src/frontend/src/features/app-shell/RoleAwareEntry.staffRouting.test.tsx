@@ -127,7 +127,6 @@ function renderAt(initialEntry: string, props: Partial<RoleAwareEntryProps> = {}
     participantSurface: <div data-testid="participant-surface" />,
     staffRoutes: STAFF_ROUTES,
     participantGuard: StubGuard,
-    staffSwitcher: <div data-testid="exercise-switcher" />,
     ...props,
   }
   return render(
@@ -204,8 +203,8 @@ describe('staff deep links', () => {
 
     expect(screen.getByTestId('staff-surface-evaluator')).toBeInTheDocument()
     expect(screen.getByTestId('pathname')).toHaveTextContent('/staff/evaluate')
-    // The staff-only switcher rides above the tree, once, outside the routes.
-    expect(screen.getByTestId('exercise-switcher')).toBeInTheDocument()
+    // The exercise switcher lives in the staff header now; no panel rides above the tree.
+    expect(screen.queryByTestId('exercise-switcher')).not.toBeInTheDocument()
   })
 
   it('mounting at /staff/plan with a planner session renders the planner workspace directly', () => {

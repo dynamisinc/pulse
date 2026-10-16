@@ -339,6 +339,5 @@ describe('App route table — the staff route registry handed to createRoleAware
     // still wired so this case cannot pass on a half-built table.
     expect(surfaces.participantSurface).toBeDefined()
     expect(surfaces.participantGuard).toBeDefined()
-    expect(surfaces.staffSwitcher).toBeDefined()
   })
 })
