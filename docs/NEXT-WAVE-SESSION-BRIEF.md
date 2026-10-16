@@ -75,7 +75,7 @@ session) is fixed. These remain open:
 | P2 | #485, #389, #390, #393 | no-store missing on 4 auth routes; refused attribution is not audited; lifecycle changes are not pushed; staff auth validates the body before identity. | see the audit |
 
 **Demo impact:** low. Staff at the demo are trusted, and the demo does not use EndEx or the
-evaluator surface. **Do not fix these before the code freeze.** They are Wave 1.
+evaluator surface. **Do not fix these before the code freeze.** They are folded into Session A (C2), alongside the role and lifecycle screens they belong to.
 
 ## A5. Tracker truth
 
@@ -89,7 +89,14 @@ evaluator surface. **Do not fix these before the code freeze.** They are Wave 1.
 
 The root cause is the process. Wave PRs merge, but nothing flips the story status or closes the
 mirrored issue: step 7 of the orchestration playbook gets skipped under deadline pressure.
-**Fix it in Wave 0 by making close-out part of the PR gate** (C4, rule 6).
+**Fix it by making close-out part of done** (C5).
+
+> **Update, later on 10/16:** the cleanup has been run. 84 issues were closed, #559 was created as
+> the post-demo hardening parent, and 182 issues are open. See
+> [`TRACKER-CLEANUP-LOG-2026-10-16.md`](TRACKER-CLEANUP-LOG-2026-10-16.md). Still held:
+> - six engine stories waiting on a recorded UAT check (#352–#354, #401, #402, #173);
+> - #350 and #351, waiting on the DF-27 UAT run;
+> - the issues that close when #553, #557 and #558 merge.
 
 ## A6. Open PRs: recommended merge order (this morning)
 
@@ -109,209 +116,337 @@ You expected three; there are five.
 
 ---
 
-# Part B · Roadmap (post-demo, from Wed 10/21)
+# Part B · Roadmap (agreed 10/16, post-demo from Wed 10/21)
 
-## B1. Calendar to the demo (for context)
+## B1. Decisions from the 10/16 interview
 
-| Day | |
+| Topic | Decision |
 |---|---|
-| Fri 10/16 | Merge the 5 PRs (A6). Docs fold: WAVE-4 rows into `feature.md`, DF-24..42 decisions into `implementation.md`. |
-| Sat 10/17 | Morning: load test (PDF-03a). Afternoon: Rehearsal 1. |
-| Sun 10/18 | UAT walk, steps 1–16. **Code freeze in the evening.** |
-| Mon 10/19 | Final reset, seed, Rehearsal 2. |
-| **Tue 10/20** | **Demo.** Capture feedback into #523 the same day. |
+| **Next target** | The next demo or pilot. There is no hard exercise date, so **build it right**. |
+| **Administration** | **Org-admin self-service.** Dynamis creates only the organization and its first org admin; the customer does everything else. |
+| **Identity model** | **One account per person.** A person can be staff on one exercise and a participant on another. |
+| **Sign-in** | **One account, separate entry.** The same credentials enter either the staff console or a participant exercise, and a session lives in **one world at a time** (the two-worlds rule holds). |
+| **Roles** | **Per exercise.** Planner, controller and evaluator are assigned per exercise; org admin is org-wide. |
+| **Participants** | **Both:** an org-level directory of people who carry across exercises, **and** one-off participants added to a single exercise. |
+| **Passwords** | All four flows: an admin resets a staff password; staff self-service "forgot password"; an admin reissues participant access (links and day word, as today); **participants can also have real passwords** that can be reset. |
+| **Avatars** | Participants upload their own (in-fiction profile). Staff set participant avatars from the roster. Staff accounts have avatars. Persona avatars stay as they are. |
+| **Exercise lifecycle** | Build → Staged (with a readiness checklist) → Live. Reopen or reset. Duplicate. Delete a Build-state exercise that never ran. |
+| **Planner self-setup** | Create personas, assign staff with roles, set or rotate the view-only code, and seed content (opening feed, noise pool, media pack) **in the app** rather than through scripts. |
+| **Security fixes** | **Folded into the administration work**, not a separate wave. |
+| **Mobile** | Responsive web plus an installable **PWA** for participants. **The controller and evaluator also work on a tablet.** |
+| **AI engine** | **Live with some autonomy** for the pilot: ambient chatter publishes on its own, key posts are still reviewed. **Tom signs PROVIDER-GOVERNANCE §8 now.** |
+| **Evaluator first** | A live timeline on real data, live annotations, and the AAR export. |
+| **First new channel** | The **local news portal** ("[City] Today"). |
+| **Production** | **Multi-tenant SaaS** (several customer orgs on one deployment), with **monitoring and alerting**. |
+| **User guide** | **Docs-as-done:** every story updates `docs/guide/` in the same PR. |
+| **Sessions** | **Three in parallel:** A (administration), B (mobile and tablet), C (AI engine). |
 
-## B2. Waves
+## B2. Order
 
-Order rule: **close the trust gaps first, then what the customer marked Must, then the rest.**
-Each wave is a normal feature orchestration
-([`FEATURE_ORCHESTRATION_PLAYBOOK.md`](FEATURE_ORCHESTRATION_PLAYBOOK.md)).
+| # | Track | Session | Starts |
+|---|---|---|---|
+| 1+2 | **Administration:** people, roles, passwords, avatars, plus exercise management (lifecycle, duplicate, delete, personas, staffing, view-only code, content seeding), with the security fixes folded in | **A** | 10/21 |
+| 3 | **Mobile and tablet:** participant PWA; controller and evaluator tablet layouts | **B** | 10/21 |
+| 4 | **AI engine go-live:** live provider with some autonomy | **C** | 10/21; the provider flip waits on the §8 signature |
+| 5 | **Evaluator dashboard on real data:** timeline, annotations, AAR export | after A | when A's role model lands |
+| 6 | **Channel breadth:** the local news portal first | after B | needs E3/E4 decomposed against D2/D3 |
+| 7 | **Production polish:** multi-tenant SaaS hardening, monitoring and alerting, Key Vault, staging, browser e2e | rolling | parts start inside A (tenancy) and C (alerts) |
 
-| Wave | Theme | Scope | Size | Why now |
-|---|---|---|---|---|
-| **0** | **Truth** (1 day, docs plus GitHub, no product code) | Execute the tracker audit. Refresh `BUILD_PLAN.md`, `README.md` and `CLAUDE.md` (no longer a "scaffold"). Fold the demo feedback into #523. Add tracker close-out to the PR gate. Re-label the open security issues with phase, feature and status. | S | Every later session plans from the tracker. Today it lies. |
-| **1** | **Trust hardening** (feature `security-hardening`) | #377 + #481 + #61 controller-role gate on config and lifecycle writes (reuse `EngineCockpitControllerRoleFilter`, plus a role-matrix test per route). #375 lifecycle-gate the hub and the reaction loop. #379 refuse participant writes during Freeze or pause. #376 + #180 a participant-facing exercise name. #480 forwarded headers. #490 Key Vault for the key ring. #485 no-store. #389 audit refused attribution. #390 push lifecycle changes. Guard the evaluator `DEV` strip, and hide the evaluator route in production until B-wave 5. | M (one migration at most: the display-name field) | P0s. Customers' security reviewers will find these first. |
-| **2** | **Scale & resilience** (PDF-03 remainder, #526) | Fix what Saturday's load report finds. Decide on **Azure SignalR Service** and the App Service size from the report. #345 feed pagination and windowing. #455 idempotent post create. Persist the remaining engine state (storylines, autonomy). Azure alert rules. Backup site and switchover plan (Front Door or a warm second region). | M–L | The customer said "Stability!". This is the precondition for 100+ participants. |
-| **3** | **Mobile** (PDF-01, #524: **Must**) | Participant app on iPhone, iPad and Android. Start responsive and installable (PWA), not native. Audit touch targets, the composer, the media viewer and the alert bar at 360 px. Then PDF-02 offline cache (#525) and PDF-08 camera (#531). | L | The only customer-flagged Must besides stability. Mobile-first is already in D0 §4 rule 6. |
-| **4** | **Reporting & AAR** | #556 controller notes in the report (decide whether evaluators can write first), #555 Word (.docx) export with white-labeling (~2–3 days), PDF-07 implementer sheets (#530), PDF-09 server-side EXERCISE burn-in (#532). | M | The 10/15 internal demo said "pretty sells". Builds directly on #551. |
-| **5** | **Evaluator on real data** (E10 slice) | Wire the evaluator dashboard to real telemetry: timeline (#231), response latency (#225), read-only staff access (#230). Remove the mocks from production paths. | L | It is designed but fake. A visible credibility gap the first time a customer clicks it. |
-| **H** | **Help / User Guide** (parallel track, docs only) | See Part D. | S per guide | Needed before any customer runs an exercise without you in the room. |
+**What can jump the queue:**
+- Findings from Saturday's load test. If they are serious, they come first in whichever session owns the code.
+- **#480 (forwarded headers) must land before any exercise with about 100 participants.** It rides along with Session A, story 1.
 
-**Parked, each needing a decision before it is built:**
-
-- **PDF-04** Facebook-style channel: needs a design brief and an epic number.
-- **PDF-05** NewsNow: Won't, unless demand is confirmed.
-- **PDF-06** Cadence ↔ Pulse integration: E9, Phase 4.
-- **E3–E6 channels** (portal, news, press, weather): need decomposing.
-- **#349** live AI provider: waiting on the §8 governance signature.
-- **PDF-10** GIF picker.
-- DMs (#114–#116) and quote-post (#101).
-
-> **My recommendation:** run **Wave 0 and Wave 1 in the first session** (Wave 0 is a half-day
-> warm-up that also teaches the session the codebase), and start Wave 2 when the load report is in.
-> Run Track H in a separate, lighter session in parallel, because it needs no code changes.
+**Why this order:** items 1 and 2 are what stop a customer from running an exercise without Dynamis.
+Writing the guide confirmed it. Each of these gaps had to be documented as "ask Dynamis support":
+- moving an exercise out of Build
+- creating staff accounts and roles
+- changing the view-only code
+- creating personas
+- seeding content
 
 ---
 
-# Part C · Session runbook
+# Part C · Session briefs
 
-## C0. Session setup
+## C0. Shared setup (all three sessions)
 
-- Root Claude Code at the repo (`C:\Code\pulse` locally, or `/home/user/pulse` in the cloud) so the
-  `.claude/agents` (`story-agent`, `frontend-agent`, `backend-agent`, `testing-agent`,
-  `code-review`) are native. Use Opus at high effort.
-- Start from the latest `origin/main` **after the five PRs merge**. Confirm with
-  `git log --oneline -5` that #551, #553 and #558 are in.
-- **GitHub GraphQL is blocked from cloud sessions.** `gh issue view` and sub-issue linking fail.
-  Use REST (`gh api repos/dynamisinc/pulse/issues/N`, `POST …/issues/{n}/sub_issues`) or the GitHub MCP tools.
-- Issue numbering continues from **#559**.
+- Root Claude Code at the repo so the `.claude/agents` are native. Use Opus at high effort.
+- Start from the latest `origin/main` **after the five 10/16 PRs merge**. Check `git log --oneline -10`.
+- **GitHub GraphQL is blocked from cloud sessions.** Use the GitHub MCP tools or `gh api` REST.
+- **Read first, in order:**
+  1. this brief
+  2. [`CLAUDE.md`](../CLAUDE.md)
+  3. [`design/D0-FOUNDATIONS.md`](design/D0-FOUNDATIONS.md)
+  4. [`FEATURE_ORCHESTRATION_PLAYBOOK.md`](FEATURE_ORCHESTRATION_PLAYBOOK.md) and
+     [`ORCHESTRATION_MECHANICS.md`](ORCHESTRATION_MECHANICS.md)
+  5. [`GITHUB_TRACKER.md`](GITHUB_TRACKER.md)
+  6. [`OPERATE.md`](OPERATE.md), before any migration or infra change
+  7. [`guide/README.md`](guide/README.md)
+- **Process per wave:**
+  1. `story-agent` decomposes the work, or amends the existing stories.
+  2. Each story gets its own worktree.
+  3. builder → `testing-agent` → Gate-1 `code-review` (no Critical or High).
+  4. The orchestrator merges the stories serially, with real merges, then runs Gate-2.
+  5. Open the PR. Request a Copilot review as soon as it opens.
+  6. Tom signs off any schema, isolation, security or infra change.
+  7. After merge, close out the tracker (C5).
 
-## C1. Read first (in order)
+## C1. Rules that keep three sessions from colliding
 
-1. **This brief**, then [`TRACKER-AUDIT-2026-10-16.md`](TRACKER-AUDIT-2026-10-16.md).
-2. [`CLAUDE.md`](../CLAUDE.md) and [`design/D0-FOUNDATIONS.md`](design/D0-FOUNDATIONS.md): the two worlds and the non-negotiables.
-3. [`FEATURE_ORCHESTRATION_PLAYBOOK.md`](FEATURE_ORCHESTRATION_PLAYBOOK.md) and
-   [`ORCHESTRATION_MECHANICS.md`](ORCHESTRATION_MECHANICS.md): the wave mechanics (§6 has paste-in kickoff prompts).
-4. [`GITHUB_TRACKER.md`](GITHUB_TRACKER.md): labels and the Epic → Feature → Story hierarchy.
-5. For Wave 1, the identity code and the existing role filter:
-   - `src/Pulse.WebApi/Features/EngineRuntime/EngineCockpitStaffAuthorizationFilter.cs`
-   - `EngineCockpitControllerRoleFilter`
-   - `Features/ExerciseConfiguration/*Endpoints.cs`
-   - `ExerciseLifecycleGatingMiddleware.cs`
-   - `Features/Identity/` (session auth)
-   - `docs/features/identity-auth-roles/` (stories 11–14: how #359 was closed; use it as the template)
-6. [`OPERATE.md`](OPERATE.md): the deploy order and the rollback rules, before any migration.
-7. `docs/features/post-demo-feedback/feature.md`: the customer's PDF-01..10 with Tom's triage.
+1. **One migration owner at a time.** EF model snapshots from parallel branches conflict.
+   - Session A owns the schema for the administration work.
+   - Session C must avoid schema changes. If it needs one (for example, persisting engine state),
+     it lands **after** A's foundation migration is on main, and it merges main in first.
+   - Session B is frontend-only and needs no migration.
+2. **The orchestrator-owned files are `Program.cs`, `App.tsx` and `staffRouteRegistry.tsx`.**
+   Each session edits them only in a dedicated "wiring" commit at the end of its wave, after
+   merging `main` in. Keep each change additive: one line per feature extension.
+3. **Branches:**
+   - Session A: `feature/admin-<slug>`
+   - Session B: `feature/mobile-<slug>`
+   - Session C: `feature/engine-golive-<slug>`
 
-## C2. Wave 0: Truth (execute)
+   Merge `main` into the active branch at the start of every work day and before opening a PR.
+4. **Frozen contracts are announced.** When Session A changes a shared type (`PostView`, the
+   session or role types, `ExerciseScopeDto`), it posts the change on its feature issue. Sessions B
+   and C merge it before touching those types.
+5. **B depends on A's role model for the tablet layouts.**
+   - Session B builds the **participant** PWA first. It needs nothing from A.
+   - It builds the **controller** tablet layout second, on the existing role guards.
+   - It builds the **evaluator** tablet layout last, after A's per-exercise roles land and the
+     dashboard has real data (track 5).
 
-1. **Tracker:** work the audit's tables in order A → B → D → C. For each close, put the evidence
-   (commit sha or PR) in the closing comment and set `state_reason`. Re-verify before closing,
-   especially the A-list engine stories (#352–#354, #401, #402, #173): their only gap is a recorded
-   UAT check, so ask Tom whether that check was done.
-2. **Parents:** create a `post-demo-hardening` feature issue. Move #514, #521, #522, #554, #462,
-   #461, #456, #451, #448, #446 and #445 under it. Then close #496, #465 and #419.
-3. **Labels:** give every category-E issue a phase, feature and status label, starting with the
-   security set (#375–#379, #390, #393, #480, #481, #490).
-4. **Docs:**
-   - Rewrite `BUILD_PLAN.md`'s status section.
-   - Update the README and CLAUDE.md: say the backend exists (`Pulse.Core`, `Pulse.WebApi`, `tools/`); set Status to "Phase 1 built; post-demo".
-   - Set the Wave 4 story files to Complete once the UAT walk passes.
-   - Refresh the stale `feature.md` tables listed in the audit.
-5. **Process fix:** add a "Tracker close-out" checkbox to the PR template, or to the
-   playbook's Gate-2 list: story status flipped, issue closed or relabelled, `feature.md` row updated.
-   Optional: a small GitHub Action that comments on a merged PR when a `Closes #N` issue still carries `status:in-review`.
+---
 
-**Done when:** open issues are about 150; every open issue has phase, feature and status labels;
-`BUILD_PLAN.md` matches reality; the PR in C4 is merged.
+## C2. Session A · Administration (people, roles, exercises) + folded security
 
-## C3. Wave 1: Trust hardening (decompose, then build)
+> **Goal:** a customer's org admin and planners can run the whole exercise lifecycle in the app,
+> with no Dynamis support and no scripts.
 
-1. Have `story-agent` create `docs/features/security-hardening/` from the Wave 1 row of B2. Suggested cut:
-   - **01** Controller-role gate on config and lifecycle writes (#377, #481, #61), with a
-     **route × role matrix test**: every non-GET `/api/staff/*` route is listed with its allowed
-     roles, and a new route fails the test until it is classified (like DF-22's method+path allow-list).
-   - **02** EndEx and Freeze stop everything (#375, #379, #390): the hub gate, the reaction-loop
-     lifecycle check, write refusal during Freeze or pause, and a lifecycle push to clients.
-   - **03** Participant-facing exercise name (#180 decision, then #376), across the scope DTO, cards and email.
-   - **04** Edge and secrets hardening (#480 forwarded headers plus per-room limits; #490 Key Vault
-     with a Bicep change; #485 no-store).
-   - **05** Audit and evaluator hygiene (#389 refused-attribution telemetry; the evaluator `DEV`
-     strip behind `import.meta.env.DEV`; the evaluator route hidden in production until Wave 5).
-2. **Tom signs off (Tier-2):** the role matrix, the participant-facing name decision, and the Key
-   Vault infra change. **Ask for these up front** so the builders aren't blocked.
-3. Build per the playbook: one worktree per story, builder → `testing-agent` → Gate-1
-   `code-review` (no Critical or High) → serial real merges → Gate-2 → PR → Copilot.
+**Start from these existing stories.** They are written but not started. **Amend them; don't rewrite them:**
 
-## C4. Non-negotiables
+| Folder | Stories | Notes |
+|---|---|---|
+| `docs/features/identity-auth-roles/` | 01 roles (In Progress), 04 evaluator read-only, 08 participant admin panel, 09 org account operation, 15 org-level authentication | 02, 03, 05–07 and 10–14 are Complete; reuse them. Read `ENDPOINT-AUTH-AUDIT.md` |
+| `docs/features/exercise-build-golive/` | 01 build workspace, 03 readiness dashboard, 04 gated go-live StartEx, 05 content lock at go-live, 06 exercise duplication | 02 (preview) is largely delivered by staff-shell/04 and C6 |
+| `docs/features/persona-management/` | 01 templates, 02 casts and seeding, 03 mid-exercise creation, 04 pre-exercise post history, 05 avatar library | 03 duplicates closed #18 |
+| `docs/features/exercise-lifecycle-admin/` | 01–03 "Backend built" | Exercise Management UI; rename and archive arrive with #553 |
+| `docs/features/easy-login/` | complete | Links, day word, cards and email: keep them working for participants |
 
-- **Two worlds:** COBRA on staff surfaces only; never on participant paths.
-- **Exercise isolation is always Critical:** `IExerciseScoped` plus the central filter. Every new
-  route gets a foreign-exercise test.
+**Phase A: design the identity model first. Don't decompose it straight into stories.**
+Deliver `docs/design/ADMIN-IDENTITY-MODEL.md` and get Tom's sign-off before building. The hard problems:
+
+1. **One account, two worlds.**
+   - One person record (org-scoped) with credentials.
+   - Per-exercise *enrollments*: an exercise plus a role (planner, controller, evaluator or participant), and for participants a persona binding.
+   - Org admin is an org-level grant.
+   - A session is minted **for one world and one exercise**. A staff session must never carry participant capabilities, and vice versa.
+   - Participants' exercise is still resolved from the request host (`HostExerciseResolver`).
+2. **Directory vs one-off participants.** How does a one-off participant differ from a directory
+   person? Probably a person with an `ExerciseOnly` flag. How are they promoted into the directory?
+   How is the easy-login roster (CSV, personal links) reconciled with directory people?
+3. **Credentials:**
+   - password hashing and policy;
+   - staff "forgot password" and admin reset, using emailed one-time links through the existing
+     Azure Communication Services path (easy-login story 06);
+   - participant passwords alongside links and the day word: which sign-in methods are allowed
+     for each exercise?
+4. **Avatars:**
+   - Participant self-upload goes through the existing media pipeline (sanitized, EXERCISE
+     watermark rules) and is exercise-scoped: the in-fiction profile lives per exercise, not per
+     person, because one person can play different personas.
+   - Staff avatars live in the staff world only.
+5. **Lifecycle:**
+   - Build → Staged requires a readiness checklist (exercise-build-golive/03).
+   - Staged → Live is StartEx (controller only).
+   - Define reopen and reset precisely: what is kept and what is wiped.
+   - Delete is allowed only for a Build-state exercise with no conduct data.
+   - Duplicate copies settings, personas, run sheet and media, but never posts.
+6. **Content seeding in the app.** Port what `scripts/uat` seed and pack loading do (opening feed,
+   noise pool, media pack, run sheet) into a planner upload flow that runs through the public
+   services. This reuses S1 seed-script logic; it does not touch the database directly.
+7. **Multi-tenant from day one.** Every new route is org-scoped *and* exercise-scoped where
+   relevant. Cross-org access returns the same bare 404 as a missing record (the DF-22 pattern).
+   Use the method+path allow-list test.
+
+**Phase B: stories.** Suggested cut, in waves:
+
+| Wave | Stories |
+|---|---|
+| **A1 Foundation** (one migration) | People and enrollments schema; the frozen contract; the role model replaces the ad-hoc staff assignment. Also folds in the **controller-role gate on every config and lifecycle write** (#377, #481, #61), with a **route × role matrix test**, and **#480** forwarded headers |
+| **A2 People** | Org directory UI (org admin); staff invite and role assignment per exercise; admin password reset; staff forgot-password; participant passwords and reset; participant reissue (existing); staff and participant avatars |
+| **A3 Exercise management** | Build workspace and readiness checklist; Staged → Live; reopen and reset; delete; duplicate; view-only code set and rotate; assign staff from the exercise |
+| **A4 Setup content** | Create, clone and archive personas (templates and casts); persona avatar library; content seeding upload |
+| **A5 Lifecycle correctness** | EndEx and Freeze stop everything: lifecycle-gate the hub and the reaction loop (#375); refuse participant writes during Freeze or pause (#379); push lifecycle changes to clients (#390). Participant-facing exercise name (#180 then #376). Audit refused attribution (#389). no-store on auth routes (#485) |
+
+**Tier-2 sign-offs to ask Tom for up front:**
+- the identity-model doc;
+- the role matrix;
+- the password policy;
+- the participant-facing name;
+- the reset semantics.
+
+**Done when:** a new org admin, starting from an empty organization, can do all of these without Dynamis:
+1. invite staff;
+2. import participants;
+3. create personas;
+4. seed content;
+5. stage, start and end the exercise;
+6. duplicate it.
+
+The planner and controller guides are updated to match, and every "ask Dynamis support" line in
+`docs/guide/` that this work removes is gone.
+
+---
+
+## C3. Session B · Mobile and tablet
+
+> **Goal:** participants play comfortably on phones and tablets (installable PWA). Controllers and
+> evaluators can work from an iPad.
+
+**Read:**
+- `docs/design/D0-FOUNDATIONS.md` §4 (participant surfaces are mobile-first; staff are desktop-first, now **plus tablet**)
+- `docs/design/D1-social-app.md`
+- `docs/design/D7-application-shells/`
+- `docs/features/post-demo-feedback/` (PDF-01 #524, PDF-02 #525, PDF-08 #531)
+
+**Waves:**
+
+| Wave | Scope |
+|---|---|
+| **B1 Participant on phones** (#524) | Audit every participant screen at 360, 390 and 768 px: feed, thread, composer, media viewer, profile, Explore, Pinned, holding page, join and sign-in. Fix the **alert bar on phones**: the text is truncated to about 3 characters, it covers the channel label, and its "Details →" link goes to a missing `/alerts` route (found 10/16; reproduce with `tools/guide-screenshots`, shot `participant-alert-bar`). Touch targets of at least 44 px. Keep burst legibility at 120 posts/min on a mid-range phone (NFR-002). |
+| **B2 PWA** | Manifest per exercise brand (the name and icon must stay in the fiction: no "Pulse by Dynamis" leaking into a branded exercise). Service worker for the app shell only. **Offline cache and "missed while offline" (PDF-02 #525) is a follow-up**, unless it is cheap once the service worker exists. Install prompts on iOS and Android. |
+| **B3 Controller on tablet** | The console at 1024×768 and 1180×820, in landscape and portrait. Collapse the columns into tabs or panes; check the keyboard shortcuts with an iPad keyboard and touch alternatives without one. Takedown and Freeze confirms must stay deliberate on touch. |
+| **B4 Evaluator on tablet** | **After track 5** (real data) and A's role model. Until then, only prototype the layout. |
+| **Later** | In-app camera (PDF-08 #531), which builds on the PWA. |
+
+**Testing:**
+- Add Playwright viewport tests for the participant critical path (join → feed → post → reply).
+  These are the first browser e2e tests, and they count toward track 7.
+- Extend `tools/guide-screenshots` with phone and tablet shots, and add them to the participant
+  and controller guides.
+
+**No migration.** Frontend only. The PWA manifest may need a small backend route for per-exercise
+brand metadata. If it does, coordinate it under C1, rule 1.
+
+---
+
+## C4. Session C · AI engine go-live (live, with some autonomy)
+
+> **Goal:** for the next pilot, the engine runs on the live provider. Ambient chatter publishes on
+> its own under guardrails; story-critical posts still go through the review queue.
+
+**Read:**
+- [`E8-SESSION-SUMMARY.md`](E8-SESSION-SUMMARY.md)
+- [`design/E8-ENGINE-ARCHITECTURE.md`](design/E8-ENGINE-ARCHITECTURE.md)
+- `docs/08-adaptive-content-engine.md`
+- [`features/engine-runtime/PROVIDER-GOVERNANCE.md`](features/engine-runtime/PROVIDER-GOVERNANCE.md)
+- `docs/demo/AI-GOVERNANCE-BRIEF.md`
+- `docs/features/{engine-runtime,autonomy-safety,ambient-chatter,engine-telemetry-tuning,engine-eval-harness}/`
+
+**Step 0, before any code:** Tom signs PROVIDER-GOVERNANCE §8. Record the signature in the doc.
+Only then:
+- flip the three infra parameters in one commit (per the E8 summary);
+- finish #349 (live provider on UAT, suggest-only first);
+- close #402 and #401 with their UAT checks.
+
+**Waves:**
+
+| Wave | Scope |
+|---|---|
+| **C1 Live, suggest-only on UAT** | #349 to green; usage and cost panel (#401); the Fake cut-over lever (#402) proven as the egress kill switch; alert rules on the provider's errors, latency and spend (counts toward track 7). Latency and cost SLO measurement (#177). |
+| **C2 Some autonomy** | Ambient background posting (#168) publishes autonomously **within a tier policy**: rate caps, topic and persona allow-lists, content safety, the kill switch, and Freeze/EndEx respected (depends on A5's lifecycle gate; until it lands, the engine must check lifecycle itself). Review stays mandatory for storyline and escalation posts. Engine settings API and panel (#353, #354) close out. |
+| **C3 State that survives a restart** | Persist the engine's run state (storylines, autonomy settings, kill switch). Today it is in process memory and lost on every deploy. **Schema: wait for A1 on main** (C1, rule 1). |
+| **C4 Quality** | Scenario reaction-correctness tests (#178); amplification (#166, #167) if time allows. |
+
+**Non-negotiables:**
+- Silence is never approval: a timed-out draft is held, never auto-sent.
+- Every engine post is labelled as engine-sourced in telemetry and in the report.
+- Participants never see a draft.
+- The kill switch works within 5 s.
+- Load the `claude-api` skill before any model, cost or latency reasoning.
+
+---
+
+## C5. Shared non-negotiables and definition of done
+
+- **Two worlds:** COBRA on staff surfaces only; nothing breaks the fiction on participant paths.
+  **One account never means one session across both worlds.**
+- **Exercise and org isolation is always Critical:** `IExerciseScoped` plus the central filter.
+  Every new route gets a foreign-exercise test and a foreign-org test.
 - **Scenario time only** on participant surfaces (COR-053).
 - **Severity is never colour-only;** WCAG 2.1 AA (NFR-001).
 - **FontAwesome only;** MUI 9 system props go in `sx`.
-- **One migration per wave;** hand-written SQL wrapped in `EXEC`; Tom signs off schema, isolation and security changes.
-- **Copilot review on every PR,** requested when the PR opens and again after substantial pushes.
-- **Tracker close-out is part of done.** A merged PR whose issues still say `in-review` is not finished.
+- **One migration per wave,** with hand-written SQL wrapped in `EXEC`. Tom signs off schema,
+  isolation, security and infra changes.
+- **Copilot review on every PR.**
+- **Done includes:**
+  - the story status is flipped;
+  - the mirrored issue is closed;
+  - the `feature.md` row is updated;
+  - **the `docs/guide/` page is updated** (the story template's user-guide line);
+  - screenshots are re-captured if a documented screen changed.
 
-## C5. Deliverables
+## C6. Paste-in kickoff prompts
 
-- Wave 0: a docs-only PR (tracker-truth commit, BUILD_PLAN, README and CLAUDE.md refresh, PR-template close-out item), plus the GitHub changes themselves.
-- Wave 1: `docs/features/security-hardening/` (feature, implementation, stories, mirrored issues) and the umbrella PR `feature/security-hardening` → main, CI green, Copilot folded.
-- A short `docs/POST-DEMO-SESSION-SUMMARY.md` at the end, in the shape of `E8-SESSION-SUMMARY.md`: what shipped, decisions and trades, what's left.
-
-## C6. The bar
-
-Flag it, don't bury it. If something in this brief is wrong when you check it against the code,
-say so and correct the brief.
-
-## C7. Paste-in kickoff prompt
-
+**Session A:**
 ```text
-Read docs/NEXT-WAVE-SESSION-BRIEF.md and docs/TRACKER-AUDIT-2026-10-16.md, then execute
-Wave 0 (C2) and Wave 1 (C3). Start from latest origin/main and confirm PRs #551/#553/#558 are
-merged. Before closing any issue, re-verify the audit row against main. Ask me up front for the
-three Tier-2 sign-offs in C3.2. Request a Copilot review on every PR.
+Read docs/NEXT-WAVE-SESSION-BRIEF.md (Parts B, C0, C1, C2, C5). You are Session A (administration).
+Start from latest origin/main. Phase A first: write docs/design/ADMIN-IDENTITY-MODEL.md resolving
+the 7 hard problems in C2, then stop and ask me for the Tier-2 sign-offs. After sign-off, have
+story-agent amend the existing identity-auth-roles / exercise-build-golive / persona-management
+stories and add new ones per the C2 wave cut, mirror to GitHub, and build wave A1. You own
+migrations; follow C1 coordination rules. Request a Copilot review on every PR.
+```
+
+**Session B:**
+```text
+Read docs/NEXT-WAVE-SESSION-BRIEF.md (Parts B, C0, C1, C3, C5). You are Session B (mobile and
+tablet). Start from latest origin/main. Have story-agent decompose waves B1-B3 under
+docs/features/mobile-tablet/ (link #524), then build B1 first, starting with the alert-bar bug.
+Frontend only, no migrations. Follow C1 coordination rules; merge main daily. Add Playwright
+viewport tests for the participant critical path. Request a Copilot review on every PR.
+```
+
+**Session C:**
+```text
+Read docs/NEXT-WAVE-SESSION-BRIEF.md (Parts B, C0, C1, C4, C5). You are Session C (AI engine
+go-live). Load the claude-api skill. Start from latest origin/main. Step 0: confirm with me that
+PROVIDER-GOVERNANCE section 8 is signed; do not flip the provider before that. Then run waves C1
+and C2. No schema changes until Session A's A1 migration is on main (C1 rule 1). Request a
+Copilot review on every PR.
 ```
 
 ---
 
-# Part D · Help / User Guide: a starting plan
+# Part D · Help / User Guide
 
-## D1. What exists today
+## D1. Where it stands (10/16)
 
-**There is no help system.** No guide, FAQ, glossary, onboarding tour or help entry point. The only
-in-app help is `KeyboardHelp.tsx`, the run-sheet shortcut list, plus tooltips and helper text
-scattered across about 30 files.
+[`docs/guide/`](guide/README.md) exists:
+- an index;
+- Getting started;
+- a glossary;
+- the Planner, Controller and Participant guides (the participant guide is a printable one-pager);
+- Troubleshooting;
+- 26 screenshots.
 
-Raw material worth harvesting:
+The screenshots are captured from mock data by [`tools/guide-screenshots`](../tools/guide-screenshots/README.md)
+(`npm run capture`). The story template now carries a user-guide line.
 
-- [`demo/BASELINE-CHECKLIST.md`](demo/BASELINE-CHECKLIST.md): a step-by-step walk. The best seed for a controller quick start.
-- [`demo/PARTICIPANT-FIRST-DEMO-PLAN.md`](demo/PARTICIPANT-FIRST-DEMO-PLAN.md): the demo beats, which read as an exercise script.
-- [`demo/pack/README.md`](demo/pack/README.md): a worked example exercise (36-post opening feed, 15-item run sheet, MSEL).
-- [`OPERATE.md`](OPERATE.md), `scripts/uat/README-seed.md`, `docs/features/login/06-uat-goLive-config-runbook.md`.
-- The acceptance criteria in 288 story files, and the D1–D7 design briefs.
+## D2. Still to do
 
-## D2. Shape: by role, docs-as-code
-
-Use Markdown in the repo under `docs/guide/`, written by role, because each role does different work:
-
-| Guide | Audience | Core content | Priority |
-|---|---|---|---|
-| **Getting started** | Everyone | What Pulse is, the two worlds, roles, glossary (inject, persona, run sheet, Freeze, tier, scenario time, white noise, lookalike account) | 1 |
-| **Planner / Exercise admin** | Planners, org admins | Create, rename and archive an exercise. Settings and branding. Roster CSV, join links, QR cards, day word, email links. MSEL import. Practice mode. Pre-flight and reset. | 1 |
-| **Controller** | Controllers | Console tour. Post as persona. Run sheet (fire, hold, mark fired). Live world, pins, takedown. White noise. Freeze and resume. AI review queue and autonomy. Report and export. | 1 |
-| **Participant one-pager** | Players | Join by link or QR, sign in with the day word, what is fiction and what isn't, who to ask for help. **Printed or emailed, outside the app.** | 2 |
-| **Evaluator** | Evaluators | **Hold until Wave 5.** Don't document mock data. | later |
-| **Troubleshooting / FAQ** | Staff | Join failures, a frozen tab, restart recovery, reseeding | 2 |
-| **Admin / Ops** | Dynamis staff | Draw from `OPERATE.md`. Stays internal. | 3 |
-
-## D3. Delivery: three steps
-
-1. **Markdown first** (Track H session): write the Getting started, Planner and Controller
-   guides from the sources above, with screenshots.
-2. **Automate the screenshots:** a Playwright script (Chromium is in the cloud container) that
-   walks the seeded demo exercise and writes PNGs into `docs/guide/img/`. Screenshots then stay
-   current with one command instead of going stale like the 10/07 set.
-3. **In-app help on staff surfaces only:** a "?" button in the COBRA staff shell that opens a
-   drawer rendering the matching guide page (bundled with Vite's `?raw` import plus a Markdown
-   renderer), with each page keyed to the current route. **Never on participant surfaces:** help
-   there breaks the fiction. Participant help lives on the join card and the one-pager.
-
-## D4. Keep it current
-
-Add a "User-guide impact" line to `docs/features/_template/story.md`. A story that changes a staff
-workflow updates its guide page in the same PR, and `code-review` checks for it. This is the same
-cure as for the stale tracker: docs-as-done, not docs-later.
-
-## D5. Track H kickoff prompt
-
-```text
-Read docs/NEXT-WAVE-SESSION-BRIEF.md Part D. Create docs/guide/ with README.md (index plus
-glossary), getting-started.md, planner-guide.md and controller-guide.md, sourced from
-docs/demo/BASELINE-CHECKLIST.md, docs/demo/PARTICIPANT-FIRST-DEMO-PLAN.md, docs/demo/pack/,
-and the story ACs in docs/features/. Write for a Cadence-trained EM controller, not a developer.
-Then add a Playwright screenshot script against the mock-data dev server (npm run dev) that
-captures each documented screen into docs/guide/img/. No product-code changes. Open one PR.
-```
+- **Fill in the placeholders:** support, escalation and in-room help contacts, marked "to be confirmed".
+- **Walk the guide on UAT once.** The labels were checked against code, but a few behaviours were inferred:
+  - what players see after EndEx;
+  - the fix for a player stuck on the holding page;
+  - whether practice mode is respected by the exports.
+- **Rewrite as each track lands:**
+  - **Session A** removes most "ask Dynamis support" lines, and needs a new **Org admin guide** (people, roles, passwords).
+  - **Session B** adds phone and tablet screenshots.
+  - **Session C** updates the AI engine section.
+  - **The Evaluator guide** gets written once track 5 has real data.
+- **In-app help, staff surfaces only:**
+  - a "?" drawer in the COBRA staff shell that renders the matching guide page for the current route;
+  - a natural small story for Session A once its screens settle;
+  - **never on participant surfaces.**
