@@ -40,7 +40,9 @@ using Pulse.WebApi.Features.EngineRuntime.Steering;
 /// <para>
 /// <b>Fail-safe Freeze (Gate-1 M-2).</b> A row whose clock is frozen but whose tier is not <c>freeze</c> can only come
 /// from a partly failed Freeze write; it is restored as Freeze, with the stored holding page (or the default
-/// in-fiction pause page), and logged at Warning, so a restart never silently un-freezes a world.
+/// in-fiction pause page), and logged at Warning, so a restart never silently un-freezes a world. The mirror case
+/// (re-review L-C) — tier <c>freeze</c> over a RUNNING clock, an Unfreeze whose tier write failed — re-freezes the
+/// clock at its elapsed value (anchor + downtime), also logged at Warning.
 /// </para>
 /// <para>
 /// <b>Isolation (COR-001).</b> The read is the store's one documented cross-exercise reader (read-only); each row is
@@ -141,6 +143,15 @@ public sealed partial class ExerciseRuntimeStateRehydrator : IHostedService
                     else
                     {
                         persistableClock.Restore(exerciseId, anchor);
+
+                        // L-C: a Freeze tier over a RUNNING clock is an Unfreeze whose registry write failed — re-freeze
+                        // the clock at the elapsed value it has now (anchor + downtime), in memory, with no write.
+                        if (snapshot.Tier == PauseTier.Freeze && !anchor.Frozen
+                            && persistableClock.GetAnchor(exerciseId) is { } running)
+                        {
+                            LogFailSafeRefreeze(exerciseId);
+                            persistableClock.Restore(exerciseId, running with { Frozen = true });
+                        }
                     }
                 }
 
@@ -173,7 +184,19 @@ public sealed partial class ExerciseRuntimeStateRehydrator : IHostedService
     /// </summary>
     private ExerciseRuntimeStateSnapshot FailSafeFreeze(ExerciseRuntimeStateSnapshot snapshot)
     {
-        if (snapshot.Clock is not { Frozen: true } || snapshot.Tier == PauseTier.Freeze)
+        if (snapshot.Tier == PauseTier.Freeze)
+        {
+            // L-C: a restored Freeze always shows the holding page (the clock is re-frozen where it is applied).
+            return snapshot.Overlay.State == OverlayStateWire.Pause
+                ? snapshot
+                : snapshot with
+                {
+                    Overlay = new OverlayStateSnapshot(
+                        OverlayStateWire.Pause, OverlayStateWire.InFiction, string.Empty, snapshot.Overlay.Sequence),
+                };
+        }
+
+        if (snapshot.Clock is not { Frozen: true })
         {
             return snapshot;
         }
@@ -266,6 +289,13 @@ public sealed partial class ExerciseRuntimeStateRehydrator : IHostedService
                   "SQL failures; every exercise starts Running with an unstarted clock and no holding page (the " +
                   "pre-restart state is NOT restored).")]
     private partial void LogReadGaveUp(Exception exception, int attempts, int budgetSeconds);
+
+    /// <summary>Source-generated Warning: a Freeze tier over a running clock was re-frozen (CA1848).</summary>
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "The runtime-state row for exercise {ExerciseId} has tier Freeze but a RUNNING clock (a partly failed " +
+                  "Unfreeze write); the clock was re-frozen fail-safe at its elapsed value.")]
+    private partial void LogFailSafeRefreeze(Guid exerciseId);
 
     /// <summary>Source-generated Warning: a frozen clock under a non-Freeze tier was restored as Freeze (CA1848).</summary>
     [LoggerMessage(

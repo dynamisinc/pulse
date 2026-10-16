@@ -139,4 +139,5 @@ All under `src/Pulse.WebApi.Tests/Features/EngineRuntime/Persistence/` (Docker-g
   - `ACancelledRequest_StillPersistsTheAppliedChange_M1`
   - `Rehydrator_AFrozenClockUnderANonFreezeTier_RestoresFailSafeAsFreeze` (M-2)
   - L-3: the reset does the in-memory reset first; staff and exercise-facts reads are best-effort with the existing fallbacks
+- **Re-review folds (M-A, L-C)** — `RequestAbortAndRefreezeTests`: `ARequestAbortedDuringThePublish_StillPersistsTheTier_MA`, `ARequestAbortedDuringTheResetPublish_StillDeletesTheRow_MA` (publish and post-reset facts read run on `CancellationToken.None`), `AFreezeTierOverARunningClock_RestoresWithTheClockRefrozen_LC`
 - **Waiting on seam S-5 (skipped until `Program.cs` is wired):** `RuntimePersistenceCompositionTests.ProgramCs_RegistersTheRehydrator_BeforeEveryTickingHostedService`, `RuntimePersistenceCompositionTests.ProgramCs_MapsTheRuntimeResetRoute_ExactlyOnce`.

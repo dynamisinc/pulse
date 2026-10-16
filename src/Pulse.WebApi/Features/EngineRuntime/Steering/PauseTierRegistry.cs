@@ -261,7 +261,10 @@ public sealed partial class PauseTierRegistry
     /// would HIDE a real stop from participants. A presentation typo must never block a safety action, so this
     /// coerces instead of refusing the Freeze.
     /// </param>
-    /// <param name="cancellationToken">Cancels the overlay publish.</param>
+    /// <param name="cancellationToken">
+    /// Accepted for API shape; deliberately NOT passed to the overlay publish or the write-through, which run on
+    /// <see cref="CancellationToken.None"/> once the tier is applied (Gate-1 M-1 / M-A).
+    /// </param>
     /// <returns>The outcome plus the completed transition when one happened.</returns>
     public async Task<PauseTierResult> SetTierAsync(
         Guid exerciseId,
@@ -318,7 +321,9 @@ public sealed partial class PauseTierRegistry
         // order.
         try
         {
-            await _overlayPublisher.PublishAsync(transition, cancellationToken).ConfigureAwait(false);
+            // Re-review M-A: CancellationToken.None — the tier is already applied, so a request abort must neither
+            // skip the participant publish nor (by throwing) the write-through below.
+            await _overlayPublisher.PublishAsync(transition, CancellationToken.None).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -374,7 +379,10 @@ public sealed partial class PauseTierRegistry
     /// </summary>
     /// <param name="exerciseId">The server-resolved exercise (COR-001); must not be <see cref="Guid.Empty"/>.</param>
     /// <param name="actingHumanId">The staff human behind the reset (staff-side attribution only, XC-002).</param>
-    /// <param name="cancellationToken">Cancels the overlay publish.</param>
+    /// <param name="cancellationToken">
+    /// Accepted for API shape; the overlay publish runs on <see cref="CancellationToken.None"/> once the in-memory
+    /// reset is applied (M-A), so an aborted request can never skip it or the caller's row delete.
+    /// </param>
     /// <returns>The tier the exercise was in before the reset.</returns>
     public async Task<PauseTier> ResetAsync(
         Guid exerciseId, string actingHumanId, CancellationToken cancellationToken = default)
@@ -417,7 +425,9 @@ public sealed partial class PauseTierRegistry
         // Best-effort, exactly as SetTierAsync's publish (WR-004): a failed push never undoes the reset.
         try
         {
-            await _overlayPublisher.PublishAsync(transition, cancellationToken).ConfigureAwait(false);
+            // Re-review M-A: CancellationToken.None — the tier is already applied, so a request abort must neither
+            // skip the participant publish nor (by throwing) the write-through below.
+            await _overlayPublisher.PublishAsync(transition, CancellationToken.None).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {

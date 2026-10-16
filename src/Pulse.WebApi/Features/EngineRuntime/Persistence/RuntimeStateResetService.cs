@@ -112,7 +112,8 @@ public sealed class RuntimeStateResetService
         var previousTier = await _pauseTiers.ResetAsync(exerciseId, actingHumanId, cancellationToken).ConfigureAwait(false);
 
         // Best-effort facts for the event, with the existing fallbacks (scenario time, then UTC).
-        var facts = await TryAsync(() => _exerciseFacts.GetAsync(exerciseId, cancellationToken)).ConfigureAwait(false);
+        // M-A: CancellationToken.None — after the in-memory reset nothing may be skipped by a request abort.
+        var facts = await TryAsync(() => _exerciseFacts.GetAsync(exerciseId, CancellationToken.None)).ConfigureAwait(false);
         var scenarioTime = clockScenarioTime ?? facts?.StoredScenarioTime ?? now;
 
         var auditEvent = new TelemetryEvent
