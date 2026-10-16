@@ -65,6 +65,16 @@ describe('getStaffAssignments — pre-A1 wire shape', () => {
     ])
   })
 
+  it('maps a legacy orgAdmin assignment row to planner (deploy-window bridge)', async () => {
+    mockGet.mockResolvedValue({
+      data: [{ exerciseId: 'ex-0001', exerciseName: 'Coastal Surge', role: 'orgAdmin' }],
+    } as Awaited<ReturnType<typeof api.get>>)
+    const result = await getStaffAssignments()
+    expect(result).toEqual([
+      { exerciseId: 'ex-0001', exerciseName: 'Coastal Surge', role: 'planner', personId: '', isLead: false },
+    ])
+  })
+
   it('still rejects a present-but-wrong isLead', async () => {
     mockGet.mockResolvedValue({
       data: [{ exerciseId: 'ex-0001', exerciseName: 'X', role: 'controller', isLead: 'yes' }],

@@ -172,8 +172,16 @@ function normalizeBody(
     ? raw.exerciseId === null
     : typeof raw.exerciseId === 'string' && raw.exerciseId.length > 0
   if (!exerciseBindingOk) return null
-  if (!isSessionRole(scope, raw.role)) return null
-  const role: SessionRole = raw.role
+  // DEPLOY-WINDOW BRIDGE: the pre-A1 backend still mints exercise sessions with
+  // `role: 'orgAdmin'` and NO `scope`. A1 migrates those people to `planner`, and the old backend
+  // still authorizes them server-side, so map to `planner` here so deploy order doesn't matter.
+  // Only the scope-ABSENT shape qualifies: an explicit `scope: 'exercise'` + `orgAdmin` is the A1
+  // contract violation and stays rejected.
+  const isLegacyOrgAdmin = raw.scope === undefined && raw.role === 'orgAdmin' &&
+    typeof raw.exerciseId === 'string'
+  const candidateRole = isLegacyOrgAdmin ? 'planner' : raw.role
+  if (!isSessionRole(scope, candidateRole)) return null
+  const role: SessionRole = candidateRole
   const personId = raw.personId === undefined ? null : raw.personId
   if (personId !== null && !(typeof personId === 'string' && personId.length > 0)) return null
   const expectedWorld = worldForRole(role)

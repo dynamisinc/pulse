@@ -139,6 +139,29 @@ describe('resolveSession', () => {
     expect(session.world).toBe('staff')
   })
 
+  // main's exact pre-A1 SessionDto: no scope/world/isLead/personId.
+  const LEGACY_ORG_ADMIN = {
+    exerciseId: 'ex-0042', accountId: 'acct-123', role: 'orgAdmin', personaId: undefined,
+    actingHumanId: 'human-1', isReadOnly: false, expiresAt: FUTURE,
+  }
+  function legacyBody(extra: Record<string, unknown> = {}) {
+    return { data: { ...LEGACY_ORG_ADMIN, ...extra } } as Awaited<ReturnType<typeof api.get>>
+  }
+
+  it('bridges a legacy (scope-absent) orgAdmin exercise session to planner', async () => {
+    mockGet.mockResolvedValue(legacyBody())
+    const session = await resolveSession()
+    expect(session).toMatchObject({
+      scope: 'exercise', role: 'planner', world: 'staff', exerciseId: 'ex-0042',
+      isLead: false, personId: null,
+    })
+  })
+
+  it('rejects the same orgAdmin body once scope: exercise is present (A1 contract)', async () => {
+    mockGet.mockResolvedValue(legacyBody({ scope: 'exercise' }))
+    await expect(resolveSession()).rejects.toThrow()
+  })
+
   it('resolves a staff exercise session carrying isLead and personId', async () => {
     mockGet.mockResolvedValue(validBody({
       role: 'controller', world: 'staff', personId: 'person-3', isLead: true,

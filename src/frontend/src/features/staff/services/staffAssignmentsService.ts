@@ -195,7 +195,11 @@ function isAssignmentListBody(value: unknown): value is StaffAssignmentBody[] {
  * `exerciseContextResolver.ts`'s `isExerciseStatus`).
  */
 function toAssignment(body: StaffAssignmentBody): Enrollment {
-  if (!isExerciseRole(body.role)) {
+  // DEPLOY-WINDOW BRIDGE: the pre-A1 backend can still return `orgAdmin` assignment rows. A1
+  // migrates those people to `planner` (the old backend still authorizes them server-side), so
+  // map here and deploy order doesn't matter.
+  const role = body.role === 'orgAdmin' ? 'planner' : body.role
+  if (!isExerciseRole(role)) {
     throw new StaffAssignmentError(
       `staffAssignmentsService: unknown role "${body.role}" for exercise ${body.exerciseId}`,
     )
@@ -203,7 +207,7 @@ function toAssignment(body: StaffAssignmentBody): Enrollment {
   return {
     exerciseId: body.exerciseId,
     exerciseName: body.exerciseName,
-    role: body.role,
+    role,
     // `Enrollment.personId` is a frozen non-null string, so an absent (pre-A1) personId falls back
     // to '' ("no person known yet"). Nothing reads it for authorization; the server remains the
     // authority, and '' can never match a real person id.
