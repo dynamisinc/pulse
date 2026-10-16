@@ -17,13 +17,14 @@
      publishes its height; 0px when none). */
   top: calc(var(--pulse-chrome-top, 0px) + var(--pulse-alert-height, 0px));
   right: 0;
-  bottom: var(--pulse-chrome-bottom, 0px);
+  /* Raised by the on-screen keyboard's height (visualViewport; 0 without one). */
+  bottom: calc(var(--pulse-chrome-bottom, 0px) + var(--pulse-keyboard-inset, 0px));
   left: 0;
   z-index: 50;
   display: flex;
   align-items: flex-start;
   justify-content: center;
-  padding: 5vh 8px 8px;
+  padding: 5vh 8px calc(8px + env(safe-area-inset-bottom, 0px));
   overflow-y: auto;
   overscroll-behavior: contain;
   background: rgba(14, 21, 24, .45);
@@ -135,4 +136,12 @@
 .discard:focus-visible {
   outline: 2px solid var(--pc-accent);
   outline-offset: 2px;
+}
+
+/* Phones: start near the top and use the whole width, so the composer (and its Post button)
+ * fit above the keyboard; the backdrop scrolls if they still do not. */
+@media (max-width: 599px) {
+  .backdrop {
+    padding: 8px 8px calc(8px + env(safe-area-inset-bottom, 0px));
+  }
 }

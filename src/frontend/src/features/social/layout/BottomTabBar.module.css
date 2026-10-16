@@ -1,0 +1,156 @@
+/*
+ * features/social/layout/BottomTabBar.module.css
+ * ---------------------------------------------------------------------------
+ * The phone bottom tab bar (mobile-tablet story 02, MT-D2). It is only rendered below
+ * 600px (`PHONE_QUERY`, see `usePhoneLayout`); the `@media (min-width: 600px)` rule at the
+ * end hides it anyway, so a stale render at a wider width (rotation, window resize before
+ * React re-renders) can never show a bar beside the rail.
+ *
+ * Fixed to the bottom, above the shell's bottom EXERCISE banner (`--pulse-chrome-bottom`),
+ * padded by `env(safe-area-inset-bottom)` (needs `viewport-fit=cover`, set in index.html).
+ * Height: `--pulse-tabbar-height` (= 56px + inset) is declared on the frame, which pads
+ * itself by the same amount so nothing is hidden behind the bar.
+ *
+ * Active tab: heavier label + an accent bar along the top + a wash (never colour alone;
+ * `aria-current` carries it to assistive tech). Colours: `--pc-*` tokens, accent = the
+ * per-exercise `--pulse-ac`; white on accent for the Post disc (same AA-certified pairing
+ * as the rail's Post button). Light only. No COBRA / MUI.
+ */
+
+.bar {
+  position: fixed;
+  right: 0;
+  bottom: var(--pulse-chrome-bottom, 0px);
+  left: 0;
+  z-index: 40;
+  box-sizing: border-box;
+  padding: 0 env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px)
+    env(safe-area-inset-left, 0px);
+  /* A hairline ABOVE the bar drawn as a shadow, so it adds no height beyond the 56px the
+     frame reserves. */
+  box-shadow: 0 -1px 0 var(--pc-line);
+  background: var(--pc-bg);
+  color: var(--pc-ink);
+}
+
+.list {
+  display: flex;
+  align-items: stretch;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cell {
+  display: flex;
+  flex: 1 1 0;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  height: 56px;
+}
+
+.tab {
+  position: relative;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  width: 100%;
+  height: 100%;
+  min-height: 44px;
+  color: var(--pc-ink);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.1;
+  text-decoration: none;
+}
+
+.tab:hover {
+  background: var(--pc-hover);
+}
+
+.tab:focus-visible,
+.post:focus-visible {
+  outline: 2px solid var(--pc-accent);
+  outline-offset: -3px;
+}
+
+.tabActive {
+  background: var(--pc-hover);
+  font-weight: 800;
+  box-shadow: inset 0 3px 0 var(--pc-accent);
+}
+
+.iconWrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.icon {
+  width: 22px;
+  height: 22px;
+}
+
+.label {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Unread count as TEXT over the bell's top-right corner (never a colour-only dot). */
+.badge {
+  position: absolute;
+  top: -6px;
+  left: 12px;
+  box-sizing: border-box;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  border: 2px solid var(--pc-bg);
+  border-radius: 999px;
+  background: var(--pc-accent);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 14px;
+  text-align: center;
+  pointer-events: none;
+}
+
+.post {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: var(--pc-accent);
+  color: #fff;
+  cursor: pointer;
+}
+
+.post:hover {
+  filter: brightness(1.08);
+}
+
+.post:focus-visible {
+  outline-color: var(--pc-ink);
+  outline-offset: 2px;
+}
+
+.postIcon {
+  width: 20px;
+  height: 20px;
+}
+
+@media (min-width: 600px) {
+  .bar {
+    display: none;
+  }
+}

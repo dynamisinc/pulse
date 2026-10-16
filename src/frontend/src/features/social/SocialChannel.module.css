@@ -76,6 +76,22 @@
   }
 }
 
+/*
+ * PHONES (< 600px; mobile-tablet story 02, MT-D2; `PHONE_MAX_WIDTH` in frameMetrics.ts).
+ * The rail is replaced by the fixed bottom tab bar (BottomTabBar), so the frame is a single
+ * column and reserves room at the bottom for the bar plus the home-indicator safe area:
+ * the last post and the composer are never covered. `--pulse-tabbar-height` is published
+ * for anything else that must clear the bar.
+ */
+@media (max-width: 599px) {
+  .frame {
+    --pulse-tabbar-height: calc(56px + env(safe-area-inset-bottom, 0px));
+
+    grid-template-columns: minmax(0, 1fr);
+    padding-bottom: var(--pulse-tabbar-height);
+  }
+}
+
 /* The main column: bordered on both sides like the platforms this mimics. */
 .main {
   box-sizing: border-box;

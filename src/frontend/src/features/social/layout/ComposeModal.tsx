@@ -51,6 +51,7 @@ import {
   useId,
   useRef,
   useState,
+  type CSSProperties,
   type KeyboardEvent,
   type MouseEvent,
   type RefObject,
@@ -60,6 +61,7 @@ import { faXmark } from '@fortawesome/free-solid-svg-icons'
 import { hasOtherModalMounted } from '@/core/a11y/modalPriority'
 import { Composer } from '../components/Composer'
 import { ParticipantTooltip } from '../components/ParticipantTooltip'
+import { useVisualViewportInset } from './useVisualViewportInset'
 import styles from './ComposeModal.module.css'
 
 export interface ComposeModalProps {
@@ -106,6 +108,9 @@ export function ComposeModal({ onClose, returnFocusRef }: ComposeModalProps) {
   const dialogRef = useRef<HTMLDivElement>(null)
   const keepEditingRef = useRef<HTMLButtonElement>(null)
   const titleId = useId()
+  // On-screen keyboard height (0 when none / unsupported): the backdrop's bottom edge rises
+  // by this much so the caret line and Post button stay in the visible viewport.
+  const keyboardInsetPx = useVisualViewportInset()
   // True while the inline "Discard this draft?" question is showing.
   const [confirmingDiscard, setConfirmingDiscard] = useState(false)
 
@@ -192,6 +197,7 @@ export function ComposeModal({ onClose, returnFocusRef }: ComposeModalProps) {
     <div
       className={styles.backdrop}
       data-testid="compose-backdrop"
+      style={{ '--pulse-keyboard-inset': `${keyboardInsetPx}px` } as CSSProperties}
       onMouseDown={handleBackdropMouseDown}
     >
       <div
