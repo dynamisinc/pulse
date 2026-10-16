@@ -217,6 +217,15 @@ public sealed class AdminIdentityFoundationMigrationTests
         var noControllers = await db.InsertExerciseAsync("live");
         await db.InsertAssignmentAsync(await db.InsertStaffUserAsync("Only planner"), noControllers, "planner", at);
 
+        // L-1: an account-backed controller (PersonId NULL) created EARLIER than every person controller is never the lead.
+        var withAccountController = await db.InsertExerciseAsync("live");
+        var accountController = await db.InsertAccountAsync(withAccountController, "controller", personaId: null, at.AddDays(-1));
+        var personController = await db.InsertAssignmentAsync(
+            await db.InsertStaffUserAsync("Person controller"), withAccountController, "controller", at);
+
+        var onlyAccountController = await db.InsertExerciseAsync("live");
+        await db.InsertAccountAsync(onlyAccountController, "controller", personaId: null, at.AddDays(-1));
+
         await db.MigrateToAsync(MigrationUnderTest);
 
         (await db.ScalarAsync<Guid>($"SELECT [Id] FROM [Enrollments] WHERE [ExerciseId] = '{exercise}' AND [IsLead] = 1"))
@@ -228,6 +237,12 @@ public sealed class AdminIdentityFoundationMigrationTests
             .Should().Be(lowest, "a CreatedAt tie is broken by the lowest id (SQL Server uniqueidentifier order)");
         (await db.ScalarAsync<int>($"SELECT COUNT(*) FROM [Enrollments] WHERE [ExerciseId] = '{noControllers}' AND [IsLead] = 1"))
             .Should().Be(0, "an exercise with no controller has no lead");
+        (await db.ScalarAsync<Guid>($"SELECT [Id] FROM [Enrollments] WHERE [ExerciseId] = '{withAccountController}' AND [IsLead] = 1"))
+            .Should().Be(personController, "only a person-backed controller can lead, even when an account-backed one is older");
+        (await db.ScalarAsync<int>($"SELECT COUNT(*) FROM [Enrollments] WHERE [Id] = '{accountController}' AND [IsLead] = 0"))
+            .Should().Be(1);
+        (await db.ScalarAsync<int>($"SELECT COUNT(*) FROM [Enrollments] WHERE [ExerciseId] = '{onlyAccountController}' AND [IsLead] = 1"))
+            .Should().Be(0, "an exercise whose only controller is account-backed has no lead");
     }
 
     [RequiresDockerFact]
@@ -331,13 +346,14 @@ public sealed class AdminIdentityFoundationMigrationTests
             return id;
         }
 
-        public async Task<Guid> InsertAccountAsync(Guid exerciseId, string role, Guid? personaId)
+        public async Task<Guid> InsertAccountAsync(Guid exerciseId, string role, Guid? personaId, DateTimeOffset? createdAt = null)
         {
             var id = Guid.NewGuid();
             var persona = personaId is { } p ? $"'{p}'" : "NULL";
+            var created = createdAt is { } c ? $"'{c:O}'" : "SYSDATETIMEOFFSET()";
             await ExecuteAsync(ConnectionString, $"""
                 INSERT INTO [Accounts] ([Id], [ExerciseId], [Username], [DisplayName], [Role], [PersonaId], [CreatedAt], [FailedLoginCount])
-                VALUES ('{id}', '{exerciseId}', N'user_{id:N}', N'Legacy Participant', N'{role}', {persona}, SYSDATETIMEOFFSET(), 0);
+                VALUES ('{id}', '{exerciseId}', N'user_{id:N}', N'Legacy Participant', N'{role}', {persona}, {created}, 0);
                 """);
             return id;
         }

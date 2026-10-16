@@ -308,12 +308,13 @@ namespace Pulse.WebApi.Data.Migrations
 
             // The lead controller (Tom, 2026-10-16): every exercise that has any controller gets exactly one lead — the
             // earliest-created controller enrollment, tiebreak the lowest Id (SQL Server uniqueidentifier order).
-            // Idempotent: an exercise that already has a lead is left alone.
+            // Idempotent: an exercise that already has a lead is left alone. Only a PERSON-backed controller can lead (the
+            // lead is a person's grant); an account-backed (PersonId NULL) controller enrollment is never chosen.
             migrationBuilder.Sql(Exec("""
                 UPDATE e SET [IsLead] = 1
                 FROM [Enrollments] e
                 WHERE e.[Id] = (SELECT TOP (1) c.[Id] FROM [Enrollments] c
-                                WHERE c.[ExerciseId] = e.[ExerciseId] AND c.[Role] = 'controller'
+                                WHERE c.[ExerciseId] = e.[ExerciseId] AND c.[Role] = 'controller' AND c.[PersonId] IS NOT NULL
                                 ORDER BY c.[CreatedAt], c.[Id])
                   AND NOT EXISTS (SELECT 1 FROM [Enrollments] l WHERE l.[ExerciseId] = e.[ExerciseId] AND l.[IsLead] = 1);
                 """));
