@@ -144,7 +144,9 @@ default (Azure OpenAI in-tenant is the v1 default; Claude is the per-deployment 
 
 ## 8. Sign-off
 
-> **Status: SIGNED — Tom Bull, 2026-10-16 — `uat` only, Ambient tier, suggest-only.** The three
+> **Status: SIGNED — Tom Bull, 2026-10-16 — `uat` only, Ambient tier, autonomy per the "Authorized
+> autonomy" amendment below (Suggest by default; Delayed-auto and lead-controller swamped mode
+> authorized).** The three
 > `uat.bicepparam` parameters (`generationProviderLive`, `generationTenantBounded`,
 > `generationNoTrainingAttested`) were set to `true` in the same commit that recorded this signature.
 > CI and production stay on `Fake`. The text below is kept as the pre-signing record.
@@ -154,7 +156,29 @@ default (Azure OpenAI in-tenant is the v1 default; Claude is the per-deployment 
 **Posture requested:** Ambient tier (`gpt-5.4-mini`, via the temporary Standard→Ambient config alias),
 **suggest-only** autonomy — every AI draft needs a human approve before it can reach participants
 (it is also the only posture reachable today; the runtime Suggest→Delayed-auto lever is
-`autonomy-safety/05`, #353).
+`autonomy-safety/05`, #353). *Superseded at signing: #353 merged 2026-07-29, so Delayed-auto is
+reachable. See "Authorized autonomy (amendment at signing)" below.*
+
+#### Authorized autonomy (amendment at signing, 2026-10-16, Tom Bull)
+
+The posture above predates #353. With #353 on `main`, a controller can raise the exercise's autonomy
+default to **Delayed-auto** and a lead controller can turn on **swamped mode**. Under both, `AutoHoldPolicy`
+publishes an expired Delayed-auto draft that has no controller decision. The signer **authorizes** that
+on `uat` with the live provider, on these conditions, all already enforced in code:
+
+- **Suggest is the default.** Every AI draft needs a human approve unless a controller deliberately
+  raises the exercise to Delayed-auto.
+- **Silence is never approval.** Without swamped mode, an expired Delayed-auto draft is **held**, never
+  sent (`AutoHoldPolicy.Decide`, pinned by `AutoHoldPolicyTests`).
+- **Swamped mode is the only auto-send path.** It is an explicit, lead-controller-gated action on the
+  controller-role steering group, and it applies only to drafts whose effective level is still
+  Delayed-auto.
+- **Every safety clamp overrides it.** The kill switch, degraded mode, and the cut-to-`Fake` egress lever
+  (#402) drop the effective level, so in-flight countdowns hold instead of sending.
+- **Participants never see a draft;** an auto-sent post is logged as engine-sourced.
+
+Wider autonomy than this (autonomous ambient posting under a tier policy, wave C2 / #168) needs its
+own amendment to this section before it reaches the live provider.
 
 ### Evidence (compiled by `engine-runtime/05` — verify, don't take on trust)
 
@@ -226,7 +250,7 @@ verification pass).
 | Fail-closed gate verified (§3 — `ProviderLiveConfigTests` green in CI, evidence ii) | ☑ |
 | Measured p95 within the degraded-mode threshold (§5 — evidence iii) | ☑ |
 | `InjectionRedTeam` green against the live provider (§6 — evidence iv) | ☑ |
-| Approved to flip `Generation:Provider` off `Fake` for **`uat`** — Ambient tier, suggest-only | ☑ |
+| Approved to flip `Generation:Provider` off `Fake` for **`uat`** — Ambient tier; Suggest default, Delayed-auto + lead-controller swamped mode authorized (see amendment) | ☑ |
 | Signer / date | **Tom Bull — 2026-10-16** |
 
 ### Pre-signing verification against Azure (2026-10-16, run by the signer in Cloud Shell, `Shared SandBox`)
