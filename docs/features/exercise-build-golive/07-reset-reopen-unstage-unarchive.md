@@ -43,6 +43,9 @@ Exercises can only move forward today, and the demo reset is direct SQL in `Clea
 - [ ] A participant image referenced only from a run-sheet item's JSON `Media`: the asset survives, and the run-sheet item still resolves it after reset.
 - [ ] Swamped mode on and autonomy raised before reset: afterwards swamped mode is off and autonomy is back to the exercise default.
 
+### Copilot review 6 fold (2026-10-16)
+- [ ] The `needs-repair` status is a coordinated contract change (A3 frozen-type clearance). The backend inject status validation, `runSheet/types.ts`, `injectGuards.ts` and `injectRules.ts` accept it; the run sheet displays it and allows editing; and repair moves the item to `pending`. Test: reset (or duplicate) → the item shows as needs-repair → repair → stage succeeds.
+
 ## Out of Scope
 Delete (08); multiple runs per exercise or run numbering (rejected, §5.2); evaluator annotations; the AAR export itself (E10).
 

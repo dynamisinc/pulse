@@ -64,6 +64,9 @@ every other Phase-A story reads. Staff-world plumbing; no participant-visible ch
 - [ ] Grant revocation also aborts every SignalR connection bound to a revoked session id and removes it from its groups (a connection-to-session registry). A test covers a client connected before revocation, which stops receiving staff broadcasts.
 - [ ] `FirstLiveAt` backfill: for exercises in live, paused, completed or archived, it is COALESCE(first transition to live, the `exercise.bootstrapped` event, earliest post, `CreatedAt`), so it is never null. A migration test covers a bootstrapped live exercise with no lifecycle events.
 
+### Copilot review 6 fold (2026-10-16)
+- [ ] Final `FirstLiveAt` fallback: when the exercise's status is past staged and no lifecycle, bootstrap or post timestamp exists and `CreatedAt` is null, the backfill uses the migration's run time (`SYSUTCDATETIME()`), so a run is never mistaken for "never ran". A migration fixture covers an exercise with all four sources absent.
+
 ## Out of Scope
 Password sign-in itself and org choice (story 15 / 05); role enforcement (17); invite and directory UI (19-20);
 the A2/A3/A4 columns (their own migrations). No participant-facing change.

@@ -15,7 +15,7 @@ route and per lifecycle transition and proves it with a route x role matrix test
       Any other role gets 403 and the state is unchanged.
 - [ ] **Narrowings land.** Create exercise is org admin only (planner/controller refused); settings, chrome, practice mode
       are planner only (controller refused); view-only code rotate/revoke is planner + controller (evaluator refused).
-- [ ] **Evaluator writes nothing (#61).** Every mutating route refuses `evaluator` with no state change; evaluator reads the
+- [ ] **Evaluator writes nothing (#61).** Every exercise-content and administration mutating route refuses `evaluator` with no state change; evaluator reads the
       exercise (console, feeds, report).
 - [ ] **Org admin has no implicit exercise power.** Org-scope session on an exercise-scoped route is refused; "via enrollment"
       rows apply only when the org admin holds that enrollment.
@@ -40,6 +40,9 @@ route and per lifecycle transition and proves it with a route x role matrix test
 
 ### Copilot review 5 fold (2026-10-16)
 - [ ] Setup authoring is separate from conduct posting. In **build**, planners and controllers may post as a persona (setup and backdated posts) and pin, using the composer flows in build-golive/01 and persona-management/04. In **staged and live**, conduct posting is controller-only. The matrix test covers a planner posting in build (allowed) and in live (403).
+
+### Copilot review 6 fold (2026-10-16)
+- [ ] Self-service session operations are explicit "allowed for all authenticated roles" rows in the matrix, evaluators included: `/api/auth/refresh`, `/api/auth/logout`, `GET /api/session`, `/api/me/*` reads, `GET /api/staff/assignments` and `POST /api/staff/active-exercise` (own enrollments only). Tests cover an evaluator refreshing, logging out and switching between two of their own evaluator enrollments.
 
 ## Out of Scope
 The new transitions themselves (reset/reopen/delete/unstage bodies: exercise-build-golive 07-08); the lifecycle write gate for participants (A5 #379).
