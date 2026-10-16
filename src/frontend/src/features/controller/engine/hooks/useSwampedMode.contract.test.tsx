@@ -30,8 +30,13 @@ import {
   runningAutonomy,
 } from '../models/reviewContracts'
 import { decide, evaluate } from '../services/autoHoldPolicy'
+import { resetStubSession, setStubSession } from '@/core/auth/rolePermissions.testUtils'
 import { swampedModeStore, useSwampedMode } from './useSwampedMode'
 
+vi.mock('@/core/auth/session', async importOriginal => ({
+  ...(await importOriginal<typeof import('@/core/auth/session')>()),
+  useOptionalSession: (await import('@/core/auth/rolePermissions.testUtils')).stubbedSession,
+}))
 vi.mock('@/core/exerciseContext', () => ({
   useExerciseContext: vi.fn(),
 }))
@@ -51,7 +56,6 @@ function identity(overrides: Partial<ControllerIdentity> = {}): ControllerIdenti
     actingHumanId: 'human-controller-01',
     callSign: 'SIMCELL-1',
     role: 'controller',
-    isLead: true,
     ...overrides,
   }
 }
@@ -61,6 +65,7 @@ function swampedEvents() {
 }
 
 beforeEach(() => {
+  resetStubSession()
   setExerciseClock({ scenarioNow: () => new Date('2033-09-04T14:00:00Z') })
   swampedModeStore.resetForTests()
   resetTelemetryBuffer()
@@ -74,7 +79,8 @@ afterEach(() => {
 describe('useSwampedMode — the engine never self-enables', () => {
   it('re-rendering the hook many times (no setSwampedMode call) never flips the flag on', () => {
     mockedUseExerciseContext.mockReturnValue(scopeFor('ex-mock-0001'))
-    mockedUseControllerIdentity.mockReturnValue(identity({ isLead: true }))
+    setStubSession({ role: 'controller', isLead: true })
+    mockedUseControllerIdentity.mockReturnValue(identity())
 
     const { result, rerender } = renderHook(() => useSwampedMode())
     expect(result.current.swampedMode).toBe(false)
@@ -89,7 +95,8 @@ describe('useSwampedMode — the engine never self-enables', () => {
 
   it('reading the flag from many concurrent hook instances never flips it on', () => {
     mockedUseExerciseContext.mockReturnValue(scopeFor('ex-mock-0001'))
-    mockedUseControllerIdentity.mockReturnValue(identity({ isLead: true }))
+    setStubSession({ role: 'controller', isLead: true })
+    mockedUseControllerIdentity.mockReturnValue(identity())
 
     const readers = Array.from({ length: 5 }, () => renderHook(() => useSwampedMode()))
     for (const reader of readers) {
@@ -107,7 +114,8 @@ describe('useSwampedMode — the engine never self-enables', () => {
     // mutate the hook's store (there is no import of `useSwampedMode` from
     // `autoHoldPolicy` at all — verified structurally by the module boundary).
     mockedUseExerciseContext.mockReturnValue(scopeFor('ex-mock-0001'))
-    mockedUseControllerIdentity.mockReturnValue(identity({ isLead: true }))
+    setStubSession({ role: 'controller', isLead: true })
+    mockedUseControllerIdentity.mockReturnValue(identity())
     const { result } = renderHook(() => useSwampedMode())
     expect(result.current.swampedMode).toBe(false)
 
@@ -140,7 +148,8 @@ describe('useSwampedMode — the engine never self-enables', () => {
 describe('useSwampedMode — boolean-shape contract with the autoHoldPolicy/useDraftTimer input', () => {
   it('is a plain boolean, both off and on', () => {
     mockedUseExerciseContext.mockReturnValue(scopeFor('ex-mock-0001'))
-    mockedUseControllerIdentity.mockReturnValue(identity({ isLead: true }))
+    setStubSession({ role: 'controller', isLead: true })
+    mockedUseControllerIdentity.mockReturnValue(identity())
 
     const { result } = renderHook(() => useSwampedMode())
     expect(typeof result.current.swampedMode).toBe('boolean')
@@ -152,7 +161,8 @@ describe('useSwampedMode — boolean-shape contract with the autoHoldPolicy/useD
 
   it('feeds directly into autoHoldPolicy.decide/evaluate with no adaptation (the real story 02 input shape)', () => {
     mockedUseExerciseContext.mockReturnValue(scopeFor('ex-mock-0001'))
-    mockedUseControllerIdentity.mockReturnValue(identity({ isLead: true }))
+    setStubSession({ role: 'controller', isLead: true })
+    mockedUseControllerIdentity.mockReturnValue(identity())
     const { result } = renderHook(() => useSwampedMode())
 
     const countdown = new DelayedAutoCountdown({
@@ -183,7 +193,8 @@ describe('useSwampedMode — boolean-shape contract with the autoHoldPolicy/useD
 describe('useSwampedMode — resetForTests isolates per-exercise state across cases', () => {
   it('resetForTests clears every exercise flag so the next case starts clean', () => {
     mockedUseExerciseContext.mockReturnValue(scopeFor('ex-mock-0001'))
-    mockedUseControllerIdentity.mockReturnValue(identity({ isLead: true }))
+    setStubSession({ role: 'controller', isLead: true })
+    mockedUseControllerIdentity.mockReturnValue(identity())
     const first = renderHook(() => useSwampedMode())
     act(() => first.result.current.setSwampedMode(true))
     expect(swampedModeStore.getSnapshot('ex-mock-0001')).toBe(true)

@@ -29,6 +29,12 @@ import { useEngineControl, type UseEngineControlResult } from '../hooks/useEngin
 import { useEngineSettings, type UseEngineSettingsResult } from '../hooks/useEngineSettings'
 import { EngineControlBar } from './EngineControlBar'
 
+// Story 17: raise controls read the SERVER's `Session.isLead`; stand in a lead controller session.
+vi.mock('@/core/auth/session', async importOriginal => ({
+  ...(await importOriginal<typeof import('@/core/auth/session')>()),
+  useOptionalSession: (await import('@/core/auth/rolePermissions.testUtils')).stubbedSession,
+}))
+
 vi.mock('../hooks/useEngineControl', async () => {
   const actual = await vi.importActual<typeof import('../hooks/useEngineControl')>(
     '../hooks/useEngineControl',

@@ -6,6 +6,9 @@
  * COBRA operator chrome (matches `ReviewQueue`'s D5 tokens), MUI 9 `sx`-only
  * system props, FontAwesome icons only. Never mounted on a participant path.
  *
+ * `isLead` is the SERVER's `Session.isLead` (story 17), via `useSwampedMode`.
+ * A non-lead controller may only LOWER: see the OFF-only control below.
+ *
  * LEAD GATE (COR-015 "absent, not disabled"). A non-lead controller has NO way
  * to enable swamped mode from this control — the enable affordance is simply
  * ABSENT for them (not rendered greyed-out), rather than present-but-disabled,
@@ -24,8 +27,15 @@
  */
 
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import { faTriangleExclamation, faToggleOn, faToggleOff } from '@fortawesome/free-solid-svg-icons'
+import {
+  faTriangleExclamation,
+  faToggleOn,
+  faToggleOff,
+  faPowerOff,
+} from '@fortawesome/free-solid-svg-icons'
+import { useState } from 'react'
 import { Box, Stack, Typography } from '@mui/material'
+import { CobraLinkButton, CobraSecondaryButton } from '@/theme/styledComponents'
 import { useSwampedMode } from '../hooks/useSwampedMode'
 // D5 dark operator-chrome tokens (matches `ReviewQueue`'s `chrome`). Staff-only.
 import { consoleChrome as chrome } from '../../consoleChrome'
@@ -34,6 +44,7 @@ import { useCanControl } from '../../access'
 export function SwampedModeToggle() {
   const { swampedMode, isLead, setSwampedMode } = useSwampedMode()
   const canControl = useCanControl()
+  const [confirmingOff, setConfirmingOff] = useState(false)
 
   return (
     <Stack
@@ -110,6 +121,54 @@ export function SwampedModeToggle() {
           <Typography component="span" sx={{ fontSize: 10.5, color: chrome.inkMuted }}>
             — swamped mode is on; expired timers publish instead of holding.
           </Typography>
+        </Stack>
+      )}
+
+      {/* Story 17 (raise-only, Option A): a non-lead controller may LOWER but not raise, so while
+          swamped mode is on they get an OFF-only control, behind a confirmation. Text + icon. */}
+      {canControl && !isLead && swampedMode && (
+        <Stack
+          direction="row"
+          role="group"
+          aria-label="Turn swamped mode off"
+          data-testid="swamped-mode-turn-off"
+          sx={{ alignItems: 'center', gap: 0.75, flexWrap: 'wrap' }}
+        >
+          {confirmingOff ? (
+            <>
+              <Typography component="span" sx={{ fontSize: 11, color: chrome.ink }}>
+                Turn swamped mode off? Expired timers will hold again instead of publishing.
+              </Typography>
+              <CobraSecondaryButton
+                size="small"
+                startIcon={<FontAwesomeIcon icon={faPowerOff} aria-hidden="true" />}
+                data-testid="swamped-mode-turn-off-confirm"
+                onClick={() => {
+                  setSwampedMode(false)
+                  setConfirmingOff(false)
+                }}
+              >
+                Confirm: turn swamped mode off
+              </CobraSecondaryButton>
+              <CobraLinkButton
+                size="small"
+                data-testid="swamped-mode-turn-off-cancel"
+                onClick={() => setConfirmingOff(false)}
+              >
+                Cancel
+              </CobraLinkButton>
+            </>
+          ) : (
+            <CobraSecondaryButton
+              size="small"
+              startIcon={<FontAwesomeIcon icon={faPowerOff} aria-hidden="true" />}
+              data-testid="swamped-mode-turn-off-button"
+              aria-haspopup="true"
+              onClick={() => setConfirmingOff(true)}
+            >
+              Turn swamped mode off
+            </CobraSecondaryButton>
+          )}
         </Stack>
       )}
 

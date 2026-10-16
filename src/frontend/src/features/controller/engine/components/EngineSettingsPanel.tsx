@@ -83,6 +83,7 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import {
   faCheck,
   faCircleInfo,
+  faLock,
   faTriangleExclamation,
   faXmark,
 } from '@fortawesome/free-solid-svg-icons'
@@ -94,6 +95,7 @@ import {
 // D5 dark operator-chrome tokens (matches `ReviewQueue`'s/`EngineControlBar`'s `chrome`).
 import { consoleChrome as chrome } from '../../consoleChrome'
 import { useCanControl } from '../../access'
+import { LEAD_ONLY_RAISE_REASON, usePermissions } from '@/core/auth'
 
 /** Stable toolstrip-registry id for the console's "ENGINE" surface tool. */
 export const ENGINE_SETTINGS_TOOL_ID = 'engine-settings'
@@ -117,6 +119,41 @@ const AUTONOMY_OPTIONS: ReadonlyArray<{ value: AutonomyDefaultLevel; label: stri
   { value: 'suggest', label: 'Suggest' },
   { value: 'delayed-auto', label: 'Delayed-auto' },
 ]
+
+/**
+ * Autonomy rank, lowest to highest. Story 17 (raise-only, Option A): MOVING UP this order is a
+ * RAISE and needs the lead controller; moving down is open to every controller.
+ */
+const AUTONOMY_RANK: Readonly<Record<AutonomyDefaultLevel, number>> = {
+  suggest: 0,
+  'delayed-auto': 1,
+}
+
+/** Tier-policy rank, lowest to highest: ambient < standard < auto (story 17). */
+const TIER_POLICY_RANK: Readonly<Record<TierPolicyMode, number>> = {
+  ambient: 0,
+  standard: 1,
+  auto: 2,
+}
+
+const LEAD_REASON_AUTONOMY_ID = 'autonomy-default-lead-reason'
+const LEAD_REASON_TIER_ID = 'tier-policy-lead-reason'
+const LEAD_REASON_RESTORE_ID = 'provider-lever-lead-reason'
+
+/** Visible, icon-plus-words reason a raise is disabled for a non-lead (never tooltip-only). */
+function LeadOnlyReason({ id, testId }: { id: string; testId: string }) {
+  return (
+    <Stack
+      id={id}
+      data-testid={testId}
+      direction="row"
+      sx={{ alignItems: 'center', gap: 0.6, fontSize: 10.5, color: chrome.inkMuted }}
+    >
+      <FontAwesomeIcon icon={faLock} aria-hidden="true" />
+      <span>{LEAD_ONLY_RAISE_REASON}</span>
+    </Stack>
+  )
+}
 
 const TIER_POLICY_OPTIONS: ReadonlyArray<{ value: TierPolicyMode; label: string }> = [
   { value: 'standard', label: 'Standard' },
@@ -164,6 +201,8 @@ export interface EngineSettingsPanelProps {
 export function EngineSettingsPanel({ open, onClose }: EngineSettingsPanelProps) {
   // Story 11 (DF-14): a non-controller reads the settings; the three levers are absent.
   const canControl = useCanControl()
+  // Story 17: raising autonomy / tier policy and both restores need the lead (server `isLead`).
+  const isLead = usePermissions().can('raiseAutonomy')
   const closeButtonRef = useRef<HTMLButtonElement | null>(null)
   const openerRef = useRef<Element | null>(null)
   const {
@@ -384,6 +423,9 @@ export function EngineSettingsPanel({ open, onClose }: EngineSettingsPanelProps)
               >
                 {AUTONOMY_OPTIONS.map(option => {
                   const selected = autonomy.exerciseDefaultLevel === option.value
+                  const leadBlocked =
+                    !isLead
+                    && AUTONOMY_RANK[option.value] > AUTONOMY_RANK[autonomy.exerciseDefaultLevel]
                   return (
                     <Box
                       key={option.value}
@@ -391,7 +433,8 @@ export function EngineSettingsPanel({ open, onClose }: EngineSettingsPanelProps)
                       type="button"
                       data-testid={`autonomy-default-${option.value}`}
                       aria-pressed={selected}
-                      disabled={autonomyControlsDisabled}
+                      disabled={autonomyControlsDisabled || leadBlocked}
+                      aria-describedby={leadBlocked ? LEAD_REASON_AUTONOMY_ID : undefined}
                       onClick={() => setAutonomyDefault(option.value)}
                       sx={{
                         flex: 1,
@@ -403,9 +446,12 @@ export function EngineSettingsPanel({ open, onClose }: EngineSettingsPanelProps)
                         bgcolor: selected ? chrome.card : 'transparent',
                         border: `1px solid ${selected ? chrome.blue : chrome.line}`,
                         borderRadius: '7px',
-                        cursor: autonomyControlsDisabled ? 'not-allowed' : 'pointer',
-                        opacity: autonomyControlsDisabled ? 0.5 : 1,
-                        '&:hover': autonomyControlsDisabled ? undefined : { borderColor: chrome.blue },
+                        cursor: autonomyControlsDisabled || leadBlocked ? 'not-allowed' : 'pointer',
+                        opacity: autonomyControlsDisabled || leadBlocked ? 0.5 : 1,
+                        '&:hover':
+                          autonomyControlsDisabled || leadBlocked
+                            ? undefined
+                            : { borderColor: chrome.blue },
                       }}
                     >
                       <SegmentLabel label={option.label} selected={selected} />
@@ -413,6 +459,9 @@ export function EngineSettingsPanel({ open, onClose }: EngineSettingsPanelProps)
                   )
                 })}
               </Stack>}
+              {canControl && !isLead && (
+                <LeadOnlyReason id={LEAD_REASON_AUTONOMY_ID} testId="autonomy-default-lead-reason" />
+              )}
               {/* Story 11 M-1: a non-controller reads the base default as text. */}
               {!canControl && (
                 <Typography
@@ -476,6 +525,9 @@ export function EngineSettingsPanel({ open, onClose }: EngineSettingsPanelProps)
               {canControl && <Stack direction="row" role="group" aria-label="Tier-policy mode" sx={{ gap: 0.75, flexWrap: 'wrap' }}>
                 {TIER_POLICY_OPTIONS.map(option => {
                   const selected = settings.tierPolicyMode === option.value
+                  const leadBlocked =
+                    !isLead
+                    && TIER_POLICY_RANK[option.value] > TIER_POLICY_RANK[settings.tierPolicyMode]
                   return (
                     <Box
                       key={option.value}
@@ -483,7 +535,8 @@ export function EngineSettingsPanel({ open, onClose }: EngineSettingsPanelProps)
                       type="button"
                       data-testid={`tier-policy-${option.value}`}
                       aria-pressed={selected}
-                      disabled={tierControlsDisabled}
+                      disabled={tierControlsDisabled || leadBlocked}
+                      aria-describedby={leadBlocked ? LEAD_REASON_TIER_ID : undefined}
                       onClick={() => setTierPolicyMode(option.value)}
                       sx={{
                         px: 1,
@@ -494,9 +547,12 @@ export function EngineSettingsPanel({ open, onClose }: EngineSettingsPanelProps)
                         bgcolor: selected ? chrome.card : 'transparent',
                         border: `1px solid ${selected ? chrome.blue : chrome.line}`,
                         borderRadius: '7px',
-                        cursor: tierControlsDisabled ? 'not-allowed' : 'pointer',
-                        opacity: tierControlsDisabled ? 0.5 : 1,
-                        '&:hover': tierControlsDisabled ? undefined : { borderColor: chrome.blue },
+                        cursor: tierControlsDisabled || leadBlocked ? 'not-allowed' : 'pointer',
+                        opacity: tierControlsDisabled || leadBlocked ? 0.5 : 1,
+                        '&:hover':
+                          tierControlsDisabled || leadBlocked
+                            ? undefined
+                            : { borderColor: chrome.blue },
                       }}
                     >
                       <SegmentLabel label={option.label} selected={selected} />
@@ -504,6 +560,9 @@ export function EngineSettingsPanel({ open, onClose }: EngineSettingsPanelProps)
                   )
                 })}
               </Stack>}
+              {canControl && !isLead && (
+                <LeadOnlyReason id={LEAD_REASON_TIER_ID} testId="tier-policy-lead-reason" />
+              )}
               {/* Story 11 M-1: a non-controller reads the current tier policy as text. */}
               {!canControl && (
                 <Typography
@@ -569,7 +628,8 @@ export function EngineSettingsPanel({ open, onClose }: EngineSettingsPanelProps)
                   component="button"
                   type="button"
                   data-testid="provider-lever-restore"
-                  disabled={providerLeverControlsDisabled}
+                  disabled={providerLeverControlsDisabled || !isLead}
+                  aria-describedby={isLead ? undefined : LEAD_REASON_RESTORE_ID}
                   onClick={() => restoreGenerationProvider()}
                   sx={{
                     alignSelf: 'flex-start',
@@ -581,9 +641,12 @@ export function EngineSettingsPanel({ open, onClose }: EngineSettingsPanelProps)
                     bgcolor: chrome.card,
                     border: `1px solid ${chrome.blue}`,
                     borderRadius: '7px',
-                    cursor: providerLeverControlsDisabled ? 'not-allowed' : 'pointer',
-                    opacity: providerLeverControlsDisabled ? 0.5 : 1,
-                    '&:hover': providerLeverControlsDisabled ? undefined : { borderColor: chrome.blue },
+                    cursor: providerLeverControlsDisabled || !isLead ? 'not-allowed' : 'pointer',
+                    opacity: providerLeverControlsDisabled || !isLead ? 0.5 : 1,
+                    '&:hover':
+                      providerLeverControlsDisabled || !isLead
+                        ? undefined
+                        : { borderColor: chrome.blue },
                   }}
                 >
                   Restore to {settings.provider}
@@ -617,6 +680,10 @@ export function EngineSettingsPanel({ open, onClose }: EngineSettingsPanelProps)
                   Cut to Fake
                 </Box>
               ))}
+
+              {canControl && settings.providerCutToFake && !isLead && (
+                <LeadOnlyReason id={LEAD_REASON_RESTORE_ID} testId="provider-lever-lead-reason" />
+              )}
 
               {/* AC3/alreadyFake: the lever is genuinely INERT when the
                   configured provider is already Fake (every environment
