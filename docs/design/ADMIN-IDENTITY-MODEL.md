@@ -168,6 +168,16 @@ which becomes the default. The config-allowlist `DynamisIdentityProvider` stays 
 break-glass** for Dynamis staff and is disabled by config in customer deployments. Entra/SSO stays a future
 provider behind the same seam (COR-014 unchanged).
 
+**Interim between A1 and A2.** A1 ships the `Person` password and lockout columns and the Pulse provider, but
+invites and resets (`CredentialToken`) arrive in A2. So in A1 the providers are **chained**:
+1. If the `Person` has a `PasswordHash`, the Pulse provider is authoritative and there is no fallback.
+2. Otherwise, the Dynamis allowlist is tried, keyed on `StaffUser.ExternalSubject`, so every backfilled legacy
+   staff member signs in exactly as they do today.
+
+A2's invite flow then gives legacy staff a Pulse password, after which step 2 no longer applies to them.
+Customer deployments turn the fallback off once everyone has been invited. New orgs (`POST /api/ops/organizations`,
+which sends an invite) therefore land in **A2**; in A1, org admins come from the existing org-admin seeder.
+
 ---
 
 ## 2. Directory people vs one-off participants
@@ -468,11 +478,23 @@ foreign-exercise parent when the inject fires, so both reset and duplicate must 
    - Each exercise route gets a foreign-exercise case (C5).
 4. **New entities and their tier:**
    - `Person`: `IOrganizationOwned` (resolution root).
+   - `OrgAuditEvent`: `IOrganizationScoped` (central filter).
    - `Enrollment`: `IExerciseScoped` (central filter). Cross-exercise org reads are `TenantChecked`.
    - `CredentialToken`: unscoped resolution root, carrying `OrganizationId` and checked on redemption.
    - `ContentPackItem`, plus a `ContentPack` upload record: `IExerciseScoped`.
    - Staff avatar blobs: under an org prefix.
-5. **Platform provisioning:** `POST /api/ops/organizations {name, adminEmail}`, gated by the bootstrap secret,
+5. **Audit without an exercise.** `TelemetryEvent.ExerciseId` is non-nullable (and the write-guard refuses
+   `Guid.Empty`), so org-scope sign-ins and org-admin actions cannot go there. They go to a new
+   **`OrgAuditEvent`** table (`IOrganizationScoped`, so it gets the central org filter):
+   - Columns: `Id`, `OrganizationId`, `Kind`, `Outcome`, `ActorPersonId?`, `SubjectPersonId?`, `ExerciseId?`,
+     `Payload` (JSON), `OccurredAt`.
+   - It records: org-scope sign-in success and refusal, org choice, enrollment grant and revoke (including
+     self-grant), people create/disable, org admin grant, password reset issuance, and the exercise
+     create/delete/duplicate/archive done from org scope.
+   - Exercise-scoped sign-ins and actions stay in `TelemetryEvent` (XC-004), unchanged.
+   - A sign-in attempt with **no resolvable org** (unknown email and no slug) has no tenant to belong to. It
+     goes only to the structured application log (App Insights), and the per-IP limiter still counts it.
+6. **Platform provisioning:** `POST /api/ops/organizations {name, adminEmail}`, gated by the bootstrap secret,
    creates the org and its first org admin `Person` and sends an invite. This is the only thing Dynamis does
    (B1 "org-admin self-service"). `bootstrap-exercise` stays non-production only.
 
@@ -551,8 +573,8 @@ the report export offered first; from `completed` **or `staged`**; planner or or
 
 | Kind | Item | Wave |
 |---|---|---|
-| **EF migration** | `AdminIdentityFoundation`:<br>• `People` table, with a backfill of one per `StaffUser` (same Id; legacy rows have a null Email until invited)<br>• `StaffUsers.Id` FK → `People.Id`<br>• `Organizations.Slug` (unique; backfilled from Name)<br>• **`Enrollments` table**: StaffAssignment rows migrated with the same Id, plus one per `Account` (Role and PersonaId copied); then **`StaffAssignments` is dropped** and **`Accounts.Role`/`Accounts.PersonaId` are dropped**<br>• `Accounts.EnrollmentId` (unique, non-null after backfill)<br>• `Sessions.PersonId`, **`Sessions.ExerciseId` nullable**<br>• `People.OrgRole`, with orgAdmin enrollments backfilled → planner + OrgRole<br>• `Exercises.FirstLiveAt` (backfilled from lifecycle telemetry where the status is past `staged`)<br>Hand-written SQL in `EXEC`, per OPERATE.md; reversible `Down` | A1 |
-| EF migration | `CredentialToken`; `People` password, lockout and avatar columns; `Exercises.SignInMethods`; `MediaAssets.UploadedByAccountId` | A2 |
+| **EF migration** | `AdminIdentityFoundation`:<br>• `People` table, with a backfill of one per `StaffUser` (same Id; legacy rows have a null Email until invited)<br>• `StaffUsers.Id` FK → `People.Id`<br>• `Organizations.Slug` (unique; backfilled from Name)<br>• **`Enrollments` table**: StaffAssignment rows migrated with the same Id, plus one per `Account` (Role and PersonaId copied); then **`StaffAssignments` is dropped** and **`Accounts.Role`/`Accounts.PersonaId` are dropped**<br>• `Accounts.EnrollmentId` (unique, non-null after backfill)<br>• `Sessions.PersonId`, **`Sessions.ExerciseId` nullable**<br>• `People.OrgRole`, with orgAdmin enrollments backfilled → planner + OrgRole<br>• `People` password and lockout columns (`PasswordHash`, `PasswordChangedAt`, `FailedLoginCount`, `LockedOutUntil`)<br>• `Sessions.Origin` (the cross-tab world backstop)<br>• **`OrgAuditEvents` table**<br>• `Exercises.FirstLiveAt` (backfilled from lifecycle telemetry where the status is past `staged`)<br>Hand-written SQL in `EXEC`, per OPERATE.md; reversible `Down` | A1 |
+| EF migration | `CredentialToken`; `People.AvatarBlobName`; `Exercises.SignInMethods`; `MediaAssets.UploadedByAccountId` | A2 |
 | EF migration | `Posts.IsSetupContent`; `Exercises.ParticipantName` | A3 |
 | EF migration | `ContentPack`, `ContentPackItem`; persona archive column | A4 |
 | **Frozen shared type** | `Session` (frontend `sessionResolver.ts:47` / `SessionDto`): `exerciseId` becomes nullable; adds `personId` and `world` (`staff`/`participant`). `ExerciseRole` (`roles.ts`): `orgAdmin` leaves the exercise-role union and becomes an `OrgRole`. `StaffAssignment` (`features/staff/types.ts:36`) becomes `Enrollment`, with the same fields plus `personId`. The staff login request takes `orgSlug?` + `email` instead of `exerciseId` + `username`. Posted on the feature issue per C1.4 **before** A1 merges | A1 |
@@ -571,8 +593,8 @@ in A5 and touches `ReactionLoopHost`, so C should coordinate on that file.
 
 | Wave | Contents | Existing stories amended | New stories |
 |---|---|---|---|
-| **A1 Foundation** | `Person` + facet + **`Enrollment` (replaces `StaffAssignment`; `Account` re-homed)** + org slug + `Session` changes + org-scope sign-in with slug or org choice (story 15) + `PulsePasswordIdentityProvider`; per-route and per-transition role checks (#377/#481/#61); the route × role matrix test; #480 forwarded headers | identity-auth-roles 01, 04, 05, 15; amendment notes on 02, 03, 10, 12 and easy-login 02, 03, 05 (readers move to `Enrollment`); exercise-lifecycle-admin 03; exercise-isolation 05 (switcher) | `16-person-and-enrollments`, `17-role-matrix-enforcement`, `18-forwarded-headers` |
-| **A2 People** | Org directory UI; staff invite and assignment; admin and forgot-password reset; participant passwords and reset; sign-in methods; avatars (re-encode first); promote one-off; roster reconciliation | identity-auth-roles 08; easy-login 02 (reconciliation note) | `19-org-directory`, `20-staff-invite-assign`, `21-password-reset-flows`, `22-sign-in-methods`, `23-avatars`, `24-image-reencode` |
+| **A1 Foundation** | `Person` (with password columns; chained provider, §1.3) + facet + `OrgAuditEvent` + cross-tab world rule + **`Enrollment` (replaces `StaffAssignment`; `Account` re-homed)** + org slug + `Session` changes + org-scope sign-in with slug or org choice (story 15) + `PulsePasswordIdentityProvider`; per-route and per-transition role checks (#377/#481/#61); the route × role matrix test; #480 forwarded headers | identity-auth-roles 01, 04, 05, 15; amendment notes on 02, 03, 10, 12 and easy-login 02, 03, 05 (readers move to `Enrollment`); exercise-lifecycle-admin 03; exercise-isolation 05 (switcher) | `16-person-and-enrollments`, `17-role-matrix-enforcement`, `18-forwarded-headers` |
+| **A2 People** | `POST /api/ops/organizations` (org + first admin invite); org directory UI; staff invite and assignment; admin and forgot-password reset; participant passwords and reset; sign-in methods; avatars (re-encode first); promote one-off; roster reconciliation | identity-auth-roles 08; easy-login 02 (reconciliation note) | `19-org-directory`, `20-staff-invite-assign`, `21-password-reset-flows`, `22-sign-in-methods`, `23-avatars`, `24-image-reencode` |
 | **A3 Exercise management** | Readiness; stage/unstage; StartEx gate; reopen; reset; delete; duplicate; participant name; view-only code UI | exercise-build-golive 01, 03, 04, 05, 06; exercise-lifecycle-admin 01–02 | `exercise-build-golive/07-reset-reopen`, `08-delete` |
 | **A4 Setup content** | Persona create, clone, archive; templates and casts; avatar library; content pack upload | persona-management 01, 02, 05 (03 is a duplicate of closed #18, so close it) | `persona-management/06-content-pack-upload` |
 | **A5 Lifecycle correctness** | #375, #379, #390, #376, #389, #485 | — | one story per issue |
@@ -580,3 +602,19 @@ in A5 and touches `ReactionLoopHost`, so C should coordinate on that file.
 **Done when** (C2): an org admin, starting from an empty org (created by `POST /api/ops/organizations`), can
 invite staff, import participants, create personas, seed content, stage, start, end and duplicate the
 exercise, with no Dynamis help. Every "ask Dynamis support" line this work removes from `docs/guide/` is gone.
+
+---
+
+## 11. Review record
+
+**Copilot review (2026-10-16), 8 findings, all accepted and folded in:**
+- the org-scope session allow-list (§1.2);
+- the cross-tab world rule (§1.2);
+- archive from build after reset (§5.1, §5.2);
+- duplicate-then-reset guidance (§5.2);
+- participant-media avatars on duplicate (§5.5);
+- run-sheet reply targets (§5.4a, readiness item 8);
+- audit storage without an exercise (`OrgAuditEvent`, §7.5);
+- the A1 password columns and the chained interim provider (§1.3, §9).
+
+None of them changes a Tier-2 decision in §8. They close gaps in how those decisions are implemented.
