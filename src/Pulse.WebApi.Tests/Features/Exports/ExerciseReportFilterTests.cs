@@ -73,6 +73,27 @@ public sealed class ExerciseReportFilterTests
             .Should().BeFalse("08:05 UTC is 03:05 in the exercise zone");
     }
 
+    [Fact]
+    public void InWindow_IsTimeOnly_WithTheSameMinuteTruncation_AndOpenWithoutAWindow()
+    {
+        var filter = Parsed("participant", null, "2033-09-04 08:05", "2033-09-04 08:10");
+        var at = new DateTimeOffset(2033, 9, 4, 13, 5, 0, TimeSpan.Zero);
+
+        filter.HasWindow.Should().BeTrue();
+        filter.InWindow(at, Chicago).Should().BeTrue("from is inclusive");
+        filter.InWindow(at.AddSeconds(-1), Chicago).Should().BeFalse();
+        filter.InWindow(at.AddMinutes(5).AddSeconds(59), Chicago).Should().BeTrue("08:10:59 prints as 08:10");
+        filter.InWindow(at.AddMinutes(6), Chicago).Should().BeFalse();
+        filter.Matches("engine", at, Chicago).Should().BeFalse("the record still filters by source");
+
+        Parsed(null, null, "2033-09-04 08:05", null).HasWindow.Should().BeTrue("one bound is a window");
+        Parsed(null, null, null, "2033-09-04 08:05").InWindow(at.AddYears(-5), Chicago).Should().BeTrue("open start");
+
+        var open = Parsed(null, null, null, null);
+        open.HasWindow.Should().BeFalse();
+        open.InWindow(DateTimeOffset.MinValue, TimeZoneInfo.Utc).Should().BeTrue("no window admits every post");
+    }
+
     [Theory]
     [InlineData("inject", "scripted")]
     [InlineData("engine", "engine")]

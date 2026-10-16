@@ -140,6 +140,18 @@ const SHOTS = [
     act: async page => { await page.getByText('EMERGENCY').first().waitFor() },
   },
   {
+    // The alert bar's "Details →" target: every active alert, in full.
+    name: 'participant-alerts',
+    role: 'participant',
+    viewport: MOBILE,
+    path: '/home',
+    storage: { 'pulse.guideShots.alerts': JSON.stringify([ALERT]) },
+    act: async page => {
+      await page.getByRole('link', { name: 'Details →' }).click()
+      await page.getByRole('heading', { level: 1, name: 'Alerts' }).waitFor()
+    },
+  },
+  {
     name: 'participant-holding-page',
     role: 'participant',
     viewport: MOBILE,

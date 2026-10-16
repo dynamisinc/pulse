@@ -91,11 +91,19 @@ public sealed class ExerciseReportResult
 /// when noise is a selected source.
 /// </para>
 /// <para>
-/// <b>Filters and limits (story 30, DF-43/DF-44).</b> The summary, activity, inject responses and lookalikes are built
-/// over every post whatever the <see cref="ExerciseReportFilter"/> is; the filter narrows only the post record. When
-/// more than <see cref="MaxListedPosts"/> posts match, the record is withheld (empty, never truncated) and the rest of
-/// the report is still built. Only an exercise of more than <see cref="MaxExercisePosts"/> posts is refused (413),
-/// by a count before any row is read.
+/// <b>Filters and limits (stories 30 and 31, DF-43..DF-45).</b> The time window scopes the whole report (DF-45): the
+/// header's scenario window and conducted date, the summary, the activity chart, the inject responses and markers, the
+/// lookalikes and the omitted-noise count are built from the posts whose printed minute is inside the window
+/// (<see cref="ExerciseReportFilter.InWindow"/>). An inject is in the window when its first post is, and its response
+/// search runs over every post, so it still reaches 30 minutes past <c>to</c> (DF-42). The sources narrow only the
+/// post record (DF-44). With no window every post is in scope, as before. <c>exercise.latestDay</c> is computed over
+/// every post. When more than <see cref="MaxListedPosts"/> posts are listed, the record is withheld (empty, never
+/// truncated) and the rest of the report is still built. Only an exercise of more than <see cref="MaxExercisePosts"/>
+/// posts (counted over the whole exercise, whatever the filters) is refused (413), by a count before any row is read.
+/// </para>
+/// <para>
+/// <b>Threads (DF-47).</b> The record is threaded over the listed posts only: a reply whose parent is listed follows
+/// its thread root at depth 1; a reply whose parent is not listed is a root at its own time.
 /// </para>
 /// <para>
 /// <b>Media.</b> Images carry a signed URL; videos carry their poster (the item's override, else the asset's) as a
@@ -133,6 +141,8 @@ public sealed partial class ExerciseReportService
     private const string SystemChannel = "system";
     private const string TimeOfDayFormat = "HH:mm";
     private const string DateFormat = "yyyy-MM-dd";
+
+    private static readonly TimeSpan LastMinuteOfDay = new(23, 59, 0);
 
     private readonly PulseDbContext _dbContext;
     private readonly IExerciseContext _exerciseContext;
@@ -249,20 +259,27 @@ public sealed partial class ExerciseReportService
             return ExerciseReportResult.TooManyPosts(TooManyPostsReason(posts.Count));
         }
 
-        // 3. The record: the filtered posts, withheld whole (never truncated) above the limit (DF-43).
+        // 3. The window in effect scopes every section (DF-45); the sources narrow only the record (DF-44). The record
+        //    is withheld whole (never truncated) above the limit (DF-43).
         var zone = ExerciseDay.ResolveTimeZone(facts.TimeZone);
-        var matching = posts.Where(post => filter.Matches(post.Origin, post.CreatedScenarioTime, zone)).ToList();
+        var scoped = filter.HasWindow
+            ? posts.Where(post => filter.InWindow(post.CreatedScenarioTime, zone)).ToList()
+            : posts;
+        var matching = scoped.Where(post => filter.Matches(post.Origin, post.CreatedScenarioTime, zone)).ToList();
         var withheld = matching.Count > _limits.MaxListedPosts;
         List<PostRow> listed = withheld ? [] : matching;
 
-        var postFacts = posts.ConvertAll(post => new ReportPostFact(
-            post.Id, post.AuthorPersonaId, post.Origin, post.CreatedScenarioTime, post.CreatedWallClock, post.ParentPostId, post.Body));
+        // Every post's facts for the inject delivery and the DF-42 response search (it reaches past the window's end);
+        // the in-window facts for the chart and the busiest window.
+        var postFacts = posts.ConvertAll(ToFact);
+        var scopedFacts = filter.HasWindow ? scoped.ConvertAll(ToFact) : postFacts;
 
         // 4. The small per-exercise lookups.
         var lookups = await ReadLookupsAsync(exerciseId, facts.OrganizationId, cancellationToken);
 
-        // 5. Lookalikes: decided before engagement, so only the paired personas' posts need counts beyond the list.
-        var authorIds = posts.Select(post => post.AuthorPersonaId).ToHashSet();
+        // 5. Lookalikes among in-window authors: decided before engagement, so only the paired personas' in-window
+        //    posts need counts beyond the list.
+        var authorIds = scoped.Select(post => post.AuthorPersonaId).ToHashSet();
         var pairs = ExerciseReportBuilder.PairLookalikes(
             lookups.Personas.Values
                 .Where(persona => authorIds.Contains(persona.Id))
@@ -270,7 +287,7 @@ public sealed partial class ExerciseReportService
         var pairedPersonas = pairs.SelectMany(pair => new[] { pair.Verified.Id, pair.Lookalike.Id }).ToHashSet();
 
         var engagementIds = listed.Select(post => post.Id)
-            .Concat(posts.Where(post => pairedPersonas.Contains(post.AuthorPersonaId)).Select(post => post.Id))
+            .Concat(scoped.Where(post => pairedPersonas.Contains(post.AuthorPersonaId)).Select(post => post.Id))
             .Distinct()
             .ToArray();
         var engagement = await ReadEngagementAsync(engagementIds, cancellationToken);
@@ -282,10 +299,10 @@ public sealed partial class ExerciseReportService
         var urls = await SignAsync(media, avatars.Values, cancellationToken);
 
         // 7. Assemble.
-        var chartBinMinutes = ExerciseReportBuilder.ChartBinMinutes(postFacts);
-        var bins = ExerciseReportBuilder.BuildBins(postFacts, chartBinMinutes);
-        var (responses, markers, medianMinutes) = BuildInjects(posts, postFacts, lookups, bins, chartBinMinutes, zone);
-        var busiest = ExerciseReportBuilder.BusiestFiveMinutes(postFacts);
+        var chartBinMinutes = ExerciseReportBuilder.ChartBinMinutes(scopedFacts);
+        var bins = ExerciseReportBuilder.BuildBins(scopedFacts, chartBinMinutes);
+        var injects = BuildInjects(posts, postFacts, lookups, bins, chartBinMinutes, filter, zone);
+        var busiest = ExerciseReportBuilder.BusiestFiveMinutes(scopedFacts);
         var now = _timeProvider.GetUtcNow();
 
         var report = new ExerciseReportDto
@@ -294,31 +311,33 @@ public sealed partial class ExerciseReportService
             {
                 Name = facts.Name,
                 TimeZone = string.IsNullOrWhiteSpace(facts.TimeZone) ? ExerciseDay.UtcZoneId : facts.TimeZone,
-                ScenarioStart = posts.Count == 0 ? null : FormatAt(posts.Min(post => post.CreatedScenarioTime), zone),
-                ScenarioEnd = posts.Count == 0 ? null : FormatAt(posts.Max(post => post.CreatedScenarioTime), zone),
-                ConductedDate = posts.Count == 0
+                ScenarioStart = scoped.Count == 0 ? null : FormatAt(scoped.Min(post => post.CreatedScenarioTime), zone),
+                ScenarioEnd = scoped.Count == 0 ? null : FormatAt(scoped.Max(post => post.CreatedScenarioTime), zone),
+                ConductedDate = scoped.Count == 0
                     ? null
-                    : TimeZoneInfo.ConvertTime(posts.Min(post => post.CreatedScenarioTime), zone).ToString(DateFormat, CultureInfo.InvariantCulture),
+                    : TimeZoneInfo.ConvertTime(scoped.Min(post => post.CreatedScenarioTime), zone).ToString(DateFormat, CultureInfo.InvariantCulture),
                 PreparedAt = FormatAt(now, zone),
+                LatestDay = LatestDay(posts, zone),
+                SpansMultipleDays = SpansMultipleDays(scoped, listed, injects.RespondedAt, zone),
             },
             Summary = new ReportSummaryDto
             {
                 Participants = lookups.SignedInParticipants,
-                Posts = posts.Count,
-                Replies = posts.Count(post => post.ParentPostId is not null),
-                InjectsDelivered = responses.Count,
-                MedianResponseMinutes = medianMinutes,
+                Posts = scoped.Count,
+                Replies = scoped.Count(post => post.ParentPostId is not null),
+                InjectsDelivered = injects.Responses.Count,
+                MedianResponseMinutes = injects.Median,
                 BusiestWindow = busiest is null
                     ? null
                     : new ReportBusiestWindowDto { Start = FormatAt(busiest.Start, zone), Posts = busiest.Total },
-                PostsEdited = posts.Count(post => post.EditCount > 0),
-                PostsTakenDown = posts.Count(post => post.DeletedAt is not null),
+                PostsEdited = scoped.Count(post => post.EditCount > 0),
+                PostsTakenDown = scoped.Count(post => post.DeletedAt is not null),
                 BySource = new ReportSourceCountsDto
                 {
-                    Participant = posts.Count(post => ExerciseReportBuilder.Series(post.Origin) == ReportSeries.Participant),
-                    Scripted = posts.Count(post => ExerciseReportBuilder.Series(post.Origin) == ReportSeries.Scripted),
-                    Engine = posts.Count(post => ExerciseReportBuilder.Series(post.Origin) == ReportSeries.Engine),
-                    Noise = posts.Count(post => ExerciseReportBuilder.Series(post.Origin) == ReportSeries.Noise),
+                    Participant = scoped.Count(post => ExerciseReportBuilder.Series(post.Origin) == ReportSeries.Participant),
+                    Scripted = scoped.Count(post => ExerciseReportBuilder.Series(post.Origin) == ReportSeries.Scripted),
+                    Engine = scoped.Count(post => ExerciseReportBuilder.Series(post.Origin) == ReportSeries.Engine),
+                    Noise = scoped.Count(post => ExerciseReportBuilder.Series(post.Origin) == ReportSeries.Noise),
                 },
             },
             Activity = new ReportActivityDto
@@ -332,16 +351,16 @@ public sealed partial class ExerciseReportService
                     Engine = bin.Engine,
                     Noise = bin.Noise,
                 }).ToArray(),
-                InjectMarkers = markers,
+                InjectMarkers = injects.Markers,
             },
-            InjectResponses = responses,
+            InjectResponses = injects.Responses,
             Lookalikes = pairs.Select(pair => new ReportLookalikeDto
             {
-                Verified = ToAccount(pair.Verified.Id, posts, lookups, engagement),
-                Lookalike = ToAccount(pair.Lookalike.Id, posts, lookups, engagement),
+                Verified = ToAccount(pair.Verified.Id, scoped, lookups, engagement),
+                Lookalike = ToAccount(pair.Lookalike.Id, scoped, lookups, engagement),
             }).ToArray(),
             Posts = BuildPosts(posts, listed, lookups, engagement, media, avatars, urls, zone),
-            OmittedNoiseCount = includeNoise ? 0 : posts.Count(post => ExerciseReportBuilder.IsNoise(post.Origin)),
+            OmittedNoiseCount = includeNoise ? 0 : scoped.Count(post => ExerciseReportBuilder.IsNoise(post.Origin)),
             PostRecord = new ReportPostRecordDto
             {
                 Matching = matching.Count,
@@ -368,15 +387,69 @@ public sealed partial class ExerciseReportService
     private static string FormatAt(DateTimeOffset instant, TimeZoneInfo zone) =>
         PostExportLabels.ScenarioTime(instant, zone);
 
+    private static ReportPostFact ToFact(PostRow post) => new(
+        post.Id, post.AuthorPersonaId, post.Origin, post.CreatedScenarioTime, post.CreatedWallClock, post.ParentPostId, post.Body);
+
+    /// <summary>The latest post's exercise-zone scenario date as 00:00..23:59 window bounds; <c>null</c> with no posts.</summary>
+    private static ReportDayDto? LatestDay(List<PostRow> posts, TimeZoneInfo zone)
+    {
+        if (posts.Count == 0)
+        {
+            return null;
+        }
+
+        var day = TimeZoneInfo.ConvertTime(posts.Max(post => post.CreatedScenarioTime), zone).Date;
+        return new ReportDayDto
+        {
+            From = ExerciseReportFilter.Format(day)!,
+            // 23:59 inside the day itself: a post on 9999-12-31 must not overflow into a day that does not exist.
+            To = ExerciseReportFilter.Format(day.Add(LastMinuteOfDay))!,
+        };
+    }
+
+    /// <summary>
+    /// Whether the printed times fall on more than one exercise-zone date: in-scope post times, inject first-response
+    /// times and the listed posts' takedown and last-edit times (inject delivery times are in-scope post times).
+    /// </summary>
+    private static bool SpansMultipleDays(
+        List<PostRow> scoped, List<PostRow> listed, IEnumerable<DateTimeOffset> respondedAt, TimeZoneInfo zone)
+    {
+        var instants = scoped.Select(post => post.CreatedScenarioTime)
+            .Concat(respondedAt)
+            .Concat(listed.Select(post => post.DeletedAt).OfType<DateTimeOffset>())
+            .Concat(listed.Where(post => post.EditCount > 0).Select(post => post.LastEditedScenarioTime).OfType<DateTimeOffset>());
+
+        DateTime? first = null;
+        foreach (var instant in instants)
+        {
+            var date = TimeZoneInfo.ConvertTime(instant, zone).Date;
+            if (first is null)
+            {
+                first = date;
+            }
+            else if (first.Value != date)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private static string FormatTime(DateTimeOffset instant, TimeZoneInfo zone) =>
         TimeZoneInfo.ConvertTime(instant, zone).ToString(TimeOfDayFormat, CultureInfo.InvariantCulture);
 
-    private static (IReadOnlyList<ReportInjectResponseDto> Responses, IReadOnlyList<ReportInjectMarkerDto> Markers, double? Median) BuildInjects(
+    /// <summary>
+    /// The delivered injects whose first inject post (over every post) is in the window, each with its DF-42 response
+    /// searched over every post (<paramref name="facts"/>), so a response up to 30 minutes past <c>to</c> still counts.
+    /// </summary>
+    private static InjectSection BuildInjects(
         List<PostRow> posts,
         List<ReportPostFact> facts,
         ReportLookups lookups,
         IReadOnlyList<ReportActivityBin> bins,
         int binMinutes,
+        ExerciseReportFilter filter,
         TimeZoneInfo zone)
     {
         // An inject's posts are those whose InjectId names the item (InjectPostRequestFactory writes item.Id) AND whose
@@ -406,13 +479,15 @@ public sealed partial class ExerciseReportService
                 Posts = entry.Value,
                 First = entry.Value.Min(post => post.CreatedScenarioTime),
             })
+            .Where(entry => filter.InWindow(entry.First, zone))
             .OrderBy(entry => entry.First)
-            .ThenBy(entry => entry.Item.Ref, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(entry => entry.Item.Ref ?? entry.Item.Title, StringComparer.OrdinalIgnoreCase)
             .ToArray();
 
         var responses = new List<ReportInjectResponseDto>(delivered.Length);
         var markers = new List<ReportInjectMarkerDto>(delivered.Length);
         var minutes = new List<double>();
+        var respondedAt = new List<DateTimeOffset>();
 
         foreach (var entry in delivered)
         {
@@ -429,6 +504,7 @@ public sealed partial class ExerciseReportService
             {
                 responseMinutes = ExerciseReportBuilder.ResponseMinutes(entry.First, response.ScenarioTime);
                 minutes.Add(responseMinutes.Value);
+                respondedAt.Add(response.ScenarioTime);
                 var handle = PostExportLabels.Handle(lookups.Personas.GetValueOrDefault(response.AuthorPersonaId)?.Handle);
                 respondedAs = handle.Length == 0 ? null : handle;
             }
@@ -459,7 +535,7 @@ public sealed partial class ExerciseReportService
             }
         }
 
-        return (responses, markers, ExerciseReportBuilder.Median(minutes));
+        return new InjectSection(responses, markers, ExerciseReportBuilder.Median(minutes), respondedAt);
     }
 
     private static ReportAccountDto ToAccount(
@@ -498,8 +574,12 @@ public sealed partial class ExerciseReportService
         // Parents resolve only when they are in this exercise: the full post list was read through the scoped set.
         var authorOf = allPosts.ToDictionary(post => post.Id, post => post.AuthorPersonaId);
 
-        return listed.Select(post =>
+        // Threads (DF-47) over the listed posts only: roots in record order, each followed by its listed descendants.
+        var slots = ExerciseReportBuilder.Thread(listed.ConvertAll(post => new ReportThreadPost(post.Id, post.ParentPostId)));
+
+        return slots.Select(slot =>
         {
+            var post = listed[slot.Index];
             var author = lookups.Personas.GetValueOrDefault(post.AuthorPersonaId);
             var real = engagement.GetValueOrDefault(post.Id);
 
@@ -544,6 +624,8 @@ public sealed partial class ExerciseReportService
                 TakenDownAt = post.DeletedAt is { } deletedAt ? FormatAt(deletedAt, zone) : null,
                 EditCount = post.EditCount,
                 LastEditedAt = post.EditCount > 0 && post.LastEditedScenarioTime is { } editedAt ? FormatAt(editedAt, zone) : null,
+                ThreadRootId = slot.ThreadRootId.ToString(),
+                Depth = slot.Depth,
             };
         }).ToArray();
     }
@@ -593,7 +675,8 @@ public sealed partial class ExerciseReportService
             return injectId;
         }
 
-        return lookups.Injects.TryGetValue(itemId, out var item) ? item.Ref : null;
+        // The post's own label keeps the title fallback (story 31 changes only the inject table's and markers' ref).
+        return lookups.Injects.TryGetValue(itemId, out var item) ? item.Ref ?? item.Title : null;
     }
 
     private async Task<ReportLookups> ReadLookupsAsync(Guid exerciseId, Guid organizationId, CancellationToken cancellationToken)
@@ -644,7 +727,7 @@ public sealed partial class ExerciseReportService
             .ToDictionaryAsync(
                 item => item.Id,
                 item => new InjectLabel(
-                    string.IsNullOrWhiteSpace(item.ExternalRef) ? item.Title : item.ExternalRef,
+                    string.IsNullOrWhiteSpace(item.ExternalRef) ? null : item.ExternalRef,
                     item.Title,
                     item.FiredScenarioTime is not null && item.DeletedAt is null),
                 cancellationToken);
@@ -807,8 +890,15 @@ public sealed partial class ExerciseReportService
     /// <summary>A persona as the report needs it.</summary>
     private sealed record PersonaLabel(Guid Id, string Handle, string DisplayName, bool Verified, Guid? AvatarMediaId);
 
-    /// <summary>An inject item's reference, title and whether it counts as delivered (fired, not deleted).</summary>
-    private sealed record InjectLabel(string Ref, string Title, bool Delivered);
+    /// <summary>An inject item's MSEL reference (<c>null</c> when blank), title and whether it counts as delivered (fired, not deleted).</summary>
+    private sealed record InjectLabel(string? Ref, string Title, bool Delivered);
+
+    /// <summary>The inject table, the chart markers, the median and the first-response instants (for the date span).</summary>
+    private sealed record InjectSection(
+        IReadOnlyList<ReportInjectResponseDto> Responses,
+        IReadOnlyList<ReportInjectMarkerDto> Markers,
+        double? Median,
+        IReadOnlyList<DateTimeOffset> RespondedAt);
 
     /// <summary>The per-exercise lookups read once per report.</summary>
     private sealed record ReportLookups(

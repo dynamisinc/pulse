@@ -298,7 +298,9 @@ describe('InjectMediaField: "Use media id" (paste an id)', () => {
     await mountField({ initial: [{ mediaId: VIDEO, alt: 'a clip' }] })
     fireEvent.click(screen.getByRole('button', { name: 'Use media id' }))
     fireEvent.change(screen.getByLabelText('Add media id'), { target: { value: 'whatever' } })
-    expect(screen.getByTestId('m-add-media-error')).toHaveTextContent(
+    // The rule needs the attached clip's kind, which resolves asynchronously: await the
+    // error rather than reading it synchronously (flaky under a loaded CI runner).
+    expect(await screen.findByTestId('m-add-media-error')).toHaveTextContent(
       'A video must be the only attachment',
     )
     expect(screen.getByRole('button', { name: 'Add media' })).toBeDisabled()
