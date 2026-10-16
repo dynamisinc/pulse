@@ -631,6 +631,11 @@ The change applies from the next engine tick, with no restart.
 - **Autonomous**: ambient posts publish on their own, without a controller click, but only inside the limits and
   lists you set. They appear as ordinary posts from the engine and carry the same scenario time as everything else.
 
+**Turning Autonomous on needs a confirmation.** Selecting **Autonomous** and saving first asks: "Autonomous ambient
+posts publish without review, within your caps and allow-lists. Turn on?" Choose **Confirm** to save, or **Cancel** to
+keep the current mode. Lowering to **Off** or **Review** saves immediately, with no confirmation. Once the lead role
+ships, raising to Autonomous will become lead-only; lowering will stay open to any controller.
+
 **Autonomous may be unavailable.** Autonomous ambient posting needs separate sign-off for each environment
 (PROVIDER-GOVERNANCE §8 amendment 2, not yet signed). Until it is signed, the **Autonomous** option is greyed out with a
 note explaining why; **Review** is still available. Autonomous is also refused while the kill switch is in either mode,
@@ -643,8 +648,12 @@ exceed the engine's overall posts-per-minute limit. The per-hour cap is also you
 list means **Nothing allowed**, never "everything", so with an empty list nothing is posted. Set both before relying
 on Autonomous.
 
-Only personas in the engine's cast are voiced. Any persona that is not in the cast is marked **not in engine cast**
-in the persona list; you can tick it, but it will not post ambient chatter.
+**Who can post ambient chatter.** Only **residents and helpers** in the engine's cast are used. Agencies, outlets,
+trolls and bots are never used for ambient, and the server refuses them. Any persona that is not eligible is marked
+**not eligible for ambient** in the persona list; you can tick it, but it will not post ambient chatter.
+
+**Content checks.** Before an ambient post publishes, it is checked. A post that mentions the incident or its
+hashtags, or that is not calm or grateful in tone, is dropped and never published.
 
 **Resets on restart.** The ambient policy is held in server memory. If the server restarts it goes back to **Off**,
 with empty lists. Check the section after any restart.
@@ -658,7 +667,8 @@ with empty lists. Check the section after any restart.
   still wait in the queue for a person (and come from Fake while cut). Only **STOPPED** halts ambient generation.
 - **Freeze, Pause engine, and any state other than live:** no ambient post publishes, and a post that finishes
   writing after the change is discarded, not posted late.
-- **EndEx:** ambient posting stops at EndEx, as it does at Freeze.
+- **EndEx:** ambient posting stops at EndEx, as it does at Freeze. A review-mode draft that finishes writing after
+  EndEx or Freeze is discarded, not queued.
 
 Ambient chatter and [white noise](#8-white-noise-background-chatter) are different features. White-noise posts count
 toward the quiet floor, so ambient never double-fills a quiet period: if white noise has already covered the quiet,
