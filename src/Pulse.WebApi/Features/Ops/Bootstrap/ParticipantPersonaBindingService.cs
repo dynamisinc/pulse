@@ -8,6 +8,7 @@ using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.ExerciseResolution;
 using Pulse.WebApi.Features.Identity.Accounts;
+using Pulse.WebApi.Features.Identity.EasyLogin;
 
 /// <summary>
 /// The guarded ops service behind <c>POST /api/ops/bind-participant-persona</c> (story identity-auth-roles/10): binds — or
@@ -167,6 +168,15 @@ public sealed class ParticipantPersonaBindingService
         if (account is null)
         {
             return ParticipantPersonaBindingResult.AccountNotFound();
+        }
+
+        // 6b. L-9: a persona belongs to a participant-world enrollment only (CK_Enrollments_PersonaId_ParticipantRolesOnly).
+        //     A legacy staff-role account (planner/controller/evaluator, migrated by AdminIdentityFoundation) would
+        //     violate that constraint at the save and surface as a 500 — refuse it here as an invalid request instead.
+        if (!ParticipantSessionRequests.IsParticipantWorldRole(account.Enrollment.Role))
+        {
+            return ParticipantPersonaBindingResult.Invalid(
+                "A persona can only be bound to a participant or pio account; this account holds a staff role.");
         }
 
         // 7. Resolve the persona WITHIN the same exercise (COR-001). A cross-exercise handle/id is NotFound —

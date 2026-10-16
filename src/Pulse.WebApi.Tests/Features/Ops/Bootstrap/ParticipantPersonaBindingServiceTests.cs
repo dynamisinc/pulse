@@ -12,6 +12,7 @@ using Pulse.WebApi.Features.Identity.Accounts;
 using Pulse.WebApi.Features.Ops.Bootstrap;
 using Pulse.WebApi.Tests.Data;
 using Pulse.WebApi.Tests.Features.Identity.Staff;
+using Pulse.WebApi.Tests.Features.ExerciseConfiguration.Lifecycle;
 
 /// <summary>
 /// Story identity-auth-roles/10 (Tier-2) integration tests for <see cref="ParticipantPersonaBindingService"/> — the guarded
@@ -47,7 +48,7 @@ public sealed class ParticipantPersonaBindingServiceTests
     /// environment is in after <c>bootstrap-exercise</c> + <c>seed-engine-content</c> (the account can see the feed
     /// but cannot post, because <see cref="Account.PersonaId"/> is null).
     /// </summary>
-    private async Task<SeededExercise> SeedAsync(string host)
+    private async Task<SeededExercise> SeedAsync(string host, string accountRole = "participant")
     {
         var seeded = new SeededExercise(
             ExerciseId: Guid.NewGuid(),
@@ -95,7 +96,7 @@ public sealed class ParticipantPersonaBindingServiceTests
             DisplayName = "Participant One",
             CredentialHash = _participantHasher.Hash(Password),
             CreatedAt = DateTimeOffset.UtcNow,
-            Enrollment = new Enrollment { Id = Guid.NewGuid(), ExerciseId = seeded.ExerciseId, Role = "participant", PersonaId = null },
+            Enrollment = new Enrollment { Id = Guid.NewGuid(), ExerciseId = seeded.ExerciseId, Role = accountRole, PersonaId = null },
         });
         await context.SaveChangesAsync();
 
@@ -146,6 +147,39 @@ public sealed class ParticipantPersonaBindingServiceTests
                 seeded.FirstPersonaId,
                 "an ops rebind is immediately visible to the next login — this is what unblocks the composer (AC3)");
         }
+    }
+
+    [RequiresDockerTheory]
+    [InlineData("planner")]
+    [InlineData("controller")]
+    [InlineData("evaluator")]
+    public async Task Bind_ToALegacyStaffRoleAccount_IsRefusedAsInvalid_BeforeTheSave_NotA500(string staffRole)
+    {
+        // L-9: a legacy account carrying a staff role (migrated to a staff-role enrollment by AdminIdentityFoundation)
+        // cannot hold a persona (CK_Enrollments_PersonaId_ParticipantRolesOnly). It is refused as a 400, writing nothing.
+        var seeded = await SeedAsync(NewHostname(), staffRole);
+
+        await using (var context = _fixture.CreateContext())
+        {
+            var result = await NewService(context).BindPersonaAsync(
+                new BindParticipantPersonaRequest
+                {
+                    Hostname = seeded.Hostname,
+                    Username = seeded.Username,
+                    PersonaHandle = seeded.FirstHandle,
+                },
+                Secret);
+
+            result.Outcome.Should().Be(ParticipantPersonaBindingOutcome.Invalid,
+                "a staff-role account cannot hold a persona — refused cleanly, never a check-constraint 500");
+            result.Error.Should().Contain("staff role");
+        }
+
+        await using var read = _fixture.CreateContext(ScopeFor(seeded.ExerciseId));
+        (await read.Accounts.Include(a => a.Enrollment).AsNoTracking().SingleAsync(a => a.Id == seeded.AccountId)).Enrollment.PersonaId
+            .Should().BeNull("nothing was written");
+        (await read.TelemetryEvents.CountAsync(e => e.EventType == "account.persona_bound"))
+            .Should().Be(0, "a refused bind emits no audit event (no mutation happened)");
     }
 
     [RequiresDockerFact]
