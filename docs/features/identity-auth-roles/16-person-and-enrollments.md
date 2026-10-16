@@ -72,6 +72,9 @@ every other Phase-A story reads. Staff-world plumbing; no participant-visible ch
 - [ ] **Existing exercise-scoped `orgAdmin` sessions are revoked** by the migration, because the new contract rejects `orgAdmin` with exercise scope. Test: an access and refresh pair from before the migration gets 401 afterwards, and a fresh sign-in mints an org-scope session.
 - [ ] `assignments` and `active-exercise` refuse participant and readonly sessions.
 
+### Orchestrator review fold (2026-10-16, M-002)
+- [ ] Swamped mode lives in memory (`EngineAutonomyState`). When the lead is removed or demoted, it is turned off **after** the enrollment change commits, **idempotently**, so a failed flip retries. On rehydrate, an exercise with no lead comes back with swamped mode off (test).
+
 ## Out of Scope
 Password sign-in itself and org choice (story 15 / 05); role enforcement (17); invite and directory UI (19-20);
 the A2/A3/A4 columns (their own migrations). No participant-facing change.

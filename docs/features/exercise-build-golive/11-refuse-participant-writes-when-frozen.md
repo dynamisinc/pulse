@@ -21,10 +21,24 @@ Sim writes are lifecycle-gated: allowed in `live` and `staged` (dry runs), refus
 ### Copilot review 2 fold (2026-10-16, ADMIN-IDENTITY-MODEL §8.2) (superseded in place by review 3: the AC above now says the same)
 - [ ] Participant sim writes stay **allowed in `staged`** (dry runs, matching `ExerciseLifecycleStates.BehaviourOf(Staged)` today) and in `live`. They are refused only when paused or frozen. The route × role matrix test (story 17) encodes staged as allowed.
 
-### Tom decision (2026-10-16, via orchestrator): bounded participant `scenarioTime`
-- [ ] **A participant `scenarioTime` out of range is rejected.** Today `PostIngestService.cs` (~281-287) only runs `TryParse` and stores the client's value as-is, so a year 9999 is accepted; #583 only stopped it crashing the report. For **participant and PIO** origins the server validates the value against the exercise's **current scenario clock**: it must be within **[clock − 10 min, clock + 2 min]** (the 2-minute margin covers client and network skew). Anything outside gets 400 `scenario-time-out-of-range`, nothing is written, and a telemetry event records the refusal. **Staff origins are unaffected:** controller-as-persona, inject and engine posts, plus build-time setup and backdated posts, keep their existing rules.
-- [ ] Tests: year 9999 → 400; clock + 3 min → 400; clock − 11 min → 400; clock ± 1 min → accepted; a staff backdated setup post in build → accepted. The window is a named constant that tests can override.
-
+### Tom decision (2026-10-16, via orchestrator): no client-controlled participant `scenarioTime` (tracked under #379)
+*(Revised after the orchestrator review CR-001. A ±window was rejected: the participant client sends wall-clock
+time, from the Wave-0 clock mock `scenarioNow() = new Date()`, while the server clock freezes on Freeze and moves on
+Jump, so every post after a Freeze would get a 400.)*
+- [ ] **For participant-origin writes the server stamps scenario time and ignores the client value.** This covers
+      `PostIngestService` with origin `participant` (PIO is a *role* that also posts with origin `participant`),
+      reactions, and amplifies/reposts: every participant write that carries `scenarioTime`. The client field
+      stays in the contract for compatibility, is **ignored**, and a year-9999 value is simply irrelevant.
+- [ ] **The source is the server `IExerciseClock`** (`ExerciseClockService.CurrentScenarioTime`). **When the clock
+      has not started** (it is null until the reaction loop starts it, e.g. in a staged dry run), the stamp is
+      the server's UTC now, which is exactly what the Wave-0 participant client sends today, so nothing changes
+      for un-started exercises. A test covers both cases.
+- [ ] **Freeze, resume and jump:** after a 15-minute Freeze and resume, and after a +60-minute jump, participant
+      posts are accepted and stamped with the server clock's time (tests).
+- [ ] Staff origins (`controller-as-persona`, `inject`, `engine`, `noise`) keep their existing rules, including
+      build-time backdated setup posts.
+- [ ] When this lands, telemetry that records a participant write stamps the **server** scenario time, never a
+      client-supplied value.
 ## Out of Scope
 Changing tier semantics; client-side optimistic UI beyond showing the refusal.
 
