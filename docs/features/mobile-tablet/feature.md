@@ -74,11 +74,16 @@ types, `ExerciseScopeDto`): merge `main` before touching those types. Existing r
 - **Backend route for the manifest:** not needed in the chosen design (story 09 builds the manifest client-side from
   `useBrandConfig()`); if review overturns that, it is a C1 rule 1 coordination item, see story 09.
 
-## Open questions (for Tom)
-1. **E2E home and CI.** Story 01 puts Playwright in `src/frontend` (`@playwright/test`, new devDependency). OK, or keep it under `tools/` with its own package like guide-screenshots? Should a CI e2e job be added (touches `.github/workflows/ci.yml`; not owned by any story)?
-2. **Install-prompt telemetry.** Should install/dismiss emit an XC-004 event? Default in story 11: no (not an in-fiction action).
-3. **Pre-sign-in PWA identity.** Before a brand resolves (join/sign-in) story 09 offers no manifest and a neutral head, so installing from the join page is not possible. Acceptable, or must the join page be installable under a neutral name?
-4. **Brand logo as app icon.** Story 09 uses the exercise brand logo (or a generated initial). A separate planner-set "app icon" would be a Session A setup-content item. Cross-origin logo fetch may force a backend route (C1 rule 1).
-5. **Tablet layout needs design input.** D5/D7 do not cover tablet. Stories 12/13 pick a tab/pane pattern; should a short design review confirm before build?
-6. **Burst thresholds.** Story 07's long-task (200 ms) and p95 frame (50 ms) thresholds on a 4x CPU-throttled emulation are proposals.
-7. **iOS verification.** Manifest and install behavior on iOS Safari needs a real-device manual check; who has an iPhone/iPad for sign-off?
+## Decisions (Tom, 10/16 interview)
+| # | Topic | Decision |
+|---|---|---|
+| MT-D1 | E2E home and CI | Playwright stays in `src/frontend` (`@playwright/test`). **Nightly / manual only**: not in PR CI. A scheduled workflow is an orchestrator-owned `.github/workflows` change. |
+| MT-D2 | Phone navigation | **Bottom tab bar on phones** (Home, Explore, Notifications, Profile, plus compose) replaces the left icon rail at phone widths. Built in story 02. The rail stays at tablet and desktop widths. |
+| MT-D3 | Tablet console design | **Short design brief first.** A 1–2 page tablet amendment to D5 (which columns become tabs or panes, where the kill switch lives) goes to Tom for sign-off before stories 12 and 13 are built. |
+| MT-D4 | Pre-sign-in PWA identity | **Not installable until signed in.** Join and sign-in pages have no manifest; the install prompt appears only after the exercise brand resolves. |
+| MT-D5 | Install-prompt telemetry | **No** XC-004 events for PWA install or dismiss. |
+| MT-D6 | Burst thresholds (story 07) | **Accepted:** no long task over 200 ms; p95 frame of 50 ms or less at 4x CPU throttle. |
+| MT-D7 | Real-device checks | **Tom, per PR.** Each mobile PR carries a short iPhone/iPad checklist and the UAT URL. |
+| MT-D8 | `/notifications` redirect in mock | Unknown. Investigate in story 02 and fix it, or document it if it is behind a flag. |
+
+Still open: story 09 uses the brand logo as the app icon. If fetching the logo cross-origin forces a backend route, that needs C1 rule 1 coordination.
