@@ -75,6 +75,51 @@ public sealed class OrgStaffLoginHttpTests
     }
 
     [RequiresDockerFact]
+    public async Task OrgScopeSession_OnAnExerciseHost_NeverReadsThatExercisesContent_TheSessionsNullScopeWins()
+    {
+        // AC3 / exercise-isolation/07 — "staff session, no exercise scope", distinct from "no session at all": the
+        // host resolves exercise X provisionally, but the org-scope session's NULL exercise overwrites it, so a
+        // participant-facing scoped read fails closed instead of reading X (or every exercise).
+        var org = await _kit.SeedOrganizationAsync();
+        var exercise = await _kit.SeedExerciseAsync(org.Id);
+        var personaId = Guid.NewGuid();
+        await using (var seed = _kit.Context())
+        {
+            seed.Personas.Add(new Persona
+            {
+                Id = personaId,
+                ExerciseId = exercise,
+                DisplayName = $"Persona {personaId:N}",
+                Handle = $"@p_{personaId:N}",
+                Kind = "human",
+            });
+            await seed.SaveChangesAsync();
+        }
+
+        var email = OrgSignInTestKit.NewEmail();
+        await _kit.SeedPersonAsync(org.Id, email, orgRole: Person.OrgAdminRole);
+
+        using var host = new Host(_fixture.ConnectionString!);
+        var token = await LoginAsync(host, new { orgSlug = org.Slug, email, password = OrgSignInTestKit.Password });
+        using var client = Authorized(host, token);
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/api/personas");
+        request.Headers.Host = $"signin-{exercise:N}.example.com";
+        using var response = await client.SendAsync(request);
+
+        var text = await response.Content.ReadAsStringAsync();
+        text.Should().NotContain(personaId.ToString(), "an org-scope session never reads an exercise's content");
+        text.Should().NotContain($"@p_{personaId:N}");
+        if (response.StatusCode == HttpStatusCode.OK)
+        {
+            JsonDocument.Parse(text).RootElement.EnumerateArray().Should().BeEmpty("zero rows — the fail-closed collapse");
+        }
+        else
+        {
+            response.StatusCode.Should().BeOneOf(HttpStatusCode.Unauthorized, HttpStatusCode.Forbidden);
+        }
+    }
+
+    [RequiresDockerFact]
     public async Task OrgScopeSession_ResolvesItsOwnTenant_WithNoExerciseInTheRequest()
     {
         // AC4: OrganizationResolutionMiddleware resolves the tenant from the staff facet alone — the list carries the
