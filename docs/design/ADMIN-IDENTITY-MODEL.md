@@ -323,10 +323,15 @@ mid-exercise.
     that Person or Account, and every unconsumed `LoginChoiceCandidate` for that Person. An older invite link or
     an org choice verified against the old password therefore cannot mint a session afterwards. Tests cover
     reset followed by redeeming each older token and choice.
-  - **An invite without a grant.** Redeeming an invite sets the password, but a session is minted **only if the
-    person has a grant** (`OrgRole`, or a staff enrollment in that org). Otherwise the page shows an
-    **"awaiting assignment"** state ("your account is ready; an administrator will add you to an exercise"),
-    and the person can sign in normally once assigned.
+  - **Staff invites without a grant.** For an invite issued from the **staff side** (org directory or staff
+    assignment), redeeming it sets the password, but a staff session is minted **only if the person has a
+    grant** (`OrgRole`, or a staff enrollment in that org). Otherwise the page shows an **"awaiting assignment"**
+    state in COBRA ("your account is ready; an administrator will add you to an exercise"), and the person can
+    sign in normally once assigned.
+  - **Participant invites** (roster import with "add to directory", or promoting a one-off, §2.2) carry the
+    exercise they were issued for. They are redeemed on **that exercise's host, inside the participant skin**:
+    redeeming sets the password and mints a **participant** session on that exercise's enrollment. They never
+    show "awaiting assignment". Tests cover both roster flows.
   - Using a token sets the password, **revokes every live session for that person or account**, and emits
     `identity.credential.changed`.
 - **Staff "forgot password":** `POST /api/auth/password/forgot {email, orgSlug?}` is pre-auth and allowlisted.
@@ -674,10 +679,16 @@ Key: ✅ allowed · — refused (403; 404 where the bare-404 pattern applies) ·
 "Via enrollment" means the org admin enrolls themselves (audited) and then holds that role's row.
 Evaluators are refused **every exercise-content and administration** write (#61), including future annotations until track 5 adds an
 evaluator-only annotation route.
-**Self-service session operations stay open to every authenticated role, evaluators included**, with their own checks:
-`POST /api/auth/refresh`, `POST /api/auth/logout`, `GET /api/session`, `/api/me/*` reads, and `GET`/`POST
-/api/staff/assignments` / `active-exercise` (the caller's own enrollments only). They change no exercise content.
-The matrix test lists them as explicit "allowed for all" rows.
+**Self-service session operations stay open, with their own checks:**
+- **For every authenticated session, in either world:** `POST /api/auth/refresh`, `POST /api/auth/logout`,
+  `GET /api/session` and `/api/me/*` reads.
+- **For staff-world sessions only (evaluators and org admins included):** `GET /api/staff/assignments` and
+  `POST /api/staff/active-exercise`, limited to the caller's own staff enrollments. **Participant and readonly
+  sessions are refused**, even when the same Person holds a staff enrollment elsewhere. A participant link or
+  day-word session must never switch into staff privileges.
+
+None of these change exercise content. The matrix test lists them as explicit rows, including a participant
+session refused on both staff operations.
 
 **Recorded decision (#481), signed off:** **stage** = planner. **Archive** = planner or org admin. StartEx and
 EndEx stay controller-only. The narrowings on create exercise, settings and the view-only code are signed off.
@@ -704,7 +715,7 @@ the report export offered first; from `completed` **or `staged`**; planner or or
 
 | Kind | Item | Wave |
 |---|---|---|
-| **EF migration** | `AdminIdentityFoundation`:<br>• `People` table, with a backfill of one per `StaffUser` (same Id; legacy rows have a null Email until invited)<br>• `StaffUsers.Id` FK → `People.Id`<br>• `Organizations.Slug` (unique; backfilled from Name)<br>• **`Enrollments` table**: StaffAssignment rows migrated with the same Id, plus one per `Account` (Role and PersonaId copied); then **`StaffAssignments` is dropped** and **`Accounts.Role`/`Accounts.PersonaId` are dropped**<br>• `Accounts.EnrollmentId` (unique, non-null after backfill)<br>• `Sessions.PersonId`, **`Sessions.ExerciseId` nullable**<br>• `People.OrgRole`, with orgAdmin enrollments backfilled → planner + OrgRole<br>• `People` password and lockout columns (`PasswordHash`, `PasswordChangedAt`, `FailedLoginCount`, `LockedOutUntil`)<br>• `Enrollments.IsLead` (check: controller only; filtered unique index, one lead per exercise; backfill: the earliest-created controller per exercise)<br>• `Sessions.Origin` (the cross-tab world backstop)<br>• `LoginChoices` + `LoginChoiceCandidates` (slugless org choice)<br>• **`OrgAuditEvents` table**<br>• `Exercises.FirstLiveAt` (backfill: for status live, paused, completed or archived = COALESCE(first transition to live, `exercise.bootstrapped` time, earliest post, `CreatedAt`, **and finally the migration's own run time**), so it is never null for an exercise that ran, even a legacy row whose `CreatedAt` is null and that has no events or posts; build and staged stay null unless a transition to live exists)<br>Hand-written SQL in `EXEC`, per OPERATE.md; reversible `Down` | A1 |
+| **EF migration** | `AdminIdentityFoundation`:<br>• `People` table, with a backfill of one per `StaffUser` (same Id; legacy rows have a null Email until invited)<br>• `StaffUsers.Id` FK → `People.Id`<br>• `Organizations.Slug` (unique; backfilled from Name)<br>• **`Enrollments` table**: StaffAssignment rows migrated with the same Id, plus one per `Account` (Role and PersonaId copied); then **`StaffAssignments` is dropped** and **`Accounts.Role`/`Accounts.PersonaId` are dropped**<br>• `Accounts.EnrollmentId` (unique, non-null after backfill)<br>• `Sessions.PersonId`, **`Sessions.ExerciseId` nullable**<br>• `People.OrgRole`, with orgAdmin enrollments backfilled → planner + OrgRole<br>• `People` password and lockout columns (`PasswordHash`, `PasswordChangedAt`, `FailedLoginCount`, `LockedOutUntil`)<br>• `Enrollments.IsLead` (check: controller only; filtered unique index, one lead per exercise; backfill: the earliest-created controller per exercise)<br>• `Sessions.Origin` (the cross-tab world backstop)<br>• `LoginChoices` + `LoginChoiceCandidates` (slugless org choice)<br>• **`OrgAuditEvents` table**<br>• **revoke every existing `Session` with `Role = 'orgAdmin'`** (exercise-scoped, which the new contract rejects; those people sign in again and get an org-scope session)<br>• `Exercises.FirstLiveAt` (from A1, **every transition into live sets it if null**, in the same transaction; backfill: for status live, paused, completed or archived = COALESCE(first transition to live, `exercise.bootstrapped` time, earliest post, `CreatedAt`, **and finally the migration's own run time**), so it is never null for an exercise that ran, even a legacy row whose `CreatedAt` is null and that has no events or posts; build and staged stay null unless a transition to live exists)<br>Hand-written SQL in `EXEC`, per OPERATE.md; reversible `Down` | A1 |
 | EF migration | `CredentialToken`; `People.AvatarBlobName`; `Exercises.SignInMethods`; `MediaAssets.UploadedByAccountId` | A2 |
 | EF migration | `Posts.IsSetupContent`, `Follows.IsSetupContent` (with the §5.4 backfill); `Exercises.ParticipantName` | A3 |
 | EF migration | `ContentPack`, `ContentPackItem`; persona archive column | A4 |
@@ -825,3 +836,10 @@ Option A changes what Session C's §8 amendment (#571) says about who may turn s
 - evaluators are refused content and admin writes only, while self-service session operations stay open;
 - the `needs-repair` run-sheet contract is added to the A3 clearance;
 - `FirstLiveAt` falls back to the migration time as a last resort.
+
+**Copilot review 7 (2026-10-16), on `a7be1c3`: 1 open finding and 4 "previously missed", all accepted:**
+- staff session operations require a staff-world session (§8.2);
+- invite completion is split into staff ("awaiting assignment") and participant (exercise skin) paths (§3.3);
+- the `FirstLiveAt` stamp moves into A1 with the column (§9);
+- the migration revokes existing exercise-scoped `orgAdmin` sessions (§9);
+- staff can still read same-org staff avatars (story 19).

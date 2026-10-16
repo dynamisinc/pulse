@@ -42,7 +42,7 @@ route and per lifecycle transition and proves it with a route x role matrix test
 - [ ] Setup authoring is separate from conduct posting. In **build**, planners and controllers may post as a persona (setup and backdated posts) and pin, using the composer flows in build-golive/01 and persona-management/04. In **staged and live**, conduct posting is controller-only. The matrix test covers a planner posting in build (allowed) and in live (403).
 
 ### Copilot review 6 fold (2026-10-16)
-- [ ] Self-service session operations are explicit "allowed for all authenticated roles" rows in the matrix, evaluators included: `/api/auth/refresh`, `/api/auth/logout`, `GET /api/session`, `/api/me/*` reads, `GET /api/staff/assignments` and `POST /api/staff/active-exercise` (own enrollments only). Tests cover an evaluator refreshing, logging out and switching between two of their own evaluator enrollments.
+- [ ] Self-service session operations are explicit rows in the matrix. `/api/auth/refresh`, `/api/auth/logout`, `GET /api/session` and `/api/me/*` reads are allowed for every authenticated session. `GET /api/staff/assignments` and `POST /api/staff/active-exercise` are allowed for **staff-world sessions only** (evaluators and org admins included; own enrollments only). **Participant and readonly sessions are refused on both**, even when the same Person is staff elsewhere. Tests cover an evaluator refreshing, logging out and switching between two of their own evaluator enrollments, and a participant session (link and day word) refused on both staff operations.
 
 ## Out of Scope
 The new transitions themselves (reset/reopen/delete/unstage bodies: exercise-build-golive 07-08); the lifecycle write gate for participants (A5 #379).

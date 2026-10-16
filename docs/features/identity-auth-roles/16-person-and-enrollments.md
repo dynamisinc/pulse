@@ -67,6 +67,11 @@ every other Phase-A story reads. Staff-world plumbing; no participant-visible ch
 ### Copilot review 6 fold (2026-10-16)
 - [ ] Final `FirstLiveAt` fallback: when the exercise's status is past staged and no lifecycle, bootstrap or post timestamp exists and `CreatedAt` is null, the backfill uses the migration's run time (`SYSUTCDATETIME()`), so a run is never mistaken for "never ran". A migration fixture covers an exercise with all four sources absent.
 
+### Copilot review 7 fold (2026-10-16)
+- [ ] **`FirstLiveAt` is stamped from A1.** Every transition into `live` (StartEx, plus any bootstrap path) sets `FirstLiveAt` if null, in the same transaction. Test: an exercise in build at A1 deploy runs afterwards, then is reset; delete is refused and archive-from-build is allowed.
+- [ ] **Existing exercise-scoped `orgAdmin` sessions are revoked** by the migration, because the new contract rejects `orgAdmin` with exercise scope. Test: an access and refresh pair from before the migration gets 401 afterwards, and a fresh sign-in mints an org-scope session.
+- [ ] `assignments` and `active-exercise` refuse participant and readonly sessions.
+
 ## Out of Scope
 Password sign-in itself and org choice (story 15 / 05); role enforcement (17); invite and directory UI (19-20);
 the A2/A3/A4 columns (their own migrations). No participant-facing change.

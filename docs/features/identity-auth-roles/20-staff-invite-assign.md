@@ -33,6 +33,9 @@ Today nothing creates staff enrollments except bootstrap and the creator. Org ad
 - [ ] Redeeming an invite sets the password but mints a session **only if a grant exists** (`OrgRole` or a staff enrollment in the org). Otherwise it shows an **"awaiting assignment"** page in COBRA staff styling, and normal sign-in works once the person is assigned. Tests cover both paths.
 - [ ] Enrollment removal or a role change also aborts the person's live SignalR connections on that exercise.
 
+### Copilot review 7 fold (2026-10-16)
+- [ ] The "awaiting assignment" rule applies to **staff** invites only. Participant invites (roster "add to directory", promoting a one-off) are redeemed on the issuing exercise's host in the participant skin, and mint a participant session on that enrollment. Tests cover both roster flows.
+
 ## Out of Scope
 Participant roster import and sign-in (easy-login); password reset (21); the directory page itself (19).
 
