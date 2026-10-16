@@ -84,6 +84,22 @@ export function setExerciseClock(clock: IExerciseClock): void {
   activeClock = clock
 }
 
+/**
+ * True while the default Wave-0 mock (wall-clock-mirroring) clock is active,
+ * i.e. no real exercise clock has been installed via `setExerciseClock()`.
+ *
+ * Why it exists (mobile-tablet story 17, COR-053): under the default clock
+ * `scenarioNow()` IS wall-clock time. A surface that renders "now" with no
+ * scenario anchor — the participant `ChannelNav` dateline — would show the
+ * real date ("OCT 16, 2026") beside posts stamped in scenario time
+ * ("Sep 4, 2033"). Such surfaces check this and render nothing until a real
+ * provider (exercise-clock story 01, #77) is installed. Timestamps that come
+ * FROM content (post.scenarioTime, alert.scenarioTime) are unaffected.
+ */
+export function isDefaultExerciseClock(): boolean {
+  return activeClock === mockExerciseClock
+}
+
 /** Restores the default Wave-0 mock (wall-clock-mirroring) exercise clock. */
 export function resetExerciseClock(): void {
   activeClock = mockExerciseClock

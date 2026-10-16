@@ -30,5 +30,6 @@ export {
   getExerciseClock,
   setExerciseClock,
   resetExerciseClock,
+  isDefaultExerciseClock,
 } from './exerciseClock'
 export type { IExerciseClock } from './exerciseClock'
