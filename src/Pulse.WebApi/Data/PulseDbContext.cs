@@ -640,6 +640,12 @@ public class PulseDbContext : DbContext
             // enrollment whenever the session is projected (a lead change revokes nothing).
             entity.HasIndex(e => e.PersonId);
             entity.Property(e => e.Origin).HasMaxLength(Session.MaxOriginLength);
+
+            // M-6: no exercise (org scope) is an orgAdmin-only shape. One direction only — legacy revoked orgAdmin rows
+            // keep their exercise; "orgAdmin => no exercise" is the session issuer's guard.
+            entity.ToTable(table => table.HasCheckConstraint(
+                "CK_Sessions_ExerciseId_OrgAdminOnly",
+                "[ExerciseId] IS NOT NULL OR [Role] = 'orgAdmin'"));
         });
 
         // ==========================================================================================

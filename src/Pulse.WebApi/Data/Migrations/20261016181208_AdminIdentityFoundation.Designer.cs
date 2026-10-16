@@ -1390,7 +1390,10 @@ namespace Pulse.WebApi.Data.Migrations
                     b.HasIndex("TokenHash")
                         .IsUnique();
 
-                    b.ToTable("Sessions");
+                    b.ToTable("Sessions", t =>
+                        {
+                            t.HasCheckConstraint("CK_Sessions_ExerciseId_OrgAdminOnly", "[ExerciseId] IS NOT NULL OR [Role] = 'orgAdmin'");
+                        });
                 });
 
             modelBuilder.Entity("Pulse.WebApi.Data.Entities.SharedCredential", b =>
