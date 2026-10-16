@@ -165,8 +165,18 @@ public static class PostWriteEndpoints
                 // media URLs, inReplyTo; no viewer, no provenance, no baseline field). The staff body borrows its
                 // media/inReplyTo and keeps the provenance the console reads off its own write.
                 var participantView = result.ParticipantView ?? ParticipantPostDto.FromPost(post);
-                return string.Equals(post.Origin, "participant", StringComparison.Ordinal)
-                    ? Results.Json(participantView, statusCode: StatusCodes.Status201Created)
+
+                // demo-feedback story 19: the creator's OWN 201 carries its viewer state with the full edit window, so
+                // Edit shows on a fresh post without waiting for the next feed read. A copy: the broadcast payload
+                // (the same projection) stays viewer-free.
+                return string.Equals(post.Origin, PostEditRules.ParticipantOrigin, StringComparison.Ordinal)
+                    ? Results.Json(
+                        participantView.WithViewer(new PostViewerStateDto(
+                            Liked: false,
+                            Reposted: false,
+                            Pinned: false,
+                            EditableForSeconds: (int)PostEditRules.Window.TotalSeconds)),
+                        statusCode: StatusCodes.Status201Created)
                     : Results.Json(StaffPostDto.FromPost(post, participantView), statusCode: StatusCodes.Status201Created);
 
             default:
