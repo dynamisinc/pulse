@@ -102,7 +102,7 @@ Organization (+ Slug: new, unique; used in the staff console URL, §1.2)
     built and is never stored on the session. A lead change therefore revokes **no** sessions, so nobody is
     signed out mid-incident.
   - **Role change or removal of the lead** never hits the check constraint as a 500. **It is allowed (Option A,
-    signed off by Tom on 2026-10-16).** In the same transaction it clears `IsLead` and **turns swamped mode off**,
+    signed off by Tom on 2026-10-16).** The transaction clears `IsLead`, and swamped mode is **turned off after commit** (see below),
     and both changes are audited. The exercise then has no lead until a planner sets one, which shows as a
     readiness warning.
   - **Migration backfill:** exactly one lead per exercise that has any controller enrollment, namely the
@@ -115,7 +115,7 @@ Organization (+ Slug: new, unique; used in the staff console URL, §1.2)
     `autonomy/restore` after a kill switch, and to use `generation-provider/restore`. **Any controller** may
     turn swamped mode off, lower autonomy, use the kill switch, or use `cut-to-fake`: controls only ever lower.
   - It unblocks Session C's provider flip (#571).
-  - **Swamped mode is in memory** (`EngineAutonomyState`). "Turns swamped mode off in the same transaction"
+  - **Swamped mode is in memory** (`EngineAutonomyState`). "Turns swamped mode off"
     therefore means: once the enrollment change commits, swamped mode is turned off **idempotently**, so a
     failed flip retries on the next request. On rehydrate after a restart, an exercise with **no lead** comes
     back with swamped mode **off**.
@@ -748,7 +748,7 @@ in A5 and touches `ReactionLoopHost`, so C should coordinate on that file.
 | **A2 People** | `POST /api/ops/organizations` (org + first admin invite); org directory UI; staff invite and assignment; admin and forgot-password reset; participant passwords and reset; sign-in methods; avatars (re-encode first); promote one-off; roster reconciliation | identity-auth-roles 08; easy-login 02 (reconciliation note) | `19-org-directory`, `20-staff-invite-assign`, `21-password-reset-flows`, `22-sign-in-methods`, `23-avatars`, `24-image-reencode` |
 | **A3 Exercise management** | Readiness; stage/unstage; StartEx gate; reopen; reset; delete; duplicate; participant name; view-only code UI | exercise-build-golive 01, 03, 04, 05, 06; exercise-lifecycle-admin 01–02 | `exercise-build-golive/07-reset-reopen`, `08-delete` |
 | **A4 Setup content** | Persona create, clone, archive; templates and casts; avatar library; content pack upload | persona-management 01, 02, 05 plus 03 (#55, the surviving owner of COR-022; #18 was closed as its duplicate) | `persona-management/06-content-pack-upload` |
-| **A5 Lifecycle correctness** | #375, #379 (plus Tom's 2026-10-16 add, tracked under #379: for participant-origin writes the **server stamps scenario time** and ignores the client value; see story 11), #390, #376, #389, #485 | — | one story per issue |
+| **A5 Lifecycle correctness** | #375, #379 (plus Tom's 2026-10-16 add, tracked under #379: for participant-origin **post ingest** the server stamps scenario time from the existing chain (`IExerciseClock` ?? `Exercise.CurrentScenarioTime` ?? the parent post's time for replies, clamped) and ignores the client value; reactions and edits already do; see story 11), #390, #376, #389, #485 | — | one story per issue |
 
 **Done when** (C2): an org admin, starting from an empty org (created by `POST /api/ops/organizations`), can
 invite staff, import participants, create personas, seed content, stage, start, end and duplicate the
@@ -824,7 +824,7 @@ swamped auto-send keeps running and only the kill switch can stop it.
 
 | Option | Gate | Losing the lead |
 |---|---|---|
-| **A (chosen)** | **Raise-only.** A lead is needed to turn swamped mode on, raise autonomy (`autonomy-default` or `tier-policy` towards more autonomy), `autonomy/restore` after a kill switch, and `generation-provider/restore`. Turning swamped mode off, lowering autonomy, the kill switch and `cut-to-fake` stay open to **any controller**. This follows the "controls only ever lower" rule. | Allowed. Removing the lead's enrollment or changing its role clears `IsLead` **and turns swamped mode off** in the same transaction (audited). The exercise has no lead until a planner sets one, which shows as a readiness warning |
+| **A (chosen)** | **Raise-only.** A lead is needed to turn swamped mode on, raise autonomy (`autonomy-default` or `tier-policy` towards more autonomy), `autonomy/restore` after a kill switch, and `generation-provider/restore`. Turning swamped mode off, lowering autonomy, the kill switch and `cut-to-fake` stay open to **any controller**. This follows the "controls only ever lower" rule. | Allowed. Removing the lead's enrollment or changing its role clears `IsLead` in the transaction, and swamped mode is turned off **after commit**, idempotently (both audited). The exercise has no lead until a planner sets one, which shows as a readiness warning |
 | B (not chosen) | Lead in both directions | Refused: 409 `is-lead` until the lead is reassigned. Risk: if the lead walks away mid-incident, nobody can turn swamped mode off without a planner first |
 | C | Lead in both directions | Allowed with no safeguard. **Rejected**: swamped mode stays stuck on |
 
@@ -863,3 +863,11 @@ Option A changes what Session C's §8 amendment (#571) says about who may turn s
 - **L-001:** Option A is now marked "chosen".
 - **L-002:** a mixed tier-policy PUT counts as a raise.
 - **L-003:** the A5 add is tracked under #379.
+
+**Orchestrator verification of `a8d6205` (2026-10-16): 1 High, 3 Low, all accepted.**
+- **H-1:** story 11 now reuses the existing server-side chain from `ReactionService` and `PostEditService`
+  (clock ?? stored scenario time ?? parent's time, clamped), instead of a new "UTC now" fallback. UTC now is the
+  last resort for a top-level post only. Reactions and edits already stamp server-side.
+- **L-1:** "clears `IsLead` in the transaction; swamped mode off after commit" is now worded consistently.
+- **L-2:** the refusal telemetry is stamped with server scenario time.
+- **L-3:** a test-stub note for the post-ingest tests.

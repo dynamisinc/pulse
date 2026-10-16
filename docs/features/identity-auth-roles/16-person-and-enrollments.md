@@ -58,7 +58,7 @@ every other Phase-A story reads. Staff-world plumbing; no participant-visible ch
 ### Orchestrator review fold (2026-10-16, ADMIN-IDENTITY-MODEL §1.1)
 - [ ] `isLead` is computed when the DTO is built, from the live `Enrollment.IsLead`, and is never stored on `Session`. It is false for org-scope and participant sessions, and the frontend `Enrollment` type carries it too.
 - [ ] Migration backfill: exactly one lead per exercise that has any controller, namely the earliest-created controller enrollment (ties go to the lowest Id). A migration test covers it.
-- [ ] Removing the lead's enrollment, or changing its role away from controller, never returns a 500 on the check constraint. **It is allowed (Option A, Tom, 2026-10-16).** In the same transaction it clears `IsLead` and turns swamped mode off, and both are audited. The exercise then has no lead until a planner sets one. A test covers both the removal and the role-change paths.
+- [ ] Removing the lead's enrollment, or changing its role away from controller, never returns a 500 on the check constraint. **It is allowed (Option A, Tom, 2026-10-16).** The transaction clears `IsLead`, and swamped mode is turned off **after commit** (idempotent; see the M-002 fold below), and both are audited. The exercise then has no lead until a planner sets one. A test covers both the removal and the role-change paths.
 
 ### Copilot review 5 fold (2026-10-16)
 - [ ] Grant revocation also aborts every SignalR connection bound to a revoked session id and removes it from its groups (a connection-to-session registry). A test covers a client connected before revocation, which stops receiving staff broadcasts.
