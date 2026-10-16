@@ -129,7 +129,10 @@ public sealed class OrganizationScopeSweepTests
         // demo-feedback/18: +1 for EfExerciseRuntimeStateStore.ReadAllForRehydrationAsync — the startup rehydrator's
         // existence check (ids only) for the exercise ids read from the server's own ExerciseRuntimeStates rows, each
         // written only under that exercise's resolved scope; nothing tenant-bound is returned or written.
-        ["ResolvedScope"] = 25,
+        // identity-auth-roles/17: +2 — ExerciseCallerRole's status read of the server-resolved exercise the caller is
+        // proven enrolled in (the role-matrix gate), and ExerciseLifecycleService.GetAsync's status + FirstLiveAt read
+        // of the resolved scope (archive-from-build is offered once the exercise has gone live).
+        ["ResolvedScope"] = 27,
 
         // orgAdmin startup seeder: +1 for OrgAdminSeedService, which resolves the seeded staff human by their
         // configured IdP ExternalSubject — the SAME resolve-by-subject read StaffLoginService and
@@ -324,8 +327,10 @@ public sealed class OrganizationScopeSweepTests
     private static readonly IReadOnlyDictionary<string, int> ExpectedEnrollmentBypassCounts = new Dictionary<string, int>(StringComparer.Ordinal)
     {
         // StaffLoginService (1), StaffAssignmentService switcher list + switch (2), OrgStaffDirectoryService (1),
-        // OrgAdminSeedService (1), EnrollmentService grant check + org-admin target + previous lead + lead swap (4).
-        ["TenantChecked"] = 9,
+        // OrgAdminSeedService (1), EnrollmentService grant check + org-admin target + previous lead + lead swap (4),
+        // identity-auth-roles/17: ExerciseManagementService's "does the planner hold a planner enrollment on this
+        // already tenant-resolved exercise" check (1).
+        ["TenantChecked"] = 10,
 
         // BootstrapService.ProvisionStaffAsync: the exercise this ops request itself created or host-resolved.
         ["ResolvedScope"] = 1,

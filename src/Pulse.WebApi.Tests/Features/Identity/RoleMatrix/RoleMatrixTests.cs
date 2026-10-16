@@ -32,8 +32,7 @@ using Pulse.WebApi.Tests.Data;
 /// </para>
 /// <para>
 /// <b>Not probed here, but still explicit rows:</b> the pre-auth sign-in / refresh / logout / ops routes (asserted to be
-/// anonymous-allowlisted; their per-role behaviour is <see cref="SelfServiceSessionTests"/> and the default-deny suite)
-/// and the SignalR negotiate route (the hub has its own default-deny suite). The per-transition lifecycle rows, the
+/// anonymous-allowlisted; their per-role behaviour is <see cref="SelfServiceSessionTests"/> and the default-deny suite). The per-transition lifecycle rows, the
 /// build-vs-live authoring rows and both directions of the lead gate have their own focused suites in this folder.
 /// </para>
 /// </remarks>
@@ -52,7 +51,8 @@ public sealed class RoleMatrixTests
     private const string ParticipantSim = "RRRRRAARR";
     private const string LiveAuthoring = "RRAARAARR";
     private const string UploadAuthoring = "RAAARAARR";
-    private const string EveryAuthenticated = "AAAAAAAAR";
+    private const string ExerciseBoundSessions = "RAAAAAAAR";
+    private const string Multipart = "multipart";
 
     private static readonly MatrixRole[] Columns = Enum.GetValues<MatrixRole>();
 
@@ -117,9 +117,11 @@ public sealed class RoleMatrixTests
                 using var client = world.Client(host, token);
                 using var request = new HttpRequestMessage(new HttpMethod(method), Path(pattern, world))
                 {
-                    Content = method is "GET" or "DELETE" && row.Body is null
-                        ? null
-                        : new StringContent(row.Body ?? "{}", Encoding.UTF8, "application/json"),
+                    Content = row.Body == Multipart
+                        ? CsvUpload()
+                        : method is "GET" or "DELETE" && row.Body is null
+                            ? null
+                            : new StringContent(row.Body ?? "{}", Encoding.UTF8, "application/json"),
                 };
 
                 using var response = await client.SendAsync(request);
@@ -159,6 +161,15 @@ public sealed class RoleMatrixTests
         return Regex.Replace(path, @"\{[^}]+\}", "matrix-probe");
     }
 
+    private static MultipartFormDataContent CsvUpload()
+    {
+        var content = new MultipartFormDataContent();
+        var file = new ByteArrayContent(Encoding.UTF8.GetBytes(string.Empty));
+        file.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("text/csv");
+        content.Add(file, "file", "matrix.csv");
+        return content;
+    }
+
     private static void ResetEngineState(RoleMatrixHost host, Guid exerciseId, MatrixRow row)
     {
         var autonomy = host.Services.GetRequiredService<EngineAutonomyRegistry>().GetOrCreate(exerciseId);
@@ -177,8 +188,6 @@ public sealed class RoleMatrixTests
 
         void PreAuth(string key) => rows.Add(key, new MatrixRow(RowKind.PreAuth, string.Empty, null, "live", TierPolicyMode.Auto));
 
-        void Hub(string key) => rows.Add(key, new MatrixRow(RowKind.Hub, string.Empty, null, "live", TierPolicyMode.Auto));
-
         // ---- Pre-auth: sign-in, refresh, logout, secret-gated ops (self-service; SelfServiceSessionTests). ----
         PreAuth("POST /api/auth/login");
         PreAuth("POST /api/auth/staff/login");
@@ -190,13 +199,13 @@ public sealed class RoleMatrixTests
         PreAuth("POST /api/ops/bootstrap-exercise");
         PreAuth("POST /api/ops/seed-engine-content");
         PreAuth("POST /api/ops/bind-participant-persona");
-        Hub("POST /hubs/exercise/negotiate");
 
         // ---- Self-service, staff world only (evaluators and org admins included). ----
         Probe("POST /api/staff/active-exercise", StaffWorld);
 
-        // ---- Measurement: client telemetry from any authenticated session (not exercise content). ----
-        Probe("POST /api/telemetry", EveryAuthenticated);
+        // ---- Measurement: client telemetry from any exercise-bound session (not exercise content). An org-scope
+        //      session has no exercise to attribute an event to, so it is refused. ----
+        Probe("POST /api/telemetry", ExerciseBoundSessions);
 
         // ---- Org tier. ----
         Probe("POST /api/org/exercises", OrgAdminOnly);
@@ -214,7 +223,7 @@ public sealed class RoleMatrixTests
 
         // ---- Roster, links, day word, accounts, view-only code: planner + controller. ----
         Probe("POST /api/staff/roster", PlannerOrController);
-        Probe("POST /api/staff/roster/import", PlannerOrController);
+        Probe("POST /api/staff/roster/import", PlannerOrController, Multipart);
         Probe("POST /api/staff/roster/cards", PlannerOrController);
         Probe("POST /api/staff/roster/email-links", PlannerOrController);
         Probe("POST /api/staff/roster/{id:guid}/link/reissue", PlannerOrController);
@@ -224,7 +233,7 @@ public sealed class RoleMatrixTests
         Probe("PUT /api/staff/day-word", PlannerOrController);
         Probe("DELETE /api/staff/day-word", PlannerOrController);
         Probe("POST /api/staff/accounts", PlannerOrController);
-        Probe("POST /api/staff/accounts/import", PlannerOrController);
+        Probe("POST /api/staff/accounts/import", PlannerOrController, Multipart);
         Probe("POST /api/staff/shared-credential/rotate", PlannerOrController);
         Probe("POST /api/staff/shared-credential/revoke", PlannerOrController);
 
@@ -292,14 +301,12 @@ internal enum RowKind
     /// <summary>A pre-auth route (sign-in / refresh / logout / secret-gated ops): asserted to be anonymous-allowlisted.</summary>
     PreAuth,
 
-    /// <summary>The SignalR negotiate route: covered by the default-deny hub suite.</summary>
-    Hub,
 }
 
 /// <summary>One matrix row.</summary>
 /// <param name="Kind">How it is asserted.</param>
 /// <param name="Expect">Nine 'A'/'R' characters in <see cref="MatrixRole"/> order.</param>
-/// <param name="Body">The probe body (JSON), or <c>null</c> for <c>{}</c>.</param>
+/// <param name="Body">The probe body (JSON), <c>"multipart"</c> for an empty CSV upload, or <c>null</c> for <c>{}</c>.</param>
 /// <param name="State">The lifecycle state the exercise is put in before each probe.</param>
 /// <param name="TierBefore">The tier-policy mode set before each probe.</param>
 internal sealed record MatrixRow(RowKind Kind, string Expect, string? Body, string State, TierPolicyMode TierBefore);
