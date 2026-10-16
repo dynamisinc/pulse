@@ -28,6 +28,13 @@ Story 07's ACs were amended at Gate-1 to show the pinned-for-everyone marker **i
 - [ ] Two worlds: participant skin only; nothing in `controller/**` changes (Live world already shows "Pinned for
       everyone").
 
+### Follow-up from story 20's Gate-1 (M-2, 10/16)
+
+- [ ] `PostCard.tsx` passes `postId={post.id}` (and ideally `edited={post.edited}`) to `PostHeader` and `PostBody`,
+      which already accept them (story 20). Today they find their post from the enclosing `<article data-post-id>`, read
+      once at mount, which costs an extra render per card and would show another post's edited text if a PostCard
+      instance were ever reused for a different post. Once passed, story 20's `noteBase` seed in `PostActions` can go.
+
 ## Out of Scope
 
 Pinning to a profile (X's profile pin), ordering changes, staff UI.
