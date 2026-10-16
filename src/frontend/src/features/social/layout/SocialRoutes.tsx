@@ -79,6 +79,7 @@ import {
   matchSocialRoute,
   useSocialNavigation,
 } from './socialNavigation'
+import { AlertsRoute } from './routes/AlertsRoute'
 import { HashtagRoute } from './routes/HashtagRoute'
 import { HomeView } from './routes/HomeView'
 import { ProfileRoute } from './routes/ProfileRoute'
@@ -116,6 +117,7 @@ export function SocialRoutes() {
           <Route path={SOCIAL_ROUTE_PATTERNS.home} element={null} />
           <Route path={SOCIAL_ROUTE_PATTERNS.explore} element={<ExplorePage />} />
           <Route path={SOCIAL_ROUTE_PATTERNS.notifications} element={<NotificationsPage />} />
+          <Route path={SOCIAL_ROUTE_PATTERNS.alerts} element={<AlertsRoute />} />
           <Route path={SOCIAL_ROUTE_PATTERNS.hashtag} element={<HashtagRoute />} />
           <Route path={SOCIAL_ROUTE_PATTERNS.thread} element={<ThreadRoute />} />
           <Route path={SOCIAL_ROUTE_PATTERNS.profile} element={<ProfileRoute />} />
