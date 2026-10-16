@@ -9,8 +9,12 @@
  * the dialog, the table re-reads on success); Archive only on a completed row,
  * behind a confirm, and on every other live state disabled with the VISIBLE
  * text "End the exercise first"; an archived row reads "Archived" in words,
- * has no Archive button and sorts last. The evaluator case (no actions at all)
- * lives with the route gate in `orgAdminSurfaceFamily.test.tsx`.
+ * has no Archive button and sorts last; after a successful archive, keyboard
+ * focus lands on the row's surviving Rename button; archiving the ACTIVE
+ * exercise re-resolves the scope (the header's status). The evaluator case (no
+ * actions at all) lives with the route gate in `orgAdminSurfaceFamily.test.tsx`;
+ * the real header and settings round trips live in
+ * `activeExerciseRowActions.test.tsx`.
  */
 import type { ReactNode } from 'react'
 import { render, screen, waitFor, within } from '@testing-library/react'
@@ -41,15 +45,19 @@ vi.mock('../services/orgExercisesService', async importOriginal => {
 })
 
 // The real app mounts exactly one ExerciseContextProvider at the root; here the scope is
-// dictated so the rename hook's "is this the active exercise" branch can be driven.
-const { refreshScope } = vi.hoisted(() => ({ refreshScope: vi.fn<() => Promise<unknown>>() }))
+// dictated so the hooks' "is this the active exercise" branch can be driven. `active.id`
+// is the active exercise (reset to LIVE before each test).
+const { refreshScope, active } = vi.hoisted(() => ({
+  refreshScope: vi.fn<() => Promise<unknown>>(),
+  active: { id: 'ex-l' },
+}))
 vi.mock('@/core/exerciseContext', async importOriginal => {
   const actual = await importOriginal<typeof import('@/core/exerciseContext')>()
   return {
     ...actual,
     useExerciseContext: () => ({
-      exerciseId: 'ex-l',
-      exerciseName: 'Harbor Live',
+      exerciseId: active.id,
+      exerciseName: 'Active Exercise',
       timeZone: 'UTC',
       status: 'live',
     }),
@@ -94,6 +102,7 @@ beforeEach(() => {
   vi.resetAllMocks()
   mockList.mockResolvedValue(PORTFOLIO)
   refreshScope.mockResolvedValue({})
+  active.id = LIVE.exerciseId
 })
 
 describe('row actions per state', () => {
@@ -208,6 +217,8 @@ describe('the Rename dialog', () => {
     const keys = invalidate.mock.calls.map(([filters]) => filters?.queryKey)
     expect(keys).toContainEqual(['org', 'exercises'])
     expect(keys).toContainEqual(['staff', 'assignments'])
+    // The settings block is always the ACTIVE exercise's: a non-active rename cannot stale it.
+    expect(keys).not.toContainEqual(['staff', 'exercise-settings'])
     expect(refreshScope).not.toHaveBeenCalled()
   })
 
@@ -291,6 +302,82 @@ describe('the Archive confirm', () => {
       expect(within(screen.getByTestId(`org-exercise-row-${COMPLETED.exerciseId}`)).getByText('Archived'))
         .toBeInTheDocument()
     })
+  })
+
+  it('after a keyboard archive, focus lands on the row’s surviving Rename button', async () => {
+    const user = userEvent.setup()
+    mockArchive.mockResolvedValue({ ...COMPLETED, status: 'archived' })
+    renderPage()
+    await screen.findByTestId('org-exercise-table')
+
+    // Keyboard only: focus Archive, open with Enter, Tab from Cancel to Archive, Enter.
+    const archiveButton = screen.getByRole('button', { name: `Archive ${COMPLETED.name}` })
+    archiveButton.focus()
+    await user.keyboard('{Enter}')
+    const dialog = await screen.findByTestId('archive-exercise-dialog')
+    await waitFor(() => {
+      expect(within(dialog).getByRole('button', { name: 'Cancel' })).toHaveFocus()
+    })
+    mockList.mockResolvedValue([ARCHIVED, { ...COMPLETED, status: 'archived' }, LIVE, BUILD])
+    await user.tab()
+    expect(within(dialog).getByTestId('archive-exercise-confirm')).toHaveFocus()
+    await user.keyboard('{Enter}')
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('archive-exercise-dialog')).not.toBeInTheDocument()
+    })
+    // The Archive button that opened the dialog is gone, and the row moved to the end.
+    await waitFor(() => {
+      expect(within(actionsOf(COMPLETED.exerciseId)).queryByRole('button', { name: /^Archive/ }))
+        .not.toBeInTheDocument()
+    })
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: `Rename ${COMPLETED.name}` })).toHaveFocus()
+    })
+  })
+
+  it('archiving a NON-active exercise re-reads the switcher list but leaves the scope alone', async () => {
+    const user = userEvent.setup()
+    mockArchive.mockResolvedValue({ ...COMPLETED, status: 'archived' })
+    renderPage()
+    await screen.findByTestId('org-exercise-table')
+    const client = lastQueryClient
+    if (client === undefined) throw new Error('no query client')
+    const invalidate = vi.spyOn(client, 'invalidateQueries')
+
+    await user.click(screen.getByRole('button', { name: `Archive ${COMPLETED.name}` }))
+    const dialog = await screen.findByTestId('archive-exercise-dialog')
+    await user.click(within(dialog).getByTestId('archive-exercise-confirm'))
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('archive-exercise-dialog')).not.toBeInTheDocument()
+    })
+    const keys = invalidate.mock.calls.map(([filters]) => filters?.queryKey)
+    expect(keys).toContainEqual(['org', 'exercises'])
+    expect(keys).toContainEqual(['staff', 'assignments'])
+    expect(refreshScope).not.toHaveBeenCalled()
+  })
+
+  it('archiving the ACTIVE exercise re-resolves the scope (the header’s status pill)', async () => {
+    const user = userEvent.setup()
+    active.id = COMPLETED.exerciseId
+    mockArchive.mockResolvedValue({ ...COMPLETED, status: 'archived' })
+    renderPage()
+    await screen.findByTestId('org-exercise-table')
+    const client = lastQueryClient
+    if (client === undefined) throw new Error('no query client')
+    const invalidate = vi.spyOn(client, 'invalidateQueries')
+
+    await user.click(screen.getByRole('button', { name: `Archive ${COMPLETED.name}` }))
+    const dialog = await screen.findByTestId('archive-exercise-dialog')
+    await user.click(within(dialog).getByTestId('archive-exercise-confirm'))
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('archive-exercise-dialog')).not.toBeInTheDocument()
+    })
+    expect(refreshScope).toHaveBeenCalledTimes(1)
+    const keys = invalidate.mock.calls.map(([filters]) => filters?.queryKey)
+    expect(keys).toContainEqual(['staff', 'assignments'])
   })
 
   it('Cancel archives nothing', async () => {

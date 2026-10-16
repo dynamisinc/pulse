@@ -9,14 +9,28 @@
  * server owns the organization's portfolio, so after a write the list asks it
  * again (and the stateful mock proves the write happened).
  *
- * ## The other places an exercise's name shows (rename only)
- *  - The exercise SWITCHER lists the caller's assignments by name
- *    (`['staff', 'assignments']`), so a rename invalidates that query too.
- *  - The staff HEADER shows the ACTIVE exercise's name from the exercise scope
- *    (`ExerciseContextProvider`, not React Query). When the renamed exercise IS
- *    the active one, the scope is re-resolved from the server (its refresh takes
- *    no arguments: the server, not this hook, says what the scope is). A refresh
- *    failure is the provider's own fail-closed path; it is not re-thrown here.
+ * ## The other places an exercise's name and status show
+ *  - The exercise SWITCHER lists the caller's assignments by name and status
+ *    (`['staff', 'assignments']`), so a rename AND an archive invalidate that
+ *    query too.
+ *  - The staff HEADER shows the ACTIVE exercise's name and status pill from the
+ *    exercise scope (`ExerciseContextProvider`, not React Query, which re-reads
+ *    only when asked). When the renamed or archived exercise IS the active one,
+ *    the scope is re-resolved from the server (its refresh takes no arguments:
+ *    the server, not this hook, says what the scope is), so the header stops
+ *    saying the old name, or ENDEX for an exercise the table calls Archived. A
+ *    refresh failure is the provider's own fail-closed path; it is not
+ *    re-thrown here.
+ *  - The planner's SETTINGS block (`EXERCISE_SETTINGS_QUERY_KEY`) is the active
+ *    exercise's, and its save is a FULL REPLACE that sends `name` back. A cached
+ *    block from before a rename would show the old name and, on an unrelated
+ *    save, silently write it back over the rename. So renaming the ACTIVE
+ *    exercise re-reads that block now (`refetchType: 'all'`: the panel is
+ *    normally unmounted while this page is open, and a plain invalidate would
+ *    leave the old name on screen until a remount's refetch landed). Renaming
+ *    any OTHER exercise cannot reach it: the block is always the active
+ *    exercise's, and switching exercise resets the whole cache
+ *    (`useSetActiveExercise`).
  *
  * ## A 404 or 409 means the list is stale
  * Another tab (or person) renamed, archived or removed the exercise, so the row
@@ -37,6 +51,7 @@ import {
   type UseMutationResult,
 } from '@tanstack/react-query'
 import { useExerciseContext, useExerciseScopeRefresh } from '@/core/exerciseContext'
+import { EXERCISE_SETTINGS_QUERY_KEY } from '@/features/planner/hooks/useExerciseSettings'
 import { STAFF_ASSIGNMENTS_QUERY_KEY } from '@/features/staff/hooks/useStaffAssignments'
 import {
   archiveOrgExercise,
@@ -63,8 +78,9 @@ async function invalidateOnStaleRow(queryClient: QueryClient, error: OrgExercise
 
 /**
  * Renames one of the organization's exercises. On success the org list and the
- * switcher's assignments re-read, and the scope re-resolves when the renamed
- * exercise is the active one (the header's name). See the module header.
+ * switcher's assignments re-read; when the renamed exercise is the active one,
+ * its settings block re-reads and the scope re-resolves (the header's name).
+ * See the module header.
  */
 export function useRenameExercise(): UseMutationResult<
   OrgExercise,
@@ -78,11 +94,20 @@ export function useRenameExercise(): UseMutationResult<
   return useMutation<OrgExercise, OrgExerciseError, RenameExerciseInput>({
     mutationFn: ({ exerciseId, name }) => renameOrgExercise(exerciseId, name),
     onSuccess: async (_renamed, { exerciseId }) => {
+      const isActive = exerciseId === activeExerciseId
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ORG_EXERCISES_QUERY_KEY }),
         queryClient.invalidateQueries({ queryKey: STAFF_ASSIGNMENTS_QUERY_KEY }),
+        // The settings save is a full replace: a cached pre-rename block would write
+        // the old name back. Re-read it even while the panel is unmounted.
+        ...(isActive
+          ? [queryClient.invalidateQueries({
+            queryKey: EXERCISE_SETTINGS_QUERY_KEY,
+            refetchType: 'all',
+          })]
+          : []),
       ])
-      if (exerciseId === activeExerciseId) {
+      if (isActive) {
         // The provider handles (and fails closed on) its own refresh failure.
         await refreshScope().catch(() => undefined)
       }
@@ -91,14 +116,28 @@ export function useRenameExercise(): UseMutationResult<
   })
 }
 
-/** Archives one completed exercise (takes its id); the list re-reads on success or a stale row. */
+/**
+ * Archives one completed exercise (takes its id). On success the org list and the
+ * switcher's assignments re-read, and the scope re-resolves when the archived
+ * exercise is the active one (the header's status pill). The list also re-reads
+ * on a stale row. See the module header.
+ */
 export function useArchiveExercise(): UseMutationResult<OrgExercise, OrgExerciseError, string> {
   const queryClient = useQueryClient()
+  const { exerciseId: activeExerciseId } = useExerciseContext()
+  const refreshScope = useExerciseScopeRefresh()
 
   return useMutation<OrgExercise, OrgExerciseError, string>({
     mutationFn: exerciseId => archiveOrgExercise(exerciseId),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ORG_EXERCISES_QUERY_KEY })
+    onSuccess: async (_archived, exerciseId) => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ORG_EXERCISES_QUERY_KEY }),
+        queryClient.invalidateQueries({ queryKey: STAFF_ASSIGNMENTS_QUERY_KEY }),
+      ])
+      if (exerciseId === activeExerciseId) {
+        // The provider handles (and fails closed on) its own refresh failure.
+        await refreshScope().catch(() => undefined)
+      }
     },
     onError: error => invalidateOnStaleRow(queryClient, error),
   })
