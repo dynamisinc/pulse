@@ -204,11 +204,10 @@ own amendment to this section before it reaches the live provider.
 >
 > **Prerequisites before signing** (from the orchestrator's review of #603):
 > 1. #603 (ambient chatter, merged dark) and its hardening follow-up are merged to `main`.
-> 2. The raise to `autonomous` is lead-only in code (Session A's lead gate in A1c, `Enrollment.IsLead`,
->    expected on `main` about Sun 10/18 12:00 UTC). If it is not yet wired when signing, the signer picks one:
->    - **sign on condition:** this authorization takes effect only once A1c's lead gate is merged and the
->      flag commit lands after it; or
->    - **strike "lead-controller only"** below and accept that any assigned controller can raise it.
+> 2. Session A's A1c is merged with the ambient-policy route lead-gated (`LeadControllerRaiseFilter`, raise-only,
+>    `Enrollment.IsLead`). **Hard prerequisite:** Tom decided (10/16) to sign on Sunday after A1c merges, so
+>    there is no conditional or struck-clause option.
+> 3. The flag commit (`generationAmbientAutonomyAuthorized = true` for `uat`) lands only after signing.
 
 **What this would authorize.** On `uat`, with the live provider, ambient background posts (trigger
 `AmbientFloor` only) may publish **without per-post human review** when a controller has set that exercise's
@@ -230,7 +229,7 @@ and test each one:
     community events, and similar), filtered by the exercise's topic allow-list.
   - Personas come only from the exercise's persona allow-list, only this exercise's personas, and only
     the **Resident** and **Helper** types. Agencies, outlets, trolls and bots are never used for ambient
-    posts; the server refuses them.
+    posts; the server refuses them. (Tom's decision, 10/16: "Resident + Helper only".)
   - An empty allow-list means nothing is allowed.
   - Every burst passes the existing `ContentGuard` fiction and injection guard on the tenant-bounded
     provider. A guard failure publishes nothing.
