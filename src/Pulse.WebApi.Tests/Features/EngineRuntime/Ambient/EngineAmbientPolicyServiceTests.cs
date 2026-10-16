@@ -182,6 +182,46 @@ public sealed class EngineAmbientPolicyServiceTests
         harness.Ambient.Get(exerciseId).Mode.Should().Be(AmbientPolicyMode.Off);
     }
 
+    [Theory]
+    [InlineData(KillSwitchMode.FullStop)]
+    [InlineData(KillSwitchMode.DropToSuggest)]
+    public async Task Autonomous_WhileTheKillSwitchIsEngaged_Is400_AndChangesNothing(KillSwitchMode mode)
+    {
+        // Gate-1 L-1: a stopped engine must be restored first; selecting autonomous is rejected, not silently demoted.
+        var exerciseId = Guid.NewGuid();
+        using var harness = new Harness(exerciseId);
+        await harness.Service.EngageKillSwitchAsync(mode, new EngineReviewActionInput("lead-1", "UTC"));
+        var eventsBefore = (await harness.EventsAsync(exerciseId)).Count;
+
+        var result = await harness.Service.SetAmbientPolicyAsync(Request("autonomous"));
+
+        result.Outcome.Should().Be(EngineReviewOutcome.Invalid);
+        result.ValidationError.Should().Be("engine is stopped or cut to Fake — restore it before enabling autonomous ambient");
+        harness.Ambient.Get(exerciseId).Mode.Should().Be(AmbientPolicyMode.Off);
+        (await harness.EventsAsync(exerciseId)).Should().HaveCount(eventsBefore, "a rejected change is not an audited change");
+
+        (await harness.Service.SetAmbientPolicyAsync(Request("review"))).Outcome.Should().Be(
+            EngineReviewOutcome.Ok, "review drafts still wait for a human, so review mode stays selectable");
+    }
+
+    [Fact]
+    public async Task Autonomous_WhileCutToFake_Is400_AndIsAcceptedAgainAfterRestore()
+    {
+        var exerciseId = Guid.NewGuid();
+        using var harness = new Harness(exerciseId);
+        await harness.Service.CutGenerationToFakeAsync(new EngineReviewActionInput("lead-1", "UTC"));
+
+        var rejected = await harness.Service.SetAmbientPolicyAsync(Request("autonomous"));
+
+        rejected.Outcome.Should().Be(EngineReviewOutcome.Invalid);
+        rejected.ValidationError.Should().Contain("restore it before enabling autonomous ambient");
+        harness.Ambient.Get(exerciseId).Mode.Should().Be(AmbientPolicyMode.Off);
+
+        await harness.Service.RestoreGenerationProviderAsync(new EngineReviewActionInput("lead-1", "UTC"));
+        (await harness.Service.SetAmbientPolicyAsync(Request("autonomous"))).Outcome.Should().Be(
+            EngineReviewOutcome.Ok, "once restored, a human may select autonomous again");
+    }
+
     [Fact]
     public async Task TheKillSwitch_LeavesReviewModeAlone()
     {

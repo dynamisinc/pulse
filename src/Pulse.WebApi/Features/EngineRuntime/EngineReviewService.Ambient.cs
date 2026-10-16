@@ -16,6 +16,10 @@ using Pulse.WebApi.Features.EngineRuntime.Telemetry;
 /// </summary>
 public sealed partial class EngineReviewService
 {
+    /// <summary>The 400 message when <c>autonomous</c> is requested while the kill switch or the cut to Fake is active.</summary>
+    internal const string AutonomousWhileSafetyHeldError =
+        "engine is stopped or cut to Fake — restore it before enabling autonomous ambient";
+
     /// <summary>
     /// Sets the exercise's ambient-chatter policy (<c>POST /api/engine/settings/ambient-policy</c>). Controller-role
     /// only (the endpoint group's filter); scope from <see cref="Pulse.WebApi.Data.IExerciseContext"/> only (COR-001).
@@ -24,7 +28,8 @@ public sealed partial class EngineReviewService
     /// </summary>
     /// <remarks>
     /// Rejected with a 400 and NOTHING mutated: an unknown mode; <c>autonomous</c> while the governed
-    /// <c>Generation:Governance:AmbientAutonomyAuthorized</c> flag is false (AC0); a cap above the exercise's
+    /// <c>Generation:Governance:AmbientAutonomyAuthorized</c> flag is false (AC0); <c>autonomous</c> while the kill switch
+    /// (either mode) or the cut to Fake is active for the exercise (Gate-1 L-1); a cap above the exercise's
     /// <c>MaxEnginePostsPerMinute</c>; a topic outside the fixed vocabulary; a persona id that is not a persona of
     /// THIS exercise (a cross-exercise id resolves to nothing through the central query filter, so it is rejected
     /// exactly like an unknown one).
@@ -59,6 +64,15 @@ public sealed partial class EngineReviewService
         if (validation.Draft is not { } draft)
         {
             return EngineSettingsResult.Invalid(validation.Error!);
+        }
+
+        // Gate-1 L-1: autonomous cannot be (re-)selected while a safety lever is holding the engine — the kill switch in
+        // either mode (SafetyClampActive also covers a degraded clamp) or the cut to Fake. Accepting it would only have
+        // the loop demote it again on its next tick; rejecting it keeps "restore first" an explicit human step.
+        if (draft.Mode == AmbientPolicyMode.Autonomous
+            && (_autonomy.GetOrCreate(exerciseId).SafetyClampActive || _providerCut.IsCutToFake(exerciseId)))
+        {
+            return EngineSettingsResult.Invalid(AutonomousWhileSafetyHeldError);
         }
 
         // Personas of THIS exercise only. The read goes through the central exercise filter, so an id from another
