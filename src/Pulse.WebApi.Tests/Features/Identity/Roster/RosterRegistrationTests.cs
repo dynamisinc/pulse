@@ -51,7 +51,7 @@ public sealed class RosterRegistrationTests
     {
         using var host = await RosterHttpHost.StartAsync(services =>
         {
-            services.AddDbContext<PulseDbContext>(options => options.UseSqlServer("Server=nonexistent;Database=pulse;"));
+            services.AddDbContext<PulseDbContext>(options => options.UseSqlServer("Server=nonexistent;Database=pulse;Connect Timeout=1;"));
             services.AddScoped<IExerciseContext, ExerciseContext>();
             services.AddScoped<ICurrentStaffSessionAccessor, NullCurrentStaffSessionAccessor>();
         });
@@ -80,7 +80,7 @@ public sealed class RosterRegistrationTests
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddSingleton(RosterSeed.Configuration());
-        services.AddDbContext<PulseDbContext>(options => options.UseSqlServer("Server=nonexistent;Database=pulse;"));
+        services.AddDbContext<PulseDbContext>(options => options.UseSqlServer("Server=nonexistent;Database=pulse;Connect Timeout=1;"));
         services.AddScoped<IExerciseContext, ExerciseContext>();
         services.AddScoped<ICurrentStaffSessionAccessor, NullCurrentStaffSessionAccessor>();
         Pulse.WebApi.Features.Identity.EasyLogin.EasyLoginFoundationExtensions.AddEasyLoginFoundation(services);

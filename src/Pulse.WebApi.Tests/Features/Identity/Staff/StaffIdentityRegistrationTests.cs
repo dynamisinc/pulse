@@ -39,7 +39,7 @@ public sealed class StaffIdentityRegistrationTests
 
         // Cross-wave collaborators the graph needs at runtime (story 03 / B0), stubbed here.
         services.AddDbContext<PulseDbContext>(options =>
-            options.UseSqlServer("Server=nonexistent;Database=pulse;Trusted_Connection=False;"));
+            options.UseSqlServer("Server=nonexistent;Database=pulse;Trusted_Connection=False;Connect Timeout=1;"));
         services.AddScoped<IExerciseContext, ExerciseContext>();
         services.AddScoped<ISessionIssuer, RecordingSessionIssuer>();
 

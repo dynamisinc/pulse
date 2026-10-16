@@ -90,7 +90,7 @@ public sealed class RuntimePersistenceCompositionTests
         hosted.Should().Contain([typeof(ReactionLoopHost), typeof(EngineReviewTickHost), typeof(InjectBurstRunner), typeof(WhiteNoisePacer)]);
     }
 
-    [Fact(Skip = AwaitingS5)]
+    [Fact]
     public void ProgramCs_RegistersTheRehydrator_BeforeEveryTickingHostedService()
     {
         using var factory = new WiringProbeFactory();
@@ -105,7 +105,7 @@ public sealed class RuntimePersistenceCompositionTests
         }
     }
 
-    [Fact(Skip = AwaitingS5)]
+    [Fact]
     public void ProgramCs_MapsTheRuntimeResetRoute_ExactlyOnce()
     {
         using var factory = new WiringProbeFactory();
@@ -131,7 +131,7 @@ public sealed class RuntimePersistenceCompositionTests
 
         public WiringProbeFactory()
         {
-            Environment.SetEnvironmentVariable(ConnectionStringEnvVar, "Server=nonexistent;Database=pulse;Trusted_Connection=False;");
+            Environment.SetEnvironmentVariable(ConnectionStringEnvVar, "Server=nonexistent;Database=pulse;Trusted_Connection=False;Connect Timeout=1;");
         }
 
         protected override void Dispose(bool disposing)

@@ -52,7 +52,7 @@ public sealed class BootstrapEndpointsHttpTests
                     // never-connecting string — every path asserted here fails closed BEFORE any query.
                     services.AddOpsBootstrap(configuration);
                     services.AddDbContext<PulseDbContext>(options =>
-                        options.UseSqlServer("Server=nonexistent;Database=pulse;Trusted_Connection=False;"));
+                        options.UseSqlServer("Server=nonexistent;Database=pulse;Trusted_Connection=False;Connect Timeout=1;"));
                     services.AddScoped<IExerciseContext, ExerciseContext>();
                 });
                 web.Configure(app =>

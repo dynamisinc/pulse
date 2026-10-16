@@ -74,7 +74,7 @@ public sealed class JoinEndpointsHttpTests
 
                     // Never connects: every asserted path returns first. No host resolution: the scope stays unset.
                     services.AddDbContext<PulseDbContext>(options =>
-                        options.UseSqlServer("Server=nonexistent;Database=pulse;Trusted_Connection=False;"));
+                        options.UseSqlServer("Server=nonexistent;Database=pulse;Trusted_Connection=False;Connect Timeout=1;"));
                     services.AddScoped<IExerciseContext, ExerciseContext>();
                     services.AddScoped<ISessionIssuer, RecordingSessionIssuer>();
                     services.AddEasyLoginFoundation();
