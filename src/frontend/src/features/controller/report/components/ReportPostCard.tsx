@@ -83,6 +83,9 @@ export interface ReportPostCardProps {
 
 export function ReportPostCard({ post }: ReportPostCardProps) {
   const { author } = post
+  const mediaItems = post.media.map((item, index) => (
+    <MediaItem key={`${post.id}-${index}`} item={item} captionId={`alt-${post.id}-${index}`} />
+  ))
   const takenDown = post.takenDownAt !== null
   const participantish = post.source === 'participant' || post.source === 'controller-as-persona'
   return (
@@ -112,9 +115,12 @@ export function ReportPostCard({ post }: ReportPostCardProps) {
           <div className={styles.replyto}>{`Replying to ${post.replyToHandle}`}</div>
         )}
         <p className={styles.text}>{post.text}</p>
-        {post.media.map((item, index) => (
-          <MediaItem key={`${post.id}-${index}`} item={item} captionId={`alt-${post.id}-${index}`} />
-        ))}
+        {post.media.length > 1 ? (
+          // 2 items side by side, 3 or 4 in a 2x2 grid: keeps a post on one Letter page.
+          <div className={styles.mediaGrid} data-testid="report-media-grid">
+            {mediaItems}
+          </div>
+        ) : mediaItems}
         <div className={styles.engagement}>
           <span>{`${post.likes.toLocaleString('en-US')} ${post.likes === 1 ? 'like' : 'likes'}`}</span>
           <span>{`${post.reposts.toLocaleString('en-US')} ${post.reposts === 1 ? 'repost' : 'reposts'}`}</span>

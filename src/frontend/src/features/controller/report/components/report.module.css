@@ -45,6 +45,11 @@
   border-bottom: 1px solid #c8ced6;
 }
 
+.stage:focus-visible {
+  outline: 3px solid #1d4f7a;
+  outline-offset: -3px;
+}
+
 .stage {
   flex: 1 1 auto;
   min-height: 0;
@@ -662,6 +667,25 @@
   margin-right: 6px;
 }
 
+/* More than one attachment: a compact two-column grid so the post fits one Letter page. */
+.mediaGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 12px;
+  max-width: 460px;
+  align-items: start;
+}
+
+.mediaGrid .photo {
+  max-width: none;
+  margin: 0;
+}
+
+.mediaGrid .photo figcaption {
+  font-size: 11px;
+  line-height: 1.35;
+}
+
 .engagement {
   display: flex;
   gap: 16px;
@@ -818,5 +842,23 @@
 
   .photo {
     max-width: 3.6in;
+  }
+
+  /* A four-image post with long alt text must stay well under one page (about 7in). */
+  .mediaGrid {
+    max-width: 4.6in;
+    max-height: 5.6in;
+    overflow: hidden;
+    break-inside: avoid;
+  }
+
+  /* VISUAL clamp only: the full text stays in the DOM and is read via aria-describedby. */
+  .mediaGrid .photo figcaption {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 4;
+    line-clamp: 4;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 }

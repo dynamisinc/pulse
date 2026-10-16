@@ -80,11 +80,44 @@ public sealed class ExerciseReportBuilderTests
     }
 
     [Fact]
-    public void BuildBins_AWildScenarioInstant_IsCappedNotExploded()
+    public void BuildBins_AWildScenarioInstant_WidensTheBins_AndDropsNoPost()
     {
         var far = new ReportPostFact(Guid.NewGuid(), Guid.NewGuid(), "engine", T0.AddYears(5), T0, null, null);
-        var bins = ExerciseReportBuilder.BuildBins([Post(0), far]);
-        bins.Should().HaveCount(ExerciseReportBuilder.MaxBins);
+        var posts = new[] { Post(0), far };
+
+        var minutes = ExerciseReportBuilder.ChartBinMinutes(posts);
+        var bins = ExerciseReportBuilder.BuildBins(posts);
+
+        minutes.Should().BeGreaterThan(1440).And.Subject.Should().Be((minutes / 1440) * 1440, "whole days past one day");
+        bins.Count.Should().BeLessThanOrEqualTo(ExerciseReportBuilder.MaxChartBins);
+        bins.Sum(bin => bin.Total).Should().Be(2);
+    }
+
+    [Fact]
+    public void EarlyOutlier_ThenTheMainRun_KeepsEveryPostInTheChart_AndTheBusiestWindowIsExact()
+    {
+        // One January post, then three September posts in one 5-minute window (Copilot #551).
+        var outlier = new ReportPostFact(Guid.NewGuid(), Guid.NewGuid(), "participant", T0.AddMonths(-8), T0, null, "early");
+        var posts = new[] { outlier, Post(0), Post(1), Post(2, origin: "inject") };
+
+        var bins = ExerciseReportBuilder.BuildBins(posts);
+        var busiest = ExerciseReportBuilder.BusiestFiveMinutes(posts);
+
+        bins.Sum(bin => bin.Total).Should().Be(4, "no post is dropped from the chart");
+        bins.Count.Should().BeLessThanOrEqualTo(ExerciseReportBuilder.MaxChartBins);
+        busiest!.Start.Should().Be(T0);
+        busiest.Total.Should().Be(3);
+        busiest.Scripted.Should().Be(1);
+    }
+
+    [Theory]
+    [InlineData(0, 5)]
+    [InlineData(24 * 60, 5)]
+    [InlineData(25 * 60, 10)]
+    [InlineData(7 * 24 * 60, 60)]
+    public void ChartBinMinutes_StaysAtFiveForADay_ThenWidens(int spanMinutes, int expected)
+    {
+        ExerciseReportBuilder.ChartBinMinutes([Post(0), Post(spanMinutes)]).Should().Be(expected);
     }
 
     [Fact]

@@ -144,7 +144,7 @@ public sealed class ReportSourceCountsDto
 /// <summary>The activity chart.</summary>
 public sealed class ReportActivityDto
 {
-    /// <summary>Always <see cref="ExerciseReportBuilder.BinMinutes"/>.</summary>
+    /// <summary>The chart bin width in minutes: 5 for a normal exercise, wider for a long span (<see cref="ExerciseReportBuilder.ChartBinMinutes"/>).</summary>
     [JsonPropertyName("binMinutes")]
     public required int BinMinutes { get; init; }
 

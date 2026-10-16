@@ -42,7 +42,7 @@ and no participant brand skin. The on-screen toolbar above the sheet uses COBRA 
 - [ ] Each image carries a signed URL and its alt text. Each video carries its **poster** (the post item's poster,
       else the asset's) as a signed URL, its duration and its alt text; a video with no poster has `posterUrl: null`.
       Avatars are signed URLs or `null`.
-- [ ] Activity: 5-minute bins from the first to the last post's scenario minute, each split into participant
+- [ ] Activity: 5-minute bins (wider for a long span, at most 300, never dropping a post) from the first to the last post's scenario minute, each split into participant
       (incl. controller-as-persona), scripted, engine and noise.
 - [ ] Inject responses follow DF-42; an inject with no response has `firstResponseAt: null`. Median response
       minutes covers responded injects only (`null` when none).
@@ -96,7 +96,7 @@ interface ExerciseReport {
     bySource: { participant: number; scripted: number; engine: number; noise: number }
   }
   activity: {
-    binMinutes: 5
+    binMinutes: number   // 5; wider (10 min … whole days) when the span needs more than 300 bins
     bins: { start: string; participant: number; scripted: number; engine: number; noise: number }[]
     injectMarkers: { ref: string; title: string; at: string; binIndex: number }[]
   }

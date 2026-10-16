@@ -12,7 +12,7 @@
  * server's scenario-time strings, sliced, never converted.
  */
 
-import { addMinutes, chartSummary, niceMax, refLabel, timeOf, type SeriesKey } from '../services/reportFormat'
+import { addMinutesToStamp, axisLabel, axisLabelMode, chartSummary, niceMax, refLabel, type SeriesKey } from '../services/reportFormat'
 import type { ExerciseReport } from '../types/report'
 import styles from './report.module.css'
 
@@ -51,7 +51,10 @@ export function ActivityChart({ activity }: ActivityChartProps) {
   const labelIndexes: number[] = []
   for (let index = 0; index < count; index += labelEvery) labelIndexes.push(index)
   const lastBin = bins[count - 1]
-  const endLabel = lastBin === undefined ? '' : addMinutes(timeOf(lastBin.start), binMinutes)
+  const mode = axisLabelMode(activity)
+  const endLabel = lastBin === undefined
+    ? ''
+    : axisLabel(addMinutesToStamp(lastBin.start, binMinutes), mode)
 
   return (
     <>
@@ -110,7 +113,7 @@ export function ActivityChart({ activity }: ActivityChartProps) {
         {labelIndexes.map(index => {
           const bin = bins[index]
           return bin === undefined ? null : (
-            <text key={index} x={X0 + index * barWidth} y={168}>{timeOf(bin.start)}</text>
+            <text key={index} x={X0 + index * barWidth} y={168}>{axisLabel(bin.start, mode)}</text>
           )
         })}
         <text x={X1} y={168} textAnchor="end">{endLabel}</text>

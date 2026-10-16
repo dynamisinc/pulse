@@ -64,14 +64,19 @@ public enum ReportSeries
 /// </summary>
 public static class ExerciseReportBuilder
 {
-    /// <summary>The width of one activity bin, in minutes (the contract's <c>binMinutes</c>).</summary>
+    /// <summary>The finest activity bin, in minutes, and the width of the busiest window.</summary>
     public const int BinMinutes = 5;
 
     /// <summary>
-    /// The most bins one report emits (about 35 days of 5-minute bins). Scenario times are client-supplied this
-    /// phase, so one malformed instant must not allocate millions of empty bins; posts past the cap are not binned.
+    /// The most bins one chart emits. Scenario times are client-supplied this phase, so a long or wild span is drawn
+    /// with wider bins (<see cref="ChartBinMinutes"/>) instead of allocating millions of empty ones; no post is dropped.
     /// </summary>
-    public const int MaxBins = 10_000;
+    public const int MaxChartBins = 300;
+
+    private const int MinutesPerDay = 1440;
+
+    /// <summary>The bin widths tried in order before falling back to whole multiples of a day.</summary>
+    private static readonly int[] BinLadder = [5, 10, 15, 30, 60, 120, 180, 360, 720, MinutesPerDay];
 
     /// <summary>The DF-42 window: a response counts within this many scenario minutes of the inject's first post.</summary>
     public const int ResponseWindowMinutes = 30;
@@ -87,8 +92,6 @@ public static class ExerciseReportBuilder
 
     /// <summary>The report source of a scripted inject post.</summary>
     public const string ScriptedSource = "scripted";
-
-    private static readonly TimeSpan BinWidth = TimeSpan.FromMinutes(BinMinutes);
 
     /// <summary>
     /// Maps a stored <c>Post.Origin</c> to the contract's <c>ReportSource</c>: <c>inject</c> becomes <c>scripted</c>;
@@ -124,19 +127,63 @@ public static class ExerciseReportBuilder
     /// <summary>The 5-minute boundary at or before <paramref name="instant"/> (UTC).</summary>
     /// <param name="instant">Any instant.</param>
     /// <returns>The bin start.</returns>
-    public static DateTimeOffset BinFloor(DateTimeOffset instant)
+    public static DateTimeOffset BinFloor(DateTimeOffset instant) => BinFloor(instant, BinMinutes);
+
+    /// <summary>The start of the <paramref name="binMinutes"/>-wide bin holding <paramref name="instant"/>, in UTC.</summary>
+    /// <param name="instant">Any instant.</param>
+    /// <param name="binMinutes">The bin width in minutes.</param>
+    /// <returns>The bin start.</returns>
+    public static DateTimeOffset BinFloor(DateTimeOffset instant, int binMinutes)
     {
+        var width = TimeSpan.FromMinutes(binMinutes).Ticks;
         var ticks = instant.UtcTicks;
-        return new DateTimeOffset(ticks - (ticks % BinWidth.Ticks), TimeSpan.Zero);
+        return new DateTimeOffset(ticks - (ticks % width), TimeSpan.Zero);
     }
 
     /// <summary>
-    /// Bins every post (all sources, noise included, DF-41) into 5-minute bins from the bin holding the earliest
-    /// post to the bin holding the latest, empty bins included, at most <see cref="MaxBins"/>.
+    /// The chart's bin width: the narrowest of 5, 10, 15, 30 minutes, 1, 2, 3, 6, 12 hours or 1 day that fits the span
+    /// from the earliest to the latest post in <see cref="MaxChartBins"/> bins, else the fewest whole days that do.
+    /// A normal exercise (under a day) stays at 5 minutes.
     /// </summary>
     /// <param name="posts">Every post in the exercise.</param>
+    /// <returns>The width in minutes (<see cref="BinMinutes"/> when there are no posts).</returns>
+    public static int ChartBinMinutes(IReadOnlyCollection<ReportPostFact> posts)
+    {
+        ArgumentNullException.ThrowIfNull(posts);
+        if (posts.Count == 0)
+        {
+            return BinMinutes;
+        }
+
+        var first = posts.Min(post => post.ScenarioTime);
+        var last = posts.Max(post => post.ScenarioTime);
+        foreach (var width in BinLadder)
+        {
+            if (BinCount(first, last, width) <= MaxChartBins)
+            {
+                return width;
+            }
+        }
+
+        const int maxDays = int.MaxValue / MinutesPerDay;
+        var spanDays = (last.UtcTicks - first.UtcTicks) / TimeSpan.TicksPerDay;
+        var days = (int)Math.Min(maxDays, (spanDays / (MaxChartBins - 1)) + 1);
+        while (days < maxDays && BinCount(first, last, days * MinutesPerDay) > MaxChartBins)
+        {
+            days++;
+        }
+
+        return days * MinutesPerDay;
+    }
+
+    /// <summary>
+    /// Bins every post (all sources, noise included, DF-41) from the bin holding the earliest post to the bin holding the
+    /// latest, empty bins included. The width is <see cref="ChartBinMinutes"/> unless given, so every post is counted.
+    /// </summary>
+    /// <param name="posts">Every post in the exercise.</param>
+    /// <param name="binMinutes">The bin width; defaults to <see cref="ChartBinMinutes"/> for these posts.</param>
     /// <returns>The bins in time order; empty when there are no posts.</returns>
-    public static IReadOnlyList<ReportActivityBin> BuildBins(IReadOnlyCollection<ReportPostFact> posts)
+    public static IReadOnlyList<ReportActivityBin> BuildBins(IReadOnlyCollection<ReportPostFact> posts, int? binMinutes = null)
     {
         ArgumentNullException.ThrowIfNull(posts);
         if (posts.Count == 0)
@@ -144,25 +191,22 @@ public static class ExerciseReportBuilder
             return [];
         }
 
-        var start = BinFloor(posts.Min(post => post.ScenarioTime));
-        var last = BinIndex(start, posts.Max(post => post.ScenarioTime));
-        var count = (int)Math.Min(last + 1, MaxBins);
+        var minutes = binMinutes ?? ChartBinMinutes(posts);
+        var width = TimeSpan.FromMinutes(minutes);
+        var start = BinFloor(posts.Min(post => post.ScenarioTime), minutes);
+        var count = (int)(BinIndex(start, posts.Max(post => post.ScenarioTime), minutes) + 1);
 
         var counts = new int[count, 4];
         foreach (var post in posts)
         {
-            var index = BinIndex(start, post.ScenarioTime);
-            if (index < count)
-            {
-                counts[index, (int)Series(post.Origin)]++;
-            }
+            counts[BinIndex(start, post.ScenarioTime, minutes), (int)Series(post.Origin)]++;
         }
 
         var bins = new ReportActivityBin[count];
         for (var i = 0; i < count; i++)
         {
             bins[i] = new ReportActivityBin(
-                start + (BinWidth * i),
+                start + (width * i),
                 counts[i, (int)ReportSeries.Participant],
                 counts[i, (int)ReportSeries.Scripted],
                 counts[i, (int)ReportSeries.Engine],
@@ -176,11 +220,43 @@ public static class ExerciseReportBuilder
     /// <param name="binsStart">The first bin's start.</param>
     /// <param name="instant">The instant to place.</param>
     /// <returns>The zero-based bin index (negative when the instant is before the first bin).</returns>
-    public static long BinIndex(DateTimeOffset binsStart, DateTimeOffset instant)
+    public static long BinIndex(DateTimeOffset binsStart, DateTimeOffset instant) =>
+        BinIndex(binsStart, instant, BinMinutes);
+
+    /// <summary>The index of the <paramref name="binMinutes"/>-wide bin holding <paramref name="instant"/>.</summary>
+    /// <param name="binsStart">The first bin's start.</param>
+    /// <param name="instant">The instant to place.</param>
+    /// <param name="binMinutes">The bin width in minutes.</param>
+    /// <returns>The zero-based bin index (negative when the instant is before the first bin).</returns>
+    public static long BinIndex(DateTimeOffset binsStart, DateTimeOffset instant, int binMinutes)
     {
+        var width = TimeSpan.FromMinutes(binMinutes).Ticks;
         var delta = instant.UtcTicks - binsStart.UtcTicks;
-        return delta >= 0 ? delta / BinWidth.Ticks : -1 - ((-delta - 1) / BinWidth.Ticks);
+        return delta >= 0 ? delta / width : -1 - ((-delta - 1) / width);
     }
+
+    /// <summary>
+    /// The busiest 5-minute window over every post (noise included), counted sparsely so a long span allocates nothing
+    /// per empty window; the earliest on a tie. Independent of the chart's bin width.
+    /// </summary>
+    /// <param name="posts">Every post in the exercise.</param>
+    /// <returns>The busiest window, or <c>null</c> when there are no posts.</returns>
+    public static ReportActivityBin? BusiestFiveMinutes(IEnumerable<ReportPostFact> posts)
+    {
+        ArgumentNullException.ThrowIfNull(posts);
+        return BusiestWindow(posts
+            .GroupBy(post => BinFloor(post.ScenarioTime))
+            .OrderBy(group => group.Key)
+            .Select(group => new ReportActivityBin(
+                group.Key,
+                group.Count(post => Series(post.Origin) == ReportSeries.Participant),
+                group.Count(post => Series(post.Origin) == ReportSeries.Scripted),
+                group.Count(post => Series(post.Origin) == ReportSeries.Engine),
+                group.Count(post => Series(post.Origin) == ReportSeries.Noise))));
+    }
+
+    private static long BinCount(DateTimeOffset first, DateTimeOffset last, int binMinutes) =>
+        BinIndex(BinFloor(first, binMinutes), last, binMinutes) + 1;
 
     /// <summary>The busiest bin (most posts, all sources; the earliest on a tie), or <c>null</c> when every bin is empty.</summary>
     /// <param name="bins">The activity bins.</param>

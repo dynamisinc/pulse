@@ -6,6 +6,10 @@
  */
 import { describe, expect, it } from 'vitest'
 import {
+  addMinutesToStamp,
+  axisLabel,
+  axisLabelMode,
+  binWidthLabel,
   chartSummary,
   formatDuration,
   groupByHalfHour,
@@ -49,5 +53,31 @@ describe('reportFormat', () => {
     const summary = chartSummary(MOCK_REPORT.activity)
     expect(summary).toContain('from 09:00 to 11:00')
     expect(summary).toContain('#4 Lookalike rumor at 09:40')
+  })
+
+  it('words the bin width', () => {
+    expect(binWidthLabel(5)).toBe('5 scenario minutes')
+    expect(binWidthLabel(60)).toBe('scenario hour')
+    expect(binWidthLabel(120)).toBe('2 scenario hours')
+    expect(binWidthLabel(1440)).toBe('scenario day')
+    expect(binWidthLabel(2880)).toBe('2 scenario days')
+  })
+
+  it('labels a multi-day chart with dates', () => {
+    const bins = ['2026-10-15 09:00', '2026-10-15 21:00', '2026-10-16 09:00'].map(start => (
+      { start, participant: 1, scripted: 0, engine: 0, noise: 0 }
+    ))
+    const hourly = { bins, binMinutes: 720, injectMarkers: [] }
+    expect(axisLabelMode(hourly)).toBe('dateTime')
+    expect(axisLabel('2026-10-15 09:00', 'dateTime')).toBe('10-15 09:00')
+    expect(addMinutesToStamp('2026-10-16 21:00', 720)).toBe('2026-10-17 09:00')
+    expect(chartSummary(hourly)).toContain('Posts per 12 scenario hours from 10-15 09:00 to 10-16 21:00')
+
+    const daily = { bins, binMinutes: 1440, injectMarkers: [] }
+    expect(axisLabelMode(daily)).toBe('date')
+    expect(axisLabel('2026-10-15 00:00', 'date')).toBe('10-15')
+    expect(chartSummary(daily)).toContain('Posts per scenario day from 10-15 to 10-17')
+    // A same-day, short chart keeps plain HH:mm.
+    expect(axisLabelMode(MOCK_REPORT.activity)).toBe('time')
   })
 })

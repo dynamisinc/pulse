@@ -262,9 +262,10 @@ public sealed partial class ExerciseReportService
         var urls = await SignAsync(media, avatars.Values, cancellationToken);
 
         // 6. Assemble.
-        var bins = ExerciseReportBuilder.BuildBins(postFacts);
-        var (responses, markers, medianMinutes) = BuildInjects(posts, postFacts, lookups, bins, zone);
-        var busiest = ExerciseReportBuilder.BusiestWindow(bins);
+        var chartBinMinutes = ExerciseReportBuilder.ChartBinMinutes(postFacts);
+        var bins = ExerciseReportBuilder.BuildBins(postFacts, chartBinMinutes);
+        var (responses, markers, medianMinutes) = BuildInjects(posts, postFacts, lookups, bins, chartBinMinutes, zone);
+        var busiest = ExerciseReportBuilder.BusiestFiveMinutes(postFacts);
         var now = _timeProvider.GetUtcNow();
 
         var report = new ExerciseReportDto
@@ -302,7 +303,7 @@ public sealed partial class ExerciseReportService
             },
             Activity = new ReportActivityDto
             {
-                BinMinutes = ExerciseReportBuilder.BinMinutes,
+                BinMinutes = chartBinMinutes,
                 Bins = bins.Select(bin => new ReportActivityBinDto
                 {
                     Start = FormatAt(bin.Start, zone),
@@ -342,6 +343,7 @@ public sealed partial class ExerciseReportService
         List<ReportPostFact> facts,
         ReportLookups lookups,
         IReadOnlyList<ReportActivityBin> bins,
+        int binMinutes,
         TimeZoneInfo zone)
     {
         // An inject's posts are those whose InjectId names the item (InjectPostRequestFactory writes item.Id) AND whose
@@ -410,7 +412,7 @@ public sealed partial class ExerciseReportService
 
             if (binsStart is { } start)
             {
-                var index = ExerciseReportBuilder.BinIndex(start, entry.First);
+                var index = ExerciseReportBuilder.BinIndex(start, entry.First, binMinutes);
                 if (index >= 0 && index < bins.Count)
                 {
                     markers.Add(new ReportInjectMarkerDto
