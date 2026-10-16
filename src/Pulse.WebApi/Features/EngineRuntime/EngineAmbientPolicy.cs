@@ -171,7 +171,23 @@ public sealed class EngineAmbientPolicyRegistry
     /// <param name="exerciseId">The exercise.</param>
     /// <returns>The DTO.</returns>
     public EngineAmbientPolicyDto Snapshot(Guid exerciseId) =>
-        EngineAmbientPolicyDto.From(Get(exerciseId), MaxEnginePostsPerMinute(exerciseId), _autonomyAuthorized);
+        EngineAmbientPolicyDto.From(
+            Get(exerciseId), MaxEnginePostsPerMinute(exerciseId), _autonomyAuthorized, VoiceablePersonaIds(exerciseId));
+
+    /// <summary>
+    /// The persona instance ids the exercise's reaction loop can actually voice — its registered cast
+    /// (<see cref="ReactionLoopRegistration.PersonasByHandle"/>) — or <c>null</c> when the exercise has no loop registered.
+    /// Informational for the settings panel: an allow-listed persona outside this set is never voiced by ambient chatter.
+    /// Only THIS exercise's registration is read (COR-001).
+    /// </summary>
+    /// <param name="exerciseId">The exercise.</param>
+    /// <returns>The voiceable ids, or <c>null</c> with no loop.</returns>
+    public IReadOnlyList<Guid>? VoiceablePersonaIds(Guid exerciseId)
+    {
+        EnsureScoped(exerciseId);
+        var registration = _loops?.Active.FirstOrDefault(loop => loop.ExerciseId == exerciseId);
+        return registration?.PersonasByHandle.Values.Select(persona => persona.InstanceId).Distinct().ToList();
+    }
 
     private static void EnsureScoped(Guid exerciseId)
     {
@@ -233,12 +249,25 @@ public sealed class EngineAmbientPolicyDto
     [JsonPropertyName("autonomousAuthorized")]
     public required bool AutonomousAuthorized { get; init; }
 
+    /// <summary>
+    /// Additive (Gate-1 M-1): the persona instance ids (GUID strings) in the exercise's reaction-loop cast — the only
+    /// personas ambient chatter can voice — or <c>null</c> when no loop is registered for the exercise. The POST still
+    /// accepts any persona of the exercise; the panel labels allow-listed ids outside this set "not in engine cast".
+    /// </summary>
+    [JsonPropertyName("voiceablePersonaIds")]
+    public IReadOnlyList<string>? VoiceablePersonaIds { get; init; }
+
     /// <summary>Projects a policy to the wire.</summary>
     /// <param name="policy">The policy.</param>
     /// <param name="maxPerMinuteLimit">The exercise's global per-minute cap.</param>
     /// <param name="autonomousAuthorized">The governed flag.</param>
+    /// <param name="voiceablePersonaIds">The loop cast's persona ids, or <c>null</c> when no loop is registered.</param>
     /// <returns>The DTO.</returns>
-    public static EngineAmbientPolicyDto From(AmbientTierPolicy policy, int maxPerMinuteLimit, bool autonomousAuthorized)
+    public static EngineAmbientPolicyDto From(
+        AmbientTierPolicy policy,
+        int maxPerMinuteLimit,
+        bool autonomousAuthorized,
+        IReadOnlyList<Guid>? voiceablePersonaIds = null)
     {
         ArgumentNullException.ThrowIfNull(policy);
         return new EngineAmbientPolicyDto
@@ -251,6 +280,7 @@ public sealed class EngineAmbientPolicyDto
             TopicVocabulary = AmbientTopics.Vocabulary,
             MaxPerMinuteLimit = maxPerMinuteLimit,
             AutonomousAuthorized = autonomousAuthorized,
+            VoiceablePersonaIds = voiceablePersonaIds?.Select(id => id.ToString()).ToList(),
         };
     }
 }

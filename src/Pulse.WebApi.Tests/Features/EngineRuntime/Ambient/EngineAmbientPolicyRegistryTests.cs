@@ -2,12 +2,15 @@ namespace Pulse.WebApi.Tests.Features.EngineRuntime.Ambient;
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
+using System.Text.Json;
 using System.Threading.Tasks;
 using FluentAssertions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Pulse.Core.Features.Ambient.Models;
+using Pulse.Core.Features.Generation.Models;
 using Pulse.WebApi.Features.EngineRuntime;
 using Pulse.WebApi.Features.EngineRuntime.Steering;
 using Xunit;
@@ -129,6 +132,59 @@ public sealed class EngineAmbientPolicyRegistryTests
         dto.MaxPerMinuteLimit.Should().Be(60, "the default MaxEnginePostsPerMinute when the exercise has no loop");
         dto.AutonomousAuthorized.Should().BeFalse();
     }
+
+    [Fact]
+    public void TheSettingsSnapshot_ReportsTheLoopCast_AsVoiceablePersonaIds_OnlyForThisExercise()
+    {
+        // Gate-1 M-1: the allow-list may name any persona of the exercise, but ambient can only voice the loop's cast —
+        // the snapshot reports that cast so the panel can label the rest "not in engine cast".
+        var exerciseA = Guid.NewGuid();
+        var exerciseB = Guid.NewGuid();
+        var castA = new[] { Guid.NewGuid(), Guid.NewGuid() };
+        var loops = new ReactionLoopRegistry();
+        loops.Register(Registration(exerciseA, castA));
+        loops.Register(Registration(exerciseB, [Guid.NewGuid()]));
+        var registry = new EngineAmbientPolicyRegistry(loops: loops);
+
+        var dto = registry.Snapshot(exerciseA);
+
+        dto.VoiceablePersonaIds.Should().BeEquivalentTo(
+            castA.Select(id => id.ToString()), "exactly exercise A's loop cast — never another exercise's (COR-001)");
+
+        using var json = JsonDocument.Parse(JsonSerializer.Serialize(dto));
+        json.RootElement.GetProperty("voiceablePersonaIds").EnumerateArray().Select(e => e.GetString())
+            .Should().BeEquivalentTo(castA.Select(id => id.ToString()), "the frozen wire name is voiceablePersonaIds");
+    }
+
+    [Fact]
+    public void TheSettingsSnapshot_VoiceablePersonaIds_IsNull_WhenNoLoopIsRegistered()
+    {
+        var loops = new ReactionLoopRegistry();
+        loops.Register(Registration(Guid.NewGuid(), [Guid.NewGuid()]));
+
+        new EngineAmbientPolicyRegistry(loops: loops).Snapshot(Guid.NewGuid()).VoiceablePersonaIds
+            .Should().BeNull("no loop for this exercise means no engine cast to report — not an empty cast");
+        new EngineAmbientPolicyRegistry().Snapshot(Guid.NewGuid()).VoiceablePersonaIds.Should().BeNull();
+
+        using var json = JsonDocument.Parse(JsonSerializer.Serialize(new EngineAmbientPolicyRegistry().Snapshot(Guid.NewGuid())));
+        json.RootElement.GetProperty("voiceablePersonaIds").ValueKind.Should().Be(JsonValueKind.Null);
+    }
+
+    private static ReactionLoopRegistration Registration(Guid exerciseId, IReadOnlyList<Guid> cast) => new()
+    {
+        ExerciseId = exerciseId,
+        ExerciseBrief = "brief",
+        TimeZone = "UTC",
+        ScenarioStart = DateTimeOffset.UnixEpoch,
+        TimeZoneInfo = TimeZoneInfo.Utc,
+        Storylines = [],
+        PersonasByHandle = cast
+            .Select((id, i) => new EnginePersona(
+                id, new PersonaDossier { Handle = $"@p{i}", DisplayName = $"P{i}", Type = PersonaType.Resident }))
+            .ToDictionary(persona => persona.Dossier.Handle, StringComparer.OrdinalIgnoreCase),
+        Autonomy = new EngineAutonomyRegistry().GetOrCreate(exerciseId),
+        ControllerDeskId = Guid.NewGuid(),
+    };
 
     // ---- the interim lifecycle gate (AC5) ---------------------------------------------------
 
