@@ -11,7 +11,8 @@ using Pulse.WebApi.Features.Media;
 using Pulse.WebApi.Features.Social.Engagement;
 
 /// <summary>
-/// The printable exercise report (demo-feedback story 29): <c>GET /api/staff/exports/report?includeNoise=false</c>.
+/// The printable exercise report (demo-feedback stories 29 and 30):
+/// <c>GET /api/staff/exports/report?sources=participant,scripted,engine&amp;from=&amp;to=&amp;includeNoise=false</c>.
 /// STAFF world. Minimal-API extension methods; the orchestrator wires <see cref="AddExerciseReport"/> and
 /// <see cref="MapExerciseReport"/> into <c>Program.cs</c>.
 /// </summary>
@@ -23,9 +24,11 @@ using Pulse.WebApi.Features.Social.Engagement;
 /// first, so every response carries <c>Cache-Control: no-store</c>.
 /// </para>
 /// <para>
-/// <b>Responses.</b> 200 with the <see cref="ExerciseReportDto"/> JSON. 401 for an unresolved scope (fail closed),
-/// 404 when the scope has no exercise row, 413 with a readable reason when more than
-/// <see cref="ExerciseReportService.MaxListedPosts"/> posts would be listed.
+/// <b>Responses.</b> 200 with the <see cref="ExerciseReportDto"/> JSON (a record of more than
+/// <see cref="ExerciseReportService.MaxListedPosts"/> matching posts is withheld, not refused). 400 with a readable
+/// reason for an invalid filter (<see cref="ExerciseReportFilter.TryParse"/>). 401 for an unresolved scope (fail
+/// closed), 404 when the scope has no exercise row, 413 with a readable reason when the exercise has more than
+/// <see cref="ExerciseReportService.MaxExercisePosts"/> posts.
 /// </para>
 /// <para>
 /// <b>Required <c>Program.cs</c> wiring (orchestrator-owned):</b> <c>builder.Services.AddExerciseReport();</c> and
@@ -78,15 +81,29 @@ public static class ExerciseReportEndpoints
 
     /// <summary>Builds the report. The filters have already admitted the caller.</summary>
     /// <param name="service">The report service.</param>
-    /// <param name="includeNoise">Whether white-noise posts are listed (default <c>false</c>, DF-41).</param>
+    /// <param name="sources">The record's sources, a comma list (default <c>participant,scripted,engine</c>).</param>
+    /// <param name="from">The record's inclusive window start, <c>yyyy-MM-dd HH:mm</c> in the exercise zone.</param>
+    /// <param name="to">The record's inclusive window end, <c>yyyy-MM-dd HH:mm</c> in the exercise zone.</param>
+    /// <param name="includeNoise">The story 29 alias: <c>true</c> adds <c>noise</c> to the sources (DF-41).</param>
     /// <param name="cancellationToken">The request-aborted token.</param>
-    /// <returns>200, 401, 404 or 413.</returns>
+    /// <returns>200, 400, 401, 404 or 413.</returns>
     private static async Task<IResult> GetReportAsync(
         ExerciseReportService service,
+        string? sources,
+        string? from,
+        string? to,
         bool? includeNoise,
         CancellationToken cancellationToken)
     {
-        var result = await service.BuildAsync(includeNoise ?? false, cancellationToken);
+        if (!ExerciseReportFilter.TryParse(sources, includeNoise, from, to, out var filter, out var error))
+        {
+            return Results.Problem(
+                detail: error,
+                statusCode: StatusCodes.Status400BadRequest,
+                title: "Invalid report filter");
+        }
+
+        var result = await service.BuildAsync(filter, cancellationToken);
         return result.Outcome switch
         {
             ExerciseReportOutcome.Ok when result.Report is { } report => Results.Ok(report),

@@ -29,7 +29,7 @@ public enum ExerciseReportOutcome
     /// <summary>The resolved scope has no exercise row; the endpoint returns 404.</summary>
     NotFound,
 
-    /// <summary>More than <see cref="ExerciseReportService.MaxListedPosts"/> posts would be listed; the endpoint returns 413.</summary>
+    /// <summary>The exercise has more than <see cref="ExerciseReportService.MaxExercisePosts"/> posts; the endpoint returns 413.</summary>
     TooManyPosts,
 }
 
@@ -88,7 +88,14 @@ public sealed class ExerciseReportResult
 /// </para>
 /// <para>
 /// <b>Noise (DF-41).</b> Noise posts are always read for the metrics and the chart; their text and media are read only
-/// when they are listed. The 413 limit counts the <em>listed</em> posts.
+/// when noise is a selected source.
+/// </para>
+/// <para>
+/// <b>Filters and limits (story 30, DF-43/DF-44).</b> The summary, activity, inject responses and lookalikes are built
+/// over every post whatever the <see cref="ExerciseReportFilter"/> is; the filter narrows only the post record. When
+/// more than <see cref="MaxListedPosts"/> posts match, the record is withheld (empty, never truncated) and the rest of
+/// the report is still built. Only an exercise of more than <see cref="MaxExercisePosts"/> posts is refused (413),
+/// by a count before any row is read.
 /// </para>
 /// <para>
 /// <b>Media.</b> Images carry a signed URL; videos carry their poster (the item's override, else the asset's) as a
@@ -102,19 +109,25 @@ public sealed class ExerciseReportResult
 /// </para>
 /// <para>
 /// <b>Telemetry (XC-004).</b> One <c>export.report.viewed</c> event per built report, actor the staff human, payload
-/// <c>{ posts }</c> (the listed post count) only.
+/// <c>{ posts }</c> (the listed post count, 0 when the record is withheld) only.
 /// </para>
 /// </remarks>
 public sealed partial class ExerciseReportService
 {
-    /// <summary>The most posts one report lists; above it the request is refused with 413.</summary>
+    /// <summary>The most posts one report's record lists; above it the record is withheld (DF-43).</summary>
     public const int MaxListedPosts = 5_000;
+
+    /// <summary>The most posts in the exercise one report reads; above it the request is refused with 413 (DF-43).</summary>
+    public const int MaxExercisePosts = 50_000;
 
     /// <summary>The XC-004 event type.</summary>
     public const string ViewedEventType = "export.report.viewed";
 
-    /// <summary>Ids per <c>Contains</c> read (EF Core 10 expands a parameter collection into scalar parameters).</summary>
-    private const int IdChunk = 500;
+    /// <summary>
+    /// Ids per <c>Contains</c> read (EF Core 10 expands a parameter collection into scalar parameters, and SQL Server
+    /// accepts at most 2,100 per command). The default for <see cref="ExerciseReportLimits.IdChunk"/>.
+    /// </summary>
+    public const int IdChunk = 500;
 
     private const string SystemActorKind = "system";
     private const string SystemChannel = "system";
@@ -130,6 +143,7 @@ public sealed partial class ExerciseReportService
     private readonly TimeProvider _timeProvider;
     private readonly IExerciseClock? _exerciseClock;
     private readonly ILogger<ExerciseReportService> _logger;
+    private readonly ExerciseReportLimits _limits;
 
     /// <summary>Creates the service.</summary>
     /// <param name="dbContext">The request's persistence context.</param>
@@ -141,6 +155,7 @@ public sealed partial class ExerciseReportService
     /// <param name="timeProvider">The server clock (prepared-at, shown in the exercise zone, and telemetry wall clock).</param>
     /// <param name="exerciseClock">The live scenario clock, when the host runs one (telemetry scenario time).</param>
     /// <param name="logger">Diagnostics for a failed signing batch; optional.</param>
+    /// <param name="limits">The size limits; <see cref="ExerciseReportLimits.Default"/> unless a host registers others.</param>
     public ExerciseReportService(
         PulseDbContext dbContext,
         IExerciseContext exerciseContext,
@@ -150,7 +165,8 @@ public sealed partial class ExerciseReportService
         IMediaUrlSigner mediaUrlSigner,
         TimeProvider timeProvider,
         IExerciseClock? exerciseClock = null,
-        ILogger<ExerciseReportService>? logger = null)
+        ILogger<ExerciseReportService>? logger = null,
+        ExerciseReportLimits? limits = null)
     {
         ArgumentNullException.ThrowIfNull(dbContext);
         ArgumentNullException.ThrowIfNull(exerciseContext);
@@ -169,14 +185,18 @@ public sealed partial class ExerciseReportService
         _timeProvider = timeProvider;
         _exerciseClock = exerciseClock;
         _logger = logger ?? NullLogger<ExerciseReportService>.Instance;
+        _limits = limits ?? ExerciseReportLimits.Default;
+        ArgumentOutOfRangeException.ThrowIfLessThan(_limits.IdChunk, 1, nameof(limits));
     }
 
     /// <summary>Builds the report for the resolved exercise and records one viewed event.</summary>
-    /// <param name="includeNoise">Whether white-noise posts are listed (they are always counted, DF-41).</param>
+    /// <param name="filter">The post record's filters (noise is always counted in the metrics, DF-41).</param>
     /// <param name="cancellationToken">The request-aborted token.</param>
     /// <returns>The result the endpoint maps to a status.</returns>
-    public async Task<ExerciseReportResult> BuildAsync(bool includeNoise, CancellationToken cancellationToken = default)
+    public async Task<ExerciseReportResult> BuildAsync(ExerciseReportFilter filter, CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(filter);
+
         var scope = _exerciseContext.CurrentExerciseId;
         if (scope is null || scope.Value == Guid.Empty)
         {
@@ -190,18 +210,15 @@ public sealed partial class ExerciseReportService
             return ExerciseReportResult.NotFound();
         }
 
-        // 1. Refuse an oversize list before reading any rows.
-        var listedCount = await _dbContext.Posts
-            .AsNoTracking()
-            .CountAsync(post => includeNoise || post.Origin != PostExportLabels.NoiseOrigin, cancellationToken);
-        if (listedCount > MaxListedPosts)
+        // 1. Refuse an oversize exercise before reading any rows.
+        var includeNoise = filter.IncludesNoise;
+        var exerciseCount = await _dbContext.Posts.AsNoTracking().CountAsync(cancellationToken);
+        if (exerciseCount > _limits.MaxExercisePosts)
         {
-            return ExerciseReportResult.TooManyPosts(
-                $"This exercise has {listedCount.ToString("N0", CultureInfo.InvariantCulture)} posts to list, more than "
-                + "the printable report can hold (5,000). Use the spreadsheet export instead.");
+            return ExerciseReportResult.TooManyPosts(TooManyPostsReason(exerciseCount));
         }
 
-        // 2. Every post (noise included, for the metrics); text only for the posts that are listed.
+        // 2. Every post (noise included, for the metrics); noise text only when noise is a selected source.
         var posts = await _dbContext.Posts
             .AsNoTracking()
             .OrderBy(post => post.CreatedScenarioTime)
@@ -226,24 +243,25 @@ public sealed partial class ExerciseReportService
                 post.LastEditedScenarioTime))
             .ToListAsync(cancellationToken);
 
-        var listed = posts.Where(post => includeNoise || !ExerciseReportBuilder.IsNoise(post.Origin)).ToList();
-
-        // Posts keep arriving between the count and this read, so the limit is checked again on what was read.
-        if (listed.Count > MaxListedPosts)
+        // Posts keep arriving between the count and this read, so the ceiling is checked again on what was read.
+        if (posts.Count > _limits.MaxExercisePosts)
         {
-            return ExerciseReportResult.TooManyPosts(
-                $"This exercise has {listed.Count.ToString("N0", CultureInfo.InvariantCulture)} posts to list, more than "
-                + "the printable report can hold (5,000). Use the spreadsheet export instead.");
+            return ExerciseReportResult.TooManyPosts(TooManyPostsReason(posts.Count));
         }
+
+        // 3. The record: the filtered posts, withheld whole (never truncated) above the limit (DF-43).
+        var zone = ExerciseDay.ResolveTimeZone(facts.TimeZone);
+        var matching = posts.Where(post => filter.Matches(post.Origin, post.CreatedScenarioTime, zone)).ToList();
+        var withheld = matching.Count > _limits.MaxListedPosts;
+        List<PostRow> listed = withheld ? [] : matching;
 
         var postFacts = posts.ConvertAll(post => new ReportPostFact(
             post.Id, post.AuthorPersonaId, post.Origin, post.CreatedScenarioTime, post.CreatedWallClock, post.ParentPostId, post.Body));
 
-        // 3. The small per-exercise lookups.
+        // 4. The small per-exercise lookups.
         var lookups = await ReadLookupsAsync(exerciseId, facts.OrganizationId, cancellationToken);
-        var zone = ExerciseDay.ResolveTimeZone(facts.TimeZone);
 
-        // 4. Lookalikes: decided before engagement, so only the paired personas' posts need counts beyond the list.
+        // 5. Lookalikes: decided before engagement, so only the paired personas' posts need counts beyond the list.
         var authorIds = posts.Select(post => post.AuthorPersonaId).ToHashSet();
         var pairs = ExerciseReportBuilder.PairLookalikes(
             lookups.Personas.Values
@@ -257,13 +275,13 @@ public sealed partial class ExerciseReportService
             .ToArray();
         var engagement = await ReadEngagementAsync(engagementIds, cancellationToken);
 
-        // 5. Media for the listed posts, avatars for their authors, signed in one batch.
-        var media = await ReadMediaAsync(includeNoise, cancellationToken);
+        // 6. Media for the listed posts, avatars for their authors, signed in one batch.
+        var media = await ReadMediaAsync(listed.Select(post => post.Id).ToHashSet(), includeNoise, cancellationToken);
         var listedAuthorIds = listed.Select(post => post.AuthorPersonaId).ToHashSet();
         var avatars = await ReadAvatarsAsync(listedAuthorIds, cancellationToken);
         var urls = await SignAsync(media, avatars.Values, cancellationToken);
 
-        // 6. Assemble.
+        // 7. Assemble.
         var chartBinMinutes = ExerciseReportBuilder.ChartBinMinutes(postFacts);
         var bins = ExerciseReportBuilder.BuildBins(postFacts, chartBinMinutes);
         var (responses, markers, medianMinutes) = BuildInjects(posts, postFacts, lookups, bins, chartBinMinutes, zone);
@@ -323,16 +341,29 @@ public sealed partial class ExerciseReportService
                 Lookalike = ToAccount(pair.Lookalike.Id, posts, lookups, engagement),
             }).ToArray(),
             Posts = BuildPosts(posts, listed, lookups, engagement, media, avatars, urls, zone),
-            OmittedNoiseCount = posts.Count - listed.Count,
+            OmittedNoiseCount = includeNoise ? 0 : posts.Count(post => ExerciseReportBuilder.IsNoise(post.Origin)),
+            PostRecord = new ReportPostRecordDto
+            {
+                Matching = matching.Count,
+                Limit = _limits.MaxListedPosts,
+                Withheld = withheld,
+                Sources = filter.Sources,
+                From = ExerciseReportFilter.Format(filter.From),
+                To = ExerciseReportFilter.Format(filter.To),
+            },
         };
 
-        // 7. One XC-004 event, stamped from the same clock read as preparedAt.
+        // 8. One XC-004 event, stamped from the same clock read as preparedAt.
         var staff = await _currentStaffSession.GetCurrentStaffSessionAsync(cancellationToken);
         _dbContext.TelemetryEvents.Add(BuildViewedEvent(exerciseId, facts, staff, lookups, listed.Count, now));
         await _dbContext.SaveChangesAsync(cancellationToken);
 
         return ExerciseReportResult.Ok(report);
     }
+
+    private string TooManyPostsReason(int count) =>
+        $"This exercise has {count.ToString("N0", CultureInfo.InvariantCulture)} posts, more than one report can read "
+        + $"({_limits.MaxExercisePosts.ToString("N0", CultureInfo.InvariantCulture)}). Nothing was built.";
 
     private static string FormatAt(DateTimeOffset instant, TimeZoneInfo zone) =>
         PostExportLabels.ScenarioTime(instant, zone);
@@ -623,7 +654,7 @@ public sealed partial class ExerciseReportService
     private async Task<IReadOnlyDictionary<Guid, PostEngagement>> ReadEngagementAsync(Guid[] ids, CancellationToken cancellationToken)
     {
         var all = new Dictionary<Guid, PostEngagement>();
-        foreach (var chunk in ids.Chunk(IdChunk))
+        foreach (var chunk in ids.Chunk(_limits.IdChunk))
         {
             var page = await _engagementReader.GetAsync(chunk, viewerPersonaId: null, cancellationToken);
             foreach (var (id, value) in page)
@@ -636,31 +667,51 @@ public sealed partial class ExerciseReportService
     }
 
     /// <summary>
-    /// ONE query: the listed posts' media items with their assets and effective posters (the item's override wins,
-    /// DP-3), joined through the scoped sets, so no item, asset or poster from another exercise can join.
+    /// The listed posts' media items with their assets and effective posters (the item's override wins, DP-3), read in
+    /// batches of <see cref="ExerciseReportLimits.IdChunk"/> listed post ids: each batch is one query restricted in SQL
+    /// to its ids, so no other post's media is loaded and no command passes SQL Server's parameter limit. Every join
+    /// runs through the scoped sets, so no item, asset or poster from another exercise can join. Each post falls in
+    /// exactly one batch, and slot order is applied per post when the record is built. Nothing is read when nothing
+    /// is listed (an empty or withheld record).
     /// </summary>
-    private async Task<ILookup<Guid, MediaRow>> ReadMediaAsync(bool includeNoise, CancellationToken cancellationToken)
+    private async Task<ILookup<Guid, MediaRow>> ReadMediaAsync(
+        HashSet<Guid> listedIds, bool includeNoise, CancellationToken cancellationToken)
     {
-        var rows = await (
-                from item in _dbContext.PostMediaItems.AsNoTracking()
-                join post in _dbContext.Posts.AsNoTracking() on item.PostId equals post.Id
-                where includeNoise || post.Origin != PostExportLabels.NoiseOrigin
-                join asset in _dbContext.MediaAssets.AsNoTracking() on item.MediaAssetId equals asset.Id
-                join poster in _dbContext.MediaAssets.AsNoTracking()
-                    on item.PosterMediaAssetId ?? asset.PosterMediaAssetId equals (Guid?)poster.Id into posters
-                from poster in posters.DefaultIfEmpty()
-                select new { item.PostId, item.Order, item.Alt, Asset = asset, Poster = poster })
-            .ToListAsync(cancellationToken);
+        if (listedIds.Count == 0)
+        {
+            return Array.Empty<MediaRow>().ToLookup(row => row.PostId);
+        }
 
-        return rows
-            .Select(row => new MediaRow(row.PostId, row.Order, row.Alt, row.Asset, row.Poster))
-            .ToLookup(row => row.PostId);
+        var rows = new List<MediaRow>();
+        foreach (var chunk in listedIds.Chunk(_limits.IdChunk))
+        {
+            var page = await (
+                    from item in _dbContext.PostMediaItems.AsNoTracking()
+                    where chunk.Contains(item.PostId)
+                    join post in _dbContext.Posts.AsNoTracking() on item.PostId equals post.Id
+                    where includeNoise || post.Origin != PostExportLabels.NoiseOrigin
+                    join asset in _dbContext.MediaAssets.AsNoTracking() on item.MediaAssetId equals asset.Id
+                    join poster in _dbContext.MediaAssets.AsNoTracking()
+                        on item.PosterMediaAssetId ?? asset.PosterMediaAssetId equals (Guid?)poster.Id into posters
+                    from poster in posters.DefaultIfEmpty()
+                    select new { item.PostId, item.Order, item.Alt, Asset = asset, Poster = poster })
+                .ToListAsync(cancellationToken);
+
+            rows.AddRange(page.Select(row => new MediaRow(row.PostId, row.Order, row.Alt, row.Asset, row.Poster)));
+        }
+
+        return rows.ToLookup(row => row.PostId);
     }
 
     /// <summary>The avatar asset per listed author, read through the scoped sets.</summary>
     private async Task<IReadOnlyDictionary<Guid, MediaAsset>> ReadAvatarsAsync(
         HashSet<Guid> authorIds, CancellationToken cancellationToken)
     {
+        if (authorIds.Count == 0)
+        {
+            return new Dictionary<Guid, MediaAsset>();
+        }
+
         var rows = await (
                 from persona in _dbContext.Personas.AsNoTracking()
                 where persona.AvatarMediaId != null

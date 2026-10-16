@@ -126,7 +126,11 @@ export function ReportSheet({ report }: ReportSheetProps) {
 
         {report.lookalikes.length > 0 && <LookalikeSection pairs={report.lookalikes} />}
 
-        <PostRecord posts={report.posts} omittedNoiseCount={report.omittedNoiseCount} />
+        <PostRecord
+          posts={report.posts}
+          omittedNoiseCount={report.omittedNoiseCount}
+          postRecord={report.postRecord}
+        />
 
         <footer className={styles.foot}>
           <span>{`Pulse · ${exercise.name} · Exercise media record`}</span>

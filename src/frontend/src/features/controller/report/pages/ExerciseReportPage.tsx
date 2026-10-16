@@ -5,8 +5,8 @@
  * Print / Save as PDF). Route `/staff/console/report` (staff; the same controller-only guard as
  * the console, declared in `staffRouteRegistry.tsx`).
  *
- * TWO WORLDS, ONE PAGE. The screen-only TOOLBAR is COBRA (staff chrome: the "Include background
- * noise" checkbox and "Print / Save as PDF"). The SHEET is a neutral printed document with its
+ * TWO WORLDS, ONE PAGE. The screen-only TOOLBAR is COBRA (staff chrome: the post-record
+ * filters and "Print / Save as PDF"). The SHEET is a neutral printed document with its
  * own CSS module: no COBRA, no participant skin.
  *
  * HOW IT PRINTS (mirrors the participant card sheet). The page renders in a portal beside
@@ -16,22 +16,28 @@
  * (an `@page` rule cannot be scoped, so it is never in the stylesheet), and (3) makes the rest of
  * the body `inert` so keyboard and screen readers stay on the report. All undone on unmount.
  *
- * DATA. `useExerciseReport(includeNoise)`: ticking the checkbox refetches with
- * `includeNoise=true` (metrics are identical either way; only the post list grows). States:
- * loading, error (401/404/413 and the rest as readable sentences), empty exercise, report.
+ * DATA. `useExerciseReport(filters)` (story 30): the source checkboxes and the From / To window
+ * refetch with `sources`/`from`/`to` (the summary is identical whatever they are; only the post
+ * record changes). States: loading, error (readable sentences), empty exercise, report. A 400
+ * (bad filter) shows the server's reason beside the filters, keeps the last good sheet on
+ * screen, and disables Print; the sheet's own filter statement says what it contains.
  */
 
-import { useEffect, useId, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
-import { Box, Checkbox, CircularProgress, FormControlLabel, ThemeProvider } from '@mui/material'
+import { Box, CircularProgress, ThemeProvider } from '@mui/material'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faArrowLeft, faCircleExclamation, faPrint } from '@fortawesome/free-solid-svg-icons'
 import { cobraTheme } from '@/theme/cobraTheme'
 import { CobraPrimaryButton, CobraSecondaryButton } from '@/theme/styledComponents'
+import { ReportFilterBar } from '../components/ReportFilterBar'
 import { ReportSheet } from '../components/ReportSheet'
 import styles from '../components/report.module.css'
 import { useExerciseReport } from '../hooks/useExerciseReport'
+import { DEFAULT_REPORT_FILTERS } from '../services/reportFilters'
+import { ReportError } from '../services/reportService'
+import type { ExerciseReport, ReportFilters } from '../types/report'
 import { REPORT_PAGE_RULE, REPORT_PAGE_STYLE_ATTR } from '../services/reportFormat'
 
 /** The global class the print rules in `report.module.css` key on (`:global(.reportOpen)`). */
@@ -66,13 +72,18 @@ function usePrintScoping(overlayRef: React.RefObject<HTMLDivElement | null>): vo
 }
 
 export function ExerciseReportPage() {
-  const [includeNoise, setIncludeNoise] = useState(false)
+  const [filters, setFilters] = useState<ReportFilters>(DEFAULT_REPORT_FILTERS)
   const overlayRef = useRef<HTMLDivElement>(null)
-  const noiseId = useId()
   usePrintScoping(overlayRef)
-  const query = useExerciseReport(includeNoise)
+  const query = useExerciseReport(filters)
   const navigate = useNavigate()
-  const report = query.data
+  // Keep the last good sheet visible when a filter change fails (a 400 clears `query.data`).
+  const [lastGood, setLastGood] = useState<ExerciseReport | undefined>(undefined)
+  if (query.data !== undefined && query.data !== lastGood) setLastGood(query.data)
+  const report = query.data ?? lastGood
+  const badFilter =
+    query.isError && query.error instanceof ReportError && query.error.status === 400
+  const serverError = badFilter && report !== undefined ? query.error.message : null
 
   return createPortal(
     <ThemeProvider theme={cobraTheme}>
@@ -91,17 +102,11 @@ export function ExerciseReportPage() {
           >
             Back to console
           </CobraSecondaryButton>
-          <FormControlLabel
-            control={
-              <Checkbox
-                id={noiseId}
-                size="small"
-                checked={includeNoise}
-                onChange={event => setIncludeNoise(event.target.checked)}
-              />
-            }
-            label="Include background noise"
-            sx={{ m: 0 }}
+          <ReportFilterBar
+            filters={filters}
+            onChange={setFilters}
+            windowStart={report?.exercise.scenarioStart ?? null}
+            serverError={serverError}
           />
           <Box sx={{ flex: 1 }} />
           {query.isFetching && report !== undefined && (
@@ -147,7 +152,7 @@ export function ExerciseReportPage() {
               </p>
             </div>
           )}
-          {report !== undefined && query.isError && (
+          {report !== undefined && query.isError && !badFilter && (
             <div className={styles.state} role="alert">
               <p>{query.error instanceof Error ? query.error.message : 'The refresh failed.'}</p>
             </div>

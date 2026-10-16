@@ -2,7 +2,8 @@
  * features/controller/report/pages/ExerciseReportPage.test.tsx
  * ---------------------------------------------------------------------------
  * Story 29 (printable exercise report), the page: every section renders from a fixture, the noise
- * checkbox refetches with includeNoise=true, every media item prints its alt text, a poster-less
+ * source checkbox refetches with noise in `sources` (story 30 filter tests are at the end),
+ * every media item prints its alt text, a poster-less
  * video is a plain tile, the edited tag appears only when editCount > 0, the lookalike section is
  * omitted when empty, the print button calls window.print, and the `@page` rule exists only while
  * the page is mounted. Error states read as sentences.
@@ -15,9 +16,10 @@ import { AxiosError, AxiosHeaders, type AxiosResponse, type InternalAxiosRequest
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { api } from '@/core/services/api'
 import { RESPONSE_METHOD_NOTE } from '../components/InjectResponseTable'
+import { DEFAULT_REPORT_FILTERS } from '../services/reportFilters'
 import { REPORT_PAGE_STYLE_ATTR } from '../services/reportFormat'
-import { MOCK_REPORT, mockReportFor } from '../services/reportMock'
-import type { ExerciseReport } from '../types/report'
+import { MOCK_REPORT, filtersFromParams, mockReportFor } from '../services/reportMock'
+import type { ExerciseReport, ReportFilters } from '../types/report'
 import { ExerciseReportPage } from './ExerciseReportPage'
 
 afterEach(() => {
@@ -34,10 +36,13 @@ function ok(data: ExerciseReport): AxiosResponse<ExerciseReport> {
   }
 }
 
-function stubApi(responder: (includeNoise: boolean) => ExerciseReport = mockReportFor) {
+function stubApi(responder: (filters: ReportFilters) => ExerciseReport = mockReportFor) {
   return vi.spyOn(api, 'get').mockImplementation((_url, config) =>
-    Promise.resolve(ok(responder(config?.params?.includeNoise === true))))
+    Promise.resolve(ok(responder(filtersFromParams(config?.params)))))
 }
+
+const NOISE_LABEL = 'Background noise'
+const PRINT = 'Print / Save as PDF'
 
 function renderPage() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -87,21 +92,21 @@ describe('ExerciseReportPage', () => {
     expect(screen.getByText('All times are scenario time')).toBeInTheDocument()
   })
 
-  it('refetches with includeNoise=true when the checkbox is ticked', async () => {
+  it('refetches with noise in sources when Background noise is ticked', async () => {
     const get = stubApi()
     const user = userEvent.setup()
     renderPage()
     await screen.findByTestId('report-sheet')
     expect(get).toHaveBeenLastCalledWith(
       expect.any(String),
-      expect.objectContaining({ params: { includeNoise: false } }),
+      expect.objectContaining({ params: { sources: 'participant,scripted,engine' } }),
     )
 
-    await user.click(screen.getByRole('checkbox', { name: 'Include background noise' }))
+    await user.click(screen.getByRole('checkbox', { name: NOISE_LABEL }))
 
     await waitFor(() => expect(get).toHaveBeenLastCalledWith(
       expect.any(String),
-      expect.objectContaining({ params: { includeNoise: true } }),
+      expect.objectContaining({ params: { sources: 'participant,scripted,engine,noise' } }),
     ))
     await waitFor(() =>
       expect(screen.getAllByTestId('report-post')).toHaveLength(MOCK_REPORT.posts.length + 2))
@@ -282,7 +287,7 @@ describe('ExerciseReportPage', () => {
   it('disables Print while the previous report is shown for a refetch', async () => {
     let release: (value: AxiosResponse<ExerciseReport>) => void = () => undefined
     vi.spyOn(api, 'get').mockImplementation((_url, config) =>
-      config?.params?.includeNoise === true
+      filtersFromParams(config?.params).sources.includes('noise')
         ? new Promise(resolve => { release = resolve })
         : Promise.resolve(ok(MOCK_REPORT)))
     const user = userEvent.setup()
@@ -290,10 +295,10 @@ describe('ExerciseReportPage', () => {
     await screen.findByTestId('report-sheet')
     expect(screen.getByRole('button', { name: 'Print / Save as PDF' })).toBeEnabled()
 
-    await user.click(screen.getByRole('checkbox', { name: 'Include background noise' }))
+    await user.click(screen.getByRole('checkbox', { name: NOISE_LABEL }))
     expect(screen.getByRole('button', { name: 'Print / Save as PDF' })).toBeDisabled()
 
-    release(ok(mockReportFor(true)))
+    release(ok(mockReportFor({ ...DEFAULT_REPORT_FILTERS, sources: ['participant', 'scripted', 'engine', 'noise'] })))
     await waitFor(() =>
       expect(screen.getByRole('button', { name: 'Print / Save as PDF' })).toBeEnabled())
   })
@@ -305,12 +310,12 @@ describe('ExerciseReportPage', () => {
       calls += 1
       // The third call is the refresh of the cached includeNoise=false result: hold it open.
       if (calls === 3) return new Promise(resolve => { release = resolve })
-      return Promise.resolve(ok(mockReportFor(config?.params?.includeNoise === true)))
+      return Promise.resolve(ok(mockReportFor(filtersFromParams(config?.params))))
     })
     const user = userEvent.setup()
     renderPage()
     await screen.findByTestId('report-sheet')
-    const checkbox = screen.getByRole('checkbox', { name: 'Include background noise' })
+    const checkbox = screen.getByRole('checkbox', { name: NOISE_LABEL })
 
     await user.click(checkbox)
     await waitFor(() =>
@@ -321,7 +326,7 @@ describe('ExerciseReportPage', () => {
     await user.click(checkbox)
     expect(screen.getByRole('button', { name: 'Print / Save as PDF' })).toBeDisabled()
 
-    release(ok(mockReportFor(false)))
+    release(ok(mockReportFor()))
     await waitFor(() =>
       expect(screen.getByRole('button', { name: 'Print / Save as PDF' })).toBeEnabled())
   })
@@ -363,5 +368,245 @@ describe('ExerciseReportPage', () => {
     await screen.findByTestId('report-sheet')
     // The fixture's posts each carry at most one item.
     expect(screen.queryByTestId('report-media-grid')).not.toBeInTheDocument()
+  })
+
+  describe('story 30 filters', () => {
+    const lastParams = (get: ReturnType<typeof stubApi>) =>
+      (get.mock.lastCall?.[1] as { params: Record<string, string> }).params
+
+    it('has four labelled source checkboxes with the first three checked', async () => {
+      stubApi()
+      renderPage()
+      await screen.findByTestId('report-sheet')
+      for (const name of ['Participant', 'Scripted inject', 'Engine']) {
+        expect(screen.getByRole('checkbox', { name })).toBeChecked()
+      }
+      expect(screen.getByRole('checkbox', { name: NOISE_LABEL })).not.toBeChecked()
+    })
+
+    it('refetches with the right sources when one is unticked', async () => {
+      const get = stubApi()
+      const user = userEvent.setup()
+      renderPage()
+      await screen.findByTestId('report-sheet')
+      await user.click(screen.getByRole('checkbox', { name: 'Engine' }))
+      await waitFor(() => expect(lastParams(get)).toEqual({ sources: 'participant,scripted' }))
+      await waitFor(() => expect(screen.getByTestId('filter-statement'))
+        .toHaveTextContent('Showing participant and scripted inject posts for the whole exercise'))
+    })
+
+    it('does not let the last source be unchecked', async () => {
+      const get = stubApi()
+      const user = userEvent.setup()
+      renderPage()
+      await screen.findByTestId('report-sheet')
+      await user.click(screen.getByRole('checkbox', { name: 'Scripted inject' }))
+      await user.click(screen.getByRole('checkbox', { name: 'Engine' }))
+      await waitFor(() => expect(lastParams(get)).toEqual({ sources: 'participant' }))
+      const last = screen.getByRole('checkbox', { name: 'Participant' })
+      expect(last).toBeDisabled()
+      expect(last).toBeChecked()
+    })
+
+    it('applies a valid window on blur, sends it as written, and Clear removes it', async () => {
+      const get = stubApi()
+      const user = userEvent.setup()
+      renderPage()
+      await screen.findByTestId('report-sheet')
+      const calls = get.mock.calls.length
+
+      const from = screen.getByRole('textbox', { name: 'From (scenario time)' })
+      await user.type(from, '2026-10-15 09:00')
+      expect(get.mock.calls.length).toBe(calls) // typing alone never refetches
+      await user.tab()
+      await waitFor(() => expect(lastParams(get)).toEqual({
+        sources: 'participant,scripted,engine',
+        from: '2026-10-15 09:00',
+      }))
+
+      const to = screen.getByRole('textbox', { name: 'To (scenario time)' })
+      await user.type(to, '2026-10-15 10:00{Enter}')
+      await waitFor(() => expect(lastParams(get)).toEqual({
+        sources: 'participant,scripted,engine',
+        from: '2026-10-15 09:00',
+        to: '2026-10-15 10:00',
+      }))
+      await waitFor(() => expect(screen.getByTestId('filter-statement')).toHaveTextContent(
+        'Showing participant, scripted inject and engine posts, 10-15 09:00 – 10-15 10:00'))
+      await waitFor(() => expect(screen.getAllByTestId('report-post')).toHaveLength(5))
+
+      await user.click(screen.getByRole('button', { name: 'Clear' }))
+      await waitFor(() => expect(lastParams(get)).toEqual({ sources: 'participant,scripted,engine' }))
+      expect(from).toHaveValue('')
+    })
+
+    it.each([
+      ['not a time', /yyyy-MM-dd HH:mm/],
+      ['2026-10-15 25:00', /yyyy-MM-dd HH:mm/],
+      ['2026-10-15 08:00', /2026-10-15 09:00 or later/],
+    ])('rejects %s with an inline message and does not refetch', async (text, message) => {
+      const get = stubApi()
+      const user = userEvent.setup()
+      renderPage()
+      await screen.findByTestId('report-sheet')
+      const calls = get.mock.calls.length
+
+      await user.type(screen.getByRole('textbox', { name: 'From (scenario time)' }), text)
+      await user.tab()
+
+      const from = screen.getByRole('textbox', { name: 'From (scenario time)' })
+      expect(from).toHaveAccessibleDescription(message)
+      expect(from).toBeInvalid()
+      expect(get.mock.calls.length).toBe(calls)
+    })
+
+    it('rejects a From after the applied To', async () => {
+      const get = stubApi()
+      const user = userEvent.setup()
+      renderPage()
+      await screen.findByTestId('report-sheet')
+      await user.type(screen.getByRole('textbox', { name: 'To (scenario time)' }), '2026-10-15 09:30{Enter}')
+      await waitFor(() => expect(lastParams(get).to).toBe('2026-10-15 09:30'))
+      const calls = get.mock.calls.length
+      await user.type(screen.getByRole('textbox', { name: 'From (scenario time)' }), '2026-10-15 10:00')
+      await user.tab()
+      expect(screen.getByText('From must not be after To.')).toBeInTheDocument()
+      expect(get.mock.calls.length).toBe(calls)
+    })
+
+    it('allows To after the snapshot scenarioEnd (a live exercise keeps growing)', async () => {
+      const get = stubApi()
+      const user = userEvent.setup()
+      renderPage()
+      await screen.findByTestId('report-sheet')
+      await user.type(screen.getByRole('textbox', { name: 'To (scenario time)' }), '2026-10-15 11:30{Enter}')
+      await waitFor(() => expect(lastParams(get).to).toBe('2026-10-15 11:30'))
+    })
+
+    it('clears a stale From-after-To error and applies From when To moves later', async () => {
+      const get = stubApi()
+      const user = userEvent.setup()
+      renderPage()
+      await screen.findByTestId('report-sheet')
+      const from = screen.getByRole('textbox', { name: 'From (scenario time)' })
+      const to = screen.getByRole('textbox', { name: 'To (scenario time)' })
+      await user.type(to, '2026-10-15 09:30{Enter}')
+      await waitFor(() => expect(lastParams(get).to).toBe('2026-10-15 09:30'))
+      await user.type(from, '2026-10-15 10:00')
+      await user.tab()
+      expect(from).toHaveAccessibleDescription('From must not be after To.')
+
+      await user.clear(to)
+      await user.type(to, '2026-10-15 10:30{Enter}')
+
+      await waitFor(() => expect(lastParams(get)).toEqual({
+        sources: 'participant,scripted,engine',
+        from: '2026-10-15 10:00',
+        to: '2026-10-15 10:30',
+      }))
+      expect(from).not.toHaveAccessibleDescription('From must not be after To.')
+    })
+
+    it.each([
+      ['To', 'From', '2026-10-15 09:30', '2026-10-15 10:00', '2026-10-15 11:00'],
+      ['From', 'To', '2026-10-15 11:30', '2026-10-15 10:00', '2026-10-15 11:00'],
+    ])('never sends an inverted window when committing %s while %s is invalid',
+      async (committing, other, value, appliedFrom, appliedTo) => {
+        const get = stubApi()
+        const user = userEvent.setup()
+        renderPage()
+        await screen.findByTestId('report-sheet')
+        const fieldOf = (name: string) =>
+          screen.getByRole('textbox', { name: `${name} (scenario time)` })
+        await user.type(fieldOf('From'), `${appliedFrom}{Enter}`)
+        await user.type(fieldOf('To'), `${appliedTo}{Enter}`)
+        await waitFor(() => expect(lastParams(get).to).toBe(appliedTo))
+        const calls = get.mock.calls.length
+
+        await user.clear(fieldOf(other))
+        await user.type(fieldOf(other), 'garbage')
+        await user.clear(fieldOf(committing))
+        await user.type(fieldOf(committing), `${value}{Enter}`)
+
+        expect(get.mock.calls.length).toBe(calls)
+        expect(fieldOf(committing)).toHaveAccessibleDescription('From must not be after To.')
+        expect(lastParams(get)).toEqual({
+          sources: 'participant,scripted,engine',
+          from: appliedFrom,
+          to: appliedTo,
+        })
+      })
+
+    it('describes the disabled last source and keeps filters before Print in tab order', async () => {
+      stubApi()
+      const user = userEvent.setup()
+      renderPage()
+      await screen.findByTestId('report-sheet')
+      await user.click(screen.getByRole('checkbox', { name: 'Scripted inject' }))
+      await user.click(screen.getByRole('checkbox', { name: 'Engine' }))
+      await waitFor(() => expect(screen.getByRole('checkbox', { name: 'Participant' })).toBeDisabled())
+      expect(screen.getByRole('checkbox', { name: 'Participant' }))
+        .toHaveAccessibleDescription('At least one source is required.')
+      const order = [
+        screen.getByRole('button', { name: 'Back to console' }),
+        screen.getByRole('textbox', { name: 'From (scenario time)' }),
+        screen.getByRole('button', { name: PRINT }),
+      ]
+      expect(order[0]?.compareDocumentPosition(order[1] as Node))
+        .toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+      expect(order[1]?.compareDocumentPosition(order[2] as Node))
+        .toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+    })
+
+    it('states the whole-exercise default above the record', async () => {
+      stubApi()
+      renderPage()
+      expect(await screen.findByTestId('filter-statement')).toHaveTextContent(
+        'Showing participant, scripted inject and engine posts for the whole exercise',
+      )
+    })
+
+    it('withholds the record but still renders summary and charts, with Print enabled', async () => {
+      stubApi(() => ({
+        ...MOCK_REPORT,
+        posts: [],
+        postRecord: { ...MOCK_REPORT.postRecord, matching: 5983, withheld: true },
+      }))
+      renderPage()
+      expect(await screen.findByTestId('record-withheld')).toHaveTextContent(
+        '5,983 posts match. The printable record holds up to 5,000. Narrow the sources or the time window above.',
+      )
+      expect(screen.queryAllByTestId('report-post')).toHaveLength(0)
+      expect(screen.queryByText('No posts to list.')).not.toBeInTheDocument()
+      expect(screen.getByRole('heading', { name: 'At a glance' })).toBeInTheDocument()
+      expect(screen.getByTestId('activity-chart')).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: PRINT })).toBeEnabled()
+    })
+
+    it('shows a 400 detail near the filters, keeps the last good sheet, and disables Print', async () => {
+      const config = { headers: new AxiosHeaders() } as InternalAxiosRequestConfig
+      let calls = 0
+      vi.spyOn(api, 'get').mockImplementation(() => {
+        calls += 1
+        if (calls === 1) return Promise.resolve(ok(MOCK_REPORT))
+        return Promise.reject(new AxiosError('bad', 'ERR_BAD_REQUEST', config, null, {
+          data: { detail: 'The time window ends before it starts.' },
+          status: 400,
+          statusText: '',
+          headers: new AxiosHeaders(),
+          config,
+        }))
+      })
+      const user = userEvent.setup()
+      renderPage()
+      await screen.findByTestId('report-sheet')
+
+      await user.click(screen.getByRole('checkbox', { name: 'Engine' }))
+
+      const alert = await screen.findByTestId('filter-server-error')
+      expect(alert).toHaveTextContent('The time window ends before it starts.')
+      expect(screen.getByTestId('report-sheet')).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: PRINT })).toBeDisabled()
+    })
   })
 })
