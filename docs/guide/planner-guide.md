@@ -31,6 +31,11 @@ refuses it and nothing changes.
 | Turn Swamped mode off, lower autonomy, use the engine switch | No | No | Yes | No |
 | Read the console, feeds and report | Only through an enrollment | Yes | Yes | Yes |
 
+Pulse hides the controls your role cannot use, or shows them disabled with the reason in words. For
+example, a controller who is not the lead sees a raise control greyed out with "Only the lead controller can
+raise this". Planners keep the run-sheet **Add**, **Edit**, **Delete**, reorder and **Import from Excel**
+controls and persona editing; they do not get **Fire next**, **Hold** or **Skip**.
+
 An org admin has no powers inside an exercise just for being an org admin. To work in an exercise, an
 org admin needs an enrollment on it, and then has exactly that role's powers.
 
@@ -64,6 +69,9 @@ state](getting-started.md#exercise-states)), **Hostname** and **Created** date.
 
 ### Creating an exercise
 
+Only an organization administrator sees the create form. Planners and controllers do not see it, because Pulse
+would refuse the request. Ask your organization administrator to create the exercise for you.
+
 1. Open **Exercise Management**.
 2. In **Exercise name**, enter the name your team will use, for example "Harbor Freeze Tabletop".
    **Players can see this name**: it appears on the player sign-in page, on printed sign-in cards and
@@ -85,7 +93,8 @@ choose it in the exercise switcher above the staff screen. See
 > has no **Actions** column, use **Exercise Settings > Identity & schedule > Exercise name** to rename
 > the exercise you are signed in to.
 
-1. Open **Exercise Management**.
+1. Open **Exercise Management**. (A controller does not see **Rename** or **Archive**; an organization
+   administrator and a planner do.)
 2. In the exercise's row, select **Rename**.
 3. Enter the new **Exercise name** and select **Rename**.
 

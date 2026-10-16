@@ -46,7 +46,39 @@ route and per lifecycle transition and proves it with a route x role matrix test
 
 ### Orchestrator review fold (2026-10-16, M-003 / L-002)
 - [ ] `tier-policy`: a PUT is a **raise** if any tier moves towards more autonomy. A mixed PUT needs the lead (test).
-- [ ] UI (A1 frontend): while swamped mode is on, a **non-lead controller** sees an **OFF-only** swamped-mode control (the shipped `useSwampedMode` / engine-review-cockpit/03 hides it from non-leads today). Turning it on stays lead-only. Component test for lead, non-lead and planner.
+- [x] UI (A1 frontend): while swamped mode is on, a **non-lead controller** sees an **OFF-only** swamped-mode control (the shipped `useSwampedMode` / engine-review-cockpit/03 hides it from non-leads today). Turning it on stays lead-only. Component test for lead, non-lead and planner.
+
+### Frontend (wave A1c, 2026-10-16): the UI hides or disables what the server now refuses
+The client mirrors the matrix in one place, `src/frontend/src/core/auth/rolePermissions.ts` (`can()` and
+`usePermissions()`, reading `Session.role` and the server's `Session.isLead`; never inferred, fail closed). This is
+convenience only: the server is the authority.
+- [x] **Role gating per the matrix.** Create exercise is org admin only; org-row Rename and Archive are hidden for a
+      controller; settings, chrome and practice mode are planner only (a read-only notice in words for anyone else);
+      StartEx and EndEx are controller only; the roster, day-word and view-only-code surface is planner + controller
+      (a text notice for an evaluator); inject create/update/delete/reorder/import and persona edit stay visible to
+      planners (fire, hold and skip stay controller); staff post and pin are planner + controller in `build`, controller
+      only otherwise. Tests: [`rolePermissions.test.tsx`](../../../src/frontend/src/core/auth/rolePermissions.test.tsx)
+      (every action x every role), [`roleGating.test.tsx`](../../../src/frontend/src/features/exerciseLifecycleAdmin/roleGating.test.tsx),
+      [`ExerciseSettingsPage.roleGating.test.tsx`](../../../src/frontend/src/features/planner/pages/ExerciseSettingsPage.roleGating.test.tsx),
+      [`ParticipantAdminSurface.roleGating.test.tsx`](../../../src/frontend/src/features/participantAdmin/ParticipantAdminSurface.roleGating.test.tsx),
+      [`useCanControl.roles.test.tsx`](../../../src/frontend/src/features/controller/access/useCanControl.roles.test.tsx),
+      [`RunSheetRow.test.tsx`](../../../src/frontend/src/features/controller/runSheet/RunSheetRow.test.tsx) (planner case),
+      [`ExerciseLifecycleControl.test.tsx`](../../../src/frontend/src/features/controller/lifecycle/ExerciseLifecycleControl.test.tsx) (planner/evaluator refused).
+- [x] **Lead gate, raise-only (Option A).** `SwampedModeToggle` renders its switch only for `canControl && isLead`; a
+      non-lead controller gets "Turn swamped mode off" (icon + text) behind a confirmation; autonomy raise, tier-policy
+      raise (ambient < standard < auto), the generation-provider Restore, the kill switch's step back to Live and the
+      degraded Restore are disabled for a non-lead with the visible text "Only the lead controller can raise this";
+      lowering stays open to every controller. `isLead` is the session's; the mock `useControllerIdentity().isLead` is
+      gone. Tests: [`SwampedModeToggle.test.tsx`](../../../src/frontend/src/features/controller/engine/components/SwampedModeToggle.test.tsx),
+      [`EngineSettingsPanel.leadGate.test.tsx`](../../../src/frontend/src/features/controller/engine/components/EngineSettingsPanel.leadGate.test.tsx),
+      [`EngineControlBar.leadGate.test.tsx`](../../../src/frontend/src/features/controller/engine/console/EngineControlBar.leadGate.test.tsx),
+      [`useSwampedMode.test.tsx`](../../../src/frontend/src/features/controller/engine/hooks/useSwampedMode.test.tsx).
+- [ ] *Not built (no UI exists yet):* stage/unstage buttons, view-only code rotate/revoke screen, "set lead controller"
+      control, staff follow button, unarchive. They are in the helper's table so they are gated the day they land.
+- [ ] *Gap:* the org-row Archive button is enabled only for a completed exercise; the server also allows archive from
+      `build` once `FirstLiveAt` is set. The org-exercise DTO carries no such flag yet.
+- [ ] *Gap:* `/staff/console` admits controller and evaluator only (`staffRouteRegistry.tsx`, orchestrator-owned), so a
+      planner cannot reach the build-time post/pin/inject surfaces in the console; the component gates are ready.
 
 ## Out of Scope
 The new transitions themselves (reset/reopen/delete/unstage bodies: exercise-build-golive 07-08); the lifecycle write gate for participants (A5 #379).

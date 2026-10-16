@@ -43,7 +43,7 @@ beforeEach(() => {
   access.canControl = true
 })
 
-/** Renders inside the COBRA theme, as the console does (the OFF-only control uses Cobra buttons). */
+/** Renders inside the COBRA theme, as the console does (the OFF-only control is Cobra). */
 function render(ui: React.ReactElement): RenderResult {
   return renderPlain(<ThemeProvider theme={cobraTheme}>{ui}</ThemeProvider>)
 }
