@@ -51,12 +51,14 @@ import {
   faSquare,
   faSquareCheck,
   faTriangleExclamation,
+  faHourglassHalf,
 } from '@fortawesome/free-solid-svg-icons'
 import type { IconDefinition } from '@fortawesome/fontawesome-svg-core'
 import { Avatar, VerifiedMark, type AvatarPersona } from '@/features/social'
 import { usePersonas } from '@/features/personas'
 import type { Persona } from '@/features/personas'
 import { DraftDisposition, type EngineReviewItem } from '../models/reviewContracts'
+import { USE_MOCK_DATA } from '@/core/config/mockData'
 import { useReviewQueue } from '../hooks/useReviewQueue'
 // D5 dark operator-chrome tokens (README §"Design Tokens"). Staff-only.
 import { consoleChrome as chrome } from '../../consoleChrome'
@@ -98,7 +100,7 @@ function formatMSS(ms: number): string {
   return `${minutes}:${seconds.toString().padStart(2, '0')}`
 }
 
-type CountdownKind = 'holds' | 'review' | 'held' | 'resolved'
+type CountdownKind = 'holds' | 'review' | 'held' | 'resolved' | 'resolving'
 
 interface CountdownState {
   readonly kind: CountdownKind
@@ -122,7 +124,12 @@ function countdownStateOf(item: EngineReviewItem, nowMs: number): CountdownState
       const countdown = item.countdown
       if (!countdown) return { kind: 'review', label: 'needs review' }
       const remaining = countdown.remainingMs(nowMs)
-      if (remaining <= 0) return { kind: 'review', label: 'needs review' }
+      if (remaining <= 0) {
+        // LIVE: the SERVER resolves the expiry (hold or auto-send); until its queue
+        // update lands the card shows a neutral "resolving…", never a client guess.
+        if (!USE_MOCK_DATA) return { kind: 'resolving', label: 'resolving…' }
+        return { kind: 'review', label: 'needs review' }
+      }
       const total = countdown.countdownMinutes * 60_000
       const fraction = total > 0 ? Math.min(1, Math.max(0, remaining / total)) : 0
       return { kind: 'holds', label: `holds in ${formatMSS(remaining)}`, fraction }
@@ -585,6 +592,9 @@ function CountdownRow({ countdown, isHeld }: CountdownRowProps) {
     <Box data-testid="countdown-state" data-countdown-kind={countdown.kind} sx={{ mt: 0.75 }}>
       <Stack direction="row" sx={{ alignItems: 'center', gap: 0.5 }}>
         {isHeld && <FontAwesomeIcon icon={faTriangleExclamation} color={chrome.red} aria-hidden="true" />}
+        {countdown.kind === 'resolving' && (
+          <FontAwesomeIcon icon={faHourglassHalf} color={chrome.inkFaint} aria-hidden="true" />
+        )}
         <Typography component="span" sx={{ fontSize: 11, fontWeight: 700, color: tone }}>
           {countdown.label}
         </Typography>

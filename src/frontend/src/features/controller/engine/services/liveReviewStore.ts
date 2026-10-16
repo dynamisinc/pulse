@@ -381,6 +381,7 @@ export const liveReviewStore = {
   subscribe,
   ensureStarted,
   removeItemOptimistically,
+  refetch,
   resetForTests,
 }
 

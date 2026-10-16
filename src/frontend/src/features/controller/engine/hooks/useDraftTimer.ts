@@ -79,6 +79,14 @@ export interface UseDraftTimerOptions {
   readonly now?: () => Date
   /** Poll interval (ms) on which the scenario clock is re-read. Defaults to 1000. */
   readonly tickMs?: number
+  /**
+   * DISPLAY-ONLY (LIVE mode). The SERVER (`EngineReviewService.EvaluateAutoHoldAsync`) is the
+   * authority on an expiry: it holds or auto-sends, and emits its own `engine.reviewed`. With
+   * this set the hook still ticks and reports the countdown, but takes NO terminal action: no
+   * `engine.reviewed`, no `onResolve`, and the label reads neutral `'resolving…'` at expiry
+   * (never a predicted "held"), because the client's cached settings can be stale. Defaults false.
+   */
+  readonly displayOnly?: boolean
 }
 
 /** What the timer surfaces to the review card (see the module header). */
@@ -145,7 +153,11 @@ function buildLabel(
   disposition: TimeoutDisposition,
   hasExpired: boolean,
   remainingMs: number,
+  displayOnly: boolean,
 ): string {
+  if (displayOnly) {
+    return hasExpired ? 'resolving…' : `holds in ${formatMmSs(remainingMs)}`
+  }
   if (disposition === TimeoutDisposition.Hold && hasExpired) {
     return 'timer expired — held for you'
   }
@@ -170,7 +182,12 @@ export function useDraftTimer(
   options: UseDraftTimerOptions = {},
   providerCutToFake = false,
 ): UseDraftTimerResult {
-  const { onResolve, now: nowFn = scenarioNow, tickMs = DEFAULT_TICK_MS } = options
+  const {
+    onResolve,
+    now: nowFn = scenarioNow,
+    tickMs = DEFAULT_TICK_MS,
+    displayOnly = false,
+  } = options
 
   const { actingHumanId } = useControllerIdentity()
   const { timeZone } = useExerciseContext()
@@ -191,16 +208,13 @@ export function useDraftTimer(
 
   // The LIVE disposition + display reads — delegated to the pure safety policy;
   // the precedence is NEVER re-derived here.
-  const disposition = decide(
-    countdown,
-    effective,
-    currentScenarioMinute,
-    swampedMode,
-    providerCutToFake,
-  )
+  // Display-only (live): never PREDICT the terminal outcome from cached settings.
+  const disposition = displayOnly
+    ? TimeoutDisposition.AwaitDecision
+    : decide(countdown, effective, currentScenarioMinute, swampedMode, providerCutToFake)
   const hasExpired = countdown.hasExpired(currentScenarioMinute)
   const minutesRemaining = countdown.minutesRemaining(currentScenarioMinute)
-  const label = buildLabel(disposition, hasExpired, countdown.remainingMs(nowMs))
+  const label = buildLabel(disposition, hasExpired, countdown.remainingMs(nowMs), displayOnly)
 
   // Guards the one-shot terminal transition: once a given countdown's expiry has
   // resolved, never re-emit/re-resolve on subsequent ticks (even if `onResolve`'s
@@ -208,6 +222,7 @@ export function useDraftTimer(
   // so a fresh countdown (re-roll) can resolve anew.
   const resolvedKeyRef = useRef<string | null>(null)
   useEffect(() => {
+    if (displayOnly) return // live: the server owns the terminal action
     const evaluation = evaluate(
       countdown,
       effective,
@@ -234,6 +249,7 @@ export function useDraftTimer(
     actingHumanId,
     scenarioTimeIso,
     onResolve,
+    displayOnly,
   ])
 
   return { disposition, minutesRemaining, hasExpired, label }

@@ -33,13 +33,21 @@
  * precedence in `autoHoldPolicy`/`useDraftTimer` doing its job with the real
  * `effective` value passed in.
  *
+ * LIVE MODE (`!USE_MOCK_DATA`) - DISPLAY-ONLY. Everything above describes MOCK mode. Live,
+ * the server (`EngineReviewService.EvaluateAutoHoldAsync`) decides and performs the expiry
+ * outcome and emits its own `engine.reviewed`; this driver takes NO terminal action (no
+ * telemetry, no `autoPublish`, no Held flip) and instead refetches the review queue when the
+ * countdown reaches 0 (then every few seconds until the item resolves), so the item's terminal
+ * state always comes from the server queue. Until then the card shows "resolving…".
+ *
  * `ctx` intentionally omits `scenarioTime` — `autoPublish` needs the SCENARIO
  * instant at the moment of resolution (COR-053), not whenever this component
  * happened to render, so it is read fresh (`scenarioNow()`) inside the
  * `onResolve` callback, exactly as `useReviewQueue`'s `buildContext` does.
  */
 
-import { useCallback } from 'react'
+import { useCallback, useEffect } from 'react'
+import { USE_MOCK_DATA } from '@/core/config/mockData'
 import { scenarioNow } from '@/core/clock'
 import {
   DraftDisposition,
@@ -49,6 +57,7 @@ import {
   type EngineReviewItem,
 } from '../models/reviewContracts'
 import { autoPublish, type ReviewActionContext } from '../services/reviewActions'
+import { liveReviewStore } from '../services/liveReviewStore'
 import { reviewStore } from '../services/reviewStore'
 import { useDraftTimer } from '../hooks/useDraftTimer'
 
@@ -83,6 +92,9 @@ export interface DraftTimerDriverProps {
   readonly ctx: DraftTimerDriverContext
 }
 
+/** How often (ms) to re-pull the live queue while an expired item awaits the server's verdict. */
+const EXPIRY_REFETCH_MS = 3000
+
 /**
  * Drives one `CountingDown` item's countdown via `useDraftTimer`, wiring its
  * terminal outcome to the review store / publish pipeline. Renders nothing.
@@ -108,7 +120,26 @@ export function DraftTimerDriver({
     [item, ctx],
   )
 
-  useDraftTimer(countdown, effective, swampedMode, { onResolve }, providerCutToFake)
+  // LIVE: the server is the authority (it holds / auto-sends and emits its own
+  // `engine.reviewed`), so the client timer is DISPLAY-ONLY - no telemetry, no publish, no
+  // local state flip. Acting on cached settings (`providerCutToFake`) could contradict it.
+  const displayOnly = !USE_MOCK_DATA
+  const { hasExpired } = useDraftTimer(
+    countdown,
+    effective,
+    swampedMode,
+    { onResolve, displayOnly },
+    providerCutToFake,
+  )
+
+  // LIVE: once the countdown hits 0, pull the server's queue promptly, and keep re-pulling
+  // until the item's terminal state arrives (this driver unmounts when it leaves CountingDown).
+  useEffect(() => {
+    if (!displayOnly || !hasExpired) return
+    void liveReviewStore.refetch()
+    const id = setInterval(() => void liveReviewStore.refetch(), EXPIRY_REFETCH_MS)
+    return () => clearInterval(id)
+  }, [displayOnly, hasExpired])
 
   return null
 }
