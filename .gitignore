@@ -44,3 +44,10 @@ Thumbs.db
 *.ntvs*
 *.njsproj
 *.sw?
+
+# ---- Load test (post-demo-feedback/01) ----
+# Join URLs are personal sign-in credentials: New-LoadTestExercise.ps1 writes them under scripts/uat/out/ (ignored
+# above); this also catches a copy saved anywhere else. Harness results and the local harness config stay local too.
+loadtest-join-urls-*.csv
+loadtest-results/
+tools/Pulse.LoadTest/loadtest.json

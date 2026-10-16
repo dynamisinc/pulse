@@ -17,6 +17,7 @@ surface lives in. Link to the epic section and the feature.md.>
 - [ ] Accessibility (NFR-001): WCAG 2.1 AA; severity/alert never color-only; live-region on feeds.
 - [ ] Content security (NFR-004): free-text/upload paths sanitized; a stored script can't execute elsewhere.
 - [ ] No-enterprise-look (D0 §2): participant surface uses the brand skin; no COBRA, no default MUI look.
+- [ ] User guide (docs/guide/): a change to a staff workflow or a participant-visible behavior updates the matching guide page (and screenshot list in tools/guide-screenshots) in the same PR, or states "no guide impact".
 -->
 
 ## Out of Scope

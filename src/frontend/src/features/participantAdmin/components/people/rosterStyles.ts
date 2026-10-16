@@ -4,18 +4,20 @@
  * Shared style constants for the staff roster screen (feature: easy-login,
  * story 10). COBRA world — theme tokens and `CobraStyles` where they exist.
  *
- * ## Why MUTED_TEXT is not `text.secondary`
- * The COBRA `text.secondary` (#848482) is 3.7:1 on white, under the WCAG 2.1 AA
- * 4.5:1 floor for normal text (NFR-001). Secondary lines on this screen carry
- * real information (issued times, "no persona"), so they use a darker grey
- * (#595957, 7:1). Status colours are theme tokens that clear 4.5:1 on white
- * (`success.main`, `notifications.errorText`, `notifications.warningText`,
- * `info.main`) — and colour is never the only cue: every status is icon + text.
+ * ## MUTED_TEXT is the COBRA muted-text token
+ * Secondary lines on this screen carry real information (issued times, "no
+ * persona"), so they must clear the WCAG 2.1 AA 4.5:1 floor (NFR-001). They use
+ * COBRA's `palette.text.muted` (demo-feedback 25, DF-37; was a local #595957
+ * while the theme's grey was below AA). Status colours are theme tokens that clear
+ * 4.5:1 on white (`success.main`, `notifications.errorText`,
+ * `notifications.warningText`, `info.main`) — and colour is never the only cue:
+ * every status is icon + text.
  */
 
-/** Secondary text that still clears AA on white. */
-// TODO(#461): COBRA's `text.secondary` fails AA; fix it in the theme and drop this override.
-export const MUTED_TEXT = '#595957'
+import { cobraTheme } from '@/theme/cobraTheme'
+
+/** Secondary text: the COBRA muted-text token (AA on white and on the table's grounds). */
+export const MUTED_TEXT = cobraTheme.palette.text.muted
 
 /** Dense table cell (desktop-first, dense on purpose). */
 export const CELL_SX = {

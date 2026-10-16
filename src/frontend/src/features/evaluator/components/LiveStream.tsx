@@ -19,6 +19,7 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faCircleCheck, faFlag } from '@fortawesome/free-solid-svg-icons'
 import { useEvaluatorState } from '../contexts/EvaluatorStateContext'
 import { useLiveStream } from '../hooks/useLiveStream'
+import { cobraTheme } from '@/theme/cobraTheme'
 
 const SEAL_BLUE = '#2D9CDB'
 
@@ -32,7 +33,7 @@ export function LiveStream() {
         <Typography sx={{ font: '800 11px ui-sans-serif,system-ui,sans-serif', letterSpacing: '.14em', color: '#4a4f55' }}>
           LIVE STREAM
         </Typography>
-        <Typography sx={{ font: '500 11px ui-sans-serif,system-ui,sans-serif', color: '#848482' }}>
+        <Typography sx={{ font: '500 11px ui-sans-serif,system-ui,sans-serif', color: cobraTheme.palette.text.muted }}>
           everything entering the world, newest first · ⚑ or B bookmarks a moment
         </Typography>
       </Stack>
@@ -77,18 +78,18 @@ export function LiveStream() {
                   style={{ color: SEAL_BLUE, width: 13, height: 13 }}
                 />
               )}
-              <Typography sx={{ font: '500 11px ui-sans-serif,system-ui,sans-serif', color: '#848482' }}>
+              <Typography sx={{ font: '500 11px ui-sans-serif,system-ui,sans-serif', color: cobraTheme.palette.text.muted }}>
                 {row.sub}
               </Typography>
               <Box sx={{ flex: 1 }} />
-              <Typography sx={{ font: '600 10.5px ui-monospace,Menlo,monospace', color: '#848482' }}>
+              <Typography sx={{ font: '600 10.5px ui-monospace,Menlo,monospace', color: cobraTheme.palette.text.muted }}>
                 {row.time}
               </Typography>
             </Stack>
             <Typography sx={{ font: '400 12.5px/1.5 ui-sans-serif,system-ui,sans-serif', mt: 0.375, color: '#1a1a1a' }}>
               {row.text}
             </Typography>
-            <Typography sx={{ font: '600 9.5px ui-monospace,Menlo,monospace', letterSpacing: '.06em', color: '#848482', mt: 0.75 }}>
+            <Typography sx={{ font: '600 9.5px ui-monospace,Menlo,monospace', letterSpacing: '.06em', color: cobraTheme.palette.text.muted, mt: 0.75 }}>
               {row.origin}
             </Typography>
           </Box>
@@ -100,7 +101,7 @@ export function LiveStream() {
                 alignSelf: 'flex-start',
                 border: '1px solid #c4c4c4',
                 borderRadius: '6px',
-                color: '#848482',
+                color: cobraTheme.palette.text.muted,
                 p: '3px 8px',
                 '&:hover': { color: '#1e3a5f', borderColor: '#1e3a5f', bgcolor: '#eef3f9' },
               }}

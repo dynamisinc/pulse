@@ -27,7 +27,7 @@
  * persona roster hasn't resolved (mirrors `ReviewQueue`'s own fallback).
  */
 
-import { useMemo, useState, type KeyboardEvent } from 'react'
+import { useId, useMemo, useState, type KeyboardEvent } from 'react'
 import { Box, Stack, Typography } from '@mui/material'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faPen } from '@fortawesome/free-solid-svg-icons'
@@ -62,6 +62,7 @@ export function EngineDraftEditComposer({
   const displayName = persona?.displayName ?? item.leadPersonaHandle
 
   const [text, setText] = useState(initialText)
+  const fieldId = useId()
 
   const submit = () => {
     if (text.trim().length === 0) return
@@ -118,8 +119,19 @@ export function EngineDraftEditComposer({
         </Stack>
       </Stack>
 
+      {/* An EXTERNAL label in `inkMuted`, as `RunSheetField` does (demo-feedback 25 W-1): MUI's
+          shrunk floating label sits half on the dark `chrome.panel` and, painted in COBRA's
+          light-surface `text.secondary`, falls to 2.66:1 there. */}
+      <Box
+        component="label"
+        htmlFor={fieldId}
+        data-testid="engine-draft-edit-label"
+        sx={{ fontSize: 12, fontWeight: 600, lineHeight: 1.4, color: chrome.inkMuted, mb: -0.75 }}
+      >
+        {`Send in-character as ${displayName}`}
+      </Box>
       <CobraTextField
-        label={`Send in-character as ${displayName}`}
+        id={fieldId}
         value={text}
         onChange={e => setText(e.target.value)}
         onKeyDown={handleKeyDown}

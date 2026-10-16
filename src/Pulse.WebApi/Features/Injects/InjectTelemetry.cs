@@ -31,6 +31,12 @@ public static class InjectTelemetry
     /// <summary>The XC-004 event type.</summary>
     public const string EventType = "inject_action";
 
+    /// <summary>
+    /// The XC-004 event type for "Mark fired" (demo-feedback DF-36): an item recorded as fired WITHOUT publishing. Its
+    /// own type, not an <c>inject_action</c>, so an after-action count of "injects fired" can tell the two apart.
+    /// </summary>
+    public const string MarkedFiredEventType = "inject.marked_fired";
+
     /// <summary>The XC-004 channel for staff queue actions.</summary>
     public const string Channel = "system";
 
@@ -71,6 +77,7 @@ public static class InjectTelemetry
 
         var itemId = item.Id.ToString();
         return Build(
+            EventType,
             eventId ?? Guid.NewGuid().ToString(),
             item.ExerciseId,
             actingHumanId,
@@ -90,6 +97,7 @@ public static class InjectTelemetry
         ArgumentNullException.ThrowIfNull(time);
 
         return Build(
+            EventType,
             Guid.NewGuid().ToString(),
             exerciseId,
             actingHumanId,
@@ -99,7 +107,34 @@ public static class InjectTelemetry
             new InjectActionPayload(InjectActions.Reorder, Kind: null, Status: null));
     }
 
+    /// <summary>
+    /// Builds the ONE <see cref="MarkedFiredEventType"/> event for a "Mark fired" (DF-36). Same envelope as an
+    /// <c>inject_action</c> (actor = the staff user, <c>injectId</c> + target = the item, server wall clock + exercise
+    /// scenario time); the payload is <c>{ action: mark_fired, kind, status }</c> — no text, no names.
+    /// </summary>
+    /// <param name="item">The item AFTER it was marked (its kind and status go into the payload).</param>
+    /// <param name="actingHumanId">The staff user who marked it (server-derived).</param>
+    /// <param name="time">The one clock read shared with the state change.</param>
+    /// <returns>The telemetry row to add to the same unit of work.</returns>
+    public static TelemetryEvent ForMarkedFired(InjectItem item, Guid actingHumanId, InjectEventTime time)
+    {
+        ArgumentNullException.ThrowIfNull(item);
+        ArgumentNullException.ThrowIfNull(time);
+
+        var itemId = item.Id.ToString();
+        return Build(
+            MarkedFiredEventType,
+            Guid.NewGuid().ToString(),
+            item.ExerciseId,
+            actingHumanId,
+            time,
+            injectId: itemId,
+            new TelemetryTarget { EntityType = ItemEntityType, EntityId = itemId },
+            new InjectActionPayload(InjectActions.MarkFired, item.Kind, item.Status));
+    }
+
     private static TelemetryEvent Build(
+        string eventType,
         string eventId,
         Guid exerciseId,
         Guid actingHumanId,
@@ -111,7 +146,7 @@ public static class InjectTelemetry
             EventId = eventId,
             SchemaVersion = "v0",
             ExerciseId = exerciseId,
-            EventType = EventType,
+            EventType = eventType,
             Channel = Channel,
             Actor = new TelemetryActor
             {

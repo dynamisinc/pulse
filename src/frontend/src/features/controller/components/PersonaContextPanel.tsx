@@ -64,6 +64,7 @@ import {
   faUsers,
 } from '@fortawesome/free-solid-svg-icons'
 import { useExerciseContext } from '@/core/exerciseContext'
+import { cobraTheme } from '@/theme/cobraTheme'
 import { formatScenarioTime } from '@/core/clock'
 import type { Post } from '@/features/social'
 import { resolveFeed } from '@/features/social/services/feedService'
@@ -91,14 +92,14 @@ export interface PersonaContextPanelProps {
 const DEFAULT_MAX_RECENTS = 3
 
 /**
- * Secondary text for an honest "nothing here" state — muted, never alarming.
- * NOT `staffShellTokens.accent.secondaryText` (#848482, ~3.75:1 on white): that fails WCAG AA
- * for 12px text. #6b6b69 is ~5.4:1. Retuning the shared token is a separate staff-shell decision.
+ * Secondary text for an honest "nothing here" state — muted, never alarming. The COBRA
+ * muted-text token (demo-feedback 25, DF-37): AA on the panel's white and its `#eaf1f9` band
+ * (was a local #6b6b69 while the theme's grey was #848482, below AA).
  */
-const MUTED_NOTE_COLOR = '#6b6b69'
+const MUTED_TEXT = cobraTheme.palette.text.muted
 const MUTED_NOTE_SX = {
   fontSize: 12,
-  color: MUTED_NOTE_COLOR,
+  color: MUTED_TEXT,
   fontStyle: 'italic',
 }
 
@@ -277,7 +278,7 @@ export function PersonaContextPanel({
 
       <Stack sx={{ px: 2, py: 1.5, gap: 0.75, borderBottom: '1px solid #eceff2' }}>
         <Stack direction="row" sx={{ alignItems: 'center', gap: 0.75 }}>
-          <FontAwesomeIcon icon={faAddressCard} style={{ fontSize: 11, color: '#848482' }} />
+          <FontAwesomeIcon icon={faAddressCard} style={{ fontSize: 11, color: MUTED_TEXT }} />
           <Typography sx={SECTION_LABEL_SX}>BIO</Typography>
         </Stack>
         {bio ? (
@@ -296,7 +297,7 @@ export function PersonaContextPanel({
 
       <Stack sx={{ px: 2, py: 1.5, gap: 0.75, borderBottom: '1px solid #eceff2' }}>
         <Stack direction="row" sx={{ alignItems: 'center', gap: 0.75 }}>
-          <FontAwesomeIcon icon={faQuoteLeft} style={{ fontSize: 11, color: '#848482' }} />
+          <FontAwesomeIcon icon={faQuoteLeft} style={{ fontSize: 11, color: MUTED_TEXT }} />
           <Typography sx={SECTION_LABEL_SX}>VOICE NOTES</Typography>
         </Stack>
         {voiceNotes ? (
@@ -318,7 +319,7 @@ export function PersonaContextPanel({
 
       <Stack sx={{ px: 2, py: 1.5, gap: 0.75, borderBottom: '1px solid #eceff2' }}>
         <Stack direction="row" sx={{ alignItems: 'center', gap: 0.75 }}>
-          <FontAwesomeIcon icon={faUsers} style={{ fontSize: 11, color: '#848482' }} />
+          <FontAwesomeIcon icon={faUsers} style={{ fontSize: 11, color: MUTED_TEXT }} />
           <Typography sx={SECTION_LABEL_SX}>AUDIENCE MAGNITUDE</Typography>
         </Stack>
         <Typography data-testid="persona-context-audience-band" sx={{ fontSize: 12.5, color: '#1a1a1a' }}>
@@ -328,7 +329,7 @@ export function PersonaContextPanel({
 
       <Stack sx={{ px: 2, py: 1.5, gap: 0.75 }}>
         <Stack direction="row" sx={{ alignItems: 'center', gap: 0.75 }}>
-          <FontAwesomeIcon icon={faClockRotateLeft} style={{ fontSize: 11, color: '#848482' }} />
+          <FontAwesomeIcon icon={faClockRotateLeft} style={{ fontSize: 11, color: MUTED_TEXT }} />
           <Typography sx={SECTION_LABEL_SX}>RECENT POSTS</Typography>
         </Stack>
         {recents.status === 'loading' && (
@@ -356,7 +357,7 @@ export function PersonaContextPanel({
             {recents.posts.map(post => (
               <Box component="li" key={post.id} sx={{ borderLeft: '3px solid #dbe9fa', pl: 1 }}>
                 <Typography sx={{ fontSize: 12, color: '#1a1a1a', lineHeight: 1.4 }}>{post.text}</Typography>
-                <Typography sx={{ fontSize: 10.5, color: '#848482', mt: 0.25 }}>
+                <Typography sx={{ fontSize: 10.5, color: MUTED_TEXT, mt: 0.25 }}>
                   {formatScenarioTime(post.scenarioTime, timeZone, { format: 'relative' })}
                 </Typography>
               </Box>

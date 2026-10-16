@@ -289,6 +289,8 @@ export function toPostView(view: ParticipantPostView, author: Persona): PostView
     ...(view.linkPreview != null ? { linkPreview: view.linkPreview } : {}),
     ...(view.viewer != null ? { viewer: view.viewer } : {}),
     ...(view.edited != null ? { edited: view.edited } : {}),
+    // DF-7 (story 21): `true` or absent, so every card can show the "Pinned" marker.
+    ...(view.pinnedForAll === true ? { pinnedForAll: true as const } : {}),
   }
 }
 

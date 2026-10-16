@@ -23,6 +23,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ThemeProvider } from '@mui/material/styles'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cobraTheme } from '@/theme/cobraTheme'
+import { contrastRatio, hexToRgb } from '@/test/contrast'
 import { api } from '@/core/services/api'
 import { useExerciseContext, type ExerciseScope } from '@/core/exerciseContext'
 import { DayWordPanel, NO_WORD_MESSAGE, ROTATE_CONFIRM_MESSAGE } from './DayWordPanel'
@@ -451,15 +452,17 @@ describe('set my own word', () => {
     expect(screen.getByText(/Looks good: 6/)).toBeInTheDocument()
   })
 
-  it('keeps the rule hint and field label at AA contrast (not COBRA\'s 3.75:1 grey)', async () => {
+  it('keeps the rule hint and field label at AA: the COBRA muted token, no override', async () => {
     await renderLoaded()
 
-    // text.primary (#1a1a1a), not text.secondary (#848482, 3.75:1 on white).
-    expect(getComputedStyle(screen.getByText(/6 to 64 letters and digits/)).color).toBe(
-      'rgb(26, 26, 26)',
-    )
+    // Demo-feedback 25: the theme's text.secondary IS the AA muted token now (>= 4.5:1 on
+    // the panel's white), so the old TODO(#461) text.primary override is gone.
+    const muted = cobraTheme.palette.text.muted
+    const rgb = `rgb(${hexToRgb(muted).join(', ')})`
+    expect(contrastRatio(muted, cobraTheme.palette.background.paper)).toBeGreaterThanOrEqual(4.5)
+    expect(getComputedStyle(screen.getByText(/6 to 64 letters and digits/)).color).toBe(rgb)
     expect(getComputedStyle(screen.getByText('Or type your own word', { selector: 'label' })).color)
-      .toBe('rgb(26, 26, 26)')
+      .toBe(rgb)
   })
 
   it('does not autofill or capitalise the field', async () => {

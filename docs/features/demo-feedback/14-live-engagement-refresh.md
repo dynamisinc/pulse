@@ -1,6 +1,6 @@
 # Story: Live engagement refresh (counts, notifications, repost notification)
 
-**Feature:** Demo feedback cut (10/20)  ·  **Phase:** 1  ·  **Status:** In Review
+**Feature:** Demo feedback cut (10/20)  ·  **Phase:** 1  ·  **Status:** Complete
 **Requirements:** SOC-071 (live feed), D1 notifications  ·  **Decisions:** DF-17, DF-18, DF-19  ·  **Issue:** #515
 **Stack:** fullstack  ·  **World:** participant  ·  **Review:** Tier-1  ·  **Priority:** Must  ·  **Wave:** 3  ·  **Effort:** M
 

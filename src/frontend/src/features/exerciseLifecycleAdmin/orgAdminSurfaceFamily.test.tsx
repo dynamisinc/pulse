@@ -203,6 +203,8 @@ describe('the surface mirrors the server gate: planner yes, controller/evaluator
 
     expect(await screen.findByTestId('exercise-management-page')).toBeInTheDocument()
     expect(screen.queryByTestId('stub-controller-console')).not.toBeInTheDocument()
+    // Story 22 positive control for the evaluator case: an admitted role DOES get row actions.
+    expect((await screen.findAllByRole('button', { name: /^Rename / })).length).toBeGreaterThan(0)
     expect(screen.getByTestId('pathname')).toHaveTextContent('/staff/exercises')
   })
 
@@ -218,6 +220,10 @@ describe('the surface mirrors the server gate: planner yes, controller/evaluator
     )).toBeInTheDocument()
     expect(screen.queryByTestId('exercise-management-page')).not.toBeInTheDocument()
     expect(screen.queryByTestId('stub-evaluator-dashboard')).not.toBeInTheDocument()
+    // Story 22: a read-only evaluator sees no row actions at all: no table, so no
+    // Rename, Archive or Duplicate control anywhere on the page.
+    expect(screen.queryByTestId('org-exercise-table')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^(Rename|Archive|Duplicate) / })).not.toBeInTheDocument()
     // No silent bounce: the URL stays where the evaluator asked to go.
     expect(screen.getByTestId('pathname')).toHaveTextContent('/staff/exercises')
 

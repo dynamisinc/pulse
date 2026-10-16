@@ -14,14 +14,23 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { AxiosError } from 'axios'
 import { api } from '@/core/services/api'
-import { OrgExerciseError, createOrgExercise, getOrgExercises } from './orgExercisesService'
+import {
+  OrgExerciseError,
+  archiveOrgExercise,
+  createOrgExercise,
+  getOrgExercises,
+  isExerciseNotFoundError,
+  isNotCompletedError,
+  renameOrgExercise,
+} from './orgExercisesService'
 
 vi.mock('@/core/services/api', () => ({
-  api: { get: vi.fn(), post: vi.fn() },
+  api: { get: vi.fn(), post: vi.fn(), patch: vi.fn() },
 }))
 
 const mockedGet = vi.mocked(api.get)
 const mockedPost = vi.mocked(api.post)
+const mockedPatch = vi.mocked(api.patch)
 
 /** Builds an axios-shaped rejection with a given status + body. */
 function httpError(status: number, data: unknown): AxiosError {
@@ -158,6 +167,72 @@ describe('createOrgExercise — the wire contract', () => {
     mockedPost.mockResolvedValue({ data: { assignedRole: 'planner' } })
 
     const caught = await createOrgExercise({ name: 'X' }).catch((error: unknown) => error)
+
+    expect(caught).toBeInstanceOf(OrgExerciseError)
+  })
+})
+
+describe('row actions — the wire contract (story 22)', () => {
+  const ROW = { data: { exerciseId: 'e1', name: 'Renamed', status: 'live' } }
+
+  it('PATCHes /org/exercises/{id} with ONLY the trimmed name', async () => {
+    mockedPatch.mockResolvedValue(ROW)
+
+    const row = await renameOrgExercise('e1', '  Renamed  ')
+
+    const [url, body] = mockedPatch.mock.calls[0] ?? []
+    expect(url).toBe('/org/exercises/e1')
+    // An exercise id in the path (server allow-listed and tenant-checked), and
+    // never an organization id anywhere.
+    expect(body).toEqual({ name: 'Renamed' })
+    expect(row.name).toBe('Renamed')
+  })
+
+  it('URL-encodes the id so it can only ever be one path segment', async () => {
+    mockedPatch.mockResolvedValue(ROW)
+
+    await renameOrgExercise('a/b', 'X')
+
+    expect(mockedPatch.mock.calls[0]?.[0]).toBe('/org/exercises/a%2Fb')
+  })
+
+  it('POSTs /org/exercises/{id}/archive with no body', async () => {
+    mockedPost.mockResolvedValue({ data: { exerciseId: 'e1', name: 'Done', status: 'archived' } })
+
+    const row = await archiveOrgExercise('e1')
+
+    const [url, body] = mockedPost.mock.calls[0] ?? []
+    expect(url).toBe('/org/exercises/e1/archive')
+    expect(body).toBeUndefined()
+    expect(row.status).toBe('archived')
+  })
+
+  it('recognises the 409 not-completed reason, and a 404', async () => {
+    mockedPost.mockRejectedValueOnce(httpError(409, { reason: 'not-completed' }))
+    mockedPost.mockRejectedValueOnce(httpError(404, ''))
+
+    const notCompleted = await archiveOrgExercise('e1').catch((error: unknown) => error)
+    const notFound = await archiveOrgExercise('e2').catch((error: unknown) => error)
+
+    expect((notCompleted as OrgExerciseError).reason).toBe('not-completed')
+    expect(isNotCompletedError(notCompleted)).toBe(true)
+    expect(isExerciseNotFoundError(notFound)).toBe(true)
+    expect(isNotCompletedError(notFound)).toBe(false)
+  })
+
+  it('carries a 400 reason through for the rename dialog to show', async () => {
+    mockedPatch.mockRejectedValue(httpError(400, 'name is required.'))
+
+    const caught = await renameOrgExercise('e1', ' ').catch((error: unknown) => error)
+
+    expect((caught as OrgExerciseError).status).toBe(400)
+    expect((caught as OrgExerciseError).serverMessage).toBe('name is required.')
+  })
+
+  it('fails closed on a 200 whose body is not a row', async () => {
+    mockedPatch.mockResolvedValue({ data: {} })
+
+    const caught = await renameOrgExercise('e1', 'X').catch((error: unknown) => error)
 
     expect(caught).toBeInstanceOf(OrgExerciseError)
   })

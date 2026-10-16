@@ -54,6 +54,8 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ThemeProvider } from '@mui/material/styles'
 import { cobraTheme } from '@/theme/cobraTheme'
+import { contrastRatio } from '@/test/contrast'
+import { consoleChrome as chrome } from '../../consoleChrome'
 import { ExerciseContextProvider } from '@/core/exerciseContext'
 import { resetExerciseClock, setExerciseClock } from '@/core/clock'
 import { resetTelemetryBuffer } from '@/core/telemetry'
@@ -132,6 +134,22 @@ describe('EngineDraftEditComposer — opened from the queue', () => {
     ).toBeInTheDocument()
     const field = within(editor).getByLabelText('Edited draft text') as HTMLTextAreaElement
     expect(field.value).toContain('boil-water advisory')
+  })
+
+  it('labels the field outside it in inkMuted, never a floating label on the panel', async () => {
+    // Demo-feedback 25 W-1: MUI's shrunk label sat half on `chrome.panel` in COBRA's
+    // light-surface `text.secondary` (2.66:1). The label is now an external <label for>.
+    await renderQueue()
+    const editor = await openEditor('draft-fulco-reassure')
+    const field = within(editor).getByLabelText('Edited draft text')
+
+    expect(editor.querySelector('.MuiInputLabel-root')).toBeNull()
+    const label = within(editor).getByTestId('engine-draft-edit-label')
+    expect(label.tagName).toBe('LABEL')
+    expect(label).toHaveAttribute('for', field.id)
+    expect(label).toHaveTextContent(/^Send in-character as /)
+    expect(label).toHaveStyle({ color: chrome.inkMuted })
+    expect(contrastRatio(chrome.inkMuted, chrome.panel)).toBeGreaterThanOrEqual(4.5)
   })
 
   it('Cancel closes the composer without publishing', async () => {

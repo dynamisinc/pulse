@@ -15,13 +15,22 @@ export { ExerciseManagementRoute } from './ExerciseManagementRoute'
 export { ExerciseManagementPage } from './pages/ExerciseManagementPage'
 export { CreateExerciseForm } from './components/CreateExerciseForm'
 export { OrgExerciseTable } from './components/OrgExerciseTable'
+export { sortArchivedLast } from './components/exerciseRowStatus'
+export { ExerciseRowActions, ARCHIVE_DISABLED_TEXT } from './components/ExerciseRowActions'
+export { RenameExerciseDialog } from './components/RenameExerciseDialog'
+export { ArchiveExerciseDialog } from './components/ArchiveExerciseDialog'
 export { ExerciseStatusBadge } from './components/ExerciseStatusBadge'
 export { useOrgExercises, ORG_EXERCISES_QUERY_KEY } from './hooks/useOrgExercises'
 export { useCreateExercise } from './hooks/useCreateExercise'
+export { useRenameExercise, useArchiveExercise } from './hooks/useExerciseRowActions'
 export {
   getOrgExercises,
   createOrgExercise,
+  renameOrgExercise,
+  archiveOrgExercise,
   isHostnameTakenError,
+  isNotCompletedError,
+  isExerciseNotFoundError,
   resetOrgExerciseMocks,
   OrgExerciseError,
 } from './services/orgExercisesService'

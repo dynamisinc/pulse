@@ -3,9 +3,8 @@
  * ---------------------------------------------------------------------------
  * NFR-001 (WCAG 2.1 AA): the colours the persona edit dialog uses for secondary
  * text (labels, helper text, the save hint) and for its error copy are COMPUTED
- * against their grounds, not eyeballed. COBRA's own `text.secondary` (#848482) is
- * the reason this file exists — it is below 4.5:1 on white, so the dialog does not
- * use it for text (see `personaEditStyles.ts`).
+ * against their grounds, not eyeballed. The muted text is the COBRA token
+ * (`palette.text.muted`, demo-feedback 25), not a local grey.
  */
 import { describe, expect, it } from 'vitest'
 import { cobraTheme } from '@/theme/cobraTheme'
@@ -23,7 +22,7 @@ describe('persona edit colours meet AA for normal text (4.5:1)', () => {
       .toBeGreaterThanOrEqual(4.5)
   })
 
-  it('documents the problem it avoids: the theme\'s text.secondary is NOT AA on white', () => {
-    expect(contrastRatio(cobraTheme.palette.text.secondary, '#ffffff')).toBeLessThan(4.5)
+  it('the muted text is the COBRA token, not a local grey', () => {
+    expect(MUTED_TEXT).toBe(cobraTheme.palette.text.muted)
   })
 })
