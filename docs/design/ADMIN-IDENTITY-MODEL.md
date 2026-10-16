@@ -104,7 +104,11 @@ Organization (+ Slug: new, unique; used in the staff console URL, §1.2)
 
 - `Session.ExerciseId` becomes **nullable**, and `Session.PersonId` is added. Null means org scope. That is
   structurally different from `Guid.Empty` (the "unresolved" sentinel the write-guard refuses), which is
-  exactly what story 15's AC asks for. Only `/api/org/*` and `/api/session` accept an org-scope session.
+  exactly what story 15's AC asks for. An org-scope session is accepted by `/api/org/*`, `/api/session`,
+  `/api/me/*`, **`GET /api/staff/assignments`** (the person's own enrollments) and
+  **`POST /api/staff/active-exercise`**. Those last two check that the target is the caller's own enrollment
+  in their own org, and a foreign or missing target gets the bare 404. Without them an org admin could never
+  enter an exercise.
   Every exercise-scoped route fails closed on it, because `IExerciseContext.CurrentExerciseId` stays null and the
   existing guards already 401/403 on null.
 - **Staff sign-in no longer takes an exercise. It takes an org, by URL or by choice.**
@@ -138,10 +142,19 @@ Organization (+ Slug: new, unique; used in the staff console URL, §1.2)
   tries the participant sign-in gets the same uniform 401 as a wrong password.
 - **The same credentials work in both worlds** (B1 "one account, separate entry"). The password hash lives on
   `Person`, so both sign-in services verify against it whenever `Enrollment.PersonId` is set (§3).
-- **One world per browser origin.** In the SPA, signing into one world clears the other world's token
-  store (`tokenStore.ts`). Staff tokens use `sessionStorage` and participant tokens use `localStorage`. Today a
-  staff member browsing an exercise host where they are also a participant could hold both. The
-  server-side rule already makes a single session one world; this closes the client-side half.
+- **One world per browser origin, across tabs too.** Clearing the other world's token store on sign-in
+  (`tokenStore.ts:335-351` already does this) is not enough. Staff tokens live in each tab's own
+  `sessionStorage`, so a participant sign-in in tab B cannot clear tab A, and `crossTabSessionSync.ts:86`
+  ignores storage changes in staff tabs. So the rule is enforced in two places:
+  1. **A cross-tab world-switch broadcast.** A sign-in posts `{world, at}` on a `BroadcastChannel('pulse-world')`
+     (with a `storage`-event fallback). Every tab of the *other* world on that origin signs itself out
+     (`POST /api/auth/logout`) and lands on its sign-in page.
+  2. **A server backstop.** When a session is minted for person P in world W, P's live sessions of the other
+     world that were minted **from the same origin** (a new `Session.Origin` column, set from the request
+     `Origin` header) are revoked.
+
+  Separate origins (the staff console host and the per-exercise participant hosts) can legitimately hold one
+  world each, which is the normal case.
 - **Staff console host.** An org-scope session has no exercise host to land on (story 15's frontend gap).
   **Decision (signed off):** one platform staff host (`console.<platform-domain>`, set by the config value
   `StaffConsole:Host`) serves the staff console for every org, with `/o/{slug}` for each org. **Per-exercise
@@ -312,7 +325,8 @@ New exercise setting, **`SignInMethods`** (flags): `PersonalLink | DayWord | Pas
      │                                                                        ▼
      └──────── **reset** (planner|orgAdmin) ◀── staged | completed ──────────── completed ──archive──▶ archived
                                                 **reopen** (controller) ──▶ live      ◀──**unarchive** (orgAdmin)──┘
-   **delete** (planner|orgAdmin): build only, never ran
+   **delete** (planner|orgAdmin): build only, never ran (FirstLiveAt null)
+   **archive** also from build when FirstLiveAt is set (ran before, then reset): the retirement path
    **duplicate** (planner of the source|orgAdmin): any state → new exercise in build
 ```
 
@@ -327,15 +341,17 @@ Freeze stays a pause tier (controller), not a state. A5 adds that Freeze and pau
 | **StartEx** | staged → live | everything | nothing | **controller**; sets `Exercise.FirstLiveAt` if null |
 | **EndEx** | live/paused → completed | everything | nothing | **controller**; closes the hub and stops the reaction loop (A5 #375) |
 | **Reopen** | completed → live | everything; the scenario clock resumes where it stopped | nothing | **controller**; refused once archived. For "we ended by mistake". Audited |
-| **Archive** | completed → archived | everything (read-only) | live sessions revoked | planner or org admin |
-| **Unarchive** | archived → completed | everything | nothing | org admin only |
+| **Archive** | completed → archived, **or build → archived when `FirstLiveAt` is set** (a reset exercise being retired) | everything (read-only) | live sessions revoked | planner or org admin |
+| **Unarchive** | archived → completed (or → build if it was archived from build) | everything | nothing | org admin only |
 | **Reset** | completed **or staged** → build | settings, chrome, sign-in methods, personas (with any live edits), staff library media, run sheet (all items back to *pending*), noise pool, **setup posts** (§5.4), accounts, enrollments, links, view-only code | **conduct data**: conduct posts and their edits, reactions, reposts, `PostMediaItem` rows and **participant-uploaded media** on them, follows created after `FirstLiveAt`, telemetry events, engine review items, inject queue state, runtime state (clock, pause tier), day words, every session | planner or org admin; typed-name confirmation. **The UI offers the AAR/report export first** (from completed). Refused in build, live, paused and archived |
-| **Delete** | build → (gone) | — | the exercise and every exercise-scoped row and blob; the hostname is freed | planner or org admin; **only if `FirstLiveAt` is null** (never ran). An exercise that ran and was reset can only be archived |
+| **Delete** | build → (gone) | — | the exercise and every exercise-scoped row and blob; the hostname is freed | planner or org admin; **only if `FirstLiveAt` is null** (never ran). An exercise that ran and was reset is retired by **archive from build** |
 | **Duplicate** | any → new build exercise | see 5.5 | — | planner on the source, or org admin |
 
 - **Reset hard-deletes.** It does not version or run-number the conduct data. Keeping several runs in one
-  exercise would push a "which run" dimension into every evaluator query. If a team needs both runs, they
-  **duplicate** before resetting. *(Signed off §8.5.)*
+  exercise would push a "which run" dimension into every evaluator query. **To keep a run, don't reset that
+  exercise.** Duplicate it and conduct the next run in the copy. The source, with its run, stays as it is
+  (and can be archived). Duplicating does not copy conduct data, so duplicating and *then* resetting the
+  source still destroys the run. The reset confirmation dialog says this. *(Signed off §8.5.)*
 - **Reset from staged** (signed off) clears a dry run: the posts, reactions, telemetry, sessions and day
   words created while the exercise was staged. It keeps everything authored in build. This works because
   `IsSetupContent` is stamped only in **build** (§5.4). Planners who need to add setup content after staging
@@ -354,6 +370,7 @@ Blocking items (stage is refused with 409 and the list):
 5. At least one participant sign-in method is on (3.4), if participant accounts exist.
 6. The time zone and scenario start time are set.
 7. Chrome and watermark are valid (`ComplianceChromeGuard`).
+8. No run-sheet item is `needs-repair` (§5.4a).
 
 Warnings (shown, not blocking): no run sheet items; no opening feed; empty noise pool; personas missing avatars;
 participants with no sign-in yet issued; no evaluator enrolled.
@@ -364,12 +381,25 @@ participants with no sign-in yet issued; no evaluator enrolled.
 Posts written in `staged` (dry runs) count as conduct, which is what makes reset from staged useful (§5.2). Today nothing distinguishes them. `Origin` describes who posted, not when. Inferring from
 `CreatedWallClock < FirstLiveAt` breaks after a reopen or a reset, so the flag is explicit.
 
+### Decision 5.4a — run-sheet items that reply to posts
+An `InjectItemPost.ReplyToPostId` can target a published post. `ReplyParentResolver` refuses a missing or
+foreign-exercise parent when the inject fires, so both reset and duplicate must handle these explicitly:
+- **Reset:** an item whose reply target is a deleted conduct post is set to **`needs-repair`**, not `pending`.
+  It cannot fire. It shows on the run sheet with "reply target removed by reset", and the planner re-points
+  it or turns it into a top-level post. Targets that are setup posts survive, so those items go back to
+  `pending`.
+- **Duplicate:** reply targets that are setup posts are **remapped** to the copied posts, because setup posts
+  are copied (§5.5). Targets that are conduct posts have no copy, so those items arrive as `needs-repair`.
+- **Readiness:** any `needs-repair` item is a **blocking** readiness item (§5.3), so stage is refused until
+  it is fixed.
+
 ### Decision 5.5 — duplicate
 - **Copied, with new ids and every cross-reference remapped:**
   - settings, chrome and sign-in methods;
-  - personas, with avatar and banner media remapped;
+  - personas, with avatar and banner media remapped. An avatar or banner that points at a
+    **participant-uploaded** asset (which is not copied) is **cleared to the default** on the copy;
   - staff library media (blobs server-side copied into the new prefix);
-  - the run sheet, all items pending;
+  - the run sheet, all items pending except reply items that need repair (§5.4a);
   - the noise pool;
   - the follow graph between personas;
   - **staff enrollments** (default on, so the team is carried over);
