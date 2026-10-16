@@ -120,6 +120,25 @@ import { SEVERITY_META, chipBaseStyle } from './severityMeta'
 import type { Alert } from './alertTypes'
 import { touchTargetCss } from '../touchTarget'
 
+const REDUCED_MOTION_QUERY = '(prefers-reduced-motion: reduce)'
+
+/** Live `prefers-reduced-motion: reduce`; false where `matchMedia` is missing (jsdom). */
+function usePrefersReducedMotion(): boolean {
+  const read = () =>
+    typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+      && window.matchMedia(REDUCED_MOTION_QUERY).matches
+  const [reduce, setReduce] = useState(read)
+  useEffect(() => {
+    if (typeof window.matchMedia !== 'function') return
+    const query = window.matchMedia(REDUCED_MOTION_QUERY)
+    const onChange = () => setReduce(query.matches)
+    onChange()
+    query.addEventListener('change', onChange)
+    return () => query.removeEventListener('change', onChange)
+  }, [])
+  return reduce
+}
+
 /** Ticker auto-rotation interval (SHELL-CONTRACT.md §2: "~3.5s"). */
 const ROTATE_INTERVAL_MS = 3500
 
@@ -365,13 +384,16 @@ export function AlertBar() {
   // Ticker auto-rotation (multi-alert AC) — only runs for the ticker
   // treatment, and only when there is more than one alert to rotate through.
   const [tickerIndex, setTickerIndex] = useState(0)
+  const reduceMotion = usePrefersReducedMotion()
   useEffect(() => {
-    if (treatment !== 'ticker' || alerts.length <= 1) return
+    // prefers-reduced-motion (NFR-001): the ticker holds on its current alert;
+    // every alert stays reachable through "Details →" (/alerts).
+    if (treatment !== 'ticker' || alerts.length <= 1 || reduceMotion) return
     const id = setInterval(() => {
       setTickerIndex(current => (current + 1) % alerts.length)
     }, ROTATE_INTERVAL_MS)
     return () => clearInterval(id)
-  }, [treatment, alerts.length])
+  }, [treatment, alerts.length, reduceMotion])
   // A shrinking alert list can leave a stale index — wrap it back in range
   // rather than indexing out of bounds.
   const safeTickerIndex = alerts.length === 0 ? 0 : tickerIndex % alerts.length

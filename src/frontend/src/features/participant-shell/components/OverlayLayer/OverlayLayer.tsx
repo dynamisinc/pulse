@@ -28,7 +28,8 @@
  *     (`./wallClock.ts`).
  *  2. **Pause** (`state: 'pause'`, CTL-023/D7-004) and **3. EndEx**
  *     (`state: 'endex'`, COR-054) — the calm control-page family, rendered at
- *     `SHELL_Z.overlay` (above content/nav/alert-bar, below chrome). Each has
+ *     `SHELL_Z.overlay` (above content/nav, below chrome; starts below the
+ *     alert bar so an active alert stays readable). Each has
  *     an `'in-fiction'` register (neutral, system-ui, ZERO exercise language
  *     — reads like an ordinary "service unavailable" page) and an
  *     `'out-of-fiction'` register (slate `#1b232c`/mono, names the exercise
@@ -124,8 +125,19 @@ const fullViewportStyle: CSSProperties = {
   boxSizing: 'border-box',
 }
 
+/**
+ * The pause / EndEx pages start BELOW the compliance chrome and the alert bar
+ * (the same inset `ShellLayout` reserves), so an active emergency alert stays
+ * readable and the page's own text is never covered by the bar. Break-fiction
+ * is exempt: it deliberately covers everything.
+ */
+const belowChromeAndAlertBarStyle: CSSProperties = {
+  top: 'calc(var(--pulse-chrome-top, 0px) + var(--pulse-alert-height, 0px))',
+}
+
 const inFictionPageStyle: CSSProperties = {
   ...fullViewportStyle,
+  ...belowChromeAndAlertBarStyle,
   zIndex: SHELL_Z.overlay,
   backgroundColor: '#f7f7f8',
   color: '#1a1a1a',
@@ -153,6 +165,7 @@ const inFictionBodyStyle: CSSProperties = {
 
 const outOfFictionPageStyle: CSSProperties = {
   ...fullViewportStyle,
+  ...belowChromeAndAlertBarStyle,
   zIndex: SHELL_Z.overlay,
   backgroundColor: '#1b232c',
   color: '#e6edf3',

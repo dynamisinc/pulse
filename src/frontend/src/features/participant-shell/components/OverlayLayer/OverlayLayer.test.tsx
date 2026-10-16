@@ -120,6 +120,27 @@ describe('OverlayLayer — z-order (COR-065)', () => {
   })
 })
 
+describe('OverlayLayer — leaves room for the alert bar (story 05 interplay)', () => {
+  const inset = 'calc(var(--pulse-chrome-top, 0px) + var(--pulse-alert-height, 0px))'
+
+  it.each([
+    ['pause', 'in-fiction', 'pulse-overlay-pause-in-fiction'],
+    ['pause', 'out-of-fiction', 'pulse-overlay-pause-out-of-fiction'],
+    ['endex', 'in-fiction', 'pulse-overlay-endex-in-fiction'],
+    ['endex', 'out-of-fiction', 'pulse-overlay-endex-out-of-fiction'],
+  ] as const)('%s / %s starts below the chrome and the alert bar', (state, register, testId) => {
+    mockUseOverlayState.mockReturnValue(overlayState({ state, register }))
+    render(<OverlayLayer />)
+    expect(screen.getByTestId(testId).style.top).toBe(inset)
+  })
+
+  it('break-fiction still covers the whole viewport', () => {
+    mockUseOverlayState.mockReturnValue(overlayState({ state: 'broadcast', message: 'Stand by.' }))
+    render(<OverlayLayer />)
+    expect(screen.getByTestId('pulse-overlay-break-fiction').style.top).toBe('0px')
+  })
+})
+
 describe('OverlayLayer — break-fiction (CTL-024/D7-003)', () => {
   it('shows the exact AC header, the director-authored message, and the "remains until cleared" line', () => {
     mockUseOverlayState.mockReturnValue(

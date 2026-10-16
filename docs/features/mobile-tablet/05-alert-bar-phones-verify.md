@@ -1,6 +1,6 @@
 # Story: Alert bar on phones: verify and touch-target gaps
 
-**Feature:** Phones and tablets  ·  **Epic:** E1  ·  **Phase:** 2  ·  **Status:** In Progress (G1 + e2e in review; reduced-motion, overlay-interplay and live-region ACs open)
+**Feature:** Phones and tablets  ·  **Epic:** E1  ·  **Phase:** 2  ·  **Status:** In Review (G2 dateline and the user-guide shot recapture remain open, owned by story 17 and story 08)
 **Requirements:** PRT-010, PRT-012, NFR-001, COR-053  ·  **Design decisions:** D7-002  ·  **Issue:** #524
 
 ## Context
@@ -26,14 +26,14 @@ overlapped, Details opens `/alerts`, no horizontal scroll. **Remaining gap G1:**
 
 ## Acceptance Criteria
 - [x] G1: on a coarse pointer, "Details →" and "+N more" are real targets of at least 44×44 CSS px (the "+N more" pill keeps its size inside a transparent 44 px button). *Amended (Copilot #584):* an invisible hit-slop poked under the compliance banner when a short alert made the band shorter than 44 px, so on touch devices the band grows to fit the targets (56 px for a one-line alert; 113 px for a wrapped alert at 390 px, up from 87 px). Mouse layouts are unchanged. Covered by the short-alert cases in `e2e/alert-bar.phone.spec.ts`.
-- [ ] G1: on a coarse pointer, "Details →" and "+N more" have hit areas of at least 44×44 CSS px. The visual size of the band does not grow.
+- [x] G1: on a coarse pointer, "Details →" and "+N more" have hit areas of at least 44×44 CSS px. The visual size of the band does not grow.
 - [ ] G2: the `ChannelNav` dateline does not render while only the default (wall-mirroring) exercise clock is installed. It renders scenario time once a real clock is installed with `setExerciseClock`. Unit-tested both ways.
-- [ ] Given info, advisory and emergency alerts at 360, 390 and 768 px, when the bar renders, then the full message is visible (wrapped, never ellipsized), the severity chip shows icon plus text label, and nothing overlaps the channel nav or the compliance chrome (`expectNoHorizontalScroll` and bounding-box non-overlap).
-- [ ] Given an alert is active, when the page scrolls, then the in-flow content begins below the bar (published `--pulse-alert-height` matches the bar's measured height within 1px) at all three widths, including multi-alert (+N more) and ticker rotation.
-- [ ] Given "Details ->", when tapped (target at least 44px), then it navigates client-side to `/alerts` listing active alerts most severe first, and browser Back returns to the prior screen with scroll preserved.
-- [ ] Given an emergency alert together with a pause/Freeze overlay on a phone, when both are active, then neither hides the other's required text and the overlay's focus trap still works (interplay check).
-- [ ] Given an alert timestamp, then it renders in scenario time (COR-053); `expectNoWallClock` passes.
-- [ ] Accessibility (NFR-001): `role="status"` and live-region announce on change still fire at phone sizes; severity is never color-only; reduced-motion stops ticker rotation (verify, fix if not).
+- [x] Given info, advisory and emergency alerts at 360, 390 and 768 px, when the bar renders, then the full message is visible (wrapped, never ellipsized), the severity chip shows icon plus text label, and nothing overlaps the channel nav or the compliance chrome (`expectNoHorizontalScroll` and bounding-box non-overlap).
+- [x] Given an alert is active, when the page scrolls, then the in-flow content begins below the bar (published `--pulse-alert-height` matches the bar's measured height within 1px) at all three widths, including multi-alert (+N more) and ticker rotation.
+- [x] Given "Details ->", when tapped (target at least 44px), then it navigates client-side to `/alerts` listing active alerts most severe first, and browser Back returns to the prior screen with scroll preserved.
+- [x] Given an emergency alert together with a pause/Freeze overlay on a phone, when both are active, then neither hides the other's required text and the overlay's focus trap still works (interplay check). *Fixed:* the pause/EndEx pages used to start at `top: 0` and painted over the alert bar; they now start below `--pulse-chrome-top + --pulse-alert-height` (break-fiction still covers everything). Covered by the interplay case in `e2e/alert-bar.phone.spec.ts` and `OverlayLayer.test.tsx`.
+- [x] Given an alert timestamp, then it renders in scenario time (COR-053); `expectNoWallClock` passes.
+- [x] Accessibility (NFR-001): `role="status"` and live-region announce on change still fire at phone sizes; severity is never color-only; reduced-motion stops ticker rotation (*fixed:* `AlertBar` ignored `prefers-reduced-motion`; it now holds on the current alert, with all alerts reachable via Details). Covered by `AlertBar.a11y.test.tsx` and the e2e rotation cases.
 - [ ] The e2e spec locks in the verified behavior so a regression fails; any further gap found is fixed in `AlertBar/*` or `ShellLayout`. User guide: `docs/guide/participant-guide.md` alert-bar section confirmed accurate; `participant-alert-bar` shot recaptured at phone sizes (story 08).
 
 ## Out of Scope

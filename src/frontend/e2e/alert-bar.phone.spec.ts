@@ -20,7 +20,7 @@
 import { test, expect, type Page } from '@playwright/test'
 import {
   boxOf, boxesOverlap, expectNoHorizontalScroll, expectNoWallClock, expectTouchTarget,
-  seedAlerts, type SeedAlert,
+  seedAlerts, seedOverlay, type SeedAlert,
 } from './kit'
 
 const EMERGENCY: SeedAlert = {
@@ -179,4 +179,115 @@ test.describe('alert bar: short single-line alerts', () => {
       }
     })
   }
+})
+
+/** A second advisory so the ticker has something to rotate to. */
+const ADVISORY_2: SeedAlert = {
+  id: 'e2e-advisory-2',
+  severity: 'advisory',
+  message: 'Shelters are open at Fairhaven High School.',
+  scenarioTime: '2033-09-04T10:20:00-04:00',
+}
+
+test.describe('alert bar: ticker rotation and reduced motion', () => {
+  test('rotates (and the live region text changes) without a reduced-motion preference', async ({ page }) => {
+    // Rotation announces: the persistent role=status node's text changes.
+    // (The project default is reduced motion; opt out for the control case.)
+    await page.emulateMedia({ reducedMotion: 'no-preference' })
+    await page.clock.install()
+    await openFeedWith(page, [ADVISORY, ADVISORY_2])
+    const bar = page.getByTestId('pulse-alert-bar')
+    await expect(bar).toHaveAttribute('role', 'status')
+    await expect(bar).toHaveAttribute('aria-live', 'polite')
+    const first = await bar.getByTestId('pulse-alert-bar-message').innerText()
+    await page.clock.runFor(3600)
+    await expect(bar.getByTestId('pulse-alert-bar-message')).not.toHaveText(first)
+    await expect(bar).toContainText('ADVISORY')
+  })
+
+  test('holds on one alert with prefers-reduced-motion: reduce', async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: 'reduce' })
+    await page.clock.install()
+    await openFeedWith(page, [ADVISORY, ADVISORY_2])
+    const bar = page.getByTestId('pulse-alert-bar')
+    const message = bar.getByTestId('pulse-alert-bar-message')
+    const first = await message.innerText()
+    await page.clock.runFor(20000)
+    await expect(message).toHaveText(first)
+    await expectTouchTarget(page.getByTestId('pulse-alert-bar-details'), 44)
+  })
+})
+
+test.describe('alert bar: emergency live region at phone sizes', () => {
+  test('is a single role=status node, assertive, carrying the full text and severity label', async ({ page }) => {
+    await openFeedWith(page, [EMERGENCY])
+    await expect(page.getByTestId('pulse-alert-bar')).toHaveCount(1)
+    const bar = page.getByTestId('pulse-alert-bar')
+    await expect(bar).toHaveAttribute('role', 'status')
+    await expect(bar).toHaveAttribute('aria-live', 'assertive')
+    await expect(bar).toHaveAttribute('aria-atomic', 'true')
+    await expect(bar).toContainText('EMERGENCY')
+    await expect(bar).toContainText(EMERGENCY.message)
+  })
+})
+
+test.describe('alert bar: emergency + pause overlay interplay', () => {
+  test('both texts stay legible and the focus trap holds', async ({ page }) => {
+    await seedOverlay(page, { state: 'pause', register: 'out-of-fiction', message: '' })
+    await openFeedWith(page, [EMERGENCY])
+    const overlay = page.getByTestId('pulse-overlay-pause-out-of-fiction')
+    await expect(overlay).toBeVisible()
+    await expect(overlay.getByRole('heading', { name: 'EXERCISE PAUSED' })).toBeVisible()
+
+    // The emergency text must still be on screen: the opaque overlay may not
+    // paint over the bar, and the bar may not cover the overlay's heading.
+    const bar = page.getByTestId('pulse-alert-bar')
+    const message = bar.getByTestId('pulse-alert-bar-message')
+    await expect(message).toBeVisible()
+    const heading = overlay.getByRole('heading', { name: 'EXERCISE PAUSED' })
+    const topmostAt = (box: { x: number, y: number, width: number, height: number }) =>
+      page.evaluate(({ x, y }) => {
+        const el = document.elementFromPoint(x, y)
+        return el?.closest('[data-testid="pulse-alert-bar"]') ? 'bar'
+          : el?.closest('[data-shell-layer="overlay"]') ? 'overlay' : 'other'
+      }, { x: box.x + box.width / 2, y: box.y + box.height / 2 })
+    expect(await topmostAt(await boxOf(message)), 'emergency text is painted over').toBe('bar')
+    expect(await topmostAt(await boxOf(heading)), 'overlay heading is covered').toBe('overlay')
+    expect(boxesOverlap(await boxOf(message), await boxOf(heading))).toBe(false)
+    await expectNoHorizontalScroll(page)
+
+    // Focus trap: focus lands in the overlay and Tab never leaves it.
+    for (let i = 0; i < 6; i++) {
+      await page.keyboard.press('Tab')
+      const inside = await page.evaluate(() => {
+        const o = document.querySelector('[data-shell-layer="overlay"]')
+        return !!o && (o === document.activeElement || o.contains(document.activeElement))
+      })
+      expect(inside, `focus escaped the overlay after Tab #${i + 1}`).toBe(true)
+    }
+  })
+})
+
+test.describe('alert bar: scroll restoration on Back (AC3)', () => {
+  test('Back from /alerts restores the previous scroll position', async ({ page }) => {
+    await openFeedWith(page, [ADVISORY, EMERGENCY])
+    await expect(page.getByRole('tab', { name: 'All Posts' })).toBeVisible()
+    const scrollable = await expect.poll(() => page.evaluate(
+      () => document.documentElement.scrollHeight - window.innerHeight)).toBeGreaterThan(200)
+      .then(() => true, () => false)
+    expect(scrollable, 'the seeded feed must be tall enough to scroll').toBe(true)
+    const target = await page.evaluate(() => {
+      window.scrollTo(0, 250)
+      return window.scrollY
+    })
+    expect(target).toBeGreaterThan(150)
+    // Let the app's scroll listener settle before leaving.
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(target)
+    await page.getByTestId('pulse-alert-bar-details').click()
+    await expect(page).toHaveURL(/\/alerts$/)
+    await page.goBack()
+    await expect(page).toHaveURL(/\/home$/)
+    await expect(page.getByRole('tab', { name: 'All Posts' })).toBeVisible()
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(target - 5)
+  })
 })
