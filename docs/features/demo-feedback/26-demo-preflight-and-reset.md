@@ -89,7 +89,7 @@ Pester tests beside the scripts (`*.Tests.ps1`, same style as `Seed-DemoContent.
 
 ## Tests
 
-`Test-DemoReady.Tests.ps1` (66 tests, Pester 5, no network): a ready exercise passes all ten checks and is read-only
+`Test-DemoReady.Tests.ps1` (72 tests, Pester 5, no network): a ready exercise passes all ten checks and is read-only
 (only GETs besides sign-in/sign-out; sign-out also after a throw); sign-in body and `-ExerciseId`; check 1 health
 down / slow wake / schema 5xx / Wave 4 `persisted` true, absent, false; check 2 engine, running, injects, freeze;
 check 3 0 / 1 / 5 / 6 drafts; check 4 Fake, AzureOpenAI, cut to Fake; check 5 noise and watermark; check 6 missing
@@ -99,7 +99,7 @@ the window, 13 h old (WARN), frozen (WARN); check 10 edits 404 (WARN), seeded po
 script's exit code (1 on FAIL, 0 on WARN only); `-Json` contents and nothing written without it; no secret, token or
 SAS link in any stream (with `-Verbose -Debug`), the JSON file or `$Error`.
 
-`Invoke-DemoReset.Tests.ps1` (44 tests): order (reset route, Reset-DemoState, Clear, Seed `-RunSheet exceptMsel`,
+`Invoke-DemoReset.Tests.ps1` (50 tests): order (reset route, Reset-DemoState, Clear, Seed `-RunSheet exceptMsel`,
 Test-DemoReady) and each step's arguments; sign-out before step 2; stop on first failure at steps 2-5 (exit and
 throw), and at step 1 on 403/500, naming the step and the steps not run; fallback on 404: marker then `-Restart` then
 polling (no fixed wait), no marker when already off running, two consecutive `running` reads, `-Restart` exit not 3,
@@ -127,6 +127,11 @@ http refused with "Nothing was sent"), and only the bare host goes to the child 
 the exercise lifecycle (`GET /api/staff/exercise-lifecycle`, the signed-in exercise): `live` PASS, `staged` WARN
 (pre-start page until StartEx), anything else FAIL.
 
-Existing `Clear-DemoContent`, `Import-Roster` and `Seed-DemoContent` suites: 483 passed, unchanged (full scripts/uat run: 593 passed).
+PR #548 review, round 3: a demo pack that cannot be loaded (missing, unreadable, invalid JSON, not an object) is a
+FAIL, and checks 6, 7, 9 and the edits route FAIL with it instead of skipping. The restart wait has an elapsed-time
+budget on a monotonic clock (each request timeout and sleep capped to what is left; the real elapsed time reported).
+`-ApiHost` refuses any `http://` (localhost included) and any explicit port, before any request: https on 443 only.
+
+Existing `Clear-DemoContent`, `Import-Roster` and `Seed-DemoContent` suites: 483 passed, unchanged (full scripts/uat run: 605 passed).
 
 **Manual (pending):** the live run on UAT, both scripts, Saturday 10/17 after the last merge (Tom).
