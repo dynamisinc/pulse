@@ -324,8 +324,8 @@ Status remains **Built (backend), NOT Complete**. No migration, no `Program.cs` 
   incident lines as "ambient" chatter.
 - **S-2 (sentiment).** Folded into the filter. A generated post carries a continuous sentiment (−1…+1), not a tone
   category, so "Calm or Gratitude only" is enforced as `Sentiment ≥ −0.1` (`AmbientOutputFilter.MinSentiment`).
-- **W-4 (eligible personas).** `AmbientPolicyValidator.EligiblePersonaTypes` = Resident, Helper (**pending Tom's
-  confirmation**; the single constant). Enforced in the POST (400 naming the persona id, handle and type: the engine
+- **W-4 (eligible personas).** `AmbientPolicyValidator.EligiblePersonaTypes` = Resident, Helper (**confirmed by
+  Tom, 10/16: "Resident + Helper only"**; the single constant). Enforced in the POST (400 naming the persona id, handle and type: the engine
   cast's type when the persona is in the cast, otherwise its stored archetype — only `citizen` maps to an eligible type),
   in `AmbientBehavior.EligibleCast`, and at the publish re-check. `ambientPolicy.voiceablePersonaIds` = engine cast ∩
   eligible types (semantics change only; same key and shape).

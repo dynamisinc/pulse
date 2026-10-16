@@ -68,8 +68,8 @@ public static class AmbientPolicyValidator
     /// The persona types that may voice ambient chatter (orchestrator review W-4): ordinary members of the public only —
     /// <see cref="PersonaType.Resident"/> and <see cref="PersonaType.Helper"/>. An outlet, agency, troll or bot posting
     /// "everyday" content would read as institutional or adversarial speech, which background colour must never be.
-    /// <b>Pending Tom's confirmation</b> of the exact set; this constant is the single place to change it (the settings
-    /// POST, the loop's eligible cast, the publish re-check and the settings DTO's <c>voiceablePersonaIds</c> all read it).
+    /// <b>Confirmed by Tom (2026-10-16): "Resident + Helper only".</b> This constant is the single place to change it (the
+    /// settings POST, the loop's eligible cast, the publish re-check and the settings DTO's <c>voiceablePersonaIds</c> all read it).
     /// </summary>
     public static IReadOnlyList<PersonaType> EligiblePersonaTypes { get; } = [PersonaType.Resident, PersonaType.Helper];
 
