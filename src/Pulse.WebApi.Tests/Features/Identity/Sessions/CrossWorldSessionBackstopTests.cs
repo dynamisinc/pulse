@@ -1,6 +1,7 @@
 namespace Pulse.WebApi.Tests.Features.Identity.Sessions;
 
 using System;
+using System.Linq;
 using System.Threading.Tasks;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
@@ -11,6 +12,7 @@ using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.Identity.EasyLogin;
 using Pulse.WebApi.Features.Identity.Sessions;
+using Pulse.WebApi.Tests.Features.Identity.Enrollments;
 using Pulse.WebApi.Tests.Data;
 using Pulse.WebApi.Tests.Helpers;
 
@@ -117,7 +119,36 @@ public sealed class CrossWorldSessionBackstopTests
         PersonId = person,
     };
 
-    private static SessionIssuer IssuerFor(PulseDbContext context, string? origin)
+    [RequiresDockerFact]
+    public async Task TheBackstop_CutsTheRevokedSessionsLiveHubConnections_AfterTheCommit_Only()
+    {
+        var exerciseId = await SeedExerciseAsync();
+        var person = Guid.NewGuid();
+        await using (var seed = _fixture.CreateContext())
+        {
+            seed.StaffUsers.Add(StaffTenantSeed.StaffUserFor(person));
+            await seed.SaveChangesAsync();
+        }
+
+        var sameOriginParticipant = await SeedSessionAsync(person, exerciseId, "participant", ConsoleOrigin);
+        var otherOriginParticipant = await SeedSessionAsync(person, exerciseId, "participant", ExerciseOrigin);
+        var revoker = new RecordingConnectionRevoker();
+
+        await using (var context = _fixture.CreateContext())
+        {
+            await IssuerFor(context, ConsoleOrigin, revoker).IssueAsync(StaffRequest(exerciseId, person));
+        }
+
+        revoker.Revoked.ToList().Should().Equal(
+            [sameOriginParticipant],
+            "the revoked other-world session's live hub connections are cut, and nothing else's");
+        await using var read = _fixture.CreateContext();
+        (await read.Sessions.SingleAsync(s => s.Id == sameOriginParticipant)).RevokedAt.Should().NotBeNull(
+            "the cut follows a committed revocation");
+        (await read.Sessions.SingleAsync(s => s.Id == otherOriginParticipant)).RevokedAt.Should().BeNull();
+    }
+
+    private static SessionIssuer IssuerFor(PulseDbContext context, string? origin, RecordingConnectionRevoker? revoker = null)
     {
         var httpContext = new DefaultHttpContext();
         if (origin is not null)
@@ -132,7 +163,8 @@ public sealed class CrossWorldSessionBackstopTests
             Options.Create(new EasyLoginOptions()),
             TimeProvider.System,
             NullLogger<SessionIssuer>.Instance,
-            new HttpContextAccessor { HttpContext = httpContext });
+            new HttpContextAccessor { HttpContext = httpContext },
+            revoker);
     }
 
     private async Task<Guid> SeedExerciseAsync()

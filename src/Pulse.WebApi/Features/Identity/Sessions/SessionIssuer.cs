@@ -7,6 +7,7 @@ using Microsoft.Extensions.Options;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.Identity.EasyLogin;
+using Pulse.WebApi.Features.Realtime;
 
 /// <summary>
 /// The single <see cref="ISessionIssuer"/> implementation (story 03, the hinge): every login method
@@ -43,10 +44,12 @@ using Pulse.WebApi.Features.Identity.EasyLogin;
 /// request's <c>Origin</c> header is stamped onto <see cref="Session.Origin"/>. Minting a session for person P in one
 /// world (staff, or participant) revokes, in the SAME unit of work, P's live sessions of the OTHER world minted from
 /// the same origin. Separate origins (the console host and the exercise hosts) legitimately hold one world each, and
-/// a session with no person or no origin revokes nothing.
+/// a session with no person or no origin revokes nothing. Once that save commits, the revoked sessions' live hub
+/// connections are cut too (<see cref="ISessionConnectionRevoker"/>, the same seam the grant-revoke rule uses), so a
+/// revoked other-world tab stops receiving broadcasts at once rather than at its next re-validation.
 /// </para>
 /// </remarks>
-public sealed class SessionIssuer : ISessionIssuer
+public sealed partial class SessionIssuer : ISessionIssuer
 {
     private readonly PulseDbContext _dbContext;
     private readonly SessionOptions _options;
@@ -55,6 +58,7 @@ public sealed class SessionIssuer : ISessionIssuer
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<SessionIssuer> _logger;
     private readonly IHttpContextAccessor? _httpContextAccessor;
+    private readonly ISessionConnectionRevoker? _connectionRevoker;
 
     /// <summary>Creates the issuer over its persistence context, the configured session lifetimes and the day cap's inputs.</summary>
     /// <param name="dbContext">The persistence context the <see cref="Session"/> row is written through.</param>
@@ -67,6 +71,10 @@ public sealed class SessionIssuer : ISessionIssuer
     /// The current request, for its <c>Origin</c> header (the one-world-per-origin backstop). Optional: without it
     /// no origin is stamped and nothing is revoked across worlds.
     /// </param>
+    /// <param name="connectionRevoker">
+    /// Cuts the live hub connections of the other-world sessions the backstop revoked, after the commit. Optional: a host
+    /// without the realtime hub has no connections to cut.
+    /// </param>
     public SessionIssuer(
         PulseDbContext dbContext,
         IOptions<SessionOptions> options,
@@ -74,7 +82,8 @@ public sealed class SessionIssuer : ISessionIssuer
         IOptions<EasyLoginOptions> easyLoginOptions,
         TimeProvider timeProvider,
         ILogger<SessionIssuer> logger,
-        IHttpContextAccessor? httpContextAccessor = null)
+        IHttpContextAccessor? httpContextAccessor = null,
+        ISessionConnectionRevoker? connectionRevoker = null)
     {
         ArgumentNullException.ThrowIfNull(dbContext);
         ArgumentNullException.ThrowIfNull(options);
@@ -90,6 +99,7 @@ public sealed class SessionIssuer : ISessionIssuer
         _timeProvider = timeProvider;
         _logger = logger;
         _httpContextAccessor = httpContextAccessor;
+        _connectionRevoker = connectionRevoker;
     }
 
     /// <inheritdoc />
@@ -133,8 +143,9 @@ public sealed class SessionIssuer : ISessionIssuer
         };
 
         _dbContext.Sessions.Add(session);
-        await RevokeOtherWorldSessionsAsync(session, now, cancellationToken);
+        var revoked = await RevokeOtherWorldSessionsAsync(session, now, cancellationToken);
         await _dbContext.SaveChangesAsync(cancellationToken);
+        await CutRevokedConnectionsAsync(revoked, cancellationToken);
 
         return new SessionIssueResult
         {
@@ -202,13 +213,14 @@ public sealed class SessionIssuer : ISessionIssuer
 
     /// <summary>
     /// Stages the revocation of the person's live OTHER-world sessions minted from the same origin (the server
-    /// backstop of the one-world-per-origin rule). A no-op without a person or an origin.
+    /// backstop of the one-world-per-origin rule) and returns their ids, so their live hub connections can be cut once
+    /// the revocation commits. A no-op (empty) without a person or an origin.
     /// </summary>
-    private async Task RevokeOtherWorldSessionsAsync(Session minted, DateTimeOffset now, CancellationToken cancellationToken)
+    private async Task<IReadOnlyList<Guid>> RevokeOtherWorldSessionsAsync(Session minted, DateTimeOffset now, CancellationToken cancellationToken)
     {
         if (minted.PersonId is not { } personId || minted.Origin is not { } origin)
         {
-            return;
+            return [];
         }
 
         var mintedIsStaff = string.Equals(minted.Kind, StaffKind, StringComparison.Ordinal);
@@ -222,9 +234,41 @@ public sealed class SessionIssuer : ISessionIssuer
                 && (mintedIsStaff ? s.Kind != StaffKind : s.Kind == StaffKind))
             .ToListAsync(cancellationToken);
 
+        var revoked = new List<Guid>();
         foreach (var other in others.Where(other => other.IsLive(now)))
         {
             other.RevokedAt = now;
+            revoked.Add(other.Id);
+        }
+
+        return revoked;
+    }
+
+    /// <summary>
+    /// Cuts the live hub connections of the just-committed backstop revocations. The new session has already committed,
+    /// so a failure here is logged, never surfaced: the revoked rows are dead regardless, and a connection that survives
+    /// fails its next re-validation.
+    /// </summary>
+    private async Task CutRevokedConnectionsAsync(IReadOnlyList<Guid> revoked, CancellationToken cancellationToken)
+    {
+        if (_connectionRevoker is null || revoked.Count == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            await _connectionRevoker.RevokeAsync(revoked, cancellationToken);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            LogConnectionCutFailed(revoked.Count, exception);
         }
     }
+
+    [LoggerMessage(
+        EventId = 1,
+        Level = LogLevel.Warning,
+        Message = "Could not cut the live hub connections of {Count} other-world session(s) revoked by the one-world-per-origin backstop.")]
+    private partial void LogConnectionCutFailed(int count, Exception exception);
 }
