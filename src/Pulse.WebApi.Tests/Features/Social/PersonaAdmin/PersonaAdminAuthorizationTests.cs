@@ -66,9 +66,10 @@ public sealed class PersonaAdminAuthorizationTests
         await AssertRefusedAsync(exercise.Host, expired, personaId, HttpStatusCode.Unauthorized, "an expired session is no session");
     }
 
+    // identity-auth-roles/17 (§8.2): persona edit is the planner's AND the controller's — the planner row moved from
+    // refused to admitted (RoleMatrixTests: PATCH /api/staff/personas/{personaId}); the evaluator is still refused.
     [RequiresDockerTheory]
     [InlineData("evaluator")]
-    [InlineData("planner")]
     public async Task AssignedNonControllerStaff_Returns403_AndChangesNothing(string role)
     {
         var exercise = await _seed.SeedExerciseAsync();
@@ -76,7 +77,7 @@ public sealed class PersonaAdminAuthorizationTests
         var staff = await _seed.SeedStaffSessionAsync(exercise.Id, [(exercise.Id, role)]);
 
         await AssertRefusedAsync(
-            exercise.Host, staff, personaId, HttpStatusCode.Forbidden, $"an assigned {role} may read personas but only a controller edits them");
+            exercise.Host, staff, personaId, HttpStatusCode.Forbidden, $"an assigned {role} may read personas but only a planner or controller edits them");
     }
 
     [RequiresDockerFact]

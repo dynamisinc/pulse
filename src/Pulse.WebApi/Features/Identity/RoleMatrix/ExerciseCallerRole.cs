@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
+using Pulse.WebApi.Features.EngineRuntime;
 using Pulse.WebApi.Features.ExerciseConfiguration.Lifecycle;
 using Pulse.WebApi.Features.Identity.Staff;
 
@@ -114,6 +115,36 @@ public sealed class ExerciseCallerRole
         return resolved;
     }
 
+    /// <summary>
+    /// The "no lead ⇒ swamped off" re-check (identity-auth-roles/16 M-002): swamped mode is in-memory, and the
+    /// post-commit OFF flip a lead removal stages could in principle fail. Every gated staff request on the exercise
+    /// therefore re-checks — cheaply, only while swamped mode is on — that the exercise still has a lead, and turns
+    /// swamped mode off (idempotently) when it has none.
+    /// </summary>
+    private static async Task EnsureSwampedOffWithoutLeadAsync(
+        IServiceProvider services,
+        PulseDbContext dbContext,
+        Guid exerciseId,
+        CancellationToken cancellationToken)
+    {
+        var registry = services.GetService<EngineAutonomyRegistry>();
+        if (registry is null || !registry.GetOrCreate(exerciseId).SwampedModeEnabled)
+        {
+            return;
+        }
+
+        var hasLead = await dbContext.Enrollments
+            .AsNoTracking()
+            .AnyAsync(e => e.ExerciseId == exerciseId && e.IsLead, cancellationToken);
+        if (!hasLead)
+        {
+            registry.GetOrCreate(exerciseId).SetSwampedMode(false, NoLeadActor, 0);
+        }
+    }
+
+    /// <summary>The actor recorded when the re-check turns swamped mode off for an exercise with no lead.</summary>
+    public const string NoLeadActor = "system:no-lead";
+
     private static async Task<ExerciseCallerRole> ResolveUncachedAsync(HttpContext httpContext)
     {
         var services = httpContext.RequestServices;
@@ -157,6 +188,8 @@ public sealed class ExerciseCallerRole
                 ExerciseId = exerciseId,
             };
         }
+
+        await EnsureSwampedOffWithoutLeadAsync(services, dbContext, exerciseId, cancellationToken);
 
         // org-scope-exempt(ResolvedScope): exerciseId is the SERVER-resolved scope the caller is enrolled in (just
         // proven above), never a request value.

@@ -185,8 +185,22 @@ public sealed class RecordingSwampedModeSwitch : ISwampedModeSwitch
 
     public bool WasOn { get; set; } = true;
 
+    public int FailuresBeforeSuccess { get; set; }
+
+    /// <summary>Runs inside TurnOff (before the call is recorded) — lets a test observe what had committed by then.</summary>
+    public Action<Guid>? OnTurnOff { get; set; }
+
+    public bool IsOn(Guid exerciseId) => WasOn;
+
     public bool TurnOff(Guid exerciseId, string actingHumanId)
     {
+        if (FailuresBeforeSuccess > 0)
+        {
+            FailuresBeforeSuccess--;
+            throw new InvalidOperationException("simulated swamped-mode flip failure");
+        }
+
+        OnTurnOff?.Invoke(exerciseId);
         Calls.Enqueue((exerciseId, actingHumanId));
         return WasOn;
     }

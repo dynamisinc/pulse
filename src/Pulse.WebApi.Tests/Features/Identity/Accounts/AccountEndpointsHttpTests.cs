@@ -114,14 +114,16 @@ public sealed class AccountEndpointsHttpTests
     }
 
     [Fact]
-    public async Task StaffCreateAccount_NullBody_Returns400()
+    public async Task StaffCreateAccount_NullBody_WithNoSession_Is401BeforeTheBodyIsRead()
     {
         using var host = await StartHostAsync();
         using var client = host.GetTestClient();
 
         var response = await client.PostAsync("/api/staff/accounts", new StringContent("null", Encoding.UTF8, "application/json"));
 
-        response.StatusCode.Should().Be(HttpStatusCode.BadRequest, "a missing account body is a 400");
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized,
+            "identity-auth-roles/17: the planner/controller role gate runs before the handler, so a session-less request "
+            + "is refused before its (missing) body is even read");
     }
 
     [Fact]
@@ -138,7 +140,7 @@ public sealed class AccountEndpointsHttpTests
     }
 
     [Fact]
-    public async Task StaffImport_EmptyFile_Returns400()
+    public async Task StaffImport_EmptyFile_WithNoSession_Is401BeforeTheFileIsRead()
     {
         using var host = await StartHostAsync();
         using var client = host.GetTestClient();
@@ -146,11 +148,12 @@ public sealed class AccountEndpointsHttpTests
         using var content = CsvUpload(string.Empty);
         var response = await client.PostAsync("/api/staff/accounts/import", content);
 
-        response.StatusCode.Should().Be(HttpStatusCode.BadRequest, "an empty CSV upload is rejected at the boundary");
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized,
+            "identity-auth-roles/17: the role gate refuses a session-less upload before the file is inspected");
     }
 
     [Fact]
-    public async Task StaffImport_OversizedFile_Returns400()
+    public async Task StaffImport_OversizedFile_WithNoSession_Is401BeforeTheSizeGuard()
     {
         using var host = await StartHostAsync();
         using var client = host.GetTestClient();
@@ -159,8 +162,9 @@ public sealed class AccountEndpointsHttpTests
         using var content = CsvUpload(oversized);
         var response = await client.PostAsync("/api/staff/accounts/import", content);
 
-        response.StatusCode.Should().Be(HttpStatusCode.BadRequest,
-            "an upload over the configured size limit is rejected at the boundary (a size guard, NFR-004)");
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized,
+            "identity-auth-roles/17: a session-less oversized upload is refused by the role gate before the handler's "
+            + "size guard (NFR-004) — which still runs for every authorized caller");
     }
 
     private static MultipartFormDataContent CsvUpload(string csv)

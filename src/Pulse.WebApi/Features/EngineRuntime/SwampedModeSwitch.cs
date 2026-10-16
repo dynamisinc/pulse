@@ -21,6 +21,14 @@ public interface ISwampedModeSwitch
     /// <param name="actingHumanId">The human whose action caused it (COR-018).</param>
     /// <returns>Whether swamped mode was ON before the call.</returns>
     bool TurnOff(Guid exerciseId, string actingHumanId);
+
+    /// <summary>
+    /// Whether swamped mode is currently on for <paramref name="exerciseId"/> — read without changing anything, so the
+    /// caller can audit the state BEFORE its unit of work commits and flip it only AFTER (identity-auth-roles/16 M-002).
+    /// </summary>
+    /// <param name="exerciseId">The exercise.</param>
+    /// <returns><c>true</c> when swamped mode is on.</returns>
+    bool IsOn(Guid exerciseId);
 }
 
 /// <summary>The production <see cref="ISwampedModeSwitch"/> over the shared <see cref="EngineAutonomyRegistry"/>.</summary>
@@ -38,6 +46,10 @@ public sealed class EngineSwampedModeSwitch : ISwampedModeSwitch
         _autonomy = autonomy;
         _clock = clock;
     }
+
+    /// <inheritdoc />
+    /// <inheritdoc />
+    public bool IsOn(Guid exerciseId) => _autonomy.GetOrCreate(exerciseId).SwampedModeEnabled;
 
     /// <inheritdoc />
     public bool TurnOff(Guid exerciseId, string actingHumanId)

@@ -93,12 +93,18 @@ public sealed class EnrollmentService
     private const int DuplicateKeyErrorNumber = 2601;
     private const int UniqueConstraintErrorNumber = 2627;
 
+    /// <summary>How many times a post-commit swamped-mode OFF flip is attempted before the next-request re-check takes over.</summary>
+    private const int SwampedOffAttempts = 3;
+
     private readonly PulseDbContext _dbContext;
     private readonly StaffCallerContext _staffCaller;
     private readonly IExerciseContext _exerciseContext;
     private readonly TimeProvider _timeProvider;
     private readonly ISwampedModeSwitch _swampedMode;
     private readonly ISessionConnectionRevoker _connectionRevoker;
+
+    /// <summary>Exercises whose swamped mode must go OFF once this request's unit of work has committed (M-002).</summary>
+    private readonly List<(Guid ExerciseId, string Actor)> _swampedOffAfterCommit = [];
 
     /// <summary>Creates the service.</summary>
     /// <param name="dbContext">The request-scoped persistence context (one unit of work).</param>
@@ -364,6 +370,7 @@ public sealed class EnrollmentService
         var revoked = await RevokeExerciseSessionsAsync(exercise.Id, [enrollment.PersonId], now, cancellationToken);
         Record(caller, exercise, enrollment, RoleChangedEventType, RoleChangedAuditKind, RolePayload(staffRole, previousRole), now);
         await _dbContext.SaveChangesAsync(cancellationToken);
+        TurnSwampedOffAfterCommit();
         await _connectionRevoker.RevokeAsync(revoked, cancellationToken);
 
         return EnrollmentResult.Ok(enrollment);
@@ -398,6 +405,7 @@ public sealed class EnrollmentService
         var revoked = await RevokeExerciseSessionsAsync(exercise.Id, [enrollment.PersonId], now, cancellationToken);
         Record(caller, exercise, enrollment, RevokedEventType, RevokedAuditKind, RolePayload(role: null, enrollment.Role), now);
         await _dbContext.SaveChangesAsync(cancellationToken);
+        TurnSwampedOffAfterCommit();
         await _connectionRevoker.RevokeAsync(revoked, cancellationToken);
 
         return EnrollmentResult.Ok(enrollment);
@@ -419,9 +427,12 @@ public sealed class EnrollmentService
 
         enrollment.IsLead = false;
 
-        // Swamped mode lives in the in-memory engine autonomy registry, not in this unit of work. Turning it OFF is the
-        // safe direction (it only ever lowers autonomy) and idempotent, so it happens before the save.
-        var swampedWasOn = _swampedMode.TurnOff(exercise.Id, caller.StaffUserId.ToString());
+        // Swamped mode lives in the in-memory engine autonomy registry, not in this unit of work (M-002). The audit
+        // records whether it was on NOW; the flip itself happens only AFTER the enrollment change commits
+        // (TurnSwampedOffAfterCommit), so a failed save never leaves swamped mode off for a lead who kept the flag.
+        // The flip is idempotent, and ExerciseCallerRole re-checks "no lead ⇒ swamped off" on the next gated request.
+        var swampedWasOn = _swampedMode.IsOn(exercise.Id);
+        _swampedOffAfterCommit.Add((exercise.Id, caller.StaffUserId.ToString()));
 
         var leadPayload = string.Create(
             CultureInfo.InvariantCulture,
@@ -433,6 +444,37 @@ public sealed class EnrollmentService
             CultureInfo.InvariantCulture,
             $"{{\"reason\":\"lead-released\",\"wasOn\":{(swampedWasOn ? "true" : "false")}}}");
         Record(caller, exercise, enrollment, SwampedModeOffEventType, SwampedModeOffAuditKind, swampedPayload, now);
+    }
+
+    /// <summary>
+    /// Applies the swamped-mode OFF flips staged by <see cref="ReleaseLeadIfLost"/>, AFTER the save committed. Idempotent
+    /// and retried; a flip that still fails is healed by the next gated staff request on the exercise
+    /// (<c>ExerciseCallerRole</c>'s "no lead ⇒ swamped off" re-check), so it is never left on without a lead.
+    /// </summary>
+    private void TurnSwampedOffAfterCommit()
+    {
+        foreach (var (exerciseId, actor) in _swampedOffAfterCommit)
+        {
+            for (var attempt = 1; attempt <= SwampedOffAttempts; attempt++)
+            {
+                try
+                {
+                    _swampedMode.TurnOff(exerciseId, actor);
+                    break;
+                }
+                catch (Exception) when (attempt < SwampedOffAttempts)
+                {
+                    // Retry: the flip is idempotent.
+                }
+                catch (Exception)
+                {
+                    // Out of attempts: the next gated request on the exercise re-checks and heals it. Never fail the
+                    // already-committed enrollment change over the in-memory flip.
+                }
+            }
+        }
+
+        _swampedOffAfterCommit.Clear();
     }
 
     private static string RolePayload(string? role, string? previousRole) => string.Create(
