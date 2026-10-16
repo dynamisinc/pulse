@@ -114,10 +114,14 @@ public sealed class ExerciseLifecycleResult
 /// <b>Isolation (always-Critical, COR-001/XC-001).</b> <see cref="Exercise"/> is the SCOPE, not an
 /// <see cref="IExerciseScoped"/> entity, so <c>PulseDbContext</c>'s central read-side query filter is a
 /// NO-OP on the <c>Exercises</c> table — an unguarded lookup here would happily return, and transition,
-/// ANOTHER exercise's row. The exercise is therefore taken ONLY from <see cref="IExerciseContext"/>. No method
-/// on this type accepts an exercise id, and the transition request body carries none, so a cross-exercise
-/// transition is structurally impossible rather than merely rejected; the endpoint layers the staff
-/// assignment gate (403) on top.
+/// ANOTHER exercise's row. The exercise therefore has exactly TWO provenances, and no other: (1) every PUBLIC
+/// method takes it ONLY from <see cref="IExerciseContext"/> (no public method accepts an exercise id, and the
+/// transition request body carries none, so a cross-exercise transition is structurally impossible rather than
+/// merely rejected; the endpoint layers the staff assignment gate (403) on top); and (2) the INTERNAL
+/// <see cref="TransitionTenantCheckedAsync"/>, used only by the org-tier archive row action
+/// (<c>ExerciseLifecycleAdmin.ExerciseManagementService</c>, demo-feedback story 22), which takes an exercise id
+/// together with the caller's server-resolved organization and re-bounds its own read with
+/// <c>InOrganization(...)</c>, so another customer's exercise reads as not found there too.
 /// </para>
 /// <para>
 /// <b>No schema, no migration (story 01a owns the column).</b> This service reads and writes
@@ -232,13 +236,67 @@ public sealed class ExerciseLifecycleService
 
         // org-scope-exempt(ResolvedScope): exerciseId comes from the server-resolved scope, never the request
         // body (the body carries only the target state), so this lifecycle write stays inside the caller's tenant.
+        // (The one other way in, TransitionTenantCheckedAsync, carries its own InOrganization bound below.)
         var exercise = await _dbContext.Exercises
             .FirstOrDefaultAsync(e => e.Id == exerciseId, cancellationToken);
 
+        return await ApplyTransitionAsync(exercise, target, cancellationToken);
+    }
+
+    /// <summary>
+    /// Applies a lifecycle transition to an exercise named by id, for the ORG-TIER row actions only
+    /// (demo-feedback story 22's archive). This is the second, tenant-checked provenance the class remarks name:
+    /// the read is bounded by <paramref name="organizationId"/> — the caller's SERVER-resolved tenant, never a
+    /// request value — so another customer's exercise is <see cref="ExerciseLifecycleOutcome.NotFound"/> here,
+    /// exactly like an id that does not exist. Everything after the read is the same machine and the same single
+    /// unit of work as <see cref="TransitionAsync"/>.
+    /// </summary>
+    /// <param name="organizationId">The caller's server-resolved customer tenant.</param>
+    /// <param name="exerciseId">The exercise to move (a route value the caller has already tenant-checked).</param>
+    /// <param name="request">The requested target state.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>A result the caller maps to a status.</returns>
+    internal async Task<ExerciseLifecycleResult> TransitionTenantCheckedAsync(
+        Guid organizationId,
+        Guid exerciseId,
+        ExerciseLifecycleTransitionRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        if (organizationId == Guid.Empty || exerciseId == Guid.Empty)
+        {
+            return ExerciseLifecycleResult.NotFound();
+        }
+
+        if (!ExerciseLifecycleStates.TryParse(request.To, out var target))
+        {
+            return ExerciseLifecycleResult.Invalid(
+                $"'to' must be one of: {string.Join(", ", ExerciseLifecycleStates.All)}.");
+        }
+
+        var exercise = await _dbContext.Exercises
+            .InOrganization(organizationId)
+            .FirstOrDefaultAsync(e => e.Id == exerciseId, cancellationToken);
+
+        return await ApplyTransitionAsync(exercise, target, cancellationToken);
+    }
+
+    /// <summary>
+    /// The shared transition step: runs the machine against the loaded row and, when allowed, stages the status
+    /// change and its one audit event and saves them together. Nothing is written on any refusal.
+    /// </summary>
+    private async Task<ExerciseLifecycleResult> ApplyTransitionAsync(
+        Exercise? exercise,
+        string target,
+        CancellationToken cancellationToken)
+    {
         if (exercise is null)
         {
             return ExerciseLifecycleResult.NotFound();
         }
+
+        var exerciseId = exercise.Id;
 
         var storedBefore = exercise.Status;
         if (!ExerciseLifecycleStates.TryParse(storedBefore, out var from))

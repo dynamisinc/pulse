@@ -126,3 +126,26 @@ public sealed class OrgStaffAssignmentDto
     [JsonPropertyName("assignedAt")]
     public required string AssignedAt { get; init; }
 }
+
+/// <summary>
+/// The <c>PATCH /api/org/exercises/{exerciseId}</c> request body (demo-feedback story 22). A nullable scalar so a
+/// missing name is a validation <c>400</c>, never a deserialization failure. Validated by the exercise-settings
+/// name rule (<c>ExerciseSettingsFieldRules.TryNormalizeName</c>).
+/// </summary>
+public sealed class RenameExerciseRequest
+{
+    /// <summary>The new staff-facing name. Sanitized on ingest (markup stripped) and 1..200 characters.</summary>
+    [JsonPropertyName("name")]
+    public string? Name { get; init; }
+}
+
+/// <summary>
+/// The <c>409</c> body of an org exercise row action that the exercise's state refuses (story 22):
+/// <c>{ "reason": "not-completed" }</c> when archive is asked of an exercise that is not completed.
+/// </summary>
+public sealed class ExerciseActionConflictDto
+{
+    /// <summary>The stable machine-readable reason.</summary>
+    [JsonPropertyName("reason")]
+    public required string Reason { get; init; }
+}

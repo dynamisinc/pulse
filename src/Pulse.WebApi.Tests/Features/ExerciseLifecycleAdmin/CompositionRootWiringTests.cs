@@ -93,32 +93,59 @@ public sealed class CompositionRootWiringTests
         provider.GetService<ExerciseCreationService>().Should().NotBeNull();
         provider.GetService<ExerciseListService>().Should().NotBeNull();
         provider.GetService<OrgStaffDirectoryService>().Should().NotBeNull();
+        provider.GetService<ExerciseManagementService>().Should().NotBeNull("story 22's rename and archive handlers");
     }
 
     /// <summary>
-    /// The route table's shape is itself part of the isolation guarantee: no org-tier route may take an
-    /// exercise id, a staff-user id or (above all) an organization id as a route parameter. The tenant is
-    /// always the caller's own, resolved server-side — so there is no IDOR surface on the org axis at all.
+    /// The route table's shape is itself part of the isolation guarantee. No org-tier route may take an
+    /// organization id or a staff-user id, and until demo-feedback story 22 none took any parameter at all. Story
+    /// 22's row actions need an EXERCISE id, so the rule is now an explicit allow-list
+    /// (<see cref="ExerciseLifecycleAdminEndpoints.ExerciseIdRoutes"/>): the parameterized org routes must be
+    /// EXACTLY that list, each taking ONE <c>exerciseId</c> with a <c>guid</c> constraint, and every entry must be
+    /// driven by <see cref="OrgExerciseByIdIsolationTests"/>, which proves it answers another customer's exercise
+    /// with the same bare 404 as an id that does not exist. A new id-bearing org route therefore fails here until it
+    /// is allow-listed, and cannot be allow-listed without a foreign-tenant 404 test.
     /// </summary>
     [Fact]
-    public void TheOrgTierRoutes_TakeNoRouteParameters_SoThereIsNoIdorSurfaceOnTheOrgAxis()
+    public void TheOrgTierRoutes_TakeOnlyAllowListedExerciseIds()
     {
         using var factory = new WiringProbeFactory();
 
-        var offenders = factory.Services.GetRequiredService<EndpointDataSource>()
+        var parameterized = factory.Services.GetRequiredService<EndpointDataSource>()
             .Endpoints
             .OfType<RouteEndpoint>()
             .Where(endpoint => (endpoint.RoutePattern.RawText ?? string.Empty)
                 .StartsWith("/api/org/", StringComparison.OrdinalIgnoreCase))
             .Where(endpoint => endpoint.RoutePattern.Parameters.Count > 0)
-            .Select(endpoint => endpoint.RoutePattern.RawText)
             .ToList();
 
-        offenders.Should().BeEmpty(
-            "an /api/org/{{id}}-shaped route would invite exactly the client-supplied scope COR-001 forbids "
-            + "one tier down. Every read here is bounded by the caller's OWN server-resolved tenant, and a "
-            + "route parameter is the first step towards someone bounding it by a path value instead. "
-            + "Offending route(s): " + string.Join(", ", offenders));
+        // Keyed by (method, template): a new GET or DELETE on an allow-listed PATH is still a new endpoint and
+        // must earn its own entry (and its own foreign-tenant case below).
+        var pairs = parameterized
+            .SelectMany(endpoint => (endpoint.Metadata.GetMetadata<HttpMethodMetadata>()?.HttpMethods
+                    ?? ["(any)"])
+                .Select(method => (Method: method, Route: endpoint.RoutePattern.RawText ?? string.Empty)))
+            .ToList();
+
+        pairs.Should().OnlyHaveUniqueItems();
+        pairs.Should().BeEquivalentTo(
+            ExerciseLifecycleAdminEndpoints.ExerciseIdRoutes,
+            "an /api/org/{{id}}-shaped endpoint invites exactly the client-supplied scope COR-001 forbids one tier "
+            + "down. Only the allow-listed story-22 (method, route) pairs may carry an id, each authorized against "
+            + "the caller's own server-resolved tenant");
+
+        foreach (var endpoint in parameterized)
+        {
+            var parameter = endpoint.RoutePattern.Parameters.Should().ContainSingle(
+                "{0} takes exactly one route value", endpoint.RoutePattern.RawText).Which;
+            parameter.Name.Should().Be("exerciseId", "never an organization or staff-user id on the org tier");
+            parameter.ParameterPolicies.Select(policy => policy.Content).Should().Contain(
+                "guid", "{0}: a non-GUID never reaches the handler", endpoint.RoutePattern.RawText);
+        }
+
+        OrgExerciseByIdIsolationTests.Callers.Keys.Should().BeEquivalentTo(
+            ExerciseLifecycleAdminEndpoints.ExerciseIdRoutes,
+            "every allow-listed (method, route) must be driven by the foreign-tenant 404 test");
     }
 
     private static int CountRoutes(EndpointDataSource dataSource, string method, string rawText)
