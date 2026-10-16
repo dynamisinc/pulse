@@ -1,7 +1,7 @@
 # Story: Audit refused attribution attempts (#389)
 
 **Feature:** Identity, auth & roles  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Not Started
-**Requirements:** COR-018, XC-004, NFR-009  ·  **Design decisions:** ADMIN-IDENTITY-MODEL §10 (A5)  ·  **Issue:** —
+**Requirements:** COR-018, XC-004, NFR-009  ·  **Design decisions:** ADMIN-IDENTITY-MODEL §10 (A5)  ·  **Issue:** #389
 **Stack:** backend  ·  **Review tier:** Tier-2 (security)  ·  **Wave:** A5
 
 ## Context

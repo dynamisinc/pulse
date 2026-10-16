@@ -1,7 +1,7 @@
 # Story: Delete an exercise that never ran
 
 **Feature:** Exercise build & go-live  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Not Started
-**Requirements:** COR-032, COR-074  ·  **Design decisions:** ADMIN-IDENTITY-MODEL §5.2, §8.2  ·  **Issue:** —
+**Requirements:** COR-032, COR-074  ·  **Design decisions:** ADMIN-IDENTITY-MODEL §5.2, §8.2  ·  **Issue:** #581
 **Stack:** fullstack  ·  **Review tier:** Tier-2 (data deletion, isolation)  ·  **Wave:** A3
 
 ## Context

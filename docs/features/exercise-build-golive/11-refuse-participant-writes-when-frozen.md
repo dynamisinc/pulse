@@ -1,7 +1,7 @@
 # Story: Refuse participant writes in Freeze and pause (#379)
 
 **Feature:** Exercise build & go-live  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Not Started
-**Requirements:** CTL-023, COR-032, SOC-001  ·  **Design decisions:** ADMIN-IDENTITY-MODEL §5.1, §8.2 (L: live, not frozen), §10 (A5)  ·  **Issue:** —
+**Requirements:** CTL-023, COR-032, SOC-001  ·  **Design decisions:** ADMIN-IDENTITY-MODEL §5.1, §8.2 (L: live, not frozen), §10 (A5)  ·  **Issue:** #379
 **Stack:** backend  ·  **Review tier:** Tier-2 (correctness, security)  ·  **Wave:** A5
 
 ## Context

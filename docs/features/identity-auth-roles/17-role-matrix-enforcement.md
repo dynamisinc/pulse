@@ -1,7 +1,7 @@
 # Story: Role-matrix enforcement (per-route, per-transition) with a route x role matrix test
 
 **Feature:** Identity, auth & roles  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Not Started
-**Requirements:** COR-010, COR-013 (+ P0 #377, #481, #61)  ·  **Design decisions:** ADMIN-IDENTITY-MODEL §8.2, §5.1  ·  **Issue:** —
+**Requirements:** COR-010, COR-013 (+ P0 #377, #481, #61)  ·  **Design decisions:** ADMIN-IDENTITY-MODEL §8.2, §5.1  ·  **Issue:** #573
 **Stack:** backend  ·  **Review tier:** Tier-2 (security)  ·  **Wave:** A1
 
 ## Context

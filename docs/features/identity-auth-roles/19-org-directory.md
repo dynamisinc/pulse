@@ -1,7 +1,7 @@
 # Story: Org directory (people list and org-admin grants)
 
 **Feature:** Identity, auth & roles  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Not Started
-**Requirements:** COR-010, COR-077, COR-017  ·  **Design decisions:** ADMIN-IDENTITY-MODEL §1.1, §2.1, §7.1, §8.2  ·  **Issue:** —
+**Requirements:** COR-010, COR-077, COR-017  ·  **Design decisions:** ADMIN-IDENTITY-MODEL §1.1, §2.1, §7.1, §8.2  ·  **Issue:** #574
 **Stack:** fullstack  ·  **Review tier:** Tier-2 (isolation)  ·  **Wave:** A2
 
 ## Context

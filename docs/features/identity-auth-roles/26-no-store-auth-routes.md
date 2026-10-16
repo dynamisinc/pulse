@@ -1,7 +1,7 @@
 # Story: Cache-Control: no-store on auth routes (#485)
 
 **Feature:** Identity, auth & roles  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Not Started
-**Requirements:** NFR-009, COR-012  ·  **Design decisions:** ADMIN-IDENTITY-MODEL §3.3, §10 (A5)  ·  **Issue:** —
+**Requirements:** NFR-009, COR-012  ·  **Design decisions:** ADMIN-IDENTITY-MODEL §3.3, §10 (A5)  ·  **Issue:** #485
 **Stack:** backend  ·  **Review tier:** Tier-2 (security)  ·  **Wave:** A5
 
 ## Context

@@ -1,7 +1,7 @@
 # Story: Participant-facing exercise name (#180 / #376)
 
 **Feature:** Exercise build & go-live  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Not Started
-**Requirements:** COR-032, COR-053, SOC-001 (+ #180, #376)  ·  **Design decisions:** ADMIN-IDENTITY-MODEL §8.4  ·  **Issue:** —
+**Requirements:** COR-032, COR-053, SOC-001 (+ #180, #376)  ·  **Design decisions:** ADMIN-IDENTITY-MODEL §8.4  ·  **Issue:** #376
 **Stack:** fullstack  ·  **Review tier:** Tier-2 (isolation, information leak)  ·  **Wave:** A3
 
 ## Context

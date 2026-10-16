@@ -1,7 +1,7 @@
 # Story: Content pack upload and apply (pulse.demopack.v1)
 
 **Feature:** Persona management & cast libraries  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Not Started
-**Requirements:** COR-020, COR-021, COR-023, COR-024  ·  **Design decisions:** ADMIN-IDENTITY-MODEL §6.1, §8.2  ·  **Issue:** —
+**Requirements:** COR-020, COR-021, COR-023, COR-024  ·  **Design decisions:** ADMIN-IDENTITY-MODEL §6.1, §8.2  ·  **Issue:** #582
 **Stack:** fullstack  ·  **Review tier:** Tier-2 (isolation, content security)  ·  **Wave:** A4
 
 ## Context

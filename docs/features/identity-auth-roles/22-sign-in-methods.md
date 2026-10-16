@@ -1,7 +1,7 @@
 # Story: Per-exercise sign-in methods
 
 **Feature:** Identity, auth & roles  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Not Started
-**Requirements:** COR-011, COR-017, COR-015  ·  **Design decisions:** ADMIN-IDENTITY-MODEL §3.4, §5.3, §8.2  ·  **Issue:** —
+**Requirements:** COR-011, COR-017, COR-015  ·  **Design decisions:** ADMIN-IDENTITY-MODEL §3.4, §5.3, §8.2  ·  **Issue:** #577
 **Stack:** fullstack  ·  **Review tier:** Tier-2 (security)  ·  **Wave:** A2
 
 ## Context

@@ -1,7 +1,7 @@
 # Story: Reset, reopen, unstage and unarchive
 
 **Feature:** Exercise build & go-live  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Not Started
-**Requirements:** COR-043, COR-032 (+ #377/#481)  ·  **Design decisions:** ADMIN-IDENTITY-MODEL §5.1, §5.2, §5.4, §5.4a, §8.5  ·  **Issue:** —
+**Requirements:** COR-043, COR-032 (+ #377/#481)  ·  **Design decisions:** ADMIN-IDENTITY-MODEL §5.1, §5.2, §5.4, §5.4a, §8.5  ·  **Issue:** #580
 **Stack:** fullstack  ·  **Review tier:** Tier-2 (data deletion, isolation)  ·  **Wave:** A3
 
 ## Context

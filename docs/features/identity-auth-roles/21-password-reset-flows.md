@@ -1,7 +1,7 @@
 # Story: Password reset flows (CredentialToken, forgot, admin reset, temporary password)
 
 **Feature:** Identity, auth & roles  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Not Started
-**Requirements:** COR-011, COR-017, COR-012, NFR-009  ·  **Design decisions:** ADMIN-IDENTITY-MODEL §3.2, §3.3, §3.4  ·  **Issue:** —
+**Requirements:** COR-011, COR-017, COR-012, NFR-009  ·  **Design decisions:** ADMIN-IDENTITY-MODEL §3.2, §3.3, §3.4  ·  **Issue:** #576
 **Stack:** fullstack  ·  **Review tier:** Tier-2 (security)  ·  **Wave:** A2
 
 ## Context

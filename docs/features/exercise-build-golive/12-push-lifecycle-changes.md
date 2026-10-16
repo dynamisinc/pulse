@@ -1,7 +1,7 @@
 # Story: Push lifecycle changes to connected clients (#390)
 
 **Feature:** Exercise build & go-live  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Not Started
-**Requirements:** COR-032, CTL-023, NFR-002  ·  **Design decisions:** ADMIN-IDENTITY-MODEL §5.1, §10 (A5)  ·  **Issue:** —
+**Requirements:** COR-032, CTL-023, NFR-002  ·  **Design decisions:** ADMIN-IDENTITY-MODEL §5.1, §10 (A5)  ·  **Issue:** #390
 **Stack:** fullstack  ·  **Review tier:** Tier-2 (isolation)  ·  **Wave:** A5
 
 ## Context

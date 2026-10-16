@@ -1,7 +1,7 @@
 # Story: Staff invite and assign to exercises
 
 **Feature:** Identity, auth & roles  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Not Started
-**Requirements:** COR-010, COR-011, COR-077  ·  **Design decisions:** ADMIN-IDENTITY-MODEL §1.1, §3.3, §7.5, §8.2  ·  **Issue:** —
+**Requirements:** COR-010, COR-011, COR-077  ·  **Design decisions:** ADMIN-IDENTITY-MODEL §1.1, §3.3, §7.5, §8.2  ·  **Issue:** #575
 **Stack:** fullstack  ·  **Review tier:** Tier-2 (isolation, security)  ·  **Wave:** A2
 
 ## Context

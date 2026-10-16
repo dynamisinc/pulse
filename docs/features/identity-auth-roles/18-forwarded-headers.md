@@ -1,7 +1,7 @@
 # Story: Forwarded headers so the per-IP rate limiter sees the client (#480)
 
 **Feature:** Identity, auth & roles  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Not Started
-**Requirements:** NFR-009, COR-012 (+ #480)  ·  **Design decisions:** ADMIN-IDENTITY-MODEL §3.2, §9  ·  **Issue:** —
+**Requirements:** NFR-009, COR-012 (+ #480)  ·  **Design decisions:** ADMIN-IDENTITY-MODEL §3.2, §9  ·  **Issue:** #480
 **Stack:** backend  ·  **Review tier:** Tier-2 (security)  ·  **Wave:** A1
 
 ## Context

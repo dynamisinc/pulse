@@ -1,7 +1,7 @@
 # Story: Lifecycle gate for the hub and the reaction loop (#375)
 
 **Feature:** Exercise build & go-live  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Not Started
-**Requirements:** COR-032, COR-043, CTL-023  ·  **Design decisions:** ADMIN-IDENTITY-MODEL §5.2 (EndEx), §9, §10 (A5)  ·  **Issue:** —
+**Requirements:** COR-032, COR-043, CTL-023  ·  **Design decisions:** ADMIN-IDENTITY-MODEL §5.2 (EndEx), §9, §10 (A5)  ·  **Issue:** #375
 **Stack:** backend  ·  **Review tier:** Tier-2 (isolation, correctness)  ·  **Wave:** A5
 
 ## Context

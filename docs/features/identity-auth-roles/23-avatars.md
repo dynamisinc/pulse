@@ -1,7 +1,7 @@
 # Story: Avatars (participant self-upload, staff set, staff avatars, moderation)
 
 **Feature:** Identity, auth & roles  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Not Started
-**Requirements:** COR-017, SOC-001, COR-024, NFR-004  ·  **Design decisions:** ADMIN-IDENTITY-MODEL §4.1, §4.2  ·  **Issue:** —
+**Requirements:** COR-017, SOC-001, COR-024, NFR-004  ·  **Design decisions:** ADMIN-IDENTITY-MODEL §4.1, §4.2  ·  **Issue:** #578
 **Stack:** fullstack  ·  **Review tier:** Tier-2 (isolation, content security)  ·  **Wave:** A2
 
 ## Context

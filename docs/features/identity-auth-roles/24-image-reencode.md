@@ -1,7 +1,7 @@
 # Story: Image re-encode and EXIF strip (SkiaSharp)
 
 **Feature:** Identity, auth & roles  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Not Started
-**Requirements:** NFR-004, NFR-009  ·  **Design decisions:** ADMIN-IDENTITY-MODEL §4.1 (Q3 signed off)  ·  **Issue:** —
+**Requirements:** NFR-004, NFR-009  ·  **Design decisions:** ADMIN-IDENTITY-MODEL §4.1 (Q3 signed off)  ·  **Issue:** #579
 **Stack:** backend  ·  **Review tier:** Tier-2 (content security)  ·  **Wave:** A2
 
 ## Context
