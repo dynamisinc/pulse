@@ -6,10 +6,14 @@ using System.Text;
 using ClosedXML.Excel;
 
 /// <summary>
-/// Writes the post activity export workbook (demo-feedback story 02, DF-8): one sheet, <c>Posts</c>, with the frozen
-/// columns in order, a bold frozen header row, an autofilter over the used range and fixed column widths (<c>Text</c>
+/// Writes the post activity export workbook (demo-feedback story 02, DF-8): the <c>Posts</c> sheet with the frozen
+/// columns in order (plus story 19's three edit columns), a bold frozen header row, an autofilter over the used range and fixed column widths (<c>Text</c>
 /// wrapped, 60 wide). Rows are appended a page at a time, so the caller never holds every post at once. Pure: no
 /// database, no HTTP, so the layout and formula-safety rules are unit-testable.
+/// <para>
+/// <b>demo-feedback DF-39 (story 19).</b> A second sheet, <c>Edit history</c>, carries one row per version of every
+/// edited post or reply, with the same header, freeze, autofilter and formula-safety rules.
+/// </para>
 /// </summary>
 /// <remarks>
 /// <para>
@@ -26,8 +30,11 @@ using ClosedXML.Excel;
 /// </remarks>
 public sealed class PostExportWorkbook : IDisposable
 {
-    /// <summary>The one sheet's name.</summary>
+    /// <summary>The posts sheet's name.</summary>
     public const string SheetName = "Posts";
+
+    /// <summary>The second sheet's name (DF-39).</summary>
+    public const string EditHistorySheetName = "Edit history";
 
     /// <summary>The Excel number format of the <c>Wall clock (UTC)</c> column.</summary>
     public const string WallClockNumberFormat = "yyyy-mm-dd hh:mm:ss";
@@ -58,20 +65,44 @@ public sealed class PostExportWorkbook : IDisposable
         "Pinned for all",
         "Status",
         "Taken down at",
+
+        // demo-feedback story 19 (DF-31): appended after the DF-8 columns.
+        "Edits",
+        "Last edited (scenario)",
+        "Original text",
+    ];
+
+    /// <summary>The <c>Edit history</c> column headers, in order (WAVE-4.md → "Export columns", DF-39).</summary>
+    public static readonly IReadOnlyList<string> EditHistoryHeaders =
+    [
+        "Post id",
+        "Edit number",
+        "Scenario time",
+        "Wall clock (UTC)",
+        "Text",
+        "Current",
     ];
 
     /// <summary>The fixed column widths, by header position (in Excel character units).</summary>
     private static readonly double[] Widths =
     [
-        17, 20, 20, 22, 22, 22, 16, 38, 50, 60, 16, 8, 9, 9, 12, 14, 14, 14, 11, 17,
+        17, 20, 20, 22, 22, 22, 16, 38, 50, 60, 16, 8, 9, 9, 12, 14, 14, 14, 11, 17, 7, 20, 60,
     ];
 
+    /// <summary>The fixed <c>Edit history</c> column widths, by header position.</summary>
+    private static readonly double[] EditHistoryWidths = [38, 11, 17, 20, 60, 9];
+
     private const int TextColumn = 10;
+    private const int OriginalTextColumn = 23;
     private const int WallClockColumn = 2;
+    private const int EditHistoryWallClockColumn = 4;
+    private const int EditHistoryTextColumn = 5;
 
     private readonly XLWorkbook _workbook;
     private readonly IXLWorksheet _sheet;
+    private readonly IXLWorksheet _historySheet;
     private int _lastRow = 1;
+    private int _lastHistoryRow = 1;
 
     /// <summary>Creates the workbook with its header row and column layout.</summary>
     public PostExportWorkbook()
@@ -87,16 +118,36 @@ public sealed class PostExportWorkbook : IDisposable
 
         // Column-level styles, not per-cell ones: a per-cell style on 50,000 rows bloats memory and the file.
         _sheet.Column(TextColumn).Style.Alignment.WrapText = true;
+        _sheet.Column(OriginalTextColumn).Style.Alignment.WrapText = true;
         _sheet.Column(WallClockColumn).Style.NumberFormat.Format = WallClockNumberFormat;
 
         var header = _sheet.Range(1, 1, 1, Headers.Count);
         header.Style.Font.Bold = true;
         header.Style.Alignment.WrapText = false;
         _sheet.SheetView.FreezeRows(1);
+
+        // DF-39: the Edit history sheet, laid out the same way.
+        _historySheet = _workbook.Worksheets.Add(EditHistorySheetName);
+        for (var column = 1; column <= EditHistoryHeaders.Count; column++)
+        {
+            _historySheet.Cell(1, column).Value = EditHistoryHeaders[column - 1];
+            _historySheet.Column(column).Width = EditHistoryWidths[column - 1];
+        }
+
+        _historySheet.Column(EditHistoryTextColumn).Style.Alignment.WrapText = true;
+        _historySheet.Column(EditHistoryWallClockColumn).Style.NumberFormat.Format = WallClockNumberFormat;
+
+        var historyHeader = _historySheet.Range(1, 1, 1, EditHistoryHeaders.Count);
+        historyHeader.Style.Font.Bold = true;
+        historyHeader.Style.Alignment.WrapText = false;
+        _historySheet.SheetView.FreezeRows(1);
     }
 
     /// <summary>The number of data rows written so far.</summary>
     public int RowCount => _lastRow - 1;
+
+    /// <summary>The number of <c>Edit history</c> rows written so far.</summary>
+    public int EditHistoryRowCount => _lastHistoryRow - 1;
 
     /// <summary>Appends rows below the ones already written.</summary>
     /// <param name="rows">The rows, in export order.</param>
@@ -127,6 +178,27 @@ public sealed class PostExportWorkbook : IDisposable
             SetText(r, 18, row.PinnedForAll);
             SetText(r, 19, row.Status);
             SetText(r, 20, row.TakenDownAt);
+            _sheet.Cell(r, 21).Value = row.Edits;
+            SetText(r, 22, row.LastEditedAt);
+            SetText(r, 23, row.OriginalText);
+        }
+    }
+
+    /// <summary>Appends <c>Edit history</c> rows below the ones already written (DF-39).</summary>
+    /// <param name="rows">The rows, ordered by post then edit number.</param>
+    public void AddEditHistoryRows(IEnumerable<PostEditHistoryExportRow> rows)
+    {
+        ArgumentNullException.ThrowIfNull(rows);
+
+        foreach (var row in rows)
+        {
+            var r = ++_lastHistoryRow;
+            SetText(_historySheet, r, 1, row.PostId);
+            _historySheet.Cell(r, 2).Value = row.EditNumber;
+            SetText(_historySheet, r, 3, row.ScenarioTime);
+            _historySheet.Cell(r, 4).Value = DateTime.SpecifyKind(row.WallClockUtc, DateTimeKind.Unspecified);
+            SetText(_historySheet, r, 5, row.Text);
+            SetText(_historySheet, r, 6, row.Current);
         }
     }
 
@@ -138,6 +210,7 @@ public sealed class PostExportWorkbook : IDisposable
 
         // Header row plus every data row; with no posts the filter still sits on the header so the sheet is usable.
         _sheet.Range(1, 1, _lastRow, Headers.Count).SetAutoFilter();
+        _historySheet.Range(1, 1, _lastHistoryRow, EditHistoryHeaders.Count).SetAutoFilter();
         _workbook.SaveAs(stream);
     }
 
@@ -202,12 +275,15 @@ public sealed class PostExportWorkbook : IDisposable
     }
 
     /// <summary>Writes a text VALUE (never a formula); a blank value leaves the cell empty.</summary>
-    private void SetText(int row, int column, string? value)
+    private void SetText(int row, int column, string? value) => SetText(_sheet, row, column, value);
+
+    /// <summary>Writes a text VALUE (never a formula) to <paramref name="sheet"/>; a blank value leaves the cell empty.</summary>
+    private static void SetText(IXLWorksheet sheet, int row, int column, string? value)
     {
         var text = CleanText(value);
         if (text.Length > 0)
         {
-            _sheet.Cell(row, column).Value = text;
+            sheet.Cell(row, column).Value = text;
         }
     }
 }
