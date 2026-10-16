@@ -38,6 +38,11 @@ Exercises can only move forward today, and the demo reset is direct SQL in `Clea
 - [ ] Retained references also include poster frames (`PostMediaItem.PosterMediaAssetId`, `MediaAsset.PosterMediaAssetId`, both `Restrict` FKs). Run-sheet media is a JSON column (`InjectItemPost.Media`), checked by parsing the ids. A missed reference aborts the reset (fail-safe) and never leaves a broken image.
 - [ ] Reset also clears the in-memory engine autonomy state: swamped mode off, and autonomy back to the exercise default.
 
+### Orchestrator re-review fold (2026-10-16): extra reset-matrix cases
+- [ ] A participant video on a conduct post whose poster frame is also used by a retained setup post: the poster asset survives (via the `PostMediaItem.PosterMediaAssetId` / `MediaAsset.PosterMediaAssetId` FKs), and the conduct post and its video asset are deleted.
+- [ ] A participant image referenced only from a run-sheet item's JSON `Media`: the asset survives, and the run-sheet item still resolves it after reset.
+- [ ] Swamped mode on and autonomy raised before reset: afterwards swamped mode is off and autonomy is back to the exercise default.
+
 ## Out of Scope
 Delete (08); multiple runs per exercise or run numbering (rejected, §5.2); evaluator annotations; the AAR export itself (E10).
 

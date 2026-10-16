@@ -31,7 +31,7 @@ route and per lifecycle transition and proves it with a route x role matrix test
 - [ ] In the matrix, participant sim writes are allowed in `live` **and `staged`** (dry runs), and refused when paused or frozen. The matrix test asserts both.
 
 ### Lead controller (Tom, 2026-10-16; ADMIN-IDENTITY-MODEL §8.2)
-- [ ] *(Raise-only, Option A, signed off by Tom 2026-10-16; design doc §12.)* Turning swamped mode **on** and **raising** the engine autonomy level require a **lead** controller. Other controllers, planners and evaluators get 403. The route × role matrix gains a `lead controller` column, and the test asserts it.
+- [ ] *(Raise-only, Option A, signed off by Tom 2026-10-16; design doc §12.)* The five raise routes listed below require a **lead** controller. Other controllers, planners and evaluators get 403 on a raise, and any controller may lower. The matrix records this inside the controller column, as "raise: lead only; lower: any controller". There is no separate lead column. The test asserts both directions for the lead, a non-lead controller, a planner and an evaluator.
 
 ### Orchestrator review fold (2026-10-16, ADMIN-IDENTITY-MODEL §8.2)
 - [ ] The lead gate is a filter that reads `Enrollment.IsLead` **live** on each request (a sibling of `EngineCockpitControllerRoleFilter`), keyed on the session's `PersonId` and never on a body `actingHumanId`.

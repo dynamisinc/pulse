@@ -41,7 +41,8 @@ Organization (+ Slug: new, unique; used in the staff console URL, §1.2)
         ├── StaffUser           (1:1 facet sharing Person.Id; exists once the person has any staff enrollment)
         └── Enrollment*         (NEW table, replaces StaffAssignment; one row per person per exercise)
               ExerciseId, PersonId? (null = one-off participant),
-              Role ∈ planner|controller|evaluator|participant|pio, PersonaId? (participant roles)
+              Role ∈ planner|controller|evaluator|participant|pio, PersonaId? (participant roles),
+              IsLead (controller only), CreatedAt (the lead backfill orders by it)
               └── Account?      (participant roles only; Account.EnrollmentId is unique. The sign-in facet:
                                  Username, CredentialHash, lockout, Email; links and day words key on it)
 ```
@@ -436,10 +437,9 @@ Blocking items (stage is refused with 409 and the list):
 7. Chrome and watermark are valid (`ComplianceChromeGuard`).
 8. No run-sheet item is `needs-repair` (§5.4a).
 
-Also a warning: **no lead controller** (swamped mode and autonomy raises unavailable).
-
 Warnings (shown, not blocking): no run sheet items; no opening feed; empty noise pool; personas missing avatars;
-participants with no sign-in yet issued; no evaluator enrolled.
+participants with no sign-in yet issued; no evaluator enrolled; **no lead controller** (swamped mode and autonomy
+raises unavailable until a planner sets one).
 
 ### Decision 5.4 — setup vs conduct posts
 `Post` gets **`IsSetupContent`** (bool, stamped server-side by the write path when the exercise is in
@@ -750,7 +750,7 @@ folded; Tom has since decided the policy half of H1 as Option A (§12). The fold
 - H1: the lead backfill and the readiness warning;
 - H2: the planner sets the lead, and org admins act through an enrollment;
 - H3: the lead is read live, with no session revocation;
-- M1: 409 `is-lead`;
+- M1: never a 500 (the interim 409 `is-lead` was superseded by Option A, §12);
 - M2: duplicate keeps `IsLead`;
 - M3: struck in story 07;
 - M4: the JSON run-sheet media and the poster FKs;
@@ -771,7 +771,7 @@ swamped auto-send keeps running and only the kill switch can stop it.
 | Option | Gate | Losing the lead |
 |---|---|---|
 | **A (recommended)** | **Raise-only.** A lead is needed to turn swamped mode on, raise autonomy (`autonomy-default` or `tier-policy` towards more autonomy), `autonomy/restore` after a kill switch, and `generation-provider/restore`. Turning swamped mode off, lowering autonomy, the kill switch and `cut-to-fake` stay open to **any controller**. This follows the "controls only ever lower" rule. | Allowed. Removing the lead's enrollment or changing its role clears `IsLead` **and turns swamped mode off** in the same transaction (audited). The exercise has no lead until a planner sets one, which shows as a readiness warning |
-| B | Lead in both directions | Refused: 409 `is-lead` until the lead is reassigned (today's interim behaviour). Risk: if the lead walks away mid-incident, nobody can turn swamped mode off without a planner first |
+| B (not chosen) | Lead in both directions | Refused: 409 `is-lead` until the lead is reassigned. Risk: if the lead walks away mid-incident, nobody can turn swamped mode off without a planner first |
 | C | Lead in both directions | Allowed with no safeguard. **Rejected**: swamped mode stays stuck on |
 
 Option A changes what Session C's §8 amendment (#571) says about who may turn swamped mode off.
