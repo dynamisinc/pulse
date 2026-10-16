@@ -871,8 +871,9 @@ public sealed partial class EngineReviewService
         // pass through here, so they keep publishing during a cut.
         //
         // Residual semantics: a cut prevents every automatic publish whose publisher call BEGINS after the cut
-        // completes. A burst already handed to the publisher cannot be recalled by a cut — the kill switch is the
-        // stop for that.
+        // completes. A burst already handed to the publisher runs to completion: neither a cut nor the kill switch
+        // interrupts it (EnginePublishService observes only its cancellation token, not autonomy state). Both stop
+        // every LATER automatic publish.
         //
         // Once the publish has been attempted, its record is written with CancellationToken.None: posts may be live,
         // so a host shutdown at this point must not leave the item counting down to be sent again on restart. A cut

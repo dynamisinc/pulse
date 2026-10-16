@@ -184,8 +184,9 @@ PR (#571) or by Session A's A1 work, which must be on `main` before #571 merges:
 - **Every safety clamp overrides it.** The kill switch and degraded mode drop the effective level, so
   in-flight countdowns hold instead of sending. Cutting generation to `Fake` (#402) also holds them: an
   expired Delayed-auto draft in a cut exercise is held even under swamped mode. The cut is re-checked
-  immediately before every automatic publish (hold-on-cut, this PR). A burst already handed to the
-  publisher cannot be recalled; the kill switch is the stop for that.
+  immediately before every automatic publish (hold-on-cut, this PR). **Limit:** a burst already handed to
+  the publisher runs to completion. Neither a cut nor the kill switch interrupts it; both stop every later
+  automatic publish.
 - **Participants never see a draft;** an auto-sent post is logged as engine-sourced.
 
 Wider autonomy than this (autonomous ambient posting under a tier policy, wave C2 / #168) needs its

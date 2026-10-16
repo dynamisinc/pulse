@@ -597,7 +597,7 @@ Open **ENGINE** on the toolstrip to see and change the engine settings.
 - Fully automatic posting cannot be selected in this version.
 
 **Swamped mode** (in the engine bar) is the only way an undecided burst posts when its countdown ends. Only the
-exercise's lead controller can turn it on. While it is on, a **TIMEOUT AUTO-SEND IS ACTIVE** banner stays on screen.
+exercise's lead controller can turn it on. While it is on, a **TIMEOUT AUTO-SEND IS ACTIVE** banner stays on screen. If generation is cut to Fake, the banner reads **TIMEOUT AUTO-SEND IS SUSPENDED** instead, and expired timers hold.
 Use it only when the lead decides the cell cannot keep up.
 
 ### The engine switch (kill switch)

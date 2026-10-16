@@ -108,7 +108,7 @@ export function SwampedModeToggle() {
             component="span"
             sx={{ fontSize: 11, fontWeight: 800, letterSpacing: '0.04em', color: chrome.amber }}
           >
-            TIMEOUT AUTO-SEND IS ACTIVE
+            {providerCutToFake ? 'TIMEOUT AUTO-SEND IS SUSPENDED' : 'TIMEOUT AUTO-SEND IS ACTIVE'}
           </Typography>
           <Typography component="span" sx={{ fontSize: 10.5, color: chrome.inkMuted }}>
             {providerCutToFake

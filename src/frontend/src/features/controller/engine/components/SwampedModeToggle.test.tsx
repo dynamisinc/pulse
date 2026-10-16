@@ -110,6 +110,8 @@ describe('SwampedModeToggle — hold-on-cut qualifier (ADP-042)', () => {
 
     const banner = screen.getByTestId('swamped-mode-active-banner')
     expect(banner).toHaveTextContent(/SUSPENDED while generation is cut to Fake/)
+    expect(banner).toHaveTextContent('TIMEOUT AUTO-SEND IS SUSPENDED')
+    expect(banner).not.toHaveTextContent('TIMEOUT AUTO-SEND IS ACTIVE')
     expect(banner).not.toHaveTextContent(/publish instead of holding/)
   })
 })
