@@ -325,4 +325,43 @@ describe('ExerciseReportPage', () => {
     await waitFor(() =>
       expect(screen.getByRole('button', { name: 'Print / Save as PDF' })).toBeEnabled())
   })
+
+  it('has a named, focusable scroll region', async () => {
+    stubApi()
+    renderPage()
+    await screen.findByTestId('report-sheet')
+    const region = screen.getByRole('region', { name: 'Exercise report preview' })
+    expect(region).toHaveAttribute('tabindex', '0')
+    region.focus()
+    expect(region).toHaveFocus()
+  })
+
+  it('lays a four-image post out as a grid with all four captions', async () => {
+    const media = Array.from({ length: 4 }, (_, index) => ({
+      kind: 'image' as const,
+      url: null,
+      alt: `Photo ${index + 1} long description`,
+      durationSec: null,
+      width: null,
+      height: null,
+    }))
+    const base = MOCK_REPORT.posts[0] as ExerciseReport['posts'][number]
+    stubApi(() => ({ ...MOCK_REPORT, posts: [{ ...base, id: 'four', media }] }))
+    renderPage()
+    await screen.findByTestId('report-sheet')
+    const grid = screen.getByTestId('report-media-grid')
+    expect(grid.className).toContain('mediaGrid')
+    expect(within(grid).getAllByText('ALT TEXT')).toHaveLength(4)
+    for (let n = 1; n <= 4; n += 1) {
+      expect(within(grid).getByText(`Photo ${n} long description`)).toBeInTheDocument()
+    }
+  })
+
+  it('does not use the grid for a single attachment', async () => {
+    stubApi()
+    renderPage()
+    await screen.findByTestId('report-sheet')
+    // The fixture's posts each carry at most one item.
+    expect(screen.queryByTestId('report-media-grid')).not.toBeInTheDocument()
+  })
 })

@@ -105,7 +105,11 @@ export interface ExerciseReport {
   }
   summary: ReportSummary
   activity: {
-    binMinutes: 5
+    /**
+     * Bin width in scenario minutes. 5 for short exercises; the server widens it for long spans
+     * (5, 10, 15, 30, 60, 120, 180, 360, 720, 1440, then whole days) so there are at most 300 bins.
+     */
+    binMinutes: number
     bins: ReportActivityBin[]
     injectMarkers: ReportInjectMarker[]
   }

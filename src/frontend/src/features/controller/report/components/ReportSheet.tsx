@@ -12,7 +12,7 @@
  * time"). "Prepared" (`preparedAt`, exercise zone) is printed once, in the meta list.
  */
 
-import { formatDay, formatDayWithWeekday, formatWindow, timeOf } from '../services/reportFormat'
+import { binWidthLabel, formatDay, formatDayWithWeekday, formatWindow, timeOf } from '../services/reportFormat'
 import type { ExerciseReport } from '../types/report'
 import { ActivityChart } from './ActivityChart'
 import { InjectResponseTable } from './InjectResponseTable'
@@ -117,7 +117,7 @@ export function ReportSheet({ report }: ReportSheetProps) {
 
         <section className={styles.section} aria-labelledby="report-activity-h">
           <h2 id="report-activity-h" className={styles.heading}>
-            Activity over time <small>Posts per 5 scenario minutes, by source</small>
+            Activity over time <small>{`Posts per ${binWidthLabel(report.activity.binMinutes)}, by source`}</small>
           </h2>
           <ActivityChart activity={report.activity} />
         </section>

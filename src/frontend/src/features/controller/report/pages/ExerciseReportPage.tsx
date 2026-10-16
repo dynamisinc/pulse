@@ -122,7 +122,13 @@ export function ExerciseReportPage() {
           </CobraPrimaryButton>
         </div>
 
-        <div className={styles.stage}>
+        <div
+          className={styles.stage}
+          role="region"
+          aria-label="Exercise report preview"
+          tabIndex={0}
+          data-testid="report-stage"
+        >
           {report === undefined && query.isError && (
             <div className={styles.state} role="alert">
               <h2>

@@ -177,12 +177,56 @@ export const REPORT_PAGE_RULE = '@page { size: letter portrait; margin: 0.6in 0.
 /** Marks the injected `@page` style (found, and asserted on, by tests). */
 export const REPORT_PAGE_STYLE_ATTR = 'data-exercise-report-page'
 
+/** The width of a chart bin in words: 5 -> "5 scenario minutes", 120 -> "2 scenario hours". */
+export function binWidthLabel(minutes: number): string {
+  const unit = (count: number, name: string) =>
+    count === 1 ? `scenario ${name}` : `${count} scenario ${name}s`
+  if (minutes >= 1440 && minutes % 1440 === 0) return unit(minutes / 1440, 'day')
+  if (minutes >= 60 && minutes % 60 === 0) return unit(minutes / 60, 'hour')
+  return unit(minutes, 'minute')
+}
+
+/** "yyyy-MM-dd HH:mm" plus `minutes` (calendar arithmetic on the written value, no zones). */
+export function addMinutesToStamp(stamp: string, minutes: number): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2})/.exec(stamp)
+  if (match === null) return stamp
+  const [, y = '0', mo = '1', d = '1', h = '0', mi = '0'] = match
+  const moved = new Date(
+    Date.UTC(Number(y), Number(mo) - 1, Number(d), Number(h), Number(mi) + minutes),
+  )
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${moved.getUTCFullYear()}-${pad(moved.getUTCMonth() + 1)}-${pad(moved.getUTCDate())} ` +
+    `${pad(moved.getUTCHours())}:${pad(moved.getUTCMinutes())}`
+}
+
+/** How chart times are labeled: "time" (HH:mm), "dateTime" (MM-dd HH:mm) or "date" (MM-dd). */
+export type AxisLabelMode = 'time' | 'dateTime' | 'date'
+
+/** Date and time when the bins span dates; date only when a bin is a day or wider. */
+export function axisLabelMode(
+  activity: Pick<ExerciseReport['activity'], 'bins' | 'binMinutes'>,
+): AxisLabelMode {
+  const first = activity.bins[0]
+  const last = activity.bins[activity.bins.length - 1]
+  if (first === undefined || last === undefined) return 'time'
+  if (activity.binMinutes >= 1440) return 'date'
+  return dateOf(first.start) !== dateOf(last.start) ? 'dateTime' : 'time'
+}
+
+/** One axis label from a "yyyy-MM-dd HH:mm" stamp: "09:00", "10-15 09:00" or "10-15". */
+export function axisLabel(stamp: string, mode: AxisLabelMode): string {
+  if (mode === 'date') return stamp.slice(5, 10)
+  if (mode === 'dateTime') return `${stamp.slice(5, 10)} ${timeOf(stamp)}`
+  return timeOf(stamp)
+}
+
 /** The text equivalent of the chart (also the SVG's accessible name). */
 export function chartSummary(activity: ExerciseReport['activity']): string {
   const { bins, injectMarkers, binMinutes } = activity
   const first = bins[0]
   const last = bins[bins.length - 1]
   if (first === undefined || last === undefined) return 'No activity to chart.'
+  const mode = axisLabelMode(activity)
   let peak = first
   let peakTotal = -1
   for (const bin of bins) {
@@ -193,11 +237,11 @@ export function chartSummary(activity: ExerciseReport['activity']): string {
     }
   }
   const markers = injectMarkers.length > 0
-    ? ` Key injects: ${injectMarkers.map(m => `${refLabel(m.ref)} ${m.title} at ${timeOf(m.at)}`).join('; ')}.`
+    ? ` Key injects: ${injectMarkers.map(m => `${refLabel(m.ref)} ${m.title} at ${axisLabel(m.at, mode === 'date' ? 'dateTime' : mode)}`).join('; ')}.`
     : ''
   return (
-    `Posts per ${binMinutes === 5 ? 'five' : binMinutes} minutes from ${timeOf(first.start)} to ` +
-    `${addMinutes(timeOf(last.start), binMinutes)}, stacked by source. ` +
-    `Busiest: ${peakTotal} posts starting ${timeOf(peak.start)}.${markers}`
+    `Posts per ${binWidthLabel(binMinutes)} from ${axisLabel(first.start, mode)} to ` +
+    `${axisLabel(addMinutesToStamp(last.start, binMinutes), mode)}, stacked by source. ` +
+    `Busiest: ${peakTotal} posts starting ${axisLabel(peak.start, mode)}.${markers}`
   )
 }

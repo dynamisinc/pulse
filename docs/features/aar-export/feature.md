@@ -26,7 +26,8 @@ DOM: `design/handoffs/evaluator-dashboard/Evaluator Dashboard.dc.html` (`expFlyO
 |---|---|---|---|---|---|
 | 01 | AAR export package | EVL-030, EVL-031 | D6-012 | Not Started | — |
 | 02 | Retention & export policy | EVL-032 | none (deferred — not a screen concern this pass) | Not Started · deferred: design pass pending | — |
-| 03 | [Controller notes in the exercise report](03-controller-notes.md) | EVL-030 (adjacent) | none (from the 10/15 demo) | Not Started · backlog | — |
+| 03 | [Controller notes in the exercise report](03-controller-notes.md) | EVL-030 (adjacent) | none (from the 10/15 demo) | Not Started · backlog | #556 |
+| 04 | [Word (.docx) export of the exercise report, with white-labeling](04-word-report-and-white-labeling.md) | EVL-030 (adjacent) | none (from the 10/15 demo) | Not Started · backlog | #555 |
 
 ## Dependencies
 Every other E10 feature — the manifest packages `evaluation-timeline`'s log + replay bundle,
