@@ -99,12 +99,15 @@ Group B — what runs autonomously, and what never does
       `Exercise.Status` through the SAME `ExerciseLifecycleStates` literals the participant gate uses (no second
       vocabulary), registered so that A5's gate can replace it by changing one registration. Tested through
       EndEx (`completed`) and Freeze.
-- [ ] **AC6 Kill switch within 5 s.** Given the kill switch is engaged (`EngineAutonomyState.IsGenerationStopped`)
-      or a degraded-mode clamp is active, when ambient autonomy is on, then no ambient post is published later
+- [ ] **AC6 Kill switch within 5 s.** Given ANY safety clamp — the kill switch in either mode (`FullStop` sets
+      `IsGenerationStopped`; `DropToSuggest` leaves it false but sets `SafetyClampActive`), a degraded-mode
+      clamp, or the cut-to-`Fake` lever (#402) — when ambient autonomy is on, then no ambient post is published later
       than 5 s after the switch: the stop is re-checked **immediately before publish** (not only at tick start,
       since the tick interval defaults to 5 s) and in-flight bursts are discarded. A degraded clamp pauses
       ambient (it lowers; it never silently drops ambient into the review queue). Restoring the engine never
-      re-raises ambient autonomy — only a human re-selecting the mode does. Tested with the real tick interval.
+      re-raises ambient autonomy — only a human re-selecting the mode does. The gate reads `SafetyClampActive`
+      (not `IsGenerationStopped` alone). Tested with the real tick interval, for **both** kill-switch modes and
+      for cut-to-`Fake`.
 - [ ] **AC7 Content safety on every ambient post.** Given an ambient burst, when generated, then it passes the
       existing `GenerateStage` path unchanged — `ContentGuard.InspectBurst` fiction/injection guard
       (ADP-023/024), tenant-bounded provider only (NFR-005/ADP-024: persona and world text is untrusted data,

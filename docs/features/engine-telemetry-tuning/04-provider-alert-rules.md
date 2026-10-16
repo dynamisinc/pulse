@@ -53,8 +53,10 @@ profile is stable (~992 in / ~200 out per 4-post burst; `engine-generation-infra
       or with no App Insights to read, is a deploy error, not a silent no-op). `parameters/uat.bicepparam`
       sets it `true`; nothing else does. `what-if` against a non-UAT parameter set shows zero alert resources.
 - [ ] **Owner email is a parameter, never a literal.** Given the action group, when it is authored, then
-      its single email receiver comes from `param alertOwnerEmail string` (no default, `@secure()` not
-      required but never echoed in outputs), the UAT value is sourced the same way the other UAT inputs are
+      its single email receiver comes from the module's required `alertOwnerEmail` param, fed by a ROOT
+      `param alertOwnerEmail string = ''` in `main.bicep` (an empty default, so parameter sets that omit it
+      still deploy with alerts off — ARM requires undefaulted params even when the consuming module is
+      disabled; never echoed in outputs), the UAT value is sourced the same way the other UAT inputs are
       (`readEnvironmentVariable('PULSE_ALERT_OWNER_EMAIL', '')` in `uat.bicepparam`), and
       `deployProviderAlerts = true` with an empty `alertOwnerEmail` **fails the deploy with a clear message**
       (an alert nobody receives is worse than none). `grep -rn "@" infrastructure/ | grep -i "alert"` finds no
