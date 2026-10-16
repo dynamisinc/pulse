@@ -95,6 +95,7 @@ import { useCallback, useState, type CSSProperties, type ReactNode } from 'react
 import { useExerciseContext } from '@/core/exerciseContext'
 import { useScenarioTime } from '@/core/clock'
 import {
+  SHELL_ALERT_HEIGHT_VAR,
   SHELL_CHROME_BOTTOM_VAR,
   SHELL_CHROME_TOP_VAR,
   SHELL_Z,
@@ -144,12 +145,20 @@ const contentRegionStyle: CSSProperties = {
  * nav, and content region all clear the two fixed banners — not just the
  * content region. `border-box` keeps that padding inside the `100vh`
  * min-height, so it reserves banner clearance without adding scroll overflow.
+ *
+ * The top padding ALSO adds the fixed alert bar's published height
+ * (`SHELL_ALERT_HEIGHT_VAR`, `0px` / unset with no active alert). The bar is
+ * `position: fixed` and so reserves no space itself; without this the in-flow
+ * channel nav (and, below it, the content region) started at the chrome inset
+ * and slid UNDER an active alert -- on a phone, the wrapped ticker covered the
+ * "Social" tab. The bar sits at the chrome inset, so chrome + alert height is
+ * exactly where in-flow content may begin.
  */
 const shellRootStyle: CSSProperties = {
   position: 'relative',
   minHeight: '100vh',
   boxSizing: 'border-box',
-  paddingTop: `var(${SHELL_CHROME_TOP_VAR}, 0px)`,
+  paddingTop: `calc(var(${SHELL_CHROME_TOP_VAR}, 0px) + var(${SHELL_ALERT_HEIGHT_VAR}, 0px))`,
   paddingBottom: `var(${SHELL_CHROME_BOTTOM_VAR}, 0px)`,
 }
 

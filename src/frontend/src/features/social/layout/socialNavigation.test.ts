@@ -24,6 +24,7 @@ describe('socialPaths', () => {
     expect(socialPaths.home()).toBe('/home')
     expect(socialPaths.explore()).toBe('/explore')
     expect(socialPaths.notifications()).toBe('/notifications')
+    expect(socialPaths.alerts()).toBe('/alerts')
     expect(socialPaths.hashtag('waterissues')).toBe('/hashtag/waterissues')
     expect(socialPaths.profile('FulcoEM')).toBe('/FulcoEM')
     expect(socialPaths.thread('post-1', 'FulcoEM')).toBe('/FulcoEM/status/post-1')
@@ -42,7 +43,7 @@ describe('socialPaths', () => {
 describe('reserved segments (COR-004)', () => {
   it('reserves exactly the routes the channel owns plus the app-level prefixes', () => {
     expect([...SOCIAL_RESERVED_SEGMENTS].sort()).toEqual(
-      ['explore', 'hashtag', 'home', 'i', 'join', 'login', 'notifications', 'staff'].sort(),
+      ['alerts', 'explore', 'hashtag', 'home', 'i', 'join', 'login', 'notifications', 'staff'].sort(),
     )
   })
 
@@ -75,6 +76,9 @@ describe('matchSocialRoute', () => {
     ['/hashtag/%23', 'redirect'],
     ['/hashtag/a%20b', 'redirect'],
     ['/hashtag/%3Cscript%3E', 'redirect'],
+    // The shell alert bar's "Details" target (PRT-012) -- a route, never a profile.
+    ['/alerts', 'alerts'],
+    ['/ALERTS', 'alerts'],
     ['/FulcoEM', 'profile'],
     ['/fulcoem', 'profile'],
     ['/FulcoEM/status/post-1', 'thread'],
