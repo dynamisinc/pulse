@@ -65,7 +65,7 @@ every other Phase-A story reads. Staff-world plumbing; no participant-visible ch
 - [ ] `FirstLiveAt` backfill: for exercises in live, paused, completed or archived, it is COALESCE(first transition to live, the `exercise.bootstrapped` event, earliest post, `CreatedAt`), so it is never null. A migration test covers a bootstrapped live exercise with no lifecycle events.
 
 ### Copilot review 6 fold (2026-10-16)
-- [ ] Final `FirstLiveAt` fallback: when the exercise's status is past staged and no lifecycle, bootstrap or post timestamp exists and `CreatedAt` is null, the backfill uses the migration's run time (`SYSUTCDATETIME()`), so a run is never mistaken for "never ran". A migration fixture covers an exercise with all four sources absent.
+- [ ] Final `FirstLiveAt` fallback: when the exercise's status is past staged and no lifecycle, bootstrap or post timestamp exists and `CreatedAt` is null, the backfill uses the migration's run time (`SYSDATETIMEOFFSET()`, the same instant as `SYSUTCDATETIME()` once stored in the `datetimeoffset` column), so a run is never mistaken for "never ran". A migration fixture covers an exercise with all four sources absent.
 
 ### Copilot review 7 fold (2026-10-16)
 - [ ] **`FirstLiveAt` is stamped from A1.** Every transition into `live` (StartEx, plus any bootstrap path) sets `FirstLiveAt` if null, in the same transaction. Test: an exercise in build at A1 deploy runs afterwards, then is reset; delete is refused and archive-from-build is allowed.
