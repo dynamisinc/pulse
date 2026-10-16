@@ -39,6 +39,21 @@ Read the job summary. Expect **only** these changes:
 - a change to the SQL server or database;
 - a change to `aif-pulse-uat`'s model deployments.
 
+### 1b. Raise the login and join limiter permits for a single-venue exercise (values pending Tom)
+
+A1a (#480) makes the per-IP limiters key on the real client IP. Players on one venue's Wi-Fi share a single public
+IP behind its NAT, so they would share **one** limiter bucket, and a room full of players joining at once could hit
+`429`. Before the demo, raise the join, day-word and login permits for UAT.
+
+| App setting | Value |
+|---|---|
+| `Authentication__EasyLogin__JoinPermitPerMinute` | **pending Tom** |
+| *(day-word equivalent; Session A to confirm the key)* | **pending Tom** |
+| *(staff and participant login equivalents; Session A to confirm the keys)* | **pending Tom** |
+
+Session A is confirming the exact keys and proposing values, and the orchestrator will relay them once Tom picks.
+They land as additional rows in the step-1 expected what-if.
+
 ## 2. Deploy Infrastructure: for real
 
 Run it again with **`what_if = false`**. When it finishes, the job summary should show `generationProvider = AzureOpenAI` and the attested posture as `true`/`true`.
