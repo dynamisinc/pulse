@@ -653,7 +653,7 @@ trolls and bots are never used for ambient, and the server refuses them. Any per
 **not eligible for ambient** in the persona list; you can tick it, but it will not post ambient chatter.
 
 **Content checks.** Before an ambient post publishes, it is checked. A post that mentions the incident or its
-hashtags, or that is not calm or grateful in tone, is dropped and never published.
+hashtags, or that is negative in tone, is dropped and never published.
 
 **Resets on restart.** The ambient policy is held in server memory. If the server restarts it goes back to **Off**,
 with empty lists. Check the section after any restart.
