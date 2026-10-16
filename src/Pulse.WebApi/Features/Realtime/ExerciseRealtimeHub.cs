@@ -20,6 +20,15 @@ using Pulse.WebApi.Features.Identity.Staff;
 /// </summary>
 /// <remarks>
 /// <para>
+/// <b>Staff connections are scoped from the SESSION (identity-auth-roles/15, ADMIN-IDENTITY-MODEL §1.2).</b> The
+/// shared staff console host resolves no exercise, so a <c>staff</c>-kind connection joins the exercise its persisted
+/// session is bound to — verified at connect time as a live staff session holding a live staff enrollment on that
+/// exercise — and that exercise's staff group; the host is not consulted. An org-scope session (no exercise) and any
+/// unverifiable staff connection are ABORTED. Switching the active exercise drops the session's connections from the
+/// old groups and closes them; the reconnect joins the new exercise. Participant and read-only connections keep the
+/// host binding described next, and never join a staff group.
+/// </para>
+/// <para>
 /// <b>Fail-closed group membership (the always-Critical isolation property, Tier-2).</b> The group a
 /// connection joins is derived ONLY from the host-resolved exercise the
 /// <see cref="ExerciseResolutionMiddleware"/> stamped on the connection's own <c>HttpContext.Items</c> — read
@@ -155,65 +164,91 @@ public sealed partial class ExerciseRealtimeHub : Hub
     {
         // SignalR runs OnConnectedAsync in its OWN DI scope, so the scoped IExerciseContext the
         // UseExerciseResolution middleware populated on the connection REQUEST never reaches this hub
-        // instance (it would read a fresh, null one and abort every connection). Read the host-resolved
-        // exercise off the connection's HttpContext, where the middleware also stashed it.
+        // instance (it would read a fresh, null one and abort every connection). Read the connection's own
+        // HttpContext instead: its server-resolved principal and its host-resolved exercise.
         var httpContext = Context.GetHttpContext();
-        var exerciseId = httpContext?.GetHostResolvedExerciseId();
-        if (httpContext is null || exerciseId is null || exerciseId.Value == Guid.Empty)
+        if (httpContext is null)
         {
             Context.Abort(); // fail closed: never join an ambient/empty exercise group
             return;
         }
 
-        // The exercise-wide join comes FIRST, so a staff connection receives participant-safe pushes
-        // (PostReceived) as promptly as a participant connection does — the staff check below costs a few
-        // queries and must not delay it.
+        // identity-auth-roles/15 (ADMIN-IDENTITY-MODEL §1.2, realtime scope on the shared console host): a STAFF-kind
+        // principal is scoped from its SESSION's exercise, verified against a live staff enrollment — the console host
+        // resolves no exercise, and a per-exercise host is irrelevant to a staff session (session > host). An
+        // org-scope session (no exercise) and every unverifiable staff connection are refused.
+        var principal = SessionPrincipal.Read(httpContext.User);
+        if (principal is not null && string.Equals(principal.Kind, StaffSessionKind, StringComparison.Ordinal))
+        {
+            await ConnectStaffAsync(principal);
+            return;
+        }
+
+        // Participant / read-only connections keep the HOST binding (unchanged).
+        var exerciseId = httpContext.GetHostResolvedExerciseId();
+        if (exerciseId is null || exerciseId.Value == Guid.Empty)
+        {
+            Context.Abort(); // fail closed: never join an ambient/empty exercise group
+            return;
+        }
+
         await Groups.AddToGroupAsync(Context.ConnectionId, GroupNameFor(exerciseId.Value));
 
         // identity-auth-roles/16: remember which session this connection was opened under, so revoking that session
         // also cuts this connection (membership is otherwise only checked here, at connect time).
-        if (_connections is not null && SessionPrincipal.Read(httpContext.User) is { } connectingSession)
+        if (principal is not null)
         {
-            _connections.Register(connectingSession.SessionId, exerciseId.Value, Context);
-            Context.Items[RegisteredSessionItemKey] = connectingSession.SessionId;
-        }
-
-        // Only a connection the check positively verifies ever reaches the staff join. A check that cannot
-        // complete (e.g. a transient database error) is logged and the connection ABORTED — never rethrown, and
-        // never treated as verified. Rethrowing would make SignalR close with allowReconnect:false, which the JS
-        // client does not retry; an abort is a drop it reconnects from, re-running this check. Aborting also
-        // removes the connection from the exercise-wide group joined above. Cancellation caused by the
-        // connection's own abort is not a check failure and propagates untouched.
-        var connectionAborted = Context.ConnectionAborted;
-        bool isVerifiedStaff;
-        try
-        {
-            isVerifiedStaff = await IsVerifiedStaffForExerciseAsync(httpContext, exerciseId.Value, connectionAborted);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException || !connectionAborted.IsCancellationRequested)
-        {
-            LogStaffCheckFailed(Context.ConnectionId, exerciseId.Value, ex);
-            Context.Abort(); // fail closed AND reconnectable: no staff group, no close-without-reconnect
-            return;
-        }
-
-        if (isVerifiedStaff)
-        {
-            // Same exercise id as the join above — the staff group can never point at another exercise.
-            await Groups.AddToGroupAsync(Context.ConnectionId, StaffGroupNameFor(exerciseId.Value));
+            Register(principal.SessionId, exerciseId.Value);
         }
 
         await base.OnConnectedAsync();
     }
 
     /// <summary>
-    /// Whether the connection's authenticated session is a live <c>staff</c>-kind session whose staff user is
-    /// assigned to <paramref name="exerciseId"/>. Fails closed (<c>false</c>) on anything else.
+    /// Joins a staff-kind connection to its session's exercise (the exercise-wide group and its staff group), or aborts
+    /// it. A check that cannot complete (e.g. a transient database error) is logged and the connection ABORTED — never
+    /// rethrown (Gate-2 L-1): an abort is a drop the JS client reconnects from, re-running the check. Cancellation caused
+    /// by the connection's own abort is not a check failure and propagates untouched.
     /// </summary>
-    /// <param name="httpContext">The connection request's context (its <c>User</c> is the server-resolved principal).</param>
-    /// <param name="exerciseId">The host-resolved exercise the connection's exercise-wide join used.</param>
-    /// <param name="cancellationToken">The connection-aborted token.</param>
-    /// <returns><c>true</c> only for a verified staff connection on its assigned exercise.</returns>
+    private async Task ConnectStaffAsync(SessionIdentity principal)
+    {
+        var connectionAborted = Context.ConnectionAborted;
+        Guid? exerciseId;
+        try
+        {
+            exerciseId = await ResolveVerifiedStaffExerciseAsync(principal, connectionAborted);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !connectionAborted.IsCancellationRequested)
+        {
+            LogStaffCheckFailed(Context.ConnectionId, ex);
+            Context.Abort(); // fail closed AND reconnectable: no group, no close-without-reconnect
+            return;
+        }
+
+        if (exerciseId is not { } verifiedExerciseId)
+        {
+            // Org scope, revoked / expired / foreign session, or no live staff enrollment on the session's exercise.
+            Context.Abort();
+            return;
+        }
+
+        // Both groups derive from the SAME verified session exercise — the staff group can never point elsewhere.
+        await Groups.AddToGroupAsync(Context.ConnectionId, GroupNameFor(verifiedExerciseId));
+        await Groups.AddToGroupAsync(Context.ConnectionId, StaffGroupNameFor(verifiedExerciseId));
+        Register(principal.SessionId, verifiedExerciseId);
+
+        await base.OnConnectedAsync();
+    }
+
+    private void Register(Guid sessionId, Guid exerciseId)
+    {
+        if (_connections is not null)
+        {
+            _connections.Register(sessionId, exerciseId, Context);
+            Context.Items[RegisteredSessionItemKey] = sessionId;
+        }
+    }
+
     /// <summary>Forgets this connection in the session registry (identity-auth-roles/16).</summary>
     /// <param name="exception">The disconnect cause, if any.</param>
     /// <returns>A task.</returns>
@@ -229,37 +264,50 @@ public sealed partial class ExerciseRealtimeHub : Hub
 
     private const string RegisteredSessionItemKey = "pulse:registered-session-id";
 
-    private async Task<bool> IsVerifiedStaffForExerciseAsync(HttpContext httpContext, Guid exerciseId, CancellationToken cancellationToken)
+    /// <summary>
+    /// The exercise a staff-kind connection may join: its persisted session's <see cref="Session.ExerciseId"/>, when the
+    /// session is live, <c>staff</c>-kind, bound to the principal's staff user, NOT org-scope, and the staff user holds a
+    /// live staff enrollment on that exercise (own-only, tenant-bounded). <c>null</c> on anything else (fail closed).
+    /// </summary>
+    private async Task<Guid?> ResolveVerifiedStaffExerciseAsync(SessionIdentity principal, CancellationToken cancellationToken)
     {
-        // The principal is assigned ONLY by SessionAuthenticationMiddleware, ONLY for a token it resolved to a
-        // live persisted session; Read() yields null for an anonymous / foreign / malformed principal. The kind
-        // and staff-user id are therefore server facts, never client assertions. A non-staff principal returns
-        // here, before any database work.
-        var identity = SessionPrincipal.Read(httpContext.User);
-        if (identity is null ||
-            !string.Equals(identity.Kind, StaffSessionKind, StringComparison.Ordinal) ||
-            identity.StaffUserId is not { } staffUserId)
+        // The principal is assigned ONLY by SessionAuthenticationMiddleware, ONLY for a token it resolved to a live
+        // persisted session; its kind and staff-user id are server facts — then re-verified against the row below.
+        if (principal.StaffUserId is not { } staffUserId)
         {
-            return false;
+            return null;
         }
 
-        var staffSession = new ConnectionStaffSessionAccessor(_dbContext, identity.SessionId, staffUserId);
+        // Session is unscoped; this is the connecting principal's own row.
+        var session = await _dbContext.Sessions
+            .AsNoTracking()
+            .SingleOrDefaultAsync(s => s.Id == principal.SessionId, cancellationToken);
+
+        if (session is null ||
+            !session.IsLive(DateTimeOffset.UtcNow) ||
+            !string.Equals(session.Kind, StaffSessionKind, StringComparison.Ordinal) ||
+            session.StaffUserId != staffUserId ||
+            session.ExerciseId is not { } sessionExerciseId ||
+            sessionExerciseId == Guid.Empty)
+        {
+            return null; // includes the ORG-SCOPE session (ExerciseId null): the hub refuses it
+        }
+
+        var staffSession = new ConnectionStaffSessionAccessor(_dbContext, session.Id, staffUserId);
         var assignments = await new StaffAssignmentService(_dbContext, staffSession).GetAssignmentsAsync(cancellationToken);
-        if (assignments is null)
-        {
-            return false;
-        }
 
-        // COR-005: the staff user must be assigned to the very exercise this connection joined — the same
-        // comparison EngineCockpitStaffAuthorizationFilter makes against the resolved scope.
-        return assignments.Any(a => Guid.TryParse(a.ExerciseId, out var assignedExerciseId) && assignedExerciseId == exerciseId);
+        // COR-005: a live staff enrollment on the very exercise the session is bound to.
+        return assignments is not null
+            && assignments.Any(a => Guid.TryParse(a.ExerciseId, out var assigned) && assigned == sessionExerciseId)
+            ? sessionExerciseId
+            : null;
     }
 
     [LoggerMessage(
         EventId = 1,
         Level = LogLevel.Warning,
-        Message = "Staff-group verification failed for hub connection {ConnectionId} on exercise {ExerciseId}; aborting the connection (fail closed, no staff group) so the client reconnects and retries.")]
-    private partial void LogStaffCheckFailed(string connectionId, Guid exerciseId, Exception exception);
+        Message = "Staff verification failed for hub connection {ConnectionId}; aborting the connection (fail closed, no group) so the client reconnects and retries.")]
+    private partial void LogStaffCheckFailed(string connectionId, Exception exception);
 
     /// <summary>
     /// A connection-bound <see cref="ICurrentStaffSessionAccessor"/>: the same "live, non-revoked, unexpired,

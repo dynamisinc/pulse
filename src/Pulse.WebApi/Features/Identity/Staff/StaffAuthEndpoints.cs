@@ -194,7 +194,8 @@ public static class StaffAuthEndpoints
 
     /// <summary>
     /// Sets the staff session's active exercise. Fails closed: 400 on invalid input, 401 when unauthenticated,
-    /// 403 when the caller is not assigned to the requested exercise.
+    /// the bare 404 for a missing or foreign-organization target (and, from org scope, an unenrolled one), and 403
+    /// when an exercise-bound caller is not assigned to a same-organization exercise.
     /// </summary>
     private static async Task<IResult> SetActiveExerciseAsync(
         SetActiveExerciseRequest? request,
