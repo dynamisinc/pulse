@@ -201,6 +201,12 @@ own amendment to this section before it reaches the live provider.
 > `off`, and the settings API rejects `mode = autonomous` with a 400 ("not authorized by
 > PROVIDER-GOVERNANCE §8"). `review` mode needs no amendment: it uses the existing review queue, and
 > silence still holds.
+>
+> **Prerequisites before signing** (from the orchestrator's review of #603):
+> 1. #603 (ambient chatter, merged dark) and its hardening follow-up are merged to `main`.
+> 2. The raise to `autonomous` is lead-only in code (Session A's lead gate, `Enrollment.IsLead`). If that
+>    is not wired at signing time, the signer must strike "lead controller" below and accept that any
+>    assigned controller can raise it.
 
 **What this would authorize.** On `uat`, with the live provider, ambient background posts (trigger
 `AmbientFloor` only) may publish **without per-post human review** when a controller has set that exercise's
@@ -208,20 +214,30 @@ ambient policy to `autonomous`. All of these conditions must hold, and #168's ac
 and test each one:
 
 - **Off by default; a human turns it on.** The policy is per exercise, starts `off`, and resets to `off`
-  on every restart. Only a controller with a staff session can set it, and the change is logged with who
-  made it, the old value and the new value. The engine never raises it itself, and restoring after the
-  kill switch never re-enables it.
+  on every restart. Raising it to `autonomous` is **lead-controller only** (the same raise-only rule as
+  amendment 1); any controller can lower it to `review` or `off`. The change is logged with the old value,
+  the new value and who made it. **Disclosure:** "who" is the acting-human id the console sends, on a
+  staff session; it is not yet a server-verified per-person identity, so it is as reliable as the
+  existing shared-account pattern used elsewhere in the engine. The engine never raises the policy itself,
+  and restoring after the kill switch never re-enables it.
 - **Bounded volume.** `maxPerMinute` and `maxPerHour` caps apply. `maxPerMinute` can never exceed the
   exercise's `MaxEnginePostsPerMinute`.
 - **Bounded content.**
   - Topics come only from a fixed server-side vocabulary (local colour, everyday traffic, food, sports,
     community events, and similar), filtered by the exercise's topic allow-list.
-  - Personas come only from the exercise's persona allow-list, and only this exercise's personas.
+  - Personas come only from the exercise's persona allow-list, only this exercise's personas, and only
+    the **Resident** and **Helper** types. Agencies, outlets, trolls and bots are never used for ambient
+    posts; the server refuses them.
   - An empty allow-list means nothing is allowed.
   - Every burst passes the existing `ContentGuard` fiction and injection guard on the tenant-bounded
     provider. A guard failure publishes nothing.
-  - There is no post-hoc topic classifier: the topic is enforced when the seed is chosen, with the
-    guard as backstop.
+  - The ambient prompt carries the setting only, never the incident narrative.
+  - A deterministic output filter drops any ambient post that mentions the incident (the storyline's
+    hashtags and a fixed incident vocabulary) or whose tone is not calm or grateful. There is no
+    model-based topic classifier.
+  - **Residual risk:** persona voice notes are staff-authored text placed in the trusted part of the
+    prompt without fencing. For that path the phrase-based `ContentGuard` and the output filter are the
+    only defence. It is red-teamed through the real path; it is accepted for `uat` only.
 - **Never storyline or escalation.** Only the `AmbientFloor` trigger can take the autonomous path.
   Inaction, official-response and amplification content, and anything storyline-bound or escalating,
   always goes through review. A timed-out draft is held, never auto-sent.
@@ -231,7 +247,8 @@ and test each one:
   - degraded mode;
   - cut-to-`Fake`.
 - **Lifecycle.** Nothing ambient publishes unless the exercise is `live` and not frozen or paused, and
-  nothing publishes after EndEx. A draft that finishes after the state changed is discarded.
+  nothing publishes after EndEx. A post or review draft that finishes after the state changed is
+  discarded, not published or queued.
 - **Labelled and invisible until published.** Posts carry `Origin = engine`, and telemetry adds
   `publishPath = ambient-autonomous`. Participants never see a draft. Times show in scenario time.
 - **Limit (same as above).** A burst already handed to the publisher runs to completion. The kill switch
