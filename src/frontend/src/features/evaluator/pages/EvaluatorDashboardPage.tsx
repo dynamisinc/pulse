@@ -26,6 +26,7 @@ import { TimelineExplorer } from '../components/TimelineExplorer'
 import { ReplayPlayer } from '../components/replay/ReplayPlayer'
 import { MetricsViews } from '../components/metrics/MetricsViews'
 import type { EvaluatorView } from '../types'
+import { cobraTheme } from '@/theme/cobraTheme'
 
 const TABS: EvaluatorView[] = ['live', 'timeline', 'replay', 'metrics']
 
@@ -51,7 +52,7 @@ function EvaluatorDashboardContent() {
                 font: '700 12px ui-sans-serif,system-ui,sans-serif',
                 letterSpacing: '.1em',
                 padding: '8px 14px',
-                color: active ? '#1e3a5f' : '#848482',
+                color: active ? '#1e3a5f' : cobraTheme.palette.text.muted,
                 boxShadow: active ? 'inset 0 -2.5px 0 #1e3a5f' : 'none',
               }}
             >
@@ -60,7 +61,7 @@ function EvaluatorDashboardContent() {
           )
         })}
         <Box sx={{ flex: 1 }} />
-        <Typography sx={{ font: '500 11px ui-sans-serif,system-ui,sans-serif', color: '#848482', pb: 0.75 }}>
+        <Typography sx={{ font: '500 11px ui-sans-serif,system-ui,sans-serif', color: cobraTheme.palette.text.muted, pb: 0.75 }}>
           Read-only — evaluators observe; steering lives in the Controller Console (COR-013)
         </Typography>
       </Stack>

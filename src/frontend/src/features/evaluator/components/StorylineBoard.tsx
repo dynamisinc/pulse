@@ -12,6 +12,7 @@ import { useEvaluatorState } from '../contexts/EvaluatorStateContext'
 import { useStorylineTiles } from '../hooks/useStorylineTiles'
 import { StorylineTile } from './StorylineTile'
 import { scenarioClock } from '../services/scenarioTime'
+import { cobraTheme } from '@/theme/cobraTheme'
 
 const POSTS_PER_MIN_DURING_STORM = 96
 
@@ -28,7 +29,7 @@ export function StorylineBoard() {
         <Typography sx={{ font: '800 11px ui-sans-serif,system-ui,sans-serif', letterSpacing: '.14em', color: '#4a4f55' }}>
           STORYLINE BOARD
         </Typography>
-        <Typography sx={{ font: '500 11px ui-sans-serif,system-ui,sans-serif', color: '#848482' }}>
+        <Typography sx={{ font: '500 11px ui-sans-serif,system-ui,sans-serif', color: cobraTheme.palette.text.muted }}>
           how long each arc has been waiting on a response — the room-glance surface
         </Typography>
         <Box sx={{ flex: 1 }} />

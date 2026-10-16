@@ -25,7 +25,7 @@
  *    a re-read (asserted with a real `PersonaComposer` publish, and with direct
  *    appends: de-duplicated, other personas' posts ignored);
  *  - a persona with no voice-notes template reads "No voice notes authored"
- *    (muted #6b6b69 — AA at 12px, not the 3.75:1 shared token), never
+ *    (muted: the COBRA `text.muted` token, AA at 12px), never
  *    "unavailable";
  *  - `actionsSlot` mounts a sibling story's control and, absent, renders nothing.
  *
@@ -204,8 +204,8 @@ describe('PersonaContextPanel (persona-operation/03)', () => {
     expect(notes).toHaveTextContent('No voice notes authored')
     expect(notes).not.toHaveTextContent(/unavailable/i)
     expect(notes).toHaveStyle({ fontStyle: 'italic' })
-    // Muted, but AA-legible at 12px (the shared secondary-text token is ~3.75:1, below AA).
-    expect(notes).toHaveStyle({ color: '#6b6b69' })
+    // Muted, but AA-legible at 12px: the COBRA muted-text token (demo-feedback 25).
+    expect(notes).toHaveStyle({ color: cobraTheme.palette.text.muted })
   })
 
   it('is a labelled, keyboard/screen-reader reachable section with no interactive controls', async () => {

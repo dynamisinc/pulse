@@ -14,6 +14,7 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faFlag, faClock, faArrowTrendDown, faArrowTrendUp, faArrowRight } from '@fortawesome/free-solid-svg-icons'
 import type { IconDefinition } from '@fortawesome/fontawesome-svg-core'
 import type { StorylineTile as StorylineTileModel } from '../types'
+import { cobraTheme } from '@/theme/cobraTheme'
 
 interface StorylineTileProps {
   tile: StorylineTileModel;
@@ -66,7 +67,7 @@ export function StorylineTile({
           <IconButton
             size="small"
             onClick={e => { e.stopPropagation(); onFlag() }}
-            sx={{ p: 0.5, color: '#848482', '&:hover': { color: '#1e3a5f' } }}
+            sx={{ p: 0.5, color: cobraTheme.palette.text.muted, '&:hover': { color: '#1e3a5f' } }}
           >
             <FontAwesomeIcon icon={faFlag} size="2xs" />
           </IconButton>
@@ -98,7 +99,7 @@ export function StorylineTile({
         <Typography
           sx={{
             font: '500 10.5px ui-sans-serif,system-ui,sans-serif',
-            color: '#848482',
+            color: cobraTheme.palette.text.muted,
             border: '1px dashed #c4c4c4',
             borderRadius: '5px',
             p: '4px 7px',
@@ -113,7 +114,7 @@ export function StorylineTile({
           <FontAwesomeIcon icon={faClock} size="xs" />
           <Typography variant="inherit">{tile.latency}</Typography>
         </Stack>
-        <Stack direction="row" sx={{ gap: 0.75, alignItems: 'center', color: tile.concernsIsHot ? tile.severity.color : '#848482' }}>
+        <Stack direction="row" sx={{ gap: 0.75, alignItems: 'center', color: tile.concernsIsHot ? tile.severity.color : cobraTheme.palette.text.muted }}>
           <FontAwesomeIcon icon={faFlag} size="xs" />
           <Typography variant="inherit">{tile.concerns}</Typography>
         </Stack>

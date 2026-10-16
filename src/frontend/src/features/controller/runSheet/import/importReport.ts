@@ -24,10 +24,10 @@ export const IMPORT_ACCEPT =
   '.xlsx,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv'
 
 /**
- * Secondary text inside the (light) COBRA dialog. NOT `text.secondary`: COBRA's #848482 is
- * ~3.7:1 on white, under the 4.5:1 AA floor (theme fix tracked in #461). `primary.dark`
- * (#696969, dim gray) is a COBRA token at ~5.5:1 on white and ~4.9:1 on the `grid.light`
- * table header.
+ * Secondary text inside the (light) COBRA dialog: `primary.dark` (#696969, dim gray), a COBRA
+ * token at ~5.5:1 on white and ~4.9:1 on the `grid.light` table header. (Chosen while COBRA's
+ * `text.secondary` was below AA; since demo-feedback 25 `text.secondary` / `text.muted` is an
+ * AA grey too, so either clears 4.5:1 here.)
  */
 export const IMPORT_MUTED_TEXT = 'primary.dark'
 

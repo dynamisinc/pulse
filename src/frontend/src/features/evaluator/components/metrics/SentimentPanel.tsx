@@ -11,6 +11,7 @@
 
 import { Box, Stack, Typography, Chip } from '@mui/material'
 import type { SentimentChartData } from '../../hooks/useMetrics'
+import { cobraTheme } from '@/theme/cobraTheme'
 
 const HATCH_PATTERN_ID = 'evaluator-seam-hatch'
 
@@ -51,9 +52,9 @@ export function SentimentPanel({ data }: SentimentPanelProps) {
       <Box sx={{ px: 2, pt: 1.75, pb: 0.75 }}>
         <svg viewBox="0 0 680 190" style={{ width: '100%', display: 'block' }}>
           <line x1="30" y1="95" x2="670" y2="95" stroke="#dcdcdc" strokeWidth={1} strokeDasharray="3 4" />
-          <text x="4" y="99" fontSize={9} fill="#848482" fontFamily="monospace">0</text>
-          <text x="4" y="30" fontSize={9} fill="#848482" fontFamily="monospace">+</text>
-          <text x="4" y="176" fontSize={9} fill="#848482" fontFamily="monospace">−</text>
+          <text x="4" y="99" fontSize={9} fill={cobraTheme.palette.text.muted} fontFamily="monospace">0</text>
+          <text x="4" y="30" fontSize={9} fill={cobraTheme.palette.text.muted} fontFamily="monospace">+</text>
+          <text x="4" y="176" fontSize={9} fill={cobraTheme.palette.text.muted} fontFamily="monospace">−</text>
           <defs>
             <pattern id={HATCH_PATTERN_ID} width={6} height={6} patternTransform="rotate(45)" patternUnits="userSpaceOnUse">
               <rect width={6} height={6} fill="#0c1420" />
@@ -79,12 +80,12 @@ export function SentimentPanel({ data }: SentimentPanelProps) {
             </g>
           ))}
           {data.axisTicks.map(tick => (
-            <text key={tick.label} x={tick.x} y={186} fontSize={9} fill="#848482" fontFamily="monospace" textAnchor="middle">
+            <text key={tick.label} x={tick.x} y={186} fontSize={9} fill={cobraTheme.palette.text.muted} fontFamily="monospace" textAnchor="middle">
               {tick.label}
             </text>
           ))}
         </svg>
-        <Typography sx={{ font: '500 10.5px ui-sans-serif,system-ui,sans-serif', color: '#848482', padding: '4px 0 8px' }}>
+        <Typography sx={{ font: '500 10.5px ui-sans-serif,system-ui,sans-serif', color: cobraTheme.palette.text.muted, padding: '4px 0 8px' }}>
           Hatched seam = scenario-time jump (+4 hr). Line is the engine's aggregate public-sentiment
           estimate; ◆ marks controller dial events with the setting change.
         </Typography>
@@ -105,7 +106,7 @@ export function SentimentUnavailableCard() {
         alignItems: 'center',
         gap: 1,
         textAlign: 'center',
-        color: '#848482',
+        color: cobraTheme.palette.text.muted,
       }}
     >
       <Typography sx={{ font: '700 13px ui-sans-serif,system-ui,sans-serif', color: '#4a4f55' }}>

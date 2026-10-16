@@ -12,6 +12,7 @@ import { faPlay, faPause } from '@fortawesome/free-solid-svg-icons'
 import { useEvaluatorState } from '../../contexts/EvaluatorStateContext'
 import { scenarioClock, ARC_DURATION_MINUTES } from '../../services/scenarioTime'
 import type { PlaybackSpeed } from '../../types'
+import { cobraTheme } from '@/theme/cobraTheme'
 
 const SPEEDS: PlaybackSpeed[] = [1, 4, 16]
 
@@ -45,10 +46,10 @@ export function ReplayTransport() {
       <Typography sx={{ font: '700 15px ui-monospace,Menlo,monospace', color: '#1a1a1a' }}>
         {scenarioClock(playhead)}
       </Typography>
-      <Typography sx={{ font: '600 10px ui-sans-serif,system-ui,sans-serif', letterSpacing: '.1em', color: '#848482' }}>
+      <Typography sx={{ font: '600 10px ui-sans-serif,system-ui,sans-serif', letterSpacing: '.1em', color: cobraTheme.palette.text.muted }}>
         SCENARIO
       </Typography>
-      <Typography sx={{ font: '600 12px ui-monospace,Menlo,monospace', color: '#848482' }}>
+      <Typography sx={{ font: '600 12px ui-monospace,Menlo,monospace', color: cobraTheme.palette.text.muted }}>
         T+{String(Math.round(playhead)).padStart(2, '0')} / {ARC_DURATION_MINUTES} MIN
       </Typography>
     </Stack>
