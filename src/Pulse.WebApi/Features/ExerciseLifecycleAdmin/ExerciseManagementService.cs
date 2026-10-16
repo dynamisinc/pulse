@@ -152,10 +152,12 @@ public sealed class ExerciseManagementService
             return ExerciseManagementResult.NotFound();
         }
 
-        // DF-35: archive is offered from completed ONLY. The state machine would also refuse every other edge
-        // into archived today, but the contract is a stable reason, not the machine's prose.
+        // DF-35: archive is offered from completed, and (identity-auth-roles/17, ADMIN-IDENTITY-MODEL §5.1) from build
+        // once the exercise has ever gone live (a reset exercise being retired). Every other state is the stable
+        // not-completed reason, not the machine's prose.
         if (!ExerciseLifecycleStates.TryParse(exercise.Status, out var state)
-            || state != ExerciseLifecycleStates.Completed)
+            || !(state == ExerciseLifecycleStates.Completed
+                || (state == ExerciseLifecycleStates.Build && exercise.FirstLiveAt is not null)))
         {
             return ExerciseManagementResult.NotCompleted();
         }
@@ -176,6 +178,7 @@ public sealed class ExerciseManagementService
             caller.OrganizationId,
             exercise.Id,
             new ExerciseLifecycleTransitionRequest { To = ExerciseLifecycleStates.Archived },
+            caller.Role,
             cancellationToken);
 
         if (transition.Outcome != ExerciseLifecycleOutcome.Ok)
@@ -211,7 +214,26 @@ public sealed class ExerciseManagementService
             ? _dbContext.Exercises.InOrganization(caller.OrganizationId)
             : _dbContext.Exercises.AsNoTracking().InOrganization(caller.OrganizationId);
 
-        return await query.FirstOrDefaultAsync(e => e.Id == exerciseId, cancellationToken);
+        var exercise = await query.FirstOrDefaultAsync(e => e.Id == exerciseId, cancellationToken);
+        if (exercise is null || ExerciseAdminRoles.IsOrgAdmin(caller.Role))
+        {
+            return exercise;
+        }
+
+        // identity-auth-roles/17 (§8.2): a planner renames / archives only an exercise they hold a PLANNER enrollment
+        // on. Any other same-org exercise is the same bare 404 as a foreign or missing id, so this discloses nothing.
+        // org-scope-exempt(TenantChecked): exercise.Id was just resolved inside the caller's own organization above;
+        // the cross-exercise read is own-only (PersonId == the caller's session-carried id).
+        var holdsPlanner = await _dbContext.Enrollments
+            .IgnoreQueryFilters()
+            .AsNoTracking()
+            .AnyAsync(
+                e => e.ExerciseId == exercise.Id
+                    && e.PersonId == caller.StaffUserId
+                    && e.Role == EnrollmentRoles.Planner,
+                cancellationToken);
+
+        return holdsPlanner ? exercise : null;
     }
 
     /// <summary>Resolves the caller and re-checks the role (defense in depth over the endpoint filter).</summary>
@@ -224,7 +246,7 @@ public sealed class ExerciseManagementService
             return (null, ExerciseManagementResult.Unauthenticated());
         }
 
-        return ExerciseAdminRoles.IsExerciseAdministrator(caller.Role)
+        return ExerciseAdminRoles.IsExerciseManager(caller.Role)
             ? (caller, null)
             : (null, ExerciseManagementResult.Forbidden());
     }

@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
+using Pulse.WebApi.Features.Identity.RoleMatrix;
 using Pulse.WebApi.Features.Identity.Sessions;
 
 /// <summary>
@@ -91,13 +92,16 @@ public static class AccountEndpoints
             .RequireRateLimiting(ParticipantLoginRateLimitPolicy)
             .WithLoginBodyLimit()
             .AllowAnonymousPreAuth();
-        endpoints.MapPost("/api/staff/accounts", CreateAccountAsync);
+        // identity-auth-roles/17 (§8.2): roster provisioning is the planner's and the controller's; evaluator 403 (#61).
+        endpoints.MapPost("/api/staff/accounts", CreateAccountAsync)
+            .RequireExerciseRole(ExerciseRoleFilter.PlannerOrController);
 
         // The CSV upload is multipart/form-data (field name "file"). DisableAntiforgery: this is a bearer-token
         // API (the staff session token is carried in the Authorization header, not a cookie), so CSRF — which
         // antiforgery defends — does not apply; the staff-session gate is the real authorization.
         endpoints.MapPost("/api/staff/accounts/import", ImportAccountsAsync)
-            .DisableAntiforgery();
+            .DisableAntiforgery()
+            .RequireExerciseRole(ExerciseRoleFilter.PlannerOrController);
 
         return endpoints;
     }

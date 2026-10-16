@@ -54,8 +54,12 @@ public static class LifecycleEndpoints
         endpoints.MapGet(LifecycleRoute, GetLifecycleAsync)
             .AddEndpointFilter<EngineCockpitStaffAuthorizationFilter>();
 
+        // identity-auth-roles/17 (#377/#481): after the staff + assigned gate, the per-transition role gate — stage /
+        // unstage / archive are the planner's, StartEx / pause / resume / EndEx / reopen the controller's, unarchive no
+        // exercise role's; any other role is 403 with the state unchanged.
         endpoints.MapPost(TransitionRoute, TransitionAsync)
-            .AddEndpointFilter<EngineCockpitStaffAuthorizationFilter>();
+            .AddEndpointFilter<EngineCockpitStaffAuthorizationFilter>()
+            .AddEndpointFilter<LifecycleTransitionRoleFilter>();
 
         return endpoints;
     }

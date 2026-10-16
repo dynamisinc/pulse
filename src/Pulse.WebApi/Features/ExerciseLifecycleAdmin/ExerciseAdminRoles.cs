@@ -65,6 +65,14 @@ public static class ExerciseAdminRoles
         new HashSet<string>(StringComparer.OrdinalIgnoreCase) { Planner, OrgAdmin, Controller };
 
     /// <summary>
+    /// The roles permitted to rename and archive an exercise on the org tier (identity-auth-roles/17, ADMIN-IDENTITY-MODEL
+    /// §8.2): <see cref="OrgAdmin"/> (any exercise of their organization) and <see cref="Planner"/> (only an exercise they
+    /// hold a planner enrollment on — re-checked by the service). The controller and evaluator are refused.
+    /// </summary>
+    public static IReadOnlySet<string> ExerciseManagers { get; } =
+        new HashSet<string>(StringComparer.OrdinalIgnoreCase) { OrgAdmin, Planner };
+
+    /// <summary>
     /// The role permitted to reach the ORG-ADMIN surface family's own reads (COR-076): <see cref="OrgAdmin"/>
     /// alone. Deliberately not a superset of <see cref="ExerciseAdministrators"/> — a planner is refused.
     /// </summary>
@@ -88,4 +96,10 @@ public static class ExerciseAdminRoles
     /// <returns><c>true</c> when the role is <c>planner</c>, <c>orgAdmin</c> or <c>controller</c> (case-insensitively).</returns>
     public static bool IsExerciseAdministrator(string? role) =>
         role is not null && ExerciseAdministrators.Contains(role);
+
+    /// <summary>Whether <paramref name="role"/> may rename / archive on the org tier (org admin or planner).</summary>
+    /// <param name="role">A stored or session role string.</param>
+    /// <returns><c>true</c> when the role is <c>orgAdmin</c> or <c>planner</c> (case-insensitively).</returns>
+    public static bool IsExerciseManager(string? role) =>
+        role is not null && ExerciseManagers.Contains(role);
 }
