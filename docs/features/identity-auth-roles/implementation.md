@@ -184,3 +184,28 @@ other or with any other `Program.cs`-touching work.
 | Backend composition root | `src/Pulse.WebApi/Program.cs` | Each story exports its own `Add*()`/`Map*()`/auth-scheme registration; the orchestrator wires the one-line calls **and the middleware ordering** serially between waves. Critical ordering: `app.UseExerciseResolution()` (exercise-isolation/08) → the **auth/session** middleware (story 03) → `app.UseAuthorization()` (story 11's `FallbackPolicy`, called explicitly immediately after the auth/session middleware — see story 11's own note on why an implicit auto-inserted `UseAuthorization()` would break this) → `MapControllers()`/endpoint maps — so the session's scope write takes precedence over the host's, and the default-deny policy sees a populated `HttpContext.User` before it evaluates. |
 | Frontend mock→live flip | `core/auth/sessionResolver.ts` (`USE_MOCK_SESSION`) | Story 03 flips this single point live once `/api/session` is Gate-2 clean; a serial, orchestrator-owned integration edit. `session.tsx`/`useSession()` consumers need no change (the `Session` shape is unchanged). |
 | Frontend realtime credential | `core/realtime/connection.ts` (`accessTokenFactory`) | Story 11's paired frontend fix — the hub connection stops sending no credential and starts attaching the live session token. Ships in the same story/PR as the backend gate, not split across two merges (a split would leave the live feed dead in between). |
+
+## Scope update 2026-10-16 (ADMIN-IDENTITY-MODEL)
+
+Source: [`docs/design/ADMIN-IDENTITY-MODEL.md`](../../design/ADMIN-IDENTITY-MODEL.md) §9-§10.
+
+**Per-story tech notes (new stories).** 16 owns `Data/Entities/Person.cs`, `Enrollment.cs`, `OrgAuditEvent.cs`, the A1 migration and the frontend `Enrollment`/`Session` frozen types. 17 owns the declarative route-policy filter and `RoleMatrixTests`. 18 owns `AddPulseForwardedHeaders()`. 19 `Features/Org/People/*`; 20 `Features/Org/Invites/*` + `Features/Ops/Organizations/*`; 21 `Features/Identity/Credentials/*` + `IPulseMailer`; 22 `Features/Exercises/Settings/*`; 23 `Features/Identity/Avatars/*`; 24 `ImageNormalizer`; 25 attribution audit; 26 no-store group filter.
+
+**Reuse map additions.** `InOrganization` + `TenantChecked` sweep exemption; `PasswordHasher<Person>`; the bare-404 pattern (`ExerciseManagementService.cs:306`); `CompositionRootWiringTests` org-tier allow-list; shared axios client; COBRA components for staff screens, brand skin for participant reset/sign-in; `MediaUploadService`; telemetry emitter and `OrgAuditEvent`.
+
+| Story | Stack | Files it owns | Depends-on | Can-run-with | Wave | Effort |
+|-------|-------|---------------|------------|--------------|------|--------|
+| 16 Person + Enrollment **[Tier-2]** | backend + frozen types | `Data/Entities/{Person,Enrollment,OrgAuditEvent}.cs`, migration, `roles.ts`, `staff/types.ts` | orchestrator clearance | 18 | A1 | L |
+| 17 Role matrix **[Tier-2]** | backend | route-policy filter, `RoleMatrixTests.cs` | 16 | 18 | A1 | M |
+| 18 Forwarded headers **[Tier-2]** | backend | `ForwardedHeaders*.cs` | none | 16, 17 | A1 | S |
+| 15 (amended) Org-scope auth **[Tier-2]** | fullstack | `Features/Identity/Sessions/*`, staff login | 16 | 18 | A1 | L |
+| 24 Re-encode **[Tier-2]** | backend | `ImageNormalizer.cs`, `MediaUploadService.cs` (edit) | A1 | 19, 22 | A2 | M |
+| 21 Reset flows **[Tier-2]** | fullstack | `Features/Identity/Credentials/*`, reset pages | A1, 18 | 19, 22 | A2 | L |
+| 19 Org directory | fullstack | `Features/Org/People/*`, directory page | 16, 17 | 21, 22, 24 | A2 | M |
+| 22 Sign-in methods | fullstack | `Features/Exercises/Settings/*` | 16, 17 | 19, 24 | A2 | M |
+| 20 Staff invite/assign **[Tier-2]** | fullstack | `Features/Org/Invites/*`, `Features/Ops/Organizations/*` | 19, 21 (token) | 23 | A2 | L |
+| 23 Avatars **[Tier-2]** | fullstack | `Features/Identity/Avatars/*` | 24 | 20 | A2 | M |
+| 26 No-store auth | backend | auth group filter | none | any | A5 | S |
+| 25 Audit refused attribution | backend | attribution audit | 12, A1 | 26 | A5 | S |
+
+A1 stories need orchestrator clearance first for the EF migration, `Program.cs`, `App.tsx` / `staffRouteRegistry.tsx` and frozen-type changes (`Session`, `ExerciseRole`, `StaffAssignment` -> `Enrollment`, staff login request). One EF migration per wave.

@@ -26,7 +26,7 @@ table). EVL-014 (dial-input overlays). Master PRD XC-004 (the v0 schema this ext
 | 01 | Engine event types (extend XC-004) | ADP-041 / XC-004 | In Progress | #173 |
 | 02 | Tuning & observability surface | ADP-041 | Not Started | #174 |
 | 03 | AI generation usage panel | ADP-041 | In Progress (built + Gate-2 clean; awaiting UAT verification — §8 signed; waits on PR #571 merging (after Session A's A1) and the UAT infra deploy) | #401 |
-| 04 | Provider alert rules (errors, latency, spend) — infra, Tom sign-off | ADP-041 / NFR-003 / NFR-005 | Built, NOT Complete (bicep build clean; Gate-1 fixes folded; lands OFF on UAT, flipped by a one-line follow-up once the `PULSE_ALERT_OWNER_EMAIL` secret exists; awaiting Tom's Tier-2 infra sign-off + UAT verification, i.e. what-if, deploy and a forced test fire) | — |
+| 04 | Provider alert rules (errors, latency, spend) — infra, Tom sign-off | ADP-041 / NFR-003 / NFR-005 | Merged (inert), NOT Complete — #585 merged 2026-10-16 after Tom's Tier-2 sign-off; OFF on UAT until the `PULSE_ALERT_OWNER_EMAIL` secret exists and the one-line flip + deploy + forced test fire (AC7) are done | #590 |
 
 ## Dependencies
 The XC-004 v0 telemetry emitter (E1); every E8 feature emits through it (reaction-loop, storyline-model,
