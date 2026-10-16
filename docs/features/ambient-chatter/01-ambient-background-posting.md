@@ -42,6 +42,21 @@ Verified state of the code this builds on (so the builder does not reinvent):
   Technical Notes.
 
 ## Acceptance Criteria
+Group 0 — governance gate (blocks shipping to UAT live, not building)
+- [ ] **AC0 PROVIDER-GOVERNANCE §8 amendment signed before this ships to UAT live (Tier-2, Tom Bull).**
+      The §8 "Authorized autonomy (amendment at signing, 2026-10-16)" (PR #571, commit `2f47fda`; read with
+      `git show 2f47fda:docs/features/engine-runtime/PROVIDER-GOVERNANCE.md`) authorizes ONLY Suggest (default) and
+      Delayed-auto with lead-controller swamped mode on UAT, and states: "Wider autonomy than this (autonomous
+      ambient posting under a tier policy, wave C2 / #168) needs its own amendment to this section before it
+      reaches the live provider." Given the code is merged, when the UAT/prod config could let an exercise reach
+      `ambientPolicy.mode = autonomous` on the live provider, then a second signed amendment naming autonomous
+      ambient posting (its caps, allow-lists, kill-switch/lifecycle conditions from AC1-AC9) exists in §8 BEFORE
+      that happens. Until then the code merges **dark**: `mode` defaults `off` (AC1), and the settings API
+      rejects `autonomous` (400, "not authorized by PROVIDER-GOVERNANCE §8") unless a governed config flag
+      `Generation:Governance:AmbientAutonomyAuthorized` is true (default false, set by the signer in the same
+      reviewed commit as the amendment — the same pattern as `generationTenantBounded`); `review` mode stays
+      allowed. The PR must not edit PROVIDER-GOVERNANCE.md itself; the amendment is Tom's.
+
 Group A — the policy (human-set, bounded, in memory)
 - [ ] **AC1 Tier policy, default OFF.** Given a new `AmbientTierPolicy` per exercise — `mode`
       (`off` | `review` | `autonomous`; default `off`), `maxPerMinute`, `maxPerHour`, `topicAllowList`,
@@ -167,7 +182,7 @@ Group B — what runs autonomously, and what never does
 storyline-model 04 (quiet floor + rate cap); persona-voice-engine; engine-generation-infra 04 (Ambient tier);
 reaction-loop; autonomy-safety 01-03 and 05/06 (levels, auto-HOLD, kill switch, settings API/panel); engine-runtime
 02 (publish service); world-steering 07 (pause tiers). **Soft:** Session A's A5 lifecycle gate (not landed — hence
-the interim gate seam). **Wave:** C2, after C1 (live provider verified on UAT).
+the interim gate seam). **Gate (DoD):** the §8 amendment in AC0 is signed before the story is marked Complete or `ambientPolicy.mode = autonomous` is enabled on UAT. **Wave:** C2, after C1 (live provider verified on UAT).
 
 ## Tests
 - Unit (Pulse.Core): policy validation (caps <= global cap, allow-lists, empty = nothing); decide policy fires only
