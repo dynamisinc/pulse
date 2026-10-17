@@ -49,10 +49,10 @@ vi.mock('../../identity/controllerIdentity', () => ({
   useControllerIdentity: vi.fn(),
 }))
 
-let useMockData = true
+const mockFlag = vi.hoisted(() => ({ useMockData: true }))
 vi.mock('@/core/config/mockData', () => ({
   get USE_MOCK_DATA() {
-    return useMockData
+    return mockFlag.useMockData
   },
 }))
 
@@ -117,7 +117,7 @@ beforeEach(() => {
   engineSettingsStore.resetForTests()
   mockedUseExerciseContext.mockReturnValue(scopeFor('ex-mock-0001'))
   mockedUseControllerIdentity.mockReturnValue(identity())
-  useMockData = true
+  mockFlag.useMockData = true
 })
 
 afterEach(() => {
@@ -251,7 +251,7 @@ describe('useEngineSettings — per-exercise scoping (COR-001)', () => {
 
 describe('useEngineSettings — live mode (USE_MOCK_DATA=false)', () => {
   beforeEach(() => {
-    useMockData = false
+    mockFlag.useMockData = false
   })
 
   it('fetches GET /api/engine/settings once per exercise, reflecting loading then ready', async () => {
