@@ -439,6 +439,96 @@ public sealed class EngineReviewEndpointsTests
             _fixture.ConnectionString!, currentExerciseId, authenticatedStaff, assignedExerciseId);
     }
 
+    // ---- WR-2: attribution is the SESSION person, never the body's actingHumanId ---------------------
+
+    private const string SpoofedActingHumanId = "the-exercise-lead";
+
+    [RequiresDockerFact]
+    public async Task Approve_ASpoofedBodyActingHumanId_IsNotRecorded_TheSessionPersonIs()
+    {
+        var exerciseId = Guid.NewGuid();
+        var draftId = Guid.NewGuid();
+        await SeedAsync(Item(draftId, exerciseId, AutonomyLevel.Suggest, DraftDisposition.Queued, countdown: false));
+        await using var host = await StartHostAsync(exerciseId);
+
+        var response = await host.Client.PostAsJsonAsync(
+            new Uri($"/api/engine/review/{draftId}/approve", UriKind.Relative),
+            new { actingHumanId = SpoofedActingHumanId, timeZone = "America/Chicago" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var reviewed = await EventsAsync(exerciseId, Pulse.WebApi.Features.EngineRuntime.Telemetry.EngineEventTypes.Reviewed);
+        reviewed.Should().ContainSingle().Which.Actor.ActingHumanId.Should().Be(
+            host.StaffUserId.ToString(), "the decision is attributed to the verified session's person (WR-2), not the body");
+    }
+
+    [RequiresDockerFact]
+    public async Task Veto_ASpoofedBodyActingHumanId_IsNotRecorded_TheSessionPersonIs()
+    {
+        var exerciseId = Guid.NewGuid();
+        var draftId = Guid.NewGuid();
+        await SeedAsync(Item(draftId, exerciseId, AutonomyLevel.Suggest, DraftDisposition.Queued, countdown: false));
+        await using var host = await StartHostAsync(exerciseId);
+
+        var response = await host.Client.PostAsJsonAsync(
+            new Uri($"/api/engine/review/{draftId}/veto", UriKind.Relative),
+            new { actingHumanId = SpoofedActingHumanId, timeZone = "America/Chicago" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var reviewed = await EventsAsync(exerciseId, Pulse.WebApi.Features.EngineRuntime.Telemetry.EngineEventTypes.Reviewed);
+        reviewed.Should().ContainSingle().Which.Actor.ActingHumanId.Should().Be(host.StaffUserId.ToString())
+            .And.NotBe(SpoofedActingHumanId);
+    }
+
+    [RequiresDockerFact]
+    public async Task KillSwitch_ASpoofedBodyActingHumanId_IsNotRecordedOnTheAmbientDemotion_TheSessionPersonIs()
+    {
+        var exerciseId = Guid.NewGuid();
+        await using var host = await StartHostAsync(exerciseId);
+        host.Services.GetRequiredService<EngineAmbientPolicyRegistry>().Set(exerciseId, new Pulse.Core.Features.Ambient.Models.AmbientTierPolicy
+        {
+            Mode = Pulse.Core.Features.Ambient.Models.AmbientPolicyMode.Autonomous,
+            MaxPerMinute = 1,
+            MaxPerHour = 1,
+            TopicAllowList = [],
+            PersonaAllowList = [],
+            SetBy = "arrange",
+        });
+
+        var response = await host.Client.PostAsJsonAsync(
+            new Uri("/api/engine/autonomy/kill-switch", UriKind.Relative),
+            new { actingHumanId = SpoofedActingHumanId, mode = "full-stop" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var demotion = await EventsAsync(exerciseId, Pulse.WebApi.Features.EngineRuntime.Telemetry.EngineEventTypes.TierPolicyChanged);
+        demotion.Should().ContainSingle("the kill switch lowered autonomous ambient (AC6)")
+            .Which.Actor.ActingHumanId.Should().Be(host.StaffUserId.ToString(), "the lever-puller is the session person (WR-2)");
+    }
+
+    [RequiresDockerFact]
+    public async Task AutonomyDefault_ASpoofedBodyActingHumanId_IsNotRecorded_TheSessionPersonIs()
+    {
+        var exerciseId = Guid.NewGuid();
+        await using var host = await StartHostAsync(exerciseId);
+
+        var response = await host.Client.PostAsJsonAsync(
+            new Uri("/api/engine/settings/autonomy-default", UriKind.Relative),
+            new { actingHumanId = SpoofedActingHumanId, level = "delayed-auto", timeZone = "UTC" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var changed = await EventsAsync(exerciseId, Pulse.WebApi.Features.EngineRuntime.Telemetry.EngineEventTypes.AutonomyDefaultChanged);
+        changed.Should().ContainSingle().Which.Actor.ActingHumanId.Should().Be(host.StaffUserId.ToString())
+            .And.NotBe(SpoofedActingHumanId);
+    }
+
+    private async Task<List<TelemetryEvent>> EventsAsync(Guid exerciseId, string eventType)
+    {
+        await using var verify = _fixture.CreateContext();
+        return await verify.TelemetryEvents
+            .IgnoreQueryFilters()
+            .Where(e => e.ExerciseId == exerciseId && e.EventType == eventType)
+            .ToListAsync();
+    }
+
     private async Task SeedAsync(params EngineReviewItemEntity[] items)
     {
         await using var seed = _fixture.CreateContext();
@@ -509,12 +599,16 @@ public sealed class EngineReviewEndpointsTests
     {
         private readonly WebApplication _app;
 
-        private EngineReviewTestHost(WebApplication app, CapturingEnginePublishService publisher)
+        private EngineReviewTestHost(WebApplication app, CapturingEnginePublishService publisher, Guid staffUserId)
         {
             _app = app;
             Publisher = publisher;
+            StaffUserId = staffUserId;
             Client = app.GetTestClient();
         }
+
+        /// <summary>The session's staff person — the identity every steering action is attributed to (WR-2).</summary>
+        public Guid StaffUserId { get; }
 
         public HttpClient Client { get; }
 
@@ -586,7 +680,7 @@ public sealed class EngineReviewEndpointsTests
             app.MapEngineReview();
             await app.StartAsync();
 
-            return new EngineReviewTestHost(app, publisher);
+            return new EngineReviewTestHost(app, publisher, staffUserId);
         }
 
         public async ValueTask DisposeAsync()
