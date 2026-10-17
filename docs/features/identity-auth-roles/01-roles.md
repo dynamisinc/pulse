@@ -40,3 +40,26 @@ Exercise-isolation (scoping). Underpins every gated surface.
 
 ## Tests
 - Unit/integration: each role reaches its allowed surfaces and is denied the others.
+
+## Scope update 2026-10-16 (ADMIN-IDENTITY-MODEL)
+
+Source: [`docs/design/ADMIN-IDENTITY-MODEL.md`](../../design/ADMIN-IDENTITY-MODEL.md) §1.1, §8.1, §8.2 (Tier-2 signed off by Tom, 2026-10-16). Wave A1. **The ACs above stay; the
+following amend them.** The frozen-type change (`ExerciseRole` in `core/auth/roles.ts`) needs
+**orchestrator clearance first** and a post on the feature issue before A1 merges (brief C1.4).
+
+- [ ] **`orgAdmin` is no longer an exercise role.** Given the role vocabulary, then `ExerciseRole` is
+      `planner | controller | evaluator | participant | pio`, and `orgAdmin` is an `OrgRole` carried by
+      `Person.OrgRole` (org-level grant). Supersedes AC 1's "six roles" reading and AC 4 for `orgAdmin`
+      only (it is org-scoped, not exercise-scoped).
+- [ ] **Role set is per `Enrollment`.** Given a person with enrollments in two exercises, then they can hold
+      a different role in each, and exactly one role per exercise (unique `(ExerciseId, PersonId)`;
+      a second role in the same exercise is 409 `conflicting-enrollment`). Being staff and participant in
+      the same exercise is impossible in the database.
+- [ ] **Org admin gets no implicit in-exercise power.** Given an org admin with no enrollment in exercise X,
+      then every exercise-scoped staff route in X fails closed; self-enrolling is audited
+      (`org.enrollment.self-granted`).
+- [ ] **Migration keeps today's access.** Every existing `orgAdmin` assignment sets `Person.OrgRole` and
+      becomes a `planner` `Enrollment` on that exercise.
+- [ ] User guide: `docs/guide/planner-guide.md` (roles) updated in the same PR, or states "no guide impact".
+
+Depends on `16-person-and-enrollments`. Not in scope: the per-route enforcement (story 17).

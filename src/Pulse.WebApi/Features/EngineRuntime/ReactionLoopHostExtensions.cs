@@ -54,6 +54,16 @@ public static class ReactionLoopHostExtensions
         // whichever is wired first — a detached registry would silently drop a controller's tier choice.
         services.TryAddSingleton<EngineTierPolicyRegistry>();
 
+        // ambient-chatter story 01: the per-exercise ambient policy the driver reads every tick (TryAdd: the SAME
+        // singleton AddEngineReview's settings POST writes), the governed autonomy flag it carries (AC0), and the
+        // engine's own lifecycle publish gate (AC5). THE A5 SEAM: Session A's lifecycle gate replaces the interim
+        // implementation by changing ONLY the IEngineLifecyclePublishGate registration below (or a later
+        // services.Replace) — nothing that calls the gate changes.
+        EngineAmbientGovernanceOptions.Register(services);
+        services.TryAddSingleton<EngineAmbientPolicyRegistry>();
+        services.TryAddScoped<Pulse.WebApi.Features.Identity.EasyLogin.ExerciseFactsReader>();
+        services.TryAddScoped<IEngineLifecyclePublishGate, InterimEngineLifecyclePublishGate>();
+
         // The single publish funnel (SOC-003) — a singleton that establishes its own per-exercise scope for
         // every publish unit of work (COR-001), so both the loop and story 02's approve share one path.
         services.TryAddSingleton<IEnginePublishService, EnginePublishService>();

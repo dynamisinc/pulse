@@ -191,6 +191,9 @@ public sealed class EnginePublishService : IEnginePublishService
             TimeZone = burst.TimeZone,
             Channel = "social",
             Origin = "engine",
+            // Ambient-chatter 01 (AC9): an autonomous ambient post names the controller whose policy authorised it.
+            // Null for every reviewed publish, which keeps the default engine actor exactly as before.
+            Actor = new EngineTelemetryActor { Kind = "engine", ActingHumanId = burst.AuthorizedBy },
             Target = new EngineTelemetryTarget
             {
                 EntityType = "post",
@@ -203,6 +206,8 @@ public sealed class EnginePublishService : IEnginePublishService
             PostRef = post.Id.ToString(),
             Origin = "engine",
             Storyline = burst.StorylineId.ToString(),
+            Trigger = burst.Trigger,
+            PublishPath = burst.PublishPath,
         };
 
         return _telemetryEmitter.BuildEvent(EngineEventTypes.Published, context, payload);
