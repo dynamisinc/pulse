@@ -146,7 +146,8 @@ export function ConsoleTabletFrame({
           id,
           label: TAB_LABELS[id],
           badge: '',
-          // Its own component: the review queue ticks every second, and only this re-renders.
+          // Its own component, so the frame never reads the 1 s-ticking review queue itself.
+          // (ControllerConsole still reads it and re-renders this frame each tick: follow-up.)
           renderBadge: () => <ReviewTabBadge />,
         }
     }

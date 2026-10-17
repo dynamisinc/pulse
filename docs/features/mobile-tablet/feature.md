@@ -38,7 +38,7 @@ Status: all Not Started. B1 audit (2026-10-16) folded in: PR #562 alert bar veri
 | 09 | [PWA: per-exercise brand manifest](09-pwa-brand-manifest.md) | B2 | COR-066, COR-030, XC-002 | Not Started | — |
 | 10 | [PWA: service worker (app shell only)](10-pwa-service-worker.md) | B2 | XC-001, NFR-004 | Not Started | — |
 | 11 | [PWA: install prompts (Android and iOS)](11-pwa-install-prompts.md) | B2 | NFR-001, D0 §2 | Not Started | — |
-| 12 | [Console layout at tablet sizes (panes/tabs)](12-console-tablet-layout.md) | B3 | COR-018, NFR-001 | Not Started | — |
+| 12 | [Console layout at tablet sizes (panes/tabs)](12-console-tablet-layout.md) | B3 | COR-018, NFR-001 | In Review | #524 |
 | 13 | [Staff shell frame, toolstrip and flyouts at tablet sizes](13-staff-shell-tablet-frame.md) | B3 | COR-018, NFR-001 | Not Started | — |
 | 14 | [Console keyboard shortcuts and touch alternatives](14-console-touch-and-keyboard.md) | B3 | NFR-001 | Not Started | — |
 | 15 | [Takedown, Freeze and EndEx confirms stay deliberate on touch](15-deliberate-confirms-touch.md) | B3 | CTL-025, CTL-023, CTL-024 | Not Started | — |
