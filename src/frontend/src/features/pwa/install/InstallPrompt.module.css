@@ -1,0 +1,90 @@
+.card,
+.sheet {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 480px;
+  border-radius: 14px;
+  background: var(--pulse-brand-surface, #fff);
+  color: var(--pulse-brand-on-surface, #1c1c1c);
+  border: 2px solid var(--pulse-brand-primary, #1c1c1c);
+  box-shadow: 0 4px 16px rgb(0 0 0 / 22%);
+  font: inherit;
+}
+
+.card {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+}
+
+.primary {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 0 14px;
+  border: 2px solid var(--pulse-brand-primary, #1c1c1c);
+  border-radius: 999px;
+  background: var(--pulse-brand-primary, #1c1c1c);
+  color: var(--pulse-brand-surface, #fff);
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.close {
+  min-width: 44px;
+  min-height: 44px;
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--pulse-brand-on-surface, #1c1c1c);
+  font: inherit;
+  cursor: pointer;
+}
+
+.primary:focus-visible,
+.close:focus-visible {
+  outline: 3px solid var(--pulse-brand-accent, #1c1c1c);
+  outline-offset: 2px;
+}
+
+.sheet {
+  padding: 12px 8px 14px 16px;
+}
+
+.sheetHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.title {
+  flex: 1;
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.steps {
+  margin: 8px 8px 0 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: step;
+}
+
+.steps li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 44px;
+  font-size: 0.95rem;
+}
+
+.steps li svg {
+  width: 1.25rem;
+  color: var(--pulse-brand-primary, #1c1c1c);
+}

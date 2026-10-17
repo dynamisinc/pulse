@@ -5,6 +5,10 @@
  * story 05; NFR-001 — see docs/features/participant-shell/05-overlay-layer.md
  * cross-cutting AC "overlays trap focus and are announced").
  *
+ * Note (Tom, 10/16): a PAUSE page leaves the alert bar visible above it, but the bar is
+ * `inert` (set by `AlertBar` from `alertPauseBridge`), so nothing outside the overlay
+ * is focusable or tappable; EndEx / break-fiction cover the bar.
+ *
  * `OverlayLayer.tsx` mounts as a top-level sibling of the channel content, not
  * a descendant of it (it must be able to paint ABOVE content/nav/alert-bar,
  * per `SHELL_Z`). That means a channel's interactive elements stay in the DOM

@@ -31,6 +31,7 @@ import { OverlayLayer } from './OverlayLayer'
 import { useOverlayState } from './overlayState'
 import { useChromeConfig } from '../../chromeConfig'
 import { SHELL_Z } from '../../mountContract'
+import { alertPauseBridge } from '../../alertPauseBridge'
 import type { OverlayState } from './types'
 import type { ChromeConfig } from '../../mountContract'
 
@@ -120,6 +121,121 @@ describe('OverlayLayer — z-order (COR-065)', () => {
   })
 })
 
+afterEach(() => {
+  act(() => alertPauseBridge.reset())
+})
+
+describe('OverlayLayer — pause leaves the alert bar visible; EndEx covers it (Tom, 10/16)', () => {
+  const inset = 'calc(var(--pulse-chrome-top, 0px) + var(--pulse-alert-height, 0px))'
+
+  it.each([
+    ['in-fiction', 'pulse-overlay-pause-in-fiction'],
+    ['out-of-fiction', 'pulse-overlay-pause-out-of-fiction'],
+  ] as const)('pause / %s starts below the chrome and the alert bar', (register, testId) => {
+    mockUseOverlayState.mockReturnValue(overlayState({ state: 'pause', register }))
+    render(<OverlayLayer />)
+    const el = screen.getByTestId(testId)
+    expect(el.style.top).toBe(inset)
+    expect(el.style.paddingTop).toBe('24px')
+  })
+
+  it.each([
+    ['in-fiction', 'pulse-overlay-endex-in-fiction'],
+    ['out-of-fiction', 'pulse-overlay-endex-out-of-fiction'],
+  ] as const)('endex / %s covers the alert bar (top 0)', (register, testId) => {
+    mockUseOverlayState.mockReturnValue(overlayState({ state: 'endex', register }))
+    render(<OverlayLayer />)
+    expect(screen.getByTestId(testId).style.top).toBe('0px')
+  })
+
+  it('break-fiction still covers the whole viewport', () => {
+    mockUseOverlayState.mockReturnValue(overlayState({ state: 'broadcast', message: 'Stand by.' }))
+    render(<OverlayLayer />)
+    expect(screen.getByTestId('pulse-overlay-break-fiction').style.top).toBe('0px')
+  })
+
+  it('publishes pauseActive only while paused, and clears it on unmount', () => {
+    mockUseOverlayState.mockReturnValue(overlayState({ state: 'endex', register: 'in-fiction' }))
+    const { rerender, unmount } = render(<OverlayLayer />)
+    expect(alertPauseBridge.getSnapshot().pauseActive).toBe(false)
+    mockUseOverlayState.mockReturnValue(overlayState({ state: 'pause', register: 'in-fiction' }))
+    rerender(<OverlayLayer />)
+    expect(alertPauseBridge.getSnapshot().pauseActive).toBe(true)
+    unmount()
+    expect(alertPauseBridge.getSnapshot().pauseActive).toBe(false)
+  })
+
+  it('renders a transparent aria-hidden shield over exactly the alert band, only while paused', () => {
+    mockUseOverlayState.mockReturnValue(overlayState({ state: 'pause', register: 'in-fiction' }))
+    const { rerender } = render(<OverlayLayer />)
+    const shield = screen.getByTestId('pulse-overlay-pause-alert-shield')
+    expect(shield).toHaveAttribute('aria-hidden', 'true')
+    expect(shield.style.top).toBe('var(--pulse-chrome-top, 0px)')
+    expect(shield.style.height).toBe('var(--pulse-alert-height, 0px)')
+    expect(shield.style.zIndex).toBe(String(SHELL_Z.overlay))
+    mockUseOverlayState.mockReturnValue(overlayState({ state: 'endex', register: 'in-fiction' }))
+    rerender(<OverlayLayer />)
+    expect(screen.queryByTestId('pulse-overlay-pause-alert-shield')).not.toBeInTheDocument()
+  })
+
+  it('marks EndEx and break-fiction as covering overlays for the alert bar', () => {
+    mockUseOverlayState.mockReturnValue(overlayState({ state: 'endex', register: 'in-fiction' }))
+    const { rerender } = render(<OverlayLayer />)
+    expect(alertPauseBridge.getSnapshot())
+      .toMatchObject({ overlayActive: true, pauseActive: false })
+    mockUseOverlayState.mockReturnValue(
+      overlayState({ state: 'broadcast', message: 'x' }))
+    rerender(<OverlayLayer />)
+    expect(alertPauseBridge.getSnapshot())
+      .toMatchObject({ overlayActive: true, pauseActive: false })
+  })
+
+  it('announces mid-pause changes in fixed-politeness regions, not the alert present at open', () => {
+    act(() => alertPauseBridge.setAlert('ADVISORY: Road closed.', 'advisory'))
+    mockUseOverlayState.mockReturnValue(overlayState({ state: 'pause', register: 'in-fiction' }))
+    render(<OverlayLayer />)
+    const polite = screen.getByTestId('pulse-overlay-pause-alert-live')
+    const assertive = screen.getByTestId('pulse-overlay-pause-alert-live-assertive')
+    expect(polite).toHaveAttribute('role', 'status')
+    expect(polite).toHaveAttribute('aria-live', 'polite')
+    expect(assertive).toHaveAttribute('aria-live', 'assertive')
+    expect(assertive).not.toHaveAttribute('role')
+    expect(polite).toBeEmptyDOMElement()
+    expect(assertive).toBeEmptyDOMElement()
+
+    act(() => alertPauseBridge.setAlert('ADVISORY: Shelters open.', 'advisory'))
+    expect(polite).toHaveTextContent('Alert changed. ADVISORY: Shelters open.')
+    expect(assertive).toBeEmptyDOMElement()
+
+    // advisory -> emergency lands in the assertive region; roles never flip.
+    act(() => alertPauseBridge.setAlert('EMERGENCY: Evacuate now.', 'emergency'))
+    expect(assertive).toHaveTextContent('Alert changed. EMERGENCY: Evacuate now.')
+    expect(polite).toBeEmptyDOMElement()
+    expect(polite).toHaveAttribute('aria-live', 'polite')
+    expect(assertive).toHaveAttribute('aria-live', 'assertive')
+  })
+
+  it('announces "Alert cleared." politely when the alert clears mid-pause', () => {
+    act(() => alertPauseBridge.setAlert('EMERGENCY: Evacuate now.', 'emergency'))
+    mockUseOverlayState.mockReturnValue(overlayState({ state: 'pause', register: 'in-fiction' }))
+    render(<OverlayLayer />)
+    act(() => alertPauseBridge.setAlert('', null))
+    expect(screen.getByTestId('pulse-overlay-pause-alert-live')).toHaveTextContent('Alert cleared.')
+    expect(screen.getByTestId('pulse-overlay-pause-alert-live-assertive')).toBeEmptyDOMElement()
+  })
+
+  it('mirrors the active alert into the pause dialog description (and not into EndEx)', () => {
+    act(() => alertPauseBridge.setAlert('EMERGENCY: Evacuate now.', 'emergency'))
+    mockUseOverlayState.mockReturnValue(overlayState({ state: 'pause', register: 'out-of-fiction' }))
+    const { rerender } = render(<OverlayLayer />)
+    const dialog = screen.getByTestId('pulse-overlay-pause-out-of-fiction')
+    expect(dialog).toHaveAccessibleDescription('Active alert. EMERGENCY: Evacuate now.')
+    mockUseOverlayState.mockReturnValue(overlayState({ state: 'endex', register: 'out-of-fiction' }))
+    rerender(<OverlayLayer />)
+    expect(screen.queryByTestId('pulse-overlay-pause-alert-mirror')).not.toBeInTheDocument()
+  })
+})
+
 describe('OverlayLayer — break-fiction (CTL-024/D7-003)', () => {
   it('shows the exact AC header, the director-authored message, and the "remains until cleared" line', () => {
     mockUseOverlayState.mockReturnValue(
@@ -165,7 +281,8 @@ describe('OverlayLayer — break-fiction (CTL-024/D7-003)', () => {
   })
 
   it('applies the black field / amber hazard treatment and renders both hazard-stripe bars', () => {
-    mockUseOverlayState.mockReturnValue(overlayState({ state: 'broadcast', message: 'x' }))
+    mockUseOverlayState.mockReturnValue(
+      overlayState({ state: 'broadcast', message: 'x' }))
 
     render(<OverlayLayer />)
 
@@ -175,7 +292,8 @@ describe('OverlayLayer — break-fiction (CTL-024/D7-003)', () => {
   })
 
   it('has no dismiss control — no button or link anywhere in the broadcast', () => {
-    mockUseOverlayState.mockReturnValue(overlayState({ state: 'broadcast', message: 'x' }))
+    mockUseOverlayState.mockReturnValue(
+      overlayState({ state: 'broadcast', message: 'x' }))
 
     render(<OverlayLayer />)
 
@@ -187,7 +305,8 @@ describe('OverlayLayer — break-fiction (CTL-024/D7-003)', () => {
   it('ticks the wall-clock display forward once a second while broadcasting — never frozen', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2032-04-01T08:00:00Z'))
-    mockUseOverlayState.mockReturnValue(overlayState({ state: 'broadcast', message: 'x' }))
+    mockUseOverlayState.mockReturnValue(
+      overlayState({ state: 'broadcast', message: 'x' }))
 
     render(<OverlayLayer />)
     const initialText = screen.getByTestId('pulse-overlay-break-fiction').textContent ?? ''
@@ -205,7 +324,8 @@ describe('OverlayLayer — break-fiction (CTL-024/D7-003)', () => {
 
   it('reserves no NFR-008 watermark slot — forbidden from carrying that signal even when chrome is off', () => {
     mockUseChromeConfig.mockReturnValue(CHROME_DISABLED)
-    mockUseOverlayState.mockReturnValue(overlayState({ state: 'broadcast', message: 'x' }))
+    mockUseOverlayState.mockReturnValue(
+      overlayState({ state: 'broadcast', message: 'x' }))
 
     render(<OverlayLayer />)
 
@@ -213,7 +333,8 @@ describe('OverlayLayer — break-fiction (CTL-024/D7-003)', () => {
   })
 
   it('is announced as role="alertdialog" with aria-modal, and receives focus on activation', () => {
-    mockUseOverlayState.mockReturnValue(overlayState({ state: 'broadcast', message: 'x' }))
+    mockUseOverlayState.mockReturnValue(
+      overlayState({ state: 'broadcast', message: 'x' }))
 
     render(<OverlayLayer />)
 
@@ -459,5 +580,70 @@ describe('OverlayLayer — priority over the channel (F2)', () => {
     rerender(<OverlayLayer />)
 
     expect(document.activeElement).toBe(screen.getByTestId('pulse-overlay-break-fiction'))
+  })
+})
+
+describe('OverlayLayer on phones (mobile-tablet story 03)', () => {
+  it.each([
+    ['pause', 'in-fiction', 'pulse-overlay-pause-in-fiction'],
+    ['pause', 'out-of-fiction', 'pulse-overlay-pause-out-of-fiction'],
+    ['endex', 'in-fiction', 'pulse-overlay-endex-in-fiction'],
+    ['endex', 'out-of-fiction', 'pulse-overlay-endex-out-of-fiction'],
+    ['broadcast', 'in-fiction', 'pulse-overlay-break-fiction'],
+  ] as const)('%s (%s) carries its state with an icon as well as text', (state, register, testId) => {
+    mockUseOverlayState.mockReturnValue(overlayState({ state, register, message: 'm' }))
+
+    render(<OverlayLayer />)
+
+    const icon = screen.getByTestId(testId).querySelector('svg')
+    expect(icon).not.toBeNull()
+    expect(icon?.closest('[aria-hidden="true"]')).not.toBeNull()
+  })
+
+  it('insets the EndEx control page by the compliance chrome and scrolls its own overflow', () => {
+    mockUseOverlayState.mockReturnValue(overlayState({ state: 'endex', register: 'out-of-fiction' }))
+
+    render(<OverlayLayer />)
+
+    const style = screen.getByTestId('pulse-overlay-endex-out-of-fiction').style
+    expect(style.top).toBe('0px')
+    expect(style.paddingTop).toContain('--pulse-chrome-top')
+    expect(style.paddingBottom).toContain('--pulse-chrome-bottom')
+    expect(style.overflowY).toBe('auto')
+  })
+
+  it('the pause page clears chrome + alert bar via top, without double-counting the chrome inset', () => {
+    mockUseOverlayState.mockReturnValue(overlayState({ state: 'pause', register: 'out-of-fiction' }))
+
+    render(<OverlayLayer />)
+
+    const style = screen.getByTestId('pulse-overlay-pause-out-of-fiction').style
+    expect(style.top).toContain('--pulse-chrome-top')
+    expect(style.top).toContain('--pulse-alert-height')
+    expect(style.paddingTop).toBe('24px')
+    expect(style.paddingBottom).toContain('--pulse-chrome-bottom')
+    expect(style.overflowY).toBe('auto')
+  })
+
+  it('the in-fiction EndEx page uses a neutral icon, not the flag; the flag is out-of-fiction only', () => {
+    mockUseOverlayState.mockReturnValue(overlayState({ state: 'endex', register: 'in-fiction' }))
+    const { unmount } = render(<OverlayLayer />)
+    expect(screen.getByTestId('pulse-overlay-endex-in-fiction').querySelector('svg'))
+      .toHaveAttribute('data-icon', 'circle-xmark')
+    unmount()
+
+    mockUseOverlayState.mockReturnValue(overlayState({ state: 'endex', register: 'out-of-fiction' }))
+    render(<OverlayLayer />)
+    expect(screen.getByTestId('pulse-overlay-endex-out-of-fiction').querySelector('svg'))
+      .toHaveAttribute('data-icon', 'flag-checkered')
+  })
+
+  it('the break-fiction layer has no compliance-chrome inset (CTL-024 covers the chrome)', () => {
+    mockUseOverlayState.mockReturnValue(overlayState({ state: 'broadcast', message: 'm' }))
+    render(<OverlayLayer />)
+    const style = screen.getByTestId('pulse-overlay-break-fiction').style
+    expect(style.cssText).not.toContain('--pulse-chrome')
+    expect(style.paddingTop).toBe('')
+    expect(style.paddingBottom).toBe('')
   })
 })

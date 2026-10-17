@@ -28,7 +28,8 @@
  *     (`./wallClock.ts`).
  *  2. **Pause** (`state: 'pause'`, CTL-023/D7-004) and **3. EndEx**
  *     (`state: 'endex'`, COR-054) — the calm control-page family, rendered at
- *     `SHELL_Z.overlay` (above content/nav/alert-bar, below chrome). Each has
+ *     `SHELL_Z.overlay` (above content/nav, below chrome; starts below the
+ *     alert bar so an active alert stays readable). Each has
  *     an `'in-fiction'` register (neutral, system-ui, ZERO exercise language
  *     — reads like an ordinary "service unavailable" page) and an
  *     `'out-of-fiction'` register (slate `#1b232c`/mono, names the exercise
@@ -73,9 +74,18 @@
  * inline style, mirroring `ComplianceChrome.tsx`.
  */
 
-import { useEffect, useId, useState, type CSSProperties, type RefObject } from 'react'
+import { useEffect, useId, useRef, useState, type CSSProperties, type RefObject } from 'react'
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
+import {
+  faCircleXmark,
+  faFlagCheckered,
+  faPause,
+  faTriangleExclamation,
+  faWrench,
+} from '@fortawesome/free-solid-svg-icons'
 import { SHELL_Z } from '../../mountContract'
 import { useChromeConfig } from '../../chromeConfig'
+import { alertPauseBridge, useAlertPauseBridge } from '../../alertPauseBridge'
 import { useOverlayState } from './overlayState'
 import { useLeaveFullscreenWhileActive } from './useLeaveFullscreenWhileActive'
 import { useOverlayFocusTrap } from './useOverlayFocusTrap'
@@ -124,18 +134,67 @@ const fullViewportStyle: CSSProperties = {
   boxSizing: 'border-box',
 }
 
-const inFictionPageStyle: CSSProperties = {
+/**
+ * PAUSE only (Tom, 10/16): the page starts BELOW the compliance chrome and the
+ * alert bar, so the EAS band stays visible (and inert) above it. EndEx and
+ * break-fiction keep `top: 0` and cover the bar (SHELL-CONTRACT.md section 3).
+ * `paddingTop` overrides story 03's `chrome-top + 24px` from
+ * `controlPageBaseStyle`: `top` already clears the chrome, so counting it again
+ * would leave a double gap.
+ */
+const belowChromeAndAlertBarStyle: CSSProperties = {
+  top: 'calc(var(--pulse-chrome-top, 0px) + var(--pulse-alert-height, 0px))',
+  paddingTop: '24px',
+}
+
+const visuallyHiddenStyle: CSSProperties = {
+  position: 'absolute',
+  width: '1px',
+  height: '1px',
+  margin: '-1px',
+  padding: 0,
+  overflow: 'hidden',
+  clip: 'rect(0 0 0 0)',
+  whiteSpace: 'nowrap',
+  border: 0,
+}
+
+const controlPageBaseStyle: CSSProperties = {
   ...fullViewportStyle,
+  // Phones (story 03): the fixed layer must clear the fixed compliance banners (z above
+  // this layer, heights published as --pulse-chrome-*) and scroll its OWN content if a
+  // short landscape viewport or large text makes the card taller than the space left.
+  paddingTop: 'calc(var(--pulse-chrome-top, 0px) + 24px)',
+  paddingBottom: 'calc(var(--pulse-chrome-bottom, 0px) + 24px)',
+  paddingLeft: '24px',
+  paddingRight: '24px',
+  overflowY: 'auto',
+  overscrollBehavior: 'contain',
+}
+
+const inFictionPageStyle: CSSProperties = {
+  ...controlPageBaseStyle,
   zIndex: SHELL_Z.overlay,
   backgroundColor: '#f7f7f8',
   color: '#1a1a1a',
   fontFamily: 'system-ui, -apple-system, "Segoe UI", sans-serif',
-  padding: '24px',
   textAlign: 'center',
 }
 
+// `margin: auto` centres the card when it fits and lets it scroll from its top when it
+// does not (flex `center` would clip the top of an overflowing card out of reach).
 const inFictionCardStyle: CSSProperties = {
   maxWidth: '420px',
+  minWidth: 0,
+  margin: 'auto',
+  overflowWrap: 'anywhere',
+}
+
+// The state icon: text AND icon carry the state, never colour alone (NFR-001).
+const stateIconStyle: CSSProperties = {
+  display: 'block',
+  margin: '0 auto 12px',
+  fontSize: '28px',
 }
 
 const inFictionHeadingStyle: CSSProperties = {
@@ -146,23 +205,25 @@ const inFictionHeadingStyle: CSSProperties = {
 
 const inFictionBodyStyle: CSSProperties = {
   margin: 0,
-  fontSize: '15px',
+  fontSize: '16px',
   lineHeight: 1.5,
   color: '#4a4a4a',
 }
 
 const outOfFictionPageStyle: CSSProperties = {
-  ...fullViewportStyle,
+  ...controlPageBaseStyle,
   zIndex: SHELL_Z.overlay,
   backgroundColor: '#1b232c',
   color: '#e6edf3',
   fontFamily: 'ui-monospace, "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace',
-  padding: '24px',
   textAlign: 'center',
 }
 
 const outOfFictionCardStyle: CSSProperties = {
   maxWidth: '480px',
+  minWidth: 0,
+  margin: 'auto',
+  overflowWrap: 'anywhere',
 }
 
 const outOfFictionHeadingStyle: CSSProperties = {
@@ -174,7 +235,7 @@ const outOfFictionHeadingStyle: CSSProperties = {
 
 const outOfFictionBodyStyle: CSSProperties = {
   margin: 0,
-  fontSize: '14px',
+  fontSize: '16px',
   lineHeight: 1.6,
   color: '#aab6c2',
 }
@@ -183,6 +244,10 @@ const breakFictionContainerStyle: CSSProperties = {
   ...fullViewportStyle,
   zIndex: SHELL_Z.breakFiction,
   flexDirection: 'column',
+  // The broadcast intentionally covers the compliance chrome (CTL-024, z above it): no
+  // inset (it spreads the padding-free base), and the bars stay pinned while only the
+  // message region scrolls.
+  overflowY: 'hidden',
   backgroundColor: '#0d0d0d',
   color: '#ffb300',
   fontFamily: 'ui-monospace, "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace',
@@ -206,6 +271,9 @@ const breakFictionBodyStyle: CSSProperties = {
   gap: '18px',
   padding: '24px',
   textAlign: 'center',
+  minHeight: 0,
+  overflowY: 'auto',
+  overflowWrap: 'anywhere',
 }
 
 const breakFictionHeadingStyle: CSSProperties = {
@@ -225,7 +293,7 @@ const breakFictionMessageStyle: CSSProperties = {
 
 const breakFictionMetaStyle: CSSProperties = {
   margin: 0,
-  fontSize: '13px',
+  fontSize: '14px',
   letterSpacing: '0.04em',
   color: '#e6a800',
 }
@@ -286,6 +354,89 @@ function ExerciseWatermarkSlot() {
   )
 }
 
+/**
+ * While PAUSED the alert bar is visible but inert, and `aria-modal` hides it
+ * from assistive tech, so the active alert (severity label + message) is
+ * mirrored into a visually-hidden description of the pause dialog.
+ */
+function usePausedAlertMirror(variant: 'pause' | 'endex') {
+  const id = useId()
+  const { alertSummary, alertSeverity } = useAlertPauseBridge()
+  // Changes AFTER the dialog opened are announced through two always-mounted
+  // regions with FIXED politeness (never flip role/aria-live on a mounted
+  // region); the value present at open is covered by aria-describedby.
+  const seen = useRef(alertSummary)
+  const [polite, setPolite] = useState('')
+  const [assertive, setAssertive] = useState('')
+  useEffect(() => {
+    if (alertSummary === seen.current) return
+    seen.current = alertSummary
+    if (alertSummary === '') {
+      setAssertive('')
+      setPolite('Alert cleared.')
+    } else if (alertSeverity === 'emergency') {
+      setPolite('')
+      setAssertive(`Alert changed. ${alertSummary}`)
+    } else {
+      setAssertive('')
+      setPolite(`Alert changed. ${alertSummary}`)
+    }
+  }, [alertSummary, alertSeverity])
+  if (variant !== 'pause') return { describedBy: undefined, mirror: null }
+  return {
+    describedBy: alertSummary === '' ? undefined : id,
+    mirror: (
+      <>
+        {alertSummary !== '' && (
+          <p id={id} data-testid="pulse-overlay-pause-alert-mirror" style={visuallyHiddenStyle}>
+            Active alert. {alertSummary}
+          </p>
+        )}
+        <div
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+          data-testid="pulse-overlay-pause-alert-live"
+          style={visuallyHiddenStyle}
+        >
+          {polite}
+        </div>
+        <div
+          aria-live="assertive"
+          aria-atomic="true"
+          data-testid="pulse-overlay-pause-alert-live-assertive"
+          style={visuallyHiddenStyle}
+        >
+          {assertive}
+        </div>
+      </>
+    ),
+  }
+}
+
+/**
+ * The alert bar stays visible above a PAUSE page but is `inert`, and an inert
+ * element is invisible to hit-testing, so a tap on it would fall through to the
+ * feed scrolled underneath. This transparent shield covers exactly the bar band
+ * and swallows those taps (CR-001).
+ */
+function AlertBandShield() {
+  return (
+    <div
+      aria-hidden="true"
+      data-testid="pulse-overlay-pause-alert-shield"
+      style={{
+        position: 'fixed',
+        left: 0,
+        right: 0,
+        top: 'var(--pulse-chrome-top, 0px)',
+        height: 'var(--pulse-alert-height, 0px)',
+        zIndex: SHELL_Z.overlay,
+      }}
+    />
+  )
+}
+
 interface ControlPageProps {
   containerRef: RefObject<HTMLDivElement | null>
   variant: 'pause' | 'endex'
@@ -294,6 +445,7 @@ interface ControlPageProps {
 /** The in-fiction control-page register: neutral, system-ui, zero exercise language. */
 function InFictionMaintenancePage({ containerRef, variant }: ControlPageProps) {
   const headingId = useId()
+  const { describedBy, mirror } = usePausedAlertMirror(variant)
   const heading = variant === 'pause' ? PAUSE_IN_FICTION_HEADING : ENDEX_IN_FICTION_HEADING
   const body = variant === 'pause' ? PAUSE_IN_FICTION_BODY : ENDEX_IN_FICTION_BODY
   const testId = variant === 'pause'
@@ -306,12 +458,16 @@ function InFictionMaintenancePage({ containerRef, variant }: ControlPageProps) {
       role="dialog"
       aria-modal="true"
       aria-labelledby={headingId}
+      aria-describedby={describedBy}
       tabIndex={-1}
       data-shell-layer="overlay"
       data-testid={testId}
-      style={inFictionPageStyle}
+      style={variant === 'pause' ? { ...inFictionPageStyle, ...belowChromeAndAlertBarStyle } : inFictionPageStyle}
     >
-      <div style={inFictionCardStyle}>
+      <div data-testid="pulse-overlay-card" style={inFictionCardStyle}>
+        <div aria-hidden="true" style={stateIconStyle}>
+          <FontAwesomeIcon icon={variant === 'pause' ? faWrench : faCircleXmark} />
+        </div>
         <h1
           id={headingId}
           style={inFictionHeadingStyle}
@@ -320,6 +476,7 @@ function InFictionMaintenancePage({ containerRef, variant }: ControlPageProps) {
         </h1>
         <p style={inFictionBodyStyle}>{body}</p>
       </div>
+      {mirror}
       <ExerciseWatermarkSlot />
     </div>
   )
@@ -328,6 +485,7 @@ function InFictionMaintenancePage({ containerRef, variant }: ControlPageProps) {
 /** The out-of-fiction control-page register: calm slate/mono, names the exercise explicitly. */
 function OutOfFictionControlPage({ containerRef, variant }: ControlPageProps) {
   const headingId = useId()
+  const { describedBy, mirror } = usePausedAlertMirror(variant)
   const heading = variant === 'pause' ? PAUSE_OUT_OF_FICTION_HEADING : ENDEX_OUT_OF_FICTION_HEADING
   const body = variant === 'pause' ? PAUSE_OUT_OF_FICTION_BODY : ENDEX_OUT_OF_FICTION_BODY
   const testId = variant === 'pause'
@@ -340,12 +498,16 @@ function OutOfFictionControlPage({ containerRef, variant }: ControlPageProps) {
       role="dialog"
       aria-modal="true"
       aria-labelledby={headingId}
+      aria-describedby={describedBy}
       tabIndex={-1}
       data-shell-layer="overlay"
       data-testid={testId}
-      style={outOfFictionPageStyle}
+      style={variant === 'pause' ? { ...outOfFictionPageStyle, ...belowChromeAndAlertBarStyle } : outOfFictionPageStyle}
     >
-      <div style={outOfFictionCardStyle}>
+      <div data-testid="pulse-overlay-card" style={outOfFictionCardStyle}>
+        <div aria-hidden="true" style={stateIconStyle}>
+          <FontAwesomeIcon icon={variant === 'pause' ? faPause : faFlagCheckered} />
+        </div>
         <h1
           id={headingId}
           style={outOfFictionHeadingStyle}
@@ -354,6 +516,7 @@ function OutOfFictionControlPage({ containerRef, variant }: ControlPageProps) {
         </h1>
         <p style={outOfFictionBodyStyle}>{body}</p>
       </div>
+      {mirror}
     </div>
   )
 }
@@ -389,6 +552,9 @@ function BreakFictionOverlay({ containerRef, message, wallClockNow }: BreakFicti
         style={hazardBarStyle}
       />
       <div style={breakFictionBodyStyle}>
+        <div aria-hidden="true" style={stateIconStyle}>
+          <FontAwesomeIcon icon={faTriangleExclamation} />
+        </div>
         <p
           id={headingId}
           style={breakFictionHeadingStyle}
@@ -432,6 +598,12 @@ export function OverlayLayer() {
     if (container !== null && !container.contains(document.activeElement)) container.focus()
   })
   const wallClockNow = useWallClockNow(isBreakFiction)
+  // Tell the alert bar a PAUSE is up (it goes inert and holds the ticker).
+  const isPause = state === 'pause'
+  useEffect(() => {
+    alertPauseBridge.setOverlay(isPause ? 'pause' : isActive ? 'cover' : 'none')
+    return () => alertPauseBridge.setOverlay('none')
+  }, [isPause, isActive])
 
   if (state === 'none') return null
 
@@ -448,9 +620,12 @@ export function OverlayLayer() {
   const PageComponent = register === 'in-fiction' ? InFictionMaintenancePage : OutOfFictionControlPage
 
   return (
-    <PageComponent
-      containerRef={containerRef}
-      variant={state}
-    />
+    <>
+      <PageComponent
+        containerRef={containerRef}
+        variant={state}
+      />
+      {state === 'pause' && <AlertBandShield />}
+    </>
   )
 }

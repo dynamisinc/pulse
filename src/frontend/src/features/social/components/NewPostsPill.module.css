@@ -33,6 +33,10 @@
   z-index: 1;
   display: flex;
   justify-content: center;
+  /* Zero layout height (burst legibility, story 07): the pill floats over the stream
+     instead of pushing it down when the first arrival lands, so the post under the
+     reader's finger never jumps. The pill overflows this box (visible) and stays sticky. */
+  height: 0;
   /* No background/padding: an empty region (count 0) is invisible. */
   pointer-events: none;
 }

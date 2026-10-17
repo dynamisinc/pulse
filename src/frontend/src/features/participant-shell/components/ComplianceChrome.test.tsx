@@ -22,10 +22,12 @@
  * that would regress if that publishing logic ever broke — rather than on
  * `ShellLayout`'s (unobservable-in-jsdom) computed padding.
  */
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { StrictMode } from 'react'
 import { render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { ComplianceChrome } from './ComplianceChrome'
+import { BOTTOM_BANNER_HEIGHT, ComplianceChrome, TOP_BANNER_HEIGHT } from './ComplianceChrome'
 import { useChromeConfig } from '../chromeConfig'
 import { SHELL_CHROME_BOTTOM_VAR, SHELL_CHROME_TOP_VAR } from '../mountContract'
 import type { ChromeConfig } from '../mountContract'
@@ -115,25 +117,27 @@ describe('ComplianceChrome — config-driven banners (AC1/AC2)', () => {
   })
 })
 
+const rootVar = (name: string) => document.documentElement.style.getPropertyValue(name)
+
 describe('ComplianceChrome — ShellLayout inset contract (AC1)', () => {
   it('publishes both chrome inset CSS vars as 22px on :root when chrome is enabled', () => {
     mockUseChromeConfig.mockReturnValue(NON_DEFAULT_CONFIG)
 
     render(<ComplianceChrome />)
 
-    expect(document.documentElement.style.getPropertyValue(SHELL_CHROME_TOP_VAR)).toBe('22px')
-    expect(document.documentElement.style.getPropertyValue(SHELL_CHROME_BOTTOM_VAR)).toBe('22px')
+    expect(rootVar(SHELL_CHROME_TOP_VAR)).toBe(TOP_BANNER_HEIGHT)
+    expect(rootVar(SHELL_CHROME_BOTTOM_VAR)).toBe(BOTTOM_BANNER_HEIGHT)
   })
 
   it('removes both inset vars from :root on unmount, leaving no stale reserved gap', () => {
     mockUseChromeConfig.mockReturnValue(NON_DEFAULT_CONFIG)
     const { unmount } = render(<ComplianceChrome />)
-    expect(document.documentElement.style.getPropertyValue(SHELL_CHROME_TOP_VAR)).toBe('22px')
+    expect(rootVar(SHELL_CHROME_TOP_VAR)).toBe(TOP_BANNER_HEIGHT)
 
     unmount()
 
-    expect(document.documentElement.style.getPropertyValue(SHELL_CHROME_TOP_VAR)).toBe('')
-    expect(document.documentElement.style.getPropertyValue(SHELL_CHROME_BOTTOM_VAR)).toBe('')
+    expect(rootVar(SHELL_CHROME_TOP_VAR)).toBe('')
+    expect(rootVar(SHELL_CHROME_BOTTOM_VAR)).toBe('')
   })
 })
 
@@ -147,19 +151,19 @@ describe('ComplianceChrome — concurrent-mount inset safety (WR-001, preview CO
     const outer = render(<ComplianceChrome />)
     const preview = render(<ComplianceChrome />)
 
-    expect(document.documentElement.style.getPropertyValue(SHELL_CHROME_TOP_VAR)).toBe('22px')
-    expect(document.documentElement.style.getPropertyValue(SHELL_CHROME_BOTTOM_VAR)).toBe('22px')
+    expect(rootVar(SHELL_CHROME_TOP_VAR)).toBe(TOP_BANNER_HEIGHT)
+    expect(rootVar(SHELL_CHROME_BOTTOM_VAR)).toBe(BOTTOM_BANNER_HEIGHT)
 
     // First unmount must NOT removeProperty the reserved inset out from under
     // the still-visible sibling shell — the exact WR-001 regression.
     preview.unmount()
-    expect(document.documentElement.style.getPropertyValue(SHELL_CHROME_TOP_VAR)).toBe('22px')
-    expect(document.documentElement.style.getPropertyValue(SHELL_CHROME_BOTTOM_VAR)).toBe('22px')
+    expect(rootVar(SHELL_CHROME_TOP_VAR)).toBe(TOP_BANNER_HEIGHT)
+    expect(rootVar(SHELL_CHROME_BOTTOM_VAR)).toBe(BOTTOM_BANNER_HEIGHT)
 
     // Last instance out clears it — a lone shell still leaves no stale gap.
     outer.unmount()
-    expect(document.documentElement.style.getPropertyValue(SHELL_CHROME_TOP_VAR)).toBe('')
-    expect(document.documentElement.style.getPropertyValue(SHELL_CHROME_BOTTOM_VAR)).toBe('')
+    expect(rootVar(SHELL_CHROME_TOP_VAR)).toBe('')
+    expect(rootVar(SHELL_CHROME_BOTTOM_VAR)).toBe('')
   })
 
   it('is StrictMode-safe: a mount→cleanup→mount cycle nets to published, then clears on unmount', () => {
@@ -173,12 +177,12 @@ describe('ComplianceChrome — concurrent-mount inset safety (WR-001, preview CO
         <ComplianceChrome />
       </StrictMode>,
     )
-    expect(document.documentElement.style.getPropertyValue(SHELL_CHROME_TOP_VAR)).toBe('22px')
-    expect(document.documentElement.style.getPropertyValue(SHELL_CHROME_BOTTOM_VAR)).toBe('22px')
+    expect(rootVar(SHELL_CHROME_TOP_VAR)).toBe(TOP_BANNER_HEIGHT)
+    expect(rootVar(SHELL_CHROME_BOTTOM_VAR)).toBe(BOTTOM_BANNER_HEIGHT)
 
     unmount()
-    expect(document.documentElement.style.getPropertyValue(SHELL_CHROME_TOP_VAR)).toBe('')
-    expect(document.documentElement.style.getPropertyValue(SHELL_CHROME_BOTTOM_VAR)).toBe('')
+    expect(rootVar(SHELL_CHROME_TOP_VAR)).toBe('')
+    expect(rootVar(SHELL_CHROME_BOTTOM_VAR)).toBe('')
   })
 })
 
@@ -191,8 +195,8 @@ describe('ComplianceChrome — chrome-off is legal, no gap artifact (AC3)', () =
     expect(screen.queryByTestId('pulse-compliance-chrome-top')).not.toBeInTheDocument()
     expect(screen.queryByTestId('pulse-compliance-chrome-bottom')).not.toBeInTheDocument()
     expect(screen.queryByRole('note')).not.toBeInTheDocument()
-    expect(document.documentElement.style.getPropertyValue(SHELL_CHROME_TOP_VAR)).toBe('0px')
-    expect(document.documentElement.style.getPropertyValue(SHELL_CHROME_BOTTOM_VAR)).toBe('0px')
+    expect(rootVar(SHELL_CHROME_TOP_VAR)).toBe('0px')
+    expect(rootVar(SHELL_CHROME_BOTTOM_VAR)).toBe('0px')
   })
 })
 
@@ -230,5 +234,26 @@ describe('ComplianceChrome — non-interactive assistive-tech context (AC5)', ()
     // appended a live clock string after the config text, this would fail.
     expect(top.textContent).toBe(NON_DEFAULT_CONFIG.top.text)
     expect(bottom.textContent).toBe(NON_DEFAULT_CONFIG.bottom.text)
+  })
+})
+
+describe('ComplianceChrome — safe areas under viewport-fit=cover (WR-001, mobile-tablet)', () => {
+  it('the banner heights grow by the safe-area insets, and the published vars match', () => {
+    expect(BOTTOM_BANNER_HEIGHT).toBe('calc(22px + env(safe-area-inset-bottom, 0px))')
+    expect(TOP_BANNER_HEIGHT).toBe('calc(22px + env(safe-area-inset-top, 0px))')
+    mockUseChromeConfig.mockReturnValue(NON_DEFAULT_CONFIG)
+    render(<ComplianceChrome />)
+    expect(rootVar(SHELL_CHROME_BOTTOM_VAR))
+      .toBe(BOTTOM_BANNER_HEIGHT)
+    expect(rootVar(SHELL_CHROME_TOP_VAR))
+      .toBe(TOP_BANNER_HEIGHT)
+  })
+
+  it('pads every banner side by its safe-area inset (source contract; jsdom drops env())', () => {
+    const src = readFileSync(join(__dirname, 'ComplianceChrome.tsx'), 'utf8')
+    expect(src).toContain('env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) 0')
+    expect(src).toContain('0 env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px)')
+    expect(src).toContain('env(safe-area-inset-left, 0px)')
+    expect(src).toContain("boxSizing: 'border-box'")
   })
 })

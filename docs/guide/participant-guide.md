@@ -32,11 +32,31 @@ Pulse runs in your web browser on a phone, tablet or computer. There is no app t
 Once you are signed in, you stay signed in for the rest of the exercise day, even if you close the
 tab or lock your phone. If you are on a shared computer, select **Sign out** when you finish.
 
+### Add it to your home screen (optional)
+
+Once you are signed in, you can put the exercise on your phone's home screen so it opens like an app.
+You may be offered this automatically; you can always say no.
+
+- **Android (Chrome):** tap **Add [exercise name] to your home screen** on the banner near the bottom
+  of the screen, then confirm. If you do not see the banner, open the Chrome menu and choose
+  **Add to Home screen** or **Install app**.
+- **iPhone or iPad (Safari):** tap the **Share** button (a square with an arrow pointing up) in
+  Safari's toolbar, scroll down, choose **Add to Home Screen**, then tap **Add**. On your second visit
+  a short reminder sheet shows these steps; close it with the **X**.
+
+If you close the banner or sheet it will not come back for this exercise.
+
+_Screenshots to follow (Android banner and iOS sheet via mock overrides)._
+
 ## 4. What you can do
 
 ![The exercise feed, showing posts with reply, repost, like and pin buttons.](img/participant-feed.png)
 
 - **Post.** Write in **What's happening?** and select **Post**. You can add up to 4 photos or a video.
+  On a phone, select the picture button to choose from your photo library. Each photo needs a short
+  description, and you can remove one with the **X** on its preview. Photos and videos carry an
+  **EXERCISE** banner. Tap a photo to see it full screen; **Close** (or the back gesture) returns you
+  to the post, and you can pinch to zoom the page.
 - **Reply.** Select **Reply** under a post to join the conversation.
 - **Like** and **Repost** a post.
 - **Pin.** Select **Pin** to save a post to your **Pinned** tab. Posts you like show up there too.
@@ -44,7 +64,9 @@ tab or lock your phone. If you are on a shared computer, select **Sign out** whe
 - **Edit your own post** within 15 minutes of posting, using **Edit post**. Everyone can see that a
   post was **Edited** and can read its edit history. *(Rolling out. You may not see this yet.)*
 - **Follow** accounts, and use **Home**, **Explore**, **Notifications** and **Profile** to find your
-  way around.
+  way around. On a tablet or computer they are on the left. On a phone they run along the
+  **bottom** of the screen, with the round **Post** button in the middle; a number on
+  **Notifications** shows how many you have not read yet.
 
 ![A post opened as a conversation, with replies below it.](img/participant-thread.png)
 

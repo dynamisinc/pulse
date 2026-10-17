@@ -112,6 +112,8 @@ import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from
 import { useExerciseContext } from '@/core/exerciseContext'
 import { useScenarioTime } from '@/core/clock'
 import { SHELL_ALERT_HEIGHT_VAR, SHELL_CHROME_TOP_VAR, SHELL_Z } from '../../mountContract'
+import { usePrefersReducedMotion } from '@/core/hooks/usePrefersReducedMotion'
+import { alertPauseBridge, useAlertPauseBridge } from '../../alertPauseBridge'
 import { useAlerts } from './useAlerts'
 import { useExitFullscreenOnNewAlert } from './useExitFullscreenOnNewAlert'
 import { AlertDetailsLink } from './AlertDetailsLink'
@@ -213,7 +215,8 @@ const hostBaseStyle: CSSProperties = {
   top: `var(${SHELL_CHROME_TOP_VAR}, 0px)`,
   zIndex: SHELL_Z.alertBar,
   boxSizing: 'border-box',
-  padding: '6px 14px',
+  // Clears a landscape notch under viewport-fit=cover (WR-001); 14px elsewhere.
+  padding: '6px max(14px, env(safe-area-inset-right, 0px)) 6px max(14px, env(safe-area-inset-left, 0px))',
 }
 
 const tickerHostStyle: CSSProperties = {
@@ -365,13 +368,17 @@ export function AlertBar() {
   // Ticker auto-rotation (multi-alert AC) — only runs for the ticker
   // treatment, and only when there is more than one alert to rotate through.
   const [tickerIndex, setTickerIndex] = useState(0)
+  const reduceMotion = usePrefersReducedMotion()
+  const { overlayActive } = useAlertPauseBridge()
   useEffect(() => {
-    if (treatment !== 'ticker' || alerts.length <= 1) return
+    // prefers-reduced-motion (NFR-001): the ticker holds on its current alert;
+    // every alert stays reachable through "Details →" (/alerts).
+    if (treatment !== 'ticker' || alerts.length <= 1 || reduceMotion || overlayActive) return
     const id = setInterval(() => {
       setTickerIndex(current => (current + 1) % alerts.length)
     }, ROTATE_INTERVAL_MS)
     return () => clearInterval(id)
-  }, [treatment, alerts.length])
+  }, [treatment, alerts.length, reduceMotion, overlayActive])
   // A shrinking alert list can leave a stale index — wrap it back in range
   // rather than indexing out of bounds.
   const safeTickerIndex = alerts.length === 0 ? 0 : tickerIndex % alerts.length
@@ -406,6 +413,15 @@ export function AlertBar() {
   // reserved space" still holds — the region is present but invisible.
   const activeAlert =
     treatment === 'none' ? null : pickActiveAlert(alerts, hasEmergency, safeTickerIndex)
+  // Mirror the shown alert for the pause dialog (aria-modal hides this bar from AT).
+  const activeSummary = activeAlert
+    ? `${SEVERITY_META[activeAlert.severity].label}: ${activeAlert.message}`
+    : ''
+  const activeSeverity = activeAlert?.severity ?? null
+  useEffect(() => {
+    alertPauseBridge.setAlert(activeSummary, activeSeverity)
+    return () => alertPauseBridge.setAlert('', null)
+  }, [activeSummary, activeSeverity])
   const liveAnnounceLevel = activeAlert?.severity === 'emergency' ? 'assertive' : 'polite'
   const otherAlerts =
     activeAlert && treatment === 'emergencyBand'
@@ -429,6 +445,7 @@ export function AlertBar() {
         role="status"
         aria-live={liveAnnounceLevel}
         aria-atomic="true"
+        inert={overlayActive}
         data-testid="pulse-alert-bar"
         data-alert-severity={activeAlert?.severity ?? 'none'}
         data-alert-treatment={dataTreatment}
