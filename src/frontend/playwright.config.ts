@@ -16,7 +16,9 @@
  * chromium`). Run with `npm run test:e2e` (see e2e/README.md).
  *
  * Projects = viewports. Phones are 360x800 and 390x844 (mobile emulation, touch);
- * the tablet is 768x1024 (touch). Specs that are phone-only skip the others.
+ * the tablet is 768x1024 (touch). Specs that are phone-only skip the others. The
+ * `controller-tablet` project runs only e2e/controller-tablet.spec.ts, which sets its own
+ * four viewports.
  */
 import { existsSync } from 'node:fs'
 import { defineConfig } from '@playwright/test'
@@ -24,6 +26,9 @@ import { defineConfig } from '@playwright/test'
 const BUNDLED_CHROMIUM = '/opt/pw-browsers/chromium'
 const executablePath = process.env.CHROMIUM_PATH
   ?? (existsSync(BUNDLED_CHROMIUM) ? BUNDLED_CHROMIUM : undefined)
+
+/** The spec that owns its four console viewports (see the `controller-tablet` project). */
+const CONTROLLER_TABLET_SPEC = /controller-tablet\.spec\.ts$/
 
 const PORT = Number(process.env.GUIDE_SHOTS_PORT ?? 5199)
 const BASE_URL = `http://localhost:${PORT}`
@@ -55,15 +60,26 @@ export default defineConfig({
   projects: [
     {
       name: 'phone-360',
+      testIgnore: CONTROLLER_TABLET_SPEC,
       use: { viewport: { width: 360, height: 800 }, isMobile: true, hasTouch: true },
     },
     {
       name: 'phone-390',
+      testIgnore: CONTROLLER_TABLET_SPEC,
       use: { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true },
     },
     {
       name: 'tablet-768',
+      testIgnore: CONTROLLER_TABLET_SPEC,
       use: { viewport: { width: 768, height: 1024 }, hasTouch: true },
+    },
+    // Controller console at the four tablet viewports (mobile-tablet story 16). The spec sets
+    // each viewport itself (per describe), so it runs ONCE here and is skipped by the projects
+    // above; no existing spec is multiplied.
+    {
+      name: 'controller-tablet',
+      testMatch: CONTROLLER_TABLET_SPEC,
+      use: { viewport: { width: 1180, height: 820 }, hasTouch: true },
     },
   ],
 })

@@ -1,6 +1,6 @@
 # Story: Console keyboard shortcuts and touch alternatives
 
-**Feature:** Phones and tablets  ·  **Epic:** E7  ·  **Phase:** 2  ·  **Status:** In Review
+**Feature:** Phones and tablets  ·  **Epic:** E7  ·  **Phase:** 2  ·  **Status:** Done
 **Requirements:** NFR-001 (controller console fully keyboard-operable)  ·  **Design decisions:** D5-024  ·  **Issue:** —
 
 ## Context
