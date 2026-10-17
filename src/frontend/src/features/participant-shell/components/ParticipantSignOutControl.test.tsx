@@ -86,3 +86,19 @@ describe('ParticipantSignOutControl', () => {
     ).resolves.not.toThrow()
   })
 })
+
+describe('ParticipantSignOutControl: touch target (WR-002, mobile-tablet)', () => {
+  it('ships a coarse-pointer rule giving the button a 44px minimum, and none for a mouse', () => {
+    const { container } = render(
+      <MemoryRouter>
+        <ParticipantSignOutControl />
+      </MemoryRouter>,
+    )
+    const css = container.querySelector('style')?.textContent ?? ''
+    expect(css).toContain('@media (pointer: coarse)')
+    expect(css).toContain('.pulse-shell-signout')
+    expect(css).toContain('min-height: 44px')
+    expect(css).toContain('min-width: 44px')
+    expect(screen.getByRole('button', { name: 'Sign out' })).toHaveClass('pulse-shell-signout')
+  })
+})

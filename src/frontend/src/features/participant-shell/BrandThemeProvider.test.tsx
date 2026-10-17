@@ -33,7 +33,7 @@ import {
   useBrandTokens,
   type BrandTokens,
 } from './brandTokens'
-import { ComplianceChrome } from './components/ComplianceChrome'
+import { ComplianceChrome, TOP_BANNER_HEIGHT } from './components/ComplianceChrome'
 import { useChromeConfig } from './chromeConfig'
 import { SHELL_CHROME_BOTTOM_VAR, SHELL_CHROME_TOP_VAR } from './mountContract'
 import type { ChromeConfig } from './mountContract'
@@ -186,7 +186,8 @@ describe('BrandThemeProvider — the shell\'s own chrome is independent of the b
     )
 
     // ComplianceChrome's own :root inset contract is present...
-    expect(document.documentElement.style.getPropertyValue(SHELL_CHROME_TOP_VAR)).toBe('22px')
+    const topInset = document.documentElement.style.getPropertyValue(SHELL_CHROME_TOP_VAR)
+    expect(topInset).toBe(TOP_BANNER_HEIGHT)
     // ...but the brand tokens never join it on :root - they stay scoped to
     // BrandThemeProvider's own wrapper (asserted separately above).
     expect(document.documentElement.style.getPropertyValue(BRAND_PRIMARY_VAR)).toBe('')
