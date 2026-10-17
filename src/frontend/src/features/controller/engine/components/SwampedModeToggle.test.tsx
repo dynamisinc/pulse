@@ -148,6 +148,52 @@ describe('SwampedModeToggle — OFF-only control for a non-lead controller (stor
     expect(screen.queryByTestId('swamped-mode-turn-off-confirm')).not.toBeInTheDocument()
   })
 
+  it('WR-004: opening the confirm step focuses Confirm; the trigger says aria-expanded, not a popup', () => {
+    mockedUseSwampedMode.mockReturnValue(stub({ swampedMode: true, isLead: false }))
+    render(<SwampedModeToggle />)
+
+    const trigger = screen.getByTestId('swamped-mode-turn-off-button')
+    expect(trigger).toHaveAttribute('aria-expanded', 'false')
+    expect(trigger).not.toHaveAttribute('aria-haspopup')
+    fireEvent.click(trigger)
+    expect(screen.getByTestId('swamped-mode-turn-off-confirm')).toHaveFocus()
+  })
+
+  it('WR-004: Cancel returns focus to the trigger', () => {
+    mockedUseSwampedMode.mockReturnValue(stub({ swampedMode: true, isLead: false }))
+    render(<SwampedModeToggle />)
+
+    fireEvent.click(screen.getByTestId('swamped-mode-turn-off-button'))
+    fireEvent.click(screen.getByTestId('swamped-mode-turn-off-cancel'))
+    expect(screen.getByTestId('swamped-mode-turn-off-button')).toHaveFocus()
+  })
+
+  it('WR-004: Confirm that turns it off lands focus on the note, not on <body>', () => {
+    const setSwampedMode = vi.fn()
+    mockedUseSwampedMode.mockReturnValue(stub({ swampedMode: true, isLead: false, setSwampedMode }))
+    const view = render(<SwampedModeToggle />)
+
+    fireEvent.click(screen.getByTestId('swamped-mode-turn-off-button'))
+    fireEvent.click(screen.getByTestId('swamped-mode-turn-off-confirm'))
+    // Still on (the server has not answered): focus is back on the trigger.
+    expect(screen.getByTestId('swamped-mode-turn-off-button')).toHaveFocus()
+
+    mockedUseSwampedMode.mockReturnValue(stub({ swampedMode: false, isLead: false, setSwampedMode }))
+    view.rerender(
+      <ThemeProvider theme={cobraTheme}>
+        <SwampedModeToggle />
+      </ThemeProvider>,
+    )
+    expect(screen.getByTestId('swamped-mode-non-lead-note')).toHaveFocus()
+  })
+
+  it('SG-005: the lead-only note is for controllers; a planner does not see it', () => {
+    access.canControl = false
+    mockedUseSwampedMode.mockReturnValue(stub({ swampedMode: false, isLead: false }))
+    render(<SwampedModeToggle />)
+    expect(screen.queryByTestId('swamped-mode-non-lead-note')).not.toBeInTheDocument()
+  })
+
   it('is absent while swamped mode is off (nothing to lower)', () => {
     mockedUseSwampedMode.mockReturnValue(stub({ swampedMode: false, isLead: false }))
     render(<SwampedModeToggle />)

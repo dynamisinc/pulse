@@ -33,7 +33,7 @@ import {
   faToggleOff,
   faPowerOff,
 } from '@fortawesome/free-solid-svg-icons'
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Box, Stack, Typography } from '@mui/material'
 import { CobraLinkButton, CobraSecondaryButton } from '@/theme/styledComponents'
 import { useSwampedMode } from '../hooks/useSwampedMode'
@@ -45,6 +45,29 @@ export function SwampedModeToggle() {
   const { swampedMode, isLead, setSwampedMode } = useSwampedMode()
   const canControl = useCanControl()
   const [confirmingOff, setConfirmingOff] = useState(false)
+  // WR-004: keyboard focus follows the OFF-only confirm step. Confirm is focused on open;
+  // Cancel returns to the trigger; after Confirm focus lands on the trigger, then (once swamped
+  // mode is actually off and the trigger unmounts) on the non-lead note.
+  const confirmRef = useRef<HTMLButtonElement | null>(null)
+  const triggerRef = useRef<HTMLButtonElement | null>(null)
+  const noteRef = useRef<HTMLParagraphElement | null>(null)
+  const restoreTriggerFocus = useRef(false)
+  const confirmedOff = useRef(false)
+
+  useEffect(() => {
+    if (confirmingOff) confirmRef.current?.focus()
+    else if (restoreTriggerFocus.current) {
+      restoreTriggerFocus.current = false
+      triggerRef.current?.focus()
+    }
+  }, [confirmingOff])
+
+  useEffect(() => {
+    if (!swampedMode && confirmedOff.current) {
+      confirmedOff.current = false
+      noteRef.current?.focus()
+    }
+  }, [swampedMode])
 
   return (
     <Stack
@@ -143,7 +166,10 @@ export function SwampedModeToggle() {
                 size="small"
                 startIcon={<FontAwesomeIcon icon={faPowerOff} aria-hidden="true" />}
                 data-testid="swamped-mode-turn-off-confirm"
+                ref={confirmRef}
                 onClick={() => {
+                  restoreTriggerFocus.current = true
+                  confirmedOff.current = true
                   setSwampedMode(false)
                   setConfirmingOff(false)
                 }}
@@ -153,7 +179,10 @@ export function SwampedModeToggle() {
               <CobraLinkButton
                 size="small"
                 data-testid="swamped-mode-turn-off-cancel"
-                onClick={() => setConfirmingOff(false)}
+                onClick={() => {
+                  restoreTriggerFocus.current = true
+                  setConfirmingOff(false)
+                }}
               >
                 Cancel
               </CobraLinkButton>
@@ -163,7 +192,8 @@ export function SwampedModeToggle() {
               size="small"
               startIcon={<FontAwesomeIcon icon={faPowerOff} aria-hidden="true" />}
               data-testid="swamped-mode-turn-off-button"
-              aria-haspopup="true"
+              ref={triggerRef}
+              aria-expanded={false}
               onClick={() => setConfirmingOff(true)}
             >
               Turn swamped mode off
@@ -172,8 +202,10 @@ export function SwampedModeToggle() {
         </Stack>
       )}
 
-      {!isLead && !swampedMode && (
+      {canControl && !isLead && !swampedMode && (
         <Typography
+          ref={noteRef}
+          tabIndex={-1}
           data-testid="swamped-mode-non-lead-note"
           sx={{ fontSize: 10.5, color: chrome.inkFaint }}
         >
