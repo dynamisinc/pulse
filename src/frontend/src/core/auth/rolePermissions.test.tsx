@@ -97,6 +97,15 @@ describe('can() - raising needs the lead controller (raise-only, Option A)', () 
   })
 })
 
+describe('can() - legacy `scheduled` is build (SG-004, the server maps it)', () => {
+  for (const action of ['staffPost', 'staffFollow', 'staffPin'] as const) {
+    it(`${action}: a planner may in scheduled, and still not in active`, () => {
+      expect(can(action, { role: 'planner', exerciseStatus: 'scheduled' })).toBe(true)
+      expect(can(action, { role: 'planner', exerciseStatus: 'active' })).toBe(false)
+    })
+  }
+})
+
 describe('can() - staff posting, follows and pins: build versus conduct', () => {
   const actions = ['staffPost', 'staffFollow', 'staffPin'] as const
   for (const action of actions) {

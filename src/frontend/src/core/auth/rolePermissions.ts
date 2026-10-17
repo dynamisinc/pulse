@@ -116,6 +116,14 @@ const BUILD_AUTHORING: readonly StaffAction[] = ['staffPost', 'staffFollow', 'st
 /** The text shown beside a control that is disabled because only the lead may raise. */
 export const LEAD_ONLY_RAISE_REASON = 'Only the lead controller can raise this'
 
+/**
+ * SG-004: the server maps the legacy `scheduled` status to `build`, so the client must too (there
+ * is no shared canonical-status map on the frontend; `ExerciseStatus` carries both vocabularies).
+ */
+function isBuildStatus(status: ExerciseStatus | undefined): boolean {
+  return status === 'build' || status === 'scheduled'
+}
+
 /** Whether `subject` may perform `action`. Pure; fails closed. */
 export function can(action: StaffAction, subject: PermissionSubject): boolean {
   const { role } = subject
@@ -123,7 +131,7 @@ export function can(action: StaffAction, subject: PermissionSubject): boolean {
   if (action === 'raiseAutonomy') return role === 'controller' && subject.isLead === true
   if ((BUILD_AUTHORING as readonly string[]).includes(action)) {
     if (role === 'controller') return true
-    return role === 'planner' && subject.exerciseStatus === 'build'
+    return role === 'planner' && isBuildStatus(subject.exerciseStatus)
   }
   return ROLE_RULES[action]?.includes(role) ?? false
 }
