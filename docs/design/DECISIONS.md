@@ -39,6 +39,14 @@ Participant = D1's model: two fixed 22px green banners, app frame inset (COR-031
 frame"). Staff = D5's model: one 20px dark top bar in flow. The asymmetry is deliberate — it is
 half of the thumbnail-distinguishability gate (D0 §2 / E1 §5).
 
+**Phone amendment (Tom, 2026-10-17, #612).** Below ~700px wide (`CHROME_WRAP_QUERY`) a 22px
+single line cannot hold a typical marking: at 360px the default bottom banner lost "— NOT REAL
+NEWS". There the banners **wrap**: up to 3 lines at an 11px line height, centred, never shorter
+than 22px, with an ellipsis only past line 3 (the full text stays available to assistive tech).
+The default markings take two lines (a 28px band). The published `--pulse-chrome-top/bottom`
+insets carry the **measured** banner heights on phones, so everything pinned to the chrome
+follows. At 700px and wider (tablets, desktop) nothing changes: one line, 22px.
+
 ### D7-006 — Classification strings stay per-world (user decision; divergence #2)
 Participant `UNCLASSIFIED // EXERCISE`; staff `UNCLASSIFIED // FOUO`. Both are config tokens,
 not hardcoded copy (COR-066).

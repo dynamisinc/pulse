@@ -194,7 +194,7 @@ describe('DraftTimerDriver — the clamp-suspends-swamped composition (REAL useE
     return effective
   }
 
-  it('STOP: a swamped expired timer still holds — never autoPublish', () => {
+  it('STOP: a swamped expired timer resolves Hold — never autoPublish', async () => {
     const effective = effectiveAfter(c => c.setMode('stop'))
     expect(effective.generationStopped).toBe(true)
 
@@ -212,15 +212,11 @@ describe('DraftTimerDriver — the clamp-suspends-swamped composition (REAL useE
       />,
     )
 
-    // A full stop is NOT a "timeout transition" (`autoHoldPolicy.evaluate` /
-    // `useDraftTimer`'s documented precedent — it is logged on the kill-
-    // switch's OWN safety path, not this one) — so `onResolve` never fires
-    // here and the item's stored disposition is simply left untouched. The
-    // safety invariant under test is the one that matters: despite an EXPIRED
-    // timer AND swamped mode being on, nothing publishes while the engine is
-    // fully stopped.
-    expect(itemDisposition()).toBe(DraftDisposition.CountingDown)
-    expect(itemDisposition()).not.toBe(DraftDisposition.Published)
+    // An expiry during a full stop is the ordinary hold-on-expiry
+    // (`autoHoldPolicy.evaluate`, mirroring the C# policy): it resolves Held
+    // rather than being left counting down, so a restore can never let it
+    // auto-send under swamped mode. Nothing publishes.
+    await waitFor(() => expect(itemDisposition()).toBe(DraftDisposition.Held))
     expect(postStore.getPosts()).toHaveLength(baseline)
   })
 

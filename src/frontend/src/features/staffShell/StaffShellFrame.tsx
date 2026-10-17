@@ -45,7 +45,16 @@ import { ThemeProvider } from '@mui/material/styles'
 import CssBaseline from '@mui/material/CssBaseline'
 import { cobraTheme } from '@/theme/cobraTheme'
 import { useOptionalPreview } from './previewContext'
-import { STAFF_HEADER_HEIGHT_PX, STAFF_TOOLSTRIP_WIDTH_PX, staffShellTokens } from './staffShellTokens'
+import {
+  STAFF_HEADER_HEIGHT_PX,
+  STAFF_HEADER_HEIGHT_TABLET_PX,
+  STAFF_COARSE_POINTER_MEDIA,
+  STAFF_TABLET_MEDIA,
+  STAFF_TOUCH_TARGET_PX,
+  STAFF_TOOLSTRIP_WIDTH_PX,
+  STAFF_TOOLSTRIP_WIDTH_TABLET_PX,
+  staffShellTokens,
+} from './staffShellTokens'
 
 export interface StaffShellFrameProps {
   /**
@@ -100,6 +109,13 @@ export function StaffShellFrame({
           height: '100vh',
           display: 'grid',
           gridTemplateRows: `${STAFF_HEADER_HEIGHT_PX}px minmax(0, 1fr)`,
+          // `minmax(0, 1fr)` (not the implicit `auto`) so an over-wide header/work-area child can
+          // never stretch the frame past the viewport and push the toolstrip off-screen (story 13:
+          // at 1180 the header's min-content was 1190 and clipped the toolstrip).
+          gridTemplateColumns: 'minmax(0, 1fr)',
+          [STAFF_TABLET_MEDIA]: {
+            gridTemplateRows: `${STAFF_HEADER_HEIGHT_TABLET_PX}px minmax(0, 1fr)`,
+          },
         }}
       >
         <Box
@@ -108,6 +124,8 @@ export function StaffShellFrame({
           sx={{
             height: STAFF_HEADER_HEIGHT_PX,
             minHeight: 0,
+            minWidth: 0,
+            [STAFF_TABLET_MEDIA]: { height: STAFF_HEADER_HEIGHT_TABLET_PX },
             bgcolor: staffShellTokens.header.background,
             borderBottom: `1px solid ${staffShellTokens.header.borderColor}`,
             color: staffShellTokens.header.textPrimary,
@@ -124,6 +142,27 @@ export function StaffShellFrame({
             display: 'grid',
             gridTemplateColumns: `minmax(0, 1fr) ${STAFF_TOOLSTRIP_WIDTH_PX}px`,
             minHeight: 0,
+            minWidth: 0,
+            [STAFF_TABLET_MEDIA]: {
+              gridTemplateColumns: `minmax(0, 1fr) ${STAFF_TOOLSTRIP_WIDTH_TABLET_PX}px`,
+            },
+            // Persona dock host (controller/console/personaDockHost.tsx, story 12's file): it
+            // predates `staffFlyout.ts` and is not edited here. Until it adopts the helper the
+            // frame applies the SAME contract to it from outside: clamp to the viewport, sit
+            // below `--staff-flyout-top`, and a 44px close button under a coarse pointer.
+            '& [data-testid="persona-dock-host"]': {
+              maxWidth: '100%',
+              top: `var(${staffShellTokens.flyout.topVar}, 0px)`,
+            },
+            [STAFF_COARSE_POINTER_MEDIA]: {
+              // The dock's HEADER close button only (first child row), not other "Close..." buttons
+              // that slot content may render. TODO(mobile-tablet/13 follow-up): remove once
+              // personaDockHost adopts staffFlyoutPanelSx / data-staff-flyout-close.
+              '& [data-testid="persona-dock-host"] > div:first-of-type button[aria-label^="Close"]': {
+                width: STAFF_TOUCH_TARGET_PX,
+                height: STAFF_TOUCH_TARGET_PX,
+              },
+            },
           }}
         >
           <Box
@@ -144,6 +183,7 @@ export function StaffShellFrame({
             data-testid="staff-shell-toolstrip"
             sx={{
               width: STAFF_TOOLSTRIP_WIDTH_PX,
+              [STAFF_TABLET_MEDIA]: { width: STAFF_TOOLSTRIP_WIDTH_TABLET_PX },
               minHeight: 0,
               overflow: 'auto',
               bgcolor: staffShellTokens.toolstrip.background,

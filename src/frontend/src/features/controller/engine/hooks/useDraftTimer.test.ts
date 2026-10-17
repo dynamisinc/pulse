@@ -208,15 +208,28 @@ describe('useDraftTimer — swamped mode is the ONLY auto-send path', () => {
     expect(events[0]?.payload).toMatchObject({ action: 'auto-send', viaSwampedMode: true })
   })
 
-  it('STILL holds under swamped mode when a full stop suspends the engine (no publish, no transition log)', () => {
+  it('STILL holds under swamped mode when the countdown expires during a full stop (hold-on-expiry, no publish)', () => {
     const onResolve = vi.fn()
     const { result } = renderHook(() =>
       useDraftTimer(makeCountdown(), STOPPED_AUTONOMY, true, { onResolve, now: clockAt(200) }),
     )
 
-    // A full stop overrides even swamped mode; and it is not a timeout transition
-    // to log here (logged on the safety path), so nothing fires from this hook.
+    // A full stop overrides even swamped mode, and an expiry under it is the
+    // ordinary hold-on-expiry, so it is never left counting down to auto-send
+    // after a restore (mirrors the C# AutoHoldPolicy.Evaluate).
     expect(result.current.disposition).toBe(TimeoutDisposition.Hold)
+    expect(onResolve).toHaveBeenCalledTimes(1)
+    expect(onResolve).toHaveBeenCalledWith(TimeoutDisposition.Hold, expect.anything())
+    expect(reviewedEvents()).toHaveLength(1)
+    expect(reviewedEvents()[0]?.payload).toMatchObject({ action: 'hold-on-expiry', viaSwampedMode: false })
+  })
+
+  it('a full stop does not resolve a countdown still inside its window (no transition log)', () => {
+    const onResolve = vi.fn()
+    renderHook(() =>
+      useDraftTimer(makeCountdown(), STOPPED_AUTONOMY, true, { onResolve, now: clockAt(103) }),
+    )
+
     expect(onResolve).not.toHaveBeenCalled()
     expect(reviewedEvents()).toHaveLength(0)
   })

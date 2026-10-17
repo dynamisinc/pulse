@@ -1,17 +1,15 @@
 /**
- * features/social/layout/useVisualViewportInset.test.tsx
+ * features/social/layout/ComposeModal.keyboardInset.test.tsx
  * ---------------------------------------------------------------------------
- * The on-screen keyboard inset (mobile-tablet story 02, composer AC): the maths, 0 without
- * `visualViewport`, and the hook's reaction to the visual viewport shrinking (keyboard up)
- * and growing back. `ComposeModal` publishes it as `--pulse-keyboard-inset`.
+ * The composer publishes the on-screen keyboard inset (`core/hooks/useVisualViewportInset`) as
+ * `--pulse-keyboard-inset` on its backdrop (mobile-tablet story 02, composer AC).
  */
-import { act, render, renderHook, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { SessionProvider } from '@/core/auth'
 import { ExerciseContextProvider } from '@/core/exerciseContext'
 import { ComposeModal } from './ComposeModal'
-import { keyboardInset, useVisualViewportInset } from './useVisualViewportInset'
 
 type Listener = () => void
 
@@ -37,34 +35,6 @@ function stubViewport(height: number, offsetTop = 0) {
 
 afterEach(() => {
   Object.defineProperty(window, 'visualViewport', { configurable: true, value: undefined })
-})
-
-describe('keyboardInset', () => {
-  it('is the part of the layout viewport the visual viewport no longer covers', () => {
-    expect(keyboardInset(800, { height: 500, offsetTop: 0 })).toBe(300)
-    expect(keyboardInset(800, { height: 500, offsetTop: 40 })).toBe(260)
-  })
-  it('never goes negative and rounds to whole px', () => {
-    expect(keyboardInset(800, { height: 810, offsetTop: 0 })).toBe(0)
-    expect(keyboardInset(800, { height: 500.4, offsetTop: 0 })).toBe(300)
-  })
-})
-
-describe('useVisualViewportInset', () => {
-  it('is 0 without visualViewport', () => {
-    expect(renderHook(() => useVisualViewportInset()).result.current).toBe(0)
-  })
-
-  it('tracks the keyboard going up and down', () => {
-    vi.spyOn(window, 'innerHeight', 'get').mockReturnValue(800)
-    const vv = stubViewport(800)
-    const { result } = renderHook(() => useVisualViewportInset())
-    expect(result.current).toBe(0)
-    act(() => vv.resize(480))
-    expect(result.current).toBe(320)
-    act(() => vv.resize(800))
-    expect(result.current).toBe(0)
-  })
 })
 
 describe('ComposeModal keyboard inset', () => {

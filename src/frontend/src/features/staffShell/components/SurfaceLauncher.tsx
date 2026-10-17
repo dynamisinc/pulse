@@ -115,7 +115,12 @@ import {
   type StaffRouteRegistry,
   type StaffSurfaceRole,
 } from '@/features/app-shell'
-import { staffShellTokens } from '../staffShellTokens'
+import {
+  STAFF_COARSE_POINTER_MEDIA,
+  STAFF_TABLET_PORTRAIT_MEDIA,
+  STAFF_TOUCH_TARGET_PX,
+  staffShellTokens,
+} from '../staffShellTokens'
 
 export interface SurfaceLauncherProps {
   /** The staff surface mounting the header, e.g. "Controller Console" — the
@@ -163,6 +168,8 @@ function LockupText({ surfaceName }: { surfaceName: string }) {
           fontSize: 9.5,
           fontWeight: 700,
           letterSpacing: '0.16em',
+          // Tablet portrait: tighter tracking so the lockup keeps its full text in the 768px row.
+          [STAFF_TABLET_PORTRAIT_MEDIA]: { letterSpacing: '0.06em' },
           color: staffShellTokens.header.textMuted,
           textTransform: 'uppercase',
           whiteSpace: 'nowrap',
@@ -262,6 +269,7 @@ export function SurfaceLauncher({
           color: 'inherit',
           textAlign: 'left',
           cursor: 'pointer',
+          [STAFF_COARSE_POINTER_MEDIA]: { minHeight: STAFF_TOUCH_TARGET_PX, px: 0.5 },
           '&:hover': { background: 'rgba(255, 255, 255, 0.1)' },
           '&:focus-visible': {
             outline: '2px solid rgba(255, 255, 255, 0.65)',
