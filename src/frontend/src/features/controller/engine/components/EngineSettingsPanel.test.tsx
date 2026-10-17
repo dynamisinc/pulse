@@ -127,7 +127,12 @@ describe('EngineSettingsPanel — read model (story 05\'s GET /api/engine/settin
     // No text input / select anywhere in the whole panel — the tier mapping
     // is read-only text, never an editable control (story 05's governed-
     // config boundary).
-    expect(container.querySelectorAll('input, select, textarea')).toHaveLength(0)
+    // (The AMBIENT CHATTER section is the one deliberate editable region — #168 —
+    // so it is excluded; the boundary is about the provider/tier mapping.)
+    const editable = Array.from(container.querySelectorAll('input, select, textarea')).filter(
+      el => !el.closest('[data-testid="ambient-chatter-section"]'),
+    )
+    expect(editable).toHaveLength(0)
   })
 
   it('always surfaces the inMemoryStateNote — never hidden', async () => {

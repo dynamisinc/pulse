@@ -30,4 +30,10 @@
     <ProjectReference Include="..\Pulse.Core\Pulse.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Test-only seams (e.g. EngineAmbientPolicyRegistry.Set, the blind ambient-policy write) are internal so no
+         production caller can bypass the compare-and-set TrySet; the test project reaches them here. -->
+    <InternalsVisibleTo Include="Pulse.WebApi.Tests" />
+  </ItemGroup>
+
 </Project>

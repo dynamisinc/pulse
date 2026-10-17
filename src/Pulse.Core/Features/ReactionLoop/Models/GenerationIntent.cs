@@ -55,4 +55,11 @@ public sealed record GenerationIntent
 
     /// <summary>The effective autonomy level the burst routes at (Suggest / Delayed-auto) — from autonomy-safety.</summary>
     public required AutonomyLevel AutonomyLevel { get; init; }
+
+    /// <summary>
+    /// For an <see cref="ReactionTriggerKind.AmbientFloor"/> intent only (ambient-chatter story 01): the topic key
+    /// the burst is seeded from — always one of <c>AmbientTopics.Vocabulary</c> and in the exercise's topic
+    /// allow-list. <c>null</c> for every storyline intent. Additive; no existing producer sets it.
+    /// </summary>
+    public string? AmbientTopicSeed { get; init; }
 }
