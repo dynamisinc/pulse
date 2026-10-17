@@ -19,6 +19,7 @@ export {
   scenarioNow,
   formatScenarioTime,
   useScenarioTime,
+  useRelativeScenarioTime,
 } from './scenarioTime'
 export type {
   ScenarioTimeFormat,

@@ -49,8 +49,8 @@
  * later, outside this story.
  */
 
-import { useCallback, useEffect, useState } from 'react'
-import { getExerciseClock } from './exerciseClock'
+import { useCallback, useEffect, useState, useSyncExternalStore } from 'react'
+import { getExerciseClock, onExerciseClockSwapped } from './exerciseClock'
 
 /**
  * Neutral default zone when a consumer doesn't (yet) supply one. Deliberately
@@ -201,6 +201,104 @@ export function useScenarioTime(
 }
 
 // -----------------------------------------------------------------------------
+// Shared relative-time ticker (burst legibility, NFR-002 / SOC-071)
+// -----------------------------------------------------------------------------
+//
+// `useScenarioTime` gives every caller its OWN 30 s interval and re-renders the
+// caller on every tick. For a feed of hundreds of rows that is hundreds of timers
+// and hundreds of component re-renders per tick, a long task on a phone. The ticker
+// below is ONE interval (plus one clock subscription) shared by every
+// `useRelativeScenarioTime` caller, holding the same kind of `now` snapshot
+// `useScenarioTime` holds. Each caller subscribes with a snapshot that is the
+// formatted STRING, so React re-renders a row only when its text actually changes
+// ("2m ago" -> "3m ago"), not on every tick.
+
+let sharedNow: Date | undefined
+const sharedListeners = new Set<() => void>()
+let sharedStop: (() => void) | undefined
+
+function sharedTick(): void {
+  const next = scenarioNow()
+  if (sharedNow !== undefined && sharedNow.getTime() === next.getTime()) return
+  sharedNow = next
+  for (const listener of Array.from(sharedListeners)) listener()
+}
+
+/** Wires the interval, the ACTIVE clock's change-notification, visibility and clock swaps. */
+function sharedStart(): () => void {
+  let unsubscribeClock = getExerciseClock().subscribe?.(sharedTick)
+  const id = setInterval(sharedTick, DEFAULT_REFRESH_MS)
+  // A backgrounded tab throttles timers: catch up the moment it is visible again.
+  const onVisible = () => {
+    if (document.visibilityState === 'visible') sharedTick()
+  }
+  document.addEventListener('visibilitychange', onVisible)
+  // The exercise clock object itself was replaced: follow the new one.
+  const stopSwap = onExerciseClockSwapped(() => {
+    unsubscribeClock?.()
+    unsubscribeClock = getExerciseClock().subscribe?.(sharedTick)
+    sharedTick()
+  })
+  return () => {
+    clearInterval(id)
+    unsubscribeClock?.()
+    document.removeEventListener('visibilitychange', onVisible)
+    stopSwap()
+  }
+}
+
+function sharedSubscribe(listener: () => void): () => void {
+  sharedListeners.add(listener)
+  if (sharedListeners.size === 1) {
+    sharedStop = sharedStart()
+    // The first subscriber's snapshot may predate this moment: refresh and notify.
+    sharedNow = undefined
+    sharedTick()
+  } else {
+    // Seed from the live clock, not a possibly-stale snapshot. Re-broadcast only when
+    // the minute moved (a per-subscriber ms difference would make N mounts cost N^2
+    // snapshot reads); within a minute the relative strings cannot differ.
+    const fresh = scenarioNow().getTime()
+    const minuteMoved = sharedNow === undefined
+      || Math.floor(fresh / 60_000) !== Math.floor(sharedNow.getTime() / 60_000)
+    if (minuteMoved) sharedTick()
+  }
+  return () => {
+    sharedListeners.delete(listener)
+    if (sharedListeners.size === 0) {
+      sharedStop?.()
+      sharedStop = undefined
+    }
+  }
+}
+
+function sharedSnapshot(): Date {
+  // While subscribed the tick owns the snapshot. With nobody subscribed it can be
+  // stale (or from a previous clock), so read the clock. It is deliberately NOT cached
+  // for a tick: React calls getSnapshot twice per render and a cached value would need
+  // its own invalidation; two reads can only differ if a whole-minute boundary falls
+  // between them (microseconds apart), and the render is then re-run by React.
+  if (sharedListeners.size === 0 || sharedNow === undefined) sharedNow = scenarioNow()
+  return sharedNow
+}
+
+/**
+ * The `'relative'` rendering of `instant` ("2m ago"), kept current on the shared
+ * ticker above. Same text as `useScenarioTime(timeZone).format(instant, { format:
+ * 'relative' })`, but the component re-renders ONLY when that text changes.
+ */
+export function useRelativeScenarioTime(
+  instant: Date | string | number,
+  timeZone: string = DEFAULT_SCENARIO_TIME_ZONE,
+): string {
+  const getSnapshot = useCallback(
+    () => formatScenarioTime(instant, timeZone, { format: 'relative', now: sharedSnapshot() }),
+    [instant, timeZone],
+  )
+  return useSyncExternalStore(sharedSubscribe, getSnapshot, getSnapshot)
+}
+
+// -----------------------------------------------------------------------------
 // Internals
 // -----------------------------------------------------------------------------
 
@@ -208,12 +306,21 @@ function toDate(instant: Date | string | number): Date {
   return instant instanceof Date ? instant : new Date(instant)
 }
 
+/** `Intl.DateTimeFormat` construction is expensive; one per locale + zone is enough. */
+const absoluteFormatters = new Map<string, Intl.DateTimeFormat>()
+
 function formatAbsolute(date: Date, timeZone: string, locale: string): string {
-  return new Intl.DateTimeFormat(locale, {
-    timeZone,
-    dateStyle: 'medium',
-    timeStyle: 'short',
-  }).format(date)
+  const key = `${locale}|${timeZone}`
+  let formatter = absoluteFormatters.get(key)
+  if (formatter === undefined) {
+    formatter = new Intl.DateTimeFormat(locale, {
+      timeZone,
+      dateStyle: 'medium',
+      timeStyle: 'short',
+    })
+    absoluteFormatters.set(key, formatter)
+  }
+  return formatter.format(date)
 }
 
 function formatDateline(date: Date, timeZone: string, locale: string): string {

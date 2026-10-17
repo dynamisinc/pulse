@@ -91,6 +91,25 @@ export function getExerciseClock(): IExerciseClock {
  */
 export function setExerciseClock(clock: IExerciseClock): void {
   activeClock = clock
+  notifyClockSwapped()
+}
+
+const swapListeners = new Set<() => void>()
+
+function notifyClockSwapped(): void {
+  for (const listener of Array.from(swapListeners)) listener()
+}
+
+/**
+ * Additive: be told when the ACTIVE clock object is swapped (`setExerciseClock` /
+ * `resetExerciseClock`), so a long-lived consumer (the shared relative-time ticker)
+ * can re-subscribe to the new clock's own `subscribe`. Returns an unsubscribe.
+ * NOTE for exercise-clock story 01: a real provider that changes the clock per
+ * exercise should route through `setExerciseClock` so this fires.
+ */
+export function onExerciseClockSwapped(listener: () => void): () => void {
+  swapListeners.add(listener)
+  return () => { swapListeners.delete(listener) }
 }
 
 /**
@@ -113,4 +132,5 @@ export function isWallMirroringExerciseClock(): boolean {
 /** Restores the default Wave-0 mock (wall-clock-mirroring) exercise clock. */
 export function resetExerciseClock(): void {
   activeClock = mockExerciseClock
+  notifyClockSwapped()
 }

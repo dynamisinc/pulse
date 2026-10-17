@@ -124,7 +124,12 @@ export function NewPostsPill({ count, onLoad }: NewPostsPillProps) {
   return (
     <div className={styles.liveRegion}>
       {/* The persistent polite region: always mounted, throttled text, visually hidden. */}
-      <span className={styles.srOnly} aria-live="polite" aria-atomic="true">
+      <span
+        className={styles.srOnly}
+        aria-live="polite"
+        aria-atomic="true"
+        data-testid="new-posts-live"
+      >
         {spokenLabel}
       </span>
       {hasNew && (
