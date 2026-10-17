@@ -27,10 +27,14 @@ public sealed class EngineSettingsDto
     /// the runtime provider cut is process memory too, so an operator reading this note has to be told that a
     /// restart returns generation to the startup-configured provider — the same honesty the other two levers get.
     /// </para>
+    /// <para>
+    /// EDITED again by ambient-chatter story 01 (AC2): the ambient-chatter policy is process memory as well, and a
+    /// restart turns ambient chatter OFF — the fail-safe direction, stated so an operator is never surprised by it.
+    /// </para>
     /// </summary>
     public const string InMemoryNote =
-        "Autonomy default, tier-policy mode and the generation-provider cut are held in process memory; a restart "
-        + "resets them to suggest / auto / the startup-configured provider.";
+        "Autonomy default, tier-policy mode, ambient-chatter policy and the generation-provider cut are held in "
+        + "process memory; a restart resets them to suggest / auto / off / the startup-configured provider.";
 
     /// <summary>
     /// The STARTUP-CONFIGURED generation provider's name (<c>Fake</c> / <c>AzureOpenAI</c> / <c>ClaudeFoundry</c>)
@@ -84,6 +88,13 @@ public sealed class EngineSettingsDto
     public required TierPolicyMode TierPolicyMode { get; init; }
 
     /// <summary>
+    /// The exercise's ambient-chatter policy (ambient-chatter story 01, AC2) — additive. Mode <c>off</c> unless a
+    /// controller set it since the last restart.
+    /// </summary>
+    [JsonPropertyName("ambientPolicy")]
+    public required EngineAmbientPolicyDto AmbientPolicy { get; init; }
+
+    /// <summary>
     /// <c>true</c> — the autonomy default and tier-policy mode live in PROCESS MEMORY and are reset by a restart.
     /// Reported honestly rather than solved here (persistence is explicitly out of scope for story 05), so an
     /// operator who restarts the App Service is not surprised by the reset.
@@ -104,6 +115,10 @@ public sealed class EngineSettingsDto
     /// <param name="options">The bound <see cref="GenerationOptions"/> (read-only here).</param>
     /// <param name="autonomy">The exercise's autonomy snapshot.</param>
     /// <param name="tierPolicyMode">The exercise's tier-policy mode.</param>
+    /// <param name="ambientPolicy">
+    /// The exercise's ambient-chatter policy snapshot; <c>null</c> reports the resting <c>off</c> policy against the
+    /// default rate config with autonomy unauthorised (the fail-safe reading).
+    /// </param>
     /// <returns>The staff wire snapshot.</returns>
     /// <remarks>
     /// <see cref="EffectiveProvider"/> and <see cref="AlreadyFake"/> are resolved HERE, once, on the server — the
@@ -115,7 +130,8 @@ public sealed class EngineSettingsDto
         bool providerCutToFake,
         GenerationOptions options,
         EngineAutonomyStateDto autonomy,
-        TierPolicyMode tierPolicyMode)
+        TierPolicyMode tierPolicyMode,
+        EngineAmbientPolicyDto? ambientPolicy = null)
     {
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(autonomy);
@@ -135,6 +151,10 @@ public sealed class EngineSettingsDto
                 .ToList(),
             Autonomy = autonomy,
             TierPolicyMode = tierPolicyMode,
+            AmbientPolicy = ambientPolicy ?? EngineAmbientPolicyDto.From(
+                Pulse.Core.Features.Ambient.Models.AmbientTierPolicy.Off,
+                Pulse.Core.Features.Storylines.Models.RateGovernanceConfig.Default.MaxEnginePostsPerMinute,
+                autonomousAuthorized: false),
             InMemoryState = true,
             InMemoryStateNote = InMemoryNote,
         };
