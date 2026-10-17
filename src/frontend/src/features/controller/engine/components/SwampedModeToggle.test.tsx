@@ -178,7 +178,9 @@ describe('SwampedModeToggle — OFF-only control for a non-lead controller (stor
     // Still on (the server has not answered): focus is back on the trigger.
     expect(screen.getByTestId('swamped-mode-turn-off-button')).toHaveFocus()
 
-    mockedUseSwampedMode.mockReturnValue(stub({ swampedMode: false, isLead: false, setSwampedMode }))
+    mockedUseSwampedMode.mockReturnValue(
+      stub({ swampedMode: false, isLead: false, setSwampedMode }),
+    )
     view.rerender(
       <ThemeProvider theme={cobraTheme}>
         <SwampedModeToggle />
