@@ -1,8 +1,10 @@
 /**
- * features/controller/components/confirm/useCoarsePointer.ts
+ * core/hooks/useCoarsePointer.ts
  * ---------------------------------------------------------------------------
  * Whether the PRIMARY input is a finger: `(pointer: coarse)`. Mobile-tablet story 15 (D5-025,
- * TABLET-AMENDMENT §5). STAFF world hook, no UI.
+ * TABLET-AMENDMENT §5). A hook, no UI; shared by the staff confirms (story 15), the console
+ * touch affordances and `usePlatformModifier` (story 14). Re-exported from
+ * `controller/components/confirm`.
  *
  * WHY THIS AND NOT A WIDTH. The amendment (§1) separates the two questions: viewport WIDTH picks
  * the tablet LAYOUT, `(pointer: coarse)` picks TOUCH AFFORDANCES. An iPad with a trackpad still

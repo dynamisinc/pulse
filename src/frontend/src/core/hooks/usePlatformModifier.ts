@@ -11,12 +11,12 @@
  * `useSyncExternalStore`; without `matchMedia` (jsdom) it is false, so desktop renders and
  * every pre-existing test are unchanged.
  *
- * `coarse` is story 15's `useCoarsePointer` (one coarse-pointer source). Controller components that only need the
- * coarse flag use `useCoarsePointer` from `controller/components/confirm` (story 15).
+ * `coarse` comes from `useCoarsePointer` (`core/hooks`, the one coarse-pointer source). Components
+ * that only need the coarse flag use that hook directly.
  */
 
 import { useMemo } from 'react'
-import { useCoarsePointer } from '@/features/controller/components/confirm'
+import { useCoarsePointer } from './useCoarsePointer'
 import { platformChordLabel, platformModifierLabel } from './platformModifier'
 
 export interface PlatformModifier {

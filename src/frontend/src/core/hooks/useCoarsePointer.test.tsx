@@ -7,8 +7,9 @@
  */
 import { act, renderHook } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
-import { restoreMatchMedia } from './coarsePointer.testUtils'
 import { useCoarsePointer } from './useCoarsePointer'
+
+const realMatchMedia = window.matchMedia
 
 class FakeMql extends EventTarget {
   matches: boolean
@@ -24,7 +25,7 @@ class FakeMql extends EventTarget {
 }
 
 afterEach(() => {
-  restoreMatchMedia()
+  window.matchMedia = realMatchMedia
 })
 
 describe('useCoarsePointer', () => {
