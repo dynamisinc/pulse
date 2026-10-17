@@ -1,6 +1,6 @@
 # Story: Role-matrix enforcement (per-route, per-transition) with a route x role matrix test
 
-**Feature:** Identity, auth & roles  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Not Started
+**Feature:** Identity, auth & roles  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** In Review
 **Requirements:** COR-010, COR-013 (+ P0 #377, #481, #61)  ·  **Design decisions:** ADMIN-IDENTITY-MODEL §8.2, §5.1  ·  **Issue:** #573
 **Stack:** backend  ·  **Review tier:** Tier-2 (security)  ·  **Wave:** A1
 
@@ -77,8 +77,24 @@ convenience only: the server is the authority.
       control, staff follow button, unarchive. They are in the helper's table so they are gated the day they land.
 - [ ] *Gap:* the org-row Archive button is enabled only for a completed exercise; the server also allows archive from
       `build` once `FirstLiveAt` is set. The org-exercise DTO carries no such flag yet.
-- [ ] *Gap:* `/staff/console` admits controller and evaluator only (`staffRouteRegistry.tsx`, orchestrator-owned), so a
+- [x] *Closed 2026-10-17 (see the planner console item above):* `/staff/console` admitted controller and evaluator only (`staffRouteRegistry.tsx`, orchestrator-owned), so a
       planner cannot reach the build-time post/pin/inject surfaces in the console; the component gates are ready.
+
+### Ambient-policy lead gate and WR-2 session attribution (2026-10-17)
+- [x] **Ambient policy is a lead-gated raise.** `POST /api/engine/settings/ambient-policy` answers 403 and changes nothing
+      when a **non-lead** controller RAISES the policy. A raise is: moving the mode to autonomous from a mode that is not
+      autonomous; while already autonomous, a higher `maxPerMinute` or `maxPerHour`; while already autonomous, an added topic
+      or persona in the allow lists. Lowering (off/review, lower caps, removed entries) is open to any controller. The lead
+      reads `Enrollment.IsLead` live, so a kill-switch demotion between the snapshot and the set turns a non-lead no-op into a
+      refused raise (race tests below).
+- [x] **WR-2 session attribution.** The acting human recorded for engine review actions (approve, veto, kill switch,
+      autonomy default) is the **session's** person, never a body `actingHumanId`. A spoofed body value is not recorded.
+- [x] **UI mirrors the ambient gate** (`AmbientChatterSection`). A non-lead controller cannot choose Autonomous (from a
+      non-autonomous mode) and cannot save an edit that would raise (same rule as the server, `ambientRaiseKind`): the
+      control is disabled with the visible text "Only the lead controller can raise this" (icon + words, `aria-describedby`).
+      Lowering edits stay enabled. A 403 response shows the same reason inline and does not flip the panel read-only.
+- [x] **Planner console access** (Tom-approved 2026-10-17; commits `7a842db6`, `5eecb754`). `/staff/console` now admits the
+      planner, which closes the earlier gap; the persona tool and dock follow the persona-edit permission.
 
 ## Out of Scope
 The new transitions themselves (reset/reopen/delete/unstage bodies: exercise-build-golive 07-08); the lifecycle write gate for participants (A5 #379).
@@ -112,4 +128,14 @@ All under `src/Pulse.WebApi.Tests/Features/Identity/RoleMatrix/` unless noted.
 - `SelfServiceSessionTests.AnEvaluator_Refreshes_ReadsItsSession_SwitchesBetweenItsOwnEnrollments_AndLogsOut`, `SelfServiceSessionTests.AParticipantSession_IsRefusedOnBothStaffOperations_EvenWhenThePersonIsStaffElsewhere` (Copilot 6 fold)
 - `SelfServiceSessionTests.AnEvaluator_ReadsTheExercise` (AC3 reads)
 - `SwampedModeLeadLossTests.*` (story 16 M-002 verified/fixed here; M-003 backend half)
+- `EngineAmbientPolicyServiceTests.ANonLeadRaise_Is403_AndChangesNothing_WhileTheLeadsSameRequestSucceeds`, `EngineAmbientPolicyServiceTests.ANonLeadLower_Succeeds` (ambient lead gate)
+- `EngineAmbientPolicyServiceTests.TheRace_AKillSwitchDemotion_BetweenTheSnapshotAndTrySet_TurnsANonLeadNoOpIntoARefusedRaise`, `EngineAmbientPolicyServiceTests.TheRace_WithoutTheDemotion_TheSameNonLeadRequestIsAllowed` (live lead read, race)
+  (`Features/EngineRuntime/Ambient/EngineAmbientPolicyServiceTests.cs`)
+- `RoleMatrixTests` ambient-policy row (lead raise / non-lead raise / lower, per role)
+- `LeadControllerGateTests` ambient Raise and Lower cases
+- `EngineReviewEndpointsTests.*_ASpoofedBodyActingHumanId_IsNotRecorded_TheSessionPersonIs`, four tests: approve, veto, kill switch, autonomy-default (WR-2)
+  (`Features/EngineRuntime/EngineReviewEndpointsTests.cs`)
 
+Frontend (under `src/frontend/src/features/`):
+- [`AmbientChatterSection.leadGate.test.tsx`](../../../src/frontend/src/features/controller/engine/components/AmbientChatterSection.leadGate.test.tsx): non-lead (Autonomous disabled with the reason, lowering save allowed, raising edit while autonomous disables Save, a 403 shows the message inline); lead (all enabled)
+- [`plannerConsole.test.tsx`](../../../src/frontend/src/features/controller/access/plannerConsole.test.tsx) and `staff/staffRouteRegistry.test.tsx`: the planner enters the console (`7a842db6`, `5eecb754`)
