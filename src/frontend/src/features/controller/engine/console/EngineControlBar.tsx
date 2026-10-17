@@ -50,6 +50,17 @@
  *     observe the POST rather than race it. See the in-component comment
  *     above the effect below for the full mechanics — do not "simplify" this
  *     dependency array back to `mode`; that reintroduces CR-101.
+ *     TOUCH (mobile-tablet story 15, D5-025, TABLET-AMENDMENT §5; Tom, 10/16). On a COARSE
+ *     pointer (`useCoarsePointer()`, never a width) the one transition that is NOT a
+ *     one-tap-safe direction, STOP -> Live (re-arming the engine), opens a small confirm dialog
+ *     first: "Re-arm the engine?" with Cancel / Re-arm to Live. STOPPING stays ONE TAP (Live ->
+ *     Suggest-only -> STOP are direct), because stopping is the safe direction and must never be
+ *     slowed. The dialog is a plain MUI `Dialog` (modal: focus trapped, Esc and Cancel close it,
+ *     focus returns to the kill switch, `aria-modal` so the console's Ctrl+K stands aside),
+ *     opens with focus on the dialog itself (never a button), is centred (so away from the
+ *     switch), has 44px buttons 16px apart with the confirm at the far edge, ignores taps for
+ *     400ms after opening (`useArmedConfirm`) and fires once. With a fine pointer the cycle is
+ *     the unchanged one-click cycle. The switch itself is a 44px box on touch.
  *  b. The degrade-mode indicator — text + icon, shown only while
  *     `useEngineControl().degraded` is true (a mock provider-degraded clamp to
  *     Suggest). A small dev-only affordance toggles it for demoing the
@@ -64,8 +75,8 @@
  *  e. `<SwampedModeToggle>` — self-contained, lead-gated.
  */
 
-import { useEffect, useMemo, useRef } from 'react'
-import { Box, Stack, Tooltip, Typography } from '@mui/material'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
+import { Box, Dialog, DialogActions, DialogContent, DialogTitle, Stack, Tooltip, Typography } from '@mui/material'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import {
   faBolt,
@@ -74,6 +85,15 @@ import {
   faPowerOff,
   faTriangleExclamation,
 } from '@fortawesome/free-solid-svg-icons'
+import { CobraPrimaryButton, CobraSecondaryButton } from '@/theme/styledComponents'
+import {
+  ARMING_SX,
+  CONFIRM_GAP_PX,
+  destructiveTouchSx,
+  touchTargetSx,
+  useArmedConfirm,
+  useCoarsePointer,
+} from '../../components/confirm'
 import { SwampedModeToggle } from '../components/SwampedModeToggle'
 import { useDemandMeter } from '../hooks/useDemandMeter'
 import { useEngineControl, type EngineMode } from '../hooks/useEngineControl'
@@ -144,10 +164,69 @@ function serverModeOf(autonomy: EngineSettingsAutonomy | null): EngineMode | nul
   return 'live'
 }
 
+/**
+ * The STOP -> Live re-arm confirm (touch only). Mounted only while open, so "open" is "mounted".
+ * Cancel/Esc close it without changing the mode; Re-arm to Live fires `onConfirm` once, after the
+ * 400ms arming delay.
+ */
+function RearmConfirmDialog({
+  onConfirm,
+  onCancel,
+}: {
+  readonly onConfirm: () => void
+  readonly onCancel: () => void
+}) {
+  const titleId = useId()
+  const bodyId = useId()
+  const { armed, guard } = useArmedConfirm({ open: true, enabled: true })
+  return (
+    <Dialog
+      open
+      onClose={onCancel}
+      maxWidth="xs"
+      fullWidth
+      aria-labelledby={titleId}
+      aria-describedby={bodyId}
+      data-testid="engine-rearm-dialog"
+    >
+      <DialogTitle id={titleId} sx={{ fontSize: 15, fontWeight: 800 }}>
+        Re-arm the engine?
+      </DialogTitle>
+      <DialogContent>
+        <Typography id={bodyId} component="div" sx={{ fontSize: 13, lineHeight: 1.5 }}>
+          The engine is STOPPED. Switching it to LIVE lets it generate again, at the autonomy level
+          set in Engine settings.
+        </Typography>
+      </DialogContent>
+      <DialogActions sx={{ px: 3, pb: 2, gap: `${CONFIRM_GAP_PX}px` }}>
+        <CobraSecondaryButton
+          onClick={onCancel}
+          sx={touchTargetSx}
+          data-testid="engine-rearm-cancel"
+        >
+          Cancel
+        </CobraSecondaryButton>
+        <CobraPrimaryButton
+          startIcon={<FontAwesomeIcon icon={faPowerOff} aria-hidden="true" />}
+          onClick={guard(onConfirm)}
+          aria-disabled={!armed}
+          onContextMenu={event => event.preventDefault()}
+          sx={{ ...touchTargetSx, ...destructiveTouchSx, ...ARMING_SX }}
+          data-testid="engine-rearm-confirm"
+        >
+          Re-arm to Live
+        </CobraPrimaryButton>
+      </DialogActions>
+    </Dialog>
+  )
+}
+
 export function EngineControlBar() {
   // Story 11 (DF-14): the bar's write toggles are absent for a non-controller; its readouts stay.
   const canControl = useCanControl()
   const engineControl = useEngineControl()
+  const coarse = useCoarsePointer()
+  const [confirmingRearm, setConfirmingRearm] = useState(false)
   const engineSettings = useEngineSettings()
   // Destructured so the effect below can depend on the STABLE `refetch`
   // reference directly (see that effect's comment) rather than the whole
@@ -231,8 +310,17 @@ export function EngineControlBar() {
         data-testid="engine-kill-switch"
         data-mode={engineControl.mode}
         aria-label={`${modeLabel} — activate to switch to ${nextModeLabel}`}
-        onClick={() => engineControl.setMode(nextMode(engineControl.mode))}
+        aria-haspopup={coarse && engineControl.mode === 'stop' ? 'dialog' : undefined}
+        onClick={() => {
+          // Touch: STOP -> Live asks first. Every other step (including STOPPING) is one tap.
+          if (coarse && engineControl.mode === 'stop') {
+            setConfirmingRearm(true)
+            return
+          }
+          engineControl.setMode(nextMode(engineControl.mode))
+        }}
         sx={{
+          ...(coarse ? touchTargetSx : {}),
           display: 'inline-flex',
           alignItems: 'center',
           gap: 0.75,
@@ -407,6 +495,16 @@ export function EngineControlBar() {
 
       {/* e. Swamped mode — self-contained, lead-gated. */}
       <SwampedModeToggle />
+
+      {confirmingRearm && canControl && (
+        <RearmConfirmDialog
+          onCancel={() => setConfirmingRearm(false)}
+          onConfirm={() => {
+            setConfirmingRearm(false)
+            engineControl.setMode('live')
+          }}
+        />
+      )}
     </Stack>
   )
 }

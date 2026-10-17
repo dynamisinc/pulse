@@ -60,12 +60,29 @@
  * keyboard-reachable Dismiss — rather than letting the pill quietly snap back. Per
  * NFR-001 the explanation is never colour alone and never a bare status code.
  *
+ * TOUCH (mobile-tablet story 15, D5-025, TABLET-AMENDMENT §5). Behaviour is unchanged. On a COARSE
+ * pointer (`useCoarsePointer()`, never a width):
+ *   - the pill, the radio rows, Cancel / Resume / Pause and Back / Confirm freeze are real 44px
+ *     boxes (`minHeight`, no pseudo-element slop); Back and Confirm freeze are 16px apart with
+ *     Confirm at the far edge;
+ *   - the Freeze confirm step opens with NO focused button: focus goes to the step's own
+ *     (non-interactive, `tabIndex -1`) container, so the first thing a keyboard or screen-reader
+ *     user meets is the "FREEZE THE WORLD?" text, and Enter/Space cannot fire the freeze;
+ *   - Confirm freeze ignores taps for 400ms after the step opens (`useArmedConfirm`, shown as
+ *     `aria-disabled`), fires once, and carries `touch-action: manipulation` / no selection / no
+ *     long-press callout;
+ *   - the step is shorter than the tier list and anchored to the top of the popover, so the
+ *     "Pause" button the controller just tapped is no longer under the finger's second tap;
+ *   - the popover's height is capped to the room under the pill, so it can never grow up over
+ *     the pill that opened it, and MUI shifts it inside the viewport at 768 and 1180.
+ * The focus-trap and Escape contract above is MUI `Popover`'s own and is untouched.
+ *
  * FULLY KEYBOARD-OPERABLE (NFR-001). The pill is a button (Enter/Space); the
  * popover traps focus; the radios are arrow/Tab navigable; every action is a
  * button; Escape dismisses the popover and the confirm step.
  */
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import {
   faCirclePause,
@@ -92,6 +109,15 @@ import {
   type OverlayRegister,
   type PauseTier,
 } from '../../hooks/usePauseState'
+import {
+  ARMING_SX,
+  CONFIRM_GAP_PX,
+  destructiveTouchSx,
+  touchRadioRowSx,
+  touchTargetSx,
+  useArmedConfirm,
+  useCoarsePointer,
+} from '../confirm'
 // D5 dark operator-chrome tokens (matches `SwampedModeToggle`). Staff-only.
 import { consoleChrome as chrome } from '../../consoleChrome'
 import { useCanControl } from '../../access'
@@ -202,6 +228,21 @@ export function PausePill() {
   const open = Boolean(anchorEl)
   const [choice, setChoice] = useState<PauseChoice>(DEFAULT_CHOICE)
   const [confirmingFreeze, setConfirmingFreeze] = useState(false)
+  const coarse = useCoarsePointer()
+  const touchSx = coarse ? touchTargetSx : {}
+  const { armed: freezeArmed, guard: guardFreeze } = useArmedConfirm({
+    open: open && confirmingFreeze,
+    enabled: coarse,
+  })
+  // The Freeze step's own container takes focus on open (never a button).
+  const freezeStepRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (confirmingFreeze) freezeStepRef.current?.focus({ preventScroll: true })
+  }, [confirmingFreeze])
+  // Room under the pill (coarse only): the popover is capped to it so it cannot overlap the pill.
+  const roomBelow = anchorEl !== null && coarse
+    ? Math.round(window.innerHeight - anchorEl.getBoundingClientRect().bottom - 16)
+    : null
 
   // Each time the popover opens, seed the radio from the active tier (or the
   // first offered option when running) and clear any stale confirm step.
@@ -296,6 +337,7 @@ export function PausePill() {
           borderRadius: '999px',
           cursor: 'pointer',
           '&:hover': { borderColor: chrome.amber },
+          ...touchSx,
         }}
       >
         {/* Dot — decorative reinforcement only; the label text is the real signal. */}
@@ -370,7 +412,7 @@ export function PausePill() {
           <CobraLinkButton
             onClick={dismissRefusal}
             aria-label="Dismiss the refused pause notice"
-            sx={{ fontSize: 11, flexShrink: 0 }}
+            sx={{ fontSize: 11, flexShrink: 0, ...touchSx }}
           >
             Dismiss
           </CobraLinkButton>
@@ -394,6 +436,7 @@ export function PausePill() {
             sx: {
               mt: 0.5,
               p: 1.5,
+              ...(roomBelow === null ? {} : { maxHeight: `max(240px, ${roomBelow}px)` }),
               width: 300,
               bgcolor: chrome.card,
               border: `1px solid ${chrome.line}`,
@@ -405,7 +448,12 @@ export function PausePill() {
       >
         <Box data-testid="pause-popover">
           {confirmingFreeze ? (
-            <Stack data-testid="pause-freeze-confirm" sx={{ gap: 1.25 }}>
+            <Stack
+              ref={freezeStepRef}
+              tabIndex={-1}
+              data-testid="pause-freeze-confirm"
+              sx={{ gap: 1.25, outline: 'none' }}
+            >
               <Stack direction="row" sx={{ alignItems: 'center', gap: 0.75 }}>
                 <FontAwesomeIcon
                   icon={faTriangleExclamation}
@@ -431,16 +479,25 @@ export function PausePill() {
               >
                 {`They will see: ${selectedRegister.label}`}
               </Typography>
-              <Stack direction="row" sx={{ gap: 1, justifyContent: 'flex-end' }}>
+              <Stack
+                direction="row"
+                sx={{ gap: coarse ? `${CONFIRM_GAP_PX}px` : 1, justifyContent: 'flex-end' }}
+              >
                 <CobraSecondaryButton
                   data-testid="pause-freeze-back"
                   onClick={() => setConfirmingFreeze(false)}
+                  sx={touchSx}
                 >
                   Back
                 </CobraSecondaryButton>
                 <CobraPrimaryButton
                   data-testid="pause-freeze-confirm-button"
-                  onClick={confirmFreeze}
+                  onClick={guardFreeze(confirmFreeze)}
+                  aria-disabled={!freezeArmed}
+                  onContextMenu={event => event.preventDefault()}
+                  sx={coarse
+                    ? { ...touchTargetSx, ...destructiveTouchSx, ...ARMING_SX }
+                    : undefined}
                   startIcon={<FontAwesomeIcon icon={faSnowflake} />}
                 >
                   Confirm freeze
@@ -495,7 +552,7 @@ export function PausePill() {
                         </Typography>
                       </Stack>
                     }
-                    sx={{ alignItems: 'flex-start', ml: 0, mr: 0 }}
+                    sx={{ alignItems: 'flex-start', ml: 0, mr: 0, ...(coarse ? touchRadioRowSx : {}) }}
                   />
                 ))}
               </RadioGroup>
@@ -554,20 +611,24 @@ export function PausePill() {
                           </Typography>
                         </Stack>
                       }
-                      sx={{ alignItems: 'flex-start', ml: 0, mr: 0 }}
+                      sx={{ alignItems: 'flex-start', ml: 0, mr: 0, ...(coarse ? touchRadioRowSx : {}) }}
                     />
                   ))}
                 </RadioGroup>
               </Box>
 
-              <Stack direction="row" sx={{ gap: 1, justifyContent: 'flex-end', alignItems: 'center' }}>
-                <CobraLinkButton data-testid="pause-cancel" onClick={closePopover}>
+              <Stack
+                direction="row"
+                sx={{ gap: coarse ? 1.5 : 1, justifyContent: 'flex-end', alignItems: 'center' }}
+              >
+                <CobraLinkButton data-testid="pause-cancel" onClick={closePopover} sx={touchSx}>
                   Cancel
                 </CobraLinkButton>
                 {isPaused && (
                   <CobraSecondaryButton
                     data-testid="pause-resume"
                     onClick={handleResume}
+                    sx={touchSx}
                     startIcon={<FontAwesomeIcon icon={faPlay} />}
                   >
                     Resume
@@ -576,6 +637,7 @@ export function PausePill() {
                 <CobraPrimaryButton
                   data-testid="pause-apply"
                   onClick={applyChoice}
+                  sx={touchSx}
                   startIcon={<FontAwesomeIcon icon={faPause} />}
                 >
                   Pause

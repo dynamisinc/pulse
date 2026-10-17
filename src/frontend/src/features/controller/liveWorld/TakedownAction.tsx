@@ -90,6 +90,18 @@
  * ROW (a stable element the controller was working in) instead; if it was elsewhere it is left
  * alone.
  *
+ * TOUCH (mobile-tablet story 15, D5-025, TABLET-AMENDMENT §5). Behaviour is unchanged; on a COARSE
+ * pointer (`useCoarsePointer()`, never a width) the step is made deliberate:
+ *   - the trigger, each category row, Cancel and Confirm are real 44px boxes; Cancel and Confirm
+ *     sit 16px apart with Confirm at the far (right) edge;
+ *   - Confirm ignores taps for 400ms after the step opens (`useArmedConfirm`), shows
+ *     `aria-disabled` meanwhile, and fires once;
+ *   - Confirm carries `touch-action: manipulation`, no text selection and no long-press callout,
+ *     and a context menu on it does nothing: no gesture reaches the action except a tap;
+ *   - focus still opens on the selected CATEGORY, never on a destructive button (rule 2);
+ *   - the popper flips (bottom-end -> top-end ...) and shifts with an 8px edge padding, so it
+ *     stays on screen at 768 and 1180, and it never overlaps the trigger it is anchored to.
+ *
  * TELEMETRY. None here. `useTakedown` emits the one XC-004 `steering_action` per successful
  * takedown (the server emits none, DP-9), so this folder never needs the exercise scope.
  */
@@ -124,6 +136,15 @@ import {
   faTriangleExclamation,
 } from '@fortawesome/free-solid-svg-icons'
 import { hasOtherModalMounted } from '@/core/a11y/modalPriority'
+import {
+  ARMING_SX,
+  CONFIRM_GAP_PX,
+  destructiveTouchSx,
+  touchRadioRowSx,
+  touchTargetSx,
+  useArmedConfirm,
+  useCoarsePointer,
+} from '../components/confirm'
 import {
   CobraDeleteButton,
   CobraLinkButton,
@@ -209,6 +230,8 @@ interface ConfirmPanelProps {
   readonly onCategoryChange: (category: TakedownCategory) => void
   readonly onConfirm: () => void
   readonly onCancel: () => void
+  /** A coarse (touch) primary pointer: 44px targets, spacing and the arming delay apply. */
+  readonly coarse: boolean
   /** Focus landed outside the step (a click elsewhere, another modal, a programmatic move). */
   readonly onFocusLeave: (target: Node) => void
 }
@@ -227,9 +250,12 @@ function ConfirmPanel({
   onCategoryChange,
   onConfirm,
   onCancel,
+  coarse,
   onFocusLeave,
 }: ConfirmPanelProps) {
   const titleId = useId()
+  // The panel is mounted only while the step is open, so "open" is simply "mounted".
+  const { armed, guard } = useArmedConfirm({ open: true, enabled: coarse })
   // The latest handler, read at event time, so the listener below subscribes once per open.
   const focusLeaveRef = useRef(onFocusLeave)
   useLayoutEffect(() => {
@@ -347,23 +373,34 @@ function ConfirmPanel({
             value={option.value}
             control={<Radio size="small" sx={{ py: '3px' }} />}
             label={option.label}
+            sx={coarse ? touchRadioRowSx : undefined}
             slotProps={{ typography: { sx: { fontSize: 12.5, color: liveWorldTokens.ink } } }}
           />
         ))}
       </RadioGroup>
 
-      <Stack direction="row" sx={{ justifyContent: 'flex-end', gap: '8px', mt: '10px' }}>
+      <Stack
+        direction="row"
+        sx={{ justifyContent: 'flex-end', gap: coarse ? `${CONFIRM_GAP_PX}px` : '8px', mt: '10px' }}
+      >
         <CobraSecondaryButton
           data-testid="takedown-cancel"
           onClick={onCancel}
-          sx={{ fontSize: 12 }}
+          sx={{ fontSize: 12, ...(coarse ? touchTargetSx : {}) }}
         >
           Cancel
         </CobraSecondaryButton>
         <CobraDeleteButton
           data-testid="takedown-confirm"
-          onClick={onConfirm}
-          sx={{ fontSize: 12 }}
+          onClick={guard(onConfirm)}
+          // Inside the arming delay the button says so (aria-disabled, still focusable).
+          aria-disabled={!armed}
+          // A context menu (long-press) on the destructive button never does anything.
+          onContextMenu={event => event.preventDefault()}
+          sx={{
+            fontSize: 12,
+            ...(coarse ? { ...touchTargetSx, ...destructiveTouchSx, ...ARMING_SX } : {}),
+          }}
         >
           Confirm take down
         </CobraDeleteButton>
@@ -376,6 +413,7 @@ function ConfirmPanel({
 export function TakedownAction({ post }: TakedownActionProps) {
   const canControl = useCanControl()
   const takedown = useTakedown(post.id)
+  const coarse = useCoarsePointer()
 
   const triggerRef = useRef<HTMLButtonElement>(null)
   const triggerId = useId()
@@ -616,6 +654,7 @@ export function TakedownAction({ post }: TakedownActionProps) {
           onClick={openConfirm}
           sx={{
             ...ROW_BUTTON_SX,
+            ...(coarse ? touchTargetSx : {}),
             '&[aria-disabled="true"]': { cursor: 'default', opacity: 0.7 },
           }}
         >
@@ -631,7 +670,16 @@ export function TakedownAction({ post }: TakedownActionProps) {
           open={open}
           anchorEl={anchorEl}
           placement="bottom-end"
-          modifiers={[{ name: 'offset', options: { offset: [0, 4] } }]}
+          // Flip to the other side and shift along the edge so the step stays fully on screen at
+          // 768 and 1180 wide, never covering its own trigger (story 15, amendment §5 rule 5).
+          modifiers={[
+            { name: 'offset', options: { offset: [0, 4] } },
+            {
+              name: 'flip',
+              options: { fallbackPlacements: ['top-end', 'bottom-start', 'top-start'], padding: 8 },
+            },
+            { name: 'preventOverflow', options: { padding: 8, altAxis: true } },
+          ]}
           // The Popper root is presentational; the dialog role lives on the panel.
           slotProps={{ root: { role: 'presentation' } }}
           sx={{ zIndex: POPPER_Z_INDEX }}
@@ -663,6 +711,7 @@ export function TakedownAction({ post }: TakedownActionProps) {
                 onCategoryChange={setCategory}
                 onConfirm={confirm}
                 onCancel={closeConfirm}
+                coarse={coarse}
                 onFocusLeave={handleFocusLeave}
               />
             </Paper>
