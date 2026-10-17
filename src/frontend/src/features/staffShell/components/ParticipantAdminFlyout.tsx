@@ -96,6 +96,7 @@
  * and `../staffShellTokens`; never a participant surface (XC-002).
  */
 
+import { useEffect, useRef, type KeyboardEvent } from 'react'
 import { Box, IconButton, Stack, Tooltip, Typography } from '@mui/material'
 import { useHref, useLinkClickHandler, useLocation } from 'react-router-dom'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
@@ -113,7 +114,8 @@ import { scenarioNow } from '@/core/clock'
 import { buildAndEmit } from '@/core/telemetry'
 import { staffRoutesForRole, useStaffNavigation } from '@/features/app-shell'
 import { CobraLinkButton } from '@/theme/styledComponents'
-import { staffShellTokens } from '../staffShellTokens'
+import { STAFF_COARSE_POINTER_MEDIA, STAFF_TOUCH_TARGET_PX, staffShellTokens } from '../staffShellTokens'
+import { staffFlyoutCloseButtonSx, staffFlyoutPanelSx } from '../staffFlyout'
 import { useRegisterShellGlobalTool, useToolstrip } from '../toolRegistry'
 import {
   useAdminAuthorization,
@@ -237,7 +239,16 @@ function ParticipantAdminRowView({
           data-testid={`participant-admin-action-${row.id}`}
           aria-label={`${quickAction.label} — ${row.name}`}
           onClick={() => onQuickAction(row, quickAction)}
-          sx={{ minWidth: 0, px: 1.25, py: 0.25, fontSize: 11 }}
+          sx={{
+            minWidth: 0,
+            px: 1.25,
+            py: 0.25,
+            fontSize: 11,
+            [STAFF_COARSE_POINTER_MEDIA]: {
+              minWidth: STAFF_TOUCH_TARGET_PX,
+              minHeight: STAFF_TOUCH_TARGET_PX,
+            },
+          }}
         >
           {quickAction.label}
         </CobraLinkButton>
@@ -277,7 +288,7 @@ function FullAdminLink({ path, label }: { path: string; label: string }) {
         onClick={handleClick}
         data-testid="participant-admin-full-link"
         endIcon={<FontAwesomeIcon icon={faArrowRight} aria-hidden="true" />}
-        sx={{ px: 0 }}
+        sx={{ px: 0, [STAFF_COARSE_POINTER_MEDIA]: { minHeight: STAFF_TOUCH_TARGET_PX } }}
       >
         {label}
       </CobraLinkButton>
@@ -338,25 +349,44 @@ export function ParticipantAdminFlyout() {
     })
   }
 
-  if (!isActive(PARTICIPANT_ADMIN_TOOL_ID)) return null
+  const open = isActive(PARTICIPANT_ADMIN_TOOL_ID)
+
+  // Focus management (story 13, AC "does not trap the user"): on open, focus lands on the close
+  // button so a keyboard/switch user is inside the panel and can dismiss it at once; on close,
+  // focus returns to whatever opened it (the toolstrip button) if that is still in the document.
+  const closeButtonRef = useRef<HTMLButtonElement | null>(null)
+  const openerRef = useRef<Element | null>(null)
+  useEffect(() => {
+    if (open) {
+      openerRef.current = document.activeElement
+      closeButtonRef.current?.focus()
+      return
+    }
+    const opener = openerRef.current
+    if (opener instanceof HTMLElement && opener.isConnected) opener.focus()
+    openerRef.current = null
+  }, [open])
+
+  if (!open) return null
+
+  const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === 'Escape') {
+      event.stopPropagation()
+      toggleTool(PARTICIPANT_ADMIN_TOOL_ID)
+    }
+  }
 
   return (
     <Box
       data-testid="participant-admin-flyout"
+      data-staff-flyout="true"
       role="region"
       aria-label="Participant admin — login triage"
+      onKeyDown={handleKeyDown}
       sx={{
-        position: 'absolute',
-        top: 0,
-        right: staffShellTokens.toolstrip.widthPx,
-        bottom: 0,
-        width: FLYOUT_WIDTH_PX,
+        ...staffFlyoutPanelSx(FLYOUT_WIDTH_PX, staffShellTokens.toolstrip.widthPx),
         bgcolor: staffShellTokens.toolstrip.background,
         borderLeft: `1px solid ${staffShellTokens.toolstrip.borderColor}`,
-        boxShadow: '-16px 0 40px rgba(0, 0, 0, 0.14)',
-        zIndex: 30,
-        display: 'flex',
-        flexDirection: 'column',
       }}
     >
       <Stack
@@ -374,10 +404,12 @@ export function ParticipantAdminFlyout() {
         </Typography>
         <Tooltip title="Close">
           <IconButton
+            ref={closeButtonRef}
             size="small"
             aria-label="Close participant admin panel"
+            data-testid="participant-admin-close"
             onClick={() => toggleTool(PARTICIPANT_ADMIN_TOOL_ID)}
-            sx={{ color: staffShellTokens.accent.secondaryText }}
+            sx={{ color: staffShellTokens.accent.secondaryText, ...staffFlyoutCloseButtonSx }}
           >
             <FontAwesomeIcon icon={faXmark} size="sm" />
           </IconButton>

@@ -50,6 +50,39 @@ export const STAFF_HEADER_HEIGHT_PX = 56
 /** Staff shell right-edge toolstrip dock width (SHELL-CONTRACT §1, "Toolstrip"). */
 export const STAFF_TOOLSTRIP_WIDTH_PX = 56
 
+// --- Tablet variants (feature: mobile-tablet, story 13; D5-021, TABLET-AMENDMENT §1/§3/§4) ---
+//
+// BANDS ARE BY WIDTH ONLY; TOUCH SIZING IS A SEPARATE TEST. An iPad with a trackpad still gets the
+// tablet layout, and a narrow desktop window gets the tablet layout WITHOUT touch sizing
+// (`(pointer: coarse)` gates only the 44px targets below). Desktop at 1280 and up is unchanged.
+
+/** Width at and above which the desktop shell renders, unchanged (TABLET-AMENDMENT §1). */
+export const STAFF_DESKTOP_MIN_WIDTH_PX = 1280
+/** Below this width: tablet PORTRAIT band (768-1023); at or above it, landscape (1024-1279). */
+export const STAFF_TABLET_LANDSCAPE_MIN_WIDTH_PX = 1024
+
+/** Tablet header height. Same as desktop today; its own token so the two can be tuned apart. */
+export const STAFF_HEADER_HEIGHT_TABLET_PX = 56
+/**
+ * Tablet toolstrip width. Held at 56 because the amendment's work-area budget (712 / 764 / 968 /
+ * 1124) assumes it: the 44px touch button plus 6px either side fits without growing the column.
+ */
+export const STAFF_TOOLSTRIP_WIDTH_TABLET_PX = 56
+
+/** Minimum touch target under a coarse pointer (TABLET-AMENDMENT §4; WCAG 2.5.5 spirit). */
+export const STAFF_TOUCH_TARGET_PX = 44
+/** Minimum gap between adjacent touch actions (TABLET-AMENDMENT §4). */
+export const STAFF_TOUCH_GAP_PX = 8
+
+/** `matchMedia` queries (JS) for the two header bands — width only, never pointer. */
+export const STAFF_TABLET_QUERY = `(max-width: ${STAFF_DESKTOP_MIN_WIDTH_PX - 0.05}px)`
+export const STAFF_TABLET_PORTRAIT_QUERY = `(max-width: ${STAFF_TABLET_LANDSCAPE_MIN_WIDTH_PX - 0.05}px)`
+
+/** CSS media-query keys for `sx` — the SAME bands, plus the independent touch gate. */
+export const STAFF_TABLET_MEDIA = `@media ${STAFF_TABLET_QUERY}`
+export const STAFF_TABLET_PORTRAIT_MEDIA = `@media ${STAFF_TABLET_PORTRAIT_QUERY}`
+export const STAFF_COARSE_POINTER_MEDIA = '@media (pointer: coarse)'
+
 // --- Navy header chrome — Pulse-staff-shell-specific (NOT in cobraTheme; see
 // module header "Why the navy header lives HERE"). ---
 const NAVY_HEADER_BACKGROUND = '#1e3a5f'
@@ -88,6 +121,20 @@ export const staffShellTokens = {
     color: NAVY_HEADER_TEXT_MUTED,
     borderColor: 'rgba(255, 255, 255, 0.18)',
     letterSpacing: '0.1em',
+  },
+  /**
+   * Flyout stacking contract (story 13). Flyouts live INSIDE the work-area row (a separate grid
+   * row from the header, so they can never cover the header) and the toolstrip is its own grid
+   * column (so they never cover it). `zIndex` orders flyouts above work-area content, including
+   * story 12's sticky command band (which must stay below this value, or set `topVar`). MUI
+   * popovers/menus/dialogs (1300+) always sit above flyouts, so a confirm raised from a flyout is
+   * never buried. `topVar` is the seam for "do not cover the top of the work area": a surface that
+   * owns a sticky band sets `--staff-flyout-top: <band height>` on an ancestor and every flyout
+   * starts below it; unset it is 0 (flyout is full work-area height).
+   */
+  flyout: {
+    zIndex: 30,
+    topVar: '--staff-flyout-top',
   },
   toolstrip: {
     widthPx: STAFF_TOOLSTRIP_WIDTH_PX,

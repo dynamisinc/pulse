@@ -41,7 +41,11 @@
 import { Box, IconButton, Stack, Tooltip, Typography } from '@mui/material'
 import { alpha, keyframes } from '@mui/material/styles'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import { staffShellTokens } from '../staffShellTokens'
+import {
+  STAFF_COARSE_POINTER_MEDIA,
+  STAFF_TOUCH_TARGET_PX,
+  staffShellTokens,
+} from '../staffShellTokens'
 import { useToolstrip, type SurfaceTool } from '../toolRegistry'
 
 /** Escalating-badge pulse (D5-017 consult-on-demand signal) — see module header. */
@@ -90,7 +94,10 @@ function ToolstripToolButton({ tool, active, onToggle }: ToolstripToolButtonProp
 
   return (
     <Stack sx={{ alignItems: 'center', gap: 0 }}>
-      <Tooltip title={tool.tooltip}>
+      {/* Touch equivalent for the tooltip (story 13, no hover-only information): the label under
+          the button is always visible, the accessible name carries the badge, and a touch HOLD
+          shows the longer tooltip (enterTouchDelay) and keeps it up long enough to read. */}
+      <Tooltip title={tool.tooltip} enterTouchDelay={400} leaveTouchDelay={3000} disableInteractive>
         <IconButton
           data-testid={`toolstrip-tool-${tool.id}`}
           aria-label={accessibleLabel}
@@ -108,6 +115,13 @@ function ToolstripToolButton({ tool, active, onToggle }: ToolstripToolButtonProp
             color: active
               ? staffShellTokens.header.background
               : staffShellTokens.accent.secondaryText,
+            // Real layout space (never ::before/::after slop) under a coarse pointer.
+            [STAFF_COARSE_POINTER_MEDIA]: {
+              width: STAFF_TOUCH_TARGET_PX,
+              height: STAFF_TOUCH_TARGET_PX,
+              minWidth: STAFF_TOUCH_TARGET_PX,
+              minHeight: STAFF_TOUCH_TARGET_PX,
+            },
           }}
         >
           <FontAwesomeIcon icon={tool.icon} size="sm" />
@@ -153,6 +167,7 @@ function ToolstripToolButton({ tool, active, onToggle }: ToolstripToolButtonProp
           color: staffShellTokens.accent.secondaryText,
           textAlign: 'center',
           lineHeight: 1.1,
+          [STAFF_COARSE_POINTER_MEDIA]: { fontSize: 9, letterSpacing: '0.04em', mt: '2px' },
         }}
       >
         {tool.label}
