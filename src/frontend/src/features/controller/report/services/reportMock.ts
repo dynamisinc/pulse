@@ -61,6 +61,9 @@ function post(overrides: Partial<ReportPost> & Pick<ReportPost, 'id' | 'scenario
 
 const EM = { handle: '@KestrelCoEM', displayName: 'Kestrel County EM', verified: true, avatarUrl: null }
 const MARISOL = { handle: '@mvega_fh', displayName: 'Marisol Vega', verified: false, avatarUrl: null }
+const TOM = { handle: '@tbrandt41', displayName: 'Tom Brandt', verified: false, avatarUrl: null }
+const BURST_TOM = "anyone else's tap water smell off this morning? #WaterIssues"
+const BURST_MARISOL = 'the store on main is already sold out of bottled water, this is getting real'
 const LOOKALIKE = { handle: '@FairhavenWaterUpd', displayName: 'Fairhaven Water Update', verified: false, avatarUrl: null }
 
 const NOISE_POSTS: ReportPost[] = [
@@ -222,6 +225,17 @@ const LISTED_POSTS: ReportPost[] = [
     ],
     likes: 12,
   }),
+  // Story 34 (DF-50): an engine burst whose identical repeats interleave by author. It prints
+  // as three cards: @tbrandt41 x3, @mvega_fh x2, and one distinct post.
+  ...([
+    ['p-b1', '10:10', TOM, BURST_TOM],
+    ['p-b2', '10:10', MARISOL, BURST_MARISOL],
+    ['p-b3', '10:11', TOM, BURST_TOM],
+    ['p-b4', '10:11', MARISOL, BURST_MARISOL],
+    ['p-b5', '10:12', MARISOL, 'Line at the Elm Street station is around the block.'],
+    ['p-b6', '10:12', TOM, BURST_TOM],
+  ] satisfies [string, string, ReportPost['author'], string][]).map(([id, time, author, text]) =>
+    post({ id, scenarioAt: `2026-10-15 ${time}`, text, author, source: 'engine' })),
   post({
     id: 'p-8',
     scenarioAt: '2026-10-15 10:14',
@@ -290,14 +304,14 @@ export const MOCK_REPORT: ExerciseReport = {
   },
   summary: {
     participants: 6,
-    posts: 14,
+    posts: 20,
     replies: 4,
     injectsDelivered: 7,
     medianResponseMinutes: 8,
-    busiestWindow: { start: '2026-10-15 10:05', posts: 3 },
+    busiestWindow: { start: '2026-10-15 10:10', posts: 6 },
     postsEdited: 2,
     postsTakenDown: 1,
-    bySource: { participant: 6, scripted: 4, engine: 1, noise: 2 },
+    bySource: { participant: 6, scripted: 4, engine: 7, noise: 2 },
   },
   activity: {
     binMinutes: 30,
@@ -305,7 +319,8 @@ export const MOCK_REPORT: ExerciseReport = {
       start: addMinutesToStamp(EXERCISE_START, index * 30),
       participant: index % 5 === 0 ? 1 : 0,
       scripted: index % 3 === 0 ? 1 : 0,
-      engine: index % 7 === 0 ? 1 : 0,
+      // Story 34: the 10:10 engine burst (6 posts) lands in the 10:00 bin.
+      engine: (index % 7 === 0 ? 1 : 0) + (index === binIndexOf('2026-10-15 10:10') ? 6 : 0),
       noise: 1,
     })),
     injectMarkers: INJECTS.map(inject => ({

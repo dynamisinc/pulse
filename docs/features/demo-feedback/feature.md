@@ -74,6 +74,7 @@ media on the server.
 | 31 | [Exercise report: time window scopes the whole report, print polish, threads](31-report-scope-and-print-polish.md) | backend + frontend | Must | 4 | 29, 30 | Complete | #568 |
 | 32 | [Exercise report: when the verified-vs-lookalike section appears](32-report-lookalike-section-rules.md) | backend + frontend | Should | post-demo | 31 | Complete | #569 |
 | 33 | [Exercise report: controller-named lookalike pairs](33-report-named-lookalike-pairs.md) | backend + frontend | Could | post-demo | 32 | Complete | #588 |
+| 34 | [Exercise report: a denser printed post record, with engine repeats merged](34-report-record-density.md) | frontend | Should | post-demo | 31 | In Review | #632 |
 | C | [Content: Kestrel MSEL file, noise pool (C1 burn-in dropped 10/15)](C-content-tasks.md) | content | Must | any | #491, 16 | Not Started | #511 |
 
 ## Manual UAT walk (Sun 10/18, before pencils down)

@@ -320,3 +320,81 @@ export function chartSummary(activity: ExerciseReport['activity']): string {
     `Busiest: ${peakTotal} posts starting ${axisLabel(peak.start, mode)}.${markers}`
   )
 }
+
+/**
+ * One printed card of the post record: a post, plus the identical engine repeats merged into it
+ * (story 34, DF-50). `repeats` lists every post the card stands for, the card's own post first;
+ * it has one entry for an ordinary card.
+ */
+export interface RecordEntry {
+  readonly post: ReportPost
+  readonly repeats: readonly ReportPost[]
+}
+
+/**
+ * Whether a post may be merged with its identical repeats (DF-50). Only an ENGINE post that no
+ * evaluator needs to see on its own: no inject ref, no media, no likes, reposts or replies,
+ * never edited or taken down, and not part of a printed thread (not a reply, not nested, not a
+ * listed root).
+ * Participant, controller-as-persona and scripted posts always print in full.
+ */
+export function isMergeable(post: ReportPost, threadRoots: ReadonlySet<string>): boolean {
+  return post.source === 'engine'
+    && post.injectRef === null
+    && post.parentPostId === null
+    && !threadRoots.has(post.id)
+    && post.media.length === 0
+    && post.likes === 0
+    && post.reposts === 0
+    && post.replies === 0
+    && (post.editCount ?? 0) === 0
+    && post.takenDownAt === null
+}
+
+/**
+ * Merges identical engine repeats within one half-hour group (DF-50): mergeable posts by the same
+ * author with the same text print once, at the first one's position, standing for all of them.
+ * Interleaved repeats merge too (a burst alternates authors). Every other post keeps its card,
+ * in order. Nothing is dropped: the repeats are carried on the entry.
+ */
+export function mergeRepeats(
+  posts: readonly ReportPost[],
+  nestedIds: ReadonlySet<string>,
+): RecordEntry[] {
+  const threadRoots = new Set(
+    posts.filter(post => nestedIds.has(post.id)).map(post => post.threadRootId),
+  )
+  const entries: { post: ReportPost; repeats: ReportPost[] }[] = []
+  const byKey = new Map<string, { post: ReportPost; repeats: ReportPost[] }>()
+  for (const post of posts) {
+    if (nestedIds.has(post.id) || !isMergeable(post, threadRoots)) {
+      entries.push({ post, repeats: [post] })
+      continue
+    }
+    const key = JSON.stringify([post.author.handle, post.text])
+    const existing = byKey.get(key)
+    if (existing !== undefined) {
+      existing.repeats.push(post)
+      continue
+    }
+    const entry = { post, repeats: [post] }
+    byKey.set(key, entry)
+    entries.push(entry)
+  }
+  return entries
+}
+
+/**
+ * The text a merged card carries (NFR-001: the count is in words, not only a badge):
+ * "Posted 3 times, 14:45–14:49" ("15 Oct 14:45–14:49" on a multi-day report), or "Posted 3
+ * times at 14:45" when all share a minute.
+ */
+export function repeatsLabel(repeats: readonly ReportPost[], spansMultipleDays: boolean): string {
+  const first = repeats[0]?.scenarioAt ?? ''
+  const last = repeats[repeats.length - 1]?.scenarioAt ?? first
+  const count = `Posted ${repeats.length.toLocaleString('en-US')} times`
+  if (first === last) return `${count} at ${formatStamp(first, spansMultipleDays)}`
+  // The end repeats the date only when the run crosses midnight.
+  const end = dateOf(first) === dateOf(last) ? timeOf(last) : formatStamp(last, spansMultipleDays)
+  return `${count}, ${formatStamp(first, spansMultipleDays)}–${end}`
+}
