@@ -5,7 +5,7 @@
  * `visualViewport`, and the hook's reaction to the visual viewport shrinking (keyboard up)
  * and growing back. `ComposeModal` publishes it as `--pulse-keyboard-inset`.
  */
-import { act, render, renderHook, screen } from '@testing-library/react'
+import { act, render, renderHook, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { SessionProvider } from '@/core/auth'
@@ -84,6 +84,13 @@ describe('ComposeModal keyboard inset', () => {
     const backdrop = await screen.findByTestId('compose-backdrop')
     expect(backdrop.style.getPropertyValue('--pulse-keyboard-inset')).toBe('0px')
     act(() => vv.resize(450))
-    expect(backdrop.style.getPropertyValue('--pulse-keyboard-inset')).toBe('350px')
+    // `ExerciseContextProvider` mounts the modal after an async resolution, i.e. a commit
+    // outside act(): under load `findByTestId` can see the backdrop before React has run
+    // the hook's passive effect that subscribes to `visualViewport`. The hook re-reads the
+    // viewport when it subscribes, so wait for the value instead of asserting synchronously.
+    await waitFor(() => {
+      expect(screen.getByTestId('compose-backdrop').style.getPropertyValue('--pulse-keyboard-inset'))
+        .toBe('350px')
+    })
   })
 })
