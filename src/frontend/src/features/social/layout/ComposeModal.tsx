@@ -61,7 +61,7 @@ import { faXmark } from '@fortawesome/free-solid-svg-icons'
 import { hasOtherModalMounted } from '@/core/a11y/modalPriority'
 import { Composer } from '../components/Composer'
 import { ParticipantTooltip } from '../components/ParticipantTooltip'
-import { useVisualViewportInset } from './useVisualViewportInset'
+import { useVisualViewportInset } from '@/core/hooks/useVisualViewportInset'
 import styles from './ComposeModal.module.css'
 
 export interface ComposeModalProps {

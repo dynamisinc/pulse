@@ -110,8 +110,6 @@ From top to bottom, left to right:
 | **REVIEW QUEUE** (far right) | Drafts from the AI engine waiting for your decision |
 | **Toolstrip** (right edge) | **PERSONAS** (opens the persona search), **ENGINE** (engine settings), **USAGE** (AI usage), **ADMIN** (participant login triage) |
 
-On screens narrower than about 1280 pixels, Live world and Run sheet stack, with Live world on top.
-
 **Evaluators** can open the same console in a read-only form. They see a **View only** chip, and every control that
 changes the exercise is absent. They can still export posts and open the exercise report.
 
@@ -154,6 +152,16 @@ start too early, **Pause** the world ([section 9](#9-pausing-and-freezing)) whil
 
 EndEx cannot be undone from the console. After EndEx, white noise stops, a Freeze is refused, and anyone who opens
 or reloads Pulse sees the end-of-exercise page.
+
+#### On a tablet
+
+EndEx is just as deliberate on an iPad or other touch screen. **End exercise** is a 44-pixel button. In **End the exercise?** the cursor stays in the **Type
+END to confirm** field. If the on-screen keyboard opens, the dialog moves up so the field and **End exercise** stay
+in view. **Cancel** and **End exercise** are at least 44 pixels tall and well apart, with **End exercise** on the
+right. **End exercise** ignores taps for the first moment after the dialog opens (about 0.4 seconds) and only acts
+once, so a double tap or a stray touch cannot end the exercise. The typed `END`, the controller-only rule and the
+log entry are the same as on a desktop. **Cancel** (or Esc on a hardware keyboard) closes the dialog and puts you
+back on **End exercise**.
 
 > **Important: EndEx does not yet close the world on its own.** Two gaps remain today:
 >
@@ -449,6 +457,14 @@ The row shows **Taken down · *category*** and keeps a **REMOVED** marker. It st
 
 A takedown cannot be undone.
 
+#### On a tablet
+
+Take down takes two deliberate taps on a touch screen too. The step opens fully on screen, below the row or, if there is no room, above it. The four **Category** options are each at
+least 44 pixels tall, and the cursor starts on the selected category, not on **Confirm take down**. **Cancel** and
+**Confirm take down** are well apart, with **Confirm take down** on the right. **Confirm take down** ignores taps for
+about 0.4 seconds after the step opens and acts only once. Pressing and holding does nothing. Nothing is taken down
+until you tap **Confirm take down**, and the row is still kept with its **REMOVED** marker.
+
 ### What participants see
 
 - The post disappears from open feeds right away, with no refresh.
@@ -536,6 +552,15 @@ Participants see the holding page at once, without refreshing, and it stays if t
 > during a Freeze either: anything you post goes into the world. If a stray post lands during a Freeze, take it
 > down ([section 7](#7-moderation-taking-a-post-down)) and do not post as a persona until you resume.
 
+#### On a tablet
+
+On a touch screen the **Pause** pill and every row in the popover are at least 44 pixels tall. After you choose
+**Freeze world** and select **Pause**, the **FREEZE THE WORLD?** step opens with nothing selected, so a stray
+Enter or Space cannot freeze the world. It restates which holding page participants will see. **Back** and **Confirm
+freeze** are at least 44 pixels tall and well apart, with **Confirm freeze** on the right. **Confirm freeze** ignores
+taps for about 0.4 seconds after the step opens and acts only once. **Back** returns you to the list of tiers without
+freezing. Esc on a hardware keyboard closes the whole popover without freezing.
+
 ### To resume
 
 1. Select the **Pause** pill.
@@ -608,10 +633,19 @@ The switch at the left of the engine bar is always visible. Each click moves it 
 **ENGINE · LIVE** → **ENGINE · SUGGEST-ONLY** → **ENGINE · STOPPED** → back to **ENGINE · LIVE**.
 
 - **SUGGEST-ONLY** forces every draft to wait for review, whatever the autonomy setting.
-- **STOPPED** stops generation at once.
+- **STOPPED** stops generation at once. A draft whose countdown runs out while the engine is stopped is held for
+  you, not sent after you restart the engine.
 - In the Live position the label also says what is really in effect, for example **ENGINE · LIVE (SUGGEST)**.
 
 If the AI service misbehaves, Pulse drops to Suggest by itself. It never raises autonomy on its own.
+
+#### On a tablet
+
+The switch is a 44-pixel button. **Stopping stays one tap**: **LIVE** → **SUGGEST-ONLY** → **STOPPED** need no
+confirmation, because stopping is the safe direction. Going back from **STOPPED** to **LIVE** asks first on a touch
+screen: **Re-arm the engine?** appears with **Cancel** and **Re-arm to Live**. **Re-arm to Live** ignores taps for
+about 0.4 seconds after it opens and acts only once. **Cancel**, or Esc on a hardware keyboard, leaves the engine
+**STOPPED**. With a mouse the switch still re-arms in one click.
 
 ### Ambient chatter
 
@@ -756,6 +790,121 @@ The report is marked **EXERCISE** at the top and contains:
 
 All times in the report are scenario time. It is a staff document: it shows who really posted each item, so do not
 hand it to players during the exercise.
+
+## Using a tablet
+
+Pulse runs on a tablet (iPad or similar) from 768 px wide upward. Phones are not supported for staff
+screens. The layout depends on the width of the window; touch-sized buttons depend on whether your
+device uses a finger (a coarse pointer), so an iPad with a trackpad gets the tablet layout and a
+narrow desktop window gets the tablet layout without the larger buttons. At 1280 px and wider
+nothing changes.
+
+### The console layout on a tablet
+
+The console works on an iPad. From 1280 pixels wide it is the desktop layout above. Narrower than that it changes
+shape, and what you can do stays the same.
+
+- **The command band.** A strip under the staff header always shows the engine switch, the **Pause** pill and, at the
+  far right, **End exercise**. It never scrolls away, never hides behind a tab and is not covered by a side panel.
+- **Panes.** Live world, Run sheet and the Review queue share the screen according to the tablet's size and
+  orientation. In landscape the Review queue stays docked on the right. At 1180 pixels wide (an iPad in landscape)
+  Live world and Run sheet sit side by side; at 1024 they share one pane with two tabs. In portrait the tabs are
+  **Live world**, **Run sheet** and **Review**, or, on a tall screen, the Review queue is docked below them.
+- **Tab badges.** Each tab says in words what needs you: "12 new" on Live world, "3 due" on Run sheet, and
+  "5 · 1 under 60s" on Review (items waiting, and how many timers are about to run out). Switching tabs or rotating between the
+  tablet layouts keeps your place, a half-typed edit and an open persona panel. (Growing the window past 1280 pixels
+  switches to the desktop layout and starts the panes fresh.)
+- **Steering.** The escalation dial and the White noise control sit behind a **STEERING** row that starts closed. It
+  shows the current storyline target and noise level in a line; tap it to open the controls.
+- **More.** **Export posts** and **Exercise report** are under the **...** button in the title row.
+
+An evaluator sees the same read-only console on a tablet as on a desktop. A planner cannot open the console.
+
+![The console on an iPad in landscape at 1180 pixels wide: the command band with the engine switch, Running and End exercise, then Live world, Run sheet and the docked Review queue side by side, with the toolstrip on the right](img/console-overview-tablet.png)
+
+*Landscape, 1180 px wide: Live world and Run sheet side by side with the Review queue docked on the right. (The
+shot was taken on a keyboard-less device that reports Ctrl; on an iPad the hint reads "Tap PERSONAS or press ⌘K".)*
+
+![The console on an iPad in tall portrait at 820 by 1180 pixels: the command band on two rows, the Live world and Run sheet tabs with count badges, the Live world list, and the Review queue docked below](img/console-overview-tablet-portrait.png)
+
+*Tall portrait, 820 x 1180: the command band wraps to two rows, Live world and Run sheet are tabs, and the Review
+queue is docked below them.*
+
+### The header, toolstrip and flyouts on a tablet
+
+- **Always visible in the header:** the exercise name and your role, the **SCENARIO** clock, the state
+  pill (**LIVE**, **INJECTS PAUSED**, **ENGINE PAUSED**, **WORLD FROZEN**; it always has a dot and
+  words, never colour alone) and `UNCLASSIFIED // FOUO`. On a narrow portrait screen the state pill
+  and the marking stack in one cell.
+- **The ⋯ (More header options) button:** below 1280 px the **LOCAL** wall clock, the staff presence
+  avatars (with their names listed) and **Preview as participant** live behind this button. While a
+  preview is on, the button reads **PREVIEW** so you can see it from the header. In portrait,
+  **Sign out** shows as an icon only; its name is still "Sign out".
+- **Preview as participant** is still framed by the **PREVIEW AS PARTICIPANT - READ-ONLY** bar
+  and an **Exit preview** button. On a narrow window the participant view scrolls inside its frame.
+- **Toolstrip (right edge):** each tool is at least 44 x 44 px on touch and has its name under it.
+  The longer description appears if you press and hold a tool.
+- **Flyouts** (**PERSONAS** dock, **ENGINE**, **USAGE**, **ADMIN**): one is open at a time; opening
+  another closes the first. Each fills the height of the work area, scrolls on its own and never runs
+  past the screen edge. It never covers the header or the toolstrip. Close it with its **✕** button
+  (44 x 44 on touch) or press <kbd>Esc</kbd> on a hardware keyboard; focus returns to the toolstrip
+  button you used.
+- **Keyboard order:** header, then the work area, then the toolstrip.
+
+### Deliberate confirms on touch
+
+The actions that cannot be undone, or that participants will notice, take a second, deliberate tap on a touch
+screen, and a single stray tap never completes one. Each confirm step opens fully on screen, has a visible
+**Cancel** or **Back**, ignores taps for about 0.4 seconds after it opens, and acts only once. Pressing and holding
+does nothing. The per-control details are in the **On a tablet** notes under
+[taking a post down](#to-take-a-post-down), [freezing the world](#to-freeze-the-world), the
+[engine switch](#the-engine-switch-kill-switch) and [ending the exercise](#ending-the-exercise-endex).
+
+![Take down on a tablet: the confirm step open beside the post, with four category options and Cancel and Confirm take down well apart](img/takedown-tablet.png)
+
+*Take down: open the step, choose a category, then tap **Confirm take down**.*
+
+![The pause tiers popover on a tablet, under the Running pill, with Pause injects, Pause engine, Freeze world and the participant pause page choice](img/freeze-controls-tablet.png)
+
+*Pause: choosing **Freeze world** and tapping **Pause** opens one more step, **FREEZE THE WORLD?**, before anything freezes.*
+
+### Keyboard and touch shortcuts
+
+Every shortcut in the console has a button you can tap, so the console works with a finger alone and with a
+Magic Keyboard. Under a touch screen (a coarse pointer) every action control is at least 44 by 44 pixels and at
+least 8 pixels from its neighbour.
+
+Hints show **one** key name, the one for your device: <kbd>⌘</kbd> on a Mac, an iPhone or an iPad (iPadOS
+included), <kbd>Ctrl</kbd> on Windows, Linux and Android. On a touch screen the strip under the title reads
+"Tap PERSONAS or press ⌘K" (or "Ctrl+K"), because a finger does not need the key.
+
+| Key | Where | Tap instead |
+|---|---|---|
+| <kbd>⌘</kbd>/<kbd>Ctrl</kbd>+<kbd>K</kbd> | Anywhere in the console | The **PERSONAS** tool in the toolstrip, or **Reply as…** on a Live world row. Toggles the persona palette. |
+| <kbd>Esc</kbd> | Palette, persona panel, run sheet editor, library picker, dialogs | The **✕** (palette, persona panel, editor), **Cancel** or **Back** on each |
+| <kbd>↑</kbd> <kbd>↓</kbd> | Review queue | Tap a card. It is focused and shows its buttons. |
+| <kbd>Space</kbd> | Review queue | The tick box on the card |
+| <kbd>A</kbd> / <kbd>V</kbd> / <kbd>E</kbd> / <kbd>R</kbd> | Review queue, focused card | **Approve** / **Veto** / **Edit** / **Re-roll** on the card |
+| <kbd>B</kbd> | Review queue | **Batch approve** at the top |
+| <kbd>J</kbd> / <kbd>K</kbd> | Live world | Scroll, or tap a row |
+| <kbd>R</kbd> | Live world, focused row | **Reply as…** on the row |
+| <kbd>N</kbd> | Live world | The **N new** pill |
+| <kbd>↑</kbd> <kbd>↓</kbd> | Run sheet | Tap a row |
+| <kbd>F</kbd> / <kbd>H</kbd> / <kbd>S</kbd> | Run sheet, selected row | **Fire** / **Hold** or **Release** / **Skip** or **Unskip** on the row |
+| <kbd>N</kbd> / <kbd>A</kbd> | Run sheet | **Fire next** / **Add** at the top |
+| <kbd>E</kbd> | Run sheet, selected row | **Edit** (or **View**) on the row |
+| <kbd>⌘</kbd>/<kbd>Ctrl</kbd>+<kbd>Enter</kbd> | Persona panel, draft edit, run sheet editor | **Post** / **Send in-character** / **Save** |
+| <kbd>←</kbd> <kbd>→</kbd> <kbd>Home</kbd> <kbd>End</kbd> | Escalation dial | Tap or drag the track |
+| <kbd>←</kbd> <kbd>→</kbd> <kbd>Home</kbd> <kbd>End</kbd> | White noise | Tap **Off**, **Low**, **Medium** or **High** |
+| <kbd>Enter</kbd> | End exercise dialog | **Confirm** (once you have typed END) |
+
+Nothing needs hover, a right-click or a key chord on a touch screen. The escalation dial's phase meaning, which
+shows on hover with a mouse, is printed under the phase name on a touch screen. When the on-screen keyboard is up,
+the persona panel and the palette rise above it so the text field and **Post** stay visible.
+
+On an iPad with a hardware keyboard, <kbd>⌘</kbd>+<kbd>K</kbd> works as on a Mac. Safari on iPadOS is not known to use
+it (a device check is pending), and the console cancels the browser's own action for it. If a future iPadOS version takes it, use the
+**PERSONAS** tool instead.
 
 ## 13. Quick reference
 

@@ -1040,6 +1040,9 @@ namespace Pulse.WebApi.Data.Migrations
                         .HasMaxLength(256)
                         .HasColumnType("nvarchar(256)");
 
+                    b.Property<Guid?>("ImitatesPersonaId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<DateTimeOffset>("JoinedAt")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("datetimeoffset")

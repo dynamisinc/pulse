@@ -59,6 +59,38 @@ public class AutoHoldPolicyTests
             .Should().Be(TimeoutDisposition.Hold);
     }
 
+    [Fact]
+    public void Evaluate_FullStop_BeforeExpiry_KeepsCounting_LogsNoTransition()
+    {
+        var result = AutoHoldPolicy.Evaluate(Countdown(), EffectiveAutonomy.Stopped, currentScenarioMinute: 103, swampedMode: true);
+
+        result.Disposition.Should().Be(TimeoutDisposition.Hold);
+        result.Event.Should().BeNull("a countdown still inside its window under a full stop is not resolved yet");
+    }
+
+    [Fact]
+    public void Evaluate_FullStop_OnExpiry_LogsAHoldTransition_NotViaSwamped()
+    {
+        var countdown = Countdown();
+
+        var result = AutoHoldPolicy.Evaluate(countdown, EffectiveAutonomy.Stopped, currentScenarioMinute: 108, swampedMode: true);
+
+        result.Disposition.Should().Be(TimeoutDisposition.Hold);
+        result.ViaSwampedMode.Should().BeFalse();
+        result.Event.Should().NotBeNull(
+            "an expiry during a full stop is the ordinary hold-on-expiry — never left counting down to auto-send after a restore");
+        result.Event!.Disposition.Should().Be(TimeoutDisposition.Hold);
+        result.Event.ViaSwampedMode.Should().BeFalse();
+        result.Event.ScenarioMinute.Should().Be(108);
+    }
+
+    [Fact]
+    public void Evaluate_FullStop_WithAStandingApproval_LogsNoTimeoutTransition()
+    {
+        AutoHoldPolicy.Evaluate(Countdown(ControllerDecision.Approved), EffectiveAutonomy.Stopped, 108, swampedMode: true)
+            .Event.Should().BeNull("a human decision is never a timeout transition, even under a full stop");
+    }
+
     [Theory]
     [InlineData(ControllerDecision.Approved, TimeoutDisposition.Publish)]
     [InlineData(ControllerDecision.Vetoed, TimeoutDisposition.Hold)]

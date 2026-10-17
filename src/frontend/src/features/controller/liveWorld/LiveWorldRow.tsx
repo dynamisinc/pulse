@@ -91,6 +91,7 @@ import type { Persona } from '@/features/personas'
 import { CobraLinkButton } from '@/theme/styledComponents'
 import { LiveWorldMedia } from './LiveWorldMedia'
 import { toLiveWorldPost, type LiveWorldEntry, type LiveWorldPost } from './liveWorldModel'
+import { COARSE_GAP_SX, COARSE_TARGET_SX } from '../consoleTouch'
 import { liveWorldTokens, monoMeta, srOnly } from './liveWorldStyles'
 import { PinForAllAction } from './PinForAllAction'
 import { LiveWorldEditHistory } from './LiveWorldEditHistory'
@@ -376,7 +377,7 @@ export const LiveWorldRow = memo(function LiveWorldRow({
 
       {post.media !== undefined && <LiveWorldMedia media={post.media} />}
 
-      <Stack direction="row" sx={{ alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+      <Stack direction="row" sx={{ alignItems: 'center', gap: 1, flexWrap: 'wrap', ...COARSE_GAP_SX }}>
         <Stack
           component="ul"
           direction="row"
@@ -428,6 +429,8 @@ export const LiveWorldRow = memo(function LiveWorldRow({
             fontWeight: 700,
             fontFamily: liveWorldTokens.mono,
             gap: '5px',
+            // Story 14: the touch twin of the R key, 44px under a coarse pointer.
+            ...COARSE_TARGET_SX,
           }}
         >
           <FontAwesomeIcon icon={faReply} aria-hidden="true" />

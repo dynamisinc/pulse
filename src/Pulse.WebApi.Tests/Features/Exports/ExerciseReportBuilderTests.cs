@@ -314,6 +314,85 @@ public sealed class ExerciseReportBuilderTests
         pairs.Should().ContainSingle().Which.Verified.Should().Be(cityFire);
     }
 
+    // ---- Named lookalike pairs (story 33, DF-49) -----------------------------------------------------------------
+
+    [Fact]
+    public void MergeLookalikePairs_ANamedPairThatSharesNoPrefix_IsListed_AsNamed()
+    {
+        var verified = new ReportLookalikeCandidate(Guid.NewGuid(), "KestrelCoEM", Verified: true);
+        var lookalike = new ReportLookalikeCandidate(Guid.NewGuid(), "@KestrelEM_Official", Verified: false, verified.Id);
+
+        var pair = ExerciseReportBuilder.MergeLookalikePairs([verified, lookalike]).Should().ContainSingle().Subject;
+
+        pair.Should().Be(new ReportLookalikePair(verified, lookalike, Named: true));
+    }
+
+    [Fact]
+    public void MergeLookalikePairs_ANamedPair_ReplacesTheLookalikesHeuristicPair_OtherHeuristicPairsStay()
+    {
+        var kestrel = new ReportLookalikeCandidate(Guid.NewGuid(), "KestrelPD", Verified: true);
+        var county = new ReportLookalikeCandidate(Guid.NewGuid(), "CountyEM", Verified: true);
+        // Its handle matches @KestrelPD, but a controller named @CountyEM: the named pair wins.
+        var named = new ReportLookalikeCandidate(Guid.NewGuid(), "KestrelPD_news", Verified: false, county.Id);
+        var heuristic = new ReportLookalikeCandidate(Guid.NewGuid(), "KestrelPD_alerts", Verified: false);
+
+        var pairs = ExerciseReportBuilder.MergeLookalikePairs([kestrel, county, named, heuristic]);
+
+        pairs.Should().Equal(
+            new ReportLookalikePair(county, named, Named: true),
+            new ReportLookalikePair(kestrel, heuristic, Named: false));
+    }
+
+    [Fact]
+    public void MergeLookalikePairs_ANamedPairThatIsAlsoAHandleMatch_IsListedOnce_AsNamed()
+    {
+        var verified = new ReportLookalikeCandidate(Guid.NewGuid(), "cityfire", Verified: true);
+        var lookalike = new ReportLookalikeCandidate(Guid.NewGuid(), "cityfire_alerts", Verified: false, verified.Id);
+
+        ExerciseReportBuilder.MergeLookalikePairs([verified, lookalike])
+            .Should().ContainSingle().Which.Named.Should().BeTrue();
+    }
+
+    [Fact]
+    public void MergeLookalikePairs_ADanglingTarget_IsSkipped_AndTheHandleMatchStands()
+    {
+        var verified = new ReportLookalikeCandidate(Guid.NewGuid(), "cityfire", Verified: true);
+        var dangling = new ReportLookalikeCandidate(Guid.NewGuid(), "cityfire_alerts", Verified: false, Guid.NewGuid());
+        var danglingNoPrefix = new ReportLookalikeCandidate(Guid.NewGuid(), "resident_ann", Verified: false, Guid.NewGuid());
+
+        var pair = ExerciseReportBuilder.MergeLookalikePairs([verified, dangling, danglingNoPrefix]).Should().ContainSingle().Subject;
+
+        pair.Should().Be(new ReportLookalikePair(verified, dangling, Named: false), "a target that is not an author is skipped silently");
+    }
+
+    [Fact]
+    public void MergeLookalikePairs_ANoLongerVerifiedTarget_OrANowVerifiedLookalike_OrSelf_IsSkipped()
+    {
+        var unverifiedTarget = new ReportLookalikeCandidate(Guid.NewGuid(), "FormerlyVerified", Verified: false);
+        var namesUnverified = new ReportLookalikeCandidate(Guid.NewGuid(), "Impostor1", Verified: false, unverifiedTarget.Id);
+        var verified = new ReportLookalikeCandidate(Guid.NewGuid(), "RealAccount", Verified: true);
+        var nowVerified = new ReportLookalikeCandidate(Guid.NewGuid(), "Impostor2", Verified: true, verified.Id);
+        var selfId = Guid.NewGuid();
+        var self = new ReportLookalikeCandidate(selfId, "Impostor3", Verified: false, selfId);
+
+        ExerciseReportBuilder.MergeLookalikePairs([unverifiedTarget, namesUnverified, verified, nowVerified, self])
+            .Should().BeEmpty("only an unverified persona naming another, verified author makes a named pair");
+    }
+
+    [Fact]
+    public void MergeLookalikePairs_IsOrderedByVerifiedHandle_ThenLookalikeHandle()
+    {
+        var alpha = new ReportLookalikeCandidate(Guid.NewGuid(), "Alpha", Verified: true);
+        var zulu = new ReportLookalikeCandidate(Guid.NewGuid(), "Zulu", Verified: true);
+        var namedZulu = new ReportLookalikeCandidate(Guid.NewGuid(), "@aaa_fake", Verified: false, zulu.Id);
+        var namedAlpha = new ReportLookalikeCandidate(Guid.NewGuid(), "zzz_fake", Verified: false, alpha.Id);
+        var heuristicAlpha = new ReportLookalikeCandidate(Guid.NewGuid(), "Alpha_news", Verified: false);
+
+        ExerciseReportBuilder.MergeLookalikePairs([zulu, namedZulu, alpha, namedAlpha, heuristicAlpha])
+            .Select(pair => pair.Lookalike.Handle)
+            .Should().Equal("Alpha_news", "zzz_fake", "@aaa_fake");
+    }
+
     [Fact]
     public void SumShown_PassesInt32Max_WithoutOverflow()
     {

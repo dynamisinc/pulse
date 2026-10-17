@@ -321,6 +321,14 @@ public sealed class ReportLookalikeDto
     /// </summary>
     [JsonPropertyName("outdrew")]
     public required bool Outdrew { get; init; }
+
+    /// <summary>
+    /// Whether a controller named this pair (DF-49, story 33: the lookalike's <c>imitatesPersonaId</c> names the verified
+    /// account); <c>false</c> when the pair is a handle-prefix match. The page prints "Named by a controller" or
+    /// "Handle match" as text (NFR-001).
+    /// </summary>
+    [JsonPropertyName("named")]
+    public required bool Named { get; init; }
 }
 
 /// <summary>A persona with its summed shown engagement.</summary>

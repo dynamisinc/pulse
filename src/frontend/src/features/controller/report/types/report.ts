@@ -40,6 +40,12 @@ export interface ReportLookalikePair {
   verified: ReportAccount
   lookalike: ReportAccount
   outdrew: boolean
+  /**
+   * Story 33 (DF-49): true when a controller named this pair (the lookalike's "Imitates" setting),
+   * false when it was found by handle prefix. Absent only from an older server, so the page
+   * renders without it (read as a handle match).
+   */
+  named?: boolean
 }
 
 /** `Post.Origin` mapped: `inject` becomes `scripted`. */

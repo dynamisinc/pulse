@@ -384,6 +384,11 @@ public class PulseDbContext : DbContext
                 .WithMany()
                 .HasForeignKey(e => e.BannerMediaId)
                 .OnDelete(DeleteBehavior.Restrict);
+
+            // demo-feedback story 33 (DF-49): the verified persona this lookalike imitates. A nullable LOGICAL
+            // reference with no foreign key and no index (read only by the per-exercise report, which loads every
+            // persona anyway). The PATCH resolves it through the scoped set, so it can never name another exercise.
+            entity.Property(e => e.ImitatesPersonaId);
         });
 
         modelBuilder.Entity<Post>(entity =>
