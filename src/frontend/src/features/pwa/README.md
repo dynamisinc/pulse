@@ -32,7 +32,7 @@ no install telemetry (MT-D5), never "Pulse"/"Dynamis" once branded. No backend r
 
 ## Install prompt (story 11)
 
-- `install/installConfig.ts` `IOS_INSTALL_PROMPT_ENABLED` (default `true`): set `false` to disable only the iOS sheet; Android is unaffected.
+- `install/installConfig.ts` `IOS_INSTALL_PROMPT_ENABLED` (`true`; off 10/16 to 10/17, back on with #606): set `false` to disable only the iOS sheet; Android is unaffected. The installed app opens signed out (its own storage), so the sheet's last step points to the home-screen sign-in page's "Paste your sign-in link".
 
 - `install/useInstallPrompt.ts` state machine (none | android | ios); `install/installEnv.ts` UA/standalone
   detection (iOS heuristic documented there) and per-exercise localStorage (`pulse:pwa:*:{exerciseId}`).
