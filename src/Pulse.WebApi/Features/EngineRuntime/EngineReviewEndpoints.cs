@@ -13,6 +13,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Pulse.Core.Features.Autonomy.Models;
 using Pulse.Core.Features.Generation.Services;
 using Pulse.WebApi.Features.EngineRuntime.Usage;
+using Pulse.WebApi.Features.Identity.Staff;
 
 /// <summary>
 /// The controller review-cockpit API (story 02) on <c>/api/engine</c>: the exercise-scoped queue GET plus the
@@ -78,6 +79,12 @@ public static class EngineReviewEndpoints
         // the loop's per-burst read MUST see the same dictionary or a tier choice would never reach generation.
         services.TryAddSingleton<EngineTierPolicyRegistry>();
 
+        // ambient-chatter story 01 — the per-exercise ambient policy (third sibling, TryAdd so this and
+        // AddReactionLoopHost converge on ONE singleton the POST writes and the loop reads) and the governed
+        // Generation:Governance:AmbientAutonomyAuthorized flag (AC0; false unless the §8 signer sets it).
+        EngineAmbientGovernanceOptions.Register(services);
+        services.TryAddSingleton<EngineAmbientPolicyRegistry>();
+
         // The degraded-mode bridge (NFR-003 / ADP-042): replace the generation core's no-op listener so a
         // provider circuit trip fans DegradeToSuggest out to every active exercise (only ever LOWERS, §8.2).
         services.RemoveAll<IProviderHealthListener>();
@@ -130,6 +137,13 @@ public static class EngineReviewEndpoints
         steering.MapPost("/api/engine/autonomy/restore", RestoreAsync);
         steering.MapPost("/api/engine/settings/autonomy-default", SetAutonomyDefaultAsync);
         steering.MapPost("/api/engine/settings/tier-policy", SetTierPolicyAsync);
+
+        // ambient-chatter story 01 (AC2) — on the SAME controller-role steering group as every other engine mutation.
+        steering.MapPost("/api/engine/settings/ambient-policy", SetAmbientPolicyAsync);
+            // TODO(A1c): raising ambient toward unreviewed output (AmbientPolicyRaise.IsRaise) is lead-only; lowering it to
+            // off/review stays open to any controller. WR-5: the raise check MUST run inside the compare-and-set loop in
+            // EngineReviewService.SetAmbientPolicyAsync (IsRaise(snapshot, request) then TrySet(snapshot, next), re-read
+            // and retry on mismatch). An endpoint filter here alone would be a TOCTOU against a concurrent write.
 
         // autonomy-safety story 07 (ADP-042) — the runtime EGRESS lever. Two routes, on the same controller-role
         // steering group as every other engine mutation. Deliberately a BINARY pair and not one route taking a
@@ -387,6 +401,39 @@ public static class EngineReviewEndpoints
         }
 
         var result = await service.SetTierPolicyModeAsync(request.Mode, request.ToInput(), cancellationToken);
+        return MapSettings(result);
+    }
+
+    /// <summary>
+    /// <c>POST /api/engine/settings/ambient-policy</c> — sets the exercise's ambient-chatter policy (mode, caps,
+    /// allow-lists; ambient-chatter story 01). Controller-role only. <c>autonomous</c> is rejected <c>400</c> unless
+    /// the deployment's governed <c>Generation:Governance:AmbientAutonomyAuthorized</c> flag is true.
+    /// </summary>
+    /// <remarks>
+    /// The policy is attributed to the AUTHENTICATED staff user from the verified session token
+    /// (<see cref="ICurrentStaffSessionAccessor"/>), never to the body's client-supplied <c>actingHumanId</c>
+    /// (orchestrator review W-2). No resolvable staff session fails closed with 401.
+    /// </remarks>
+    private static async Task<IResult> SetAmbientPolicyAsync(
+        EngineAmbientPolicyRequest? request,
+        EngineReviewService service,
+        HttpContext httpContext,
+        CancellationToken cancellationToken)
+    {
+        if (request is null)
+        {
+            return Results.BadRequest("A JSON ambient-policy body is required.");
+        }
+
+        var staff = httpContext.RequestServices.GetService<ICurrentStaffSessionAccessor>() is { } accessor
+            ? await accessor.GetCurrentStaffSessionAsync(cancellationToken)
+            : null;
+        if (staff is null)
+        {
+            return Results.Unauthorized();
+        }
+
+        var result = await service.SetAmbientPolicyAsync(request, staff.StaffUserId, cancellationToken);
         return MapSettings(result);
     }
 

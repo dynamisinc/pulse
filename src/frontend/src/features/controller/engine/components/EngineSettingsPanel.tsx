@@ -94,6 +94,8 @@ import {
 // D5 dark operator-chrome tokens (matches `ReviewQueue`'s/`EngineControlBar`'s `chrome`).
 import { consoleChrome as chrome } from '../../consoleChrome'
 import { useCanControl } from '../../access'
+import { useStaffPersonas } from '@/features/personas'
+import { AmbientChatterSection } from './AmbientChatterSection'
 
 /** Stable toolstrip-registry id for the console's "ENGINE" surface tool. */
 export const ENGINE_SETTINGS_TOOL_ID = 'engine-settings'
@@ -174,12 +176,17 @@ export function EngineSettingsPanel({ open, onClose }: EngineSettingsPanelProps)
     pendingAutonomyDefault,
     pendingTierPolicy,
     pendingProviderLever,
+    pendingAmbientPolicy,
+    ambientError,
+    setAmbientPolicy,
     setAutonomyDefault,
     setTierPolicyMode,
     cutGenerationToFake,
     restoreGenerationProvider,
     refetch,
   } = useEngineSettings()
+  // Ambient-chatter persona allow-list options: this exercise's personas (#168 AC2).
+  const { personas, loading: personasLoading } = useStaffPersonas()
 
   useEffect(() => {
     if (open) {
@@ -220,7 +227,11 @@ export function EngineSettingsPanel({ open, onClose }: EngineSettingsPanelProps)
   // serialization invariant that makes the "two mutations racing to
   // overwrite each other's field" bug class structurally unrepresentable.
   const anyRequestInFlight =
-    loading || pendingAutonomyDefault || pendingTierPolicy || pendingProviderLever
+    loading ||
+    pendingAutonomyDefault ||
+    pendingTierPolicy ||
+    pendingProviderLever ||
+    pendingAmbientPolicy
   const autonomyControlsDisabled = forbidden || anyRequestInFlight
   const tierControlsDisabled = forbidden || anyRequestInFlight
   // The CUT control is additionally disabled when the lever is INERT
@@ -649,6 +660,22 @@ export function EngineSettingsPanel({ open, onClose }: EngineSettingsPanelProps)
                 </Typography>
               )}
             </Stack>
+
+            {settings.ambientPolicy && (
+              <>
+                <AmbientChatterSection
+                  policy={settings.ambientPolicy}
+                  personas={personas}
+                  personasLoading={personasLoading}
+                  canControl={canControl && !forbidden}
+                  disabled={anyRequestInFlight}
+                  pending={pendingAmbientPolicy}
+                  error={ambientError}
+                  onSave={setAmbientPolicy}
+                />
+                <Box sx={{ height: '1px', bgcolor: chrome.line }} />
+              </>
+            )}
 
             {(forbidden || !canControl) && (
               <Stack

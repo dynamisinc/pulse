@@ -75,3 +75,7 @@ globally shared vs. the design's org-owned → a latent cross-customer leak). **
 single-customer the explicit operating assumption until then. This is distinct from the *in-fiction*
 org-account (COR-018,
 `identity-auth-roles/09`).
+
+## Scope update 2026-10-16 (ADMIN-IDENTITY-MODEL)
+
+Source: [`docs/design/ADMIN-IDENTITY-MODEL.md`](../../design/ADMIN-IDENTITY-MODEL.md) §1.2. Story 05 (Complete) carries an amendment note: the switcher reads `Enrollment`, selects staff-role enrollments only, and never crosses orgs. No new stories.
