@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using Pulse.Core.Features.Ambient.Services;
 using Pulse.Core.Features.EngineEval;
 using Pulse.Core.Features.Generation.Models;
 using Pulse.Core.Features.Generation.Services;
@@ -91,18 +92,30 @@ public sealed class GenerateStage
         {
             cancellationToken.ThrowIfCancellationRequested();
 
+            // SG-2: the caller accounts for each attempt BEFORE the (paid) provider call is made, so a call that throws
+            // or a burst that is later dropped is still counted.
+            request.BeforeAttempt?.Invoke(attempt);
+
             var result = await _provider.GenerateAsync(generationRequest, cancellationToken);
             lastResult = result;
 
             var guard = ContentGuard.InspectBurst(result.Posts);
             var diversity = BurstAcceptancePolicy.Evaluate(result.Posts, stylesByHandle);
 
-            if (guard.Clean && diversity.Passed)
+            // Ambient chatter only (orchestrator review W-3 / S-2): the output-side "never storyline" check runs as a
+            // third gate with the guard's semantics — re-roll, then drop; nothing from a failing burst surfaces.
+            IReadOnlyList<string> ambientFailures = request.Storyline.IsAmbient
+                ? AmbientOutputFilter.Inspect(result.Posts, request.AmbientExclusions)
+                : [];
+
+            if (guard.Clean && diversity.Passed && ambientFailures.Count == 0)
             {
                 return GenerateStageResult.Accepted(result, attempt);
             }
 
-            lastFailingChecks = BuildFailingChecks(guard, diversity);
+            var failing = BuildFailingChecks(guard, diversity);
+            failing.AddRange(ambientFailures);
+            lastFailingChecks = failing;
 
             // Bounded re-roll: regenerate while attempts remain, otherwise drop (logged by the caller, never
             // surfaced — §8.5). Mirrors BurstAcceptancePolicy.Decide, widened to also cover a guard failure.
@@ -168,8 +181,22 @@ public sealed record GenerateStageRequest
     /// <summary>The model tier for this burst (Standard for storyline-critical reactions; Ambient for lulls).</summary>
     public required GenerationTier Tier { get; init; }
 
+    /// <summary>
+    /// For an ambient burst (<see cref="StorylineBrief.IsAmbient"/>) only: the per-exercise terms (active storyline
+    /// hashtags + title keywords, from <see cref="AmbientOutputFilter.BuildExclusions"/>) an ambient post must not
+    /// contain, on top of the filter's fixed incident vocabulary. Ignored for a storyline burst.
+    /// </summary>
+    public IReadOnlyList<string> AmbientExclusions { get; init; } = [];
+
     /// <summary>The bounded re-roll budget before a failing burst is dropped (defaults to <see cref="GenerateStage.DefaultMaxAttempts"/>).</summary>
     public int MaxAttempts { get; init; } = GenerateStage.DefaultMaxAttempts;
+
+    /// <summary>
+    /// Optional hook invoked with the 1-based attempt number immediately BEFORE each provider call (orchestrator review
+    /// SG-2) — the ambient path counts every attempt into its spend window up front. <c>null</c> (the default) for
+    /// storyline bursts; it never changes the stage's own behaviour.
+    /// </summary>
+    public Action<int>? BeforeAttempt { get; init; }
 }
 
 /// <summary>Whether the generate stage produced a surfaceable burst or dropped it after exhausting re-rolls.</summary>

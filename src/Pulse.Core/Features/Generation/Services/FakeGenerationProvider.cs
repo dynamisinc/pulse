@@ -47,8 +47,13 @@ public sealed class FakeGenerationProvider : IGenerationProvider
         for (var i = 0; i < request.PostCount; i++)
         {
             var handle = $"@sim_{i:00}";
-            var text = FakeLines[(offset + i) % FakeLines.Length];
-            var sentiment = Math.Round(-0.6 + ((i % 5) * 0.3), 2);
+            // An ambient burst gets everyday small talk with calm-to-warm sentiment (ambient-chatter story 01): the
+            // incident lines below would (rightly) be dropped by the ambient output filter.
+            var lines = request.IsAmbient ? AmbientFakeLines : FakeLines;
+            var text = lines[(offset + i) % lines.Length];
+            var sentiment = request.IsAmbient
+                ? Math.Round(0.1 + ((i % 4) * 0.15), 2)
+                : Math.Round(-0.6 + ((i % 5) * 0.3), 2);
             posts.Add(new GeneratedPost(handle, text, sentiment, ExtractHashtags(text)));
         }
 
@@ -98,6 +103,20 @@ public sealed class FakeGenerationProvider : IGenerationProvider
 
         return hash;
     }
+
+    private static readonly string[] AmbientFakeLines =
+    [
+        "finally tried the new taco truck by the library, the carnitas were worth the line",
+        "varsity soccer pulled off a late equalizer tonight, what a finish for the seniors",
+        "farmers market had the first strawberries of the season this morning",
+        "anyone have a good recommendation for a dog groomer on the north side?",
+        "the community choir concert at the old theater was lovely, packed house too",
+        "new bakery on main street does a cardamom bun that might ruin me for all others",
+        "repainted the porch this weekend and the neighbors keep stopping to chat about it",
+        "library book sale starts saturday, already made a list of mystery novels to hunt",
+        "little league opening day was chaos in the best way, so many proud grandparents",
+        "the trail along the river is gorgeous right now, saw two herons on my walk",
+    ];
 
     private static readonly string[] FakeLines =
     [
