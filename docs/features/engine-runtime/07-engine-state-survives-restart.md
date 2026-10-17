@@ -1,6 +1,6 @@
 # Story: Engine state survives a restart — the kill switch and the cut-to-Fake lever hold, the loop comes back by itself  `[backend] [SAFETY-CRITICAL] [TIER-2 schema]`
 
-**Feature:** engine-runtime  ·  **Epic:** E8  ·  **Phase:** 2  ·  **Stack:** backend  ·  **Status:** Not Started — **gated** (see Gates)
+**Feature:** engine-runtime  ·  **Epic:** E8  ·  **Phase:** 2  ·  **Stack:** backend  ·  **Status:** Ready (decisions recorded 2026-10-17) — **gated** (see Gates); build post-demo
 **Requirements:** ADP-042 (kill switch / degraded mode), ADP-040 (review queue), CTL-034, ADP-011, ADP-002a, COR-001, XC-004, NFR-005, NFR-003 (E8 arch §8.1/§8.2/§8.4)  ·  **Design decisions:** D5-014/1.1 (auto-HOLD, never auto-send; inherited, not re-decided)  ·  **Issue:** —
 **Wave:** Session C wave C3 (`docs/NEXT-WAVE-SESSION-BRIEF.md` §C4)  ·  **World:** staff/backend. No participant surface; the only UI touch is one staff banner on the existing controller engine cockpit (COBRA).
 
@@ -130,7 +130,7 @@ inputs* and rebuild the graph from durable sources the same way `EngineContentSe
 - [ ] **Raises are not auto-restored.** Given A had a `DelayedAuto` default, a storyline override, swamped mode ON,
       ambient `Autonomous` and auto-confirm on, when the host restarts, then A boots at `Suggest`, swamped OFF, ambient
       `Off` (a `Review` ambient policy is restored as it was), auto-confirm off; the "previous" values stay in the
-      row, and a human restore re-applies them (next AC). *(Proposal; see Q1.)*
+      row, and a human restore re-applies them (next AC). *(Decided: Q1.)*
 - [ ] **A human can restore the previous raises in one step, logged.** Given A booted with "previous" raises on
       file, then the controller cockpit shows a staff banner naming each (COBRA, severity not colour-only, text plus
       icon, NFR-001), and a controller-confirmed "Restore previous settings" re-applies them through the **same**
@@ -149,7 +149,7 @@ inputs* and rebuild the graph from durable sources the same way `EngineContentSe
 - [ ] **Re-seed still works and still overwrites.** Given an explicit re-seed, then it replaces the registration row
       and resets that exercise's storyline snapshot to `Dormant`, but it does **not** clear the kill switch, the
       clamp, the stop or the cut (a re-seed is not a human restore). *(Today a re-seed builds a fresh state; this is
-      an intentional change. Needs Tom's confirmation, Q3.)*
+      an intentional change. Decided: Q3.)*
 
 ### Ordering and concurrency
 
@@ -208,7 +208,24 @@ inputs* and rebuild the graph from durable sources the same way `EngineContentSe
 - A participant-facing change of any kind.
 - Any change to who may raise (the A1c lead gate is Session A's); this story only routes the restore through it.
 
-## Open questions for Tom
+## Decisions (Tom, 2026-10-17: "Accept all proposals")
+
+All eight proposals below are **accepted as written** and are now requirements of this story:
+
+| # | Decision |
+|---|---|
+| Q1 | Raises do **not** auto-restore. Lowering state (kill switch, FullStop, degraded clamp, cut-to-Fake) is restored exactly and automatically. Raising state (Delayed-auto default and overrides, swamped mode ON, ambient `Autonomous`, response auto-confirm) is persisted as "previous" and the exercise boots at the floor, with a controller-confirmed one-click restore. |
+| Q2 | "Restore previous settings" is open to a controller on the exercise until A1c lands, then **lead controller only**. |
+| Q3 | A re-seed **never** clears a kill switch or cut; only `RestoreFromSafety` and the provider "restore to live" do. This changes today's re-seed behaviour on purpose. |
+| Q4 | The ambient posting windows are **not** persisted. At most one extra `MaxPerHour` window after a restart is accepted (review-gated, small). |
+| Q5 | The tier policy restores **automatically** (cost and model choice, not a raise). |
+| Q6 | Storyline progress is snapshotted at the end of any tick that changed intensity, phase or last-response. Losing at most the last changed tick on a hard crash is accepted. |
+| Q7 | If the rows cannot be read at startup, that exercise boots **FullStop and cut to Fake**, with an Error log and a banner, until a human restores it. |
+| Q8 | The runbook lives on #571 (`UAT-GOLIVE-RUNBOOK.md`); the build PR removes its manual re-seed step once this ships. |
+
+The build remains **post-demo**, and the migration remains gated on A1 on `main` plus the orchestrator's clearance.
+
+## Open questions for Tom (answered above; kept for the record)
 
 Q1. **Do raises auto-restore after a restart?** Proposal: no. Lowering state (kill switch, FullStop, degraded
 clamp, cut-to-Fake) is restored exactly and automatically. Raising state (Delayed-auto default or override,
