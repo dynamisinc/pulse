@@ -251,6 +251,10 @@ export const SHELL_ALERT_HEIGHT_VAR = '--pulse-alert-height'
  * overlay (pause/EndEx pages) · compliance chrome · break-fiction broadcast
  * (covers everything).
  *
+ * Overlay vs alert bar (Tom, 10/16): the overlay layer is above the alert bar,
+ * but a PAUSE page starts below chrome + alert bar (the bar stays visible and
+ * inert); EndEx and break-fiction start at top 0 and cover the bar.
+ *
  * A channel is mounted inside the content region at `SHELL_Z.content`, and
  * that region is its own CSS stacking context (`ShellLayout.tsx`). Any
  * `z-index` a channel sets on its own internal elements is scoped INSIDE
