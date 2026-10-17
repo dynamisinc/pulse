@@ -49,7 +49,7 @@
 import { useMemo, type CSSProperties, type ReactNode } from 'react'
 import { useBrand } from '@/features/participant-shell/brandTokens'
 import { accessibleAccent } from './accent'
-import { ACCENT_CSS_VAR, FONT_FAMILY } from './tokens'
+import { ACCENT_CSS_VAR, FONT_FAMILY, TOUCH_MIN, TOUCH_MIN_CSS_VAR } from './tokens'
 
 export interface SocialBrandScopeProps {
   /** The Social channel (feed, thread, profile, hashtag views, frame chrome). */
@@ -65,6 +65,7 @@ export function SocialBrandScope({ children }: SocialBrandScopeProps) {
       display: 'contents',
       fontFamily: FONT_FAMILY,
       [ACCENT_CSS_VAR]: accessibleAccent(colors.accent),
+      [TOUCH_MIN_CSS_VAR]: TOUCH_MIN,
     }) as CSSProperties,
     [colors.accent],
   )

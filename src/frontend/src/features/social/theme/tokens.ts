@@ -49,6 +49,14 @@ export const SEAL_BLUE = '#2D9CDB'
  */
 export const ACCENT_CSS_VAR = '--pulse-ac'
 
+/**
+ * The shared minimum touch target (mobile-tablet story 18; NFR-001), published on the social
+ * root by `SocialBrandScope`. Social CSS modules read `var(--pulse-touch-min, 44px)` inside
+ * `@media (pointer: coarse)` only, so a mouse layout never changes.
+ */
+export const TOUCH_MIN_CSS_VAR = '--pulse-touch-min'
+export const TOUCH_MIN = '44px'
+
 /** Default accent when no ancestor sets `--pulse-ac` — Cadence navy (D1-001). */
 export const DEFAULT_ACCENT = '#1e3a5f'
 
