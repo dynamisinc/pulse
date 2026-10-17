@@ -6,8 +6,8 @@
  *     action calls the held `beforeinstallprompt` event's `prompt()`.
  *   - iOS Safari: a dismissible non-modal sheet with "Share -> Add to Home Screen" steps
  *     (FontAwesome icons + text; never color-only). A home-screen app has its own storage, so it
- *     opens signed out: the last step tells the participant to copy their sign-in link first,
- *     because the app's sign-in page asks them to paste it (#606).
+ *     opens signed out: the last step tells the participant to open the app and paste their
+ *     sign-in link from the invitation, or use today's word (#606).
  * Skinned with `--pulse-brand-*` tokens; no COBRA, no MUI; actions are >= 44px; it never takes
  * focus (feed focus is preserved) and Escape dismisses while focus is inside it. Copy uses the
  * exercise brand name only,

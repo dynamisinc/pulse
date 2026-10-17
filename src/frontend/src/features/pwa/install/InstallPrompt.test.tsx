@@ -172,7 +172,8 @@ describe('iOS Safari', () => {
     expect(dlg.textContent).toMatch(/Add to Home Screen/)
     expect(dlg.querySelectorAll('svg').length).toBeGreaterThanOrEqual(3)
     // #606: the installed app opens signed out; the last step says how to get in.
-    expect(dlg.textContent).toMatch(/Open Bay Shield from your home screen and paste your sign-in/)
+    expect(dlg.textContent).toContain('Open Bay Shield from your home screen and paste your '
+      + "sign-in link from your invitation, or use today's word.")
     expect(dlg.textContent).not.toMatch(/Pulse/)
     fireEvent.click(screen.getByRole('button', { name: 'Close' }))
     expect(screen.queryByRole('region')).toBeNull()

@@ -42,8 +42,11 @@ You may be offered this automatically; you can always say no.
   of the screen, then confirm. If you do not see the banner, open the Chrome menu and choose
   **Add to Home screen** or **Install app**.
 - **iPhone or iPad (Safari):** tap the **Share** button (a square with an arrow pointing up) in
-  Safari's toolbar, scroll down, choose **Add to Home Screen**, then tap **Add**. On your second visit
-  a short reminder sheet shows these steps; close it with the **X**.
+  Safari's toolbar, scroll down, choose **Add to Home Screen**, then tap **Add**. The first time you
+  open it from the home screen you are signed out (the app does not share Safari's sign-in): choose
+  **Sign-in link** and paste the link from your invitation (copy it from Mail or Messages first), or
+  choose **Today's word**. On your second visit a short reminder sheet shows these three steps; close
+  it with the **X**.
 
 If you close the banner or sheet it will not come back for this exercise.
 
@@ -95,7 +98,8 @@ like an app, under the exercise's name:
 - **Android (Chrome):** tap **Add** on the banner that offers to add the exercise to your home
   screen. If you closed the banner, use Chrome's menu (**⋮**) → **Add to Home screen**.
 - **iPhone or iPad (Safari):** tap **Share**, then **Add to Home Screen**. When you first open it
-  from the home screen, you need to sign in again with your link or today's word.
+  from the home screen you need to sign in again: tapping your link would open Safari, so choose
+  **Sign-in link** and paste the link from your invitation, or choose **Today's word**.
 
 ![The exercise feed on a small phone, with Home, Explore, Post, Notifications and Profile along the bottom.](img/participant-feed-360.png)
 

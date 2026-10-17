@@ -76,15 +76,21 @@
   counter-reset: step;
 }
 
+/* flex-start: the sign-in step wraps to 2-3 lines on a phone, and every icon should sit
+   on its step's FIRST line, not centred on the text block. The steps are not tap targets,
+   so vertical padding (not the old 44px min-height) spaces them. */
 .steps li {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 12px;
-  min-height: 44px;
+  padding: 10px 0;
   font-size: 0.95rem;
+  line-height: 1.4;
 }
 
 .steps li svg {
+  flex: none;
   width: 1.25rem;
+  margin-top: 0.15em;
   color: var(--pulse-brand-primary, #1c1c1c);
 }
