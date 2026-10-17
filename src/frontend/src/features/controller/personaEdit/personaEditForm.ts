@@ -70,12 +70,13 @@ export const PERSONA_EDIT_FIELD_ORDER: readonly PersonaEditField[] = [
   'verified',
   'avatarMediaId',
   'bannerMediaId',
+  'imitatesPersonaId',
 ]
 
 /** The persona members the form reads. */
 export type EditablePersonaView = Pick<
   StaffPersona,
-  'displayName' | 'bio' | 'location' | 'verified'
+  'displayName' | 'bio' | 'location' | 'verified' | 'imitatesPersonaId'
 >
 
 /** A fresh draft that reproduces `persona` exactly (so the initial diff is empty). */
@@ -85,6 +86,7 @@ export function draftFromPersona(persona: EditablePersonaView): PersonaEditDraft
     bio: persona.bio ?? '',
     location: persona.location ?? '',
     verified: persona.verified,
+    imitatesPersonaId: persona.imitatesPersonaId ?? null,
     avatar: { mode: 'keep' },
     banner: { mode: 'keep' },
   }
@@ -222,6 +224,9 @@ export function buildPersonaPatch(
     ...(draft.verified !== persona.verified ? { verified: draft.verified } : {}),
     ...(avatarMediaId !== undefined ? { avatarMediaId } : {}),
     ...(bannerMediaId !== undefined ? { bannerMediaId } : {}),
+    ...(draft.imitatesPersonaId !== (persona.imitatesPersonaId ?? null)
+      ? { imitatesPersonaId: draft.imitatesPersonaId }
+      : {}),
   }
 }
 
@@ -238,4 +243,37 @@ export function patchFieldNames(patch: PersonaPatch): PersonaEditField[] {
 /** True when the patch changes nothing. */
 export function isPatchEmpty(patch: PersonaPatch): boolean {
   return patchFieldNames(patch).length === 0
+}
+
+export interface ImitatesOption {
+  readonly id: string
+  readonly label: string
+}
+
+/**
+ * The Imitates options: the exercise's verified personas other than `persona`, labelled
+ * "Display name (@handle)" and sorted by display name. A stored target that is no longer in
+ * that set (un-verified or removed since) stays selectable as a labelled stale entry so the
+ * select never shows a value it cannot list. "No longer verified" is claimed only once the list
+ * has loaded; while it loads (or if it failed) the entry is the neutral current selection.
+ */
+export function imitatesOptions(
+  directory: readonly StaffPersona[],
+  persona: StaffPersona,
+  current: string | null,
+  listState: 'loading' | 'error' | 'ready',
+): ImitatesOption[] {
+  const options = directory
+    .filter(entry => entry.verified && entry.id !== persona.id)
+    .sort((a, b) => a.displayName.localeCompare(b.displayName))
+    .map(entry => ({ id: entry.id, label: `${entry.displayName} (@${entry.handle})` }))
+  if (current !== null && !options.some(option => option.id === current)) {
+    const label = listState === 'ready'
+      ? 'Unavailable persona (no longer verified)'
+      : listState === 'loading'
+        ? 'Current selection (loading the persona list…)'
+        : 'Current selection (the persona list could not load)'
+    options.push({ id: current, label })
+  }
+  return options
 }

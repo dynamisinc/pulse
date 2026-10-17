@@ -44,7 +44,9 @@ import { existsSync, mkdirSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { startServer, ROLE_STORAGE_KEY } from './serve.mjs'
-import { DESKTOP, DESKTOP_TALL, PHONE, PHONE_SMALL, TABLET } from './viewports.mjs'
+import {
+  DESKTOP, DESKTOP_TALL, PHONE, PHONE_SMALL, TABLET, TABLET_LANDSCAPE, TABLET_PORTRAIT_TALL,
+} from './viewports.mjs'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const OUT_DIR = path.resolve(HERE, '../../docs/guide/img')
@@ -176,6 +178,15 @@ const SHOTS = [
   // ---------------------------------------------------------------- staff
   { name: 'staff-sign-in', role: 'participant', path: '/staff/login' },
   { name: 'console-overview', role: 'controller', path: '/staff/console' },
+  // Controller console on a tablet (mobile-tablet story 16): the large-landscape and tall-portrait
+  // bands. Touch emulation comes from the viewport's `mobile` flag.
+  { name: 'console-overview-tablet', role: 'controller', path: '/staff/console', viewport: TABLET_LANDSCAPE },
+  {
+    name: 'console-overview-tablet-portrait',
+    role: 'controller',
+    path: '/staff/console',
+    viewport: TABLET_PORTRAIT_TALL,
+  },
   {
     name: 'post-as-persona',
     role: 'controller',
@@ -212,6 +223,17 @@ const SHOTS = [
     },
   },
   {
+    name: 'takedown-tablet',
+    role: 'controller',
+    path: '/staff/console',
+    viewport: TABLET_LANDSCAPE,
+    act: async page => {
+      await page.getByRole('button', { name: 'Take down post by Tom Brandt' }).first().tap()
+      await page.getByText('Take down this post?').waitFor()
+      await page.getByLabel('Real-world reference').check()
+    },
+  },
+  {
     name: 'white-noise',
     role: 'controller',
     path: '/staff/console',
@@ -233,6 +255,16 @@ const SHOTS = [
     path: '/staff/console',
     act: async page => {
       await page.getByRole('button', { name: /Pause control/ }).click()
+      await page.getByText('PAUSE TIERS').waitFor()
+    },
+  },
+  {
+    name: 'freeze-controls-tablet',
+    role: 'controller',
+    path: '/staff/console',
+    viewport: TABLET_LANDSCAPE,
+    act: async page => {
+      await page.getByRole('button', { name: /Pause control/ }).tap()
       await page.getByText('PAUSE TIERS').waitFor()
     },
   },

@@ -155,6 +155,34 @@ public sealed class PersonaResponseDtoTests
     }
 
     [Fact]
+    public void StaffFromPersona_CarriesImitatesPersonaId_AndEmitsNullWhenUnset()
+    {
+        // demo-feedback story 33 (DF-49): the client types it `string | null`, so an unset value is sent as null.
+        var target = Guid.NewGuid();
+        var persona = AuthoredPersona();
+        persona.ImitatesPersonaId = target;
+
+        StaffPersonaResponseDto.FromPersona(persona).ImitatesPersonaId.Should().Be(target.ToString());
+
+        using var unset = JsonDocument.Parse(JsonSerializer.Serialize(StaffPersonaResponseDto.FromPersona(AuthoredPersona())));
+        unset.RootElement.GetProperty("imitatesPersonaId").ValueKind.Should().Be(
+            JsonValueKind.Null, "the staff shape always carries the key, null for none");
+    }
+
+    [Fact]
+    public void FromPersona_StructurallyOmitsImitatesPersonaId_TheNamedPairStaysStaffOnly()
+    {
+        var persona = AuthoredPersona();
+        persona.ImitatesPersonaId = Guid.NewGuid();
+
+        using var document = JsonDocument.Parse(JsonSerializer.Serialize(PersonaResponseDto.FromPersona(persona)));
+        document.RootElement.TryGetProperty("imitatesPersonaId", out _).Should().BeFalse(
+            "naming what an account imitates would be a machine-readable flag on the lookalike (XC-002, SOC-052)");
+        typeof(PersonaResponseDto).GetProperty("ImitatesPersonaId").Should().BeNull(
+            "the omission is structural: there is no property to populate");
+    }
+
+    [Fact]
     public void FromPersona_KeepsAvatarColorAndInitials_DerivedAndStable()
     {
         var persona = AuthoredPersona();

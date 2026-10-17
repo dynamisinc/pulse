@@ -27,6 +27,12 @@
  *   Space  toggle the focused card's batch selection (also a click target)
  * The focused card shows a blue ring + the A/V/E/R action buttons.
  *
+ * TOUCH (story 14, D5-024): none of the keys is required. Tapping a card focuses it and reveals
+ * its labelled Approve / Veto / Edit / Re-roll buttons; "Batch approve" is the B button and the
+ * per-card select toggle is the Space key. Under `(pointer: coarse)` each of those is >= 44 x 44
+ * (real layout space, `consoleTouch.ts`) with >= 8px between neighbours. No action is hover- or
+ * right-click-only and none is destructive in one tap beyond what the desktop button already is.
+ *
  * SINGLE COUNT SOURCE (D5-014/2.1). The header's "N need review" / "N timers <60s"
  * / "N held" all come from `useReviewQueue()` — the ONE source the (future)
  * NEEDS-YOU bar + queue-pressure meter will read, rather than recomputing.
@@ -63,6 +69,7 @@ import { useReviewQueue } from '../hooks/useReviewQueue'
 // D5 dark operator-chrome tokens (README §"Design Tokens"). Staff-only.
 import { consoleChrome as chrome } from '../../consoleChrome'
 import { useCanControl } from '../../access'
+import { COARSE_GAP_SX, COARSE_TARGET_SX } from '../../consoleTouch'
 
 /** The queue's one-line explanation. A non-controller (story 11 L-1) is not told to press keys. */
 const REVIEW_HINT_CONTROLLER =
@@ -334,6 +341,7 @@ export function ReviewQueue({ editSlot }: ReviewQueueProps = {}) {
               borderRadius: '7px',
               cursor: 'pointer',
               '&:hover': { borderColor: chrome.blue },
+              ...COARSE_TARGET_SX,
             }}
           >
             <FontAwesomeIcon icon={faListCheck} aria-hidden="true" />
@@ -511,7 +519,7 @@ function ReviewCard({
           aria-pressed={selected}
           aria-label={selected ? `Deselect ${displayName} draft` : `Select ${displayName} draft`}
           onClick={e => { e.stopPropagation(); onToggleSelected() }}
-          sx={{ mt: 0.25, bgcolor: 'transparent', border: 'none', p: 0, cursor: 'pointer', color: selected ? chrome.blue : chrome.inkFaint }}
+          sx={{ mt: 0.25, bgcolor: 'transparent', border: 'none', p: 0, cursor: 'pointer', color: selected ? chrome.blue : chrome.inkFaint, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', ...COARSE_TARGET_SX }}
         >
           <FontAwesomeIcon icon={selected ? faSquareCheck : faSquare} aria-hidden="true" />
         </Box>}
@@ -561,7 +569,7 @@ function ReviewCard({
 
           {/* Action row — only on the focused, reviewable card */}
           {canControl && focused && reviewable && (
-            <Stack direction="row" data-testid="card-actions" sx={{ gap: 0.5, mt: 1, flexWrap: 'wrap' }}>
+            <Stack direction="row" data-testid="card-actions" sx={{ gap: 0.5, mt: 1, flexWrap: 'wrap', ...COARSE_GAP_SX }}>
               <ActionButton icon={faCheck} label="Approve" hint="A" tone={chrome.green} onClick={e => { e.stopPropagation(); onApprove() }} />
               <ActionButton icon={faXmark} label="Veto" hint="V" tone={chrome.red} onClick={e => { e.stopPropagation(); onVeto() }} />
               {editable && (
@@ -640,6 +648,7 @@ function ActionButton({ icon, label, hint, tone, onClick }: ActionButtonProps) {
         borderRadius: '7px',
         cursor: 'pointer',
         '&:hover': { borderColor: tone },
+        ...COARSE_TARGET_SX,
       }}
     >
       <FontAwesomeIcon icon={icon} color={tone} aria-hidden="true" />

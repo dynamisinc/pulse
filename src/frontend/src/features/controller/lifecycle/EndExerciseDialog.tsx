@@ -42,6 +42,21 @@
  * the name aloud in the confirmation is the last chance for the controller to notice. (The name
  * is data, rendered as text -- never HTML.)
  *
+ * TOUCH (mobile-tablet story 15, D5-025, TABLET-AMENDMENT §5). The gate is unchanged (role +
+ * typed END + the caller's logging). On a COARSE pointer (`useCoarsePointer()`, never a width):
+ *   - Cancel and End exercise are real 44px boxes, 16px apart, End exercise at the far right;
+ *   - End exercise ignores taps for 400ms after the dialog opens (`useArmedConfirm`; Enter in the
+ *     field is held to the same rule), fires once per attempt (a refused request re-allows one
+ *     more, so retrying is still one tap), and carries `touch-action: manipulation`, no text
+ *     selection and no long-press callout;
+ *   - focus stays on the END FIELD (never the destructive button), as above;
+ *   - the on-screen keyboard cannot hide the field or the buttons: the dialog's container is padded
+ *     by the keyboard's height against the VISUAL viewport (`useVisualViewportInset`), so the
+ *     centred Paper re-centres in what is actually visible, and the Paper scrolls if it still does
+ *     not fit.
+ * Focus trap and Escape are MUI `Dialog`'s own, as documented above: Esc and Cancel close (not
+ * while pending) and focus returns to the End exercise trigger.
+ *
  * The dialog owns its text and nothing else: the request, the pending flag and the error come
  * from the caller (`ExerciseLifecycleControl` via `useExerciseLifecycle`).
  */
@@ -55,6 +70,15 @@ import {
   CobraLinkButton,
   CobraTextField,
 } from '@/theme/styledComponents'
+import {
+  ARMING_SX,
+  CONFIRM_GAP_PX,
+  destructiveTouchSx,
+  touchTargetSx,
+  useArmedConfirm,
+  useCoarsePointer,
+  useVisualViewportInset,
+} from '../components/confirm'
 
 /** The word the controller types. Exact match after trimming. */
 export const END_CONFIRM_WORD = 'END'
@@ -91,8 +115,20 @@ export function EndExerciseDialog({
   const matches = typed.trim() === END_CONFIRM_WORD
   const canConfirm = matches && !pending
 
+  const coarse = useCoarsePointer()
+  const keyboardInset = useVisualViewportInset(coarse)
+  // The dialog is mounted only while open. A refused request (error) or a settled one (pending
+  // false) allows one more attempt without closing it.
+  const { armed, guard } = useArmedConfirm({
+    open: true,
+    enabled: coarse,
+    resetKey: `${String(pending)}|${error ?? ''}`,
+  })
+
+  // Only a CONFIRMABLE press spends the once-only guard (Enter on an empty field must not).
+  const fire = guard(onConfirm)
   const confirm = () => {
-    if (canConfirm) onConfirm()
+    if (canConfirm) fire()
   }
   const cancel = () => {
     if (!pending) onCancel()
@@ -114,6 +150,15 @@ export function EndExerciseDialog({
       aria-labelledby={titleId}
       aria-describedby={bodyId}
       data-testid="end-exercise-dialog"
+      slotProps={{
+        container: {
+          // Re-centre in the visible area when the on-screen keyboard is up.
+          sx: coarse && keyboardInset > 0
+            ? { boxSizing: 'border-box', paddingBottom: `${keyboardInset}px` }
+            : undefined,
+        },
+        paper: { sx: coarse ? { maxHeight: 'calc(100% - 32px)', overflowY: 'auto' } : undefined },
+      }}
     >
       <DialogTitle id={titleId} sx={{ fontSize: 15, fontWeight: 800 }}>
         End the exercise?
@@ -166,17 +211,24 @@ export function EndExerciseDialog({
           </Typography>
         )}
       </DialogContent>
-      <DialogActions sx={{ px: 3, pb: 2 }}>
-        <CobraLinkButton onClick={cancel} aria-disabled={pending} sx={PENDING_SX}>
+      <DialogActions sx={{ px: 3, pb: 2, gap: coarse ? `${CONFIRM_GAP_PX}px` : undefined }}>
+        <CobraLinkButton
+          onClick={cancel}
+          aria-disabled={pending}
+          sx={{ ...PENDING_SX, ...(coarse ? touchTargetSx : {}) }}
+        >
           Cancel
         </CobraLinkButton>
         <CobraDeleteButton
           startIcon={<FontAwesomeIcon icon={faStop} aria-hidden="true" />}
           onClick={confirm}
           disabled={!matches}
-          aria-disabled={pending}
+          aria-disabled={pending || !armed}
           aria-busy={pending}
-          sx={PENDING_SX}
+          onContextMenu={event => event.preventDefault()}
+          sx={coarse
+            ? { ...PENDING_SX, ...touchTargetSx, ...destructiveTouchSx, ...ARMING_SX }
+            : PENDING_SX}
           data-testid="end-exercise-confirm"
         >
           {pending ? 'Ending…' : 'End exercise'}

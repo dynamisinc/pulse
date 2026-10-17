@@ -84,7 +84,11 @@ import { useMemo } from 'react'
 import { Box, Stack, Typography } from '@mui/material'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faXmark } from '@fortawesome/free-solid-svg-icons'
-import { staffShellTokens } from '../staffShellTokens'
+import {
+  STAFF_COARSE_POINTER_MEDIA,
+  STAFF_TOUCH_TARGET_PX,
+  staffShellTokens,
+} from '../staffShellTokens'
 import { PREVIEW_FRAME_FULL_WIDTH_PX, PREVIEW_FRAME_NAV_WIDTH_PX } from '../previewFrameMetrics'
 import { resolvePreviewMomentInstant, usePreview } from '../previewContext'
 import { PreviewChannelHost } from './PreviewChannelHost'
@@ -181,6 +185,8 @@ export function PreviewAsParticipant() {
             cursor: 'pointer',
             whiteSpace: 'nowrap',
             flex: 'none',
+            // 44px under a coarse pointer, as real layout space (story 13).
+            [STAFF_COARSE_POINTER_MEDIA]: { minHeight: STAFF_TOUCH_TARGET_PX },
           }}
         >
           <FontAwesomeIcon icon={faXmark} size="sm" />

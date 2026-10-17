@@ -18,10 +18,12 @@ import type { StaffPersona } from '@/features/personas'
 import {
   BIO_MAX,
   DISPLAY_NAME_MAX,
+  PERSONA_EDIT_FIELD_ORDER,
   LOCATION_MAX,
   buildPersonaPatch,
   countedLength,
   draftFromPersona,
+  imitatesOptions,
   isDraftValid,
   isPatchEmpty,
   patchFieldNames,
@@ -134,6 +136,7 @@ describe('draftFromPersona / buildPersonaPatch — the merge-patch diff', () => 
       bio: 'New bio',
       location: 'New place',
       verified: false,
+      imitatesPersonaId: null,
       avatar: { mode: 'set', mediaId: 'm-a' },
       banner: { mode: 'set', mediaId: 'm-b' },
     })
@@ -317,5 +320,57 @@ describe('validateDraft — mirrors the server, counts code points, never trunca
     expect(draft.bio).toHaveLength(long.length)
     expect(validateDraft(draft).bio).toBeDefined()
     expect(buildPersonaPatch(persona(), draft).bio).toBe(long)
+  })
+})
+
+describe('imitatesPersonaId in the draft and the patch (story 33, DF-49)', () => {
+  it('is in the canonical field order, last', () => {
+    expect(PERSONA_EDIT_FIELD_ORDER.at(-1)).toBe('imitatesPersonaId')
+  })
+
+  it('an untouched draft diffs to nothing, whether the persona carries a target or not', () => {
+    const plain = persona({ verified: false })
+    expect(buildPersonaPatch(plain, draftFromPersona(plain))).toEqual({})
+    const named = persona({ verified: false, imitatesPersonaId: 'persona-w' })
+    expect(draftFromPersona(named).imitatesPersonaId).toBe('persona-w')
+    expect(buildPersonaPatch(named, draftFromPersona(named))).toEqual({})
+  })
+
+  it('sends a changed target, null to clear, and lists the field name for telemetry', () => {
+    const plain = persona({ verified: false })
+    const set = buildPersonaPatch(plain, draftWith({ imitatesPersonaId: 'persona-w' }, plain))
+    expect(set).toEqual({ imitatesPersonaId: 'persona-w' })
+    expect(patchFieldNames(set)).toEqual(['imitatesPersonaId'])
+    const named = persona({ verified: false, imitatesPersonaId: 'persona-w' })
+    expect(buildPersonaPatch(named, draftWith({ imitatesPersonaId: null }, named)))
+      .toEqual({ imitatesPersonaId: null })
+  })
+})
+
+describe('imitatesOptions (story 33, DF-49)', () => {
+  const self = persona({ id: 'p-self', verified: false, displayName: 'Water Update', handle: 'WaterUpd' })
+  const directory = [
+    persona({ id: 'p-b', displayName: 'Newsline 7', handle: 'Newsline7' }),
+    persona({ id: 'p-a', displayName: 'Fairhaven Water Utility', handle: 'FairhavenWater' }),
+    persona({ id: 'p-u', verified: false, displayName: 'Anon', handle: 'anon' }),
+    self,
+  ]
+
+  it('lists the other verified personas, sorted by display name', () => {
+    expect(imitatesOptions(directory, self, null, 'ready').map(option => option.label))
+      .toEqual(['Fairhaven Water Utility (@FairhavenWater)', 'Newsline 7 (@Newsline7)'])
+  })
+
+  it('says "no longer verified" for a stored target only once the list has loaded', () => {
+    const last = (state: 'loading' | 'error' | 'ready') =>
+      imitatesOptions(directory, self, 'p-u', state).at(-1)
+    expect(last('ready')).toEqual({ id: 'p-u', label: 'Unavailable persona (no longer verified)' })
+    expect(last('loading')?.label).toBe('Current selection (loading the persona list…)')
+    expect(last('error')?.label).toBe('Current selection (the persona list could not load)')
+  })
+
+  it('while loading, a valid target missing from the (empty) list is never called unverified', () => {
+    expect(imitatesOptions([], self, 'p-a', 'loading'))
+      .toEqual([{ id: 'p-a', label: 'Current selection (loading the persona list…)' }])
   })
 })
