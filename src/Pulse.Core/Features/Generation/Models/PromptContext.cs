@@ -80,6 +80,15 @@ public sealed record StorylineBrief
     public string Phase { get; init; } = "ESCALATING";
     public ToneMix ToneMix { get; init; } = new();
     public IReadOnlyList<string> Hashtags { get; init; } = [];
+
+    /// <summary>
+    /// <c>true</c> for an ambient-chatter burst (ambient-chatter story 01): NOT a storyline at all, but everyday
+    /// background life. The assembler then frames the prompt as ordinary daily life — the exercise brief is background
+    /// setting only, <see cref="Title"/> is read as the server-authored topic seed phrase, and no storyline / public
+    /// expectation / official-response / intensity / escalation text is emitted. Additive; defaults to <c>false</c>, so
+    /// every storyline prompt is unchanged.
+    /// </summary>
+    public bool IsAmbient { get; init; }
 }
 
 /// <summary>

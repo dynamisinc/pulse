@@ -55,6 +55,27 @@ public sealed record EngineBurst
 
     /// <summary>The generated posts to publish, in order.</summary>
     public required IReadOnlyList<EngineBurstPost> Posts { get; init; }
+
+    /// <summary>
+    /// The decide trigger literal for the <c>engine.published</c> payload — <c>ambient-floor</c> for an ambient post,
+    /// autonomous or controller-approved (ambient-chatter story 01 AC9, review S-1); <c>null</c> (omitted) for every
+    /// storyline publish.
+    /// </summary>
+    public string? Trigger { get; init; }
+
+    /// <summary>
+    /// The <c>publishPath</c> literal for the <c>engine.published</c> payload — <c>ambient-autonomous</c> for a post
+    /// published with no controller click, <c>ambient-reviewed</c> for a controller-approved ambient draft (S-1);
+    /// <c>null</c> (omitted) for every storyline publish (AC9).
+    /// </summary>
+    public string? PublishPath { get; init; }
+
+    /// <summary>
+    /// The controller (COR-018) whose ambient policy authorised an autonomous publish, stamped as the
+    /// <c>engine.published</c> actor's <c>actingHumanId</c>; <c>null</c> for every reviewed publish. Staff telemetry
+    /// only: it never reaches the post or any participant surface (XC-002).
+    /// </summary>
+    public string? AuthorizedBy { get; init; }
 }
 
 /// <summary>
