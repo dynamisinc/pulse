@@ -141,6 +141,13 @@ export interface ExerciseReport {
     latestDay: { from: string; to: string } | null
     /** Story 31: printed times fall on more than one exercise-zone date (drives date display). */
     spansMultipleDays: boolean
+    /**
+     * Scenario "now" ("yyyy-MM-dd HH:mm"): the live scenario clock, else the persisted scenario
+     * time if one is set, else the latest post (the later of clock and latest post); null when
+     * unknown. The filter bar's default To. Absent from
+     * an older API.
+     */
+    scenarioNow?: string | null
   }
   summary: ReportSummary
   activity: {
