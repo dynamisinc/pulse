@@ -160,7 +160,8 @@ or reloads Pulse sees the end-of-exercise page.
 > - **Open tabs are not told.** A player who already has the feed (or the holding page) open keeps seeing it until
 >   they reload. Nothing is pushed to their screen at EndEx.
 > - **The AI engine is not stopped by EndEx.** Engine posts (for example, a burst you approve late, or one Swamped
->   mode auto-sends) can still reach a feed that is already open.
+>   mode auto-sends) can still reach a feed that is already open. The exception is **ambient chatter**: ambient
+>   posting stops at EndEx and Freeze ([section 10](#ambient-chatter)).
 >
 > Close out by hand, in this order:
 >
@@ -611,6 +612,57 @@ The switch at the left of the engine bar is always visible. Each click moves it 
 - In the Live position the label also says what is really in effect, for example **ENGINE · LIVE (SUGGEST)**.
 
 If the AI service misbehaves, Pulse drops to Suggest by itself. It never raises autonomy on its own.
+
+### Ambient chatter
+
+Ambient chatter is everyday background life: small, low-stakes posts about local colour, mundane traffic, food,
+sports and community events. It is separate from the autonomy setting above, and it never carries storyline content.
+Anything tied to a storyline, a response, an amplification or an escalation still goes to the review queue.
+
+Open **ENGINE** and find the **Ambient chatter** section. It shows the saved mode as text with an icon
+(for example "Ambient mode: Review"). Choose a mode, set the limits and lists, then select **Save ambient policy**.
+The change applies from the next engine tick, with no restart.
+
+**The three modes**
+
+- **Off** (the default): no ambient posts are generated or published.
+- **Review**: ambient drafts go to the review queue like any other draft. They have no countdown: each waits in the
+  queue until a person approves or rejects it. Silence never publishes an ambient post.
+- **Autonomous**: ambient posts publish on their own, without a controller click, but only inside the limits and
+  lists you set. They appear as ordinary posts from the engine and carry the same scenario time as everything else.
+
+**Autonomous may be unavailable.** Autonomous ambient posting needs separate sign-off for each environment
+(PROVIDER-GOVERNANCE §8 amendment 2, not yet signed). Until it is signed, the **Autonomous** option is greyed out with a
+note explaining why; **Review** is still available. Autonomous is also refused while the kill switch is in either mode,
+the engine is degraded, or the exercise is cut to Fake. Saving then shows the reason and the mode stays as it was.
+
+**Caps.** **Max per minute** and **Max per hour** bound how many ambient posts can publish. The per-minute cap cannot
+exceed the engine's overall posts-per-minute limit. The per-hour cap is also your spending cap for ambient content.
+
+**Allow-lists.** Choose which **topics** and which **personas** (from this exercise) ambient posts may use. An empty
+list means **Nothing allowed**, never "everything", so with an empty list nothing is posted. Set both before relying
+on Autonomous.
+
+Only personas in the engine's cast are voiced. Any persona that is not in the cast is marked **not in engine cast**
+in the persona list; you can tick it, but it will not post ambient chatter.
+
+**Resets on restart.** The ambient policy is held in server memory. If the server restarts it goes back to **Off**,
+with empty lists. Check the section after any restart.
+
+**Stopping ambient posting.**
+
+- **Kill switch, degraded mode and Cut to Fake:** the kill switch (either **SUGGEST-ONLY** or **STOPPED**), the engine
+  going into degraded mode, and **Cut to Fake** all turn **Autonomous** ambient **Off**, and stop autonomous posts
+  within seconds, including any already being written. Restoring the switch, the provider or normal operation does
+  **not** turn it back on; only you can, by selecting the mode again. **Review** mode is not switched off: its drafts
+  still wait in the queue for a person (and come from Fake while cut). Only **STOPPED** halts ambient generation.
+- **Freeze, Pause engine, and any state other than live:** no ambient post publishes, and a post that finishes
+  writing after the change is discarded, not posted late.
+- **EndEx:** ambient posting stops at EndEx, as it does at Freeze.
+
+Ambient chatter and [white noise](#8-white-noise-background-chatter) are different features. White-noise posts count
+toward the quiet floor, so ambient never double-fills a quiet period: if white noise has already covered the quiet,
+ambient adds nothing for it.
 
 ### Provider
 

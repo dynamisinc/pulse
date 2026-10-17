@@ -1,6 +1,6 @@
 # Story: Ambient background posting (autonomous, within a tier policy)
 
-**Feature:** Ambient chatter  ·  **Epic:** E8  ·  **Phase:** 2 (v1) — engine go-live wave C2 ("some autonomy")  ·  **Status:** Not Started
+**Feature:** Ambient chatter  ·  **Epic:** E8  ·  **Phase:** 2 (v1) — engine go-live wave C2 ("some autonomy")  ·  **Status:** Built (backend), NOT Complete
 **Requirements:** ADP-005 (+ ADP-011 quiet floor, ADP-023/024 content safety, ADP-042 kill switch, ADP-040 auto-HOLD, NFR-005)  ·  **Design decisions:** none (brief decision B1 "AI engine: ambient chatter publishes on its own, key posts are still reviewed")  ·  **Issue:** #168
 
 > Rewritten 2026-10-16 from `docs/NEXT-WAVE-SESSION-BRIEF.md` C4/C2 (wave C2). Original ADP-005 intent (fill the
@@ -204,3 +204,127 @@ the interim gate seam). **Gate (DoD):** the §8 amendment in AC0 is signed befor
 - Frontend (Vitest): panel section renders mode as text+icon, posts the policy, reflects the server value.
 - Manual (UAT after #571): turn on `autonomous` with a tight cap, watch the Live World, then kill switch and
   Freeze; re-capture the screenshot.
+
+## Build notes (backend, branch `feature/engine-golive-ambient-backend`, 2026-10-16)
+
+**Status: Built (backend), NOT Complete.** Not Complete until: the frontend panel section (AC2 UI) and AC10 guide work land
+(frontend PR); the PROVIDER-GOVERNANCE §8 amendment (AC0) is signed by Tom Bull; the Docker-gated suites below run green
+in CI; Tier-2 human sign-off (isolation + a new autonomous publish path). The code merges **dark**:
+`Generation:Governance:AmbientAutonomyAuthorized` is `false` in committed `appsettings.json` and in bicep.
+
+What was built (no schema change, no EF migration, no `Program.cs` edit):
+- **AC0** — `EngineAmbientGovernanceOptions` bound from `Generation:Governance` (separate from `GenerationOptions`, so the
+  NFR-005 startup gate is untouched). `autonomous` is rejected 400 with *"mode 'autonomous' is not authorized by
+  PROVIDER-GOVERNANCE §8 …"* while false. Bicep: root param `generationAmbientAutonomyAuthorized` (default false) →
+  `webapp.bicep` → app setting `Generation__Governance__AmbientAutonomyAuthorized`; `uat.bicepparam` now states it
+  explicitly as `false` (Gate-1 L-5, "NOT authorized until PROVIDER-GOVERNANCE §8 amendment 2 is signed"); `main.json`
+  regenerated with Bicep 0.48.1 (re-verified byte-identical after L-5). The loop also re-checks the flag before every autonomous publish
+  (defence in depth).
+- **AC1** — `Pulse.Core/Features/Ambient`: `AmbientTierPolicy` (+ `AmbientPolicyMode`), fixed vocabulary `AmbientTopics`
+  (`local-color, traffic-mundane, food, sports, community-events, pets, local-business, family-school`), pure
+  `AmbientPolicyValidator`. `EngineAmbientPolicyRegistry` (WebApi, singleton, `TryAddSingleton` in both `AddEngineReview`
+  and `AddReactionLoopHost`) — absent entry = `off`.
+- **AC2** — `ambientPolicy` on `EngineSettingsDto` (every settings response); `POST /api/engine/settings/ambient-policy` on
+  the existing controller-role `steering` group in `MapEngineReview`; one XC-004 event under the EXISTING
+  `engine.tier_policy_changed` type with an `AmbientPolicyChanged` payload (`policy: "ambient"` discriminator, from→to mode,
+  caps, lists, reason, acting human). `InMemoryNote` now says ambient resets to off.
+- **AC4** — `AmbientBehavior` (Core, pure). NOT registered in `DecideStage` (that registry's `ReactionContext` requires a
+  storyline); the driver calls it after all storyline work (`ReactionLoopDriver.Ambient.cs`). Intent: `AmbientFloor`,
+  Ambient tier, `StorylineId = Guid.Empty`, Suggest, `AmbientTopicSeed` (new optional field on `GenerationIntent`).
+  Per-minute/per-hour caps are rolling **server wall-clock** windows counted at generation (spend), so a time-jump cannot
+  reset them; the global `MaxEnginePostsPerMinute` clamp uses the loop's existing per-scenario-minute counter.
+- **White-noise overlap (decision):** the floor's activity measure = engine posts this minute + **non-engine posts in the
+  trailing scenario minute** (participants, injects, controller-as-persona, **white noise**). White noise therefore fills
+  the floor first and ambient only tops up the remainder; they never double-fill. Ambient does not read the noise level.
+- **AC5** — `IEngineLifecyclePublishGate` (`RefreshAsync` = the only I/O; `CanPublish` = synchronous) with
+  `InterimEngineLifecyclePublishGate`: `ExerciseLifecycleStates.TryParse(...) == live` (legacy `active` folds to live),
+  clock not frozen, pause tier not `Engine`/`Freeze`. Registered `TryAddScoped` in `AddReactionLoopHost` — **A5 replaces
+  that one registration**. A due burst in a closed world is not generated (`engine.decided` with
+  `heldReason: held:lifecycle`, once per hold episode); a draft finishing after the change is discarded
+  (`engine.generated` `heldReason: held:lifecycle`), never queued.
+- **AC6** — mirrors PR #571's last-boundary re-decision: each ambient post is published individually; before each, the
+  gate is refreshed (the one await) and then, with no await before `PublishBurstAsync`, the driver re-reads
+  `SafetyClampActive`/`IsGenerationStopped` (both the registration's and the shared registry's state), the cut-to-Fake
+  registry, the policy (still autonomous + authorised) and `CanPublish`. A safety hold discards the rest
+  (`held:safety`) and **lowers the policy to off**; the kill switch (either mode) and cut-to-Fake also lower it on their
+  request path. Restore never re-raises it. Degraded mode lowers it at the next tick (the clamp persists until a human
+  restore). Residual: one post already handed to the funnel completes.
+- **AC7** — `GenerateStage`/`ContentGuard` unchanged; 4 ambient persona-bio cases added to `InjectionRedTeam.Catalog`.
+  A guard drop publishes nothing; the `engine.generated` `guardResult: drop` event is the count. **There is no post-hoc
+  topic classifier in this story**: topics are enforced at seed time (server-authored phrase from the allow-list) plus the
+  guard backstop.
+- **AC8** — only `Trigger == AmbientFloor` + `autonomous` reaches `PublishAmbientAsync`. `review` mode queues a Suggest /
+  `Queued` item (`#ambient`, no countdown), so no expiry path can ever publish it.
+- **AC9** — publishes via `EnginePublishService` only (`Origin = "engine"`). `engine.decided/generated/published` carry
+  `trigger: "ambient-floor"` and `publishPath: "ambient-autonomous"`; actor `kind: engine` + `actingHumanId` = the
+  controller who set the policy (via new optional `EngineBurst.Trigger/PublishPath/AuthorizedBy`). The report row already
+  labels `engine` (`ExerciseReportBuilder.Source`) — no change. Post scenario time = the exercise clock instant ("O").
+
+Known limitations / follow-ups: ~~`PromptAssembler` has no ambient mode~~ — **addressed by Gate-1 H-1** (below).
+Allow-listed personas are voiced only if they are in the loop's seeded cast (`ReactionLoopRegistration.PersonasByHandle`)
+— now **reported** to the panel as `ambientPolicy.voiceablePersonaIds` (Gate-1 M-1). "Pause engine" still has no effect on
+storyline bursts (pre-existing; only ambient honours it).
+**Residual risk (NFR-005):** persona `VoiceNotes` stay unfenced in the trusted part of the prompt (fencing them would
+change every storyline prompt and its cache prefix). For that path the `ContentGuard` backstop is the only defence; it is
+red-teamed through the real path (Gate-1 M-2). Revisit before any production authorization.
+
+### Gate-1 review fixes (branch `fix/ambient-be`, 2026-10-16) — status remains **Built (backend), NOT Complete**
+- **H-1 (addressed)** — ambient bursts no longer travel a storyline/escalation prompt. Additive
+  `StorylineBrief.IsAmbient` (default `false`), set by `ReactionLoopDriver.BuildAmbientGenerateRequest` (no magic
+  Phase/Title strings drive behaviour). With it, `PromptAssembler` uses an everyday-life opening, puts the exercise
+  brief under "## Setting (background only …)", replaces the storyline / public-expectation / minutes-since-response /
+  intensity / escalation block with "## Background chatter — topic: {seed phrase}. Ordinary daily life only …", drops
+  "advance the storyline / react to the world feed" from the task, and skips persona recent-post exemplars. Storyline
+  prompts are unchanged. `AmbientBehavior.AmbientMix` is now Calm 0.75 + Gratitude 0.25 only.
+- **M-1 (addressed)** — additive `ambientPolicy.voiceablePersonaIds` (GUID strings, or `null` when the exercise has no
+  registered loop): the loop cast's persona ids. POST validation unchanged (any persona of this exercise), so the panel
+  can label the rest "not in engine cast".
+- **M-2 (addressed)** — `InjectionAttack.Vector` (`WorldFeed` default | `PersonaVoiceNotes`); the four ambient bio cases
+  run the REAL unfenced path (`PersonaDossier.VoiceNotes` → `PromptAssembler.AppendPersona`) via
+  `InjectionRedTeam.AssembleViaPersonaVoiceNotes`, and an obeyed burst is dropped end to end through `GenerateStage`.
+  VoiceNotes are deliberately **not** fenced: it would change every storyline prompt (and its cache prefix); the reason
+  is commented at `AppendPersona`. The guard is the defence on that path.
+- **L-1** — `autonomous` is rejected 400 (*"engine is stopped or cut to Fake — restore it before enabling autonomous
+  ambient"*) while the kill switch (either mode; `SafetyClampActive`, which also covers a degraded clamp) or the cut to
+  Fake is active. Review mode stays selectable.
+- **L-5** — explicit `param generationAmbientAutonomyAuthorized = false` in `uat.bicepparam`.
+- **L-6** — the ambient `engine.tier_policy_changed` shape and the new nullable `trigger` / `publishPath` / `heldReason`
+  keys are documented in `engine-telemetry-tuning/01-engine-event-types.md`.
+- **L-7** — `PublishAmbientAsync` refuses (logs + `held:policy`, publishes nothing) any intent whose trigger is not
+  `AmbientFloor`. Defence in depth; unreachable today, so it has no dedicated test (the method is private).
+
+### AC10 backend facts (for the frontend PR's guide section)
+- Three modes: **Off** (default; also after every restart), **Review** (drafts enter the review queue, never auto-sent),
+  **Autonomous** (publishes without a click; only selectable when the deployment flag is on, else the API answers 400).
+- Caps: per-minute ≤ the exercise's MaxEnginePostsPerMinute (60 by default); per-hour ≤ 60 × that; counted per
+  generated post on a rolling wall-clock window (the per-hour cap is the ambient spend cap).
+- Allow-lists: topics from the fixed list above; personas of this exercise only (and only those in the engine's seeded
+  cast are voiced). Empty = nothing.
+- Ambient fills the quiet floor only after white noise and participant posts are counted.
+- Ambient posting stops at EndEx, any non-live state, Freeze and Pause engine; the kill switch (either mode), a degraded
+  provider and Cut to Fake switch ambient to **Off** — restoring the engine does not turn it back on.
+
+## Tests (backend)
+- `AmbientPolicyValidatorTests.*` (AC0, AC1); `AmbientBehaviorTests.*` (AC4, white-noise overlap)
+- `InjectionRedTeamTests.Catalog_CarriesAmbientPersonaBioSteeringCases` + the catalog theories (AC7)
+- `InjectionRedTeamTests.Catalog_CarriesPersonaVoiceNotesVectorCases`,
+  `.PersonaVoiceNotesAttack_ReachesTheTrustedPromptUnfenced_AndItsObeyedFormIsCaught`,
+  `GenerateStageTests.GenerateAsync_AmbientBurst_SteeredViaPersonaVoiceNotes_ObeyedOutputIsDropped` (AC7, Gate-1 M-2)
+- `PromptAssemblerTests.Assemble_Ambient_CarriesNoStorylineOrEscalationFraming`,
+  `.Assemble_Ambient_CarriesTheTopicSeed_TheBackgroundSetting_AndTheTask`, `.Assemble_Ambient_SkipsPersonaRecentPosts`,
+  `.Assemble_NonAmbient_KeepsTheStorylineFraming_AndRecentPosts`; `AmbientBehaviorTests.TheAmbientMix_IsCalmAndGratitudeOnly`
+  (AC4/AC7, Gate-1 H-1)
+- `EngineAmbientPolicyRegistryTests.TheSettingsSnapshot_ReportsTheLoopCast_AsVoiceablePersonaIds_OnlyForThisExercise`,
+  `.TheSettingsSnapshot_VoiceablePersonaIds_IsNull_WhenNoLoopIsRegistered` (AC2, Gate-1 M-1)
+- `EngineAmbientPolicyServiceTests.Autonomous_WhileTheKillSwitchIsEngaged_Is400_AndChangesNothing`,
+  `.Autonomous_WhileCutToFake_Is400_AndIsAcceptedAgainAfterRestore` (AC2/AC6, Gate-1 L-1)
+- `EngineAmbientPolicyRegistryTests.*` (AC0 flag binding/committed false, AC1 registry, AC5 interim gate)
+- `EngineAmbientPolicyServiceTests.*` (AC0, AC2, AC3 foreign persona/unresolved scope, AC6 request-path demotion)
+- `AmbientAutonomousPublishTests.*` (AC4-AC9 through the real driver; both kill-switch modes, degraded, cut-to-Fake,
+  EndEx/Freeze/Pause engine, guard failure, review never auto-sends)
+- `AmbientKillSwitchRealTickTests.AfterTheLever_NoAmbientPostIsPublished_WithinTheRealTickInterval` (AC6, real 5 s tick,
+  FullStop / DropToSuggest / CutToFake)
+- `AmbientCompositionRootWiringTests.*` (AC3 composition-root guard, `WebApplicationFactory<Program>`)
+- Docker-gated (`[RequiresDockerFact]`): `AmbientPolicyIsolationTests.*` (AC3 foreign exercise, foreign org, 401, body
+  `exerciseId` ignored, foreign persona — real `Program` + real sessions), `AmbientRealPublishTests.*` (AC9 real SQL
+  publish), `EngineSettingsEndpointsTests` (route added to the #297 role-gate drift guard + contract key)
