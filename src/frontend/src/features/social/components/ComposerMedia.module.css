@@ -240,12 +240,18 @@
 }
 
 /*
- * Phones / tablets (coarse pointer): the Remove / Cancel-upload button is a real 44px
- * box (story 04, NFR-001) tucked into the card's corner, and the body reserves matching
- * room so the alt-text field never sits under it. The card is >= 72px tall, so 44px
- * fits inside it. Mouse layout is unchanged.
+ * Phones / tablets (coarse pointer), NFR-001; mouse layout is unchanged:
+ * - Attach (story 18): 44x44 of real space via the shared touch-minimum variable.
+ * - Remove / Cancel-upload (story 04): a real 44px box tucked into the card's corner,
+ *   and the body reserves matching room so the alt-text field never sits under it.
+ *   The card is >= 72px tall, so 44px fits inside it.
  */
 @media (pointer: coarse) {
+  .attachButton {
+    width: var(--pulse-touch-min, 44px);
+    height: var(--pulse-touch-min, 44px);
+  }
+
   .remove {
     top: 2px;
     right: 2px;
