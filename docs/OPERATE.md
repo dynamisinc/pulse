@@ -92,9 +92,11 @@ scheme (`X-Forwarded-Proto`), but **only from peers you configure**:
   `192.168.0.0/16`. This is safe here because the worker is reachable only through the front end; a client
   cannot connect from those ranges directly. If the app is ever put behind another hop (Front Door, App
   Gateway), add that hop and revisit `ForwardLimit`.
-- **Never set `ASPNETCORE_FORWARDEDHEADERS_ENABLED=true`.** That framework switch adds its own forwarded-headers
-  middleware that trusts **every** peer, so the trust list stops protecting the limiter. The host now refuses to
-  start if it is set.
+- **Keep `ASPNETCORE_FORWARDEDHEADERS_ENABLED=false`** (pinned in `webapp.bicep`). When true, that framework switch adds
+  its own forwarded-headers middleware that trusts **every** peer. App Service on Linux can set it on the platform
+  side, so the host does **not** refuse to start: it removes that framework middleware, honors only the trust list
+  above, and logs a critical warning naming the key. (An earlier version refused to start; that took UAT down with a
+  503 on 2026-10-17.)
 - `X-Forwarded-Host` is never honored: the request host selects the exercise, so it must not be client-settable.
 - **Check it worked:** after a deploy, two people on different networks should each get their own staff-login
   limit (10 failed attempts per minute). If one person's failures lock out the other, the networks are not
