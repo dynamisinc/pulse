@@ -166,7 +166,7 @@ default to **Delayed-auto** and the exercise's **lead controller** can turn on *
 `AutoHoldPolicy` publishes an expired Delayed-auto draft that has no controller decision. The signer
 **authorizes** that on `uat` with the live provider, in two phases.
 
-> **Phase 1, from the 2026-10-17 go-live until A1c is on `main` (edit re-initialled: Tom Bull, ____):**
+> **Phase 1, from the 2026-10-17 go-live until A1c is on `main` (edit re-initialled: Tom Bull, 2026-10-17):**
 > **timeout auto-send is NOT authorized.** It is enforced in code by the governed flag
 > `Generation:Governance:TimeoutAutoSendAuthorized = false` (`generationTimeoutAutoSendAuthorized`, `false` in
 > `uat.bicepparam`):
