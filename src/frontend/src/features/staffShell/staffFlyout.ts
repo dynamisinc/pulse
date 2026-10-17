@@ -16,8 +16,9 @@
  *  - NEVER past the viewport edge: `maxWidth` clamps to the containing block (minus any right
  *    offset). The containing block is the work-area row / console root, so a flyout can never
  *    reach the header (a separate grid row) or the toolstrip (a separate column).
- *  - Starts at `var(--staff-flyout-top, 0px)`: a surface with a sticky command band sets that
- *    custom property to the band's height and flyouts leave it uncovered.
+ *  - Starts at `var(--staff-flyout-top, 0px)`: an opt-in seam for a surface whose sticky band
+ *    sits INSIDE the flyouts' containing block (set the property to the band's height). Unset by
+ *    default; the controller console keeps its flyouts below its band and leaves it unset.
  *  - z-index {@link staffShellTokens.flyout.zIndex}: above work-area content, below MUI
  *    popovers/dialogs (1300+).
  *  - Close: every panel keeps a VISIBLE close button (sized 44x44 under `(pointer: coarse)` by

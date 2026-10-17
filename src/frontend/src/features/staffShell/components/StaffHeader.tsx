@@ -412,9 +412,8 @@ export function StaffHeader({
           <Tooltip
             key={member.id}
             title={member.label}
-            enterTouchDelay={400}
+            enterTouchDelay={600}
             leaveTouchDelay={3000}
-            disableInteractive
           >
             <Box
               aria-label={member.label}
@@ -632,8 +631,8 @@ export function StaffHeader({
           disableEnforceFocus
           slotProps={{
             paper: {
+              role: 'dialog',
               'aria-label': 'More header options',
-              'data-testid': 'staff-header-more-menu',
               // Navy like the header it extends, so header-styled controls inside keep contrast.
               sx: {
                 width: 'min(320px, calc(100vw - 16px))',
@@ -643,10 +642,10 @@ export function StaffHeader({
                 color: staffShellTokens.header.textPrimary,
                 border: `1px solid ${staffShellTokens.header.borderColor}`,
               },
-            } as object,
+            },
           }}
         >
-          <Stack sx={{ gap: 1.5, alignItems: 'stretch' }}>
+          <Stack data-testid="staff-header-more-menu" sx={{ gap: 1.5, alignItems: 'stretch' }}>
             <Stack sx={{ gap: 0.5 }}>
               <Typography sx={{ fontSize: 10, fontWeight: 800, letterSpacing: '0.12em' }}>
                 WALL CLOCK

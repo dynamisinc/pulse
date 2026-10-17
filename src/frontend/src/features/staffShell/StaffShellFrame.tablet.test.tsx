@@ -28,7 +28,8 @@ import type { ExerciseScope } from '@/core/exerciseContext'
 import { StaffShellFrame } from './StaffShellFrame'
 import { Toolstrip } from './components/Toolstrip'
 import { ParticipantAdminFlyout, PARTICIPANT_ADMIN_TOOL_ID } from './components/ParticipantAdminFlyout'
-import { ToolstripProvider } from './toolRegistry'
+import { faFlag } from '@fortawesome/free-solid-svg-icons'
+import { ToolstripProvider, useRegisterSurfaceTool } from './toolRegistry'
 import { staffShellTokens, STAFF_TOUCH_TARGET_PX, STAFF_TOOLSTRIP_WIDTH_PX } from './staffShellTokens'
 import { mediaRuleDeclarations, ruleDeclarations } from './tabletTestUtils'
 import { useAdminAuthorization, useParticipantAdminRoster } from './participantAdminMocks'
@@ -77,6 +78,11 @@ afterEach(() => {
   engineUsageStore.resetForTests()
   engineSettingsStore.resetForTests()
 })
+
+function SecondToolRegistrant() {
+  useRegisterSurfaceTool({ id: 'second', label: 'SECOND', icon: faFlag, tooltip: 'Second tool' })
+  return null
+}
 
 function renderFrame() {
   return render(
@@ -167,6 +173,24 @@ describe('Participant admin flyout — tablet', () => {
     await user.keyboard('{Escape}')
     expect(screen.queryByTestId('participant-admin-flyout')).not.toBeInTheDocument()
     expect(tool).toHaveFocus()
+  })
+
+  it('does not steal focus back when the user switches to another tool', async () => {
+    const user = userEvent.setup()
+    render(
+      <MemoryRouter>
+        <ToolstripProvider>
+          <StaffShellFrame toolstrip={<Toolstrip />} globalOverlay={<ParticipantAdminFlyout />}>
+            <SecondToolRegistrant />
+          </StaffShellFrame>
+        </ToolstripProvider>
+      </MemoryRouter>,
+    )
+    await user.click(screen.getByTestId(`toolstrip-tool-${PARTICIPANT_ADMIN_TOOL_ID}`))
+    const second = screen.getByTestId('toolstrip-tool-second')
+    await user.click(second)
+    expect(screen.queryByTestId('participant-admin-flyout')).not.toBeInTheDocument()
+    expect(second).toHaveFocus()
   })
 
   it('sizes the close button and row action to 44px only under a coarse pointer', async () => {

@@ -363,7 +363,10 @@ export function ParticipantAdminFlyout() {
       return
     }
     const opener = openerRef.current
-    if (opener instanceof HTMLElement && opener.isConnected) opener.focus()
+    // Restore only if focus died with the panel. Switching to another tool (this is a shell-level
+    // overlay, so its effect runs last) must not steal focus back from that tool.
+    const lost = document.activeElement === null || document.activeElement === document.body
+    if (lost && opener instanceof HTMLElement && opener.isConnected) opener.focus()
     openerRef.current = null
   }, [open])
 

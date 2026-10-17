@@ -156,6 +156,7 @@ describe('StaffHeader tablet bands', () => {
     expect(screen.getByTestId('staff-header')).toHaveAttribute('data-header-band', 'tablet-landscape')
     expect(screen.queryByTestId('staff-header-status-group')).not.toBeInTheDocument()
     expect(screen.getByTestId('staff-header-sign-out')).toHaveTextContent('Sign out')
+    expect(screen.getByRole('button', { name: 'Sign out' })).toBeInTheDocument()
   })
 
   it('1280 and up is the unchanged desktop header (no "more" menu, everything inline)', () => {

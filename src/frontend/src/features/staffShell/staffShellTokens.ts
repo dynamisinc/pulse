@@ -125,12 +125,12 @@ export const staffShellTokens = {
   /**
    * Flyout stacking contract (story 13). Flyouts live INSIDE the work-area row (a separate grid
    * row from the header, so they can never cover the header) and the toolstrip is its own grid
-   * column (so they never cover it). `zIndex` orders flyouts above work-area content, including
-   * story 12's sticky command band (which must stay below this value, or set `topVar`). MUI
+   * column (so they never cover it). `zIndex` orders flyouts above work-area content. MUI
    * popovers/menus/dialogs (1300+) always sit above flyouts, so a confirm raised from a flyout is
-   * never buried. `topVar` is the seam for "do not cover the top of the work area": a surface that
-   * owns a sticky band sets `--staff-flyout-top: <band height>` on an ancestor and every flyout
-   * starts below it; unset it is 0 (flyout is full work-area height).
+   * never buried. `topVar` is an OPT-IN seam, only for a surface whose sticky band sits inside the
+   * flyouts' containing block: it sets `--staff-flyout-top: <band height>` on an ancestor and
+   * every flyout starts below it. Unset it is 0. The controller console does NOT use it (its
+   * flyouts already live in its pane area, below its band), so it must stay unset there.
    */
   flyout: {
     zIndex: 30,

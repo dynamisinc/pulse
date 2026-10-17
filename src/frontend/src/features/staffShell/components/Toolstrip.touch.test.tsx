@@ -39,6 +39,13 @@ function renderStrip() {
 describe('Toolstrip — touch targets (story 13, TABLET-AMENDMENT §4)', () => {
   it('grows every tool to a real 44x44 inside @media (pointer: coarse), by width/height not slop', () => {
     renderStrip()
+    const probe = screen.getByTestId('toolstrip-tool-stories')
+    const coarseMedia = Array.from(document.styleSheets)
+      .flatMap(sheet => Array.from(sheet.cssRules))
+      .filter((r): r is CSSMediaRule => r instanceof CSSMediaRule)
+      .filter(r => Array.from(r.cssRules).some(
+        i => i instanceof CSSStyleRule && probe.matches(i.selectorText)))
+    expect(coarseMedia.map(r => r.media.mediaText)).toContain('(pointer: coarse)')
     for (const tool of [TOOL_A, TOOL_B]) {
       const button = screen.getByTestId(`toolstrip-tool-${tool.id}`)
       const coarse = mediaRuleDeclarations(button, 'pointer: coarse')

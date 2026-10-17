@@ -155,7 +155,10 @@ export function StaffShellFrame({
               top: `var(${staffShellTokens.flyout.topVar}, 0px)`,
             },
             [STAFF_COARSE_POINTER_MEDIA]: {
-              '& [data-testid="persona-dock-host"] button[aria-label^="Close"]': {
+              // The dock's HEADER close button only (first child row), not other "Close..." buttons
+              // that slot content may render. TODO(mobile-tablet/13 follow-up): remove once
+              // personaDockHost adopts staffFlyoutPanelSx / data-staff-flyout-close.
+              '& [data-testid="persona-dock-host"] > div:first-of-type button[aria-label^="Close"]': {
                 width: STAFF_TOUCH_TARGET_PX,
                 height: STAFF_TOUCH_TARGET_PX,
               },

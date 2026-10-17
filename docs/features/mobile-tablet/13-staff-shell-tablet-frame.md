@@ -9,7 +9,7 @@ and evaluator. At 768-1180 px the header (exercise identity badge, clock, state 
 participant admin) must still fit and stay operable by touch. Staff world: COBRA.
 
 ## Acceptance Criteria
-- [x] Given each of 768, 820, 1024 and 1180 px wide, when the shell renders, then header items fit on one row or wrap/overflow deliberately into a "more" menu with no clipped text, and the exercise identity and state pill (never color-only) are always visible.
+- [x] (Verified manually in Playwright; formal e2e in story 16.) Given each of 768, 820, 1024 and 1180 px wide, when the shell renders, then header items fit on one row or wrap/overflow deliberately into a "more" menu with no clipped text, and the exercise identity and state pill (never color-only) are always visible.
 - [x] Given the toolstrip, then every tool button has a hit area of at least 44x44 on touch (coarse pointer) with its label or accessible name; one flyout opens at a time (D7-011) and never extends past the viewport edge.
 - [x] Given a flyout (Personas dock, ENGINE, USAGE, participant admin) at 768 wide, then it is usable full-height with its own scroll, can be closed by a visible close button and Escape, and does not trap the user without a way back.
 - [x] Given the exercise-clock/state strip, then it renders in the same staff presentation as desktop and is never confusable with a participant view or its compliance chrome.
@@ -24,11 +24,14 @@ participant admin) must still fit and stay operable by touch. Staff world: COBRA
   pill and the FOUO tag never move (portrait stacks pill + tag). Sign-out is icon-only in portrait (name kept).
 - Flyouts: one `staffFlyoutPanelSx` (`staffShell/staffFlyout.ts`) for the participant-admin, ENGINE and USAGE panels. **z-order:**
   header (own grid row) and toolstrip (own column) are structurally uncoverable; flyouts sit at `staffShellTokens.flyout.zIndex` (30)
-  inside the work-area row, above work-area content; MUI popovers/dialogs (1300+) sit above flyouts. `--staff-flyout-top` is the
-  seam for story 12's sticky command band (set it to the band's height on a console ancestor and every flyout starts below it);
-  unset, flyouts are full work-area height.
-- Open items: story 12 should set `--staff-flyout-top`; the persona dock (`controller/console/personaDockHost.tsx`, story 12's file)
+  inside the work-area row, above work-area content; MUI popovers/dialogs (1300+) sit above flyouts. `--staff-flyout-top` is an
+  opt-in seam only for surfaces whose band sits inside the flyouts' containing block; unset (the default), flyouts are full
+  work-area height.
+- Open items: story 12 does NOT use `--staff-flyout-top` (its flyouts stay in its pane area below the band), so it stays unset
+  there; the persona dock (`controller/console/personaDockHost.tsx`, story 12's file)
   gets the clamp/top/44px-close contract from the frame via a selector until it adopts `staffFlyout.ts`. Browser e2e is story 16.
+- Deferred: before Complete, check the four widths with a long exercise name, plus desktop at exactly 1280 with a long name
+  (the frame grid change affects overflow there).
 
 ## Out of Scope
 Console pane layout (12), shortcuts (14), confirms (15), evaluator-specific layout (B4), a phone staff shell.

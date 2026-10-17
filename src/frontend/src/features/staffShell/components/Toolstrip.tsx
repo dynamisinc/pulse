@@ -97,7 +97,13 @@ function ToolstripToolButton({ tool, active, onToggle }: ToolstripToolButtonProp
       {/* Touch equivalent for the tooltip (story 13, no hover-only information): the label under
           the button is always visible, the accessible name carries the badge, and a touch HOLD
           shows the longer tooltip (enterTouchDelay) and keeps it up long enough to read. */}
-      <Tooltip title={tool.tooltip} enterTouchDelay={400} leaveTouchDelay={3000} disableInteractive>
+      <Tooltip
+        title={tool.tooltip}
+        placement="left"
+        describeChild
+        enterTouchDelay={600}
+        leaveTouchDelay={3000}
+      >
         <IconButton
           data-testid={`toolstrip-tool-${tool.id}`}
           aria-label={accessibleLabel}
