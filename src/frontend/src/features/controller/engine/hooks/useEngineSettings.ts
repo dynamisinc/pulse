@@ -185,16 +185,28 @@ import { useExerciseContext } from '@/core/exerciseContext'
 import { useControllerIdentity } from '../../identity/controllerIdentity'
 import {
   cutGenerationToFake as postCutGenerationToFake,
+  describeAmbientPolicyError,
   describeSettingsError,
   getSettings as fetchSettings,
   restoreGenerationProvider as postRestoreGenerationProvider,
+  setAmbientPolicy as postAmbientPolicy,
   setAutonomyDefault as postAutonomyDefault,
   setTierPolicyMode as postTierPolicyMode,
   type AutonomyDefaultLevel,
   type EngineSettingsDto,
   type TierPolicyMode,
 } from '../services/engineSettingsActions'
+import {
+  AMBIENT_AUTONOMOUS_NOT_AUTHORIZED_MESSAGE,
+  DEFAULT_AMBIENT_POLICY,
+  type AmbientPolicyDraft,
+} from '../models/ambientPolicyContract'
 
+export type {
+  AmbientMode,
+  AmbientPolicyDraft,
+  AmbientPolicyDto,
+} from '../models/ambientPolicyContract'
 export type {
   AutonomyDefaultLevel,
   EngineSettingsAutonomy,
@@ -250,8 +262,12 @@ export const MOCK_ENGINE_SETTINGS: EngineSettingsDto = {
   tierPolicyMode: 'auto',
   inMemoryState: true,
   inMemoryStateNote:
-    'Autonomy default, tier-policy mode and the generation-provider cut are held in process ' +
-    'memory; a restart resets them to suggest / auto / the startup-configured provider.',
+    'Autonomy default, tier-policy mode, the generation-provider cut and the ambient-chatter ' +
+    'policy are held in process memory; a restart resets them to suggest / auto / the ' +
+    'startup-configured provider / ambient Off.',
+  // Dark by default (#168 AC1/AC0). `autonomousAuthorized: false` mirrors an
+  // ungoverned environment, so mock mode exercises the rejection path too.
+  ambientPolicy: { ...DEFAULT_AMBIENT_POLICY, autonomousAuthorized: false },
 }
 
 // ---------------------------------------------------------------------------
@@ -281,6 +297,10 @@ interface EngineSettingsState {
    * exactly one of the cut/restore controls is ever rendered at a time.
    */
   readonly pendingProviderLever: boolean
+  /** The ambient-policy POST is outstanding (#168). */
+  readonly pendingAmbientPolicy: boolean
+  /** The last ambient-policy save failure's message (kept apart from `error`), or `null`. */
+  readonly ambientError: string | null
 }
 
 const DEFAULT_STATE: EngineSettingsState = {
@@ -291,6 +311,8 @@ const DEFAULT_STATE: EngineSettingsState = {
   pendingAutonomyDefault: false,
   pendingTierPolicy: false,
   pendingProviderLever: false,
+  pendingAmbientPolicy: false,
+  ambientError: null,
 }
 
 const MOCK_STATE: EngineSettingsState = {
@@ -301,6 +323,8 @@ const MOCK_STATE: EngineSettingsState = {
   pendingAutonomyDefault: false,
   pendingTierPolicy: false,
   pendingProviderLever: false,
+  pendingAmbientPolicy: false,
+  ambientError: null,
 }
 
 /**
@@ -417,6 +441,8 @@ function setForTests(
     pendingAutonomyDefault: false,
     pendingTierPolicy: false,
     pendingProviderLever: false,
+    pendingAmbientPolicy: false,
+    ambientError: null,
   })
   internalByExercise.set(exerciseId, defaultInternal())
   liveFetchStarted.add(exerciseId)
@@ -834,6 +860,66 @@ function runRestoreGenerationProvider(
     .finally(() => settle(exerciseId, mine))
 }
 
+/**
+ * Saves the ambient-chatter policy (#168, AC2). Same await-then-apply /
+ * serialization contract as the other mutations; failures land in
+ * `ambientError` (not `error`) and leave `settings` — and so the previous mode
+ * — untouched. Mock mode applies instantly, except `autonomous`, which is
+ * rejected unless the mock policy says it is authorized (mirrors the dark
+ * default, AC0).
+ */
+function runSetAmbientPolicy(
+  exerciseId: string,
+  draft: AmbientPolicyDraft,
+  ctx: { readonly actingHumanId: string; readonly timeZone: string },
+): void {
+  const current = getSnapshot(exerciseId)
+  if (!current.settings) return
+
+  if (USE_MOCK_DATA) {
+    const previous = current.settings.ambientPolicy ?? DEFAULT_AMBIENT_POLICY
+    if (draft.mode === 'autonomous' && previous.autonomousAuthorized !== true) {
+      setFor(exerciseId, { ...current, ambientError: AMBIENT_AUTONOMOUS_NOT_AUTHORIZED_MESSAGE })
+      return
+    }
+    setFor(exerciseId, {
+      ...current,
+      ambientError: null,
+      settings: { ...current.settings, ambientPolicy: { ...previous, ...draft } },
+    })
+    return
+  }
+
+  const internal = getInternal(exerciseId)
+  if (internal.requestInFlight) return
+
+  const { internal: mine, seq: mySeq } = issue(exerciseId)
+  setFor(exerciseId, { ...current, pendingAmbientPolicy: true, ambientError: null })
+
+  postAmbientPolicy(draft, ctx)
+    .then(settings => {
+      if (!isLiveGeneration(exerciseId, mine)) return
+      const latest = getSnapshot(exerciseId)
+      if (tryApply(mine, mySeq)) {
+        setFor(exerciseId, { ...latest, settings, pendingAmbientPolicy: false, ambientError: null })
+      } else {
+        setFor(exerciseId, { ...latest, pendingAmbientPolicy: false })
+      }
+    })
+    .catch((error: unknown) => {
+      if (!isLiveGeneration(exerciseId, mine)) return
+      const described = describeAmbientPolicyError(error, draft.mode)
+      const latest = getSnapshot(exerciseId)
+      setFor(exerciseId, {
+        ...latest,
+        pendingAmbientPolicy: false,
+        ambientError: described.message,
+        forbidden: described.status === 403 ? true : latest.forbidden,
+      })
+    })
+    .finally(() => settle(exerciseId, mine))
+}
+
 // ---------------------------------------------------------------------------
 // The hook
 // ---------------------------------------------------------------------------
@@ -858,6 +944,12 @@ export interface UseEngineSettingsResult {
    * {@link EngineSettingsState.pendingProviderLever}).
    */
   readonly pendingProviderLever: boolean
+  /** The ambient-policy POST (#168) is outstanding. */
+  readonly pendingAmbientPolicy: boolean
+  /** The last ambient-policy save failure's message, or `null`. */
+  readonly ambientError: string | null
+  /** Saves the ambient-chatter policy. Same await-then-apply contract as the others. */
+  readonly setAmbientPolicy: (draft: AmbientPolicyDraft) => void
   /**
    * Requests the exercise autonomy default. AWAITS the response and applies
    * it verbatim on success; on rejection, re-enables the control and surfaces
@@ -930,6 +1022,13 @@ export function useEngineSettings(): UseEngineSettingsResult {
     runRestoreGenerationProvider(exerciseId, { actingHumanId: identity.actingHumanId, timeZone })
   }, [exerciseId, identity.actingHumanId, timeZone])
 
+  const setAmbientPolicyCb = useCallback(
+    (draft: AmbientPolicyDraft) => {
+      runSetAmbientPolicy(exerciseId, draft, { actingHumanId: identity.actingHumanId, timeZone })
+    },
+    [exerciseId, identity.actingHumanId, timeZone],
+  )
+
   const refetchCb = useCallback(() => {
     invalidate(exerciseId)
   }, [exerciseId])
@@ -942,6 +1041,9 @@ export function useEngineSettings(): UseEngineSettingsResult {
     pendingAutonomyDefault: state.pendingAutonomyDefault,
     pendingTierPolicy: state.pendingTierPolicy,
     pendingProviderLever: state.pendingProviderLever,
+    pendingAmbientPolicy: state.pendingAmbientPolicy,
+    ambientError: state.ambientError,
+    setAmbientPolicy: setAmbientPolicyCb,
     setAutonomyDefault: setAutonomyDefaultCb,
     setTierPolicyMode: setTierPolicyModeCb,
     cutGenerationToFake: cutGenerationToFakeCb,
