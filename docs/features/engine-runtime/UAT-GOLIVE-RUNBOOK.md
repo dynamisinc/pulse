@@ -46,6 +46,7 @@ Read the job summary. Expect **only** these changes:
 | | **Add** `ForwardedHeaders__KnownNetworks__1 = 172.16.0.0/12` | A1a (#480) |
 | | **Add** `ForwardedHeaders__KnownNetworks__2 = 192.168.0.0/16` | A1a (#480). No `KnownProxies`; `ForwardLimit` stays at the code default of 1 |
 | | **Add** the four limiter permits from step 1b (`SessionPerMinute = 120`, `WordPermitPerMinute = 30`, `ParticipantLoginPerMinute = 30`, `SharedLoginPerMinute = 20`) | A1a (#480): single-venue permits |
+| | **Add** `Generation__Governance__TimeoutAutoSendAuthorized = false` | Phase 1 (PROVIDER-GOVERNANCE §8): timeout auto-send (swamped mode) stays off until the lead-controller gate is on main |
 | Action group and four `scheduledQueryRules` (`ag-…-provider`, errors / latency / timeouts / spend) | **Create**, only if you enabled alerts | #585 / #590 |
 
 > ⚠ **Never set `ASPNETCORE_FORWARDEDHEADERS_ENABLED=true`.** It trusts forwarded headers from *any* client, so anyone
@@ -119,7 +120,10 @@ Expect a 200 response carrying the `exerciseId` and persona counts. A 404 means 
 3. **The usage panel moves (#401).** The ENGINE flyout's AI usage panel goes from "0 calls, $0" to "N calls, $Y" on `gpt-5.4-mini`.
 4. **The cut-to-Fake lever works (#402).** Cut generation to Fake.
    - The next burst uses Fake (no new calls in the usage panel).
-   - The swamped banner, if swamped mode is on, reads **TIMEOUT AUTO-SEND IS SUSPENDED**.
+   - Turning swamped mode ON is refused with the not-authorized message. In the engine bar the lead's **Swamped
+     mode: OFF** control is disabled, with the note "Timeout auto-send is off until the lead-controller role
+     ships." (The API itself answers `400`: "timeout auto-send (swamped mode) is not authorized on this
+     environment until the lead-controller gate lands (PROVIDER-GOVERNANCE §8, Phase 1)".)
    - Restore afterwards (lead controller).
 5. **The login limiter keys on the real client IP (A1a).** Make 11 rapid bad staff logins from one machine.
    - That machine gets `429`.
