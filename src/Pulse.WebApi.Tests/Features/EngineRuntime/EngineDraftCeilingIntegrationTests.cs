@@ -100,7 +100,7 @@ public sealed class EngineDraftCeilingIntegrationTests
         var item = Item(draftId, exerciseId, AutonomyLevel.DelayedAuto, DraftDisposition.CountingDown, "@rosa", "@ghost", "@lena");
         await SeedItemAsync(item);
 
-        await using var host = BuildHost(manualTime);
+        await using var host = BuildHost(manualTime, timeoutAutoSendAuthorized: true);
         host.GetRequiredService<IExerciseClock>().Start(exerciseId, ScenarioStart, TimeZoneInfo.Utc);
         var state = host.GetRequiredService<EngineAutonomyRegistry>().GetOrCreate(exerciseId);
         state.SetStorylineOverride(item.StorylineId, AutonomyLevel.DelayedAuto, "lead-1", 0);
@@ -163,7 +163,7 @@ public sealed class EngineDraftCeilingIntegrationTests
     private static IExerciseContext ScopeFor(Guid exerciseId) => new ExerciseContext { CurrentExerciseId = exerciseId };
 
     /// <summary>The loop slice plus the review cockpit and the REAL publish funnel, as in <c>EngineContentSeedServiceTests</c>.</summary>
-    private ServiceProvider BuildHost(TimeProvider timeProvider, IGenerationProvider? provider = null)
+    private ServiceProvider BuildHost(TimeProvider timeProvider, IGenerationProvider? provider = null, bool timeoutAutoSendAuthorized = false)
     {
         var services = new ServiceCollection();
         services.AddLogging();
@@ -184,6 +184,9 @@ public sealed class EngineDraftCeilingIntegrationTests
         services.AddEngineRuntimeSeams();
         services.AddReactionLoopHost();
         services.AddEngineReview();
+
+        // The governed timeout-auto-send flag (PROVIDER-GOVERNANCE §8, Phase 1) — explicit per test.
+        services.Configure<EngineAmbientGovernanceOptions>(o => o.TimeoutAutoSendAuthorized = timeoutAutoSendAuthorized);
         return services.BuildServiceProvider();
     }
 

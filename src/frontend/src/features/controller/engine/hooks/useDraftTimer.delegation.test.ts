@@ -97,12 +97,14 @@ describe('useDraftTimer — delegates to autoHoldPolicy.decide/evaluate (no re-d
       delayedAuto,
       scenarioMinute,
       swampedMode,
+      false,
     )
     expect(autoHoldPolicy.evaluate).toHaveBeenCalledWith(
       countdown,
       delayedAuto,
       scenarioMinute,
       swampedMode,
+      false,
     )
   })
 

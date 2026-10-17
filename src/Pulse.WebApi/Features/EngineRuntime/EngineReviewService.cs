@@ -86,6 +86,15 @@ public sealed partial class EngineReviewService
     private readonly IGenerationProviderCutRegistry _providerCut;
     private readonly ILogger<EngineReviewService> _logger;
     private readonly EngineAmbientPolicyRegistry _ambientPolicy;
+    private readonly bool _timeoutAutoSendAuthorized;
+
+    /// <summary>
+    /// The 400 message <see cref="SetSwampedModeAsync"/> returns for an ON request while the governed
+    /// <c>Generation:Governance:TimeoutAutoSendAuthorized</c> flag is false (PROVIDER-GOVERNANCE §8, Phase 1).
+    /// </summary>
+    public const string TimeoutAutoSendNotAuthorizedMessage =
+        "timeout auto-send (swamped mode) is not authorized on this environment until the lead-controller gate lands "
+        + "(PROVIDER-GOVERNANCE §8, Phase 1)";
 
     /// <summary>Creates the review service over its persistence, scope, clock, telemetry, publish, push, and autonomy collaborators.</summary>
     /// <param name="store">The seam-freeze review-item persistence store (reads + lookup).</param>
@@ -106,6 +115,12 @@ public sealed partial class EngineReviewService
     /// loop reads. Optional so existing direct constructions keep compiling; when absent a private, empty registry is
     /// used, which reads every exercise as <c>off</c> with autonomy unauthorised (the fail-safe direction).
     /// </param>
+    /// <param name="governance">
+    /// The governed <c>Generation:Governance</c> flags — read here ONLY for
+    /// <see cref="EngineAmbientGovernanceOptions.TimeoutAutoSendAuthorized"/>. Optional so existing direct constructions
+    /// keep compiling; when absent timeout auto-send is NOT authorised (fail closed: swamped ON is refused and an
+    /// expired countdown is always held).
+    /// </param>
     public EngineReviewService(
         IEngineReviewStore store,
         PulseDbContext dbContext,
@@ -120,7 +135,8 @@ public sealed partial class EngineReviewService
         IOptions<GenerationOptions> generationOptions,
         IGenerationProviderCutRegistry providerCut,
         ILogger<EngineReviewService> logger,
-        EngineAmbientPolicyRegistry? ambientPolicy = null)
+        EngineAmbientPolicyRegistry? ambientPolicy = null,
+        IOptions<EngineAmbientGovernanceOptions>? governance = null)
     {
         ArgumentNullException.ThrowIfNull(store);
         ArgumentNullException.ThrowIfNull(dbContext);
@@ -150,6 +166,7 @@ public sealed partial class EngineReviewService
         _providerCut = providerCut;
         _logger = logger;
         _ambientPolicy = ambientPolicy ?? new EngineAmbientPolicyRegistry();
+        _timeoutAutoSendAuthorized = governance?.Value.TimeoutAutoSendAuthorized ?? false;
     }
 
     // ---- Queue read -----------------------------------------------------------------------------
@@ -379,7 +396,14 @@ public sealed partial class EngineReviewService
     /// Sets swamped mode for the current exercise (the lead-gated toggle that is the ONLY path by which a
     /// Delayed-auto draft auto-sends on expiry, D5-014/1.1, #36). Always an explicit human action; the engine
     /// never turns it on by itself. Delegates to the built <see cref="EngineAutonomyState.SetSwampedMode"/>.
+    /// While the governed <c>Generation:Governance:TimeoutAutoSendAuthorized</c> flag is false, an ON request is
+    /// refused (<see cref="EngineReviewOutcome.Invalid"/> with <see cref="TimeoutAutoSendNotAuthorizedMessage"/>);
+    /// turning it OFF always succeeds (lowering, §8.2).
     /// </summary>
+    /// <param name="enabled">Whether swamped mode is turned on.</param>
+    /// <param name="input">The acting human (COR-018).</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The resulting autonomy snapshot, or the refusal.</returns>
     public async Task<EngineAutonomyResult> SetSwampedModeAsync(
         bool enabled,
         EngineReviewActionInput input,
@@ -395,6 +419,13 @@ public sealed partial class EngineReviewService
         if (string.IsNullOrWhiteSpace(input.ActingHumanId))
         {
             return EngineAutonomyResult.Invalid("actingHumanId is required (COR-018).");
+        }
+
+        if (enabled && !_timeoutAutoSendAuthorized)
+        {
+            // PROVIDER-GOVERNANCE §8, Phase 1: raising toward unreviewed timeout publishes is refused until the
+            // lead-controller gate lands. Lowering (enabled=false) is never refused.
+            return EngineAutonomyResult.Invalid(TimeoutAutoSendNotAuthorizedMessage);
         }
 
         var state = _autonomy.GetOrCreate(exerciseId);
@@ -777,7 +808,10 @@ public sealed partial class EngineReviewService
     /// — held for you", surfaces in NEEDS YOU) — it NEVER auto-sends. The ONLY auto-send-on-expiry path is
     /// swamped mode explicitly enabled AND the draft still effectively Delayed-auto; a kill switch or degraded
     /// clamp lowers the effective level below Delayed-auto, so the countdown suspends (holds) even under
-    /// swamped mode. Each resolution emits exactly one <c>engine.reviewed</c> (hold-on-expiry / auto-send) and
+    /// swamped mode. Likewise, while the exercise is cut to Fake (<see cref="IGenerationProviderCutRegistry"/>,
+    /// ADP-042) an expired countdown HOLDs even under swamped mode (hold-on-cut), so a live draft generated before
+    /// the cut never auto-sends after it; explicit controller approvals are unaffected, and a countdown already
+    /// held stays held after a restore. Each resolution emits exactly one <c>engine.reviewed</c> (hold-on-expiry / auto-send) and
     /// pushes the change. Callers (the tick host) set <see cref="IExerciseContext.CurrentExerciseId"/> before
     /// invoking, so this operates entirely within one exercise's scope (COR-001).
     /// </summary>
@@ -790,7 +824,10 @@ public sealed partial class EngineReviewService
         }
 
         var state = _autonomy.GetOrCreate(exerciseId);
-        var swamped = state.SwampedModeEnabled;
+        // Defence in depth (PROVIDER-GOVERNANCE §8, Phase 1): with timeout auto-send unauthorised, swamped mode is read
+        // as OFF, so an expired countdown HOLDs even if swamped mode is somehow on.
+        var swamped = state.SwampedModeEnabled && _timeoutAutoSendAuthorized;
+        var cutToFake = _providerCut.IsCutToFake(exerciseId);
         var currentMinute = _clock.CurrentScenarioMinute(exerciseId);
 
         var queue = await _store.GetQueueAsync(cancellationToken);
@@ -811,7 +848,7 @@ public sealed partial class EngineReviewService
                 candidate.CountdownDecision ?? ControllerDecision.None);
 
             var effective = state.ResolveEffective(candidate.StorylineId);
-            var evaluation = AutoHoldPolicy.Evaluate(countdown, effective, currentMinute, swamped);
+            var evaluation = AutoHoldPolicy.Evaluate(countdown, effective, currentMinute, swamped, cutToFake);
 
             // Only an on-expiry, no-decision transition returns an event to act on here; while the countdown
             // is still running the display tick is driven client-side (the frozen useReviewQueue's own clock).
@@ -822,7 +859,7 @@ public sealed partial class EngineReviewService
 
             if (evaluation.Disposition == TimeoutDisposition.Publish)
             {
-                await AutoSendOnTickAsync(candidate, exerciseId, cancellationToken);
+                await AutoSendOnTickAsync(candidate, countdown, currentMinute, exerciseId, cancellationToken);
             }
             else
             {
@@ -864,9 +901,25 @@ public sealed partial class EngineReviewService
     /// two DbContexts; closing it needs an atomic claim (a rowversion or a conditional update), a follow-up tracked
     /// with WR-001.
     /// </para>
+    /// <para>
+    /// <b>The whole auto-send policy is re-decided at the last boundary (PR #571).</b> The tick's up-front
+    /// <see cref="AutoHoldPolicy.Evaluate"/> used a snapshot of the effective autonomy, swamped mode and the provider
+    /// cut. Any of them can change while this item's lookup or its burst's persona lookup is awaited, so the same
+    /// pure policy is re-run with FRESH inputs immediately before the publisher call, and the burst is published only
+    /// if it still says Publish. Otherwise the item resolves exactly as the up-front policy would for those inputs:
+    /// either kill-switch mode (DropToSuggest or FullStop), a degraded clamp, swamped mode turned off or a cut
+    /// HOLD it (one <c>engine.reviewed</c> hold-on-expiry). Nothing is published.
+    /// </para>
     /// </remarks>
+    /// <param name="candidate">The untracked queue-snapshot row whose countdown expired.</param>
+    /// <param name="countdown">The countdown snapshot the tick evaluated (re-evaluated here with fresh inputs).</param>
+    /// <param name="currentMinute">The scenario minute the tick evaluated the expiry at.</param>
+    /// <param name="exerciseId">The resolved exercise scope.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
     private async Task AutoSendOnTickAsync(
         EngineReviewItemEntity candidate,
+        DelayedAutoCountdown countdown,
+        int currentMinute,
         Guid exerciseId,
         CancellationToken cancellationToken)
     {
@@ -876,12 +929,46 @@ public sealed partial class EngineReviewService
             return;
         }
 
+        // The auto-send policy, re-decided at the last boundary before the publish (M-1 / PR #571): the tick reads the
+        // effective autonomy, swamped mode and the provider cut once up front, but the kill switch (DropToSuggest or
+        // FullStop), a degraded-mode clamp, swamped mode being turned off, or a cut to Fake can complete while the
+        // queue query, this item's lookup or the burst's persona lookup is awaited, or while a swamped tick awaits an
+        // earlier burst's publish. So the burst is prepared FIRST and the pure AutoHoldPolicy is re-run on FRESH
+        // inputs as the last step before the publisher is invoked, with no await in between; anything but Publish
+        // there resolves the expiry exactly as the up-front policy would for those inputs. Explicit approvals never
+        // pass through here, so they keep their own semantics (an approve still publishes during a cut).
+        //
+        // Residual semantics: a burst already handed to the publisher runs to completion: neither the kill switch,
+        // degraded mode, swamped-off nor a cut interrupts it (EnginePublishService observes only its cancellation
+        // token, not autonomy state). Every automatic publish whose publisher call BEGINS after one of them completes
+        // is stopped.
+        //
         // Once the publish has been attempted, its record is written with CancellationToken.None: posts may be live,
-        // so a host shutdown at this point must not leave the item counting down to be sent again on restart.
-        EngineBurstPublishResult publishResult;
+        // so a host shutdown at this point must not leave the item counting down to be sent again on restart. A
+        // re-decision found before the publisher call means NOTHING was attempted, so that hold is recorded after the
+        // try with the tick's own token (and, being outside it, can never be recorded twice by the fault handlers
+        // below).
+        EngineBurstPublishResult? publishResult = null;
         try
         {
-            publishResult = await PublishBurstAsync(item, exerciseId, input: null, leadTextOverride: null, cancellationToken);
+            var burst = await PrepareBurstAsync(item, exerciseId, input: null, leadTextOverride: null, cancellationToken);
+
+            // NO await between this re-decision and the publisher call. The governed timeout-auto-send flag is a
+            // synchronous field read (PROVIDER-GOVERNANCE §8, Phase 1): unauthorised reads swamped mode as OFF → HOLD.
+            var state = _autonomy.GetOrCreate(exerciseId);
+            var recheck = AutoHoldPolicy.Evaluate(
+                countdown,
+                state.ResolveEffective(item.StorylineId),
+                currentMinute,
+                state.SwampedModeEnabled && _timeoutAutoSendAuthorized,
+                _providerCut.IsCutToFake(exerciseId));
+            if (recheck.Disposition == TimeoutDisposition.Publish)
+            {
+                publishResult = await _publisher.PublishBurstAsync(burst, cancellationToken);
+            }
+
+            // Every non-Publish outcome (including a FullStop: an expired countdown under a full stop is an ordinary
+            // hold-on-expiry, safety fix D5) is resolved to HOLD below.
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -920,6 +1007,14 @@ public sealed partial class EngineReviewService
             return;
         }
 #pragma warning restore CA1031
+
+        if (publishResult is null)
+        {
+            // Kill switch (either mode), degraded clamp, swamped mode off or a cut to Fake before the publisher was
+            // invoked: nothing was published. Hold it exactly as the up-front policy would.
+            await ResolveOnTickAsync(item, exerciseId, DraftDisposition.Held, EngineReviewAction.HoldOnExpiry, mutate: null, cancellationToken);
+            return;
+        }
 
         if (IsPublishFullySuccessful(publishResult))
         {
@@ -1040,7 +1135,8 @@ public sealed partial class EngineReviewService
         _generationOptions,
         EngineAutonomyStateDto.From(_autonomy.GetOrCreate(exerciseId)),
         _tierPolicy.GetMode(exerciseId),
-        _ambientPolicy.Snapshot(exerciseId));
+        _ambientPolicy.Snapshot(exerciseId),
+        _timeoutAutoSendAuthorized);
 
     /// <summary>
     /// Whether <paramref name="mode"/> would force a tier this deployment has NOT bound to a deployment name —
@@ -1231,7 +1327,8 @@ public sealed partial class EngineReviewService
             return EngineReviewActionResult.AlreadyResolved();
         }
 
-        var publishResult = await PublishBurstAsync(item, exerciseId, input, leadTextOverride, cancellationToken);
+        var burst = await PrepareBurstAsync(item, exerciseId, input, leadTextOverride, cancellationToken);
+        var publishResult = await _publisher.PublishBurstAsync(burst, cancellationToken);
 
         // WR-002 / SG-001: record the burst as Published ONLY when every post genuinely reached the feed. A post
         // that comes back Invalid (which also covers an unresolved persona handle — SG-001) or ScopeUnresolved
@@ -1294,8 +1391,8 @@ public sealed partial class EngineReviewService
     private static bool IsPublishFullySuccessful(EngineBurstPublishResult result) =>
         result.Posts.Count > 0 && result.Posts.All(p => p.Outcome == EnginePublishOutcome.Published);
 
-    /// <summary>Publishes the burst through story 01's single funnel (one decision per burst, SOC-003), resolving persona handles + server scenario time, and returns the per-post outcome so the caller can gate on genuine success (WR-002).</summary>
-    private async Task<EngineBurstPublishResult> PublishBurstAsync(
+    /// <summary>Prepares the burst for story 01's single publish funnel (one decision per burst, SOC-003), resolving persona handles + server scenario time. The caller hands it to <see cref="IEnginePublishService.PublishBurstAsync"/> and gates on the per-post outcome (WR-002); preparing it separately lets the automatic path re-check the provider cut immediately before that call.</summary>
+    private async Task<EngineBurst> PrepareBurstAsync(
         EngineReviewItemEntity item,
         Guid exerciseId,
         EngineReviewActionInput? input,
@@ -1322,7 +1419,7 @@ public sealed partial class EngineReviewService
 
         // S-1: an approved ambient draft is still ambient chatter — tag it so the AAR can tell it apart.
         var ambient = IsAmbientDraft(item);
-        var burst = new EngineBurst
+        return new EngineBurst
         {
             ExerciseId = exerciseId,
             StorylineId = item.StorylineId,
@@ -1332,8 +1429,6 @@ public sealed partial class EngineReviewService
             Trigger = ambient ? EngineEventPayloads.AmbientFloorTrigger : null,
             PublishPath = ambient ? EngineEventPayloads.PublishPathAmbientReviewed : null,
         };
-
-        return await _publisher.PublishBurstAsync(burst, cancellationToken);
     }
 
     /// <summary>Resolves the burst's persona handles to their scoped persona-instance ids (keyed by the '@'-stripped handle).</summary>

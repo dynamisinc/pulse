@@ -19,14 +19,26 @@
  * never colour alone. It stays mounted for as long as `swampedMode` is true;
  * there is no dismiss.
  *
+ * PHASE 1 GOVERNANCE (PROVIDER-GOVERNANCE §8). When the engine settings report
+ * `timeoutAutoSendAuthorized === false`, the server refuses swamped mode ON, so
+ * the ON control is DISABLED (it is a real control that cannot work here yet,
+ * not a role gate) with a text + icon note it is described by. Turning an
+ * already-on switch OFF is never blocked.
+ *
  * The hook backing this (`useSwampedMode`) does all of the gating/telemetry —
  * this component only renders its state and calls its setter.
  */
 
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import { faTriangleExclamation, faToggleOn, faToggleOff } from '@fortawesome/free-solid-svg-icons'
+import {
+  faCircleInfo,
+  faTriangleExclamation,
+  faToggleOn,
+  faToggleOff,
+} from '@fortawesome/free-solid-svg-icons'
 import { Box, Stack, Typography } from '@mui/material'
 import { useSwampedMode } from '../hooks/useSwampedMode'
+import { useEngineSettings } from '../hooks/useEngineSettings'
 // D5 dark operator-chrome tokens (matches `ReviewQueue`'s `chrome`). Staff-only.
 import { consoleChrome as chrome } from '../../consoleChrome'
 import { useCanControl } from '../../access'
@@ -34,6 +46,12 @@ import { useCanControl } from '../../access'
 export function SwampedModeToggle() {
   const { swampedMode, isLead, setSwampedMode } = useSwampedMode()
   const canControl = useCanControl()
+  const settings = useEngineSettings().settings
+  // Hold-on-cut (ADP-042): while cut to Fake, expiries hold even under swamped mode.
+  const providerCutToFake = settings?.providerCutToFake ?? false
+  // Phase 1 (PROVIDER-GOVERNANCE §8): the server refuses swamped ON while the
+  // governed flag is false. Only an explicit `false` disables; OFF stays open.
+  const onRefused = settings?.timeoutAutoSendAuthorized === false && !swampedMode
 
   return (
     <Stack
@@ -52,6 +70,8 @@ export function SwampedModeToggle() {
           data-testid="swamped-mode-enable-toggle"
           role="switch"
           aria-checked={swampedMode}
+          disabled={onRefused}
+          aria-describedby={onRefused ? 'swamped-mode-not-authorized-note' : undefined}
           aria-label={
             swampedMode
               ? 'Swamped mode is on — turn off timeout auto-send'
@@ -74,11 +94,30 @@ export function SwampedModeToggle() {
             cursor: 'pointer',
             alignSelf: 'flex-start',
             '&:hover': { borderColor: chrome.amber },
+            '&:disabled': {
+              cursor: 'not-allowed',
+              color: chrome.inkFaint,
+              borderColor: chrome.line,
+            },
           }}
         >
           <FontAwesomeIcon icon={swampedMode ? faToggleOn : faToggleOff} aria-hidden="true" />
           Swamped mode: {swampedMode ? 'ON' : 'OFF'}
         </Box>
+      )}
+
+      {canControl && isLead && onRefused && (
+        <Stack
+          direction="row"
+          id="swamped-mode-not-authorized-note"
+          data-testid="swamped-mode-not-authorized-note"
+          sx={{ alignItems: 'center', gap: 0.75 }}
+        >
+          <FontAwesomeIcon icon={faCircleInfo} color={chrome.inkMuted} aria-hidden="true" />
+          <Typography component="span" sx={{ fontSize: 10.5, color: chrome.inkMuted }}>
+            Timeout auto-send is off until the lead-controller role ships.
+          </Typography>
+        </Stack>
       )}
 
       {/* The persistent on-state indicator — text + icon, never colour alone
@@ -105,10 +144,12 @@ export function SwampedModeToggle() {
             component="span"
             sx={{ fontSize: 11, fontWeight: 800, letterSpacing: '0.04em', color: chrome.amber }}
           >
-            TIMEOUT AUTO-SEND IS ACTIVE
+            {providerCutToFake ? 'TIMEOUT AUTO-SEND IS SUSPENDED' : 'TIMEOUT AUTO-SEND IS ACTIVE'}
           </Typography>
           <Typography component="span" sx={{ fontSize: 10.5, color: chrome.inkMuted }}>
-            — swamped mode is on; expired timers publish instead of holding.
+            {providerCutToFake
+              ? '— swamped mode is on, but auto-send is SUSPENDED while generation is cut to Fake; expired timers hold.'
+              : '— swamped mode is on; expired timers publish instead of holding.'}
           </Typography>
         </Stack>
       )}

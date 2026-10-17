@@ -623,8 +623,13 @@ Open **ENGINE** on the toolstrip to see and change the engine settings.
 - Fully automatic posting cannot be selected in this version.
 
 **Swamped mode** (in the engine bar) is the only way an undecided burst posts when its countdown ends. Only the
-exercise's lead controller can turn it on. While it is on, a **TIMEOUT AUTO-SEND IS ACTIVE** banner stays on screen.
+exercise's lead controller can turn it on. While it is on, a **TIMEOUT AUTO-SEND IS ACTIVE** banner stays on screen. If generation is cut to Fake, the banner reads **TIMEOUT AUTO-SEND IS SUSPENDED** instead, and expired timers hold.
 Use it only when the lead decides the cell cannot keep up.
+
+> **Phase 1:** Swamped mode cannot be turned on yet. Until the lead-controller role ships, the **Swamped mode**
+> control is greyed out with the note "Timeout auto-send is off until the lead-controller role ships.", and Pulse
+> refuses the request if it is sent anyway. Every undecided burst whose countdown ends is held for you. Turning
+> Swamped mode off always works.
 
 ### The engine switch (kill switch)
 
@@ -713,6 +718,10 @@ ambient adds nothing for it.
 The **ENGINE** panel shows **RUNNING ON:** and the provider in use. **Cut to Fake** switches the exercise to the
 offline generator without a restart; it is greyed out today because the exercise is already on Fake. The **USAGE**
 tool shows the provider, model and call counts; select **Refresh** to update it.
+
+While the exercise is cut to Fake, Swamped mode does not post anything on its own: a burst whose countdown ends is
+**held** for you, as if Swamped mode were off. Bursts you approve still post. A burst held during a cut stays held
+after you restore the provider; approve or veto it yourself.
 
 ### Steering a storyline
 

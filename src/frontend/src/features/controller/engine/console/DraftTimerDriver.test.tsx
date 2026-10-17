@@ -26,7 +26,7 @@ import { act, render, renderHook, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { resetExerciseClock, setExerciseClock } from '@/core/clock'
 import { useExerciseContext, type ExerciseScope } from '@/core/exerciseContext'
-import { resetTelemetryBuffer } from '@/core/telemetry'
+import { getEmittedTelemetryEvents, resetTelemetryBuffer } from '@/core/telemetry'
 import { listPosts, toParticipantView } from '@/features/social'
 import { postStore } from '@/features/social/services/postStore'
 import { useControllerIdentity, type ControllerIdentity } from '../../identity/controllerIdentity'
@@ -263,5 +263,32 @@ describe('DraftTimerDriver — the clamp-suspends-swamped composition (REAL useE
 
     await waitFor(() => expect(itemDisposition()).toBe(DraftDisposition.Held))
     expect(postStore.getPosts()).toHaveLength(baseline)
+  })
+})
+
+describe('DraftTimerDriver — hold-on-cut (ADP-042): swamped + expired + provider cut to Fake', () => {
+  it('holds, publishes nothing, and logs no auto-send telemetry', async () => {
+    const countdown = makeCountdown()
+    reviewStore.appendItem(makeItem(countdown))
+    const baseline = baselinePostCount()
+
+    render(
+      <DraftTimerDriver
+        item={makeItem(countdown)}
+        countdown={countdown}
+        swampedMode={true}
+        effective={runningAutonomy(AutonomyLevel.DelayedAuto)}
+        providerCutToFake={true}
+        ctx={CTX}
+      />,
+    )
+
+    await waitFor(() => expect(itemDisposition()).toBe(DraftDisposition.Held))
+    expect(postStore.getPosts()).toHaveLength(baseline)
+    const events = getEmittedTelemetryEvents()
+    expect(events.some(e => e.eventType === 'post')).toBe(false)
+    const reviewed = events.filter(e => e.eventType === 'engine.reviewed')
+    expect(reviewed).toHaveLength(1)
+    expect(reviewed[0]?.payload).toMatchObject({ action: 'hold-on-expiry' })
   })
 })

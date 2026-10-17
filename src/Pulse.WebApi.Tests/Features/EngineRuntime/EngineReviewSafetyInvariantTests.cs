@@ -143,6 +143,280 @@ public sealed class EngineReviewSafetyInvariantTests
         item.Disposition.Should().Be(DraftDisposition.Held);
     }
 
+    // ==== (b') Hold-on-cut: a provider cut to Fake suspends the swamped auto-send (ADP-042) ==========
+
+    [Fact]
+    public async Task AutoHold_CutToFake_HoldsEvenUnderSwampedMode_WhileUncutSiblingExerciseStillAutoSends()
+    {
+        // Two exercises share ONE process-wide cut registry (as in production); only A is cut.
+        var cuts = new GenerationProviderCutRegistry();
+        var exerciseA = Guid.NewGuid();
+        var exerciseB = Guid.NewGuid();
+        var itemA = Countdown(exerciseA, started: 0, minutes: 3);
+        var itemB = Countdown(exerciseB, started: 0, minutes: 3);
+        using var harnessA = new Harness(exerciseA, new[] { itemA }, cuts);
+        using var harnessB = new Harness(exerciseB, new[] { itemB }, cuts);
+
+        foreach (var (harness, item, exerciseId) in new[] { (harnessA, itemA, exerciseA), (harnessB, itemB, exerciseB) })
+        {
+            var state = harness.Registry.GetOrCreate(exerciseId);
+            state.SetStorylineOverride(item.StorylineId, AutonomyLevel.DelayedAuto, "lead-1", 0);
+            state.SetSwampedMode(enabled: true, "lead-1", 0);
+            harness.Advance(minutes: 4);
+        }
+
+        // The live draft was generated (and its countdown started) BEFORE the cut.
+        cuts.Cut(exerciseA);
+
+        await harnessA.Service.EvaluateAutoHoldAsync();
+        await harnessB.Service.EvaluateAutoHoldAsync();
+
+        harnessA.Publisher.Bursts.Should().BeEmpty(
+            "while an exercise is cut to Fake, a pre-cut Delayed-auto draft must never auto-send — even under swamped mode");
+        itemA.Disposition.Should().Be(DraftDisposition.Held, "the expiry resolves to the ordinary 'timer expired — held for you'");
+        var reviewedA = await harnessA.ReviewedEventsAsync(itemA.DraftId);
+        Action(reviewedA.Should().ContainSingle("exactly one engine.reviewed per decision").Subject).Should().Be("hold-on-expiry");
+        reviewedA[0].Actor.ActingHumanId.Should().BeNull("a hold-on-cut is still silence, not a human decision");
+
+        harnessB.Publisher.Bursts.Should().ContainSingle("the cut is per-exercise (COR-001) — an uncut sibling keeps its swamped auto-send")
+            .Which.DraftId.Should().Be(itemB.DraftId);
+        itemB.Disposition.Should().Be(DraftDisposition.Published);
+        Action((await harnessB.ReviewedEventsAsync(itemB.DraftId)).Should().ContainSingle().Subject).Should().Be("auto-send");
+    }
+
+    [Fact]
+    public async Task AutoHold_AfterRestore_HeldCountdownStaysHeld_NewExpiryResumesSwampedAutoSend()
+    {
+        var exerciseId = Guid.NewGuid();
+        var heldDuringCut = Countdown(exerciseId, started: 0, minutes: 3);
+        var laterCountdown = Countdown(exerciseId, started: 0, minutes: 6);
+        using var harness = Build(exerciseId, heldDuringCut, laterCountdown);
+
+        var state = harness.Registry.GetOrCreate(exerciseId);
+        state.SetStorylineOverride(heldDuringCut.StorylineId, AutonomyLevel.DelayedAuto, "lead-1", 0);
+        state.SetStorylineOverride(laterCountdown.StorylineId, AutonomyLevel.DelayedAuto, "lead-1", 0);
+        state.SetSwampedMode(enabled: true, "lead-1", 0);
+
+        harness.ProviderCut.Cut(exerciseId);
+        harness.Advance(minutes: 4);
+        await harness.Service.EvaluateAutoHoldAsync();
+        heldDuringCut.Disposition.Should().Be(DraftDisposition.Held);
+        laterCountdown.Disposition.Should().Be(DraftDisposition.CountingDown, "its deadline has not passed yet");
+
+        harness.ProviderCut.Restore(exerciseId);
+        harness.Advance(minutes: 3);
+        await harness.Service.EvaluateAutoHoldAsync();
+
+        heldDuringCut.Disposition.Should().Be(DraftDisposition.Held, "a countdown already resolved to HOLD stays held after a restore");
+        Action((await harness.ReviewedEventsAsync(heldDuringCut.DraftId)).Should().ContainSingle(
+            "the restore never re-resolves a held countdown — its one hold-on-expiry decision is the only engine.reviewed").Subject)
+            .Should().Be("hold-on-expiry");
+        harness.Publisher.Bursts.Should().ContainSingle("after the restore the ordinary swamped-mode rule resumes for still-running countdowns")
+            .Which.DraftId.Should().Be(laterCountdown.DraftId);
+        laterCountdown.Disposition.Should().Be(DraftDisposition.Published);
+    }
+
+    [Fact]
+    public async Task AutoHold_CutLandsMidTick_LaterExpiredItemHolds_NotPublished()
+    {
+        var exerciseId = Guid.NewGuid();
+        var first = Countdown(exerciseId, started: 0, minutes: 3);
+        var second = Countdown(exerciseId, started: 0, minutes: 3);
+        using var harness = Build(exerciseId, first, second);
+
+        var state = harness.Registry.GetOrCreate(exerciseId);
+        state.SetStorylineOverride(first.StorylineId, AutonomyLevel.DelayedAuto, "lead-1", 0);
+        state.SetStorylineOverride(second.StorylineId, AutonomyLevel.DelayedAuto, "lead-1", 0);
+        state.SetSwampedMode(enabled: true, "lead-1", 0);
+        harness.Advance(minutes: 4);
+
+        // The controller cuts to Fake while the swamped tick is awaiting the FIRST burst's publish.
+        harness.Publisher.OnPublish = _ => harness.ProviderCut.Cut(exerciseId);
+
+        await harness.Service.EvaluateAutoHoldAsync();
+
+        var published = harness.Publisher.Bursts.Should().ContainSingle(
+            "only the burst whose publish was already under way when the cut landed reaches the feed").Subject;
+        var (sent, held) = published.DraftId == first.DraftId ? (first, second) : (second, first);
+
+        sent.Disposition.Should().Be(DraftDisposition.Published);
+        Action((await harness.ReviewedEventsAsync(sent.DraftId)).Should().ContainSingle().Subject).Should().Be("auto-send");
+
+        held.Disposition.Should().Be(
+            DraftDisposition.Held,
+            "a cut that lands mid-tick holds every later expiry — the cut is re-checked before each auto-send publish");
+        var reviewed = await harness.ReviewedEventsAsync(held.DraftId);
+        Action(reviewed.Should().ContainSingle("exactly one engine.reviewed per resolution").Subject).Should().Be("hold-on-expiry");
+        reviewed[0].Actor.ActingHumanId.Should().BeNull("a hold-on-cut is silence, not a human decision");
+    }
+
+    [Fact]
+    public async Task AutoHold_CutCompletesWhileQueueIsRetrieved_ExpiredItemHolds_NotPublished()
+    {
+        var exerciseId = Guid.NewGuid();
+        var item = Countdown(exerciseId, started: 0, minutes: 3);
+        using var harness = Build(exerciseId, item);
+
+        var state = harness.Registry.GetOrCreate(exerciseId);
+        state.SetStorylineOverride(item.StorylineId, AutonomyLevel.DelayedAuto, "lead-1", 0);
+        state.SetSwampedMode(enabled: true, "lead-1", 0);
+        harness.Advance(minutes: 4);
+
+        // The tick has already read "not cut"; the cut completes while the queue query is being awaited.
+        harness.Store.OnGetQueue = () => harness.ProviderCut.Cut(exerciseId);
+
+        await harness.Service.EvaluateAutoHoldAsync();
+
+        harness.Publisher.Bursts.Should().BeEmpty(
+            "a cut that completes before the auto-send publish holds the expiry — the cut is re-checked at the last boundary");
+        item.Disposition.Should().Be(DraftDisposition.Held);
+        Action((await harness.ReviewedEventsAsync(item.DraftId)).Should().ContainSingle("exactly one engine.reviewed per resolution").Subject)
+            .Should().Be("hold-on-expiry");
+    }
+
+    [Fact]
+    public async Task AutoHold_CutCompletesDuringPersonaLookup_ExpiredItemHolds_NotPublished()
+    {
+        var exerciseId = Guid.NewGuid();
+        var item = Countdown(exerciseId, started: 0, minutes: 3);
+        using var harness = Build(exerciseId, item);
+
+        var state = harness.Registry.GetOrCreate(exerciseId);
+        state.SetStorylineOverride(item.StorylineId, AutonomyLevel.DelayedAuto, "lead-1", 0);
+        state.SetSwampedMode(enabled: true, "lead-1", 0);
+        harness.Advance(minutes: 4);
+
+        // The item has been re-read as still expired and undecided; the cut completes while the burst's persona
+        // handles are being resolved: after every earlier re-check, before the publisher is invoked (PR #571).
+        harness.Db.OnPersonaLookup = () => harness.ProviderCut.Cut(exerciseId);
+
+        await harness.Service.EvaluateAutoHoldAsync();
+
+        harness.Db.PersonaLookups.Should().BePositive("the cut must land during the persona lookup for this to prove anything");
+        harness.Publisher.Bursts.Should().BeEmpty(
+            "the cut is re-read as the last statement before the publisher call, so a cut completing mid-lookup holds the expiry");
+        item.Disposition.Should().Be(DraftDisposition.Held);
+        var reviewed = await harness.ReviewedEventsAsync(item.DraftId);
+        Action(reviewed.Should().ContainSingle("exactly one engine.reviewed per resolution").Subject).Should().Be("hold-on-expiry");
+        reviewed[0].Actor.ActingHumanId.Should().BeNull("a hold-on-cut is silence, not a human decision");
+        item.ActionLabel.Should().Be("reply → @mvega_fh", "nothing was attempted, so no 'check the feed' publish reason is recorded");
+    }
+
+    // The whole auto-send policy is re-decided at the last boundary (PR #571): a safety change that completes while
+    // the burst's persona handles are resolved stops the publish, resolving as the up-front policy would.
+
+    [Fact]
+    public async Task AutoHold_KillSwitchDropToSuggestDuringPersonaLookup_Holds_NotPublished()
+    {
+        var exerciseId = Guid.NewGuid();
+        var item = Countdown(exerciseId, started: 0, minutes: 3);
+        using var harness = Build(exerciseId, item);
+        var state = SwampedDelayedAuto(harness, exerciseId, item);
+
+        harness.Db.OnPersonaLookup = () => state.EngageKillSwitch(KillSwitchMode.DropToSuggest, "lead-1", 4);
+
+        await harness.Service.EvaluateAutoHoldAsync();
+
+        harness.Db.PersonaLookups.Should().BePositive("the kill switch must land during the persona lookup for this to prove anything");
+        harness.Publisher.Bursts.Should().BeEmpty("the effective autonomy is re-read immediately before the publisher call");
+        item.Disposition.Should().Be(DraftDisposition.Held);
+        Action((await harness.ReviewedEventsAsync(item.DraftId)).Should().ContainSingle("exactly one engine.reviewed per resolution").Subject)
+            .Should().Be("hold-on-expiry");
+    }
+
+    [Fact]
+    public async Task AutoHold_KillSwitchFullStopDuringPersonaLookup_Holds_NotPublished()
+    {
+        var exerciseId = Guid.NewGuid();
+        var item = Countdown(exerciseId, started: 0, minutes: 3);
+        using var harness = Build(exerciseId, item);
+        var state = SwampedDelayedAuto(harness, exerciseId, item);
+
+        harness.Db.OnPersonaLookup = () => state.EngageKillSwitch(KillSwitchMode.FullStop, "lead-1", 4);
+
+        await harness.Service.EvaluateAutoHoldAsync();
+
+        harness.Db.PersonaLookups.Should().BePositive("the full stop must land during the persona lookup for this to prove anything");
+        harness.Publisher.Bursts.Should().BeEmpty("a full stop found at the last boundary stops the automatic publish");
+        item.Disposition.Should().Be(
+            DraftDisposition.Held,
+            "an expired countdown under a full stop is an ordinary hold-on-expiry (safety fix D5), never left to auto-send after a restore");
+        Action((await harness.ReviewedEventsAsync(item.DraftId)).Should().ContainSingle("exactly one engine.reviewed per resolution").Subject)
+            .Should().Be("hold-on-expiry");
+    }
+
+    [Fact]
+    public async Task AutoHold_FullStopSeenUpFront_HoldsTheExpiredCountdown_NotPublished()
+    {
+        var exerciseId = Guid.NewGuid();
+        var item = Countdown(exerciseId, started: 0, minutes: 3);
+        using var harness = Build(exerciseId, item);
+        var state = SwampedDelayedAuto(harness, exerciseId, item);
+        state.EngageKillSwitch(KillSwitchMode.FullStop, "lead-1", 0);
+
+        await harness.Service.EvaluateAutoHoldAsync();
+
+        harness.Publisher.Bursts.Should().BeEmpty();
+        item.Disposition.Should().Be(DraftDisposition.Held, "an expired countdown under a full stop holds (safety fix D5)");
+        Action((await harness.ReviewedEventsAsync(item.DraftId)).Should().ContainSingle().Subject).Should().Be("hold-on-expiry");
+    }
+
+    [Fact]
+    public async Task AutoHold_SwampedModeTurnedOffDuringPersonaLookup_Holds_NotPublished()
+    {
+        var exerciseId = Guid.NewGuid();
+        var item = Countdown(exerciseId, started: 0, minutes: 3);
+        using var harness = Build(exerciseId, item);
+        var state = SwampedDelayedAuto(harness, exerciseId, item);
+
+        harness.Db.OnPersonaLookup = () => state.SetSwampedMode(enabled: false, "lead-1", 4);
+
+        await harness.Service.EvaluateAutoHoldAsync();
+
+        harness.Db.PersonaLookups.Should().BePositive("swamped-off must land during the persona lookup for this to prove anything");
+        harness.Publisher.Bursts.Should().BeEmpty("swamped mode is re-read immediately before the publisher call");
+        item.Disposition.Should().Be(DraftDisposition.Held);
+        Action((await harness.ReviewedEventsAsync(item.DraftId)).Should().ContainSingle("exactly one engine.reviewed per resolution").Subject)
+            .Should().Be("hold-on-expiry");
+    }
+
+    [Fact]
+    public async Task AutoHold_DegradedClampDuringPersonaLookup_Holds_NotPublished()
+    {
+        var exerciseId = Guid.NewGuid();
+        var item = Countdown(exerciseId, started: 0, minutes: 3);
+        using var harness = Build(exerciseId, item);
+        var state = SwampedDelayedAuto(harness, exerciseId, item);
+
+        harness.Db.OnPersonaLookup = () => state.DegradeToSuggest("generation provider circuit opened", 4);
+
+        await harness.Service.EvaluateAutoHoldAsync();
+
+        harness.Db.PersonaLookups.Should().BePositive("the degraded clamp must land during the persona lookup for this to prove anything");
+        harness.Publisher.Bursts.Should().BeEmpty("the degraded clamp is re-read immediately before the publisher call");
+        item.Disposition.Should().Be(DraftDisposition.Held);
+        Action((await harness.ReviewedEventsAsync(item.DraftId)).Should().ContainSingle("exactly one engine.reviewed per resolution").Subject)
+            .Should().Be("hold-on-expiry");
+    }
+
+    [Fact]
+    public async Task Approve_WhileCutToFake_StillPublishes()
+    {
+        var exerciseId = Guid.NewGuid();
+        var item = Countdown(exerciseId, started: 0, minutes: 5);
+        using var harness = Build(exerciseId, item);
+        harness.ProviderCut.Cut(exerciseId);
+
+        var result = await harness.Service.ApproveAsync(item.DraftId, Input("controller-7"));
+
+        result.Outcome.Should().Be(EngineReviewOutcome.Ok);
+        harness.Publisher.Bursts.Should().ContainSingle(
+            "hold-on-cut suspends only the timeout auto-send — an explicit approve still publishes")
+            .Which.DraftId.Should().Be(item.DraftId);
+        item.Disposition.Should().Be(DraftDisposition.Published);
+        Action((await harness.ReviewedEventsAsync(item.DraftId)).Should().ContainSingle().Subject).Should().Be("approve");
+    }
+
     // ==== (c) Kill switch + degraded clamp only LOWER; suspend countdowns; never auto-recover =========
 
     [Fact]
@@ -430,6 +704,88 @@ public sealed class EngineReviewSafetyInvariantTests
             "edit", "the approve/edit distinction is telemetry-only (same 'engine' publish origin)");
     }
 
+    // ==== Phase 1 (PROVIDER-GOVERNANCE §8): timeout auto-send NOT authorised =============================
+
+    [Fact]
+    public async Task SwampedMode_TurnOn_WhileTimeoutAutoSendNotAuthorized_IsRefused_StateUnchanged()
+    {
+        var exerciseId = Guid.NewGuid();
+        using var harness = new Harness(exerciseId, Array.Empty<EngineReviewItemEntity>(), timeoutAutoSendAuthorized: false);
+
+        var result = await harness.Service.SetSwampedModeAsync(enabled: true, Input("lead-1"));
+
+        result.Outcome.Should().Be(EngineReviewOutcome.Invalid, "raising toward unreviewed timeout publishes is refused in Phase 1");
+        result.ValidationError.Should().Be(
+            "timeout auto-send (swamped mode) is not authorized on this environment until the lead-controller gate lands "
+            + "(PROVIDER-GOVERNANCE §8, Phase 1)");
+        harness.Registry.GetOrCreate(exerciseId).SwampedModeEnabled.Should().BeFalse("a refused request changes nothing");
+    }
+
+    [Fact]
+    public async Task SwampedMode_TurnOff_WhileTimeoutAutoSendNotAuthorized_Succeeds()
+    {
+        var exerciseId = Guid.NewGuid();
+        using var harness = new Harness(exerciseId, Array.Empty<EngineReviewItemEntity>(), timeoutAutoSendAuthorized: false);
+        harness.Registry.GetOrCreate(exerciseId).SetSwampedMode(enabled: true, "lead-1", 0); // forced on (test hook)
+
+        var result = await harness.Service.SetSwampedModeAsync(enabled: false, Input("lead-1"));
+
+        result.Outcome.Should().Be(EngineReviewOutcome.Ok, "lowering is never refused (§8.2)");
+        result.State!.SwampedMode.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task AutoHold_SwampedForcedOn_DelayedAuto_Expired_WhileNotAuthorized_Holds_NeverPublishes()
+    {
+        var exerciseId = Guid.NewGuid();
+        var item = Countdown(exerciseId, started: 0, minutes: 3);
+        using var harness = new Harness(exerciseId, new[] { item }, timeoutAutoSendAuthorized: false);
+
+        // Swamped mode forced on through the in-memory registry (bypassing the refused POST) — defence in depth.
+        SwampedDelayedAuto(harness, exerciseId, item);
+
+        await harness.Service.EvaluateAutoHoldAsync();
+
+        harness.Publisher.Bursts.Should().BeEmpty(
+            "with timeout auto-send unauthorised, an expired countdown never auto-sends even if swamped mode is on");
+        item.Disposition.Should().Be(DraftDisposition.Held, "the draft holds for a human (NEEDS YOU)");
+        Action((await harness.ReviewedEventsAsync(item.DraftId)).Should().ContainSingle().Subject).Should().Be("hold-on-expiry");
+    }
+
+    [Fact]
+    public async Task AutoHold_SwampedForcedOn_DelayedAuto_Expired_WhileAuthorized_AutoSends()
+    {
+        var exerciseId = Guid.NewGuid();
+        var item = Countdown(exerciseId, started: 0, minutes: 3);
+        using var harness = new Harness(exerciseId, new[] { item }, timeoutAutoSendAuthorized: true);
+        SwampedDelayedAuto(harness, exerciseId, item);
+
+        await harness.Service.EvaluateAutoHoldAsync();
+
+        harness.Publisher.Bursts.Should().ContainSingle("with the flag true the existing swamped-mode behaviour is unchanged");
+        item.Disposition.Should().Be(DraftDisposition.Published);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task GetSettings_ExposesTimeoutAutoSendAuthorized(bool authorized)
+    {
+        var exerciseId = Guid.NewGuid();
+        using var harness = new Harness(exerciseId, Array.Empty<EngineReviewItemEntity>(), timeoutAutoSendAuthorized: authorized);
+
+        var result = await harness.Service.GetSettingsAsync();
+
+        result.Outcome.Should().Be(EngineReviewOutcome.Ok);
+        result.Settings!.TimeoutAutoSendAuthorized.Should().Be(authorized, "the console disables swamped ON from this field");
+    }
+
+    [Fact]
+    public void TimeoutAutoSendAuthorized_DefaultsFalse_WhenGovernanceAbsent()
+    {
+        new EngineAmbientGovernanceOptions().TimeoutAutoSendAuthorized.Should().BeFalse("fail closed (PROVIDER-GOVERNANCE §8, Phase 1)");
+    }
+
     // ==== helpers ====================================================================================
 
     private static EngineReviewActionInput Input(string actingHumanId) => new(actingHumanId, "America/Chicago");
@@ -441,6 +797,16 @@ public sealed class EngineReviewSafetyInvariantTests
     }
 
     private static Harness Build(Guid exerciseId, params EngineReviewItemEntity[] items) => new(exerciseId, items);
+
+    /// <summary>Puts the item on the sole auto-send path (Delayed-auto + swamped mode) and advances past its expiry.</summary>
+    private static EngineAutonomyState SwampedDelayedAuto(Harness harness, Guid exerciseId, EngineReviewItemEntity item)
+    {
+        var state = harness.Registry.GetOrCreate(exerciseId);
+        state.SetStorylineOverride(item.StorylineId, AutonomyLevel.DelayedAuto, "lead-1", 0);
+        state.SetSwampedMode(enabled: true, "lead-1", 0);
+        harness.Advance(minutes: 4);
+        return state;
+    }
 
     private static EngineReviewItemEntity Queued(Guid exerciseId) => new()
     {
@@ -482,17 +848,28 @@ public sealed class EngineReviewSafetyInvariantTests
     /// </summary>
     private sealed class Harness : IDisposable
     {
-        private readonly PulseDbContext _db;
         private readonly ManualTimeProvider _time;
 
-        public Harness(Guid exerciseId, EngineReviewItemEntity[] items)
+        /// <param name="exerciseId">The resolved exercise scope.</param>
+        /// <param name="items">The seeded review items.</param>
+        /// <param name="providerCut">An optional shared cut registry.</param>
+        /// <param name="timeoutAutoSendAuthorized">
+        /// The governed <c>Generation:Governance:TimeoutAutoSendAuthorized</c> flag. This suite's swamped/auto-send
+        /// invariants are proven under the AUTHORISED posture, so the default here is an explicit <c>true</c>; the
+        /// Phase-1 refusal tests pass <c>false</c> (production's committed default, PROVIDER-GOVERNANCE §8).
+        /// </param>
+        public Harness(
+            Guid exerciseId,
+            EngineReviewItemEntity[] items,
+            GenerationProviderCutRegistry? providerCut = null,
+            bool timeoutAutoSendAuthorized = true)
         {
             var context = new ExerciseContext { CurrentExerciseId = exerciseId };
 
             var options = new DbContextOptionsBuilder<PulseDbContext>()
                 .UseInMemoryDatabase(Guid.NewGuid().ToString())
                 .Options;
-            _db = new PulseDbContext(options, context);
+            Db = new HookedPulseDbContext(options, context);
 
             _time = new ManualTimeProvider(ScenarioStart);
             var clock = new ExerciseClockService(_time);
@@ -501,10 +878,12 @@ public sealed class EngineReviewSafetyInvariantTests
             Publisher = new RecordingPublishService();
             Registry = new EngineAutonomyRegistry();
             TierPolicy = new EngineTierPolicyRegistry();
+            ProviderCut = providerCut ?? new GenerationProviderCutRegistry();
 
+            Store = new FakeReviewStore(items);
             Service = new EngineReviewService(
-                new FakeReviewStore(items),
-                _db,
+                Store,
+                Db,
                 context,
                 clock,
                 new EngineTelemetryEmitter(),
@@ -514,28 +893,67 @@ public sealed class EngineReviewSafetyInvariantTests
                 TierPolicy,
                 new FakeGenerationProvider(),
                 Options.Create(new GenerationOptions()),
-                new GenerationProviderCutRegistry(),
-                NullLogger<EngineReviewService>.Instance);
+                ProviderCut,
+                NullLogger<EngineReviewService>.Instance,
+                ambientPolicy: null,
+                governance: Options.Create(new EngineAmbientGovernanceOptions { TimeoutAutoSendAuthorized = timeoutAutoSendAuthorized }));
         }
 
         public EngineReviewService Service { get; }
 
+        /// <summary>The in-memory context the service writes through (telemetry sink + persona lookup seam).</summary>
+        public HookedPulseDbContext Db { get; }
+
         public RecordingPublishService Publisher { get; }
+
+        public FakeReviewStore Store { get; }
 
         public EngineAutonomyRegistry Registry { get; }
 
         public EngineTierPolicyRegistry TierPolicy { get; }
 
+        public GenerationProviderCutRegistry ProviderCut { get; }
+
         public void Advance(int minutes) => _time.Advance(TimeSpan.FromMinutes(minutes));
 
         public async Task<List<TelemetryEvent>> ReviewedEventsAsync(Guid draftId) =>
-            await _db.TelemetryEvents
+            await Db.TelemetryEvents
                 .IgnoreQueryFilters()
                 .Where(e => e.EventType == "engine.reviewed"
                     && e.Target != null && e.Target.EntityId == draftId.ToString())
                 .ToListAsync();
 
-        public void Dispose() => _db.Dispose();
+        public void Dispose() => Db.Dispose();
+    }
+
+    /// <summary>
+    /// The real <see cref="PulseDbContext"/> with one test seam: <see cref="OnPersonaLookup"/> runs when the
+    /// <see cref="PulseDbContext.Personas"/> set is taken for a query (the review service's persona-handle
+    /// resolution), so a test can complete a provider cut in the middle of that lookup.
+    /// </summary>
+    private sealed class HookedPulseDbContext : PulseDbContext
+    {
+        public HookedPulseDbContext(DbContextOptions<PulseDbContext> options, IExerciseContext exerciseContext)
+            : base(options, exerciseContext)
+        {
+        }
+
+        /// <summary>An optional side effect run each time the persona set is taken (e.g. a cut completing mid-lookup).</summary>
+        public Action? OnPersonaLookup { get; set; }
+
+        /// <summary>How many times the persona set was taken.</summary>
+        public int PersonaLookups { get; private set; }
+
+        public override DbSet<TEntity> Set<TEntity>()
+        {
+            if (typeof(TEntity) == typeof(Persona))
+            {
+                PersonaLookups++;
+                OnPersonaLookup?.Invoke();
+            }
+
+            return base.Set<TEntity>();
+        }
     }
 
     /// <summary>An in-memory <see cref="IEngineReviewStore"/> keyed by draft id — returns the same entity instances the tests hold.</summary>
@@ -552,8 +970,14 @@ public sealed class EngineReviewSafetyInvariantTests
             return Task.CompletedTask;
         }
 
-        public Task<IReadOnlyList<EngineReviewItemEntity>> GetQueueAsync(CancellationToken cancellationToken = default) =>
-            Task.FromResult<IReadOnlyList<EngineReviewItemEntity>>(_items.Values.ToList());
+        /// <summary>An optional side effect run while the queue is being retrieved (e.g. a cut completing during the await).</summary>
+        public Action? OnGetQueue { get; set; }
+
+        public Task<IReadOnlyList<EngineReviewItemEntity>> GetQueueAsync(CancellationToken cancellationToken = default)
+        {
+            OnGetQueue?.Invoke();
+            return Task.FromResult<IReadOnlyList<EngineReviewItemEntity>>(_items.Values.ToList());
+        }
 
         public Task<EngineReviewItemEntity?> FindAsync(Guid draftId, CancellationToken cancellationToken = default) =>
             Task.FromResult(_items.GetValueOrDefault(draftId));
@@ -584,9 +1008,13 @@ public sealed class EngineReviewSafetyInvariantTests
     {
         public List<EngineBurst> Bursts { get; } = new();
 
+        /// <summary>An optional side effect run on each publish (e.g. a cut to Fake landing mid-tick).</summary>
+        public Action<EngineBurst>? OnPublish { get; set; }
+
         public Task<EngineBurstPublishResult> PublishBurstAsync(EngineBurst burst, CancellationToken cancellationToken = default)
         {
             Bursts.Add(burst);
+            OnPublish?.Invoke(burst);
             return Task.FromResult(new EngineBurstPublishResult
             {
                 Posts = burst.Posts

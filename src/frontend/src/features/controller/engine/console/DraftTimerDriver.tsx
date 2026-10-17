@@ -33,13 +33,22 @@
  * precedence in `autoHoldPolicy`/`useDraftTimer` doing its job with the real
  * `effective` value passed in.
  *
+ * LIVE MODE (`!USE_MOCK_DATA`) - DISPLAY-ONLY. Everything above describes MOCK mode. Live,
+ * the server (`EngineReviewService.EvaluateAutoHoldAsync`) decides and performs the expiry
+ * outcome and emits its own `engine.reviewed`; this driver takes NO terminal action (no
+ * telemetry, no `autoPublish`, no Held flip) and instead refetches the review queue when the
+ * countdown reaches 0 by nudging the store's single shared expiry scheduler (it polls,
+ * coalesced and backed off, while any item is expired; drivers never poll themselves), so the
+ * item's terminal state always comes from the server queue. Until then the card shows "resolving…".
+ *
  * `ctx` intentionally omits `scenarioTime` — `autoPublish` needs the SCENARIO
  * instant at the moment of resolution (COR-053), not whenever this component
  * happened to render, so it is read fresh (`scenarioNow()`) inside the
  * `onResolve` callback, exactly as `useReviewQueue`'s `buildContext` does.
  */
 
-import { useCallback } from 'react'
+import { useCallback, useEffect } from 'react'
+import { USE_MOCK_DATA } from '@/core/config/mockData'
 import { scenarioNow } from '@/core/clock'
 import {
   DraftDisposition,
@@ -49,6 +58,7 @@ import {
   type EngineReviewItem,
 } from '../models/reviewContracts'
 import { autoPublish, type ReviewActionContext } from '../services/reviewActions'
+import { liveReviewStore } from '../services/liveReviewStore'
 import { reviewStore } from '../services/reviewStore'
 import { useDraftTimer } from '../hooks/useDraftTimer'
 
@@ -73,6 +83,12 @@ export interface DraftTimerDriverProps {
   readonly swampedMode: boolean
   /** The engine's current safety-adjusted disposition (`useEngineControl().effective`). */
   readonly effective: EffectiveAutonomy
+  /**
+   * Whether generation is cut to the Fake provider (`useEngineSettings().settings
+   * .providerCutToFake`, ADP-042). While true an expiry HOLDs even under swamped
+   * mode (hold-on-cut, mirrors the server). Defaults to false.
+   */
+  readonly providerCutToFake?: boolean
   /** The clock/identity/exercise inputs for a swamped-mode auto-publish. */
   readonly ctx: DraftTimerDriverContext
 }
@@ -86,6 +102,7 @@ export function DraftTimerDriver({
   countdown,
   swampedMode,
   effective,
+  providerCutToFake = false,
   ctx,
 }: DraftTimerDriverProps) {
   const onResolve = useCallback(
@@ -101,7 +118,23 @@ export function DraftTimerDriver({
     [item, ctx],
   )
 
-  useDraftTimer(countdown, effective, swampedMode, { onResolve })
+  // LIVE: the server is the authority (it holds / auto-sends and emits its own
+  // `engine.reviewed`), so the client timer is DISPLAY-ONLY - no telemetry, no publish, no
+  // local state flip. Acting on cached settings (`providerCutToFake`) could contradict it.
+  const displayOnly = !USE_MOCK_DATA
+  const { hasExpired } = useDraftTimer(
+    countdown,
+    effective,
+    swampedMode,
+    { onResolve, displayOnly },
+    providerCutToFake,
+  )
+
+  // LIVE: once the countdown hits 0, nudge the ONE shared, queue-level expiry scheduler
+  // (idempotent). This driver never polls itself: N expired drafts => one GET in flight.
+  useEffect(() => {
+    if (displayOnly && hasExpired) liveReviewStore.requestExpiryRefresh()
+  }, [displayOnly, hasExpired])
 
   return null
 }

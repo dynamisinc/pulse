@@ -198,7 +198,9 @@ public sealed class AmbientAutonomousPublishTests
                 Options.Create(new GenerationOptions()),
                 harness.Cut,
                 NullLogger<EngineReviewService>.Instance,
-                harness.Ambient);
+                harness.Ambient,
+                // Timeout auto-send AUTHORISED, so the negative below is about ambient review mode, not the Phase-1 flag.
+                Options.Create(new EngineAmbientGovernanceOptions { TimeoutAutoSendAuthorized = true }));
 
             await service.EvaluateAutoHoldAsync();
         }

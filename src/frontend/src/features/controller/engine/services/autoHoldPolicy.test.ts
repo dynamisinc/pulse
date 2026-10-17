@@ -153,3 +153,26 @@ describe('DelayedAutoCountdown — scenario-minute math', () => {
     expect(make(EX, -1)).toThrow() // negative length
   })
 })
+
+describe('autoHoldPolicy — hold-on-cut (ADP-042, mirrors the C# policy)', () => {
+  it('cut + swamped + expired + Delayed-auto → Hold (no auto-send)', () => {
+    expect(decide(countdown(), delayedAuto, 105, true, true)).toBe(TimeoutDisposition.Hold)
+  })
+
+  it('cut + swamped + expired: evaluate logs hold-on-expiry, not via swamped mode', () => {
+    const e = evaluate(countdown(), delayedAuto, 105, true, true)
+    expect(e.disposition).toBe(TimeoutDisposition.Hold)
+    expect(e.viaSwampedMode).toBe(false)
+    expect(e.event?.disposition).toBe(TimeoutDisposition.Hold)
+  })
+
+  it('an explicit approval under a cut still publishes (the cut suspends only the AUTO path)', () => {
+    const c = countdown({ decision: ControllerDecision.Approved })
+    expect(decide(c, delayedAuto, 101, true, true)).toBe(TimeoutDisposition.Publish)
+  })
+
+  it('a full stop still holds under a cut; not cut keeps the swamped auto-send', () => {
+    expect(decide(countdown(), STOPPED_AUTONOMY, 105, true, true)).toBe(TimeoutDisposition.Hold)
+    expect(decide(countdown(), delayedAuto, 105, true, false)).toBe(TimeoutDisposition.Publish)
+  })
+})

@@ -20,9 +20,11 @@ using Pulse.WebApi.Features.ExerciseConfiguration.Lifecycle;
 using Pulse.WebApi.Features.Identity.EasyLogin;
 
 /// <summary>
-/// The governed deployment flag that decides whether ANY exercise may select ambient <c>autonomous</c> mode
-/// (ambient-chatter story 01, AC0). Bound from <c>Generation:Governance</c> — the App Service setting
-/// <c>Generation__Governance__AmbientAutonomyAuthorized</c> (<c>infrastructure/modules/webapp.bicep</c>).
+/// The governed deployment flags under <c>Generation:Governance</c>: whether ANY exercise may select ambient
+/// <c>autonomous</c> mode (ambient-chatter story 01, AC0), and whether timeout auto-send (swamped mode) is authorised
+/// (<see cref="TimeoutAutoSendAuthorized"/>, PROVIDER-GOVERNANCE §8 Phase 1). Bound from <c>Generation:Governance</c> —
+/// the App Service settings <c>Generation__Governance__AmbientAutonomyAuthorized</c> and
+/// <c>Generation__Governance__TimeoutAutoSendAuthorized</c> (<c>infrastructure/modules/webapp.bicep</c>).
 /// </summary>
 /// <remarks>
 /// <b>False by default, and committed false.</b> PROVIDER-GOVERNANCE §8 authorises only Suggest and Delayed-auto
@@ -37,6 +39,20 @@ public sealed class EngineAmbientGovernanceOptions
 
     /// <summary>Whether autonomous ambient posting is authorised for this deployment (PROVIDER-GOVERNANCE §8).</summary>
     public bool AmbientAutonomyAuthorized { get; set; }
+
+    /// <summary>
+    /// Whether timeout auto-send (swamped mode — the only path by which a Delayed-auto draft publishes on countdown
+    /// expiry with no controller click) is authorised for this deployment. Bound from
+    /// <c>Generation:Governance:TimeoutAutoSendAuthorized</c> (App Service
+    /// <c>Generation__Governance__TimeoutAutoSendAuthorized</c>, <c>infrastructure/modules/webapp.bicep</c>).
+    /// </summary>
+    /// <remarks>
+    /// <b>False by default (PROVIDER-GOVERNANCE §8, Phase 1).</b> While false, turning swamped mode ON is refused with
+    /// 400 (turning it OFF always succeeds) and the auto-HOLD tick never auto-sends — an expired countdown is held for a
+    /// human even if swamped mode is somehow on. It is set true in a separate reviewed commit once the lead-controller
+    /// gate (A1c) is on main. Lives on this class (same section) so no new registration or <c>Program.cs</c> edit is needed.
+    /// </remarks>
+    public bool TimeoutAutoSendAuthorized { get; set; }
 
     /// <summary>
     /// Registers the options, bound from <see cref="SectionName"/> when the host HAS configuration and left at the
