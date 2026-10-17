@@ -86,6 +86,15 @@ public sealed partial class EngineReviewService
     private readonly IGenerationProviderCutRegistry _providerCut;
     private readonly ILogger<EngineReviewService> _logger;
     private readonly EngineAmbientPolicyRegistry _ambientPolicy;
+    private readonly bool _timeoutAutoSendAuthorized;
+
+    /// <summary>
+    /// The 400 message <see cref="SetSwampedModeAsync"/> returns for an ON request while the governed
+    /// <c>Generation:Governance:TimeoutAutoSendAuthorized</c> flag is false (PROVIDER-GOVERNANCE §8, Phase 1).
+    /// </summary>
+    public const string TimeoutAutoSendNotAuthorizedMessage =
+        "timeout auto-send (swamped mode) is not authorized on this environment until the lead-controller gate lands "
+        + "(PROVIDER-GOVERNANCE §8, Phase 1)";
 
     /// <summary>Creates the review service over its persistence, scope, clock, telemetry, publish, push, and autonomy collaborators.</summary>
     /// <param name="store">The seam-freeze review-item persistence store (reads + lookup).</param>
@@ -106,6 +115,12 @@ public sealed partial class EngineReviewService
     /// loop reads. Optional so existing direct constructions keep compiling; when absent a private, empty registry is
     /// used, which reads every exercise as <c>off</c> with autonomy unauthorised (the fail-safe direction).
     /// </param>
+    /// <param name="governance">
+    /// The governed <c>Generation:Governance</c> flags — read here ONLY for
+    /// <see cref="EngineAmbientGovernanceOptions.TimeoutAutoSendAuthorized"/>. Optional so existing direct constructions
+    /// keep compiling; when absent timeout auto-send is NOT authorised (fail closed: swamped ON is refused and an
+    /// expired countdown is always held).
+    /// </param>
     public EngineReviewService(
         IEngineReviewStore store,
         PulseDbContext dbContext,
@@ -120,7 +135,8 @@ public sealed partial class EngineReviewService
         IOptions<GenerationOptions> generationOptions,
         IGenerationProviderCutRegistry providerCut,
         ILogger<EngineReviewService> logger,
-        EngineAmbientPolicyRegistry? ambientPolicy = null)
+        EngineAmbientPolicyRegistry? ambientPolicy = null,
+        IOptions<EngineAmbientGovernanceOptions>? governance = null)
     {
         ArgumentNullException.ThrowIfNull(store);
         ArgumentNullException.ThrowIfNull(dbContext);
@@ -150,6 +166,7 @@ public sealed partial class EngineReviewService
         _providerCut = providerCut;
         _logger = logger;
         _ambientPolicy = ambientPolicy ?? new EngineAmbientPolicyRegistry();
+        _timeoutAutoSendAuthorized = governance?.Value.TimeoutAutoSendAuthorized ?? false;
     }
 
     // ---- Queue read -----------------------------------------------------------------------------
@@ -379,7 +396,14 @@ public sealed partial class EngineReviewService
     /// Sets swamped mode for the current exercise (the lead-gated toggle that is the ONLY path by which a
     /// Delayed-auto draft auto-sends on expiry, D5-014/1.1, #36). Always an explicit human action; the engine
     /// never turns it on by itself. Delegates to the built <see cref="EngineAutonomyState.SetSwampedMode"/>.
+    /// While the governed <c>Generation:Governance:TimeoutAutoSendAuthorized</c> flag is false, an ON request is
+    /// refused (<see cref="EngineReviewOutcome.Invalid"/> with <see cref="TimeoutAutoSendNotAuthorizedMessage"/>);
+    /// turning it OFF always succeeds (lowering, §8.2).
     /// </summary>
+    /// <param name="enabled">Whether swamped mode is turned on.</param>
+    /// <param name="input">The acting human (COR-018).</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The resulting autonomy snapshot, or the refusal.</returns>
     public async Task<EngineAutonomyResult> SetSwampedModeAsync(
         bool enabled,
         EngineReviewActionInput input,
@@ -395,6 +419,13 @@ public sealed partial class EngineReviewService
         if (string.IsNullOrWhiteSpace(input.ActingHumanId))
         {
             return EngineAutonomyResult.Invalid("actingHumanId is required (COR-018).");
+        }
+
+        if (enabled && !_timeoutAutoSendAuthorized)
+        {
+            // PROVIDER-GOVERNANCE §8, Phase 1: raising toward unreviewed timeout publishes is refused until the
+            // lead-controller gate lands. Lowering (enabled=false) is never refused.
+            return EngineAutonomyResult.Invalid(TimeoutAutoSendNotAuthorizedMessage);
         }
 
         var state = _autonomy.GetOrCreate(exerciseId);
@@ -793,7 +824,9 @@ public sealed partial class EngineReviewService
         }
 
         var state = _autonomy.GetOrCreate(exerciseId);
-        var swamped = state.SwampedModeEnabled;
+        // Defence in depth (PROVIDER-GOVERNANCE §8, Phase 1): with timeout auto-send unauthorised, swamped mode is read
+        // as OFF, so an expired countdown HOLDs even if swamped mode is somehow on.
+        var swamped = state.SwampedModeEnabled && _timeoutAutoSendAuthorized;
         var cutToFake = _providerCut.IsCutToFake(exerciseId);
         var currentMinute = _clock.CurrentScenarioMinute(exerciseId);
 
@@ -922,13 +955,14 @@ public sealed partial class EngineReviewService
         {
             var burst = await PrepareBurstAsync(item, exerciseId, input: null, leadTextOverride: null, cancellationToken);
 
-            // NO await between this re-decision and the publisher call.
+            // NO await between this re-decision and the publisher call. The governed timeout-auto-send flag is a
+            // synchronous field read (PROVIDER-GOVERNANCE §8, Phase 1): unauthorised reads swamped mode as OFF → HOLD.
             var state = _autonomy.GetOrCreate(exerciseId);
             var recheck = AutoHoldPolicy.Evaluate(
                 countdown,
                 state.ResolveEffective(item.StorylineId),
                 currentMinute,
-                state.SwampedModeEnabled,
+                state.SwampedModeEnabled && _timeoutAutoSendAuthorized,
                 _providerCut.IsCutToFake(exerciseId));
             if (recheck.Disposition == TimeoutDisposition.Publish)
             {
@@ -1113,7 +1147,8 @@ public sealed partial class EngineReviewService
         _generationOptions,
         EngineAutonomyStateDto.From(_autonomy.GetOrCreate(exerciseId)),
         _tierPolicy.GetMode(exerciseId),
-        _ambientPolicy.Snapshot(exerciseId));
+        _ambientPolicy.Snapshot(exerciseId),
+        _timeoutAutoSendAuthorized);
 
     /// <summary>
     /// Whether <paramref name="mode"/> would force a tier this deployment has NOT bound to a deployment name —

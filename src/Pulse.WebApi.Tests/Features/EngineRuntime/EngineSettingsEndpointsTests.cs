@@ -122,7 +122,7 @@ public sealed class EngineSettingsEndpointsTests
         using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         var root = doc.RootElement;
 
-        foreach (var key in new[] { "provider", "tiers", "autonomy", "tierPolicyMode", "ambientPolicy", "inMemoryState", "inMemoryStateNote" })
+        foreach (var key in new[] { "provider", "tiers", "autonomy", "tierPolicyMode", "ambientPolicy", "timeoutAutoSendAuthorized", "inMemoryState", "inMemoryStateNote" })
         {
             root.TryGetProperty(key, out _).Should().BeTrue($"the settings contract requires a '{key}' key");
         }
@@ -130,6 +130,8 @@ public sealed class EngineSettingsEndpointsTests
         root.GetProperty("provider").GetString().Should().Be("Fake", "the test host runs the offline provider");
         root.GetProperty("tierPolicyMode").GetString().Should().Be("auto", "no override is set on a fresh exercise");
         root.GetProperty("inMemoryState").GetBoolean().Should().BeTrue();
+        root.GetProperty("timeoutAutoSendAuthorized").GetBoolean().Should().BeFalse(
+            "the governed flag is unset on this host, so it reads the fail-closed default (PROVIDER-GOVERNANCE §8, Phase 1)");
 
         var tier = root.GetProperty("tiers").EnumerateArray().Single(t => t.GetProperty("tier").GetString() == "Standard");
         tier.GetProperty("model").GetString().Should().Be("claude-sonnet-5");

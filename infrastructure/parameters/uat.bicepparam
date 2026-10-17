@@ -100,6 +100,11 @@ param generationNoTrainingAttested = true
 // NOT authorized until PROVIDER-GOVERNANCE §8 amendment 2 is signed; the signer flips this in that same commit.
 param generationAmbientAutonomyAuthorized = false
 
+// ⚠ Timeout auto-send (swamped mode) — App Service setting Generation__Governance__TimeoutAutoSendAuthorized. When
+// false, turning swamped mode ON is refused with a 400 and an expired Delayed-auto countdown always holds for a human.
+// Phase 1 (PROVIDER-GOVERNANCE §8 amendment 1): timeout auto-send NOT authorized until A1c's lead-controller gate is on main; set true in a separate reviewed commit after that.
+param generationTimeoutAutoSendAuthorized = false
+
 // Flip to true (with deployAi) to also deploy the Claude-on-Foundry tiers for the E8 provider
 // comparison. Requires a Claude-eligible subscription; the Anthropic Marketplace offer is auto-accepted
 // from the attestation below. Set the org name to the real entity using the model.
