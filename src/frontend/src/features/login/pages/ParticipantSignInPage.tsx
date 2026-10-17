@@ -140,9 +140,18 @@
  *   - The field is plain `type="text"`, not `url`: a bare token or a whole message
  *     is not a URL, and a URL field would reject them. Autocomplete, autocorrect,
  *     capitalisation and spell-check are off. The value is never logged or echoed.
+ *   - A repeated pre-request refusal re-mounts the alert (`seq`), so a screen reader
+ *     announces it again even though its text did not change (Gate-1 W-2). While the
+ *     link form shows an error, the field is `aria-invalid` and described by the
+ *     alert as well as the hint.
+ *   - Four methods do not fit one row without breaking words, so in standalone mode
+ *     the toggle is always a 2 x 2 grid (`.toggleGroupFour`).
  *   - The "Pulse" product label is HIDDEN in standalone mode, so the installed app
  *     shows only the resolved exercise name. Outside standalone, nothing on this
  *     page changes.
+ *   - `isStandalone()` is also true for an installed Android or desktop PWA. There
+ *     the link method is redundant (those share the browser's storage) but harmless,
+ *     and it is deliberately NOT narrowed to iOS: one check, one behaviour.
  *
  * SCENARIO TIME (COR-053): not applicable — no participant-visible
  * timestamps on this page.
@@ -166,6 +175,7 @@ import { faTowerBroadcast, faTriangleExclamation } from '@fortawesome/free-solid
 import { resolveExerciseContext } from '@/core/exerciseContext'
 import { STAFF_LOGIN_PATH } from '@/features/app-shell/constants'
 import { isStandalone } from '@/features/pwa/install/installEnv'
+import { USE_MOCK_DATA } from '@/core/config/mockData'
 import { completeSignIn } from '../completeSignIn'
 import { extractJoinToken } from '../linkToken'
 import { classifyJoinFailure, signInWithLink } from '../services/joinService'
@@ -202,7 +212,7 @@ const STANDALONE_SIGN_IN_METHODS: readonly SignInMethod[] = [
 
 const WORD_UNAUTHORIZED_MESSAGE =
   "That name or word wasn't recognized. Check today's word with your controller."
-const WORD_RATE_LIMITED_MESSAGE = 'Too many tries. Wait a minute and try again.'
+const RATE_LIMITED_MESSAGE = 'Too many tries. Wait a minute and try again.'
 const NAMED_UNAUTHORIZED_MESSAGE = "That handle or password wasn't recognized."
 const SHARED_UNAUTHORIZED_MESSAGE = "That view-only code wasn't recognized."
 const GENERIC_FAILURE_MESSAGE = 'Could not sign in. Please try again.'
@@ -217,7 +227,12 @@ type FocusTarget = 'word' | 'word-submit' | 'link' | 'link-submit'
 interface SignInFormError {
   readonly mode: SignInMode
   readonly message: string
+  /** Bumped per pre-request refusal so the alert re-mounts and is re-announced (W-2). */
+  readonly seq?: number
 }
+
+/** The alert's id, so the link field can point `aria-describedby` at it. */
+const ERROR_ID = 'participant-signin-error'
 
 /**
  * Softly resolves the current host's exercise name for the heading (AC5).
@@ -267,6 +282,7 @@ export function ParticipantSignInPage() {
   const linkInputRef = useRef<HTMLInputElement>(null)
   const linkSubmitRef = useRef<HTMLButtonElement>(null)
   const focusAfterSubmitRef = useRef<FocusTarget | null>(null)
+  const refusalSeqRef = useRef(0)
 
   useEffect(() => {
     if (isSubmitting) return
@@ -320,7 +336,7 @@ export function ParticipantSignInPage() {
         setWord('')
         focusAfterSubmitRef.current = 'word'
       } else if (isRateLimitedSignInError(caught)) {
-        setError({ mode: 'word', message: WORD_RATE_LIMITED_MESSAGE })
+        setError({ mode: 'word', message: RATE_LIMITED_MESSAGE })
         focusAfterSubmitRef.current = 'word-submit'
       } else {
         setError({ mode: 'word', message: GENERIC_FAILURE_MESSAGE })
@@ -334,10 +350,11 @@ export function ParticipantSignInPage() {
   async function handleLinkSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     setError(null)
-    const token = extractJoinToken(pastedLink)
+    const token = extractJoinToken(pastedLink, { allowLooseBareToken: USE_MOCK_DATA })
     if (token === null) {
       // Refused before any request: nothing token-shaped is ever posted.
-      setError({ mode: 'link', message: LINK_NOT_A_LINK_MESSAGE })
+      refusalSeqRef.current += 1
+      setError({ mode: 'link', message: LINK_NOT_A_LINK_MESSAGE, seq: refusalSeqRef.current })
       linkInputRef.current?.focus()
       return
     }
@@ -352,7 +369,7 @@ export function ParticipantSignInPage() {
         focusAfterSubmitRef.current = 'link'
       } else {
         const message =
-          failure === 'rate-limited' ? WORD_RATE_LIMITED_MESSAGE : GENERIC_FAILURE_MESSAGE
+          failure === 'rate-limited' ? RATE_LIMITED_MESSAGE : GENERIC_FAILURE_MESSAGE
         setError({ mode: 'link', message })
         focusAfterSubmitRef.current = 'link-submit'
       }
@@ -454,7 +471,10 @@ export function ParticipantSignInPage() {
                 spellCheck={false}
                 inputMode="text"
                 enterKeyHint="go"
-                aria-describedby="participant-signin-link-hint"
+                aria-describedby={activeError
+                  ? `participant-signin-link-hint ${ERROR_ID}`
+                  : 'participant-signin-link-hint'}
+                aria-invalid={activeError ? true : undefined}
                 className={styles.input}
                 value={pastedLink}
                 onChange={event => setPastedLink(event.target.value)}
@@ -615,7 +635,7 @@ export function ParticipantSignInPage() {
         )}
 
         {activeError ? (
-          <p role="alert" className={styles.alert}>
+          <p key={activeError.seq ?? 0} id={ERROR_ID} role="alert" className={styles.alert}>
             <FontAwesomeIcon icon={faTriangleExclamation} aria-hidden />
             <span>{activeError.message}</span>
           </p>

@@ -151,6 +151,54 @@ describe('ParticipantSignInPage in the home-screen app (#606)', () => {
     expect(screen.getByLabelText('Paste your sign-in link')).toHaveFocus()
   })
 
+  it('a repeated refusal re-mounts the alert so it is announced again (W-2)', async () => {
+    const user = userEvent.setup()
+    renderPage()
+    await pasteAndSubmit(user, 'my-secret-word')
+    const first = screen.getByRole('alert')
+    expect(first.textContent).not.toContain('my-secret-word')
+    await user.click(screen.getByRole('button', { name: 'Sign in' }))
+    const second = screen.getByRole('alert')
+    expect(second).not.toBe(first)
+    expect(second).toHaveTextContent("That doesn't look like a sign-in link.")
+  })
+
+  it('marks the field invalid and described by the alert while it shows an error', async () => {
+    const user = userEvent.setup()
+    renderPage()
+    const field = screen.getByLabelText('Paste your sign-in link')
+    expect(field).not.toHaveAttribute('aria-invalid')
+    await pasteAndSubmit(user, 'nope')
+    expect(field).toHaveAttribute('aria-invalid', 'true')
+    expect(field).toHaveAccessibleDescription(expect.stringContaining("doesn't look like a sign-in link"))
+  })
+
+  it('a bare value that is not exactly a token (e.g. today\'s word) is never posted', async () => {
+    const user = userEvent.setup()
+    renderPage()
+    await pasteAndSubmit(user, 'harborlights')
+    expect(mockPost).not.toHaveBeenCalled()
+    expect(screen.getByRole('alert')).toHaveTextContent("That doesn't look like a sign-in link.")
+  })
+
+  it('a 400 reads as the same refused-link message as a 401', async () => {
+    mockPost.mockRejectedValue(axiosErrorWith(400))
+    const user = userEvent.setup()
+    renderPage()
+    await pasteAndSubmit(user, LINK)
+    expect(await screen.findByRole('alert')).toHaveTextContent("That link wasn't recognized.")
+  })
+
+  it('a 200 carrying a non-participant role is refused like a bad link and stores nothing', async () => {
+    mockPost.mockResolvedValue({ data: { ...ENVELOPE, session: { ...ENVELOPE.session, role: 'controller' } } })
+    const user = userEvent.setup()
+    renderPage()
+    await pasteAndSubmit(user, LINK)
+    expect(await screen.findByRole('alert')).toHaveTextContent("That link wasn't recognized.")
+    expect(mockSetTokens).not.toHaveBeenCalled()
+    expect(mockNavigate).not.toHaveBeenCalled()
+  })
+
   it('401: one generic message, the field cleared and focused, the link never echoed', async () => {
     mockPost.mockRejectedValue(axiosErrorWith(401))
     const user = userEvent.setup()
