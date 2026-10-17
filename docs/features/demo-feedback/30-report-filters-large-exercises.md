@@ -27,28 +27,29 @@ metrics and charts have no such problem, and refusing the whole report is the wr
 
 **Endpoint** — `GET /api/staff/exports/report`
 
-- [ ] New query parameters: `sources` (comma list of `participant,scripted,engine,noise`; default
+- [x] New query parameters: `sources` (comma list of `participant,scripted,engine,noise`; default
       `participant,scripted,engine`, so `includeNoise=true` remains an alias that adds `noise`), `from`, `to`
       (`yyyy-MM-dd HH:mm`, exercise zone, inclusive; either may be omitted). An unknown source or an unparsable or
       inverted window returns 400 with a readable reason.
-- [ ] Summary, activity, inject responses and lookalikes are identical whatever the filters are.
-- [ ] New `postRecord` object: `{ matching, limit, withheld, sources, from, to }`. `withheld` is true when
+- [x] Summary, activity, inject responses and lookalikes are identical whatever the filters are. *(Superseded for the time
+      window by story 31, DF-45: the window now scopes every section; the sources still change only the record.)*
+- [x] New `postRecord` object: `{ matching, limit, withheld, sources, from, to }`. `withheld` is true when
       `matching > limit` (5,000); `posts` is then empty. Engagement, media and avatar signing run only for listed posts.
-- [ ] `omittedNoiseCount` stays the noise posts left out by the source filter (0 when `noise` is selected).
-- [ ] More than 50,000 posts in the exercise returns 413 with a readable reason; nothing else returns 413.
-- [ ] Isolation, telemetry (`{ posts }` = listed count) and time formatting unchanged from story 29.
+- [x] `omittedNoiseCount` stays the noise posts left out by the source filter (0 when `noise` is selected).
+- [x] More than 50,000 posts in the exercise returns 413 with a readable reason; nothing else returns 413.
+- [x] Isolation, telemetry (`{ posts }` = listed count) and time formatting unchanged from story 29.
 
 **Page** — `/staff/console/report`
 
-- [ ] Toolbar (screen only): source checkboxes (Participant, Scripted inject, Engine, Background noise) replacing the
+- [x] Toolbar (screen only): source checkboxes (Participant, Scripted inject, Engine, Background noise) replacing the
       single noise checkbox, and From / To scenario-time fields bounded by the exercise window, with Clear. Changing
       a filter refetches; Print stays disabled while fetching (story 29 rule).
-- [ ] Above the post record, a one-line statement of the active filters ("Showing participant and scripted inject posts,
+- [x] Above the post record, a one-line statement of the active filters ("Showing participant and scripted inject posts,
       10-15 09:00 – 10-15 10:00"), printed too.
-- [ ] When `withheld`: the record section prints "5,983 posts match. The printable record holds up to 5,000. Narrow
+- [x] When `withheld`: the record section prints "5,983 posts match. The printable record holds up to 5,000. Narrow
       the sources or the time window above." Summary and charts still render and print, so a summary-only report can
       be saved.
-- [ ] Filters are labeled controls (NFR-001), keyboard-operable, and the time fields reject input outside the window
+- [x] Filters are labeled controls (NFR-001), keyboard-operable, and the time fields reject input outside the window
       with a readable message.
 
 ## Out of Scope

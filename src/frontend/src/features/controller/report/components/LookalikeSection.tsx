@@ -5,21 +5,24 @@
  * lookalike, with shown likes and reposts as bars on one shared scale and the numbers in text.
  * Omitted entirely by the caller when the report has no pairs. Verification is labeled in words
  * (VERIFIED / UNVERIFIED), never by color alone.
+ *
+ * Story 32 (DF-48): each row states its posts in the window, so engagement reads against
+ * activity; the scale never drops below a range of 10, so 1 against 0 is a short bar, not a
+ * full one; and the verdict sentence (the two totals) prints only for a pair the server marked
+ * `outdrew`.
  */
 
-import type { ReportAccount } from '../types/report'
+import type { ReportAccount, ReportLookalikePair } from '../types/report'
 import styles from './report.module.css'
 
 /** The widest bar, as a share of the row. */
 const MAX_BAR_PERCENT = 60
 
-export interface LookalikePair {
-  readonly verified: ReportAccount
-  readonly lookalike: ReportAccount
-}
+/** The smallest value the widest bar stands for (DF-48). */
+export const MIN_BAR_RANGE = 10
 
 export interface LookalikeSectionProps {
-  readonly pairs: readonly LookalikePair[]
+  readonly pairs: readonly ReportLookalikePair[]
 }
 
 function VerificationChip({ verified }: { readonly verified: boolean }) {
@@ -40,6 +43,7 @@ function AccountRow({ account, scale }: AccountRowProps) {
         <strong>{account.displayName}</strong>
         <span>
           {account.handle} · <VerificationChip verified={account.verified} />
+          {postsText(account.posts)}
         </span>
       </div>
       <div className={styles.vsbars}>
@@ -56,18 +60,27 @@ function AccountRow({ account, scale }: AccountRowProps) {
   )
 }
 
-/** One factual sentence when the lookalike out-drew the real account on a measure. */
-function comparison({ verified, lookalike }: LookalikePair): string | null {
-  const more: string[] = []
-  if (lookalike.reposts > verified.reposts) more.push('reposted')
-  if (lookalike.likes > verified.likes) more.push('liked')
-  if (more.length === 0) return null
-  return `${lookalike.handle} was ${more.join(' and ')} more than ${verified.handle}.`
+/**
+ * One factual sentence when the server judged the lookalike out-drew the real account (DF-48).
+ * It states the likes + reposts totals the rule compares, never a single measure, so a 1-vs-0
+ * like is never singled out.
+ */
+function comparison({ verified, lookalike, outdrew }: ReportLookalikePair): string | null {
+  if (!outdrew) return null
+  const total = (account: ReportAccount) => (account.likes + account.reposts).toLocaleString('en-US')
+  return `${lookalike.handle} drew more engagement than ${verified.handle}: `
+    + `${total(lookalike)} likes and reposts against ${total(verified)}.`
+}
+
+/** " · 3 posts"; empty when an older server sent no count. */
+function postsText(posts: number | undefined): string {
+  if (posts === undefined) return ''
+  return ` · ${posts.toLocaleString('en-US')} ${posts === 1 ? 'post' : 'posts'}`
 }
 
 export function LookalikeSection({ pairs }: LookalikeSectionProps) {
   const peak = Math.max(
-    1,
+    MIN_BAR_RANGE,
     ...pairs.flatMap(p => [
       p.verified.likes,
       p.verified.reposts,
