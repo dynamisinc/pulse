@@ -33,19 +33,37 @@ export async function expectNoHorizontalScroll(page: Page): Promise<void> {
 export async function expectTouchTarget(locator: Locator, minPx = 44): Promise<void> {
   await locator.scrollIntoViewIfNeeded()
   const result = await locator.evaluate((el, min) => {
+    // Chrome paints and hit-tests a control at its PIXEL-SNAPPED box, so a genuine 44px
+    // control at a fractional offset (top: 100.4px) can have an edge probe land a hair
+    // outside it. Try the raw centre and the device-pixel-snapped centres (round, floor,
+    // ceil, and the snapped box's own centre) and keep the best. A control narrower than
+    // `min` still fails: the probes span min - 0.5 px, which no shift of < 0.5 px covers.
     const r = el.getBoundingClientRect()
-    const cx = r.left + r.width / 2
-    const cy = r.top + r.height / 2
+    const dpr = window.devicePixelRatio || 1
+    const snap = (v: number, fn: (n: number) => number) => fn(v * dpr) / dpr
+    const rawX = r.left + r.width / 2
+    const rawY = r.top + r.height / 2
+    const centres: Array<[number, number]> = [
+      [rawX, rawY],
+      [snap(rawX, Math.round), snap(rawY, Math.round)],
+      [snap(rawX, Math.floor), snap(rawY, Math.floor)],
+      [snap(rawX, Math.ceil), snap(rawY, Math.ceil)],
+      [(snap(r.left, Math.round) + snap(r.right, Math.round)) / 2,
+        (snap(r.top, Math.round) + snap(r.bottom, Math.round)) / 2],
+    ]
     // Probe a quarter-pixel inside the min-size edge: a 44 px target passes,
     // a 43 px one fails (a full-pixel inset would let 43 px through).
     const half = min / 2 - 0.25
-    const probes: Array<[number, number]> = [
-      [cx, cy], [cx - half, cy], [cx + half, cy], [cx, cy - half], [cx, cy + half],
-    ]
-    const misses = probes
-      .map(([x, y]) => ({ x, y, hit: document.elementFromPoint(x, y) }))
-      .filter(p => !p.hit || !(p.hit === el || el.contains(p.hit)))
-      .map(p => `(${Math.round(p.x)},${Math.round(p.y)}) -> ${p.hit ? p.hit.tagName.toLowerCase() : 'nothing'}`)
+    const missesAt = ([cx, cy]: [number, number]) => {
+      const probes: Array<[number, number]> = [
+        [cx, cy], [cx - half, cy], [cx + half, cy], [cx, cy - half], [cx, cy + half],
+      ]
+      return probes
+        .map(([x, y]) => ({ x, y, hit: document.elementFromPoint(x, y) }))
+        .filter(p => !p.hit || !(p.hit === el || el.contains(p.hit)))
+        .map(p => `(${Math.round(p.x)},${Math.round(p.y)}) -> ${p.hit ? p.hit.tagName.toLowerCase() : 'nothing'}`)
+    }
+    const misses = centres.map(missesAt).reduce((best, m) => (m.length < best.length ? m : best))
     return { misses, box: `${Math.round(r.width)}x${Math.round(r.height)}` }
   }, minPx)
   expect(

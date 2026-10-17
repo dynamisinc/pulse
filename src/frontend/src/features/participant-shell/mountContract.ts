@@ -108,6 +108,14 @@ export interface ShellMountProps {
    * labeled "scenario time" inside the fiction (XC-002).
    */
   readonly scenarioNow: Date
+  /**
+   * Optional: `true` while the shell has not yet resolved the exercise's
+   * variant, so `variant` is the least-affordance placeholder. Absent means
+   * settled. A channel that would take an irreversible step on `variant`
+   * (redirecting away from a deep link) waits while this is `true`
+   * (mobile-tablet MT-D8). Additive; affordance gating is unchanged.
+   */
+  readonly variantPending?: boolean
 }
 
 const ShellMountContext = createContext<ShellMountProps | undefined>(undefined)
@@ -242,6 +250,10 @@ export const SHELL_ALERT_HEIGHT_VAR = '--pulse-alert-height'
  * `SHELL-CONTRACT.md` §3 exactly: content · channel nav · alert bar ·
  * overlay (pause/EndEx pages) · compliance chrome · break-fiction broadcast
  * (covers everything).
+ *
+ * Overlay vs alert bar (Tom, 10/16): the overlay layer is above the alert bar,
+ * but a PAUSE page starts below chrome + alert bar (the bar stays visible and
+ * inert); EndEx and break-fiction start at top 0 and cover the bar.
  *
  * A channel is mounted inside the content region at `SHELL_Z.content`, and
  * that region is its own CSS stacking context (`ShellLayout.tsx`). Any

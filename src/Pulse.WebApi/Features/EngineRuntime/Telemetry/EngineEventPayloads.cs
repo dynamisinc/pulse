@@ -15,6 +15,28 @@ using Pulse.WebApi.Features.EngineRuntime;
 /// </summary>
 public static class EngineEventPayloads
 {
+    /// <summary>The <c>trigger</c> literal an ambient-floor burst's decided/generated/published events carry (ambient-chatter 01, AC9).</summary>
+    public const string AmbientFloorTrigger = "ambient-floor";
+
+    /// <summary>The <c>publishPath</c> literal for content published autonomously by the ambient policy (AC9).</summary>
+    public const string PublishPathAmbientAutonomous = "ambient-autonomous";
+
+    /// <summary>
+    /// The <c>publishPath</c> literal for a REVIEW-mode ambient draft a controller approved (orchestrator review S-1), so
+    /// the AAR can tell reviewed ambient chatter from autonomous ambient chatter and from storyline content. Carried on
+    /// <c>engine.published</c> with <c>trigger = ambient-floor</c>.
+    /// </summary>
+    public const string PublishPathAmbientReviewed = "ambient-reviewed";
+
+    /// <summary>The <c>heldReason</c> for ambient content not published because the lifecycle / Freeze / Pause-engine gate was closed (AC5).</summary>
+    public const string HeldLifecycle = "held:lifecycle";
+
+    /// <summary>The <c>heldReason</c> for ambient content not published because a safety control was active (kill switch, degraded mode, cut to Fake; AC6).</summary>
+    public const string HeldSafety = "held:safety";
+
+    /// <summary>The <c>heldReason</c> for ambient content not published because the policy stopped being autonomous mid-flight (AC8).</summary>
+    public const string HeldPolicy = "held:policy";
+
     /// <summary>Payload for <see cref="EngineEventTypes.Observed"/> — the trigger + storyline + scenario minute.</summary>
     public sealed record Observed
     {
@@ -58,6 +80,24 @@ public static class EngineEventPayloads
         /// <summary>The rate-cap state at decision time (e.g. <c>ok</c> / <c>throttled</c>).</summary>
         [JsonPropertyName("rateCapState")]
         public string? RateCapState { get; init; }
+
+        /// <summary>
+        /// The decide trigger, set ONLY for an ambient-floor burst (<see cref="AmbientFloorTrigger"/>; ambient-chatter
+        /// story 01, AC9). Null-omitted for every storyline decision, so their shape is unchanged.
+        /// </summary>
+        [JsonPropertyName("trigger")]
+        public string? Trigger { get; init; }
+
+        /// <summary>
+        /// <see cref="PublishPathAmbientAutonomous"/> when the burst takes the autonomous ambient path; null-omitted
+        /// otherwise (the review-queue path, unchanged). Additive (AC9).
+        /// </summary>
+        [JsonPropertyName("publishPath")]
+        public string? PublishPath { get; init; }
+
+        /// <summary>Why a due ambient burst was not generated (e.g. <see cref="HeldLifecycle"/>); null-omitted otherwise (AC5).</summary>
+        [JsonPropertyName("heldReason")]
+        public string? HeldReason { get; init; }
     }
 
     /// <summary>Token accounting for a generated burst (mirrors <c>GenerationUsage</c>).</summary>
@@ -110,6 +150,21 @@ public static class EngineEventPayloads
         /// <summary>The EngineEval guard result for the burst (e.g. <c>pass</c> / <c>re-roll</c> / <c>drop</c>).</summary>
         [JsonPropertyName("guardResult")]
         public required string GuardResult { get; init; }
+
+        /// <summary>The decide trigger — <see cref="AmbientFloorTrigger"/> for an ambient burst; null-omitted otherwise (AC9).</summary>
+        [JsonPropertyName("trigger")]
+        public string? Trigger { get; init; }
+
+        /// <summary><see cref="PublishPathAmbientAutonomous"/> for an autonomous ambient burst; null-omitted otherwise (AC9).</summary>
+        [JsonPropertyName("publishPath")]
+        public string? PublishPath { get; init; }
+
+        /// <summary>
+        /// Why an accepted autonomous ambient draft was DISCARDED instead of published (<see cref="HeldLifecycle"/> /
+        /// <see cref="HeldSafety"/> / <see cref="HeldPolicy"/>); null-omitted when nothing was held (AC5/AC6).
+        /// </summary>
+        [JsonPropertyName("heldReason")]
+        public string? HeldReason { get; init; }
     }
 
     /// <summary>Payload for <see cref="EngineEventTypes.Reviewed"/> — the review action + acting controller.</summary>
@@ -163,6 +218,17 @@ public static class EngineEventPayloads
         /// </summary>
         [JsonPropertyName("mutationOf")]
         public string? MutationOf { get; init; }
+
+        /// <summary>The decide trigger — <see cref="AmbientFloorTrigger"/> for an ambient post; null-omitted otherwise (AC9).</summary>
+        [JsonPropertyName("trigger")]
+        public string? Trigger { get; init; }
+
+        /// <summary>
+        /// <see cref="PublishPathAmbientAutonomous"/> for a post published with no controller click;
+        /// <see cref="PublishPathAmbientReviewed"/> for a controller-approved ambient draft (S-1); null-omitted otherwise (AC9).
+        /// </summary>
+        [JsonPropertyName("publishPath")]
+        public string? PublishPath { get; init; }
     }
 
     /// <summary>Payload for <see cref="EngineEventTypes.Measured"/> — storyline intensity/sentiment delta + amplification.</summary>
@@ -227,6 +293,60 @@ public static class EngineEventPayloads
         [JsonPropertyName("toMode")]
         [JsonConverter(typeof(TierPolicyModeJsonConverter))]
         public required TierPolicyMode ToMode { get; init; }
+
+        /// <summary>The scenario minute the change was made at (COR-050/053).</summary>
+        [JsonPropertyName("scenarioMinute")]
+        public required int ScenarioMinute { get; init; }
+    }
+
+    /// <summary>
+    /// Payload for an ambient-chatter policy change (ambient-chatter story 01, AC2). Emitted under the EXISTING
+    /// <see cref="EngineEventTypes.TierPolicyChanged"/> event type (the #353 steering-change type for tier-policy
+    /// changes; the taxonomy is not forked). <see cref="Policy"/> = <see cref="PolicyAmbient"/> is the discriminator
+    /// that tells it apart from a <see cref="TierPolicyChanged"/> payload, which never carries that key.
+    /// </summary>
+    public sealed record AmbientPolicyChanged
+    {
+        /// <summary>The <see cref="Policy"/> discriminator literal.</summary>
+        public const string PolicyAmbient = "ambient";
+
+        /// <summary>A controller set the policy through the settings POST.</summary>
+        public const string ReasonController = "controller";
+
+        /// <summary>The engine LOWERED an autonomous policy to off because a safety control engaged (AC6).</summary>
+        public const string ReasonSafetyClamp = "safety-clamp";
+
+        /// <summary>Always <see cref="PolicyAmbient"/>.</summary>
+        [JsonPropertyName("policy")]
+        public string Policy { get; init; } = PolicyAmbient;
+
+        /// <summary>The mode before the change (<c>off</c> / <c>review</c> / <c>autonomous</c>).</summary>
+        [JsonPropertyName("fromMode")]
+        public required string FromMode { get; init; }
+
+        /// <summary>The mode after the change.</summary>
+        [JsonPropertyName("toMode")]
+        public required string ToMode { get; init; }
+
+        /// <summary>The per-minute cap after the change.</summary>
+        [JsonPropertyName("maxPerMinute")]
+        public required int MaxPerMinute { get; init; }
+
+        /// <summary>The per-hour cap after the change.</summary>
+        [JsonPropertyName("maxPerHour")]
+        public required int MaxPerHour { get; init; }
+
+        /// <summary>The topic allow-list after the change.</summary>
+        [JsonPropertyName("topicAllowList")]
+        public required IReadOnlyList<string> TopicAllowList { get; init; }
+
+        /// <summary>The persona allow-list (instance ids) after the change.</summary>
+        [JsonPropertyName("personaAllowList")]
+        public required IReadOnlyList<string> PersonaAllowList { get; init; }
+
+        /// <summary>Why it changed: <see cref="ReasonController"/> or <see cref="ReasonSafetyClamp"/>.</summary>
+        [JsonPropertyName("reason")]
+        public required string Reason { get; init; }
 
         /// <summary>The scenario minute the change was made at (COR-050/053).</summary>
         [JsonPropertyName("scenarioMinute")]

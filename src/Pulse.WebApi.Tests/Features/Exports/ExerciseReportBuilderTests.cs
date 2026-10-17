@@ -263,6 +263,20 @@ public sealed class ExerciseReportBuilderTests
 
     // ---- Lookalikes --------------------------------------------------------------------------------------------
 
+    [Theory]
+    [InlineData(0, 0, false)]
+    [InlineData(0, 1, false)] // the 10/16 UAT pair: 1 repost against 0
+    [InlineData(0, 9, false)] // below the floor of 10
+    [InlineData(0, 10, true)]
+    [InlineData(10, 15, true)] // exactly 1.5x
+    [InlineData(10, 14, false)]
+    [InlineData(7, 10, false)] // at the floor but under 1.5x
+    [InlineData(20, 10, false)] // the verified account drew more
+    [InlineData(long.MaxValue / 2, long.MaxValue, true)] // 2x at the 64-bit limit: no overflow
+    [InlineData(long.MaxValue, long.MaxValue, false)]
+    public void LookalikeOutdrew_NeedsTenAndOneAndAHalfTimesTheVerifiedTotal(long verified, long lookalike, bool outdrew) =>
+        ExerciseReportBuilder.LookalikeOutdrew(verified, lookalike).Should().Be(outdrew);
+
     [Fact]
     public void PairLookalikes_UnverifiedHandleStartingWithAVerifiedOne_IsPaired_CaseInsensitive()
     {
