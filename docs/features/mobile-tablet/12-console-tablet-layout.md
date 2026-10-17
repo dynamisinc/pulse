@@ -1,6 +1,6 @@
 # Story: Console layout at tablet sizes (panes/tabs)
 
-**Feature:** Phones and tablets  ·  **Epic:** E7  ·  **Phase:** 2  ·  **Status:** In Review
+**Feature:** Phones and tablets  ·  **Epic:** E7  ·  **Phase:** 2  ·  **Status:** Done
 **Requirements:** COR-018, NFR-001  ·  **Design decisions:** D5-021 (bands), D5-022 (layout table), D5-023 (command band), D5-026 (steering disclosure, More menu), from [`D5-controller-console/TABLET-AMENDMENT.md`](../../design/D5-controller-console/TABLET-AMENDMENT.md), signed by Tom (merged 2026-10-17, #594)  ·  **Issue:** —
 
 ## Context

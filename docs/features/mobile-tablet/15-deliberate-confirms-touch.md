@@ -1,6 +1,6 @@
 # Story: Takedown, Freeze and EndEx confirms stay deliberate on touch
 
-**Feature:** Phones and tablets  ·  **Epic:** E7  ·  **Phase:** 2  ·  **Status:** In Review
+**Feature:** Phones and tablets  ·  **Epic:** E7  ·  **Phase:** 2  ·  **Status:** Done
 **Requirements:** CTL-025 (takedown), CTL-023 (tiered pause: Freeze guarded), CTL-024 (break-fiction, Director-gated)  ·  **Design decisions:** D5-025  ·  **Issue:** —
 
 ## Context

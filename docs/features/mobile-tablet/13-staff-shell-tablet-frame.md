@@ -1,6 +1,6 @@
 # Story: Staff shell frame, toolstrip and flyouts at tablet sizes
 
-**Feature:** Phones and tablets  ·  **Epic:** E1 (staff shell)  ·  **Phase:** 2  ·  **Status:** In Review
+**Feature:** Phones and tablets  ·  **Epic:** E1 (staff shell)  ·  **Phase:** 2  ·  **Status:** Done
 **Requirements:** COR-018, NFR-001  ·  **Design decisions:** D5-021 (tablet bands by width; touch sizing gated separately by `(pointer: coarse)`), D5-024 (touch parity: every keyboard-only action has a visible 44px control; Esc has a visible close), D7-011 (toolstrip dock, one flyout at a time); [`D5-controller-console/TABLET-AMENDMENT.md`](../../design/D5-controller-console/TABLET-AMENDMENT.md), signed by Tom 10/17  ·  **Issue:** —
 
 ## Context
