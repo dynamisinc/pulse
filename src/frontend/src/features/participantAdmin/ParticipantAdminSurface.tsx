@@ -38,7 +38,9 @@
 
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faLock } from '@fortawesome/free-solid-svg-icons'
+import { Box, Typography } from '@mui/material'
 import { usePermissions } from '@/core/auth'
+import CobraStyles from '@/theme/CobraStyles'
 import { ParticipantAdminRoute } from './ParticipantAdminRoute'
 import { PrintCardsButton } from './cards'
 import { DayWordPanel } from './dayWord'
@@ -71,10 +73,17 @@ export const ParticipantAdminSurface = () => {
   const canManage = usePermissions().can('manageAccounts')
   if (!canManage) {
     return (
-      <div role="status" data-testid="participant-admin-no-access" style={{ padding: 16 }}>
-        <FontAwesomeIcon icon={faLock} aria-hidden /> <strong>Not available for your role.</strong>{' '}
-        Only a planner or controller can manage participant accounts and codes.
-      </div>
+      <Box
+        role="status"
+        data-testid="participant-admin-no-access"
+        sx={{ padding: CobraStyles.Padding.MainWindow, display: 'flex', gap: 1, alignItems: 'center' }}
+      >
+        <FontAwesomeIcon icon={faLock} aria-hidden />
+        <Typography variant="body2">
+          <strong>Not available for your role.</strong> Only a planner or controller can manage
+          participant accounts and codes.
+        </Typography>
+      </Box>
     )
   }
   return (
