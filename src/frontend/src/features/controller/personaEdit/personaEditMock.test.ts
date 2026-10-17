@@ -13,7 +13,12 @@
 import axios from 'axios'
 import { afterEach, describe, expect, it } from 'vitest'
 import { api } from '@/core/services/api'
-import { resolvePersonas, resolveStaffPersonas, SEEDED_PERSONAS } from '@/features/personas'
+import {
+  resolvePersonas,
+  resolveStaffPersonas,
+  SEEDED_PERSONAS,
+  type StaffPersona,
+} from '@/features/personas'
 import {
   PERSONA_ADMIN_MESSAGES,
   initialsForDisplayName,
@@ -149,7 +154,7 @@ describe('mock persona edit — the server\'s exact 400 texts', () => {
   it('an unknown field (and the whole-persona echo) is a 400 naming the editable fields', async () => {
     const expected = (field: string) =>
       `Unknown field '${field}'. Editable fields: displayName, bio, location, verified, `
-      + 'avatarMediaId, bannerMediaId.'
+      + 'avatarMediaId, bannerMediaId, imitatesPersonaId.'
     expect(await refusal(WATER, { nickname: 'x' })).toBe(expected('nickname'))
     expect(await refusal(WATER, { id: WATER })).toBe(expected('id'))
     expect(await refusal(WATER, { avatarUrl: '/x.svg' })).toBe(expected('avatarUrl'))
@@ -437,5 +442,61 @@ describe('mock persona edit — display name visibility follows the server\'s ru
     const zeroWidth = String.fromCodePoint(0x200B)
     expect((await raw(WATER, { displayName: `Ful${zeroWidth}co EM` })).status).toBe(200)
     expect((await raw(WATER, { displayName: `${BLANK_ONLY.join('')}A` })).status).toBe(200)
+  })
+})
+
+describe('mock persona edit — imitatesPersonaId (story 33, DF-49): the server\'s 400 rules', () => {
+  const LOOKALIKE = 'persona-fairhavenwaterupd' // unverified
+  const FULCO = 'persona-fulcoem' // verified
+
+  it('sets a verified target on an unverified persona; null clears (the member is then absent)', async () => {
+    const named = await patchPersona(LOOKALIKE, { imitatesPersonaId: WATER })
+    expect(named.imitatesPersonaId).toBe(WATER)
+    expect(seeded(LOOKALIKE).imitatesPersonaId).toBe(WATER)
+    const cleared = await patchPersona(LOOKALIKE, { imitatesPersonaId: null })
+    expect(cleared).not.toHaveProperty('imitatesPersonaId')
+  })
+
+  it('refuses the persona itself', async () => {
+    expect(await refusal(LOOKALIKE, { imitatesPersonaId: LOOKALIKE }))
+      .toBe(PERSONA_ADMIN_MESSAGES.imitatesSelf)
+  })
+
+  it('refuses an unknown target and another exercise\'s persona with the SAME text', async () => {
+    const unknown = await refusal(LOOKALIKE, { imitatesPersonaId: 'persona-does-not-exist' })
+    expect(unknown).toBe(PERSONA_ADMIN_MESSAGES.imitatesUnknown)
+    const foreign = { ...seeded(WATER), id: 'persona-foreign', exerciseId: 'ex-other' }
+    ;(SEEDED_PERSONAS as StaffPersona[]).push(foreign)
+    try {
+      expect(await refusal(LOOKALIKE, { imitatesPersonaId: 'persona-foreign' })).toBe(unknown)
+    } finally {
+      ;(SEEDED_PERSONAS as StaffPersona[]).pop()
+    }
+  })
+
+  it('refuses an unverified target', async () => {
+    expect(await refusal(LOOKALIKE, { imitatesPersonaId: TOM }))
+      .toBe(PERSONA_ADMIN_MESSAGES.imitatesNotVerified)
+  })
+
+  it('refuses a verified persona naming a target, including verified:true in the same patch', async () => {
+    expect(await refusal(WATER, { imitatesPersonaId: FULCO }))
+      .toBe(PERSONA_ADMIN_MESSAGES.imitatesWhileVerified)
+    expect(await refusal(LOOKALIKE, { verified: true, imitatesPersonaId: WATER }))
+      .toBe(PERSONA_ADMIN_MESSAGES.imitatesWhileVerified)
+  })
+
+  it('allows verifying a persona that already names a target (kept, the report skips it) and clearing while verified', async () => {
+    await patchPersona(LOOKALIKE, { imitatesPersonaId: WATER })
+    const verified = await patchPersona(LOOKALIKE, { verified: true })
+    expect(verified.imitatesPersonaId).toBe(WATER)
+    expect((await raw(LOOKALIKE, { imitatesPersonaId: null })).status).toBe(200)
+  })
+
+  it('refuses a non-string, non-null value and writes nothing on a refusal', async () => {
+    expect(await refusal(LOOKALIKE, { imitatesPersonaId: 7 }))
+      .toBe(PERSONA_ADMIN_MESSAGES.imitatesNotId)
+    await refusal(LOOKALIKE, { imitatesPersonaId: TOM })
+    expect(seeded(LOOKALIKE).imitatesPersonaId).toBeUndefined()
   })
 })

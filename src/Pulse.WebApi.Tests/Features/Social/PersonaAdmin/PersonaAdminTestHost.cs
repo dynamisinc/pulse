@@ -158,9 +158,16 @@ public sealed class PersonaAdminSeeder
     /// <param name="avatarMediaId">An initial avatar, or <c>null</c>.</param>
     /// <param name="bannerMediaId">An initial banner, or <c>null</c>.</param>
     /// <param name="handle">The handle, or a fresh unique one.</param>
+    /// <param name="verified">The verified mark (default <c>true</c>).</param>
+    /// <param name="imitatesPersonaId">The stored imitated persona (story 33), or <c>null</c>.</param>
     /// <returns>The persona id.</returns>
     public async Task<Guid> SeedPersonaAsync(
-        Guid exerciseId, Guid? avatarMediaId = null, Guid? bannerMediaId = null, string? handle = null)
+        Guid exerciseId,
+        Guid? avatarMediaId = null,
+        Guid? bannerMediaId = null,
+        string? handle = null,
+        bool verified = true,
+        Guid? imitatesPersonaId = null)
     {
         var id = Guid.NewGuid();
         await using var seed = _fixture.CreateContext();
@@ -174,12 +181,13 @@ public sealed class PersonaAdminSeeder
             PersonaType = "agency",
             AudienceBand = "large",
             AudienceMagnitude = 12000,
-            Verified = true,
+            Verified = verified,
             Castable = false,
             Bio = OriginalBio,
             Location = OriginalLocation,
             AvatarMediaId = avatarMediaId,
             BannerMediaId = bannerMediaId,
+            ImitatesPersonaId = imitatesPersonaId,
         });
         await seed.SaveChangesAsync();
         return id;

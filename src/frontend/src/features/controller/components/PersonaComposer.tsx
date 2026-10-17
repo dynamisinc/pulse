@@ -65,6 +65,10 @@
  * signal - it is never emitted to a participant surface, which only ever
  * receives `toParticipantView` output.
  *
+ * TOUCH (story 14): the labelled Post button is the touch control for Ctrl/Cmd+Enter ; under
+ * `(pointer: coarse)` every button here is >= 44px (see the module CSS). The dock's ✕ is the
+ * touch control for Esc.
+ *
  * KEYBOARD (NFR-001): Ctrl/Cmd+Enter fires from ANY control in the form; plain Enter
  * in an input (alt text, a baseline field) does NOT submit; Esc bubbles to the dock
  * (it closes the persona dock) - except while the library picker is open, where the

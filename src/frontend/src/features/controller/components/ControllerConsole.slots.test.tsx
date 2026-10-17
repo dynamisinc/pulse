@@ -274,16 +274,17 @@ describe('ControllerConsole — main-area slots', () => {
       expect(screen.getByTestId('console-slots')).toHaveAttribute('data-layout', 'split')
     })
 
-    it('stacks one column below 1280px, Live world first', async () => {
+    it('hands over to the tablet frame below 1280px (story 12), Live world first', async () => {
       stubViewport(1279)
       renderConsole(slots)
       await screen.findByTestId('controller-console')
 
+      // The desktop stacked layout is gone: 1180 to 1279 is the wide landscape tablet band.
       const grid = screen.getByTestId('console-slots')
-      expect(grid).toHaveAttribute('data-layout', 'stacked')
-      expect(getComputedStyle(grid).gridTemplateColumns).toBe('minmax(0, 1fr)')
+      expect(grid).toHaveAttribute('data-layout', 'landscapeWide')
+      expect(screen.getByTestId('console-tablet-frame')).toBeInTheDocument()
 
-      const [first, second] = Array.from(grid.children)
+      const [first, second] = Array.from(grid.children).filter(child => child.tagName === 'SECTION')
       expect(first).toBe(screen.getByRole('region', { name: 'Live world' }))
       expect(second).toBe(screen.getByRole('region', { name: 'Run sheet' }))
     })
@@ -546,15 +547,17 @@ describe('ControllerConsole — ConsoleSlotContext.openComposer', { timeout: 200
 })
 
 describe('ControllerConsole — dev copy is gone, replaced by a shortcut strip', () => {
-  it('shows a short ⌘K / Ctrl+K shortcut strip that says what it does', async () => {
+  it('shows a short shortcut strip with ONE platform keycap (story 14, D5-024)', async () => {
     renderConsole()
     await screen.findByTestId('controller-console')
 
+    // jsdom reports no Apple platform, so the one keycap is Ctrl+K (the Apple case is unit-tested
+    // in core/hooks/platformModifier.test.ts and shortcutHints.test.tsx).
     const strip = screen.getByTestId('console-shortcut-strip')
-    expect(strip).toHaveTextContent('⌘K')
     expect(strip).toHaveTextContent('Ctrl+K')
+    expect(strip).not.toHaveTextContent('⌘K')
     expect(strip).toHaveTextContent(/post as a persona/i)
-    expect(strip.querySelectorAll('kbd')).toHaveLength(2)
+    expect(strip.querySelectorAll('kbd')).toHaveLength(1)
   })
 
   it('no longer carries the old paragraph', async () => {

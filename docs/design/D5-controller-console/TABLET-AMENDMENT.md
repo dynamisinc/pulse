@@ -1,6 +1,6 @@
 # D5 Tablet Amendment: Controller Console on iPad
 
-> **Status:** DRAFT for Tom's sign-off (MT-D3). Proposed 2026-10-16. Gates stories 12 and 13 in
+> **Status:** SIGNED by Tom (merged 2026-10-17, #594). Proposed 2026-10-16. Gates stories 12 and 13 in
 > `docs/features/mobile-tablet/`; also sets the rules for 14 and 15.
 > **Scope:** brief C3, wave B3. Staff world: COBRA / Cadence chrome (D7-009). Nothing here may
 > make the console look like a participant view. Desktop at 1280px and wider does not change.

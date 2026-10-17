@@ -23,7 +23,10 @@ engine is misbehaving, the scenario changes abruptly, or the world needs to go q
       *(`RestoreFromSafety` is the only lift; no automation path raises — `KillSwitch_DoesNotAutoRecover`.)*
 - [x] Given in-flight Delayed-auto countdowns, when the kill switch fires, then they are suspended (no
       auto-send) — consistent with dropping to Suggest. *(effective drops below Delayed-auto → `AutoHoldPolicy`
-      holds even under swamped mode.)*
+      holds even under swamped mode.)* A countdown that expires during a **full stop** resolves to Held with one
+      hold-on-expiry event; it is never left counting down to auto-send after a restore.
+      *(`AutoHoldPolicyTests.Evaluate_FullStop_OnExpiry_LogsAHoldTransition_NotViaSwamped`,
+      `EngineReviewSafetyInvariantTests.AutoHold_CountdownExpiresDuringFullStop_Holds_AndStaysHeldAfterRestore_EvenUnderSwampedMode`.)*
 - [x] Given the kill switch fires, when it does, then it is logged (XC-004) with actor + scenario time,
       and the state is clearly indicated in the console (text + icon, not color alone; NFR-001),
       staff-only (XC-002). *(`EngineKillSwitchFired` carries mode+actor+scenario minute; console surface is E7.)*

@@ -24,6 +24,7 @@ import { faClipboardCheck } from '@fortawesome/free-solid-svg-icons'
 import CobraStyles from '@/theme/CobraStyles'
 import { CobraLinkButton, CobraPrimaryButton } from '@/theme/styledComponents'
 import { RunSheetButton } from './RunSheetButtons'
+import { COARSE_TARGET_SX } from '../consoleTouch'
 import { MESSAGES } from './injectMessages'
 
 export interface MarkFiredActionProps {
@@ -83,10 +84,10 @@ export function MarkFiredAction({ title, disabled, onConfirm }: MarkFiredActionP
             </Typography>
           </DialogContent>
           <DialogActions sx={{ padding: CobraStyles.Padding.DialogContent, gap: 1 }}>
-            <CobraLinkButton onClick={() => setOpen(false)} data-testid="mark-fired-cancel">
+            <CobraLinkButton onClick={() => setOpen(false)} data-testid="mark-fired-cancel" sx={COARSE_TARGET_SX}>
               Cancel
             </CobraLinkButton>
-            <CobraPrimaryButton autoFocus onClick={confirm} data-testid="mark-fired-confirm">
+            <CobraPrimaryButton autoFocus onClick={confirm} data-testid="mark-fired-confirm" sx={COARSE_TARGET_SX}>
               Mark fired
             </CobraPrimaryButton>
           </DialogActions>

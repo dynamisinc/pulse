@@ -37,6 +37,7 @@ import {
   faXmark,
 } from '@fortawesome/free-solid-svg-icons'
 import { CobraLinkButton } from '@/theme/styledComponents'
+import { COARSE_TARGET_SX } from '../consoleTouch'
 import type { LiveWorldPost } from './liveWorldModel'
 import { liveWorldTokens, monoMeta, srOnly } from './liveWorldStyles'
 import { PinForAllError, setPinnedForAll } from './pinForAllService'
@@ -60,6 +61,8 @@ const ROW_BUTTON_SX = {
   fontWeight: 700,
   fontFamily: liveWorldTokens.mono,
   gap: '5px',
+  // Story 14: 44px under a coarse pointer (real layout space).
+  ...COARSE_TARGET_SX,
   '&.Mui-focusVisible, &:focus-visible': {
     outline: `2px solid ${liveWorldTokens.focus}`,
     outlineOffset: '1px',

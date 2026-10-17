@@ -48,6 +48,8 @@ Viewports live in `viewports.mjs`:
 | `PHONE` | 390x844 | yes | participant screens (primary size, no file suffix) |
 | `PHONE_SMALL` | 360x800 | yes | `-360` variants of the core participant screens |
 | `TABLET` | 768x1024 | yes | `-tablet` variants of the core participant screens |
+| `TABLET_LANDSCAPE` | 1180x820 | yes | controller `*-tablet` shots (side-by-side band) |
+| `TABLET_PORTRAIT_TALL` | 820x1180 | yes | `console-overview-tablet-portrait` (stacked band) |
 
 Mobile and touch emulation comes from each viewport's `mobile` flag, so phone and
 tablet shots render the coarse-pointer (touch-sized) layout a real device gets.

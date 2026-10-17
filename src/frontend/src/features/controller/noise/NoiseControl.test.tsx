@@ -24,6 +24,7 @@ import { cobraTheme } from '@/theme/cobraTheme'
 import { api } from '@/core/services/api'
 import type { PauseTier } from '../hooks/usePauseState'
 import { NoiseControl } from './NoiseControl'
+import { hasPseudoHitSlop, mediaRuleDeclarations } from '@/features/staffShell/tabletTestUtils'
 import type { NoiseLevel, NoiseStateDto } from './noiseTypes'
 
 // Demo-feedback story 11 (DF-14): the console's write controls render only for a controller
@@ -463,5 +464,30 @@ describe('NoiseControl (Gate-1 folds)', () => {
     await flush()
     await flush(60_000)
     expect(getSpy).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('NoiseControl — touch targets (story 14, D5-024)', () => {
+  it('makes every level a 44x44 pill, 8px apart, inside (pointer: coarse), with no hit-slop', async () => {
+    server = stateFor('low')
+    render(knob())
+    await waitFor(() => expect(radio('Low')).toHaveAttribute('aria-checked', 'true'))
+
+    for (const name of ['Off', 'Low', 'Medium', 'High']) {
+      const coarse = mediaRuleDeclarations(radio(name), 'pointer: coarse')
+      expect(coarse['min-width']).toBe('44px')
+      expect(coarse['min-height']).toBe('44px')
+      expect(hasPseudoHitSlop(radio(name))).toBe(false)
+    }
+    const group = screen.getByTestId('noise-level-group')
+    expect(mediaRuleDeclarations(group, 'pointer: coarse').gap).toBe('8px')
+  })
+
+  it('a tap on a level is the whole interaction (no hover, no key)', async () => {
+    const user = userEvent.setup()
+    render(knob())
+    await waitFor(() => expect(radio('Off')).toHaveAttribute('aria-checked', 'true'))
+    await user.click(radio('Medium'))
+    expect(putSpy).toHaveBeenCalledWith('/staff/noise', { level: 'medium' }, expect.any(Object))
   })
 })

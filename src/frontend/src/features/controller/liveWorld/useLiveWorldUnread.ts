@@ -46,6 +46,7 @@ import {
   useState,
   type RefObject,
 } from 'react'
+import { usePaneShowing } from '../console/paneBadges'
 import type { LiveWorldEntry } from './liveWorldModel'
 import { MAX_PENDING, MAX_ROWS } from './liveWorldModel'
 
@@ -270,8 +271,10 @@ interface SeenState {
  * keeps its observation AND its running dwell timer, so a burst of arrivals never
  * restarts the clock. A row scrolled out of view before the dwell completes stays
  * unread. Hiding the tab or leaving the window stops every dwell; coming back restarts
- * them for the rows then in view. A browser without IntersectionObserver marks nothing
- * read by sight (Mark all read still works).
+ * them for the rows then in view. So does a pane the console has HIDDEN (a tablet tab that is
+ * not selected keeps its box, so the observer still sees its rows): no dwell runs while hidden,
+ * and showing it again restarts them (`usePaneShowing`). A browser without IntersectionObserver
+ * marks nothing read by sight (Mark all read still works).
  *
  * `rowsTrigger` / `unreadTrigger` are values whose identity changes when the rendered rows
  * (the column's visible list) or the unread set may have changed.
@@ -294,10 +297,17 @@ export function useMarkReadWhenSeen(
     markReadRef.current = markRead
   })
 
-  /** Starts the dwell for `id` (once), if the controller is attentive. */
+  // False while the console has this pane's tab hidden: nobody is looking, so nothing is read.
+  const showing = usePaneShowing()
+  const showingRef = useRef(showing)
+  useLayoutEffect(() => {
+    showingRef.current = showing
+  })
+
+  /** Starts the dwell for `id` (once), if the controller is attentive and the pane shows. */
   const startDwell = useCallback((id: string) => {
     const state = stateRef.current
-    if (state.timers.has(id) || !isAttentive()) return
+    if (state.timers.has(id) || !showingRef.current || !isAttentive()) return
     state.timers.set(id, setTimeout(() => {
       state.timers.delete(id)
       markReadRef.current(id)
@@ -387,6 +397,16 @@ export function useMarkReadWhenSeen(
       window.removeEventListener('blur', onAttentionChange)
     }
   }, [startDwell, stopDwell])
+
+  // The pane is hidden or shown (a tablet tab switch): same as attention leaving or returning.
+  useEffect(() => {
+    const state = stateRef.current
+    if (showing) {
+      if (isAttentive()) for (const id of state.visible) startDwell(id)
+    } else {
+      for (const id of [...state.timers.keys()]) stopDwell(id)
+    }
+  }, [showing, startDwell, stopDwell])
 
   useEffect(() => {
     const state = stateRef.current

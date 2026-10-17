@@ -23,8 +23,8 @@ using Pulse.WebApi.Features.Identity.Sessions;
 [Collection(MsSqlCollection.Name)]
 public sealed class AdminIdentityFoundationMigrationTests
 {
-    private const string PreviousMigration = "20261015192237_DemoFeedbackWave4RuntimeAndEdits";
-    private const string MigrationUnderTest = "20261016181208_AdminIdentityFoundation";
+    private const string PreviousMigration = "20261017011709_DemoFeedbackNamedLookalikePairs";
+    private const string MigrationUnderTest = "20261017120000_AdminIdentityFoundation";
 
     private readonly MsSqlContainerFixture _fixture;
 

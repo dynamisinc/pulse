@@ -283,10 +283,13 @@ public sealed partial class ExerciseReportService
         //    Decided before engagement, so only the paired personas' in-window posts need counts beyond the list.
         var authorIds = posts.Select(post => post.AuthorPersonaId).ToHashSet();
         var windowAuthorIds = scoped.Select(post => post.AuthorPersonaId).ToHashSet();
-        var pairs = ExerciseReportBuilder.PairLookalikes(
+        // Controller-named pairs (DF-49, story 33) join the handle matches and replace a lookalike's own handle match;
+        // they follow the same window rule, and a target that is not an author or no longer verified is skipped.
+        var pairs = ExerciseReportBuilder.MergeLookalikePairs(
                 lookups.Personas.Values
                     .Where(persona => authorIds.Contains(persona.Id))
-                    .Select(persona => new ReportLookalikeCandidate(persona.Id, persona.Handle, persona.Verified)))
+                    .Select(persona => new ReportLookalikeCandidate(
+                        persona.Id, persona.Handle, persona.Verified, persona.ImitatesPersonaId)))
             .Where(pair => windowAuthorIds.Contains(pair.Verified.Id) && windowAuthorIds.Contains(pair.Lookalike.Id))
             .ToArray();
         var pairedPersonas = pairs.SelectMany(pair => new[] { pair.Verified.Id, pair.Lookalike.Id }).ToHashSet();
@@ -361,7 +364,8 @@ public sealed partial class ExerciseReportService
             InjectResponses = injects.Responses,
             Lookalikes = pairs.Select(pair => ToLookalike(
                 ToAccount(pair.Verified.Id, scoped, lookups, engagement),
-                ToAccount(pair.Lookalike.Id, scoped, lookups, engagement))).ToArray(),
+                ToAccount(pair.Lookalike.Id, scoped, lookups, engagement),
+                pair.Named)).ToArray(),
             Posts = BuildPosts(posts, listed, lookups, engagement, media, avatars, urls, zone),
             OmittedNoiseCount = includeNoise ? 0 : scoped.Count(post => ExerciseReportBuilder.IsNoise(post.Origin)),
             PostRecord = new ReportPostRecordDto
@@ -541,10 +545,11 @@ public sealed partial class ExerciseReportService
         return new InjectSection(responses, markers, ExerciseReportBuilder.Median(minutes), respondedAt);
     }
 
-    private static ReportLookalikeDto ToLookalike(ReportAccountDto verified, ReportAccountDto lookalike) => new()
+    private static ReportLookalikeDto ToLookalike(ReportAccountDto verified, ReportAccountDto lookalike, bool named) => new()
     {
         Verified = verified,
         Lookalike = lookalike,
+        Named = named,
         Outdrew = ExerciseReportBuilder.LookalikeOutdrew(verified.Likes + verified.Reposts, lookalike.Likes + lookalike.Reposts),
     };
 
@@ -694,7 +699,8 @@ public sealed partial class ExerciseReportService
     {
         var personas = await _dbContext.Personas
             .AsNoTracking()
-            .Select(persona => new PersonaLabel(persona.Id, persona.Handle, persona.DisplayName, persona.Verified, persona.AvatarMediaId))
+            .Select(persona => new PersonaLabel(
+                persona.Id, persona.Handle, persona.DisplayName, persona.Verified, persona.AvatarMediaId, persona.ImitatesPersonaId))
             .ToDictionaryAsync(persona => persona.Id, cancellationToken);
 
         // identity-auth-roles/16: the exercise's STAFF enrollments (Enrollment is IExerciseScoped, so the central filter
@@ -899,7 +905,8 @@ public sealed partial class ExerciseReportService
     private partial void LogSigningFailed(Exception exception, int assetCount);
 
     /// <summary>A persona as the report needs it.</summary>
-    private sealed record PersonaLabel(Guid Id, string Handle, string DisplayName, bool Verified, Guid? AvatarMediaId);
+    private sealed record PersonaLabel(
+        Guid Id, string Handle, string DisplayName, bool Verified, Guid? AvatarMediaId, Guid? ImitatesPersonaId);
 
     /// <summary>An inject item's MSEL reference (<c>null</c> when blank), title and whether it counts as delivered (fired, not deleted).</summary>
     private sealed record InjectLabel(string? Ref, string Title, bool Delivered);

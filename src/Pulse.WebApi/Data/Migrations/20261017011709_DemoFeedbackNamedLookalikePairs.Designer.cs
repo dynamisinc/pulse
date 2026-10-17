@@ -12,8 +12,8 @@ using Pulse.WebApi.Data;
 namespace Pulse.WebApi.Data.Migrations
 {
     [DbContext(typeof(PulseDbContext))]
-    [Migration("20261016181208_AdminIdentityFoundation")]
-    partial class AdminIdentityFoundation
+    [Migration("20261017011709_DemoFeedbackNamedLookalikePairs")]
+    partial class DemoFeedbackNamedLookalikePairs
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -56,9 +56,6 @@ namespace Pulse.WebApi.Data.Migrations
                         .HasMaxLength(254)
                         .HasColumnType("nvarchar(254)");
 
-                    b.Property<Guid>("EnrollmentId")
-                        .HasColumnType("uniqueidentifier");
-
                     b.Property<Guid>("ExerciseId")
                         .HasColumnType("uniqueidentifier");
 
@@ -80,15 +77,19 @@ namespace Pulse.WebApi.Data.Migrations
                         .HasColumnType("bit")
                         .HasDefaultValue(false);
 
+                    b.Property<Guid?>("PersonaId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Role")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
                     b.Property<string>("Username")
                         .IsRequired()
                         .HasMaxLength(256)
                         .HasColumnType("nvarchar(256)");
 
                     b.HasKey("Id");
-
-                    b.HasIndex("EnrollmentId")
-                        .IsUnique();
 
                     b.HasIndex("ExerciseId");
 
@@ -142,58 +143,6 @@ namespace Pulse.WebApi.Data.Migrations
                     b.HasIndex("ExerciseId");
 
                     b.ToTable("EngineReviewItems");
-                });
-
-            modelBuilder.Entity("Pulse.WebApi.Data.Entities.Enrollment", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("datetimeoffset");
-
-                    b.Property<Guid>("ExerciseId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<bool>("IsLead")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bit")
-                        .HasDefaultValue(false);
-
-                    b.Property<Guid?>("PersonId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<Guid?>("PersonaId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("Role")
-                        .IsRequired()
-                        .HasMaxLength(32)
-                        .HasColumnType("nvarchar(32)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ExerciseId");
-
-                    b.HasIndex("PersonId");
-
-                    b.HasIndex("ExerciseId", "PersonId")
-                        .IsUnique()
-                        .HasFilter("[PersonId] IS NOT NULL");
-
-                    b.HasIndex(new[] { "ExerciseId" }, "IX_Enrollments_ExerciseId_Lead")
-                        .IsUnique()
-                        .HasFilter("[IsLead] = 1");
-
-                    b.ToTable("Enrollments", t =>
-                        {
-                            t.HasCheckConstraint("CK_Enrollments_IsLead_ControllerOnly", "[IsLead] = 0 OR [Role] = 'controller'");
-
-                            t.HasCheckConstraint("CK_Enrollments_PersonaId_ParticipantRolesOnly", "[PersonaId] IS NULL OR [Role] IN ('participant', 'pio')");
-
-                            t.HasCheckConstraint("CK_Enrollments_Role", "[Role] IN ('planner', 'controller', 'evaluator', 'participant', 'pio')");
-                        });
                 });
 
             modelBuilder.Entity("Pulse.WebApi.Data.Entities.Exercise", b =>
@@ -264,9 +213,6 @@ namespace Pulse.WebApi.Data.Migrations
                     b.Property<string>("EnabledChannels")
                         .HasMaxLength(256)
                         .HasColumnType("nvarchar(256)");
-
-                    b.Property<DateTimeOffset?>("FirstLiveAt")
-                        .HasColumnType("datetimeoffset");
 
                     b.Property<string>("Hostname")
                         .HasMaxLength(253)
@@ -663,54 +609,6 @@ namespace Pulse.WebApi.Data.Migrations
                     b.ToTable("InjectQueueStates");
                 });
 
-            modelBuilder.Entity("Pulse.WebApi.Data.Entities.LoginChoice", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTimeOffset?>("ConsumedAt")
-                        .HasColumnType("datetimeoffset");
-
-                    b.Property<string>("CreatedFromIpHash")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
-
-                    b.Property<DateTimeOffset>("ExpiresAt")
-                        .HasColumnType("datetimeoffset");
-
-                    b.Property<string>("TokenHash")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("TokenHash")
-                        .IsUnique();
-
-                    b.ToTable("LoginChoices");
-                });
-
-            modelBuilder.Entity("Pulse.WebApi.Data.Entities.LoginChoiceCandidate", b =>
-                {
-                    b.Property<Guid>("ChoiceId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<Guid>("PersonId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<Guid>("OrganizationId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.HasKey("ChoiceId", "PersonId");
-
-                    b.HasIndex("PersonId");
-
-                    b.ToTable("LoginChoiceCandidates");
-                });
-
             modelBuilder.Entity("Pulse.WebApi.Data.Entities.MediaAsset", b =>
                 {
                     b.Property<Guid>("Id")
@@ -816,48 +714,6 @@ namespace Pulse.WebApi.Data.Migrations
                     b.ToTable("NoisePosts");
                 });
 
-            modelBuilder.Entity("Pulse.WebApi.Data.Entities.OrgAuditEvent", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<Guid?>("ActorPersonId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<Guid?>("ExerciseId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("Kind")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
-
-                    b.Property<DateTimeOffset>("OccurredAt")
-                        .HasColumnType("datetimeoffset");
-
-                    b.Property<Guid>("OrganizationId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("Outcome")
-                        .IsRequired()
-                        .HasMaxLength(32)
-                        .HasColumnType("nvarchar(32)");
-
-                    b.Property<string>("Payload")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<Guid?>("SubjectPersonId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("OrganizationId", "OccurredAt");
-
-                    b.ToTable("OrgAuditEvents");
-                });
-
             modelBuilder.Entity("Pulse.WebApi.Data.Entities.Organization", b =>
                 {
                     b.Property<Guid>("Id")
@@ -872,17 +728,9 @@ namespace Pulse.WebApi.Data.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)");
 
-                    b.Property<string>("Slug")
-                        .IsRequired()
-                        .HasMaxLength(63)
-                        .HasColumnType("nvarchar(63)");
-
                     b.HasKey("Id");
 
                     b.HasIndex("Name")
-                        .IsUnique();
-
-                    b.HasIndex("Slug")
                         .IsUnique();
 
                     b.ToTable("Organizations");
@@ -941,63 +789,6 @@ namespace Pulse.WebApi.Data.Migrations
                     b.ToTable("ParticipantLinks");
                 });
 
-            modelBuilder.Entity("Pulse.WebApi.Data.Entities.Person", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("datetimeoffset");
-
-                    b.Property<DateTimeOffset?>("DisabledAt")
-                        .HasColumnType("datetimeoffset");
-
-                    b.Property<string>("DisplayName")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
-
-                    b.Property<string>("Email")
-                        .HasMaxLength(254)
-                        .HasColumnType("nvarchar(254)");
-
-                    b.Property<int>("FailedLoginCount")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("int")
-                        .HasDefaultValue(0);
-
-                    b.Property<DateTimeOffset?>("LockedOutUntil")
-                        .HasColumnType("datetimeoffset");
-
-                    b.Property<string>("OrgRole")
-                        .HasMaxLength(32)
-                        .HasColumnType("nvarchar(32)");
-
-                    b.Property<Guid>("OrganizationId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTimeOffset?>("PasswordChangedAt")
-                        .HasColumnType("datetimeoffset");
-
-                    b.Property<string>("PasswordHash")
-                        .HasMaxLength(512)
-                        .HasColumnType("nvarchar(512)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("OrganizationId");
-
-                    b.HasIndex("OrganizationId", "Email")
-                        .IsUnique()
-                        .HasFilter("[Email] IS NOT NULL");
-
-                    b.ToTable("People", t =>
-                        {
-                            t.HasCheckConstraint("CK_People_OrgRole", "[OrgRole] IS NULL OR [OrgRole] = 'orgAdmin'");
-                        });
-                });
-
             modelBuilder.Entity("Pulse.WebApi.Data.Entities.Persona", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1042,6 +833,9 @@ namespace Pulse.WebApi.Data.Migrations
                         .IsRequired()
                         .HasMaxLength(256)
                         .HasColumnType("nvarchar(256)");
+
+                    b.Property<Guid?>("ImitatesPersonaId")
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<DateTimeOffset>("JoinedAt")
                         .ValueGeneratedOnAdd()
@@ -1325,7 +1119,7 @@ namespace Pulse.WebApi.Data.Migrations
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
-                    b.Property<Guid?>("ExerciseId")
+                    b.Property<Guid>("ExerciseId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<DateTimeOffset>("ExpiresAt")
@@ -1340,13 +1134,6 @@ namespace Pulse.WebApi.Data.Migrations
                     b.Property<string>("Kind")
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
-
-                    b.Property<string>("Origin")
-                        .HasMaxLength(256)
-                        .HasColumnType("nvarchar(256)");
-
-                    b.Property<Guid?>("PersonId")
-                        .HasColumnType("uniqueidentifier");
 
                     b.Property<Guid?>("PersonaId")
                         .HasColumnType("uniqueidentifier");
@@ -1381,8 +1168,6 @@ namespace Pulse.WebApi.Data.Migrations
 
                     b.HasIndex("ExerciseId");
 
-                    b.HasIndex("PersonId");
-
                     b.HasIndex("RefreshTokenHash")
                         .IsUnique()
                         .HasFilter("[RefreshTokenHash] IS NOT NULL");
@@ -1390,10 +1175,7 @@ namespace Pulse.WebApi.Data.Migrations
                     b.HasIndex("TokenHash")
                         .IsUnique();
 
-                    b.ToTable("Sessions", t =>
-                        {
-                            t.HasCheckConstraint("CK_Sessions_ExerciseId_OrgAdminOnly", "[ExerciseId] IS NOT NULL OR [Role] = 'orgAdmin'");
-                        });
+                    b.ToTable("Sessions");
                 });
 
             modelBuilder.Entity("Pulse.WebApi.Data.Entities.SharedCredential", b =>
@@ -1440,9 +1222,39 @@ namespace Pulse.WebApi.Data.Migrations
                     b.ToTable("SharedCredentials");
                 });
 
+            modelBuilder.Entity("Pulse.WebApi.Data.Entities.StaffAssignment", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid>("ExerciseId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Role")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid>("StaffUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ExerciseId");
+
+                    b.HasIndex("StaffUserId", "ExerciseId")
+                        .IsUnique();
+
+                    b.ToTable("StaffAssignments");
+                });
+
             modelBuilder.Entity("Pulse.WebApi.Data.Entities.StaffUser", b =>
                 {
                     b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<DateTimeOffset>("CreatedAt")
@@ -1537,17 +1349,6 @@ namespace Pulse.WebApi.Data.Migrations
                     b.ToTable("TelemetryEvents");
                 });
 
-            modelBuilder.Entity("Pulse.WebApi.Data.Entities.Account", b =>
-                {
-                    b.HasOne("Pulse.WebApi.Data.Entities.Enrollment", "Enrollment")
-                        .WithOne()
-                        .HasForeignKey("Pulse.WebApi.Data.Entities.Account", "EnrollmentId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("Enrollment");
-                });
-
             modelBuilder.Entity("Pulse.WebApi.Data.Entities.EngineReviewItemEntity", b =>
                 {
                     b.OwnsMany("Pulse.WebApi.Data.Entities.EngineReviewDraftPost", "Posts", b1 =>
@@ -1581,14 +1382,6 @@ namespace Pulse.WebApi.Data.Migrations
                         });
 
                     b.Navigation("Posts");
-                });
-
-            modelBuilder.Entity("Pulse.WebApi.Data.Entities.Enrollment", b =>
-                {
-                    b.HasOne("Pulse.WebApi.Data.Entities.Person", null)
-                        .WithMany()
-                        .HasForeignKey("PersonId")
-                        .OnDelete(DeleteBehavior.Restrict);
                 });
 
             modelBuilder.Entity("Pulse.WebApi.Data.Entities.ExerciseRuntimeState", b =>
@@ -1634,21 +1427,6 @@ namespace Pulse.WebApi.Data.Migrations
                         });
 
                     b.Navigation("Media");
-                });
-
-            modelBuilder.Entity("Pulse.WebApi.Data.Entities.LoginChoiceCandidate", b =>
-                {
-                    b.HasOne("Pulse.WebApi.Data.Entities.LoginChoice", null)
-                        .WithMany()
-                        .HasForeignKey("ChoiceId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("Pulse.WebApi.Data.Entities.Person", null)
-                        .WithMany()
-                        .HasForeignKey("PersonId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
                 });
 
             modelBuilder.Entity("Pulse.WebApi.Data.Entities.MediaAsset", b =>
@@ -1716,17 +1494,6 @@ namespace Pulse.WebApi.Data.Migrations
                         .HasForeignKey("PostId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
-                });
-
-            modelBuilder.Entity("Pulse.WebApi.Data.Entities.StaffUser", b =>
-                {
-                    b.HasOne("Pulse.WebApi.Data.Entities.Person", "Person")
-                        .WithOne()
-                        .HasForeignKey("Pulse.WebApi.Data.Entities.StaffUser", "Id")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("Person");
                 });
 
             modelBuilder.Entity("Pulse.WebApi.Data.Entities.TelemetryEvent", b =>

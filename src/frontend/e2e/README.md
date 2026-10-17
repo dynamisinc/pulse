@@ -35,6 +35,7 @@ npx playwright test e2e/alert-bar.phone.spec.ts
 
 `smoke.spec.ts` (boot + role-seam isolation), `participant-critical-path.spec.ts` (join, feed,
 post, thread, reply, telemetry on the wire, unknown-thread fail-closed), `alert-bar.phone.spec.ts`.
+`controller-tablet.spec.ts` (controller console at 1024x768, 768x1024, 1180x820, 820x1180; run by its own `controller-tablet` project only: `npx playwright test e2e/controller-tablet.spec.ts --project=controller-tablet`).
 Known gap tracked in-spec with `test.fail`: composer submit buttons under 44px (story 18).
 
 ## Perf (`@perf`)

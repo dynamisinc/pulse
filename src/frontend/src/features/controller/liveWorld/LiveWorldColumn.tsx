@@ -147,7 +147,9 @@ import { liveWorldTokens, monoMeta, srOnly } from './liveWorldStyles'
 import { useLiveWorldFeed } from './useLiveWorldFeed'
 import { defaultPinChangeSource, type PinChangeSource } from './pinChangeSource'
 import { useLiveWorldUnread, useMarkReadWhenSeen } from './useLiveWorldUnread'
+import { usePublishPaneBadge } from '../console/paneBadges'
 import { useCanControl } from '../access'
+import { COARSE_TARGET_SX } from '../consoleTouch'
 
 /** A scroll offset (px) at or below which the list counts as "at the top". */
 const TOP_THRESHOLD_PX = 4
@@ -303,6 +305,8 @@ function LiveWorldPanel({
     ready: feed.status === 'ready',
   })
   const { unreadIds, unreadCount, markRead, markAllRead } = unread
+  // Tablet pane-switcher badge "N new" (mobile-tablet story 12): every unread post, listed or held.
+  usePublishPaneBadge('liveWorld', unreadIds.size)
 
   // The latest `onReplyAs`, behind a stable callback, so rows (memoized) never
   // re-render just because the parent passed a fresh function.
@@ -733,6 +737,7 @@ function LiveWorldPanel({
                   outline: `2px solid ${liveWorldTokens.focus}`,
                   outlineOffset: '1px',
                 },
+                ...COARSE_TARGET_SX,
               }}
             >
               <FontAwesomeIcon icon={faXmark} aria-hidden="true" />
@@ -755,6 +760,7 @@ function LiveWorldPanel({
             fontSize: 12,
             gap: '6px',
             '&[aria-disabled="true"]': { opacity: 0.55, cursor: 'default' },
+            ...COARSE_TARGET_SX,
           }}
         >
           <FontAwesomeIcon icon={faCheckDouble} aria-hidden="true" />
@@ -811,7 +817,7 @@ function LiveWorldPanel({
             size="small"
             data-testid="live-world-retry"
             onClick={feedFailed ? feed.retry : invalidatePersonas}
-            sx={{ py: '1px', px: '12px', fontSize: 12 }}
+            sx={{ py: '1px', px: '12px', fontSize: 12, ...COARSE_TARGET_SX }}
           >
             Retry
           </CobraSecondaryButton>
@@ -857,6 +863,8 @@ function LiveWorldPanel({
                 fontFamily: liveWorldTokens.mono,
                 gap: '6px',
                 boxShadow: '0 2px 6px rgba(0, 0, 0, 0.3)',
+                // Story 14: the touch twin of the N key, 44px under a coarse pointer.
+                ...COARSE_TARGET_SX,
               }}
             >
               <FontAwesomeIcon icon={faArrowUp} aria-hidden="true" />

@@ -86,17 +86,28 @@
  *      control here.
  */
 
-import { useEffect, useState } from 'react'
-import { Box, Stack, Tooltip, Typography } from '@mui/material'
+import { useEffect, useRef, useState } from 'react'
+import { Box, Popover, Stack, Tooltip, Typography, useMediaQuery } from '@mui/material'
 import { useNavigate } from 'react-router-dom'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import { faEye, faEyeSlash, faRightFromBracket } from '@fortawesome/free-solid-svg-icons'
+import {
+  faEllipsis,
+  faEye,
+  faEyeSlash,
+  faRightFromBracket,
+} from '@fortawesome/free-solid-svg-icons'
 import { useExerciseContext } from '@/core/exerciseContext'
 import { useScenarioTime } from '@/core/clock'
 import { endSession } from '@/core/auth'
 import { LOGIN_PATH } from '@/features/app-shell/constants'
 import type { StaffRouteRegistry, StaffSurfaceRole } from '@/features/app-shell'
-import { staffShellTokens } from '../staffShellTokens'
+import {
+  STAFF_COARSE_POINTER_MEDIA,
+  STAFF_TABLET_PORTRAIT_QUERY,
+  STAFF_TABLET_QUERY,
+  STAFF_TOUCH_TARGET_PX,
+  staffShellTokens,
+} from '../staffShellTokens'
 import { useStaffPresence, useStaffRoleCell } from '../staffHeaderMocks'
 import { STATE_PILL_CONFIG, type StatePillConfig } from './statePillConfig'
 import { SurfaceLauncher } from './SurfaceLauncher'
@@ -252,6 +263,423 @@ export function StaffHeader({
   const wallTimeText = formatClock(wallInstant, undefined, TIME_ONLY)
   const wallDateText = formatClock(wallInstant, undefined, DAY_MONTH).toUpperCase()
 
+  // --- Tablet bands (story 13; D5-021). Chosen by WIDTH ONLY; `noSsr` so the first paint is
+  // already the right layout (no desktop flash on an iPad). With no `matchMedia` (jsdom) both are
+  // false and
+  // the desktop header renders, byte-for-byte as before. ---
+  const tablet = useMediaQuery(STAFF_TABLET_QUERY, { noSsr: true })
+  const portrait = useMediaQuery(STAFF_TABLET_PORTRAIT_QUERY, { noSsr: true })
+  const [moreAnchor, setMoreAnchor] = useState<HTMLElement | null>(null)
+  const moreButtonRef = useRef<HTMLButtonElement | null>(null)
+  const moreOpen = moreAnchor !== null
+  const closeMore = () => setMoreAnchor(null)
+
+  // Under a coarse pointer every header control is at least 44px tall (real layout space, never
+  // ::before/::after slop). Width follows content; adjacent controls are >= 8px apart (gap).
+  const headerButtonTouchSx = {
+    [STAFF_COARSE_POINTER_MEDIA]: { minHeight: STAFF_TOUCH_TARGET_PX },
+  } as const
+
+  const scenarioClock = (
+    <Stack
+      data-testid="staff-header-scenario-clock"
+      sx={{ alignItems: 'flex-start', lineHeight: 1, gap: '3px', flex: 'none' }}
+    >
+      <Typography
+        id="staff-header-scenario-clock-label"
+        sx={{
+          fontSize: 8.5,
+          fontWeight: 700,
+          letterSpacing: '0.12em',
+          color: staffShellTokens.header.textMuted,
+        }}
+      >
+        SCENARIO
+      </Typography>
+      <Typography
+        aria-labelledby="staff-header-scenario-clock-label"
+        sx={{
+          fontFamily: staffShellTokens.classificationTag.fontFamily,
+          fontSize: 20,
+          fontWeight: 700,
+        }}
+      >
+        {scenarioTimeText}
+      </Typography>
+    </Stack>
+  )
+
+  const wallClock = (
+    <Stack
+      data-testid="staff-header-wall-clock"
+      sx={{ alignItems: 'flex-start', lineHeight: 1, gap: '3px' }}
+    >
+      <Typography
+        id="staff-header-wall-clock-label"
+        sx={{
+          fontSize: 8.5,
+          fontWeight: 700,
+          letterSpacing: '0.12em',
+          color: staffShellTokens.header.textMuted,
+          whiteSpace: 'nowrap',
+        }}
+      >
+        LOCAL · {wallDateText}
+      </Typography>
+      <Typography
+        aria-labelledby="staff-header-wall-clock-label"
+        sx={{
+          fontFamily: staffShellTokens.classificationTag.fontFamily,
+          fontSize: 13,
+          fontWeight: 700,
+          color: staffShellTokens.header.textMuted,
+        }}
+      >
+        {wallTimeText}
+      </Typography>
+    </Stack>
+  )
+
+  // State pill — dot AND text, never color-only (NFR-001). Never collapses at any width.
+  const pill = (
+    <Box
+      role="status"
+      data-testid="staff-header-state-pill"
+      aria-label={`Exercise state: ${statePill.label}`}
+      sx={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 0.75,
+        fontSize: 10.5,
+        fontWeight: 700,
+        letterSpacing: '0.08em',
+        px: 1.125,
+        py: 0.5,
+        borderRadius: '20px',
+        background: statePill.background,
+        color: statePill.accentColor,
+        border: `1px solid ${statePill.borderColor}`,
+        flex: 'none',
+        whiteSpace: 'nowrap',
+      }}
+    >
+      <Box
+        aria-hidden="true"
+        data-testid="staff-header-state-pill-dot"
+        sx={{ width: 8, height: 8, borderRadius: '50%', background: 'currentColor', flex: 'none' }}
+      />
+      <Box component="span" data-testid="staff-header-state-pill-label">
+        {statePill.label}
+      </Box>
+    </Box>
+  )
+
+  // Classification tag — persistent, mono, config-driven (D7-010). Never collapses at any width.
+  const classificationTag = (
+    <Box
+      data-testid="staff-header-classification-tag"
+      title="Training use only — all content simulated"
+      sx={{
+        fontFamily: staffShellTokens.classificationTag.fontFamily,
+        fontWeight: 700,
+        fontSize: 9,
+        letterSpacing: staffShellTokens.classificationTag.letterSpacing,
+        color: staffShellTokens.classificationTag.color,
+        border: `1px solid ${staffShellTokens.classificationTag.borderColor}`,
+        borderRadius: '5px',
+        px: 1,
+        py: 0.375,
+        whiteSpace: 'nowrap',
+        flex: 'none',
+      }}
+    >
+      {STAFF_CLASSIFICATION}
+    </Box>
+  )
+
+  const presenceAvatars =
+    presence.length > 0 ? (
+      <Stack
+        direction="row"
+        role="group"
+        aria-label="Staff presence"
+        data-testid="staff-header-presence"
+        sx={{ gap: 0.75, flex: 'none', flexWrap: 'wrap' }}
+      >
+        {presence.map(member => (
+          // Touch equivalent for the hover tooltip: a held touch shows it (and it lingers); on a
+          // tablet the avatars live in the header "more" menu with their names as TEXT.
+          <Tooltip
+            key={member.id}
+            title={member.label}
+            enterTouchDelay={600}
+            leaveTouchDelay={3000}
+          >
+            <Box
+              aria-label={member.label}
+              sx={{
+                width: 26,
+                height: 26,
+                borderRadius: '50%',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: 10,
+                fontWeight: 800,
+                color: '#fff',
+                background: member.color,
+              }}
+            >
+              {member.initials}
+            </Box>
+          </Tooltip>
+        ))}
+      </Stack>
+    ) : null
+
+  // Preview-as-participant button — behavior is story 04's; HANDLER-GATED (see module header
+  // point 7). In the tablet "more" menu it keeps the same testid/aria-pressed contract.
+  const previewButton =
+    onTogglePreview !== undefined ? (
+      <Box
+        component="button"
+        type="button"
+        data-testid="staff-header-preview-toggle"
+        aria-pressed={previewActive}
+        onClick={() => {
+          if (moreOpen) {
+            // Entering preview remembers `document.activeElement` as the opener to return focus
+            // to on exit. A control inside the menu unmounts when the menu closes, so hand focus
+            // to the always-mounted "more" button FIRST (the menu does not trap focus; see below).
+            moreButtonRef.current?.focus()
+            closeMore()
+          }
+          onTogglePreview()
+        }}
+        sx={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 0.875,
+          background: previewActive ? 'rgba(255, 255, 255, 0.16)' : 'transparent',
+          border: previewActive ? '1px solid rgba(255, 255, 255, 0.55)' : '1px solid rgba(255, 255, 255, 0.35)',
+          borderRadius: '999px',
+          color: staffShellTokens.header.textMuted,
+          font: '600 12px ui-sans-serif, system-ui, sans-serif',
+          px: 1.75,
+          py: 0.875,
+          cursor: 'pointer',
+          whiteSpace: 'nowrap',
+          flex: 'none',
+          '&:hover': {
+            background: 'rgba(255, 255, 255, 0.12)',
+          },
+          ...headerButtonTouchSx,
+        }}
+      >
+        <FontAwesomeIcon icon={previewActive ? faEyeSlash : faEye} size="sm" />
+        {previewActive ? 'Exit preview' : 'Preview as participant'}
+      </Box>
+    ) : null
+
+  // Sign-out control — see module header point 8. Tablet portrait shows it icon-only (the row has
+  // no room for the word); the accessible name stays "Sign out".
+  const signOutIconOnly = portrait
+  const signOutButton = (
+    <Box
+      component="button"
+      type="button"
+      data-testid="staff-header-sign-out"
+      aria-label={signOutIconOnly ? 'Sign out' : undefined}
+      onClick={handleSignOut}
+      sx={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 0.875,
+        background: 'transparent',
+        border: '1px solid rgba(255, 255, 255, 0.35)',
+        borderRadius: '999px',
+        color: staffShellTokens.header.textMuted,
+        font: '600 12px ui-sans-serif, system-ui, sans-serif',
+        px: signOutIconOnly ? 1.25 : 1.75,
+        py: 0.875,
+        cursor: 'pointer',
+        whiteSpace: 'nowrap',
+        flex: 'none',
+        '&:hover': {
+          background: 'rgba(255, 255, 255, 0.12)',
+        },
+        ...(signOutIconOnly
+          ? {
+            [STAFF_COARSE_POINTER_MEDIA]: {
+              minHeight: STAFF_TOUCH_TARGET_PX,
+              minWidth: STAFF_TOUCH_TARGET_PX,
+            },
+          }
+          : headerButtonTouchSx),
+      }}
+    >
+      <FontAwesomeIcon icon={faRightFromBracket} size="sm" />
+      {!signOutIconOnly && 'Sign out'}
+    </Box>
+  )
+
+  // ---------------------------------------------------------------------------------------------
+  // TABLET (< 1280): the wall clock, presence avatars and "Preview as participant" move into a
+  // header "more" popover. Exercise identity, the scenario clock, the state pill, the
+  // classification tag and sign-out stay in the row, never collapsed (TABLET-AMENDMENT §3).
+  // In portrait (< 1024) the pill and tag stack in one cell so the row fits 768px.
+  // ---------------------------------------------------------------------------------------------
+  if (tablet) {
+    return (
+      <Box
+        data-testid="staff-header"
+        data-header-band={portrait ? 'tablet-portrait' : 'tablet-landscape'}
+        sx={{
+          height: '100%',
+          display: 'flex',
+          alignItems: 'center',
+          gap: portrait ? 1 : 1.5,
+          px: portrait ? 1.5 : 2,
+          minWidth: 0,
+        }}
+      >
+        <SurfaceLauncher
+          surfaceName={surfaceName}
+          registry={staffRoutes}
+          role={launcherRole}
+          currentPath={currentPath}
+        />
+        <ExerciseIdentityBadge role={role} cell={cell} />
+        {scenarioClock}
+
+        {portrait ? (
+          <Stack
+            data-testid="staff-header-status-group"
+            sx={{ alignItems: 'flex-start', gap: '3px', flex: 'none' }}
+          >
+            {pill}
+            {classificationTag}
+          </Stack>
+        ) : (
+          <>
+            {pill}
+            <Box sx={{ flex: 1 }} />
+            {classificationTag}
+          </>
+        )}
+
+        {portrait && <Box sx={{ flex: 1, minWidth: 0 }} />}
+
+        <Box
+          component="button"
+          type="button"
+          ref={moreButtonRef}
+          data-testid="staff-header-more"
+          aria-haspopup="dialog"
+          aria-expanded={moreOpen}
+          aria-label={
+            previewActive ? 'More header options — preview is on' : 'More header options'
+          }
+          onClick={event => setMoreAnchor(event.currentTarget)}
+          sx={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 0.75,
+            background: previewActive ? 'rgba(255, 255, 255, 0.16)' : 'transparent',
+            border: previewActive
+              ? '1px solid rgba(255, 255, 255, 0.55)'
+              : '1px solid rgba(255, 255, 255, 0.35)',
+            borderRadius: '999px',
+            color: staffShellTokens.header.textMuted,
+            font: '600 12px ui-sans-serif, system-ui, sans-serif',
+            px: 1.25,
+            py: 0.875,
+            minWidth: 36,
+            cursor: 'pointer',
+            whiteSpace: 'nowrap',
+            flex: 'none',
+            '&:hover': { background: 'rgba(255, 255, 255, 0.12)' },
+            '&:focus-visible': {
+              outline: '2px solid rgba(255, 255, 255, 0.85)',
+              outlineOffset: '2px',
+            },
+            [STAFF_COARSE_POINTER_MEDIA]: {
+              minHeight: STAFF_TOUCH_TARGET_PX,
+              minWidth: STAFF_TOUCH_TARGET_PX,
+            },
+          }}
+        >
+          <FontAwesomeIcon icon={faEllipsis} size="sm" aria-hidden="true" />
+          {/* Text, not just a tint, says the preview is on (never color-only, NFR-001). */}
+          {previewActive && (
+            <Box component="span" sx={{ fontSize: 10, fontWeight: 800, letterSpacing: '0.08em' }}>
+              PREVIEW
+            </Box>
+          )}
+        </Box>
+
+        <Popover
+          open={moreOpen}
+          anchorEl={moreAnchor}
+          onClose={closeMore}
+          anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+          transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+          // Do not trap focus: the preview toggle hands focus to the "more" button before the menu
+          // closes (see its onClick). Escape and the backdrop still close it.
+          disableEnforceFocus
+          slotProps={{
+            paper: {
+              role: 'dialog',
+              'aria-label': 'More header options',
+              // Navy like the header it extends, so header-styled controls inside keep contrast.
+              sx: {
+                width: 'min(320px, calc(100vw - 16px))',
+                p: 1.5,
+                mt: 0.5,
+                bgcolor: staffShellTokens.header.background,
+                color: staffShellTokens.header.textPrimary,
+                border: `1px solid ${staffShellTokens.header.borderColor}`,
+              },
+            },
+          }}
+        >
+          <Stack data-testid="staff-header-more-menu" sx={{ gap: 1.5, alignItems: 'stretch' }}>
+            <Stack sx={{ gap: 0.5 }}>
+              <Typography sx={{ fontSize: 10, fontWeight: 800, letterSpacing: '0.12em' }}>
+                WALL CLOCK
+              </Typography>
+              {wallClock}
+            </Stack>
+            {presenceAvatars !== null && (
+              <Stack sx={{ gap: 0.75 }}>
+                <Typography sx={{ fontSize: 10, fontWeight: 800, letterSpacing: '0.12em' }}>
+                  STAFF ONLINE
+                </Typography>
+                {presenceAvatars}
+                <Typography
+                  component="ul"
+                  sx={{ m: 0, p: 0, listStyle: 'none', fontSize: 12, color: staffShellTokens.header.textMuted }}
+                >
+                  {presence.map(member => (
+                    <li key={member.id}>{member.label}</li>
+                  ))}
+                </Typography>
+              </Stack>
+            )}
+            {previewButton}
+            <Typography sx={{ fontSize: 11, color: staffShellTokens.header.textMuted }}>
+              Training use only — all content simulated
+            </Typography>
+          </Stack>
+        </Popover>
+
+        {signOutButton}
+      </Box>
+    )
+  }
+
   return (
     <Box
       data-testid="staff-header"
@@ -280,210 +708,27 @@ export function StaffHeader({
 
       {/* 3. Dual clock pair — SCENARIO (COR-053) + LOCAL (wall, staff-exempt). */}
       <Stack direction="row" sx={{ alignItems: 'center', gap: 1.75, px: 0.5, flex: 'none' }}>
-        <Stack data-testid="staff-header-scenario-clock" sx={{ alignItems: 'flex-start', lineHeight: 1, gap: '3px' }}>
-          <Typography
-            id="staff-header-scenario-clock-label"
-            sx={{
-              fontSize: 8.5,
-              fontWeight: 700,
-              letterSpacing: '0.12em',
-              color: staffShellTokens.header.textMuted,
-            }}
-          >
-            SCENARIO
-          </Typography>
-          <Typography
-            aria-labelledby="staff-header-scenario-clock-label"
-            sx={{
-              fontFamily: staffShellTokens.classificationTag.fontFamily,
-              fontSize: 20,
-              fontWeight: 700,
-            }}
-          >
-            {scenarioTimeText}
-          </Typography>
-        </Stack>
-        <Stack data-testid="staff-header-wall-clock" sx={{ alignItems: 'flex-start', lineHeight: 1, gap: '3px' }}>
-          <Typography
-            id="staff-header-wall-clock-label"
-            sx={{
-              fontSize: 8.5,
-              fontWeight: 700,
-              letterSpacing: '0.12em',
-              color: staffShellTokens.header.textMuted,
-              whiteSpace: 'nowrap',
-            }}
-          >
-            LOCAL · {wallDateText}
-          </Typography>
-          <Typography
-            aria-labelledby="staff-header-wall-clock-label"
-            sx={{
-              fontFamily: staffShellTokens.classificationTag.fontFamily,
-              fontSize: 13,
-              fontWeight: 700,
-              color: staffShellTokens.header.textMuted,
-            }}
-          >
-            {wallTimeText}
-          </Typography>
-        </Stack>
+        {scenarioClock}
+        {wallClock}
       </Stack>
 
       {/* 4. Exercise state pill — dot AND text, never color-only (NFR-001). */}
-      <Box
-        role="status"
-        data-testid="staff-header-state-pill"
-        aria-label={`Exercise state: ${statePill.label}`}
-        sx={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 0.75,
-          fontSize: 10.5,
-          fontWeight: 700,
-          letterSpacing: '0.08em',
-          px: 1.125,
-          py: 0.5,
-          borderRadius: '20px',
-          background: statePill.background,
-          color: statePill.accentColor,
-          border: `1px solid ${statePill.borderColor}`,
-          flex: 'none',
-        }}
-      >
-        <Box
-          aria-hidden="true"
-          data-testid="staff-header-state-pill-dot"
-          sx={{ width: 8, height: 8, borderRadius: '50%', background: 'currentColor', flex: 'none' }}
-        />
-        <Box component="span" data-testid="staff-header-state-pill-label">
-          {statePill.label}
-        </Box>
-      </Box>
+      {pill}
 
       <Box sx={{ flex: 1 }} />
 
       {/* 5. Classification tag — persistent, mono, config-driven (D7-010). */}
-      <Box
-        data-testid="staff-header-classification-tag"
-        title="Training use only — all content simulated"
-        sx={{
-          fontFamily: staffShellTokens.classificationTag.fontFamily,
-          fontWeight: 700,
-          fontSize: 9,
-          letterSpacing: staffShellTokens.classificationTag.letterSpacing,
-          color: staffShellTokens.classificationTag.color,
-          border: `1px solid ${staffShellTokens.classificationTag.borderColor}`,
-          borderRadius: '5px',
-          px: 1,
-          py: 0.375,
-          whiteSpace: 'nowrap',
-          flex: 'none',
-        }}
-      >
-        {STAFF_CLASSIFICATION}
-      </Box>
+      {classificationTag}
 
       {/* 6. Staff presence — contract seam, see staffHeaderMocks.ts. Rendered
-          only for a NON-EMPTY roster: no members means no group at all (no empty
-          labelled region, no placeholder avatars). */}
-      {presence.length > 0 && (
-        <Stack
-          direction="row"
-          role="group"
-          aria-label="Staff presence"
-          data-testid="staff-header-presence"
-          sx={{ gap: 0.75, flex: 'none' }}
-        >
-          {presence.map(member => (
-            <Tooltip key={member.id} title={member.label}>
-              <Box
-                aria-label={member.label}
-                sx={{
-                  width: 26,
-                  height: 26,
-                  borderRadius: '50%',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontSize: 10,
-                  fontWeight: 800,
-                  color: '#fff',
-                  background: member.color,
-                }}
-              >
-                {member.initials}
-              </Box>
-            </Tooltip>
-          ))}
-        </Stack>
-      )}
+          only for a NON-EMPTY roster: no members means no group at all. */}
+      {presenceAvatars}
 
-      {/* 7. Preview-as-participant button — behavior is story 04's; renders
-          the control only, driven entirely by props (COR-041). HANDLER-GATED:
-          a surface that wires no `onTogglePreview` (the planner workspace, and
-          the controller console until it wires one) ships NO button at all
-          rather than a focusable dead control — see module header point 7. */}
-      {onTogglePreview !== undefined && (
-        <Box
-          component="button"
-          type="button"
-          data-testid="staff-header-preview-toggle"
-          aria-pressed={previewActive}
-          onClick={onTogglePreview}
-          sx={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 0.875,
-            background: previewActive ? 'rgba(255, 255, 255, 0.16)' : 'transparent',
-            border: previewActive ? '1px solid rgba(255, 255, 255, 0.55)' : '1px solid rgba(255, 255, 255, 0.35)',
-            borderRadius: '999px',
-            color: staffShellTokens.header.textMuted,
-            font: '600 12px ui-sans-serif, system-ui, sans-serif',
-            px: 1.75,
-            py: 0.875,
-            cursor: 'pointer',
-            whiteSpace: 'nowrap',
-            flex: 'none',
-            '&:hover': {
-              background: 'rgba(255, 255, 255, 0.12)',
-            },
-          }}
-        >
-          <FontAwesomeIcon icon={previewActive ? faEyeSlash : faEye} size="sm" />
-          {previewActive ? 'Exit preview' : 'Preview as participant'}
-        </Box>
-      )}
+      {/* 7. Preview-as-participant button (handler-gated). */}
+      {previewButton}
 
-      {/* 8. Sign-out control — see module header point 8 for the styling
-          nuance (this idiom IS the COBRA staff look for header controls). */}
-      <Box
-        component="button"
-        type="button"
-        data-testid="staff-header-sign-out"
-        onClick={handleSignOut}
-        sx={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 0.875,
-          background: 'transparent',
-          border: '1px solid rgba(255, 255, 255, 0.35)',
-          borderRadius: '999px',
-          color: staffShellTokens.header.textMuted,
-          font: '600 12px ui-sans-serif, system-ui, sans-serif',
-          px: 1.75,
-          py: 0.875,
-          cursor: 'pointer',
-          whiteSpace: 'nowrap',
-          flex: 'none',
-          '&:hover': {
-            background: 'rgba(255, 255, 255, 0.12)',
-          },
-        }}
-      >
-        <FontAwesomeIcon icon={faRightFromBracket} size="sm" />
-        Sign out
-      </Box>
+      {/* 8. Sign-out control. */}
+      {signOutButton}
     </Box>
   )
 }

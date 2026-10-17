@@ -216,6 +216,13 @@ export interface Persona {
 export interface StaffPersona extends Persona {
   /** The archetype (COR-020). STAFF-ONLY (SOC-052/D1-008) — never participant-visible. */
   readonly personaType: PersonaType
+  /**
+   * Story 33 (DF-49): the verified persona this UNVERIFIED persona imitates (a controller
+   * names it in the persona editor), or null for none. STAFF-ONLY: a participant never
+   * learns which account is a lookalike of which (XC-002), so `toParticipantPersona` drops it.
+   * OPTIONAL: the server may omit a null member, and absent reads as null.
+   */
+  readonly imitatesPersonaId?: string | null
 }
 
 /**

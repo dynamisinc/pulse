@@ -39,6 +39,14 @@ Participant = D1's model: two fixed 22px green banners, app frame inset (COR-031
 frame"). Staff = D5's model: one 20px dark top bar in flow. The asymmetry is deliberate — it is
 half of the thumbnail-distinguishability gate (D0 §2 / E1 §5).
 
+**Phone amendment (Tom, 2026-10-17, #612).** Below ~700px wide (`CHROME_WRAP_QUERY`) a 22px
+single line cannot hold a typical marking: at 360px the default bottom banner lost "— NOT REAL
+NEWS". There the banners **wrap**: up to 3 lines at an 11px line height, centred, never shorter
+than 22px, with an ellipsis only past line 3 (the full text stays available to assistive tech).
+The default markings take two lines (a 28px band). The published `--pulse-chrome-top/bottom`
+insets carry the **measured** banner heights on phones, so everything pinned to the chrome
+follows. At 700px and wider (tablets, desktop) nothing changes: one line, 22px.
+
 ### D7-006 — Classification strings stay per-world (user decision; divergence #2)
 Participant `UNCLASSIFIED // EXERCISE`; staff `UNCLASSIFIED // FOUO`. Both are config tokens,
 not hardcoded copy (COR-066).
@@ -430,6 +438,54 @@ ResizeObserver-driven): you always see 1/2/3/4 *whole* columns and scroll by who
 Nothing is ever clipped under the rail. Rail keeps its elevation shadow; posts/min caption hides
 at narrow widths.
 **Satisfies.** SOC-071/NFR-002 burst legibility, D0 §1.
+
+## D5-021 — Tablet bands: landscape 1024–1279, portrait 768–1023, by width only
+**Trigger.** Controllers must run the console from an iPad (1024x768, 1180x820, 768x1024,
+820x1180); below 1280px the console only stacked its two columns beside a fixed 336px queue.
+**Decision.** Landscape covers 1024–1279 and portrait 768–1023, selected by viewport **width**
+(`consoleLayout.selectConsoleBand`). Below 768 is not supported for staff and renders the portrait
+layout. The edges reuse existing breakpoints: 1280 is `SLOT_SPLIT_MIN_WIDTH_PX`, 1024 and 768 are
+COBRA `lg` / `md`. Touch sizing is gated separately by `(pointer: coarse)` (story 14), so an iPad
+with a trackpad still gets the tablet layout. Desktop at 1280 and up does not change.
+**Satisfies.** COR-018, NFR-001. Signed by Tom (merged 2026-10-17, #594).
+
+## D5-022 — Tablet pane layouts, chosen by one table
+**Trigger.** Tom wants side by side at 1180x820 and stacked at 820x1180, and expects to revisit the
+1180 choice after hands-on use.
+**Decision.** One layout table, `CONSOLE_TABLET_LAYOUTS` in `consoleLayout.ts`, keyed by band, picks
+the arrangement; changing a layout is a one-line edit, not a code fork. Signed initial values:
+1024–1179 one Live world / Run sheet switcher plus a docked 296px Review queue; 1180 and up (under
+1280) Live world | Run sheet side by side plus the docked Review queue; tall portrait (820 wide and
+1100 tall) the switcher above a docked Review queue, about 60/40; other portrait a full tab switcher
+with Review as a badged tab. All panes stay mounted in every arrangement (hidden, not unmounted),
+so scroll, a half-typed edit, the open persona dock and the active tab survive a switch or a rotation.
+**Satisfies.** COR-018, D5-017 (the review queue stays visible or one tap away), NFR-001.
+
+## D5-023 — Command band
+**Trigger.** The kill switch, Pause and End exercise must be reachable at every tablet size.
+**Decision.** One sticky strip directly under the shell header holds, in order, `EngineControlBar`
+(kill switch first), `PausePill`, and End exercise at the far right. It is never tabbed, never in an
+overflow menu and never covered by a flyout (flyouts are positioned over the pane area only). It may
+wrap to two rows in portrait. The kill switch and End exercise sit at opposite ends.
+**Satisfies.** ADP-042, D5-008, NFR-001.
+
+## D5-024 — Touch parity
+**Decision.** Every shortcut has a visible 44px control, and hints show the platform modifier
+(command on iPadOS). Built by story 14; story 12 supplies the 44px pane tabs and More button.
+**Satisfies.** NFR-001.
+
+## D5-025 — Deliberate confirms on touch
+**Decision.** Two taps minimum, no destructive autofocus, the confirm placed away from the trigger,
+and a 400ms arming delay. The kill switch's STOP to Live re-arm needs a confirm on touch (Tom,
+10/16); stopping stays one tap. Built by story 15, not by the layout.
+**Satisfies.** NFR-001.
+
+## D5-026 — Tablet secondary controls
+**Decision.** Steering (the escalation dial and the noise knob) becomes a disclosure row, collapsed
+by default and one tap away (Tom, 10/16); collapsed it shows a one-line text summary of the
+storyline target and the noise level. Export posts and Exercise report move into a "More" menu in
+the title row.
+**Satisfies.** COR-018, NFR-001.
 
 ## Open / deferred
 - Evaluator read-only variant (CTL-033): steering controls *absent, not disabled* — noted, not in

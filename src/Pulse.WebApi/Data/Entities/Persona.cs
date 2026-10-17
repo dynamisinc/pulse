@@ -141,6 +141,20 @@ public sealed class Persona : IExerciseScoped
     /// </remarks>
     public string? Location { get; set; }
 
+    /// <summary>
+    /// The verified persona this (unverified) persona imitates (DF-49, demo-feedback story 33) — a controller-named
+    /// lookalike pair the exercise report shows alongside its handle-prefix matches. Null = none.
+    /// </summary>
+    /// <remarks>
+    /// A LOGICAL reference with no foreign key (house style, as <c>PostReaction</c>/<c>NoisePost</c>). It is
+    /// scoped with the persona (this row is <see cref="IExerciseScoped"/>), and the persona PATCH resolves the target
+    /// through the exercise-scoped persona set, so another exercise's persona can never be written here. Staff-world
+    /// authoring state only: it is NEVER projected onto a participant DTO (XC-002), because naming what an account
+    /// imitates would be exactly the machine-readable tell SOC-052 forbids. A value can go stale (the target loses
+    /// its badge, or this persona gains one); the report skips such a pair rather than failing.
+    /// </remarks>
+    public Guid? ImitatesPersonaId { get; set; }
+
     /// <summary>The maximum stored <see cref="Location"/> length — the schema bound (DP-4).</summary>
     public const int MaxLocationLength = 100;
 

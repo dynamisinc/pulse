@@ -94,6 +94,7 @@ import {
 } from '../hooks/useEngineSettings'
 // D5 dark operator-chrome tokens (matches `ReviewQueue`'s/`EngineControlBar`'s `chrome`).
 import { consoleChrome as chrome } from '../../consoleChrome'
+import { staffFlyoutCloseButtonSx, staffFlyoutPanelSx } from '@/features/staffShell/staffFlyout'
 import { useCanControl } from '../../access'
 import { LEAD_ONLY_RAISE_REASON, usePermissions } from '@/core/auth'
 import { useStaffPersonas } from '@/features/personas'
@@ -330,18 +331,10 @@ export function EngineSettingsPanel({ open, onClose }: EngineSettingsPanelProps)
       aria-label={ENGINE_SETTINGS_PANEL_TITLE}
       onKeyDown={handleKeyDown}
       sx={{
-        position: 'absolute',
-        top: 0,
-        right: 0,
-        bottom: 0,
-        width: PANEL_WIDTH_PX,
+        ...staffFlyoutPanelSx(PANEL_WIDTH_PX),
         bgcolor: chrome.panel,
         color: chrome.ink,
         borderLeft: `1px solid ${chrome.line}`,
-        boxShadow: '-16px 0 40px rgba(0, 0, 0, 0.14)',
-        zIndex: 30,
-        display: 'flex',
-        flexDirection: 'column',
         fontFamily: "'Figtree', system-ui, sans-serif",
       }}
     >
@@ -366,7 +359,7 @@ export function EngineSettingsPanel({ open, onClose }: EngineSettingsPanelProps)
             size="small"
             aria-label="Close engine settings panel"
             onClick={onClose}
-            sx={{ color: chrome.inkMuted }}
+            sx={{ color: chrome.inkMuted, ...staffFlyoutCloseButtonSx }}
           >
             <FontAwesomeIcon icon={faXmark} size="sm" />
           </IconButton>

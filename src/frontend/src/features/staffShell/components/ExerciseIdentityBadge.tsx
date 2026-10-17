@@ -51,7 +51,12 @@ import { useStaffAssignments } from '@/features/staff/hooks/useStaffAssignments'
 import { useSetActiveExercise } from '@/features/staff/hooks/useSetActiveExercise'
 import { friendlyErrorMessage, sameExercise } from '@/features/staff/components/switcherShared'
 import type { Enrollment } from '@/features/staff/types'
-import { staffShellTokens } from '../staffShellTokens'
+import {
+  STAFF_COARSE_POINTER_MEDIA,
+  STAFF_TABLET_PORTRAIT_MEDIA,
+  STAFF_TOUCH_TARGET_PX,
+  staffShellTokens,
+} from '../staffShellTokens'
 
 /** The minimum number of assignments for there to be anything to switch between. */
 const MIN_ASSIGNMENTS_TO_SWITCH = 2
@@ -71,7 +76,16 @@ interface BadgeTextProps extends ExerciseIdentityBadgeProps {
 function BadgeText({ exerciseName, role, cell }: BadgeTextProps) {
   return (
     <>
-      <Typography sx={{ fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap' }}>
+      <Typography
+        sx={{
+          fontSize: 12,
+          fontWeight: 700,
+          whiteSpace: 'nowrap',
+          // Tablet portrait: a long exercise name WRAPS (never clipped, never ellipsised) so the
+          // identity badge shrinks instead of pushing the header past the viewport.
+          [STAFF_TABLET_PORTRAIT_MEDIA]: { whiteSpace: 'normal', lineHeight: 1.15 },
+        }}
+      >
         {exerciseName}
       </Typography>
       <Typography
@@ -100,6 +114,16 @@ const badgeFrameSx = {
   px: 1.375,
   py: 0.625,
   minWidth: 0,
+} as const
+
+/**
+ * Tablet overrides, spread LAST in each usage: object-key order is emission order, so a media
+ * rule must come after every base declaration it overrides (a media block spread early would be
+ * beaten by a later base `pr`).
+ */
+const badgeTabletSx = {
+  [STAFF_TABLET_PORTRAIT_MEDIA]: { px: 1, pr: 1 },
+  [STAFF_COARSE_POINTER_MEDIA]: { minHeight: STAFF_TOUCH_TARGET_PX },
 } as const
 
 interface SwitchableBadgeProps extends ExerciseIdentityBadgeProps {
@@ -175,6 +199,9 @@ function SwitchableBadge({ role, cell, assignments }: SwitchableBadgeProps) {
             outline: '2px solid rgba(255, 255, 255, 0.85)',
             outlineOffset: '2px',
           },
+          ...badgeTabletSx,
+          // The chevron is absolutely placed at right: 10, so portrait keeps room for it.
+          [STAFF_TABLET_PORTRAIT_MEDIA]: { px: 1, pr: 3 },
         }}
       >
         <BadgeText exerciseName={displayName} role={role} cell={cell} />
@@ -301,7 +328,7 @@ export function ExerciseIdentityBadge({ role, cell }: ExerciseIdentityBadgeProps
     <Box
       data-testid="staff-header-identity-badge"
       title="Exercise identity — static while conduct is live (COR-005)"
-      sx={badgeFrameSx}
+      sx={{ ...badgeFrameSx, ...badgeTabletSx }}
     >
       <BadgeText exerciseName={exerciseName} role={role} cell={cell} />
     </Box>
