@@ -30,4 +30,4 @@ export {
   StaffAssignmentError,
 } from './services/staffAssignmentsService'
 export type { StaffAssignmentErrorInit } from './services/staffAssignmentsService'
-export type { StaffAssignment } from './types'
+export type { Enrollment } from './types'

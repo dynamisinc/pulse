@@ -137,7 +137,8 @@ public sealed class JoinLoginService
                 from link in _dbContext.ParticipantLinks
                 where link.TokenHash == tokenHash && link.RevokedAt == null
                 join account in _dbContext.Accounts on link.AccountId equals account.Id
-                select new { Link = link, Account = account })
+                join enrollment in _dbContext.Enrollments on account.EnrollmentId equals enrollment.Id
+                select new { Link = link, Account = account, Enrollment = enrollment })
             .FirstOrDefaultAsync(cancellationToken);
 
         // 4. Admit only an enabled participant-world account (participant / pio, as for the day word: Gate-2 S-6) in an
@@ -145,7 +146,7 @@ public sealed class JoinLoginService
         //    identity-less event: no target, never the token.
         if (match is null
             || match.Account.DisabledAt is not null
-            || !ParticipantSessionRequests.IsParticipantWorldRole(match.Account.Role)
+            || !ParticipantSessionRequests.IsParticipantWorldRole(match.Enrollment.Role)
             || !ExerciseLifecycleStates.IsParticipantAccessible(facts.Status))
         {
             _dbContext.TelemetryEvents.Add(EasyLoginTelemetry.LinkLoginFailed(scope.Value, time));

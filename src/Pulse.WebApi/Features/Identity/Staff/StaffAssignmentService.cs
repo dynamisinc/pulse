@@ -4,6 +4,7 @@ using System.Linq;
 using Microsoft.EntityFrameworkCore;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
+using Pulse.WebApi.Features.Realtime;
 
 /// <summary>
 /// The staff cross-exercise read/switch service behind <c>GET /api/staff/assignments</c> and
@@ -52,17 +53,27 @@ public sealed class StaffAssignmentService
 
     private readonly PulseDbContext _dbContext;
     private readonly ICurrentStaffSessionAccessor _currentStaffSession;
+    private readonly ISessionConnectionRevoker? _connectionRevoker;
 
     /// <summary>Creates the service over its persistence context and the current-staff-session seam.</summary>
     /// <param name="dbContext">The persistence context the assignment read + session mutation run through.</param>
     /// <param name="currentStaffSession">The cross-wave accessor that identifies the authenticated staff caller.</param>
-    public StaffAssignmentService(PulseDbContext dbContext, ICurrentStaffSessionAccessor currentStaffSession)
+    /// <param name="connectionRevoker">
+    /// identity-auth-roles/15: drops the switching session's live hub connections out of the OLD exercise's groups
+    /// (and closes them, so the client reconnects into the new exercise). Optional: a host without the realtime hub
+    /// has no connections to move.
+    /// </param>
+    public StaffAssignmentService(
+        PulseDbContext dbContext,
+        ICurrentStaffSessionAccessor currentStaffSession,
+        ISessionConnectionRevoker? connectionRevoker = null)
     {
         ArgumentNullException.ThrowIfNull(dbContext);
         ArgumentNullException.ThrowIfNull(currentStaffSession);
 
         _dbContext = dbContext;
         _currentStaffSession = currentStaffSession;
+        _connectionRevoker = connectionRevoker;
     }
 
     /// <summary>
@@ -107,19 +118,28 @@ public sealed class StaffAssignmentService
         // compares assignment.exerciseId against the resolved scope's exerciseId, so an uppercase/lowercase
         // split makes the active exercise fail to match. Materialize, then ToString() in memory for one
         // consistent (lowercase) casing across the whole API surface.
+        //
+        // identity-auth-roles/16: the caller's STAFF enrollments (StaffUser.Id == Person.Id). This read is CROSS-exercise
+        // by design (the switcher lists every exercise the caller may enter), so the central exercise filter is
+        // bypassed explicitly and the tenant bound is the InOrganization join on Exercise below.
         var rows = await (
-            from a in _dbContext.StaffAssignments.AsNoTracking()
-            where a.StaffUserId == current.StaffUserId
+            // org-scope-exempt(TenantChecked): own-only (PersonId == the caller's session-carried id) and every row
+            // must inner-join an Exercise of the caller's OWN organization, so no other customer's exercise is listed.
+            from a in _dbContext.Enrollments.IgnoreQueryFilters().AsNoTracking().Where(EnrollmentRoles.IsStaffEnrollment)
+            where a.PersonId == current.StaffUserId
             join e in _dbContext.Exercises.AsNoTracking().InOrganization(callerOrganizationId) on a.ExerciseId equals e.Id
             orderby e.Name
-            select new { a.ExerciseId, ExerciseName = e.Name, a.Role }).ToListAsync(cancellationToken);
+            select new { a.ExerciseId, ExerciseName = e.Name, a.Role, a.IsLead }).ToListAsync(cancellationToken);
 
+        var personId = current.StaffUserId.ToString();
         return rows
             .Select(r => new StaffAssignmentDto
             {
                 ExerciseId = r.ExerciseId.ToString(),
                 ExerciseName = r.ExerciseName,
                 Role = r.Role,
+                PersonId = personId,
+                IsLead = r.IsLead,
             })
             .ToList();
     }
@@ -147,16 +167,14 @@ public sealed class StaffAssignmentService
             return SetActiveExerciseResult.Unauthenticated();
         }
 
-        // Authorization: the caller must be assigned to the target exercise. Rejecting an unassigned exercise
-        // is the crux of this endpoint (COR-005) — it fails closed to 403.
-        var assignment = await _dbContext.StaffAssignments
+        // identity-auth-roles/16 + 15: a target that is not an exercise of the caller's OWN organization — missing, or
+        // another customer's — is the bare 404 for EVERY caller (ADMIN-IDENTITY-MODEL §1.2 / §7.2, the bare-404
+        // pattern: a cross-org id answers exactly like a missing id). An ORG-SCOPE session (no exercise bound) also gets
+        // the 404 for a same-org exercise it is not enrolled in; an exercise-bound session keeps its documented 403
+        // (story 05) for that one case. Session is unscoped; this is the caller's own row by the authenticated id.
+        var isOrgScope = await _dbContext.Sessions
             .AsNoTracking()
-            .FirstOrDefaultAsync(a => a.StaffUserId == current.StaffUserId && a.ExerciseId == exerciseId, cancellationToken);
-
-        if (assignment is null)
-        {
-            return SetActiveExerciseResult.NotAssigned();
-        }
+            .AnyAsync(s => s.Id == current.SessionId && s.ExerciseId == null, cancellationToken);
 
         // exercise-isolation/11 AC3 (COR-010): the caller's own CUSTOMER tenant, resolved server-side.
         // org-scope-exempt(OwnIdentity): this reads the CALLER'S OWN staff row, by the id their server-issued
@@ -167,30 +185,34 @@ public sealed class StaffAssignmentService
             .Select(u => (Guid?)u.OrganizationId)
             .FirstOrDefaultAsync(cancellationToken);
 
-        // Wave-0 deferred FKs → validate the exercise resolves to a real Exercise before persisting the
-        // selection (and to read its display name for the confirmation). Exercise is the unfiltered scope
-        // root on both axes.
-        // org-scope-exempt(TenantChecked): exerciseId IS client-supplied (the switch names the target), so
-        // this read is deliberately unbounded and answers only "does this id exist at all". The cross-customer
-        // case is refused a few lines below by the explicit `exercise.OrganizationId != callerOrganizationId`
-        // comparison, which returns NotAssigned (403) before the selection is persisted or a name disclosed.
+        // The target, bounded by the caller's tenant (fail closed: an unresolved tenant matches nothing). Exercise is
+        // the unfiltered scope root on both axes, which is why the bound is written here. Missing and foreign are one
+        // answer, so nothing distinguishes "exists elsewhere" from "does not exist".
         var exercise = await _dbContext.Exercises
             .AsNoTracking()
+            .InOrganization(callerOrganizationId)
             .FirstOrDefaultAsync(e => e.Id == exerciseId, cancellationToken);
 
         if (exercise is null)
         {
-            return SetActiveExerciseResult.Invalid("exerciseId does not resolve to a known exercise.");
+            return SetActiveExerciseResult.NotFound();
         }
 
-        // exercise-isolation/11 AC3 (COR-010): the tenant bound, applied EXPLICITLY because Exercise carries
-        // no global filter. Written as an unconditional inequality against a nullable so an UNRESOLVED caller
-        // tenant refuses too (null != any real tenant) — fail closed on the org axis, never "unknown tenant
-        // sees everything". Refused as NotAssigned (403), the same shape as an unassigned exercise, so a
-        // cross-customer selection discloses nothing beyond "you may not have this".
-        if (exercise.OrganizationId != callerOrganizationId)
+        // Authorization: the caller must hold a STAFF enrollment in the target exercise (never one with an account,
+        // so a staff session can never cross into the participant world). Rejecting an unassigned exercise is the
+        // crux of this endpoint (COR-005) — it fails closed. The read is cross-exercise (the target is not the
+        // session's scope), so the central exercise filter is bypassed and the exercise is named explicitly.
+        // org-scope-exempt(TenantChecked): own-only (PersonId == the caller's session-carried id), and the target
+        // exercise was just resolved INSIDE the caller's own organization, so this never reaches another customer.
+        var assignment = await _dbContext.Enrollments
+            .IgnoreQueryFilters()
+            .AsNoTracking()
+            .Where(EnrollmentRoles.IsStaffEnrollment)
+            .FirstOrDefaultAsync(a => a.PersonId == current.StaffUserId && a.ExerciseId == exerciseId, cancellationToken);
+
+        if (assignment is null)
         {
-            return SetActiveExerciseResult.NotAssigned();
+            return isOrgScope ? SetActiveExerciseResult.NotFound() : SetActiveExerciseResult.NotAssigned();
         }
 
         // Load the persisted staff session row to update (Session is unscoped → findable regardless of scope).
@@ -216,11 +238,16 @@ public sealed class StaffAssignmentService
 
         var now = DateTimeOffset.UtcNow;
         var scenarioTime = exercise.CurrentScenarioTime ?? now;
+        var previousExerciseId = session.ExerciseId;
 
         // Persist the selection: the session's bound exercise AND its per-exercise role both move to the newly
         // selected assignment. Story 03's session middleware applies this to CurrentExerciseId per request.
         session.ExerciseId = exerciseId;
         session.Role = assignment.Role;
+
+        // identity-auth-roles/16: the person is the caller (shared key) — stamped here too so a pre-migration row gains
+        // it on its first switch. (The lead flag is never stored on the session; it is read live.)
+        session.PersonId ??= current.StaffUserId;
 
         _dbContext.TelemetryEvents.Add(new TelemetryEvent
         {
@@ -244,11 +271,21 @@ public sealed class StaffAssignmentService
 
         await _dbContext.SaveChangesAsync(cancellationToken);
 
+        // identity-auth-roles/15 (ADMIN-IDENTITY-MODEL §1.2, realtime scope): the switch MOVES the session's live hub
+        // connections — out of the old exercise's groups now (no further old-exercise push reaches them), and closed so
+        // the client reconnects, where the hub joins the NEW exercise from the session row persisted above.
+        if (_connectionRevoker is not null && previousExerciseId != exerciseId)
+        {
+            await _connectionRevoker.RevokeAsync([session.Id], cancellationToken);
+        }
+
         return SetActiveExerciseResult.Ok(new StaffAssignmentDto
         {
             ExerciseId = exerciseId.ToString(),
             ExerciseName = exercise.Name,
             Role = assignment.Role,
+            PersonId = current.StaffUserId.ToString(),
+            IsLead = assignment.IsLead,
         });
     }
 }
@@ -267,6 +304,12 @@ public enum SetActiveExerciseOutcome
 
     /// <summary>The caller is not assigned to the requested exercise — the endpoint returns 403 (fail closed).</summary>
     NotAssigned,
+
+    /// <summary>
+    /// The target is missing or another organization's exercise (any caller), or — for an ORG-SCOPE caller — a same-org
+    /// exercise it holds no staff enrollment in: the bare 404 (identity-auth-roles/16, aligned for every caller in 15).
+    /// </summary>
+    NotFound,
 }
 
 /// <summary>
@@ -312,8 +355,13 @@ public sealed class SetActiveExerciseResult
     public static SetActiveExerciseResult Unauthenticated() =>
         new(SetActiveExerciseOutcome.Unauthenticated, null, null);
 
-    /// <summary>The fail-closed result for an unassigned exercise.</summary>
+    /// <summary>The fail-closed result for an exercise-bound caller's unassigned same-org exercise (403).</summary>
     /// <returns>A not-assigned result.</returns>
     public static SetActiveExerciseResult NotAssigned() =>
         new(SetActiveExerciseOutcome.NotAssigned, null, null);
+
+    /// <summary>The bare-404 result for an org-scope caller whose target is not its own same-org enrollment.</summary>
+    /// <returns>A not-found result.</returns>
+    public static SetActiveExerciseResult NotFound() =>
+        new(SetActiveExerciseOutcome.NotFound, null, null);
 }

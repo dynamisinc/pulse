@@ -137,7 +137,14 @@ public sealed class OrganizationScopeSweepTests
         // the OrganizationId every later read in the method is bounded by, so it cannot itself be
         // tenant-bounded. (The seeder's other two reads — the org's exercises and the org's staff humans — do
         // carry .InOrganization(...) and are therefore not exemptions at all.)
-        ["ResolutionRoot"] = 8,
+        // identity-auth-roles/16: +1 for PulsePasswordIdentityProvider.HasPulsePasswordAsync — after the Dynamis
+        // allowlist authenticates, the IdP subject is resolved to its staff human (the same resolve-by-subject read
+        // StaffLoginService claims) so a person who HAS a Pulse password is never signed in by the allowlist. The person
+        // read that follows is bounded by that row's OrganizationId (.InOrganization), so it is not an exemption.
+        // identity-auth-roles/15: +4 for OrgStaffLoginService — the email-first candidate read (People by email across
+        // orgs, capped at 5, disclosed only after the password verifies), the slug → organization resolution, the names
+        // of ONLY the organizations whose password verified (the org choice), and the IdP subject → staff human read.
+        ["ResolutionRoot"] = 13,
 
         // exercise-lifecycle-admin: +1 for OrganizationResolutionMiddleware, the production writer of
         // IOrganizationContext. It reads the authenticated caller's OWN StaffUser row (by the id their
@@ -146,7 +153,8 @@ public sealed class OrganizationScopeSweepTests
         // StaffAssignmentService sites already claim.
         ["OwnIdentity"] = 3,
 
-        ["TenantChecked"] = 2,
+        // identity-auth-roles/15: -1 — StaffAssignmentService's switch now reads the target exercise .InOrganization(...).
+        ["TenantChecked"] = 1,
 
         // exercise-lifecycle-admin (review finding WR-008): the tenant ROOT table joined the swept set, so
         // its one existing reader — BootstrapService.ResolveDefaultOrganizationAsync, a lookup by the FIXED
@@ -279,7 +287,7 @@ public sealed class OrganizationScopeSweepTests
         // If somebody drops IOrganizationOwned off Exercise, every other assertion in this file would sweep
         // an empty set and pass. This is the assertion that notices.
         swept.Should().BeEquivalentTo(
-            ["Exercise", "Organization", "StaffUser"],
+            ["Exercise", "Organization", "Person", "StaffUser"],
             "these are exactly the tables a tenant filter does NOT cover, and therefore exactly the ones "
             + "whose bound is opt-in and forgettable: the two org-owned RESOLUTION ROOTS (Exercise, "
             + "StaffUser) plus the TENANT ROOT itself (Organization — review finding WR-008). A new name "
@@ -310,6 +318,71 @@ public sealed class OrganizationScopeSweepTests
     /// reviewer.
     /// </para>
     /// </remarks>
+    /// <summary>
+    /// identity-auth-roles/16: <c>Enrollment</c> is IExerciseScoped, so its reads are confined by the central exercise
+    /// filter — EXCEPT the deliberate cross-exercise org reads (the switcher, staff sign-in, the org staff directory,
+    /// org-admin enrollment administration), which bypass it with <c>IgnoreQueryFilters()</c>. Every such bypass must
+    /// carry a reasoned exemption marker (normally <c>TenantChecked</c>: an explicit InOrganization join or
+    /// OrganizationId comparison in the same method), and the inventory is pinned like the one above.
+    /// </summary>
+    private static readonly IReadOnlyDictionary<string, int> ExpectedEnrollmentBypassCounts = new Dictionary<string, int>(StringComparer.Ordinal)
+    {
+        // StaffLoginService (1), StaffAssignmentService switcher list + switch (2), OrgStaffDirectoryService (1),
+        // OrgAdminSeedService (1), EnrollmentService grant check + org-admin target + previous lead + lead swap (4),
+        // OrgStaffLoginService's landing enrollment (1, identity-auth-roles/15: own-only, joined to an InOrganization exercise).
+        ["TenantChecked"] = 10,
+
+        // BootstrapService.ProvisionStaffAsync: the exercise this ops request itself created or host-resolved.
+        ["ResolvedScope"] = 1,
+
+        // SessionService.IsLeadAsync: the caller's own enrollment, by the person + exercise on their own session row.
+        ["OwnIdentity"] = 1,
+    };
+
+    [Fact]
+    public void EveryCrossExerciseEnrollmentRead_BypassesTheFilterOnlyUnderAReasonedPinnedExemption()
+    {
+        var pattern = new Regex(@"\.Enrollments\b", RegexOptions.CultureInvariant);
+        var sites = new List<CallSite>();
+        foreach (var (relativePath, lines) in ProductionSourceFiles())
+        {
+            for (var i = 0; i < lines.Length; i++)
+            {
+                var code = StripLineComment(lines[i]);
+                foreach (Match match in pattern.Matches(code))
+                {
+                    var chain = ReadExpressionChain(lines, i, match.Index + match.Length);
+                    if (!chain.Contains("IgnoreQueryFilters(", StringComparison.Ordinal))
+                    {
+                        continue;
+                    }
+
+                    var (reason, justification) = FindExemption(lines, i);
+                    sites.Add(new CallSite($"{relativePath}:{i + 1}", code.Trim(), false, reason, justification));
+                }
+            }
+        }
+
+        sites.Should().NotBeEmpty("the org tier's cross-exercise enrollment reads exist — an empty sweep has rotted");
+
+        sites.Where(site => site.ExemptionReason is null || !ExemptionReasons.ContainsKey(site.ExemptionReason))
+            .Select(site => site.Location)
+            .Should().BeEmpty(
+                "an Enrollment read that bypasses the central exercise filter is a cross-exercise (and potentially "
+                + "cross-customer) read; it must carry `// org-scope-exempt(<Reason>): <why>` from the fixed vocabulary");
+
+        sites.Where(site => (site.Justification?.Trim().Length ?? 0) < 20)
+            .Select(site => site.Location)
+            .Should().BeEmpty("a reason code alone is a rubber stamp");
+
+        sites.GroupBy(site => site.ExemptionReason!, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.Count(), StringComparer.Ordinal)
+            .Should().BeEquivalentTo(
+                ExpectedEnrollmentBypassCounts,
+                "the set of Enrollment reads that bypass the exercise filter is a pinned, reviewed inventory: a count "
+                + "going up means a new cross-exercise read landed — re-read its marker before bumping the number");
+    }
+
     private static List<string> UnfilteredOrgOwnedEntityNames()
     {
         using var context = BuildModelOnlyContext();

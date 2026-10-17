@@ -44,11 +44,12 @@ public sealed class StaffAssignmentServiceHardeningTests
             ExternalSubject = $"idp|{staffUserId:N}",
             DisplayName = "Staffer",
             CreatedAt = DateTimeOffset.UtcNow,
+            Person = new Person { Id = staffUserId, OrganizationId = Organization.DefaultOrganizationId, DisplayName = "Test Person", CreatedAt = DateTimeOffset.UtcNow },
         });
-        seed.StaffAssignments.Add(new StaffAssignment
+        seed.Enrollments.Add(new Enrollment
         {
             Id = Guid.NewGuid(),
-            StaffUserId = staffUserId,
+            PersonId = staffUserId,
             ExerciseId = exerciseId,
             Role = "controller",
             CreatedAt = DateTimeOffset.UtcNow,

@@ -1452,9 +1452,10 @@ public sealed partial class InjectQueueService
     }
 
     /// <summary>
-    /// The staff assigned to the exercise. <see cref="StaffAssignment"/> is deliberately unscoped (a staff human spans
-    /// exercises), so the exercise predicate is explicit; the staff rows are bounded by the exercise's own customer
-    /// tenant — the same <c>InOrganization</c> bound <c>OrgStaffDirectoryService</c> uses (COR-010).
+    /// The staff enrolled in the exercise. <see cref="Enrollment"/> is <c>IExerciseScoped</c> (identity-auth-roles/16),
+    /// so the central exercise filter already confines this read to the resolved exercise; the explicit exercise
+    /// predicate is belt-and-braces. The staff rows (unscoped: a staff human spans exercises) are bounded by the
+    /// exercise's own customer tenant — the same <c>InOrganization</c> bound <c>OrgStaffDirectoryService</c> uses (COR-010).
     /// </summary>
     private async Task<List<RosterEntry>> ReadRosterAsync(
         Guid exerciseId,
@@ -1462,10 +1463,10 @@ public sealed partial class InjectQueueService
         CancellationToken cancellationToken)
     {
         var rows = await (
-            from assignment in _dbContext.StaffAssignments.AsNoTracking()
+            from assignment in _dbContext.Enrollments.AsNoTracking().Where(EnrollmentRoles.IsStaffEnrollment)
             where assignment.ExerciseId == exerciseId
             join staffUser in _dbContext.StaffUsers.AsNoTracking().InOrganization(organizationId)
-                on assignment.StaffUserId equals staffUser.Id
+                on assignment.PersonId equals (Guid?)staffUser.Id
             orderby staffUser.DisplayName
             select new RosterEntry(staffUser.Id, staffUser.DisplayName, assignment.Role)).ToListAsync(cancellationToken);
 

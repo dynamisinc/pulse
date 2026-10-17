@@ -243,6 +243,7 @@ public sealed class AmbientPolicyIsolationTests
         {
             Id = organizationId,
             Name = $"Other customer {organizationId:N}",
+            Slug = $"org-{organizationId:N}",
             CreatedAt = DateTimeOffset.UtcNow,
         });
         await seed.SaveChangesAsync();
@@ -275,10 +276,10 @@ public sealed class AmbientPolicyIsolationTests
 
         await using var seed = _fixture.CreateContext();
         seed.StaffUsers.Add(StaffTenantSeed.StaffUserFor(staffUserId, organizationId));
-        seed.StaffAssignments.Add(new StaffAssignment
+        seed.Enrollments.Add(new Enrollment
         {
             Id = Guid.NewGuid(),
-            StaffUserId = staffUserId,
+            PersonId = staffUserId,
             ExerciseId = assignedTo,
             Role = "controller",
             CreatedAt = DateTimeOffset.UtcNow,

@@ -95,10 +95,10 @@ internal sealed class LinkCardTestWorld
         seed.StaffUsers.Add(StaffTenantSeed.StaffUserFor(staffUserId));
         foreach (var (exerciseId, role) in assignments)
         {
-            seed.StaffAssignments.Add(new StaffAssignment
+            seed.Enrollments.Add(new Enrollment
             {
                 Id = Guid.NewGuid(),
-                StaffUserId = staffUserId,
+                PersonId = staffUserId,
                 ExerciseId = exerciseId,
                 Role = role,
                 CreatedAt = DateTimeOffset.UtcNow,
@@ -127,11 +127,11 @@ internal sealed class LinkCardTestWorld
             ExerciseId = exerciseId,
             Username = signInName,
             DisplayName = name,
-            Role = "participant",
             CreatedAt = DateTimeOffset.UtcNow,
             Agency = agency,
             JobRole = jobRole,
             DisabledAt = disabled ? DateTimeOffset.UtcNow.AddMinutes(-5) : null,
+            Enrollment = new Enrollment { Id = Guid.NewGuid(), ExerciseId = exerciseId, Role = "participant" },
         };
 
         string? token = null;

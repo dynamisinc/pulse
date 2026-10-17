@@ -82,7 +82,7 @@ public sealed class ExerciseReportResult
 /// <b>Isolation (COR-001, XC-001).</b> Exactly as <see cref="PostExportService"/>: the exercise comes only from
 /// <see cref="IExerciseContext"/>, an unresolved scope fails closed before any read, every content table (posts,
 /// personas, accounts, media, reactions, inject items) is read through its scoped set, and the two unscoped tables are
-/// bounded explicitly (<see cref="StaffAssignment"/> by the exercise id, <see cref="StaffUser"/> by the exercise's own
+/// bounded explicitly (<see cref="Enrollment"/> by the exercise id, <see cref="StaffUser"/> by the exercise's own
 /// tenant). A parent, author, acting human or inject that does not resolve inside the exercise is left blank. The
 /// signer refuses to mint a URL outside the scope (and that refusal is never absorbed).
 /// </para>
@@ -703,18 +703,19 @@ public sealed partial class ExerciseReportService
                 persona.Id, persona.Handle, persona.DisplayName, persona.Verified, persona.AvatarMediaId, persona.ImitatesPersonaId))
             .ToDictionaryAsync(persona => persona.Id, cancellationToken);
 
-        // StaffAssignment is deliberately unscoped (a staff human spans exercises), so the exercise predicate is
-        // explicit; StaffUser is bounded by the exercise's own tenant. Same join as PostExportService.
+        // identity-auth-roles/16: the exercise's STAFF enrollments (Enrollment is IExerciseScoped, so the central filter
+        // confines it to the resolved exercise; the predicate is explicit too); StaffUser is bounded by the exercise's
+        // own tenant. Same join as PostExportService.
         var staff = await (
-            from assignment in _dbContext.StaffAssignments.AsNoTracking()
+            from assignment in _dbContext.Enrollments.AsNoTracking().Where(EnrollmentRoles.IsStaffEnrollment)
             where assignment.ExerciseId == exerciseId
             join staffUser in _dbContext.StaffUsers.AsNoTracking().InOrganization(organizationId)
-                on assignment.StaffUserId equals staffUser.Id
+                on assignment.PersonId equals (Guid?)staffUser.Id
             select new { staffUser.Id, staffUser.DisplayName, assignment.Role }).ToListAsync(cancellationToken);
 
         var accounts = await _dbContext.Accounts
             .AsNoTracking()
-            .Select(account => new { account.Id, account.ActingHumanId, account.DisplayName, account.Role, account.LastLoginAt })
+            .Select(account => new { account.Id, account.ActingHumanId, account.DisplayName, account.Enrollment.Role, account.LastLoginAt })
             .ToListAsync(cancellationToken);
 
         var humans = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);

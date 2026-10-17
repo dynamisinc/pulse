@@ -18,7 +18,7 @@ using Pulse.WebApi.Features.Identity.SharedAccess;
 /// The guarded, idempotent UAT bootstrap service behind <c>POST /api/ops/bootstrap-exercise</c> (story login/05).
 /// It is the ONLY path that can seed a fresh, empty database: it creates the FIRST <see cref="Exercise"/> (host-
 /// bound so <c>ExerciseResolutionMiddleware</c> can later resolve it) and — optionally — the first
-/// <see cref="StaffAssignment"/> (unblocking staff login for an allowlisted identity), the exercise's first
+/// <see cref="Enrollment"/> (unblocking staff login for an allowlisted identity), the exercise's first
 /// <see cref="SharedCredential"/> (the gap story 06/07 never closed — only rotate/revoke exist), and one
 /// participant <see cref="Account"/>. Scoped lifetime, matching the <see cref="PulseDbContext"/> unit of work.
 /// </summary>
@@ -41,7 +41,7 @@ using Pulse.WebApi.Features.Identity.SharedAccess;
 /// </para>
 /// <para>
 /// <b>Idempotent &amp; non-clobbering.</b> A hostname that already resolves to an exercise reuses it; an already-
-/// provisioned <see cref="StaffAssignment"/> / <see cref="SharedCredential"/> / <see cref="Account"/> is reused,
+/// provisioned <see cref="Enrollment"/> / <see cref="SharedCredential"/> / <see cref="Account"/> is reused,
 /// never duplicated or overwritten (so a re-run never rotates a live shared password out from under existing
 /// access). Server-authoritative: one wall-clock read stamps every <c>CreatedAt</c> and the telemetry. Reuses —
 /// never reimplements — <see cref="AccountFieldRules"/> (sanitization/validation), <see cref="ExerciseHostName"/>
@@ -76,13 +76,13 @@ public sealed class BootstrapService
     private const string LiveStatus = "live";
 
     /// <summary>
-    /// The staff roles a bootstrapped <see cref="StaffAssignment"/> may carry, keyed case-insensitively to their
+    /// The staff roles a bootstrapped <see cref="Enrollment"/> may carry, keyed case-insensitively to their
     /// canonical frozen lowercase value so a request that says <c>Controller</c> stores <c>controller</c> (the
     /// exact <c>Session.role</c> vocabulary), mirroring <see cref="AccountFieldRules"/>'s participant-role map.
     /// </summary>
     /// <remarks>
     /// <c>orgAdmin</c> (COR-010/COR-076) is here so a real deployment has a path to its FIRST organization
-    /// administrator. Nothing else can mint one: staff login requires a pre-existing <see cref="StaffAssignment"/>,
+    /// administrator. Nothing else can mint one: staff login requires a pre-existing <see cref="Enrollment"/>,
     /// exercise creation copies the creator's role, and the zero-config seeder
     /// (<c>Features/Ops/OrgAdminSeed</c>) is non-production by design. Without this entry the OrgAdmin surface is
     /// reachable only by hand-inserting a row — see the deploy note on PR #411.
@@ -281,6 +281,9 @@ public sealed class BootstrapService
                 // a RUNNING exercise, so the legacy "active" becomes "live" (StartEx has effectively
                 // occurred), matching the data migration's legacy→new mapping for existing rows.
                 Status = LiveStatus,
+
+                // identity-auth-roles/16: created directly in live, so it is live from this instant.
+                FirstLiveAt = now,
             };
             _dbContext.Exercises.Add(exercise);
         }
@@ -358,6 +361,7 @@ public sealed class BootstrapService
         {
             Id = Organization.DefaultOrganizationId,
             Name = Organization.DefaultOrganizationName,
+            Slug = OrganizationSlug.FromName(Organization.DefaultOrganizationName),
             CreatedAt = now,
         });
 
@@ -469,7 +473,7 @@ public sealed class BootstrapService
         return AccountValidation.Ok(new ResolvedAccount(username, displayName, role, password, personaId, personaHandle));
     }
 
-    /// <summary>Provisions (or reuses) the <see cref="StaffUser"/> + <see cref="StaffAssignment"/> for the exercise.</summary>
+    /// <summary>Provisions (or reuses) the <see cref="StaffUser"/> + <see cref="Enrollment"/> for the exercise.</summary>
     /// <remarks>
     /// The <paramref name="organizationId"/> is the TARGET EXERCISE's tenant (exercise-isolation/11): a
     /// newly-provisioned staff human joins the customer whose exercise they are being assigned to. An
@@ -486,37 +490,65 @@ public sealed class BootstrapService
         var staffUser = await _dbContext.StaffUsers
             .FirstOrDefaultAsync(u => u.ExternalSubject == staff.ExternalSubject, cancellationToken);
 
+        Person? newPerson = null;
         if (staffUser is null)
         {
+            var newStaffUserId = Guid.NewGuid();
+
+            // identity-auth-roles/16: the staff facet shares its Person's primary key.
+            newPerson = new Person
+            {
+                Id = newStaffUserId,
+                OrganizationId = organizationId,
+                DisplayName = Person.BoundDisplayName(staff.DisplayName),
+                CreatedAt = now,
+            };
             staffUser = new StaffUser
             {
-                Id = Guid.NewGuid(),
+                Id = newStaffUserId,
                 OrganizationId = organizationId,
                 ExternalSubject = staff.ExternalSubject,
                 DisplayName = staff.DisplayName,
                 Username = staff.Username,
                 CreatedAt = now,
+                Person = newPerson,
             };
             _dbContext.StaffUsers.Add(staffUser);
         }
 
-        // StaffAssignment is unscoped (cross-exercise by design) — resolve/create by (staffUserId, exerciseId);
-        // an existing assignment is reused as-is (role never clobbered).
-        var assignment = await _dbContext.StaffAssignments
-            .FirstOrDefaultAsync(a => a.StaffUserId == staffUser.Id && a.ExerciseId == exerciseId, cancellationToken);
+        // identity-auth-roles/16 (ADMIN-IDENTITY-MODEL §1.1): orgAdmin is the org-level grant Person.OrgRole, no longer
+        // an exercise role — an orgAdmin bootstrap sets the grant and enrolls the human as PLANNER, exactly as the
+        // AdminIdentityFoundation migration maps every pre-existing orgAdmin assignment.
+        var isOrgAdmin = ExerciseAdminRoles.IsOrgAdmin(staff.Role);
+        if (isOrgAdmin)
+        {
+            var person = newPerson
+                ?? await _dbContext.People.InOrganization(staffUser.OrganizationId)
+                    .FirstAsync(p => p.Id == staffUser.Id, cancellationToken);
+            person.OrgRole = Person.OrgAdminRole;
+        }
+
+        // Enrollment replaces StaffAssignment — resolve/create by (person, exercise); an existing enrollment is reused
+        // as-is (role never clobbered). The ops context has no exercise scope, so the central filter is bypassed and
+        // the exercise is named explicitly (it is the exercise this very request resolved).
+        // org-scope-exempt(ResolvedScope): exerciseId is the exercise this bootstrap request itself created or resolved
+        // by host, and staffUser.Id the human it just resolved — no request value can point this at another tenant.
+        var assignment = await _dbContext.Enrollments
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(a => a.PersonId == staffUser.Id && a.ExerciseId == exerciseId, cancellationToken);
         var assignmentCreated = assignment is null;
 
         if (assignment is null)
         {
-            assignment = new StaffAssignment
+            assignment = new Enrollment
             {
                 Id = Guid.NewGuid(),
-                StaffUserId = staffUser.Id,
+                PersonId = staffUser.Id,
                 ExerciseId = exerciseId,
-                Role = staff.Role,
+                Role = isOrgAdmin ? EnrollmentRoles.Planner : staff.Role,
                 CreatedAt = now,
             };
-            _dbContext.StaffAssignments.Add(assignment);
+            _dbContext.Enrollments.Add(assignment);
         }
 
         return new BootstrapStaffResult(staffUser.Id, assignment.Role, assignmentCreated);
@@ -595,15 +627,17 @@ public sealed class BootstrapService
         // case-insensitively, matching the (ExerciseId, Username) unique index).
         var existing = await _dbContext.Accounts
             .IgnoreQueryFilters()
+            .Include(a => a.Enrollment)
             .FirstOrDefaultAsync(a => a.ExerciseId == exerciseId && a.Username == account.Username, cancellationToken);
 
         if (existing is not null)
         {
             // Non-clobbering: fill an ABSENT binding, never overwrite a different existing one.
-            var bound = personaId is not null && existing.PersonaId is null;
+            // identity-auth-roles/16: the binding lives on the account's enrollment.
+            var bound = personaId is not null && existing.Enrollment.PersonaId is null;
             if (bound)
             {
-                existing.PersonaId = personaId;
+                existing.Enrollment.PersonaId = personaId;
             }
 
             // Only echo the resolved handle when it actually DESCRIBES the binding being reported. `personaId`
@@ -611,13 +645,13 @@ public sealed class BootstrapService
             // non-clobber path those are two different personas, and pairing them would tell an operator that
             // the account ended up on a persona it did not. This is the one surface whose whole job is
             // confirming which persona an account is bound to, so it must not be ambiguous (CR WR-001).
-            var handleDescribesTheBinding = bound || (personaId is not null && existing.PersonaId == personaId);
+            var handleDescribesTheBinding = bound || (personaId is not null && existing.Enrollment.PersonaId == personaId);
 
             return AccountProvisionOutcome.Ok(new BootstrapAccountResult(
                 existing.Id,
                 existing.Username,
                 Created: false,
-                existing.PersonaId,
+                existing.Enrollment.PersonaId,
                 handleDescribesTheBinding ? personaHandle : null,
                 bound));
         }
@@ -628,10 +662,18 @@ public sealed class BootstrapService
             ExerciseId = exerciseId,
             Username = account.Username,
             DisplayName = account.DisplayName,
-            Role = account.Role,
-            PersonaId = personaId,
             CredentialHash = account.Password is null ? null : _participantPasswordHasher.Hash(account.Password),
             CreatedAt = now,
+
+            // identity-auth-roles/16: the participant-role enrollment carries the role and the persona.
+            Enrollment = new Enrollment
+            {
+                Id = Guid.NewGuid(),
+                ExerciseId = exerciseId,
+                Role = account.Role,
+                PersonaId = personaId,
+                CreatedAt = now,
+            },
         };
         _dbContext.Accounts.Add(entity);
 

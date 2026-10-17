@@ -113,7 +113,11 @@ public sealed class CurrentSessionPersonaAccessor : ICurrentSessionPersonaAccess
             .SingleOrDefaultAsync(candidate => candidate.TokenHash == tokenHash, cancellationToken);
 
         // Fail closed on anything that is not a live session carrying a bound persona.
-        if (session is null || !session.IsLive(now) || session.PersonaId is not { } personaId || personaId == Guid.Empty)
+        if (session is null
+            || !session.IsLive(now)
+            || session.PersonaId is not { } personaId
+            || personaId == Guid.Empty
+            || session.ExerciseId is not { } boundExerciseId)
         {
             return null;
         }
@@ -123,7 +127,7 @@ public sealed class CurrentSessionPersonaAccessor : ICurrentSessionPersonaAccess
             SessionId = session.Id,
             PersonaId = personaId,
             Kind = session.Kind,
-            ExerciseId = session.ExerciseId,
+            ExerciseId = boundExerciseId,
             ActingHumanId = session.ActingHumanId,
         };
     }

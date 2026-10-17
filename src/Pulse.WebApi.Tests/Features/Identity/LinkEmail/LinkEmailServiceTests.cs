@@ -6,6 +6,7 @@ using System.Linq;
 using System.Text.Json;
 using System.Threading.Tasks;
 using FluentAssertions;
+using Microsoft.EntityFrameworkCore;
 using Pulse.WebApi.Features.Identity.EasyLogin;
 using Pulse.WebApi.Features.Identity.LinkEmail;
 using Pulse.WebApi.Tests.Data;
@@ -174,7 +175,9 @@ public sealed class LinkEmailServiceTests
         var participant = await _world.SeedParticipantAsync(exercise, "Ann Participant");
         var pio = await _world.SeedParticipantAsync(exercise, "Pat Pio", role: "pio");
         var others = new List<EmailSeededParticipant>();
-        foreach (var role in new[] { "controller", "bootstrap", "orgAdmin", "planner" })
+        // identity-auth-roles/16: the enrollment role vocabulary is checked, so the retired orgAdmin and the free-string
+        // "bootstrap" can no longer exist; every staff-world role still exercises the roster-role filter.
+        foreach (var role in new[] { "controller", "evaluator", "planner" })
         {
             others.Add(await _world.SeedParticipantAsync(exercise, $"Zed {role}", role: role));
         }
@@ -562,7 +565,7 @@ public sealed class LinkEmailServiceTests
             {
                 if (message.RecipientAddress == first.Email)
                 {
-                    await _world.ChangeAccountAsync(promoted.AccountId, account => account.Role = "controller");
+                    await _world.ChangeAccountAsync(promoted.AccountId, account => account.Enrollment.Role = "controller");
                 }
             },
         };

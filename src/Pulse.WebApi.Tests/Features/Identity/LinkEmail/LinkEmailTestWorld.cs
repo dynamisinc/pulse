@@ -103,10 +103,10 @@ internal sealed class LinkEmailTestWorld
         seed.StaffUsers.Add(StaffTenantSeed.StaffUserFor(staffUserId));
         foreach (var (exerciseId, role) in assignments)
         {
-            seed.StaffAssignments.Add(new StaffAssignment
+            seed.Enrollments.Add(new Enrollment
             {
                 Id = Guid.NewGuid(),
-                StaffUserId = staffUserId,
+                PersonId = staffUserId,
                 ExerciseId = exerciseId,
                 Role = role,
                 CreatedAt = DateTimeOffset.UtcNow,
@@ -139,10 +139,10 @@ internal sealed class LinkEmailTestWorld
             ExerciseId = exerciseId,
             Username = signInName,
             DisplayName = name,
-            Role = role,
             CreatedAt = DateTimeOffset.UtcNow,
             Email = address.Length == 0 ? null : address,
             DisabledAt = disabled ? DateTimeOffset.UtcNow.AddMinutes(-5) : null,
+            Enrollment = new Enrollment { Id = Guid.NewGuid(), ExerciseId = exerciseId, Role = role },
         };
 
         string? token = null;
@@ -290,7 +290,7 @@ internal sealed class LinkEmailTestWorld
     public async Task ChangeAccountAsync(Guid accountId, Action<Account> change)
     {
         await using var write = _fixture.CreateContext();
-        change(await write.Accounts.IgnoreQueryFilters().SingleAsync(a => a.Id == accountId));
+        change(await write.Accounts.IgnoreQueryFilters().Include(a => a.Enrollment).SingleAsync(a => a.Id == accountId));
         await write.SaveChangesAsync();
     }
 

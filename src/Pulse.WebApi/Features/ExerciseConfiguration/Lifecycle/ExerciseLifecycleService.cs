@@ -324,6 +324,13 @@ public sealed class ExerciseLifecycleService
         var now = DateTimeOffset.UtcNow;
         var staff = await _currentStaffSession.GetCurrentStaffSessionAsync(cancellationToken);
 
+        // identity-auth-roles/16 (ADMIN-IDENTITY-MODEL §9): the first time an exercise goes live is recorded once and
+        // never moved (the AdminIdentityFoundation migration backfilled it for exercises already past staged).
+        if (string.Equals(target, ExerciseLifecycleStates.Live, StringComparison.Ordinal) && exercise.FirstLiveAt is null)
+        {
+            exercise.FirstLiveAt = now;
+        }
+
         _dbContext.TelemetryEvents.Add(new TelemetryEvent
         {
             EventId = Guid.NewGuid().ToString(),

@@ -52,9 +52,9 @@ public sealed class ParticipantDayLongLoginTests
                 ExerciseId = exerciseId,
                 Username = "dayn-user",
                 DisplayName = "Day N",
-                Role = "participant",
                 CredentialHash = _hasher.Hash("pw-day-n-123"),
                 CreatedAt = DateTimeOffset.UtcNow,
+                Enrollment = new Enrollment { Id = Guid.NewGuid(), ExerciseId = exerciseId, Role = "participant" },
             });
             await seed.SaveChangesAsync();
         }

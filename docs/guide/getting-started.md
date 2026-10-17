@@ -119,6 +119,25 @@ Pulse opens your home screen:
 | Evaluator | Evaluator Dashboard |
 | Org admin | Exercise Management |
 
+### Signing in to your organization
+
+Staff will soon sign in to their **organization** rather than to one exercise, with their email and
+password:
+
+- **With your organization's address** (`console.<platform address>/o/<your organization>`), Pulse
+  signs you straight in to that organization. Bookmark it.
+- **Without it**, you enter your email and password first. If the same email belongs to you in more than
+  one organization, Pulse lists only the organizations where that password is correct, and you choose
+  one. The choice lasts two minutes.
+- **Org admins** land on **Exercise Management** for the whole organization, even before it has any
+  exercises. Everyone else lands on the exercise they used most recently, and switches with the exercise
+  switcher. Changing organization means signing in again.
+- After five wrong passwords your account is locked for 15 minutes, and the lock grows with further
+  failures, up to 4 hours. Every failed sign-in shows the same message, whatever the reason.
+
+> **Not yet on a screen:** the organization sign-in page. Until it arrives, sign in on the exercise's
+> address as described above.
+
 ### Moving between screens
 
 The top-left corner of every staff screen shows the name of the screen you are on. Select it to open

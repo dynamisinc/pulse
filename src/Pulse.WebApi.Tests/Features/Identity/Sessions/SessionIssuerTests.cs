@@ -12,6 +12,7 @@ using Pulse.WebApi.Features.Identity.EasyLogin;
 using Pulse.WebApi.Features.Identity.Sessions;
 using Pulse.WebApi.Tests.Data;
 using Pulse.WebApi.Tests.Features.EngineRuntime.Clock;
+using Pulse.WebApi.Tests.Features.ExerciseConfiguration.Lifecycle;
 
 /// <summary>
 /// Integration tests for <see cref="SessionIssuer"/> (story 03, COR-012 / NFR-009) against REAL SQL Server
@@ -336,5 +337,80 @@ public sealed class SessionIssuerTests
 
         eventCount.Should().Be(0,
             "issuance is not a telemetry-emitting operation — the login METHOD emits the login event, not this seam");
+    }
+
+    // ---- M-6: session scope invariants (org scope <=> orgAdmin) --------------------------------------------
+
+    private static SessionIssueRequest ScopeRequest(Guid? exerciseId, string kind, string role)
+    {
+        var principal = Guid.NewGuid();
+        return new SessionIssueRequest
+        {
+            ExerciseId = exerciseId,
+            Kind = kind,
+            Role = role,
+            PrincipalId = principal.ToString(),
+            ActingHumanId = principal.ToString(),
+            IsReadOnly = kind == "readonly",
+            AccountId = kind == "participant" ? Guid.NewGuid() : null,
+            StaffUserId = kind == "staff" ? principal : null,
+            PersonaId = null,
+            PersonId = kind == "staff" ? principal : null,
+        };
+    }
+
+    [RequiresDockerTheory]
+    [InlineData("staff", "planner")]
+    [InlineData("staff", "controller")]
+    [InlineData("participant", "participant")]
+    [InlineData("readonly", "participant")]
+    [InlineData("participant", "orgAdmin")]
+    public async Task Issue_NullExercise_ForAnythingButAStaffOrgAdmin_Throws_AndPersistsNothing(string kind, string role)
+    {
+        var request = ScopeRequest(exerciseId: null, kind, role);
+
+        await using (var context = _fixture.CreateContext())
+        {
+            var act = () => IssuerFor(context).IssueAsync(request);
+            await act.Should().ThrowAsync<InvalidOperationException>(
+                "only a staff orgAdmin session may be org-scoped (no exercise) — anything else is a programming error");
+        }
+
+        await using var verify = _fixture.CreateContext();
+        (await verify.Sessions.CountAsync(s => s.PrincipalId == request.PrincipalId))
+            .Should().Be(0, "the guard runs before anything is staged, so nothing is persisted");
+    }
+
+    [RequiresDockerTheory]
+    [InlineData("orgAdmin")]
+    [InlineData("orgadmin")]
+    public async Task Issue_OrgAdminRole_WithAnExercise_Throws_AndPersistsNothing(string role)
+    {
+        var request = ScopeRequest(Guid.NewGuid(), "staff", role);
+
+        await using (var context = _fixture.CreateContext())
+        {
+            var act = () => IssuerFor(context).IssueAsync(request);
+            await act.Should().ThrowAsync<InvalidOperationException>(
+                "orgAdmin is an org-level grant (Person.OrgRole), never issued with an exercise scope");
+        }
+
+        await using var verify = _fixture.CreateContext();
+        (await verify.Sessions.CountAsync(s => s.PrincipalId == request.PrincipalId))
+            .Should().Be(0, "the guard runs before anything is staged, so nothing is persisted");
+    }
+
+    [RequiresDockerFact]
+    public async Task Issue_StaffOrgAdmin_WithNoExercise_IsIssuedOrgScoped()
+    {
+        var request = ScopeRequest(exerciseId: null, "staff", "orgAdmin");
+
+        await using var context = _fixture.CreateContext();
+        var issued = await IssuerFor(context).IssueAsync(request);
+
+        await using var verify = _fixture.CreateContext();
+        var stored = await verify.Sessions.SingleAsync(s => s.Id == issued.Session.Id);
+        stored.ExerciseId.Should().BeNull("a staff orgAdmin session is the one valid org-scope shape");
+        stored.Role.Should().Be("orgAdmin");
     }
 }

@@ -24,6 +24,10 @@ import type { PostView } from './types'
 // A persona IS bound — only the session's read-only flag differs from a normal one.
 const READ_ONLY_SESSION: Session = {
   exerciseId: 'ex-mock-0001',
+  scope: 'exercise',
+  personId: null,
+  world: 'participant',
+  isLead: false,
   accountId: 'acct-observer',
   role: 'participant',
   personaId: 'persona-dreyes_fh',

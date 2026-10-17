@@ -87,8 +87,8 @@ describe('interactive header controls — touch targets', () => {
       status: 'live',
     })
     vi.mocked(getStaffAssignments).mockResolvedValue([
-      { exerciseId: 'ex-alpha', exerciseName: 'Alpha', role: 'controller' },
-      { exerciseId: 'ex-bravo', exerciseName: 'Bravo', role: 'evaluator' },
+      { exerciseId: 'ex-alpha', exerciseName: 'Alpha', role: 'controller', personId: 'p-1', isLead: false },
+      { exerciseId: 'ex-bravo', exerciseName: 'Bravo', role: 'evaluator', personId: 'p-1', isLead: false },
     ])
     render(<ExerciseIdentityBadge role="CONTROLLER" cell="SIMCELL-1" />, { wrapper: Wrapper })
     const badge = await screen.findByRole('button', { name: /Switch exercise/ })

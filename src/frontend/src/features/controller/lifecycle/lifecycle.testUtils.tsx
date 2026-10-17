@@ -27,7 +27,7 @@ import {
   resetMockExerciseStatus,
   setMockExerciseStatus,
 } from '@/core/exerciseContext/exerciseContextResolver'
-import type { ExerciseRole } from '@/core/auth'
+import type { SessionRole } from '@/core/auth'
 import { StaffHeader } from '@/features/staffShell/components/StaffHeader'
 import { SessionProvider } from '@/core/auth'
 import { ExerciseLifecycleControl } from './ExerciseLifecycleControl'
@@ -37,7 +37,7 @@ export interface RenderControlOptions {
   /** The status the MOCK exercise scope reports at mount. Defaults to the mock's own `live`. */
   readonly status?: ExerciseStatus
   /** The signed-in session's role; `'none'` = no `SessionProvider`. Defaults to `controller`. */
-  readonly sessionRole?: ExerciseRole | 'none'
+  readonly sessionRole?: SessionRole | 'none'
   /** Render the real staff header beside the control, to read the state pill. */
   readonly withHeader?: boolean
 }

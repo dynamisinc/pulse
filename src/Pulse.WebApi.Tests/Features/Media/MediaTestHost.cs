@@ -148,10 +148,10 @@ internal static class MediaSeed
         context.StaffUsers.Add(StaffTenantSeed.StaffUserFor(staffUserId));
         if (assigned)
         {
-            context.StaffAssignments.Add(new StaffAssignment
+            context.Enrollments.Add(new Enrollment
             {
                 Id = Guid.NewGuid(),
-                StaffUserId = staffUserId,
+                PersonId = staffUserId,
                 ExerciseId = activeExercise.ExerciseId,
                 Role = role,
                 CreatedAt = DateTimeOffset.UtcNow,

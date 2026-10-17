@@ -20,6 +20,10 @@ import { followPersona, unfollowPersona } from '../services/followService'
 
 const NO_PERSONA_SESSION: Session = {
   exerciseId: 'ex-mock-0001',
+  scope: 'exercise',
+  personId: null,
+  world: 'participant',
+  isLead: false,
   accountId: 'acct-shared',
   role: 'participant',
   personaId: undefined,

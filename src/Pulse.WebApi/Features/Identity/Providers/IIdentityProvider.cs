@@ -38,6 +38,13 @@ public sealed class StaffCredentials
 
     /// <summary>The presented secret (password / token). Never persisted, never logged.</summary>
     public required string Secret { get; init; }
+
+    /// <summary>
+    /// The organization the sign-in is for, when the caller knows it (identity-auth-roles/16: the staff login derives it
+    /// from the exercise being entered). The Pulse password provider resolves the <c>Person</c> by
+    /// <c>(OrganizationId, email)</c>; a provider that does not need it ignores it. Never a client-supplied value.
+    /// </summary>
+    public Guid? OrganizationId { get; init; }
 }
 
 /// <summary>

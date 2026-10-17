@@ -51,8 +51,12 @@ public sealed class AuthenticatedSession
     /// <summary>The persisted <c>Session.Id</c> of the authenticated session.</summary>
     public required Guid SessionId { get; init; }
 
-    /// <summary>The session's bound exercise (COR-012) — the scope the middleware writes with precedence over the host.</summary>
-    public required Guid ExerciseId { get; init; }
+    /// <summary>
+    /// The session's bound exercise (COR-012) — the scope the middleware writes with precedence over the host — or
+    /// <c>null</c> for an ORG-SCOPE staff session (identity-auth-roles/16), which the middleware writes as an UNSET
+    /// scope so every exercise-scoped route fails closed under it.
+    /// </summary>
+    public required Guid? ExerciseId { get; init; }
 
     /// <summary>The session kind — <c>participant</c> / <c>staff</c> / <c>readonly</c>.</summary>
     public required string Kind { get; init; }

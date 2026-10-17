@@ -48,9 +48,9 @@ public sealed class AccountLoginIsolationTests
             ExerciseId = exerciseId,
             Username = username,
             DisplayName = username,
-            Role = "participant",
             CredentialHash = _hasher.Hash(password),
             CreatedAt = DateTimeOffset.UtcNow,
+            Enrollment = new Enrollment { Id = Guid.NewGuid(), ExerciseId = exerciseId, Role = "participant" },
         });
         await seed.SaveChangesAsync();
     }

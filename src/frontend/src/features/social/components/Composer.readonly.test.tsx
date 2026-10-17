@@ -19,6 +19,10 @@ import { Composer } from './Composer'
 
 const READONLY_SESSION: Session = {
   exerciseId: 'ex-mock-0001',
+  scope: 'exercise',
+  personId: null,
+  world: 'participant',
+  isLead: false,
   accountId: 'acct-observer',
   role: 'participant',
   personaId: 'persona-dreyes_fh',

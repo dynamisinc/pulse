@@ -112,6 +112,10 @@ function scope(): ExerciseScope {
 function writableSession(): Session {
   return {
     exerciseId: 'ex-live-0001',
+    scope: 'exercise',
+    personId: null,
+    world: 'participant',
+    isLead: false,
     accountId: 'acct-live-participant',
     role: 'participant',
     personaId: 'persona-dreyes_fh',

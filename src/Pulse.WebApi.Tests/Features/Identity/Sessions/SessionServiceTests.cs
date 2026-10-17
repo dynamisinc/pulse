@@ -131,9 +131,9 @@ public sealed class SessionServiceTests
             ExerciseId = exerciseId,
             Username = $"acct{id:N}"[..30],
             DisplayName = "Pat Participant",
-            Role = "participant",
             CreatedAt = DateTimeOffset.UtcNow,
             DisabledAt = disabledAt,
+            Enrollment = new Enrollment { Id = Guid.NewGuid(), ExerciseId = exerciseId, Role = "participant" },
         };
 
         await using var seed = _fixture.CreateContext();

@@ -50,6 +50,10 @@ const scope: ExerciseScope = {
 
 const session: Session = {
   exerciseId: EXERCISE_ID,
+  scope: 'exercise',
+  personId: null,
+  world: 'participant',
+  isLead: false,
   accountId: 'acct-live-participant',
   role: 'participant',
   personaId: 'persona-dreyes_fh',

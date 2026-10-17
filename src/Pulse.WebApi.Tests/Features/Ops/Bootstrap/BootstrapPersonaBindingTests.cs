@@ -130,8 +130,8 @@ public sealed class BootstrapPersonaBindingTests
         }
 
         await using var read = _fixture.CreateContext(ScopeFor(exerciseId));
-        var account = await read.Accounts.AsNoTracking().SingleAsync(a => a.Username == username);
-        account.PersonaId.Should().Be(personaId, "the binding is persisted onto Account.PersonaId (AC1)");
+        var account = await read.Accounts.Include(account => account.Enrollment).AsNoTracking().SingleAsync(a => a.Username == username);
+        account.Enrollment.PersonaId.Should().Be(personaId, "the binding is persisted onto Account.PersonaId (AC1)");
     }
 
     [RequiresDockerFact]
@@ -161,7 +161,7 @@ public sealed class BootstrapPersonaBindingTests
         }
 
         await using var read = _fixture.CreateContext(ScopeFor(exerciseId));
-        (await read.Accounts.AsNoTracking().SingleAsync(a => a.Username == username)).PersonaId
+        (await read.Accounts.Include(account => account.Enrollment).AsNoTracking().SingleAsync(a => a.Username == username)).Enrollment.PersonaId
             .Should().Be(personaId);
     }
 
@@ -195,7 +195,7 @@ public sealed class BootstrapPersonaBindingTests
         }
 
         await using var read = _fixture.CreateContext(ScopeFor(exerciseId));
-        (await read.Accounts.AsNoTracking().SingleAsync(a => a.Username == username)).PersonaId
+        (await read.Accounts.Include(account => account.Enrollment).AsNoTracking().SingleAsync(a => a.Username == username)).Enrollment.PersonaId
             .Should().Be(personaId);
     }
 
@@ -306,7 +306,7 @@ public sealed class BootstrapPersonaBindingTests
         await using var read = _fixture.CreateContext();
 
         // The rejected call wrote NOTHING — not even the account it would otherwise have created.
-        (await read.Accounts.IgnoreQueryFilters().AnyAsync(a => a.Username == username))
+        (await read.Accounts.Include(account => account.Enrollment).IgnoreQueryFilters().AnyAsync(a => a.Username == username))
             .Should().BeFalse("a rejected cross-exercise binding must not partially provision the account");
 
         // The persona DOES exist — in exercise B. So the rejection above is the exercise predicate closing the
@@ -349,7 +349,7 @@ public sealed class BootstrapPersonaBindingTests
         }
 
         await using var read = _fixture.CreateContext();
-        (await read.Accounts.IgnoreQueryFilters().AnyAsync(a => a.Username == username))
+        (await read.Accounts.Include(account => account.Enrollment).IgnoreQueryFilters().AnyAsync(a => a.Username == username))
             .Should().BeFalse("a rejected cross-exercise binding writes nothing at all");
     }
 
@@ -381,7 +381,7 @@ public sealed class BootstrapPersonaBindingTests
         }
 
         await using var read = _fixture.CreateContext();
-        (await read.Accounts.IgnoreQueryFilters().AnyAsync(a => a.Username == username))
+        (await read.Accounts.Include(account => account.Enrollment).IgnoreQueryFilters().AnyAsync(a => a.Username == username))
             .Should().BeFalse("an unresolvable binding must never provision a half-configured account");
     }
 
@@ -522,7 +522,7 @@ public sealed class BootstrapPersonaBindingTests
 
         await using (var read = _fixture.CreateContext(ScopeFor(exerciseId)))
         {
-            (await read.Accounts.AsNoTracking().SingleAsync(a => a.Username == username)).PersonaId
+            (await read.Accounts.Include(account => account.Enrollment).AsNoTracking().SingleAsync(a => a.Username == username)).Enrollment.PersonaId
                 .Should().Be(firstPersona, "the filled binding is persisted");
         }
 
@@ -554,7 +554,7 @@ public sealed class BootstrapPersonaBindingTests
 
         await using (var read = _fixture.CreateContext(ScopeFor(exerciseId)))
         {
-            (await read.Accounts.AsNoTracking().SingleAsync(a => a.Username == username)).PersonaId
+            (await read.Accounts.Include(account => account.Enrollment).AsNoTracking().SingleAsync(a => a.Username == username)).Enrollment.PersonaId
                 .Should().Be(firstPersona, "the original binding is untouched by the re-run (non-clobbering)");
         }
     }

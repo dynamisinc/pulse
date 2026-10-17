@@ -4,10 +4,10 @@
  * Public domain types for the STAFF-world staff feature (feature:
  * exercise-isolation, story 05 — staff cross-exercise switcher; COR-005).
  *
- * `StaffAssignment` mirrors the FROZEN backend `StaffAssignmentDto` shape
+ * `Enrollment` (formerly `StaffAssignment`) mirrors the FROZEN backend `StaffAssignmentDto` shape
  * (`src/Pulse.WebApi/Features/Identity/Staff/StaffAssignmentDto.cs`) built in
  * identity-auth-roles/05: one of a staff user's roles on one exercise
- * (`{ exerciseId, exerciseName, role }`). It is the response shape of BOTH
+ * (`{ exerciseId, exerciseName, role, personId, isLead }`). It is the response shape of BOTH
  * `GET /api/staff/assignments` (a list) and `POST /api/staff/active-exercise`
  * (a single confirmed assignment). The transport wire body is validated at the
  * service boundary (`services/staffAssignmentsService.ts`) before it is ever
@@ -18,7 +18,7 @@
  * rather than a locally-invented string type — `StaffAssignmentDto.Role` is
  * documented server-side as "the `ExerciseRole` string vocabulary (verbatim)".
  *
- * World: STAFF (COBRA). `StaffAssignment` is an ACCESS RECORD (exercise id +
+ * World: STAFF (COBRA). `Enrollment` is an ACCESS RECORD (exercise id +
  * name + role) — never participant-visible content (XC-002) — and is exempt
  * from the participant scenario-time rule (COR-053): it carries no
  * participant-visible timestamps.
@@ -28,13 +28,17 @@ import type { ExerciseRole } from '@/core/auth'
 
 /**
  * One of the authenticated staff user's assignments: a role on one exercise.
- * `StaffAssignment` is the ONLY cross-exercise object in the Pulse data model
+ * `Enrollment` is the ONLY cross-exercise object in the Pulse data model
  * (COR-005) — reading a LIST of these (via `GET /api/staff/assignments`) is
  * therefore a deliberate, staff-only, own-only exception to the otherwise
  * universal single-exercise scoping rule (COR-001).
  */
-export interface StaffAssignment {
+export interface Enrollment {
   readonly exerciseId: string
   readonly exerciseName: string
   readonly role: ExerciseRole
+  /** The enrolled person (for a staff enrollment: the caller's own id). */
+  readonly personId: string
+  /** Whether this enrollment is the exercise's lead controller (read live server-side). */
+  readonly isLead: boolean
 }

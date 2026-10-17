@@ -20,6 +20,10 @@ import { useAmplify } from './useAmplify'
 const SESSIONS: Record<string, Session> = {
   readOnly: {
     exerciseId: 'ex-mock-0001',
+    scope: 'exercise',
+    personId: null,
+    world: 'participant',
+    isLead: false,
     accountId: 'acct-observer',
     role: 'participant',
     personaId: 'persona-dreyes_fh',
@@ -29,6 +33,10 @@ const SESSIONS: Record<string, Session> = {
   },
   noPersona: {
     exerciseId: 'ex-mock-0001',
+    scope: 'exercise',
+    personId: null,
+    world: 'participant',
+    isLead: false,
     accountId: 'acct-shared',
     role: 'participant',
     personaId: undefined,

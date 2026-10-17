@@ -30,10 +30,9 @@ public sealed class ParticipantSessionRequestsTests
         ExerciseId = exerciseId,
         Username = $"user_{Guid.NewGuid():N}",
         DisplayName = "Jane Smith",
-        Role = role,
-        PersonaId = personaId,
         ActingHumanId = actingHumanId,
         CreatedAt = DateTimeOffset.UtcNow,
+        Enrollment = new Enrollment { Id = Guid.NewGuid(), ExerciseId = exerciseId, Role = role, PersonaId = personaId },
     };
 
     [Fact]

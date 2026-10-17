@@ -59,4 +59,15 @@ public sealed class Organization
 
     /// <summary>Server wall-clock instant (UTC) the tenant record was created.</summary>
     public DateTimeOffset CreatedAt { get; set; }
+
+    /// <summary>The schema bound of <see cref="Slug"/> (a DNS-label-sized URL segment).</summary>
+    public const int MaxSlugLength = 63;
+
+    /// <summary>
+    /// The organization's URL slug (ADMIN-IDENTITY-MODEL §1.1 / §1.2) — lower-case letters, digits and single
+    /// hyphens, used in the staff console URL (<c>console.&lt;domain&gt;/o/{slug}</c>). Unique across Pulse.
+    /// Backfilled from <see cref="Name"/> by the <c>AdminIdentityFoundation</c> migration; a new organization
+    /// derives it with <see cref="OrganizationSlug.FromName"/>. Staff/platform only (XC-002).
+    /// </summary>
+    public required string Slug { get; set; }
 }

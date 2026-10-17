@@ -137,11 +137,20 @@ public static class TelemetryEnvelopeAuthority
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(identity);
 
+        // identity-auth-roles/16: an ORG-SCOPE session has no exercise, so there is no scope it could vouch for —
+        // fail closed rather than write an exercise-scoped row nobody vouched for (COR-001).
+        if (identity.ExerciseId is not { } sessionScope)
+        {
+            return TelemetryAuthorityResolution.Rejected(
+                StatusCodes.Status403Forbidden,
+                "An org-scope session has no exercise scope to emit telemetry for.");
+        }
+
         // The session's own bound exercise is the authority (COR-012): SessionAuthenticationMiddleware writes it
         // into the request scope with precedence over host resolution, so for an authenticated request the two
         // agree by construction. Cross-checked anyway (COR-001) — a disagreement must never be resolved in
         // favour of writing a row, exactly as PostAttributionResolver's participant arm refuses one.
-        if (resolvedScope is { } scope && scope != Guid.Empty && scope != identity.ExerciseId)
+        if (resolvedScope is { } scope && scope != Guid.Empty && scope != sessionScope)
         {
             return TelemetryAuthorityResolution.Rejected(
                 StatusCodes.Status403Forbidden,
@@ -152,7 +161,7 @@ public static class TelemetryEnvelopeAuthority
         // v0 shape error — not a forgery, and not this type's business. Anything present must AGREE: a non-Guid
         // string cannot name the caller's exercise any more than another exercise's id can.
         if (!string.IsNullOrEmpty(request.ExerciseId)
-            && (!Guid.TryParse(request.ExerciseId, out var claimedScope) || claimedScope != identity.ExerciseId))
+            && (!Guid.TryParse(request.ExerciseId, out var claimedScope) || claimedScope != sessionScope))
         {
             return TelemetryAuthorityResolution.Rejected(
                 StatusCodes.Status400BadRequest,
@@ -270,7 +279,7 @@ public static class TelemetryEnvelopeAuthority
             actor.ParticipantId = isParticipantSession ? identity.PrincipalId : null;
         }
 
-        return TelemetryAuthorityResolution.Resolved(identity.ExerciseId);
+        return TelemetryAuthorityResolution.Resolved(sessionScope);
     }
 }
 

@@ -8,6 +8,7 @@ using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.ExerciseResolution;
 using Pulse.WebApi.Features.Identity.Accounts;
+using Pulse.WebApi.Features.Identity.EasyLogin;
 
 /// <summary>
 /// The guarded ops service behind <c>POST /api/ops/bind-participant-persona</c> (story identity-auth-roles/10): binds — or
@@ -162,10 +163,20 @@ public sealed class ParticipantPersonaBindingService
         //    (COR-001). Tracked — this is the row being mutated.
         var account = await _dbContext.Accounts
             .IgnoreQueryFilters()
+            .Include(a => a.Enrollment)
             .FirstOrDefaultAsync(a => a.ExerciseId == exerciseId && a.Username == username, cancellationToken);
         if (account is null)
         {
             return ParticipantPersonaBindingResult.AccountNotFound();
+        }
+
+        // 6b. L-9: a persona belongs to a participant-world enrollment only (CK_Enrollments_PersonaId_ParticipantRolesOnly).
+        //     A legacy staff-role account (planner/controller/evaluator, migrated by AdminIdentityFoundation) would
+        //     violate that constraint at the save and surface as a 500 — refuse it here as an invalid request instead.
+        if (!ParticipantSessionRequests.IsParticipantWorldRole(account.Enrollment.Role))
+        {
+            return ParticipantPersonaBindingResult.Invalid(
+                "A persona can only be bound to a participant or pio account; this account holds a staff role.");
         }
 
         // 7. Resolve the persona WITHIN the same exercise (COR-001). A cross-exercise handle/id is NotFound —
@@ -185,13 +196,14 @@ public sealed class ParticipantPersonaBindingService
         }
 
         var resolvedPersonaId = resolution.PersonaId!.Value;
-        var previousPersonaId = account.PersonaId;
+        // identity-auth-roles/16: the persona binding lives on the account's enrollment.
+        var previousPersonaId = account.Enrollment.PersonaId;
         var changed = previousPersonaId != resolvedPersonaId;
 
         // 8. Bind (assignment is idempotent — an unchanged value leaves the row unmodified) and emit exactly one
         //    XC-004 event in the SAME unit of work. One server wall-clock read stamps the event.
         var now = DateTimeOffset.UtcNow;
-        account.PersonaId = resolvedPersonaId;
+        account.Enrollment.PersonaId = resolvedPersonaId;
 
         _dbContext.TelemetryEvents.Add(BuildBoundTelemetry(
             exercise, account, resolvedPersonaId, resolution.Handle!, previousPersonaId, changed, now));

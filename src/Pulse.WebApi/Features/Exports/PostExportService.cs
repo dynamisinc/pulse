@@ -92,7 +92,7 @@ public sealed class PostExportResult
 /// <b>Isolation (COR-001, XC-001).</b> The exercise comes only from <see cref="IExerciseContext"/>; an unresolved
 /// scope fails closed before any read. Posts, personas, accounts, media, reactions and inject items are all
 /// <see cref="IExerciseScoped"/>, so the central query filter confines every read to the exercise. The two unscoped
-/// tables are bounded explicitly: <see cref="StaffAssignment"/> by the exercise id, and <see cref="StaffUser"/> by the
+/// tables are bounded explicitly: <see cref="Enrollment"/> by the exercise id, and <see cref="StaffUser"/> by the
 /// exercise's own tenant (<c>InOrganization</c>), the same join <c>InjectQueueService</c> uses. A <c>Posted by</c> or
 /// <c>Inject #</c> that does not resolve inside the exercise stays blank, so no name or id from another exercise can
 /// appear.
@@ -252,13 +252,14 @@ public sealed class PostExportService
             .Select(persona => new { persona.Id, persona.Handle, persona.DisplayName })
             .ToDictionaryAsync(persona => persona.Id, persona => new PersonaLabel(persona.Handle, persona.DisplayName), cancellationToken);
 
-        // StaffAssignment is deliberately unscoped (a staff human spans exercises), so the exercise predicate is
-        // explicit; StaffUser is bounded by the exercise's own tenant. Same join as InjectQueueService.ReadRosterAsync.
+        // identity-auth-roles/16: the exercise's STAFF enrollments (Enrollment is IExerciseScoped, so the central filter
+        // confines it to the resolved exercise; the predicate is explicit too); StaffUser is bounded by the exercise's
+        // own tenant. Same join as InjectQueueService.ReadRosterAsync.
         var staff = await (
-            from assignment in _dbContext.StaffAssignments.AsNoTracking()
+            from assignment in _dbContext.Enrollments.AsNoTracking().Where(EnrollmentRoles.IsStaffEnrollment)
             where assignment.ExerciseId == exerciseId
             join staffUser in _dbContext.StaffUsers.AsNoTracking().InOrganization(organizationId)
-                on assignment.StaffUserId equals staffUser.Id
+                on assignment.PersonId equals (Guid?)staffUser.Id
             select new { staffUser.Id, staffUser.DisplayName, assignment.Role }).ToListAsync(cancellationToken);
 
         var accounts = await _dbContext.Accounts

@@ -33,21 +33,26 @@
 
 import type { AxiosAdapter } from 'axios'
 import { api } from '../services/api'
-import { isExerciseRole, type ExerciseRole } from './roles'
+import {
+  isParticipantRole,
+  isSessionRole,
+  type ExerciseRole,
+  type OrgRole,
+  type SessionRole,
+  type SessionScope,
+} from './roles'
 import { USE_MOCK_DATA } from '../config/mockData'
 import { SessionExpiredError } from './sessionExpiredError'
 
-/**
- * The bound session for the current participant. Bound to exactly ONE exercise
- * and ONE account (COR-012). `personaId` is the persona this account posts as
- * (a citizen has their own); `actingHumanId` is the individual human behind the
- * account for per-human attribution (COR-018); `isReadOnly` marks a shared
- * view-only session (COR-015).
- */
-export interface Session {
-  readonly exerciseId: string
+/** Fields every session carries, whatever its scope. */
+interface SessionBase {
+  /** The person the session was minted for; `null` for a one-off participant / read-only viewer. */
+  readonly personId: string | null
+  /** `staff` (staff sessions) or `participant` (participant + read-only). One world per origin. */
+  readonly world: SessionWorld
+  /** Whether the person holds the exercise's lead-controller enrollment (read live server-side). */
+  readonly isLead: boolean
   readonly accountId: string
-  readonly role: ExerciseRole
   readonly personaId?: string
   readonly actingHumanId: string
   readonly isReadOnly: boolean
@@ -55,14 +60,44 @@ export interface Session {
   readonly expiresAt: string
 }
 
+/** A session bound to exactly one exercise, carrying an `ExerciseRole`. */
+export interface ExerciseSession extends SessionBase {
+  readonly scope: 'exercise'
+  readonly exerciseId: string
+  readonly role: ExerciseRole
+}
+
+/** An org-scope session: no exercise bound, `orgAdmin` only (ADMIN-IDENTITY-MODEL §1.2/§9). */
+export interface OrgSession extends SessionBase {
+  readonly scope: 'org'
+  readonly exerciseId: null
+  readonly role: OrgRole
+}
+
+/**
+ * The bound session for the current user (COR-012), discriminated on `scope`: an exercise session
+ * is bound to ONE exercise and carries an `ExerciseRole`; an org session has no exercise and
+ * carries `orgAdmin`. `personaId` is the persona this account posts as; `actingHumanId` is the
+ * human behind the account for per-human attribution (COR-018); `isReadOnly` marks a shared
+ * view-only session (COR-015).
+ */
+export type Session = ExerciseSession | OrgSession
+
+/** Which world a session belongs to (matches the server's `world` value). */
+export type SessionWorld = 'staff' | 'participant'
+
 /** Mock session lifetime (short-lived, COR-012). */
 export const SESSION_TTL_MS = 60 * 60 * 1000
 
-/** Wire shape of the (future) `/session` response body. */
+/** Wire shape of the `/session` response body (the frozen `SessionDto`). */
 interface SessionResponseBody {
-  readonly exerciseId: string
+  readonly exerciseId: string | null
+  readonly personId: string | null
+  readonly world: SessionWorld
+  readonly scope: SessionScope
+  readonly isLead: boolean
   readonly accountId: string
-  readonly role: ExerciseRole
+  readonly role: ExerciseRole | OrgRole
   readonly personaId?: string
   readonly actingHumanId: string
   readonly isReadOnly: boolean
@@ -78,6 +113,10 @@ interface SessionResponseBody {
  */
 const MOCK_SESSION_BASE: Omit<SessionResponseBody, 'expiresAt'> = {
   exerciseId: 'ex-mock-0001',
+  personId: null,
+  world: 'participant',
+  scope: 'exercise',
+  isLead: false,
   accountId: 'acct-dreyes',
   role: 'participant',
   personaId: 'persona-dreyes_fh',
@@ -106,17 +145,70 @@ const mockAdapter: AxiosAdapter = config => Promise.resolve({
  */
 const USE_MOCK_SESSION = USE_MOCK_DATA
 
-function isValidBody(body: SessionResponseBody | null | undefined): body is SessionResponseBody {
-  return (
-    !!body &&
-    typeof body.exerciseId === 'string' && body.exerciseId.length > 0 &&
-    typeof body.accountId === 'string' && body.accountId.length > 0 &&
-    isExerciseRole(body.role) &&
-    (body.personaId === undefined || typeof body.personaId === 'string') &&
-    typeof body.actingHumanId === 'string' && body.actingHumanId.length > 0 &&
-    typeof body.isReadOnly === 'boolean' &&
-    typeof body.expiresAt === 'string' && !Number.isNaN(Date.parse(body.expiresAt))
-  )
+/** The wire body after tolerant defaulting: every field of the A1b SessionDto is present. */
+type NormalizedBody = SessionResponseBody
+
+/** The world a role belongs to: participant/pio are participant-world; everything else is staff. */
+function worldForRole(role: SessionRole): SessionWorld {
+  return isParticipantRole(role) ? 'participant' : 'staff'
+}
+
+/**
+ * Validates and normalizes a `/session` body, accepting BOTH wire shapes at once (docs/OPERATE.md
+ * "Frontend-before-backend": the client deploys before the server). The pre-A1 SessionDto carried
+ * only exerciseId/accountId/role/personaId/actingHumanId/isReadOnly/expiresAt, so an ABSENT
+ * (undefined) `scope` means `exercise`, `world` is derived from the role, `isLead` is `false` and
+ * `personId` is `null`. A field that IS present is validated fail-closed exactly as before: a
+ * wrong type, a mixed scope/role, or a `world` contradicting the role rejects.
+ */
+function normalizeBody(
+  raw: Partial<SessionResponseBody> | null | undefined,
+): NormalizedBody | null {
+  if (!raw || typeof raw !== 'object') return null
+  const scope = raw.scope === undefined ? 'exercise' : raw.scope
+  if (scope !== 'exercise' && scope !== 'org') return null
+  // Scope and exercise binding must agree: exercise scope binds an exercise, org scope binds none.
+  const exerciseBindingOk = scope === 'org'
+    ? raw.exerciseId === null
+    : typeof raw.exerciseId === 'string' && raw.exerciseId.length > 0
+  if (!exerciseBindingOk) return null
+  // DEPLOY-WINDOW BRIDGE: the pre-A1 backend still mints exercise sessions with
+  // `role: 'orgAdmin'` and NO `scope`. A1 migrates those people to `planner`, and the old backend
+  // still authorizes them server-side, so map to `planner` here so deploy order doesn't matter.
+  // Only the scope-ABSENT shape qualifies: an explicit `scope: 'exercise'` + `orgAdmin` is the A1
+  // contract violation and stays rejected.
+  const isLegacyOrgAdmin = raw.scope === undefined && raw.role === 'orgAdmin' &&
+    typeof raw.exerciseId === 'string'
+  const candidateRole = isLegacyOrgAdmin ? 'planner' : raw.role
+  if (!isSessionRole(scope, candidateRole)) return null
+  const role: SessionRole = candidateRole
+  const personId = raw.personId === undefined ? null : raw.personId
+  if (personId !== null && !(typeof personId === 'string' && personId.length > 0)) return null
+  const expectedWorld = worldForRole(role)
+  const world = raw.world === undefined ? expectedWorld : raw.world
+  if (world !== 'staff' && world !== 'participant') return null
+  // A world that contradicts the role (e.g. staff + participant) is never trusted (S-1).
+  if (world !== expectedWorld) return null
+  const isLead = raw.isLead === undefined ? false : raw.isLead
+  if (typeof isLead !== 'boolean') return null
+  if (!(typeof raw.accountId === 'string' && raw.accountId.length > 0)) return null
+  if (!(raw.personaId === undefined || typeof raw.personaId === 'string')) return null
+  if (!(typeof raw.actingHumanId === 'string' && raw.actingHumanId.length > 0)) return null
+  if (typeof raw.isReadOnly !== 'boolean') return null
+  if (!(typeof raw.expiresAt === 'string' && !Number.isNaN(Date.parse(raw.expiresAt)))) return null
+  return {
+    exerciseId: raw.exerciseId as string | null,
+    personId,
+    world,
+    scope,
+    isLead,
+    accountId: raw.accountId,
+    role,
+    personaId: raw.personaId,
+    actingHumanId: raw.actingHumanId,
+    isReadOnly: raw.isReadOnly,
+    expiresAt: raw.expiresAt,
+  }
 }
 
 /**
@@ -137,24 +229,30 @@ export function isSessionExpired(session: Session, now: Date): boolean {
  * fail closed rather than serve a default/expired session (COR-012, COR-001).
  */
 export async function resolveSession(): Promise<Session> {
-  const response = await api.get<SessionResponseBody>(
+  const response = await api.get<Partial<SessionResponseBody>>(
     '/session',
     USE_MOCK_SESSION ? { adapter: mockAdapter } : undefined,
   )
 
-  if (!isValidBody(response.data)) {
+  const body = normalizeBody(response.data)
+  if (!body) {
     throw new Error('resolveSession: resolution returned an empty or malformed session')
   }
 
-  const session: Session = {
-    exerciseId: response.data.exerciseId,
-    accountId: response.data.accountId,
-    role: response.data.role,
-    personaId: response.data.personaId,
-    actingHumanId: response.data.actingHumanId,
-    isReadOnly: response.data.isReadOnly,
-    expiresAt: response.data.expiresAt,
+  const common = {
+    personId: body.personId,
+    world: body.world,
+    isLead: body.isLead,
+    accountId: body.accountId,
+    personaId: body.personaId,
+    actingHumanId: body.actingHumanId,
+    isReadOnly: body.isReadOnly,
+    expiresAt: body.expiresAt,
   }
+  // `isValidBody` already proved scope/role/exerciseId agree; this re-narrows for the union.
+  const session: Session = body.scope === 'org'
+    ? { ...common, scope: 'org', exerciseId: null, role: 'orgAdmin' }
+    : { ...common, scope: 'exercise', exerciseId: body.exerciseId as string, role: body.role as ExerciseRole }
 
   if (isSessionExpired(session, new Date())) {
     // The server answered with a well-formed session that is over: a typed failure, so the

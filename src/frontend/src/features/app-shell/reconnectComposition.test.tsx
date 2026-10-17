@@ -37,6 +37,10 @@ const SCOPE = {
 
 const SESSION = {
   exerciseId: 'ex-0001',
+  personId: null,
+  world: 'participant',
+  scope: 'exercise',
+  isLead: false,
   accountId: 'acct-1',
   role: 'participant',
   personaId: 'persona-1',
