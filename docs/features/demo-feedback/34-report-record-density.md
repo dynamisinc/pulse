@@ -17,7 +17,7 @@ about 6 cards per page.
   - **Merge.** Within one half-hour group, ENGINE posts by the same author with identical text print once, at the
     first one's position. Interleaved repeats merge too. The card says how many posts it stands for, in text:
     "Posted 3 times, 14:45–14:49". A note above the record says how many posts appear as how many cards.
-  - **Never merged.** Each of these keeps its own card:
+  - **Never merged.** Each of these keeps its own card (and any post carrying an inject ref):
     - participant, controller-as-persona and scripted inject posts;
     - any post with likes, reposts, replies or media;
     - any edited or taken-down post;
@@ -43,7 +43,7 @@ about 6 cards per page.
 | Merge, interleaved, nothing dropped | `services/mergeRepeats.test.ts` "merges interleaved repeats by author and text, at the first one's position", "never merges the same text from two different authors" |
 | "Posted N times" label | `mergeRepeats.test.ts` "states the count and the span", "says "at" when every repeat shares a minute, and dates both ends across midnight"; `pages/ExerciseReportPage.test.tsx` "renders every section from the fixture" (two merged cards) |
 | Merged note | `ExerciseReportPage.test.tsx` "renders every section from the fixture" |
-| Protected posts | `mergeRepeats.test.ts` "keeps %s as its own card" (10 cases), "keeps thread members whole" |
+| Protected posts | `mergeRepeats.test.ts` "keeps %s as its own card" (11 cases, incl. an inject ref), "keeps thread members whole" |
 | Compact print card, screen unchanged | `components/ReportStory31.test.tsx` "prints a compact card: small avatar, tight rows, counts and tags on one line" |
 
 Headless Edge print-to-PDF of the dev mock: plain cards measure about 0.7 in (about 14 per page, previously about
