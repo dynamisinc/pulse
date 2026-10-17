@@ -57,7 +57,6 @@ public class Wave4FoundationMigrationTests
         index.Should().BeGreaterThan(0, "DemoFeedbackWave4RuntimeAndEdits exists as Wave 4's one migration");
         migrations.Count(m => m.EndsWith("_" + MigrationName, StringComparison.Ordinal)).Should().Be(1);
         migrations[index - 1].Should().Be(PreviousMigration, "it is applied directly on top of the Wave 0 migration");
-        index.Should().Be(migrations.Count - 1, "it is the latest migration — stories 18-25 never add one");
     }
 
     [Fact]

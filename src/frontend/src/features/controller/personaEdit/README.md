@@ -23,13 +23,13 @@ import { PersonaEditButton } from '@/features/controller/personaEdit'
 | File | Role |
 |---|---|
 | `PersonaEditButton.tsx` | The only export the route uses: button + dialog + "Saved" status; returns focus to itself. |
-| `PersonaEditDialog.tsx` | The COBRA dialog (form; mounted only while open). |
+| `PersonaEditDialog.tsx` | The COBRA dialog (form; mounted only while open). Includes the story-33 **Imitates** select (unverified drafts only; options from `useStaffPersonas()`, never `PersonaPicker`). |
 | `ImageChooser.tsx` | Avatar / banner: upload (`useMediaUpload`) or pick from the library; preview. |
 | `VerifiedConfirmDialog.tsx` | Confirmation when Verified is turned on or off (SOC-052). |
 | `DiscardChangesDialog.tsx` / `consoleChords.ts` | "Discard your changes?" on Esc; swallows the console's ⌘K. |
 | `usePersonaEdit.ts` | The save flow: PATCH, then `invalidatePersonas()`, `selectPersona(updated)`, ONE `steering_action`. |
 | `personaEditService.ts` | `patchPersona`, error mapping (400 text verbatim), response parser. |
-| `personaEditMock.ts` | Mock adapter: the contract's exact 400 texts; **edits the mock persona directory**. |
+| `personaEditMock.ts` | Mock adapter: the contract's exact 400 texts (incl. the `imitatesPersonaId` rules: self / unknown or other exercise / not verified / edited persona verified); **edits the mock persona directory**. |
 | `personaEditForm.ts` / `textRules.ts` / `personaEditStyles.ts` | Pure: validation, the draft -> merge-patch diff, AA colours. |
 | `libraryPicker.ts` | The ONE import seam to C1's `MediaLibraryPicker`. |
 | `PersonaEditHarness.testUtils.tsx` | Test-only render harness. |
@@ -38,7 +38,7 @@ import { PersonaEditButton } from '@/features/controller/personaEdit'
 
 - JSON merge-patch (RFC 7396), `Content-Type: application/merge-patch+json` (anything else is 415).
   Only **changed** fields are sent; `null` clears `bio` / `location` / `avatarMediaId` / `bannerMediaId`
-  (never `""`); the persona is never echoed back; `{}` is valid but the dialog never sends it.
+  (never `""`); `imitatesPersonaId` (story 33, DF-49) is a persona id or `null` and is cleared when Verified is turned on; the persona is never echoed back; `{}` is valid but the dialog never sends it.
 - The server's 400 sentence is shown to the controller **verbatim**; 401 / 403 / 404 / 415 / 5xx / network
   have their own staff copy.
 - **Never truncate user text.** Lengths are counted in **UTF-16 units** — the server's `string.Length`, so an

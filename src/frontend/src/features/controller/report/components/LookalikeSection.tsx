@@ -10,6 +10,10 @@
  * activity; the scale never drops below a range of 10, so 1 against 0 is a short bar, not a
  * full one; and the verdict sentence (the two totals) prints only for a pair the server marked
  * `outdrew`.
+ *
+ * Story 33 (DF-49): each pair says in text how it was found, "Named by a controller" (the
+ * lookalike's Imitates setting) or "Handle match" (handle prefix); a named pair need not share
+ * a prefix. `named` is optional at runtime (older API), read as a handle match.
  */
 
 import type { ReportAccount, ReportLookalikePair } from '../types/report'
@@ -72,6 +76,11 @@ function comparison({ verified, lookalike, outdrew }: ReportLookalikePair): stri
     + `${total(lookalike)} likes and reposts against ${total(verified)}.`
 }
 
+/** How the pair was found, in words (NFR-001). An older server sends no flag: a handle match. */
+function basisText(named: boolean | undefined): string {
+  return named === true ? 'Named by a controller' : 'Handle match'
+}
+
 /** " · 3 posts"; empty when an older server sent no count. */
 function postsText(posts: number | undefined): string {
   if (posts === undefined) return ''
@@ -100,6 +109,9 @@ export function LookalikeSection({ pairs }: LookalikeSectionProps) {
           <div key={`${pair.verified.handle}-${pair.lookalike.handle}`} className={styles.vs}>
             <AccountRow account={pair.verified} scale={scale} />
             <AccountRow account={pair.lookalike} scale={scale} />
+            <p className={styles.method} data-testid="lookalike-basis">
+              {basisText(pair.named)}
+            </p>
           </div>
         ))}
       </div>

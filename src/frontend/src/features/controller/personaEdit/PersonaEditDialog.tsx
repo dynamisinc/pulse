@@ -22,6 +22,13 @@
  *                   flipping it in EITHER direction asks for confirmation
  *                   (`VerifiedConfirmDialog`), and the state is always said in
  *                   words + icon, never by colour (NFR-001);
+ *   - IMITATES      (story 33, DF-49) a native select shown ONLY while the draft is
+ *                   unverified: "None" plus the exercise's OTHER verified personas
+ *                   (`useStaffPersonas`, "Display name (@handle)", sorted by name). It
+ *                   names the verified account this lookalike imitates, so the exercise
+ *                   report pairs them. Turning Verified on hides it and clears it to
+ *                   null (the patch then clears a stored value). A server refusal of it
+ *                   shows in the same `role="alert"` banner as any other field's;
  *   - AVATAR/BANNER `ImageChooser`: upload (`useMediaUpload`) or pick from the
  *                   library (C1's picker), with an image preview.
  *
@@ -95,7 +102,7 @@ import {
   faTriangleExclamation,
 } from '@fortawesome/free-solid-svg-icons'
 import { useMediaUpload } from '@/core/media'
-import type { StaffPersona } from '@/features/personas'
+import { useStaffPersonas, type StaffPersona } from '@/features/personas'
 import CobraStyles from '@/theme/CobraStyles'
 import { CobraLinkButton, CobraPrimaryButton, CobraTextField } from '@/theme/styledComponents'
 import { swallowConsoleChord } from './consoleChords'
@@ -110,6 +117,7 @@ import {
   countedLength,
   draftFromPersona,
   isPatchEmpty,
+  imitatesOptions,
   validateDraft,
 } from './personaEditForm'
 import { MUTED_TEXT, STAFF_FIELD_SX } from './personaEditStyles'
@@ -169,6 +177,14 @@ function FieldHelp({ problem, hint, length, max, counterTestId }: FieldHelpProps
   )
 }
 
+/**
+ * The Imitates value when Verified is turned back off in the draft: the saved target when the
+ * saved persona is unverified (so on-then-off changes nothing), else whatever the draft held.
+ */
+function restoredImitates(persona: StaffPersona, draftValue: string | null): string | null {
+  return persona.verified ? draftValue : (persona.imitatesPersonaId ?? null)
+}
+
 /** The words for the verified state: what participants see now / will see after saving. */
 function verifiedStateText(draftVerified: boolean, persisted: boolean): string {
   if (draftVerified === persisted) {
@@ -191,6 +207,7 @@ interface PersonaEditFormProps {
 function PersonaEditForm({ persona, onClose, onSaved }: PersonaEditFormProps) {
   const titleId = useId()
   const hintId = useId()
+  const imitatesId = useId()
   const verifiedHelpId = useId()
   const saveButtonRef = useRef<HTMLButtonElement>(null)
 
@@ -200,6 +217,13 @@ function PersonaEditForm({ persona, onClose, onSaved }: PersonaEditFormProps) {
   const avatarUpload = useMediaUpload()
   const bannerUpload = useMediaUpload()
   const { save, saving, error } = usePersonaEdit(persona)
+  const staffPersonas = useStaffPersonas()
+  const directory = staffPersonas.personas
+  const directoryState = staffPersonas.loading ? 'loading' : staffPersonas.error ? 'error' : 'ready'
+  const imitatesChoices = useMemo(
+    () => imitatesOptions(directory, persona, draft.imitatesPersonaId, directoryState),
+    [directory, persona, draft.imitatesPersonaId, directoryState],
+  )
 
   const problems = validateDraft(draft)
   const valid = Object.keys(problems).length === 0
@@ -461,6 +485,38 @@ function PersonaEditForm({ persona, onClose, onSaved }: PersonaEditFormProps) {
                 </Stack>
               </Box>
 
+              {draft.verified ? null : (
+                <CobraTextField
+                  id={imitatesId}
+                  label="Imitates"
+                  select
+                  size="small"
+                  sx={STAFF_FIELD_SX}
+                  fullWidth
+                  disabled={saving}
+                  value={draft.imitatesPersonaId ?? ''}
+                  onChange={event =>
+                    setDraft(previous => ({
+                      ...previous,
+                      imitatesPersonaId: event.target.value === '' ? null : event.target.value,
+                    }))}
+                  helperText="The verified account this lookalike imitates. The exercise report pairs them and says a controller named the pair."
+                  slotProps={{
+                    // A native select always shows a value ("None"), so the label must stay shrunk.
+                    inputLabel: { shrink: true },
+                    select: { native: true },
+                    htmlInput: { 'data-testid': 'persona-edit-imitates' },
+                  }}
+                >
+                  <option value="">None</option>
+                  {imitatesChoices.map(option => (
+                    <option key={option.id} value={option.id}>
+                      {option.label}
+                    </option>
+                  ))}
+                </CobraTextField>
+              )}
+
               <ImageChooser
                 slot="avatar"
                 handle={persona.handle}
@@ -540,7 +596,15 @@ function PersonaEditForm({ persona, onClose, onSaved }: PersonaEditFormProps) {
         onConfirm={() => {
           if (proposedVerified !== null) {
             const next = proposedVerified
-            setDraft(previous => ({ ...previous, verified: next }))
+            // Only an unverified persona can imitate: verifying clears the target, and turning
+            // it back off restores the saved one, so on-then-off is a no-op for the patch.
+            setDraft(previous => ({
+              ...previous,
+              verified: next,
+              imitatesPersonaId: next
+                ? null
+                : restoredImitates(persona, previous.imitatesPersonaId),
+            }))
           }
           setProposedVerified(null)
         }}
