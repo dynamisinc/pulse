@@ -29,13 +29,12 @@
  * default expiry resolves `Hold` and only the swamped path resolves `Publish`.
  *
  * ONE TELEMETRY EVENT PER TRANSITION (ADP-041/§11, XC-004). On the expiry→terminal
- * transition (no decision, expired, engine running) it emits EXACTLY ONE
+ * transition (no decision, expired — including under a full stop or clamp,
+ * which resolve to the hold-on-expiry) it emits EXACTLY ONE
  * `engine.reviewed` event via the caller-safe `buildAndEmit` — `action:
  * 'hold-on-expiry'` for the auto-HOLD, `action: 'auto-send'` for the swamped
  * auto-send — stamped with the acting controller (COR-018), the storyline, and
- * SCENARIO time. A ref guards against re-emitting on every subsequent tick. A
- * full stop / clamp is NOT a timeout transition (logged on the safety path), so
- * this hook emits nothing for it.
+ * SCENARIO time. A ref guards against re-emitting on every subsequent tick.
  *
  * A11Y (NFR-001). Disposition/countdown are conveyed by the text `label` (never
  * color alone): `'holds in M:SS'` while counting, `'timer expired — held for you'`
@@ -68,7 +67,7 @@ export interface UseDraftTimerOptions {
    * Called ONCE when the countdown resolves a terminal outcome on expiry with no
    * decision (the auto-HOLD, or the swamped auto-send). The integration wires this
    * to `reviewActions` — a `Hold` marks the item HELD, a `Publish` auto-sends. Never
-   * fires for a still-running countdown, a human decision, or a full stop / clamp.
+   * fires for a still-running countdown or a human decision.
    */
   readonly onResolve?: (disposition: TimeoutDisposition, event: DraftTimeoutResolved) => void
   /**

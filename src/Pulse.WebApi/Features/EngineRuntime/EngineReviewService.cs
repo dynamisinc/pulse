@@ -907,9 +907,8 @@ public sealed partial class EngineReviewService
     /// cut. Any of them can change while this item's lookup or its burst's persona lookup is awaited, so the same
     /// pure policy is re-run with FRESH inputs immediately before the publisher call, and the burst is published only
     /// if it still says Publish. Otherwise the item resolves exactly as the up-front policy would for those inputs:
-    /// a DropToSuggest kill switch, a degraded clamp, swamped mode turned off or a cut HOLD it (one
-    /// <c>engine.reviewed</c> hold-on-expiry); a FullStop kill switch leaves it suspended — still counting down,
-    /// unresolved, no event — just as the tick leaves a FullStop countdown. Nothing is published in either case.
+    /// either kill-switch mode (DropToSuggest or FullStop), a degraded clamp, swamped mode turned off or a cut
+    /// HOLD it (one <c>engine.reviewed</c> hold-on-expiry). Nothing is published.
     /// </para>
     /// </remarks>
     /// <param name="candidate">The untracked queue-snapshot row whose countdown expired.</param>
@@ -950,7 +949,6 @@ public sealed partial class EngineReviewService
         // try with the tick's own token (and, being outside it, can never be recorded twice by the fault handlers
         // below).
         EngineBurstPublishResult? publishResult = null;
-        var suspendedByFullStop = false;
         try
         {
             var burst = await PrepareBurstAsync(item, exerciseId, input: null, leadTextOverride: null, cancellationToken);
@@ -968,12 +966,9 @@ public sealed partial class EngineReviewService
             {
                 publishResult = await _publisher.PublishBurstAsync(burst, cancellationToken);
             }
-            else
-            {
-                // A FullStop yields no timeout transition (Event is null): the tick leaves such a countdown
-                // suspended and unresolved, so the same is done here. Every other non-Publish outcome is a HOLD.
-                suspendedByFullStop = recheck.Event is null;
-            }
+
+            // Every non-Publish outcome (including a FullStop: an expired countdown under a full stop is an ordinary
+            // hold-on-expiry, safety fix D5) is resolved to HOLD below.
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -1013,16 +1008,9 @@ public sealed partial class EngineReviewService
         }
 #pragma warning restore CA1031
 
-        if (suspendedByFullStop)
-        {
-            // FullStop engaged before the publisher was invoked: nothing was published, and — exactly like the tick's
-            // own FullStop handling — the countdown stays suspended (counting down, unresolved, no engine.reviewed).
-            return;
-        }
-
         if (publishResult is null)
         {
-            // Kill switch (DropToSuggest), degraded clamp, swamped mode off or a cut to Fake before the publisher was
+            // Kill switch (either mode), degraded clamp, swamped mode off or a cut to Fake before the publisher was
             // invoked: nothing was published. Hold it exactly as the up-front policy would.
             await ResolveOnTickAsync(item, exerciseId, DraftDisposition.Held, EngineReviewAction.HoldOnExpiry, mutate: null, cancellationToken);
             return;

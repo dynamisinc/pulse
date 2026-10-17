@@ -325,7 +325,7 @@ public sealed class EngineReviewSafetyInvariantTests
     }
 
     [Fact]
-    public async Task AutoHold_KillSwitchFullStopDuringPersonaLookup_StaysSuspended_NotPublished_NoEvent()
+    public async Task AutoHold_KillSwitchFullStopDuringPersonaLookup_Holds_NotPublished()
     {
         var exerciseId = Guid.NewGuid();
         var item = Countdown(exerciseId, started: 0, minutes: 3);
@@ -339,13 +339,14 @@ public sealed class EngineReviewSafetyInvariantTests
         harness.Db.PersonaLookups.Should().BePositive("the full stop must land during the persona lookup for this to prove anything");
         harness.Publisher.Bursts.Should().BeEmpty("a full stop found at the last boundary stops the automatic publish");
         item.Disposition.Should().Be(
-            DraftDisposition.CountingDown,
-            "a full stop suspends the countdown unresolved, exactly as the tick treats a full stop seen up front");
-        (await harness.ReviewedEventsAsync(item.DraftId)).Should().BeEmpty("a suspended countdown is not a resolution");
+            DraftDisposition.Held,
+            "an expired countdown under a full stop is an ordinary hold-on-expiry (safety fix D5), never left to auto-send after a restore");
+        Action((await harness.ReviewedEventsAsync(item.DraftId)).Should().ContainSingle("exactly one engine.reviewed per resolution").Subject)
+            .Should().Be("hold-on-expiry");
     }
 
     [Fact]
-    public async Task AutoHold_FullStopSeenUpFront_LeavesCountdownSuspended_NotPublished_NoEvent()
+    public async Task AutoHold_FullStopSeenUpFront_HoldsTheExpiredCountdown_NotPublished()
     {
         var exerciseId = Guid.NewGuid();
         var item = Countdown(exerciseId, started: 0, minutes: 3);
@@ -356,8 +357,8 @@ public sealed class EngineReviewSafetyInvariantTests
         await harness.Service.EvaluateAutoHoldAsync();
 
         harness.Publisher.Bursts.Should().BeEmpty();
-        item.Disposition.Should().Be(DraftDisposition.CountingDown, "the existing FullStop semantics: suspended, unresolved");
-        (await harness.ReviewedEventsAsync(item.DraftId)).Should().BeEmpty();
+        item.Disposition.Should().Be(DraftDisposition.Held, "an expired countdown under a full stop holds (safety fix D5)");
+        Action((await harness.ReviewedEventsAsync(item.DraftId)).Should().ContainSingle().Subject).Should().Be("hold-on-expiry");
     }
 
     [Fact]
@@ -458,6 +459,66 @@ public sealed class EngineReviewSafetyInvariantTests
 
         harness.Publisher.Bursts.Should().BeEmpty("degraded mode lowers autonomy and suspends countdowns — HOLD, not send");
         item.Disposition.Should().Be(DraftDisposition.Held);
+    }
+
+    [Fact]
+    public async Task AutoHold_FullStopBeforeExpiry_KeepsCountingDown_NothingPublishesOrLogs()
+    {
+        var exerciseId = Guid.NewGuid();
+        var item = Countdown(exerciseId, started: 0, minutes: 5);
+        using var harness = Build(exerciseId, item);
+
+        var state = harness.Registry.GetOrCreate(exerciseId);
+        state.SetStorylineOverride(item.StorylineId, AutonomyLevel.DelayedAuto, "lead-1", 0);
+        state.SetSwampedMode(enabled: true, "lead-1", 0);
+        state.EngageKillSwitch(KillSwitchMode.FullStop, "lead-1", 0);
+        harness.Advance(minutes: 2); // still before the deadline (5)
+
+        await harness.Service.EvaluateAutoHoldAsync();
+
+        harness.Publisher.Bursts.Should().BeEmpty();
+        item.Disposition.Should().Be(DraftDisposition.CountingDown, "a full stop does not resolve a countdown still inside its window");
+        (await harness.ReviewedEventsAsync(item.DraftId)).Should().BeEmpty("a still-running countdown is not a resolution");
+    }
+
+    /// <summary>
+    /// Regression (Gate-1 HIGH): a Delayed-auto countdown that expires DURING a kill-switch FullStop used to be left
+    /// counting down (no timeout transition), so with swamped mode on it auto-published on the first sweep after a
+    /// human restore. Every safety clamp — FullStop included — must HOLD an expiry, never send it later.
+    /// </summary>
+    [Fact]
+    public async Task AutoHold_CountdownExpiresDuringFullStop_Holds_AndStaysHeldAfterRestore_EvenUnderSwampedMode()
+    {
+        var exerciseId = Guid.NewGuid();
+        var item = Countdown(exerciseId, started: 0, minutes: 3);
+        using var harness = Build(exerciseId, item);
+
+        var state = harness.Registry.GetOrCreate(exerciseId);
+        state.SetStorylineOverride(item.StorylineId, AutonomyLevel.DelayedAuto, "lead-1", 0);
+        state.SetSwampedMode(enabled: true, "lead-1", 0);
+        state.EngageKillSwitch(KillSwitchMode.FullStop, "lead-1", 1);
+        harness.Advance(minutes: 4); // the deadline (3) passes while the engine is fully stopped
+
+        await harness.Service.EvaluateAutoHoldAsync();
+
+        harness.Publisher.Bursts.Should().BeEmpty("a full stop publishes nothing");
+        item.Disposition.Should().Be(DraftDisposition.Held, "an expiry during a full stop is held, not left counting down");
+        var reviewed = await harness.ReviewedEventsAsync(item.DraftId);
+        Action(reviewed.Should().ContainSingle("exactly one engine.reviewed per resolution").Subject).Should().Be("hold-on-expiry");
+        reviewed[0].Actor.ActingHumanId.Should().BeNull("a hold-on-expiry is silence, not a human decision");
+
+        var restored = await harness.Service.RestoreFromSafetyAsync(Input("lead-1"));
+        restored.Outcome.Should().Be(EngineReviewOutcome.Ok);
+        state.IsGenerationStopped.Should().BeFalse("the restore must actually lift the full stop for this to prove anything");
+        state.SwampedModeEnabled.Should().BeTrue("swamped mode survives the restore — the auto-send path is live again");
+        harness.Advance(minutes: 1);
+
+        await harness.Service.EvaluateAutoHoldAsync();
+
+        harness.Publisher.Bursts.Should().BeEmpty(
+            "a draft held during the full stop must never auto-send after the restore, even under swamped mode");
+        item.Disposition.Should().Be(DraftDisposition.Held);
+        (await harness.ReviewedEventsAsync(item.DraftId)).Should().ContainSingle("the second sweep resolves nothing new");
     }
 
     [Fact]

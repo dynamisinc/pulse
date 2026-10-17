@@ -613,7 +613,8 @@ The switch at the left of the engine bar is always visible. Each click moves it 
 **ENGINE · LIVE** → **ENGINE · SUGGEST-ONLY** → **ENGINE · STOPPED** → back to **ENGINE · LIVE**.
 
 - **SUGGEST-ONLY** forces every draft to wait for review, whatever the autonomy setting.
-- **STOPPED** stops generation at once.
+- **STOPPED** stops generation at once. A draft whose countdown runs out while the engine is stopped is held for
+  you, not sent after you restart the engine.
 - In the Live position the label also says what is really in effect, for example **ENGINE · LIVE (SUGGEST)**.
 
 If the AI service misbehaves, Pulse drops to Suggest by itself. It never raises autonomy on its own.
