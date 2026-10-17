@@ -28,7 +28,7 @@
  * absent and the current level is shown as text instead; the rate, counts and status stay.
  */
 
-import { useId, useRef, type KeyboardEvent } from 'react'
+import { useEffect, useId, useRef, type KeyboardEvent } from 'react'
 import { Box, Stack, Typography } from '@mui/material'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import {
@@ -67,8 +67,20 @@ function levelForKey(key: string, index: number): NoiseLevel | undefined {
   }
 }
 
-export function NoiseControl() {
+export interface NoiseControlProps {
+  /**
+   * Reports the level the knob shows (undefined until the first read). The console's tablet
+   * "Steering" row uses it for its one-line collapsed summary, so the summary never runs a second
+   * noise poll of its own (mobile-tablet story 12). Optional: nothing else passes it.
+   */
+  readonly onLevelChange?: (level: NoiseLevel | undefined) => void
+}
+
+export function NoiseControl({ onLevelChange }: NoiseControlProps = {}) {
   const { state, selectedLevel, loadError, saveError, setLevel } = useNoiseState()
+  useEffect(() => {
+    onLevelChange?.(selectedLevel)
+  }, [onLevelChange, selectedLevel])
   const canControl = useCanControl()
   const { tier } = usePauseState()
   const { status: exerciseStatus } = useExerciseContext()

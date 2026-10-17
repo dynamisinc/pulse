@@ -101,6 +101,7 @@ import {
 } from './injectRules'
 import { useInjectAssignees } from './useInjectAssignees'
 import { CREATE_LOCK, useInjectQueue, type ActionOutcome } from './useInjectQueue'
+import { usePublishPaneBadge } from '../console/paneBadges'
 import { useRunSheetFilters } from './useRunSheetFilters'
 import { useStatusAnnouncer } from './useStatusAnnouncer'
 import type { InjectItemDto, InjectItemWrite } from './types'
@@ -274,6 +275,8 @@ function RunSheetPanelBody({ exerciseId }: { readonly exerciseId: string }) {
   const statusFilterRef = useRef<HTMLDivElement>(null)
 
   const { items, pauseTier } = queue
+  // Tablet pane-switcher badge "N due" (mobile-tablet story 12): items still waiting to be fired.
+  usePublishPaneBadge('runSheet', items.filter(item => item.status === 'pending').length)
   const frozen = pauseTier === 'freeze'
   const injectsPaused = pauseTier === 'injects'
   const fireDisabledReason = frozen ? MESSAGES.worldFrozen : undefined
