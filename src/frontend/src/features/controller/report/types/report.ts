@@ -25,6 +25,21 @@ export interface ReportAccount {
   verified: boolean
   likes: number
   reposts: number
+  /**
+   * Story 32: the account's posts inside the report's window (all sources). Absent only from an
+   * older server (the frontend and API deploy separately), so the page renders without it.
+   */
+  posts?: number
+}
+
+/**
+ * A verified account beside its lookalike. `outdrew` (story 32, DF-48): the lookalike's likes +
+ * reposts are at least 10 and at least 1.5x the verified account's; only then is a verdict printed.
+ */
+export interface ReportLookalikePair {
+  verified: ReportAccount
+  lookalike: ReportAccount
+  outdrew: boolean
 }
 
 /** `Post.Origin` mapped: `inject` becomes `scripted`. */
@@ -132,7 +147,7 @@ export interface ExerciseReport {
     injectMarkers: ReportInjectMarker[]
   }
   injectResponses: ReportInjectResponse[]
-  lookalikes: { verified: ReportAccount; lookalike: ReportAccount }[]
+  lookalikes: ReportLookalikePair[]
   posts: ReportPost[]
   /** Noise posts left out by the source filter; 0 when `noise` is selected. */
   omittedNoiseCount: number

@@ -324,9 +324,17 @@ export const MOCK_REPORT: ExerciseReport = {
     respondedAsHandle: inject.responseAt === null ? null : '@KestrelCoEM',
   })),
   lookalikes: [
+    // Story 32: the lookalike led on reposts, but not by 1.5x overall, so no verdict prints.
     {
-      verified: { handle: '@FairhavenWater', displayName: 'Fairhaven Water Utility', verified: true, likes: 412, reposts: 230 },
-      lookalike: { handle: '@FairhavenWaterUpd', displayName: 'Fairhaven Water Update', verified: false, likes: 288, reposts: 241 },
+      verified: { handle: '@FairhavenWater', displayName: 'Fairhaven Water Utility', verified: true, likes: 412, reposts: 230, posts: 4 },
+      lookalike: { handle: '@FairhavenWaterUpd', displayName: 'Fairhaven Water Update', verified: false, likes: 288, reposts: 241, posts: 2 },
+      outdrew: false,
+    },
+    // ... while this one clears 10 and 1.5x: "@KestrelCoEM_Alerts was reposted and liked more ...".
+    {
+      verified: { handle: '@KestrelCoEM', displayName: 'Kestrel County EM', verified: true, likes: 6, reposts: 2, posts: 3 },
+      lookalike: { handle: '@KestrelCoEM_Alerts', displayName: 'Kestrel EM Alerts', verified: false, likes: 9, reposts: 14, posts: 1 },
+      outdrew: true,
     },
   ],
   posts: LISTED_POSTS,

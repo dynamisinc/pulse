@@ -10,6 +10,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Pulse.WebApi.Features.Identity.Providers;
 using Pulse.WebApi.Features.Identity.Sessions;
+using Pulse.WebApi.Features.Identity.RateLimits;
 
 /// <summary>
 /// The staff-identity slice HTTP surface (story 05): <c>POST /api/auth/staff/login</c>,
@@ -57,6 +58,7 @@ public static class StaffAuthEndpoints
 
         // Per-IP fixed-window limiter on the internet-facing staff login (NFR-009). Enforcement needs
         // app.UseRateLimiter() in the pipeline (orchestrator-owned) — documented in implementation.md.
+        AuthRateLimitsStartupCheck.Register(services);
         services.AddRateLimiter(options =>
         {
             options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
@@ -65,7 +67,9 @@ public static class StaffAuthEndpoints
                     partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
                     factory: _ => new FixedWindowRateLimiterOptions
                     {
-                        PermitLimit = 10,
+                        // Configurable (Authentication:RateLimits:StaffLoginPerMinute); default 10 — see AuthRateLimits.
+                        PermitLimit = AuthRateLimits.StaffLoginPerMinute(
+                            httpContext.RequestServices.GetRequiredService<IConfiguration>()),
                         Window = TimeSpan.FromMinutes(1),
                         QueueLimit = 0,
                     }));

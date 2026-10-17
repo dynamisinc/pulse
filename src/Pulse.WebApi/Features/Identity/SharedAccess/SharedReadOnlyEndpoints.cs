@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Pulse.WebApi.Features.Identity.Sessions;
+using Pulse.WebApi.Features.Identity.RateLimits;
 
 /// <summary>
 /// The shared read-only slice HTTP surface + composition-root seams (story 06, COR-015 / NFR-009):
@@ -69,6 +70,7 @@ public static class SharedReadOnlyEndpoints
         // Per-IP fixed-window limiter on the internet-facing shared login (NFR-009). Tight (5/minute) because a
         // shared password is a low-entropy human-shared secret — the most brute-forceable of the auth endpoints.
         // Enforcement needs app.UseRateLimiter() (orchestrator-owned); full lockout is story 07.
+        AuthRateLimitsStartupCheck.Register(services);
         services.AddRateLimiter(options =>
         {
             options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
@@ -77,7 +79,9 @@ public static class SharedReadOnlyEndpoints
                     partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
                     factory: _ => new FixedWindowRateLimiterOptions
                     {
-                        PermitLimit = 5,
+                        // Configurable (Authentication:RateLimits:SharedLoginPerMinute); default 5 — see AuthRateLimits.
+                        PermitLimit = AuthRateLimits.SharedLoginPerMinute(
+                            httpContext.RequestServices.GetRequiredService<IConfiguration>()),
                         Window = TimeSpan.FromMinutes(1),
                         QueueLimit = 0,
                     }));
