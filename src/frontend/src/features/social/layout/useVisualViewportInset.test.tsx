@@ -11,7 +11,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { SessionProvider } from '@/core/auth'
 import { ExerciseContextProvider } from '@/core/exerciseContext'
 import { ComposeModal } from './ComposeModal'
-import { keyboardInset, useVisualViewportInset } from './useVisualViewportInset'
+import { keyboardInset, useVisualViewportInset } from '@/core/hooks/useVisualViewportInset'
 
 type Listener = () => void
 
