@@ -188,6 +188,6 @@ None external. All icons are inline SVG strokes in the prototype — production 
 ## Files
 - `Controller Console.dc.html` — the full prototype (template + logic + all data).
 - `DECISIONS.md` — decision log with requirement traceability (input for story updates).
-- `TABLET-AMENDMENT.md` — tablet (iPad) layout, touch and confirm rules for the console; proposed D5-021…026, **pending Tom's sign-off** (MT-D3).
+- `TABLET-AMENDMENT.md` — tablet (iPad) layout, touch and confirm rules for the console; D5-021…026, **signed by Tom** (merged 2026-10-17, #594).
 - `cobra.jsx` — provider-wrapping shim used by the prototype (pattern reference only).
 - Design-system source: `cadence-design-system@2.16.0` (COBRA components) — use the real package.
