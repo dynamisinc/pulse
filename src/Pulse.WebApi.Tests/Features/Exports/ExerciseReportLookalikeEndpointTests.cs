@@ -61,6 +61,31 @@ public sealed class ExerciseReportLookalikeEndpointTests
     }
 
     [RequiresDockerFact]
+    public async Task APair_IsMatchedOverTheWholeExercise_SoAShorterPrefixNeverStandsInForTheRealAccount()
+    {
+        var exerciseId = await _seed.ExerciseAsync();
+        var (token, _) = await _seed.StaffAsync(exerciseId, [(exerciseId, "controller")]);
+        var kestrel = await _report.PersonaAsync(exerciseId, "Kestrel", "Kestrel Times", verified: true);
+        var kestrelEm = await _report.PersonaAsync(exerciseId, "KestrelCoEM", "Kestrel County EM", verified: true);
+        var alerts = await _report.PersonaAsync(exerciseId, "KestrelCoEM_Alerts", "Kestrel EM Alerts");
+
+        // The real account posts only before the window; the shorter verified prefix and the lookalike post inside it.
+        await _seed.PostAsync(exerciseId, kestrelEm, 0, p => p.Origin = "inject");
+        await _seed.PostAsync(exerciseId, kestrel, 35, p => p.Origin = "engine");
+        await _seed.PostAsync(exerciseId, alerts, 40, p => { p.Origin = "controller-as-persona"; p.BaselineRepostCount = 50; });
+
+        await using var host = await ExerciseReportTestHost.StartAsync(_seed.ConnectionString, exerciseId, utcNow: Now);
+
+        using var windowed = await GetJsonAsync(host, token, Window);
+        windowed.RootElement.GetProperty("lookalikes").GetArrayLength()
+            .Should().Be(0, "@KestrelCoEM_Alerts imitates @KestrelCoEM, which posted only outside the window, not @Kestrel");
+
+        using var open = await GetJsonAsync(host, token, string.Empty);
+        var pair = open.RootElement.GetProperty("lookalikes").EnumerateArray().Should().ContainSingle().Subject;
+        pair.GetProperty("verified").GetProperty("handle").GetString().Should().Be("@KestrelCoEM");
+    }
+
+    [RequiresDockerFact]
     public async Task EachAccount_CarriesItsInWindowPosts_AndOutdrewFollowsTheTenAndOneAndAHalfRule()
     {
         var exerciseId = await _seed.ExerciseAsync();

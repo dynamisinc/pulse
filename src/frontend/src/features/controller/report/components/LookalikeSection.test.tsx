@@ -2,7 +2,7 @@
  * features/controller/report/components/LookalikeSection.test.tsx
  * ---------------------------------------------------------------------------
  * Story 32 (DF-48): post counts in text, the bar scale's minimum range, and the verdict sentence
- * only for a pair the server marked `outdrew`, naming only the measures the lookalike led on.
+ * only for a pair the server marked `outdrew`, stating the two likes + reposts totals.
  */
 import { render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
@@ -53,9 +53,9 @@ describe('LookalikeSection (story 32, DF-48)', () => {
 
   it('draws 1 against 0 as a short bar on the minimum range, never a full-width one', () => {
     const { container } = render(<LookalikeSection pairs={[pair({}, { reposts: 1 }, false)]} />)
-    const lookalikeReposts = barWidths(container)[3]
-    expect(lookalikeReposts).toBeCloseTo(60 / MIN_BAR_RANGE)
-    expect(lookalikeReposts).toBeLessThan(10)
+    expect(MIN_BAR_RANGE).toBe(10)
+    // 1 on a range of 10, where the widest bar is 60% of the row.
+    expect(barWidths(container)[3]).toBeCloseTo(6)
   })
 
   it('still scales to the largest value above the minimum range', () => {
@@ -73,10 +73,20 @@ describe('LookalikeSection (story 32, DF-48)', () => {
     expect(screen.getByText('241 reposts')).toBeInTheDocument()
   })
 
-  it('prints the verdict for an outdrew pair, naming only the measures the lookalike led on', () => {
-    const led = pair({ likes: 9, reposts: 1 }, { likes: 2, reposts: 30 }, true)
+  it('states the two totals for an outdrew pair, never singling out one measure', () => {
+    // 1 like against 0 must not read as "liked more": the sentence is about the totals.
+    const led = pair({ likes: 0, reposts: 0 }, { likes: 1, reposts: 1_499 }, true)
     render(<LookalikeSection pairs={[led]} />)
-    expect(screen.getByText('@FairhavenWaterUpd was reposted more than @FairhavenWater.'))
-      .toBeInTheDocument()
+    expect(screen.getByText(
+      '@FairhavenWaterUpd drew more engagement than @FairhavenWater: 1,500 likes and reposts against 0.',
+    )).toBeInTheDocument()
+    expect(screen.queryByText(/liked more/)).not.toBeInTheDocument()
+  })
+
+  it('renders without a post count from an older server that sends none', () => {
+    const old = pair({}, {}, false)
+    delete old.verified.posts
+    render(<LookalikeSection pairs={[old]} />)
+    expect(screen.getByText(/@FairhavenWater ·/)).toHaveTextContent(/VERIFIED$/)
   })
 })

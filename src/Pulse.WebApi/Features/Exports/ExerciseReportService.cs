@@ -277,13 +277,18 @@ public sealed partial class ExerciseReportService
         // 4. The small per-exercise lookups.
         var lookups = await ReadLookupsAsync(exerciseId, facts.OrganizationId, cancellationToken);
 
-        // 5. Lookalikes among in-window authors: decided before engagement, so only the paired personas' in-window
-        //    posts need counts beyond the list.
-        var authorIds = scoped.Select(post => post.AuthorPersonaId).ToHashSet();
+        // 5. Lookalikes: each lookalike is matched against every author in the exercise, then shown only when both
+        //    sides posted inside the window (story 32). Matching over in-window authors alone would let a shorter
+        //    verified prefix stand in for the real account when that account posted only outside the window.
+        //    Decided before engagement, so only the paired personas' in-window posts need counts beyond the list.
+        var authorIds = posts.Select(post => post.AuthorPersonaId).ToHashSet();
+        var windowAuthorIds = scoped.Select(post => post.AuthorPersonaId).ToHashSet();
         var pairs = ExerciseReportBuilder.PairLookalikes(
-            lookups.Personas.Values
-                .Where(persona => authorIds.Contains(persona.Id))
-                .Select(persona => new ReportLookalikeCandidate(persona.Id, persona.Handle, persona.Verified)));
+                lookups.Personas.Values
+                    .Where(persona => authorIds.Contains(persona.Id))
+                    .Select(persona => new ReportLookalikeCandidate(persona.Id, persona.Handle, persona.Verified)))
+            .Where(pair => windowAuthorIds.Contains(pair.Verified.Id) && windowAuthorIds.Contains(pair.Lookalike.Id))
+            .ToArray();
         var pairedPersonas = pairs.SelectMany(pair => new[] { pair.Verified.Id, pair.Lookalike.Id }).ToHashSet();
 
         var engagementIds = listed.Select(post => post.Id)

@@ -25,8 +25,11 @@ export interface ReportAccount {
   verified: boolean
   likes: number
   reposts: number
-  /** Story 32: the account's posts inside the report's window (all sources). */
-  posts: number
+  /**
+   * Story 32: the account's posts inside the report's window (all sources). Absent only from an
+   * older server (the frontend and API deploy separately), so the page renders without it.
+   */
+  posts?: number
 }
 
 /**

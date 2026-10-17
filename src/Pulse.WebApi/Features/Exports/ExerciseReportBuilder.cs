@@ -92,6 +92,9 @@ public static class ExerciseReportBuilder
     /// <summary>The DF-42 window: a response counts within this many scenario minutes of the inject's first post.</summary>
     public const int ResponseWindowMinutes = 30;
 
+    /// <summary>The DF-48 floor: a lookalike verdict needs at least this much engagement (likes + reposts).</summary>
+    public const long LookalikeVerdictMinimum = 10;
+
     /// <summary>The participant origin, the only origin that can respond to an inject (DF-42).</summary>
     public const string ParticipantOrigin = "participant";
 
@@ -433,9 +436,6 @@ public static class ExerciseReportBuilder
             .ThenBy(pair => NormalizeHandle(pair.Lookalike.Handle), StringComparer.OrdinalIgnoreCase)
             .ToArray();
     }
-
-    /// <summary>The DF-48 floor: a lookalike verdict needs at least this much engagement (likes + reposts).</summary>
-    public const long LookalikeVerdictMinimum = 10;
 
     /// <summary>
     /// The DF-48 rule (story 32): the lookalike out-drew the verified account when its shown likes + reposts are at least
