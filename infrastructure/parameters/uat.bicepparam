@@ -154,5 +154,5 @@ param staffIdentityAccountsJson = readEnvironmentVariable('STAFF_IDENTITY_ACCOUN
 // FOLLOW-UP once Tom has created the PULSE_ALERT_OWNER_EMAIL secret on the uat environment (otherwise every
 // UAT infra deploy would fail until the secret exists). Thresholds can be overridden here for a forced test
 // fire (e.g. param providerAlertCallsPerHourThreshold = 1), then reverted; see infrastructure/README.md.
-param deployProviderAlerts = false
+param deployProviderAlerts = true // ON for the Saturday go-live: PULSE_ALERT_OWNER_EMAIL added to the uat environment (Tom, 2026-10-17)
 param alertOwnerEmail = readEnvironmentVariable('PULSE_ALERT_OWNER_EMAIL', '')

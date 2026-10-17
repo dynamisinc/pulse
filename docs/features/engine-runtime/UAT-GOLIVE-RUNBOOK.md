@@ -13,7 +13,7 @@
 | A1 (with #573) and #571 are merged | Both PRs show *Merged*. #571's merge auto-deploys the backend and frontend; wait for **Deploy Backend** and **Deploy Frontend** to go green. |
 | UAT is healthy on `Fake` | `https://app-pulse-api-uat-dynamis.azurewebsites.net/health` returns 200. |
 | You can reach the bootstrap secret | The `uat` environment secret `BOOTSTRAP_SECRET`, which step 3 needs. |
-| Optional: provider alerts | If you want alerts on in the same run, first create the `PULSE_ALERT_OWNER_EMAIL` secret and merge the one-line `deployProviderAlerts = true` change (issue #590). Otherwise skip it; alerts stay off. |
+| Provider alerts are ON in this run | #571 sets `deployProviderAlerts = true`; the `PULSE_ALERT_OWNER_EMAIL` secret exists on `uat` (Tom, 10/17). If the secret were missing, the deploy fails with a clear message rather than deploying silently. |
 
 ## 0b. Capture the current app settings (before any deploy)
 
@@ -47,9 +47,10 @@ Read the job summary. Expect **only** these changes:
 | | **Add** `ForwardedHeaders__KnownNetworks__2 = 192.168.0.0/16` | A1a (#480). No `KnownProxies`; `ForwardLimit` stays at the code default of 1 |
 | | **Add** the four limiter permits from step 1b (`SessionPerMinute = 120`, `WordPermitPerMinute = 30`, `ParticipantLoginPerMinute = 30`, `SharedLoginPerMinute = 20`) | A1a (#480): single-venue permits |
 | | **Add** `Generation__Governance__TimeoutAutoSendAuthorized = false` | Phase 1 (PROVIDER-GOVERNANCE §8): timeout auto-send (swamped mode) stays off until the lead-controller gate is on main |
-| Action group and four `scheduledQueryRules` (`ag-…-provider`, errors / latency / timeouts / spend) | **Create**, only if you enabled alerts | #585 / #590 |
+| Action group and four `scheduledQueryRules` (`ag-…-provider`, errors / latency / timeouts / spend) | **Create** | #585 / #590 (alerts on in #571) |
 
-> ⚠ **Never set `ASPNETCORE_FORWARDEDHEADERS_ENABLED=true`.** It trusts forwarded headers from *any* client, so anyone
+> ⚠ **Never set `ASPNETCORE_FORWARDEDHEADERS_ENABLED=true`.** (An explicit `false`, which Session A's hotfix for #597 sets, is
+> fine and expected in the what-if.) It trusts forwarded headers from *any* client, so anyone
 > could spoof their IP past the login limiter. The three `KnownNetworks` entries above are the only forwarded-headers settings.
 
 **Compare with step 0b.** Every name in `uat-appsettings-before.txt` must appear in the what-if, either unchanged or
@@ -138,6 +139,12 @@ Expect a 200 response carrying the `exerciseId` and persona counts. A 404 means 
 6. **The kill switch works.** Engage FullStop.
    - Nothing new publishes.
    - Restore afterwards (lead controller).
+
+7. **Provider alerts reach the owner (AC7, closes #590).** The infra run creates the action group and four alert rules.
+   - Azure portal, then **Monitor → Alerts → Action groups**, then `ag-…-provider`, then **Test**. Choose the email
+     action and confirm the test email reaches the `PULSE_ALERT_OWNER_EMAIL` inbox.
+   - Optional: in **Alert rules**, confirm all four rules are **Enabled** (errors, latency, timeouts, spend).
+   - Record the date and result in `engine-telemetry-tuning/04` (Tests section). Session C closes #590.
 
 Session C then runs the formal #349/#401/#402 checks and the #177 latency and cost measurement that evening.
 

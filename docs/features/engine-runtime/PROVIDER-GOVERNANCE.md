@@ -164,8 +164,24 @@ reachable. See "Authorized autonomy (amendment at signing)" below.*
 The posture above predates #353. With #353 on `main`, a controller can raise the exercise's autonomy
 default to **Delayed-auto** and the exercise's **lead controller** can turn on **swamped mode**. Under both,
 `AutoHoldPolicy` publishes an expired Delayed-auto draft that has no controller decision. The signer
-**authorizes** that on `uat` with the live provider, on these conditions. Each is enforced in code by this
-PR (#571) or by Session A's A1 work, which must be on `main` before #571 merges:
+**authorizes** that on `uat` with the live provider, in two phases.
+
+> **Phase 1, from the 2026-10-17 go-live until A1c is on `main` (edit re-initialled: Tom Bull, ____):**
+> **timeout auto-send is NOT authorized.** It is enforced in code by the governed flag
+> `Generation:Governance:TimeoutAutoSendAuthorized = false` (`generationTimeoutAutoSendAuthorized`, `false` in
+> `uat.bicepparam`):
+> - turning swamped mode **on** is refused with a `400`; turning it off always works;
+> - the tick never auto-sends, even if swamped mode were somehow on, so an expired Delayed-auto draft is always
+>   **held**;
+> - every AI draft therefore needs a human approval. Suggest is the default; Delayed-auto countdowns may run, and
+>   they end in a hold.
+>
+> Because nothing auto-sends in Phase 1, #571 may merge before Session A's A1 work.
+>
+> **Phase 2** starts only with a separate reviewed commit that sets `generationTimeoutAutoSendAuthorized = true` for
+> `uat`, made after A1c's lead gate is on `main`. From then on the conditions below apply in full.
+
+The conditions, each enforced in code by this PR (#571) or by Session A's A1 work:
 
 - **Suggest is the default.** Every AI draft needs a human approve unless a controller deliberately
   raises the exercise to Delayed-auto.
