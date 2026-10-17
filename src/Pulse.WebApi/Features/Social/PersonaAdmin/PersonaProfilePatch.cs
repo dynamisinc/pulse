@@ -20,7 +20,7 @@ public readonly record struct PatchField<T>(bool IsPresent, T Value);
 /// against the scoped <c>MediaAssets</c> set.
 /// </summary>
 /// <remarks>
-/// <b>What it can express.</b> Only the six editable fields. <c>handle</c>, <c>kind</c>, <c>personaType</c> and
+/// <b>What it can express.</b> Only the seven editable fields. <c>handle</c>, <c>kind</c>, <c>personaType</c> and
 /// <c>exerciseId</c> have no member here at all, so a patch that would change them cannot even be represented;
 /// the parser refuses such a body with a 400 instead of ignoring the field.
 /// </remarks>
@@ -54,6 +54,13 @@ public sealed class PersonaProfilePatch
     public PatchField<Guid?> BannerMediaId { get; init; }
 
     /// <summary>
+    /// The verified persona this persona imitates (DF-49, story 33; not yet resolved), or a present <c>null</c> to
+    /// clear it. Whether it names a verified persona in the caller's exercise, other than this one, and whether this
+    /// persona is unverified after the patch, is decided by <see cref="PersonaProfileEditService"/>.
+    /// </summary>
+    public PatchField<Guid?> ImitatesPersonaId { get; init; }
+
+    /// <summary>
     /// The wire names of the fields this patch sets, in a fixed order. Used for the operational log line only
     /// (names, never values).
     /// </summary>
@@ -61,20 +68,22 @@ public sealed class PersonaProfilePatch
     {
         get
         {
-            var names = new List<string>(6);
+            var names = new List<string>(7);
             AddIfPresent(names, DisplayName.IsPresent, PersonaProfilePatchParser.DisplayNameField);
             AddIfPresent(names, Bio.IsPresent, PersonaProfilePatchParser.BioField);
             AddIfPresent(names, Location.IsPresent, PersonaProfilePatchParser.LocationField);
             AddIfPresent(names, Verified.IsPresent, PersonaProfilePatchParser.VerifiedField);
             AddIfPresent(names, AvatarMediaId.IsPresent, PersonaProfilePatchParser.AvatarMediaIdField);
             AddIfPresent(names, BannerMediaId.IsPresent, PersonaProfilePatchParser.BannerMediaIdField);
+            AddIfPresent(names, ImitatesPersonaId.IsPresent, PersonaProfilePatchParser.ImitatesPersonaIdField);
             return names;
         }
     }
 
     /// <summary>
     /// Applies every present field to <paramref name="persona"/>. Absent fields are left exactly as they are
-    /// (RFC 7396). The caller must already have verified that any media id names an in-scope image.
+    /// (RFC 7396). The caller must already have verified that any media id names an in-scope image and that any
+    /// <see cref="ImitatesPersonaId"/> names an in-scope verified persona.
     /// </summary>
     /// <param name="persona">The tracked, in-scope persona to update.</param>
     public void ApplyTo(Persona persona)
@@ -109,6 +118,11 @@ public sealed class PersonaProfilePatch
         if (BannerMediaId.IsPresent)
         {
             persona.BannerMediaId = BannerMediaId.Value;
+        }
+
+        if (ImitatesPersonaId.IsPresent)
+        {
+            persona.ImitatesPersonaId = ImitatesPersonaId.Value;
         }
     }
 

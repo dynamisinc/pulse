@@ -39,7 +39,14 @@ public sealed record ReportActivityBin(DateTimeOffset Start, int Participant, in
 /// <param name="Id">The persona id.</param>
 /// <param name="Handle">The stored handle (with or without a leading <c>@</c>).</param>
 /// <param name="Verified">Whether the persona carries the verified badge.</param>
-public sealed record ReportLookalikeCandidate(Guid Id, string Handle, bool Verified);
+/// <param name="ImitatesPersonaId">The verified persona a controller named this persona as imitating (DF-49, story 33), if any.</param>
+public sealed record ReportLookalikeCandidate(Guid Id, string Handle, bool Verified, Guid? ImitatesPersonaId = null);
+
+/// <summary>A verified persona and its lookalike, as the report lists them.</summary>
+/// <param name="Verified">The verified account.</param>
+/// <param name="Lookalike">The unverified lookalike.</param>
+/// <param name="Named">Whether a controller named the pair (DF-49, story 33); <c>false</c> for a handle match.</param>
+public sealed record ReportLookalikePair(ReportLookalikeCandidate Verified, ReportLookalikeCandidate Lookalike, bool Named);
 
 /// <summary>A listed post as threading sees it (DF-47): its id and its direct parent.</summary>
 /// <param name="Id">The post id.</param>
@@ -432,6 +439,49 @@ public static class ExerciseReportBuilder
         }
 
         return pairs
+            .OrderBy(pair => NormalizeHandle(pair.Verified.Handle), StringComparer.OrdinalIgnoreCase)
+            .ThenBy(pair => NormalizeHandle(pair.Lookalike.Handle), StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    /// <summary>
+    /// The report's lookalike pairs (DF-49, story 33): the controller-named pairs plus the handle-prefix pairs of
+    /// <see cref="PairLookalikes"/>. A named pair is (P, V) for an unverified author P whose
+    /// <see cref="ReportLookalikeCandidate.ImitatesPersonaId"/> names a verified author V other than P. A target that is
+    /// not among <paramref name="authors"/> (deleted, another exercise, or never posted) or is no longer verified, and a
+    /// P that is now verified, is skipped silently. When a lookalike has a named pair, that pair replaces its heuristic
+    /// one; every other heuristic pair is kept. Ordered by verified handle, then lookalike handle. The window rule
+    /// (both sides posted inside it) is the caller's and runs AFTER this merge, on purpose (story 32: match over the
+    /// whole exercise, then filter): a lookalike whose named target posted only outside the window shows no pair at
+    /// all, never its handle match to another account.
+    /// </summary>
+    /// <param name="authors">The personas that authored posts in the exercise.</param>
+    /// <returns>The pairs, each marked named or handle match.</returns>
+    public static IReadOnlyList<ReportLookalikePair> MergeLookalikePairs(IEnumerable<ReportLookalikeCandidate> authors)
+    {
+        ArgumentNullException.ThrowIfNull(authors);
+        var all = authors.DistinctBy(author => author.Id).ToArray();
+        var byId = all.ToDictionary(author => author.Id);
+
+        var named = new List<ReportLookalikePair>();
+        foreach (var candidate in all.Where(author => !author.Verified))
+        {
+            if (candidate.ImitatesPersonaId is { } targetId
+                && targetId != candidate.Id
+                && byId.TryGetValue(targetId, out var target)
+                && target.Verified)
+            {
+                named.Add(new ReportLookalikePair(target, candidate, Named: true));
+            }
+        }
+
+        var namedLookalikes = named.Select(pair => pair.Lookalike.Id).ToHashSet();
+        var heuristic = PairLookalikes(all)
+            .Where(pair => !namedLookalikes.Contains(pair.Lookalike.Id))
+            .Select(pair => new ReportLookalikePair(pair.Verified, pair.Lookalike, Named: false));
+
+        return named
+            .Concat(heuristic)
             .OrderBy(pair => NormalizeHandle(pair.Verified.Handle), StringComparer.OrdinalIgnoreCase)
             .ThenBy(pair => NormalizeHandle(pair.Lookalike.Handle), StringComparer.OrdinalIgnoreCase)
             .ToArray();

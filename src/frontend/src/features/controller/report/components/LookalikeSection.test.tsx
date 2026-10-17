@@ -90,3 +90,36 @@ describe('LookalikeSection (story 32, DF-48)', () => {
     expect(screen.getByText(/@FairhavenWater ·/)).toHaveTextContent(/VERIFIED$/)
   })
 })
+
+describe('LookalikeSection basis text (story 33, DF-49)', () => {
+  it('says "Named by a controller" for a named pair, in text, even with no shared prefix', () => {
+    const named: ReportLookalikePair = {
+      ...pair({}, { handle: '@TapWaterTruth', displayName: 'Tap Water Truth' }, false),
+      named: true,
+    }
+    render(<LookalikeSection pairs={[named]} />)
+    expect(screen.getByTestId('lookalike-basis')).toHaveTextContent('Named by a controller')
+    expect(screen.getByText(/@TapWaterTruth ·/)).toHaveTextContent('UNVERIFIED')
+    expect(screen.queryByText('Handle match')).not.toBeInTheDocument()
+  })
+
+  it('says "Handle match" for a heuristic pair, and tolerates an absent `named` (older API)', () => {
+    const heuristic: ReportLookalikePair = { ...pair({}, {}, false), named: false }
+    const old = pair({}, { handle: '@FairhavenWaterX' }, false)
+    expect(old.named).toBeUndefined()
+    render(<LookalikeSection pairs={[heuristic, old]} />)
+    const basis = screen.getAllByTestId('lookalike-basis').map(node => node.textContent)
+    expect(basis).toEqual(['Handle match', 'Handle match'])
+    expect(screen.queryByText('Named by a controller')).not.toBeInTheDocument()
+  })
+
+  it('shows each pair its own basis when named and heuristic pairs mix', () => {
+    const mixed = [
+      { ...pair({}, {}, false), named: false },
+      { ...pair({}, { handle: '@TapWaterTruth' }, false), named: true },
+    ]
+    render(<LookalikeSection pairs={mixed} />)
+    expect(screen.getAllByTestId('lookalike-basis').map(node => node.textContent))
+      .toEqual(['Handle match', 'Named by a controller'])
+  })
+})

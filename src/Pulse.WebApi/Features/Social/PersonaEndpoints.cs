@@ -327,8 +327,8 @@ public sealed class PersonaResponseDto
 /// </summary>
 /// <remarks>
 /// Carries no operator/session/attribution field either (XC-002) and never
-/// <see cref="Persona.Castable"/> — this type widens the participant shape by exactly ONE authoring field,
-/// deliberately, and nothing else.
+/// <see cref="Persona.Castable"/> — this type widens the participant shape by exactly TWO authoring fields,
+/// deliberately, and nothing else: <c>personaType</c>, and <c>imitatesPersonaId</c> (DF-49, story 33).
 /// </remarks>
 public sealed class StaffPersonaResponseDto
 {
@@ -417,8 +417,16 @@ public sealed class StaffPersonaResponseDto
     public string? Location { get; init; }
 
     /// <summary>
+    /// The id of the verified persona this persona imitates (DF-49, story 33), or <c>null</c> for none. Always
+    /// emitted (the client types it <c>string | null</c>). Staff world only: the participant shape never carries it
+    /// (XC-002, SOC-052).
+    /// </summary>
+    [JsonPropertyName("imitatesPersonaId")]
+    public required string? ImitatesPersonaId { get; init; }
+
+    /// <summary>
     /// Projects a persisted <see cref="Data.Entities.Persona"/> to the staff shape — the participant fields
-    /// plus the authoring archetype. Never projects <see cref="Data.Entities.Persona.Castable"/>.
+    /// plus the authoring archetype and the imitated persona. Never projects <see cref="Data.Entities.Persona.Castable"/>.
     /// </summary>
     /// <param name="persona">The full persona entity to project.</param>
     /// <param name="inboundFollowEdges">The persona's REAL inbound follow-edge count in the caller's exercise scope.</param>
@@ -456,6 +464,7 @@ public sealed class StaffPersonaResponseDto
             AvatarUrl = avatarUrl,
             BannerUrl = bannerUrl,
             Location = persona.Location,
+            ImitatesPersonaId = persona.ImitatesPersonaId?.ToString(),
         };
     }
 }

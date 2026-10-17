@@ -251,7 +251,7 @@ describe('patchPersona (live) — failures reject with staff copy', () => {
   it('400: every shipped text passes through untouched', async () => {
     for (const sentence of [
       'handle cannot be changed.',
-      "Unknown field 'x'. Editable fields: displayName, bio, location, verified, avatarMediaId, bannerMediaId.",
+      "Unknown field 'x'. Editable fields: displayName, bio, location, verified, avatarMediaId, bannerMediaId, imitatesPersonaId.",
       'avatarMediaId must name an image in this exercise, or be null to clear it.',
       'The request body must be a JSON object naming the fields to change (JSON merge-patch).',
       'The request body must be at most 16384 bytes.',

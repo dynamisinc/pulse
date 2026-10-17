@@ -32,6 +32,7 @@ public sealed class PersonaProfilePatchParserTests
         patch.Verified.IsPresent.Should().BeFalse();
         patch.AvatarMediaId.IsPresent.Should().BeFalse();
         patch.BannerMediaId.IsPresent.Should().BeFalse();
+        patch.ImitatesPersonaId.IsPresent.Should().BeFalse();
     }
 
     [Fact]
@@ -130,7 +131,7 @@ public sealed class PersonaProfilePatchParserTests
 
         message.Should().Be(PersonaAdminMessages.UnknownField(field));
         message.Should().Be(
-            $"Unknown field '{field}'. Editable fields: displayName, bio, location, verified, avatarMediaId, bannerMediaId.");
+            $"Unknown field '{field}'. Editable fields: displayName, bio, location, verified, avatarMediaId, bannerMediaId, imitatesPersonaId.");
     }
 
     [Fact]
@@ -434,6 +435,61 @@ public sealed class PersonaProfilePatchParserTests
 
         ParseInvalid(JsonSerializer.Serialize(new Dictionary<string, int> { [name] = 1 }))
             .Should().Contain(new string('a', 62) + "\U0001F600" + "…'");
+    }
+
+    // ---- imitatesPersonaId (demo-feedback story 33, DF-49) -------------------------------------------------------
+
+    [Fact]
+    public void ImitatesPersonaId_AGuid_IsPresent_AndListedInTheFieldNames()
+    {
+        var patch = ParseValid($$"""{ "verified": false, "imitatesPersonaId": "{{SomeMediaId}}" }""");
+
+        patch.ImitatesPersonaId.Should().Be(new PatchField<Guid?>(true, SomeMediaId));
+        patch.PresentFieldNames.Should().Equal("verified", "imitatesPersonaId");
+    }
+
+    [Fact]
+    public void ImitatesPersonaId_Null_IsAPresentClear()
+    {
+        var patch = ParseValid("""{ "imitatesPersonaId": null }""");
+
+        patch.ImitatesPersonaId.Should().Be(new PatchField<Guid?>(true, null), "null clears the named pair");
+        patch.PresentFieldNames.Should().Equal("imitatesPersonaId");
+    }
+
+    [Theory]
+    [InlineData("\"not-a-guid\"")]
+    [InlineData("\"00000000-0000-0000-0000-000000000000\"")]
+    [InlineData("42")]
+    [InlineData("true")]
+    [InlineData("{}")]
+    public void ImitatesPersonaId_Malformed_GetsTheUnknownPersonaText(string value)
+    {
+        ParseInvalid($$"""{ "imitatesPersonaId": {{value}} }""")
+            .Should().Be(PersonaAdminMessages.ImitatesNotFound, "a malformed id reads exactly like an unknown one");
+    }
+
+    [Fact]
+    public void ApplyTo_SetsAndClearsImitatesPersonaId()
+    {
+        var target = Guid.NewGuid();
+        var persona = new Persona
+        {
+            Id = Guid.NewGuid(),
+            ExerciseId = Guid.NewGuid(),
+            DisplayName = "Kestrel EM Official",
+            Handle = "KestrelEM_Official",
+            Kind = "org",
+        };
+
+        ParseValid($$"""{ "imitatesPersonaId": "{{target}}" }""").ApplyTo(persona);
+        persona.ImitatesPersonaId.Should().Be(target);
+
+        ParseValid("""{ "displayName": "Renamed" }""").ApplyTo(persona);
+        persona.ImitatesPersonaId.Should().Be(target, "absent = unchanged");
+
+        ParseValid("""{ "imitatesPersonaId": null }""").ApplyTo(persona);
+        persona.ImitatesPersonaId.Should().BeNull();
     }
 
     private static PersonaProfilePatch ParseValid(string json)

@@ -85,6 +85,10 @@ describe('ExerciseReportPage', () => {
     expect(RESPONSE_METHOD_NOTE).not.toMatch(/hashtag/i)
 
     expect(screen.getByRole('heading', { name: /Verified vs\. lookalike/ })).toBeInTheDocument()
+    // Story 33: the controller-named pair (no shared prefix) appears, labeled in text.
+    expect(screen.getByText(/@TapWaterTruth ·/)).toBeInTheDocument()
+    expect(screen.getAllByTestId('lookalike-basis').map(n => n.textContent))
+      .toEqual(['Handle match', 'Handle match', 'Named by a controller'])
     expect(screen.getByRole('heading', { name: /Post record/ })).toBeInTheDocument()
     expect(screen.getByTestId('omitted-noise-note')).toHaveTextContent('Background noise (2 posts)')
     expect(screen.getByText('15 Oct 2026 · 09:30')).toBeInTheDocument() // a half-hour group heading
