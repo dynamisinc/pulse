@@ -50,6 +50,9 @@ public class IdempotentMigrationScriptTests
     /// <summary>The last migration before demo-feedback/17 (Wave 4) — the shape UAT holds when the Wave 4 cut deploys.</summary>
     private const string BeforeWave4 = "20261014202342_DemoFeedbackPinsNoiseImport";
 
+    /// <summary>The last migration before identity-auth-roles/16 (A1) — the shape UAT holds when the A1 cut deploys.</summary>
+    private const string BeforeAdminIdentity = "20261015192237_DemoFeedbackWave4RuntimeAndEdits";
+
     private readonly MsSqlContainerFixture _fixture;
 
     public IdempotentMigrationScriptTests(MsSqlContainerFixture fixture)
@@ -177,6 +180,148 @@ public class IdempotentMigrationScriptTests
 
         (await database.AppliedMigrationsAsync()).Should().BeEquivalentTo(database.AllMigrations());
         await AssertWave4SchemaOverLegacyRowsAsync(database, exerciseId, postId);
+    }
+
+    [RequiresDockerFact]
+    public async Task TheDeployScript_BringsUpAdminIdentity_OverLegacyRows()
+    {
+        // identity-auth-roles/16 (M-4, lesson #413): the UAT shape on A1 deploy day — staff users and assignments
+        // (one orgAdmin), participant and pio accounts, live sessions of every kind, a post and lifecycle telemetry —
+        // taken forward by the SCRIPT, batch by batch, as sqlcmd -b runs it. AdminIdentityFoundation's hand-written
+        // backfills name columns its own ALTERs add, so this is the shape that only fails in the script.
+        await using var database = await ScriptDatabase.CreateAsync(_fixture);
+        await database.MigrateToAsync(BeforeAdminIdentity);
+
+        var seed = await LegacyIdentityRows.SeedAsync(database);
+        var script = database.GenerateIdempotentScript();
+
+        await database.ApplyScriptAsync(script);
+
+        (await database.AppliedMigrationsAsync()).Should().BeEquivalentTo(
+            database.AllMigrations(),
+            "the AdminIdentityFoundation batch must compile and run in the script, not just under Migrate()");
+        await AssertAdminIdentityOverLegacyRowsAsync(database, seed);
+
+        // The deploy re-applies the same script on every merge: a second apply must be a no-op.
+        await database.ApplyScriptAsync(script);
+
+        (await database.AppliedMigrationsAsync()).Should().BeEquivalentTo(database.AllMigrations());
+        await AssertAdminIdentityOverLegacyRowsAsync(database, seed);
+    }
+
+    private static async Task AssertAdminIdentityOverLegacyRowsAsync(ScriptDatabase database, LegacyIdentityRows seed)
+    {
+        async Task<int> Count(string sql) => await database.ScalarAsync<int>(sql);
+
+        (await Count($"SELECT COUNT(*) FROM [People] WHERE [Id] IN ('{seed.Controller}', '{seed.Admin}') AND [Email] IS NULL"))
+            .Should().Be(2, "one person per staff user, SAME id, no email until invited");
+        (await Count($"SELECT COUNT(*) FROM [People] WHERE [Id] = '{seed.Admin}' AND [OrgRole] = 'orgAdmin'"))
+            .Should().Be(1, "the orgAdmin assignment moves the org-admin grant onto the person");
+        (await Count($"SELECT COUNT(*) FROM [People] WHERE [Id] = '{seed.Controller}' AND [OrgRole] IS NULL")).Should().Be(1);
+
+        (await Count($"SELECT COUNT(*) FROM [Enrollments] WHERE [Id] = '{seed.ControllerAssignment}' AND [PersonId] = '{seed.Controller}' AND [Role] = 'controller' AND [IsLead] = 1"))
+            .Should().Be(1, "the controller assignment becomes the SAME-id enrollment, and the exercise's only controller leads");
+        (await Count($"SELECT COUNT(*) FROM [Enrollments] WHERE [Id] = '{seed.AdminAssignment}' AND [PersonId] = '{seed.Admin}' AND [Role] = 'planner' AND [IsLead] = 0"))
+            .Should().Be(1, "an orgAdmin assignment becomes a planner enrollment");
+        (await Count("SELECT COUNT(*) FROM sys.tables WHERE [name] = 'StaffAssignments'")).Should().Be(0);
+
+        (await Count($"""
+            SELECT COUNT(*) FROM [Accounts] a JOIN [Enrollments] e ON e.[Id] = a.[EnrollmentId]
+            WHERE a.[Id] = '{seed.ParticipantAccount}' AND e.[Id] = a.[Id] AND e.[Role] = 'participant'
+              AND e.[PersonaId] = '{seed.PersonaId}' AND e.[ExerciseId] = '{seed.Exercise}' AND e.[PersonId] IS NULL
+            """)).Should().Be(1, "the participant account's role and persona move to its same-id enrollment");
+        (await Count($"""
+            SELECT COUNT(*) FROM [Accounts] a JOIN [Enrollments] e ON e.[Id] = a.[EnrollmentId]
+            WHERE a.[Id] = '{seed.PioAccount}' AND e.[Role] = 'pio' AND e.[PersonaId] IS NULL
+            """)).Should().Be(1, "the pio account's role moves to its enrollment");
+        (await Count("SELECT COUNT(*) FROM sys.columns WHERE [object_id] = OBJECT_ID('Accounts') AND [name] IN ('Role', 'PersonaId')"))
+            .Should().Be(0, "the old homes are dropped once the data has moved");
+
+        (await Count($"SELECT COUNT(*) FROM [Sessions] WHERE [Id] = '{seed.ControllerSession}' AND [PersonId] = '{seed.Controller}' AND [RevokedAt] IS NULL"))
+            .Should().Be(1, "an ordinary staff session survives, its person backfilled from the staff user");
+        (await Count($"SELECT COUNT(*) FROM [Sessions] WHERE [Id] = '{seed.AdminSession}' AND [PersonId] = '{seed.Admin}' AND [RevokedAt] IS NOT NULL"))
+            .Should().Be(1, "a live exercise-scoped orgAdmin session is revoked");
+        (await Count($"SELECT COUNT(*) FROM [Sessions] WHERE [Id] = '{seed.ParticipantSession}' AND [RevokedAt] IS NULL"))
+            .Should().Be(1, "a participant session survives");
+        (await Count("""
+            SELECT COUNT(*) FROM sys.check_constraints
+            WHERE [name] = 'CK_Sessions_ExerciseId_OrgAdminOnly' AND [parent_object_id] = OBJECT_ID('Sessions') AND [is_not_trusted] = 0
+            """)).Should().Be(1, "the session-scope CHECK is created, and validated against the legacy rows, by the script");
+
+        (await Count($"SELECT COUNT(*) FROM [Exercises] WHERE [Id] = '{seed.Exercise}' AND [FirstLiveAt] = '{seed.WentLiveAt:O}'"))
+            .Should().Be(1, "FirstLiveAt is backfilled from the first transition to live");
+        (await Count("SELECT COUNT(*) FROM [Organizations] WHERE [Slug] IS NULL OR [Slug] = N''"))
+            .Should().Be(0, "every organization gets a slug");
+        (await Count($"SELECT COUNT(*) FROM [Posts] WHERE [Id] = '{seed.Post}' AND [ExerciseId] = '{seed.Exercise}'"))
+            .Should().Be(1, "an existing post survives untouched");
+        (await Count($"SELECT COUNT(*) FROM [TelemetryEvents] WHERE [ExerciseId] = '{seed.Exercise}'"))
+            .Should().Be(1, "existing telemetry survives untouched");
+    }
+
+    /// <summary>The legacy (pre-A1) rows seeded for the A1 deploy-script test, by raw SQL in the pre-A1 schema.</summary>
+    private sealed record LegacyIdentityRows(
+        Guid Exercise,
+        Guid Controller,
+        Guid Admin,
+        Guid ControllerAssignment,
+        Guid AdminAssignment,
+        Guid PersonaId,
+        Guid ParticipantAccount,
+        Guid PioAccount,
+        Guid ControllerSession,
+        Guid AdminSession,
+        Guid ParticipantSession,
+        Guid Post,
+        DateTimeOffset WentLiveAt)
+    {
+        public static async Task<LegacyIdentityRows> SeedAsync(ScriptDatabase database)
+        {
+            var org = Organization.DefaultOrganizationId;
+            var exercise = await database.InsertTenantExerciseAsync();
+            var controller = Guid.NewGuid();
+            var admin = Guid.NewGuid();
+            var controllerAssignment = Guid.NewGuid();
+            var adminAssignment = Guid.NewGuid();
+            var personaId = Guid.NewGuid();
+            var participantAccount = Guid.NewGuid();
+            var pioAccount = Guid.NewGuid();
+            var controllerSession = Guid.NewGuid();
+            var adminSession = Guid.NewGuid();
+            var participantSession = Guid.NewGuid();
+            var post = Guid.NewGuid();
+            var wentLiveAt = new DateTimeOffset(2026, 10, 1, 13, 0, 0, TimeSpan.Zero);
+            const string wentLivePayload = "{\"from\":\"staged\",\"to\":\"live\"}";
+
+            await database.ExecuteAsync($"""
+                INSERT INTO [StaffUsers] ([Id], [OrganizationId], [ExternalSubject], [DisplayName], [CreatedAt]) VALUES
+                    ('{controller}', '{org}', N'idp|{controller:N}', N'Legacy Controller', SYSDATETIMEOFFSET()),
+                    ('{admin}', '{org}', N'idp|{admin:N}', N'Legacy Admin', SYSDATETIMEOFFSET());
+                INSERT INTO [StaffAssignments] ([Id], [StaffUserId], [ExerciseId], [Role], [CreatedAt]) VALUES
+                    ('{controllerAssignment}', '{controller}', '{exercise}', N'controller', SYSDATETIMEOFFSET()),
+                    ('{adminAssignment}', '{admin}', '{exercise}', N'orgAdmin', SYSDATETIMEOFFSET());
+                INSERT INTO [Accounts] ([Id], [ExerciseId], [Username], [DisplayName], [Role], [PersonaId], [CreatedAt], [FailedLoginCount]) VALUES
+                    ('{participantAccount}', '{exercise}', N'user_{participantAccount:N}', N'Legacy Participant', N'participant', '{personaId}', SYSDATETIMEOFFSET(), 0),
+                    ('{pioAccount}', '{exercise}', N'user_{pioAccount:N}', N'Legacy PIO', N'pio', NULL, SYSDATETIMEOFFSET(), 0);
+                INSERT INTO [Sessions] ([Id], [TokenHash], [Kind], [ExerciseId], [PrincipalId], [StaffUserId], [AccountId], [PersonaId],
+                                        [Role], [ActingHumanId], [IsReadOnly], [IssuedAt], [ExpiresAt], [RefreshExpiresAt]) VALUES
+                    ('{controllerSession}', N'hash-{controllerSession:N}', N'staff', '{exercise}', N'{controller}', '{controller}', NULL, NULL,
+                     N'controller', N'{controller}', 0, SYSDATETIMEOFFSET(), DATEADD(hour, 1, SYSDATETIMEOFFSET()), DATEADD(hour, 8, SYSDATETIMEOFFSET())),
+                    ('{adminSession}', N'hash-{adminSession:N}', N'staff', '{exercise}', N'{admin}', '{admin}', NULL, NULL,
+                     N'orgAdmin', N'{admin}', 0, SYSDATETIMEOFFSET(), DATEADD(hour, 1, SYSDATETIMEOFFSET()), DATEADD(hour, 8, SYSDATETIMEOFFSET())),
+                    ('{participantSession}', N'hash-{participantSession:N}', N'participant', '{exercise}', N'{participantAccount}', NULL, '{participantAccount}', '{personaId}',
+                     N'participant', N'{participantAccount}', 0, SYSDATETIMEOFFSET(), DATEADD(hour, 1, SYSDATETIMEOFFSET()), DATEADD(hour, 8, SYSDATETIMEOFFSET()));
+                INSERT INTO [Posts] ([Id], [ExerciseId], [AuthorPersonaId], [Body], [CreatedScenarioTime], [Origin], [ActingHumanId], [CreatedWallClock])
+                VALUES ('{post}', '{exercise}', '{personaId}', N'Legacy post', '2033-09-04T13:00:00+00:00', N'participant', N'human-legacy', SYSDATETIMEOFFSET());
+                INSERT INTO [TelemetryEvents] ([EventId], [SchemaVersion], [ExerciseId], [EventType], [Channel], [Actor_Kind],
+                                               [WallClockTime], [ScenarioTime], [TimeZone], [Payload], [EmittedAt])
+                VALUES (N'{Guid.NewGuid()}', N'v0', '{exercise}', N'exercise.lifecycle.transitioned', N'system', N'system',
+                        '{wentLiveAt:O}', '{wentLiveAt:O}', N'UTC', N'{wentLivePayload}', '{wentLiveAt:O}');
+                """);
+
+            return new LegacyIdentityRows(
+                exercise, controller, admin, controllerAssignment, adminAssignment, personaId, participantAccount, pioAccount,
+                controllerSession, adminSession, participantSession, post, wentLiveAt);
+        }
     }
 
     private static async Task AssertWave4SchemaOverLegacyRowsAsync(ScriptDatabase database, Guid exerciseId, Guid postId)
@@ -408,6 +553,9 @@ public class IdempotentMigrationScriptTests
                 """);
             return id;
         }
+
+        /// <summary>Runs a non-query — raw SQL, independent of the entity model (used to seed legacy rows).</summary>
+        public Task ExecuteAsync(string sql) => ExecuteNonQueryAsync(ConnectionString, sql);
 
         /// <summary>Runs a scalar query — raw SQL, independent of the entity model.</summary>
         public async Task<T> ScalarAsync<T>(string sql)

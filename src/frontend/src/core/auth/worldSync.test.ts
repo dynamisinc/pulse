@@ -6,7 +6,7 @@
  * clear their own store only, and go to their sign-in page. BroadcastChannel is mocked.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { clearTokens, getAccessToken, setTokens } from './tokenStore'
+import { clearActiveTokens, clearTokens, getAccessToken, setTokens } from './tokenStore'
 import {
   WORLD_CHANNEL_NAME,
   TAB_ID,
@@ -101,6 +101,28 @@ describe('installWorldSync receiver', () => {
     channel.deliver({ world: 'staff', at: new Date().toISOString() })
 
     expect(postLogout).toHaveBeenCalledWith('p-tok')
+    expect(navigate).toHaveBeenCalledWith('/login')
+  })
+
+  it('a staff tab whose tokens were cleared (sticky-empty) ignores a participant sign-in (W-2)', () => {
+    setTokens({ token: 'staff-tok', refreshToken: 'staff-ref' })
+    clearActiveTokens()
+    const { channel, postLogout, navigate } = setup()
+
+    channel.deliver({ world: 'participant', at: new Date().toISOString() })
+
+    expect(postLogout).not.toHaveBeenCalled()
+    expect(navigate).not.toHaveBeenCalled()
+  })
+
+  it('does not call the logout poster when there is no access token (S-4), but still signs out', () => {
+    localStorage.setItem('pulse.auth.refreshToken', 'only-refresh')
+    const { channel, postLogout, navigate } = setup()
+
+    channel.deliver({ world: 'staff', at: new Date().toISOString() })
+
+    expect(postLogout).not.toHaveBeenCalled()
+    expect(localStorage.getItem('pulse.auth.refreshToken')).toBeNull()
     expect(navigate).toHaveBeenCalledWith('/login')
   })
 

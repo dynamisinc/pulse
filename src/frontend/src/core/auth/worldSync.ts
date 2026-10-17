@@ -11,9 +11,20 @@
  * world is announced, this tab (if it holds a session) POSTs `/api/auth/logout` with its own
  * token, clears ITS OWN token store only, and goes to its world's sign-in page.
  *
+ * EXCEPTION, STAFF SIGN-IN OVER A PARTICIPANT (W-1). The signing-in staff tab's `setTokens` removes
+ * the shared `localStorage` pair BEFORE it announces, so participant tabs find no session
+ * (`currentWorld() === null`) and return early: they never POST a logout. Instead the SIGNING-IN
+ * tab POSTs `/auth/logout` with the outgoing participant access token itself
+ * (`tokenStore.postDisplacedLogout`). Participant tabs still hear the signal but hold nothing, so
+ * the server-side logout happens exactly once. The other direction (participant sign-in over a
+ * staff tab) works as described above, because staff tokens live in that tab's own store.
+ *
  * WHICH WORLD AM I. A page whose session lives in `sessionStorage` is a staff page
  * (`isSessionScoped()`); one holding a persistent (`localStorage`) pair is a participant page.
- * A tab with no session has nothing to sign out and ignores the signal. Same-world signals are
+ * A tab with no session has nothing to sign out and ignores the signal. That includes a staff tab
+ * whose tokens were cleared (the sticky record keeps `isSessionScoped()` true): with no access and
+ * no refresh token it ignores the signal, so half-typed credentials on /staff/login survive (W-2).
+ * Same-world signals are
  * ignored (`crossTabSessionSync` already handles participant-to-participant).
  *
  * ONLY OWN STORE. It uses `clearActiveTokens`, never `clearTokens`: the signing-in tab has just
@@ -35,6 +46,7 @@ import {
 import {
   clearActiveTokens,
   getAccessToken,
+  getRefreshToken,
   isPersistentSession,
   isSessionScoped,
 } from './tokenStore'
@@ -56,7 +68,7 @@ export interface WorldSyncOptions {
   readonly createChannel?: () => WorldChannelLike | null
   readonly storageTarget?: Pick<Window, 'addEventListener' | 'removeEventListener'> | null
   /** Best-effort server logout with the captured token. */
-  readonly postLogout?: (token: string | null) => Promise<void>
+  readonly postLogout?: (token: string) => Promise<void>
   /** Navigate (hard) to the given sign-in path. */
   readonly navigate?: (path: string) => void
 }
@@ -68,12 +80,12 @@ export function currentWorld(): World | null {
   return null
 }
 
-async function defaultPostLogout(token: string | null): Promise<void> {
+async function defaultPostLogout(token: string): Promise<void> {
   const { api } = await import('../services/api')
   await api.post(
     '/auth/logout',
     undefined,
-    token ? { headers: { Authorization: `Bearer ${token}` } } : undefined,
+    { headers: { Authorization: `Bearer ${token}` } },
   )
 }
 
@@ -96,9 +108,12 @@ export function installWorldSync(options: WorldSyncOptions = {}): () => void {
     if (mine === null || mine === signal.world) return
 
     const token = getAccessToken()
+    // A cleared-but-still-"staff" tab (sticky record) holds nothing to sign out (W-2).
+    if (token === null && getRefreshToken() === null) return
     clearActiveTokens()
     // Best effort: the local sign-out has already happened whatever the network does.
-    void postLogout(token).catch(() => undefined)
+    // No token to present (refresh-only pair): nothing to POST (S-4).
+    if (token !== null) void postLogout(token).catch(() => undefined)
     navigate(WORLD_SIGN_IN_PATHS[mine])
   }
 

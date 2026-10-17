@@ -102,6 +102,78 @@ public sealed class AdminIdentityFoundationMigrationTests
             RefreshOutcome.Invalid, "and the old refresh token cannot mint a replacement (POST /api/session/refresh → 401)");
     }
 
+    [RequiresDockerFact]
+    public async Task Up_RevokesLiveParticipantSessions_MintedFromLegacyStaffRoleAccounts_AndLeavesParticipantsLive()
+    {
+        // L-6: a participant-kind session minted before the deploy from an account carrying a STAFF role fails the
+        // client's world check after A1; the migration revokes it like the retired orgAdmin sessions.
+        await using var db = await LegacyDatabase.CreateAsync(_fixture);
+        await db.MigrateToAsync(PreviousMigration);
+        var exercise = await db.InsertExerciseAsync("live");
+        var staffSessions = new List<Guid>();
+        foreach (var role in new[] { "planner", "controller", "evaluator", "orgAdmin" })
+        {
+            var account = await db.InsertAccountAsync(exercise, role, personaId: null);
+            staffSessions.Add(await db.InsertParticipantSessionAsync(account, exercise, role));
+        }
+
+        var participantAccount = await db.InsertAccountAsync(exercise, "participant", Guid.NewGuid());
+        var participantSession = await db.InsertParticipantSessionAsync(participantAccount, exercise, "participant");
+        var pioAccount = await db.InsertAccountAsync(exercise, "pio", personaId: null);
+        var pioSession = await db.InsertParticipantSessionAsync(pioAccount, exercise, "pio");
+
+        await db.MigrateToAsync(MigrationUnderTest);
+
+        foreach (var id in staffSessions)
+        {
+            (await db.ScalarAsync<int>($"SELECT COUNT(*) FROM [Sessions] WHERE [Id] = '{id}' AND [RevokedAt] IS NOT NULL"))
+                .Should().Be(1, "a live participant session minted from a staff-role account is revoked by the migration");
+        }
+
+        (await db.ScalarAsync<int>($"SELECT COUNT(*) FROM [Sessions] WHERE [Id] IN ('{participantSession}', '{pioSession}') AND [RevokedAt] IS NULL"))
+            .Should().Be(2, "participant-world sessions (participant, pio) are untouched");
+    }
+
+    [RequiresDockerFact]
+    public async Task Up_AddsTheSessionScopeCheck_ThatHoldsOverEveryLegacyRow_AndRejectsANullExerciseNonOrgAdminRow()
+    {
+        // M-6: CK_Sessions_ExerciseId_OrgAdminOnly — "ExerciseId IS NOT NULL OR Role = 'orgAdmin'", one direction only.
+        await using var db = await LegacyDatabase.CreateAsync(_fixture);
+        await db.MigrateToAsync(PreviousMigration);
+        (await db.ScalarAsync<bool>("SELECT c.[is_nullable] FROM sys.columns c WHERE c.[object_id] = OBJECT_ID('Sessions') AND c.[name] = 'ExerciseId'"))
+            .Should().BeFalse("before A1 Sessions.ExerciseId is NOT NULL, so no legacy row can carry a null exercise");
+
+        var exercise = await db.InsertExerciseAsync("live");
+        var admin = await db.InsertStaffUserAsync("Admin");
+        var controller = await db.InsertStaffUserAsync("Controller");
+        await db.InsertAssignmentAsync(admin, exercise, "orgAdmin");
+        await db.InsertAssignmentAsync(controller, exercise, "controller");
+        var legacyOrgAdminSession = await db.InsertStaffSessionAsync(admin, exercise, "orgAdmin");
+        await db.InsertStaffSessionAsync(controller, exercise, "controller");
+        var account = await db.InsertAccountAsync(exercise, "participant", Guid.NewGuid());
+        await db.InsertParticipantSessionAsync(account, exercise, "participant");
+
+        await db.MigrateToAsync(MigrationUnderTest);
+
+        (await db.ScalarAsync<int>("""
+            SELECT COUNT(*) FROM sys.check_constraints
+            WHERE [name] = 'CK_Sessions_ExerciseId_OrgAdminOnly' AND [parent_object_id] = OBJECT_ID('Sessions')
+              AND [is_not_trusted] = 0 AND [is_disabled] = 0
+            """)).Should().Be(1, "the constraint exists, enabled, and was validated WITH CHECK against every existing row");
+        (await db.ScalarAsync<int>("SELECT COUNT(*) FROM [Sessions] WHERE NOT ([ExerciseId] IS NOT NULL OR [Role] = 'orgAdmin')"))
+            .Should().Be(0, "every legacy row the migration can see satisfies the constraint");
+        (await db.ScalarAsync<int>($"SELECT COUNT(*) FROM [Sessions] WHERE [Id] = '{legacyOrgAdminSession}' AND [ExerciseId] = '{exercise}' AND [RevokedAt] IS NOT NULL"))
+            .Should().Be(1, "a legacy revoked orgAdmin row keeps its exercise — the reverse direction is deliberately not constrained");
+
+        var reject = async () => await db.InsertSessionRowAsync(exerciseId: null, kind: "staff", role: "controller");
+        (await reject.Should().ThrowAsync<SqlException>("a null-exercise session is an orgAdmin-only shape"))
+            .Which.Number.Should().Be(547, "547 is a CHECK constraint violation");
+
+        var orgScope = await db.InsertSessionRowAsync(exerciseId: null, kind: "staff", role: "orgAdmin");
+        (await db.ScalarAsync<int>($"SELECT COUNT(*) FROM [Sessions] WHERE [Id] = '{orgScope}' AND [ExerciseId] IS NULL"))
+            .Should().Be(1, "an org-scope orgAdmin session is the one valid null-exercise row");
+    }
+
     private static SessionService SessionServiceOver(PulseDbContext context) => new(
         context,
         Microsoft.Extensions.Options.Options.Create(new SessionOptions()),
@@ -370,6 +442,33 @@ public sealed class AdminIdentityFoundationMigrationTests
                 VALUES ('{id}', N'{tokenHash}', {refreshHash}, N'staff', '{exerciseId}', N'{staffUserId}', '{staffUserId}',
                         N'{role}', N'{staffUserId}', 0, SYSDATETIMEOFFSET(), DATEADD(hour, 1, SYSDATETIMEOFFSET()),
                         DATEADD(hour, 8, SYSDATETIMEOFFSET()));
+                """);
+            return id;
+        }
+
+        public async Task<Guid> InsertParticipantSessionAsync(Guid accountId, Guid exerciseId, string role)
+        {
+            var id = Guid.NewGuid();
+            await ExecuteAsync(ConnectionString, $"""
+                INSERT INTO [Sessions] ([Id], [TokenHash], [Kind], [ExerciseId], [PrincipalId], [AccountId],
+                                        [Role], [ActingHumanId], [IsReadOnly], [IssuedAt], [ExpiresAt], [RefreshExpiresAt])
+                VALUES ('{id}', N'hash-{id:N}', N'participant', '{exerciseId}', N'{accountId}', '{accountId}',
+                        N'{role}', N'{accountId}', 0, SYSDATETIMEOFFSET(), DATEADD(hour, 1, SYSDATETIMEOFFSET()),
+                        DATEADD(hour, 8, SYSDATETIMEOFFSET()));
+                """);
+            return id;
+        }
+
+        /// <summary>A raw post-A1 session row (nullable exercise), for probing the Sessions CHECK.</summary>
+        public async Task<Guid> InsertSessionRowAsync(Guid? exerciseId, string kind, string role)
+        {
+            var id = Guid.NewGuid();
+            var exercise = exerciseId is { } e ? $"'{e}'" : "NULL";
+            await ExecuteAsync(ConnectionString, $"""
+                INSERT INTO [Sessions] ([Id], [TokenHash], [Kind], [ExerciseId], [PrincipalId], [Role], [ActingHumanId],
+                                        [IsReadOnly], [IssuedAt], [ExpiresAt])
+                VALUES ('{id}', N'hash-{id:N}', N'{kind}', {exercise}, N'{id}', N'{role}', N'{id}', 0,
+                        SYSDATETIMEOFFSET(), DATEADD(hour, 1, SYSDATETIMEOFFSET()));
                 """);
             return id;
         }

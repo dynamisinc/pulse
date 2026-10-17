@@ -62,8 +62,10 @@ interface StaffAssignmentBody {
   readonly exerciseId: string
   readonly exerciseName: string
   readonly role: string
-  readonly personId: string
-  readonly isLead: boolean
+  /** Absent on the pre-A1 wire shape (frontend deploys before the backend). */
+  readonly personId?: string
+  /** Absent on the pre-A1 wire shape; defaults to `false`. */
+  readonly isLead?: boolean
 }
 
 /**
@@ -174,8 +176,10 @@ function isAssignmentBody(value: unknown): value is StaffAssignmentBody {
     typeof body.exerciseId === 'string' && body.exerciseId.length > 0 &&
     typeof body.exerciseName === 'string' && body.exerciseName.length > 0 &&
     typeof body.role === 'string' && body.role.length > 0 &&
-    typeof body.personId === 'string' && body.personId.length > 0 &&
-    typeof body.isLead === 'boolean'
+    // Additive widening (docs/OPERATE.md "Frontend-before-backend"): the pre-A1 body has no
+    // personId/isLead, so ABSENT is accepted; a PRESENT-but-wrong value still rejects.
+    (body.personId === undefined || (typeof body.personId === 'string' && body.personId.length > 0)) &&
+    (body.isLead === undefined || typeof body.isLead === 'boolean')
   )
 }
 
@@ -191,7 +195,11 @@ function isAssignmentListBody(value: unknown): value is StaffAssignmentBody[] {
  * `exerciseContextResolver.ts`'s `isExerciseStatus`).
  */
 function toAssignment(body: StaffAssignmentBody): Enrollment {
-  if (!isExerciseRole(body.role)) {
+  // DEPLOY-WINDOW BRIDGE: the pre-A1 backend can still return `orgAdmin` assignment rows. A1
+  // migrates those people to `planner` (the old backend still authorizes them server-side), so
+  // map here and deploy order doesn't matter.
+  const role = body.role === 'orgAdmin' ? 'planner' : body.role
+  if (!isExerciseRole(role)) {
     throw new StaffAssignmentError(
       `staffAssignmentsService: unknown role "${body.role}" for exercise ${body.exerciseId}`,
     )
@@ -199,9 +207,12 @@ function toAssignment(body: StaffAssignmentBody): Enrollment {
   return {
     exerciseId: body.exerciseId,
     exerciseName: body.exerciseName,
-    role: body.role,
-    personId: body.personId,
-    isLead: body.isLead,
+    role,
+    // `Enrollment.personId` is a frozen non-null string, so an absent (pre-A1) personId falls back
+    // to '' ("no person known yet"). Nothing reads it for authorization; the server remains the
+    // authority, and '' can never match a real person id.
+    personId: body.personId ?? '',
+    isLead: body.isLead ?? false,
   }
 }
 

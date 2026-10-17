@@ -1,4 +1,4 @@
-﻿﻿using System;
+﻿using System;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
@@ -39,7 +39,9 @@ namespace Pulse.WebApi.Data.Migrations
     /// has any: the earliest-created, tiebreak the lowest id. <c>Sessions.PersonId</c> = <c>StaffUserId</c> for staff sessions.
     /// Live sessions carrying the retired exercise role <c>orgAdmin</c> are REVOKED: the grant they were minted from
     /// changed (§1.1 "revoking a grant revokes the sessions built on it"), and <c>orgAdmin</c> with an exercise
-    /// scope is no longer a valid session shape.
+    /// scope is no longer a valid session shape. So are live <c>participant</c>-kind sessions minted from a legacy account
+    /// that carried a staff role (L-6). Last, <c>CK_Sessions_ExerciseId_OrgAdminOnly</c> makes "no exercise" an orgAdmin-only
+    /// session shape at the database (M-6).
     /// </para>
     /// <para>
     /// <b>Every hand-written statement is wrapped in <c>EXEC(N'…')</c> — load-bearing, do not unwrap</b> (OPERATE.md;
@@ -413,6 +415,20 @@ namespace Pulse.WebApi.Data.Migrations
                 UPDATE [Sessions] SET [RevokedAt] = SYSDATETIMEOFFSET() WHERE [Role] = 'orgAdmin' AND [RevokedAt] IS NULL;
                 """));
 
+            // L-6: a live participant-kind session minted from a legacy account carrying a STAFF role (planner, controller,
+            // evaluator, orgAdmin) is revoked too: the participant world no longer signs such an account in, and the
+            // session's staff role fails the client's world check. Matched on the session's own role and on the account's
+            // (now enrollment-held) role, so either record of the staff grant revokes it.
+            migrationBuilder.Sql(Exec("""
+                UPDATE s SET [RevokedAt] = SYSDATETIMEOFFSET()
+                FROM [Sessions] s
+                WHERE s.[Kind] = 'participant'
+                  AND s.[RevokedAt] IS NULL
+                  AND (s.[Role] IN ('planner', 'controller', 'evaluator', 'orgAdmin')
+                       OR EXISTS (SELECT 1 FROM [Accounts] a JOIN [Enrollments] e ON e.[Id] = a.[EnrollmentId]
+                                  WHERE a.[Id] = s.[AccountId] AND e.[Role] IN ('planner', 'controller', 'evaluator')));
+                """));
+
             migrationBuilder.CreateIndex(
                 name: "IX_Sessions_PersonId",
                 table: "Sessions",
@@ -495,11 +511,26 @@ namespace Pulse.WebApi.Data.Migrations
                 name: "IX_OrgAuditEvents_OrganizationId_OccurredAt",
                 table: "OrgAuditEvents",
                 columns: OrgAuditKeyColumns);
+
+            // ---------------------------------------------------------------------------------------------------
+            // 7. M-6: an org-scope session (no exercise) is ONLY an orgAdmin session. Added last, after every backfill:
+            //    every legacy row has an exercise (the column was NOT NULL), so the WITH CHECK validation always passes.
+            //    One direction only, deliberately: legacy REVOKED orgAdmin rows keep their exercise, so "orgAdmin => no
+            //    exercise" is enforced by the session issuer, not here. Mirrored in the model (PulseDbContext).
+            // ---------------------------------------------------------------------------------------------------
+            migrationBuilder.Sql(Exec("""
+                ALTER TABLE [Sessions] ADD CONSTRAINT [CK_Sessions_ExerciseId_OrgAdminOnly] CHECK ([ExerciseId] IS NOT NULL OR [Role] = 'orgAdmin');
+                """));
         }
 
         /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder)
         {
+            // 7. The M-6 session-scope CHECK goes first, before any Sessions column change.
+            migrationBuilder.Sql(Exec("""
+                ALTER TABLE [Sessions] DROP CONSTRAINT IF EXISTS [CK_Sessions_ExerciseId_OrgAdminOnly];
+                """));
+
             // 6. The A1-only tables.
             migrationBuilder.DropTable(
                 name: "OrgAuditEvents");

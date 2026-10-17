@@ -75,6 +75,52 @@ describe('resolveSession', () => {
     await expect(resolveSession()).rejects.toThrow()
   })
 
+  it('accepts main\'s pre-A1 SessionDto (7 keys) with defaults', async () => {
+    mockGet.mockResolvedValue({
+      data: {
+        exerciseId: 'ex-0042',
+        accountId: 'acct-123',
+        role: 'controller',
+        personaId: 'persona-x',
+        actingHumanId: 'human-1',
+        isReadOnly: false,
+        expiresAt: FUTURE,
+      },
+    } as Awaited<ReturnType<typeof api.get>>)
+    const s = await resolveSession()
+    expect(s).toMatchObject({
+      scope: 'exercise', exerciseId: 'ex-0042', role: 'controller',
+      world: 'staff', isLead: false, personId: null,
+    })
+  })
+
+  it('derives participant world from a participant role when world is absent', async () => {
+    mockGet.mockResolvedValue(validBody({
+      world: undefined, scope: undefined, isLead: undefined, personId: undefined,
+    }))
+    const s = await resolveSession()
+    expect(s).toMatchObject({ world: 'participant', scope: 'exercise', isLead: false, personId: null })
+  })
+
+  it('still requires a string exerciseId when scope is absent', async () => {
+    mockGet.mockResolvedValue(validBody({ scope: undefined, exerciseId: null }))
+    await expect(resolveSession()).rejects.toThrow()
+  })
+
+  it('rejects present-but-wrong-typed new fields', async () => {
+    for (const o of [{ isLead: 'yes' }, { personId: 7 }, { world: 'other' }, { scope: 'galaxy' }]) {
+      mockGet.mockResolvedValue(validBody(o))
+      await expect(resolveSession()).rejects.toThrow()
+    }
+  })
+
+  it('rejects a present world that contradicts the role (S-1)', async () => {
+    mockGet.mockResolvedValue(validBody({ world: 'staff', role: 'participant' }))
+    await expect(resolveSession()).rejects.toThrow()
+    mockGet.mockResolvedValue(validBody({ world: 'participant', role: 'controller' }))
+    await expect(resolveSession()).rejects.toThrow()
+  })
+
   it('fails closed when the role is outside the known vocabulary', async () => {
     mockGet.mockResolvedValue(validBody({ role: 'superuser' }))
     await expect(resolveSession()).rejects.toThrow()
@@ -91,6 +137,29 @@ describe('resolveSession', () => {
     expect(session.role).toBe('orgAdmin')
     expect(session.personId).toBe('person-9')
     expect(session.world).toBe('staff')
+  })
+
+  // main's exact pre-A1 SessionDto: no scope/world/isLead/personId.
+  const LEGACY_ORG_ADMIN = {
+    exerciseId: 'ex-0042', accountId: 'acct-123', role: 'orgAdmin', personaId: undefined,
+    actingHumanId: 'human-1', isReadOnly: false, expiresAt: FUTURE,
+  }
+  function legacyBody(extra: Record<string, unknown> = {}) {
+    return { data: { ...LEGACY_ORG_ADMIN, ...extra } } as Awaited<ReturnType<typeof api.get>>
+  }
+
+  it('bridges a legacy (scope-absent) orgAdmin exercise session to planner', async () => {
+    mockGet.mockResolvedValue(legacyBody())
+    const session = await resolveSession()
+    expect(session).toMatchObject({
+      scope: 'exercise', role: 'planner', world: 'staff', exerciseId: 'ex-0042',
+      isLead: false, personId: null,
+    })
+  })
+
+  it('rejects the same orgAdmin body once scope: exercise is present (A1 contract)', async () => {
+    mockGet.mockResolvedValue(legacyBody({ scope: 'exercise' }))
+    await expect(resolveSession()).rejects.toThrow()
   })
 
   it('resolves a staff exercise session carrying isLead and personId', async () => {

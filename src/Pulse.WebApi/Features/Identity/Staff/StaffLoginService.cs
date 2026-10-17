@@ -189,7 +189,7 @@ public sealed class StaffLoginService
                 {
                     Id = newStaffUserId,
                     OrganizationId = exercise.OrganizationId,
-                    DisplayName = identity.DisplayName,
+                    DisplayName = Person.BoundDisplayName(identity.DisplayName),
                     CreatedAt = now,
                 },
             };

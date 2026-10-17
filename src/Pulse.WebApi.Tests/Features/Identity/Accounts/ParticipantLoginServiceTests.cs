@@ -247,6 +247,28 @@ public sealed class ParticipantLoginServiceTests
     }
 
     [RequiresDockerFact]
+    public async Task Login_LegacyStaffRoleAccount_WithTheRightPassword_IsRefusedExactlyLikeAWrongPassword()
+    {
+        // A1b Gate-1 S-A: AdminIdentityFoundation carries legacy staff-role accounts across as account-backed enrollments.
+        // This path mints participant-world sessions only (XC-002), so such an account gets the uniform 401 rather than
+        // a staff-role participant session the frontend would refuse after a "successful" sign-in.
+        var exercise = await SeedExerciseAsync(scenarioTime: null);
+        await SeedAccountAsync(exercise.Id, "legacy-controller", "right-password", role: "controller");
+
+        var issuer = new RecordingSessionIssuer();
+        ParticipantLoginResult result;
+        await using (var context = _fixture.CreateContext(new ExerciseContext { CurrentExerciseId = exercise.Id }))
+        {
+            result = await ServiceFor(context, exercise.Id, issuer)
+                .LoginAsync(new ParticipantLoginRequest { Username = "legacy-controller", Password = "right-password" });
+        }
+
+        result.Outcome.Should().Be(ParticipantLoginOutcome.RejectedCredential);
+        issuer.IssueCount.Should().Be(0, "a staff-role account never gets a participant-world session");
+        (await ReadLoginEventsAsync(exercise.Id)).Single().Payload.Should().Be(PasswordFailurePayload);
+    }
+
+    [RequiresDockerFact]
     public async Task Login_UnresolvedScope_FailsClosed_NoSession_NoTelemetry()
     {
         var exercise = await SeedExerciseAsync(scenarioTime: null);

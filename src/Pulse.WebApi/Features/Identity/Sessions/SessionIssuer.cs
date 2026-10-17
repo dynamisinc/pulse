@@ -108,6 +108,7 @@ public sealed partial class SessionIssuer : ISessionIssuer
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
+        EnsureValidScope(request);
 
         // Generate opaque references; only their hashes are persisted (the raw tokens are returned once).
         var sessionToken = SessionTokens.Generate();
@@ -185,6 +186,33 @@ public sealed partial class SessionIssuer : ISessionIssuer
             now,
             _dayRolloverHour,
             _logger);
+    }
+
+    /// <summary>
+    /// The session-scope invariants (M-6), checked before anything is generated or persisted: an org-scope session (no
+    /// exercise) is ONLY a <c>staff</c> session with role <c>orgAdmin</c>, and role <c>orgAdmin</c> is ONLY ever issued
+    /// org-scoped (it is <see cref="Person.OrgRole"/>, no longer an exercise role). The database backs the first half
+    /// with <c>CK_Sessions_ExerciseId_OrgAdminOnly</c>; the second is enforced here only, because legacy revoked
+    /// <c>orgAdmin</c> rows still carry an exercise. A violation is a caller bug, never a user error.
+    /// </summary>
+    /// <param name="request">The issue request.</param>
+    /// <exception cref="InvalidOperationException">The request breaks either invariant.</exception>
+    private static void EnsureValidScope(SessionIssueRequest request)
+    {
+        var isOrgAdmin = string.Equals(request.Role, Person.OrgAdminRole, StringComparison.OrdinalIgnoreCase);
+
+        if (request.ExerciseId is null
+            && !(isOrgAdmin && string.Equals(request.Kind, StaffKind, StringComparison.Ordinal)))
+        {
+            throw new InvalidOperationException(
+                "A session without an exercise (org scope) may only be issued as a staff session with role orgAdmin.");
+        }
+
+        if (isOrgAdmin && request.ExerciseId is not null)
+        {
+            throw new InvalidOperationException(
+                "A session with role orgAdmin may only be issued org-scoped (no exercise); orgAdmin is not an exercise role.");
+        }
     }
 
     /// <summary>The world a session kind belongs to: <c>staff</c> for staff sessions, <c>participant</c> otherwise.</summary>

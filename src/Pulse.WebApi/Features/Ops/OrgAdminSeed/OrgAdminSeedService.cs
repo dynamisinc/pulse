@@ -230,7 +230,7 @@ public sealed partial class OrgAdminSeedService
                 {
                     Id = newStaffUserId,
                     OrganizationId = organizationId,
-                    DisplayName = credential.DisplayName,
+                    DisplayName = Person.BoundDisplayName(credential.DisplayName),
                     CreatedAt = now,
                 },
             };
