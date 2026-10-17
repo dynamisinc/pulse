@@ -87,6 +87,13 @@ convenience only: the server is the authority.
       or persona in the allow lists. Lowering (off/review, lower caps, removed entries) is open to any controller. The lead
       reads `Enrollment.IsLead` live, so a kill-switch demotion between the snapshot and the set turns a non-lead no-op into a
       refused raise (race tests below).
+- [x] **Lead-gated raises are judged at write time.** Swamped-mode on, autonomy-default, tier-policy and the ambient
+      policy re-read the lead flag when the write is applied (not from an earlier snapshot), so a demotion between the
+      read and the write refuses the raise. Pause-tier now attributes to the session person, like the other engine routes.
+- [x] **WR-005: Rename/Archive follow the per-row `canManage`.** `GET /api/org/exercises` sends `canManage` on every
+      row (an org admin any row; a planner only the exercises they plan). The client shows Rename/Archive only when
+      `canManage` and the role gate both hold; a row missing the field (older backend) falls back to org admin only.
+- [x] **WR-005 follow-ups:** WR-002 (planner chip), WR-004 (swamped-off confirm focus), SG-004 (`scheduled` is build).
 - [x] **WR-2 session attribution.** The acting human recorded for engine review actions (approve, veto, kill switch,
       autonomy default) is the **session's** person, never a body `actingHumanId`. A spoofed body value is not recorded.
 - [x] **UI mirrors the ambient gate** (`AmbientChatterSection`). A non-lead controller cannot choose Autonomous (from a
@@ -139,3 +146,14 @@ All under `src/Pulse.WebApi.Tests/Features/Identity/RoleMatrix/` unless noted.
 Frontend (under `src/frontend/src/features/`):
 - [`AmbientChatterSection.leadGate.test.tsx`](../../../src/frontend/src/features/controller/engine/components/AmbientChatterSection.leadGate.test.tsx): non-lead (Autonomous disabled with the reason, lowering save allowed, raising edit while autonomous disables Save, a 403 shows the message inline); lead (all enabled)
 - [`plannerConsole.test.tsx`](../../../src/frontend/src/features/controller/access/plannerConsole.test.tsx) and `staff/staffRouteRegistry.test.tsx`: the planner enters the console (`7a842db6`, `5eecb754`)
+- `EngineSettingsServiceTests.AutonomyDefault_TheRace_*`, `EngineSettingsServiceTests.TierPolicy_TheRace_*` (write-time lead read)
+- `EngineSettingsServiceTests.*_ANonLeadRaise_Is403_AndChangesNothing_WhileANonLeadLowerSucceeds`
+- `LeadControllerGateTests.ANonLead_TurningSwampedModeOn_WhileItIsAlreadyOn_IsStill403`
+- `SwampedModeLeadLossTests.TheHeal_*` (2)
+- `EngineReviewEndpointsTests.EveryRoute_ASpoofedBodyActingHumanId_IsNotRecorded_TheSessionPersonIs`
+- `PauseTierEndpointsTests.Post_ASpoofedBodyActingHumanId_IsNotRecorded_TheSessionPersonIs`
+- `OrgRowActionRoleTests.OrgExerciseList_CanManage_FollowsTheRenameArchiveRule` (WR-005 backend)
+- Frontend: WR-002 in [`plannerConsole.test.tsx`](../../../src/frontend/src/features/controller/access/plannerConsole.test.tsx) (planner chip, shortcut strip);
+  WR-004 in [`SwampedModeToggle.test.tsx`](../../../src/frontend/src/features/controller/engine/components/SwampedModeToggle.test.tsx) (confirm focus, `aria-expanded`, SG-005 note);
+  SG-004 in [`rolePermissions.test.tsx`](../../../src/frontend/src/core/auth/rolePermissions.test.tsx) (`scheduled` is build);
+  WR-005 in [`ExerciseRowActions.test.tsx`](../../../src/frontend/src/features/exerciseLifecycleAdmin/components/ExerciseRowActions.test.tsx) and `services/orgExercisesService.test.ts` (per-row `canManage`, absent-field fallback)
