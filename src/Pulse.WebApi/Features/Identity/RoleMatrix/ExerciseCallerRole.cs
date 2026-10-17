@@ -120,6 +120,42 @@ public sealed class ExerciseCallerRole
     }
 
     /// <summary>
+    /// The post-write lead re-check (Tier-2 M-1): whether <paramref name="personId"/> holds the LEAD controller enrollment
+    /// on <paramref name="exerciseId"/> right now — an enrollment flagged lead AND in the <c>controller</c> role, the same
+    /// rule as <see cref="IsLead"/>. Read live (never the per-request memo <see cref="ResolveAsync"/> keeps), so a raise
+    /// gated on a lead flag read BEFORE its write can be re-judged AFTER it, and reverted if a demotion committed between.
+    /// </summary>
+    /// <remarks>
+    /// The read goes through the caller's request-scoped context, so the central exercise filter confines it to the
+    /// server-resolved scope; the explicit <c>ExerciseId</c> predicate keeps that visible at the call site. Pass the
+    /// SESSION person (<see cref="PersonId"/>) and the server-resolved exercise only — never a request value. Fails closed
+    /// (<c>false</c>) for an empty exercise or person.
+    /// </remarks>
+    /// <param name="dbContext">The request's scoped context.</param>
+    /// <param name="exerciseId">The server-resolved exercise.</param>
+    /// <param name="personId">The session's person.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns><c>true</c> only while the person is still the exercise's lead controller.</returns>
+    public static async Task<bool> IsStillLeadAsync(
+        PulseDbContext dbContext,
+        Guid exerciseId,
+        Guid personId,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(dbContext);
+        if (exerciseId == Guid.Empty || personId == Guid.Empty)
+        {
+            return false;
+        }
+
+        return await dbContext.Enrollments
+            .AsNoTracking()
+            .AnyAsync(
+                e => e.ExerciseId == exerciseId && e.PersonId == personId && e.IsLead && e.Role == EnrollmentRoles.Controller,
+                cancellationToken);
+    }
+
+    /// <summary>
     /// The "no lead ⇒ swamped off" re-check (identity-auth-roles/16 M-002): swamped mode is in-memory, and the
     /// post-commit OFF flip a lead removal stages could in principle fail. Every gated staff request on the exercise
     /// therefore re-checks — cheaply, only while swamped mode is on — that the exercise still has a lead (an enrollment

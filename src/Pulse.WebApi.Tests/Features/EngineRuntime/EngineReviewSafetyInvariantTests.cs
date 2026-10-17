@@ -22,6 +22,7 @@ using Pulse.WebApi.Features.EngineRuntime.Publishing;
 using Pulse.WebApi.Features.EngineRuntime.Review;
 using Pulse.WebApi.Features.EngineRuntime.Telemetry;
 using Pulse.WebApi.Tests.Features.EngineRuntime.Clock;
+using Pulse.WebApi.Tests.Helpers;
 using Xunit;
 
 /// <summary>
@@ -247,7 +248,7 @@ public sealed class EngineReviewSafetyInvariantTests
         var state = harness.Registry.GetOrCreate(exerciseId);
         var before = state.ResolveEffective(storylineId).Level;
 
-        var result = await harness.Service.SetSwampedModeAsync(enabled: true, Input("lead-1"));
+        var result = await harness.Service.SetSwampedModeAsync(enabled: true, Input("lead-1"), harness.SeedLead());
 
         result.Outcome.Should().Be(EngineReviewOutcome.Ok);
         result.State!.SwampedMode.Should().BeTrue();
@@ -424,9 +425,11 @@ public sealed class EngineReviewSafetyInvariantTests
     {
         private readonly PulseDbContext _db;
         private readonly ManualTimeProvider _time;
+        private readonly Guid _exerciseId;
 
         public Harness(Guid exerciseId, EngineReviewItemEntity[] items)
         {
+            _exerciseId = exerciseId;
             var context = new ExerciseContext { CurrentExerciseId = exerciseId };
 
             var options = new DbContextOptionsBuilder<PulseDbContext>()
@@ -465,6 +468,9 @@ public sealed class EngineReviewSafetyInvariantTests
         public EngineAutonomyRegistry Registry { get; }
 
         public EngineTierPolicyRegistry TierPolicy { get; }
+
+        /// <summary>Seeds the exercise's lead controller — the session person a raise's post-write re-check reads (Tier-2 M-1).</summary>
+        public Guid SeedLead() => LeadControllerSeed.Seed(_db, _exerciseId);
 
         public void Advance(int minutes) => _time.Advance(TimeSpan.FromMinutes(minutes));
 

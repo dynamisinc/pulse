@@ -368,7 +368,9 @@ public static class EngineReviewEndpoints
             return Results.Unauthorized();
         }
 
-        var result = await service.SetSwampedModeAsync(enabled, input, cancellationToken);
+        // Tier-2 M-1: the session person, whose lead the service re-checks AFTER an ON lands.
+        var caller = await ExerciseCallerRole.ResolveAsync(httpContext);
+        var result = await service.SetSwampedModeAsync(enabled, input, caller.PersonId, cancellationToken);
         return MapAutonomy(result);
     }
 
@@ -417,7 +419,9 @@ public static class EngineReviewEndpoints
             return Results.Unauthorized();
         }
 
-        var result = await service.RestoreFromSafetyAsync(input, cancellationToken);
+        // Tier-2 M-1: the session person, whose lead the service re-checks AFTER a restore lands.
+        var caller = await ExerciseCallerRole.ResolveAsync(httpContext);
+        var result = await service.RestoreFromSafetyAsync(input, caller.PersonId, cancellationToken);
         return MapAutonomy(result);
     }
 
@@ -458,7 +462,8 @@ public static class EngineReviewEndpoints
 
         // Gate-1 WR-001: the raise is judged in the service, atomically with the write, on the live lead flag.
         var caller = await ExerciseCallerRole.ResolveAsync(httpContext);
-        var result = await service.SetExerciseAutonomyDefaultAsync(request.Level, input, caller.IsLead, cancellationToken);
+        var result = await service.SetExerciseAutonomyDefaultAsync(
+            request.Level, input, caller.IsLead, caller.PersonId, cancellationToken);
         return MapSettings(result);
     }
 
@@ -486,7 +491,7 @@ public static class EngineReviewEndpoints
 
         // Gate-1 WR-001: the raise is judged in the service, atomically with the write, on the live lead flag.
         var caller = await ExerciseCallerRole.ResolveAsync(httpContext);
-        var result = await service.SetTierPolicyModeAsync(request.Mode, input, caller.IsLead, cancellationToken);
+        var result = await service.SetTierPolicyModeAsync(request.Mode, input, caller.IsLead, caller.PersonId, cancellationToken);
         return MapSettings(result);
     }
 
@@ -574,7 +579,9 @@ public static class EngineReviewEndpoints
             return Results.Unauthorized();
         }
 
-        var result = await service.RestoreGenerationProviderAsync(input, cancellationToken);
+        // Tier-2 M-1: the session person, whose lead the service re-checks AFTER a restore lands.
+        var caller = await ExerciseCallerRole.ResolveAsync(httpContext);
+        var result = await service.RestoreGenerationProviderAsync(input, caller.PersonId, cancellationToken);
         return MapSettings(result);
     }
 
@@ -631,6 +638,7 @@ public static class EngineReviewEndpoints
         EngineReviewOutcome.Ok => Results.Ok(result.State),
         EngineReviewOutcome.ScopeUnresolved => Results.Unauthorized(),
         EngineReviewOutcome.Invalid => Results.BadRequest(result.ValidationError),
+        EngineReviewOutcome.Forbidden => Results.StatusCode(StatusCodes.Status403Forbidden),
         _ => Results.StatusCode(StatusCodes.Status500InternalServerError),
     };
 

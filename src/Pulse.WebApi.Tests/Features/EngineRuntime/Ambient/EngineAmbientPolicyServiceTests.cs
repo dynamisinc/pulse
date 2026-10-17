@@ -24,6 +24,7 @@ using Pulse.WebApi.Features.EngineRuntime.Publishing;
 using Pulse.WebApi.Features.EngineRuntime.Review;
 using Pulse.WebApi.Features.EngineRuntime.Telemetry;
 using Pulse.WebApi.Tests.Features.EngineRuntime.Clock;
+using Pulse.WebApi.Tests.Helpers;
 using Xunit;
 
 /// <summary>
@@ -163,7 +164,7 @@ public sealed class EngineAmbientPolicyServiceTests
         await harness.Service.EngageKillSwitchAsync(mode, new EngineReviewActionInput("lead-1", "UTC"));
         harness.Ambient.Get(exerciseId).Mode.Should().Be(AmbientPolicyMode.Off, "the kill switch lowers ambient at once (AC6)");
 
-        await harness.Service.RestoreFromSafetyAsync(new EngineReviewActionInput("lead-1", "UTC"));
+        await harness.Service.RestoreFromSafetyAsync(new EngineReviewActionInput("lead-1", "UTC"), harness.StaffUserId);
         harness.Ambient.Get(exerciseId).Mode.Should().Be(AmbientPolicyMode.Off, "restoring the engine never re-raises ambient");
 
         var lowered = (await harness.EventsAsync(exerciseId)).Last();
@@ -219,7 +220,7 @@ public sealed class EngineAmbientPolicyServiceTests
         rejected.ValidationError.Should().Contain("restore it before enabling autonomous ambient");
         harness.Ambient.Get(exerciseId).Mode.Should().Be(AmbientPolicyMode.Off);
 
-        await harness.Service.RestoreGenerationProviderAsync(new EngineReviewActionInput("lead-1", "UTC"));
+        await harness.Service.RestoreGenerationProviderAsync(new EngineReviewActionInput("lead-1", "UTC"), harness.StaffUserId);
         (await harness.SetPolicyAsync(Request("autonomous"))).Outcome.Should().Be(
             EngineReviewOutcome.Ok, "once restored, a human may select autonomous again");
     }
@@ -587,6 +588,12 @@ public sealed class EngineAmbientPolicyServiceTests
         {
             var context = new ExerciseContext { CurrentExerciseId = currentExerciseId };
             _db = new PulseDbContext(Options(), context);
+            if (currentExerciseId is { } scoped && scoped != Guid.Empty)
+            {
+                // Tier-2 M-1: the session person is the exercise's LEAD, so a raise survives the post-write re-check.
+                LeadControllerSeed.Seed(_db, scoped, StaffUserId);
+            }
+
             var clock = new ExerciseClockService(new ManualTimeProvider(ScenarioStart));
             if (currentExerciseId is { } id)
             {

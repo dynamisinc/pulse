@@ -35,6 +35,11 @@ using Pulse.WebApi.Features.Identity.RoleMatrix;
 /// takes effect immediately and revokes no session. An unparseable body is treated as a raise (fail closed): a non-lead
 /// gets 403, the lead reaches the handler's own 400.
 /// </para>
+/// <para>
+/// <b>Not the last word (Tier-2 M-1).</b> This read happens BEFORE the write, so a demotion can commit in between. Each
+/// raise path in <see cref="EngineReviewService"/> therefore re-reads the session person's lead live AFTER its write
+/// (<see cref="ExerciseCallerRole.IsStillLeadAsync"/>) and reverts the raise with a 403 when the lead was lost.
+/// </para>
 /// </remarks>
 public sealed class LeadControllerRaiseFilter : IEndpointFilter
 {

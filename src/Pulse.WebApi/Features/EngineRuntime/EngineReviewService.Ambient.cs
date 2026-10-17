@@ -189,6 +189,15 @@ public sealed partial class EngineReviewService
             return EngineSettingsResult.Invalid(AmbientPolicyConcurrentChangeError);
         }
 
+        // Tier-2 M-1: the lead flag was read BEFORE this write, so a demotion can commit in between. A raise that landed
+        // is re-checked against the session person's LIVE lead enrollment; lost meanwhile ⇒ compare-and-set the policy
+        // back (a later writer's value, if any, stands) and refuse 403 with no audit event.
+        if (AmbientPolicyRaise.IsRaise(from, request) && !await IsStillLeadAsync(exerciseId, staffUserId, cancellationToken))
+        {
+            _ambientPolicy.TrySet(exerciseId, policy, from);
+            return EngineSettingsResult.Forbidden();
+        }
+
         await CommitSettingsEventAsync(
             EngineEventTypes.TierPolicyChanged,
             exerciseId,
