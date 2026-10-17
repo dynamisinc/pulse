@@ -216,6 +216,22 @@ describe('a planner in the controller console (story 17)', () => {
     expect(all('live-world-reply-as')).toHaveLength(0)
   })
 
+  it('says what a planner can do, not "View only" (WR-002): role-accurate chip with an icon', async () => {
+    await renderConsole('planner')
+    expect(all('console-view-only-chip')).toHaveLength(0)
+    const chip = screen.getByTestId('console-planner-chip')
+    expect(chip).toHaveTextContent('Planner: content only. Conduct is controller-only')
+    expect(chip.querySelector('svg')).not.toBeNull()
+  })
+
+  it('shows the Ctrl+K shortcut strip, which opens the personas tool the planner has', async () => {
+    const user = userEvent.setup()
+    await renderConsole('planner')
+    expect(screen.getByTestId('console-shortcut-strip')).toBeInTheDocument()
+    await user.keyboard('{Control>}k{/Control}')
+    expect(await screen.findByRole('dialog', { name: /command palette/i })).toBeInTheDocument()
+  })
+
   it('keeps the read surfaces: run sheet, live world, review cards, Export posts', async () => {
     await renderConsole('planner')
     expect(screen.getAllByTestId('run-sheet-row')).toHaveLength(SEED.length)
@@ -232,5 +248,8 @@ describe('an evaluator in the controller console: no persona tool at all', () =>
     await user.keyboard('{Control>}k{/Control}')
     expect(screen.queryByRole('dialog', { name: /command palette/i })).not.toBeInTheDocument()
     expect(all('persona-edit-button')).toHaveLength(0)
+    expect(all('console-shortcut-strip')).toHaveLength(0)
+    expect(screen.getByTestId('console-view-only-chip')).toBeInTheDocument()
+    expect(all('console-planner-chip')).toHaveLength(0)
   })
 })

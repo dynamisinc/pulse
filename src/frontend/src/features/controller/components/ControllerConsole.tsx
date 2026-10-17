@@ -665,7 +665,7 @@ export function ControllerConsole(
               </Stack>
 
               {/* Shortcut strip — the one place the console says how to start. */}
-              {canControl && <Stack
+              {canPersonas && <Stack
                 direction="row"
                 data-testid="console-shortcut-strip"
                 sx={{
