@@ -21,8 +21,9 @@ using Xunit;
 /// <para>
 /// <b>What "controller demand" means here</b> (defined once, in <see cref="ReactionScenario"/>): the decisions the
 /// controller is asked for in one scenario minute - one per review-queue item (one burst = one decision, however
-/// many posts it carries) plus one per response-match prompt. This file asserts the queue-fire part, which is
-/// exactly what the production meter (<see cref="WorkloadDemandMeter"/>) records and enforces.
+/// many posts it carries) plus one per response-match prompt. The production meter (<see cref="WorkloadDemandMeter"/>)
+/// records and enforces both (queue fires; response-match prompts since D4). The burst-load tests assert the
+/// queue-fire part; the match-prompt test asserts the total.
 /// </para>
 /// <para>
 /// <b>The burst load.</b> 24 storylines whose response windows all blow in the same minute (the worst realistic
