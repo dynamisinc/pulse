@@ -1,4 +1,4 @@
-# UAT go-live runbook: live generation provider (Sunday, 10/18)
+# UAT go-live runbook: live generation provider (Saturday, 10/17; Sunday is buffer)
 
 > **For:** Tom (the operator). **When:** after Session A's A1 (including #573, the lead gate) and PR #571 are on `main`.
 > **What it does:** switches UAT's AI engine from the offline `Fake` provider to the governed live provider
@@ -19,7 +19,7 @@
 
 The infra run **replaces the App Service's whole app-settings list** (`siteConfig.appSettings`). Any setting that
 exists only in the portal, and not in the bicep, is **deleted** by the deploy. This was already true before the
-go-live; it matters now because Sunday's run is the first big settings change.
+go-live; it matters now because this go-live run is the first big settings change.
 
 In Cloud Shell, after `az account set` to the Pulse subscription (the one you used for the §8 checks):
 
@@ -79,7 +79,7 @@ run sets them, and the next infra run would overwrite any manual value anyway. T
 | Staff login | not set; stays at the default of 10 (smoke check 5 relies on this) |
 
 > These values are **demo-sized** (one room, a few dozen players). A 100-person StartEx on one venue's NAT needs the
-> larger set, which Session A can supply. Raise them before that exercise, not on Sunday.
+> larger set, which Session A can supply. Raise them before that exercise, not for this go-live.
 
 ## 2. Deploy Infrastructure: for real
 
@@ -90,6 +90,11 @@ Run it again with **`what_if = false`**. When it finishes, the job summary shoul
 with those values. If any is missing, stop and tell Session A; do not add it by hand.
 
 The app-setting change **restarts the App Service**. That clears the engine's in-memory state, including any per-exercise cut-to-Fake.
+
+> ⚠ **After ANY restart or deploy, re-check the engine state panel** (console ENGINE flyout) for every active exercise, and
+> **re-apply cut-to-Fake or the kill switch if it was set before.** Neither survives a restart today, so live output silently
+> comes back. This applies to every Deploy Infrastructure run and every backend deploy (any merge that touches `src/`),
+> not just this one. (Ambient chatter is the safe exception: it resets to Off.) Persisting this state is wave C3.
 
 ## 3. Re-register the engine loop
 
@@ -140,7 +145,27 @@ Session C then runs the formal #349/#401/#402 checks and the #177 latency and co
 | **Immediate stop of all engine output** | **Kill switch, FullStop** (any controller). | Stops every later publish. It does not interrupt a burst already handed to the publisher. |
 | **Durable, all exercises** | In `infrastructure/parameters/uat.bicepparam` set `generationProviderLive = false` (leave the two attestations), merge, then **Deploy Infrastructure** (what-if, then deploy). Then re-run step 3. | The App Service restarts on `Fake`. This is the clean way back for the demo if live behaves badly. |
 
-## 6. After the verification pass
+> ⚠ **A restart undoes a cut and a kill switch.** The first two rows live in memory only. After ANY restart or deploy, re-check
+> the engine state panel and re-apply cut-to-Fake or the kill switch if it was set. Only the durable row survives a restart.
+
+## 6. Amendment 2: autonomous ambient (only after Tom signs #593)
+
+Prerequisites on `main`: #603, #607, and Session A's A1c with the ambient-policy route lead-gated. Then:
+
+1. Tom ticks and signs amendment 2 in `PROVIDER-GOVERNANCE.md` (#593), and #593 merges.
+2. The flag commit, a separate reviewed PR: `infrastructure/parameters/uat.bicepparam` sets
+   `generationAmbientAutonomyAuthorized = true`. Nothing else changes.
+3. **Deploy Infrastructure**, what-if first. Expect **only** `Generation__Governance__AmbientAutonomyAuthorized`: `false` → `true`.
+   Stop if anything else changes.
+4. Deploy for real. **This restarts the App Service:** re-run step 3 (re-seed), then re-check the engine state panel and
+   re-apply any cut-to-Fake or kill switch (see the warning under step 2).
+5. Smoke check: in the ENGINE flyout's **Ambient chatter** section, **Autonomous** is no longer greyed out. As the **lead**
+   controller, set it with small caps and two everyday topics, then confirm the warning step and save. Within a quiet period:
+   - an ambient post appears in the feed with no review click;
+   - a non-lead controller gets 403 when trying to raise the caps;
+   - the kill switch turns ambient back to Off.
+
+## 7. After the verification pass
 
 If UAT will sit idle with no exercise running, either:
 - leave it, since cost is incurred only while a storyline is active; or
