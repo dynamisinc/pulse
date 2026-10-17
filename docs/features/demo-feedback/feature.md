@@ -72,8 +72,8 @@ media on the server.
 | 29 | [Printable exercise report (PDF via print)](29-printable-exercise-report.md) | backend + frontend | Must | 3 | 02 | Complete | #550 |
 | 30 | [Exercise report: filters, and large exercises never refused](30-report-filters-large-exercises.md) | backend + frontend | Must | 4 | 29 | Complete | #561 |
 | 31 | [Exercise report: time window scopes the whole report, print polish, threads](31-report-scope-and-print-polish.md) | backend + frontend | Must | 4 | 29, 30 | Complete | #568 |
-| 32 | [Exercise report: when the verified-vs-lookalike section appears](32-report-lookalike-section-rules.md) | backend + frontend | Should | post-demo | 31 | In Review | #569 |
-| 33 | [Exercise report: controller-named lookalike pairs](33-report-named-lookalike-pairs.md) | backend + frontend | Could | post-demo | 32 | In Review | #588 |
+| 32 | [Exercise report: when the verified-vs-lookalike section appears](32-report-lookalike-section-rules.md) | backend + frontend | Should | post-demo | 31 | Complete | #569 |
+| 33 | [Exercise report: controller-named lookalike pairs](33-report-named-lookalike-pairs.md) | backend + frontend | Could | post-demo | 32 | Complete | #588 |
 | C | [Content: Kestrel MSEL file, noise pool (C1 burn-in dropped 10/15)](C-content-tasks.md) | content | Must | any | #491, 16 | Not Started | #511 |
 
 ## Manual UAT walk (Sun 10/18, before pencils down)
