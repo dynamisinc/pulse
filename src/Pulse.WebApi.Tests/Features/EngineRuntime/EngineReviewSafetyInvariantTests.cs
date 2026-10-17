@@ -234,7 +234,7 @@ public sealed class EngineReviewSafetyInvariantTests
         Action(reviewed.Should().ContainSingle("exactly one engine.reviewed per resolution").Subject).Should().Be("hold-on-expiry");
         reviewed[0].Actor.ActingHumanId.Should().BeNull("a hold-on-expiry is silence, not a human decision");
 
-        var restored = await harness.Service.RestoreFromSafetyAsync(Input("lead-1"));
+        var restored = await harness.Service.RestoreFromSafetyAsync(Input("lead-1"), harness.SeedLead());
         restored.Outcome.Should().Be(EngineReviewOutcome.Ok);
         state.IsGenerationStopped.Should().BeFalse("the restore must actually lift the full stop for this to prove anything");
         state.SwampedModeEnabled.Should().BeTrue("swamped mode survives the restore — the auto-send path is live again");

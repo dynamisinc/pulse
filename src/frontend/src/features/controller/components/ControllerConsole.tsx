@@ -614,7 +614,11 @@ export function ControllerConsole(
   // pane area so they never cover the command band.
   const flyouts = (
     <>
-      <PersonaDockHost open={canPersonas && dockPersonaOpen} onClose={closeDock} slots={dockSlots} />
+      <PersonaDockHost
+        open={canPersonas && dockPersonaOpen}
+        onClose={closeDock}
+        slots={dockSlots}
+      />
 
       <EngineSettingsPanel open={engineSettingsOpen} onClose={closeEngineSettings} />
 
