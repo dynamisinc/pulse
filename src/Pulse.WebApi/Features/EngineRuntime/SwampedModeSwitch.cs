@@ -48,7 +48,6 @@ public sealed class EngineSwampedModeSwitch : ISwampedModeSwitch
     }
 
     /// <inheritdoc />
-    /// <inheritdoc />
     public bool IsOn(Guid exerciseId) => _autonomy.GetOrCreate(exerciseId).SwampedModeEnabled;
 
     /// <inheritdoc />
