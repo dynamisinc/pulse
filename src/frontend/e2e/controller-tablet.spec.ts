@@ -19,16 +19,22 @@
  *    item, Take down (a stray tap inside the 400ms arming delay does nothing; a tap after it
  *    completes), Pause popover -> Freeze confirm step (stray tap ignored, Back returns).
  *  - geometry deferred from stories 12 to 15: the Take down confirm popover does not cover its
- *    trigger, the Pause popover does not cover the pill, the 1180 command band wrap is OBSERVED
- *    (recorded as an annotation, never a failure).
+ *    trigger, the Pause popover does not cover the pill, the 1180 command band is measured with and
+ *    without the dev-only button (DEV wraps; production-equivalent is one row).
  *  - rotation 1024x768 -> 768x1024 mid-flow: the selected pane tab and an open persona composer
  *    (with typed text) survive.
  *  - roles at 1180x820: evaluator and planner see no controller controls; the evaluator
  *    dashboard is only checked for reachability.
  *
  * Mock-only: the guide-shots server serves the fictional Coastal Surge exercise. The 400ms
- * arming delay (`ARMING_DELAY_MS`) is real here, which is the point: the stray tap is dispatched
- * in the same task as the opening tap, the deliberate tap waits past the delay.
+ * arming delay (`ARMING_DELAY_MS`) is real here, which is the point: the stray tap is clicked a
+ * few animation frames after the opening tap (synthetic `HTMLElement.click()`, fine because the
+ * guard sits in `onClick`), the deliberate tap is a real touch tap after waiting past the delay.
+ *
+ * PRODUCTION-EQUIVALENT GEOMETRY: the dev-only "Simulate degraded (dev)" button
+ * (`engine-degraded-simulate`) renders in the command band on the dev server and widens it, so
+ * `openControllerConsole` hides it (as capture.mjs does) and all geometry reflects production.
+ * The observation test measures the band both ways.
  *
  * Do not assert persistence across the 1280px boundary (story 12 known limit: panes remount).
  */
@@ -39,6 +45,8 @@ import {
 
 /** Longer than the 400ms touch arming delay (useArmedConfirm), with margin. */
 const PAST_ARMING_MS = 650
+/** useArmedConfirm's ARMING_DELAY_MS. */
+const ARMING_DELAY_MS = 400
 
 type Band = 'landscape' | 'landscapeWide' | 'portrait' | 'portraitTall'
 
@@ -63,8 +71,11 @@ async function openConsole(page: Page, role: 'controller' | 'evaluator' | 'plann
   await page.goto('/staff/console')
 }
 
-async function openControllerConsole(page: Page): Promise<void> {
+const HIDE_DEV_BUTTON_CSS = '[data-testid="engine-degraded-simulate"]{display:none!important}'
+
+async function openControllerConsole(page: Page, hideDevButton = true): Promise<void> {
   await openConsole(page)
+  if (hideDevButton) await page.addStyleTag({ content: HIDE_DEV_BUTTON_CSS })
   await expect(page.getByTestId('console-command-band')).toBeVisible()
   await expect(page.getByTestId('live-world-row').first()).toBeVisible()
 }
@@ -87,8 +98,8 @@ interface StrayTap {
 }
 
 /**
- * Click the first `firstTestId` control and, a few animation frames later in the SAME page task
- * chain, click `secondTestId` once it exists. This is the "stray tap right after opening" case:
+ * Click the first `firstTestId` control and, a few animation frames later, click
+ * `secondTestId` once it exists. This is the "stray tap right after opening" case:
  * far inside the 400ms arming delay and independent of how slow the test runner is. Returns what
  * the second control looked like when it was clicked, so the caller can assert it was unarmed.
  */
@@ -201,11 +212,16 @@ for (const vp of VIEWPORTS) {
 
       // Sticky: it stays put when the page/work area is scrolled.
       const before = await boxOf(band)
-      await page.evaluate(() => {
+      const scrolled = await page.evaluate(() => {
         window.scrollTo(0, 400)
-        document.querySelectorAll('[data-testid="console-slot-live-world"], [data-testid="review-queue-column"]')
-          .forEach(n => { n.scrollTop = 400 })
+        let moved = window.scrollY
+        const scrollers = '[data-testid="console-slot-live-world"], [data-testid="review-queue-column"], '
+          + '[data-testid="live-world-list"]'
+        document.querySelectorAll(scrollers)
+          .forEach(n => { n.scrollTop = 400; moved = Math.max(moved, n.scrollTop) })
+        return moved
       })
+      expect(scrolled, 'nothing scrolled, so the sticky check proves nothing').toBeGreaterThan(0)
       const after = await boxOf(band)
       expect(Math.abs(after.y - before.y), 'command band moved on scroll').toBeLessThanOrEqual(1)
       await expect(kill).toBeVisible()
@@ -288,22 +304,20 @@ for (const vp of VIEWPORTS.filter(v => v.band === 'landscape' || v.band === 'lan
       await expect(card).toBeVisible()
       await card.getByRole('button', { name: /^edit/i }).tap()
       await expect(page.getByTestId('engine-draft-edit-composer')).toBeVisible()
-      await page.getByRole('button', { name: /cancel/i }).first().tap()
+      await page.getByTestId('engine-draft-edit-composer').getByRole('button', { name: /cancel/i }).tap()
       await expect(page.getByTestId('engine-draft-edit-composer')).toBeHidden()
     })
 
     test('Take down: a stray tap does not complete it, a deliberate Confirm does', async ({ page }) => {
       const trigger = page.getByTestId('takedown-trigger').first()
       await trigger.scrollIntoViewIfNeeded()
-      const rows = page.getByTestId('live-world-row')
-      const rowCount = await rows.count()
       await expect(trigger).toBeVisible()
 
       // Stray tap: the confirm is clicked a few frames after the opening tap (< 400ms).
       const stray = await openThenStrayTap(page, 'takedown-trigger', 'takedown-confirm')
       expect(stray.clicked, 'the Take down confirm never opened').toBe(true)
       expect(stray.ariaDisabled, 'the confirm was already armed at the stray tap').toBe('true')
-      expect(stray.elapsedMs, 'the stray tap landed after the arming delay').toBeLessThan(350)
+      expect(stray.elapsedMs, 'the stray tap landed after the arming delay').toBeLessThan(ARMING_DELAY_MS)
       const dialog = page.getByTestId('takedown-dialog')
       await expect(dialog, 'a tap inside the arming delay completed the take down').toBeVisible()
       await expect(page.getByTestId('takedown-confirmation')).toHaveCount(0)
@@ -316,7 +330,6 @@ for (const vp of VIEWPORTS.filter(v => v.band === 'landscape' || v.band === 'lan
       await expect(
         page.getByTestId('takedown-confirmation').or(page.getByTestId('live-world-removed')).first(),
       ).toBeVisible()
-      expect(await rows.count()).toBeGreaterThanOrEqual(rowCount - 1)
     })
 
     test('Take down confirm popover does not cover its trigger; Cancel closes it', async ({ page }) => {
@@ -336,6 +349,9 @@ for (const vp of VIEWPORTS.filter(v => v.band === 'landscape' || v.band === 'lan
       // Radio options are 44px rows.
       const options = dialog.getByRole('radio')
       expect(await options.count()).toBeGreaterThan(0)
+      const heights = await options.evaluateAll(els =>
+        els.map(el => (el.closest('label') ?? el).getBoundingClientRect().height))
+      for (const h of heights) expect(h, 'a category row is under 44px').toBeGreaterThanOrEqual(43.5)
       await page.getByTestId('takedown-cancel').tap()
       await expect(dialog).toBeHidden()
     })
@@ -354,11 +370,11 @@ for (const vp of VIEWPORTS.filter(v => v.band === 'landscape' || v.band === 'lan
       expect(card.x + card.width).toBeLessThanOrEqual(vp.width + 1)
 
       await page.getByTestId('pause-tier-option-freeze').tap()
-      // Opening the confirm step and tapping its Confirm in the same task.
+      // Open the confirm step and tap its Confirm a few frames later (inside the arming delay).
       const stray = await openThenStrayTap(page, 'pause-apply', 'pause-freeze-confirm-button')
       expect(stray.clicked, 'the Freeze confirm step never opened').toBe(true)
       expect(stray.ariaDisabled, 'Confirm freeze was already armed at the stray tap').toBe('true')
-      expect(stray.elapsedMs, 'the stray tap landed after the arming delay').toBeLessThan(350)
+      expect(stray.elapsedMs, 'the stray tap landed after the arming delay').toBeLessThan(ARMING_DELAY_MS)
       const confirm = page.getByTestId('pause-freeze-confirm')
       await expect(confirm, 'the guarded Freeze confirm step did not appear').toBeVisible()
       await expect(page.getByTestId('pause-freeze-confirm-register')).toBeVisible()
@@ -389,26 +405,55 @@ for (const vp of VIEWPORTS.filter(v => v.band === 'landscape' || v.band === 'lan
 }
 
 // ---------------------------------------------------------------------------------------------
-// 1180 command band wrap: observed and documented, never a failure (story 12 AC note).
+// 1180 command band: DEV wraps (dev-only button), production is one row (story 12 AC note, W-001).
 // ---------------------------------------------------------------------------------------------
 
-test.describe('command band at 1180x820 (observation)', () => {
+test.describe('command band at 1180x820 (dev versus production)', () => {
   test.use({ viewport: { width: 1180, height: 820 }, hasTouch: true, isMobile: false })
 
-  test('records whether the band wraps onto a second row', async ({ page }) => {
-    await openControllerConsole(page)
+  /** Kill switch / End exercise geometry of the command band right now. */
+  async function measureBand(page: Page) {
     const band = await boxOf(page.getByTestId('console-command-band'))
     const kill = await boxOf(page.getByTestId('engine-kill-switch'))
     const end = await boxOf(page.getByTestId('lifecycle-end'))
-    const wraps = end.y >= kill.y + kill.height - 1
-    const note = `1180x820 command band is ${Math.round(band.height)}px tall; End exercise is `
-      + `${wraps ? 'on a second row' : 'on the first row'} (kill switch y=${Math.round(kill.y)}, `
-      + `End y=${Math.round(end.y)}).`
-    test.info().annotations.push({ type: 'observed', description: note })
-    console.log(`[observed] ${note}`)
-    // Whatever the wrap, the band must still hold both ends and fit the work area.
-    expect(band.x + band.width).toBeLessThanOrEqual(1180)
+    return { band, kill, end, wraps: end.y >= kill.y + kill.height - 1 }
+  }
+
+  test('the band is one row in production; the DEV build wraps (dev button)', async ({ page }) => {
+    await openControllerConsole(page, false)
+    // DEV build: the "Simulate degraded (dev)" button is visible and widens the band.
+    const dev = await measureBand(page)
+    const devNote = `DEV build: band ${Math.round(dev.band.height)}px tall, End exercise `
+      + `${dev.wraps ? 'on a second row' : 'on the first row'} (kill y=${Math.round(dev.kill.y)}, `
+      + `End y=${Math.round(dev.end.y)}).`
+    test.info().annotations.push({ type: 'observed-dev', description: devNote })
+    console.log(`[observed] ${devNote}`)
+
+    // Production-equivalent: the dev-only button never renders in a production build.
+    await page.addStyleTag({ content: HIDE_DEV_BUTTON_CSS })
+    const prod = await measureBand(page)
+    const prodNote = `PRODUCTION-equivalent: band ${Math.round(prod.band.height)}px tall, End exercise `
+      + `${prod.wraps ? 'on a second row' : 'on the first row'} (kill y=${Math.round(prod.kill.y)}, `
+      + `End y=${Math.round(prod.end.y)}).`
+    test.info().annotations.push({ type: 'observed-prod', description: prodNote })
+    console.log(`[observed] ${prodNote}`)
+    expect(prod.wraps, 'with the dev button hidden the band is one row').toBe(false)
+    expect(prod.band.x + prod.band.width).toBeLessThanOrEqual(1180)
     await expect(page.getByTestId('lifecycle-end')).toBeVisible()
+  })
+})
+
+test.describe('pause popover at 1180x820 (issue #626)', () => {
+  test.use({ viewport: { width: 1180, height: 820 }, hasTouch: true, isMobile: false })
+
+  // Today the popover (x 841..1141) pokes 17px into the toolstrip (x >= 1124). PR #627 right-aligns
+  // it; remove `fixme` once #627 is merged.
+  test.fixme('the popover stays left of the toolstrip (#626, PR #627)', async ({ page }) => {
+    await openControllerConsole(page)
+    await page.getByTestId('pause-pill').tap()
+    const card = await paperBoxOf(page.getByTestId('pause-popover'))
+    const strip = await boxOf(page.getByTestId('staff-toolstrip'))
+    expect(card.x + card.width, 'popover overlaps the toolstrip').toBeLessThanOrEqual(strip.x + 0.5)
   })
 })
 

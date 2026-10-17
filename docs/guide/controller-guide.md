@@ -818,7 +818,7 @@ shape, and what you can do stays the same.
   shows the current storyline target and noise level in a line; tap it to open the controls.
 - **More.** **Export posts** and **Exercise report** are under the **...** button in the title row.
 
-An evaluator or planner sees the same read-only console on a tablet as on a desktop.
+An evaluator sees the same read-only console on a tablet as on a desktop. A planner cannot open the console.
 
 ![The console on an iPad in landscape at 1180 pixels wide: the command band with the engine switch, Running and End exercise, then Live world, Run sheet and the docked Review queue side by side, with the toolstrip on the right](img/console-overview-tablet.png)
 

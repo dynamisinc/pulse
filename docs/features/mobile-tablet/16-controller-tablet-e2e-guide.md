@@ -9,7 +9,7 @@ for the controller guide. Staff world.
 
 ## Acceptance Criteria
 - [x] Given a controller at each of the four viewports, when the console loads, then there is no horizontal scroll, the pane/tab layout from story 12 is present, and the toolstrip tools meet 44px touch targets. _(36 tests in `e2e/controller-tablet.spec.ts`; arrangement per band, sticky band, 44px tools asserted at all four viewports.)_
-- [x] Given a controller on touch, when they open the palette, switch panes, open a review item, take down a post (confirm) and open the pause popover (Freeze confirm), then each flow completes with the deliberate step and nothing fires on a single stray tap (stories 14 and 15). _(Palette via PERSONAS, pane tabs, a review item (Edit then Cancel), Take down and the Pause/Freeze confirm, at 1024x768 and 1180x820. The stray tap is dispatched a few frames after the opening tap (asserted under 350ms, confirm `aria-disabled=true`), and the deliberate tap waits past the real 400ms delay. Not exercised on touch: EndEx and the kill switch re-arm (unchanged by this story; covered by story 15 unit tests).)_
+- [x] Given a controller on touch, when they open the palette, switch panes, open a review item, take down a post (confirm) and open the pause popover (Freeze confirm), then each flow completes with the deliberate step and nothing fires on a single stray tap (stories 14 and 15). _(Palette via PERSONAS, pane tabs, a review item (Edit then Cancel), Take down and the Pause/Freeze confirm, at 1024x768 and 1180x820. The stray tap is dispatched a few frames after the opening tap (asserted under the 400ms delay, confirm `aria-disabled=true`, which is the real proof), and the deliberate tap waits past the real 400ms delay. Not exercised on touch: EndEx and the kill switch re-arm (unchanged by this story; covered by story 15 unit tests).)_
 - [x] Given rotation from landscape to portrait mid-flow, then pane/tab selection and an open composer survive. _(1024x768 to 768x1024 with the Run sheet tab selected and a typed persona draft: both survive. Not asserted across 1280 (story 12 known limit).)_
 - [x] Given an evaluator and a planner session at 1180x820, then each sees only what their role guard allows (no controller controls for an evaluator); the evaluator dashboard remains mock/canned and is not asserted beyond reachability. _(Evaluator: view-only console, no kill switch, Pause, End exercise, Take down or PERSONAS; evaluator dashboard reachable. Planner: "Not allowed" (the console route guard), no controller controls.)_
 - [x] Given `capture.mjs`, then `console-overview-tablet`, `takedown-tablet` and `freeze-controls-tablet` shots exist at 1180x820 (and portrait 820x1180 for the overview), with the 1440 originals untouched and hidden dev scaffolding still hidden. _(Four PNGs captured at 1180x820 / 820x1180 with touch emulation and each opened and checked. The 1440 originals are untouched (`git status` shows no change to them) and the dev scaffolding CSS is unchanged.)_
@@ -33,19 +33,23 @@ The spec (3x consecutive green); open every new PNG.
 - **Spec:** `src/frontend/e2e/controller-tablet.spec.ts`. Viewports are per-describe `test.use({ viewport, hasTouch: true, isMobile: false })`.
   `playwright.config.ts` gained a `controller-tablet` project (`testMatch` this spec); the three existing projects `testIgnore` it, so no existing spec runs more often.
 - **Run:** `GUIDE_SHOTS_PORT=5241 npx playwright test e2e/controller-tablet.spec.ts --project=controller-tablet`. Three consecutive runs: 36/36 green each time.
-- **Stray-tap technique:** the arming delay is real, so the stray tap is clicked from the page a few animation frames after the opening click and the spec asserts the confirm was still `aria-disabled="true"` and under 350ms had passed.
+- **Stray-tap technique:** the arming delay is real, so the stray tap is clicked from the page a few animation frames after the opening click and the spec asserts the confirm was still `aria-disabled="true"` and under the 400ms delay had passed.
 - **Screenshots:** `TABLET_LANDSCAPE` (1180x820) and `TABLET_PORTRAIT_TALL` (820x1180) in `tools/guide-screenshots/viewports.mjs` (`mobile: true`); shots `console-overview-tablet`, `console-overview-tablet-portrait`, `takedown-tablet`, `freeze-controls-tablet`.
 - No product code changed. No `data-testid` was added.
 
 ### Geometry findings (measured by the spec)
 | Check | 1024x768 | 1180x820 | Result |
 |---|---|---|---|
-| Take down confirm vs trigger | dialog (338,203) 292x357; trigger (537,565) 94x44 | dialog (33,294) 292x357; trigger (32,656) 94x44 | no overlap; dialog opens above the trigger (flipped), fully on screen |
-| Pause popover vs pill | popover (16,175) 300x411; pill (12,127) 105x44 | popover (864,113) 300x411; pill (1019,65) 105x44 | no overlap |
-| Command band at 1180 | | band 121px tall; kill switch y=64, End exercise y=127 | wraps to a second row, as noted in story 12 (observed, not failed) |
+| Take down confirm vs trigger | dialog (338,203) 292x357; trigger (537,565) 94x44 | dialog (33,235) 292x357; trigger (32,597) 94x44 | no overlap; dialog opens above the trigger (flipped), fully on screen |
+| Pause popover vs pill | popover (708,113) 300x411; pill (863,65) 105x44 | popover (841,113) 300x411; pill (841,65) 105x44 | no overlap |
+| Command band at 1180 | | DEV: 121px, End exercise y=127 (second row). Production-equivalent (dev button hidden): 62px, kill y=64, End y=65 (one row) | one row in production; the wrap is a dev-only artifact (W-001) |
 | ENGINE / USAGE flyouts | | | start at or below the band bottom, inside the viewport, never over the kill switch (all four viewports) |
 
-Observation, not asserted: at 1180x820 the Pause popover (x 864 to 1164) extends 40px past the work area into the toolstrip column (starts at x=1124), covering the top of the PERSONAS, ENGINE and USAGE labels while it is open (see `freeze-controls-tablet.png`). It is dismissable and does not cover the pill or the command band. Raise with Tom if the popover should clamp to the work area.
+All geometry numbers are production-equivalent: the spec hides the dev-only `engine-degraded-simulate` button (as `capture.mjs` does), since it widens the band on the dev server only. The tablet screenshots are captured the same way.
+
+Observation (issue #626): at 1180x820 the Pause popover (x 841 to 1141) extends 17px past the work area into the toolstrip column (starts at x=1124), covering the top of the toolstrip labels while open. It does not cover the pill or the command band. PR #627 right-aligns the popover; a `test.fixme` in the spec (`pause popover at 1180x820`) asserts its right edge is at or left of the toolstrip once #627 merges, and should then be un-fixme'd.
+
+Follow-up (product, NFR-001): the Pause popover's Cancel link looks low-contrast on the dark navy background (visible in `freeze-controls-tablet.png`).
 
 ## Manual iPad checklist
 Chromium (touch emulation, coarse pointer) cannot show these. Check on a real iPad in Safari before calling B3 done (MT-D7):
