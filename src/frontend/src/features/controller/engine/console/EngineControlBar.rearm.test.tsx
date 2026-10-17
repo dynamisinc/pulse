@@ -14,7 +14,7 @@ import { ThemeProvider } from '@mui/material/styles'
 import { cobraTheme } from '@/theme/cobraTheme'
 import { ExerciseContextProvider } from '@/core/exerciseContext'
 import { resetExerciseClock, setExerciseClock } from '@/core/clock'
-import { resetTelemetryBuffer } from '@/core/telemetry'
+import { getEmittedTelemetryEvents, resetTelemetryBuffer } from '@/core/telemetry'
 import { postStore } from '@/features/social/services/postStore'
 import { reviewStore } from '../services/reviewStore'
 import { engineControlStore } from '../hooks/useEngineControl'
@@ -32,6 +32,12 @@ function renderBar() {
       </ExerciseContextProvider>
     </ThemeProvider>,
   )
+}
+
+const EXERCISE_ID = 'ex-mock-0001'
+
+function autonomyEvents() {
+  return getEmittedTelemetryEvents().filter(e => e.eventType === 'engine.autonomy_changed')
 }
 
 /** Live -> Suggest-only -> STOP, one tap each. */
@@ -90,6 +96,7 @@ describe('kill switch STOP -> Live on a coarse pointer', () => {
     mockPointer(true)
     renderBar()
     const killSwitch = await stopEngine()
+    const eventsBefore = autonomyEvents().length
     vi.useFakeTimers()
     fireEvent.click(killSwitch)
     const confirm = screen.getByTestId('engine-rearm-confirm')
@@ -106,6 +113,27 @@ describe('kill switch STOP -> Live on a coarse pointer', () => {
     fireEvent.click(confirm)
     fireEvent.click(confirm)
     expect(killSwitch).toHaveAttribute('data-mode', 'live')
+    // Exactly one re-arm reached the mode setter (one telemetry event), not one per tap.
+    expect(autonomyEvents()).toHaveLength(eventsBefore + 1)
+  })
+
+  it('drops a stale dialog when the engine is re-armed elsewhere (no second POST)', async () => {
+    mockPointer(true)
+    renderBar()
+    const killSwitch = await stopEngine()
+    fireEvent.click(killSwitch)
+    await screen.findByTestId('engine-rearm-dialog')
+    const eventsBefore = autonomyEvents().length
+
+    // Another controller re-armed it; this console adopts the server's mode silently.
+    act(() => {
+      engineControlStore.adoptServerMode(EXERCISE_ID, 'live')
+    })
+    await vi.waitFor(() => {
+      expect(screen.queryByTestId('engine-rearm-dialog')).not.toBeInTheDocument()
+    })
+    expect(killSwitch).toHaveAttribute('data-mode', 'live')
+    expect(autonomyEvents()).toHaveLength(eventsBefore)
   })
 
   it('Escape cancels, the engine stays STOPPED and focus returns to the kill switch', async () => {

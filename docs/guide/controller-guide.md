@@ -157,8 +157,7 @@ or reloads Pulse sees the end-of-exercise page.
 
 #### On a tablet
 
-EndEx is just as deliberate on an iPad or other touch screen. **End exercise** is a 44-pixel button at the far end of
-the command band, so it is never next to the engine switch. In **End the exercise?** the cursor stays in the **Type
+EndEx is just as deliberate on an iPad or other touch screen. **End exercise** is a 44-pixel button. In **End the exercise?** the cursor stays in the **Type
 END to confirm** field. If the on-screen keyboard opens, the dialog moves up so the field and **End exercise** stay
 in view. **Cancel** and **End exercise** are at least 44 pixels tall and well apart, with **End exercise** on the
 right. **End exercise** ignores taps for the first moment after the dialog opens (about 0.4 seconds) and only acts
@@ -462,8 +461,7 @@ A takedown cannot be undone.
 
 #### On a tablet
 
-Take down takes two deliberate taps on a touch screen too. The step opens fully on screen, below the row or above it
-if there is no room, and never over the **Take down** button you tapped. The four **Category** options are each at
+Take down takes two deliberate taps on a touch screen too. The step opens fully on screen, below the row or, if there is no room, above it. The four **Category** options are each at
 least 44 pixels tall, and the cursor starts on the selected category, not on **Confirm take down**. **Cancel** and
 **Confirm take down** are well apart, with **Confirm take down** on the right. **Confirm take down** ignores taps for
 about 0.4 seconds after the step opens and acts only once. Pressing and holding does nothing. Nothing is taken down
@@ -562,8 +560,8 @@ On a touch screen the **Pause** pill and every row in the popover are at least 4
 **Freeze world** and select **Pause**, the **FREEZE THE WORLD?** step opens with nothing selected, so a stray
 Enter or Space cannot freeze the world. It restates which holding page participants will see. **Back** and **Confirm
 freeze** are at least 44 pixels tall and well apart, with **Confirm freeze** on the right. **Confirm freeze** ignores
-taps for about 0.4 seconds after the step opens and acts only once. **Back**, or Esc on a hardware keyboard, returns
-you to the pill without freezing.
+taps for about 0.4 seconds after the step opens and acts only once. **Back** returns you to the list of tiers without
+freezing. Esc on a hardware keyboard closes the whole popover without freezing.
 
 ### To resume
 

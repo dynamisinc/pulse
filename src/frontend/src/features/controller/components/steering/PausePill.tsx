@@ -65,16 +65,18 @@
  *   - the pill, the radio rows, Cancel / Resume / Pause and Back / Confirm freeze are real 44px
  *     boxes (`minHeight`, no pseudo-element slop); Back and Confirm freeze are 16px apart with
  *     Confirm at the far edge;
- *   - the Freeze confirm step opens with NO focused button: focus goes to the step's own
- *     (non-interactive, `tabIndex -1`) container, so the first thing a keyboard or screen-reader
- *     user meets is the "FREEZE THE WORLD?" text, and Enter/Space cannot fire the freeze;
+ *   - the Freeze confirm step opens with NO focused button, on ALL pointers (rule 2 holds
+ *     everywhere): focus goes to the step's own (non-interactive, `tabIndex -1`) container, so
+ *     the first thing a keyboard or screen-reader user meets is the "FREEZE THE WORLD?" text,
+ *     and Enter/Space cannot fire the freeze;
  *   - Confirm freeze ignores taps for 400ms after the step opens (`useArmedConfirm`, shown as
  *     `aria-disabled`), fires once, and carries `touch-action: manipulation` / no selection / no
  *     long-press callout;
  *   - the step is shorter than the tier list and anchored to the top of the popover, so the
  *     "Pause" button the controller just tapped is no longer under the finger's second tap;
- *   - the popover's height is capped to the room under the pill, so it can never grow up over
- *     the pill that opened it, and MUI shifts it inside the viewport at 768 and 1180.
+ *   - the popover's height is capped to the room under the pill (its paper scrolls past that,
+ *     re-measured on resize and rotation while open), so MUI's edge shift cannot move it up over
+ *     the pill that opened it, and it stays inside the viewport at 768 and 1180.
  * The focus-trap and Escape contract above is MUI `Popover`'s own and is untouched.
  *
  * FULLY KEYBOARD-OPERABLE (NFR-001). The pill is a button (Enter/Space); the
@@ -239,10 +241,27 @@ export function PausePill() {
   useEffect(() => {
     if (confirmingFreeze) freezeStepRef.current?.focus({ preventScroll: true })
   }, [confirmingFreeze])
-  // Room under the pill (coarse only): the popover is capped to it so it cannot overlap the pill.
-  const roomBelow = anchorEl !== null && coarse
-    ? Math.round(window.innerHeight - anchorEl.getBoundingClientRect().bottom - 16)
-    : null
+  // Room under the pill (coarse only): the popover is capped to it (its paper scrolls) so MUI's
+  // edge shift can never move it up over the pill. Re-measured on resize / rotation while open.
+  const [roomBelow, setRoomBelow] = useState<number | null>(null)
+  useEffect(() => {
+    if (anchorEl === null || !coarse) {
+      setRoomBelow(null)
+      return undefined
+    }
+    const measure = () => {
+      setRoomBelow(Math.max(0, Math.round(
+        window.innerHeight - anchorEl.getBoundingClientRect().bottom - 16,
+      )))
+    }
+    measure()
+    window.addEventListener('resize', measure)
+    window.addEventListener('orientationchange', measure)
+    return () => {
+      window.removeEventListener('resize', measure)
+      window.removeEventListener('orientationchange', measure)
+    }
+  }, [anchorEl, coarse])
 
   // Each time the popover opens, seed the radio from the active tier (or the
   // first offered option when running) and clear any stale confirm step.
@@ -436,7 +455,7 @@ export function PausePill() {
             sx: {
               mt: 0.5,
               p: 1.5,
-              ...(roomBelow === null ? {} : { maxHeight: `max(240px, ${roomBelow}px)` }),
+              ...(roomBelow === null ? {} : { maxHeight: `${roomBelow}px`, overflowY: 'auto' }),
               width: 300,
               bgcolor: chrome.card,
               border: `1px solid ${chrome.line}`,

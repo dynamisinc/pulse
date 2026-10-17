@@ -99,8 +99,9 @@
  *   - Confirm carries `touch-action: manipulation`, no text selection and no long-press callout,
  *     and a context menu on it does nothing: no gesture reaches the action except a tap;
  *   - focus still opens on the selected CATEGORY, never on a destructive button (rule 2);
- *   - the popper flips (bottom-end -> top-end ...) and shifts with an 8px edge padding, so it
- *     stays on screen at 768 and 1180, and it never overlaps the trigger it is anchored to.
+ *   - the popper flips (bottom-end -> top-end ...) and shifts along its main axis with an 8px
+ *     edge padding, so it stays on screen at 768 and 1180. Flip never lands it on the trigger
+ *     (no cross-axis shift is used); on a fine pointer the popper config is unchanged.
  *
  * TELEMETRY. None here. `useTakedown` emits the one XC-004 `steering_action` per successful
  * takedown (the server emits none, DP-9), so this folder never needs the exercise scope.
@@ -670,15 +671,24 @@ export function TakedownAction({ post }: TakedownActionProps) {
           open={open}
           anchorEl={anchorEl}
           placement="bottom-end"
-          // Flip to the other side and shift along the edge so the step stays fully on screen at
-          // 768 and 1180 wide, never covering its own trigger (story 15, amendment §5 rule 5).
+          // Touch only: flip to the other side and shift along the main axis so the step stays
+          // fully on screen at 768 and 1180 wide (story 15, amendment §5 rule 5). No `altAxis`
+          // shift, which could push the panel over its trigger. A fine pointer keeps the
+          // original offset-only behaviour untouched.
           modifiers={[
             { name: 'offset', options: { offset: [0, 4] } },
-            {
-              name: 'flip',
-              options: { fallbackPlacements: ['top-end', 'bottom-start', 'top-start'], padding: 8 },
-            },
-            { name: 'preventOverflow', options: { padding: 8, altAxis: true } },
+            ...(coarse
+              ? [
+                {
+                  name: 'flip',
+                  options: {
+                    fallbackPlacements: ['top-end', 'bottom-start', 'top-start'],
+                    padding: 8,
+                  },
+                },
+                { name: 'preventOverflow', options: { padding: 8 } },
+              ]
+              : []),
           ]}
           // The Popper root is presentational; the dialog role lives on the panel.
           slotProps={{ root: { role: 'presentation' } }}

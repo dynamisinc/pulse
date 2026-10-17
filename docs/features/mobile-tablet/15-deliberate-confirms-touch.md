@@ -22,7 +22,11 @@ Touch must not weaken them or make them unusable. Staff world: COBRA.
 ## Implementation notes
 - Shared, touch-only logic lives in `controller/components/confirm/`: `useCoarsePointer` (`(pointer: coarse)`, never a width), `useArmedConfirm` (400ms arming delay + fire-once), `useVisualViewportInset`, `confirmTouch` (44px / 16px sx fragments).
 - Decision: the 400ms arming delay is **touch-only** (coarse pointer). Desktop keyboard users who press Enter on a freshly opened step must not be silently ignored, and desktop behaviour stays byte-for-byte as it was.
+- The Freeze step's no-focused-button rule applies on **all pointers** (amendment §5 rule 2 holds everywhere); the arming delay, 44px sizing, popper flip and re-arm confirm are coarse-pointer only.
 - Real layout space for 44px (`minHeight`/`minWidth`/`gap`); no pseudo-element hit-slop.
+
+## Deferred to story 16
+- S6: verify on a real iPad that focus returns to the trigger after each dialog closes (iOS Safari focus-return quirks), and the real-device geometry at 768 and 1180.
 
 ## Out of Scope
 Changing what the confirms do, adding hold-to-confirm gestures (parked as an option), new tiers, evaluator controls.

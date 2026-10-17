@@ -38,11 +38,11 @@ interface DialogOptions {
 function renderDialog(props: DialogOptions = {}) {
   const onConfirm = props.onConfirm ?? vi.fn()
   const onCancel = props.onCancel ?? vi.fn()
-  const ui = (error?: string) => (
+  const ui = (error?: string, pending = false) => (
     <ThemeProvider theme={cobraTheme}>
       <EndExerciseDialog
         exerciseName="Bay Shield"
-        pending={false}
+        pending={pending}
         error={error}
         onConfirm={onConfirm}
         onCancel={onCancel}
@@ -54,11 +54,14 @@ function renderDialog(props: DialogOptions = {}) {
     ...utils,
     onConfirm,
     onCancel,
-    rerenderWith: (error?: string) => utils.rerender(ui(error)),
+    rerenderWith: (error?: string, pending = false) => utils.rerender(ui(error, pending)),
   }
 }
 
+const realInnerHeight = window.innerHeight
+
 afterEach(() => {
+  Object.defineProperty(window, 'innerHeight', { configurable: true, value: realInnerHeight })
   vi.useRealTimers()
   restoreMatchMedia()
   resetLifecycleMock()
@@ -105,7 +108,7 @@ describe('EndExerciseDialog on a coarse pointer', () => {
     expect(onConfirm).toHaveBeenCalledTimes(1)
   })
 
-  it('allows one more attempt after a refused request (retry stays one tap)', () => {
+  it('runs a real pending cycle: tap, pending ignores taps, a refusal allows one more', () => {
     mockPointer(true)
     vi.useFakeTimers()
     const { onConfirm, rerenderWith } = renderDialog()
@@ -113,9 +116,18 @@ describe('EndExerciseDialog on a coarse pointer', () => {
     act(() => {
       vi.advanceTimersByTime(400)
     })
-    fireEvent.click(screen.getByTestId('end-exercise-confirm'))
-    rerenderWith('Refused')
-    fireEvent.click(screen.getByTestId('end-exercise-confirm'))
+    const confirm = () => screen.getByTestId('end-exercise-confirm')
+    fireEvent.click(confirm())
+    expect(onConfirm).toHaveBeenCalledTimes(1)
+
+    // The request is in flight: further taps are ignored.
+    rerenderWith(undefined, true)
+    fireEvent.click(confirm())
+    expect(onConfirm).toHaveBeenCalledTimes(1)
+
+    // The request was refused: the dialog stays open and one more tap is allowed.
+    rerenderWith('Refused', false)
+    fireEvent.click(confirm())
     expect(onConfirm).toHaveBeenCalledTimes(2)
   })
 
@@ -148,9 +160,14 @@ describe('EndExerciseDialog on a coarse pointer', () => {
 describe('EndExerciseDialog on a fine pointer', () => {
   it('is unchanged: End exercise fires at once, no keyboard padding', () => {
     mockPointer(false)
+    // A keyboard-sized visual viewport on a FINE pointer must not pad the container.
+    mockVisualViewport(400)
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 768 })
     const { onConfirm } = renderDialog()
     fireEvent.change(screen.getByTestId('end-exercise-confirm-input'), { target: { value: 'END' } })
     fireEvent.click(screen.getByTestId('end-exercise-confirm'))
     expect(onConfirm).toHaveBeenCalledTimes(1)
+    const container = document.querySelector('.MuiDialog-container') as HTMLElement
+    expect(['', '0', '0px']).toContain(getComputedStyle(container).paddingBottom)
   })
 })

@@ -279,6 +279,14 @@ export function EngineControlBar() {
   // `eslint-disable` needed — `degraded`/`modeSettledCount` are the only
   // MEANINGFUL triggers, and `refetchEngineSettings` is listed because it is
   // what the effect calls, not because it is expected to change.
+  // The re-arm confirm only makes sense while the engine is STOPPED. If the mode leaves 'stop'
+  // underneath it (a server-synced or other controller's re-arm), drop the dialog so a stale
+  // "Re-arm to Live" cannot fire a second POST.
+  const isStopped = engineControl.mode === 'stop'
+  useEffect(() => {
+    if (!isStopped) setConfirmingRearm(false)
+  }, [isStopped])
+
   const skippedInitialRefetch = useRef(false)
   useEffect(() => {
     if (!skippedInitialRefetch.current) {
@@ -496,7 +504,7 @@ export function EngineControlBar() {
       {/* e. Swamped mode — self-contained, lead-gated. */}
       <SwampedModeToggle />
 
-      {confirmingRearm && canControl && (
+      {confirmingRearm && canControl && isStopped && (
         <RearmConfirmDialog
           onCancel={() => setConfirmingRearm(false)}
           onConfirm={() => {

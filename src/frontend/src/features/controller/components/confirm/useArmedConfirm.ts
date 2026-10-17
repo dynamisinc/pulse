@@ -14,11 +14,13 @@
  *      step closes and reopens (or `resetKey` changes, for a step that legitimately stays open
  *      after a refused request, such as EndEx, so retrying is still one tap).
  *
- * DECISION: THE DELAY IS TOUCH-ONLY. `enabled` is `useCoarsePointer()` at every call site. The
- * amendment allows the delay everywhere "if harmless", but on a desktop a keyboard user who opens
- * Freeze and presses Enter on the first thing they see should not be silently ignored, and every
- * pre-existing click-straight-through test and the desktop feel stay exactly as they were. With
- * `enabled` false the step is armed the moment it is open; "fires once" still applies.
+ * DECISION: THE DELAY IS TOUCH-ONLY. `enabled` is `useCoarsePointer()` at every call site.
+ * TABLET-AMENDMENT §5 is headed "Deliberate confirms on touch", and the amendment's scope line
+ * (its line 6) says desktop at 1280px and wider does not change. So the delay applies on a
+ * coarse pointer only: a desktop
+ * keyboard user who opens Freeze and presses Enter right away is not silently ignored, and the
+ * desktop feel stays exactly as it was. With `enabled` false the step is armed the moment it is
+ * open; "fires once" still applies.
  *
  * The guard is a ref check at event time, so two taps in the same frame (before React re-renders)
  * still fire once. Timers are cleaned up on close and unmount.
@@ -77,9 +79,20 @@ export function useArmedConfirm({
     }
   }, [open, enabled, delayMs])
 
+  // `resetKey` allows one more fire, but must not re-arm a fire that happened this open cycle
+  // merely because the effect also runs on mount / when the step opens (that is handled above).
+  const prevOpenRef = useRef(open)
+  const mountedRef = useRef(false)
   useEffect(() => {
-    firedRef.current = false
-  }, [resetKey])
+    const wasOpen = prevOpenRef.current
+    prevOpenRef.current = open
+    if (!mountedRef.current) {
+      mountedRef.current = true
+      return
+    }
+    // Reset on a genuine resetKey change while the step stays open; opening is reset above.
+    if (open && wasOpen) firedRef.current = false
+  }, [resetKey, open])
 
   const guard = useCallback((action: () => void) => () => {
     if (!armedRef.current || firedRef.current) return

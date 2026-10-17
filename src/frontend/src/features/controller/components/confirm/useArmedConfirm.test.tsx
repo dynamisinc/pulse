@@ -75,6 +75,19 @@ describe('useArmedConfirm', () => {
     expect(onFire).toHaveBeenCalledTimes(2)
   })
 
+  it('does not re-arm a fired step just because it stays open (only resetKey does)', () => {
+    const onFire = vi.fn()
+    const { rerender } = render(<Probe enabled onFire={onFire} resetKey="a" />)
+    act(() => {
+      vi.advanceTimersByTime(400)
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'confirm' }))
+    // A re-render with the SAME key must not allow another fire.
+    rerender(<Probe enabled onFire={onFire} resetKey="a" />)
+    fireEvent.click(screen.getByRole('button', { name: 'confirm' }))
+    expect(onFire).toHaveBeenCalledTimes(1)
+  })
+
   it('is armed immediately when not enabled (fine pointer), and still fires once', () => {
     const onFire = vi.fn()
     render(<Probe enabled={false} onFire={onFire} />)
