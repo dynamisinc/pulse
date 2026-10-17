@@ -41,8 +41,8 @@ vi.mock('@/core/exerciseContext', async importOriginal => ({
   useExerciseScopeRefresh: () => vi.fn(),
 }))
 
-const COMPLETED: OrgExercise = { exerciseId: 'ex-c', name: 'Coastal Surge', status: 'completed' }
-const LIVE: OrgExercise = { exerciseId: 'ex-l', name: 'Harbor Live', status: 'live' }
+const COMPLETED: OrgExercise = { exerciseId: 'ex-c', name: 'Coastal Surge', status: 'completed', canManage: true }
+const LIVE: OrgExercise = { exerciseId: 'ex-l', name: 'Harbor Live', status: 'live', canManage: true }
 
 function renderPage() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })

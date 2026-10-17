@@ -65,8 +65,11 @@ export function ExerciseRowActions({ exercise }: ExerciseRowActionsProps) {
   // Story 17: rename and archive are org-admin / planner; a controller would get a 403, so the
   // actions are absent (a controller still sees the row's status in the table).
   const permissions = usePermissions()
-  const canRename = permissions.can('renameExercise')
-  const canArchive = permissions.can('archiveExercise')
+  // WR-005: ... and, per row, only where the server says the caller manages it (a planner only
+  // plans some exercises). A backend that predates the field omits it: org admin manages all.
+  const manages = exercise.canManage ?? permissions.role === 'orgAdmin'
+  const canRename = manages && permissions.can('renameExercise')
+  const canArchive = manages && permissions.can('archiveExercise')
   const archived = isArchivedStatus(exercise.status)
   const completed = isCompletedStatus(exercise.status)
 

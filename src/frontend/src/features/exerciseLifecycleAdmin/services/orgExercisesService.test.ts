@@ -76,6 +76,20 @@ describe('getOrgExercises — the wire contract', () => {
     expect(row?.createdAt).toBeUndefined()
   })
 
+  it('carries canManage through when sent and leaves it undefined when absent (WR-005)', async () => {
+    mockedGet.mockResolvedValue({
+      data: [
+        { exerciseId: 'e1', name: 'A', status: 'build', canManage: false },
+        { exerciseId: 'e2', name: 'B', status: 'build' },
+      ],
+    })
+
+    const rows = await getOrgExercises()
+
+    expect(rows[0]?.canManage).toBe(false)
+    expect(rows[1]?.canManage).toBeUndefined()
+  })
+
   it('carries an UNRECOGNISED status through instead of rejecting the whole response', async () => {
     // The narrowing is deliberately deferred to the row that renders it: one odd
     // literal must not blank the organization's entire portfolio on a
