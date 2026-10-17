@@ -52,6 +52,8 @@ const rawSources = import.meta.glob(
     './ParticipantSignInPage.tsx',
     '../services/participantSignInService.ts',
     '../completeSignIn.ts',
+    '../linkToken.ts',
+    '../services/joinService.ts',
   ],
   { eager: true, query: '?raw', import: 'default' },
 ) as Record<string, string>
@@ -61,6 +63,10 @@ const SERVICE_SOURCE = rawSources['../services/participantSignInService.ts'] ?? 
 // The shared "sign-in succeeded" step the page hands off to (Gate-2 W-2). It runs on the
 // participant path, so it is held to the same two-worlds rule as the page itself.
 const COMPLETE_SOURCE = rawSources['../completeSignIn.ts'] ?? ''
+// The home-screen link method's parser and the join exchange it reuses (#606): the
+// pasted link is a bearer credential, so both are held to the no-console rule too.
+const LINK_TOKEN_SOURCE = rawSources['../linkToken.ts'] ?? ''
+const JOIN_SERVICE_SOURCE = rawSources['../services/joinService.ts'] ?? ''
 const CSS_SOURCE = readSrcFile('features/login/pages/ParticipantSignInPage.module.css')
 
 /** Drops block comments and whole-line / trailing line comments, keeping code. */
@@ -173,6 +179,13 @@ describe('ParticipantSignInPage boundary - the two-worlds rule (D0 section 2)', 
     expect(forbiddenImports(COMPLETE_SOURCE)).toEqual([])
   })
 
+  it('the link-token parser and the join service import no MUI, COBRA or theme module', () => {
+    expect(LINK_TOKEN_SOURCE).toContain('export function extractJoinToken')
+    expect(JOIN_SERVICE_SOURCE).toContain('export async function signInWithLink')
+    expect(forbiddenImports(LINK_TOKEN_SOURCE)).toEqual([])
+    expect(forbiddenImports(JOIN_SERVICE_SOURCE)).toEqual([])
+  })
+
   it('the page takes its icons from FontAwesome', () => {
     expect(importSpecifiers(PAGE_CODE)).toContain('@fortawesome/react-fontawesome')
     expect(importSpecifiers(PAGE_CODE)).toContain('@fortawesome/free-solid-svg-icons')
@@ -195,6 +208,8 @@ describe('ParticipantSignInPage boundary - content security (NFR-004 / NFR-009)'
   it.each([
     ['page', PAGE_CODE],
     ['service', SERVICE_CODE],
+    ['link-token parser', stripComments(LINK_TOKEN_SOURCE)],
+    ['join service', stripComments(JOIN_SERVICE_SOURCE)],
   ])('the %s has no console output at all (the word and name are never logged)', (_label, code) => {
     expect(code).not.toMatch(/\bconsole\s*\./)
   })
@@ -254,7 +269,8 @@ describe('ParticipantSignInPage boundary - the Today\'s-word fields in the sourc
 
   it('every input on the page has a <label htmlFor> (no placeholder-only labels)', () => {
     const ids = INPUT_ELEMENTS.map(element => /\sid="([^"]+)"/.exec(element)?.[1])
-    expect(ids.length).toBe(5)
+    // Five on every page, plus the pasted-link field of the home-screen app (#606).
+    expect(ids.length).toBe(6)
     for (const id of ids) {
       expect(id).toBeDefined()
       expect(PAGE_CODE, `label for ${String(id)}`).toContain(`htmlFor="${String(id)}"`)
@@ -423,9 +439,9 @@ describe('ParticipantSignInPage boundary - Gate-1 folds (S-1, S-3, S-4, S-6, W-1
     expect(PAGE_CODE).toMatch(/\{isSubmitting \? 'Signing in…' : ''\}/)
   })
 
-  it('S-6: all three forms are method="post"', () => {
+  it('S-6: every form (three, plus the home-screen link form, #606) is method="post"', () => {
     const forms = Array.from(PAGE_CODE.matchAll(/<form\b[\s\S]*?>/g), match => match[0])
-    expect(forms).toHaveLength(3)
+    expect(forms).toHaveLength(4)
     for (const form of forms) {
       expect(form).toContain('method="post"')
     }

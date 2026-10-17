@@ -1,6 +1,6 @@
 # Story: Exercise report: controller-named lookalike pairs
 
-**Feature:** Demo feedback cut (10/20)  ·  **Phase:** 1 (post-demo)  ·  **Status:** In Review
+**Feature:** Demo feedback cut (10/20)  ·  **Phase:** 1 (post-demo)  ·  **Status:** Complete
 **Requirements:** EVL-030 (lite), SOC-052  ·  **Decisions:** DF-49  ·  **Issue:** #588
 **Stack:** backend + frontend  ·  **Review:** Tier-1  ·  **Priority:** Could  ·  **Effort:** M
 
