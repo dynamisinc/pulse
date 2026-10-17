@@ -12,8 +12,8 @@ vi.mock('@/core/exerciseContext', () => ({
 const emit = vi.hoisted(() => vi.fn())
 vi.mock('@/core/telemetry/mockSink', () => ({ emitTelemetryEvent: emit }))
 
-// The iOS sheet ships OFF (Tom, 10/16); pin it ON here so the sheet's behaviour stays covered
-// for when the flag is flipped back. The off path is covered in iosFlag.test.tsx.
+// Pin the iOS sheet ON here (it ships on again since #606) so this suite does not depend on
+// the flag's current value. The off path is covered in iosFlag.test.tsx.
 vi.mock('./installConfig', () => ({ IOS_INSTALL_PROMPT_ENABLED: true }))
 
 import { InstallPrompt } from './InstallPrompt'
@@ -170,7 +170,10 @@ describe('iOS Safari', () => {
     const dlg = screen.getByRole('region', { name: /Add Bay Shield to your home screen/ })
     expect(dlg.textContent).toMatch(/Share/)
     expect(dlg.textContent).toMatch(/Add to Home Screen/)
-    expect(dlg.querySelectorAll('svg').length).toBeGreaterThanOrEqual(2)
+    expect(dlg.querySelectorAll('svg').length).toBeGreaterThanOrEqual(3)
+    // #606: the installed app opens signed out; the last step says how to get in.
+    expect(dlg.textContent).toMatch(/Open Bay Shield from your home screen and paste your sign-in/)
+    expect(dlg.textContent).not.toMatch(/Pulse/)
     fireEvent.click(screen.getByRole('button', { name: 'Close' }))
     expect(screen.queryByRole('region')).toBeNull()
     unmount()

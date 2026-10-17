@@ -6,6 +6,8 @@
  * turned off: iOS Home Screen apps do not share storage with Safari, so the installed app opens
  * signed out (see story 11 known limitations).
  *
- * OFF for now: Tom, 10/16 ("iOS prompt off for now"). Android keeps its banner.
+ * Was OFF (Tom, 10/16) until the installed app had a way in. Back ON with #606 option A: the
+ * home-screen app's sign-in page leads with "Paste your sign-in link" (the existing /auth/join
+ * token), with Today's word beside it, and the sheet's last step says so.
  */
-export const IOS_INSTALL_PROMPT_ENABLED = false
+export const IOS_INSTALL_PROMPT_ENABLED = true
