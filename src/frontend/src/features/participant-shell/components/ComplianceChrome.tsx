@@ -70,6 +70,20 @@ import { useChromeConfig } from '../chromeConfig'
 
 /** The shell's fixed compliance-chrome banner height (D7-005, SHELL-CONTRACT §1). */
 const BANNER_HEIGHT = '22px'
+/**
+ * SAFE AREAS (mobile-tablet WR-001). The app sets `viewport-fit=cover`, so on a notched /
+ * home-indicator phone the page extends under the system UI. Each banner therefore pads
+ * itself by the relevant `env(safe-area-inset-*)` (text stays in the 22px band) and its
+ * height, AND the published `--pulse-chrome-top/bottom` inset, grow by the same amount, so
+ * everything pinned below/above the banners (alert bar, tab bar, modals) clears them.
+ * `env()` is 0 where unsupported, so desktop is unchanged (22px).
+ */
+export const TOP_BANNER_HEIGHT = `calc(${BANNER_HEIGHT} + env(safe-area-inset-top, 0px))`
+export const BOTTOM_BANNER_HEIGHT = `calc(${BANNER_HEIGHT} + env(safe-area-inset-bottom, 0px))`
+const TOP_BANNER_PADDING =
+  'env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) 0 env(safe-area-inset-left, 0px)'
+const BOTTOM_BANNER_PADDING =
+  '0 env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px)'
 /** The var value when chrome is off (D7-008) — collapses `ShellLayout`'s inset to zero. */
 const NO_CHROME_HEIGHT = '0px'
 
@@ -82,9 +96,8 @@ const bannerBaseStyle: CSSProperties = {
   position: 'fixed',
   left: 0,
   right: 0,
-  height: BANNER_HEIGHT,
+  boxSizing: 'border-box',
   margin: 0,
-  padding: 0,
   fontFamily: "'Figtree', system-ui, sans-serif",
   fontWeight: 700,
   fontSize: '10px',
@@ -110,11 +123,11 @@ let activeChromeInstances = 0
  * writes (last writer wins on the shared pair); the increment is what lets
  * {@link releaseChromeInset} defer the clear until the last instance leaves.
  */
-function acquireChromeInset(height: string): void {
+function acquireChromeInset(top: string, bottom: string): void {
   const root = document.documentElement
   activeChromeInstances += 1
-  root.style.setProperty(SHELL_CHROME_TOP_VAR, height)
-  root.style.setProperty(SHELL_CHROME_BOTTOM_VAR, height)
+  root.style.setProperty(SHELL_CHROME_TOP_VAR, top)
+  root.style.setProperty(SHELL_CHROME_BOTTOM_VAR, bottom)
 }
 
 /**
@@ -153,8 +166,8 @@ export function ComplianceChrome() {
   // still clears them on unmount, matching the "0px fallback IS the contract"
   // note on SHELL_CHROME_TOP_VAR/BOTTOM_VAR.
   useLayoutEffect(() => {
-    const height = config.enabled ? BANNER_HEIGHT : NO_CHROME_HEIGHT
-    acquireChromeInset(height)
+    if (config.enabled) acquireChromeInset(TOP_BANNER_HEIGHT, BOTTOM_BANNER_HEIGHT)
+    else acquireChromeInset(NO_CHROME_HEIGHT, NO_CHROME_HEIGHT)
     return releaseChromeInset
   }, [config.enabled])
 
@@ -172,6 +185,8 @@ export function ComplianceChrome() {
         style={{
           ...bannerBaseStyle,
           top: 0,
+          height: TOP_BANNER_HEIGHT,
+          padding: TOP_BANNER_PADDING,
           color: config.top.fg,
           backgroundColor: config.top.bg,
         }}
@@ -185,6 +200,8 @@ export function ComplianceChrome() {
         style={{
           ...bannerBaseStyle,
           bottom: 0,
+          height: BOTTOM_BANNER_HEIGHT,
+          padding: BOTTOM_BANNER_PADDING,
           color: config.bottom.fg,
           backgroundColor: config.bottom.bg,
         }}

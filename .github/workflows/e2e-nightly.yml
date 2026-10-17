@@ -1,0 +1,74 @@
+# ---------------------------------------------------------------------------
+# e2e-nightly.yml — participant/staff browser e2e (Playwright), nightly + manual
+# ---------------------------------------------------------------------------
+# Decision MT-D1 (docs/features/mobile-tablet/feature.md): the Playwright suite
+# in src/frontend/e2e runs on a schedule and on demand, NOT on every PR.
+#
+# What it does: installs the frontend, downloads Playwright's Chromium on the
+# runner, and runs `npm run test:e2e` at the phone-360 / phone-390 / tablet-768
+# viewports. Playwright starts the mock-data dev server itself
+# (tools/guide-screenshots/serve.mjs on port 5199), so NO backend, secrets or
+# Azure access are involved.
+#
+# Safety: read-only token, no secrets, no environments, no deploy steps. A
+# failing run only uploads Playwright's test-results folder as an artifact.
+# Standalone by design: ci.yml and the deploy-* workflows are not touched.
+# ---------------------------------------------------------------------------
+name: E2E (nightly)
+
+on:
+  schedule:
+    - cron: '17 7 * * *' # 07:17 UTC daily (~03:17 US Eastern)
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-nightly
+  cancel-in-progress: true
+
+jobs:
+  playwright:
+    name: Playwright (phones + tablet)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: src/frontend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: src/frontend/.nvmrc
+          cache: npm
+          cache-dependency-path: src/frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Run e2e
+        run: npm run test:e2e
+        env:
+          CI: 'true'
+
+      # @perf burst-legibility spec (mobile-tablet 07). `--if-present` keeps
+      # this a no-op until the test:e2e:perf script lands with story 07.
+      - name: Run e2e perf (@perf)
+        run: npm run test:e2e:perf --if-present
+        env:
+          CI: 'true'
+
+      - name: Upload Playwright failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-test-results
+          path: src/frontend/test-results
+          retention-days: 7
