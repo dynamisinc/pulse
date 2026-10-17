@@ -28,7 +28,7 @@ Status: all Not Started. B1 audit (2026-10-16) folded in: PR #562 alert bar veri
 | # | Story | Wave (brief) | Requirement(s) | Status | Issue |
 |---|-------|--------------|----------------|--------|-------|
 | 01 | [Browser e2e harness and viewport kit](01-e2e-harness-viewport-kit.md) | B1 | NFR-001, XC-001 | In Review | — |
-| 02 | [Participant core screens on phones (feed, thread, composer, profile, Explore, Pinned)](02-participant-core-screens-phones.md) | B1 | NFR-001, NFR-002, COR-053, D0 §4.6 | Not Started | — |
+| 02 | [Participant core screens on phones (feed, thread, composer, profile, Explore, Pinned)](02-participant-core-screens-phones.md) | B1 | NFR-001, NFR-002, COR-053, D0 §4.6 | In Review | — |
 | 03 | [Participant entry screens on phones (join, sign-in, holding page)](03-participant-entry-screens-phones.md) | B1 | NFR-001, D0 §4.6 | Not Started | — |
 | 04 | [Media viewer and composer media on phones](04-media-viewer-phones.md) | B1 | NFR-001, NFR-008 | Not Started | — |
 | 05 | [Alert bar on phones: verify and touch-target gaps](05-alert-bar-phones-verify.md) | B1 | PRT-010, PRT-012, NFR-001 | In Progress | — |
@@ -84,6 +84,6 @@ types, `ExerciseScopeDto`): merge `main` before touching those types. Existing r
 | MT-D5 | Install-prompt telemetry | **No** XC-004 events for PWA install or dismiss. |
 | MT-D6 | Burst thresholds (story 07) | **Accepted:** no long task over 200 ms; p95 frame of 50 ms or less at 4x CPU throttle. |
 | MT-D7 | Real-device checks | **Tom, per PR.** Each mobile PR carries a short iPhone/iPad checklist and the UAT URL. |
-| MT-D8 | `/notifications` redirect in mock | Unknown. Investigate in story 02 and fix it, or document it if it is behind a flag. |
+| MT-D8 | `/notifications` redirect in mock | Investigated in story 02: a real cold-load bug, not a flag. Fixed with the shell's `variantPending`. |
 
 Still open: story 09 uses the brand logo as the app icon. If fetching the logo cross-origin forces a backend route, that needs C1 rule 1 coordination.

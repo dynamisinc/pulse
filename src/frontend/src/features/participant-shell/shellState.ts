@@ -57,6 +57,13 @@ import type { ShellVariant } from './mountContract'
 /** The mount-relevant slice of shell state this story resolves. */
 export interface ShellStateResult {
   readonly variant: ShellVariant
+  /**
+   * `true` while the shell-state query has not resolved, so `variant` is still
+   * the least-affordance default rather than the exercise's confirmed value.
+   * Lets a channel WAIT instead of acting on the placeholder (e.g. redirecting
+   * a cold-loaded `/notifications` away; mobile-tablet MT-D8).
+   */
+  readonly pending: boolean
 }
 
 /** Wire shape of the (future) `/shell-state` response body's mount-relevant field. */
@@ -118,7 +125,7 @@ const mockAdapter: AxiosAdapter = config => Promise.resolve({
  */
 const USE_MOCK_SHELL_STATE = USE_MOCK_DATA
 
-async function fetchShellState(): Promise<ShellStateResult> {
+async function fetchShellState(): Promise<Pick<ShellStateResult, 'variant'>> {
   const response = await api.get<ShellStateResponseBody>(
     '/shell-state',
     USE_MOCK_SHELL_STATE ? { adapter: mockAdapter } : undefined,
@@ -157,10 +164,10 @@ const LEAST_AFFORDANCE_VARIANT: ShellVariant = 'readOnly'
 export function useShellState(): ShellStateResult {
   const { exerciseId } = useExerciseContext()
 
-  const { data } = useQuery({
+  const { data, isPending } = useQuery({
     queryKey: ['participant-shell', 'shell-state', exerciseId],
     queryFn: fetchShellState,
   })
 
-  return { variant: data?.variant ?? LEAST_AFFORDANCE_VARIANT }
+  return { variant: data?.variant ?? LEAST_AFFORDANCE_VARIANT, pending: isPending }
 }

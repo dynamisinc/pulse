@@ -168,7 +168,7 @@ export function ShellLayout({ children }: ShellLayoutProps) {
   // read (inside useShellState) only to key that query, never rendered here.
   useExerciseContext()
 
-  const { variant } = useShellState()
+  const { variant, pending: variantPending } = useShellState()
   const { now: scenarioNow } = useScenarioTime()
 
   // How many mounted channels currently render their own account control (see the
@@ -180,7 +180,7 @@ export function ShellLayout({ children }: ShellLayoutProps) {
     return () => setAccountClaims(count => Math.max(0, count - 1))
   }, [])
 
-  const mountProps: ShellMountProps = { variant, scenarioNow }
+  const mountProps: ShellMountProps = { variant, scenarioNow, variantPending }
 
   return (
     <div data-testid="pulse-shell-root" style={shellRootStyle}>
