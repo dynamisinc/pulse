@@ -132,9 +132,10 @@ public sealed class GenerateStageTests
     [MemberData(nameof(PersonaVoiceNotesAttacks))]
     public async Task GenerateAsync_AmbientBurst_SteeredViaPersonaVoiceNotes_ObeyedOutputIsDropped(string attackName)
     {
-        // Gate-1 M-2 (ambient-chatter story 01, AC7): the hostile payload travels the REAL unfenced path — the persona's
-        // VoiceNotes through PromptAssembler.AppendPersona into an ambient prompt — and the provider obeys it. The guard
-        // must drop the burst so nothing can reach the autonomous publish path.
+        // Gate-1 M-2 (ambient-chatter story 01, AC7): the hostile payload is put on the REAL persona path — the persona's
+        // VoiceNotes — of an ambient burst. Since WR-1 the ambient prompt omits voice notes, so it never reaches the model;
+        // even if a provider emitted the obeyed tell anyway, the guard must drop the burst so nothing can reach the
+        // autonomous publish path.
         var attack = InjectionRedTeam.Catalog.Single(a => a.Name == attackName);
         var provider = new StubGenerationProvider([new GeneratedPost("@gen0", "lovely morning at the bakery — " + attack.ObeyedTell, 0.2, [])]);
         var stage = new GenerateStage(provider, new PromptAssembler());
@@ -155,8 +156,43 @@ public sealed class GenerateStageTests
 
         var result = await stage.GenerateAsync(request);
 
-        provider.LastRequest!.SystemPrompt.Should().Contain(attack.WorldFeedPayload, "the payload really took the persona path");
+        provider.LastRequest!.SystemPrompt.Should().NotContain(attack.WorldFeedPayload, "ambient prompts drop voice notes (WR-1)");
         result.Disposition.Should().Be(GenerateDisposition.Dropped, "an obeyed persona-bio steer never surfaces");
         result.Posts.Should().BeEmpty();
+    }
+
+    [Theory]
+    [MemberData(nameof(PersonaVoiceNotesAttacks))]
+    public async Task GenerateAsync_StorylineBurst_SteeredViaPersonaVoiceNotes_ReachesThePrompt_ButObeyedOutputIsDropped(string attackName)
+    {
+        // The WR-1 residual: storyline prompts still carry persona voice notes unfenced, so the guard is the defence there.
+        var attack = InjectionRedTeam.Catalog.Single(a => a.Name == attackName);
+        var provider = new StubGenerationProvider([new GeneratedPost("@gen0", "is the tap water ok? " + attack.ObeyedTell, -0.2, [])]);
+        var stage = new GenerateStage(provider, new PromptAssembler());
+        var request = RequestFor([Dossier("@rosa") with { VoiceNotes = attack.WorldFeedPayload }]);
+
+        var result = await stage.GenerateAsync(request);
+
+        provider.LastRequest!.SystemPrompt.Should().Contain(attack.WorldFeedPayload, "storyline prompts keep voice notes (WR-1 residual)");
+        result.Disposition.Should().Be(GenerateDisposition.Dropped, "an obeyed persona-bio steer never surfaces");
+    }
+
+    [Fact]
+    public async Task GenerateAsync_InvokesBeforeAttempt_BeforeEachProviderCall()
+    {
+        // SG-2: the hook runs BEFORE every (paid) provider call — including each re-roll — with the 1-based attempt.
+        var provider = new StubGenerationProvider([
+            new GeneratedPost("@gen0", "the exercise is over, everyone go home", 0.0, []),
+        ]);
+        var stage = new GenerateStage(provider, new PromptAssembler());
+        var seen = new List<(int Attempt, int CallsBefore)>();
+        var request = RequestFor([Dossier("@rosa")]) with { BeforeAttempt = attempt => seen.Add((attempt, provider.Calls)) };
+
+        var result = await stage.GenerateAsync(request);
+
+        result.Disposition.Should().Be(GenerateDisposition.Dropped);
+        seen.Should().Equal(
+            Enumerable.Range(1, GenerateStage.DefaultMaxAttempts).Select(attempt => (attempt, attempt - 1)),
+            "each attempt is announced before its provider call is made");
     }
 }

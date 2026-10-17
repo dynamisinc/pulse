@@ -52,6 +52,12 @@ using Pulse.WebApi.Features.EngineRuntime.Telemetry;
 /// </remarks>
 public sealed partial class ReactionLoopDriver
 {
+    /// <summary>
+    /// The <c>storylineTag</c> a review-mode ambient draft carries. Together with <see cref="Guid.Empty"/> as its storyline
+    /// id it is how the approve path recognises an ambient draft (no schema column; S-1).
+    /// </summary>
+    internal const string AmbientStorylineTag = "#ambient";
+
     private readonly ConcurrentDictionary<Guid, AmbientWindow> _ambientWindows = new();
 
     /// <summary>
@@ -164,15 +170,54 @@ public sealed partial class ReactionLoopDriver
         window.ClearHeld();
         pendingEvents.Add(BuildAmbientDecidedEvent(ambientContext, intent, tick.TickState.PostsThisMinute, publishPath, heldReason: null));
 
-        // The per-minute / per-hour budget is spent at GENERATION (a call costs money whether or not it publishes), on
-        // the server wall clock, so a scenario time-jump can never reset the spend window.
-        window.Record(now, intent.Count);
-
         var draftId = Guid.NewGuid();
         var tier = _tierPolicy.ResolveTier(exerciseId, intent.Tier);
-        var generated = await _generateStage
-            .GenerateAsync(BuildAmbientGenerateRequest(registration, intent, tier), cancellationToken)
-            .ConfigureAwait(false);
+
+        // The per-minute / per-hour budget is spent at GENERATION (a call costs money whether or not it publishes), on
+        // the server wall clock, so a scenario time-jump can never reset the spend window. SG-2 (supersedes the Gate-1
+        // W-B after-the-fact count): EVERY attempt — the first and each guard / diversity / ambient-filter re-roll — is
+        // counted BEFORE its provider call through the stage's BeforeAttempt hook, so a call that throws is counted too.
+        // The burst's own re-roll spend is tracked as in-flight and excused by PolicyStillAdmits, so an accepted burst
+        // is never retro-held by its own re-rolls; it bounds the NEXT decision. EndBurst clears the in-flight mark.
+        var generateRequest = BuildAmbientGenerateRequest(registration, intent, tier) with
+        {
+            BeforeAttempt = attempt => window.RecordAttempt(_timeProvider.GetUtcNow(), intent.Count, isReRoll: attempt > 1),
+        };
+
+        try
+        {
+            var generated = await _generateStage.GenerateAsync(generateRequest, cancellationToken).ConfigureAwait(false);
+            return await SettleAmbientBurstAsync(
+                tick, registry, gate, window, intent, generated, draftId, ambientContext, publishPath, autonomous, pendingEvents, reviewItems, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        finally
+        {
+            window.EndBurst();
+        }
+    }
+
+    /// <summary>
+    /// Routes a generated ambient burst: a dropped burst is recorded; a review-mode burst is re-checked and queued; an
+    /// autonomous burst is published post by post through the last-boundary re-check. Returns the published count.
+    /// </summary>
+    private async Task<int> SettleAmbientBurstAsync(
+        AmbientTickInputs tick,
+        EngineAmbientPolicyRegistry registry,
+        IEngineLifecyclePublishGate gate,
+        AmbientWindow window,
+        GenerationIntent intent,
+        GenerateStageResult generated,
+        Guid draftId,
+        EngineTelemetryContext ambientContext,
+        string? publishPath,
+        bool autonomous,
+        List<TelemetryEvent> pendingEvents,
+        List<EngineReviewItemEntity> reviewItems,
+        CancellationToken cancellationToken)
+    {
+        var registration = tick.Registration;
+        var exerciseId = registration.ExerciseId;
 
         // AC7: a guard (or diversity) failure publishes NOTHING; the engine.generated drop event is the count.
         if (generated.Disposition != GenerateDisposition.Accepted)
@@ -183,6 +228,18 @@ public sealed partial class ReactionLoopDriver
 
         if (!autonomous)
         {
+            // W-7: generation takes seconds, and the world can close (EndEx, Freeze, Pause engine) or the policy can be
+            // turned off / narrowed meanwhile. Re-run the lifecycle gate (the one await) and then, with no await before
+            // the queue add, the current policy: a draft the world or the policy no longer admits is discarded and
+            // recorded (heldReason), never queued for a controller to approve into a closed exercise.
+            await gate.RefreshAsync(exerciseId, cancellationToken).ConfigureAwait(false);
+            var reviewHeld = ReviewQueueHold(tick.ScopedServices, registration, registry, gate, window, intent);
+            if (reviewHeld is not null)
+            {
+                pendingEvents.Add(BuildAmbientGeneratedEvent(ambientContext, draftId, generated, publishPath: null, reviewHeld));
+                return 0;
+            }
+
             var item = BuildAmbientReviewItem(exerciseId, intent, generated.Posts, draftId);
             reviewItems.Add(item);
             tick.TickState.DemandMeter.Record(DemandEventKind.QueueFire, tick.ScenarioMinute);
@@ -192,7 +249,7 @@ public sealed partial class ReactionLoopDriver
         }
 
         var (published, held) = await PublishAmbientAsync(
-            tick, registry, gate, policy, intent, generated.Posts, draftId, ambientContext, pendingEvents, cancellationToken)
+            tick, registry, gate, window, intent, generated.Posts, draftId, ambientContext, pendingEvents, cancellationToken)
             .ConfigureAwait(false);
 
         tick.TickState.PostsThisMinute += published;
@@ -209,7 +266,7 @@ public sealed partial class ReactionLoopDriver
         AmbientTickInputs tick,
         EngineAmbientPolicyRegistry registry,
         IEngineLifecyclePublishGate gate,
-        AmbientTierPolicy policy,
+        AmbientWindow window,
         GenerationIntent intent,
         IReadOnlyList<GeneratedPost> posts,
         Guid draftId,
@@ -239,7 +296,8 @@ public sealed partial class ReactionLoopDriver
             await gate.RefreshAsync(exerciseId, cancellationToken).ConfigureAwait(false);
 
             // ---- NO await from here to the publisher call ----------------------------------------------------
-            var held = PublishHold(tick.ScopedServices, registration, registry, gate);
+            var held = PublishHold(
+                tick.ScopedServices, registration, registry, gate, window, intent.AmbientTopicSeed, post.PersonaHandle, out var current);
             if (held is not null)
             {
                 if (held == EngineEventPayloads.HeldSafety)
@@ -259,7 +317,8 @@ public sealed partial class ReactionLoopDriver
                 Posts = [post with { ScenarioTime = CurrentScenarioTime(registration) }],
                 Trigger = EngineEventPayloads.AmbientFloorTrigger,
                 PublishPath = EngineEventPayloads.PublishPathAmbientAutonomous,
-                AuthorizedBy = policy.SetBy,
+                // Gate-1 S-1: the CURRENT policy's setter (the snapshot PublishHold just admitted), not the tick-start one.
+                AuthorizedBy = current.SetBy,
             };
             var result = await publisher.PublishBurstAsync(burst, cancellationToken).ConfigureAwait(false);
             published += result.Posts.Count(outcome => outcome.Outcome == EnginePublishOutcome.Published);
@@ -272,23 +331,120 @@ public sealed partial class ReactionLoopDriver
     /// The synchronous last-boundary re-check (AC5/AC6/AC8). Safety first (so a kill switch is reported as such even
     /// though its request path also demoted the policy), then the policy, then the lifecycle gate. <c>null</c> = publish.
     /// </summary>
-    private static string? PublishHold(
+    /// <remarks>
+    /// Orchestrator review W-6: the policy half reads the CURRENT policy snapshot, not just its mode — the persona being
+    /// published must still be allow-listed and of an eligible type, the burst's topic must still be allow-listed, both
+    /// caps must still be above zero, and the spend already recorded must not exceed a cap lowered mid-flight. A policy
+    /// narrowed between generation and publish therefore holds the post (<c>held:policy</c>). Synchronous: no await.
+    /// Gate-1 S-1: <paramref name="current"/> hands that same snapshot back so the publish is attributed to the policy's
+    /// CURRENT setter, never the tick-start one.
+    /// </remarks>
+    private string? PublishHold(
         IServiceProvider scopedServices,
         ReactionLoopRegistration registration,
         EngineAmbientPolicyRegistry registry,
-        IEngineLifecyclePublishGate gate)
+        IEngineLifecyclePublishGate gate,
+        AmbientWindow window,
+        string? topic,
+        string personaHandle,
+        out AmbientTierPolicy current)
     {
         if (SafetyHeld(scopedServices, registration))
         {
+            current = registry.Get(registration.ExerciseId);
             return EngineEventPayloads.HeldSafety;
         }
 
-        if (registry.Get(registration.ExerciseId).Mode != AmbientPolicyMode.Autonomous || !registry.AutonomyAuthorized)
+        current = registry.Get(registration.ExerciseId);
+        if (current.Mode != AmbientPolicyMode.Autonomous
+            || !registry.AutonomyAuthorized
+            || !PolicyStillAdmits(current, registration, window, topic, [personaHandle]))
         {
             return EngineEventPayloads.HeldPolicy;
         }
 
         return gate.CanPublish(registration.ExerciseId) ? null : EngineEventPayloads.HeldLifecycle;
+    }
+
+    /// <summary>
+    /// The synchronous re-check before a REVIEW-mode ambient draft is queued (orchestrator review W-7): the policy must
+    /// not have been turned off or narrowed (<see cref="PolicyStillAdmits"/>) and the lifecycle gate (refreshed by the
+    /// caller immediately before) must be open. <c>null</c> = queue it.
+    /// </summary>
+    /// <remarks>
+    /// Orchestrator review SG-3: a kill-switch FULL STOP (<c>IsGenerationStopped</c>) that lands while the draft was
+    /// generating holds it (<c>held:safety</c>) — STOPPED halts generation, so nothing it produced is queued. The softer
+    /// levers (kill switch Suggest-only, degraded mode, cut to Fake) do NOT: review drafts still wait for a human under
+    /// them, exactly as the controller guide describes, so they are deliberately not checked here.
+    /// </remarks>
+    private string? ReviewQueueHold(
+        IServiceProvider scopedServices,
+        ReactionLoopRegistration registration,
+        EngineAmbientPolicyRegistry registry,
+        IEngineLifecyclePublishGate gate,
+        AmbientWindow window,
+        GenerationIntent intent)
+    {
+        if (GenerationStopped(scopedServices, registration))
+        {
+            return EngineEventPayloads.HeldSafety;
+        }
+
+        var current = registry.Get(registration.ExerciseId);
+        if (current.Mode == AmbientPolicyMode.Off
+            || !PolicyStillAdmits(current, registration, window, intent.AmbientTopicSeed, intent.Personas.Select(p => p.Handle)))
+        {
+            return EngineEventPayloads.HeldPolicy;
+        }
+
+        return gate.CanPublish(registration.ExerciseId) ? null : EngineEventPayloads.HeldLifecycle;
+    }
+
+    /// <summary>
+    /// Whether the CURRENT policy still admits content on <paramref name="topic"/> voiced by <paramref name="personaHandles"/>:
+    /// both caps above zero; the spend already recorded in the rolling windows not above either cap; the topic still
+    /// allow-listed; and every persona still allow-listed, in the loop's cast, and of an ambient-eligible type
+    /// (<see cref="AmbientPolicyValidator.EligiblePersonaTypes"/>). Pure in-memory; no await.
+    /// </summary>
+    private bool PolicyStillAdmits(
+        AmbientTierPolicy current,
+        ReactionLoopRegistration registration,
+        AmbientWindow window,
+        string? topic,
+        IEnumerable<string> personaHandles)
+    {
+        if (current.MaxPerMinute <= 0 || current.MaxPerHour <= 0)
+        {
+            return false;
+        }
+
+        // The burst was counted at generation, so its own posts are inside these windows already: only a cap LOWERED
+        // below what was really spent holds it. The burst's own re-roll attempts (SG-2: counted before each call) are
+        // excused here, so a burst that passed on a re-roll is not retro-held by its own re-rolls.
+        var now = _timeProvider.GetUtcNow();
+        var ownReRolls = window.InFlightReRollPosts;
+        if (window.CountSince(now - TimeSpan.FromMinutes(1)) - ownReRolls > current.MaxPerMinute
+            || window.CountSince(now - TimeSpan.FromHours(1)) - ownReRolls > current.MaxPerHour)
+        {
+            return false;
+        }
+
+        if (topic is null || !current.TopicAllowList.Contains(topic, StringComparer.Ordinal))
+        {
+            return false;
+        }
+
+        foreach (var handle in personaHandles)
+        {
+            if (!registration.PersonasByHandle.TryGetValue(handle, out var persona)
+                || !current.PersonaAllowList.Contains(persona.InstanceId)
+                || !AmbientPolicyValidator.IsEligiblePersonaType(persona.Dossier.Type))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /// <summary>
@@ -313,6 +469,15 @@ public sealed partial class ReactionLoopDriver
 
         return scopedServices.GetService<IGenerationProviderCutRegistry>()?.IsCutToFake(exerciseId) ?? false;
     }
+
+    /// <summary>
+    /// Whether the kill switch's FULL STOP is active for the exercise (SG-3) — the loop's own autonomy state or the
+    /// shared registry's. Unlike <see cref="SafetyHeld"/> it ignores Suggest-only, degraded mode and the cut to Fake.
+    /// </summary>
+    private static bool GenerationStopped(IServiceProvider scopedServices, ReactionLoopRegistration registration) =>
+        registration.Autonomy.IsGenerationStopped
+        || (scopedServices.GetService<EngineAutonomyRegistry>() is { } autonomy
+            && autonomy.GetOrCreate(registration.ExerciseId).IsGenerationStopped);
 
     /// <summary>Lowers an autonomous policy to off and records it once (actor: the engine), as the request levers do.</summary>
     private void DemoteAndRecord(
@@ -370,6 +535,12 @@ public sealed partial class ReactionLoopDriver
     /// <see cref="StorylineBrief.IsAmbient"/>, so the assembler frames it as everyday background life — no storyline,
     /// no incident, no officials, no escalation text — rather than as a storyline to advance.
     /// </summary>
+    /// <remarks>
+    /// Orchestrator review W-3: the prompt's brief is the SETTING only (<see cref="AmbientSettingBrief"/> over the
+    /// registration's place name), never <see cref="ReactionLoopRegistration.ExerciseBrief"/>, which narrates the
+    /// incident; and the active storylines' hashtags + title keywords ride along as output exclusions for
+    /// <see cref="AmbientOutputFilter"/>, so a post that drifts into the incident is dropped like a guard failure.
+    /// </remarks>
     private static GenerateStageRequest BuildAmbientGenerateRequest(
         ReactionLoopRegistration registration,
         GenerationIntent intent,
@@ -382,7 +553,7 @@ public sealed partial class ReactionLoopDriver
         return new GenerateStageRequest
         {
             ExerciseId = registration.ExerciseId,
-            ExerciseBrief = registration.ExerciseBrief,
+            ExerciseBrief = AmbientSettingBrief.Build(registration.AmbientPlaceName),
             Storyline = new StorylineBrief
             {
                 // With IsAmbient the assembler reads Title as the topic seed phrase and ignores the storyline-only
@@ -397,6 +568,9 @@ public sealed partial class ReactionLoopDriver
             },
             Personas = intent.Personas,
             Tier = tier,
+            AmbientExclusions = AmbientOutputFilter.BuildExclusions(
+                registration.Storylines.SelectMany(storyline => storyline.Hashtags),
+                registration.Storylines.Select(storyline => storyline.Title)),
         };
     }
 
@@ -434,7 +608,7 @@ public sealed partial class ReactionLoopDriver
             CountdownStartedScenarioMinute = null,
             CountdownMinutes = null,
             CountdownDecision = null,
-            StorylineTag = "#ambient",
+            StorylineTag = AmbientStorylineTag,
             StorylineBrief = $"Ambient chatter · {topic}",
             ActionLabel = $"ambient · {topic}",
             Posts = draftPosts,
@@ -564,6 +738,41 @@ public sealed partial class ReactionLoopDriver
         private readonly Queue<(DateTimeOffset At, int Count)> _generated = new();
         private readonly Lock _gate = new();
         private string? _lastHeld;
+        private int _inFlightReRollPosts;
+
+        /// <summary>The posts the in-flight burst's own re-roll attempts recorded (SG-2); 0 between bursts.</summary>
+        public int InFlightReRollPosts
+        {
+            get
+            {
+                lock (_gate)
+                {
+                    return _inFlightReRollPosts;
+                }
+            }
+        }
+
+        /// <summary>Records one generation attempt BEFORE its provider call (SG-2); a re-roll is also marked in-flight.</summary>
+        public void RecordAttempt(DateTimeOffset at, int count, bool isReRoll)
+        {
+            Record(at, count);
+            if (isReRoll)
+            {
+                lock (_gate)
+                {
+                    _inFlightReRollPosts += count;
+                }
+            }
+        }
+
+        /// <summary>Ends the in-flight burst: its re-rolls stay counted in the window but are no longer excused.</summary>
+        public void EndBurst()
+        {
+            lock (_gate)
+            {
+                _inFlightReRollPosts = 0;
+            }
+        }
 
         public void Record(DateTimeOffset at, int count)
         {

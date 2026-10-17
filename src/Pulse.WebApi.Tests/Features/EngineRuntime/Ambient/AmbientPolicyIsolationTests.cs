@@ -1,6 +1,7 @@
 namespace Pulse.WebApi.Tests.Features.EngineRuntime.Ambient;
 
 using System;
+using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
@@ -9,11 +10,13 @@ using System.Text.Json;
 using System.Threading.Tasks;
 using FluentAssertions;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Pulse.Core.Features.Ambient.Models;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.EngineRuntime;
+using Pulse.WebApi.Features.EngineRuntime.Telemetry;
 using Pulse.WebApi.Tests.Data;
 using Pulse.WebApi.Tests.Helpers;
 using Xunit;
@@ -115,6 +118,38 @@ public sealed class AmbientPolicyIsolationTests
         (await client.PostAsJsonAsync(PolicyRoute, Body("review"))).StatusCode.Should().Be(HttpStatusCode.Unauthorized);
         (await client.GetAsync(SettingsRoute)).StatusCode.Should().Be(HttpStatusCode.Unauthorized);
         Registry(host).Get(exerciseA).Mode.Should().Be(AmbientPolicyMode.Off);
+    }
+
+    [RequiresDockerFact]
+    public async Task ASpoofedActingHumanId_IsNotRecorded_TheVerifiedStaffUserIs()
+    {
+        // SG-7, endpoint level (W-2): attribution comes from the verified session's StaffUser, never the body.
+        const string spoofed = "spoofed-lead-99";
+        var exercise = await SeedExerciseAsync();
+        var token = await SeedStaffSessionAsync(sessionExercise: exercise, assignedTo: exercise);
+        using var host = new AmbientHost(_fixture.ConnectionString!);
+        using var client = Client(host, token);
+
+        var response = await client.PostAsJsonAsync(PolicyRoute, new
+        {
+            actingHumanId = spoofed,
+            mode = "review",
+            maxPerMinute = 2,
+            maxPerHour = 20,
+            topicAllowList = new[] { "food" },
+            timeZone = "UTC",
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var setBy = Registry(host).Get(exercise).SetBy;
+        setBy.Should().NotBe(spoofed, "the client-supplied actingHumanId is never trusted for attribution");
+        Guid.TryParse(setBy, out var staffUserId).Should().BeTrue("SetBy is the verified session's StaffUser id");
+
+        await using var read = _fixture.CreateContext();
+        var audit = await read.TelemetryEvents.IgnoreQueryFilters()
+            .Where(e => e.ExerciseId == exercise && e.EventType == EngineEventTypes.TierPolicyChanged)
+            .ToListAsync();
+        audit.Should().ContainSingle().Which.Actor.ActingHumanId.Should().Be(staffUserId.ToString());
     }
 
     [RequiresDockerFact]

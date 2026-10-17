@@ -2,6 +2,7 @@ namespace Pulse.Core.Features.Generation.Services;
 
 using System.Globalization;
 using System.Text;
+using Pulse.Core.Features.Ambient.Services;
 using Pulse.Core.Features.Generation.Models;
 
 /// <summary>Turns a storyline + cast + world context into a provider-neutral <see cref="GenerationRequest"/> (story 02).</summary>
@@ -40,6 +41,7 @@ public sealed class PromptAssembler : IPromptAssembler
             PostCount = postCount,
             SystemPrompt = BuildSystemPrompt(input, postCount),
             WorldFeed = WorldFeedFence.Fence(input.WorldPosts),
+            IsAmbient = input.Storyline.IsAmbient,
         };
     }
 
@@ -52,7 +54,9 @@ public sealed class PromptAssembler : IPromptAssembler
         sb.AppendLine("You are the crowd-simulation engine for a closed emergency-management training exercise.");
         if (ambient)
         {
-            // Ambient chatter is NOT a reaction to anything: everyday life, with the exercise brief demoted to setting.
+            // Ambient chatter is NOT a reaction to anything: everyday life, with the brief demoted to setting. The ambient
+            // caller passes a SETTING-ONLY brief (AmbientSettingBrief: the place name, never the incident narrative —
+            // orchestrator review W-3), and AmbientOutputFilter checks the output side.
             sb.AppendLine("You generate short social-media posts authored BY simulated members of the public about their");
             sb.AppendLine("ordinary everyday lives. You are not a chat assistant and you never speak as yourself.");
             sb.AppendLine();
@@ -88,9 +92,11 @@ public sealed class PromptAssembler : IPromptAssembler
           .AppendLine(" personas, each in their own voice");
         foreach (var persona in input.Personas)
         {
-            // Ambient chatter skips prior-post exemplars: a persona's recent posts are usually storyline reactions,
-            // and conditioning everyday small talk on them would pull the incident back into the background.
-            AppendPersona(sb, persona, includeRecentPosts: !ambient);
+            // Ambient chatter skips prior-post exemplars AND voice notes: a persona's recent posts are usually storyline
+            // reactions, and seeded voice notes are routinely incident-specific ("is the water safe for my kids?",
+            // "complains about mixed messaging") — conditioning everyday small talk on either pulls the incident back
+            // into the background (orchestrator review WR-1). Only the non-sensitive style signals remain.
+            AppendPersona(sb, persona, includeVoiceNotes: !ambient, includeRecentPosts: !ambient, cleanDisplayName: ambient);
         }
 
         sb.AppendLine();
@@ -156,17 +162,28 @@ public sealed class PromptAssembler : IPromptAssembler
         sb.AppendLine("about the background-chatter topic above, as everyday small talk. Then call emit_posts.");
     }
 
-    private static void AppendPersona(StringBuilder sb, PersonaDossier p, bool includeRecentPosts)
+    private static void AppendPersona(
+        StringBuilder sb,
+        PersonaDossier p,
+        bool includeVoiceNotes,
+        bool includeRecentPosts,
+        bool cleanDisplayName)
     {
-        sb.Append("- ").Append(p.Handle).Append(" (").Append(p.DisplayName).Append(") — type: ").Append(p.Type)
+        // The display name is staff-authored text in the TRUSTED stratum, unfenced. On the ambient path (which can
+        // publish autonomously) it is reduced like the setting brief — letters/digits/space and ' . -, length-capped —
+        // so a hostile name cannot open a new prompt section. Storyline prompts keep it verbatim (cache-prefix stability;
+        // ContentGuard + the review queue backstop them, as for voice notes).
+        var displayName = cleanDisplayName ? AmbientSettingBrief.CleanName(p.DisplayName) : p.DisplayName;
+        sb.Append("- ").Append(p.Handle).Append(" (").Append(displayName).Append(") — type: ").Append(p.Type)
           .Append("; audience band: ").AppendLine(p.AudienceBand.ToString(CultureInfo.InvariantCulture));
 
-        // Persona voice notes are staff-authored dossier text and enter the TRUSTED stratum unfenced. They are NOT
-        // fenced like WorldFeedFence here on purpose: every storyline prompt carries them, so fencing would change all
-        // non-ambient prompts (and their cache prefix) materially. A hostile note that steers the model is instead
-        // caught downstream by ContentGuard before anything publishes — pinned by the red-team's PersonaVoiceNotes
-        // vector (InjectionRedTeam.AssembleViaPersonaVoiceNotes, ambient-chatter story 01 AC7).
-        if (!string.IsNullOrWhiteSpace(p.VoiceNotes))
+        // Persona voice notes are staff-authored dossier text and enter the TRUSTED stratum unfenced — STORYLINE prompts
+        // only. They are NOT fenced like WorldFeedFence here on purpose: every storyline prompt carries them, so fencing
+        // would change all storyline prompts (and their cache prefix) materially. A hostile note that steers a storyline
+        // burst is instead caught downstream by ContentGuard and lands in the human review queue — pinned by the
+        // red-team's PersonaVoiceNotes vector (InjectionRedTeam.AssembleViaPersonaVoiceNotes). Ambient prompts omit voice
+        // notes entirely (orchestrator review WR-1), so on the autonomous ambient path the payload never reaches the model.
+        if (includeVoiceNotes && !string.IsNullOrWhiteSpace(p.VoiceNotes))
         {
             sb.Append("  voice: ").AppendLine(p.VoiceNotes.Trim());
         }

@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
@@ -40,7 +41,7 @@ public sealed class EngineAmbientPolicyServiceTests
     {
         using var harness = new Harness(currentExerciseId: null);
 
-        var result = await harness.Service.SetAmbientPolicyAsync(Request("review"));
+        var result = await harness.SetPolicyAsync(Request("review"));
 
         result.Outcome.Should().Be(EngineReviewOutcome.ScopeUnresolved, "an unresolved scope is a 401, never a default write");
     }
@@ -50,7 +51,7 @@ public sealed class EngineAmbientPolicyServiceTests
     {
         using var harness = new Harness(Guid.NewGuid());
 
-        var result = await harness.Service.SetAmbientPolicyAsync(Request("review", actingHumanId: null));
+        var result = await harness.SetPolicyAsync(Request("review", actingHumanId: null));
 
         result.Outcome.Should().Be(EngineReviewOutcome.Invalid, "COR-018 attribution is required");
     }
@@ -61,7 +62,7 @@ public sealed class EngineAmbientPolicyServiceTests
         var exerciseId = Guid.NewGuid();
         using var harness = new Harness(exerciseId, authorized: false);
 
-        var result = await harness.Service.SetAmbientPolicyAsync(Request("autonomous"));
+        var result = await harness.SetPolicyAsync(Request("autonomous"));
 
         result.Outcome.Should().Be(EngineReviewOutcome.Invalid);
         result.ValidationError.Should().Contain("not authorized by PROVIDER-GOVERNANCE §8");
@@ -76,7 +77,7 @@ public sealed class EngineAmbientPolicyServiceTests
         using var harness = new Harness(exerciseId);
         var persona = await harness.SeedPersonaAsync(exerciseId);
 
-        var result = await harness.Service.SetAmbientPolicyAsync(Request("review", personas: [persona.ToString()]));
+        var result = await harness.SetPolicyAsync(Request("review", personas: [persona.ToString()]));
 
         result.Outcome.Should().Be(EngineReviewOutcome.Ok);
         var dto = result.Settings!.AmbientPolicy;
@@ -93,7 +94,8 @@ public sealed class EngineAmbientPolicyServiceTests
         var events = await harness.EventsAsync(exerciseId);
         var audit = events.Should().ContainSingle().Subject;
         audit.EventType.Should().Be(EngineEventTypes.TierPolicyChanged, "the #353 steering-change type is reused, not forked");
-        audit.Actor.ActingHumanId.Should().Be("controller-7");
+        audit.Actor.ActingHumanId.Should().Be(
+            harness.StaffUserId.ToString(), "attribution is the verified session's staff user, not the body (W-2)");
         using var payload = JsonDocument.Parse(audit.Payload!);
         payload.RootElement.GetProperty("policy").GetString().Should().Be("ambient");
         payload.RootElement.GetProperty("fromMode").GetString().Should().Be("off");
@@ -109,7 +111,7 @@ public sealed class EngineAmbientPolicyServiceTests
         using var harness = new Harness(exerciseA);
         var foreign = await harness.SeedPersonaAsync(exerciseB);
 
-        var result = await harness.Service.SetAmbientPolicyAsync(Request("review", personas: [foreign.ToString()]));
+        var result = await harness.SetPolicyAsync(Request("review", personas: [foreign.ToString()]));
 
         result.Outcome.Should().Be(EngineReviewOutcome.Invalid, "only personas of THIS exercise may be allow-listed (AC1/AC3)");
         result.ValidationError.Should().Contain("not a persona of this exercise");
@@ -122,7 +124,7 @@ public sealed class EngineAmbientPolicyServiceTests
     {
         using var harness = new Harness(Guid.NewGuid());
 
-        var result = await harness.Service.SetAmbientPolicyAsync(Request("review", personas: [Guid.NewGuid().ToString()]));
+        var result = await harness.SetPolicyAsync(Request("review", personas: [Guid.NewGuid().ToString()]));
 
         result.Outcome.Should().Be(EngineReviewOutcome.Invalid);
     }
@@ -132,7 +134,7 @@ public sealed class EngineAmbientPolicyServiceTests
     {
         using var harness = new Harness(Guid.NewGuid());
 
-        var result = await harness.Service.SetAmbientPolicyAsync(Request("review", perMinute: 61));
+        var result = await harness.SetPolicyAsync(Request("review", perMinute: 61));
 
         result.Outcome.Should().Be(EngineReviewOutcome.Invalid);
         result.ValidationError.Should().Contain("MaxEnginePostsPerMinute");
@@ -156,7 +158,7 @@ public sealed class EngineAmbientPolicyServiceTests
     {
         var exerciseId = Guid.NewGuid();
         using var harness = new Harness(exerciseId);
-        (await harness.Service.SetAmbientPolicyAsync(Request("autonomous"))).Outcome.Should().Be(EngineReviewOutcome.Ok);
+        (await harness.SetPolicyAsync(Request("autonomous"))).Outcome.Should().Be(EngineReviewOutcome.Ok);
 
         await harness.Service.EngageKillSwitchAsync(mode, new EngineReviewActionInput("lead-1", "UTC"));
         harness.Ambient.Get(exerciseId).Mode.Should().Be(AmbientPolicyMode.Off, "the kill switch lowers ambient at once (AC6)");
@@ -175,7 +177,7 @@ public sealed class EngineAmbientPolicyServiceTests
     {
         var exerciseId = Guid.NewGuid();
         using var harness = new Harness(exerciseId);
-        await harness.Service.SetAmbientPolicyAsync(Request("autonomous"));
+        await harness.SetPolicyAsync(Request("autonomous"));
 
         await harness.Service.CutGenerationToFakeAsync(new EngineReviewActionInput("lead-1", "UTC"));
 
@@ -193,14 +195,14 @@ public sealed class EngineAmbientPolicyServiceTests
         await harness.Service.EngageKillSwitchAsync(mode, new EngineReviewActionInput("lead-1", "UTC"));
         var eventsBefore = (await harness.EventsAsync(exerciseId)).Count;
 
-        var result = await harness.Service.SetAmbientPolicyAsync(Request("autonomous"));
+        var result = await harness.SetPolicyAsync(Request("autonomous"));
 
         result.Outcome.Should().Be(EngineReviewOutcome.Invalid);
         result.ValidationError.Should().Be("engine is stopped or cut to Fake — restore it before enabling autonomous ambient");
         harness.Ambient.Get(exerciseId).Mode.Should().Be(AmbientPolicyMode.Off);
         (await harness.EventsAsync(exerciseId)).Should().HaveCount(eventsBefore, "a rejected change is not an audited change");
 
-        (await harness.Service.SetAmbientPolicyAsync(Request("review"))).Outcome.Should().Be(
+        (await harness.SetPolicyAsync(Request("review"))).Outcome.Should().Be(
             EngineReviewOutcome.Ok, "review drafts still wait for a human, so review mode stays selectable");
     }
 
@@ -211,14 +213,14 @@ public sealed class EngineAmbientPolicyServiceTests
         using var harness = new Harness(exerciseId);
         await harness.Service.CutGenerationToFakeAsync(new EngineReviewActionInput("lead-1", "UTC"));
 
-        var rejected = await harness.Service.SetAmbientPolicyAsync(Request("autonomous"));
+        var rejected = await harness.SetPolicyAsync(Request("autonomous"));
 
         rejected.Outcome.Should().Be(EngineReviewOutcome.Invalid);
         rejected.ValidationError.Should().Contain("restore it before enabling autonomous ambient");
         harness.Ambient.Get(exerciseId).Mode.Should().Be(AmbientPolicyMode.Off);
 
         await harness.Service.RestoreGenerationProviderAsync(new EngineReviewActionInput("lead-1", "UTC"));
-        (await harness.Service.SetAmbientPolicyAsync(Request("autonomous"))).Outcome.Should().Be(
+        (await harness.SetPolicyAsync(Request("autonomous"))).Outcome.Should().Be(
             EngineReviewOutcome.Ok, "once restored, a human may select autonomous again");
     }
 
@@ -227,12 +229,161 @@ public sealed class EngineAmbientPolicyServiceTests
     {
         var exerciseId = Guid.NewGuid();
         using var harness = new Harness(exerciseId);
-        await harness.Service.SetAmbientPolicyAsync(Request("review"));
+        await harness.SetPolicyAsync(Request("review"));
 
         await harness.Service.EngageKillSwitchAsync(KillSwitchMode.DropToSuggest, new EngineReviewActionInput("lead-1", "UTC"));
 
         harness.Ambient.Get(exerciseId).Mode.Should().Be(AmbientPolicyMode.Review, "review drafts already wait for a human");
     }
+
+    // ---- orchestrator delta-review W-2: a lever landing between the safety check and the swap ---------
+
+    [Fact]
+    public async Task ACutToFake_LandingBetweenTheSafetyCheckAndTheSwap_IsCaughtByThePostCheck_AndDemotedByTheEngine()
+    {
+        // The cut reads "not cut" for the in-loop pre-check, then "cut" — exactly a cut that lands after the check
+        // and before TrySet (its own demotion ran while the policy was not yet autonomous, so it was a no-op).
+        var exerciseId = Guid.NewGuid();
+        var cut = new CutAfterFirstReadRegistry();
+        using var harness = new Harness(exerciseId, providerCut: cut);
+
+        var result = await harness.SetPolicyAsync(Request("autonomous"));
+
+        result.Outcome.Should().Be(EngineReviewOutcome.Invalid, "the post-swap re-check returns the same 400 as the pre-check");
+        result.ValidationError.Should().Be(EngineReviewService.AutonomousWhileSafetyHeldError);
+        harness.Ambient.Get(exerciseId).Mode.Should().Be(
+            AmbientPolicyMode.Off, "autonomous must never survive under an engaged safety lever");
+
+        var events = await harness.EventsAsync(exerciseId);
+        events.Should().HaveCount(2, "the controller's swap really was live, and the engine's demotion follows it");
+        using var demotion = JsonDocument.Parse(events.Last().Payload!);
+        demotion.RootElement.GetProperty("fromMode").GetString().Should().Be("autonomous");
+        demotion.RootElement.GetProperty("toMode").GetString().Should().Be("off");
+        demotion.RootElement.GetProperty("reason").GetString().Should().Be("safety-clamp");
+        events.Last().Actor.Kind.Should().Be("engine");
+        events.Last().Actor.ActingHumanId.Should().BeNull("the engine lowered it, not a human");
+    }
+
+    [Fact]
+    public async Task NoLeverEngaged_AutonomousSurvivesThePostCheck()
+    {
+        var exerciseId = Guid.NewGuid();
+        using var harness = new Harness(exerciseId);
+
+        (await harness.SetPolicyAsync(Request("autonomous"))).Outcome.Should().Be(EngineReviewOutcome.Ok);
+        harness.Ambient.Get(exerciseId).Mode.Should().Be(AmbientPolicyMode.Autonomous);
+        (await harness.EventsAsync(exerciseId)).Should().ContainSingle("no lever, no demotion");
+    }
+
+    // ---- orchestrator review W-2: attribution from the verified session, never the body -------------
+
+    [Fact]
+    public async Task NoAuthenticatedStaffUser_Is401_AndChangesNothing()
+    {
+        var exerciseId = Guid.NewGuid();
+        using var harness = new Harness(exerciseId);
+
+        var result = await harness.SetPolicyAsync(Request("review"), authenticated: false);
+
+        result.Outcome.Should().Be(EngineReviewOutcome.ScopeUnresolved, "no verified staff identity fails closed (401)");
+        harness.Ambient.Get(exerciseId).Mode.Should().Be(AmbientPolicyMode.Off);
+        (await harness.EventsAsync(exerciseId)).Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ASpoofedActingHumanId_DoesNotBecomeSetBy_OrTheAuditActor()
+    {
+        var exerciseId = Guid.NewGuid();
+        using var harness = new Harness(exerciseId);
+
+        var result = await harness.SetPolicyAsync(Request("autonomous", actingHumanId: "the-exercise-lead"));
+
+        result.Outcome.Should().Be(EngineReviewOutcome.Ok);
+        harness.Ambient.Get(exerciseId).SetBy.Should().Be(
+            harness.StaffUserId.ToString(), "an autonomous post is attributed to the verified staff user, not to a body field");
+        harness.Ambient.Get(exerciseId).SetBy.Should().NotBe("the-exercise-lead");
+        (await harness.EventsAsync(exerciseId)).Single().Actor.ActingHumanId.Should().Be(harness.StaffUserId.ToString());
+    }
+
+    // ---- orchestrator review W-4: only Resident / Helper personas ---------------------------------
+
+    [Theory]
+    [InlineData("agency")]
+    [InlineData("news-outlet")]
+    [InlineData("bad-actor")]
+    [InlineData("influencer")]
+    public async Task APersonaOfAnIneligibleArchetype_Is400_NamingThePersonaAndItsType(string profileType)
+    {
+        var exerciseId = Guid.NewGuid();
+        using var harness = new Harness(exerciseId);
+        var persona = await harness.SeedPersonaAsync(exerciseId, profileType);
+
+        var result = await harness.SetPolicyAsync(Request("review", personas: [persona.ToString()]));
+
+        result.Outcome.Should().Be(EngineReviewOutcome.Invalid);
+        result.ValidationError.Should().Contain(persona.ToString()).And.Contain(profileType).And.Contain("not eligible for ambient");
+        harness.Ambient.Get(exerciseId).Mode.Should().Be(AmbientPolicyMode.Off);
+    }
+
+    [Theory]
+    [InlineData("citizen")]
+    [InlineData("Citizen")]
+    [InlineData("CITIZEN")]
+    public async Task ACitizenArchetype_IsEligible_WhateverItsStoredCase(string profileType)
+    {
+        // Gate-1 S-3: the stored archetype is compared case-insensitively, so a "Citizen" row is not a spurious 400.
+        var exerciseId = Guid.NewGuid();
+        using var harness = new Harness(exerciseId);
+        var persona = await harness.SeedPersonaAsync(exerciseId, profileType);
+
+        var result = await harness.SetPolicyAsync(Request("review", personas: [persona.ToString()]));
+
+        result.Outcome.Should().Be(EngineReviewOutcome.Ok);
+    }
+
+    [Theory]
+    [InlineData(PersonaType.Outlet, false)]
+    [InlineData(PersonaType.Agency, false)]
+    [InlineData(PersonaType.Troll, false)]
+    [InlineData(PersonaType.Resident, true)]
+    [InlineData(PersonaType.Helper, true)]
+    public async Task APersonaInTheEngineCast_IsJudgedByItsEngineType(PersonaType type, bool accepted)
+    {
+        var exerciseId = Guid.NewGuid();
+        var loops = new ReactionLoopRegistry();
+        using var harness = new Harness(exerciseId, loops: loops);
+        var persona = await harness.SeedPersonaAsync(exerciseId); // stored archetype: citizen
+        loops.Register(CastRegistration(exerciseId, persona, type));
+
+        var result = await harness.SetPolicyAsync(Request("review", personas: [persona.ToString()]));
+
+        if (accepted)
+        {
+            result.Outcome.Should().Be(EngineReviewOutcome.Ok);
+            result.Settings!.AmbientPolicy.VoiceablePersonaIds.Should().Equal(persona.ToString());
+        }
+        else
+        {
+            result.Outcome.Should().Be(EngineReviewOutcome.Invalid, "the engine cast's type wins over the stored archetype");
+            result.ValidationError.Should().Contain(type.ToString()).And.Contain("eligible: Resident, Helper");
+        }
+    }
+
+    private static ReactionLoopRegistration CastRegistration(Guid exerciseId, Guid personaId, PersonaType type) => new()
+    {
+        ExerciseId = exerciseId,
+        ExerciseBrief = "brief",
+        TimeZone = "UTC",
+        ScenarioStart = ScenarioStart,
+        TimeZoneInfo = TimeZoneInfo.Utc,
+        Storylines = [],
+        PersonasByHandle = new Dictionary<string, EnginePersona>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["@cast"] = new EnginePersona(personaId, new PersonaDossier { Handle = "@cast", DisplayName = "Cast", Type = type }),
+        },
+        Autonomy = new EngineAutonomyRegistry().GetOrCreate(exerciseId),
+        ControllerDeskId = Guid.NewGuid(),
+    };
 
     private static EngineAmbientPolicyRequest Request(
         string mode,
@@ -254,7 +405,11 @@ public sealed class EngineAmbientPolicyServiceTests
         private readonly string _dbName = $"ambient-svc-{Guid.NewGuid():N}";
         private readonly PulseDbContext _db;
 
-        public Harness(Guid? currentExerciseId, bool authorized = true)
+        public Harness(
+            Guid? currentExerciseId,
+            bool authorized = true,
+            IReactionLoopRegistry? loops = null,
+            IGenerationProviderCutRegistry? providerCut = null)
         {
             var context = new ExerciseContext { CurrentExerciseId = currentExerciseId };
             _db = new PulseDbContext(Options(), context);
@@ -265,7 +420,8 @@ public sealed class EngineAmbientPolicyServiceTests
             }
 
             Ambient = new EngineAmbientPolicyRegistry(
-                Microsoft.Extensions.Options.Options.Create(new EngineAmbientGovernanceOptions { AmbientAutonomyAuthorized = authorized }));
+                Microsoft.Extensions.Options.Options.Create(new EngineAmbientGovernanceOptions { AmbientAutonomyAuthorized = authorized }),
+                loops);
             Service = new EngineReviewService(
                 new EngineReviewStore(_db),
                 _db,
@@ -278,16 +434,22 @@ public sealed class EngineAmbientPolicyServiceTests
                 new EngineTierPolicyRegistry(),
                 new ClaudeNamedProvider(),
                 Microsoft.Extensions.Options.Options.Create(new GenerationOptions()),
-                new GenerationProviderCutRegistry(),
+                providerCut ?? new GenerationProviderCutRegistry(),
                 NullLogger<EngineReviewService>.Instance,
                 Ambient);
         }
 
         public EngineReviewService Service { get; }
 
+        /// <summary>The authenticated staff user the harness's "endpoint" resolves from the session (W-2).</summary>
+        public Guid StaffUserId { get; } = Guid.NewGuid();
+
+        public Task<EngineSettingsResult> SetPolicyAsync(EngineAmbientPolicyRequest request, bool authenticated = true) =>
+            Service.SetAmbientPolicyAsync(request, authenticated ? StaffUserId : null);
+
         public EngineAmbientPolicyRegistry Ambient { get; }
 
-        public async Task<Guid> SeedPersonaAsync(Guid exerciseId)
+        public async Task<Guid> SeedPersonaAsync(Guid exerciseId, string profileType = Persona.DefaultPersonaType)
         {
             var id = Guid.NewGuid();
             await using var seed = new PulseDbContext(Options(), new ExerciseContext { CurrentExerciseId = exerciseId });
@@ -298,6 +460,7 @@ public sealed class EngineAmbientPolicyServiceTests
                 DisplayName = "Rosa",
                 Handle = $"@rosa{id:N}"[..12],
                 Kind = "npc",
+                PersonaType = profileType,
             });
             await seed.SaveChangesAsync();
             return id;
@@ -313,6 +476,18 @@ public sealed class EngineAmbientPolicyServiceTests
 
         private DbContextOptions<PulseDbContext> Options() =>
             new DbContextOptionsBuilder<PulseDbContext>().UseInMemoryDatabase(_dbName).Options;
+    }
+
+    /// <summary>Reads "not cut" on the first <see cref="IsCutToFake"/> call and "cut" on every later one (delta-review W-2).</summary>
+    private sealed class CutAfterFirstReadRegistry : IGenerationProviderCutRegistry
+    {
+        private int _reads;
+
+        public bool IsCutToFake(Guid exerciseId) => Interlocked.Increment(ref _reads) > 1;
+
+        public bool Cut(Guid exerciseId) => true;
+
+        public bool Restore(Guid exerciseId) => true;
     }
 
     /// <summary>A non-Fake provider NAME, so the cut-to-Fake lever really cuts (it is a no-op when already Fake).</summary>

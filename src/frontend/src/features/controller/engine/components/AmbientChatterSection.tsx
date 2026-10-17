@@ -29,7 +29,7 @@
  * in, which keeps it unit-testable without a store.
  */
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Box, Stack, Typography } from '@mui/material'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import type { IconDefinition } from '@fortawesome/fontawesome-svg-core'
@@ -42,7 +42,7 @@ import {
   faRobot,
   faTriangleExclamation,
 } from '@fortawesome/free-solid-svg-icons'
-import { CobraPrimaryButton, CobraTextField } from '@/theme/styledComponents'
+import { CobraPrimaryButton, CobraSecondaryButton, CobraTextField } from '@/theme/styledComponents'
 import { consoleChrome as chrome } from '../../consoleChrome'
 import {
   AMBIENT_MODES,
@@ -53,6 +53,7 @@ import {
   type AmbientPolicyDraft,
   type AmbientPolicyDto,
 } from '../models/ambientPolicyContract'
+import { ambientRaiseKind, type AmbientRaiseKind } from '../models/ambientRaise'
 
 /** A persona the controller can allow-list (id is what goes on the wire). */
 export interface AmbientPersonaOption {
@@ -119,7 +120,7 @@ interface ChipListProps {
   readonly disabled: boolean
   readonly onToggle: (id: string) => void
   readonly emptyOptionsText: string
-  /** Optional per-option annotation (text, never colour-only), e.g. "not in engine cast". */
+  /** Optional per-option annotation (text, never colour-only), e.g. "not eligible for ambient". */
   readonly optionNote?: (id: string) => string | null
 }
 
@@ -258,7 +259,7 @@ export function AmbientChatterSection(props: AmbientChatterSectionProps) {
   const topicOptions = vocabulary.map(id => ({ id, label: topicLabel(id) }))
   const voiceable = policy.voiceablePersonaIds ?? null
   const personaNote = (id: string): string | null =>
-    voiceable !== null && !voiceable.includes(id) ? 'not in engine cast' : null
+    voiceable !== null && !voiceable.includes(id) ? 'not eligible for ambient' : null
   const personaOptions = personas.map(p => ({ id: p.id, label: `${p.displayName} (${p.handle})` }))
 
   const perMinute = parseCap(perMinuteText)
@@ -268,10 +269,59 @@ export function AmbientChatterSection(props: AmbientChatterSectionProps) {
   const controlsDisabled = disabled || pending
   const saved = MODE_META[policy.mode]
 
-  const save = () => {
+  const doSave = () => {
     if (perMinute === null || perHour === null) return
     onSave({ ...draft, maxPerMinute: perMinute, maxPerHour: perHour })
   }
+
+  // S-4: RAISING to Autonomous needs a deliberate confirm step (same inline Back/Confirm
+  // pattern as the Freeze guard in PausePill). Lowering to Off/Review saves immediately.
+  // SG-6: also confirmed when already Autonomous and the draft WIDENS caps / allow-lists.
+  const [confirmingAutonomous, setConfirmingAutonomous] = useState<AmbientRaiseKind>(null)
+  const confirmCancelRef = useRef<HTMLButtonElement>(null)
+  const saveButtonRef = useRef<HTMLButtonElement>(null)
+
+  const save = () => {
+    if (perMinute === null || perHour === null) return
+    const kind = ambientRaiseKind(policy, {
+      ...draft,
+      maxPerMinute: perMinute,
+      maxPerHour: perHour,
+    })
+    if (kind) {
+      setConfirmingAutonomous(kind)
+      return
+    }
+    doSave()
+  }
+
+  // Focus management: move focus into the prompt on open (Cancel = the safe default).
+  // On close, return focus to Save (it is only re-mounted after the prompt unmounts).
+  const restoreSaveFocus = useRef(false)
+  useEffect(() => {
+    if (confirmingAutonomous !== null) confirmCancelRef.current?.focus()
+    else if (restoreSaveFocus.current) {
+      restoreSaveFocus.current = false
+      saveButtonRef.current?.focus()
+    }
+  }, [confirmingAutonomous])
+
+  const cancelAutonomous = () => {
+    // Cancelling a mode switch snaps back; cancelling a widening keeps the draft for editing.
+    if (confirmingAutonomous === 'switch') setDraft(d => ({ ...d, mode: policy.mode }))
+    setConfirmingAutonomous(null)
+    restoreSaveFocus.current = true
+  }
+
+  const confirmAutonomous = () => {
+    setConfirmingAutonomous(null)
+    doSave()
+  }
+
+  // The prompt must not outlive the choice it guards (mode changed, new server policy, error).
+  useEffect(() => {
+    if (draft.mode !== 'autonomous') setConfirmingAutonomous(null)
+  }, [draft.mode])
 
   return (
     <Stack data-testid="ambient-chatter-section" sx={{ gap: 0.9 }}>
@@ -411,7 +461,7 @@ export function AmbientChatterSection(props: AmbientChatterSectionProps) {
         data-testid="ambient-persona-cast-help"
         sx={{ fontSize: 10.5, color: chrome.inkFaint, lineHeight: 1.4 }}
       >
-        Only personas in the engine cast post ambient chatter.
+        Only residents and helpers in the engine cast post ambient chatter.
       </Typography>
       <ChipList
         optionNote={personaNote}
@@ -425,8 +475,50 @@ export function AmbientChatterSection(props: AmbientChatterSectionProps) {
         emptyOptionsText={personasLoading ? 'Loading personas…' : 'No personas in this exercise.'}
       />
 
-      {editing && (
+      {editing && confirmingAutonomous !== null && (
+        <Stack
+          data-testid="ambient-autonomous-confirm"
+          role="alertdialog"
+          aria-labelledby="ambient-autonomous-confirm-text"
+          onKeyDown={e => {
+            if (e.key === 'Escape') cancelAutonomous()
+          }}
+          sx={{ gap: 1, p: 1, border: `1px solid ${chrome.amber}`, borderRadius: '7px' }}
+        >
+          <Stack direction="row" sx={{ alignItems: 'flex-start', gap: 0.6 }}>
+            <FontAwesomeIcon icon={faTriangleExclamation} color={chrome.amber} aria-hidden="true" />
+            <Typography
+              id="ambient-autonomous-confirm-text"
+              sx={{ fontSize: 11.5, fontWeight: 700, color: chrome.ink, lineHeight: 1.4 }}
+            >
+              {confirmingAutonomous === 'widen'
+                ? 'This widens what posts without review. Apply?'
+                : 'Autonomous ambient posts publish without review, within your caps and allow-lists. Turn on?'}
+            </Typography>
+          </Stack>
+          <Stack direction="row" sx={{ gap: 1 }}>
+            <CobraSecondaryButton
+              data-testid="ambient-autonomous-cancel"
+              size="small"
+              ref={confirmCancelRef}
+              onClick={cancelAutonomous}
+            >
+              Cancel
+            </CobraSecondaryButton>
+            <CobraPrimaryButton
+              data-testid="ambient-autonomous-confirm-button"
+              size="small"
+              onClick={confirmAutonomous}
+            >
+              Confirm
+            </CobraPrimaryButton>
+          </Stack>
+        </Stack>
+      )}
+
+      {editing && confirmingAutonomous === null && (
         <CobraPrimaryButton
+          ref={saveButtonRef}
           data-testid="ambient-save"
           size="small"
           disabled={controlsDisabled || !capsValid}

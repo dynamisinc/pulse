@@ -264,9 +264,11 @@ Known limitations / follow-ups: ~~`PromptAssembler` has no ambient mode~~ — **
 Allow-listed personas are voiced only if they are in the loop's seeded cast (`ReactionLoopRegistration.PersonasByHandle`)
 — now **reported** to the panel as `ambientPolicy.voiceablePersonaIds` (Gate-1 M-1). "Pause engine" still has no effect on
 storyline bursts (pre-existing; only ambient honours it).
-**Residual risk (NFR-005):** persona `VoiceNotes` stay unfenced in the trusted part of the prompt (fencing them would
-change every storyline prompt and its cache prefix). For that path the `ContentGuard` backstop is the only defence; it is
-red-teamed through the real path (Gate-1 M-2). Revisit before any production authorization.
+**Residual risk (NFR-005) — STORYLINE prompts only (since #607 WR-1):** persona `VoiceNotes` stay unfenced in the trusted
+part of the STORYLINE prompt (fencing them would change every storyline prompt and its cache prefix). For that path the
+`ContentGuard` backstop is the defence (and storyline drafts wait for a human); it is red-teamed through the real path
+(Gate-1 M-2). Ambient prompts no longer carry voice notes at all (WR-1), so the autonomous path has no such residual.
+Revisit before any production authorization.
 
 ### Gate-1 review fixes (branch `fix/ambient-be`, 2026-10-16) — status remains **Built (backend), NOT Complete**
 - **H-1 (addressed)** — ambient bursts no longer travel a storyline/escalation prompt. Additive
@@ -283,7 +285,9 @@ red-teamed through the real path (Gate-1 M-2). Revisit before any production aut
   run the REAL unfenced path (`PersonaDossier.VoiceNotes` → `PromptAssembler.AppendPersona`) via
   `InjectionRedTeam.AssembleViaPersonaVoiceNotes`, and an obeyed burst is dropped end to end through `GenerateStage`.
   VoiceNotes are deliberately **not** fenced: it would change every storyline prompt (and its cache prefix); the reason
-  is commented at `AppendPersona`. The guard is the defence on that path.
+  is commented at `AppendPersona`. The guard is the defence on that path. *(Superseded for AMBIENT by #607 WR-1: the
+  ambient prompt omits voice notes, and the ambient red-team cases now prove the payload is ABSENT; the unfenced path
+  remains — and is red-teamed — for storyline prompts only.)*
 - **L-1** — `autonomous` is rejected 400 (*"engine is stopped or cut to Fake — restore it before enabling autonomous
   ambient"*) while the kill switch (either mode; `SafetyClampActive`, which also covers a degraded clamp) or the cut to
   Fake is active. Review mode stays selectable.
@@ -298,18 +302,201 @@ red-teamed through the real path (Gate-1 M-2). Revisit before any production aut
   **Autonomous** (publishes without a click; only selectable when the deployment flag is on, else the API answers 400).
 - Caps: per-minute ≤ the exercise's MaxEnginePostsPerMinute (60 by default); per-hour ≤ 60 × that; counted per
   generated post on a rolling wall-clock window (the per-hour cap is the ambient spend cap).
-- Allow-lists: topics from the fixed list above; personas of this exercise only (and only those in the engine's seeded
-  cast are voiced). Empty = nothing.
+- Allow-lists: topics from the fixed list above; personas of this exercise only, and only ordinary members of the public
+  (Resident / Helper — an outlet, agency, troll or bot is rejected 400); only those in the engine's seeded cast are
+  voiced. Empty = nothing.
 - Ambient fills the quiet floor only after white noise and participant posts are counted.
 - Ambient posting stops at EndEx, any non-live state, Freeze and Pause engine; the kill switch (either mode), a degraded
   provider and Cut to Fake switch ambient to **Off** — restoring the engine does not turn it back on.
+
+### Orchestrator review hardening (branch `feature/engine-golive-ambient-hardening`, 2026-10-16) — before §8 amendment 2
+
+Status remains **Built (backend), NOT Complete**. No migration, no `Program.cs` change.
+
+**Done**
+- **W-3 (never storyline, now enforced on both sides).** The ambient prompt no longer carries the exercise brief (which
+  narrates the incident): `ReactionLoopDriver.BuildAmbientGenerateRequest` passes `AmbientSettingBrief.Build(placeName)`
+  — the fictional place name only (new optional `ReactionLoopRegistration.AmbientPlaceName`, seeded from
+  `Exercise.WorldName`; generic "An ordinary town on an ordinary day." when unset). Output side: new pure
+  `Pulse.Core.Features.Ambient.Services.AmbientOutputFilter` runs in `GenerateStage` for ambient bursts as a third gate
+  with the guard's semantics (re-roll, then drop; `engine.generated.guardResult = "drop"`; nothing published or queued).
+  A burst fails if any post contains a fixed incident term, an active storyline hashtag, or a storyline title keyword
+  (≥ 5 letters, minus stop words) — exclusions built per request from `registration.Storylines`. Matching is at word
+  boundaries since Gate-1 W-A (see "Gate-1 follow-up" below for the vocabulary).
+  Failing checks: `ambient:incident-term`, `ambient:sentiment`. The offline Fake now emits everyday small talk for an
+  ambient request (additive `GenerationRequest.IsAmbient`, set by the assembler) — previously it emitted its tap-water
+  incident lines as "ambient" chatter.
+- **S-2 (sentiment).** Folded into the filter. A generated post carries a continuous sentiment (−1…+1), not a tone
+  category, so "Calm or Gratitude only" is enforced as `Sentiment ≥ −0.1` (`AmbientOutputFilter.MinSentiment`).
+- **W-4 (eligible personas).** `AmbientPolicyValidator.EligiblePersonaTypes` = Resident, Helper (**confirmed by
+  Tom, 10/16: "Resident + Helper only"**; the single constant). Enforced in the POST (400 naming the persona id, handle and type: the engine
+  cast's type when the persona is in the cast, otherwise its stored archetype — only `citizen` maps to an eligible type),
+  in `AmbientBehavior.EligibleCast`, and at the publish re-check. `ambientPolicy.voiceablePersonaIds` = engine cast ∩
+  eligible types (semantics change only; same key and shape).
+- **W-6 (publish re-check reads the current policy).** The no-await block before each publish now also requires, under
+  the CURRENT policy: the post's persona still allow-listed, in the cast and of an eligible type; the burst's topic still
+  allow-listed; both caps > 0; and the spend already recorded in the rolling windows not above either cap. Otherwise
+  `held:policy`.
+- **W-7 (review drafts into a closed world).** Before a review-mode draft is queued: lifecycle gate refreshed (the one
+  await), then synchronously the policy (not off, still admits the topic/personas/caps) and `CanPublish`. Otherwise the
+  draft is discarded with `engine.generated.heldReason` = `held:policy` / `held:lifecycle`.
+- **W-2 (attribution).** `POST /api/engine/settings/ambient-policy` resolves the caller through
+  `ICurrentStaffSessionAccessor` (verified session token) and stamps `SetBy` — hence every autonomous post's
+  `engine.published` actor `actingHumanId` / `EngineBurst.AuthorizedBy` — and the audit event's acting human with the
+  `StaffUser.Id`. The body's `actingHumanId` is still required (wire compatibility) but not trusted. No staff session →
+  401.
+- **S-1 (AAR tagging).** An approved review-mode ambient draft publishes with `trigger = "ambient-floor"` and
+  `publishPath = "ambient-reviewed"` (recognised by storyline id `Guid.Empty` + tag `#ambient`; no schema column).
+- **W-1 helper.** Pure `AmbientPolicyRaise.IsRaise(AmbientTierPolicy current, EngineAmbientPolicyRequest request)`. A
+  **raise** (lead-only once A1c lands): (a) the requested mode is `autonomous` and the current mode is not; or (b) both
+  are `autonomous` and the request raises `maxPerMinute` or `maxPerHour` or adds any topic or persona. Everything else
+  is **not** a raise: off ↔ review, lowering caps, removing entries, autonomous → review/off; an unparseable mode is not a
+  raise (validation 400s), an unparseable persona entry counts as an addition.
+
+**Pending**
+- **W-1 lead gate** — not built (Session A's A1c / `Enrollment.IsLead` is not on `main`). One marked
+  `// TODO(A1c): .AddEndpointFilter(LeadControllerRaiseFilter.AmbientPolicy)` sits on the route mapping in
+  `EngineReviewEndpoints.MapEngineReview`; Session A wires the filter (calling `AmbientPolicyRaise.IsRaise`) and its test.
+- **W-5** — disclosed residual; carry the orchestrator review's wording into the amendment. Since #607 WR-1 the residual
+  (unfenced persona `VoiceNotes` in the trusted prompt) applies to **storyline prompts only**.
+- ~~**Residual (disclose with W-3):** persona `VoiceNotes` still enter the ambient prompt~~ — **closed by #607 WR-1**: the
+  ambient prompt omits voice notes entirely (the seeded residents' notes reference the incident, e.g. "is the water safe
+  for my kids?").
+
+### Gate-1 follow-up (#168, branch `feature/engine-golive-ambient-hardening`, 2026-10-16)
+
+No migration, no `Program.cs` change.
+
+- **W-A (filter false positives).** `AmbientOutputFilter` no longer matches raw substrings. A post (text + hashtag
+  list) is tokenized into lower-cased letter/digit words (hyphens, underscores, apostrophes, punctuation are
+  boundaries; a `#tag` is also read as one compact token). Per-exercise exclusions (storyline hashtags without `#`,
+  title keywords) match a whole word plus at most one inflection suffix (`s, es, ed, ing, er`): title word `water`
+  hits "water / waters / watered" but not "watermelon / waterfront"; hashtag `#Fire` hits "#fire / a fire / fires" but
+  not "fireworks / #fireworks" (a hashtag matches as a whole tag in text or hashtag list, never as the prefix of a
+  longer tag). Fixed vocabulary — words are consecutive tokens; `*` = word-start stem; other words whole-word +
+  inflection:
+  `emergenc*`, `evacuat*`, `evacuee*`, `contamina*`, `hazmat*`, `outage*`; `boil water`, `boil notice`,
+  `boil advisory`, `boil order`; `officials said`, `officials say`, `officials announced`, `officials confirmed`,
+  `officials warn*`, `officials urg*`; `shelter in place`; `weather alert`, `severe weather`, `alert issued`,
+  `warning issued`, `advisory issued`. Bare `officials`, `shelter`, `alert`, `warning` were dropped (sports officials,
+  animal shelter, "spoiler alert", "fair warning" collide with allow-listed topics). **Accepted false positives:** a
+  generic title word still drops its everyday use (for "Water main contamination fears", "a glass of water" / "the
+  dog's water bowl" are dropped — on-incident vocabulary for that exercise), and "boil water for the pasta" trips the
+  `boil water` phrase. Dropping chatter is free; leaking the incident is not.
+- **W-B (re-rolls count against the caps).** Each guard / diversity / ambient-filter re-roll is a real provider call.
+  The driver still records the burst's `intent.Count` at generation; once the burst is settled (dropped, queued, held
+  or published) it also records `(GenerateStageResult.Attempts − 1) × intent.Count` into the same wall-clock window, so
+  `maxPerMinute` / `maxPerHour` bound provider spend (posts requested), not only accepted bursts. The extra spend is
+  recorded after settlement so it limits the NEXT decision and never retro-holds the burst that already passed. A
+  provider call that throws mid-re-roll is not counted (the tick faults and is logged). *(Superseded by #607 SG-2: every
+  attempt is now counted BEFORE its call, including one that throws.)*
+- **S-1 (attribution).** The autonomous publish stamps `EngineBurst.AuthorizedBy` from the CURRENT policy snapshot
+  `PublishHold` just admitted (still inside the no-await block), not the tick-start snapshot.
+- **S-3.** The stored `citizen` archetype is compared case-insensitively in `IneligibleAmbientType`.
+- **S-2 (residual, doc only).** The exclusions come from `registration.Storylines`, frozen when the reaction loop is
+  seeded. A storyline injected at runtime must refresh the registration (and so the exclusions); until it does, only
+  the fixed vocabulary covers it.
+
+### Orchestrator review on #607 (branch `feature/engine-golive-ambient-hardening`, 2026-10-16) — before §8 amendment 2
+
+No migration, no `Program.cs` change.
+
+- **WR-1 (ambient prompt omits VoiceNotes).** `PromptAssembler.AppendPersona` writes `  voice: …` only for STORYLINE
+  prompts; an ambient prompt keeps the persona's handle, display name, type, audience band and the non-sensitive
+  `PersonaStyle` signals (length, emoji/hashtag rate, caps) and nothing else. Reason: the seeded Resident notes are
+  incident-specific (`PersonaCastSeeder`: mvega_fh "is the water safe for my kids?", tbrandt41 "complains about mixed
+  messaging"), and those posts can pass the filter. Storyline prompts are unchanged. The red-team's `PersonaVoiceNotes`
+  cases now prove the payload is ABSENT from the ambient prompt (`InjectionRedTeam.AssembleViaPersonaVoiceNotes`) and
+  still reaches the storyline prompt unfenced (`AssembleStorylineViaPersonaVoiceNotes`), where the guard catches it.
+  **The M-2 / W-5 residual now applies to storyline prompts only.**
+- **WR-3 (filter vocabulary).** `MinTitleKeywordLength` 5 → **4** ("leak", "fire", "boil" in a title now count;
+  three-letter "gas" / "flu" / "dam" still do not — too noisy at three letters; "gas leak" is a fixed phrase and the
+  storyline's hashtags cover the rest). Four-letter function words (with, from, that, …) plus `main`, `town`, `city`,
+  `area`, `news` are stop words ("water main" is caught by `water`; "main street" is everyday). Fixed vocabulary added —
+  whole word (+ inflection): `wildfire`, `flood`, `leak`, `explosion`, `storm`, `tornado`, `hurricane`, `earthquake`,
+  `outbreak`, `lockdown`; stems: `firefighter*`, `quarantin*`, `casualt*`; phrase-only: `house fire`, `brush fire`,
+  `fire department`, `gas leak`, `chemical leak`, `chemical release`, `chemical spill`, `oil spill`, `fuel spill`,
+  `toxic fumes`, `toxic smoke`, `active shooter`, `mass shooting`, `school shooting`, `shots fired`, `power out`,
+  `power is out`, `missing person`. Deliberately NOT bare: `fire` ("fire up the grill", "on fire"), `gas` ("gas prices"),
+  `shooting`/`shooter` (basketball), `spill` ("spilled my coffee"), `chemical`/`toxic` ("chemical-free", "a toxic ex"),
+  `explod*` ("the crowd exploded"), `flood*` ("floodlights"); `injur*` and `lights out` left out. Accepted false
+  positives of the whole-word additions: "my roof leaks", "the team stormed back", "a flood of emails". A storyline whose
+  title or hashtag says "fire" still excludes the bare word through its title keywords. Rationale in the
+  `AmbientOutputFilter` XML header.
+- **SG-1 (normalisation).** Every matched string (post text, hashtags, and the storyline hashtags/titles the exclusions
+  are built from) goes through `AmbientOutputFilter.Fold`: NFKC (fullwidth `ＷＡＴＥＲ` → `water`), Unicode Cf removed
+  (zero-width space/joiner, soft hyphen, bidi marks — `w\u200Bater` → `water`), diacritics folded (FormD minus
+  non-spacing marks, incl. emoji variation selectors — `contaminación` hits `contamina*`), lower-cased invariant.
+  Incident emoji 🚱 ☣ ☢ 🚨 ⚠ fail a post (💧 deliberately not — common in innocuous posts). A hashtag with a trailing
+  digit run still matches (`#FairhavenWater2` → `fairhavenwater`); a storyline hashtag that itself ends in digits still
+  matches exactly.
+- **WR-2 (approve/edit/veto/batch-approve + demotion attribution from the body)** — **closed by A1c (Session A)**, which
+  stamps the verified staff identity at the endpoint layer. Not changed here; the ambient-policy POST's `StaffUserId`
+  stamping (W-2) is unchanged.
+- **WR-5 (compare-and-set).** `EngineAmbientPolicyRegistry.TrySet(Guid exerciseId, AmbientTierPolicy expected,
+  AmbientTierPolicy next)` swaps only when the stored policy is reference-equal to `expected` (the policy carries no
+  version); each write stores a fresh internal slot so `ConcurrentDictionary.TryUpdate` is a strict reference CAS,
+  atomic with `Set` and `DemoteAutonomous`. `SetAmbientPolicyAsync` reads the snapshot, re-runs the snapshot-dependent
+  safety check (L-1), then `TrySet`; on a mismatch it re-reads and retries up to 3 times, then answers 400 *"the ambient
+  policy changed while this request was being applied — reload the settings and try again"* with nothing mutated. A1c's
+  lead gate MUST call `AmbientPolicyRaise.IsRaise(snapshot, request)` inside that loop and then `TrySet(snapshot, next)`
+  (comment at the loop and on the route mapping) — a pre-Set endpoint filter alone is a TOCTOU.
+- **SG-2 (attempts counted up front).** `GenerateStageRequest.BeforeAttempt` (optional `Action<int>`) runs before every
+  provider call; the ambient driver records `intent.Count` into the wall-clock window there for the first attempt AND
+  each re-roll (replacing W-B's after-settlement `(Attempts − 1) × Count`). A call that throws is now counted. The
+  burst's own re-roll spend is tracked as in-flight and excused by `PolicyStillAdmits`, so an accepted burst is still not
+  retro-held by its own re-rolls; it bounds the next decision.
+- **SG-3 (review hold on STOPPED).** `ReviewQueueHold` discards a review draft (`heldReason = held:safety`) when the
+  kill switch's FULL STOP (`IsGenerationStopped`) landed during generation. Suggest-only, degraded mode and the cut to
+  Fake do NOT discard it — review drafts still wait for a human under them, as the controller guide says.
+- **SG-7 (tests).** `IsRaise`: swapping a persona/topic at the same count is a raise; null lists are empty (never a
+  raise from autonomous); reordered lists are not a raise. Endpoint level (Docker-gated): a spoofed `actingHumanId` is
+  not recorded — `SetBy` and the audit actor are the verified `StaffUser.Id`. The no-session 401 is already covered at
+  endpoint level (`AmbientPolicyIsolationTests.AnUnresolvedScope_Anonymous_Is401`).
+- **WR-4 (exclusions are a seed-time snapshot).** The filter's per-exercise exclusions are built from
+  `ReactionLoopRegistration.Storylines` — the storylines present when the loop was SEEDED. A storyline (or hashtag)
+  added or edited at runtime is NOT excluded until the registration is refreshed; until then only the fixed vocabulary
+  (+ emoji) covers it. Disclose with the §8 amendment; a live refresh is a follow-up.
+
+### Orchestrator delta-review on #607 (branch `feature/engine-golive-ambient-hardening`, 2026-10-16)
+- **W-1 (supplementary-plane fold).** `AmbientOutputFilter.Fold` walked UTF-16 chars, so a supplementary-plane Cf/Mn
+  character (tag characters U+E0020–E007F, variation selectors U+E0100–E01EF — each a surrogate pair, read as category
+  *Surrogate* per char) survived and split a word (`wa\u{E0020}ter`). It now walks `string.EnumerateRunes()` and drops
+  every Format (Cf), NonSpacingMark (Mn) and EnclosingMark (Me) rune; emoji (So) are kept, so the emoji denylist still
+  matches. **Accepted residuals (drift only — the filter is a drift guard, not an adversarial one), now in the XML
+  header:** homoglyphs (Cyrillic `а`), percent-encoding / digit noise (`%23FairhavenWater`, a leading digit run),
+  split words (`wa ter`), leetspeak (`w4ter`), paraphrase.
+- **W-2 (post-swap safety re-check — gap closed).** The L-1 check ran inside the CAS loop but BEFORE `TrySet`. A kill
+  switch / cut to Fake landing between the check and the swap ran its own demotion while the policy was not yet
+  autonomous (a no-op), so the swap then stored `autonomous` under an engaged lever. After a successful autonomous swap
+  `SetAmbientPolicyAsync` now re-checks the levers; if one is engaged it calls `DemoteAutonomous` (an
+  **engine-attributed** `engine.tier_policy_changed`, reason `safety-clamp`, no acting human — after the controller's
+  own event, since the swap really was live) and answers the same 400 as the pre-check.
+- **Item 3 (blind write test-only).** `EngineAmbientPolicyRegistry.Set` is now `internal` (`InternalsVisibleTo
+  Pulse.WebApi.Tests` added to `Pulse.WebApi.csproj`); production writers use `TrySet` (controller) and
+  `DemoteAutonomous` (engine) only.
+- **Item 4 (emoji).** The denylist adds 🚒 🚑 🆘 ☠. 🔥 is deliberately NOT listed: it is everyday praise on allow-listed
+  topics ("this pizza 🔥").
+- **Item 6a (persona DisplayName in the ambient prompt — closed).** A persona's `DisplayName` is staff-authored text in
+  the TRUSTED stratum, unfenced. On the ambient path it is now reduced like `AmbientSettingBrief` (letters/digits/space
+  and `' . -`, whitespace collapsed, capped at 60 — `AmbientSettingBrief.CleanName`) so a hostile name cannot open a new
+  prompt section. Storyline prompts keep it verbatim (cache-prefix stability; ContentGuard + the review queue backstop
+  them, as for voice notes). The handle is carried as-is on both paths.
+- **Item 6b (disclosed; follow-up).** A topic allow-list whose seed phrases overlap the storyline exclusions (e.g. a
+  "water"-titled storyline with a topic that naturally talks about water) makes every ambient burst fail the output
+  filter and drop — burning up to 3 attempts per burst, all of which now count against the caps (SG-2). Ambient then
+  goes silent with no error surfaced to the controller. **Follow-up:** warn at policy-set time when an allow-listed
+  topic's seed overlaps the active storylines' exclusions.
 
 ## Tests (backend)
 - `AmbientPolicyValidatorTests.*` (AC0, AC1); `AmbientBehaviorTests.*` (AC4, white-noise overlap)
 - `InjectionRedTeamTests.Catalog_CarriesAmbientPersonaBioSteeringCases` + the catalog theories (AC7)
 - `InjectionRedTeamTests.Catalog_CarriesPersonaVoiceNotesVectorCases`,
-  `.PersonaVoiceNotesAttack_ReachesTheTrustedPromptUnfenced_AndItsObeyedFormIsCaught`,
-  `GenerateStageTests.GenerateAsync_AmbientBurst_SteeredViaPersonaVoiceNotes_ObeyedOutputIsDropped` (AC7, Gate-1 M-2)
+  `.PersonaVoiceNotesAttack_NeverReachesTheAmbientPrompt_AndItsObeyedFormIsStillCaught`,
+  `.PersonaVoiceNotesAttack_ReachesTheStorylinePromptUnfenced_AndItsObeyedFormIsCaught`,
+  `GenerateStageTests.GenerateAsync_AmbientBurst_SteeredViaPersonaVoiceNotes_ObeyedOutputIsDropped`,
+  `.GenerateAsync_StorylineBurst_SteeredViaPersonaVoiceNotes_ReachesThePrompt_ButObeyedOutputIsDropped` (AC7, Gate-1 M-2,
+  #607 WR-1)
 - `PromptAssemblerTests.Assemble_Ambient_CarriesNoStorylineOrEscalationFraming`,
   `.Assemble_Ambient_CarriesTheTopicSeed_TheBackgroundSetting_AndTheTask`, `.Assemble_Ambient_SkipsPersonaRecentPosts`,
   `.Assemble_NonAmbient_KeepsTheStorylineFraming_AndRecentPosts`; `AmbientBehaviorTests.TheAmbientMix_IsCalmAndGratitudeOnly`
@@ -328,3 +515,49 @@ red-teamed through the real path (Gate-1 M-2). Revisit before any production aut
 - Docker-gated (`[RequiresDockerFact]`): `AmbientPolicyIsolationTests.*` (AC3 foreign exercise, foreign org, 401, body
   `exerciseId` ignored, foreign persona — real `Program` + real sessions), `AmbientRealPublishTests.*` (AC9 real SQL
   publish), `EngineSettingsEndpointsTests` (route added to the #297 role-gate drift guard + contract key)
+- Orchestrator review hardening: `AmbientOutputFilterTests.*`, `AmbientSettingBriefTests.*` (W-3/S-2);
+  `PromptAssemblerTests.Assemble_FlagsTheTransportRequest_AmbientOnlyForAnAmbientBrief` (W-3);
+  `AmbientBehaviorTests.AnAllowListedPersonaOfAnIneligibleType_IsNeverVoiced`, `.EligiblePersonaTypes_AreResidentAndHelperOnly`,
+  `EngineAmbientPolicyServiceTests.APersonaOfAnIneligibleArchetype_Is400_NamingThePersonaAndItsType`,
+  `.APersonaInTheEngineCast_IsJudgedByItsEngineType`,
+  `EngineAmbientPolicyRegistryTests.TheSettingsSnapshot_VoiceablePersonaIds_IsTheCast_IntersectedWithEligibleTypes`,
+  `AmbientHardeningTests.AnAllowListedOutlet_IsNeverVoiced_EvenIfThePolicyNamesIt` (W-4);
+  `AmbientHardeningTests.TheAmbientPrompt_CarriesThePlaceName_NeverTheIncidentBrief`,
+  `.WithNoPlaceName_TheAmbientPrompt_UsesTheGenericSetting`,
+  `.AnAmbientPostThatDriftsTowardTheIncident_IsDroppedLikeAGuardFailure` (W-3/S-2);
+  `.APolicyNarrowedBetweenGenerationAndPublish_HoldsThePublish`, `.APersonaRemovedAfterTheFirstPost_HoldsTheRestOfTheBurst` (W-6);
+  `.AReviewDraft_FinishingAfterFreeze_IsDiscarded_NotQueued`, `.AReviewDraft_FinishingAfterEndEx_IsDiscarded_NotQueued`,
+  `.AReviewDraft_WhosePolicyWasTurnedOffMidGeneration_IsDiscarded` (W-7);
+  `.AnApprovedAmbientDraft_PublishesWithAmbientFloorTrigger_AndTheReviewedPublishPath` (S-1);
+  `EngineAmbientPolicyServiceTests.NoAuthenticatedStaffUser_Is401_AndChangesNothing`,
+  `.ASpoofedActingHumanId_DoesNotBecomeSetBy_OrTheAuditActor` (W-2); `AmbientPolicyRaiseTests.*` (W-1 helper)
+- Gate-1 follow-up: `AmbientOutputFilterTests.WaterStoryline_EverydayWordsThatOnlyContainATerm_Pass`,
+  `.StormStoryline_EverydayWordsThatOnlyContainATerm_Pass`, `.WaterStoryline_TruePositives_StillFail`,
+  `.WaterStoryline_TheStorylineHashtagInTheHashtagList_Fails_WithOrWithoutTheHash`, `.StormStoryline_TruePositives_StillFail`,
+  `.AGenericTitleWord_StillDropsAnOnIncidentEverydayUse_ByDesign`, `.AFixedIncidentTerm_Fails` (W-A);
+  `AmbientHardeningTests.ReRolledAttempts_CountAgainstTheHourlyCap_WithoutHoldingTheBurstThatPassed`,
+  `.ADroppedBurst_CountsEveryAttemptAgainstTheCaps`, `.AFirstTimeAcceptedBurst_CountsOnlyItsOwnPosts` (W-B);
+  `.AnAutonomousPublish_IsAuthorizedByTheCurrentPolicySetter_NotTheTickStartOne` (S-1);
+  `EngineAmbientPolicyServiceTests.ACitizenArchetype_IsEligible_WhateverItsStoredCase` (S-3)
+- #607 review: `PromptAssemblerTests.Assemble_Ambient_OmitsPersonaVoiceNotes_ButKeepsTheStyleSignals`,
+  `.Assemble_Storyline_StillCarriesPersonaVoiceNotes` (WR-1); `AmbientOutputFilterTests.AFourLetterTitleWord_IsNowAKeyword`,
+  `.FourLetterFunctionWords_AndGenericNouns_AreNotKeywords`, `.AWidenedFixedIncidentTerm_Fails`,
+  `.EverydaySportsFoodAndPetsPhrases_Pass_UnderTheWidenedVocabulary` (WR-3);
+  `.ObfuscatedStorylineKeyword_IsFoldedAndFails`, `.Diacritics_AreFolded_SoTheStemsStillHit`,
+  `.AnIncidentEmoji_Fails_WithOrWithoutTheVariationSelector`, `.AnIncidentEmoji_InTheHashtagList_Fails_ButAWaterDroplet_Passes`,
+  `.AStorylineHashtag_WithATrailingDigitRun_Fails`, `.AStorylineHashtag_ThatItselfEndsInDigits_StillMatchesExactly`,
+  `.Fold_AppliesNfkc_StripsFormatAndMarks_AndLowerCases` (SG-1); `EngineAmbientPolicyCasTests.*` (WR-5, incl. racing
+  writers and a demotion racing a set); `GenerateStageTests.GenerateAsync_InvokesBeforeAttempt_BeforeEachProviderCall`,
+  `AmbientHardeningTests.AnAttemptThatThrows_IsStillCountedAgainstTheCaps` (SG-2);
+  `AmbientHardeningTests.AReviewDraft_FinishingAfterAFullStop_IsDiscarded_NotQueued`,
+  `.AReviewDraft_FinishingAfterSuggestOnlyOrACutToFake_IsStillQueued` (SG-3);
+  `AmbientPolicyRaiseTests.AutonomousToAutonomous_SwappingAPersonaOrATopic_AtTheSameCount_IsARaise`,
+  `.NullAllowLists_AreTreatedAsEmpty_SoNeverARaise_FromAutonomous`, `.AutonomousToAutonomous_ReorderedLists_AreNotARaise`,
+  Docker-gated `AmbientPolicyIsolationTests.ASpoofedActingHumanId_IsNotRecorded_TheVerifiedStaffUserIs` (SG-7)
+- #607 delta-review: `AmbientOutputFilterTests.Fold_StripsSupplementaryPlaneTagCharactersAndVariationSelectors`,
+  `.ASupplementaryPlaneCfInsideAStorylineKeyword_StillFails` (W-1); `.AnIncidentEmoji_Fails_WithOrWithoutTheVariationSelector`
+  (🚒 🚑 🆘 ☠ cases), `.AFireEmoji_IsDeliberatelyNotAnIncidentEmoji` (item 4);
+  `EngineAmbientPolicyServiceTests.ACutToFake_LandingBetweenTheSafetyCheckAndTheSwap_IsCaughtByThePostCheck_AndDemotedByTheEngine`,
+  `.NoLeverEngaged_AutonomousSurvivesThePostCheck` (W-2);
+  `PromptAssemblerTests.Assemble_Ambient_CleansThePersonaDisplayName_SoItCannotOpenAPromptSection`,
+  `.Assemble_Storyline_KeepsThePersonaDisplayNameVerbatim` (item 6a)

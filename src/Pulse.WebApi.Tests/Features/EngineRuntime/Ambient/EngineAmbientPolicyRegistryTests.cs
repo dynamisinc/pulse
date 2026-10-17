@@ -170,6 +170,43 @@ public sealed class EngineAmbientPolicyRegistryTests
         json.RootElement.GetProperty("voiceablePersonaIds").ValueKind.Should().Be(JsonValueKind.Null);
     }
 
+    [Fact]
+    public void TheSettingsSnapshot_VoiceablePersonaIds_IsTheCast_IntersectedWithEligibleTypes()
+    {
+        // Orchestrator review W-4: only Resident / Helper may voice ambient, so the panel's "voiceable" set excludes the
+        // cast's outlets, agencies, trolls and bots.
+        var exerciseId = Guid.NewGuid();
+        var resident = Guid.NewGuid();
+        var helper = Guid.NewGuid();
+        var outlet = Guid.NewGuid();
+        var agency = Guid.NewGuid();
+        var registration = new ReactionLoopRegistration
+        {
+            ExerciseId = exerciseId,
+            ExerciseBrief = "brief",
+            TimeZone = "UTC",
+            ScenarioStart = DateTimeOffset.UnixEpoch,
+            TimeZoneInfo = TimeZoneInfo.Utc,
+            Storylines = [],
+            PersonasByHandle = new[]
+                {
+                    (Id: resident, Type: PersonaType.Resident), (Id: helper, Type: PersonaType.Helper),
+                    (Id: outlet, Type: PersonaType.Outlet), (Id: agency, Type: PersonaType.Agency),
+                }
+                .Select((p, i) => new EnginePersona(p.Id, new PersonaDossier { Handle = $"@t{i}", DisplayName = $"T{i}", Type = p.Type }))
+                .ToDictionary(persona => persona.Dossier.Handle, StringComparer.OrdinalIgnoreCase),
+            Autonomy = new EngineAutonomyRegistry().GetOrCreate(exerciseId),
+            ControllerDeskId = Guid.NewGuid(),
+        };
+        var loops = new ReactionLoopRegistry();
+        loops.Register(registration);
+        var registry = new EngineAmbientPolicyRegistry(loops: loops);
+
+        registry.Snapshot(exerciseId).VoiceablePersonaIds.Should().BeEquivalentTo([resident.ToString(), helper.ToString()]);
+        registry.CastPersonaType(exerciseId, outlet).Should().Be(PersonaType.Outlet);
+        registry.CastPersonaType(exerciseId, Guid.NewGuid()).Should().BeNull("not in the cast");
+    }
+
     private static ReactionLoopRegistration Registration(Guid exerciseId, IReadOnlyList<Guid> cast) => new()
     {
         ExerciseId = exerciseId,
