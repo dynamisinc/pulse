@@ -47,7 +47,7 @@ The spec (3x consecutive green); open every new PNG.
 
 All geometry numbers are production-equivalent: the spec hides the dev-only `engine-degraded-simulate` button (as `capture.mjs` does), since it widens the band on the dev server only. The tablet screenshots are captured the same way.
 
-Observation (issue #626): at 1180x820 the Pause popover (x 841 to 1141) extends 17px past the work area into the toolstrip column (starts at x=1124), covering the top of the toolstrip labels while open. It does not cover the pill or the command band. PR #627 right-aligns the popover; a `test.fixme` in the spec (`pause popover at 1180x820`) asserts its right edge is at or left of the toolstrip once #627 merges, and should then be un-fixme'd.
+Observation (issue #626): at 1180x820 the Pause popover (x 841 to 1141) extends 17px past the work area into the toolstrip column (starts at x=1124), covering the top of the toolstrip labels while open. It does not cover the pill or the command band. Fixed by PR #627 (merged): the popover right-aligns to the pill when it would cross the toolstrip. It spilled at 1024x768 too (40px); the spec's `pause popover at …` tests now assert its right edge is at or left of the toolstrip at both 1180x820 and 1024x768.
 
 Follow-up (product, NFR-001): the Pause popover's Cancel link looks low-contrast on the dark navy background (visible in `freeze-controls-tablet.png`).
 

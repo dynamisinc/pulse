@@ -443,19 +443,21 @@ test.describe('command band at 1180x820 (dev versus production)', () => {
   })
 })
 
-test.describe('pause popover at 1180x820 (issue #626)', () => {
-  test.use({ viewport: { width: 1180, height: 820 }, hasTouch: true, isMobile: false })
+for (const viewport of [{ width: 1180, height: 820 }, { width: 1024, height: 768 }]) {
+  test.describe(`pause popover at ${viewport.width}x${viewport.height} (issue #626)`, () => {
+    test.use({ viewport, hasTouch: true, isMobile: false })
 
-  // Today the popover (x 841..1141) pokes 17px into the toolstrip (x >= 1124). PR #627 right-aligns
-  // it; remove `fixme` once #627 is merged.
-  test.fixme('the popover stays left of the toolstrip (#626, PR #627)', async ({ page }) => {
-    await openControllerConsole(page)
-    await page.getByTestId('pause-pill').tap()
-    const card = await paperBoxOf(page.getByTestId('pause-popover'))
-    const strip = await boxOf(page.getByTestId('staff-toolstrip'))
-    expect(card.x + card.width, 'popover overlaps the toolstrip').toBeLessThanOrEqual(strip.x + 0.5)
+    // Before #627 the left-aligned popover spilled into the toolstrip at both tablet widths
+    // (1180: 17px, 1024: 40px); it now right-aligns to the pill when it would cross the edge.
+    test('the popover stays left of the toolstrip (#626, PR #627)', async ({ page }) => {
+      await openControllerConsole(page)
+      await page.getByTestId('pause-pill').tap()
+      const card = await paperBoxOf(page.getByTestId('pause-popover'))
+      const strip = await boxOf(page.getByTestId('staff-toolstrip'))
+      expect(card.x + card.width, 'popover overlaps the toolstrip').toBeLessThanOrEqual(strip.x + 0.5)
+    })
   })
-})
+}
 
 // ---------------------------------------------------------------------------------------------
 // Rotation: 1024x768 -> 768x1024 mid-flow.
