@@ -4,11 +4,14 @@ using System;
 using System.Linq;
 using System.Net;
 using System.Net.Http.Json;
+using System.Text.Json;
 using System.Threading.Tasks;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Pulse.WebApi.Features.EngineRuntime;
+using Pulse.WebApi.Features.EngineRuntime.Clock;
+using Pulse.WebApi.Features.Identity.RoleMatrix;
 using Pulse.WebApi.Features.Identity.Enrollments;
 using Pulse.WebApi.Tests.Data;
 using Pulse.WebApi.Tests.Features.Identity.Enrollments;
@@ -100,6 +103,81 @@ public sealed class SwampedModeLeadLossTests
         using var response = await planner.PutAsJsonAsync("/api/staff/practice-mode", new { });
 
         autonomy.SwampedModeEnabled.Should().BeFalse("an exercise with no lead is never left swamped");
+    }
+
+    [RequiresDockerFact]
+    public async Task TheHeal_WhenSwampedModeWasOn_RecordsExactlyOneSwampedOffEventAndAudit_AtTheCurrentScenarioMinute()
+    {
+        // Gate-1 WR-003: the self-heal goes through ISwampedModeSwitch and is recorded like EnrollmentService's flip.
+        var world = await RoleMatrixWorld.SeedAsync(_fixture);
+        await ClearTheLeadAsync(world);
+
+        using var host = new RoleMatrixHost(_fixture.ConnectionString!);
+        var clock = host.Services.GetRequiredService<IExerciseClock>();
+        clock.Start(world.ExerciseId, DateTimeOffset.UtcNow, TimeZoneInfo.Utc);
+        clock.Jump(world.ExerciseId, 42);
+        var autonomy = host.Services.GetRequiredService<EngineAutonomyRegistry>().GetOrCreate(world.ExerciseId);
+        autonomy.SetSwampedMode(true, "stale-flip", 0);
+
+        using var planner = world.Client(host, await world.TokenForAsync(MatrixRole.Planner));
+        using (await planner.PutAsJsonAsync("/api/staff/practice-mode", new { }))
+        {
+        }
+
+        using var second = world.Client(host, await world.TokenForAsync(MatrixRole.Planner));
+        using (await second.PutAsJsonAsync("/api/staff/practice-mode", new { }))
+        {
+        }
+
+        autonomy.SwampedModeEnabled.Should().BeFalse();
+        await using var verify = _fixture.CreateContext();
+        var events = await verify.TelemetryEvents.IgnoreQueryFilters()
+            .Where(e => e.ExerciseId == world.ExerciseId && e.EventType == EnrollmentService.SwampedModeOffEventType)
+            .ToListAsync();
+        var heal = events.Should().ContainSingle("one heal flipped it; the second request found it already off").Subject;
+        heal.Actor.Kind.Should().Be("system");
+        heal.Actor.ActingHumanId.Should().BeNull("the heal is a system action — no acting human");
+        heal.Channel.Should().Be("system");
+        using (var payload = JsonDocument.Parse(heal.Payload!))
+        {
+            payload.RootElement.GetProperty("reason").GetString().Should().Be(ExerciseCallerRole.NoLeadRecheckReason);
+            payload.RootElement.GetProperty("wasOn").GetBoolean().Should().BeTrue();
+            payload.RootElement.GetProperty("scenarioMinute").GetInt32().Should().Be(42, "the clock's CURRENT minute, never 0");
+        }
+
+        var audits = await verify.OrgAuditEvents.IgnoreQueryFilters()
+            .Where(a => a.ExerciseId == world.ExerciseId && a.Kind == EnrollmentService.SwampedModeOffAuditKind)
+            .ToListAsync();
+        audits.Should().ContainSingle().Which.OrganizationId.Should().Be(world.OrganizationId);
+    }
+
+    [RequiresDockerFact]
+    public async Task TheHeal_WhenSwampedModeWasAlreadyOff_RecordsNothing()
+    {
+        var world = await RoleMatrixWorld.SeedAsync(_fixture);
+        await ClearTheLeadAsync(world);
+
+        using var host = new RoleMatrixHost(_fixture.ConnectionString!);
+        using var planner = world.Client(host, await world.TokenForAsync(MatrixRole.Planner));
+        using (await planner.PutAsJsonAsync("/api/staff/practice-mode", new { }))
+        {
+        }
+
+        await using var verify = _fixture.CreateContext();
+        (await verify.TelemetryEvents.IgnoreQueryFilters()
+            .CountAsync(e => e.ExerciseId == world.ExerciseId && e.EventType == EnrollmentService.SwampedModeOffEventType))
+            .Should().Be(0, "nothing was turned off, so nothing is recorded");
+        (await verify.OrgAuditEvents.IgnoreQueryFilters()
+            .CountAsync(a => a.ExerciseId == world.ExerciseId && a.Kind == EnrollmentService.SwampedModeOffAuditKind))
+            .Should().Be(0);
+    }
+
+    private async Task ClearTheLeadAsync(RoleMatrixWorld world)
+    {
+        await using var demote = _fixture.CreateContext();
+        await demote.Enrollments.IgnoreQueryFilters()
+            .Where(e => e.ExerciseId == world.ExerciseId && e.IsLead)
+            .ExecuteUpdateAsync(set => set.SetProperty(e => e.IsLead, false));
     }
 
     [RequiresDockerFact]

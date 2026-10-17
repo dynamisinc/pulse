@@ -1,11 +1,15 @@
 namespace Pulse.WebApi.Features.Identity.RoleMatrix;
 
+using System.Globalization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.EngineRuntime;
+using Pulse.WebApi.Features.EngineRuntime.Clock;
+using Pulse.WebApi.Features.Identity.Enrollments;
 using Pulse.WebApi.Features.ExerciseConfiguration.Lifecycle;
 using Pulse.WebApi.Features.Identity.Staff;
 
@@ -118,15 +122,26 @@ public sealed class ExerciseCallerRole
     /// <summary>
     /// The "no lead ⇒ swamped off" re-check (identity-auth-roles/16 M-002): swamped mode is in-memory, and the
     /// post-commit OFF flip a lead removal stages could in principle fail. Every gated staff request on the exercise
-    /// therefore re-checks — cheaply, only while swamped mode is on — that the exercise still has a lead, and turns
-    /// swamped mode off (idempotently) when it has none.
+    /// therefore re-checks — cheaply, only while swamped mode is on — that the exercise still has a lead (an enrollment
+    /// flagged lead AND in the <c>controller</c> role, the same rule as <see cref="IsLead"/>, SG-002), and turns swamped
+    /// mode off (idempotently) when it has none.
     /// </summary>
+    /// <remarks>
+    /// The flip goes through the same OFF-only <see cref="ISwampedModeSwitch"/> the enrollment change uses (stamped with
+    /// the clock's CURRENT scenario minute), and when it really turned swamped mode off (<c>wasOn</c>) it is recorded
+    /// exactly like <see cref="EnrollmentService"/>'s flip — one <see cref="EnrollmentService.SwampedModeOffEventType"/>
+    /// XC-004 event and one <see cref="EnrollmentService.SwampedModeOffAuditKind"/> org audit, through the shared
+    /// <see cref="StaffChangeRecorder"/>, with <c>reason: "no-lead-recheck"</c> (Gate-1 WR-003). The record is a system
+    /// action (no acting human) saved in its OWN unit of work, so it never flushes whatever the request has tracked; a
+    /// failed save is logged and never fails the request — the flip has already happened.
+    /// </remarks>
     private static async Task EnsureSwampedOffWithoutLeadAsync(
         IServiceProvider services,
         PulseDbContext dbContext,
-        Guid exerciseId,
+        StaffChangeExercise exercise,
         CancellationToken cancellationToken)
     {
+        var exerciseId = exercise.ExerciseId;
         var registry = services.GetService<EngineAutonomyRegistry>();
         if (registry is null || !registry.GetOrCreate(exerciseId).SwampedModeEnabled)
         {
@@ -135,12 +150,61 @@ public sealed class ExerciseCallerRole
 
         var hasLead = await dbContext.Enrollments
             .AsNoTracking()
-            .AnyAsync(e => e.ExerciseId == exerciseId && e.IsLead, cancellationToken);
-        if (!hasLead)
+            .AnyAsync(
+                e => e.ExerciseId == exerciseId && e.IsLead && e.Role == EnrollmentRoles.Controller,
+                cancellationToken);
+        if (hasLead)
         {
-            registry.GetOrCreate(exerciseId).SetSwampedMode(false, NoLeadActor, 0);
+            return;
+        }
+
+        var clock = services.GetService<IExerciseClock>();
+        var swampedSwitch = services.GetService<ISwampedModeSwitch>() ?? new EngineSwampedModeSwitch(registry, clock);
+        if (!swampedSwitch.TurnOff(exerciseId, NoLeadActor))
+        {
+            return;
+        }
+
+        var scenarioMinute = clock?.CurrentScenarioMinute(exerciseId) ?? 0;
+        var now = (services.GetService<TimeProvider>() ?? TimeProvider.System).GetUtcNow();
+        var payload = string.Create(
+            CultureInfo.InvariantCulture,
+            $"{{\"reason\":\"{NoLeadRecheckReason}\",\"wasOn\":true,\"scenarioMinute\":{scenarioMinute}}}");
+
+        try
+        {
+            await using var scope = services.GetRequiredService<IServiceScopeFactory>().CreateAsyncScope();
+            var recordContext = scope.ServiceProvider.GetRequiredService<PulseDbContext>();
+            StaffChangeRecorder.Stage(
+                recordContext,
+                exercise,
+                actor: null,
+                new TelemetryTarget { EntityType = ExerciseEntityType, EntityId = exerciseId.ToString() },
+                subjectPersonId: null,
+                EnrollmentService.SwampedModeOffEventType,
+                EnrollmentService.SwampedModeOffAuditKind,
+                payload,
+                now);
+            await recordContext.SaveChangesAsync(cancellationToken);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            if (services.GetService<ILoggerFactory>()?.CreateLogger<ExerciseCallerRole>() is { } logger)
+            {
+                LogNoLeadRecordFailed(logger, exerciseId, exception);
+            }
         }
     }
+
+    /// <summary>The swamped-mode-off payload <c>reason</c> when the per-request re-check found no lead (Gate-1 WR-003).</summary>
+    public const string NoLeadRecheckReason = "no-lead-recheck";
+
+    private const string ExerciseEntityType = "exercise";
+
+    private static readonly Action<ILogger, Guid, Exception?> LogNoLeadRecordFailed = LoggerMessage.Define<Guid>(
+        LogLevel.Error,
+        new EventId(1, nameof(LogNoLeadRecordFailed)),
+        "Swamped mode was turned off for exercise {ExerciseId} (no lead), but its telemetry/audit record could not be saved.");
 
     /// <summary>The actor recorded when the re-check turns swamped mode off for an exercise with no lead.</summary>
     public const string NoLeadActor = "system:no-lead";
@@ -189,15 +253,23 @@ public sealed class ExerciseCallerRole
             };
         }
 
-        await EnsureSwampedOffWithoutLeadAsync(services, dbContext, exerciseId, cancellationToken);
-
         // org-scope-exempt(ResolvedScope): exerciseId is the SERVER-resolved scope the caller is enrolled in (just
         // proven above), never a request value.
-        var status = await dbContext.Exercises
+        var facts = await dbContext.Exercises
             .AsNoTracking()
             .Where(e => e.Id == exerciseId)
-            .Select(e => e.Status)
+            .Select(e => new { e.Status, e.OrganizationId, e.CurrentScenarioTime, e.TimeZone })
             .FirstOrDefaultAsync(cancellationToken);
+        var status = facts?.Status;
+
+        if (facts is not null)
+        {
+            await EnsureSwampedOffWithoutLeadAsync(
+                services,
+                dbContext,
+                new StaffChangeExercise(exerciseId, facts.OrganizationId, facts.CurrentScenarioTime, facts.TimeZone),
+                cancellationToken);
+        }
 
         return new ExerciseCallerRole(ExerciseCallerOutcome.Enrolled)
         {
