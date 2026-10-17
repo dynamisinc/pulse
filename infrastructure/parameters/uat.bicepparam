@@ -150,9 +150,8 @@ param staffIdentityAccountsJson = readEnvironmentVariable('STAFF_IDENTITY_ACCOUN
 // GitHub environment (threaded by deploy-infrastructure.yml). An unset secret with alerts on FAILS the
 // deploy with a clear message.
 //
-// LANDS OFF on purpose: merging this changes nothing on UAT. Flip deployProviderAlerts to true in a ONE-LINE
-// FOLLOW-UP once Tom has created the PULSE_ALERT_OWNER_EMAIL secret on the uat environment (otherwise every
-// UAT infra deploy would fail until the secret exists). Thresholds can be overridden here for a forced test
+// ON since the 10/17 go-live (#571): Tom created the PULSE_ALERT_OWNER_EMAIL secret on the uat environment. If that
+// secret is ever removed, every UAT infra deploy fails with a clear message until it is restored or this is set false. Thresholds can be overridden here for a forced test
 // fire (e.g. param providerAlertCallsPerHourThreshold = 1), then reverted; see infrastructure/README.md.
 param deployProviderAlerts = true // ON for the Saturday go-live: PULSE_ALERT_OWNER_EMAIL added to the uat environment (Tom, 2026-10-17)
 param alertOwnerEmail = readEnvironmentVariable('PULSE_ALERT_OWNER_EMAIL', '')

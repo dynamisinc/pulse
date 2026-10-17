@@ -49,8 +49,7 @@ Read the job summary. Expect **only** these changes:
 | | **Add** `Generation__Governance__TimeoutAutoSendAuthorized = false` | Phase 1 (PROVIDER-GOVERNANCE §8): timeout auto-send (swamped mode) stays off until the lead-controller gate is on main |
 | Action group and four `scheduledQueryRules` (`ag-…-provider`, errors / latency / timeouts / spend) | **Create** | #585 / #590 (alerts on in #571) |
 
-> ⚠ **Never set `ASPNETCORE_FORWARDEDHEADERS_ENABLED=true`.** (An explicit `false`, which Session A's hotfix for #597 sets, is
-> fine and expected in the what-if.) It trusts forwarded headers from *any* client, so anyone
+> ⚠ **Never set `ASPNETCORE_FORWARDEDHEADERS_ENABLED=true`.** It trusts forwarded headers from *any* client, so anyone
 > could spoof their IP past the login limiter. The three `KnownNetworks` entries above are the only forwarded-headers settings.
 
 **Compare with step 0b.** Every name in `uat-appsettings-before.txt` must appear in the what-if, either unchanged or
@@ -121,11 +120,16 @@ Expect a 200 response carrying the `exerciseId` and persona counts. A 404 means 
 3. **The usage panel moves (#401).** The ENGINE flyout's AI usage panel goes from "0 calls, $0" to "N calls, $Y" on `gpt-5.4-mini`.
 4. **The cut-to-Fake lever works (#402).** Cut generation to Fake.
    - The next burst uses Fake (no new calls in the usage panel).
-   - Turning swamped mode ON is refused with the not-authorized message. In the engine bar the lead's **Swamped
-     mode: OFF** control is disabled, with the note "Timeout auto-send is off until the lead-controller role
-     ships." (The API itself answers `400`: "timeout auto-send (swamped mode) is not authorized on this
-     environment until the lead-controller gate lands (PROVIDER-GOVERNANCE §8, Phase 1)".)
-   - Restore afterwards (lead controller).
+   - Restore afterwards.
+4b. **Timeout auto-send is refused on the server (Phase 1).**
+   - In the engine bar, the **Swamped mode** ON control is disabled, with the note "Timeout auto-send is off until
+     the lead-controller role ships." (The console toggle does not call the server, so this only shows the console
+     read the flag.)
+   - Prove the server refuses it. With a staff session cookie (browser dev tools → Network → copy a request as cURL):
+     - `GET /api/engine/settings` shows `"timeoutAutoSendAuthorized": false`;
+     - `POST /api/engine/autonomy/swamped-mode` with body `{"actingHumanId":"<your id>","enabled":true}` returns
+       `400` "timeout auto-send (swamped mode) is not authorized on this environment until the lead-controller
+       gate lands (PROVIDER-GOVERNANCE §8, Phase 1)".
 5. **The login limiter keys on the real client IP (A1a).** Make 11 rapid bad staff logins from one machine.
    - That machine gets `429`.
    - A second machine can still log in.

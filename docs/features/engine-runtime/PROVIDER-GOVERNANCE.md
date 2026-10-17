@@ -173,8 +173,11 @@ default to **Delayed-auto** and the exercise's **lead controller** can turn on *
 > - turning swamped mode **on** is refused with a `400`; turning it off always works;
 > - the tick never auto-sends, even if swamped mode were somehow on, so an expired Delayed-auto draft is always
 >   **held**;
-> - every AI draft therefore needs a human approval. Suggest is the default; Delayed-auto countdowns may run, and
->   they end in a hold.
+> - together with `AmbientAutonomyAuthorized = false` (amendment 2, unsigned), every AI draft therefore needs a human
+>   approval. Suggest is the default; Delayed-auto countdowns may run, and they end in a hold.
+> - **Known gap before Phase 2:** the console's swamped-mode toggle is local to the browser and never calls the server,
+>   so turning the flag on alone would not make swamped mode work from the console. Wiring the toggle to the server is
+>   a Phase 2 prerequisite.
 >
 > Because nothing auto-sends in Phase 1, #571 may merge before Session A's A1 work.
 >
