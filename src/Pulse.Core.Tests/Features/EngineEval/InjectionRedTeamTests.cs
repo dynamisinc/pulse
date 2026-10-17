@@ -58,6 +58,75 @@ public class InjectionRedTeamTests
     }
 
     [Fact]
+    public void Catalog_CarriesAmbientPersonaBioSteeringCases()
+    {
+        // ambient-chatter story 01 (AC7): ambient posts publish without a click, so allow-listed persona bios that try
+        // to steer the ambient prompt are standing catalog entries — and, through the theories above, each is fenced
+        // and its obeyed form is caught by the guard.
+        var ambient = InjectionRedTeam.Catalog.Where(a => a.Name.StartsWith("ambient /", StringComparison.Ordinal)).ToList();
+
+        ambient.Should().HaveCountGreaterThanOrEqualTo(3);
+        ambient.Should().OnlyContain(a => a.WorldFeedPayload.StartsWith("Bio:", StringComparison.Ordinal));
+        ambient.Should().OnlyContain(a => !InjectionRedTeam.Obeyed(a.ObeyedTell).Clean);
+    }
+
+    public static TheoryData<InjectionAttack> PersonaVoiceNotesAttacks()
+    {
+        var data = new TheoryData<InjectionAttack>();
+        foreach (var attack in InjectionRedTeam.Catalog.Where(a => a.Vector == InjectionVector.PersonaVoiceNotes))
+        {
+            data.Add(attack);
+        }
+
+        return data;
+    }
+
+    [Fact]
+    public void Catalog_CarriesPersonaVoiceNotesVectorCases()
+    {
+        // Gate-1 M-2: the ambient bio-steering cases travel the REAL persona path, not only the world-feed fence.
+        InjectionRedTeam.Catalog.Where(a => a.Vector == InjectionVector.PersonaVoiceNotes)
+            .Should().HaveCountGreaterThanOrEqualTo(3)
+            .And.OnlyContain(a => a.Name.StartsWith("ambient /", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [MemberData(nameof(PersonaVoiceNotesAttacks))]
+    public void PersonaVoiceNotesAttack_NeverReachesTheAmbientPrompt_AndItsObeyedFormIsStillCaught(InjectionAttack attack)
+    {
+        var request = InjectionRedTeam.AssembleViaPersonaVoiceNotes(attack);
+
+        // WR-1: the ambient prompt omits voice notes entirely — the autonomous path never carries the payload...
+        request.IsAmbient.Should().BeTrue();
+        request.SystemPrompt.Should().NotContain(attack.WorldFeedPayload,
+            "ambient prompts drop persona voice notes (orchestrator review WR-1)");
+        request.SystemPrompt.Should().NotContain("  voice: ");
+        request.WorldFeed.Should().NotContain(attack.WorldFeedPayload);
+
+        // ...and the guard stays as the second layer behind it.
+        InjectionRedTeam.Obeyed(attack.ObeyedTell).Clean
+            .Should().BeFalse($"an obeyed '{attack.Name}' must still be caught by the content guard");
+    }
+
+    [Theory]
+    [MemberData(nameof(PersonaVoiceNotesAttacks))]
+    public void PersonaVoiceNotesAttack_ReachesTheStorylinePromptUnfenced_AndItsObeyedFormIsCaught(InjectionAttack attack)
+    {
+        var request = InjectionRedTeam.AssembleStorylineViaPersonaVoiceNotes(attack);
+
+        // The residual (storyline prompts only): the payload sits in the trusted cast block, NOT inside the fence — so
+        // layer 1 does not apply...
+        request.IsAmbient.Should().BeFalse();
+        request.SystemPrompt.Should().Contain("  voice: " + attack.WorldFeedPayload,
+            "VoiceNotes are rendered verbatim into a storyline persona dossier by PromptAssembler.AppendPersona");
+        request.WorldFeed.Should().NotContain(attack.WorldFeedPayload);
+
+        // ...so the guard is the defence on this path: an obeyed tell is caught before it can reach a human.
+        InjectionRedTeam.Obeyed(attack.ObeyedTell).Clean
+            .Should().BeFalse($"an obeyed '{attack.Name}' via persona voice notes must be caught by the content guard");
+    }
+
+    [Fact]
     public void AnInCharacterReaction_PassesTheGuard_SoTheGateIsNotTriviallyGreen()
     {
         // The resisted form: a citizen reacting in-world, containing none of the attacker tells.

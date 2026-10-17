@@ -34,9 +34,13 @@ internal sealed class StubGenerationProvider : IGenerationProvider
     /// <summary>How many times <see cref="GenerateAsync"/> was invoked — proves re-rolls happened.</summary>
     public int Calls { get; private set; }
 
+    /// <summary>The last request the stage sent — lets a test assert what the assembled prompt carried.</summary>
+    public GenerationRequest? LastRequest { get; private set; }
+
     public Task<GenerationResult> GenerateAsync(GenerationRequest request, CancellationToken cancellationToken = default)
     {
         Calls++;
+        LastRequest = request;
         var result = new GenerationResult(
             Posts: _posts,
             Usage: new GenerationUsage(InputTokens: 42, OutputTokens: 17),
