@@ -220,7 +220,10 @@ public sealed class ExerciseCreationService
             });
     }
 
-    /// <summary>Projects a freshly created exercise onto the shared org-admin row shape.</summary>
+    /// <summary>
+    /// Projects a freshly created exercise onto the shared org-admin row shape. Creation is org-admin only, and an org
+    /// admin manages every exercise of their organization, so <see cref="OrgExerciseDto.CanManage"/> is <c>true</c>.
+    /// </summary>
     private static OrgExerciseDto ToDto(Exercise exercise) => new()
     {
         ExerciseId = exercise.Id.ToString(),
@@ -228,6 +231,7 @@ public sealed class ExerciseCreationService
         Status = exercise.Status,
         Hostname = exercise.Hostname,
         CreatedAt = exercise.CreatedAt?.ToString("O", CultureInfo.InvariantCulture),
+        CanManage = true,
     };
 
     /// <summary>

@@ -5,6 +5,7 @@ using System.Globalization;
 using System.Linq;
 using Microsoft.EntityFrameworkCore;
 using Pulse.WebApi.Data;
+using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.ExerciseConfiguration.Lifecycle;
 
 /// <summary>
@@ -77,12 +78,32 @@ public sealed class ExerciseListService
         // and SQL Server renders a uniqueidentifier UPPERCASE, which would mismatch the lowercase exerciseId
         // every other endpoint emits (and which the switcher compares against). Materialize, then stringify in
         // memory — the same trap StaffAssignmentService documents.
+        //
+        // canManage (identity-auth-roles/17 Gate-1 WR-005) mirrors the rename/archive rule in the SAME query (one
+        // correlated EXISTS, no N+1): an org admin manages every row; a planner only a row they hold a PLANNER enrollment
+        // on; anyone else (the controller) none.
+        var isOrgAdmin = ExerciseAdminRoles.IsOrgAdmin(caller.Role);
+        var isManager = ExerciseAdminRoles.IsExerciseManager(caller.Role);
+        var personId = caller.StaffUserId;
         var rows = await _dbContext.Exercises
             .AsNoTracking()
             .InOrganization(caller.OrganizationId)
             .OrderBy(exercise => exercise.Name)
             .Select(exercise => new ExerciseRow(
-                exercise.Id, exercise.Name, exercise.Status, exercise.Hostname, exercise.CreatedAt))
+                exercise.Id,
+                exercise.Name,
+                exercise.Status,
+                exercise.Hostname,
+                exercise.CreatedAt,
+                isOrgAdmin
+                    || (isManager
+                        // org-scope-exempt(TenantChecked): correlated to an exercise this same query bounds with
+                        // .InOrganization(caller.OrganizationId); own-only (PersonId == the session-carried person id).
+                        && _dbContext.Enrollments
+                            .IgnoreQueryFilters()
+                            .Any(e => e.ExerciseId == exercise.Id
+                                && e.PersonId == personId
+                                && e.Role == EnrollmentRoles.Planner))))
             .ToListAsync(cancellationToken);
 
         return rows
@@ -93,6 +114,7 @@ public sealed class ExerciseListService
                 Status = CanonicalStatus(row.Status),
                 Hostname = row.Hostname,
                 CreatedAt = row.CreatedAt?.ToString("O", CultureInfo.InvariantCulture),
+                CanManage = row.CanManage,
             })
             .ToList();
     }
@@ -107,5 +129,6 @@ public sealed class ExerciseListService
         ExerciseLifecycleStates.TryParse(status, out var canonical) ? canonical : status;
 
     /// <summary>The materialized projection shape — a record so the EF projection stays translatable and typed.</summary>
-    private sealed record ExerciseRow(Guid Id, string Name, string Status, string? Hostname, DateTimeOffset? CreatedAt);
+    private sealed record ExerciseRow(
+        Guid Id, string Name, string Status, string? Hostname, DateTimeOffset? CreatedAt, bool CanManage);
 }

@@ -251,7 +251,11 @@ public sealed class ExerciseManagementService
             : (null, ExerciseManagementResult.Forbidden());
     }
 
-    /// <summary>Projects an exercise onto the shared org-admin row shape, status canonicalized like the list.</summary>
+    /// <summary>
+    /// Projects an exercise onto the shared org-admin row shape, status canonicalized like the list. Only ever built for
+    /// an exercise the caller has just been allowed to manage (an exercise they may not manage is a bare 404), so
+    /// <see cref="OrgExerciseDto.CanManage"/> is <c>true</c>.
+    /// </summary>
     internal static OrgExerciseDto ToDto(Exercise exercise) => new()
     {
         ExerciseId = exercise.Id.ToString(),
@@ -259,6 +263,7 @@ public sealed class ExerciseManagementService
         Status = ExerciseLifecycleStates.TryParse(exercise.Status, out var canonical) ? canonical : exercise.Status,
         Hostname = exercise.Hostname,
         CreatedAt = exercise.CreatedAt?.ToString("O", CultureInfo.InvariantCulture),
+        CanManage = true,
     };
 
     /// <summary>

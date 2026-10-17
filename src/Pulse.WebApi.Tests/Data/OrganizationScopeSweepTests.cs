@@ -335,7 +335,9 @@ public sealed class OrganizationScopeSweepTests
         // OrgStaffLoginService's landing enrollment (1, identity-auth-roles/15: own-only, joined to an InOrganization exercise).
         // identity-auth-roles/17: ExerciseManagementService's "does the planner hold a planner enrollment on this
         // already tenant-resolved exercise" check (1).
-        ["TenantChecked"] = 11,
+        // identity-auth-roles/17 Gate-1 WR-005: ExerciseListService's canManage EXISTS — the caller's own planner
+        // enrollment, correlated to the InOrganization-bounded exercise rows of the same query (1).
+        ["TenantChecked"] = 12,
 
         // BootstrapService.ProvisionStaffAsync: the exercise this ops request itself created or host-resolved.
         ["ResolvedScope"] = 1,

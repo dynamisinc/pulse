@@ -1,8 +1,10 @@
 namespace Pulse.WebApi.Tests.Features.Identity.RoleMatrix;
 
 using System;
+using System.Linq;
 using System.Net;
 using System.Net.Http.Json;
+using System.Text.Json;
 using System.Threading.Tasks;
 using FluentAssertions;
 using Pulse.WebApi.Tests.Data;
@@ -63,6 +65,40 @@ public sealed class OrgRowActionRoleTests
         using var controller = world.Client(host, await world.TokenForAsync(MatrixRole.Controller));
         using var refused = await controller.PatchAsJsonAsync($"/api/org/exercises/{world.ExerciseId}", new { name = "Controller" });
         refused.StatusCode.Should().Be(HttpStatusCode.Forbidden, "a controller may not rename (§8.2)");
+    }
+
+    /// <summary>
+    /// Gate-1 WR-005: the org exercise list carries <c>canManage</c>, the same rule rename/archive enforce — so the UI
+    /// offers Rename/Archive only where the server will honour them. Org admin: every row. Planner: only the exercise
+    /// they plan (a same-org sibling they are not enrolled on is false). Controller: none.
+    /// </summary>
+    [RequiresDockerTheory]
+    [InlineData(MatrixRole.OrgAdmin, true, true)]
+    [InlineData(MatrixRole.Planner, true, false)]
+    [InlineData(MatrixRole.Controller, false, false)]
+    public async Task OrgExerciseList_CanManage_FollowsTheRenameArchiveRule(MatrixRole role, bool ownExpected, bool siblingExpected)
+    {
+        var world = await RoleMatrixWorld.SeedAsync(_fixture);
+        var sibling = await RoleMatrixWorld.SeedAsync(_fixture, organizationId: world.OrganizationId);
+        using var host = new RoleMatrixHost(_fixture.ConnectionString!);
+        using var client = world.Client(host, await world.TokenForAsync(role));
+
+        using var response = await client.GetAsync("/api/org/exercises");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var canManage = document.RootElement.EnumerateArray().ToDictionary(
+            row => Guid.Parse(row.GetProperty("exerciseId").GetString()!),
+            row => row.GetProperty("canManage").GetBoolean());
+
+        canManage.Should().HaveCount(2, "the list is the organization's two exercises");
+        canManage[world.ExerciseId].Should().Be(ownExpected, "{0} on the exercise they are enrolled in", role);
+        canManage[sibling.ExerciseId].Should().Be(siblingExpected, "{0} on a same-org exercise they are not enrolled in", role);
+
+        // The flag is honest: where it says false, rename is the server's refusal (403 for a controller, the bare 404
+        // for a planner); where it says true, rename succeeds.
+        using var rename = await client.PatchAsJsonAsync($"/api/org/exercises/{sibling.ExerciseId}", new { name = $"Sibling by {role}" });
+        rename.IsSuccessStatusCode.Should().Be(siblingExpected);
     }
 
     [RequiresDockerFact]
