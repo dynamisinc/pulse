@@ -20,6 +20,8 @@
  * exactly as `AlertBar.test.tsx` does; the clock is NOT mocked (scenario time
  * is rendered by the real `useScenarioTime`).
  */
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { fireEvent, render, screen } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -186,5 +188,13 @@ describe('AlertBar — touch targets on phones (mobile-tablet 05, gap G1)', () =
     render(<AlertBar />)
 
     expect(screen.getByTestId('pulse-alert-bar-details')).toHaveClass('pulse-alert-bar-hit')
+  })
+})
+
+describe('AlertBar: landscape safe-area padding (WR-001, mobile-tablet)', () => {
+  it('pads left/right by max(14px, the safe-area inset)', () => {
+    const src = readFileSync(join(__dirname, 'AlertBar.tsx'), 'utf8')
+    expect(src).toContain('max(14px, env(safe-area-inset-right, 0px))')
+    expect(src).toContain('max(14px, env(safe-area-inset-left, 0px))')
   })
 })

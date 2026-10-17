@@ -95,9 +95,10 @@
  */
 .topBar {
   position: absolute;
-  top: 8px;
-  right: 8px;
-  left: 8px;
+  /* max(): in native fullscreen on a notched phone the controls stay inside the safe area. */
+  top: max(8px, env(safe-area-inset-top, 0px));
+  right: max(8px, env(safe-area-inset-right, 0px));
+  left: max(8px, env(safe-area-inset-left, 0px));
   z-index: 2;
   display: flex;
   align-items: flex-start;
@@ -142,6 +143,18 @@
 
 .control:hover {
   background: rgb(0 0 0 / 82%);
+}
+
+/*
+ * Phones / tablets (coarse pointer): Mute and Expand are 44px boxes (story 04, NFR-001).
+ * Real layout space, not a hit-slop. Declared before .playToggle (52px) so that wins.
+ * Mouse layout stays 34px.
+ */
+@media (pointer: coarse) {
+  .control {
+    width: 44px;
+    height: 44px;
+  }
 }
 
 /* A white + dark double ring: visible over any footage (NFR-001). */

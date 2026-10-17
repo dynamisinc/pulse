@@ -69,6 +69,18 @@ describe('useShellState (boundary-mocked branch)', () => {
     const { result } = renderHook(() => useShellState(), { wrapper: makeWrapper(queryClient) })
 
     expect(result.current.variant).toBe('readOnly')
+    // ...and says so, so a channel can wait instead of acting on it (MT-D8).
+    expect(result.current.pending).toBe(true)
+  })
+
+  it('reports pending=false once the variant resolves (MT-D8)', async () => {
+    mockGet.mockResolvedValue({ data: { variant: 'full' } } as Awaited<ReturnType<typeof api.get>>)
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+
+    const { result } = renderHook(() => useShellState(), { wrapper: makeWrapper(queryClient) })
+
+    await waitFor(() => expect(result.current.variant).toBe('full'))
+    expect(result.current.pending).toBe(false)
   })
 
   it('falls back to "readOnly" (CR-W1) - never the bogus value, never "full" - once a response with an out-of-enum variant settles', async () => {
@@ -88,6 +100,8 @@ describe('useShellState (boundary-mocked branch)', () => {
       expect(cachedState?.status).toBe('error')
     })
     expect(result.current.variant).toBe('readOnly')
+    // A failed resolution is SETTLED (fail-closed), not pending: channels act on readOnly.
+    expect(result.current.pending).toBe(false)
   })
 
   it('never sends the exerciseId as a request/query param to the server (COR-001, XC-002)', async () => {

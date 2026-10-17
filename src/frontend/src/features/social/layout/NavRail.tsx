@@ -55,7 +55,7 @@
  * World: participant. CSS Module + FontAwesome only -- no COBRA, no MUI.
  */
 
-import type { MouseEvent, Ref } from 'react'
+import type { Ref } from 'react'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import type { IconDefinition } from '@fortawesome/fontawesome-svg-core'
 import {
@@ -76,7 +76,9 @@ import {
   EXPLORE_PATH,
   HOME_PATH,
   NOTIFICATIONS_PATH,
+  soleSegment,
   socialPaths,
+  useSocialLinkClick,
   useSocialNavigation,
 } from './socialNavigation'
 import styles from './NavRail.module.css'
@@ -112,13 +114,6 @@ interface NavItemSpec {
   readonly icon: IconDefinition
 }
 
-/** The single path segment of `pathname`, lower-cased, or `undefined` if it has more/none. */
-function soleSegment(pathname: string): string | undefined {
-  const segments = pathname.split('/').filter(segment => segment !== '')
-  const [only] = segments
-  return segments.length === 1 && only !== undefined ? only.toLowerCase() : undefined
-}
-
 export function NavRail({
   onCompose,
   postButtonRef,
@@ -126,7 +121,8 @@ export function NavRail({
   showAccount,
   showNotifications = false,
 }: NavRailProps) {
-  const { location, navigate, kind } = useSocialNavigation()
+  const { location } = useSocialNavigation()
+  const handleLinkClick = useSocialLinkClick()
   const { available: notificationsAvailable, unread } = useNotificationsSummary()
   const current = soleSegment(location.pathname)
 
@@ -157,15 +153,6 @@ export function NavRail({
     if (item.id === 'explore') return current === 'explore'
     if (item.id === 'notifications') return current === 'notifications'
     return self !== undefined && current === self.handle.toLowerCase()
-  }
-
-  const handleLinkClick = (event: MouseEvent<HTMLAnchorElement>, path: string) => {
-    const modified = event.metaKey || event.ctrlKey || event.shiftKey || event.altKey
-    // Browser kind: let the browser own new-tab / download style clicks. Memory kind
-    // has no URL of its own to open, so it always handles the click in-memory.
-    if (kind === 'browser' && (modified || event.button !== 0)) return
-    event.preventDefault()
-    navigate(path)
   }
 
   return (

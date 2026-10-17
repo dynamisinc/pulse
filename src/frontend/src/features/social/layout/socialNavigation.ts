@@ -54,7 +54,15 @@
  * World: participant. No COBRA, no MUI.
  */
 
-import { createContext, createElement, useContext, useMemo, type ReactNode } from 'react'
+import {
+  createContext,
+  createElement,
+  useCallback,
+  useContext,
+  useMemo,
+  type MouseEvent,
+  type ReactNode,
+} from 'react'
 import { matchPath } from 'react-router-dom'
 import { ALERTS_PATH } from '@/features/participant-shell/components/AlertBar/alertsRoute'
 
@@ -333,4 +341,28 @@ export function useSocialNavigation(): SocialNavigation {
     throw new Error('useSocialNavigation() found actions but no location state.')
   }
   return useMemo(() => ({ ...actions, ...state }), [actions, state])
+}
+
+/** The single path segment of `pathname`, lower-cased, or `undefined` if it has more/none. */
+export function soleSegment(pathname: string): string | undefined {
+  const segments = pathname.split('/').filter(segment => segment !== '')
+  const [only] = segments
+  return segments.length === 1 && only !== undefined ? only.toLowerCase() : undefined
+}
+
+/**
+ * The click handler shared by the nav rail and the phone tab bar (they are interchangeable
+ * primary navigations): a plain left click is routed through the adapter (a push in the
+ * browser kind, a memory move in the memory kind); in the browser kind a modified or
+ * non-primary click falls through to the browser (new tab, download); the memory kind has
+ * no URL of its own, so it always handles the click in memory.
+ */
+export function useSocialLinkClick(): (event: MouseEvent<HTMLAnchorElement>, path: string) => void {
+  const { navigate, kind } = useSocialNavigation()
+  return useCallback((event, path) => {
+    const modified = event.metaKey || event.ctrlKey || event.shiftKey || event.altKey
+    if (kind === 'browser' && (modified || event.button !== 0)) return
+    event.preventDefault()
+    navigate(path)
+  }, [kind, navigate])
 }
