@@ -758,6 +758,35 @@ The report is marked **EXERCISE** at the top and contains:
 All times in the report are scenario time. It is a staff document: it shows who really posted each item, so do not
 hand it to players during the exercise.
 
+## Using a tablet
+
+Pulse runs on a tablet (iPad or similar) from 768 px wide upward. Phones are not supported for staff
+screens. The layout depends on the width of the window; touch-sized buttons depend on whether your
+device uses a finger (a coarse pointer), so an iPad with a trackpad gets the tablet layout and a
+narrow desktop window gets the tablet layout without the larger buttons. At 1280 px and wider
+nothing changes.
+
+### The header, toolstrip and flyouts on a tablet
+
+- **Always visible in the header:** the exercise name and your role, the **SCENARIO** clock, the state
+  pill (**LIVE**, **INJECTS PAUSED**, **ENGINE PAUSED**, **WORLD FROZEN**; it always has a dot and
+  words, never colour alone) and `UNCLASSIFIED // FOUO`. On a narrow portrait screen the state pill
+  and the marking stack in one cell.
+- **The ⋯ (More header options) button:** below 1280 px the **LOCAL** wall clock, the staff presence
+  avatars (with their names listed) and **Preview as participant** live behind this button. While a
+  preview is on, the button reads **PREVIEW** so you can see it from the header. In portrait,
+  **Sign out** shows as an icon only; its name is still "Sign out".
+- **Preview as participant** is still framed by the **PREVIEW AS PARTICIPANT - READ-ONLY** bar
+  and an **Exit preview** button. On a narrow window the participant view scrolls inside its frame.
+- **Toolstrip (right edge):** each tool is at least 44 x 44 px on touch and has its name under it.
+  The longer description appears if you press and hold a tool.
+- **Flyouts** (**PERSONAS** dock, **ENGINE**, **USAGE**, **ADMIN**): one is open at a time; opening
+  another closes the first. Each fills the height of the work area, scrolls on its own and never runs
+  past the screen edge. It never covers the header or the toolstrip. Close it with its **✕** button
+  (44 x 44 on touch) or press <kbd>Esc</kbd> on a hardware keyboard; focus returns to the toolstrip
+  button you used.
+- **Keyboard order:** header, then the work area, then the toolstrip.
+
 ## 13. Quick reference
 
 | Task | Where | How |
