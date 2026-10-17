@@ -1064,4 +1064,30 @@ describe('ParticipantSignInPage — a native submit can never put credentials in
       'post',
     )
   })
+  describe('phone keyboard hints (mobile-tablet story 03)', () => {
+    it('the sign-in name and the day word are not mangled by the keyboard', () => {
+      renderPage()
+      for (const label of ['Sign-in name', "Today's word"]) {
+        const field = screen.getByLabelText(label)
+        expect(field).toHaveAttribute('autocapitalize', 'none')
+        expect(field).toHaveAttribute('autocorrect', 'off')
+        expect(field).toHaveAttribute('inputmode', 'text')
+        expect(field).toHaveAttribute('spellcheck', 'false')
+      }
+      expect(screen.getByLabelText('Sign-in name')).toHaveAttribute('enterkeyhint', 'next')
+      expect(screen.getByLabelText("Today's word")).toHaveAttribute('enterkeyhint', 'go')
+    })
+
+    it('the Password and view-only code forms get the same protection', async () => {
+      renderPage()
+      await userEvent.click(screen.getByRole('button', { name: 'Password' }))
+      expect(screen.getByLabelText('Handle')).toHaveAttribute('autocapitalize', 'none')
+      expect(screen.getByLabelText('Handle')).toHaveAttribute('autocorrect', 'off')
+      expect(screen.getByLabelText('Password', { selector: 'input' }))
+        .toHaveAttribute('enterkeyhint', 'go')
+      await userEvent.click(screen.getByRole('button', { name: 'View-only code' }))
+      expect(screen.getByLabelText('View-only code', { selector: 'input' }))
+        .toHaveAttribute('enterkeyhint', 'go')
+    })
+  })
 })

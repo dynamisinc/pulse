@@ -314,6 +314,13 @@ public sealed class ReportLookalikeDto
     /// <summary>The unverified lookalike.</summary>
     [JsonPropertyName("lookalike")]
     public required ReportAccountDto Lookalike { get; init; }
+
+    /// <summary>
+    /// Whether the lookalike out-drew the verified account by a real margin (DF-48, story 32): its likes + reposts are
+    /// at least 10 and at least 1.5 times the verified account's. The page prints a verdict only when <c>true</c>.
+    /// </summary>
+    [JsonPropertyName("outdrew")]
+    public required bool Outdrew { get; init; }
 }
 
 /// <summary>A persona with its summed shown engagement.</summary>
@@ -338,6 +345,10 @@ public sealed class ReportAccountDto
     /// <summary>Shown reposts summed over the persona's posts (64-bit).</summary>
     [JsonPropertyName("reposts")]
     public required long Reposts { get; init; }
+
+    /// <summary>The persona's posts inside the report's window, all sources (story 32).</summary>
+    [JsonPropertyName("posts")]
+    public required int Posts { get; init; }
 }
 
 /// <summary>One post in the record.</summary>

@@ -18,6 +18,6 @@ describe('MediaViewer top inset', () => {
     const viewer = /\.viewer\s*\{([^{}]*)\}/.exec(css)?.[1] ?? ''
     const chrome = String.raw`var\(--pulse-chrome-top,\s*0px\)`
     const alert = String.raw`var\(--pulse-alert-height,\s*0px\)`
-    expect(viewer).toMatch(new RegExp(String.raw`top\s*:\s*calc\(\s*${chrome}\s*\+\s*${alert}\s*\)`))
+    expect(viewer).toMatch(new RegExp(String.raw`top\s*:\s*calc\(\s*${chrome}\s*\+\s*${alert}\s*\+\s*env\(safe-area-inset-top,\s*0px\)\s*\)`))
   })
 })
