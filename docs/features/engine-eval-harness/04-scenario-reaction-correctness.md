@@ -98,9 +98,9 @@ prompt is a separate surface), so "the controller is prompted" is asserted at th
   total controller demand is 7/min for 36 consecutive minutes.
 - **D5 - HIGH: an expired countdown auto-sends after a FullStop is restored (swamped mode).** After a FullStop,
   a pre-stop undecided countdown that has expired is left `CountingDown`; on the first sweep after a human restore
-  with swamped mode on, it auto-publishes (stale burst goes out at restore). Fix: PR #571 (`AutoHoldPolicy.Evaluate`:
+  with swamped mode on, it auto-publishes (stale burst goes out at restore). Fix: a separate safety PR to main (`AutoHoldPolicy.Evaluate`:
   expired undecided countdown under GenerationStopped -> Hold with a hold-on-expiry event). This suite does not
-  assert the buggy or fixed state for that case. Follow-up once #571 is on main: add the release-blocking scenario
+  assert the buggy or fixed state for that case. Follow-up once that safety fix is on main: add the release-blocking scenario
   "FullStop -> expiry -> restore -> nothing auto-publishes, item Held".
 - **Observations (not asserted):** (a) under a tight cap, storylines are served in registration order, so with
   10 simultaneous storylines at cap 3/min, 4 are never voiced in 40 minutes (no rotation / staleness priority).

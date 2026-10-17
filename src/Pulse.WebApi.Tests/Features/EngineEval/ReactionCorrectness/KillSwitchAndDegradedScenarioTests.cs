@@ -90,7 +90,7 @@ public sealed class KillSwitchAndDegradedScenarioTests
 
         // FullStop + an expired countdown: deliberately NOT asserting the disposition here. On main the draft stays
         // CountingDown and auto-sends after a human restore under swamped mode (defect D5, HIGH); the fix lands in
-        // PR #571 (AutoHoldPolicy.Evaluate -> Hold with a hold-on-expiry event). See
+        // the D5 safety PR to main (AutoHoldPolicy.Evaluate -> Hold with a hold-on-expiry event). See
         // docs/features/engine-eval-harness/04-scenario-reaction-correctness.md (D5). Only "nothing publishes
         // during the stop" (above) and "never Published" (below) hold either way.
         suspended.Disposition.Should().NotBe(DraftDisposition.Published);
