@@ -239,6 +239,25 @@
   cursor: not-allowed;
 }
 
+/*
+ * Phones / tablets (coarse pointer): the Remove / Cancel-upload button is a real 44px
+ * box (story 04, NFR-001) tucked into the card's corner, and the body reserves matching
+ * room so the alt-text field never sits under it. The card is >= 72px tall, so 44px
+ * fits inside it. Mouse layout is unchanged.
+ */
+@media (pointer: coarse) {
+  .remove {
+    top: 2px;
+    right: 2px;
+    width: 44px;
+    height: 44px;
+  }
+
+  .attachBody {
+    padding-right: 44px;
+  }
+}
+
 @media (max-width: 420px) {
   .thumb {
     width: 56px;
