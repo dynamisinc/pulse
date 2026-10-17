@@ -35,6 +35,9 @@
  * React tree from having its Tab presses hijacked.) The console's ⌘K handler additionally
  * refuses to OPEN the palette over another modal - see `ControllerConsole`.
  *
+ * TOUCH (story 14): a visible Close button (the twin of Esc), a >= 44px close, a keyboard-aware
+ * (visual viewport) height, and a scrollable results list whose rows single-tap select.
+ *
  * ## What this file does NOT own
  * The ⌘K key binding + open/close state live in `ControllerConsole` (the
  * composition owner); this component is a controlled overlay (`open`/`onClose`).
@@ -47,10 +50,13 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { Box, Stack, Typography } from '@mui/material'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import { faMagnifyingGlass, faMasksTheater } from '@fortawesome/free-solid-svg-icons'
+import { faMagnifyingGlass, faMasksTheater, faXmark } from '@fortawesome/free-solid-svg-icons'
 import { hasOtherModalMounted } from '@/core/a11y/modalPriority'
 import { CobraTextField } from '@/theme/styledComponents'
 import { staffShellTokens } from '@/features/staffShell/staffShellTokens'
+import { useVisualViewportInset } from '@/core/hooks/useVisualViewportInset'
+import { useIsCoarsePointer } from '@/core/hooks/usePlatformModifier'
+import { COARSE_TARGET_SX } from '../consoleTouch'
 
 /** Focusable-element selector for the focus trap (visible, tabbable nodes). */
 const FOCUSABLE_SELECTOR =
@@ -132,6 +138,11 @@ export function CommandPalette({
   renderPersonaResults,
 }: CommandPaletteProps) {
   const [query, setQuery] = useState('')
+  // Story 14: the on-screen keyboard (touch only) must not cover the results. The backdrop pads up
+  // by the covered px and the panel height cap shrinks with it: the list scrolls above the keys.
+  // Touch only: a hardware keyboard has no on-screen one, and desktop pinch-zoom must not shift us.
+  const coarse = useIsCoarsePointer()
+  const keyboardInset = useVisualViewportInset(open && coarse)
   const panelRef = useRef<HTMLDivElement | null>(null)
   const searchInputRef = useRef<HTMLInputElement | null>(null)
   const triggerRef = useRef<Element | null>(null)
@@ -252,6 +263,7 @@ export function CommandPalette({
         alignItems: 'flex-start',
         pt: '12vh',
         px: 2,
+        pb: `${keyboardInset}px`,
         bgcolor: 'rgba(15, 23, 36, 0.42)',
       }}
     >
@@ -266,7 +278,7 @@ export function CommandPalette({
         sx={{
           width: '100%',
           maxWidth: 560,
-          maxHeight: '70vh',
+          maxHeight: `min(70vh, calc(100vh - 12vh - ${keyboardInset}px - 16px))`,
           display: 'flex',
           flexDirection: 'column',
           bgcolor: staffShellTokens.toolstrip.background,
@@ -304,6 +316,31 @@ export function CommandPalette({
             }}
             data-testid="command-palette-search"
           />
+          {/* Touch twin of Esc (D5-024): visible, labelled, >= 44px. Coarse pointer only, so the
+              desktop Tab order (search, then results) is exactly what it was. */}
+          {coarse && <Box
+            component="button"
+            type="button"
+            aria-label="Close command palette"
+            data-testid="command-palette-close"
+            onClick={onClose}
+            sx={{
+              flex: 'none',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              p: 0.75,
+              border: 0,
+              borderRadius: '6px',
+              bgcolor: 'transparent',
+              color: staffShellTokens.accent.secondaryText,
+              cursor: 'pointer',
+              '&:focus-visible': { outline: `2px solid ${staffShellTokens.header.background}` },
+              ...COARSE_TARGET_SX,
+            }}
+          >
+            <FontAwesomeIcon icon={faXmark} aria-hidden="true" />
+          </Box>}
         </Stack>
 
         <Box sx={{ overflowY: 'auto', flex: 1, minHeight: 0 }}>

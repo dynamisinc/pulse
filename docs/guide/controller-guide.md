@@ -778,6 +778,44 @@ shape, and what you can do stays the same.
 
 An evaluator or planner sees the same read-only console on a tablet as on a desktop.
 
+### Keyboard and touch shortcuts
+
+Every shortcut in the console has a button you can tap, so the console works with a finger alone and with a
+Magic Keyboard. Under a touch screen (a coarse pointer) every action control is at least 44 by 44 pixels and at
+least 8 pixels from its neighbour.
+
+Hints show **one** key name, the one for your device: <kbd>⌘</kbd> on a Mac, an iPhone or an iPad (iPadOS
+included), <kbd>Ctrl</kbd> on Windows, Linux and Android. On a touch screen the strip under the title reads
+"Tap PERSONAS or press ⌘K" (or "Ctrl+K"), because a finger does not need the key.
+
+| Key | Where | Tap instead |
+|---|---|---|
+| <kbd>⌘</kbd>/<kbd>Ctrl</kbd>+<kbd>K</kbd> | Anywhere in the console | The **PERSONAS** tool in the toolstrip, or **Reply as…** on a Live world row. Toggles the persona palette. |
+| <kbd>Esc</kbd> | Palette, persona panel, run sheet editor, library picker, dialogs | The **✕** (palette, persona panel, editor), **Cancel** or **Back** on each |
+| <kbd>↑</kbd> <kbd>↓</kbd> | Review queue | Tap a card. It is focused and shows its buttons. |
+| <kbd>Space</kbd> | Review queue | The tick box on the card |
+| <kbd>A</kbd> / <kbd>V</kbd> / <kbd>E</kbd> / <kbd>R</kbd> | Review queue, focused card | **Approve** / **Veto** / **Edit** / **Re-roll** on the card |
+| <kbd>B</kbd> | Review queue | **Batch approve** at the top |
+| <kbd>J</kbd> / <kbd>K</kbd> | Live world | Scroll, or tap a row |
+| <kbd>R</kbd> | Live world, focused row | **Reply as…** on the row |
+| <kbd>N</kbd> | Live world | The **N new** pill |
+| <kbd>↑</kbd> <kbd>↓</kbd> | Run sheet | Tap a row |
+| <kbd>F</kbd> / <kbd>H</kbd> / <kbd>S</kbd> | Run sheet, selected row | **Fire** / **Hold** or **Release** / **Skip** or **Unskip** on the row |
+| <kbd>N</kbd> / <kbd>A</kbd> | Run sheet | **Fire next** / **Add** at the top |
+| <kbd>E</kbd> | Run sheet, selected row | **Edit** (or **View**) on the row |
+| <kbd>⌘</kbd>/<kbd>Ctrl</kbd>+<kbd>Enter</kbd> | Persona panel, draft edit, run sheet editor | **Post** / **Send in-character** / **Save** |
+| <kbd>←</kbd> <kbd>→</kbd> <kbd>Home</kbd> <kbd>End</kbd> | Escalation dial | Tap or drag the track |
+| <kbd>←</kbd> <kbd>→</kbd> | White noise | Tap **Off**, **Low**, **Medium** or **High** |
+| <kbd>Enter</kbd> | End exercise dialog | **Confirm** (once you have typed END) |
+
+Nothing needs hover, a right-click or a key chord on a touch screen. The escalation dial's phase meaning, which
+shows on hover with a mouse, is printed under the phase name on a touch screen. When the on-screen keyboard is up,
+the persona panel and the palette rise above it so the text field and **Post** stay visible.
+
+On an iPad with a hardware keyboard, <kbd>⌘</kbd>+<kbd>K</kbd> works as on a Mac. Safari on iPadOS does not use
+it, and the console cancels the browser's own action for it. If a future iPadOS version takes it, use the
+**PERSONAS** tool instead.
+
 ## 13. Quick reference
 
 | Task | Where | How |

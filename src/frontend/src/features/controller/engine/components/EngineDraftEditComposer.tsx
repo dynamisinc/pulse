@@ -37,6 +37,8 @@ import { usePersonas } from '@/features/personas'
 import type { ReviewQueueEditSlotProps } from './ReviewQueue'
 // D5 dark operator-chrome tokens (matches `ReviewQueue`'s `chrome`). Staff-only.
 import { consoleChrome as chrome } from '../../consoleChrome'
+import { COARSE_GAP_SX, COARSE_TARGET_SX } from '../../consoleTouch'
+import { ComposeSendHint } from '../../shortcutHints'
 
 /** Fallback avatar identity when the persona isn't resolved yet (mirrors `ReviewQueue`). */
 function fallbackAvatar(handle: string): AvatarPersona {
@@ -144,8 +146,9 @@ export function EngineDraftEditComposer({
 
       <Box sx={{ flex: 1 }} />
 
-      <Stack direction="row" sx={{ justifyContent: 'flex-end', gap: 1 }}>
-        <CobraLinkButton type="button" onClick={onCancel}>
+      <Stack direction="row" sx={{ alignItems: 'center', justifyContent: 'flex-end', gap: 1, ...COARSE_GAP_SX }}>
+        <ComposeSendHint verb="send" />
+        <CobraLinkButton type="button" onClick={onCancel} sx={COARSE_TARGET_SX}>
           Cancel
         </CobraLinkButton>
         <CobraPrimaryButton
@@ -153,6 +156,7 @@ export function EngineDraftEditComposer({
           onClick={submit}
           disabled={text.trim().length === 0}
           aria-label="Send in-character"
+          sx={COARSE_TARGET_SX}
         >
           Send in-character
         </CobraPrimaryButton>

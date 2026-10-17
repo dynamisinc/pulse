@@ -128,7 +128,8 @@
  * ⌘K palette and its key listener, the flyouts and the draft drivers are shared by both. A
  * rotation WITHIN the tablet bands never resets them. Crossing 1280 (an iPad Pro 1366 rotating to
  * 1024) swaps the work area, so panes and flyouts REMOUNT then: a known limit (story 12 doc).
- * The shortcut strip is drawn by both, unchanged (story 14 owns it).
+ * The shortcut strip is drawn by both (`ConsoleShortcutStrip`, story 14: one keycap, tap hint on
+ * a coarse pointer).
  *
  * World: staff (COBRA/Cadence) — everything here is COBRA chrome; the
  * participant OUTPUT (a published post) is `persona-operation`'s / the engine
@@ -142,7 +143,6 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import {
   faChartLine,
   faGear,
-  faKeyboard,
   faMasksTheater,
   faTowerBroadcast,
 } from '@fortawesome/free-solid-svg-icons'
@@ -150,6 +150,8 @@ import { useStaffPersonas, type StaffPersona } from '@/features/personas'
 import { useExerciseContext } from '@/core/exerciseContext'
 import { hasOtherModalMounted } from '@/core/a11y/modalPriority'
 import { useRegisterSurfaceTool, useToolstrip } from '@/features/staffShell/toolRegistry'
+import { ConsoleShortcutStrip } from '../shortcutHints'
+import { usePersonasTooltip } from '../usePersonasTooltip'
 import { staffShellTokens } from '@/features/staffShell/staffShellTokens'
 import { useControllerIdentity } from '../identity/controllerIdentity'
 import { useCanControl, ViewOnlyChip } from '../access'
@@ -209,19 +211,6 @@ const SLOT_SECTION_SX = {
   flexDirection: 'column',
   minWidth: 0,
   minHeight: 0,
-} as const
-
-/** A keycap in the shortcut strip. */
-const KBD_SX = {
-  fontFamily: staffShellTokens.classificationTag.fontFamily,
-  fontSize: 11,
-  fontWeight: 700,
-  color: staffShellTokens.header.background,
-  border: `1px solid ${staffShellTokens.toolstrip.borderColor}`,
-  borderRadius: '4px',
-  bgcolor: staffShellTokens.toolstrip.background,
-  px: 0.75,
-  py: 0.125,
 } as const
 
 /**
@@ -352,11 +341,12 @@ export interface ControllerConsoleProps {
  * so the toolstrip order is unchanged.
  */
 function PersonasTool({ personaCount }: { personaCount: number }) {
+  const tooltip = usePersonasTooltip()
   useRegisterSurfaceTool({
     id: PERSONAS_TOOL_ID,
     label: 'PERSONAS',
     icon: faMasksTheater,
-    tooltip: 'Post as persona (⌘K) — search a persona and compose',
+    tooltip,
     badge: personaCount > 0 ? { count: personaCount, escalating: false } : undefined,
   })
   return null
@@ -613,26 +603,8 @@ export function ControllerConsole(
   const tabletLayout = consoleLayout.layout
   const paneBadges = usePaneBadgeStore()
 
-  // The ⌘K shortcut strip (story 14 owns its behaviour). Drawn by both work areas.
-  const shortcutStrip = canControl ? (
-    <Stack
-      direction="row"
-      data-testid="console-shortcut-strip"
-      sx={{
-        alignItems: 'center',
-        gap: 1,
-        flexWrap: 'wrap',
-        fontSize: 12,
-        color: staffShellTokens.accent.secondaryText,
-      }}
-    >
-      <FontAwesomeIcon icon={faKeyboard} aria-hidden="true" />
-      <Box component="kbd" sx={KBD_SX}>⌘K</Box>
-      <Box component="span">/</Box>
-      <Box component="kbd" sx={KBD_SX}>Ctrl+K</Box>
-      <Box component="span">Post as a persona</Box>
-    </Stack>
-  ) : null
+  // The command-palette hint strip (story 14: platform-correct keycap / tap hint). Both work areas.
+  const shortcutStrip = canControl ? <ConsoleShortcutStrip /> : null
 
   // The persona dock and the ENGINE / USAGE flyouts, in the order their focus effects rely on
   // (dock first). Desktop mounts them on the console root; the tablet frame mounts them over its

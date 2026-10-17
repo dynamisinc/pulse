@@ -52,6 +52,7 @@ import type { Persona } from '@/features/personas'
 import { formatScenarioTime } from '@/core/clock'
 import { consoleChrome as chrome } from '../consoleChrome'
 import { RunSheetButton, RunSheetIconButton } from './RunSheetButtons'
+import { COARSE_GAP_SX } from '../consoleTouch'
 import { RunSheetStatusChip } from './RunSheetStatusChip'
 import { PersonaLine } from './PersonaLine'
 import { MarkFiredAction } from './MarkFiredAction'
@@ -297,7 +298,7 @@ export function RunSheetRow({
       ) : null}
 
       {/* Actions */}
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, flexWrap: 'wrap' }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, flexWrap: 'wrap', ...COARSE_GAP_SX }}>
         {canControl && canFire(item.status) ? (
           <RunSheetButton
             kind="primary"

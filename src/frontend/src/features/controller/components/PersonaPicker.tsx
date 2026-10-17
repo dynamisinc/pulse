@@ -117,6 +117,7 @@ import { useStaffPersonas, type Persona, type PersonaType, type StaffPersona } f
 import { VerifiedMark } from '@/features/social/components/VerifiedMark'
 import { CobraTextField } from '@/theme/styledComponents'
 import { useActivePersona } from '../hooks/useActivePersona'
+import { COARSE_GAP_SX, COARSE_TALL_SX, COARSE_TARGET_SX } from '../consoleTouch'
 
 interface PersonaTypeFilterOption {
   value: PersonaType
@@ -377,7 +378,7 @@ export function PersonaPicker({
       <Stack
         direction="row"
         data-testid="persona-picker-type-filters"
-        sx={{ flexWrap: 'wrap', gap: 0.75 }}
+        sx={{ flexWrap: 'wrap', gap: 0.75, ...COARSE_GAP_SX }}
       >
         <TypeFilterChip
           label="All types"
@@ -518,6 +519,7 @@ function TypeFilterChip({ label, icon, active, onClick }: TypeFilterChipProps) {
         fontWeight: 700,
         cursor: 'pointer',
         lineHeight: 1.4,
+        ...COARSE_TARGET_SX,
       }}
     >
       {icon && <FontAwesomeIcon icon={icon} size="xs" />}
@@ -562,6 +564,8 @@ function PersonaPickerRow({
         bgcolor: highlighted ? 'action.hover' : 'transparent',
         border: highlighted ? '1px solid' : '1px solid transparent',
         borderColor: highlighted ? 'primary.main' : 'transparent',
+        // Story 14: a single tap selects (the row's onClick); the row is a >= 44px target.
+        ...COARSE_TALL_SX,
       }}
     >
       <Box
@@ -649,6 +653,8 @@ function PersonaPickerRow({
           color: pinned ? 'primary.main' : 'text.disabled',
           fontSize: 10,
           fontWeight: 700,
+          justifyContent: 'center',
+          ...COARSE_TARGET_SX,
         }}
       >
         <FontAwesomeIcon icon={faThumbtack} size="xs" />
