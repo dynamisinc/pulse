@@ -21,7 +21,7 @@
  *   npm install                      # once: installs playwright-core only
  *   node capture.mjs                 # all shots
  *   node capture.mjs roster day-word # only these (names without .png)
- *   node capture.mjs --list          # print the shot names
+ *   node capture.mjs --list          # print the shot names (size variants included)
  *   GUIDE_SHOTS_URL=http://localhost:5199 node capture.mjs
  *                                    # reuse an already running `node serve.mjs`
  *   CHROMIUM_PATH=/path/to/chrome node capture.mjs
@@ -29,7 +29,9 @@
  *                                    # whatever playwright-core resolves
  *
  * ADDING A SHOT
- *   Append an entry to SHOTS: { name, role, path, viewport?, storage?, act?, crop? }.
+ *   Append an entry to SHOTS: { name, role, path, viewport?, variants?, storage?, act?, crop? }.
+ *   `variants` lists extra viewports (from ./viewports.mjs); each writes
+ *   `<name>-<suffix>.png` next to the primary `<name>.png`.
  *   `act(page)` performs the clicks; `crop(page)` (optional) returns a Locator or
  *   an array of Locators whose union (+ padding) is captured instead of the full
  *   viewport. Then run `node capture.mjs <name>` and LOOK at the PNG.
@@ -42,14 +44,13 @@ import { existsSync, mkdirSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { startServer, ROLE_STORAGE_KEY } from './serve.mjs'
+import { DESKTOP, DESKTOP_TALL, PHONE, PHONE_SMALL, TABLET } from './viewports.mjs'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const OUT_DIR = path.resolve(HERE, '../../docs/guide/img')
 
-const DESKTOP = { width: 1440, height: 900 }
-const MOBILE = { width: 390, height: 844 }
-/** Taller desktop window for CROPPED console panels, so each panel shows more rows. */
-const DESKTOP_TALL = { width: 1440, height: 1150 }
+/** The core participant screens are also captured on a small phone and a tablet. */
+const PHONE_AND_TABLET_VARIANTS = [PHONE_SMALL, TABLET]
 
 /** Hides dev-only scaffolding that would never appear for a real user. */
 const HIDE_DEV_CHROME_CSS = `
@@ -95,7 +96,7 @@ const SHOTS = [
   {
     name: 'participant-join',
     role: 'participant',
-    viewport: MOBILE,
+    viewport: PHONE,
     // `slow-` tokens make the mock wait ~1.5 s, so the "Signing you in…" state is visible.
     path: '/join/slow-guide-demo',
     waitUntil: 'domcontentloaded',
@@ -105,27 +106,36 @@ const SHOTS = [
   {
     name: 'participant-signin-word',
     role: 'participant',
-    viewport: MOBILE,
+    viewport: PHONE,
     path: '/login',
     act: async page => {
       await page.getByRole('textbox', { name: 'Sign-in name' }).fill('dreyes')
       await page.getByRole('textbox', { name: "Today's word" }).fill('harbor lantern')
     },
   },
-  { name: 'participant-feed', role: 'participant', viewport: MOBILE, path: '/home' },
+  {
+    name: 'participant-feed',
+    role: 'participant',
+    viewport: PHONE,
+    variants: PHONE_AND_TABLET_VARIANTS,
+    path: '/home',
+  },
   {
     name: 'participant-thread',
     role: 'participant',
-    viewport: MOBILE,
+    viewport: PHONE,
+    variants: PHONE_AND_TABLET_VARIANTS,
     path: '/i/status/post-fx-thread-root',
   },
   {
     name: 'participant-composer',
     role: 'participant',
-    viewport: MOBILE,
+    viewport: PHONE,
+    variants: PHONE_AND_TABLET_VARIANTS,
     path: '/home',
     act: async page => {
-      // The feather "Post" button in the left rail opens the compose sheet.
+      // "Post" opens the compose sheet: the round button in the bottom tab bar on a
+      // phone, the feather button in the left rail on a tablet.
       await page.getByRole('button', { name: 'Post', exact: true }).first().click()
       await page.getByRole('heading', { name: 'New post' }).waitFor()
       await page.keyboard.type('Line at the Elm St. water station is about 20 min now. Bring your own jugs! #WaterIssues')
@@ -134,7 +144,8 @@ const SHOTS = [
   {
     name: 'participant-alert-bar',
     role: 'participant',
-    viewport: MOBILE,
+    viewport: PHONE,
+    variants: PHONE_AND_TABLET_VARIANTS,
     path: '/home',
     storage: { 'pulse.guideShots.alerts': JSON.stringify([ALERT]) },
     act: async page => { await page.getByText('EMERGENCY').first().waitFor() },
@@ -143,7 +154,7 @@ const SHOTS = [
     // The alert bar's "Details →" target: every active alert, in full.
     name: 'participant-alerts',
     role: 'participant',
-    viewport: MOBILE,
+    viewport: PHONE,
     path: '/home',
     storage: { 'pulse.guideShots.alerts': JSON.stringify([ALERT]) },
     act: async page => {
@@ -154,7 +165,7 @@ const SHOTS = [
   {
     name: 'participant-holding-page',
     role: 'participant',
-    viewport: MOBILE,
+    viewport: PHONE,
     path: '/home',
     storage: {
       'pulse.guideShots.overlay': JSON.stringify({ state: 'pause', register: 'out-of-fiction', message: '' }),
@@ -322,6 +333,24 @@ const SHOTS = [
   },
 ]
 
+/**
+ * One capture job per (shot, viewport): the primary viewport keeps the shot's own
+ * name; each entry in `variants` adds `<name>-<suffix>`.
+ */
+function expandVariants(shots) {
+  return shots.flatMap(shot => [
+    { ...shot, baseName: shot.name },
+    ...(shot.variants ?? []).map(viewport => ({
+      ...shot,
+      baseName: shot.name,
+      name: `${shot.name}-${viewport.suffix}`,
+      viewport,
+    })),
+  ])
+}
+
+const JOBS = expandVariants(SHOTS)
+
 // ---------------------------------------------------------------------------
 
 function chromiumPath() {
@@ -350,8 +379,10 @@ async function captureShot(browser, baseUrl, shot) {
   const context = await browser.newContext({
     viewport,
     deviceScaleFactor: 1,
-    isMobile: viewport === MOBILE,
-    hasTouch: viewport === MOBILE,
+    // Driven by the viewport's flag (not object identity), so every phone and tablet
+    // size gets mobile + touch emulation and therefore the coarse-pointer layout.
+    isMobile: viewport.mobile === true,
+    hasTouch: viewport.mobile === true,
     reducedMotion: 'reduce',
     timezoneId: 'America/New_York',
     locale: 'en-US',
@@ -397,13 +428,16 @@ async function captureShot(browser, baseUrl, shot) {
 async function main() {
   const args = process.argv.slice(2)
   if (args.includes('--list')) {
-    for (const s of SHOTS) console.log(s.name)
+    for (const job of JOBS) console.log(job.name)
     return
   }
+  // A base name selects the shot and all its size variants; a suffixed name
+  // (`participant-feed-360`) selects just that one.
   const wanted = args.filter(a => !a.startsWith('--'))
-  const unknown = wanted.filter(w => !SHOTS.some(s => s.name === w))
+  const unknown = wanted.filter(w => !JOBS.some(j => j.name === w))
   if (unknown.length) throw new Error(`unknown shot(s): ${unknown.join(', ')} (see --list)`)
-  const shots = wanted.length ? SHOTS.filter(s => wanted.includes(s.name)) : SHOTS
+  const selected = new Set(wanted)
+  const shots = wanted.length ? JOBS.filter(j => selected.has(j.name) || selected.has(j.baseName)) : JOBS
 
   mkdirSync(OUT_DIR, { recursive: true })
   const external = process.env.GUIDE_SHOTS_URL

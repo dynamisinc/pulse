@@ -56,6 +56,27 @@ tab or lock your phone. If you are on a shared computer, select **Sign out** whe
 
 ![The post composer, with the text box, photo and emoji buttons, and the Post button.](img/participant-composer.png)
 
+### On a phone or tablet
+
+Pulse is built for phones first. It works on any current iPhone or Android phone, including small
+ones, and on tablets held either way up. Use the phone's normal browser (Safari on iPhone and iPad,
+Chrome on Android).
+
+- **On a phone**, the buttons along the bottom are how you move around. Tap the round **Post**
+  button in the middle to write a post. Buttons are sized for your thumb, so you should not need to
+  zoom.
+- **On a tablet**, the same buttons are in a column on the left, as on a computer.
+- **The EXERCISE banners** at the very top and bottom of the screen always stay visible. Nothing
+  you need sits underneath them.
+- **When the keyboard is open**, the **Post** button stays above it, so you can send without
+  closing the keyboard.
+- **To leave a full-screen photo**, swipe back or tap **Close**. You return to the same place in
+  the feed.
+
+![The exercise feed on a small phone, with Home, Explore, Post, Notifications and Profile along the bottom.](img/participant-feed-360.png)
+
+![The exercise feed on a tablet, with the same buttons in a column on the left.](img/participant-feed-tablet.png)
+
 Read carefully before you trust or share a post. **Not every account is what it seems.** Lookalike
 accounts are part of the exercise.
 
