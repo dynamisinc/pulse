@@ -39,6 +39,7 @@ using Pulse.WebApi.Features.Social.Moderation; // demo-polish B6
 using Pulse.WebApi.Features.Social.PersonaAdmin; // demo-polish PE-BE
 using Pulse.WebApi.Features.Social.Reactions;  // demo-polish B3
 using Pulse.WebApi.Features.Social.Editing;
+using Pulse.WebApi.Features.TrustedProxy; // identity-auth-roles/18 (#480)
 
 // Pulse.WebApi — the first runtime for the Pulse.Core engine (docs/BACKEND_ROADMAP.md §4, Phase B0).
 // This composition root is orchestrator-owned from here on: only a story that adds a *new* DI
@@ -94,6 +95,8 @@ builder.Services.AddExerciseResolution();
 // AddStaffIdentity is listed first as the intended order). Both AddRateLimiter calls accumulate distinct
 // named policies under the single app.UseRateLimiter() below.
 builder.Services.AddStaffIdentity(builder.Configuration);
+// identity-auth-roles/18 (#480): trusted-proxy forwarded headers. A no-op unless ForwardedHeaders:KnownNetworks/KnownProxies are set.
+builder.Services.AddPulseForwardedHeaders(builder.Configuration);
 builder.Services.AddSessions(builder.Configuration);
 builder.Services.AddEnrollments();   // identity-auth-roles/16: Enrollment service + lead-controller route
 
@@ -318,6 +321,10 @@ builder.Services.AddApplicationInsightsTelemetry();
 
 var app = builder.Build();
 
+// identity-auth-roles/18 (#480): MUST be the first middleware — before CORS, exercise resolution, session
+// authentication and the rate limiter — so every per-IP partition sees the real client, not the front end.
+app.UsePulseForwardedHeaders();
+
 app.UseCors(FrontendCorsPolicy);
 
 // Exercise scope resolution (exercise-isolation/08) — MUST run BEFORE any auth/session middleware
@@ -395,13 +402,9 @@ app.UseAuthorization();
 // probe, the only test that can see it (a slice-composed host fixes its own scope, so it cannot).
 app.UseExerciseLifecycleGating();
 
-// Rate limiting (identity-auth-roles/05 staff-login + /03 session-endpoints policies). NOTE (Gate-1,
-// tracked for /security-review before the umbrella→main PR): the staff-login limiter partitions on
-// Connection.RemoteIpAddress, which behind the Azure App Service reverse proxy is the platform proxy's
-// address — so the "per-IP" partition collapses to one global bucket unless forwarded-headers handling that
-// trusts ONLY the platform proxy (NEVER client-supplied X-Forwarded-For, which would let an attacker evade
-// the limit) is wired ahead of this. That config is a deployment/security decision finalized under
-// /security-review. Separately, the always-on session middleware's per-request token lookup is not covered
+// Rate limiting (identity-auth-roles/05 staff-login + /03 session-endpoints policies). The per-IP partitions see
+// the real client because UsePulseForwardedHeaders() runs first and trusts ONLY the configured platform ranges
+// (identity-auth-roles/18, #480); clients behind one NAT still share a bucket (docs/OPERATE.md). Separately, the always-on session middleware's per-request token lookup is not covered
 // by these per-endpoint policies — a global per-IP limiter / edge-WAF is a /security-review item too.
 app.UseRateLimiter();
 

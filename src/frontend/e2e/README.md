@@ -36,3 +36,20 @@ npx playwright test e2e/alert-bar.phone.spec.ts
 `smoke.spec.ts` (boot + role-seam isolation), `participant-critical-path.spec.ts` (join, feed,
 post, thread, reply, telemetry on the wire, unknown-thread fail-closed), `alert-bar.phone.spec.ts`.
 Known gap tracked in-spec with `test.fail`: composer submit buttons under 44px (story 18).
+
+## Perf (`@perf`)
+
+`burst-legibility.phone.spec.ts` (mobile-tablet story 07) runs 120 posts/min for 60 s at 4x CPU
+throttle (CDP) on phone-390 only, and asserts MT-D6 (no long task over 200 ms, p95 frame <= 50 ms),
+scroll anchoring, the aggregate `NewPostsPill`, and a throttled live region. It takes about 1.4 min.
+
+```bash
+npx playwright test --grep @perf            # only the perf spec
+npx playwright test --grep-invert @perf     # the fast run
+BURST_SECONDS=600 npx playwright test --grep @perf   # 10-minute soak (manual)
+```
+
+Seam: the spec `import()`s the dev server's `postStore` module and calls `appendPost` (the mock's
+stand-in for a SignalR frame). Dev-server only; no production code or serve.mjs rewrite needed.
+`npm run test:e2e` (and so the nightly) includes it. It measures a Vite DEV build (React dev mode),
+which is slower than production, so a pass here is conservative.

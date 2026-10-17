@@ -205,6 +205,21 @@
   border-radius: 3px;
 }
 
+/* Touch target (mobile-tablet story 18, NFR-001): the Followers button is >= 44px tall on a
+ * COARSE pointer (real space; the stats row grows). "Following" is plain text, not a control. */
+@media (pointer: coarse) {
+  .stats {
+    align-items: center;
+  }
+
+  .statButton {
+    display: inline-flex;
+    align-items: center;
+    box-sizing: border-box;
+    min-height: var(--pulse-touch-min, 44px);
+  }
+}
+
 .followAction {
   margin-top: 14px;
 }

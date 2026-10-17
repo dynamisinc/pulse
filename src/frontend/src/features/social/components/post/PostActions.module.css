@@ -126,6 +126,21 @@
   color: var(--pc-ink);
 }
 
+/*
+ * Touch targets (mobile-tablet story 18, NFR-001). On a COARSE pointer every action button
+ * is REAL layout space >= 44x44 (not an invisible ::before slop, which would poke into the
+ * row above/below and lose taps to its neighbours, PR #584). The row grows taller on touch;
+ * the 20px/12px gap keeps adjacent targets from overlapping. Mouse layout is untouched.
+ */
+@media (pointer: coarse) {
+  .actionButton {
+    justify-content: center;
+    box-sizing: border-box;
+    min-width: var(--pulse-touch-min, 44px);
+    min-height: var(--pulse-touch-min, 44px);
+  }
+}
+
 @media (max-width: 420px) {
   .actions {
     gap: 12px;
