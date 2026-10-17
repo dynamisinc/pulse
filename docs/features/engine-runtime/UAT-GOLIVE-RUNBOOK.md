@@ -45,11 +45,12 @@ Read the job summary. Expect **only** these changes:
 | | **Add** `ForwardedHeaders__KnownNetworks__0 = 10.0.0.0/8` | A1a (#480): trusted-proxy ranges, so the per-IP login limiter sees the real client IP |
 | | **Add** `ForwardedHeaders__KnownNetworks__1 = 172.16.0.0/12` | A1a (#480) |
 | | **Add** `ForwardedHeaders__KnownNetworks__2 = 192.168.0.0/16` | A1a (#480). No `KnownProxies`; `ForwardLimit` stays at the code default of 1 |
+| | `ASPNETCORE_FORWARDEDHEADERS_ENABLED = false`: **Add**, or **unchanged** if it was already set to `false` in the portal during the #597 outage | A's hotfix #616. `false` is required; never `true` (see below) |
 | | **Add** the four limiter permits from step 1b (`SessionPerMinute = 120`, `WordPermitPerMinute = 30`, `ParticipantLoginPerMinute = 30`, `SharedLoginPerMinute = 20`) | A1a (#480): single-venue permits |
 | | **Add** `Generation__Governance__TimeoutAutoSendAuthorized = false` | Phase 1 (PROVIDER-GOVERNANCE §8): timeout auto-send (swamped mode) stays off until the lead-controller gate is on main |
 | Action group and four `scheduledQueryRules` (`ag-…-provider`, errors / latency / timeouts / spend) | **Create** | #585 / #590 (alerts on in #571) |
 
-> ⚠ **Never set `ASPNETCORE_FORWARDEDHEADERS_ENABLED=true`.** It trusts forwarded headers from *any* client, so anyone
+> ⚠ **Never set `ASPNETCORE_FORWARDEDHEADERS_ENABLED=true`.** The bicep sets it to `false` explicitly (#616), because a `true` crash-loops the app's forwarded-headers startup guard. It trusts forwarded headers from *any* client, so anyone
 > could spoof their IP past the login limiter. The three `KnownNetworks` entries above are the only forwarded-headers settings.
 
 **Compare with step 0b.** Every name in `uat-appsettings-before.txt` must appear in the what-if, either unchanged or
