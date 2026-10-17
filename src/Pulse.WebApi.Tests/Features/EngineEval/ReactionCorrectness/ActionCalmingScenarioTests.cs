@@ -108,7 +108,7 @@ public sealed class ActionCalmingScenarioTests
     }
 
     [Fact]
-    public async Task APlausibleButUnconfirmedAnswer_DoesNotCalmTheWorld_UntilAControllerConfirmsIt()
+    public async Task APlausibleButUnconfirmedAnswer_DoesNotCalmTheWorld()
     {
         // Auto-confirm stays OFF (the default): the engine only SUGGESTS a match; it never grades its own homework.
         await using var scenario = ReactionScenario.Create();

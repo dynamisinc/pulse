@@ -14,7 +14,7 @@ miss-safe or kill-switch scenarios **blocks release**.
       intensity rises per the curve and anxiety/speculation content appears (**inaction → escalation**,
       ADP-001). *Partial:* rise (monotonic, bounded by the curve rate and ceiling), sentiment souring, cadence and
       anxious/speculative content are asserted; "exactly per the curve" and a silence-duration tone ramp are NOT
-      (product defects D1-D3 below).
+      (product defects D1-D5 below).
 - [x] Given a *matched* official response, when it lands, then intensity/sentiment bend down and a
       response-reaction burst appears (**action → calming**, ADP-002).
 - [x] Given an *unmatched* official post, when it lands, then escalation **slows but does not pause**,
@@ -96,7 +96,11 @@ prompt is a separate surface), so "the controller is prompted" is asserted at th
 - **D4 - CTL-034 is breached when match prompts are counted.** The loop budgets queue fires only. With 24 blown
   storylines at Delayed-auto (fires saturate at 6/min) and one unconfirmed official post per minute (1 prompt/min),
   total controller demand is 7/min for 36 consecutive minutes.
+- **D5 - HIGH: an expired countdown auto-sends after a FullStop is restored (swamped mode).** After a FullStop,
+  a pre-stop undecided countdown that has expired is left `CountingDown`; on the first sweep after a human restore
+  with swamped mode on, it auto-publishes (stale burst goes out at restore). Fix: PR #571 (`AutoHoldPolicy.Evaluate`:
+  expired undecided countdown under GenerationStopped -> Hold with a hold-on-expiry event). This suite does not
+  assert the buggy or fixed state for that case. Follow-up once #571 is on main: add the release-blocking scenario
+  "FullStop -> expiry -> restore -> nothing auto-publishes, item Held".
 - **Observations (not asserted):** (a) under a tight cap, storylines are served in registration order, so with
-  10 simultaneous storylines at cap 3/min, 4 are never voiced in 40 minutes (no rotation / staleness priority);
-  (b) after a FullStop, a pre-stop expired countdown auto-sends on the first sweep after a human restore when
-  swamped mode is on (stale burst publishes at restore).
+  10 simultaneous storylines at cap 3/min, 4 are never voiced in 40 minutes (no rotation / staleness priority).

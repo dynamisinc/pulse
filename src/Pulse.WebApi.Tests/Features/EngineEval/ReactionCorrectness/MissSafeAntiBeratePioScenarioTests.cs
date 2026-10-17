@@ -81,6 +81,8 @@ public sealed class MissSafeAntiBeratePioScenarioTests
         var decided = (await scenario.DecidedAsync()).Skip(decidedBefore).ToList();
         var fireMinutes = scenario.Timeline.Skip(minutesBefore).Where(t => t.ReviewItemsEnqueued > 0).Select(t => t.Minute).ToList();
         (await scenario.ReviewItemsAsync()).Count.Should().Be(itemsBefore + fireMinutes.Count);
+        // One decided record per fire: pairing by position is only valid if the counts agree.
+        decided.Should().HaveCount(fireMinutes.Count, "each burst emits exactly one engine.decided event");
         return fireMinutes.Zip(decided, (minute, d) => (minute, d.Count)).ToList();
     }
 
