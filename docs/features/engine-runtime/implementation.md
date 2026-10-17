@@ -175,3 +175,100 @@ engineering call at build time; (c) is resolved.
   feature's Wave-0 seam-freeze** (the way B1 froze `ParticipantPostDto`/`IFeedBroadcaster` before its
   fan-out), so 01/02 emit against a settled envelope rather than churning it — a hard prerequisite for
   the Wave-2 fan-out (see the Wave-0 seam-freeze subsection above).
+
+## Story 07 — Engine state survives a restart (Session C wave C3)
+
+> Story: `07-engine-state-survives-restart.md`. **Gated:** one migration, only after Session A's A1 migration is on
+> `main`, this branch has merged `main`, and the orchestrator has cleared the migration slot (C1 rule 1, C5). Pattern:
+> `demo-feedback/18` (store + write-through + rehydrator + retry). Single story, single wave, but internally ordered.
+
+### Entities (all `IExerciseScoped`, central filter, `Restrict` FK to `Exercises`, hand-written SQL wrapped in `EXEC`)
+
+| Entity | Key | Columns (summary) | Notes |
+|---|---|---|---|
+| `EngineControlState` | `ExerciseId` (one row) | Autonomy: `ExerciseDefault`, `OverridesJson` (storylineId→level), `SwampedMode`, `SafetyClamp?`, `Stopped`, `DegradedReason?`, `AutonomyRevision`. Cut: `CutToFake`, `CutRevision`. Tier: `TierPolicyMode`, `TierRevision`. Ambient: `AmbientPolicyJson` (mode, caps, topic and persona lists), `AmbientRevision`. "Previous raises": `PreviousRaisesJson?` (what boot withheld), `UpdatedAt`, `UpdatedBy` | Writes are **column-scoped** (`ExecuteUpdate` per control) so writers to different controls never clobber one another. Each control has its own monotonic revision; the SQL guard is `WHERE <Control>Revision < @rev`. |
+| `EngineLoopRegistration` | `ExerciseId` | `StorylineId`, `StorylineParticipantsJson`, `ResponseWindowMinutes`, `ScenarioStart`, `ControllerDeskId`, `RateConfigJson`, `AutoConfirmPrevious`, `SeededAtUtc`, `SeededBy`, `Active` | Seed inputs only; the object graph is re-derived (see story, "persisted vs re-derived"). `Remove` sets `Active=false` (no hard delete outside reset). |
+| `EngineStorylineState` | (`ExerciseId`, `StorylineId`) | `Phase`, `Intensity`, `Sentiment`, `TargetIntensity?`, `MinutesSinceLastOfficialResponse`, `PhaseEnteredScenarioMinute`, `LastTickScenarioMinute`, `LastEngineReactionScenarioMinute?`, `CurveName`, `UpdatedAt` | Applied onto a `Storyline.Create(id: persisted)` through a new internal `Storyline.Restore(...)` in `Pulse.Core`. |
+
+Rowversion note: the ambient CAS in memory is the authority (`Slot` reference compare). The SQL revision is a follower
+guard for out-of-order async writes, not a second CAS. If Tom prefers a SQL `rowversion` token on `EngineControlState`,
+the column-scoped writes would become read-modify-write with retry; not recommended (more contention, same safety).
+
+### Migration
+
+Exactly one: `<timestamp>_EngineRuntimePersistence` (three tables, indexes on `ExerciseId`, the FKs, the revision
+columns), idempotent script, covered by `IdempotentMigrationScriptTests` and `MigrationRoundTripTests`. Do not
+generate it until the Gates in the story are met; the model snapshot is a conflict magnet across the three sessions.
+
+### Code seams
+
+- `Pulse.Core`: `EngineAutonomyState.Restore(...)` (internal factory, accepts only stored values and rejects `Auto`);
+  `Storyline.Restore(...)`; `IGenerationProviderCutRegistry` gains an internal `Seed(Guid)` used only by the
+  rehydrator (so `Cut`'s one-audit-event-per-transition contract is unchanged).
+- `Pulse.WebApi/Features/EngineRuntime/Persistence/`: `IEngineControlStateStore` + `EfEngineControlStateStore`,
+  `IEngineLoopRegistrationStore`, `IEngineStorylineStateStore`, `EngineRuntimeStateRehydrator` (hosted),
+  `EngineStateWriteThrough` (the awaited, retried writer shared by the registries, reusing `TransientSqlErrors`),
+  `EngineRestorePreviousEndpoint` (`POST /api/engine/restore-previous`, controller-only now, lead-gated with A1c).
+- `EngineContentSeedService` is refactored so `SeedAsync` and the rehydrator share one `RegistrationBuilder`
+  (the re-derivation) and a re-seed writes the registration row but never clears control state.
+- `Program.cs`: orchestrator-owned; one additive `AddEngineRuntimePersistence()` line in the wiring commit, registered
+  **after** the story-18 rehydrator and **before** `ReactionLoopHost`, `EngineReviewTickHost`, noise and ambient hosts.
+
+### Write-through points
+
+| Control | Where it is written after the in-memory apply |
+|---|---|
+| Kill switch, clamp, stop, restore-from-safety | `EngineReviewService` kill-switch and restore handlers (~line 680 region); response carries `persisted` |
+| Degraded clamp / reason | `EngineAutonomyProviderHealthListener.OnDegradedAsync` / `OnRecoveredAsync` (per loaded exercise) |
+| Cut / restore-to-live | the `_providerCut.Cut` / `Restore` call sites in `EngineReviewService` |
+| Exercise default, override, swamped | autonomy settings handlers in `EngineReviewService` |
+| Tier policy | `EngineTierPolicyRegistry` setter's caller (settings endpoint) |
+| Ambient policy | after a successful `TrySet`, `Set`, or `DemoteAutonomous` (inside the existing retry loop's success branch only) |
+| Loop registration | `EngineContentSeedService` after commit and before `Register`; remove path |
+| Storyline snapshot | end of `ReactionLoopDriver.RunTickAsync` when a storyline changed |
+
+A lowering write that fails never rolls back the in-memory lowering; a raise write that fails leaves the in-memory
+raise in place and reports `persisted: false` (a restart then boots at the floor, which is fail-closed).
+
+### Load-on-startup ordering
+
+`ExerciseRuntimeStateRehydrator` (story 18) → **`EngineRuntimeStateRehydrator`**: (1) read all control rows with the
+single documented `IgnoreQueryFilters` read, retry on 40613 with the existing budget; (2) per exercise,
+`EngineAutonomyRegistry.GetOrCreate` + `Restore` and `Seed` the cut set (so the provider-health fan-out covers every
+persisted exercise before the first provider call); (3) install tier and ambient policy through the registries' own
+seams; (4) rebuild registrations and storyline snapshots, `Register`; (5) emit `engine.state_restored`; (6) only
+then do the ticking hosts start. Unreadable row or table: the most restrictive reading per Q7.
+
+### Wave Plan row
+
+| Story | Stack | Files it owns | Depends-on | Can-run-with | Wave | Effort |
+|-------|-------|----------------|------------|---------------|------|--------|
+| 07 Engine state survives a restart | backend | `Pulse.WebApi/Features/EngineRuntime/Persistence/Engine*` (new files), `Data/Entities/Engine{ControlState,LoopRegistration,StorylineState}.cs`, the one migration, `Pulse.Core` `Restore` seams, `EngineContentSeedService` refactor, `docs/guide/` page | **A1 migration on main + orchestrator migration-slot clearance** (hard); story 18 (built); A1c (soft) | Session B (frontend only); nothing touching `PulseDbContext` or the snapshot | C3 (own wave, serial after A1) | L |
+
+Internal order for the builder: (a) Core `Restore` seams and in-memory tests (no schema, may start before the gate),
+(b) entities + migration (after the gate), (c) stores + write-through, (d) rehydrator + ordering, (e) restore-previous
+route + cockpit banner, (f) seed-service refactor and runbook edit.
+
+### Tests (`src/Pulse.WebApi.Tests/Features/EngineRuntime/Persistence/`; Docker-gated are `[RequiresDockerFact]`)
+
+- **Isolation:** `EngineStateIsolationTests` (two exercises through store, rehydrator and HTTP; foreign-exercise and
+  foreign-org 403/404 on `restore-previous`); extend the standing isolation suite; query-filter coverage for all three
+  entities.
+- **Restart survival, real host restart (Docker):** `EngineRestartSurvivalTests` boots a host over a SQL container,
+  engages kill switch (both modes), cuts to Fake, degrades, seeds with a Delayed-auto default, swamped ON and ambient
+  Autonomous; disposes the host; boots a **new** host over the same database; asserts clamp, stop, degraded reason and
+  `IsCutToFake` restored, raises held at the floor with "previous" on file, the loop registered with no re-seed, the
+  storyline arc restored, and the restored clock not restarted.
+- **Fail closed:** `EngineRestoreFailClosedTests` (unparseable row, unreadable table after the retry budget, missing
+  exercise skipped, a lowering racing the load, a failed lowering write keeps the clamp and reports `persisted:false`,
+  a restored cut prevents any call to the configured provider through `GenerationProviderSelector`).
+- **Revision guard:** `EngineRevisionGuardTests` (out-of-order write dropped; lowering never regressed by a late raise).
+- **CAS regression:** existing `EngineAmbientPolicyRegistry` TrySet/Set/DemoteAutonomous tests unmodified and green;
+  `PersistedAmbientPolicy_AcceptsTrySetOnTheReturnedInstance`.
+- **Ordering:** `EngineRuntimePersistenceCompositionTests.RehydratorsRunInOrderBeforeEveryTickingHost`.
+- **Restore previous:** controller-only (401/403 matrix), re-applies through the raise code paths (ambient
+  `AutonomyAuthorized` false refuses), emits the audit events with the human actor, idempotent.
+- **Re-seed:** `ReseedResetsLoopAndArc_ButNeverClearsKillSwitchOrCut`.
+- **Telemetry:** one `engine.state_restored` per exercise against the v0 envelope.
+- **Migration:** round-trip, idempotent script, `Down` leaves story-18 tables intact.
+- **Frontend (small):** cockpit banner renders text plus icon, `role="status"`, restore requires confirm.
