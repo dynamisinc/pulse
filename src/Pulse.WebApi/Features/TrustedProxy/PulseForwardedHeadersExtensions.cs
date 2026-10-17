@@ -3,9 +3,11 @@ namespace Pulse.WebApi.Features.TrustedProxy;
 using System.Globalization;
 using System.Net;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 /// <summary>
 /// Composition-root seams for forwarded-headers handling (identity-auth-roles/18, #480). Behind the App Service
@@ -42,11 +44,16 @@ public static class PulseForwardedHeadersExtensions
     /// <param name="services">The service collection to register into.</param>
     /// <param name="configuration">The application configuration.</param>
     /// <returns>The same collection, for chaining.</returns>
-    /// <exception cref="InvalidOperationException">
-    /// The configuration section is invalid, or <c>ASPNETCORE_FORWARDEDHEADERS_ENABLED</c> is set to true (that
-    /// framework switch installs a trust-every-peer forwarded-headers middleware ahead of this one, so the host
-    /// refuses to start rather than silently letting any client forge its IP).
-    /// </exception>
+    /// <remarks>
+    /// <b>The framework switch.</b> When <c>ASPNETCORE_FORWARDEDHEADERS_ENABLED</c> (read as <c>ForwardedHeaders_Enabled</c>)
+    /// is true, the web host registers its own <c>ForwardedHeadersStartupFilter</c>, which runs a forwarded-headers
+    /// middleware ahead of the whole pipeline that trusts EVERY peer. Azure App Service on Linux can set that switch on
+    /// the platform side, so the host must start with it on. This method therefore REMOVES that framework startup
+    /// filter: only the trust list configured here is ever honored, and <see cref="UsePulseForwardedHeaders"/> logs a
+    /// critical warning naming the key. (2026-10-17 UAT outage: an earlier version threw on the switch and the worker
+    /// crash-looped with a 503.)
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">The configuration section is invalid.</exception>
     public static IServiceCollection AddPulseForwardedHeaders(
         this IServiceCollection services,
         IConfiguration configuration)
@@ -54,23 +61,41 @@ public static class PulseForwardedHeadersExtensions
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(configuration);
 
-        // Defense in depth (Gate-1 M-2, orchestrator review L-1): the framework switch is documented as forbidden, and
-        // it is also refused here. The framework's ForwardedHeadersStartupFilter reads configuration["ForwardedHeaders_Enabled"]
-        // (case-insensitive), which the ASPNETCORE_FORWARDEDHEADERS_ENABLED env var feeds once its prefix is stripped,
-        // and which an app setting, an unprefixed env var or appsettings can also set. Check both spellings.
-        if (IsTrue(configuration["ForwardedHeaders_Enabled"]) || IsTrue(configuration["ASPNETCORE_FORWARDEDHEADERS_ENABLED"]))
-        {
-            throw new InvalidOperationException(
-                "ASPNETCORE_FORWARDEDHEADERS_ENABLED=true trusts forwarded headers from every client. Remove it and " +
-                "configure ForwardedHeaders:KnownNetworks / KnownProxies instead (docs/OPERATE.md, trusted proxy).");
-        }
+        var frameworkSwitchOn = IsTrue(configuration["ForwardedHeaders_Enabled"])
+            || IsTrue(configuration["ASPNETCORE_FORWARDEDHEADERS_ENABLED"]);
+        var removed = RemoveFrameworkForwardedHeadersStartupFilter(services);
 
         var settings = new PulseForwardedHeadersOptions();
         configuration.GetSection(PulseForwardedHeadersOptions.SectionName).Bind(settings);
 
-        services.AddSingleton(new PulseForwardedHeadersRegistration(BuildOptions(settings)));
+        services.AddSingleton(new PulseForwardedHeadersRegistration(BuildOptions(settings))
+        {
+            FrameworkSwitchNeutralised = frameworkSwitchOn || removed > 0,
+        });
 
         return services;
+    }
+
+    /// <summary>
+    /// Removes the web host's own forwarded-headers startup filter, which the host registers when the
+    /// <c>ForwardedHeaders_Enabled</c> switch is on and which trusts every peer. Matched by type name because the type
+    /// is internal to ASP.NET Core. A no-op when the switch is off (nothing is registered).
+    /// </summary>
+    /// <param name="services">The service collection.</param>
+    /// <returns>How many registrations were removed.</returns>
+    internal static int RemoveFrameworkForwardedHeadersStartupFilter(IServiceCollection services)
+    {
+        var frameworkFilters = services
+            .Where(d => d.ServiceType == typeof(IStartupFilter)
+                && string.Equals(d.ImplementationType?.Name, "ForwardedHeadersStartupFilter", StringComparison.Ordinal))
+            .ToList();
+
+        foreach (var descriptor in frameworkFilters)
+        {
+            services.Remove(descriptor);
+        }
+
+        return frameworkFilters.Count;
     }
 
     /// <summary>
@@ -93,6 +118,17 @@ public static class PulseForwardedHeadersExtensions
         var registration = app.ApplicationServices.GetService<PulseForwardedHeadersRegistration>()
             ?? throw new InvalidOperationException(
                 $"{nameof(UsePulseForwardedHeaders)}() requires {nameof(AddPulseForwardedHeaders)}() in the service registrations.");
+
+        if (registration.FrameworkSwitchNeutralised)
+        {
+            // Key name only, never values. The framework's trust-every-peer middleware was removed at registration.
+            app.ApplicationServices.GetService<ILoggerFactory>()?
+                .CreateLogger(typeof(PulseForwardedHeadersExtensions).FullName!)
+                .LogCritical(
+                    "ASPNETCORE_FORWARDEDHEADERS_ENABLED is true in this environment. Its trust-every-peer forwarded-headers " +
+                    "middleware was removed; only ForwardedHeaders:KnownNetworks / KnownProxies are honored. Set it to false " +
+                    "(docs/OPERATE.md, trusted proxy).");
+        }
 
         // Load-bearing: ForwardedHeadersMiddleware treats EMPTY KnownProxies + KnownIPNetworks as "trust every
         // peer" (it only checks the peer when at least one entry exists). With nothing configured the middleware
@@ -183,4 +219,7 @@ internal sealed class PulseForwardedHeadersRegistration
 
     /// <summary>Gets the middleware options.</summary>
     public ForwardedHeadersOptions Options { get; }
+
+    /// <summary>Gets a value indicating whether the framework's trust-every-peer switch was on and was neutralised.</summary>
+    public bool FrameworkSwitchNeutralised { get; init; }
 }

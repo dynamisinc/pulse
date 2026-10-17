@@ -1,6 +1,7 @@
 namespace Pulse.WebApi.Tests.Features.TrustedProxy;
 
 using System.Collections.Generic;
+using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Json;
@@ -270,47 +271,75 @@ public sealed class ForwardedHeadersTests
         act.Should().Throw<InvalidOperationException>("a mistyped trusted-proxy entry must not be dropped silently");
     }
 
-    /// <summary>Gate-1 M-2: the framework trust-every-peer switch is refused at startup.</summary>
+    /// <summary>
+    /// 2026-10-17 UAT outage regression: the framework trust-every-peer switch (which App Service on Linux can set on the
+    /// platform side) must NOT stop the host from starting. It is neutralised instead, under either spelling.
+    /// </summary>
     [Theory]
-    [InlineData("true")]
-    [InlineData("True")]
-    public void FrameworkForwardedHeadersSwitch_IsRefusedAtStartup(string value)
+    [InlineData("ASPNETCORE_FORWARDEDHEADERS_ENABLED", "true")]
+    [InlineData("ASPNETCORE_FORWARDEDHEADERS_ENABLED", "True")]
+    [InlineData("ForwardedHeaders_Enabled", "TRUE")]
+    public void FrameworkForwardedHeadersSwitch_DoesNotStopStartup_AndIsFlaggedAsNeutralised(string key, string value)
     {
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
-                ["ASPNETCORE_FORWARDEDHEADERS_ENABLED"] = value,
+                [key] = value,
                 ["ForwardedHeaders:KnownNetworks:0"] = "10.0.0.0/8",
             })
             .Build();
 
-        var act = () => new ServiceCollection().AddPulseForwardedHeaders(configuration);
+        var services = new ServiceCollection();
+        var act = () => services.AddPulseForwardedHeaders(configuration);
 
-        act.Should().Throw<InvalidOperationException>("that switch trusts forwarded headers from any client")
-            .WithMessage("*ASPNETCORE_FORWARDEDHEADERS_ENABLED*");
+        act.Should().NotThrow("a platform-set switch must never crash-loop the worker (UAT outage 2026-10-17)");
+        services.BuildServiceProvider().GetRequiredService<PulseForwardedHeadersRegistration>()
+            .FrameworkSwitchNeutralised.Should().BeTrue();
     }
 
     /// <summary>
-    /// Orchestrator review L-1: the framework's startup filter reads <c>ForwardedHeaders_Enabled</c> (what the
-    /// prefixed env var becomes, and what an app setting or appsettings can set directly), so that spelling is
-    /// refused too.
+    /// The real web host registers the framework's trust-every-peer startup filter when the switch is on, and
+    /// AddPulseForwardedHeaders removes it.
     /// </summary>
-    [Theory]
-    [InlineData("true")]
-    [InlineData("TRUE")]
-    public void FrameworkForwardedHeadersSwitch_UnprefixedSpelling_IsRefusedAtStartup(string value)
+    [Fact]
+    public void FrameworkForwardedHeadersSwitch_OnARealWebHost_ItsStartupFilterIsRemoved()
     {
-        var configuration = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>
-            {
-                ["ForwardedHeaders_Enabled"] = value,
-                ["ForwardedHeaders:KnownNetworks:0"] = "10.0.0.0/8",
-            })
-            .Build();
+        var builder = WebApplication.CreateBuilder(new WebApplicationOptions { Args = ["--ForwardedHeaders_Enabled=true"] });
+        static bool HasFrameworkFilter(IServiceCollection services) => services.Any(d =>
+            d.ServiceType == typeof(IStartupFilter) && d.ImplementationType?.Name == "ForwardedHeadersStartupFilter");
 
-        var act = () => new ServiceCollection().AddPulseForwardedHeaders(configuration);
+        HasFrameworkFilter(builder.Services).Should().BeTrue("precondition: the switch makes the host register its filter");
 
-        act.Should().Throw<InvalidOperationException>("the unprefixed key turns on the same trust-every-peer middleware");
+        builder.Services.AddPulseForwardedHeaders(builder.Configuration);
+
+        HasFrameworkFilter(builder.Services).Should().BeFalse("only Pulse's configured trust list may be honored");
+    }
+
+    /// <summary>
+    /// End to end: with the switch on and NO trust list configured, a spoofed X-Forwarded-For from an arbitrary peer is
+    /// not honored, so the framework's trust-everyone middleware is really gone, not merely flagged.
+    /// </summary>
+    [Fact]
+    public async Task FrameworkForwardedHeadersSwitch_On_WithNoTrustList_ASpoofedForwardedForIsIgnored()
+    {
+        var builder = WebApplication.CreateBuilder(new WebApplicationOptions { Args = ["--ForwardedHeaders_Enabled=true"] });
+        builder.WebHost.UseTestServer();
+        builder.Services.AddPulseForwardedHeaders(builder.Configuration);
+
+        await using var app = builder.Build();
+        app.UsePulseForwardedHeaders();
+        app.MapGet("/ip", (HttpContext context) => context.Connection.RemoteIpAddress?.ToString() ?? "none");
+        await app.StartAsync();
+
+        var context = await app.GetTestServer().SendAsync(http =>
+        {
+            http.Connection.RemoteIpAddress = IPAddress.Parse("198.51.100.7");
+            http.Request.Method = HttpMethods.Get;
+            http.Request.Path = "/ip";
+            http.Request.Headers["X-Forwarded-For"] = "203.0.113.99";
+        });
+
+        context.Connection.RemoteIpAddress!.ToString().Should().Be("198.51.100.7", "no peer is trusted, so the header is ignored");
     }
 
     /// <summary>The switch set to false (or absent) is fine.</summary>

@@ -295,8 +295,13 @@ resource webApp 'Microsoft.Web/sites@2023-12-01' = {
           value: emailSupportAddress
         }
         // Trusted proxies (identity-auth-roles/18, #480): the App Service front end forwards from private ranges
-        // (Microsoft: "add private IP address ranges to the known networks"). Never set
-        // ASPNETCORE_FORWARDEDHEADERS_ENABLED=true — it trusts forwarded headers from any client.
+        // (Microsoft: "add private IP address ranges to the known networks"). The framework switch is pinned OFF here:
+        // when true it trusts forwarded headers from any client. The app also neutralises it if the platform sets it
+        // (2026-10-17 UAT outage), and app settings here replace the whole set, so a portal-only value would be lost.
+        {
+          name: 'ASPNETCORE_FORWARDEDHEADERS_ENABLED'
+          value: 'false'
+        }
         {
           name: 'ForwardedHeaders__KnownNetworks__0'
           value: '10.0.0.0/8'
