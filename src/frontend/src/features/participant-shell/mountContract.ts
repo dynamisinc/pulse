@@ -108,6 +108,14 @@ export interface ShellMountProps {
    * labeled "scenario time" inside the fiction (XC-002).
    */
   readonly scenarioNow: Date
+  /**
+   * Optional: `true` while the shell has not yet resolved the exercise's
+   * variant, so `variant` is the least-affordance placeholder. Absent means
+   * settled. A channel that would take an irreversible step on `variant`
+   * (redirecting away from a deep link) waits while this is `true`
+   * (mobile-tablet MT-D8). Additive; affordance gating is unchanged.
+   */
+  readonly variantPending?: boolean
 }
 
 const ShellMountContext = createContext<ShellMountProps | undefined>(undefined)

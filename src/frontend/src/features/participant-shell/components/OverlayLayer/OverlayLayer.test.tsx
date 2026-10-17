@@ -582,3 +582,68 @@ describe('OverlayLayer — priority over the channel (F2)', () => {
     expect(document.activeElement).toBe(screen.getByTestId('pulse-overlay-break-fiction'))
   })
 })
+
+describe('OverlayLayer on phones (mobile-tablet story 03)', () => {
+  it.each([
+    ['pause', 'in-fiction', 'pulse-overlay-pause-in-fiction'],
+    ['pause', 'out-of-fiction', 'pulse-overlay-pause-out-of-fiction'],
+    ['endex', 'in-fiction', 'pulse-overlay-endex-in-fiction'],
+    ['endex', 'out-of-fiction', 'pulse-overlay-endex-out-of-fiction'],
+    ['broadcast', 'in-fiction', 'pulse-overlay-break-fiction'],
+  ] as const)('%s (%s) carries its state with an icon as well as text', (state, register, testId) => {
+    mockUseOverlayState.mockReturnValue(overlayState({ state, register, message: 'm' }))
+
+    render(<OverlayLayer />)
+
+    const icon = screen.getByTestId(testId).querySelector('svg')
+    expect(icon).not.toBeNull()
+    expect(icon?.closest('[aria-hidden="true"]')).not.toBeNull()
+  })
+
+  it('insets the EndEx control page by the compliance chrome and scrolls its own overflow', () => {
+    mockUseOverlayState.mockReturnValue(overlayState({ state: 'endex', register: 'out-of-fiction' }))
+
+    render(<OverlayLayer />)
+
+    const style = screen.getByTestId('pulse-overlay-endex-out-of-fiction').style
+    expect(style.top).toBe('0px')
+    expect(style.paddingTop).toContain('--pulse-chrome-top')
+    expect(style.paddingBottom).toContain('--pulse-chrome-bottom')
+    expect(style.overflowY).toBe('auto')
+  })
+
+  it('the pause page clears chrome + alert bar via top, without double-counting the chrome inset', () => {
+    mockUseOverlayState.mockReturnValue(overlayState({ state: 'pause', register: 'out-of-fiction' }))
+
+    render(<OverlayLayer />)
+
+    const style = screen.getByTestId('pulse-overlay-pause-out-of-fiction').style
+    expect(style.top).toContain('--pulse-chrome-top')
+    expect(style.top).toContain('--pulse-alert-height')
+    expect(style.paddingTop).toBe('24px')
+    expect(style.paddingBottom).toContain('--pulse-chrome-bottom')
+    expect(style.overflowY).toBe('auto')
+  })
+
+  it('the in-fiction EndEx page uses a neutral icon, not the flag; the flag is out-of-fiction only', () => {
+    mockUseOverlayState.mockReturnValue(overlayState({ state: 'endex', register: 'in-fiction' }))
+    const { unmount } = render(<OverlayLayer />)
+    expect(screen.getByTestId('pulse-overlay-endex-in-fiction').querySelector('svg'))
+      .toHaveAttribute('data-icon', 'circle-xmark')
+    unmount()
+
+    mockUseOverlayState.mockReturnValue(overlayState({ state: 'endex', register: 'out-of-fiction' }))
+    render(<OverlayLayer />)
+    expect(screen.getByTestId('pulse-overlay-endex-out-of-fiction').querySelector('svg'))
+      .toHaveAttribute('data-icon', 'flag-checkered')
+  })
+
+  it('the break-fiction layer has no compliance-chrome inset (CTL-024 covers the chrome)', () => {
+    mockUseOverlayState.mockReturnValue(overlayState({ state: 'broadcast', message: 'm' }))
+    render(<OverlayLayer />)
+    const style = screen.getByTestId('pulse-overlay-break-fiction').style
+    expect(style.cssText).not.toContain('--pulse-chrome')
+    expect(style.paddingTop).toBe('')
+    expect(style.paddingBottom).toBe('')
+  })
+})

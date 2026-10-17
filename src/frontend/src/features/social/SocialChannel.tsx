@@ -82,6 +82,7 @@ import {
   affordancesAvailable,
 } from '@/features/participant-shell/mountContract'
 import { ComposeModal } from './layout/ComposeModal'
+import { BottomTabBar } from './layout/BottomTabBar'
 import { NavRail } from './layout/NavRail'
 import { NotificationsEngine } from './notifications/NotificationsEngine'
 import { RightRailContent } from './layout/RightRailContent'
@@ -94,6 +95,7 @@ import {
   useHasSocialNavigation,
   useSocialNavigation,
 } from './layout/socialNavigation'
+import { usePhoneLayout } from './layout/usePhoneLayout'
 import { useRouteFocus } from './layout/useRouteFocus'
 import { useScrollRestoration } from './layout/useScrollRestoration'
 import styles from './SocialChannel.module.css'
@@ -121,6 +123,8 @@ function SocialFrame() {
   const session = useSession()
   const { self, loading: directoryLoading } = useSocialDirectory()
   const { location, kind } = useSocialNavigation()
+  // Phones (< 600px) get the bottom tab bar instead of the left rail (MT-D2).
+  const phone = usePhoneLayout()
 
   const mainRef = useRef<HTMLElement>(null)
   const postButtonRef = useRef<HTMLButtonElement>(null)
@@ -147,7 +151,9 @@ function SocialFrame() {
   // but ONLY while the card is actually on screen. While it is withheld (`awaitingSelf`)
   // the claim is not made, so the shell's own Sign out row stays up and there is never a
   // moment (a slow or hung cast load) with no Sign out anywhere (Gate-2 low).
-  useClaimShellAccountControl(showAccount && !awaitingSelf)
+  // On a phone the rail (and so its account card) is not rendered, so the claim is NOT made:
+  // the shell keeps its own Sign out row and there is still a Sign out on screen.
+  useClaimShellAccountControl(showAccount && !awaitingSelf && !phone)
 
   // The dialog belongs to the page it was opened on: if the route changes under it
   // (browser Back / Forward are the only way, the frame behind it being inert) it
@@ -178,13 +184,22 @@ function SocialFrame() {
       {/* `inert` while the compose modal is open: nothing behind it can take focus
           or be read by assistive tech (the modal also traps Tab itself). */}
       <div className={styles.frame} inert={composeOpen}>
-        <NavRail
-          {...(canCompose ? { onCompose: openCompose } : {})}
-          postButtonRef={postButtonRef}
-          self={self}
-          showAccount={showAccount && !awaitingSelf}
-          showNotifications={affordancesAvailable(variant)}
-        />
+        {phone ? (
+          <BottomTabBar
+            {...(canCompose ? { onCompose: openCompose } : {})}
+            postButtonRef={postButtonRef}
+            self={self}
+            showNotifications={affordancesAvailable(variant)}
+          />
+        ) : (
+          <NavRail
+            {...(canCompose ? { onCompose: openCompose } : {})}
+            postButtonRef={postButtonRef}
+            self={self}
+            showAccount={showAccount && !awaitingSelf}
+            showNotifications={affordancesAvailable(variant)}
+          />
+        )}
 
         <main
           id={MAIN_ID}

@@ -75,6 +75,14 @@
  */
 
 import { useEffect, useId, useRef, useState, type CSSProperties, type RefObject } from 'react'
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
+import {
+  faCircleXmark,
+  faFlagCheckered,
+  faPause,
+  faTriangleExclamation,
+  faWrench,
+} from '@fortawesome/free-solid-svg-icons'
 import { SHELL_Z } from '../../mountContract'
 import { useChromeConfig } from '../../chromeConfig'
 import { alertPauseBridge, useAlertPauseBridge } from '../../alertPauseBridge'
@@ -130,6 +138,9 @@ const fullViewportStyle: CSSProperties = {
  * PAUSE only (Tom, 10/16): the page starts BELOW the compliance chrome and the
  * alert bar, so the EAS band stays visible (and inert) above it. EndEx and
  * break-fiction keep `top: 0` and cover the bar (SHELL-CONTRACT.md section 3).
+ * `paddingTop` overrides story 03's `chrome-top + 24px` from
+ * `controlPageBaseStyle`: `top` already clears the chrome, so counting it again
+ * would leave a double gap.
  */
 const belowChromeAndAlertBarStyle: CSSProperties = {
   top: 'calc(var(--pulse-chrome-top, 0px) + var(--pulse-alert-height, 0px))',
@@ -148,18 +159,42 @@ const visuallyHiddenStyle: CSSProperties = {
   border: 0,
 }
 
-const inFictionPageStyle: CSSProperties = {
+const controlPageBaseStyle: CSSProperties = {
   ...fullViewportStyle,
+  // Phones (story 03): the fixed layer must clear the fixed compliance banners (z above
+  // this layer, heights published as --pulse-chrome-*) and scroll its OWN content if a
+  // short landscape viewport or large text makes the card taller than the space left.
+  paddingTop: 'calc(var(--pulse-chrome-top, 0px) + 24px)',
+  paddingBottom: 'calc(var(--pulse-chrome-bottom, 0px) + 24px)',
+  paddingLeft: '24px',
+  paddingRight: '24px',
+  overflowY: 'auto',
+  overscrollBehavior: 'contain',
+}
+
+const inFictionPageStyle: CSSProperties = {
+  ...controlPageBaseStyle,
   zIndex: SHELL_Z.overlay,
   backgroundColor: '#f7f7f8',
   color: '#1a1a1a',
   fontFamily: 'system-ui, -apple-system, "Segoe UI", sans-serif',
-  padding: '24px',
   textAlign: 'center',
 }
 
+// `margin: auto` centres the card when it fits and lets it scroll from its top when it
+// does not (flex `center` would clip the top of an overflowing card out of reach).
 const inFictionCardStyle: CSSProperties = {
   maxWidth: '420px',
+  minWidth: 0,
+  margin: 'auto',
+  overflowWrap: 'anywhere',
+}
+
+// The state icon: text AND icon carry the state, never colour alone (NFR-001).
+const stateIconStyle: CSSProperties = {
+  display: 'block',
+  margin: '0 auto 12px',
+  fontSize: '28px',
 }
 
 const inFictionHeadingStyle: CSSProperties = {
@@ -170,23 +205,25 @@ const inFictionHeadingStyle: CSSProperties = {
 
 const inFictionBodyStyle: CSSProperties = {
   margin: 0,
-  fontSize: '15px',
+  fontSize: '16px',
   lineHeight: 1.5,
   color: '#4a4a4a',
 }
 
 const outOfFictionPageStyle: CSSProperties = {
-  ...fullViewportStyle,
+  ...controlPageBaseStyle,
   zIndex: SHELL_Z.overlay,
   backgroundColor: '#1b232c',
   color: '#e6edf3',
   fontFamily: 'ui-monospace, "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace',
-  padding: '24px',
   textAlign: 'center',
 }
 
 const outOfFictionCardStyle: CSSProperties = {
   maxWidth: '480px',
+  minWidth: 0,
+  margin: 'auto',
+  overflowWrap: 'anywhere',
 }
 
 const outOfFictionHeadingStyle: CSSProperties = {
@@ -198,7 +235,7 @@ const outOfFictionHeadingStyle: CSSProperties = {
 
 const outOfFictionBodyStyle: CSSProperties = {
   margin: 0,
-  fontSize: '14px',
+  fontSize: '16px',
   lineHeight: 1.6,
   color: '#aab6c2',
 }
@@ -207,6 +244,10 @@ const breakFictionContainerStyle: CSSProperties = {
   ...fullViewportStyle,
   zIndex: SHELL_Z.breakFiction,
   flexDirection: 'column',
+  // The broadcast intentionally covers the compliance chrome (CTL-024, z above it): no
+  // inset (it spreads the padding-free base), and the bars stay pinned while only the
+  // message region scrolls.
+  overflowY: 'hidden',
   backgroundColor: '#0d0d0d',
   color: '#ffb300',
   fontFamily: 'ui-monospace, "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace',
@@ -230,6 +271,9 @@ const breakFictionBodyStyle: CSSProperties = {
   gap: '18px',
   padding: '24px',
   textAlign: 'center',
+  minHeight: 0,
+  overflowY: 'auto',
+  overflowWrap: 'anywhere',
 }
 
 const breakFictionHeadingStyle: CSSProperties = {
@@ -249,7 +293,7 @@ const breakFictionMessageStyle: CSSProperties = {
 
 const breakFictionMetaStyle: CSSProperties = {
   margin: 0,
-  fontSize: '13px',
+  fontSize: '14px',
   letterSpacing: '0.04em',
   color: '#e6a800',
 }
@@ -420,7 +464,10 @@ function InFictionMaintenancePage({ containerRef, variant }: ControlPageProps) {
       data-testid={testId}
       style={variant === 'pause' ? { ...inFictionPageStyle, ...belowChromeAndAlertBarStyle } : inFictionPageStyle}
     >
-      <div style={inFictionCardStyle}>
+      <div data-testid="pulse-overlay-card" style={inFictionCardStyle}>
+        <div aria-hidden="true" style={stateIconStyle}>
+          <FontAwesomeIcon icon={variant === 'pause' ? faWrench : faCircleXmark} />
+        </div>
         <h1
           id={headingId}
           style={inFictionHeadingStyle}
@@ -457,7 +504,10 @@ function OutOfFictionControlPage({ containerRef, variant }: ControlPageProps) {
       data-testid={testId}
       style={variant === 'pause' ? { ...outOfFictionPageStyle, ...belowChromeAndAlertBarStyle } : outOfFictionPageStyle}
     >
-      <div style={outOfFictionCardStyle}>
+      <div data-testid="pulse-overlay-card" style={outOfFictionCardStyle}>
+        <div aria-hidden="true" style={stateIconStyle}>
+          <FontAwesomeIcon icon={variant === 'pause' ? faPause : faFlagCheckered} />
+        </div>
         <h1
           id={headingId}
           style={outOfFictionHeadingStyle}
@@ -502,6 +552,9 @@ function BreakFictionOverlay({ containerRef, message, wallClockNow }: BreakFicti
         style={hazardBarStyle}
       />
       <div style={breakFictionBodyStyle}>
+        <div aria-hidden="true" style={stateIconStyle}>
+          <FontAwesomeIcon icon={faTriangleExclamation} />
+        </div>
         <p
           id={headingId}
           style={breakFictionHeadingStyle}

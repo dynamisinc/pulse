@@ -30,6 +30,8 @@ import { useSocialDirectory } from '../layout/socialDirectory'
 
 export type NotificationsEligibility =
   | { readonly kind: 'unavailable' }
+  /** The shell has not resolved the variant yet: neither available nor not (MT-D8). */
+  | { readonly kind: 'resolving' }
   | { readonly kind: 'pending' }
   | { readonly kind: 'failed' }
   | {
@@ -42,10 +44,14 @@ export type NotificationsEligibility =
   }
 
 export function useNotificationsEligibility(): NotificationsEligibility {
-  const { variant } = useShellContext()
+  const { variant, variantPending } = useShellContext()
   const session = useSession()
   const { self, loading } = useSocialDirectory()
 
+  // Cold load / reload of /notifications: the variant is still the
+  // least-affordance placeholder. Say "resolving", not "unavailable", so the
+  // page waits instead of redirecting a full participant to Home (MT-D8).
+  if (variantPending === true) return { kind: 'resolving' }
   if (!affordancesAvailable(variant) || session.isReadOnly || session.personaId === undefined) {
     return { kind: 'unavailable' }
   }
