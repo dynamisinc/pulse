@@ -737,7 +737,14 @@ public sealed partial class ReactionLoopDriver
         };
     }
 
-    /// <summary>Builds the generate-stage request from a decided intent (storyline brief + eligible cast + tier).</summary>
+    /// <summary>
+    /// Builds the generate-stage request from a decided intent (storyline brief + eligible cast + tier). The brief's
+    /// tone mix is the DECIDED intent's (D3), not the storyline's phase-derived projection: the decide-stage
+    /// behaviors exist to shape the burst's tone (a gratitude-led response reaction, the silence-escalation ramp),
+    /// so the mix the provider is asked for must be the mix that was decided and logged on <c>engine.decided</c>.
+    /// Every other brief field still comes from <see cref="StorylineBriefProjection.ToBrief"/>. For a trigger that
+    /// runs the default composer the two are identical (<see cref="IntentComposer"/> copies the projection's mix).
+    /// </summary>
     /// <param name="registration">The exercise loop being ticked.</param>
     /// <param name="storyline">The storyline the burst voices.</param>
     /// <param name="intent">The decided generation intent.</param>
@@ -753,7 +760,7 @@ public sealed partial class ReactionLoopDriver
         {
             ExerciseId = registration.ExerciseId,
             ExerciseBrief = registration.ExerciseBrief,
-            Storyline = storyline.ToBrief(),
+            Storyline = storyline.ToBrief() with { ToneMix = intent.ToneMix },
             Personas = intent.Personas,
             Tier = tier,
         };

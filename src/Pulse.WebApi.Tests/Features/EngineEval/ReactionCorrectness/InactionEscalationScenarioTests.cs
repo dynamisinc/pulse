@@ -159,5 +159,31 @@ public sealed class InactionEscalationScenarioTests
             "^(speculation|anger) ",
             "by ~2x the window the vacuum has filled with speculation and anger, not worry");
     }
+
+    [Fact]
+    public async Task AsTheSilenceRunsOn_TheProviderIsAskedForTheDecidedEscalatingMix()
+    {
+        // D3 (with D2): the generate request carries the decided intent's tone mix, so the silence-escalation ramp
+        // reaches the provider prompt. The first burst's prompt mix is the decided mix; later bursts ask for visibly
+        // more speculation + anger and less worry.
+        await using var scenario = ReactionScenario.Create();
+        scenario.AddStoryline(responseWindowMin: 20);
+
+        await scenario.RunMinutesAsync(50);
+
+        var requests = scenario.Provider.Requests;
+        requests.Should().HaveCountGreaterThan(2, "silence keeps producing bursts");
+        var first = ScenarioScripts.PromptMix(requests[0]);
+        var last = ScenarioScripts.PromptMix(requests[^1]);
+
+        var decidedFirst = SilenceRules.EscalationTone(minutesSilent: 20, windowMin: 20);
+        first["worry"].Should().Be(
+            System.Math.Round(decidedFirst.Worry, 1, System.MidpointRounding.AwayFromZero),
+            "the prompt carries the decided silence-escalation mix, not the phase mix");
+        last["worry"].Should().BeLessThan(first["worry"], "worry cools as the silence runs on");
+        (last.GetValueOrDefault("speculation") + last.GetValueOrDefault("anger")).Should().BeGreaterThan(
+            first.GetValueOrDefault("speculation") + first.GetValueOrDefault("anger"),
+            "the provider is asked for more speculation and anger the longer officials stay silent");
+    }
 }
 

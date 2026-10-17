@@ -3,6 +3,8 @@ namespace Pulse.WebApi.Tests.Features.EngineEval.ReactionCorrectness;
 using System.Linq;
 using System.Threading.Tasks;
 using FluentAssertions;
+using Pulse.Core.Features.Generation.Models;
+using Pulse.Core.Features.ResponseReaction.Services;
 using Pulse.Core.Features.Storylines.Models;
 using Xunit;
 
@@ -83,7 +85,24 @@ public sealed class ActionCalmingScenarioTests
             "gratitude", "the provider is asked for a gratitude-led crowd, not a worried one");
         mix["gratitude"].Should().BeGreaterThan(mix.GetValueOrDefault("worry"));
         mix["gratitude"].Should().BeGreaterThan(mix.GetValueOrDefault("anger"));
+
+        // D3: the provider is asked for the DECIDED response-reaction mix (ResponseReactionBehavior.DefaultMix:
+        // gratitude 0.5 / calm 0.3 / skepticism 0.15 / worry 0.05), not the Addressed phase projection
+        // (which rendered as gratitude 0.4 / calm 0.2 before the fix).
+        mix.Should().BeEquivalentTo(
+            ExpectedPromptMix(ResponseReactionBehavior.DefaultMix),
+            "the decided intent's tone mix, not the storyline's phase mix, reaches the provider prompt");
     }
+
+    /// <summary>The tone mix exactly as the prompt assembler renders it (one decimal, ~0 tones omitted).</summary>
+    private static System.Collections.Generic.Dictionary<string, double> ExpectedPromptMix(ToneMix mix) =>
+        new (string Name, double Value)[]
+        {
+            ("worry", mix.Worry), ("anger", mix.Anger), ("speculation", mix.Speculation),
+            ("gratitude", mix.Gratitude), ("skepticism", mix.Skepticism), ("calm", mix.Calm),
+        }
+        .Where(t => t.Value > 0.001)
+        .ToDictionary(t => t.Name, t => System.Math.Round(t.Value, 1, System.MidpointRounding.AwayFromZero));
 
     [Fact]
     public async Task AfterTheResponse_TheConcernDecaysAndTheEngineStopsEscalatingIt()
