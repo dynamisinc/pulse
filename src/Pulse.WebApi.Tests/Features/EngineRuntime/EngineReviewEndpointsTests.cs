@@ -251,7 +251,7 @@ public sealed class EngineReviewEndpointsTests
     {
         var exerciseId = Guid.NewGuid();
 
-        await using var host = await StartHostAsync(exerciseId);
+        await using var host = await StartHostAsync(exerciseId, timeoutAutoSendAuthorized: true);
         var response = await host.Client.PostAsJsonAsync(
             new Uri("/api/engine/autonomy/swamped-mode", UriKind.Relative),
             new { actingHumanId = "lead-1", enabled = true });
@@ -260,6 +260,38 @@ public sealed class EngineReviewEndpointsTests
         var json = await response.Content.ReadAsStringAsync();
         using var doc = JsonDocument.Parse(json);
         doc.RootElement.GetProperty("swampedMode").GetBoolean().Should().BeTrue();
+    }
+
+    [RequiresDockerFact]
+    public async Task SwampedMode_Enable_WhileTimeoutAutoSendNotAuthorized_Returns400_WithTheGovernanceMessage()
+    {
+        var exerciseId = Guid.NewGuid();
+
+        await using var host = await StartHostAsync(exerciseId, timeoutAutoSendAuthorized: false);
+        var response = await host.Client.PostAsJsonAsync(
+            new Uri("/api/engine/autonomy/swamped-mode", UriKind.Relative),
+            new { actingHumanId = "lead-1", enabled = true });
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest, "timeout auto-send is not authorised in Phase 1");
+        var body = await response.Content.ReadAsStringAsync();
+        JsonSerializer.Deserialize<string>(body).Should().Be(EngineReviewService.TimeoutAutoSendNotAuthorizedMessage);
+        host.Services.GetRequiredService<EngineAutonomyRegistry>().GetOrCreate(exerciseId).SwampedModeEnabled
+            .Should().BeFalse("a refused request changes nothing");
+    }
+
+    [RequiresDockerFact]
+    public async Task SwampedMode_Disable_WhileTimeoutAutoSendNotAuthorized_Returns200()
+    {
+        var exerciseId = Guid.NewGuid();
+
+        await using var host = await StartHostAsync(exerciseId, timeoutAutoSendAuthorized: false);
+        var response = await host.Client.PostAsJsonAsync(
+            new Uri("/api/engine/autonomy/swamped-mode", UriKind.Relative),
+            new { actingHumanId = "lead-1", enabled = false });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, "lowering is never refused");
+        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        doc.RootElement.GetProperty("swampedMode").GetBoolean().Should().BeFalse();
     }
 
     [RequiresDockerFact]
@@ -431,12 +463,13 @@ public sealed class EngineReviewEndpointsTests
     private async Task<EngineReviewTestHost> StartHostAsync(
         Guid? currentExerciseId,
         bool authenticatedStaff = true,
-        Guid? assignedExerciseId = null)
+        Guid? assignedExerciseId = null,
+        bool timeoutAutoSendAuthorized = false)
     {
         _fixture.ConnectionString.Should().NotBeNull(
             "the Docker-gated MsSql fixture must have started and captured its connection string before these tests run");
         return await EngineReviewTestHost.StartAsync(
-            _fixture.ConnectionString!, currentExerciseId, authenticatedStaff, assignedExerciseId);
+            _fixture.ConnectionString!, currentExerciseId, authenticatedStaff, assignedExerciseId, timeoutAutoSendAuthorized);
     }
 
     private async Task SeedAsync(params EngineReviewItemEntity[] items)
@@ -526,7 +559,8 @@ public sealed class EngineReviewEndpointsTests
             string connectionString,
             Guid? currentExerciseId,
             bool authenticatedStaff = true,
-            Guid? assignedExerciseId = null)
+            Guid? assignedExerciseId = null,
+            bool timeoutAutoSendAuthorized = false)
         {
             var publisher = new CapturingEnginePublishService();
 
@@ -549,6 +583,9 @@ public sealed class EngineReviewEndpointsTests
             var builder = WebApplication.CreateBuilder();
             builder.WebHost.UseTestServer();
             builder.Configuration["ConnectionStrings:DefaultConnection"] = connectionString;
+
+            // The governed timeout-auto-send flag (PROVIDER-GOVERNANCE §8, Phase 1), set explicitly per test.
+            builder.Configuration["Generation:Governance:TimeoutAutoSendAuthorized"] = timeoutAutoSendAuthorized ? "true" : "false";
 
             // Wire exactly the production prerequisites the review endpoints depend on, then the feature.
             builder.Services.AddPulsePersistence(builder.Configuration);

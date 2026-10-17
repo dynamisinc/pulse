@@ -1,7 +1,7 @@
 # Story: Console layout at tablet sizes (panes/tabs)
 
 **Feature:** Phones and tablets  ·  **Epic:** E7  ·  **Phase:** 2  ·  **Status:** Not Started
-**Requirements:** COR-018, NFR-001  ·  **Design decisions:** none (new scope; D5/D7 do not cover tablet, flag for design review)  ·  **Issue:** —
+**Requirements:** COR-018, NFR-001  ·  **Design decisions:** pending TABLET-AMENDMENT sign-off ([`D5-controller-console/TABLET-AMENDMENT.md`](../../design/D5-controller-console/TABLET-AMENDMENT.md), proposed D5-021…026)  ·  **Issue:** —
 
 ## Context
 Controllers must be able to run the console from an iPad: 1024x768 and 1180x820 in landscape, and 768x1024 and 820x1180 in portrait.

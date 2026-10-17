@@ -111,6 +111,23 @@ describe('autoHoldPolicy.evaluate — transition event to log', () => {
     expect(result.disposition).toBe(TimeoutDisposition.Hold)
     expect(result.event).toBeNull()
   })
+
+  it('a full stop: an unexpired countdown keeps counting with no event', () => {
+    const result = evaluate(countdown(), STOPPED_AUTONOMY, 104, true)
+    expect(result.disposition).toBe(TimeoutDisposition.Hold)
+    expect(result.event).toBeNull()
+  })
+
+  it('a full stop: an expired countdown logs hold-on-expiry, never via swamped mode', () => {
+    const result = evaluate(countdown(), STOPPED_AUTONOMY, 106, true)
+    expect(result.disposition).toBe(TimeoutDisposition.Hold)
+    expect(result.viaSwampedMode).toBe(false)
+    expect(result.event).toMatchObject({
+      disposition: TimeoutDisposition.Hold,
+      viaSwampedMode: false,
+      scenarioMinute: 106,
+    })
+  })
 })
 
 describe('DelayedAutoCountdown — scenario-minute math', () => {

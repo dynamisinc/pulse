@@ -100,6 +100,11 @@ param generationNoTrainingAttested = true
 // NOT authorized until PROVIDER-GOVERNANCE §8 amendment 2 is signed; the signer flips this in that same commit.
 param generationAmbientAutonomyAuthorized = false
 
+// ⚠ Timeout auto-send (swamped mode) — App Service setting Generation__Governance__TimeoutAutoSendAuthorized. When
+// false, turning swamped mode ON is refused with a 400 and an expired Delayed-auto countdown always holds for a human.
+// Phase 1 (PROVIDER-GOVERNANCE §8 amendment 1): timeout auto-send NOT authorized until A1c's lead-controller gate is on main; set true in a separate reviewed commit after that.
+param generationTimeoutAutoSendAuthorized = false
+
 // Flip to true (with deployAi) to also deploy the Claude-on-Foundry tiers for the E8 provider
 // comparison. Requires a Claude-eligible subscription; the Anthropic Marketplace offer is auto-accepted
 // from the attestation below. Set the org name to the real entity using the model.
@@ -145,9 +150,8 @@ param staffIdentityAccountsJson = readEnvironmentVariable('STAFF_IDENTITY_ACCOUN
 // GitHub environment (threaded by deploy-infrastructure.yml). An unset secret with alerts on FAILS the
 // deploy with a clear message.
 //
-// LANDS OFF on purpose: merging this changes nothing on UAT. Flip deployProviderAlerts to true in a ONE-LINE
-// FOLLOW-UP once Tom has created the PULSE_ALERT_OWNER_EMAIL secret on the uat environment (otherwise every
-// UAT infra deploy would fail until the secret exists). Thresholds can be overridden here for a forced test
+// ON since the 10/17 go-live (#571): Tom created the PULSE_ALERT_OWNER_EMAIL secret on the uat environment. If that
+// secret is ever removed, every UAT infra deploy fails with a clear message until it is restored or this is set false. Thresholds can be overridden here for a forced test
 // fire (e.g. param providerAlertCallsPerHourThreshold = 1), then reverted; see infrastructure/README.md.
-param deployProviderAlerts = false
+param deployProviderAlerts = true // ON for the Saturday go-live: PULSE_ALERT_OWNER_EMAIL added to the uat environment (Tom, 2026-10-17)
 param alertOwnerEmail = readEnvironmentVariable('PULSE_ALERT_OWNER_EMAIL', '')

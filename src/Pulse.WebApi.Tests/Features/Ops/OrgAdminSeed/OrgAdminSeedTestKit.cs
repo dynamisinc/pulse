@@ -87,7 +87,9 @@ internal static class OrgAdminSeedTestKit
             .AddInMemoryCollection(configurationValues ?? new Dictionary<string, string?>())
             .Build();
 
+        // Like the real host, which always registers IConfiguration (the auth slices' startup checks depend on it).
         var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(configuration);
         services.AddLogging();
         services.AddStaffIdentity(configuration);
         services.AddOrgAdminSeed(new TestHostEnvironment(environmentName), configuration);

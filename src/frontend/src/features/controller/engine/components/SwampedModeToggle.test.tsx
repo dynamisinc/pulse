@@ -34,10 +34,10 @@ vi.mock('../hooks/useEngineSettings', () => ({
 const mockedUseSwampedMode = vi.mocked(useSwampedMode)
 const mockedUseEngineSettings = vi.mocked(useEngineSettings)
 
-/** Stubs only the field the toggle reads (`settings.providerCutToFake`). */
-function stubSettings(providerCutToFake: boolean): void {
+/** Stubs only the fields the toggle reads (`providerCutToFake`, `timeoutAutoSendAuthorized`). */
+function stubSettings(providerCutToFake: boolean, timeoutAutoSendAuthorized?: boolean): void {
   mockedUseEngineSettings.mockReturnValue({
-    settings: { providerCutToFake },
+    settings: { providerCutToFake, timeoutAutoSendAuthorized },
   } as unknown as ReturnType<typeof useEngineSettings>)
 }
 
@@ -113,5 +113,48 @@ describe('SwampedModeToggle — hold-on-cut qualifier (ADP-042)', () => {
     expect(banner).toHaveTextContent('TIMEOUT AUTO-SEND IS SUSPENDED')
     expect(banner).not.toHaveTextContent('TIMEOUT AUTO-SEND IS ACTIVE')
     expect(banner).not.toHaveTextContent(/publish instead of holding/)
+  })
+})
+
+describe('SwampedModeToggle — Phase 1: timeout auto-send not authorized (PROVIDER-GOVERNANCE §8)', () => {
+  it('disables the ON control and describes it with a text + icon note', () => {
+    stubSettings(false, false)
+    const setSwampedMode = vi.fn()
+    mockedUseSwampedMode.mockReturnValue(stub({ swampedMode: false, isLead: true, setSwampedMode }))
+    render(<SwampedModeToggle />)
+
+    const toggle = screen.getByTestId('swamped-mode-enable-toggle')
+    expect(toggle).toBeDisabled()
+    const note = screen.getByTestId('swamped-mode-not-authorized-note')
+    expect(note).toHaveTextContent('Timeout auto-send is off until the lead-controller role ships.')
+    expect(note.querySelector('svg')).not.toBeNull()
+    expect(toggle).toHaveAttribute('aria-describedby', note.id)
+
+    fireEvent.click(toggle)
+    expect(setSwampedMode).not.toHaveBeenCalled()
+  })
+
+  it('never blocks turning an already-on switch OFF', () => {
+    stubSettings(false, false)
+    const setSwampedMode = vi.fn()
+    mockedUseSwampedMode.mockReturnValue(stub({ swampedMode: true, isLead: true, setSwampedMode }))
+    render(<SwampedModeToggle />)
+
+    const toggle = screen.getByTestId('swamped-mode-enable-toggle')
+    expect(toggle).toBeEnabled()
+    expect(screen.queryByTestId('swamped-mode-not-authorized-note')).not.toBeInTheDocument()
+    fireEvent.click(toggle)
+    expect(setSwampedMode).toHaveBeenCalledWith(false)
+  })
+
+  it('keeps the control enabled when the flag is true or absent', () => {
+    for (const authorized of [true, undefined]) {
+      stubSettings(false, authorized)
+      mockedUseSwampedMode.mockReturnValue(stub({ swampedMode: false, isLead: true }))
+      const { unmount } = render(<SwampedModeToggle />)
+      expect(screen.getByTestId('swamped-mode-enable-toggle')).toBeEnabled()
+      expect(screen.queryByTestId('swamped-mode-not-authorized-note')).not.toBeInTheDocument()
+      unmount()
+    }
   })
 })

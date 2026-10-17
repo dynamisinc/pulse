@@ -601,6 +601,11 @@ Open **ENGINE** on the toolstrip to see and change the engine settings.
 exercise's lead controller can turn it on. While it is on, a **TIMEOUT AUTO-SEND IS ACTIVE** banner stays on screen. If generation is cut to Fake, the banner reads **TIMEOUT AUTO-SEND IS SUSPENDED** instead, and expired timers hold.
 Use it only when the lead decides the cell cannot keep up.
 
+> **Phase 1:** Swamped mode cannot be turned on yet. Until the lead-controller role ships, the **Swamped mode**
+> control is greyed out with the note "Timeout auto-send is off until the lead-controller role ships.", and Pulse
+> refuses the request if it is sent anyway. Every undecided burst whose countdown ends is held for you. Turning
+> Swamped mode off always works.
+
 ### The engine switch (kill switch)
 
 The switch at the left of the engine bar is always visible. Each click moves it one step:
@@ -608,7 +613,8 @@ The switch at the left of the engine bar is always visible. Each click moves it 
 **ENGINE · LIVE** → **ENGINE · SUGGEST-ONLY** → **ENGINE · STOPPED** → back to **ENGINE · LIVE**.
 
 - **SUGGEST-ONLY** forces every draft to wait for review, whatever the autonomy setting.
-- **STOPPED** stops generation at once.
+- **STOPPED** stops generation at once. A draft whose countdown runs out while the engine is stopped is held for
+  you, not sent after you restart the engine.
 - In the Live position the label also says what is really in effect, for example **ENGINE · LIVE (SUGGEST)**.
 
 If the AI service misbehaves, Pulse drops to Suggest by itself. It never raises autonomy on its own.

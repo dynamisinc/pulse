@@ -15,7 +15,9 @@ using Pulse.Core.Features.Autonomy.Models;
 /// drops the effective level below Delayed-auto (or stops the engine), which suspends in-flight countdowns:
 /// they hold instead of sending, even under swamped mode. Timers are evaluated in scenario time
 /// (COR-050/051), so a freeze holds the deadline and a time-jump that carries the deadline past resolves to
-/// a HOLD, not a missed auto-send.</para>
+/// a HOLD, not a missed auto-send. A full stop is no exception: a countdown whose deadline passes while the engine
+/// is stopped resolves to the ordinary hold-on-expiry (held, not left counting down to auto-send after a restore);
+/// a countdown still inside its window while stopped keeps counting.</para>
 ///
 /// <para><b>Hold-on-cut.</b> An active generation-provider cut to Fake (the ADP-042 manual egress brake) is
 /// treated as one more safety clamp on the auto paths: while the exercise is cut, an expired countdown with no
@@ -95,6 +97,7 @@ public static class AutoHoldPolicy
     /// auto-send). While the countdown is still running, or when the outcome is a human approve/veto (logged
     /// on the review-action path, not here), the event is null. The disposition is always returned. An expiry
     /// held because the exercise is cut to Fake is the ordinary hold-on-expiry transition (not via swamped mode).
+    /// while the engine is fully stopped (kill switch FullStop) is the ordinary hold-on-expiry transition.
     /// </summary>
     /// <param name="countdown">The draft's countdown snapshot.</param>
     /// <param name="effective">The draft's safety-adjusted effective autonomy.</param>
@@ -114,9 +117,10 @@ public static class AutoHoldPolicy
     {
         var disposition = Decide(countdown, effective, currentScenarioMinute, swampedMode, providerCutToFake);
 
-        // Only an on-expiry, no-decision resolution is an autonomy-layer transition to log here.
+        // Only an on-expiry, no-decision resolution is an autonomy-layer transition to log here. A full stop is no
+        // exception: a countdown that expires while the engine is stopped resolves to the ordinary hold-on-expiry
+        // (Decide already returns Hold), so it is never left counting down to auto-send after a restore.
         var isTimeoutTransition = countdown.Decision == ControllerDecision.None
-            && !effective.GenerationStopped
             && countdown.HasExpired(currentScenarioMinute);
 
         if (!isTimeoutTransition)

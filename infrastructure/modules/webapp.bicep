@@ -93,6 +93,9 @@ param generationNoTrainingAttested bool = false
 @description('Generation:Governance:AmbientAutonomyAuthorized (ambient-chatter story 01, AC0) — whether ANY exercise may select ambient \'autonomous\' mode (engine posts that publish with no controller click). False by default: PROVIDER-GOVERNANCE.md §8 does not authorise it until a second signed amendment; while false the settings API rejects \'autonomous\' with 400.')
 param generationAmbientAutonomyAuthorized bool = false
 
+@description('Generation:Governance:TimeoutAutoSendAuthorized (PROVIDER-GOVERNANCE §8, Phase 1) — whether timeout auto-send (swamped mode: a Delayed-auto draft publishing on countdown expiry with no controller click) is authorised. False by default: while false the swamped-mode API refuses ON with 400 and an expired countdown always holds for a human.')
+param generationTimeoutAutoSendAuthorized bool = false
+
 @description('Generation:Governance:Retention — the attestable retention posture. Retained is today\'s posture (standard retention under the no-training contract); switch to ZeroDataRetention only once the per-subscription abuse-monitoring/ZDR approval lands (PROVIDER-GOVERNANCE.md §2). Never left Unspecified.')
 @allowed(['Retained', 'ZeroDataRetention'])
 param generationRetention string = 'Retained'
@@ -197,6 +200,11 @@ var generationSettings = [
     name: 'Generation__Governance__AmbientAutonomyAuthorized'
     value: generationAmbientAutonomyAuthorized ? 'true' : 'false'
   }
+  // PROVIDER-GOVERNANCE §8 Phase 1: the governed timeout-auto-send (swamped mode) flag. Same lowercase-literal rule.
+  {
+    name: 'Generation__Governance__TimeoutAutoSendAuthorized'
+    value: generationTimeoutAutoSendAuthorized ? 'true' : 'false'
+  }
 ]
 
 resource webApp 'Microsoft.Web/sites@2023-12-01' = {
@@ -293,6 +301,40 @@ resource webApp 'Microsoft.Web/sites@2023-12-01' = {
         {
           name: 'Email__SupportAddress'
           value: emailSupportAddress
+        }
+        // Trusted proxies (identity-auth-roles/18, #480): the App Service front end forwards from private ranges
+        // (Microsoft: "add private IP address ranges to the known networks"). Never set
+        // ASPNETCORE_FORWARDEDHEADERS_ENABLED=true — it trusts forwarded headers from any client.
+        {
+          name: 'ForwardedHeaders__KnownNetworks__0'
+          value: '10.0.0.0/8'
+        }
+        {
+          name: 'ForwardedHeaders__KnownNetworks__1'
+          value: '172.16.0.0/12'
+        }
+        {
+          name: 'ForwardedHeaders__KnownNetworks__2'
+          value: '192.168.0.0/16'
+        }
+        // Auth rate limits for the demo (Tom, 10/16: "limits (a)", ~15-person demo). Code defaults are unchanged;
+        // only the non-default values are set here. UAT is the only environment this module deploys today; revisit
+        // per environment before production. See docs/OPERATE.md (trusted proxy / shared networks).
+        {
+          name: 'Authentication__RateLimits__SessionPerMinute'
+          value: '120'
+        }
+        {
+          name: 'Authentication__EasyLogin__WordPermitPerMinute'
+          value: '30'
+        }
+        {
+          name: 'Authentication__RateLimits__ParticipantLoginPerMinute'
+          value: '30'
+        }
+        {
+          name: 'Authentication__RateLimits__SharedLoginPerMinute'
+          value: '20'
         }
         // Authentication
         {
