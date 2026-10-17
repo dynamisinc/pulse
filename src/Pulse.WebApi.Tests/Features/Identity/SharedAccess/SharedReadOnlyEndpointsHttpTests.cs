@@ -28,12 +28,17 @@ using Pulse.WebApi.Tests.Features.Identity.Staff;
 /// </summary>
 public sealed class SharedReadOnlyEndpointsHttpTests
 {
-    private static async Task<IHost> StartHostAsync()
+    private static async Task<IHost> StartHostAsync(int? sharedLoginPerMinute = null)
     {
         return await new HostBuilder()
             .ConfigureWebHost(web =>
             {
                 web.UseTestServer();
+                if (sharedLoginPerMinute is { } limit)
+                {
+                    web.UseSetting("Authentication:RateLimits:SharedLoginPerMinute", limit.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                }
+
                 web.ConfigureServices(services =>
                 {
                     services.AddRouting();
@@ -108,5 +113,30 @@ public sealed class SharedReadOnlyEndpointsHttpTests
             "the 6th shared-login attempt within the same window from the same caller must be rejected by the " +
             "per-IP rate limiter (NFR-009), before it ever reaches the handler — a shared secret is the most " +
             "brute-forceable auth endpoint");
+    }
+
+    [Fact]
+    public async Task SharedLogin_ConfiguredLimit_RaisesThePerIpWindow()
+    {
+        // identity-auth-roles/18 follow-up: Authentication:RateLimits:SharedLoginPerMinute raises the limit with no
+        // deploy (a large single-venue exercise behind one NAT). With 7 configured, attempts 6 and 7 still reach the
+        // handler and the 8th is the first 429.
+        using var host = await StartHostAsync(sharedLoginPerMinute: 7);
+        using var client = host.GetTestClient();
+
+        for (var attempt = 1; attempt <= 7; attempt++)
+        {
+            var response = await client.PostAsync(
+                "/api/auth/shared",
+                new StringContent("null", System.Text.Encoding.UTF8, "application/json"));
+
+            response.StatusCode.Should().Be(HttpStatusCode.BadRequest, $"attempt {attempt} is within the configured 7/minute window");
+        }
+
+        var eighth = await client.PostAsync(
+            "/api/auth/shared",
+            new StringContent("null", System.Text.Encoding.UTF8, "application/json"));
+
+        eighth.StatusCode.Should().Be(HttpStatusCode.TooManyRequests, "the configured limit, not the default 5, applies");
     }
 }

@@ -1,6 +1,6 @@
 # Story: Forwarded headers so the per-IP rate limiter sees the client (#480)
 
-**Feature:** Identity, auth & roles  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** Not Started
+**Feature:** Identity, auth & roles  ·  **Epic:** E1  ·  **Phase:** 1  ·  **Status:** In Review
 **Requirements:** NFR-009, COR-012 (+ #480)  ·  **Design decisions:** ADMIN-IDENTITY-MODEL §3.2, §9  ·  **Issue:** #480
 **Stack:** backend  ·  **Review tier:** Tier-2 (security)  ·  **Wave:** A1
 
@@ -14,9 +14,9 @@ or no one. The lockout policy ([`docs/design/ADMIN-IDENTITY-MODEL.md`](../../des
 - [ ] Given a request from an untrusted source with a spoofed `X-Forwarded-For`, then the header is ignored (trusts only the platform proxy).
 - [ ] Given forwarded headers middleware, then it is registered **before** the rate limiter in the pipeline (asserted by a test).
 - [ ] Given `X-Forwarded-Proto`, then HTTPS redirection / secure-cookie logic sees the original scheme.
-- [ ] Given 6 failed staff logins from one client IP, then the limiter trips for that IP only; a second client IP is unaffected.
+- [ ] Given the existing staff-login limit (10 per minute) is exceeded from one client IP (the 11th attempt), then the limiter trips for that IP only; a second client IP behind the same proxy is unaffected. *(Corrected from "6 failed logins": the existing limit is 10/min and this story does not change limiters.)*
 - [ ] Isolation: the limiter partition never mixes exercises or orgs; no per-route foreign-exercise/org test is needed as no route is added (stated).
-- [ ] User guide (C5 docs-as-done): `docs/OPERATE.md` (trusted-proxy config) is updated in the same PR; no `docs/guide/` page changes ("no guide impact").
+- [ ] User guide (C5 docs-as-done): `docs/OPERATE.md` (trusted-proxy config and shared-NAT note) and `docs/guide/troubleshooting.md` ("Too many tries" counts per network address) are updated in the same PR.
 
 ## Out of Scope
 New limiters; MFA; HIBP breach checks (#490).
@@ -30,3 +30,28 @@ Wave A1; independent of 16/17 (can run with them). Required before 15's login li
 
 ## Tests
 Integration tests with a test server and forged headers; pipeline-order test.
+
+Linked (`src/Pulse.WebApi.Tests/Features/TrustedProxy/`):
+- `ForwardedHeadersTests.TrustedProxy_ForwardedFor_BecomesTheClientIp` (AC-1)
+- `ForwardedHeadersTests.TrustedProxy_ClientPrependedEntry_IsNotUsed` (AC-1, AC-2)
+- `ForwardedHeadersTests.TrustedNetwork_Ipv4MappedPeer_IsTrusted` (AC-1)
+- `ForwardedHeadersTests.UntrustedSource_SpoofedHeaders_AreIgnored` (AC-2)
+- `ForwardedHeadersTests.NoConfiguration_TrustsNoOne_IncludingLoopback` (AC-2)
+- `ForwardedHeadersTests.UntrustedSource_RotatingSpoofedForwardedFor_CannotEscapeItsBucket` (AC-2)
+- `ForwardedHeadersTests.ClientsBehindTrustedProxy_GetSeparateStaffLoginBuckets` (AC-1, AC-5)
+- `ForwardedHeadersTests.TrustedProxy_ForwardedProto_RestoresHttpsScheme` (AC-4)
+- `ForwardedHeadersTests.InvalidConfiguration_FailsFast`, `ForwardedHeadersTests.UseWithoutAdd_Throws` (config safety)
+- `ForwardedHeadersPipelineOrderTests.RealPipeline_ForwardedHeadersRunBeforeTheRateLimiter_SoClientsBehindTheProxyGetSeparateBuckets`
+  (AC-3, AC-5 over the real `Program`) — active since the wiring commit (passes against the real `Program`).
+  wiring commit. Verified red against the current (unwired) `Program`.
+
+AC-5 note: the staff-login limiter is 10 attempts/minute per IP (unchanged; new limiters are out of scope), so the tests
+exhaust 10 and assert the 11th trips for that client only. The "6 failures" figure belongs to the A2 per-account lockout.
+
+AC-6 (isolation, stated): no route is added and no data is read. The limiter partition key is the client IP only — it
+carries no exercise or org identity, so it cannot mix exercises or orgs. `X-Forwarded-Host` is deliberately not honored
+because the request host selects the exercise (COR-001).
+
+`Program.cs` wiring (orchestrator): `builder.Services.AddPulseForwardedHeaders(builder.Configuration);` with the other
+`Add*` calls, and `app.UsePulseForwardedHeaders();` as the FIRST middleware, directly after `builder.Build()` and before
+`app.UseCors(...)` (so before exercise resolution, session auth and `UseRateLimiter()`).

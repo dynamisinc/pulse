@@ -14,7 +14,8 @@ You will get a personal sign-in card or an email from exercise staff.
 - **Tap your personal link**, or **scan the QR code** on your card with your phone's camera.
 - You are signed in straight away. There is no password to remember.
 
-Pulse runs in your web browser on a phone, tablet or computer. There is no app to install.
+Pulse runs in your web browser on a phone, tablet or computer. There is no app to download, but you
+can add it to your phone's home screen (see *On a phone or tablet*).
 
 **Your link is personal.** Do not share it or post it. Anyone who has it can sign in as you.
 
@@ -64,13 +65,41 @@ _Screenshots to follow (Android banner and iOS sheet via mock overrides)._
 - **Edit your own post** within 15 minutes of posting, using **Edit post**. Everyone can see that a
   post was **Edited** and can read its edit history. *(Rolling out. You may not see this yet.)*
 - **Follow** accounts, and use **Home**, **Explore**, **Notifications** and **Profile** to find your
-  way around. On a tablet or computer they are on the left. On a phone they run along the
-  **bottom** of the screen, with the round **Post** button in the middle; a number on
-  **Notifications** shows how many you have not read yet.
+  way around (see *On a phone or tablet* below for where they are). A number on **Notifications**
+  shows how many you have not read yet.
 
 ![A post opened as a conversation, with replies below it.](img/participant-thread.png)
 
 ![The post composer, with the text box, photo and emoji buttons, and the Post button.](img/participant-composer.png)
+
+### On a phone or tablet
+
+Pulse is built for phones first and works in your device's normal web browser (Safari on iPhone and
+iPad, Chrome on Android).
+
+- **On a phone**, the buttons along the bottom are how you move around. Tap the round **Post**
+  button in the middle to write a post. Buttons are sized for your thumb, so you should not need to
+  zoom.
+- **On a tablet or computer**, the same buttons are in a column on the left, shown as icons. The
+  round feather button writes a post.
+- **The EXERCISE banners** at the very top and bottom of the screen always stay visible. Nothing
+  you need sits underneath them.
+- **In the new-post window**, the **Post** button stays above the keyboard, so you can send without
+  closing it.
+- **To leave a full-screen photo**, tap **Close**, swipe back, or use your phone's **Back** button.
+  You end up back where you were.
+
+**Add it to your home screen (optional).** Once you are signed in, Pulse can sit on your home screen
+like an app, under the exercise's name:
+
+- **Android (Chrome):** tap **Add** on the banner that offers to add the exercise to your home
+  screen. If you closed the banner, use Chrome's menu (**⋮**) → **Add to Home screen**.
+- **iPhone or iPad (Safari):** tap **Share**, then **Add to Home Screen**. When you first open it
+  from the home screen, you need to sign in again with your link or today's word.
+
+![The exercise feed on a small phone, with Home, Explore, Post, Notifications and Profile along the bottom.](img/participant-feed-360.png)
+
+![The exercise feed on a tablet, with the same buttons in a column on the left.](img/participant-feed-tablet.png)
 
 Read carefully before you trust or share a post. **Not every account is what it seems.** Lookalike
 accounts are part of the exercise.

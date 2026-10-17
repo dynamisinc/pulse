@@ -43,7 +43,7 @@ non-negotiables (staff vs participant worlds).
 | 15 | Org-level authentication for OrgAdmin (session with no exercise scope) | COR-077 (new) | Not Started | — |
 | 16 | Person, StaffUser facet and Enrollments (replaces StaffAssignment) — A1, Tier-2 | COR-010, COR-011, COR-012, COR-014, COR-077 | Not Started | #572 |
 | 17 | Role-matrix enforcement + route x role matrix test (#377/#481/#61) — A1, Tier-2 | COR-010, COR-013 | Not Started | #573 |
-| 18 | Forwarded headers for the per-IP limiter (#480) — A1, Tier-2 | NFR-009, COR-012 | Not Started | #480 |
+| 18 | Forwarded headers for the per-IP limiter (#480) — A1, Tier-2 | NFR-009, COR-012 | In Review | #480 |
 | 19 | Org directory (people list, org-admin grants) — A2 | COR-010, COR-077, COR-017 | Not Started | #574 |
 | 20 | Staff invite and assign to exercises — A2, Tier-2 | COR-010, COR-011, COR-077 | Not Started | #575 |
 | 21 | Password reset flows (CredentialToken, forgot, admin reset, temp password, policy) — A2, Tier-2 | COR-011, COR-017, COR-012, NFR-009 | Not Started | #576 |
