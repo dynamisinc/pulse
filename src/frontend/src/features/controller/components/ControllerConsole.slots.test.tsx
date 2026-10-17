@@ -542,15 +542,17 @@ describe('ControllerConsole — ConsoleSlotContext.openComposer', { timeout: 200
 })
 
 describe('ControllerConsole — dev copy is gone, replaced by a shortcut strip', () => {
-  it('shows a short ⌘K / Ctrl+K shortcut strip that says what it does', async () => {
+  it('shows a short shortcut strip with ONE platform keycap (story 14, D5-024)', async () => {
     renderConsole()
     await screen.findByTestId('controller-console')
 
+    // jsdom reports no Apple platform, so the one keycap is Ctrl+K (the Apple case is unit-tested
+    // in core/hooks/platformModifier.test.ts and shortcutHints.test.tsx).
     const strip = screen.getByTestId('console-shortcut-strip')
-    expect(strip).toHaveTextContent('⌘K')
     expect(strip).toHaveTextContent('Ctrl+K')
+    expect(strip).not.toHaveTextContent('⌘K')
     expect(strip).toHaveTextContent(/post as a persona/i)
-    expect(strip.querySelectorAll('kbd')).toHaveLength(2)
+    expect(strip.querySelectorAll('kbd')).toHaveLength(1)
   })
 
   it('no longer carries the old paragraph', async () => {

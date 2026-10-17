@@ -462,3 +462,22 @@
   gap: 6px;
   margin-top: 4px;
 }
+
+/* ---- Touch (mobile-tablet story 14, D5-024, TABLET-AMENDMENT section 4) ----------------------
+   Under a COARSE pointer every action in the composer (Post, Retry, Clear reply, Upload, From
+   library, the emoji trigger, the disclosure, attachment remove) is a real >= 44 x 44 box with
+   >= 8px between neighbours. Real layout space (min-width / min-height on the control), no
+   ::before / ::after hit-slop. Gated on the POINTER, never the viewport width. */
+@media (pointer: coarse) {
+  .composer button,
+  .composer [role="button"] {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  /* Groups whose desktop gap is under 8px. */
+  .bannerActions,
+  .presets {
+    gap: 8px;
+  }
+}

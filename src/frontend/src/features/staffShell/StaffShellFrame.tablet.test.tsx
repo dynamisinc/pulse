@@ -253,7 +253,7 @@ describe('Console-hosted flyouts (ENGINE, USAGE, persona dock) — shared contra
     expect(onClose).toHaveBeenCalledTimes(1)
   })
 
-  it('the frame applies the same clamp, top seam and 44px close to the persona dock (story 12 owns that file)', () => {
+  it('the frame applies the same clamp and top seam to the persona dock (story 12 owns that file)', () => {
     render(
       <MemoryRouter>
         <ToolstripProvider>
@@ -277,7 +277,8 @@ describe('Console-hosted flyouts (ENGINE, USAGE, persona dock) — shared contra
       )
     expect(frameRule?.style.getPropertyValue('max-width')).toBe('100%')
     expect(frameRule?.style.getPropertyValue('top')).toBe(`var(${staffShellTokens.flyout.topVar}, 0px)`)
+    // The 44px close is the dock's own now (story 14, consoleTouch.keyboard.test.tsx).
     const close = screen.getByRole('button', { name: /^Close/ })
-    expect(mediaRuleDeclarations(close, 'pointer: coarse').height).toBe(`${STAFF_TOUCH_TARGET_PX}px`)
+    expect(mediaRuleDeclarations(close, 'pointer: coarse')['min-height']).toBe(`${STAFF_TOUCH_TARGET_PX}px`)
   })
 })

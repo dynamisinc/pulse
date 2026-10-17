@@ -482,3 +482,53 @@ describe('roles on a tablet', () => {
     },
   )
 })
+
+describe('touch and keyboard parity (story 14, D5-024)', () => {
+  it('Cmd+K from an iPad hardware keyboard toggles the palette and is preventDefault-ed', async () => {
+    await renderConsole('controller', 1024, 768)
+    const open = new KeyboardEvent('keydown', { key: 'k', metaKey: true, bubbles: true, cancelable: true })
+    act(() => { window.dispatchEvent(open) })
+    // The browser / iPadOS default for the chord is suppressed.
+    expect(open.defaultPrevented).toBe(true)
+    expect(await screen.findByTestId('command-palette')).toBeInTheDocument()
+
+    const close = new KeyboardEvent('keydown', { key: 'K', metaKey: true, bubbles: true, cancelable: true })
+    act(() => { window.dispatchEvent(close) })
+    expect(close.defaultPrevented).toBe(true)
+    await waitFor(() => expect(screen.queryByTestId('command-palette')).not.toBeInTheDocument())
+  })
+
+  it('touch only: tapping the PERSONAS tool opens the palette; one tap on a persona opens the dock', async () => {
+    const user = userEvent.setup()
+    await renderConsole('controller', 1024, 768)
+    await user.click(screen.getByTestId('toolstrip-tool-personas'))
+    expect(await screen.findByTestId('command-palette')).toBeInTheDocument()
+    await user.click(await screen.findByTestId('persona-picker-option-persona-fairhavenwater'))
+    expect(await screen.findByTestId('persona-composer')).toBeInTheDocument()
+    expect(screen.queryByTestId('command-palette')).not.toBeInTheDocument()
+  })
+
+  it('focus in the Review pane survives a rotation that turns Review into a tab', async () => {
+    await renderConsole('controller', 1024, 768)
+    const [card] = screen.getAllByTestId('review-card')
+    if (card === undefined) throw new Error('no review card rendered')
+    act(() => card.focus())
+    expect(card).toHaveFocus()
+
+    resizeTo(768, 1024)
+    await waitFor(() =>
+      expect(screen.getByTestId('console-tablet-frame')).toHaveAttribute('data-band', 'portrait'),
+    )
+    // The pane holding focus was selected, so focus is neither hidden nor dropped to <body>.
+    expect(tabNamed(/Review/)).toHaveAttribute('aria-selected', 'true')
+    expect(visible('review-queue-column')).toBe(true)
+    expect(document.activeElement).not.toBe(document.body)
+    expect(card).toHaveFocus()
+  })
+
+  it('the shortcut strip is the key hint on a fine pointer (the tap hint is in shortcutHints.test)', async () => {
+    await renderConsole('controller', 1024, 768)
+    // jsdom's stub answers every pointer query false: a fine pointer, the key hint.
+    expect(screen.getByTestId('console-shortcut-strip')).toHaveAttribute('data-pointer', 'fine')
+  })
+})

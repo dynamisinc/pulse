@@ -40,7 +40,7 @@ Status: all Not Started. B1 audit (2026-10-16) folded in: PR #562 alert bar veri
 | 11 | [PWA: install prompts (Android and iOS)](11-pwa-install-prompts.md) | B2 | NFR-001, D0 §2 | Not Started | — |
 | 12 | [Console layout at tablet sizes (panes/tabs)](12-console-tablet-layout.md) | B3 | COR-018, NFR-001 | In Review | #524 |
 | 13 | [Staff shell frame, toolstrip and flyouts at tablet sizes](13-staff-shell-tablet-frame.md) | B3 | COR-018, NFR-001 | Not Started | — |
-| 14 | [Console keyboard shortcuts and touch alternatives](14-console-touch-and-keyboard.md) | B3 | NFR-001 | Not Started | — |
+| 14 | [Console keyboard shortcuts and touch alternatives](14-console-touch-and-keyboard.md) | B3 | NFR-001 | In Review | — |
 | 15 | [Takedown, Freeze and EndEx confirms stay deliberate on touch](15-deliberate-confirms-touch.md) | B3 | CTL-025, CTL-023, CTL-024 | Not Started | — |
 | 16 | [Controller tablet e2e and guide screenshots](16-controller-tablet-e2e-guide.md) | B3 | NFR-001, docs-as-done | Not Started | — |
 | 17 | [Channel nav dateline never shows wall-clock time](17-dateline-scenario-time-guard.md) | B1 (audit G2) | COR-053, COR-061/062 | In Review | — |

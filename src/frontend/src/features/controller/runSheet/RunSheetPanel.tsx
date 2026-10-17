@@ -74,6 +74,7 @@ import { useExerciseContext } from '@/core/exerciseContext'
 import { useStaffPersonas } from '@/features/personas'
 import { consoleChrome as chrome } from '../consoleChrome'
 import { RunSheetButton } from './RunSheetButtons'
+import { COARSE_GAP_SX } from '../consoleTouch'
 import { RunSheetRow } from './RunSheetRow'
 import { InjectItemEditor, type EditorMode, type EditorSubmitResult } from './InjectItemEditor'
 import { KeyboardHelp } from './KeyboardHelp'
@@ -175,7 +176,7 @@ function Segmented<T extends string>({
       ref={groupRef}
       role="group"
       aria-label={label}
-      sx={{ display: 'inline-flex', gap: 0.5, alignItems: 'center' }}
+      sx={{ display: 'inline-flex', gap: 0.5, alignItems: 'center', ...COARSE_GAP_SX }}
     >
       {options.map(option => (
         <RunSheetButton
@@ -661,7 +662,7 @@ function RunSheetPanelBody({ exerciseId }: { readonly exerciseId: string }) {
           />
         </Box>
 
-        <Box sx={{ mt: 1, display: 'flex', flexWrap: 'wrap', gap: 1, alignItems: 'center' }}>
+        <Box sx={{ mt: 1, display: 'flex', flexWrap: 'wrap', gap: 1, alignItems: 'center', ...COARSE_GAP_SX }}>
           {canControl && <>
             <RunSheetButton
               kind="primary"

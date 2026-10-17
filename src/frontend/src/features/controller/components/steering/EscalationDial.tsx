@@ -107,6 +107,8 @@ import type { StorylinePhase } from '../../services/storylineMock'
 // Dark operator-chrome tokens (matches `EngineControlBar`/`ReviewQueue`'s tokens). Staff-only.
 import { consoleChrome as chrome } from '../../consoleChrome'
 import { useCanControl } from '../../access'
+import { CONSOLE_COARSE_MEDIA, CONSOLE_TOUCH_TARGET_PX } from '../../consoleTouch'
+import { useCoarsePointer } from '../confirm'
 
 /**
  * The phases in which `Storyline.Tick` actually drives actual intensity
@@ -167,10 +169,16 @@ function DialPanel({ children }: { children: ReactNode }) {
  * storyline via `useStorylineTarget()` (Wave-1/2 is single-storyline; a
  * future per-card board reuse arrives with the multi-storyline store,
  * D5-016/017).
+ *
+ * TOUCH (story 14, D5-024): the arrow / Home / End keys have a touch twin in the track itself: tap
+ * or drag sets the target (pointer events). Under `(pointer: coarse)` the track is 44px tall, the
+ * default hint reads "Tap or drag", and the phase meaning (hover/focus tooltip on desktop) is
+ * printed under the label so nothing is hover-only.
  */
 export function EscalationDial() {
   const canControl = useCanControl()
   const dial = useStorylineTarget()
+  const coarse = useCoarsePointer()
   const trackRef = useRef<HTMLDivElement | null>(null)
   const isDraggingRef = useRef(false)
   // The in-progress drag position — LIVE visual feedback only. The telemetry-
@@ -315,7 +323,9 @@ export function EscalationDial() {
   const isPending = dial.pendingChangeDetail !== null
   const relationshipText = isPending
     ? `Setting target: ${dial.pendingChangeDetail}… (not yet confirmed)`
-    : (dial.lastChangeDetail ?? 'Click, drag, or use arrow keys / Home / End on the track to set a target.')
+    : (dial.lastChangeDetail ?? (coarse
+      ? 'Tap or drag the track to set a target.'
+      : 'Click, drag, or use arrow keys / Home / End on the track to set a target.'))
 
   // AC4 — the honesty caveat: a target is recorded on ANY phase, but the
   // engine only chases it while Escalating/Peak (mirrors Storyline.Tick's own
@@ -328,7 +338,7 @@ export function EscalationDial() {
     <DialPanel>
       <Stack
         direction="row"
-        sx={{ alignItems: 'baseline', justifyContent: 'space-between', gap: 1, mb: 0.25 }}
+        sx={{ alignItems: 'baseline', justifyContent: 'space-between', gap: 1, mb: 0.25, flexWrap: 'wrap' }}
       >
         <Typography
           component="span"
@@ -361,6 +371,17 @@ export function EscalationDial() {
             {dial.phaseLabel}
           </Typography>
         </Tooltip>
+        {/* Story 14 (no hover-only information): a coarse pointer has no hover, so the phase
+            meaning is printed, not tooltip-only. */}
+        {coarse ? (
+          <Typography
+            component="span"
+            data-testid="escalation-dial-phase-description"
+            sx={{ fontSize: 11, color: chrome.inkMuted, flexBasis: '100%' }}
+          >
+            {PHASE_DESCRIPTIONS[dial.phase]}
+          </Typography>
+        ) : null}
       </Stack>
 
       {/* Storyline title (Gate-1 W-008) — names what the dial is steering, never just numbers. */}
@@ -408,6 +429,8 @@ export function EscalationDial() {
           cursor: 'pointer',
           touchAction: 'none',
           '&:focus-visible': { outline: `2px solid ${chrome.blue}`, outlineOffset: '2px' },
+          // Story 14: a 44px-tall track under a coarse pointer (tap or drag; real layout space).
+          [CONSOLE_COARSE_MEDIA]: { height: `${CONSOLE_TOUCH_TARGET_PX}px` },
         }}
       >
         {/* Actual — a solid full-height fill (shape-distinct from the target tick, NFR-001). */}
