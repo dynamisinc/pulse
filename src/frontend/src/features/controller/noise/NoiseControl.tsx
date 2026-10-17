@@ -28,7 +28,7 @@
  * absent and the current level is shown as text instead; the rate, counts and status stay.
  */
 
-import { useId, useRef, type KeyboardEvent } from 'react'
+import { useEffect, useId, useRef, type KeyboardEvent } from 'react'
 import { Box, Stack, Typography } from '@mui/material'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import {
@@ -45,6 +45,7 @@ import { formatNoiseCounts, formatNoiseRate, noiseStatusLine } from './noiseStat
 import { NOISE_LEVEL_LABELS, NOISE_LEVELS, type NoiseLevel } from './noiseTypes'
 import { useNoiseState } from './useNoiseState'
 import { useCanControl } from '../access'
+import { CONSOLE_COARSE_MEDIA, CONSOLE_TOUCH_GAP_PX, CONSOLE_TOUCH_TARGET_PX } from '../consoleTouch'
 
 const FONT = "'Figtree', system-ui, sans-serif"
 
@@ -67,8 +68,20 @@ function levelForKey(key: string, index: number): NoiseLevel | undefined {
   }
 }
 
-export function NoiseControl() {
+export interface NoiseControlProps {
+  /**
+   * Reports the level the knob shows (undefined until the first read). The console's tablet
+   * "Steering" row uses it for its one-line collapsed summary, so the summary never runs a second
+   * noise poll of its own (mobile-tablet story 12). Optional: nothing else passes it.
+   */
+  readonly onLevelChange?: (level: NoiseLevel | undefined) => void
+}
+
+export function NoiseControl({ onLevelChange }: NoiseControlProps = {}) {
   const { state, selectedLevel, loadError, saveError, setLevel } = useNoiseState()
+  useEffect(() => {
+    onLevelChange?.(selectedLevel)
+  }, [onLevelChange, selectedLevel])
   const canControl = useCanControl()
   const { tier } = usePauseState()
   const { status: exerciseStatus } = useExerciseContext()
@@ -146,6 +159,9 @@ export function NoiseControl() {
             border: `1px solid ${chrome.line}`,
             borderRadius: '999px',
             overflow: 'hidden',
+            // Story 14: under a coarse pointer the joined segments become separate 44px pills,
+            // 8px apart, so adjacent targets never touch.
+            [CONSOLE_COARSE_MEDIA]: { gap: `${CONSOLE_TOUCH_GAP_PX}px`, border: 'none', overflow: 'visible' },
           }}
         >
           {NOISE_LEVELS.map(level => {
@@ -179,6 +195,12 @@ export function NoiseControl() {
                   '&:focus-visible': {
                     outline: `2px solid ${chrome.amber}`,
                     outlineOffset: '-2px',
+                  },
+                  [CONSOLE_COARSE_MEDIA]: {
+                    minWidth: `${CONSOLE_TOUCH_TARGET_PX}px`,
+                    minHeight: `${CONSOLE_TOUCH_TARGET_PX}px`,
+                    border: `1px solid ${chrome.line}`,
+                    borderRadius: '999px',
                   },
                 }}
               >

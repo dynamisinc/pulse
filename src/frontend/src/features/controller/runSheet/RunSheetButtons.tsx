@@ -13,6 +13,9 @@
  * tokens; the PRIMARY (cobalt fill, white text) and DELETE (red fill) variants keep
  * their COBRA colours. No new hex values.
  *
+ * TOUCH (story 14, D5-024). Every wrapper grows to 44 x 44 under `(pointer: coarse)` via
+ * `COARSE_TARGET_SX` (real layout space); the callers space them at least 8px apart.
+ *
  * ACCESSIBILITY (NFR-001). Every button is icon + visible text and carries an
  * explicit accessible name that STARTS with its visible label ("Fire Boil-water
  * advisory") so the name contains the label (WCAG 2.5.3). `title` mirrors the
@@ -30,6 +33,7 @@ import {
   CobraSecondaryButton,
 } from '@/theme/styledComponents'
 import { consoleChrome as chrome } from '../consoleChrome'
+import { COARSE_TARGET_SX } from '../consoleTouch'
 
 export type RunSheetButtonKind = 'primary' | 'secondary' | 'danger'
 
@@ -61,6 +65,8 @@ const dense = {
   fontSize: 12,
   lineHeight: 1.7,
   fontWeight: 600,
+  // Story 14: a 44 x 44 box under a coarse pointer (real layout space, no hit-slop).
+  ...COARSE_TARGET_SX,
 } as const
 
 const secondaryOnDark = {

@@ -143,6 +143,7 @@ import {
 } from '@fortawesome/free-solid-svg-icons'
 // D5 dark operator chrome: the shared token set (this file used to carry a stale local copy).
 import { consoleChrome as chrome } from '../../consoleChrome'
+import { staffFlyoutCloseButtonSx, staffFlyoutPanelSx } from '@/features/staffShell/staffFlyout'
 import { useEngineSettings } from '../hooks/useEngineSettings'
 import {
   ENGINE_USAGE_WINDOW_PRESETS_MINUTES,
@@ -814,18 +815,10 @@ export function UsagePanel({ open, onClose }: UsagePanelProps) {
       aria-label={ENGINE_USAGE_PANEL_TITLE}
       onKeyDown={handleKeyDown}
       sx={{
-        position: 'absolute',
-        top: 0,
-        right: 0,
-        bottom: 0,
-        width: PANEL_WIDTH_PX,
+        ...staffFlyoutPanelSx(PANEL_WIDTH_PX),
         bgcolor: chrome.panel,
         color: chrome.ink,
         borderLeft: `1px solid ${chrome.line}`,
-        boxShadow: '-16px 0 40px rgba(0, 0, 0, 0.14)',
-        zIndex: 30,
-        display: 'flex',
-        flexDirection: 'column',
         fontFamily: "'Figtree', system-ui, sans-serif",
       }}
     >
@@ -857,6 +850,9 @@ export function UsagePanel({ open, onClose }: UsagePanelProps) {
             cursor: 'pointer',
             p: 0.5,
             display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            ...staffFlyoutCloseButtonSx,
           }}
         >
           <FontAwesomeIcon icon={faXmark} size="sm" />

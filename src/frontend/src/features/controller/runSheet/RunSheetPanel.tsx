@@ -74,6 +74,7 @@ import { useExerciseContext } from '@/core/exerciseContext'
 import { useStaffPersonas } from '@/features/personas'
 import { consoleChrome as chrome } from '../consoleChrome'
 import { RunSheetButton } from './RunSheetButtons'
+import { COARSE_GAP_SX } from '../consoleTouch'
 import { RunSheetRow } from './RunSheetRow'
 import { InjectItemEditor, type EditorMode, type EditorSubmitResult } from './InjectItemEditor'
 import { KeyboardHelp } from './KeyboardHelp'
@@ -101,6 +102,7 @@ import {
 } from './injectRules'
 import { useInjectAssignees } from './useInjectAssignees'
 import { CREATE_LOCK, useInjectQueue, type ActionOutcome } from './useInjectQueue'
+import { usePublishPaneBadge } from '../console/paneBadges'
 import { useRunSheetFilters } from './useRunSheetFilters'
 import { useStatusAnnouncer } from './useStatusAnnouncer'
 import type { InjectItemDto, InjectItemWrite } from './types'
@@ -174,7 +176,7 @@ function Segmented<T extends string>({
       ref={groupRef}
       role="group"
       aria-label={label}
-      sx={{ display: 'inline-flex', gap: 0.5, alignItems: 'center' }}
+      sx={{ display: 'inline-flex', gap: 0.5, alignItems: 'center', ...COARSE_GAP_SX }}
     >
       {options.map(option => (
         <RunSheetButton
@@ -274,6 +276,8 @@ function RunSheetPanelBody({ exerciseId }: { readonly exerciseId: string }) {
   const statusFilterRef = useRef<HTMLDivElement>(null)
 
   const { items, pauseTier } = queue
+  // Tablet pane-switcher badge "N due" (mobile-tablet story 12): items still waiting to be fired.
+  usePublishPaneBadge('runSheet', items.filter(item => item.status === 'pending').length)
   const frozen = pauseTier === 'freeze'
   const injectsPaused = pauseTier === 'injects'
   const fireDisabledReason = frozen ? MESSAGES.worldFrozen : undefined
@@ -658,7 +662,7 @@ function RunSheetPanelBody({ exerciseId }: { readonly exerciseId: string }) {
           />
         </Box>
 
-        <Box sx={{ mt: 1, display: 'flex', flexWrap: 'wrap', gap: 1, alignItems: 'center' }}>
+        <Box sx={{ mt: 1, display: 'flex', flexWrap: 'wrap', gap: 1, alignItems: 'center', ...COARSE_GAP_SX }}>
           {canControl && <>
             <RunSheetButton
               kind="primary"
