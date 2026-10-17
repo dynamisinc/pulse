@@ -287,7 +287,12 @@ internal sealed class ReactionScenario : IAsyncDisposable
             new FakeGenerationProvider(),
             Options.Create(new GenerationOptions()),
             _services.GetRequiredService<IGenerationProviderCutRegistry>(),
-            NullLogger<EngineReviewService>.Instance);
+            NullLogger<EngineReviewService>.Instance,
+            ambientPolicy: null,
+            // These scenarios exercise the auto-send policy itself (its positive control proves swamped mode CAN
+            // auto-send), so the PROVIDER-GOVERNANCE §8 Phase-1 flag is authorised here. With it false (the
+            // committed default), swamped mode never auto-sends; EngineReviewSafetyInvariantTests pins that.
+            governance: Options.Create(new EngineAmbientGovernanceOptions { TimeoutAutoSendAuthorized = true }));
         await service.EvaluateAutoHoldAsync();
     }
 
