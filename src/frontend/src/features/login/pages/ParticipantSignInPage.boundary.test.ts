@@ -254,7 +254,8 @@ describe('ParticipantSignInPage boundary - the Today\'s-word fields in the sourc
 
   it('every input on the page has a <label htmlFor> (no placeholder-only labels)', () => {
     const ids = INPUT_ELEMENTS.map(element => /\sid="([^"]+)"/.exec(element)?.[1])
-    expect(ids.length).toBe(5)
+    // Five on every page, plus the pasted-link field of the home-screen app (#606).
+    expect(ids.length).toBe(6)
     for (const id of ids) {
       expect(id).toBeDefined()
       expect(PAGE_CODE, `label for ${String(id)}`).toContain(`htmlFor="${String(id)}"`)
@@ -423,9 +424,9 @@ describe('ParticipantSignInPage boundary - Gate-1 folds (S-1, S-3, S-4, S-6, W-1
     expect(PAGE_CODE).toMatch(/\{isSubmitting \? 'Signing in…' : ''\}/)
   })
 
-  it('S-6: all three forms are method="post"', () => {
+  it('S-6: every form (three, plus the home-screen link form, #606) is method="post"', () => {
     const forms = Array.from(PAGE_CODE.matchAll(/<form\b[\s\S]*?>/g), match => match[0])
-    expect(forms).toHaveLength(3)
+    expect(forms).toHaveLength(4)
     for (const form of forms) {
       expect(form).toContain('method="post"')
     }
