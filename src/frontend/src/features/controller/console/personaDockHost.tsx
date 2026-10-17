@@ -41,7 +41,7 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faXmark } from '@fortawesome/free-solid-svg-icons'
 import { staffShellTokens } from '@/features/staffShell/staffShellTokens'
 import { useVisualViewportInset } from '@/core/hooks/useVisualViewportInset'
-import { useIsCoarsePointer } from '@/core/hooks/usePlatformModifier'
+import { useCoarsePointer } from '../components/confirm'
 import { COARSE_TARGET_SX } from '../consoleTouch'
 import { PERSONA_DOCK_HOST_TITLE, type PersonaDockSlots } from './personaDockHost'
 
@@ -67,7 +67,7 @@ export interface PersonaDockHostProps {
  */
 export function PersonaDockHost({ open, onClose, slots }: PersonaDockHostProps) {
   // Touch only: a hardware keyboard has no on-screen one, and desktop pinch-zoom must not shift us.
-  const coarse = useIsCoarsePointer()
+  const coarse = useCoarsePointer()
   const keyboardInset = useVisualViewportInset(open && coarse)
   const closeButtonRef = useRef<HTMLButtonElement | null>(null)
   const openerRef = useRef<Element | null>(null)

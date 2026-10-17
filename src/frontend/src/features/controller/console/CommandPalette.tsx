@@ -55,7 +55,7 @@ import { hasOtherModalMounted } from '@/core/a11y/modalPriority'
 import { CobraTextField } from '@/theme/styledComponents'
 import { staffShellTokens } from '@/features/staffShell/staffShellTokens'
 import { useVisualViewportInset } from '@/core/hooks/useVisualViewportInset'
-import { useIsCoarsePointer } from '@/core/hooks/usePlatformModifier'
+import { useCoarsePointer } from '../components/confirm'
 import { COARSE_TARGET_SX } from '../consoleTouch'
 
 /** Focusable-element selector for the focus trap (visible, tabbable nodes). */
@@ -141,7 +141,7 @@ export function CommandPalette({
   // Story 14: the on-screen keyboard (touch only) must not cover the results. The backdrop pads up
   // by the covered px and the panel height cap shrinks with it: the list scrolls above the keys.
   // Touch only: a hardware keyboard has no on-screen one, and desktop pinch-zoom must not shift us.
-  const coarse = useIsCoarsePointer()
+  const coarse = useCoarsePointer()
   const keyboardInset = useVisualViewportInset(open && coarse)
   const panelRef = useRef<HTMLDivElement | null>(null)
   const searchInputRef = useRef<HTMLInputElement | null>(null)

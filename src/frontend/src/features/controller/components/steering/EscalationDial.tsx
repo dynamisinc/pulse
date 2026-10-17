@@ -108,7 +108,7 @@ import type { StorylinePhase } from '../../services/storylineMock'
 import { consoleChrome as chrome } from '../../consoleChrome'
 import { useCanControl } from '../../access'
 import { CONSOLE_COARSE_MEDIA, CONSOLE_TOUCH_TARGET_PX } from '../../consoleTouch'
-import { useIsCoarsePointer } from '@/core/hooks/usePlatformModifier'
+import { useCoarsePointer } from '../confirm'
 
 /**
  * The phases in which `Storyline.Tick` actually drives actual intensity
@@ -178,7 +178,7 @@ function DialPanel({ children }: { children: ReactNode }) {
 export function EscalationDial() {
   const canControl = useCanControl()
   const dial = useStorylineTarget()
-  const coarse = useIsCoarsePointer()
+  const coarse = useCoarsePointer()
   const trackRef = useRef<HTMLDivElement | null>(null)
   const isDraggingRef = useRef(false)
   // The in-progress drag position — LIVE visual feedback only. The telemetry-
