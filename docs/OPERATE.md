@@ -118,6 +118,13 @@ scheme (`X-Forwarded-Proto`), but **only from peers you configure**:
   the sign-in rush: higher limits give a guesser on the same network more tries, and the day word is the
   weakest credential.
 
+## Retire the PWA service worker
+
+To retire the PWA service worker: copy `src/frontend/public/sw-killswitch.js` over `src/frontend/public/sw.js`
+and deploy. Every installed client unregisters on its next visit and reloads uncached (the kill switch
+deletes all `pulse-shell-*` caches, unregisters itself and reloads open windows). Keep it deployed for at
+least 30 days so infrequent devices also pick it up.
+
 ## Rollback
 
 **Frontend (deploy-only):**
