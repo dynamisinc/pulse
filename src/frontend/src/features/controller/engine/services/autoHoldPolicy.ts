@@ -106,7 +106,8 @@ export interface TimeoutEvaluation {
  * returns the {@link DraftTimeoutResolved} event to log — mirrors
  * `AutoHoldPolicy.Evaluate`. While the countdown is still running, or when the
  * outcome is a human approve/veto (logged on the review-action path), the event is
- * null. The disposition is always returned.
+ * null. The disposition is always returned. An expiry while the engine is fully
+ * stopped (kill-switch FullStop) is the ordinary hold-on-expiry transition.
  */
 export function evaluate(
   countdown: DelayedAutoCountdown,
@@ -117,11 +118,11 @@ export function evaluate(
   const disposition = decide(countdown, effective, currentScenarioMinute, swampedMode)
 
   // Only an on-expiry, no-decision resolution is an autonomy-layer transition to
-  // log here.
+  // log here. A full stop is no exception: a countdown that expires while the
+  // engine is stopped resolves to the ordinary hold-on-expiry (decide already
+  // returns Hold), so it is never left counting down to auto-send after a restore.
   const isTimeoutTransition =
-    countdown.decision === ControllerDecision.None &&
-    !effective.generationStopped &&
-    countdown.hasExpired(currentScenarioMinute)
+    countdown.decision === ControllerDecision.None && countdown.hasExpired(currentScenarioMinute)
 
   if (!isTimeoutTransition) {
     return { disposition, viaSwampedMode: false, event: null }
