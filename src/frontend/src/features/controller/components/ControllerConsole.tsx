@@ -142,7 +142,7 @@ import { hasOtherModalMounted } from '@/core/a11y/modalPriority'
 import { useRegisterSurfaceTool, useToolstrip } from '@/features/staffShell/toolRegistry'
 import { staffShellTokens } from '@/features/staffShell/staffShellTokens'
 import { useControllerIdentity } from '../identity/controllerIdentity'
-import { useCanControl, ViewOnlyChip } from '../access'
+import { useCanControl, useCanEditContent, ViewOnlyChip } from '../access'
 import { ReadOnlyRefresh } from '../access/ReadOnlyRefresh'
 import { CommandPalette, type CommandPalettePersonaSlot } from '../console/CommandPalette'
 // The component lives in `personaDockHost.tsx`; the shared ids/types in the
@@ -363,6 +363,9 @@ export function ControllerConsole(
   const identity = useControllerIdentity()
   // Story 11 (DF-14): false for an evaluator, whose console has no write control at all.
   const canControl = useCanControl()
+  // Story 17: the persona palette / dock (persona edit, setup posting) is planner + controller;
+  // the composer inside still gates posting by build-versus-conduct, reply-as stays controller.
+  const canPersonas = useCanEditContent()
   const { exerciseId, timeZone } = useExerciseContext()
   const { isActive, toggleTool } = useToolstrip()
   // The console's root element: the reference point for "is some OTHER modal on top of
@@ -454,7 +457,7 @@ export function ControllerConsole(
   // with only the palette open, the chord still closes it.
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (!canControl) return
+      if (!canPersonas) return
       if ((event.metaKey || event.ctrlKey) && (event.key === 'k' || event.key === 'K')) {
         event.preventDefault()
         const root = rootRef.current
@@ -464,7 +467,7 @@ export function ControllerConsole(
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [toggleTool, canControl])
+  }, [toggleTool, canPersonas])
 
   // The persona-dock host opens once a persona is selected (from the palette,
   // or — at integration — from the picker). Persona content mounts into its
@@ -569,7 +572,7 @@ export function ControllerConsole(
     Parameters<ConsoleSlotContext['openComposer']>,
     void
   >(opts => {
-    if (!canControl) return
+    if (!canPersonas) return
     const requestedId = opts?.personaId ?? activePersona?.id
     const persona =
       requestedId === undefined ? undefined : findExercisePersona(personas, requestedId, exerciseId)
@@ -789,19 +792,23 @@ export function ControllerConsole(
         />
       ))}
 
-      {canControl && <PersonasTool personaCount={personaCount} />}
+      {canPersonas && <PersonasTool personaCount={personaCount} />}
       {/* A non-controller never acts, so it re-reads the pause tier and engine settings on a
           timer; a controller's console mounts (and subscribes to) none of it. */}
       {!canControl && <ReadOnlyRefresh />}
 
       <CommandPalette
-        open={canControl && paletteOpen}
+        open={canPersonas && paletteOpen}
         onClose={closePalette}
         onSelectPersona={handleSelectPersona}
         renderPersonaResults={renderPersonaResults}
       />
 
-      <PersonaDockHost open={canControl && dockPersonaOpen} onClose={closeDock} slots={dockSlots} />
+      <PersonaDockHost
+        open={canPersonas && dockPersonaOpen}
+        onClose={closeDock}
+        slots={dockSlots}
+      />
 
       <EngineSettingsPanel open={engineSettingsOpen} onClose={closeEngineSettings} />
 

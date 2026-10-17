@@ -6,11 +6,12 @@
  * harness as `readOnlyConsole.test.tsx`; the mock exercise is `live`). Every controller-only and
  * lead-only control must be absent (or disabled with words); inject authoring stays available.
  *
- * Gap recorded, not asserted as a feature: the persona palette / dock and so "Edit persona" sit
- * behind `useCanControl()` in `ControllerConsole`, so a planner does not reach them from the
- * console yet (the component-level gate for persona edit is ready).
+ * The persona palette / dock is planner + controller (`useCanEditContent`): a planner has the
+ * PERSONAS tool and "Edit persona"; reply-as and conduct posting stay controller-only; an
+ * evaluator has none of it.
  */
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -168,7 +169,6 @@ const ABSENT_FOR_PLANNER: ReadonlyArray<readonly [string, string]> = [
   ['Degraded Restore', 'engine-degraded-restore'],
   ['Review queue: Batch approve', 'batch-approve'],
   ['Review queue: Approve / Veto / Edit / Re-roll', 'card-actions'],
-  ['PERSONAS tool', 'toolstrip-tool-personas'],
 ]
 
 describe('a planner in the controller console (story 17)', () => {
@@ -202,11 +202,35 @@ describe('a planner in the controller console (story 17)', () => {
     expect(all('row-move-down').length).toBeGreaterThan(0)
   })
 
+  it('has the PERSONAS tool and, once a persona is chosen, Edit persona; no composer outside build', async () => {
+    const user = userEvent.setup()
+    await renderConsole('planner')
+    await user.click(screen.getByTestId('toolstrip-tool-personas'))
+    const palette = await screen.findByRole('dialog', { name: /command palette/i })
+    const options = within(palette).getAllByRole('option')
+    expect(options.length).toBeGreaterThan(0)
+    await user.click(options[0] as HTMLElement)
+    expect(await screen.findByTestId('persona-edit-button')).toBeEnabled()
+    // The mock exercise is live: conduct posting is controller-only, so no composer.
+    expect(screen.queryByTestId('persona-composer')).not.toBeInTheDocument()
+    expect(all('live-world-reply-as')).toHaveLength(0)
+  })
+
   it('keeps the read surfaces: run sheet, live world, review cards, Export posts', async () => {
     await renderConsole('planner')
     expect(screen.getAllByTestId('run-sheet-row')).toHaveLength(SEED.length)
     expect(screen.getAllByTestId('live-world-row').length).toBeGreaterThan(0)
     expect(screen.getAllByTestId('review-card').length).toBeGreaterThan(0)
     expect(screen.getByTestId('export-posts')).toBeEnabled()
+  })
+})
+describe('an evaluator in the controller console: no persona tool at all', () => {
+  it('has no PERSONAS tool and Ctrl+K opens nothing', async () => {
+    const user = userEvent.setup()
+    await renderConsole('evaluator')
+    expect(all('toolstrip-tool-personas')).toHaveLength(0)
+    await user.keyboard('{Control>}k{/Control}')
+    expect(screen.queryByRole('dialog', { name: /command palette/i })).not.toBeInTheDocument()
+    expect(all('persona-edit-button')).toHaveLength(0)
   })
 })
