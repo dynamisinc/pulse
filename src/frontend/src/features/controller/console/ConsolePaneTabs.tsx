@@ -26,7 +26,7 @@
  * (in `consoleLayout.ts`) name the tab and panel pair.
  */
 
-import { useRef, type KeyboardEvent } from 'react'
+import { useRef, type KeyboardEvent, type ReactNode } from 'react'
 import { Box } from '@mui/material'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faTriangleExclamation, type IconDefinition } from '@fortawesome/free-solid-svg-icons'
@@ -46,6 +46,39 @@ export interface ConsolePaneTab {
   /** True when the badge needs attention; it then also shows a warning icon. */
   readonly attention?: boolean
   readonly icon?: IconDefinition
+  /**
+   * Draws the badge instead of the default one (use {@link PaneBadge}). A tab whose count ticks
+   * (Review) uses it so only the badge re-renders, not the whole bar or frame.
+   */
+  readonly renderBadge?: () => ReactNode
+}
+
+/** A tab's text badge: a count plus its label, with a warning icon when it needs attention. */
+export function PaneBadge(
+  { id, text, attention }: { id: ConsolePaneId, text: string, attention: boolean },
+) {
+  return (
+    <Box
+      component="span"
+      data-testid={`console-pane-badge-${id}`}
+      sx={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: '5px',
+        px: '8px',
+        py: '2px',
+        fontSize: 11,
+        fontWeight: 700,
+        textDecorationLine: 'none',
+        color: attention ? staffShellTokens.accent.cadenceRed : MUTED,
+        border: `1px solid ${attention ? staffShellTokens.accent.cadenceRed : LINE}`,
+        borderRadius: '20px',
+      }}
+    >
+      {attention && <FontAwesomeIcon icon={faTriangleExclamation} aria-hidden="true" />}
+      {text}
+    </Box>
+  )
 }
 
 export interface ConsolePaneTabsProps {
@@ -131,7 +164,7 @@ export function ConsolePaneTabs({ tabs, activeId, onChange }: ConsolePaneTabsPro
               // Bold + underline mark the active tab; colour only reinforces (NFR-001).
               fontWeight: selected ? 800 : 500,
               color: selected ? NAVY : MUTED,
-              bgcolor: selected ? '#fff' : 'transparent',
+              bgcolor: selected ? staffShellTokens.toolstrip.background : 'transparent',
               border: 'none',
               borderBottom: selected ? `3px solid ${NAVY}` : '3px solid transparent',
               textDecorationLine: selected ? 'underline' : 'none',
@@ -141,28 +174,9 @@ export function ConsolePaneTabs({ tabs, activeId, onChange }: ConsolePaneTabsPro
           >
             {tab.icon !== undefined && <FontAwesomeIcon icon={tab.icon} aria-hidden="true" />}
             <span>{tab.label}</span>
-            <Box
-              component="span"
-              data-testid={`console-pane-badge-${tab.id}`}
-              sx={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '5px',
-                px: '8px',
-                py: '2px',
-                fontSize: 11,
-                fontWeight: 700,
-                textDecorationLine: 'none',
-                color: tab.attention === true ? staffShellTokens.accent.cadenceRed : MUTED,
-                border: `1px solid ${tab.attention === true ? staffShellTokens.accent.cadenceRed : LINE}`,
-                borderRadius: '20px',
-              }}
-            >
-              {tab.attention === true && (
-                <FontAwesomeIcon icon={faTriangleExclamation} aria-hidden="true" />
-              )}
-              {tab.badge}
-            </Box>
+            {tab.renderBadge !== undefined
+              ? tab.renderBadge()
+              : <PaneBadge id={tab.id} text={tab.badge} attention={tab.attention === true} />}
           </Box>
         )
       })}

@@ -187,11 +187,9 @@ export function paneGridTemplate(layout: ConsoleTabletLayout): {
 }
 
 /** What {@link useConsoleLayout} reports. */
-export interface UseConsoleLayoutResult {
-  readonly band: ConsoleBand
-  /** The tablet layout, or `null` on the desktop band (the console draws its own layout then). */
-  readonly layout: ConsoleTabletLayout | null
-}
+export type UseConsoleLayoutResult =
+  | { readonly band: 'desktop', readonly layout: null }
+  | { readonly band: ConsoleTabletBand, readonly layout: ConsoleTabletLayout }
 
 /**
  * The console's current band and layout, live with the viewport (a rotation re-renders).

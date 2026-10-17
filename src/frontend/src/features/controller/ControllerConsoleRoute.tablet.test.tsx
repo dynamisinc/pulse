@@ -40,6 +40,8 @@ import { composeAsPersonaDraftStore } from './hooks/useComposeAsPersona'
 import { resetPauseStateForTest } from './hooks/usePauseState'
 import { resetNoiseMockForTest } from './noise/noiseMock'
 import { injectMock } from './runSheet/injectMock'
+import { post, WATER } from './liveWorld/liveWorldTestKit'
+import { READ_DWELL_MS } from './liveWorld/useLiveWorldUnread'
 import { ControllerConsoleRoute } from './ControllerConsoleRoute'
 import { resetSessionRole, setSessionRole } from './lifecycle/lifecycle.sessionKit.testUtils'
 
@@ -328,6 +330,74 @@ describe('panes stay mounted', () => {
     const dock = await screen.findByTestId('persona-dock-host')
     expect(screen.getByTestId('console-command-band').contains(dock)).toBe(false)
     expect(screen.getByTestId('console-tablet-frame').contains(dock)).toBe(true)
+  })
+})
+
+// A controllable IntersectionObserver (jsdom has none): the test reports a row as in view.
+class FakeIntersectionObserver {
+  static instances: FakeIntersectionObserver[] = []
+  readonly observed = new Set<Element>()
+  private readonly callback: IntersectionObserverCallback
+  constructor(callback: IntersectionObserverCallback) {
+    this.callback = callback
+    FakeIntersectionObserver.instances.push(this)
+  }
+  observe(element: Element) { this.observed.add(element) }
+  unobserve(element: Element) { this.observed.delete(element) }
+  disconnect() { this.observed.clear() }
+  takeRecords(): IntersectionObserverEntry[] { return [] }
+  report(element: Element, ratio: number) {
+    const entry = { target: element, isIntersecting: ratio > 0, intersectionRatio: ratio }
+    this.callback(
+      [entry as unknown as IntersectionObserverEntry],
+      this as unknown as IntersectionObserver,
+    )
+  }
+}
+
+describe('a hidden Live world pane reads nothing (CR-001)', () => {
+  it('keeps counting a post while its tab is hidden, and drains it once the tab shows', async () => {
+    const user = userEvent.setup()
+    FakeIntersectionObserver.instances = []
+    vi.stubGlobal('IntersectionObserver', FakeIntersectionObserver)
+    Object.defineProperty(document, 'hasFocus', { configurable: true, value: () => true })
+    try {
+      await renderConsole('controller', 1024, 768)
+      const badge = () => Number(/^(\d+) new$/.exec(
+        screen.getByTestId('console-pane-badge-live-world').textContent ?? '',
+      )?.[1])
+      await user.click(tabNamed(/Run sheet/))
+      expect(visible('console-slot-live-world')).toBe(false)
+      const before = badge()
+
+      act(() => postStore.appendPost(post('live-while-hidden', {
+        authorPersonaId: WATER,
+        text: 'Arrives while nobody is looking',
+        scenarioTime: '2033-09-04T23:30:00.000Z',
+      })))
+      await waitFor(() => expect(badge()).toBe(before + 1))
+      const row = screen.getAllByTestId('live-world-row')
+        .find(element => element.dataset.postId === 'live-while-hidden')
+      if (row === undefined) throw new Error('the arrival has no row')
+      const io = FakeIntersectionObserver.instances.at(-1)
+      if (io === undefined) throw new Error('no IntersectionObserver')
+
+      // The hidden pane keeps its box, so the observer reports the row as in view.
+      vi.useFakeTimers()
+      try {
+        act(() => io.report(row, 1))
+        act(() => { vi.advanceTimersByTime(READ_DWELL_MS + 100) })
+      } finally {
+        vi.useRealTimers()
+      }
+      expect(badge()).toBe(before + 1)
+
+      // Showing the pane starts the dwell for the rows already in view: they drain.
+      await user.click(tabNamed(/Live world/))
+      await waitFor(() => expect(badge()).toBe(before), { timeout: 4000 })
+    } finally {
+      delete (document as unknown as Record<string, unknown>).hasFocus
+    }
   })
 })
 

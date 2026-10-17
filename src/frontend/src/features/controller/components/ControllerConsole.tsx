@@ -125,8 +125,10 @@
  * `console/ConsoleTabletFrame` instead (a command band, a "Steering" disclosure, a "More" menu
  * and a pane grid whose arrangement comes from the ONE table in `console/consoleLayout.ts`).
  * This file only chooses which work area to draw: the slot contexts, the dock state, the
- * ⌘K palette and its key listener, the flyouts and the draft drivers are shared by both, so a
- * rotation never resets them. The shortcut strip is drawn by both, unchanged (story 14 owns it).
+ * ⌘K palette and its key listener, the flyouts and the draft drivers are shared by both. A
+ * rotation WITHIN the tablet bands never resets them. Crossing 1280 (an iPad Pro 1366 rotating to
+ * 1024) swaps the work area, so panes and flyouts REMOUNT then: a known limit (story 12 doc).
+ * The shortcut strip is drawn by both, unchanged (story 14 owns it).
  *
  * World: staff (COBRA/Cadence) — everything here is COBRA chrome; the
  * participant OUTPUT (a published post) is `persona-operation`'s / the engine
@@ -607,7 +609,8 @@ export function ControllerConsole(
   const slotsTwoColumn = slotsSplit && Boolean(liveWorldSlot) && Boolean(runSheetSlot)
 
   // Tablet bands (story 12): under 1280px the tablet frame replaces the desktop work area.
-  const { band, layout: tabletLayout } = useConsoleLayout()
+  const consoleLayout = useConsoleLayout()
+  const tabletLayout = consoleLayout.layout
   const paneBadges = usePaneBadgeStore()
 
   // The ⌘K shortcut strip (story 14 owns its behaviour). Drawn by both work areas.
@@ -644,8 +647,10 @@ export function ControllerConsole(
     </>
   )
 
+  // Only a tablet reads the badge counts: on desktop no publisher exists, so a burst of unread
+  // changes never re-renders the console. A band crossing republishes (the panes' effects re-run).
   return (
-    <PaneBadgeContext.Provider value={paneBadges.publish}>
+    <PaneBadgeContext.Provider value={tabletLayout !== null ? paneBadges.publish : null}>
       <Box
         ref={rootRef}
         data-testid="controller-console"
@@ -657,10 +662,10 @@ export function ControllerConsole(
         // anchored to the work area's edges — mirrors the evaluator dashboard page.
         sx={{ position: 'relative', height: '100%', overflow: 'hidden', outline: 'none' }}
       >
-        {tabletLayout !== null ? (
+        {consoleLayout.layout !== null ? (
           <ConsoleTabletFrame
-            band={band as Exclude<typeof band, 'desktop'>}
-            layout={tabletLayout}
+            band={consoleLayout.band}
+            layout={consoleLayout.layout}
             hasLiveWorld={Boolean(liveWorldSlot)}
             hasRunSheet={Boolean(runSheetSlot)}
             liveWorld={liveWorld}

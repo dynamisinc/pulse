@@ -110,6 +110,9 @@ From top to bottom, left to right:
 | **REVIEW QUEUE** (far right) | Drafts from the AI engine waiting for your decision |
 | **Toolstrip** (right edge) | **PERSONAS** (opens the persona search), **ENGINE** (engine settings), **USAGE** (AI usage), **ADMIN** (participant login triage) |
 
+**Evaluators** can open the same console in a read-only form. They see a **View only** chip, and every control that
+changes the exercise is absent. They can still export posts and open the exercise report.
+
 ## 3. Before StartEx, starting and ending
 
 ### Pre-flight checklist
@@ -766,16 +769,14 @@ shape, and what you can do stays the same.
   Live world and Run sheet sit side by side; at 1024 they share one pane with two tabs. In portrait the tabs are
   **Live world**, **Run sheet** and **Review**, or, on a tall screen, the Review queue is docked below them.
 - **Tab badges.** Each tab says in words what needs you: "12 new" on Live world, "3 due" on Run sheet, and
-  "5 · 1 under 60s" on Review (items waiting, and how many timers are about to run out). Switching tabs or rotating the
-  tablet keeps your place, a half-typed edit and an open persona panel.
+  "5 · 1 under 60s" on Review (items waiting, and how many timers are about to run out). Switching tabs or rotating between the
+  tablet layouts keeps your place, a half-typed edit and an open persona panel. (Growing the window past 1280 pixels
+  switches to the desktop layout and starts the panes fresh.)
 - **Steering.** The escalation dial and the White noise control sit behind a **STEERING** row that starts closed. It
   shows the current storyline target and noise level in a line; tap it to open the controls.
 - **More.** **Export posts** and **Exercise report** are under the **...** button in the title row.
 
 An evaluator or planner sees the same read-only console on a tablet as on a desktop.
-
-**Evaluators** can open the same console in a read-only form. They see a **View only** chip, and every control that
-changes the exercise is absent. They can still export posts and open the exercise report.
 
 ## 13. Quick reference
 

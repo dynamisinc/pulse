@@ -32,6 +32,9 @@
  * tab list, so a tab that stops existing (Review leaves the tab bar in landscape) is not
  * forgotten: it is back when the band returns.
  *
+ * A pane that is not showing also tells its content (`PaneShowingContext`): the Live world marks
+ * nothing read while its tab is hidden, since nobody is looking at it.
+ *
  * ## Badges (TABLET-AMENDMENT section 6)
  * Live world "N new" and Run sheet "N due" are published by the panes through `paneBadges`;
  * Review is "N · M under 60s" from `useReviewQueue`, the same single count source as the engine
@@ -41,7 +44,7 @@
  * themselves, so an evaluator or planner sees on a tablet what they see on desktop.
  */
 
-import { useState, type ReactNode } from 'react'
+import { useLayoutEffect, useState, type ReactNode } from 'react'
 import { Box, Typography } from '@mui/material'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faTowerBroadcast } from '@fortawesome/free-solid-svg-icons'
@@ -59,10 +62,22 @@ import {
   type ConsoleTabletBand,
   type ConsoleTabletLayout,
 } from './consoleLayout'
-import { ConsolePaneTabs, type ConsolePaneTab } from './ConsolePaneTabs'
+import { ConsolePaneTabs, PaneBadge, type ConsolePaneTab } from './ConsolePaneTabs'
 import { ConsoleMoreMenu } from './ConsoleMoreMenu'
 import { ConsoleSteeringDisclosure } from './ConsoleSteeringDisclosure'
-import type { PaneBadgeCounts } from './paneBadges'
+import { PaneShowingContext, type PaneBadgeCounts } from './paneBadges'
+
+/** The Review tab's badge, "N · M under 60s": the one place the frame reads the ticking queue. */
+function ReviewTabBadge() {
+  const { pendingCount, timersUnder60sCount } = useReviewQueue()
+  return (
+    <PaneBadge
+      id="review"
+      text={`${pendingCount} · ${timersUnder60sCount} under 60s`}
+      attention={timersUnder60sCount > 0}
+    />
+  )
+}
 
 /** Smallest height the pane grid is given before the body scrolls instead of squeezing it. */
 const PANE_GRID_MIN_HEIGHT_PX = 280
@@ -110,7 +125,6 @@ export function ConsoleTabletFrame({
   shortcutStrip,
   flyouts,
 }: ConsoleTabletFrameProps) {
-  const { pendingCount, timersUnder60sCount } = useReviewQueue()
   const [selectedPane, setSelectedPane] = useState<ConsolePaneId>('live-world')
 
   const tabIds = tabbedPanes(layout, { liveWorld: hasLiveWorld, runSheet: hasRunSheet })
@@ -131,14 +145,35 @@ export function ConsoleTabletFrame({
         return {
           id,
           label: TAB_LABELS[id],
-          badge: `${pendingCount} · ${timersUnder60sCount} under 60s`,
-          attention: timersUnder60sCount > 0,
+          badge: '',
+          // Its own component: the review queue ticks every second, and only this re-renders.
+          renderBadge: () => <ReviewTabBadge />,
         }
     }
   })
 
-  const grid = paneGridTemplate(layout)
   const split = layout.main === 'split'
+  // Which panes a person can see right now (hidden panes stay mounted; see the module header).
+  const liveShowing = split || activePane === 'live-world'
+  const runShowing = split || activePane === 'run-sheet'
+  const reviewShowing = !isTab('review') || activePane === 'review'
+
+  // A band change can hide the pane that holds the keyboard focus (a rotation moves Review into,
+  // or Run sheet out of, the tab set). Select that pane's tab so focus is never left in a hidden
+  // pane. Runs on a band change only.
+  useLayoutEffect(() => {
+    const focused = document.activeElement
+    if (focused === null || focused === document.body) return
+    for (const pane of tabIds) {
+      if (document.getElementById(consolePanePanelId(pane))?.contains(focused)) {
+        setSelectedPane(pane)
+        return
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- band changes only
+  }, [band])
+
+  const grid = paneGridTemplate(layout)
   const noSlots = !hasLiveWorld && !hasRunSheet
 
   /** Common sx for a pane: its grid area, and hidden-but-mounted when it is not showing. */
@@ -268,9 +303,11 @@ export function ConsoleTabletFrame({
                 id={consolePanePanelId('live-world')}
                 data-testid="console-slot-live-world"
                 {...paneAria('live-world', 'Live world')}
-                sx={paneSx(split ? 'live' : 'main', split || activePane === 'live-world')}
+                sx={paneSx(split ? 'live' : 'main', liveShowing)}
               >
-                {liveWorld}
+                <PaneShowingContext.Provider value={liveShowing}>
+                  {liveWorld}
+                </PaneShowingContext.Provider>
               </Box>
             )}
             {hasRunSheet && (
@@ -279,22 +316,25 @@ export function ConsoleTabletFrame({
                 id={consolePanePanelId('run-sheet')}
                 data-testid="console-slot-run-sheet"
                 {...paneAria('run-sheet', 'Run sheet')}
-                sx={paneSx(split ? 'run' : 'main', split || activePane === 'run-sheet')}
+                sx={paneSx(split ? 'run' : 'main', runShowing)}
               >
-                {runSheet}
+                <PaneShowingContext.Provider value={runShowing}>
+                  {runSheet}
+                </PaneShowingContext.Provider>
               </Box>
             )}
 
             <Box
+              component="section"
               id={consolePanePanelId('review')}
               data-testid="review-queue-column"
               {...(isTab('review')
                 ? { role: 'tabpanel', 'aria-labelledby': consolePaneTabId('review') }
-                : {})}
+                : { 'aria-label': 'Review queue' })}
               sx={{
                 ...paneSx(
                   layout.review === 'tab' ? 'main' : 'review',
-                  !isTab('review') || activePane === 'review',
+                  reviewShowing,
                 ),
                 overflow: 'hidden',
               }}

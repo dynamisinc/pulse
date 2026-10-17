@@ -61,7 +61,7 @@ export function ConsoleSteeringDisclosure() {
           fontFamily: 'inherit',
           fontSize: 12,
           color: NAVY,
-          bgcolor: '#fff',
+          bgcolor: staffShellTokens.toolstrip.background,
           border: `1px solid ${staffShellTokens.toolstrip.borderColor}`,
           borderRadius: '4px',
           '&:focus-visible': { outline: `2px solid ${NAVY}`, outlineOffset: '2px' },

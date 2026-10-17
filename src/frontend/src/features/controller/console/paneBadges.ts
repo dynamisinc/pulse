@@ -1,5 +1,5 @@
 /**
- * features/controller/console/paneBadges.tsx
+ * features/controller/console/paneBadges.ts
  * ---------------------------------------------------------------------------
  * The seam that carries the Live world "N new" and Run sheet "N due" counts from the two panes
  * up to the console's pane-switcher tabs (feature: mobile-tablet, story 12; TABLET-AMENDMENT
@@ -57,4 +57,16 @@ export function usePublishPaneBadge(pane: BadgePane, count: number): void {
     publish?.(pane, count)
   }, [publish, pane, count])
   useEffect(() => () => publish?.(pane, null), [publish, pane])
+}
+
+/**
+ * Whether a pane is the one being SHOWN (default true: desktop and standalone panes always are).
+ * The tablet frame provides false for a pane whose tab is not selected. Hidden panes stay mounted
+ * and keep their box, so an IntersectionObserver still reports their rows as visible; anything
+ * that must only happen while a person can see the pane (marking posts read) reads this.
+ */
+export const PaneShowingContext = createContext(true)
+
+export function usePaneShowing(): boolean {
+  return useContext(PaneShowingContext)
 }
