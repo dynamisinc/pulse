@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Pulse.WebApi.Features.Identity.Sessions;
+using Pulse.WebApi.Features.Identity.RateLimits;
 
 /// <summary>
 /// The account slice HTTP surface + composition-root seams (story 02, COR-011): the participant credential login
@@ -60,6 +61,7 @@ public static class AccountEndpoints
         // Per-IP fixed-window limiter on the internet-facing participant login (NFR-009). Enforcement needs
         // app.UseRateLimiter() (orchestrator-owned, already wired for the staff/session policies). AddRateLimiter
         // is additive across features — this only adds a new named policy to the shared limiter.
+        AuthRateLimitsStartupCheck.Register(services);
         services.AddRateLimiter(options =>
         {
             options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
@@ -68,7 +70,9 @@ public static class AccountEndpoints
                     partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
                     factory: _ => new FixedWindowRateLimiterOptions
                     {
-                        PermitLimit = 10,
+                        // Configurable (Authentication:RateLimits:ParticipantLoginPerMinute); default 10 — see AuthRateLimits.
+                        PermitLimit = AuthRateLimits.ParticipantLoginPerMinute(
+                            httpContext.RequestServices.GetRequiredService<IConfiguration>()),
                         Window = TimeSpan.FromMinutes(1),
                         QueueLimit = 0,
                     }));

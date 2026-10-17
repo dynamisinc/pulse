@@ -19,8 +19,8 @@ using Pulse.WebApi.Features.Identity.EasyLogin;
 /// <c>Authentication__EasyLogin__JoinPermitPerMinute</c>, no deploy.
 /// </para>
 /// <para>
-/// <b>Known limitation (C-1, post-demo #480).</b> Partitioned on <c>Connection.RemoteIpAddress</c>, which behind the App
-/// Service proxy is the proxy's address until forwarded-headers handling lands, the same as every other per-IP policy.
+/// <b>Partitioning.</b> On <c>Connection.RemoteIpAddress</c>, which is the real client's public IP since the trusted-proxy
+/// forwarded-headers handling (identity-auth-roles/18, #480). Clients behind one NAT still share a bucket.
 /// </para>
 /// </remarks>
 public sealed class JoinRateLimiterPolicy : IRateLimiterPolicy<string>
