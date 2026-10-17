@@ -90,6 +90,9 @@ param generationTenantBounded bool = false
 @description('Generation:Governance:NoTrainingAttested — attests customer prompts/completions are not used to train the model (Microsoft product terms for Azure OpenAI; the Anthropic Marketplace offer for Claude). False by default (fail closed).')
 param generationNoTrainingAttested bool = false
 
+@description('Generation:Governance:AmbientAutonomyAuthorized (ambient-chatter story 01, AC0) — whether ANY exercise may select ambient \'autonomous\' mode (engine posts that publish with no controller click). False by default: PROVIDER-GOVERNANCE.md §8 does not authorise it until a second signed amendment; while false the settings API rejects \'autonomous\' with 400.')
+param generationAmbientAutonomyAuthorized bool = false
+
 @description('Generation:Governance:Retention — the attestable retention posture. Retained is today\'s posture (standard retention under the no-training contract); switch to ZeroDataRetention only once the per-subscription abuse-monitoring/ZDR approval lands (PROVIDER-GOVERNANCE.md §2). Never left Unspecified.')
 @allowed(['Retained', 'ZeroDataRetention'])
 param generationRetention string = 'Retained'
@@ -188,6 +191,11 @@ var generationSettings = [
   {
     name: 'Generation__Governance__Retention'
     value: generationRetention
+  }
+  // ambient-chatter story 01 (AC0): the governed autonomy flag. Same lowercase-literal rule as the attestations above.
+  {
+    name: 'Generation__Governance__AmbientAutonomyAuthorized'
+    value: generationAmbientAutonomyAuthorized ? 'true' : 'false'
   }
 ]
 

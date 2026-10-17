@@ -85,6 +85,7 @@ public sealed partial class EngineReviewService
     private readonly GenerationOptions _generationOptions;
     private readonly IGenerationProviderCutRegistry _providerCut;
     private readonly ILogger<EngineReviewService> _logger;
+    private readonly EngineAmbientPolicyRegistry _ambientPolicy;
 
     /// <summary>Creates the review service over its persistence, scope, clock, telemetry, publish, push, and autonomy collaborators.</summary>
     /// <param name="store">The seam-freeze review-item persistence store (reads + lookup).</param>
@@ -100,6 +101,11 @@ public sealed partial class EngineReviewService
     /// <param name="generationOptions">The governed <c>Generation</c> configuration — read-only here (never mutated, NFR-005).</param>
     /// <param name="providerCut">The per-exercise generation-provider cut state (story 07) — the SAME singleton the loop's selector reads.</param>
     /// <param name="logger">Diagnostics for the loud (non-fatal) engine-settings audit-persist failure path.</param>
+    /// <param name="ambientPolicy">
+    /// The per-exercise ambient-chatter policy registry (ambient-chatter story 01), the SAME singleton the reaction
+    /// loop reads. Optional so existing direct constructions keep compiling; when absent a private, empty registry is
+    /// used, which reads every exercise as <c>off</c> with autonomy unauthorised (the fail-safe direction).
+    /// </param>
     public EngineReviewService(
         IEngineReviewStore store,
         PulseDbContext dbContext,
@@ -113,7 +119,8 @@ public sealed partial class EngineReviewService
         IGenerationProvider generationProvider,
         IOptions<GenerationOptions> generationOptions,
         IGenerationProviderCutRegistry providerCut,
-        ILogger<EngineReviewService> logger)
+        ILogger<EngineReviewService> logger,
+        EngineAmbientPolicyRegistry? ambientPolicy = null)
     {
         ArgumentNullException.ThrowIfNull(store);
         ArgumentNullException.ThrowIfNull(dbContext);
@@ -142,6 +149,7 @@ public sealed partial class EngineReviewService
         _generationOptions = generationOptions.Value;
         _providerCut = providerCut;
         _logger = logger;
+        _ambientPolicy = ambientPolicy ?? new EngineAmbientPolicyRegistry();
     }
 
     // ---- Queue read -----------------------------------------------------------------------------
@@ -420,6 +428,11 @@ public sealed partial class EngineReviewService
 
         var state = _autonomy.GetOrCreate(exerciseId);
         state.EngageKillSwitch(mode, input.ActingHumanId, _clock.CurrentScenarioMinute(exerciseId));
+
+        // Ambient-chatter 01 (AC6): either kill-switch mode LOWERS autonomous ambient posting to off, so a later
+        // restore can never re-raise it; only a controller re-selecting the mode does.
+        await DemoteAutonomousAmbientAsync(exerciseId, input, cancellationToken);
+
         return EngineAutonomyResult.Ok(EngineAutonomyStateDto.From(state));
     }
 
@@ -672,6 +685,10 @@ public sealed partial class EngineReviewService
                     input, cancellationToken);
             }
         }
+
+        // Ambient-chatter 01 (AC6): the cut to Fake is a safety lever, so it lowers autonomous ambient posting to off
+        // whether or not the configured provider was already Fake (the controller pulled the brake either way).
+        await DemoteAutonomousAmbientAsync(exerciseId, input, cancellationToken);
 
         return EngineSettingsResult.Ok(BuildSettings(exerciseId));
     }
@@ -1095,7 +1112,8 @@ public sealed partial class EngineReviewService
         _providerCut.IsCutToFake(exerciseId),
         _generationOptions,
         EngineAutonomyStateDto.From(_autonomy.GetOrCreate(exerciseId)),
-        _tierPolicy.GetMode(exerciseId));
+        _tierPolicy.GetMode(exerciseId),
+        _ambientPolicy.Snapshot(exerciseId));
 
     /// <summary>
     /// Whether <paramref name="mode"/> would force a tier this deployment has NOT bound to a deployment name —
@@ -1376,6 +1394,8 @@ public sealed partial class EngineReviewService
             })
             .ToList();
 
+        // S-1: an approved ambient draft is still ambient chatter — tag it so the AAR can tell it apart.
+        var ambient = IsAmbientDraft(item);
         return new EngineBurst
         {
             ExerciseId = exerciseId,
@@ -1383,6 +1403,8 @@ public sealed partial class EngineReviewService
             DraftId = item.DraftId,
             TimeZone = timeZone,
             Posts = posts,
+            Trigger = ambient ? EngineEventPayloads.AmbientFloorTrigger : null,
+            PublishPath = ambient ? EngineEventPayloads.PublishPathAmbientReviewed : null,
         };
     }
 

@@ -94,6 +94,12 @@ param generationProviderLive = true
 param generationTenantBounded = true
 param generationNoTrainingAttested = true
 
+// ⚠ Autonomous ambient chatter (ambient-chatter story 01, AC0) — App Service setting
+// Generation__Governance__AmbientAutonomyAuthorized. When false, the engine settings POST rejects ambient mode
+// `autonomous` with a 400 (review mode still works). Stated explicitly rather than left to the main.bicep default.
+// NOT authorized until PROVIDER-GOVERNANCE §8 amendment 2 is signed; the signer flips this in that same commit.
+param generationAmbientAutonomyAuthorized = false
+
 // Flip to true (with deployAi) to also deploy the Claude-on-Foundry tiers for the E8 provider
 // comparison. Requires a Claude-eligible subscription; the Anthropic Marketplace offer is auto-accepted
 // from the attestation below. Set the org name to the real entity using the model.
