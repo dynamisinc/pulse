@@ -72,6 +72,13 @@ public sealed class RoleMatrixHost : WebApplicationFactory<Program>
     /// <inheritdoc />
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
+        ArgumentNullException.ThrowIfNull(builder);
+
+        // identity-auth-roles/17: the ambient-policy lead gate is only reachable for an AUTONOMOUS request, which the
+        // governed flag otherwise rejects 400 for every caller before the gate. Authorising it here lets the matrix and
+        // the lead-gate suite prove the raise is lead-only (403 for a non-lead, allowed for the lead).
+        builder.UseSetting("Generation:Governance:AmbientAutonomyAuthorized", "true");
+
         builder.ConfigureTestServices(services =>
         {
             services.AddEnrollments();

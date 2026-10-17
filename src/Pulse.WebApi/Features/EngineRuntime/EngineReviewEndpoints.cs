@@ -13,6 +13,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Pulse.Core.Features.Autonomy.Models;
 using Pulse.Core.Features.Generation.Services;
 using Pulse.WebApi.Features.EngineRuntime.Usage;
+using Pulse.WebApi.Features.Identity.RoleMatrix;
 using Pulse.WebApi.Features.Identity.Staff;
 
 /// <summary>
@@ -146,11 +147,13 @@ public static class EngineReviewEndpoints
             .AddEndpointFilter(LeadControllerRaiseFilter.TierPolicy);
 
         // ambient-chatter story 01 (AC2) — on the SAME controller-role steering group as every other engine mutation.
+        // identity-auth-roles/17 (Option A): raising ambient toward unreviewed output (AmbientPolicyRaise.IsRaise) is
+        // lead-only; lowering it to off/review is open to any controller. Deliberately NOT a LeadControllerRaiseFilter:
+        // the handler passes the caller's live lead flag (ExerciseCallerRole.IsLead) into
+        // EngineReviewService.SetAmbientPolicyAsync, which judges the raise INSIDE its compare-and-set loop against the
+        // snapshot TrySet compares with (WR-5) — so a concurrent change between check and write cannot slip a raise
+        // through. A non-lead raise is 403 with nothing mutated.
         steering.MapPost("/api/engine/settings/ambient-policy", SetAmbientPolicyAsync);
-            // TODO(A1c): raising ambient toward unreviewed output (AmbientPolicyRaise.IsRaise) is lead-only; lowering it to
-            // off/review stays open to any controller. WR-5: the raise check MUST run inside the compare-and-set loop in
-            // EngineReviewService.SetAmbientPolicyAsync (IsRaise(snapshot, request) then TrySet(snapshot, next), re-read
-            // and retry on mismatch). An endpoint filter here alone would be a TOCTOU against a concurrent write.
 
         // autonomy-safety story 07 (ADP-042) — the runtime EGRESS lever. Two routes, on the same controller-role
         // steering group as every other engine mutation. Deliberately a BINARY pair and not one route taking a
@@ -419,8 +422,10 @@ public static class EngineReviewEndpoints
     /// </summary>
     /// <remarks>
     /// The policy is attributed to the AUTHENTICATED staff user from the verified session token
-    /// (<see cref="ICurrentStaffSessionAccessor"/>), never to the body's client-supplied <c>actingHumanId</c>
-    /// (orchestrator review W-2). No resolvable staff session fails closed with 401.
+    /// (<see cref="ExerciseCallerRole.PersonId"/>), never to the body's client-supplied <c>actingHumanId</c>
+    /// (orchestrator review W-2). No resolvable staff session fails closed with 401. A RAISE toward unreviewed output
+    /// needs the lead controller (identity-auth-roles/17): the caller's live <see cref="ExerciseCallerRole.IsLead"/> is
+    /// passed to the service, which judges the raise inside its compare-and-set loop (WR-5); a non-lead raise is 403.
     /// </remarks>
     private static async Task<IResult> SetAmbientPolicyAsync(
         EngineAmbientPolicyRequest? request,
@@ -433,15 +438,13 @@ public static class EngineReviewEndpoints
             return Results.BadRequest("A JSON ambient-policy body is required.");
         }
 
-        var staff = httpContext.RequestServices.GetService<ICurrentStaffSessionAccessor>() is { } accessor
-            ? await accessor.GetCurrentStaffSessionAsync(cancellationToken)
-            : null;
-        if (staff is null)
+        var caller = await ExerciseCallerRole.ResolveAsync(httpContext);
+        if (caller.Outcome == ExerciseCallerOutcome.NoStaffSession || caller.PersonId == Guid.Empty)
         {
             return Results.Unauthorized();
         }
 
-        var result = await service.SetAmbientPolicyAsync(request, staff.StaffUserId, cancellationToken);
+        var result = await service.SetAmbientPolicyAsync(request, caller.PersonId, caller.IsLead, cancellationToken);
         return MapSettings(result);
     }
 
@@ -492,6 +495,7 @@ public static class EngineReviewEndpoints
         EngineReviewOutcome.Ok => Results.Ok(result.Settings),
         EngineReviewOutcome.ScopeUnresolved => Results.Unauthorized(),
         EngineReviewOutcome.Invalid => Results.BadRequest(result.ValidationError),
+        EngineReviewOutcome.Forbidden => Results.StatusCode(StatusCodes.Status403Forbidden),
         _ => Results.StatusCode(StatusCodes.Status500InternalServerError),
     };
 

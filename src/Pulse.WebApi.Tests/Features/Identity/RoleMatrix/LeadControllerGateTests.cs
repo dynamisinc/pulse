@@ -7,6 +7,7 @@ using System.Net.Http.Json;
 using System.Threading.Tasks;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
+using Pulse.Core.Features.Ambient.Models;
 using Pulse.Core.Features.Autonomy.Models;
 using Pulse.WebApi.Features.EngineRuntime;
 using Pulse.WebApi.Tests.Data;
@@ -44,6 +45,8 @@ public sealed class LeadControllerGateTests
     [InlineData("kill-switch", Direction.Lower)]
     [InlineData("provider-restore", Direction.Raise)]
     [InlineData("cut-to-fake", Direction.Lower)]
+    [InlineData("ambient-policy", Direction.Raise)]
+    [InlineData("ambient-policy", Direction.Lower)]
     public async Task RaiseNeedsTheLead_LowerIsAnyController_PlannerAndEvaluatorNeither(string control, Direction direction)
     {
         var world = await RoleMatrixWorld.SeedAsync(_fixture);
@@ -127,6 +130,25 @@ public sealed class LeadControllerGateTests
                 return ("/api/engine/generation-provider/restore", $"{{{Acting}}}");
             case "cut-to-fake":
                 return ("/api/engine/generation-provider/cut-to-fake", $"{{{Acting}}}");
+            case "ambient-policy":
+                // Raise: off -> autonomous. Lower: autonomous -> review (any controller). Judged in the service's
+                // compare-and-set loop against the live policy, which is reset here before every role's request.
+                host.Services.GetRequiredService<EngineAmbientPolicyRegistry>().Set(
+                    exerciseId,
+                    raise
+                        ? AmbientTierPolicy.Off
+                        : new AmbientTierPolicy
+                        {
+                            Mode = AmbientPolicyMode.Autonomous,
+                            MaxPerMinute = 1,
+                            MaxPerHour = 1,
+                            TopicAllowList = [],
+                            PersonaAllowList = [],
+                            SetBy = "arrange",
+                        });
+                return (
+                    "/api/engine/settings/ambient-policy",
+                    $"{{\"mode\":\"{(raise ? "autonomous" : "review")}\",\"maxPerMinute\":1,\"maxPerHour\":1,{Acting}}}");
             default:
                 throw new ArgumentOutOfRangeException(nameof(control));
         }

@@ -55,6 +55,16 @@ public sealed partial class EngineReviewService
     /// not trusted for attribution. No resolved staff user fails closed (401), like the route's staff filter.
     /// </para>
     /// <para>
+    /// <b>Lead-only raise (identity-auth-roles/17, ADMIN-IDENTITY-MODEL §12 Option A).</b> A request that RAISES the
+    /// policy toward unreviewed output (<see cref="AmbientPolicyRaise.IsRaise"/>) needs the lead controller; lowering it
+    /// is open to any controller. The raise is judged INSIDE the compare-and-set loop against the very snapshot the
+    /// <see cref="EngineAmbientPolicyRegistry.TrySet"/> then compares against (WR-5), so a concurrent change (e.g. a
+    /// kill-switch demotion to off) between the check and the write misses the swap, the loop re-reads, and the
+    /// re-judged raise is refused — never a raise approved against a stale "not a raise" read. A non-lead raise is
+    /// <see cref="EngineReviewOutcome.Forbidden"/> (403) with NOTHING mutated and no audit event. The raise check runs
+    /// before the safety-lever check of the same attempt, so an unauthorised raise is a 403 whatever the levers say.
+    /// </para>
+    /// <para>
     /// <b>Eligible personas (W-4).</b> Each allow-listed persona must be of an ambient-eligible type
     /// (<see cref="AmbientPolicyValidator.EligiblePersonaTypes"/>): its engine type when it is in the loop's cast,
     /// otherwise its stored archetype (<c>citizen</c> is the only one that maps to an eligible type, Resident). A 400
@@ -63,11 +73,16 @@ public sealed partial class EngineReviewService
     /// </remarks>
     /// <param name="request">The requested policy.</param>
     /// <param name="authenticatedStaffUserId">The verified session's <c>StaffUser.Id</c>, or <c>null</c> when none resolved.</param>
+    /// <param name="callerIsLead">
+    /// Whether the session's person is the exercise's LEAD controller, read live by the endpoint
+    /// (<c>ExerciseCallerRole.IsLead</c>, identity-auth-roles/17). A raise by a non-lead is refused 403 (see remarks).
+    /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>The resulting settings snapshot, or a fail-closed/invalid outcome.</returns>
+    /// <returns>The resulting settings snapshot, or a fail-closed/invalid/forbidden outcome.</returns>
     public async Task<EngineSettingsResult> SetAmbientPolicyAsync(
         EngineAmbientPolicyRequest request,
         Guid? authenticatedStaffUserId,
+        bool callerIsLead,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -138,14 +153,21 @@ public sealed partial class EngineReviewService
         // THAT snapshot; a demotion or another writer landing in between fails the swap, and the loop re-reads and
         // re-checks (bounded). The persona/validation checks above do not depend on the snapshot, so they run once.
         //
-        // A1c (Session A): the lead-only raise gate MUST live INSIDE this loop — call
-        // AmbientPolicyRaise.IsRaise(snapshot, request) on the snapshot just read, then TrySet(snapshot, next), and on a
-        // mismatch re-read and retry — so the raise check and the write are atomic. A pre-Set endpoint filter alone is a
-        // TOCTOU: the policy can change between the filter's read and this write.
+        // identity-auth-roles/17 (A1c): the lead-only raise gate lives INSIDE this loop, judged against the snapshot just
+        // read — the same instance TrySet compares against — so the check and the write are atomic. A pre-Set endpoint
+        // filter would be a TOCTOU: the policy could change between the filter's read and this write.
         AmbientTierPolicy? from = null;
         for (var attempt = 0; attempt < AmbientPolicyCasAttempts && from is null; attempt++)
         {
             var snapshot = _ambientPolicy.Get(exerciseId);
+
+            // Raising toward unreviewed output is lead-only; lowering is any controller. Re-judged on every attempt, so a
+            // swap that missed because the policy was lowered underneath it (e.g. a kill-switch demotion) is refused here
+            // on the re-read rather than written as the raise it has become.
+            if (!callerIsLead && AmbientPolicyRaise.IsRaise(snapshot, request))
+            {
+                return EngineSettingsResult.Forbidden();
+            }
 
             // Gate-1 L-1: autonomous cannot be (re-)selected while a safety lever is holding the engine — the kill switch
             // in either mode (SafetyClampActive also covers a degraded clamp) or the cut to Fake. Re-evaluated on every

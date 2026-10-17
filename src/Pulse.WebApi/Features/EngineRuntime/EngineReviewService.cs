@@ -1481,6 +1481,9 @@ public enum EngineReviewOutcome
 
     /// <summary>The publish funnel did not fully reach the feed (a post came back Invalid/ScopeUnresolved); the item is left actionable and NOT marked Published (WR-002/SG-001) — mapped to a non-2xx (502).</summary>
     PublishFailed,
+
+    /// <summary>The caller may not make this change — e.g. a non-lead controller raising the ambient policy (403, identity-auth-roles/17).</summary>
+    Forbidden,
 }
 
 /// <summary>The result of a queue read.</summary>

@@ -305,6 +305,167 @@ public sealed class EngineAmbientPolicyServiceTests
         (await harness.EventsAsync(exerciseId)).Single().Actor.ActingHumanId.Should().Be(harness.StaffUserId.ToString());
     }
 
+    // ---- identity-auth-roles/17 (Option A): raising ambient is LEAD-only, lowering is any controller ----
+
+    public enum RaiseCase
+    {
+        OffToAutonomous,
+        ReviewToAutonomous,
+        HigherPerMinuteCap,
+        HigherPerHourCap,
+        AddedTopic,
+        AddedPersona,
+    }
+
+    public enum LowerCase
+    {
+        AutonomousToReview,
+        AutonomousToOff,
+        LowerPerMinuteCap,
+        LowerPerHourCap,
+        RemovedTopic,
+        SameAutonomousPolicy,
+        OffToReview,
+    }
+
+    [Theory]
+    [InlineData(RaiseCase.OffToAutonomous)]
+    [InlineData(RaiseCase.ReviewToAutonomous)]
+    [InlineData(RaiseCase.HigherPerMinuteCap)]
+    [InlineData(RaiseCase.HigherPerHourCap)]
+    [InlineData(RaiseCase.AddedTopic)]
+    [InlineData(RaiseCase.AddedPersona)]
+    public async Task ANonLeadRaise_Is403_AndChangesNothing_WhileTheLeadsSameRequestSucceeds(RaiseCase raise)
+    {
+        var exerciseId = Guid.NewGuid();
+        using var harness = new Harness(exerciseId);
+        var (before, request) = await ArrangeRaiseAsync(harness, exerciseId, raise);
+        AmbientPolicyRaise.IsRaise(harness.Ambient.Get(exerciseId), request).Should().BeTrue("the case must really be a raise");
+
+        var refused = await harness.SetPolicyAsync(request, callerIsLead: false);
+
+        refused.Outcome.Should().Be(EngineReviewOutcome.Forbidden, "raising ambient toward unreviewed output is lead-only (403)");
+        harness.Ambient.Get(exerciseId).Should().BeSameAs(before, "a refused raise mutates nothing");
+        (await harness.EventsAsync(exerciseId)).Should().BeEmpty("a refused change is not an audited change");
+
+        var allowed = await harness.SetPolicyAsync(request, callerIsLead: true);
+
+        allowed.Outcome.Should().Be(EngineReviewOutcome.Ok, "the lead may raise");
+        harness.Ambient.Get(exerciseId).Mode.Should().Be(AmbientPolicyMode.Autonomous);
+        (await harness.EventsAsync(exerciseId)).Should().ContainSingle();
+    }
+
+    [Theory]
+    [InlineData(LowerCase.AutonomousToReview, AmbientPolicyMode.Review)]
+    [InlineData(LowerCase.AutonomousToOff, AmbientPolicyMode.Off)]
+    [InlineData(LowerCase.LowerPerMinuteCap, AmbientPolicyMode.Autonomous)]
+    [InlineData(LowerCase.LowerPerHourCap, AmbientPolicyMode.Autonomous)]
+    [InlineData(LowerCase.RemovedTopic, AmbientPolicyMode.Autonomous)]
+    [InlineData(LowerCase.SameAutonomousPolicy, AmbientPolicyMode.Autonomous)]
+    [InlineData(LowerCase.OffToReview, AmbientPolicyMode.Review)]
+    public async Task ANonLeadLower_Succeeds(LowerCase lower, AmbientPolicyMode expected)
+    {
+        var exerciseId = Guid.NewGuid();
+        using var harness = new Harness(exerciseId);
+        if (lower != LowerCase.OffToReview)
+        {
+            harness.Ambient.Set(exerciseId, AutonomousPolicy());
+        }
+
+        var request = lower switch
+        {
+            LowerCase.AutonomousToReview => Request("review"),
+            LowerCase.AutonomousToOff => Request("off"),
+            LowerCase.LowerPerMinuteCap => Request("autonomous", perMinute: 2),
+            LowerCase.LowerPerHourCap => Request("autonomous", perHour: 20),
+            LowerCase.RemovedTopic => Request("autonomous", topics: [AmbientTopics.Food]),
+            LowerCase.SameAutonomousPolicy => Request("autonomous"),
+            _ => Request("review"),
+        };
+        AmbientPolicyRaise.IsRaise(harness.Ambient.Get(exerciseId), request).Should().BeFalse("the case must really be a lower");
+
+        var result = await harness.SetPolicyAsync(request, callerIsLead: false);
+
+        result.Outcome.Should().Be(EngineReviewOutcome.Ok, "lowering ambient is open to any controller");
+        harness.Ambient.Get(exerciseId).Mode.Should().Be(expected);
+        harness.Ambient.Get(exerciseId).SetBy.Should().Be(harness.StaffUserId.ToString());
+    }
+
+    [Fact]
+    public async Task TheRace_AKillSwitchDemotion_BetweenTheSnapshotAndTrySet_TurnsANonLeadNoOpIntoARefusedRaise()
+    {
+        // WR-5 + identity-auth-roles/17. The policy is autonomous and a NON-lead sends "autonomous, same caps" — not a
+        // raise against that snapshot. Between the snapshot (and its raise check) and TrySet, the kill switch lands: its
+        // clamp engages and its demotion lowers the policy to off. TrySet misses on the stale snapshot, the loop re-reads
+        // (off), and against THAT snapshot the request IS a raise (off → autonomous): 403, and the policy stays off.
+        var exerciseId = Guid.NewGuid();
+        var cut = new HookOnFirstReadCutRegistry();
+        using var harness = new Harness(exerciseId, providerCut: cut);
+        harness.Ambient.Set(exerciseId, AutonomousPolicy());
+        var request = Request("autonomous");
+        AmbientPolicyRaise.IsRaise(harness.Ambient.Get(exerciseId), request).Should().BeFalse("not a raise against the first snapshot");
+
+        var demoted = false;
+        cut.OnFirstRead = () =>
+        {
+            harness.Autonomy.GetOrCreate(exerciseId).EngageKillSwitch(KillSwitchMode.FullStop, "lead-1", 0);
+            demoted = harness.Ambient.DemoteAutonomous(exerciseId, out _);
+        };
+
+        var result = await harness.SetPolicyAsync(request, callerIsLead: false);
+
+        demoted.Should().BeTrue("the hook really landed the demotion inside the compare-and-set window");
+        result.Outcome.Should().Be(
+            EngineReviewOutcome.Forbidden, "the re-read snapshot is off, so the same request is now a raise — lead-only");
+        harness.Ambient.Get(exerciseId).Mode.Should().Be(AmbientPolicyMode.Off, "a non-lead never resurrects autonomous");
+        (await harness.EventsAsync(exerciseId)).Should().BeEmpty("the refused request audits nothing");
+    }
+
+    [Fact]
+    public async Task TheRace_WithoutTheDemotion_TheSameNonLeadRequestIsAllowed()
+    {
+        // The control for the race test: with no concurrent change, "autonomous, same caps" from a non-lead is a no-op
+        // re-set, not a raise — so the 403 above comes from the re-read snapshot, not from the request alone.
+        var exerciseId = Guid.NewGuid();
+        using var harness = new Harness(exerciseId, providerCut: new HookOnFirstReadCutRegistry());
+        harness.Ambient.Set(exerciseId, AutonomousPolicy());
+
+        var result = await harness.SetPolicyAsync(Request("autonomous"), callerIsLead: false);
+
+        result.Outcome.Should().Be(EngineReviewOutcome.Ok);
+        harness.Ambient.Get(exerciseId).Mode.Should().Be(AmbientPolicyMode.Autonomous);
+    }
+
+    private static async Task<(AmbientTierPolicy Before, EngineAmbientPolicyRequest Request)> ArrangeRaiseAsync(
+        Harness harness,
+        Guid exerciseId,
+        RaiseCase raise)
+    {
+        switch (raise)
+        {
+            case RaiseCase.OffToAutonomous:
+                return (harness.Ambient.Get(exerciseId), Request("autonomous"));
+            case RaiseCase.ReviewToAutonomous:
+                harness.Ambient.Set(exerciseId, AutonomousPolicy() with { Mode = AmbientPolicyMode.Review });
+                return (harness.Ambient.Get(exerciseId), Request("autonomous"));
+            case RaiseCase.HigherPerMinuteCap:
+                harness.Ambient.Set(exerciseId, AutonomousPolicy());
+                return (harness.Ambient.Get(exerciseId), Request("autonomous", perMinute: 5));
+            case RaiseCase.HigherPerHourCap:
+                harness.Ambient.Set(exerciseId, AutonomousPolicy());
+                return (harness.Ambient.Get(exerciseId), Request("autonomous", perHour: 41));
+            case RaiseCase.AddedTopic:
+                harness.Ambient.Set(exerciseId, AutonomousPolicy());
+                return (harness.Ambient.Get(exerciseId), Request("autonomous", topics: [AmbientTopics.Food, AmbientTopics.Sports, AmbientTopics.Pets]));
+            default:
+                var persona = await harness.SeedPersonaAsync(exerciseId, AmbientEligibleCitizen);
+                harness.Ambient.Set(exerciseId, AutonomousPolicy());
+                return (harness.Ambient.Get(exerciseId), Request("autonomous", personas: [persona.ToString()]));
+        }
+    }
+
+    private const string AmbientEligibleCitizen = "citizen";
+
     // ---- orchestrator review W-4: only Resident / Helper personas ---------------------------------
 
     [Theory]
@@ -389,16 +550,29 @@ public sealed class EngineAmbientPolicyServiceTests
         string mode,
         string? actingHumanId = "controller-7",
         int? perMinute = 4,
-        IReadOnlyList<string>? personas = null) => new()
+        IReadOnlyList<string>? personas = null,
+        int perHour = 40,
+        IReadOnlyList<string>? topics = null) => new()
         {
             ActingHumanId = actingHumanId,
             Mode = mode,
             MaxPerMinute = perMinute,
-            MaxPerHour = 40,
-            TopicAllowList = ["food", "sports"],
+            MaxPerHour = perHour,
+            TopicAllowList = topics ?? ["food", "sports"],
             PersonaAllowList = personas,
             TimeZone = "UTC",
         };
+
+    /// <summary>The autonomous policy <see cref="Request"/>'s defaults describe (caps 4/40, food + sports, the given personas).</summary>
+    private static AmbientTierPolicy AutonomousPolicy(params Guid[] personas) => new()
+    {
+        Mode = AmbientPolicyMode.Autonomous,
+        MaxPerMinute = 4,
+        MaxPerHour = 40,
+        TopicAllowList = [AmbientTopics.Food, AmbientTopics.Sports],
+        PersonaAllowList = personas,
+        SetBy = "the-lead",
+    };
 
     private sealed class Harness : IDisposable
     {
@@ -430,7 +604,7 @@ public sealed class EngineAmbientPolicyServiceTests
                 new EngineTelemetryEmitter(),
                 Mock.Of<IEnginePublishService>(),
                 Mock.Of<IEngineReviewBroadcaster>(),
-                new EngineAutonomyRegistry(),
+                Autonomy,
                 new EngineTierPolicyRegistry(),
                 new ClaudeNamedProvider(),
                 Microsoft.Extensions.Options.Options.Create(new GenerationOptions()),
@@ -441,11 +615,14 @@ public sealed class EngineAmbientPolicyServiceTests
 
         public EngineReviewService Service { get; }
 
+        /// <summary>The autonomy registry the service's kill switch engages (shared, so a test can engage it directly).</summary>
+        public EngineAutonomyRegistry Autonomy { get; } = new();
+
         /// <summary>The authenticated staff user the harness's "endpoint" resolves from the session (W-2).</summary>
         public Guid StaffUserId { get; } = Guid.NewGuid();
 
-        public Task<EngineSettingsResult> SetPolicyAsync(EngineAmbientPolicyRequest request, bool authenticated = true) =>
-            Service.SetAmbientPolicyAsync(request, authenticated ? StaffUserId : null);
+        public Task<EngineSettingsResult> SetPolicyAsync(EngineAmbientPolicyRequest request, bool authenticated = true, bool callerIsLead = true) =>
+            Service.SetAmbientPolicyAsync(request, authenticated ? StaffUserId : null, callerIsLead);
 
         public EngineAmbientPolicyRegistry Ambient { get; }
 
@@ -484,6 +661,32 @@ public sealed class EngineAmbientPolicyServiceTests
         private int _reads;
 
         public bool IsCutToFake(Guid exerciseId) => Interlocked.Increment(ref _reads) > 1;
+
+        public bool Cut(Guid exerciseId) => true;
+
+        public bool Restore(Guid exerciseId) => true;
+    }
+
+    /// <summary>
+    /// Never cut, but runs <see cref="OnFirstRead"/> on the FIRST <see cref="IsCutToFake"/> call. The service reads the cut
+    /// in its in-loop safety check — after the snapshot and the raise check, before <c>TrySet</c> — so the hook lands a
+    /// concurrent change exactly in the WR-5 window, deterministically.
+    /// </summary>
+    private sealed class HookOnFirstReadCutRegistry : IGenerationProviderCutRegistry
+    {
+        private int _reads;
+
+        public Action? OnFirstRead { get; set; }
+
+        public bool IsCutToFake(Guid exerciseId)
+        {
+            if (Interlocked.Increment(ref _reads) == 1)
+            {
+                OnFirstRead?.Invoke();
+            }
+
+            return false;
+        }
 
         public bool Cut(Guid exerciseId) => true;
 

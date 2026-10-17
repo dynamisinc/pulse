@@ -12,6 +12,7 @@ using FluentAssertions;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
+using Pulse.Core.Features.Ambient.Models;
 using Pulse.Core.Features.Autonomy.Models;
 using Pulse.WebApi.Features.EngineRuntime;
 using Pulse.WebApi.Tests.Data;
@@ -176,6 +177,7 @@ public sealed class RoleMatrixTests
         autonomy.SetSwampedMode(false, "matrix-reset", 0);
         autonomy.SetExerciseDefault(AutonomyLevel.Suggest, "matrix-reset", 0);
         host.Services.GetRequiredService<EngineTierPolicyRegistry>().SetMode(exerciseId, row.TierBefore);
+        host.Services.GetRequiredService<EngineAmbientPolicyRegistry>().Set(exerciseId, AmbientTierPolicy.Off);
     }
 
     private static Dictionary<string, MatrixRow> BuildMatrix()
@@ -274,6 +276,13 @@ public sealed class RoleMatrixTests
         Probe("POST /api/engine/settings/autonomy-default", LeadOnly, $"{{\"level\":\"delayed-auto\",{Acting}}}");
         Probe("POST /api/engine/settings/tier-policy", LeadOnly, $"{{\"mode\":\"auto\",{Acting}}}", tierBefore: TierPolicyMode.Ambient);
         Probe("POST /api/engine/generation-provider/restore", LeadOnly, $"{{{Acting}}}");
+
+        // identity-auth-roles/17: ambient off -> autonomous is a RAISE (lead-only; judged inside the service's
+        // compare-and-set loop, not by a filter). The policy is reset to off before every role's request.
+        Probe(
+            "POST /api/engine/settings/ambient-policy",
+            LeadOnly,
+            $"{{\"mode\":\"autonomous\",\"maxPerMinute\":1,\"maxPerHour\":1,{Acting}}}");
 
         // ---- Authoring as a persona (live = conduct, controller only; build: StaffAuthoringTests). ----
         Probe("POST /api/posts", LiveAuthoring);
