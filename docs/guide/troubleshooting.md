@@ -54,6 +54,10 @@ Capitals, accents, spaces and punctuation in the word do not matter.
 
 The player tried too many times in a short period. Ask them to wait a minute and try again.
 
+The limit counts tries **per network address**. Players on the same venue Wi-Fi usually share one address, so a
+burst of mistakes in the room can slow everyone there down. If many players see this at once, wait a minute,
+have people sign in a few at a time, and ask support to raise the sign-in limit for the exercise.
+
 ### The exercise is not open to players
 
 Players can only sign in while the exercise is **Staged**, **Live** or **Paused**. Check the state on
