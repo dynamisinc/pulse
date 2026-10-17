@@ -43,7 +43,8 @@ import { storylineMock } from '../../services/storylineMock'
 import * as liveStorylineActions from '../../services/liveStorylineActions'
 import { liveStorylineStore } from '../../services/liveStorylineStore'
 import { EscalationDial } from './EscalationDial'
-import { hasPseudoHitSlop, mediaRuleDeclarations, setPointer } from '../../consoleTouchTestUtils'
+import { hasPseudoHitSlop, mediaRuleDeclarations } from '@/features/staffShell/tabletTestUtils'
+import { mockPointer, restoreMatchMedia } from '@/features/controller/components/confirm/coarsePointer.testUtils'
 
 // Demo-feedback story 11 (DF-14): the console's write controls render only for a controller
 // session, and this suite mounts none, so the read-only gate is fixed to "controller" here.
@@ -675,10 +676,8 @@ describe('EscalationDial — names what it is steering (Gate-1 W-008)', () => {
 })
 
 describe('EscalationDial — touch parity (story 14, D5-024)', () => {
-  let restorePointer: (() => void) | undefined
   afterEach(() => {
-    restorePointer?.()
-    restorePointer = undefined
+    restoreMatchMedia()
   })
 
   it('makes the track a real 44px-tall target inside (pointer: coarse), never by hit-slop', async () => {
@@ -689,21 +688,21 @@ describe('EscalationDial — touch parity (story 14, D5-024)', () => {
   })
 
   it('reads "Tap or drag" and prints the phase meaning on a coarse pointer (no hover-only info)', async () => {
-    restorePointer = setPointer(true)
+    mockPointer(true)
     await renderDial()
     expect(screen.getByTestId('escalation-dial-relationship')).toHaveTextContent(/tap or drag/i)
     expect(screen.getByTestId('escalation-dial-phase-description')).not.toBeEmptyDOMElement()
   })
 
   it('keeps the click / arrow-key wording and no printed description on a fine pointer', async () => {
-    restorePointer = setPointer(false)
+    mockPointer(false)
     await renderDial()
     expect(screen.getByTestId('escalation-dial-relationship')).toHaveTextContent(/arrow keys/i)
     expect(screen.queryByTestId('escalation-dial-phase-description')).not.toBeInTheDocument()
   })
 
   it('a tap on the track (no key, no hover) sets the target', async () => {
-    restorePointer = setPointer(true)
+    mockPointer(true)
     await renderDial()
     const track = screen.getByTestId('escalation-dial-track')
     stubTrackGeometry(track)

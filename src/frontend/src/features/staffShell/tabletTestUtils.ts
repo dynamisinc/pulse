@@ -90,3 +90,13 @@ export function ruleDeclarations(el: Element): Record<string, string> {
   }
   return out
 }
+
+/** True when an Emotion class on `el` has a `::before` / `::after` rule (a hit-slop pseudo-element). */
+export function hasPseudoHitSlop(el: Element): boolean {
+  const classes = Array.from(el.classList).filter(c => c.startsWith('css-'))
+  const css = Array.from(document.styleSheets)
+    .flatMap(sheet => Array.from(sheet.cssRules))
+    .map(rule => rule.cssText)
+    .join('\n')
+  return classes.some(c => new RegExp(`\\.${c}[^{]*::?(before|after)`).test(css))
+}

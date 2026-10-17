@@ -10,13 +10,11 @@
  *      `core/hooks/platformModifier.ts`. The key HANDLERS are unchanged and accept either modifier.
  *   2. On a COARSE pointer a hint must not promise a keyboard that may not be there. The command
  *      strip becomes a TAP hint ("Tap PERSONAS or press ⌘K": the toolstrip tool is the touch
- *      control, and an iPad with a Magic Keyboard still has the chord). The compose-send hint is
- *      HIDDEN on coarse because the labelled Post / Send button is already the touch control.
+ *      control, and an iPad with a Magic Keyboard still has the chord).
  *
  * Exports:
  *  - {@link ConsoleShortcutStrip}  the strip under the console header (replaces the hard-coded
  *                                  "⌘K / Ctrl+K" strip that lived in `ControllerConsole`);
- *  - {@link ComposeSendHint}       "Ctrl+Enter to post", hidden on a coarse pointer;
  */
 
 import { Box, Stack } from '@mui/material'
@@ -67,21 +65,5 @@ export function ConsoleShortcutStrip() {
         </>
       )}
     </Stack>
-  )
-}
-
-/** "Ctrl+Enter to post" next to a Post / Send button. Hidden on a coarse pointer. */
-export function ComposeSendHint({ verb = 'post' }: { readonly verb?: string }) {
-  const { chord, coarse } = usePlatformModifier()
-  if (coarse) return null
-  return (
-    <Box
-      component="span"
-      data-testid="compose-send-hint"
-      sx={{ fontSize: 11, color: staffShellTokens.accent.secondaryText }}
-    >
-      <Box component="kbd" sx={KBD_SX}>{chord('Enter')}</Box>
-      {` to ${verb}`}
-    </Box>
   )
 }

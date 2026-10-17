@@ -868,15 +868,15 @@ included), <kbd>Ctrl</kbd> on Windows, Linux and Android. On a touch screen the 
 | <kbd>E</kbd> | Run sheet, selected row | **Edit** (or **View**) on the row |
 | <kbd>⌘</kbd>/<kbd>Ctrl</kbd>+<kbd>Enter</kbd> | Persona panel, draft edit, run sheet editor | **Post** / **Send in-character** / **Save** |
 | <kbd>←</kbd> <kbd>→</kbd> <kbd>Home</kbd> <kbd>End</kbd> | Escalation dial | Tap or drag the track |
-| <kbd>←</kbd> <kbd>→</kbd> | White noise | Tap **Off**, **Low**, **Medium** or **High** |
+| <kbd>←</kbd> <kbd>→</kbd> <kbd>Home</kbd> <kbd>End</kbd> | White noise | Tap **Off**, **Low**, **Medium** or **High** |
 | <kbd>Enter</kbd> | End exercise dialog | **Confirm** (once you have typed END) |
 
 Nothing needs hover, a right-click or a key chord on a touch screen. The escalation dial's phase meaning, which
 shows on hover with a mouse, is printed under the phase name on a touch screen. When the on-screen keyboard is up,
 the persona panel and the palette rise above it so the text field and **Post** stay visible.
 
-On an iPad with a hardware keyboard, <kbd>⌘</kbd>+<kbd>K</kbd> works as on a Mac. Safari on iPadOS does not use
-it, and the console cancels the browser's own action for it. If a future iPadOS version takes it, use the
+On an iPad with a hardware keyboard, <kbd>⌘</kbd>+<kbd>K</kbd> works as on a Mac. Safari on iPadOS is not known to use
+it (a device check is pending), and the console cancels the browser's own action for it. If a future iPadOS version takes it, use the
 **PERSONAS** tool instead.
 
 ## 13. Quick reference

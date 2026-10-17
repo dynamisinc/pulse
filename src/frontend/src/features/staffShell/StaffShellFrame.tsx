@@ -48,9 +48,7 @@ import { useOptionalPreview } from './previewContext'
 import {
   STAFF_HEADER_HEIGHT_PX,
   STAFF_HEADER_HEIGHT_TABLET_PX,
-  STAFF_COARSE_POINTER_MEDIA,
   STAFF_TABLET_MEDIA,
-  STAFF_TOUCH_TARGET_PX,
   STAFF_TOOLSTRIP_WIDTH_PX,
   STAFF_TOOLSTRIP_WIDTH_TABLET_PX,
   staffShellTokens,
@@ -148,20 +146,11 @@ export function StaffShellFrame({
             },
             // Persona dock host (controller/console/personaDockHost.tsx, story 12's file): it
             // predates `staffFlyout.ts` and is not edited here. Until it adopts the helper the
-            // frame applies the SAME contract to it from outside: clamp to the viewport, sit
-            // below `--staff-flyout-top`, and a 44px close button under a coarse pointer.
+            // frame applies the SAME contract to it from outside: clamp to the viewport and sit
+            // below `--staff-flyout-top`. (The 44px close is the dock's own, story 14.)
             '& [data-testid="persona-dock-host"]': {
               maxWidth: '100%',
               top: `var(${staffShellTokens.flyout.topVar}, 0px)`,
-            },
-            [STAFF_COARSE_POINTER_MEDIA]: {
-              // The dock's HEADER close button only (first child row), not other "Close..." buttons
-              // that slot content may render. TODO(mobile-tablet/13 follow-up): remove once
-              // personaDockHost adopts staffFlyoutPanelSx / data-staff-flyout-close.
-              '& [data-testid="persona-dock-host"] > div:first-of-type button[aria-label^="Close"]': {
-                width: STAFF_TOUCH_TARGET_PX,
-                height: STAFF_TOUCH_TARGET_PX,
-              },
             },
           }}
         >

@@ -40,7 +40,7 @@ import { Box, IconButton, Stack, Tooltip, Typography } from '@mui/material'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faXmark } from '@fortawesome/free-solid-svg-icons'
 import { staffShellTokens } from '@/features/staffShell/staffShellTokens'
-import { useVisualViewportInset } from '@/core/hooks/useVisualViewportInset'
+import { useKeyboardOverlap } from '@/core/hooks/useKeyboardOverlap'
 import { useCoarsePointer } from '../components/confirm'
 import { COARSE_TARGET_SX } from '../consoleTouch'
 import { PERSONA_DOCK_HOST_TITLE, type PersonaDockSlots } from './personaDockHost'
@@ -68,7 +68,9 @@ export interface PersonaDockHostProps {
 export function PersonaDockHost({ open, onClose, slots }: PersonaDockHostProps) {
   // Touch only: a hardware keyboard has no on-screen one, and desktop pinch-zoom must not shift us.
   const coarse = useCoarsePointer()
-  const keyboardInset = useVisualViewportInset(open && coarse)
+  const dockRef = useRef<HTMLDivElement | null>(null)
+  // Measured against the dock's containing block (the work area), not the window: see the hook.
+  const keyboardLift = useKeyboardOverlap(dockRef, open && coarse)
   const closeButtonRef = useRef<HTMLButtonElement | null>(null)
   const openerRef = useRef<Element | null>(null)
 
@@ -101,6 +103,7 @@ export function PersonaDockHost({ open, onClose, slots }: PersonaDockHostProps) 
 
   return (
     <Box
+      ref={dockRef}
       data-testid="persona-dock-host"
       role="region"
       aria-label={PERSONA_DOCK_HOST_TITLE}
@@ -111,7 +114,7 @@ export function PersonaDockHost({ open, onClose, slots }: PersonaDockHostProps) 
         right: 0,
         // Story 14: lifted by the on-screen keyboard's height so the composer's text field and Post
         // stay visible (the slots area scrolls inside the shorter dock). 0 without a keyboard.
-        bottom: `${keyboardInset}px`,
+        bottom: `${keyboardLift}px`,
         width: DOCK_WIDTH_PX,
         bgcolor: staffShellTokens.toolstrip.background,
         borderLeft: `1px solid ${staffShellTokens.toolstrip.borderColor}`,

@@ -9,8 +9,10 @@
  * when `useCoarsePointer()` is true, so desktop is untouched.
  */
 
+import { STAFF_TOUCH_TARGET_PX } from '@/features/staffShell/staffShellTokens'
+
 /** Minimum touch target edge (WCAG 2.5.5 / amendment §4). */
-export const TOUCH_TARGET_PX = 44
+export const TOUCH_TARGET_PX = STAFF_TOUCH_TARGET_PX
 /** Minimum space between Cancel/Back and Confirm (amendment §5 rule 3). */
 export const CONFIRM_GAP_MIN_PX = 8
 /** What the confirm row actually uses on touch: comfortably above the 8px floor. */

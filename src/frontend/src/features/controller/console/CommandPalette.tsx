@@ -278,7 +278,8 @@ export function CommandPalette({
         sx={{
           width: '100%',
           maxWidth: 560,
-          maxHeight: `min(70vh, calc(100vh - 12vh - ${keyboardInset}px - 16px))`,
+          // Resolves against the (padded) fixed backdrop, so it shrinks with the keyboard inset.
+          maxHeight: 'min(70vh, calc(100% - 16px))',
           display: 'flex',
           flexDirection: 'column',
           bgcolor: staffShellTokens.toolstrip.background,

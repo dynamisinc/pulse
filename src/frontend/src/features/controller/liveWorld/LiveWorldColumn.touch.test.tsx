@@ -13,7 +13,7 @@ import { cobraTheme } from '@/theme/cobraTheme'
 import { resolveFeed } from '@/features/social/services/feedService'
 import { LiveWorldColumn } from './LiveWorldColumn'
 import { at, createFakeSource, MVEGA, post, view, WATER, type FakeSource } from './liveWorldTestKit'
-import { hasPseudoHitSlop, mediaRuleDeclarations } from '../consoleTouchTestUtils'
+import { hasPseudoHitSlop, mediaRuleDeclarations } from '@/features/staffShell/tabletTestUtils'
 
 vi.mock('@/features/controller/access/useCanControl', () => ({ useCanControl: () => true }))
 
@@ -68,7 +68,9 @@ describe('Live world — touch parity (story 14)', () => {
       expect(reply).toHaveTextContent('Reply as…')
       expect44(reply)
     }
-    const actionRow = replies[0].parentElement as HTMLElement
+    const [firstReply] = replies
+    if (firstReply === undefined) throw new Error('no Reply as button')
+    const actionRow = firstReply.parentElement as HTMLElement
     expect(mediaRuleDeclarations(actionRow, 'pointer: coarse').gap).toBe('8px')
   })
 

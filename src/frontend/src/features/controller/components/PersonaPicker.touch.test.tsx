@@ -13,7 +13,7 @@ import { cobraTheme } from '@/theme/cobraTheme'
 import { PersonaPicker } from './PersonaPicker'
 import { ActivePersonaProvider } from '../hooks/useActivePersona'
 import type { StaffPersona } from '@/features/personas'
-import { hasPseudoHitSlop, mediaRuleDeclarations } from '../consoleTouchTestUtils'
+import { hasPseudoHitSlop, mediaRuleDeclarations } from '@/features/staffShell/tabletTestUtils'
 
 const FULTON: StaffPersona = {
   id: 'persona-fulton-em',

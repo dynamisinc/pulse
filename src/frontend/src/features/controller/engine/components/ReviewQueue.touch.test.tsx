@@ -17,7 +17,7 @@ import { resetTelemetryBuffer } from '@/core/telemetry'
 import { postStore } from '@/features/social/services/postStore'
 import { reviewStore } from '../services/reviewStore'
 import { ReviewQueue } from './ReviewQueue'
-import { hasPseudoHitSlop, mediaRuleDeclarations } from '../../consoleTouchTestUtils'
+import { hasPseudoHitSlop, mediaRuleDeclarations } from '@/features/staffShell/tabletTestUtils'
 
 vi.mock('@/features/controller/access/useCanControl', () => ({ useCanControl: () => true }))
 

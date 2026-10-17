@@ -24,7 +24,7 @@ import { cobraTheme } from '@/theme/cobraTheme'
 import { api } from '@/core/services/api'
 import type { PauseTier } from '../hooks/usePauseState'
 import { NoiseControl } from './NoiseControl'
-import { hasPseudoHitSlop, mediaRuleDeclarations } from '../consoleTouchTestUtils'
+import { hasPseudoHitSlop, mediaRuleDeclarations } from '@/features/staffShell/tabletTestUtils'
 import type { NoiseLevel, NoiseStateDto } from './noiseTypes'
 
 // Demo-feedback story 11 (DF-14): the console's write controls render only for a controller

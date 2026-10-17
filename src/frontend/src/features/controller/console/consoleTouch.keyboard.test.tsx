@@ -16,9 +16,8 @@ import { ThemeProvider } from '@mui/material/styles'
 import { cobraTheme } from '@/theme/cobraTheme'
 import { CommandPalette } from './CommandPalette'
 import { PersonaDockHost } from './personaDockHost.tsx'
-import { hasPseudoHitSlop, mediaRuleDeclarations, setPointer } from '../consoleTouchTestUtils'
-
-let restorePointer: (() => void) | undefined
+import { hasPseudoHitSlop, mediaRuleDeclarations } from '@/features/staffShell/tabletTestUtils'
+import { mockPointer, restoreMatchMedia } from '@/features/controller/components/confirm/coarsePointer.testUtils'
 
 /** A visual viewport 400px shorter than the layout viewport (the on-screen keyboard is up). */
 function stubKeyboard(coveredPx: number): () => void {
@@ -31,9 +30,8 @@ function stubKeyboard(coveredPx: number): () => void {
 let restoreKeyboard: (() => void) | undefined
 
 afterEach(() => {
-  restorePointer?.()
+  restoreMatchMedia()
   restoreKeyboard?.()
-  restorePointer = undefined
   restoreKeyboard = undefined
 })
 
@@ -41,7 +39,7 @@ const themed = (ui: React.ReactNode) => <ThemeProvider theme={cobraTheme}>{ui}</
 
 describe('CommandPalette — touch', () => {
   it('has a labelled 44px Close on a coarse pointer that closes it with one tap', async () => {
-    restorePointer = setPointer(true)
+    mockPointer(true)
     const onClose = vi.fn()
     render(themed(<CommandPalette open onClose={onClose} />))
     const close = screen.getByRole('button', { name: 'Close command palette' })
@@ -54,13 +52,13 @@ describe('CommandPalette — touch', () => {
   })
 
   it('has no extra Tab stop on a fine pointer (desktop Tab order unchanged)', () => {
-    restorePointer = setPointer(false)
+    mockPointer(false)
     render(themed(<CommandPalette open onClose={vi.fn()} />))
     expect(screen.queryByTestId('command-palette-close')).not.toBeInTheDocument()
   })
 
   it('a single tap on a result row selects and closes; the results area scrolls', async () => {
-    restorePointer = setPointer(true)
+    mockPointer(true)
     const onSelectPersona = vi.fn()
     const onClose = vi.fn()
     render(themed(
@@ -81,14 +79,14 @@ describe('CommandPalette — touch', () => {
   })
 
   it('pads up by the on-screen keyboard height on a coarse pointer', () => {
-    restorePointer = setPointer(true)
+    mockPointer(true)
     restoreKeyboard = stubKeyboard(300)
     render(themed(<CommandPalette open onClose={vi.fn()} />))
     expect(screen.getByTestId('command-palette-backdrop')).toHaveStyle({ paddingBottom: '300px' })
   })
 
   it('ignores the visual viewport on a fine pointer (desktop pinch-zoom must not shift it)', () => {
-    restorePointer = setPointer(false)
+    mockPointer(false)
     restoreKeyboard = stubKeyboard(300)
     render(themed(<CommandPalette open onClose={vi.fn()} />))
     expect(screen.getByTestId('command-palette-backdrop')).not.toHaveStyle({ paddingBottom: '300px' })
@@ -96,17 +94,21 @@ describe('CommandPalette — touch', () => {
 })
 
 describe('PersonaDockHost — touch', () => {
-  it('lifts its bottom edge above the on-screen keyboard on a coarse pointer, and follows it', () => {
-    restorePointer = setPointer(true)
-    restoreKeyboard = stubKeyboard(320)
+  it('lifts by the overlap with ITS containing block (not the window) and follows the keyboard', () => {
+    mockPointer(true)
+    // The work area ends at y=700; the visual viewport (keyboard up) ends at y=380: 320px covered.
+    const rect = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+      .mockReturnValue({ bottom: 700 } as DOMRect)
+    restoreKeyboard = stubKeyboard(window.innerHeight - 380)
     render(themed(<PersonaDockHost open onClose={vi.fn()} />))
     expect(screen.getByTestId('persona-dock-host')).toHaveStyle({ bottom: '320px' })
     const vv = window.visualViewport as unknown as { height: number } & EventTarget
     act(() => {
-      vv.height = window.innerHeight
+      vv.height = 700
       vv.dispatchEvent(new Event('resize'))
     })
     expect(screen.getByTestId('persona-dock-host')).toHaveStyle({ bottom: '0px' })
+    rect.mockRestore()
   })
 
   it('has a 44px Close (the touch twin of Esc)', () => {

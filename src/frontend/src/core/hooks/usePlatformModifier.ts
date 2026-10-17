@@ -11,15 +11,13 @@
  * `useSyncExternalStore`; without `matchMedia` (jsdom) it is false, so desktop renders and
  * every pre-existing test are unchanged.
  *
- * `coarse` uses the shared `useCssMediaQuery` (core). Controller components that only need the
+ * `coarse` is story 15's `useCoarsePointer` (one coarse-pointer source). Controller components that only need the
  * coarse flag use `useCoarsePointer` from `controller/components/confirm` (story 15).
  */
 
 import { useMemo } from 'react'
-import { useCssMediaQuery } from './useCssMediaQuery'
+import { useCoarsePointer } from '@/features/controller/components/confirm'
 import { platformChordLabel, platformModifierLabel } from './platformModifier'
-
-const COARSE_QUERY = '(pointer: coarse)'
 
 export interface PlatformModifier {
   /** `⌘` or `Ctrl`. */
@@ -31,7 +29,7 @@ export interface PlatformModifier {
 }
 
 export function usePlatformModifier(): PlatformModifier {
-  const coarse = useCssMediaQuery(COARSE_QUERY)
+  const coarse = useCoarsePointer()
   return useMemo(
     () => ({
       modifier: platformModifierLabel(),

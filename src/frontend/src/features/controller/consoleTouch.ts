@@ -20,13 +20,20 @@
  * Toolstrip buttons are story 13's; the confirm internals are story 15's. Neither uses this file.
  */
 
+import {
+  STAFF_COARSE_POINTER_MEDIA,
+  STAFF_TOUCH_GAP_PX,
+  STAFF_TOUCH_TARGET_PX,
+} from '@/features/staffShell/staffShellTokens'
+
+// ONE source of truth (story 13's staff tokens): 44, 8 and the coarse-pointer media key.
 /** Minimum touch target, CSS px (TABLET-AMENDMENT section 4). */
-export const CONSOLE_TOUCH_TARGET_PX = 44
+export const CONSOLE_TOUCH_TARGET_PX = STAFF_TOUCH_TARGET_PX
 /** Minimum gap between adjacent touch actions, CSS px. */
-export const CONSOLE_TOUCH_GAP_PX = 8
+export const CONSOLE_TOUCH_GAP_PX = STAFF_TOUCH_GAP_PX
 
 /** The media query key used in `sx`. */
-export const CONSOLE_COARSE_MEDIA = '@media (pointer: coarse)'
+export const CONSOLE_COARSE_MEDIA = STAFF_COARSE_POINTER_MEDIA
 
 /** Grow a control to a 44 x 44 box, content centred (an inline-flex control stays inline-flex). */
 export const COARSE_TARGET_SX = {

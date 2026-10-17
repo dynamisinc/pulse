@@ -65,8 +65,7 @@
  * signal - it is never emitted to a participant surface, which only ever
  * receives `toParticipantView` output.
  *
- * TOUCH (story 14): the labelled Post button is the touch control for Ctrl/Cmd+Enter (the hint
- * beside it names the platform's one keycap and is hidden on a coarse pointer); under
+ * TOUCH (story 14): the labelled Post button is the touch control for Ctrl/Cmd+Enter ; under
  * `(pointer: coarse)` every button here is >= 44px (see the module CSS). The dock's ✕ is the
  * touch control for Esc.
  *
@@ -142,7 +141,6 @@ import { PersonaComposerPreview } from './PersonaComposerPreview'
 import styles from './PersonaComposer.module.css'
 import emojiSkin from './PersonaComposerEmoji.module.css'
 import { useCanControl } from '../access'
-import { ComposeSendHint } from '../shortcutHints'
 
 export interface PersonaComposerProps {
   /** The persona to post AS (persona-operation/02 input - never imported).
@@ -707,7 +705,6 @@ export function PersonaComposer({
           >
             {compose.remaining}
           </span>
-          <ComposeSendHint verb="post" />
           <CobraPrimaryButton
             type="submit"
             disabled={!compose.canPublish}

@@ -510,7 +510,8 @@ describe('touch and keyboard parity (story 14, D5-024)', () => {
 
   it('focus in the Review pane survives a rotation that turns Review into a tab', async () => {
     await renderConsole('controller', 1024, 768)
-    const card = screen.getAllByTestId('review-card')[0]
+    const [card] = screen.getAllByTestId('review-card')
+    if (card === undefined) throw new Error('no review card rendered')
     act(() => card.focus())
     expect(card).toHaveFocus()
 
