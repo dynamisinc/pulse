@@ -37,6 +37,10 @@ tab or lock your phone. If you are on a shared computer, select **Sign out** whe
 ![The exercise feed, showing posts with reply, repost, like and pin buttons.](img/participant-feed.png)
 
 - **Post.** Write in **What's happening?** and select **Post**. You can add up to 4 photos or a video.
+  On a phone, select the picture button to choose from your photo library. Each photo needs a short
+  description, and you can remove one with the **X** on its preview. Photos and videos carry an
+  **EXERCISE** banner. Tap a photo to see it full screen; **Close** (or the back gesture) returns you
+  to the post, and you can pinch to zoom the page.
 - **Reply.** Select **Reply** under a post to join the conversation.
 - **Like** and **Repost** a post.
 - **Pin.** Select **Pin** to save a post to your **Pinned** tab. Posts you like show up there too.

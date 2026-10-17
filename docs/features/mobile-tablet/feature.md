@@ -30,7 +30,7 @@ Status: all Not Started. B1 audit (2026-10-16) folded in: PR #562 alert bar veri
 | 01 | [Browser e2e harness and viewport kit](01-e2e-harness-viewport-kit.md) | B1 | NFR-001, XC-001 | In Review | — |
 | 02 | [Participant core screens on phones (feed, thread, composer, profile, Explore, Pinned)](02-participant-core-screens-phones.md) | B1 | NFR-001, NFR-002, COR-053, D0 §4.6 | In Review | — |
 | 03 | [Participant entry screens on phones (join, sign-in, holding page)](03-participant-entry-screens-phones.md) | B1 | NFR-001, D0 §4.6 | Not Started | — |
-| 04 | [Media viewer and composer media on phones](04-media-viewer-phones.md) | B1 | NFR-001, NFR-008 | Not Started | — |
+| 04 | [Media viewer and composer media on phones](04-media-viewer-phones.md) | B1 | NFR-001, NFR-008 | In Review | — |
 | 05 | [Alert bar on phones: verify and touch-target gaps](05-alert-bar-phones-verify.md) | B1 | PRT-010, PRT-012, NFR-001 | In Progress | — |
 | 06 | [Participant critical-path e2e at 360/390/768](06-participant-critical-path-e2e.md) | B1 | XC-004, NFR-001 | In Review | — |
 | 07 | [Burst legibility at 120 posts/min on a mid-range phone](07-burst-legibility-phone.md) | B1 | NFR-002, SOC-071 | Not Started | — |
