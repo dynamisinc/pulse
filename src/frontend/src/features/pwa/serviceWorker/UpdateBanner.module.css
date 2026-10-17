@@ -1,0 +1,53 @@
+.banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 480px;
+  padding: 6px 8px 6px 14px;
+  border-radius: 14px;
+  background: var(--pulse-brand-surface, #fff);
+  color: var(--pulse-brand-on-surface, #1c1c1c);
+  border: 2px solid var(--pulse-brand-primary, #1c1c1c);
+  box-shadow: 0 4px 16px rgb(0 0 0 / 22%);
+  font: inherit;
+}
+
+.icon {
+  color: var(--pulse-brand-primary, #1c1c1c);
+}
+
+.text {
+  flex: 1;
+  font-size: 0.9rem;
+}
+
+.primary,
+.secondary {
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 14px;
+  border-radius: 999px;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.primary {
+  background: var(--pulse-brand-primary, #1c1c1c);
+  color: var(--pulse-brand-surface, #fff);
+  border: 2px solid var(--pulse-brand-primary, #1c1c1c);
+}
+
+.secondary {
+  background: transparent;
+  color: var(--pulse-brand-on-surface, #1c1c1c);
+  border: 2px solid transparent;
+}
+
+.primary:focus-visible,
+.secondary:focus-visible {
+  outline: 3px solid var(--pulse-brand-accent, #1c1c1c);
+  outline-offset: 2px;
+}

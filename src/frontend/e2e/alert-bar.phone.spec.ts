@@ -20,7 +20,7 @@
 import { test, expect, type Page } from '@playwright/test'
 import {
   boxOf, boxesOverlap, expectNoHorizontalScroll, expectNoWallClock, expectTouchTarget,
-  seedAlerts, type SeedAlert,
+  seedAlerts, seedOverlay, type SeedAlert,
 } from './kit'
 
 const EMERGENCY: SeedAlert = {
@@ -179,4 +179,213 @@ test.describe('alert bar: short single-line alerts', () => {
       }
     })
   }
+})
+
+/** A second advisory so the ticker has something to rotate to. */
+const ADVISORY_2: SeedAlert = {
+  id: 'e2e-advisory-2',
+  severity: 'advisory',
+  message: 'Shelters are open at Fairhaven High School.',
+  scenarioTime: '2033-09-04T10:20:00-04:00',
+}
+
+test.describe('alert bar: ticker rotation and reduced motion', () => {
+  test('rotates (and the live region text changes) without a reduced-motion preference', async ({ page }) => {
+    // Rotation announces: the persistent role=status node's text changes.
+    // (The project default is reduced motion; opt out for the control case.)
+    await page.emulateMedia({ reducedMotion: 'no-preference' })
+    await page.clock.install()
+    await openFeedWith(page, [ADVISORY, ADVISORY_2])
+    const bar = page.getByTestId('pulse-alert-bar')
+    await expect(bar).toHaveAttribute('role', 'status')
+    await expect(bar).toHaveAttribute('aria-live', 'polite')
+    const first = await bar.getByTestId('pulse-alert-bar-message').innerText()
+    await page.clock.runFor(3600)
+    await expect(bar.getByTestId('pulse-alert-bar-message')).not.toHaveText(first)
+    await expect(bar).toContainText('ADVISORY')
+    // The published height still tracks the bar after the text swapped.
+    await expect.poll(async () => {
+      const h = (await boxOf(bar)).height
+      return Math.abs((await publishedAlertHeight(page)) - h)
+    }).toBeLessThanOrEqual(1)
+  })
+
+  test('holds on one alert with prefers-reduced-motion: reduce', async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: 'reduce' })
+    await page.clock.install()
+    await openFeedWith(page, [ADVISORY, ADVISORY_2])
+    const bar = page.getByTestId('pulse-alert-bar')
+    const message = bar.getByTestId('pulse-alert-bar-message')
+    const first = await message.innerText()
+    await page.clock.runFor(20000)
+    await expect(message).toHaveText(first)
+    await expectTouchTarget(page.getByTestId('pulse-alert-bar-details'), 44)
+  })
+})
+
+test.describe('alert bar: emergency live region at phone, tablet sizes', () => {
+  test('the bar is one role=status node, assertive, carrying the full text and severity label', async ({ page }) => {
+    await openFeedWith(page, [EMERGENCY])
+    await expect(page.getByTestId('pulse-alert-bar')).toHaveCount(1)
+    await expect(page.getByRole('status').filter({ hasText: EMERGENCY.message })).toHaveCount(1)
+    const bar = page.getByTestId('pulse-alert-bar')
+    await expect(bar).toHaveAttribute('role', 'status')
+    await expect(bar).toHaveAttribute('aria-live', 'assertive')
+    await expect(bar).toHaveAttribute('aria-atomic', 'true')
+    await expect(bar).toContainText('EMERGENCY')
+    await expect(bar).toContainText(EMERGENCY.message)
+  })
+})
+
+type Rect = { x: number, y: number, width: number, height: number }
+
+/** Which shell layer is topmost at a point: the alert bar, the overlay, or neither. */
+async function topmostLayerAt(page: Page, x: number, y: number): Promise<string> {
+  return page.evaluate(([px, py]) => {
+    const el = document.elementFromPoint(px as number, py as number)
+    return el?.closest('[data-testid="pulse-overlay-pause-alert-shield"]') ? 'shield'
+      : el?.closest('[data-testid="pulse-shell-content-region"]') ? 'content'
+        : el?.closest('[data-testid="pulse-alert-bar"]') ? 'bar'
+          : el?.closest('[data-shell-layer="overlay"]') ? 'overlay' : 'other'
+  }, [x, y])
+}
+
+/** Top and bottom edges plus the centre of a box all hit the expected layer. */
+async function expectLayerOnTop(page: Page, box: Rect, layer: string, what: string): Promise<void> {
+  const cx = box.x + box.width / 2
+  for (const y of [box.y + 1, box.y + box.height / 2, box.y + box.height - 1]) {
+    const hit = await topmostLayerAt(page, cx, y)
+    // An inert bar is skipped by hit-testing: the pause click shield must be what is hit,
+    // never the feed underneath.
+    const ok = layer === 'bar-inert' ? hit === 'shield' : hit === layer
+    expect(ok, `${what} is covered at y=${Math.round(y)} (hit: ${hit})`).toBe(true)
+  }
+}
+
+test.describe('alert bar: emergency + pause overlay interplay (Tom, 10/16)', () => {
+  test('pause keeps the alert visible and inert; focus trap holds; Details does nothing', async ({ page }) => {
+    await seedOverlay(page, { state: 'pause', register: 'out-of-fiction', message: '' })
+    await openFeedWith(page, [EMERGENCY])
+    const overlay = page.getByTestId('pulse-overlay-pause-out-of-fiction')
+    const heading = overlay.getByRole('heading', { name: 'EXERCISE PAUSED' })
+    await expect(heading).toBeVisible()
+
+    const bar = page.getByTestId('pulse-alert-bar')
+    const message = bar.getByTestId('pulse-alert-bar-message')
+    await expect(message).toBeVisible()
+    await expect(bar).toHaveAttribute('inert', '')
+    await expectLayerOnTop(page, await boxOf(message), 'bar-inert', 'emergency text')
+    await expectLayerOnTop(page, await boxOf(heading), 'overlay', 'overlay heading')
+    expect(boxesOverlap(await boxOf(message), await boxOf(heading))).toBe(false)
+    expect(boxesOverlap(await boxOf(bar), await boxOf(overlay.locator('h1')))).toBe(false)
+    await expectNoHorizontalScroll(page)
+
+    // Assistive tech: the dialog's description carries the alert.
+    await expect(overlay).toHaveAccessibleDescription(
+      `Active alert. EMERGENCY: ${EMERGENCY.message}`)
+
+    // Inert: tapping Details navigates nowhere.
+    const details = await boxOf(page.getByTestId('pulse-alert-bar-details'))
+    await page.touchscreen.tap(details.x + details.width / 2, details.y + details.height / 2)
+    await expect(page).toHaveURL(/\/home$/)
+
+    // Focus trap: focus lands in the overlay and Tab never leaves it.
+    for (let i = 0; i < 6; i++) {
+      await page.keyboard.press('Tab')
+      const inside = await page.evaluate(() => {
+        const o = document.querySelector('[data-shell-layer="overlay"]')
+        return !!o && (o === document.activeElement || o.contains(document.activeElement))
+      })
+      expect(inside, `focus escaped the overlay after Tab #${i + 1}`).toBe(true)
+    }
+  })
+
+  test('taps on the inert bar band never reach the feed scrolled underneath', async ({ page }) => {
+    await seedOverlay(page, { state: 'pause', register: 'in-fiction', message: '' })
+    await openFeedWith(page, [EMERGENCY])
+    await page.evaluate(() => {
+      const spacer = document.createElement('div')
+      spacer.style.height = '3000px'
+      document.body.appendChild(spacer)
+      window.scrollTo(0, 600)
+    })
+    const band = await boxOf(page.getByTestId('pulse-alert-bar'))
+    const before = await page.evaluate(() => document.body.innerText)
+    const points = [0.05, 0.5, 0.95].map(frac => ({
+      x: band.x + band.width * (0.1 + frac * 0.8),
+      y: band.y + band.height * frac,
+    }))
+    // Non-vacuous: without the shield the band points fall through to the feed.
+    const setShield = (show: boolean) => page.evaluate(display => {
+      const el = document.querySelector<HTMLElement>(
+        '[data-testid="pulse-overlay-pause-alert-shield"]')
+      if (el) el.style.display = display
+    }, show ? '' : 'none')
+    await setShield(false)
+    const bare = await Promise.all(points.map(pt => topmostLayerAt(page, pt.x, pt.y)))
+    expect(bare, 'without the shield some band point must hit the feed').toContain('content')
+    await setShield(true)
+    for (const pt of points) {
+      expect(await topmostLayerAt(page, pt.x, pt.y), 'band point').toBe('shield')
+      await page.touchscreen.tap(pt.x, pt.y)
+    }
+    await expect(page).toHaveURL(/\/home$/)
+    expect(await page.evaluate(() => document.body.innerText)).toBe(before)
+  })
+
+  test('the pause dialog has empty polite and assertive alert-change regions at open', async ({ page }) => {
+    await seedOverlay(page, { state: 'pause', register: 'in-fiction', message: '' })
+    await openFeedWith(page, [EMERGENCY])
+    const live = page.getByTestId('pulse-overlay-pause-alert-live')
+    const assertive = page.getByTestId('pulse-overlay-pause-alert-live-assertive')
+    await expect(live).toBeEmpty()
+    await expect(live).toHaveAttribute('aria-live', 'polite')
+    await expect(assertive).toBeEmpty()
+    await expect(assertive).toHaveAttribute('aria-live', 'assertive')
+  })
+
+  test('pause holds the ticker rotation', async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: 'no-preference' })
+    await page.clock.install()
+    await seedOverlay(page, { state: 'pause', register: 'in-fiction', message: '' })
+    await openFeedWith(page, [ADVISORY, ADVISORY_2])
+    const message = page.getByTestId('pulse-alert-bar').getByTestId('pulse-alert-bar-message')
+    const first = await message.innerText()
+    await page.clock.runFor(20000)
+    await expect(message).toHaveText(first)
+  })
+
+  test('EndEx covers the alert bar entirely', async ({ page }) => {
+    await seedOverlay(page, { state: 'endex', register: 'out-of-fiction', message: '' })
+    await openFeedWith(page, [EMERGENCY])
+    const overlay = page.getByTestId('pulse-overlay-endex-out-of-fiction')
+    await expect(overlay).toBeVisible()
+    const bar = await boxOf(page.getByTestId('pulse-alert-bar'))
+    await expectLayerOnTop(page, bar, 'overlay', 'alert band under EndEx')
+  })
+})
+
+test.describe('alert bar: scroll restoration on Back (AC3)', () => {
+  test('Back from /alerts restores the previous scroll position', async ({ page }) => {
+    await openFeedWith(page, [ADVISORY, EMERGENCY])
+    await expect(page.getByRole('tab', { name: 'All Posts' })).toBeVisible()
+    const scrollable = await expect.poll(() => page.evaluate(
+      () => document.documentElement.scrollHeight - window.innerHeight)).toBeGreaterThan(200)
+      .then(() => true, () => false)
+    expect(scrollable, 'the seeded feed must be tall enough to scroll').toBe(true)
+    const target = await page.evaluate(() => {
+      window.scrollTo(0, 250)
+      return window.scrollY
+    })
+    expect(target).toBeGreaterThan(150)
+    // Let the app's scroll listener settle before leaving.
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(target)
+    await page.getByTestId('pulse-alert-bar-details').click()
+    await expect(page).toHaveURL(/\/alerts$/)
+    await page.goBack()
+    await expect(page).toHaveURL(/\/home$/)
+    await expect(page.getByRole('tab', { name: 'All Posts' })).toBeVisible()
+    await expect.poll(async () => Math.abs((await page.evaluate(() => window.scrollY)) - target))
+      .toBeLessThanOrEqual(5)
+  })
 })

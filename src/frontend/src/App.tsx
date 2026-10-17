@@ -65,6 +65,7 @@ import { ToastContainer } from 'react-toastify'
 import 'react-toastify/dist/ReactToastify.css'
 
 import { BrandThemeProvider } from './features/participant-shell/BrandThemeProvider'
+import { PwaRoot } from '@/features/pwa'
 import { ShellLayout } from './features/participant-shell/ShellLayout'
 import { ParticipantLandingGuard } from '@/features/participant-shell'
 import { SocialChannel } from './features/social'
@@ -97,6 +98,7 @@ const router = createBrowserRouter(
     // COBRA-free by construction — the only theme here is the per-brand skin.
     participantSurface: (
       <BrandThemeProvider>
+        <PwaRoot />
         <ShellLayout>
           {/* Sets `--pulse-ac` from the resolved brand for the whole channel (F5, #433). */}
           <SocialBrandScope>

@@ -300,6 +300,46 @@ const FeedRow = memo(function FeedRow({
   )
 })
 
+interface FeedListProps {
+  views: readonly PostView[]
+  variant: CardVariant
+  onOpenThread?: (id: string) => void
+  onReply?: (id: string) => void
+  onHashtagOpen?: (tag: string) => void
+  onOpenProfile?: (personaId: string) => void
+}
+
+/**
+ * The rendered list, memoized as a unit (mobile-tablet story 07, NFR-002). An arrival
+ * buffered behind the pill re-renders `<Feed>` (the pill's count is its state) but changes
+ * none of these props, so the whole list - including building one element per row - is
+ * skipped instead of re-walked on every arrival.
+ */
+const FeedList = memo(function FeedList({
+  views,
+  variant,
+  onOpenThread,
+  onReply,
+  onHashtagOpen,
+  onOpenProfile,
+}: FeedListProps) {
+  return (
+    <ul className={styles.list} aria-live="polite">
+      {views.map(post => (
+        <FeedRow
+          key={post.id}
+          post={post}
+          variant={variant}
+          onOpenThread={onOpenThread}
+          onReply={onReply}
+          onHashtagOpen={onHashtagOpen}
+          onOpenProfile={onOpenProfile}
+        />
+      ))}
+    </ul>
+  )
+})
+
 export interface FeedProps {
   /**
    * Which feed to render (story 02, SOC-081). Defaults to `'all'` — omitting
@@ -612,19 +652,14 @@ export function Feed({
       {/* aria-live region: it now changes ONLY when the reader taps the pill
           (a user-initiated load), never on its own — the initial render is not
           announced (live regions only announce subsequent changes). */}
-      <ul className={styles.list} aria-live="polite">
-        {displayViews.map(post => (
-          <FeedRow
-            key={post.id}
-            post={post}
-            variant={cardVariant}
-            onOpenThread={onOpenThread}
-            onReply={onOpenThread !== undefined ? handleReply : undefined}
-            onHashtagOpen={onHashtagOpen}
-            onOpenProfile={onOpenProfile}
-          />
-        ))}
-      </ul>
+      <FeedList
+        views={displayViews}
+        variant={cardVariant}
+        onOpenThread={onOpenThread}
+        onReply={onOpenThread !== undefined ? handleReply : undefined}
+        onHashtagOpen={onHashtagOpen}
+        onOpenProfile={onOpenProfile}
+      />
 
       {loading && posts.length === 0 && <FeedSkeleton />}
       {!loading && error !== undefined && posts.length === 0 && (

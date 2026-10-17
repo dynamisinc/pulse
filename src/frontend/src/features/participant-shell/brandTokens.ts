@@ -190,6 +190,18 @@ async function fetchBrandTokens(): Promise<BrandTokens> {
  * partial/undefined brand.
  */
 export function useBrandConfig(): BrandTokens {
+  return useResolvedBrandConfig() ?? DEFAULT_BRAND_TOKENS
+}
+
+/**
+ * Like {@link useBrandConfig} but WITHOUT the screened-default fallback: returns
+ * `undefined` until the exercise's brand has actually resolved (loading or
+ * fetch failure). For consumers that must fail CLOSED rather than advertise a
+ * placeholder identity - e.g. the PWA manifest (mobile-tablet story 09), which
+ * must never publish the default "Sample Exercise Network" name as an installable
+ * app. Shares `useBrandConfig`'s query key, so it costs no extra request.
+ */
+export function useResolvedBrandConfig(): BrandTokens | undefined {
   const { exerciseId } = useExerciseContext()
 
   const { data } = useQuery({
@@ -197,7 +209,7 @@ export function useBrandConfig(): BrandTokens {
     queryFn: fetchBrandTokens,
   })
 
-  return data ?? DEFAULT_BRAND_TOKENS
+  return data
 }
 
 // -----------------------------------------------------------------------------

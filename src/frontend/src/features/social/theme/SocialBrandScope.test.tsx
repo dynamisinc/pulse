@@ -73,6 +73,13 @@ describe('SocialBrandScope — --pulse-ac is set from the resolved brand accent'
     expect(scope).toContainElement(screen.getByRole('button', { name: 'Follow' }))
   })
 
+  it('publishes the shared 44px touch minimum for the social CSS modules (story 18)', () => {
+    renderScope(SECTOR_SEVEN)
+    expect(
+      screen.getByTestId('social-brand-scope').style.getPropertyValue('--pulse-touch-min'),
+    ).toBe('44px')
+  })
+
   it('follows a rebrand: a different brand yields a different --pulse-ac, no other code changes', () => {
     const { rerender } = renderScope(SECTOR_SEVEN)
     expect(

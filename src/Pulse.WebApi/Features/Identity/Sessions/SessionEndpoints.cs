@@ -10,6 +10,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Pulse.WebApi.Features.Identity.EasyLogin;
 using Pulse.WebApi.Features.Identity.Staff;
+using Pulse.WebApi.Features.Identity.RateLimits;
 
 /// <summary>
 /// The session slice HTTP surface + composition-root seams (story 03, the hinge): <c>GET /api/session</c>,
@@ -96,6 +97,7 @@ public static class SessionEndpoints
         // Per-IP fixed-window limiter on the session endpoints (NFR-009). Generous (60/min) because these
         // require an EXISTING valid token/refresh token (not credential guessing — that lockout is the login
         // stories' concern). Enforcement needs app.UseRateLimiter() (orchestrator-owned).
+        AuthRateLimitsStartupCheck.Register(services);
         services.AddRateLimiter(options =>
         {
             options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
@@ -104,7 +106,9 @@ public static class SessionEndpoints
                     partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
                     factory: _ => new FixedWindowRateLimiterOptions
                     {
-                        PermitLimit = 60,
+                        // Configurable (Authentication:RateLimits:SessionPerMinute); default 60 — see AuthRateLimits.
+                        PermitLimit = AuthRateLimits.SessionPerMinute(
+                            httpContext.RequestServices.GetRequiredService<IConfiguration>()),
                         Window = TimeSpan.FromMinutes(1),
                         QueueLimit = 0,
                     }));
