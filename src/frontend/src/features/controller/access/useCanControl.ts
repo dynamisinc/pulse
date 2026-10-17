@@ -21,8 +21,9 @@
  * told "you are a controller" can be shown to the wrong role. Tests choose the session (or mock
  * this module) instead.
  *
- * THIS HIDES CONTROLS; IT AUTHORIZES NOTHING. The API does not yet refuse an evaluator's write
- * (#61 / #377, after the demo): an evaluator with a REST client can still write.
+ * THIS HIDES CONTROLS; IT AUTHORIZES NOTHING. The server enforces every write through the
+ * role-matrix filters (`Features/Identity/RoleMatrix/*`, `LeadControllerRaiseFilter`, write-time
+ * lead checks); the UI gates only mirror that enforcement.
  */
 
 import { usePermissions } from '@/core/auth'

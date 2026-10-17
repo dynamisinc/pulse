@@ -92,7 +92,7 @@ describe('useSwampedMode — lead can toggle', () => {
     expect(result.current.swampedMode).toBe(true)
     const events = swampedEvents()
     expect(events).toHaveLength(1)
-    expect(events[0]?.actor).toEqual({ kind: 'engine', actingHumanId: 'human-lead-1' })
+    expect(events[0]?.actor).toEqual({ kind: 'engine', actingHumanId: 'person-stub' }) // session personId, not the mock identity
     expect(events[0]?.scenarioTime).toBe('2033-09-04T14:00:00.000Z')
     expect(events[0]?.channel).toBe('system')
     expect(events[0]?.payload).toEqual({ action: 'swamped-mode-enabled' })

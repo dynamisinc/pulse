@@ -45,7 +45,7 @@ import { scenarioNow } from '@/core/clock'
 import { useExerciseContext } from '@/core/exerciseContext'
 import { buildAndEmit } from '@/core/telemetry'
 import { wallClockNowIso } from '@/core/time/wallClock'
-import { usePermissions } from '@/core/auth'
+import { usePermissions, useOptionalSession } from '@/core/auth'
 import { useControllerIdentity } from '../../identity/controllerIdentity'
 
 // ---------------------------------------------------------------------------
@@ -125,6 +125,8 @@ export function useSwampedMode(): UseSwampedModeResult {
   // Story 17: the lead flag is the SERVER's (`Session.isLead`, read live per request), never the
   // mock identity's. Raising is lead-only; lowering is open to every controller.
   const { can } = usePermissions()
+  // Telemetry actor = the signed-in person; the mock identity is only a fallback (null personId).
+  const actingHumanId = useOptionalSession()?.personId ?? identity.actingHumanId
   const isLead = can('raiseAutonomy')
   const { exerciseId, timeZone } = useExerciseContext()
 
@@ -149,7 +151,7 @@ export function useSwampedMode(): UseSwampedModeResult {
         exerciseId,
         eventType: 'engine.swamped_mode_changed',
         channel: 'system',
-        actor: { kind: 'engine', actingHumanId: identity.actingHumanId },
+        actor: { kind: 'engine', actingHumanId },
         origin: 'engine',
         wallClockTime: wallClockNowIso(),
         scenarioTime: scenarioNow().toISOString(),
@@ -158,7 +160,7 @@ export function useSwampedMode(): UseSwampedModeResult {
         payload: { action: next ? 'swamped-mode-enabled' : 'swamped-mode-disabled' },
       })
     },
-    [exerciseId, timeZone, isLead, identity.actingHumanId],
+    [exerciseId, timeZone, isLead, actingHumanId],
   )
 
   return { swampedMode, isLead, setSwampedMode }
