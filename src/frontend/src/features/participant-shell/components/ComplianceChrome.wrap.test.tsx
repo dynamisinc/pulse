@@ -73,7 +73,10 @@ beforeEach(() => {
     private readonly cb: () => void
     constructor(cb: () => void) { this.cb = cb; observers.push(cb) }
     observe() {}
-    disconnect() { observers.splice(observers.indexOf(this.cb), 1) }
+    disconnect() {
+      const i = observers.indexOf(this.cb)
+      if (i >= 0) observers.splice(i, 1)
+    }
   })
   mockUseChromeConfig.mockReturnValue(CONFIG)
 })
@@ -106,7 +109,7 @@ describe('ComplianceChrome on narrow screens (#612)', () => {
     heights['pulse-compliance-chrome-bottom'] = 39.2
     render(<ComplianceChrome />)
     expect(rootVar(SHELL_CHROME_TOP_VAR)).toBe('28px')
-    expect(rootVar(SHELL_CHROME_BOTTOM_VAR)).toBe('40px') // rounded UP, nothing tucks under
+    expect(rootVar(SHELL_CHROME_BOTTOM_VAR)).toBe('39.2px') // exact: no overlap, no sub-pixel gap
   })
 
   it('re-publishes when a banner resizes (rotation, font load, text change)', () => {
@@ -130,6 +133,23 @@ describe('ComplianceChrome on narrow screens (#612)', () => {
 
     act(() => media.set(true))
     expect(rootVar(SHELL_CHROME_TOP_VAR)).toBe('28px')
+  })
+
+  it('re-measures when the configured text changes', () => {
+    stubMatchMedia(true)
+    const { rerender } = render(<ComplianceChrome />)
+    heights['pulse-compliance-chrome-top'] = 39
+    mockUseChromeConfig.mockReturnValue({ ...CONFIG, top: { ...CONFIG.top, text: `${CONFIG.top.text} -- LONGER` } })
+    rerender(<ComplianceChrome />)
+    expect(rootVar(SHELL_CHROME_TOP_VAR)).toBe('39px')
+  })
+
+  it('measures once (no throw) where ResizeObserver does not exist', () => {
+    stubMatchMedia(true)
+    vi.stubGlobal('ResizeObserver', undefined)
+    render(<ComplianceChrome />)
+    expect(rootVar(SHELL_CHROME_TOP_VAR)).toBe('28px')
+    expect(rootVar(SHELL_CHROME_BOTTOM_VAR)).toBe('28px')
   })
 
   it('still clears both vars on unmount', () => {

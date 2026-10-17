@@ -30,7 +30,9 @@ const bottom = (page: Page) => page.getByTestId('pulse-compliance-chrome-bottom'
 /** True when the banner's text is fully shown: no horizontal clip, no clamped lines. */
 async function showsFullText(banner: Locator): Promise<boolean> {
   return banner.evaluate(el => {
-    const text = el.querySelector('span') as HTMLElement
+    // Falls back to the band itself where there is no inner text span (e.g. older builds),
+    // so the band's own horizontal-overflow check still decides.
+    const text = el.querySelector('span') ?? el
     return el.scrollWidth <= el.clientWidth + 1
       && text.scrollWidth <= text.clientWidth + 1
       && text.scrollHeight <= text.clientHeight + 1

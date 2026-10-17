@@ -47,6 +47,11 @@
  * moving `ShellLayout`'s `var(--pulse-chrome-*, 0px)` consumer with them —
  * deferred to story 06 / the staff-shell preview composition, when that
  * container actually exists.
+ * On narrow screens (see below) each instance also re-publishes from its own
+ * ResizeObserver, so the "winner" is the last instance to MEASURE, not the
+ * last to mount; and the wrap query is viewport-based, so a narrow preview
+ * pane inside a desktop staff frame does not wrap. Both belong to the same
+ * deferred scoping follow-up.
  *
  * Narrow screens (#612, D7-005 phone amendment): below `CHROME_WRAP_QUERY`
  * (~700px) a 22px single line cannot hold a typical marking (the default bottom
@@ -72,7 +77,7 @@
  */
 
 import { useLayoutEffect, useRef, type CSSProperties } from 'react'
-import { useMediaQuery } from '@/core/hooks/useMediaQuery'
+import { useCssMediaQuery } from '@/core/hooks/useCssMediaQuery'
 import {
   SHELL_CHROME_BOTTOM_VAR,
   SHELL_CHROME_TOP_VAR,
@@ -188,9 +193,13 @@ function publishChromeInset(top: string, bottom: string): void {
   root.style.setProperty(SHELL_CHROME_BOTTOM_VAR, bottom)
 }
 
-/** A banner's rendered height as a whole-px CSS length (rounded up, so nothing tucks under it). */
+/**
+ * A banner's rendered (border-box) height as a CSS length. Unrounded on purpose: what is
+ * pinned at `top: var(--pulse-chrome-top)` then meets the banner exactly, with neither a
+ * sliver of overlap nor a sub-pixel gap for scrolling content to show through.
+ */
 function measuredHeight(el: HTMLElement): string {
-  return `${Math.ceil(el.getBoundingClientRect().height)}px`
+  return `${el.getBoundingClientRect().height}px`
 }
 
 /**
@@ -218,7 +227,7 @@ function releaseChromeInset(): void {
  */
 export function ComplianceChrome() {
   const config = useChromeConfig()
-  const wraps = useMediaQuery(CHROME_WRAP_QUERY)
+  const wraps = useCssMediaQuery(CHROME_WRAP_QUERY)
   const topRef = useRef<HTMLDivElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
 
@@ -249,8 +258,10 @@ export function ComplianceChrome() {
     publish()
     if (typeof ResizeObserver === 'undefined') return undefined
     const observer = new ResizeObserver(publish)
-    observer.observe(top)
-    observer.observe(bottom)
+    // Border box: the published value includes the safe-area padding, so a padding-only
+    // change (a rotation that moves the insets) must re-measure too.
+    observer.observe(top, { box: 'border-box' })
+    observer.observe(bottom, { box: 'border-box' })
     return () => observer.disconnect()
   }, [config.enabled, wraps, config.top.text, config.bottom.text])
 

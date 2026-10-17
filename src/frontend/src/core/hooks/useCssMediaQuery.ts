@@ -1,5 +1,5 @@
 /**
- * core/hooks/useMediaQuery.ts
+ * core/hooks/useCssMediaQuery.ts
  * ---------------------------------------------------------------------------
  * Whether a CSS media query currently matches, kept live as the viewport changes
  * (rotation, window resize). Built on `useSyncExternalStore`, so a change re-renders
@@ -11,6 +11,9 @@
  *
  * One `MediaQueryList` is kept per query string and reused by `subscribe` and
  * `getSnapshot`; it is rebuilt if a test swaps `window.matchMedia`.
+ *
+ * Named apart from MUI's `useMediaQuery` (staff surfaces) so an auto-import on a participant
+ * path cannot pull the MUI one in.
  *
  * Used by: participant-shell `ComplianceChrome` (narrow-screen banner wrap, #612).
  */
@@ -28,7 +31,7 @@ function mediaList(query: string): MediaQueryList | undefined {
   return list
 }
 
-export function useMediaQuery(query: string): boolean {
+export function useCssMediaQuery(query: string): boolean {
   const subscribe = useCallback((onChange: () => void) => {
     const list = mediaList(query)
     if (list === undefined) return () => {}
