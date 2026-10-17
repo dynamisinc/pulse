@@ -110,8 +110,6 @@ From top to bottom, left to right:
 | **REVIEW QUEUE** (far right) | Drafts from the AI engine waiting for your decision |
 | **Toolstrip** (right edge) | **PERSONAS** (opens the persona search), **ENGINE** (engine settings), **USAGE** (AI usage), **ADMIN** (participant login triage) |
 
-On screens narrower than about 1280 pixels, Live world and Run sheet stack, with Live world on top.
-
 **Evaluators** can open the same console in a read-only form. They see a **View only** chip, and every control that
 changes the exercise is absent. They can still export posts and open the exercise report.
 
@@ -800,6 +798,27 @@ screens. The layout depends on the width of the window; touch-sized buttons depe
 device uses a finger (a coarse pointer), so an iPad with a trackpad gets the tablet layout and a
 narrow desktop window gets the tablet layout without the larger buttons. At 1280 px and wider
 nothing changes.
+
+### The console layout on a tablet
+
+The console works on an iPad. From 1280 pixels wide it is the desktop layout above. Narrower than that it changes
+shape, and what you can do stays the same.
+
+- **The command band.** A strip under the staff header always shows the engine switch, the **Pause** pill and, at the
+  far right, **End exercise**. It never scrolls away, never hides behind a tab and is not covered by a side panel.
+- **Panes.** Live world, Run sheet and the Review queue share the screen according to the tablet's size and
+  orientation. In landscape the Review queue stays docked on the right. At 1180 pixels wide (an iPad in landscape)
+  Live world and Run sheet sit side by side; at 1024 they share one pane with two tabs. In portrait the tabs are
+  **Live world**, **Run sheet** and **Review**, or, on a tall screen, the Review queue is docked below them.
+- **Tab badges.** Each tab says in words what needs you: "12 new" on Live world, "3 due" on Run sheet, and
+  "5 · 1 under 60s" on Review (items waiting, and how many timers are about to run out). Switching tabs or rotating between the
+  tablet layouts keeps your place, a half-typed edit and an open persona panel. (Growing the window past 1280 pixels
+  switches to the desktop layout and starts the panes fresh.)
+- **Steering.** The escalation dial and the White noise control sit behind a **STEERING** row that starts closed. It
+  shows the current storyline target and noise level in a line; tap it to open the controls.
+- **More.** **Export posts** and **Exercise report** are under the **...** button in the title row.
+
+An evaluator or planner sees the same read-only console on a tablet as on a desktop.
 
 ### The header, toolstrip and flyouts on a tablet
 

@@ -120,6 +120,16 @@
  * X, an ENGINE / USAGE flyout taking over, an exercise switch), so the target never
  * outlives the dock that showed it.
  *
+ * ## TABLET BANDS (mobile-tablet, story 12; D5-021 to D5-026)
+ * At 1280px and up the console is exactly the layout described above. Under 1280 it renders
+ * `console/ConsoleTabletFrame` instead (a command band, a "Steering" disclosure, a "More" menu
+ * and a pane grid whose arrangement comes from the ONE table in `console/consoleLayout.ts`).
+ * This file only chooses which work area to draw: the slot contexts, the dock state, the
+ * ⌘K palette and its key listener, the flyouts and the draft drivers are shared by both. A
+ * rotation WITHIN the tablet bands never resets them. Crossing 1280 (an iPad Pro 1366 rotating to
+ * 1024) swaps the work area, so panes and flyouts REMOUNT then: a known limit (story 12 doc).
+ * The shortcut strip is drawn by both, unchanged (story 14 owns it).
+ *
  * World: staff (COBRA/Cadence) — everything here is COBRA chrome; the
  * participant OUTPUT (a published post) is `persona-operation`'s / the engine
  * review queue's via `createPost` and is never drawn here. Never a participant
@@ -176,12 +186,15 @@ import {
   type ReviewQueueEditSlotProps,
 } from '../engine'
 import type { ReplyTarget } from '@/features/social'
+import {
+  SLOT_SPLIT_MIN_WIDTH_PX,
+  useConsoleLayout,
+} from '../console/consoleLayout'
+import { ConsoleTabletFrame } from '../console/ConsoleTabletFrame'
+import { PaneBadgeContext, usePaneBadgeStore } from '../console/paneBadges'
 
 /** The docked review-queue column's fixed width (D5 §6 "336px, sole tenant"). */
 const REVIEW_QUEUE_WIDTH_PX = 336
-
-/** Viewport width at which Live world | Run sheet sit side by side (C4 AC). */
-const SLOT_SPLIT_MIN_WIDTH_PX = 1280
 
 /** Smallest height a main-area slot row is given before the region scrolls. */
 const SLOT_MIN_HEIGHT_PX = 320
@@ -595,217 +608,257 @@ export function ControllerConsole(
   // lone panel takes the full width instead of sitting in half a split.
   const slotsTwoColumn = slotsSplit && Boolean(liveWorldSlot) && Boolean(runSheetSlot)
 
-  return (
-    <Box
-      ref={rootRef}
-      data-testid="controller-console"
-      // The last-resort home for focus (`CommandPalette`'s fallback when the layer it was opened
-      // over has closed): focusable by script only, no tab stop, no ring on a container.
-      data-console-root=""
-      tabIndex={-1}
-      // Positioning context for the console's own flyouts (persona-dock host),
-      // anchored to the work area's edges — mirrors the evaluator dashboard page.
-      sx={{ position: 'relative', height: '100%', overflow: 'hidden', outline: 'none' }}
+  // Tablet bands (story 12): under 1280px the tablet frame replaces the desktop work area.
+  const consoleLayout = useConsoleLayout()
+  const tabletLayout = consoleLayout.layout
+  const paneBadges = usePaneBadgeStore()
+
+  // The ⌘K shortcut strip (story 14 owns its behaviour). Drawn by both work areas.
+  const shortcutStrip = canControl ? (
+    <Stack
+      direction="row"
+      data-testid="console-shortcut-strip"
+      sx={{
+        alignItems: 'center',
+        gap: 1,
+        flexWrap: 'wrap',
+        fontSize: 12,
+        color: staffShellTokens.accent.secondaryText,
+      }}
     >
-      <Box sx={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-        {/* The engine-control chrome strip — full width, top of the work area
-            (D5 §2). Reads the SAME useReviewQueue()/useEngineControl()/
-            useSwampedMode() singleton-store hooks as the driver map + the
-            docked queue below (D5-014/2.1 counts-consistency). */}
-        <Box sx={{ flex: 'none' }}>
-          <EngineControlBar />
-        </Box>
+      <FontAwesomeIcon icon={faKeyboard} aria-hidden="true" />
+      <Box component="kbd" sx={KBD_SX}>⌘K</Box>
+      <Box component="span">/</Box>
+      <Box component="kbd" sx={KBD_SX}>Ctrl+K</Box>
+      <Box component="span">Post as a persona</Box>
+    </Stack>
+  ) : null
 
-        <Stack direction="row" sx={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
-          {/* Main content region — the existing header/⌘K hint/persona-dock
-              host mount, unchanged by this integration. */}
-          <Box sx={{ flex: 1, minWidth: 0, overflow: 'auto' }}>
-            {/* Fixed to the work area's height (not just a minimum) so the slot
-                grid below can take the REMAINING height and each slot can own
-                its own scroll; if the area is too short, this box overflows and
-                the region itself scrolls instead. */}
-            <Stack sx={{ gap: 1.5, p: '18px 22px', height: '100%', boxSizing: 'border-box' }}>
-              <Stack direction="row" sx={{ alignItems: 'center', gap: 1 }}>
-                <FontAwesomeIcon
-                  icon={faTowerBroadcast}
-                  color={staffShellTokens.header.background}
-                />
-                <Typography
-                  component="h1"
-                  sx={{
-                    fontSize: 14,
-                    fontWeight: 800,
-                    letterSpacing: '0.1em',
-                    color: staffShellTokens.header.background,
-                  }}
-                >
-                  CONTROLLER CONSOLE
-                </Typography>
-                <Box sx={{ flex: 1 }} />
-                <ViewOnlyChip />
-                {lifecycleSlot}
-                {/* demo-feedback 09: the post activity export (any staff role, DF-8). */}
-                <ExportPostsButton />
-                {/* demo-feedback 29: the printable exercise report, in a new tab. */}
-                <ExerciseReportButton />
-                <Typography
-                  data-testid="controller-callsign"
-                  sx={{
-                    fontSize: 11,
-                    fontWeight: 700,
-                    letterSpacing: '0.08em',
-                    color: staffShellTokens.accent.secondaryText,
-                  }}
-                >
-                  {identity.callSign}
-                </Typography>
-              </Stack>
-
-              {/* Shortcut strip — the one place the console says how to start. */}
-              {canControl && <Stack
-                direction="row"
-                data-testid="console-shortcut-strip"
-                sx={{
-                  alignItems: 'center',
-                  gap: 1,
-                  flexWrap: 'wrap',
-                  fontSize: 12,
-                  color: staffShellTokens.accent.secondaryText,
-                }}
-              >
-                <FontAwesomeIcon icon={faKeyboard} aria-hidden="true" />
-                <Box component="kbd" sx={KBD_SX}>⌘K</Box>
-                <Box component="span">/</Box>
-                <Box component="kbd" sx={KBD_SX}>Ctrl+K</Box>
-                <Box component="span">Post as a persona</Box>
-              </Stack>}
-
-              {/* World-steering (world-steering feature): the tiered-pause control + the
-                  storyline escalation dial. PausePill drives usePauseState (the
-                  header state pill reflects the tier); EscalationDial sets the
-                  storyline target the engine will follow (loop deferred). Both
-                  are self-contained COBRA staff controls. The White noise knob
-                  (demo-feedback 09) sits BESIDE the pause pill, the two in one row. */}
-              <Stack data-testid="world-steering-panel" sx={{ gap: 1.5, mt: 0.5 }}>
-                <Stack
-                  direction="row"
-                  data-testid="world-steering-row"
-                  sx={{ alignItems: 'center', gap: 1.5, flexWrap: 'wrap' }}
-                >
-                  <PausePill />
-                  <NoiseControl />
-                </Stack>
-                <Box sx={{ maxWidth: 520 }}>
-                  <EscalationDial />
-                </Box>
-              </Stack>
-
-              {/* Main-area slots: Live world | Run sheet (split >= 1280px,
-                  stacked below). Nothing supplied = one status line, never
-                  placeholder panels. */}
-              {hasSlots ? (
-                <Box
-                  data-testid="console-slots"
-                  data-layout={slotsTwoColumn ? 'split' : 'stacked'}
-                  sx={{
-                    display: 'grid',
-                    gridTemplateColumns: slotsTwoColumn
-                      ? 'repeat(2, minmax(0, 1fr))'
-                      : 'minmax(0, 1fr)',
-                    // Rows share the remaining height, never below a usable floor.
-                    gridAutoRows: `minmax(${SLOT_MIN_HEIGHT_PX}px, 1fr)`,
-                    gap: 2,
-                    alignItems: 'stretch',
-                    // Fill the height left under the steering controls, and be
-                    // allowed to shrink to it (a slot can then own its scroll).
-                    flex: 1,
-                    minHeight: 0,
-                    mt: 0.5,
-                  }}
-                >
-                  {liveWorldSlot && (
-                    <Box
-                      component="section"
-                      aria-label="Live world"
-                      data-testid="console-slot-live-world"
-                      sx={SLOT_SECTION_SX}
-                    >
-                      {liveWorld}
-                    </Box>
-                  )}
-                  {runSheetSlot && (
-                    <Box
-                      component="section"
-                      aria-label="Run sheet"
-                      data-testid="console-slot-run-sheet"
-                      sx={SLOT_SECTION_SX}
-                    >
-                      {runSheet}
-                    </Box>
-                  )}
-                </Box>
-              ) : (
-                <Typography
-                  data-testid="console-slots-status"
-                  sx={{ fontSize: 12, color: staffShellTokens.accent.secondaryText }}
-                >
-                  Live world and run sheet are not connected to this console.
-                </Typography>
-              )}
-            </Stack>
-          </Box>
-
-          {/* The engine review queue — a PERMANENT docked column (D5-017), NOT
-              a toolstrip flyout. Self-contained; reads useReviewQueue()
-              internally. The edit slot is supplied by the /console route. */}
-          <Box
-            data-testid="review-queue-column"
-            sx={{
-              flex: 'none',
-              width: REVIEW_QUEUE_WIDTH_PX,
-              minWidth: REVIEW_QUEUE_WIDTH_PX,
-              height: '100%',
-              overflow: 'hidden',
-            }}
-          >
-            <ReviewQueue editSlot={reviewEditSlot} />
-          </Box>
-        </Stack>
-      </Box>
-
-      {/* One invisible driver per CountingDown item — the safety demo (see
-          `DraftTimerDriver`'s module header). Auto-HOLDs by default; the ONLY
-          timeout auto-send is swamped(lead) on a still-effectively-Delayed-auto
-          draft, and a STOP/Suggest-only/degraded engine holds even then. A timeout can
-          publish, so an evaluator's console runs no drivers (story 11). */}
-      {canControl && countingDownItems.map(item => (
-        <DraftTimerDriver
-          key={item.draftId}
-          item={item}
-          countdown={item.countdown}
-          swampedMode={swampedMode}
-          effective={engineControl.effective}
-          ctx={draftTimerCtx}
-        />
-      ))}
-
-      {canControl && <PersonasTool personaCount={personaCount} />}
-      {/* A non-controller never acts, so it re-reads the pause tier and engine settings on a
-          timer; a controller's console mounts (and subscribes to) none of it. */}
-      {!canControl && <ReadOnlyRefresh />}
-
-      <CommandPalette
-        open={canControl && paletteOpen}
-        onClose={closePalette}
-        onSelectPersona={handleSelectPersona}
-        renderPersonaResults={renderPersonaResults}
-      />
-
+  // The persona dock and the ENGINE / USAGE flyouts, in the order their focus effects rely on
+  // (dock first). Desktop mounts them on the console root; the tablet frame mounts them over its
+  // pane area so they never cover the command band.
+  const flyouts = (
+    <>
       <PersonaDockHost open={canControl && dockPersonaOpen} onClose={closeDock} slots={dockSlots} />
 
       <EngineSettingsPanel open={engineSettingsOpen} onClose={closeEngineSettings} />
 
       <UsagePanel open={engineUsageOpen} onClose={closeEngineUsage} />
-    </Box>
+    </>
+  )
+
+  // Only a tablet reads the badge counts: on desktop no publisher exists, so a burst of unread
+  // changes never re-renders the console. A band crossing republishes (the panes' effects re-run).
+  return (
+    <PaneBadgeContext.Provider value={tabletLayout !== null ? paneBadges.publish : null}>
+      <Box
+        ref={rootRef}
+        data-testid="controller-console"
+        // The last-resort home for focus (`CommandPalette`'s fallback when the layer it was opened
+        // over has closed): focusable by script only, no tab stop, no ring on a container.
+        data-console-root=""
+        tabIndex={-1}
+        // Positioning context for the console's own flyouts (persona-dock host),
+        // anchored to the work area's edges — mirrors the evaluator dashboard page.
+        sx={{ position: 'relative', height: '100%', overflow: 'hidden', outline: 'none' }}
+      >
+        {consoleLayout.layout !== null ? (
+          <ConsoleTabletFrame
+            band={consoleLayout.band}
+            layout={consoleLayout.layout}
+            hasLiveWorld={Boolean(liveWorldSlot)}
+            hasRunSheet={Boolean(runSheetSlot)}
+            liveWorld={liveWorld}
+            runSheet={runSheet}
+            reviewQueue={<ReviewQueue editSlot={reviewEditSlot} />}
+            badges={paneBadges.counts}
+            callSign={identity.callSign}
+            lifecycleSlot={lifecycleSlot}
+            shortcutStrip={shortcutStrip}
+            flyouts={flyouts}
+          />
+        ) : (
+          <Box sx={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            {/* The engine-control chrome strip — full width, top of the work area
+            (D5 §2). Reads the SAME useReviewQueue()/useEngineControl()/
+            useSwampedMode() singleton-store hooks as the driver map + the
+            docked queue below (D5-014/2.1 counts-consistency). */}
+            <Box sx={{ flex: 'none' }}>
+              <EngineControlBar />
+            </Box>
+
+            <Stack direction="row" sx={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
+              {/* Main content region — the existing header/⌘K hint/persona-dock
+              host mount, unchanged by this integration. */}
+              <Box sx={{ flex: 1, minWidth: 0, overflow: 'auto' }}>
+                {/* Fixed to the work area's height (not just a minimum) so the slot
+                grid below can take the REMAINING height and each slot can own
+                its own scroll; if the area is too short, this box overflows and
+                the region itself scrolls instead. */}
+                <Stack sx={{ gap: 1.5, p: '18px 22px', height: '100%', boxSizing: 'border-box' }}>
+                  <Stack direction="row" sx={{ alignItems: 'center', gap: 1 }}>
+                    <FontAwesomeIcon
+                      icon={faTowerBroadcast}
+                      color={staffShellTokens.header.background}
+                    />
+                    <Typography
+                      component="h1"
+                      sx={{
+                        fontSize: 14,
+                        fontWeight: 800,
+                        letterSpacing: '0.1em',
+                        color: staffShellTokens.header.background,
+                      }}
+                    >
+                      CONTROLLER CONSOLE
+                    </Typography>
+                    <Box sx={{ flex: 1 }} />
+                    <ViewOnlyChip />
+                    {lifecycleSlot}
+                    {/* demo-feedback 09: the post activity export (any staff role, DF-8). */}
+                    <ExportPostsButton />
+                    {/* demo-feedback 29: the printable exercise report, in a new tab. */}
+                    <ExerciseReportButton />
+                    <Typography
+                      data-testid="controller-callsign"
+                      sx={{
+                        fontSize: 11,
+                        fontWeight: 700,
+                        letterSpacing: '0.08em',
+                        color: staffShellTokens.accent.secondaryText,
+                      }}
+                    >
+                      {identity.callSign}
+                    </Typography>
+                  </Stack>
+
+                  {/* Shortcut strip — the one place the console says how to start. */}
+                  {shortcutStrip}
+
+                  {/* World-steering (world-steering feature): the tiered-pause control + the
+                  storyline escalation dial. PausePill drives usePauseState (the
+                  header state pill reflects the tier); EscalationDial sets the
+                  storyline target the engine will follow (loop deferred). Both
+                  are self-contained COBRA staff controls. The White noise knob
+                  (demo-feedback 09) sits BESIDE the pause pill, the two in one row. */}
+                  <Stack data-testid="world-steering-panel" sx={{ gap: 1.5, mt: 0.5 }}>
+                    <Stack
+                      direction="row"
+                      data-testid="world-steering-row"
+                      sx={{ alignItems: 'center', gap: 1.5, flexWrap: 'wrap' }}
+                    >
+                      <PausePill />
+                      <NoiseControl />
+                    </Stack>
+                    <Box sx={{ maxWidth: 520 }}>
+                      <EscalationDial />
+                    </Box>
+                  </Stack>
+
+                  {/* Main-area slots: Live world | Run sheet (split >= 1280px,
+                  stacked below). Nothing supplied = one status line, never
+                  placeholder panels. */}
+                  {hasSlots ? (
+                    <Box
+                      data-testid="console-slots"
+                      data-layout={slotsTwoColumn ? 'split' : 'stacked'}
+                      sx={{
+                        display: 'grid',
+                        gridTemplateColumns: slotsTwoColumn
+                          ? 'repeat(2, minmax(0, 1fr))'
+                          : 'minmax(0, 1fr)',
+                        // Rows share the remaining height, never below a usable floor.
+                        gridAutoRows: `minmax(${SLOT_MIN_HEIGHT_PX}px, 1fr)`,
+                        gap: 2,
+                        alignItems: 'stretch',
+                        // Fill the height left under the steering controls, and be
+                        // allowed to shrink to it (a slot can then own its scroll).
+                        flex: 1,
+                        minHeight: 0,
+                        mt: 0.5,
+                      }}
+                    >
+                      {liveWorldSlot && (
+                        <Box
+                          component="section"
+                          aria-label="Live world"
+                          data-testid="console-slot-live-world"
+                          sx={SLOT_SECTION_SX}
+                        >
+                          {liveWorld}
+                        </Box>
+                      )}
+                      {runSheetSlot && (
+                        <Box
+                          component="section"
+                          aria-label="Run sheet"
+                          data-testid="console-slot-run-sheet"
+                          sx={SLOT_SECTION_SX}
+                        >
+                          {runSheet}
+                        </Box>
+                      )}
+                    </Box>
+                  ) : (
+                    <Typography
+                      data-testid="console-slots-status"
+                      sx={{ fontSize: 12, color: staffShellTokens.accent.secondaryText }}
+                    >
+                      Live world and run sheet are not connected to this console.
+                    </Typography>
+                  )}
+                </Stack>
+              </Box>
+
+              {/* The engine review queue — a PERMANENT docked column (D5-017), NOT
+              a toolstrip flyout. Self-contained; reads useReviewQueue()
+              internally. The edit slot is supplied by the /console route. */}
+              <Box
+                data-testid="review-queue-column"
+                sx={{
+                  flex: 'none',
+                  width: REVIEW_QUEUE_WIDTH_PX,
+                  minWidth: REVIEW_QUEUE_WIDTH_PX,
+                  height: '100%',
+                  overflow: 'hidden',
+                }}
+              >
+                <ReviewQueue editSlot={reviewEditSlot} />
+              </Box>
+            </Stack>
+          </Box>
+        )}
+
+        {/* One invisible driver per CountingDown item — the safety demo (see
+          `DraftTimerDriver`'s module header). Auto-HOLDs by default; the ONLY
+          timeout auto-send is swamped(lead) on a still-effectively-Delayed-auto
+          draft, and a STOP/Suggest-only/degraded engine holds even then. A timeout can
+          publish, so an evaluator's console runs no drivers (story 11). */}
+        {canControl && countingDownItems.map(item => (
+          <DraftTimerDriver
+            key={item.draftId}
+            item={item}
+            countdown={item.countdown}
+            swampedMode={swampedMode}
+            effective={engineControl.effective}
+            ctx={draftTimerCtx}
+          />
+        ))}
+
+        {canControl && <PersonasTool personaCount={personaCount} />}
+        {/* A non-controller never acts, so it re-reads the pause tier and engine settings on a
+          timer; a controller's console mounts (and subscribes to) none of it. */}
+        {!canControl && <ReadOnlyRefresh />}
+
+        <CommandPalette
+          open={canControl && paletteOpen}
+          onClose={closePalette}
+          onSelectPersona={handleSelectPersona}
+          renderPersonaResults={renderPersonaResults}
+        />
+
+        {tabletLayout === null && flyouts}
+      </Box>
+    </PaneBadgeContext.Provider>
   )
 }

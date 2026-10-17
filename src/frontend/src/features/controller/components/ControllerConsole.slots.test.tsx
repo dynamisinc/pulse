@@ -269,16 +269,17 @@ describe('ControllerConsole — main-area slots', () => {
       expect(screen.getByTestId('console-slots')).toHaveAttribute('data-layout', 'split')
     })
 
-    it('stacks one column below 1280px, Live world first', async () => {
+    it('hands over to the tablet frame below 1280px (story 12), Live world first', async () => {
       stubViewport(1279)
       renderConsole(slots)
       await screen.findByTestId('controller-console')
 
+      // The desktop stacked layout is gone: 1180 to 1279 is the wide landscape tablet band.
       const grid = screen.getByTestId('console-slots')
-      expect(grid).toHaveAttribute('data-layout', 'stacked')
-      expect(getComputedStyle(grid).gridTemplateColumns).toBe('minmax(0, 1fr)')
+      expect(grid).toHaveAttribute('data-layout', 'landscapeWide')
+      expect(screen.getByTestId('console-tablet-frame')).toBeInTheDocument()
 
-      const [first, second] = Array.from(grid.children)
+      const [first, second] = Array.from(grid.children).filter(child => child.tagName === 'SECTION')
       expect(first).toBe(screen.getByRole('region', { name: 'Live world' }))
       expect(second).toBe(screen.getByRole('region', { name: 'Run sheet' }))
     })

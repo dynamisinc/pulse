@@ -147,6 +147,7 @@ import { liveWorldTokens, monoMeta, srOnly } from './liveWorldStyles'
 import { useLiveWorldFeed } from './useLiveWorldFeed'
 import { defaultPinChangeSource, type PinChangeSource } from './pinChangeSource'
 import { useLiveWorldUnread, useMarkReadWhenSeen } from './useLiveWorldUnread'
+import { usePublishPaneBadge } from '../console/paneBadges'
 import { useCanControl } from '../access'
 
 /** A scroll offset (px) at or below which the list counts as "at the top". */
@@ -303,6 +304,8 @@ function LiveWorldPanel({
     ready: feed.status === 'ready',
   })
   const { unreadIds, unreadCount, markRead, markAllRead } = unread
+  // Tablet pane-switcher badge "N new" (mobile-tablet story 12): every unread post, listed or held.
+  usePublishPaneBadge('liveWorld', unreadIds.size)
 
   // The latest `onReplyAs`, behind a stable callback, so rows (memoized) never
   // re-render just because the parent passed a fresh function.
