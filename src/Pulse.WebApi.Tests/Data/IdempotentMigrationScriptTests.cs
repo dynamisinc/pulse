@@ -51,7 +51,7 @@ public class IdempotentMigrationScriptTests
     private const string BeforeWave4 = "20261014202342_DemoFeedbackPinsNoiseImport";
 
     /// <summary>The last migration before identity-auth-roles/16 (A1) — the shape UAT holds when the A1 cut deploys.</summary>
-    private const string BeforeAdminIdentity = "20261015192237_DemoFeedbackWave4RuntimeAndEdits";
+    private const string BeforeAdminIdentity = "20261017011709_DemoFeedbackNamedLookalikePairs";
 
     private readonly MsSqlContainerFixture _fixture;
 

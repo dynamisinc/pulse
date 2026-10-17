@@ -12,7 +12,7 @@ using Pulse.WebApi.Data;
 namespace Pulse.WebApi.Data.Migrations
 {
     [DbContext(typeof(PulseDbContext))]
-    [Migration("20261016181208_AdminIdentityFoundation")]
+    [Migration("20261017120000_AdminIdentityFoundation")]
     partial class AdminIdentityFoundation
     {
         /// <inheritdoc />
@@ -1042,6 +1042,9 @@ namespace Pulse.WebApi.Data.Migrations
                         .IsRequired()
                         .HasMaxLength(256)
                         .HasColumnType("nvarchar(256)");
+
+                    b.Property<Guid?>("ImitatesPersonaId")
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<DateTimeOffset>("JoinedAt")
                         .ValueGeneratedOnAdd()
