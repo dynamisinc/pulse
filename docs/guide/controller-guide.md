@@ -820,6 +820,16 @@ shape, and what you can do stays the same.
 
 An evaluator or planner sees the same read-only console on a tablet as on a desktop.
 
+![The console on an iPad in landscape at 1180 pixels wide: the command band with the engine switch, Running and End exercise, then Live world, Run sheet and the docked Review queue side by side, with the toolstrip on the right](img/console-overview-tablet.png)
+
+*Landscape, 1180 px wide: Live world and Run sheet side by side with the Review queue docked on the right. (The
+shot was taken on a keyboard-less device that reports Ctrl; on an iPad the hint reads "Tap PERSONAS or press ⌘K".)*
+
+![The console on an iPad in tall portrait at 820 by 1180 pixels: the command band on two rows, the Live world and Run sheet tabs with count badges, the Live world list, and the Review queue docked below](img/console-overview-tablet-portrait.png)
+
+*Tall portrait, 820 x 1180: the command band wraps to two rows, Live world and Run sheet are tabs, and the Review
+queue is docked below them.*
+
 ### The header, toolstrip and flyouts on a tablet
 
 - **Always visible in the header:** the exercise name and your role, the **SCENARIO** clock, the state
@@ -840,6 +850,23 @@ An evaluator or planner sees the same read-only console on a tablet as on a desk
   (44 x 44 on touch) or press <kbd>Esc</kbd> on a hardware keyboard; focus returns to the toolstrip
   button you used.
 - **Keyboard order:** header, then the work area, then the toolstrip.
+
+### Deliberate confirms on touch
+
+The actions that cannot be undone, or that participants will notice, take a second, deliberate tap on a touch
+screen, and a single stray tap never completes one. Each confirm step opens fully on screen, has a visible
+**Cancel** or **Back**, ignores taps for about 0.4 seconds after it opens, and acts only once. Pressing and holding
+does nothing. The per-control details are in the **On a tablet** notes under
+[taking a post down](#to-take-a-post-down), [freezing the world](#to-freeze-the-world), the
+[engine switch](#the-engine-switch-kill-switch) and [ending the exercise](#ending-the-exercise-endex).
+
+![Take down on a tablet: the confirm step open beside the post, with four category options and Cancel and Confirm take down well apart](img/takedown-tablet.png)
+
+*Take down: open the step, choose a category, then tap **Confirm take down**.*
+
+![The pause tiers popover on a tablet, under the Running pill, with Pause injects, Pause engine, Freeze world and the participant pause page choice](img/freeze-controls-tablet.png)
+
+*Pause: choosing **Freeze world** and tapping **Pause** opens one more step, **FREEZE THE WORLD?**, before anything freezes.*
 
 ### Keyboard and touch shortcuts
 

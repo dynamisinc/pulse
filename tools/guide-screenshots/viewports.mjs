@@ -34,3 +34,17 @@ export const PHONE_SMALL = { width: 360, height: 800, mobile: true, suffix: '360
 
 /** Portrait tablet (iPad mini / 9.7" class). */
 export const TABLET = { width: 768, height: 1024, mobile: true, suffix: 'tablet' }
+
+/**
+ * Large landscape tablet (iPad Air / 11" iPad Pro class) for the CONTROLLER console: the
+ * side-by-side band (Live world | Run sheet | docked Review queue). `mobile: true` so the
+ * coarse-pointer (44px touch) sizing applies. Used by the `*-tablet` controller shots
+ * (mobile-tablet story 16); those shots are separate named shots, so no `suffix`.
+ */
+export const TABLET_LANDSCAPE = { width: 1180, height: 820, mobile: true }
+
+/**
+ * Tall portrait tablet (820x1180) for the CONTROLLER console: the stacked band (pane tabs above
+ * a docked Review queue). `mobile: true` for touch sizing. See {@link TABLET_LANDSCAPE}.
+ */
+export const TABLET_PORTRAIT_TALL = { width: 820, height: 1180, mobile: true }
