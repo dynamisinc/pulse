@@ -14,7 +14,8 @@ You will get a personal sign-in card or an email from exercise staff.
 - **Tap your personal link**, or **scan the QR code** on your card with your phone's camera.
 - You are signed in straight away. There is no password to remember.
 
-Pulse runs in your web browser on a phone, tablet or computer. There is no app to install.
+Pulse runs in your web browser on a phone, tablet or computer. There is no app to download, but you
+can add it to your phone's home screen (see *On a phone or tablet*).
 
 **Your link is personal.** Do not share it or post it. Anyone who has it can sign in as you.
 
@@ -87,6 +88,14 @@ iPad, Chrome on Android).
   closing it.
 - **To leave a full-screen photo**, tap **Close**, swipe back, or use your phone's **Back** button.
   You end up back where you were.
+
+**Add it to your home screen (optional).** Once you are signed in, Pulse can sit on your home screen
+like an app, under the exercise's name:
+
+- **Android (Chrome):** tap **Add** on the banner that offers to add the exercise to your home
+  screen. If you closed the banner, use Chrome's menu (**⋮**) → **Add to Home screen**.
+- **iPhone or iPad (Safari):** tap **Share**, then **Add to Home Screen**. When you first open it
+  from the home screen, you need to sign in again with your link or today's word.
 
 ![The exercise feed on a small phone, with Home, Explore, Post, Notifications and Profile along the bottom.](img/participant-feed-360.png)
 
