@@ -65,6 +65,12 @@
  * so a keyboard user is never stranded on <body>. The group stays mounted after a success even
  * with nothing left to press, for exactly that reason (and so its live region keeps announcing).
  *
+ * TOUCH (mobile-tablet story 15, D5-025). On a COARSE pointer the Start / End exercise buttons are
+ * real 44px boxes; see `EndExerciseDialog` for the deliberate confirm (arming delay, 44px
+ * spacing, keyboard-safe layout). Opening the dialog is the FIRST of the two taps; the trigger
+ * never sits under the dialog's confirm (the dialog is centred, the trigger lives in the command
+ * band). Role gating is unchanged: non-controllers render nothing.
+ *
  * MOUNTING. The orchestrator mounts this in `ControllerConsole`'s header row through the
  * `lifecycleSlot` prop (`ControllerConsoleRoute.tsx`); see `./README.md`.
  */
@@ -78,6 +84,7 @@ import {
   CobraPrimaryButton,
   CobraSecondaryButton,
 } from '@/theme/styledComponents'
+import { touchTargetSx, useCoarsePointer } from '../components/confirm'
 import { useOptionalSession } from '@/core/auth'
 import { useExerciseContext } from '@/core/exerciseContext'
 import { EndExerciseDialog } from './EndExerciseDialog'
@@ -116,6 +123,7 @@ export function ExerciseLifecycleControl() {
 /** The controller-only body. Its hooks (and so its request) exist only for a controller. */
 function ExerciseLifecycleControlBody() {
   const lifecycle = useExerciseLifecycle()
+  const touchSx = useCoarsePointer() ? touchTargetSx : undefined
   const { exerciseName } = useExerciseContext()
   const {
     canStart,
@@ -205,6 +213,7 @@ function ExerciseLifecycleControlBody() {
             startIcon={<FontAwesomeIcon icon={faPlay} aria-hidden="true" />}
             onClick={() => void start()}
             aria-disabled={pending !== undefined}
+            sx={touchSx}
             data-testid="lifecycle-start"
           >
             {pending === 'live' ? 'Starting…' : 'Start exercise'}
@@ -218,6 +227,7 @@ function ExerciseLifecycleControlBody() {
             onClick={openEndConfirm}
             aria-haspopup="dialog"
             aria-disabled={pending !== undefined}
+            sx={touchSx}
             data-testid="lifecycle-end"
           >
             End exercise
@@ -235,7 +245,7 @@ function ExerciseLifecycleControlBody() {
             <span>
               <strong>Exercise state unavailable.</strong> {loadError}
             </span>
-            <CobraLinkButton size="small" onClick={reload} data-testid="lifecycle-retry">
+            <CobraLinkButton size="small" onClick={reload} sx={touchSx} data-testid="lifecycle-retry">
               Retry
             </CobraLinkButton>
           </Typography>

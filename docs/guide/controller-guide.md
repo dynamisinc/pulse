@@ -155,6 +155,16 @@ start too early, **Pause** the world ([section 9](#9-pausing-and-freezing)) whil
 EndEx cannot be undone from the console. After EndEx, white noise stops, a Freeze is refused, and anyone who opens
 or reloads Pulse sees the end-of-exercise page.
 
+#### On a tablet
+
+EndEx is just as deliberate on an iPad or other touch screen. **End exercise** is a 44-pixel button. In **End the exercise?** the cursor stays in the **Type
+END to confirm** field. If the on-screen keyboard opens, the dialog moves up so the field and **End exercise** stay
+in view. **Cancel** and **End exercise** are at least 44 pixels tall and well apart, with **End exercise** on the
+right. **End exercise** ignores taps for the first moment after the dialog opens (about 0.4 seconds) and only acts
+once, so a double tap or a stray touch cannot end the exercise. The typed `END`, the controller-only rule and the
+log entry are the same as on a desktop. **Cancel** (or Esc on a hardware keyboard) closes the dialog and puts you
+back on **End exercise**.
+
 > **Important: EndEx does not yet close the world on its own.** Two gaps remain today:
 >
 > - **Open tabs are not told.** A player who already has the feed (or the holding page) open keeps seeing it until
@@ -449,6 +459,14 @@ The row shows **Taken down · *category*** and keeps a **REMOVED** marker. It st
 
 A takedown cannot be undone.
 
+#### On a tablet
+
+Take down takes two deliberate taps on a touch screen too. The step opens fully on screen, below the row or, if there is no room, above it. The four **Category** options are each at
+least 44 pixels tall, and the cursor starts on the selected category, not on **Confirm take down**. **Cancel** and
+**Confirm take down** are well apart, with **Confirm take down** on the right. **Confirm take down** ignores taps for
+about 0.4 seconds after the step opens and acts only once. Pressing and holding does nothing. Nothing is taken down
+until you tap **Confirm take down**, and the row is still kept with its **REMOVED** marker.
+
 ### What participants see
 
 - The post disappears from open feeds right away, with no refresh.
@@ -536,6 +554,15 @@ Participants see the holding page at once, without refreshing, and it stays if t
 > during a Freeze either: anything you post goes into the world. If a stray post lands during a Freeze, take it
 > down ([section 7](#7-moderation-taking-a-post-down)) and do not post as a persona until you resume.
 
+#### On a tablet
+
+On a touch screen the **Pause** pill and every row in the popover are at least 44 pixels tall. After you choose
+**Freeze world** and select **Pause**, the **FREEZE THE WORLD?** step opens with nothing selected, so a stray
+Enter or Space cannot freeze the world. It restates which holding page participants will see. **Back** and **Confirm
+freeze** are at least 44 pixels tall and well apart, with **Confirm freeze** on the right. **Confirm freeze** ignores
+taps for about 0.4 seconds after the step opens and acts only once. **Back** returns you to the list of tiers without
+freezing. Esc on a hardware keyboard closes the whole popover without freezing.
+
 ### To resume
 
 1. Select the **Pause** pill.
@@ -613,6 +640,14 @@ The switch at the left of the engine bar is always visible. Each click moves it 
 - In the Live position the label also says what is really in effect, for example **ENGINE · LIVE (SUGGEST)**.
 
 If the AI service misbehaves, Pulse drops to Suggest by itself. It never raises autonomy on its own.
+
+#### On a tablet
+
+The switch is a 44-pixel button. **Stopping stays one tap**: **LIVE** → **SUGGEST-ONLY** → **STOPPED** need no
+confirmation, because stopping is the safe direction. Going back from **STOPPED** to **LIVE** asks first on a touch
+screen: **Re-arm the engine?** appears with **Cancel** and **Re-arm to Live**. **Re-arm to Live** ignores taps for
+about 0.4 seconds after it opens and acts only once. **Cancel**, or Esc on a hardware keyboard, leaves the engine
+**STOPPED**. With a mouse the switch still re-arms in one click.
 
 ### Ambient chatter
 
