@@ -294,6 +294,40 @@ resource webApp 'Microsoft.Web/sites@2023-12-01' = {
           name: 'Email__SupportAddress'
           value: emailSupportAddress
         }
+        // Trusted proxies (identity-auth-roles/18, #480): the App Service front end forwards from private ranges
+        // (Microsoft: "add private IP address ranges to the known networks"). Never set
+        // ASPNETCORE_FORWARDEDHEADERS_ENABLED=true — it trusts forwarded headers from any client.
+        {
+          name: 'ForwardedHeaders__KnownNetworks__0'
+          value: '10.0.0.0/8'
+        }
+        {
+          name: 'ForwardedHeaders__KnownNetworks__1'
+          value: '172.16.0.0/12'
+        }
+        {
+          name: 'ForwardedHeaders__KnownNetworks__2'
+          value: '192.168.0.0/16'
+        }
+        // Auth rate limits for the demo (Tom, 10/16: "limits (a)", ~15-person demo). Code defaults are unchanged;
+        // only the non-default values are set here. UAT is the only environment this module deploys today; revisit
+        // per environment before production. See docs/OPERATE.md (trusted proxy / shared networks).
+        {
+          name: 'Authentication__RateLimits__SessionPerMinute'
+          value: '120'
+        }
+        {
+          name: 'Authentication__EasyLogin__WordPermitPerMinute'
+          value: '30'
+        }
+        {
+          name: 'Authentication__RateLimits__ParticipantLoginPerMinute'
+          value: '30'
+        }
+        {
+          name: 'Authentication__RateLimits__SharedLoginPerMinute'
+          value: '20'
+        }
         // Authentication
         {
           name: 'Authentication__FrontendBaseUrl'

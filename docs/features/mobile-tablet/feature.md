@@ -34,7 +34,7 @@ Status: all Not Started. B1 audit (2026-10-16) folded in: PR #562 alert bar veri
 | 05 | [Alert bar on phones: verify and touch-target gaps](05-alert-bar-phones-verify.md) | B1 | PRT-010, PRT-012, NFR-001 | In Progress | — |
 | 06 | [Participant critical-path e2e at 360/390/768](06-participant-critical-path-e2e.md) | B1 | XC-004, NFR-001 | In Review | — |
 | 07 | [Burst legibility at 120 posts/min on a mid-range phone](07-burst-legibility-phone.md) | B1 | NFR-002, SOC-071 | Not Started | — |
-| 08 | [Phone/tablet guide screenshots and participant guide](08-guide-screenshots-participant.md) | B1 | docs-as-done | Not Started | — |
+| 08 | [Phone/tablet guide screenshots and participant guide](08-guide-screenshots-participant.md) | B1 | docs-as-done | In Review | #524 |
 | 09 | [PWA: per-exercise brand manifest](09-pwa-brand-manifest.md) | B2 | COR-066, COR-030, XC-002 | Not Started | — |
 | 10 | [PWA: service worker (app shell only)](10-pwa-service-worker.md) | B2 | XC-001, NFR-004 | Not Started | — |
 | 11 | [PWA: install prompts (Android and iOS)](11-pwa-install-prompts.md) | B2 | NFR-001, D0 §2 | Not Started | — |
