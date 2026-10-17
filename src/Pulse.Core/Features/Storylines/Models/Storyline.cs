@@ -278,9 +278,11 @@ public sealed class Storyline
         // re-heat an addressed/decaying concern (that would need an explicit re-open).
         // The step is quantized against the previous tick's scenario minute (D1) so fractional curve rates
         // (Standard 2.5/min) accrue at their true rate under per-minute ticks instead of rounding to 2/min.
+        // Clamped to 0 so a pre-StartEx (negative) clock reading can never throw inside the tick loop.
+        var fromMinute = Math.Max(0, LastTickScenarioMinute);
         var next = TargetIntensity is int target && Phase is StorylinePhase.Escalating or StorylinePhase.Peak
-            ? IntensityModel.TickTowardTarget(Intensity, target, elapsed, curve, signals.Amplification, LastTickScenarioMinute)
-            : IntensityModel.Tick(Intensity, elapsed, Phase, curve, signals.Amplification, LastTickScenarioMinute);
+            ? IntensityModel.TickTowardTarget(Intensity, target, elapsed, curve, signals.Amplification, fromMinute)
+            : IntensityModel.Tick(Intensity, elapsed, Phase, curve, signals.Amplification, fromMinute);
         SetIntensity(next);
 
         // Intensity-driven phase moves that follow the update.
