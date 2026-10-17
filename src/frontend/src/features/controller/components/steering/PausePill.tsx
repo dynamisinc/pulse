@@ -122,6 +122,7 @@ import {
 } from '../confirm'
 // D5 dark operator-chrome tokens (matches `SwampedModeToggle`). Staff-only.
 import { consoleChrome as chrome } from '../../consoleChrome'
+import { STAFF_TOOLSTRIP_WIDTH_PX } from '@/features/staffShell/staffShellTokens'
 import { useCanControl } from '../../access'
 
 /** The tiers a controller can SELECT to pause (excludes the `running` baseline). */
@@ -148,6 +149,11 @@ const TIER_OPTIONS: readonly TierOption[] = [
  * choice, never the default.
  */
 const DEFAULT_CHOICE: PauseChoice = 'engine'
+
+/** Width of the pause-tier popover paper. */
+const PAUSE_POPOVER_WIDTH_PX = 300
+/** Breathing room kept between the popover and the toolstrip edge (#626). */
+const POPOVER_EDGE_GAP_PX = 8
 
 /**
  * The radio to pre-select for the active `tier`: the tier itself when it is
@@ -228,6 +234,13 @@ export function PausePill() {
 
   const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null)
   const open = Boolean(anchorEl)
+  // Keep the popover inside the work area (#626). It opens left-aligned under the pill; when
+  // that would cross into the right-edge toolstrip (at 1180 px the pill ends where the toolstrip
+  // begins), it right-aligns to the pill instead. Wider layouts never meet the condition.
+  const alignRight = anchorEl !== null
+    && anchorEl.getBoundingClientRect().left + PAUSE_POPOVER_WIDTH_PX
+      > window.innerWidth - STAFF_TOOLSTRIP_WIDTH_PX - POPOVER_EDGE_GAP_PX
+  const popoverHorizontal = alignRight ? 'right' : 'left'
   const [choice, setChoice] = useState<PauseChoice>(DEFAULT_CHOICE)
   const [confirmingFreeze, setConfirmingFreeze] = useState(false)
   const coarse = useCoarsePointer()
@@ -442,8 +455,8 @@ export function PausePill() {
         open={open}
         anchorEl={anchorEl}
         onClose={closePopover}
-        anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
-        transformOrigin={{ vertical: 'top', horizontal: 'left' }}
+        anchorOrigin={{ vertical: 'bottom', horizontal: popoverHorizontal }}
+        transformOrigin={{ vertical: 'top', horizontal: popoverHorizontal }}
         slotProps={{
           paper: {
             role: 'dialog',
@@ -456,7 +469,7 @@ export function PausePill() {
               mt: 0.5,
               p: 1.5,
               ...(roomBelow === null ? {} : { maxHeight: `${roomBelow}px`, overflowY: 'auto' }),
-              width: 300,
+              width: PAUSE_POPOVER_WIDTH_PX,
               bgcolor: chrome.card,
               border: `1px solid ${chrome.line}`,
               borderRadius: '10px',
@@ -465,7 +478,7 @@ export function PausePill() {
           },
         }}
       >
-        <Box data-testid="pause-popover">
+        <Box data-testid="pause-popover" data-align={popoverHorizontal}>
           {confirmingFreeze ? (
             <Stack
               ref={freezeStepRef}
