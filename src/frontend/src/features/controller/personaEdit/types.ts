@@ -36,6 +36,7 @@ export type PersonaEditField =
   | 'verified'
   | 'avatarMediaId'
   | 'bannerMediaId'
+  | 'imitatesPersonaId'
 
 /**
  * The JSON merge-patch body. Every member is optional; an absent member is
@@ -48,6 +49,8 @@ export interface PersonaPatch {
   readonly verified?: boolean
   readonly avatarMediaId?: string | null
   readonly bannerMediaId?: string | null
+  /** Story 33 (DF-49): the verified persona this unverified one imitates; `null` clears. */
+  readonly imitatesPersonaId?: string | null
 }
 
 /**
@@ -69,6 +72,8 @@ export interface PersonaEditDraft {
   readonly bio: string
   readonly location: string
   readonly verified: boolean
+  /** Story 33: the imitation target while unverified; always null once Verified is on. */
+  readonly imitatesPersonaId: string | null
   readonly avatar: ImageChoice
   readonly banner: ImageChoice
 }

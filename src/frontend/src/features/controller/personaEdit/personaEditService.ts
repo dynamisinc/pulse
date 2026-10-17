@@ -264,7 +264,7 @@ export function parseStaffPersonaResponse(
   const {
     id, exerciseId, templateId, displayName, handle, kind, personaType, verified,
     avatarColor, initials, bio, audienceBand, followerCount, followingCount,
-    audienceMagnitude, joinedAt, avatarUrl, bannerUrl, location,
+    audienceMagnitude, joinedAt, avatarUrl, bannerUrl, location, imitatesPersonaId,
   } = data
 
   if (id !== expectedId) return undefined
@@ -285,6 +285,8 @@ export function parseStaffPersonaResponse(
   if (!optionalNumber(followingCount) || !optionalNumber(audienceMagnitude)) return undefined
   if (!optionalString(bio) || !optionalString(avatarUrl)) return undefined
   if (!optionalString(bannerUrl) || !optionalString(location)) return undefined
+  // Story 33: the named imitation target; absent/null both mean none.
+  if (!optionalString(imitatesPersonaId)) return undefined
 
   return {
     id: expectedId,
@@ -304,6 +306,7 @@ export function parseStaffPersonaResponse(
     ...(typeof avatarUrl === 'string' ? { avatarUrl } : {}),
     ...(typeof bannerUrl === 'string' ? { bannerUrl } : {}),
     ...(typeof location === 'string' ? { location } : {}),
+    ...(typeof imitatesPersonaId === 'string' ? { imitatesPersonaId } : {}),
     ...(typeof followingCount === 'number' ? { followingCount } : {}),
     ...(typeof audienceMagnitude === 'number' ? { audienceMagnitude } : {}),
   }

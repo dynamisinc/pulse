@@ -132,8 +132,15 @@ public sealed class ExerciseReportSeed
     /// <param name="displayName">The display name.</param>
     /// <param name="verified">The verified badge.</param>
     /// <param name="avatarMediaId">The avatar asset.</param>
+    /// <param name="imitatesPersonaId">The persona a controller named this one as imitating (story 33).</param>
     /// <returns>The persona id.</returns>
-    public async Task<Guid> PersonaAsync(Guid exerciseId, string handle, string displayName, bool verified = false, Guid? avatarMediaId = null)
+    public async Task<Guid> PersonaAsync(
+        Guid exerciseId,
+        string handle,
+        string displayName,
+        bool verified = false,
+        Guid? avatarMediaId = null,
+        Guid? imitatesPersonaId = null)
     {
         var id = Guid.NewGuid();
         await using var seed = _fixture.CreateContext();
@@ -146,6 +153,7 @@ public sealed class ExerciseReportSeed
             Kind = "human",
             Verified = verified,
             AvatarMediaId = avatarMediaId,
+            ImitatesPersonaId = imitatesPersonaId,
         });
         await seed.SaveChangesAsync();
         return id;

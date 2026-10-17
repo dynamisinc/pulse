@@ -13,13 +13,13 @@ using System.Text.Json;
 /// <remarks>
 /// <para>
 /// <b>Merge-patch semantics.</b> A field the body does not name is left unchanged. A field set to <c>null</c> is
-/// cleared, which is allowed ONLY for <c>bio</c>, <c>location</c>, <c>avatarMediaId</c> and
-/// <c>bannerMediaId</c>; <c>displayName</c> and <c>verified</c> cannot be null. An empty object is a valid
+/// cleared, which is allowed ONLY for <c>bio</c>, <c>location</c>, <c>avatarMediaId</c>, <c>bannerMediaId</c>
+/// and <c>imitatesPersonaId</c>; <c>displayName</c> and <c>verified</c> cannot be null. An empty object is a valid
 /// patch that changes nothing.
 /// </para>
 /// <para>
 /// <b>Loud, never silent.</b> A body naming <c>handle</c>, <c>kind</c>, <c>personaType</c> or
-/// <c>exerciseId</c> (matched case-insensitively), any other field outside the six editable ones (matched
+/// <c>exerciseId</c> (matched case-insensitively), any other field outside the seven editable ones (matched
 /// exactly, camelCase), or any field twice, is refused with a 400. Field names are checked before any value, so
 /// such a body is refused for its field name whatever else it contains. The exercise is never read from the
 /// body (COR-001): <c>exerciseId</c> is simply one of the refused names.
@@ -50,6 +50,10 @@ using System.Text.Json;
 /// <b>Media ids (DP-16).</b> Every malformed media id (not a string, not a GUID, the empty GUID) gets the same
 /// message the service uses for an unknown, cross-exercise or non-image id, so no response can tell them apart.
 /// </para>
+/// <para>
+/// <b>Imitated persona (DF-49, story 33).</b> A malformed <c>imitatesPersonaId</c> (not a string, not a GUID, the
+/// empty GUID) gets the same message as an unknown or cross-exercise persona, for the same reason.
+/// </para>
 /// </remarks>
 public static class PersonaProfilePatchParser
 {
@@ -70,6 +74,9 @@ public static class PersonaProfilePatchParser
 
     /// <summary>Wire name of the banner media-id field.</summary>
     public const string BannerMediaIdField = "bannerMediaId";
+
+    /// <summary>Wire name of the imitated-persona field (DF-49, story 33).</summary>
+    public const string ImitatesPersonaIdField = "imitatesPersonaId";
 
     /// <summary>
     /// A raw text value (or an echoed field name) longer than this many times its bound is refused (or cut)
@@ -115,10 +122,11 @@ public static class PersonaProfilePatchParser
         PersonaAdminMessages.LocationForbiddenCharacter,
         AllowLineBreaks: false);
 
-    /// <summary>The six fields a patch may name, in their canonical order.</summary>
+    /// <summary>The seven fields a patch may name, in their canonical order.</summary>
     public static IReadOnlyList<string> EditableFields { get; } =
     [
         DisplayNameField, BioField, LocationField, VerifiedField, AvatarMediaIdField, BannerMediaIdField,
+        ImitatesPersonaIdField,
     ];
 
     /// <summary>
@@ -161,6 +169,7 @@ public static class PersonaProfilePatchParser
         var verified = default(PatchField<bool>);
         var avatar = default(PatchField<Guid?>);
         var banner = default(PatchField<Guid?>);
+        var imitates = default(PatchField<Guid?>);
 
         foreach (var property in body.EnumerateObject())
         {
@@ -172,8 +181,9 @@ public static class PersonaProfilePatchParser
                 VerifiedField => ParseVerified(property.Value, out verified),
                 AvatarMediaIdField => ParseMediaId(property.Value, PersonaAdminMessages.AvatarMediaNotFound, out avatar),
                 BannerMediaIdField => ParseMediaId(property.Value, PersonaAdminMessages.BannerMediaNotFound, out banner),
+                ImitatesPersonaIdField => ParseMediaId(property.Value, PersonaAdminMessages.ImitatesNotFound, out imitates),
 
-                // Unreachable: pass 1 admitted only the six editable names.
+                // Unreachable: pass 1 admitted only the seven editable names.
                 _ => PersonaAdminMessages.UnknownField(property.Name),
             };
 
@@ -191,6 +201,7 @@ public static class PersonaProfilePatchParser
             Verified = verified,
             AvatarMediaId = avatar,
             BannerMediaId = banner,
+            ImitatesPersonaId = imitates,
         };
         return true;
     }
@@ -437,6 +448,14 @@ public static class PersonaProfilePatchParser
         }
     }
 
+    /// <summary>
+    /// Parses a clearable id field (the media ids, and <c>imitatesPersonaId</c>): <c>null</c> clears; anything that is
+    /// not a non-empty GUID string gets <paramref name="notFoundMessage"/>, the same text as an id that does not resolve.
+    /// </summary>
+    /// <param name="value">The raw value.</param>
+    /// <param name="notFoundMessage">The field's not-found message.</param>
+    /// <param name="field">The parsed field.</param>
+    /// <returns>The 400 message, or <c>null</c> when the value is acceptable.</returns>
     private static string? ParseMediaId(JsonElement value, string notFoundMessage, out PatchField<Guid?> field)
     {
         field = default;
@@ -534,12 +553,32 @@ public static class PersonaAdminMessages
     /// <summary>The <c>bannerMediaId</c> counterpart of <see cref="AvatarMediaNotFound"/>.</summary>
     public const string BannerMediaNotFound = "bannerMediaId must name an image in this exercise, or be null to clear it.";
 
+    /// <summary>
+    /// <c>imitatesPersonaId</c> is malformed, unknown, or names a persona in another exercise — one text for all of
+    /// them, so the response never confirms that another exercise's persona exists (COR-001; DF-49, story 33).
+    /// </summary>
+    public const string ImitatesNotFound =
+        "imitatesPersonaId must name a persona in this exercise, or be null to clear it.";
+
+    /// <summary><c>imitatesPersonaId</c> names the persona being edited.</summary>
+    public const string ImitatesSelf = "imitatesPersonaId cannot name the persona itself.";
+
+    /// <summary><c>imitatesPersonaId</c> names a persona that is not verified.</summary>
+    public const string ImitatesNotVerified = "imitatesPersonaId must name a verified persona.";
+
+    /// <summary>
+    /// <c>imitatesPersonaId</c> is set on a persona that is verified once the patch is applied: only an unverified
+    /// persona can imitate another.
+    /// </summary>
+    public const string ImitatesRequiresUnverified =
+        "Only an unverified persona can imitate another. Set verified to false, or clear imitatesPersonaId.";
+
     /// <summary>The body names an immutable persona field.</summary>
     /// <param name="canonicalName">The field's canonical name from <see cref="PersonaProfilePatchParser.ImmutableFields"/> (never the client's spelling).</param>
     /// <returns>The message.</returns>
     public static string CannotBeChanged(string canonicalName) => canonicalName + " cannot be changed.";
 
-    /// <summary>The body names a field that is not one of the six editable ones.</summary>
+    /// <summary>The body names a field that is not one of the seven editable ones.</summary>
     /// <param name="name">The raw field name (echoed sanitized and length-capped).</param>
     /// <returns>The message.</returns>
     public static string UnknownField(string name) =>

@@ -19,6 +19,11 @@
  *   verified              boolean; not null
  *   avatarMediaId /       an IMAGE asset (mock media registry); anything else —
  *   bannerMediaId         unknown id, a video — is the one 400 text
+ *   imitatesPersonaId     (story 33, DF-49) a persona id or null to clear. 400 when the target is
+ *                         the persona itself, does not resolve in this exercise (the SAME text
+ *                         as unknown), or is not verified, or when the edited persona is verified
+ *                         after the patch (only an unverified persona can imitate). Checked after
+ *                         the 404, so the persona and its exercise are known.
  *   handle, kind, personaType, exerciseId, any unknown field   400 (never ignored)
  *   `{}`                  valid, 200, no change
  *   body > 16384 bytes    400
@@ -105,13 +110,20 @@ export const PERSONA_ADMIN_MESSAGES = {
   locationTooLong: 'location must be at most 100 characters.',
   verifiedNull: 'verified cannot be null.',
   verifiedNotBoolean: 'verified must be true or false.',
+  // Byte-for-byte the server's PersonaAdminMessages (a malformed id gets the not-found text).
+  imitatesNotId: 'imitatesPersonaId must name a persona in this exercise, or be null to clear it.',
+  imitatesSelf: 'imitatesPersonaId cannot name the persona itself.',
+  imitatesUnknown: 'imitatesPersonaId must name a persona in this exercise, or be null to clear it.',
+  imitatesNotVerified: 'imitatesPersonaId must name a verified persona.',
+  imitatesWhileVerified:
+    'Only an unverified persona can imitate another. Set verified to false, or clear imitatesPersonaId.',
   avatarNotImage: 'avatarMediaId must name an image in this exercise, or be null to clear it.',
   bannerNotImage: 'bannerMediaId must name an image in this exercise, or be null to clear it.',
   /** `handle cannot be changed.` / `kind ...` / `personaType ...` / `exerciseId ...`. */
   immutable: (field: string) => `${field} cannot be changed.`,
   unknownField: (field: string) =>
     `Unknown field '${field}'. Editable fields: displayName, bio, location, verified, ` +
-    'avatarMediaId, bannerMediaId.',
+    'avatarMediaId, bannerMediaId, imitatesPersonaId.',
 } as const
 
 const MAX_BODY_BYTES = 16384
@@ -125,6 +137,7 @@ const EDITABLE_FIELDS: readonly string[] = [
   'verified',
   'avatarMediaId',
   'bannerMediaId',
+  'imitatesPersonaId',
 ]
 
 // ---------------------------------------------------------------------------
@@ -174,6 +187,7 @@ interface ParsedPatch {
   readonly verified?: boolean
   readonly avatarMediaId?: string | null
   readonly bannerMediaId?: string | null
+  readonly imitatesPersonaId?: string | null
 }
 
 function fail(message: string): MockPatchFailure {
@@ -302,6 +316,13 @@ function parseBody(
     if (typeof value !== 'boolean') return fail(PERSONA_ADMIN_MESSAGES.verifiedNotBoolean)
     patch.verified = value
   }
+  if ('imitatesPersonaId' in record) {
+    const value = record.imitatesPersonaId
+    if (value !== null && (typeof value !== 'string' || value.trim() === '')) {
+      return fail(PERSONA_ADMIN_MESSAGES.imitatesNotId)
+    }
+    patch.imitatesPersonaId = value
+  }
   // Media members: shape only here (string or null); existence/kind after the 404 check.
   for (const field of ['avatarMediaId', 'bannerMediaId'] as const) {
     if (!(field in record)) continue
@@ -374,15 +395,19 @@ export function initialsForDisplayName(displayName: string): string {
 }
 
 /**
- * Applies a validated patch to `current`. `null` removes the optional member (the
- * server's response omits absent members — never `null`).
+ * Applies a validated patch to `current`. `null` removes the optional member (the server's
+ * response omits absent members, except `imitatesPersonaId`, which it always sends and sends as
+ * `null` when unset; the client reads absent and `null` the same).
  */
 function applyPatch(
   current: StaffPersona,
   patch: ParsedPatch,
   urls: { readonly avatarUrl?: string; readonly bannerUrl?: string },
 ): StaffPersona {
-  const { bio, location, avatarUrl, bannerUrl, ...rest } = current
+  const { bio, location, avatarUrl, bannerUrl, imitatesPersonaId, ...rest } = current
+  const nextImitates = patch.imitatesPersonaId === undefined
+    ? imitatesPersonaId
+    : (patch.imitatesPersonaId ?? undefined)
   const nextBio = patch.bio === undefined ? bio : (patch.bio ?? undefined)
   const nextLocation = patch.location === undefined ? location : (patch.location ?? undefined)
   const nextAvatarUrl = patch.avatarMediaId === undefined ? avatarUrl : urls.avatarUrl
@@ -395,6 +420,7 @@ function applyPatch(
         ? initialsForDisplayName(patch.displayName)
         : current.initials,
     verified: patch.verified ?? current.verified,
+    ...(nextImitates !== undefined ? { imitatesPersonaId: nextImitates } : {}),
     ...(nextBio !== undefined ? { bio: nextBio } : {}),
     ...(nextLocation !== undefined ? { location: nextLocation } : {}),
     ...(nextAvatarUrl !== undefined ? { avatarUrl: nextAvatarUrl } : {}),
@@ -438,6 +464,28 @@ export const personaPatchMockAdapter: AxiosAdapter = async config => {
     const asset = getMockMediaAsset(id)
     if (asset === undefined || asset.kind !== 'image') return refuse(config, 400, 'Bad Request', message)
     urls[target] = asset.url
+  }
+
+  // Imitation (story 33), checked after media as the server does: the target must resolve
+  // in THIS persona's exercise (an id from another exercise reads exactly like an unknown
+  // one) and be verified; only an UNVERIFIED persona (after the patch) may carry one.
+  const target = parsed.patch.imitatesPersonaId
+  if (target !== undefined && target !== null) {
+    if (target === current.id) {
+      return refuse(config, 400, 'Bad Request', PERSONA_ADMIN_MESSAGES.imitatesSelf)
+    }
+    const imitated = directory().find(
+      entry => entry.id === target && entry.exerciseId === current.exerciseId,
+    )
+    if (imitated === undefined) {
+      return refuse(config, 400, 'Bad Request', PERSONA_ADMIN_MESSAGES.imitatesUnknown)
+    }
+    if (!imitated.verified) {
+      return refuse(config, 400, 'Bad Request', PERSONA_ADMIN_MESSAGES.imitatesNotVerified)
+    }
+    if (parsed.patch.verified ?? current.verified) {
+      return refuse(config, 400, 'Bad Request', PERSONA_ADMIN_MESSAGES.imitatesWhileVerified)
+    }
   }
 
   const updated = applyPatch(current, parsed.patch, urls)

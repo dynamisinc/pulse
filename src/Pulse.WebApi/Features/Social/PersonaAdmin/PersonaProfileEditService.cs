@@ -109,7 +109,15 @@ public sealed partial class PersonaProfileEditService
             return PersonaProfileEditResult.Invalid(mediaError);
         }
 
-        // 4. Apply the present fields and persist them in one unit of work. An empty patch writes nothing.
+        // 4. The imitated persona (DF-49, story 33) must be another, verified persona in this exercise, and only a
+        //    persona that is unverified after the patch may name one.
+        var imitatesError = await ValidateImitatesAsync(persona, patch, exerciseId, cancellationToken);
+        if (imitatesError is not null)
+        {
+            return PersonaProfileEditResult.Invalid(imitatesError);
+        }
+
+        // 5. Apply the present fields and persist them in one unit of work. An empty patch writes nothing.
         patch.ApplyTo(persona);
         await _dbContext.SaveChangesAsync(cancellationToken);
 
@@ -119,7 +127,7 @@ public sealed partial class PersonaProfileEditService
             LogPersonaEdited(exerciseId, personaId, staffUserId, fields);
         }
 
-        // 5. The signed staff read-back (BP). It cannot miss — nothing deletes a persona — but never answer 200
+        // 6. The signed staff read-back (BP). It cannot miss — nothing deletes a persona — but never answer 200
         //    without a body: report it as not found instead.
         var updated = await _personaReadService.GetStaffPersonaAsync(personaId, cancellationToken);
         return updated is null ? PersonaProfileEditResult.NotFound() : PersonaProfileEditResult.Updated(updated);
@@ -163,6 +171,51 @@ public sealed partial class PersonaProfileEditService
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Checks the <c>imitatesPersonaId</c> a patch SETS (DF-49, story 33): it must not be the persona itself, must
+    /// resolve through the exercise-scoped persona set (another exercise's persona reads exactly like an unknown id),
+    /// must be verified, and the edited persona must be unverified once the patch is applied. A present <c>null</c>
+    /// (clear) needs no check, and neither does a patch that only makes the persona verified while an older value is
+    /// stored: the value is kept and the report skips the pair.
+    /// </summary>
+    /// <param name="persona">The tracked persona being edited (before the patch is applied).</param>
+    /// <param name="patch">The patch.</param>
+    /// <param name="exerciseId">The resolved exercise scope.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The 400 message, or <c>null</c> when the value is acceptable.</returns>
+    private async Task<string?> ValidateImitatesAsync(
+        Persona persona, PersonaProfilePatch patch, Guid exerciseId, CancellationToken cancellationToken)
+    {
+        if (!patch.ImitatesPersonaId.IsPresent || patch.ImitatesPersonaId.Value is not { } targetId)
+        {
+            return null;
+        }
+
+        if (targetId == persona.Id)
+        {
+            return PersonaAdminMessages.ImitatesSelf;
+        }
+
+        // Scoped set + restated ExerciseId (defense in depth, COR-001): another exercise's persona is invisible here.
+        var target = await _dbContext.Personas
+            .AsNoTracking()
+            .Where(candidate => candidate.Id == targetId && candidate.ExerciseId == exerciseId)
+            .Select(candidate => new { candidate.Verified })
+            .FirstOrDefaultAsync(cancellationToken);
+        if (target is null)
+        {
+            return PersonaAdminMessages.ImitatesNotFound;
+        }
+
+        if (!target.Verified)
+        {
+            return PersonaAdminMessages.ImitatesNotVerified;
+        }
+
+        var verifiedAfterPatch = patch.Verified.IsPresent ? patch.Verified.Value : persona.Verified;
+        return verifiedAfterPatch ? PersonaAdminMessages.ImitatesRequiresUnverified : null;
     }
 
     [LoggerMessage(
