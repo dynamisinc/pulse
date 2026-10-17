@@ -76,6 +76,9 @@ public sealed class EngineSettingsEndpointsTests
         ("/api/engine/settings/autonomy-default", new { actingHumanId = "c-1", level = "delayed-auto" }),
         ("/api/engine/settings/tier-policy", new { actingHumanId = "c-1", mode = "ambient" }),
 
+        // ambient-chatter story 01: the ambient-policy POST is a steering mutation like the two above.
+        ("/api/engine/settings/ambient-policy", new { actingHumanId = "c-1", mode = "review", maxPerMinute = 1, maxPerHour = 1 }),
+
         // autonomy-safety story 07: the generation-provider egress lever. Added here (not only in its own
         // suite) because the drift guard below derives the mutating surface from the REAL route table and
         // would otherwise red the build — which is exactly the #297 protection working as designed: a new
@@ -98,6 +101,7 @@ public sealed class EngineSettingsEndpointsTests
         CountRoutes(dataSource, "GET", "/api/engine/settings").Should().Be(1);
         CountRoutes(dataSource, "POST", "/api/engine/settings/autonomy-default").Should().Be(1);
         CountRoutes(dataSource, "POST", "/api/engine/settings/tier-policy").Should().Be(1);
+        CountRoutes(dataSource, "POST", "/api/engine/settings/ambient-policy").Should().Be(1);
 
         // The pre-existing routes are unchanged by the new controller-role sub-group (empty prefix).
         CountRoutes(dataSource, "GET", "/api/engine/review-queue").Should().Be(1);
@@ -118,7 +122,7 @@ public sealed class EngineSettingsEndpointsTests
         using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         var root = doc.RootElement;
 
-        foreach (var key in new[] { "provider", "tiers", "autonomy", "tierPolicyMode", "inMemoryState", "inMemoryStateNote" })
+        foreach (var key in new[] { "provider", "tiers", "autonomy", "tierPolicyMode", "ambientPolicy", "inMemoryState", "inMemoryStateNote" })
         {
             root.TryGetProperty(key, out _).Should().BeTrue($"the settings contract requires a '{key}' key");
         }
