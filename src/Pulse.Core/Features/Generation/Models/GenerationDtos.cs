@@ -29,6 +29,14 @@ public sealed record GenerationRequest
 
     /// <summary>Optional output-token ceiling for the burst.</summary>
     public int? MaxOutputTokens { get; init; }
+
+    /// <summary>
+    /// <c>true</c> for an ambient-chatter burst (ambient-chatter story 01), set by the prompt assembler from
+    /// <see cref="StorylineBrief.IsAmbient"/>. Real providers ignore it (the system prompt already carries the framing);
+    /// the offline Fake reads it so its canned output is everyday small talk rather than incident reactions. Additive;
+    /// defaults to <c>false</c>.
+    /// </summary>
+    public bool IsAmbient { get; init; }
 }
 
 /// <summary>One generated post, attributable to a persona (XC-005). Its engine origin is captured for

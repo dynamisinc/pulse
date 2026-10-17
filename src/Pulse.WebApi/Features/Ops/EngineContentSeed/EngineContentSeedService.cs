@@ -264,6 +264,8 @@ public sealed partial class EngineContentSeedService
         {
             ExerciseId = exerciseId,
             ExerciseBrief = ExerciseBrief,
+            // Ambient chatter is set in the world by name only, never in the incident brief above (W-3).
+            AmbientPlaceName = exercise.WorldName,
             TimeZone = exercise.TimeZone,
             ScenarioStart = now,
             TimeZoneInfo = ResolveTimeZone(exercise.TimeZone),
