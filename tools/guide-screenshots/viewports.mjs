@@ -23,7 +23,10 @@ export const DESKTOP = { width: 1440, height: 900, mobile: false }
 /** Taller desktop window for CROPPED console panels, so each panel shows more rows. */
 export const DESKTOP_TALL = { width: 1440, height: 1150, mobile: false }
 
-/** Default participant phone (iPhone 12-15 class). The guide's primary participant size. */
+/**
+ * Default participant phone (iPhone 12-15 class). The guide's primary participant size;
+ * its suffix only applies if it is ever used as a variant.
+ */
 export const PHONE = { width: 390, height: 844, mobile: true, suffix: '390' }
 
 /** Small Android phone: the narrowest width the participant surfaces support. */

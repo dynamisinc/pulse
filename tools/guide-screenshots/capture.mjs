@@ -340,12 +340,15 @@ const SHOTS = [
 function expandVariants(shots) {
   return shots.flatMap(shot => [
     { ...shot, baseName: shot.name },
-    ...(shot.variants ?? []).map(viewport => ({
-      ...shot,
-      baseName: shot.name,
-      name: `${shot.name}-${viewport.suffix}`,
-      viewport,
-    })),
+    ...(shot.variants ?? []).map(viewport => {
+      if (!viewport.suffix) throw new Error(`${shot.name}: variant viewport has no suffix`)
+      return {
+        ...shot,
+        baseName: shot.name,
+        name: `${shot.name}-${viewport.suffix}`,
+        viewport,
+      }
+    }),
   ])
 }
 

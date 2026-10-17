@@ -48,9 +48,8 @@ tab or lock your phone. If you are on a shared computer, select **Sign out** whe
 - **Edit your own post** within 15 minutes of posting, using **Edit post**. Everyone can see that a
   post was **Edited** and can read its edit history. *(Rolling out. You may not see this yet.)*
 - **Follow** accounts, and use **Home**, **Explore**, **Notifications** and **Profile** to find your
-  way around. On a tablet or computer they are on the left. On a phone they run along the
-  **bottom** of the screen, with the round **Post** button in the middle; a number on
-  **Notifications** shows how many you have not read yet.
+  way around (see *On a phone or tablet* below for where they are). A number on **Notifications**
+  shows how many you have not read yet.
 
 ![A post opened as a conversation, with replies below it.](img/participant-thread.png)
 
@@ -58,20 +57,20 @@ tab or lock your phone. If you are on a shared computer, select **Sign out** whe
 
 ### On a phone or tablet
 
-Pulse is built for phones first. It works on any current iPhone or Android phone, including small
-ones, and on tablets held either way up. Use the phone's normal browser (Safari on iPhone and iPad,
-Chrome on Android).
+Pulse is built for phones first and works in your device's normal web browser (Safari on iPhone and
+iPad, Chrome on Android).
 
 - **On a phone**, the buttons along the bottom are how you move around. Tap the round **Post**
   button in the middle to write a post. Buttons are sized for your thumb, so you should not need to
   zoom.
-- **On a tablet**, the same buttons are in a column on the left, as on a computer.
+- **On a tablet or computer**, the same buttons are in a column on the left, shown as icons. The
+  round feather button writes a post.
 - **The EXERCISE banners** at the very top and bottom of the screen always stay visible. Nothing
   you need sits underneath them.
-- **When the keyboard is open**, the **Post** button stays above it, so you can send without
-  closing the keyboard.
-- **To leave a full-screen photo**, swipe back or tap **Close**. You return to the same place in
-  the feed.
+- **In the new-post window**, the **Post** button stays above the keyboard, so you can send without
+  closing it.
+- **To leave a full-screen photo**, tap **Close**, swipe back, or use your phone's **Back** button.
+  You end up back where you were.
 
 ![The exercise feed on a small phone, with Home, Explore, Post, Notifications and Profile along the bottom.](img/participant-feed-360.png)
 
