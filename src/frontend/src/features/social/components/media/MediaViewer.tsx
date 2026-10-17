@@ -19,6 +19,8 @@
  *    never dropped out of the trap). A player inside handles its own ←/→ (seek)
  *    and stops them, so they never also page.
  *  - Clicking the dimmed area outside the media closes it.
+ *  - BACK (the phone's back gesture / button) closes it too and stays on the page: see
+ *    `useViewerHistory`, which pushes one history entry on open and pops it on any other close.
  *  - Alt text reaches assistive tech three ways: it is the image's `alt`; the live
  *    region announces it as the user pages; and the dialog is `aria-describedby` that
  *    same status line, so it is read when the viewer OPENS (a live region present at
@@ -58,6 +60,7 @@ import { ParticipantTooltip } from '../ParticipantTooltip'
 import { mediaAlt } from './mediaLayout'
 import { resolveSafeMediaUrl } from './safeMediaUrl'
 import { useFocusTrap } from './useFocusTrap'
+import { useViewerHistory } from './useViewerHistory'
 import { VideoPlayer } from './VideoPlayer'
 import styles from './MediaViewer.module.css'
 
@@ -124,6 +127,8 @@ export function MediaViewer({
   const statusId = useId()
 
   useFocusTrap(dialogRef, { returnFocusTo })
+  // Back closes the viewer; every other close pops the entry it pushed (story 04).
+  const requestClose = useViewerHistory(onClose)
 
   const current = items[Math.min(index, lastIndex)]
   const total = items.length
@@ -154,7 +159,7 @@ export function MediaViewer({
       if (dialog !== null && hasOtherModalMounted(dialog)) return
       if (event.key === 'Escape') {
         event.stopPropagation()
-        onClose()
+        requestClose()
       } else if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
         // The native <video> uses the arrows to seek while it has focus.
         if (event.target instanceof HTMLVideoElement) return
@@ -164,7 +169,7 @@ export function MediaViewer({
     }
     document.addEventListener('keydown', handleKeyDown)
     return () => document.removeEventListener('keydown', handleKeyDown)
-  }, [go, onClose])
+  }, [go, requestClose])
 
   if (current === undefined) return null
 
@@ -174,7 +179,7 @@ export function MediaViewer({
   // A click on the dimmed area (the dialog shell or the stage itself) — not on the media — closes.
   const handleBackdropClick = (event: MouseEvent<HTMLElement>) => {
     event.stopPropagation()
-    if (event.target === event.currentTarget || event.target === stageRef.current) onClose()
+    if (event.target === event.currentTarget || event.target === stageRef.current) requestClose()
   }
 
   const style: CSSProperties = { zIndex: VIEWER_Z_INDEX }
@@ -212,7 +217,7 @@ export function MediaViewer({
           type="button"
           className={styles.closeButton}
           data-testid="media-viewer-close"
-          onClick={onClose}
+          onClick={requestClose}
         >
           <FontAwesomeIcon icon={faXmark} aria-hidden="true" />
           <span>Close</span>

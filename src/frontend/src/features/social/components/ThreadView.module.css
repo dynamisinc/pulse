@@ -40,7 +40,13 @@
 
 /* The focused post renders enlarged (D1-006) via a wrapper-only transform -
  * `<PostCard>` itself is never forked/aware of a "large" variant. */
+/* G3 (mobile-tablet story 02): the card is laid out 1/1.06 as wide as the column so that,
+ * once scaled 1.06 from the top-left, it fills the column exactly. Without this the scaled
+ * card was 6% WIDER than the column and its right edge (media, the Pin action) was clipped
+ * by the main column's `overflow-x: clip`, with no page scroll to reveal the problem. */
 .focusedWrap {
+  box-sizing: border-box;
+  width: calc(100% / 1.06);
   transform: scale(1.06);
   transform-origin: top left;
   margin: 4px 0 16px;

@@ -150,6 +150,7 @@ import {
   isUnauthorizedSignInError,
   type LoginEnvelope,
 } from '../services/participantSignInService'
+import { useKeepSubmitVisible } from '../hooks/useKeepSubmitVisible'
 import styles from './ParticipantSignInPage.module.css'
 
 type SignInMode = 'word' | 'named' | 'shared'
@@ -210,6 +211,8 @@ export function ParticipantSignInPage() {
   // Where focus should land once the in-flight day-word request settles (see
   // the module header's FOCUS note). A ref, not state: it is read once by the
   // effect below and never drives a render itself.
+  const cardRef = useRef<HTMLDivElement>(null)
+  useKeepSubmitVisible(cardRef)
   const wordInputRef = useRef<HTMLInputElement>(null)
   const wordSubmitRef = useRef<HTMLButtonElement>(null)
   const focusAfterSubmitRef = useRef<'word' | 'submit' | null>(null)
@@ -312,7 +315,7 @@ export function ParticipantSignInPage() {
 
   return (
     <main className={styles.page}>
-      <div className={styles.card}>
+      <div ref={cardRef} className={styles.card}>
         <div className={styles.brandRow}>
           <FontAwesomeIcon icon={faTowerBroadcast} aria-hidden className={styles.brandIcon} />
           <span className={styles.brandLabel}>Pulse</span>
@@ -355,6 +358,8 @@ export function ParticipantSignInPage() {
                 autoCapitalize="none"
                 autoCorrect="off"
                 spellCheck={false}
+                inputMode="text"
+                enterKeyHint="next"
                 className={styles.input}
                 value={signInName}
                 onChange={event => setSignInName(event.target.value)}
@@ -376,6 +381,8 @@ export function ParticipantSignInPage() {
                 autoCapitalize="none"
                 autoCorrect="off"
                 spellCheck={false}
+                inputMode="text"
+                enterKeyHint="go"
                 className={styles.input}
                 value={word}
                 onChange={event => setWord(event.target.value)}
@@ -407,6 +414,11 @@ export function ParticipantSignInPage() {
                 name="username"
                 type="text"
                 autoComplete="username"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
+                inputMode="text"
+                enterKeyHint="next"
                 className={styles.input}
                 value={username}
                 onChange={event => setUsername(event.target.value)}
@@ -422,6 +434,10 @@ export function ParticipantSignInPage() {
                 name="password"
                 type="password"
                 autoComplete="current-password"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
+                enterKeyHint="go"
                 className={styles.input}
                 value={password}
                 onChange={event => setPassword(event.target.value)}
@@ -448,6 +464,10 @@ export function ParticipantSignInPage() {
                 name="password"
                 type="password"
                 autoComplete="off"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
+                enterKeyHint="go"
                 className={styles.input}
                 value={sharedPassword}
                 onChange={event => setSharedPassword(event.target.value)}
