@@ -96,6 +96,24 @@ public sealed class LeadControllerGateTests
         raised.StatusCode.Should().Be(HttpStatusCode.OK, "IsLead is read live on the same session — no re-sign-in");
     }
 
+    [RequiresDockerFact]
+    public async Task ANonLead_TurningSwampedModeOn_WhileItIsAlreadyOn_IsStill403()
+    {
+        // Gate-1 WR-001: any non-lead enabled:true is a raise, whatever the current state. Judging "on while already on"
+        // as a no-op was a TOCTOU — a concurrent OFF landing after that judgment turned auto-send back on.
+        var world = await RoleMatrixWorld.SeedAsync(_fixture);
+        using var host = new RoleMatrixHost(_fixture.ConnectionString!);
+        var autonomy = host.Services.GetRequiredService<EngineAutonomyRegistry>().GetOrCreate(world.ExerciseId);
+        autonomy.SetSwampedMode(true, "arrange", 0);
+        using var controller = world.Client(host, await world.TokenForAsync(MatrixRole.Controller));
+
+        using var response = await controller.PostAsync(
+            "/api/engine/autonomy/swamped-mode", Json("{\"enabled\":true,\"actingHumanId\":\"x\"}"));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden, "a non-lead enabled:true is always a raise");
+        autonomy.SwampedModeEnabled.Should().BeTrue("the refusal changed nothing");
+    }
+
     private static (string Route, string Body) Arrange(RoleMatrixHost host, Guid exerciseId, string control, Direction direction)
     {
         var autonomy = host.Services.GetRequiredService<EngineAutonomyRegistry>().GetOrCreate(exerciseId);

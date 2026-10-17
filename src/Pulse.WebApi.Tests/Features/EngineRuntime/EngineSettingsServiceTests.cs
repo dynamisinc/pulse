@@ -56,7 +56,7 @@ public sealed class EngineSettingsServiceTests
         var loopState = harness.Registry.GetOrCreate(exerciseId);
         loopState.ExerciseDefault.Should().Be(AutonomyLevel.Suggest, "every exercise is seeded at the safe floor");
 
-        var result = await harness.Service.SetExerciseAutonomyDefaultAsync("delayed-auto", Input("controller-7"));
+        var result = await harness.Service.SetExerciseAutonomyDefaultAsync("delayed-auto", Input("controller-7"), callerIsLead: true);
 
         result.Outcome.Should().Be(EngineReviewOutcome.Ok);
         loopState.ExerciseDefault.Should().Be(
@@ -73,8 +73,8 @@ public sealed class EngineSettingsServiceTests
         var exerciseId = Guid.NewGuid();
         await using var harness = Build(exerciseId);
 
-        await harness.Service.SetExerciseAutonomyDefaultAsync("delayed-auto", Input("controller-7"));
-        var result = await harness.Service.SetExerciseAutonomyDefaultAsync("suggest", Input("controller-7"));
+        await harness.Service.SetExerciseAutonomyDefaultAsync("delayed-auto", Input("controller-7"), callerIsLead: true);
+        var result = await harness.Service.SetExerciseAutonomyDefaultAsync("suggest", Input("controller-7"), callerIsLead: true);
 
         result.Outcome.Should().Be(EngineReviewOutcome.Ok);
         result.Settings!.Autonomy.ExerciseDefaultLevel.Should().Be(
@@ -87,7 +87,7 @@ public sealed class EngineSettingsServiceTests
         var exerciseId = Guid.NewGuid();
         await using var harness = Build(exerciseId);
 
-        var result = await harness.Service.SetExerciseAutonomyDefaultAsync("auto", Input("controller-7"));
+        var result = await harness.Service.SetExerciseAutonomyDefaultAsync("auto", Input("controller-7"), callerIsLead: true);
 
         result.Outcome.Should().Be(
             EngineReviewOutcome.Invalid,
@@ -104,7 +104,7 @@ public sealed class EngineSettingsServiceTests
         var exerciseId = Guid.NewGuid();
         await using var harness = Build(exerciseId);
 
-        var result = await harness.Service.SetExerciseAutonomyDefaultAsync("full-auto-please", Input("controller-7"));
+        var result = await harness.Service.SetExerciseAutonomyDefaultAsync("full-auto-please", Input("controller-7"), callerIsLead: true);
 
         result.Outcome.Should().Be(EngineReviewOutcome.Invalid, "an unknown level literal fails loud, never a silent default");
         harness.Registry.GetOrCreate(exerciseId).ExerciseDefault.Should().Be(AutonomyLevel.Suggest);
@@ -121,7 +121,7 @@ public sealed class EngineSettingsServiceTests
         var state = harness.Registry.GetOrCreate(exerciseId);
         state.EngageKillSwitch(KillSwitchMode.FullStop, "lead-1", 0);
 
-        var result = await harness.Service.SetExerciseAutonomyDefaultAsync("delayed-auto", Input("controller-7"));
+        var result = await harness.Service.SetExerciseAutonomyDefaultAsync("delayed-auto", Input("controller-7"), callerIsLead: true);
 
         result.Outcome.Should().Be(EngineReviewOutcome.Ok);
         state.ExerciseDefault.Should().Be(AutonomyLevel.DelayedAuto, "the base level is set UNDERNEATH the clamp");
@@ -142,7 +142,7 @@ public sealed class EngineSettingsServiceTests
         var exerciseId = Guid.NewGuid();
         await using var harness = Build(exerciseId);
 
-        var clean = await harness.Service.SetExerciseAutonomyDefaultAsync("delayed-auto", Input("controller-7"));
+        var clean = await harness.Service.SetExerciseAutonomyDefaultAsync("delayed-auto", Input("controller-7"), callerIsLead: true);
         clean.Settings!.Autonomy.EffectiveLevel.Should().Be(
             AutonomyLevel.DelayedAuto, "with no clamp the effective level IS the base default");
 
@@ -162,7 +162,7 @@ public sealed class EngineSettingsServiceTests
         var exerciseId = Guid.NewGuid();
         await using var harness = Build(exerciseId);
 
-        await harness.Service.SetExerciseAutonomyDefaultAsync("delayed-auto", Input("controller-7"));
+        await harness.Service.SetExerciseAutonomyDefaultAsync("delayed-auto", Input("controller-7"), callerIsLead: true);
         harness.Registry.GetOrCreate(exerciseId).EngageKillSwitch(KillSwitchMode.FullStop, "lead-1", 0);
 
         var result = await harness.Service.GetSettingsAsync();
@@ -179,7 +179,7 @@ public sealed class EngineSettingsServiceTests
         var exerciseId = Guid.NewGuid();
         await using var harness = Build(exerciseId);
 
-        await harness.Service.SetExerciseAutonomyDefaultAsync("delayed-auto", Input("controller-7"));
+        await harness.Service.SetExerciseAutonomyDefaultAsync("delayed-auto", Input("controller-7"), callerIsLead: true);
         await harness.Service.EngageKillSwitchAsync(KillSwitchMode.FullStop, Input("lead-1"));
         await harness.Service.RestoreFromSafetyAsync(Input("lead-1"));
 
@@ -203,7 +203,7 @@ public sealed class EngineSettingsServiceTests
         options.Tiers["Standard"] = new TierModelOptions { Model = "claude-sonnet-5", Deployment = "standard" };
         await using var harness = Build(exerciseId, options);
 
-        var result = await harness.Service.SetTierPolicyModeAsync("ambient", Input("controller-7"));
+        var result = await harness.Service.SetTierPolicyModeAsync("ambient", Input("controller-7"), callerIsLead: true);
 
         result.Outcome.Should().Be(EngineReviewOutcome.Invalid);
         result.ValidationError.Should().Contain(
@@ -226,7 +226,7 @@ public sealed class EngineSettingsServiceTests
             new GenerationOptions(),                       // nothing bound
             generationProvider: new StubLiveGenerationProvider());
 
-        var rejected = await live.Service.SetTierPolicyModeAsync("ambient", Input("controller-7"));
+        var rejected = await live.Service.SetTierPolicyModeAsync("ambient", Input("controller-7"), callerIsLead: true);
 
         rejected.Outcome.Should().Be(
             EngineReviewOutcome.Invalid,
@@ -238,7 +238,7 @@ public sealed class EngineSettingsServiceTests
         var fakeExercise = Guid.NewGuid();
         await using var offline = Build(fakeExercise, new GenerationOptions());
 
-        var allowed = await offline.Service.SetTierPolicyModeAsync("ambient", Input("controller-7"));
+        var allowed = await offline.Service.SetTierPolicyModeAsync("ambient", Input("controller-7"), callerIsLead: true);
 
         allowed.Outcome.Should().Be(
             EngineReviewOutcome.Ok,
@@ -268,7 +268,7 @@ public sealed class EngineSettingsServiceTests
         options.Tiers["Ambient"] = new TierModelOptions { Model = "claude-haiku-5", Deployment = "   " };
         await using var harness = Build(exerciseId, options);
 
-        var result = await harness.Service.SetTierPolicyModeAsync("ambient", Input("controller-7"));
+        var result = await harness.Service.SetTierPolicyModeAsync("ambient", Input("controller-7"), callerIsLead: true);
 
         result.Outcome.Should().Be(
             EngineReviewOutcome.Invalid,
@@ -284,8 +284,8 @@ public sealed class EngineSettingsServiceTests
         options.Tiers["Ambient"] = new TierModelOptions { Model = "claude-haiku-5", Deployment = "ambient" };
         await using var harness = Build(exerciseId, options);
 
-        var standard = await harness.Service.SetTierPolicyModeAsync("standard", Input("controller-7"));
-        var ambient = await harness.Service.SetTierPolicyModeAsync("ambient", Input("controller-7"));
+        var standard = await harness.Service.SetTierPolicyModeAsync("standard", Input("controller-7"), callerIsLead: true);
+        var ambient = await harness.Service.SetTierPolicyModeAsync("ambient", Input("controller-7"), callerIsLead: true);
 
         standard.Outcome.Should().Be(EngineReviewOutcome.Ok);
         ambient.Outcome.Should().Be(EngineReviewOutcome.Ok);
@@ -300,7 +300,7 @@ public sealed class EngineSettingsServiceTests
         options.Tiers["Standard"] = new TierModelOptions { Model = "claude-sonnet-5", Deployment = "standard" };
         await using var harness = Build(exerciseId, options);
 
-        var result = await harness.Service.SetTierPolicyModeAsync("auto", Input("controller-7"));
+        var result = await harness.Service.SetTierPolicyModeAsync("auto", Input("controller-7"), callerIsLead: true);
 
         result.Outcome.Should().Be(
             EngineReviewOutcome.Ok, "'auto' forces no tier, so there is no binding to check — clearing is always allowed");
@@ -312,7 +312,7 @@ public sealed class EngineSettingsServiceTests
         var exerciseId = Guid.NewGuid();
         await using var harness = Build(exerciseId); // no Generation:Tiers at all — the Fake provider's normal state
 
-        var result = await harness.Service.SetTierPolicyModeAsync("ambient", Input("controller-7"));
+        var result = await harness.Service.SetTierPolicyModeAsync("ambient", Input("controller-7"), callerIsLead: true);
 
         result.Outcome.Should().Be(
             EngineReviewOutcome.Ok, "the offline Fake provider ignores the tier, so an unconfigured Tiers map is not an error");
@@ -327,7 +327,7 @@ public sealed class EngineSettingsServiceTests
         var exerciseId = Guid.NewGuid();
         await using var harness = Build(currentExerciseId: null);
 
-        var result = await harness.Service.SetExerciseAutonomyDefaultAsync("delayed-auto", Input("controller-7"));
+        var result = await harness.Service.SetExerciseAutonomyDefaultAsync("delayed-auto", Input("controller-7"), callerIsLead: true);
 
         result.Outcome.Should().Be(
             EngineReviewOutcome.ScopeUnresolved,
@@ -343,7 +343,7 @@ public sealed class EngineSettingsServiceTests
         await using var harness = Build(exerciseId);
 
         var result = await harness.Service.SetExerciseAutonomyDefaultAsync(
-            "delayed-auto", new EngineReviewActionInput(ActingHumanId: null, TimeZone: "UTC"));
+            "delayed-auto", new EngineReviewActionInput(ActingHumanId: null, TimeZone: "UTC"), callerIsLead: true);
 
         result.Outcome.Should().Be(EngineReviewOutcome.Invalid, "COR-018 requires the human behind the shared account");
         harness.Registry.GetOrCreate(exerciseId).ExerciseDefault.Should().Be(AutonomyLevel.Suggest);
@@ -356,7 +356,7 @@ public sealed class EngineSettingsServiceTests
         var exerciseB = Guid.NewGuid();
         await using var harness = Build(exerciseA);
 
-        await harness.Service.SetExerciseAutonomyDefaultAsync("delayed-auto", Input("controller-7"));
+        await harness.Service.SetExerciseAutonomyDefaultAsync("delayed-auto", Input("controller-7"), callerIsLead: true);
 
         harness.Registry.GetOrCreate(exerciseA).ExerciseDefault.Should().Be(AutonomyLevel.DelayedAuto);
         harness.Registry.GetOrCreate(exerciseB).ExerciseDefault.Should().Be(
@@ -372,7 +372,7 @@ public sealed class EngineSettingsServiceTests
         var exerciseId = Guid.NewGuid();
         await using var harness = Build(exerciseId);
 
-        var result = await harness.Service.SetTierPolicyModeAsync("ambient", Input("controller-7"));
+        var result = await harness.Service.SetTierPolicyModeAsync("ambient", Input("controller-7"), callerIsLead: true);
 
         result.Outcome.Should().Be(EngineReviewOutcome.Ok);
         result.Settings!.TierPolicyMode.Should().Be(TierPolicyMode.Ambient);
@@ -388,10 +388,10 @@ public sealed class EngineSettingsServiceTests
         var exerciseId = Guid.NewGuid();
         await using var harness = Build(exerciseId);
 
-        await harness.Service.SetTierPolicyModeAsync("standard", Input("controller-7"));
+        await harness.Service.SetTierPolicyModeAsync("standard", Input("controller-7"), callerIsLead: true);
         harness.TierPolicy.ResolveTier(exerciseId, GenerationTier.Ambient).Should().Be(GenerationTier.Standard);
 
-        var result = await harness.Service.SetTierPolicyModeAsync("auto", Input("controller-7"));
+        var result = await harness.Service.SetTierPolicyModeAsync("auto", Input("controller-7"), callerIsLead: true);
 
         result.Outcome.Should().Be(EngineReviewOutcome.Ok);
         result.Settings!.TierPolicyMode.Should().Be(TierPolicyMode.Auto);
@@ -406,8 +406,8 @@ public sealed class EngineSettingsServiceTests
         var exerciseId = Guid.NewGuid();
         await using var harness = Build(exerciseId);
 
-        await harness.Service.SetTierPolicyModeAsync("standard", Input("controller-7"));
-        var result = await harness.Service.SetTierPolicyModeAsync("gpt-5-turbo-max", Input("controller-7"));
+        await harness.Service.SetTierPolicyModeAsync("standard", Input("controller-7"), callerIsLead: true);
+        var result = await harness.Service.SetTierPolicyModeAsync("gpt-5-turbo-max", Input("controller-7"), callerIsLead: true);
 
         result.Outcome.Should().Be(EngineReviewOutcome.Invalid, "only the three tier ROLE literals are accepted");
         harness.TierPolicy.GetMode(exerciseId).Should().Be(
@@ -420,7 +420,7 @@ public sealed class EngineSettingsServiceTests
         var exerciseId = Guid.NewGuid();
         await using var harness = Build(currentExerciseId: null);
 
-        var result = await harness.Service.SetTierPolicyModeAsync("standard", Input("controller-7"));
+        var result = await harness.Service.SetTierPolicyModeAsync("standard", Input("controller-7"), callerIsLead: true);
 
         result.Outcome.Should().Be(EngineReviewOutcome.ScopeUnresolved);
         harness.TierPolicy.GetMode(exerciseId).Should().Be(TierPolicyMode.Auto);
@@ -433,7 +433,7 @@ public sealed class EngineSettingsServiceTests
         await using var harness = Build(exerciseId);
 
         var result = await harness.Service.SetTierPolicyModeAsync(
-            "ambient", new EngineReviewActionInput(ActingHumanId: null, TimeZone: "UTC"));
+            "ambient", new EngineReviewActionInput(ActingHumanId: null, TimeZone: "UTC"), callerIsLead: true);
 
         result.Outcome.Should().Be(EngineReviewOutcome.Invalid, "COR-018 applies to every steering mutation");
         harness.TierPolicy.GetMode(exerciseId).Should().Be(TierPolicyMode.Auto);
@@ -452,8 +452,8 @@ public sealed class EngineSettingsServiceTests
         await using var harness = Build(exerciseId, options);
 
         // Move every reported dimension away from its default so a stale/hardcoded read cannot pass.
-        await harness.Service.SetExerciseAutonomyDefaultAsync("delayed-auto", Input("controller-7"));
-        await harness.Service.SetTierPolicyModeAsync("standard", Input("controller-7"));
+        await harness.Service.SetExerciseAutonomyDefaultAsync("delayed-auto", Input("controller-7"), callerIsLead: true);
+        await harness.Service.SetTierPolicyModeAsync("standard", Input("controller-7"), callerIsLead: true);
         harness.Registry.GetOrCreate(exerciseId).DegradeToSuggest("provider circuit opened", 0);
 
         var result = await harness.Service.GetSettingsAsync();
@@ -508,8 +508,8 @@ public sealed class EngineSettingsServiceTests
 
         // B is set to Delayed-auto + ambient through its OWN scope; A must still read its own (default) posture.
         await using var harnessB = Build(exerciseB);
-        await harnessB.Service.SetExerciseAutonomyDefaultAsync("delayed-auto", Input("controller-b"));
-        await harnessB.Service.SetTierPolicyModeAsync("ambient", Input("controller-b"));
+        await harnessB.Service.SetExerciseAutonomyDefaultAsync("delayed-auto", Input("controller-b"), callerIsLead: true);
+        await harnessB.Service.SetTierPolicyModeAsync("ambient", Input("controller-b"), callerIsLead: true);
 
         await using var harnessA = Build(exerciseA, autonomy: harnessB.Registry, tierPolicy: harnessB.TierPolicy);
         var result = await harnessA.Service.GetSettingsAsync();
@@ -528,7 +528,7 @@ public sealed class EngineSettingsServiceTests
         await using var harness = Build(exerciseId);
         harness.Registry.GetOrCreate(exerciseId).EngageKillSwitch(KillSwitchMode.DropToSuggest, "lead-1", 0);
 
-        await harness.Service.SetExerciseAutonomyDefaultAsync("delayed-auto", Input("controller-7"));
+        await harness.Service.SetExerciseAutonomyDefaultAsync("delayed-auto", Input("controller-7"), callerIsLead: true);
 
         var events = await ReadEventsAsync(exerciseId, EngineEventTypes.AutonomyDefaultChanged);
         var telemetryEvent = events.Should().ContainSingle(
@@ -551,8 +551,8 @@ public sealed class EngineSettingsServiceTests
         var exerciseId = Guid.NewGuid();
         await using var harness = Build(exerciseId);
 
-        await harness.Service.SetTierPolicyModeAsync("ambient", Input("controller-7"));
-        await harness.Service.SetTierPolicyModeAsync("auto", Input("controller-7"));
+        await harness.Service.SetTierPolicyModeAsync("ambient", Input("controller-7"), callerIsLead: true);
+        await harness.Service.SetTierPolicyModeAsync("auto", Input("controller-7"), callerIsLead: true);
 
         var events = await ReadEventsAsync(exerciseId, EngineEventTypes.TierPolicyChanged);
         events.Should().HaveCount(2, "one event per change — never a batched or missing audit record");
@@ -573,10 +573,147 @@ public sealed class EngineSettingsServiceTests
         var exerciseId = Guid.NewGuid();
         await using var harness = Build(exerciseId);
 
-        await harness.Service.SetExerciseAutonomyDefaultAsync("delayed-auto", Input("controller-7"));
+        await harness.Service.SetExerciseAutonomyDefaultAsync("delayed-auto", Input("controller-7"), callerIsLead: true);
 
         (await CountTelemetryAsync(exerciseId)).Should().Be(
             1, "a settings change emits exactly ONE event, never a spurious engine.reviewed alongside it");
+    }
+
+    // ---- Gate-1 WR-001: the lead-only raise is judged atomically with the write --------------------
+
+    [RequiresDockerFact]
+    public async Task AutonomyDefault_TheRace_AConcurrentLowerBetweenTheReadAndTheWrite_TurnsANonLeadNoOpIntoARefusedRaise()
+    {
+        // A non-lead's "delayed-auto" while the default IS delayed-auto is a no-op, not a raise. A concurrent lower to
+        // suggest lands between the service's read and its write (the hook fires on the scenario-minute read that sits
+        // in that window): the compare-and-set misses, the loop re-reads suggest, and the same request is now a raise.
+        var exerciseId = Guid.NewGuid();
+        var lowered = false;
+        EngineAutonomyRegistry registry = new();
+        await using var harness = Build(
+            exerciseId,
+            autonomy: registry,
+            onFirstScenarioMinuteRead: () => lowered = registry.TrySetExerciseDefault(
+                exerciseId, AutonomyLevel.DelayedAuto, AutonomyLevel.Suggest, "lead-1", 0));
+        registry.GetOrCreate(exerciseId).SetExerciseDefault(AutonomyLevel.DelayedAuto, "arrange", 0);
+
+        var result = await harness.Service.SetExerciseAutonomyDefaultAsync("delayed-auto", Input("controller-2"), callerIsLead: false);
+
+        lowered.Should().BeTrue("the hook really landed the lower inside the read→write window");
+        result.Outcome.Should().Be(EngineReviewOutcome.Forbidden, "against the re-read default the request is a raise — lead-only");
+        registry.GetOrCreate(exerciseId).ExerciseDefault.Should().Be(
+            AutonomyLevel.Suggest, "a non-lead never writes delayed-auto back over the concurrent lower");
+        (await CountTelemetryAsync(exerciseId)).Should().Be(0, "the refused request audits nothing");
+    }
+
+    [RequiresDockerFact]
+    public async Task AutonomyDefault_TheRace_WithoutTheConcurrentLower_TheSameNonLeadRequestIsAllowed()
+    {
+        var exerciseId = Guid.NewGuid();
+        EngineAutonomyRegistry registry = new();
+        await using var harness = Build(exerciseId, autonomy: registry, onFirstScenarioMinuteRead: () => { });
+        registry.GetOrCreate(exerciseId).SetExerciseDefault(AutonomyLevel.DelayedAuto, "arrange", 0);
+
+        var result = await harness.Service.SetExerciseAutonomyDefaultAsync("delayed-auto", Input("controller-2"), callerIsLead: false);
+
+        result.Outcome.Should().Be(EngineReviewOutcome.Ok, "the 403 above comes from the re-read, not from the request alone");
+    }
+
+    [RequiresDockerFact]
+    public async Task AutonomyDefault_ANonLeadRaise_Is403_AndChangesNothing_WhileANonLeadLowerSucceeds()
+    {
+        var exerciseId = Guid.NewGuid();
+        await using var harness = Build(exerciseId);
+
+        var raise = await harness.Service.SetExerciseAutonomyDefaultAsync("delayed-auto", Input("controller-2"), callerIsLead: false);
+        raise.Outcome.Should().Be(EngineReviewOutcome.Forbidden);
+        harness.Registry.GetOrCreate(exerciseId).ExerciseDefault.Should().Be(AutonomyLevel.Suggest);
+
+        harness.Registry.GetOrCreate(exerciseId).SetExerciseDefault(AutonomyLevel.DelayedAuto, "arrange", 0);
+        var lower = await harness.Service.SetExerciseAutonomyDefaultAsync("suggest", Input("controller-2"), callerIsLead: false);
+        lower.Outcome.Should().Be(EngineReviewOutcome.Ok, "lowering is open to any controller");
+        harness.Registry.GetOrCreate(exerciseId).ExerciseDefault.Should().Be(AutonomyLevel.Suggest);
+    }
+
+    [RequiresDockerFact]
+    public async Task TierPolicy_TheRace_AConcurrentLowerBetweenTheReadAndTheWrite_TurnsANonLeadNoOpIntoARefusedRaise()
+    {
+        // A non-lead's "standard" while the mode IS standard is a no-op. A concurrent lower to ambient lands between the
+        // read and the write: the compare-and-set misses, the loop re-reads ambient, and standard is now a raise.
+        var exerciseId = Guid.NewGuid();
+        var lowered = false;
+        EngineTierPolicyRegistry tiers = new();
+        await using var harness = Build(
+            exerciseId,
+            tierPolicy: tiers,
+            onFirstScenarioMinuteRead: () => lowered = tiers.TrySetMode(exerciseId, TierPolicyMode.Standard, TierPolicyMode.Ambient));
+        tiers.SetMode(exerciseId, TierPolicyMode.Standard);
+
+        var result = await harness.Service.SetTierPolicyModeAsync("standard", Input("controller-2"), callerIsLead: false);
+
+        lowered.Should().BeTrue("the hook really landed the lower inside the read→write window");
+        result.Outcome.Should().Be(EngineReviewOutcome.Forbidden, "against the re-read mode the request is a raise — lead-only");
+        tiers.GetMode(exerciseId).Should().Be(TierPolicyMode.Ambient, "a non-lead never writes standard back over the lower");
+        (await CountTelemetryAsync(exerciseId)).Should().Be(0, "the refused request audits nothing");
+    }
+
+    [RequiresDockerFact]
+    public async Task TierPolicy_TheRace_WithoutTheConcurrentLower_TheSameNonLeadRequestIsAllowed()
+    {
+        var exerciseId = Guid.NewGuid();
+        EngineTierPolicyRegistry tiers = new();
+        await using var harness = Build(exerciseId, tierPolicy: tiers, onFirstScenarioMinuteRead: () => { });
+        tiers.SetMode(exerciseId, TierPolicyMode.Standard);
+
+        var result = await harness.Service.SetTierPolicyModeAsync("standard", Input("controller-2"), callerIsLead: false);
+
+        result.Outcome.Should().Be(EngineReviewOutcome.Ok);
+        tiers.GetMode(exerciseId).Should().Be(TierPolicyMode.Standard);
+    }
+
+    [RequiresDockerFact]
+    public async Task TierPolicy_ANonLeadRaise_Is403_AndChangesNothing_WhileANonLeadLowerSucceeds()
+    {
+        var exerciseId = Guid.NewGuid();
+        await using var harness = Build(exerciseId);
+        harness.TierPolicy.SetMode(exerciseId, TierPolicyMode.Ambient);
+
+        var raise = await harness.Service.SetTierPolicyModeAsync("auto", Input("controller-2"), callerIsLead: false);
+        raise.Outcome.Should().Be(EngineReviewOutcome.Forbidden);
+        harness.TierPolicy.GetMode(exerciseId).Should().Be(TierPolicyMode.Ambient);
+
+        harness.TierPolicy.SetMode(exerciseId, TierPolicyMode.Auto);
+        var lower = await harness.Service.SetTierPolicyModeAsync("ambient", Input("controller-2"), callerIsLead: false);
+        lower.Outcome.Should().Be(EngineReviewOutcome.Ok, "lowering is open to any controller");
+        harness.TierPolicy.GetMode(exerciseId).Should().Be(TierPolicyMode.Ambient);
+    }
+
+    [Fact]
+    public void TierPolicyRegistry_TrySetMode_SwapsOnlyAgainstTheExpectedMode()
+    {
+        var exerciseId = Guid.NewGuid();
+        var tiers = new EngineTierPolicyRegistry();
+
+        tiers.TrySetMode(exerciseId, TierPolicyMode.Standard, TierPolicyMode.Ambient).Should().BeFalse("the mode is auto");
+        tiers.TrySetMode(exerciseId, TierPolicyMode.Auto, TierPolicyMode.Standard).Should().BeTrue();
+        tiers.TrySetMode(exerciseId, TierPolicyMode.Auto, TierPolicyMode.Ambient).Should().BeFalse("the mode is standard");
+        tiers.TrySetMode(exerciseId, TierPolicyMode.Standard, TierPolicyMode.Ambient).Should().BeTrue();
+        tiers.TrySetMode(exerciseId, TierPolicyMode.Standard, TierPolicyMode.Auto).Should().BeFalse("the mode is ambient");
+        tiers.TrySetMode(exerciseId, TierPolicyMode.Ambient, TierPolicyMode.Auto).Should().BeTrue();
+        tiers.GetMode(exerciseId).Should().Be(TierPolicyMode.Auto);
+        tiers.TrySetMode(exerciseId, TierPolicyMode.Auto, TierPolicyMode.Auto).Should().BeTrue("an auto → auto no-op");
+    }
+
+    [Fact]
+    public void AutonomyRegistry_TrySetExerciseDefault_SwapsOnlyAgainstTheExpectedDefault()
+    {
+        var exerciseId = Guid.NewGuid();
+        var registry = new EngineAutonomyRegistry();
+
+        registry.TrySetExerciseDefault(exerciseId, AutonomyLevel.DelayedAuto, AutonomyLevel.Suggest, "c", 0)
+            .Should().BeFalse("the default is suggest");
+        registry.TrySetExerciseDefault(exerciseId, AutonomyLevel.Suggest, AutonomyLevel.DelayedAuto, "c", 0).Should().BeTrue();
+        registry.GetOrCreate(exerciseId).ExerciseDefault.Should().Be(AutonomyLevel.DelayedAuto);
     }
 
     // ---- helpers ---------------------------------------------------------------------------------
@@ -589,16 +726,21 @@ public sealed class EngineSettingsServiceTests
         EngineAutonomyRegistry? autonomy = null,
         EngineTierPolicyRegistry? tierPolicy = null,
         IGenerationProvider? generationProvider = null,
-        IGenerationProviderCutRegistry? providerCut = null)
+        IGenerationProviderCutRegistry? providerCut = null,
+        Action? onFirstScenarioMinuteRead = null)
     {
         var context = new ExerciseContext { CurrentExerciseId = currentExerciseId };
         var db = _fixture.CreateContext(context);
         var time = new ManualTimeProvider(ScenarioStart);
-        var clock = new ExerciseClockService(time);
+        var native = new ExerciseClockService(time);
         if (currentExerciseId is { } id && id != Guid.Empty)
         {
-            clock.Start(id, ScenarioStart, TimeZoneInfo.Utc);
+            native.Start(id, ScenarioStart, TimeZoneInfo.Utc);
         }
+
+        IExerciseClock clock = onFirstScenarioMinuteRead is null
+            ? native
+            : new HookOnFirstMinuteReadClock(native, onFirstScenarioMinuteRead);
 
         var registry = autonomy ?? new EngineAutonomyRegistry();
         var tiers = tierPolicy ?? new EngineTierPolicyRegistry();
@@ -633,6 +775,41 @@ public sealed class EngineSettingsServiceTests
     {
         await using var verify = _fixture.CreateContext();
         return await verify.TelemetryEvents.IgnoreQueryFilters().CountAsync(e => e.ExerciseId == exerciseId);
+    }
+
+    /// <summary>
+    /// Delegates to the native clock, running <c>onFirstRead</c> once on the FIRST scenario-minute read. The settings
+    /// sets read the minute between their snapshot read and their compare-and-set, so the hook lands a concurrent change
+    /// exactly inside that window (Gate-1 WR-001).
+    /// </summary>
+    private sealed class HookOnFirstMinuteReadClock(IExerciseClock inner, Action onFirstRead) : IExerciseClock
+    {
+        private int _reads;
+
+        public void Start(Guid exerciseId, DateTimeOffset scenarioStart, TimeZoneInfo timeZone) =>
+            inner.Start(exerciseId, scenarioStart, timeZone);
+
+        public void Freeze(Guid exerciseId) => inner.Freeze(exerciseId);
+
+        public void Unfreeze(Guid exerciseId) => inner.Unfreeze(exerciseId);
+
+        public void Jump(Guid exerciseId, int scenarioMinutes) => inner.Jump(exerciseId, scenarioMinutes);
+
+        public int CurrentScenarioMinute(Guid exerciseId)
+        {
+            if (System.Threading.Interlocked.Increment(ref _reads) == 1)
+            {
+                onFirstRead();
+            }
+
+            return inner.CurrentScenarioMinute(exerciseId);
+        }
+
+        public DateTimeOffset? CurrentScenarioTime(Guid exerciseId) => inner.CurrentScenarioTime(exerciseId);
+
+        public bool IsFrozen(Guid exerciseId) => inner.IsFrozen(exerciseId);
+
+        public bool IsRunning(Guid exerciseId) => inner.IsRunning(exerciseId);
     }
 
     private sealed class Harness : IAsyncDisposable

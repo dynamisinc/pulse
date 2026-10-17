@@ -314,7 +314,7 @@ public sealed class EngineSettingsLoopIntegrationTests
         var service = scope.ServiceProvider.GetRequiredService<EngineReviewService>();
 
         var result = await service.SetExerciseAutonomyDefaultAsync(
-            level, new EngineReviewActionInput("controller-7", "UTC"));
+            level, new EngineReviewActionInput("controller-7", "UTC"), callerIsLead: true);
         result.Outcome.Should().Be(EngineReviewOutcome.Ok, "the settings change must succeed for this proof to mean anything");
     }
 
@@ -324,7 +324,7 @@ public sealed class EngineSettingsLoopIntegrationTests
         ((ExerciseContext)scope.ServiceProvider.GetRequiredService<IExerciseContext>()).CurrentExerciseId = exerciseId;
         var service = scope.ServiceProvider.GetRequiredService<EngineReviewService>();
 
-        var result = await service.SetTierPolicyModeAsync(mode, new EngineReviewActionInput("controller-7", "UTC"));
+        var result = await service.SetTierPolicyModeAsync(mode, new EngineReviewActionInput("controller-7", "UTC"), callerIsLead: true);
         result.Outcome.Should().Be(EngineReviewOutcome.Ok);
     }
 

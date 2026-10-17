@@ -42,7 +42,7 @@ public sealed class EngineSettingsAuditFailureTests
         using var harness = new Harness(exerciseId, new InvalidOperationException("transient SQL failure"));
 
         var result = await harness.Service.SetExerciseAutonomyDefaultAsync(
-            "delayed-auto", new EngineReviewActionInput("controller-7", "UTC"));
+            "delayed-auto", new EngineReviewActionInput("controller-7", "UTC"), callerIsLead: true);
 
         result.Outcome.Should().Be(
             EngineReviewOutcome.Ok,
@@ -60,7 +60,7 @@ public sealed class EngineSettingsAuditFailureTests
         using var harness = new Harness(exerciseId, new InvalidOperationException("transient SQL failure"));
 
         await harness.Service.SetExerciseAutonomyDefaultAsync(
-            "delayed-auto", new EngineReviewActionInput("controller-7", "UTC"));
+            "delayed-auto", new EngineReviewActionInput("controller-7", "UTC"), callerIsLead: true);
 
         var entry = harness.Logger.Entries.Should().ContainSingle(
             "an unaudited-but-live posture change is an ops event, so exactly one loud record is written").Subject;
@@ -77,7 +77,7 @@ public sealed class EngineSettingsAuditFailureTests
         using var harness = new Harness(exerciseId, new DbUpdateException("audit insert failed"));
 
         var result = await harness.Service.SetTierPolicyModeAsync(
-            "ambient", new EngineReviewActionInput("controller-7", "UTC"));
+            "ambient", new EngineReviewActionInput("controller-7", "UTC"), callerIsLead: true);
 
         result.Outcome.Should().Be(EngineReviewOutcome.Ok);
         result.Settings!.TierPolicyMode.Should().Be(
@@ -93,7 +93,7 @@ public sealed class EngineSettingsAuditFailureTests
         using var harness = new Harness(exerciseId, new OperationCanceledException());
 
         var act = async () => await harness.Service.SetExerciseAutonomyDefaultAsync(
-            "delayed-auto", new EngineReviewActionInput("controller-7", "UTC"));
+            "delayed-auto", new EngineReviewActionInput("controller-7", "UTC"), callerIsLead: true);
 
         await act.Should().ThrowAsync<OperationCanceledException>(
             "cancellation is a caller/shutdown signal, not an audit failure — it must never be swallowed");
@@ -107,7 +107,7 @@ public sealed class EngineSettingsAuditFailureTests
         using var harness = new Harness(exerciseId, saveFailure: null);
 
         var result = await harness.Service.SetExerciseAutonomyDefaultAsync(
-            "delayed-auto", new EngineReviewActionInput("controller-7", "UTC"));
+            "delayed-auto", new EngineReviewActionInput("controller-7", "UTC"), callerIsLead: true);
 
         result.Outcome.Should().Be(EngineReviewOutcome.Ok);
         harness.Logger.Entries.Should().BeEmpty("the happy path is silent — the Error log means something genuinely went wrong");

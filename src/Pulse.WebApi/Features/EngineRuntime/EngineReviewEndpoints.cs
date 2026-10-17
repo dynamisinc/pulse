@@ -135,7 +135,8 @@ public static class EngineReviewEndpoints
         steering.MapPost("/api/engine/review/batch-approve", BatchApproveAsync);
         // identity-auth-roles/17 (ADMIN-IDENTITY-MODEL §12, Option A): the five autonomy RAISES additionally need the
         // LEAD controller (LeadControllerRaiseFilter, read live); lowering — swamped off, autonomy down, the kill switch,
-        // cut-to-fake — stays open to any controller.
+        // cut-to-fake — stays open to any controller. For autonomy-default and tier-policy the filter is a cheap first
+        // line: the service re-judges the raise atomically with its compare-and-set write (Gate-1 WR-001).
         steering.MapPost("/api/engine/autonomy/swamped-mode", SetSwampedModeAsync)
             .AddEndpointFilter(LeadControllerRaiseFilter.SwampedMode);
         steering.MapPost("/api/engine/autonomy/kill-switch", EngageKillSwitchAsync);
@@ -455,7 +456,9 @@ public static class EngineReviewEndpoints
             return Results.Unauthorized();
         }
 
-        var result = await service.SetExerciseAutonomyDefaultAsync(request.Level, input, cancellationToken);
+        // Gate-1 WR-001: the raise is judged in the service, atomically with the write, on the live lead flag.
+        var caller = await ExerciseCallerRole.ResolveAsync(httpContext);
+        var result = await service.SetExerciseAutonomyDefaultAsync(request.Level, input, caller.IsLead, cancellationToken);
         return MapSettings(result);
     }
 
@@ -481,7 +484,9 @@ public static class EngineReviewEndpoints
             return Results.Unauthorized();
         }
 
-        var result = await service.SetTierPolicyModeAsync(request.Mode, input, cancellationToken);
+        // Gate-1 WR-001: the raise is judged in the service, atomically with the write, on the live lead flag.
+        var caller = await ExerciseCallerRole.ResolveAsync(httpContext);
+        var result = await service.SetTierPolicyModeAsync(request.Mode, input, caller.IsLead, cancellationToken);
         return MapSettings(result);
     }
 

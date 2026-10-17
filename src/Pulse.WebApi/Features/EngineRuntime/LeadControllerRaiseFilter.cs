@@ -17,9 +17,11 @@ using Pulse.WebApi.Features.Identity.RoleMatrix;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>Raise-only.</b> The request is compared against the exercise's CURRENT state: swamped mode off → on, an autonomy
-/// default above the current one, a tier policy towards more engine autonomy, and either restore are RAISES and need
-/// the lead. Everything else — swamped off, autonomy down, a no-op, and the never-gated kill switch and
+/// <b>Raise-only.</b> Swamped mode ON (any <c>enabled:true</c>, whatever the current state), an autonomy default above
+/// the current one, a tier policy towards more engine autonomy, and either restore are RAISES and need the lead. For
+/// the autonomy default and the tier policy this filter is only a cheap first line: the service re-judges the raise
+/// against the state it then compare-and-sets (Gate-1 WR-001), so a concurrent lower between this read and the write
+/// cannot slip a non-lead raise through. Everything else — swamped off, autonomy down, a no-op, and the never-gated kill switch and
 /// <c>cut-to-fake</c> — is a LOWER and stays open to any controller ("controls only ever lower").
 /// </para>
 /// <para>
@@ -40,20 +42,22 @@ public sealed class LeadControllerRaiseFilter : IEndpointFilter
 
     private LeadControllerRaiseFilter(Func<EndpointFilterInvocationContext, Guid, bool> isRaise) => _isRaise = isRaise;
 
-    /// <summary><c>swamped-mode</c>: turning it ON while it is off is a raise.</summary>
-    public static LeadControllerRaiseFilter SwampedMode { get; } = new((context, exerciseId) =>
+    /// <summary>
+    /// <c>swamped-mode</c>: ANY <c>enabled:true</c> is a raise, whatever the current state (Gate-1 WR-001). Judging it
+    /// against the current state would be a TOCTOU: a non-lead's "on while already on" no-op could land just after a
+    /// concurrent OFF and turn auto-send back on. Only <c>enabled:false</c> is a lower; an unparseable body is a raise.
+    /// </summary>
+    public static LeadControllerRaiseFilter SwampedMode { get; } = new((context, _) =>
     {
         var request = context.Arguments.OfType<EngineSwampedModeRequest>().FirstOrDefault();
-        if (request?.Enabled is not { } enabled)
-        {
-            return true;
-        }
-
-        var registry = context.HttpContext.RequestServices.GetService<EngineAutonomyRegistry>();
-        return enabled && (registry is null || !registry.GetOrCreate(exerciseId).SwampedModeEnabled);
+        return request?.Enabled is not { } enabled || enabled;
     });
 
-    /// <summary><c>settings/autonomy-default</c>: a level above the current default is a raise.</summary>
+    /// <summary>
+    /// <c>settings/autonomy-default</c>: a level above the current default is a raise. A cheap first line only — the
+    /// authoritative judgment is <see cref="EngineReviewService.SetExerciseAutonomyDefaultAsync"/>'s, made atomically
+    /// with the write (Gate-1 WR-001).
+    /// </summary>
     public static LeadControllerRaiseFilter AutonomyDefault { get; } = new((context, exerciseId) =>
     {
         var request = context.Arguments.OfType<EngineAutonomyDefaultRequest>().FirstOrDefault();
@@ -66,7 +70,11 @@ public sealed class LeadControllerRaiseFilter : IEndpointFilter
         return registry is null || requested > (int)registry.GetOrCreate(exerciseId).ExerciseDefault;
     });
 
-    /// <summary><c>settings/tier-policy</c>: a mode towards more engine autonomy than the current one is a raise.</summary>
+    /// <summary>
+    /// <c>settings/tier-policy</c>: a mode towards more engine autonomy than the current one is a raise. A cheap first
+    /// line only — the authoritative judgment is <see cref="EngineReviewService.SetTierPolicyModeAsync"/>'s, made
+    /// atomically with the write (Gate-1 WR-001).
+    /// </summary>
     public static LeadControllerRaiseFilter TierPolicy { get; } = new((context, exerciseId) =>
     {
         var request = context.Arguments.OfType<EngineTierPolicyRequest>().FirstOrDefault();

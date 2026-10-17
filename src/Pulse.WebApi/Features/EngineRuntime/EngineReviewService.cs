@@ -472,6 +472,13 @@ public sealed partial class EngineReviewService
 
     // ---- Engine settings (story 05: the runtime-settable autonomy default + tier policy) ---------
 
+    /// <summary>How many read→judge→compare-and-set attempts the autonomy-default and tier-policy sets make (Gate-1 WR-001).</summary>
+    internal const int SettingsCasAttempts = 3;
+
+    /// <summary>The 400 message when every compare-and-set attempt met a concurrently-changed setting (Gate-1 WR-001).</summary>
+    internal const string SettingsConcurrentChangeError =
+        "the setting changed while this request was being applied — reload the settings and try again";
+
     /// <summary>
     /// The staff-only engine-settings READ: the active provider name, the governed
     /// <c>Generation:Tiers:*</c> mapping (informational — never editable here), the exercise's autonomy default
@@ -511,14 +518,27 @@ public sealed partial class EngineReviewService
     /// <see cref="RestoreFromSafetyAsync"/> releases it. <see cref="AutonomyLevels.EnsureSelectable"/> rejects
     /// <see cref="AutonomyLevel.Auto"/> (v1.1) with a 400 — never a silent clamp to Suggest.
     /// </para>
+    /// <para>
+    /// <b>Lead-only raise, atomic with the write (identity-auth-roles/17, Gate-1 WR-001).</b> A level above the current
+    /// default is a RAISE and needs the lead controller; lowering (or a no-op) is open to any controller. The raise is
+    /// judged against the default just read, and the write is a compare-and-set against that SAME value
+    /// (<see cref="EngineAutonomyRegistry.TrySetExerciseDefault"/>), retried up to <see cref="SettingsCasAttempts"/>
+    /// times: a concurrent lower in between misses the swap, the loop re-reads, and the re-judged raise is refused
+    /// (<see cref="EngineReviewOutcome.Forbidden"/>, 403, nothing mutated, no event). Exhausting the attempts is a 400.
+    /// </para>
     /// </remarks>
     /// <param name="level">The requested level literal (<c>suggest</c> / <c>delayed-auto</c>).</param>
     /// <param name="input">The acting human (COR-018) + optional telemetry zone (XC-008).</param>
+    /// <param name="callerIsLead">
+    /// Whether the session's person is the exercise's LEAD controller, read live by the endpoint
+    /// (<c>ExerciseCallerRole.IsLead</c>). A raise by a non-lead is refused 403.
+    /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>The resulting settings snapshot, or a fail-closed/invalid outcome.</returns>
+    /// <returns>The resulting settings snapshot, or a fail-closed/invalid/forbidden outcome.</returns>
     public async Task<EngineSettingsResult> SetExerciseAutonomyDefaultAsync(
         string? level,
         EngineReviewActionInput input,
+        bool callerIsLead,
         CancellationToken cancellationToken = default)
     {
         if (!TryResolveScope(out var exerciseId))
@@ -547,15 +567,36 @@ public sealed partial class EngineReviewService
             return EngineSettingsResult.Invalid(ex.Message);
         }
 
-        var scenarioMinute = _clock.CurrentScenarioMinute(exerciseId);
+        // WR-001: read → judge → compare-and-set against the SAME read, bounded. A concurrent change between the read
+        // and the write misses the swap; the loop re-reads and re-judges, so a non-lead never writes a raise that was
+        // judged "not a raise" against a stale default.
         var state = _autonomy.GetOrCreate(exerciseId);
-        var from = state.ExerciseDefault;
-        state.SetExerciseDefault(requested, input.ActingHumanId, scenarioMinute);
+        AutonomyLevel? from = null;
+        var scenarioMinute = 0;
+        for (var attempt = 0; attempt < SettingsCasAttempts && from is null; attempt++)
+        {
+            var snapshot = state.ExerciseDefault;
+            if (!callerIsLead && (int)requested > (int)snapshot)
+            {
+                return EngineSettingsResult.Forbidden();
+            }
+
+            scenarioMinute = _clock.CurrentScenarioMinute(exerciseId);
+            if (_autonomy.TrySetExerciseDefault(exerciseId, snapshot, requested, input.ActingHumanId, scenarioMinute))
+            {
+                from = snapshot;
+            }
+        }
+
+        if (from is not { } fromLevel)
+        {
+            return EngineSettingsResult.Invalid(SettingsConcurrentChangeError);
+        }
 
         var payload = new EngineEventPayloads.AutonomyDefaultChanged
         {
-            FromLevel = from,
-            ToLevel = state.ExerciseDefault,
+            FromLevel = fromLevel,
+            ToLevel = requested,
             SafetyClampActive = state.SafetyClampActive,
             ScenarioMinute = scenarioMinute,
         };
@@ -579,11 +620,19 @@ public sealed partial class EngineReviewService
     /// </remarks>
     /// <param name="mode">The requested mode literal (<c>standard</c> / <c>ambient</c> / <c>auto</c>).</param>
     /// <param name="input">The acting human (COR-018) + optional telemetry zone (XC-008).</param>
+    /// <param name="callerIsLead">
+    /// Whether the session's person is the exercise's LEAD controller, read live by the endpoint
+    /// (<c>ExerciseCallerRole.IsLead</c>). A mode towards more engine autonomy (<c>ambient</c> &lt; <c>standard</c>
+    /// &lt; <c>auto</c>) is a RAISE; a non-lead raise is refused 403, judged atomically with the write (Gate-1 WR-001:
+    /// a compare-and-set against the mode just read, <see cref="EngineTierPolicyRegistry.TrySetMode"/>, retried up to
+    /// <see cref="SettingsCasAttempts"/> times; exhausting them is a 400).
+    /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>The resulting settings snapshot, or a fail-closed/invalid outcome.</returns>
+    /// <returns>The resulting settings snapshot, or a fail-closed/invalid/forbidden outcome.</returns>
     public async Task<EngineSettingsResult> SetTierPolicyModeAsync(
         string? mode,
         EngineReviewActionInput input,
+        bool callerIsLead,
         CancellationToken cancellationToken = default)
     {
         if (!TryResolveScope(out var exerciseId))
@@ -613,12 +662,32 @@ public sealed partial class EngineReviewService
                 $"(set Generation:Tiers:{unboundTierKey}:Deployment). Choose a bound tier or 'auto'.");
         }
 
-        var scenarioMinute = _clock.CurrentScenarioMinute(exerciseId);
-        var from = _tierPolicy.SetMode(exerciseId, requested);
+        // WR-001: read → judge → compare-and-set against the SAME read, bounded (see the autonomy default above).
+        TierPolicyMode? from = null;
+        var scenarioMinute = 0;
+        for (var attempt = 0; attempt < SettingsCasAttempts && from is null; attempt++)
+        {
+            var snapshot = _tierPolicy.GetMode(exerciseId);
+            if (!callerIsLead && LeadControllerRaiseFilter.RankTier(requested) > LeadControllerRaiseFilter.RankTier(snapshot))
+            {
+                return EngineSettingsResult.Forbidden();
+            }
+
+            scenarioMinute = _clock.CurrentScenarioMinute(exerciseId);
+            if (_tierPolicy.TrySetMode(exerciseId, snapshot, requested))
+            {
+                from = snapshot;
+            }
+        }
+
+        if (from is not { } fromMode)
+        {
+            return EngineSettingsResult.Invalid(SettingsConcurrentChangeError);
+        }
 
         var payload = new EngineEventPayloads.TierPolicyChanged
         {
-            FromMode = from,
+            FromMode = fromMode,
             ToMode = requested,
             ScenarioMinute = scenarioMinute,
         };
@@ -1709,6 +1778,10 @@ public sealed class EngineAutonomyRegistry
 {
     private readonly ConcurrentDictionary<Guid, EngineAutonomyState> _states = new();
 
+    // Per-exercise gates for the compare-and-set on the exercise default (Gate-1 WR-001). EngineAutonomyState (Core)
+    // is not thread-safe and has no CAS of its own, so the check-and-write is serialized here, per exercise.
+    private readonly ConcurrentDictionary<Guid, Lock> _defaultGates = new();
+
     /// <summary>Gets (or creates at the Suggest floor) the autonomy state for <paramref name="exerciseId"/>.</summary>
     /// <param name="exerciseId">The exercise whose autonomy state to resolve (COR-001); must not be empty.</param>
     /// <returns>The exercise's autonomy state.</returns>
@@ -1720,6 +1793,33 @@ public sealed class EngineAutonomyRegistry
         }
 
         return _states.GetOrAdd(exerciseId, id => EngineAutonomyState.Create(id));
+    }
+
+    /// <summary>
+    /// Compare-and-set on the exercise's DEFAULT autonomy level (Gate-1 WR-001): sets <paramref name="level"/> ONLY when
+    /// the default is still <paramref name="expected"/>, under a per-exercise gate, so a caller that judged a request
+    /// against <paramref name="expected"/> (the lead-only raise) never writes over a concurrent change. Every runtime
+    /// write of the default goes through here.
+    /// </summary>
+    /// <param name="exerciseId">The exercise (COR-001); must not be empty.</param>
+    /// <param name="expected">The default the caller read and judged against.</param>
+    /// <param name="level">The level to set.</param>
+    /// <param name="actor">The acting human (COR-018).</param>
+    /// <param name="scenarioMinute">The change's scenario minute.</param>
+    /// <returns><c>true</c> when the default was still <paramref name="expected"/> and is now <paramref name="level"/>.</returns>
+    public bool TrySetExerciseDefault(Guid exerciseId, AutonomyLevel expected, AutonomyLevel level, string actor, int scenarioMinute)
+    {
+        var state = GetOrCreate(exerciseId);
+        lock (_defaultGates.GetOrAdd(exerciseId, _ => new Lock()))
+        {
+            if (state.ExerciseDefault != expected)
+            {
+                return false;
+            }
+
+            state.SetExerciseDefault(level, actor, scenarioMinute);
+            return true;
+        }
     }
 
     /// <summary>The exercises that currently have an autonomy state — the set the provider-health fan-out clamps.</summary>
