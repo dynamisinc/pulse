@@ -479,9 +479,22 @@ public sealed partial class ReactionLoopDriver
         //     storyline's next burst (never paused).
         var responses = ResolveOfficialPosts(registration, observed.AddressingCandidates, scenarioMinute, context, pendingEvents);
 
+        // CTL-034 (D4): every official post the engine could not confirm on its own asks the controller for a
+        // response-match decision ("does this address X? Y/N"). That prompt is controller demand exactly like a
+        // queue fire, so it is metered against the SAME per-minute budget BEFORE any burst is decided below; the
+        // bursts then get only the budget the prompts left. Before D4 only queue fires were metered, so a minute
+        // with a match prompt could demand budget + 1 decisions. Participant posts cannot be throttled, so prompts
+        // are always recorded; it is the engine's own bursts that yield.
+        var promptDemand = responses.MatchPrompts * DemandAccounting.MatchPromptDemand(autoConfirmEarned: false);
+        for (var i = 0; i < promptDemand; i++)
+        {
+            tickState.DemandMeter.Record(DemandEventKind.ResponseMatchPrompt, scenarioMinute);
+        }
+
         // 3-5. DECIDE → GENERATE → enqueue. Response reactions go first (the responder's moment), then the
         //       inaction bursts, minus any storyline a response just answered (it is no longer silent). CTL-034:
-        //       never demand more than the budget of review decisions per scenario minute — one burst = one decision.
+        //       never demand more than the budget of controller decisions per scenario minute — one burst = one
+        //       decision, counted together with this minute's response-match prompts (recorded above).
         var work = new List<(Storyline Storyline, ReactionTriggerKind Kind)>();
         foreach (var addressed in responses.Voiced)
         {
@@ -638,7 +651,10 @@ public sealed partial class ReactionLoopDriver
     /// a suggestion awaiting confirmation) and none for a post that relates to nothing; applies a genuine match
     /// (silence clock reset, bend-down, phase → Addressed, with the resulting storyline telemetry); and otherwise
     /// leaves a miss-safe slow pending: on the suggested storyline for an unconfirmed match (unless it is already
-    /// addressed), and on every actively escalating storyline when the post's target is unknown.
+    /// addressed), and on every actively escalating storyline when the post's target is unknown. Counts, on the
+    /// returned resolutions, every official post that was NOT confirmed as a match (needs confirmation or unmatched):
+    /// each raises one response-match prompt the CTL-034 budget must meter (D4). An off-platform marker is the
+    /// controller's own action, not a prompt to them, so it is never counted.
     /// </summary>
     private OfficialPostResolutions ResolveOfficialPosts(
         ReactionLoopRegistration registration,
@@ -665,6 +681,11 @@ public sealed partial class ReactionLoopDriver
             }
 
             LogOfficialPostResolved(candidate.Reference, resolution.Kind, resolution.Confidence, target?.Id);
+
+            if (candidate.Source == AddressingSource.OfficialPost && resolution.Kind != MatchKind.Matched)
+            {
+                resolutions.AddMatchPrompt();
+            }
 
             if (resolution.Kind == MatchKind.Matched && target is not null)
             {
@@ -883,6 +904,11 @@ public sealed partial class ReactionLoopDriver
         }
 
         public bool IsAnswered(Guid storylineId) => _answered.Contains(storylineId);
+
+        /// <summary>Response-match prompts this tick raised: official posts the engine could not confirm on its own (CTL-034, D4).</summary>
+        public int MatchPrompts { get; private set; }
+
+        public void AddMatchPrompt() => MatchPrompts++;
     }
 
     /// <summary>Builds the <c>engine.decided</c> event (personas / tone mix / count / autonomy / rate-cap state).</summary>

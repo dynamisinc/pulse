@@ -42,7 +42,7 @@ public sealed class ControllerDemandBudgetScenarioTests
     private const int Storylines = 24;
     private const int Minutes = 40;
 
-    private static async Task<ReactionScenario> BurstLoadAsync()
+    private static async Task<ReactionScenario> BurstLoadAsync(string? officialPostEachMinute = null)
     {
         var scenario = ReactionScenario.Create(AutonomyLevel.DelayedAuto);
         for (var i = 0; i < Storylines; i++)
@@ -53,6 +53,11 @@ public sealed class ControllerDemandBudgetScenarioTests
         for (var minute = 1; minute <= Minutes; minute++)
         {
             scenario.Advance(1);
+            if (officialPostEachMinute is not null)
+            {
+                scenario.OfficialPost(officialPostEachMinute);
+            }
+
             for (var tick = 0; tick < 3; tick++)
             {
                 await scenario.TickAsync();
@@ -119,4 +124,27 @@ public sealed class ControllerDemandBudgetScenarioTests
             WorkloadDemandMeter.BudgetPerMinute,
             "the same traffic costed one-decision-per-post would blow the budget: the burst-as-one-decision unit is load-bearing");
     }
+
+    [Fact]
+    public async Task AtBurstLoadWithAMatchPromptEveryMinute_TotalControllerDemandStaysWithinTheBudget()
+    {
+        // D4: the same burst load plus one official post per minute the engine cannot confirm on its own (a plausible
+        // answer, auto-confirm off) - one response-match prompt per minute. CTL-034 counts review-queue actions +
+        // response-match prompts + queue fires against ONE budget, so the loop must leave room for the prompt: before
+        // the fix it budgeted queue fires only, and total demand ran at 7/min for 36 consecutive minutes.
+        await using var scenario = await BurstLoadAsync(officialPostEachMinute: ScenarioScripts.PlausiblePost);
+
+        scenario.Timeline.Sum(t => t.MatchPrompts).Should().Be(Minutes, "precondition: one match prompt was raised every minute");
+
+        var demand = scenario.ControllerDemandPerMinute();
+        demand.Values.Max().Should().Be(
+            WorkloadDemandMeter.BudgetPerMinute,
+            "precondition: the load still pushes the loop to the budget, so a pass is not vacuous");
+        demand.Should().OnlyContain(
+            kv => kv.Value <= WorkloadDemandMeter.BudgetPerMinute,
+            "CTL-034: queue fires + match prompts together never exceed 6 decisions in a scenario minute");
+        scenario.QueueFireDemandPerMinute().Values.Max().Should().BeLessThan(
+            WorkloadDemandMeter.BudgetPerMinute, "the engine's own bursts yield the budget the prompt took");
+    }
 }
+
