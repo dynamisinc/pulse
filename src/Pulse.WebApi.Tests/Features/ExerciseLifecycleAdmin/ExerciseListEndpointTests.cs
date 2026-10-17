@@ -239,9 +239,11 @@ public sealed class ExerciseListEndpointTests
     /// Nothing about the role crosses customers.
     /// </summary>
     [RequiresDockerFact]
-    public async Task List_AsControllerInASecondTenant_NeverSeesWhatAControllerInTheFirstTenantCreated()
+    public async Task List_AsControllerInASecondTenant_NeverSeesWhatTheFirstTenantCreated()
     {
-        var tenantA = await OrgAdminTestWorld.SeedAsync(_fixture, ExerciseAdminRoles.Controller);
+        // identity-auth-roles/17: creation is org admin only, so tenant A's run is created by its org admin; the
+        // listing controller in tenant B is unchanged (the list stays open to controllers).
+        var tenantA = await OrgAdminTestWorld.SeedAsync(_fixture, ExerciseAdminRoles.OrgAdmin);
         var tenantB = await OrgAdminTestWorld.SeedAsync(_fixture, ExerciseAdminRoles.Controller);
 
         await using var factory = new OrgAdminProbeFactory(_fixture.ConnectionString!);
@@ -251,14 +253,14 @@ public sealed class ExerciseListEndpointTests
         {
             var create = await clientA.PostAsJsonAsync(
                 ExerciseLifecycleAdminEndpoints.ExercisesRoute,
-                new { name = $"Tenant A Controller Run {Guid.NewGuid():N}" });
+                new { name = $"Tenant A Run {Guid.NewGuid():N}" });
             create.StatusCode.Should().Be(HttpStatusCode.Created);
             createdId = (await create.Content.ReadFromJsonAsync<CreateExerciseWire>())!.Exercise.ExerciseId;
 
             var listA = await clientA.GetFromJsonAsync<List<OrgExerciseWire>>(
                 new Uri(ExerciseLifecycleAdminEndpoints.ExercisesRoute, UriKind.Relative));
             listA!.Select(row => row.ExerciseId).Should().Contain(
-                createdId, "positive control: tenant A's controller sees the run it just created");
+                createdId, "positive control: tenant A's org admin sees the run it just created");
         }
 
         using var clientB = OrgAdminTestWorld.CreateClient(factory, tenantB.Token);

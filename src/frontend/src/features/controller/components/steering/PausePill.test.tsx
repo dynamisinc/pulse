@@ -38,7 +38,12 @@ import { PausePill } from './PausePill'
 
 // Demo-feedback story 11 (DF-14): the console's write controls render only for a controller
 // session, and this suite mounts none, so the read-only gate is fixed to "controller" here.
-vi.mock('@/features/controller/access/useCanControl', () => ({ useCanControl: () => true }))
+vi.mock('@/features/controller/access/useCanControl', () => ({
+  useCanControl: () => true,
+  useCanEditContent: () => true,
+  useCanStaffPost: () => true,
+  useCanStaffPin: () => true,
+}))
 
 function renderWithTheme(ui: ReactElement) {
   return render(<ThemeProvider theme={cobraTheme}>{ui}</ThemeProvider>)

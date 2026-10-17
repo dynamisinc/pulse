@@ -97,10 +97,6 @@ public sealed partial class EnrollmentService
     /// <summary>The org-audit kind of a lead change.</summary>
     public const string LeadSetAuditKind = "org.enrollment.lead-set";
 
-    private const string SuccessOutcome = "success";
-    private const string SchemaVersion = "v0";
-    private const string SystemActorKind = "system";
-    private const string SystemChannel = "system";
     private const string EnrollmentEntityType = "enrollment";
     private const int DuplicateKeyErrorNumber = 2601;
     private const int UniqueConstraintErrorNumber = 2627;
@@ -644,7 +640,10 @@ public sealed partial class EnrollmentService
         return sessions.Select(session => session.Id).ToList();
     }
 
-    /// <summary>Stages the XC-004 event (exercise) and the org-audit record (organization) for one change.</summary>
+    /// <summary>
+    /// Stages the XC-004 event (exercise) and the org-audit record (organization) for one change, through the shared
+    /// <see cref="StaffChangeRecorder"/>.
+    /// </summary>
     private void Record(
         StaffCaller caller,
         Exercise exercise,
@@ -652,46 +651,17 @@ public sealed partial class EnrollmentService
         string eventType,
         string auditKind,
         string payload,
-        DateTimeOffset now)
-    {
-        _dbContext.TelemetryEvents.Add(new TelemetryEvent
-        {
-            EventId = Guid.NewGuid().ToString(),
-            SchemaVersion = SchemaVersion,
-            ExerciseId = exercise.Id,
-            EventType = eventType,
-            Channel = SystemChannel,
-            Actor = new TelemetryActor
-            {
-                Kind = SystemActorKind,
-                Role = caller.Role,
-                ActingHumanId = caller.StaffUserId.ToString(),
-                SessionId = caller.SessionId.ToString(),
-            },
-            WallClockTime = now,
-
-            // COR-053: the exercise's stored scenario instant, falling back to the wall clock (the pre-COR-050
-            // placeholder every staff event uses) — never re-derived when one is persisted.
-            ScenarioTime = exercise.CurrentScenarioTime ?? now,
-            TimeZone = exercise.TimeZone,
-            Target = new TelemetryTarget { EntityType = EnrollmentEntityType, EntityId = enrollment.Id.ToString() },
-            Payload = payload,
-            EmittedAt = now,
-        });
-
-        _dbContext.OrgAuditEvents.Add(new OrgAuditEvent
-        {
-            Id = Guid.NewGuid(),
-            OrganizationId = exercise.OrganizationId,
-            Kind = auditKind,
-            Outcome = SuccessOutcome,
-            ActorPersonId = caller.StaffUserId,
-            SubjectPersonId = enrollment.PersonId,
-            ExerciseId = exercise.Id,
-            Payload = payload,
-            OccurredAt = now,
-        });
-    }
+        DateTimeOffset now) =>
+        StaffChangeRecorder.Stage(
+            _dbContext,
+            StaffChangeExercise.From(exercise),
+            new StaffChangeActor(caller.StaffUserId, caller.Role, caller.SessionId),
+            new TelemetryTarget { EntityType = EnrollmentEntityType, EntityId = enrollment.Id.ToString() },
+            enrollment.PersonId,
+            eventType,
+            auditKind,
+            payload,
+            now);
 }
 
 /// <summary>The outcome kind of an <see cref="EnrollmentService"/> call.</summary>

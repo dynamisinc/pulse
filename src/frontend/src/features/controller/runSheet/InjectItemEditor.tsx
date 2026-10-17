@@ -61,7 +61,7 @@ import {
   plannedLabel,
 } from './injectRules'
 import type { InjectAssigneesDto, InjectItemDto, InjectItemWrite, InjectKind } from './types'
-import { useCanControl } from '../access'
+import { useCanEditContent } from '../access'
 
 export type EditorMode = 'create' | 'edit' | 'view'
 
@@ -134,8 +134,8 @@ export function InjectItemEditor({
   onCancel,
 }: InjectItemEditorProps) {
   // Story 11 (DF-14): read-only for a non-controller whatever the mode (no Save, no Add post).
-  const canControl = useCanControl()
-  const readOnly = mode === 'view' || !canControl
+  const canEdit = useCanEditContent()
+  const readOnly = mode === 'view' || !canEdit
   const [draft, setDraft] = useState<Draft>(() =>
     item && mode !== 'create' ? draftFromItem(item) : blankDraft(me ?? ''),
   )
@@ -325,7 +325,7 @@ export function InjectItemEditor({
         <RunSheetIconButton icon={faXmark} ariaLabel="Close editor" onClick={onCancel} />
       </Box>
 
-      {readOnly && canControl && item ? (
+      {readOnly && canEdit && item ? (
         <Box
           data-testid="editor-readonly-note"
           role="status"

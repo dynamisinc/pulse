@@ -25,17 +25,11 @@
  * (no `.NET` backend exists yet). When it lands, this hook swaps its body for
  * a `useSession()`-derived read with no change to its signature or consumers.
  *
- * ## `isLead` (feature: engine-review-cockpit, story 03 — ADP-040)
- * A small, ADDITIVE extension of this same Phase-1 mock: whether the operating
- * controller is the exercise's LEAD controller — the only human who may opt an
- * exercise into "swamped mode" (`useSwampedMode`, ADP-040/D5-014/1.1). This is
- * NOT an E1 role (`roles.ts` has no `lead-controller` role yet); it rides on the
- * same mock-record-per-exercise pattern as the rest of this file and swaps for a
- * real per-controller lead flag when the backend lands, with no signature
- * change. The mock exercise (`ex-mock-0001`) is seeded `isLead: true` so a demo
- * lead can exercise the toggle; any other (derived) exercise defaults `isLead:
- * false`, matching this module's existing "named mock vs. derived default"
- * shape.
+ * ## `isLead` is NOT here any more (identity-auth-roles story 17)
+ * Whether the operator is the exercise's LEAD controller is the server's `Session.isLead`
+ * (read live per request), exposed through `usePermissions().can('raiseAutonomy')` in
+ * `core/auth/rolePermissions.ts`. This mock no longer carries it, so nothing can read a stale
+ * mock flag by mistake.
  *
  * ## Exercise-scoped, mirroring `useExerciseContext()` (COR-001)
  * The identity is derived from the exercise scope read via
@@ -69,12 +63,6 @@ export interface ControllerIdentity {
   readonly callSign: string
   /** Always `'controller'` — the console operator role (COR-010). */
   readonly role: 'controller'
-  /**
-   * Whether this controller is the exercise's LEAD controller — gates the
-   * "swamped mode" opt-in (`useSwampedMode`, ADP-040/D5-014/1.1). Phase-1 mock
-   * field (see module header "isLead"); NOT an E1 role.
-   */
-  readonly isLead: boolean
 }
 
 /**
@@ -90,7 +78,6 @@ const MOCK_CONTROLLER_IDENTITIES: Readonly<Record<string, ControllerIdentity>> =
     actingHumanId: 'human-controller-01',
     callSign: 'SIMCELL-1',
     role: 'controller',
-    isLead: true,
   },
 }
 
@@ -105,7 +92,6 @@ export function resolveMockControllerIdentity(exerciseId: string): ControllerIde
       actingHumanId: `human-controller-${exerciseId}`,
       callSign: 'SIMCELL-1',
       role: 'controller',
-      isLead: false,
     }
   )
 }

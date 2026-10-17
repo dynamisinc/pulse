@@ -4,5 +4,10 @@
  * non-controller why they are not there. See `useCanControl.ts` for the rule.
  */
 
-export { useCanControl } from './useCanControl'
+export {
+  useCanControl,
+  useCanEditContent,
+  useCanStaffPost,
+  useCanStaffPin,
+} from './useCanControl'
 export { ViewOnlyChip } from './ViewOnlyChip'

@@ -14,9 +14,9 @@
 
 import { Box, Chip } from '@mui/material'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import { faEye } from '@fortawesome/free-solid-svg-icons'
+import { faEye, faPenRuler } from '@fortawesome/free-solid-svg-icons'
 import { staffShellTokens } from '@/features/staffShell/staffShellTokens'
-import { useCanControl } from './useCanControl'
+import { useCanControl, useCanEditContent } from './useCanControl'
 
 const NAVY = staffShellTokens.header.background
 
@@ -33,14 +33,51 @@ const SR_ONLY = {
   border: 0,
 } as const
 
+const CHIP_SX = {
+  fontWeight: 800,
+  fontSize: 10.5,
+  letterSpacing: '.06em',
+  textTransform: 'uppercase',
+  borderRadius: '999px',
+  border: `1px solid ${NAVY}`,
+  bgcolor: staffShellTokens.workArea.background,
+  color: NAVY,
+  '& .MuiChip-icon': { color: NAVY, ml: '6px' },
+} as const
+
 /** The reason, read after the label. */
 const VIEW_ONLY_REASON =
   'You can watch this console. Only a controller can change the exercise.'
 
-/** "View only" for a non-controller; nothing for a controller. */
+/** The planner's role-accurate reason (WR-002): they hold the content tools, not conduct. */
+const PLANNER_REASON = 'You can edit content here. Only a controller can run the exercise.'
+
+/**
+ * "View only" for a non-controller who cannot edit content (evaluator); "Planner: content only"
+ * for a planner (who holds the edit tools); nothing for a controller.
+ */
 export function ViewOnlyChip() {
   const canControl = useCanControl()
+  const canEditContent = useCanEditContent()
   if (canControl) return null
+  if (canEditContent) {
+    return (
+      <Chip
+        data-testid="console-planner-chip"
+        icon={<FontAwesomeIcon icon={faPenRuler} aria-hidden="true" style={{ fontSize: 11 }} />}
+        label={
+          <>
+            Planner: content only. Conduct is controller-only
+            <Box component="span" data-testid="console-planner-reason" sx={SR_ONLY}>
+              {`. ${PLANNER_REASON}`}
+            </Box>
+          </>
+        }
+        size="small"
+        sx={CHIP_SX}
+      />
+    )
+  }
   return (
     <Chip
       data-testid="console-view-only-chip"
@@ -54,17 +91,7 @@ export function ViewOnlyChip() {
         </>
       }
       size="small"
-      sx={{
-        fontWeight: 800,
-        fontSize: 10.5,
-        letterSpacing: '.06em',
-        textTransform: 'uppercase',
-        borderRadius: '999px',
-        border: `1px solid ${NAVY}`,
-        bgcolor: staffShellTokens.workArea.background,
-        color: NAVY,
-        '& .MuiChip-icon': { color: NAVY, ml: '6px' },
-      }}
+      sx={CHIP_SX}
     />
   )
 }

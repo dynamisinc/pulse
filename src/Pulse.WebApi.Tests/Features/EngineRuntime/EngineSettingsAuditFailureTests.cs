@@ -20,6 +20,7 @@ using Pulse.WebApi.Features.EngineRuntime.Publishing;
 using Pulse.WebApi.Features.EngineRuntime.Review;
 using Pulse.WebApi.Features.EngineRuntime.Telemetry;
 using Pulse.WebApi.Tests.Features.EngineRuntime.Clock;
+using Pulse.WebApi.Tests.Helpers;
 using Xunit;
 
 /// <summary>
@@ -42,7 +43,7 @@ public sealed class EngineSettingsAuditFailureTests
         using var harness = new Harness(exerciseId, new InvalidOperationException("transient SQL failure"));
 
         var result = await harness.Service.SetExerciseAutonomyDefaultAsync(
-            "delayed-auto", new EngineReviewActionInput("controller-7", "UTC"));
+            "delayed-auto", new EngineReviewActionInput("controller-7", "UTC"), callerIsLead: true, harness.Lead);
 
         result.Outcome.Should().Be(
             EngineReviewOutcome.Ok,
@@ -60,7 +61,7 @@ public sealed class EngineSettingsAuditFailureTests
         using var harness = new Harness(exerciseId, new InvalidOperationException("transient SQL failure"));
 
         await harness.Service.SetExerciseAutonomyDefaultAsync(
-            "delayed-auto", new EngineReviewActionInput("controller-7", "UTC"));
+            "delayed-auto", new EngineReviewActionInput("controller-7", "UTC"), callerIsLead: true, harness.Lead);
 
         var entry = harness.Logger.Entries.Should().ContainSingle(
             "an unaudited-but-live posture change is an ops event, so exactly one loud record is written").Subject;
@@ -77,7 +78,7 @@ public sealed class EngineSettingsAuditFailureTests
         using var harness = new Harness(exerciseId, new DbUpdateException("audit insert failed"));
 
         var result = await harness.Service.SetTierPolicyModeAsync(
-            "ambient", new EngineReviewActionInput("controller-7", "UTC"));
+            "ambient", new EngineReviewActionInput("controller-7", "UTC"), callerIsLead: true, harness.Lead);
 
         result.Outcome.Should().Be(EngineReviewOutcome.Ok);
         result.Settings!.TierPolicyMode.Should().Be(
@@ -93,7 +94,7 @@ public sealed class EngineSettingsAuditFailureTests
         using var harness = new Harness(exerciseId, new OperationCanceledException());
 
         var act = async () => await harness.Service.SetExerciseAutonomyDefaultAsync(
-            "delayed-auto", new EngineReviewActionInput("controller-7", "UTC"));
+            "delayed-auto", new EngineReviewActionInput("controller-7", "UTC"), callerIsLead: true, harness.Lead);
 
         await act.Should().ThrowAsync<OperationCanceledException>(
             "cancellation is a caller/shutdown signal, not an audit failure — it must never be swallowed");
@@ -107,7 +108,7 @@ public sealed class EngineSettingsAuditFailureTests
         using var harness = new Harness(exerciseId, saveFailure: null);
 
         var result = await harness.Service.SetExerciseAutonomyDefaultAsync(
-            "delayed-auto", new EngineReviewActionInput("controller-7", "UTC"));
+            "delayed-auto", new EngineReviewActionInput("controller-7", "UTC"), callerIsLead: true, harness.Lead);
 
         result.Outcome.Should().Be(EngineReviewOutcome.Ok);
         harness.Logger.Entries.Should().BeEmpty("the happy path is silent — the Error log means something genuinely went wrong");
@@ -126,6 +127,9 @@ public sealed class EngineSettingsAuditFailureTests
                 .Options;
 
             _db = new FaultyDbContext(options, context, saveFailure);
+
+            // Tier-2 M-1: the session person a raise's post-write lead re-check reads (the sync save is not faulted).
+            Lead = LeadControllerSeed.Seed(_db, exerciseId);
 
             var clock = new ExerciseClockService(new ManualTimeProvider(ScenarioStart));
             clock.Start(exerciseId, ScenarioStart, TimeZoneInfo.Utc);
@@ -157,6 +161,9 @@ public sealed class EngineSettingsAuditFailureTests
         public EngineTierPolicyRegistry TierPolicy { get; }
 
         public CapturingLogger Logger { get; }
+
+        /// <summary>The seeded lead controller — the session person passed to every raise.</summary>
+        public Guid Lead { get; }
 
         public void Dispose() => _db.Dispose();
     }

@@ -21,6 +21,7 @@ using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.EngineRuntime.Publishing;
 using Pulse.WebApi.Features.EngineRuntime.Review;
 using Pulse.WebApi.Features.EngineRuntime.Telemetry;
+using Pulse.WebApi.Features.Identity.RoleMatrix;
 using Pulse.WebApi.Features.Social;
 
 /// <summary>
@@ -380,13 +381,27 @@ public sealed partial class EngineReviewService
     /// Delayed-auto draft auto-sends on expiry, D5-014/1.1, #36). Always an explicit human action; the engine
     /// never turns it on by itself. Delegates to the built <see cref="EngineAutonomyState.SetSwampedMode"/>.
     /// </summary>
+    /// <remarks>
+    /// <b>Lead re-checked AFTER the write (Tier-2 M-1).</b> The lead gate (<see cref="LeadControllerRaiseFilter"/>) reads
+    /// the lead flag BEFORE this write, so a demotion can commit — and run its post-commit swamped OFF — in between,
+    /// after which this ON would land with no lead. Turning ON is therefore followed by a live re-read of the SESSION
+    /// person's lead enrollment on the server-resolved exercise (<see cref="ExerciseCallerRole.IsStillLeadAsync"/>);
+    /// when it no longer holds, swamped mode is turned straight back OFF through the same state API and the request is
+    /// <see cref="EngineReviewOutcome.Forbidden"/> (403). A demotion commits before its own OFF, so the outcome is OFF
+    /// whichever request wins. Like the ON itself, the revert persists no record (the state is process memory, and the
+    /// demotion's own OFF is the recorded change).
+    /// </remarks>
+    /// <param name="enabled">The requested state.</param>
+    /// <param name="input">The acting human (COR-018) + optional telemetry zone.</param>
+    /// <param name="sessionPersonId">The verified session's person (<c>ExerciseCallerRole.PersonId</c>) — whose lead is re-checked.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The resulting autonomy snapshot, or a fail-closed/invalid/forbidden outcome.</returns>
     public async Task<EngineAutonomyResult> SetSwampedModeAsync(
         bool enabled,
         EngineReviewActionInput input,
+        Guid sessionPersonId,
         CancellationToken cancellationToken = default)
     {
-        await Task.CompletedTask;
-
         if (!TryResolveScope(out var exerciseId))
         {
             return EngineAutonomyResult.ScopeUnresolved();
@@ -399,6 +414,14 @@ public sealed partial class EngineReviewService
 
         var state = _autonomy.GetOrCreate(exerciseId);
         state.SetSwampedMode(enabled, input.ActingHumanId, _clock.CurrentScenarioMinute(exerciseId));
+
+        // M-1: ON is a raise — re-check the lead live, AFTER the write, and revert to OFF when it was lost meanwhile.
+        if (enabled && !await IsStillLeadAsync(exerciseId, sessionPersonId, cancellationToken))
+        {
+            state.SetSwampedMode(false, ExerciseCallerRole.NoLeadActor, _clock.CurrentScenarioMinute(exerciseId));
+            return EngineAutonomyResult.Forbidden();
+        }
+
         return EngineAutonomyResult.Ok(EngineAutonomyStateDto.From(state));
     }
 
@@ -444,12 +467,22 @@ public sealed partial class EngineReviewService
     /// restores). Restoring an already-running engine (nothing clamped) is an idempotent no-op that STILL
     /// succeeds — the domain call returns null and the state is simply unchanged.
     /// </summary>
+    /// <remarks>
+    /// <b>Lead re-checked AFTER the write (Tier-2 M-1).</b> A restore that really lifted a clamp is a raise, and the lead
+    /// gate read the lead flag before it; so the SESSION person's lead is re-read live afterwards
+    /// (<see cref="ExerciseCallerRole.IsStillLeadAsync"/>). When it no longer holds, the clamp that was lifted is put back
+    /// exactly (the kill switch in its mode and/or the degraded clamp with its reason — every clamp is the floor) and
+    /// the request is <see cref="EngineReviewOutcome.Forbidden"/> (403).
+    /// </remarks>
+    /// <param name="input">The acting human (COR-018) + optional telemetry zone.</param>
+    /// <param name="sessionPersonId">The verified session's person (<c>ExerciseCallerRole.PersonId</c>) — whose lead is re-checked.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The resulting autonomy snapshot, or a fail-closed/invalid/forbidden outcome.</returns>
     public async Task<EngineAutonomyResult> RestoreFromSafetyAsync(
         EngineReviewActionInput input,
+        Guid sessionPersonId,
         CancellationToken cancellationToken = default)
     {
-        await Task.CompletedTask;
-
         if (!TryResolveScope(out var exerciseId))
         {
             return EngineAutonomyResult.ScopeUnresolved();
@@ -466,11 +499,58 @@ public sealed partial class EngineReviewService
         // autonomy change onto XC-004 is engine-telemetry-tuning's job, not yet built), so the returned
         // (nullable) level change is discarded exactly as EngageKillSwitch discards EngineKillSwitchFired.
         var state = _autonomy.GetOrCreate(exerciseId);
-        state.RestoreFromSafety(input.ActingHumanId, _clock.CurrentScenarioMinute(exerciseId));
+        var wasStopped = state.IsGenerationStopped;
+        var degradedReason = state.DegradedReason;
+        var lifted = state.RestoreFromSafety(input.ActingHumanId, _clock.CurrentScenarioMinute(exerciseId));
+
+        // M-1: a restore that lifted a clamp is a raise — re-check the lead live, AFTER the write, and re-impose the
+        // clamp when the lead was lost meanwhile.
+        if (lifted is not null && !await IsStillLeadAsync(exerciseId, sessionPersonId, cancellationToken))
+        {
+            ReimposeSafetyClamp(state, wasStopped, degradedReason, _clock.CurrentScenarioMinute(exerciseId));
+            return EngineAutonomyResult.Forbidden();
+        }
+
         return EngineAutonomyResult.Ok(EngineAutonomyStateDto.From(state));
     }
 
+    /// <summary>
+    /// Puts back the safety clamp a <see cref="EngineAutonomyState.RestoreFromSafety"/> lifted (Tier-2 M-1 revert): the
+    /// degraded clamp with its alert reason, and/or the kill switch in the mode it was in. Every clamp the state imposes
+    /// is the autonomy floor, so this restores the pre-restore state exactly; it only ever LOWERS autonomy.
+    /// </summary>
+    private static void ReimposeSafetyClamp(EngineAutonomyState state, bool wasStopped, string? degradedReason, int scenarioMinute)
+    {
+        if (degradedReason is not null)
+        {
+            state.DegradeToSuggest(degradedReason, scenarioMinute);
+        }
+
+        if (wasStopped || degradedReason is null)
+        {
+            state.EngageKillSwitch(
+                wasStopped ? KillSwitchMode.FullStop : KillSwitchMode.DropToSuggest,
+                ExerciseCallerRole.NoLeadActor,
+                scenarioMinute);
+        }
+    }
+
+    /// <summary>
+    /// The Tier-2 M-1 post-write lead re-check shared by every raise path: whether the SESSION person still holds the
+    /// lead controller enrollment on the server-resolved exercise, read live from the database through this request's
+    /// scoped (exercise-filtered) context. Fails closed (<c>false</c>) for an empty person.
+    /// </summary>
+    private Task<bool> IsStillLeadAsync(Guid exerciseId, Guid sessionPersonId, CancellationToken cancellationToken) =>
+        ExerciseCallerRole.IsStillLeadAsync(_dbContext, exerciseId, sessionPersonId, cancellationToken);
+
     // ---- Engine settings (story 05: the runtime-settable autonomy default + tier policy) ---------
+
+    /// <summary>How many read→judge→compare-and-set attempts the autonomy-default and tier-policy sets make (Gate-1 WR-001).</summary>
+    internal const int SettingsCasAttempts = 3;
+
+    /// <summary>The 400 message when every compare-and-set attempt met a concurrently-changed setting (Gate-1 WR-001).</summary>
+    internal const string SettingsConcurrentChangeError =
+        "the setting changed while this request was being applied — reload the settings and try again";
 
     /// <summary>
     /// The staff-only engine-settings READ: the active provider name, the governed
@@ -511,14 +591,33 @@ public sealed partial class EngineReviewService
     /// <see cref="RestoreFromSafetyAsync"/> releases it. <see cref="AutonomyLevels.EnsureSelectable"/> rejects
     /// <see cref="AutonomyLevel.Auto"/> (v1.1) with a 400 — never a silent clamp to Suggest.
     /// </para>
+    /// <para>
+    /// <b>Lead-only raise, atomic with the write (identity-auth-roles/17, Gate-1 WR-001).</b> A level above the current
+    /// default is a RAISE and needs the lead controller; lowering (or a no-op) is open to any controller. The raise is
+    /// judged against the default just read, and the write is a compare-and-set against that SAME value
+    /// (<see cref="EngineAutonomyRegistry.TrySetExerciseDefault"/>), retried up to <see cref="SettingsCasAttempts"/>
+    /// times: a concurrent lower in between misses the swap, the loop re-reads, and the re-judged raise is refused
+    /// (<see cref="EngineReviewOutcome.Forbidden"/>, 403, nothing mutated, no event). Exhausting the attempts is a 400.
+    /// </para>
     /// </remarks>
     /// <param name="level">The requested level literal (<c>suggest</c> / <c>delayed-auto</c>).</param>
     /// <param name="input">The acting human (COR-018) + optional telemetry zone (XC-008).</param>
+    /// <param name="callerIsLead">
+    /// Whether the session's person is the exercise's LEAD controller, read live by the endpoint
+    /// (<c>ExerciseCallerRole.IsLead</c>). A raise by a non-lead is refused 403.
+    /// </param>
+    /// <param name="sessionPersonId">
+    /// The verified session's person (<c>ExerciseCallerRole.PersonId</c>). A raise that was written is followed by a live
+    /// re-check that this person still holds the lead (Tier-2 M-1: the lead flag was read before the write); when it no
+    /// longer does, the raise is compare-and-set back and the request is 403 with no event.
+    /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>The resulting settings snapshot, or a fail-closed/invalid outcome.</returns>
+    /// <returns>The resulting settings snapshot, or a fail-closed/invalid/forbidden outcome.</returns>
     public async Task<EngineSettingsResult> SetExerciseAutonomyDefaultAsync(
         string? level,
         EngineReviewActionInput input,
+        bool callerIsLead,
+        Guid sessionPersonId,
         CancellationToken cancellationToken = default)
     {
         if (!TryResolveScope(out var exerciseId))
@@ -547,15 +646,45 @@ public sealed partial class EngineReviewService
             return EngineSettingsResult.Invalid(ex.Message);
         }
 
-        var scenarioMinute = _clock.CurrentScenarioMinute(exerciseId);
+        // WR-001: read → judge → compare-and-set against the SAME read, bounded. A concurrent change between the read
+        // and the write misses the swap; the loop re-reads and re-judges, so a non-lead never writes a raise that was
+        // judged "not a raise" against a stale default.
         var state = _autonomy.GetOrCreate(exerciseId);
-        var from = state.ExerciseDefault;
-        state.SetExerciseDefault(requested, input.ActingHumanId, scenarioMinute);
+        AutonomyLevel? from = null;
+        var scenarioMinute = 0;
+        for (var attempt = 0; attempt < SettingsCasAttempts && from is null; attempt++)
+        {
+            var snapshot = state.ExerciseDefault;
+            if (!callerIsLead && (int)requested > (int)snapshot)
+            {
+                return EngineSettingsResult.Forbidden();
+            }
+
+            scenarioMinute = _clock.CurrentScenarioMinute(exerciseId);
+            if (_autonomy.TrySetExerciseDefault(exerciseId, snapshot, requested, input.ActingHumanId, scenarioMinute))
+            {
+                from = snapshot;
+            }
+        }
+
+        if (from is not { } fromLevel)
+        {
+            return EngineSettingsResult.Invalid(SettingsConcurrentChangeError);
+        }
+
+        // M-1: a raise that landed is re-checked against the LIVE lead, after the write; lost meanwhile ⇒ swap it back
+        // (a later writer's value, if any, stands) and refuse with no event.
+        if ((int)requested > (int)fromLevel && !await IsStillLeadAsync(exerciseId, sessionPersonId, cancellationToken))
+        {
+            _autonomy.TrySetExerciseDefault(
+                exerciseId, requested, fromLevel, ExerciseCallerRole.NoLeadActor, _clock.CurrentScenarioMinute(exerciseId));
+            return EngineSettingsResult.Forbidden();
+        }
 
         var payload = new EngineEventPayloads.AutonomyDefaultChanged
         {
-            FromLevel = from,
-            ToLevel = state.ExerciseDefault,
+            FromLevel = fromLevel,
+            ToLevel = requested,
             SafetyClampActive = state.SafetyClampActive,
             ScenarioMinute = scenarioMinute,
         };
@@ -579,11 +708,25 @@ public sealed partial class EngineReviewService
     /// </remarks>
     /// <param name="mode">The requested mode literal (<c>standard</c> / <c>ambient</c> / <c>auto</c>).</param>
     /// <param name="input">The acting human (COR-018) + optional telemetry zone (XC-008).</param>
+    /// <param name="callerIsLead">
+    /// Whether the session's person is the exercise's LEAD controller, read live by the endpoint
+    /// (<c>ExerciseCallerRole.IsLead</c>). A mode towards more engine autonomy (<c>ambient</c> &lt; <c>standard</c>
+    /// &lt; <c>auto</c>) is a RAISE; a non-lead raise is refused 403, judged atomically with the write (Gate-1 WR-001:
+    /// a compare-and-set against the mode just read, <see cref="EngineTierPolicyRegistry.TrySetMode"/>, retried up to
+    /// <see cref="SettingsCasAttempts"/> times; exhausting them is a 400).
+    /// </param>
+    /// <param name="sessionPersonId">
+    /// The verified session's person (<c>ExerciseCallerRole.PersonId</c>). A raise that was written is followed by a live
+    /// re-check that this person still holds the lead (Tier-2 M-1); when it no longer does, the mode is compare-and-set
+    /// back and the request is 403 with no event.
+    /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>The resulting settings snapshot, or a fail-closed/invalid outcome.</returns>
+    /// <returns>The resulting settings snapshot, or a fail-closed/invalid/forbidden outcome.</returns>
     public async Task<EngineSettingsResult> SetTierPolicyModeAsync(
         string? mode,
         EngineReviewActionInput input,
+        bool callerIsLead,
+        Guid sessionPersonId,
         CancellationToken cancellationToken = default)
     {
         if (!TryResolveScope(out var exerciseId))
@@ -613,12 +756,40 @@ public sealed partial class EngineReviewService
                 $"(set Generation:Tiers:{unboundTierKey}:Deployment). Choose a bound tier or 'auto'.");
         }
 
-        var scenarioMinute = _clock.CurrentScenarioMinute(exerciseId);
-        var from = _tierPolicy.SetMode(exerciseId, requested);
+        // WR-001: read → judge → compare-and-set against the SAME read, bounded (see the autonomy default above).
+        TierPolicyMode? from = null;
+        var scenarioMinute = 0;
+        for (var attempt = 0; attempt < SettingsCasAttempts && from is null; attempt++)
+        {
+            var snapshot = _tierPolicy.GetMode(exerciseId);
+            if (!callerIsLead && LeadControllerRaiseFilter.RankTier(requested) > LeadControllerRaiseFilter.RankTier(snapshot))
+            {
+                return EngineSettingsResult.Forbidden();
+            }
+
+            scenarioMinute = _clock.CurrentScenarioMinute(exerciseId);
+            if (_tierPolicy.TrySetMode(exerciseId, snapshot, requested))
+            {
+                from = snapshot;
+            }
+        }
+
+        if (from is not { } fromMode)
+        {
+            return EngineSettingsResult.Invalid(SettingsConcurrentChangeError);
+        }
+
+        // M-1: a raise that landed is re-checked against the LIVE lead, after the write (see the autonomy default above).
+        if (LeadControllerRaiseFilter.RankTier(requested) > LeadControllerRaiseFilter.RankTier(fromMode)
+            && !await IsStillLeadAsync(exerciseId, sessionPersonId, cancellationToken))
+        {
+            _tierPolicy.TrySetMode(exerciseId, requested, fromMode);
+            return EngineSettingsResult.Forbidden();
+        }
 
         var payload = new EngineEventPayloads.TierPolicyChanged
         {
-            FromMode = from,
+            FromMode = fromMode,
             ToMode = requested,
             ScenarioMinute = scenarioMinute,
         };
@@ -709,10 +880,16 @@ public sealed partial class EngineReviewService
     /// the change, since the cut state is process memory — fails to persist.
     /// </remarks>
     /// <param name="input">The acting human (COR-018) + optional telemetry zone (XC-008).</param>
+    /// <param name="sessionPersonId">
+    /// The verified session's person (<c>ExerciseCallerRole.PersonId</c>). A restore that really lifted a cut is a raise
+    /// and is followed by a live re-check that this person still holds the lead (Tier-2 M-1: the lead gate read it
+    /// before the write); when it no longer does, the cut is put back and the request is 403 with no event.
+    /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>The resulting settings snapshot, or a fail-closed/invalid outcome.</returns>
+    /// <returns>The resulting settings snapshot, or a fail-closed/invalid/forbidden outcome.</returns>
     public async Task<EngineSettingsResult> RestoreGenerationProviderAsync(
         EngineReviewActionInput input,
+        Guid sessionPersonId,
         CancellationToken cancellationToken = default)
     {
         if (!TryResolveScope(out var exerciseId))
@@ -731,6 +908,13 @@ public sealed partial class EngineReviewService
 
         if (_providerCut.Restore(exerciseId))
         {
+            // M-1: the restore landed — re-check the LIVE lead after the write; lost meanwhile ⇒ re-cut, refuse, no event.
+            if (!await IsStillLeadAsync(exerciseId, sessionPersonId, cancellationToken))
+            {
+                _providerCut.Cut(exerciseId);
+                return EngineSettingsResult.Forbidden();
+            }
+
             await CommitProviderChangeAsync(
                 exerciseId, FakeProviderName, configured, EngineEventPayloads.ProviderChanged.ReasonRestore,
                 input, cancellationToken);
@@ -1481,6 +1665,9 @@ public enum EngineReviewOutcome
 
     /// <summary>The publish funnel did not fully reach the feed (a post came back Invalid/ScopeUnresolved); the item is left actionable and NOT marked Published (WR-002/SG-001) — mapped to a non-2xx (502).</summary>
     PublishFailed,
+
+    /// <summary>The caller may not make this change — e.g. a non-lead controller raising the ambient policy (403, identity-auth-roles/17).</summary>
+    Forbidden,
 }
 
 /// <summary>The result of a queue read.</summary>
@@ -1617,6 +1804,9 @@ public sealed class EngineAutonomyResult
 
     /// <summary>A rejected request.</summary>
     public static EngineAutonomyResult Invalid(string validationError) => new(EngineReviewOutcome.Invalid, null, validationError);
+
+    /// <summary>A raise refused because the caller is not (or is no longer) the exercise's lead controller (403).</summary>
+    public static EngineAutonomyResult Forbidden() => new(EngineReviewOutcome.Forbidden, null, null);
 }
 
 /// <summary>The staff-only wire snapshot of an exercise's autonomy/safety state after a control change (COBRA cockpit; never a participant surface, XC-002).</summary>
@@ -1706,6 +1896,10 @@ public sealed class EngineAutonomyRegistry
 {
     private readonly ConcurrentDictionary<Guid, EngineAutonomyState> _states = new();
 
+    // Per-exercise gates for the compare-and-set on the exercise default (Gate-1 WR-001). EngineAutonomyState (Core)
+    // is not thread-safe and has no CAS of its own, so the check-and-write is serialized here, per exercise.
+    private readonly ConcurrentDictionary<Guid, Lock> _defaultGates = new();
+
     /// <summary>Gets (or creates at the Suggest floor) the autonomy state for <paramref name="exerciseId"/>.</summary>
     /// <param name="exerciseId">The exercise whose autonomy state to resolve (COR-001); must not be empty.</param>
     /// <returns>The exercise's autonomy state.</returns>
@@ -1717,6 +1911,33 @@ public sealed class EngineAutonomyRegistry
         }
 
         return _states.GetOrAdd(exerciseId, id => EngineAutonomyState.Create(id));
+    }
+
+    /// <summary>
+    /// Compare-and-set on the exercise's DEFAULT autonomy level (Gate-1 WR-001): sets <paramref name="level"/> ONLY when
+    /// the default is still <paramref name="expected"/>, under a per-exercise gate, so a caller that judged a request
+    /// against <paramref name="expected"/> (the lead-only raise) never writes over a concurrent change. Every runtime
+    /// write of the default goes through here.
+    /// </summary>
+    /// <param name="exerciseId">The exercise (COR-001); must not be empty.</param>
+    /// <param name="expected">The default the caller read and judged against.</param>
+    /// <param name="level">The level to set.</param>
+    /// <param name="actor">The acting human (COR-018).</param>
+    /// <param name="scenarioMinute">The change's scenario minute.</param>
+    /// <returns><c>true</c> when the default was still <paramref name="expected"/> and is now <paramref name="level"/>.</returns>
+    public bool TrySetExerciseDefault(Guid exerciseId, AutonomyLevel expected, AutonomyLevel level, string actor, int scenarioMinute)
+    {
+        var state = GetOrCreate(exerciseId);
+        lock (_defaultGates.GetOrAdd(exerciseId, _ => new Lock()))
+        {
+            if (state.ExerciseDefault != expected)
+            {
+                return false;
+            }
+
+            state.SetExerciseDefault(level, actor, scenarioMinute);
+            return true;
+        }
     }
 
     /// <summary>The exercises that currently have an autonomy state — the set the provider-health fan-out clamps.</summary>

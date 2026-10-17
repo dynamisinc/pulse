@@ -12,6 +12,7 @@ using Pulse.WebApi.Features.Identity.EasyLogin;
 using Pulse.WebApi.Features.Identity.Providers;
 using Pulse.WebApi.Features.Identity.Sessions;
 using Pulse.WebApi.Features.Identity.RateLimits;
+using Pulse.WebApi.Features.Identity.RoleMatrix;
 
 /// <summary>
 /// The staff-identity slice HTTP surface (story 05): <c>POST /api/auth/staff/login</c>,
@@ -113,7 +114,10 @@ public static class StaffAuthEndpoints
             .WithLoginBodyLimit()
             .AllowAnonymousPreAuth();
         endpoints.MapGet("/api/staff/assignments", GetAssignmentsAsync);
-        endpoints.MapPost("/api/staff/active-exercise", SetActiveExerciseAsync);
+        // identity-auth-roles/17: staff-world sessions only (evaluators and org admins included), refused before the
+        // body is validated for a participant or read-only session.
+        endpoints.MapPost("/api/staff/active-exercise", SetActiveExerciseAsync)
+            .AddEndpointFilter<StaffWorldSessionFilter>();
 
         return endpoints;
     }

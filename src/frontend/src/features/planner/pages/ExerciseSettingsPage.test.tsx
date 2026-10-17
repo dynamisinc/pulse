@@ -100,6 +100,13 @@ import {
 } from '../services/exerciseSettingsService'
 import { getChromeSettings } from '../services/chromeSettingsService'
 import { getPracticeMode } from '../services/practiceModeService'
+import { resetStubSession, setStubSession } from '@/core/auth/rolePermissions.testUtils'
+
+// Story 17: role-gated controls read the session; stand in the session this suite signs in as.
+vi.mock('@/core/auth/session', async importOriginal => ({
+  ...(await importOriginal<typeof import('@/core/auth/session')>()),
+  useOptionalSession: (await import('@/core/auth/rolePermissions.testUtils')).stubbedSession,
+}))
 
 vi.mock('../services/exerciseSettingsService', async importOriginal => {
   const actual = await importOriginal<typeof import('../services/exerciseSettingsService')>()
@@ -188,6 +195,8 @@ function nav(): HTMLElement {
 }
 
 beforeEach(() => {
+  resetStubSession()
+  setStubSession({ role: 'planner', isLead: false })
   vi.mocked(getExerciseSettings).mockReset().mockImplementation(pendingForever)
   vi.mocked(getChromeSettings).mockReset().mockImplementation(pendingForever)
   vi.mocked(getPracticeMode).mockReset().mockImplementation(pendingForever)

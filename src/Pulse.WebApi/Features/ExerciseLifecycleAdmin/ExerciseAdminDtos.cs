@@ -73,6 +73,15 @@ public sealed class OrgExerciseDto
     /// </summary>
     [JsonPropertyName("createdAt")]
     public string? CreatedAt { get; init; }
+
+    /// <summary>
+    /// Whether the CALLER may rename and archive this exercise on the org tier (identity-auth-roles/17 Gate-1 WR-005;
+    /// ADMIN-IDENTITY-MODEL §8.2): <c>true</c> for an org admin, and for a planner only on an exercise they hold a
+    /// planner enrollment on — the same rule the rename/archive routes enforce (anything else is their bare 404).
+    /// Always <c>false</c> for a controller. Additive; a client gates the row's Rename/Archive on it.
+    /// </summary>
+    [JsonPropertyName("canManage")]
+    public required bool CanManage { get; init; }
 }
 
 /// <summary>The <c>POST /api/org/exercises</c> success body (COR-074): the new exercise plus the assignment it minted for its creator.</summary>

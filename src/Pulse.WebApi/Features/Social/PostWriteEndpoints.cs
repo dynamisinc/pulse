@@ -10,6 +10,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.Social.Editing;
 using Pulse.WebApi.Features.Social.Follows;
+using Pulse.WebApi.Features.Identity.RoleMatrix;
 
 /// <summary>
 /// The <c>POST /api/posts</c> ingest endpoint — the HTTP face of <see cref="PostIngestService"/>'s blessed
@@ -78,8 +79,11 @@ public static class PostWriteEndpoints
         // The per-route body limit (IRequestSizeLimitMetadata, applied by endpoint routing to the server's
         // IHttpMaxRequestBodySizeFeature before the JSON body is read). PostIngestService also caps the raw text and
         // alt lengths, which covers the in-process engine publish that never comes through HTTP.
+        // identity-auth-roles/17 (§8.2): a STAFF post as a persona is setup authoring in build (planner or controller)
+        // and conduct otherwise (controller only); evaluators never. Participant callers pass through unchanged.
         endpoints.MapPost("/api/posts", CreatePostAsync)
-            .WithMetadata(new RequestSizeLimitAttribute(MaxRequestBodyBytes));
+            .WithMetadata(new RequestSizeLimitAttribute(MaxRequestBodyBytes))
+            .AddEndpointFilter(StaffAuthoringRoleFilter.PersonaAuthoring);
 
         return endpoints;
     }

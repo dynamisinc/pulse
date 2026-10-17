@@ -106,7 +106,7 @@ import { usePublishPaneBadge } from '../console/paneBadges'
 import { useRunSheetFilters } from './useRunSheetFilters'
 import { useStatusAnnouncer } from './useStatusAnnouncer'
 import type { InjectItemDto, InjectItemWrite } from './types'
-import { useCanControl } from '../access'
+import { useCanControl, useCanEditContent } from '../access'
 
 /** The panel. No props: the frozen seam name (see the module header). */
 export function RunSheetPanel() {
@@ -231,6 +231,8 @@ function RunSheetPanelBody({ exerciseId }: { readonly exerciseId: string }) {
   // Story 11 (DF-14): a non-controller reads the sheet; Fire next / Add / Import, every row write
   // and every write shortcut are absent, and an item opens read-only.
   const canControl = useCanControl()
+  // Story 17: inject create / update / delete / reorder / import are planner or controller.
+  const canEdit = useCanEditContent()
   const { timeZone } = useExerciseContext()
   const queue = useInjectQueue()
   const {
@@ -411,7 +413,7 @@ function RunSheetPanelBody({ exerciseId }: { readonly exerciseId: string }) {
   const openEditor = (item: InjectItemDto): void => {
     setConfirmDeleteId(null)
     setEditor({
-      mode: canControl && isEditable(item.status) ? 'edit' : 'view',
+      mode: canEdit && isEditable(item.status) ? 'edit' : 'view',
       itemId: item.id,
       base: item,
       key: ++editorKey.current,
@@ -663,7 +665,7 @@ function RunSheetPanelBody({ exerciseId }: { readonly exerciseId: string }) {
         </Box>
 
         <Box sx={{ mt: 1, display: 'flex', flexWrap: 'wrap', gap: 1, alignItems: 'center', ...COARSE_GAP_SX }}>
-          {canControl && <>
+          {canControl && (
             <RunSheetButton
               kind="primary"
               icon={faBolt}
@@ -675,6 +677,8 @@ function RunSheetPanelBody({ exerciseId }: { readonly exerciseId: string }) {
               testId="fire-next"
               onClick={fireNext}
             />
+          )}
+          {canEdit && <>
             <RunSheetButton
               icon={faPlus}
               label="Add"

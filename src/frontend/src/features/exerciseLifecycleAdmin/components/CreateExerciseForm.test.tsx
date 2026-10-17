@@ -24,6 +24,13 @@ import { cobraTheme } from '@/theme/cobraTheme'
 import { CreateExerciseForm } from './CreateExerciseForm'
 import { OrgExerciseError, createOrgExercise } from '../services/orgExercisesService'
 import type { CreateExerciseResult } from '../types'
+import { resetStubSession, setStubSession } from '@/core/auth/rolePermissions.testUtils'
+
+// Story 17: role-gated controls read the session; stand in the session this suite signs in as.
+vi.mock('@/core/auth/session', async importOriginal => ({
+  ...(await importOriginal<typeof import('@/core/auth/session')>()),
+  useOptionalSession: (await import('@/core/auth/rolePermissions.testUtils')).stubbedSession,
+}))
 
 vi.mock('../services/orgExercisesService', async importOriginal => {
   const actual = await importOriginal<typeof import('../services/orgExercisesService')>()
@@ -66,6 +73,8 @@ function hostnameField(): HTMLInputElement {
 }
 
 beforeEach(() => {
+  resetStubSession()
+  setStubSession({ role: 'orgAdmin', isLead: false })
   vi.resetAllMocks()
 })
 
@@ -279,7 +288,7 @@ describe('CreateExerciseForm — the other failures', () => {
 
     await waitFor(() => {
       expect(screen.getByTestId('create-exercise-error'))
-        .toHaveTextContent('Only a planner, controller or organization administrator can.')
+        .toHaveTextContent('Only an organization administrator can.')
     })
     expect(nameField()).not.toHaveAttribute('aria-invalid', 'true')
   })

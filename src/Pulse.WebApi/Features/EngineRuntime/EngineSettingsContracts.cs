@@ -233,4 +233,11 @@ public sealed class EngineSettingsResult
     /// <returns>The result.</returns>
     public static EngineSettingsResult Invalid(string validationError) =>
         new(EngineReviewOutcome.Invalid, null, validationError);
+
+    /// <summary>
+    /// A refused request (403) — the caller is a controller but not the one the change needs (a non-lead RAISING the
+    /// ambient policy, identity-auth-roles/17). Nothing was mutated.
+    /// </summary>
+    /// <returns>The result.</returns>
+    public static EngineSettingsResult Forbidden() => new(EngineReviewOutcome.Forbidden, null, null);
 }

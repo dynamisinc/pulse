@@ -472,8 +472,19 @@ describe('roles on a tablet', () => {
     'a %s gets on a tablet what they get on desktop: read-only, no write control added',
     async role => {
       await renderConsole(role, 1180, 820)
-      for (const id of WRITE_CONTROLS) expect(screen.queryByTestId(id)).not.toBeInTheDocument()
-      expect(screen.getByTestId('console-view-only-chip')).toBeInTheDocument()
+      for (const id of WRITE_CONTROLS) {
+        // A planner may post as a persona (identity-auth-roles story 17: content-editing role), so
+        // the ⌘K shortcut strip stays for them exactly as on desktop; the kill switch does not.
+        if (role === 'planner' && id === 'console-shortcut-strip') {
+          expect(screen.getByTestId(id)).toBeInTheDocument()
+          continue
+        }
+        expect(screen.queryByTestId(id)).not.toBeInTheDocument()
+      }
+      // The chip names the role: an evaluator is "View only", a planner holds the content tools.
+      expect(
+        screen.getByTestId(role === 'planner' ? 'console-planner-chip' : 'console-view-only-chip'),
+      ).toBeInTheDocument()
       expect(
         within(screen.getByTestId('console-command-band')).queryByRole('button', { name: /end exercise/i }),
       ).not.toBeInTheDocument()

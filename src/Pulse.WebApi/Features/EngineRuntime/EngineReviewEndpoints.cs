@@ -13,6 +13,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Pulse.Core.Features.Autonomy.Models;
 using Pulse.Core.Features.Generation.Services;
 using Pulse.WebApi.Features.EngineRuntime.Usage;
+using Pulse.WebApi.Features.Identity.RoleMatrix;
 using Pulse.WebApi.Features.Identity.Staff;
 
 /// <summary>
@@ -132,25 +133,36 @@ public static class EngineReviewEndpoints
         steering.MapPost("/api/engine/review/{draftId:guid}/veto", VetoAsync);
         steering.MapPost("/api/engine/review/{draftId:guid}/re-roll", ReRollAsync);
         steering.MapPost("/api/engine/review/batch-approve", BatchApproveAsync);
-        steering.MapPost("/api/engine/autonomy/swamped-mode", SetSwampedModeAsync);
+        // identity-auth-roles/17 (ADMIN-IDENTITY-MODEL §12, Option A): the five autonomy RAISES additionally need the
+        // LEAD controller (LeadControllerRaiseFilter, read live); lowering — swamped off, autonomy down, the kill switch,
+        // cut-to-fake — stays open to any controller. For autonomy-default and tier-policy the filter is a cheap first
+        // line: the service re-judges the raise atomically with its compare-and-set write (Gate-1 WR-001).
+        steering.MapPost("/api/engine/autonomy/swamped-mode", SetSwampedModeAsync)
+            .AddEndpointFilter(LeadControllerRaiseFilter.SwampedMode);
         steering.MapPost("/api/engine/autonomy/kill-switch", EngageKillSwitchAsync);
-        steering.MapPost("/api/engine/autonomy/restore", RestoreAsync);
-        steering.MapPost("/api/engine/settings/autonomy-default", SetAutonomyDefaultAsync);
-        steering.MapPost("/api/engine/settings/tier-policy", SetTierPolicyAsync);
+        steering.MapPost("/api/engine/autonomy/restore", RestoreAsync)
+            .AddEndpointFilter(LeadControllerRaiseFilter.AlwaysRaise);
+        steering.MapPost("/api/engine/settings/autonomy-default", SetAutonomyDefaultAsync)
+            .AddEndpointFilter(LeadControllerRaiseFilter.AutonomyDefault);
+        steering.MapPost("/api/engine/settings/tier-policy", SetTierPolicyAsync)
+            .AddEndpointFilter(LeadControllerRaiseFilter.TierPolicy);
 
         // ambient-chatter story 01 (AC2) — on the SAME controller-role steering group as every other engine mutation.
+        // identity-auth-roles/17 (Option A): raising ambient toward unreviewed output (AmbientPolicyRaise.IsRaise) is
+        // lead-only; lowering it to off/review is open to any controller. Deliberately NOT a LeadControllerRaiseFilter:
+        // the handler passes the caller's live lead flag (ExerciseCallerRole.IsLead) into
+        // EngineReviewService.SetAmbientPolicyAsync, which judges the raise INSIDE its compare-and-set loop against the
+        // snapshot TrySet compares with (WR-5) — so a concurrent change between check and write cannot slip a raise
+        // through. A non-lead raise is 403 with nothing mutated.
         steering.MapPost("/api/engine/settings/ambient-policy", SetAmbientPolicyAsync);
-            // TODO(A1c): raising ambient toward unreviewed output (AmbientPolicyRaise.IsRaise) is lead-only; lowering it to
-            // off/review stays open to any controller. WR-5: the raise check MUST run inside the compare-and-set loop in
-            // EngineReviewService.SetAmbientPolicyAsync (IsRaise(snapshot, request) then TrySet(snapshot, next), re-read
-            // and retry on mismatch). An endpoint filter here alone would be a TOCTOU against a concurrent write.
 
         // autonomy-safety story 07 (ADP-042) — the runtime EGRESS lever. Two routes, on the same controller-role
         // steering group as every other engine mutation. Deliberately a BINARY pair and not one route taking a
         // provider name: there is no route, field, or literal anywhere here that selects a provider, so the wire
         // shape itself cannot become a chooser by a later, smaller change (NFR-005 / ADP-025).
         steering.MapPost("/api/engine/generation-provider/cut-to-fake", CutGenerationToFakeAsync);
-        steering.MapPost("/api/engine/generation-provider/restore", RestoreGenerationProviderAsync);
+        steering.MapPost("/api/engine/generation-provider/restore", RestoreGenerationProviderAsync)
+            .AddEndpointFilter(LeadControllerRaiseFilter.AlwaysRaise);
 
         return endpoints;
     }
@@ -202,6 +214,7 @@ public static class EngineReviewEndpoints
         Guid draftId,
         EngineReviewActionRequest? request,
         EngineReviewService service,
+        HttpContext httpContext,
         CancellationToken cancellationToken)
     {
         if (request is null)
@@ -209,7 +222,13 @@ public static class EngineReviewEndpoints
             return Results.BadRequest("A JSON action body is required.");
         }
 
-        var result = await service.ApproveAsync(draftId, request.ToInput(), cancellationToken);
+        // WR-2: attributed to the SESSION person, never the body actingHumanId (see AttributeToSessionAsync).
+        if (await AttributeToSessionAsync(httpContext, request.ToInput()) is not { } input)
+        {
+            return Results.Unauthorized();
+        }
+
+        var result = await service.ApproveAsync(draftId, input, cancellationToken);
         return MapAction(result);
     }
 
@@ -218,6 +237,7 @@ public static class EngineReviewEndpoints
         Guid draftId,
         EngineDraftEditRequest? request,
         EngineReviewService service,
+        HttpContext httpContext,
         CancellationToken cancellationToken)
     {
         if (request is null)
@@ -225,7 +245,13 @@ public static class EngineReviewEndpoints
             return Results.BadRequest("A JSON edit body is required.");
         }
 
-        var result = await service.EditAsync(draftId, request.Text, request.ToInput(), cancellationToken);
+        // WR-2: attributed to the SESSION person, never the body actingHumanId (see AttributeToSessionAsync).
+        if (await AttributeToSessionAsync(httpContext, request.ToInput()) is not { } input)
+        {
+            return Results.Unauthorized();
+        }
+
+        var result = await service.EditAsync(draftId, request.Text, input, cancellationToken);
         return MapAction(result);
     }
 
@@ -234,6 +260,7 @@ public static class EngineReviewEndpoints
         Guid draftId,
         EngineReviewActionRequest? request,
         EngineReviewService service,
+        HttpContext httpContext,
         CancellationToken cancellationToken)
     {
         if (request is null)
@@ -241,7 +268,13 @@ public static class EngineReviewEndpoints
             return Results.BadRequest("A JSON action body is required.");
         }
 
-        var result = await service.VetoAsync(draftId, request.ToInput(), cancellationToken);
+        // WR-2: attributed to the SESSION person, never the body actingHumanId (see AttributeToSessionAsync).
+        if (await AttributeToSessionAsync(httpContext, request.ToInput()) is not { } input)
+        {
+            return Results.Unauthorized();
+        }
+
+        var result = await service.VetoAsync(draftId, input, cancellationToken);
         return MapAction(result);
     }
 
@@ -250,6 +283,7 @@ public static class EngineReviewEndpoints
         Guid draftId,
         EngineReviewActionRequest? request,
         EngineReviewService service,
+        HttpContext httpContext,
         CancellationToken cancellationToken)
     {
         if (request is null)
@@ -257,7 +291,13 @@ public static class EngineReviewEndpoints
             return Results.BadRequest("A JSON action body is required.");
         }
 
-        var result = await service.ReRollAsync(draftId, request.ToInput(), cancellationToken);
+        // WR-2: attributed to the SESSION person, never the body actingHumanId (see AttributeToSessionAsync).
+        if (await AttributeToSessionAsync(httpContext, request.ToInput()) is not { } input)
+        {
+            return Results.Unauthorized();
+        }
+
+        var result = await service.ReRollAsync(draftId, input, cancellationToken);
         return MapAction(result);
     }
 
@@ -265,6 +305,7 @@ public static class EngineReviewEndpoints
     private static async Task<IResult> BatchApproveAsync(
         EngineBatchApproveRequest? request,
         EngineReviewService service,
+        HttpContext httpContext,
         CancellationToken cancellationToken)
     {
         if (request is null)
@@ -288,7 +329,13 @@ public static class EngineReviewEndpoints
             draftIds.Add(draftId);
         }
 
-        var result = await service.BatchApproveAsync(draftIds, request.ToInput(), cancellationToken);
+        // WR-2: attributed to the SESSION person, never the body actingHumanId (see AttributeToSessionAsync).
+        if (await AttributeToSessionAsync(httpContext, request.ToInput()) is not { } input)
+        {
+            return Results.Unauthorized();
+        }
+
+        var result = await service.BatchApproveAsync(draftIds, input, cancellationToken);
         return result.Outcome switch
         {
             EngineReviewOutcome.Ok => Results.Ok(result.Outcomes),
@@ -302,6 +349,7 @@ public static class EngineReviewEndpoints
     private static async Task<IResult> SetSwampedModeAsync(
         EngineSwampedModeRequest? request,
         EngineReviewService service,
+        HttpContext httpContext,
         CancellationToken cancellationToken)
     {
         if (request is null)
@@ -314,7 +362,15 @@ public static class EngineReviewEndpoints
             return Results.BadRequest("enabled is required.");
         }
 
-        var result = await service.SetSwampedModeAsync(enabled, request.ToInput(), cancellationToken);
+        // WR-2: attributed to the SESSION person, never the body actingHumanId (see AttributeToSessionAsync).
+        if (await AttributeToSessionAsync(httpContext, request.ToInput()) is not { } input)
+        {
+            return Results.Unauthorized();
+        }
+
+        // Tier-2 M-1: the session person, whose lead the service re-checks AFTER an ON lands.
+        var caller = await ExerciseCallerRole.ResolveAsync(httpContext);
+        var result = await service.SetSwampedModeAsync(enabled, input, caller.PersonId, cancellationToken);
         return MapAutonomy(result);
     }
 
@@ -322,6 +378,7 @@ public static class EngineReviewEndpoints
     private static async Task<IResult> EngageKillSwitchAsync(
         EngineKillSwitchRequest? request,
         EngineReviewService service,
+        HttpContext httpContext,
         CancellationToken cancellationToken)
     {
         if (request is null)
@@ -334,7 +391,13 @@ public static class EngineReviewEndpoints
             return Results.BadRequest("mode must be one of 'drop-to-suggest' or 'full-stop'.");
         }
 
-        var result = await service.EngageKillSwitchAsync(mode, request.ToInput(), cancellationToken);
+        // WR-2: attributed to the SESSION person, never the body actingHumanId (see AttributeToSessionAsync).
+        if (await AttributeToSessionAsync(httpContext, request.ToInput()) is not { } input)
+        {
+            return Results.Unauthorized();
+        }
+
+        var result = await service.EngageKillSwitchAsync(mode, input, cancellationToken);
         return MapAutonomy(result);
     }
 
@@ -342,6 +405,7 @@ public static class EngineReviewEndpoints
     private static async Task<IResult> RestoreAsync(
         EngineReviewActionRequest? request,
         EngineReviewService service,
+        HttpContext httpContext,
         CancellationToken cancellationToken)
     {
         if (request is null)
@@ -349,7 +413,15 @@ public static class EngineReviewEndpoints
             return Results.BadRequest("A JSON restore body is required.");
         }
 
-        var result = await service.RestoreFromSafetyAsync(request.ToInput(), cancellationToken);
+        // WR-2: attributed to the SESSION person, never the body actingHumanId (see AttributeToSessionAsync).
+        if (await AttributeToSessionAsync(httpContext, request.ToInput()) is not { } input)
+        {
+            return Results.Unauthorized();
+        }
+
+        // Tier-2 M-1: the session person, whose lead the service re-checks AFTER a restore lands.
+        var caller = await ExerciseCallerRole.ResolveAsync(httpContext);
+        var result = await service.RestoreFromSafetyAsync(input, caller.PersonId, cancellationToken);
         return MapAutonomy(result);
     }
 
@@ -374,6 +446,7 @@ public static class EngineReviewEndpoints
     private static async Task<IResult> SetAutonomyDefaultAsync(
         EngineAutonomyDefaultRequest? request,
         EngineReviewService service,
+        HttpContext httpContext,
         CancellationToken cancellationToken)
     {
         if (request is null)
@@ -381,7 +454,16 @@ public static class EngineReviewEndpoints
             return Results.BadRequest("A JSON autonomy-default body is required.");
         }
 
-        var result = await service.SetExerciseAutonomyDefaultAsync(request.Level, request.ToInput(), cancellationToken);
+        // WR-2: attributed to the SESSION person, never the body actingHumanId (see AttributeToSessionAsync).
+        if (await AttributeToSessionAsync(httpContext, request.ToInput()) is not { } input)
+        {
+            return Results.Unauthorized();
+        }
+
+        // Gate-1 WR-001: the raise is judged in the service, atomically with the write, on the live lead flag.
+        var caller = await ExerciseCallerRole.ResolveAsync(httpContext);
+        var result = await service.SetExerciseAutonomyDefaultAsync(
+            request.Level, input, caller.IsLead, caller.PersonId, cancellationToken);
         return MapSettings(result);
     }
 
@@ -393,6 +475,7 @@ public static class EngineReviewEndpoints
     private static async Task<IResult> SetTierPolicyAsync(
         EngineTierPolicyRequest? request,
         EngineReviewService service,
+        HttpContext httpContext,
         CancellationToken cancellationToken)
     {
         if (request is null)
@@ -400,7 +483,15 @@ public static class EngineReviewEndpoints
             return Results.BadRequest("A JSON tier-policy body is required.");
         }
 
-        var result = await service.SetTierPolicyModeAsync(request.Mode, request.ToInput(), cancellationToken);
+        // WR-2: attributed to the SESSION person, never the body actingHumanId (see AttributeToSessionAsync).
+        if (await AttributeToSessionAsync(httpContext, request.ToInput()) is not { } input)
+        {
+            return Results.Unauthorized();
+        }
+
+        // Gate-1 WR-001: the raise is judged in the service, atomically with the write, on the live lead flag.
+        var caller = await ExerciseCallerRole.ResolveAsync(httpContext);
+        var result = await service.SetTierPolicyModeAsync(request.Mode, input, caller.IsLead, caller.PersonId, cancellationToken);
         return MapSettings(result);
     }
 
@@ -411,8 +502,10 @@ public static class EngineReviewEndpoints
     /// </summary>
     /// <remarks>
     /// The policy is attributed to the AUTHENTICATED staff user from the verified session token
-    /// (<see cref="ICurrentStaffSessionAccessor"/>), never to the body's client-supplied <c>actingHumanId</c>
-    /// (orchestrator review W-2). No resolvable staff session fails closed with 401.
+    /// (<see cref="ExerciseCallerRole.PersonId"/>), never to the body's client-supplied <c>actingHumanId</c>
+    /// (orchestrator review W-2). No resolvable staff session fails closed with 401. A RAISE toward unreviewed output
+    /// needs the lead controller (identity-auth-roles/17): the caller's live <see cref="ExerciseCallerRole.IsLead"/> is
+    /// passed to the service, which judges the raise inside its compare-and-set loop (WR-5); a non-lead raise is 403.
     /// </remarks>
     private static async Task<IResult> SetAmbientPolicyAsync(
         EngineAmbientPolicyRequest? request,
@@ -425,15 +518,13 @@ public static class EngineReviewEndpoints
             return Results.BadRequest("A JSON ambient-policy body is required.");
         }
 
-        var staff = httpContext.RequestServices.GetService<ICurrentStaffSessionAccessor>() is { } accessor
-            ? await accessor.GetCurrentStaffSessionAsync(cancellationToken)
-            : null;
-        if (staff is null)
+        var caller = await ExerciseCallerRole.ResolveAsync(httpContext);
+        if (caller.Outcome == ExerciseCallerOutcome.NoStaffSession || caller.PersonId == Guid.Empty)
         {
             return Results.Unauthorized();
         }
 
-        var result = await service.SetAmbientPolicyAsync(request, staff.StaffUserId, cancellationToken);
+        var result = await service.SetAmbientPolicyAsync(request, caller.PersonId, caller.IsLead, cancellationToken);
         return MapSettings(result);
     }
 
@@ -448,6 +539,7 @@ public static class EngineReviewEndpoints
     private static async Task<IResult> CutGenerationToFakeAsync(
         EngineGenerationProviderRequest? request,
         EngineReviewService service,
+        HttpContext httpContext,
         CancellationToken cancellationToken)
     {
         if (request is null)
@@ -455,7 +547,13 @@ public static class EngineReviewEndpoints
             return Results.BadRequest("A JSON cut-to-fake body is required.");
         }
 
-        var result = await service.CutGenerationToFakeAsync(request.ToInput(), cancellationToken);
+        // WR-2: attributed to the SESSION person, never the body actingHumanId (see AttributeToSessionAsync).
+        if (await AttributeToSessionAsync(httpContext, request.ToInput()) is not { } input)
+        {
+            return Results.Unauthorized();
+        }
+
+        var result = await service.CutGenerationToFakeAsync(input, cancellationToken);
         return MapSettings(result);
     }
 
@@ -467,6 +565,7 @@ public static class EngineReviewEndpoints
     private static async Task<IResult> RestoreGenerationProviderAsync(
         EngineGenerationProviderRequest? request,
         EngineReviewService service,
+        HttpContext httpContext,
         CancellationToken cancellationToken)
     {
         if (request is null)
@@ -474,8 +573,39 @@ public static class EngineReviewEndpoints
             return Results.BadRequest("A JSON restore body is required.");
         }
 
-        var result = await service.RestoreGenerationProviderAsync(request.ToInput(), cancellationToken);
+        // WR-2: attributed to the SESSION person, never the body actingHumanId (see AttributeToSessionAsync).
+        if (await AttributeToSessionAsync(httpContext, request.ToInput()) is not { } input)
+        {
+            return Results.Unauthorized();
+        }
+
+        // Tier-2 M-1: the session person, whose lead the service re-checks AFTER a restore lands.
+        var caller = await ExerciseCallerRole.ResolveAsync(httpContext);
+        var result = await service.RestoreGenerationProviderAsync(input, caller.PersonId, cancellationToken);
         return MapSettings(result);
+    }
+
+    /// <summary>
+    /// WR-2 attribution: the service input for a request-bound engine action, with <c>ActingHumanId</c> set to the
+    /// SESSION person (<see cref="ExerciseCallerRole.PersonId"/> — the verified staff session's person, the same
+    /// identity <see cref="SetAmbientPolicyAsync"/> attributes to), never the client-supplied body value. The body
+    /// field is still accepted and still required for wire compatibility (a missing one keeps the service's COR-018
+    /// <c>400</c>), but its value is not trusted: a spoofed id is never what the decision, the autonomy state or the
+    /// XC-004 audit event records. The time zone is the body's, unchanged.
+    /// </summary>
+    /// <param name="httpContext">The current request.</param>
+    /// <param name="bodyInput">The input projected from the request body.</param>
+    /// <returns>The session-attributed input, or <c>null</c> when no staff session resolved (the caller answers 401).</returns>
+    private static async Task<EngineReviewActionInput?> AttributeToSessionAsync(HttpContext httpContext, EngineReviewActionInput bodyInput)
+    {
+        var caller = await ExerciseCallerRole.ResolveAsync(httpContext);
+        if (caller.Outcome == ExerciseCallerOutcome.NoStaffSession || caller.PersonId == Guid.Empty)
+        {
+            return null;
+        }
+
+        var actingHumanId = string.IsNullOrWhiteSpace(bodyInput.ActingHumanId) ? null : caller.PersonId.ToString();
+        return new EngineReviewActionInput(actingHumanId, bodyInput.TimeZone);
     }
 
     /// <summary>Maps an engine-settings result to its HTTP status (fail closed).</summary>
@@ -484,6 +614,7 @@ public static class EngineReviewEndpoints
         EngineReviewOutcome.Ok => Results.Ok(result.Settings),
         EngineReviewOutcome.ScopeUnresolved => Results.Unauthorized(),
         EngineReviewOutcome.Invalid => Results.BadRequest(result.ValidationError),
+        EngineReviewOutcome.Forbidden => Results.StatusCode(StatusCodes.Status403Forbidden),
         _ => Results.StatusCode(StatusCodes.Status500InternalServerError),
     };
 
@@ -507,6 +638,7 @@ public static class EngineReviewEndpoints
         EngineReviewOutcome.Ok => Results.Ok(result.State),
         EngineReviewOutcome.ScopeUnresolved => Results.Unauthorized(),
         EngineReviewOutcome.Invalid => Results.BadRequest(result.ValidationError),
+        EngineReviewOutcome.Forbidden => Results.StatusCode(StatusCodes.Status403Forbidden),
         _ => Results.StatusCode(StatusCodes.Status500InternalServerError),
     };
 
@@ -535,7 +667,10 @@ public static class EngineReviewEndpoints
 /// </summary>
 public class EngineReviewActionRequest
 {
-    /// <summary>The individual controller behind the shared account (COR-018) — required.</summary>
+    /// <summary>
+    /// The individual controller behind the shared account (COR-018) — required for wire compatibility, but NOT trusted:
+    /// the endpoint records the verified session's person instead (WR-2).
+    /// </summary>
     public string? ActingHumanId { get; init; }
 
     /// <summary>The exercise IANA time zone for the XC-004 envelope (XC-008) — required (client-supplied stopgap until COR-050 metadata carries it).</summary>

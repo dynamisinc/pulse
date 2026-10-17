@@ -215,11 +215,13 @@ import {
   faFileImport,
   faFlask,
   faGears,
+  faLock,
   faPenToSquare,
   faShieldHalved,
   faTriangleExclamation,
 } from '@fortawesome/free-solid-svg-icons'
 import CobraStyles from '@/theme/CobraStyles'
+import { usePermissions } from '@/core/auth'
 import { CobraLinkButton } from '@/theme/styledComponents'
 import {
   CLEAN_EXERCISE_SETTINGS_STATUS,
@@ -457,7 +459,7 @@ function SectionShell({ active, children }: SectionShellProps) {
  * (orchestrator-owned) inside the shared staff shell, a COBRA `ThemeProvider`
  * and a React Query `QueryClientProvider`.
  */
-export function ExerciseSettingsPage() {
+function ExerciseSettingsWorkspace() {
   // THE URL IS THE SOURCE OF TRUTH for which section shows (COR-072): a plain
   // `useState` here always reset to `DEFAULT_SECTION` on reload and could never
   // be linked. `resolveSectionId` is the fail-safe boundary — an absent or
@@ -750,4 +752,32 @@ export function ExerciseSettingsPage() {
       </Stack>
     </Box>
   )
+}
+
+/**
+ * Read-only stand-in for a role that may not change exercise settings (story 17: settings, chrome
+ * and practice mode are planner-only; a controller or evaluator would get a 403 on every save).
+ * Icon plus words, never colour alone. The route registry already admits only planners, so this is
+ * the defence in depth for any other mount.
+ */
+function SettingsReadOnlyNotice() {
+  return (
+    <Box
+      role="status"
+      data-testid="exercise-settings-read-only"
+      sx={{ padding: CobraStyles.Padding.MainWindow, display: 'flex', gap: 1, alignItems: 'center' }}
+    >
+      <FontAwesomeIcon icon={faLock} aria-hidden />
+      <Typography variant="body2">
+        <strong>Read-only.</strong> Only the planner can change this exercise&rsquo;s settings,
+        compliance chrome and practice mode.
+      </Typography>
+    </Box>
+  )
+}
+
+/** The `/staff/plan` work area: the settings workspace for a planner, a notice for anyone else. */
+export function ExerciseSettingsPage() {
+  const canEdit = usePermissions().can('editExerciseSettings')
+  return canEdit ? <ExerciseSettingsWorkspace /> : <SettingsReadOnlyNotice />
 }

@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Pulse.WebApi.Features.EngineRuntime;
+using Pulse.WebApi.Features.Identity.RoleMatrix;
 
 /// <summary>
 /// The scripted-post queue API (inject-queue story 06) on <c>/api/injects*</c> — the frozen 06 ↔ 07 wire contract:
@@ -93,10 +94,16 @@ public static class InjectEndpoints
         staff.MapGet("/api/injects", GetQueueAsync);
         staff.MapGet("/api/injects/assignees", GetAssigneesAsync);
 
-        controllerOnly.MapPost("/api/injects", CreateAsync);
-        controllerOnly.MapPut("/api/injects/{id:guid}", UpdateAsync);
-        controllerOnly.MapDelete("/api/injects/{id:guid}", DeleteAsync);
-        controllerOnly.MapPost("/api/injects/reorder", ReorderAsync);
+        // identity-auth-roles/17 (§8.2): run-sheet EDIT is the planner's and the controller's (planner added); firing
+        // and the conduct actions below stay controller only. Evaluators are refused both (#61).
+        var runSheetEdit = staff
+            .MapGroup(string.Empty)
+            .RequireExerciseRole(ExerciseRoleFilter.PlannerOrController);
+
+        runSheetEdit.MapPost("/api/injects", CreateAsync);
+        runSheetEdit.MapPut("/api/injects/{id:guid}", UpdateAsync);
+        runSheetEdit.MapDelete("/api/injects/{id:guid}", DeleteAsync);
+        runSheetEdit.MapPost("/api/injects/reorder", ReorderAsync);
         controllerOnly.MapPost("/api/injects/{id:guid}/fire", FireAsync)
             .RequireRateLimiting(InjectFireRateLimiterPolicy.PolicyName);
         controllerOnly.MapPost("/api/injects/{id:guid}/hold", HoldAsync);

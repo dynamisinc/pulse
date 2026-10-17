@@ -44,6 +44,13 @@ import {
   renameOrgExercise,
 } from './services/orgExercisesService'
 import type { OrgExercise } from './types'
+import { resetStubSession, setStubSession } from '@/core/auth/rolePermissions.testUtils'
+
+// Story 17: role-gated controls read the session; stand in the session this suite signs in as.
+vi.mock('@/core/auth/session', async importOriginal => ({
+  ...(await importOriginal<typeof import('@/core/auth/session')>()),
+  useOptionalSession: (await import('@/core/auth/rolePermissions.testUtils')).stubbedSession,
+}))
 
 vi.mock('@/core/exerciseContext/exerciseContextResolver', async importOriginal => {
   const actual = await importOriginal<typeof import('@/core/exerciseContext/exerciseContextResolver')>()
@@ -130,6 +137,8 @@ function renderWithProviders(ui: ReactNode) {
 }
 
 beforeEach(() => {
+  resetStubSession()
+  setStubSession({ role: 'orgAdmin', isLead: false })
   vi.resetAllMocks()
   server.name = 'Coastal Surge'
   server.status = 'completed'

@@ -51,6 +51,13 @@ public sealed class OrgAdminAuthorizationFilter : IEndpointFilter
         new(ExerciseAdminRoles.ExerciseAdministrators);
 
     /// <summary>
+    /// Admits <c>orgAdmin</c> and <c>planner</c> — the org-tier rename / archive row actions (identity-auth-roles/17,
+    /// §8.2). A planner is further confined by the service to exercises they hold a planner enrollment on.
+    /// </summary>
+    public static OrgAdminAuthorizationFilter ExerciseManagers { get; } =
+        new(ExerciseAdminRoles.ExerciseManagers);
+
+    /// <summary>
     /// Admits <c>orgAdmin</c> alone — the org-admin surface family's own reads (COR-076). Controller,
     /// evaluator AND planner sessions are all refused with <c>403</c>.
     /// </summary>

@@ -22,6 +22,7 @@ using Pulse.WebApi.Features.EngineRuntime.Review;
 using Pulse.WebApi.Features.EngineRuntime.Telemetry;
 using Pulse.WebApi.Tests.Data;
 using Pulse.WebApi.Tests.Features.EngineRuntime.Clock;
+using Pulse.WebApi.Tests.Helpers;
 using Xunit;
 
 /// <summary>
@@ -102,7 +103,7 @@ public sealed class EngineProviderCutServiceTests
         await using var harness = Build(exerciseId, generationProvider: live, providerCut: cuts);
 
         await harness.Service.CutGenerationToFakeAsync(Input("controller-7"));
-        var result = await harness.Service.RestoreGenerationProviderAsync(Input("controller-7"));
+        var result = await harness.Service.RestoreGenerationProviderAsync(Input("controller-7"), harness.Lead);
 
         result.Outcome.Should().Be(EngineReviewOutcome.Ok);
         result.Settings!.ProviderCutToFake.Should().BeFalse();
@@ -140,7 +141,7 @@ public sealed class EngineProviderCutServiceTests
         var exerciseId = Guid.NewGuid();
         await using var harness = Build(exerciseId, generationProvider: new RecordingLiveProvider());
 
-        var result = await harness.Service.RestoreGenerationProviderAsync(Input("controller-7"));
+        var result = await harness.Service.RestoreGenerationProviderAsync(Input("controller-7"), harness.Lead);
 
         result.Outcome.Should().Be(EngineReviewOutcome.Ok);
         result.Settings!.ProviderCutToFake.Should().BeFalse();
@@ -155,8 +156,8 @@ public sealed class EngineProviderCutServiceTests
 
         await harness.Service.CutGenerationToFakeAsync(Input("controller-7"));
         var secondCut = await harness.Service.CutGenerationToFakeAsync(Input("controller-7"));
-        await harness.Service.RestoreGenerationProviderAsync(Input("controller-7"));
-        var secondRestore = await harness.Service.RestoreGenerationProviderAsync(Input("controller-7"));
+        await harness.Service.RestoreGenerationProviderAsync(Input("controller-7"), harness.Lead);
+        var secondRestore = await harness.Service.RestoreGenerationProviderAsync(Input("controller-7"), harness.Lead);
 
         secondCut.Outcome.Should().Be(EngineReviewOutcome.Ok, "a repeated cut is idempotent, not a 409");
         secondCut.Settings!.ProviderCutToFake.Should().BeTrue();
@@ -204,7 +205,7 @@ public sealed class EngineProviderCutServiceTests
         await using var harness = Build(exerciseId, generationProvider: new RecordingLiveProvider());
 
         await harness.Service.CutGenerationToFakeAsync(Input("controller-7"));
-        await harness.Service.RestoreGenerationProviderAsync(Input("controller-9"));
+        await harness.Service.RestoreGenerationProviderAsync(Input("controller-9"), harness.Lead);
 
         var events = await ReadEventsAsync(exerciseId, EngineEventTypes.ProviderChanged);
         events.Should().HaveCount(2, "both directions are audited server-side");
@@ -276,7 +277,7 @@ public sealed class EngineProviderCutServiceTests
 
         await harnessA.Service.CutGenerationToFakeAsync(Input("controller-a"));
         await harnessB.Service.CutGenerationToFakeAsync(Input("controller-b"));
-        await harnessA.Service.RestoreGenerationProviderAsync(Input("controller-a"));
+        await harnessA.Service.RestoreGenerationProviderAsync(Input("controller-a"), harnessA.Lead);
 
         cuts.IsCutToFake(exerciseA).Should().BeFalse();
         cuts.IsCutToFake(exerciseB).Should().BeTrue(
@@ -295,7 +296,7 @@ public sealed class EngineProviderCutServiceTests
             currentExerciseId: null, generationProvider: new RecordingLiveProvider(), providerCut: cuts);
 
         var cut = await harness.Service.CutGenerationToFakeAsync(Input("controller-7"));
-        var restore = await harness.Service.RestoreGenerationProviderAsync(Input("controller-7"));
+        var restore = await harness.Service.RestoreGenerationProviderAsync(Input("controller-7"), harness.Lead);
 
         cut.Outcome.Should().Be(
             EngineReviewOutcome.ScopeUnresolved,
@@ -321,7 +322,7 @@ public sealed class EngineProviderCutServiceTests
         harness.ProviderCut.IsCutToFake(exerciseId).Should().BeFalse("a rejected call records nothing");
 
         await harness.Service.CutGenerationToFakeAsync(Input("controller-7"));
-        var restore = await harness.Service.RestoreGenerationProviderAsync(noHuman);
+        var restore = await harness.Service.RestoreGenerationProviderAsync(noHuman, harness.Lead);
 
         restore.Outcome.Should().Be(EngineReviewOutcome.Invalid);
         harness.ProviderCut.IsCutToFake(exerciseId).Should().BeTrue("and the rejected restore left the cut in place");
@@ -390,6 +391,14 @@ public sealed class EngineProviderCutServiceTests
     {
         var context = new ExerciseContext { CurrentExerciseId = currentExerciseId };
         var db = _fixture.CreateContext(context);
+
+        // Tier-2 M-1: the session person a restore's post-write lead re-check reads — seeded as the exercise's lead.
+        var lead = Guid.Empty;
+        if (currentExerciseId is { } scoped && scoped != Guid.Empty)
+        {
+            using var seed = _fixture.CreateContext();
+            lead = LeadControllerSeed.Seed(seed, scoped);
+        }
         var clock = new ExerciseClockService(new ManualTimeProvider(ScenarioStart));
         if (currentExerciseId is { } id && id != Guid.Empty)
         {
@@ -412,7 +421,7 @@ public sealed class EngineProviderCutServiceTests
             cuts,
             NullLogger<EngineReviewService>.Instance);
 
-        return new Harness(service, db, cuts);
+        return new Harness(service, db, cuts, lead);
     }
 
     private async Task<List<TelemetryEvent>> ReadEventsAsync(Guid exerciseId, string eventType)
@@ -461,12 +470,16 @@ public sealed class EngineProviderCutServiceTests
     {
         private readonly PulseDbContext _db;
 
-        public Harness(EngineReviewService service, PulseDbContext db, IGenerationProviderCutRegistry providerCut)
+        public Harness(EngineReviewService service, PulseDbContext db, IGenerationProviderCutRegistry providerCut, Guid lead)
         {
             Service = service;
             _db = db;
             ProviderCut = providerCut;
+            Lead = lead;
         }
+
+        /// <summary>The seeded lead controller — the session person passed to every restore (Tier-2 M-1).</summary>
+        public Guid Lead { get; }
 
         public EngineReviewService Service { get; }
 
