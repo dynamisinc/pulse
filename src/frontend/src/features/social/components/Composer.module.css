@@ -304,6 +304,25 @@
   white-space: nowrap;
 }
 
+/* Touch targets (mobile-tablet story 18, NFR-001): real layout space >= 44x44 on a COARSE
+ * pointer only. The toolbar is a wrapping-free flex row; two 44px tools + ring + Post fit 320. */
+@media (pointer: coarse) {
+  .postButton,
+  .retryButton {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+    min-width: var(--pulse-touch-min, 44px);
+    min-height: var(--pulse-touch-min, 44px);
+  }
+
+  .emojiButton {
+    width: var(--pulse-touch-min, 44px);
+    height: var(--pulse-touch-min, 44px);
+  }
+}
+
 @media (max-width: 420px) {
   .composer {
     padding: 10px 12px;

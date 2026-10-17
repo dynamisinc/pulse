@@ -142,12 +142,9 @@ test.describe('participant critical path', () => {
     }
   })
 
-  // The composer's Post button measures 71x34 and Reply is expected to be similar:
-  // below the 44 px floor (NFR-001). Owned by mobile-tablet story 18 (Composer /
-  // ReplyComposer). `test.fail` keeps the gap visible and turns RED the moment
-  // it is fixed, so the annotation must then be removed.
-  test('composer Post and thread Reply are 44px touch targets (story 18 gap)', async ({ page }) => {
-    test.fail(true, 'story 18: Composer submit buttons are 71x34 CSS px')
+  // The composer Post / thread Reply buttons are 44 px touch targets on a coarse
+  // pointer (mobile-tablet story 18; NFR-001). Fuller coverage: participant-touch-targets.
+  test('composer Post and thread Reply are 44px touch targets', async ({ page }) => {
     await joinAndLand(page)
     await page.getByRole('button', { name: 'Post', exact: true }).first().click()
     const dialog = page.getByRole('dialog', { name: 'New post' })

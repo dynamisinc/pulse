@@ -49,6 +49,8 @@
   width: calc(100% / 1.06);
   transform: scale(1.06);
   transform-origin: top left;
+  /* The 16px bottom margin grows by 6% of the card's height at runtime (ThreadView.tsx,
+   * `focusedOverflowPx`) so the scaled card never reaches the first reply (SG-005). */
   margin: 4px 0 16px;
 }
 
