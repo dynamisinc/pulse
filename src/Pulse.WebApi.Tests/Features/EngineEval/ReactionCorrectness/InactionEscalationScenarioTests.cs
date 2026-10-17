@@ -3,6 +3,7 @@ namespace Pulse.WebApi.Tests.Features.EngineEval.ReactionCorrectness;
 using System.Linq;
 using System.Threading.Tasks;
 using FluentAssertions;
+using Pulse.Core.Features.SilenceEscalation.Services;
 using Pulse.Core.Features.Storylines.Models;
 using Pulse.Core.Features.Storylines.Services;
 using Xunit;
@@ -134,4 +135,29 @@ public sealed class InactionEscalationScenarioTests
             gap => gap >= scenario.Registration.RateConfig.MinMinutesBetweenInactionReactions,
             "one storyline's ongoing silence re-fires at most once per reaction cadence (no firehose, ADP-011)");
     }
+
+    [Fact]
+    public async Task AsTheSilenceRunsOn_TheDecidedToneShiftsFromWorryTowardSpeculationAndAnger()
+    {
+        // D2: SilenceEscalationBehavior is registered on the driver's decide stage, so successive inaction bursts in
+        // the Escalating phase carry SilenceRules.EscalationTone for the silence so far: worry-led just past the
+        // window, shifting to speculation + anger by ~2x the window. Before D2 the mix was the phase-flat one.
+        await using var scenario = ReactionScenario.Create();
+        var storyline = scenario.AddStoryline(responseWindowMin: 20);
+
+        await scenario.RunMinutesAsync(50);
+
+        var bursts = await scenario.DecidedAsync();
+        bursts.Should().HaveCountGreaterThan(2, "silence keeps producing bursts");
+        storyline.Phase.Should().Be(StorylinePhase.Escalating, "the ramp under test is the Escalating phase's");
+
+        var expectedFirst = SilenceRules.EscalationTone(minutesSilent: 20, windowMin: 20);
+        bursts[0].DominantTone.Should().Be(
+            $"worry {expectedFirst.Worry.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture)}",
+            "just past the window the silence-escalation mix is worry-led");
+        bursts[^1].DominantTone.Should().MatchRegex(
+            "^(speculation|anger) ",
+            "by ~2x the window the vacuum has filled with speculation and anger, not worry");
+    }
 }
+

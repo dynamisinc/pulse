@@ -17,6 +17,7 @@ using Pulse.Core.Features.ReactionLoop.Models;
 using Pulse.Core.Features.ReactionLoop.Services;
 using Pulse.Core.Features.ResponseReaction.Models;
 using Pulse.Core.Features.ResponseReaction.Services;
+using Pulse.Core.Features.SilenceEscalation.Services;
 using Pulse.Core.Features.Storylines.Models;
 using Pulse.Core.Features.Storylines.Services;
 using Pulse.WebApi.Data;
@@ -351,10 +352,18 @@ public sealed partial class ReactionLoopDriver
     private readonly IAddressingInbox _addressingInbox;
     private readonly ILogger<ReactionLoopDriver> _logger;
 
-    // The matched-response reaction (response-reaction/01) is the decide-stage policy for an OfficialResponse
-    // trigger. Registered here because the loop is what raises that trigger (engine-runtime/06); every other
-    // trigger kind still runs the default composer.
-    private readonly DecideStage _decideStage = new DecideStage().Register(new ResponseReactionBehavior());
+    // The decide-stage policies for the two trigger kinds this loop raises. The matched-response reaction
+    // (response-reaction/01) shapes an OfficialResponse trigger (gratitude-led burst); silence-escalation
+    // (ADP-001, D2) shapes an Inaction trigger, ramping the tone mix from worry toward speculation + anger as the
+    // silence runs on past the window. Before D2 only the response behavior was registered, so inaction ran the
+    // default composer and its phase-flat mix for the whole Escalating phase. The registry is one behavior PER
+    // trigger kind, so the two never compete for the same burst; precedence between a response and an inaction
+    // on the same storyline is the loop's (RunTickAsync drops the inaction trigger of a storyline a response
+    // just answered, and response work is queued first). Both behaviors start from IntentComposer.Compose, so
+    // stop / cap / target gating is unchanged; any other trigger kind still runs the default composer.
+    private readonly DecideStage _decideStage = new DecideStage()
+        .Register(new ResponseReactionBehavior())
+        .Register(new SilenceEscalationBehavior());
     private readonly ConcurrentDictionary<Guid, ExerciseTickState> _tickStates = new();
 
     /// <summary>Creates the driver over the generate/measure stages, telemetry emitter, scenario clock, and server clock.</summary>
