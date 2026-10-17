@@ -60,3 +60,18 @@ export const FRAME_CENTRED_MIN_WIDTH = 1280
  * The rail's tooltips show only while it matches (demo-feedback 13, #494).
  */
 export const NAV_ICON_RAIL_QUERY = `not all and (min-width: ${NAV_EXPANDED_MIN_WIDTH}px)`
+
+/**
+ * PHONE LAYOUT (mobile-tablet story 02, decision MT-D2). Below `PHONE_MAX_WIDTH + 1`
+ * (i.e. up to 599px) the left rail is replaced by the fixed bottom tab bar
+ * (`BottomTabBar`); from 600px (tablets and up) the rail is unchanged. 600 is the
+ * conventional phone/tablet split: a 599px-wide phone in landscape still has the bar, a
+ * 768px tablet keeps the icon rail. Mirrored by hand in `SocialChannel.module.css`.
+ */
+export const PHONE_MAX_WIDTH = 599
+
+/** True on a phone-width viewport: the exact complement of the CSS `min-width: 600px`. */
+export const PHONE_QUERY = `(max-width: ${PHONE_MAX_WIDTH}px)`
+
+/** The bottom tab bar's own height, before the safe-area inset is added (px). */
+export const TAB_BAR_HEIGHT = 56

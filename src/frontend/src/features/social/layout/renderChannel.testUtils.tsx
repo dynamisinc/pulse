@@ -41,6 +41,8 @@ export interface RenderChannelOptions {
   /** The REAL router's entries (the app's address bar). Defaults to `['/home']`. */
   entries?: string[]
   variant?: ShellVariant
+  /** The shell has not resolved the variant yet (cold load; MT-D8). */
+  variantPending?: boolean
   /** Mount the channel under the memory navigation provider (C6's preview). */
   memory?: { initialEntries?: string[] }
   /** Render extra content beside the channel inside the router (probes). */
@@ -59,52 +61,70 @@ export interface RenderChannelOptions {
   appRoutes?: boolean
 }
 
-export function renderChannel(options: RenderChannelOptions = {}): RenderResult {
-  const { variant = 'full', memory, beside, parentRoute, appRoutes = false } = options
+/** What `renderChannel` returns: RTL's result plus a way to move the shell's mount state. */
+export interface RenderChannelResult extends RenderResult {
+  /**
+   * Re-render the SAME tree with a new shell mount state (variant / pending), keeping every
+   * component (and the query client) mounted: how the shell's variant query settles after a
+   * cold load (MT-D8).
+   */
+  setShellMount: (next: { variant: ShellMountProps['variant'], variantPending?: boolean }) => void
+}
+
+export function renderChannel(options: RenderChannelOptions = {}): RenderChannelResult {
+  const { memory, beside, parentRoute, appRoutes = false } = options
   const entries = options.entries ?? [parentRoute ?? '/home']
   setExerciseClock({ scenarioNow: () => SCENARIO_NOW })
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  const mount: ShellMountProps = { variant, scenarioNow: SCENARIO_NOW }
 
-  const channel = <SocialChannel />
-  const stack = (
-    <ExerciseContextProvider>
-      <SessionProvider>
-        <ShellContextProvider value={mount}>
-          {memory === undefined
-            ? channel
-            : (
-              <MemorySocialNavigationProvider
-                {...(memory.initialEntries !== undefined
-                  ? { initialEntries: memory.initialEntries }
-                  : {})}
-              >
-                {channel}
-              </MemorySocialNavigationProvider>
-            )}
-        </ShellContextProvider>
-      </SessionProvider>
-    </ExerciseContextProvider>
-  )
-  return render(
-    <QueryClientProvider client={client}>
-      <MemoryRouter initialEntries={entries}>
-        {appRoutes
-          ? (
-            <Routes>
-              <Route path="/login" element={<p data-testid="login-page">Sign in</p>} />
-              <Route path="*" element={stack} />
-            </Routes>
-          )
-          : parentRoute === undefined
-            ? stack
-            : (
+  const tree = (variant: ShellMountProps['variant'], variantPending: boolean | undefined) => {
+    const mount: ShellMountProps = { variant, scenarioNow: SCENARIO_NOW, variantPending }
+    const channel = <SocialChannel />
+    const stack = (
+      <ExerciseContextProvider>
+        <SessionProvider>
+          <ShellContextProvider value={mount}>
+            {memory === undefined
+              ? channel
+              : (
+                <MemorySocialNavigationProvider
+                  {...(memory.initialEntries !== undefined
+                    ? { initialEntries: memory.initialEntries }
+                    : {})}
+                >
+                  {channel}
+                </MemorySocialNavigationProvider>
+              )}
+          </ShellContextProvider>
+        </SessionProvider>
+      </ExerciseContextProvider>
+    )
+    return (
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={entries}>
+          {appRoutes
+            ? (
               <Routes>
-                <Route path={`${parentRoute}/*`} element={stack} />
+                <Route path="/login" element={<p data-testid="login-page">Sign in</p>} />
+                <Route path="*" element={stack} />
               </Routes>
-            )}
-        {beside}
-      </MemoryRouter>
-    </QueryClientProvider>,
-  )
+            )
+            : parentRoute === undefined
+              ? stack
+              : (
+                <Routes>
+                  <Route path={`${parentRoute}/*`} element={stack} />
+                </Routes>
+              )}
+          {beside}
+        </MemoryRouter>
+      </QueryClientProvider>
+    )
+  }
+
+  const result = render(tree(options.variant ?? 'full', options.variantPending))
+  return {
+    ...result,
+    setShellMount: next => result.rerender(tree(next.variant, next.variantPending)),
+  }
 }

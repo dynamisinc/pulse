@@ -1,6 +1,6 @@
 # Story: Participant core screens on phones (feed, thread, composer, profile, Explore, Pinned)
 
-**Feature:** Phones and tablets  ·  **Epic:** E2 (cross-cutting)  ·  **Phase:** 2  ·  **Status:** Not Started
+**Feature:** Phones and tablets  ·  **Epic:** E2 (cross-cutting)  ·  **Phase:** 2  ·  **Status:** In Review
 **Requirements:** NFR-001, NFR-002, COR-053, D0 §4.6 (mobile-first)  ·  **Design decisions:** none  ·  **Issue:** #524
 
 ## Context
@@ -25,7 +25,7 @@ needed, adds phone breakpoints rather than a parallel layout system.
 
 ## Acceptance Criteria
 - [ ] MT-D2: below the phone breakpoint, the social `NavRail` is replaced by a fixed **bottom tab bar** with Home, Explore, Notifications (with its unread badge, not colour-only), Profile and a prominent compose (Post) action. Each item is a 44 px target with an icon plus an accessible name, `aria-current` marks the current tab, and it respects `env(safe-area-inset-bottom)`. Feed content is padded so the bar never covers the last post or the composer. The rail is unchanged at tablet and desktop widths. The bar does not collide with the shell's channel nav (`participant-shell` is out of scope here; if the two overlap, report it rather than editing the shell).
-- [ ] MT-D8: `/notifications` reached from the new tab either renders Notifications or, if it is intentionally flagged off, the tab is hidden while the flag is off. The finding is recorded in the PR.
+- [x] MT-D8 *(finding: a real bug, not a flag)*: a cold load or reload of `/notifications` redirected to Home. The shell-state query was still pending and reported its least-affordance `readOnly` placeholder, and the page acted on it. Fix: `useShellState` returns `pending`, the shell passes the optional `ShellMountProps.variantPending` to mounted channels, and notifications eligibility returns `resolving` (the page waits, busy, without redirecting) until the variant settles. A failed resolution still settles fail-closed to `readOnly`. Original AC: `/notifications` reached from the new tab either renders Notifications or, if it is intentionally flagged off, the tab is hidden while the flag is off. The finding is recorded in the PR.
 - [ ] Given each of feed, thread, composer (modal), profile, Explore (search + trending) and Pinned at 360, 390 and 768 px, when loaded with mock data, then `expectNoHorizontalScroll` passes and no text or media is clipped or overlaps the bottom tab bar or the alert bar.
 - [ ] G3 (audit): Given the thread view (`/i/status/:id`) at 360 and 390, when the focused post has media and the Pin action, then the card stays inside the column (media and Pin no longer clip at the right edge; offenders were `_focusedWrap`, `_postCard`, `_content`, `_openable`, header) and `expectNoHorizontalScroll` plus a per-element bounding-box check pass.
 - [ ] Hit areas (44px) on these screens are delivered by story 18, which runs after this one; this story must not shrink any control below its current size and leaves the post action row, composer buttons, Back and Followers link to 18.
