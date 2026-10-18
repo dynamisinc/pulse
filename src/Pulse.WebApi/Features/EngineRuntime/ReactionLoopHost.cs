@@ -481,20 +481,29 @@ public sealed partial class ReactionLoopDriver
 
         // CTL-034 (D4): every official post the engine could not confirm on its own asks the controller for a
         // response-match decision ("does this address X? Y/N"). That prompt is controller demand exactly like a
-        // queue fire, so it is metered against the SAME per-minute budget BEFORE any burst is decided below; the
-        // bursts then get only the budget the prompts left. Before D4 only queue fires were metered, so a minute
-        // with a match prompt could demand budget + 1 decisions. Participant posts cannot be throttled, so prompts
-        // are always recorded; it is the engine's own bursts that yield.
+        // queue fire, so it is metered on the SAME per-minute meter BEFORE any burst is decided below (the CTL-034
+        // accounting and telemetry stay honest), and ordinarily the bursts get only the budget the prompts left.
+        // Participant/PIO posts cannot be throttled, so prompts are always recorded. How far prompt demand may
+        // squeeze the engine's own work is bounded by the gate in the work loop below (see PassesDemandGate).
+        //
+        // autoConfirmEarned is deliberately false, not registration.ResponseMatching.AutoConfirmEnabled: with
+        // auto-confirm on, a plausible post resolves straight to Matched and is never counted here at all, so every
+        // post that DOES reach this line (Unmatched, or NeedsConfirmation with auto-confirm off) still needs a human's
+        // Y/N. Passing the opt-in flag would price those genuine prompts at zero. (The reaction-correctness harness,
+        // ReactionScenario.ControllerDemandPerMinute, mirrors this.)
         var promptDemand = responses.MatchPrompts * DemandAccounting.MatchPromptDemand(autoConfirmEarned: false);
         for (var i = 0; i < promptDemand; i++)
         {
             tickState.DemandMeter.Record(DemandEventKind.ResponseMatchPrompt, scenarioMinute);
         }
 
+        tickState.PromptDemandThisMinute += promptDemand;
+
         // 3-5. DECIDE → GENERATE → enqueue. Response reactions go first (the responder's moment), then the
         //       inaction bursts, minus any storyline a response just answered (it is no longer silent). CTL-034:
         //       never demand more than the budget of controller decisions per scenario minute — one burst = one
-        //       decision, counted together with this minute's response-match prompts (recorded above).
+        //       decision, counted together with this minute's response-match prompts (recorded above) — subject to
+        //       the miss-safe minimum service in PassesDemandGate (prompt demand alone never starves the engine).
         var work = new List<(Storyline Storyline, ReactionTriggerKind Kind)>();
         foreach (var addressed in responses.Voiced)
         {
@@ -520,9 +529,9 @@ public sealed partial class ReactionLoopDriver
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            if (tickState.DemandMeter.DemandInWindow(scenarioMinute) >= WorkloadDemandMeter.BudgetPerMinute)
+            if (!PassesDemandGate(tickState, storyline, kind, scenarioMinute))
             {
-                break;
+                continue;
             }
 
             var reactionContext = BuildReactionContext(registration, storyline, kind, tickState, scenarioMinute);
@@ -615,6 +624,50 @@ public sealed partial class ReactionLoopDriver
         }
 
         return new ReactionTickResult(scenarioMinute, observed.InactionTriggers.Count, reviewItems.Count, ambientPublished);
+    }
+
+    /// <summary>
+    /// The CTL-034 demand gate for one unit of storyline work (D4 + the miss-safe minimum service, PR #634 CR-001/W-001).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The rule.</b> With <c>total</c> = all demand metered this scenario minute (engine queue fires + response-match
+    /// prompts) and <c>engine</c> = the engine-originated part (<c>total</c> minus this minute's prompt demand):
+    /// </para>
+    /// <list type="number">
+    ///   <item><b>OfficialResponse</b> work (the gratitude/response burst) passes while <c>engine &lt; cap</c>. It is
+    ///   never gated by prompt demand: a response burst is voiced only on the tick the storyline was addressed (the
+    ///   voiced list is tick-local), so a prompt-saturated minute would otherwise lose it permanently.</item>
+    ///   <item><b>Inaction</b> work passes while <c>total &lt; cap</c> (the ordinary CTL-034 budget, prompts included);
+    ///   OR, when the engine has demanded NOTHING yet this minute (<c>engine == 0</c>) and the storyline is actively
+    ///   escalating (Escalating/Peak), it passes anyway — the minimum service of one escalation burst.</item>
+    /// </list>
+    /// <para>
+    /// <b>Why.</b> Miss-safe (ADP-002a) outranks CTL-034 when the demand comes from participants/PIOs we cannot
+    /// throttle. If prompt demand alone could exhaust the budget, a stream of six irrelevant official posts a minute
+    /// would silence the world entirely — exactly the gaming vector ADP-002a forbids ("unmatched official content
+    /// slows escalation, never pauses it"). So total demand can exceed the cap, but only by engine minimum service:
+    /// at most one inaction burst per minute plus response work bounded by the engine-only cap. When prompts do not
+    /// saturate the budget (e.g. 24 blown storylines + 1 prompt/min), the guarantee never applies — the engine has
+    /// already fired that minute — and total demand stays at or below the cap.
+    /// </para>
+    /// </remarks>
+    private static bool PassesDemandGate(ExerciseTickState tickState, Storyline storyline, ReactionTriggerKind kind, int scenarioMinute)
+    {
+        var total = tickState.DemandMeter.DemandInWindow(scenarioMinute);
+        var engine = Math.Max(0, total - tickState.PromptDemandThisMinute);
+
+        if (kind == ReactionTriggerKind.OfficialResponse)
+        {
+            return engine < WorkloadDemandMeter.BudgetPerMinute;
+        }
+
+        if (total < WorkloadDemandMeter.BudgetPerMinute)
+        {
+            return true;
+        }
+
+        return engine == 0 && storyline.Phase is StorylinePhase.Escalating or StorylinePhase.Peak;
     }
 
     /// <summary>Persists the tick's telemetry + review items in the scoped unit of work (one review item per burst, via the store).</summary>
@@ -999,13 +1052,20 @@ public sealed partial class ReactionLoopDriver
 
         public int PostsThisMinute { get; set; }
 
-        /// <summary>Resets the per-minute post counter when the scenario minute advances.</summary>
+        /// <summary>
+        /// Response-match prompt demand recorded this scenario minute, so the demand gate can separate engine-originated
+        /// demand from participant/PIO-originated prompt demand (the meter's one-minute window is this minute).
+        /// </summary>
+        public int PromptDemandThisMinute { get; set; }
+
+        /// <summary>Resets the per-minute post and prompt counters when the scenario minute advances.</summary>
         public void RollMinute(int scenarioMinute)
         {
             if (scenarioMinute != CurrentMinute)
             {
                 CurrentMinute = scenarioMinute;
                 PostsThisMinute = 0;
+                PromptDemandThisMinute = 0;
             }
         }
     }
