@@ -13,6 +13,10 @@
  *  - sign-in (/login): no horizontal scroll, 44px controls (toggles, inputs,
  *    submit, staff link), the phone-keyboard input hints on the name and word
  *    fields, a visible error state with icon + text, submit reachable;
+ *  - home-screen app sign-in (#606): with the page standalone, "Sign-in link" leads and
+ *    fits beside the other three methods with no horizontal scroll, every control is a
+ *    44px target, the "Pulse" label is hidden, and a pasted invitation message signs
+ *    the participant in through /auth/join (mock `demo-` token);
  *  - holding page: pause and EndEx overlays in both registers (and the Freeze
  *    path, which reuses the pause state) injected via the guide-shots `overlay`
  *    seam: message fully visible without page scroll, not covered by / not
@@ -57,6 +61,50 @@ test.describe('join page', () => {
     await expect(page.getByRole('status')).toContainText('tap your link again')
     await expectTouchTarget(page.getByRole('link', { name: 'Continue' }), 44)
     await expectNoHorizontalScroll(page)
+  })
+})
+
+/** Makes the page believe it runs as an iOS home-screen app (`navigator.standalone`). */
+async function emulateHomeScreenApp(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    Object.defineProperty(Navigator.prototype, 'standalone', { get: () => true, configurable: true })
+  })
+}
+
+test.describe('home-screen app sign-in (#606)', () => {
+  test.beforeEach(async ({ page }) => {
+    await emulateHomeScreenApp(page)
+    await page.goto('/login')
+    await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
+  })
+
+  test('leads with the link form; four methods fit; 44px targets; no "Pulse"', async ({ page }) => {
+    await expect(page.getByRole('button', { name: 'Sign-in link', exact: true }))
+      .toHaveAttribute('aria-pressed', 'true')
+    await expectNoHorizontalScroll(page)
+    for (const name of ['Sign-in link', "Today's word", 'Password', 'View-only code']) {
+      await expectTouchTarget(page.getByRole('button', { name, exact: true }), 44)
+    }
+    await expectTouchTarget(page.getByRole('textbox', { name: 'Paste your sign-in link' }), 44)
+    await expectTouchTarget(page.getByRole('button', { name: 'Sign in', exact: true }), 44)
+    await expect(page.getByText('Pulse', { exact: true })).toHaveCount(0)
+  })
+
+  test('a pasted invitation message signs in through the link', async ({ page }) => {
+    const message = 'Your sign-in link: https://bayshield.example/join/demo-e2e-standalone'
+    await page.getByRole('textbox', { name: 'Paste your sign-in link' }).fill(message)
+    await page.getByRole('button', { name: 'Sign in', exact: true }).click()
+    await expect(page).not.toHaveURL(/\/login/)
+    expect(page.url()).not.toContain('demo-e2e-standalone')
+  })
+
+  test('text with no link: a visible error with icon + text, nothing sent', async ({ page }) => {
+    await page.getByRole('textbox', { name: 'Paste your sign-in link' }).fill('I lost my link')
+    await page.getByRole('button', { name: 'Sign in', exact: true }).click()
+    const alert = page.getByRole('alert')
+    await expect(alert).toContainText("doesn't look like a sign-in link")
+    await expect(alert.locator('svg')).toBeVisible()
+    await expect(page).toHaveURL(/\/login/)
   })
 })
 
