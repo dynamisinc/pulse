@@ -163,4 +163,55 @@ public class IntensityModelTests
         // 1.4 × 45 is 62.999… in binary floating point; the step must still be 63, not 62.
         IntensityModel.CurveStep(1.4, 45, fromScenarioMinute: 0).Should().Be(63.0);
     }
+
+    // ---- D1 / PR #634 W-004: TickTowardTarget under per-minute anchored ticks --------------------------
+
+    [Fact]
+    public void TickTowardTarget_AnchoredPerMinute_RisesTowardTheTargetAtTwoPointFivePerMinute()
+    {
+        // 20 per-minute ticks on Standard toward a far target: +2.5/min = +50 (pre-fix rounding gave +2/min = +40).
+        var intensity = 10;
+        for (var minute = 1; minute <= 20; minute++)
+        {
+            intensity = IntensityModel.TickTowardTarget(intensity, target: 90, 1, Standard, fromScenarioMinute: minute - 1);
+        }
+
+        intensity.Should().Be(60, "the dial chase rises at the curve's true 2.5/min");
+    }
+
+    [Fact]
+    public void TickTowardTarget_AnchoredPerMinute_DecaysTowardTheTargetAtTheSlowBurnRate()
+    {
+        // Slow burn decays 0.6/min: 20 per-minute ticks = -12 (pre-fix each step rounded to -1, i.e. -20).
+        var intensity = 80;
+        for (var minute = 1; minute <= 20; minute++)
+        {
+            intensity = IntensityModel.TickTowardTarget(intensity, target: 20, 1, EscalationCurves.SlowBurn, fromScenarioMinute: minute - 1);
+        }
+
+        intensity.Should().Be(68, "a lowered target is approached at the curve's true 0.6/min decay");
+    }
+
+    [Theory]
+    [InlineData(50, 60)] // rising toward the target
+    [InlineData(70, 65)] // decaying toward the target
+    public void TickTowardTarget_AnchoredPerMinute_NeverOvershootsTheTarget(int start, int target)
+    {
+        var intensity = start;
+        for (var minute = 1; minute <= 15; minute++)
+        {
+            intensity = IntensityModel.TickTowardTarget(intensity, target, 1, Standard, fromScenarioMinute: minute - 1);
+            if (start < target)
+            {
+                intensity.Should().BeLessThanOrEqualTo(target, $"minute {minute}: a rise never overshoots the target");
+            }
+            else
+            {
+                intensity.Should().BeGreaterThanOrEqualTo(target, $"minute {minute}: a decay never undershoots the target");
+            }
+        }
+
+        intensity.Should().Be(target, "15 minutes is ample to reach a target this close");
+    }
 }
+
