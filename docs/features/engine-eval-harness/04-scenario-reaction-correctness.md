@@ -71,7 +71,7 @@ The two release-blocking classes carry `[Trait("Category", "ReleaseBlocking")]`
 |----|-----------|-------|
 | 1 inaction -> escalation | `InactionEscalationScenarioTests` | `WhileTheResponseWindowIsStillOpen_TheWorldStaysQuiet`, `WhenTheWindowBlowsWithNoResponse_TheConcernEscalatesAndAnAnxiousBurstIsQueued`, `WhileOfficialsStaySilent_IntensityKeepsRisingAlongTheCurve_AndSentimentSours`, `EveryInactionBurstAsksTheProviderForWorryAndSpeculation_AndNamesTheSilence`, `OngoingSilence_ReactsOnTheReactionCadence_NotOnEveryTick`, `AsTheSilenceRunsOn_TheDecidedToneShiftsFromWorryTowardSpeculationAndAnger` (D2), `AsTheSilenceRunsOn_TheProviderIsAskedForTheDecidedEscalatingMix` (D3) |
 | 2 action -> calming | `ActionCalmingScenarioTests` | `AMatchedOfficialResponse_BendsIntensityDown_AndSentimentUp_AndMarksTheConcernAddressed`, `..._DrawsAGratitudeLedReactionBurst_NotAnotherRoundOfWorry`, `AfterTheResponse_TheConcernDecaysAndTheEngineStopsEscalatingIt`, `APlausibleButUnconfirmedAnswer_DoesNotCalmTheWorld_UntilAControllerConfirmsIt` |
-| 3 anti-berate-the-PIO (**ReleaseBlocking**) | `MissSafeAntiBeratePioScenarioTests` | `AnUnmatchedOfficialPost_SlowsTheNextBurst_ButNeverPausesIt` (x2 auto-confirm), `AnUnmatchedOfficialPost_IsNeverTreatedAsAnswerOrAsSilence_AndNeverMarksTheConcernAddressed` (x2), `AnUnmatchedOfficialPost_PromptsTheController_ToSayWhichConcernItAddressed`, `APlausibleButUnconfirmedAnswer_AlsoSlowsWithoutPausing_AndLeavesTheConcernUnaddressed`, `ARepeatedStreamOfIrrelevantPosts_CannotPauseOrCalmTheWorld` |
+| 3 anti-berate-the-PIO (**ReleaseBlocking**) | `MissSafeAntiBeratePioScenarioTests` | `AnUnmatchedOfficialPost_SlowsTheNextBurst_ButNeverPausesIt` (x2 auto-confirm), `AnUnmatchedOfficialPost_IsNeverTreatedAsAnswerOrAsSilence_AndNeverMarksTheConcernAddressed` (x2), `AnUnmatchedOfficialPost_PromptsTheController_ToSayWhichConcernItAddressed`, `APlausibleButUnconfirmedAnswer_AlsoSlowsWithoutPausing_AndLeavesTheConcernUnaddressed`, `ARepeatedStreamOfIrrelevantPosts_CannotPauseOrCalmTheWorld`, `AFloodOfIrrelevantPostsThatSaturatesTheDemandBudget_StillCannotPauseEscalation` (x2: 6, 10 posts/min), `AnAnswerLandingAmidAPromptSaturatingFlood_StillDrawsItsResponseBurst` |
 | 4 off-platform parity | `OffPlatformMarkerParityScenarioTests` | `AnOffPlatformMarker_AddressesTheConcern_IdenticallyToAnOnPlatformMatch`, `AnOffPlatformMarker_IsAConfirmedMatch_EvenWithoutAutoConfirm`, `TheOnlyDifferenceBetweenTheTwoSources_IsTheRecordedCause`, `AfterAMarker_TheConcernDecaysAndStopsEscalating_JustAsAfterAnOnPlatformAnswer` |
 | 5a kill switch / degraded (**ReleaseBlocking**) | `KillSwitchAndDegradedScenarioTests` | `WithoutAnyLever_SwampedModeAutoSendsAnExpiredCountdown` (positive control), `TheKillSwitch_SuspendsAnInFlightCountdown_AndNothingAutoPublishes` (DropToSuggest, FullStop), `DropToSuggest_KeepsTheEngineRunning_ButEveryNewBurstWaitsForAHuman`, `FullStop_GeneratesNothingAtAll_AfterTheLever`, `ADegradedProviderTrip_DropsToSuggest_AndNothingAutoPublishes`, `ProviderRecovery_NeverRaisesAutonomyOnItsOwn_OnlyAHumanRestoreDoes`, `FullStop_ExpiryThenRestore_UnderSwampedMode_NothingAutoPublishes_AndTheItemStaysHeld` (D5) |
 | 5b caps / floors | `RateCapAndQuietFloorScenarioTests` | `UnderHeavyPressure_EngineOutputNeverExceedsThePerMinuteCap`, `TheCapRationsPosts_ButTheWorldNeverGoesQuietWhileConcernsAreUnanswered`, `AQuietExercise_IsNeverDead_AndNeverBuried` |
@@ -88,7 +88,11 @@ prompt is a separate surface), so "the controller is prompted" is asserted at th
   became +2. The rise/decay step is now quantized against absolute scenario time
   (`IntensityModel.CurveStep`: `floor(rate x to) - floor(rate x from)`, anchored on the storyline's existing
   `LastTickScenarioMinute`), which telescopes to the true rate under any tick granularity; no new persisted state.
-  Also applied to `TickTowardTarget` (dial follow). Asserted: `IntensityModelTests` /
+  Also applied to `TickTowardTarget` (dial follow). The anchor is clamped to minute 0. **Decay changes too
+  (expected, PR #634 W-003):** fractional decay rates now run at their true rate as well, so Slow burn's addressed
+  decay is 0.6/min (it used to round to 1/min per tick), i.e. an addressed Slow-burn concern calms ~40% slower than
+  before; Standard (2.0/min) and Flash panic (5.0/min) decay are unchanged. Asserted: `IntensityModelTests`
+  (incl. per-minute `TickTowardTarget_AnchoredPerMinute_*` rise 2.5/min, decay 0.6/min, no overshoot) /
   `StorylineTickTests.Tick_EveryScenarioMinute_StandardCurve_ReachesSpecIntensityAtMinute50` (minute 50 = 78) and
   `InactionEscalationScenarioTests.WhileOfficialsStaySilent_IntensityKeepsRisingAlongTheCurve_AndSentimentSours`.
 - **D2 - `SilenceEscalationBehavior` was never registered. FIXED** ("fix(engine): D2 ..."). `ReactionLoopDriver`
@@ -102,8 +106,20 @@ prompt is a separate surface), so "the controller is prompted" is asserted at th
   `InactionEscalationScenarioTests.AsTheSilenceRunsOn_TheProviderIsAskedForTheDecidedEscalatingMix`.
 - **D4 - CTL-034 was breached when match prompts are counted. FIXED** ("fix(engine): D4 ..."). Every official
   post the engine could not confirm on its own now records a `DemandEventKind.ResponseMatchPrompt` on the tick's
-  demand meter before bursts are decided, so bursts get only the budget the prompts left (cap unchanged at 6).
-  Asserted: `ControllerDemandBudgetScenarioTests.AtBurstLoadWithAMatchPromptEveryMinute_TotalControllerDemandStaysWithinTheBudget`.
+  demand meter before bursts are decided, so bursts ordinarily get only the budget the prompts left (cap unchanged
+  at 6). **Saturation / minimum service (PR #634 CR-001, W-001):** prompt demand alone never starves engine work,
+  because miss-safe (ADP-002a) outranks CTL-034 when the demand comes from participants/PIOs we cannot throttle.
+  The gate (`ReactionLoopDriver.PassesDemandGate`), with total = all demand this minute and engine = total minus
+  prompt demand: response (gratitude) work passes while engine < cap, never gated by prompts (it is voiced only on
+  the addressing tick); inaction work passes while total < cap, or, when the engine has demanded nothing yet this
+  minute and the storyline is Escalating/Peak, the first burst the cadence already decided to fire goes out anyway
+  (it never creates a burst). So when 6+ unconfirmed posts a minute saturate the budget, total demand can exceed the
+  cap, but only by engine minimum service (at most one inaction burst plus response work). Asserted:
+  `ControllerDemandBudgetScenarioTests.AtBurstLoadWithAMatchPromptEveryMinute_TotalControllerDemandStaysWithinTheBudget`
+  (24 blown storylines + 1 prompt/min stays <= 6), and (ReleaseBlocking)
+  `MissSafeAntiBeratePioScenarioTests.AFloodOfIrrelevantPostsThatSaturatesTheDemandBudget_StillCannotPauseEscalation`
+  (6 and 10 posts/min: fires equal the post-free control, minute for minute) and
+  `MissSafeAntiBeratePioScenarioTests.AnAnswerLandingAmidAPromptSaturatingFlood_StillDrawsItsResponseBurst`.
 - **D5 - HIGH: an expired countdown auto-sent after a FullStop was restored (swamped mode). FIXED on main by
   #620** (`AutoHoldPolicy.Evaluate`: an expired undecided countdown under GenerationStopped -> Hold with a
   hold-on-expiry event). Asserted (release-blocking):
