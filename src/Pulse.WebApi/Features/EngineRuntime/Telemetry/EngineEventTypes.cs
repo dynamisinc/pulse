@@ -106,6 +106,12 @@ public static class EngineEventTypes
     /// wrote it. Distinct from <see cref="AutonomyDefaultChanged"/>, which is the server-side, server-timed
     /// record of a change to the exercise DEFAULT; the two coexist and neither replaces the other.
     /// </para>
+    /// <para>
+    /// <b>Retired on the LIVE path for the kill switch / restore (#618).</b> The server now records those levers
+    /// itself (<c>engine.kill-switch.engaged</c> / <c>engine.autonomy.restored</c>, staff-change records attributed
+    /// to the verified session person — see <c>StaffChangeEventTypes</c>), so the client emits this only under
+    /// <c>USE_MOCK_DATA</c> (no backend) and for its mock-only provider degrade/restore. Historical rows remain.
+    /// </para>
     /// </summary>
     public const string AutonomyChanged = "engine.autonomy_changed";
 

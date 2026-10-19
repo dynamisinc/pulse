@@ -466,12 +466,13 @@ public sealed partial class EngineReviewEndpointsTests
         Guid? currentExerciseId,
         bool authenticatedStaff = true,
         Guid? assignedExerciseId = null,
-        bool timeoutAutoSendAuthorized = false)
+        bool timeoutAutoSendAuthorized = false,
+        Action<IServiceCollection>? configureServices = null)
     {
         _fixture.ConnectionString.Should().NotBeNull(
             "the Docker-gated MsSql fixture must have started and captured its connection string before these tests run");
         return await EngineReviewTestHost.StartAsync(
-            _fixture.ConnectionString!, currentExerciseId, authenticatedStaff, assignedExerciseId, timeoutAutoSendAuthorized);
+            _fixture.ConnectionString!, currentExerciseId, authenticatedStaff, assignedExerciseId, timeoutAutoSendAuthorized, configureServices);
     }
 
     // ---- WR-2: attribution is the SESSION person, never the body's actingHumanId ---------------------
@@ -780,7 +781,8 @@ public sealed partial class EngineReviewEndpointsTests
             Guid? currentExerciseId,
             bool authenticatedStaff = true,
             Guid? assignedExerciseId = null,
-            bool timeoutAutoSendAuthorized = false)
+            bool timeoutAutoSendAuthorized = false,
+            Action<IServiceCollection>? configureServices = null)
         {
             var publisher = new CapturingEnginePublishService();
 
@@ -839,6 +841,9 @@ public sealed partial class EngineReviewEndpointsTests
             // The server-authoritative request scope (fixed per host; null = the fail-closed case).
             builder.Services.RemoveAll<IExerciseContext>();
             builder.Services.AddScoped<IExerciseContext>(_ => new ExerciseContext { CurrentExerciseId = currentExerciseId });
+
+            // A test's own substitutions (e.g. #618's failing steering-lever recorder), applied last.
+            configureServices?.Invoke(builder.Services);
 
             var app = builder.Build();
             app.MapEngineReview();

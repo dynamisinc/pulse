@@ -106,6 +106,6 @@ public static class StaffChangeRecorder
 
 /// <summary>The human behind a staff change: their person id, their role and the session they acted through.</summary>
 /// <param name="PersonId">The acting person (the staff facet id).</param>
-/// <param name="Role">The acting role.</param>
+/// <param name="Role">The acting role, or <c>null</c> when it could not be read (null-omitted on the envelope, never invented).</param>
 /// <param name="SessionId">The session the change was made through.</param>
-public sealed record StaffChangeActor(Guid PersonId, string Role, Guid SessionId);
+public sealed record StaffChangeActor(Guid PersonId, string? Role, Guid SessionId);

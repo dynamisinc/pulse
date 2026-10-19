@@ -142,6 +142,7 @@ public sealed class SwampedModeLeadLossTests
         {
             payload.RootElement.GetProperty("reason").GetString().Should().Be(ExerciseCallerRole.NoLeadRecheckReason);
             payload.RootElement.GetProperty("wasOn").GetBoolean().Should().BeTrue();
+            payload.RootElement.GetProperty("isOn").GetBoolean().Should().BeFalse("#618: the one swamped-off shape every path records");
             payload.RootElement.GetProperty("scenarioMinute").GetInt32().Should().Be(42, "the clock's CURRENT minute, never 0");
         }
 

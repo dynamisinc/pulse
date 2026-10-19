@@ -1,15 +1,10 @@
 namespace Pulse.WebApi.Features.EngineRuntime;
 
 using System;
-using System.Linq;
-using System.Threading;
 using System.Threading.Tasks;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Pulse.Core.Features.Autonomy.Models;
 using Pulse.Core.Features.Autonomy.Services;
-using Pulse.WebApi.Data.Entities;
-using Pulse.WebApi.Features.Identity.Enrollments;
 
 /// <summary>
 /// The XC-004 + org-audit record of the three in-memory autonomy steering levers (issue #618): swamped mode on/off,
@@ -19,8 +14,13 @@ using Pulse.WebApi.Features.Identity.Enrollments;
 /// <para>
 /// <b>Only a real change is recorded.</b> A lever that leaves the state as it was (swamped ON while already on, OFF
 /// while already off, a kill switch that does not move the posture, a restore with nothing clamped) records nothing —
-/// the same rule as <see cref="EngineEventTypes.ProviderChanged"/>. A refused call (400 / 403, including the Tier-2
-/// M-1 post-write revert) never reaches a record: each call site sits after every refusal.
+/// the same rule as <see cref="EngineEventTypes.ProviderChanged"/>. A refused call (400 / 403) records nothing; the one
+/// exception is a refused swamped ON that reverts swamped mode which was ALREADY on (Tier-2 M-1 with a lost lead): that
+/// is a real ON→OFF change and is recorded as a system <c>lead-lost-revert</c>.
+/// </para>
+/// <para>
+/// <b>Recorded LAST.</b> Each call site sits after every state change of its lever (for the kill switch, after the
+/// ambient demotion — AC6), so the record can never skip a safety effect.
 /// </para>
 /// <para>
 /// <b>Attributed to the session person (WR-2).</b> The actor is <see cref="EngineReviewActionInput.Session"/>, which
@@ -29,35 +29,56 @@ using Pulse.WebApi.Features.Identity.Enrollments;
 /// unverified string.
 /// </para>
 /// <para>
-/// <b>Not atomic with the change, and not fatal.</b> The lever is process memory and is already live when the record
-/// is written, so — like <c>CommitSettingsEventAsync</c> and the lead-release flip — a failed save is logged and the
-/// applied snapshot is still returned; the staged rows are detached so a later save in the same request cannot
-/// resurrect them.
+/// <b>The previous state is read beside the write, not atomically with it.</b> <c>EngineAutonomyState</c> has no
+/// compare-and-set for swamped mode or the clamp, so a concurrent lever on the same exercise between the read and the
+/// write can make one record's <c>wasOn</c> / <c>fromPosture</c> stale. That is the same window the state itself has
+/// (last writer wins); the record still names a real change by a real, verified person.
+/// </para>
+/// <para>
+/// <b>Never fatal.</b> The lever is process memory and is already live, so the record is written by
+/// <see cref="IEngineSteeringLeverRecorder"/> in its own scope, and any failure — including one the recorder failed to
+/// contain — is logged here and swallowed: an applied lever is never turned into a 500.
 /// </para>
 /// </remarks>
 public sealed partial class EngineReviewService
 {
-    private const string ExerciseEntityType = "exercise";
-
     /// <summary>Records a swamped-mode change (<paramref name="wasOn"/> → <paramref name="isOn"/>); nothing when unchanged.</summary>
-    private Task RecordSwampedModeChangeAsync(
-        Guid exerciseId,
-        EngineReviewActionInput input,
-        bool wasOn,
-        bool isOn,
-        CancellationToken cancellationToken)
+    private Task RecordSwampedModeChangeAsync(Guid exerciseId, EngineReviewActionInput input, bool wasOn, bool isOn)
     {
         if (wasOn == isOn)
         {
             return Task.CompletedTask;
         }
 
-        var payload = EngineSteeringLeverRecords.SwampedModePayload(wasOn, isOn, _clock.CurrentScenarioMinute(exerciseId));
+        var payload = EngineSteeringLeverRecords.SwampedModePayload(
+            EngineSteeringLeverRecords.ControllerReason, wasOn, isOn, EngineSteeringLeverRecords.ScenarioMinuteOrNull(_clock, exerciseId));
         return isOn
             ? RecordSteeringLeverAsync(
-                exerciseId, input, EngineSteeringLeverRecords.SwampedModeOnEventType, EngineSteeringLeverRecords.SwampedModeOnAuditKind, payload, cancellationToken)
+                exerciseId, input, EngineSteeringLeverRecords.SwampedModeOnEventType, EngineSteeringLeverRecords.SwampedModeOnAuditKind, payload)
             : RecordSteeringLeverAsync(
-                exerciseId, input, EngineSteeringLeverRecords.SwampedModeOffEventType, EngineSteeringLeverRecords.SwampedModeOffAuditKind, payload, cancellationToken);
+                exerciseId, input, EngineSteeringLeverRecords.SwampedModeOffEventType, EngineSteeringLeverRecords.SwampedModeOffAuditKind, payload);
+    }
+
+    /// <summary>
+    /// Records the Tier-2 M-1 revert of a refused swamped ON — but only when swamped mode was ALREADY on before the
+    /// request (the revert then turned an ON exercise OFF). A system action: the revert is the lost lead's consequence,
+    /// not the caller's choice. When it was off before, the revert restored it exactly, so nothing is recorded.
+    /// </summary>
+    private Task RecordSwampedLeadLostRevertAsync(Guid exerciseId, bool wasOn)
+    {
+        if (!wasOn)
+        {
+            return Task.CompletedTask;
+        }
+
+        var payload = EngineSteeringLeverRecords.SwampedModePayload(
+            EngineSteeringLeverRecords.LeadLostRevertReason, wasOn: true, isOn: false, EngineSteeringLeverRecords.ScenarioMinuteOrNull(_clock, exerciseId));
+        return RecordSteeringLeverAsync(
+            exerciseId,
+            new EngineReviewActionInput(null, null),
+            EngineSteeringLeverRecords.SwampedModeOffEventType,
+            EngineSteeringLeverRecords.SwampedModeOffAuditKind,
+            payload);
     }
 
     /// <summary>Records an engaged kill switch when it moved the safety posture; nothing when the posture is unchanged.</summary>
@@ -66,8 +87,7 @@ public sealed partial class EngineReviewService
         EngineReviewActionInput input,
         KillSwitchMode mode,
         string fromPosture,
-        EngineAutonomyState state,
-        CancellationToken cancellationToken)
+        EngineAutonomyState state)
     {
         var toPosture = EngineSteeringLeverRecords.PostureOf(state);
         if (string.Equals(fromPosture, toPosture, StringComparison.Ordinal))
@@ -75,9 +95,10 @@ public sealed partial class EngineReviewService
             return Task.CompletedTask;
         }
 
-        var payload = EngineSteeringLeverRecords.KillSwitchPayload(mode, fromPosture, toPosture, _clock.CurrentScenarioMinute(exerciseId));
+        var payload = EngineSteeringLeverRecords.KillSwitchPayload(
+            mode, fromPosture, toPosture, EngineSteeringLeverRecords.ScenarioMinuteOrNull(_clock, exerciseId));
         return RecordSteeringLeverAsync(
-            exerciseId, input, EngineSteeringLeverRecords.KillSwitchEngagedEventType, EngineSteeringLeverRecords.KillSwitchEngagedAuditKind, payload, cancellationToken);
+            exerciseId, input, EngineSteeringLeverRecords.KillSwitchEngagedEventType, EngineSteeringLeverRecords.KillSwitchEngagedAuditKind, payload);
     }
 
     /// <summary>Records a restore that really lifted a clamp (<paramref name="lifted"/>); nothing for the idempotent no-op.</summary>
@@ -86,8 +107,7 @@ public sealed partial class EngineReviewService
         EngineReviewActionInput input,
         bool lifted,
         bool wasStopped,
-        EngineAutonomyState state,
-        CancellationToken cancellationToken)
+        EngineAutonomyState state)
     {
         if (!lifted)
         {
@@ -97,95 +117,49 @@ public sealed partial class EngineReviewService
         // A lift implies a clamp was active before it (RestoreFromSafety returns null otherwise).
         var fromPosture = EngineSteeringLeverRecords.PostureOf(wasStopped, safetyClampActive: true);
         var payload = EngineSteeringLeverRecords.RestorePayload(
-            fromPosture, EngineSteeringLeverRecords.PostureOf(state), _clock.CurrentScenarioMinute(exerciseId));
+            fromPosture, EngineSteeringLeverRecords.PostureOf(state), EngineSteeringLeverRecords.ScenarioMinuteOrNull(_clock, exerciseId));
         return RecordSteeringLeverAsync(
-            exerciseId, input, EngineSteeringLeverRecords.AutonomyRestoredEventType, EngineSteeringLeverRecords.AutonomyRestoredAuditKind, payload, cancellationToken);
+            exerciseId, input, EngineSteeringLeverRecords.AutonomyRestoredEventType, EngineSteeringLeverRecords.AutonomyRestoredAuditKind, payload);
     }
 
-    /// <summary>
-    /// Stages the event + audit through <see cref="StaffChangeRecorder"/> (the lead-release flip's recorder) and saves
-    /// them in one <c>SaveChanges</c>. One server clock read is shared by both rows.
-    /// </summary>
+    /// <summary>Hands one record to <see cref="IEngineSteeringLeverRecorder"/>; never throws (see the remarks).</summary>
     private async Task RecordSteeringLeverAsync(
         Guid exerciseId,
         EngineReviewActionInput input,
         string eventType,
         string auditKind,
-        string payload,
-        CancellationToken cancellationToken)
+        string payload)
     {
-        var now = DateTimeOffset.UtcNow;
-
-        // org-scope-exempt(ResolvedScope): exerciseId is the SERVER-resolved scope (TryResolveScope over IExerciseContext);
-        // this reads only that exercise's organization (where the audit row lives), stored scenario instant and zone.
-        var facts = await _dbContext.Exercises
-            .AsNoTracking()
-            .Where(e => e.Id == exerciseId)
-            .Select(e => new { e.OrganizationId, e.CurrentScenarioTime, e.TimeZone })
-            .FirstOrDefaultAsync(cancellationToken);
-        if (facts is null)
-        {
-            LogSteeringLeverRecordSkipped(eventType, exerciseId);
-            return;
-        }
-
-        // COR-053: the live scenario clock's instant, else the exercise's stored one (StaffChangeRecorder then falls
-        // back to the wall clock, the pre-COR-050 placeholder) — never re-derived.
-        var exercise = new StaffChangeExercise(
-            exerciseId,
-            facts.OrganizationId,
-            _clock.CurrentScenarioTime(exerciseId) ?? facts.CurrentScenarioTime,
-            facts.TimeZone);
-
-        StaffChangeRecorder.Stage(
-            _dbContext,
-            exercise,
-            input.Session,
-            new TelemetryTarget { EntityType = ExerciseEntityType, EntityId = exerciseId.ToString() },
-            subjectPersonId: null,
-            eventType,
-            auditKind,
-            payload,
-            now);
-
         try
         {
-            await _dbContext.SaveChangesAsync(cancellationToken);
+            await _steeringLeverRecorder.RecordAsync(new EngineSteeringLeverRecord(
+                exerciseId,
+                input.Session,
+                eventType,
+                auditKind,
+                payload,
+                _clock.CurrentScenarioTime(exerciseId),
+                DateTimeOffset.UtcNow));
         }
-        catch (OperationCanceledException)
+#pragma warning disable CA1031 // The lever is already applied and live; a record failure must be loud, never fatal.
+        catch (Exception exception)
         {
-            DetachStagedRecords();
-            throw;
-        }
-#pragma warning disable CA1031 // The lever is already applied and live; a record-persist failure must be loud, not fatal.
-        catch (Exception ex)
-        {
-            DetachStagedRecords();
-            LogSteeringLeverRecordFailed(eventType, exerciseId, ex);
+            LogSteeringLeverRecordFailed(eventType, exerciseId, exception);
         }
 #pragma warning restore CA1031
     }
 
-    /// <summary>Detaches the still-Added event + audit rows of a failed record save so no later save writes them.</summary>
-    private void DetachStagedRecords()
-    {
-        foreach (var entry in _dbContext.ChangeTracker.Entries()
-            .Where(e => e.State == EntityState.Added && e.Entity is TelemetryEvent or OrgAuditEvent)
-            .ToList())
-        {
-            entry.State = EntityState.Detached;
-        }
-    }
-
-    /// <summary>Source-generated Error log for a steering-lever record that could not be persisted.</summary>
+    /// <summary>Source-generated Error log for a steering-lever record whose recorder threw.</summary>
     [LoggerMessage(
         Level = LogLevel.Error,
-        Message = "Steering lever '{EventType}' for exercise {ExerciseId} was APPLIED in memory but its XC-004 event and org audit could not be persisted; the change is live and unaudited.")]
+        Message = "Steering lever '{EventType}' for exercise {ExerciseId} was APPLIED in memory but recording it failed; the change is live and unaudited.")]
     private partial void LogSteeringLeverRecordFailed(string eventType, Guid exerciseId, Exception exception);
 
-    /// <summary>Source-generated Error log for a steering-lever record skipped because the exercise row was not found.</summary>
-    [LoggerMessage(
-        Level = LogLevel.Error,
-        Message = "Steering lever '{EventType}' for exercise {ExerciseId} was APPLIED in memory but the exercise row was not found, so it was not recorded.")]
-    private partial void LogSteeringLeverRecordSkipped(string eventType, Guid exerciseId);
+    /// <summary>The recorder used when none is injected (direct, non-DI constructions): records nothing.</summary>
+    private sealed class NullSteeringLeverRecorder : IEngineSteeringLeverRecorder
+    {
+        public static readonly NullSteeringLeverRecorder Instance = new();
+
+        public Task RecordAsync(EngineSteeringLeverRecord record) => Task.CompletedTask;
+    }
 }

@@ -8,7 +8,11 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using System.Threading.Tasks;
 using FluentAssertions;
+using System.Threading;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Pulse.WebApi.Data;
 using Microsoft.Extensions.DependencyInjection;
 using Pulse.Core.Features.Autonomy.Models;
 using Pulse.WebApi.Data.Entities;
@@ -258,7 +262,158 @@ public sealed partial class EngineReviewEndpointsTests
         await AssertNoLeverRecordAsync(exerciseId, "a refused restore records nothing");
     }
 
+    [RequiresDockerFact]
+    public async Task SpoofTheoryHost_WithAnUnstartedClock_OmitsTheScenarioMinute_NeverAFabricatedZero()
+    {
+        var exerciseId = Guid.NewGuid();
+        await using var host = await StartHostAsync(exerciseId);
+
+        using var response = await host.Client.PostAsJsonAsync(
+            new Uri("/api/engine/autonomy/kill-switch", UriKind.Relative),
+            new { actingHumanId = SpoofedActingHumanId, mode = "drop-to-suggest" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var (events, _) = await LeverRecordsAsync(exerciseId);
+        using var payload = JsonDocument.Parse(events.Should().ContainSingle().Subject.Payload!);
+        payload.RootElement.TryGetProperty("scenarioMinute", out _).Should().BeFalse("the clock has not started");
+    }
+
+    // ---- #618 review C2: a record failure never costs a safety effect, nor fails the lever ------------
+
+    [RequiresDockerFact]
+    public async Task KillSwitch_WhenTheRecorderThrows_StillDemotesAutonomousAmbient_AndReturns200()
+    {
+        var exerciseId = Guid.NewGuid();
+        await using var host = await StartHostAsync(exerciseId, configureServices: UseRecorder(new ThrowingSteeringLeverRecorder()));
+        var (path, body, _) = ArrangeAutonomousAmbient(host, exerciseId, "/api/engine/autonomy/kill-switch", new { actingHumanId = SpoofedActingHumanId, mode = "full-stop" });
+
+        using var response = await host.Client.PostAsJsonAsync(new Uri(path, UriKind.Relative), body);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, "the kill switch applied; a failed record must not turn it into a 500");
+        host.Services.GetRequiredService<EngineAmbientPolicyRegistry>().Get(exerciseId).Mode
+            .Should().Be(Pulse.Core.Features.Ambient.Models.AmbientPolicyMode.Off, "AC6: the kill switch lowers autonomous ambient whatever happens to the record");
+        host.Services.GetRequiredService<EngineAutonomyRegistry>().GetOrCreate(exerciseId).IsGenerationStopped.Should().BeTrue();
+        await AssertNoLeverRecordAsync(exerciseId, "the recorder failed");
+    }
+
+    [RequiresDockerFact]
+    public async Task SwampedModeAndRestore_WhenTheRecorderThrows_StillApply_AndReturn200()
+    {
+        var exerciseId = Guid.NewGuid();
+        await using var host = await StartHostAsync(
+            exerciseId, timeoutAutoSendAuthorized: true, configureServices: UseRecorder(new ThrowingSteeringLeverRecorder()));
+        var autonomy = host.Services.GetRequiredService<EngineAutonomyRegistry>().GetOrCreate(exerciseId);
+
+        using (var on = await host.Client.PostAsJsonAsync(
+            new Uri("/api/engine/autonomy/swamped-mode", UriKind.Relative), new { actingHumanId = SpoofedActingHumanId, enabled = true }))
+        {
+            on.StatusCode.Should().Be(HttpStatusCode.OK);
+        }
+
+        autonomy.SwampedModeEnabled.Should().BeTrue();
+
+        autonomy.EngageKillSwitch(KillSwitchMode.FullStop, "arrange", 0);
+        using (var restore = await host.Client.PostAsJsonAsync(
+            new Uri("/api/engine/autonomy/restore", UriKind.Relative), new { actingHumanId = SpoofedActingHumanId }))
+        {
+            restore.StatusCode.Should().Be(HttpStatusCode.OK);
+        }
+
+        autonomy.SafetyClampActive.Should().BeFalse();
+    }
+
+    [RequiresDockerFact]
+    public async Task KillSwitch_WhenTheRecordSaveFails_StillDemotesAmbient_Returns200_AndWritesNothing()
+    {
+        var exerciseId = Guid.NewGuid();
+        await using var failingDb = new ServiceCollection()
+            .AddDbContext<PulseDbContext>(o => o.UseSqlServer(_fixture.ConnectionString!).AddInterceptors(new FailingSaveInterceptor()))
+            .BuildServiceProvider();
+        await using var host = await StartHostAsync(
+            exerciseId,
+            configureServices: UseRecorder(new EngineSteeringLeverRecorder(failingDb.GetRequiredService<IServiceScopeFactory>())));
+        var (path, body, _) = ArrangeAutonomousAmbient(host, exerciseId, "/api/engine/autonomy/kill-switch", new { actingHumanId = SpoofedActingHumanId, mode = "drop-to-suggest" });
+
+        using var response = await host.Client.PostAsJsonAsync(new Uri(path, UriKind.Relative), body);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, "a record that cannot be saved is logged, never fatal");
+        host.Services.GetRequiredService<EngineAmbientPolicyRegistry>().Get(exerciseId).Mode
+            .Should().Be(Pulse.Core.Features.Ambient.Models.AmbientPolicyMode.Off);
+        await AssertNoLeverRecordAsync(exerciseId, "the record's own save failed (and it never shared the request's unit of work)");
+    }
+
+    // ---- #618 review W4 -----------------------------------------------------------------------------
+
+    [RequiresDockerFact]
+    public async Task KillSwitch_DropToSuggest_UnderTheDegradedClamp_IsANoOp_AndRecordsNothing_ButFullStopIsAChange()
+    {
+        var exerciseId = Guid.NewGuid();
+        await using var host = await StartHostAsync(exerciseId);
+        host.Services.GetRequiredService<EngineAutonomyRegistry>().GetOrCreate(exerciseId).DegradeToSuggest("provider down", 0);
+        var uri = new Uri("/api/engine/autonomy/kill-switch", UriKind.Relative);
+
+        using (var drop = await host.Client.PostAsJsonAsync(uri, new { actingHumanId = SpoofedActingHumanId, mode = "drop-to-suggest" }))
+        {
+            drop.StatusCode.Should().Be(HttpStatusCode.OK);
+        }
+
+        await AssertNoLeverRecordAsync(exerciseId, "already clamped to Suggest — the posture did not move");
+
+        using (var stop = await host.Client.PostAsJsonAsync(uri, new { actingHumanId = SpoofedActingHumanId, mode = "full-stop" }))
+        {
+            stop.StatusCode.Should().Be(HttpStatusCode.OK);
+        }
+
+        var (events, _) = await LeverRecordsAsync(exerciseId);
+        using var payload = JsonDocument.Parse(events.Should().ContainSingle().Subject.Payload!);
+        payload.RootElement.GetProperty("fromPosture").GetString().Should().Be("clamped");
+        payload.RootElement.GetProperty("toPosture").GetString().Should().Be("stopped");
+    }
+
+    [RequiresDockerFact]
+    public async Task ALeverOnExerciseA_NeverWritesARecordScopedToExerciseB()
+    {
+        var exerciseA = Guid.NewGuid();
+        var exerciseB = Guid.NewGuid();
+        await using var hostA = await StartHostAsync(exerciseA);
+        await using var hostB = await StartHostAsync(exerciseB);
+
+        using var response = await hostA.Client.PostAsJsonAsync(
+            new Uri("/api/engine/autonomy/kill-switch", UriKind.Relative),
+            new { actingHumanId = SpoofedActingHumanId, mode = "full-stop" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        (await LeverRecordsAsync(exerciseA)).Events.Should().ContainSingle("A's lever is recorded on A");
+        await AssertNoLeverRecordAsync(exerciseB, "COR-001: nothing A did is ever scoped to B");
+
+        // And through B's own scope, the central filter shows B nothing of A's record.
+        await using var asB = _fixture.CreateContext(new ExerciseContext { CurrentExerciseId = exerciseB });
+        (await asB.TelemetryEvents.CountAsync(e => LeverEventTypes.Contains(e.EventType))).Should().Be(0);
+        hostB.Services.GetRequiredService<EngineAutonomyRegistry>().GetOrCreate(exerciseB).SafetyClampActive.Should().BeFalse();
+    }
+
     // ---- #618 helpers ---------------------------------------------------------------------------
+
+    private static Action<IServiceCollection> UseRecorder(IEngineSteeringLeverRecorder recorder) => services =>
+    {
+        services.RemoveAll<IEngineSteeringLeverRecorder>();
+        services.AddSingleton(recorder);
+    };
+
+    /// <summary>A recorder that breaks its never-throws contract — proves the service's own guard.</summary>
+    private sealed class ThrowingSteeringLeverRecorder : IEngineSteeringLeverRecorder
+    {
+        public Task RecordAsync(EngineSteeringLeverRecord record) =>
+            throw new InvalidOperationException("record store down");
+    }
+
+    /// <summary>Fails every save on the context it is attached to.</summary>
+    private sealed class FailingSaveInterceptor : SaveChangesInterceptor
+    {
+        public override ValueTask<InterceptionResult<int>> SavingChangesAsync(
+            DbContextEventData eventData, InterceptionResult<int> result, CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException("audit store down");
+    }
 
     /// <summary>Starts (and freezes) the exercise's scenario clock at <see cref="LeverScenarioMinute"/>; returns that instant.</summary>
     private static DateTimeOffset StartLeverClock(EngineReviewTestHost host, Guid exerciseId)

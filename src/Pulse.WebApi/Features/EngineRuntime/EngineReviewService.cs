@@ -88,6 +88,7 @@ public sealed partial class EngineReviewService
     private readonly ILogger<EngineReviewService> _logger;
     private readonly EngineAmbientPolicyRegistry _ambientPolicy;
     private readonly bool _timeoutAutoSendAuthorized;
+    private readonly IEngineSteeringLeverRecorder _steeringLeverRecorder;
 
     /// <summary>
     /// The 400 message <see cref="SetSwampedModeAsync"/> returns for an ON request while the governed
@@ -122,6 +123,10 @@ public sealed partial class EngineReviewService
     /// keep compiling; when absent timeout auto-send is NOT authorised (fail closed: swamped ON is refused and an
     /// expired countdown is always held).
     /// </param>
+    /// <param name="steeringLeverRecorder">
+    /// Records the swamped-mode / kill-switch / restore levers (#618). Optional so existing direct constructions keep
+    /// compiling; when absent (never in the DI-built service — <c>AddEngineReview</c> registers it) nothing is recorded.
+    /// </param>
     public EngineReviewService(
         IEngineReviewStore store,
         PulseDbContext dbContext,
@@ -137,7 +142,8 @@ public sealed partial class EngineReviewService
         IGenerationProviderCutRegistry providerCut,
         ILogger<EngineReviewService> logger,
         EngineAmbientPolicyRegistry? ambientPolicy = null,
-        IOptions<EngineAmbientGovernanceOptions>? governance = null)
+        IOptions<EngineAmbientGovernanceOptions>? governance = null,
+        IEngineSteeringLeverRecorder? steeringLeverRecorder = null)
     {
         ArgumentNullException.ThrowIfNull(store);
         ArgumentNullException.ThrowIfNull(dbContext);
@@ -168,6 +174,7 @@ public sealed partial class EngineReviewService
         _logger = logger;
         _ambientPolicy = ambientPolicy ?? new EngineAmbientPolicyRegistry();
         _timeoutAutoSendAuthorized = governance?.Value.TimeoutAutoSendAuthorized ?? false;
+        _steeringLeverRecorder = steeringLeverRecorder ?? NullSteeringLeverRecorder.Instance;
     }
 
     // ---- Queue read -----------------------------------------------------------------------------
@@ -408,8 +415,10 @@ public sealed partial class EngineReviewService
     /// person's lead enrollment on the server-resolved exercise (<see cref="ExerciseCallerRole.IsStillLeadAsync"/>);
     /// when it no longer holds, swamped mode is turned straight back OFF through the same state API and the request is
     /// <see cref="EngineReviewOutcome.Forbidden"/> (403). A demotion commits before its own OFF, so the outcome is OFF
-    /// whichever request wins. A refused (reverted) ON records nothing — the demotion's own OFF is the recorded change;
-    /// an ON or OFF that lands and changes the state is recorded (#618, <see cref="EngineSteeringLeverRecords"/>).
+    /// whichever request wins. A refused (reverted) ON records nothing — the demotion's own OFF is the recorded change —
+    /// unless swamped mode was already on before it, when the revert is a real ON→OFF recorded as a system
+    /// <c>lead-lost-revert</c>; an ON or OFF that lands and changes the state is recorded (#618,
+    /// <see cref="EngineSteeringLeverRecords"/>).
     /// </remarks>
     /// <param name="enabled">The requested state.</param>
     /// <param name="input">The acting human (COR-018) + optional telemetry zone.</param>
@@ -440,17 +449,18 @@ public sealed partial class EngineReviewService
         }
 
         var state = _autonomy.GetOrCreate(exerciseId);
-        var wasOn = state.SwampedModeEnabled;
+        var wasOn = state.SwampedModeEnabled; // #618: read beside the write, not atomic with it (EngineReviewService.SteeringLevers.cs)
         state.SetSwampedMode(enabled, input.ActingHumanId, _clock.CurrentScenarioMinute(exerciseId));
 
         // M-1: ON is a raise — re-check the lead live, AFTER the write, and revert to OFF when it was lost meanwhile.
         if (enabled && !await IsStillLeadAsync(exerciseId, sessionPersonId, cancellationToken))
         {
             state.SetSwampedMode(false, ExerciseCallerRole.NoLeadActor, _clock.CurrentScenarioMinute(exerciseId));
+            await RecordSwampedLeadLostRevertAsync(exerciseId, wasOn); // #618: only an ALREADY-on exercise really changed
             return EngineAutonomyResult.Forbidden();
         }
 
-        await RecordSwampedModeChangeAsync(exerciseId, input, wasOn, enabled, cancellationToken); // #618
+        await RecordSwampedModeChangeAsync(exerciseId, input, wasOn, enabled); // #618
         return EngineAutonomyResult.Ok(EngineAutonomyStateDto.From(state));
     }
 
@@ -481,12 +491,12 @@ public sealed partial class EngineReviewService
         var state = _autonomy.GetOrCreate(exerciseId);
         var fromPosture = EngineSteeringLeverRecords.PostureOf(state);
         state.EngageKillSwitch(mode, input.ActingHumanId, _clock.CurrentScenarioMinute(exerciseId));
-        await RecordKillSwitchEngagedAsync(exerciseId, input, mode, fromPosture, state, cancellationToken); // #618
 
         // Ambient-chatter 01 (AC6): either kill-switch mode LOWERS autonomous ambient posting to off, so a later
         // restore can never re-raise it; only a controller re-selecting the mode does.
         await DemoteAutonomousAmbientAsync(exerciseId, input, cancellationToken);
 
+        await RecordKillSwitchEngagedAsync(exerciseId, input, mode, fromPosture, state); // #618: LAST, after every state change (AC6)
         return EngineAutonomyResult.Ok(EngineAutonomyStateDto.From(state));
     }
 
@@ -541,7 +551,7 @@ public sealed partial class EngineReviewService
             return EngineAutonomyResult.Forbidden();
         }
 
-        await RecordAutonomyRestoredAsync(exerciseId, input, lifted is not null, wasStopped, state, cancellationToken); // #618
+        await RecordAutonomyRestoredAsync(exerciseId, input, lifted is not null, wasStopped, state); // #618
         return EngineAutonomyResult.Ok(EngineAutonomyStateDto.From(state));
     }
 

@@ -8,6 +8,7 @@ using FluentAssertions;
 using Pulse.Core.Features.Autonomy.Models;
 using Pulse.Core.Features.Autonomy.Services;
 using Pulse.WebApi.Features.EngineRuntime;
+using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.EngineRuntime.Telemetry;
 using Pulse.WebApi.Features.Identity.Enrollments;
 using Xunit;
@@ -83,7 +84,7 @@ public class EngineSteeringLeverRecordsTests
     [Fact]
     public void SwampedModePayload_CarriesReasonPreviousNewStateAndScenarioMinute()
     {
-        using var payload = JsonDocument.Parse(EngineSteeringLeverRecords.SwampedModePayload(wasOn: false, isOn: true, scenarioMinute: 42));
+        using var payload = JsonDocument.Parse(EngineSteeringLeverRecords.SwampedModePayload("controller", wasOn: false, isOn: true, scenarioMinute: 42));
 
         payload.RootElement.EnumerateObject().Select(p => p.Name)
             .Should().Equal("reason", "wasOn", "isOn", "scenarioMinute");
@@ -91,6 +92,47 @@ public class EngineSteeringLeverRecordsTests
         payload.RootElement.GetProperty("wasOn").GetBoolean().Should().BeFalse();
         payload.RootElement.GetProperty("isOn").GetBoolean().Should().BeTrue();
         payload.RootElement.GetProperty("scenarioMinute").GetInt32().Should().Be(42);
+    }
+
+    [Theory]
+    [InlineData("controller")]
+    [InlineData("lead-released")]
+    [InlineData("no-lead-recheck")]
+    [InlineData("lead-lost-revert")]
+    public void SwampedModePayload_HasOneShapeForEveryReason_AndOmitsAnUnknownMinute(string reason)
+    {
+        using var withMinute = JsonDocument.Parse(EngineSteeringLeverRecords.SwampedModePayload(reason, wasOn: true, isOn: false, scenarioMinute: 9));
+        withMinute.RootElement.EnumerateObject().Select(p => p.Name).Should().Equal("reason", "wasOn", "isOn", "scenarioMinute");
+        withMinute.RootElement.GetProperty("reason").GetString().Should().Be(reason);
+
+        using var withoutMinute = JsonDocument.Parse(EngineSteeringLeverRecords.SwampedModePayload(reason, wasOn: true, isOn: false, scenarioMinute: null));
+        withoutMinute.RootElement.EnumerateObject().Select(p => p.Name).Should().Equal(
+            ["reason", "wasOn", "isOn"], "an unstarted clock's minute 0 is never recorded as if it were real");
+    }
+
+    [Fact]
+    public void KillSwitchAndRestorePayloads_OmitAnUnknownMinute()
+    {
+        using var kill = JsonDocument.Parse(EngineSteeringLeverRecords.KillSwitchPayload(KillSwitchMode.FullStop, "running", "stopped", null));
+        kill.RootElement.TryGetProperty("scenarioMinute", out _).Should().BeFalse();
+
+        using var restore = JsonDocument.Parse(EngineSteeringLeverRecords.RestorePayload("stopped", "running", null));
+        restore.RootElement.TryGetProperty("scenarioMinute", out _).Should().BeFalse();
+    }
+
+    [Fact]
+    public void ScenarioMinuteOrNull_IsNullWithoutAClockOrBeforeItStarts_AndTheMinuteAfter()
+    {
+        var exerciseId = Guid.NewGuid();
+        EngineSteeringLeverRecords.ScenarioMinuteOrNull(null, exerciseId).Should().BeNull("no clock, no minute");
+
+        var clock = new ExerciseClockService(TimeProvider.System);
+        EngineSteeringLeverRecords.ScenarioMinuteOrNull(clock, exerciseId).Should().BeNull("an unstarted clock reads 0, which is not a real minute");
+
+        clock.Start(exerciseId, DateTimeOffset.UtcNow, TimeZoneInfo.Utc);
+        clock.Freeze(exerciseId);
+        clock.Jump(exerciseId, 12);
+        EngineSteeringLeverRecords.ScenarioMinuteOrNull(clock, exerciseId).Should().Be(12);
     }
 
     [Theory]

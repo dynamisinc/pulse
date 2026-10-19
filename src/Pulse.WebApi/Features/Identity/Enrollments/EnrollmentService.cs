@@ -9,6 +9,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.EngineRuntime;
+using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.ExerciseLifecycleAdmin;
 using Pulse.WebApi.Features.Realtime;
 
@@ -59,10 +60,10 @@ public sealed partial class EnrollmentService
     public const string LeadConflictError = "lead-conflict";
 
     /// <summary>The XC-004 event type of a lead released because its holder lost the controller grant.</summary>
-    public const string LeadReleasedEventType = "enrollment.lead.released";
+    public const string LeadReleasedEventType = StaffChangeEventTypes.LeadReleased;
 
     /// <summary>The XC-004 event type of swamped mode turned off because the exercise lost its lead.</summary>
-    public const string SwampedModeOffEventType = "engine.swamped-mode.turned-off";
+    public const string SwampedModeOffEventType = StaffChangeEventTypes.SwampedModeTurnedOff;
 
     /// <summary>The org-audit kind of a lead released because its holder lost the controller grant.</summary>
     public const string LeadReleasedAuditKind = "org.enrollment.lead-released";
@@ -71,16 +72,16 @@ public sealed partial class EnrollmentService
     public const string SwampedModeOffAuditKind = "org.engine.swamped-mode-off";
 
     /// <summary>The XC-004 event type of a lead change.</summary>
-    public const string LeadChangedEventType = "enrollment.lead.changed";
+    public const string LeadChangedEventType = StaffChangeEventTypes.LeadChanged;
 
     /// <summary>The XC-004 event type of a grant.</summary>
-    public const string GrantedEventType = "enrollment.granted";
+    public const string GrantedEventType = StaffChangeEventTypes.EnrollmentGranted;
 
     /// <summary>The XC-004 event type of a role change.</summary>
-    public const string RoleChangedEventType = "enrollment.role.changed";
+    public const string RoleChangedEventType = StaffChangeEventTypes.EnrollmentRoleChanged;
 
     /// <summary>The XC-004 event type of a removal.</summary>
-    public const string RevokedEventType = "enrollment.revoked";
+    public const string RevokedEventType = StaffChangeEventTypes.EnrollmentRevoked;
 
     /// <summary>The org-audit kind of a grant to someone else.</summary>
     public const string GrantedAuditKind = "org.enrollment.granted";
@@ -108,6 +109,7 @@ public sealed partial class EnrollmentService
     private readonly ISwampedModeSwitch _swampedMode;
     private readonly ISessionConnectionRevoker _connectionRevoker;
     private readonly ILogger<EnrollmentService> _logger;
+    private readonly IExerciseClock? _clock;
 
     /// <summary>Creates the service.</summary>
     /// <param name="dbContext">The request-scoped persistence context (one unit of work).</param>
@@ -117,6 +119,10 @@ public sealed partial class EnrollmentService
     /// <param name="swampedMode">The OFF-only swamped-mode seam used when an exercise loses its lead.</param>
     /// <param name="connectionRevoker">Cuts the live hub connections of the sessions a grant change revokes.</param>
     /// <param name="logger">Logs a post-commit swamped-mode flip that failed (never surfaced to the caller).</param>
+    /// <param name="clock">
+    /// The scenario clock — read only for the swamped-off record's <c>scenarioMinute</c> (omitted when absent or not
+    /// started; #618 aligned the payload shape across every swamped-off path).
+    /// </param>
     public EnrollmentService(
         PulseDbContext dbContext,
         StaffCallerContext staffCaller,
@@ -124,9 +130,11 @@ public sealed partial class EnrollmentService
         TimeProvider timeProvider,
         ISwampedModeSwitch swampedMode,
         ISessionConnectionRevoker connectionRevoker,
-        ILogger<EnrollmentService>? logger = null)
+        ILogger<EnrollmentService>? logger = null,
+        IExerciseClock? clock = null)
     {
         _logger = logger ?? NullLogger<EnrollmentService>.Instance;
+        _clock = clock;
         ArgumentNullException.ThrowIfNull(swampedMode);
         ArgumentNullException.ThrowIfNull(connectionRevoker);
         _swampedMode = swampedMode;
@@ -474,9 +482,12 @@ public sealed partial class EnrollmentService
             return;
         }
 
-        var swampedPayload = string.Create(
-            CultureInfo.InvariantCulture,
-            $"{{\"reason\":\"lead-released\",\"wasOn\":{(swampedWasOn ? "true" : "false")}}}");
+        // #618: the ONE swamped-off shape {reason, wasOn, isOn, scenarioMinute?} every path records.
+        var swampedPayload = EngineSteeringLeverRecords.SwampedModePayload(
+            EngineSteeringLeverRecords.LeadReleasedReason,
+            swampedWasOn,
+            isOn: false,
+            EngineSteeringLeverRecords.ScenarioMinuteOrNull(_clock, exercise.Id));
         Record(caller, exercise, enrollment, SwampedModeOffEventType, SwampedModeOffAuditKind, swampedPayload, now);
 
         try
