@@ -18,7 +18,9 @@ never first on `main`.
 - **Backend:** automatic on push to `main` touching `src/Pulse.WebApi/**`, `src/Pulse.Core/**`,
   `global.json` or `pulse.slnx` ([`deploy-backend.yml`](../.github/workflows/deploy-backend.yml)) →
   App Service (`app-pulse-api-uat-dynamis`), applying the EF migration to `sqldb-pulse-uat` as an
-  idempotent script **before** the new code is published.
+  idempotent script **before** the new code is published. Its first post-deploy smoke polls
+  `GET /api/build` (anonymous, returns only `{"commit":"<sha>"}`) for up to ~5 min until it reports the
+  run's own commit, so a green deploy means the **new** build is serving, not just that `/health` answers.
 - **Infrastructure:** manual `workflow_dispatch`
   ([`deploy-infrastructure.yml`](../.github/workflows/deploy-infrastructure.yml)), with `what_if` preview.
 

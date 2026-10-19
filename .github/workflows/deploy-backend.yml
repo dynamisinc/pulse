@@ -76,10 +76,14 @@ jobs:
       - name: Restore
         run: dotnet restore pulse.slnx
 
+      # -p:SourceRevisionId stamps the commit into AssemblyInformationalVersion as "<version>+<sha>" (the SDK's
+      # IncludeSourceRevisionInInformationalVersion default); GET /api/build reports it, and the deploy job's
+      # "new build is serving" smoke compares it to github.sha (#617). An explicit value overrides SourceLink's.
       - name: Publish Pulse.WebApi
         run: >-
           dotnet publish src/Pulse.WebApi/Pulse.WebApi.csproj
           --configuration Release --no-restore --output ./publish
+          -p:SourceRevisionId=${{ github.sha }}
 
       - name: Generate idempotent EF migration script
         run: |
@@ -211,6 +215,29 @@ jobs:
         with:
           app-name: ${{ env.WEBAPP_NAME }}
           package: ./publish
+
+      - name: Smoke test — the NEW build is serving (commit matches)
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          # /health alone is a false green: the OLD process keeps answering it for minutes after "Deploy to App
+          # Service" returns, and a deploy whose new instance never came up was once reported green that way
+          # (#617). GET /api/build reports the commit the running process was published from (stamped by the
+          # publish step's -p:SourceRevisionId), so wait until it equals this run's commit. Runs FIRST so every
+          # later smoke step exercises the verified new build. ~5 minutes (30 x 10s): the old process has been
+          # seen serving for ~3 minutes after the deploy step returns (2026-10-07).
+          URL="https://${WEBAPP_NAME}.azurewebsites.net/api/build"
+          OBSERVED="none"
+          for i in $(seq 1 30); do
+            BODY=$(curl -s --max-time 10 -H 'Cache-Control: no-cache' "$URL" || true)
+            OBSERVED=$(printf '%s' "$BODY" | jq -r '.commit // "none"' 2>/dev/null || echo "unparseable")
+            [ -n "$OBSERVED" ] || OBSERVED="none"
+            echo "attempt $i: /api/build commit = $OBSERVED (want $EXPECTED_SHA)"
+            [ "$OBSERVED" = "$EXPECTED_SHA" ] && exit 0
+            sleep 10
+          done
+          echo "::error::the new build never served: /api/build still reported commit '$OBSERVED' after ~5 min, expected '$EXPECTED_SHA'. The previous build is likely still the one answering."
+          exit 1
 
       - name: Smoke test — liveness must be up (DB-independent)
         run: |
