@@ -4,14 +4,17 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using FluentAssertions;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
+using Pulse.WebApi.Features.ExerciseConfiguration.Lifecycle;
 using Pulse.WebApi.Features.Identity.SharedAccess;
 using Xunit;
 
 /// <summary>
-/// #661 S1: EVERY participant write route carries the held-world refusal (<c>RefuseWhenWritesPaused()</c>, #379).
+/// #661 S1: EVERY participant write route carries the held-world refusal (<c>RefuseWhenWritesPaused()</c>, #379),
+/// and (Gate-1 W-4) is covered by the lifecycle gate, which is what refuses it after EndEx.
 /// The route set comes from the live <see cref="EndpointDataSource"/> of the REAL <c>Program</c> host, so a
 /// participant write mapped tomorrow is caught the day it is mapped, with nobody writing a test for it.
 /// </summary>
@@ -62,7 +65,9 @@ public sealed class ParticipantWriteRouteCoverageTests
         "/health",
     ];
 
-    /// <summary>The participant write routes #379 named, which the sweep must reach (a coverage guard, not an exemption).</summary>
+    /// <summary>
+    /// The participant write routes #379 named, which the sweep must reach (a coverage guard, not an exemption).
+    /// </summary>
     private static readonly string[] KnownParticipantWrites =
     [
         "POST /api/posts",
@@ -91,6 +96,33 @@ public sealed class ParticipantWriteRouteCoverageTests
             + "participant-world write, add its surface to NotParticipantWritePrefixes in review");
     }
 
+    /// <summary>
+    /// Gate-1 W-4: the pause marker is not enough. The ended, read-only review refuses writes in <c>completed</c> ONLY
+    /// through the lifecycle gate (<c>ExerciseLifecycleGatingMiddleware</c>), which matches by path prefix. So every
+    /// participant write route must ALSO sit under a gated prefix, or it would stay writable after EndEx (and in
+    /// build / archived).
+    /// </summary>
+    [Fact]
+    public void EveryParticipantWriteRoute_IsCoveredByTheLifecycleGate()
+    {
+        using var factory = new RouteTableFactory();
+
+        var writes = ParticipantWrites(factory).ToList();
+
+        writes.Select(write => write.Key).Should().Contain(
+            KnownParticipantWrites,
+            "the sweep must reach every known participant write, or a green result proves nothing");
+
+        writes
+            .Where(write => !ExerciseLifecycleGatedRoutes.IsGated(new PathString(write.Path)))
+            .Select(write => write.Key)
+            .Should().BeEmpty(
+                "a participant write route outside ExerciseLifecycleGatedRoutes.Paths is not refused by the lifecycle "
+                + "gate, so it stays writable in completed (the ended review), build and archived. Add its prefix to "
+                + "ExerciseLifecycleGatedRoutes.Paths, or, if it is not a participant-world write, add its surface to "
+                + "NotParticipantWritePrefixes in review");
+    }
+
     [Fact]
     public void TheMarker_IsStampedOnlyAlongsideTheFilter_NeverOnAReadRoute()
     {
@@ -111,7 +143,7 @@ public sealed class ParticipantWriteRouteCoverageTests
     private static IEnumerable<string> Methods(RouteEndpoint endpoint) =>
         endpoint.Metadata.GetMetadata<HttpMethodMetadata>()?.HttpMethods ?? ["*"];
 
-    private static IEnumerable<(string Key, bool Guarded)> ParticipantWrites(RouteTableFactory factory)
+    private static IEnumerable<(string Key, string Path, bool Guarded)> ParticipantWrites(RouteTableFactory factory)
     {
         foreach (var endpoint in Endpoints(factory))
         {
@@ -129,7 +161,7 @@ public sealed class ParticipantWriteRouteCoverageTests
                     continue;
                 }
 
-                yield return ($"{method} {raw}", guarded);
+                yield return ($"{method} {raw}", raw, guarded);
             }
         }
     }
@@ -138,7 +170,9 @@ public sealed class ParticipantWriteRouteCoverageTests
         route.Equals(prefix, StringComparison.OrdinalIgnoreCase)
         || route.StartsWith(prefix + "/", StringComparison.OrdinalIgnoreCase);
 
-    /// <summary>The real <c>Program</c> host, pointed at an unreachable database (the route table needs none).</summary>
+    /// <summary>
+    /// The real <c>Program</c> host, pointed at an unreachable database (the route table needs none).
+    /// </summary>
     private sealed class RouteTableFactory : WebApplicationFactory<Program>
     {
         private const string ConnectionStringEnvVar = "ConnectionStrings__DefaultConnection";
