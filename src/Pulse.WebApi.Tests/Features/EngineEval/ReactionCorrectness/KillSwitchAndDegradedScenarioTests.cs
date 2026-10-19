@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using FluentAssertions;
 using Pulse.Core.Features.Autonomy.Models;
+using Pulse.WebApi.Features.EngineRuntime;
 using Xunit;
 
 /// <summary>
@@ -35,6 +36,10 @@ using Xunit;
 public sealed class KillSwitchAndDegradedScenarioTests
 {
     private const int CountdownDeadline = 25; // minute-20 burst + the 5-minute Delayed-auto countdown
+
+    // Post-restore minutes the D5 scenario plays: fewer than a new burst's 5-minute countdown, so a new post-restore
+    // burst cannot expire (and legitimately auto-send) inside the window being asserted on.
+    private const int DelayedAutoCountdownGuard = ReactionLoopDriver.DefaultDelayedAutoCountdownMinutes - 2;
 
     /// <summary>A Delayed-auto exercise with swamped mode ON (the worst case: the only auto-send path is armed).</summary>
     private static async Task<ReactionScenario> ArmedAsync()
@@ -83,17 +88,42 @@ public sealed class KillSwitchAndDegradedScenarioTests
 
         scenario.Publisher.Published.Should().BeEmpty("a kill switch means no engine content auto-publishes, even under swamped mode");
         var suspended = (await scenario.ReviewItemsAsync()).Single(i => i.DraftId == inFlight.DraftId);
-        if (mode == KillSwitchMode.DropToSuggest)
-        {
-            suspended.Disposition.Should().Be(DraftDisposition.Held, "the expired countdown is held for a human (NEEDS YOU), never sent");
-        }
 
-        // FullStop + an expired countdown: deliberately NOT asserting the disposition here. On main the draft stays
-        // CountingDown and auto-sends after a human restore under swamped mode (defect D5, HIGH); the fix lands in
-        // the D5 safety PR to main (AutoHoldPolicy.Evaluate -> Hold with a hold-on-expiry event). See
-        // docs/features/engine-eval-harness/04-scenario-reaction-correctness.md (D5). Only "nothing publishes
-        // during the stop" (above) and "never Published" (below) hold either way.
-        suspended.Disposition.Should().NotBe(DraftDisposition.Published);
+        // Either lever holds the expired countdown for a human. For FullStop this is the D5 fix (#620): an expiry
+        // during a full stop used to be left CountingDown (see FullStop_ExpiryThenRestore_UnderSwampedMode_...).
+        suspended.Disposition.Should().Be(DraftDisposition.Held, "the expired countdown is held for a human (NEEDS YOU), never sent");
+    }
+
+    /// <summary>
+    /// D5 (HIGH, fixed on main by #620): a pre-stop countdown that expires DURING a FullStop must be held at expiry,
+    /// so a later human restore - with swamped mode still on and the auto-send path re-armed (the harness authorises
+    /// <c>TimeoutAutoSendAuthorized</c>) - cannot send the stale burst on the first sweep after the restore.
+    /// </summary>
+    [Fact]
+    public async Task FullStop_ExpiryThenRestore_UnderSwampedMode_NothingAutoPublishes_AndTheItemStaysHeld()
+    {
+        await using var scenario = await ArmedAsync();
+        var inFlight = (await scenario.ReviewItemsAsync()).Single();
+        inFlight.Disposition.Should().Be(DraftDisposition.CountingDown, "precondition: the burst is on a veto countdown");
+
+        scenario.Autonomy.EngageKillSwitch(KillSwitchMode.FullStop, "lead-1", scenario.Minute);
+        await PlayAsync(scenario, CountdownDeadline + 2); // the countdown expires while the engine is fully stopped
+
+        (await scenario.ReviewItemsAsync()).Single(i => i.DraftId == inFlight.DraftId).Disposition.Should().Be(
+            DraftDisposition.Held, "an expiry during a full stop is held at expiry, not left counting down");
+
+        scenario.Autonomy.RestoreFromSafety("lead-1", scenario.Minute);
+        scenario.Autonomy.IsGenerationStopped.Should().BeFalse("precondition: the restore actually lifted the full stop");
+        scenario.Autonomy.SwampedModeEnabled.Should().BeTrue("precondition: swamped mode survives the restore, so auto-send is re-armed");
+
+        // A few post-restore minutes with the sweep running every minute - short of a NEW burst's own 5-minute countdown,
+        // so any publish here could only be the stale pre-stop burst.
+        await PlayAsync(scenario, scenario.Minute + DelayedAutoCountdownGuard);
+
+        scenario.Publisher.Published.Should().BeEmpty(
+            "a draft held during the full stop must never auto-send after the restore, even under swamped mode");
+        (await scenario.ReviewItemsAsync()).Single(i => i.DraftId == inFlight.DraftId).Disposition.Should().Be(
+            DraftDisposition.Held, "the held item stays held for a human after the restore");
     }
 
     [Fact]
