@@ -28,6 +28,7 @@ using Pulse.WebApi.Features.Social.Pins;            // demo-feedback 04
 using Pulse.WebApi.Features.WhiteNoise;             // demo-feedback 05
 using Pulse.WebApi.Features.ExerciseLifecycleAdmin;
 using Pulse.WebApi.Features.Media; // demo-polish BM
+using Pulse.WebApi.Features.Ops.Build;            // #617
 using Pulse.WebApi.Features.Ops.Bootstrap;
 using Pulse.WebApi.Features.Ops.EngineContentSeed;
 using Pulse.WebApi.Features.Ops.OrgAdminSeed;
@@ -415,7 +416,7 @@ app.UseRateLimiter();
 // credential by construction, and a probe that 401s reads as an unhealthy instance to the orchestrator.
 app.MapHealthChecks("/health", new HealthCheckOptions { Predicate = _ => false }).AllowAnonymousPreAuth();
 app.MapHealthChecks("/health/ready").AllowAnonymousPreAuth();
-Pulse.WebApi.Features.Ops.Build.BuildInfoEndpoints.MapBuildInfoEndpoints(app);
+app.MapBuildInfoEndpoints(); // #617 GET /api/build
 
 // Attribute-routed controllers. POST /api/telemetry is the only one today, and it inherits the default-deny
 // fallback policy above — the surface a minimal-API endpoint filter could never have gated (identity-auth-

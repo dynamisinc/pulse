@@ -31,16 +31,17 @@ using Pulse.WebApi.Features.Identity.Sessions;
 /// probes, so the route is on <see cref="PreAuthAllowlist"/> and marked
 /// <see cref="SessionAuthorizationExtensions.AllowAnonymousPreAuth{TBuilder}"/>. It discloses only a commit id of
 /// a repository whose deploys are already public in the Actions log: no version string, environment name,
-/// configuration, exercise data or scope. It reads nothing from the request and touches no database itself.
+/// configuration, exercise data or scope. The handler reads nothing from the request and queries nothing itself,
+/// though the pipeline's session and exercise-resolution middleware still run on the route as on any API path.
 /// </para>
 /// <para>
 /// <b>No caching.</b> The response carries <c>Cache-Control: no-store</c> so no proxy or front end can hand the
 /// smoke a stale commit, the same false-green this endpoint exists to prevent.
 /// </para>
 /// <para>
-/// No rate limiter: like <c>/health</c>, the handler returns a value computed once per process, so a flood costs
-/// no more than a flood of liveness probes, and every existing limiter policy is a login or ops policy whose
-/// budget this route should not share.
+/// No rate limiter: the handler returns a value captured once at startup, so its own cost is negligible; a flood
+/// still pays for the shared session and exercise-resolution middleware, as any anonymous API request does. Every
+/// existing limiter policy is a login or ops policy whose budget this route should not share.
 /// </para>
 /// </remarks>
 public static class BuildInfoEndpoints
@@ -51,9 +52,6 @@ public static class BuildInfoEndpoints
     /// <summary>The value returned when the running assembly carries no source revision.</summary>
     public const string UnknownCommit = "unknown";
 
-    /// <summary>The commit, read once per process: the attribute cannot change while the process runs.</summary>
-    private static readonly string RunningCommit = ReadRunningCommit();
-
     /// <summary>Maps <c>GET /api/build</c>.</summary>
     /// <param name="endpoints">The route builder to map onto.</param>
     /// <returns>The same route builder, for chaining.</returns>
@@ -61,8 +59,13 @@ public static class BuildInfoEndpoints
     {
         ArgumentNullException.ThrowIfNull(endpoints);
 
+        // Captured EAGERLY at startup, not lazily on the first request: the deploy overwrites the DLLs in place on a
+        // single instance, so a lazy read in a process that started on the OLD image could pick up the NEW image's
+        // attribute and report a false green (#617 review W1).
+        var runningCommit = ReadRunningCommit();
+
         // PRE-AUTH (PreAuthAllowlist, #617): the deploy smoke presents no credential, like the health probes.
-        endpoints.MapGet(Route, GetBuildInfo)
+        endpoints.MapGet(Route, (HttpContext httpContext) => GetBuildInfo(httpContext, runningCommit))
             .AllowAnonymousPreAuth();
 
         return endpoints;
@@ -91,10 +94,10 @@ public static class BuildInfoEndpoints
     }
 
     /// <summary>Writes the running commit with <c>Cache-Control: no-store</c>.</summary>
-    private static IResult GetBuildInfo(HttpContext httpContext)
+    private static IResult GetBuildInfo(HttpContext httpContext, string runningCommit)
     {
         httpContext.Response.Headers.CacheControl = "no-store";
-        return Results.Ok(new BuildInfoDto { Commit = RunningCommit });
+        return Results.Ok(new BuildInfoDto { Commit = runningCommit });
     }
 
     /// <summary>Reads this assembly's informational version; any failure is <see cref="UnknownCommit"/>.</summary>

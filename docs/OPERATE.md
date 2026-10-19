@@ -19,8 +19,10 @@ never first on `main`.
   `global.json` or `pulse.slnx` ([`deploy-backend.yml`](../.github/workflows/deploy-backend.yml)) →
   App Service (`app-pulse-api-uat-dynamis`), applying the EF migration to `sqldb-pulse-uat` as an
   idempotent script **before** the new code is published. Its first post-deploy smoke polls
-  `GET /api/build` (anonymous, returns only `{"commit":"<sha>"}`) for up to ~5 min until it reports the
-  run's own commit, so a green deploy means the **new** build is serving, not just that `/health` answers.
+  `GET /api/build` (anonymous, returns only `{"commit":"<sha>"}`) for 30 attempts (~5 min, up to ~10 worst
+  case) until it reports the run's own commit, so a green deploy means the **new** build is serving, not just
+  that `/health` answers. This assumes the single-instance plan: if the App Service scales out, one matching
+  answer proves only the instance that served it.
 - **Infrastructure:** manual `workflow_dispatch`
   ([`deploy-infrastructure.yml`](../.github/workflows/deploy-infrastructure.yml)), with `what_if` preview.
 
