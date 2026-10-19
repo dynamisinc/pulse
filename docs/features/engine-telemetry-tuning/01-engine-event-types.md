@@ -214,6 +214,14 @@ exactly like the existing `engine.swamped-mode.turned-off` flip. Constants: `Eng
 - **Why not in `EngineEventTypes`:** these are staff-change records (system channel + org audit) and share the
   dotted-kebab naming of the pre-existing `engine.swamped-mode.turned-off` they extend; `EngineEventTypes` is the
   engine-loop taxonomy (lower_snake, `actor.kind: "engine"`) pinned by `EngineEventTaxonomyTests`.
+- **Consumers:** no report or export filters engine events by type today (`ExerciseReportService` and
+  `PostExportService` read only their own `export.*` types), so nothing had to pick these up. Any future
+  consumer that wants "every engine lever change" must read **both** families: the `engine.*` lower_snake loop
+  taxonomy and these dotted-kebab staff-change records.
+- **Coexists with the client emits:** the console still writes its own `engine.swamped_mode_changed` and
+  `engine.autonomy_changed` (`useSwampedMode.ts`, `useEngineControl.ts`) through `POST /api/telemetry`. These server
+  records are the server-timed, session-attributed companions (the `engine.autonomy_default_changed` precedent), not
+  replacements; a consumer counting lever changes should count the server records, not both.
 - **Tests:** `EngineReviewEndpointsTests.EveryRoute_ASpoofedBodyActingHumanId_IsNotRecorded_TheSessionPersonIs`
   (positive half for the three levers) and the `EngineReviewEndpointsTests.SteeringLevers.cs` lever tests
   (Docker-gated); `EngineSteeringLeverRecordsTests` (vocabulary + payload shapes, `[Fact]`).
