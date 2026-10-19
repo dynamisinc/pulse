@@ -79,7 +79,7 @@ describe('ExerciseContextProvider', () => {
     await waitFor(() => expect(screen.getByTestId('probe')).toBeInTheDocument())
 
     expect(screen.getByTestId('exerciseId')).toHaveTextContent(FIXTURE.exerciseId)
-    expect(screen.getByTestId('exerciseName')).toHaveTextContent(FIXTURE.exerciseName)
+    expect(screen.getByTestId('exerciseName')).toHaveTextContent(FIXTURE.exerciseName ?? '')
     expect(screen.getByTestId('timeZone')).toHaveTextContent(FIXTURE.timeZone)
     expect(screen.getByTestId('status')).toHaveTextContent(FIXTURE.status)
     expect(mockResolve).toHaveBeenCalledTimes(1)

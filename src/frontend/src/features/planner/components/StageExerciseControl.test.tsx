@@ -26,6 +26,11 @@ vi.mock('@/core/config/mockData', () => ({
   USE_MOCK_DATA: false,
   warnIfMockDataActive: () => undefined,
 }))
+vi.mock('@/features/staff/hooks/useActiveExerciseInternalName', () => ({
+  // Staff world shows the INTERNAL name (story 09), never the participant scope name.
+  useActiveExerciseInternalName: () => 'Harbor Storm',
+}))
+
 vi.mock('@/core/exerciseContext', async importOriginal => ({
   ...(await importOriginal<typeof import('@/core/exerciseContext')>()),
   useExerciseContext: () => ({ exerciseId: 'ex-1', status: 'build', exerciseName: 'Harbor Storm' }),

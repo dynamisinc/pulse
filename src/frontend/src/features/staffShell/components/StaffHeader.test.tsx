@@ -92,6 +92,26 @@ function render(ui: ReactElement) {
   return rtlRender(ui, { wrapper: Wrapper })
 }
 
+// The identity badge's name is the INTERNAL name from the staff assignments (story 09), not the
+// scope's participant-facing name, so the header's assignments must carry the active exercise.
+vi.mock('@/features/staff/services/staffAssignmentsService', async importOriginal => {
+  const actual =
+    await importOriginal<typeof import('@/features/staff/services/staffAssignmentsService')>()
+  return {
+    ...actual,
+    getStaffAssignments: () =>
+      Promise.resolve([
+        {
+          exerciseId: 'ex-test-staff-header-0001',
+          exerciseName: 'Bay Shield 2026',
+          role: 'controller',
+          personId: 'p-1',
+          isLead: false,
+        },
+      ]),
+  }
+})
+
 const BASE_SCOPE: ExerciseScope = {
   exerciseId: 'ex-test-staff-header-0001',
   exerciseName: 'Bay Shield 2026',
@@ -118,7 +138,7 @@ afterEach(() => {
 })
 
 describe('StaffHeader — renders every required region (AC1)', () => {
-  it('renders the brand lockup, identity badge, dual clock pair, state pill, FOUO tag, and preview button', () => {
+  it('renders the brand lockup, identity badge, dual clock pair, state pill, FOUO tag, and preview button', async () => {
     // The preview control is HANDLER-GATED (see the header describe below), so
     // a render that expects it must wire the handler that gives it a behavior.
     render(<StaffHeader surfaceName="Controller Console" onTogglePreview={vi.fn()} />)
@@ -128,7 +148,7 @@ describe('StaffHeader — renders every required region (AC1)', () => {
     expect(within(lockup).getByText('Controller Console')).toBeInTheDocument()
 
     const badge = screen.getByTestId('staff-header-identity-badge')
-    expect(within(badge).getByText('Bay Shield 2026')).toBeInTheDocument()
+    expect(await within(badge).findByText('Bay Shield 2026')).toBeInTheDocument()
     // Exact role/cell string (not a loose substring match) — pins the
     // `${role} · ${cell}` join format the seam (staffHeaderMocks.ts) feeds it.
     // The cell is the controller identity's call sign verbatim (one source).
@@ -436,7 +456,7 @@ describe('StaffHeader — staff world (thumbnail-distinguishability, XC-002)', (
 })
 
 describe('StaffHeader — primary-emphasis text INHERITS its color rather than hardcoding one (module-header decision 2)', () => {
-  it('the PULSE lockup, identity-badge exercise name, and scenario-clock digits pick up an ancestor text color instead of a fixed one', () => {
+  it('the PULSE lockup, identity-badge exercise name, and scenario-clock digits pick up an ancestor text color instead of a fixed one', async () => {
     // StaffShellFrame (story 05) is the one that actually paints the navy
     // background + light `textPrimary` on the real header element — this
     // test proves StaffHeader never shortcuts that by hardcoding its own
@@ -453,7 +473,7 @@ describe('StaffHeader — primary-emphasis text INHERITS its color rather than h
     )
 
     const pulseLabel = screen.getByText('PULSE')
-    const exerciseNameLabel = screen.getByText('Bay Shield 2026')
+    const exerciseNameLabel = await screen.findByText('Bay Shield 2026')
     const scenarioClockDigits = screen
       .getByTestId('staff-header-scenario-clock')
       .querySelector('[aria-labelledby="staff-header-scenario-clock-label"]')
