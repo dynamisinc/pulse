@@ -103,6 +103,7 @@ function serverSettings(): ExerciseSettings {
     exerciseId: ACTIVE_ID,
     name: server.name,
     worldName: 'Metro Coast',
+    participantName: 'Coast Exercise',
     locale: null,
     timeZone: 'UTC',
     scheduledStartAt: null,

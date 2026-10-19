@@ -158,6 +158,7 @@ const SETTINGS: ExerciseSettings = {
   exerciseId: '6f0a1c52-9d4b-4f3a-8a01-2c7d9e5b1a44',
   name: 'Atlanta CIE 2026',
   worldName: 'Metro Atlanta',
+  participantName: 'Atlanta Coastal Exercise',
   locale: null,
   timeZone: 'America/New_York',
   scheduledStartAt: '2026-03-01T13:00:00.0000000+00:00',

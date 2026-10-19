@@ -13,6 +13,7 @@ using Microsoft.EntityFrameworkCore;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.ExerciseConfiguration;
 using Pulse.WebApi.Tests.Data;
+using Pulse.WebApi.Tests.Features.ExerciseConfiguration.Lifecycle;
 using Xunit;
 
 /// <summary>
@@ -142,6 +143,7 @@ public sealed class ExerciseSettingsEndpointsTests
         {
             name = "Atlanta CIE 2026",
             worldName = "Metro Atlanta",
+            participantName = "Harbor City Exercise",
             locale = "en-US",
             timeZone = "America/New_York",
             scheduledStartAt = "2026-03-01T13:00:00Z",
@@ -161,6 +163,7 @@ public sealed class ExerciseSettingsEndpointsTests
         var reloaded = await GetOkAsync(host);
         reloaded.GetProperty("name").GetString().Should().Be("Atlanta CIE 2026");
         reloaded.GetProperty("worldName").GetString().Should().Be("Metro Atlanta");
+        reloaded.GetProperty("participantName").GetString().Should().Be("Harbor City Exercise");
         reloaded.GetProperty("locale").GetString().Should().Be("en-US");
         reloaded.GetProperty("timeZone").GetString().Should().Be("America/New_York");
         reloaded.GetProperty("scheduledStartAt").GetString().Should().StartWith("2026-03-01T13:00:00");
@@ -185,6 +188,7 @@ public sealed class ExerciseSettingsEndpointsTests
         await SeedExerciseAsync(exerciseId, e =>
         {
             e.WorldName = "Old World";
+            e.ParticipantName = "Old Participant Name";
             e.BrandName = "Old Brand";
             e.EnabledChannels = "social,news";
         });
@@ -198,6 +202,7 @@ public sealed class ExerciseSettingsEndpointsTests
 
         var stored = await LoadAsync(exerciseId);
         stored.WorldName.Should().BeNull();
+        stored.ParticipantName.Should().BeNull("participantName is full-replace like every other field: absent clears it");
         stored.BrandName.Should().BeNull();
         stored.EnabledChannels.Should().BeNull();
 
@@ -328,6 +333,69 @@ public sealed class ExerciseSettingsEndpointsTests
         (await LoadAsync(exerciseId)).WorldName.Should().BeNull();
     }
 
+    /// <summary>exercise-build-golive/09: the participant-facing name is bounded at the 80-character column width.</summary>
+    [RequiresDockerFact]
+    public async Task Put_OverLengthParticipantName_Returns400_AndEightyCharactersIsAccepted()
+    {
+        var exerciseId = Guid.NewGuid();
+        await SeedExerciseAsync(exerciseId, e => e.ParticipantName = "Kept Name");
+
+        await using var host = await StartHostAsync(exerciseId);
+        var tooLong = await host.Client.PutAsJsonAsync(new Uri(Route, UriKind.Relative), new
+        {
+            name = "Long",
+            timeZone = "UTC",
+            participantName = new string('p', ExerciseSettingsFieldRules.MaxParticipantNameLength + 1),
+        });
+
+        tooLong.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await tooLong.Content.ReadAsStringAsync()).Should().Contain(
+            "participantName", "the 400 names the offending field, in the existing error shape");
+        (await LoadAsync(exerciseId)).ParticipantName.Should().Be("Kept Name", "a rejected write changes nothing");
+
+        var atBound = await host.Client.PutAsJsonAsync(new Uri(Route, UriKind.Relative), new
+        {
+            name = "Long",
+            timeZone = "UTC",
+            participantName = new string('p', ExerciseSettingsFieldRules.MaxParticipantNameLength),
+        });
+
+        atBound.StatusCode.Should().Be(HttpStatusCode.OK);
+        (await LoadAsync(exerciseId)).ParticipantName.Should().HaveLength(80);
+    }
+
+    /// <summary>exercise-build-golive/09: the participant-facing name is trimmed, blank clears it, markup is stripped.</summary>
+    [RequiresDockerTheory]
+    [InlineData("  Harbor City Exercise  ", "Harbor City Exercise")]
+    [InlineData("   ", null)]
+    [InlineData("", null)]
+    [InlineData("<script>alert('x')</script>Harbor City", "Harbor City")]
+    public async Task Put_ParticipantName_IsTrimmedSanitizedAndBlankClearsIt(string raw, string? expected)
+    {
+        var exerciseId = Guid.NewGuid();
+        await SeedExerciseAsync(exerciseId, e => e.ParticipantName = "Previous");
+
+        await using var host = await StartHostAsync(exerciseId);
+        var response = await host.Client.PutAsJsonAsync(new Uri(Route, UriKind.Relative), new
+        {
+            name = "Trim",
+            timeZone = "UTC",
+            participantName = raw,
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        (await LoadAsync(exerciseId)).ParticipantName.Should().Be(expected);
+        var reloaded = await GetOkAsync(host);
+        if (expected is null)
+        {
+            reloaded.GetProperty("participantName").ValueKind.Should().Be(JsonValueKind.Null);
+        }
+        else
+        {
+            reloaded.GetProperty("participantName").GetString().Should().Be(expected);
+        }
+    }
+
     [RequiresDockerFact]
     public async Task Put_MissingName_Returns400()
     {
@@ -422,6 +490,7 @@ public sealed class ExerciseSettingsEndpointsTests
         {
             e.Name = "Exercise B";
             e.WorldName = "B World";
+            e.ParticipantName = "B Participant Name";
         });
 
         await using var host = await StartHostAsync(exerciseA);
@@ -433,6 +502,7 @@ public sealed class ExerciseSettingsEndpointsTests
                 name = "Hijacked",
                 timeZone = "UTC",
                 worldName = "Hijacked World",
+                participantName = "Hijacked Participant Name",
             }),
             Encoding.UTF8,
             "application/json");
@@ -444,10 +514,12 @@ public sealed class ExerciseSettingsEndpointsTests
         var b = await LoadAsync(exerciseB);
         b.Name.Should().Be("Exercise B", "exercise B must be untouched by a write scoped to A");
         b.WorldName.Should().Be("B World");
+        b.ParticipantName.Should().Be("B Participant Name");
 
         var a = await LoadAsync(exerciseA);
         a.Name.Should().Be("Hijacked", "the write landed on the SERVER-resolved exercise, A");
         a.WorldName.Should().Be("Hijacked World");
+        a.ParticipantName.Should().Be("Hijacked Participant Name");
     }
 
     [RequiresDockerFact]
@@ -460,6 +532,7 @@ public sealed class ExerciseSettingsEndpointsTests
         {
             e.Name = "Exercise B";
             e.WorldName = "B Secret World";
+            e.ParticipantName = "B Secret Participant Name";
         });
 
         await using var host = await StartHostAsync(exerciseA);
@@ -469,6 +542,7 @@ public sealed class ExerciseSettingsEndpointsTests
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         body.Should().Contain("Exercise A");
         body.Should().NotContain("B Secret World", "Exercise is unfiltered by the central query filter — the service's own scoping is the guard");
+        body.Should().NotContain("B Secret Participant Name");
     }
 
     // ---- XC-004 telemetry ------------------------------------------------------------------------
@@ -485,6 +559,7 @@ public sealed class ExerciseSettingsEndpointsTests
             name = "Telemetered",
             timeZone = "UTC",
             worldName = "Telemetry World",
+            participantName = "Telemetry Participant Name",
         });
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -506,6 +581,10 @@ public sealed class ExerciseSettingsEndpointsTests
         settingsEvent.Target!.EntityType.Should().Be("exercise");
         settingsEvent.Target.EntityId.Should().Be(exerciseId.ToString());
         settingsEvent.Payload.Should().Contain("WorldName", "the opaque payload records which settings changed");
+        settingsEvent.Payload.Should().Contain(
+            "ParticipantName", "exercise-build-golive/09: a participant-name change rides the same changed-fields event");
+        settingsEvent.Payload.Should().NotContain(
+            "Telemetry Participant Name", "the payload lists changed FIELD names, never their values");
     }
 
     [RequiresDockerFact]

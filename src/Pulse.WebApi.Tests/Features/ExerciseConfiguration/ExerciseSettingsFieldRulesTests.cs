@@ -243,6 +243,40 @@ public sealed class ExerciseSettingsFieldRulesTests
             "the sanitizer STRIPS markup and never entity-encodes — encoding would double-encode at the React text node");
     }
 
+    /// <summary>exercise-build-golive/09: the participant-facing name follows the worldName rule with an 80-char bound.</summary>
+    [Theory]
+    [InlineData(null, null)]
+    [InlineData("", null)]
+    [InlineData("   ", null)]
+    [InlineData("  Harbor City  ", "Harbor City")]
+    [InlineData("<b>Harbor</b> City", "Harbor City")]
+    public void TryNormalizeParticipantName_TrimsSanitizesAndBlankIsNull(string? raw, string? expected)
+    {
+        var ok = ExerciseSettingsFieldRules.TryNormalizeParticipantName(raw, out var participantName, out var error);
+
+        ok.Should().BeTrue(error);
+        participantName.Should().Be(expected);
+    }
+
+    [Fact]
+    public void TryNormalizeParticipantName_BoundsAtEightyCharacters_AndRejectsAllMarkup()
+    {
+        ExerciseSettingsFieldRules.MaxParticipantNameLength.Should().Be(80, "the bound is the column width");
+
+        ExerciseSettingsFieldRules.TryNormalizeParticipantName(new string('p', 80), out var atBound, out _)
+            .Should().BeTrue();
+        atBound.Should().HaveLength(80);
+
+        ExerciseSettingsFieldRules.TryNormalizeParticipantName(new string('p', 81), out var tooLong, out var error)
+            .Should().BeFalse();
+        tooLong.Should().BeNull();
+        error.Should().Contain("participantName");
+
+        ExerciseSettingsFieldRules.TryNormalizeParticipantName("<script></script>", out _, out var markupError)
+            .Should().BeFalse("an all-markup value is refused rather than stored as an empty name");
+        markupError.Should().Contain("participantName");
+    }
+
     [Fact]
     public void TryNormalizeBrandName_RejectsAValueThatIsEntirelyMarkup()
     {
@@ -323,6 +357,7 @@ public sealed class ExerciseSettingsFieldRulesTests
             {
               "name": "Atlanta CIE",
               "worldName": "Metro Atlanta",
+              "participantName": "Harbor City Exercise",
               "locale": "en-US",
               "timeZone": "America/New_York",
               "scheduledStartAt": "2026-03-01T13:00:00Z",
@@ -341,6 +376,7 @@ public sealed class ExerciseSettingsFieldRulesTests
 
         request.Should().NotBeNull();
         request!.Name.Should().Be("Atlanta CIE");
+        request.ParticipantName.Should().Be("Harbor City Exercise");
         request.TimeZone.Should().Be("America/New_York");
         request.ScheduledEndAt.Should().BeNull();
         request.EnabledChannels.Should().Equal("social", "news");
@@ -369,6 +405,7 @@ public sealed class ExerciseSettingsFieldRulesTests
             TimeZone = "America/New_York",
             Status = "live",
             WorldName = "Metro Atlanta",
+            ParticipantName = "Harbor City Exercise",
             ScheduledStartAt = new DateTimeOffset(2026, 3, 1, 13, 0, 0, TimeSpan.Zero),
             EnabledChannels = "social,news",
             BrandPrimary = "#123456",
@@ -380,7 +417,7 @@ public sealed class ExerciseSettingsFieldRulesTests
 
         foreach (var key in new[]
         {
-            "exerciseId", "name", "worldName", "locale", "timeZone", "scheduledStartAt", "scheduledEndAt",
+            "exerciseId", "name", "worldName", "participantName", "locale", "timeZone", "scheduledStartAt", "scheduledEndAt",
             "channels", "brandName", "brandPrimary", "brandAccent", "brandSurface", "brandOnSurface", "outletNames",
         })
         {

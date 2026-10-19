@@ -60,7 +60,11 @@ export type RosterCardsRequest =
 
 /** `POST /api/staff/roster/cards` 200 body. */
 export interface RosterCardsDto {
-  exerciseName: string
+  /**
+   * The PARTICIPANT-facing exercise name, or null when none is set (story 09). Cards print the
+   * brand only on null: no placeholder, never the internal name.
+   */
+  exerciseName: string | null
   cards: RosterCardDto[]
   skipped: RosterCardSkippedDto[]
 }

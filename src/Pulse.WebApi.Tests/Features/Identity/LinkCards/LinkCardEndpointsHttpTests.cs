@@ -39,7 +39,7 @@ public sealed class LinkCardEndpointsHttpTests
     [RequiresDockerFact]
     public async Task AController_Gets200_InTheFrozenShape_WithNoStore()
     {
-        var exercise = await _world.SeedExerciseAsync(name: "Coastal Surge 2026");
+        var exercise = await _world.SeedExerciseAsync(name: "HURREX internal", participantName: "Coastal Surge 2026");
         var staff = await _world.SeedStaffAsync((exercise, "controller"));
         var jane = await _world.SeedParticipantAsync(exercise, "Jane Smith", agency: "Fulco County EM", jobRole: "EOC Liaison");
         var madonna = await _world.SeedParticipantAsync(exercise, "Madonna");
@@ -57,7 +57,8 @@ public sealed class LinkCardEndpointsHttpTests
         using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         var root = body.RootElement;
         root.EnumerateObject().Select(p => p.Name).Should().BeEquivalentTo(["exerciseName", "cards", "skipped"]);
-        root.GetProperty("exerciseName").GetString().Should().Be("Coastal Surge 2026");
+        root.GetProperty("exerciseName").GetString().Should().Be(
+            "Coastal Surge 2026", "the sheet header is the participant-facing name (§8.4), never the internal one");
 
         var cards = root.GetProperty("cards").EnumerateArray().ToList();
         cards.Select(c => c.GetProperty("name").GetString()).Should().Equal(["Jane Smith", "Madonna"], "ordered by name");
@@ -441,7 +442,7 @@ public sealed class LinkCardEndpointsHttpTests
         var root = body.RootElement;
         return new RosterCardsDto
         {
-            ExerciseName = root.GetProperty("exerciseName").GetString()!,
+            ExerciseName = root.GetProperty("exerciseName").GetString(),
             Cards = root.GetProperty("cards").EnumerateArray().Select(c => new RosterCardDto
             {
                 ParticipantId = c.GetProperty("participantId").GetString()!,

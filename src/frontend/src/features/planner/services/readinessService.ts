@@ -181,8 +181,8 @@ const MOCK_READINESS: ExerciseReadiness = {
     {
       id: 'participant-name',
       label: 'Participant-facing exercise name is set',
-      status: 'notChecked',
-      detail: 'Not checked yet - arrives with story 09',
+      status: 'open',
+      detail: 'No participant-facing name is set. Participants never see the internal name.',
     },
     {
       id: 'participant-access',

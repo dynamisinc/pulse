@@ -171,6 +171,7 @@ import {
   MAX_NAME_LENGTH,
   MAX_OUTLET_NAME_LENGTH,
   MAX_TIME_ZONE_LENGTH,
+  MAX_PARTICIPANT_NAME_LENGTH,
   MAX_WORLD_NAME_LENGTH,
   type ExerciseSettings,
   type ExerciseSettingsError,
@@ -189,6 +190,7 @@ import {
 interface ExerciseSettingsFormValues {
   readonly name: string
   readonly worldName: string
+  readonly participantName: string
   readonly locale: string
   readonly timeZone: string
   /** `datetime-local` value in UTC (`yyyy-MM-ddTHH:mm:ss`), or `''`. */
@@ -219,6 +221,7 @@ const FIELD_SECTIONS: Readonly<
 > = {
   name: 'identity',
   worldName: 'identity',
+  participantName: 'identity',
   locale: 'identity',
   timeZone: 'identity',
   scheduledStartAt: 'identity',
@@ -292,6 +295,7 @@ function toFormValues(settings: ExerciseSettings): ExerciseSettingsFormValues {
   return {
     name: settings.name,
     worldName: toText(settings.worldName),
+    participantName: toText(settings.participantName),
     locale: toText(settings.locale),
     timeZone: settings.timeZone,
     scheduledStartAt: toDateTimeInput(settings.scheduledStartAt),
@@ -323,6 +327,7 @@ function toUpdate(values: ExerciseSettingsFormValues): ExerciseSettingsUpdate {
   return {
     name: values.name.trim(),
     worldName: fromText(values.worldName),
+    participantName: fromText(values.participantName),
     locale: fromText(values.locale),
     timeZone: values.timeZone.trim(),
     scheduledStartAt: fromDateTimeInput(values.scheduledStartAt),
@@ -398,6 +403,13 @@ function validate(values: ExerciseSettingsFormValues): FieldErrors {
 
   const worldNameError = lengthError(values.worldName, MAX_WORLD_NAME_LENGTH, 'The world name')
   if (worldNameError) errors.worldName = worldNameError
+
+  const participantNameError = lengthError(
+    values.participantName,
+    MAX_PARTICIPANT_NAME_LENGTH,
+    'The participant-facing name',
+  )
+  if (participantNameError) errors.participantName = participantNameError
 
   const localeError = lengthError(values.locale, MAX_LOCALE_LENGTH, 'The locale')
   if (localeError) errors.locale = localeError
@@ -658,6 +670,17 @@ function ExerciseSettingsForm({
               value={values.name}
               onChange={event => setField('name', event.target.value)}
               slotProps={{ htmlInput: { maxLength: MAX_NAME_LENGTH } }}
+            />
+            <CobraTextField
+              {...textFieldProps(
+                'participantName',
+                'The name participants see for this exercise. They never see the internal '
+                + 'exercise name. Required before the exercise can go live.',
+              )}
+              label="Participant-facing name"
+              value={values.participantName}
+              onChange={event => setField('participantName', event.target.value)}
+              slotProps={{ htmlInput: { maxLength: MAX_PARTICIPANT_NAME_LENGTH } }}
             />
             <CobraTextField
               {...textFieldProps(

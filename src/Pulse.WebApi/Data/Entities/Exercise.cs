@@ -295,4 +295,20 @@ public sealed class Exercise : IOrganizationOwned
     /// <c>live</c>. Staff-world only (XC-002) — never projected onto a participant surface.
     /// </summary>
     public DateTimeOffset? FirstLiveAt { get; set; }
+
+    // ============================================================================================
+    // exercise-build-golive/09 (#376, ADMIN-IDENTITY-MODEL §8.4, the A3 migration).
+    // ============================================================================================
+
+    /// <summary>The column width of <see cref="ParticipantName"/> (and the settings validation bound).</summary>
+    public const int MaxParticipantNameLength = 80;
+
+    /// <summary>
+    /// The participant-facing exercise name (§8.4): the ONLY exercise name a participant surface (scope
+    /// projection, sign-in/join pages, printed cards, link email) may show. Nullable with <b>no fallback</b> to
+    /// the internal <see cref="Name"/>, which can leak the scenario: when unset, participant surfaces show the
+    /// brand alone and the readiness item <c>participant-name</c> blocks staging. Planner-edited through the
+    /// settings PUT (sanitized, at most <see cref="MaxParticipantNameLength"/> characters).
+    /// </summary>
+    public string? ParticipantName { get; set; }
 }

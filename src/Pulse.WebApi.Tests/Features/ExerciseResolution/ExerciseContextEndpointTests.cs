@@ -36,9 +36,11 @@ public class ExerciseContextEndpointTests
         var hostB = $"host-b-{exerciseB:N}.example.com";
 
         await SeedExerciseAsync(
-            exerciseA, hostA, name: "Atlanta Hurricane Cascade", timeZone: "America/Chicago", status: "scheduled");
+            exerciseA, hostA, name: "HURREX internal A", timeZone: "America/Chicago", status: "scheduled",
+            participantName: "Atlanta Hurricane Cascade");
         await SeedExerciseAsync(
-            exerciseB, hostB, name: "Coastal Cascade Exercise", timeZone: "America/New_York", status: "active");
+            exerciseB, hostB, name: "HURREX internal B", timeZone: "America/New_York", status: "active",
+            participantName: "Coastal Cascade Exercise");
 
         await using var testHost = await ExerciseResolutionTestHost.StartAsync(_fixture.ConnectionString!);
         using var client = testHost.CreateClientForHost(hostA);
@@ -55,13 +57,41 @@ public class ExerciseContextEndpointTests
 
         root.GetProperty("exerciseId").GetString().Should().Be(
             exerciseA.ToString(), "the returned exerciseId must be the HOST-resolved exercise, never client-influenced");
-        root.GetProperty("exerciseName").GetString().Should().Be("Atlanta Hurricane Cascade");
+        root.GetProperty("exerciseName").GetString().Should().Be(
+            "Atlanta Hurricane Cascade", "exerciseName is the participant-facing name (§8.4)");
         root.GetProperty("timeZone").GetString().Should().Be("America/Chicago");
         root.GetProperty("status").GetString().Should().Be(
             "scheduled", "status must pass through verbatim (lowercase ExerciseStatus vocabulary), not a hardcoded default like 'active'");
 
         body.Should().NotContain(exerciseB.ToString(), "exercise B's id must never appear in exercise A's host-resolved response");
         body.Should().NotContain("Coastal Cascade", "exercise B's name must never appear in exercise A's host-resolved response");
+        body.Should().NotContain("HURREX", "no internal exercise name (A's or B's) ever reaches the participant-facing scope");
+    }
+
+    /// <summary>
+    /// exercise-build-golive/09 (§8.4): an exercise with no participant-facing name resolves with
+    /// <c>exerciseName: null</c> over the real pipeline — the key present, the value null, and the internal name nowhere
+    /// in the body (no fallback).
+    /// </summary>
+    [RequiresDockerFact]
+    public async Task ResolvedHost_WithNoParticipantName_ReturnsANullExerciseName_NeverTheInternalName()
+    {
+        var exerciseA = Guid.NewGuid();
+        var hostA = $"host-a-{exerciseA:N}.example.com";
+        var sentinel = $"INTERNAL-{Guid.NewGuid():N}";
+        await SeedExerciseAsync(exerciseA, hostA, name: sentinel, timeZone: "America/Chicago", status: "build");
+
+        await using var testHost = await ExerciseResolutionTestHost.StartAsync(_fixture.ConnectionString!);
+        using var client = testHost.CreateClientForHost(hostA);
+
+        var response = await client.GetAsync(new Uri("/api/exercise-context", UriKind.Relative));
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var body = await response.Content.ReadAsStringAsync();
+        using var document = JsonDocument.Parse(body);
+        document.RootElement.GetProperty("exerciseName").ValueKind.Should().Be(
+            JsonValueKind.Null, "an unset participant-facing name is a present null, with no fallback");
+        body.Should().NotContain(sentinel, "the internal name never reaches the participant-facing scope (§8.4)");
     }
 
     [RequiresDockerFact]
@@ -83,7 +113,8 @@ public class ExerciseContextEndpointTests
             "an unresolved host must fail closed with 404 — never a 200 with empty/default data, and never exercise A's data either");
     }
 
-    private async Task SeedExerciseAsync(Guid id, string hostname, string name, string timeZone, string status)
+    private async Task SeedExerciseAsync(
+        Guid id, string hostname, string name, string timeZone, string status, string? participantName = null)
     {
         await using var seed = _fixture.CreateContext();
         seed.Exercises.Add(new Exercise
@@ -94,6 +125,7 @@ public class ExerciseContextEndpointTests
             Hostname = hostname,
             TimeZone = timeZone,
             Status = status,
+            ParticipantName = participantName,
         });
         await seed.SaveChangesAsync();
     }

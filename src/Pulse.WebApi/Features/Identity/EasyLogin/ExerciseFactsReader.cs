@@ -60,12 +60,14 @@ public sealed class ExerciseFactsReader
                 exercise.Status,
                 exercise.OrganizationId,
                 exercise.CurrentScenarioTime,
+                exercise.ParticipantName,
             })
             .FirstOrDefaultAsync(cancellationToken);
 
         return row is null
             ? null
-            : new ExerciseFacts(row.Name, row.TimeZone, row.Status, row.OrganizationId, row.CurrentScenarioTime);
+            : new ExerciseFacts(
+                row.Name, row.TimeZone, row.Status, row.OrganizationId, row.CurrentScenarioTime, row.ParticipantName);
     }
 }
 
@@ -73,14 +75,22 @@ public sealed class ExerciseFactsReader
 /// What the easy-login stories need to know about the exercise a request is scoped to. Server-side only: never
 /// serialized as-is (the tenant id must not reach a wire shape, XC-002).
 /// </summary>
-/// <param name="Name">The exercise display name (the card sheet's <c>exerciseName</c>).</param>
+/// <param name="Name">
+/// The INTERNAL (staff-facing) exercise name. Staff-only readers (exports, reports) use it; it must never reach a
+/// participant-facing output (exercise-build-golive/09, §8.4), which use <paramref name="ParticipantName"/>.
+/// </param>
 /// <param name="TimeZone">The stored IANA zone id, verbatim (resolve it with <see cref="ExerciseDay.ResolveTimeZone"/>; blank or unknown means UTC).</param>
 /// <param name="Status">The stored lifecycle status, verbatim (the <c>ExerciseLifecycleStates</c> vocabulary).</param>
 /// <param name="OrganizationId">The owning customer tenant, for an <c>.InOrganization(...)</c>-bounded staff read.</param>
 /// <param name="StoredScenarioTime">The persisted scenario instant, the telemetry fallback after the live exercise clock.</param>
+/// <param name="ParticipantName">
+/// The participant-facing exercise name (exercise-build-golive/09, §8.4), or <c>null</c> when unset: the card sheet's
+/// <c>exerciseName</c> and the link email's subject. There is NO fallback to <paramref name="Name"/>.
+/// </param>
 public sealed record ExerciseFacts(
     string Name,
     string TimeZone,
     string Status,
     Guid OrganizationId,
-    DateTimeOffset? StoredScenarioTime);
+    DateTimeOffset? StoredScenarioTime,
+    string? ParticipantName = null);

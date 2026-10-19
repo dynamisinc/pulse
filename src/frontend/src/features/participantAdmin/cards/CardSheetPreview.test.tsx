@@ -92,6 +92,16 @@ describe('CardSheetPreview - location and dialog semantics', () => {
   })
 })
 
+describe('CardSheetPreview - a null participant-facing exercise name (story 09)', () => {
+  it('prints every card with no exercise-name line and no placeholder', async () => {
+    spyOnCardsEndpoint(() => ({ exerciseName: null, cards: buildMockCards(2), skipped: [] }))
+    await renderPreview()
+    await loaded()
+    expect(screen.getAllByTestId('roster-card')).toHaveLength(2)
+    expect(document.querySelector('[data-testid="roster-card"] p[class*="exercise"]')).toBeNull()
+  })
+})
+
 describe('CardSheetPreview - the loaded sheet', () => {
   it('shows every card and a count', async () => {
     await renderPreview()

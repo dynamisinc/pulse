@@ -21,7 +21,7 @@ const CARD: RosterCardDto = {
   qrSvgDataUri: QR,
 }
 
-function renderCard(card: RosterCardDto = CARD, exerciseName = 'Coastal Surge') {
+function renderCard(card: RosterCardDto = CARD, exerciseName: string | null = 'Coastal Surge') {
   return render(<Card card={card} exerciseName={exerciseName} />)
 }
 
@@ -31,6 +31,14 @@ describe('Card - every field', () => {
     const card = screen.getByTestId('roster-card')
     expect(within(card).getByText('Coastal Surge')).toBeInTheDocument()
     expect(within(card).getByText('Training exercise')).toBeInTheDocument()
+  })
+
+  it('prints no exercise-name line (and no placeholder) when the name is null', () => {
+    renderCard(CARD, null)
+    const card = screen.getByTestId('roster-card')
+    expect(within(card).getByText('Training exercise')).toBeInTheDocument()
+    expect(card.querySelector('p[class*="exercise"]')).toBeNull()
+    expect(card).not.toHaveTextContent(/null|undefined/i)
   })
 
   it('shows the name as a heading', () => {

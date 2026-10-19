@@ -93,7 +93,8 @@ public class ExerciseScopeDtoTests
         {
             OrganizationId = Organization.DefaultOrganizationId,
             Id = Guid.NewGuid(),
-            Name = "Coastal Cascade Exercise",
+            Name = "HURREX-26 Cat 4 Landfall Dry Run",
+            ParticipantName = "Coastal Cascade Exercise",
             Hostname = "atl-cie.example.com",
             BrandedDomain = "cascade.example.org",
             TimeZone = "America/Chicago",
@@ -104,9 +105,31 @@ public class ExerciseScopeDtoTests
         var dto = ExerciseScopeDto.FromExercise(exercise);
 
         dto.ExerciseId.Should().Be(exercise.Id.ToString());
-        dto.ExerciseName.Should().Be("Coastal Cascade Exercise");
+        dto.ExerciseName.Should().Be(
+            "Coastal Cascade Exercise", "exerciseName is the participant-facing name (§8.4), never the internal Name");
         dto.TimeZone.Should().Be("America/Chicago");
         dto.Status.Should().Be("complete");
+    }
+
+    /// <summary>
+    /// exercise-build-golive/09 (§8.4, Tier-2 information leak): with no participant-facing name set, exerciseName is
+    /// NULL — written as a present <c>null</c> key (the frozen client type is <c>string | null</c>) — and never falls
+    /// back to the internal name, which can leak the scenario.
+    /// </summary>
+    [Fact]
+    public void ExerciseName_IsNull_WhenNoParticipantNameIsSet_AndNeverFallsBackToTheInternalName()
+    {
+        var exercise = NewExercise();
+        exercise.Name = "HURREX-26 Cat 4 Landfall Dry Run";
+
+        var dto = ExerciseScopeDto.FromExercise(exercise);
+
+        dto.ExerciseName.Should().BeNull("there is no fallback to the internal Name (§8.4)");
+        var json = JsonSerializer.Serialize(dto);
+        using var document = JsonDocument.Parse(json);
+        document.RootElement.GetProperty("exerciseName").ValueKind.Should().Be(
+            JsonValueKind.Null, "the key stays present as null so the client's string | null guard accepts it");
+        json.Should().NotContain("HURREX", "the internal name never reaches the participant-facing scope");
     }
 
     [Fact]

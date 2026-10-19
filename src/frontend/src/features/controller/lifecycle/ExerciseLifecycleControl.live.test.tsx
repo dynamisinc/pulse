@@ -129,6 +129,16 @@ beforeEach(() => {
         },
       }
     }
+    if (url === '/staff/assignments') {
+      // The staff label is the INTERNAL name from the assignments (story 09), never the
+      // participant-facing scope name (which the scope above may even send as null).
+      return {
+        data: [
+          { exerciseId: 'ex-live-0001', exerciseName: 'Coastal Surge (live)', role: 'controller', personId: 'p-1', isLead: true },
+          { exerciseId: 'ex-other-9999', exerciseName: 'Harbor Drill (other)', role: 'controller', personId: 'p-1', isLead: false },
+        ],
+      }
+    }
     if (url === LIFECYCLE_PATH) {
       if (getLifecycleFailure !== undefined) throw getLifecycleFailure
       return { data: lifecycleBody() }

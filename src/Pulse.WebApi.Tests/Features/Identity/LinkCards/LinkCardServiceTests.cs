@@ -37,7 +37,7 @@ public sealed class LinkCardServiceTests
     [RequiresDockerFact]
     public async Task EligibleParticipants_GetACardEach_WithEveryField_OrderedByName()
     {
-        var exercise = await _world.SeedExerciseAsync(name: "Coastal Surge 2026");
+        var exercise = await _world.SeedExerciseAsync(name: "HURREX internal", participantName: "Coastal Surge 2026");
         var staff = await _world.SeedStaffAsync((exercise, "controller"));
         var priya = await _world.SeedParticipantAsync(exercise, "Priya Raman", agency: "Regional Medical Center", jobRole: "Incident Commander");
         var aisha = await _world.SeedParticipantAsync(exercise, "Aisha Okafor", agency: "City Public Works");
