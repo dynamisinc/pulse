@@ -53,4 +53,9 @@ export interface OverlayState {
   readonly register: OverlayRegister
   /** The break-fiction configured message (CTL-024). Unused outside `'broadcast'`. */
   readonly message: string
+  /**
+   * True only when the exercise lifecycle is `completed` (EndEx done, read-only review). The
+   * overlay `state` stays `'none'` then. Absent on the wire means false.
+   */
+  readonly ended: boolean
 }

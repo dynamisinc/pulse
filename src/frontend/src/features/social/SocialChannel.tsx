@@ -99,6 +99,7 @@ import { usePhoneLayout } from './layout/usePhoneLayout'
 import { useRouteFocus } from './layout/useRouteFocus'
 import { useScrollRestoration } from './layout/useScrollRestoration'
 import styles from './SocialChannel.module.css'
+import { useCanWrite } from '@/features/participant-shell/writeGate'
 
 /** The `id` the skip link targets. */
 const MAIN_ID = 'social-main'
@@ -121,6 +122,8 @@ export function SocialChannel() {
 function SocialFrame() {
   const { variant } = useShellContext()
   const session = useSession()
+  // False once the exercise has ended (or the session is read-only): no Post / compose.
+  const canWrite = useCanWrite()
   const { self, loading: directoryLoading } = useSocialDirectory()
   const { location, kind } = useSocialNavigation()
   // Phones (< 600px) get the bottom tab bar instead of the left rail (MT-D2).
@@ -137,7 +140,7 @@ function SocialFrame() {
   // the session can post (a persona-less session would only open a modal that says
   // "posting isn't available"). The composer self-guards on `isReadOnly` too.
   const canCompose =
-    affordancesAvailable(variant) && !session.isReadOnly && session.personaId !== undefined
+    affordancesAvailable(variant) && canWrite && session.personaId !== undefined
   // A staff `preview` / `kiosk` mount must never expose a sign-out (it would sign
   // the STAFF user out); only a real participant mount gets the account card.
   const showAccount = variant === 'full' || variant === 'readOnly'
@@ -183,7 +186,7 @@ function SocialFrame() {
 
       {/* `inert` while the compose modal is open: nothing behind it can take focus
           or be read by assistive tech (the modal also traps Tab itself). */}
-      <div className={styles.frame} inert={composeOpen}>
+      <div className={styles.frame} inert={composeOpen && canCompose}>
         {phone ? (
           <BottomTabBar
             {...(canCompose ? { onCompose: openCompose } : {})}
@@ -218,7 +221,9 @@ function SocialFrame() {
       {/* Outside the (inert-while-composing) frame on purpose: see the header. */}
       <NotificationsEngine />
 
-      {composeOpen && <ComposeModal onClose={closeCompose} returnFocusRef={postButtonRef} />}
+      {composeOpen && canCompose && (
+        <ComposeModal onClose={closeCompose} returnFocusRef={postButtonRef} />
+      )}
     </div>
   )
 }

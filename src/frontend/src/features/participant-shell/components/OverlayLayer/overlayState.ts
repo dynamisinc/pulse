@@ -103,7 +103,7 @@ import { useQuery } from '@tanstack/react-query'
 import axios from 'axios'
 import type { AxiosAdapter } from 'axios'
 import { api } from '@/core/services/api'
-import { useExerciseContext } from '@/core/exerciseContext'
+import { useExerciseContext, useOptionalExerciseContext } from '@/core/exerciseContext'
 import { USE_MOCK_DATA } from '@/core/config/mockData'
 import { getAccessToken } from '@/core/auth/tokenStore'
 import { registerSessionReset } from '@/core/auth/sessionReset'
@@ -118,7 +118,7 @@ const OVERLAY_STATE_PATH = '/overlay-state'
 const OVERLAY_STATE_CHANGED_EVENT = 'OverlayStateChanged'
 
 /** Wire shape of the (future) `/overlay-state` response body. */
-type OverlayStateResponseBody = OverlayState
+type OverlayStateResponseBody = Omit<OverlayState, 'ended'> & { readonly ended?: unknown }
 
 /**
  * All valid overlay states / registers. The runtime guards check membership
@@ -164,6 +164,7 @@ const MOCK_OVERLAY_STATE: OverlayStateResponseBody = {
   state: 'none',
   register: 'in-fiction',
   message: '',
+  ended: false,
 }
 
 /**
@@ -204,6 +205,7 @@ async function fetchOverlayState(): Promise<OverlayState> {
     state: response.data.state,
     register: response.data.register,
     message: response.data.message,
+    ended: (response.data as { ended?: unknown }).ended === true,
   }
 }
 
@@ -218,6 +220,7 @@ const DEFAULT_OVERLAY_STATE: OverlayState = {
   state: 'none',
   register: 'in-fiction',
   message: '',
+  ended: false,
 }
 
 // ---------------------------------------------------------------------------
@@ -236,6 +239,7 @@ interface WireOverlayState {
   readonly state: OverlayStateKind
   readonly register: OverlayRegister
   readonly message: string
+  readonly ended?: unknown
   readonly sequence?: number
 }
 
@@ -262,7 +266,12 @@ function readSequence(wire: WireOverlayState): number {
 }
 
 function toOverlayState(wire: WireOverlayState): OverlayState {
-  return { state: wire.state, register: wire.register, message: wire.message }
+  return {
+    state: wire.state,
+    register: wire.register,
+    message: wire.message,
+    ended: wire.ended === true,
+  }
 }
 
 /** The current live snapshot. Starts at the safe `'none'` default (fail closed). */
@@ -328,7 +337,8 @@ function applyLive(next: OverlayState, sequence: number): void {
   if (
     next.state === liveSnapshot.state &&
     next.register === liveSnapshot.register &&
-    next.message === liveSnapshot.message
+    next.message === liveSnapshot.message &&
+    next.ended === liveSnapshot.ended
   ) {
     return
   }
@@ -566,3 +576,17 @@ export function useOverlayState(): OverlayState {
 }
 
 registerSessionReset(resetLiveForSession, import.meta.hot)
+
+/**
+ * True once the exercise has ended (lifecycle `completed`): participants may still READ, but every
+ * write is refused server-side (403). Drives the ended banner and the write-disable seam.
+ * Absent on the wire is false. The caller may OR in `scope.status === 'completed'` as a
+ * first-paint seed (completed only ever moves to archived, so that is safe).
+ */
+export function useExerciseEnded(): boolean {
+  const overlay = useOverlayState()
+  // First-paint seed: the bound scope already says `completed` before the overlay GET lands.
+  // Safe because completed only ever moves to archived (still read-only).
+  const scope = useOptionalExerciseContext()
+  return overlay.ended || scope?.status === 'completed'
+}

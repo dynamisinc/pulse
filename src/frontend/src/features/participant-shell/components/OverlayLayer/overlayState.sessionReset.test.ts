@@ -37,7 +37,7 @@ vi.mock('@/core/services/api', () => ({
   },
 }))
 
-const NONE = { state: 'none', register: 'in-fiction', message: '' }
+const NONE = { state: 'none', register: 'in-fiction', message: '', ended: false }
 
 function wireState(overrides: Record<string, unknown> = {}) {
   return { ...NONE, sequence: 1, ...overrides }
