@@ -193,6 +193,19 @@ npm run type-check   # or: npm run build:check
 
 Use `npm run build` only for deployment validation.
 
+**View a staff page on mock data** (for example `/staff/console/report`). The dev server
+(`npm --prefix src/frontend run dev`, port 5198) signs you in as the mock participant. For a
+staff page, temporarily edit `MOCK_SESSION_BASE` in `src/frontend/src/core/auth/sessionResolver.ts`:
+
+```ts
+world: 'staff',      // was 'participant'
+role: 'controller',  // was 'participant'
+```
+
+Change **both** fields. A staff role in the participant world fails the role/world check
+(`normalizeBody`), which sends you to `/login` with "resolveSession failed" in the console.
+Revert the file before committing.
+
 ## FAQ
 
 **Q: Should participant surfaces use COBRA components?**

@@ -8,6 +8,8 @@ using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Pulse.WebApi.Data.Entities;
+using Pulse.WebApi.Features.EngineRuntime.Steering;
+using Pulse.WebApi.Features.Identity.SharedAccess;
 using Pulse.WebApi.Features.Social.Editing;
 using Pulse.WebApi.Features.Social.Follows;
 using Pulse.WebApi.Features.Identity.RoleMatrix;
@@ -65,6 +67,7 @@ public static class PostWriteEndpoints
         services.AddScoped<PostAttributionResolver>();
         services.AddScoped<PostIngestService>();
         services.TryAddPostSeamFallbacks();
+        services.TryAddParticipantWriteGate();
 
         return services;
     }
@@ -83,7 +86,10 @@ public static class PostWriteEndpoints
         // and conduct otherwise (controller only); evaluators never. Participant callers pass through unchanged.
         endpoints.MapPost("/api/posts", CreatePostAsync)
             .WithMetadata(new RequestSizeLimitAttribute(MaxRequestBodyBytes))
-            .AddEndpointFilter(StaffAuthoringRoleFilter.PersonaAuthoring);
+            .AddEndpointFilter(StaffAuthoringRoleFilter.PersonaAuthoring)
+
+            // #379: a participant post or reply is refused (409 frozen) while the exercise is paused or frozen.
+            .RefuseWhenWritesPaused();
 
         return endpoints;
     }
