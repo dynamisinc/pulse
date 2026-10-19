@@ -31,10 +31,14 @@ public sealed class ActiveEnrollmentSweepTests
     /// <summary>Writes, which need no read predicate (a revoked row is only ever reached by a read first).</summary>
     private static readonly string[] WriteOperations = [".Add(", ".AddRange(", ".Remove(", ".RemoveRange(", ".Update(", ".Attach("];
 
-    private static readonly Regex EnrollmentsRead = new(@"\.Enrollments\b", RegexOptions.CultureInvariant);
+    /// <summary>
+    /// A <c>.Enrollments</c> member access. The <c>Features.Identity.Enrollments</c> namespace (a fully qualified type such as
+    /// <c>Pulse.WebApi.Features.Identity.Enrollments.StaffChangeActor</c>) is excluded: it names the namespace, not the DbSet.
+    /// </summary>
+    private static readonly Regex EnrollmentsRead = new(@"(?<!\bIdentity)\.Enrollments\b", RegexOptions.CultureInvariant);
 
     /// <summary>Where one read's own segment ends: the next <c>.Enrollments</c> or a query-syntax <c>join</c>.</summary>
-    private static readonly Regex SegmentEnd = new(@"\.Enrollments\b|\bjoin\b", RegexOptions.CultureInvariant);
+    private static readonly Regex SegmentEnd = new(@"(?<!\bIdentity)\.Enrollments\b|\bjoin\b", RegexOptions.CultureInvariant);
 
     [Fact]
     public void EveryEnrollmentsRead_ExcludesRevokedRows_ThroughActive()
@@ -52,6 +56,14 @@ public sealed class ActiveEnrollmentSweepTests
             + $"must include `{Constraint}` (Pulse.WebApi.Data.ActiveEnrollments) in its query chain. Offending site(s): "
             + string.Join(" | ", offenders));
     }
+
+    [Theory]
+    [InlineData("public Pulse.WebApi.Features.Identity.Enrollments.StaffChangeActor? Session { get; init; }", 0)]
+    [InlineData("var x = new Pulse.WebApi.Features.Identity.Enrollments.EnrollmentService(db);", 0)]
+    [InlineData("_dbContext.Enrollments.IgnoreQueryFilters().Active()", 1)]
+    [InlineData("from e in dbContext.Enrollments.Active() join x in _db.Enrollments on a equals b", 2)]
+    public void TheReadPattern_MatchesDbSetAccess_NotTheIdentityEnrollmentsNamespace(string code, int reads) =>
+        EnrollmentsRead.Matches(code).Count.Should().Be(reads);
 
     [Theory]
     [InlineData(".IgnoreQueryFilters().Active().Where(x) join e in _db.Exercises on a equals b", true)]
