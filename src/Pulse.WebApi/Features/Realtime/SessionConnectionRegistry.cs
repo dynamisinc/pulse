@@ -147,24 +147,47 @@ public sealed class SessionConnectionRevoker : ISessionConnectionRevoker
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// <para>
+    /// <b>Runs to completion whatever <paramref name="cancellationToken"/> does (#668 Gate-1 W-002).</b> Callers invoke
+    /// this AFTER their revocation commits, usually with the HTTP request's token. <see cref="SessionConnectionRegistry.Take"/>
+    /// removes the registry entries before the group removals and the abort. If the client then dropped the request, a
+    /// cancelled token would stop the loop part-way: the connection would be in no registry, so no later revoke could
+    /// find it, yet it would still sit in the staff group and keep receiving broadcasts (they are fanned straight to the
+    /// group, never re-checked per message). So the token is deliberately NOT passed on: the group removals use
+    /// <see cref="CancellationToken.None"/>, and the abort runs in a <c>finally</c> even if a removal throws. The work is
+    /// in-memory and per connection, so it cannot hang a request for long.
+    /// </para>
+    /// <para>
+    /// The parameter stays for the interface and callers' convenience. Fixing it here covers every post-commit caller
+    /// at once (enrollment change and revoke, session issue, staff assignment, password reset, the org directory).
+    /// </para>
+    /// </remarks>
     public async Task RevokeAsync(IEnumerable<Guid> sessionIds, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(sessionIds);
+        _ = cancellationToken; // Deliberately unused: see the remarks.
 
         foreach (var sessionId in sessionIds.Distinct())
         {
             foreach (var (connectionId, connection) in _registry.Take(sessionId))
             {
-                if (_hubContext is not null)
+                try
                 {
-                    // Out of the groups FIRST, so not one more staff broadcast is fanned to it while the abort lands.
-                    await _hubContext.Groups.RemoveFromGroupAsync(
-                        connectionId, ExerciseRealtimeHub.StaffGroupNameFor(connection.ExerciseId), cancellationToken);
-                    await _hubContext.Groups.RemoveFromGroupAsync(
-                        connectionId, ExerciseRealtimeHub.GroupNameFor(connection.ExerciseId), cancellationToken);
+                    if (_hubContext is not null)
+                    {
+                        // Out of the groups FIRST, so not one more staff broadcast is fanned to it while the abort lands.
+                        await _hubContext.Groups.RemoveFromGroupAsync(
+                            connectionId, ExerciseRealtimeHub.StaffGroupNameFor(connection.ExerciseId), CancellationToken.None);
+                        await _hubContext.Groups.RemoveFromGroupAsync(
+                            connectionId, ExerciseRealtimeHub.GroupNameFor(connection.ExerciseId), CancellationToken.None);
+                    }
                 }
-
-                connection.Context.Abort();
+                finally
+                {
+                    // Taken out of the registry already, so this is the last chance to close it: always abort.
+                    connection.Context.Abort();
+                }
             }
         }
     }

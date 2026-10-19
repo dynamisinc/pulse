@@ -89,6 +89,72 @@ public sealed class SessionConnectionRegistryTests
         registry.Take(session).Should().BeEmpty();
     }
 
+    /// <summary>
+    /// #668 Gate-1 W-002: the post-commit cut runs with the request's token. A dropped request (token already cancelled)
+    /// must still take every connection out of BOTH groups and abort it, because <see cref="SessionConnectionRegistry.Take"/>
+    /// has already forgotten it and nothing could cut it later.
+    /// </summary>
+    [Fact]
+    public async Task RevokeAsync_WithACancelledRequestToken_StillRemovesFromBothGroups_AndAborts()
+    {
+        var registry = new SessionConnectionRegistry();
+        var session = Guid.NewGuid();
+        var exerciseId = Guid.NewGuid();
+        var context = new Mock<HubCallerContext>();
+        context.SetupGet(c => c.ConnectionId).Returns("conn-1");
+        registry.Register(session, exerciseId, context.Object);
+
+        var groups = new Mock<IGroupManager>();
+        groups
+            .Setup(g => g.RemoveFromGroupAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns<string, string, CancellationToken>((_, _, token) =>
+            {
+                token.ThrowIfCancellationRequested();
+                return Task.CompletedTask;
+            });
+        var hubContext = new Mock<IHubContext<ExerciseRealtimeHub>>();
+        hubContext.SetupGet(h => h.Groups).Returns(groups.Object);
+
+        using var dropped = new CancellationTokenSource();
+        await dropped.CancelAsync();
+
+        await new SessionConnectionRevoker(registry, hubContext.Object).RevokeAsync([session], dropped.Token);
+
+        groups.Verify(
+            g => g.RemoveFromGroupAsync(
+                "conn-1", ExerciseRealtimeHub.StaffGroupNameFor(exerciseId), It.IsAny<CancellationToken>()),
+            Times.Once);
+        groups.Verify(
+            g => g.RemoveFromGroupAsync(
+                "conn-1", ExerciseRealtimeHub.GroupNameFor(exerciseId), It.IsAny<CancellationToken>()),
+            Times.Once);
+        context.Verify(c => c.Abort(), Times.Once);
+        registry.IsRegistered(session, "conn-1").Should().BeFalse();
+    }
+
+    /// <summary>#668 Gate-1 W-002: if a group removal throws, the taken connection is still aborted.</summary>
+    [Fact]
+    public async Task RevokeAsync_WhenAGroupRemovalThrows_StillAbortsTheTakenConnection()
+    {
+        var registry = new SessionConnectionRegistry();
+        var session = Guid.NewGuid();
+        var context = new Mock<HubCallerContext>();
+        context.SetupGet(c => c.ConnectionId).Returns("conn-2");
+        registry.Register(session, Guid.NewGuid(), context.Object);
+
+        var groups = new Mock<IGroupManager>();
+        groups
+            .Setup(g => g.RemoveFromGroupAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("backplane hiccup"));
+        var hubContext = new Mock<IHubContext<ExerciseRealtimeHub>>();
+        hubContext.SetupGet(h => h.Groups).Returns(groups.Object);
+
+        var act = () => new SessionConnectionRevoker(registry, hubContext.Object).RevokeAsync([session]);
+
+        await act.Should().ThrowAsync<InvalidOperationException>();
+        context.Verify(c => c.Abort(), Times.Once);
+    }
+
     private static HubCallerContext Context(string connectionId)
     {
         var context = new Mock<HubCallerContext>();
