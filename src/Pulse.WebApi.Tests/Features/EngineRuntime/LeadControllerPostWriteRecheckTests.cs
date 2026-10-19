@@ -354,7 +354,8 @@ public sealed class LeadControllerPostWriteRecheckTests
             Options.Create(new GenerationOptions()),
             cut,
             NullLogger<EngineReviewService>.Instance,
-            ambient);
+            ambient,
+            governance: Options.Create(new EngineAmbientGovernanceOptions { TimeoutAutoSendAuthorized = true }));
 
         return new Harness(_fixture, exerciseId, lead, service, db, clock, autonomy, tiers, cut, ambient);
     }

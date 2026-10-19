@@ -78,6 +78,9 @@ public sealed class RoleMatrixHost : WebApplicationFactory<Program>
         // governed flag otherwise rejects 400 for every caller before the gate. Authorising it here lets the matrix and
         // the lead-gate suite prove the raise is lead-only (403 for a non-lead, allowed for the lead).
         builder.UseSetting("Generation:Governance:AmbientAutonomyAuthorized", "true");
+        // The Phase-1 timeout-auto-send flag (PROVIDER-GOVERNANCE §8) is ON here so swamped-mode probes reach the
+        // lead gate this suite is about; the flag-off refusal is covered by EngineReviewSafetyInvariantTests.
+        builder.UseSetting("Generation:Governance:TimeoutAutoSendAuthorized", "true");
 
         builder.ConfigureTestServices(services =>
         {

@@ -580,7 +580,7 @@ public sealed class EngineReviewEndpointsTests
         var exerciseId = Guid.NewGuid();
         var draftId = Guid.NewGuid();
         await SeedAsync(Item(draftId, exerciseId, AutonomyLevel.Suggest, DraftDisposition.Queued, countdown: false));
-        await using var host = await StartHostAsync(exerciseId);
+        await using var host = await StartHostAsync(exerciseId, timeoutAutoSendAuthorized: true); // swamped ON must pass the Phase-1 flag to reach attribution
 
         var autonomy = host.Services.GetRequiredService<EngineAutonomyRegistry>().GetOrCreate(exerciseId);
         var (path, body, recordedEventType) = route switch
