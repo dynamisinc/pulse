@@ -89,6 +89,19 @@ UAT has one staff login (`controller1`, the lead). To add a non-lead controller,
 Steps and caveats:
 [login/06 → Adding test staff accounts](features/login/06-uat-goLive-config-runbook.md#adding-test-staff-accounts-role-smoke).
 
+## Timeout auto-send (swamped mode): single instance only
+
+`uat` authorizes timeout auto-send (`generationTimeoutAutoSendAuthorized = true` in
+`infrastructure/parameters/uat.bicepparam`, PROVIDER-GOVERNANCE §8 Phase 2).
+
+- **Keep `uat` single-instance (B1, capacity 1) while that flag is true.** Swamped mode and the rest of the engine's
+  autonomy state are held **in memory, per process**. With two instances, one could be swamped (auto-sending expired
+  drafts) while the other is not, and a lead's ON or OFF would reach only one of them.
+- **Before scaling out** (more instances, or a plan with autoscale), set the flag back to `false` and re-run **Deploy
+  Infrastructure**. Expired countdowns then always hold.
+- **A restart turns swamped mode off.** After an app restart or deploy, swamped mode is off until the lead turns it on
+  again.
+
 ## Trusted proxy (forwarded headers, #480)
 
 Behind App Service every request arrives from the platform front end, so without forwarded headers every

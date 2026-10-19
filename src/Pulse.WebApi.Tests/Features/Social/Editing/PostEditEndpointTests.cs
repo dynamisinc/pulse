@@ -17,8 +17,9 @@ using Xunit;
 /// <summary>
 /// demo-feedback story 19 — <c>PATCH /api/posts/{postId}</c> end to end over real SQL: who may edit (own post and own
 /// reply only, participant origin only, never staff or read-only), isolation (another exercise is 404), the window and
-/// limit (DF-30, on a hand-advanced wall clock standing in for <c>FakeTimeProvider</c>), the Freeze / frozen clock /
-/// paused-or-ended refusal, the identical-text no-op, the sanitizer, the one-transaction write, the <c>PostEdited</c>
+/// limit (DF-30, on a hand-advanced wall clock standing in for <c>FakeTimeProvider</c>), the Freeze /
+/// paused-or-ended refusal (a frozen clock alone no longer refuses, #379), the identical-text no-op, the sanitizer,
+/// the one-transaction write, the <c>PostEdited</c>
 /// push and the <c>post.edited</c> telemetry.
 /// </summary>
 [Collection(MsSqlCollection.Name)]
@@ -316,18 +317,45 @@ public sealed class PostEditEndpointTests
     }
 
     [RequiresDockerFact]
-    public async Task FrozenClock_RefusesTheEdit_WithFrozen()
+    public async Task FreezeTier_WithTheClockRunning_StillRefusesTheEdit_WithFrozen()
     {
+        // #379 (Tom's condition for dropping the frozen-clock check): the Freeze TIER refuses, whatever the clock
+        // reads.
+        await using var host = await PostEditTestHost.StartAsync(ConnectionString);
+        var (_, exerciseId, personaId) = await StartWithParticipantAsync(host);
+        var postId = await host.SeedPostAsync(exerciseId, personaId);
+        await host.PauseTiers.SetTierAsync(
+            exerciseId,
+            PauseTier.Freeze,
+            "controller-1",
+            new PauseClockStart(PostEditTestHost.StoredScenarioTime, TimeZoneInfo.Utc));
+        host.Clock.Unfreeze(exerciseId);
+        host.Clock.IsFrozen(exerciseId).Should().BeFalse("this test needs the Freeze tier with a RUNNING clock");
+
+        using var response = await host.EditAsync(postId, "During freeze, clock running");
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        (await JsonOf(response))["reason"]!.GetValue<string>().Should().Be("frozen");
+        (await host.ReadPostAsync(postId)).EditCount.Should().Be(0);
+    }
+
+    [RequiresDockerFact]
+    public async Task FrozenClock_WithNoFreezeTierAndALiveLifecycle_DoesNotRefuseTheEdit()
+    {
+        // #379: the separate frozen-clock condition is gone. Only the Freeze tier or a lifecycle refusing participant
+        // writes refuses; a clock frozen on its own (e.g. to pin scenario time) leaves the edit allowed.
         await using var host = await PostEditTestHost.StartAsync(ConnectionString);
         var (_, exerciseId, personaId) = await StartWithParticipantAsync(host);
         var postId = await host.SeedPostAsync(exerciseId, personaId);
         host.Clock.Start(exerciseId, PostEditTestHost.StoredScenarioTime, TimeZoneInfo.Utc);
         host.Clock.Freeze(exerciseId);
+        host.PauseTiers.GetTier(exerciseId).Should().Be(PauseTier.Running);
 
         using var response = await host.EditAsync(postId, "Clock frozen");
 
-        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
-        (await JsonOf(response))["reason"]!.GetValue<string>().Should().Be("frozen");
+        response.StatusCode.Should().Be(
+            HttpStatusCode.OK, "a frozen clock without a Freeze tier or a paused lifecycle is not a refusal");
+        (await host.ReadPostAsync(postId)).EditCount.Should().Be(1);
     }
 
     [RequiresDockerFact]

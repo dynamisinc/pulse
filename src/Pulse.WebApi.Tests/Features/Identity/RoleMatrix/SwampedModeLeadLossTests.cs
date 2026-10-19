@@ -61,6 +61,126 @@ public sealed class SwampedModeLeadLossTests
     }
 
     [RequiresDockerFact]
+    public async Task TransferringTheLead_TurnsSwampedOff_AfterCommit_AndRecordsItAsALeadTransfer()
+    {
+        // Adversarial review W1 (#642): a transfer demotes the previous lead (§8: demoting the lead turns swamped off), but
+        // the exercise still HAS a lead afterwards, so the no-lead heal never catches it. The new lead must not inherit
+        // timeout auto-send they never turned on.
+        var org = await _kit.SeedOrganizationAsync();
+        var exercise = await _kit.SeedExerciseAsync(org);
+        var (planner, _) = await _kit.SeedStaffAsync(org, exercise, "planner");
+        await _kit.SeedStaffAsync(org, exercise, "controller", isLead: true);
+        var (_, newLead) = await _kit.SeedStaffAsync(org, exercise, "controller");
+        var (plannerSession, _) = await _kit.SeedStaffSessionAsync(planner, exercise, "planner");
+
+        bool? newLeadCommittedAtFlip = null;
+        _kit.Swamped.OnTurnOff = _ =>
+        {
+            using var probe = _kit.ReadContext();
+            newLeadCommittedAtFlip = probe.Enrollments.IgnoreQueryFilters().Single(e => e.Id == newLead).IsLead;
+        };
+
+        var (service, context) = _kit.ServiceFor(plannerSession, planner, org, exercise);
+        await using (context)
+        {
+            (await service.SetLeadAsync(newLead)).Outcome.Should().Be(EnrollmentOutcome.Ok);
+        }
+
+        _kit.Swamped.Calls.Should().ContainSingle("a transfer demotes the previous lead, so swamped mode goes off");
+        newLeadCommittedAtFlip.Should().BeTrue("the in-memory flip runs only after the lead change committed");
+
+        await using var verify = _kit.ReadContext();
+        var events = await verify.TelemetryEvents.IgnoreQueryFilters()
+            .Where(e => e.ExerciseId == exercise && e.EventType == EnrollmentService.SwampedModeOffEventType)
+            .ToListAsync();
+        using (var payload = JsonDocument.Parse(events.Should().ContainSingle().Subject.Payload!))
+        {
+            payload.RootElement.GetProperty("reason").GetString().Should().Be(EnrollmentService.LeadTransferredReason);
+            payload.RootElement.GetProperty("wasOn").GetBoolean().Should().BeTrue();
+        }
+
+        (await verify.OrgAuditEvents.IgnoreQueryFilters()
+            .CountAsync(a => a.ExerciseId == exercise && a.Kind == EnrollmentService.SwampedModeOffAuditKind))
+            .Should().Be(1);
+    }
+
+    [RequiresDockerFact]
+    public async Task ReleasingTheLead_WhileSwampedWasAlreadyOff_RecordsNoSwampedOff_ButStillRecordsTheRelease()
+    {
+        // #618 S-A: a release whose flip changed nothing records nothing for the flip (like a transfer); the
+        // enrollment change itself (enrollment.lead.released) is still recorded.
+        var org = await _kit.SeedOrganizationAsync();
+        var exercise = await _kit.SeedExerciseAsync(org);
+        var (planner, _) = await _kit.SeedStaffAsync(org, exercise, "planner");
+        var (_, leadEnrollment) = await _kit.SeedStaffAsync(org, exercise, "controller", isLead: true);
+        var (plannerSession, _) = await _kit.SeedStaffSessionAsync(planner, exercise, "planner");
+        _kit.Swamped.WasOn = false;
+
+        var (service, context) = _kit.ServiceFor(plannerSession, planner, org, exercise);
+        await using (context)
+        {
+            (await service.RevokeAsync(leadEnrollment)).Outcome.Should().Be(EnrollmentOutcome.Ok);
+        }
+
+        _kit.Swamped.Calls.Should().ContainSingle("the flip is still attempted (idempotent)");
+        await using var verify = _kit.ReadContext();
+        (await verify.TelemetryEvents.IgnoreQueryFilters()
+            .CountAsync(e => e.ExerciseId == exercise && e.EventType == EnrollmentService.SwampedModeOffEventType))
+            .Should().Be(0, "only real changes are recorded");
+        (await verify.OrgAuditEvents.IgnoreQueryFilters()
+            .CountAsync(a => a.ExerciseId == exercise && a.Kind == EnrollmentService.SwampedModeOffAuditKind))
+            .Should().Be(0);
+        (await verify.TelemetryEvents.IgnoreQueryFilters()
+            .CountAsync(e => e.ExerciseId == exercise && e.EventType == EnrollmentService.LeadReleasedEventType))
+            .Should().Be(1, "the release itself is a real change");
+    }
+
+    [RequiresDockerFact]
+    public async Task TransferringTheLead_WhileSwampedWasAlreadyOff_RecordsNothing()
+    {
+        var org = await _kit.SeedOrganizationAsync();
+        var exercise = await _kit.SeedExerciseAsync(org);
+        var (planner, _) = await _kit.SeedStaffAsync(org, exercise, "planner");
+        await _kit.SeedStaffAsync(org, exercise, "controller", isLead: true);
+        var (_, newLead) = await _kit.SeedStaffAsync(org, exercise, "controller");
+        var (plannerSession, _) = await _kit.SeedStaffSessionAsync(planner, exercise, "planner");
+        _kit.Swamped.WasOn = false;
+
+        var (service, context) = _kit.ServiceFor(plannerSession, planner, org, exercise);
+        await using (context)
+        {
+            (await service.SetLeadAsync(newLead)).Outcome.Should().Be(EnrollmentOutcome.Ok);
+        }
+
+        _kit.Swamped.Calls.Should().ContainSingle("the flip is still attempted (idempotent)");
+        await using var verify = _kit.ReadContext();
+        (await verify.TelemetryEvents.IgnoreQueryFilters()
+            .CountAsync(e => e.ExerciseId == exercise && e.EventType == EnrollmentService.SwampedModeOffEventType))
+            .Should().Be(0, "a transfer that changed nothing records nothing");
+        (await verify.OrgAuditEvents.IgnoreQueryFilters()
+            .CountAsync(a => a.ExerciseId == exercise && a.Kind == EnrollmentService.SwampedModeOffAuditKind))
+            .Should().Be(0);
+    }
+
+    [RequiresDockerFact]
+    public async Task SettingTheFirstLead_WhenThereWasNone_DoesNotTouchSwampedMode()
+    {
+        var org = await _kit.SeedOrganizationAsync();
+        var exercise = await _kit.SeedExerciseAsync(org);
+        var (planner, _) = await _kit.SeedStaffAsync(org, exercise, "planner");
+        var (_, controller) = await _kit.SeedStaffAsync(org, exercise, "controller");
+        var (plannerSession, _) = await _kit.SeedStaffSessionAsync(planner, exercise, "planner");
+
+        var (service, context) = _kit.ServiceFor(plannerSession, planner, org, exercise);
+        await using (context)
+        {
+            (await service.SetLeadAsync(controller)).Outcome.Should().Be(EnrollmentOutcome.Ok);
+        }
+
+        _kit.Swamped.Calls.Should().BeEmpty("nobody was demoted, so there is nothing to turn off");
+    }
+
+    [RequiresDockerFact]
     public async Task AFailedFlip_NeverFailsTheCommittedChange_AndIsLeftForTheNextGatedRequestToHeal()
     {
         var org = await _kit.SeedOrganizationAsync();
@@ -142,6 +262,7 @@ public sealed class SwampedModeLeadLossTests
         {
             payload.RootElement.GetProperty("reason").GetString().Should().Be(ExerciseCallerRole.NoLeadRecheckReason);
             payload.RootElement.GetProperty("wasOn").GetBoolean().Should().BeTrue();
+            payload.RootElement.GetProperty("isOn").GetBoolean().Should().BeFalse("#618: the one swamped-off shape every path records");
             payload.RootElement.GetProperty("scenarioMinute").GetInt32().Should().Be(42, "the clock's CURRENT minute, never 0");
         }
 

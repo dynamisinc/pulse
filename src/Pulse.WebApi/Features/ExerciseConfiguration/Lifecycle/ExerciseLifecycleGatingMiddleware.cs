@@ -28,14 +28,16 @@ using Pulse.WebApi.Features.Identity.Staff;
 /// archived exercise merely because someone mapped a different verb on it.
 /// </para>
 /// <para>
-/// <b>Known NOT covered — a named RISK, not an assurance:</b> the SignalR hub <c>/hubs/exercise</c>.
-/// implementation.md's covered set does not name it and this story does not widen its own scope, so the hub
-/// is un-gated: a connection to a <c>build</c> / <c>completed</c> / <c>archived</c> exercise's group is
-/// accepted and would receive anything fanned out to it. "Nothing publishes into a closed exercise" is an
-/// ASSUMPTION, not an invariant — nothing consumes
-/// <see cref="ExerciseLifecycleBehaviour.ScenarioContentFires"/> today, and the engine reaction loop does not
-/// deregister an exercise on <c>completed</c>. Closing the hub is a deliberate decision that belongs to a
-/// story, not to a builder.
+/// <b>Not covered on CONNECT, by design: the SignalR hub <c>/hubs/exercise</c>.</b> A connection to a
+/// <c>build</c> / <c>completed</c> / <c>archived</c> exercise's group is still accepted — the participant overlay
+/// client re-GETs <c>/api/overlay-state</c> on reconnect, and that GET is what renders COR-054's EndEx overlay. The
+/// risk this used to name ("a connected tab would receive anything fanned out to it after EndEx") is closed on the
+/// SEND side instead (#375): <c>SignalRFeedBroadcaster</c> checks
+/// <see cref="ExerciseLifecycleStates.IsLivePushOpen"/> before every feed frame, and outside it sends to the
+/// staff-only group alone (fail closed). That predicate coincides with this gate's
+/// <see cref="ExerciseLifecycleStates.IsParticipantAccessible"/> today, by design, and may diverge in
+/// <c>completed</c> (REST reads may reopen there; live pushes stay closed). A NEW hub frame that bypasses
+/// <c>IFeedBroadcaster</c> must apply the same check; the pause overlay push already gates itself (CR-001).
 /// </para>
 /// </remarks>
 public static class ExerciseLifecycleGatedRoutes

@@ -17,9 +17,9 @@ that keeps being used never ends, and one left alone for 12 hours dies mid-day. 
 COR-012 says sessions are *short-lived with refresh*. That stays true: the **access token stays 60 minutes**, and
 the SPA's silent refresh keeps it fresh. What changes, for `participant`-kind sessions only, is the **refresh
 window**: it ends at the **end of the exercise day** in the exercise time zone (EL-10), recomputed on each refresh
-so it can never slide into the next day. "Until EndEx" is already enforced by the lifecycle gate and by story
-03/05 refusing new sign-ins (EL-11); this story deliberately does **not** make refresh refuse at `completed`,
-which would bounce participants off the COR-054 EndEx overlay.
+so it can never slide into the next day. Lifecycle limits follow EL-11 as superseded on 2026-10-19 ("one rule for
+all"): refresh of `participant`/`readonly` sessions is admitted in Staged/Live/Paused/Completed (participants may
+review read-only after EndEx) and refused in Build/Archived, or when the exercise row is missing (fail closed).
 
 If this story slips, the existing 12-hour window is an acceptable degraded behaviour for the demo; story 07 is the
 part testers will feel.
@@ -41,10 +41,12 @@ part testers will feel.
       they do today (60 min / sliding 720 min). The default is `true`.
 - [ ] **Given** an exercise whose stored time zone is blank or unknown, **then** the cap falls back to UTC and a
       warning is logged **once per exercise per process**, not per request. The rollover hour is bounded 0 to 6.
-- [ ] **Given** an exercise that is `completed` or `archived`, **then** an already-issued participant access token
-      still gets the existing lifecycle-gate behaviour (participant data routes `403`, `/api/overlay-state` served in
-      `completed`), and refresh is **not** newly refused; a test pins this so a later change does not break the EndEx
-      overlay.
+- [ ] *(Superseded 2026-10-19, EL-11, one rule for all.)* **Given** an exercise that is `completed`, **then** an
+      already-issued participant access token still gets the existing lifecycle-gate behaviour (participant data routes
+      `403`, `/api/overlay-state` served) and its refresh **renews**, so the EndEx overlay is not broken. **Given** an
+      exercise that is `build` or `archived` (or an unknown status, or a missing exercise row), **then** refresh of a
+      `participant` or `readonly` session is **refused** with the existing `401`, no event, nothing written. Staff
+      refresh is unchanged. A test pins both.
 
 ### Cross-cutting
 - [ ] **Isolation (XC-001/COR-001):** the time zone is read for the session's own bound `ExerciseId` through
@@ -56,8 +58,8 @@ part testers will feel.
 ## Out of Scope
 
 Where the browser stores the token (07). Per-exercise configuration of the day boundary beyond the global
-`DayRolloverHour`. Changing staff or read-only lifetimes. Refusing refresh at EndEx (deliberately not done). A
-"stay signed in across days" option.
+`DayRolloverHour`. Changing staff or read-only lifetimes. Refusing refresh at EndEx (`completed`; still not done,
+and refresh in Build/Archived is now refused per the 2026-10-19 amendment above). A "stay signed in across days" option.
 
 ## Technical Notes
 
@@ -111,7 +113,9 @@ a 3 a.m. rollover) and a lifecycle-pin test in `ExerciseLifecycleGatingTests` te
   `SessionRegistrationTests.AddSessions_BindsSessionLifetimeDefaults`, `.AddSessions_BindsParticipantDayLongOff_FromAuthenticationSession`.
 - **AC-5 (unknown zone, warn once, rollover 0 to 6, DST):** `SessionIssuerTests.Issue_Participant_UnknownOrBlankZone_IsCappedAtTheEndOfTheUtcDay`;
   `SessionServiceTests.Refresh_Participant_UnknownZone_IsCappedAtTheEndOfTheUtcDay`,
-  `.Refresh_ParticipantWithNoExerciseRow_FallsBackToUtc_AndTheWallClockScenarioTime`;
+  `.Refresh_ParticipantWithNoExerciseRow_IsRefused_FailClosed`, `.Refresh_ReadOnlyWithNoExerciseRow_IsRefused_FailClosed`
+  (superseded 2026-10-19, EL-11, one rule for all: a missing row now refuses refresh; the UTC fallback is reached on
+  issue only);
   `ParticipantSessionCapTests.UnknownOrBlankZone_FallsBackToTheUtcDay`, `.UnknownZone_IsWarnedOncePerExercisePerProcess_NotPerRequest`,
   `.KnownZone_IsNeverWarned`, `.TheFallbackWarning_SaysWhatHappenedAndWhichDefaultWasUsed_AndEchoesNoStoredValue` (Gate-1 S-4),
   `.RolloverHour_OutsideZeroToSix_IsBoundedIntoRange`, `.EasyLoginOptions_ValidatesTheRolloverHourZeroToSix`,
@@ -119,10 +123,14 @@ a 3 a.m. rollover) and a lifecycle-pin test in `ExerciseLifecycleGatingTests` te
   `.SpringForward_ThreeAmRollover_TheDayEndsAtThreeLocalDaylightTime`,
   `.FallBack_RolloverZero_TheTwentyFiveHourDayEndsAtLocalMidnightInStandardTime`,
   `.FallBack_ThreeAmRollover_TheDayEndsAtThreeLocalAfterTheClocksFall`, `.AtTheDayEndExactly_TheNextDayHasBegun`.
-- **AC-6 (completed / archived, lifecycle pin):** `ParticipantDayLongLifecyclePinTests.AfterEndEx_ADayLongParticipantSession_StillRefreshes_AndTheGateBehavesAsBefore`
-  (completed: feed 403, overlay 200; archived: feed 403, overlay 403; refresh succeeds in both and the refreshed token
-  resolves a live session, Gate-1 S-1);
-  `SessionServiceTests.Refresh_Participant_InACompletedOrArchivedExercise_IsNotRefused`.
+- **AC-6 (lifecycle pin; superseded 2026-10-19, EL-11, one rule for all):**
+  `ParticipantDayLongLifecyclePinTests.AfterEndEx_ADayLongParticipantSession_StillRefreshes_AndTheGateBehavesAsBefore`
+  (completed: feed 403, overlay 200; refresh succeeds and the refreshed token resolves a live session, Gate-1 S-1);
+  `ParticipantDayLongLifecyclePinTests.InAStateThatRefusesParticipantReads_ADayLongParticipantSession_IsNotRefreshed`
+  (build, archived);
+  `SessionServiceTests.Refresh_ParticipantWorldSession_InAParticipantReadState_Renews`,
+  `.Refresh_ParticipantWorldSession_InAStateThatRefusesParticipantReads_IsRefusedLikeARevokedSession`,
+  `.Refresh_StaffSession_InBuildOrArchived_IsUnchanged_AndRenews`.
 - **Isolation (XC-001):** `SessionIssuerTests.Issue_Participant_IsCappedByItsOwnExercisesZone_NeverAnotherExercises`,
   `SessionServiceTests.Refresh_Participant_IsCappedByItsOwnExercisesZone_NeverAnotherExercises`; `OrganizationScopeSweepTests`
   unchanged (no new `Exercises` read: issue and refresh read through `ExerciseFactsReader`).
