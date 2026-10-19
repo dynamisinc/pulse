@@ -1,6 +1,8 @@
 namespace Pulse.WebApi.Features.Realtime;
 
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 /// <summary>
 /// Which live <see cref="ExerciseRealtimeHub"/> connections were opened under which persisted session
@@ -131,37 +133,51 @@ public interface ISessionConnectionRevoker
 }
 
 /// <summary>The production <see cref="ISessionConnectionRevoker"/> over <see cref="SessionConnectionRegistry"/>.</summary>
-public sealed class SessionConnectionRevoker : ISessionConnectionRevoker
+public sealed partial class SessionConnectionRevoker : ISessionConnectionRevoker
 {
     private readonly SessionConnectionRegistry _registry;
     private readonly IHubContext<ExerciseRealtimeHub>? _hubContext;
+    private readonly ILogger<SessionConnectionRevoker> _logger;
 
     /// <summary>Creates the revoker.</summary>
     /// <param name="registry">The connection → session registry.</param>
     /// <param name="hubContext">The hub context for group removal; absent in a host without SignalR (nothing to cut).</param>
-    public SessionConnectionRevoker(SessionConnectionRegistry registry, IHubContext<ExerciseRealtimeHub>? hubContext = null)
+    /// <param name="logger">Logs a connection whose group removal failed (it is still aborted); a no-op logger if absent.</param>
+    public SessionConnectionRevoker(
+        SessionConnectionRegistry registry,
+        IHubContext<ExerciseRealtimeHub>? hubContext = null,
+        ILogger<SessionConnectionRevoker>? logger = null)
     {
         ArgumentNullException.ThrowIfNull(registry);
         _registry = registry;
         _hubContext = hubContext;
+        _logger = logger ?? NullLogger<SessionConnectionRevoker>.Instance;
     }
 
     /// <inheritdoc />
     /// <remarks>
     /// <para>
-    /// <b>Runs to completion whatever <paramref name="cancellationToken"/> does (#668 Gate-1 W-002).</b> Callers invoke
-    /// this AFTER their revocation commits, usually with the HTTP request's token. <see cref="SessionConnectionRegistry.Take"/>
-    /// removes the registry entries before the group removals and the abort. If the client then dropped the request, a
-    /// cancelled token would stop the loop part-way: the connection would be in no registry, so no later revoke could
-    /// find it, yet it would still sit in the staff group and keep receiving broadcasts (they are fanned straight to the
-    /// group, never re-checked per message). So the token is deliberately NOT passed on: the group removals use
-    /// <see cref="CancellationToken.None"/>, and the abort runs in a <c>finally</c> even if a removal throws. The work is
-    /// in-memory and per connection, so it cannot hang a request for long.
+    /// <b>Every taken connection is cut, whatever happens (#668 Gate-1 W-002, #660 delta review).</b> Callers invoke this
+    /// AFTER their revocation commits. <see cref="SessionConnectionRegistry.Take"/> forgets a session's connections
+    /// before they are removed from their groups and aborted, so a connection the loop fails to reach is an orphan: in no
+    /// registry (no later revoke can find it) yet still in the staff group, receiving broadcasts (they are fanned straight
+    /// to the group, never re-checked per message). Two things could stop the loop part-way, and neither may:
     /// </para>
-    /// <para>
-    /// The parameter stays for the interface and callers' convenience. Fixing it here covers every post-commit caller
-    /// at once (enrollment change and revoke, session issue, staff assignment, password reset, the org directory).
-    /// </para>
+    /// <list type="bullet">
+    /// <item><description>
+    /// <b>Cancellation.</b> Callers usually pass the HTTP request's token, and a client may drop the request right after the
+    /// commit. So <paramref name="cancellationToken"/> is deliberately NOT passed on: the removals use
+    /// <see cref="CancellationToken.None"/>. The work is in-memory and per connection, so it cannot hang a request.
+    /// </description></item>
+    /// <item><description>
+    /// <b>A failing group removal.</b> Each of the two removals is attempted on its own, a failure is logged (session id
+    /// and connection id only) and the loop goes on to the next connection and session. The connection is aborted
+    /// regardless, and an aborted connection leaves its groups when SignalR tears it down, so a logged removal failure
+    /// only widens the gap to the disconnect; it never leaves a live member. Nothing is rethrown: the revocation has
+    /// already committed, so there is nothing for a caller to undo, and one caller
+    /// (<c>StaffAssignmentService.SetActiveExerciseAsync</c>) does not catch.
+    /// </description></item>
+    /// </list>
     /// </remarks>
     public async Task RevokeAsync(IEnumerable<Guid> sessionIds, CancellationToken cancellationToken = default)
     {
@@ -172,23 +188,36 @@ public sealed class SessionConnectionRevoker : ISessionConnectionRevoker
         {
             foreach (var (connectionId, connection) in _registry.Take(sessionId))
             {
-                try
+                if (_hubContext is not null)
                 {
-                    if (_hubContext is not null)
-                    {
-                        // Out of the groups FIRST, so not one more staff broadcast is fanned to it while the abort lands.
-                        await _hubContext.Groups.RemoveFromGroupAsync(
-                            connectionId, ExerciseRealtimeHub.StaffGroupNameFor(connection.ExerciseId), CancellationToken.None);
-                        await _hubContext.Groups.RemoveFromGroupAsync(
-                            connectionId, ExerciseRealtimeHub.GroupNameFor(connection.ExerciseId), CancellationToken.None);
-                    }
+                    // Out of the groups FIRST, so not one more staff broadcast is fanned to it while the abort lands.
+                    await TryRemoveFromGroupAsync(
+                        sessionId, connectionId, ExerciseRealtimeHub.StaffGroupNameFor(connection.ExerciseId));
+                    await TryRemoveFromGroupAsync(
+                        sessionId, connectionId, ExerciseRealtimeHub.GroupNameFor(connection.ExerciseId));
                 }
-                finally
-                {
-                    // Taken out of the registry already, so this is the last chance to close it: always abort.
-                    connection.Context.Abort();
-                }
+
+                // Taken out of the registry already, so this is the last chance to close it: always abort.
+                connection.Context.Abort();
             }
         }
     }
+
+    private async Task TryRemoveFromGroupAsync(Guid sessionId, string connectionId, string groupName)
+    {
+        try
+        {
+            await _hubContext!.Groups.RemoveFromGroupAsync(connectionId, groupName, CancellationToken.None);
+        }
+        catch (Exception exception)
+        {
+            LogGroupRemovalFailed(sessionId, connectionId, exception);
+        }
+    }
+
+    [LoggerMessage(
+        EventId = 1,
+        Level = LogLevel.Warning,
+        Message = "Removing revoked hub connection {ConnectionId} (session {SessionId}) from a group failed; the connection is aborted anyway and leaves its groups on teardown.")]
+    private partial void LogGroupRemovalFailed(Guid sessionId, string connectionId, Exception exception);
 }

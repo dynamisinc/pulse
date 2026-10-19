@@ -1,6 +1,7 @@
 namespace Pulse.WebApi.Tests.Features.Realtime;
 
 using System;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using FluentAssertions;
@@ -132,27 +133,60 @@ public sealed class SessionConnectionRegistryTests
         registry.IsRegistered(session, "conn-1").Should().BeFalse();
     }
 
-    /// <summary>#668 Gate-1 W-002: if a group removal throws, the taken connection is still aborted.</summary>
+    /// <summary>
+    /// #660 delta review: a throwing group removal must not stop the loop. Every connection after the failing one has
+    /// already been taken out of the registry, so if the exception escaped, they would be orphans: unregistered, still
+    /// in their groups, never aborted. Two connections on one session plus a second session; the very first removal
+    /// throws. Every connection must still be asked out of BOTH groups and aborted, and nothing is rethrown (the
+    /// revocation has already committed; one caller does not catch).
+    /// </summary>
     [Fact]
-    public async Task RevokeAsync_WhenAGroupRemovalThrows_StillAbortsTheTakenConnection()
+    public async Task RevokeAsync_WhenTheFirstGroupRemovalThrows_StillCutsEveryTakenConnectionOfEverySession()
     {
         var registry = new SessionConnectionRegistry();
-        var session = Guid.NewGuid();
-        var context = new Mock<HubCallerContext>();
-        context.SetupGet(c => c.ConnectionId).Returns("conn-2");
-        registry.Register(session, Guid.NewGuid(), context.Object);
+        var sessionA = Guid.NewGuid();
+        var sessionB = Guid.NewGuid();
+        var exerciseId = Guid.NewGuid();
+        var contexts = new[] { ("a-1", sessionA), ("a-2", sessionA), ("b-1", sessionB) }
+            .Select(pair =>
+            {
+                var context = new Mock<HubCallerContext>();
+                context.SetupGet(c => c.ConnectionId).Returns(pair.Item1);
+                registry.Register(pair.Item2, exerciseId, context.Object);
+                return (Id: pair.Item1, Context: context);
+            })
+            .ToList();
 
+        var calls = 0;
         var groups = new Mock<IGroupManager>();
         groups
             .Setup(g => g.RemoveFromGroupAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new InvalidOperationException("backplane hiccup"));
+            .Returns(() => Interlocked.Increment(ref calls) == 1
+                ? Task.FromException(new InvalidOperationException("backplane hiccup"))
+                : Task.CompletedTask);
         var hubContext = new Mock<IHubContext<ExerciseRealtimeHub>>();
         hubContext.SetupGet(h => h.Groups).Returns(groups.Object);
 
-        var act = () => new SessionConnectionRevoker(registry, hubContext.Object).RevokeAsync([session]);
+        var act = () => new SessionConnectionRevoker(registry, hubContext.Object).RevokeAsync([sessionA, sessionB]);
 
-        await act.Should().ThrowAsync<InvalidOperationException>();
-        context.Verify(c => c.Abort(), Times.Once);
+        await act.Should().NotThrowAsync("the revocation already committed; the failure is logged, not rethrown");
+        foreach (var (id, context) in contexts)
+        {
+            groups.Verify(
+                g => g.RemoveFromGroupAsync(
+                    id, ExerciseRealtimeHub.StaffGroupNameFor(exerciseId), It.IsAny<CancellationToken>()),
+                Times.Once,
+                $"{id} must be asked out of the staff group");
+            groups.Verify(
+                g => g.RemoveFromGroupAsync(
+                    id, ExerciseRealtimeHub.GroupNameFor(exerciseId), It.IsAny<CancellationToken>()),
+                Times.Once,
+                $"{id} must be asked out of the exercise group");
+            context.Verify(c => c.Abort(), Times.Once, $"{id} must be aborted");
+        }
+
+        registry.Take(sessionA).Should().BeEmpty();
+        registry.Take(sessionB).Should().BeEmpty();
     }
 
     private static HubCallerContext Context(string connectionId)
