@@ -95,6 +95,14 @@ public sealed class EngineSettingsDto
     public required EngineAmbientPolicyDto AmbientPolicy { get; init; }
 
     /// <summary>
+    /// Whether this deployment authorises timeout auto-send (swamped mode) — the governed
+    /// <c>Generation:Governance:TimeoutAutoSendAuthorized</c> flag (PROVIDER-GOVERNANCE §8, Phase 1). Additive. While
+    /// <c>false</c> the swamped-mode POST refuses ON with 400, so the console disables its ON control.
+    /// </summary>
+    [JsonPropertyName("timeoutAutoSendAuthorized")]
+    public required bool TimeoutAutoSendAuthorized { get; init; }
+
+    /// <summary>
     /// <c>true</c> — the autonomy default and tier-policy mode live in PROCESS MEMORY and are reset by a restart.
     /// Reported honestly rather than solved here (persistence is explicitly out of scope for story 05), so an
     /// operator who restarts the App Service is not surprised by the reset.
@@ -119,6 +127,7 @@ public sealed class EngineSettingsDto
     /// The exercise's ambient-chatter policy snapshot; <c>null</c> reports the resting <c>off</c> policy against the
     /// default rate config with autonomy unauthorised (the fail-safe reading).
     /// </param>
+    /// <param name="timeoutAutoSendAuthorized">The governed timeout-auto-send flag; absent reads as not authorised.</param>
     /// <returns>The staff wire snapshot.</returns>
     /// <remarks>
     /// <see cref="EffectiveProvider"/> and <see cref="AlreadyFake"/> are resolved HERE, once, on the server — the
@@ -131,7 +140,8 @@ public sealed class EngineSettingsDto
         GenerationOptions options,
         EngineAutonomyStateDto autonomy,
         TierPolicyMode tierPolicyMode,
-        EngineAmbientPolicyDto? ambientPolicy = null)
+        EngineAmbientPolicyDto? ambientPolicy = null,
+        bool timeoutAutoSendAuthorized = false)
     {
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(autonomy);
@@ -155,6 +165,7 @@ public sealed class EngineSettingsDto
                 Pulse.Core.Features.Ambient.Models.AmbientTierPolicy.Off,
                 Pulse.Core.Features.Storylines.Models.RateGovernanceConfig.Default.MaxEnginePostsPerMinute,
                 autonomousAuthorized: false),
+            TimeoutAutoSendAuthorized = timeoutAutoSendAuthorized,
             InMemoryState = true,
             InMemoryStateNote = InMemoryNote,
         };

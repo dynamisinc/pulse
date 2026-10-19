@@ -84,6 +84,14 @@ describe('getSettings', () => {
     expect(getMock).toHaveBeenCalledWith('/engine/settings')
   })
 
+  it('passes timeoutAutoSendAuthorized through when present, and rejects a non-boolean (PROVIDER-GOVERNANCE §8)', async () => {
+    getMock.mockResolvedValue({ data: { ...VALID_DTO, timeoutAutoSendAuthorized: false } })
+    await expect(getSettings()).resolves.toMatchObject({ timeoutAutoSendAuthorized: false })
+
+    getMock.mockResolvedValue({ data: { ...VALID_DTO, timeoutAutoSendAuthorized: 'no' } })
+    await expect(getSettings()).rejects.toThrow(MalformedEngineSettingsResponseError)
+  })
+
   it('throws MalformedEngineSettingsResponseError on a malformed body', async () => {
     getMock.mockResolvedValue({ data: { nonsense: true } })
 

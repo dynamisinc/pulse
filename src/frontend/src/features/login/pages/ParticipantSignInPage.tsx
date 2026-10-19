@@ -120,6 +120,39 @@
  * file, its service and its CSS Module for any `@mui/*`, `@/theme/*` or COBRA
  * import and for the mobile-first numbers (16 px inputs, 44 px targets).
  *
+ * HOME-SCREEN APP (#606, option A): an app added to the iOS home screen has its own
+ * storage, apart from Safari's, so it always opens signed out. Tapping the
+ * personal link in Mail or Messages opens Safari, not the app. So when the page
+ * runs standalone (`isStandalone()`, read once on mount) it adds a FOURTH method,
+ * "Sign-in link", placed FIRST and selected by default, with Today's word next to it:
+ *   - The participant pastes their personal link (the full URL, a bare token, or the
+ *     whole invitation message). `extractJoinToken` (`../linkToken`) finds the token
+ *     and `signInWithLink` (`../services/joinService`) exchanges it through the
+ *     EXISTING `POST /auth/join`: the same credential and the same body-only
+ *     transport the join page uses (EL-7). Nothing new is exposed.
+ *   - Input that holds no token-shaped value is refused HERE, before any request
+ *     ("That doesn't look like a sign-in link."), so a stray word is never posted.
+ *   - Failures use `classifyJoinFailure`. A refused link (401/400) gets ONE generic
+ *     message that never says wrong vs revoked vs another exercise (NFR-009); the
+ *     field is cleared and focused. A 429 reuses the "Too many tries" copy, and
+ *     anything else the generic copy. In both cases the value is kept and focus
+ *     returns to Sign in.
+ *   - The field is plain `type="text"`, not `url`: a bare token or a whole message
+ *     is not a URL, and a URL field would reject them. Autocomplete, autocorrect,
+ *     capitalisation and spell-check are off. The value is never logged or echoed.
+ *   - A repeated pre-request refusal re-mounts the alert (`seq`), so a screen reader
+ *     announces it again even though its text did not change (Gate-1 W-2). While the
+ *     link form shows an error, the field is `aria-invalid` and described by the
+ *     alert as well as the hint.
+ *   - Four methods do not fit one row without breaking words, so in standalone mode
+ *     the toggle is always a 2 x 2 grid (`.toggleGroupFour`).
+ *   - The "Pulse" product label is HIDDEN in standalone mode, so the installed app
+ *     shows only the resolved exercise name. Outside standalone, nothing on this
+ *     page changes.
+ *   - `isStandalone()` is also true for an installed Android or desktop PWA. There
+ *     the link method is redundant (those share the browser's storage) but harmless,
+ *     and it is deliberately NOT narrowed to iOS: one check, one behaviour.
+ *
  * SCENARIO TIME (COR-053): not applicable — no participant-visible
  * timestamps on this page.
  *
@@ -141,7 +174,11 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faTowerBroadcast, faTriangleExclamation } from '@fortawesome/free-solid-svg-icons'
 import { resolveExerciseContext } from '@/core/exerciseContext'
 import { STAFF_LOGIN_PATH } from '@/features/app-shell/constants'
+import { isStandalone } from '@/features/pwa/install/installEnv'
+import { USE_MOCK_DATA } from '@/core/config/mockData'
 import { completeSignIn } from '../completeSignIn'
+import { extractJoinToken } from '../linkToken'
+import { classifyJoinFailure, signInWithLink } from '../services/joinService'
 import {
   signInWithDayWord,
   signInWithPassword,
@@ -153,26 +190,49 @@ import {
 import { useKeepSubmitVisible } from '../hooks/useKeepSubmitVisible'
 import styles from './ParticipantSignInPage.module.css'
 
-type SignInMode = 'word' | 'named' | 'shared'
+type SignInMode = 'link' | 'word' | 'named' | 'shared'
+
+interface SignInMethod {
+  readonly mode: SignInMode
+  readonly label: string
+}
 
 /** The three methods, in display order. `word` is the default (first). */
-const SIGN_IN_METHODS: readonly { readonly mode: SignInMode; readonly label: string }[] = [
+const SIGN_IN_METHODS: readonly SignInMethod[] = [
   { mode: 'word', label: "Today's word" },
   { mode: 'named', label: 'Password' },
   { mode: 'shared', label: 'View-only code' },
 ]
 
+/** Home-screen app (#606): "Sign-in link" leads, and is the default. */
+const STANDALONE_SIGN_IN_METHODS: readonly SignInMethod[] = [
+  { mode: 'link', label: 'Sign-in link' },
+  ...SIGN_IN_METHODS,
+]
+
 const WORD_UNAUTHORIZED_MESSAGE =
   "That name or word wasn't recognized. Check today's word with your controller."
-const WORD_RATE_LIMITED_MESSAGE = 'Too many tries. Wait a minute and try again.'
+const RATE_LIMITED_MESSAGE = 'Too many tries. Wait a minute and try again.'
 const NAMED_UNAUTHORIZED_MESSAGE = "That handle or password wasn't recognized."
 const SHARED_UNAUTHORIZED_MESSAGE = "That view-only code wasn't recognized."
 const GENERIC_FAILURE_MESSAGE = 'Could not sign in. Please try again.'
+const LINK_NOT_A_LINK_MESSAGE =
+  "That doesn't look like a sign-in link. Paste the whole link from your invitation."
+const LINK_UNAUTHORIZED_MESSAGE =
+  "That link wasn't recognized. Check you copied all of it, or sign in with today's word."
+
+/** Where focus goes once a request settles (see the module header's FOCUS note). */
+type FocusTarget = 'word' | 'word-submit' | 'link' | 'link-submit'
 
 interface SignInFormError {
   readonly mode: SignInMode
   readonly message: string
+  /** Bumped per pre-request refusal so the alert re-mounts and is re-announced (W-2). */
+  readonly seq?: number
 }
+
+/** The alert's id, so the link field can point `aria-describedby` at it. */
+const ERROR_ID = 'participant-signin-error'
 
 /**
  * Softly resolves the current host's exercise name for the heading (AC5).
@@ -196,8 +256,12 @@ export function ParticipantSignInPage() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const exerciseName = useResolvedExerciseName()
+  // Read once: a page does not switch between browser tab and home-screen app.
+  const [standalone] = useState(() => isStandalone())
+  const methods = standalone ? STANDALONE_SIGN_IN_METHODS : SIGN_IN_METHODS
 
-  const [mode, setMode] = useState<SignInMode>('word')
+  const [mode, setMode] = useState<SignInMode>(standalone ? 'link' : 'word')
+  const [pastedLink, setPastedLink] = useState('')
   const [signInName, setSignInName] = useState('')
   const [word, setWord] = useState('')
   const [username, setUsername] = useState('')
@@ -215,17 +279,25 @@ export function ParticipantSignInPage() {
   useKeepSubmitVisible(cardRef)
   const wordInputRef = useRef<HTMLInputElement>(null)
   const wordSubmitRef = useRef<HTMLButtonElement>(null)
-  const focusAfterSubmitRef = useRef<'word' | 'submit' | null>(null)
+  const linkInputRef = useRef<HTMLInputElement>(null)
+  const linkSubmitRef = useRef<HTMLButtonElement>(null)
+  const focusAfterSubmitRef = useRef<FocusTarget | null>(null)
+  const refusalSeqRef = useRef(0)
 
   useEffect(() => {
     if (isSubmitting) return
     const target = focusAfterSubmitRef.current
     if (target === null) return
     focusAfterSubmitRef.current = null
-    // Both controls are enabled again by now; the ref is null if the day-word
-    // form was switched away from while the request was in flight.
-    const element = target === 'word' ? wordInputRef.current : wordSubmitRef.current
-    element?.focus()
+    // The controls are enabled again by now; a ref is null if its form was
+    // switched away from while the request was in flight.
+    const targets: Record<FocusTarget, HTMLElement | null> = {
+      'word': wordInputRef.current,
+      'word-submit': wordSubmitRef.current,
+      'link': linkInputRef.current,
+      'link-submit': linkSubmitRef.current,
+    }
+    targets[target]?.focus()
   }, [isSubmitting])
 
   function selectMode(nextMode: SignInMode) {
@@ -264,11 +336,42 @@ export function ParticipantSignInPage() {
         setWord('')
         focusAfterSubmitRef.current = 'word'
       } else if (isRateLimitedSignInError(caught)) {
-        setError({ mode: 'word', message: WORD_RATE_LIMITED_MESSAGE })
-        focusAfterSubmitRef.current = 'submit'
+        setError({ mode: 'word', message: RATE_LIMITED_MESSAGE })
+        focusAfterSubmitRef.current = 'word-submit'
       } else {
         setError({ mode: 'word', message: GENERIC_FAILURE_MESSAGE })
-        focusAfterSubmitRef.current = 'submit'
+        focusAfterSubmitRef.current = 'word-submit'
+      }
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  async function handleLinkSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setError(null)
+    const token = extractJoinToken(pastedLink, { allowLooseBareToken: USE_MOCK_DATA })
+    if (token === null) {
+      // Refused before any request: nothing token-shaped is ever posted.
+      refusalSeqRef.current += 1
+      setError({ mode: 'link', message: LINK_NOT_A_LINK_MESSAGE, seq: refusalSeqRef.current })
+      linkInputRef.current?.focus()
+      return
+    }
+    setIsSubmitting(true)
+    try {
+      finishSignIn(await signInWithLink(token))
+    } catch (caught) {
+      const failure = classifyJoinFailure(caught)
+      if (failure === 'link-invalid') {
+        setError({ mode: 'link', message: LINK_UNAUTHORIZED_MESSAGE })
+        setPastedLink('')
+        focusAfterSubmitRef.current = 'link'
+      } else {
+        const message =
+          failure === 'rate-limited' ? RATE_LIMITED_MESSAGE : GENERIC_FAILURE_MESSAGE
+        setError({ mode: 'link', message })
+        focusAfterSubmitRef.current = 'link-submit'
       }
     } finally {
       setIsSubmitting(false)
@@ -316,17 +419,24 @@ export function ParticipantSignInPage() {
   return (
     <main className={styles.page}>
       <div ref={cardRef} className={styles.card}>
-        <div className={styles.brandRow}>
-          <FontAwesomeIcon icon={faTowerBroadcast} aria-hidden className={styles.brandIcon} />
-          <span className={styles.brandLabel}>Pulse</span>
-        </div>
+        {/* Hidden in the home-screen app (#606): only the exercise name shows there. */}
+        {standalone ? null : (
+          <div className={styles.brandRow}>
+            <FontAwesomeIcon icon={faTowerBroadcast} aria-hidden className={styles.brandIcon} />
+            <span className={styles.brandLabel}>Pulse</span>
+          </div>
+        )}
 
         <h1 className={styles.heading}>
           {exerciseName ? `Sign in to ${exerciseName}` : 'Sign in'}
         </h1>
 
-        <div className={styles.toggleGroup} role="group" aria-label="Sign-in method">
-          {SIGN_IN_METHODS.map(method => (
+        <div
+          className={standalone ? `${styles.toggleGroup} ${styles.toggleGroupFour}` : styles.toggleGroup}
+          role="group"
+          aria-label="Sign-in method"
+        >
+          {methods.map(method => (
             <button
               key={method.mode}
               type="button"
@@ -339,7 +449,51 @@ export function ParticipantSignInPage() {
           ))}
         </div>
 
-        {mode === 'word' ? (
+        {mode === 'link' ? (
+          <form
+            className={styles.form}
+            aria-label="Sign in with your link"
+            method="post"
+            onSubmit={handleLinkSubmit}
+          >
+            <div className={styles.field}>
+              <label htmlFor="participant-signin-link" className={styles.label}>
+                Paste your sign-in link
+              </label>
+              <input
+                id="participant-signin-link"
+                ref={linkInputRef}
+                name="link"
+                type="text"
+                autoComplete="off"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
+                inputMode="text"
+                enterKeyHint="go"
+                aria-describedby={activeError
+                  ? `participant-signin-link-hint ${ERROR_ID}`
+                  : 'participant-signin-link-hint'}
+                aria-invalid={activeError ? true : undefined}
+                className={styles.input}
+                value={pastedLink}
+                onChange={event => setPastedLink(event.target.value)}
+                required
+              />
+              <p id="participant-signin-link-hint" className={styles.hint}>
+                Copy it from your invitation email or text message.
+              </p>
+            </div>
+            <button
+              ref={linkSubmitRef}
+              type="submit"
+              className={styles.submitButton}
+              disabled={isSubmitting}
+            >
+              Sign in
+            </button>
+          </form>
+        ) : mode === 'word' ? (
           <form
             className={styles.form}
             aria-label="Sign in with today's word"
@@ -481,7 +635,7 @@ export function ParticipantSignInPage() {
         )}
 
         {activeError ? (
-          <p role="alert" className={styles.alert}>
+          <p key={activeError.seq ?? 0} id={ERROR_ID} role="alert" className={styles.alert}>
             <FontAwesomeIcon icon={faTriangleExclamation} aria-hidden />
             <span>{activeError.message}</span>
           </p>

@@ -1012,8 +1012,12 @@ public sealed class EngineReviewServiceTests
         Guid? currentExerciseId,
         Func<EngineBurst, EngineBurstPublishResult>? publishOutcome = null,
         IEngineReviewBroadcaster? reviewBroadcaster = null,
-        Func<Task>? afterQueueSnapshot = null)
+        Func<Task>? afterQueueSnapshot = null,
+        bool timeoutAutoSendAuthorized = true)
     {
+        // timeoutAutoSendAuthorized: this suite's swamped-mode / auto-send tests exercise the authorised posture, so
+        // the harness sets Generation:Governance:TimeoutAutoSendAuthorized = true explicitly (production defaults false,
+        // PROVIDER-GOVERNANCE §8 Phase 1); the refusal is proven in EngineReviewSafetyInvariantTests.
         var context = new ExerciseContext { CurrentExerciseId = currentExerciseId };
         var db = _fixture.CreateContext(context);
         var time = new ManualTimeProvider(ScenarioStart);
@@ -1064,7 +1068,9 @@ public sealed class EngineReviewServiceTests
             new FakeGenerationProvider(),
             Options.Create(new GenerationOptions()),
             new GenerationProviderCutRegistry(),
-            NullLogger<EngineReviewService>.Instance);
+            NullLogger<EngineReviewService>.Instance,
+            ambientPolicy: null,
+            governance: Options.Create(new EngineAmbientGovernanceOptions { TimeoutAutoSendAuthorized = timeoutAutoSendAuthorized }));
 
         return new Harness(service, db, published, registry, time);
     }

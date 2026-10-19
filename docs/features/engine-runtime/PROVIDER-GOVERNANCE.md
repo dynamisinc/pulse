@@ -144,17 +144,72 @@ default (Azure OpenAI in-tenant is the v1 default; Claude is the per-deployment 
 
 ## 8. Sign-off
 
-> **Status: UNSIGNED — this is the hard stop.** `engine-runtime/05` has prepared everything below and
-> deliberately stopped here. Evidence is compiled and linked so signing is a **one-step human action**;
-> nothing in the repo ticks a box. Until the boxes below are ticked and signer + date entered,
-> `generationProviderLive` stays `false` and the UAT App Service resolves `Generation:Provider = Fake`.
+> **Status: SIGNED — Tom Bull, 2026-10-16 — `uat` only, Ambient tier, autonomy per the "Authorized
+> autonomy" amendment below (Suggest by default; Delayed-auto and lead-controller swamped mode
+> authorized).** The three
+> `uat.bicepparam` parameters (`generationProviderLive`, `generationTenantBounded`,
+> `generationNoTrainingAttested`) were set to `true` in the same commit that recorded this signature.
+> CI and production stay on `Fake`. The text below is kept as the pre-signing record.
 
 **Environment requested:** `uat` (`app-pulse-api-uat-dynamis` → `aif-pulse-uat`,
 `rg-pulse-uat-centralus`). CI and production are **not** in scope and stay on `Fake`.
 **Posture requested:** Ambient tier (`gpt-5.4-mini`, via the temporary Standard→Ambient config alias),
 **suggest-only** autonomy — every AI draft needs a human approve before it can reach participants
 (it is also the only posture reachable today; the runtime Suggest→Delayed-auto lever is
-`autonomy-safety/05`, #353).
+`autonomy-safety/05`, #353). *Superseded at signing: #353 merged 2026-07-29, so Delayed-auto is
+reachable. See "Authorized autonomy (amendment at signing)" below.*
+
+#### Authorized autonomy (amendment at signing, 2026-10-16, Tom Bull)
+
+The posture above predates #353. With #353 on `main`, a controller can raise the exercise's autonomy
+default to **Delayed-auto** and the exercise's **lead controller** can turn on **swamped mode**. Under both,
+`AutoHoldPolicy` publishes an expired Delayed-auto draft that has no controller decision. The signer
+**authorizes** that on `uat` with the live provider, in two phases.
+
+> **Phase 1, from the 2026-10-17 go-live until A1c is on `main` (edit re-initialled: Tom Bull, 2026-10-17):**
+> **timeout auto-send is NOT authorized.** It is enforced in code by the governed flag
+> `Generation:Governance:TimeoutAutoSendAuthorized = false` (`generationTimeoutAutoSendAuthorized`, `false` in
+> `uat.bicepparam`):
+> - turning swamped mode **on** is refused with a `400`; turning it off always works;
+> - the tick never auto-sends, even if swamped mode were somehow on, so an expired Delayed-auto draft is always
+>   **held**;
+> - together with `AmbientAutonomyAuthorized = false` (amendment 2, unsigned), every AI draft therefore needs a human
+>   approval. Suggest is the default; Delayed-auto countdowns may run, and they end in a hold.
+> - **Known gap before Phase 2:** the console's swamped-mode toggle is local to the browser and never calls the server,
+>   so turning the flag on alone would not make swamped mode work from the console. Wiring the toggle to the server is
+>   a Phase 2 prerequisite.
+>
+> Because nothing auto-sends in Phase 1, #571 may merge before Session A's A1 work.
+>
+> **Phase 2** starts only with a separate reviewed commit that sets `generationTimeoutAutoSendAuthorized = true` for
+> `uat`, made after A1c's lead gate is on `main`. From then on the conditions below apply in full.
+
+The conditions, each enforced in code by this PR (#571) or by Session A's A1 work:
+
+- **Suggest is the default.** Every AI draft needs a human approve unless a controller deliberately
+  raises the exercise to Delayed-auto.
+- **Silence is never approval.** Without swamped mode, an expired Delayed-auto draft is **held**, never
+  sent (`AutoHoldPolicy.Decide`, pinned by `AutoHoldPolicyTests`).
+- **Swamped mode is the only auto-send path.** It applies only to drafts whose effective level is still
+  Delayed-auto.
+- **Raising is lead-only; lowering is open to any controller** (raise-only lead gate, Tom's decision
+  2026-10-16; A1 stories 16-17, #572/#573, `Enrollment.IsLead`):
+  - Only the exercise's lead controller may turn swamped mode **on**, raise autonomy, restore after the
+    kill switch, or restore the generation provider after a cut. Anyone else gets `403`.
+  - Any assigned controller may turn swamped mode **off**, lower autonomy, engage the kill switch, or cut
+    generation to `Fake`.
+  - Removing or demoting the lead clears `IsLead` and turns swamped mode off in the same transaction,
+    and both changes are audited.
+- **Every safety clamp overrides it.** The kill switch and degraded mode drop the effective level, so
+  in-flight countdowns hold instead of sending. Cutting generation to `Fake` (#402) also holds them: an
+  expired Delayed-auto draft in a cut exercise is held even under swamped mode. The cut is re-checked
+  immediately before every automatic publish (hold-on-cut, this PR). **Limit:** a burst already handed to
+  the publisher runs to completion. Neither a cut nor the kill switch interrupts it; both stop every later
+  automatic publish.
+- **Participants never see a draft;** an auto-sent post is logged as engine-sourced.
+
+Wider autonomy than this (autonomous ambient posting under a tier policy, wave C2 / #168) needs its
+own amendment to this section before it reaches the live provider.
 
 ### Evidence (compiled by `engine-runtime/05` — verify, don't take on trust)
 
@@ -222,9 +277,21 @@ verification pass).
 
 | | |
 |---|---|
-| Governance contract reviewed (§2 — evidence i) | ☐ |
-| Fail-closed gate verified (§3 — `ProviderLiveConfigTests` green in CI, evidence ii) | ☐ |
-| Measured p95 within the degraded-mode threshold (§5 — evidence iii) | ☐ |
-| `InjectionRedTeam` green against the live provider (§6 — evidence iv) | ☐ |
-| Approved to flip `Generation:Provider` off `Fake` for `<environment>` — requested: **`uat`**, Ambient tier, suggest-only | ☐ |
-| Signer / date | |
+| Governance contract reviewed (§2 — evidence i) | ☑ |
+| Fail-closed gate verified (§3 — `ProviderLiveConfigTests` green in CI, evidence ii) | ☑ |
+| Measured p95 within the degraded-mode threshold (§5 — evidence iii) | ☑ |
+| `InjectionRedTeam` green against the live provider (§6 — evidence iv) | ☑ |
+| Approved to flip `Generation:Provider` off `Fake` for **`uat`** — Ambient tier; Suggest default, Delayed-auto + swamped mode authorized (lead-only to turn on, any controller to turn off; see amendment) | ☑ |
+| Signer / date | **Tom Bull — 2026-10-16** |
+
+### Pre-signing verification against Azure (2026-10-16, run by the signer in Cloud Shell, `Shared SandBox`)
+
+Provisioning half deployed by **Deploy Infrastructure** run #12
+([37951107243](https://github.com/dynamisinc/pulse/actions/runs/37951107243), 2026-10-09, real deploy,
+not what-if) from `2435702`, with `deployAi = true` and all three live-traffic params `false`.
+
+| Check | Expected | Observed |
+|---|---|---|
+| (i) App Service identity role on `aif-pulse-uat` | `Cognitive Services OpenAI User` at account scope | `Cognitive Services OpenAI User` at `…/Microsoft.CognitiveServices/accounts/aif-pulse-uat` ✅ |
+| (i) Keyless + residency | `localAuthDisabled: true`, `centralus` | `true`, `centralus` ✅ |
+| (iv) Ambient model version drift (§6) | `gpt-5.4-mini` `2026-03-17` | `gpt-5.4-mini` `2026-03-17` ✅ (no drift; no §6 re-run needed) |

@@ -278,6 +278,17 @@ public sealed class ExerciseReportBuilderTests
         ExerciseReportBuilder.LookalikeOutdrew(verified, lookalike).Should().Be(outdrew);
 
     [Fact]
+    public void ScenarioNow_IsTheLaterOfTheClockAndTheLatestPost_OrNull()
+    {
+        var clock = T0.AddHours(2);
+        ExerciseReportBuilder.ScenarioNow(clock, T0).Should().Be(clock, "a live exercise is past its last post");
+        ExerciseReportBuilder.ScenarioNow(T0, clock).Should().Be(clock, "a post dated after the clock is never hidden");
+        ExerciseReportBuilder.ScenarioNow(null, T0).Should().Be(T0);
+        ExerciseReportBuilder.ScenarioNow(clock, null).Should().Be(clock);
+        ExerciseReportBuilder.ScenarioNow(null, null).Should().BeNull();
+    }
+
+    [Fact]
     public void PairLookalikes_UnverifiedHandleStartingWithAVerifiedOne_IsPaired_CaseInsensitive()
     {
         var verified = new ReportLookalikeCandidate(Guid.NewGuid(), "KestrelPD", Verified: true);

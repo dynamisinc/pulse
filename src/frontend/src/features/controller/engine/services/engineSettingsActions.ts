@@ -157,6 +157,14 @@ export interface EngineSettingsDto {
    * rather than a malformed-response failure; validated when present.
    */
   readonly ambientPolicy?: AmbientPolicyDto
+  /**
+   * Whether this deployment authorises timeout auto-send (swamped mode) — the
+   * governed `Generation:Governance:TimeoutAutoSendAuthorized` flag
+   * (PROVIDER-GOVERNANCE §8, Phase 1). Additive and optional: absent (an older
+   * server or a fixture) means "unknown", not "refused". When `false` the
+   * server refuses swamped ON with 400, so the console disables its ON control.
+   */
+  readonly timeoutAutoSendAuthorized?: boolean
 }
 
 /** Request context shared by both mutating endpoints — no client `exerciseId` (COR-001). */
@@ -249,7 +257,8 @@ function isWireEngineSettings(value: unknown): value is EngineSettingsDto {
     typeof s.tierPolicyMode === 'string' && TIER_POLICY_MODES.has(s.tierPolicyMode) &&
     typeof s.inMemoryState === 'boolean' &&
     typeof s.inMemoryStateNote === 'string' &&
-    (s.ambientPolicy === undefined || isWireAmbientPolicy(s.ambientPolicy))
+    (s.ambientPolicy === undefined || isWireAmbientPolicy(s.ambientPolicy)) &&
+    (s.timeoutAutoSendAuthorized === undefined || typeof s.timeoutAutoSendAuthorized === 'boolean')
   )
 }
 

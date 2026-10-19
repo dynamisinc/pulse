@@ -64,7 +64,11 @@ param deployAi = true
 // Cost, once live: ~$0.61/exercise-hour at the measured Ambient rate while a storyline is active
 // (MEASURED-RESULTS.md). Cheap, not free — flip it back to false after a verification pass rather than
 // leaving it on indefinitely.
-param generationProviderLive = false
+//
+// SIGNED 2026-10-16 (Tom Bull) — PROVIDER-GOVERNANCE.md §8, uat / Ambient; Suggest default,
+// Delayed-auto + swamped mode authorized: lead-only to turn on, any controller to turn off
+// (§8 "Authorized autonomy" amendment).
+param generationProviderLive = true
 
 // The two §2 governance attestations, asserted HERE BY A HUMAN — deliberately not derived from deployAi,
 // so GenerationGovernance.Validate remains an independent startup gate that can actually fire rather than
@@ -86,14 +90,20 @@ param generationProviderLive = false
 // them asserts nothing (fail closed). Harmless today: with generationProviderLive = false the App Service
 // resolves Generation:Provider = Fake, whose in-process posture is compliant by construction and never
 // runs the governance gate.
-param generationTenantBounded = false
-param generationNoTrainingAttested = false
+// Attested by the §8 signer (Tom Bull, 2026-10-16) after verifying evidence (i) against Azure.
+param generationTenantBounded = true
+param generationNoTrainingAttested = true
 
 // ⚠ Autonomous ambient chatter (ambient-chatter story 01, AC0) — App Service setting
 // Generation__Governance__AmbientAutonomyAuthorized. When false, the engine settings POST rejects ambient mode
 // `autonomous` with a 400 (review mode still works). Stated explicitly rather than left to the main.bicep default.
 // NOT authorized until PROVIDER-GOVERNANCE §8 amendment 2 is signed; the signer flips this in that same commit.
 param generationAmbientAutonomyAuthorized = false
+
+// ⚠ Timeout auto-send (swamped mode) — App Service setting Generation__Governance__TimeoutAutoSendAuthorized. When
+// false, turning swamped mode ON is refused with a 400 and an expired Delayed-auto countdown always holds for a human.
+// Phase 1 (PROVIDER-GOVERNANCE §8 amendment 1): timeout auto-send NOT authorized until A1c's lead-controller gate is on main; set true in a separate reviewed commit after that.
+param generationTimeoutAutoSendAuthorized = false
 
 // Flip to true (with deployAi) to also deploy the Claude-on-Foundry tiers for the E8 provider
 // comparison. Requires a Claude-eligible subscription; the Anthropic Marketplace offer is auto-accepted
@@ -140,9 +150,8 @@ param staffIdentityAccountsJson = readEnvironmentVariable('STAFF_IDENTITY_ACCOUN
 // GitHub environment (threaded by deploy-infrastructure.yml). An unset secret with alerts on FAILS the
 // deploy with a clear message.
 //
-// LANDS OFF on purpose: merging this changes nothing on UAT. Flip deployProviderAlerts to true in a ONE-LINE
-// FOLLOW-UP once Tom has created the PULSE_ALERT_OWNER_EMAIL secret on the uat environment (otherwise every
-// UAT infra deploy would fail until the secret exists). Thresholds can be overridden here for a forced test
+// ON since the 10/17 go-live (#571): Tom created the PULSE_ALERT_OWNER_EMAIL secret on the uat environment. If that
+// secret is ever removed, every UAT infra deploy fails with a clear message until it is restored or this is set false. Thresholds can be overridden here for a forced test
 // fire (e.g. param providerAlertCallsPerHourThreshold = 1), then reverted; see infrastructure/README.md.
-param deployProviderAlerts = false
+param deployProviderAlerts = true // ON for the Saturday go-live: PULSE_ALERT_OWNER_EMAIL added to the uat environment (Tom, 2026-10-17)
 param alertOwnerEmail = readEnvironmentVariable('PULSE_ALERT_OWNER_EMAIL', '')

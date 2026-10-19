@@ -91,6 +91,11 @@ vi.mock('@/core/exerciseContext', () => ({
   resolveExerciseContext: vi.fn(),
 }))
 
+// A browser tab, explicitly: the home-screen variant (#606) has its own suite
+// (`ParticipantSignInPage.standalone.test.tsx`), and this one must not depend on jsdom
+// happening to lack `matchMedia` / `navigator.standalone`.
+vi.mock('@/features/pwa/install/installEnv', () => ({ isStandalone: () => false }))
+
 const mockNavigate = vi.fn()
 vi.mock('react-router-dom', async importOriginal => {
   const actual = await importOriginal<typeof import('react-router-dom')>()
