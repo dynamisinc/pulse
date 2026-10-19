@@ -17,14 +17,28 @@
  * still change only the record (DF-44). "Latest scenario day" fills From/To with 00:00-23:59 of
  * the latest post's scenario date (`latestDay`, from the server) and applies at once; it is
  * disabled while the exercise has no posts (`latestDay` null).
+ *
+ * PICKERS (Tom, 10/17): From/To are native `datetime-local` inputs (the browser's date and time
+ * picker; typing still works), holding exercise-zone wall times with no zone conversion. Until
+ * To is touched it SHOWS "now" (`scenarioNow`: the live scenario clock, else the latest post)
+ * but stays an OPEN end, so a live exercise's later posts are never cut off. A half-typed
+ * value (the browser reports `badInput`) is refused inline instead of reading as "no bound".
  */
 
-import { useId, useState, type KeyboardEvent } from 'react'
+import { useId, useRef, useState, type KeyboardEvent } from 'react'
 import { Box, Checkbox, FormControlLabel, FormGroup, FormLabel } from '@mui/material'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faCalendarDay, faCircleExclamation, faRotateLeft } from '@fortawesome/free-solid-svg-icons'
 import { CobraSecondaryButton, CobraTextField } from '@/theme/styledComponents'
-import { SOURCE_LABELS, SOURCE_ORDER, orderedSources, parseTimeField } from '../services/reportFilters'
+import {
+  SOURCE_LABELS,
+  SOURCE_ORDER,
+  earliestStamp,
+  fromInputValue,
+  orderedSources,
+  parseTimeField,
+  toInputValue,
+} from '../services/reportFilters'
 import type { ReportFilters, ReportSourceKey } from '../types/report'
 
 export interface ReportFilterBarProps {
@@ -39,9 +53,13 @@ export interface ReportFilterBarProps {
   readonly serverError: string | null
   /** Story 31: the latest post's scenario day (00:00 to 23:59, "yyyy-MM-dd HH:mm"), or null. */
   readonly latestDay?: { readonly from: string; readonly to: string } | null
+  /** Scenario "now" ("yyyy-MM-dd HH:mm"): what an untouched To shows. Null when unknown. */
+  readonly scenarioNow?: string | null
 }
 
 type TimeField = 'from' | 'to'
+
+const HALF_TYPED = 'Enter a full date and time.'
 
 /** Screen-reader-only text (the standard clip pattern). */
 const VISUALLY_HIDDEN = {
@@ -59,12 +77,23 @@ export function ReportFilterBar({
   windowStart,
   serverError,
   latestDay = null,
+  scenarioNow = null,
 }: ReportFilterBarProps) {
   const [draft, setDraft] = useState<Record<TimeField, string>>({
     from: filters.from ?? '',
     to: filters.to ?? '',
   })
   const [errors, setErrors] = useState<Record<TimeField, string | null>>({ from: null, to: null })
+  // Until To is touched it shows "now" but is not a bound (an open end).
+  const [toTouched, setToTouched] = useState(filters.to !== null)
+  const fromInput = useRef<HTMLInputElement>(null)
+  const toInput = useRef<HTMLInputElement>(null)
+  const inputOf = (field: TimeField) => (field === 'from' ? fromInput : toInput)
+  /** The text a field stands for: an untouched To is empty (open), whatever it shows. */
+  const valueOf = (field: TimeField) => (field === 'to' && !toTouched ? '' : draft[field])
+  const showsNow = (field: TimeField) => field === 'to' && !toTouched && scenarioNow !== null
+  /** The browser holds a half-typed date or time (its value then reads as empty). */
+  const halfTyped = (field: TimeField) => inputOf(field).current?.validity.badInput === true
 
   const selected = orderedSources(filters.sources)
   const lastId = useId()
@@ -82,12 +111,21 @@ export function ReportFilterBar({
    */
   function commit(field: TimeField) {
     const other: TimeField = field === 'from' ? 'to' : 'from'
-    const mine = parseTimeField(draft[field], windowStart, null)
-    const theirs = parseTimeField(draft[other], windowStart, null)
+    if (halfTyped(field)) {
+      setErrors(current => ({ ...current, [field]: HALF_TYPED }))
+      return
+    }
+    const mine = parseTimeField(valueOf(field), windowStart, null)
+    const theirs = halfTyped(other)
+      ? ({ ok: false, message: HALF_TYPED } as const)
+      : parseTimeField(valueOf(other), windowStart, null)
     const mineValue = mine.ok ? mine.value : null
     // An invalid other draft is not what gets sent: its APPLIED value is, so check against that.
     const theirValue = theirs.ok ? theirs.value : filters[other]
-    const [low, high] = field === 'from' ? [mineValue, theirValue] : [theirValue, mineValue]
+    // An untouched To SHOWS "now": From may not pass it either (it bounds this check, never the
+    // query), so the fields never display an inverted window.
+    const checkedTo = field === 'from' && theirValue === null && showsNow('to') ? scenarioNow : theirValue
+    const [low, high] = field === 'from' ? [mineValue, checkedTo] : [theirValue, mineValue]
     const inverted = mine.ok && low !== null && high !== null && low > high
 
     setErrors(current => ({
@@ -111,7 +149,11 @@ export function ReportFilterBar({
   }
 
   function clearWindow() {
+    // A half-typed value lives only in the browser (its value already reads ''), so React would
+    // leave it on screen: wipe the inputs themselves.
+    for (const input of [fromInput.current, toInput.current]) if (input !== null) input.value = ''
     setDraft({ from: '', to: '' })
+    setToTouched(false)
     setErrors({ from: null, to: null })
     if (filters.from !== null || filters.to !== null) onChange({ ...filters, from: null, to: null })
   }
@@ -120,26 +162,44 @@ export function ReportFilterBar({
   function applyLatestDay() {
     if (latestDay === null) return
     setDraft({ from: latestDay.from, to: latestDay.to })
+    setToTouched(true)
     setErrors({ from: null, to: null })
     if (latestDay.from !== filters.from || latestDay.to !== filters.to) {
       onChange({ ...filters, from: latestDay.from, to: latestDay.to })
     }
   }
 
-  const hint = 'yyyy-MM-dd HH:mm'
+  const earliest = earliestStamp(windowStart)
+  const shown = (field: TimeField) =>
+    showsNow(field) && scenarioNow !== null ? scenarioNow : draft[field]
+  const hint = (field: TimeField) =>
+    showsNow(field) ? 'Defaults to now' : 'Scenario time, exercise zone'
   const timeField = (field: TimeField, label: string) => (
     <CobraTextField
       size="small"
+      type="datetime-local"
       label={label}
-      value={draft[field]}
-      onChange={event => setDraft(current => ({ ...current, [field]: event.target.value }))}
+      value={toInputValue(shown(field))}
+      inputRef={inputOf(field)}
+      onChange={event => {
+        if (field === 'to') setToTouched(true)
+        const value = fromInputValue(event.target.value)
+        setDraft(current => ({ ...current, [field]: value }))
+      }}
       onBlur={() => commit(field)}
       onKeyDown={event => onKeyDown(field, event)}
       error={errors[field] !== null}
-      helperText={errors[field] ?? hint}
-      placeholder={windowStart ?? hint}
-      slotProps={{ htmlInput: { autoComplete: 'off' } }}
-      sx={{ width: 190 }}
+      helperText={errors[field] ?? hint(field)}
+      slotProps={{
+        // A datetime-local input always shows its own mask, so the label stays shrunk.
+        inputLabel: { shrink: true },
+        htmlInput: {
+          autoComplete: 'off',
+          step: 60,
+          ...(earliest === null ? {} : { min: toInputValue(earliest) }),
+        },
+      }}
+      sx={{ width: 230 }}
     />
   )
 

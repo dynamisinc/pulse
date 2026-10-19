@@ -8,6 +8,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Threading.Tasks;
 using FluentAssertions;
+using Microsoft.EntityFrameworkCore;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.Media;
 using Pulse.WebApi.Tests.Data;
@@ -25,11 +26,13 @@ public sealed class ExerciseReportScopeEndpointTests
 {
     private static readonly DateTimeOffset Now = new(2026, 10, 16, 12, 0, 0, TimeSpan.Zero);
 
+    private readonly MsSqlContainerFixture _fixture;
     private readonly PostExportSeed _seed;
     private readonly ExerciseReportSeed _report;
 
     public ExerciseReportScopeEndpointTests(MsSqlContainerFixture fixture)
     {
+        _fixture = fixture;
         _seed = new PostExportSeed(fixture);
         _report = new ExerciseReportSeed(fixture);
     }
@@ -283,6 +286,41 @@ public sealed class ExerciseReportScopeEndpointTests
     }
 
     [RequiresDockerFact]
+    public async Task ScenarioNow_IsTheStoredScenarioTime_OrTheLatestPostWhenLater_InTheExerciseZone()
+    {
+        var exerciseId = await _seed.ExerciseAsync(timeZone: "America/Chicago");
+        var (token, _) = await _seed.StaffAsync(exerciseId, [(exerciseId, "controller")]);
+        var persona = await _report.PersonaAsync(exerciseId, "resident", "Resident");
+        await using var host = await ExerciseReportTestHost.StartAsync(_seed.ConnectionString, exerciseId, utcNow: Now);
+
+        using (var empty = await GetJsonAsync(host, token, string.Empty))
+        {
+            empty.RootElement.GetProperty("exercise").GetProperty("scenarioNow").ValueKind
+                .Should().Be(JsonValueKind.Null, "no clock, no stored time and no posts");
+        }
+
+        // 13:00Z = 08:00 CDT. No stored scenario time: the latest post is "now".
+        await _seed.PostAsync(exerciseId, persona, 0, p => p.Origin = "participant");
+        using (var postsOnly = await GetJsonAsync(host, token, string.Empty))
+        {
+            postsOnly.RootElement.GetProperty("exercise").GetProperty("scenarioNow").GetString().Should().Be("2033-09-04 08:00");
+        }
+
+        // The persisted scenario time (the clock's fallback) is later: it wins, whatever the window.
+        await SetStoredScenarioTimeAsync(exerciseId, PostExportSeed.ScenarioStart.AddHours(3));
+        foreach (var query in new[] { string.Empty, "?from=2033-09-04%2008:00&to=2033-09-04%2008:05" })
+        {
+            using var stored = await GetJsonAsync(host, token, query);
+            stored.RootElement.GetProperty("exercise").GetProperty("scenarioNow").GetString().Should().Be("2033-09-04 11:00", query);
+        }
+
+        // A post dated after the stored time is never hidden by the default end.
+        await _seed.PostAsync(exerciseId, persona, 240, p => p.Origin = "engine");
+        using var later = await GetJsonAsync(host, token, string.Empty);
+        later.RootElement.GetProperty("exercise").GetProperty("scenarioNow").GetString().Should().Be("2033-09-04 12:00");
+    }
+
+    [RequiresDockerFact]
     public async Task LatestDay_OnTheLastRepresentableDay_DoesNotOverflow_AndAWindowExcludingItStillBuilds()
     {
         var exerciseId = await _seed.ExerciseAsync();
@@ -446,6 +484,14 @@ public sealed class ExerciseReportScopeEndpointTests
         record.Remove("from");
         record.Remove("to");
         return node.ToJsonString();
+    }
+
+    private async Task SetStoredScenarioTimeAsync(Guid exerciseId, DateTimeOffset scenarioTime)
+    {
+        await using var context = _fixture.CreateContext();
+        var exercise = await context.Exercises.SingleAsync(row => row.Id == exerciseId);
+        exercise.CurrentScenarioTime = scenarioTime;
+        await context.SaveChangesAsync();
     }
 
     private static async Task<JsonDocument> GetJsonAsync(ExerciseReportTestHost host, string token, string query)

@@ -126,6 +126,7 @@ export function ExerciseReportPage() {
             onChange={setFilters}
             windowStart={exerciseStart ?? start}
             latestDay={report?.exercise.latestDay ?? null}
+            scenarioNow={report?.exercise.scenarioNow ?? null}
             serverError={serverError}
           />
           <Box sx={{ flex: 1 }} />
