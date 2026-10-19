@@ -91,11 +91,11 @@ public sealed partial class EngineReviewService
 
     /// <summary>
     /// The 400 message <see cref="SetSwampedModeAsync"/> returns for an ON request while the governed
-    /// <c>Generation:Governance:TimeoutAutoSendAuthorized</c> flag is false (PROVIDER-GOVERNANCE §8, Phase 1).
+    /// <c>Generation:Governance:TimeoutAutoSendAuthorized</c> flag is false (PROVIDER-GOVERNANCE §8). Worded for any
+    /// environment, not only the Phase-1 UAT window (#636 W-001).
     /// </summary>
     public const string TimeoutAutoSendNotAuthorizedMessage =
-        "timeout auto-send (swamped mode) is not authorized on this environment until the lead-controller gate lands "
-        + "(PROVIDER-GOVERNANCE §8, Phase 1)";
+        "timeout auto-send (swamped mode) is not authorized on this environment (PROVIDER-GOVERNANCE §8)";
 
     /// <summary>Creates the review service over its persistence, scope, clock, telemetry, publish, push, and autonomy collaborators.</summary>
     /// <param name="store">The seam-freeze review-item persistence store (reads + lookup).</param>
@@ -434,8 +434,8 @@ public sealed partial class EngineReviewService
 
         if (enabled && !_timeoutAutoSendAuthorized)
         {
-            // PROVIDER-GOVERNANCE §8, Phase 1: raising toward unreviewed timeout publishes is refused until the
-            // lead-controller gate lands. Lowering (enabled=false) is never refused.
+            // PROVIDER-GOVERNANCE §8: raising toward unreviewed timeout publishes is refused on any environment that has
+            // not authorised it. Lowering (enabled=false) is never refused.
             return EngineAutonomyResult.Invalid(TimeoutAutoSendNotAuthorizedMessage);
         }
 

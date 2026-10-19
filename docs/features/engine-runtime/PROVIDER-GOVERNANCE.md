@@ -183,6 +183,14 @@ default to **Delayed-auto** and the exercise's **lead controller** can turn on *
 >
 > **Phase 2** starts only with a separate reviewed commit that sets `generationTimeoutAutoSendAuthorized = true` for
 > `uat`, made after A1c's lead gate is on `main`. From then on the conditions below apply in full.
+>
+> **Phase 2 commit (status note, not a signed edit; awaiting the signer's Tier-2 sign-off on the PR):**
+> - A1c (#615) is on `main`; its UAT role smoke passed on 2026-10-19 (non-lead ON `403`, OFF `200`; lead ON refused
+>   `400` by this flag).
+> - The known gap above is closed in the same commit: the console's swamped-mode toggle now calls
+>   `POST /api/engine/autonomy/swamped-mode` and shows the server's state (`GET /api/engine/settings`), so every
+>   controller sees the same swamped mode and a refusal leaves it unchanged.
+> - `uat.bicepparam` sets `generationTimeoutAutoSendAuthorized = true`; the committed code default stays `false`.
 
 The conditions, each enforced in code by this PR (#571) or by Session A's A1 work:
 

@@ -114,6 +114,28 @@ public sealed class LeadControllerGateTests
         autonomy.SwampedModeEnabled.Should().BeTrue("the refusal changed nothing");
     }
 
+    [RequiresDockerFact]
+    public async Task WithTimeoutAutoSendNotAuthorized_ANonLeadSwampedOn_Is403FromTheLeadGate_AndTheLeadGetsTheGovernance400()
+    {
+        // #636 S-002: the lead gate (LeadControllerRaiseFilter, an endpoint filter) runs BEFORE the service's governance
+        // check, so a non-lead learns nothing about the flag: they get 403 whatever it says. Only the lead reaches the 400.
+        var world = await RoleMatrixWorld.SeedAsync(_fixture);
+        using var host = new RoleMatrixHost(_fixture.ConnectionString!, timeoutAutoSendAuthorized: false);
+        var autonomy = host.Services.GetRequiredService<EngineAutonomyRegistry>().GetOrCreate(world.ExerciseId);
+        const string On = "{\"enabled\":true,\"actingHumanId\":\"x\"}";
+
+        using var controller = world.Client(host, await world.TokenForAsync(MatrixRole.Controller));
+        using var nonLead = await controller.PostAsync("/api/engine/autonomy/swamped-mode", Json(On));
+        nonLead.StatusCode.Should().Be(HttpStatusCode.Forbidden, "the lead gate answers before the governance check");
+
+        using var lead = world.Client(host, await world.TokenForAsync(MatrixRole.LeadController));
+        using var leadOn = await lead.PostAsync("/api/engine/autonomy/swamped-mode", Json(On));
+        leadOn.StatusCode.Should().Be(HttpStatusCode.BadRequest, "the flag refuses ON for the lead too");
+        (await leadOn.Content.ReadFromJsonAsync<string>()).Should().Be(EngineReviewService.TimeoutAutoSendNotAuthorizedMessage);
+
+        autonomy.SwampedModeEnabled.Should().BeFalse("neither refusal changed anything");
+    }
+
     private static (string Route, string Body) Arrange(RoleMatrixHost host, Guid exerciseId, string control, Direction direction)
     {
         var autonomy = host.Services.GetRequiredService<EngineAutonomyRegistry>().GetOrCreate(exerciseId);

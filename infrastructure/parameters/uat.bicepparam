@@ -102,8 +102,10 @@ param generationAmbientAutonomyAuthorized = false
 
 // ⚠ Timeout auto-send (swamped mode) — App Service setting Generation__Governance__TimeoutAutoSendAuthorized. When
 // false, turning swamped mode ON is refused with a 400 and an expired Delayed-auto countdown always holds for a human.
-// Phase 1 (PROVIDER-GOVERNANCE §8 amendment 1): timeout auto-send NOT authorized until A1c's lead-controller gate is on main; set true in a separate reviewed commit after that.
-param generationTimeoutAutoSendAuthorized = false
+// Phase 2 (PROVIDER-GOVERNANCE §8 amendment 1): AUTHORIZED. A1c's lead-controller gate is on main (#615, smoke passed
+// 2026-10-19) and the console toggle now drives the server. Only the lead may turn swamped mode on; any controller may
+// turn it off; the kill switch, degraded mode and cut-to-Fake all hold expired countdowns. Revert to false to withdraw.
+param generationTimeoutAutoSendAuthorized = true
 
 // Flip to true (with deployAi) to also deploy the Claude-on-Foundry tiers for the E8 provider
 // comparison. Requires a Claude-eligible subscription; the Anthropic Marketplace offer is auto-accepted

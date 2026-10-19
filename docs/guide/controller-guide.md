@@ -636,10 +636,14 @@ then Auto), the generation provider **Restore** button, and the step from **ENGI
 **ENGINE · LIVE** on the engine switch, with the degraded banner's **Restore**. While Swamped mode is on, a **TIMEOUT AUTO-SEND IS ACTIVE** banner stays on screen. If generation is cut to Fake, the banner reads **TIMEOUT AUTO-SEND IS SUSPENDED** instead, and expired timers hold.
 Use it only when the lead decides the cell cannot keep up.
 
-> **Phase 1:** Swamped mode cannot be turned on yet. Until the lead-controller role ships, the **Swamped mode**
-> control is greyed out with the note "Timeout auto-send is off until the lead-controller role ships.", and Pulse
-> refuses the request if it is sent anyway. Every undecided burst whose countdown ends is held for you. Turning
-> Swamped mode off always works.
+> **If timeout auto-send is not authorized on your environment,** Swamped mode cannot be turned on. The
+> **Swamped mode** switch is greyed out for the lead (others don't see it), with the note "Timeout auto-send is
+> not authorized on this environment.", and Pulse refuses the request if it is sent anyway. Every undecided burst
+> whose countdown ends is held for you. Turning Swamped mode off always works.
+>
+> Swamped mode is a shared setting for the whole exercise, not just your screen: when the lead turns it on, every
+> controller's console shows it on, and if Pulse refuses the change, the switch stays where it was and the reason
+> is shown beside it.
 
 ### The engine switch (kill switch)
 
