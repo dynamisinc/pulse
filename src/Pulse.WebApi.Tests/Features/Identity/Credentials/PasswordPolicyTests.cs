@@ -88,7 +88,7 @@ public sealed class PasswordPolicyTests
 
     [Theory]
     [InlineData("Fairhaven-2026-spring")]   // an org-name word
-    [InlineData("FAIRHAVENCOUNTYEMERGENCY!")] // the org name, reduced
+    [InlineData("FAIRHAVENCOUNTYEMERGENCY!")] // a distinctive org word inside a run-together name
     [InlineData("my-jane.doe-key-99")]       // the email local part, reduced
     [InlineData("marigold-rocket-launch")]   // a display-name word
     [InlineData("xx JaneMarigold xx")]       // the whole display name
