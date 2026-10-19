@@ -86,8 +86,15 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v6
 
-      - name: Install Bicep CLI
-        run: az bicep install
+      # Pinned to the version infrastructure/main.json is generated with, so the staleness gate below compares
+      # like with like. use_binary_from_path=false stops az preferring the runner image's own (unpinned) bicep on
+      # PATH, which it does by default in CI; the version check proves the pin is the binary actually used.
+      - name: Install Bicep CLI (pinned v0.48.1)
+        run: |
+          az config set bicep.use_binary_from_path=false
+          az bicep install --version v0.48.1
+          az bicep version
+          az bicep version | grep -qE '(^|[^0-9.])0\.48\.1([^0-9]|$)' || { echo "::error::az is not using bicep 0.48.1"; exit 1; }
 
       # `az bicep build` compiles main.bicep + every referenced module to ARM and runs the linter from
       # infrastructure/bicepconfig.json. Compile errors fail the job; lint findings are advisory (default
@@ -97,6 +104,20 @@ jobs:
 
       - name: Validate UAT parameters
         run: az bicep build-params --file infrastructure/parameters/uat.bicepparam --stdout > /dev/null
+
+      # infrastructure/main.json is committed alongside main.bicep and must not drift from it. Compared as JSON
+      # (keys sorted) with EVERY _generator block removed from both (top level and each nested module), so only
+      # template content can fail the gate.
+      - name: main.json is up to date with main.bicep
+        run: |
+          az bicep build --file infrastructure/main.bicep --stdout > "$RUNNER_TEMP/main.built.json"
+          STRIP='walk(if type == "object" then del(._generator) else . end)'
+          jq -S "$STRIP" "$RUNNER_TEMP/main.built.json" > "$RUNNER_TEMP/built.json"
+          jq -S "$STRIP" infrastructure/main.json > "$RUNNER_TEMP/committed.json"
+          if ! diff -u "$RUNNER_TEMP/committed.json" "$RUNNER_TEMP/built.json"; then
+            echo "::error file=infrastructure/main.json::infrastructure/main.json is stale. Regenerate it with \`az bicep build --file infrastructure/main.bicep\` (bicep 0.48.1) and commit the result."
+            exit 1
+          fi
 
   gate:
     name: gate
