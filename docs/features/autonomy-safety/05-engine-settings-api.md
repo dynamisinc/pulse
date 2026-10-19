@@ -82,7 +82,9 @@ file outside this story's stated scope.
 - [ ] **Telemetry — flagged for reviewer sign-off, not silently decided.** The existing swamped-mode/
       kill-switch/restore endpoints deliberately emit **no** backend telemetry (no autonomy XC-004
       vocab exists there; the frontend's `engine.autonomy_changed`/`engine.swamped_mode_changed`
-      emits are the sole audit trail — see `useEngineControl.ts`/`useSwampedMode.ts`). This story's
+      emits are the sole audit trail — see `useEngineControl.ts`/`useSwampedMode.ts`). *(Superseded by
+      #618: those three levers now record server-side staff-change events + org audit, and the live-path
+      client emits are retired — see `engine-telemetry-tuning/01-engine-event-types.md`.)* This story's
       two new endpoints sit in the SAME service, which already has `IEngineTelemetryEmitter` wired in
       and an established additive-vocabulary convention (`EngineEventTypes.{Observed,Decided,
       Generated,Reviewed,Published,Measured}`, `Pulse.WebApi/Features/EngineRuntime/Telemetry/
@@ -239,8 +241,8 @@ AutonomyDefaultChanged` (`engine.autonomy_default_changed`) and `EngineEventType
 server-side through the already-wired `IEngineTelemetryEmitter` — one event per change, alongside (not
 replacing) the frontend's existing `engine.autonomy_changed` emit. **Rationale:** the autonomy/tier state is
 process memory, so this event is the only record of an operator's change that survives a restart. This is a
-deliberate divergence from the legacy swamped-mode / kill-switch / restore trio, which still emit no backend
-telemetry — flagged for the reviewer rather than silently generalised.
+deliberate divergence from the legacy swamped-mode / kill-switch / restore trio, which then emitted no backend
+telemetry — flagged for the reviewer rather than silently generalised. *(#618 later closed that gap for the trio.)*
 
 **Endpoint contract (the artifact story 06 builds against).** All three endpoints return the SAME
 `EngineSettingsDto` body on success, so a mutation needs no follow-up read:
