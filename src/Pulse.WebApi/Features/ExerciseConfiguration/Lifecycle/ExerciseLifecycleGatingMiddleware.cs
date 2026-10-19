@@ -33,10 +33,11 @@ using Pulse.WebApi.Features.Identity.Staff;
 /// client re-GETs <c>/api/overlay-state</c> on reconnect, and that GET is what renders COR-054's EndEx overlay. The
 /// risk this used to name ("a connected tab would receive anything fanned out to it after EndEx") is closed on the
 /// SEND side instead (#375): <c>SignalRFeedBroadcaster</c> checks
-/// <see cref="ExerciseLifecycleStates.IsParticipantAccessible"/> — this gate's own predicate — before every feed
-/// frame, and outside the participant-accessible states sends to the staff-only group alone (fail closed). A NEW
-/// hub frame that bypasses <c>IFeedBroadcaster</c> must apply the same check; the pause overlay push already gates
-/// itself (CR-001).
+/// <see cref="ExerciseLifecycleStates.IsLivePushOpen"/> before every feed frame, and outside it sends to the
+/// staff-only group alone (fail closed). That predicate coincides with this gate's
+/// <see cref="ExerciseLifecycleStates.IsParticipantAccessible"/> today, by design, and may diverge in
+/// <c>completed</c> (REST reads may reopen there; live pushes stay closed). A NEW hub frame that bypasses
+/// <c>IFeedBroadcaster</c> must apply the same check; the pause overlay push already gates itself (CR-001).
 /// </para>
 /// </remarks>
 public static class ExerciseLifecycleGatedRoutes

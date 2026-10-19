@@ -11,12 +11,24 @@ using Pulse.WebApi.Features.Social.Engagement;
 /// hub). Kept as a small interface agreed upfront so 02 and 03 build in the same wave against the shape
 /// rather than serializing on a shared file.
 /// </summary>
+/// <remarks>
+/// <para>
+/// <b>Lifecycle routing (#375).</b> Every frame on this seam goes to the exercise-wide group
+/// (<c>ExerciseRealtimeHub.GroupNameFor</c>) only while the exercise is open to participants
+/// (<c>ExerciseLifecycleStates.IsParticipantAccessible</c> — <c>staged</c> / <c>live</c> / <c>paused</c>;
+/// the implementation asks <c>IsLivePushOpen</c>, which coincides with it today). In any other state — and for
+/// an unknown status or a missing exercise row — it goes to the staff-only group
+/// (<c>ExerciseRealtimeHub.StaffGroupNameFor</c>) instead, so a tab still connected after EndEx receives nothing
+/// while staff consoles keep their live view. "Exercise-wide group" in the members below means: while open.
+/// </para>
+/// </remarks>
 public interface IFeedBroadcaster
 {
     /// <summary>
     /// Broadcasts a newly-persisted post to the exercise's subscribers. The payload is the unconditionally
     /// participant-safe <see cref="ParticipantPostDto"/> — XC-002 on the broadcast is unconditional (there is
-    /// no staff branch on this seam; a broadcast never carries provenance).
+    /// no staff branch on this seam; a broadcast never carries provenance). It reaches the exercise-wide group
+    /// only while <c>IsParticipantAccessible</c> holds; otherwise to the staff group only (#375, see the type remarks).
     /// </summary>
     /// <param name="exerciseId">The owning exercise run whose subscribers receive the post (COR-001 scope).</param>
     /// <param name="post">The participant-safe post to fan out.</param>
@@ -28,7 +40,8 @@ public interface IFeedBroadcaster
     /// Tells the exercise's subscribers that a post was taken down (demo-polish B6, CTL-025), so every
     /// participant feed drops it live. The payload is ONLY the post id (<c>PostRemoved { postId }</c>): no text,
     /// author, category or provenance ever rides this event (XC-002). It goes to the exercise-wide group,
-    /// because participants are exactly who must stop seeing the post.
+    /// because participants are exactly who must stop seeing the post — only while
+    /// <c>IsParticipantAccessible</c> holds; otherwise to the staff group only (#375, see the type remarks).
     /// </summary>
     /// <remarks>
     /// A <b>default interface method</b> (a no-op), so the <see cref="IFeedBroadcaster"/> test doubles that
@@ -45,7 +58,8 @@ public interface IFeedBroadcaster
     /// Tells the exercise's subscribers that a controller pinned a post for everyone, or cleared that pin
     /// (demo-feedback DF-7), so every Pinned tab and console updates live. The payload is ONLY
     /// <c>PostPinChanged { postId, pinnedForAll }</c>: never who pinned it, when, or any post content (XC-002). It goes
-    /// to the exercise-wide group, because participants are exactly who see exercise pins.
+    /// to the exercise-wide group, because participants are exactly who see exercise pins — only while
+    /// <c>IsParticipantAccessible</c> holds; otherwise to the staff group only (#375, see the type remarks).
     /// </summary>
     /// <remarks>
     /// A <b>default interface method</b> (a no-op), so the <see cref="IFeedBroadcaster"/> test doubles that predate
@@ -65,7 +79,8 @@ public interface IFeedBroadcaster
     /// 19), after the edit committed. The payload is ONLY <c>PostEdited { postId, text, edited { count, scenarioTime },
     /// version }</c> (<see cref="PostEditedDto"/>): the new text, the edit summary in SCENARIO time and the monotonic
     /// <c>version</c> (= the edit count) a client uses to drop a stale frame. Never who edited it, the wall clock or the
-    /// previous text (XC-002). It goes to the exercise-wide group only.
+    /// previous text (XC-002). It goes to the exercise-wide group only while
+    /// <c>IsParticipantAccessible</c> holds; otherwise to the staff group only (#375, see the type remarks).
     /// </summary>
     /// <remarks>
     /// A <b>default interface method</b> (a no-op), so the <see cref="IFeedBroadcaster"/> test doubles that predate
@@ -85,7 +100,8 @@ public interface IFeedBroadcaster
     /// <c>PostEngagementChanged { postId, counts { reply, repost, like }, version }</c>: the shown counts every
     /// participant sees and a database-derived version (DF-18). It never carries who reacted, the viewer's own
     /// <c>active</c> state, or the baseline / real split (XC-002). It goes to the exercise-wide group, because every
-    /// participant card showing the post must update.
+    /// participant card showing the post must update — only while
+    /// <c>IsParticipantAccessible</c> holds; otherwise to the staff group only (#375, see the type remarks).
     /// </summary>
     /// <remarks>
     /// A <b>default interface method</b> (a no-op), so the <see cref="IFeedBroadcaster"/> test doubles that predate live

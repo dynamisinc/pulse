@@ -249,4 +249,29 @@ public sealed class ExerciseLifecycleStateMachineTests
     [Fact]
     public void BehaviourOf_AnUnknownState_IsTheFullyClosedSet() =>
         ExerciseLifecycleStates.BehaviourOf("running").Should().Be(ExerciseLifecycleBehaviour.Closed);
+
+    /// <summary>
+    /// #375: the live-push rule equals the participant-access rule TODAY for every literal — canonical, legacy, cased,
+    /// unknown and missing. A follow-up that reopens participant REST reads in <c>completed</c> is expected to break
+    /// this pin deliberately (and must keep <c>IsLivePushOpen("completed")</c> false).
+    /// </summary>
+    [Theory]
+    [InlineData("build")]
+    [InlineData("staged")]
+    [InlineData("live")]
+    [InlineData("paused")]
+    [InlineData("completed")]
+    [InlineData("archived")]
+    [InlineData("scheduled")]
+    [InlineData("active")]
+    [InlineData("complete")]
+    [InlineData("Live")]
+    [InlineData(" paused ")]
+    [InlineData("running")]
+    [InlineData("")]
+    [InlineData(null)]
+    public void IsLivePushOpen_EqualsIsParticipantAccessible_ForEveryLiteral(string? state) =>
+        ExerciseLifecycleStates.IsLivePushOpen(state).Should().Be(
+            ExerciseLifecycleStates.IsParticipantAccessible(state),
+            "live pushes and participant REST access coincide today by design (they may diverge in completed)");
 }

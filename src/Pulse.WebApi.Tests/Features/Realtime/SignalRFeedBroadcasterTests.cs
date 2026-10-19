@@ -309,6 +309,26 @@ public class SignalRFeedBroadcasterTests
                 "the REST gate and the behaviour hook must never disagree about who is admitted");
     }
 
+    [Theory]
+    [MemberData(nameof(AllFrames))]
+    public async Task Broadcast_WhenTheStatusReadThrows_AddressesNeitherGroup_AndPropagates(string frame)
+    {
+        // #375 S-1: an unreadable lifecycle (database down) must not fall through to the participant group, and must
+        // not be swallowed either: the caller sees the failure, and nothing is sent to anyone.
+        var clients = new Mock<IHubClients>(MockBehavior.Strict);
+        var hubContext = new Mock<IHubContext<ExerciseRealtimeHub>>();
+        hubContext.SetupGet(h => h.Clients).Returns(clients.Object);
+        var broadcaster = new SignalRFeedBroadcaster(
+            hubContext.Object,
+            (_, _) => throw new InvalidOperationException("status read failed"),
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<SignalRFeedBroadcaster>.Instance);
+
+        var act = () => SendAsync(broadcaster, frame, Guid.NewGuid());
+
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("status read failed");
+        clients.Verify(c => c.Group(It.IsAny<string>()), Times.Never, "no group, participant or staff, is addressed");
+    }
+
     [Fact]
     public void AddSocialRealtimeHub_Alone_RegistersTheLifecycleReader_SoTheBroadcasterResolves_WithoutReplacingAHostsOwn()
     {

@@ -25,9 +25,10 @@ using Pulse.WebApi.Features.Social.Pins;
 /// <para>
 /// <b>The EndEx send gate (#375, COR-032) — every frame passes ONE choke point.</b> Before each send the
 /// broadcaster reads the exercise's stored lifecycle status through <see cref="ExerciseLifecycleStatusReader"/>
-/// and asks <see cref="ExerciseLifecycleStates.IsParticipantAccessible"/> — the SAME predicate
-/// <see cref="ExerciseLifecycleGatingMiddleware"/> refuses the REST participant surface on (it agrees with
-/// <see cref="ExerciseLifecycleBehaviour.ParticipantAccessOpen"/> for every literal). Open (<c>staged</c> /
+/// and asks <see cref="ExerciseLifecycleStates.IsLivePushOpen"/>. Today that coincides, by design, with
+/// <see cref="ExerciseLifecycleStates.IsParticipantAccessible"/> — the predicate
+/// <see cref="ExerciseLifecycleGatingMiddleware"/> refuses the REST participant surface on — but the two may diverge
+/// in <c>completed</c> (participant REST reads may reopen there; live pushes stay closed). Open (<c>staged</c> /
 /// <c>live</c> / <c>paused</c>, legacy <c>active</c>): the frame goes to <see cref="ExerciseRealtimeHub.GroupNameFor"/>
 /// as before. Anything else — <c>build</c>, <c>completed</c>, <c>archived</c>, an unknown literal, or no exercise
 /// row — FAILS CLOSED: the frame goes to <see cref="ExerciseRealtimeHub.StaffGroupNameFor"/> only, so a participant
@@ -36,6 +37,10 @@ using Pulse.WebApi.Features.Social.Pins;
 /// side is what closes the risk the gating middleware names. The gate lives here rather than in a decorator so
 /// that every caller (storyline auto-send, inject bursts, approve, controller-as-persona, pins, takedowns,
 /// edits, engagement) inherits it and the registered <see cref="IFeedBroadcaster"/> stays this concrete type.
+/// </para>
+/// <para>
+/// <b>Accepted race:</b> the status is read just before each send, so an EndEx committed between that read and the
+/// send can let at most one in-flight frame reach participants.
 /// </para>
 /// </remarks>
 public sealed partial class SignalRFeedBroadcaster : IFeedBroadcaster
@@ -170,7 +175,7 @@ public sealed partial class SignalRFeedBroadcaster : IFeedBroadcaster
         // Exercise is the scope, not an IExerciseScoped entity: this is a direct status read by the SERVER-resolved
         // id the caller fans out for, never a client-supplied one.
         var status = await _lifecycleStatusReader(exerciseId, cancellationToken);
-        if (ExerciseLifecycleStates.IsParticipantAccessible(status))
+        if (ExerciseLifecycleStates.IsLivePushOpen(status))
         {
             return _hubContext.Clients.Group(ExerciseRealtimeHub.GroupNameFor(exerciseId));
         }
@@ -179,13 +184,16 @@ public sealed partial class SignalRFeedBroadcaster : IFeedBroadcaster
         return _hubContext.Clients.Group(ExerciseRealtimeHub.StaffGroupNameFor(exerciseId));
     }
 
-    /// <summary>Source-generated notice that a frame was withheld from participants (CA1848).</summary>
+    /// <summary>
+    /// Source-generated notice that a frame was withheld from participants (CA1848). Debug, not Information:
+    /// producers keep persisting into completed exercises until #640, so this fires routinely.
+    /// </summary>
     /// <param name="eventName">The client event withheld.</param>
     /// <param name="exerciseId">The exercise.</param>
     /// <param name="lifecycleStatus">The stored status that closed the participant group.</param>
     [LoggerMessage(
-        Level = LogLevel.Information,
+        Level = LogLevel.Debug,
         Message = "A {EventName} frame for exercise {ExerciseId} was NOT sent to participants: its lifecycle state " +
-                  "{LifecycleStatus} is not participant-accessible (COR-032). It was sent to the staff group only.")]
+                  "{LifecycleStatus} is not open to live pushes (COR-032). It was sent to the staff group only.")]
     private partial void LogParticipantSendSuppressed(string eventName, Guid exerciseId, string lifecycleStatus);
 }
