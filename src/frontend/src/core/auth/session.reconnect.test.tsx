@@ -159,7 +159,9 @@ describe('a pair is stored and the server was not reached: Reconnecting, not /lo
     await screen.findByRole('heading', { name: 'Reconnecting…' })
     expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1)
     expect(screen.getAllByRole('main')).toHaveLength(1)
-    expect(screen.getByRole('status')).toHaveFocus()
+    // Focus lands in the screen's mount effect, which can run after the heading is found
+    // on a loaded CI runner — wait for it rather than racing it.
+    await waitFor(() => expect(screen.getByRole('status')).toHaveFocus())
     expect(screen.getByRole('status')).toHaveAttribute('aria-live', 'polite')
   })
 
