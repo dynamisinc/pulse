@@ -32,7 +32,8 @@ using Microsoft.AspNetCore.SignalR;
 /// (<c>ExerciseRealtimeHub.RegisterLiveAsync</c>): every interleaving is covered by one side or the other. A
 /// participant / read-only connection is registered without that re-read — its path deliberately never opens the
 /// database — so the same narrow window remains for it (it can only keep the exercise-wide group it was already entitled
-/// to at connect time, until it disconnects).
+/// to at connect time, until it disconnects). Accepted as documented (#602 review); the participant-side revoke race is
+/// tracked with #659 (revoke non-staff sessions or gate the hub).
 /// </para>
 /// </remarks>
 public sealed class SessionConnectionRegistry
