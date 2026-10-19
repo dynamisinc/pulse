@@ -342,6 +342,53 @@ public sealed partial class EngineReviewEndpointsTests
         await AssertNoLeverRecordAsync(exerciseId, "the record's own save failed (and it never shared the request's unit of work)");
     }
 
+    // ---- #618 follow-up: each lever records AFTER its last state change -------------------------------
+
+    [RequiresDockerFact]
+    public async Task KillSwitch_RecordsOnlyAfterTheAmbientDemotion()
+    {
+        var exerciseId = Guid.NewGuid();
+        EngineAmbientPolicyRegistry? ambient = null;
+        var recorder = new SnapshottingSteeringLeverRecorder(() => ambient!.Get(exerciseId).Mode.ToString());
+        await using var host = await StartHostAsync(exerciseId, configureServices: UseRecorder(recorder));
+        ambient = host.Services.GetRequiredService<EngineAmbientPolicyRegistry>();
+        var (path, body, _) = ArrangeAutonomousAmbient(host, exerciseId, "/api/engine/autonomy/kill-switch", new { actingHumanId = SpoofedActingHumanId, mode = "full-stop" });
+
+        using var response = await host.Client.PostAsJsonAsync(new Uri(path, UriKind.Relative), body);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        recorder.Snapshots.Should().ContainSingle().Which.Should().Be(
+            nameof(Pulse.Core.Features.Ambient.Models.AmbientPolicyMode.Off),
+            "the record is written LAST — after the AC6 ambient demotion, so a record can never pre-empt it");
+    }
+
+    [RequiresDockerFact]
+    public async Task SwampedOnAndRestore_RecordOnlyAfterTheirStateChange()
+    {
+        var exerciseId = Guid.NewGuid();
+        Pulse.Core.Features.Autonomy.Services.EngineAutonomyState? state = null;
+        var recorder = new SnapshottingSteeringLeverRecorder(() => $"swamped={state!.SwampedModeEnabled};clamp={state.SafetyClampActive}");
+        await using var host = await StartHostAsync(exerciseId, timeoutAutoSendAuthorized: true, configureServices: UseRecorder(recorder));
+        state = host.Services.GetRequiredService<EngineAutonomyRegistry>().GetOrCreate(exerciseId);
+
+        using (var on = await host.Client.PostAsJsonAsync(
+            new Uri("/api/engine/autonomy/swamped-mode", UriKind.Relative), new { actingHumanId = SpoofedActingHumanId, enabled = true }))
+        {
+            on.StatusCode.Should().Be(HttpStatusCode.OK);
+        }
+
+        state.EngageKillSwitch(KillSwitchMode.FullStop, "arrange", 0);
+        using (var restore = await host.Client.PostAsJsonAsync(
+            new Uri("/api/engine/autonomy/restore", UriKind.Relative), new { actingHumanId = SpoofedActingHumanId }))
+        {
+            restore.StatusCode.Should().Be(HttpStatusCode.OK);
+        }
+
+        recorder.Snapshots.Should().Equal(
+            ["swamped=True;clamp=False", "swamped=True;clamp=False"],
+            "the ON record sees swamped already on (after the M-1 re-check), the restore record sees the clamp already lifted");
+    }
+
     // ---- #618 review W4 -----------------------------------------------------------------------------
 
     [RequiresDockerFact]
@@ -399,6 +446,18 @@ public sealed partial class EngineReviewEndpointsTests
         services.RemoveAll<IEngineSteeringLeverRecorder>();
         services.AddSingleton(recorder);
     };
+
+    /// <summary>Snapshots live state at the moment each record is handed over — pins WHEN the service records.</summary>
+    private sealed class SnapshottingSteeringLeverRecorder(Func<string> snapshot) : IEngineSteeringLeverRecorder
+    {
+        public List<string> Snapshots { get; } = [];
+
+        public Task RecordAsync(EngineSteeringLeverRecord record)
+        {
+            Snapshots.Add(snapshot());
+            return Task.CompletedTask;
+        }
+    }
 
     /// <summary>A recorder that breaks its never-throws contract — proves the service's own guard.</summary>
     private sealed class ThrowingSteeringLeverRecorder : IEngineSteeringLeverRecorder

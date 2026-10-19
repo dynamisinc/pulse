@@ -137,6 +137,7 @@ public sealed class LeadControllerPostWriteRecheckTests
 
         result.Outcome.Should().Be(EngineReviewOutcome.Forbidden);
         state.SwampedModeEnabled.Should().BeFalse("swamped mode must never end ON with no lead");
+        harness.SwampedAtRecordTime.Should().Equal([false], "the revert record is written AFTER the revert");
         var record = harness.Records.Should().ContainSingle("ON -> OFF is a real change, even on a refused request").Subject;
         record.EventType.Should().Be(EngineSteeringLeverRecords.SwampedModeOffEventType);
         record.AuditKind.Should().Be(EngineSteeringLeverRecords.SwampedModeOffAuditKind);
@@ -414,14 +415,14 @@ public sealed class LeadControllerPostWriteRecheckTests
         var native = new ExerciseClockService(new ManualTimeProvider(ScenarioStart));
         native.Start(exerciseId, ScenarioStart, TimeZoneInfo.Utc);
         var clock = new HookableClock(native);
-        var autonomy = new EngineAutonomyRegistry();
         var tiers = new EngineTierPolicyRegistry();
         var cut = new HookableCutRegistry(new GenerationProviderCutRegistry());
         var ambient = new EngineAmbientPolicyRegistry(
             Options.Create(new EngineAmbientGovernanceOptions { AmbientAutonomyAuthorized = true }),
             null);
 
-        var recorder = new CapturingSteeringLeverRecorder();
+        var autonomy = new EngineAutonomyRegistry();
+        var recorder = new CapturingSteeringLeverRecorder(() => autonomy.GetOrCreate(exerciseId).SwampedModeEnabled);
         var service = new EngineReviewService(
             new EngineReviewStore(db),
             db,
@@ -459,6 +460,9 @@ public sealed class LeadControllerPostWriteRecheckTests
         /// <summary>The steering-lever records the service handed to its recorder (#618).</summary>
         public System.Collections.Generic.IReadOnlyList<EngineSteeringLeverRecord> Records => recorder.Records;
 
+        /// <summary>Swamped mode as each record was handed over — pins that the service records after its state change.</summary>
+        public System.Collections.Generic.IReadOnlyList<bool> SwampedAtRecordTime => recorder.SwampedAtRecordTime;
+
         public Guid ExerciseId => exerciseId;
 
         /// <summary>The seeded lead controller — the session person every raise is made as.</summary>
@@ -494,15 +498,19 @@ public sealed class LeadControllerPostWriteRecheckTests
     }
 
     /// <summary>Captures every steering-lever record instead of writing it (#618).</summary>
-    private sealed class CapturingSteeringLeverRecorder : IEngineSteeringLeverRecorder
+    private sealed class CapturingSteeringLeverRecorder(Func<bool> swampedNow) : IEngineSteeringLeverRecorder
     {
         private readonly System.Collections.Generic.List<EngineSteeringLeverRecord> _records = [];
+        private readonly System.Collections.Generic.List<bool> _swampedAtRecordTime = [];
 
         public System.Collections.Generic.IReadOnlyList<EngineSteeringLeverRecord> Records => _records;
+
+        public System.Collections.Generic.IReadOnlyList<bool> SwampedAtRecordTime => _swampedAtRecordTime;
 
         public Task RecordAsync(EngineSteeringLeverRecord record)
         {
             _records.Add(record);
+            _swampedAtRecordTime.Add(swampedNow());
             return Task.CompletedTask;
         }
     }
