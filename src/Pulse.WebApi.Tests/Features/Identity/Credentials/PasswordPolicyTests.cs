@@ -95,6 +95,28 @@ public sealed class PasswordPolicyTests
     public void APasswordContainingTheOrgName_EmailLocalPart_OrDisplayName_IsRefused(string password) =>
         PasswordPolicy.Validate(password, PasswordAudience.Staff, Context).Should().Be(PasswordPolicy.PersonalInfoError);
 
+    [Theory]
+    [InlineData("county-emergency-kayak")]   // generic agency words are not refused on their own
+    [InlineData("management-office-tulip")]
+    public void GenericOrganizationWords_AreNotRefusedOnTheirOwn(string password) =>
+        PasswordPolicy.Validate(password, PasswordAudience.Staff, Context).Should().BeNull(
+            "Gate-1 S-006: only the whole org name and its DISTINCTIVE words (6+ characters, not generic) are refused");
+
+    [Fact]
+    public void TheWholeOrganizationName_IsStillRefused()
+    {
+        var context = new PasswordContext { OrganizationName = "City Office" };
+        PasswordPolicy.Validate("my-cityoffice-pass", PasswordAudience.Staff, context).Should().Be(
+            PasswordPolicy.PersonalInfoError, "the whole name is refused even when every word in it is generic");
+    }
+
+    [Theory]
+    [InlineData("baseball ")]
+    [InlineData("  Baseball\t")]
+    public void TheBlocklist_IsComparedOnATrimmedCaseFoldedCopy(string password) =>
+        PasswordPolicy.Validate(password, PasswordAudience.Participant, PasswordContext.None).Should().Be(
+            PasswordPolicy.CommonError, "surrounding whitespace must not slip a common password past the blocklist");
+
     [Fact]
     public void ShortContextWords_DoNotRefuseUnrelatedPasswords()
     {

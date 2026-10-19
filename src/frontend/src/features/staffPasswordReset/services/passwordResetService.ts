@@ -14,7 +14,7 @@
  * World: STAFF, pre-auth. No UI here.
  */
 
-import axios from 'axios'
+import axios, { type AxiosRequestConfig } from 'axios'
 import { api, type PulseRequestFlags } from '@/core/services/api'
 
 const RESET_ENDPOINT = '/auth/password/reset'
@@ -51,7 +51,7 @@ function readErrorCode(data: unknown): string | undefined {
 export async function resetPassword(request: PasswordResetRequest): Promise<void> {
   try {
     // Pre-auth: never attach a stored bearer to this call (and api.ts never refresh-retries it).
-    const config: PulseRequestFlags = { _pulseSkipAuthAttach: true }
+    const config: AxiosRequestConfig & PulseRequestFlags = { _pulseSkipAuthAttach: true }
     await api.post(
       RESET_ENDPOINT,
       { token: request.token, newPassword: request.newPassword },

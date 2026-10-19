@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -205,7 +206,7 @@ internal sealed class CredentialProbeFactory : WebApplicationFactory<Program>
             new System.Collections.Generic.Dictionary<string, string?> { [JoinUrlBuilder.FrontendBaseUrlKey] = _frontendBaseUrl ?? string.Empty }));
         if (_configureServices is not null)
         {
-            builder.ConfigureServices(_configureServices);
+            builder.ConfigureTestServices(_configureServices);
         }
 
         builder.ConfigureLogging(logging =>

@@ -11,6 +11,8 @@ using System.Threading.Tasks;
 using FluentAssertions;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.Identity.Credentials;
@@ -169,6 +171,95 @@ public sealed class CredentialEndpointsHttpTests
         await using var read = _world.ReadContext();
         (await read.CredentialTokens.AsNoTracking().CountAsync(t => t.PersonId == target || t.PersonId == disabled))
             .Should().Be(0, "no refused call issued a token");
+    }
+
+    [RequiresDockerFact]
+    public async Task AdminReset_OfAPeerOrgAdmin_IsRefused409_ButSelfAndANonAdminStafferAreAllowed()
+    {
+        // Gate-1 W-001: one org admin receiving a link that sets ANOTHER org admin's password is a lateral takeover.
+        var (org, _) = await _world.SeedOrganizationAsync();
+        var (admin, _) = await _world.SeedPersonAsync(org, orgRole: Person.OrgAdminRole);
+        var (_, adminToken, _) = await _world.SeedStaffSessionAsync(admin, exerciseId: null, Person.OrgAdminRole);
+        var (peerAdmin, _) = await _world.SeedPersonAsync(org, orgRole: Person.OrgAdminRole);
+        var (staffer, _) = await _world.SeedPersonAsync(org);
+
+        await using var factory = new CredentialProbeFactory(_fixture.ConnectionString!);
+        using var client = CredentialTestWorld.CreateClient(factory, adminToken);
+        var call = PersonIdCallers.Single().Value;
+
+        using (var peer = await call(client, peerAdmin))
+        {
+            peer.StatusCode.Should().Be(HttpStatusCode.Conflict);
+            (await peer.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("error").GetString()
+                .Should().Be(AdminPasswordResetService.TargetIsOrgAdminError);
+        }
+
+        using (var self = await call(client, admin))
+        {
+            self.StatusCode.Should().Be(HttpStatusCode.OK, "an org admin may reset their own password");
+        }
+
+        using (var nonAdmin = await call(client, staffer))
+        {
+            nonAdmin.StatusCode.Should().Be(HttpStatusCode.OK, "a non-admin staffer of the org is the ordinary case");
+        }
+
+        await using var read = _world.ReadContext();
+        (await read.CredentialTokens.AsNoTracking().CountAsync(t => t.PersonId == peerAdmin))
+            .Should().Be(0, "nothing was issued for the peer admin");
+    }
+
+    [RequiresDockerFact]
+    public async Task AdminReset_WhenTheMailerThrows_StillAnswers200WithTheLink()
+    {
+        // Gate-1 S-007: the token is committed before the mail is attempted, so a failing mailer must not hide the link.
+        var (org, _) = await _world.SeedOrganizationAsync();
+        var (admin, _) = await _world.SeedPersonAsync(org, orgRole: Person.OrgAdminRole);
+        var (_, adminToken, _) = await _world.SeedStaffSessionAsync(admin, exerciseId: null, Person.OrgAdminRole);
+        var (target, _) = await _world.SeedPersonAsync(org);
+
+        await using var factory = new CredentialProbeFactory(
+            _fixture.ConnectionString!,
+            configureServices: services =>
+            {
+                services.RemoveAll<IPulseMailer>();
+                services.AddSingleton<IPulseMailer, ThrowingMailer>();
+            });
+        using var client = CredentialTestWorld.CreateClient(factory, adminToken);
+
+        using var response = await PersonIdCallers.Single().Value(client, target);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var resetUrl = (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("resetUrl").GetString()!;
+        resetUrl.Should().StartWith($"{CredentialTestWorld.FrontendBaseUrl}/staff/reset#token=");
+        var rawToken = resetUrl[(resetUrl.IndexOf("#token=", StringComparison.Ordinal) + "#token=".Length)..];
+        factory.Logs.Messages.Should().Contain(m => m.Contains("Credential email failed", StringComparison.Ordinal));
+        factory.Logs.Messages.Should().NotContain(
+            m => m.Contains(rawToken, StringComparison.Ordinal) || m.Contains(ThrowingMailer.Secret, StringComparison.Ordinal),
+            "the failure is logged with the purpose and exception type only");
+    }
+
+    [RequiresDockerFact]
+    public async Task Reset_WithATokenIssuedBeforeTheLastPasswordChange_IsRefused_EvenIfItWasNeverVoided()
+    {
+        // Gate-1 S-002: a token committed concurrently with a credential change could escape the voiding statement; the
+        // redemption check refuses any token created at or before the person's last password change.
+        var (org, _) = await _world.SeedOrganizationAsync();
+        var (target, _) = await _world.SeedPersonAsync(org);
+        var survivor = await _world.IssueAsync(CredentialTokenPurposes.Reset, target, org, DateTimeOffset.UtcNow.AddMinutes(-2));
+        await using (var write = _world.ReadContext())
+        {
+            var person = await write.People.SingleAsync(p => p.Id == target);
+            person.PasswordChangedAt = DateTimeOffset.UtcNow.AddMinutes(-1);
+            await write.SaveChangesAsync();
+        }
+
+        await using var factory = new CredentialProbeFactory(_fixture.ConnectionString!);
+        using var anonymous = CredentialTestWorld.CreateClient(factory);
+        using var response = await anonymous.PostAsJsonAsync(ResetUri, new { token = survivor.RawToken, newPassword = CredentialTestWorld.NewPassword });
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await response.Content.ReadAsStringAsync()).Should().Be("{\"error\":\"invalid-token\"}");
     }
 
     [RequiresDockerFact]
@@ -410,5 +501,17 @@ public sealed class CredentialEndpointsHttpTests
         var person = await read.People.AsNoTracking().SingleAsync(p => p.Id == victim);
         person.PasswordChangedAt.Should().BeNull("the cross-tenant token changed nothing");
         (await read.CredentialTokens.AsNoTracking().SingleAsync(t => t.Id == forged.Token.Id)).UsedAt.Should().BeNull();
+    }
+
+    /// <summary>A mailer that always throws, with a "secret" in its message that must never reach a log.</summary>
+    private sealed class ThrowingMailer : IPulseMailer
+    {
+        public const string Secret = "mailer-secret-recipient@example.com";
+
+        public bool IsConfigured => true;
+
+        public Task<Pulse.WebApi.Features.Identity.LinkEmail.LinkMailSendOutcome> SendCredentialLinkAsync(
+            CredentialMail mail, System.Threading.CancellationToken cancellationToken) =>
+            throw new InvalidOperationException($"provider exploded for {Secret}");
     }
 }

@@ -55,10 +55,11 @@ describe('StaffSetPasswordPage', () => {
     expect(window.location.hash).toBe('')
     expect(window.location.href).not.toContain('abc123')
     await fillAndSubmit(user)
-    expect(mockPost).toHaveBeenCalledWith('/auth/password/reset', {
-      token: 'abc123',
-      newPassword: GOOD,
-    })
+    expect(mockPost).toHaveBeenCalledWith(
+      '/auth/password/reset',
+      { token: 'abc123', newPassword: GOOD },
+      { _pulseSkipAuthAttach: true },
+    )
   })
 
   it('shows success, focuses the heading, and links to staff sign-in', async () => {
