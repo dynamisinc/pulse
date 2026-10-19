@@ -40,9 +40,17 @@ using Pulse.WebApi.Features.Identity.Sessions;
 /// cost the same KDF work — the count is never an existence, lock-state or candidate-count oracle.
 /// </para>
 /// <para>
+/// <b>What M-2 does NOT claim (#660 W-2).</b> Only the slow-hash (KDF) work is equalized — the dominant, tens-of-ms cost
+/// per verification. The paths still differ in their non-KDF work: database round-trips (the candidate / slug / staff-facet
+/// reads), the atomic failure <c>UPDATE</c> of a tried candidate, the audit / telemetry writes, and session issuance on
+/// success. Those residual differences are at millisecond scale, are bounded by the per-IP staff-login rate limiter, and
+/// are NOT claimed uniform.
+/// </para>
+/// <para>
 /// <b>The org choice (#602 L-3).</b> A choice is redeemable only from the IP hash it was created from (a mismatch is the
 /// uniform refusal and leaves the choice unconsumed), and spent choices are purged opportunistically, in a bounded batch,
-/// whenever a choice is created or redeemed: every EXPIRED choice — which is every consumed one too, at most
+/// whenever a choice is created or redeemed (on redemption only past the refusal checks, so a refusal's timing never
+/// depends on the backlog): every EXPIRED choice — which is every consumed one too, at most
 /// <see cref="ChoiceLifetime"/> after it was issued (a consumed choice is kept until then, so a redemption in flight and
 /// the audit trail still see it).
 /// </para>
@@ -225,7 +233,6 @@ public sealed partial class OrgStaffLoginService
 
         var now = DateTimeOffset.UtcNow;
         var tokenHash = SessionTokens.Hash(token);
-        await PurgeSpentChoicesAsync(now, cancellationToken);
 
         // LoginChoice is an unscoped resolution root, looked up by its token hash.
         var choice = await _dbContext.LoginChoices
@@ -260,6 +267,10 @@ public sealed partial class OrgStaffLoginService
             LogChoiceRefused();
             return OrgStaffLoginResult.Rejected();
         }
+
+        // #660 S-3: the opportunistic purge runs only once the request presents a live, own-IP choice for a candidate
+        // org — never on the refusal paths above, so their timing does not depend on the purge backlog.
+        await PurgeSpentChoicesAsync(now, cancellationToken);
 
         // Consume the whole choice atomically: one statement, guarded so a token can never mint twice (or for a
         // second organization). Consumed before minting — a later refusal leaves it spent (fail closed).

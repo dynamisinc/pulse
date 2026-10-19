@@ -302,6 +302,37 @@ public sealed class ExerciseRealtimeHubStaffGroupTests
         registry.Take(staff.SessionId).Should().ContainSingle("a live connection stays registered for a later revoke to cut");
     }
 
+    [RequiresDockerFact]
+    public async Task StaffConnection_AbortedDuringThePostRegistrationReCheck_IsUnregistered_NotLeaked()
+    {
+        // #660 W-3: the connection's OWN abort cancels the re-read after Register. The cancellation propagates (it is not a
+        // check failure), and a connection that dies inside OnConnectedAsync never reaches OnDisconnectedAsync — so the hub
+        // must forget the registration itself, or the registry leaks the dead connection.
+        var exerciseA = await SeedExerciseAsync();
+        var staff = await SeedStaffAsync(assignedTo: [exerciseA]);
+        var registry = new SessionConnectionRegistry();
+        using var connectionAborted = new CancellationTokenSource();
+        var items = new Dictionary<object, object?>();
+
+        // The abort lands at the staff-group join: after verification, before Register and its re-read.
+        var connect = () => ConnectWithRaceAsync(
+            null,
+            staff.Principal,
+            registry,
+            revokeOnJoining: $"exercise:{exerciseA}:staff",
+            revoke: () =>
+            {
+                connectionAborted.Cancel();
+                return Task.CompletedTask;
+            },
+            connectionAborted.Token,
+            items);
+
+        await connect.Should().ThrowAsync<OperationCanceledException>("the connection's own abort is not swallowed as a check failure");
+        registry.Take(staff.SessionId).Should().BeEmpty("the aborted connection was unregistered, not leaked");
+        items.Should().BeEmpty("no registration marker is left for a disconnect that will never run");
+    }
+
     private async Task RevokeAsync(Guid sessionId, SessionConnectionRevoker revoker)
     {
         // As the grant-revoke rule does: commit the revocation, THEN cut the registered connections.
@@ -325,7 +356,9 @@ public sealed class ExerciseRealtimeHubStaffGroupTests
         System.Security.Claims.ClaimsPrincipal principal,
         SessionConnectionRegistry registry,
         string? revokeOnJoining,
-        Func<Task>? revoke)
+        Func<Task>? revoke,
+        CancellationToken connectionAborted = default,
+        IDictionary<object, object?>? items = null)
     {
         var httpContext = new DefaultHttpContext { User = principal };
         if (hostResolvedExerciseId is { } host)
@@ -342,7 +375,8 @@ public sealed class ExerciseRealtimeHubStaffGroupTests
         var callerContext = new Mock<HubCallerContext>();
         callerContext.SetupGet(c => c.ConnectionId).Returns(ConnectionId);
         callerContext.SetupGet(c => c.Features).Returns(features);
-        callerContext.SetupGet(c => c.Items).Returns(new Dictionary<object, object?>());
+        callerContext.SetupGet(c => c.Items).Returns(items ?? new Dictionary<object, object?>());
+        callerContext.SetupGet(c => c.ConnectionAborted).Returns(connectionAborted);
         callerContext.Setup(c => c.Abort()).Callback(() => aborted = true);
 
         var removed = new List<string>();

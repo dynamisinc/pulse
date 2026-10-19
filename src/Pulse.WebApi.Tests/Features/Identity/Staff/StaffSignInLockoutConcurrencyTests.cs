@@ -1,10 +1,14 @@
 namespace Pulse.WebApi.Tests.Features.Identity.Staff;
 
 using System;
+using System.Collections.Generic;
+using System.Data.Common;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.Identity.Staff;
@@ -18,9 +22,14 @@ using Pulse.WebApi.Tests.Data;
 [Collection(MsSqlCollection.Name)]
 public sealed class StaffSignInLockoutConcurrencyTests
 {
+    private readonly MsSqlContainerFixture _fixture;
     private readonly OrgSignInTestKit _kit;
 
-    public StaffSignInLockoutConcurrencyTests(MsSqlContainerFixture fixture) => _kit = new OrgSignInTestKit(fixture);
+    public StaffSignInLockoutConcurrencyTests(MsSqlContainerFixture fixture)
+    {
+        _fixture = fixture;
+        _kit = new OrgSignInTestKit(fixture);
+    }
 
     [Fact]
     public void LockoutDuration_IsTheThresholdDoublingCappedRule()
@@ -113,9 +122,81 @@ public sealed class StaffSignInLockoutConcurrencyTests
         }
     }
 
+    [RequiresDockerFact]
+    public async Task EveryFailure_ReusesOneCompiledQuery_WithTheLockoutInstantsAsSqlParameters()
+    {
+        // #660 W-1: the lockout instants must be SQL PARAMETERS, not per-call literals — otherwise every failed sign-in
+        // compiles a new query (and SQL Server a new plan), a measurable cost on exactly the known-email path.
+        var org = await _kit.SeedOrganizationAsync();
+        var personId = await _kit.SeedPersonAsync(org.Id, OrgSignInTestKit.NewEmail());
+
+        var commands = new CapturingCommandInterceptor();
+        var compilations = 0;
+        var options = new DbContextOptionsBuilder<PulseDbContext>()
+            .UseSqlServer(_fixture.ConnectionString!)
+            .AddInterceptors(commands)
+            .LogTo(_ => Interlocked.Increment(ref compilations), [CoreEventId.QueryCompilationStarting])
+            .Options;
+
+        async Task FailAsync(DateTimeOffset now)
+        {
+            // One options instance → one internal service provider → one shared compiled-query cache, as in the host.
+            await using var context = new PulseDbContext(options, null, null);
+            var person = await context.People.InOrganization(org.Id).AsNoTracking().SingleAsync(p => p.Id == personId);
+            commands.Clear();
+            var compiledBefore = Volatile.Read(ref compilations);
+            await StaffSignInLockout.RecordFailureAsync(context, person, now);
+            commands.Last.Should().NotBeNull();
+            commands.Last!.Compiled = Volatile.Read(ref compilations) - compiledBefore;
+        }
+
+        await FailAsync(new DateTimeOffset(2026, 1, 2, 3, 4, 5, TimeSpan.Zero));
+        var first = commands.Last!;
+        await FailAsync(new DateTimeOffset(2027, 6, 7, 8, 9, 10, TimeSpan.Zero));
+        var second = commands.Last!;
+
+        first.Sql.Should().StartWith("UPDATE", "the captured command is the failure's atomic UPDATE");
+        second.Sql.Should().Be(first.Sql, "a different clock must not change the statement text (no literal instants)");
+        second.Sql.Should().NotContain("2026").And.NotContain("2027", "the instants travel as parameters, never inlined");
+        second.DateParameters.Should().HaveCountGreaterThanOrEqualTo(2, "every lockout arm is a datetimeoffset parameter");
+        second.DateParameters.Should().Contain(new DateTimeOffset(2027, 6, 7, 8, 9, 10, TimeSpan.Zero) + StaffSignInLockout.BaseDuration);
+        second.Compiled.Should().Be(0, "the second failure reuses the query compiled for the first");
+    }
+
     private async Task<Person> ReadAsync(Guid personId)
     {
         await using var read = _kit.Context();
         return await read.People.IgnoreQueryFilters().AsNoTracking().SingleAsync(p => p.Id == personId);
     }
+}
+
+/// <summary>Captures the last executed non-query command's text and datetimeoffset parameter values (#660 W-1).</summary>
+internal sealed class CapturingCommandInterceptor : DbCommandInterceptor
+{
+    /// <summary>The last captured command (its <c>Compiled</c> slot is filled in by the test).</summary>
+    public CapturedCommand? Last { get; private set; }
+
+    public void Clear() => Last = null;
+
+    public override ValueTask<InterceptionResult<int>> NonQueryExecutingAsync(
+        DbCommand command,
+        CommandEventData eventData,
+        InterceptionResult<int> result,
+        CancellationToken cancellationToken = default)
+    {
+        Last = new CapturedCommand(
+            command.CommandText,
+            command.Parameters.Cast<DbParameter>().Select(p => p.Value).OfType<DateTimeOffset>().ToList());
+        return base.NonQueryExecutingAsync(command, eventData, result, cancellationToken);
+    }
+}
+
+/// <summary>One captured command.</summary>
+internal sealed class CapturedCommand(string sql, IReadOnlyList<DateTimeOffset> dateParameters)
+{
+    public string Sql { get; } = sql;
+
+    public IReadOnlyList<DateTimeOffset> DateParameters { get; } = dateParameters;
+
+    public int Compiled { get; set; }
 }

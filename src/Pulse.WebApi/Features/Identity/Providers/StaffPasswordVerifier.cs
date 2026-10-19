@@ -1,5 +1,6 @@
 namespace Pulse.WebApi.Features.Identity.Providers;
 
+using System.Runtime.CompilerServices;
 using Microsoft.AspNetCore.Identity;
 using Pulse.WebApi.Data.Entities;
 
@@ -15,8 +16,8 @@ using Pulse.WebApi.Data.Entities;
 /// <para>
 /// <b>Scoped</b> (one per request, shared by the provider and the funnel through DI), over the singleton
 /// <see cref="IPasswordHasher{TUser}"/> — the default <see cref="PasswordHasher{TUser}"/> (PBKDF2 / HMAC-SHA-512),
-/// the same format every stored <see cref="Person.PasswordHash"/> and the dummy hash below are written in, so a dummy
-/// verification costs exactly what a real one does. Tests substitute a counting hasher to assert the count.
+/// the same format every stored <see cref="Person.PasswordHash"/> is written in. The dummy hash is made by that same
+/// hasher instance, so a dummy verification costs exactly what a real one does. Tests substitute a counting hasher to assert the count.
 /// </para>
 /// <para>Never logs or returns the secret or a hash (NFR-004 / NFR-009).</para>
 /// </remarks>
@@ -25,9 +26,12 @@ public sealed class StaffPasswordVerifier
     // The PasswordHasher<T> API threads a TUser instance through, but the default PBKDF2 implementation never reads it.
     private static readonly Person HashSubject = new() { DisplayName = string.Empty };
 
-    /// <summary>A throwaway hash (of a random value no submission will ever equal) in the stored format.</summary>
-    private static readonly Lazy<string> DummyHash = new(() =>
-        new PasswordHasher<Person>().HashPassword(HashSubject, Guid.NewGuid().ToString("N")));
+    /// <summary>
+    /// A throwaway hash (of a random value no submission will ever equal) per hasher INSTANCE, made BY that hasher (#660
+    /// S-1): it carries the hasher's own configured format and iteration count, so a dummy verification costs exactly what
+    /// a real one does even if the registered options change. The hasher is a singleton, so this is computed once.
+    /// </summary>
+    private static readonly ConditionalWeakTable<IPasswordHasher<Person>, string> DummyHashes = new();
 
     private readonly IPasswordHasher<Person> _hasher;
 
@@ -73,9 +77,15 @@ public sealed class StaffPasswordVerifier
     {
         ArgumentNullException.ThrowIfNull(password);
 
+        if (SlowVerifications >= target)
+        {
+            return;
+        }
+
+        var dummyHash = DummyHashes.GetValue(_hasher, static hasher => hasher.HashPassword(HashSubject, Guid.NewGuid().ToString("N")));
         while (SlowVerifications < target)
         {
-            _ = Verify(DummyHash.Value, password);
+            _ = Verify(dummyHash, password);
         }
     }
 }

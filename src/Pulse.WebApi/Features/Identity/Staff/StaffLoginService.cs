@@ -148,10 +148,11 @@ public sealed class StaffLoginService
         var now = DateTimeOffset.UtcNow;
         var scenarioTime = exercise.CurrentScenarioTime ?? now;
 
-        // 3. identity-auth-roles/15 (Gate-1 M-3): a person with a PULSE password gets the same per-person lockout and
-        //    disable as the org sign-in. A locked-out or disabled person is refused with the uniform failure WITHOUT a real
-        //    verification (the attempt's padding still spends its fixed PBKDF2 work, #602 M-5). Allowlist-only staff (no Pulse password) are not matched here, so their legacy behaviour is
-        //    unchanged.
+        // 3. identity-auth-roles/15 (Gate-1 M-3): a person with a PULSE password gets the same per-person
+        //    lockout and disable as the org sign-in. A locked-out or disabled person is refused with the
+        //    uniform failure WITHOUT a real verification (the attempt's padding still spends its fixed PBKDF2
+        //    work, #602 M-5). Allowlist-only staff (no Pulse password) are not matched here, so their legacy
+        //    behaviour is unchanged.
         var passwordPerson = await PulsePasswordIdentityProvider.FindPasswordPersonAsync(
             _dbContext, username, exercise.OrganizationId, cancellationToken);
         if (passwordPerson is not null && StaffSignInLockout.IsBlocked(passwordPerson, now))

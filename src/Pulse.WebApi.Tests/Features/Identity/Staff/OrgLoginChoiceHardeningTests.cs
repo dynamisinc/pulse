@@ -72,6 +72,9 @@ public sealed class OrgLoginChoiceHardeningTests
     [RequiresDockerFact]
     public async Task RedeemingAChoice_PurgesExpiredChoices_ConsumedOrNot_AndTheirCandidates_ButNotUnexpiredOnes()
     {
+        // The real choice is created FIRST (creation purges too), then the spent rows, so only the redemption can purge them.
+        var (token, orgB, _) = await SeedChoiceAsync(CreatingIp);
+
         var personId = await SeedPersonAsync();
         var expired = await SeedRawChoiceAsync(personId, DateTimeOffset.UtcNow.AddMinutes(-5), consumedAt: null);
         var expiredConsumed = await SeedRawChoiceAsync(
@@ -84,8 +87,8 @@ public sealed class OrgLoginChoiceHardeningTests
         await using (var context = _kit.Context())
         {
             (await OrgSignInTestKit.Service(context, new RecordingSessionIssuer())
-                    .ChooseAsync(new StaffLoginChooseRequest { ChoiceToken = SessionTokens.Generate(), OrgSlug = "any" }, CreatingIp))
-                .Outcome.Should().Be(OrgStaffLoginOutcome.Rejected);
+                    .ChooseAsync(new StaffLoginChooseRequest { ChoiceToken = token, OrgSlug = orgB }, CreatingIp))
+                .Outcome.Should().Be(OrgStaffLoginOutcome.Authenticated);
         }
 
         await AssertPurgedAsync(purged: [expired, expiredConsumed], kept: [consumedUnexpired, live]);
@@ -102,6 +105,26 @@ public sealed class OrgLoginChoiceHardeningTests
         await AssertPurgedAsync(purged: [expired], kept: []);
         await using var read = _kit.Context();
         (await read.LoginChoices.CountAsync(c => c.TokenHash == SessionTokens.Hash(token))).Should().Be(1, "the new choice is created");
+    }
+
+    [RequiresDockerFact]
+    public async Task ARefusedRedemption_DoesNotPurge_SoItsTimingNeverDependsOnTheBacklog()
+    {
+        // #660 S-3: an unknown / foreign-IP / non-candidate choice is refused BEFORE the purge runs.
+        var (token, orgB, _) = await SeedChoiceAsync(CreatingIp);
+        var personId = await SeedPersonAsync();
+        var expired = await SeedRawChoiceAsync(personId, DateTimeOffset.UtcNow.AddMinutes(-5), consumedAt: null);
+
+        await using (var context = _kit.Context())
+        {
+            var service = OrgSignInTestKit.Service(context, new RecordingSessionIssuer());
+            (await service.ChooseAsync(new StaffLoginChooseRequest { ChoiceToken = SessionTokens.Generate(), OrgSlug = orgB }, CreatingIp))
+                .Outcome.Should().Be(OrgStaffLoginOutcome.Rejected);
+            (await service.ChooseAsync(new StaffLoginChooseRequest { ChoiceToken = token, OrgSlug = orgB }, OtherIp))
+                .Outcome.Should().Be(OrgStaffLoginOutcome.Rejected);
+        }
+
+        await AssertPurgedAsync(purged: [], kept: [expired]);
     }
 
     private async Task AssertPurgedAsync(Guid[] purged, Guid[] kept)

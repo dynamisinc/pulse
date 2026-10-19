@@ -281,6 +281,15 @@ public sealed partial class ExerciseRealtimeHub : Hub
             LogSessionRecheckFailed(Context.ConnectionId, ex);
             live = false;
         }
+        catch (OperationCanceledException)
+        {
+            // #660 W-3: the connection's OWN abort cancelled the re-read. The cancellation propagates (it is not a check
+            // failure), and a connection that dies inside OnConnectedAsync never reaches OnDisconnectedAsync — so forget
+            // the registration here, or the registry would hold this dead connection forever.
+            _connections.Unregister(sessionId, Context.ConnectionId);
+            Context.Items.Remove(RegisteredSessionItemKey);
+            throw;
+        }
 
         if (live)
         {
