@@ -455,7 +455,8 @@ function ensureStartedLive(connection: RealtimeConnection = realtimeConnection):
   // reconnects), and the one stranding that matters is a Freeze holding page left over an
   // exercise that has since ended. The GET is the same ordering-guarded `refetchLive`, so
   // the generation and push-count guards apply to it exactly as to every other GET.
-  // Mirrors `notificationsStore.ts` / `useReadOnlyRefresh.ts`.
+  // Mirrors `notificationsStore.ts` / `useReadOnlyRefresh.ts`. The GET body has no `sequence`,
+  // so adopting it re-bases `lastAppliedSequence` to 0 ON PURPOSE (any later push then applies).
   unsubscribeVisibility = onBecameVisible(() => {
     void refetchLive()
   })

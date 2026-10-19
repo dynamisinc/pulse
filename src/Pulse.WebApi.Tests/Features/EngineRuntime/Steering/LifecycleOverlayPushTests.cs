@@ -50,6 +50,7 @@ public sealed class LifecycleOverlayPushTests
     public async Task FreezeWhileLive_ThenCompleted_PushesTheProjectedState_ExactlyOnce_WithAHigherSequence()
     {
         var exerciseId = await SeedAsync(ExerciseLifecycleStates.Live);
+        var bystander = await SeedAsync(ExerciseLifecycleStates.Live);
         var hub = new RecordingHub();
         await using var host = await StartAsync(exerciseId, hub);
 
@@ -64,8 +65,9 @@ public sealed class LifecycleOverlayPushTests
         var endexPush = pushes[1];
         endexPush.State.Should().Be(
             "none",
-            "today's projection of 'completed' (LifecycleOverlayComposer.FromLifecycle) — the endex literal is a pending "
-            + "decision for Tom; whatever it becomes, the push must carry the projection, not a constant");
+            "Tom's ruling (2026-10-19, #390, recorded at LifecycleOverlayComposer.FromLifecycle): 'completed' projects to "
+            + "'none', so EndEx LIFTS the holding page rather than showing the blocking 'endex' overlay — and the push "
+            + "carries that projection, not a constant");
         endexPush.Sequence.Should().BeGreaterThan(
             freezePush.Sequence,
             "the client drops a push whose sequence is not NEWER than the last applied one — a lower or equal ticket "
@@ -75,6 +77,7 @@ public sealed class LifecycleOverlayPushTests
         hub.Sends.Should().OnlyContain(
             send => send.Group == ExerciseRealtimeHub.GroupNameFor(exerciseId),
             "COR-001: the push goes only to this exercise's group");
+        AssertBystanderUntouched(hub, bystander);
     }
 
     /// <summary>live → paused pushes the lifecycle's holding page to connected tabs.</summary>
@@ -82,6 +85,7 @@ public sealed class LifecycleOverlayPushTests
     public async Task LiveToPaused_PushesTheLifecyclePauseProjection()
     {
         var exerciseId = await SeedAsync(ExerciseLifecycleStates.Live);
+        var bystander = await SeedAsync(ExerciseLifecycleStates.Live);
         var hub = new RecordingHub();
         await using var host = await StartAsync(exerciseId, hub);
 
@@ -93,6 +97,7 @@ public sealed class LifecycleOverlayPushTests
             "out-of-fiction", "with nothing chosen on either side the composer falls back to out-of-fiction");
         push.Sequence.Should().BePositive("an unsequenced push is dropped by the client as unorderable (SG-002)");
         await AssertParityAsync(host, push);
+        AssertBystanderUntouched(hub, bystander);
     }
 
     /// <summary>paused → live with no Freeze lifts the holding page.</summary>
@@ -100,6 +105,7 @@ public sealed class LifecycleOverlayPushTests
     public async Task PausedToLive_WithNoFreeze_PushesNone()
     {
         var exerciseId = await SeedAsync(ExerciseLifecycleStates.Paused);
+        var bystander = await SeedAsync(ExerciseLifecycleStates.Live);
         var hub = new RecordingHub();
         await using var host = await StartAsync(exerciseId, hub);
 
@@ -108,6 +114,7 @@ public sealed class LifecycleOverlayPushTests
         var push = hub.SendsTo(exerciseId).Should().ContainSingle().Which;
         push.State.Should().Be("none", "resuming the lifecycle must lift the holding page on connected tabs");
         await AssertParityAsync(host, push);
+        AssertBystanderUntouched(hub, bystander);
     }
 
     /// <summary>
@@ -118,6 +125,7 @@ public sealed class LifecycleOverlayPushTests
     public async Task FreezeThenLifecyclePauseThenLive_EachPushMatchesTheGet()
     {
         var exerciseId = await SeedAsync(ExerciseLifecycleStates.Live);
+        var bystander = await SeedAsync(ExerciseLifecycleStates.Live);
         var hub = new RecordingHub();
         await using var host = await StartAsync(exerciseId, hub);
         await FreezeAsync(host, exerciseId);
@@ -136,6 +144,35 @@ public sealed class LifecycleOverlayPushTests
         await AssertParityAsync(host, livePush);
 
         hub.SendsTo(exerciseId).Should().HaveCount(3, "one Freeze push plus one push per applied transition");
+        AssertBystanderUntouched(hub, bystander);
+    }
+
+    /// <summary>
+    /// #390 Gate-1 WR-002: a Resume while the LIFECYCLE is paused must push what the GET serves — the lifecycle's holding
+    /// page — not the raw cleared store snapshot. Otherwise the tab drops its holding page over a paused exercise.
+    /// </summary>
+    [RequiresDockerFact]
+    public async Task LifecyclePaused_FreezeThenResume_TheResumePushEqualsTheGet_Pause()
+    {
+        var exerciseId = await SeedAsync(ExerciseLifecycleStates.Live);
+        var bystander = await SeedAsync(ExerciseLifecycleStates.Live);
+        var hub = new RecordingHub();
+        await using var host = await StartAsync(exerciseId, hub);
+        await TransitionAsync(host, ExerciseLifecycleStates.Paused);
+        await FreezeAsync(host, exerciseId);
+
+        var resumed = await host.Services.GetRequiredService<PauseTierRegistry>().SetTierAsync(
+            exerciseId,
+            PauseTier.Running,
+            "human-controller-01",
+            new PauseClockStart(DateTimeOffset.UtcNow, TimeZoneInfo.Utc));
+        resumed.Outcome.Should().Be(PauseTierOutcome.Applied);
+
+        var resumePush = hub.SendsTo(exerciseId).Last();
+        resumePush.State.Should().Be(
+            "pause", "the lifecycle is still paused, so the composed overlay is still the holding page");
+        await AssertParityAsync(host, resumePush);
+        AssertBystanderUntouched(hub, bystander);
     }
 
     /// <summary>A refused (409) or invalid (400) transition pushes nothing.</summary>
@@ -166,6 +203,7 @@ public sealed class LifecycleOverlayPushTests
         var world = await Pulse.WebApi.Tests.Features.ExerciseLifecycleAdmin.OrgAdminTestWorld.SeedAsync(
             _fixture, Pulse.WebApi.Features.ExerciseLifecycleAdmin.ExerciseAdminRoles.Planner);
         await SetStatusAsync(world.OwnExercise.Id, ExerciseLifecycleStates.Completed);
+        var bystander = await SeedAsync(ExerciseLifecycleStates.Live);
         var hub = new RecordingHub();
 
         await using var baseFactory = new Pulse.WebApi.Tests.Features.ExerciseLifecycleAdmin.OrgAdminProbeFactory(
@@ -190,6 +228,8 @@ public sealed class LifecycleOverlayPushTests
         push.State.Should().Be("none", "an archived world authors no overlay (the GET 403s, which the client clears on)");
         push.Sequence.Should().BePositive();
         hub.Sends.Should().OnlyContain(send => send.Group == ExerciseRealtimeHub.GroupNameFor(world.OwnExercise.Id));
+        AssertBystanderUntouched(hub, bystander);
+        AssertBystanderUntouched(hub, world.OtherExercise.Id);
     }
 
     /// <summary>
@@ -271,6 +311,14 @@ public sealed class LifecycleOverlayPushTests
     /// <summary>One captured log entry.</summary>
     private sealed record LogEntry(
         string Category, Microsoft.Extensions.Logging.LogLevel Level, string Message, Exception? Exception);
+
+    /// <summary>
+    /// SG-002, a real COR-001 negative: a SECOND, genuinely live exercise exists in the same database and host while
+    /// the test's exercise transitions, and its group must have received nothing at all.
+    /// </summary>
+    private static void AssertBystanderUntouched(RecordingHub hub, Guid bystander) =>
+        hub.SendsTo(bystander).Should().BeEmpty(
+            "COR-001/XC-001: one exercise's lifecycle push must never reach another exercise's participants");
 
     private static async Task FreezeAsync(ExerciseLifecycleTestHost host, Guid exerciseId)
     {

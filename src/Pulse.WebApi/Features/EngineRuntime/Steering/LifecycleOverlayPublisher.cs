@@ -31,10 +31,13 @@ using Pulse.WebApi.Features.Realtime;
 /// outlives a lifecycle pause must re-appear on <c>paused → live</c>). It only takes a ticket from it.
 /// </para>
 /// <para>
-/// <b>Sequence convergence — the <see cref="PauseOverlayPublisher"/> rule.</b> The
+/// <b>Sequence convergence — the <see cref="PauseOverlayPublisher"/> rule, under the shared publish lock.</b> The
+/// whole sequence runs under <see cref="OverlayStateService.AcquirePublishLockAsync"/> (#390 Gate-1 WR-001): the
 /// <see cref="OverlayStateService.NextSequence"/> ticket is taken FIRST, then the projection is read, then the push is
-/// sent with that ticket as its <c>sequence</c>. The client drops any push not newer than the last applied one, so the
-/// lifecycle push outranks every earlier Freeze push, and a later Freeze/Resume push outranks it.
+/// sent with that ticket as its <c>sequence</c>. Because the pause publisher holds the same lock from its ticket to its
+/// send, every lower-ticketed Freeze/Resume has already written the store when this projects, so this push both
+/// outranks AND reflects every earlier one; a later Freeze/Resume push outranks it in turn. (The ticket alone was not
+/// enough: this push writes no store, so a Freeze still awaiting its lifecycle read could lose to it.)
 /// </para>
 /// <para>
 /// <b>Lifetime: SINGLETON, with its own DI scope per notification.</b> Chosen deliberately:
@@ -104,6 +107,12 @@ public sealed class LifecycleOverlayPublisher : IExerciseLifecycleTransitionObse
             // Fail closed: never fan out to an unscoped group (COR-001).
             return;
         }
+
+        // WR-001 (#390 Gate-1): the per-exercise publish lock PauseOverlayPublisher also holds, across ticket ->
+        // project -> send, so a Freeze can never be between its ticket and its store write while this projects.
+        // Released by `using` on every exit, exceptions included; nothing below publishes, so it is never re-taken.
+        using var publishLock = await _overlayState.AcquirePublishLockAsync(exerciseId, cancellationToken)
+            .ConfigureAwait(false);
 
         // 1. The ticket FIRST (PauseOverlayPublisher's convergence rule — see the remarks).
         var sequence = _overlayState.NextSequence(exerciseId);

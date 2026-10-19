@@ -14,11 +14,11 @@ using Pulse.WebApi.Features.ParticipantShell;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>The XC-002 projection is STRUCTURAL, not a discipline (read this before adding a property).</b> There are
-/// exactly two factories and both take a participant-safe record that itself carries no staff field:
-/// <see cref="FromSnapshot"/> (the steering store's <see cref="OverlayStateSnapshot"/>, used by the Freeze push) and
-/// <see cref="FromComposed"/> (the composed <c>GET /api/overlay-state</c> projection, used by the lifecycle push,
-/// #390). Neither accepts a <see cref="PauseTierTransition"/>, so
+/// <b>The XC-002 projection is STRUCTURAL, not a discipline (read this before adding a property).</b> The one
+/// factory, <see cref="FromComposed"/>, takes the composed <c>GET /api/overlay-state</c> body — a participant-safe
+/// record that itself carries no staff field — plus an opaque sequence. BOTH pushers (the pause-tier
+/// <see cref="PauseOverlayPublisher"/> and the lifecycle <see cref="LifecycleOverlayPublisher"/>) use it, so there is
+/// one projection and one wire shape (#390). It does not accept a <see cref="PauseTierTransition"/>, so
 /// <see cref="PauseTierTransition.ActingHumanId"/> (COR-018 staff attribution) is not merely omitted here, it
 /// is not reachable from here: a participant can never learn WHICH controller paused the exercise. For the same
 /// reason no <see cref="PauseTier"/> value is projected — <c>INJECTS PAUSED</c>/<c>ENGINE PAUSED</c>/<c>WORLD
@@ -53,25 +53,6 @@ public sealed class ParticipantOverlayStateDto
     /// </summary>
     [JsonPropertyName("sequence")]
     public required long Sequence { get; init; }
-
-    /// <summary>
-    /// Projects a stored overlay snapshot onto the participant wire shape. The ONLY way to build this DTO — see
-    /// the type's remarks for why the input is deliberately the snapshot and never a staff transition record.
-    /// </summary>
-    /// <param name="snapshot">The exercise's stored overlay snapshot.</param>
-    /// <returns>The participant-safe projection.</returns>
-    public static ParticipantOverlayStateDto FromSnapshot(OverlayStateSnapshot snapshot)
-    {
-        ArgumentNullException.ThrowIfNull(snapshot);
-
-        return new ParticipantOverlayStateDto
-        {
-            State = snapshot.State,
-            Register = snapshot.Register,
-            Message = snapshot.Message,
-            Sequence = snapshot.Sequence,
-        };
-    }
 
     /// <summary>
     /// Projects the COMPOSED overlay — exactly the <see cref="OverlayStateResponse"/> <c>GET /api/overlay-state</c>

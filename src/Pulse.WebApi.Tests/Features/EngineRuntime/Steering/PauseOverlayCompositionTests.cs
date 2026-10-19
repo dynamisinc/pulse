@@ -9,6 +9,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.EngineRuntime.Steering;
 using Pulse.WebApi.Features.ExerciseConfiguration.Lifecycle;
+using Pulse.WebApi.Features.ParticipantShell;
 using Xunit;
 
 /// <summary>
@@ -242,6 +243,10 @@ public sealed class PauseOverlayCompositionTests
 
         services.Replace(ServiceDescriptor.Singleton<ExerciseLifecycleStatusReader>(
             _ => (exerciseId, cancellationToken) => Task.FromResult<string?>("live")));
+
+        // WR-002: the composed reader also reads PulseDbContext in production; stubbed for the same reason.
+        services.Replace(ServiceDescriptor.Singleton<ComposedOverlayStateReader>(
+            _ => (exerciseId, cancellationToken) => Task.FromResult(new OverlayStateResponse())));
 
         return services.BuildServiceProvider(validateScopes: true);
     }

@@ -3,6 +3,7 @@ namespace Pulse.WebApi.Features.EngineRuntime.Steering;
 using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using System.Threading;
+using System.Threading.Tasks;
 
 /// <summary>
 /// The PARTICIPANT-facing overlay wire vocabulary — the exact literals the frozen frontend unions use
@@ -122,6 +123,10 @@ public sealed class OverlayStateService
     // plain Interlocked on a field — unambiguously atomic, without depending on AddOrUpdate's retry semantics.
     private readonly ConcurrentDictionary<Guid, StrongBox<long>> _sequences = new();
 
+    // One async publish lock PER EXERCISE (#390 Gate-1 WR-001) — see AcquirePublishLockAsync. Never removed: one
+    // small semaphore per exercise this host has ever published for, exactly like the counters above.
+    private readonly ConcurrentDictionary<Guid, SemaphoreSlim> _publishLocks = new();
+
     /// <summary>
     /// The CLEARED overlay — no overlay active. What an exercise that has never been frozen reads, what a
     /// Resume writes, and the fail-closed answer for an unresolved/empty scope: this feature never fails OPEN
@@ -234,6 +239,43 @@ public sealed class OverlayStateService
     }
 
     /// <summary>
+    /// Acquires this exercise's PUBLISH lock (#390 Gate-1 WR-001). Every participant-overlay pusher —
+    /// <see cref="PauseOverlayPublisher"/> and <see cref="LifecycleOverlayPublisher"/> — holds it across its WHOLE
+    /// ticket → read/<see cref="Apply"/>/project → send sequence, so per exercise the pushes go out in ticket order and
+    /// each one is computed from a store that already holds every lower-ticketed write.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Why the ticket alone was not enough.</b> The lifecycle push does not write this store, so "highest ticket
+    /// wins" cannot converge it: a Freeze could take ticket F, await its lifecycle read, and meanwhile a transition
+    /// into <c>live</c> takes L &gt; F, projects the still-empty store and sends <c>none@L</c>; the Freeze's
+    /// <c>pause@F</c> then arrives and the client drops it as stale. Serializing the two closes that window.
+    /// </para>
+    /// <para>
+    /// <b>No deadlock by construction.</b> The lock is per exercise (A never waits on B), is not reentrant and is never
+    /// taken while held (no publisher calls another publisher, and nothing a publisher awaits under it — the tier
+    /// read, the lifecycle-status read, the projection, the hub send — publishes), and is released by disposing the
+    /// returned handle, which every caller does with <c>using</c>, so an exception also releases it. Disposing the
+    /// handle twice releases once.
+    /// </para>
+    /// </remarks>
+    /// <param name="exerciseId">The exercise whose publishes are serialized; never <see cref="Guid.Empty"/>.</param>
+    /// <param name="cancellationToken">Cancels the WAIT only; once acquired, the handle must still be disposed.</param>
+    /// <returns>A handle whose disposal releases the lock.</returns>
+    /// <exception cref="ArgumentException"><paramref name="exerciseId"/> is <see cref="Guid.Empty"/> (COR-001).</exception>
+    public async Task<IDisposable> AcquirePublishLockAsync(Guid exerciseId, CancellationToken cancellationToken = default)
+    {
+        if (exerciseId == Guid.Empty)
+        {
+            throw new ArgumentException("An overlay publish lock must name an exercise (COR-001).", nameof(exerciseId));
+        }
+
+        var gate = _publishLocks.GetOrAdd(exerciseId, _ => new SemaphoreSlim(1, 1));
+        await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        return new PublishLockRelease(gate);
+    }
+
+    /// <summary>
     /// TEST-ONLY reset: clears every exercise's overlay and the sequence counter. Production has one long-lived
     /// store per host.
     /// </summary>
@@ -241,5 +283,20 @@ public sealed class OverlayStateService
     {
         _states.Clear();
         _sequences.Clear();
+    }
+
+    /// <summary>Releases a publish lock exactly once, however many times it is disposed.</summary>
+    private sealed class PublishLockRelease(SemaphoreSlim gate) : IDisposable
+    {
+        private int _released;
+
+        /// <inheritdoc />
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _released, 1) == 0)
+            {
+                gate.Release();
+            }
+        }
     }
 }

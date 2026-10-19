@@ -94,6 +94,28 @@ public static class PauseOverlayServiceCollectionExtensions
                     .SingleOrDefaultAsync(cancellationToken);
             });
 
+        // #390 Gate-1 WR-002: the COMPOSED overlay the pause publisher pushes — the same read the GET performs
+        // (ParticipantShellConfigService.GetOverlayStateAsync): the exercise row (or the unconfigured fallback) through
+        // ExerciseShellConfigSource, then the registered IOverlayStateProjection — in its OWN scope per call, for the
+        // same captive-dependency reason as the lifecycle reader above.
+        services.TryAddSingleton<ComposedOverlayStateReader>(provider =>
+            async (exerciseId, cancellationToken) =>
+            {
+                await using var scope = provider.GetRequiredService<IServiceScopeFactory>().CreateAsyncScope();
+
+                // org-scope-exempt(ResolvedScope): exerciseId is the SERVER-resolved scope the transition carries,
+                // never a client-supplied id, so this read stays inside the caller's tenant.
+                var exercise = await scope.ServiceProvider.GetRequiredService<PulseDbContext>().Exercises
+                    .AsNoTracking()
+                    .SingleOrDefaultAsync(row => row.Id == exerciseId, cancellationToken);
+                var source = exercise is null
+                    ? ExerciseShellConfigSource.Unconfigured(exerciseId)
+                    : ExerciseShellConfigSource.FromExercise(exercise);
+
+                return await scope.ServiceProvider.GetRequiredService<IOverlayStateProjection>()
+                    .ProjectAsync(source, cancellationToken);
+            });
+
         services.RemoveAll<IPauseOverlayPublisher>();
         services.AddSingleton<IPauseOverlayPublisher, PauseOverlayPublisher>();
 
