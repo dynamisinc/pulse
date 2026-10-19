@@ -67,7 +67,7 @@ export function parseTimeField(
   }
   // The lower bound is the start of the exercise's first scenario DAY, so a whole-day window
   // (the "Latest scenario day" preset on a one-day exercise) is always accepted.
-  const earliest = windowStart === null ? null : `${windowStart.slice(0, 10)} 00:00`
+  const earliest = earliestStamp(windowStart)
   if (earliest !== null && text < earliest) {
     return {
       ok: false,
@@ -106,4 +106,21 @@ export function describeFilters(filters: ReportFilters): string {
   if (filters.from !== null) return `${head}, from ${shortStamp(filters.from)}`
   if (filters.to !== null) return `${head}, up to ${shortStamp(filters.to)}`
   return `${head} for the whole exercise`
+}
+
+/**
+ * A wire stamp ("yyyy-MM-dd HH:mm") as a `datetime-local` value ("yyyy-MM-ddTHH:mm"), and back.
+ * Both are exercise-zone wall times: the input carries no zone, so nothing is converted.
+ */
+export function toInputValue(stamp: string): string {
+  return stamp.replace(' ', 'T')
+}
+
+export function fromInputValue(value: string): string {
+  return value.replace('T', ' ').slice(0, 16)
+}
+
+/** The earliest value the From/To pickers offer: 00:00 of the exercise's first scenario day. */
+export function earliestStamp(windowStart: string | null): string | null {
+  return windowStart === null ? null : `${windowStart.slice(0, 10)} 00:00`
 }

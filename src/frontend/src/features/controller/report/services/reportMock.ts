@@ -300,6 +300,7 @@ export const MOCK_REPORT: ExerciseReport = {
     conductedDate: '2026-10-14',
     preparedAt: '2026-10-15 14:30',
     latestDay: { from: '2026-10-15 00:00', to: '2026-10-15 23:59' },
+    scenarioNow: '2026-10-15 10:42',
     spansMultipleDays: true,
   },
   summary: {

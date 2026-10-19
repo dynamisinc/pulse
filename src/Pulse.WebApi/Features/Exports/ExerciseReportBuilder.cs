@@ -501,6 +501,22 @@ public static class ExerciseReportBuilder
         return lookalikeTotal >= LookalikeVerdictMinimum && (decimal)lookalikeTotal * 2 >= (decimal)verifiedTotal * 3;
     }
 
+    /// <summary>
+    /// The report's "now" in scenario time: the later of the exercise clock (live, else the persisted placeholder) and
+    /// the latest post, so a default window end never hides a post. <c>null</c> when both are missing.
+    /// </summary>
+    /// <param name="clock">The live or stored scenario time, if any.</param>
+    /// <param name="latestPost">The latest post's scenario time, if any.</param>
+    /// <returns>The instant, or <c>null</c>.</returns>
+    public static DateTimeOffset? ScenarioNow(DateTimeOffset? clock, DateTimeOffset? latestPost) =>
+        (clock, latestPost) switch
+        {
+            ({ } c, { } p) => c >= p ? c : p,
+            ({ } c, null) => c,
+            (null, { } p) => p,
+            _ => null,
+        };
+
     /// <summary>A handle without its leading <c>@</c> and surrounding whitespace.</summary>
     /// <param name="handle">The stored handle.</param>
     /// <returns>The bare handle, or empty.</returns>
