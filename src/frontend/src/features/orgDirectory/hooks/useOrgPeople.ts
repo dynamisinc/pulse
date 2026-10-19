@@ -48,9 +48,14 @@ export function useUpdateOrgPerson(): UseMutationResult<
   })
 }
 
-/** Issues a reset link. Resolves to the one-time URL. */
+/**
+ * Issues a reset link. Resolves to the one-time URL. `gcTime: 0` so the link is dropped from the
+ * mutation cache as soon as the dialog that shows it unmounts, instead of lingering for the default
+ * five minutes (the link is a bearer credential, shown once).
+ */
 export function useIssuePasswordReset(): UseMutationResult<string, OrgPeopleError, string> {
   return useMutation<string, OrgPeopleError, string>({
     mutationFn: (personId: string) => issuePasswordResetLink(personId),
+    gcTime: 0,
   })
 }

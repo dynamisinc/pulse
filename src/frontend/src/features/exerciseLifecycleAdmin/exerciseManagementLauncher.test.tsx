@@ -176,25 +176,13 @@ describe('the launcher is LIVE for a planner (no longer permanently degraded)', 
   })
 })
 
-describe('the degrade is intact for a single-surface role (the non-vacuity control)', () => {
-  // The controller used to be a control here. Easy-login's participant-admin surface
-  // (Gate-2 W-3) gave the controller a second destination, and demo-feedback seam S-3
-  // (DF-14) gave the evaluator the read-only console, so the org admin is the remaining
-  // single-surface role.
-  it.each([
-    ['orgAdmin', '/staff/exercises', 'exercise-management-page'],
-  ] as const)('a %s still gets the static lockup', async (role, path, surfaceTestId) => {
-    // Without this control the cases above could be passing because the launcher
-    // ALWAYS renders a button now — which would mean a one-destination menu that
-    // goes nowhere, the thing the degrade rule exists to prevent.
-    renderTreeAt(role, path, path)
-    await screen.findByTestId(surfaceTestId)
-
-    const lockup = screen.getByTestId('staff-header-lockup')
-    expect(lockup.tagName).not.toBe('BUTTON')
-    expect(lockup).not.toHaveAttribute('aria-haspopup')
-  })
-})
+// The single-surface degrade no longer has a live-tree control. The org admin was the last
+// single-surface role, and #574's People directory (`/staff/people`) gave them a second
+// destination, so every staff role now reaches at least two surfaces. The degrade rule
+// ("do not render a launcher that goes nowhere") stays pinned at unit level in
+// `staffShell/components/SurfaceLauncher.test.tsx` ("single-surface role degrades to the static
+// lockup"). The live-tree cases here are not vacuous for the same reason: each one also
+// asserts the role's EXACT destinations, which a launcher wired to nothing could not list.
 
 describe('the launcher for a controller (easy-login participant-admin, Gate-2 W-3)', () => {
   it('is live now: the controller has Exercise Management and Participants under Administer', async () => {
@@ -217,15 +205,22 @@ describe('the launcher for a controller (easy-login participant-admin, Gate-2 W-
 })
 
 describe('the launcher for an orgAdmin', () => {
-  it('degrades today, because exercise management is their only surface', async () => {
-    // Honest, not aspirational: `GET /api/org/staff-assignments` exists and is
-    // gated on orgAdmin alone, but no surface consumes it yet, so an org-admin
-    // has exactly one destination. When that second surface lands, this case
-    // flips — which is the point of asserting it rather than leaving it
-    // undefined.
+  it('is live now: the People directory (#574) is the org admin\'s second surface', async () => {
+    // This case used to assert the degrade, "until that second surface lands". The org people
+    // directory is that surface, so it flips: Exercise Management (current) plus People, and
+    // nothing an org admin cannot reach.
+    const user = userEvent.setup()
     renderTreeAt('orgAdmin', '/staff/exercises', '/staff/exercises')
     await screen.findByTestId('exercise-management-page')
 
-    expect(screen.getByTestId('staff-header-lockup').tagName).not.toBe('BUTTON')
+    const lockup = screen.getByTestId('staff-header-lockup')
+    expect(lockup.tagName).toBe('BUTTON')
+
+    await user.click(lockup)
+    expect(screen.getByTestId('surface-launcher-item-exercise-management'))
+      .toHaveAttribute('aria-current', 'page')
+    expect(screen.getByTestId('surface-launcher-item-org-people-directory')).toBeEnabled()
+    expect(screen.queryByTestId('surface-launcher-item-planner-workspace')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('surface-launcher-item-controller-console')).not.toBeInTheDocument()
   })
 })

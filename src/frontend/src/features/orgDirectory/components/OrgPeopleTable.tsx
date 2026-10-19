@@ -5,11 +5,13 @@
  * row: name + email, status (org-admin badge, disabled, locked-out: ALWAYS icon + text, never
  * colour alone), an enrollment summary (exercise name + role, lead marker) and the actions, each
  * opening `PersonActionDialog`. The caller's own row offers no Disable (and says "you"); the
- * server's `cannot-disable-self` 409 is still mapped in the dialog.
+ * server's `cannot-disable-self` 409 is still mapped in the dialog. "Reset link" is disabled on
+ * org-admin and disabled rows with a VISIBLE text reason (the server would 409; the 409 mappings
+ * stay for a stale row). A dialog's success sentence is passed up via `onActionSuccess`.
  * STAFF world, COBRA, FontAwesome.
  */
 
-import { useState, type ReactNode } from 'react'
+import { useId, useState, type ReactNode } from 'react'
 import { Box, Stack, Typography } from '@mui/material'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import {
@@ -26,7 +28,7 @@ import type { IconDefinition } from '@fortawesome/free-solid-svg-icons'
 import { CobraSecondaryButton } from '@/theme/styledComponents'
 import type { OrgPerson } from '../types'
 import { PersonActionDialog } from './PersonActionDialog'
-import type { PersonActionKind } from './personActions'
+import { resetUnavailableReason, type PersonActionKind } from './personActions'
 
 const CELL_SX = {
   padding: '8px 12px',
@@ -55,6 +57,8 @@ export interface OrgPeopleTableProps {
   readonly people: readonly OrgPerson[]
   /** The signed-in person's id, so their own Disable is not offered. */
   readonly currentPersonId: string | null
+  /** Receives the short success sentence of a completed action (for the page status region). */
+  readonly onActionSuccess?: (message: string) => void
   /**
    * TODO(#667 merge): the per-exercise staff link hook. Receives an enrollment's exercise and
    * returns the node to render for its name; the default is PLAIN TEXT. #667's merge passes a link
@@ -68,9 +72,11 @@ const plainExerciseName = (_exerciseId: string, exerciseName: string): ReactNode
 export function OrgPeopleTable({
   people,
   currentPersonId,
+  onActionSuccess,
   renderExerciseLink = plainExerciseName,
 }: OrgPeopleTableProps) {
   const [open, setOpen] = useState<{ person: OrgPerson; kind: PersonActionKind } | null>(null)
+  const reasonIdPrefix = useId()
 
   return (
     <>
@@ -93,6 +99,8 @@ export function OrgPeopleTable({
           {people.map(p => {
             const isSelf = currentPersonId !== null && p.id === currentPersonId
             const isAdmin = p.orgRole === 'orgAdmin'
+            const resetReason = resetUnavailableReason(p)
+            const resetReasonId = `${reasonIdPrefix}-reset-${p.id}`
             return (
               <tr key={p.id} data-testid={`org-person-${p.id}`}>
                 <Box component="td" sx={CELL_SX}>
@@ -165,11 +173,22 @@ export function OrgPeopleTable({
                       sx={ACTION_SX}
                       startIcon={<FontAwesomeIcon icon={faKey} aria-hidden="true" />}
                       aria-label={`Copy password-reset link for ${p.displayName}`}
+                      aria-describedby={resetReason === null ? undefined : resetReasonId}
+                      disabled={resetReason !== null}
                       onClick={() => setOpen({ person: p, kind: 'resetPassword' })}
                     >
                       Reset link
                     </CobraSecondaryButton>
                   </Stack>
+                  {resetReason !== null && (
+                    <Typography
+                      id={resetReasonId}
+                      data-testid="reset-unavailable-reason"
+                      sx={{ fontSize: 12, mt: 0.5 }}
+                    >
+                      {resetReason}
+                    </Typography>
+                  )}
                 </Box>
               </tr>
             )
@@ -177,7 +196,13 @@ export function OrgPeopleTable({
         </tbody>
       </Box>
       {open !== null && (
-        <PersonActionDialog person={open.person} kind={open.kind} onClose={() => setOpen(null)} />
+        <PersonActionDialog
+          person={open.person}
+          kind={open.kind}
+          isSelf={currentPersonId !== null && open.person.id === currentPersonId}
+          onClose={() => setOpen(null)}
+          onSuccess={onActionSuccess}
+        />
       )}
     </>
   )

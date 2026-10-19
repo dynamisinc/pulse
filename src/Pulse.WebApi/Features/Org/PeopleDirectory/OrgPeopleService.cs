@@ -310,7 +310,7 @@ public sealed partial class OrgPeopleService
             }
         }
 
-        await CutRevokedConnectionsAfterCommitAsync(revokedSessionIds, cancellationToken);
+        await CutRevokedConnectionsAfterCommitAsync(revokedSessionIds);
 
         var dto = await ReadPersonAsync(tenant, personId, cancellationToken);
         return dto is null ? OrgPeopleResult.NotFound() : OrgPeopleResult.Ok(dto);
@@ -418,7 +418,18 @@ public sealed partial class OrgPeopleService
         }).ToList();
     }
 
-    private async Task CutRevokedConnectionsAfterCommitAsync(List<Guid> revoked, CancellationToken cancellationToken)
+    /// <summary>
+    /// Cuts the live hub connections of the sessions the committed change revoked: each connection is taken out of the
+    /// registry, removed from its exercise's staff and participant groups, then aborted.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately takes no request token and runs on <see cref="CancellationToken.None"/>. The revocation has already
+    /// committed, so this cut must finish even if the caller drops the request: the revoker takes a connection out of the
+    /// registry before it removes it from the groups, and a cancellation between those two steps would leave a
+    /// connection no longer tracked (so never cut again) yet still in the staff group, receiving every broadcast.
+    /// </remarks>
+    /// <param name="revoked">The session ids the committed change revoked.</param>
+    private async Task CutRevokedConnectionsAfterCommitAsync(List<Guid> revoked)
     {
         if (revoked.Count == 0)
         {
@@ -427,11 +438,15 @@ public sealed partial class OrgPeopleService
 
         try
         {
-            await _connectionRevoker.RevokeAsync(revoked, cancellationToken);
+            // CancellationToken.None: a committed revocation is never half-applied to the hub (see the remarks).
+            await _connectionRevoker.RevokeAsync(revoked, CancellationToken.None);
         }
-        catch (Exception exception) when (exception is not OperationCanceledException)
+        catch (Exception exception)
         {
-            // The sessions are already revoked in the database; a surviving connection is refused on its next call.
+            // The sessions are already revoked in the database, but broadcasts go straight to the hub group, not through
+            // a session check: a connection that survives this failure stays in the staff group and keeps receiving
+            // them until it disconnects. Only its HTTP API calls are refused (the session is revoked); a reconnect is
+            // refused at OnConnectedAsync.
             LogConnectionCutFailed(revoked.Count, exception);
         }
     }

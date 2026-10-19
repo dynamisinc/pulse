@@ -3,10 +3,14 @@
  * ---------------------------------------------------------------------------
  * The PEOPLE DIRECTORY work area (identity-auth-roles story 19, #574) at `/staff/people`. The shell
  * owns the header; this renders the single `h1`, the search box, a live-region status line (result
- * count / loading), an alert on read failure, the table and prev/next paging.
+ * count / loading), a second polite status region announcing a completed action ("Pat Plain was
+ * disabled."), an alert on read failure, the table and prev/next paging. The action region is
+ * separate from the count line because the post-mutation refetch rewrites the count line and would
+ * overwrite (or race) the action sentence.
  *
- * ROLE GATING. Org admin only. Any other role sees a short notice and NO request is made (the
- * inner component, which owns the query, is never mounted). The server 403s regardless; this is
+ * ROLE GATING. `can('manageOrgPeople')` (org admin only, `rolePermissions.ts`). Any other role sees
+ * a short notice and NO request is made (the inner component, which owns the query, is never
+ * mounted). The server 403s regardless; this is
  * only so a control is absent instead of failing. STAFF world: COBRA, FontAwesome, sx-only.
  */
 
@@ -35,6 +39,7 @@ function Directory() {
   const [draft, setDraft] = useState('')
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
+  const [announcement, setAnnouncement] = useState('')
   const people = useOrgPeople({ search, page, pageSize: DIRECTORY_PAGE_SIZE })
 
   const submit = (event: FormEvent) => {
@@ -71,6 +76,7 @@ function Directory() {
       </Box>
 
       <div role="status" aria-live="polite" data-testid="org-people-status">{status}</div>
+      <div role="status" aria-live="polite" data-testid="org-people-action-status">{announcement}</div>
 
       {people.isError && (
         <Stack
@@ -90,7 +96,13 @@ function Directory() {
       {data !== undefined && (
         data.items.length === 0
           ? <Typography data-testid="org-people-empty">No people found.</Typography>
-          : <OrgPeopleTable people={data.items} currentPersonId={session?.personId ?? null} />
+          : (
+            <OrgPeopleTable
+              people={data.items}
+              currentPersonId={session?.personId ?? null}
+              onActionSuccess={setAnnouncement}
+            />
+          )
       )}
 
       {data !== undefined && lastPage > 1 && (
@@ -118,7 +130,7 @@ function Directory() {
 }
 
 export function OrgDirectoryPage() {
-  const isOrgAdmin = usePermissions().role === 'orgAdmin'
+  const mayManage = usePermissions().can('manageOrgPeople')
   return (
     <Box
       data-testid="org-directory-page"
@@ -130,7 +142,7 @@ export function OrgDirectoryPage() {
           People directory
         </Typography>
       </Stack>
-      {isOrgAdmin
+      {mayManage
         ? <Directory />
         : <Typography data-testid="org-directory-denied">Only organization admins can open the people directory.</Typography>}
     </Box>

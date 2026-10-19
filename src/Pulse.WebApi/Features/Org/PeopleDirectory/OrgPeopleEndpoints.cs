@@ -22,7 +22,8 @@ using Pulse.WebApi.Features.Realtime;
 /// </list>
 /// </summary>
 /// <remarks>
-/// <b>REQUIRED WIRING (orchestrator-owned):</b> <c>builder.Services.AddOrgPeople();</c> after
+/// <b>WIRING:</b> the 3 additive <c>Program.cs</c> lines were approved by the orchestrator for this PR (#574): the
+/// <c>using Pulse.WebApi.Features.Org.PeopleDirectory;</c> directive, <c>builder.Services.AddOrgPeople();</c> after
 /// <c>AddExerciseLifecycleAdmin()</c>, and <c>app.MapOrgPeopleEndpoints();</c> with the other <c>/api/org/*</c> routes
 /// (after <c>UseOrganizationResolution()</c>, like every org route). No organization id appears in any route, query or
 /// body: the tenant is the caller's own, resolved server-side. The id-taking routes are on <see cref="PersonIdRoutes"/>,

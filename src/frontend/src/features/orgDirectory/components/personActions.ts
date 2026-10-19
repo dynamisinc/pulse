@@ -1,8 +1,9 @@
 /**
  * features/orgDirectory/components/personActions.ts
  * ---------------------------------------------------------------------------
- * The five per-person actions, their confirm copy, and the 409/404/400 -> message mapping.
- * Pure data; the dialog renders it. Messages are plain words (shown beside an icon, never colour).
+ * The five per-person actions, their confirm and success copy, the reset-link availability rule,
+ * and the 409/404/400 -> message mapping. Pure data; the dialog and table render it. Messages
+ * are plain words (shown beside an icon, never colour).
  */
 
 import type { OrgPersonPatch } from '../types'
@@ -53,6 +54,37 @@ export function actionConfirmLabel(kind: PersonActionKind): string {
     case 'enable': return 'Enable'
     case 'resetPassword': return 'Create link'
   }
+}
+
+/**
+ * The short success sentence lifted into the page's polite `role="status"` region (W-003), so a
+ * screen-reader user hears that the action worked after the dialog closes.
+ */
+export function successMessage(kind: PersonActionKind, displayName: string): string {
+  switch (kind) {
+    case 'grantAdmin': return `${displayName} is now an org admin.`
+    case 'revokeAdmin': return `${displayName} is no longer an org admin.`
+    case 'disable': return `${displayName} was disabled.`
+    case 'enable': return `${displayName} was enabled.`
+    case 'resetPassword': return `Reset link created for ${displayName}.`
+  }
+}
+
+/** The extra confirm line when an org admin removes their OWN org-admin role (S4). */
+export const SELF_REVOKE_NOTE = 'You will be signed out of the organization view.'
+
+/**
+ * Why the reset-link action is unavailable for a row, or null when it is available (S3). The server
+ * would 409 both cases (`target-is-org-admin`, `person-disabled`); the mappings below stay for a
+ * stale row. Shown as visible text beside the disabled button, not only as a tooltip.
+ */
+export function resetUnavailableReason(person: {
+  readonly orgRole: 'orgAdmin' | null
+  readonly disabled: boolean
+}): string | null {
+  if (person.orgRole === 'orgAdmin') return 'Not for org admins: they reset their own password.'
+  if (person.disabled) return 'Not while disabled: enable them first.'
+  return null
 }
 
 /** Maps a failure to words. `status`/`code` come from `OrgPeopleError`. */

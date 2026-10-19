@@ -1,7 +1,9 @@
 /**
  * OrgDirectoryPage tests (story 19, #574): table content, search and paging, each action with its
- * confirm dialog and error mapping, refetch after mutation, self-disable, and role gating. The
- * service is mocked; the session is the role-selectable stub.
+ * confirm dialog and error mapping, refetch after mutation, self-disable, self-revoke warning,
+ * success announcements in a polite status region (W-003), reset-link availability with a visible
+ * reason (S3), and role gating via `can('manageOrgPeople')`. The service is mocked; the session is
+ * the role-selectable stub.
  */
 import type { ReactNode } from 'react'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
@@ -162,6 +164,10 @@ describe('actions', () => {
     await waitFor(() => expect(updateOrgPerson).toHaveBeenCalledWith('p-plain', { isOrgAdmin: true }))
     await waitFor(() => expect(vi.mocked(listOrgPeople).mock.calls.length).toBeGreaterThan(calls))
     await waitFor(() => expect(screen.queryByTestId('person-action-dialog')).toBeNull())
+    const announced = screen.getByTestId('org-people-action-status')
+    expect(announced.getAttribute('role')).toBe('status')
+    expect(announced.getAttribute('aria-live')).toBe('polite')
+    expect(announced.textContent).toBe('Pat Plain is now an org admin.')
   })
 
   it('revokes org admin', async () => {
@@ -171,6 +177,8 @@ describe('actions', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Remove org admin from Ada Admin' }))
     fireEvent.click(screen.getByTestId('person-action-confirm'))
     await waitFor(() => expect(updateOrgPerson).toHaveBeenCalledWith('p-admin', { isOrgAdmin: false }))
+    await waitFor(() =>
+      expect(screen.getByTestId('org-people-action-status').textContent).toBe('Ada Admin is no longer an org admin.'))
   })
 
   it('maps 409 last-org-admin into an alert with the dialog kept open and the list refetched', async () => {
@@ -186,6 +194,8 @@ describe('actions', () => {
     expect(alert.querySelector('svg')).not.toBeNull()
     expect(screen.getByTestId('person-action-dialog')).toBeTruthy()
     await waitFor(() => expect(vi.mocked(listOrgPeople).mock.calls.length).toBeGreaterThan(calls))
+    // A failure announces no success.
+    expect(screen.getByTestId('org-people-action-status').textContent).toBe('')
   })
 
   it('disables and enables', async () => {
@@ -196,9 +206,12 @@ describe('actions', () => {
     fireEvent.click(screen.getByTestId('person-action-confirm'))
     await waitFor(() => expect(updateOrgPerson).toHaveBeenCalledWith('p-plain', { disabled: true }))
     await waitFor(() => expect(screen.queryByTestId('person-action-dialog')).toBeNull())
+    expect(screen.getByTestId('org-people-action-status').textContent).toBe('Pat Plain was disabled.')
     fireEvent.click(screen.getByRole('button', { name: 'Enable Dan Disabled' }))
     fireEvent.click(screen.getByTestId('person-action-confirm'))
     await waitFor(() => expect(updateOrgPerson).toHaveBeenCalledWith('p-dis', { disabled: false }))
+    await waitFor(() =>
+      expect(screen.getByTestId('org-people-action-status').textContent).toBe('Dan Disabled was enabled.'))
   })
 
   it('Cancel makes no call', async () => {
@@ -239,21 +252,60 @@ describe('actions', () => {
     fireEvent.click(screen.getByTestId('person-action-confirm'))
     expect((await screen.findByTestId('reset-link')).textContent).toBe('https://app.example/staff/reset#token=abc')
     expect(issuePasswordResetLink).toHaveBeenCalledWith('p-plain')
+    // Announced on the page AND inside the modal (which hides the page from assistive tech).
+    expect(screen.getByTestId('org-people-action-status').textContent).toBe('Reset link created for Pat Plain.')
+    expect(screen.getByTestId('copy-status').textContent).toBe('Reset link created for Pat Plain.')
+    expect(screen.getByTestId('copy-status').getAttribute('role')).toBe('status')
     fireEvent.click(screen.getByTestId('copy-reset-link'))
     await waitFor(() => expect(writeText).toHaveBeenCalledWith('https://app.example/staff/reset#token=abc'))
     await waitFor(() => expect(screen.getByTestId('copy-status').textContent).toContain('copied'))
   })
 
-  it('maps 409 target-is-org-admin on the reset link', async () => {
+  it('disables Reset link on org-admin and disabled rows with a visible text reason', async () => {
+    renderPage()
+    await screen.findByTestId('org-people-table')
+    const adminReset = screen.getByRole('button', { name: 'Copy password-reset link for Ada Admin' })
+    expect((adminReset as HTMLButtonElement).disabled).toBe(true)
+    const adminReason = within(screen.getByTestId('org-person-p-admin')).getByTestId('reset-unavailable-reason')
+    expect(adminReason.textContent).toContain('org admins')
+    expect(adminReset.getAttribute('aria-describedby')).toBe(adminReason.id)
+    const disabledReset = screen.getByRole('button', { name: 'Copy password-reset link for Dan Disabled' })
+    expect((disabledReset as HTMLButtonElement).disabled).toBe(true)
+    expect(within(screen.getByTestId('org-person-p-dis')).getByTestId('reset-unavailable-reason').textContent)
+      .toContain('enable them first')
+    const plainReset = screen.getByRole('button', { name: 'Copy password-reset link for Pat Plain' })
+    expect((plainReset as HTMLButtonElement).disabled).toBe(false)
+    expect(within(screen.getByTestId('org-person-p-plain')).queryByTestId('reset-unavailable-reason')).toBeNull()
+  })
+
+  it('still maps 409 target-is-org-admin on the reset link (a stale row)', async () => {
     vi.mocked(issuePasswordResetLink).mockRejectedValue(
       new OrgPeopleError('x', { status: 409, code: 'target-is-org-admin' }))
     renderPage()
     await screen.findByTestId('org-people-table')
-    fireEvent.click(screen.getByRole('button', { name: 'Copy password-reset link for Ada Admin' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Copy password-reset link for Pat Plain' }))
     fireEvent.click(screen.getByTestId('person-action-confirm'))
     await waitFor(() =>
       expect(screen.getByTestId('person-action-error').textContent).toContain('another organization admin'))
     expect(screen.queryByTestId('reset-link')).toBeNull()
+    expect(screen.getByTestId('org-people-action-status').textContent).toBe('')
+  })
+
+  it('warns that removing your own org admin signs you out of the organization view', async () => {
+    const { stubbedSession } = await import('@/core/auth/rolePermissions.testUtils')
+    const selfId = stubbedSession()?.personId
+    expect(selfId).toBeTruthy()
+    const self = person({ id: selfId as string, displayName: 'Sam Self', orgRole: 'orgAdmin' })
+    vi.mocked(listOrgPeople).mockResolvedValue(page([self, ADMIN]))
+    renderPage()
+    await screen.findByTestId('org-people-table')
+    fireEvent.click(screen.getByRole('button', { name: 'Remove org admin from Sam Self' }))
+    expect(screen.getByTestId('person-action-self-note').textContent)
+      .toBe('You will be signed out of the organization view.')
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(screen.queryByTestId('person-action-dialog')).toBeNull())
+    fireEvent.click(screen.getByRole('button', { name: 'Remove org admin from Ada Admin' }))
+    expect(screen.queryByTestId('person-action-self-note')).toBeNull()
   })
 
   it('maps a 404 to the person-gone message', async () => {
