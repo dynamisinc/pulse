@@ -173,7 +173,7 @@ default to **Delayed-auto** and the exercise's **lead controller** can turn on *
 > - turning swamped mode **on** is refused with a `400`; turning it off always works;
 > - the tick never auto-sends, even if swamped mode were somehow on, so an expired Delayed-auto draft is always
 >   **held**;
-> - together with `AmbientAutonomyAuthorized = false` (amendment 2, unsigned), every AI draft therefore needs a human
+> - together with `AmbientAutonomyAuthorized = false` (amendment 2, until its flag commit deploys), every AI draft therefore needs a human
 >   approval. Suggest is the default; Delayed-auto countdowns may run, and they end in a hold.
 > - **Known gap before Phase 2:** the console's swamped-mode toggle is local to the browser and never calls the server,
 >   so turning the flag on alone would not make swamped mode work from the console. Wiring the toggle to the server is
@@ -211,22 +211,22 @@ The conditions, each enforced in code by this PR (#571) or by Session A's A1 wor
 Wider autonomy than this (autonomous ambient posting under a tier policy, wave C2 / #168) needs its
 own amendment to this section before it reaches the live provider.
 
-#### Amendment 2: autonomous ambient posting (#168): DRAFT, UNSIGNED
+#### Amendment 2: autonomous ambient posting (#168): SIGNED
 
-> **Status: DRAFT, not signed.** Nothing in this subsection is authorized until the signer ticks the box
-> below and enters a name and date. Signing is paired with one reviewed commit that sets the governed
+> **Status: SIGNED (Tom Bull, 2026-10-19).** Authorized on `uat` under the conditions below. Signing is paired with one reviewed commit that sets the governed
 > flag `Generation:Governance:AmbientAutonomyAuthorized = true` for `uat` only, the same pattern as
-> `generationTenantBounded`. Until then the #168 code is merged **dark**: the ambient policy defaults to
+> `generationTenantBounded`. Until that flag commit is deployed, the #168 code stays **dark**: the ambient policy defaults to
 > `off`, and the settings API rejects `mode = autonomous` with a 400 ("not authorized by
 > PROVIDER-GOVERNANCE §8"). `review` mode needs no amendment: it uses the existing review queue, and
 > silence still holds.
 >
-> **Prerequisites before signing** (from the orchestrator's review of #603):
+> **Prerequisites before signing** (from the orchestrator's review of #603). 1 and 2 met on 2026-10-19; 3 follows:
 > 1. #603 (ambient chatter, merged dark) and its hardening follow-up are merged to `main`.
 > 2. Session A's A1c is merged with the ambient-policy route lead-gated (raise-only, `Enrollment.IsLead` read live via
 >    `ExerciseCallerRole.IsLead`; the raise is judged inside the compare-and-set loop in
 >    `EngineReviewService.SetAmbientPolicyAsync`, not by the `LeadControllerRaiseFilter` the other steering routes
->    use; a non-lead raise is 403 with nothing changed). Merged in #615 (f734e0a, 2026-10-19). **Hard prerequisite:** Tom decided (10/16) to sign on Sunday after A1c merges, so
+>    use; a non-lead raise is 403 with nothing changed). Merged in #615 (f734e0a, 2026-10-19); the A1c role smoke passed
+>    on `uat` the same day (non-lead raise 403, lead-only raise works, attribution resolves to the real person). **Hard prerequisite:** Tom decided (10/16) to sign on Sunday after A1c merges, so
 >    there is no conditional or struck-clause option.
 > 3. The flag commit (`generationAmbientAutonomyAuthorized = true` for `uat`) lands only after signing.
 
@@ -293,8 +293,8 @@ and test each one:
 
 | | |
 |---|---|
-| Autonomous ambient posting authorized on **`uat`** under the conditions above | ☐ |
-| Signer / date | |
+| Autonomous ambient posting authorized on **`uat`** under the conditions above | ☑ |
+| Signer / date | **Tom Bull — 2026-10-19** |
 
 ### Evidence (compiled by `engine-runtime/05` — verify, don't take on trust)
 
