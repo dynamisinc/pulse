@@ -62,6 +62,11 @@ public sealed class ActiveEnrollmentSweepTests
     [InlineData("var x = new Pulse.WebApi.Features.Identity.Enrollments.EnrollmentService(db);", 0)]
     [InlineData("_dbContext.Enrollments.IgnoreQueryFilters().Active()", 1)]
     [InlineData("from e in dbContext.Enrollments.Active() join x in _db.Enrollments on a equals b", 2)]
+
+    // KNOWN LIMIT of the lookbehind, pinned so it is a decision and not a surprise: a DbContext-like object exposed through a
+    // member literally named "Identity" (x.Identity.Enrollments.Where(...)) is mistaken for the namespace and NOT swept.
+    // No such member exists in the tree; if one is ever added, its reads must be checked by review.
+    [InlineData("x.Identity.Enrollments.Where(e => true)", 0)]
     public void TheReadPattern_MatchesDbSetAccess_NotTheIdentityEnrollmentsNamespace(string code, int reads) =>
         EnrollmentsRead.Matches(code).Count.Should().Be(reads);
 

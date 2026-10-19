@@ -481,6 +481,131 @@ public sealed class CredentialEndpointsHttpTests
     }
 
     [RequiresDockerFact]
+    public async Task Reset_ForAPersonDisabledAfterTheLinkWasIssued_IsInvalidToken_AndChangesNothing()
+    {
+        // Adversarial review W2 (#665).
+        var (org, _) = await _world.SeedOrganizationAsync();
+        var (target, _) = await _world.SeedPersonAsync(org);
+        var issued = await _world.IssueAsync(CredentialTokenPurposes.Reset, target, org);
+        string hashBefore;
+        await using (var write = _world.ReadContext())
+        {
+            var person = await write.People.SingleAsync(p => p.Id == target);
+            hashBefore = person.PasswordHash!;
+            person.DisabledAt = DateTimeOffset.UtcNow;
+            await write.SaveChangesAsync();
+        }
+
+        await using var factory = new CredentialProbeFactory(_fixture.ConnectionString!);
+        using var anonymous = CredentialTestWorld.CreateClient(factory);
+        using var response = await anonymous.PostAsJsonAsync(ResetUri, new { token = issued.RawToken, newPassword = CredentialTestWorld.NewPassword });
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await response.Content.ReadAsStringAsync()).Should().Be("{\"error\":\"invalid-token\"}");
+        await using var read = _world.ReadContext();
+        (await read.People.AsNoTracking().SingleAsync(p => p.Id == target)).PasswordHash.Should().Be(hashBefore);
+    }
+
+    [RequiresDockerFact]
+    public async Task Reset_ClearsTheLockout()
+    {
+        // Adversarial review W4 (#665): a successful reset clears the failure counter and any lockout.
+        var (org, _) = await _world.SeedOrganizationAsync();
+        var (target, _) = await _world.SeedPersonAsync(org);
+        await using (var write = _world.ReadContext())
+        {
+            var person = await write.People.SingleAsync(p => p.Id == target);
+            person.FailedLoginCount = 7;
+            person.LockedOutUntil = DateTimeOffset.UtcNow.AddHours(1);
+            await write.SaveChangesAsync();
+        }
+
+        var issued = await _world.IssueAsync(CredentialTokenPurposes.Reset, target, org);
+
+        await using var factory = new CredentialProbeFactory(_fixture.ConnectionString!);
+        using var anonymous = CredentialTestWorld.CreateClient(factory);
+        using var response = await anonymous.PostAsJsonAsync(ResetUri, new { token = issued.RawToken, newPassword = CredentialTestWorld.NewPassword });
+
+        response.StatusCode.Should().Be(HttpStatusCode.NoContent);
+        await using var read = _world.ReadContext();
+        var after = await read.People.AsNoTracking().SingleAsync(p => p.Id == target);
+        after.FailedLoginCount.Should().Be(0);
+        after.LockedOutUntil.Should().BeNull();
+    }
+
+    [RequiresDockerFact]
+    public async Task Reset_OfAPersonPromotedToOrgAdminAfterAPeerIssuedTheLink_IsInvalidToken_ButASelfIssuedLinkWorks()
+    {
+        // Adversarial review W5 (#665): the issue-time peer-admin refusal (W-001) must not be bypassed by promoting the
+        // target within the link's 60 minutes.
+        var (org, _) = await _world.SeedOrganizationAsync();
+        var (issuer, _) = await _world.SeedPersonAsync(org, orgRole: Person.OrgAdminRole);
+        var (target, _) = await _world.SeedPersonAsync(org);
+
+        IssuedCredentialToken peerIssued;
+        await using (var context = _world.ReadContext())
+        {
+            peerIssued = await new CredentialTokenService(context, TimeProvider.System).StageIssueAsync(
+                CredentialTokenPurposes.Reset, CredentialSubject.ForPerson(target), org, issuedByPersonId: issuer, DateTimeOffset.UtcNow);
+            await context.SaveChangesAsync();
+        }
+
+        await using (var write = _world.ReadContext())
+        {
+            (await write.People.SingleAsync(p => p.Id == target)).OrgRole = Person.OrgAdminRole;
+            await write.SaveChangesAsync();
+        }
+
+        await using var factory = new CredentialProbeFactory(_fixture.ConnectionString!);
+        using var anonymous = CredentialTestWorld.CreateClient(factory);
+        using (var refused = await anonymous.PostAsJsonAsync(ResetUri, new { token = peerIssued.RawToken, newPassword = CredentialTestWorld.NewPassword }))
+        {
+            refused.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+            (await refused.Content.ReadAsStringAsync()).Should().Be("{\"error\":\"invalid-token\"}");
+        }
+
+        await using (var read = _world.ReadContext())
+        {
+            (await read.People.AsNoTracking().SingleAsync(p => p.Id == target)).PasswordChangedAt.Should().BeNull();
+        }
+
+        // Positive control: a link the (now) admin issued for themselves still works.
+        IssuedCredentialToken selfIssued;
+        await using (var context = _world.ReadContext())
+        {
+            selfIssued = await new CredentialTokenService(context, TimeProvider.System).StageIssueAsync(
+                CredentialTokenPurposes.Reset, CredentialSubject.ForPerson(target), org, issuedByPersonId: target, DateTimeOffset.UtcNow);
+            await context.SaveChangesAsync();
+        }
+
+        using var ok = await anonymous.PostAsJsonAsync(ResetUri, new { token = selfIssued.RawToken, newPassword = CredentialTestWorld.NewPassword });
+        ok.StatusCode.Should().Be(HttpStatusCode.NoContent);
+    }
+
+    [RequiresDockerFact]
+    public async Task Reset_HasItsOwnPerIpLimiter_ThatDoesNotSpendTheSignInBudget()
+    {
+        // Adversarial review S4 (#665): a separate "password-reset" partition (default 10 a minute per IP).
+        await using var factory = new CredentialProbeFactory(_fixture.ConnectionString!);
+        using var anonymous = CredentialTestWorld.CreateClient(factory);
+
+        for (var i = 0; i < 10; i++)
+        {
+            using var allowed = await anonymous.PostAsJsonAsync(ResetUri, new { token = $"nope-{i}", newPassword = "x" });
+            allowed.StatusCode.Should().Be(HttpStatusCode.BadRequest, "attempt {0} is within the budget", i + 1);
+        }
+
+        using (var limited = await anonymous.PostAsJsonAsync(ResetUri, new { token = "nope-11", newPassword = "x" }))
+        {
+            limited.StatusCode.Should().Be(HttpStatusCode.TooManyRequests);
+        }
+
+        using var signIn = await anonymous.PostAsJsonAsync(
+            new Uri("/api/auth/staff/login", UriKind.Relative), new { orgSlug = "no-such-org", email = "a@b.example", password = "x" });
+        signIn.StatusCode.Should().Be(HttpStatusCode.Unauthorized, "the sign-in limiter is a different partition");
+    }
+
+    [RequiresDockerFact]
     public async Task Reset_ATokenStampedWithAnotherOrganization_CannotReachThePerson()
     {
         // The token's OrganizationId bounds the person read (InOrganization): a row whose tenant does not match its

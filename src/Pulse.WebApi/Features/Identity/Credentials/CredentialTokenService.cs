@@ -211,6 +211,10 @@ public sealed class CredentialTokenService
     /// <param name="token">The token being redeemed.</param>
     /// <param name="passwordChangedAt">The subject's last password change, or <c>null</c>.</param>
     /// <returns><c>true</c> when the token must be refused.</returns>
+    /// <remarks>
+    /// The tie (<c>CreatedAt == PasswordChangedAt</c>) counts as stale: under clock skew between instances this fails
+    /// CLOSED — a link is refused rather than outliving the credential change it may predate.
+    /// </remarks>
     public static bool IsStaleFor(CredentialToken token, DateTimeOffset? passwordChangedAt)
     {
         ArgumentNullException.ThrowIfNull(token);

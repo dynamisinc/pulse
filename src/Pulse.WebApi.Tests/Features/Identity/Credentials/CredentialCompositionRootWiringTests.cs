@@ -33,6 +33,8 @@ public sealed class CredentialCompositionRootWiringTests
 
         PreAuthAllowlist.Contains(Single(CredentialEndpoints.ResetRoute)).Should().BeTrue(
             "the reset link is redeemed with no session");
+        Single(CredentialEndpoints.ResetRoute).Metadata.GetMetadata<Microsoft.AspNetCore.RateLimiting.EnableRateLimitingAttribute>()
+            ?.PolicyName.Should().Be(CredentialEndpoints.PasswordResetRateLimitPolicy, "the reset route has its own per-IP partition (S4)");
         PreAuthAllowlist.Contains(Single(CredentialEndpoints.AdminResetRoute)).Should().BeFalse(
             "the admin reset requires a live org-admin session");
     }
@@ -65,5 +67,17 @@ public sealed class CredentialCompositionRootWiringTests
             base.Dispose(disposing);
             Environment.SetEnvironmentVariable(ConnectionStringEnvVar, null);
         }
+    }
+
+    [Fact]
+    public void IsStaleFor_CountsTheTieAsStale_SoClockSkewFailsClosed()
+    {
+        var at = new DateTimeOffset(2026, 10, 19, 12, 0, 0, TimeSpan.Zero);
+        var token = new Pulse.WebApi.Data.Entities.CredentialToken { TokenHash = "h", Purpose = "reset", CreatedAt = at };
+
+        CredentialTokenService.IsStaleFor(token, at).Should().BeTrue("CreatedAt == PasswordChangedAt is stale (fails closed)");
+        CredentialTokenService.IsStaleFor(token, at.AddTicks(-1)).Should().BeFalse("a token issued after the change is fresh");
+        CredentialTokenService.IsStaleFor(token, at.AddTicks(1)).Should().BeTrue();
+        CredentialTokenService.IsStaleFor(token, null).Should().BeFalse("no password change yet");
     }
 }

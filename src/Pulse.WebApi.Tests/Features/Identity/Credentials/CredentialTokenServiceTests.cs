@@ -119,6 +119,24 @@ public sealed class CredentialTokenServiceTests
     }
 
     [RequiresDockerFact]
+    public async Task TryClaim_AtExactlyExpiresAt_IsRefused_AndOneTickBefore_Succeeds()
+    {
+        // Adversarial review S2 (#665): the claim's `ExpiresAt > now` boundary.
+        var (org, _) = await _world.SeedOrganizationAsync();
+        var (person, _) = await _world.SeedPersonAsync(org);
+        var issuedAt = new DateTimeOffset(2026, 10, 19, 12, 0, 0, TimeSpan.Zero);
+        var atExpiry = await _world.IssueAsync(CredentialTokenPurposes.Invite, person, org, issuedAt);
+        var expiresAt = atExpiry.Token.ExpiresAt;
+
+        await using var context = _fixture.CreateContext();
+        var service = new CredentialTokenService(context, TimeProvider.System);
+
+        (await service.TryClaimAsync(atExpiry.Token.Id, org, expiresAt)).Should().BeFalse("at ExpiresAt the token has expired");
+        (await service.FindRedeemableAsync(atExpiry.RawToken, expiresAt)).Should().BeNull("the lookup agrees");
+        (await service.TryClaimAsync(atExpiry.Token.Id, org, expiresAt.AddTicks(-1))).Should().BeTrue("one tick before, it is live");
+    }
+
+    [RequiresDockerFact]
     public async Task CredentialChangeInvalidation_VoidsEveryOutstandingTokenOfBothPurposes_ForThatPersonOnly()
     {
         var (org, _) = await _world.SeedOrganizationAsync();

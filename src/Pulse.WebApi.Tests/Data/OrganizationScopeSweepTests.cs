@@ -351,7 +351,9 @@ public sealed class OrganizationScopeSweepTests
         // already tenant-resolved exercise" check (1).
         // identity-auth-roles/17 Gate-1 WR-005: ExerciseListService's canManage EXISTS — the caller's own planner
         // enrollment, correlated to the InOrganization-bounded exercise rows of the same query (1).
-        ["TenantChecked"] = 12,
+        // identity-auth-roles/21 (adversarial review W1 on #665): +1 — EnrollmentService.SetLeadAsync re-reads its own
+        // caller-reachable target inside the lead transaction to confirm it really became the live lead.
+        ["TenantChecked"] = 13,
 
         // BootstrapService.ProvisionStaffAsync: the exercise this ops request itself created or host-resolved.
         ["ResolvedScope"] = 1,
