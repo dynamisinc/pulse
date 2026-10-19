@@ -34,7 +34,7 @@ const mockGet = vi.mocked(getReadiness)
 
 const MIXED: ExerciseReadiness = {
   ready: false,
-  lifecycleState: 'draft',
+  lifecycleState: 'build',
   blocking: [
     { id: 'controller-enrolled', label: 'Controller enrolled', status: 'ok', detail: null },
     { id: 'schedule-set', label: 'Schedule set', status: 'open', detail: 'No start time yet.' },
@@ -51,7 +51,7 @@ const MIXED: ExerciseReadiness = {
 
 const READY: ExerciseReadiness = {
   ready: true,
-  lifecycleState: 'draft',
+  lifecycleState: 'build',
   blocking: [
     { id: 'controller-enrolled', label: 'Controller enrolled', status: 'ok', detail: null },
     { id: 'sign-in-methods', label: 'Sign-in methods', status: 'notChecked', detail: null },

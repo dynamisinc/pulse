@@ -22,7 +22,7 @@ const mockGet = vi.mocked(api.get)
 
 const CONTRACT: ExerciseReadiness = {
   ready: false,
-  lifecycleState: 'draft',
+  lifecycleState: 'build',
   blocking: [
     { id: 'controller-enrolled', label: 'Controller enrolled', status: 'ok', detail: null },
     { id: 'schedule-set', label: 'Schedule set', status: 'open', detail: 'No start time.' },
@@ -89,6 +89,17 @@ describe('getReadiness', () => {
     ).toBe(false)
     expect(isExerciseReadiness({ ...CONTRACT, ready: 'yes' })).toBe(false)
     expect(isExerciseReadiness({ ...CONTRACT, lifecycleState: undefined })).toBe(false)
+  })
+
+  it('rejects an empty blocking list (never "ready" on a broken response)', () => {
+    const empty = { ...CONTRACT, ready: true, blocking: [], warnings: [] }
+    expect(isExerciseReadiness(empty)).toBe(false)
+    expect(isExerciseReadiness({ ...CONTRACT, lifecycleState: '' })).toBe(false)
+  })
+
+  it('rejects duplicate item ids across the two lists', () => {
+    const dup = { id: 'controller-enrolled', label: 'Again', status: 'ok', detail: null }
+    expect(isExerciseReadiness({ ...CONTRACT, warnings: [dup] })).toBe(false)
   })
 
   it.each([401, 403])('translates a %s into a ReadinessError carrying the status', async status => {

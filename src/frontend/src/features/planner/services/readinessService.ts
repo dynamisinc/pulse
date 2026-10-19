@@ -125,9 +125,16 @@ function isReadinessItem(value: unknown): value is ReadinessItem {
   )
 }
 
+/** Ids must be unique across both lists: they key React rows and the fix-link map. */
+function hasUniqueIds(items: readonly ReadinessItem[]): boolean {
+  return new Set(items.map(item => item.id)).size === items.length
+}
+
 /**
  * Validates a response body against the contract. Exported for tests. `detail`
  * is required-and-nullable: an absent key is rejected, matching the contract.
+ * An empty `blocking` list is rejected too: the server always sends the full
+ * checklist, so an empty one is a broken response, never "ready".
  */
 export function isExerciseReadiness(value: unknown): value is ExerciseReadiness {
   if (typeof value !== 'object' || value === null) return false
@@ -135,10 +142,13 @@ export function isExerciseReadiness(value: unknown): value is ExerciseReadiness 
   return (
     typeof body.ready === 'boolean' &&
     typeof body.lifecycleState === 'string' &&
+    body.lifecycleState.length > 0 &&
     Array.isArray(body.blocking) &&
+    body.blocking.length > 0 &&
     body.blocking.every(isReadinessItem) &&
     Array.isArray(body.warnings) &&
-    body.warnings.every(isReadinessItem)
+    body.warnings.every(isReadinessItem) &&
+    hasUniqueIds([...body.blocking, ...body.warnings])
   )
 }
 
@@ -165,7 +175,7 @@ function toReadinessError(error: unknown): ReadinessError {
 /** A realistic mix: some done, some open, and the two not-yet-evaluable items. */
 const MOCK_READINESS: ExerciseReadiness = {
   ready: false,
-  lifecycleState: 'draft',
+  lifecycleState: 'build',
   blocking: [
     { id: 'controller-enrolled', label: 'At least one controller is enrolled', status: 'ok', detail: null },
     {
