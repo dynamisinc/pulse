@@ -401,6 +401,9 @@ public sealed class EngineProviderCutEndpointsTests
                 PersonId = staffUserId,
                 ExerciseId = exerciseId,
                 Role = "controller",
+
+                // identity-auth-roles/17: the suite's controller is the exercise's LEAD — provider restore needs it.
+                IsLead = true,
                 CreatedAt = DateTimeOffset.UtcNow,
             });
             await context.SaveChangesAsync();

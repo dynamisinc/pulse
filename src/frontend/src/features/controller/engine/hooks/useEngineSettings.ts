@@ -914,7 +914,8 @@ function runSetAmbientPolicy(
         ...latest,
         pendingAmbientPolicy: false,
         ambientError: described.message,
-        forbidden: described.status === 403 ? true : latest.forbidden,
+        // An ambient 403 is the lead gate refusing a raise, not "not a controller": it must
+        // not flip the whole panel read-only (story 17).
       })
     })
     .finally(() => settle(exerciseId, mine))

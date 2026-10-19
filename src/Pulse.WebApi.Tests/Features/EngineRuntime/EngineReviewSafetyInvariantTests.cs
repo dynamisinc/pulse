@@ -22,6 +22,7 @@ using Pulse.WebApi.Features.EngineRuntime.Publishing;
 using Pulse.WebApi.Features.EngineRuntime.Review;
 using Pulse.WebApi.Features.EngineRuntime.Telemetry;
 using Pulse.WebApi.Tests.Features.EngineRuntime.Clock;
+using Pulse.WebApi.Tests.Helpers;
 using Xunit;
 
 /// <summary>
@@ -507,7 +508,7 @@ public sealed class EngineReviewSafetyInvariantTests
         Action(reviewed.Should().ContainSingle("exactly one engine.reviewed per resolution").Subject).Should().Be("hold-on-expiry");
         reviewed[0].Actor.ActingHumanId.Should().BeNull("a hold-on-expiry is silence, not a human decision");
 
-        var restored = await harness.Service.RestoreFromSafetyAsync(Input("lead-1"));
+        var restored = await harness.Service.RestoreFromSafetyAsync(Input("lead-1"), harness.SeedLead());
         restored.Outcome.Should().Be(EngineReviewOutcome.Ok);
         state.IsGenerationStopped.Should().BeFalse("the restore must actually lift the full stop for this to prove anything");
         state.SwampedModeEnabled.Should().BeTrue("swamped mode survives the restore — the auto-send path is live again");
@@ -581,7 +582,7 @@ public sealed class EngineReviewSafetyInvariantTests
         var state = harness.Registry.GetOrCreate(exerciseId);
         var before = state.ResolveEffective(storylineId).Level;
 
-        var result = await harness.Service.SetSwampedModeAsync(enabled: true, Input("lead-1"));
+        var result = await harness.Service.SetSwampedModeAsync(enabled: true, Input("lead-1"), harness.SeedLead());
 
         result.Outcome.Should().Be(EngineReviewOutcome.Ok);
         result.State!.SwampedMode.Should().BeTrue();
@@ -712,7 +713,7 @@ public sealed class EngineReviewSafetyInvariantTests
         var exerciseId = Guid.NewGuid();
         using var harness = new Harness(exerciseId, Array.Empty<EngineReviewItemEntity>(), timeoutAutoSendAuthorized: false);
 
-        var result = await harness.Service.SetSwampedModeAsync(enabled: true, Input("lead-1"));
+        var result = await harness.Service.SetSwampedModeAsync(enabled: true, Input("lead-1"), harness.SeedLead());
 
         result.Outcome.Should().Be(EngineReviewOutcome.Invalid, "raising toward unreviewed timeout publishes is refused in Phase 1");
         result.ValidationError.Should().Be(
@@ -728,7 +729,7 @@ public sealed class EngineReviewSafetyInvariantTests
         using var harness = new Harness(exerciseId, Array.Empty<EngineReviewItemEntity>(), timeoutAutoSendAuthorized: false);
         harness.Registry.GetOrCreate(exerciseId).SetSwampedMode(enabled: true, "lead-1", 0); // forced on (test hook)
 
-        var result = await harness.Service.SetSwampedModeAsync(enabled: false, Input("lead-1"));
+        var result = await harness.Service.SetSwampedModeAsync(enabled: false, Input("lead-1"), harness.SeedLead());
 
         result.Outcome.Should().Be(EngineReviewOutcome.Ok, "lowering is never refused (§8.2)");
         result.State!.SwampedMode.Should().BeFalse();
@@ -849,6 +850,7 @@ public sealed class EngineReviewSafetyInvariantTests
     private sealed class Harness : IDisposable
     {
         private readonly ManualTimeProvider _time;
+        private readonly Guid _exerciseId;
 
         /// <param name="exerciseId">The resolved exercise scope.</param>
         /// <param name="items">The seeded review items.</param>
@@ -864,6 +866,7 @@ public sealed class EngineReviewSafetyInvariantTests
             GenerationProviderCutRegistry? providerCut = null,
             bool timeoutAutoSendAuthorized = true)
         {
+            _exerciseId = exerciseId;
             var context = new ExerciseContext { CurrentExerciseId = exerciseId };
 
             var options = new DbContextOptionsBuilder<PulseDbContext>()
@@ -913,6 +916,9 @@ public sealed class EngineReviewSafetyInvariantTests
         public EngineTierPolicyRegistry TierPolicy { get; }
 
         public GenerationProviderCutRegistry ProviderCut { get; }
+
+        /// <summary>Seeds the exercise's lead controller — the session person a raise's post-write re-check reads (Tier-2 M-1).</summary>
+        public Guid SeedLead() => LeadControllerSeed.Seed(Db, _exerciseId);
 
         public void Advance(int minutes) => _time.Advance(TimeSpan.FromMinutes(minutes));
 

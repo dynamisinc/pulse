@@ -38,7 +38,6 @@ vi.mock('../../identity/controllerIdentity', () => ({
     actingHumanId: 'human-controller-01',
     callSign: 'SIMCELL-1',
     role: 'controller',
-    isLead: true,
   })),
 }))
 

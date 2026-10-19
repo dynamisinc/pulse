@@ -202,8 +202,8 @@ describe('STAFF_ROUTE_REGISTRY — the exercise-management entry (COR-074/075/07
 describe('STAFF_ROUTE_REGISTRY — the controller-console entry (demo-feedback seam S-3, DF-14)', () => {
   const entry = STAFF_ROUTE_REGISTRY.find(candidate => candidate.id === 'controller-console')
 
-  it('admits the evaluator read-only, but stays the controller’s home page only', () => {
-    expect([...(entry?.allowedRoles ?? [])].sort()).toEqual(['controller', 'evaluator'])
+  it('admits the evaluator read-only and the planner (story 17), but stays the controller’s home page only', () => {
+    expect([...(entry?.allowedRoles ?? [])].sort()).toEqual(['controller', 'evaluator', 'planner'])
     expect(entry?.isDefaultFor).toEqual(['controller'])
     expect(resolveDefaultStaffRoute(STAFF_ROUTE_REGISTRY, 'evaluator')?.id)
       .toBe('evaluator-dashboard')
@@ -212,5 +212,20 @@ describe('STAFF_ROUTE_REGISTRY — the controller-console entry (demo-feedback s
   it('lists the console and the exercise report in the evaluator’s launcher', () => {
     expect(staffRoutesForRole(STAFF_ROUTE_REGISTRY, 'evaluator').map(e => e.id))
       .toEqual(['controller-console', 'evaluator-dashboard', 'exercise-report'])
+  })
+})
+
+describe('STAFF_ROUTE_REGISTRY — a planner may enter /staff/console (story 17, Tom-approved)', () => {
+  const entry = STAFF_ROUTE_REGISTRY.find(candidate => candidate.id === 'controller-console')
+
+  it('lists the console in the planner’s launcher, but the planner’s home stays the settings page', () => {
+    expect(staffRoutesForRole(STAFF_ROUTE_REGISTRY, 'planner').map(e => e.id))
+      .toContain('controller-console')
+    expect(resolveDefaultStaffRoute(STAFF_ROUTE_REGISTRY, 'planner')?.id).toBe('planner-workspace')
+  })
+
+  it('never admits a participant-world role (participant, pio, readonly)', () => {
+    const allowed = (entry?.allowedRoles ?? []) as readonly string[]
+    for (const role of ['participant', 'pio', 'readonly']) expect(allowed).not.toContain(role)
   })
 })

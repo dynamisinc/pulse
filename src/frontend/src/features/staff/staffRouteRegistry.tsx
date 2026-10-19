@@ -95,9 +95,14 @@ const REGISTRY_TABLE = [
     element: <ControllerConsoleRoute />,
     // Seam S-3 (demo-feedback DF-14): evaluators may open the console READ-ONLY. Story 11's
     // `useCanControl()` removes every write control for them; the console is still nobody's
-    // home page but the controller's (the evaluator keeps `/staff/evaluate`). The API already
-    // lets an evaluator read every console endpoint; server-side write enforcement is #61/#377.
-    allowedRoles: ['controller', 'evaluator'],
+    // home page but the controller's (the evaluator keeps `/staff/evaluate`). The API lets an
+    // evaluator read every console endpoint; the server enforces every write through the
+    // role-matrix filters (`Features/Identity/RoleMatrix/*`, `LeadControllerRaiseFilter`,
+    // write-time lead checks), and the UI gates only mirror it.
+    // Planners (identity-auth-roles/17, Tom 2026-10-17) enter to author injects/personas and to
+    // post/pin in build; every controller-only and lead-only control is gated by `can()` and fails
+    // closed, and the server role matrix refuses those routes for planners.
+    allowedRoles: ['controller', 'evaluator', 'planner'],
     isDefaultFor: ['controller'],
     group: 'conduct',
     description: 'Drive the simulated world: personas, injects, steering and the review queue.',

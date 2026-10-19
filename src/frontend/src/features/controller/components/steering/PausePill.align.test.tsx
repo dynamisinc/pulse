@@ -14,7 +14,12 @@ import { cobraTheme } from '@/theme/cobraTheme'
 import { usePauseState, type PauseState } from '../../hooks/usePauseState'
 import { PausePill } from './PausePill'
 
-vi.mock('@/features/controller/access/useCanControl', () => ({ useCanControl: () => true }))
+vi.mock('@/features/controller/access/useCanControl', () => ({
+  useCanControl: () => true,
+  useCanEditContent: () => true,
+  useCanStaffPost: () => true,
+  useCanStaffPin: () => true,
+}))
 vi.mock('../../hooks/usePauseState', async () => ({
   ...(await vi.importActual<typeof import('../../hooks/usePauseState')>('../../hooks/usePauseState')),
   usePauseState: vi.fn(),

@@ -40,6 +40,13 @@ import { withRole } from '@/core/auth/withRole.testUtils'
 import { ExerciseContextProvider } from '@/core/exerciseContext'
 import { RoleAwareEntry } from '@/features/app-shell'
 import { STAFF_ROUTE_REGISTRY } from '@/features/staff'
+import { resetStubSession, setStubSession } from '@/core/auth/rolePermissions.testUtils'
+
+// Story 17: role-gated controls read the session; stand in the session this suite signs in as.
+vi.mock('@/core/auth/session', async importOriginal => ({
+  ...(await importOriginal<typeof import('@/core/auth/session')>()),
+  useOptionalSession: (await import('@/core/auth/rolePermissions.testUtils')).stubbedSession,
+}))
 
 vi.mock('@/features/controller', () => ({
   ControllerConsoleRoute: () => <div data-testid="stub-controller-console" />,
@@ -116,6 +123,8 @@ function renderAt(path: string) {
 }
 
 beforeEach(() => {
+  resetStubSession()
+  setStubSession({ role: 'planner', isLead: false })
   vi.mocked(useSession).mockReset()
   vi.mocked(useRole).mockReset()
 })

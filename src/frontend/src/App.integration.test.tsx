@@ -74,13 +74,26 @@ import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { QueryClientProvider, QueryClient } from '@tanstack/react-query'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ExerciseContextProvider } from '@/core/exerciseContext'
 import { SessionProvider } from '@/core/auth'
+import { resetStubSession, setStubSession } from '@/core/auth/rolePermissions.testUtils'
 import type { RoleAwareEntryProps, StaffSurfaceRole } from './features/app-shell'
 import { resolveDefaultStaffRoute, staffRoutesForRole } from './features/app-shell'
 import { STAFF_ROUTE_REGISTRY } from './features/staff'
 import { EvaluatorDashboardRoute, PlannerWorkspaceRoute } from './App'
+
+// Story 17: the settings page is planner-only; the mock resolver gives a participant session, so
+// stand in a planner session (only `useOptionalSession` is replaced).
+vi.mock('@/core/auth/session', async importOriginal => ({
+  ...(await importOriginal<typeof import('@/core/auth/session')>()),
+  useOptionalSession: (await import('@/core/auth/rolePermissions.testUtils')).stubbedSession,
+}))
+
+beforeEach(() => {
+  resetStubSession()
+  setStubSession({ role: 'planner', isLead: false })
+})
 
 /**
  * Captures the surface map `App.tsx` hands `createRoleAwareRoutes` at module

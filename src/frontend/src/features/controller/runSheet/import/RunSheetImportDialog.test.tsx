@@ -28,7 +28,12 @@ import type { InjectItemWrite } from '../types'
 
 // Demo-feedback story 11 (DF-14): the console's write controls render only for a controller
 // session, and this suite mounts none, so the read-only gate is fixed to "controller" here.
-vi.mock('@/features/controller/access/useCanControl', () => ({ useCanControl: () => true }))
+vi.mock('@/features/controller/access/useCanControl', () => ({
+  useCanControl: () => true,
+  useCanEditContent: () => true,
+  useCanStaffPost: () => true,
+  useCanStaffPin: () => true,
+}))
 
 const seed: InjectItemWrite[] = [
   { kind: 'post', title: 'Alpha', posts: [{ personaId: 'persona-fairhavenwater', text: 'Alpha text' }] },

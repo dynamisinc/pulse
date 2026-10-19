@@ -15,8 +15,9 @@
  * autonomy. The engine itself never turns this on: there is no code path here
  * (or anywhere) that flips it without a human calling `setSwampedMode`.
  *
- * GATE. `isLead` is read off the Phase-1 mock `useControllerIdentity()`
- * (extended by this story — see that module's header). `setSwampedMode(true)`
+ * GATE. `isLead` is the real session's server-computed flag (`Session.isLead`, via
+ * `usePermissions().can('raiseAutonomy')` = controller AND lead; story 17 replaced the Phase-1
+ * mock `useControllerIdentity().isLead`). `setSwampedMode(true)`
  * is a NO-OP — rejected, not recorded as enabled, no telemetry emitted — when
  * `!isLead`. Disabling is not gated (there is nothing unsafe about a
  * controller turning auto-send back OFF).
@@ -44,6 +45,7 @@ import { scenarioNow } from '@/core/clock'
 import { useExerciseContext } from '@/core/exerciseContext'
 import { buildAndEmit } from '@/core/telemetry'
 import { wallClockNowIso } from '@/core/time/wallClock'
+import { usePermissions, useOptionalSession } from '@/core/auth'
 import { useControllerIdentity } from '../../identity/controllerIdentity'
 
 // ---------------------------------------------------------------------------
@@ -120,6 +122,12 @@ export interface UseSwampedModeResult {
  */
 export function useSwampedMode(): UseSwampedModeResult {
   const identity = useControllerIdentity()
+  // Story 17: the lead flag is the SERVER's (`Session.isLead`, read live per request), never the
+  // mock identity's. Raising is lead-only; lowering is open to every controller.
+  const { can } = usePermissions()
+  // Telemetry actor = the signed-in person; the mock identity is only a fallback (null personId).
+  const actingHumanId = useOptionalSession()?.personId ?? identity.actingHumanId
+  const isLead = can('raiseAutonomy')
   const { exerciseId, timeZone } = useExerciseContext()
 
   const swampedMode = useSyncExternalStore(subscribe, () => getSnapshot(exerciseId))
@@ -128,7 +136,7 @@ export function useSwampedMode(): UseSwampedModeResult {
     (next: boolean) => {
       // The sole safety gate (ADP-040): a non-lead can never ENABLE swamped
       // mode. Rejected silently to the caller — no state change, no telemetry.
-      if (next && !identity.isLead) {
+      if (next && !isLead) {
         return
       }
 
@@ -143,7 +151,7 @@ export function useSwampedMode(): UseSwampedModeResult {
         exerciseId,
         eventType: 'engine.swamped_mode_changed',
         channel: 'system',
-        actor: { kind: 'engine', actingHumanId: identity.actingHumanId },
+        actor: { kind: 'engine', actingHumanId },
         origin: 'engine',
         wallClockTime: wallClockNowIso(),
         scenarioTime: scenarioNow().toISOString(),
@@ -152,8 +160,8 @@ export function useSwampedMode(): UseSwampedModeResult {
         payload: { action: next ? 'swamped-mode-enabled' : 'swamped-mode-disabled' },
       })
     },
-    [exerciseId, timeZone, identity.isLead, identity.actingHumanId],
+    [exerciseId, timeZone, isLead, actingHumanId],
   )
 
-  return { swampedMode, isLead: identity.isLead, setSwampedMode }
+  return { swampedMode, isLead, setSwampedMode }
 }

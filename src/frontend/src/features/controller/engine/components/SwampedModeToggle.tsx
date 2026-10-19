@@ -6,6 +6,9 @@
  * COBRA operator chrome (matches `ReviewQueue`'s D5 tokens), MUI 9 `sx`-only
  * system props, FontAwesome icons only. Never mounted on a participant path.
  *
+ * `isLead` is the SERVER's `Session.isLead` (story 17), via `useSwampedMode`.
+ * A non-lead controller may only LOWER: see the OFF-only control below.
+ *
  * LEAD GATE (COR-015 "absent, not disabled"). A non-lead controller has NO way
  * to enable swamped mode from this control — the enable affordance is simply
  * ABSENT for them (not rendered greyed-out), rather than present-but-disabled,
@@ -35,8 +38,11 @@ import {
   faTriangleExclamation,
   faToggleOn,
   faToggleOff,
+  faPowerOff,
 } from '@fortawesome/free-solid-svg-icons'
+import { useEffect, useRef, useState } from 'react'
 import { Box, Stack, Typography } from '@mui/material'
+import { CobraLinkButton, CobraSecondaryButton } from '@/theme/styledComponents'
 import { useSwampedMode } from '../hooks/useSwampedMode'
 import { useEngineSettings } from '../hooks/useEngineSettings'
 // D5 dark operator-chrome tokens (matches `ReviewQueue`'s `chrome`). Staff-only.
@@ -46,11 +52,37 @@ import { useCanControl } from '../../access'
 export function SwampedModeToggle() {
   const { swampedMode, isLead, setSwampedMode } = useSwampedMode()
   const canControl = useCanControl()
+  const [confirmingOff, setConfirmingOff] = useState(false)
+  // WR-004: keyboard focus follows the OFF-only confirm step. Confirm is focused on open;
+  // Cancel returns to the trigger; after Confirm focus lands on the trigger, then (once swamped
+  // mode is actually off and the trigger unmounts) on the non-lead note.
+  const confirmRef = useRef<HTMLButtonElement | null>(null)
+  const triggerRef = useRef<HTMLButtonElement | null>(null)
+  const noteRef = useRef<HTMLParagraphElement | null>(null)
+  const restoreTriggerFocus = useRef(false)
+  const confirmedOff = useRef(false)
+
+  useEffect(() => {
+    if (confirmingOff) confirmRef.current?.focus()
+    else if (restoreTriggerFocus.current) {
+      restoreTriggerFocus.current = false
+      triggerRef.current?.focus()
+    }
+  }, [confirmingOff])
+
+  useEffect(() => {
+    if (!swampedMode && confirmedOff.current) {
+      confirmedOff.current = false
+      noteRef.current?.focus()
+    }
+  }, [swampedMode])
   const settings = useEngineSettings().settings
   // Hold-on-cut (ADP-042): while cut to Fake, expiries hold even under swamped mode.
   const providerCutToFake = settings?.providerCutToFake ?? false
   // Phase 1 (PROVIDER-GOVERNANCE §8): the server refuses swamped ON while the
   // governed flag is false. Only an explicit `false` disables; OFF stays open.
+  // Turning ON needs the lead role (COR-015, absent for others) AND this flag; OFF is never
+  // refused.
   const onRefused = settings?.timeoutAutoSendAuthorized === false && !swampedMode
 
   return (
@@ -154,8 +186,65 @@ export function SwampedModeToggle() {
         </Stack>
       )}
 
-      {!isLead && !swampedMode && (
+      {/* Story 17 (raise-only, Option A): a non-lead controller may LOWER but not raise, so while
+          swamped mode is on they get an OFF-only control, behind a confirmation. Text + icon. */}
+      {canControl && !isLead && swampedMode && (
+        <Stack
+          direction="row"
+          role="group"
+          aria-label="Turn swamped mode off"
+          data-testid="swamped-mode-turn-off"
+          sx={{ alignItems: 'center', gap: 0.75, flexWrap: 'wrap' }}
+        >
+          {confirmingOff ? (
+            <>
+              <Typography component="span" sx={{ fontSize: 11, color: chrome.ink }}>
+                Turn swamped mode off? Expired timers will hold again instead of publishing.
+              </Typography>
+              <CobraSecondaryButton
+                size="small"
+                startIcon={<FontAwesomeIcon icon={faPowerOff} aria-hidden="true" />}
+                data-testid="swamped-mode-turn-off-confirm"
+                ref={confirmRef}
+                onClick={() => {
+                  restoreTriggerFocus.current = true
+                  confirmedOff.current = true
+                  setSwampedMode(false)
+                  setConfirmingOff(false)
+                }}
+              >
+                Confirm: turn swamped mode off
+              </CobraSecondaryButton>
+              <CobraLinkButton
+                size="small"
+                data-testid="swamped-mode-turn-off-cancel"
+                onClick={() => {
+                  restoreTriggerFocus.current = true
+                  setConfirmingOff(false)
+                }}
+              >
+                Cancel
+              </CobraLinkButton>
+            </>
+          ) : (
+            <CobraSecondaryButton
+              size="small"
+              startIcon={<FontAwesomeIcon icon={faPowerOff} aria-hidden="true" />}
+              data-testid="swamped-mode-turn-off-button"
+              ref={triggerRef}
+              aria-expanded={false}
+              onClick={() => setConfirmingOff(true)}
+            >
+              Turn swamped mode off
+            </CobraSecondaryButton>
+          )}
+        </Stack>
+      )}
+
+      {canControl && !isLead && !swampedMode && (
         <Typography
+          ref={noteRef}
+          tabIndex={-1}
           data-testid="swamped-mode-non-lead-note"
           sx={{ fontSize: 10.5, color: chrome.inkFaint }}
         >

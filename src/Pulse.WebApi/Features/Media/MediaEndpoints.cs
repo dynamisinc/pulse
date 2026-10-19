@@ -19,6 +19,7 @@ using Pulse.WebApi.Data;
 using Pulse.WebApi.Features.EngineRuntime;
 using Pulse.WebApi.Features.Identity.SharedAccess;
 using Pulse.WebApi.Features.Social.Follows;
+using Pulse.WebApi.Features.Identity.RoleMatrix;
 
 /// <summary>
 /// The Azure credential and (optionally) client options the Azure media store and key source are built with.
@@ -148,7 +149,11 @@ public static class MediaEndpoints
         ArgumentNullException.ThrowIfNull(endpoints);
 
         // A sim WRITE: a shared read-only session is refused (403) before the handler runs (COR-015).
-        var writes = endpoints.MapGroup(string.Empty).DenyReadOnlySessions();
+        // identity-auth-roles/17 (§8.2): a STAFF upload is planner or controller (evaluator 403, #61); a participant
+        // upload passes through to the service's own persona-bound check.
+        var writes = endpoints.MapGroup(string.Empty)
+            .DenyReadOnlySessions()
+            .AddEndpointFilter(StaffAuthoringRoleFilter.StaffUpload);
         writes.MapPost(UploadRoute, UploadAsync)
             .RequireRateLimiting(MediaUploadRateLimitPolicy);
 

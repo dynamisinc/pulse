@@ -142,7 +142,6 @@ beforeEach(() => {
     actingHumanId: 'human-controller-01',
     callSign: 'SIMCELL-1',
     role: 'controller',
-    isLead: true,
   })
   // Fixed scenario clock PAST the minute-105 deadline: expired on mount.
   setExerciseClock({ scenarioNow: () => new Date(105 * 60_000) })

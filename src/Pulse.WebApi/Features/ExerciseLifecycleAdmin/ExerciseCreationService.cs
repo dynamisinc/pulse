@@ -102,7 +102,9 @@ public sealed class ExerciseCreationService
 
         // Defense in depth over the endpoint filter: a service must fail closed on its own, so a future
         // mapping that forgot the filter cannot turn every staff session into an exercise administrator.
-        if (!ExerciseAdminRoles.IsExerciseAdministrator(caller.Role))
+        // identity-auth-roles/17 (§8.2, signed off): creating an exercise is the ORG ADMIN's alone — planners and
+        // controllers are refused (a narrowing of DF-20).
+        if (!ExerciseAdminRoles.IsOrgAdmin(caller.Role))
         {
             return CreateExerciseResult.Forbidden();
         }
@@ -218,7 +220,10 @@ public sealed class ExerciseCreationService
             });
     }
 
-    /// <summary>Projects a freshly created exercise onto the shared org-admin row shape.</summary>
+    /// <summary>
+    /// Projects a freshly created exercise onto the shared org-admin row shape. Creation is org-admin only, and an org
+    /// admin manages every exercise of their organization, so <see cref="OrgExerciseDto.CanManage"/> is <c>true</c>.
+    /// </summary>
     private static OrgExerciseDto ToDto(Exercise exercise) => new()
     {
         ExerciseId = exercise.Id.ToString(),
@@ -226,6 +231,7 @@ public sealed class ExerciseCreationService
         Status = exercise.Status,
         Hostname = exercise.Hostname,
         CreatedAt = exercise.CreatedAt?.ToString("O", CultureInfo.InvariantCulture),
+        CanManage = true,
     };
 
     /// <summary>

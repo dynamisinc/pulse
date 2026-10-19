@@ -184,6 +184,31 @@ public sealed class EngineTierPolicyRegistry
     }
 
     /// <summary>
+    /// Compare-and-set (Gate-1 WR-001): records <paramref name="mode"/> ONLY when the exercise's mode is still
+    /// <paramref name="expected"/>, atomically. Lets a caller judge a request against the mode it read (the lead-only
+    /// raise) and write against that SAME mode, so a concurrent change in between misses the swap instead of being
+    /// overwritten by a decision made against a stale read.
+    /// </summary>
+    /// <param name="exerciseId">The exercise whose mode to set (COR-001); must not be empty.</param>
+    /// <param name="expected">The mode the caller read and judged against.</param>
+    /// <param name="mode">The mode to record, or <see cref="TierPolicyMode.Auto"/> to clear the override.</param>
+    /// <returns><c>true</c> when the mode was still <paramref name="expected"/> and is now <paramref name="mode"/>.</returns>
+    public bool TrySetMode(Guid exerciseId, TierPolicyMode expected, TierPolicyMode mode)
+    {
+        EnsureScoped(exerciseId);
+
+        // Auto is the ABSENCE of an entry, so each (expected, mode) pair maps onto one atomic primitive.
+        if (expected == TierPolicyMode.Auto)
+        {
+            return mode == TierPolicyMode.Auto ? !_modes.ContainsKey(exerciseId) : _modes.TryAdd(exerciseId, mode);
+        }
+
+        return mode == TierPolicyMode.Auto
+            ? _modes.TryRemove(new KeyValuePair<Guid, TierPolicyMode>(exerciseId, expected))
+            : _modes.TryUpdate(exerciseId, mode, expected);
+    }
+
+    /// <summary>
     /// Applies the exercise's mode to a composed intent's tier: the exercise's forced tier when an override is
     /// set, otherwise <paramref name="composedTier"/> unchanged (the purpose-based decision the decide stage
     /// already made). This is the ONE read the reaction loop performs per burst.

@@ -26,6 +26,7 @@ using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.EngineRuntime.Publishing;
 using Pulse.WebApi.Tests.Data;
 using Pulse.WebApi.Tests.Features.EngineRuntime.Clock;
+using Pulse.WebApi.Tests.Helpers;
 using Xunit;
 
 /// <summary>
@@ -312,9 +313,10 @@ public sealed class EngineSettingsLoopIntegrationTests
         using var scope = host.CreateScope();
         ((ExerciseContext)scope.ServiceProvider.GetRequiredService<IExerciseContext>()).CurrentExerciseId = exerciseId;
         var service = scope.ServiceProvider.GetRequiredService<EngineReviewService>();
+        var lead = LeadControllerSeed.Seed(scope.ServiceProvider.GetRequiredService<PulseDbContext>(), exerciseId);
 
         var result = await service.SetExerciseAutonomyDefaultAsync(
-            level, new EngineReviewActionInput("controller-7", "UTC"));
+            level, new EngineReviewActionInput("controller-7", "UTC"), callerIsLead: true, lead);
         result.Outcome.Should().Be(EngineReviewOutcome.Ok, "the settings change must succeed for this proof to mean anything");
     }
 
@@ -323,8 +325,10 @@ public sealed class EngineSettingsLoopIntegrationTests
         using var scope = host.CreateScope();
         ((ExerciseContext)scope.ServiceProvider.GetRequiredService<IExerciseContext>()).CurrentExerciseId = exerciseId;
         var service = scope.ServiceProvider.GetRequiredService<EngineReviewService>();
+        var lead = LeadControllerSeed.Seed(scope.ServiceProvider.GetRequiredService<PulseDbContext>(), exerciseId);
 
-        var result = await service.SetTierPolicyModeAsync(mode, new EngineReviewActionInput("controller-7", "UTC"));
+        var result = await service.SetTierPolicyModeAsync(
+            mode, new EngineReviewActionInput("controller-7", "UTC"), callerIsLead: true, lead);
         result.Outcome.Should().Be(EngineReviewOutcome.Ok);
     }
 

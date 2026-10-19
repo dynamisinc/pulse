@@ -100,6 +100,8 @@ interface OrgExerciseBody {
   readonly status: string
   readonly hostname?: string | null
   readonly createdAt?: string | null
+  /** WR-005; required by the current backend, accepted absent (older backend). */
+  readonly canManage?: boolean
 }
 
 /** Wire shape of the creation response (`CreateExerciseResponseDto`). */
@@ -421,6 +423,7 @@ function isOrgExerciseBody(value: unknown): value is OrgExerciseBody {
     && (body.hostname === undefined || body.hostname === null || typeof body.hostname === 'string')
     && (body.createdAt === undefined || body.createdAt === null
       || typeof body.createdAt === 'string')
+    && (body.canManage === undefined || typeof body.canManage === 'boolean')
   )
 }
 
@@ -449,6 +452,7 @@ function toOrgExercise(body: OrgExerciseBody): OrgExercise {
     ...(typeof body.createdAt === 'string' && body.createdAt.length > 0
       ? { createdAt: body.createdAt }
       : {}),
+    ...(typeof body.canManage === 'boolean' ? { canManage: body.canManage } : {}),
   }
 }
 

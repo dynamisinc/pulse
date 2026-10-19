@@ -38,11 +38,13 @@ import {
   faCheck,
   faCircleInfo,
   faEye,
+  faLock,
   faPowerOff,
   faRobot,
   faTriangleExclamation,
 } from '@fortawesome/free-solid-svg-icons'
 import { CobraPrimaryButton, CobraSecondaryButton, CobraTextField } from '@/theme/styledComponents'
+import { LEAD_ONLY_RAISE_REASON, usePermissions } from '@/core/auth'
 import { consoleChrome as chrome } from '../../consoleChrome'
 import {
   AMBIENT_MODES,
@@ -64,6 +66,9 @@ export interface AmbientPersonaOption {
 
 /** Id of the unauthorized note; the disabled Autonomous option points at it. */
 const AUTONOMOUS_NOTE_ID = 'ambient-autonomous-unauthorized-note-text'
+
+/** Id of the lead-only reason; the disabled raise controls point at it (story 17). */
+const LEAD_REASON_ID = 'ambient-lead-reason'
 
 interface ModeMeta {
   label: string
@@ -262,11 +267,20 @@ export function AmbientChatterSection(props: AmbientChatterSectionProps) {
     voiceable !== null && !voiceable.includes(id) ? 'not eligible for ambient' : null
   const personaOptions = personas.map(p => ({ id: p.id, label: `${p.displayName} (${p.handle})` }))
 
+  // Story 17: raising the ambient policy needs the lead (server `isLead`); lowering is open.
+  const isLead = usePermissions().can('raiseAutonomy')
+
   const perMinute = parseCap(perMinuteText)
   const perHour = parseCap(perHourText)
   const capsValid = perMinute !== null && perHour !== null
   const editing = canControl
   const controlsDisabled = disabled || pending
+  // Would saving the current draft be a raise? (null caps are not saveable anyway.)
+  const draftIsRaise =
+    perMinute !== null &&
+    perHour !== null &&
+    ambientRaiseKind(policy, { ...draft, maxPerMinute: perMinute, maxPerHour: perHour }) !== null
+  const leadBlockedSave = !isLead && draftIsRaise
   const saved = MODE_META[policy.mode]
 
   const doSave = () => {
@@ -355,7 +369,9 @@ export function AmbientChatterSection(props: AmbientChatterSectionProps) {
             const meta = MODE_META[mode]
             const selected = draft.mode === mode
             const blocked = mode === 'autonomous' && policy.autonomousAuthorized === false
-            const modeDisabled = controlsDisabled || blocked
+            // Non-lead: choosing Autonomous from a non-autonomous mode is a raise.
+            const leadBlockedMode = mode === 'autonomous' && !isLead && policy.mode !== 'autonomous'
+            const modeDisabled = controlsDisabled || blocked || leadBlockedMode
             return (
               <Box
                 key={mode}
@@ -363,7 +379,11 @@ export function AmbientChatterSection(props: AmbientChatterSectionProps) {
                 type="button"
                 data-testid={`ambient-mode-${mode}`}
                 aria-pressed={selected}
-                aria-describedby={blocked ? AUTONOMOUS_NOTE_ID : undefined}
+                aria-describedby={
+                  [blocked ? AUTONOMOUS_NOTE_ID : null, leadBlockedMode ? LEAD_REASON_ID : null]
+                    .filter(Boolean)
+                    .join(' ') || undefined
+                }
                 disabled={modeDisabled}
                 onClick={() => setDraft(d => ({ ...d, mode }))}
                 sx={{
@@ -386,6 +406,18 @@ export function AmbientChatterSection(props: AmbientChatterSectionProps) {
               </Box>
             )
           })}
+        </Stack>
+      )}
+
+      {editing && !isLead && (
+        <Stack
+          id={LEAD_REASON_ID}
+          data-testid="ambient-lead-reason"
+          direction="row"
+          sx={{ alignItems: 'center', gap: 0.6, fontSize: 10.5, color: chrome.inkMuted }}
+        >
+          <FontAwesomeIcon icon={faLock} aria-hidden="true" />
+          <span>{LEAD_ONLY_RAISE_REASON}</span>
         </Stack>
       )}
 
@@ -521,7 +553,8 @@ export function AmbientChatterSection(props: AmbientChatterSectionProps) {
           ref={saveButtonRef}
           data-testid="ambient-save"
           size="small"
-          disabled={controlsDisabled || !capsValid}
+          disabled={controlsDisabled || !capsValid || leadBlockedSave}
+          aria-describedby={leadBlockedSave ? LEAD_REASON_ID : undefined}
           onClick={save}
           sx={{ alignSelf: 'flex-start' }}
         >

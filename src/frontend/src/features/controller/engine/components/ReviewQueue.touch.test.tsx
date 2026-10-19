@@ -19,7 +19,12 @@ import { reviewStore } from '../services/reviewStore'
 import { ReviewQueue } from './ReviewQueue'
 import { hasPseudoHitSlop, mediaRuleDeclarations } from '@/features/staffShell/tabletTestUtils'
 
-vi.mock('@/features/controller/access/useCanControl', () => ({ useCanControl: () => true }))
+vi.mock('@/features/controller/access/useCanControl', () => ({
+  useCanControl: () => true,
+  useCanEditContent: () => true,
+  useCanStaffPost: () => true,
+  useCanStaffPin: () => true,
+}))
 
 beforeEach(() => {
   setExerciseClock({ scenarioNow: () => new Date('2033-09-04T14:00:30Z') })

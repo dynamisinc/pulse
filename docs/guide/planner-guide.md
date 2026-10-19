@@ -10,6 +10,35 @@ into it, and closing it out. Many of these tasks are also open to other roles:
 | **Participants** | Planners and controllers |
 | **Controller Console** (where the run sheet and MSEL import are) | Controllers. Evaluators get a read-only view. |
 
+### Who can do what
+
+Pulse checks every change against your role on the exercise. If your role cannot make a change, Pulse
+refuses it and nothing changes.
+
+| Task | Org admin | Planner | Controller | Evaluator |
+|---|---|---|---|---|
+| Create an exercise | Yes | No | No | No |
+| Rename or archive an exercise | Yes | Yes, for exercises you plan | No | No |
+| Change settings, chrome or practice mode | Only through a planner enrollment | Yes | No | No |
+| Stage the exercise | Only through a planner enrollment | Yes | No | No |
+| Set the lead controller | Only through a planner enrollment | Yes | No | No |
+| Start, pause, resume or end the exercise, and the pause tiers | Only through a controller enrollment | No | Yes | No |
+| Roster, links, day word, view-only code | Only through an enrollment | Yes | Yes | No |
+| Edit personas and the run sheet (including MSEL import) | Only through an enrollment | Yes | Yes | No |
+| Post as a persona or pin, while the exercise is in **build** (setup) | Only through an enrollment | Yes | Yes | No |
+| Post as a persona, pin, fire injects, take down posts, steer the engine (**staged** or **live**) | Only through a controller enrollment | No | Yes | No |
+| Turn Swamped mode on, raise engine autonomy, restore after the engine switch | No | No | Lead controller only | No |
+| Turn Swamped mode off, lower autonomy, use the engine switch | No | No | Yes | No |
+| Read the console, feeds and report | Only through an enrollment | Yes | Yes | Yes |
+
+Pulse hides the controls your role cannot use, or shows them disabled with the reason in words. For
+example, a controller who is not the lead sees a raise control greyed out with "Only the lead controller can
+raise this". Planners keep the run-sheet **Add**, **Edit**, **Delete**, reorder and **Import from Excel**
+controls and persona editing; they do not get **Fire next**, **Hold** or **Skip**.
+
+An org admin has no powers inside an exercise just for being an org admin. To work in an exercise, an
+org admin needs an enrollment on it, and then has exactly that role's powers.
+
 Open any of these from the screen menu in the top-left corner of a staff screen. If you have not
 signed in before, start with [Getting started](getting-started.md#signing-in-as-staff).
 
@@ -40,6 +69,9 @@ state](getting-started.md#exercise-states)), **Hostname** and **Created** date.
 
 ### Creating an exercise
 
+Only an organization administrator sees the create form. Planners and controllers do not see it, because Pulse
+would refuse the request. Ask your organization administrator to create the exercise for you.
+
 1. Open **Exercise Management**.
 2. In **Exercise name**, enter the name your team will use, for example "Harbor Freeze Tabletop".
    **Players can see this name**: it appears on the player sign-in page, on printed sign-in cards and
@@ -61,7 +93,8 @@ choose it in the exercise switcher above the staff screen. See
 > has no **Actions** column, use **Exercise Settings > Identity & schedule > Exercise name** to rename
 > the exercise you are signed in to.
 
-1. Open **Exercise Management**.
+1. Open **Exercise Management**. (A controller does not see **Rename** or **Archive**; an organization
+   administrator and a planner do.)
 2. In the exercise's row, select **Rename**.
 3. Enter the new **Exercise name** and select **Rename**.
 
@@ -382,8 +415,7 @@ You can load the social-media injects from a Cadence MSEL export straight into t
 Pulse reads the file as Cadence exports it, keeps only the social-media rows, and turns each one into
 a single post on the run sheet.
 
-**Who can do this:** controllers, from the **Controller Console**. If you are a planner without the
-controller role, ask a controller to run the import, or ask Dynamis support for controller access.
+**Who can do this:** planners and controllers. Evaluators cannot import.
 
 ![The Import from Excel dialog, showing a preview of what the import would create.](img/msel-import.png)
 

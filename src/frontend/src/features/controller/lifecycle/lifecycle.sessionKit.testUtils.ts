@@ -24,6 +24,13 @@ import { withRole } from '@/core/auth/withRole.testUtils'
 const DEFAULT_ROLE: SessionRole = 'controller'
 
 let role: SessionRole = DEFAULT_ROLE
+// Story 17: the server's `isLead`. A lead by default so the lead-gated raise controls are present.
+let lead = true
+
+/** Whether the next resolved session is the lead controller. */
+export function setSessionLead(next: boolean): void {
+  lead = next
+}
 
 /** The role the next resolved session carries. */
 export function setSessionRole(next: SessionRole): void {
@@ -33,6 +40,7 @@ export function setSessionRole(next: SessionRole): void {
 /** Back to `controller`. */
 export function resetSessionRole(): void {
   role = DEFAULT_ROLE
+  lead = true
 }
 
 /** The `resolveSession` replacement: a staff session with the chosen role, no persona. */
@@ -42,7 +50,7 @@ export async function resolveSession(): Promise<Session> {
     scope: 'exercise',
     personId: null,
     world: 'participant',
-    isLead: false,
+    isLead: lead,
     accountId: `acct-${role}`,
     role: 'participant',
     actingHumanId: `human-${role}`,

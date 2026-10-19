@@ -463,6 +463,18 @@ public static class PostMediaSeed
         seed.Personas.Add(NewPersona(otherParticipantPersona, exerciseId));
         seed.Personas.Add(NewPersona(staffPersona, exerciseId));
         seed.Sessions.AddRange(participantSession, otherParticipantSession, staffSession, staffWithPersonaSession);
+
+        // identity-auth-roles/17: a staff post-as-persona now needs a live controller (or, in build, planner)
+        // ENROLLMENT on the exercise — an unenrolled staff session is refused (403), so the operator is seeded enrolled.
+        seed.StaffUsers.Add(StaffTenantSeed.StaffUserFor(staffUserId));
+        seed.Enrollments.Add(new Enrollment
+        {
+            Id = Guid.NewGuid(),
+            ExerciseId = exerciseId,
+            PersonId = staffUserId,
+            Role = "controller",
+            CreatedAt = DateTimeOffset.UtcNow,
+        });
         await seed.SaveChangesAsync();
 
         return new MediaWorld
