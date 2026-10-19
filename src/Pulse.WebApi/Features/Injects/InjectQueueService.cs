@@ -1463,7 +1463,7 @@ public sealed partial class InjectQueueService
         CancellationToken cancellationToken)
     {
         var rows = await (
-            from assignment in _dbContext.Enrollments.AsNoTracking().Where(EnrollmentRoles.IsStaffEnrollment)
+            from assignment in _dbContext.Enrollments.Active().AsNoTracking().Where(EnrollmentRoles.IsStaffEnrollment)
             where assignment.ExerciseId == exerciseId
             join staffUser in _dbContext.StaffUsers.AsNoTracking().InOrganization(organizationId)
                 on assignment.PersonId equals (Guid?)staffUser.Id

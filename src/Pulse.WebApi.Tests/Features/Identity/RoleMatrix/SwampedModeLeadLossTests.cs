@@ -8,6 +8,7 @@ using System.Text.Json;
 using System.Threading.Tasks;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
+using Pulse.WebApi.Data;
 using Microsoft.Extensions.DependencyInjection;
 using Pulse.WebApi.Features.EngineRuntime;
 using Pulse.WebApi.Features.EngineRuntime.Clock;
@@ -47,7 +48,8 @@ public sealed class SwampedModeLeadLossTests
         _kit.Swamped.OnTurnOff = _ =>
         {
             using var probe = _kit.ReadContext();
-            enrollmentStillPresentAtFlip = probe.Enrollments.IgnoreQueryFilters().Any(e => e.Id == leadEnrollment);
+            // identity-auth-roles/21: removal is a soft delete (XC-010), so "removed" = no longer an ACTIVE row.
+            enrollmentStillPresentAtFlip = probe.Enrollments.IgnoreQueryFilters().Active().Any(e => e.Id == leadEnrollment);
         };
 
         var (service, context) = _kit.ServiceFor(plannerSession, planner, org, exercise);

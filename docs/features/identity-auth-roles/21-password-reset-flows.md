@@ -36,3 +36,15 @@ Wave A2, after A1. Owns `CredentialToken`; 20 consumes it. Needs 18 (#480) for t
 
 ## Tests
 Policy unit tests; token lifecycle tests (single use, expiry, voiding); anti-enumeration timing/shape test; session-revocation test; foreign-org/exercise route tests; RTL for both reset pages.
+
+### Test linkage — #576 backend subset (credential foundation; forgot-password, participant reset, temporary password and both reset pages are NOT in this subset)
+- `PasswordPolicyTests` (all) — AC "Policy (§3.2)": staff 12 / participant 8 floors, 128 ceiling in code points, no composition rules, embedded top-10k blocklist, org name / email local part / display name, specific non-leaking codes.
+- `CredentialTokenServiceTests.Issue_ReturnsAUrlSafe256BitTokenOnce_StoresOnlyItsSha256_WithThePurposesLifetime` — AC "Reset" (lifetimes), AC "Tokens are stored only as SHA-256 hashes".
+- `CredentialTokenServiceTests.Issue_VoidsTheEarlierUnusedTokensOfTheSamePurpose_Only_AndOnlyForThatPerson` — AC "Reset" (issuing voids earlier unused tokens of the same purpose).
+- `CredentialTokenServiceTests.FindRedeemable_IsNullForUnknownExpiredUsedOrMalformed_AndTheRowOtherwise`, `.TryClaim_IsSingleUse_AcrossTwoUnitsOfWork_AndRefusesAnotherOrganizationsBound` — AC "Reset" (single use, uniform error).
+- `CredentialTokenServiceTests.CredentialChangeInvalidation_VoidsEveryOutstandingTokenOfBothPurposes_ForThatPersonOnly`, `CredentialEndpointsHttpTests.Reset_VoidsTheOlderInvite_TheOlderResetLink_AndTheOlderOrgChoice` — Copilot review 5 fold (older invite, older reset link and older org choice all fail).
+- `CredentialEndpointsHttpTests.Reset_FromAnAdminIssuedLink_SetsThePassword_SignsInWithIt_AndRevokesEveryLiveSession` — AC "Reset" (sets the password, revokes every live session, `identity.credential.changed` org audit), AC `Cache-Control: no-store`.
+- `CredentialEndpointsHttpTests.Reset_WithAnUnknownExpiredUsedOrMissingToken_IsOneUniform400`, `.Reset_WithAPolicyViolation_IsTheSpecificCode_AndDoesNotConsumeTheToken` — AC "Reset" (uniform error), AC "Policy" (specific codes).
+- `CredentialEndpointsHttpTests.AdminReset_ByAnOrgAdmin_ReturnsTheLinkOnce_NoStore_StoresOnlyTheHash_AndAudits`, `.AdminReset_IsRefusedToAPlanner_AndToAnAnonymousCaller_AndConflictsForADisabledPerson`, `.AdminReset_WithoutAFrontendBaseUrl_Is503_AndIssuesNothing` — AC "Admin reset" (staff half: org admin only; copy-link flow because email is off; `IPulseMailer` no-op).
+- `CredentialEndpointsHttpTests.AdminReset_ForAnotherCustomersPerson_IsTheSameBare404AsAMissingId_AndIssuesNothing`, `.Reset_ATokenStampedWithAnotherOrganization_CannotReachThePerson`, `CompositionRootWiringTests.TheOrgTierRoutes_TakeOnlyAllowListedExerciseIds` — AC "Isolation" (foreign-org bare 404; the person-id route is allow-listed). Neither route takes an exercise, so there is no foreign-exercise case.
+- `CredentialCompositionRootWiringTests` (both) — Program.cs wiring; the reset route is pre-auth and the admin route is not.

@@ -535,6 +535,7 @@ public sealed class BootstrapService
         // by host, and staffUser.Id the human it just resolved — no request value can point this at another tenant.
         var assignment = await _dbContext.Enrollments
             .IgnoreQueryFilters()
+            .Active()
             .FirstOrDefaultAsync(a => a.PersonId == staffUser.Id && a.ExerciseId == exerciseId, cancellationToken);
         var assignmentCreated = assignment is null;
 

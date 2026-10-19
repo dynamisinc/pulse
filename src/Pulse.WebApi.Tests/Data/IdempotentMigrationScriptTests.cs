@@ -53,6 +53,9 @@ public class IdempotentMigrationScriptTests
     /// <summary>The last migration before identity-auth-roles/16 (A1) — the shape UAT holds when the A1 cut deploys.</summary>
     private const string BeforeAdminIdentity = "20261017011709_DemoFeedbackNamedLookalikePairs";
 
+    /// <summary>The last migration before identity-auth-roles/21 (A2) — the shape UAT holds when the A2 cut deploys.</summary>
+    private const string BeforeA2Credentials = "20261017120000_AdminIdentityFoundation";
+
     private readonly MsSqlContainerFixture _fixture;
 
     public IdempotentMigrationScriptTests(MsSqlContainerFixture fixture)
@@ -207,6 +210,56 @@ public class IdempotentMigrationScriptTests
 
         (await database.AppliedMigrationsAsync()).Should().BeEquivalentTo(database.AllMigrations());
         await AssertAdminIdentityOverLegacyRowsAsync(database, seed);
+    }
+
+    [RequiresDockerFact]
+    public async Task TheDeployScript_BringsUpA2Credentials_OverA1Rows_AndReplaysAsANoOp()
+    {
+        // identity-auth-roles/21 (lesson #413): the UAT shape on A2 deploy day — an A1 world (people, staff and participant
+        // enrollments with a lead, an account, a media asset) — taken forward by the SCRIPT, batch by batch, as sqlcmd -b
+        // runs it. A2CredentialFoundation's CHECKs and filtered indexes name columns its own ALTERs add.
+        await using var database = await ScriptDatabase.CreateAsync(_fixture);
+        await database.MigrateToAsync(BeforeA2Credentials);
+
+        var (rows, seedSql) = A2CredentialFoundationMigrationTests.A1Seed();
+        await database.ExecuteAsync(seedSql);
+        var script = database.GenerateIdempotentScript();
+
+        await database.ApplyScriptAsync(script);
+
+        (await database.AppliedMigrationsAsync()).Should().BeEquivalentTo(
+            database.AllMigrations(),
+            "the A2CredentialFoundation batch must compile and run in the script, not just under Migrate()");
+        await AssertA2OverA1RowsAsync(database, rows);
+
+        // The deploy re-applies the same script on every merge: a second apply must be a no-op.
+        await database.ApplyScriptAsync(script);
+
+        (await database.AppliedMigrationsAsync()).Should().BeEquivalentTo(database.AllMigrations());
+        await AssertA2OverA1RowsAsync(database, rows);
+    }
+
+    private static async Task AssertA2OverA1RowsAsync(ScriptDatabase database, A2CredentialFoundationMigrationTests.A1Rows rows)
+    {
+        (await database.ScalarAsync<int>($"SELECT [SignInMethods] FROM [Exercises] WHERE [Id] = '{rows.Exercise}'"))
+            .Should().Be(7, "an existing exercise defaults to every sign-in method");
+        (await database.ScalarAsync<int>($"SELECT COUNT(*) FROM [Enrollments] WHERE [ExerciseId] = '{rows.Exercise}' AND [DeletedAt] IS NULL"))
+            .Should().Be(3, "every existing enrollment stays live");
+        (await database.ScalarAsync<int>($"SELECT COUNT(*) FROM [Enrollments] WHERE [Id] = '{rows.LeadEnrollment}' AND [IsLead] = 1"))
+            .Should().Be(1);
+        (await database.ScalarAsync<int>("""
+            SELECT COUNT(*) FROM sys.check_constraints
+            WHERE [name] IN ('CK_Enrollments_DeletedAt_StaffOnly', 'CK_Enrollments_DeletedAt_NotLead', 'CK_Exercises_SignInMethods')
+              AND [is_not_trusted] = 0
+            """)).Should().Be(3, "the hand-written CHECKs are created, and validated, by the script");
+        (await database.ScalarAsync<int>("""
+            SELECT COUNT(*) FROM sys.indexes
+            WHERE [name] IN ('IX_Enrollments_ExerciseId_PersonId', 'IX_Enrollments_ExerciseId_Lead')
+              AND [filter_definition] LIKE '%DeletedAt%'
+            """)).Should().Be(2, "both filtered unique indexes ignore a revoked row");
+        (await database.ScalarAsync<int>("SELECT COUNT(*) FROM sys.tables WHERE [name] = 'CredentialTokens'")).Should().Be(1);
+        (await database.ScalarAsync<int>($"SELECT COUNT(*) FROM [MediaAssets] WHERE [Id] = '{rows.MediaAsset}' AND [UploadedByAccountId] IS NULL"))
+            .Should().Be(1, "an existing asset survives untouched");
     }
 
     private static async Task AssertAdminIdentityOverLegacyRowsAsync(ScriptDatabase database, LegacyIdentityRows seed)

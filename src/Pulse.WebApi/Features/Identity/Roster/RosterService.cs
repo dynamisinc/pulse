@@ -247,6 +247,7 @@ public sealed class RosterService
         // (the central filter confines it to the resolved scope) and the explicit predicates keep it to this caller
         // (StaffUser.Id == Person.Id, the shared key) and this exercise.
         var role = await _dbContext.Enrollments
+            .Active()
             .AsNoTracking()
             .Where(e => e.PersonId == current.StaffUserId && e.ExerciseId == exerciseId)
             .Select(e => e.Role)

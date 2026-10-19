@@ -147,7 +147,10 @@ public sealed class OrganizationScopeSweepTests
         // identity-auth-roles/15: +4 for OrgStaffLoginService — the email-first candidate read (People by email across
         // orgs, capped at 5, disclosed only after the password verifies), the slug → organization resolution, the names
         // of ONLY the organizations whose password verified (the org choice), and the IdP subject → staff human read.
-        ["ResolutionRoot"] = 13,
+        // identity-auth-roles/21: +1 for CredentialTokenService.FindRedeemableAsync — redeeming an invite/reset link IS the
+        // resolution of whose credential it is (by the SHA-256 of a 256-bit token, pre-auth); the person it names is then
+        // read only .InOrganization(token.OrganizationId).
+        ["ResolutionRoot"] = 14,
 
         // exercise-lifecycle-admin: +1 for OrganizationResolutionMiddleware, the production writer of
         // IOrganizationContext. It reads the authenticated caller's OWN StaffUser row (by the id their
@@ -164,7 +167,10 @@ public sealed class OrganizationScopeSweepTests
         // Organization.DefaultOrganizationId — now needs a marker. A count going above 1 means somebody
         // added a second unbounded read of the customer roster: check that it is still a by-known-id lookup
         // and not an enumeration before bumping this.
-        ["TenantRoot"] = 1,
+        // identity-auth-roles/21: +1 for PasswordResetService — a by-id read of the person's OWN organization's name
+        // (token.OrganizationId, stamped by the server at issue) for the password policy's context words. Still a
+        // by-known-id lookup, never an enumeration.
+        ["TenantRoot"] = 2,
     };
 
     [Fact]
@@ -290,10 +296,11 @@ public sealed class OrganizationScopeSweepTests
         // If somebody drops IOrganizationOwned off Exercise, every other assertion in this file would sweep
         // an empty set and pass. This is the assertion that notices.
         swept.Should().BeEquivalentTo(
-            ["Exercise", "Organization", "Person", "StaffUser"],
+            ["CredentialToken", "Exercise", "Organization", "Person", "StaffUser"],
             "these are exactly the tables a tenant filter does NOT cover, and therefore exactly the ones "
             + "whose bound is opt-in and forgettable: the two org-owned RESOLUTION ROOTS (Exercise, "
-            + "StaffUser) plus the TENANT ROOT itself (Organization — review finding WR-008). A new name "
+            + "StaffUser, and identity-auth-roles/21's CredentialToken, looked up by token hash) plus the TENANT ROOT "
+            + "itself (Organization — review finding WR-008). A new name "
             + "here needs its reads swept too; a MISSING name means an entity lost IOrganizationOwned (now "
             + "unownable by any customer) or gained IOrganizationScoped (now centrally filtered) — either "
             + "way this guard's coverage just changed and must be re-reasoned, not re-baselined.");

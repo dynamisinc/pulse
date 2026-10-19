@@ -337,6 +337,7 @@ public sealed class ExerciseLifecycleService
         actorRole ??= staff is null
             ? null
             : await _dbContext.Enrollments
+                .Active()
                 .AsNoTracking()
                 .Where(EnrollmentRoles.IsStaffEnrollment)
                 .Where(e => e.ExerciseId == exerciseId && e.PersonId == staff.StaffUserId)

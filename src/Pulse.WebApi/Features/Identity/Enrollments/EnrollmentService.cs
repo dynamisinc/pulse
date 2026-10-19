@@ -191,6 +191,7 @@ public sealed partial class EnrollmentService
         // (FindReachableAsync), so this reads only that one exercise's current lead (for the audit payload).
         var previousLeadId = await _dbContext.Enrollments
             .IgnoreQueryFilters()
+            .Active()
             .AsNoTracking()
             .Where(e => e.ExerciseId == exercise.Id && e.IsLead)
             .Select(e => (Guid?)e.Id)
@@ -205,6 +206,7 @@ public sealed partial class EnrollmentService
             // org-scope-exempt(TenantChecked): the same caller-reachable exercise as above.
             await _dbContext.Enrollments
                 .IgnoreQueryFilters()
+                .Active()
                 .Where(e => e.ExerciseId == exercise.Id && (e.IsLead || e.Id == enrollment.Id))
                 .ExecuteUpdateAsync(set => set.SetProperty(e => e.IsLead, e => e.Id == enrollment.Id), cancellationToken);
 
@@ -293,6 +295,7 @@ public sealed partial class EnrollmentService
         // scope) and the person inside the exercise's organization; this only asks whether the pair is enrolled.
         var alreadyEnrolled = await _dbContext.Enrollments
             .IgnoreQueryFilters()
+            .Active()
             .AnyAsync(e => e.ExerciseId == exercise.Id && e.PersonId == person.Id, cancellationToken);
         if (alreadyEnrolled)
         {
@@ -392,7 +395,11 @@ public sealed partial class EnrollmentService
     }
 
     /// <summary>
-    /// Removes a STAFF enrollment, revoking the person's live sessions on that exercise in the same unit of work.
+    /// Removes a STAFF enrollment, revoking the person's live sessions on that exercise in the same unit of work. The
+    /// removal is a SOFT delete (XC-010, identity-auth-roles/21): the row keeps its history with
+    /// <see cref="Enrollment.DeletedAt"/> set, every enrollment read excludes it (<see cref="ActiveEnrollments.Active"/>),
+    /// and the filtered unique indexes ignore it, so the same person can be enrolled again. A second revoke of the same
+    /// id is the bare 404 (the revoked row is no longer reachable).
     /// </summary>
     /// <param name="enrollmentId">The target enrollment.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
@@ -415,8 +422,10 @@ public sealed partial class EnrollmentService
         var (enrollment, exercise) = target.Value;
         var now = _timeProvider.GetUtcNow();
 
+        // The lead (if held) is released BEFORE the row is marked revoked: CK_Enrollments_DeletedAt_NotLead refuses a
+        // revoked lead, so the order is load-bearing as well as the policy.
         var leadReleased = ReleaseLeadIfLost(caller, exercise, enrollment, newRole: null, now);
-        _dbContext.Enrollments.Remove(enrollment);
+        enrollment.DeletedAt = now;
         var revoked = await RevokeExerciseSessionsAsync(exercise.Id, [enrollment.PersonId], now, cancellationToken);
         Record(caller, exercise, enrollment, RevokedEventType, RevokedAuditKind, RolePayload(role: null, enrollment.Role), now);
         await _dbContext.SaveChangesAsync(cancellationToken);
@@ -599,15 +608,18 @@ public sealed partial class EnrollmentService
             enrollment = await (
                 // org-scope-exempt(TenantChecked): the row must inner-join an Exercise of the caller's OWN
                 // server-resolved organization, so another customer's enrollment is the same bare 404 as a missing one.
-                from e in _dbContext.Enrollments.IgnoreQueryFilters()
-                join x in _dbContext.Exercises.AsNoTracking().InOrganization(caller.OrganizationId) on e.ExerciseId equals x.Id
+                // NO AsNoTracking anywhere in this query (identity-auth-roles/21): it is a query-level switch in EF Core, so on
+                // the joined Exercises it made the whole query untracked and the org admin's role change, lead release and
+                // soft-delete revoke were silently never saved. Only `e` is projected, so no exercise row is tracked.
+                from e in _dbContext.Enrollments.IgnoreQueryFilters().Active()
+                join x in _dbContext.Exercises.InOrganization(caller.OrganizationId) on e.ExerciseId equals x.Id
                 where e.Id == enrollmentId
                 select e).FirstOrDefaultAsync(cancellationToken);
         }
         else
         {
             // A planner: the central exercise filter confines this to the resolved exercise.
-            enrollment = await _dbContext.Enrollments.FirstOrDefaultAsync(e => e.Id == enrollmentId, cancellationToken);
+            enrollment = await _dbContext.Enrollments.Active().FirstOrDefaultAsync(e => e.Id == enrollmentId, cancellationToken);
         }
 
         if (enrollment is null)

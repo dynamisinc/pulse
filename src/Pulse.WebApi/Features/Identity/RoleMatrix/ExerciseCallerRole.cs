@@ -149,6 +149,7 @@ public sealed class ExerciseCallerRole
         }
 
         return await dbContext.Enrollments
+            .Active()
             .AsNoTracking()
             .AnyAsync(
                 e => e.ExerciseId == exerciseId && e.PersonId == personId && e.IsLead && e.Role == EnrollmentRoles.Controller,
@@ -185,6 +186,7 @@ public sealed class ExerciseCallerRole
         }
 
         var hasLead = await dbContext.Enrollments
+            .Active()
             .AsNoTracking()
             .AnyAsync(
                 e => e.ExerciseId == exerciseId && e.IsLead && e.Role == EnrollmentRoles.Controller,
@@ -273,6 +275,7 @@ public sealed class ExerciseCallerRole
         // The caller's OWN staff enrollment on the resolved exercise, read live. The central exercise filter confines the
         // read to the scope; the explicit ExerciseId predicate keeps that visible at the call site.
         var enrollment = await dbContext.Enrollments
+            .Active()
             .AsNoTracking()
             .Where(EnrollmentRoles.IsStaffEnrollment)
             .Where(e => e.ExerciseId == exerciseId && e.PersonId == staff.StaffUserId)

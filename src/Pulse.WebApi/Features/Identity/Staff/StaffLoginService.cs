@@ -228,6 +228,7 @@ public sealed class StaffLoginService
         // own enrollment in an exercise of the caller's own organization.
         var assignment = await _dbContext.Enrollments
             .IgnoreQueryFilters()
+            .Active()
             .AsNoTracking()
             .Where(EnrollmentRoles.IsStaffEnrollment)
             .FirstOrDefaultAsync(a => a.PersonId == staffUser.Id && a.ExerciseId == exerciseId, cancellationToken);

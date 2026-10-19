@@ -137,7 +137,7 @@ public sealed class JoinLoginService
                 from link in _dbContext.ParticipantLinks
                 where link.TokenHash == tokenHash && link.RevokedAt == null
                 join account in _dbContext.Accounts on link.AccountId equals account.Id
-                join enrollment in _dbContext.Enrollments on account.EnrollmentId equals enrollment.Id
+                join enrollment in _dbContext.Enrollments.Active() on account.EnrollmentId equals enrollment.Id
                 select new { Link = link, Account = account, Enrollment = enrollment })
             .FirstOrDefaultAsync(cancellationToken);
 

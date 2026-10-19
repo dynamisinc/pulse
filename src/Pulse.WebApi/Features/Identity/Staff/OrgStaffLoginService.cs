@@ -572,7 +572,7 @@ public sealed partial class OrgStaffLoginService
             // org-scope-exempt(TenantChecked): own-only (PersonId is the person whose password just verified) and every
             // row must inner-join an Exercise of that person's own organization (InOrganization), so no other
             // customer's exercise can be landed on. Cross-exercise by design — no exercise scope exists yet.
-            from enrollment in _dbContext.Enrollments.IgnoreQueryFilters().AsNoTracking().Where(EnrollmentRoles.IsStaffEnrollment)
+            from enrollment in _dbContext.Enrollments.IgnoreQueryFilters().Active().AsNoTracking().Where(EnrollmentRoles.IsStaffEnrollment)
             where enrollment.PersonId == personId
             join exercise in _dbContext.Exercises.AsNoTracking().InOrganization(organizationId) on enrollment.ExerciseId equals exercise.Id
             select new LandingEnrollment(
