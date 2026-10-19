@@ -410,16 +410,26 @@ export async function restoreGenerationProvider(
 }
 
 /**
- * Turns swamped mode (timeout auto-send) on/off. The 200 body is an autonomy-state
- * DTO, NOT an `EngineSettingsDto`, so it is deliberately discarded: the caller
- * re-reads `GET /engine/settings` for the authoritative state. No client
- * `exerciseId` (COR-001). ON is lead-only (403) and governance-gated (400).
+ * Turns swamped mode on/off. The 200 body is an autonomy-state DTO, NOT an `EngineSettingsDto`;
+ * the caller re-reads `GET /engine/settings` for the authoritative state. This returns only
+ * the body's `swampedMode` (or `null` if unreadable) so the caller can emit telemetry only
+ * when the server's value matches what was requested. No client `exerciseId` (COR-001).
+ * ON is lead-only (403) and governance-gated (400).
  */
 export async function setSwampedMode(
   enabled: boolean,
   ctx: Pick<EngineSettingsActionContext, 'actingHumanId'>,
-): Promise<void> {
-  await api.post<unknown>(SWAMPED_MODE_PATH, { actingHumanId: ctx.actingHumanId, enabled })
+): Promise<boolean | null> {
+  const response = await api.post<unknown>(SWAMPED_MODE_PATH, {
+    actingHumanId: ctx.actingHumanId,
+    enabled,
+  })
+  const body: unknown = response.data
+  if (typeof body === 'object' && body !== null) {
+    const applied = (body as Record<string, unknown>).swampedMode
+    if (typeof applied === 'boolean') return applied
+  }
+  return null
 }
 
 // ---------------------------------------------------------------------------
@@ -473,22 +483,24 @@ export function describeSettingsError(error: unknown): EngineSettingsActionError
   return { status: null, message: 'The engine settings change could not be applied. Try again.' }
 }
 
+/** Fixed operator sentence for the governance refusal (400). */
+export const SWAMPED_NOT_AUTHORIZED_MESSAGE =
+  'Timeout auto-send is not authorized on this environment.'
+
+/** Fixed operator sentence for the lead-gate refusal (403). */
+export const SWAMPED_LEAD_ONLY_MESSAGE = 'Only the lead controller can turn swamped mode on.'
+
 /**
- * Describes a rejected swamped-mode change. A 400 body (governance flag false, or
- * missing fields) is surfaced verbatim; a 403 is the lead gate refusing a raise;
- * everything else reuses {@link describeSettingsError}'s wording for 401/generic.
+ * Describes a rejected swamped-mode change with FIXED operator sentences (never the raw
+ * server body): 400 = governance flag false, 403 = lead gate. 401/other reuse
+ * {@link describeSettingsError}'s wording, with a swamped-specific generic fallback.
  */
 export function describeSwampedModeError(error: unknown): EngineSettingsActionError {
   if (axios.isAxiosError(error) && error.response?.status === 403) {
-    return { status: 403, message: `${LEAD_ONLY_RAISE_REASON}. Swamped mode was not changed.` }
+    return { status: 403, message: SWAMPED_LEAD_ONLY_MESSAGE }
   }
   if (axios.isAxiosError(error) && error.response?.status === 400) {
-    const body: unknown = error.response.data
-    const text = typeof body === 'string' ? body.trim() : ''
-    return {
-      status: 400,
-      message: text.length > 0 ? text : 'The server refused this swamped-mode change.',
-    }
+    return { status: 400, message: SWAMPED_NOT_AUTHORIZED_MESSAGE }
   }
   const described = describeSettingsError(error)
   return described.status === null

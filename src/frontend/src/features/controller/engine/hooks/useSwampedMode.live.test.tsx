@@ -111,8 +111,8 @@ describe('useSwampedMode (live) — lead ON', () => {
     setStubSession({ role: 'controller', isLead: true })
     const { result } = await mount(false)
 
-    let release: (v: void) => void = () => {}
-    postSwamped.mockReturnValue(new Promise<void>(r => { release = r }))
+    let release: (v: boolean | null) => void = () => {}
+    postSwamped.mockReturnValue(new Promise<boolean | null>(r => { release = r }))
     getSettings.mockResolvedValue(dto(true))
     act(() => result.current.setSwampedMode(true))
 
@@ -121,7 +121,7 @@ describe('useSwampedMode (live) — lead ON', () => {
     expect(result.current.swampedMode).toBe(false) // NOT optimistic
     expect(events()).toHaveLength(0)
 
-    await act(async () => release())
+    await act(async () => release(true))
     await waitFor(() => expect(result.current.swampedMode).toBe(true))
     expect(result.current.pending).toBe(false)
     expect(events()).toHaveLength(1)
@@ -131,10 +131,12 @@ describe('useSwampedMode (live) — lead ON', () => {
   it('a 400 (governance flag false) leaves it OFF, shows the message, emits nothing', async () => {
     setStubSession({ role: 'controller', isLead: true })
     const { result } = await mount(false, false)
-    postSwamped.mockRejectedValue(httpError(400, 'Timeout auto-send is not authorized.'))
+    postSwamped.mockRejectedValue(httpError(400, 'raw server text that must not be shown'))
 
     act(() => result.current.setSwampedMode(true))
-    await waitFor(() => expect(result.current.error).toBe('Timeout auto-send is not authorized.'))
+    await waitFor(() => expect(result.current.error).toBe(
+      'Timeout auto-send is not authorized on this environment.',
+    ))
     expect(result.current.swampedMode).toBe(false)
     expect(events()).toHaveLength(0)
   })
@@ -145,7 +147,7 @@ describe('useSwampedMode (live) — lead ON', () => {
     postSwamped.mockRejectedValue(httpError(403, ''))
 
     act(() => result.current.setSwampedMode(true))
-    await waitFor(() => expect(result.current.error).toMatch(/not changed/i))
+    await waitFor(() => expect(result.current.error).toBe('Only the lead controller can turn swamped mode on.'))
     expect(result.current.swampedMode).toBe(false)
     expect(events()).toHaveLength(0)
   })
@@ -175,7 +177,7 @@ describe('useSwampedMode (live) — non-lead', () => {
   it('OFF posts {enabled:false} and emits after the server confirms', async () => {
     setStubSession({ role: 'controller', isLead: false })
     const { result } = await mount(true)
-    postSwamped.mockResolvedValue(undefined)
+    postSwamped.mockResolvedValue(false)
     getSettings.mockResolvedValue(dto(false))
 
     act(() => result.current.setSwampedMode(false))
@@ -198,23 +200,31 @@ describe('useSwampedMode (live) — non-lead', () => {
 })
 
 describe('useSwampedMode (live) — serialization and agreement', () => {
-  it('a toggle while another settings request is in flight is a no-op and reads as pending', async () => {
+  it('a toggle while a settings GET is in flight is QUEUED, not dropped, and runs on settle', async () => {
     setStubSession({ role: 'controller', isLead: true })
     const { result } = await mount(false)
-    getSettings.mockReturnValue(new Promise(() => {})) // a refetch that never lands
+    let landGet: (v: EngineSettingsDto) => void = () => {}
+    getSettings.mockReturnValueOnce(new Promise<EngineSettingsDto>(r => { landGet = r }))
     const settings = renderHook(() => useEngineSettings())
     act(() => settings.result.current.refetch())
     await waitFor(() => expect(result.current.pending).toBe(true))
 
+    postSwamped.mockResolvedValue(true)
+    getSettings.mockResolvedValue(dto(true))
     act(() => result.current.setSwampedMode(true))
-    expect(postSwamped).not.toHaveBeenCalled()
+    expect(postSwamped).not.toHaveBeenCalled() // serialized: one request in flight
+    expect(result.current.pending).toBe(true)
+
+    await act(async () => landGet(dto(false)))
+    await waitFor(() => expect(postSwamped).toHaveBeenCalledWith(true, { actingHumanId: 'person-stub' }))
+    await waitFor(() => expect(result.current.swampedMode).toBe(true))
   })
 
-  it('two consoles agree: after one toggles, both read the same server state', async () => {
+  it('two hook instances in one window share the store (agreement by construction)', async () => {
     setStubSession({ role: 'controller', isLead: true })
     const a = await mount(false)
     const b = renderHook(() => useSwampedMode())
-    postSwamped.mockResolvedValue(undefined)
+    postSwamped.mockResolvedValue(true)
     getSettings.mockResolvedValue(dto(true))
 
     act(() => a.result.current.setSwampedMode(true))
@@ -230,5 +240,93 @@ describe('useSwampedMode (live) — serialization and agreement', () => {
 
     act(() => settings.result.current.refetch())
     await waitFor(() => expect(result.current.swampedMode).toBe(true))
+  })
+})
+
+describe('useSwampedMode (live) — background refresh (CR-001)', () => {
+  it('a background refresh never sets loading or pending, and still applies the result', async () => {
+    setStubSession({ role: 'controller', isLead: true })
+    const { result } = await mount(false)
+    const settings = renderHook(() => useEngineSettings())
+    let land: (v: EngineSettingsDto) => void = () => {}
+    getSettings.mockReturnValueOnce(new Promise<EngineSettingsDto>(r => { land = r }))
+
+    act(() => settings.result.current.refreshInBackground())
+    expect(settings.result.current.loading).toBe(false)
+    expect(result.current.pending).toBe(false)
+
+    await act(async () => land(dto(true)))
+    await waitFor(() => expect(result.current.swampedMode).toBe(true))
+    expect(settings.result.current.loading).toBe(false)
+  })
+
+  it('an OFF confirmed during a background GET still POSTs (queued, runs on settle)', async () => {
+    setStubSession({ role: 'controller', isLead: false })
+    const { result } = await mount(true)
+    const settings = renderHook(() => useEngineSettings())
+    let land: (v: EngineSettingsDto) => void = () => {}
+    getSettings.mockReturnValueOnce(new Promise<EngineSettingsDto>(r => { land = r }))
+    act(() => settings.result.current.refreshInBackground())
+
+    postSwamped.mockResolvedValue(false)
+    getSettings.mockResolvedValue(dto(false))
+    act(() => result.current.setSwampedMode(false))
+    expect(postSwamped).not.toHaveBeenCalled()
+
+    await act(async () => land(dto(true)))
+    await waitFor(() => expect(postSwamped).toHaveBeenCalledWith(false, { actingHumanId: 'person-stub' }))
+    await waitFor(() => expect(result.current.swampedMode).toBe(false))
+  })
+})
+
+describe('useSwampedMode (live) — telemetry only when the 200 body confirms (WR-005)', () => {
+  it('does not emit when the body disagrees with the request or is unreadable', async () => {
+    setStubSession({ role: 'controller', isLead: true })
+    const { result } = await mount(false)
+    getSettings.mockResolvedValue(dto(false))
+
+    postSwamped.mockResolvedValueOnce(false) // asked ON, server says OFF
+    act(() => result.current.setSwampedMode(true))
+    await waitFor(() => expect(postSwamped).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(result.current.pending).toBe(false))
+    expect(events()).toHaveLength(0)
+
+    postSwamped.mockResolvedValueOnce(null) // unreadable body
+    act(() => result.current.setSwampedMode(true))
+    await waitFor(() => expect(postSwamped).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(result.current.pending).toBe(false))
+    expect(events()).toHaveLength(0)
+  })
+})
+
+describe('useSwampedMode (live) — stale messages clear (WR-004)', () => {
+  it('a failed re-read is cleared by the queued background retry', async () => {
+    setStubSession({ role: 'controller', isLead: true })
+    const { result } = await mount(false)
+    postSwamped.mockResolvedValue(true)
+    getSettings.mockRejectedValueOnce(new Error('blip')).mockResolvedValue(dto(true))
+
+    act(() => result.current.setSwampedMode(true))
+    await waitFor(() => expect(result.current.swampedMode).toBe(true))
+    expect(result.current.error).toBeNull()
+  })
+
+  it('a refusal clears once the server swamped state changes', async () => {
+    setStubSession({ role: 'controller', isLead: true })
+    const { result } = await mount(false, false)
+    const settings = renderHook(() => useEngineSettings())
+    postSwamped.mockRejectedValue(httpError(400, 'x'))
+    getSettings.mockResolvedValue(dto(false, false))
+
+    act(() => result.current.setSwampedMode(true))
+    await waitFor(() => expect(result.current.error).not.toBeNull())
+    await waitFor(() => expect(result.current.pending).toBe(false))
+    // The queued re-read saw no change, so the refusal stays.
+    expect(result.current.error).not.toBeNull()
+
+    getSettings.mockResolvedValue(dto(true, true))
+    act(() => settings.result.current.refetch())
+    await waitFor(() => expect(result.current.swampedMode).toBe(true))
+    expect(result.current.error).toBeNull()
   })
 })

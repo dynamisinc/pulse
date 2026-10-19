@@ -642,9 +642,9 @@ Use it only when the lead decides the cell cannot keep up.
 > whose countdown ends is held for you. Turning Swamped mode off always works.
 >
 > Swamped mode is a shared setting for the whole exercise, not just your screen. When the lead turns it on or off,
-> the lead's console shows it as soon as Pulse confirms it, and other controllers' consoles catch up within about
-> 30 seconds, or straight away when they open **ENGINE**. If Pulse refuses the change, the switch stays where it
-> was and the reason is shown beside it.
+> the lead's console shows it as soon as Pulse confirms it. Other controllers' open consoles catch up within about
+> 30 seconds, or straight away when they open **ENGINE** or come back to the console's browser tab. If Pulse
+> refuses the change, the switch stays where it was and the reason is shown beside it.
 
 ### The engine switch (kill switch)
 

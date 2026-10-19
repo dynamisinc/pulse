@@ -52,7 +52,7 @@ function stubSettings(providerCutToFake: boolean, timeoutAutoSendAuthorized?: bo
   } as unknown as ReturnType<typeof useEngineSettings>)
 }
 
-beforeEach(() => stubSettings(false))
+beforeEach(() => stubSettings(false, true))
 
 beforeEach(() => {
   access.canControl = true
@@ -357,10 +357,47 @@ describe('SwampedModeToggle — server-driven pending + refusal', () => {
     expect(err.querySelector('svg')).not.toBeNull()
   })
 
-  it('shows no error region when there is no error', () => {
+  it('keeps an always-mounted, empty status region when there is no error', () => {
     mockedUseSwampedMode.mockReturnValue(stub())
     render(<SwampedModeToggle />)
-    expect(screen.queryByTestId('swamped-mode-error')).not.toBeInTheDocument()
+    const region = screen.getByTestId('swamped-mode-error')
+    expect(region).toHaveAttribute('role', 'status')
+    expect(region).toBeEmptyDOMElement()
+    expect(screen.getByTestId('swamped-mode-enable-toggle')).not.toHaveAttribute('aria-describedby')
+  })
+
+  it('ties the switch to the status region while it holds an error', () => {
+    mockedUseSwampedMode.mockReturnValue(stub({ error: 'Only the lead controller can turn swamped mode on.' }))
+    render(<SwampedModeToggle />)
+    expect(screen.getByTestId('swamped-mode-enable-toggle')).toHaveAttribute(
+      'aria-describedby',
+      'swamped-mode-status',
+    )
+  })
+
+  it('does not claim ACTIVE when swamped is on but auto-send is not authorized (text + icon)', () => {
+    stubSettings(false, false)
+    mockedUseSwampedMode.mockReturnValue(stub({ swampedMode: true }))
+    render(<SwampedModeToggle />)
+    const banner = screen.getByTestId('swamped-mode-active-banner')
+    expect(banner).toHaveTextContent('TIMEOUT AUTO-SEND IS NOT AUTHORIZED')
+    expect(banner).not.toHaveTextContent('TIMEOUT AUTO-SEND IS ACTIVE')
+    expect(banner.querySelector('svg')).not.toBeNull()
+  })
+
+  it('keeps the OFF confirm open while the request is pending (not closed as if done)', () => {
+    mockedUseSwampedMode.mockReturnValue(stub({ swampedMode: true, isLead: false }))
+    const { rerender } = render(<SwampedModeToggle />)
+    fireEvent.click(screen.getByTestId('swamped-mode-turn-off-button'))
+    // Click confirm while still "not pending" would close at once; model a queued change:
+    mockedUseSwampedMode.mockReturnValue(stub({ swampedMode: true, isLead: false, pending: true }))
+    rerender(
+      <ThemeProvider theme={cobraTheme}>
+        <SwampedModeToggle />
+      </ThemeProvider>,
+    )
+    expect(screen.getByTestId('swamped-mode-turn-off-confirm')).toBeDisabled()
+    expect(screen.queryByTestId('swamped-mode-turn-off-button')).not.toBeInTheDocument()
   })
 
   it('disables the non-lead OFF confirm while pending', () => {

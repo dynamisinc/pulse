@@ -188,6 +188,8 @@ import {
   type EngineReviewItem,
   type ReviewQueueEditSlotProps,
 } from '../engine'
+import { effectiveTimeoutAutoSend } from '../engine/models/effectiveTimeoutAutoSend'
+import { useSwampedSettingsPoll } from '../engine/hooks/useSwampedSettingsPoll'
 import type { ReplyTarget } from '@/features/social'
 import {
   SLOT_SPLIT_MIN_WIDTH_PX,
@@ -195,9 +197,6 @@ import {
 } from '../console/consoleLayout'
 import { ConsoleTabletFrame } from '../console/ConsoleTabletFrame'
 import { PaneBadgeContext, usePaneBadgeStore } from '../console/paneBadges'
-
-/** How often a console re-reads engine settings to pick up another controller's swamped change. */
-const SETTINGS_POLL_MS = 30_000
 
 /** The docked review-queue column's fixed width (D5 §6 "336px, sole tenant"). */
 const REVIEW_QUEUE_WIDTH_PX = 336
@@ -391,18 +390,10 @@ export function ControllerConsole(
   // browser drivers must hold too (no phantom auto-send telemetry).
   const providerCutToFake = consoleEngineSettings.settings?.providerCutToFake ?? false
   // Expiry must match the server: auto-send only when the server says swamped mode is on AND
-  // this deployment authorizes it (an absent flag is "not proven", so hold).
-  const swampedMode =
-    serverSwampedMode && consoleEngineSettings.settings?.timeoutAutoSendAuthorized === true
-  // There is no settings push, so another controller's swamped change reaches this console
-  // by polling the existing (serialized, queued, no-op-under-mock) settings refetch.
-  const refetchEngineSettingsForSwamped = consoleEngineSettings.refetch
-  useEffect(() => {
-    const id = window.setInterval(() => {
-      if (document.visibilityState !== 'hidden') refetchEngineSettingsForSwamped()
-    }, SETTINGS_POLL_MS)
-    return () => window.clearInterval(id)
-  }, [refetchEngineSettingsForSwamped])
+  // this deployment authorizes it (one shared rule, also used by the toggle banner).
+  const swampedMode = effectiveTimeoutAutoSend(serverSwampedMode, consoleEngineSettings.settings)
+  // No settings push exists: poll the settings in the BACKGROUND (and on tab-visible).
+  useSwampedSettingsPoll(consoleEngineSettings.refreshInBackground)
   const engineControl = useEngineControl()
   const draftTimerCtx = useMemo(
     () => ({ exerciseId, timeZone, actingHumanId: identity.actingHumanId }),
