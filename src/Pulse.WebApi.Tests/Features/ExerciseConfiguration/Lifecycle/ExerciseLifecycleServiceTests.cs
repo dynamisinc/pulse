@@ -282,7 +282,7 @@ public sealed class ExerciseLifecycleServiceTests
     [RequiresDockerFact]
     public async Task Stage_WithAnOpenBlockingItem_IsRefusedWithTheOpenItems_AndChangesNothing()
     {
-        // No controller, no participant access, no start time: three blocking items open.
+        // No controller, no participant-facing name, no participant access, no start time: four blocking items open.
         var exerciseId = await SeedAsync("build");
 
         var result = await TransitionAsync(exerciseId, "staged");
@@ -290,7 +290,8 @@ public sealed class ExerciseLifecycleServiceTests
         result.Outcome.Should().Be(ExerciseLifecycleOutcome.ReadinessBlocked);
         result.Snapshot.Should().BeNull();
         result.OpenBlocking!.Select(i => i.Id).Should().Equal(
-            ["controller-enrolled", "participant-access", "schedule-set"], "only the OPEN blocking items, in checklist order");
+            ["controller-enrolled", "participant-name", "participant-access", "schedule-set"],
+            "only the OPEN blocking items, in checklist order");
         result.OpenBlocking.Should().OnlyContain(i => i.Status == ReadinessItemStatuses.Open);
         (await ReadStatusAsync(exerciseId)).Should().Be("build", "a refused stage leaves the state untouched");
         (await CountTransitionEventsAsync(exerciseId)).Should().Be(0, "a refused stage emits no transition event");
@@ -307,7 +308,7 @@ public sealed class ExerciseLifecycleServiceTests
 
         var result = await TransitionAsync(exerciseId, "staged");
 
-        result.Outcome.Should().Be(ExerciseLifecycleOutcome.Ok, "participant-name and sign-in-methods are notChecked and never block");
+        result.Outcome.Should().Be(ExerciseLifecycleOutcome.Ok, "sign-in-methods is notChecked and never blocks (participant-name is seeded, so it is ok)");
         (await ReadStatusAsync(exerciseId)).Should().Be("staged");
         (await CountTransitionEventsAsync(exerciseId)).Should().Be(1);
     }

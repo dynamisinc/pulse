@@ -402,7 +402,7 @@ public sealed partial class LinkEmailService
             attempted++;
             // §8.4 (exercise-build-golive/09): the participant-facing name only; when unset the composer's subject falls
             // back to "Your sign-in link". Never facts.Name, the internal name.
-            var outcome = await SendOneAsync(facts.ParticipantName ?? string.Empty, delivery);
+            var outcome = await SendOneAsync(Exercise.NormalizeParticipantName(facts.ParticipantName) ?? string.Empty, delivery);
 
             // XC-004: one event per attempt, one clock read for it, saved now. CancellationToken.None on purpose: the
             // send already happened, so its audit record must be written even if the caller has just gone.

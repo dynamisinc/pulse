@@ -63,6 +63,40 @@ frontend second** — the exact opposite of promotion.
 Left unmanaged the failure is **transient and self-healing** — both workflows complete, so UAT blanks
 only for the window between them — but a tab holding the old bundle stays blank until a hard reload.
 
+#### A3 — participant-facing name + setup-content columns (exercise-build-golive/09, PR-4b)
+
+This change runs the rule above in **reverse** (backend first), so it ships as two PRs. PR-4a
+(`feature/build-09a-null-name-tolerance`) is frontend-only: the resolver accepts `exerciseName: null`, the
+card-sheet guard accepts a null name, and staff labels come from the staff assignments rather than the scope.
+PR-4b (`feature/build-a3-setup-content`) is a superset that adds the `A3SetupContentParticipantName`
+migration, the backend scope projection (`exerciseName` = `Exercises.ParticipantName`, never the internal
+`Name`), the participant NavRail name and the settings field.
+
+1. **Precondition: PR-4a is deployed to UAT.** The serving bundle must tolerate a null `exerciseName`
+   before any backend emits one; the old guard rejects null and blanks the participant world and staff shell.
+2. **PR-4b deploys backend first, then frontend.** The new NavRail renders `exerciseName`. Against an old
+   backend that value is the internal name, which can leak the scenario (#376). When the merge fires both
+   workflows, **cancel the *Deploy Frontend* run**, let *Deploy Backend* (with the migration) finish, then
+   re-dispatch *Deploy Frontend*. Cancelling the frontend run is always safe; it changes no data.
+3. **Rollback: frontend first, then backend/schema.** Roll the bundle back first so nothing renders the
+   name, then the backend. Down drops the three columns. Planner-entered participant names and the
+   setup/conduct split are lost; a replayed Up re-derives them from `WorldName` and the lifecycle telemetry.
+4. **After deploy, reload open staff consoles.** The settings PUT is a full replace. An old tab's PUT omits
+   `participantName` and clears it. That fails safe (no name shows, and the `participant-name` readiness item
+   blocks staging again), but the planner must re-enter the name.
+5. **Migration ordering.** Merge #655 (`20261019171234`) and #665 (`20261019200000`) first. Then re-scaffold
+   this migration so its Designer and the model snapshot carry all three: `dotnet ef migrations remove`, then
+   `dotnet ef migrations add` with the same id `20261019230000_A3SetupContentParticipantName`, and re-apply
+   the hand-written Up/Down (the `EXEC(N'…')`-wrapped backfills and the remarks). Re-run
+   `IdempotentMigrationScriptTests` and `A3SetupContentParticipantNameMigrationTests`.
+6. **Backfill cost and locks.** The column adds are metadata-only (a nullable column, and a `bit NOT NULL
+   DEFAULT 0`). The `IsSetupContent` backfill aggregates the lifecycle events **once per exercise**: one scan
+   of `TelemetryEvents` (there is no `EventType` index, so this is the largest read), then one join against
+   `Posts` and one against `Follows`. At UAT size this takes seconds. The deploy script runs in one
+   transaction, so the schema locks on `Exercises`, `Posts` and `Follows` are held until it commits. Reads and
+   writes to those tables wait for that time; expect a short stall in the window, not errors. Run it in the
+   agreed UAT window, not during an exercise.
+
 ## Easy login (participant sign-in)
 
 Decided by Tom on 2026-10-14 (#486, Tier-2 items 3, 4 and 7):

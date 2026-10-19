@@ -17,8 +17,9 @@ You will get a personal sign-in card or an email from exercise staff.
 Pulse runs in your web browser on a phone, tablet or computer. There is no app to download, but you
 can add it to your phone's home screen (see *On a phone or tablet*).
 
-The exercise may show its name on the sign-in page and beside the logo. That is the name the exercise
-team chose for you. If no name is shown, you are still in the right place.
+The exercise may show its name on the sign-in page and, on a tablet or computer, under the logo in the
+social app's side menu. That is the name the exercise team chose for you. If no name is shown, you are
+still in the right place.
 
 **Your link is personal.** Do not share it or post it. Anyone who has it can sign in as you.
 

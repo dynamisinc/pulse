@@ -93,4 +93,4 @@ public sealed record ExerciseFacts(
     string Status,
     Guid OrganizationId,
     DateTimeOffset? StoredScenarioTime,
-    string? ParticipantName = null);
+    string? ParticipantName);

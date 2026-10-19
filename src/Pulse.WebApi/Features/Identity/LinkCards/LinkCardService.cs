@@ -268,8 +268,9 @@ public sealed class LinkCardService
 
         return LinkCardResult.Ok(new RosterCardsDto
         {
-            // §8.4 (exercise-build-golive/09): the participant-facing name only, null when unset; never facts.Name.
-            ExerciseName = facts.ParticipantName,
+            // §8.4 (exercise-build-golive/09): the participant-facing name only, null when unset or whitespace (trimmed
+            // otherwise); never facts.Name.
+            ExerciseName = Exercise.NormalizeParticipantName(facts.ParticipantName),
             Cards = cards,
             Skipped = skipped,
         });

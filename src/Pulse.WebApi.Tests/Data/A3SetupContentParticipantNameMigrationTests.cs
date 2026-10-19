@@ -186,6 +186,31 @@ public sealed class A3SetupContentParticipantNameMigrationTests
     }
 
     [RequiresDockerFact]
+    public async Task Up_BackfillsParticipantName_BlankOrWhitespaceWorldNameIsNull_AndTheValueIsTrimmedWithinEighty()
+    {
+        await using var db = await MigrationDatabase.CreateAsync(_fixture);
+        await db.MigrateToAsync(PreviousMigration);
+        var empty = await db.InsertExerciseAsync("live", worldName: string.Empty);
+        var whitespace = await db.InsertExerciseAsync("live", worldName: "   ");
+        var padded = await db.InsertExerciseAsync("live", worldName: "  Metro Atlanta  ");
+
+        // Leading spaces count against nothing (trimmed before the cut); a space landing at the 80th character is
+        // re-trimmed after it, so the stored value never ends in a space.
+        var cutOnSpace = await db.InsertExerciseAsync("live", worldName: "   " + new string('w', 79) + " tail");
+
+        await db.MigrateToAsync(MigrationUnderTest);
+
+        (await db.ScalarAsync<string?>($"SELECT [ParticipantName] FROM [Exercises] WHERE [Id] = '{empty}'"))
+            .Should().BeNull("an empty WorldName is no participant name");
+        (await db.ScalarAsync<string?>($"SELECT [ParticipantName] FROM [Exercises] WHERE [Id] = '{whitespace}'"))
+            .Should().BeNull("a whitespace-only WorldName is no participant name");
+        (await db.ScalarAsync<string>($"SELECT [ParticipantName] FROM [Exercises] WHERE [Id] = '{padded}'"))
+            .Should().Be("Metro Atlanta", "the backfilled name is trimmed");
+        (await db.ScalarAsync<string>($"SELECT [ParticipantName] FROM [Exercises] WHERE [Id] = '{cutOnSpace}'"))
+            .Should().Be(new string('w', 79), "trimmed before the cut to 80 and re-trimmed after it");
+    }
+
+    [RequiresDockerFact]
     public async Task Down_DropsTheThreeColumns_AndAReplayedUpConverges()
     {
         await using var db = await MigrationDatabase.CreateAsync(_fixture);

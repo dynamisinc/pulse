@@ -311,4 +311,14 @@ public sealed class Exercise : IOrganizationOwned
     /// settings PUT (sanitized, at most <see cref="MaxParticipantNameLength"/> characters).
     /// </summary>
     public string? ParticipantName { get; set; }
+
+    /// <summary>
+    /// The wire form of a participant-facing name (<see cref="ParticipantName"/>): <c>null</c> when the value is null,
+    /// empty or whitespace, otherwise the value trimmed. Every participant-facing projection of the name (the scope
+    /// projection, the printed card sheet) goes through this, so a blank stored value never renders as an empty label.
+    /// </summary>
+    /// <param name="participantName">The stored participant-facing name.</param>
+    /// <returns>The trimmed name, or <c>null</c> when there is none.</returns>
+    public static string? NormalizeParticipantName(string? participantName) =>
+        string.IsNullOrWhiteSpace(participantName) ? null : participantName.Trim();
 }

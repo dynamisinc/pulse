@@ -132,6 +132,26 @@ public class ExerciseScopeDtoTests
         json.Should().NotContain("HURREX", "the internal name never reaches the participant-facing scope");
     }
 
+    /// <summary>
+    /// exercise-build-golive/09 (Tier-2 review M-4): the wire name is normalized — a blank or whitespace-only stored
+    /// participant name is <c>null</c> (never an empty label, never the internal name), and a padded one is trimmed.
+    /// </summary>
+    [Theory]
+    [InlineData("", null)]
+    [InlineData("   ", null)]
+    [InlineData("\t \n", null)]
+    [InlineData("  Coastal Cascade Exercise  ", "Coastal Cascade Exercise")]
+    public void ExerciseName_IsNullWhenBlankOrWhitespace_AndTrimmedOtherwise(string stored, string? expected)
+    {
+        var exercise = NewExercise();
+        exercise.ParticipantName = stored;
+
+        var dto = ExerciseScopeDto.FromExercise(exercise);
+
+        dto.ExerciseName.Should().Be(expected, "the participant-facing name is null when blank and trimmed otherwise");
+        dto.ExerciseName.Should().NotBe(exercise.Name, "a blank participant name never falls back to the internal name");
+    }
+
     [Fact]
     public void FromExercise_DoesNotLeakStaffOnlyOrHostFields()
     {

@@ -16,6 +16,7 @@ using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.Identity.EasyLogin;
 using Pulse.WebApi.Features.Identity.LinkCards;
 using Pulse.WebApi.Tests.Data;
+using Pulse.WebApi.Tests.Features.ExerciseConfiguration.Lifecycle;
 
 /// <summary>
 /// easy-login/04: <see cref="LinkCardService"/> against real SQL. A participant whose account is enabled, whose link
@@ -33,6 +34,26 @@ public sealed class LinkCardServiceTests
     private readonly LinkCardTestWorld _world;
 
     public LinkCardServiceTests(MsSqlContainerFixture fixture) => _world = new LinkCardTestWorld(fixture);
+
+    /// <summary>
+    /// exercise-build-golive/09 (Tier-2 review M-4): the sheet header is normalized like the scope projection — a blank
+    /// or whitespace-only stored participant name is <c>null</c> (the sheet omits the line), a padded one is trimmed.
+    /// </summary>
+    [RequiresDockerTheory]
+    [InlineData("", null)]
+    [InlineData("   ", null)]
+    [InlineData("  Coastal Surge 2026  ", "Coastal Surge 2026")]
+    public async Task TheSheetsExerciseName_IsNullWhenBlankOrWhitespace_AndTrimmedOtherwise(string stored, string? expected)
+    {
+        var exercise = await _world.SeedExerciseAsync(name: "HURREX internal", participantName: stored);
+        var staff = await _world.SeedStaffAsync((exercise, "controller"));
+        await _world.SeedParticipantAsync(exercise, "Priya Raman");
+
+        var result = await _world.GenerateAsync(exercise, staff);
+
+        result.Outcome.Should().Be(LinkCardOutcome.Ok);
+        result.Sheet!.ExerciseName.Should().Be(expected, "the card header is null when blank and trimmed otherwise");
+    }
 
     [RequiresDockerFact]
     public async Task EligibleParticipants_GetACardEach_WithEveryField_OrderedByName()

@@ -59,7 +59,8 @@ public sealed class ExerciseScopeDto
 
     /// <summary>
     /// Projects an <see cref="Exercise"/> to the frozen wire shape. <see cref="ExerciseName"/> is the participant-facing
-    /// name only (no fallback to the internal name). <see cref="TimeZone"/> and
+    /// name only (no fallback to the internal name), <c>null</c> when null/whitespace and trimmed otherwise
+    /// (<see cref="Exercise.NormalizeParticipantName"/>). <see cref="TimeZone"/> and
     /// <see cref="Status"/> read the exercise's stored config verbatim (required, non-null by their defaults).
     /// </summary>
     /// <param name="exercise">The resolved exercise to project.</param>
@@ -71,7 +72,7 @@ public sealed class ExerciseScopeDto
         return new ExerciseScopeDto
         {
             ExerciseId = exercise.Id.ToString(),
-            ExerciseName = exercise.ParticipantName,
+            ExerciseName = Exercise.NormalizeParticipantName(exercise.ParticipantName),
             TimeZone = exercise.TimeZone,
             Status = exercise.Status,
         };
