@@ -51,4 +51,25 @@ public static class OrganizationSlug
 
         return builder.Length == 0 ? Fallback : builder.ToString();
     }
+
+    /// <summary>
+    /// The <paramref name="ordinal"/>-th collision candidate for <paramref name="baseSlug"/> — the SAME rule the
+    /// <c>AdminIdentityFoundation</c> backfill applies in T-SQL (<c>LEFT(@base, 63 - LEN(@suffix)) + @suffix</c>, with
+    /// <c>@suffix = '-' + n</c> for n = 2, 3, …), so a collision-suffixed slug minted here looks exactly like a
+    /// backfilled one and still fits <see cref="Organization.MaxSlugLength"/>.
+    /// </summary>
+    /// <param name="baseSlug">The un-suffixed slug (from <see cref="FromName"/>).</param>
+    /// <param name="ordinal">The suffix number (2 for the first collision).</param>
+    /// <returns>The suffixed slug.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="baseSlug"/> is <c>null</c>.</exception>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="ordinal"/> is below 2.</exception>
+    public static string WithCollisionSuffix(string baseSlug, int ordinal)
+    {
+        ArgumentNullException.ThrowIfNull(baseSlug);
+        ArgumentOutOfRangeException.ThrowIfLessThan(ordinal, 2);
+
+        var suffix = "-" + ordinal.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        var keep = Math.Min(baseSlug.Length, Organization.MaxSlugLength - suffix.Length);
+        return string.Concat(baseSlug.AsSpan(0, keep), suffix);
+    }
 }

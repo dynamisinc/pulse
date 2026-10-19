@@ -2,12 +2,14 @@ namespace Pulse.WebApi.Tests.Features.Realtime;
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Pulse.WebApi.Data.Entities;
@@ -257,6 +259,148 @@ public sealed class ExerciseRealtimeHubStaffGroupTests
         reconnected.Should().Equal(
             new[] { $"exercise:{exerciseB}", $"exercise:{exerciseB}:staff" },
             "the reconnect is scoped from the session row the switch persisted");
+    }
+
+    [RequiresDockerFact]
+    public async Task StaffConnection_RegisteredAfterTheRevokeTookItsSession_IsCutByTheReCheck()
+    {
+        // #602 L-2: the connect-time check passes, THEN the session is revoked and the revoker's Take runs (finding
+        // nothing yet), THEN the hub registers the connection. Without the post-registration re-check the connection
+        // would survive the revocation in both staff groups. The revocation is injected deterministically at the last
+        // group join — strictly after verification and strictly before registration.
+        var exerciseA = await SeedExerciseAsync();
+        var staff = await SeedStaffAsync(assignedTo: [exerciseA]);
+        var registry = new SessionConnectionRegistry();
+        var revoker = new SessionConnectionRevoker(registry);
+
+        var outcome = await ConnectWithRaceAsync(
+            hostResolvedExerciseId: null,
+            staff.Principal,
+            registry,
+            revokeOnJoining: $"exercise:{exerciseA}:staff",
+            revoke: () => RevokeAsync(staff.SessionId, revoker));
+
+        outcome.Aborted.Should().BeTrue("a connection whose session was revoked before it registered must be cut");
+        outcome.Removed.Should().BeEquivalentTo(
+            new[] { $"exercise:{exerciseA}:staff", $"exercise:{exerciseA}" },
+            "it is taken back out of every group it joined, so not one more broadcast reaches it");
+        registry.Take(staff.SessionId).Should().BeEmpty("the cut connection is no longer registered under the revoked session");
+    }
+
+    [RequiresDockerFact]
+    public async Task ParticipantConnection_RegisteredAfterTheRevokeTookItsSession_IsCutByTheReCheck()
+    {
+        // #602 L-2, the host-bound (participant) path: same race, same guarantee.
+        var exerciseA = await SeedExerciseAsync();
+        var session = TestSessions.NewSession($"participant-race-{Guid.NewGuid():N}", exerciseA);
+        await using (var seed = _fixture.CreateContext())
+        {
+            seed.Sessions.Add(session);
+            await seed.SaveChangesAsync();
+        }
+
+        var principal = SessionPrincipal.Create(new AuthenticatedSession
+        {
+            SessionId = session.Id,
+            ExerciseId = exerciseA,
+            Kind = "participant",
+            PrincipalId = session.PrincipalId,
+            ActingHumanId = session.ActingHumanId,
+        });
+        var registry = new SessionConnectionRegistry();
+        var revoker = new SessionConnectionRevoker(registry);
+
+        var outcome = await ConnectWithRaceAsync(
+            exerciseA,
+            principal,
+            registry,
+            revokeOnJoining: $"exercise:{exerciseA}",
+            revoke: () => RevokeAsync(session.Id, revoker));
+
+        outcome.Aborted.Should().BeTrue();
+        outcome.Removed.Should().Equal($"exercise:{exerciseA}");
+        registry.Take(session.Id).Should().BeEmpty();
+    }
+
+    [RequiresDockerFact]
+    public async Task StaffConnection_WhoseSessionStaysLive_RemainsRegistered_AndIsCutByALaterRevoke()
+    {
+        // The control: no revocation in the window — the re-check keeps the connection, and a later revoke's Take finds it.
+        var exerciseA = await SeedExerciseAsync();
+        var staff = await SeedStaffAsync(assignedTo: [exerciseA]);
+        var registry = new SessionConnectionRegistry();
+
+        var outcome = await ConnectWithRaceAsync(null, staff.Principal, registry, revokeOnJoining: null, revoke: null);
+
+        outcome.Aborted.Should().BeFalse();
+        outcome.Removed.Should().BeEmpty();
+        registry.Take(staff.SessionId).Should().ContainSingle("a live connection stays registered for a later revoke to cut");
+    }
+
+    private async Task RevokeAsync(Guid sessionId, SessionConnectionRevoker revoker)
+    {
+        // As the grant-revoke rule does: commit the revocation, THEN cut the registered connections.
+        await using (var context = _fixture.CreateContext())
+        {
+            await context.Sessions
+                .Where(s => s.Id == sessionId)
+                .ExecuteUpdateAsync(set => set.SetProperty(s => s.RevokedAt, DateTimeOffset.UtcNow));
+        }
+
+        await revoker.RevokeAsync([sessionId]);
+    }
+
+    /// <summary>
+    /// Runs <c>OnConnectedAsync</c> with a registry, running <paramref name="revoke"/> when the connection joins
+    /// <paramref name="revokeOnJoining"/> (i.e. after verification, before registration). Returns whether the hub aborted
+    /// the connection and the groups it was removed from.
+    /// </summary>
+    private async Task<(bool Aborted, IReadOnlyList<string> Removed)> ConnectWithRaceAsync(
+        Guid? hostResolvedExerciseId,
+        System.Security.Claims.ClaimsPrincipal principal,
+        SessionConnectionRegistry registry,
+        string? revokeOnJoining,
+        Func<Task>? revoke)
+    {
+        var httpContext = new DefaultHttpContext { User = principal };
+        if (hostResolvedExerciseId is { } host)
+        {
+            httpContext.SetHostResolvedExerciseId(host);
+        }
+
+        var httpContextFeature = new Mock<SignalRHttpContextFeature>();
+        httpContextFeature.SetupGet(f => f.HttpContext).Returns(httpContext);
+        var features = new FeatureCollection();
+        features.Set<SignalRHttpContextFeature>(httpContextFeature.Object);
+
+        var aborted = false;
+        var callerContext = new Mock<HubCallerContext>();
+        callerContext.SetupGet(c => c.ConnectionId).Returns(ConnectionId);
+        callerContext.SetupGet(c => c.Features).Returns(features);
+        callerContext.SetupGet(c => c.Items).Returns(new Dictionary<object, object?>());
+        callerContext.Setup(c => c.Abort()).Callback(() => aborted = true);
+
+        var removed = new List<string>();
+        var groups = new Mock<IGroupManager>();
+        groups
+            .Setup(g => g.AddToGroupAsync(ConnectionId, It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns<string, string, CancellationToken>((_, group, _) =>
+                revoke is not null && string.Equals(group, revokeOnJoining, StringComparison.Ordinal) ? revoke() : Task.CompletedTask);
+        groups
+            .Setup(g => g.RemoveFromGroupAsync(ConnectionId, It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Callback<string, string, CancellationToken>((_, group, _) => removed.Add(group))
+            .Returns(Task.CompletedTask);
+
+        await using var dbContext = _fixture.CreateContext();
+        var hub = new ExerciseRealtimeHub(dbContext, NullLogger<ExerciseRealtimeHub>.Instance, registry)
+        {
+            Context = callerContext.Object,
+            Groups = groups.Object,
+        };
+
+        await hub.OnConnectedAsync();
+
+        return (aborted, removed);
     }
 
     /// <summary>Runs <c>OnConnectedAsync</c> for one connection and returns the groups it joined, in order.</summary>

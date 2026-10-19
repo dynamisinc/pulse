@@ -1,9 +1,9 @@
 namespace Pulse.WebApi.Features.Identity.Staff;
 
+using System.Data.Common;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
-using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Pulse.WebApi.Data;
@@ -27,9 +27,24 @@ using Pulse.WebApi.Features.Identity.Sessions;
 /// </para>
 /// <para>
 /// <b>Lockout attribution (slugless).</b> Up to <see cref="MaxCandidates"/> people share the email across
-/// organizations. Locked-out (or disabled) candidates are skipped without verification. The failure counter goes up
-/// only when the attempt fails AS A WHOLE (no candidate verified) — then each tried candidate gets one failure; a
-/// success in one org never counts against the same email's person in another.
+/// organizations. Locked-out (or disabled) candidates are never verified for real (so they neither count a failure nor
+/// unlock). The failure counter goes up only when the attempt fails AS A WHOLE (no candidate verified) — then each tried
+/// candidate gets one failure, recorded atomically (<see cref="StaffSignInLockout.RecordFailureAsync"/>); a success in
+/// one org never counts against the same email's person in another.
+/// </para>
+/// <para>
+/// <b>Fixed slow-hash work (#602 M-2 / M-5).</b> Every sign-in attempt that passes body validation performs EXACTLY
+/// <see cref="SlowVerificationsPerAttempt"/> PBKDF2 verifications: the real ones the provider performs (one per tried
+/// candidate with a Pulse password), padded with dummy ones (<see cref="StaffPasswordVerifier.PadTo"/>). So an unknown
+/// slug, an unknown email, an allowlist-only staffer, a locked candidate, one or five candidates, success and failure all
+/// cost the same KDF work — the count is never an existence, lock-state or candidate-count oracle.
+/// </para>
+/// <para>
+/// <b>The org choice (#602 L-3).</b> A choice is redeemable only from the IP hash it was created from (a mismatch is the
+/// uniform refusal and leaves the choice unconsumed), and spent choices are purged opportunistically, in a bounded batch,
+/// whenever a choice is created or redeemed: every EXPIRED choice — which is every consumed one too, at most
+/// <see cref="ChoiceLifetime"/> after it was issued (a consumed choice is kept until then, so a redemption in flight and
+/// the audit trail still see it).
 /// </para>
 /// <para>
 /// <b>Uniform 401.</b> Every refusal (unknown slug, unknown email, wrong password, locked out, no grant, a foreign or
@@ -59,6 +74,15 @@ public sealed partial class OrgStaffLoginService
     /// <summary>The audit outcome of a refused sign-in.</summary>
     public const string RefusedOutcome = "refused";
 
+    /// <summary>
+    /// The fixed number of slow (PBKDF2) verifications every validated sign-in attempt performs (#602 M-2 / M-5): the most
+    /// any attempt can need — one per candidate, at most <see cref="MaxCandidates"/>.
+    /// </summary>
+    public const int SlowVerificationsPerAttempt = MaxCandidates;
+
+    /// <summary>The most expired (incl. expired consumed) choices one opportunistic purge removes (#602 L-3).</summary>
+    public const int ChoicePurgeBatchSize = 100;
+
     /// <summary>The longest accepted choice token (the issued token is 64 hex characters).</summary>
     public const int MaxChoiceTokenLength = 256;
 
@@ -69,33 +93,37 @@ public sealed partial class OrgStaffLoginService
     private const int MaxPasswordLength = 1024;
     private const string SuccessTelemetryPayload = "{\"outcome\":\"success\"}";
 
-    /// <summary>A throwaway hash verified when no candidate exists, so an unknown email costs the same PBKDF2 work.</summary>
-    private static readonly Lazy<string> DummyHash = new(() =>
-        new PasswordHasher<Person>().HashPassword(new Person { DisplayName = string.Empty }, Guid.NewGuid().ToString("N")));
-
     private readonly PulseDbContext _dbContext;
     private readonly IIdentityProvider _identityProvider;
+    private readonly StaffPasswordVerifier _passwordVerifier;
     private readonly ISessionIssuer _sessionIssuer;
     private readonly ILogger<OrgStaffLoginService> _logger;
 
     /// <summary>Creates the org sign-in over its collaborators.</summary>
     /// <param name="dbContext">The persistence context (people, choices, audit, telemetry).</param>
     /// <param name="identityProvider">The chained staff provider (Pulse password, then the Dynamis allowlist).</param>
+    /// <param name="passwordVerifier">
+    /// The request's counted slow-hash seam — the SAME instance the provider verifies through — used to pad every attempt
+    /// to <see cref="SlowVerificationsPerAttempt"/>.
+    /// </param>
     /// <param name="sessionIssuer">The session-issuance seam.</param>
     /// <param name="logger">The structured log the no-resolvable-org attempts go to (never secrets).</param>
     public OrgStaffLoginService(
         PulseDbContext dbContext,
         IIdentityProvider identityProvider,
+        StaffPasswordVerifier passwordVerifier,
         ISessionIssuer sessionIssuer,
         ILogger<OrgStaffLoginService> logger)
     {
         ArgumentNullException.ThrowIfNull(dbContext);
         ArgumentNullException.ThrowIfNull(identityProvider);
+        ArgumentNullException.ThrowIfNull(passwordVerifier);
         ArgumentNullException.ThrowIfNull(sessionIssuer);
         ArgumentNullException.ThrowIfNull(logger);
 
         _dbContext = dbContext;
         _identityProvider = identityProvider;
+        _passwordVerifier = passwordVerifier;
         _sessionIssuer = sessionIssuer;
         _logger = logger;
     }
@@ -145,19 +173,41 @@ public sealed partial class OrgStaffLoginService
         var now = DateTimeOffset.UtcNow;
         var email = PulsePasswordIdentityProvider.NormalizeEmail(handle);
 
-        return slug is null
+        // #602 M-2 / M-5: whatever path the attempt takes, it ends having performed exactly SlowVerificationsPerAttempt
+        // PBKDF2 verifications (the provider's real ones, padded with dummies here).
+        var slowVerificationsTarget = _passwordVerifier.SlowVerifications + SlowVerificationsPerAttempt;
+        var result = slug is null
             ? await LoginWithoutSlugAsync(handle, email, request.Password, remoteIp, now, cancellationToken)
             : await LoginWithSlugAsync(handle, email, request.Password, slug, now, cancellationToken);
+
+        _passwordVerifier.PadTo(slowVerificationsTarget, request.Password);
+        return result;
     }
+
+    /// <summary>
+    /// The hash of a caller IP stored on (and compared against) a <see cref="LoginChoice"/>: SHA-256 of <c>ip:</c> plus
+    /// the forwarded-headers-resolved remote address (<c>unknown</c> when absent). Never the raw address.
+    /// </summary>
+    /// <param name="remoteIp">The caller's IP.</param>
+    /// <returns>The hex hash.</returns>
+    public static string HashChoiceIp(string? remoteIp) =>
+        SessionTokens.Hash("ip:" + (string.IsNullOrEmpty(remoteIp) ? "unknown" : remoteIp));
 
     /// <summary>
     /// Redeems an org choice: mints the session for the chosen candidate organization, consuming the WHOLE choice in
     /// one statement guarded by <c>ConsumedAt IS NULL</c>. Changes no credential.
     /// </summary>
     /// <param name="request">The choice token and the chosen slug.</param>
+    /// <param name="remoteIp">
+    /// The caller's IP (forwarded-headers resolved, as at creation). The choice redeems only from the IP hash it was created
+    /// from (#602 L-3); a mismatch is the uniform refusal and leaves the choice unconsumed.
+    /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>A session, a validation failure (400), or the uniform refusal (401).</returns>
-    public async Task<OrgStaffLoginResult> ChooseAsync(StaffLoginChooseRequest request, CancellationToken cancellationToken = default)
+    public async Task<OrgStaffLoginResult> ChooseAsync(
+        StaffLoginChooseRequest request,
+        string? remoteIp,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
 
@@ -175,13 +225,21 @@ public sealed partial class OrgStaffLoginService
 
         var now = DateTimeOffset.UtcNow;
         var tokenHash = SessionTokens.Hash(token);
+        await PurgeSpentChoicesAsync(now, cancellationToken);
 
         // LoginChoice is an unscoped resolution root, looked up by its token hash.
         var choice = await _dbContext.LoginChoices
             .AsNoTracking()
             .FirstOrDefaultAsync(c => c.TokenHash == tokenHash, cancellationToken);
 
-        if (choice is null || choice.ConsumedAt is not null || choice.ExpiresAt <= now)
+        // #602 L-3: a choice presented from another IP than the one it was created from is the SAME uniform refusal as an
+        // unknown token (no oracle), and is left unconsumed.
+        if (choice is null
+            || choice.ConsumedAt is not null
+            || choice.ExpiresAt <= now
+            || !CryptographicOperations.FixedTimeEquals(
+                Encoding.UTF8.GetBytes(choice.CreatedFromIpHash),
+                Encoding.UTF8.GetBytes(HashChoiceIp(remoteIp))))
         {
             LogChoiceRefused();
             return OrgStaffLoginResult.Rejected();
@@ -291,7 +349,6 @@ public sealed partial class OrgStaffLoginService
         var organization = await FindOrganizationAsync(slug, cancellationToken);
         if (organization is null)
         {
-            BurnVerification(password);
             LogUnresolved(handle);
             return OrgStaffLoginResult.Rejected();
         }
@@ -305,7 +362,8 @@ public sealed partial class OrgStaffLoginService
 
         if (candidate is not null && StaffSignInLockout.IsBlocked(candidate, now))
         {
-            // Locked out (or disabled): skipped without verification.
+            // Locked out (or disabled): never verified for real (no failure counted, no unlock); the attempt's padding
+            // still spends the fixed PBKDF2 work (#602 M-5).
             AddAudit(organization.Id, SignInAuditKind, RefusedOutcome, candidate.Id, "{\"reason\":\"locked\"}", now);
             await _dbContext.SaveChangesAsync(cancellationToken);
             return OrgStaffLoginResult.Rejected();
@@ -320,7 +378,7 @@ public sealed partial class OrgStaffLoginService
         {
             if (candidate is not null)
             {
-                StaffSignInLockout.RecordFailure(candidate, now);
+                await StaffSignInLockout.RecordFailureAsync(_dbContext, candidate, now, cancellationToken);
             }
 
             AddAudit(organization.Id, SignInAuditKind, RefusedOutcome, candidate?.Id, "{\"reason\":\"credentials\"}", now);
@@ -376,7 +434,7 @@ public sealed partial class OrgStaffLoginService
         {
             if (StaffSignInLockout.IsBlocked(candidate, now))
             {
-                continue; // locked out / disabled: skipped WITHOUT verification
+                continue; // locked out / disabled: never verified for real (the attempt's padding spends its PBKDF2)
             }
 
             tried.Add(candidate);
@@ -395,7 +453,7 @@ public sealed partial class OrgStaffLoginService
                 var wasTried = tried.Contains(person);
                 if (wasTried)
                 {
-                    StaffSignInLockout.RecordFailure(person, now);
+                    await StaffSignInLockout.RecordFailureAsync(_dbContext, person, now, cancellationToken);
                 }
 
                 AddAudit(
@@ -424,13 +482,15 @@ public sealed partial class OrgStaffLoginService
             StaffSignInLockout.RecordSuccess(person);
         }
 
+        await PurgeSpentChoicesAsync(now, cancellationToken);
+
         var rawToken = SessionTokens.Generate();
         var choice = new LoginChoice
         {
             Id = Guid.NewGuid(),
             TokenHash = SessionTokens.Hash(rawToken),
             ExpiresAt = now + ChoiceLifetime,
-            CreatedFromIpHash = SessionTokens.Hash("ip:" + (string.IsNullOrEmpty(remoteIp) ? "unknown" : remoteIp)),
+            CreatedFromIpHash = HashChoiceIp(remoteIp),
         };
         _dbContext.LoginChoices.Add(choice);
         foreach (var (person, _) in verified)
@@ -468,8 +528,7 @@ public sealed partial class OrgStaffLoginService
         DateTimeOffset now,
         CancellationToken cancellationToken)
     {
-        BurnVerification(password);
-
+        // No Pulse password is verified on this path; the caller's padding spends the attempt's fixed PBKDF2 work.
         var staffUser = await VerifyAsync(handle, password, organizationId: null, cancellationToken);
         if (staffUser is null)
         {
@@ -645,9 +704,44 @@ public sealed partial class OrgStaffLoginService
             OccurredAt = now,
         });
 
-    /// <summary>Spends one PBKDF2 verification so an attempt with no Pulse-password candidate is not measurably faster.</summary>
-    private static void BurnVerification(string password) =>
-        _ = new PasswordHasher<Person>().VerifyHashedPassword(new Person { DisplayName = string.Empty }, DummyHash.Value, password);
+    /// <summary>
+    /// Opportunistically deletes up to <see cref="ChoicePurgeBatchSize"/> EXPIRED <see cref="LoginChoice"/>s — consumed or
+    /// not; a consumed choice expires at most <see cref="ChoiceLifetime"/> after issue — and their candidates (#602 L-3).
+    /// Best-effort: a failure here is logged and never fails the sign-in. Not observable — a purged choice is refused
+    /// exactly as the expired one already was.
+    /// </summary>
+    private async Task PurgeSpentChoicesAsync(DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        try
+        {
+            // LoginChoice / LoginChoiceCandidate are unscoped resolution roots (no tenant on the choice itself); this
+            // deletes only rows no request can redeem any more.
+            var spent = await _dbContext.LoginChoices
+                .AsNoTracking()
+                .Where(c => c.ExpiresAt <= now)
+                .OrderBy(c => c.ExpiresAt)
+                .Select(c => c.Id)
+                .Take(ChoicePurgeBatchSize)
+                .ToListAsync(cancellationToken);
+
+            if (spent.Count == 0)
+            {
+                return;
+            }
+
+            // Candidates first: the candidate → choice foreign key is Restrict.
+            await _dbContext.LoginChoiceCandidates
+                .Where(c => spent.Contains(c.ChoiceId))
+                .ExecuteDeleteAsync(cancellationToken);
+            await _dbContext.LoginChoices
+                .Where(c => spent.Contains(c.Id))
+                .ExecuteDeleteAsync(cancellationToken);
+        }
+        catch (DbException ex)
+        {
+            LogChoicePurgeFailed(ex);
+        }
+    }
 
     private void LogUnresolved(string handle)
     {
@@ -669,6 +763,12 @@ public sealed partial class OrgStaffLoginService
         Level = LogLevel.Information,
         Message = "Staff org choice refused (unknown, spent, expired, or non-candidate organization).")]
     private partial void LogChoiceRefused();
+
+    [LoggerMessage(
+        EventId = 3,
+        Level = LogLevel.Warning,
+        Message = "Opportunistic purge of spent staff org choices failed; it is retried on the next choice.")]
+    private partial void LogChoicePurgeFailed(Exception exception);
 
     private sealed record OrgRef(Guid Id);
 

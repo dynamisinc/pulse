@@ -11,10 +11,25 @@ using Microsoft.AspNetCore.SignalR;
 /// <see cref="ISessionConnectionRevoker"/> to cut those connections the moment the sessions are revoked.
 /// </summary>
 /// <remarks>
+/// <para>
 /// Singleton, in-memory, per app instance (SignalR connections are per instance too). Registered by the hub in
 /// <c>OnConnectedAsync</c> and removed in <c>OnDisconnectedAsync</c>; holds the connection's
 /// <see cref="HubCallerContext"/> because <see cref="HubCallerContext.Abort"/> is the one server-side way to close a
 /// specific connection from outside a hub invocation.
+/// </para>
+/// <para>
+/// <b>SINGLE-INSTANCE ASSUMPTION (#602 L-2).</b> There is no SignalR backplane (no Azure SignalR Service, no Redis):
+/// the App Service runs ONE instance, so the instance that commits a revocation is the instance holding every live hub
+/// connection. Scaling out to more than one instance breaks that — a revocation on instance A would not cut a
+/// connection held by instance B (until it reconnects and is re-verified) — so a scale-out must first move this
+/// registry (and the hub's group fan-out) onto a backplane or a cross-instance revoke signal.
+/// </para>
+/// <para>
+/// <b>The register-after-take race.</b> A revocation commits, then <see cref="Take"/>s the session's connections; a
+/// connection whose connect-time check ran before the commit but whose <see cref="Register"/> lands after the take is not
+/// in that take. The hub therefore re-reads the session AFTER registering and cuts the connection itself if it is no
+/// longer live (<c>ExerciseRealtimeHub.RegisterLiveAsync</c>): every interleaving is covered by one side or the other.
+/// </para>
 /// </remarks>
 public sealed class SessionConnectionRegistry
 {

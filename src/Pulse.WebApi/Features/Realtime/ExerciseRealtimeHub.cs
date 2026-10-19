@@ -113,7 +113,9 @@ public sealed partial class ExerciseRealtimeHub : Hub
     /// <summary>Creates the hub over the persistence context its staff-membership check reads through.</summary>
     /// <param name="dbContext">
     /// The hub-scope persistence context. Used ONLY to verify a staff-kind connection's session and assignment
-    /// (unscoped access records); never touched for a participant, read-only or anonymous connection.
+    /// (unscoped access records), and — when a <paramref name="connections"/> registry is present — to re-read a
+    /// registered connection's OWN session right after registering it (#602 L-2). Never touched for an anonymous
+    /// connection.
     /// </param>
     /// <param name="logger">Diagnostics logger (a failed staff check is logged; never token material).</param>
     /// <param name="connections">
@@ -196,9 +198,9 @@ public sealed partial class ExerciseRealtimeHub : Hub
 
         // identity-auth-roles/16: remember which session this connection was opened under, so revoking that session
         // also cuts this connection (membership is otherwise only checked here, at connect time).
-        if (principal is not null)
+        if (principal is not null && !await RegisterLiveAsync(principal.SessionId, exerciseId.Value, staffGroup: false))
         {
-            Register(principal.SessionId, exerciseId.Value);
+            return;
         }
 
         await base.OnConnectedAsync();
@@ -235,18 +237,64 @@ public sealed partial class ExerciseRealtimeHub : Hub
         // Both groups derive from the SAME verified session exercise — the staff group can never point elsewhere.
         await Groups.AddToGroupAsync(Context.ConnectionId, GroupNameFor(verifiedExerciseId));
         await Groups.AddToGroupAsync(Context.ConnectionId, StaffGroupNameFor(verifiedExerciseId));
-        Register(principal.SessionId, verifiedExerciseId);
+        if (!await RegisterLiveAsync(principal.SessionId, verifiedExerciseId, staffGroup: true))
+        {
+            return;
+        }
 
         await base.OnConnectedAsync();
     }
 
-    private void Register(Guid sessionId, Guid exerciseId)
+    /// <summary>
+    /// Registers this connection under its session, THEN re-reads the session (#602 L-2). The revoke rule commits the
+    /// revocation and only then <see cref="SessionConnectionRegistry.Take"/>s the session's connections; a connection
+    /// verified before that commit but registered after the take would otherwise survive the revocation. Registering
+    /// first and re-checking second closes the window: either the take sees the registration (and cuts it), or this
+    /// re-read runs after the commit and sees the session revoked — then the connection is unregistered, removed from
+    /// the groups it joined, and aborted (fail closed). A re-check that cannot complete aborts it too (reconnectable).
+    /// </summary>
+    /// <returns><c>true</c> when the connection may stay; <c>false</c> when it was cut.</returns>
+    private async Task<bool> RegisterLiveAsync(Guid sessionId, Guid exerciseId, bool staffGroup)
     {
-        if (_connections is not null)
+        if (_connections is null)
         {
-            _connections.Register(sessionId, exerciseId, Context);
-            Context.Items[RegisteredSessionItemKey] = sessionId;
+            return true;
         }
+
+        _connections.Register(sessionId, exerciseId, Context);
+        Context.Items[RegisteredSessionItemKey] = sessionId;
+
+        var connectionAborted = Context.ConnectionAborted;
+        bool live;
+        try
+        {
+            // Session is unscoped; this is the connecting principal's own row.
+            var session = await _dbContext.Sessions
+                .AsNoTracking()
+                .SingleOrDefaultAsync(s => s.Id == sessionId, connectionAborted);
+            live = session is not null && session.IsLive(DateTimeOffset.UtcNow);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !connectionAborted.IsCancellationRequested)
+        {
+            LogSessionRecheckFailed(Context.ConnectionId, ex);
+            live = false;
+        }
+
+        if (live)
+        {
+            return true;
+        }
+
+        _connections.Unregister(sessionId, Context.ConnectionId);
+        Context.Items.Remove(RegisteredSessionItemKey);
+        if (staffGroup)
+        {
+            await Groups.RemoveFromGroupAsync(Context.ConnectionId, StaffGroupNameFor(exerciseId));
+        }
+
+        await Groups.RemoveFromGroupAsync(Context.ConnectionId, GroupNameFor(exerciseId));
+        Context.Abort();
+        return false;
     }
 
     /// <summary>Forgets this connection in the session registry (identity-auth-roles/16).</summary>
@@ -308,6 +356,12 @@ public sealed partial class ExerciseRealtimeHub : Hub
         Level = LogLevel.Warning,
         Message = "Staff verification failed for hub connection {ConnectionId}; aborting the connection (fail closed, no group) so the client reconnects and retries.")]
     private partial void LogStaffCheckFailed(string connectionId, Exception exception);
+
+    [LoggerMessage(
+        EventId = 2,
+        Level = LogLevel.Warning,
+        Message = "Session re-check failed for hub connection {ConnectionId} after registration; aborting the connection (fail closed) so the client reconnects and retries.")]
+    private partial void LogSessionRecheckFailed(string connectionId, Exception exception);
 
     /// <summary>
     /// A connection-bound <see cref="ICurrentStaffSessionAccessor"/>: the same "live, non-revoked, unexpired,

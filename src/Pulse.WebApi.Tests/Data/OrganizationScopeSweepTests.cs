@@ -164,7 +164,9 @@ public sealed class OrganizationScopeSweepTests
         // Organization.DefaultOrganizationId — now needs a marker. A count going above 1 means somebody
         // added a second unbounded read of the customer roster: check that it is still a by-known-id lookup
         // and not an enumeration before bumping this.
-        ["TenantRoot"] = 1,
+        // #602 L-5: +1 for BootstrapService.SlugTakenAsync — an EXISTENCE probe (AnyAsync, no row returned) by the unique
+        // slug, so a re-created default organization takes the backfill's -2/-3 suffix instead of tripping the index.
+        ["TenantRoot"] = 2,
     };
 
     [Fact]

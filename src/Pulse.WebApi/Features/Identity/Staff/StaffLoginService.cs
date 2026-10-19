@@ -31,9 +31,21 @@ using Pulse.WebApi.Features.Identity.Sessions;
 /// unset). A rejected credential yields no session and a failure event that carries NO session identity. The
 /// <see cref="IIdentityProvider"/> never logs the secret (NFR-009).
 /// </para>
+/// <para>
+/// <b>Fixed slow-hash work (#602 M-2).</b> Every attempt that reaches credential checking (a valid body naming a real
+/// exercise) performs EXACTLY <see cref="SlowVerificationsPerAttempt"/> PBKDF2 verification — the provider's real one for
+/// a person with a Pulse password, otherwise a dummy (<see cref="StaffPasswordVerifier.PadTo"/>) — so an unknown handle,
+/// an allowlist-only staffer, a locked-out person and a Pulse-password person cost the same KDF work.
+/// </para>
 /// </remarks>
 public sealed class StaffLoginService
 {
+    /// <summary>
+    /// The fixed number of slow (PBKDF2) verifications every exercise-bound attempt performs (#602 M-2): at most one
+    /// person — the handle's Pulse-password person in the exercise's organization — can ever be verified.
+    /// </summary>
+    public const int SlowVerificationsPerAttempt = 1;
+
     private const string StaffSessionKind = "staff";
     private const string SystemActorKind = "system";
     private const string SystemChannel = "system";
@@ -43,23 +55,31 @@ public sealed class StaffLoginService
 
     private readonly PulseDbContext _dbContext;
     private readonly IIdentityProvider _identityProvider;
+    private readonly StaffPasswordVerifier _passwordVerifier;
     private readonly ISessionIssuer _sessionIssuer;
 
     /// <summary>Creates the staff-login funnel over its collaborators.</summary>
     /// <param name="dbContext">The persistence context the StaffUser mutation and telemetry event are written through.</param>
     /// <param name="identityProvider">The provider-agnostic staff authentication seam (Phase-1 Dynamis impl).</param>
+    /// <param name="passwordVerifier">
+    /// The request's counted slow-hash seam — the SAME instance the provider verifies through — used to pad every attempt
+    /// to <see cref="SlowVerificationsPerAttempt"/>.
+    /// </param>
     /// <param name="sessionIssuer">The story-03 session-issuance seam this login calls to mint the session.</param>
     public StaffLoginService(
         PulseDbContext dbContext,
         IIdentityProvider identityProvider,
+        StaffPasswordVerifier passwordVerifier,
         ISessionIssuer sessionIssuer)
     {
         ArgumentNullException.ThrowIfNull(dbContext);
         ArgumentNullException.ThrowIfNull(identityProvider);
+        ArgumentNullException.ThrowIfNull(passwordVerifier);
         ArgumentNullException.ThrowIfNull(sessionIssuer);
 
         _dbContext = dbContext;
         _identityProvider = identityProvider;
+        _passwordVerifier = passwordVerifier;
         _sessionIssuer = sessionIssuer;
     }
 
@@ -75,6 +95,21 @@ public sealed class StaffLoginService
     {
         ArgumentNullException.ThrowIfNull(request);
 
+        // #602 M-2: an attempt that reaches credential checking ends having performed exactly SlowVerificationsPerAttempt
+        // PBKDF2 verifications (the provider's real one, or a dummy). Body / exercise validation (400) precedes any
+        // credential or person lookup, so it needs none.
+        var slowVerificationsTarget = _passwordVerifier.SlowVerifications + SlowVerificationsPerAttempt;
+        var result = await AuthenticateAndIssueAsync(request, cancellationToken);
+        if (result.Outcome != StaffLoginOutcome.Invalid)
+        {
+            _passwordVerifier.PadTo(slowVerificationsTarget, request.Secret!);
+        }
+
+        return result;
+    }
+
+    private async Task<StaffLoginResult> AuthenticateAndIssueAsync(StaffLoginRequest request, CancellationToken cancellationToken)
+    {
         // 1. Validate the request shape (400). Nullable scalars → a missing field is a validation concern.
         var username = request.Username?.Trim();
         if (string.IsNullOrEmpty(username) || username.Length > 256)
@@ -114,8 +149,8 @@ public sealed class StaffLoginService
         var scenarioTime = exercise.CurrentScenarioTime ?? now;
 
         // 3. identity-auth-roles/15 (Gate-1 M-3): a person with a PULSE password gets the same per-person lockout and
-        //    disable as the org sign-in. A locked-out or disabled person is refused with the uniform failure WITHOUT
-        //    verifying. Allowlist-only staff (no Pulse password) are not matched here, so their legacy behaviour is
+        //    disable as the org sign-in. A locked-out or disabled person is refused with the uniform failure WITHOUT a real
+        //    verification (the attempt's padding still spends its fixed PBKDF2 work, #602 M-5). Allowlist-only staff (no Pulse password) are not matched here, so their legacy behaviour is
         //    unchanged.
         var passwordPerson = await PulsePasswordIdentityProvider.FindPasswordPersonAsync(
             _dbContext, username, exercise.OrganizationId, cancellationToken);
@@ -141,7 +176,7 @@ public sealed class StaffLoginService
             if (passwordPerson is not null)
             {
                 // A failed Pulse-password verification counts toward the person's lockout (saved with the event below).
-                StaffSignInLockout.RecordFailure(passwordPerson, now);
+                await StaffSignInLockout.RecordFailureAsync(_dbContext, passwordPerson, now, cancellationToken);
             }
 
             // Fail closed: rejected credentials get NO session and a failure event with no session identity.

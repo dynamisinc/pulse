@@ -3,11 +3,13 @@ namespace Pulse.WebApi.Features.Identity.Staff;
 using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.Identity.EasyLogin;
 using Pulse.WebApi.Features.Identity.Providers;
 using Pulse.WebApi.Features.Identity.Sessions;
@@ -57,6 +59,12 @@ public static class StaffAuthEndpoints
         // front of the Dynamis allowlist (registered concretely as its fallback) for the A1→A2 interim.
         services.AddScoped<DynamisIdentityProvider>();
         services.AddScoped<IIdentityProvider, PulsePasswordIdentityProvider>();
+
+        // #602 M-2 / M-5: the counted slow-hash seam, ONE per request, shared by the Pulse password provider and both login
+        // funnels so every attempt pads to a fixed PBKDF2 count. The hasher is the default PBKDF2 PasswordHasher — the
+        // format every stored Person.PasswordHash is written in.
+        services.TryAddSingleton<IPasswordHasher<Person>>(_ => new PasswordHasher<Person>());
+        services.AddScoped<StaffPasswordVerifier>();
 
         services.AddScoped<StaffLoginService>();
 
@@ -168,6 +176,7 @@ public static class StaffAuthEndpoints
     private static async Task<IResult> StaffLoginChooseAsync(
         StaffLoginChooseRequest? request,
         OrgStaffLoginService orgLoginService,
+        HttpContext httpContext,
         CancellationToken cancellationToken)
     {
         if (request is null)
@@ -175,7 +184,9 @@ public static class StaffAuthEndpoints
             return Results.BadRequest("A JSON choice body is required.");
         }
 
-        return ToResult(await orgLoginService.ChooseAsync(request, cancellationToken));
+        // #602 L-3: the same (forwarded-headers resolved) remote address the choice's IP hash was created from.
+        return ToResult(await orgLoginService.ChooseAsync(
+            request, httpContext.Connection.RemoteIpAddress?.ToString(), cancellationToken));
     }
 
     private static IResult ToResult(OrgStaffLoginResult result) => result.Outcome switch
