@@ -713,7 +713,7 @@ public sealed class EngineReviewSafetyInvariantTests
         var exerciseId = Guid.NewGuid();
         using var harness = new Harness(exerciseId, Array.Empty<EngineReviewItemEntity>(), timeoutAutoSendAuthorized: false);
 
-        var result = await harness.Service.SetSwampedModeAsync(enabled: true, Input("lead-1"));
+        var result = await harness.Service.SetSwampedModeAsync(enabled: true, Input("lead-1"), harness.SeedLead());
 
         result.Outcome.Should().Be(EngineReviewOutcome.Invalid, "raising toward unreviewed timeout publishes is refused in Phase 1");
         result.ValidationError.Should().Be(
@@ -729,7 +729,7 @@ public sealed class EngineReviewSafetyInvariantTests
         using var harness = new Harness(exerciseId, Array.Empty<EngineReviewItemEntity>(), timeoutAutoSendAuthorized: false);
         harness.Registry.GetOrCreate(exerciseId).SetSwampedMode(enabled: true, "lead-1", 0); // forced on (test hook)
 
-        var result = await harness.Service.SetSwampedModeAsync(enabled: false, Input("lead-1"));
+        var result = await harness.Service.SetSwampedModeAsync(enabled: false, Input("lead-1"), harness.SeedLead());
 
         result.Outcome.Should().Be(EngineReviewOutcome.Ok, "lowering is never refused (§8.2)");
         result.State!.SwampedMode.Should().BeFalse();
@@ -918,7 +918,7 @@ public sealed class EngineReviewSafetyInvariantTests
         public GenerationProviderCutRegistry ProviderCut { get; }
 
         /// <summary>Seeds the exercise's lead controller — the session person a raise's post-write re-check reads (Tier-2 M-1).</summary>
-        public Guid SeedLead() => LeadControllerSeed.Seed(_db, _exerciseId);
+        public Guid SeedLead() => LeadControllerSeed.Seed(Db, _exerciseId);
 
         public void Advance(int minutes) => _time.Advance(TimeSpan.FromMinutes(minutes));
 

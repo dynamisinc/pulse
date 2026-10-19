@@ -81,7 +81,8 @@ export function SwampedModeToggle() {
   const providerCutToFake = settings?.providerCutToFake ?? false
   // Phase 1 (PROVIDER-GOVERNANCE §8): the server refuses swamped ON while the
   // governed flag is false. Only an explicit `false` disables; OFF stays open.
-  // Turning ON therefore needs the lead role (COR-015, absent for others) AND this flag; OFF is never refused.
+  // Turning ON needs the lead role (COR-015, absent for others) AND this flag; OFF is never
+  // refused.
   const onRefused = settings?.timeoutAutoSendAuthorized === false && !swampedMode
 
   return (
