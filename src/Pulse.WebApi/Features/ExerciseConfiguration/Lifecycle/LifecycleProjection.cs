@@ -198,10 +198,11 @@ public static class LifecycleOverlayComposer
     /// <param name="state">A canonical or legacy lifecycle literal.</param>
     /// <returns>The lifecycle contribution — <c>none</c>, or an unspecified-register <c>pause</c>.</returns>
     public static OverlayContribution FromLifecycle(string? state) =>
-        // PENDING DECISION (Tom, #390): 'completed' projects to 'none' here today, so EndEx simply LIFTS any overlay
-        // (and, since #390, pushes that lift to connected tabs). Whether 'completed' should instead project to the
-        // terminal 'endex' overlay is an open product ruling, not settled by #390 — do not change it without it.
-        // Both the GET and the lifecycle push read this one line, so the ruling lands here and only here.
+        // RULING (Tom, 2026-10-19, #390): 'completed' stays 'none' here, so EndEx LIFTS any overlay (and, since #390,
+        // pushes that lift to connected tabs). It is deliberately NOT the blocking 'endex' overlay: participants may
+        // keep reading after EndEx. The "exercise has ended, read-only" state travels as a separate additive `ended`
+        // flag on the overlay DTOs (follow-up PR), not as a new overlay value. Both the GET and the lifecycle push
+        // read this one line, so do not change it without a new ruling.
         ExerciseLifecycleStates.TryParse(state, out var canonical)
         && string.Equals(canonical, ExerciseLifecycleStates.Paused, StringComparison.Ordinal)
             ? new OverlayContribution(LifecycleOverlayWire.Pause, Register: null, string.Empty)
