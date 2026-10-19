@@ -2,6 +2,7 @@ namespace Pulse.WebApi.Features.Identity.Credentials;
 
 using System.Globalization;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -43,6 +44,8 @@ public sealed partial class PasswordResetService
 
     /// <summary>The audit outcome of a completed change.</summary>
     public const string SuccessOutcome = "success";
+
+    private const int DeadlockVictimErrorNumber = 1205;
 
     private static readonly PasswordHasher<Person> Hasher = new();
 
@@ -101,6 +104,16 @@ public sealed partial class PasswordResetService
             return PasswordResetResult.Invalid(InvalidTokenError);
         }
 
+        // Adversarial review W5 (#665): the admin reset refuses a PEER org admin at issue, but the target may have been
+        // promoted to org admin after the link was issued. Refuse the redemption then too (uniformly) unless the person
+        // issued it themselves. A token with no issuer is not a peer's link: CredentialTokenService.StageIssueAsync only
+        // creates one for SELF-DELIVERY to the subject's own email (the null-issuer rule — #575b's first-admin invite and
+        // the later forgot-password MUST comply), so it can never have been handed to a third party.
+        if (Person.IsOrgAdmin(person.OrgRole) && token.IssuedByPersonId is { } issuer && issuer != person.Id)
+        {
+            return PasswordResetResult.Invalid(InvalidTokenError);
+        }
+
         // org-scope-exempt(TenantRoot): a by-id lookup of the person's OWN organization (token.OrganizationId, which the
         // server stamped at issue) for its name — the policy refuses a password containing it. Never an enumeration.
         var organizationName = await _dbContext.Organizations
@@ -119,6 +132,43 @@ public sealed partial class PasswordResetService
             return PasswordResetResult.Invalid(policyError);
         }
 
+        List<Guid>? revokedSessionIds;
+        try
+        {
+            revokedSessionIds = await ChangeCredentialAsync(token, person, request.NewPassword!, now, cancellationToken);
+        }
+        catch (Exception exception) when (IsDeadlock(exception))
+        {
+            // Adversarial review S3 (#665): two concurrent redemptions can deadlock; SQL Server rolls the victim back, so
+            // nothing changed — the same uniform answer as losing the claim.
+            _dbContext.ChangeTracker.Clear();
+            return PasswordResetResult.Invalid(InvalidTokenError);
+        }
+
+        if (revokedSessionIds is null)
+        {
+            return PasswordResetResult.Invalid(InvalidTokenError);
+        }
+
+        await CutRevokedConnectionsAfterCommitAsync(revokedSessionIds, cancellationToken);
+        return PasswordResetResult.Ok();
+    }
+
+    private static bool IsDeadlock(Exception exception) =>
+        exception is SqlException { Number: DeadlockVictimErrorNumber }
+        || exception.InnerException is SqlException { Number: DeadlockVictimErrorNumber };
+
+    /// <summary>
+    /// The single transaction of a credential change. Returns the revoked session ids, or <c>null</c> when the claim was
+    /// lost (a concurrent redemption, or the token expired in between) and nothing changed.
+    /// </summary>
+    private async Task<List<Guid>?> ChangeCredentialAsync(
+        CredentialToken token,
+        Person person,
+        string newPassword,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
         List<Guid> revokedSessionIds;
         await using (var transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken))
         {
@@ -126,10 +176,10 @@ public sealed partial class PasswordResetService
             {
                 // Lost a race with a concurrent redemption (or it expired in between): the same uniform answer.
                 await transaction.RollbackAsync(cancellationToken);
-                return PasswordResetResult.Invalid(InvalidTokenError);
+                return null;
             }
 
-            person.PasswordHash = Hasher.HashPassword(person, request.NewPassword!);
+            person.PasswordHash = Hasher.HashPassword(person, newPassword);
             person.PasswordChangedAt = now;
             StaffSignInLockout.RecordSuccess(person);
 
@@ -162,8 +212,7 @@ public sealed partial class PasswordResetService
             await transaction.CommitAsync(cancellationToken);
         }
 
-        await CutRevokedConnectionsAfterCommitAsync(revokedSessionIds, cancellationToken);
-        return PasswordResetResult.Ok();
+        return revokedSessionIds;
     }
 
     /// <summary>

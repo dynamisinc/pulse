@@ -1,6 +1,7 @@
 namespace Pulse.WebApi.Tests.Features.Identity.Credentials;
 
 using System;
+using System.Linq;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Threading.Tasks;
@@ -8,6 +9,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -130,13 +132,23 @@ public sealed class CredentialTestWorld
         return (session.Id, token, refresh);
     }
 
-    /// <summary>Issues (and saves) a token through the real service, as an admin reset or an invite would.</summary>
-    public async Task<IssuedCredentialToken> IssueAsync(string purpose, Guid personId, Guid organizationId, DateTimeOffset? now = null)
+    /// <summary>
+    /// Issues (and saves) a token through the real service. With no <paramref name="issuedBy"/> it is a SELF-DELIVERED
+    /// token (the null-issuer rule): delivered to the person's own email, as #575b's invite or forgot-password would.
+    /// </summary>
+    public async Task<IssuedCredentialToken> IssueAsync(
+        string purpose, Guid personId, Guid organizationId, DateTimeOffset? now = null, Guid? issuedBy = null)
     {
         await using var context = _fixture.CreateContext();
+        var ownEmail = await context.People.AsNoTracking().Where(p => p.Id == personId).Select(p => p.Email).SingleAsync();
         var service = new CredentialTokenService(context, TimeProvider.System);
         var issued = await service.StageIssueAsync(
-            purpose, CredentialSubject.ForPerson(personId), organizationId, issuedByPersonId: null, now ?? DateTimeOffset.UtcNow);
+            purpose,
+            CredentialSubject.ForPerson(personId),
+            organizationId,
+            issuedByPersonId: issuedBy,
+            now ?? DateTimeOffset.UtcNow,
+            deliverToEmail: issuedBy is null ? ownEmail : null);
         await context.SaveChangesAsync();
         return issued;
     }

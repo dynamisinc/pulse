@@ -50,6 +50,7 @@ import {
   type ExerciseSettingsError,
   type ExerciseSettingsUpdate,
 } from '../services/exerciseSettingsService'
+import { READINESS_QUERY_KEY } from './useReadiness'
 
 /**
  * The query key the settings read uses. Exported so any staff surface can
@@ -88,6 +89,8 @@ export function useSaveExerciseSettings(): UseMutationResult<
     mutationFn: updateExerciseSettings,
     onSuccess: saved => {
       queryClient.setQueryData(EXERCISE_SETTINGS_QUERY_KEY, saved)
+      // Go-live readiness reads this state (story 03): refresh it.
+      void queryClient.invalidateQueries({ queryKey: READINESS_QUERY_KEY })
     },
   })
 }

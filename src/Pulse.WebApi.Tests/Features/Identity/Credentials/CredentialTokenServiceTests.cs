@@ -119,6 +119,65 @@ public sealed class CredentialTokenServiceTests
     }
 
     [RequiresDockerFact]
+    public async Task TryClaim_AtExactlyExpiresAt_IsRefused_AndOneTickBefore_Succeeds()
+    {
+        // Adversarial review S2 (#665): the claim's `ExpiresAt > now` boundary.
+        var (org, _) = await _world.SeedOrganizationAsync();
+        var (person, _) = await _world.SeedPersonAsync(org);
+        var issuedAt = new DateTimeOffset(2026, 10, 19, 12, 0, 0, TimeSpan.Zero);
+        var atExpiry = await _world.IssueAsync(CredentialTokenPurposes.Invite, person, org, issuedAt);
+        var expiresAt = atExpiry.Token.ExpiresAt;
+
+        await using var context = _fixture.CreateContext();
+        var service = new CredentialTokenService(context, TimeProvider.System);
+
+        (await service.TryClaimAsync(atExpiry.Token.Id, org, expiresAt)).Should().BeFalse("at ExpiresAt the token has expired");
+        (await service.FindRedeemableAsync(atExpiry.RawToken, expiresAt)).Should().BeNull("the lookup agrees");
+        (await service.TryClaimAsync(atExpiry.Token.Id, org, expiresAt.AddTicks(-1))).Should().BeTrue("one tick before, it is live");
+    }
+
+    [RequiresDockerFact]
+    public async Task NullIssuer_IsIssuedOnlyForSelfDelivery_ToTheSubjectsOwnEmail()
+    {
+        // The null-issuer rule (#665 orchestrator decision): a token with no issuer goes only to the person themselves.
+        var (org, _) = await _world.SeedOrganizationAsync();
+        var (person, email) = await _world.SeedPersonAsync(org);
+        var (admin, _) = await _world.SeedPersonAsync(org, orgRole: Person.OrgAdminRole);
+        var (noEmail, _) = await _world.SeedPersonAsync(org);
+        await using (var write = _fixture.CreateContext())
+        {
+            (await write.People.SingleAsync(p => p.Id == noEmail)).Email = null;
+            await write.SaveChangesAsync();
+        }
+
+        async Task<IssuedCredentialToken> Issue(Guid subject, Guid? issuer, string? deliverTo)
+        {
+            await using var context = _fixture.CreateContext();
+            var issued = await new CredentialTokenService(context, TimeProvider.System).StageIssueAsync(
+                CredentialTokenPurposes.Invite, CredentialSubject.ForPerson(subject), org, issuer, DateTimeOffset.UtcNow, deliverTo);
+            await context.SaveChangesAsync();
+            return issued;
+        }
+
+        (await Issue(person, null, $"  {email.ToUpperInvariant()} ")).Token.IssuedByPersonId
+            .Should().BeNull("own email (trimmed, case-insensitive) → issued");
+
+        var toSomeoneElse = () => Issue(person, null, "someone.else@example.com");
+        await toSomeoneElse.Should().ThrowAsync<InvalidOperationException>("a null-issuer token is never delivered to a third party");
+        var toNobody = () => Issue(person, null, null);
+        await toNobody.Should().ThrowAsync<InvalidOperationException>("no delivery target is not self-delivery");
+        var noOwnEmail = () => Issue(noEmail, null, "anything@example.com");
+        await noOwnEmail.Should().ThrowAsync<InvalidOperationException>("a person with no email cannot be self-delivered to");
+
+        (await Issue(noEmail, admin, null)).Token.IssuedByPersonId
+            .Should().Be(admin, "an admin-issued token is unaffected by the rule");
+
+        await using var read = _world.ReadContext();
+        (await read.CredentialTokens.AsNoTracking().CountAsync(t => t.PersonId == person)).Should().Be(
+            1, "the refused issues wrote nothing");
+    }
+
+    [RequiresDockerFact]
     public async Task CredentialChangeInvalidation_VoidsEveryOutstandingTokenOfBothPurposes_ForThatPersonOnly()
     {
         var (org, _) = await _world.SeedOrganizationAsync();

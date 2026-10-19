@@ -139,7 +139,9 @@ public sealed class OrganizationScopeSweepTests
         // PauseOverlayServiceCollectionExtensions — the composed participant-overlay read both overlay publishers push,
         // by the SERVER-resolved exercise id (the steering tier's scope, or the committed lifecycle transition's row);
         // the same read the overlay GET performs, never a client-supplied id.
-        ["ResolvedScope"] = 29,
+        // exercise-build-golive/03: +1 for ExerciseReadinessService.GetAsync — the checklist's one read of the exercise
+        // row (status, schedule, time zone, chrome switches) by the IExerciseContext id.
+        ["ResolvedScope"] = 30,
 
         // orgAdmin startup seeder: +1 for OrgAdminSeedService, which resolves the seeded staff human by their
         // configured IdP ExternalSubject — the SAME resolve-by-subject read StaffLoginService and
@@ -351,9 +353,11 @@ public sealed class OrganizationScopeSweepTests
         // already tenant-resolved exercise" check (1).
         // identity-auth-roles/17 Gate-1 WR-005: ExerciseListService's canManage EXISTS — the caller's own planner
         // enrollment, correlated to the InOrganization-bounded exercise rows of the same query (1).
+        // identity-auth-roles/21 (adversarial review W1 on #665): +1 — EnrollmentService.SetLeadAsync re-reads its own
+        // caller-reachable target inside the lead transaction to confirm it really became the live lead.
         // identity-auth-roles/19 (#574): OrgPeopleService's enrollments summary — the listed people's enrollments, inner-
         // joined to the caller's InOrganization-bounded exercises (1).
-        ["TenantChecked"] = 13,
+        ["TenantChecked"] = 14,
 
         // BootstrapService.ProvisionStaffAsync: the exercise this ops request itself created or host-resolved.
         ["ResolvedScope"] = 1,

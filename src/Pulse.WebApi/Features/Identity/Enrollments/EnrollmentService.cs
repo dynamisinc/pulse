@@ -61,7 +61,8 @@ public sealed partial class EnrollmentService
 
     /// <summary>
     /// The 409 error code for a revoke that raced a concurrent lead change (Gate-1 S-003): the row became the lead after it
-    /// was read, so the soft delete was refused by <c>CK_Enrollments_DeletedAt_NotLead</c> and NOTHING was saved. Retry.
+    /// was read, so the soft delete was refused by <c>CK_Enrollments_DeletedAt_NotLead</c> and NOTHING was saved — and
+    /// for a lead change that raced a revoke or a role change of its target (adversarial review W1 on #665). Retry.
     /// </summary>
     public const string LeadChangedRetryError = "lead-changed-retry";
 
@@ -220,16 +221,37 @@ public sealed partial class EnrollmentService
             // ONE statement: UPDATE … SET IsLead = CASE WHEN Id = @id THEN 1 ELSE 0 END
             //                WHERE ExerciseId = @exercise AND (IsLead = 1 OR Id = @id).
             // org-scope-exempt(TenantChecked): the same caller-reachable exercise as above.
-            await _dbContext.Enrollments
+            var updated = await _dbContext.Enrollments
                 .IgnoreQueryFilters()
                 .Active()
                 .Where(e => e.ExerciseId == exercise.Id && (e.IsLead || e.Id == enrollment.Id))
                 .ExecuteUpdateAsync(set => set.SetProperty(e => e.IsLead, e => e.Id == enrollment.Id), cancellationToken);
 
-            // The statement above already wrote it; mirror it on the tracked entity WITHOUT marking it modified.
+            // Adversarial review W1 (#665): a revoke that landed between FindReachableAsync and the statement above leaves
+            // the target out of the Active() set, so it was NOT made lead (and, if there was a previous lead, that lead was
+            // demoted). Confirm inside the transaction that the target IS now the live lead; otherwise roll everything back
+            // and ask the caller to retry. Our UPDATE holds the target's row lock until commit, so a revoke cannot slip in
+            // after this check.
+            // org-scope-exempt(TenantChecked): keyed by the ALREADY-AUTHORIZED enrollment id (resolved inside the caller's own
+            // scope and organization by FindReachableAsync) and read inside the same transaction as the UPDATE above.
+            var targetIsLead = updated > 0 && await _dbContext.Enrollments
+                .IgnoreQueryFilters()
+                .Active()
+                .AsNoTracking()
+                .AnyAsync(e => e.Id == enrollment.Id && e.IsLead, cancellationToken);
+            if (!targetIsLead)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                _dbContext.ChangeTracker.Clear();
+                return EnrollmentResult.Conflict(LeadChangedRetryError);
+            }
+
+            // The statement above already wrote it; mirror it on the tracked entity WITHOUT marking it modified (W1: setting
+            // OriginalValue alone leaves IsModified set, which re-wrote IsLead = 1 in SaveChanges).
             var isLead = _dbContext.Entry(enrollment).Property(e => e.IsLead);
             isLead.CurrentValue = true;
             isLead.OriginalValue = true;
+            isLead.IsModified = false;
 
             var payload = string.Create(
                 CultureInfo.InvariantCulture,
@@ -251,6 +273,18 @@ public sealed partial class EnrollmentService
             // ExecuteUpdate surfaces the index violation as a raw SqlException (a concurrent lead change won the race).
             _dbContext.ChangeTracker.Clear();
             return EnrollmentResult.Conflict(LeadConflictError);
+        }
+        catch (DbUpdateException exception) when (IsLeadCheckViolation(exception.InnerException as SqlException))
+        {
+            // W1: the lead / revoke / role CHECKs refused a write that raced a concurrent change — never a 500.
+            _dbContext.ChangeTracker.Clear();
+            return EnrollmentResult.Conflict(LeadChangedRetryError);
+        }
+        catch (SqlException exception) when (IsLeadCheckViolation(exception))
+        {
+            // The same, surfaced raw by ExecuteUpdate (e.g. the target stopped being a controller in between).
+            _dbContext.ChangeTracker.Clear();
+            return EnrollmentResult.Conflict(LeadChangedRetryError);
         }
 
         // PROVIDER-GOVERNANCE §8: demoting the lead turns swamped mode off. A TRANSFER demotes the previous lead, and the
@@ -584,6 +618,11 @@ public sealed partial class EnrollmentService
     private static string RolePayload(string? role, string? previousRole) => string.Create(
         CultureInfo.InvariantCulture,
         $"{{\"role\":{JsonSerializer.Serialize(role)},\"previousRole\":{JsonSerializer.Serialize(previousRole)}}}");
+
+    private static bool IsLeadCheckViolation(SqlException? exception) =>
+        exception is { Number: CheckConstraintErrorNumber }
+        && (exception.Message.Contains(LeadNotRevokedConstraint, StringComparison.Ordinal)
+            || exception.Message.Contains("CK_Enrollments_IsLead_ControllerOnly", StringComparison.Ordinal));
 
     private static bool IsCheckViolation(DbUpdateException exception, string constraint) =>
         exception.InnerException is SqlException { Number: CheckConstraintErrorNumber } sql

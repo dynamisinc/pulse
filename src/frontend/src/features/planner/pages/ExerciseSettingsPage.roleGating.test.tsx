@@ -26,6 +26,12 @@ vi.mock('../components/ComplianceChromePanel', () => ({
 vi.mock('../components/PracticeModePanel', () => ({
   PracticeModePanel: () => <div data-testid="stub-practice-panel" />,
 }))
+vi.mock('../components/ReadinessPanel', () => ({
+  ReadinessPanel: () => <div data-testid="stub-readiness-panel" />,
+}))
+vi.mock('../components/StageExerciseControl', () => ({
+  StageExerciseControl: () => <div data-testid="stub-stage-control" />,
+}))
 vi.mock('../components/AccountImport', () => ({
   AccountImport: () => <div data-testid="stub-account-import" />,
 }))

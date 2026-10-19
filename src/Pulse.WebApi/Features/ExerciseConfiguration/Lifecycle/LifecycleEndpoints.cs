@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Routing;
 using Pulse.WebApi.Features.EngineRuntime;
+using Pulse.WebApi.Features.ExerciseConfiguration.Readiness;
 
 /// <summary>
 /// The STAFF HTTP surface for the COR-032 lifecycle: <c>GET /api/staff/exercise-lifecycle</c> (the current
@@ -33,7 +34,9 @@ using Pulse.WebApi.Features.EngineRuntime;
 /// <b>Status contract:</b> <c>200</c> with the lifecycle body; <c>400</c> when <c>to</c> is missing or is not
 /// a COR-032 literal; <c>401</c> with no staff session or an unresolved scope; <c>403</c> when the staff
 /// caller is not assigned to the resolved exercise; <c>404</c> when the resolved scope has no exercise row;
-/// <c>409</c> when the state machine refuses the transition — and in every non-200 case NOTHING is persisted.
+/// <c>409</c> when the state machine refuses the transition (a plain-string reason), or when a stage is refused by the
+/// readiness gate (a <see cref="ReadinessBlockedResponse"/> body, exercise-build-golive/04) — and in every non-200 case
+/// NOTHING is persisted.
 /// </para>
 /// </remarks>
 public static class LifecycleEndpoints
@@ -60,6 +63,9 @@ public static class LifecycleEndpoints
         endpoints.MapPost(TransitionRoute, TransitionAsync)
             .AddEndpointFilter<EngineCockpitStaffAuthorizationFilter>()
             .AddEndpointFilter<LifecycleTransitionRoleFilter>();
+
+        // exercise-build-golive/03: the go-live readiness checklist rides this extension, so it needs no Program.cs line.
+        endpoints.MapReadinessEndpoint();
 
         return endpoints;
     }
@@ -98,6 +104,10 @@ public static class LifecycleEndpoints
         ExerciseLifecycleOutcome.Ok => Results.Ok(ExerciseLifecycleDto.FromSnapshot(result.Snapshot!)),
         ExerciseLifecycleOutcome.Invalid => Results.BadRequest(result.Error),
         ExerciseLifecycleOutcome.TransitionNotAllowed => Results.Conflict(result.Error),
+
+        // exercise-build-golive/04: a stage refused by the readiness gate carries the open blocking items.
+        ExerciseLifecycleOutcome.ReadinessBlocked => Results.Conflict(
+            ReadinessBlockedResponse.From(result.Error!, result.OpenBlocking!)),
         ExerciseLifecycleOutcome.ScopeUnresolved => Results.Unauthorized(),
         ExerciseLifecycleOutcome.NotFound => Results.NotFound(),
 
