@@ -894,6 +894,25 @@ public sealed class SessionServiceTests
     }
 
     [RequiresDockerFact]
+    public async Task Refresh_ReadOnlyWithNoExerciseRow_IsRefused_FailClosed()
+    {
+        // The same fail-closed rule for a shared view-only session: no readable exercise, no renewal.
+        var exerciseId = Guid.NewGuid();
+        var token = $"no-row-readonly-{Guid.NewGuid():N}";
+        var original = await SeedSessionAsync(exerciseId, kind: "readonly", rawRefreshToken: token);
+
+        await using (var context = _fixture.CreateContext())
+        {
+            (await ServiceFor(context).RefreshAsync(token)).Outcome.Should().Be(RefreshOutcome.Invalid);
+        }
+
+        await using var verify = _fixture.CreateContext();
+        (await verify.Sessions.AsNoTracking().SingleAsync(s => s.Id == original.Id)).Should().BeEquivalentTo(
+            original, "the refusal writes nothing");
+        (await CountEventsAsync(exerciseId, "session.refreshed")).Should().Be(0);
+    }
+
+    [RequiresDockerFact]
     public Task Refresh_ParticipantSessionRevokedByStaff_Is401_AndTheAccessTokenIs401() =>
         AssertRevokedCappedSessionIsRefusedAsync(viaLogout: false);
 

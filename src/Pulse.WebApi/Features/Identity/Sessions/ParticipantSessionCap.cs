@@ -49,6 +49,11 @@ public static partial class ParticipantSessionCap
     /// The instant the exercise day containing <paramref name="asOf"/> ends, in the exercise's own time zone. A blank or
     /// unknown zone, or a missing exercise row, falls back to UTC and is logged once for <paramref name="exerciseId"/>.
     /// </summary>
+    /// <remarks>
+    /// Since the one-rule ruling (2026-10-19) the missing-row fallback is reachable from session ISSUE only:
+    /// <see cref="SessionService.RefreshAsync"/> refuses a participant refresh whose exercise row cannot be read before
+    /// it ever computes the day end. The fallback is kept for the issue path and as defence in depth.
+    /// </remarks>
     /// <param name="exerciseId">The session's own bound exercise (used only to log the fallback once).</param>
     /// <param name="facts">That exercise's facts from <see cref="ExerciseFactsReader"/>, or <c>null</c> when its row could not be read.</param>
     /// <param name="asOf">An instant inside the day.</param>

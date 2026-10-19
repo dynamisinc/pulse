@@ -43,8 +43,8 @@ using Pulse.WebApi.Features.Identity.EasyLogin;
 /// Staff and read-only sessions are not day-capped and renew exactly as before.
 /// </para>
 /// <para>
-/// <b>One rule for all (Tom, 2026-10-19).</b> A participant-world session (<c>participant</c> or shared view-only
-/// <c>readonly</c>) renews only while its bound exercise's lifecycle accepts participant reads
+/// <b>One rule for all (Tom, 2026-10-19).</b> Every non-staff session (today <c>participant</c> and shared view-only
+/// <c>readonly</c>; any future kind fails closed) renews only while its bound exercise's lifecycle accepts participant reads
 /// (<see cref="ExerciseLifecycleStates.IsParticipantSignInAllowed"/>: staged, live, paused, completed), the same rule
 /// every participant sign-in applies. In <c>build</c>, <c>archived</c>, an unknown status, or when the exercise cannot
 /// be read, the refresh is refused exactly like a revoked session (401, no event, nothing written). <c>completed</c>
@@ -209,8 +209,9 @@ public sealed class SessionService
         // One rule for all (2026-10-19): a participant-world session renews only while its exercise accepts participant
         // reads, the same predicate every participant sign-in applies. Refused exactly as a revoked session is: 401, no
         // event, nothing written, so the response never reveals the lifecycle state. Missing facts fail closed. Staff
-        // sessions are out of scope and renew in every state.
-        if (session.Kind is ParticipantKind or ReadOnlyKind
+        // sessions are out of scope and renew in every state. Every kind that is NOT staff is checked (not a list of
+        // participant-world kinds), so a future session kind fails closed until it is deliberately exempted.
+        if (!string.Equals(session.Kind, StaffKind, StringComparison.Ordinal)
             && !ExerciseLifecycleStates.IsParticipantSignInAllowed(facts?.Status))
         {
             return RefreshResult.Invalid();

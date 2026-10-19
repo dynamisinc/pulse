@@ -220,6 +220,47 @@ public sealed class SharedReadOnlyLoginServiceTests
         events.Should().OnlyContain(e =>
             e.Payload == "{\"outcome\":\"failure\"}" && e.Actor.Kind == "system" && e.Actor.SessionId == null,
             "the lifecycle refusal records the same identity-less failure a wrong password records");
+
+        var stored = await ReadCredentialAsync(exercise.Id);
+        stored.FailedAttemptCount.Should().Be(0, "a closed exercise takes the decoy path, so no attempt counts toward lockout");
+        stored.LockedOutUntil.Should().BeNull();
+    }
+
+    /// <summary>
+    /// The closed-exercise decoy path never trips the brute-force lockout: <see cref="SharedCredentialLifecyclePolicy.MaxFailedAttempts"/>
+    /// wrong passwords in a build or archived exercise leave the counter at zero and the credential unlocked.
+    /// </summary>
+    [RequiresDockerTheory]
+    [InlineData("build")]
+    [InlineData("archived")]
+    public async Task Login_MaxFailedAttemptsWrongPasswords_InAClosedExercise_NeverLockTheCredential(string status)
+    {
+        var exercise = await SeedExerciseAsync(scenarioTime: null, status: status);
+        await SeedCredentialAsync(exercise.Id, Password);
+        var scope = ScopeFor(exercise.Id);
+
+        for (var attempt = 0; attempt < SharedCredentialLifecyclePolicy.MaxFailedAttempts; attempt++)
+        {
+            await using var context = _fixture.CreateContext(scope);
+            (await new SharedReadOnlyLoginService(context, scope, _hasher, new RecordingSessionIssuer())
+                    .LoginAsync(new SharedReadOnlyLoginRequest { Password = "WRONG-password" }))
+                .Outcome.Should().Be(SharedReadOnlyLoginOutcome.Rejected);
+        }
+
+        var stored = await ReadCredentialAsync(exercise.Id);
+        stored.FailedAttemptCount.Should().Be(0, "no attempt in a {0} exercise counts toward lockout", status);
+        stored.LockedOutUntil.Should().BeNull("the credential is never locked by attempts made while the exercise is closed");
+
+        await using var read = _fixture.CreateContext();
+        (await read.TelemetryEvents.IgnoreQueryFilters()
+                .CountAsync(e => e.ExerciseId == exercise.Id && e.EventType == "auth.lockout"))
+            .Should().Be(0, "no lockout trip, so no auth.lockout event");
+    }
+
+    private async Task<SharedCredential> ReadCredentialAsync(Guid exerciseId)
+    {
+        await using var read = _fixture.CreateContext();
+        return await read.SharedCredentials.IgnoreQueryFilters().AsNoTracking().SingleAsync(c => c.ExerciseId == exerciseId);
     }
 
     [RequiresDockerFact]
