@@ -9,7 +9,9 @@ using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Pulse.WebApi.Features.ExerciseLifecycleAdmin;
 using Pulse.WebApi.Features.Identity.Credentials;
+using Pulse.WebApi.Features.Identity.Enrollments;
 using Pulse.WebApi.Tests.Features.Identity.Credentials;
+using Pulse.WebApi.Tests.Features.Identity.Enrollments;
 using Xunit;
 
 /// <summary>
@@ -131,8 +133,11 @@ public sealed class CompositionRootWiringTests
 
         // identity-auth-roles/21 (#576): the org tier's first PERSON-id route (the org admin's staff password reset) joins
         // the allow-list — a person of the caller's own organization, never an organization or staff-user id.
+        // story 20 (#575a): the exercise staff list + grant (GET / POST /api/org/exercises/{exerciseId}/enrollments) join
+        // it — an exercise of the caller's own organization (org admin) or the caller's own resolved exercise (planner).
         var allowListed = ExerciseLifecycleAdminEndpoints.ExerciseIdRoutes
             .Concat(CredentialEndpoints.PersonIdRoutes)
+            .Concat(EnrollmentEndpoints.ExerciseIdRoutes)
             .ToList();
 
         pairs.Should().OnlyHaveUniqueItems();
@@ -154,6 +159,9 @@ public sealed class CompositionRootWiringTests
                 "guid", "{0}: a non-GUID never reaches the handler", endpoint.RoutePattern.RawText);
         }
 
+        StaffAssignmentHttpTests.ExerciseIdCallers.Keys.Should().BeEquivalentTo(
+            EnrollmentEndpoints.ExerciseIdRoutes,
+            "every allow-listed enrollment exercise-id (method, route) must be driven by the foreign-tenant 404 test");
         OrgExerciseByIdIsolationTests.Callers.Keys.Should().BeEquivalentTo(
             ExerciseLifecycleAdminEndpoints.ExerciseIdRoutes,
             "every allow-listed exercise-id (method, route) must be driven by the foreign-tenant 404 test");

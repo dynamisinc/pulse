@@ -48,6 +48,21 @@ Wave A2, after A1 and 19. Shares `IPulseMailer` + `CredentialToken` with 21 (ser
 ## Tests
 Endpoint tests (foreign-exercise/foreign-org, conflicting-enrollment, last-planner); mailer fake; RTL for invite/assign UI.
 
+**#575a (assign backend) linkage:**
+- `StaffAssignmentHttpTests.EveryStaffAssignmentRoute_AnswersEveryCaller_WithTheExactStatus` (Assign, role matrix)
+- `StaffAssignmentHttpTests.Grant_ByThePlanner_CreatesTheEnrollmentAndFacet_AndRecordsTelemetryAndAudit` (Assign, Telemetry)
+- `StaffAssignmentHttpTests.Grant_ByAnOrgScopeAdmin_ToThemselves_IsAuditedSelfGranted` (Self-enroll)
+- `StaffAssignmentHttpTests.Grant_Refusals_400Invalid_404ForeignPerson_409ConflictingEnrollment` (Assign: 409 `conflicting-enrollment`, Isolation)
+- `StaffAssignmentHttpTests.ExerciseIdRoutes_AnswerAForeignOrSiblingOrMissingExercise_WithTheBare404` (Isolation, allow-list)
+- `StaffAssignmentHttpTests.PatchAndDelete_OnAForeignExerciseForeignOrgMissingOrParticipantEnrollment_AreTheBare404` (Isolation)
+- `StaffAssignmentHttpTests.List_ShowsTheActiveStaffWithLeadMarker_AndTheNotYetEnrolledOrgPeopleAsCandidates` (reality check §3 planner read, lead marker)
+- `StaffAssignmentHttpTests.PatchRole_ChangesTheRole_RevokesTheTargetsSessions_AndRecordsIt` (Copilot 4 fold)
+- `StaffAssignmentHttpTests.Delete_SoftRevokes_RevokesTheTargetsSessions_AndThePersonCanBeGrantedAgain` (Last planner: removal succeeds; Copilot 4 fold; soft delete)
+- `StaffAssignmentHttpTests.LastPlanner_CannotBeRemovedOrDemoted_ByThemselvesOrAnOrgAdmin_AndASecondPlannerUnlocksIt` (Last planner)
+- `LastPlannerRaceTests.TwoPlannersRemovingEachOtherConcurrently_LeaveExactlyOnePlanner` (Last planner, race)
+- `EnrollmentSoftDeleteTests.Revoke_ThatRacesAConcurrentSetLead_ReadsTheLeadUnderTheLock_AndReleasesIt` (Option A under the guard's lock)
+- `RoleMatrixTests` rows: `POST /api/org/exercises/{exerciseId}/enrollments`, `PATCH`/`DELETE /api/staff/enrollments/{id}`; `CompositionRootWiringTests.TheOrgTierRoutes_TakeOnlyAllowListedExerciseIds` (`EnrollmentEndpoints.ExerciseIdRoutes`)
+
 ## A1b/A1c reality check (2026-10-19)
 Checked against what A1b (#608), A1c (#615) and Phase 2 (#642) shipped. The ACs above are history and stay; where this section contradicts one, **this section wins**. No ACs were ticked.
 

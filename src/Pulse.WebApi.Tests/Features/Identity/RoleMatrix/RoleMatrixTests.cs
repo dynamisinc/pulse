@@ -116,7 +116,7 @@ public sealed class RoleMatrixTests
 
                 var token = await world.TokenForAsync(role);
                 using var client = world.Client(host, token);
-                using var request = new HttpRequestMessage(new HttpMethod(method), Path(pattern, world))
+                using var request = new HttpRequestMessage(new HttpMethod(method), Path(method, pattern, world))
                 {
                     Content = row.Body == Multipart
                         ? CsvUpload()
@@ -151,11 +151,14 @@ public sealed class RoleMatrixTests
         }
     }
 
-    private static string Path(string pattern, RoleMatrixWorld world)
+    private static string Path(string method, string pattern, RoleMatrixWorld world)
     {
+        // story 20: DELETE /api/staff/enrollments/{id} would really REVOKE the evaluator for an allowed role (and break
+        // every later probe that needs the evaluator), so it targets a fresh id instead — allowed is then the bare 404.
+        var enrollmentTarget = method == "DELETE" ? Guid.NewGuid() : world.EvaluatorEnrollmentId;
         var path = pattern
             .Replace("{exerciseId:guid}", world.ExerciseId.ToString(), StringComparison.Ordinal)
-            .Replace("/api/staff/enrollments/{id:guid}", $"/api/staff/enrollments/{world.EvaluatorEnrollmentId}", StringComparison.Ordinal)
+            .Replace("/api/staff/enrollments/{id:guid}", $"/api/staff/enrollments/{enrollmentTarget}", StringComparison.Ordinal)
             .Replace("{kind}", "like", StringComparison.Ordinal);
 
         path = Regex.Replace(path, @"\{[^}:]+:guid\}", _ => Guid.NewGuid().ToString());
@@ -222,6 +225,12 @@ public sealed class RoleMatrixTests
         Probe("PUT /api/staff/chrome-settings", PlannerOnly);
         Probe("PUT /api/staff/practice-mode", PlannerOnly);
         Probe("PUT /api/staff/enrollments/{id:guid}/lead", PlannerOnly);
+
+        // ---- Staff assignment (story 20, #575a): planner on THIS exercise, or an org admin (org scope, own org). The
+        //      probes write nothing: {} is a 400 (role checked after the gate) and DELETE targets a fresh id (bare 404). ----
+        Probe("POST /api/org/exercises/{exerciseId:guid}/enrollments", OrgAdminOrPlanner);
+        Probe("PATCH /api/staff/enrollments/{id:guid}", OrgAdminOrPlanner);
+        Probe("DELETE /api/staff/enrollments/{id:guid}", OrgAdminOrPlanner);
 
         // ---- Lifecycle: per transition (live → paused is the controller's; LifecycleTransitionRoleTests has the rest). ----
         Probe("POST /api/staff/exercise-lifecycle/transition", ControllerOnly, "{\"to\":\"paused\"}");

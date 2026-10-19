@@ -152,10 +152,13 @@ public sealed class EnrollmentSoftDeleteTests
     }
 
     [RequiresDockerFact]
-    public async Task Revoke_ThatRacesAConcurrentSetLead_Is409LeadChangedRetry_AndChangesNothing()
+    public async Task Revoke_ThatRacesAConcurrentSetLead_ReadsTheLeadUnderTheLock_AndReleasesIt()
     {
-        // Gate-1 S-003: the row becomes the lead between FindReachableAsync's read and the save, so the soft delete would
-        // violate CK_Enrollments_DeletedAt_NotLead. The whole unit of work rolls back and the caller is told to retry.
+        // Gate-1 S-003, as story 20 (#575a) changed it: the row becomes the lead between FindReachableAsync's read and the
+        // revoke. The last-planner guard now X-locks the target and re-reads it inside the revoke's transaction, so the
+        // revoke SEES the new lead and releases it (Option A: lead cleared, swamped mode off) instead of tripping
+        // CK_Enrollments_DeletedAt_NotLead. (A lead change landing AFTER the lock blocks until the revoke commits, so the
+        // 409 lead-changed-retry catch is now defence in depth only.)
         var org = await _kit.SeedOrganizationAsync();
         var exercise = await _kit.SeedExerciseAsync(org);
         var (planner, _) = await _kit.SeedStaffAsync(org, exercise, "planner");
@@ -163,7 +166,7 @@ public sealed class EnrollmentSoftDeleteTests
         var (controller, enrollment) = await _kit.SeedStaffAsync(org, exercise, "controller");
         var (controllerSession, _) = await _kit.SeedStaffSessionAsync(controller, exercise, "controller");
 
-        var hook = new BeforeSaveHook(async () =>
+        var hook = new BeforeGuardLockHook(async () =>
         {
             await using var competing = _kit.ReadContext();
             await competing.Database.ExecuteSqlInterpolatedAsync($"UPDATE [Enrollments] SET [IsLead] = 1 WHERE [Id] = {enrollment}");
@@ -173,21 +176,19 @@ public sealed class EnrollmentSoftDeleteTests
         await using (context)
         {
             var result = await service.RevokeAsync(enrollment);
-            result.Outcome.Should().Be(EnrollmentOutcome.Conflict);
-            result.Error.Should().Be(EnrollmentService.LeadChangedRetryError);
+            result.Outcome.Should().Be(EnrollmentOutcome.Ok, "the guard re-read the row under its lock and saw the new lead");
         }
 
-        hook.Fired.Should().BeTrue("the competing lead change landed in the window");
+        hook.Fired.Should().BeTrue("the competing lead change landed in the window before the lock");
         await using var read = _kit.ReadContext();
         var row = await read.Enrollments.IgnoreQueryFilters().AsNoTracking().SingleAsync(e => e.Id == enrollment);
-        row.DeletedAt.Should().BeNull("nothing was saved");
-        row.IsLead.Should().BeTrue("the concurrent lead change stands; this revoke released nothing");
-        (await read.Sessions.AsNoTracking().SingleAsync(s => s.Id == controllerSession)).RevokedAt.Should().BeNull(
-            "the session revocation rolled back with the refused soft delete");
+        row.DeletedAt.Should().NotBeNull("the revoke committed");
+        row.IsLead.Should().BeFalse("the lead was released before the row was marked revoked");
+        (await read.Sessions.AsNoTracking().SingleAsync(s => s.Id == controllerSession)).RevokedAt.Should().NotBeNull();
         (await read.TelemetryEvents.IgnoreQueryFilters().AsNoTracking()
-                .CountAsync(t => t.ExerciseId == exercise && t.EventType == EnrollmentService.RevokedEventType))
-            .Should().Be(0);
-        _kit.Swamped.Calls.Should().BeEmpty("no lead was released, so the swamped-off path does not run");
+                .CountAsync(t => t.ExerciseId == exercise && t.EventType == EnrollmentService.LeadReleasedEventType))
+            .Should().Be(1, "the release is recorded in the revoke's unit of work");
+        _kit.Swamped.Calls.Should().ContainSingle("the released lead turns swamped mode off after commit");
     }
 
     [RequiresDockerFact]
@@ -227,16 +228,18 @@ public sealed class EnrollmentSoftDeleteTests
     }
 
     /// <summary>Runs one competing write just before the first save of the context it is attached to.</summary>
-    private sealed class BeforeSaveHook(Func<Task> competingWrite) : Microsoft.EntityFrameworkCore.Diagnostics.SaveChangesInterceptor
+    /// <summary>Runs a competing write just before the last-planner guard's lock statement (the no-op <c>SET Role = Role</c>).</summary>
+    private sealed class BeforeGuardLockHook(Func<Task> competingWrite) : Microsoft.EntityFrameworkCore.Diagnostics.DbCommandInterceptor
     {
         public bool Fired { get; private set; }
 
-        public override async ValueTask<Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<int>> SavingChangesAsync(
-            Microsoft.EntityFrameworkCore.Diagnostics.DbContextEventData eventData,
+        public override async ValueTask<Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<int>> NonQueryExecutingAsync(
+            System.Data.Common.DbCommand command,
+            Microsoft.EntityFrameworkCore.Diagnostics.CommandEventData eventData,
             Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<int> result,
             System.Threading.CancellationToken cancellationToken = default)
         {
-            if (!Fired)
+            if (!Fired && command.CommandText.Contains("[Role] = [e].[Role]", StringComparison.Ordinal))
             {
                 Fired = true;
                 await competingWrite();

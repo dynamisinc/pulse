@@ -351,7 +351,10 @@ public sealed class OrganizationScopeSweepTests
         // already tenant-resolved exercise" check (1).
         // identity-auth-roles/17 Gate-1 WR-005: ExerciseListService's canManage EXISTS — the caller's own planner
         // enrollment, correlated to the InOrganization-bounded exercise rows of the same query (1).
-        ["TenantChecked"] = 12,
+        // story 20 (#575a): +3 in EnrollmentService — the last-planner guard's lock statement and its under-lock re-read
+        // (both confined to the target's exercise, just resolved by FindReachableAsync inside the caller's own scope /
+        // InOrganization exercise), and the Staff tab list read (the exercise just resolved by FindReachableExerciseAsync).
+        ["TenantChecked"] = 15,
 
         // BootstrapService.ProvisionStaffAsync: the exercise this ops request itself created or host-resolved.
         ["ResolvedScope"] = 1,
