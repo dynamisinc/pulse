@@ -4,6 +4,7 @@ using System;
 using System.Linq;
 using System.Net;
 using System.Net.Http.Json;
+using System.Text.Json;
 using System.Threading.Tasks;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
@@ -62,6 +63,13 @@ public sealed class LifecycleTransitionRoleTests
         string from, string to, MatrixRole role, bool allowed)
     {
         var world = await RoleMatrixWorld.SeedAsync(_fixture, status: from);
+        if (to == "staged")
+        {
+            // exercise-build-golive/04: stage is readiness-gated, so the world is made stage-ready; this suite asserts
+            // the ROLE gate (the readiness refusal has its own tests below).
+            await MakeStageReadyAsync(world);
+        }
+
         using var host = new RoleMatrixHost(_fixture.ConnectionString!);
         using var client = world.Client(host, await world.TokenForAsync(role));
 
@@ -140,6 +148,7 @@ public sealed class LifecycleTransitionRoleTests
             await seed.SaveChangesAsync();
         }
 
+        await MakeStageReadyAsync(world);
         using var host = new RoleMatrixHost(_fixture.ConnectionString!);
 
         var (_, orgScope) = await world.StaffTokenAsync(orgAdmin, exerciseId: null, "orgAdmin");
@@ -151,6 +160,83 @@ public sealed class LifecycleTransitionRoleTests
         using var enrolledClient = world.Client(host, enrolled);
         using var staged = await enrolledClient.PostAsJsonAsync(LifecycleEndpoints.TransitionRoute, new { to = "staged" });
         staged.StatusCode.Should().Be(HttpStatusCode.OK, "holding the planner enrollment, the org admin stages as a planner");
+    }
+
+    /// <summary>
+    /// exercise-build-golive/04: the planner's stage is refused with 409 and the readiness body while a blocking item is
+    /// open — the role gate admits the planner, the readiness gate refuses — and nothing changes or is emitted.
+    /// </summary>
+    [RequiresDockerFact]
+    public async Task PlannerStage_WithAnOpenBlockingItem_Is409WithTheReadinessBody_AndChangesNothing()
+    {
+        // The matrix world has controllers enrolled but no scenario start time and no participant access.
+        var world = await RoleMatrixWorld.SeedAsync(_fixture, status: "build");
+        using var host = new RoleMatrixHost(_fixture.ConnectionString!);
+        using var planner = world.Client(host, await world.TokenForAsync(MatrixRole.Planner));
+
+        using var response = await planner.PostAsJsonAsync(LifecycleEndpoints.TransitionRoute, new { to = "staged" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var root = body.RootElement;
+        root.EnumerateObject().Select(p => p.Name).Should().Equal(["error", "message", "blocking"], "the 409 body shape is fixed");
+        root.GetProperty("error").GetString().Should().Be("readiness-blocking");
+        root.GetProperty("message").GetString().Should().NotBeNullOrWhiteSpace();
+
+        var blocking = root.GetProperty("blocking").EnumerateArray().ToList();
+        blocking.Select(i => i.GetProperty("id").GetString()).Should().Equal(
+            ["participant-access", "schedule-set"], "only the OPEN blocking items, in checklist order");
+        blocking.Should().OnlyContain(i =>
+            i.EnumerateObject().Select(p => p.Name).SequenceEqual(new[] { "id", "label", "status", "detail" })
+            && i.GetProperty("status").GetString() == "open"
+            && !string.IsNullOrWhiteSpace(i.GetProperty("label").GetString())
+            && !string.IsNullOrWhiteSpace(i.GetProperty("detail").GetString()));
+
+        (await world.ReadStatusAsync()).Should().Be("build", "a refused stage changes nothing");
+        await using var read = _fixture.CreateContext();
+        (await read.TelemetryEvents.IgnoreQueryFilters()
+            .CountAsync(e => e.ExerciseId == world.ExerciseId && e.EventType == "exercise.lifecycle.transitioned"))
+            .Should().Be(0, "a refused stage emits no transition event");
+        (await read.Exercises.AsNoTracking().SingleAsync(e => e.Id == world.ExerciseId)).FirstLiveAt.Should().BeNull();
+    }
+
+    /// <summary>
+    /// exercise-build-golive/04: with every evaluable blocking item ok (participant-name and sign-in-methods stay
+    /// notChecked), the planner's stage is applied.
+    /// </summary>
+    [RequiresDockerFact]
+    public async Task PlannerStage_WithNoOpenBlockingItem_Is200Staged()
+    {
+        var world = await RoleMatrixWorld.SeedAsync(_fixture, status: "build");
+        await MakeStageReadyAsync(world);
+        using var host = new RoleMatrixHost(_fixture.ConnectionString!);
+        using var planner = world.Client(host, await world.TokenForAsync(MatrixRole.Planner));
+
+        using var response = await planner.PostAsJsonAsync(LifecycleEndpoints.TransitionRoute, new { to = "staged" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, "notChecked items never block");
+        (await world.ReadStatusAsync()).Should().Be("staged");
+    }
+
+    /// <summary>exercise-build-golive/04: StartEx by the controller does NOT re-run the readiness check.</summary>
+    [RequiresDockerFact]
+    public async Task ControllerStartEx_WithAnOpenBlockingItem_Is200Live()
+    {
+        // Seeded straight into staged; schedule-set and participant-access are open.
+        var world = await RoleMatrixWorld.SeedAsync(_fixture, status: "staged");
+        using var host = new RoleMatrixHost(_fixture.ConnectionString!);
+        using var controller = world.Client(host, await world.TokenForAsync(MatrixRole.Controller));
+
+        using var response = await controller.PostAsJsonAsync(LifecycleEndpoints.TransitionRoute, new { to = "live" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, "readiness is shown at StartEx, never enforced");
+        (await world.ReadStatusAsync()).Should().Be("live");
+    }
+
+    private async Task MakeStageReadyAsync(RoleMatrixWorld world)
+    {
+        await using var context = _fixture.CreateContext();
+        await ExerciseLifecycleTestData.MakeStageReadyAsync(context, world.ExerciseId);
     }
 
     private async Task AssertTransitionEventAsync(RoleMatrixWorld world, MatrixRole role)

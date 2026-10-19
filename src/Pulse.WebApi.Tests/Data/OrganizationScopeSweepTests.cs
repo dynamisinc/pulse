@@ -139,7 +139,9 @@ public sealed class OrganizationScopeSweepTests
         // PauseOverlayServiceCollectionExtensions — the composed participant-overlay read both overlay publishers push,
         // by the SERVER-resolved exercise id (the steering tier's scope, or the committed lifecycle transition's row);
         // the same read the overlay GET performs, never a client-supplied id.
-        ["ResolvedScope"] = 29,
+        // exercise-build-golive/03: +1 for ExerciseReadinessService.GetAsync — the checklist's one read of the exercise
+        // row (status, schedule, time zone, chrome switches) by the IExerciseContext id.
+        ["ResolvedScope"] = 30,
 
         // orgAdmin startup seeder: +1 for OrgAdminSeedService, which resolves the seeded staff human by their
         // configured IdP ExternalSubject — the SAME resolve-by-subject read StaffLoginService and

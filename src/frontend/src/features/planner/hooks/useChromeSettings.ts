@@ -45,6 +45,7 @@ import {
   type ChromeSettingsError,
   type ChromeSettingsUpdate,
 } from '../services/chromeSettingsService'
+import { READINESS_QUERY_KEY } from './useReadiness'
 
 /**
  * The query key the chrome read uses. Exported so any staff surface can target
@@ -83,6 +84,8 @@ export function useSaveChromeSettings(): UseMutationResult<
     mutationFn: updateChromeSettings,
     onSuccess: saved => {
       queryClient.setQueryData(CHROME_SETTINGS_QUERY_KEY, saved)
+      // Go-live readiness reads this state (story 03): refresh it.
+      void queryClient.invalidateQueries({ queryKey: READINESS_QUERY_KEY })
     },
   })
 }
