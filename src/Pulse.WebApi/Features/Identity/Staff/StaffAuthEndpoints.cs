@@ -66,6 +66,12 @@ public static class StaffAuthEndpoints
         services.TryAddSingleton<IPasswordHasher<Person>>(_ => new PasswordHasher<Person>());
         services.AddScoped<StaffPasswordVerifier>();
 
+        // #602 W1: the wall-clock floor of both sign-in funnels. The production floors are the options class's OWN
+        // defaults, so a missing or blank setting never yields 0. Only test hosts set 0.
+        services.TryAddSingleton(TimeProvider.System);
+        services.AddOptions<StaffSignInTimingOptions>().Bind(configuration.GetSection(StaffSignInTimingOptions.SectionName));
+        services.AddSingleton<StaffSignInTiming>();
+
         services.AddScoped<StaffLoginService>();
 
         // identity-auth-roles/15: the org sign-in ({orgSlug?, email, password}) and the org choice.

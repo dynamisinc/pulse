@@ -121,7 +121,9 @@ public sealed class OrgSignInTestKit
         PulseDbContext context,
         ISessionIssuer issuer,
         IList<DynamisStaffAccount>? allowlist = null,
-        IPasswordHasher<Person>? hasher = null)
+        IPasswordHasher<Person>? hasher = null,
+        StaffSignInTiming? timing = null,
+        Microsoft.Extensions.Logging.ILogger<OrgStaffLoginService>? logger = null)
     {
         var verifier = TestPasswordVerifiers.New(hasher);
         return new(
@@ -134,7 +136,8 @@ public sealed class OrgSignInTestKit
                 })),
                 verifier),
             verifier,
+            timing ?? TestSignInTiming.NoFloor,
             issuer,
-            NullLogger<OrgStaffLoginService>.Instance);
+            logger ?? NullLogger<OrgStaffLoginService>.Instance);
     }
 }

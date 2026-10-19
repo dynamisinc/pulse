@@ -195,7 +195,7 @@ public sealed class StaffSignInFixedWorkTests
             context,
             new DynamisIdentityProvider(Options.Create(new DynamisIdentityProviderOptions { Accounts = [.. allowlist ?? []] })),
             verifier);
-        var result = await new StaffLoginService(context, provider, verifier, new RecordingSessionIssuer())
+        var result = await new StaffLoginService(context, provider, verifier, TestSignInTiming.NoFloor, new RecordingSessionIssuer())
             .LoginAsync(new StaffLoginRequest { Username = username, Secret = secret, ExerciseId = exerciseId.ToString() });
 
         result.Outcome.Should().Be(expected, "the scenario must take the path it claims to measure");

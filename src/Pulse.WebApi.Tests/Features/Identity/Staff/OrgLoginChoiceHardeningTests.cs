@@ -108,6 +108,30 @@ public sealed class OrgLoginChoiceHardeningTests
     }
 
     [RequiresDockerFact]
+    public async Task EveryChoiceRefusal_LogsItsServerOnlyReason_WhileTheResultStaysUniform()
+    {
+        // #602 review S4: the operator can tell WHY a choice was refused; the caller cannot.
+        var (token, orgB, _) = await SeedChoiceAsync(CreatingIp);
+        var foreignOrg = await _kit.SeedOrganizationAsync();
+        var logger = new Pulse.WebApi.Tests.Features.Identity.DayWord.ListLogger<OrgStaffLoginService>();
+
+        await using var context = _kit.Context();
+        var service = OrgSignInTestKit.Service(context, new RecordingSessionIssuer(), logger: logger);
+        var results = new[]
+        {
+            await service.ChooseAsync(new StaffLoginChooseRequest { ChoiceToken = SessionTokens.Generate(), OrgSlug = orgB }, CreatingIp),
+            await service.ChooseAsync(new StaffLoginChooseRequest { ChoiceToken = token, OrgSlug = orgB }, OtherIp),
+            await service.ChooseAsync(new StaffLoginChooseRequest { ChoiceToken = token, OrgSlug = foreignOrg.Slug }, CreatingIp),
+        };
+
+        results.Should().AllSatisfy(r => r.Should().BeEquivalentTo(OrgStaffLoginResult.Rejected(), "every refusal is the same uniform result"));
+        logger.Entries.Select(e => e.Message).Should().Equal(
+            "Staff org choice refused (unknown).",
+            "Staff org choice refused (ip-mismatch).",
+            "Staff org choice refused (non-candidate-org).");
+    }
+
+    [RequiresDockerFact]
     public async Task ARefusedRedemption_DoesNotPurge_SoItsTimingNeverDependsOnTheBacklog()
     {
         // #660 S-3: an unknown / foreign-IP / non-candidate choice is refused BEFORE the purge runs.

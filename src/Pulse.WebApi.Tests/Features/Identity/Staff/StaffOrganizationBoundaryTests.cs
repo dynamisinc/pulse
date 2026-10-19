@@ -117,6 +117,7 @@ public sealed class StaffOrganizationBoundaryTests
                 context,
                 ProviderFor("ctrl", "pw-123456", world.ExternalSubject, "Cross-Tenant Controller"),
                 TestPasswordVerifiers.New(),
+                TestSignInTiming.NoFloor,
                 issuer);
 
             var refused = await service.LoginAsync(new StaffLoginRequest
@@ -143,6 +144,7 @@ public sealed class StaffOrganizationBoundaryTests
                 context,
                 ProviderFor("ctrl", "pw-123456", world.ExternalSubject, "Cross-Tenant Controller"),
                 TestPasswordVerifiers.New(),
+                TestSignInTiming.NoFloor,
                 issuer);
 
             var allowed = await service.LoginAsync(new StaffLoginRequest
@@ -173,6 +175,7 @@ public sealed class StaffOrganizationBoundaryTests
                 context,
                 ProviderFor("ctrl", "pw-123456", world.ExternalSubject, "Cross-Tenant Controller"),
                 TestPasswordVerifiers.New(),
+                TestSignInTiming.NoFloor,
                 new RecordingSessionIssuer());
 
             await service.LoginAsync(new StaffLoginRequest
@@ -207,6 +210,7 @@ public sealed class StaffOrganizationBoundaryTests
                 context,
                 ProviderFor("ctrl", "pw-123456", world.ExternalSubject, "Cross-Tenant Controller"),
                 TestPasswordVerifiers.New(),
+                TestSignInTiming.NoFloor,
                 new RecordingSessionIssuer());
 
             await service.LoginAsync(new StaffLoginRequest

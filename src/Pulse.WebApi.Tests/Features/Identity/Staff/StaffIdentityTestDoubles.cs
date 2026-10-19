@@ -167,3 +167,19 @@ public static class TestPasswordVerifiers
     public static StaffPasswordVerifier New(IPasswordHasher<Person>? hasher = null) =>
         new(hasher ?? new PasswordHasher<Person>());
 }
+
+/// <summary>
+/// The staff sign-in wall-clock floor for funnels a test builds directly: BOTH floors explicitly 0 (#602 W1). The
+/// production floors are the options' own non-zero defaults; only tests switch them off.
+/// </summary>
+public static class TestSignInTiming
+{
+    /// <summary>No floor (both 0), on the system clock.</summary>
+    public static StaffSignInTiming NoFloor { get; } = new(
+        Microsoft.Extensions.Options.Options.Create(new StaffSignInTimingOptions
+        {
+            OrgSignInFloorMilliseconds = 0,
+            ExerciseBoundSignInFloorMilliseconds = 0,
+        }),
+        TimeProvider.System);
+}

@@ -35,7 +35,9 @@ using Pulse.WebApi.Features.Identity.Sessions;
 /// <b>Fixed slow-hash work (#602 M-2).</b> Every attempt that reaches credential checking (a valid body naming a real
 /// exercise) performs EXACTLY <see cref="SlowVerificationsPerAttempt"/> PBKDF2 verification — the provider's real one for
 /// a person with a Pulse password, otherwise a dummy (<see cref="StaffPasswordVerifier.PadTo"/>) — so an unknown handle,
-/// an allowlist-only staffer, a locked-out person and a Pulse-password person cost the same KDF work.
+/// an allowlist-only staffer, a locked-out person and a Pulse-password person cost the same KDF work. Every such attempt,
+/// success included, then waits out <see cref="StaffSignInTiming.ExerciseBoundSignInFloor"/> (#602 W1), so the non-KDF
+/// differences (the failure <c>UPDATE</c>, the telemetry write, session issuance) remain only above that floor.
 /// </para>
 /// </remarks>
 public sealed class StaffLoginService
@@ -56,6 +58,7 @@ public sealed class StaffLoginService
     private readonly PulseDbContext _dbContext;
     private readonly IIdentityProvider _identityProvider;
     private readonly StaffPasswordVerifier _passwordVerifier;
+    private readonly StaffSignInTiming _signInTiming;
     private readonly ISessionIssuer _sessionIssuer;
 
     /// <summary>Creates the staff-login funnel over its collaborators.</summary>
@@ -65,21 +68,25 @@ public sealed class StaffLoginService
     /// The request's counted slow-hash seam — the SAME instance the provider verifies through — used to pad every attempt
     /// to <see cref="SlowVerificationsPerAttempt"/>.
     /// </param>
+    /// <param name="signInTiming">The wall-clock floor every attempt past validation ends at (#602 W1).</param>
     /// <param name="sessionIssuer">The story-03 session-issuance seam this login calls to mint the session.</param>
     public StaffLoginService(
         PulseDbContext dbContext,
         IIdentityProvider identityProvider,
         StaffPasswordVerifier passwordVerifier,
+        StaffSignInTiming signInTiming,
         ISessionIssuer sessionIssuer)
     {
         ArgumentNullException.ThrowIfNull(dbContext);
         ArgumentNullException.ThrowIfNull(identityProvider);
         ArgumentNullException.ThrowIfNull(passwordVerifier);
+        ArgumentNullException.ThrowIfNull(signInTiming);
         ArgumentNullException.ThrowIfNull(sessionIssuer);
 
         _dbContext = dbContext;
         _identityProvider = identityProvider;
         _passwordVerifier = passwordVerifier;
+        _signInTiming = signInTiming;
         _sessionIssuer = sessionIssuer;
     }
 
@@ -98,11 +105,15 @@ public sealed class StaffLoginService
         // #602 M-2: an attempt that reaches credential checking ends having performed exactly SlowVerificationsPerAttempt
         // PBKDF2 verifications (the provider's real one, or a dummy). Body / exercise validation (400) precedes any
         // credential or person lookup, so it needs none.
+        var attemptStart = _signInTiming.Start();
         var slowVerificationsTarget = _passwordVerifier.SlowVerifications + SlowVerificationsPerAttempt;
         var result = await AuthenticateAndIssueAsync(request, cancellationToken);
         if (result.Outcome != StaffLoginOutcome.Invalid)
         {
             _passwordVerifier.PadTo(slowVerificationsTarget, request.Secret!);
+
+            // #602 W1: then the wall-clock floor on every outcome past validation (success included).
+            await _signInTiming.WaitForFloorAsync(attemptStart, _signInTiming.ExerciseBoundSignInFloor, cancellationToken);
         }
 
         return result;
@@ -176,7 +187,8 @@ public sealed class StaffLoginService
         {
             if (passwordPerson is not null)
             {
-                // A failed Pulse-password verification counts toward the person's lockout (saved with the event below).
+                // A failed Pulse-password verification counts toward the person's lockout: one atomic UPDATE executed
+                // NOW, in its own statement (#602 L-4), not staged with the failure event saved below.
                 await StaffSignInLockout.RecordFailureAsync(_dbContext, passwordPerson, now, cancellationToken);
             }
 

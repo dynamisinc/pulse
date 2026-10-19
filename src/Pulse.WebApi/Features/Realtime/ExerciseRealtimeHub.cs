@@ -236,11 +236,27 @@ public sealed partial class ExerciseRealtimeHub : Hub
             return;
         }
 
+        // #602 review S1: register and re-check the session BEFORE joining any group. A session revoked (or switched to
+        // another exercise) before the re-read is cut without ever entering the staff group.
+        if (!await RegisterLiveAsync(principal.SessionId, verifiedExerciseId))
+        {
+            return;
+        }
+
         // Both groups derive from the SAME verified session exercise — the staff group can never point elsewhere.
         await Groups.AddToGroupAsync(Context.ConnectionId, GroupNameFor(verifiedExerciseId));
         await Groups.AddToGroupAsync(Context.ConnectionId, StaffGroupNameFor(verifiedExerciseId));
-        if (!await RegisterLiveAsync(principal.SessionId, verifiedExerciseId))
+
+        // A revoke whose Take ran AFTER the re-read but BEFORE these joins found the registration and aborted the
+        // connection, but its group removal ran before the joins and so removed nothing. The registration being gone is
+        // the signal: leave the groups here. What remains is the microsecond span between these joins and this check,
+        // during which the connection is already aborted (the revoker's Abort ran), so no frame is written to it.
+        if (_connections is not null && !_connections.IsRegistered(principal.SessionId, Context.ConnectionId))
         {
+            await Groups.RemoveFromGroupAsync(Context.ConnectionId, StaffGroupNameFor(verifiedExerciseId));
+            await Groups.RemoveFromGroupAsync(Context.ConnectionId, GroupNameFor(verifiedExerciseId));
+            Context.Items.Remove(RegisteredSessionItemKey);
+            Context.Abort();
             return;
         }
 
@@ -248,12 +264,15 @@ public sealed partial class ExerciseRealtimeHub : Hub
     }
 
     /// <summary>
-    /// Registers a VERIFIED STAFF connection under its session, THEN re-reads the session (#602 L-2). The revoke rule commits the
-    /// revocation and only then <see cref="SessionConnectionRegistry.Take"/>s the session's connections; a connection
-    /// verified before that commit but registered after the take would otherwise survive the revocation. Registering
-    /// first and re-checking second closes the window: either the take sees the registration (and cuts it), or this
-    /// re-read runs after the commit and sees the session revoked — then the connection is unregistered, removed from
-    /// the groups it joined, and aborted (fail closed). A re-check that cannot complete aborts it too (reconnectable).
+    /// Registers a VERIFIED STAFF connection under its session, THEN re-reads the session (#602 L-2), all BEFORE the
+    /// connection joins any group (S1). The revoke rule commits the revocation and only then
+    /// <see cref="SessionConnectionRegistry.Take"/>s the session's connections. A connection verified before that commit
+    /// but registered after the take would otherwise survive the revocation. Registering first and re-checking second
+    /// closes that window: either the take sees the registration (and cuts it), or this re-read runs after the commit and
+    /// sees the session revoked. The re-read also requires the session to still be bound to <paramref name="exerciseId"/>
+    /// (S2): an active-exercise switch that moved the session since verification cuts the connection, so the client
+    /// reconnects onto the new exercise. Either way the connection is unregistered and aborted (fail closed), with no
+    /// group joined. A re-check that cannot complete aborts it too (reconnectable).
     /// </summary>
     /// <returns><c>true</c> when the connection may stay; <c>false</c> when it was cut.</returns>
     private async Task<bool> RegisterLiveAsync(Guid sessionId, Guid exerciseId)
@@ -274,7 +293,7 @@ public sealed partial class ExerciseRealtimeHub : Hub
             var session = await _dbContext.Sessions
                 .AsNoTracking()
                 .SingleOrDefaultAsync(s => s.Id == sessionId, connectionAborted);
-            live = session is not null && session.IsLive(DateTimeOffset.UtcNow);
+            live = session is not null && session.IsLive(DateTimeOffset.UtcNow) && session.ExerciseId == exerciseId;
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !connectionAborted.IsCancellationRequested)
         {
@@ -298,8 +317,6 @@ public sealed partial class ExerciseRealtimeHub : Hub
 
         _connections.Unregister(sessionId, Context.ConnectionId);
         Context.Items.Remove(RegisteredSessionItemKey);
-        await Groups.RemoveFromGroupAsync(Context.ConnectionId, StaffGroupNameFor(exerciseId));
-        await Groups.RemoveFromGroupAsync(Context.ConnectionId, GroupNameFor(exerciseId));
         Context.Abort();
         return false;
     }

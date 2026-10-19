@@ -1,6 +1,5 @@
 namespace Pulse.WebApi.Features.Identity.Staff;
 
-using System.Data.Common;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
@@ -37,14 +36,23 @@ using Pulse.WebApi.Features.Identity.Sessions;
 /// <see cref="SlowVerificationsPerAttempt"/> PBKDF2 verifications: the real ones the provider performs (one per tried
 /// candidate with a Pulse password), padded with dummy ones (<see cref="StaffPasswordVerifier.PadTo"/>). So an unknown
 /// slug, an unknown email, an allowlist-only staffer, a locked candidate, one or five candidates, success and failure all
-/// cost the same KDF work — the count is never an existence, lock-state or candidate-count oracle.
+/// cost the same KDF work: the slow-hash count does not vary with existence, lock state or candidate count.
 /// </para>
 /// <para>
-/// <b>What M-2 does NOT claim (#660 W-2).</b> Only the slow-hash (KDF) work is equalized — the dominant, tens-of-ms cost
-/// per verification. The paths still differ in their non-KDF work: database round-trips (the candidate / slug / staff-facet
-/// reads), the atomic failure <c>UPDATE</c> of a tried candidate, the audit / telemetry writes, and session issuance on
-/// success. Those residual differences are at millisecond scale, are bounded by the per-IP staff-login rate limiter, and
-/// are NOT claimed uniform.
+/// <b>Plus a wall-clock floor (#602 W1).</b> Equal KDF work alone still leaves the non-KDF work different:
+/// <list type="bullet">
+///   <item><description>database round-trips (the candidate, slug and staff-facet reads);</description></item>
+///   <item><description>the atomic failure <c>UPDATE</c> of each tried candidate, which an unknown email never does;</description></item>
+///   <item><description>the audit and telemetry writes;</description></item>
+///   <item><description>session issuance on success.</description></item>
+/// </list>
+/// So every attempt that passed body validation, success included, then waits until
+/// <see cref="StaffSignInTiming.OrgSignInFloor"/> has elapsed since it started (<see cref="StaffSignInTiming"/>). The
+/// claim is exactly this: equal KDF work plus a wall-clock floor. Residual differences remain only for an attempt whose
+/// work runs past the floor, which the defaults are sized to avoid in steady state. Those are bounded by the per-IP
+/// staff-login rate limiter and are not claimed uniform. The org choice (<see cref="ChooseAsync"/>) has no floor: it
+/// verifies no password, and its paths differ only for a caller who already holds a valid 256-bit choice token, which
+/// itself discloses the candidate orgs.
 /// </para>
 /// <para>
 /// <b>The org choice (#602 L-3).</b> A choice is redeemable only from the IP hash it was created from (a mismatch is the
@@ -104,6 +112,7 @@ public sealed partial class OrgStaffLoginService
     private readonly PulseDbContext _dbContext;
     private readonly IIdentityProvider _identityProvider;
     private readonly StaffPasswordVerifier _passwordVerifier;
+    private readonly StaffSignInTiming _signInTiming;
     private readonly ISessionIssuer _sessionIssuer;
     private readonly ILogger<OrgStaffLoginService> _logger;
 
@@ -114,24 +123,28 @@ public sealed partial class OrgStaffLoginService
     /// The request's counted slow-hash seam — the SAME instance the provider verifies through — used to pad every attempt
     /// to <see cref="SlowVerificationsPerAttempt"/>.
     /// </param>
+    /// <param name="signInTiming">The wall-clock floor every validated attempt ends at (#602 W1).</param>
     /// <param name="sessionIssuer">The session-issuance seam.</param>
     /// <param name="logger">The structured log the no-resolvable-org attempts go to (never secrets).</param>
     public OrgStaffLoginService(
         PulseDbContext dbContext,
         IIdentityProvider identityProvider,
         StaffPasswordVerifier passwordVerifier,
+        StaffSignInTiming signInTiming,
         ISessionIssuer sessionIssuer,
         ILogger<OrgStaffLoginService> logger)
     {
         ArgumentNullException.ThrowIfNull(dbContext);
         ArgumentNullException.ThrowIfNull(identityProvider);
         ArgumentNullException.ThrowIfNull(passwordVerifier);
+        ArgumentNullException.ThrowIfNull(signInTiming);
         ArgumentNullException.ThrowIfNull(sessionIssuer);
         ArgumentNullException.ThrowIfNull(logger);
 
         _dbContext = dbContext;
         _identityProvider = identityProvider;
         _passwordVerifier = passwordVerifier;
+        _signInTiming = signInTiming;
         _sessionIssuer = sessionIssuer;
         _logger = logger;
     }
@@ -160,6 +173,7 @@ public sealed partial class OrgStaffLoginService
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
+        var attemptStart = _signInTiming.Start();
 
         var handle = request.Email?.Trim();
         if (string.IsNullOrEmpty(handle) || handle.Length > Person.MaxEmailLength)
@@ -189,6 +203,10 @@ public sealed partial class OrgStaffLoginService
             : await LoginWithSlugAsync(handle, email, request.Password, slug, now, cancellationToken);
 
         _passwordVerifier.PadTo(slowVerificationsTarget, request.Password);
+
+        // #602 W1: then the wall-clock floor, on EVERY validated outcome (success included), so the non-KDF differences
+        // (failure UPDATEs, audit writes, session issue) hide under it.
+        await _signInTiming.WaitForFloorAsync(attemptStart, _signInTiming.OrgSignInFloor, cancellationToken);
         return result;
     }
 
@@ -241,14 +259,17 @@ public sealed partial class OrgStaffLoginService
 
         // #602 L-3: a choice presented from another IP than the one it was created from is the SAME uniform refusal as an
         // unknown token (no oracle), and is left unconsumed.
-        if (choice is null
-            || choice.ConsumedAt is not null
-            || choice.ExpiresAt <= now
-            || !CryptographicOperations.FixedTimeEquals(
+        // #602 review S4: the server-only refusal reason goes to the log; the HTTP response stays the uniform empty 401.
+        var refusal = choice is null ? "unknown"
+            : choice.ConsumedAt is not null ? "spent"
+            : choice.ExpiresAt <= now ? "expired"
+            : !CryptographicOperations.FixedTimeEquals(
                 Encoding.UTF8.GetBytes(choice.CreatedFromIpHash),
-                Encoding.UTF8.GetBytes(HashChoiceIp(remoteIp))))
+                Encoding.UTF8.GetBytes(HashChoiceIp(remoteIp))) ? "ip-mismatch"
+            : null;
+        if (refusal is not null || choice is null)
         {
-            LogChoiceRefused();
+            LogChoiceRefused(refusal ?? "unknown");
             return OrgStaffLoginResult.Rejected();
         }
 
@@ -264,7 +285,7 @@ public sealed partial class OrgStaffLoginService
 
         if (organization is null || candidate is null)
         {
-            LogChoiceRefused();
+            LogChoiceRefused("non-candidate-org");
             return OrgStaffLoginResult.Rejected();
         }
 
@@ -280,7 +301,7 @@ public sealed partial class OrgStaffLoginService
 
         if (consumed != 1)
         {
-            LogChoiceRefused();
+            LogChoiceRefused("spent");
             return OrgStaffLoginResult.Rejected();
         }
 
@@ -748,7 +769,7 @@ public sealed partial class OrgStaffLoginService
                 .Where(c => spent.Contains(c.Id))
                 .ExecuteDeleteAsync(cancellationToken);
         }
-        catch (DbException ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             LogChoicePurgeFailed(ex);
         }
@@ -772,8 +793,8 @@ public sealed partial class OrgStaffLoginService
     [LoggerMessage(
         EventId = 2,
         Level = LogLevel.Information,
-        Message = "Staff org choice refused (unknown, spent, expired, or non-candidate organization).")]
-    private partial void LogChoiceRefused();
+        Message = "Staff org choice refused ({Reason}).")]
+    private partial void LogChoiceRefused(string reason);
 
     [LoggerMessage(
         EventId = 3,

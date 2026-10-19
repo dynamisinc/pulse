@@ -10,7 +10,8 @@ using Pulse.WebApi.Data.Entities;
 /// instance per request, which counts them. The login funnels then pad the request to a FIXED number of slow
 /// verifications (<see cref="PadTo"/>), so the PBKDF2 work a request performs is independent of whether the slug or
 /// email exists, whether the person has a Pulse password, whether a candidate is locked out, and how many candidates
-/// share the email — closing the timing side channels of a variable verification count.
+/// share the email. This equalizes the KDF work; the funnels' wall-clock floor (<c>StaffSignInTiming</c>) then hides the
+/// non-KDF differences, which remain only above that floor.
 /// </summary>
 /// <remarks>
 /// <para>

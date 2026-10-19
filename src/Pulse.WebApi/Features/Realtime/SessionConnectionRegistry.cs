@@ -1,6 +1,5 @@
 namespace Pulse.WebApi.Features.Realtime;
 
-using System.Collections.Concurrent;
 using Microsoft.AspNetCore.SignalR;
 
 /// <summary>
@@ -28,8 +27,12 @@ using Microsoft.AspNetCore.SignalR;
 /// <b>The register-after-take race.</b> A revocation commits, then <see cref="Take"/>s the session's connections; a
 /// connection whose connect-time check ran before the commit but whose <see cref="Register"/> lands after the take is not
 /// in that take. For a STAFF connection (the staff group carries staff-only content) the hub therefore re-reads the
-/// session AFTER registering and cuts the connection itself if it is no longer live
-/// (<c>ExerciseRealtimeHub.RegisterLiveAsync</c>): every interleaving is covered by one side or the other. A
+/// session AFTER registering, and BEFORE joining any group. It cuts the connection itself if the session is no longer live
+/// or no longer bound to the connection's exercise (<c>ExerciseRealtimeHub.RegisterLiveAsync</c>). A take landing
+/// between that re-read and the group joins is caught by the hub's post-join <see cref="IsRegistered"/> check. Each
+/// operation here is atomic under one lock, so no registration can be lost to a concurrent unregister (adversarial
+/// review W2). What is NOT claimed: the instant between the hub's group joins and its post-join check. In that instant a
+/// connection whose take already ran sits in the groups, but it is already aborted, so it is not a delivery channel. A
 /// participant / read-only connection is registered without that re-read — its path deliberately never opens the
 /// database — so the same narrow window remains for it (it can only keep the exercise-wide group it was already entitled
 /// to at connect time, until it disconnects). Accepted as documented (#602 review); the participant-side revoke race is
@@ -38,7 +41,14 @@ using Microsoft.AspNetCore.SignalR;
 /// </remarks>
 public sealed class SessionConnectionRegistry
 {
-    private readonly ConcurrentDictionary<Guid, ConcurrentDictionary<string, RegisteredConnection>> _bySession = new();
+    // #602 adversarial-review W2: ONE lock over plain dictionaries, not nested ConcurrentDictionaries. With nested
+    // concurrent sets, "unregister A, see the set empty, drop the set" and "fetch the set, add B" are separate atomic
+    // steps. B could fetch the set before A dropped it, then write into the orphan, and a later revoke's Take would miss
+    // B. A single lock makes each operation atomic as a whole. At this scale (one register on connect, one unregister on
+    // disconnect, one take per revoked session, all O(1) in-memory) contention is negligible. It is also simpler to prove
+    // than a lock-free verify-and-retry loop.
+    private readonly object _gate = new();
+    private readonly Dictionary<Guid, Dictionary<string, RegisteredConnection>> _bySession = [];
 
     /// <summary>Records that <paramref name="context"/> was opened under <paramref name="sessionId"/>.</summary>
     /// <param name="sessionId">The persisted session id of the connecting principal.</param>
@@ -48,8 +58,16 @@ public sealed class SessionConnectionRegistry
     {
         ArgumentNullException.ThrowIfNull(context);
 
-        _bySession.GetOrAdd(sessionId, _ => new ConcurrentDictionary<string, RegisteredConnection>(StringComparer.Ordinal))
-            [context.ConnectionId] = new RegisteredConnection(exerciseId, context);
+        lock (_gate)
+        {
+            if (!_bySession.TryGetValue(sessionId, out var connections))
+            {
+                connections = new Dictionary<string, RegisteredConnection>(StringComparer.Ordinal);
+                _bySession[sessionId] = connections;
+            }
+
+            connections[context.ConnectionId] = new RegisteredConnection(exerciseId, context);
+        }
     }
 
     /// <summary>Forgets a connection (on disconnect).</summary>
@@ -57,23 +75,41 @@ public sealed class SessionConnectionRegistry
     /// <param name="connectionId">The connection id.</param>
     public void Unregister(Guid sessionId, string connectionId)
     {
-        if (_bySession.TryGetValue(sessionId, out var connections))
+        lock (_gate)
         {
-            connections.TryRemove(connectionId, out _);
-            if (connections.IsEmpty)
+            if (_bySession.TryGetValue(sessionId, out var connections)
+                && connections.Remove(connectionId)
+                && connections.Count == 0)
             {
-                _bySession.TryRemove(new KeyValuePair<Guid, ConcurrentDictionary<string, RegisteredConnection>>(sessionId, connections));
+                _bySession.Remove(sessionId);
             }
+        }
+    }
+
+    /// <summary>Whether <paramref name="connectionId"/> is still registered under <paramref name="sessionId"/>.</summary>
+    /// <param name="sessionId">The session.</param>
+    /// <param name="connectionId">The connection id.</param>
+    /// <returns><c>false</c> once a revoke's <see cref="Take"/> (or an unregister) removed it.</returns>
+    public bool IsRegistered(Guid sessionId, string connectionId)
+    {
+        lock (_gate)
+        {
+            return _bySession.TryGetValue(sessionId, out var connections) && connections.ContainsKey(connectionId);
         }
     }
 
     /// <summary>Removes and returns every connection registered under <paramref name="sessionId"/>.</summary>
     /// <param name="sessionId">The revoked session.</param>
     /// <returns>The connections that were open under it.</returns>
-    public IReadOnlyList<(string ConnectionId, RegisteredConnection Connection)> Take(Guid sessionId) =>
-        _bySession.TryRemove(sessionId, out var connections)
-            ? connections.Select(pair => (pair.Key, pair.Value)).ToList()
-            : [];
+    public IReadOnlyList<(string ConnectionId, RegisteredConnection Connection)> Take(Guid sessionId)
+    {
+        lock (_gate)
+        {
+            return _bySession.Remove(sessionId, out var connections)
+                ? connections.Select(pair => (pair.Key, pair.Value)).ToList()
+                : [];
+        }
+    }
 
     /// <summary>One registered connection.</summary>
     /// <param name="ExerciseId">The exercise whose groups it joined.</param>
