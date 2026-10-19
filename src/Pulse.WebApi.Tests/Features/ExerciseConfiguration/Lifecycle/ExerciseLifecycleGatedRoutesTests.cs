@@ -69,6 +69,9 @@ public sealed class ExerciseLifecycleGatedRoutesTests
     [InlineData("/api/ops/bootstrap-exercise")]
     [InlineData("/health")]
     [InlineData("/health/ready")]
+    // The hub stays un-gated on CONNECT by design (the overlay client re-GETs /api/overlay-state on reconnect). What a
+    // connected participant RECEIVES after EndEx is gated on the send side instead (#375; SignalRFeedBroadcasterTests,
+    // ExerciseRealtimeHubLifecycleTests).
     [InlineData("/hubs/exercise")]
     public void IsGated_NeverTouchesTheAuthStaffOpsOrHealthSurface(string path) =>
         ExerciseLifecycleGatedRoutes.IsGated(new PathString(path)).Should().BeFalse(

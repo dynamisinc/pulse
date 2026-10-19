@@ -175,6 +175,31 @@ public static class ExerciseLifecycleStates
         && canonical is Staged or Live or Paused;
 
     /// <summary>
+    /// <b>The live-push rule (#375).</b> Whether a hub frame (<c>PostReceived</c> and the other
+    /// <c>IFeedBroadcaster</c> frames) may be sent to the exercise-wide participant group in
+    /// <paramref name="state"/>. Outside it, <c>SignalRFeedBroadcaster</c> sends to the staff-only group instead.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Equal to <see cref="IsParticipantAccessible"/> today, by design — but a SEPARATE question.</b> REST
+    /// access answers "may a participant READ this exercise's surface?"; this answers "may new content be PUSHED
+    /// live into an open participant tab?". A planned follow-up opens participant REST <i>reads</i> in
+    /// <c>completed</c> (a browsable after-action world); live pushes must stay closed there, because the run is
+    /// over and nothing should keep arriving. Keeping the two predicates apart means that change edits
+    /// <see cref="IsParticipantAccessible"/> alone and cannot silently reopen the hub. Do not re-express one in
+    /// terms of the other.
+    /// </para>
+    /// <para>
+    /// Fails closed exactly like the access rule: an unknown literal or a missing row is never push-open.
+    /// </para>
+    /// </remarks>
+    /// <param name="state">A canonical or legacy lifecycle literal.</param>
+    /// <returns><c>true</c> when live frames may reach the exercise's participants.</returns>
+    public static bool IsLivePushOpen(string? state) =>
+        TryParse(state, out var canonical)
+        && canonical is Staged or Live or Paused;
+
+    /// <summary>
     /// <b>The overlay-endpoint carve-out (Tier-2 human ruling, decision 2).</b> Whether
     /// <c>GET /api/overlay-state</c> — and ONLY that route — is served in <paramref name="state"/>: every
     /// participant-accessible state, plus <c>completed</c>.
@@ -333,11 +358,13 @@ public sealed record ExerciseLifecycleBehaviour
 
     /// <summary>Whether participant sim WRITES (post/reply/react) are meaningful in this state.</summary>
     /// <remarks>
-    /// <b>Advisory in this story, not enforced by it.</b> <c>paused</c> reports <c>false</c> while
-    /// <see cref="ParticipantAccessOpen"/> stays <c>true</c> (the holding page must render), but this story's
-    /// gating middleware refuses service on <see cref="ParticipantAccessOpen"/> alone — refusing a write in a
-    /// paused world is CTL-023's tiered-pause behaviour (world-steering), and adding a second, parallel
-    /// enforcement of it here is exactly the duplication hazard 1 forbids.
+    /// <b>Enforced (#379).</b> <c>paused</c> reports <c>false</c> while <see cref="ParticipantAccessOpen"/> stays
+    /// <c>true</c> (the holding page must render), so the gating middleware still SERVES a paused exercise; the
+    /// write refusal is <c>Pulse.WebApi.Features.EngineRuntime.Steering.ParticipantWriteGate</c>, applied to every
+    /// participant write route by <c>Pulse.WebApi.Features.Identity.SharedAccess.ParticipantWritePauseFilter</c>
+    /// (<c>.RefuseWhenWritesPaused()</c>): a participant post, reply, reaction, follow, media upload or post edit
+    /// gets <c>409 {"reason":"frozen"}</c> before its handler runs, staff sessions excepted. That gate is the one
+    /// enforcement point (it also covers the Freeze pause tier); this middleware does not duplicate it.
     /// </remarks>
     public bool ParticipantWritesAccepted { get; init; }
 

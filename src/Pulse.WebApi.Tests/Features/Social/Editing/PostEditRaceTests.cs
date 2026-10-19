@@ -11,6 +11,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
+using Pulse.WebApi.Features.EngineRuntime.Steering;
 using Pulse.WebApi.Features.Identity.EasyLogin;
 using Pulse.WebApi.Features.Social;
 using Pulse.WebApi.Features.Social.Editing;
@@ -50,6 +51,7 @@ public sealed class PostEditRaceTests
             }),
             new StubCurrentStaffSessionAccessor(null),
             new ExerciseFactsReader(db),
+            new ParticipantWriteGate(new ExerciseFactsReader(db)),
             broadcaster,
             new NarrowProjector(),
             time,

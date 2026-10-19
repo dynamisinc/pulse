@@ -35,9 +35,9 @@ using Pulse.WebApi.Features.Social.Follows;
 /// </para>
 /// <para>
 /// <b>When (DF-30).</b> The window is 15 minutes of SERVER wall clock from <see cref="Post.CreatedWallClock"/>
-/// (<see cref="TimeProvider"/>); an edit is also refused while posting is refused — pause tier Freeze, a frozen
-/// scenario clock, or a lifecycle that does not accept participant writes (paused or ended). The window keeps running
-/// meanwhile.
+/// (<see cref="TimeProvider"/>); an edit is also refused while posting is refused — the shared
+/// <see cref="ParticipantWriteGate"/>: pause tier Freeze, or a lifecycle that does not accept participant writes
+/// (paused or ended). The window keeps running meanwhile.
 /// </para>
 /// <para>
 /// <b>An edit is not a new post (DF-33).</b> One transaction writes the <see cref="PostEdit"/>, the post's new text and
@@ -58,11 +58,11 @@ public sealed partial class PostEditService
     private readonly ICurrentSessionPersonaAccessor _sessionPersonaAccessor;
     private readonly ICurrentStaffSessionAccessor _staffSessionAccessor;
     private readonly ExerciseFactsReader _exerciseFacts;
+    private readonly ParticipantWriteGate _writeGate;
     private readonly IFeedBroadcaster _broadcaster;
     private readonly IParticipantPostProjector _projector;
     private readonly TimeProvider _timeProvider;
     private readonly IExerciseClock? _exerciseClock;
-    private readonly PauseTierRegistry? _pauseTiers;
     private readonly ILogger<PostEditService> _logger;
     private readonly IScenarioNow _scenarioNow;
 
@@ -72,12 +72,14 @@ public sealed partial class PostEditService
     /// <param name="sessionPersonaAccessor">The caller's session-bound persona (the participant arm).</param>
     /// <param name="staffSessionAccessor">The caller's live staff session, if any (refused, DF-32).</param>
     /// <param name="exerciseFacts">The exercise's lifecycle status and time zone.</param>
+    /// <param name="writeGate">
+    /// The shared held-world refusal (#379): Freeze tier, or a lifecycle refusing participant writes.
+    /// </param>
     /// <param name="broadcaster">The exercise-group fan-out (<c>PostEdited</c>).</param>
     /// <param name="projector">The participant projection of the edited post (the 200 body).</param>
     /// <param name="timeProvider">The server wall clock (window, <see cref="PostEdit.EditedAt"/>, telemetry).</param>
     /// <param name="scenarioNow">The exercise's scenario now for telemetry (engine-runtime/08, CLK-2: clock, else latest post, else now).</param>
     /// <param name="exerciseClock">The live scenario clock, when the host runs one.</param>
-    /// <param name="pauseTiers">The pause-tier registry, when the host runs one (Freeze refuses an edit).</param>
     /// <param name="logger">Diagnostics (a failed push after commit); optional.</param>
     public PostEditService(
         PulseDbContext dbContext,
@@ -85,12 +87,12 @@ public sealed partial class PostEditService
         ICurrentSessionPersonaAccessor sessionPersonaAccessor,
         ICurrentStaffSessionAccessor staffSessionAccessor,
         ExerciseFactsReader exerciseFacts,
+        ParticipantWriteGate writeGate,
         IFeedBroadcaster broadcaster,
         IParticipantPostProjector projector,
         TimeProvider timeProvider,
         IScenarioNow scenarioNow,
         IExerciseClock? exerciseClock = null,
-        PauseTierRegistry? pauseTiers = null,
         ILogger<PostEditService>? logger = null)
     {
         ArgumentNullException.ThrowIfNull(dbContext);
@@ -98,6 +100,7 @@ public sealed partial class PostEditService
         ArgumentNullException.ThrowIfNull(sessionPersonaAccessor);
         ArgumentNullException.ThrowIfNull(staffSessionAccessor);
         ArgumentNullException.ThrowIfNull(exerciseFacts);
+        ArgumentNullException.ThrowIfNull(writeGate);
         ArgumentNullException.ThrowIfNull(broadcaster);
         ArgumentNullException.ThrowIfNull(projector);
         ArgumentNullException.ThrowIfNull(timeProvider);
@@ -108,11 +111,11 @@ public sealed partial class PostEditService
         _sessionPersonaAccessor = sessionPersonaAccessor;
         _staffSessionAccessor = staffSessionAccessor;
         _exerciseFacts = exerciseFacts;
+        _writeGate = writeGate;
         _broadcaster = broadcaster;
         _projector = projector;
         _timeProvider = timeProvider;
         _exerciseClock = exerciseClock;
-        _pauseTiers = pauseTiers;
         _logger = logger ?? NullLogger<PostEditService>.Instance;
         _scenarioNow = scenarioNow;
     }
@@ -204,7 +207,7 @@ public sealed partial class PostEditService
         }
 
         var facts = await _exerciseFacts.GetAsync(exerciseId, cancellationToken);
-        if (IsPostingRefused(exerciseId, facts))
+        if (_writeGate.IsRefused(exerciseId, facts?.Status))
         {
             return PostEditResult.Refused(PostEditRefusalReasons.Frozen);
         }
@@ -387,27 +390,6 @@ public sealed partial class PostEditService
     }
 
     /// <summary>
-    /// Whether posting is refused in the exercise right now (DF-30, amended 10/15): pause tier Freeze, a frozen
-    /// scenario clock, or a lifecycle state that does not accept participant writes
-    /// (<see cref="ExerciseLifecycleBehaviour.ParticipantWritesAccepted"/>: paused, completed, archived, build). An
-    /// unreadable exercise row is refused too (fail closed).
-    /// </summary>
-    private bool IsPostingRefused(Guid exerciseId, ExerciseFacts? facts)
-    {
-        if (_pauseTiers?.GetTier(exerciseId) == PauseTier.Freeze)
-        {
-            return true;
-        }
-
-        if (_exerciseClock?.IsFrozen(exerciseId) == true)
-        {
-            return true;
-        }
-
-        return !ExerciseLifecycleStates.BehaviourOf(facts?.Status).ParticipantWritesAccepted;
-    }
-
-    /// <summary>
     /// The participant view of the post for the 200 body, with the caller's viewer state (so
     /// <c>viewer.editableForSeconds</c> is present on their own post). A projection fault falls back to
     /// <see cref="ParticipantPostDto.FromPost"/> — never a failed request after a committed edit.
@@ -499,8 +481,10 @@ public static class PostEditRefusalReasons
     /// <summary>The post already has the maximum number of edits.</summary>
     public const string EditLimit = "edit-limit";
 
-    /// <summary>Posting is refused right now (Freeze, a frozen clock, or a paused/ended lifecycle).</summary>
-    public const string Frozen = "frozen";
+    /// <summary>
+    /// Posting is refused right now (<see cref="ParticipantWriteGate"/>: Freeze, or a paused/ended lifecycle).
+    /// </summary>
+    public const string Frozen = ParticipantWriteGate.FrozenReason;
 }
 
 /// <summary>The outcome kind of <see cref="PostEditService.EditAsync"/>.</summary>

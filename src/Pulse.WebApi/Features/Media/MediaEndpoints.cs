@@ -17,6 +17,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Features.EngineRuntime;
+using Pulse.WebApi.Features.EngineRuntime.Steering;
 using Pulse.WebApi.Features.Identity.SharedAccess;
 using Pulse.WebApi.Features.Social.Follows;
 using Pulse.WebApi.Features.Identity.RoleMatrix;
@@ -128,6 +129,9 @@ public static class MediaEndpoints
         services.AddScoped<IMediaUrlSigner>(CreateSigner);
 
         services.AddScoped<MediaUploadService>();
+
+        // #379: POST /api/media carries RefuseWhenWritesPaused().
+        services.TryAddParticipantWriteGate();
         services.AddScoped<MediaLibraryService>();
 
         // Development + Local only: serves /dev-media/* ahead of the default-deny gate (see DevMediaStartupFilter).
@@ -153,7 +157,10 @@ public static class MediaEndpoints
         // upload passes through to the service's own persona-bound check.
         var writes = endpoints.MapGroup(string.Empty)
             .DenyReadOnlySessions()
-            .AddEndpointFilter(StaffAuthoringRoleFilter.StaffUpload);
+            .AddEndpointFilter(StaffAuthoringRoleFilter.StaffUpload)
+
+            // #379: a participant upload is refused (409 frozen) while the exercise is paused or frozen; staff pass.
+            .RefuseWhenWritesPaused();
         writes.MapPost(UploadRoute, UploadAsync)
             .RequireRateLimiting(MediaUploadRateLimitPolicy);
 
