@@ -15,6 +15,7 @@ using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Logging.Abstractions;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.EngineRuntime.Steering;
@@ -163,7 +164,10 @@ public sealed class ExerciseRealtimeHubLifecycleTests
         var service = new ExerciseLifecycleService(
             context,
             new ExerciseContext { CurrentExerciseId = exerciseId },
-            new StubCurrentStaffSessionAccessor(null));
+            new StubCurrentStaffSessionAccessor(null),
+            // #390 (merged with #375): this test pins the FEED send gate; the overlay push is #651's to test.
+            new NoOpExerciseLifecycleTransitionObserver(),
+            NullLogger<ExerciseLifecycleService>.Instance);
 
         var result = await service.TransitionAsync(new ExerciseLifecycleTransitionRequest { To = "completed" });
         result.Outcome.Should().Be(ExerciseLifecycleOutcome.Ok, "live → completed is an allowed EndEx transition");
