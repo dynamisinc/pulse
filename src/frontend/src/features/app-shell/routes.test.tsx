@@ -121,6 +121,7 @@ describe('createRoleAwareRoutes', () => {
     expect(routes.map(r => r.path)).toEqual([
       LOGIN_PATH,
       STAFF_LOGIN_PATH,
+      '/staff/reset', // #576
       `${JOIN_PATH}/:token`,
       JOIN_PATH,
       '*',
