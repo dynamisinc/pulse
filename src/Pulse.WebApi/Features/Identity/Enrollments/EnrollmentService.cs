@@ -70,6 +70,9 @@ public sealed partial class EnrollmentService
     /// <summary>The org-audit kind of swamped mode turned off because the exercise lost its lead.</summary>
     public const string SwampedModeOffAuditKind = "org.engine.swamped-mode-off";
 
+    /// <summary>The swamped-off <c>reason</c> recorded when a lead transfer demotes the previous lead.</summary>
+    public const string LeadTransferredReason = "lead-transferred";
+
     /// <summary>The XC-004 event type of a lead change.</summary>
     public const string LeadChangedEventType = "enrollment.lead.changed";
 
@@ -236,7 +239,7 @@ public sealed partial class EnrollmentService
         // exercise still has a lead afterwards, so the no-lead heal never catches it: without this the new lead would
         // inherit timeout auto-send they never turned on (adversarial review W1 on #642).
         await TurnSwampedModeOffAfterCommitAsync(
-            caller, exercise, enrollment, leadReleased: previousLeadId is not null, now, cancellationToken, reason: "lead-transferred");
+            caller, exercise, enrollment, leadReleased: previousLeadId is not null, now, cancellationToken, reason: LeadTransferredReason);
 
         return EnrollmentResult.Ok(enrollment);
     }
@@ -478,6 +481,13 @@ public sealed partial class EnrollmentService
         {
             // The grant change has committed; a failed in-memory flip must never fail it.
             LogSwampedModeOffFailed(exercise.Id, exception);
+            return;
+        }
+
+        if (!swampedWasOn && reason == LeadTransferredReason)
+        {
+            // A transfer happens routinely; when swamped mode was already off it changed nothing, so it records nothing
+            // (delta review: audit noise). A release still records wasOn:false, as before.
             return;
         }
 

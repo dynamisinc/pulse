@@ -95,13 +95,40 @@ public sealed class SwampedModeLeadLossTests
             .ToListAsync();
         using (var payload = JsonDocument.Parse(events.Should().ContainSingle().Subject.Payload!))
         {
-            payload.RootElement.GetProperty("reason").GetString().Should().Be("lead-transferred");
+            payload.RootElement.GetProperty("reason").GetString().Should().Be(EnrollmentService.LeadTransferredReason);
             payload.RootElement.GetProperty("wasOn").GetBoolean().Should().BeTrue();
         }
 
         (await verify.OrgAuditEvents.IgnoreQueryFilters()
             .CountAsync(a => a.ExerciseId == exercise && a.Kind == EnrollmentService.SwampedModeOffAuditKind))
             .Should().Be(1);
+    }
+
+    [RequiresDockerFact]
+    public async Task TransferringTheLead_WhileSwampedWasAlreadyOff_RecordsNothing()
+    {
+        var org = await _kit.SeedOrganizationAsync();
+        var exercise = await _kit.SeedExerciseAsync(org);
+        var (planner, _) = await _kit.SeedStaffAsync(org, exercise, "planner");
+        await _kit.SeedStaffAsync(org, exercise, "controller", isLead: true);
+        var (_, newLead) = await _kit.SeedStaffAsync(org, exercise, "controller");
+        var (plannerSession, _) = await _kit.SeedStaffSessionAsync(planner, exercise, "planner");
+        _kit.Swamped.WasOn = false;
+
+        var (service, context) = _kit.ServiceFor(plannerSession, planner, org, exercise);
+        await using (context)
+        {
+            (await service.SetLeadAsync(newLead)).Outcome.Should().Be(EnrollmentOutcome.Ok);
+        }
+
+        _kit.Swamped.Calls.Should().ContainSingle("the flip is still attempted (idempotent)");
+        await using var verify = _kit.ReadContext();
+        (await verify.TelemetryEvents.IgnoreQueryFilters()
+            .CountAsync(e => e.ExerciseId == exercise && e.EventType == EnrollmentService.SwampedModeOffEventType))
+            .Should().Be(0, "a transfer that changed nothing records nothing");
+        (await verify.OrgAuditEvents.IgnoreQueryFilters()
+            .CountAsync(a => a.ExerciseId == exercise && a.Kind == EnrollmentService.SwampedModeOffAuditKind))
+            .Should().Be(0);
     }
 
     [RequiresDockerFact]
