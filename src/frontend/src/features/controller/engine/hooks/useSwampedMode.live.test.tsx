@@ -4,8 +4,9 @@
  * LIVE-mode (USE_MOCK_DATA=false) coverage for the server-driven swamped-mode toggle
  * (PROVIDER-GOVERNANCE §8). Proves: the displayed state comes from the server's settings
  * re-read, never an optimistic flip; 400/403 refusals leave state untouched and surface an
- * inline message; a non-lead ON sends no request; OFF always posts; telemetry fires only
- * after a 200; the store is serialized; and two consoles sharing an exercise agree.
+ * inline message; a non-lead ON sends no request; OFF always posts; NO client telemetry on
+ * the live path (#618 — the server records the change), not on success and not on a refusal;
+ * the store is serialized; and two consoles sharing an exercise agree.
  */
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -124,8 +125,8 @@ describe('useSwampedMode (live) — lead ON', () => {
     await act(async () => release(true))
     await waitFor(() => expect(result.current.swampedMode).toBe(true))
     expect(result.current.pending).toBe(false)
-    expect(events()).toHaveLength(1)
-    expect(events()[0]?.payload).toEqual({ action: 'swamped-mode-enabled' })
+    // #618: the server records engine.swamped-mode.turned-on — no client emit.
+    expect(getEmittedTelemetryEvents()).toHaveLength(0)
   })
 
   it('a 400 (governance flag false) leaves it OFF, shows the message, emits nothing', async () => {
@@ -138,7 +139,7 @@ describe('useSwampedMode (live) — lead ON', () => {
       'Timeout auto-send is not authorized on this environment.',
     ))
     expect(result.current.swampedMode).toBe(false)
-    expect(events()).toHaveLength(0)
+    expect(getEmittedTelemetryEvents()).toHaveLength(0)
   })
 
   it('a 403 leaves it OFF, shows a refusal, emits nothing', async () => {
@@ -174,7 +175,7 @@ describe('useSwampedMode (live) — non-lead', () => {
     expect(events()).toHaveLength(0)
   })
 
-  it('OFF posts {enabled:false} and emits after the server confirms', async () => {
+  it('OFF posts {enabled:false} and emits no client telemetry (the server records it)', async () => {
     setStubSession({ role: 'controller', isLead: false })
     const { result } = await mount(true)
     postSwamped.mockResolvedValue(false)
@@ -183,8 +184,7 @@ describe('useSwampedMode (live) — non-lead', () => {
     act(() => result.current.setSwampedMode(false))
     expect(postSwamped).toHaveBeenCalledWith(false, { actingHumanId: 'person-stub' })
     await waitFor(() => expect(result.current.swampedMode).toBe(false))
-    expect(events()).toHaveLength(1)
-    expect(events()[0]?.payload).toEqual({ action: 'swamped-mode-disabled' })
+    expect(getEmittedTelemetryEvents()).toHaveLength(0)
   })
 
   it('a failed OFF stays ON (never assumes OFF locally) and shows the error', async () => {
@@ -279,7 +279,7 @@ describe('useSwampedMode (live) — background refresh (CR-001)', () => {
   })
 })
 
-describe('useSwampedMode (live) — telemetry only when the 200 body confirms (WR-005)', () => {
+describe('useSwampedMode (live) — never a client emit (#618)', () => {
   it('does not emit when the body disagrees with the request or is unreadable', async () => {
     setStubSession({ role: 'controller', isLead: true })
     const { result } = await mount(false)

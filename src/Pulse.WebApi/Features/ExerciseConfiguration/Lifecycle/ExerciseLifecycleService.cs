@@ -6,6 +6,7 @@ using System.Text.Json.Serialization;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.Identity.Staff;
@@ -134,8 +135,14 @@ public sealed class ExerciseLifecycleResult
 /// clock read and carrying the from/to states plus the acting staff human. A REJECTED transition writes
 /// nothing and emits nothing — the audit trail records what happened, not what was attempted.
 /// </para>
+/// <para>
+/// <b>After the commit (#390).</b> An applied transition then notifies the one
+/// <see cref="IExerciseLifecycleTransitionObserver"/> (world-steering pushes the participant overlay from it), best
+/// effort: after the commit, with <see cref="CancellationToken.None"/>, and with any failure logged and swallowed —
+/// the transition has already happened, so a broken notification must never report it as failed.
+/// </para>
 /// </remarks>
-public sealed class ExerciseLifecycleService
+public sealed partial class ExerciseLifecycleService
 {
     private const string TransitionedEventType = "exercise.lifecycle.transitioned";
     private const string SystemActorKind = "system";
@@ -144,23 +151,33 @@ public sealed class ExerciseLifecycleService
     private readonly PulseDbContext _dbContext;
     private readonly IExerciseContext _exerciseContext;
     private readonly ICurrentStaffSessionAccessor _currentStaffSession;
+    private readonly IExerciseLifecycleTransitionObserver _transitionObserver;
+    private readonly ILogger<ExerciseLifecycleService> _logger;
 
     /// <summary>Creates the service over persistence, the resolved scope, and the staff-session seam.</summary>
     /// <param name="dbContext">The persistence context the status is read and written through.</param>
     /// <param name="exerciseContext">The server-resolved exercise scope — the ONLY source of "which exercise".</param>
     /// <param name="currentStaffSession">Identifies the acting staff human for the XC-004 event.</param>
+    /// <param name="transitionObserver">Notified, best effort, after an applied transition commits (#390).</param>
+    /// <param name="logger">Logs a failed post-commit notification.</param>
     public ExerciseLifecycleService(
         PulseDbContext dbContext,
         IExerciseContext exerciseContext,
-        ICurrentStaffSessionAccessor currentStaffSession)
+        ICurrentStaffSessionAccessor currentStaffSession,
+        IExerciseLifecycleTransitionObserver transitionObserver,
+        ILogger<ExerciseLifecycleService> logger)
     {
         ArgumentNullException.ThrowIfNull(dbContext);
         ArgumentNullException.ThrowIfNull(exerciseContext);
         ArgumentNullException.ThrowIfNull(currentStaffSession);
+        ArgumentNullException.ThrowIfNull(transitionObserver);
+        ArgumentNullException.ThrowIfNull(logger);
 
         _dbContext = dbContext;
         _exerciseContext = exerciseContext;
         _currentStaffSession = currentStaffSession;
+        _transitionObserver = transitionObserver;
+        _logger = logger;
     }
 
     /// <summary>
@@ -387,8 +404,38 @@ public sealed class ExerciseLifecycleService
         // ONE unit of work: the status change and its audit event commit together or not at all.
         await _dbContext.SaveChangesAsync(cancellationToken);
 
+        // #390: ONLY after a successful commit (every refusal returned above, and a failed save threw). Best effort.
+        await NotifyTransitionedAsync(exercise, from);
+
         return ExerciseLifecycleResult.Ok(Snapshot(exerciseId, target, exercise.FirstLiveAt));
     }
+
+    /// <summary>
+    /// Tells the <see cref="IExerciseLifecycleTransitionObserver"/> about a COMMITTED transition. Never throws: the
+    /// change has already happened, so a failure here is logged and swallowed rather than surfaced as a failed
+    /// transition. <see cref="CancellationToken.None"/> on purpose — a client aborting after the commit must not
+    /// suppress the announcement of a change that did happen.
+    /// </summary>
+    private async Task NotifyTransitionedAsync(Exercise exercise, string from)
+    {
+        try
+        {
+            await _transitionObserver.OnTransitionedAsync(exercise, from, CancellationToken.None);
+        }
+#pragma warning disable CA1031 // Best effort by design: the transition has committed; nothing here may undo or fail it.
+        catch (Exception ex)
+#pragma warning restore CA1031
+        {
+            LogTransitionObserverFailed(ex, exercise.Id, from, exercise.Status);
+        }
+    }
+
+    /// <summary>Source-generated warning for a failed post-commit notification (CA1848).</summary>
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "The lifecycle transition of exercise {ExerciseId} ({From} -> {To}) COMMITTED, but notifying its " +
+                  "transition observer failed; connected participants may not see the change until they re-read it.")]
+    private partial void LogTransitionObserverFailed(Exception exception, Guid exerciseId, string from, string to);
 
     /// <summary>Builds the snapshot for a stored status value.</summary>
     private static ExerciseLifecycleSnapshot Snapshot(Guid exerciseId, string storedStatus, DateTimeOffset? firstLiveAt)

@@ -107,6 +107,37 @@ public sealed class SwampedModeLeadLossTests
     }
 
     [RequiresDockerFact]
+    public async Task ReleasingTheLead_WhileSwampedWasAlreadyOff_RecordsNoSwampedOff_ButStillRecordsTheRelease()
+    {
+        // #618 S-A: a release whose flip changed nothing records nothing for the flip (like a transfer); the
+        // enrollment change itself (enrollment.lead.released) is still recorded.
+        var org = await _kit.SeedOrganizationAsync();
+        var exercise = await _kit.SeedExerciseAsync(org);
+        var (planner, _) = await _kit.SeedStaffAsync(org, exercise, "planner");
+        var (_, leadEnrollment) = await _kit.SeedStaffAsync(org, exercise, "controller", isLead: true);
+        var (plannerSession, _) = await _kit.SeedStaffSessionAsync(planner, exercise, "planner");
+        _kit.Swamped.WasOn = false;
+
+        var (service, context) = _kit.ServiceFor(plannerSession, planner, org, exercise);
+        await using (context)
+        {
+            (await service.RevokeAsync(leadEnrollment)).Outcome.Should().Be(EnrollmentOutcome.Ok);
+        }
+
+        _kit.Swamped.Calls.Should().ContainSingle("the flip is still attempted (idempotent)");
+        await using var verify = _kit.ReadContext();
+        (await verify.TelemetryEvents.IgnoreQueryFilters()
+            .CountAsync(e => e.ExerciseId == exercise && e.EventType == EnrollmentService.SwampedModeOffEventType))
+            .Should().Be(0, "only real changes are recorded");
+        (await verify.OrgAuditEvents.IgnoreQueryFilters()
+            .CountAsync(a => a.ExerciseId == exercise && a.Kind == EnrollmentService.SwampedModeOffAuditKind))
+            .Should().Be(0);
+        (await verify.TelemetryEvents.IgnoreQueryFilters()
+            .CountAsync(e => e.ExerciseId == exercise && e.EventType == EnrollmentService.LeadReleasedEventType))
+            .Should().Be(1, "the release itself is a real change");
+    }
+
+    [RequiresDockerFact]
     public async Task TransferringTheLead_WhileSwampedWasAlreadyOff_RecordsNothing()
     {
         var org = await _kit.SeedOrganizationAsync();
@@ -233,6 +264,7 @@ public sealed class SwampedModeLeadLossTests
         {
             payload.RootElement.GetProperty("reason").GetString().Should().Be(ExerciseCallerRole.NoLeadRecheckReason);
             payload.RootElement.GetProperty("wasOn").GetBoolean().Should().BeTrue();
+            payload.RootElement.GetProperty("isOn").GetBoolean().Should().BeFalse("#618: the one swamped-off shape every path records");
             payload.RootElement.GetProperty("scenarioMinute").GetInt32().Should().Be(42, "the clock's CURRENT minute, never 0");
         }
 
