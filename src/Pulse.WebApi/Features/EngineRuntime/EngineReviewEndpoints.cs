@@ -13,6 +13,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Pulse.Core.Features.Autonomy.Models;
 using Pulse.Core.Features.Generation.Services;
 using Pulse.WebApi.Features.EngineRuntime.Usage;
+using Pulse.WebApi.Features.Identity.Enrollments;
 using Pulse.WebApi.Features.Identity.RoleMatrix;
 using Pulse.WebApi.Features.Identity.Staff;
 
@@ -59,6 +60,10 @@ public static class EngineReviewEndpoints
         ArgumentNullException.ThrowIfNull(services);
 
         services.AddScoped<EngineReviewService>();
+
+        // #618: records the swamped-mode / kill-switch / restore levers in its own DI scope (never the request's
+        // unit of work). TryAdd so a test can substitute it.
+        services.TryAddSingleton<IEngineSteeringLeverRecorder, EngineSteeringLeverRecorder>();
         services.AddScoped<IEngineReviewBroadcaster, EngineReviewBroadcaster>();
         services.AddSingleton<EngineAutonomyRegistry>();
 
@@ -591,7 +596,9 @@ public static class EngineReviewEndpoints
     /// identity <see cref="SetAmbientPolicyAsync"/> attributes to), never the client-supplied body value. The body
     /// field is still accepted and still required for wire compatibility (a missing one keeps the service's COR-018
     /// <c>400</c>), but its value is not trusted: a spoofed id is never what the decision, the autonomy state or the
-    /// XC-004 audit event records. The time zone is the body's, unchanged.
+    /// XC-004 audit event records. The time zone is the body's, unchanged. The verified session itself (person, role,
+    /// session id) rides along as <see cref="EngineReviewActionInput.Session"/>, the actor the steering levers record
+    /// (#618). A role the live read could not name is left null (null-omitted on the envelope), never invented.
     /// </summary>
     /// <param name="httpContext">The current request.</param>
     /// <param name="bodyInput">The input projected from the request body.</param>
@@ -605,7 +612,10 @@ public static class EngineReviewEndpoints
         }
 
         var actingHumanId = string.IsNullOrWhiteSpace(bodyInput.ActingHumanId) ? null : caller.PersonId.ToString();
-        return new EngineReviewActionInput(actingHumanId, bodyInput.TimeZone);
+        return new EngineReviewActionInput(actingHumanId, bodyInput.TimeZone)
+        {
+            Session = new StaffChangeActor(caller.PersonId, caller.Role, caller.SessionId),
+        };
     }
 
     /// <summary>Maps an engine-settings result to its HTTP status (fail closed).</summary>

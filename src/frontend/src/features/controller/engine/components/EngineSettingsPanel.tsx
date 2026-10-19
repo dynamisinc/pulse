@@ -217,6 +217,7 @@ export function EngineSettingsPanel({ open, onClose }: EngineSettingsPanelProps)
     pendingTierPolicy,
     pendingProviderLever,
     pendingAmbientPolicy,
+    pendingSwampedMode,
     ambientError,
     setAmbientPolicy,
     setAutonomyDefault,
@@ -271,7 +272,8 @@ export function EngineSettingsPanel({ open, onClose }: EngineSettingsPanelProps)
     pendingAutonomyDefault ||
     pendingTierPolicy ||
     pendingProviderLever ||
-    pendingAmbientPolicy
+    pendingAmbientPolicy ||
+    pendingSwampedMode
   const autonomyControlsDisabled = forbidden || anyRequestInFlight
   const tierControlsDisabled = forbidden || anyRequestInFlight
   // The CUT control is additionally disabled when the lever is INERT

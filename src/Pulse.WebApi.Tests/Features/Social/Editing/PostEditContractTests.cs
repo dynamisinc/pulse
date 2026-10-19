@@ -14,6 +14,7 @@ using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.Realtime;
 using Pulse.WebApi.Features.Social;
 using Pulse.WebApi.Features.Social.Editing;
+using Pulse.WebApi.Tests.Features.Realtime;
 using Xunit;
 
 /// <summary>
@@ -156,7 +157,7 @@ public class PostEditContractTests
             Version = 2,
         };
 
-        await new SignalRFeedBroadcaster(hub.Object).BroadcastPostEditedAsync(exerciseA, frame);
+        await TestFeedBroadcasters.Create(hub.Object).BroadcastPostEditedAsync(exerciseA, frame);
 
         proxyA.Verify(p => p.SendCoreAsync("PostEdited", It.IsAny<object?[]>(), It.IsAny<CancellationToken>()), Times.Once);
         proxyB.Verify(p => p.SendCoreAsync(It.IsAny<string>(), It.IsAny<object?[]>(), It.IsAny<CancellationToken>()), Times.Never);

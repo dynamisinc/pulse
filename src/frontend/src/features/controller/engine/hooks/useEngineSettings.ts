@@ -164,6 +164,25 @@
  * the settings mutations above do: a client emission would double the audit
  * record.
  *
+ * ## SWAMPED MODE (PROVIDER-GOVERNANCE §8)
+ * `setSwampedMode` is a FIFTH mutation on the same serialized mechanism. Its POST
+ * returns an autonomy-state DTO, not settings, so on a 200 the SAME flow (still
+ * holding `requestInFlight`, one sequence number) issues `GET /settings` and applies
+ * THAT as the authoritative state — nothing is asserted before the server confirms,
+ * and `useSwampedMode` derives its flag from `settings.autonomy.swampedMode`. A 400/403
+ * leaves `settings` untouched and sets `swampedError` (kept apart from `error`, and a
+ * 403 does NOT flip the sticky `forbidden`: it is the lead gate, like ambient).
+ * `onConfirmed` fires once, after the POST's 200 (never on a refusal). Live, the server
+ * records the change itself (#618), so `useSwampedMode` emits nothing from it; it is the
+ * mock-mode telemetry hook only. Mock: instant local flip.
+ *
+ * **Queueing + background refresh (CR-001).** A swamped request made while another request
+ * is in flight is queued (first wins: further swamped clicks are ignored while one is
+ * pending, and the control shows as unavailable then) and run from `settle`, so an OFF
+ * always lands.
+ * `refreshInBackground()` (the console poll) is a GET that never sets `loading`, so no
+ * control disables and the panel shows nothing new; it keeps the one in-flight slot.
+ *
  * ## PER-EXERCISE SCOPE (COR-001)
  * Module-singleton store keyed by `exerciseId` — mirrors `useEngineControl`'s
  * / `useSwampedMode`'s shape (`subscribe`/`resetForTests`), so a remount under
@@ -171,8 +190,8 @@
  * settings leak into another's.
  *
  * ## NO TELEMETRY EMITTED HERE
- * Unlike the kill switch (whose backend endpoints emit no autonomy events, so
- * the frontend emit is the sole audit trail), story 05's two settings
+ * Like the kill-switch / restore / swamped-mode endpoints (which record their
+ * own staff-change events since #618), story 05's two settings
  * endpoints emit their own server-side XC-004 events
  * (`engine.autonomy_default_changed` / `engine.tier_policy_changed`) — see
  * that story's "Build notes". Duplicating an emit here would double the audit
@@ -187,10 +206,12 @@ import {
   cutGenerationToFake as postCutGenerationToFake,
   describeAmbientPolicyError,
   describeSettingsError,
+  describeSwampedModeError,
   getSettings as fetchSettings,
   restoreGenerationProvider as postRestoreGenerationProvider,
   setAmbientPolicy as postAmbientPolicy,
   setAutonomyDefault as postAutonomyDefault,
+  setSwampedMode as postSwampedMode,
   setTierPolicyMode as postTierPolicyMode,
   type AutonomyDefaultLevel,
   type EngineSettingsDto,
@@ -259,6 +280,8 @@ export const MOCK_ENGINE_SETTINGS: EngineSettingsDto = {
     exerciseDefaultLevel: 'suggest',
     effectiveLevel: 'suggest',
   },
+  // Mock mode authorizes timeout auto-send so the toggle -> timer path works end to end.
+  timeoutAutoSendAuthorized: true,
   tierPolicyMode: 'auto',
   inMemoryState: true,
   inMemoryStateNote:
@@ -301,6 +324,19 @@ interface EngineSettingsState {
   readonly pendingAmbientPolicy: boolean
   /** The last ambient-policy save failure's message (kept apart from `error`), or `null`. */
   readonly ambientError: string | null
+  /** The swamped-mode POST (and its follow-up settings GET) is outstanding. */
+  readonly pendingSwampedMode: boolean
+  /** The last swamped-mode refusal/failure message, or `null`. */
+  readonly swampedError: string | null
+  /**
+   * Why `swampedError` is set: a server `refusal` (cleared once the server's swamped state
+   * changes) or a failed `reread` after a confirmed change (cleared by the next applied GET).
+   */
+  readonly swampedErrorKind: 'refusal' | 'reread' | null
+  /** Wall-clock ms (staff-only) when a settings GET was last APPLIED; `null` = never (or mock). */
+  readonly lastAppliedAt: number | null
+  /** Consecutive failed settings refreshes (background or foreground); reset by an applied GET. */
+  readonly refreshFailures: number
 }
 
 const DEFAULT_STATE: EngineSettingsState = {
@@ -313,6 +349,11 @@ const DEFAULT_STATE: EngineSettingsState = {
   pendingProviderLever: false,
   pendingAmbientPolicy: false,
   ambientError: null,
+  pendingSwampedMode: false,
+  swampedError: null,
+  swampedErrorKind: null,
+  lastAppliedAt: null,
+  refreshFailures: 0,
 }
 
 const MOCK_STATE: EngineSettingsState = {
@@ -325,6 +366,11 @@ const MOCK_STATE: EngineSettingsState = {
   pendingProviderLever: false,
   pendingAmbientPolicy: false,
   ambientError: null,
+  pendingSwampedMode: false,
+  swampedError: null,
+  swampedErrorKind: null,
+  lastAppliedAt: null,
+  refreshFailures: 0,
 }
 
 /**
@@ -348,10 +394,31 @@ interface EngineSettingsInternal {
    * already `true` — run once the in-flight request settles, never dropped.
    */
   refetchQueued: boolean
+  /** Like `refetchQueued`, but the queued GET is a silent BACKGROUND refresh (no `loading`). */
+  bgRefetchQueued: boolean
+  /**
+   * A swamped-mode request made while another request was in flight. First wins (a second click
+   * while one is pending is ignored; the control is unavailable then); run from
+   * `settle` so an OFF always lands rather than silently no-opping (CR-001).
+   */
+  queuedSwamped: QueuedSwamped | null
+}
+
+interface QueuedSwamped {
+  readonly enabled: boolean
+  readonly ctx: { readonly actingHumanId: string }
+  readonly onConfirmed: (applied: boolean | null) => void
 }
 
 function defaultInternal(): EngineSettingsInternal {
-  return { nextSeq: 0, appliedSeq: 0, requestInFlight: false, refetchQueued: false }
+  return {
+    nextSeq: 0,
+    appliedSeq: 0,
+    requestInFlight: false,
+    refetchQueued: false,
+    bgRefetchQueued: false,
+    queuedSwamped: null,
+  }
 }
 
 /** `exerciseId -> state`. Absent = the default (loading/empty in live; mock reads MOCK_STATE). */
@@ -443,6 +510,11 @@ function setForTests(
     pendingProviderLever: false,
     pendingAmbientPolicy: false,
     ambientError: null,
+    pendingSwampedMode: false,
+    swampedError: null,
+    swampedErrorKind: null,
+    lastAppliedAt: null,
+    refreshFailures: 0,
   })
   internalByExercise.set(exerciseId, defaultInternal())
   liveFetchStarted.add(exerciseId)
@@ -530,10 +602,41 @@ function tryApply(internal: EngineSettingsInternal, mySeq: number): boolean {
 function settle(exerciseId: string, internal: EngineSettingsInternal): void {
   if (!isLiveGeneration(exerciseId, internal)) return
   internal.requestInFlight = false
+  // A queued swamped-mode change goes first (it ends with its own settings re-read).
+  const queued = internal.queuedSwamped
+  if (queued) {
+    internal.queuedSwamped = null
+    executeSwampedMode(exerciseId, queued.enabled, queued.ctx, queued.onConfirmed)
+    return
+  }
   if (internal.refetchQueued) {
     internal.refetchQueued = false
+    internal.bgRefetchQueued = false
     startLiveFetch(exerciseId)
+  } else if (internal.bgRefetchQueued) {
+    internal.bgRefetchQueued = false
+    startLiveFetch(exerciseId, true)
   }
+}
+
+/**
+ * Clears a stale swamped-mode message when a settings GET lands: a failed re-read is
+ * resolved by ANY applied GET; a refusal only once the server's swamped state has changed.
+ */
+/** Stamps a successfully APPLIED settings DTO: when it landed, and no outstanding failures. */
+function appliedStamp(): Pick<EngineSettingsState, 'lastAppliedAt' | 'refreshFailures'> {
+  return { lastAppliedAt: Date.now(), refreshFailures: 0 }
+}
+
+function reconcileSwampedError(
+  current: EngineSettingsState,
+  next: EngineSettingsDto,
+): Pick<EngineSettingsState, 'swampedError' | 'swampedErrorKind'> {
+  const changed = current.settings?.autonomy.swampedMode !== next.autonomy.swampedMode
+  if (current.swampedErrorKind === 'reread' || (current.swampedErrorKind === 'refusal' && changed)) {
+    return { swampedError: null, swampedErrorKind: null }
+  }
+  return { swampedError: current.swampedError, swampedErrorKind: current.swampedErrorKind }
 }
 
 // ---------------------------------------------------------------------------
@@ -545,23 +648,33 @@ function settle(exerciseId: string, internal: EngineSettingsInternal): void {
  * (a mutation OR another GET), this one QUEUES (never silently dropped) and
  * re-runs once the in-flight one settles.
  */
-function startLiveFetch(exerciseId: string): void {
+function startLiveFetch(exerciseId: string, background = false): void {
   const internal = getInternal(exerciseId)
   if (internal.requestInFlight) {
-    internal.refetchQueued = true
+    if (background) internal.bgRefetchQueued = true
+    else internal.refetchQueued = true
     return
   }
   liveFetchStarted.add(exerciseId)
   const { internal: mine, seq: mySeq } = issue(exerciseId)
 
-  setFor(exerciseId, { ...getSnapshot(exerciseId), loading: true })
+  // A BACKGROUND refresh (the console's poll) never sets `loading`: no control disables, no
+  // panel "Loading…" flash, no focus loss. It keeps the one in-flight slot and the queueing.
+  if (!background) setFor(exerciseId, { ...getSnapshot(exerciseId), loading: true })
 
   fetchSettings()
     .then(settings => {
       if (!isLiveGeneration(exerciseId, mine)) return
       const current = getSnapshot(exerciseId)
       if (tryApply(mine, mySeq)) {
-        setFor(exerciseId, { ...current, settings, loading: false, error: null })
+        setFor(exerciseId, {
+          ...current,
+          ...reconcileSwampedError(current, settings),
+          ...appliedStamp(),
+          settings,
+          loading: false,
+          error: null,
+        })
       } else {
         // A strictly newer response has already been applied — this GET's
         // result is discarded, never overwriting that newer truth.
@@ -570,6 +683,13 @@ function startLiveFetch(exerciseId: string): void {
     })
     .catch((error: unknown) => {
       if (!isLiveGeneration(exerciseId, mine)) return
+      // A failed background refresh shows no error here (the previous snapshot stays, the next
+      // tick retries) but is COUNTED so a stale console can be flagged (see `useSwampedMode`).
+      if (background) {
+        const cur = getSnapshot(exerciseId)
+        setFor(exerciseId, { ...cur, refreshFailures: cur.refreshFailures + 1 })
+        return
+      }
       // WR-004: clear the "started" flag so a later mount/invalidate can
       // retry — a transient blip must not be a PERMANENT load-error state.
       liveFetchStarted.delete(exerciseId)
@@ -578,6 +698,7 @@ function startLiveFetch(exerciseId: string): void {
       setFor(exerciseId, {
         ...current,
         loading: false,
+        refreshFailures: current.refreshFailures + 1,
         error: described.message,
         // Sticky either way; a GET 403 (unexpected per story 05 AC6, but
         // handled) also only ever turns this ON, never off.
@@ -611,6 +732,16 @@ function ensureLiveFetchStarted(exerciseId: string): void {
 function invalidate(exerciseId: string): void {
   if (USE_MOCK_DATA) return
   startLiveFetch(exerciseId)
+}
+
+/**
+ * A silent BACKGROUND settings refresh (the console poll / tab-visible catch-up). Same
+ * serialization and queueing as `invalidate`, but never sets `loading` or surfaces errors.
+ * A no-op under mock.
+ */
+function refreshInBackground(exerciseId: string): void {
+  if (USE_MOCK_DATA) return
+  startLiveFetch(exerciseId, true)
 }
 
 // ---------------------------------------------------------------------------
@@ -691,7 +822,13 @@ function runSetAutonomyDefault(
       if (!isLiveGeneration(exerciseId, mine)) return
       const latest = getSnapshot(exerciseId)
       if (tryApply(mine, mySeq)) {
-        setFor(exerciseId, { ...latest, settings, pendingAutonomyDefault: false, error: null })
+        setFor(exerciseId, {
+          ...latest,
+          ...appliedStamp(),
+          settings,
+          pendingAutonomyDefault: false,
+          error: null,
+        })
       } else {
         setFor(exerciseId, { ...latest, pendingAutonomyDefault: false })
       }
@@ -737,7 +874,13 @@ function runSetTierPolicyMode(
       if (!isLiveGeneration(exerciseId, mine)) return
       const latest = getSnapshot(exerciseId)
       if (tryApply(mine, mySeq)) {
-        setFor(exerciseId, { ...latest, settings, pendingTierPolicy: false, error: null })
+        setFor(exerciseId, {
+          ...latest,
+          ...appliedStamp(),
+          settings,
+          pendingTierPolicy: false,
+          error: null,
+        })
       } else {
         setFor(exerciseId, { ...latest, pendingTierPolicy: false })
       }
@@ -791,7 +934,13 @@ function runCutGenerationToFake(
       if (!isLiveGeneration(exerciseId, mine)) return
       const latest = getSnapshot(exerciseId)
       if (tryApply(mine, mySeq)) {
-        setFor(exerciseId, { ...latest, settings, pendingProviderLever: false, error: null })
+        setFor(exerciseId, {
+          ...latest,
+          ...appliedStamp(),
+          settings,
+          pendingProviderLever: false,
+          error: null,
+        })
       } else {
         setFor(exerciseId, { ...latest, pendingProviderLever: false })
       }
@@ -841,7 +990,13 @@ function runRestoreGenerationProvider(
       if (!isLiveGeneration(exerciseId, mine)) return
       const latest = getSnapshot(exerciseId)
       if (tryApply(mine, mySeq)) {
-        setFor(exerciseId, { ...latest, settings, pendingProviderLever: false, error: null })
+        setFor(exerciseId, {
+          ...latest,
+          ...appliedStamp(),
+          settings,
+          pendingProviderLever: false,
+          error: null,
+        })
       } else {
         setFor(exerciseId, { ...latest, pendingProviderLever: false })
       }
@@ -901,7 +1056,13 @@ function runSetAmbientPolicy(
       if (!isLiveGeneration(exerciseId, mine)) return
       const latest = getSnapshot(exerciseId)
       if (tryApply(mine, mySeq)) {
-        setFor(exerciseId, { ...latest, settings, pendingAmbientPolicy: false, ambientError: null })
+        setFor(exerciseId, {
+          ...latest,
+          ...appliedStamp(),
+          settings,
+          pendingAmbientPolicy: false,
+          ambientError: null,
+        })
       } else {
         setFor(exerciseId, { ...latest, pendingAmbientPolicy: false })
       }
@@ -917,6 +1078,136 @@ function runSetAmbientPolicy(
         // An ambient 403 is the lead gate refusing a raise, not "not a controller": it must
         // not flip the whole panel read-only (story 17).
       })
+    })
+    .finally(() => settle(exerciseId, mine))
+}
+
+/**
+ * Turns swamped mode on/off. Await-then-apply, serialized: POST, then (inside the
+ * same in-flight slot) GET settings and apply it. `onConfirmed(applied)` runs once after
+ * the server confirms (POST 200; `applied` is the 200 body's `swampedMode`, or `null` if
+ * unreadable), before the re-read — never on a refusal. If ANOTHER request is in flight the
+ * change is QUEUED (first wins; a click while one is pending is ignored) and run from
+ * `settle`, never silently dropped (CR-001).
+ */
+function runSetSwampedMode(
+  exerciseId: string,
+  enabled: boolean,
+  ctx: { readonly actingHumanId: string },
+  onConfirmed: (applied: boolean | null) => void,
+): void {
+  const current = getSnapshot(exerciseId)
+  if (!current.settings) return // not loaded yet
+  if (current.pendingSwampedMode) return
+
+  if (USE_MOCK_DATA) {
+    if (current.settings.autonomy.swampedMode === enabled) return
+    setFor(exerciseId, {
+      ...current,
+      swampedError: null,
+      swampedErrorKind: null,
+      settings: {
+        ...current.settings,
+        autonomy: { ...current.settings.autonomy, swampedMode: enabled },
+      },
+    })
+    onConfirmed(enabled)
+    return
+  }
+
+  const internal = getInternal(exerciseId)
+  if (internal.requestInFlight) {
+    internal.queuedSwamped = { enabled, ctx, onConfirmed }
+    setFor(exerciseId, {
+      ...current,
+      pendingSwampedMode: true,
+      swampedError: null,
+      swampedErrorKind: null,
+    })
+    return
+  }
+  executeSwampedMode(exerciseId, enabled, ctx, onConfirmed)
+}
+
+function executeSwampedMode(
+  exerciseId: string,
+  enabled: boolean,
+  ctx: { readonly actingHumanId: string },
+  onConfirmed: (applied: boolean | null) => void,
+): void {
+  const current = getSnapshot(exerciseId)
+  const { internal: mine, seq: mySeq } = issue(exerciseId)
+  setFor(exerciseId, {
+    ...current,
+    pendingSwampedMode: true,
+    swampedError: null,
+    swampedErrorKind: null,
+  })
+
+  postSwampedMode(enabled, ctx)
+    .then(applied => {
+      if (!isLiveGeneration(exerciseId, mine)) return undefined
+      onConfirmed(applied)
+      // The POST body is not settings-shaped: re-read the server's truth in this same slot.
+      return fetchSettings()
+        .then(settings => {
+          if (!isLiveGeneration(exerciseId, mine)) return
+          const latest = getSnapshot(exerciseId)
+          if (tryApply(mine, mySeq)) {
+            setFor(exerciseId, {
+              ...latest,
+              settings,
+              pendingSwampedMode: false,
+              swampedError: null,
+              swampedErrorKind: null,
+              error: null,
+              ...appliedStamp(),
+            })
+          } else {
+            setFor(exerciseId, { ...latest, pendingSwampedMode: false })
+          }
+        })
+        .catch(() => {
+          if (!isLiveGeneration(exerciseId, mine)) return
+          // The change was confirmed but the re-read failed: do not guess the new state.
+          liveFetchStarted.delete(exerciseId)
+          const latest = getSnapshot(exerciseId)
+          // The server confirmed `applied`, so show THAT rather than the old state; the
+          // "could not re-read" message stays until a GET lands.
+          const confirmed =
+            applied !== null && latest.settings
+              ? {
+                ...latest.settings,
+                autonomy: { ...latest.settings.autonomy, swampedMode: applied },
+              }
+              : latest.settings
+          setFor(exerciseId, {
+            ...latest,
+            settings: confirmed,
+            refreshFailures: latest.refreshFailures + 1,
+            pendingSwampedMode: false,
+            swampedError:
+              'Swamped mode was changed, but the console could not re-read its state. ' +
+              'Refresh to confirm.',
+            swampedErrorKind: 'reread',
+          })
+          // Retry the read in the background rather than waiting for the next poll.
+          mine.bgRefetchQueued = true
+        })
+    })
+    .catch((error: unknown) => {
+      if (!isLiveGeneration(exerciseId, mine)) return
+      const described = describeSwampedModeError(error)
+      const latest = getSnapshot(exerciseId)
+      setFor(exerciseId, {
+        ...latest,
+        pendingSwampedMode: false,
+        swampedError: described.message,
+        swampedErrorKind: 'refusal',
+      })
+      // A refusal may mean our view is stale (another controller changed it): queue a silent
+      // re-read so the display converges on server truth. Runs from `settle`, still serialized.
+      mine.bgRefetchQueued = true
     })
     .finally(() => settle(exerciseId, mine))
 }
@@ -949,6 +1240,25 @@ export interface UseEngineSettingsResult {
   readonly pendingAmbientPolicy: boolean
   /** The last ambient-policy save failure's message, or `null`. */
   readonly ambientError: string | null
+  /** Wall-clock ms of the last applied settings GET, or `null` (never, or mock). */
+  readonly lastAppliedAt: number | null
+  /** Consecutive failed settings refreshes since the last applied GET. */
+  readonly refreshFailures: number
+  /** The swamped-mode POST (+ settings re-read) is outstanding. */
+  readonly pendingSwampedMode: boolean
+  /** The last swamped-mode refusal/failure message, or `null`. */
+  readonly swampedError: string | null
+  /**
+   * Requests swamped mode on/off. Await-then-apply; `onConfirmed` fires only after the
+   * server confirms. A no-op while any request is in flight or settings are unloaded.
+   */
+  readonly setSwampedMode: (
+    enabled: boolean,
+    actingHumanId: string,
+    onConfirmed: (applied: boolean | null) => void,
+  ) => void
+  /** Silent background settings refresh (no `loading`); a no-op under mock. See header. */
+  readonly refreshInBackground: () => void
   /** Saves the ambient-chatter policy. Same await-then-apply contract as the others. */
   readonly setAmbientPolicy: (draft: AmbientPolicyDraft) => void
   /**
@@ -1030,6 +1340,17 @@ export function useEngineSettings(): UseEngineSettingsResult {
     [exerciseId, identity.actingHumanId, timeZone],
   )
 
+  const setSwampedModeCb = useCallback(
+    (enabled: boolean, actingHumanId: string, onConfirmed: (applied: boolean | null) => void) => {
+      runSetSwampedMode(exerciseId, enabled, { actingHumanId }, onConfirmed)
+    },
+    [exerciseId],
+  )
+
+  const refreshInBackgroundCb = useCallback(() => {
+    refreshInBackground(exerciseId)
+  }, [exerciseId])
+
   const refetchCb = useCallback(() => {
     invalidate(exerciseId)
   }, [exerciseId])
@@ -1044,6 +1365,12 @@ export function useEngineSettings(): UseEngineSettingsResult {
     pendingProviderLever: state.pendingProviderLever,
     pendingAmbientPolicy: state.pendingAmbientPolicy,
     ambientError: state.ambientError,
+    lastAppliedAt: state.lastAppliedAt,
+    refreshFailures: state.refreshFailures,
+    pendingSwampedMode: state.pendingSwampedMode,
+    swampedError: state.swampedError,
+    setSwampedMode: setSwampedModeCb,
+    refreshInBackground: refreshInBackgroundCb,
     setAmbientPolicy: setAmbientPolicyCb,
     setAutonomyDefault: setAutonomyDefaultCb,
     setTierPolicyMode: setTierPolicyModeCb,

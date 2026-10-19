@@ -6,6 +6,7 @@ using System.Text.Json;
 using System.Threading.Tasks;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging.Abstractions;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Features.ExerciseConfiguration.Lifecycle;
 using Pulse.WebApi.Features.Identity.Staff;
@@ -169,7 +170,9 @@ public sealed class ExerciseLifecycleServiceTests
         var service = new ExerciseLifecycleService(
             context,
             new ExerciseContext { CurrentExerciseId = null },
-            new StubCurrentStaffSessionAccessor(null));
+            new StubCurrentStaffSessionAccessor(null),
+            new NoOpExerciseLifecycleTransitionObserver(),
+            NullLogger<ExerciseLifecycleService>.Instance);
 
         (await service.GetAsync()).Outcome.Should().Be(ExerciseLifecycleOutcome.ScopeUnresolved);
         (await service.GetCurrentStateAsync()).Should().BeNull();
@@ -216,7 +219,9 @@ public sealed class ExerciseLifecycleServiceTests
         var service = new ExerciseLifecycleService(
             context,
             new ExerciseContext { CurrentExerciseId = exerciseId },
-            new StubCurrentStaffSessionAccessor(null));
+            new StubCurrentStaffSessionAccessor(null),
+            new NoOpExerciseLifecycleTransitionObserver(),
+            NullLogger<ExerciseLifecycleService>.Instance);
 
         var snapshot = (await service.GetAsync()).Snapshot!;
 
@@ -237,7 +242,9 @@ public sealed class ExerciseLifecycleServiceTests
         var service = new ExerciseLifecycleService(
             context,
             new ExerciseContext { CurrentExerciseId = missing },
-            new StubCurrentStaffSessionAccessor(null));
+            new StubCurrentStaffSessionAccessor(null),
+            new NoOpExerciseLifecycleTransitionObserver(),
+            NullLogger<ExerciseLifecycleService>.Instance);
 
         (await service.GetAsync()).Outcome.Should().Be(ExerciseLifecycleOutcome.NotFound);
     }
@@ -298,7 +305,12 @@ public sealed class ExerciseLifecycleServiceTests
         var exerciseContext = new ExerciseContext { CurrentExerciseId = exerciseId };
 
         await using var context = _fixture.CreateContext(exerciseContext);
-        var service = new ExerciseLifecycleService(context, exerciseContext, staff);
+        var service = new ExerciseLifecycleService(
+            context,
+            exerciseContext,
+            staff,
+            new NoOpExerciseLifecycleTransitionObserver(),
+            NullLogger<ExerciseLifecycleService>.Instance);
 
         return await service.TransitionAsync(new ExerciseLifecycleTransitionRequest { To = to });
     }

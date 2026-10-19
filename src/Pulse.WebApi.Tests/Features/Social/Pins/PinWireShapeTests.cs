@@ -15,6 +15,7 @@ using Pulse.WebApi.Features.Realtime;
 using Pulse.WebApi.Features.Social;
 using Pulse.WebApi.Features.Social.Follows;
 using Pulse.WebApi.Features.Social.Pins;
+using Pulse.WebApi.Tests.Features.Realtime;
 using Xunit;
 
 /// <summary>
@@ -86,7 +87,7 @@ public sealed class PinWireShapeTests
         var hubContext = new Mock<IHubContext<ExerciseRealtimeHub>>();
         hubContext.SetupGet(h => h.Clients).Returns(clients.Object);
 
-        await new SignalRFeedBroadcaster(hubContext.Object).BroadcastPostPinChangedAsync(exerciseId, postId, pinnedForAll: false);
+        await TestFeedBroadcasters.Create(hubContext.Object).BroadcastPostPinChangedAsync(exerciseId, postId, pinnedForAll: false);
 
         clients.Verify(c => c.Group($"exercise:{exerciseId}"), Times.Once);
         groupProxy.Verify(
