@@ -223,8 +223,10 @@ own amendment to this section before it reaches the live provider.
 >
 > **Prerequisites before signing** (from the orchestrator's review of #603):
 > 1. #603 (ambient chatter, merged dark) and its hardening follow-up are merged to `main`.
-> 2. Session A's A1c is merged with the ambient-policy route lead-gated (`LeadControllerRaiseFilter`, raise-only,
->    `Enrollment.IsLead`). **Hard prerequisite:** Tom decided (10/16) to sign on Sunday after A1c merges, so
+> 2. Session A's A1c is merged with the ambient-policy route lead-gated (raise-only, `Enrollment.IsLead` read live via
+>    `ExerciseCallerRole.IsLead`; the raise is judged inside the compare-and-set loop in
+>    `EngineReviewService.SetAmbientPolicyAsync`, not by the `LeadControllerRaiseFilter` the other steering routes
+>    use; a non-lead raise is 403 with nothing changed). Merged in #615 (f734e0a, 2026-10-19). **Hard prerequisite:** Tom decided (10/16) to sign on Sunday after A1c merges, so
 >    there is no conditional or struck-clause option.
 > 3. The flag commit (`generationAmbientAutonomyAuthorized = true` for `uat`) lands only after signing.
 
