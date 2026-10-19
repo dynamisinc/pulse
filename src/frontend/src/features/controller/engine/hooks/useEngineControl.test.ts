@@ -17,12 +17,11 @@
  *    action; toggled to live (a dedicated describe block below), it ALSO
  *    calls `liveEngineControlActions.setMode` with the mode + acting
  *    human/time zone, and reverts the optimistic flip on a rejected POST.
- *    The `engine.autonomy_changed` telemetry emit happens in BOTH modes,
- *    unconditionally — the backend kill-switch/restore endpoints mutate
- *    in-memory state but emit no telemetry of their own, so this frontend
- *    emit is the only audit trail (it is logged before the POST fires, so it
- *    still stands even if the POST later rejects and the optimistic flip is
- *    reverted).
+ *    The `engine.autonomy_changed` kill-switch emit happens in MOCK mode
+ *    only (#618): live, the backend kill-switch/restore endpoints record each
+ *    real change themselves (attributed to the verified session person), so
+ *    the live path emits NO client telemetry — not on success, and not on a
+ *    rejected POST (nothing changed, so nothing is recorded).
  *
  * `@/core/exerciseContext` and the sibling `controllerIdentity` module are
  * mocked at the module boundary (mirrors `useSwampedMode.test.tsx`).
@@ -237,7 +236,7 @@ describe('useEngineControl — live mode (UAT engine-pause fix; USE_MOCK_DATA=fa
     useMockData = false
   })
 
-  it("setMode('stop') calls the live action with the mode + acting human/time zone, optimistically flips the store, and STILL emits the audit telemetry (the backend endpoint emits none of its own)", () => {
+  it("setMode('stop') calls the live action with the mode + acting human/time zone, optimistically flips the store, and emits NO client telemetry (#618: the server records the lever)", () => {
     mockedLiveSetMode.mockResolvedValue(undefined)
     const { result } = renderHook(() => useEngineControl())
 
@@ -250,13 +249,13 @@ describe('useEngineControl — live mode (UAT engine-pause fix; USE_MOCK_DATA=fa
       actingHumanId: 'human-controller-01',
       timeZone: 'America/New_York',
     })
-    // The frontend emit is the ONLY audit trail — the backend endpoint mutates
-    // in-memory state but emits no telemetry of its own.
-    expect(autonomyEvents()).toHaveLength(1)
-    expect(autonomyEvents()[0]?.payload).toMatchObject({ cause: 'kill-switch', mode: 'stop' })
+    // #618: the server records the real change (engine.kill-switch.engaged),
+    // attributed to the session person — a client emit would double it.
+    expect(autonomyEvents()).toHaveLength(0)
+    expect(getEmittedTelemetryEvents()).toHaveLength(0)
   })
 
-  it("setMode('suggest-only') calls the live action with the right mode and emits telemetry", () => {
+  it("setMode('suggest-only') calls the live action with the right mode and emits NO client telemetry", () => {
     mockedLiveSetMode.mockResolvedValue(undefined)
     const { result } = renderHook(() => useEngineControl())
 
@@ -267,11 +266,24 @@ describe('useEngineControl — live mode (UAT engine-pause fix; USE_MOCK_DATA=fa
       actingHumanId: 'human-controller-01',
       timeZone: 'America/New_York',
     })
-    expect(autonomyEvents()).toHaveLength(1)
-    expect(autonomyEvents()[0]?.payload).toMatchObject({ cause: 'kill-switch', mode: 'suggest-only' })
+    expect(getEmittedTelemetryEvents()).toHaveLength(0)
   })
 
-  it('reverts the optimistic flip to the prior mode when the live POST rejects, but keeps the telemetry already logged for the attempted change', async () => {
+  it("setMode('live') (the restore) calls the live action and emits NO client telemetry", () => {
+    mockedLiveSetMode.mockResolvedValue(undefined)
+    const { result } = renderHook(() => useEngineControl())
+    act(() => result.current.setMode('stop'))
+
+    act(() => result.current.setMode('live'))
+
+    expect(mockedLiveSetMode).toHaveBeenLastCalledWith('live', {
+      actingHumanId: 'human-controller-01',
+      timeZone: 'America/New_York',
+    })
+    expect(getEmittedTelemetryEvents()).toHaveLength(0)
+  })
+
+  it('reverts the optimistic flip to the prior mode when the live POST rejects, and records nothing (nothing changed)', async () => {
     mockedLiveSetMode.mockRejectedValue(new Error('network down'))
     const { result } = renderHook(() => useEngineControl())
 
@@ -284,10 +296,9 @@ describe('useEngineControl — live mode (UAT engine-pause fix; USE_MOCK_DATA=fa
 
     expect(result.current.mode).toBe('live')
     expect(result.current.effective).toEqual(runningAutonomy(AutonomyLevel.DelayedAuto))
-    // The attempted change was still logged — the emit happens before the
-    // POST fires, so a later rejection/revert does not erase the audit trail.
-    expect(autonomyEvents()).toHaveLength(1)
-    expect(autonomyEvents()[0]?.payload).toMatchObject({ cause: 'kill-switch', mode: 'stop' })
+    // #618: no optimistic client emit — a refused lever changed nothing, and the
+    // server records only real changes.
+    expect(getEmittedTelemetryEvents()).toHaveLength(0)
   })
 
   it('is a no-op (no telemetry, no live POST) when set to its current mode', () => {
