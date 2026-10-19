@@ -7,7 +7,9 @@ using System.Threading.Tasks;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Pulse.WebApi.Data;
+using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.ExerciseConfiguration.Lifecycle;
+using Pulse.WebApi.Features.ExerciseConfiguration.Readiness;
 using Pulse.WebApi.Features.Identity.Staff;
 using Pulse.WebApi.Tests.Data;
 using Pulse.WebApi.Tests.Features.Identity.Staff;
@@ -31,7 +33,7 @@ public sealed class ExerciseLifecycleServiceTests
     [RequiresDockerFact]
     public async Task TransitionAsync_AllowedTransition_PersistsTheNewStateOnTheStatusColumn()
     {
-        var exerciseId = await SeedAsync("build");
+        var exerciseId = await SeedAsync("build", stageReady: true);
 
         var result = await TransitionAsync(exerciseId, "staged");
 
@@ -166,7 +168,7 @@ public sealed class ExerciseLifecycleServiceTests
         var exerciseId = await SeedAsync("live");
 
         await using var context = _fixture.CreateContext();
-        var service = new ExerciseLifecycleService(
+        var service = NewService(
             context,
             new ExerciseContext { CurrentExerciseId = null },
             new StubCurrentStaffSessionAccessor(null));
@@ -186,7 +188,7 @@ public sealed class ExerciseLifecycleServiceTests
     [RequiresDockerFact]
     public async Task TheScopeIsTheOnlyExerciseSelector_AServiceBoundToAneverTouchesB()
     {
-        var exerciseA = await SeedAsync("build");
+        var exerciseA = await SeedAsync("build", stageReady: true);
         var exerciseB = await SeedAsync("live");
 
         var result = await TransitionAsync(exerciseA, "staged");
@@ -213,7 +215,7 @@ public sealed class ExerciseLifecycleServiceTests
         var exerciseId = await SeedAsync("staged");
 
         await using var context = _fixture.CreateContext(new ExerciseContext { CurrentExerciseId = exerciseId });
-        var service = new ExerciseLifecycleService(
+        var service = NewService(
             context,
             new ExerciseContext { CurrentExerciseId = exerciseId },
             new StubCurrentStaffSessionAccessor(null));
@@ -234,7 +236,7 @@ public sealed class ExerciseLifecycleServiceTests
         var missing = Guid.NewGuid();
 
         await using var context = _fixture.CreateContext();
-        var service = new ExerciseLifecycleService(
+        var service = NewService(
             context,
             new ExerciseContext { CurrentExerciseId = missing },
             new StubCurrentStaffSessionAccessor(null));
@@ -270,7 +272,99 @@ public sealed class ExerciseLifecycleServiceTests
             stamped, "FirstLiveAt is the FIRST time — a resume after a pause never moves it");
     }
 
-    private async Task<Guid> SeedAsync(string status)
+    // ---- exercise-build-golive/04: the stage readiness gate ----
+
+    /// <summary>
+    /// exercise-build-golive/04: a stage with an open blocking readiness item is refused with the open items only, and
+    /// nothing changes — no state, no FirstLiveAt, no transition event.
+    /// </summary>
+    [RequiresDockerFact]
+    public async Task Stage_WithAnOpenBlockingItem_IsRefusedWithTheOpenItems_AndChangesNothing()
+    {
+        // No controller, no participant access, no start time: three blocking items open.
+        var exerciseId = await SeedAsync("build");
+
+        var result = await TransitionAsync(exerciseId, "staged");
+
+        result.Outcome.Should().Be(ExerciseLifecycleOutcome.ReadinessBlocked);
+        result.Snapshot.Should().BeNull();
+        result.OpenBlocking!.Select(i => i.Id).Should().Equal(
+            ["controller-enrolled", "participant-access", "schedule-set"], "only the OPEN blocking items, in checklist order");
+        result.OpenBlocking.Should().OnlyContain(i => i.Status == ReadinessItemStatuses.Open);
+        (await ReadStatusAsync(exerciseId)).Should().Be("build", "a refused stage leaves the state untouched");
+        (await CountTransitionEventsAsync(exerciseId)).Should().Be(0, "a refused stage emits no transition event");
+
+        await using var read = _fixture.CreateContext();
+        (await read.Exercises.AsNoTracking().SingleAsync(e => e.Id == exerciseId)).FirstLiveAt.Should().BeNull();
+    }
+
+    /// <summary>exercise-build-golive/04: notChecked blocking items never block a stage.</summary>
+    [RequiresDockerFact]
+    public async Task Stage_WithEveryEvaluableBlockingItemOk_AndNotCheckedItemsPresent_IsApplied()
+    {
+        var exerciseId = await SeedAsync("build", stageReady: true);
+
+        var result = await TransitionAsync(exerciseId, "staged");
+
+        result.Outcome.Should().Be(ExerciseLifecycleOutcome.Ok, "participant-name and sign-in-methods are notChecked and never block");
+        (await ReadStatusAsync(exerciseId)).Should().Be("staged");
+        (await CountTransitionEventsAsync(exerciseId)).Should().Be(1);
+    }
+
+    /// <summary>exercise-build-golive/04: StartEx (staged → live) does NOT re-run the readiness check.</summary>
+    [RequiresDockerFact]
+    public async Task StartEx_WithAnOpenBlockingItem_IsStillApplied()
+    {
+        // Seeded straight into staged with every evaluable blocking item open.
+        var exerciseId = await SeedAsync("staged");
+
+        var result = await TransitionAsync(exerciseId, "live");
+
+        result.Outcome.Should().Be(ExerciseLifecycleOutcome.Ok, "readiness is shown at StartEx, never enforced");
+        (await ReadStatusAsync(exerciseId)).Should().Be("live");
+    }
+
+    /// <summary>
+    /// exercise-build-golive/04 (isolation): another exercise's readiness rows never satisfy this exercise's gate.
+    /// </summary>
+    [RequiresDockerFact]
+    public async Task Stage_IsJudgedOnlyOnTheResolvedExercise_AnotherExercisesReadinessNeverCounts()
+    {
+        var notReady = await SeedAsync("build");
+        await SeedAsync("build", stageReady: true);
+
+        var result = await TransitionAsync(notReady, "staged");
+
+        result.Outcome.Should().Be(ExerciseLifecycleOutcome.ReadinessBlocked);
+        (await ReadStatusAsync(notReady)).Should().Be("build");
+    }
+
+    /// <summary>
+    /// exercise-build-golive/04: the org-tier entry point names an exercise by id while the readiness checklist reads
+    /// the resolved scope, so it cannot judge that exercise — staging there is refused outright (fail closed).
+    /// </summary>
+    [RequiresDockerFact]
+    public async Task Stage_ThroughTheOrgTierEntryPoint_ForAnExerciseOtherThanTheScope_IsRefused()
+    {
+        var exerciseId = await SeedAsync("build", stageReady: true);
+
+        var exerciseContext = new ExerciseContext { CurrentExerciseId = null };
+        await using var context = _fixture.CreateContext(exerciseContext);
+        var service = NewService(context, exerciseContext, new StubCurrentStaffSessionAccessor(null));
+
+        var result = await service.TransitionTenantCheckedAsync(
+            Organization.DefaultOrganizationId,
+            exerciseId,
+            new ExerciseLifecycleTransitionRequest { To = "staged" });
+
+        result.Outcome.Should().Be(
+            ExerciseLifecycleOutcome.TransitionNotAllowed, "no item was judged, so this is not a readiness-blocking 409");
+        result.OpenBlocking.Should().BeNull();
+        (await ReadStatusAsync(exerciseId)).Should().Be("build");
+        (await CountTransitionEventsAsync(exerciseId)).Should().Be(0);
+    }
+
+    private async Task<Guid> SeedAsync(string status, bool stageReady = false)
     {
         var exerciseId = Guid.NewGuid();
 
@@ -278,8 +372,19 @@ public sealed class ExerciseLifecycleServiceTests
         context.Exercises.Add(ExerciseLifecycleTestData.ExerciseInState(exerciseId, status));
         await context.SaveChangesAsync();
 
+        if (stageReady)
+        {
+            await ExerciseLifecycleTestData.MakeStageReadyAsync(context, exerciseId);
+        }
+
         return exerciseId;
     }
+
+    private static ExerciseLifecycleService NewService(
+        PulseDbContext context,
+        ExerciseContext exerciseContext,
+        ICurrentStaffSessionAccessor staff) =>
+        new(context, exerciseContext, staff, new ExerciseReadinessService(context, exerciseContext));
 
     private async Task<ExerciseLifecycleResult> TransitionAsync(
         Guid exerciseId,
@@ -298,7 +403,7 @@ public sealed class ExerciseLifecycleServiceTests
         var exerciseContext = new ExerciseContext { CurrentExerciseId = exerciseId };
 
         await using var context = _fixture.CreateContext(exerciseContext);
-        var service = new ExerciseLifecycleService(context, exerciseContext, staff);
+        var service = NewService(context, exerciseContext, staff);
 
         return await service.TransitionAsync(new ExerciseLifecycleTransitionRequest { To = to });
     }

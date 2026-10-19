@@ -141,6 +141,10 @@ Walk this list before every StartEx. It takes about ten minutes.
 2. The button reads **Starting…** for a moment. The header state pill changes from **STAGED** to **LIVE** and the
    scenario clock starts.
 
+Next to **Start exercise** a short line shows the planner's readiness check, for example "Readiness: all
+blocking items done" or "Readiness: 2 blocking items open — starting is still allowed". It is information
+only: it never stops you starting. If items are open, ask the planner whether that is intended.
+
 There is no confirmation step: StartEx is meant to be one deliberate press. There is also no "un-start". If you
 start too early, **Pause** the world ([section 9](#9-pausing-and-freezing)) while you recover.
 

@@ -28,6 +28,15 @@ The control is self-contained; it needs the console's providers (`ExerciseContex
   exercise** while `completed` is (a live or paused one). A paused exercise also reaches `live`, but that is a
   *resume* — the world-steering tier control's job — so it is never offered as "Start exercise". The server's table
   decides what is reachable. Nothing to press at build / completed / archived: the control renders nothing.
+- **Readiness summary at Start** (exercise-build-golive story 04): while Start is offered, `StagedReadinessSummary`
+  shows "Readiness: all blocking items done" or "Readiness: N blocking items open — starting is still allowed", icon
+  plus words, from `useReadiness()` (imported by direct path from `features/planner/hooks/useReadiness`). Informational
+  only: **Start is never gated on it** (the server does not gate StartEx either). It is mounted only for a staged
+  exercise, so no readiness request is made otherwise, and shows nothing while readiness loads or fails.
+- **Stage (planner)**: `LifecycleTarget` now includes `staged`, used by the planner's `StageExerciseControl`. The server
+  can refuse a stage with `409 { error: 'readiness-blocking', message, blocking[] }`; `lifecycleService` parses it
+  (fail closed) into a `LifecycleError` with `kind: 'readiness-blocking'` and `blocking` items, and the hook exposes
+  them as `transitionBlocking`. Any other 409 keeps its plain-string handling.
 - Start runs at once. End opens a **type-to-confirm** dialog: the confirm button stays disabled until the
   field reads `END` (exact, after trimming). The dialog is a modal MUI `Dialog` (`aria-modal`), so the
   console's Ctrl/Cmd+K is inert while it is open.

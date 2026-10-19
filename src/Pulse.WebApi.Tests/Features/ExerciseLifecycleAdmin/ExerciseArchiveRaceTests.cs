@@ -11,6 +11,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Features.ExerciseConfiguration.Lifecycle;
+using Pulse.WebApi.Features.ExerciseConfiguration.Readiness;
 using Pulse.WebApi.Features.ExerciseLifecycleAdmin;
 using Pulse.WebApi.Features.Identity.Staff;
 using Pulse.WebApi.Tests.Data;
@@ -55,12 +56,14 @@ public sealed class ExerciseArchiveRaceTests
         var organization = new OrganizationContext { CurrentOrganizationId = world.OwnOrganizationId };
         var staff = new FixedStaffSession(sessionId, world.CallerStaffUserId);
 
+        var scope = new ExerciseContext();
         await using (var context = new PulseDbContext(options, exerciseContext: null, organization))
         {
             var service = new ExerciseManagementService(
                 context,
                 new StaffCallerContext(context, staff, organization),
-                new ExerciseLifecycleService(context, new ExerciseContext(), staff));
+                new ExerciseLifecycleService(
+                    context, scope, staff, new ExerciseReadinessService(context, scope)));
 
             var result = await service.ArchiveAsync(world.OwnExercise.Id);
 

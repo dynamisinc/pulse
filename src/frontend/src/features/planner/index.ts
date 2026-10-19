@@ -48,6 +48,8 @@ export { usePracticeMode, useSetPracticeMode } from './hooks/usePracticeMode'
 // exercise-build-golive, story 03 — the COR-042 go-live readiness panel. Mounted into
 // `ExerciseSettingsPage` as its first section; self-contained, no props.
 export { ReadinessPanel } from './components/ReadinessPanel'
+// exercise-build-golive, story 04 - the gated Stage exercise control (confirm dialog) under it.
+export { StageExerciseControl } from './components/StageExerciseControl'
 export { READINESS_QUERY_KEY, useReadiness } from './hooks/useReadiness'
 export type {
   ExerciseReadiness,
