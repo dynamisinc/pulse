@@ -53,8 +53,8 @@ public static class EngineEventTypes
     /// <c>engine.autonomy_default_changed</c> — a controller changed the exercise's AUTONOMY DEFAULT at runtime
     /// (autonomy-safety story 05). Additive vocabulary, reviewer-approved: the autonomy state itself is process
     /// memory, so this event is the only record of the change that survives a restart. Distinct from the
-    /// frontend's own <c>engine.autonomy_changed</c> emit (<c>useEngineControl.ts</c>), which continues
-    /// unchanged — this is the server-side, server-timed companion, not a replacement.
+    /// frontend's own <c>engine.autonomy_changed</c> emit (<c>useEngineControl.ts</c>, mock mode only since #618)
+    /// — this is the server-side, server-timed record of the DEFAULT, not a replacement for it.
     /// </summary>
     public const string AutonomyDefaultChanged = "engine.autonomy_default_changed";
 

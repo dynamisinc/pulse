@@ -121,7 +121,7 @@ taxonomy:
 The tuning/observability surface that renders them (story 02); E10's metric computation (E10); the
 XC-004 v0 base schema definition itself (E1 owns it — this story *extends* it); the rumor mechanics
 (rumor-model, v1.1 — this reserves their event slots); a server-side emitter for `engine.autonomy_changed`
-(recorded above as a known gap, not addressed by this commit).
+(recorded above as a known gap, not addressed by this commit — since closed by #618's server-side lever records).
 
 ## Technical Notes
 Staff/backend. Additive event types on the XC-004 envelope; emitted by every E8 feature via the shared
@@ -202,7 +202,7 @@ exactly like the existing `engine.swamped-mode.turned-off` flip. Names: `StaffCh
 | `POST /api/engine/autonomy/restore` | `engine.autonomy.restored` | `org.engine.autonomy-restored` | `fromPosture`, `toPosture`, `scenarioMinute?` |
 
 - **One `engine.swamped-mode.turned-off` shape for every path:** `{reason, wasOn, isOn, scenarioMinute?}` with
-  `reason` = `controller` (the route), `lead-released` (`EnrollmentService`), `no-lead-recheck` (`ExerciseCallerRole`)
+  `reason` = `controller` (the route), `lead-released` or `lead-transferred` (`EnrollmentService`; a transfer records only when swamped mode was on), `no-lead-recheck` (`ExerciseCallerRole`)
   or `lead-lost-revert` (below). `isOn` is always `false` on this type.
 - **`scenarioMinute` is omitted** (never a fabricated `0`) when there is no scenario clock or the exercise's clock has
   not started — an unstarted clock reads minute 0. The envelope's required `scenarioTime` keeps its existing fallback:
@@ -254,9 +254,10 @@ exactly like the existing `engine.swamped-mode.turned-off` flip. Names: `StaffCh
     path**: it was optimistic (sent before the POST, kept on rejection) and client-attributed, so it would double — and
     could contradict — the server record. It is still emitted under `USE_MOCK_DATA` (mock mode has no backend, so it is
     that mode's only record), and the hook's mock-only provider `degrade()` / `restore()` still emit it.
-  - `engine.swamped_mode_changed` (`useSwampedMode.ts`) is **still emitted on the live path — retirement pending**
-    after PR #642 (which rewrites that hook) merges. Until then a consumer counting swamped changes should count the
-    server records, not both.
+  - `engine.swamped_mode_changed` (`useSwampedMode.ts`) is likewise **retired on the live path** (after #642): the
+    server's `engine.swamped-mode.turned-on` / `turned-off` is the record. It is still emitted under `USE_MOCK_DATA`.
+    Historical rows of both client types remain in the log; a consumer counting lever changes from the #618 cutover
+    on should count the server records.
 - **Tests:** `EngineReviewEndpointsTests.EveryRoute_ASpoofedBodyActingHumanId_IsNotRecorded_TheSessionPersonIs`
   (positive half for the three levers) and the `EngineReviewEndpointsTests.SteeringLevers.cs` lever tests (including
   recorder-failure, degraded no-op and cross-exercise cases); `LeadControllerPostWriteRecheckTests` (#618 M-1 revert
