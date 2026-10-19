@@ -13,6 +13,7 @@ using Pulse.WebApi.Features.Identity.EasyLogin;
 using Pulse.WebApi.Features.Identity.Sessions;
 using Pulse.WebApi.Tests.Data;
 using Pulse.WebApi.Tests.Features.EngineRuntime.Clock;
+using Pulse.WebApi.Tests.Features.ExerciseConfiguration.Lifecycle;
 
 /// <summary>
 /// Integration tests for <see cref="SessionService"/> (story 03, COR-012 / XC-004 / NFR-009) against REAL SQL
@@ -870,10 +871,11 @@ public sealed class SessionServiceTests
     }
 
     [RequiresDockerFact]
-    public async Task Refresh_ParticipantWithNoExerciseRow_FallsBackToUtc_AndTheWallClockScenarioTime()
+    public async Task Refresh_ParticipantWithNoExerciseRow_IsRefused_FailClosed()
     {
-        // Defensive: the bound exercise cannot be read. The cap still applies (UTC day) — a participant session is
-        // never left uncapped — and the event falls back exactly as before.
+        // One rule for all (2026-10-19): a participant-world refresh renews only when its bound exercise's lifecycle
+        // accepts participant reads. An exercise that cannot be read has no such state, so the refresh fails closed
+        // like a revoked session (401, no event, nothing written). Before the ruling it renewed on a UTC day cap.
         var exerciseId = Guid.NewGuid();
         var token = $"no-row-{Guid.NewGuid():N}";
         var original = await SeedSessionAsync(
@@ -882,14 +884,13 @@ public sealed class SessionServiceTests
 
         await using (var context = _fixture.CreateContext())
         {
-            (await ServiceFor(context, clock: clock).RefreshAsync(token)).Outcome.Should().Be(RefreshOutcome.Refreshed);
+            (await ServiceFor(context, clock: clock).RefreshAsync(token)).Outcome.Should().Be(RefreshOutcome.Invalid);
         }
 
         await using var verify = _fixture.CreateContext();
-        (await verify.Sessions.SingleAsync(s => s.Id == original.Id)).RefreshExpiresAt.Should().Be(Utc(2026, 10, 15, 0));
-        var evt = await GetSingleEventAsync(exerciseId, "session.refreshed");
-        evt.ScenarioTime.Should().Be(Utc(2026, 10, 14, 12));
-        evt.TimeZone.Should().Be("UTC");
+        (await verify.Sessions.AsNoTracking().SingleAsync(s => s.Id == original.Id)).Should().BeEquivalentTo(
+            original, "the refusal writes nothing");
+        (await CountEventsAsync(exerciseId, "session.refreshed")).Should().Be(0);
     }
 
     [RequiresDockerFact]
@@ -900,22 +901,83 @@ public sealed class SessionServiceTests
     public Task Refresh_ParticipantSessionLoggedOut_Is401_AndTheAccessTokenIs401() =>
         AssertRevokedCappedSessionIsRefusedAsync(viaLogout: true);
 
-    [RequiresDockerFact]
-    public async Task Refresh_Participant_InACompletedOrArchivedExercise_IsNotRefused()
+    /// <summary>
+    /// One rule for all (Tom, 2026-10-19): a participant-world refresh (participant or shared read-only) renews exactly
+    /// where participant reads are accepted, staged, live, paused and completed. Completed stays admitted so a
+    /// participant is not signed out underneath the COR-054 EndEx overlay.
+    /// </summary>
+    [RequiresDockerTheory]
+    [InlineData("participant", "staged")]
+    [InlineData("participant", "live")]
+    [InlineData("participant", "paused")]
+    [InlineData("participant", "completed")]
+    [InlineData("readonly", "staged")]
+    [InlineData("readonly", "live")]
+    [InlineData("readonly", "paused")]
+    [InlineData("readonly", "completed")]
+    public async Task Refresh_ParticipantWorldSession_InAParticipantReadState_Renews(string kind, string status)
     {
-        // EL-11: refresh is deliberately NOT refused at EndEx — the lifecycle gate handles the data routes, and a
-        // refused refresh would bounce participants off the COR-054 EndEx overlay (see the lifecycle pin suite).
-        foreach (var status in new[] { "completed", "archived" })
-        {
-            var exerciseId = Guid.NewGuid();
-            await SeedExerciseAsync(exerciseId, timeZone: "UTC", status: status);
-            var token = $"endex-{status}-{Guid.NewGuid():N}";
-            await SeedSessionAsync(exerciseId, rawRefreshToken: token);
+        var exerciseId = Guid.NewGuid();
+        await SeedExerciseAsync(exerciseId, timeZone: "UTC", status: status);
+        var token = $"reads-{kind}-{status}-{Guid.NewGuid():N}";
+        await SeedSessionAsync(exerciseId, kind: kind, rawRefreshToken: token);
 
-            await using var context = _fixture.CreateContext();
-            (await ServiceFor(context).RefreshAsync(token)).Outcome.Should().Be(
-                RefreshOutcome.Refreshed, "a '{0}' exercise does not newly refuse a participant refresh", status);
+        await using var context = _fixture.CreateContext();
+        (await ServiceFor(context).RefreshAsync(token)).Outcome.Should().Be(
+            RefreshOutcome.Refreshed, "a '{0}' exercise accepts participant reads, so a {1} session renews", status, kind);
+    }
+
+    /// <summary>
+    /// One rule for all: in build, archived or an unrecognized status a participant-world refresh is refused exactly as
+    /// a revoked session's is (the ordinary fail-closed 401: no event, nothing written, no rotation), so the response
+    /// never reveals the lifecycle state.
+    /// </summary>
+    [RequiresDockerTheory]
+    [InlineData("participant", "build")]
+    [InlineData("participant", "archived")]
+    [InlineData("participant", "scheduled")]
+    [InlineData("participant", "not-a-state")]
+    [InlineData("readonly", "build")]
+    [InlineData("readonly", "archived")]
+    public async Task Refresh_ParticipantWorldSession_InAStateThatRefusesParticipantReads_IsRefusedLikeARevokedSession(
+        string kind,
+        string status)
+    {
+        var exerciseId = Guid.NewGuid();
+        await SeedExerciseAsync(exerciseId, timeZone: "UTC", status: status);
+        var token = $"closed-{kind}-{status}-{Guid.NewGuid():N}";
+        var seeded = await SeedSessionAsync(exerciseId, kind: kind, rawRefreshToken: token);
+
+        RefreshResult result;
+        await using (var context = _fixture.CreateContext())
+        {
+            result = await ServiceFor(context).RefreshAsync(token);
         }
+
+        result.Outcome.Should().Be(RefreshOutcome.Invalid, "a '{0}' exercise admits no participant-world session renewal", status);
+        result.SessionToken.Should().BeNull();
+        result.RefreshToken.Should().BeNull();
+
+        await using var verify = _fixture.CreateContext();
+        var stored = await verify.Sessions.AsNoTracking().SingleAsync(x => x.Id == seeded.Id);
+        stored.Should().BeEquivalentTo(seeded, "the refusal writes nothing: no rotation, no new window, no RevokedAt");
+        (await CountEventsAsync(exerciseId, "session.refreshed")).Should().Be(0, "a refused refresh emits no event");
+    }
+
+    /// <summary>Staff sign-in is out of scope for the one-rule ruling: a staff session renews in every state, as before.</summary>
+    [RequiresDockerTheory]
+    [InlineData("build")]
+    [InlineData("archived")]
+    public async Task Refresh_StaffSession_InBuildOrArchived_IsUnchanged_AndRenews(string status)
+    {
+        var exerciseId = Guid.NewGuid();
+        await SeedExerciseAsync(exerciseId, timeZone: "UTC", status: status);
+        var token = $"staff-{status}-{Guid.NewGuid():N}";
+        await SeedSessionAsync(exerciseId, kind: "staff", rawRefreshToken: token, role: "controller", staffUserId: Guid.NewGuid());
+
+        await using var context = _fixture.CreateContext();
+        (await ServiceFor(context).RefreshAsync(token)).Outcome.Should().Be(
+            RefreshOutcome.Refreshed, "staff configure a '{0}' exercise; their refresh is not a participant sign-in", status);
     }
 
     /// <summary>

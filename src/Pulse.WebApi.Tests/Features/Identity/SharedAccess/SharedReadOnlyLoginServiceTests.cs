@@ -10,6 +10,7 @@ using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.Identity.SharedAccess;
 using Pulse.WebApi.Tests.Data;
+using Pulse.WebApi.Tests.Features.ExerciseConfiguration.Lifecycle;
 using Pulse.WebApi.Tests.Features.Identity.Staff;
 
 /// <summary>
@@ -34,7 +35,10 @@ public sealed class SharedReadOnlyLoginServiceTests
 
     private static IExerciseContext ScopeFor(Guid exerciseId) => new ExerciseContext { CurrentExerciseId = exerciseId };
 
-    private async Task<Exercise> SeedExerciseAsync(DateTimeOffset? scenarioTime, string timeZone = "America/Chicago")
+    private async Task<Exercise> SeedExerciseAsync(
+        DateTimeOffset? scenarioTime,
+        string timeZone = "America/Chicago",
+        string status = "active")
     {
         var exercise = new Exercise
         {
@@ -42,7 +46,7 @@ public sealed class SharedReadOnlyLoginServiceTests
             Id = Guid.NewGuid(),
             Name = $"Exercise {Guid.NewGuid():N}",
             TimeZone = timeZone,
-            Status = "active",
+            Status = status,
             CurrentScenarioTime = scenarioTime,
         };
 
@@ -146,6 +150,76 @@ public sealed class SharedReadOnlyLoginServiceTests
         events[0].Payload.Should().Contain("failure");
         events[0].Actor.Kind.Should().Be("system");
         events[0].Actor.SessionId.Should().BeNull("a rejected login mints no session, so it carries no ephemeral session identity");
+    }
+
+    /// <summary>
+    /// One rule for all (Tom, 2026-10-19): a shared view-only sign-in is admitted exactly where participant reads are
+    /// accepted (<c>ExerciseLifecycleStates.IsParticipantSignInAllowed</c>): staged, live, paused and completed.
+    /// </summary>
+    [RequiresDockerTheory]
+    [InlineData("staged")]
+    [InlineData("live")]
+    [InlineData("paused")]
+    [InlineData("completed")]
+    public async Task Login_CorrectPassword_IsAdmitted_InEveryParticipantReadState(string status)
+    {
+        var exercise = await SeedExerciseAsync(scenarioTime: null, status: status);
+        await SeedCredentialAsync(exercise.Id, Password);
+
+        var issuer = new RecordingSessionIssuer();
+        var scope = ScopeFor(exercise.Id);
+        await using var context = _fixture.CreateContext(scope);
+        var result = await new SharedReadOnlyLoginService(context, scope, _hasher, issuer)
+            .LoginAsync(new SharedReadOnlyLoginRequest { Password = Password });
+
+        result.Outcome.Should().Be(SharedReadOnlyLoginOutcome.Authenticated, "a {0} exercise accepts participant reads, so it admits sign-in", status);
+        issuer.IssueCount.Should().Be(1);
+    }
+
+    /// <summary>
+    /// One rule for all: build, archived and an unrecognized status refuse a shared sign-in even with the correct
+    /// password, exactly as a wrong password is refused (same outcome, one identity-less failure event, no session), so
+    /// the response never reveals the lifecycle state (NFR-009). The closed state takes the existing decoy path, as a
+    /// disabled credential does, so a correct password in a closed exercise neither authenticates nor counts toward
+    /// lockout.
+    /// </summary>
+    [RequiresDockerTheory]
+    [InlineData("build")]
+    [InlineData("archived")]
+    [InlineData("scheduled")]
+    [InlineData("not-a-state")]
+    public async Task Login_CorrectPassword_InAStateThatRefusesParticipantReads_IsRefusedExactlyLikeAWrongPassword(string status)
+    {
+        var exercise = await SeedExerciseAsync(scenarioTime: null, status: status);
+        await SeedCredentialAsync(exercise.Id, Password);
+
+        var issuer = new RecordingSessionIssuer();
+        var scope = ScopeFor(exercise.Id);
+        SharedReadOnlyLoginResult right;
+        SharedReadOnlyLoginResult wrong;
+        await using (var context = _fixture.CreateContext(scope))
+        {
+            right = await new SharedReadOnlyLoginService(context, scope, _hasher, issuer)
+                .LoginAsync(new SharedReadOnlyLoginRequest { Password = Password });
+        }
+
+        await using (var context = _fixture.CreateContext(scope))
+        {
+            wrong = await new SharedReadOnlyLoginService(context, scope, _hasher, issuer)
+                .LoginAsync(new SharedReadOnlyLoginRequest { Password = "WRONG-password" });
+        }
+
+        right.Outcome.Should().Be(SharedReadOnlyLoginOutcome.Rejected, "a {0} exercise admits no shared sign-in", status);
+        right.Outcome.Should().Be(wrong.Outcome, "the lifecycle refusal is indistinguishable from a wrong password");
+        right.Issued.Should().BeNull();
+        right.ValidationError.Should().BeNull("a refusal says nothing about why");
+        issuer.IssueCount.Should().Be(0, "no session in a {0} exercise", status);
+
+        var events = await ReadLoginEventsAsync(exercise.Id);
+        events.Should().HaveCount(2, "each attempt emits exactly one login event");
+        events.Should().OnlyContain(e =>
+            e.Payload == "{\"outcome\":\"failure\"}" && e.Actor.Kind == "system" && e.Actor.SessionId == null,
+            "the lifecycle refusal records the same identity-less failure a wrong password records");
     }
 
     [RequiresDockerFact]

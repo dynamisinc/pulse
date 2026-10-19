@@ -191,6 +191,57 @@ public sealed class ExerciseLifecycleStateMachineTests
         ExerciseLifecycleStates.IsParticipantAccessible(legacy).Should().Be(
             accessible, "'scheduled' maps to 'build' per implementation.md's table — not to 'staged'");
 
+    /// <summary>
+    /// One rule for all (Tom, 2026-10-19): participant reads are accepted in staged, live, paused and completed; never in
+    /// build, archived or an unrecognized or missing state.
+    /// </summary>
+    [Theory]
+    [InlineData("build", false)]
+    [InlineData("staged", true)]
+    [InlineData("live", true)]
+    [InlineData("paused", true)]
+    [InlineData("completed", true)]
+    [InlineData("archived", false)]
+    [InlineData("scheduled", false)]
+    [InlineData("active", true)]
+    [InlineData("complete", true)]
+    [InlineData("running", false)]
+    [InlineData("", false)]
+    [InlineData(null, false)]
+    public void ParticipantReadsAccepted_IsStagedLivePausedAndCompleted_AndFailsClosed(string? state, bool accepted) =>
+        ExerciseLifecycleStates.BehaviourOf(state).ParticipantReadsAccepted.Should().Be(
+            accepted, "participant reads are accepted exactly in staged, live, paused and completed (legacy rows by their mapping)");
+
+    /// <summary>The sign-in predicate is DEFINED from the reads flag, for every literal: the two can never drift apart.</summary>
+    [Theory]
+    [InlineData("build")]
+    [InlineData("staged")]
+    [InlineData("live")]
+    [InlineData("paused")]
+    [InlineData("completed")]
+    [InlineData("archived")]
+    [InlineData("scheduled")]
+    [InlineData("complete")]
+    [InlineData("running")]
+    [InlineData(null)]
+    public void IsParticipantSignInAllowed_IsExactlyParticipantReadsAccepted(string? state) =>
+        ExerciseLifecycleStates.IsParticipantSignInAllowed(state).Should().Be(
+            ExerciseLifecycleStates.BehaviourOf(state).ParticipantReadsAccepted,
+            "every participant sign-in path admits a session exactly where participant reads are accepted");
+
+    /// <summary>
+    /// The sign-in rule differs from the gate's participant-access rule in <c>completed</c> ONLY, and leaves the gate's
+    /// rule untouched: <see cref="ExerciseLifecycleStates.IsParticipantAccessible"/> still refuses completed.
+    /// </summary>
+    [Fact]
+    public void IsParticipantSignInAllowed_DiffersFromIsParticipantAccessible_OnlyInCompleted()
+    {
+        ExerciseLifecycleStates.All
+            .Where(s => ExerciseLifecycleStates.IsParticipantSignInAllowed(s) != ExerciseLifecycleStates.IsParticipantAccessible(s))
+            .Should().Equal(["completed"], "sign-in opens in completed; the gate's access rule is not changed by this ruling");
+        ExerciseLifecycleStates.IsParticipantAccessible("completed").Should().BeFalse();
+    }
+
     /// <summary>AC7: Staged runs the ambient world but neither the clock nor scheduled scenario content.</summary>
     [Fact]
     public void BehaviourOf_Staged_OpensParticipantAccessButHoldsTheClockAndScenarioContent()
