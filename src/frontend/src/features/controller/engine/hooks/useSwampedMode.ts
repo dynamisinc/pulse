@@ -47,7 +47,7 @@
  * carrying scenario time (COR-053) and the resulting state in `payload`.
  */
 
-import { useCallback } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { scenarioNow } from '@/core/clock'
 import { useExerciseContext } from '@/core/exerciseContext'
 import { buildAndEmit } from '@/core/telemetry'
@@ -93,7 +93,21 @@ export interface UseSwampedModeResult {
   readonly pending: boolean
   /** The last server refusal/failure message (400/403/...), or `null`. */
   readonly error: string | null
+  /**
+   * The console's view of the server may be out of date: 2+ consecutive failed refreshes, or
+   * no applied settings GET for over {@link STALE_AFTER_MS} while the tab is visible. Clears on
+   * the next applied GET.
+   */
+  readonly stale: boolean
+  /** Wall-clock ms of the last applied settings GET (staff-only), or `null` if none. */
+  readonly lastConfirmedAt: number | null
 }
+
+/** Consecutive failed refreshes after which the console flags itself stale. */
+export const STALE_FAILURE_COUNT = 2
+/** No applied GET for longer than this (tab visible) flags the console stale. */
+export const STALE_AFTER_MS = 60_000
+const STALE_TICK_MS = 15_000
 
 /**
  * The per-exercise, lead-gated swamped-mode flag. See the module header for
@@ -121,6 +135,25 @@ export function useSwampedMode(): UseSwampedModeResult {
     engine.pendingAmbientPolicy
   // Unknown (settings not loaded) is OFF — the safe default.
   const swampedMode = settings?.autonomy.swampedMode ?? false
+
+  // Staleness: re-evaluated on a short tick (and when the tab becomes visible) so a hung or
+  // silently failing refresh is flagged even though nothing else re-renders.
+  const [nowMs, setNowMs] = useState(() => Date.now())
+  useEffect(() => {
+    const refreshNow = () => {
+      if (document.visibilityState !== 'hidden') setNowMs(Date.now())
+    }
+    const id = window.setInterval(refreshNow, STALE_TICK_MS)
+    document.addEventListener('visibilitychange', refreshNow)
+    return () => {
+      window.clearInterval(id)
+      document.removeEventListener('visibilitychange', refreshNow)
+    }
+  }, [])
+  const lastConfirmedAt = engine.lastAppliedAt
+  const stale =
+    engine.refreshFailures >= STALE_FAILURE_COUNT ||
+    (lastConfirmedAt !== null && nowMs - lastConfirmedAt > STALE_AFTER_MS)
 
   const setSwampedMode = useCallback(
     (next: boolean) => {
@@ -153,5 +186,13 @@ export function useSwampedMode(): UseSwampedModeResult {
     [exerciseId, timeZone, isLead, actingHumanId, swampedMode, requestSwampedMode],
   )
 
-  return { swampedMode, isLead, setSwampedMode, pending, error: swampedError }
+  return {
+    swampedMode,
+    isLead,
+    setSwampedMode,
+    pending,
+    error: swampedError,
+    stale,
+    lastConfirmedAt,
+  }
 }

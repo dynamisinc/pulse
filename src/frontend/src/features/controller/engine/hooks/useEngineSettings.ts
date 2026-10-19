@@ -331,6 +331,10 @@ interface EngineSettingsState {
    * changes) or a failed `reread` after a confirmed change (cleared by the next applied GET).
    */
   readonly swampedErrorKind: 'refusal' | 'reread' | null
+  /** Wall-clock ms (staff-only) when a settings GET was last APPLIED; `null` = never (or mock). */
+  readonly lastAppliedAt: number | null
+  /** Consecutive failed settings refreshes (background or foreground); reset by an applied GET. */
+  readonly refreshFailures: number
 }
 
 const DEFAULT_STATE: EngineSettingsState = {
@@ -346,6 +350,8 @@ const DEFAULT_STATE: EngineSettingsState = {
   pendingSwampedMode: false,
   swampedError: null,
   swampedErrorKind: null,
+  lastAppliedAt: null,
+  refreshFailures: 0,
 }
 
 const MOCK_STATE: EngineSettingsState = {
@@ -361,6 +367,8 @@ const MOCK_STATE: EngineSettingsState = {
   pendingSwampedMode: false,
   swampedError: null,
   swampedErrorKind: null,
+  lastAppliedAt: null,
+  refreshFailures: 0,
 }
 
 /**
@@ -503,6 +511,8 @@ function setForTests(
     pendingSwampedMode: false,
     swampedError: null,
     swampedErrorKind: null,
+    lastAppliedAt: null,
+    refreshFailures: 0,
   })
   internalByExercise.set(exerciseId, defaultInternal())
   liveFetchStarted.add(exerciseId)
@@ -653,6 +663,8 @@ function startLiveFetch(exerciseId: string, background = false): void {
         setFor(exerciseId, {
           ...current,
           ...reconcileSwampedError(current, settings),
+          lastAppliedAt: Date.now(),
+          refreshFailures: 0,
           settings,
           loading: false,
           error: null,
@@ -665,8 +677,13 @@ function startLiveFetch(exerciseId: string, background = false): void {
     })
     .catch((error: unknown) => {
       if (!isLiveGeneration(exerciseId, mine)) return
-      // A failed background refresh is silent: the previous snapshot stays, the next tick retries.
-      if (background) return
+      // A failed background refresh shows no error here (the previous snapshot stays, the next
+      // tick retries) but is COUNTED so a stale console can be flagged (see `useSwampedMode`).
+      if (background) {
+        const cur = getSnapshot(exerciseId)
+        setFor(exerciseId, { ...cur, refreshFailures: cur.refreshFailures + 1 })
+        return
+      }
       // WR-004: clear the "started" flag so a later mount/invalidate can
       // retry — a transient blip must not be a PERMANENT load-error state.
       liveFetchStarted.delete(exerciseId)
@@ -675,6 +692,7 @@ function startLiveFetch(exerciseId: string, background = false): void {
       setFor(exerciseId, {
         ...current,
         loading: false,
+        refreshFailures: current.refreshFailures + 1,
         error: described.message,
         // Sticky either way; a GET 403 (unexpected per story 05 AC6, but
         // handled) also only ever turns this ON, never off.
@@ -1106,6 +1124,8 @@ function executeSwampedMode(
               swampedError: null,
               swampedErrorKind: null,
               error: null,
+              lastAppliedAt: Date.now(),
+              refreshFailures: 0,
             })
           } else {
             setFor(exerciseId, { ...latest, pendingSwampedMode: false })
@@ -1116,8 +1136,19 @@ function executeSwampedMode(
           // The change was confirmed but the re-read failed: do not guess the new state.
           liveFetchStarted.delete(exerciseId)
           const latest = getSnapshot(exerciseId)
+          // The server confirmed `applied`, so show THAT rather than the old state; the
+          // "could not re-read" message stays until a GET lands.
+          const confirmed =
+            applied !== null && latest.settings
+              ? {
+                ...latest.settings,
+                autonomy: { ...latest.settings.autonomy, swampedMode: applied },
+              }
+              : latest.settings
           setFor(exerciseId, {
             ...latest,
+            settings: confirmed,
+            refreshFailures: latest.refreshFailures + 1,
             pendingSwampedMode: false,
             swampedError:
               'Swamped mode was changed, but the console could not re-read its state. ' +
@@ -1173,6 +1204,10 @@ export interface UseEngineSettingsResult {
   readonly pendingAmbientPolicy: boolean
   /** The last ambient-policy save failure's message, or `null`. */
   readonly ambientError: string | null
+  /** Wall-clock ms of the last applied settings GET, or `null` (never, or mock). */
+  readonly lastAppliedAt: number | null
+  /** Consecutive failed settings refreshes since the last applied GET. */
+  readonly refreshFailures: number
   /** The swamped-mode POST (+ settings re-read) is outstanding. */
   readonly pendingSwampedMode: boolean
   /** The last swamped-mode refusal/failure message, or `null`. */
@@ -1294,6 +1329,8 @@ export function useEngineSettings(): UseEngineSettingsResult {
     pendingProviderLever: state.pendingProviderLever,
     pendingAmbientPolicy: state.pendingAmbientPolicy,
     ambientError: state.ambientError,
+    lastAppliedAt: state.lastAppliedAt,
+    refreshFailures: state.refreshFailures,
     pendingSwampedMode: state.pendingSwampedMode,
     swampedError: state.swampedError,
     setSwampedMode: setSwampedModeCb,

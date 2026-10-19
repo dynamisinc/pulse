@@ -48,13 +48,64 @@ import { Box, Stack, Typography } from '@mui/material'
 import { CobraLinkButton, CobraSecondaryButton } from '@/theme/styledComponents'
 import { useSwampedMode } from '../hooks/useSwampedMode'
 import { useEngineSettings } from '../hooks/useEngineSettings'
-import { effectiveTimeoutAutoSend } from '../models/effectiveTimeoutAutoSend'
+import { timeoutAutoSendState, type TimeoutAutoSendState } from '../models/effectiveTimeoutAutoSend'
 // D5 dark operator-chrome tokens (matches `ReviewQueue`'s `chrome`). Staff-only.
 import { consoleChrome as chrome } from '../../consoleChrome'
 import { useCanControl } from '../../access'
 
+/**
+ * Banner wording per state (text + icon always; the icon is rendered by the banner). Only
+ * `active` claims auto-send; every other state says why expired timers HOLD.
+ */
+const BANNER_COPY: Record<TimeoutAutoSendState, {
+  readonly title: string
+  readonly detail: string
+}> = {
+  off: { title: '', detail: '' },
+  active: {
+    title: 'TIMEOUT AUTO-SEND IS ACTIVE',
+    detail: '— swamped mode is on; expired timers publish instead of holding.',
+  },
+  cut: {
+    title: 'TIMEOUT AUTO-SEND IS SUSPENDED',
+    detail:
+      '— swamped mode is on, but auto-send is SUSPENDED while generation is cut to Fake; expired timers hold.',
+  },
+  stopped: {
+    title: 'TIMEOUT AUTO-SEND IS SUSPENDED',
+    detail:
+      '— swamped mode is on, but generation is fully stopped (kill switch); expired timers hold.',
+  },
+  clamped: {
+    title: 'TIMEOUT AUTO-SEND IS SUSPENDED',
+    detail:
+      '— swamped mode is on, but the engine is clamped to suggest-only (kill switch); expired timers hold.',
+  },
+  degraded: {
+    title: 'TIMEOUT AUTO-SEND IS SUSPENDED',
+    detail:
+      '— swamped mode is on, but the engine is in degraded mode; expired timers hold.',
+  },
+  'not-authorized': {
+    title: 'TIMEOUT AUTO-SEND IS NOT AUTHORIZED',
+    detail:
+      '— swamped mode is on, but this environment has not authorized timeout auto-send; expired timers hold.',
+  },
+}
+
+/** hh:mm of the last confirmed settings read (staff wall time, as `UsagePanel` shows it). */
+function formatLastConfirmed(at: number | null): string {
+  if (at === null) return 'never'
+  return new Date(at).toLocaleTimeString(undefined, {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  })
+}
+
 export function SwampedModeToggle() {
-  const { swampedMode, isLead, setSwampedMode, pending, error } = useSwampedMode()
+  const { swampedMode, isLead, setSwampedMode, pending, error, stale, lastConfirmedAt } =
+    useSwampedMode()
   const canControl = useCanControl()
   const [confirmingOff, setConfirmingOff] = useState(false)
   // The confirm stays open from the click until the request settles (`pending` falls), so the
@@ -88,8 +139,6 @@ export function SwampedModeToggle() {
     }
   }, [swampedMode])
   const settings = useEngineSettings().settings
-  // Hold-on-cut (ADP-042): while cut to Fake, expiries hold even under swamped mode.
-  const providerCutToFake = settings?.providerCutToFake ?? false
   // PROVIDER-GOVERNANCE §8: wherever the deployment does not authorize timeout auto-send, the
   // server refuses swamped ON. Only an explicit `false` disables; OFF stays open.
   // Turning ON needs the lead role (COR-015, absent for others) AND this flag; OFF is never
@@ -97,7 +146,8 @@ export function SwampedModeToggle() {
   const onRefused = settings?.timeoutAutoSendAuthorized === false && !swampedMode
   // Swamped can be ON while the deployment does not authorize auto-send (server holds): the
   // banner must not claim ACTIVE then. Same rule as the console's draft-timer input.
-  const autoSendLive = effectiveTimeoutAutoSend(swampedMode, settings)
+  // Which banner to show comes from the SAME server-derived inputs the timers use.
+  const autoSendState = timeoutAutoSendState(swampedMode, settings)
   const errorId = error ? 'swamped-mode-status' : undefined
 
   return (
@@ -173,6 +223,19 @@ export function SwampedModeToggle() {
           data-testid="swamped-mode-error"
           sx={{ alignItems: 'center', gap: 0.75 }}
         >
+          {stale && (
+            <>
+              <FontAwesomeIcon icon={faTriangleExclamation} color={chrome.amber} aria-hidden="true" />
+              <Typography
+                component="span"
+                data-testid="swamped-mode-stale-note"
+                sx={{ fontSize: 10.5, color: chrome.ink }}
+              >
+                Swamped state could not be refreshed. Last confirmed{' '}
+                {formatLastConfirmed(lastConfirmedAt)}
+              </Typography>
+            </>
+          )}
           {error && (
             <>
               <FontAwesomeIcon icon={faTriangleExclamation} color={chrome.amber} aria-hidden="true" />
@@ -222,18 +285,10 @@ export function SwampedModeToggle() {
             component="span"
             sx={{ fontSize: 11, fontWeight: 800, letterSpacing: '0.04em', color: chrome.amber }}
           >
-            {providerCutToFake
-              ? 'TIMEOUT AUTO-SEND IS SUSPENDED'
-              : autoSendLive
-                ? 'TIMEOUT AUTO-SEND IS ACTIVE'
-                : 'TIMEOUT AUTO-SEND IS NOT AUTHORIZED'}
+            {BANNER_COPY[autoSendState].title}
           </Typography>
           <Typography component="span" sx={{ fontSize: 10.5, color: chrome.inkMuted }}>
-            {providerCutToFake
-              ? '— swamped mode is on, but auto-send is SUSPENDED while generation is cut to Fake; expired timers hold.'
-              : autoSendLive
-                ? '— swamped mode is on; expired timers publish instead of holding.'
-                : '— swamped mode is on, but this environment has not authorized timeout auto-send; expired timers hold.'}
+            {BANNER_COPY[autoSendState].detail}
           </Typography>
         </Stack>
       )}

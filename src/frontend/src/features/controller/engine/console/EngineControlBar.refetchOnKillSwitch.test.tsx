@@ -99,6 +99,8 @@ function settingsResult(overrides: Partial<UseEngineSettingsResult> = {}): UseEn
     swampedError: null,
     setSwampedMode: vi.fn(),
     refreshInBackground: vi.fn(),
+    lastAppliedAt: null,
+    refreshFailures: 0,
     setAmbientPolicy: vi.fn(),
     setAutonomyDefault: vi.fn(),
     setTierPolicyMode: vi.fn(),

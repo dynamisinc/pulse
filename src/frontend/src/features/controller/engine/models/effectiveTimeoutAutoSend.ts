@@ -21,3 +21,41 @@ export function effectiveTimeoutAutoSend(
 ): boolean {
   return swampedMode && settings?.timeoutAutoSendAuthorized === true
 }
+
+/** The slice of the settings the banner reads (all optional: older servers / fixtures). */
+export interface TimeoutAutoSendBannerSettings extends TimeoutAutoSendSettings {
+  readonly providerCutToFake?: boolean
+  readonly autonomy?: {
+    readonly generationStopped?: boolean
+    readonly safetyClampActive?: boolean
+    readonly degradedReason?: string | null
+  }
+}
+
+/**
+ * What the swamped-mode banner should say. `active` ONLY when expiries would really publish;
+ * every other state with swamped ON names why expiries HOLD instead. Precedence: a full stop,
+ * then the Fake cut, then "not authorized", then degraded mode, then a kill-switch clamp.
+ * (Scenario pause is not modelled by the timer/policy, so it is not a state here.)
+ */
+export type TimeoutAutoSendState =
+  | 'off'
+  | 'active'
+  | 'stopped'
+  | 'cut'
+  | 'not-authorized'
+  | 'degraded'
+  | 'clamped'
+
+export function timeoutAutoSendState(
+  swampedMode: boolean,
+  settings: TimeoutAutoSendBannerSettings | null | undefined,
+): TimeoutAutoSendState {
+  if (!swampedMode) return 'off'
+  if (settings?.autonomy?.generationStopped === true) return 'stopped'
+  if (settings?.providerCutToFake === true) return 'cut'
+  if (settings?.timeoutAutoSendAuthorized !== true) return 'not-authorized'
+  if (settings.autonomy?.degradedReason) return 'degraded'
+  if (settings.autonomy?.safetyClampActive === true) return 'clamped'
+  return 'active'
+}

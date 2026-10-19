@@ -70,6 +70,8 @@ function stub(overrides: Partial<UseSwampedModeResult> = {}): UseSwampedModeResu
     setSwampedMode: vi.fn(),
     pending: false,
     error: null,
+    stale: false,
+    lastConfirmedAt: null,
     ...overrides,
   }
 }
