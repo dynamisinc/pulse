@@ -17,9 +17,9 @@ that keeps being used never ends, and one left alone for 12 hours dies mid-day. 
 COR-012 says sessions are *short-lived with refresh*. That stays true: the **access token stays 60 minutes**, and
 the SPA's silent refresh keeps it fresh. What changes, for `participant`-kind sessions only, is the **refresh
 window**: it ends at the **end of the exercise day** in the exercise time zone (EL-10), recomputed on each refresh
-so it can never slide into the next day. "Until EndEx" is already enforced by the lifecycle gate and by story
-03/05 refusing new sign-ins (EL-11); this story deliberately does **not** make refresh refuse at `completed`,
-which would bounce participants off the COR-054 EndEx overlay.
+so it can never slide into the next day. Lifecycle limits follow EL-11 as superseded on 2026-10-19 ("one rule for
+all"): refresh of `participant`/`readonly` sessions is admitted in Staged/Live/Paused/Completed (participants may
+review read-only after EndEx) and refused in Build/Archived, or when the exercise row is missing (fail closed).
 
 If this story slips, the existing 12-hour window is an acceptable degraded behaviour for the demo; story 07 is the
 part testers will feel.
