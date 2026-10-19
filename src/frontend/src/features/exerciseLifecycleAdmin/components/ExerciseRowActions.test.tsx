@@ -32,6 +32,13 @@ import {
 } from '../services/orgExercisesService'
 import type { OrgExercise } from '../types'
 import { sortArchivedLast } from './exerciseRowStatus'
+import { resetStubSession, setStubSession } from '@/core/auth/rolePermissions.testUtils'
+
+// Story 17: role-gated controls read the session; stand in the session this suite signs in as.
+vi.mock('@/core/auth/session', async importOriginal => ({
+  ...(await importOriginal<typeof import('@/core/auth/session')>()),
+  useOptionalSession: (await import('@/core/auth/rolePermissions.testUtils')).stubbedSession,
+}))
 
 vi.mock('../services/orgExercisesService', async importOriginal => {
   const actual = await importOriginal<typeof import('../services/orgExercisesService')>()
@@ -99,10 +106,54 @@ function actionsOf(exerciseId: string): HTMLElement {
 }
 
 beforeEach(() => {
+  resetStubSession()
+  setStubSession({ role: 'orgAdmin', isLead: false })
   vi.resetAllMocks()
   mockList.mockResolvedValue(PORTFOLIO)
   refreshScope.mockResolvedValue({})
   active.id = LIVE.exerciseId
+})
+
+describe('row actions follow the per-row canManage (WR-005)', () => {
+  const MINE: OrgExercise = { exerciseId: 'ex-m', name: 'Mine Build', status: 'build', canManage: true }
+  const THEIRS: OrgExercise = {
+    exerciseId: 'ex-t',
+    name: 'Theirs Build',
+    status: 'build',
+    canManage: false,
+  }
+  const UNKNOWN: OrgExercise = { exerciseId: 'ex-u', name: 'Old Backend', status: 'build' }
+
+  it('a planner sees Rename on a canManage:true row and nothing on a false row', async () => {
+    setStubSession({ role: 'planner', isLead: false })
+    mockList.mockResolvedValue([MINE, THEIRS])
+    renderPage()
+    await screen.findByTestId('org-exercise-table')
+    expect(within(actionsOf('ex-m')).getByRole('button', { name: 'Rename Mine Build' })).toBeEnabled()
+    expect(within(actionsOf('ex-t')).queryByRole('button', { name: /Rename|Archive/ }))
+      .not.toBeInTheDocument()
+  })
+
+  it('an org admin sees the actions on a canManage:true row', async () => {
+    mockList.mockResolvedValue([MINE])
+    renderPage()
+    await screen.findByTestId('org-exercise-table')
+    expect(within(actionsOf('ex-m')).getByRole('button', { name: 'Rename Mine Build' })).toBeEnabled()
+  })
+
+  it('a row missing the field: org admin yes, planner no', async () => {
+    mockList.mockResolvedValue([UNKNOWN])
+    const { unmount } = renderPage()
+    await screen.findByTestId('org-exercise-table')
+    expect(within(actionsOf('ex-u')).getByRole('button', { name: 'Rename Old Backend' })).toBeEnabled()
+    unmount()
+
+    setStubSession({ role: 'planner', isLead: false })
+    renderPage()
+    await screen.findByTestId('org-exercise-table')
+    expect(within(actionsOf('ex-u')).queryByRole('button', { name: /Rename|Archive/ }))
+      .not.toBeInTheDocument()
+  })
 })
 
 describe('row actions per state', () => {

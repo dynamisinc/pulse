@@ -7,8 +7,9 @@ using Pulse.Core.Features.Ambient.Services;
 
 /// <summary>
 /// The pure "is this a raise?" rule for the ambient-chatter policy (ambient-chatter story 01, orchestrator review W-1),
-/// for Session A's lead-only gate (A1c, <c>LeadControllerRaiseFilter.AmbientPolicy</c>): raising ambient toward
-/// unreviewed output is lead-only; lowering it is open to any controller.
+/// behind the lead-only gate (identity-auth-roles/17, A1c), which <see cref="EngineReviewService.SetAmbientPolicyAsync"/>
+/// applies INSIDE its compare-and-set loop (WR-5): raising ambient toward unreviewed output is lead-only; lowering it is
+/// open to any controller.
 /// </summary>
 /// <remarks>
 /// <para>A request is a <b>raise</b> when it moves toward unreviewed (autonomous) output:</para>
@@ -30,7 +31,7 @@ public static class AmbientPolicyRaise
     /// <summary>Whether <paramref name="request"/> raises <paramref name="current"/> toward unreviewed output (see remarks).</summary>
     /// <param name="current">The exercise's current policy (<see cref="EngineAmbientPolicyRegistry.Get"/>).</param>
     /// <param name="request">The incoming <c>POST /api/engine/settings/ambient-policy</c> body.</param>
-    /// <returns><c>true</c> for a raise (lead-only once A1c lands); otherwise <c>false</c>.</returns>
+    /// <returns><c>true</c> for a raise (lead-only); otherwise <c>false</c>.</returns>
     public static bool IsRaise(AmbientTierPolicy current, EngineAmbientPolicyRequest request)
     {
         ArgumentNullException.ThrowIfNull(current);

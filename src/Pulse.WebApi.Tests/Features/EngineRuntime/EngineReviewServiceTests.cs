@@ -25,6 +25,7 @@ using Pulse.WebApi.Features.Social;
 using Pulse.WebApi.Tests.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Tests.Data;
 using Pulse.WebApi.Tests.Features.ExerciseConfiguration.Lifecycle;
+using Pulse.WebApi.Tests.Helpers;
 using Xunit;
 
 /// <summary>
@@ -910,7 +911,7 @@ public sealed class EngineReviewServiceTests
         var state = harness.Registry.GetOrCreate(exerciseId);
         var before = state.ResolveEffective(storylineId).Level;
 
-        var result = await harness.Service.SetSwampedModeAsync(enabled: true, Input("lead-1"));
+        var result = await harness.Service.SetSwampedModeAsync(enabled: true, Input("lead-1"), SeedLead(exerciseId));
 
         result.Outcome.Should().Be(EngineReviewOutcome.Ok);
         result.State!.SwampedMode.Should().BeTrue();
@@ -932,7 +933,7 @@ public sealed class EngineReviewServiceTests
         state.ResolveEffective(storylineId).GenerationStopped.Should().BeTrue("precondition: the full-stop kill switch stopped the engine");
 
         // The restore acts on the SAME shared per-exercise state instance the loop reads.
-        var result = await harness.Service.RestoreFromSafetyAsync(Input("lead-1"));
+        var result = await harness.Service.RestoreFromSafetyAsync(Input("lead-1"), SeedLead(exerciseId));
 
         result.Outcome.Should().Be(EngineReviewOutcome.Ok);
         result.State!.GenerationStopped.Should().BeFalse();
@@ -955,7 +956,7 @@ public sealed class EngineReviewServiceTests
         var state = harness.Registry.GetOrCreate(exerciseId);
         var before = state.ResolveEffective(storylineId);
 
-        var result = await harness.Service.RestoreFromSafetyAsync(Input("lead-1"));
+        var result = await harness.Service.RestoreFromSafetyAsync(Input("lead-1"), SeedLead(exerciseId));
 
         result.Outcome.Should().Be(EngineReviewOutcome.Ok,
             "restoring an already-running engine is an idempotent no-op SUCCESS, not an error");
@@ -975,7 +976,7 @@ public sealed class EngineReviewServiceTests
         var state = harness.Registry.GetOrCreate(exerciseId);
         state.EngageKillSwitch(KillSwitchMode.FullStop, "lead-1", 0);
 
-        var result = await harness.Service.RestoreFromSafetyAsync(Input("lead-1"));
+        var result = await harness.Service.RestoreFromSafetyAsync(Input("lead-1"), Guid.NewGuid());
 
         result.Outcome.Should().Be(EngineReviewOutcome.ScopeUnresolved,
             "an unresolved scope fails closed — a restore never runs without a resolved exercise (COR-001)");
@@ -989,7 +990,8 @@ public sealed class EngineReviewServiceTests
         var exerciseId = Guid.NewGuid();
 
         await using var harness = Build(exerciseId);
-        var result = await harness.Service.RestoreFromSafetyAsync(new EngineReviewActionInput(ActingHumanId: null, TimeZone: "UTC"));
+        var result = await harness.Service.RestoreFromSafetyAsync(
+            new EngineReviewActionInput(ActingHumanId: null, TimeZone: "UTC"), SeedLead(exerciseId));
 
         result.Outcome.Should().Be(EngineReviewOutcome.Invalid,
             "COR-018 requires the acting human behind the shared controller account");
@@ -998,6 +1000,13 @@ public sealed class EngineReviewServiceTests
     // ---- helpers --------------------------------------------------------------------------------
 
     private static EngineReviewActionInput Input(string actingHumanId) => new(actingHumanId, "America/Chicago");
+
+    /// <summary>Seeds the exercise's lead controller — the session person a raise's post-write re-check reads (Tier-2 M-1).</summary>
+    private Guid SeedLead(Guid exerciseId)
+    {
+        using var seed = _fixture.CreateContext();
+        return LeadControllerSeed.Seed(seed, exerciseId);
+    }
 
     private Harness Build(
         Guid? currentExerciseId,

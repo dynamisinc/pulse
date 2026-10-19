@@ -34,7 +34,12 @@ import type { Persona } from '@/features/personas'
 import { reviewStore } from '../services/reviewStore'
 import { ReviewQueue } from './ReviewQueue'
 
-vi.mock('@/features/controller/access/useCanControl', () => ({ useCanControl: () => true }))
+vi.mock('@/features/controller/access/useCanControl', () => ({
+  useCanControl: () => true,
+  useCanEditContent: () => true,
+  useCanStaffPost: () => true,
+  useCanStaffPin: () => true,
+}))
 
 vi.mock('@/core/exerciseContext/exerciseContextResolver', async importOriginal => {
   const actual = await importOriginal<typeof import('@/core/exerciseContext/exerciseContextResolver')>()

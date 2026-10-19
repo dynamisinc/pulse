@@ -44,7 +44,7 @@ public sealed class SessionEndpointContractTests
         using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         var keys = document.RootElement.EnumerateObject().Select(p => p.Name).ToList();
         keys.Should().BeEquivalentTo(
-            ["exerciseId", "accountId", "role", "personaId", "actingHumanId", "isReadOnly", "expiresAt"],
+            ["exerciseId", "accountId", "role", "personaId", "actingHumanId", "isReadOnly", "expiresAt", "personId", "world", "scope", "isLead"],
             "a participant session with a persona serializes exactly the frozen seven keys");
         document.RootElement.GetProperty("exerciseId").GetString().Should().Be(exerciseId.ToString());
         document.RootElement.GetProperty("accountId").GetString().Should().Be(accountId.ToString());
@@ -70,7 +70,7 @@ public sealed class SessionEndpointContractTests
         using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         var keys = document.RootElement.EnumerateObject().Select(p => p.Name).ToList();
         keys.Should().NotContain("personaId", "a staff session has no persona — the optional key is OMITTED, never null");
-        keys.Should().BeEquivalentTo(["exerciseId", "accountId", "role", "actingHumanId", "isReadOnly", "expiresAt"]);
+        keys.Should().BeEquivalentTo(["exerciseId", "accountId", "role", "actingHumanId", "isReadOnly", "expiresAt", "personId", "world", "scope", "isLead"]);
     }
 
     [RequiresDockerFact]
@@ -92,7 +92,7 @@ public sealed class SessionEndpointContractTests
         var keys = document.RootElement.EnumerateObject().Select(p => p.Name).ToList();
         keys.Should().NotContain("personaId", "a read-only session has no persona — the optional key is OMITTED, never null");
         keys.Should().BeEquivalentTo(
-            ["exerciseId", "accountId", "role", "actingHumanId", "isReadOnly", "expiresAt"],
+            ["exerciseId", "accountId", "role", "actingHumanId", "isReadOnly", "expiresAt", "personId", "world", "scope", "isLead"],
             "a read-only session with no persona serializes exactly the frozen six keys");
         document.RootElement.GetProperty("accountId").GetString().Should().Be(
             ephemeralId, "a read-only session's wire accountId is the ephemeral identity (COR-015 — no named account)");

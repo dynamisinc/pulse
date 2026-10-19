@@ -24,13 +24,17 @@ import type { InjectItemDto, InjectStatus } from './types'
 // Demo-feedback story 11 (DF-14): the console's write controls render only for a controller
 // session, and this suite mounts none, so the read-only gate is "controller" here unless a case
 // flips it to an evaluator.
-const access = vi.hoisted(() => ({ canControl: true }))
+const access = vi.hoisted(() => ({ canControl: true, canEdit: true }))
 vi.mock('@/features/controller/access/useCanControl', () => ({
   useCanControl: () => access.canControl,
+  useCanEditContent: () => access.canEdit,
+  useCanStaffPost: () => access.canControl,
+  useCanStaffPin: () => access.canControl,
 }))
 
 beforeEach(() => {
   access.canControl = true
+  access.canEdit = true
 })
 
 const persona = {
@@ -202,8 +206,33 @@ describe('RunSheetRow — "Marked fired" (DF-36)', () => {
 
   it.each(['pending', 'held', 'failed'] as const)('an evaluator gets no "Mark fired" on a %s row', status => {
     access.canControl = false
+    access.canEdit = false
     renderRow(makeItem({ status, title: 'Item' }))
     expect(screen.queryByRole('button', { name: 'Mark fired Item' })).toBeNull()
+  })
+})
+
+describe('RunSheetRow — a planner (story 17: inject authoring is planner + controller)', () => {
+  it('keeps Edit, Delete and the reorder arrows, and loses Fire, Hold, Skip and Mark fired', () => {
+    access.canControl = false
+    access.canEdit = true
+    renderRow(makeItem({ status: 'pending', title: 'Item' }), { canMoveUp: true, canMoveDown: true })
+    expect(screen.getByRole('button', { name: 'Edit Item' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Delete Item' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Move Item up' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Move Item down' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^Fire Item/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: /^Skip Item/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Mark fired Item' })).toBeNull()
+  })
+
+  it('an evaluator (neither) gets View only: no Edit, Delete or reorder', () => {
+    access.canControl = false
+    access.canEdit = false
+    renderRow(makeItem({ status: 'pending', title: 'Item' }), { canMoveUp: true, canMoveDown: true })
+    expect(screen.getByRole('button', { name: 'View Item' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Delete Item' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Move Item up' })).toBeNull()
   })
 })
 

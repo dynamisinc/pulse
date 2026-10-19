@@ -175,11 +175,16 @@ public sealed class ExerciseLifecycleService
             return ExerciseLifecycleResult.ScopeUnresolved();
         }
 
-        var stored = await ReadStoredStatusAsync(exerciseId, cancellationToken);
+        // org-scope-exempt(ResolvedScope): the SERVER-resolved exercise id, never a client value.
+        var row = await _dbContext.Exercises
+            .AsNoTracking()
+            .Where(e => e.Id == exerciseId)
+            .Select(e => new { e.Status, e.FirstLiveAt })
+            .FirstOrDefaultAsync(cancellationToken);
 
-        return stored is null
+        return row is null
             ? ExerciseLifecycleResult.NotFound()
-            : ExerciseLifecycleResult.Ok(Snapshot(exerciseId, stored));
+            : ExerciseLifecycleResult.Ok(Snapshot(exerciseId, row.Status, row.FirstLiveAt));
     }
 
     /// <summary>
@@ -240,7 +245,7 @@ public sealed class ExerciseLifecycleService
         var exercise = await _dbContext.Exercises
             .FirstOrDefaultAsync(e => e.Id == exerciseId, cancellationToken);
 
-        return await ApplyTransitionAsync(exercise, target, cancellationToken);
+        return await ApplyTransitionAsync(exercise, target, actorRole: null, cancellationToken);
     }
 
     /// <summary>
@@ -256,10 +261,12 @@ public sealed class ExerciseLifecycleService
     /// <param name="request">The requested target state.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>A result the caller maps to a status.</returns>
+    /// <param name="actorRole">The caller's role for the XC-004 actor (identity-auth-roles/17), e.g. <c>orgAdmin</c>.</param>
     internal async Task<ExerciseLifecycleResult> TransitionTenantCheckedAsync(
         Guid organizationId,
         Guid exerciseId,
         ExerciseLifecycleTransitionRequest request,
+        string? actorRole = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -279,7 +286,7 @@ public sealed class ExerciseLifecycleService
             .InOrganization(organizationId)
             .FirstOrDefaultAsync(e => e.Id == exerciseId, cancellationToken);
 
-        return await ApplyTransitionAsync(exercise, target, cancellationToken);
+        return await ApplyTransitionAsync(exercise, target, actorRole, cancellationToken);
     }
 
     /// <summary>
@@ -289,6 +296,7 @@ public sealed class ExerciseLifecycleService
     private async Task<ExerciseLifecycleResult> ApplyTransitionAsync(
         Exercise? exercise,
         string target,
+        string? actorRole,
         CancellationToken cancellationToken)
     {
         if (exercise is null)
@@ -307,9 +315,9 @@ public sealed class ExerciseLifecycleService
                 $"the exercise's stored status '{storedBefore}' is not a known lifecycle state, so no transition is allowed.");
         }
 
-        if (!ExerciseLifecycleStates.IsTransitionAllowed(from, target))
+        if (!IsAllowed(from, target, exercise.FirstLiveAt))
         {
-            var allowed = ExerciseLifecycleStates.AllowedTransitionsFrom(from);
+            var allowed = AllowedFrom(from, exercise.FirstLiveAt);
             var allowedText = allowed.Count == 0
                 ? $"'{from}' is a terminal state"
                 : $"allowed from '{from}': {string.Join(", ", allowed)}";
@@ -323,6 +331,24 @@ public sealed class ExerciseLifecycleService
         // One server clock read shared by the entity write and its telemetry (never client input).
         var now = DateTimeOffset.UtcNow;
         var staff = await _currentStaffSession.GetCurrentStaffSessionAsync(cancellationToken);
+
+        // identity-auth-roles/17 (ADMIN-IDENTITY-MODEL §5.2): the event carries the actor's role. The org tier passes it;
+        // in-exercise it is the caller's own live staff enrollment on this exercise (null-omitted when there is none).
+        actorRole ??= staff is null
+            ? null
+            : await _dbContext.Enrollments
+                .AsNoTracking()
+                .Where(EnrollmentRoles.IsStaffEnrollment)
+                .Where(e => e.ExerciseId == exerciseId && e.PersonId == staff.StaffUserId)
+                .Select(e => e.Role)
+                .FirstOrDefaultAsync(cancellationToken);
+
+        // identity-auth-roles/16 (ADMIN-IDENTITY-MODEL §9): the first time an exercise goes live is recorded once and
+        // never moved (the AdminIdentityFoundation migration backfilled it for exercises already past staged).
+        if (string.Equals(target, ExerciseLifecycleStates.Live, StringComparison.Ordinal) && exercise.FirstLiveAt is null)
+        {
+            exercise.FirstLiveAt = now;
+        }
 
         _dbContext.TelemetryEvents.Add(new TelemetryEvent
         {
@@ -339,6 +365,7 @@ public sealed class ExerciseLifecycleService
                 // optional NON-EMPTY string, so an unknown staff id is null, never "".
                 ActingHumanId = staff?.StaffUserId.ToString(),
                 SessionId = staff?.SessionId.ToString(),
+                Role = string.IsNullOrEmpty(actorRole) ? null : actorRole,
             },
             WallClockTime = now,
 
@@ -359,11 +386,11 @@ public sealed class ExerciseLifecycleService
         // ONE unit of work: the status change and its audit event commit together or not at all.
         await _dbContext.SaveChangesAsync(cancellationToken);
 
-        return ExerciseLifecycleResult.Ok(Snapshot(exerciseId, target));
+        return ExerciseLifecycleResult.Ok(Snapshot(exerciseId, target, exercise.FirstLiveAt));
     }
 
     /// <summary>Builds the snapshot for a stored status value.</summary>
-    private static ExerciseLifecycleSnapshot Snapshot(Guid exerciseId, string storedStatus)
+    private static ExerciseLifecycleSnapshot Snapshot(Guid exerciseId, string storedStatus, DateTimeOffset? firstLiveAt)
     {
         var canonical = ExerciseLifecycleStates.TryParse(storedStatus, out var parsed) ? parsed : storedStatus;
 
@@ -371,8 +398,27 @@ public sealed class ExerciseLifecycleService
             exerciseId,
             canonical,
             storedStatus,
-            ExerciseLifecycleStates.AllowedTransitionsFrom(storedStatus),
+            AllowedFrom(storedStatus, firstLiveAt),
             ExerciseLifecycleStates.BehaviourOf(storedStatus));
+    }
+
+    /// <summary>
+    /// Whether the edge exists for this exercise: the state machine's edges, plus <c>build → archived</c> once the
+    /// exercise has ever gone live (<c>FirstLiveAt</c> set — a reset exercise being retired; ADMIN-IDENTITY-MODEL §5.1,
+    /// identity-auth-roles/17).
+    /// </summary>
+    internal static bool IsAllowed(string? from, string target, DateTimeOffset? firstLiveAt) =>
+        AllowedFrom(from, firstLiveAt).Contains(target, StringComparer.Ordinal);
+
+    /// <summary>The states reachable from <paramref name="from"/> for an exercise with this <paramref name="firstLiveAt"/>.</summary>
+    internal static IReadOnlyList<string> AllowedFrom(string? from, DateTimeOffset? firstLiveAt)
+    {
+        var allowed = ExerciseLifecycleStates.AllowedTransitionsFrom(from);
+        return firstLiveAt is not null
+            && ExerciseLifecycleStates.TryParse(from, out var canonical)
+            && canonical == ExerciseLifecycleStates.Build
+                ? [.. allowed, ExerciseLifecycleStates.Archived]
+                : allowed;
     }
 
     /// <summary>Reads just the status column of the SERVER-RESOLVED exercise, or <c>null</c> when absent.</summary>

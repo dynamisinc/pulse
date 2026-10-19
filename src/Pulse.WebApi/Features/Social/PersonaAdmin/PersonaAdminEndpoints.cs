@@ -8,6 +8,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Pulse.WebApi.Features.EngineRuntime;
 using Pulse.WebApi.Features.Identity.Sessions;
 using Pulse.WebApi.Features.Identity.SharedAccess;
+using Pulse.WebApi.Features.Identity.RoleMatrix;
 
 /// <summary>
 /// The staff persona profile edit endpoint (demo-polish PE-BE, story 21; implementation.md §1.5.6):
@@ -97,11 +98,13 @@ public static class PersonaAdminEndpoints
             .MapGroup(string.Empty)
             .AddEndpointFilter<EngineCockpitStaffAuthorizationFilter>();
 
-        var controllerOnly = staff
+        // identity-auth-roles/17 (§8.2): persona create / edit / archive is the planner's and the controller's (planner
+        // added); an evaluator is 403 (#61).
+        var personaEditors = staff
             .MapGroup(string.Empty)
-            .AddEndpointFilter<EngineCockpitControllerRoleFilter>();
+            .RequireExerciseRole(ExerciseRoleFilter.PlannerOrController);
 
-        var writable = controllerOnly
+        var writable = personaEditors
             .MapGroup(string.Empty)
             .DenyReadOnlySessions();
 

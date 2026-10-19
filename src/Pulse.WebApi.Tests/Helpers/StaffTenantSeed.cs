@@ -47,5 +47,15 @@ public static class StaffTenantSeed
         ExternalSubject = $"idp|{staffUserId:N}",
         DisplayName = "Test Staff User",
         CreatedAt = DateTimeOffset.UtcNow,
+
+        // identity-auth-roles/16: the staff facet shares its Person's primary key (FK), so the person rides along and is
+        // inserted in the same SaveChanges as the staff user.
+        Person = new Person
+        {
+            Id = staffUserId,
+            OrganizationId = organizationId ?? Organization.DefaultOrganizationId,
+            DisplayName = "Test Staff User",
+            CreatedAt = DateTimeOffset.UtcNow,
+        },
     };
 }

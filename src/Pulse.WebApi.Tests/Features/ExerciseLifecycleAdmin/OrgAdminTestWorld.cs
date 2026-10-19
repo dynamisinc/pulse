@@ -73,9 +73,19 @@ public static class OrgAdminTestWorld
         context.Exercises.Add(ownExercise);
         context.Exercises.Add(otherExercise);
 
+        // identity-auth-roles/16: orgAdmin is the org-level grant Person.OrgRole, no longer an exercise role. An orgAdmin
+        // caller therefore holds the grant on their person, a PLANNER enrollment in their own exercise (exactly how the
+        // AdminIdentityFoundation migration maps an orgAdmin assignment), and an ORG-SCOPE session (no exercise).
+        var callerIsOrgAdmin = string.Equals(callerRole, "orgAdmin", StringComparison.Ordinal);
         if (seedCallerStaffUser)
         {
-            context.StaffUsers.Add(NewStaffUser(callerStaffUserId, ownOrganizationId, "Caller"));
+            var caller = NewStaffUser(callerStaffUserId, ownOrganizationId, "Caller");
+            if (callerIsOrgAdmin)
+            {
+                caller.Person!.OrgRole = "orgAdmin";
+            }
+
+            context.StaffUsers.Add(caller);
         }
 
         context.StaffUsers.Add(NewStaffUser(otherStaffUserId, otherOrganizationId, "Other Customer Staff"));
@@ -83,15 +93,19 @@ public static class OrgAdminTestWorld
         // The caller is assigned to their own exercise; the OTHER customer's human is assigned to theirs. The
         // second assignment is the adversarial half: an org-scoped read that forgot its tenant bound would
         // surface it, and one that is correctly bounded never can.
-        context.StaffAssignments.Add(NewAssignment(callerStaffUserId, ownExercise.Id, callerRole));
-        context.StaffAssignments.Add(NewAssignment(otherStaffUserId, otherExercise.Id, "controller"));
+        if (seedCallerStaffUser)
+        {
+            context.Enrollments.Add(NewAssignment(callerStaffUserId, ownExercise.Id, callerIsOrgAdmin ? "planner" : callerRole));
+        }
+        context.Enrollments.Add(NewAssignment(otherStaffUserId, otherExercise.Id, "controller"));
 
         context.Sessions.Add(new Session
         {
             Id = Guid.NewGuid(),
             TokenHash = SessionTokens.Hash(token),
             Kind = StaffKind,
-            ExerciseId = ownExercise.Id,
+            ExerciseId = callerIsOrgAdmin ? null : ownExercise.Id,
+            PersonId = callerStaffUserId,
             PrincipalId = callerStaffUserId.ToString(),
             StaffUserId = callerStaffUserId,
             Role = callerRole,
@@ -133,6 +147,7 @@ public static class OrgAdminTestWorld
 
     private static Organization NewOrganization(Guid id, string label) => new()
     {
+        Slug = $"org-{Guid.NewGuid():N}",
         Id = id,
 
         // The Name column carries a unique index, so it must be distinct per seeded world.
@@ -160,12 +175,15 @@ public static class OrgAdminTestWorld
         ExternalSubject = $"idp|{id:N}",
         DisplayName = $"{displayName} {id:N}",
         CreatedAt = DateTimeOffset.UtcNow,
+
+        // identity-auth-roles/16: the staff facet shares its Person's primary key.
+        Person = new Person { Id = id, OrganizationId = organizationId, DisplayName = $"{displayName} {id:N}", CreatedAt = DateTimeOffset.UtcNow },
     };
 
-    private static StaffAssignment NewAssignment(Guid staffUserId, Guid exerciseId, string role) => new()
+    private static Enrollment NewAssignment(Guid staffUserId, Guid exerciseId, string role) => new()
     {
         Id = Guid.NewGuid(),
-        StaffUserId = staffUserId,
+        PersonId = staffUserId,
         ExerciseId = exerciseId,
         Role = role,
         CreatedAt = DateTimeOffset.UtcNow,

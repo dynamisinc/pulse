@@ -505,7 +505,7 @@ public sealed partial class LinkEmailService
     private IQueryable<Account> RosterAccounts(Guid exerciseId) =>
         _dbContext.Accounts.AsNoTracking()
             .Where(account => account.ExerciseId == exerciseId
-                && (account.Role == RosterRoles.Participant || account.Role == RosterRoles.Pio));
+                && (account.Enrollment.Role == RosterRoles.Participant || account.Enrollment.Role == RosterRoles.Pio));
 
     /// <summary>
     /// <paramref name="accounts"/> with their link (if any), ordered by name. The link set carries the same two scope

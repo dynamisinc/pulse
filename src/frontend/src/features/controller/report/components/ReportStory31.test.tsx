@@ -147,6 +147,17 @@ describe('report.module.css print rules (story 31, DF-46)', () => {
   const css = readFileSync(resolve(process.cwd(), 'src/features/controller/report/components/report.module.css'), 'utf-8')
   const printBlock = css.slice(css.indexOf('@media print'))
 
+  // Story 34 (DF-50): the compact print card; the screen card (before @media print) is unchanged.
+  it('prints a compact card: small avatar, tight rows, counts and tags on one line', () => {
+    const screenCss = css.slice(0, css.indexOf('@media print'))
+    expect(printBlock).toMatch(/\.post\s*\{[^}]*grid-template-columns:\s*52px 24px 1fr/)
+    expect(printBlock).toMatch(/\.post\s*\{[^}]*padding:\s*5px 0/)
+    expect(printBlock).toMatch(/\.av,\s*\.avImg\s*\{[^}]*width:\s*24px/)
+    expect(printBlock).toMatch(/\.meta\s*\{[^}]*display:\s*flex/)
+    expect(screenCss).toMatch(/\.post\s*\{[^}]*grid-template-columns:\s*72px 40px 1fr/)
+    expect(screenCss).toMatch(/\.meta\s*\{[^}]*display:\s*grid/)
+  })
+
   it('caps media at 2.5in and the poster-less tile at 1.25in, inside @media print', () => {
     expect(printBlock).toMatch(/\.frame\s*\{[^}]*max-height:\s*2\.5in/)
     expect(printBlock)

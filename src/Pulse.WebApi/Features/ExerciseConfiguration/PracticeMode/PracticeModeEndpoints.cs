@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Routing;
 using Pulse.WebApi.Features.EngineRuntime;
+using Pulse.WebApi.Features.Identity.RoleMatrix;
 
 /// <summary>
 /// The staff HTTP surface for the COR-033 practice/sandbox flag: <c>GET /api/staff/practice-mode</c> and
@@ -53,8 +54,11 @@ public static class PracticeModeEndpoints
         endpoints.MapGet(PracticeModeRoute, GetPracticeModeAsync)
             .AddEndpointFilter<EngineCockpitStaffAuthorizationFilter>();
 
+        // identity-auth-roles/17 (ADMIN-IDENTITY-MODEL §8.2, signed off): configuration is the PLANNER's — a controller
+        // or evaluator is 403 (a narrowing from "any assigned staff"). The read above stays open to any assigned staff.
         endpoints.MapPut(PracticeModeRoute, UpdatePracticeModeAsync)
-            .AddEndpointFilter<EngineCockpitStaffAuthorizationFilter>();
+            .AddEndpointFilter<EngineCockpitStaffAuthorizationFilter>()
+            .RequireExerciseRole(ExerciseRoleFilter.PlannerOnly);
 
         return endpoints;
     }

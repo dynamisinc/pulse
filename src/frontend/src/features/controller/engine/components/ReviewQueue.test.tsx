@@ -31,7 +31,12 @@ import { ReviewQueue, type ReviewQueueEditSlotProps } from './ReviewQueue'
 
 // Demo-feedback story 11 (DF-14): the console's write controls render only for a controller
 // session, and this suite mounts none, so the read-only gate is fixed to "controller" here.
-vi.mock('@/features/controller/access/useCanControl', () => ({ useCanControl: () => true }))
+vi.mock('@/features/controller/access/useCanControl', () => ({
+  useCanControl: () => true,
+  useCanEditContent: () => true,
+  useCanStaffPost: () => true,
+  useCanStaffPin: () => true,
+}))
 
 beforeEach(() => {
   // 30s into the minute so the 1-minute burst reads a genuine sub-60s timer.

@@ -36,7 +36,7 @@ import {
   getStaffAssignments,
   setActiveExercise,
 } from '../services/staffAssignmentsService'
-import type { StaffAssignment } from '../types'
+import type { Enrollment } from '../types'
 
 // MOCK COMPLETENESS ONLY (staff-navigation/04): `useSetActiveExercise` now also
 // consumes `useExerciseScopeRefresh()` from this module, so the factory has to
@@ -68,10 +68,10 @@ const SCOPE: ExerciseScope = {
   status: 'scheduled',
 }
 
-const ASSIGNMENTS: StaffAssignment[] = [
-  { exerciseId: 'ex-alpha', exerciseName: 'Alpha Exercise', role: 'controller' },
-  { exerciseId: 'ex-bravo', exerciseName: 'Bravo Exercise', role: 'evaluator' },
-  { exerciseId: 'ex-charlie', exerciseName: 'Charlie Exercise', role: 'planner' },
+const ASSIGNMENTS: Enrollment[] = [
+  { exerciseId: 'ex-alpha', exerciseName: 'Alpha Exercise', role: 'controller', personId: 'person-1', isLead: false },
+  { exerciseId: 'ex-bravo', exerciseName: 'Bravo Exercise', role: 'evaluator', personId: 'person-1', isLead: false },
+  { exerciseId: 'ex-charlie', exerciseName: 'Charlie Exercise', role: 'planner', personId: 'person-1', isLead: false },
 ]
 
 function mockScope(overrides: Partial<ExerciseScope> = {}) {
@@ -155,8 +155,8 @@ describe('ExerciseSwitcher — the active exercise is conveyed by MORE than colo
     // may emit an UPPERCASE id while the resolved scope is lowercase. The active row
     // must still be recognized (compared case-insensitively), not shown as switchable.
     mockGetAssignments.mockResolvedValue([
-      { exerciseId: 'EX-ALPHA', exerciseName: 'Alpha Exercise', role: 'controller' },
-      { exerciseId: 'ex-bravo', exerciseName: 'Bravo Exercise', role: 'evaluator' },
+      { exerciseId: 'EX-ALPHA', exerciseName: 'Alpha Exercise', role: 'controller', personId: 'person-1', isLead: false },
+      { exerciseId: 'ex-bravo', exerciseName: 'Bravo Exercise', role: 'evaluator', personId: 'person-1', isLead: false },
     ])
     mockScope({ exerciseId: 'ex-alpha' })
     renderSwitcher()
@@ -181,7 +181,7 @@ describe('ExerciseSwitcher — the active exercise is conveyed by MORE than colo
 
 describe('ExerciseSwitcher — switching calls the mutation with the chosen exerciseId', () => {
   it('calls setActiveExercise with the clicked assignment\'s exerciseId', async () => {
-    mockSetActiveExercise.mockResolvedValue(ASSIGNMENTS[1] as StaffAssignment)
+    mockSetActiveExercise.mockResolvedValue(ASSIGNMENTS[1] as Enrollment)
     const user = userEvent.setup()
     renderSwitcher()
 
@@ -194,7 +194,7 @@ describe('ExerciseSwitcher — switching calls the mutation with the chosen exer
   })
 
   it('reflects the newly active exercise after a successful switch', async () => {
-    mockSetActiveExercise.mockResolvedValue(ASSIGNMENTS[1] as StaffAssignment)
+    mockSetActiveExercise.mockResolvedValue(ASSIGNMENTS[1] as Enrollment)
     const user = userEvent.setup()
     renderSwitcher()
 
@@ -210,7 +210,7 @@ describe('ExerciseSwitcher — switching calls the mutation with the chosen exer
   })
 
   it('is keyboard-operable: reachable by Tab and activatable with Enter', async () => {
-    mockSetActiveExercise.mockResolvedValue(ASSIGNMENTS[1] as StaffAssignment)
+    mockSetActiveExercise.mockResolvedValue(ASSIGNMENTS[1] as Enrollment)
     const user = userEvent.setup()
     renderSwitcher()
 
@@ -227,7 +227,7 @@ describe('ExerciseSwitcher — switching calls the mutation with the chosen exer
   })
 
   it('is activatable with Space too', async () => {
-    mockSetActiveExercise.mockResolvedValue(ASSIGNMENTS[2] as StaffAssignment)
+    mockSetActiveExercise.mockResolvedValue(ASSIGNMENTS[2] as Enrollment)
     const user = userEvent.setup()
     renderSwitcher()
 

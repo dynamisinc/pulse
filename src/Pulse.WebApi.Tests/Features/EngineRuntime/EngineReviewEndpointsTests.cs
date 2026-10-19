@@ -25,8 +25,10 @@ using Pulse.WebApi.Data.Extensions;
 using Pulse.WebApi.Features.EngineRuntime;
 using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.EngineRuntime.Publishing;
+using Pulse.WebApi.Features.EngineRuntime.Telemetry;
 using Pulse.WebApi.Features.Identity.Staff;
 using Pulse.WebApi.Tests.Data;
+using Pulse.WebApi.Tests.Features.ExerciseConfiguration.Lifecycle;
 using Pulse.WebApi.Tests.Features.Identity.Staff;
 using Pulse.WebApi.Tests.Helpers;
 using Xunit;
@@ -472,6 +474,193 @@ public sealed class EngineReviewEndpointsTests
             _fixture.ConnectionString!, currentExerciseId, authenticatedStaff, assignedExerciseId, timeoutAutoSendAuthorized);
     }
 
+    // ---- WR-2: attribution is the SESSION person, never the body's actingHumanId ---------------------
+
+    private const string SpoofedActingHumanId = "the-exercise-lead";
+
+    [RequiresDockerFact]
+    public async Task Approve_ASpoofedBodyActingHumanId_IsNotRecorded_TheSessionPersonIs()
+    {
+        var exerciseId = Guid.NewGuid();
+        var draftId = Guid.NewGuid();
+        await SeedAsync(Item(draftId, exerciseId, AutonomyLevel.Suggest, DraftDisposition.Queued, countdown: false));
+        await using var host = await StartHostAsync(exerciseId);
+
+        var response = await host.Client.PostAsJsonAsync(
+            new Uri($"/api/engine/review/{draftId}/approve", UriKind.Relative),
+            new { actingHumanId = SpoofedActingHumanId, timeZone = "America/Chicago" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var reviewed = await EventsAsync(exerciseId, Pulse.WebApi.Features.EngineRuntime.Telemetry.EngineEventTypes.Reviewed);
+        reviewed.Should().ContainSingle().Which.Actor.ActingHumanId.Should().Be(
+            host.StaffUserId.ToString(), "the decision is attributed to the verified session's person (WR-2), not the body");
+    }
+
+    [RequiresDockerFact]
+    public async Task Veto_ASpoofedBodyActingHumanId_IsNotRecorded_TheSessionPersonIs()
+    {
+        var exerciseId = Guid.NewGuid();
+        var draftId = Guid.NewGuid();
+        await SeedAsync(Item(draftId, exerciseId, AutonomyLevel.Suggest, DraftDisposition.Queued, countdown: false));
+        await using var host = await StartHostAsync(exerciseId);
+
+        var response = await host.Client.PostAsJsonAsync(
+            new Uri($"/api/engine/review/{draftId}/veto", UriKind.Relative),
+            new { actingHumanId = SpoofedActingHumanId, timeZone = "America/Chicago" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var reviewed = await EventsAsync(exerciseId, Pulse.WebApi.Features.EngineRuntime.Telemetry.EngineEventTypes.Reviewed);
+        reviewed.Should().ContainSingle().Which.Actor.ActingHumanId.Should().Be(host.StaffUserId.ToString())
+            .And.NotBe(SpoofedActingHumanId);
+    }
+
+    [RequiresDockerFact]
+    public async Task KillSwitch_ASpoofedBodyActingHumanId_IsNotRecordedOnTheAmbientDemotion_TheSessionPersonIs()
+    {
+        var exerciseId = Guid.NewGuid();
+        await using var host = await StartHostAsync(exerciseId);
+        host.Services.GetRequiredService<EngineAmbientPolicyRegistry>().Set(exerciseId, new Pulse.Core.Features.Ambient.Models.AmbientTierPolicy
+        {
+            Mode = Pulse.Core.Features.Ambient.Models.AmbientPolicyMode.Autonomous,
+            MaxPerMinute = 1,
+            MaxPerHour = 1,
+            TopicAllowList = [],
+            PersonaAllowList = [],
+            SetBy = "arrange",
+        });
+
+        var response = await host.Client.PostAsJsonAsync(
+            new Uri("/api/engine/autonomy/kill-switch", UriKind.Relative),
+            new { actingHumanId = SpoofedActingHumanId, mode = "full-stop" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var demotion = await EventsAsync(exerciseId, Pulse.WebApi.Features.EngineRuntime.Telemetry.EngineEventTypes.TierPolicyChanged);
+        demotion.Should().ContainSingle("the kill switch lowered autonomous ambient (AC6)")
+            .Which.Actor.ActingHumanId.Should().Be(host.StaffUserId.ToString(), "the lever-puller is the session person (WR-2)");
+    }
+
+    [RequiresDockerFact]
+    public async Task AutonomyDefault_ASpoofedBodyActingHumanId_IsNotRecorded_TheSessionPersonIs()
+    {
+        var exerciseId = Guid.NewGuid();
+        await using var host = await StartHostAsync(exerciseId);
+
+        var response = await host.Client.PostAsJsonAsync(
+            new Uri("/api/engine/settings/autonomy-default", UriKind.Relative),
+            new { actingHumanId = SpoofedActingHumanId, level = "delayed-auto", timeZone = "UTC" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var changed = await EventsAsync(exerciseId, Pulse.WebApi.Features.EngineRuntime.Telemetry.EngineEventTypes.AutonomyDefaultChanged);
+        changed.Should().ContainSingle().Which.Actor.ActingHumanId.Should().Be(host.StaffUserId.ToString())
+            .And.NotBe(SpoofedActingHumanId);
+    }
+
+    /// <summary>
+    /// Gate-1 WR-006: every one of the twelve request-bound steering routes, posted with a SPOOFED body
+    /// <c>actingHumanId</c>, records the SESSION person in the route's XC-004 event — and nothing anywhere carries the
+    /// spoofed value. <c>swamped-mode</c> and <c>autonomy/restore</c> persist no event or audit at all (the autonomy
+    /// state keeps no actor; mapping those changes onto XC-004 is engine-telemetry-tuning's), so for those two rows the
+    /// assertion is the absence of the spoofed id: there is no record for the session person to appear in.
+    /// </summary>
+    [RequiresDockerTheory]
+    [InlineData("approve")]
+    [InlineData("edit")]
+    [InlineData("veto")]
+    [InlineData("re-roll")]
+    [InlineData("batch-approve")]
+    [InlineData("swamped-mode")]
+    [InlineData("kill-switch")]
+    [InlineData("restore")]
+    [InlineData("autonomy-default")]
+    [InlineData("tier-policy")]
+    [InlineData("cut-to-fake")]
+    [InlineData("provider-restore")]
+    public async Task EveryRoute_ASpoofedBodyActingHumanId_IsNotRecorded_TheSessionPersonIs(string route)
+    {
+        var exerciseId = Guid.NewGuid();
+        var draftId = Guid.NewGuid();
+        await SeedAsync(Item(draftId, exerciseId, AutonomyLevel.Suggest, DraftDisposition.Queued, countdown: false));
+        await using var host = await StartHostAsync(exerciseId, timeoutAutoSendAuthorized: true); // swamped ON must pass the Phase-1 flag to reach attribution
+
+        var autonomy = host.Services.GetRequiredService<EngineAutonomyRegistry>().GetOrCreate(exerciseId);
+        var (path, body, recordedEventType) = route switch
+        {
+            "approve" => ($"/api/engine/review/{draftId}/approve", (object)new { actingHumanId = SpoofedActingHumanId, timeZone = "America/Chicago" }, EngineEventTypes.Reviewed),
+            "edit" => ($"/api/engine/review/{draftId}/edit", new { actingHumanId = SpoofedActingHumanId, timeZone = "America/Chicago", text = "Edited by the controller." }, EngineEventTypes.Reviewed),
+            "veto" => ($"/api/engine/review/{draftId}/veto", new { actingHumanId = SpoofedActingHumanId, timeZone = "America/Chicago" }, EngineEventTypes.Reviewed),
+            "re-roll" => ($"/api/engine/review/{draftId}/re-roll", new { actingHumanId = SpoofedActingHumanId, timeZone = "America/Chicago" }, EngineEventTypes.Reviewed),
+            "batch-approve" => ("/api/engine/review/batch-approve", new { actingHumanId = SpoofedActingHumanId, timeZone = "America/Chicago", draftIds = new[] { draftId.ToString() } }, EngineEventTypes.Reviewed),
+            "swamped-mode" => ("/api/engine/autonomy/swamped-mode", new { actingHumanId = SpoofedActingHumanId, enabled = true }, null),
+            "kill-switch" => ArrangeAutonomousAmbient(host, exerciseId, "/api/engine/autonomy/kill-switch", new { actingHumanId = SpoofedActingHumanId, mode = "full-stop" }),
+            "restore" => ArrangeKillSwitch(autonomy, "/api/engine/autonomy/restore", new { actingHumanId = SpoofedActingHumanId }),
+            "autonomy-default" => ("/api/engine/settings/autonomy-default", new { actingHumanId = SpoofedActingHumanId, level = "delayed-auto" }, EngineEventTypes.AutonomyDefaultChanged),
+            "tier-policy" => ("/api/engine/settings/tier-policy", new { actingHumanId = SpoofedActingHumanId, mode = "ambient" }, EngineEventTypes.TierPolicyChanged),
+
+            // The configured provider is Fake here, so the cut itself records nothing; the lever's ambient demotion is the
+            // route's record (AC6: the cut lowers autonomous ambient whether or not the provider was already Fake).
+            "cut-to-fake" => ArrangeAutonomousAmbient(host, exerciseId, "/api/engine/generation-provider/cut-to-fake", new { actingHumanId = SpoofedActingHumanId }),
+            "provider-restore" => ArrangeCut(host, exerciseId),
+            _ => throw new ArgumentOutOfRangeException(nameof(route)),
+        };
+
+        using var response = await host.Client.PostAsJsonAsync(new Uri(path, UriKind.Relative), body);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, "{0} must succeed for the attribution proof to mean anything", route);
+        await using var verify = _fixture.CreateContext();
+        var events = await verify.TelemetryEvents.IgnoreQueryFilters().Where(e => e.ExerciseId == exerciseId).ToListAsync();
+        events.Should().NotContain(
+            e => e.Actor.ActingHumanId == SpoofedActingHumanId || (e.Payload != null && e.Payload.Contains(SpoofedActingHumanId)),
+            "{0}: a spoofed body actingHumanId is never recorded (WR-2)", route);
+        (await verify.OrgAuditEvents.IgnoreQueryFilters()
+            .AnyAsync(a => a.ExerciseId == exerciseId && a.Payload.Contains(SpoofedActingHumanId)))
+            .Should().BeFalse("{0}: nor in any audit record", route);
+
+        if (recordedEventType is not null)
+        {
+            events.Where(e => e.EventType == recordedEventType).Should().NotBeEmpty("{0} records {1}", route, recordedEventType)
+                .And.OnlyContain(
+                    e => e.Actor.ActingHumanId == host.StaffUserId.ToString(),
+                    "{0}: the decision is attributed to the verified session's person (WR-2)", route);
+        }
+    }
+
+    private static (string Path, object Body, string? EventType) ArrangeAutonomousAmbient(
+        EngineReviewTestHost host, Guid exerciseId, string path, object body)
+    {
+        host.Services.GetRequiredService<EngineAmbientPolicyRegistry>().Set(exerciseId, new Pulse.Core.Features.Ambient.Models.AmbientTierPolicy
+        {
+            Mode = Pulse.Core.Features.Ambient.Models.AmbientPolicyMode.Autonomous,
+            MaxPerMinute = 1,
+            MaxPerHour = 1,
+            TopicAllowList = [],
+            PersonaAllowList = [],
+            SetBy = "arrange",
+        });
+        return (path, body, EngineEventTypes.TierPolicyChanged);
+    }
+
+    private static (string Path, object Body, string? EventType) ArrangeKillSwitch(
+        Pulse.Core.Features.Autonomy.Services.EngineAutonomyState autonomy, string path, object body)
+    {
+        autonomy.EngageKillSwitch(KillSwitchMode.DropToSuggest, "arrange", 0);
+        return (path, body, null);
+    }
+
+    private static (string Path, object Body, string? EventType) ArrangeCut(EngineReviewTestHost host, Guid exerciseId)
+    {
+        host.Services.GetRequiredService<Pulse.Core.Features.Generation.Services.IGenerationProviderCutRegistry>().Cut(exerciseId);
+        return ("/api/engine/generation-provider/restore", new { actingHumanId = SpoofedActingHumanId }, EngineEventTypes.ProviderChanged);
+    }
+
+    private async Task<List<TelemetryEvent>> EventsAsync(Guid exerciseId, string eventType)
+    {
+        await using var verify = _fixture.CreateContext();
+        return await verify.TelemetryEvents
+            .IgnoreQueryFilters()
+            .Where(e => e.ExerciseId == exerciseId && e.EventType == eventType)
+            .ToListAsync();
+    }
+
     private async Task SeedAsync(params EngineReviewItemEntity[] items)
     {
         await using var seed = _fixture.CreateContext();
@@ -542,12 +731,16 @@ public sealed class EngineReviewEndpointsTests
     {
         private readonly WebApplication _app;
 
-        private EngineReviewTestHost(WebApplication app, CapturingEnginePublishService publisher)
+        private EngineReviewTestHost(WebApplication app, CapturingEnginePublishService publisher, Guid staffUserId)
         {
             _app = app;
             Publisher = publisher;
+            StaffUserId = staffUserId;
             Client = app.GetTestClient();
         }
+
+        /// <summary>The session's staff person — the identity every steering action is attributed to (WR-2).</summary>
+        public Guid StaffUserId { get; }
 
         public HttpClient Client { get; }
 
@@ -623,7 +816,7 @@ public sealed class EngineReviewEndpointsTests
             app.MapEngineReview();
             await app.StartAsync();
 
-            return new EngineReviewTestHost(app, publisher);
+            return new EngineReviewTestHost(app, publisher, staffUserId);
         }
 
         public async ValueTask DisposeAsync()
@@ -656,12 +849,15 @@ public sealed class EngineReviewEndpointsTests
             // exercise-isolation/11: the staff human the session names must EXIST and share the exercise's
             // customer tenant, or the org bound fails closed and every staff endpoint 403s.
             context.StaffUsers.Add(StaffTenantSeed.StaffUserFor(staffUserId));
-            context.StaffAssignments.Add(new StaffAssignment
+            context.Enrollments.Add(new Enrollment
             {
                 Id = Guid.NewGuid(),
-                StaffUserId = staffUserId,
+                PersonId = staffUserId,
                 ExerciseId = exerciseId,
                 Role = "controller",
+
+                // identity-auth-roles/17: the suite's controller is the exercise's LEAD — the raise routes need it.
+                IsLead = true,
                 CreatedAt = DateTimeOffset.UtcNow,
             });
             await context.SaveChangesAsync();

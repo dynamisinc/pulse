@@ -24,8 +24,13 @@ import { resetExerciseClock, setExerciseClock } from '@/core/clock'
 import { useExerciseContext, type ExerciseScope } from '@/core/exerciseContext'
 import { getEmittedTelemetryEvents, resetTelemetryBuffer } from '@/core/telemetry'
 import { useControllerIdentity, type ControllerIdentity } from '../../identity/controllerIdentity'
+import { resetStubSession, setStubSession } from '@/core/auth/rolePermissions.testUtils'
 import { swampedModeStore, useSwampedMode } from './useSwampedMode'
 
+vi.mock('@/core/auth/session', async importOriginal => ({
+  ...(await importOriginal<typeof import('@/core/auth/session')>()),
+  useOptionalSession: (await import('@/core/auth/rolePermissions.testUtils')).stubbedSession,
+}))
 vi.mock('@/core/exerciseContext', () => ({
   useExerciseContext: vi.fn(),
 }))
@@ -45,7 +50,6 @@ function identity(overrides: Partial<ControllerIdentity> = {}): ControllerIdenti
     actingHumanId: 'human-controller-01',
     callSign: 'SIMCELL-1',
     role: 'controller',
-    isLead: true,
     ...overrides,
   }
 }
@@ -55,6 +59,7 @@ function swampedEvents() {
 }
 
 beforeEach(() => {
+  resetStubSession()
   setExerciseClock({ scenarioNow: () => new Date('2033-09-04T14:00:00Z') })
   swampedModeStore.resetForTests()
   resetTelemetryBuffer()
@@ -78,7 +83,8 @@ describe('useSwampedMode — default state', () => {
 describe('useSwampedMode — lead can toggle', () => {
   it('enables swamped mode and logs one telemetry event with actor + scenario time', () => {
     mockedUseExerciseContext.mockReturnValue(scopeFor('ex-mock-0001'))
-    mockedUseControllerIdentity.mockReturnValue(identity({ isLead: true, actingHumanId: 'human-lead-1' }))
+    setStubSession({ role: 'controller', isLead: true })
+    mockedUseControllerIdentity.mockReturnValue(identity({ actingHumanId: 'human-lead-1' }))
 
     const { result } = renderHook(() => useSwampedMode())
     act(() => result.current.setSwampedMode(true))
@@ -86,7 +92,7 @@ describe('useSwampedMode — lead can toggle', () => {
     expect(result.current.swampedMode).toBe(true)
     const events = swampedEvents()
     expect(events).toHaveLength(1)
-    expect(events[0]?.actor).toEqual({ kind: 'engine', actingHumanId: 'human-lead-1' })
+    expect(events[0]?.actor).toEqual({ kind: 'engine', actingHumanId: 'person-stub' }) // session personId, not the mock identity
     expect(events[0]?.scenarioTime).toBe('2033-09-04T14:00:00.000Z')
     expect(events[0]?.channel).toBe('system')
     expect(events[0]?.payload).toEqual({ action: 'swamped-mode-enabled' })
@@ -94,7 +100,8 @@ describe('useSwampedMode — lead can toggle', () => {
 
   it('disables swamped mode and logs a second telemetry event', () => {
     mockedUseExerciseContext.mockReturnValue(scopeFor('ex-mock-0001'))
-    mockedUseControllerIdentity.mockReturnValue(identity({ isLead: true }))
+    setStubSession({ role: 'controller', isLead: true })
+    mockedUseControllerIdentity.mockReturnValue(identity())
 
     const { result } = renderHook(() => useSwampedMode())
     act(() => result.current.setSwampedMode(true))
@@ -107,7 +114,8 @@ describe('useSwampedMode — lead can toggle', () => {
 
   it('is a no-op (no state change, no telemetry) when set to its current value', () => {
     mockedUseExerciseContext.mockReturnValue(scopeFor('ex-mock-0001'))
-    mockedUseControllerIdentity.mockReturnValue(identity({ isLead: true }))
+    setStubSession({ role: 'controller', isLead: true })
+    mockedUseControllerIdentity.mockReturnValue(identity())
 
     const { result } = renderHook(() => useSwampedMode())
     act(() => result.current.setSwampedMode(false))
@@ -120,7 +128,8 @@ describe('useSwampedMode — lead can toggle', () => {
 describe('useSwampedMode — non-lead cannot enable it (ADP-040)', () => {
   it('setSwampedMode(true) is rejected: state stays off, nothing is logged', () => {
     mockedUseExerciseContext.mockReturnValue(scopeFor('ex-mock-0001'))
-    mockedUseControllerIdentity.mockReturnValue(identity({ isLead: false }))
+    setStubSession({ role: 'controller', isLead: false })
+    mockedUseControllerIdentity.mockReturnValue(identity())
 
     const { result } = renderHook(() => useSwampedMode())
     act(() => result.current.setSwampedMode(true))
@@ -132,12 +141,14 @@ describe('useSwampedMode — non-lead cannot enable it (ADP-040)', () => {
 
   it('setSwampedMode(false) is not gated for a non-lead', () => {
     mockedUseExerciseContext.mockReturnValue(scopeFor('ex-mock-0001'))
-    mockedUseControllerIdentity.mockReturnValue(identity({ isLead: true }))
+    setStubSession({ role: 'controller', isLead: true })
+    mockedUseControllerIdentity.mockReturnValue(identity())
     const lead = renderHook(() => useSwampedMode())
     act(() => lead.result.current.setSwampedMode(true))
     lead.unmount()
 
-    mockedUseControllerIdentity.mockReturnValue(identity({ isLead: false }))
+    setStubSession({ role: 'controller', isLead: false })
+    mockedUseControllerIdentity.mockReturnValue(identity())
     const nonLead = renderHook(() => useSwampedMode())
     expect(nonLead.result.current.swampedMode).toBe(true)
 
@@ -149,7 +160,8 @@ describe('useSwampedMode — non-lead cannot enable it (ADP-040)', () => {
 describe('useSwampedMode — per-exercise scoping (COR-001)', () => {
   it('a different exercise never observes another exercise\'s flag', () => {
     mockedUseExerciseContext.mockReturnValue(scopeFor('ex-alpha'))
-    mockedUseControllerIdentity.mockReturnValue(identity({ isLead: true }))
+    setStubSession({ role: 'controller', isLead: true })
+    mockedUseControllerIdentity.mockReturnValue(identity())
     const alpha = renderHook(() => useSwampedMode())
     act(() => alpha.result.current.setSwampedMode(true))
     expect(alpha.result.current.swampedMode).toBe(true)

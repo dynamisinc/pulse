@@ -12,7 +12,7 @@
  * A PLANNER, an ORG-ADMIN and (since demo-feedback DF-20) a CONTROLLER reach
  * this surface (the three roles the server's `ExerciseAdministrators` gate
  * admits). The list is scoped to the caller's ORGANIZATION, not to their
- * assignments — an org-admin administers runs they hold no `StaffAssignment`
+ * assignments — an org-admin administers runs they hold no `Enrollment`
  * on, and a planner or controller needs to see what already exists before
  * creating another. That is a different, strictly larger read than the
  * exercise switcher's own-only `GET /api/staff/assignments`, on purpose.
@@ -55,9 +55,10 @@ import { CobraSecondaryButton } from '@/theme/styledComponents'
 import { CreateExerciseForm } from '../components/CreateExerciseForm'
 import { OrgExerciseTable } from '../components/OrgExerciseTable'
 import { useOrgExercises } from '../hooks/useOrgExercises'
+import { usePermissions } from '@/core/auth'
 
 /** The first-run state. See the module header for why it is more than a shrug. */
-function EmptyState() {
+function EmptyState({ canCreate }: { readonly canCreate: boolean }) {
   return (
     <Stack
       data-testid="org-exercises-empty"
@@ -79,8 +80,10 @@ function EmptyState() {
       </Typography>
       <Typography variant="body2" sx={{ color: 'text.secondary', maxWidth: 520 }}>
         Everything your organization runs will be listed here — its name, where it is in the
-        lifecycle, its hostname and when it was created. Create your first one using the form
-        above; it starts in Build and you will be assigned to it straight away.
+        lifecycle, its hostname and when it was created.
+        {canCreate
+          ? ' Create your first one using the form above; it starts in Build and you will be assigned to it straight away.'
+          : ' Only an organization administrator can create an exercise.'}
       </Typography>
     </Stack>
   )
@@ -89,6 +92,8 @@ function EmptyState() {
 /** The exercise-management work area. */
 export function ExerciseManagementPage() {
   const exercises = useOrgExercises()
+  // Story 17: create is org-admin only; planners and controllers would get a 403, so no form.
+  const canCreate = usePermissions().can('createExercise')
 
   return (
     <Box
@@ -114,7 +119,7 @@ export function ExerciseManagementPage() {
         <Divider sx={{ mt: 2 }} />
       </Box>
 
-      <CreateExerciseForm />
+      {canCreate ? <CreateExerciseForm /> : null}
 
       <Box component="section" aria-labelledby="org-exercise-list-heading">
         <Typography
@@ -187,7 +192,7 @@ export function ExerciseManagementPage() {
         {exercises.isSuccess
           ? (
             exercises.data.length === 0
-              ? <EmptyState />
+              ? <EmptyState canCreate={canCreate} />
               : <OrgExerciseTable exercises={exercises.data} />
           )
           : null}

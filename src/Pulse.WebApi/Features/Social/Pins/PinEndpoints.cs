@@ -10,6 +10,7 @@ using Pulse.WebApi.Data;
 using Pulse.WebApi.Features.EngineRuntime;
 using Pulse.WebApi.Features.Identity.Sessions;
 using Pulse.WebApi.Features.Social.Follows;
+using Pulse.WebApi.Features.Identity.RoleMatrix;
 
 /// <summary>
 /// The pins HTTP surface (demo-feedback story 04): the controller's exercise pin
@@ -82,12 +83,14 @@ public static class PinEndpoints
             .MapGroup(string.Empty)
             .AddEndpointFilter<EngineCockpitStaffAuthorizationFilter>();
 
-        var controllerOnly = staff
+        // identity-auth-roles/17 (§8.2): pinning is setup authoring in build (planner or controller) and conduct
+        // everywhere else (controller only). Evaluators are refused in every state (#61).
+        var authoring = staff
             .MapGroup(string.Empty)
-            .AddEndpointFilter<EngineCockpitControllerRoleFilter>();
+            .AddEndpointFilter(StaffAuthoringRoleFilter.PersonaAuthoring);
 
-        controllerOnly.MapPut(StaffPinRoute, PinForAllAsync);
-        controllerOnly.MapDelete(StaffPinRoute, UnpinForAllAsync);
+        authoring.MapPut(StaffPinRoute, PinForAllAsync);
+        authoring.MapDelete(StaffPinRoute, UnpinForAllAsync);
 
         endpoints.MapGet(PinnedFeedRoute, GetPinnedFeedAsync);
 

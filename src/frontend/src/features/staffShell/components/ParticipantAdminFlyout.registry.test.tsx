@@ -23,12 +23,19 @@ import { configure, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { ExerciseContextProvider } from '@/core/exerciseContext'
 import { StaffRouteTree, resolveDefaultStaffRoute } from '@/features/app-shell'
 import type { StaffSurfaceRole } from '@/features/app-shell'
 import { STAFF_ROUTE_REGISTRY } from '@/features/staff'
 import { PARTICIPANT_ADMIN_TOOL_ID } from './ParticipantAdminFlyout'
+import { resetStubSession, setStubSession } from '@/core/auth/rolePermissions.testUtils'
+
+// Story 17: role-gated controls read the session; stand in the session this suite signs in as.
+vi.mock('@/core/auth/session', async importOriginal => ({
+  ...(await importOriginal<typeof import('@/core/auth/session')>()),
+  useOptionalSession: (await import('@/core/auth/rolePermissions.testUtils')).stubbedSession,
+}))
 
 vi.mock('@/features/controller', async () => {
   const { StaffShellFrame } = await import('@/features/staffShell/StaffShellFrame')
@@ -95,6 +102,11 @@ async function openFlyout(user: ReturnType<typeof userEvent.setup>) {
   await user.click(await screen.findByTestId(`toolstrip-tool-${PARTICIPANT_ADMIN_TOOL_ID}`))
   return screen.findByTestId('participant-admin-flyout')
 }
+
+beforeEach(() => {
+  resetStubSession()
+  setStubSession({ role: 'planner', isLead: false })
+})
 
 describe('the flyout footer follows the shipped registry entry', () => {
   it('shows the CONTROLLER the link, to the entry\'s path', async () => {

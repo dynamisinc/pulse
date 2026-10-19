@@ -41,6 +41,13 @@ import { StaffRouteTree } from '@/features/app-shell'
 import type { StaffSurfaceRole } from '@/features/app-shell'
 import { STAFF_ROUTE_REGISTRY } from '@/features/staff'
 import { resetOrgExerciseMocks } from './services/orgExercisesService'
+import { resetStubSession, setStubSession } from '@/core/auth/rolePermissions.testUtils'
+
+// Story 17: role-gated controls read the session; stand in the session this suite signs in as.
+vi.mock('@/core/auth/session', async importOriginal => ({
+  ...(await importOriginal<typeof import('@/core/auth/session')>()),
+  useOptionalSession: (await import('@/core/auth/rolePermissions.testUtils')).stubbedSession,
+}))
 
 vi.mock('@/features/controller', async () => {
   const { StaffShellFrame } = await import('@/features/staffShell/StaffShellFrame')
@@ -72,6 +79,7 @@ vi.mock('@/features/evaluator', async () => {
  * that header mounts `SurfaceLauncher` with no props at all.
  */
 function renderTreeAt(role: StaffSurfaceRole, path: string, defaultPath: string) {
+  setStubSession({ role })
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
@@ -92,6 +100,8 @@ function renderTreeAt(role: StaffSurfaceRole, path: string, defaultPath: string)
 }
 
 beforeEach(() => {
+  resetStubSession()
+  setStubSession({ role: 'orgAdmin', isLead: false })
   resetOrgExerciseMocks()
 })
 

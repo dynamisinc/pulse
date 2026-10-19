@@ -41,11 +41,19 @@ import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { useSession, useRole } from '@/core/auth'
-import type { ExerciseRole, Session } from '@/core/auth'
+import type { ExerciseSession, SessionRole } from '@/core/auth'
+import { withRole } from '@/core/auth/withRole.testUtils'
 import { ExerciseContextProvider } from '@/core/exerciseContext'
 import { RoleAwareEntry } from '@/features/app-shell'
 import { STAFF_ROUTE_REGISTRY } from '@/features/staff'
 import { resetOrgExerciseMocks } from './services/orgExercisesService'
+import { resetStubSession, setStubSession } from '@/core/auth/rolePermissions.testUtils'
+
+// Story 17: role-gated controls read the session; stand in the session this suite signs in as.
+vi.mock('@/core/auth/session', async importOriginal => ({
+  ...(await importOriginal<typeof import('@/core/auth/session')>()),
+  useOptionalSession: (await import('@/core/auth/rolePermissions.testUtils')).stubbedSession,
+}))
 
 vi.mock('@/features/controller', () => ({
   ControllerConsoleRoute: () => <div data-testid="stub-controller-console" />,
@@ -62,8 +70,12 @@ vi.mock('@/core/auth', async importOriginal => {
   return { ...actual, useSession: vi.fn(), useRole: vi.fn() }
 })
 
-const BASE_SESSION: Session = {
+const BASE_SESSION: ExerciseSession = {
   exerciseId: 'ex-mock-0001',
+  scope: 'exercise',
+  personId: null,
+  world: 'staff',
+  isLead: false,
   accountId: 'acct-test',
   role: 'planner',
   personaId: 'persona-test',
@@ -72,8 +84,8 @@ const BASE_SESSION: Session = {
   expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
 }
 
-function primeSession(role: ExerciseRole) {
-  const session: Session = { ...BASE_SESSION, role }
+function primeSession(role: SessionRole) {
+  const session = withRole(BASE_SESSION, role)
   vi.mocked(useSession).mockReturnValue(session)
   vi.mocked(useRole).mockReturnValue(role)
 }
@@ -123,6 +135,8 @@ function renderAt(path: string) {
 }
 
 beforeEach(() => {
+  resetStubSession()
+  setStubSession({ role: 'orgAdmin', isLead: false })
   vi.mocked(useSession).mockReset()
   vi.mocked(useRole).mockReset()
   resetOrgExerciseMocks()
@@ -164,9 +178,8 @@ describe('COR-076 — an orgAdmin session reaches a real surface, not /login', (
   })
 
   it('still fails closed for an EXPIRED orgAdmin session', async () => {
-    const expired: Session = {
-      ...BASE_SESSION,
-      role: 'orgAdmin',
+    const expired = {
+      ...withRole(BASE_SESSION, 'orgAdmin'),
       expiresAt: new Date(Date.now() - 1000).toISOString(),
     }
     vi.mocked(useSession).mockReturnValue(expired)

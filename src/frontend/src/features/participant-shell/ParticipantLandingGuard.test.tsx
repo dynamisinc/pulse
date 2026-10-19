@@ -28,7 +28,8 @@
 import { render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { describe, expect, it, vi } from 'vitest'
-import type { ExerciseRole, Session } from '@/core/auth'
+import type { ExerciseRole, ExerciseSession, Session, SessionRole } from '@/core/auth'
+import { withRole } from '@/core/auth/withRole.testUtils'
 import { useExerciseContext, type ExerciseScope } from '@/core/exerciseContext'
 import { useRole, useSession } from '@/core/auth'
 import { ParticipantLandingGuard } from './ParticipantLandingGuard'
@@ -53,9 +54,13 @@ const mockedUseExerciseContext = vi.mocked(useExerciseContext)
 
 const EXERCISE_ID = 'ex-mock-0001'
 
-function sessionFixture(overrides: Partial<Session> = {}): Session {
+function sessionFixture(overrides: Partial<ExerciseSession> = {}): ExerciseSession {
   return {
     exerciseId: EXERCISE_ID,
+    scope: 'exercise',
+    personId: null,
+    world: 'participant',
+    isLead: false,
     accountId: 'acct-dreyes',
     role: 'participant',
     personaId: 'persona-dreyes_fh',
@@ -94,7 +99,7 @@ function ForbiddenLandingSurface() {
   )
 }
 
-function setup(role: ExerciseRole, session: Session, scope: ExerciseScope) {
+function setup(role: SessionRole, session: Session, scope: ExerciseScope) {
   mockedUseRole.mockReturnValue(role)
   mockedUseSession.mockReturnValue(session)
   mockedUseExerciseContext.mockReturnValue(scope)
@@ -144,7 +149,7 @@ describe('ParticipantLandingGuard — fail-closed', () => {
   )
 
   it('denies orgAdmin — not a participant surface either', () => {
-    setup('orgAdmin', sessionFixture({ role: 'orgAdmin' }), scopeFixture())
+    setup('orgAdmin', withRole(sessionFixture(), 'orgAdmin'), scopeFixture())
 
     renderGuard()
 

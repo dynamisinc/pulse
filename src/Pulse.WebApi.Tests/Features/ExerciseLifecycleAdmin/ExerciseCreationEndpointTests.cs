@@ -12,6 +12,7 @@ using Pulse.WebApi.Features.ExerciseConfiguration.Lifecycle;
 using Pulse.WebApi.Features.ExerciseLifecycleAdmin;
 using Pulse.WebApi.Features.ExerciseResolution;
 using Pulse.WebApi.Tests.Data;
+using Pulse.WebApi.Tests.Features.ExerciseConfiguration.Lifecycle;
 using Xunit;
 
 /// <summary>
@@ -34,13 +35,13 @@ public sealed class ExerciseCreationEndpointTests
     public ExerciseCreationEndpointTests(MsSqlContainerFixture fixture) => _fixture = fixture;
 
     /// <summary>
-    /// AC1 + AC2 + AC3 + AC4: a planner's create yields a <c>build</c> exercise with a unique hostname, a
+    /// AC1 + AC2 + AC3 + AC4 (identity-auth-roles/17: creation is org admin only): an org admin's create yields a <c>build</c> exercise with a unique hostname, a
     /// creator assignment, the caller's own organization, and the documented column defaults untouched.
     /// </summary>
     [RequiresDockerFact]
-    public async Task Create_AsPlanner_PersistsABuildExercise_OwnedByTheCallersOrganization_WithACreatorAssignment()
+    public async Task Create_AsOrgAdmin_PersistsABuildExercise_OwnedByTheCallersOrganization_WithACreatorAssignment()
     {
-        var world = await OrgAdminTestWorld.SeedAsync(_fixture, ExerciseAdminRoles.Planner);
+        var world = await OrgAdminTestWorld.SeedAsync(_fixture, ExerciseAdminRoles.OrgAdmin);
 
         await using var factory = new OrgAdminProbeFactory(_fixture.ConnectionString!);
         using var client = OrgAdminTestWorld.CreateClient(factory, world.Token);
@@ -51,7 +52,7 @@ public sealed class ExerciseCreationEndpointTests
 
         response.StatusCode.Should().Be(
             HttpStatusCode.Created,
-            "a Planner session may create an exercise (COR-074 AC1) — a 401 here means the customer tenant was "
+            "an org-admin session may create an exercise (COR-074 AC1) — a 401 here means the customer tenant was "
             + "never resolved, a 403 means the role gate refused a role it must admit, and a 404 means "
             + "Program.cs never mapped the route");
 
@@ -64,7 +65,7 @@ public sealed class ExerciseCreationEndpointTests
             + "state — bootstrap's 'live' seed is a different path with a different purpose");
         created.AssignedRole.Should().Be(
             ExerciseAdminRoles.Planner,
-            "AC3: the auto-created assignment carries the CREATOR'S OWN role");
+            "AC3 (as amended by identity-auth-roles/16): an org-admin creator is enrolled as the planner");
 
         var exerciseId = Guid.Parse(created.Exercise.ExerciseId);
 
@@ -88,11 +89,11 @@ public sealed class ExerciseCreationEndpointTests
         exercise.IsPracticeMode.Should().BeFalse();
         exercise.WorldName.Should().BeNull("an unconfigured exercise leaves every COR-030 setting null");
 
-        var assignment = await read.StaffAssignments
+        var assignment = await read.Enrollments.IgnoreQueryFilters()
             .AsNoTracking()
             .SingleAsync(a => a.ExerciseId == exerciseId);
 
-        assignment.StaffUserId.Should().Be(
+        assignment.PersonId.Should().Be(
             world.CallerStaffUserId,
             "AC3: the creator is assigned so they reach the run through the switcher with no separate "
             + "provisioning step");
@@ -119,16 +120,16 @@ public sealed class ExerciseCreationEndpointTests
 
         var created = await response.Content.ReadFromJsonAsync<CreateExerciseWire>();
         created!.AssignedRole.Should().Be(
-            ExerciseAdminRoles.OrgAdmin,
-            "orgAdmin is a real, stored role in its own right (COR-076) — AC3 says 'planner or orgAdmin', so "
-            + "silently writing 'planner' here would erase the very role this feature makes real");
+            ExerciseAdminRoles.Planner,
+            "identity-auth-roles/16: orgAdmin left the exercise-role vocabulary (it is Person.OrgRole) — an org-admin "
+            + "creator is enrolled as planner, exactly as the AdminIdentityFoundation migration maps an orgAdmin assignment");
 
         await using var read = _fixture.CreateContext();
-        var assignment = await read.StaffAssignments
+        var assignment = await read.Enrollments.IgnoreQueryFilters()
             .AsNoTracking()
             .SingleAsync(a => a.ExerciseId == Guid.Parse(created.Exercise.ExerciseId));
 
-        assignment.Role.Should().Be(ExerciseAdminRoles.OrgAdmin, "the persisted assignment, not just the echo");
+        assignment.Role.Should().Be(ExerciseAdminRoles.Planner, "the persisted enrollment, not just the echo (orgAdmin is no exercise role)");
     }
 
     /// <summary>
@@ -138,7 +139,7 @@ public sealed class ExerciseCreationEndpointTests
     [RequiresDockerFact]
     public async Task Create_WithAProposedHostname_NormalizesAndStoresIt_SoHostResolutionCanFindIt()
     {
-        var world = await OrgAdminTestWorld.SeedAsync(_fixture, ExerciseAdminRoles.Planner);
+        var world = await OrgAdminTestWorld.SeedAsync(_fixture, ExerciseAdminRoles.OrgAdmin);
         var proposed = $"Proposed-{Guid.NewGuid():N}.Pulse.Test";
 
         await using var factory = new OrgAdminProbeFactory(_fixture.ConnectionString!);
@@ -164,7 +165,7 @@ public sealed class ExerciseCreationEndpointTests
     [RequiresDockerFact]
     public async Task Create_WithNoProposedHostname_AllocatesOneThatHostResolutionWouldAccept()
     {
-        var world = await OrgAdminTestWorld.SeedAsync(_fixture, ExerciseAdminRoles.Planner);
+        var world = await OrgAdminTestWorld.SeedAsync(_fixture, ExerciseAdminRoles.OrgAdmin);
 
         await using var factory = new OrgAdminProbeFactory(_fixture.ConnectionString!);
         using var client = OrgAdminTestWorld.CreateClient(factory, world.Token);
@@ -194,7 +195,7 @@ public sealed class ExerciseCreationEndpointTests
     [RequiresDockerFact]
     public async Task Create_WithAHostnameAnotherCustomersExerciseAlreadyHolds_Conflicts_AndCreatesNothing()
     {
-        var world = await OrgAdminTestWorld.SeedAsync(_fixture, ExerciseAdminRoles.Planner);
+        var world = await OrgAdminTestWorld.SeedAsync(_fixture, ExerciseAdminRoles.OrgAdmin);
         var takenHost = $"taken-{Guid.NewGuid():N}.pulse.test";
 
         // Park the hostname on the OTHER customer's exercise: "no two exercises, across any organization, ever
@@ -233,13 +234,13 @@ public sealed class ExerciseCreationEndpointTests
             .ToListAsync();
         created.Should().BeEmpty("no half-created exercise may survive a refused create");
 
-        var assignmentCount = await read.StaffAssignments
+        var assignmentCount = await read.Enrollments.IgnoreQueryFilters()
             .AsNoTracking()
-            .CountAsync(a => a.StaffUserId == world.CallerStaffUserId);
+            .CountAsync(a => a.PersonId == world.CallerStaffUserId);
         assignmentCount.Should().Be(
             1,
             "the single unit of work rolls back completely: only the fixture's own assignment remains, so no "
-            + "orphan StaffAssignment points at an exercise that was never created");
+            + "orphan Enrollment points at an exercise that was never created");
 
         var telemetry = await read.TelemetryEvents
             .IgnoreQueryFilters()
@@ -250,47 +251,15 @@ public sealed class ExerciseCreationEndpointTests
     }
 
     /// <summary>
-    /// demo-feedback DF-20 (story 15): a Controller session MAY create an exercise. It gets a
-    /// <c>controller</c> assignment (AC3's "creator's own role" rule, unchanged), and the exercise is owned by
-    /// the controller's OWN server-resolved tenant — never the other customer's.
+    /// identity-auth-roles/17 (ADMIN-IDENTITY-MODEL §8.2, signed off): creating an exercise is org admin ONLY. The
+    /// DF-20 widening is reversed deliberately — a planner and a controller are both refused and nothing is created.
     /// </summary>
-    [RequiresDockerFact]
-    public async Task Create_AsController_PersistsAnExerciseInTheCallersOwnTenant_WithAControllerAssignment()
+    [RequiresDockerTheory]
+    [InlineData(ExerciseAdminRoles.Planner)]
+    [InlineData(ExerciseAdminRoles.Controller)]
+    public async Task Create_AsPlannerOrController_IsRefused(string role)
     {
-        var world = await OrgAdminTestWorld.SeedAsync(_fixture, ExerciseAdminRoles.Controller);
-
-        await using var factory = new OrgAdminProbeFactory(_fixture.ConnectionString!);
-        using var client = OrgAdminTestWorld.CreateClient(factory, world.Token);
-
-        var response = await client.PostAsJsonAsync(
-            ExerciseLifecycleAdminEndpoints.ExercisesRoute,
-            new { name = "Controller Created Run" });
-
-        response.StatusCode.Should().Be(
-            HttpStatusCode.Created,
-            "DF-20: the controller joined ExerciseAdministrators, so the filter AND the service re-check must "
-            + "both admit it — a 403 here means one of the two still carries the old planner/orgAdmin set");
-
-        var created = await response.Content.ReadFromJsonAsync<CreateExerciseWire>();
-        created.Should().NotBeNull();
-        created!.AssignedRole.Should().Be(
-            ExerciseAdminRoles.Controller,
-            "AC3: the auto-created assignment carries the CREATOR'S OWN role — a controller is not coerced "
-            + "onto planner, which would hand it the planner workspace it was never granted");
-        created.Exercise.Status.Should().Be(ExerciseLifecycleStates.Build);
-
-        var exerciseId = Guid.Parse(created.Exercise.ExerciseId);
-
-        await using var read = _fixture.CreateContext();
-        var exercise = await read.Exercises.AsNoTracking().SingleAsync(e => e.Id == exerciseId);
-        exercise.OrganizationId.Should().Be(
-            world.OwnOrganizationId,
-            "the tenant comes only from the server session (StaffCallerContext), for a controller as for anyone");
-        exercise.OrganizationId.Should().NotBe(world.OtherOrganizationId);
-
-        var assignment = await read.StaffAssignments.AsNoTracking().SingleAsync(a => a.ExerciseId == exerciseId);
-        assignment.StaffUserId.Should().Be(world.CallerStaffUserId);
-        assignment.Role.Should().Be(ExerciseAdminRoles.Controller, "the persisted assignment, not just the echo");
+        await AssertRoleIsRefusedAsync(role);
     }
 
     /// <summary>AC5 (and story 15): an Evaluator session still cannot create an exercise.</summary>
@@ -325,7 +294,7 @@ public sealed class ExerciseCreationEndpointTests
     [RequiresDockerFact]
     public async Task Create_WithNoName_IsRejected_AndWritesNothing()
     {
-        var world = await OrgAdminTestWorld.SeedAsync(_fixture, ExerciseAdminRoles.Planner);
+        var world = await OrgAdminTestWorld.SeedAsync(_fixture, ExerciseAdminRoles.OrgAdmin);
 
         await using var factory = new OrgAdminProbeFactory(_fixture.ConnectionString!);
         using var client = OrgAdminTestWorld.CreateClient(factory, world.Token);
@@ -350,7 +319,7 @@ public sealed class ExerciseCreationEndpointTests
     [RequiresDockerFact]
     public async Task Create_SanitizesTheName_StrippingMarkupRatherThanStoringIt()
     {
-        var world = await OrgAdminTestWorld.SeedAsync(_fixture, ExerciseAdminRoles.Planner);
+        var world = await OrgAdminTestWorld.SeedAsync(_fixture, ExerciseAdminRoles.OrgAdmin);
 
         await using var factory = new OrgAdminProbeFactory(_fixture.ConnectionString!);
         using var client = OrgAdminTestWorld.CreateClient(factory, world.Token);
@@ -454,7 +423,7 @@ public sealed class ExerciseCreationEndpointTests
 
         response.StatusCode.Should().Be(
             HttpStatusCode.Forbidden,
-            "AC5 as widened by DF-20: creation is Planner/OrgAdmin/Controller only, so a live, perfectly "
+            "identity-auth-roles/17: creation is org admin only, so a live, perfectly "
             + "valid {0} session must be refused — "
             + "a 201 here means the endpoint gates on 'any staff session' (exercise-configuration's open "
             + "question (a) gap) rather than on role, and a 401 would mean the session itself was not honored, "

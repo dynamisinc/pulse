@@ -28,6 +28,13 @@ import {
   getOrgExercises,
 } from '../services/orgExercisesService'
 import type { OrgExercise } from '../types'
+import { resetStubSession, setStubSession } from '@/core/auth/rolePermissions.testUtils'
+
+// Story 17: role-gated controls read the session; stand in the session this suite signs in as.
+vi.mock('@/core/auth/session', async importOriginal => ({
+  ...(await importOriginal<typeof import('@/core/auth/session')>()),
+  useOptionalSession: (await import('@/core/auth/rolePermissions.testUtils')).stubbedSession,
+}))
 
 vi.mock('../services/orgExercisesService', async importOriginal => {
   const actual = await importOriginal<typeof import('../services/orgExercisesService')>()
@@ -69,6 +76,8 @@ function renderPage() {
 }
 
 beforeEach(() => {
+  resetStubSession()
+  setStubSession({ role: 'orgAdmin', isLead: false })
   vi.resetAllMocks()
 })
 

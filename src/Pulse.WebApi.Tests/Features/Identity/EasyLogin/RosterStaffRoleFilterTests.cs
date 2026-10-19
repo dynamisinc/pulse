@@ -160,10 +160,10 @@ public sealed class RosterStaffRoleFilterTests
 
         if (roleOnA is not null)
         {
-            seed.StaffAssignments.Add(new StaffAssignment
+            seed.Enrollments.Add(new Enrollment
             {
                 Id = Guid.NewGuid(),
-                StaffUserId = staffUserId,
+                PersonId = staffUserId,
                 ExerciseId = exerciseA,
                 Role = roleOnA,
                 CreatedAt = DateTimeOffset.UtcNow,
@@ -172,10 +172,10 @@ public sealed class RosterStaffRoleFilterTests
 
         if (roleOnB is not null)
         {
-            seed.StaffAssignments.Add(new StaffAssignment
+            seed.Enrollments.Add(new Enrollment
             {
                 Id = Guid.NewGuid(),
-                StaffUserId = staffUserId,
+                PersonId = staffUserId,
                 ExerciseId = exerciseB,
                 Role = roleOnB,
                 CreatedAt = DateTimeOffset.UtcNow,

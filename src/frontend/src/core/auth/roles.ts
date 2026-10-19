@@ -36,7 +36,18 @@ export type ExerciseRole =
   | 'controller'
   | 'evaluator'
   | 'planner'
-  | 'orgAdmin'
+
+/**
+ * The one organization-scope role (identity-auth-roles/16, ADMIN-IDENTITY-MODEL §9). It is NOT an
+ * exercise role: it only ever rides an org-scope session (`scope: 'org'`, no exercise bound).
+ */
+export type OrgRole = 'orgAdmin'
+
+/** Session scope on the wire: bound to one exercise, or org-wide (no exercise). */
+export type SessionScope = 'exercise' | 'org'
+
+/** Any role a session can carry: an exercise role (exercise scope) or `orgAdmin` (org scope). */
+export type SessionRole = ExerciseRole | OrgRole
 
 /**
  * All valid roles. The runtime guard (`isExerciseRole`) checks membership
@@ -50,8 +61,10 @@ export const ALL_ROLES: readonly ExerciseRole[] = [
   'controller',
   'evaluator',
   'planner',
-  'orgAdmin',
 ] as const
+
+/** All org-scope roles (just `orgAdmin`). */
+export const ORG_ROLES: readonly OrgRole[] = ['orgAdmin'] as const
 
 /** Staff-surface roles (controller/evaluator/planner) - gated behind XC-002. */
 export const STAFF_ROLES: readonly ExerciseRole[] = [
@@ -71,13 +84,29 @@ export function isExerciseRole(value: unknown): value is ExerciseRole {
   return typeof value === 'string' && (ALL_ROLES as readonly string[]).includes(value)
 }
 
+/** Runtime guard for the org-scope role. */
+export function isOrgRole(value: unknown): value is OrgRole {
+  return value === 'orgAdmin'
+}
+
+/**
+ * Validates a (scope, role) pair read off the wire: `exercise` scope takes only an
+ * `ExerciseRole`, `org` scope takes only `orgAdmin`. Mixed combinations are rejected, so a
+ * parsed session can never be an org role on an exercise or an exercise role on the org.
+ */
+export function isSessionRole(scope: unknown, role: unknown): role is SessionRole {
+  if (scope === 'exercise') return isExerciseRole(role)
+  if (scope === 'org') return isOrgRole(role)
+  return false
+}
+
 /** True for controller/evaluator/planner - staff-console-reachable roles. */
-export function isStaffRole(role: ExerciseRole): boolean {
+export function isStaffRole(role: SessionRole): boolean {
   return (STAFF_ROLES as readonly string[]).includes(role)
 }
 
 /** True for participant/pio - the two participant-surface flavors. */
-export function isParticipantRole(role: ExerciseRole): boolean {
+export function isParticipantRole(role: SessionRole): boolean {
   return (PARTICIPANT_ROLES as readonly string[]).includes(role)
 }
 
@@ -87,7 +116,7 @@ export function isParticipantRole(role: ExerciseRole): boolean {
  * here). Every other role - including staff roles like controller/planner
  * acting in-sim, and orgAdmin - can write.
  */
-export function canWriteInSim(role: ExerciseRole): boolean {
+export function canWriteInSim(role: SessionRole): boolean {
   return role !== 'evaluator'
 }
 
@@ -97,6 +126,6 @@ export function canWriteInSim(role: ExerciseRole): boolean {
  * from the session it was resolved with. Throws outside a `SessionProvider`
  * (fail-closed; see `useSession`).
  */
-export function useRole(): ExerciseRole {
+export function useRole(): SessionRole {
   return useSession().role
 }

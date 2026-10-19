@@ -37,6 +37,10 @@ const mockResolve = vi.mocked(resolveSession)
 
 const FIXTURE: Session = {
   exerciseId: 'ex-test-0001',
+  scope: 'exercise',
+  personId: null,
+  world: 'participant',
+  isLead: false,
   accountId: 'acct-test',
   role: 'pio',
   personaId: 'persona-test',

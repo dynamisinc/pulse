@@ -66,6 +66,7 @@
 
 import axios from 'axios'
 import { api } from '@/core/services/api'
+import { LEAD_ONLY_RAISE_REASON } from '@/core/auth/rolePermissions'
 import {
   AMBIENT_MODES,
   AMBIENT_AUTONOMOUS_NOT_AUTHORIZED_MESSAGE,
@@ -470,6 +471,10 @@ export function describeAmbientPolicyError(
     if (text.trim().length === 0 || /authori|governance/i.test(text)) {
       return { status: 400, message: AMBIENT_AUTONOMOUS_NOT_AUTHORIZED_MESSAGE }
     }
+  }
+  // Story 17: the server refuses a non-lead RAISE with a 403. Say why, in the lead-gate words.
+  if (axios.isAxiosError(error) && error.response?.status === 403) {
+    return { status: 403, message: `${LEAD_ONLY_RAISE_REASON}. Your change was not saved.` }
   }
   return describeSettingsError(error)
 }

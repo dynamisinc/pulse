@@ -283,4 +283,16 @@ public sealed class Exercise : IOrganizationOwned
     /// STAFF-WORLD ONLY: never projected onto a participant surface (XC-002). No CHECK constraint; story 05 validates.
     /// </summary>
     public string NoiseLevel { get; set; } = DefaultNoiseLevel;
+
+    // ============================================================================================
+    // identity-auth-roles/16 (ADMIN-IDENTITY-MODEL §9, the A1 AdminIdentityFoundation migration).
+    // ============================================================================================
+
+    /// <summary>
+    /// Server wall-clock instant (UTC) the exercise FIRST entered <c>live</c>, or <c>null</c> while it never has.
+    /// Backfilled by the <c>AdminIdentityFoundation</c> migration from the lifecycle telemetry of exercises whose
+    /// status is past <c>staged</c>, and stamped once by the lifecycle service on the first transition to
+    /// <c>live</c>. Staff-world only (XC-002) — never projected onto a participant surface.
+    /// </summary>
+    public DateTimeOffset? FirstLiveAt { get; set; }
 }

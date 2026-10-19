@@ -50,7 +50,9 @@ public sealed class OrgExerciseByIdIsolationTests
     [RequiresDockerFact]
     public async Task EveryIdRoute_AnswersAnotherCustomersExerciseExactlyLikeAMissingOne_AndChangesNothing()
     {
-        foreach (var role in new[] { ExerciseAdminRoles.Planner, ExerciseAdminRoles.OrgAdmin, ExerciseAdminRoles.Controller })
+        // identity-auth-roles/17: the controller left the rename/archive role set (§8.2) — it is refused by the role
+        // gate (RoleMatrixTests) before the id is looked at, so only the two admitted roles are probed for the 404.
+        foreach (var role in new[] { ExerciseAdminRoles.Planner, ExerciseAdminRoles.OrgAdmin })
         {
             foreach (var (route, call) in Callers)
             {

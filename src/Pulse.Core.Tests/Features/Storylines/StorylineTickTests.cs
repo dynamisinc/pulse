@@ -220,4 +220,21 @@ public class StorylineTickTests
         result.ElapsedScenarioMinutes.Should().Be(0);
         storyline.MinutesSinceLastOfficialResponse.Should().Be(silence);
     }
+
+    [Fact]
+    public void Tick_EveryScenarioMinute_StandardCurve_ReachesSpecIntensityAtMinute50()
+    {
+        // D1 end-to-end on the aggregate: seeded at 0 with intensity 0, window 20, ticked every minute.
+        var storyline = SeededStoryline(initialIntensity: 0, windowMin: 20);
+        var clock = new FakeScenarioClock(0);
+
+        for (var minute = 1; minute <= 50; minute++)
+        {
+            storyline.Tick(clock.Set(minute));
+        }
+
+        storyline.Phase.Should().Be(StorylinePhase.Escalating);
+        storyline.Intensity.Should().Be(78, "Standard rises 2.5/min from the minute-20 window open (spec ~78), not 2.0/min (62)");
+    }
 }
+

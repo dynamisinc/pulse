@@ -156,10 +156,10 @@ internal sealed class UploadHarness : IDisposable
                 seed.StaffUsers.Add(StaffTenantSeed.StaffUserFor(staffId));
                 if (staffAssigned)
                 {
-                    seed.StaffAssignments.Add(new StaffAssignment
+                    seed.Enrollments.Add(new Enrollment
                     {
                         Id = Guid.NewGuid(),
-                        StaffUserId = staffId,
+                        PersonId = staffId,
                         ExerciseId = ExerciseId,
                         Role = "controller",
                         CreatedAt = WallClockNow,

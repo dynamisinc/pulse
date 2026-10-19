@@ -17,32 +17,44 @@
  * and picks the role per case with `setSessionRole` (`renderControl({ sessionRole })` does it).
  */
 
-import type { ExerciseRole } from '@/core/auth'
-import type { Session } from '@/core/auth'
+import type { Session, SessionRole } from '@/core/auth'
+import { withRole } from '@/core/auth/withRole.testUtils'
 
 /** The default: the role the control is FOR. */
-const DEFAULT_ROLE: ExerciseRole = 'controller'
+const DEFAULT_ROLE: SessionRole = 'controller'
 
-let role: ExerciseRole = DEFAULT_ROLE
+let role: SessionRole = DEFAULT_ROLE
+// Story 17: the server's `isLead`. A lead by default so the lead-gated raise controls are present.
+let lead = true
+
+/** Whether the next resolved session is the lead controller. */
+export function setSessionLead(next: boolean): void {
+  lead = next
+}
 
 /** The role the next resolved session carries. */
-export function setSessionRole(next: ExerciseRole): void {
+export function setSessionRole(next: SessionRole): void {
   role = next
 }
 
 /** Back to `controller`. */
 export function resetSessionRole(): void {
   role = DEFAULT_ROLE
+  lead = true
 }
 
 /** The `resolveSession` replacement: a staff session with the chosen role, no persona. */
 export async function resolveSession(): Promise<Session> {
-  return {
+  return withRole({
     exerciseId: 'ex-mock-0001',
+    scope: 'exercise',
+    personId: null,
+    world: 'participant',
+    isLead: lead,
     accountId: `acct-${role}`,
-    role,
+    role: 'participant',
     actingHumanId: `human-${role}`,
     isReadOnly: false,
     expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
-  }
+  }, role)
 }

@@ -53,8 +53,8 @@ public sealed class RosterIsolationTests
         }
 
         await using var all = _fixture.CreateContext();
-        (await all.Accounts.IgnoreQueryFilters().CountAsync(x => x.PersonaId == bOrg)).Should().Be(0, "nothing was bound to B's persona");
-        (await all.Accounts.IgnoreQueryFilters().CountAsync(x => x.ExerciseId == a.ExerciseId)).Should().Be(0);
+        (await all.Accounts.Include(account => account.Enrollment).IgnoreQueryFilters().CountAsync(x => x.Enrollment.PersonaId == bOrg)).Should().Be(0, "nothing was bound to B's persona");
+        (await all.Accounts.Include(account => account.Enrollment).IgnoreQueryFilters().CountAsync(x => x.ExerciseId == a.ExerciseId)).Should().Be(0);
     }
 
     [RequiresDockerFact]
@@ -82,7 +82,7 @@ public sealed class RosterIsolationTests
         only.LiveSessions.Should().Be(0, "Session is not exercise-scoped; a session bound to B never counts on A's roster");
 
         await using var all = _fixture.CreateContext();
-        (await all.Accounts.IgnoreQueryFilters().AnyAsync(x => x.Id == inB.Id)).Should().BeTrue("B's person exists; A simply cannot see them");
+        (await all.Accounts.Include(account => account.Enrollment).IgnoreQueryFilters().AnyAsync(x => x.Id == inB.Id)).Should().BeTrue("B's person exists; A simply cannot see them");
     }
 
     [RequiresDockerFact]
@@ -106,7 +106,7 @@ public sealed class RosterIsolationTests
         }
 
         await using var all = _fixture.CreateContext();
-        var untouched = await all.Accounts.IgnoreQueryFilters().AsNoTracking().SingleAsync(x => x.Id == bPerson.Id);
+        var untouched = await all.Accounts.Include(account => account.Enrollment).IgnoreQueryFilters().AsNoTracking().SingleAsync(x => x.Id == bPerson.Id);
         untouched.JobRole.Should().BeNull("A's import never updates B's person");
         untouched.ExerciseId.Should().Be(b.ExerciseId);
     }
@@ -122,7 +122,7 @@ public sealed class RosterIsolationTests
         }
 
         await using var all = _fixture.CreateContext();
-        var accountIds = await all.Accounts.IgnoreQueryFilters().Where(x => x.DisplayName == "Riley Chen" || x.DisplayName == "Taylor Reed")
+        var accountIds = await all.Accounts.Include(account => account.Enrollment).IgnoreQueryFilters().Where(x => x.DisplayName == "Riley Chen" || x.DisplayName == "Taylor Reed")
             .Where(x => x.ExerciseId == a.ExerciseId).Select(x => x.Id).ToListAsync();
         accountIds.Should().HaveCount(2);
 
@@ -148,7 +148,7 @@ public sealed class RosterIsolationTests
         }
 
         await using var all = _fixture.CreateContext();
-        (await all.Accounts.IgnoreQueryFilters().AnyAsync(x => x.DisplayName == "Zed")).Should().BeFalse();
+        (await all.Accounts.Include(account => account.Enrollment).IgnoreQueryFilters().AnyAsync(x => x.DisplayName == "Zed")).Should().BeFalse();
     }
 
     [RequiresDockerFact]
@@ -190,15 +190,15 @@ public sealed class RosterIsolationTests
         {
             var bPersona = await all.Personas.IgnoreQueryFilters().AsNoTracking().SingleAsync(p => p.Id == bPersonaId);
             (bPersona.ExerciseId, bPersona.Handle).Should().Be((b.ExerciseId, "cross_person"), "B's persona is untouched");
-            (await all.Accounts.IgnoreQueryFilters().CountAsync(x => x.ExerciseId == b.ExerciseId)).Should().Be(0);
+            (await all.Accounts.Include(account => account.Enrollment).IgnoreQueryFilters().CountAsync(x => x.ExerciseId == b.ExerciseId)).Should().Be(0);
 
-            var crossNow = await all.Accounts.IgnoreQueryFilters().AsNoTracking().SingleAsync(x => x.Id == cross.Id);
-            var fresh = await all.Personas.IgnoreQueryFilters().AsNoTracking().SingleAsync(p => p.Id == crossNow.PersonaId);
+            var crossNow = await all.Accounts.Include(account => account.Enrollment).IgnoreQueryFilters().AsNoTracking().SingleAsync(x => x.Id == cross.Id);
+            var fresh = await all.Personas.IgnoreQueryFilters().AsNoTracking().SingleAsync(p => p.Id == crossNow.Enrollment.PersonaId);
             fresh.Id.Should().NotBe(bPersonaId);
             (fresh.ExerciseId, fresh.Handle, fresh.Castable).Should().Be((a.ExerciseId, "cross_person", false), "a new persona, stamped A");
 
-            var lostNow = await all.Accounts.IgnoreQueryFilters().AsNoTracking().SingleAsync(x => x.Id == dangling.Id);
-            (await all.Personas.IgnoreQueryFilters().AnyAsync(p => p.Id == lostNow.PersonaId && p.ExerciseId == a.ExerciseId)).Should().BeTrue();
+            var lostNow = await all.Accounts.Include(account => account.Enrollment).IgnoreQueryFilters().AsNoTracking().SingleAsync(x => x.Id == dangling.Id);
+            (await all.Personas.IgnoreQueryFilters().AnyAsync(p => p.Id == lostNow.Enrollment.PersonaId && p.ExerciseId == a.ExerciseId)).Should().BeTrue();
         }
 
         await using var again = RosterHarness.For(_fixture, a);

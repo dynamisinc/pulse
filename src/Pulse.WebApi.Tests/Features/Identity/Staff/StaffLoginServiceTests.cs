@@ -65,11 +65,12 @@ public sealed class StaffLoginServiceTests
             ExternalSubject = subject,
             DisplayName = displayName,
             CreatedAt = DateTimeOffset.UtcNow,
+            Person = new Person { Id = staffUserId, OrganizationId = Organization.DefaultOrganizationId, DisplayName = "Test Person", CreatedAt = DateTimeOffset.UtcNow },
         });
-        seed.StaffAssignments.Add(new StaffAssignment
+        seed.Enrollments.Add(new Enrollment
         {
             Id = Guid.NewGuid(),
-            StaffUserId = staffUserId,
+            PersonId = staffUserId,
             ExerciseId = exerciseId,
             Role = role,
             CreatedAt = DateTimeOffset.UtcNow,
@@ -238,6 +239,37 @@ public sealed class StaffLoginServiceTests
         events[0].Payload.Should().Contain("failure");
         events[0].Actor.ActingHumanId.Should().Be(provisioned.Id.ToString(),
             "the unassigned-failure event knows the authenticated human (audit), unlike a bad-credential failure");
+    }
+
+    [RequiresDockerFact]
+    public async Task Login_FirstSeenIdentity_WithADisplayNameLongerThanThePersonColumn_ProvisionsATruncatedPerson()
+    {
+        // L-5: the IdP display name is unbounded (StaffUser.DisplayName is nvarchar(max)); People.DisplayName is
+        // nvarchar(200). A first-seen human with a longer name used to fail the save with a 500.
+        var subject = $"idp|{Guid.NewGuid():N}";
+        var exercise = await SeedExerciseAsync(scenarioTime: null);
+        var longName = new string('L', 260);
+
+        await using (var context = _fixture.CreateContext())
+        {
+            var service = new StaffLoginService(context, ProviderFor("longname", "pw-123456", subject, longName), new RecordingSessionIssuer());
+
+            var result = await service.LoginAsync(new StaffLoginRequest
+            {
+                Username = "longname",
+                Secret = "pw-123456",
+                ExerciseId = exercise.Id.ToString(),
+            });
+
+            result.Outcome.Should().Be(StaffLoginOutcome.NotAssigned,
+                "the provisioning save succeeds; the human simply has no grant yet (never a 500)");
+        }
+
+        await using var verify = _fixture.CreateContext();
+        var staffUser = await verify.StaffUsers.SingleAsync(u => u.ExternalSubject == subject);
+        staffUser.DisplayName.Should().Be(longName, "the staff facet keeps the full IdP name (unbounded column)");
+        var person = await verify.People.SingleAsync(p => p.Id == staffUser.Id);
+        person.DisplayName.Should().Be(new string('L', Person.MaxDisplayNameLength), "the person's name is truncated to its column");
     }
 
     [RequiresDockerFact]

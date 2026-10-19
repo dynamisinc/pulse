@@ -44,11 +44,17 @@ export interface OrgExercise {
   readonly hostname?: string
   /** ISO-8601 creation instant, or `undefined` for a row that predates the column. */
   readonly createdAt?: string
+  /**
+   * WR-005: whether the caller may Rename/Archive THIS row (the server's own rule: an org admin
+   * any row, a planner only the exercises they plan). Optional for deploy-order safety against a
+   * backend that predates the field; when absent the row actions fall back to "org admin only".
+   */
+  readonly canManage?: boolean
 }
 
 /**
  * The `POST /api/org/exercises` success body (COR-074): the new exercise plus
- * the role of the `StaffAssignment` the server minted for its creator, so they
+ * the role of the `Enrollment` the server minted for its creator, so they
  * can reach the run through the exercise switcher with no extra provisioning.
  */
 export interface CreateExerciseResult {

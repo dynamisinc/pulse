@@ -35,10 +35,18 @@ import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useSession, useRole } from '@/core/auth'
-import type { ExerciseRole, Session } from '@/core/auth'
+import type { ExerciseSession, SessionRole } from '@/core/auth'
+import { withRole } from '@/core/auth/withRole.testUtils'
 import { ExerciseContextProvider } from '@/core/exerciseContext'
 import { RoleAwareEntry } from '@/features/app-shell'
 import { STAFF_ROUTE_REGISTRY } from '@/features/staff'
+import { resetStubSession, setStubSession } from '@/core/auth/rolePermissions.testUtils'
+
+// Story 17: role-gated controls read the session; stand in the session this suite signs in as.
+vi.mock('@/core/auth/session', async importOriginal => ({
+  ...(await importOriginal<typeof import('@/core/auth/session')>()),
+  useOptionalSession: (await import('@/core/auth/rolePermissions.testUtils')).stubbedSession,
+}))
 
 vi.mock('@/features/controller', () => ({
   ControllerConsoleRoute: () => <div data-testid="stub-controller-console" />,
@@ -58,8 +66,12 @@ configure({ asyncUtilTimeout: 10_000 })
 
 const PATH = '/staff/participant-admin'
 
-const BASE_SESSION: Session = {
+const BASE_SESSION: ExerciseSession = {
   exerciseId: 'ex-mock-0001',
+  scope: 'exercise',
+  personId: null,
+  world: 'staff',
+  isLead: false,
   accountId: 'acct-test',
   role: 'controller',
   personaId: 'persona-test',
@@ -68,8 +80,8 @@ const BASE_SESSION: Session = {
   expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
 }
 
-function primeSession(role: ExerciseRole) {
-  vi.mocked(useSession).mockReturnValue({ ...BASE_SESSION, role })
+function primeSession(role: SessionRole) {
+  vi.mocked(useSession).mockReturnValue(withRole(BASE_SESSION, role))
   vi.mocked(useRole).mockReturnValue(role)
 }
 
@@ -111,6 +123,8 @@ function renderAt(path: string) {
 }
 
 beforeEach(() => {
+  resetStubSession()
+  setStubSession({ role: 'planner', isLead: false })
   vi.mocked(useSession).mockReset()
   vi.mocked(useRole).mockReset()
 })

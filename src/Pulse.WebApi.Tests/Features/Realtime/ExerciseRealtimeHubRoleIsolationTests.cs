@@ -118,55 +118,87 @@ public sealed class ExerciseRealtimeHubRoleIsolationTests
     }
 
     [RequiresDockerFact]
-    public async Task StaffConnectionForExerciseA_NeverReceivesExerciseBsStaffOrParticipantEvents()
+    public async Task StaffConnection_IsScopedFromItsSession_NeverFromTheHost()
     {
-        // B5 AC2/AC5 (COR-001): the staff user is assigned to BOTH exercises and the session is ACTIVE ON B, yet
-        // the connection is on A's host — so only the host-derived group keeps B out. The staff group comes from
-        // the connection's host-resolved exercise (the same id as its exercise-wide join), never from the
-        // assignment set and never from the session's active exercise.
+        // identity-auth-roles/15 (ADMIN-IDENTITY-MODEL §1.2, supersedes B5's host-derived staff group): the staff user
+        // is enrolled in BOTH exercises and the session is ACTIVE ON B, while the connection arrives on A's host. A
+        // staff connection is scoped from its SESSION (session > host, as for REST), so it receives B's staff and
+        // participant events and never A's.
         var exerciseA = await SeedExerciseAsync();
         var exerciseB = await SeedExerciseAsync();
         var staffToken = await SeedStaffSessionAsync(activeExerciseId: exerciseB.Id, assignedTo: [exerciseA.Id, exerciseB.Id]);
 
         using var host = new RealtimeRoleHost(_fixture.ConnectionString!);
-        await using var staffOnA = await ConnectAsync(host, exerciseA.Hostname, staffToken);
-        await staffOnA.WaitUntilInGroupAsync(host, $"exercise:{exerciseA.Id}:staff");
+        await using var staffOnAHost = await ConnectAsync(host, exerciseA.Hostname, staffToken);
+        await staffOnAHost.WaitUntilInGroupAsync(host, $"exercise:{exerciseB.Id}:staff");
 
-        // B's events first, then A's — A's PostReceived is the ordering barrier for everything before it.
-        await BroadcastReviewItemAsync(host, exerciseB.Id);
-        await BroadcastPostAsync(host, exerciseB.Id);
-        var draftA = await BroadcastReviewItemAsync(host, exerciseA.Id);
-        var postA = await BroadcastPostAsync(host, exerciseA.Id);
+        // A's events first, then B's — B's PostReceived is the ordering barrier for everything before it.
+        await BroadcastReviewItemAsync(host, exerciseA.Id);
+        await BroadcastPostAsync(host, exerciseA.Id);
+        var draftB = await BroadcastReviewItemAsync(host, exerciseB.Id);
+        var postB = await BroadcastPostAsync(host, exerciseB.Id);
 
-        await staffOnA.WaitForAsync(PostReceived, postA);
+        await staffOnAHost.WaitForAsync(PostReceived, postB);
 
-        staffOnA.Frames.Should().Equal(
-            new[] { (ReviewItemChanged, draftA), (PostReceived, postA) },
-            "a staff connection on exercise A's host receives only A's staff and participant events — never "
-            + "B's, even though its session is active on B");
+        staffOnAHost.Frames.Should().Equal(
+            new[] { (ReviewItemChanged, draftB), (PostReceived, postB) },
+            "a staff connection receives only its session's exercise's events — never the host's other exercise");
     }
 
     [RequiresDockerFact]
-    public async Task StaffSessionNotAssignedToTheResolvedExercise_ConnectsButNeverReceivesReviewItemChanged()
+    public async Task StaffSessionNotEnrolledInItsSessionsExercise_IsRefused_NeverReceivesAnything()
     {
-        // B5 AC5: a live staff session whose assignments do not include the host-resolved exercise gets no staff
-        // group — it is treated as a non-staff connection of that exercise.
+        // identity-auth-roles/15: the session names exercise A but the staff user is enrolled only in B — unverifiable,
+        // so the hub refuses the connection (it never falls back to the host's exercise group).
         var exerciseA = await SeedExerciseAsync();
         var exerciseB = await SeedExerciseAsync();
-        var staffToken = await SeedStaffSessionAsync(activeExerciseId: exerciseB.Id, assignedTo: [exerciseB.Id]);
+        var staffToken = await SeedStaffSessionAsync(activeExerciseId: exerciseA.Id, assignedTo: [exerciseB.Id]);
 
         using var host = new RealtimeRoleHost(_fixture.ConnectionString!);
-        await using var unassigned = await ConnectAsync(host, exerciseA.Hostname, staffToken);
-        await unassigned.WaitUntilInGroupAsync(host, $"exercise:{exerciseA.Id}");
+        await AssertRefusedAsync(host, exerciseA.Hostname, staffToken);
+    }
 
-        await BroadcastReviewItemAsync(host, exerciseA.Id);
-        var postA = await BroadcastPostAsync(host, exerciseA.Id);
+    [RequiresDockerFact]
+    public async Task RevokingTheGrant_CutsAStaffConnectionOpenedBeforeIt_SoItReceivesNoFurtherStaffBroadcast()
+    {
+        // identity-auth-roles/16 (Copilot review fold A): staff membership is checked only at connect, so the
+        // grant-revoke rule must also cut the live connection. A controller connects, a planner removes the
+        // controller's enrollment, and the controller's connection is aborted and out of the staff group.
+        var kit = new Pulse.WebApi.Tests.Features.Identity.Enrollments.EnrollmentTestKit(_fixture);
+        var exercise = await SeedExerciseAsync();
+        var org = Organization.DefaultOrganizationId;
+        var (planner, _) = await kit.SeedStaffAsync(org, exercise.Id, "planner");
+        var (controller, controllerEnrollment) = await kit.SeedStaffAsync(org, exercise.Id, "controller");
+        var (plannerSession, _) = await kit.SeedStaffSessionAsync(planner, exercise.Id, "planner");
+        var (_, controllerToken) = await kit.SeedStaffSessionAsync(controller, exercise.Id, "controller");
 
-        await unassigned.WaitForAsync(PostReceived, postA);
+        using var host = new RealtimeRoleHost(_fixture.ConnectionString!);
+        await using var staff = await ConnectAsync(host, exercise.Hostname, controllerToken);
+        await staff.WaitUntilInGroupAsync(host, $"exercise:{exercise.Id}:staff");
+        var before = await BroadcastReviewItemAsync(host, exercise.Id);
+        await staff.WaitForAsync(ReviewItemChanged, before);
 
-        unassigned.Frames.Should().Equal(
-            new[] { (PostReceived, postA) },
-            "a staff session not assigned to the resolved exercise must never receive that exercise's staff-only push");
+        var closed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        staff.Connection.Closed += _ =>
+        {
+            closed.TrySetResult();
+            return Task.CompletedTask;
+        };
+
+        var revoker = host.Services.GetRequiredService<ISessionConnectionRevoker>();
+        var (service, context) = kit.ServiceFor(plannerSession, planner, org, exercise.Id, revoker);
+        await using (context)
+        {
+            (await service.RevokeAsync(controllerEnrollment)).Outcome.Should().Be(
+                Pulse.WebApi.Features.Identity.Enrollments.EnrollmentOutcome.Ok);
+        }
+
+        (await Task.WhenAny(closed.Task, Task.Delay(DeliveryTimeout))).Should().Be(
+            closed.Task, "the revoked session's live hub connection is aborted");
+
+        var after = await BroadcastReviewItemAsync(host, exercise.Id);
+        await Task.Delay(250);
+        staff.Frames.Should().NotContain((ReviewItemChanged, after), "a revoked grant receives no further staff broadcast");
     }
 
     [RequiresDockerFact]
@@ -190,16 +222,28 @@ public sealed class ExerciseRealtimeHubRoleIsolationTests
     }
 
     [RequiresDockerFact]
-    public async Task StaffSession_OnAnUnresolvedHost_IsAborted_NeverJoinsAnyGroup()
+    public async Task StaffSession_OnTheConsoleHost_ConnectsAndReceivesItsSessionsExerciseEvents()
     {
-        // B5 AC6: staff sessions are not host-bound for REST, but the hub's groups are — no host-resolved
-        // exercise still aborts the connection.
+        // identity-auth-roles/15 AC (realtime scope on the shared console host): the console host resolves NO
+        // exercise. A staff connection there is scoped from its session's exercise, verified against a live staff
+        // enrollment, and receives that exercise's staff and participant pushes.
         var exercise = await SeedExerciseAsync();
         var staffToken = await SeedStaffSessionAsync(activeExerciseId: exercise.Id, assignedTo: [exercise.Id]);
 
         using var host = new RealtimeRoleHost(_fixture.ConnectionString!);
-        await using var connection = BuildConnection(
-            host, $"unprovisioned-{Guid.NewGuid():N}.example.com", staffToken, tokenInQuery: false);
+        await using var console = await ConnectAsync(host, $"console-{Guid.NewGuid():N}.example.com", staffToken);
+        await console.WaitUntilInGroupAsync(host, $"exercise:{exercise.Id}:staff");
+
+        var draft = await BroadcastReviewItemAsync(host, exercise.Id);
+        var post = await BroadcastPostAsync(host, exercise.Id);
+        await console.WaitForAsync(PostReceived, post);
+
+        console.Frames.Should().Equal(new[] { (ReviewItemChanged, draft), (PostReceived, post) });
+    }
+
+    private static async Task AssertRefusedAsync(RealtimeRoleHost host, string hostname, string token)
+    {
+        await using var connection = BuildConnection(host, hostname, token, tokenInQuery: false);
 
         var closed = new TaskCompletionSource<Exception?>(TaskCreationOptions.RunContinuationsAsynchronously);
         connection.Closed += ex =>
@@ -221,7 +265,7 @@ public sealed class ExerciseRealtimeHubRoleIsolationTests
         if (startException is null)
         {
             var completed = await Task.WhenAny(closed.Task, Task.Delay(DeliveryTimeout));
-            completed.Should().Be(closed.Task, "an unresolved-host connection must be aborted, not left open");
+            completed.Should().Be(closed.Task, "a refused connection must be aborted, not left open");
         }
 
         connection.State.Should().NotBe(HubConnectionState.Connected);
@@ -344,10 +388,10 @@ public sealed class ExerciseRealtimeHubRoleIsolationTests
         seed.StaffUsers.Add(StaffTenantSeed.StaffUserFor(staffUserId));
         foreach (var exerciseId in assignedTo)
         {
-            seed.StaffAssignments.Add(new StaffAssignment
+            seed.Enrollments.Add(new Enrollment
             {
                 Id = Guid.NewGuid(),
-                StaffUserId = staffUserId,
+                PersonId = staffUserId,
                 ExerciseId = exerciseId,
                 Role = "controller",
                 CreatedAt = DateTimeOffset.UtcNow,
@@ -451,6 +495,8 @@ public sealed class ExerciseRealtimeHubRoleIsolationTests
 
             Frames.Should().Contain((eventName, id), $"{eventName} {id} should have been delivered within {DeliveryTimeout}");
         }
+
+        public HubConnection Connection => _connection;
 
         public ValueTask DisposeAsync() => _connection.DisposeAsync();
 

@@ -406,12 +406,13 @@ public class OrganizationIsolationTests
                 ExternalSubject = $"idp|{staffUserId:N}",
                 DisplayName = "Cross-Tenant Controller",
                 CreatedAt = DateTimeOffset.UtcNow,
+                Person = new Person { Id = staffUserId, OrganizationId = orgX, DisplayName = "Test Person", CreatedAt = DateTimeOffset.UtcNow },
             });
 
             // The adversarial fixture: this human is ASSIGNED to both runs, including one belonging to a
             // DIFFERENT customer. Assignment alone must no longer be sufficient — that is exactly AC3.
-            seed.StaffAssignments.Add(NewAssignment(staffUserId, exerciseX));
-            seed.StaffAssignments.Add(NewAssignment(staffUserId, exerciseY));
+            seed.Enrollments.Add(NewAssignment(staffUserId, exerciseX));
+            seed.Enrollments.Add(NewAssignment(staffUserId, exerciseY));
             await seed.SaveChangesAsync();
         }
 
@@ -425,18 +426,18 @@ public class OrganizationIsolationTests
 
         // The shape StaffAssignmentService.GetAssignmentsAsync uses.
         var reachable = await (
-            from a in read.StaffAssignments.AsNoTracking()
-            where a.StaffUserId == staffUserId
+            from a in read.Enrollments.IgnoreQueryFilters().AsNoTracking()
+            where a.PersonId == staffUserId
             join e in read.Exercises.AsNoTracking().InOrganization(callerOrganizationId) on a.ExerciseId equals e.Id
             select a.ExerciseId).ToListAsync();
 
         reachable.Should().ContainSingle().Which.Should().Be(
             exerciseX, "a staff human spans EXERCISES but never CUSTOMERS: an assignment pointing at another "
-            + "organization's run must not make it reachable, even though the StaffAssignment row exists");
+            + "organization's run must not make it reachable, even though the Enrollment row exists");
 
         var unbounded = await (
-            from a in read.StaffAssignments.AsNoTracking()
-            where a.StaffUserId == staffUserId
+            from a in read.Enrollments.IgnoreQueryFilters().AsNoTracking()
+            where a.PersonId == staffUserId
             join e in read.Exercises.AsNoTracking() on a.ExerciseId equals e.Id
             select a.ExerciseId).ToListAsync();
 
@@ -456,9 +457,11 @@ public class OrganizationIsolationTests
         {
             seed.Exercises.Add(NewExercise(exerciseX, orgX));
 
-            // An assignment whose StaffUser row does not exist. Production cannot produce this (login
-            // creates the human before any session names them), but the resolution must still fail CLOSED.
-            seed.StaffAssignments.Add(NewAssignment(ghostStaffUserId, exerciseX));
+            // An enrollment whose person has NO StaffUser facet. Production cannot produce this for a staff role (a
+            // staff grant creates the facet; identity-auth-roles/16 also made an enrollment with no Person at all
+            // impossible — a foreign key), but the resolution must still fail CLOSED.
+            seed.People.Add(new Person { Id = ghostStaffUserId, OrganizationId = orgX, DisplayName = "Ghost", CreatedAt = DateTimeOffset.UtcNow });
+            seed.Enrollments.Add(NewAssignment(ghostStaffUserId, exerciseX));
             await seed.SaveChangesAsync();
         }
 
@@ -473,8 +476,8 @@ public class OrganizationIsolationTests
         callerOrganizationId.Should().BeNull("there is no staff row, so no tenant can be resolved");
 
         var reachable = await (
-            from a in read.StaffAssignments.AsNoTracking()
-            where a.StaffUserId == ghostStaffUserId
+            from a in read.Enrollments.IgnoreQueryFilters().AsNoTracking()
+            where a.PersonId == ghostStaffUserId
             join e in read.Exercises.AsNoTracking().InOrganization(callerOrganizationId) on a.ExerciseId equals e.Id
             select a.ExerciseId).ToListAsync();
 
@@ -582,6 +585,7 @@ public class OrganizationIsolationTests
             ExternalSubject = $"idp|{staffUserId:N}",
             DisplayName = "Orphan Staff User",
             CreatedAt = DateTimeOffset.UtcNow,
+            Person = new Person { Id = staffUserId, OrganizationId = Guid.Empty, DisplayName = "Test Person", CreatedAt = DateTimeOffset.UtcNow },
         });
 
         var act = async () => await write.SaveChangesAsync();
@@ -614,12 +618,14 @@ public class OrganizationIsolationTests
             Id = orgX,
             Name = $"Customer X {orgX:N}",
             CreatedAt = DateTimeOffset.UtcNow,
+            Slug = $"org-{Guid.NewGuid():N}",
         });
         seed.Organizations.Add(new Organization
         {
             Id = orgY,
             Name = $"Customer Y {orgY:N}",
             CreatedAt = DateTimeOffset.UtcNow,
+            Slug = $"org-{Guid.NewGuid():N}",
         });
         await seed.SaveChangesAsync();
 
@@ -649,14 +655,14 @@ public class OrganizationIsolationTests
         ExerciseId = exerciseId,
         Username = $"user_{id:N}",
         DisplayName = $"Account {id:N}",
-        Role = "participant",
         CreatedAt = DateTimeOffset.UtcNow,
+        Enrollment = new Enrollment { Id = Guid.NewGuid(), ExerciseId = exerciseId, Role = "participant" },
     };
 
-    private static StaffAssignment NewAssignment(Guid staffUserId, Guid exerciseId) => new()
+    private static Enrollment NewAssignment(Guid staffUserId, Guid exerciseId) => new()
     {
         Id = Guid.NewGuid(),
-        StaffUserId = staffUserId,
+        PersonId = staffUserId,
         ExerciseId = exerciseId,
         Role = "controller",
         CreatedAt = DateTimeOffset.UtcNow,

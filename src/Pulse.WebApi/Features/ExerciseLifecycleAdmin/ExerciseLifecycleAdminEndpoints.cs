@@ -115,8 +115,9 @@ public static class ExerciseLifecycleAdminEndpoints
     {
         ArgumentNullException.ThrowIfNull(endpoints);
 
+        // identity-auth-roles/17 (§8.2, signed off): create exercise is org admin only.
         endpoints.MapPost(ExercisesRoute, CreateExerciseAsync)
-            .AddEndpointFilter(OrgAdminAuthorizationFilter.ExerciseAdministrators);
+            .AddEndpointFilter(OrgAdminAuthorizationFilter.OrgAdminOnly);
 
         endpoints.MapGet(ExercisesRoute, ListExercisesAsync)
             .AddEndpointFilter(OrgAdminAuthorizationFilter.ExerciseAdministrators);
@@ -124,13 +125,14 @@ public static class ExerciseLifecycleAdminEndpoints
         endpoints.MapGet(StaffAssignmentsRoute, ListStaffAssignmentsAsync)
             .AddEndpointFilter(OrgAdminAuthorizationFilter.OrgAdminOnly);
 
-        // Story 22 row actions. Same role gate as create/list (DF-20 set); the id is authorized against the
-        // caller's tenant inside the service, so the filter's 401/403 never depends on the id at all.
+        // Story 22 row actions. identity-auth-roles/17 (§8.2): rename / archive are the org admin's and the planner's
+        // (controller refused). The id is authorized against the caller's tenant — and, for a planner, their own
+        // planner enrollment — inside the service, so the filter's 401/403 never depends on the id at all.
         endpoints.MapPatch(ExerciseByIdRoute, RenameExerciseAsync)
-            .AddEndpointFilter(OrgAdminAuthorizationFilter.ExerciseAdministrators);
+            .AddEndpointFilter(OrgAdminAuthorizationFilter.ExerciseManagers);
 
         endpoints.MapPost(ArchiveExerciseRoute, ArchiveExerciseAsync)
-            .AddEndpointFilter(OrgAdminAuthorizationFilter.ExerciseAdministrators);
+            .AddEndpointFilter(OrgAdminAuthorizationFilter.ExerciseManagers);
 
         return endpoints;
     }

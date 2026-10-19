@@ -75,6 +75,7 @@ export const PARTICIPANT_FAIL_CLOSED_REDIRECT = '/login'
  */
 function isScopeResolved(session: Session, scope: ExerciseScope): boolean {
   return (
+    session.exerciseId !== null &&
     session.exerciseId.length > 0 &&
     scope.exerciseId.length > 0 &&
     session.exerciseId === scope.exerciseId

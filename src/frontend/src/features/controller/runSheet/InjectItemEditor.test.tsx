@@ -23,7 +23,12 @@ import { SEEDED_PERSONAS } from '@/features/personas'
 
 // Demo-feedback story 11 (DF-14): the console's write controls render only for a controller
 // session, and this suite mounts none, so the read-only gate is fixed to "controller" here.
-vi.mock('@/features/controller/access/useCanControl', () => ({ useCanControl: () => true }))
+vi.mock('@/features/controller/access/useCanControl', () => ({
+  useCanControl: () => true,
+  useCanEditContent: () => true,
+  useCanStaffPost: () => true,
+  useCanStaffPin: () => true,
+}))
 
 // The editor's media field reads F0's library hook (`useMediaLibrary`), which needs the exercise
 // + query providers. These tests drive the EDITOR, not the library, so the hook is stubbed with

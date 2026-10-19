@@ -420,13 +420,15 @@ public sealed class InjectImportEndpointTests
     // ---- authorization ----
 
     [RequiresDockerFact]
-    public async Task OnlyAController_MayImport_EvaluatorAndPlannerAre403_AndAnUnassignedStaffIs403()
+    public async Task OnlyAPlannerOrController_MayImport_AnEvaluatorIs403_AndAnUnassignedStaffIs403()
     {
+        // identity-auth-roles/17 (§8.2): a run-sheet import is a run-sheet edit — planner or controller. The planner
+        // was refused here before; it is admitted now (RoleMatrixTests: POST /api/injects/import).
         await using var host = await StartAsync();
         var controller = await SeedKestrelAsync(host);
         var file = Kestrel(controller).Xlsx;
 
-        foreach (var role in new[] { "evaluator", "planner" })
+        foreach (var role in new[] { "evaluator" })
         {
             var staff = await host.AddStaffAsync(controller.ExerciseId, role, $"A {role}");
             host.ActAs(controller.ExerciseId, staff);

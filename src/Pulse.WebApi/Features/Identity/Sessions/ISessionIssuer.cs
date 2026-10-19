@@ -36,8 +36,12 @@ public interface ISessionIssuer
 /// </summary>
 public sealed class SessionIssueRequest
 {
-    /// <summary>The bound exercise run (COR-012). For a participant this must equal the host-resolved exercise (story 08).</summary>
-    public required Guid ExerciseId { get; init; }
+    /// <summary>
+    /// The bound exercise run (COR-012). For a participant this must equal the host-resolved exercise (story 08).
+    /// <c>null</c> mints an ORG-SCOPE staff session (identity-auth-roles/16, ADMIN-IDENTITY-MODEL §1.2) — never
+    /// <see cref="Guid.Empty"/>, which is the unresolved sentinel.
+    /// </summary>
+    public required Guid? ExerciseId { get; init; }
 
     /// <summary>The session kind — <c>participant</c> / <c>staff</c> / <c>readonly</c> (matches <c>Session.Kind</c>).</summary>
     public required string Kind { get; init; }
@@ -62,6 +66,13 @@ public sealed class SessionIssueRequest
 
     /// <summary>The bound persona id, or <c>null</c> when absent (surfaces as the OPTIONAL frozen <c>Session.personaId</c>).</summary>
     public Guid? PersonaId { get; init; }
+
+    /// <summary>
+    /// The <c>Person</c> the session is minted for (identity-auth-roles/16), or <c>null</c> when the principal has
+    /// none (one-off participant, read-only viewer). For staff it is the staff user's id (shared key). Keys the
+    /// grant-revoke rule and the cross-world revocation backstop.
+    /// </summary>
+    public Guid? PersonId { get; init; }
 }
 
 /// <summary>

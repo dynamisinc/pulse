@@ -52,7 +52,8 @@ export function useNotificationsEligibility(): NotificationsEligibility {
   // least-affordance placeholder. Say "resolving", not "unavailable", so the
   // page waits instead of redirecting a full participant to Home (MT-D8).
   if (variantPending === true) return { kind: 'resolving' }
-  if (!affordancesAvailable(variant) || session.isReadOnly || session.personaId === undefined) {
+  const noPersona = session.personaId === undefined || session.exerciseId === null
+  if (!affordancesAvailable(variant) || session.isReadOnly || noPersona) {
     return { kind: 'unavailable' }
   }
   if (self === undefined) return loading ? { kind: 'pending' } : { kind: 'failed' }

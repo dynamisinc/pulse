@@ -67,10 +67,10 @@ internal static class DayWordTestSupport
 
         await using var seed = fixture.CreateContext();
         seed.StaffUsers.Add(StaffTenantSeed.StaffUserFor(staffUserId));
-        seed.StaffAssignments.Add(new StaffAssignment
+        seed.Enrollments.Add(new Enrollment
         {
             Id = Guid.NewGuid(),
-            StaffUserId = staffUserId,
+            PersonId = staffUserId,
             ExerciseId = exerciseId,
             Role = role,
             CreatedAt = DateTimeOffset.UtcNow,
@@ -95,11 +95,10 @@ internal static class DayWordTestSupport
             ExerciseId = exerciseId,
             Username = username,
             DisplayName = $"Display {username}",
-            Role = role,
-            PersonaId = personaId,
             ActingHumanId = actingHumanId,
             CreatedAt = DateTimeOffset.UtcNow,
             DisabledAt = disabledAt,
+            Enrollment = new Enrollment { Id = Guid.NewGuid(), ExerciseId = exerciseId, Role = role, PersonaId = personaId },
         };
 
         await using var seed = fixture.CreateContext();

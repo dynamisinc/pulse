@@ -100,7 +100,6 @@ function identity(overrides: Partial<ControllerIdentity> = {}): ControllerIdenti
     actingHumanId: HUMAN,
     callSign: 'SIMCELL-1',
     role: 'controller',
-    isLead: true,
     ...overrides,
   }
 }

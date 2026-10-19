@@ -57,6 +57,7 @@ public sealed class SessionService
     private const string SystemChannel = "system";
     private const string ParticipantKind = "participant";
     private const string ReadOnlyKind = "readonly";
+    private const string StaffKind = "staff";
     private const string ParticipantActorKind = "participant";
     private const string SystemActorKind = "system";
     private const string SessionRefreshedEventType = "session.refreshed";
@@ -130,7 +131,7 @@ public sealed class SessionService
         var now = _timeProvider.GetUtcNow();
         if (session.IsLive(now))
         {
-            return SessionQueryResult.Live(session);
+            return SessionQueryResult.Live(session, await IsLeadAsync(session, cancellationToken));
         }
 
         // Not live. Distinguish the two fail-closed cases for telemetry: an EXPIRED (not revoked) session is
@@ -180,7 +181,7 @@ public sealed class SessionService
 
         if (session.Kind == ParticipantKind
             && session.AccountId is { } accountId
-            && !await IsEnabledAccountOfExerciseAsync(session.ExerciseId, accountId, cancellationToken))
+            && !await IsEnabledAccountOfExerciseAsync(session.ExerciseId.GetValueOrDefault(), accountId, cancellationToken))
         {
             // easy-login Gate-2 W-001 / S-1, fail closed: the bound account is disabled, gone, or not this exercise's.
             // Refused exactly as a revoked session is: 401, no event, nothing written.
@@ -190,7 +191,11 @@ public sealed class SessionService
         // The bound exercise's facts: the ONE exercise read on this path, through the easy-login reader (EL-17), shared
         // by the participant day cap (zone) and the session.refreshed envelope (stored scenario time + zone). The id is
         // the server-issued session's own binding, so a session for exercise A is only ever capped by A's zone.
-        var facts = await _exerciseFacts.GetAsync(session.ExerciseId, cancellationToken);
+        // An ORG-SCOPE session (identity-auth-roles/16: ExerciseId null) has no exercise, so no facts: it is never a
+        // participant session (no day cap) and carries no exercise-scoped telemetry.
+        var facts = session.ExerciseId is { } boundExerciseId
+            ? await _exerciseFacts.GetAsync(boundExerciseId, cancellationToken)
+            : null;
 
         DateTimeOffset? endOfExerciseDay = null;
         if (ParticipantSessionCap.AppliesTo(session.Kind, _options))
@@ -199,7 +204,7 @@ public sealed class SessionService
             // zone, rather than trusting the stored window alone, means a window stamped under other rules (option off,
             // or before the cap shipped) cannot carry the session into the next day either.
             endOfExerciseDay = ParticipantSessionCap.EndOfExerciseDay(
-                session.ExerciseId,
+                session.ExerciseId.GetValueOrDefault(),
                 facts,
                 session.IssuedAt,
                 _dayRolloverHour,
@@ -234,7 +239,7 @@ public sealed class SessionService
         AddLifecycleEvent(session, SessionRefreshedEventType, now, facts?.StoredScenarioTime, facts?.TimeZone);
         await _dbContext.SaveChangesAsync(cancellationToken);
 
-        return RefreshResult.Refreshed(session, newSessionToken, newRefreshToken);
+        return RefreshResult.Refreshed(session, newSessionToken, newRefreshToken, await IsLeadAsync(session, cancellationToken));
     }
 
     /// <summary>
@@ -276,6 +281,34 @@ public sealed class SessionService
     /// exercise: an account of exercise A never satisfies a session bound to exercise B, whatever its state. The ids are
     /// the server-issued session's own binding, never caller input.
     /// </summary>
+    /// <summary>
+    /// The LIVE lead flag of a staff session's enrollment (identity-auth-roles/16): read from <c>Enrollment.IsLead</c> for
+    /// the session's own person in the session's own exercise, never stored on the session. <c>false</c> for any other
+    /// session (participant, read-only, org scope).
+    /// </summary>
+    /// <param name="session">The live session.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Whether the session's person is the exercise's lead controller.</returns>
+    public async Task<bool> IsLeadAsync(Session session, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+
+        if (!string.Equals(session.Kind, StaffKind, StringComparison.Ordinal)
+            || session.ExerciseId is not { } exerciseId
+            || (session.PersonId ?? session.StaffUserId) is not { } personId)
+        {
+            return false;
+        }
+
+        // org-scope-exempt(OwnIdentity): the caller's OWN enrollment — the person and exercise both come from the
+        // server-issued session row, never a request value — so it cannot reach another tenant's row. Session lookups
+        // run before any scope is resolved, so the central exercise filter is bypassed and the exercise named instead.
+        return await _dbContext.Enrollments
+            .IgnoreQueryFilters()
+            .AsNoTracking()
+            .AnyAsync(e => e.ExerciseId == exerciseId && e.PersonId == personId && e.IsLead, cancellationToken);
+    }
+
     private Task<bool> IsEnabledAccountOfExerciseAsync(Guid exerciseId, Guid accountId, CancellationToken cancellationToken) =>
         _dbContext.Accounts
             .IgnoreQueryFilters()
@@ -294,14 +327,18 @@ public sealed class SessionService
         CancellationToken cancellationToken)
     {
         // The bound exercise supplies the (placeholder) scenario time + time zone for the envelope. It is the
-        // unscoped scope root, so this read is not filtered.
-        // org-scope-exempt(ResolvedScope): session.ExerciseId is the binding on a SERVER-ISSUED session row,
-        // stamped at issue time from the resolved scope — the caller cannot name a different exercise here.
-        var exercise = await _dbContext.Exercises
-            .AsNoTracking()
-            .FirstOrDefaultAsync(e => e.Id == session.ExerciseId, cancellationToken);
+        // unscoped scope root, so this read is not filtered. An org-scope session (no exercise) emits no
+        // exercise-scoped event (identity-auth-roles/16).
+        if (session.ExerciseId is { } boundExerciseId)
+        {
+            // org-scope-exempt(ResolvedScope): session.ExerciseId is the binding on a SERVER-ISSUED session row,
+            // stamped at issue time from the resolved scope — the caller cannot name a different exercise here.
+            var exercise = await _dbContext.Exercises
+                .AsNoTracking()
+                .FirstOrDefaultAsync(e => e.Id == boundExerciseId, cancellationToken);
 
-        AddLifecycleEvent(session, eventType, now, exercise?.CurrentScenarioTime, exercise?.TimeZone);
+            AddLifecycleEvent(session, eventType, now, exercise?.CurrentScenarioTime, exercise?.TimeZone);
+        }
 
         await _dbContext.SaveChangesAsync(cancellationToken);
     }
@@ -318,11 +355,19 @@ public sealed class SessionService
         DateTimeOffset? storedScenarioTime,
         string? timeZone)
     {
+        // identity-auth-roles/16: an ORG-SCOPE session has no exercise, and TelemetryEvent requires one (the
+        // write-guard refuses an empty scope). Its lifecycle is org-tier audit (ADMIN-IDENTITY-MODEL §7.5, story 15),
+        // never an exercise-scoped row.
+        if (session.ExerciseId is not { } boundExerciseId)
+        {
+            return;
+        }
+
         _dbContext.TelemetryEvents.Add(new TelemetryEvent
         {
             EventId = Guid.NewGuid().ToString(),
             SchemaVersion = SchemaVersion,
-            ExerciseId = session.ExerciseId,
+            ExerciseId = boundExerciseId,
             EventType = eventType,
             Channel = SystemChannel,
             Actor = BuildActor(session),
@@ -386,11 +431,15 @@ public enum SessionQueryOutcome
 /// </summary>
 public sealed class SessionQueryResult
 {
-    private SessionQueryResult(SessionQueryOutcome outcome, Session? session)
+    private SessionQueryResult(SessionQueryOutcome outcome, Session? session, bool isLead = false)
     {
         Outcome = outcome;
         Session = session;
+        IsLead = isLead;
     }
+
+    /// <summary>The LIVE lead flag of the session's enrollment (identity-auth-roles/16).</summary>
+    public bool IsLead { get; }
 
     /// <summary>Which outcome occurred.</summary>
     public SessionQueryOutcome Outcome { get; }
@@ -401,10 +450,11 @@ public sealed class SessionQueryResult
     /// <summary>A live bound session.</summary>
     /// <param name="session">The resolved session.</param>
     /// <returns>A live result.</returns>
-    public static SessionQueryResult Live(Session session)
+    /// <param name="isLead">The live lead flag.</param>
+    public static SessionQueryResult Live(Session session, bool isLead = false)
     {
         ArgumentNullException.ThrowIfNull(session);
-        return new SessionQueryResult(SessionQueryOutcome.Live, session);
+        return new SessionQueryResult(SessionQueryOutcome.Live, session, isLead);
     }
 
     /// <summary>An expired session (a <c>session.expired</c> event was emitted).</summary>
@@ -433,8 +483,9 @@ public enum RefreshOutcome
 /// </summary>
 public sealed class RefreshResult
 {
-    private RefreshResult(RefreshOutcome outcome, Session? session, string? sessionToken, string? refreshToken)
+    private RefreshResult(RefreshOutcome outcome, Session? session, string? sessionToken, string? refreshToken, bool isLead = false)
     {
+        IsLead = isLead;
         Outcome = outcome;
         Session = session;
         SessionToken = sessionToken;
@@ -458,17 +509,21 @@ public sealed class RefreshResult
     /// <param name="sessionToken">The rotated raw session token.</param>
     /// <param name="refreshToken">The rotated raw refresh token.</param>
     /// <returns>A refreshed result.</returns>
-    public static RefreshResult Refreshed(Session session, string sessionToken, string refreshToken)
+    /// <param name="isLead">The live lead flag.</param>
+    public static RefreshResult Refreshed(Session session, string sessionToken, string refreshToken, bool isLead = false)
     {
         ArgumentNullException.ThrowIfNull(session);
         ArgumentException.ThrowIfNullOrEmpty(sessionToken);
         ArgumentException.ThrowIfNullOrEmpty(refreshToken);
-        return new RefreshResult(RefreshOutcome.Refreshed, session, sessionToken, refreshToken);
+        return new RefreshResult(RefreshOutcome.Refreshed, session, sessionToken, refreshToken, isLead);
     }
 
     /// <summary>The fail-closed result for an unusable refresh token.</summary>
     /// <returns>An invalid result.</returns>
     public static RefreshResult Invalid() => new(RefreshOutcome.Invalid, null, null, null);
+
+    /// <summary>The LIVE lead flag of the refreshed session's enrollment (identity-auth-roles/16).</summary>
+    public bool IsLead { get; }
 }
 
 /// <summary>
@@ -512,7 +567,7 @@ public sealed class SessionRefreshResponseDto
         {
             Token = result.SessionToken!,
             RefreshToken = result.RefreshToken!,
-            Session = SessionDto.FromSession(result.Session!),
+            Session = SessionDto.FromSession(result.Session!, result.IsLead),
         };
     }
 }

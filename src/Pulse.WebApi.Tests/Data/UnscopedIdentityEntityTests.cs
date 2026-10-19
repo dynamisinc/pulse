@@ -67,19 +67,20 @@ public class UnscopedIdentityEntityTests
                 ExternalSubject = $"idp|{staffUserId:N}",
                 DisplayName = "Cross-Exercise Controller",
                 CreatedAt = DateTimeOffset.UtcNow,
+                Person = new Person { Id = staffUserId, OrganizationId = Organization.DefaultOrganizationId, DisplayName = "Test Person", CreatedAt = DateTimeOffset.UtcNow },
             });
-            seed.StaffAssignments.Add(new StaffAssignment
+            seed.Enrollments.Add(new Enrollment
             {
                 Id = assignmentA,
-                StaffUserId = staffUserId,
+                PersonId = staffUserId,
                 ExerciseId = exerciseA,
                 Role = "controller",
                 CreatedAt = DateTimeOffset.UtcNow,
             });
-            seed.StaffAssignments.Add(new StaffAssignment
+            seed.Enrollments.Add(new Enrollment
             {
                 Id = assignmentB,
-                StaffUserId = staffUserId,
+                PersonId = staffUserId,
                 ExerciseId = exerciseB,
                 Role = "evaluator",
                 CreatedAt = DateTimeOffset.UtcNow,
@@ -90,8 +91,8 @@ public class UnscopedIdentityEntityTests
                 ExerciseId = exerciseA,
                 Username = $"user_{accountA:N}",
                 DisplayName = "Exercise A Account",
-                Role = "participant",
                 CreatedAt = DateTimeOffset.UtcNow,
+                Enrollment = new Enrollment { Id = Guid.NewGuid(), ExerciseId = exerciseA, Role = "participant" },
             });
             seed.Accounts.Add(new Account
             {
@@ -99,8 +100,8 @@ public class UnscopedIdentityEntityTests
                 ExerciseId = exerciseB,
                 Username = $"user_{accountB:N}",
                 DisplayName = "Exercise B Account",
-                Role = "participant",
                 CreatedAt = DateTimeOffset.UtcNow,
+                Enrollment = new Enrollment { Id = Guid.NewGuid(), ExerciseId = exerciseB, Role = "participant" },
             });
             await seed.SaveChangesAsync();
         }
@@ -109,8 +110,8 @@ public class UnscopedIdentityEntityTests
         // see BOTH of this staff user's assignments (COR-005: a staff human spans exercises).
         await using var read = _fixture.CreateContext(ScopeFor(exerciseA));
 
-        var assignedExercises = await read.StaffAssignments
-            .Where(a => a.StaffUserId == staffUserId)
+        var assignedExercises = await read.Enrollments.IgnoreQueryFilters()
+            .Where(a => a.PersonId == staffUserId)
             .Select(a => a.ExerciseId)
             .ToListAsync();
 
@@ -127,7 +128,7 @@ public class UnscopedIdentityEntityTests
 
         visibleAccounts.Should().ContainSingle().Which.Should().Be(
             accountA,
-            "the StaffAssignment exemption must not weaken content isolation — an Account query in the same " +
+            "the Enrollment exemption must not weaken content isolation — an Account query in the same " +
             "context, scoped to exercise A, must still see only exercise A's account");
     }
 
@@ -145,6 +146,7 @@ public class UnscopedIdentityEntityTests
                 ExternalSubject = $"idp|{staffUserId:N}",
                 DisplayName = "Unconfined Staff User",
                 CreatedAt = DateTimeOffset.UtcNow,
+                Person = new Person { Id = staffUserId, OrganizationId = Organization.DefaultOrganizationId, DisplayName = "Test Person", CreatedAt = DateTimeOffset.UtcNow },
             });
             await seed.SaveChangesAsync();
         }
@@ -174,6 +176,7 @@ public class UnscopedIdentityEntityTests
                 ExternalSubject = $"idp|{staffUserId:N}",
                 DisplayName = "Pre-Scope Staff User",
                 CreatedAt = DateTimeOffset.UtcNow,
+                Person = new Person { Id = staffUserId, OrganizationId = Organization.DefaultOrganizationId, DisplayName = "Test Person", CreatedAt = DateTimeOffset.UtcNow },
             });
             await seed.SaveChangesAsync();
         }

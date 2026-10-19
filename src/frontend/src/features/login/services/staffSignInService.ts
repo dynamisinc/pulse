@@ -65,6 +65,48 @@ export interface StaffLoginEnvelope {
 }
 
 /**
+ * Org-level staff sign-in body (story 15): `orgSlug` is optional (omitted = match across orgs).
+ * Types only: no UI sends this yet.
+ */
+export interface StaffOrgSignInCredentials {
+  readonly orgSlug?: string
+  readonly email: string
+  readonly password: string
+}
+
+/** One org the password matched, offered when the email is in several (story 15). */
+export interface StaffOrgChoice {
+  readonly slug: string
+  readonly orgName: string
+}
+
+/** 200 body when a password matched in several orgs: pick one via `staff/login/choose`. */
+export interface StaffOrgChoiceResponse {
+  readonly choose: readonly StaffOrgChoice[]
+  readonly choiceToken: string
+}
+
+/** Body of `POST /auth/staff/login/choose`. */
+export interface StaffOrgChooseRequest {
+  readonly choiceToken: string
+  readonly orgSlug: string
+}
+
+/**
+ * The 200 response of the org-level login/choose endpoints: the unchanged success envelope
+ * (`session.scope` may be `'org'` with a null `exerciseId`) or a choice list. Discriminate with
+ * `isStaffOrgChoiceResponse`. Refusals are an empty 401.
+ */
+export type StaffOrgLoginResponse = StaffLoginEnvelope | StaffOrgChoiceResponse
+
+/** Narrows a login/choose response to the multi-org choice shape. */
+export function isStaffOrgChoiceResponse(
+  body: StaffOrgLoginResponse,
+): body is StaffOrgChoiceResponse {
+  return 'choose' in body && Array.isArray(body.choose) && 'choiceToken' in body
+}
+
+/**
  * A transport-agnostic error this seam throws so the page can render clear,
  * status-aware feedback without coupling itself to axios internals. `status`
  * is the HTTP status when the server responded (401/403/400/…), or

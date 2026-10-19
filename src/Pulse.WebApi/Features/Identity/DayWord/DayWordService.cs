@@ -480,12 +480,12 @@ public sealed class DayWordService
             return new CallerResolution(DayWordOutcome.Unauthorized, null);
         }
 
-        // StaffAssignment is deliberately unscoped (a staff human spans exercises), so the exercise predicate is
-        // explicit: the caller's OWN assignment on the RESOLVED exercise, never one named by the request.
-        var role = await _dbContext.StaffAssignments
+        // identity-auth-roles/16: the caller's OWN enrollment on the RESOLVED exercise, never one named by the request.
+        // Enrollment is IExerciseScoped (central filter) and the predicates are explicit too (StaffUser.Id == Person.Id).
+        var role = await _dbContext.Enrollments
             .AsNoTracking()
-            .Where(assignment => assignment.StaffUserId == current.StaffUserId && assignment.ExerciseId == exerciseId)
-            .Select(assignment => assignment.Role)
+            .Where(enrollment => enrollment.PersonId == current.StaffUserId && enrollment.ExerciseId == exerciseId)
+            .Select(enrollment => enrollment.Role)
             .FirstOrDefaultAsync(cancellationToken);
 
         if (!RosterStaffRoleFilter.IsAdmittedRole(role))

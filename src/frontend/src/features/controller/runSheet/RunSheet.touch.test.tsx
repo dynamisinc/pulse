@@ -15,7 +15,12 @@ import { makeItem } from './runSheetTestHarness'
 import { faBolt, faArrowUp } from '@fortawesome/free-solid-svg-icons'
 import { hasPseudoHitSlop, mediaRuleDeclarations } from '@/features/staffShell/tabletTestUtils'
 
-vi.mock('@/features/controller/access/useCanControl', () => ({ useCanControl: () => true }))
+vi.mock('@/features/controller/access/useCanControl', () => ({
+  useCanControl: () => true,
+  useCanEditContent: () => true,
+  useCanStaffPost: () => true,
+  useCanStaffPin: () => true,
+}))
 
 function expect44(el: HTMLElement) {
   const coarse = mediaRuleDeclarations(el, 'pointer: coarse')

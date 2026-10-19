@@ -51,8 +51,8 @@ public sealed class AccountProvisioningServiceTests
             ExerciseId = exerciseId,
             Username = username,
             DisplayName = username,
-            Role = "participant",
             CreatedAt = DateTimeOffset.UtcNow,
+            Enrollment = new Enrollment { Id = Guid.NewGuid(), ExerciseId = exerciseId, Role = "participant" },
         });
         await seed.SaveChangesAsync();
     }
@@ -82,7 +82,7 @@ public sealed class AccountProvisioningServiceTests
         result.Account.HasCredential.Should().BeTrue();
 
         await using var verify = _fixture.CreateContext(new ExerciseContext { CurrentExerciseId = exercise.Id });
-        var stored = await verify.Accounts.SingleAsync(a => a.Username == "mayor");
+        var stored = await verify.Accounts.Include(account => account.Enrollment).SingleAsync(a => a.Username == "mayor");
         stored.ExerciseId.Should().Be(exercise.Id, "the account is stamped with the caller's active exercise, never a client id");
         stored.DisplayName.Should().Be("Mayor Vance");
         stored.CredentialHash.Should().NotBeNullOrEmpty();
@@ -103,7 +103,7 @@ public sealed class AccountProvisioningServiceTests
         result.Outcome.Should().Be(CreateAccountOutcome.Unauthenticated, "account creation is staff-only and fails closed with no staff session");
 
         await using var verify = _fixture.CreateContext(new ExerciseContext { CurrentExerciseId = exercise.Id });
-        (await verify.Accounts.AnyAsync(a => a.Username == "x")).Should().BeFalse("an unauthenticated request must write nothing");
+        (await verify.Accounts.Include(account => account.Enrollment).AnyAsync(a => a.Username == "x")).Should().BeFalse("an unauthenticated request must write nothing");
     }
 
     [RequiresDockerFact]
@@ -162,7 +162,7 @@ public sealed class AccountProvisioningServiceTests
         }
 
         await using var verify = _fixture.CreateContext(new ExerciseContext { CurrentExerciseId = exercise.Id });
-        var stored = await verify.Accounts.SingleAsync(a => a.Username == "evil");
+        var stored = await verify.Accounts.Include(account => account.Enrollment).SingleAsync(a => a.Username == "evil");
         stored.DisplayName.Should().Be("Real Name", "a stored display name is stripped of markup on ingest so it can never execute (COR-007)");
         stored.DisplayName.Should().NotContain("<script>");
     }
@@ -189,10 +189,10 @@ public sealed class AccountProvisioningServiceTests
         result.Summary.Rows.Should().OnlyContain(r => r.Status == "created");
 
         await using var verify = _fixture.CreateContext(new ExerciseContext { CurrentExerciseId = exercise.Id });
-        var stored = await verify.Accounts.Where(a => a.ExerciseId == exercise.Id).ToListAsync();
+        var stored = await verify.Accounts.Include(account => account.Enrollment).Where(a => a.ExerciseId == exercise.Id).ToListAsync();
         stored.Should().HaveCount(2);
-        stored.Should().Contain(a => a.Username == "alice" && a.Role == "participant");
-        stored.Should().Contain(a => a.Username == "bob" && a.Role == "pio");
+        stored.Should().Contain(a => a.Username == "alice" && a.Enrollment.Role == "participant");
+        stored.Should().Contain(a => a.Username == "bob" && a.Enrollment.Role == "pio");
     }
 
     [RequiresDockerFact]
@@ -231,7 +231,7 @@ public sealed class AccountProvisioningServiceTests
         rows.Single(r => r.RowNumber == 5).Status.Should().Be("created");
 
         await using var verify = _fixture.CreateContext(new ExerciseContext { CurrentExerciseId = exercise.Id });
-        (await verify.Accounts.CountAsync(a => a.ExerciseId == exercise.Id)).Should().Be(3,
+        (await verify.Accounts.Include(account => account.Enrollment).CountAsync(a => a.ExerciseId == exercise.Id)).Should().Be(3,
             "the pre-existing account plus the two created rows — the failed rows persisted nothing");
     }
 
@@ -261,7 +261,7 @@ public sealed class AccountProvisioningServiceTests
         result.Outcome.Should().Be(ImportAccountsOutcome.Unauthenticated, "import is staff-only and fails closed with no staff session");
 
         await using var verify = _fixture.CreateContext(new ExerciseContext { CurrentExerciseId = exercise.Id });
-        (await verify.Accounts.AnyAsync(a => a.ExerciseId == exercise.Id)).Should().BeFalse("an unauthenticated import must write nothing");
+        (await verify.Accounts.Include(account => account.Enrollment).AnyAsync(a => a.ExerciseId == exercise.Id)).Should().BeFalse("an unauthenticated import must write nothing");
     }
 
     [RequiresDockerFact]
@@ -277,7 +277,7 @@ public sealed class AccountProvisioningServiceTests
         }
 
         await using var verify = _fixture.CreateContext(new ExerciseContext { CurrentExerciseId = exercise.Id });
-        var stored = await verify.Accounts.SingleAsync(a => a.Username == "evil");
+        var stored = await verify.Accounts.Include(account => account.Enrollment).SingleAsync(a => a.Username == "evil");
         stored.DisplayName.Should().Be("Mayor", "an imported display name is stripped of markup, so a stored script can never execute (COR-007)");
         stored.DisplayName.Should().NotContain("<script>");
     }

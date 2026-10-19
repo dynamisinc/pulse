@@ -19,6 +19,10 @@ vi.mock('./sessionResolver', () => ({
 
 const FIXTURE: Session = {
   exerciseId: 'ex-test-0001',
+  scope: 'exercise',
+  personId: null,
+  world: 'staff',
+  isLead: false,
   accountId: 'acct-test',
   role: 'controller',
   personaId: 'persona-test',

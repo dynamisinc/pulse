@@ -50,7 +50,7 @@ import { useExerciseContext } from '@/core/exerciseContext'
 import { useStaffAssignments } from '@/features/staff/hooks/useStaffAssignments'
 import { useSetActiveExercise } from '@/features/staff/hooks/useSetActiveExercise'
 import { friendlyErrorMessage, sameExercise } from '@/features/staff/components/switcherShared'
-import type { StaffAssignment } from '@/features/staff/types'
+import type { Enrollment } from '@/features/staff/types'
 import {
   STAFF_COARSE_POINTER_MEDIA,
   STAFF_TABLET_PORTRAIT_MEDIA,
@@ -127,7 +127,7 @@ const badgeTabletSx = {
 } as const
 
 interface SwitchableBadgeProps extends ExerciseIdentityBadgeProps {
-  assignments: StaffAssignment[]
+  assignments: Enrollment[]
 }
 
 /** The 2+ assignments form: a menu button that switches the active exercise. */
@@ -137,7 +137,7 @@ function SwitchableBadge({ role, cell, assignments }: SwitchableBadgeProps) {
   const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null)
   // Provisional echo of the switch response, superseded the moment the provider
   // re-resolves (same rationale as `ExerciseSwitcher`'s `justSwitchedTo`).
-  const [justSwitchedTo, setJustSwitchedTo] = useState<StaffAssignment | null>(null)
+  const [justSwitchedTo, setJustSwitchedTo] = useState<Enrollment | null>(null)
   const menuId = useId()
   const open = anchorEl !== null
 
@@ -161,7 +161,7 @@ function SwitchableBadge({ role, cell, assignments }: SwitchableBadgeProps) {
     setAnchorEl(target)
   }
 
-  const handleSelect = (assignment: StaffAssignment) => {
+  const handleSelect = (assignment: Enrollment) => {
     if (switchMutation.isPending) return
     if (sameExercise(assignment.exerciseId, activeExerciseId)) {
       setAnchorEl(null)
@@ -314,7 +314,7 @@ export function ExerciseIdentityBadge({ role, cell }: ExerciseIdentityBadgeProps
   // The switch mutation's `resetQueries()` clears the assignments while they refetch.
   // Keep the last-known list so `SwitchableBadge` (the menu, the trigger, and the
   // focus target) stays mounted through the reset instead of being swapped out.
-  const [lastKnown, setLastKnown] = useState<StaffAssignment[]>([])
+  const [lastKnown, setLastKnown] = useState<Enrollment[]>([])
   if (assignmentsQuery.isSuccess && assignmentsQuery.data !== lastKnown) {
     setLastKnown(assignmentsQuery.data)
   }

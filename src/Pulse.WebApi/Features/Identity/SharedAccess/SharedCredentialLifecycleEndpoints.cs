@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Pulse.WebApi.Features.Identity.RoleMatrix;
 
 /// <summary>
 /// The shared-credential LIFECYCLE slice HTTP surface + composition-root seams (story 07, COR-016 / NFR-009):
@@ -60,8 +61,12 @@ public static class SharedCredentialLifecycleEndpoints
     {
         ArgumentNullException.ThrowIfNull(endpoints);
 
-        endpoints.MapPost("/api/staff/shared-credential/rotate", RotateAsync);
-        endpoints.MapPost("/api/staff/shared-credential/revoke", RevokeAsync);
+        // identity-auth-roles/17 (§8.2, signed off): the view-only code is the planner's and the controller's — an
+        // evaluator is 403 (a narrowing from "any staff").
+        endpoints.MapPost("/api/staff/shared-credential/rotate", RotateAsync)
+            .RequireExerciseRole(ExerciseRoleFilter.PlannerOrController);
+        endpoints.MapPost("/api/staff/shared-credential/revoke", RevokeAsync)
+            .RequireExerciseRole(ExerciseRoleFilter.PlannerOrController);
 
         return endpoints;
     }

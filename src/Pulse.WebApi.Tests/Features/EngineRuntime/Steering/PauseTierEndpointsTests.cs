@@ -737,6 +737,36 @@ public sealed class PauseTierEndpointsTests
         (await ReadStateAsync(response)).Tier.Should().Be("running", "the read is the honest server baseline");
     }
 
+    // ---- WR-2 (identity-auth-roles/17 Gate-1 WR-006): attribution is the SESSION person ---------
+
+    [RequiresDockerFact]
+    public async Task Post_ASpoofedBodyActingHumanId_IsNotRecorded_TheSessionPersonIs()
+    {
+        var exerciseId = Guid.NewGuid();
+        var publisher = new CapturingPauseOverlayPublisher();
+        await using var host = await StartHostAsync(exerciseId, exerciseStatus: "live", publisherOverride: publisher);
+
+        var response = await host.Client.PostAsJsonAsync(
+            new Uri("/api/steering/pause-tier", UriKind.Relative),
+            new { tier = "engine", actingHumanId = "the-exercise-lead" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        publisher.Transitions.Should().ContainSingle().Which.ActingHumanId.Should().Be(
+            host.StaffUserId.ToString(), "the transition is attributed to the verified session's person, not the body");
+    }
+
+    /// <summary>Captures every published pause-tier transition (the WR-2 attribution proof reads its acting human).</summary>
+    private sealed class CapturingPauseOverlayPublisher : IPauseOverlayPublisher
+    {
+        public System.Collections.Concurrent.ConcurrentQueue<PauseTierTransition> Transitions { get; } = new();
+
+        public Task PublishAsync(PauseTierTransition transition, CancellationToken cancellationToken = default)
+        {
+            Transitions.Enqueue(transition);
+            return Task.CompletedTask;
+        }
+    }
+
     // ---- composition: story 08's swap of the no-op overlay publisher default --------------------
 
     [RequiresDockerFact]
@@ -761,7 +791,8 @@ public sealed class PauseTierEndpointsTests
         Guid? assignedExerciseId = null,
         IExerciseClock? clockOverride = null,
         string exerciseStatus = "active",
-        string assignedRole = "controller")
+        string assignedRole = "controller",
+        IPauseOverlayPublisher? publisherOverride = null)
     {
         _fixture.ConnectionString.Should().NotBeNull(
             "the Docker-gated MsSql fixture must have started and captured its connection string before these tests run");
@@ -772,7 +803,8 @@ public sealed class PauseTierEndpointsTests
             assignedExerciseId,
             clockOverride,
             exerciseStatus,
-            assignedRole);
+            assignedRole,
+            publisherOverride);
     }
 
     /// <summary>
@@ -850,11 +882,15 @@ public sealed class PauseTierEndpointsTests
     {
         private readonly WebApplication _app;
 
-        private PauseTierTestHost(WebApplication app)
+        private PauseTierTestHost(WebApplication app, Guid staffUserId)
         {
             _app = app;
+            StaffUserId = staffUserId;
             Client = app.GetTestClient();
         }
+
+        /// <summary>The session's staff person — the identity every pause-tier transition is attributed to (WR-2).</summary>
+        public Guid StaffUserId { get; }
 
         public HttpClient Client { get; }
 
@@ -896,7 +932,8 @@ public sealed class PauseTierEndpointsTests
             Guid? assignedExerciseId = null,
             IExerciseClock? clockOverride = null,
             string exerciseStatus = "active",
-            string assignedRole = "controller")
+            string assignedRole = "controller",
+            IPauseOverlayPublisher? publisherOverride = null)
         {
             // The staff caller the REUSED cockpit authorization filter gates on. A default host is an
             // authenticated staff user ASSIGNED to the resolved exercise; the denial tests flip these knobs.
@@ -935,6 +972,13 @@ public sealed class PauseTierEndpointsTests
             builder.Services.AddSignalR();
             builder.Services.AddPauseParticipantOverlay();
 
+            // A test may capture the published transitions (the WR-2 attribution proof).
+            if (publisherOverride is not null)
+            {
+                builder.Services.RemoveAll<IPauseOverlayPublisher>();
+                builder.Services.AddSingleton(publisherOverride);
+            }
+
             // A test may substitute a non-conforming clock to force the fail-closed 409 path (WR-103).
             if (clockOverride is not null)
             {
@@ -960,7 +1004,7 @@ public sealed class PauseTierEndpointsTests
             app.MapParticipantShellEndpoints();
             await app.StartAsync();
 
-            return new PauseTierTestHost(app);
+            return new PauseTierTestHost(app, staffUserId);
         }
 
         public async ValueTask DisposeAsync()
@@ -1005,10 +1049,10 @@ public sealed class PauseTierEndpointsTests
             // exercise-isolation/11: the staff human the session names must EXIST and share the exercise's
             // customer tenant, or the org bound fails closed and every staff endpoint 403s.
             context.StaffUsers.Add(StaffTenantSeed.StaffUserFor(staffUserId));
-            context.StaffAssignments.Add(new StaffAssignment
+            context.Enrollments.Add(new Enrollment
             {
                 Id = Guid.NewGuid(),
-                StaffUserId = staffUserId,
+                PersonId = staffUserId,
                 ExerciseId = exerciseId,
                 Role = assignedRole,
                 CreatedAt = DateTimeOffset.UtcNow,

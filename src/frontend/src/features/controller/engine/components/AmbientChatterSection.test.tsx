@@ -33,6 +33,12 @@ import {
 } from '../models/ambientPolicyContract'
 import { EngineSettingsPanel } from './EngineSettingsPanel'
 
+// Story 17: the ambient raise needs the lead; the stub session defaults to a LEAD controller.
+vi.mock('@/core/auth/session', async importOriginal => ({
+  ...(await importOriginal<typeof import('@/core/auth/session')>()),
+  useOptionalSession: (await import('@/core/auth/rolePermissions.testUtils')).stubbedSession,
+}))
+
 vi.mock('@/features/controller/access/useCanControl', () => ({ useCanControl: () => true }))
 
 vi.mock('@/features/personas', () => ({

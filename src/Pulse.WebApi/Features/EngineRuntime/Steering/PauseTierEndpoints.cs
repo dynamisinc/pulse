@@ -15,6 +15,7 @@ using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.EngineRuntime.Persistence;
 using Pulse.WebApi.Features.ExerciseConfiguration.Lifecycle;
+using Pulse.WebApi.Features.Identity.RoleMatrix;
 
 /// <summary>
 /// The SERVER-AUTHORITATIVE tiered-pause API (feature: world-steering, story 07; CTL-023, COR-001, COR-050/052,
@@ -140,6 +141,7 @@ public static class PauseTierEndpoints
         IExerciseContext exerciseContext,
         PulseDbContext dbContext,
         ILoggerFactory loggerFactory,
+        HttpContext httpContext,
         CancellationToken cancellationToken)
     {
         if (request is null)
@@ -158,6 +160,17 @@ public static class PauseTierEndpoints
         {
             return Results.BadRequest("actingHumanId is required (COR-018).");
         }
+
+        // WR-2 (identity-auth-roles/17 Gate-1 WR-006): the transition is attributed to the SESSION person
+        // (ExerciseCallerRole.PersonId, the verified staff session's person), never the body's actingHumanId. The body
+        // field stays required for wire compatibility (the 400 above), but its value is not trusted.
+        var caller = await ExerciseCallerRole.ResolveAsync(httpContext);
+        if (caller.Outcome == ExerciseCallerOutcome.NoStaffSession || caller.PersonId == Guid.Empty)
+        {
+            return Results.Unauthorized();
+        }
+
+        var actingHumanId = caller.PersonId.ToString();
 
         if (!PauseTierWire.TryParse(request.Tier, out var tier))
         {
@@ -196,7 +209,7 @@ public static class PauseTierEndpoints
         var result = await registry.SetTierAsync(
             scope.Value,
             tier,
-            request.ActingHumanId,
+            actingHumanId,
             clockStart,
             request.OverlayRegister,
             cancellationToken);
@@ -323,7 +336,10 @@ public sealed class PauseTierRequest
     [JsonPropertyName("tier")]
     public string? Tier { get; init; }
 
-    /// <summary>The individual controller behind the shared console account (COR-018) — required.</summary>
+    /// <summary>
+    /// The individual controller behind the shared console account (COR-018) — required for wire compatibility, but
+    /// NOT trusted for attribution: the transition records the verified session's person (WR-2).
+    /// </summary>
     [JsonPropertyName("actingHumanId")]
     public string? ActingHumanId { get; init; }
 

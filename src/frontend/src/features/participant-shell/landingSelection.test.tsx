@@ -18,6 +18,10 @@ import {
 function sessionWith(isReadOnly: boolean): Session {
   return {
     exerciseId: 'ex-mock-0001',
+    scope: 'exercise',
+    personId: null,
+    world: 'participant',
+    isLead: false,
     accountId: 'acct-test',
     role: 'participant',
     personaId: 'persona-test',

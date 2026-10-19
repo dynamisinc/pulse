@@ -653,12 +653,15 @@ public sealed class EngineSettingsEndpointsTests
             // exercise-isolation/11: the staff human the session names must EXIST and share the exercise's
             // customer tenant, or the org bound fails closed and every staff endpoint 403s.
             context.StaffUsers.Add(StaffTenantSeed.StaffUserFor(staffUserId));
-            context.StaffAssignments.Add(new StaffAssignment
+            context.Enrollments.Add(new Enrollment
             {
                 Id = Guid.NewGuid(),
-                StaffUserId = staffUserId,
+                PersonId = staffUserId,
                 ExerciseId = exerciseId,
                 Role = role,
+
+                // identity-auth-roles/17: the suite's controller is the exercise's LEAD — the raise routes need it.
+                IsLead = role == "controller",
                 CreatedAt = DateTimeOffset.UtcNow,
             });
             await context.SaveChangesAsync();

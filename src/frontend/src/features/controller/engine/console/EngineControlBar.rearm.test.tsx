@@ -16,13 +16,24 @@ import { ExerciseContextProvider } from '@/core/exerciseContext'
 import { resetExerciseClock, setExerciseClock } from '@/core/clock'
 import { getEmittedTelemetryEvents, resetTelemetryBuffer } from '@/core/telemetry'
 import { postStore } from '@/features/social/services/postStore'
+import { resetStubSession, setStubSession } from '@/core/auth/rolePermissions.testUtils'
 import { reviewStore } from '../services/reviewStore'
 import { engineControlStore } from '../hooks/useEngineControl'
 import { engineSettingsStore } from '../hooks/useEngineSettings'
 import { mockPointer, restoreMatchMedia } from '../../components/confirm/coarsePointer.testUtils'
 import { EngineControlBar } from './EngineControlBar'
 
-vi.mock('@/features/controller/access/useCanControl', () => ({ useCanControl: () => true }))
+// STOP -> Live is a raise: only the lead controller may do it (identity-auth-roles story 17).
+vi.mock('@/core/auth/session', async importOriginal => ({
+  ...(await importOriginal<typeof import('@/core/auth/session')>()),
+  useOptionalSession: (await import('@/core/auth/rolePermissions.testUtils')).stubbedSession,
+}))
+vi.mock('@/features/controller/access/useCanControl', () => ({
+  useCanControl: () => true,
+  useCanEditContent: () => true,
+  useCanStaffPost: () => true,
+  useCanStaffPin: () => true,
+}))
 
 function renderBar() {
   return render(
@@ -50,6 +61,8 @@ async function stopEngine() {
 }
 
 beforeEach(() => {
+  resetStubSession()
+  setStubSession({ role: 'controller', isLead: true })
   setExerciseClock({ scenarioNow: () => new Date('2033-09-04T14:00:30Z') })
   postStore.resetForTests()
   reviewStore.resetForTests()

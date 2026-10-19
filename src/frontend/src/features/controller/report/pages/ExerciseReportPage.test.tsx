@@ -8,7 +8,7 @@
  * omitted when empty, the print button calls window.print, and the `@page` rule exists only while
  * the page is mounted. Error states read as sentences.
  */
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
@@ -43,6 +43,24 @@ function stubApi(responder: (filters: ReportFilters) => ExerciseReport = mockRep
 
 const NOISE_LABEL = 'Background noise'
 const PRINT = 'Print / Save as PDF'
+
+/** The From/To pickers (native `datetime-local`: no textbox role). */
+function timeInput(name: 'From' | 'To'): HTMLInputElement {
+  return screen.getByLabelText(`${name} (scenario time)`)
+}
+
+/** Sets a scenario time ("yyyy-MM-dd HH:mm") in a picker, as the browser's picker does. */
+function pick(input: HTMLInputElement, stamp: string) {
+  fireEvent.change(input, { target: { value: stamp.replace(' ', 'T') } })
+}
+
+/** A half-typed value: the browser reports `badInput` and an empty value. */
+function halfType(input: HTMLInputElement) {
+  Object.defineProperty(input, 'validity', { configurable: true, value: { badInput: true, valid: false } })
+  fireEvent.change(input, { target: { value: '' } })
+}
+
+const enter = (input: HTMLInputElement) => fireEvent.keyDown(input, { key: 'Enter' })
 
 function renderPage() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -92,7 +110,12 @@ describe('ExerciseReportPage', () => {
     expect(screen.getByRole('heading', { name: /Post record/ })).toBeInTheDocument()
     expect(screen.getByTestId('omitted-noise-note')).toHaveTextContent('Background noise (2 posts)')
     expect(screen.getByText('15 Oct 2026 · 09:30')).toBeInTheDocument() // a half-hour group heading
-    expect(screen.getAllByTestId('report-post')).toHaveLength(MOCK_REPORT.posts.length)
+    // Story 34 (DF-50): the mock's 6-post engine burst prints as 3 cards.
+    expect(screen.getAllByTestId('report-post')).toHaveLength(MOCK_REPORT.posts.length - 3)
+    expect(screen.getByTestId('merged-note')).toHaveTextContent(
+      `these ${MOCK_REPORT.posts.length} posts appear as ${MOCK_REPORT.posts.length - 3} cards`)
+    expect(screen.getAllByTestId('report-post-repeats').map(n => n.textContent))
+      .toEqual(['Posted 3 times, 15 Oct 10:10–10:12', 'Posted 2 times, 15 Oct 10:10–10:11'])
     expect(screen.getByText('All times are scenario time')).toBeInTheDocument()
   })
 
@@ -113,7 +136,7 @@ describe('ExerciseReportPage', () => {
       expect.objectContaining({ params: { sources: 'participant,scripted,engine,noise' } }),
     ))
     await waitFor(() =>
-      expect(screen.getAllByTestId('report-post')).toHaveLength(MOCK_REPORT.posts.length + 2))
+      expect(screen.getAllByTestId('report-post')).toHaveLength(MOCK_REPORT.posts.length + 2 - 3))
     expect(screen.queryByTestId('omitted-noise-note')).not.toBeInTheDocument()
   })
 
@@ -424,17 +447,18 @@ describe('ExerciseReportPage', () => {
       await screen.findByTestId('report-sheet')
       const calls = get.mock.calls.length
 
-      const from = screen.getByRole('textbox', { name: 'From (scenario time)' })
-      await user.type(from, '2026-10-15 09:00')
-      expect(get.mock.calls.length).toBe(calls) // typing alone never refetches
-      await user.tab()
+      const from = timeInput('From')
+      pick(from, '2026-10-15 09:00')
+      expect(get.mock.calls.length).toBe(calls) // picking alone never refetches
+      fireEvent.blur(from)
       await waitFor(() => expect(lastParams(get)).toEqual({
         sources: 'participant,scripted,engine',
         from: '2026-10-15 09:00',
       }))
 
-      const to = screen.getByRole('textbox', { name: 'To (scenario time)' })
-      await user.type(to, '2026-10-15 10:00{Enter}')
+      const to = timeInput('To')
+      pick(to, '2026-10-15 10:00')
+      enter(to)
       await waitFor(() => expect(lastParams(get)).toEqual({
         sources: 'participant,scripted,engine',
         from: '2026-10-15 09:00',
@@ -443,6 +467,8 @@ describe('ExerciseReportPage', () => {
       await waitFor(() => expect(screen.getByTestId('filter-statement')).toHaveTextContent(
         'Showing participant, scripted inject and engine posts, 10-15 09:00 – 10-15 10:00'))
       await waitFor(() => expect(screen.getAllByTestId('report-post')).toHaveLength(6))
+      // Nothing in 09:00-10:00 repeats, so no merge note (story 34).
+      expect(screen.queryByTestId('merged-note')).not.toBeInTheDocument()
 
       await user.click(screen.getByRole('button', { name: 'Clear' }))
       await waitFor(() => expect(lastParams(get)).toEqual({ sources: 'participant,scripted,engine' }))
@@ -450,20 +476,19 @@ describe('ExerciseReportPage', () => {
     })
 
     it.each([
-      ['not a time', /yyyy-MM-dd HH:mm/],
-      ['2026-10-15 25:00', /yyyy-MM-dd HH:mm/],
-      ['2026-10-13 23:59', /2026-10-14 00:00 or later/],
-    ])('rejects %s with an inline message and does not refetch', async (text, message) => {
+      ['a half-typed date', null, /Enter a full date and time/],
+      ['2026-10-13 23:59', '2026-10-13 23:59', /2026-10-14 00:00 or later/],
+    ])('rejects %s with an inline message and does not refetch', async (_case, stamp, message) => {
       const get = stubApi()
-      const user = userEvent.setup()
       renderPage()
       await screen.findByTestId('report-sheet')
       const calls = get.mock.calls.length
 
-      await user.type(screen.getByRole('textbox', { name: 'From (scenario time)' }), text)
-      await user.tab()
+      const from = timeInput('From')
+      if (stamp === null) halfType(from)
+      else pick(from, stamp)
+      fireEvent.blur(from)
 
-      const from = screen.getByRole('textbox', { name: 'From (scenario time)' })
       expect(from).toHaveAccessibleDescription(message)
       expect(from).toBeInvalid()
       expect(get.mock.calls.length).toBe(calls)
@@ -471,42 +496,109 @@ describe('ExerciseReportPage', () => {
 
     it('rejects a From after the applied To', async () => {
       const get = stubApi()
-      const user = userEvent.setup()
       renderPage()
       await screen.findByTestId('report-sheet')
-      await user.type(screen.getByRole('textbox', { name: 'To (scenario time)' }), '2026-10-15 09:30{Enter}')
+      pick(timeInput('To'), '2026-10-15 09:30')
+      enter(timeInput('To'))
       await waitFor(() => expect(lastParams(get).to).toBe('2026-10-15 09:30'))
       const calls = get.mock.calls.length
-      await user.type(screen.getByRole('textbox', { name: 'From (scenario time)' }), '2026-10-15 10:00')
-      await user.tab()
+      pick(timeInput('From'), '2026-10-15 10:00')
+      fireEvent.blur(timeInput('From'))
       expect(screen.getByText('From must not be after To.')).toBeInTheDocument()
       expect(get.mock.calls.length).toBe(calls)
     })
 
     it('allows To after the snapshot scenarioEnd (a live exercise keeps growing)', async () => {
       const get = stubApi()
-      const user = userEvent.setup()
       renderPage()
       await screen.findByTestId('report-sheet')
-      await user.type(screen.getByRole('textbox', { name: 'To (scenario time)' }), '2026-10-15 11:30{Enter}')
+      pick(timeInput('To'), '2026-10-15 11:30')
+      enter(timeInput('To'))
       await waitFor(() => expect(lastParams(get).to).toBe('2026-10-15 11:30'))
     })
 
-    it('clears a stale From-after-To error and applies From when To moves later', async () => {
+    // Tom, 10/17: To defaults to "now" (scenario time) but stays an open end until changed.
+    it('shows scenario now in an untouched To, but sends no To bound', async () => {
+      const get = stubApi()
+      renderPage()
+      await screen.findByTestId('report-sheet')
+      const to = timeInput('To')
+      expect(to).toHaveValue('2026-10-15T10:42')
+      expect(to).toHaveAccessibleDescription('Defaults to now')
+
+      const from = timeInput('From')
+      pick(from, '2026-10-15 09:00')
+      fireEvent.blur(from)
+      await waitFor(() => expect(lastParams(get)).toEqual({
+        sources: 'participant,scripted,engine',
+        from: '2026-10-15 09:00',
+      }))
+      fireEvent.blur(to) // leaving an untouched To applies nothing either
+      expect(lastParams(get)).not.toHaveProperty('to')
+    })
+
+    it('refuses a From after the "now" an untouched To shows, and sends nothing', async () => {
+      const get = stubApi()
+      renderPage()
+      await screen.findByTestId('report-sheet')
+      const calls = get.mock.calls.length
+      const from = timeInput('From')
+      pick(from, '2026-10-15 11:00') // after "now", 10:42
+      fireEvent.blur(from)
+      expect(from).toHaveAccessibleDescription('From must not be after To.')
+      expect(get.mock.calls.length).toBe(calls)
+    })
+
+    it('sends To once it is changed, and Clear puts "now" back as an open end', async () => {
       const get = stubApi()
       const user = userEvent.setup()
       renderPage()
       await screen.findByTestId('report-sheet')
-      const from = screen.getByRole('textbox', { name: 'From (scenario time)' })
-      const to = screen.getByRole('textbox', { name: 'To (scenario time)' })
-      await user.type(to, '2026-10-15 09:30{Enter}')
+      const to = timeInput('To')
+      pick(to, '2026-10-15 10:00')
+      enter(to)
+      await waitFor(() => expect(lastParams(get).to).toBe('2026-10-15 10:00'))
+      expect(to).toHaveAccessibleDescription('Scenario time, exercise zone')
+
+      await user.click(screen.getByRole('button', { name: 'Clear' }))
+      await waitFor(() => expect(lastParams(get)).toEqual({ sources: 'participant,scripted,engine' }))
+      expect(to).toHaveValue('2026-10-15T10:42')
+    })
+
+    it('offers date and time pickers that start at the exercise\'s first day', async () => {
+      stubApi()
+      renderPage()
+      await screen.findByTestId('report-sheet')
+      for (const name of ['From', 'To'] as const) {
+        expect(timeInput(name)).toHaveAttribute('type', 'datetime-local')
+        expect(timeInput(name)).toHaveAttribute('min', '2026-10-14T00:00')
+        expect(timeInput(name)).toHaveAttribute('step', '60')
+      }
+    })
+
+    it('leaves To empty when the server sends no scenario now (an older API)', async () => {
+      const exercise = { ...MOCK_REPORT.exercise, scenarioNow: undefined }
+      stubApi(() => ({ ...MOCK_REPORT, exercise }))
+      renderPage()
+      await screen.findByTestId('report-sheet')
+      expect(timeInput('To')).toHaveValue('')
+    })
+
+    it('clears a stale From-after-To error and applies From when To moves later', async () => {
+      const get = stubApi()
+      renderPage()
+      await screen.findByTestId('report-sheet')
+      const from = timeInput('From')
+      const to = timeInput('To')
+      pick(to, '2026-10-15 09:30')
+      enter(to)
       await waitFor(() => expect(lastParams(get).to).toBe('2026-10-15 09:30'))
-      await user.type(from, '2026-10-15 10:00')
-      await user.tab()
+      pick(from, '2026-10-15 10:00')
+      fireEvent.blur(from)
       expect(from).toHaveAccessibleDescription('From must not be after To.')
 
-      await user.clear(to)
-      await user.type(to, '2026-10-15 10:30{Enter}')
+      pick(to, '2026-10-15 10:30')
+      enter(to)
 
       await waitFor(() => expect(lastParams(get)).toEqual({
         sources: 'participant,scripted,engine',
@@ -522,20 +614,19 @@ describe('ExerciseReportPage', () => {
     ])('never sends an inverted window when committing %s while %s is invalid',
       async (committing, other, value, appliedFrom, appliedTo) => {
         const get = stubApi()
-        const user = userEvent.setup()
         renderPage()
         await screen.findByTestId('report-sheet')
-        const fieldOf = (name: string) =>
-          screen.getByRole('textbox', { name: `${name} (scenario time)` })
-        await user.type(fieldOf('From'), `${appliedFrom}{Enter}`)
-        await user.type(fieldOf('To'), `${appliedTo}{Enter}`)
+        const fieldOf = (name: string) => timeInput(name as 'From' | 'To')
+        pick(fieldOf('From'), appliedFrom)
+        enter(fieldOf('From'))
+        pick(fieldOf('To'), appliedTo)
+        enter(fieldOf('To'))
         await waitFor(() => expect(lastParams(get).to).toBe(appliedTo))
         const calls = get.mock.calls.length
 
-        await user.clear(fieldOf(other))
-        await user.type(fieldOf(other), 'garbage')
-        await user.clear(fieldOf(committing))
-        await user.type(fieldOf(committing), `${value}{Enter}`)
+        halfType(fieldOf(other))
+        pick(fieldOf(committing), value)
+        enter(fieldOf(committing))
 
         expect(get.mock.calls.length).toBe(calls)
         expect(fieldOf(committing)).toHaveAccessibleDescription('From must not be after To.')
@@ -558,7 +649,7 @@ describe('ExerciseReportPage', () => {
         .toHaveAccessibleDescription('At least one source is required.')
       const order = [
         screen.getByRole('button', { name: 'Back to console' }),
-        screen.getByRole('textbox', { name: 'From (scenario time)' }),
+        timeInput('From'),
         screen.getByRole('button', { name: PRINT }),
       ]
       expect(order[0]?.compareDocumentPosition(order[1] as Node))
@@ -637,8 +728,8 @@ describe('ExerciseReportPage', () => {
         from: '2026-10-15 00:00',
         to: '2026-10-15 23:59',
       }))
-      expect(screen.getByRole('textbox', { name: 'From (scenario time)' })).toHaveValue('2026-10-15 00:00')
-      expect(screen.getByRole('textbox', { name: 'To (scenario time)' })).toHaveValue('2026-10-15 23:59')
+      expect(timeInput('From')).toHaveValue('2026-10-15T00:00')
+      expect(timeInput('To')).toHaveValue('2026-10-15T23:59')
     })
 
     // Page AC: ... disabled when null.
@@ -681,7 +772,7 @@ describe('ExerciseReportPage', () => {
       await screen.findByTestId('report-sheet')
       await user.click(screen.getByRole('button', { name: LATEST }))
 
-      await user.click(screen.getByRole('textbox', { name: 'From (scenario time)' }))
+      await user.click(timeInput('From'))
       await user.tab()
       expect(screen.queryByText(/or later/)).not.toBeInTheDocument()
     })
@@ -696,9 +787,9 @@ describe('ExerciseReportPage', () => {
       await user.click(screen.getByRole('button', { name: LATEST }))
       await waitFor(() => expect(screen.getByTestId('window-filtered')).toBeInTheDocument())
 
-      const from = screen.getByRole('textbox', { name: 'From (scenario time)' })
-      await user.clear(from)
-      await user.type(from, '2026-10-14 16:30{Enter}')
+      const from = timeInput('From')
+      pick(from, '2026-10-14 16:30')
+      enter(from)
       await waitFor(() => expect(lastParams(get).from).toBe('2026-10-14 16:30'))
     })
 

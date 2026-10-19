@@ -15,7 +15,12 @@ import { LiveWorldColumn } from './LiveWorldColumn'
 import { at, createFakeSource, MVEGA, post, view, WATER, type FakeSource } from './liveWorldTestKit'
 import { hasPseudoHitSlop, mediaRuleDeclarations } from '@/features/staffShell/tabletTestUtils'
 
-vi.mock('@/features/controller/access/useCanControl', () => ({ useCanControl: () => true }))
+vi.mock('@/features/controller/access/useCanControl', () => ({
+  useCanControl: () => true,
+  useCanEditContent: () => true,
+  useCanStaffPost: () => true,
+  useCanStaffPin: () => true,
+}))
 
 vi.mock('@/features/social/services/feedService', async importOriginal => {
   const actual = await importOriginal<typeof import('@/features/social/services/feedService')>()

@@ -59,6 +59,7 @@ public sealed class ExerciseCreationService
     private const string SystemChannel = "system";
     private const string SchemaVersion = "v0";
     private const string ExerciseEntityType = "exercise";
+    private const string OrgExerciseCreatedAuditKind = "org.exercise.created";
 
     /// <summary>SQL Server error numbers for a unique-index / unique-constraint violation.</summary>
     private const int DuplicateKeyErrorNumber = 2601;
@@ -81,7 +82,7 @@ public sealed class ExerciseCreationService
 
     /// <summary>
     /// Creates one exercise owned by the caller's own organization, in lifecycle state <c>build</c>, with a
-    /// unique hostname and a <see cref="StaffAssignment"/> for the creator — plus exactly one XC-004
+    /// unique hostname and a <see cref="Enrollment"/> for the creator — plus exactly one XC-004
     /// <c>exercise.created</c> event, all in a single unit of work.
     /// </summary>
     /// <param name="request">The request body (a <c>null</c> body is a 400).</param>
@@ -101,7 +102,9 @@ public sealed class ExerciseCreationService
 
         // Defense in depth over the endpoint filter: a service must fail closed on its own, so a future
         // mapping that forgot the filter cannot turn every staff session into an exercise administrator.
-        if (!ExerciseAdminRoles.IsExerciseAdministrator(caller.Role))
+        // identity-auth-roles/17 (§8.2, signed off): creating an exercise is the ORG ADMIN's alone — planners and
+        // controllers are refused (a narrowing of DF-20).
+        if (!ExerciseAdminRoles.IsOrgAdmin(caller.Role))
         {
             return CreateExerciseResult.Forbidden();
         }
@@ -152,22 +155,46 @@ public sealed class ExerciseCreationService
             // exercise is indistinguishable from any other un-configured one.
         };
 
-        var assignment = new StaffAssignment
+        var assignment = new Enrollment
         {
             Id = Guid.NewGuid(),
-            StaffUserId = caller.StaffUserId,
+
+            // identity-auth-roles/16: the creator is ENROLLED (Enrollment replaces StaffAssignment; the staff user's
+            // id IS their person id — the shared key).
+            PersonId = caller.StaffUserId,
             ExerciseId = exercise.Id,
 
-            // COR-074 AC3: the creator's OWN role (planner, orgAdmin or — DF-20 — controller) — so they reach
-            // the new run through the exercise switcher with no separate provisioning step. A controller
-            // creator therefore holds a controller assignment on the new run.
-            Role = caller.Role,
+            // COR-074 AC3: the creator's OWN role (planner or — DF-20 — controller) — so they reach the new run
+            // through the exercise switcher with no separate provisioning step. orgAdmin is no longer an exercise
+            // role (ADMIN-IDENTITY-MODEL §1.1): an org-admin creator is enrolled as planner, exactly as the
+            // AdminIdentityFoundation migration maps every existing orgAdmin assignment.
+            Role = CreatorEnrollmentRole(caller.Role),
             CreatedAt = now,
         };
 
         _dbContext.Exercises.Add(exercise);
-        _dbContext.StaffAssignments.Add(assignment);
-        _dbContext.TelemetryEvents.Add(BuildCreatedTelemetry(exercise, caller, now));
+        _dbContext.Enrollments.Add(assignment);
+        _dbContext.TelemetryEvents.Add(BuildCreatedTelemetry(exercise, caller, assignment.Role, now));
+
+        // ADMIN-IDENTITY-MODEL §7.5: an exercise created FROM ORG SCOPE is also an org-tier audit record, in the same
+        // unit of work (the exercise-scoped telemetry above is unchanged).
+        if (caller.IsOrgScope)
+        {
+            _dbContext.OrgAuditEvents.Add(new OrgAuditEvent
+            {
+                Id = Guid.NewGuid(),
+                OrganizationId = caller.OrganizationId,
+                Kind = OrgExerciseCreatedAuditKind,
+                Outcome = "success",
+                ActorPersonId = caller.StaffUserId,
+                ExerciseId = exercise.Id,
+                Payload = string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"{{\"hostname\":{JsonSerializer.Serialize(exercise.Hostname)}," +
+                    $"\"creatorEnrollmentRole\":{JsonSerializer.Serialize(assignment.Role)}}}"),
+                OccurredAt = now,
+            });
+        }
 
         try
         {
@@ -193,7 +220,10 @@ public sealed class ExerciseCreationService
             });
     }
 
-    /// <summary>Projects a freshly created exercise onto the shared org-admin row shape.</summary>
+    /// <summary>
+    /// Projects a freshly created exercise onto the shared org-admin row shape. Creation is org-admin only, and an org
+    /// admin manages every exercise of their organization, so <see cref="OrgExerciseDto.CanManage"/> is <c>true</c>.
+    /// </summary>
     private static OrgExerciseDto ToDto(Exercise exercise) => new()
     {
         ExerciseId = exercise.Id.ToString(),
@@ -201,6 +231,7 @@ public sealed class ExerciseCreationService
         Status = exercise.Status,
         Hostname = exercise.Hostname,
         CreatedAt = exercise.CreatedAt?.ToString("O", CultureInfo.InvariantCulture),
+        CanManage = true,
     };
 
     /// <summary>
@@ -308,7 +339,18 @@ public sealed class ExerciseCreationService
     /// <c>exercise.switched</c> and <c>exercise.bootstrapped</c> already use. The opaque payload records the
     /// allocated host and the role granted; it deliberately does NOT record the tenant (XC-002).
     /// </summary>
-    private static TelemetryEvent BuildCreatedTelemetry(Exercise exercise, StaffCaller caller, DateTimeOffset now) => new()
+    /// <summary>
+    /// The enrollment role a creator receives: their own staff role, or <c>planner</c> for an org admin (orgAdmin is
+    /// not an exercise role — identity-auth-roles/16).
+    /// </summary>
+    private static string CreatorEnrollmentRole(string callerRole) =>
+        EnrollmentRoles.TryNormalizeStaffRole(callerRole, out var staffRole) ? staffRole : EnrollmentRoles.Planner;
+
+    private static TelemetryEvent BuildCreatedTelemetry(
+        Exercise exercise,
+        StaffCaller caller,
+        string creatorEnrollmentRole,
+        DateTimeOffset now) => new()
     {
         EventId = Guid.NewGuid().ToString(),
         SchemaVersion = SchemaVersion,
@@ -333,7 +375,7 @@ public sealed class ExerciseCreationService
             CultureInfo.InvariantCulture,
             $"{{\"status\":{JsonSerializer.Serialize(exercise.Status)}," +
             $"\"hostname\":{JsonSerializer.Serialize(exercise.Hostname)}," +
-            $"\"creatorAssignmentRole\":{JsonSerializer.Serialize(caller.Role)}}}"),
+            $"\"creatorAssignmentRole\":{JsonSerializer.Serialize(creatorEnrollmentRole)}}}"),
         EmittedAt = now,
     };
 }

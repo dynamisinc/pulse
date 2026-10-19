@@ -100,6 +100,8 @@ interface OrgExerciseBody {
   readonly status: string
   readonly hostname?: string | null
   readonly createdAt?: string | null
+  /** WR-005; required by the current backend, accepted absent (older backend). */
+  readonly canManage?: boolean
 }
 
 /** Wire shape of the creation response (`CreateExerciseResponseDto`). */
@@ -421,6 +423,7 @@ function isOrgExerciseBody(value: unknown): value is OrgExerciseBody {
     && (body.hostname === undefined || body.hostname === null || typeof body.hostname === 'string')
     && (body.createdAt === undefined || body.createdAt === null
       || typeof body.createdAt === 'string')
+    && (body.canManage === undefined || typeof body.canManage === 'boolean')
   )
 }
 
@@ -449,6 +452,7 @@ function toOrgExercise(body: OrgExerciseBody): OrgExercise {
     ...(typeof body.createdAt === 'string' && body.createdAt.length > 0
       ? { createdAt: body.createdAt }
       : {}),
+    ...(typeof body.canManage === 'boolean' ? { canManage: body.canManage } : {}),
   }
 }
 
@@ -533,7 +537,7 @@ export async function getOrgExercises(): Promise<OrgExercise[]> {
 
 /**
  * Creates one exercise under the caller's own organization (COR-074). The new
- * exercise is always in `build` status with a `StaffAssignment` minted for the
+ * exercise is always in `build` status with an `Enrollment` minted for the
  * creator — both server-decided; this seam asserts neither.
  *
  * A blank `hostname` is OMITTED from the body rather than sent as `""`, so the

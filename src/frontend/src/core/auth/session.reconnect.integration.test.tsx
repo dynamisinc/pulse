@@ -31,6 +31,10 @@ vi.mock('../config/mockData', () => ({ USE_MOCK_DATA: false }))
 
 const SESSION_BODY = {
   exerciseId: 'ex-0001',
+  personId: null,
+  world: 'participant',
+  scope: 'exercise',
+  isLead: false,
   accountId: 'acct-1',
   role: 'participant',
   personaId: 'persona-1',

@@ -82,6 +82,7 @@ import {
   faBolt,
   faCircleCheck,
   faGaugeHigh,
+  faLock,
   faPowerOff,
   faTriangleExclamation,
 } from '@fortawesome/free-solid-svg-icons'
@@ -102,6 +103,7 @@ import { useReviewQueue } from '../hooks/useReviewQueue'
 // D5 dark operator-chrome tokens (matches `ReviewQueue`'s `chrome`). Staff-only.
 import { consoleChrome as chrome } from '../../consoleChrome'
 import { useCanControl } from '../../access'
+import { LEAD_ONLY_RAISE_REASON, usePermissions } from '@/core/auth'
 
 /** The kill switch's cycle order + display copy (D5 §2 "Live / Suggest-only / STOP ENGINE"). */
 const MODE_CYCLE: readonly EngineMode[] = ['live', 'suggest-only', 'stop']
@@ -224,6 +226,10 @@ function RearmConfirmDialog({
 export function EngineControlBar() {
   // Story 11 (DF-14): the bar's write toggles are absent for a non-controller; its readouts stay.
   const canControl = useCanControl()
+  // Story 17 (raise-only): the cycle's step back to LIVE and the degraded RESTORE both call
+  // `POST /api/engine/autonomy/restore`, which only the lead controller may do. Going DOWN
+  // (suggest-only, stop) stays open to every controller.
+  const isLead = usePermissions().can('raiseAutonomy')
   const engineControl = useEngineControl()
   const coarse = useCoarsePointer()
   const [confirmingRearm, setConfirmingRearm] = useState(false)
@@ -239,6 +245,8 @@ export function EngineControlBar() {
   const modeCopy = MODE_COPY[engineControl.mode]
   const modeLabel = labelFor(engineControl.mode, autonomy)
   const nextModeLabel = labelFor(nextMode(engineControl.mode), autonomy)
+  const nextIsRaise = nextMode(engineControl.mode) === 'live'
+  const killSwitchLeadBlocked = nextIsRaise && !isLead
   const demandFraction = useMemo(
     () => Math.min(1, demand.demand / Math.max(1, demand.budget)),
     [demand.demand, demand.budget],
@@ -318,6 +326,8 @@ export function EngineControlBar() {
         data-testid="engine-kill-switch"
         data-mode={engineControl.mode}
         aria-label={`${modeLabel} — activate to switch to ${nextModeLabel}`}
+        disabled={killSwitchLeadBlocked}
+        aria-describedby={killSwitchLeadBlocked ? 'engine-lead-only-reason' : undefined}
         aria-haspopup={coarse && engineControl.mode === 'stop' ? 'dialog' : undefined}
         onClick={() => {
           // Touch: STOP -> Live asks first. Every other step (including STOPPING) is one tap.
@@ -329,6 +339,7 @@ export function EngineControlBar() {
         }}
         sx={{
           ...(coarse ? touchTargetSx : {}),
+          opacity: killSwitchLeadBlocked ? 0.5 : 1,
           display: 'inline-flex',
           alignItems: 'center',
           gap: 0.75,
@@ -352,6 +363,17 @@ export function EngineControlBar() {
           sx={{ width: 7, height: 7, borderRadius: '50%', bgcolor: modeCopy.tone, flex: 'none' }}
         />
       </Box>}
+      {canControl && (killSwitchLeadBlocked || (engineControl.degraded && !isLead)) && (
+        <Stack
+          id="engine-lead-only-reason"
+          data-testid="engine-lead-only-reason"
+          direction="row"
+          sx={{ alignItems: 'center', gap: 0.6, fontSize: 10.5, color: chrome.inkMuted }}
+        >
+          <FontAwesomeIcon icon={faLock} aria-hidden="true" />
+          <span>{LEAD_ONLY_RAISE_REASON}</span>
+        </Stack>
+      )}
       {/* a'. Story 11 H-1: a non-controller sees the server's engine mode, not a switch. */}
       {!canControl && (
         <Box
@@ -399,6 +421,8 @@ export function EngineControlBar() {
             component="button"
             type="button"
             data-testid="engine-degraded-restore"
+            disabled={!isLead}
+            aria-describedby={isLead ? undefined : 'engine-lead-only-reason'}
             onClick={() => engineControl.restore()}
             sx={{
               fontSize: 10,

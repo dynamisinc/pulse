@@ -36,6 +36,11 @@
  * nothing here is a participant surface.
  */
 
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
+import { faLock } from '@fortawesome/free-solid-svg-icons'
+import { Box, Typography } from '@mui/material'
+import { usePermissions } from '@/core/auth'
+import CobraStyles from '@/theme/CobraStyles'
 import { ParticipantAdminRoute } from './ParticipantAdminRoute'
 import { PrintCardsButton } from './cards'
 import { DayWordPanel } from './dayWord'
@@ -57,11 +62,35 @@ const renderEmailAction = (selection: readonly string[]) => (
   <EmailLinksButton selection={selection} />
 )
 
-/** The `/staff/participant-admin` registry element. See the module header. */
-export const ParticipantAdminSurface = () => (
-  <ParticipantAdminRoute
-    dayWordSlot={<DayWordPanel />}
-    renderCardsAction={renderCardsAction}
-    renderEmailAction={renderEmailAction}
-  />
-)
+/**
+ * The `/staff/participant-admin` registry element. See the module header.
+ *
+ * Story 17: roster provisioning/import and view-only/day-word codes are planner + controller
+ * (`manageAccounts`). The registry already admits only those two roles; for any other role (an
+ * evaluator would get a 403 on every call) this renders a text notice instead of write controls.
+ */
+export const ParticipantAdminSurface = () => {
+  const canManage = usePermissions().can('manageAccounts')
+  if (!canManage) {
+    return (
+      <Box
+        role="status"
+        data-testid="participant-admin-no-access"
+        sx={{ padding: CobraStyles.Padding.MainWindow, display: 'flex', gap: 1, alignItems: 'center' }}
+      >
+        <FontAwesomeIcon icon={faLock} aria-hidden />
+        <Typography variant="body2">
+          <strong>Not available for your role.</strong> Only a planner or controller can manage
+          participant accounts and codes.
+        </Typography>
+      </Box>
+    )
+  }
+  return (
+    <ParticipantAdminRoute
+      dayWordSlot={<DayWordPanel />}
+      renderCardsAction={renderCardsAction}
+      renderEmailAction={renderEmailAction}
+    />
+  )
+}

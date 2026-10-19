@@ -203,7 +203,6 @@ public sealed class WordLoginServiceTests
     [InlineData("controller")]
     [InlineData("evaluator")]
     [InlineData("planner")]
-    [InlineData("orgAdmin")]
     public async Task AnAccountOutsideTheParticipantWorld_IsRefused(string role)
     {
         var exercise = await SeedExerciseAsync(_fixture);
@@ -325,7 +324,9 @@ public sealed class WordLoginServiceTests
         await using var read = _fixture.CreateContext();
         var accounts = await read.Accounts.IgnoreQueryFilters().Where(a => a.ExerciseId == exercise.Id).ToListAsync();
         accounts.Should().ContainSingle("COR-011: no sign-in path provisions an account").Which.Should().BeEquivalentTo(
-            account, options => options.Excluding(a => a.CreatedAt), "a refused sign-in changes nothing on the account");
+            account,
+            options => options.Excluding(a => a.CreatedAt).Excluding(a => a.Enrollment),
+            "a refused sign-in changes nothing on the account");
     }
 
     // ---------------------------------------------------------------- 400s

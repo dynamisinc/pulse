@@ -17,6 +17,7 @@ using Pulse.Core.Features.ReactionLoop.Models;
 using Pulse.Core.Features.ReactionLoop.Services;
 using Pulse.Core.Features.ResponseReaction.Models;
 using Pulse.Core.Features.ResponseReaction.Services;
+using Pulse.Core.Features.SilenceEscalation.Services;
 using Pulse.Core.Features.Storylines.Models;
 using Pulse.Core.Features.Storylines.Services;
 using Pulse.WebApi.Data;
@@ -351,10 +352,18 @@ public sealed partial class ReactionLoopDriver
     private readonly IAddressingInbox _addressingInbox;
     private readonly ILogger<ReactionLoopDriver> _logger;
 
-    // The matched-response reaction (response-reaction/01) is the decide-stage policy for an OfficialResponse
-    // trigger. Registered here because the loop is what raises that trigger (engine-runtime/06); every other
-    // trigger kind still runs the default composer.
-    private readonly DecideStage _decideStage = new DecideStage().Register(new ResponseReactionBehavior());
+    // The decide-stage policies for the two trigger kinds this loop raises. The matched-response reaction
+    // (response-reaction/01) shapes an OfficialResponse trigger (gratitude-led burst); silence-escalation
+    // (ADP-001, D2) shapes an Inaction trigger, ramping the tone mix from worry toward speculation + anger as the
+    // silence runs on past the window. Before D2 only the response behavior was registered, so inaction ran the
+    // default composer and its phase-flat mix for the whole Escalating phase. The registry is one behavior PER
+    // trigger kind, so the two never compete for the same burst; precedence between a response and an inaction
+    // on the same storyline is the loop's (RunTickAsync drops the inaction trigger of a storyline a response
+    // just answered, and response work is queued first). Both behaviors start from IntentComposer.Compose, so
+    // stop / cap / target gating is unchanged; any other trigger kind still runs the default composer.
+    private readonly DecideStage _decideStage = new DecideStage()
+        .Register(new ResponseReactionBehavior())
+        .Register(new SilenceEscalationBehavior());
     private readonly ConcurrentDictionary<Guid, ExerciseTickState> _tickStates = new();
 
     /// <summary>Creates the driver over the generate/measure stages, telemetry emitter, scenario clock, and server clock.</summary>
@@ -470,9 +479,31 @@ public sealed partial class ReactionLoopDriver
         //     storyline's next burst (never paused).
         var responses = ResolveOfficialPosts(registration, observed.AddressingCandidates, scenarioMinute, context, pendingEvents);
 
+        // CTL-034 (D4): every official post the engine could not confirm on its own asks the controller for a
+        // response-match decision ("does this address X? Y/N"). That prompt is controller demand exactly like a
+        // queue fire, so it is metered on the SAME per-minute meter BEFORE any burst is decided below (the CTL-034
+        // accounting and telemetry stay honest), and ordinarily the bursts get only the budget the prompts left.
+        // Participant/PIO posts cannot be throttled, so prompts are always recorded. How far prompt demand may
+        // squeeze the engine's own work is bounded by the gate in the work loop below (see PassesDemandGate).
+        //
+        // autoConfirmEarned is deliberately false, not registration.ResponseMatching.AutoConfirmEnabled: with
+        // auto-confirm on, a plausible post resolves straight to Matched and is never counted here at all, so every
+        // post that DOES reach this line (Unmatched, or NeedsConfirmation with auto-confirm off) still needs a human's
+        // Y/N. Passing the opt-in flag would price those genuine prompts at zero. (The reaction-correctness harness,
+        // ReactionScenario.ControllerDemandPerMinute, mirrors this.)
+        var promptDemand = responses.MatchPrompts * DemandAccounting.MatchPromptDemand(autoConfirmEarned: false);
+        for (var i = 0; i < promptDemand; i++)
+        {
+            tickState.DemandMeter.Record(DemandEventKind.ResponseMatchPrompt, scenarioMinute);
+        }
+
+        tickState.PromptDemandThisMinute += promptDemand;
+
         // 3-5. DECIDE → GENERATE → enqueue. Response reactions go first (the responder's moment), then the
         //       inaction bursts, minus any storyline a response just answered (it is no longer silent). CTL-034:
-        //       never demand more than the budget of review decisions per scenario minute — one burst = one decision.
+        //       never demand more than the budget of controller decisions per scenario minute — one burst = one
+        //       decision, counted together with this minute's response-match prompts (recorded above) — subject to
+        //       the miss-safe minimum service in PassesDemandGate (prompt demand alone never starves the engine).
         var work = new List<(Storyline Storyline, ReactionTriggerKind Kind)>();
         foreach (var addressed in responses.Voiced)
         {
@@ -498,9 +529,9 @@ public sealed partial class ReactionLoopDriver
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            if (tickState.DemandMeter.DemandInWindow(scenarioMinute) >= WorkloadDemandMeter.BudgetPerMinute)
+            if (!PassesDemandGate(tickState, storyline, kind, scenarioMinute))
             {
-                break;
+                continue;
             }
 
             var reactionContext = BuildReactionContext(registration, storyline, kind, tickState, scenarioMinute);
@@ -595,6 +626,50 @@ public sealed partial class ReactionLoopDriver
         return new ReactionTickResult(scenarioMinute, observed.InactionTriggers.Count, reviewItems.Count, ambientPublished);
     }
 
+    /// <summary>
+    /// The CTL-034 demand gate for one unit of storyline work (D4 + the miss-safe minimum service, PR #634 CR-001/W-001).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The rule.</b> With <c>total</c> = all demand metered this scenario minute (engine queue fires + response-match
+    /// prompts) and <c>engine</c> = the engine-originated part (<c>total</c> minus this minute's prompt demand):
+    /// </para>
+    /// <list type="number">
+    ///   <item><b>OfficialResponse</b> work (the gratitude/response burst) passes while <c>engine &lt; cap</c>. It is
+    ///   never gated by prompt demand: a response burst is voiced only on the tick the storyline was addressed (the
+    ///   voiced list is tick-local), so a prompt-saturated minute would otherwise lose it permanently.</item>
+    ///   <item><b>Inaction</b> work passes while <c>total &lt; cap</c> (the ordinary CTL-034 budget, prompts included);
+    ///   OR, when the engine has demanded NOTHING yet this minute (<c>engine == 0</c>) and the storyline is actively
+    ///   escalating (Escalating/Peak), it passes anyway — the minimum service of one escalation burst.</item>
+    /// </list>
+    /// <para>
+    /// <b>Why.</b> Miss-safe (ADP-002a) outranks CTL-034 when the demand comes from participants/PIOs we cannot
+    /// throttle. If prompt demand alone could exhaust the budget, a stream of six irrelevant official posts a minute
+    /// would silence the world entirely — exactly the gaming vector ADP-002a forbids ("unmatched official content
+    /// slows escalation, never pauses it"). So total demand can exceed the cap, but only by engine minimum service:
+    /// at most one inaction burst per minute plus response work bounded by the engine-only cap. When prompts do not
+    /// saturate the budget (e.g. 24 blown storylines + 1 prompt/min), the guarantee never applies — the engine has
+    /// already fired that minute — and total demand stays at or below the cap.
+    /// </para>
+    /// </remarks>
+    private static bool PassesDemandGate(ExerciseTickState tickState, Storyline storyline, ReactionTriggerKind kind, int scenarioMinute)
+    {
+        var total = tickState.DemandMeter.DemandInWindow(scenarioMinute);
+        var engine = Math.Max(0, total - tickState.PromptDemandThisMinute);
+
+        if (kind == ReactionTriggerKind.OfficialResponse)
+        {
+            return engine < WorkloadDemandMeter.BudgetPerMinute;
+        }
+
+        if (total < WorkloadDemandMeter.BudgetPerMinute)
+        {
+            return true;
+        }
+
+        return engine == 0 && storyline.Phase is StorylinePhase.Escalating or StorylinePhase.Peak;
+    }
+
     /// <summary>Persists the tick's telemetry + review items in the scoped unit of work (one review item per burst, via the store).</summary>
     private static async Task PersistAsync(
         PulseDbContext dbContext,
@@ -629,7 +704,10 @@ public sealed partial class ReactionLoopDriver
     /// a suggestion awaiting confirmation) and none for a post that relates to nothing; applies a genuine match
     /// (silence clock reset, bend-down, phase → Addressed, with the resulting storyline telemetry); and otherwise
     /// leaves a miss-safe slow pending: on the suggested storyline for an unconfirmed match (unless it is already
-    /// addressed), and on every actively escalating storyline when the post's target is unknown.
+    /// addressed), and on every actively escalating storyline when the post's target is unknown. Counts, on the
+    /// returned resolutions, every official post that was NOT confirmed as a match (needs confirmation or unmatched):
+    /// each raises one response-match prompt the CTL-034 budget must meter (D4). An off-platform marker is the
+    /// controller's own action, not a prompt to them, so it is never counted.
     /// </summary>
     private OfficialPostResolutions ResolveOfficialPosts(
         ReactionLoopRegistration registration,
@@ -656,6 +734,11 @@ public sealed partial class ReactionLoopDriver
             }
 
             LogOfficialPostResolved(candidate.Reference, resolution.Kind, resolution.Confidence, target?.Id);
+
+            if (candidate.Source == AddressingSource.OfficialPost && resolution.Kind != MatchKind.Matched)
+            {
+                resolutions.AddMatchPrompt();
+            }
 
             if (resolution.Kind == MatchKind.Matched && target is not null)
             {
@@ -728,7 +811,14 @@ public sealed partial class ReactionLoopDriver
         };
     }
 
-    /// <summary>Builds the generate-stage request from a decided intent (storyline brief + eligible cast + tier).</summary>
+    /// <summary>
+    /// Builds the generate-stage request from a decided intent (storyline brief + eligible cast + tier). The brief's
+    /// tone mix is the DECIDED intent's (D3), not the storyline's phase-derived projection: the decide-stage
+    /// behaviors exist to shape the burst's tone (a gratitude-led response reaction, the silence-escalation ramp),
+    /// so the mix the provider is asked for must be the mix that was decided and logged on <c>engine.decided</c>.
+    /// Every other brief field still comes from <see cref="StorylineBriefProjection.ToBrief"/>. For a trigger that
+    /// runs the default composer the two are identical (<see cref="IntentComposer"/> copies the projection's mix).
+    /// </summary>
     /// <param name="registration">The exercise loop being ticked.</param>
     /// <param name="storyline">The storyline the burst voices.</param>
     /// <param name="intent">The decided generation intent.</param>
@@ -744,7 +834,7 @@ public sealed partial class ReactionLoopDriver
         {
             ExerciseId = registration.ExerciseId,
             ExerciseBrief = registration.ExerciseBrief,
-            Storyline = storyline.ToBrief(),
+            Storyline = storyline.ToBrief() with { ToneMix = intent.ToneMix },
             Personas = intent.Personas,
             Tier = tier,
         };
@@ -867,6 +957,11 @@ public sealed partial class ReactionLoopDriver
         }
 
         public bool IsAnswered(Guid storylineId) => _answered.Contains(storylineId);
+
+        /// <summary>Response-match prompts this tick raised: official posts the engine could not confirm on its own (CTL-034, D4).</summary>
+        public int MatchPrompts { get; private set; }
+
+        public void AddMatchPrompt() => MatchPrompts++;
     }
 
     /// <summary>Builds the <c>engine.decided</c> event (personas / tone mix / count / autonomy / rate-cap state).</summary>
@@ -957,13 +1052,20 @@ public sealed partial class ReactionLoopDriver
 
         public int PostsThisMinute { get; set; }
 
-        /// <summary>Resets the per-minute post counter when the scenario minute advances.</summary>
+        /// <summary>
+        /// Response-match prompt demand recorded this scenario minute, so the demand gate can separate engine-originated
+        /// demand from participant/PIO-originated prompt demand (the meter's one-minute window is this minute).
+        /// </summary>
+        public int PromptDemandThisMinute { get; set; }
+
+        /// <summary>Resets the per-minute post and prompt counters when the scenario minute advances.</summary>
         public void RollMinute(int scenarioMinute)
         {
             if (scenarioMinute != CurrentMinute)
             {
                 CurrentMinute = scenarioMinute;
                 PostsThisMinute = 0;
+                PromptDemandThisMinute = 0;
             }
         }
     }
