@@ -641,9 +641,10 @@ Use it only when the lead decides the cell cannot keep up.
 > not authorized on this environment.", and Pulse refuses the request if it is sent anyway. Every undecided burst
 > whose countdown ends is held for you. Turning Swamped mode off always works.
 >
-> Swamped mode is a shared setting for the whole exercise, not just your screen: when the lead turns it on, every
-> controller's console shows it on, and if Pulse refuses the change, the switch stays where it was and the reason
-> is shown beside it.
+> Swamped mode is a shared setting for the whole exercise, not just your screen. When the lead turns it on or off,
+> the lead's console shows it as soon as Pulse confirms it, and other controllers' consoles catch up within about
+> 30 seconds, or straight away when they open **ENGINE**. If Pulse refuses the change, the switch stays where it
+> was and the reason is shown beside it.
 
 ### The engine switch (kill switch)
 
