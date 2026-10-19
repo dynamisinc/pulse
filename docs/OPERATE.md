@@ -173,11 +173,12 @@ script is idempotent-forward only and is never auto-reversed. A schema rollback 
 directly):
 
 ```bash
-dotnet ef migrations script <target-migration> <migration-to-undo> --idempotent --project src/Pulse.WebApi
+dotnet ef migrations script <migration-to-undo> <target-migration> --idempotent --project src/Pulse.WebApi
 ```
 
-where `<target-migration>` is the one you want to land back on — i.e. the arguments are from-then-to,
-so undoing the newest migration means naming the one **before** it first.
+where `<target-migration>` is the one you want to land back on. The arguments are **from, then to**: a down script
+goes *from* the migration being undone *to* the one before it, so name the **newest** migration first. (Naming
+the older one first generates an *up* script instead.)
 
 Note that a `Down` is not guaranteed loss-free: where a migration widens a vocabulary, `Down` maps the
 new values back onto the narrower legacy set, so distinctions collapse (and a `Down` **then** re-`Up` is

@@ -48,10 +48,10 @@ const MISMATCH_MESSAGE = 'The two passwords do not match.'
 
 /** Known server policy codes -> plain messages. Unknown codes fall back to the generic one. */
 const POLICY_MESSAGES: Readonly<Record<string, string>> = {
-  'too-short': 'Use at least 12 characters.',
-  'too-long': 'Use no more than 128 characters.',
-  'too-common': 'That password is too common. Choose a less guessable one.',
-  'contains-personal-info': 'Do not include your name, email, or username in the password.',
+  'password-too-short': 'Use at least 12 characters.',
+  'password-too-long': 'Use no more than 128 characters.',
+  'password-too-common': 'That password is too common. Choose a less guessable one.',
+  'password-contains-personal-info': 'Do not include your name, email, or username in the password.',
 }
 
 type Phase = 'form' | 'success' | 'invalid'

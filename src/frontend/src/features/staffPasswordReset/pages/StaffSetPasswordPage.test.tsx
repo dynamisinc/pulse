@@ -85,7 +85,7 @@ describe('StaffSetPasswordPage', () => {
   })
 
   it('maps a known policy code and keeps the form', async () => {
-    mockPost.mockRejectedValue(httpError(400, { error: 'too-common' }))
+    mockPost.mockRejectedValue(httpError(400, { error: 'password-too-common' }))
     const user = userEvent.setup()
     renderPage()
     await fillAndSubmit(user)
