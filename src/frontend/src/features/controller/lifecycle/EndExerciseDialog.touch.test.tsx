@@ -171,3 +171,21 @@ describe('EndExerciseDialog on a fine pointer', () => {
     expect(['', '0', '0px']).toContain(getComputedStyle(container).paddingBottom)
   })
 })
+
+describe('EndExerciseDialog with no internal name yet (story 09)', () => {
+  it('says "the exercise" and never invents a name', () => {
+    render(
+      <ThemeProvider theme={cobraTheme}>
+        <EndExerciseDialog
+          exerciseName={null}
+          pending={false}
+          error={undefined}
+          onConfirm={vi.fn()}
+          onCancel={vi.fn()}
+        />
+      </ThemeProvider>,
+    )
+    expect(screen.getByRole('dialog')).toHaveTextContent('the exercise')
+    expect(screen.queryByTestId('end-exercise-name')).toBeNull()
+  })
+})

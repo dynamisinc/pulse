@@ -49,7 +49,7 @@ const PENDING_SX = {
 } as const
 
 export interface StageExerciseDialogProps {
-  /** The exercise the console shows (the scope's name): the one this dialog says it stages. */
+  /** The INTERNAL name of the exercise being staged (story 09); null until known: generic title. */
   readonly exerciseName: string | null
   /** Count of OPEN blocking items from the last readiness read; `undefined` = unknown. */
   readonly openBlocking: number | undefined
