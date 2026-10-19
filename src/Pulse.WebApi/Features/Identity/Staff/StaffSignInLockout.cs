@@ -119,10 +119,17 @@ public static class StaffSignInLockout
     }
 
     /// <summary>
-    /// Builds <c>p =&gt; (p.FailedLoginCount + 1) &lt; Threshold ? p.LockedOutUntil : (… == Threshold ? now + d0 : … : now + dCap)</c>
+    /// Builds <c>p =&gt; (p.FailedLoginCount + 1) &lt; Threshold ? p.LockedOutUntil : (… == Threshold ? at[0] : … : at[k])</c>
     /// — a SQL <c>CASE</c> over the PRE-update count, one arm per distinct <see cref="LockoutDuration"/> value up to the
     /// count from which it no longer changes, so the statement applies exactly the in-memory rule.
     /// </summary>
+    /// <remarks>
+    /// <b>Parameterized, never literal (#660 W-1).</b> The lockout instants are read from a per-call
+    /// <see cref="LockoutInstants"/> holder (<c>holder.At[i]</c>), not inlined as <see cref="ConstantExpression"/>s: EF
+    /// funcletizes the holder access into SQL PARAMETERS, so the tree shape — and therefore the compiled query and the SQL
+    /// text / server plan — is identical on every failed sign-in. A literal <c>now + d</c> per call would compile a new
+    /// query (and a new plan) each time, adding a measurable cost to exactly the known-email path M-2 equalizes.
+    /// </remarks>
     private static Expression<Func<Person, DateTimeOffset?>> LockedOutUntilAfterIncrement(DateTimeOffset now)
     {
         var person = Expression.Parameter(typeof(Person), "p");
@@ -130,19 +137,17 @@ public static class StaffSignInLockout
             Expression.Property(person, nameof(Person.FailedLoginCount)),
             Expression.Constant(1));
 
-        // The first count at which the duration stops changing (the cap, or the doubling bound).
-        var stable = Threshold;
-        while (stable - Threshold < MaxDoublings && LockoutDuration(stable) < MaxDuration)
-        {
-            stable++;
-        }
+        var instants = new LockoutInstants(now);
+        var at = Expression.Property(Expression.Constant(instants), nameof(LockoutInstants.At));
 
-        Expression ladder = Expression.Constant(now + LockoutDuration(stable)!.Value, typeof(DateTimeOffset?));
-        for (var count = stable - 1; count >= Threshold; count--)
+        // The last arm is the stable (capped) value; every earlier arm is an exact count.
+        var last = LockoutInstants.ArmCount - 1;
+        Expression ladder = Expression.ArrayIndex(at, Expression.Constant(last));
+        for (var arm = last - 1; arm >= 0; arm--)
         {
             ladder = Expression.Condition(
-                Expression.Equal(next, Expression.Constant(count)),
-                Expression.Constant(now + LockoutDuration(count)!.Value, typeof(DateTimeOffset?)),
+                Expression.Equal(next, Expression.Constant(Threshold + arm)),
+                Expression.ArrayIndex(at, Expression.Constant(arm)),
                 ladder);
         }
 
@@ -152,5 +157,41 @@ public static class StaffSignInLockout
             ladder);
 
         return Expression.Lambda<Func<Person, DateTimeOffset?>>(body, person);
+    }
+
+    /// <summary>
+    /// The per-call lockout instants the <see cref="LockedOutUntilAfterIncrement"/> ladder reads as SQL parameters:
+    /// <c>At[i] = now + LockoutDuration(Threshold + i)</c>, the last entry being the stable (capped) value.
+    /// </summary>
+    private sealed class LockoutInstants
+    {
+        /// <summary>
+        /// How many arms the ladder has: one per count from <see cref="Threshold"/> up to the first count at which the
+        /// duration stops changing (the cap, or the doubling bound), inclusive. Fixed for the process, so the tree shape is.
+        /// </summary>
+        public static readonly int ArmCount = ComputeArmCount();
+
+        public LockoutInstants(DateTimeOffset now)
+        {
+            At = new DateTimeOffset?[ArmCount];
+            for (var arm = 0; arm < ArmCount; arm++)
+            {
+                At[arm] = now + LockoutDuration(Threshold + arm)!.Value;
+            }
+        }
+
+        /// <summary>The instants, by arm.</summary>
+        public DateTimeOffset?[] At { get; }
+
+        private static int ComputeArmCount()
+        {
+            var stable = Threshold;
+            while (stable - Threshold < MaxDoublings && LockoutDuration(stable) < MaxDuration)
+            {
+                stable++;
+            }
+
+            return stable - Threshold + 1;
+        }
     }
 }
