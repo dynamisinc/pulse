@@ -1018,6 +1018,9 @@ function runSetSwampedMode(
       const described = describeSwampedModeError(error)
       const latest = getSnapshot(exerciseId)
       setFor(exerciseId, { ...latest, pendingSwampedMode: false, swampedError: described.message })
+      // A refusal may mean our view is stale (another controller changed it): queue a re-read
+      // so the display converges on server truth. Runs from `settle`, still serialized.
+      mine.refetchQueued = true
     })
     .finally(() => settle(exerciseId, mine))
 }

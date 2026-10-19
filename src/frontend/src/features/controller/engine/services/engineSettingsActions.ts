@@ -22,8 +22,8 @@
  *   POST /api/engine/generation-provider/restore          { actingHumanId, timeZone? }
  *                                                        -> 200 EngineSettingsDto | 400 | 401 | 403
  *
- *   POST /api/engine/autonomy/swamped-mode               { actingHumanId, enabled }
- *                                                        -> 200 autonomy DTO, not settings | 400 | 401 | 403
+ *   POST /api/engine/autonomy/swamped-mode                { actingHumanId, enabled }
+ *                                                        -> 200 autonomy DTO (not settings) | 400 | 403
  *
  * The FIVE settings-shaped calls above return the IDENTICAL `EngineSettingsDto` body on success —
  * one TS type, one parse function, no follow-up GET after a mutation; the
