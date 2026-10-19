@@ -266,6 +266,52 @@ public sealed class LifecycleOverlayPushTests
         hub.Sends.Should().BeEmpty();
     }
 
+    /// <summary>
+    /// PR #651 review W2, end to end: a participant pipe that never drains cannot hang an EndEx POST. The observer runs
+    /// inline in the request, so its push is bounded (5 s): the POST still answers 200 within the bound, the transition
+    /// is committed, the timeout is logged, the lock is released, and the next publish for the exercise proceeds.
+    /// </summary>
+    [RequiresDockerFact]
+    public async Task AHungParticipantPipe_DoesNotHangTheTransition_AndTheNextPublishProceeds()
+    {
+        var exerciseId = await SeedAsync(ExerciseLifecycleStates.Live);
+        var hub = new RecordingHub { Hangs = true };
+        var logs = new CapturingLoggerProvider();
+        await using var host = await StartAsync(
+            exerciseId, hub, services => services.AddSingleton<Microsoft.Extensions.Logging.ILoggerProvider>(logs));
+
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        await TransitionAsync(host, ExerciseLifecycleStates.Paused);
+        clock.Stop();
+
+        clock.Elapsed.Should().BeLessThan(
+            OverlayStateService.DefaultPublishTimeout + TimeSpan.FromSeconds(10),
+            "the bounded push returns within its bound; an unbounded one would never return at all");
+        await using (var read = _fixture.CreateContext())
+        {
+            (await read.Exercises.AsNoTracking().SingleAsync(e => e.Id == exerciseId)).Status
+                .Should().Be(ExerciseLifecycleStates.Paused, "the transition committed before the push was attempted");
+        }
+
+        logs.Entries.Should().Contain(
+            entry => entry.Category == typeof(LifecycleOverlayPublisher).FullName
+                && entry.Level == Microsoft.Extensions.Logging.LogLevel.Warning
+                && entry.Message.Contains(exerciseId.ToString(), StringComparison.Ordinal),
+            "an abandoned push must never be silent");
+
+        hub.Hangs = false;
+        using (await host.Services.GetRequiredService<OverlayStateService>().AcquirePublishLockAsync(exerciseId)
+            .WaitAsync(TimeSpan.FromSeconds(5)))
+        {
+            // The lock was released by the timed-out push.
+        }
+
+        await TransitionAsync(host, ExerciseLifecycleStates.Live);
+        var push = hub.SendsTo(exerciseId).Should().ContainSingle("the next publish got the lock and pushed").Which;
+        push.State.Should().Be("none");
+        await AssertParityAsync(host, push);
+    }
+
     // ---- helpers -------------------------------------------------------------------------------
 
     /// <summary>An observer that always throws.</summary>
@@ -428,6 +474,12 @@ public sealed class LifecycleOverlayPushTests
                         It.IsAny<string>(), It.IsAny<object?[]>(), It.IsAny<CancellationToken>()))
                     .Returns((string method, object?[] args, CancellationToken _) =>
                     {
+                        if (Hangs)
+                        {
+                            // A stuck participant pipe: never completes and IGNORES the token.
+                            return new TaskCompletionSource().Task;
+                        }
+
                         method.Should().Be("OverlayStateChanged");
                         var dto = args.Should().ContainSingle().Which.Should()
                             .BeOfType<ParticipantOverlayStateDto>(
@@ -445,6 +497,9 @@ public sealed class LifecycleOverlayPushTests
         }
 
         public IHubContext<ExerciseRealtimeHub> Context { get; }
+
+        /// <summary>When set, every send hangs forever and is NOT recorded.</summary>
+        public bool Hangs { get; set; }
 
         public IReadOnlyList<RecordedPush> Sends => [.. _sends];
 

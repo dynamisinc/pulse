@@ -3,7 +3,7 @@ namespace Pulse.WebApi.Features.EngineRuntime.Steering;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.SignalR;
-using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.ExerciseConfiguration;
 using Pulse.WebApi.Features.ExerciseConfiguration.Lifecycle;
@@ -18,11 +18,12 @@ using Pulse.WebApi.Features.Realtime;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>The push IS the GET (parity).</b> The pushed state is computed by resolving the registered
-/// <see cref="IOverlayStateProjection"/> — <see cref="SteeringPauseOverlayProjection"/> in the composed host, the very
-/// projection <c>GET /api/overlay-state</c> calls through <c>ParticipantShellConfigService.GetOverlayStateAsync</c> —
-/// over <see cref="ExerciseShellConfigSource.FromExercise"/> of the transitioned row, the same source factory that GET
-/// uses. So the precedence chain (endex &gt; pre-start &gt; pause &gt; none) and whatever <c>completed</c> projects to
+/// <b>The push IS the GET (parity).</b> The pushed state is read through <see cref="ComposedOverlayStateReader"/> — the
+/// committed exercise row through <see cref="ExerciseShellConfigSource"/>, then the registered
+/// <see cref="IOverlayStateProjection"/> (<see cref="SteeringPauseOverlayProjection"/> in the composed host), exactly
+/// what <c>GET /api/overlay-state</c> does through <c>ParticipantShellConfigService.GetOverlayStateAsync</c>, and the
+/// same reader <see cref="PauseOverlayPublisher"/> pushes through. Only the transitioned row's ID is used: the state is
+/// re-read under the lock at ticket time (PR #651 review W1), never taken from the request's in-memory row. So the precedence chain (endex &gt; pre-start &gt; pause &gt; none) and whatever <c>completed</c> projects to
 /// are decided in one place for both channels and cannot diverge.
 /// </para>
 /// <para>
@@ -40,10 +41,11 @@ using Pulse.WebApi.Features.Realtime;
 /// enough: this push writes no store, so a Freeze still awaiting its lifecycle read could lose to it.)
 /// </para>
 /// <para>
-/// <b>Lifetime: SINGLETON, with its own DI scope per notification.</b> Chosen deliberately:
+/// <b>Lifetime: SINGLETON, reading in its own DI scope per notification.</b> Chosen deliberately:
 /// <list type="bullet">
-///   <item>Everything it holds is a singleton (the hub context, the overlay store, the scope factory), so a singleton
-///   captures nothing scoped. The scoped projection is resolved INSIDE a fresh scope at call time — never captured.</item>
+///   <item>Everything it holds is a singleton (the hub context, the overlay store, the composed-read delegate), so a
+///   singleton captures nothing scoped. The delegate opens a fresh scope per call for the scoped
+///   <c>PulseDbContext</c> and projection — never captured.</item>
 ///   <item>The scope is NOT the request's. The observer runs inside the lifecycle request, but that request's scope
 ///   belongs to the CALLER: on the archive row action it is an org-tier request with no exercise resolved at all. The
 ///   projection is handed its exercise explicitly through <see cref="ExerciseShellConfigSource"/>, so it needs nothing
@@ -68,39 +70,62 @@ using Pulse.WebApi.Features.Realtime;
 /// <c>exercise.lifecycle.transitioned</c> event already records the action.
 /// </para>
 /// <para>
-/// <b>Failures</b> propagate to the caller, which is <see cref="ExerciseLifecycleService"/>'s best-effort, logging
-/// wrapper — the transition has committed by the time this runs.
+/// <b>Bounded (PR #651 review W2).</b> This runs inline in the lifecycle POST, so the lock wait, the composed read and
+/// the hub send together are bounded by <see cref="PublishTimeout"/> (5 s by default). A timeout is logged and
+/// swallowed here — the transition has committed, the lock is released by <c>using</c>, and the next publish proceeds.
+/// Any other failure propagates to <see cref="ExerciseLifecycleService"/>'s best-effort, logging wrapper.
+/// </para>
+/// <para>
+/// <b>The lock is IN-PROCESS only (PR #651 review S1).</b> <see cref="OverlayStateService.AcquirePublishLockAsync"/> —
+/// like the store and its sequence counter — lives in this app instance's memory. That is correct for today's single
+/// App Service instance. A scale-out to several instances needs a distributed lock or ordering at the SignalR
+/// backplane (and a shared sequence), or two instances' pushes for one exercise can interleave again.
 /// </para>
 /// </remarks>
-public sealed class LifecycleOverlayPublisher : IExerciseLifecycleTransitionObserver
+public sealed partial class LifecycleOverlayPublisher : IExerciseLifecycleTransitionObserver
 {
     private readonly IHubContext<ExerciseRealtimeHub> _hubContext;
     private readonly OverlayStateService _overlayState;
-    private readonly IServiceScopeFactory _scopeFactory;
+    private readonly ComposedOverlayStateReader _composedOverlayReader;
+    private readonly ILogger<LifecycleOverlayPublisher> _logger;
 
-    /// <summary>Creates the publisher over the shared hub, the overlay store's ticket counter, and a scope factory.</summary>
+    /// <summary>Creates the publisher over the shared hub, the overlay store's lock and ticket, and the composed read.</summary>
     /// <param name="hubContext">The context for the SHARED <see cref="ExerciseRealtimeHub"/> (no second hub).</param>
-    /// <param name="overlayState">The per-exercise overlay store — used ONLY for its sequence ticket, never written.</param>
-    /// <param name="scopeFactory">Opens the per-notification scope the scoped projection is resolved in.</param>
+    /// <param name="overlayState">The overlay store — used ONLY for its publish lock and sequence ticket, never written.</param>
+    /// <param name="composedOverlayReader">
+    /// Reads the composed overlay exactly as <c>GET /api/overlay-state</c> serves it, from COMMITTED state, in a DI scope
+    /// of its own (the same reader <see cref="PauseOverlayPublisher"/> pushes through).
+    /// </param>
+    /// <param name="logger">Logs a bounded publish that timed out — never silent.</param>
     public LifecycleOverlayPublisher(
         IHubContext<ExerciseRealtimeHub> hubContext,
         OverlayStateService overlayState,
-        IServiceScopeFactory scopeFactory)
+        ComposedOverlayStateReader composedOverlayReader,
+        ILogger<LifecycleOverlayPublisher> logger)
     {
         ArgumentNullException.ThrowIfNull(hubContext);
         ArgumentNullException.ThrowIfNull(overlayState);
-        ArgumentNullException.ThrowIfNull(scopeFactory);
+        ArgumentNullException.ThrowIfNull(composedOverlayReader);
+        ArgumentNullException.ThrowIfNull(logger);
 
         _hubContext = hubContext;
         _overlayState = overlayState;
-        _scopeFactory = scopeFactory;
+        _composedOverlayReader = composedOverlayReader;
+        _logger = logger;
     }
+
+    /// <summary>
+    /// The bound on the whole publish — lock wait, composed read and hub send (PR #651 review W2). Defaults to
+    /// <see cref="OverlayStateService.DefaultPublishTimeout"/>; settable only so tests can use a short bound.
+    /// </summary>
+    internal TimeSpan PublishTimeout { get; init; } = OverlayStateService.DefaultPublishTimeout;
 
     /// <inheritdoc />
     public async Task OnTransitionedAsync(Exercise exercise, string fromState, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(exercise);
 
+        // ONLY the id is read off the request's row (W1): the state pushed is re-read from committed data below.
         var exerciseId = exercise.Id;
         if (exerciseId == Guid.Empty)
         {
@@ -108,33 +133,54 @@ public sealed class LifecycleOverlayPublisher : IExerciseLifecycleTransitionObse
             return;
         }
 
-        // WR-001 (#390 Gate-1): the per-exercise publish lock PauseOverlayPublisher also holds, across ticket ->
-        // project -> send, so a Freeze can never be between its ticket and its store write while this projects.
-        // Released by `using` on every exit, exceptions included; nothing below publishes, so it is never re-taken.
-        using var publishLock = await _overlayState.AcquirePublishLockAsync(exerciseId, cancellationToken)
-            .ConfigureAwait(false);
+        // W2: this runs INLINE in the lifecycle POST (with CancellationToken.None), so the whole publish is bounded —
+        // a slow participant pipe must never hang an EndEx/pause request. The transition has already committed.
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(PublishTimeout);
+        var bounded = timeout.Token;
 
-        // 1. The ticket FIRST (PauseOverlayPublisher's convergence rule — see the remarks).
-        var sequence = _overlayState.NextSequence(exerciseId);
-
-        // 2. The SAME projection over the SAME source factory the GET uses, in a scope of its own.
-        var source = ExerciseShellConfigSource.FromExercise(exercise);
-        OverlayStateResponse overlay;
-        await using (var scope = _scopeFactory.CreateAsyncScope())
+        try
         {
-            overlay = await scope.ServiceProvider
-                .GetRequiredService<IOverlayStateProjection>()
-                .ProjectAsync(source, cancellationToken)
+            // WR-001 (#390 Gate-1): the per-exercise publish lock PauseOverlayPublisher also holds, across ticket ->
+            // read -> send, so a Freeze can never be between its ticket and its store write while this reads.
+            // Released by `using` on every exit, exceptions and timeouts included; nothing below publishes, so it is
+            // never re-taken.
+            using var publishLock = await _overlayState.AcquirePublishLockAsync(exerciseId, bounded)
+                .ConfigureAwait(false);
+
+            // 1. The ticket FIRST (PauseOverlayPublisher's convergence rule — see the remarks).
+            var sequence = _overlayState.NextSequence(exerciseId);
+
+            // 2. W1: a FRESH read of the composed overlay from COMMITTED state, AFTER the ticket and under the lock —
+            //    never the request's in-memory row. Two transitions can commit in one order and reach here in the
+            //    other; projecting each request's own row would let the earlier (stale) one go out last with the
+            //    higher ticket. Reading at ticket time means the highest ticket always carries the latest commit.
+            var overlay = await _composedOverlayReader(exerciseId, bounded).WaitAsync(bounded).ConfigureAwait(false);
+
+            // 3. The same participant DTO type the Freeze push sends, built ONLY from the composed GET projection,
+            //    carrying this push's ticket. WaitAsync bounds a transport that ignores the token.
+            await _hubContext.Clients
+                .Group(ExerciseRealtimeHub.GroupNameFor(exerciseId))
+                .SendAsync(
+                    PauseOverlayPublisher.OverlayStateChangedEvent,
+                    ParticipantOverlayStateDto.FromComposed(overlay, sequence),
+                    bounded)
+                .WaitAsync(bounded)
                 .ConfigureAwait(false);
         }
-
-        // 3. The same participant DTO type the Freeze push sends, built ONLY from the composed GET projection (never
-        //    the steering store snapshot), carrying this push's ticket.
-        var payload = ParticipantOverlayStateDto.FromComposed(overlay, sequence);
-
-        await _hubContext.Clients
-            .Group(ExerciseRealtimeHub.GroupNameFor(exerciseId))
-            .SendAsync(PauseOverlayPublisher.OverlayStateChangedEvent, payload, cancellationToken)
-            .ConfigureAwait(false);
+        catch (OperationCanceledException) when (timeout.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+        {
+            // W2: swallowed and logged, never thrown — the transition committed, and connected tabs heal on their next
+            // re-GET (reconnect, or the tab becoming visible).
+            LogLifecyclePushTimedOut(exerciseId, PublishTimeout.TotalMilliseconds);
+        }
     }
+
+    /// <summary>Source-generated warning for a lifecycle push that exceeded its bound (CA1848).</summary>
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "The lifecycle overlay push for exercise {ExerciseId} did not complete within {TimeoutMs} ms (lock " +
+                  "wait, composed read or hub send) and was abandoned; the transition STANDS — connected participants " +
+                  "see it on their next re-read.")]
+    private partial void LogLifecyclePushTimedOut(Guid exerciseId, double timeoutMs);
 }

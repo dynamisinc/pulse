@@ -194,12 +194,33 @@ public sealed partial class PauseOverlayPublisher : IPauseOverlayPublisher
         // (Copilot review, PR #386). Null means "we failed before the registry read".
         PauseTier? authoritativeTier = null;
 
+        // PR #651 review W2: the lock wait, the composed read and the hub send are BOUNDED, so a stuck participant
+        // pipe can neither hang this (the controller's pause-tier POST awaits it) nor hold the lock indefinitely.
+        // The tier/lifecycle reads and the store write are deliberately NOT on this token: they are what keeps the
+        // GET truthful, so they still run even when the bound was spent waiting for the lock.
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(PublishTimeout);
+        var bounded = timeout.Token;
+
         try
         {
             // WR-001 (#390 Gate-1): held across the WHOLE sequence below, shared with LifecycleOverlayPublisher, and
-            // released by `using` on every exit — the suppression return and any exception included.
-            using var publishLock = await _overlayState.AcquirePublishLockAsync(exerciseId, cancellationToken)
-                .ConfigureAwait(false);
+            // released by `using` on every exit — the suppression return, a timeout and any exception included.
+            //
+            // W2 DEGRADED PATH: if the lock is not free within the bound (another publish for this exercise is stuck
+            // in its send), the store is STILL written below — unserialized, but sequence-guarded — so the GET and
+            // every reconnect/visibility re-GET serve the truth; only this push is skipped (and logged).
+            IDisposable? publishLock = null;
+            try
+            {
+                publishLock = await _overlayState.AcquirePublishLockAsync(exerciseId, bounded).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (timeout.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+            {
+                LogPublishLockTimedOut(exerciseId, PublishTimeout.TotalMilliseconds);
+            }
+
+            using var heldLock = publishLock;
 
             // The ticket comes FIRST, so the last-invoked publish holds the highest one (see the remarks).
             //
@@ -253,20 +274,34 @@ public sealed partial class PauseOverlayPublisher : IPauseOverlayPublisher
                     sequence)
                 : _overlayState.Apply(exerciseId, OverlayStateWire.None, OverlayStateWire.InFiction, sequence);
 
+            if (publishLock is null)
+            {
+                // W2 degraded path (see above): the store is written; the push is skipped.
+                return;
+            }
+
             // Store BEFORE push: a reconnecting participant's GET must never read older state than a push that
             // has already gone out. WR-002: the pushed value is the COMPOSED overlay the GET serves, read AFTER the
             // write — so the lifecycle's precedence applies to this channel too, and a write that lost to a newer
             // one still broadcasts the newer state (the projection reads the store's current snapshot). The
             // sequence is the store's post-write one, as before.
-            var composed = await _composedOverlayReader(exerciseId, cancellationToken).ConfigureAwait(false);
+            var composed = await _composedOverlayReader(exerciseId, bounded).WaitAsync(bounded).ConfigureAwait(false);
 
+            // WaitAsync bounds a transport that ignores the token, so the lock is released within the bound.
             await _hubContext.Clients
                 .Group(ExerciseRealtimeHub.GroupNameFor(exerciseId))
                 .SendAsync(
                     OverlayStateChangedEvent,
                     ParticipantOverlayStateDto.FromComposed(composed, snapshot.Sequence),
-                    cancellationToken: cancellationToken)
+                    cancellationToken: bounded)
+                .WaitAsync(bounded)
                 .ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (timeout.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+        {
+            // W2: the BOUND fired (not the caller's cancellation) — treated like any other push failure (WR-004): the
+            // tier, clock freeze and store write stand, and participants heal on their next re-GET.
+            LogOverlayPushTimedOut(exerciseId, PublishTimeout.TotalMilliseconds);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -276,6 +311,26 @@ public sealed partial class PauseOverlayPublisher : IPauseOverlayPublisher
             LogOverlayPushFailed(ex, exerciseId, authoritativeTier ?? transition.To);
         }
     }
+
+    /// <summary>
+    /// The bound on the lock wait, the composed read and the hub send (PR #651 review W2). Defaults to
+    /// <see cref="OverlayStateService.DefaultPublishTimeout"/>; settable only so tests can use a short bound.
+    /// </summary>
+    internal TimeSpan PublishTimeout { get; init; } = OverlayStateService.DefaultPublishTimeout;
+
+    /// <summary>Source-generated warning: the publish lock was not free within the bound (W2's degraded path).</summary>
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "The overlay publish lock for exercise {ExerciseId} was not free within {TimeoutMs} ms; the overlay " +
+                  "store was written WITHOUT it and this push was skipped — participants see the change on their next re-read.")]
+    private partial void LogPublishLockTimedOut(Guid exerciseId, double timeoutMs);
+
+    /// <summary>Source-generated warning: the composed read or hub send exceeded the bound (W2).</summary>
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "The participant overlay push for exercise {ExerciseId} did not complete within {TimeoutMs} ms and was " +
+                  "abandoned; the tier, its clock effect and the overlay store STAND.")]
+    private partial void LogOverlayPushTimedOut(Guid exerciseId, double timeoutMs);
 
     /// <summary>Source-generated warning for an unscoped publish (CA1848: no per-call allocation).</summary>
     [LoggerMessage(

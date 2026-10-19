@@ -239,6 +239,12 @@ public sealed class OverlayStateService
     }
 
     /// <summary>
+    /// The bound both overlay pushers put on a publish (PR #651 review W2): 5 s. The lock is held across a hub fan-out
+    /// and database reads, so no holder may keep it — or a request waiting on it — indefinitely.
+    /// </summary>
+    public static TimeSpan DefaultPublishTimeout { get; } = TimeSpan.FromSeconds(5);
+
+    /// <summary>
     /// Acquires this exercise's PUBLISH lock (#390 Gate-1 WR-001). Every participant-overlay pusher —
     /// <see cref="PauseOverlayPublisher"/> and <see cref="LifecycleOverlayPublisher"/> — holds it across its WHOLE
     /// ticket → read/<see cref="Apply"/>/project → send sequence, so per exercise the pushes go out in ticket order and
@@ -256,7 +262,12 @@ public sealed class OverlayStateService
     /// taken while held (no publisher calls another publisher, and nothing a publisher awaits under it — the tier
     /// read, the lifecycle-status read, the projection, the hub send — publishes), and is released by disposing the
     /// returned handle, which every caller does with <c>using</c>, so an exception also releases it. Disposing the
-    /// handle twice releases once.
+    /// handle twice releases once. Both pushers also BOUND their hold (<see cref="DefaultPublishTimeout"/>), so a stuck
+    /// transport delays the next publish for that one exercise by at most the bound.
+    /// </para>
+    /// <para>
+    /// <b>In-process only.</b> Correct for a single app instance; a scale-out needs a distributed lock or backplane
+    /// ordering (see <see cref="LifecycleOverlayPublisher"/>).
     /// </para>
     /// </remarks>
     /// <param name="exerciseId">The exercise whose publishes are serialized; never <see cref="Guid.Empty"/>.</param>
