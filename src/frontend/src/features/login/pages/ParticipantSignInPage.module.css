@@ -116,6 +116,13 @@
   box-shadow: 0 1px 3px rgba(15, 32, 51, 0.18), inset 0 -3px 0 #2b5f75;
 }
 
+/* Home-screen app (#606): FOUR methods do not fit one row in the 400 px card
+   without breaking words ("Passwo-rd"), so they always sit in a 2 x 2 grid. */
+.toggleGroupFour {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
+
 .toggleButton:focus-visible {
   outline: 2px solid #2b5f75;
   outline-offset: 2px;
@@ -166,6 +173,15 @@
   font: inherit;
   /* 16 px: below this iOS Safari zooms the page when the field is focused. */
   font-size: 16px;
+}
+
+/* Helper line under the pasted-link field (#606). #4a5b68 on the white card is
+   the status line's colour (>= 4.5:1). */
+.hint {
+  margin: 0;
+  color: #4a5b68;
+  font-size: 14px;
+  line-height: 1.4;
 }
 
 .input:focus-visible {

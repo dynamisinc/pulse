@@ -181,6 +181,7 @@ import {
   ReviewQueue,
   UsagePanel,
   useEngineControl,
+  useEngineSettings,
   useReviewQueue,
   useSwampedMode,
   type DelayedAutoCountdown,
@@ -379,6 +380,9 @@ export function ControllerConsole(
   // all agree by construction (D5-014/2.1 counts-consistency).
   const { items } = useReviewQueue()
   const { swampedMode } = useSwampedMode()
+  // Hold-on-cut (ADP-042): while cut to Fake the server holds expiries, so the
+  // browser drivers must hold too (no phantom auto-send telemetry).
+  const providerCutToFake = useEngineSettings().settings?.providerCutToFake ?? false
   const engineControl = useEngineControl()
   const draftTimerCtx = useMemo(
     () => ({ exerciseId, timeZone, actingHumanId: identity.actingHumanId }),
@@ -813,6 +817,7 @@ export function ControllerConsole(
             countdown={item.countdown}
             swampedMode={swampedMode}
             effective={engineControl.effective}
+            providerCutToFake={providerCutToFake}
             ctx={draftTimerCtx}
           />
         ))}

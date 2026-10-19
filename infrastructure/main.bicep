@@ -65,6 +65,9 @@ param generationNoTrainingAttested bool = false
 @description('TIER-2 GOVERNANCE FLAG (ambient-chatter story 01, AC0): authorises autonomous ambient posting (engine posts that publish with no controller click, inside a controller-set tier policy). Maps to Generation__Governance__AmbientAutonomyAuthorized. False by default and must stay false until PROVIDER-GOVERNANCE.md §8 carries a second signed amendment naming autonomous ambient posting; the signer sets it in the same reviewed commit as that amendment. While false the settings API rejects ambient mode \'autonomous\' with 400 (\'off\' and \'review\' stay allowed).')
 param generationAmbientAutonomyAuthorized bool = false
 
+@description('TIER-2 GOVERNANCE FLAG (PROVIDER-GOVERNANCE §8, Phase 1): authorises timeout auto-send — swamped mode, the only path by which a Delayed-auto draft publishes on countdown expiry with no controller click. Maps to Generation__Governance__TimeoutAutoSendAuthorized. False by default and must stay false until the lead-controller gate (A1c) is on main; it is set true in a separate reviewed commit after that. While false the swamped-mode API refuses ON with 400 (OFF stays allowed) and an expired countdown always holds for a human.')
+param generationTimeoutAutoSendAuthorized bool = false
+
 @description('Deploy the provider alert rules (engine-telemetry-tuning/04): an email action group + scheduled log-query rules over App Insights for generation errors/breaker, latency (5 s p95 warning / share of attempts timing out at the 10 s trip) and a call-volume spend proxy. Read-only over existing telemetry. OFF by default; requires deployMonitoring AND deployAi (the deploy fails otherwise) and a non-empty alertOwnerEmail.')
 param deployProviderAlerts bool = false
 
@@ -444,6 +447,8 @@ module webApp 'modules/webapp.bicep' = if (deployWebApp) {
     // Not gated on deployAi: it authorises a POSTURE (autonomous ambient), whatever provider serves it, and it is
     // false unless the §8 signer sets it.
     generationAmbientAutonomyAuthorized: generationAmbientAutonomyAuthorized
+    // Not gated on deployAi either: it authorises a POSTURE (unreviewed timeout publishes), whatever provider serves it.
+    generationTimeoutAutoSendAuthorized: generationTimeoutAutoSendAuthorized
     tags: tags
   }
 }

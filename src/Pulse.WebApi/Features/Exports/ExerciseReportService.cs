@@ -327,6 +327,11 @@ public sealed partial class ExerciseReportService
                 PreparedAt = FormatAt(now, zone),
                 LatestDay = LatestDay(posts, zone),
                 SpansMultipleDays = SpansMultipleDays(scoped, listed, injects.RespondedAt, zone),
+                ScenarioNow = ExerciseReportBuilder.ScenarioNow(
+                        _exerciseClock?.CurrentScenarioTime(exerciseId) ?? facts.StoredScenarioTime,
+                        posts.Count == 0 ? null : posts.Max(post => post.CreatedScenarioTime)) is { } scenarioNow
+                    ? FormatAt(scenarioNow, zone)
+                    : null,
             },
             Summary = new ReportSummaryDto
             {

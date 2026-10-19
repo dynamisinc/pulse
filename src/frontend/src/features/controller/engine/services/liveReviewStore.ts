@@ -52,6 +52,42 @@
  * the subscription down and clears the snapshot (test-only, prevents
  * cross-test pollution / duplicate `HubConnection` builds).
  *
+ * REFRESH DISCIPLINE (one GET at a time, never stale over a push). Three rules:
+ *  1. COALESCING. `refetch()` while a GET is in flight returns that SAME promise - never a second
+ *     request. Any number of callers (reconnect, driver nudges, the scheduler) share one GET.
+ *  2. STALE-RESPONSE GUARD. A monotonic `version` is bumped on every applied SignalR push and
+ *     every local mutation (`removeItemOptimistically`). A GET records `version` when it starts;
+ *     if it moved by the time the response lands, the response may predate a push (it could erase
+ *     a newly queued draft or resurrect a published one as CountingDown), so it is DISCARDED and
+ *     a fresh GET is issued (bounded retries; the pushes already applied remain the truth if
+ *     we give up). Chosen over per-item merging because it is simplest and always correct: the
+ *     replacement GET starts after the push, so the server's answer includes it. A GET is also
+ *     discarded if a newer-started GET has already committed (`committedSeq`).
+ *     INVALIDATION (trailing refresh). Coalescing alone would swallow a "server state may have
+ *     changed WITHOUT a push" signal: a hub Connected/Reconnected that lands while the initial GET
+ *     is pending would share that GET, which may predate a draft created before the hub joined
+ *     (no push is ever delivered for it, so `version` is unchanged and the stale response would
+ *     commit). So `refetch({ invalidate: true })` - used by the hub-connect trigger - sets a
+ *     one-shot `trailingRequested` flag when a GET is in flight; when that GET cycle ends exactly
+ *     ONE more GET runs (any number of invalidations while pending collapse into that one).
+ *     Plain `refetch()` (expiry nudges, drivers) still just shares the in-flight GET. Chosen over
+ *     a separate invalidation counter in the commit check because the flag needs no change to
+ *     the stale guard and the returned promise resolves only after the trailing GET.
+ *  2b. RECONCILIATION AFTER EXHAUSTED RETRIES. If every bounded immediate retry is discarded
+ *     (pushes kept landing), the pushes applied locally stand, but items that exist only on the
+ *     server (e.g. a Suggest draft created before load) would stay hidden: pushes do not trigger
+ *     GETs and Suggest drafts have no expiry poller. So exhaustion schedules a backed-off
+ *     reconciliation GET (2 s -> 5 s -> 15 s, capped at 15 s), repeated until a GET commits.
+ *     Chosen over per-item merging: a merge cannot tell "absent from the response because stale"
+ *     from "absent because resolved" without per-item versions, whereas a committed wholesale GET
+ *     is always correct. The timer is cleared on commit, session reset and `resetForTests`.
+ *  3. ONE EXPIRY SCHEDULER. Live draft timers are display-only, so when a countdown reaches 0 the
+ *     server's verdict must be pulled. `requestExpiryRefresh()` (idempotent; the per-item
+ *     `DraftTimerDriver`s call it) starts a SINGLE queue-level poller that runs while ANY
+ *     CountingDown item is past its deadline (scenario clock), at most one GET per 3 s, and stops
+ *     when none remain. If the same expired set persists (e.g. FullStop leaves countdowns
+ *     unresolved) the interval backs off 3 s -> 10 s -> 30 s (cap), one step per 5 polls.
+ *
  * THE SESSION ENDS (COR-001). This singleton lives as long as the TAB, but its snapshot, its
  * GET and its hub connection all belong to ONE staff identity (and one exercise). So it
  * registers a reset with `core/auth/sessionReset`, which `resetClientSession()` runs on
@@ -68,6 +104,7 @@
  */
 
 import { api } from '@/core/services/api'
+import { scenarioNow } from '@/core/clock'
 import { getAccessToken } from '@/core/auth/tokenStore'
 import { registerSessionReset } from '@/core/auth/sessionReset'
 import { HubConnectionState, realtimeConnection } from '@/core/realtime/connection'
@@ -78,6 +115,7 @@ import {
   DelayedAutoCountdown,
   DraftDisposition,
   EngineReviewItem,
+  scenarioMinuteOf,
   type GeneratedPost,
 } from '../models/reviewContracts'
 
@@ -251,23 +289,166 @@ function subscribe(listener: () => void): () => void {
   }
 }
 
+/** Monotonic; bumped on every applied push and local mutation (see "REFRESH DISCIPLINE"). */
+let version = 0
+/** Sequence numbers of GETs started / last committed, so an older GET never overwrites a newer. */
+let getSeq = 0
+let committedSeq = 0
+/** The single in-flight GET, shared by every concurrent `refetch()` caller. */
+let inFlight: Promise<void> | null = null
+/** Stale-discard retries allowed per refetch call before giving up. */
+const MAX_STALE_RETRIES = 2
+/** One-shot: an invalidating refetch arrived while a GET was in flight; run one more after it. */
+let trailingRequested = false
+/** Backed-off reconciliation after exhausted stale retries (see "REFRESH DISCIPLINE" 2b). */
+const RECONCILE_DELAYS_MS = [2000, 5000, 15_000] as const
+let reconcileTimer: ReturnType<typeof setTimeout> | null = null
+let reconcileAttempts = 0
+
+function clearReconcile(): void {
+  if (reconcileTimer !== null) clearTimeout(reconcileTimer)
+  reconcileTimer = null
+  reconcileAttempts = 0
+}
+
+function scheduleReconcile(): void {
+  if (reconcileTimer !== null) return
+  const delay = RECONCILE_DELAYS_MS[Math.min(reconcileAttempts, RECONCILE_DELAYS_MS.length - 1)]
+  reconcileAttempts += 1
+  reconcileTimer = setTimeout(() => {
+    reconcileTimer = null
+    void refetch()
+  }, delay)
+}
+
+interface RefetchOptions {
+  /** Server state may have changed without a push: guarantee a GET that STARTS after this call. */
+  readonly invalidate?: boolean
+}
+
+/** Expiry scheduler tuning: base interval, then backoff steps after STEP_POLLS unchanged polls. */
+const EXPIRY_POLL_INTERVALS_MS = [3000, 10_000, 30_000] as const
+const EXPIRY_POLLS_PER_STEP = 5
+let expiryTimer: ReturnType<typeof setTimeout> | null = null
+let expiryRunning = false
+let expirySignature = ''
+let expiryUnchangedPolls = 0
+
 /**
- * Refetches the queue from the server and replaces the snapshot wholesale.
+ * Refetches the queue from the server and replaces the snapshot wholesale - COALESCED (a call
+ * while a GET is in flight returns that GET's promise) and STALE-GUARDED (see the module header).
  * Fails closed (COR-001) on a request error or a malformed body by leaving the
- * PREVIOUS snapshot in place — never substitutes an empty/default queue.
+ * PREVIOUS snapshot in place - never substitutes an empty/default queue.
  */
-async function refetch(): Promise<void> {
+function refetch(options: RefetchOptions = {}): Promise<void> {
+  if (inFlight !== null) {
+    if (options.invalidate === true) trailingRequested = true
+    return inFlight
+  }
+  const run: Promise<void> = runCycle().finally(() => {
+    if (inFlight === run) inFlight = null
+  })
+  inFlight = run
+  return run
+}
+
+/** One GET (with bounded stale retries) plus at most one trailing GET per invalidation burst. */
+async function runCycle(): Promise<void> {
   const issuedInEpoch = epoch
+  trailingRequested = false
+  let outcome = await runGet(MAX_STALE_RETRIES)
+  while (trailingRequested && issuedInEpoch === epoch) {
+    trailingRequested = false
+    outcome = await runGet(MAX_STALE_RETRIES)
+  }
+  if (outcome === 'exhausted' && issuedInEpoch === epoch) scheduleReconcile()
+}
+
+type GetOutcome = 'committed' | 'exhausted' | 'other'
+
+async function runGet(staleRetriesLeft: number): Promise<GetOutcome> {
+  const issuedInEpoch = epoch
+  const startedAtVersion = version
+  getSeq += 1
+  const seq = getSeq
   try {
     const response = await api.get<unknown>(REVIEW_QUEUE_PATH)
-    if (issuedInEpoch !== epoch) return // for an identity that has since ended
-    if (!isWireReviewItemArray(response.data)) return
+    if (issuedInEpoch !== epoch) return 'other' // for an identity that has since ended
+    if (seq < committedSeq) return 'other' // a newer GET already committed
+    if (!isWireReviewItemArray(response.data)) return 'other'
+    if (version !== startedAtVersion) {
+      // A push / local mutation landed while this GET was pending: it may predate it. Discard,
+      // then issue a fresh GET (it starts after the push, so it reflects it).
+      if (staleRetriesLeft > 0) return await runGet(staleRetriesLeft - 1)
+      return 'exhausted'
+    }
+    committedSeq = seq
+    clearReconcile()
     items = response.data.map(toEngineReviewItem)
     notify()
+    return 'committed'
   } catch {
-    // Transient failure (including the expected pre-scope 401) — keep the
+    // Transient failure (including the expected pre-scope 401) - keep the
     // previous snapshot; the next hub reconnect retries.
+    return 'other'
   }
+}
+
+// ---------------------------------------------------------------------------
+// The single expiry scheduler (see "REFRESH DISCIPLINE" rule 3)
+// ---------------------------------------------------------------------------
+
+/** The CountingDown items whose countdown is past its deadline right now (scenario clock). */
+function expiredCountingDownDraftIds(): string[] {
+  const minute = scenarioMinuteOf(scenarioNow().getTime())
+  return items
+    .filter(
+      item =>
+        item.disposition === DraftDisposition.CountingDown &&
+        item.countdown !== null &&
+        item.countdown.hasExpired(minute),
+    )
+    .map(item => item.draftId)
+    .sort()
+}
+
+function stopExpiryScheduler(): void {
+  if (expiryTimer !== null) clearTimeout(expiryTimer)
+  expiryTimer = null
+  expiryRunning = false
+  expirySignature = ''
+  expiryUnchangedPolls = 0
+}
+
+async function expiryTick(): Promise<void> {
+  expiryTimer = null
+  const issuedInEpoch = epoch
+  await refetch()
+  if (!expiryRunning || issuedInEpoch !== epoch) return
+  const expired = expiredCountingDownDraftIds()
+  if (expired.length === 0) {
+    stopExpiryScheduler()
+    return
+  }
+  const signature = expired.join('|')
+  expiryUnchangedPolls = signature === expirySignature ? expiryUnchangedPolls + 1 : 0
+  expirySignature = signature
+  const step = Math.min(
+    Math.floor(expiryUnchangedPolls / EXPIRY_POLLS_PER_STEP),
+    EXPIRY_POLL_INTERVALS_MS.length - 1,
+  )
+  expiryTimer = setTimeout(() => void expiryTick(), EXPIRY_POLL_INTERVALS_MS[step])
+}
+
+/**
+ * Nudges the shared expiry scheduler: a countdown reached 0, so the server's verdict must be
+ * pulled. IDEMPOTENT - if the scheduler is already running this is a no-op, so N expired drafts
+ * (N drivers) produce one GET and one poll loop. Live mode only (the caller guards on that).
+ */
+function requestExpiryRefresh(): void {
+  if (expiryRunning) return
+  expiryRunning = true
+  void expiryTick()
 }
 
 /**
@@ -278,6 +459,7 @@ async function refetch(): Promise<void> {
 function reconcile(payload: unknown): void {
   if (!isWireReviewItem(payload)) return
   const item = toEngineReviewItem(payload)
+  version += 1
   const index = items.findIndex(existing => existing.draftId === item.draftId)
 
   if (isResolved(item.disposition)) {
@@ -305,6 +487,7 @@ function reconcile(payload: unknown): void {
  */
 function removeItemOptimistically(draftId: string): void {
   if (!items.some(item => item.draftId === draftId)) return
+  version += 1
   items = items.filter(item => item.draftId !== draftId)
   notify()
 }
@@ -321,7 +504,7 @@ function ensureStarted(connection: RealtimeConnection = realtimeConnection): voi
 
   unsubscribePush = connection.subscribe(REVIEW_ITEM_CHANGED_EVENT, payload => reconcile(payload))
   unsubscribeState = connection.onStateChange(state => {
-    if (state === HubConnectionState.Connected) void refetch()
+    if (state === HubConnectionState.Connected) void refetch({ invalidate: true })
   })
 
   void refetch()
@@ -350,6 +533,11 @@ function resetForSession(): void {
   const connection = attachedConnection
   detach()
   epoch += 1
+  version += 1
+  inFlight = null
+  trailingRequested = false
+  clearReconcile()
+  stopExpiryScheduler()
   if (items.length > 0) {
     items = []
     notify()
@@ -371,6 +559,13 @@ function resetForTests(): void {
   detach()
   attachedConnection = realtimeConnection
   epoch += 1
+  version += 1
+  inFlight = null
+  committedSeq = 0
+  getSeq = 0
+  trailingRequested = false
+  clearReconcile()
+  stopExpiryScheduler()
   items = []
   listeners.clear()
 }
@@ -381,6 +576,8 @@ export const liveReviewStore = {
   subscribe,
   ensureStarted,
   removeItemOptimistically,
+  refetch,
+  requestExpiryRefresh,
   resetForTests,
 }
 
