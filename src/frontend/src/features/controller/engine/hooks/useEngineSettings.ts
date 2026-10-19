@@ -176,7 +176,8 @@
  * telemetry hook, since the server records none (#618). Mock: instant local flip.
  *
  * **Queueing + background refresh (CR-001).** A swamped request made while another request
- * is in flight is queued (latest wins) and run from `settle`, so an OFF always lands.
+ * is in flight is queued (first wins: further swamped clicks are ignored while one is pending, and the
+ * control shows as unavailable then) and run from `settle`, so an OFF always lands.
  * `refreshInBackground()` (the console poll) is a GET that never sets `loading`, so no
  * control disables and the panel shows nothing new; it keeps the one in-flight slot.
  *
@@ -386,7 +387,8 @@ interface EngineSettingsInternal {
   /** Like `refetchQueued`, but the queued GET is a silent BACKGROUND refresh (no `loading`). */
   bgRefetchQueued: boolean
   /**
-   * A swamped-mode request made while another request was in flight. Latest wins; run from
+   * A swamped-mode request made while another request was in flight. First wins (a second click
+   * while one is pending is ignored; the control is unavailable then); run from
    * `settle` so an OFF always lands rather than silently no-opping (CR-001).
    */
   queuedSwamped: QueuedSwamped | null
@@ -1031,7 +1033,7 @@ function runSetAmbientPolicy(
  * same in-flight slot) GET settings and apply it. `onConfirmed(applied)` runs once after
  * the server confirms (POST 200; `applied` is the 200 body's `swampedMode`, or `null` if
  * unreadable), before the re-read — never on a refusal. If ANOTHER request is in flight the
- * change is QUEUED (latest wins) and run from `settle`, never silently dropped (CR-001).
+ * change is QUEUED (first wins; a click while one is pending is ignored) and run from `settle`, never silently dropped (CR-001).
  */
 function runSetSwampedMode(
   exerciseId: string,

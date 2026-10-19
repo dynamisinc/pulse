@@ -336,13 +336,17 @@ describe('SwampedModeToggle — Phase 1: timeout auto-send not authorized (PROVI
 })
 
 describe('SwampedModeToggle — server-driven pending + refusal', () => {
-  it('disables the switch while a request is pending', () => {
+  it('marks the switch unavailable while a request is pending, without native disabled (keeps focus, WR-101)', () => {
     const setSwampedMode = vi.fn()
     mockedUseSwampedMode.mockReturnValue(stub({ pending: true, setSwampedMode }))
     render(<SwampedModeToggle />)
 
     const toggle = screen.getByTestId('swamped-mode-enable-toggle')
-    expect(toggle).toBeDisabled()
+    toggle.focus()
+    expect(toggle).not.toBeDisabled()
+    expect(toggle).toHaveAttribute('aria-disabled', 'true')
+    expect(toggle).toHaveAttribute('aria-busy', 'true')
+    expect(toggle).toHaveFocus()
     fireEvent.click(toggle)
     expect(setSwampedMode).not.toHaveBeenCalled()
   })

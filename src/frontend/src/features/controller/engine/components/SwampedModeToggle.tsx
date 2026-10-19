@@ -117,7 +117,10 @@ export function SwampedModeToggle() {
           data-testid="swamped-mode-enable-toggle"
           role="switch"
           aria-checked={swampedMode}
-          disabled={onRefused || pending}
+          // WR-101: `pending` uses aria-disabled + a click guard, NOT native `disabled`, so the lead's own
+          // focused switch keeps keyboard focus while its request is in flight (native disabled drops focus).
+          disabled={onRefused}
+          aria-disabled={pending || undefined}
           aria-busy={pending}
           aria-describedby={
             [onRefused ? 'swamped-mode-not-authorized-note' : undefined, errorId]
@@ -129,7 +132,9 @@ export function SwampedModeToggle() {
               ? 'Swamped mode is on — turn off timeout auto-send'
               : 'Swamped mode is off — turn on timeout auto-send'
           }
-          onClick={() => setSwampedMode(!swampedMode)}
+          onClick={() => {
+            if (!pending) setSwampedMode(!swampedMode)
+          }}
           sx={{
             display: 'inline-flex',
             alignItems: 'center',
