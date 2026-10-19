@@ -5,23 +5,30 @@
  * `StaffAssignmentError` kept) so the panel is driven through its seam. Covers: list + lead
  * marker as text, grant from candidates, role change, remove and make-lead confirms (with the
  * swamped-mode and self-removal warnings), every 409/404 message, refetch after each mutation,
- * and that a non-assigning role gets nothing.
+ * that a non-assigning role gets nothing, and that a successful self-demote / self-remove on an
+ * exercise-bound session ends the (server-revoked) session and goes to sign-in.
  */
 import type { ReactNode } from 'react'
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { ThemeProvider } from '@mui/material/styles'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { cobraTheme } from '@/theme/cobraTheme'
 import { resetStubSession, setStubSession } from '@/core/auth/rolePermissions.testUtils'
 import { StaffPanel } from './StaffPanel'
 import * as service from '../services/staffAssignmentService'
+import { endSession } from '@/core/auth/endSession'
 import type { StaffRoster } from '../types/staff'
 
 vi.mock('@/core/auth/session', async importOriginal => ({
   ...(await importOriginal<typeof import('@/core/auth/session')>()),
   useOptionalSession: (await import('@/core/auth/rolePermissions.testUtils')).stubbedSession,
+}))
+vi.mock('@/core/auth/endSession', () => ({
+  endSession: vi.fn(() => Promise.resolve()),
+  resetClientSession: vi.fn(),
 }))
 vi.mock('@/core/exerciseContext', () => ({
   useOptionalExerciseContext: () => ({ exerciseId: 'ex-1' }),
@@ -62,7 +69,14 @@ function renderPanel() {
   })
   const Wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={queryClient}>
-      <ThemeProvider theme={cobraTheme}>{children}</ThemeProvider>
+      <ThemeProvider theme={cobraTheme}>
+        <MemoryRouter initialEntries={['/staff/plan/settings']}>
+          <Routes>
+            <Route path="/staff/plan/settings" element={children} />
+            <Route path="/login" element={<div data-testid="login-page" />} />
+          </Routes>
+        </MemoryRouter>
+      </ThemeProvider>
     </QueryClientProvider>
   )
   return render(<StaffPanel />, { wrapper: Wrapper })
@@ -173,6 +187,70 @@ describe('StaffPanel', () => {
     expect(svc.changeStaffRole).not.toHaveBeenCalled()
     await userEvent.click(within(dialog).getByRole('button', { name: 'Change role' }))
     await waitFor(() => expect(svc.changeStaffRole).toHaveBeenCalledWith('e1', 'evaluator'))
+  })
+
+  it('after a successful self-demote, ends the revoked session and goes to sign-in', async () => {
+    svc.changeStaffRole.mockResolvedValue()
+    renderPanel()
+    await screen.findByTestId('staff-row-e1')
+    await userEvent.selectOptions(screen.getByLabelText('Role for Pat Planner'), 'controller')
+    await userEvent.click(within(await screen.findByRole('alertdialog'))
+      .getByRole('button', { name: 'Change role' }))
+    expect(await screen.findByTestId('login-page')).toBeInTheDocument()
+    expect(vi.mocked(endSession)).toHaveBeenCalledTimes(1)
+    expect(svc.changeStaffRole).toHaveBeenCalledWith('e1', 'controller')
+    expect(screen.queryByTestId('staff-panel')).not.toBeInTheDocument()
+  })
+
+  it('after a successful self-remove, ends the revoked session and goes to sign-in', async () => {
+    svc.removeStaff.mockResolvedValue()
+    renderPanel()
+    await screen.findByTestId('staff-row-e1')
+    await userEvent.click(screen.getByRole('button', { name: 'Remove Pat Planner' }))
+    await userEvent.click(within(await screen.findByRole('alertdialog'))
+      .getByRole('button', { name: 'Remove' }))
+    expect(await screen.findByTestId('login-page')).toBeInTheDocument()
+    expect(vi.mocked(endSession)).toHaveBeenCalledTimes(1)
+    expect(svc.removeStaff).toHaveBeenCalledWith('e1')
+  })
+
+  it('a refused self-demote (last planner) keeps the session and explains', async () => {
+    svc.changeStaffRole.mockRejectedValue(new StaffAssignmentError('x', 409, 'last-planner'))
+    renderPanel()
+    await screen.findByTestId('staff-row-e1')
+    await userEvent.selectOptions(screen.getByLabelText('Role for Pat Planner'), 'evaluator')
+    await userEvent.click(within(await screen.findByRole('alertdialog'))
+      .getByRole('button', { name: 'Change role' }))
+    expect(await screen.findByTestId('staff-error'))
+      .toHaveTextContent('An exercise must keep at least one planner.')
+    expect(vi.mocked(endSession)).not.toHaveBeenCalled()
+    expect(screen.queryByTestId('login-page')).not.toBeInTheDocument()
+  })
+
+  it('removing someone else does not sign you out', async () => {
+    svc.removeStaff.mockResolvedValue()
+    renderPanel()
+    await screen.findByTestId('staff-row-e4')
+    await userEvent.click(screen.getByRole('button', { name: 'Remove Eve Eval' }))
+    await userEvent.click(within(await screen.findByRole('alertdialog'))
+      .getByRole('button', { name: 'Remove' }))
+    await waitFor(() => expect(svc.getStaffRoster).toHaveBeenCalledTimes(2))
+    expect(vi.mocked(endSession)).not.toHaveBeenCalled()
+    expect(screen.getByTestId('staff-panel')).toBeInTheDocument()
+  })
+
+  it('an org admin on an org-scope session removing their own row stays signed in', async () => {
+    // The server only revokes sessions minted on THAT exercise; an org-scope session is not one.
+    setStubSession({ role: 'orgAdmin' })
+    svc.removeStaff.mockResolvedValue()
+    renderPanel()
+    await screen.findByTestId('staff-row-e1')
+    await userEvent.click(screen.getByRole('button', { name: 'Remove Pat Planner' }))
+    await userEvent.click(within(await screen.findByRole('alertdialog'))
+      .getByRole('button', { name: 'Remove' }))
+    await waitFor(() => expect(svc.getStaffRoster).toHaveBeenCalledTimes(2))
+    expect(vi.mocked(endSession)).not.toHaveBeenCalled()
+    expect(screen.getByTestId('staff-panel')).toBeInTheDocument()
   })
 
   const CASES: ReadonlyArray<readonly [number, string | undefined, string]> = [

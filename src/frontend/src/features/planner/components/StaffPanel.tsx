@@ -14,12 +14,16 @@
  *  - Lead is shown as icon + the word "Lead", never colour alone (NFR-001).
  *  - Make lead warns that it turns swamped mode off (Phase 2 server behaviour, #642).
  *  - Removing or demoting YOURSELF warns you lose this exercise's staff role and are signed
- *    out of it (the server revokes the sessions).
+ *    out of it (the server revokes the sessions). On success, an exercise-bound session is then
+ *    ended through the shared sign-out path (`endSession()` + the login route), so the page never
+ *    sits on stale planner controls backed by a revoked token. An org-scope session is not
+ *    revoked by the server (it is not minted from the exercise grant), so it stays.
  *  - Failures show inline in a `role="alert"` block (icon + words) mapped by `staffErrors.ts`;
  *    409/404 also refetch. Every success refetches; nothing is optimistic.
  * The server is the authority (403s, last-planner, conflicts); this only hides what cannot work.
  */
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { Box, Stack, Typography } from '@mui/material'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import {
@@ -30,7 +34,8 @@ import {
   faUsers,
 } from '@fortawesome/free-solid-svg-icons'
 import CobraStyles from '@/theme/CobraStyles'
-import { useOptionalSession, usePermissions } from '@/core/auth'
+import { endSession, useOptionalSession, usePermissions } from '@/core/auth'
+import { LOGIN_PATH } from '@/features/app-shell/constants'
 import { useOptionalExerciseContext } from '@/core/exerciseContext'
 import { CobraLinkButton, CobraPrimaryButton, CobraTextField } from '@/theme/styledComponents'
 import { useStaffMutations, useStaffRoster } from '../hooks/useStaffAssignment'
@@ -91,7 +96,9 @@ export function StaffPanel() {
   // Optional on purpose: with no resolved exercise there is nothing to list (fails closed).
   const exerciseId = useOptionalExerciseContext()?.exerciseId ?? ''
   const { can } = usePermissions()
-  const myPersonId = useOptionalSession()?.personId ?? null
+  const session = useOptionalSession()
+  const myPersonId = session?.personId ?? null
+  const navigate = useNavigate()
   const roster = useStaffRoster(exerciseId)
   const m = useStaffMutations(exerciseId)
 
@@ -132,12 +139,20 @@ export function StaffPanel() {
   async function confirm() {
     if (pending === null) return
     const p = pending
-    await run(() => {
+    const ok = await run(() => {
       if (p.kind === 'lead') return m.makeLead.mutateAsync({ id: p.row.id })
       if (p.kind === 'demote') return m.changeRole.mutateAsync({ id: p.row.id, role: p.role })
       return m.remove.mutateAsync({ id: p.row.id })
     })
     setPending(null)
+    // A self-demote / self-remove revoked this exercise-bound session server-side (the
+    // grant-revoke rule): end it here and go to sign-in, exactly as the header's sign-out does,
+    // rather than leave planner controls on screen that the next call would 401.
+    const selfChange = p.kind === 'demote' || (p.kind === 'remove' && isSelf(p.row))
+    if (ok && selfChange && session?.scope === 'exercise') {
+      void endSession()
+      navigate(LOGIN_PATH)
+    }
   }
 
   async function onGrant() {
