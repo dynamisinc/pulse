@@ -28,6 +28,9 @@
  * not a role gate) with a text + icon note it is described by. Turning an
  * already-on switch OFF is never blocked.
  *
+ * SERVER-DRIVEN. The switch reflects the server's state; while a request is in flight
+ * (`pending`) it is disabled, and a 400/403 refusal shows inline (`error`).
+ *
  * The hook backing this (`useSwampedMode`) does all of the gating/telemetry —
  * this component only renders its state and calls its setter.
  */
@@ -50,7 +53,7 @@ import { consoleChrome as chrome } from '../../consoleChrome'
 import { useCanControl } from '../../access'
 
 export function SwampedModeToggle() {
-  const { swampedMode, isLead, setSwampedMode } = useSwampedMode()
+  const { swampedMode, isLead, setSwampedMode, pending, error } = useSwampedMode()
   const canControl = useCanControl()
   const [confirmingOff, setConfirmingOff] = useState(false)
   // WR-004: keyboard focus follows the OFF-only confirm step. Confirm is focused on open;
@@ -102,7 +105,8 @@ export function SwampedModeToggle() {
           data-testid="swamped-mode-enable-toggle"
           role="switch"
           aria-checked={swampedMode}
-          disabled={onRefused}
+          disabled={onRefused || pending}
+          aria-busy={pending}
           aria-describedby={onRefused ? 'swamped-mode-not-authorized-note' : undefined}
           aria-label={
             swampedMode
@@ -138,6 +142,21 @@ export function SwampedModeToggle() {
         </Box>
       )}
 
+      {/* A server refusal (400 governance / 403 lead gate): text + icon, never colour alone. */}
+      {canControl && error && (
+        <Stack
+          direction="row"
+          role="status"
+          data-testid="swamped-mode-error"
+          sx={{ alignItems: 'center', gap: 0.75 }}
+        >
+          <FontAwesomeIcon icon={faTriangleExclamation} color={chrome.amber} aria-hidden="true" />
+          <Typography component="span" sx={{ fontSize: 10.5, color: chrome.ink }}>
+            {error}
+          </Typography>
+        </Stack>
+      )}
+
       {canControl && isLead && onRefused && (
         <Stack
           direction="row"
@@ -147,7 +166,7 @@ export function SwampedModeToggle() {
         >
           <FontAwesomeIcon icon={faCircleInfo} color={chrome.inkMuted} aria-hidden="true" />
           <Typography component="span" sx={{ fontSize: 10.5, color: chrome.inkMuted }}>
-            Timeout auto-send is off until the lead-controller role ships.
+            Timeout auto-send is not authorized on this environment.
           </Typography>
         </Stack>
       )}
@@ -205,6 +224,7 @@ export function SwampedModeToggle() {
                 size="small"
                 startIcon={<FontAwesomeIcon icon={faPowerOff} aria-hidden="true" />}
                 data-testid="swamped-mode-turn-off-confirm"
+                disabled={pending}
                 ref={confirmRef}
                 onClick={() => {
                   restoreTriggerFocus.current = true

@@ -22,81 +22,53 @@
  * `!isLead`. Disabling is not gated (there is nothing unsafe about a
  * controller turning auto-send back OFF).
  *
- * PER-EXERCISE SCOPE (COR-001). State lives in a small module-singleton store
- * KEYED BY `exerciseId` (mirrors `reviewStore`'s singleton shape:
- * `subscribe`/`resetForTests`), so a remount under a different exercise reads
- * a different flag and no exercise's swamped state can leak into another's.
+ * SERVER-DRIVEN (PROVIDER-GOVERNANCE §8). The flag is read from the engine settings
+ * (`settings.autonomy.swampedMode`; off while unknown) and changed ONLY through
+ * `useEngineSettings.setSwampedMode` — a serialized, non-optimistic POST followed by
+ * a settings re-read. `pending`/`error` expose the in-flight and refusal states.
+ *
+ * PER-EXERCISE SCOPE (COR-001). The settings store is KEYED BY `exerciseId`, so a
+ * remount under a different exercise reads a different flag; no client exerciseId
+ * is sent (the server scopes by session).
  *
  * OUTPUT CONTRACT. The `swampedMode` boolean this hook returns is exactly the
  * value story 02's `useDraftTimer` consumes as an INPUT PARAMETER (wired at
  * integration) — this file has no import of, and no dependency on, that hook
  * (file-disjoint parallel build, implementation.md).
  *
- * TELEMETRY (ADP-041/§11, XC-004). Every actual enable/disable (a value that
- * changes, and — for enabling — passes the lead gate) emits ONE telemetry
+ * TELEMETRY (ADP-041/§11, XC-004). The server records none (#618), so every
+ * enable/disable the SERVER CONFIRMS (200; never a refusal) emits ONE telemetry
  * event via the caller-safe `buildAndEmit`: `channel: 'system'`, `actor {
  * kind: 'engine', actingHumanId }` (the toggling controller), `eventType`
  * `'engine.swamped_mode_changed'` (an open string — no envelope migration),
  * carrying scenario time (COR-053) and the resulting state in `payload`.
  */
 
-import { useCallback, useSyncExternalStore } from 'react'
+import { useCallback } from 'react'
 import { scenarioNow } from '@/core/clock'
 import { useExerciseContext } from '@/core/exerciseContext'
 import { buildAndEmit } from '@/core/telemetry'
 import { wallClockNowIso } from '@/core/time/wallClock'
 import { usePermissions, useOptionalSession } from '@/core/auth'
 import { useControllerIdentity } from '../../identity/controllerIdentity'
+import { engineSettingsStore, useEngineSettings } from './useEngineSettings'
 
 // ---------------------------------------------------------------------------
-// The per-exercise module-singleton store (mirrors `reviewStore`'s shape)
+// The store — a read-only VIEW over the engine-settings store (server truth)
 // ---------------------------------------------------------------------------
 
-/** `exerciseId -> swampedMode`. Absent = off (the safety default). */
-const swampedModeByExercise = new Map<string, boolean>()
-
-/** Active change listeners; notified on every mutation. */
-const listeners = new Set<() => void>()
-
-function notify(): void {
-  for (const listener of listeners) listener()
-}
-
-/** The current swamped-mode flag for `exerciseId` — off (`false`) if unset. */
-function getSnapshot(exerciseId: string): boolean {
-  return swampedModeByExercise.get(exerciseId) ?? false
-}
-
-/** Subscribes to store changes; returns an unsubscribe function. */
-function subscribe(listener: () => void): () => void {
-  listeners.add(listener)
-  return () => {
-    listeners.delete(listener)
-  }
-}
-
 /**
- * Sets the flag for `exerciseId` and notifies subscribers. Internal — the gate
- * (lead-only enable) and the telemetry emit live in `useSwampedMode`'s
- * `setSwampedMode`, not here, so this stays a plain, unguarded store write.
+ * Swamped mode no longer has its own browser-local state: it is the SERVER's
+ * `settings.autonomy.swampedMode`, held per exercise by `useEngineSettings`'s store.
+ * This view keeps the old test/diagnostic seam (`getSnapshot`/`subscribe`/
+ * `resetForTests`) and reads off when settings are unknown (the safe default).
  */
-function setFor(exerciseId: string, value: boolean): void {
-  if (getSnapshot(exerciseId) === value) return
-  swampedModeByExercise.set(exerciseId, value)
-  notify()
+export const swampedModeStore = {
+  getSnapshot: (exerciseId: string): boolean =>
+    engineSettingsStore.getSnapshot(exerciseId).settings?.autonomy.swampedMode ?? false,
+  subscribe: engineSettingsStore.subscribe,
+  resetForTests: engineSettingsStore.resetForTests,
 }
-
-/**
- * Clears every exercise's flag and all listeners. Test-only — prevents
- * cross-test pollution (mirrors `reviewStore.resetForTests`).
- */
-function resetForTests(): void {
-  swampedModeByExercise.clear()
-  listeners.clear()
-}
-
-/** The module-singleton swamped-mode store. Exposed for test-only reset. */
-export const swampedModeStore = { getSnapshot, subscribe, resetForTests }
 
 // ---------------------------------------------------------------------------
 // The hook
@@ -114,6 +86,10 @@ export interface UseSwampedModeResult {
    * change (including disable) logs a telemetry event (ADP-041).
    */
   readonly setSwampedMode: (next: boolean) => void
+  /** Any settings request (incl. this one's POST + re-read) is in flight — disable the control. */
+  readonly pending: boolean
+  /** The last server refusal/failure message (400/403/...), or `null`. */
+  readonly error: string | null
 }
 
 /**
@@ -130,38 +106,47 @@ export function useSwampedMode(): UseSwampedModeResult {
   const isLead = can('raiseAutonomy')
   const { exerciseId, timeZone } = useExerciseContext()
 
-  const swampedMode = useSyncExternalStore(subscribe, () => getSnapshot(exerciseId))
+  const engine = useEngineSettings()
+  const { settings, swampedError, setSwampedMode: requestSwampedMode } = engine
+  // Serialized store: the control is unavailable while ANY settings request is in flight.
+  const pending =
+    engine.pendingSwampedMode ||
+    engine.loading ||
+    engine.pendingAutonomyDefault ||
+    engine.pendingTierPolicy ||
+    engine.pendingProviderLever ||
+    engine.pendingAmbientPolicy
+  // Unknown (settings not loaded) is OFF — the safe default.
+  const swampedMode = settings?.autonomy.swampedMode ?? false
 
   const setSwampedMode = useCallback(
     (next: boolean) => {
-      // The sole safety gate (ADP-040): a non-lead can never ENABLE swamped
-      // mode. Rejected silently to the caller — no state change, no telemetry.
+      // The sole client-side safety gate (ADP-040): a non-lead can never ENABLE swamped
+      // mode — no request is sent. (The server enforces it too.)
       if (next && !isLead) {
         return
       }
-
-      const current = getSnapshot(exerciseId)
-      if (current === next) {
+      if (swampedMode === next) {
         return
       }
 
-      setFor(exerciseId, next)
-
-      buildAndEmit({
-        exerciseId,
-        eventType: 'engine.swamped_mode_changed',
-        channel: 'system',
-        actor: { kind: 'engine', actingHumanId },
-        origin: 'engine',
-        wallClockTime: wallClockNowIso(),
-        scenarioTime: scenarioNow().toISOString(),
-        timeZone,
-        target: { entityType: 'exercise', entityId: exerciseId },
-        payload: { action: next ? 'swamped-mode-enabled' : 'swamped-mode-disabled' },
-      })
+      requestSwampedMode(next, actingHumanId, () =>
+        buildAndEmit({
+          exerciseId,
+          eventType: 'engine.swamped_mode_changed',
+          channel: 'system',
+          actor: { kind: 'engine', actingHumanId },
+          origin: 'engine',
+          wallClockTime: wallClockNowIso(),
+          scenarioTime: scenarioNow().toISOString(),
+          timeZone,
+          target: { entityType: 'exercise', entityId: exerciseId },
+          payload: { action: next ? 'swamped-mode-enabled' : 'swamped-mode-disabled' },
+        }),
+      )
     },
-    [exerciseId, timeZone, isLead, actingHumanId],
+    [exerciseId, timeZone, isLead, actingHumanId, swampedMode, requestSwampedMode],
   )
 
-  return { swampedMode, isLead, setSwampedMode }
+  return { swampedMode, isLead, setSwampedMode, pending, error: swampedError }
 }

@@ -22,7 +22,10 @@
  *   POST /api/engine/generation-provider/restore          { actingHumanId, timeZone? }
  *                                                        -> 200 EngineSettingsDto | 400 | 401 | 403
  *
- * ALL FIVE calls return the IDENTICAL `EngineSettingsDto` body on success —
+ *   POST /api/engine/autonomy/swamped-mode               { actingHumanId, enabled }
+ *                                                        -> 200 autonomy DTO, not settings | 400 | 401 | 403
+ *
+ * The FIVE settings-shaped calls above return the IDENTICAL `EngineSettingsDto` body on success —
  * one TS type, one parse function, no follow-up GET after a mutation; the
  * caller reconciles straight from the response.
  *
@@ -299,6 +302,9 @@ const CUT_TO_FAKE_PATH = '/engine/generation-provider/cut-to-fake'
 /** `POST /api/engine/generation-provider/restore` (story 07). */
 const PROVIDER_RESTORE_PATH = '/engine/generation-provider/restore'
 
+/** `POST /api/engine/autonomy/swamped-mode` (PROVIDER-GOVERNANCE §8). */
+const SWAMPED_MODE_PATH = '/engine/autonomy/swamped-mode'
+
 /** Reads the current settings snapshot. Open to any assigned staff (story 05 AC6). */
 export async function getSettings(): Promise<EngineSettingsDto> {
   const response = await api.get<unknown>(SETTINGS_PATH)
@@ -403,6 +409,19 @@ export async function restoreGenerationProvider(
   return parseSettings(response.data)
 }
 
+/**
+ * Turns swamped mode (timeout auto-send) on/off. The 200 body is an autonomy-state
+ * DTO, NOT an `EngineSettingsDto`, so it is deliberately discarded: the caller
+ * re-reads `GET /engine/settings` for the authoritative state. No client
+ * `exerciseId` (COR-001). ON is lead-only (403) and governance-gated (400).
+ */
+export async function setSwampedMode(
+  enabled: boolean,
+  ctx: Pick<EngineSettingsActionContext, 'actingHumanId'>,
+): Promise<void> {
+  await api.post<unknown>(SWAMPED_MODE_PATH, { actingHumanId: ctx.actingHumanId, enabled })
+}
+
 // ---------------------------------------------------------------------------
 // Error description — the presentation policy for the three failure shapes
 // ---------------------------------------------------------------------------
@@ -452,6 +471,29 @@ export function describeSettingsError(error: unknown): EngineSettingsActionError
   }
 
   return { status: null, message: 'The engine settings change could not be applied. Try again.' }
+}
+
+/**
+ * Describes a rejected swamped-mode change. A 400 body (governance flag false, or
+ * missing fields) is surfaced verbatim; a 403 is the lead gate refusing a raise;
+ * everything else reuses {@link describeSettingsError}'s wording for 401/generic.
+ */
+export function describeSwampedModeError(error: unknown): EngineSettingsActionError {
+  if (axios.isAxiosError(error) && error.response?.status === 403) {
+    return { status: 403, message: `${LEAD_ONLY_RAISE_REASON}. Swamped mode was not changed.` }
+  }
+  if (axios.isAxiosError(error) && error.response?.status === 400) {
+    const body: unknown = error.response.data
+    const text = typeof body === 'string' ? body.trim() : ''
+    return {
+      status: 400,
+      message: text.length > 0 ? text : 'The server refused this swamped-mode change.',
+    }
+  }
+  const described = describeSettingsError(error)
+  return described.status === null
+    ? { status: null, message: 'Swamped mode could not be changed. Try again.' }
+    : described
 }
 
 /**
