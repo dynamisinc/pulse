@@ -80,7 +80,8 @@ public sealed class EngineAmbientGovernanceOptions
 /// <para>
 /// <b>Process memory, by design, and fail-safe.</b> Only non-resting policies are stored; an exercise with no entry
 /// reads <see cref="AmbientTierPolicy.Off"/>. A restart therefore resets every exercise to <c>off</c> — no ambient
-/// content until a controller turns it back on (persistence is wave C3, after Session A's A1 schema).
+/// content until a controller turns it back on — unless the engine-runtime story 07 rehydrator re-installs the
+/// persisted policy through <see cref="InstallPersisted"/> (which never re-arms <c>autonomous</c>, decision Q1).
 /// </para>
 /// <para>
 /// <b>Only a human raises it (§8.2).</b> <see cref="TrySet"/> is called only by the controller-role settings POST;
@@ -216,6 +217,51 @@ public sealed class EngineAmbientPolicyRegistry
         return false;
     }
 
+    /// <summary>
+    /// STARTUP RESTORE ONLY (engine-runtime story 07): installs an exercise's persisted policy as a FRESH slot through
+    /// the registry's own compare-and-set primitive, under the fail-closed rule of decision Q1. <see cref="AmbientPolicyMode.Off"/>
+    /// and <see cref="AmbientPolicyMode.Review"/> (drafts for a human) are installed as persisted;
+    /// <see cref="AmbientPolicyMode.Autonomous"/> (posts without a human) is a raise and is installed as
+    /// <see cref="AmbientPolicyMode.Off"/> with its caps and allow-lists kept — the same lowering
+    /// <see cref="DemoteAutonomous"/> applies — and the persisted policy is handed back as the held "previous" for a
+    /// later, controller-confirmed restore through <see cref="TrySet"/> (and so through every raise check).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>CAS semantics unchanged (story 07 "CAS semantics are unchanged").</b> The install is a <c>TryAdd</c> of a new
+    /// <c>Slot</c> — the same primitive <see cref="TrySet"/> uses from the resting <see cref="AmbientTierPolicy.Off"/> — so
+    /// it is mutually atomic with <see cref="TrySet"/>, <see cref="Set"/> and <see cref="DemoteAutonomous"/>. The installed
+    /// instance is exactly what <see cref="Get"/> then returns, so <c>TrySet(expected: Get(id), …)</c> accepts it.
+    /// </para>
+    /// <para>
+    /// <b>The in-memory slot stays the authority; the row is a follower.</b> If any writer stored a policy for the
+    /// exercise before the load reached it, that live policy is newer and is kept: nothing is installed and
+    /// <see cref="AmbientPolicyInstallResult.Installed"/> is <c>false</c>. A persisted row can therefore never
+    /// overwrite — or resurrect — a policy a controller or the engine just set.
+    /// </para>
+    /// <para>Never raises: the only modes this can store are the persisted <c>Off</c>/<c>Review</c> or <c>Off</c>. No audit
+    /// event is emitted here; the rehydrator records the restore in its single <c>engine.state_restored</c> event.</para>
+    /// </remarks>
+    /// <param name="exerciseId">The exercise (COR-001); must not be empty.</param>
+    /// <param name="persisted">The policy read from the exercise's persisted row.</param>
+    /// <returns>Whether it was installed, the policy <see cref="Get"/> now returns, and any withheld Autonomous policy.</returns>
+    internal AmbientPolicyInstallResult InstallPersisted(Guid exerciseId, AmbientTierPolicy persisted)
+    {
+        EnsureScoped(exerciseId);
+        ArgumentNullException.ThrowIfNull(persisted);
+
+        var raise = persisted.Mode == AmbientPolicyMode.Autonomous;
+        var install = raise ? persisted with { Mode = AmbientPolicyMode.Off } : persisted;
+
+        if (_policies.TryAdd(exerciseId, new Slot(install)))
+        {
+            return new AmbientPolicyInstallResult(Installed: true, Current: install, HeldPrevious: raise ? persisted : null);
+        }
+
+        // A live policy is already stored: it is newer than the row, so the row loses (fail closed, no overwrite).
+        return new AmbientPolicyInstallResult(Installed: false, Current: Get(exerciseId), HeldPrevious: null);
+    }
+
     /// <summary>The exercise's global engine cap (ADP-011): its loop's <c>RateConfig</c>, or the default when it has no loop.</summary>
     /// <param name="exerciseId">The exercise.</param>
     /// <returns><see cref="RateGovernanceConfig.MaxEnginePostsPerMinute"/> for the exercise.</returns>
@@ -280,6 +326,15 @@ public sealed class EngineAmbientPolicyRegistry
         public AmbientTierPolicy Policy { get; } = policy;
     }
 }
+
+/// <summary>
+/// The outcome of <see cref="EngineAmbientPolicyRegistry.InstallPersisted"/> (engine-runtime story 07): whether the
+/// persisted policy was installed, the policy now in effect, and the withheld Autonomous policy (decision Q1).
+/// </summary>
+/// <param name="Installed"><c>true</c> when the persisted policy (or its Off demotion) was stored; <c>false</c> when a newer live policy was kept.</param>
+/// <param name="Current">The policy <see cref="EngineAmbientPolicyRegistry.Get"/> returns after the call — the instance <c>TrySet</c> compares against.</param>
+/// <param name="HeldPrevious">The persisted <see cref="AmbientPolicyMode.Autonomous"/> policy booted as Off, kept as "previous" for a human restore; otherwise <c>null</c>.</param>
+internal sealed record AmbientPolicyInstallResult(bool Installed, AmbientTierPolicy Current, AmbientTierPolicy? HeldPrevious);
 
 /// <summary>Serializes <see cref="AmbientPolicyMode"/> as <c>off</c> / <c>review</c> / <c>autonomous</c>.</summary>
 public sealed class AmbientPolicyModeJsonConverter : MappedEnumJsonConverter<AmbientPolicyMode>
