@@ -9,6 +9,7 @@ using FluentAssertions;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.Extensions.Logging.Abstractions;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Features.ExerciseConfiguration.Lifecycle;
 using Pulse.WebApi.Features.ExerciseLifecycleAdmin;
@@ -60,7 +61,12 @@ public sealed class ExerciseArchiveRaceTests
             var service = new ExerciseManagementService(
                 context,
                 new StaffCallerContext(context, staff, organization),
-                new ExerciseLifecycleService(context, new ExerciseContext(), staff));
+                new ExerciseLifecycleService(
+                    context,
+                    new ExerciseContext(),
+                    staff,
+                    new NoOpExerciseLifecycleTransitionObserver(),
+                    NullLogger<ExerciseLifecycleService>.Instance));
 
             var result = await service.ArchiveAsync(world.OwnExercise.Id);
 
