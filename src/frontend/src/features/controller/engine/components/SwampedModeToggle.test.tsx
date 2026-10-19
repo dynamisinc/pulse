@@ -256,7 +256,7 @@ describe('SwampedModeToggle — hold-on-cut qualifier (ADP-042)', () => {
   })
 })
 
-describe('SwampedModeToggle — Phase 1: timeout auto-send not authorized (PROVIDER-GOVERNANCE §8)', () => {
+describe('SwampedModeToggle — timeout auto-send not authorized (PROVIDER-GOVERNANCE §8)', () => {
   it('disables the ON control and describes it with a text + icon note', () => {
     stubSettings(false, false)
     const setSwampedMode = vi.fn()
@@ -420,7 +420,11 @@ describe('SwampedModeToggle — banner follows the inputs expiries really use (S
     over: {
       providerCutToFake?: boolean
       timeoutAutoSendAuthorized?: boolean
-      autonomy?: { generationStopped?: boolean; safetyClampActive?: boolean; degradedReason?: string | null }
+      autonomy?: {
+        generationStopped?: boolean
+        safetyClampActive?: boolean
+        degradedReason?: string | null
+      }
     },
   ): void {
     mockedUseEngineSettings.mockReturnValue({
@@ -428,7 +432,12 @@ describe('SwampedModeToggle — banner follows the inputs expiries really use (S
         providerCutToFake: false,
         timeoutAutoSendAuthorized: true,
         ...over,
-        autonomy: { generationStopped: false, safetyClampActive: false, degradedReason: null, ...over.autonomy },
+        autonomy: {
+          generationStopped: false,
+          safetyClampActive: false,
+          degradedReason: null,
+          ...over.autonomy,
+        },
       },
     } as unknown as ReturnType<typeof useEngineSettings>)
   }

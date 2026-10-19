@@ -167,8 +167,9 @@ export function SwampedModeToggle() {
           data-testid="swamped-mode-enable-toggle"
           role="switch"
           aria-checked={swampedMode}
-          // WR-101: `pending` uses aria-disabled + a click guard, NOT native `disabled`, so the lead's own
-          // focused switch keeps keyboard focus while its request is in flight (native disabled drops focus).
+          // WR-101: `pending` uses aria-disabled + a click guard, NOT native `disabled`, so the
+          // lead's own focused switch keeps keyboard focus while its request is in flight
+          // (native disabled drops focus).
           disabled={onRefused}
           aria-disabled={pending || undefined}
           aria-busy={pending}
