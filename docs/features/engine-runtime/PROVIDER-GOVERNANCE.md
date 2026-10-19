@@ -173,7 +173,7 @@ default to **Delayed-auto** and the exercise's **lead controller** can turn on *
 > - turning swamped mode **on** is refused with a `400`; turning it off always works;
 > - the tick never auto-sends, even if swamped mode were somehow on, so an expired Delayed-auto draft is always
 >   **held**;
-> - together with `AmbientAutonomyAuthorized = false` (amendment 2, unsigned), every AI draft therefore needs a human
+> - together with `AmbientAutonomyAuthorized = false` (amendment 2, until its flag commit deploys), every AI draft therefore needs a human
 >   approval. Suggest is the default; Delayed-auto countdowns may run, and they end in a hold.
 > - **Known gap before Phase 2:** the console's swamped-mode toggle is local to the browser and never calls the server,
 >   so turning the flag on alone would not make swamped mode work from the console. Wiring the toggle to the server is
@@ -183,6 +183,14 @@ default to **Delayed-auto** and the exercise's **lead controller** can turn on *
 >
 > **Phase 2** starts only with a separate reviewed commit that sets `generationTimeoutAutoSendAuthorized = true` for
 > `uat`, made after A1c's lead gate is on `main`. From then on the conditions below apply in full.
+>
+> **Phase 2 commit (status note, not a signed edit; awaiting the signer's Tier-2 sign-off on the PR):**
+> - A1c (#615) is on `main`; its UAT role smoke passed on 2026-10-19 (non-lead ON `403`, OFF `200`; lead ON refused
+>   `400` by this flag).
+> - The known gap above is closed in the same commit: the console's swamped-mode toggle now calls
+>   `POST /api/engine/autonomy/swamped-mode` and shows the server's state (`GET /api/engine/settings`), so every
+>   controller sees the same swamped mode and a refusal leaves it unchanged.
+> - `uat.bicepparam` sets `generationTimeoutAutoSendAuthorized = true`; the committed code default stays `false`.
 
 The conditions, each enforced in code by this PR (#571) or by Session A's A1 work:
 
@@ -210,6 +218,91 @@ The conditions, each enforced in code by this PR (#571) or by Session A's A1 wor
 
 Wider autonomy than this (autonomous ambient posting under a tier policy, wave C2 / #168) needs its
 own amendment to this section before it reaches the live provider.
+
+#### Amendment 2: autonomous ambient posting (#168): SIGNED
+
+> **Status: SIGNED (Tom Bull, 2026-10-19).** Authorized on `uat` under the conditions below. Signing is paired with one reviewed commit that sets the governed
+> flag `Generation:Governance:AmbientAutonomyAuthorized = true` for `uat` only, the same pattern as
+> `generationTenantBounded`. Until that flag commit is deployed, the #168 code stays **dark**: the ambient policy defaults to
+> `off`, and the settings API rejects `mode = autonomous` with a 400 ("not authorized by
+> PROVIDER-GOVERNANCE §8"). `review` mode needs no amendment: it uses the existing review queue, and
+> silence still holds.
+>
+> **Prerequisites before signing** (from the orchestrator's review of #603). 1 and 2 met on 2026-10-19; 3 follows:
+> 1. #603 (ambient chatter, merged dark) and its hardening follow-up are merged to `main`.
+> 2. Session A's A1c is merged with the ambient-policy route lead-gated (raise-only, `Enrollment.IsLead` read live via
+>    `ExerciseCallerRole.IsLead`; the raise is judged inside the compare-and-set loop in
+>    `EngineReviewService.SetAmbientPolicyAsync`, not by the `LeadControllerRaiseFilter` the other steering routes
+>    use; a non-lead raise is 403 with nothing changed). Merged in #615 (f734e0a, 2026-10-19); the A1c role smoke passed
+>    on `uat` the same day (non-lead raise 403, lead-only raise works, attribution resolves to the real person). **Hard prerequisite:** Tom decided (10/16) to sign on Sunday after A1c merges, so
+>    there is no conditional or struck-clause option.
+> 3. The flag commit (`generationAmbientAutonomyAuthorized = true` for `uat`) lands only after signing.
+
+**What this would authorize.** On `uat`, with the live provider, ambient background posts (trigger
+`AmbientFloor` only) may publish **without per-post human review** when a controller has set that exercise's
+ambient policy to `autonomous`. All of these conditions must hold, and #168's acceptance criteria enforce
+and test each one:
+
+- **Off by default; a human turns it on.** The policy is per exercise, starts `off`, and resets to `off`
+  on every restart. Raising it to `autonomous` is **lead-controller only** (the same raise-only rule as
+  amendment 1); any controller can lower it to `review` or `off`. The change is logged with the old value,
+  the new value and who made it. "Who" is the server-verified staff identity from the session token
+  (`StaffUserId`), not a value the console sends; a request with no staff session is refused. A "raise" is
+  turning `autonomous` on, or, while it is on, raising a cap or adding a topic or persona. The lead check and
+  the policy write are atomic (compare-and-set), so a concurrent change cannot slip between them. Approving,
+  editing or vetoing an ambient **review** draft, and the automatic demotion, are attributed to the session
+  person by Session A's A1c on all engine draft routes (a prerequisite above). The engine never raises the
+  policy itself,
+  and restoring after the kill switch never re-enables it.
+- **Bounded volume.** `maxPerMinute` and `maxPerHour` caps apply. `maxPerMinute` can never exceed the
+  exercise's `MaxEnginePostsPerMinute`.
+- **Bounded content.**
+  - Topics come only from a fixed server-side vocabulary (local colour, everyday traffic, food, sports,
+    community events, and similar), filtered by the exercise's topic allow-list.
+  - Personas come only from the exercise's persona allow-list, only this exercise's personas, and only
+    the **Resident** and **Helper** types. Agencies, outlets, trolls and bots are never used for ambient
+    posts; the server refuses them. (Tom's decision, 10/16: "Resident + Helper only".)
+  - An empty allow-list means nothing is allowed.
+  - Every burst passes the existing `ContentGuard` fiction and injection guard on the tenant-bounded
+    provider. A guard failure publishes nothing.
+  - The ambient prompt carries the setting only, never the incident narrative.
+  - A deterministic output filter drops any ambient post that mentions the incident (the storyline's
+    hashtags, words from its title, and a fixed incident vocabulary) or whose tone is negative. There is
+    no model-based topic classifier.
+  - **Residual risk:** persona voice notes are staff-authored text placed in the trusted part of the
+    prompt without fencing, and some seeded residents' notes mention the incident. For that path the
+    phrase-based `ContentGuard` and the output filter are the only defence. It is red-teamed through the
+    real path; it is accepted for `uat` only. Ambient prompts omit voice notes entirely, so this residual
+    applies to storyline prompts only.
+  - The incident vocabulary is a snapshot taken when the exercise's engine is seeded. A storyline or hashtag
+    injected later is not excluded until the engine is re-seeded.
+  - The output filter is deterministic, so it can be evaded by drift: lookalike letters from other alphabets,
+    percent-encoded or digit-prefixed hashtags, split words ("wa ter"), leetspeak, and paraphrase. It catches
+    the model's ordinary wording, not deliberate evasion. This is accepted for `uat`.
+  - Persona display names are staff-authored text that also appears in the ambient prompt.
+- **Never storyline or escalation.** Only the `AmbientFloor` trigger can take the autonomous path.
+  Inaction, official-response and amplification content, and anything storyline-bound or escalating,
+  always goes through review. A timed-out draft is held, never auto-sent.
+- **Every clamp stops it within 5 s.** The engine re-checks immediately before each publish, and
+  in-flight ambient bursts are discarded when any of these is active:
+  - the kill switch, in either mode;
+  - degraded mode;
+  - cut-to-`Fake`.
+- **Lifecycle.** Nothing ambient publishes unless the exercise is `live` and not frozen or paused, and
+  nothing publishes after EndEx. A post or review draft that finishes after the state changed is
+  discarded, not published or queued.
+- **Labelled and invisible until published.** Posts carry `Origin = engine`, and telemetry adds
+  `publishPath = ambient-autonomous`. Participants never see a draft. Times show in scenario time.
+- **Limit (same as above).** A burst already handed to the publisher runs to completion. The kill switch
+  stops every later publish.
+
+**Not authorized by this amendment:** production; autonomous storyline, response or escalation content;
+`AutonomyLevel.Auto`; replies or DMs from ambient personas; any change to the provider, tier or residency.
+
+| | |
+|---|---|
+| Autonomous ambient posting authorized on **`uat`** under the conditions above | ☑ |
+| Signer / date | **Tom Bull — 2026-10-19** |
 
 ### Evidence (compiled by `engine-runtime/05` — verify, don't take on trust)
 

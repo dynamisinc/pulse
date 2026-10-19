@@ -49,6 +49,7 @@ const SENTINEL_DISPOSITION = 'sentinel-disposition-not-a-real-value' as TimeoutD
 vi.mock('../services/autoHoldPolicy', () => ({
   decide: vi.fn(),
   evaluate: vi.fn(),
+  wouldAutoSendOnExpiry: vi.fn(() => false),
 }))
 
 const EX = 'ex-mock-0001'

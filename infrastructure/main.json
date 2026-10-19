@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.48.1.52935",
-      "templateHash": "1456882770627301840"
+      "templateHash": "201900261359345606"
     }
   },
   "parameters": {
@@ -131,7 +131,7 @@
       "type": "bool",
       "defaultValue": false,
       "metadata": {
-        "description": "TIER-2 GOVERNANCE FLAG (PROVIDER-GOVERNANCE §8, Phase 1): authorises timeout auto-send — swamped mode, the only path by which a Delayed-auto draft publishes on countdown expiry with no controller click. Maps to Generation__Governance__TimeoutAutoSendAuthorized. False by default and must stay false until the lead-controller gate (A1c) is on main; it is set true in a separate reviewed commit after that. While false the swamped-mode API refuses ON with 400 (OFF stays allowed) and an expired countdown always holds for a human."
+        "description": "TIER-2 GOVERNANCE FLAG (PROVIDER-GOVERNANCE §8): authorises timeout auto-send — swamped mode, the only path by which a Delayed-auto draft publishes on countdown expiry with no controller click. Maps to Generation__Governance__TimeoutAutoSendAuthorized. False by default (fail closed); an environment authorises it in its own parameter file, in a reviewed commit (uat: Phase 2, after the A1c lead gate). While false the swamped-mode API refuses ON with 400 (OFF stays allowed) and an expired countdown always holds for a human."
       }
     },
     "deployProviderAlerts": {
@@ -1445,7 +1445,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.48.1.52935",
-              "templateHash": "2369056139632542825"
+              "templateHash": "14388113696166457722"
             }
           },
           "parameters": {
@@ -1641,7 +1641,7 @@
               "type": "bool",
               "defaultValue": false,
               "metadata": {
-                "description": "Generation:Governance:TimeoutAutoSendAuthorized (PROVIDER-GOVERNANCE §8, Phase 1) — whether timeout auto-send (swamped mode: a Delayed-auto draft publishing on countdown expiry with no controller click) is authorised. False by default: while false the swamped-mode API refuses ON with 400 and an expired countdown always holds for a human."
+                "description": "Generation:Governance:TimeoutAutoSendAuthorized (PROVIDER-GOVERNANCE §8) — whether timeout auto-send (swamped mode: a Delayed-auto draft publishing on countdown expiry with no controller click) is authorised. False by default: while false the swamped-mode API refuses ON with 400 and an expired countdown always holds for a human."
               }
             },
             "generationRetention": {

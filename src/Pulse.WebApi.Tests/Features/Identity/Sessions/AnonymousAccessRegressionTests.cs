@@ -143,8 +143,10 @@ public sealed class AnonymousAccessRegressionTests
         // a decision, not merely appear in a diff and hope a human notices (AC4).
         // identity-auth-roles/15: 13 -> 14 for POST /api/auth/staff/login/choose (the org choice, ADMIN-IDENTITY-MODEL
         // §1.2) — pre-auth by nature, behind the staff-login per-IP limiter, uniform 401, no-store.
+        // #617: 14 -> 15 for GET /api/build — the running commit, polled credential-less by the Deploy Backend
+        // smoke to prove the NEW build is serving; it returns only {"commit":"…"}, no-store, and reads no request.
         PreAuthAllowlist.Routes.Should().HaveCount(
-            14,
+            15,
             "the pre-auth allowlist is the one deliberately hand-maintained opt-out in the whole gate; a new entry "
             + "is a security decision and must be made explicitly here as well as there");
 

@@ -717,8 +717,7 @@ public sealed class EngineReviewSafetyInvariantTests
 
         result.Outcome.Should().Be(EngineReviewOutcome.Invalid, "raising toward unreviewed timeout publishes is refused in Phase 1");
         result.ValidationError.Should().Be(
-            "timeout auto-send (swamped mode) is not authorized on this environment until the lead-controller gate lands "
-            + "(PROVIDER-GOVERNANCE §8, Phase 1)");
+            "timeout auto-send (swamped mode) is not authorized on this environment (PROVIDER-GOVERNANCE §8)");
         harness.Registry.GetOrCreate(exerciseId).SwampedModeEnabled.Should().BeFalse("a refused request changes nothing");
     }
 
