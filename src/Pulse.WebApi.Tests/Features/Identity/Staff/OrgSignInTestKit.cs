@@ -13,6 +13,7 @@ using Pulse.WebApi.Features.Identity.Sessions;
 using Pulse.WebApi.Features.Identity.Staff;
 using Pulse.WebApi.Tests.Data;
 using Pulse.WebApi.Tests.Helpers;
+using Pulse.WebApi.Tests.Features.EngineRuntime.Clock;
 
 /// <summary>
 /// Real-SQL seeding for the identity-auth-roles/15 org sign-in suites: organizations with slugs, people with an email,
@@ -127,5 +128,6 @@ public sealed class OrgSignInTestKit
                     Accounts = allowlist is null ? [] : [.. allowlist],
                 }))),
             issuer,
-            NullLogger<OrgStaffLoginService>.Instance);
+            NullLogger<OrgStaffLoginService>.Instance,
+            TestScenarioNow.Over(context));
 }

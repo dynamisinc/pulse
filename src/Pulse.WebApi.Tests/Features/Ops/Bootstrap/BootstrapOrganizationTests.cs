@@ -13,6 +13,7 @@ using Pulse.WebApi.Features.Identity.Providers;
 using Pulse.WebApi.Features.Identity.SharedAccess;
 using Pulse.WebApi.Features.Ops.Bootstrap;
 using Pulse.WebApi.Tests.Data;
+using Pulse.WebApi.Tests.Features.EngineRuntime.Clock;
 
 /// <summary>
 /// exercise-isolation/11 — <see cref="BootstrapService"/> under the CUSTOMER-tenant tier. Bootstrap is the one
@@ -209,5 +210,6 @@ public sealed class BootstrapOrganizationTests
             Options.Create(new DynamisIdentityProviderOptions { Accounts = new List<DynamisStaffAccount>(allowlist) }),
             _sharedHasher,
             _participantHasher,
-            new OpsPersonaResolver(context));
+            new OpsPersonaResolver(context),
+            TestScenarioNow.Over(context));
 }

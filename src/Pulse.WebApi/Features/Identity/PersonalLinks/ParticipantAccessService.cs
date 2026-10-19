@@ -65,7 +65,7 @@ public sealed class ParticipantAccessService
     private readonly RosterLinkDtoFactory _linkDtoFactory;
     private readonly ExerciseFactsReader _factsReader;
     private readonly TimeProvider _timeProvider;
-    private readonly IExerciseClock? _exerciseClock;
+    private readonly IScenarioNow? _scenarioNow;
 
     /// <summary>Creates the access service over its collaborators.</summary>
     /// <param name="dbContext">The persistence context every mutation, termination and event is written through.</param>
@@ -75,7 +75,7 @@ public sealed class ParticipantAccessService
     /// <param name="linkDtoFactory">Projects the link to the frozen <see cref="RosterLinkDto"/>.</param>
     /// <param name="factsReader">The exercise facts for the event envelope (EL-17's one <c>Exercises</c> read).</param>
     /// <param name="timeProvider">The server clock (one read per action).</param>
-    /// <param name="exerciseClock">The native exercise clock for scenario time, when the host has one.</param>
+    /// <param name="scenarioNow">The exercise's scenario now for telemetry (engine-runtime/08, CLK-2: clock, else latest post, else now).</param>
     public ParticipantAccessService(
         PulseDbContext dbContext,
         IExerciseContext exerciseContext,
@@ -84,7 +84,7 @@ public sealed class ParticipantAccessService
         RosterLinkDtoFactory linkDtoFactory,
         ExerciseFactsReader factsReader,
         TimeProvider timeProvider,
-        IExerciseClock? exerciseClock = null)
+        IScenarioNow? scenarioNow = null)
     {
         ArgumentNullException.ThrowIfNull(dbContext);
         ArgumentNullException.ThrowIfNull(exerciseContext);
@@ -101,7 +101,7 @@ public sealed class ParticipantAccessService
         _linkDtoFactory = linkDtoFactory;
         _factsReader = factsReader;
         _timeProvider = timeProvider;
-        _exerciseClock = exerciseClock;
+        _scenarioNow = scenarioNow;
     }
 
     /// <summary>
@@ -317,7 +317,7 @@ public sealed class ParticipantAccessService
             exerciseId,
             new EasyLoginStaffActor(current.StaffUserId, session.Role),
             now,
-            EasyLoginEventTime.For(exerciseId, facts, _exerciseClock, now));
+            await EasyLoginEventTime.ForAsync(exerciseId, facts, _scenarioNow, now, cancellationToken));
     }
 
     /// <summary>

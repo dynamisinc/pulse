@@ -132,7 +132,10 @@ public sealed class OrganizationScopeSweepTests
         // identity-auth-roles/17: +2 — ExerciseCallerRole's status read of the server-resolved exercise the caller is
         // proven enrolled in (the role-matrix gate), and ExerciseLifecycleService.GetAsync's status + FirstLiveAt read
         // of the resolved scope (archive-from-build is offered once the exercise has gone live).
-        ["ResolvedScope"] = 27,
+        // engine-runtime/08 (CLK-2): -1 — MediaUploadService.PersistAsync no longer reads the exercise row (its only use
+        // was the retired CurrentScenarioTime fallback; scenario time now comes from IScenarioNow over Posts). The
+        // ReactionService read above now supplies only the time zone.
+        ["ResolvedScope"] = 26,
 
         // orgAdmin startup seeder: +1 for OrgAdminSeedService, which resolves the seeded staff human by their
         // configured IdP ExternalSubject — the SAME resolve-by-subject read StaffLoginService and

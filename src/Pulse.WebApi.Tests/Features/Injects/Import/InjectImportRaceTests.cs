@@ -275,7 +275,7 @@ public sealed class InjectImportRaceTests
             db,
             scope,
             staff,
-            world.Clock,
+            TestScenarioNow.Over(db, world.Clock, world.Time),
             registry,
             new FunnelInjectPostPublisher(ingest),
             new FixedJitterSource(),

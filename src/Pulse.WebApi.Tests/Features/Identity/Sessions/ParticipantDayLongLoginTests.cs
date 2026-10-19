@@ -74,7 +74,7 @@ public sealed class ParticipantDayLongLoginTests
                 clock,
                 NullLogger<SessionIssuer>.Instance);
             var login = new ParticipantLoginService(
-                context, new ExerciseContext { CurrentExerciseId = exerciseId }, issuer, _hasher);
+                context, new ExerciseContext { CurrentExerciseId = exerciseId }, issuer, _hasher, TestScenarioNow.Over(context));
 
             result = await login.LoginAsync(new ParticipantLoginRequest { Username = "dayn-user", Password = "pw-day-n-123" });
         }

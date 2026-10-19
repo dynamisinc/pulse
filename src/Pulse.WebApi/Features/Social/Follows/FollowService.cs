@@ -34,8 +34,8 @@ using Pulse.WebApi.Features.EngineRuntime.Clock;
 /// <para>
 /// <b>Scenario time is server-side (COR-053).</b> The edge's and the event's scenario instant come from the
 /// native per-exercise clock (COR-050) when the exercise's clock is running, falling back to the exercise's
-/// persisted <c>CurrentScenarioTime</c> and finally to the server wall clock — mirroring what the identity and
-/// ops slices already do. It is never read from the request body.
+/// latest post and finally to the server wall clock (<see cref="IScenarioNow"/>, engine-runtime/08) — mirroring what
+/// the identity and ops slices do. It is never read from the request body.
 /// </para>
 /// </remarks>
 public sealed class FollowService
@@ -68,28 +68,28 @@ public sealed class FollowService
     private readonly PulseDbContext _dbContext;
     private readonly IExerciseContext _exerciseContext;
     private readonly ICurrentSessionPersonaAccessor _sessionPersonaAccessor;
-    private readonly IExerciseClock _exerciseClock;
+    private readonly IScenarioNow _scenarioNow;
 
     /// <summary>Creates the service over its persistence, scope, session-identity, and scenario-clock collaborators.</summary>
     /// <param name="dbContext">The persistence context the edge and its telemetry event are written through.</param>
     /// <param name="exerciseContext">The server-authoritative exercise scope (COR-001) — the sole scoping source.</param>
     /// <param name="sessionPersonaAccessor">Resolves the caller's session-bound persona (the follower).</param>
-    /// <param name="exerciseClock">The native per-exercise scenario clock (COR-050).</param>
+    /// <param name="scenarioNow">The exercise's scenario now (engine-runtime/08, CLK-2: clock, else latest post, else now; COR-050).</param>
     public FollowService(
         PulseDbContext dbContext,
         IExerciseContext exerciseContext,
         ICurrentSessionPersonaAccessor sessionPersonaAccessor,
-        IExerciseClock exerciseClock)
+        IScenarioNow scenarioNow)
     {
         ArgumentNullException.ThrowIfNull(dbContext);
         ArgumentNullException.ThrowIfNull(exerciseContext);
         ArgumentNullException.ThrowIfNull(sessionPersonaAccessor);
-        ArgumentNullException.ThrowIfNull(exerciseClock);
+        ArgumentNullException.ThrowIfNull(scenarioNow);
 
         _dbContext = dbContext;
         _exerciseContext = exerciseContext;
         _sessionPersonaAccessor = sessionPersonaAccessor;
-        _exerciseClock = exerciseClock;
+        _scenarioNow = scenarioNow;
     }
 
     /// <summary>
@@ -278,13 +278,11 @@ public sealed class FollowService
         //    resolved server-side (COR-053), never from client input.
         var now = DateTimeOffset.UtcNow;
         // org-scope-exempt(ResolvedScope): exerciseId comes from TryGetScope (IExerciseContext) at step 1 and
-        // is never a request field; it only supplies the scenario-time fallback and the telemetry time zone.
+        // is never a request field; it only supplies the telemetry time zone.
         var exercise = await _dbContext.Exercises
             .AsNoTracking()
             .FirstOrDefaultAsync(candidate => candidate.Id == exerciseId, cancellationToken);
-        var scenarioTime = _exerciseClock.CurrentScenarioTime(exerciseId)
-            ?? exercise?.CurrentScenarioTime
-            ?? now;
+        var scenarioTime = await _scenarioNow.GetAsync(exerciseId, now, cancellationToken);
         var timeZone = string.IsNullOrWhiteSpace(exercise?.TimeZone) ? FallbackTimeZone : exercise.TimeZone;
 
         Guid edgeId;

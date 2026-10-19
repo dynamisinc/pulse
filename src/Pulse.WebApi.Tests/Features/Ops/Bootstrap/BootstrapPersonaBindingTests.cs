@@ -15,6 +15,7 @@ using Pulse.WebApi.Features.Identity.SharedAccess;
 using Pulse.WebApi.Features.Ops.Bootstrap;
 using Pulse.WebApi.Tests.Data;
 using Pulse.WebApi.Tests.Features.Identity.Staff;
+using Pulse.WebApi.Tests.Features.EngineRuntime.Clock;
 
 /// <summary>
 /// Story identity-auth-roles/10 (Tier-2) integration tests for the <see cref="BootstrapService"/> PERSONA-BINDING extension
@@ -49,7 +50,8 @@ public sealed class BootstrapPersonaBindingTests
             Options.Create(new DynamisIdentityProviderOptions { Accounts = new List<DynamisStaffAccount>() }),
             _sharedHasher,
             _participantHasher,
-            new OpsPersonaResolver(context));
+            new OpsPersonaResolver(context),
+            TestScenarioNow.Over(context));
 
     /// <summary>
     /// Seeds a host-bound exercise with one persona directly (standing in for
@@ -92,7 +94,7 @@ public sealed class BootstrapPersonaBindingTests
     {
         var issuer = new RecordingSessionIssuer();
         await using var context = _fixture.CreateContext(ScopeFor(exerciseId));
-        var login = new ParticipantLoginService(context, ScopeFor(exerciseId), issuer, _participantHasher);
+        var login = new ParticipantLoginService(context, ScopeFor(exerciseId), issuer, _participantHasher, TestScenarioNow.Over(context));
         var result = await login.LoginAsync(new ParticipantLoginRequest { Username = username, Password = Password });
         return (result, issuer);
     }

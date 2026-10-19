@@ -27,6 +27,7 @@ using Pulse.WebApi.Features.ExerciseConfiguration.Lifecycle;
 using Pulse.WebApi.Features.Identity.Staff;
 using Pulse.WebApi.Features.ParticipantShell;
 using Pulse.WebApi.Tests.Data;
+using Pulse.WebApi.Tests.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Tests.Features.ExerciseConfiguration.Lifecycle;
 using Pulse.WebApi.Tests.Features.Identity.Staff;
 using Pulse.WebApi.Tests.Helpers;
@@ -159,6 +160,61 @@ public sealed class PauseTierEndpointsTests
             "the response must never claim a freeze the clock did not take — the console verifies this field");
         host.Clock.IsFrozen(exerciseId).Should().BeTrue(
             "ReactionLoopHost.TickExerciseAsync skips a tick on exactly this flag, so the engine is genuinely halted");
+    }
+
+    [RequiresDockerFact]
+    public async Task Post_Freeze_OnAColdClock_StartsItAtTheLatestPost_A2033WorldStaysIn2033()
+    {
+        // engine-runtime/08 (CLK-1): a freeze that has to start a cold clock starts it where the world is, never at the
+        // real date, and never at another exercise's later post (COR-001).
+        var exerciseId = Guid.NewGuid();
+        var latest = new DateTimeOffset(2033, 6, 14, 11, 30, 0, TimeSpan.FromHours(-4));
+        await ScenarioNowResolverTests.AddPostAsync(_fixture, exerciseId, latest.AddMinutes(-30));
+        await ScenarioNowResolverTests.AddPostAsync(_fixture, exerciseId, latest);
+        await ScenarioNowResolverTests.AddPostAsync(_fixture, Guid.NewGuid(), latest.AddYears(3));
+        await using var host = await StartHostAsync(exerciseId);
+
+        var response = await host.Client.PostAsJsonAsync(
+            new Uri("/api/steering/pause-tier", UriKind.Relative),
+            new { tier = "freeze", actingHumanId = "human-controller-01" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        host.Clock.IsFrozen(exerciseId).Should().BeTrue();
+        host.Clock.CurrentScenarioTime(exerciseId).Should().BeCloseTo(
+            latest, TimeSpan.FromSeconds(1), "the cold clock starts at the exercise's latest post and the freeze holds it there");
+    }
+
+    [RequiresDockerFact]
+    public async Task Post_Freeze_OnAColdClock_WithNoPosts_StartsItAtWallClockNow()
+    {
+        var exerciseId = Guid.NewGuid();
+        await using var host = await StartHostAsync(exerciseId);
+        var before = DateTimeOffset.UtcNow;
+
+        await host.Client.PostAsJsonAsync(
+            new Uri("/api/steering/pause-tier", UriKind.Relative),
+            new { tier = "freeze", actingHumanId = "human-controller-01" });
+
+        host.Clock.CurrentScenarioTime(exerciseId).Should().BeOnOrAfter(before).And.BeOnOrBefore(
+            DateTimeOffset.UtcNow, "a fresh exercise with no posts behaves as today: the clock starts at now");
+    }
+
+    [RequiresDockerFact]
+    public async Task Post_Freeze_OnARunningClock_NeverRestartsOrMovesIt()
+    {
+        var exerciseId = Guid.NewGuid();
+        var start = new DateTimeOffset(2033, 6, 14, 9, 0, 0, TimeSpan.Zero);
+        await ScenarioNowResolverTests.AddPostAsync(_fixture, exerciseId, start.AddDays(2));
+        await using var host = await StartHostAsync(exerciseId);
+        host.Clock.Start(exerciseId, start, TimeZoneInfo.Utc);
+
+        await host.Client.PostAsJsonAsync(
+            new Uri("/api/steering/pause-tier", UriKind.Relative),
+            new { tier = "freeze", actingHumanId = "human-controller-01" });
+
+        host.Clock.IsFrozen(exerciseId).Should().BeTrue();
+        host.Clock.CurrentScenarioTime(exerciseId).Should().BeCloseTo(
+            start, TimeSpan.FromMinutes(1), "a running clock is frozen where it is, never restarted at the latest post");
     }
 
     [RequiresDockerFact]

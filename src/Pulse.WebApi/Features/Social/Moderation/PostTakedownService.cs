@@ -36,11 +36,10 @@ using Pulse.WebApi.Features.Social.Engagement;
 /// pattern. A RUNNING exercise clock (<see cref="IExerciseClock"/>, COR-050) is authoritative and is used as
 /// is, never clamped: a post's <c>CreatedScenarioTime</c> can still come from the client in this phase, so
 /// clamping the clock to it would let a post stamped ahead of the clock push the takedown forward. Without a
-/// running clock, the fallback is the exercise's stored <c>CurrentScenarioTime</c>, then (where
-/// <c>FollowService</c> would use the server clock) the post's own <c>CreatedScenarioTime</c>. Only this
-/// fallback is clamped to be no earlier than the post's <c>CreatedScenarioTime</c>, because no API writes the
-/// stored value (only the seed sets it), so it can be stale. The stamped value is always a scenario instant,
-/// never <c>DateTimeOffset.UtcNow</c>.
+/// running clock, the fallback is the exercise's latest post (<see cref="IScenarioNow"/>, engine-runtime/08), then
+/// (where <c>FollowService</c> would use the server clock) the post's own <c>CreatedScenarioTime</c>. Only this
+/// fallback is clamped to be no earlier than the post's <c>CreatedScenarioTime</c>. The stamped value is always a
+/// scenario instant, never <c>DateTimeOffset.UtcNow</c>.
 /// </para>
 /// <para>
 /// <b>A failed broadcast never fails the takedown.</b> Once the update has committed, the takedown has
@@ -66,19 +65,19 @@ public sealed partial class PostTakedownService
 {
     private readonly PulseDbContext _dbContext;
     private readonly IExerciseContext _exerciseContext;
-    private readonly IOrganizationContext _organizationContext;
     private readonly IExerciseClock _exerciseClock;
     private readonly IFeedBroadcaster _feedBroadcaster;
     private readonly ILogger<PostTakedownService> _logger;
     private readonly IPostEngagementReader? _engagementReader;
+    private readonly IScenarioNow _scenarioNow;
 
     /// <summary>Creates the service over its persistence, scope, clock, fan-out and logging collaborators.</summary>
     /// <param name="dbContext">The persistence context. Its central exercise filter scopes every post read and update.</param>
     /// <param name="exerciseContext">The server-resolved exercise scope (COR-001), the only scope source.</param>
-    /// <param name="organizationContext">The server-resolved customer tenant, which bounds the one <c>Exercises</c> read.</param>
     /// <param name="exerciseClock">The native per-exercise scenario clock (COR-050).</param>
     /// <param name="feedBroadcaster">The real-time fan-out that carries <c>PostRemoved</c>.</param>
     /// <param name="logger">Operational log (the takedown record and broadcast failures). Never telemetry.</param>
+    /// <param name="scenarioNow">The takedown's scenario-time fallback when no clock runs (engine-runtime/08, CLK-2: the latest post).</param>
     /// <param name="engagementReader">
     /// The engagement read the feed projection uses, for a taken-down reply's parent push (DF-17). Optional: without
     /// it a takedown pushes no parent counts.
@@ -86,26 +85,26 @@ public sealed partial class PostTakedownService
     public PostTakedownService(
         PulseDbContext dbContext,
         IExerciseContext exerciseContext,
-        IOrganizationContext organizationContext,
         IExerciseClock exerciseClock,
         IFeedBroadcaster feedBroadcaster,
         ILogger<PostTakedownService> logger,
+        IScenarioNow scenarioNow,
         IPostEngagementReader? engagementReader = null)
     {
         ArgumentNullException.ThrowIfNull(dbContext);
         ArgumentNullException.ThrowIfNull(exerciseContext);
-        ArgumentNullException.ThrowIfNull(organizationContext);
         ArgumentNullException.ThrowIfNull(exerciseClock);
         ArgumentNullException.ThrowIfNull(feedBroadcaster);
         ArgumentNullException.ThrowIfNull(logger);
+        ArgumentNullException.ThrowIfNull(scenarioNow);
 
         _dbContext = dbContext;
         _exerciseContext = exerciseContext;
-        _organizationContext = organizationContext;
         _exerciseClock = exerciseClock;
         _feedBroadcaster = feedBroadcaster;
         _logger = logger;
         _engagementReader = engagementReader;
+        _scenarioNow = scenarioNow;
     }
 
     /// <summary>
@@ -226,8 +225,9 @@ public sealed partial class PostTakedownService
 
     /// <summary>
     /// The scenario instant to stamp for <paramref name="exerciseId"/>: the running exercise clock, unclamped;
-    /// otherwise the exercise's stored <c>CurrentScenarioTime</c> (or <paramref name="postScenarioTime"/> when
-    /// unset), clamped to be no earlier than <paramref name="postScenarioTime"/>. Never the wall clock (COR-053).
+    /// otherwise the exercise's scenario now from <see cref="IScenarioNow"/> (engine-runtime/08: its latest post), or
+    /// <paramref name="postScenarioTime"/> when there is none, clamped to be no earlier than
+    /// <paramref name="postScenarioTime"/>. Never the wall clock (COR-053).
     /// </summary>
     /// <param name="exerciseId">The resolved exercise scope.</param>
     /// <param name="postScenarioTime">The post's own creation instant (scenario time): the last fallback, and the floor for the fallbacks only.</param>
@@ -245,27 +245,9 @@ public sealed partial class PostTakedownService
             return clockTime.Value;
         }
 
-        // Fallback only: the stored value can be stale (only the seed writes it), so never record a takedown
-        // earlier than the post it removed.
-        var fallback = await ReadStoredScenarioTimeAsync(exerciseId, cancellationToken) ?? postScenarioTime;
+        // Fallback only: the exercise's latest post (CLK-2), never a takedown earlier than the post it removed.
+        var fallback = await _scenarioNow.FindAsync(exerciseId, cancellationToken) ?? postScenarioTime;
         return fallback < postScenarioTime ? postScenarioTime : fallback;
-    }
-
-    /// <summary>The exercise's stored <c>CurrentScenarioTime</c>, or <c>null</c>.</summary>
-    /// <param name="exerciseId">The resolved exercise scope.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>The stored scenario instant, or <c>null</c> when unset or out of the caller's tenant.</returns>
-    private async Task<DateTimeOffset?> ReadStoredScenarioTimeAsync(Guid exerciseId, CancellationToken cancellationToken)
-    {
-        // Exercise is not IExerciseScoped (it IS the scope), so the central filter does not cover it. The id
-        // comes from IExerciseContext, and the read is also bounded to the caller's resolved tenant. An
-        // unresolved tenant matches nothing, which falls through to the post's own scenario time.
-        return await _dbContext.Exercises
-            .AsNoTracking()
-            .InOrganization(_organizationContext.CurrentOrganizationId)
-            .Where(exercise => exercise.Id == exerciseId)
-            .Select(exercise => exercise.CurrentScenarioTime)
-            .FirstOrDefaultAsync(cancellationToken);
     }
 
     [LoggerMessage(

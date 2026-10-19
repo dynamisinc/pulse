@@ -13,6 +13,7 @@ using Pulse.WebApi.Features.Identity.Sessions;
 using Pulse.WebApi.Tests.Data;
 using Pulse.WebApi.Tests.Features.Identity.PersonalLinks;
 using Pulse.WebApi.Tests.Features.Identity.Staff;
+using Pulse.WebApi.Tests.Features.EngineRuntime.Clock;
 
 /// <summary>
 /// Integration tests for <see cref="ParticipantLoginService"/> (story 02, COR-011 / XC-004 / NFR-009) against
@@ -33,7 +34,7 @@ public sealed class ParticipantLoginServiceTests
     private const string PasswordFailurePayload = "{\"outcome\":\"failure\",\"method\":\"password\"}";
 
     private ParticipantLoginService ServiceFor(PulseDbContext context, Guid? scope, ISessionIssuer issuer) =>
-        new(context, new ExerciseContext { CurrentExerciseId = scope }, issuer, _hasher);
+        new(context, new ExerciseContext { CurrentExerciseId = scope }, issuer, _hasher, TestScenarioNow.Over(context));
 
     private async Task<Exercise> SeedExerciseAsync(DateTimeOffset? scenarioTime, string timeZone = "America/Chicago")
     {
@@ -44,12 +45,12 @@ public sealed class ParticipantLoginServiceTests
             Name = $"Exercise {Guid.NewGuid():N}",
             TimeZone = timeZone,
             Status = "active",
-            CurrentScenarioTime = scenarioTime,
         };
 
         await using var seed = _fixture.CreateContext();
         seed.Exercises.Add(exercise);
         await seed.SaveChangesAsync();
+        await TestScenarioNow.SeedWorldTimeAsync(seed, exercise.Id, scenarioTime); // engine-runtime/08: the world's time is its latest post
         return exercise;
     }
 
@@ -126,7 +127,7 @@ public sealed class ParticipantLoginServiceTests
         evt.Payload.Should().Be(
             PasswordSuccessPayload,
             "easy-login Gate-2 S-1: a password sign-in names its method, like the link and word sign-ins (additive field)");
-        evt.ScenarioTime.Should().Be(scenario, "scenario time is stamped from the exercise's stored CurrentScenarioTime (B2 placeholder)");
+        evt.ScenarioTime.Should().Be(scenario, "scenario time is the exercise's scenario now: its latest post (engine-runtime/08)");
         evt.TimeZone.Should().Be("America/Chicago");
 
         await using var verify = _fixture.CreateContext(new ExerciseContext { CurrentExerciseId = exercise.Id });

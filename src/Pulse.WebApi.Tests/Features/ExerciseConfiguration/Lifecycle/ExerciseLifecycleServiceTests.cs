@@ -12,6 +12,7 @@ using Pulse.WebApi.Features.Identity.Staff;
 using Pulse.WebApi.Tests.Data;
 using Pulse.WebApi.Tests.Features.Identity.Staff;
 using Xunit;
+using Pulse.WebApi.Tests.Features.EngineRuntime.Clock;
 
 /// <summary>
 /// The lifecycle service against REAL SQL Server: transitions persist the canonical literal, a refused
@@ -108,19 +109,23 @@ public sealed class ExerciseLifecycleServiceTests
         payload.RootElement.GetProperty("to").GetString().Should().Be("paused");
     }
 
-    /// <summary>The persisted scenario instant is round-tripped, never re-derived from the server clock.</summary>
+    /// <summary>
+    /// engine-runtime/08 (CLK-2): with no running clock the event stamps the exercise's scenario now, its latest post,
+    /// never the server clock and never another exercise's later post.
+    /// </summary>
     [RequiresDockerFact]
-    public async Task TransitionAsync_StampsThePersistedScenarioInstant_RatherThanTheServerClock()
+    public async Task TransitionAsync_StampsTheExercisesScenarioNow_ItsLatestPost_RatherThanTheServerClock()
     {
         var exerciseId = Guid.NewGuid();
         var scenarioNow = new DateTimeOffset(2033, 3, 1, 9, 30, 0, TimeSpan.Zero);
 
         await using (var seed = _fixture.CreateContext())
         {
-            var exercise = ExerciseLifecycleTestData.ExerciseInState(exerciseId, "live");
-            exercise.CurrentScenarioTime = scenarioNow;
-            seed.Exercises.Add(exercise);
+            seed.Exercises.Add(ExerciseLifecycleTestData.ExerciseInState(exerciseId, "live"));
             await seed.SaveChangesAsync();
+            await TestScenarioNow.SeedWorldTimeAsync(seed, exerciseId, scenarioNow.AddHours(-1));
+            await TestScenarioNow.SeedWorldTimeAsync(seed, exerciseId, scenarioNow);
+            await TestScenarioNow.SeedWorldTimeAsync(seed, Guid.NewGuid(), scenarioNow.AddYears(1));
         }
 
         await TransitionAsync(exerciseId, "completed");
@@ -131,7 +136,7 @@ public sealed class ExerciseLifecycleServiceTests
             .AsNoTracking()
             .SingleAsync(e => e.ExerciseId == exerciseId);
 
-        telemetry.ScenarioTime.Should().Be(scenarioNow, "scenario time is the exercise's persisted instant (COR-053)");
+        telemetry.ScenarioTime.Should().Be(scenarioNow, "scenario time is where the exercise's world is (COR-053, CLK-2)");
     }
 
     /// <summary>A legacy row transitions as its canonical equivalent and HEALS to the COR-032 literal.</summary>
@@ -169,7 +174,8 @@ public sealed class ExerciseLifecycleServiceTests
         var service = new ExerciseLifecycleService(
             context,
             new ExerciseContext { CurrentExerciseId = null },
-            new StubCurrentStaffSessionAccessor(null));
+            new StubCurrentStaffSessionAccessor(null),
+            TestScenarioNow.Over(context));
 
         (await service.GetAsync()).Outcome.Should().Be(ExerciseLifecycleOutcome.ScopeUnresolved);
         (await service.GetCurrentStateAsync()).Should().BeNull();
@@ -216,7 +222,8 @@ public sealed class ExerciseLifecycleServiceTests
         var service = new ExerciseLifecycleService(
             context,
             new ExerciseContext { CurrentExerciseId = exerciseId },
-            new StubCurrentStaffSessionAccessor(null));
+            new StubCurrentStaffSessionAccessor(null),
+            TestScenarioNow.Over(context));
 
         var snapshot = (await service.GetAsync()).Snapshot!;
 
@@ -237,7 +244,8 @@ public sealed class ExerciseLifecycleServiceTests
         var service = new ExerciseLifecycleService(
             context,
             new ExerciseContext { CurrentExerciseId = missing },
-            new StubCurrentStaffSessionAccessor(null));
+            new StubCurrentStaffSessionAccessor(null),
+            TestScenarioNow.Over(context));
 
         (await service.GetAsync()).Outcome.Should().Be(ExerciseLifecycleOutcome.NotFound);
     }
@@ -298,7 +306,7 @@ public sealed class ExerciseLifecycleServiceTests
         var exerciseContext = new ExerciseContext { CurrentExerciseId = exerciseId };
 
         await using var context = _fixture.CreateContext(exerciseContext);
-        var service = new ExerciseLifecycleService(context, exerciseContext, staff);
+        var service = new ExerciseLifecycleService(context, exerciseContext, staff, TestScenarioNow.Over(context));
 
         return await service.TransitionAsync(new ExerciseLifecycleTransitionRequest { To = to });
     }

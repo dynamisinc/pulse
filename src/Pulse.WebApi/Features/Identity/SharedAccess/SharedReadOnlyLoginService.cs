@@ -4,6 +4,7 @@ using System.Globalization;
 using Microsoft.EntityFrameworkCore;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
+using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.Identity.Sessions;
 
 /// <summary>
@@ -45,9 +46,9 @@ using Pulse.WebApi.Features.Identity.Sessions;
 /// revoked / locked / passwordless credential), it runs a fixed-cost DECOY verify so the PBKDF2 cost is paid
 /// regardless of credential state — closing the enabled-state timing oracle. It therefore now MUTATES the tracked
 /// credential row within the same unit of work as its telemetry. Server-authoritative: one wall-clock read is
-/// shared by the telemetry timestamps; scenario time is the exercise's stored
-/// <see cref="Exercise.CurrentScenarioTime"/> (a documented B2 placeholder until the COR-050 backend clock lands
-/// in B3). The password is never logged (NFR-009). Rotation and immediate revoke themselves live in
+/// shared by the telemetry timestamps; scenario time is
+/// the exercise's scenario now from <see cref="Pulse.WebApi.Features.EngineRuntime.Clock.IScenarioNow"/> (engine-runtime/08:
+/// the running clock, else the latest post, else the wall clock). The password is never logged (NFR-009). Rotation and immediate revoke themselves live in
 /// <see cref="SharedCredentialLifecycleService"/>.
 /// </para>
 /// </remarks>
@@ -69,27 +70,32 @@ public sealed class SharedReadOnlyLoginService
     private readonly IExerciseContext _exerciseContext;
     private readonly ISharedCredentialHasher _hasher;
     private readonly ISessionIssuer _sessionIssuer;
+    private readonly IScenarioNow _scenarioNow;
 
     /// <summary>Creates the shared read-only login funnel over its collaborators.</summary>
     /// <param name="dbContext">The persistence context the login telemetry is written through (credential lookup is scope-filtered).</param>
     /// <param name="exerciseContext">The server-authoritative host-resolved exercise scope (COR-001) — the sole scoping source.</param>
     /// <param name="hasher">The slow-KDF verifier the submitted password is checked against (NFR-009).</param>
     /// <param name="sessionIssuer">The story-03 session-issuance seam this login calls to mint the view-only session.</param>
+    /// <param name="scenarioNow">The exercise's scenario now for telemetry (engine-runtime/08, CLK-2: clock, else latest post, else now).</param>
     public SharedReadOnlyLoginService(
         PulseDbContext dbContext,
         IExerciseContext exerciseContext,
         ISharedCredentialHasher hasher,
-        ISessionIssuer sessionIssuer)
+        ISessionIssuer sessionIssuer,
+        IScenarioNow scenarioNow)
     {
         ArgumentNullException.ThrowIfNull(dbContext);
         ArgumentNullException.ThrowIfNull(exerciseContext);
         ArgumentNullException.ThrowIfNull(hasher);
         ArgumentNullException.ThrowIfNull(sessionIssuer);
+        ArgumentNullException.ThrowIfNull(scenarioNow);
 
         _dbContext = dbContext;
         _exerciseContext = exerciseContext;
         _hasher = hasher;
         _sessionIssuer = sessionIssuer;
+        _scenarioNow = scenarioNow;
     }
 
     /// <summary>
@@ -137,7 +143,9 @@ public sealed class SharedReadOnlyLoginService
         }
 
         var now = DateTimeOffset.UtcNow;
-        var scenarioTime = exercise.CurrentScenarioTime ?? now;
+        // engine-runtime/08 (CLK-2): the clock, else the exercise's latest post, else now. Hits the database only when
+        // no clock is running (one MAX over the exercise's posts).
+        var scenarioTime = await _scenarioNow.GetAsync(exercise.Id, now, cancellationToken);
 
         // 4. Load THIS exercise's shared credential (TRACKED — story 07 mutates it: failed-attempt counting on a
         //    failure, and the counter reset on success). The B0 global query filter confines SharedCredential to

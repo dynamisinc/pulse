@@ -10,6 +10,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Pulse.WebApi.Data.Extensions;
+using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.ExerciseConfiguration;
 using Pulse.WebApi.Features.ExerciseConfiguration.PracticeMode;
 using Pulse.WebApi.Features.Identity.Staff;
@@ -146,6 +147,7 @@ public sealed class PracticeModeRegistrationTests
         services.AddLogging();
         services.AddPulsePersistence(configuration);
         services.AddExerciseScoping();
+        services.AddExerciseClock(); // engine-runtime/08: IScenarioNow (+ the clock it reads)
         services.AddScoped<StaffAssignmentService>();
         services.RemoveAll<ICurrentStaffSessionAccessor>();
         services.AddScoped<ICurrentStaffSessionAccessor>(_ => new StubCurrentStaffSessionAccessor(null));

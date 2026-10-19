@@ -95,7 +95,7 @@ public sealed class DayWordService
     private readonly ICurrentStaffSessionAccessor _staffSession;
     private readonly ExerciseFactsReader _factsReader;
     private readonly ISharedCredentialHasher _hasher;
-    private readonly IExerciseClock _exerciseClock;
+    private readonly IScenarioNow _scenarioNow;
     private readonly TimeProvider _timeProvider;
     private readonly EasyLoginOptions _options;
     private readonly ILogger<DayWordService> _logger;
@@ -106,7 +106,7 @@ public sealed class DayWordService
     /// <param name="staffSession">Identifies the authenticated staff caller (the acting human).</param>
     /// <param name="factsReader">The feature's one read of the exercise row (zone, tenant, scenario fallback).</param>
     /// <param name="hasher">The slow-KDF hasher the normalised word is stored under.</param>
-    /// <param name="exerciseClock">The native exercise clock, for the telemetry scenario time.</param>
+    /// <param name="scenarioNow">The exercise's scenario now for telemetry (engine-runtime/08, CLK-2: clock, else latest post, else now).</param>
     /// <param name="timeProvider">The wall clock (a fake in tests).</param>
     /// <param name="options">The easy-login options (the day rollover hour).</param>
     /// <param name="logger">Logs the once-per-exercise time-zone fallback warning (never a word).</param>
@@ -116,7 +116,7 @@ public sealed class DayWordService
         ICurrentStaffSessionAccessor staffSession,
         ExerciseFactsReader factsReader,
         ISharedCredentialHasher hasher,
-        IExerciseClock exerciseClock,
+        IScenarioNow scenarioNow,
         TimeProvider timeProvider,
         IOptions<EasyLoginOptions> options,
         ILogger<DayWordService> logger)
@@ -126,7 +126,7 @@ public sealed class DayWordService
         ArgumentNullException.ThrowIfNull(staffSession);
         ArgumentNullException.ThrowIfNull(factsReader);
         ArgumentNullException.ThrowIfNull(hasher);
-        ArgumentNullException.ThrowIfNull(exerciseClock);
+        ArgumentNullException.ThrowIfNull(scenarioNow);
         ArgumentNullException.ThrowIfNull(timeProvider);
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(logger);
@@ -136,7 +136,7 @@ public sealed class DayWordService
         _staffSession = staffSession;
         _factsReader = factsReader;
         _hasher = hasher;
-        _exerciseClock = exerciseClock;
+        _scenarioNow = scenarioNow;
         _timeProvider = timeProvider;
         _options = options.Value;
         _logger = logger;
@@ -285,7 +285,7 @@ public sealed class DayWordService
         //    between. No 409: the caller asked for this word to be the date's word, and at our commit it is. Exactly
         //    one credential.rotated is written, with the save that commits. Bounded by MaxWriteAttempts: past it the
         //    last exception propagates (it names the table, index or key, never the word) rather than loop.
-        var eventTime = EasyLoginEventTime.For(context.ExerciseId, context.Facts, _exerciseClock, now);
+        var eventTime = await EasyLoginEventTime.ForAsync(context.ExerciseId, context.Facts, _scenarioNow, now, cancellationToken);
         bool replaced;
         for (var attempt = 1; ; attempt++)
         {
@@ -381,7 +381,7 @@ public sealed class DayWordService
         // request, and the staff member closing the word path must not be left with a word still open that they never
         // saw); a row another clear already removed is the idempotent no-op (that clear wrote the one
         // credential.revoked; this one writes none). Bounded by MaxWriteAttempts, exactly as a set.
-        var eventTime = EasyLoginEventTime.For(context.ExerciseId, context.Facts, _exerciseClock, now);
+        var eventTime = await EasyLoginEventTime.ForAsync(context.ExerciseId, context.Facts, _scenarioNow, now, cancellationToken);
         for (var attempt = 1; ; attempt++)
         {
             var row = await FindRowAsync(context.ExerciseId, date, cancellationToken);

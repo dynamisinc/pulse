@@ -64,16 +64,18 @@ public sealed partial class PostEditService
     private readonly IExerciseClock? _exerciseClock;
     private readonly PauseTierRegistry? _pauseTiers;
     private readonly ILogger<PostEditService> _logger;
+    private readonly IScenarioNow _scenarioNow;
 
     /// <summary>Creates the service.</summary>
     /// <param name="dbContext">The request's persistence context.</param>
     /// <param name="exerciseContext">The server-resolved exercise scope — the only source of "which exercise".</param>
     /// <param name="sessionPersonaAccessor">The caller's session-bound persona (the participant arm).</param>
     /// <param name="staffSessionAccessor">The caller's live staff session, if any (refused, DF-32).</param>
-    /// <param name="exerciseFacts">The exercise's lifecycle status, time zone and stored scenario time.</param>
+    /// <param name="exerciseFacts">The exercise's lifecycle status and time zone.</param>
     /// <param name="broadcaster">The exercise-group fan-out (<c>PostEdited</c>).</param>
     /// <param name="projector">The participant projection of the edited post (the 200 body).</param>
     /// <param name="timeProvider">The server wall clock (window, <see cref="PostEdit.EditedAt"/>, telemetry).</param>
+    /// <param name="scenarioNow">The exercise's scenario now for telemetry (engine-runtime/08, CLK-2: clock, else latest post, else now).</param>
     /// <param name="exerciseClock">The live scenario clock, when the host runs one.</param>
     /// <param name="pauseTiers">The pause-tier registry, when the host runs one (Freeze refuses an edit).</param>
     /// <param name="logger">Diagnostics (a failed push after commit); optional.</param>
@@ -86,6 +88,7 @@ public sealed partial class PostEditService
         IFeedBroadcaster broadcaster,
         IParticipantPostProjector projector,
         TimeProvider timeProvider,
+        IScenarioNow scenarioNow,
         IExerciseClock? exerciseClock = null,
         PauseTierRegistry? pauseTiers = null,
         ILogger<PostEditService>? logger = null)
@@ -98,6 +101,7 @@ public sealed partial class PostEditService
         ArgumentNullException.ThrowIfNull(broadcaster);
         ArgumentNullException.ThrowIfNull(projector);
         ArgumentNullException.ThrowIfNull(timeProvider);
+        ArgumentNullException.ThrowIfNull(scenarioNow);
 
         _dbContext = dbContext;
         _exerciseContext = exerciseContext;
@@ -110,6 +114,7 @@ public sealed partial class PostEditService
         _exerciseClock = exerciseClock;
         _pauseTiers = pauseTiers;
         _logger = logger ?? NullLogger<PostEditService>.Instance;
+        _scenarioNow = scenarioNow;
     }
 
     /// <summary>Applies one edit of the caller's own post, or refuses it.</summary>
@@ -218,10 +223,9 @@ public sealed partial class PostEditService
             return PostEditResult.Refused(PostEditRefusalReasons.EditLimit);
         }
 
-        // Scenario time only (COR-053): the live clock, else the stored exercise time, else the post's own creation
-        // scenario time — NEVER the wall clock (Gate-1 L-2).
-        var scenarioTime = _exerciseClock?.CurrentScenarioTime(exerciseId)
-            ?? facts?.StoredScenarioTime
+        // Scenario time only (COR-053): the exercise's scenario now (engine-runtime/08: the live clock, else its latest
+        // post), else the post's own creation scenario time — NEVER the wall clock (Gate-1 L-2).
+        var scenarioTime = await _scenarioNow.FindAsync(exerciseId, cancellationToken)
             ?? post.CreatedScenarioTime;
 
         var edit = new PostEdit

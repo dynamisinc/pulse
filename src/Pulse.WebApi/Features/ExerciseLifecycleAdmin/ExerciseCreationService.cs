@@ -366,9 +366,9 @@ public sealed class ExerciseCreationService
         },
         WallClockTime = now,
 
-        // COR-053: a brand-new exercise has no stored scenario instant yet, so the created event carries the
-        // wall clock as its scenario time — the same placeholder every other pre-COR-050 staff event uses.
-        ScenarioTime = exercise.CurrentScenarioTime ?? now,
+        // COR-053 / engine-runtime/08 (CLK-2): the exercise is not even saved yet, so it has neither a running clock nor
+        // posts and its scenario now IS the operation's wall-clock read; no resolver query is needed for it.
+        ScenarioTime = now,
         TimeZone = exercise.TimeZone,
         Target = new TelemetryTarget { EntityType = ExerciseEntityType, EntityId = exercise.Id.ToString() },
         Payload = string.Create(

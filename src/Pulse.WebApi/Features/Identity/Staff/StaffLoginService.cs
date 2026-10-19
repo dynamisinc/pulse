@@ -3,6 +3,7 @@ namespace Pulse.WebApi.Features.Identity.Staff;
 using Microsoft.EntityFrameworkCore;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
+using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.Identity.Providers;
 using Pulse.WebApi.Features.Identity.Sessions;
 
@@ -26,9 +27,9 @@ using Pulse.WebApi.Features.Identity.Sessions;
 /// </para>
 /// <para>
 /// <b>Server-authoritative &amp; fail-closed.</b> Wall-clock is the server clock (one read shared by the entity
-/// mutation and its telemetry). Scenario time is the exercise's stored <see cref="Exercise.CurrentScenarioTime"/>
-/// (a documented B2 placeholder until the COR-050 backend clock lands in B3; falls back to the wall clock when
-/// unset). A rejected credential yields no session and a failure event that carries NO session identity. The
+/// mutation and its telemetry). Scenario time is
+/// the exercise's scenario now from <see cref="Pulse.WebApi.Features.EngineRuntime.Clock.IScenarioNow"/> (engine-runtime/08:
+/// the running clock, else the latest post, else the wall clock). A rejected credential yields no session and a failure event that carries NO session identity. The
 /// <see cref="IIdentityProvider"/> never logs the secret (NFR-009).
 /// </para>
 /// </remarks>
@@ -44,23 +45,28 @@ public sealed class StaffLoginService
     private readonly PulseDbContext _dbContext;
     private readonly IIdentityProvider _identityProvider;
     private readonly ISessionIssuer _sessionIssuer;
+    private readonly IScenarioNow _scenarioNow;
 
     /// <summary>Creates the staff-login funnel over its collaborators.</summary>
     /// <param name="dbContext">The persistence context the StaffUser mutation and telemetry event are written through.</param>
     /// <param name="identityProvider">The provider-agnostic staff authentication seam (Phase-1 Dynamis impl).</param>
     /// <param name="sessionIssuer">The story-03 session-issuance seam this login calls to mint the session.</param>
+    /// <param name="scenarioNow">The exercise's scenario now for telemetry (engine-runtime/08, CLK-2: clock, else latest post, else now).</param>
     public StaffLoginService(
         PulseDbContext dbContext,
         IIdentityProvider identityProvider,
-        ISessionIssuer sessionIssuer)
+        ISessionIssuer sessionIssuer,
+        IScenarioNow scenarioNow)
     {
         ArgumentNullException.ThrowIfNull(dbContext);
         ArgumentNullException.ThrowIfNull(identityProvider);
         ArgumentNullException.ThrowIfNull(sessionIssuer);
+        ArgumentNullException.ThrowIfNull(scenarioNow);
 
         _dbContext = dbContext;
         _identityProvider = identityProvider;
         _sessionIssuer = sessionIssuer;
+        _scenarioNow = scenarioNow;
     }
 
     /// <summary>
@@ -94,8 +100,9 @@ public sealed class StaffLoginService
         }
 
         // 2. Validate the exercise resolves to a real Exercise BEFORE anything is stamped with it (Wave-0
-        //    deferred FKs → service-layer validation), and load its scenario-time placeholder + time zone for
-        //    the telemetry envelope. Exercise is the scope root (never IExerciseScoped), so this is unfiltered.
+        //    deferred FKs → service-layer validation), and load its organization + time zone for the telemetry
+        //    envelope. Exercise is the scope root (never IExerciseScoped), so this is unfiltered. (Its scenario now is
+        //    resolved only AFTER authentication, below: engine-runtime/08.)
         // org-scope-exempt(TenantChecked): exerciseId here IS client-supplied (the login body names the
         // exercise), so this read is deliberately unbounded — a tenant bound would need a tenant that does
         // not exist yet. The cross-customer case is refused below by the explicit
@@ -111,7 +118,6 @@ public sealed class StaffLoginService
         }
 
         var now = DateTimeOffset.UtcNow;
-        var scenarioTime = exercise.CurrentScenarioTime ?? now;
 
         // 3. identity-auth-roles/15 (Gate-1 M-3): a person with a PULSE password gets the same per-person lockout and
         //    disable as the org sign-in. A locked-out or disabled person is refused with the uniform failure WITHOUT
@@ -121,9 +127,12 @@ public sealed class StaffLoginService
             _dbContext, username, exercise.OrganizationId, cancellationToken);
         if (passwordPerson is not null && StaffSignInLockout.IsBlocked(passwordPerson, now))
         {
+            // Refused WITHOUT authenticating, so no scenario-now resolution runs for it (engine-runtime/08 W-2: no
+            // resolver / post read keyed by the body-supplied exercise id before authentication). The staff-only
+            // telemetry event carries the operation's wall-clock read as its scenario time.
             _dbContext.TelemetryEvents.Add(BuildLoginTelemetry(
                 exerciseId, role: null, actingHumanId: null, outcome: FailureOutcomePayload,
-                now: now, scenarioTime: scenarioTime, timeZone: exercise.TimeZone, targetStaffUserId: null));
+                now: now, scenarioTime: now, timeZone: exercise.TimeZone, targetStaffUserId: null));
             await _dbContext.SaveChangesAsync(cancellationToken);
 
             return StaffLoginResult.Rejected();
@@ -135,6 +144,14 @@ public sealed class StaffLoginService
         var authentication = await _identityProvider.AuthenticateAsync(
             new StaffCredentials { Username = username, Secret = request.Secret, OrganizationId = exercise.OrganizationId },
             cancellationToken);
+
+        // engine-runtime/08 (CLK-2): the exercise's scenario now (the clock, else its latest post, else now), resolved
+        // ONCE, only AFTER the provider has answered (W-2): an unauthenticated caller cannot drive a post read by naming
+        // an exercise in the login body before the credential check. It is shared by every telemetry event below
+        // (failure and success). The id came from the body but names a real exercise row (checked above), and the value
+        // is stamped only onto that exercise's own staff telemetry; it is never returned to the caller. Hits the
+        // database only when no clock is running (one MAX over the exercise's posts).
+        var scenarioTime = await _scenarioNow.GetAsync(exercise.Id, now, cancellationToken);
 
         if (authentication.Outcome != StaffAuthenticationOutcome.Authenticated || authentication.Identity is null)
         {

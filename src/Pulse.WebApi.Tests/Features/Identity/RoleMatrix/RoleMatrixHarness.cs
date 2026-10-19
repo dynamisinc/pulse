@@ -172,7 +172,6 @@ public sealed class RoleMatrixWorld
             Hostname = world.Hostname,
             TimeZone = "UTC",
             Status = status,
-            CurrentScenarioTime = DateTimeOffset.Parse("2026-10-16T09:00:00Z", System.Globalization.CultureInfo.InvariantCulture),
         });
 
         world.PersonaId = Guid.NewGuid();

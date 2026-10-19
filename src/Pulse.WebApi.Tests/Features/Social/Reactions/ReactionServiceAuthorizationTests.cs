@@ -13,6 +13,7 @@ using Pulse.WebApi.Features.Social.Engagement;
 using Pulse.WebApi.Features.Social.Follows;
 using Pulse.WebApi.Features.Social.Reactions;
 using Pulse.WebApi.Tests.Features.Social;
+using Pulse.WebApi.Tests.Features.EngineRuntime.Clock;
 
 /// <summary>
 /// The reaction service's identity gate (DP-10) in isolation, model-only: every refusal here is decided BEFORE any
@@ -129,7 +130,8 @@ public sealed class ReactionServiceAuthorizationTests
             new ExerciseClockService(TimeProvider.System),
             new PostEngagementReader(dbContext, exerciseContext),
             new FakeFeedBroadcaster(),
-            NullLogger<ReactionService>.Instance);
+            NullLogger<ReactionService>.Instance,
+            TestScenarioNow.Over(dbContext));
     }
 
     private sealed class StubAccessor : ICurrentSessionPersonaAccessor

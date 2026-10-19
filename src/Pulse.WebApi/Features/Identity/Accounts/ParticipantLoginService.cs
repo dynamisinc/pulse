@@ -3,6 +3,7 @@ namespace Pulse.WebApi.Features.Identity.Accounts;
 using Microsoft.EntityFrameworkCore;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
+using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.Identity.EasyLogin;
 using Pulse.WebApi.Features.Identity.Sessions;
 
@@ -28,9 +29,9 @@ using Pulse.WebApi.Features.Identity.Sessions;
 /// </para>
 /// <para>
 /// <b>Server-authoritative &amp; scenario time.</b> Wall-clock is the server clock (one read shared by the
-/// account mutation and its telemetry). Scenario time is the exercise's stored
-/// <see cref="Exercise.CurrentScenarioTime"/> (a documented B2 placeholder until the COR-050 backend clock lands
-/// in B3; falls back to the wall clock when unset). Brute-force lockout is deliberately NOT handled here (it is
+/// account mutation and its telemetry). Scenario time is
+/// the exercise's scenario now from <see cref="Pulse.WebApi.Features.EngineRuntime.Clock.IScenarioNow"/> (engine-runtime/08:
+/// the running clock, else the latest post, else the wall clock). Brute-force lockout is deliberately NOT handled here (it is
 /// story 07); per-IP rate limiting is applied at the endpoint (NFR-009). The password is never logged (NFR-009).
 /// </para>
 /// <para>
@@ -67,27 +68,32 @@ public sealed class ParticipantLoginService
     private readonly IExerciseContext _exerciseContext;
     private readonly ISessionIssuer _sessionIssuer;
     private readonly ParticipantPasswordHasher _passwordHasher;
+    private readonly IScenarioNow _scenarioNow;
 
     /// <summary>Creates the participant-login funnel over its collaborators.</summary>
     /// <param name="dbContext">The persistence context the account mutation and telemetry event are written through.</param>
     /// <param name="exerciseContext">The host-resolved exercise scope the login matches an account against.</param>
     /// <param name="sessionIssuer">The story-03 session-issuance seam this login calls to mint the participant session.</param>
     /// <param name="passwordHasher">The slow-KDF credential verifier (constant-time, enumeration-resistant).</param>
+    /// <param name="scenarioNow">The exercise's scenario now for telemetry (engine-runtime/08, CLK-2: clock, else latest post, else now).</param>
     public ParticipantLoginService(
         PulseDbContext dbContext,
         IExerciseContext exerciseContext,
         ISessionIssuer sessionIssuer,
-        ParticipantPasswordHasher passwordHasher)
+        ParticipantPasswordHasher passwordHasher,
+        IScenarioNow scenarioNow)
     {
         ArgumentNullException.ThrowIfNull(dbContext);
         ArgumentNullException.ThrowIfNull(exerciseContext);
         ArgumentNullException.ThrowIfNull(sessionIssuer);
         ArgumentNullException.ThrowIfNull(passwordHasher);
+        ArgumentNullException.ThrowIfNull(scenarioNow);
 
         _dbContext = dbContext;
         _exerciseContext = exerciseContext;
         _sessionIssuer = sessionIssuer;
         _passwordHasher = passwordHasher;
+        _scenarioNow = scenarioNow;
     }
 
     /// <summary>
@@ -156,7 +162,9 @@ public sealed class ParticipantLoginService
         }
 
         var now = DateTimeOffset.UtcNow;
-        var scenarioTime = exercise.CurrentScenarioTime ?? now;
+        // engine-runtime/08 (CLK-2): the clock, else the exercise's latest post, else now. Hits the database only when
+        // no clock is running (one MAX over the exercise's posts).
+        var scenarioTime = await _scenarioNow.GetAsync(exercise.Id, now, cancellationToken);
 
         // 4. Resolve the account within the host-resolved scope. The GLOBAL query filter confines this to the
         //    resolved exercise — a handle from another exercise is simply invisible (the isolation guarantee).

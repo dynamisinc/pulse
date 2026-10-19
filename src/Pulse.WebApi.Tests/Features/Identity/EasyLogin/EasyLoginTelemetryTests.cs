@@ -4,6 +4,8 @@ using System;
 using System.Collections.Generic;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Threading.Tasks;
+using System.Threading;
 using FluentAssertions;
 using Moq;
 using Pulse.WebApi.Data.Entities;
@@ -232,22 +234,23 @@ public sealed class EasyLoginTelemetryTests
     }
 
     [Fact]
-    public void EventTime_PrefersTheLiveClock_ThenTheStoredScenarioTime_ThenTheWallClock()
+    public async Task EventTime_StampsTheScenarioNowResolver_ElseTheWallClock()
     {
+        // engine-runtime/08 (CLK-2): the event's scenario time is IScenarioNow's answer for THIS exercise (the clock,
+        // else the latest post, else the caller's now), passed the caller's one wall-clock read.
         var now = new DateTimeOffset(2026, 10, 20, 13, 0, 0, TimeSpan.Zero);
-        var stored = new DateTimeOffset(2033, 6, 14, 8, 0, 0, TimeSpan.Zero);
-        var live = new DateTimeOffset(2033, 6, 14, 9, 0, 0, TimeSpan.Zero);
-        var facts = new ExerciseFacts("Ex", "America/New_York", "live", Guid.NewGuid(), stored);
+        var world = new DateTimeOffset(2033, 6, 14, 9, 0, 0, TimeSpan.Zero);
+        var facts = new ExerciseFacts("Ex", "America/New_York", "live", Guid.NewGuid());
+        var resolver = new Mock<IScenarioNow>();
+        resolver.Setup(r => r.GetAsync(ExerciseId, now, It.IsAny<CancellationToken>())).ReturnsAsync(world);
 
-        var running = Mock.Of<IExerciseClock>(c => c.CurrentScenarioTime(ExerciseId) == live);
-        var stopped = Mock.Of<IExerciseClock>(c => c.CurrentScenarioTime(ExerciseId) == null);
-
-        EasyLoginEventTime.For(ExerciseId, facts, running, now).Should().Be(new EasyLoginEventTime(now, live, "America/New_York"));
-        EasyLoginEventTime.For(ExerciseId, facts, stopped, now).ScenarioTime.Should().Be(stored);
-        EasyLoginEventTime.For(ExerciseId, facts with { StoredScenarioTime = null }, null, now).ScenarioTime.Should().Be(now);
-        EasyLoginEventTime.For(ExerciseId, facts with { TimeZone = " " }, null, now).TimeZone.Should().Be(
+        (await EasyLoginEventTime.ForAsync(ExerciseId, facts, resolver.Object, now))
+            .Should().Be(new EasyLoginEventTime(now, world, "America/New_York"));
+        (await EasyLoginEventTime.ForAsync(ExerciseId, facts, null, now)).ScenarioTime.Should().Be(
+            now, "a host without the resolver keeps the wall clock");
+        (await EasyLoginEventTime.ForAsync(ExerciseId, facts with { TimeZone = " " }, null, now)).TimeZone.Should().Be(
             "UTC", "the envelope time zone is required, so a blank stored zone becomes UTC");
-        EasyLoginEventTime.For(ExerciseId, null, null, now).Should().Be(new EasyLoginEventTime(now, now, "UTC"));
+        (await EasyLoginEventTime.ForAsync(ExerciseId, null, null, now)).Should().Be(new EasyLoginEventTime(now, now, "UTC"));
     }
 
     private static TelemetryEvent Build(string builder) => builder switch

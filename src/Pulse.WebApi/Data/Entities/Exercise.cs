@@ -14,8 +14,8 @@ namespace Pulse.WebApi.Data.Entities;
 /// the migration can add them to the existing table and the frozen wire fields are never null.
 /// </para>
 /// <para>
-/// <see cref="CurrentScenarioTime"/> is a DOCUMENTED PLACEHOLDER (mirroring B1's approach): B2 auth telemetry
-/// stamps <c>scenarioTime</c> from it until the native backend scenario clock (COR-050) lands in Phase B3.
+/// <see cref="CurrentScenarioTime"/> is RETIRED (engine-runtime/08, CLK-2): it was a B2 placeholder that nothing ever
+/// wrote. Scenario time now comes from <c>IScenarioNow</c> (the running clock, else the latest post, else now).
 /// </para>
 /// <para>
 /// <b>Exercise-configuration story 01a (the feature's ONE migration).</b> The COR-030 settings, the COR-031
@@ -139,9 +139,11 @@ public sealed class Exercise : IOrganizationOwned
     public string Status { get; set; } = "build";
 
     /// <summary>
-    /// B2 PLACEHOLDER (COR-050 follow-up): the exercise's stored scenario-time instant that auth telemetry
-    /// stamps as <c>scenarioTime</c> until the native backend scenario clock lands in Phase B3. Nullable —
-    /// absent until configured. NOT a participant-visible field on any wire shape frozen this wave.
+    /// RETIRED (engine-runtime/08, decision CLK-2). Formerly the B2 placeholder for a stored scenario instant; no
+    /// production code ever wrote it, so every reader fell through to wall-clock now. Nothing reads or writes it any
+    /// more: the exercise's scenario now comes from <c>Pulse.WebApi.Features.EngineRuntime.Clock.IScenarioNow</c> (the
+    /// running clock, else the latest post's scenario time, else now). The column stays in the schema, unused, for a
+    /// later migration to drop. Do not read or write it (a source guard test fails the build of any reader).
     /// </summary>
     public DateTimeOffset? CurrentScenarioTime { get; set; }
 

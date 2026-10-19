@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
+using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.Identity.Staff;
 
 /// <summary>
@@ -144,23 +145,28 @@ public sealed class ExerciseLifecycleService
     private readonly PulseDbContext _dbContext;
     private readonly IExerciseContext _exerciseContext;
     private readonly ICurrentStaffSessionAccessor _currentStaffSession;
+    private readonly IScenarioNow _scenarioNow;
 
     /// <summary>Creates the service over persistence, the resolved scope, and the staff-session seam.</summary>
     /// <param name="dbContext">The persistence context the status is read and written through.</param>
     /// <param name="exerciseContext">The server-resolved exercise scope — the ONLY source of "which exercise".</param>
     /// <param name="currentStaffSession">Identifies the acting staff human for the XC-004 event.</param>
+    /// <param name="scenarioNow">The exercise's scenario now for telemetry (engine-runtime/08, CLK-2: clock, else latest post, else now).</param>
     public ExerciseLifecycleService(
         PulseDbContext dbContext,
         IExerciseContext exerciseContext,
-        ICurrentStaffSessionAccessor currentStaffSession)
+        ICurrentStaffSessionAccessor currentStaffSession,
+        IScenarioNow scenarioNow)
     {
         ArgumentNullException.ThrowIfNull(dbContext);
         ArgumentNullException.ThrowIfNull(exerciseContext);
         ArgumentNullException.ThrowIfNull(currentStaffSession);
+        ArgumentNullException.ThrowIfNull(scenarioNow);
 
         _dbContext = dbContext;
         _exerciseContext = exerciseContext;
         _currentStaffSession = currentStaffSession;
+        _scenarioNow = scenarioNow;
     }
 
     /// <summary>
@@ -350,6 +356,9 @@ public sealed class ExerciseLifecycleService
             exercise.FirstLiveAt = now;
         }
 
+        // engine-runtime/08 (CLK-2): the clock, else the exercise's latest post, else this operation's now.
+        var scenarioTime = await _scenarioNow.GetAsync(exerciseId, now, cancellationToken);
+
         _dbContext.TelemetryEvents.Add(new TelemetryEvent
         {
             EventId = Guid.NewGuid().ToString(),
@@ -369,9 +378,9 @@ public sealed class ExerciseLifecycleService
             },
             WallClockTime = now,
 
-            // Scenario time is the exercise's stored instant (the documented B2/B3 placeholder), never
-            // re-derived from the server clock when one is persisted (COR-053).
-            ScenarioTime = exercise.CurrentScenarioTime ?? now,
+            // Scenario time is the exercise's scenario now (engine-runtime/08): the clock, else the latest post, and
+            // only wall-clock now when the exercise has neither (COR-053).
+            ScenarioTime = scenarioTime,
             TimeZone = exercise.TimeZone,
             Target = new TelemetryTarget { EntityType = "exercise", EntityId = exerciseId.ToString() },
             Payload = JsonSerializer.Serialize(new LifecycleTransitionPayload

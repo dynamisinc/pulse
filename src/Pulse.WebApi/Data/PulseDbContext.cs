@@ -264,7 +264,7 @@ public class PulseDbContext : DbContext
             // through the transition on purpose — the frontend guard accepts the transitional superset, which
             // is what makes UAT's independent frontend/backend deploys safe (isExerciseStatus fails closed).
             entity.Property(e => e.Status).IsRequired().HasDefaultValue("build");
-            // CurrentScenarioTime is nullable by its C# type (B2 placeholder) — no extra config.
+            // CurrentScenarioTime is nullable by its C# type (RETIRED by engine-runtime/08; unused, kept for a later drop).
 
             // ---------------------------------------------------------------------------------------
             // Exercise-configuration story 01a — the feature's ONE migration. COR-030 settings, the COR-031
@@ -396,6 +396,12 @@ public class PulseDbContext : DbContext
             entity.HasKey(e => e.Id);
             entity.Property(e => e.ExerciseId).IsRequired();
             entity.HasIndex(e => e.ExerciseId);
+            // engine-runtime/08 (CLK-2): the scenario-now resolver's post tier is ONE MAX(CreatedScenarioTime) per exercise
+            // (WHERE ExerciseId = @id). This composite answers it as a single seek to the end of the exercise's range
+            // instead of scanning every row of a busy exercise. The single-column ExerciseId index above is kept on purpose:
+            // dropping it is not this story's change (its migration only adds this index), it is the narrowest index for
+            // the per-exercise COUNT/filter reads, and the filtered (ExerciseId, PinnedForAllAt) index already coexists with it.
+            entity.HasIndex(e => new { e.ExerciseId, e.CreatedScenarioTime });
             // RumorRef / MutationOf / DeletedAt are reserved nullable columns (E8 rumor model + XC-010
             // soft-delete); left nullable by their C# type — no extra config needed.
             // Provenance columns (Origin / ActingHumanId / CreatedWallClock — NOT NULL; InjectId — NULL)

@@ -14,6 +14,7 @@ using Pulse.WebApi.Features.Ops.OrgAdminSeed;
 using Pulse.WebApi.Tests.Data;
 using Pulse.WebApi.Tests.Features.Identity.Staff;
 using Xunit;
+using Pulse.WebApi.Tests.Features.EngineRuntime.Clock;
 
 /// <summary>
 /// THE test this whole feature exists to make pass: a seeded <c>orgAdmin</c> must be an identity the REAL staff
@@ -127,7 +128,7 @@ public sealed class OrgAdminSeedIdentityTests
 
         // The REAL login funnel, over the REAL provider, reading the SAME allowlist an operator would configure.
         var issuer = new RecordingSessionIssuer();
-        var login = new StaffLoginService(context, new DynamisIdentityProvider(allowlist), issuer);
+        var login = new StaffLoginService(context, new DynamisIdentityProvider(allowlist), issuer, TestScenarioNow.Over(context));
 
         var loginResult = await login.LoginAsync(new StaffLoginRequest
         {
@@ -201,7 +202,7 @@ public sealed class OrgAdminSeedIdentityTests
             + "'resolve or refuse' logic resolves");
 
         var issuer = new RecordingSessionIssuer();
-        var login = new StaffLoginService(context, new DynamisIdentityProvider(allowlist), issuer);
+        var login = new StaffLoginService(context, new DynamisIdentityProvider(allowlist), issuer, TestScenarioNow.Over(context));
         var loginResult = await login.LoginAsync(new StaffLoginRequest
         {
             Username = DefaultOrgAdminAccount.Username,

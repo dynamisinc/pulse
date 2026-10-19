@@ -77,7 +77,8 @@ public sealed class EngineContentSeedServiceTests
         EngineAutonomyRegistry autonomy,
         string configuredSecret = ConfiguredSecret,
         TimeProvider? timeProvider = null,
-        IAddressingInbox? addressingInbox = null) =>
+        IAddressingInbox? addressingInbox = null,
+        IExerciseClock? clock = null) =>
         new(
             db,
             Options.Create(new BootstrapOptions { Secret = configuredSecret }),
@@ -85,6 +86,7 @@ public sealed class EngineContentSeedServiceTests
             registry,
             addressingInbox ?? new AddressingInbox(),
             autonomy,
+            TestScenarioNow.Over(db, clock, timeProvider: timeProvider),
             timeProvider ?? TimeProvider.System,
             NullLogger<EngineContentSeedService>.Instance);
 
@@ -275,6 +277,75 @@ public sealed class EngineContentSeedServiceTests
         await using var verify = _fixture.CreateContext();
         (await verify.Personas.IgnoreQueryFilters().CountAsync(p => p.ExerciseId == exerciseId)).Should().Be(
             9, "re-running the seed creates zero additional persona rows (AC4)");
+    }
+
+    [RequiresDockerFact]
+    public async Task Seed_ColdClock_StartsAtTheLatestPost_A2033WorldStaysIn2033()
+    {
+        // engine-runtime/08 (CLK-1): a cold clock starts where the world is, never back at the real date.
+        var hostname = UniqueHostname();
+        var exerciseId = await InsertExerciseAsync(hostname);
+        var latest = new DateTimeOffset(2033, 6, 14, 11, 30, 0, TimeSpan.FromHours(-4));
+        await ScenarioNowResolverTests.AddPostAsync(_fixture, exerciseId, latest.AddHours(-2));
+        await ScenarioNowResolverTests.AddPostAsync(_fixture, exerciseId, latest);
+        await ScenarioNowResolverTests.AddPostAsync(_fixture, Guid.NewGuid(), latest.AddYears(2)); // another exercise
+        var registry = new ReactionLoopRegistry();
+        var wallNow = new DateTimeOffset(2026, 10, 19, 15, 0, 0, TimeSpan.Zero);
+
+        await using (var db = _fixture.CreateContext())
+        {
+            await BuildService(db, registry, new EngineAutonomyRegistry(), timeProvider: new ManualTimeProvider(wallNow))
+                .SeedAsync(new EngineContentSeedRequest { Hostname = hostname }, ConfiguredSecret);
+        }
+
+        registry.Active.Single(r => r.ExerciseId == exerciseId).ScenarioStart.Should().Be(
+            latest, "the loop's first tick starts the cold clock at the exercise's latest post (CLK-1), not at wall-clock "
+            + "now and never at another exercise's later post (COR-001)");
+
+        await using var verify = _fixture.CreateContext();
+        var evt = await verify.TelemetryEvents.IgnoreQueryFilters()
+            .SingleAsync(e => e.ExerciseId == exerciseId && e.EventType == "engine.content_seeded");
+        evt.ScenarioTime.Should().Be(latest, "the seed event stamps the same scenario now");
+        evt.WallClockTime.Should().Be(wallNow, "wall-clock time is still the server clock");
+    }
+
+    [RequiresDockerFact]
+    public async Task Seed_ColdClock_NoPosts_StartsAtWallClockNow_AsBefore()
+    {
+        var hostname = UniqueHostname();
+        var exerciseId = await InsertExerciseAsync(hostname);
+        var registry = new ReactionLoopRegistry();
+        var wallNow = new DateTimeOffset(2026, 10, 19, 15, 0, 0, TimeSpan.Zero);
+
+        await using var db = _fixture.CreateContext();
+        await BuildService(db, registry, new EngineAutonomyRegistry(), timeProvider: new ManualTimeProvider(wallNow))
+            .SeedAsync(new EngineContentSeedRequest { Hostname = hostname }, ConfiguredSecret);
+
+        registry.Active.Single(r => r.ExerciseId == exerciseId).ScenarioStart.Should().Be(
+            wallNow, "a fresh exercise with no posts behaves as today: the clock starts at now");
+    }
+
+    [RequiresDockerFact]
+    public async Task Seed_RunningClock_IsNeverRestartedOrMoved()
+    {
+        var hostname = UniqueHostname();
+        var exerciseId = await InsertExerciseAsync(hostname);
+        await ScenarioNowResolverTests.AddPostAsync(_fixture, exerciseId, ScenarioStart.AddYears(1));
+        var time = new ManualTimeProvider(new DateTimeOffset(2026, 10, 19, 15, 0, 0, TimeSpan.Zero));
+        var clock = new ExerciseClockService(time);
+        clock.Start(exerciseId, ScenarioStart, TimeZoneInfo.Utc);
+        time.Advance(TimeSpan.FromMinutes(20));
+        var registry = new ReactionLoopRegistry();
+
+        await using var db = _fixture.CreateContext();
+        await BuildService(db, registry, new EngineAutonomyRegistry(), timeProvider: time, clock: clock)
+            .SeedAsync(new EngineContentSeedRequest { Hostname = hostname }, ConfiguredSecret);
+
+        clock.CurrentScenarioTime(exerciseId).Should().Be(
+            ScenarioStart.AddMinutes(20), "the seed never touches a running clock");
+        ReactionLoopHost.ShouldStartClock(clock, exerciseId).Should().BeFalse("and the loop will not restart it");
+        registry.Active.Single(r => r.ExerciseId == exerciseId).ScenarioStart.Should().Be(
+            ScenarioStart.AddMinutes(20), "the registration records where the running world is");
     }
 
     [RequiresDockerFact]

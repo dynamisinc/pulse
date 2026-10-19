@@ -8,6 +8,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
+using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.ExerciseResolution;
 
 /// <summary>
@@ -104,7 +105,7 @@ public sealed partial class AccessRejectionTelemetry
             var dbContext = services.GetRequiredService<PulseDbContext>();
 
             // Exercise is the scope ROOT (never IExerciseScoped), so this read is unfiltered. It supplies the
-            // envelope's scenario time + time zone, exactly as the login services do.
+            // envelope's time zone, exactly as the login services do.
             // org-scope-exempt(ResolvedScope): exerciseId.Value is the server-resolved scope for the rejected
             // request, never a client value; it only supplies the telemetry envelope's clock fields.
             var exercise = await dbContext.Exercises
@@ -115,12 +116,17 @@ public sealed partial class AccessRejectionTelemetry
                 return;
             }
 
+            // engine-runtime/08 (CLK-2): the clock, else the exercise's latest post, else now. Coalesced above, so a
+            // rejection flood pays this at most once per key per window.
+            var scenarioTime = await services.GetRequiredService<IScenarioNow>()
+                .GetAsync(exerciseId.Value, now, context.RequestAborted);
+
             dbContext.TelemetryEvents.Add(BuildRejectionTelemetry(
                 exerciseId.Value,
                 $"{method} {route}",
                 statusCode,
                 now,
-                exercise.CurrentScenarioTime ?? now,
+                scenarioTime,
                 exercise.TimeZone));
 
             await dbContext.SaveChangesAsync(context.RequestAborted);

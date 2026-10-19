@@ -90,7 +90,7 @@ public sealed class WordLoginService
     private readonly ISessionIssuer _sessionIssuer;
     private readonly ISharedCredentialHasher _hasher;
     private readonly ExerciseFactsReader _factsReader;
-    private readonly IExerciseClock _exerciseClock;
+    private readonly IScenarioNow _scenarioNow;
     private readonly TimeProvider _timeProvider;
     private readonly EasyLoginOptions _options;
     private readonly ILogger<WordLoginService> _logger;
@@ -101,7 +101,7 @@ public sealed class WordLoginService
     /// <param name="sessionIssuer">Mints the participant session, as for a password sign-in.</param>
     /// <param name="hasher">The slow-KDF verifier (real hash or decoy, exactly once per attempt).</param>
     /// <param name="factsReader">The feature's one read of the exercise row (zone, lifecycle status).</param>
-    /// <param name="exerciseClock">The native exercise clock, for the telemetry scenario time.</param>
+    /// <param name="scenarioNow">The exercise's scenario now for telemetry (engine-runtime/08, CLK-2: clock, else latest post, else now).</param>
     /// <param name="timeProvider">The wall clock (a fake in tests).</param>
     /// <param name="options">The easy-login options (the day rollover hour).</param>
     /// <param name="logger">Logs the once-per-exercise time-zone fallback warning (never a name or a word).</param>
@@ -111,7 +111,7 @@ public sealed class WordLoginService
         ISessionIssuer sessionIssuer,
         ISharedCredentialHasher hasher,
         ExerciseFactsReader factsReader,
-        IExerciseClock exerciseClock,
+        IScenarioNow scenarioNow,
         TimeProvider timeProvider,
         IOptions<EasyLoginOptions> options,
         ILogger<WordLoginService> logger)
@@ -121,7 +121,7 @@ public sealed class WordLoginService
         ArgumentNullException.ThrowIfNull(sessionIssuer);
         ArgumentNullException.ThrowIfNull(hasher);
         ArgumentNullException.ThrowIfNull(factsReader);
-        ArgumentNullException.ThrowIfNull(exerciseClock);
+        ArgumentNullException.ThrowIfNull(scenarioNow);
         ArgumentNullException.ThrowIfNull(timeProvider);
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(logger);
@@ -131,7 +131,7 @@ public sealed class WordLoginService
         _sessionIssuer = sessionIssuer;
         _hasher = hasher;
         _factsReader = factsReader;
-        _exerciseClock = exerciseClock;
+        _scenarioNow = scenarioNow;
         _timeProvider = timeProvider;
         _options = options.Value;
         _logger = logger;
@@ -256,7 +256,7 @@ public sealed class WordLoginService
         //    enabled after its session exists.
         account.LastLoginAt = now;
         _dbContext.TelemetryEvents.Add(EasyLoginTelemetry.LoginSucceeded(
-            exerciseId, account.Id, EasyLoginMethod.Word, EventTime(exerciseId, facts, now)));
+            exerciseId, account.Id, EasyLoginMethod.Word, await EventTimeAsync(exerciseId, facts, now, cancellationToken)));
         await _dbContext.SaveChangesAsync(cancellationToken);
 
         return WordLoginResult.Authenticated(issued);
@@ -299,7 +299,8 @@ public sealed class WordLoginService
 
         var target = nameIsTheAttemptedWord || nameIsTodaysWord ? null : attemptedSignInName;
 
-        _dbContext.TelemetryEvents.Add(EasyLoginTelemetry.WordLoginFailed(exerciseId, target, EventTime(exerciseId, facts, now)));
+        var time = await EventTimeAsync(exerciseId, facts, now, cancellationToken);
+        _dbContext.TelemetryEvents.Add(EasyLoginTelemetry.WordLoginFailed(exerciseId, target, time));
         await _dbContext.SaveChangesAsync(cancellationToken);
 
         return WordLoginResult.Rejected();
@@ -325,8 +326,9 @@ public sealed class WordLoginService
             ? _hasher.Verify(storedHash, normalizedName)
             : _hasher.VerifyDecoy(normalizedName);
 
-    private EasyLoginEventTime EventTime(Guid exerciseId, ExerciseFacts facts, DateTimeOffset now) =>
-        EasyLoginEventTime.For(exerciseId, facts, _exerciseClock, now);
+    private Task<EasyLoginEventTime> EventTimeAsync(
+        Guid exerciseId, ExerciseFacts facts, DateTimeOffset now, CancellationToken cancellationToken) =>
+        EasyLoginEventTime.ForAsync(exerciseId, facts, _scenarioNow, now, cancellationToken);
 }
 
 /// <summary>The outcome of a <see cref="WordLoginService.SignInAsync"/> call.</summary>

@@ -18,6 +18,7 @@ using Pulse.WebApi.Features.Social.Reactions;
 using Pulse.WebApi.Tests.Data;
 using Pulse.WebApi.Tests.Features.Social;
 using static Pulse.WebApi.Tests.Features.Social.Reactions.ReactionTestSeed;
+using Pulse.WebApi.Tests.Features.EngineRuntime.Clock;
 
 /// <summary>
 /// The concurrent double-submit fold for reactions (demo-polish B3, "Race-safe" AC), in BOTH directions. A racing
@@ -174,7 +175,8 @@ public class ReactionConcurrencyTests
             new ExerciseClockService(TimeProvider.System),
             new PostEngagementReader(context, exerciseContext),
             new FakeFeedBroadcaster(),
-            NullLogger<ReactionService>.Instance);
+            NullLogger<ReactionService>.Instance,
+            TestScenarioNow.Over(context));
     }
 
     /// <summary>Returns a fixed session persona, standing in for the request's authenticated session.</summary>

@@ -7,6 +7,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Extensions;
+using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.Identity.EasyLogin;
 using Pulse.WebApi.Features.Identity.Sessions;
 using Pulse.WebApi.Features.Identity.Staff;
@@ -28,6 +29,7 @@ public class SessionRegistrationTests
         services.AddDbContext<PulseDbContext>(options =>
             options.UseSqlServer("Server=nonexistent;Database=pulse;Trusted_Connection=False;Connect Timeout=1;"));
         services.AddExerciseScoping();
+        services.AddExerciseClock(); // engine-runtime/08: IScenarioNow (+ the clock it reads)
         return services;
     }
 

@@ -11,6 +11,7 @@ using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.Identity.SharedAccess;
 using Pulse.WebApi.Tests.Data;
 using Pulse.WebApi.Tests.Features.Identity.Staff;
+using Pulse.WebApi.Tests.Features.EngineRuntime.Clock;
 
 /// <summary>
 /// Integration tests for <see cref="SharedReadOnlyLoginService"/> (story 06, COR-015 / XC-004 / NFR-009) against
@@ -43,12 +44,12 @@ public sealed class SharedReadOnlyLoginServiceTests
             Name = $"Exercise {Guid.NewGuid():N}",
             TimeZone = timeZone,
             Status = "active",
-            CurrentScenarioTime = scenarioTime,
         };
 
         await using var seed = _fixture.CreateContext();
         seed.Exercises.Add(exercise);
         await seed.SaveChangesAsync();
+        await TestScenarioNow.SeedWorldTimeAsync(seed, exercise.Id, scenarioTime); // engine-runtime/08: the world's time is its latest post
         return exercise;
     }
 
@@ -86,7 +87,7 @@ public sealed class SharedReadOnlyLoginServiceTests
         var scope = ScopeFor(exercise.Id);
         await using (var context = _fixture.CreateContext(scope))
         {
-            var service = new SharedReadOnlyLoginService(context, scope, _hasher, issuer);
+            var service = new SharedReadOnlyLoginService(context, scope, _hasher, issuer, TestScenarioNow.Over(context));
             var result = await service.LoginAsync(new SharedReadOnlyLoginRequest { Password = Password });
 
             result.Outcome.Should().Be(SharedReadOnlyLoginOutcome.Authenticated);
@@ -119,7 +120,7 @@ public sealed class SharedReadOnlyLoginServiceTests
             "the ephemeral session identity is carried in actor.sessionId so views/reach are counted (COR-015)");
         evt.Payload.Should().Contain("success");
         evt.ScenarioTime.Should().Be(new DateTimeOffset(2033, 6, 14, 9, 0, 0, TimeSpan.FromHours(-5)),
-            "scenario time is stamped from the exercise's stored CurrentScenarioTime (B2 placeholder)");
+            "scenario time is the exercise's scenario now: its latest post (engine-runtime/08)");
         evt.TimeZone.Should().Be("America/Chicago");
     }
 
@@ -133,7 +134,7 @@ public sealed class SharedReadOnlyLoginServiceTests
         var scope = ScopeFor(exercise.Id);
         await using (var context = _fixture.CreateContext(scope))
         {
-            var service = new SharedReadOnlyLoginService(context, scope, _hasher, issuer);
+            var service = new SharedReadOnlyLoginService(context, scope, _hasher, issuer, TestScenarioNow.Over(context));
             var result = await service.LoginAsync(new SharedReadOnlyLoginRequest { Password = "WRONG-password" });
 
             result.Outcome.Should().Be(SharedReadOnlyLoginOutcome.Rejected, "a wrong password fails closed — never a default session");
@@ -157,7 +158,7 @@ public sealed class SharedReadOnlyLoginServiceTests
         var issuer = new RecordingSessionIssuer();
         var scope = ScopeFor(exercise.Id);
         await using var context = _fixture.CreateContext(scope);
-        var service = new SharedReadOnlyLoginService(context, scope, _hasher, issuer);
+        var service = new SharedReadOnlyLoginService(context, scope, _hasher, issuer, TestScenarioNow.Over(context));
 
         var result = await service.LoginAsync(new SharedReadOnlyLoginRequest { Password = Password });
 
@@ -175,7 +176,7 @@ public sealed class SharedReadOnlyLoginServiceTests
         var issuer = new RecordingSessionIssuer();
         var scope = ScopeFor(exercise.Id);
         await using var context = _fixture.CreateContext(scope);
-        var service = new SharedReadOnlyLoginService(context, scope, _hasher, issuer);
+        var service = new SharedReadOnlyLoginService(context, scope, _hasher, issuer, TestScenarioNow.Over(context));
 
         var result = await service.LoginAsync(new SharedReadOnlyLoginRequest { Password = Password });
 
@@ -193,7 +194,7 @@ public sealed class SharedReadOnlyLoginServiceTests
         var issuer = new RecordingSessionIssuer();
         var scope = ScopeFor(exercise.Id);
         await using var context = _fixture.CreateContext(scope);
-        var service = new SharedReadOnlyLoginService(context, scope, _hasher, issuer);
+        var service = new SharedReadOnlyLoginService(context, scope, _hasher, issuer, TestScenarioNow.Over(context));
 
         var result = await service.LoginAsync(new SharedReadOnlyLoginRequest { Password = Password });
 
@@ -213,7 +214,7 @@ public sealed class SharedReadOnlyLoginServiceTests
         var issuer = new RecordingSessionIssuer();
         var unscoped = new ExerciseContext(); // CurrentExerciseId == null
         await using var context = _fixture.CreateContext(unscoped);
-        var service = new SharedReadOnlyLoginService(context, unscoped, _hasher, issuer);
+        var service = new SharedReadOnlyLoginService(context, unscoped, _hasher, issuer, TestScenarioNow.Over(context));
 
         var result = await service.LoginAsync(new SharedReadOnlyLoginRequest { Password = Password });
 
@@ -238,7 +239,7 @@ public sealed class SharedReadOnlyLoginServiceTests
         var scopeB = ScopeFor(exerciseB.Id);
         await using (var context = _fixture.CreateContext(scopeB))
         {
-            var service = new SharedReadOnlyLoginService(context, scopeB, _hasher, new RecordingSessionIssuer());
+            var service = new SharedReadOnlyLoginService(context, scopeB, _hasher, new RecordingSessionIssuer(), TestScenarioNow.Over(context));
             var result = await service.LoginAsync(new SharedReadOnlyLoginRequest { Password = "password-for-A" });
 
             result.Outcome.Should().Be(SharedReadOnlyLoginOutcome.Rejected,
@@ -252,7 +253,7 @@ public sealed class SharedReadOnlyLoginServiceTests
         var scopeB2 = ScopeFor(exerciseB.Id);
         await using (var context = _fixture.CreateContext(scopeB2))
         {
-            var service = new SharedReadOnlyLoginService(context, scopeB2, _hasher, issuerB);
+            var service = new SharedReadOnlyLoginService(context, scopeB2, _hasher, issuerB, TestScenarioNow.Over(context));
             var result = await service.LoginAsync(new SharedReadOnlyLoginRequest { Password = "password-for-B" });
 
             result.Outcome.Should().Be(SharedReadOnlyLoginOutcome.Authenticated, "exercise B's own password authenticates under B's scope");
@@ -277,7 +278,7 @@ public sealed class SharedReadOnlyLoginServiceTests
             .Options;
 
         await using var context = new PulseDbContext(options, scope);
-        var service = new SharedReadOnlyLoginService(context, scope, _hasher, new RecordingSessionIssuer());
+        var service = new SharedReadOnlyLoginService(context, scope, _hasher, new RecordingSessionIssuer(), TestScenarioNow.Over(context));
 
         var result = await service.LoginAsync(new SharedReadOnlyLoginRequest { Password = Password });
 
@@ -304,7 +305,7 @@ public sealed class SharedReadOnlyLoginServiceTests
             .Options;
 
         await using var context = new PulseDbContext(options, scope);
-        var service = new SharedReadOnlyLoginService(context, scope, _hasher, new RecordingSessionIssuer());
+        var service = new SharedReadOnlyLoginService(context, scope, _hasher, new RecordingSessionIssuer(), TestScenarioNow.Over(context));
 
         var result = await service.LoginAsync(new SharedReadOnlyLoginRequest { Password = "WRONG-password" });
 
