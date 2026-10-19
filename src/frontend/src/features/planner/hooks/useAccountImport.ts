@@ -13,9 +13,10 @@
  * World: STAFF. Pure data hook — no UI, no COBRA.
  */
 
-import { useMutation, type UseMutationResult } from '@tanstack/react-query'
+import { useMutation, useQueryClient, type UseMutationResult } from '@tanstack/react-query'
 import { importAccounts, type AccountImportError } from '../services/accountImportService'
 import type { AccountImportResult } from '../types'
+import { READINESS_QUERY_KEY } from './useReadiness'
 
 /**
  * Provisions participant accounts from a CSV file. `mutate(file)` /
@@ -27,7 +28,13 @@ export function useAccountImport(): UseMutationResult<
   AccountImportError,
   File
 > {
+  const queryClient = useQueryClient()
+
   return useMutation<AccountImportResult, AccountImportError, File>({
     mutationFn: importAccounts,
+    onSuccess: () => {
+      // New accounts change go-live readiness (story 03): refresh it.
+      void queryClient.invalidateQueries({ queryKey: READINESS_QUERY_KEY })
+    },
   })
 }

@@ -45,6 +45,15 @@ export { useChromeSettings, useSaveChromeSettings } from './hooks/useChromeSetti
 // practice state is never projected onto a participant surface (XC-002).
 export { PracticeModePanel } from './components/PracticeModePanel'
 export { usePracticeMode, useSetPracticeMode } from './hooks/usePracticeMode'
+// exercise-build-golive, story 03 — the COR-042 go-live readiness panel. Mounted into
+// `ExerciseSettingsPage` as its first section; self-contained, no props.
+export { ReadinessPanel } from './components/ReadinessPanel'
+export { READINESS_QUERY_KEY, useReadiness } from './hooks/useReadiness'
+export type {
+  ExerciseReadiness,
+  ReadinessItem,
+  ReadinessStatus,
+} from './services/readinessService'
 export {
   AccountImportError,
   IMPORT_FILE_ACCEPT,

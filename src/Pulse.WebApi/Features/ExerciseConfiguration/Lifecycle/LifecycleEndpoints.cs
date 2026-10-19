@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Routing;
 using Pulse.WebApi.Features.EngineRuntime;
+using Pulse.WebApi.Features.ExerciseConfiguration.Readiness;
 
 /// <summary>
 /// The STAFF HTTP surface for the COR-032 lifecycle: <c>GET /api/staff/exercise-lifecycle</c> (the current
@@ -60,6 +61,9 @@ public static class LifecycleEndpoints
         endpoints.MapPost(TransitionRoute, TransitionAsync)
             .AddEndpointFilter<EngineCockpitStaffAuthorizationFilter>()
             .AddEndpointFilter<LifecycleTransitionRoleFilter>();
+
+        // exercise-build-golive/03: the go-live readiness checklist rides this extension, so it needs no Program.cs line.
+        endpoints.MapReadinessEndpoint();
 
         return endpoints;
     }

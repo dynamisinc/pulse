@@ -132,7 +132,9 @@ public sealed class OrganizationScopeSweepTests
         // identity-auth-roles/17: +2 — ExerciseCallerRole's status read of the server-resolved exercise the caller is
         // proven enrolled in (the role-matrix gate), and ExerciseLifecycleService.GetAsync's status + FirstLiveAt read
         // of the resolved scope (archive-from-build is offered once the exercise has gone live).
-        ["ResolvedScope"] = 27,
+        // exercise-build-golive/03: +1 for ExerciseReadinessService.GetAsync — the checklist's one read of the exercise
+        // row (status, schedule, time zone, chrome switches) by the IExerciseContext id.
+        ["ResolvedScope"] = 28,
 
         // orgAdmin startup seeder: +1 for OrgAdminSeedService, which resolves the seeded staff human by their
         // configured IdP ExternalSubject — the SAME resolve-by-subject read StaffLoginService and
