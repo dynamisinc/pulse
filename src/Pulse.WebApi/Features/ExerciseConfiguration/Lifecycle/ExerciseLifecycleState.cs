@@ -201,6 +201,28 @@ public static class ExerciseLifecycleStates
         || (TryParse(state, out var canonical) && canonical is Completed);
 
     /// <summary>
+    /// <b>One rule for all (Tom, 2026-10-19).</b> Whether a participant-world sign-in may admit a session in
+    /// <paramref name="state"/>: exactly when <see cref="ExerciseLifecycleBehaviour.ParticipantReadsAccepted"/> holds,
+    /// so <c>staged</c>, <c>live</c>, <c>paused</c> and <c>completed</c>. <c>build</c>, <c>archived</c> and an
+    /// unrecognized or missing status are refused (fail closed).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Every participant sign-in path asks THIS question and no other: the join link, the day word, the participant
+    /// password, the shared view-only credential, and the refresh of a participant or view-only session. Staff sign-in
+    /// does not. A session is admitted wherever its holder could read, and nowhere else.
+    /// </para>
+    /// <para>
+    /// This is deliberately NOT <see cref="IsParticipantAccessible"/>, which still refuses <c>completed</c> and is what
+    /// the lifecycle gate serves participant routes on. The two differ only in <c>completed</c>.
+    /// </para>
+    /// </remarks>
+    /// <param name="state">A canonical or legacy lifecycle literal.</param>
+    /// <returns><c>true</c> when a participant-world sign-in may admit a session.</returns>
+    public static bool IsParticipantSignInAllowed(string? state) =>
+        BehaviourOf(state).ParticipantReadsAccepted;
+
+    /// <summary>
     /// The per-state behaviour hooks (AC7) other subsystems subscribe to instead of each keeping its own copy
     /// of the lifecycle. <c>exercise-build-golive</c> reads the transitions; <c>exercise-clock</c> reads
     /// <see cref="ExerciseLifecycleBehaviour.ClockRuns"/>; E8 reads
@@ -228,6 +250,7 @@ public static class ExerciseLifecycleStates
             Staged => new ExerciseLifecycleBehaviour
             {
                 ParticipantAccessOpen = true,
+                ParticipantReadsAccepted = true,
                 ParticipantWritesAccepted = true,
                 AmbientWorldRuns = true,
                 ClockRuns = false,
@@ -239,6 +262,7 @@ public static class ExerciseLifecycleStates
             Live => new ExerciseLifecycleBehaviour
             {
                 ParticipantAccessOpen = true,
+                ParticipantReadsAccepted = true,
                 ParticipantWritesAccepted = true,
                 AmbientWorldRuns = true,
                 ClockRuns = true,
@@ -251,6 +275,7 @@ public static class ExerciseLifecycleStates
             Paused => new ExerciseLifecycleBehaviour
             {
                 ParticipantAccessOpen = true,
+                ParticipantReadsAccepted = true,
                 ParticipantWritesAccepted = false,
                 AmbientWorldRuns = false,
                 ClockRuns = false,
@@ -258,8 +283,10 @@ public static class ExerciseLifecycleStates
                 IsTerminal = false,
             },
 
-            // Completed (EndEx) and Archived: the run is over. Everything is off; archived is terminal.
-            Completed => ExerciseLifecycleBehaviour.Closed,
+            // Completed (EndEx) and Archived: the run is over. Everything is off; archived is terminal. Completed alone
+            // still accepts participant READS (one rule for all, 2026-10-19): the run's content stays readable after
+            // EndEx, so a participant may still sign in to read it. Nothing else opens.
+            Completed => ExerciseLifecycleBehaviour.Closed with { ParticipantReadsAccepted = true },
             _ => ExerciseLifecycleBehaviour.Closed with { IsTerminal = true },
         };
     }
@@ -282,6 +309,27 @@ public sealed record ExerciseLifecycleBehaviour
 
     /// <summary>Whether a participant may be served this exercise at all (the gating middleware's question).</summary>
     public bool ParticipantAccessOpen { get; init; }
+
+    /// <summary>
+    /// Whether participant READS are accepted in this state: <c>staged</c>, <c>live</c>, <c>paused</c> and
+    /// <c>completed</c>; never <c>build</c>, <c>archived</c> or an unknown state (Tom's "one rule for all" ruling,
+    /// 2026-10-19).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The sign-in rule reads this flag.</b> Every participant sign-in path admits a session exactly when it holds,
+    /// through <see cref="ExerciseLifecycleStates.IsParticipantSignInAllowed"/>.
+    /// </para>
+    /// <para>
+    /// <b>It is also the flag for the participant REST read carve-out in <c>completed</c>.</b> It differs from
+    /// <see cref="ParticipantAccessOpen"/> only in <c>completed</c>, where reads are accepted but the gate does not yet
+    /// open. Today the lifecycle gating middleware still serves participant routes on
+    /// <see cref="ParticipantAccessOpen"/> (plus the overlay carve-out), so in <c>completed</c> a signed-in participant
+    /// reaches <c>/api/overlay-state</c> only. A follow-up that opens participant reads in <c>completed</c> should key the
+    /// gate on THIS flag rather than adding a parallel rule, so sign-in and reads cannot drift apart.
+    /// </para>
+    /// </remarks>
+    public bool ParticipantReadsAccepted { get; init; }
 
     /// <summary>Whether participant sim WRITES (post/reply/react) are meaningful in this state.</summary>
     /// <remarks>

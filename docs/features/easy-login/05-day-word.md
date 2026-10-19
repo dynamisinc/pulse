@@ -46,13 +46,14 @@ the **real date in the exercise time zone**, never scenario time.
       clear racing another clear is the idempotent `204`, and only the one that removed the row emits.
 - [ ] **Given** a request to `POST /api/auth/word { signInName, word }` with today's word and an **enabled**
       participant account of that sign-in name in the host-resolved exercise (name matched case-insensitively,
-      trimmed), in an exercise that is Staged/Live/Paused, **then** it answers `200` with exactly the
+      trimmed), in an exercise that is Staged/Live/Paused/Completed *(Superseded 2026-10-19, EL-11, one rule for all: Completed admits; Build/Archived refuse.)*, **then** it answers `200` with exactly the
       `/api/auth/login` envelope (built with `ParticipantSessionRequests`, persona and acting human as the account
       has them) and sets the account's `LastLoginAt`. The word is normalised the same way on both sides, so
       `Maple Harbor 42`, `maple-harbor-42` and `MAPLEHARBOR42` are the same word.
 - [ ] **Given** any other outcome, **then** the answer is the **same bodyless `401`**: wrong word, wrong or unknown
       sign-in name, no word set for today, **yesterday's** word, a disabled account, an account from another
-      exercise, a staff or read-only identity, an exercise that is Build/Completed/Archived, an unresolved host.
+      exercise, a staff or read-only identity, an exercise that is Build/Archived (or an unknown status)
+      *(Superseded 2026-10-19, EL-11, one rule for all: Completed admits; Build/Archived refuse.)*, an unresolved host.
       One slow-KDF word verification runs on every path (the real hash, or `VerifyDecoy` when no word is set), and
       it runs **before** the account lookup; every refusal then runs one more (the check that keeps a word typed into
       the name box out of telemetry), and every resolved path runs the same account lookup, so response time does not
@@ -150,11 +151,11 @@ AC5 day boundary; XC-ISO isolation, XC-TEL telemetry, XC-SEC content security an
   `.APlanner_MayManageTheWord` (XC-AUTH)
 - `WordLoginServiceTests.Success_IssuesTheLoginSession_RecordsLastLoginAt_AndRunsExactlyOneKdf`,
   `.TheName_IsMatchedCaseInsensitively_AndTrimmed`, `.TheWord_IsNormalisedOnBothSides`,
-  `.ParticipantAccessibleLifecycleStates_Admit` (AC3)
+  `.ParticipantReadLifecycleStates_Admit` (AC3; includes completed, superseded 2026-10-19, EL-11, one rule for all)
 - `WordLoginServiceTests.WrongWord_IsRefused_AfterTheRealWordCheck`, `.UnknownName_IsRefused_AfterTheRealWordCheck`,
   `.NoWordSetToday_IsRefused_AfterTheDecoy`, `.YesterdaysWord_AndTomorrowsPresetWord_AreRefused`,
   `.ADisabledAccount_IsRefused_EvenWithTheRightWord`, `.AnAccountOutsideTheParticipantWorld_IsRefused`,
-  `.AnExerciseOutsideStagedLivePaused_IsRefused`, `.AnUnresolvedOrEmptyHost_IsRefused_AfterTheDecoy_WithNoTelemetry`,
+  `.AnExerciseWhoseParticipantReadsAreRefused_IsRefused` (build, archived, legacy scheduled, unknown), `.AnUnresolvedOrEmptyHost_IsRefused_AfterTheDecoy_WithNoTelemetry`,
   `.AWordThatCannotBeValid_StillPaysTheDecoy`, `.TheWordIsVerifiedBeforeTheNameLookup_AndEveryRefusalRunsTheSameStatements`,
   `.AMissingField_IsInvalid_BeforeAnyWork`, `.AnOversizedField_IsInvalid_AndTheReasonNeverQuotesIt` (AC4);
   `.TheRoute_NeverCreatesOrChangesAnAccount` (XC-SEC);

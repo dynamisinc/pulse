@@ -18,11 +18,12 @@ using Pulse.WebApi.Features.Identity.Staff;
 using Pulse.WebApi.Tests.Data;
 
 /// <summary>
-/// <b>Easy-login story 06 lifecycle pin (EL-11).</b> A day-long participant session in a <c>completed</c> or
-/// <c>archived</c> exercise refreshes into a live session and keeps the EXISTING lifecycle-gate behaviour — participant data routes <c>403</c>, and
-/// <c>/api/overlay-state</c> served in <c>completed</c> (COR-054's EndEx overlay) — and its refresh is NOT newly refused.
-/// Refusing refresh at EndEx would sign participants out underneath the overlay they are meant to see; this pin stops a
-/// later change from doing that silently.
+/// <b>Easy-login story 06 lifecycle pin (EL-11), as amended by the one-rule ruling (Tom, 2026-10-19).</b> A day-long
+/// participant session in a <c>completed</c> exercise refreshes into a live session and keeps the EXISTING
+/// lifecycle-gate behaviour — participant data routes <c>403</c>, and <c>/api/overlay-state</c> served (COR-054's EndEx
+/// overlay) — and its refresh is NOT refused. Refusing refresh at EndEx would sign participants out underneath the
+/// overlay they are meant to see; this pin stops a later change from doing that silently. In <c>build</c> and
+/// <c>archived</c> participant reads are refused, so under the one rule the refresh is refused too.
 /// </summary>
 /// <remarks>
 /// The session is minted by the real <see cref="SessionIssuer"/> (day-capped) and renewed by the real
@@ -41,40 +42,11 @@ public sealed class ParticipantDayLongLifecyclePinTests
 
     [RequiresDockerTheory]
     [InlineData("completed", HttpStatusCode.OK)]
-    [InlineData("archived", HttpStatusCode.Forbidden)]
     public async Task AfterEndEx_ADayLongParticipantSession_StillRefreshes_AndTheGateBehavesAsBefore(
         string state,
         HttpStatusCode expectedOverlay)
     {
-        var exerciseId = Guid.NewGuid();
-        var accountId = Guid.NewGuid();
-        await using (var seed = _fixture.CreateContext())
-        {
-            seed.Exercises.Add(ExerciseLifecycleTestData.ExerciseInState(exerciseId, state));
-            seed.Posts.Add(ExerciseLifecycleTestData.PostIn(exerciseId, SeededPostBody));
-
-            // A real, enabled account: refresh renews a participant session only while one exists in its exercise
-            // (easy-login Gate-2 S-1, fail closed).
-            seed.Accounts.Add(new Account
-            {
-                Id = accountId,
-                ExerciseId = exerciseId,
-                Username = $"pin{accountId:N}"[..30],
-                DisplayName = "Pat Participant",
-                CreatedAt = DateTimeOffset.UtcNow,
-                Enrollment = new Enrollment { Id = Guid.NewGuid(), ExerciseId = exerciseId, Role = "participant" },
-            });
-            await seed.SaveChangesAsync();
-        }
-
-        SessionIssueResult issued;
-        await using (var issueContext = _fixture.CreateContext())
-        {
-            issued = await IssuerFor(issueContext).IssueAsync(ParticipantRequest(exerciseId, accountId));
-        }
-
-        issued.Session.RefreshExpiresAt.Should().Be(
-            ExerciseDay.EndOfDayUtc("UTC", issued.Session.IssuedAt, 0), "the session under test is a day-capped one");
+        var (exerciseId, issued) = await SeedAndIssueAsync(state);
 
         RefreshResult refreshed;
         await using (var refreshContext = _fixture.CreateContext())
@@ -106,7 +78,64 @@ public sealed class ParticipantDayLongLifecyclePinTests
 
         var overlay = await host.Client.SendAsync(RequestWith("/api/overlay-state", refreshed.SessionToken!));
         overlay.StatusCode.Should().Be(
-            expectedOverlay, "the overlay carve-out is unchanged: served in completed (EndEx), refused in archived");
+            expectedOverlay, "the overlay carve-out is unchanged: served in completed (EndEx)");
+    }
+
+    /// <summary>
+    /// One rule for all (2026-10-19): in <c>build</c> and <c>archived</c> participant reads are refused, so the same
+    /// day-long participant session's refresh is refused too (the ordinary fail-closed 401, no rotation).
+    /// </summary>
+    [RequiresDockerTheory]
+    [InlineData("build")]
+    [InlineData("archived")]
+    public async Task InAStateThatRefusesParticipantReads_ADayLongParticipantSession_IsNotRefreshed(string state)
+    {
+        var (_, issued) = await SeedAndIssueAsync(state);
+
+        RefreshResult refreshed;
+        await using (var refreshContext = _fixture.CreateContext())
+        {
+            refreshed = await ServiceFor(refreshContext).RefreshAsync(issued.RefreshToken);
+        }
+
+        refreshed.Outcome.Should().Be(
+            RefreshOutcome.Invalid, "a '{0}' exercise refuses participant reads, so it refuses the participant refresh", state);
+        refreshed.SessionToken.Should().BeNull();
+    }
+
+    /// <summary>Seeds an exercise in <paramref name="state"/> with one post and one enabled account, and issues that account a real day-capped participant session.</summary>
+    private async Task<(Guid ExerciseId, SessionIssueResult Issued)> SeedAndIssueAsync(string state)
+    {
+        var exerciseId = Guid.NewGuid();
+        var accountId = Guid.NewGuid();
+        await using (var seed = _fixture.CreateContext())
+        {
+            seed.Exercises.Add(ExerciseLifecycleTestData.ExerciseInState(exerciseId, state));
+            seed.Posts.Add(ExerciseLifecycleTestData.PostIn(exerciseId, SeededPostBody));
+
+            // A real, enabled account: refresh renews a participant session only while one exists in its exercise
+            // (easy-login Gate-2 S-1, fail closed).
+            seed.Accounts.Add(new Account
+            {
+                Id = accountId,
+                ExerciseId = exerciseId,
+                Username = $"pin{accountId:N}"[..30],
+                DisplayName = "Pat Participant",
+                CreatedAt = DateTimeOffset.UtcNow,
+                Enrollment = new Enrollment { Id = Guid.NewGuid(), ExerciseId = exerciseId, Role = "participant" },
+            });
+            await seed.SaveChangesAsync();
+        }
+
+        SessionIssueResult issued;
+        await using (var issueContext = _fixture.CreateContext())
+        {
+            issued = await IssuerFor(issueContext).IssueAsync(ParticipantRequest(exerciseId, accountId));
+        }
+
+        issued.Session.RefreshExpiresAt.Should().Be(
+            ExerciseDay.EndOfDayUtc("UTC", issued.Session.IssuedAt, 0), "the session under test is a day-capped one");
+        return (exerciseId, issued);
     }
 
     private static SessionIssuer IssuerFor(PulseDbContext context) => new(
