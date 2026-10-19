@@ -12,7 +12,7 @@ unpublished state (COR-040).
 ## Acceptance Criteria
 - [ ] During the Build state, staff can author all world content (~~personas/casts~~ *persona creation is out of scope here: persona-management A4*; backdated history,
       scheduled content, theming) using the same composers used during conduct. *Server-side persona-post/follow/pin already exist; this story adds the workspace entry points.*
-- [ ] ~~All content authored during Build is **staff-only and unpublished** until go-live/fire~~ **Superseded by the currency check below:** build content is invisible to participants because participants have no access in `build` (lifecycle gate) and setup posts are marked `IsSetupContent`; there is no per-post publish state (XC-002).
+- [ ] ~~All content authored during Build is **staff-only and unpublished** until go-live/fire~~ **Superseded by the currency check below:** build content is invisible to participants because participants have no access in `build` (`ExerciseLifecycleStates.IsParticipantAccessible`); there is no per-post publish state (XC-002). After Stage, scheduled/run-sheet content must stay held until fire/StartEx; that hold is the engine-runtime dependency owned by story 04 (H1), not this story. `IsSetupContent` is a reset/duplicate classification (§5.4) only, not a visibility mechanism.
 - [ ] The build workspace is exercise-scoped and reflects the current lifecycle state
       (exercise-configuration COR-032).
 - [ ] Phase 1 scope covers Social + persona content; other channels' authoring plugs in as E4–E6 land.
@@ -45,7 +45,7 @@ Audit of main after the A1 identity wave ([`ADMIN-IDENTITY-MODEL`](../../design/
 
 **Already on main (do not rebuild):**
 - Staff persona-post / follow / pin in build exist server-side (`StaffAuthoringRoleFilter.PersonaAuthoring` on `POST /api/posts`; planner or controller). The client may send `ScenarioTime` (backdating).
-- `/staff/plan` (`features/planner`) is a sectioned settings workspace (identity/schedule, channels, theming, chrome, practice, account import). It has no lifecycle, readiness or composer. Exercise creation is at `/staff/exercises` (org admin).
+- `/staff/plan` (`features/planner`) is a sectioned settings workspace (identity/schedule, channels, theming, chrome, practice, account import). It has no lifecycle, readiness or composer. Exercise creation is at `/staff/exercises`: the client route allows planner/orgAdmin/controller, but create-exercise is org-admin-only server-side (§8.2).
 
 **Not built / out of scope:**
 - No staff persona-CREATE endpoint (only `PATCH /api/staff/personas...`). Persona creation is persona-management (A4), not this story.

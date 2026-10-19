@@ -9,8 +9,8 @@
 |-------|----------|------------------|------------------------------|
 | 01 Build workspace (PR-5) | "Overview" section in `/staff/plan` (lifecycle state, readiness summary, links to existing authoring surfaces) + server-side `IsSetupContent` stamp in build (blocked on A3 migration, PR-4). No unpublished state. | `features/planner/` Overview section; post-write stamp in the posts feature | — |
 | 02 Preview-as-participant | Staff-invoked participant render at a chosen scenario time. | `features/planner/components/ParticipantPreview.tsx` | `<ParticipantPreview>` |
-| 03 Readiness dashboard (PR-2) | `GET /api/staff/readiness` via ExerciseLifecycle extensions (no `Program.cs` change); "Readiness" section in `/staff/plan`. | ExerciseLifecycle readiness service + endpoint; `features/planner/components/ReadinessDashboard.tsx`, `hooks/useReadiness.ts` | `useReadiness()` |
-| 04 Gated go-live (PR-3) | Transition/roles/telemetry already built (identity 16/17). Remaining: stage readiness gate (409) in `ExerciseLifecycleService`; planner "Stage exercise" control in `/staff/plan`; readiness summary beside Start in `features/controller/lifecycle/ExerciseLifecycleControl.tsx`. | `ExerciseLifecycleService` gate; `features/planner/components/GoLiveControls.tsx`; `ExerciseLifecycleControl.tsx` | stage action + 409 handling |
+| 03 Readiness dashboard (PR-2) | `GET /api/staff/readiness` via ExerciseLifecycle extensions (no `Program.cs` change); "Readiness" section in `/staff/plan`. | ExerciseLifecycle readiness service + endpoint; backend `Features/ExerciseConfiguration/Readiness/*`; `features/planner/components/ReadinessPanel.tsx`, `hooks/useReadiness.ts`, `services/readinessService.ts` | `useReadiness()` |
+| 04 Gated go-live (PR-3) | Transition/roles/telemetry already built (identity 16/17). Remaining: stage readiness gate (409) in `ExerciseLifecycleService`; planner "Stage exercise" control in `/staff/plan`; readiness summary beside Start in `features/controller/lifecycle/ExerciseLifecycleControl.tsx`. | `ExerciseLifecycleService` gate; `features/planner/components/StageExerciseControl.tsx` / `StageExerciseDialog.tsx`; `ExerciseLifecycleControl.tsx` | stage action + 409 handling; **cross-area dep (engine-runtime): lifecycle-gated clock start + scenario content hold blocks Complete** |
 | 05 Content lock | Versioning/lock boundary at go-live. | (backend) content lock | lock boundary |
 | 06 Duplication | Deep-copy of world-definition entities. | (backend) `cloneExercise` | `cloneExercise()` |
 
@@ -28,8 +28,8 @@
 |-------|---------------|------------|--------------|------|--------|
 | 01 Build workspace | BuildWorkspace | lifecycle; composers | 02 | 1 | M |
 | 02 Preview-as-participant | ParticipantPreview | participant surfaces; COR-053 | 01 | 1 | M |
-| 04 Gated go-live | GoLiveControls | lifecycle; clock; roles | 03 | 2 | M |
-| 03 Readiness dashboard | ReadinessDashboard, useReadiness | readiness inputs | 04 | 2 | M |
+| 04 Gated go-live | StageExerciseControl, StageExerciseDialog | lifecycle; clock; roles | 03 | 2 | M |
+| 03 Readiness dashboard | ReadinessPanel, useReadiness, readinessService, `Features/ExerciseConfiguration/Readiness/*` | readiness inputs | 04 | 2 | M |
 | 05 Content lock | content lock | 04 | 06 | 3 | M |
 | 06 Duplication | cloneExercise | 01; exercise-configuration | 05 | 3 | M |
 

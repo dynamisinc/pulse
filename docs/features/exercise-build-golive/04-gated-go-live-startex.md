@@ -13,8 +13,8 @@ begins scenario content delivery (COR-043).
 - [ ] **Build → Staged** is a ~~Director-gated~~ **planner-only** action (role gate ALREADY MET, identity 17; readiness gate remaining, see Currency check) that opens participant access to the ambient world
       (clock not started; ambient/backdated content visible; scheduled scenario content held; E8
       dormant; weather shows pre-StartEx state).
-- [ ] **StartEx (Staged → Live)** is a **separate** ~~Director-gated~~ **controller-only** action (ALREADY MET) that starts the exercise
-      clock (exercise-clock COR-050) and begins scenario content delivery.
+- [ ] **StartEx (Staged → Live)** is a **separate** ~~Director-gated~~ **controller-only** action. Transition + role gate + telemetry + `FirstLiveAt`: ALREADY MET. It starts the exercise
+      clock (exercise-clock COR-050) and begins scenario content delivery: **NOT MET**, see the engine-runtime dependency in the Currency check.
 - [ ] Both actions are ~~Director-authority~~ role-gated (planner / controller; there is no Director role), logged (XC-004), and reflect/advance the lifecycle state
       machine (exercise-configuration COR-032).
 - [ ] The readiness dashboard (story 03) is surfaced at the go-live decision (**shown, not enforced, at StartEx**; enforced at Stage).
@@ -54,17 +54,24 @@ Audit of main after A1. Slice plan: PR-2 = story 03, **PR-3 = this story**, PR-4
 - **StartEx** (staged -> live) is controller-only (delivered, identity 17) and does NOT re-run the blocking check. Readiness is shown at the decision, not enforced.
 
 **ALREADY MET (evidence on main)**
-- Transition + clock start: `ExerciseLifecycleState` forward-only machine, `POST /api/staff/exercise-lifecycle/transition`.
+- Transition: `ExerciseLifecycleState` machine with edges build->staged->live<->paused->completed->archived, plus build->archived once `FirstLiveAt` is set; `POST /api/staff/exercise-lifecycle/transition`. `ApplyTransitionAsync` only writes Status, stamps `FirstLiveAt`, emits telemetry and notifies the observer (`LifecycleOverlayPublisher`). It does NOT start the clock.
 - Role gates: `LifecycleTransitionRoles` + `LifecycleTransitionRoleFilter` (stage = planner; StartEx / pause / resume / EndEx = controller; unarchive = no exercise role).
 - Telemetry: `exercise.lifecycle.transitioned` with `Actor.ActingHumanId` (= `StaffUserId`, same key as `Person.Id`, so it is the PersonId) and `Role`.
 - `FirstLiveAt` stamp: identity 16.
 
+**NOT MET / cross-area dependency (blocks Complete): "engine-runtime: lifecycle-gated clock start + scenario content hold"**
+- The clock is started by `ReactionLoopHost.EnsureClockStarted` for any registered exercise regardless of lifecycle (registered by Ops `EngineContentSeedService` or a Freeze, `PauseTierRegistry`). `ExerciseLifecycleBehaviour.ClockRuns` / `.ScenarioContentFires` are declared but only `SteeringOverlayPrecedence` reads `ClockRuns`.
+- So "clock starts at StartEx; staged holds the clock and scheduled content" is owned by the engine runtime (`Features/EngineRuntime`): `ReactionLoopHost` and inject delivery must consult `ClockRuns` / `ScenarioContentFires`. Session D may not edit the engine, so story 04 cannot reach Complete until that lands.
+
 **Remaining work**
-- [ ] The stage readiness gate in `ExerciseLifecycleService` (409 with the blocking list; needs the story 03 service).
+- [ ] The stage readiness gate in the shared `ApplyTransitionAsync`, before any write (409 with the blocking list; needs the story 03 service). The org-tier `TransitionTenantCheckedAsync` path refuses staging (`TransitionNotAllowed`) when the exercise is not the resolved scope.
+- [ ] The client handles both 409 shapes: a plain-string body (transition not allowed) and an object body `{ error: 'readiness-blocking', message, blocking }`. The server sends no `fixRoute`; the client maps item ids to fixing screens (story 03).
 - [ ] A planner "Stage exercise" control in `/staff/plan` alongside the Readiness section: confirm dialog; shows the blocking list on 409.
 - [ ] A readiness summary next to the controller's Start control (`features/controller/lifecycle/ExerciseLifecycleControl.tsx`).
-- [ ] Tests: stage refused with blocking items (409 body shape) and allowed when clear; StartEx unaffected by open items; existing role-matrix rows unchanged.
+- [ ] Tests: stage refused with blocking items (409 body shape) and allowed when clear; StartEx unaffected by open items; existing role-matrix rows unchanged. The orphan Integration test (staged holds clock + scheduled content; StartEx starts them) is covered by the engine-runtime dependency above.
 
-**Not built (story 07):** unstage, reopen, reset, unarchive.
+**Not built (story 07):** unstage, reopen, reset, unarchive. **Delete** is story 08.
+
+**Note:** until story 09 (PR-4) lands, `ExerciseScopeDto` still projects the internal Name to participants, so Stage can open access with the #376 leak live (not a regression).
 
 **Dependencies (updated):** identity-auth-roles 17 role matrix; story 03 readiness.
