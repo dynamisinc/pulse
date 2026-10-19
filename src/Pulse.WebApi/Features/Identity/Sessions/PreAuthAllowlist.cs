@@ -46,6 +46,9 @@ using Microsoft.AspNetCore.Routing;
 ///   secret-bearing call and break the UAT go-live runbook. (The 2026-07-25 endpoint audit classified these
 ///   "correctly gated" and omitted them from its 8-route allowlist; this is that list's one correction.)
 ///   </description></item>
+///   <item><description><c>/api/build</c> (#617) — the running build's commit, polled credential-less by the
+///   Deploy Backend smoke to prove the NEW build is serving. Returns only <c>{"commit":"…"}</c>, no-store.
+///   </description></item>
 /// </list>
 /// </para>
 /// <para>
@@ -63,7 +66,7 @@ public static class PreAuthAllowlist
 
     /// <summary>
     /// The allowlist, as <c>"{METHOD} {routePattern}"</c> keys matching
-    /// <see cref="RoutePattern.RawText"/>. Exactly thirteen routes.
+    /// <see cref="RoutePattern.RawText"/>. Exactly fifteen routes.
     /// </summary>
     public static IReadOnlySet<string> Routes { get; } = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
@@ -81,6 +84,7 @@ public static class PreAuthAllowlist
         "POST /api/ops/bootstrap-exercise",
         "POST /api/ops/seed-engine-content",
         "POST /api/ops/bind-participant-persona",
+        "GET /api/build",
     };
 
     /// <summary>
