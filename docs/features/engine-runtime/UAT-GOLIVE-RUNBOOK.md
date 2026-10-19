@@ -123,14 +123,15 @@ Expect a 200 response carrying the `exerciseId` and persona counts. A 404 means 
    - The next burst uses Fake (no new calls in the usage panel).
    - Restore afterwards.
 4b. **Timeout auto-send is refused on the server (Phase 1).**
-   - In the engine bar, the **Swamped mode** ON control is disabled, with the note "Timeout auto-send is off until
-     the lead-controller role ships." (The console toggle does not call the server, so this only shows the console
-     read the flag.)
+   - In the engine bar, the **Swamped mode** ON control is disabled, with the note "Timeout auto-send is not
+     authorized on this environment." (Wording updated by #636. In Phase 1 the console toggle did not call the
+     server, so this only showed the console read the flag; from Phase 2 the toggle calls the server.)
    - Prove the server refuses it. With a staff session cookie (browser dev tools → Network → copy a request as cURL):
      - `GET /api/engine/settings` shows `"timeoutAutoSendAuthorized": false`;
      - `POST /api/engine/autonomy/swamped-mode` with body `{"actingHumanId":"<your id>","enabled":true}` returns
-       `400` "timeout auto-send (swamped mode) is not authorized on this environment until the lead-controller
-       gate lands (PROVIDER-GOVERNANCE §8, Phase 1)".
+       `400` "timeout auto-send (swamped mode) is not authorized on this environment (PROVIDER-GOVERNANCE §8)".
+   - **Phase 1 only.** Once Phase 2 sets the flag true, this check no longer applies: the lead's ON returns `200` and
+     a non-lead's ON returns `403`.
 5. **The login limiter keys on the real client IP (A1a).** Make 11 rapid bad staff logins from one machine.
    - That machine gets `429`.
    - A second machine can still log in.

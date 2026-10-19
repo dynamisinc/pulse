@@ -18,7 +18,11 @@ never first on `main`.
 - **Backend:** automatic on push to `main` touching `src/Pulse.WebApi/**`, `src/Pulse.Core/**`,
   `global.json` or `pulse.slnx` ([`deploy-backend.yml`](../.github/workflows/deploy-backend.yml)) →
   App Service (`app-pulse-api-uat-dynamis`), applying the EF migration to `sqldb-pulse-uat` as an
-  idempotent script **before** the new code is published.
+  idempotent script **before** the new code is published. Its first post-deploy smoke polls
+  `GET /api/build` (anonymous, returns only `{"commit":"<sha>"}`) for 30 attempts (~5 min, up to ~10 worst
+  case) until it reports the run's own commit, so a green deploy means the **new** build is serving, not just
+  that `/health` answers. This assumes the single-instance plan: if the App Service scales out, one matching
+  answer proves only the instance that served it.
 - **Infrastructure:** manual `workflow_dispatch`
   ([`deploy-infrastructure.yml`](../.github/workflows/deploy-infrastructure.yml)), with `what_if` preview.
 
@@ -84,6 +88,19 @@ UAT has one staff login (`controller1`, the lead). To add a non-lead controller,
 
 Steps and caveats:
 [login/06 → Adding test staff accounts](features/login/06-uat-goLive-config-runbook.md#adding-test-staff-accounts-role-smoke).
+
+## Timeout auto-send (swamped mode): single instance only
+
+`uat` authorizes timeout auto-send (`generationTimeoutAutoSendAuthorized = true` in
+`infrastructure/parameters/uat.bicepparam`, PROVIDER-GOVERNANCE §8 Phase 2).
+
+- **Keep `uat` single-instance (B1, capacity 1) while that flag is true.** Swamped mode and the rest of the engine's
+  autonomy state are held **in memory, per process**. With two instances, one could be swamped (auto-sending expired
+  drafts) while the other is not, and a lead's ON or OFF would reach only one of them.
+- **Before scaling out** (more instances, or a plan with autoscale), set the flag back to `false` and re-run **Deploy
+  Infrastructure**. Expired countdowns then always hold.
+- **A restart turns swamped mode off.** After an app restart or deploy, swamped mode is off until the lead turns it on
+  again.
 
 ## Trusted proxy (forwarded headers, #480)
 
