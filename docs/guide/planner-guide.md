@@ -120,10 +120,12 @@ It changes only the exercise you are signed in to. To change another exercise, s
 
 ![Exercise configuration, with the section list on the left and the Identity & schedule section open.](img/exercise-settings.png)
 
-The section list on the left has six sections:
+The section list on the left has seven sections. **Readiness** is listed first, but the page still
+opens on **Identity & schedule**.
 
 | Section | What it controls |
 |---|---|
+| **Readiness** | Your go-live checklist (see [below](#checking-readiness-before-you-stage)) |
 | **Identity & schedule** | Names, locale, time zone and the planned start and end |
 | **Channels** | Which channels players can use |
 | **Theming & outlets** | The brand and colours players see, and the outlet names |
@@ -490,6 +492,61 @@ The new items appear on the run sheet within a few seconds, in order of their pl
 **Importing the same file again is safe.** Rows that have not changed are reported as unchanged. A
 changed row updates its item if the item has not fired yet. An item that has already fired is left
 alone.
+
+---
+
+## Checking readiness before you stage
+
+Open **Readiness** (the first section in the list on the left) to see how close the exercise is to
+being ready to stage. The top line reads **Ready to stage** or, for example, **2 blocking items
+open**. Below it are two lists. Each row has an icon and a status in words, so you never have to rely
+on colour.
+
+- **Blocking** items must be done before the exercise can be staged. For example: at least one
+  controller is enrolled, participants can get in (an account or the view-only code), every
+  participant account has a persona, the time zone and start time are set, and the compliance
+  chrome and watermark are valid. Staging is refused while any blocking item needs attention
+  (see [Staging the exercise](#staging-the-exercise)).
+- **Warnings** are worth a look but never stop you. For example: the run sheet is empty, there is no
+  opening feed, the noise pool is empty, some personas have no avatar, no evaluator is enrolled, or
+  no lead controller is set. Without a lead controller, swamped mode and autonomy raises are
+  unavailable.
+
+Each row shows one of three states:
+
+| Status | Meaning |
+|---|---|
+| **Done** | This item is in place. |
+| **Needs attention** | This item is not in place yet. Where there is a screen that fixes it, the row has a link to it. |
+| **Not checked yet** | Pulse cannot check this item yet, so it does not block. The participant-facing exercise name and the participant sign-in methods arrive in a later release. |
+
+The list updates after you save settings, compliance chrome, practice mode or an account import. It
+also refreshes when you return to the browser tab. Select **Refresh** to check again at any time.
+
+### Staging the exercise
+
+Directly under the checklist, while the exercise is still being built, you will find **Stage exercise**.
+
+- **While any blocking item needs attention** the button is dimmed and a line beside it says how many are
+  still open (for example, "Staging is unavailable: 2 blocking items are still open."). You can still tab
+  to the button, but pressing it does nothing. Fix the items, and the button comes alive.
+- **When everything blocking is done**, select **Stage exercise**. A confirmation opens: **Stage *exercise
+  name*?** It tells you that participants will be able to sign in and see the ambient world, and that the
+  clock does not start until a controller starts the exercise. It also shows the readiness summary.
+  Select **Stage** to confirm, or **Cancel** (or press <kbd>Esc</kbd>) to leave things as they are. You do not
+  need to type anything.
+- If someone else changed the exercise while the confirmation was open and a blocking item needs attention
+  again, Pulse refuses and lists those items in the confirmation. Fix them and try again.
+- After staging, the page reads "Exercise staged." and the button is replaced by "This exercise is staged. A
+  controller starts it from the console." Only a controller can start the exercise.
+
+> **Note:** Unstaging arrives later (story 07). Once staged, participants can sign in and see the ambient
+> world, and planners can no longer post as personas (controllers still can), so finish your setup first.
+> A full content lock at go-live is a later change (story 05).
+>
+> **Known gap:** today the scenario clock is driven by the engine, not by the lifecycle, so it can already be
+> running while the exercise is staged. Holding the clock until a controller starts the exercise is tracked
+> as an engine-runtime change.
 
 ---
 

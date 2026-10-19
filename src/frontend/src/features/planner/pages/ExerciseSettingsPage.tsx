@@ -20,7 +20,11 @@
  * right — the Cadence/COBRA idiom for dense operator config, chosen over tabs
  * because it keeps scaling as more panels land.
  *
- * Six sections, from ONE registry (`SECTIONS` below):
+ * Eight sections, from ONE registry (`SECTIONS` below); the eighth, Staff (identity-auth-roles
+ * story 20), is shown only to a role that may assign staff. Readiness is listed first in the
+ * nav (the go-live view; exercise-build-golive story 03, a self-contained read-only
+ * panel) but is NOT the arrival section: `DEFAULT_SECTION` stays Identity & schedule.
+ * The numbered list below is the original six:
  *
  *   1. Identity & schedule  ┐
  *   2. Channels             ├─ three VIEWS over ONE shared settings form
@@ -212,6 +216,7 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import type { IconDefinition } from '@fortawesome/fontawesome-svg-core'
 import {
   faArrowLeft,
+  faClipboardCheck,
   faFileImport,
   faFlask,
   faGears,
@@ -235,6 +240,8 @@ import { ExerciseSettingsPanel } from '../components/ExerciseSettingsPanel'
 import { ComplianceChromePanel } from '../components/ComplianceChromePanel'
 import { PracticeModePanel } from '../components/PracticeModePanel'
 import { AccountImport } from '../components/AccountImport'
+import { ReadinessPanel } from '../components/ReadinessPanel'
+import { StageExerciseControl } from '../components/StageExerciseControl'
 import { StaffPanel } from '../components/StaffPanel'
 import { PANEL_SAVE_BAR_SCROLL_PADDING_PX } from '../components/PanelSaveBar'
 
@@ -243,7 +250,13 @@ import { PANEL_SAVE_BAR_SCROLL_PADDING_PX } from '../components/PanelSaveBar'
 // ---------------------------------------------------------------------------
 
 /** Every section the nav can select. Adding a panel adds one member here. */
-type ExerciseConfigSectionId = ExerciseSettingsSectionId | 'chrome' | 'practice' | 'accounts' | 'staff'
+type ExerciseConfigSectionId =
+  | ExerciseSettingsSectionId
+  | 'readiness'
+  | 'chrome'
+  | 'practice'
+  | 'accounts'
+  | 'staff'
 
 /**
  * What a section shows.
@@ -273,6 +286,25 @@ interface ExerciseConfigSection {
  * apart. Self-contained panels bring their own.
  */
 const SECTIONS: readonly ExerciseConfigSection[] = [
+  {
+    // FIRST in the nav: the planner's go-live view (exercise-build-golive story
+    // 03). It is NOT the default section - `DEFAULT_SECTION` below is named
+    // explicitly, so nav order and arrival section are independent.
+    id: 'readiness',
+    label: 'Readiness',
+    icon: faClipboardCheck,
+    content: {
+      kind: 'panel',
+      // Story 04: the Stage control sits directly under the checklist it is gated by.
+      panel: (
+        <>
+          <ReadinessPanel />
+          <StageExerciseControl />
+        </>
+      ),
+    },
+  },
+
   ...EXERCISE_SETTINGS_SECTION_ORDER.map<ExerciseConfigSection>(section => ({
     id: section,
     label: EXERCISE_SETTINGS_SECTION_META[section].label,
