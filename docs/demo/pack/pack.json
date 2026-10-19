@@ -89,8 +89,8 @@
       "poster": "media/news-elm-break.poster.jpg",
       "width": 1280,
       "height": 720,
-      "durationSec": 20,
-      "alt": "Street-level news footage of a utility crew in high-visibility vests working in a deep trench cut across a city street. Water pools at the bottom around a large exposed pipe, an excavator works beside it and traffic cones steer cars around the site."
+      "durationSec": 13,
+      "alt": "Overhead news footage of a deep, muddy excavation: a worker in a high-visibility vest kneels beside an excavator bucket next to a large concrete pipe section standing in brown water. The view then drops into the narrow trench as the excavator bucket digs and water runs along the bottom."
     },
     {
       "key": "news-mill-road",
@@ -99,8 +99,8 @@
       "poster": "media/news-mill-road.poster.jpg",
       "width": 1280,
       "height": 720,
-      "durationSec": 15,
-      "alt": "News footage of water gushing up through cracked pavement and flowing down a residential street toward a storm drain, as a utility truck with flashing amber lights pulls up."
+      "durationSec": 16,
+      "alt": "News footage of water surging up through the pavement and flooding a residential street. Down the road, a fire engine waits behind a \"Road work ahead\" sign and traffic cones, beside a line of stopped cars."
     },
     {
       "key": "scoop-brown-tap",
@@ -110,7 +110,7 @@
       "width": 1280,
       "height": 720,
       "durationSec": 10,
-      "alt": "Shaky phone video of cloudy, brownish water running from a kitchen faucet into a stainless steel sink."
+      "alt": "Shaky close-up video of rust-brown tap water pouring from a chrome tap and filling a white bathroom sink."
     },
     {
       "key": "photo-elm-crew",
@@ -118,7 +118,7 @@
       "kind": "image",
       "width": 1600,
       "height": 900,
-      "alt": "A utility crew in high-visibility vests stands around an excavated trench in a city street. A section of large water pipe is exposed and water has pooled at the bottom."
+      "alt": "A worker in a welding mask kneels in an excavated trench, welding a joint on a large steel pipe, while a second worker in an orange vest and blue hard hat works beside the pipe."
     },
     {
       "key": "photo-advisory-sign",
@@ -126,7 +126,7 @@
       "kind": "image",
       "width": 1600,
       "height": 900,
-      "alt": "A yellow roadside sign reading \"Boil water advisory\" stands on the sidewalk at the edge of a residential street."
+      "alt": "A portable electronic sign on an orange trailer reads \"Boil water advisory\" at the curb of a quiet residential street."
     },
     {
       "key": "photo-boiling-pot",
@@ -134,7 +134,7 @@
       "kind": "image",
       "width": 1600,
       "height": 900,
-      "alt": "A pot of water at a rolling boil on a kitchen stove."
+      "alt": "A stainless steel pot of water at a rolling boil on a stovetop, with steam rising."
     },
     {
       "key": "photo-brown-sink",
@@ -142,7 +142,7 @@
       "kind": "image",
       "width": 1600,
       "height": 900,
-      "alt": "Cloudy, brownish tap water filling a white kitchen sink."
+      "alt": "Cloudy, rust-brown tap water pouring from a chrome tap and filling a white bathroom sink."
     },
     {
       "key": "photo-hydrant-flush",
@@ -150,7 +150,7 @@
       "kind": "image",
       "width": 1600,
       "height": 900,
-      "alt": "An open fire hydrant sends a strong stream of water along the gutter of a residential street."
+      "alt": "An open red fire hydrant sends a strong stream of water into the gutter of a residential street. Work trucks and a police car with flashing lights wait farther down the road."
     },
     {
       "key": "photo-distribution",
@@ -158,7 +158,7 @@
       "kind": "image",
       "width": 1600,
       "height": 900,
-      "alt": "Stacks of shrink-wrapped cases of bottled water on pallets inside an open fire station bay, with a folding table set up in front."
+      "alt": "Rows of large, blue-capped water jugs packed tightly together and roped into lines, ready to be handed out."
     },
     {
       "key": "photo-line",
@@ -166,7 +166,7 @@
       "kind": "image",
       "width": 1600,
       "height": 900,
-      "alt": "A line of people, seen from behind, waits on a sidewalk outside a school building to collect bottled water."
+      "alt": "A line of people, shown from the shoulders down, waits along a railing outside a white-painted building."
     },
     {
       "key": "photo-brown-glass",
@@ -174,7 +174,7 @@
       "kind": "image",
       "width": 1600,
       "height": 900,
-      "alt": "A clear drinking glass of cloudy, brown-tinted tap water held under a running kitchen faucet."
+      "alt": "A tall clear glass of cloudy, silty tap water on a kitchen counter beside a stainless steel sink."
     },
     {
       "key": "photo-empty-shelves",
@@ -182,7 +182,7 @@
       "kind": "image",
       "width": 1600,
       "height": 900,
-      "alt": "Empty store shelves where bottled water is normally stocked, with a few torn plastic wraps left behind."
+      "alt": "Long rows of bare store shelves, emptied of stock, with only price tags left along the shelf edges."
     },
     {
       "key": "pio-statement-card",

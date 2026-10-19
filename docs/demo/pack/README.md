@@ -12,8 +12,8 @@
 | [`kestrel-msel.xlsx`](kestrel-msel.xlsx) | The run sheet as a Cadence MSEL, for the on-stage import ([below](#demo-feedback-additions-1020-cut-511)) |
 | [`tools/build-kestrel-msel.py`](tools/build-kestrel-msel.py) | Builds and checks `kestrel-msel.xlsx` from `pack.json` |
 | [`MEDIA-SHOTLIST.md`](MEDIA-SHOTLIST.md) | What each photo, video, avatar and banner must show, with alt text and search terms |
-| [`CREDITS.md`](CREDITS.md) | Source, licence and URL per file (the stock rows are for Tom to fill in) |
-| `media/`, `avatars/`, `banners/` | The files. **23 are placeholders and 6 are generated drafts** (see the shot list) |
+| [`CREDITS.md`](CREDITS.md) | Source, licence and URL per file (filled in 2026-10-19) |
+| `media/`, `avatars/`, `banners/` | The files: **14 licensed (`STOCK`), 7 generated and approved, 8 generated drafts** (see the shot list) |
 | [`schema/`](schema/pack.schema.json) | S1's JSON Schema (owned by S1; do not edit here) |
 
 ## At a glance
@@ -50,15 +50,15 @@ them).
 
 | Handle | Display name | Role in the story | Verified | Avatar |
 |---|---|---|---|---|
-| `KestrelCoEM` | Kestrel County EM | County emergency management. **The PIO participant posts as this persona** (`New-DemoParticipant.ps1` default) | ✔ | generated draft |
-| `FairhavenWater` | Fairhaven Water Utility | The real utility | ✔ | generated draft |
-| `FairhavenWaterUpd` | Fairhaven Water Update | **The impersonator**: an unverified lookalike of the utility. Same banner file, near-identical avatar | ✘ | generated draft |
-| `MetroDesk9` | Metro Desk 9 | Local TV news: breaking news and video | ✔ | generated draft |
-| `TheScoopHQ` | The Scoop | Sensational, low-credibility outlet that amplifies the rumor | ✘ | generated draft |
-| `mvega_fh` | Marisol Vega | East-side mom and nurse: practical, worried questions | ✘ | placeholder (garden) |
-| `tbrandt41` | Tom Brandt | Small-business owner: skeptical, falls for the lookalike | ✘ | placeholder (dog) |
-| `kwardFH` | Keisha Ward | Community organizer: steers people to verified accounts | ✘ | placeholder (hands) |
-| `dreyes_fh` | Dana Reyes | Ordinary resident: confused, shares the fake, then corrects | ✘ | placeholder (cat) |
+| `KestrelCoEM` | Kestrel County EM | County emergency management. **The PIO participant posts as this persona** (`New-DemoParticipant.ps1` default) | ✔ | generated (approved) |
+| `FairhavenWater` | Fairhaven Water Utility | The real utility | ✔ | generated (approved) |
+| `FairhavenWaterUpd` | Fairhaven Water Update | **The impersonator**: an unverified lookalike of the utility. Same banner file, near-identical avatar | ✘ | generated (approved) |
+| `MetroDesk9` | Metro Desk 9 | Local TV news: breaking news and video | ✔ | generated (approved) |
+| `TheScoopHQ` | The Scoop | Sensational, low-credibility outlet that amplifies the rumor | ✘ | generated (approved) |
+| `mvega_fh` | Marisol Vega | East-side mom and nurse: practical, worried questions | ✘ | generated draft (garden) |
+| `tbrandt41` | Tom Brandt | Small-business owner: skeptical, falls for the lookalike | ✘ | generated draft (dog) |
+| `kwardFH` | Keisha Ward | Community organizer: steers people to verified accounts | ✘ | generated draft (hands) |
+| `dreyes_fh` | Dana Reyes | Ordinary resident: confused, shares the fake, then corrects | ✘ | generated draft (cat) |
 
 ## Storyline, beat by beat
 
@@ -175,13 +175,18 @@ review (display names change in `pack.json` alone):
 
 ### 2. Media
 
-- Replace the **23 placeholders** with Pexels/Pixabay stock, following [`MEDIA-SHOTLIST.md`](MEDIA-SHOTLIST.md):
-  same path and file name, the listed sizes, and **no faces, logos or real brands**. Fill in
-  [`CREDITS.md`](CREDITS.md) as you go. If P3 test clips fit a video slot, start from them.
-- Approve or replace the **6 generated drafts** (5 org avatars and the PIO notice card). The Kestrel County EM
-  and Metro Desk 9 avatars and the notice card were redrawn with the new names on 2026-10-14.
-- After swapping, update `width`/`height`/`durationSec` in `pack.json` if a file differs from the listed size or
-  length, and **re-read each media `alt`** against the real shot.
+- **Done 2026-10-19:** the 23 placeholders are replaced. The 3 videos, 3 posters and 8 photos are licensed media
+  from the Dynamis team; the advisory-sign photo is AI-generated (FIC-002); the 4 resident avatars and 4 banners
+  are new generated drafts. Every file was cropped or trimmed to the pack sizes and stripped of metadata, and the
+  `alt` text and durations in `pack.json` were rewritten to match the final shots. Details per file are in
+  [`CREDITS.md`](CREDITS.md).
+- **Tom approved** the 6 earlier generated drafts (5 org avatars and the PIO notice card) on 2026-10-19.
+- **Still for Tom:** approve or replace the **8 generated drafts** (the avatars of `mvega_fh`, `tbrandt41`,
+  `kwardFH` and `dreyes_fh`, and the 4 org banners). They are flat illustrations, not photos. A replacement
+  keeps the same path and file name, and then needs `-WhatIf` again.
+- Two post texts read slightly differently from their final photos: **p15** says "kitchen tap" over a
+  bathroom-sink photo, and **p19** says "2 cases per household" over a photo of 5-gallon jugs. Change the
+  text in `pack.json` if that matters.
 
 ### 3. When to seed: read this before Mon 10/19
 
@@ -356,6 +361,18 @@ without the alt text and engagement, and the items are appended at the end.
   3 × (posts − 1).
 - Every media item needs a meaningful `alt`. A post-level `alt` overrides it for that post.
 - Run `-WhatIf` after every edit.
+
+## Validation (2026-10-19, final media)
+
+- `Seed-DemoContent.ps1 -WhatIf` **passes** with exit 0 and no warnings: "9 persona edit(s), 29 file(s) (18.1 MB),
+  36 post(s) (23 top-level), 15 run-sheet item(s) (30 scripted post(s)), 100 noise entries, 2 pin(s)". The
+  exercise-context check passed against UAT. Every file passes the type, size and magic-byte checks.
+- The videos are H.264 High, `yuv420p`, `+faststart`, 1280×720, 24 fps, no audio: 13 s / 3.5 MB, 16 s / 10.0 MB and
+  10 s / 2.3 MB. Every photo is a 1600×900 sRGB JPEG under 330 KB. No file carries EXIF, GPS, XMP, ICC or a capture
+  time.
+- `kestrel-msel.xlsx` was rebuilt for the new video alt text (`Pulse Media Alt`), and `build-kestrel-msel.py --check`
+  passes: 34 rows, 8 social, 26 skipped, 0 failed, 0 warnings.
+- Not checked here: playback in Chrome and Safari after the upload, and the live self-check (both need UAT).
 
 ## Validation (2026-10-14, after the FIC-001 rename)
 
