@@ -23,7 +23,7 @@ and the exercise clock (COR-050).
 | 01 | Build workspace (author the world staff-only) | COR-040 | Not Started | #71 |
 | 02 | Preview-as-participant | COR-041 | Not Started | #72 |
 | 03 | Go-live readiness dashboard | COR-042 | Not Started | #73 |
-| 04 | Gated go-live: Staged, then StartEx→Live | COR-043 | Not Started | #74 |
+| 04 | Gated go-live: Staged, then StartEx→Live | COR-043 | Partially built (roles/transition/telemetry via identity 16/17) | #74 |
 | 05 | Content lock at go-live | COR-044 | Not Started | #75 |
 | 06 | Exercise duplication | COR-045 | Not Started | #76 |
 | 07 | Reset, reopen, unstage, unarchive (A3, Tier-2) | COR-043, COR-032 | Not Started | #580 |

@@ -7,10 +7,10 @@
 
 | Story | Approach | Key files (owns) | Exports (that others import) |
 |-------|----------|------------------|------------------------------|
-| 01 Build workspace | Hosts conduct composers in an unpublished/held state. | `features/planner/components/BuildWorkspace.tsx` | — |
+| 01 Build workspace (PR-5) | "Overview" section in `/staff/plan` (lifecycle state, readiness summary, links to existing authoring surfaces) + server-side `IsSetupContent` stamp in build (blocked on A3 migration, PR-4). No unpublished state. | `features/planner/` Overview section; post-write stamp in the posts feature | — |
 | 02 Preview-as-participant | Staff-invoked participant render at a chosen scenario time. | `features/planner/components/ParticipantPreview.tsx` | `<ParticipantPreview>` |
-| 03 Readiness dashboard | Aggregates per-subsystem readiness status. | `features/planner/components/ReadinessDashboard.tsx`, `hooks/useReadiness.ts` | `useReadiness()` |
-| 04 Gated go-live | Two Director-gated lifecycle transitions (Staged, StartEx). | `features/planner/components/GoLiveControls.tsx` | go-live actions |
+| 03 Readiness dashboard (PR-2) | `GET /api/staff/readiness` via ExerciseLifecycle extensions (no `Program.cs` change); "Readiness" section in `/staff/plan`. | ExerciseLifecycle readiness service + endpoint; `features/planner/components/ReadinessDashboard.tsx`, `hooks/useReadiness.ts` | `useReadiness()` |
+| 04 Gated go-live (PR-3) | Transition/roles/telemetry already built (identity 16/17). Remaining: stage readiness gate (409) in `ExerciseLifecycleService`; planner "Stage exercise" control in `/staff/plan`; readiness summary beside Start in `features/controller/lifecycle/ExerciseLifecycleControl.tsx`. | `ExerciseLifecycleService` gate; `features/planner/components/GoLiveControls.tsx`; `ExerciseLifecycleControl.tsx` | stage action + 409 handling |
 | 05 Content lock | Versioning/lock boundary at go-live. | (backend) content lock | lock boundary |
 | 06 Duplication | Deep-copy of world-definition entities. | (backend) `cloneExercise` | `cloneExercise()` |
 
