@@ -1,6 +1,8 @@
 namespace Pulse.WebApi.Features.Identity.Credentials;
 
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.ExerciseLifecycleAdmin;
@@ -25,13 +27,19 @@ using Pulse.WebApi.Features.Identity.EasyLogin;
 /// server, so it reaches no access log; the response is <c>Cache-Control: no-store</c>.
 /// </para>
 /// </remarks>
-public sealed class AdminPasswordResetService
+public sealed partial class AdminPasswordResetService
 {
     /// <summary>The org-audit kind of an issued admin reset.</summary>
     public const string ResetIssuedKind = "org.credential.reset-issued";
 
     /// <summary>The 409 error code for a disabled person (their reset link could never be used).</summary>
     public const string PersonDisabledError = "person-disabled";
+
+    /// <summary>
+    /// The 409 error code for a target who is ANOTHER org admin (Gate-1 W-001): handing one admin a link that sets a peer
+    /// admin's password would be a lateral takeover. An admin may still reset themselves.
+    /// </summary>
+    public const string TargetIsOrgAdminError = "target-is-org-admin";
 
     /// <summary>The 503 error code when no frontend base URL is configured, so no link can be built.</summary>
     public const string LinkUnavailableError = "reset-link-unavailable";
@@ -45,6 +53,7 @@ public sealed class AdminPasswordResetService
     private readonly JoinUrlBuilder _urls;
     private readonly IPulseMailer _mailer;
     private readonly TimeProvider _timeProvider;
+    private readonly ILogger<AdminPasswordResetService> _logger;
 
     /// <summary>Creates the service.</summary>
     /// <param name="dbContext">The request-scoped persistence context (one unit of work).</param>
@@ -53,13 +62,15 @@ public sealed class AdminPasswordResetService
     /// <param name="urls">The validated <c>Authentication:FrontendBaseUrl</c> (the same base join links use).</param>
     /// <param name="mailer">The credential mailer (a no-op unless email is configured).</param>
     /// <param name="timeProvider">The server wall clock.</param>
+    /// <param name="logger">Logs a mailer failure after the commit (the purpose only — never the link or recipient).</param>
     public AdminPasswordResetService(
         PulseDbContext dbContext,
         StaffCallerContext staffCaller,
         CredentialTokenService tokens,
         JoinUrlBuilder urls,
         IPulseMailer mailer,
-        TimeProvider timeProvider)
+        TimeProvider timeProvider,
+        ILogger<AdminPasswordResetService>? logger = null)
     {
         ArgumentNullException.ThrowIfNull(dbContext);
         ArgumentNullException.ThrowIfNull(staffCaller);
@@ -74,6 +85,7 @@ public sealed class AdminPasswordResetService
         _urls = urls;
         _mailer = mailer;
         _timeProvider = timeProvider;
+        _logger = logger ?? NullLogger<AdminPasswordResetService>.Instance;
     }
 
     /// <summary>The staff reset link for <paramref name="rawToken"/>: <c>{FrontendBaseUrl}/staff/reset#token={token}</c>.</summary>
@@ -121,12 +133,23 @@ public sealed class AdminPasswordResetService
             return AdminPasswordResetResult.NotFound();
         }
 
+        // Gate-1 W-001: never another org admin (a lateral takeover); the tenant bound above still answers first, so a
+        // foreign admin is the bare 404. Resetting oneself stays allowed.
+        if (Person.IsOrgAdmin(person.OrgRole) && person.Id != caller.StaffUserId)
+        {
+            return AdminPasswordResetResult.Conflict(TargetIsOrgAdminError);
+        }
+
         if (person.DisabledAt is not null)
         {
             return AdminPasswordResetResult.Conflict(PersonDisabledError);
         }
 
         var now = _timeProvider.GetUtcNow();
+
+        // One transaction: the voiding of earlier reset links (executed immediately, Gate-1 S-002), the new token and its
+        // audit record commit or roll back together.
+        await using var transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken);
         var issued = await _tokens.StageIssueAsync(
             CredentialTokenPurposes.Reset,
             CredentialSubject.ForPerson(person.Id),
@@ -149,18 +172,34 @@ public sealed class AdminPasswordResetService
         });
 
         await _dbContext.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
 
         var resetUrl = BuildResetUrl(baseUrl, issued.RawToken);
         if (!string.IsNullOrWhiteSpace(person.Email))
         {
-            // A no-op on a host without email; never fails the request (the link is returned either way).
-            await _mailer.SendCredentialLinkAsync(
-                new CredentialMail { Purpose = CredentialTokenPurposes.Reset, RecipientAddress = person.Email, Link = resetUrl },
-                cancellationToken);
+            // A no-op on a host without email. Gate-1 S-007: the token is already committed, so a misbehaving mailer must
+            // never turn this into a 500 that hides the only copy of the link — log the purpose only and answer anyway.
+            try
+            {
+                await _mailer.SendCredentialLinkAsync(
+                    new CredentialMail { Purpose = CredentialTokenPurposes.Reset, RecipientAddress = person.Email, Link = resetUrl },
+                    cancellationToken);
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                LogMailerFailed(CredentialTokenPurposes.Reset, exception.GetType().Name);
+            }
         }
 
         return AdminPasswordResetResult.Ok(resetUrl);
     }
+
+    // The exception TYPE only: a provider message could echo the recipient or the link.
+    [LoggerMessage(
+        EventId = 1,
+        Level = LogLevel.Warning,
+        Message = "Credential email failed after the reset link was issued (purpose {Purpose}, {ExceptionType}); the link was returned to the admin.")]
+    private partial void LogMailerFailed(string purpose, string exceptionType);
 }
 
 /// <summary>The outcome kind of an <see cref="AdminPasswordResetService"/> call.</summary>
