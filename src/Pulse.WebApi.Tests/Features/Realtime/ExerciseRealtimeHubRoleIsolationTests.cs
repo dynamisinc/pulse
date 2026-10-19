@@ -202,6 +202,51 @@ public sealed class ExerciseRealtimeHubRoleIsolationTests
     }
 
     [RequiresDockerFact]
+    public async Task DisablingThePerson_CutsAStaffConnectionOpenedBeforeIt_SoItReceivesNoFurtherStaffBroadcast()
+    {
+        // identity-auth-roles/19 (Copilot review 5 fold): an org admin disables a controller through the REAL
+        // PATCH /api/org/people/{id}; the controller's hub connection, opened BEFORE the disable, is aborted and out of
+        // the staff group — the person-wide revocation reaches live connections, not only the session rows.
+        var kit = new Pulse.WebApi.Tests.Features.Identity.Enrollments.EnrollmentTestKit(_fixture);
+        var credentials = new Pulse.WebApi.Tests.Features.Identity.Credentials.CredentialTestWorld(_fixture);
+        var exercise = await SeedExerciseAsync();
+        var org = Organization.DefaultOrganizationId;
+        var (controller, _) = await kit.SeedStaffAsync(org, exercise.Id, "controller");
+        var (_, controllerToken) = await kit.SeedStaffSessionAsync(controller, exercise.Id, "controller");
+        var (admin, _) = await credentials.SeedPersonAsync(org, orgRole: Person.OrgAdminRole);
+        var (_, adminToken, _) = await credentials.SeedStaffSessionAsync(admin, exerciseId: null, Person.OrgAdminRole);
+
+        using var host = new RealtimeRoleHost(_fixture.ConnectionString!);
+        await using var staff = await ConnectAsync(host, exercise.Hostname, controllerToken);
+        await staff.WaitUntilInGroupAsync(host, $"exercise:{exercise.Id}:staff");
+        var before = await BroadcastReviewItemAsync(host, exercise.Id);
+        await staff.WaitForAsync(ReviewItemChanged, before);
+
+        var closed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        staff.Connection.Closed += _ =>
+        {
+            closed.TrySetResult();
+            return Task.CompletedTask;
+        };
+
+        using (var asAdmin = host.CreateClient())
+        {
+            asAdmin.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", adminToken);
+            using var disable = await asAdmin.PatchAsync(
+                new Uri($"/api/org/people/{controller}", UriKind.Relative),
+                new System.Net.Http.StringContent("{\"disabled\":true}", System.Text.Encoding.UTF8, "application/json"));
+            disable.StatusCode.Should().Be(System.Net.HttpStatusCode.OK);
+        }
+
+        (await Task.WhenAny(closed.Task, Task.Delay(DeliveryTimeout))).Should().Be(
+            closed.Task, "the disabled person's live hub connection is aborted");
+
+        var after = await BroadcastReviewItemAsync(host, exercise.Id);
+        await Task.Delay(250);
+        staff.Frames.Should().NotContain((ReviewItemChanged, after), "a disabled person receives no further staff broadcast");
+    }
+
+    [RequiresDockerFact]
     public async Task ExpiredStaffToken_IsRejected_NeverConnects()
     {
         // B5 AC6: an invalid/expired token yields a participant-or-rejected connection, never staff. Here the

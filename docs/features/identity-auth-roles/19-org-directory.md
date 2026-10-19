@@ -38,6 +38,23 @@ Wave A2, after A1 (16, 17). Can run with 22, 24.
 ## Tests
 Endpoint tests (incl. foreign-org, last-admin: revoke-role and disable of the last enabled admin both 409 `last-org-admin`; with two admins, one already disabled, revoking/disabling the other is refused; disabled sign-in); RTL for the directory page; role-matrix entries.
 
+**Backend test linkage (#574).** All in `src/Pulse.WebApi.Tests` (`OrgPeopleEndpointTests` is `[RequiresDockerFact]`, real SQL):
+- `OrgPeopleEndpointTests.List_ReturnsOnlyTheCallersOrgPeople_WithTheEnrollmentsSummary_AndNeverAOneOffParticipant` (AC List, Directory shows people only, Isolation)
+- `OrgPeopleEndpointTests.List_IsPaged_AndSearchableByNameAndEmail_AndShowsAnActiveLockout` (AC List)
+- `OrgPeopleEndpointTests.PersonIdRoutes_ForAnotherCustomersPerson_AreTheSameBare404AsAMissingId_AndChangeNothing` (AC Isolation, Bare 404 on `personId` routes)
+- `OrgPeopleEndpointTests.EveryRoute_RefusesEveryNonOrgAdminSession_IncludingAnExerciseBoundSessionOfTheSameOrg` (AC Role gating, Isolation foreign-exercise)
+- `RoleMatrixTests` row `PATCH /api/org/people/{personId:guid}` = org admin only (AC Role gating)
+- `OrgPeopleEndpointTests.Grant_CreatesTheMissingStaffFacet_Audits_AndTheNewAdminSignsInOrgScope` (AC Grant, reality-check facet + no-enrollment rows, org-audit replacement of XC-004)
+- `OrgPeopleEndpointTests.Grant_VoidsEveryOutstandingCredentialTokenOfThePerson_SoAPrePromotionLinkCannotBeRedeemed` (#665 adversarial review W5)
+- `OrgPeopleEndpointTests.Revoke_RevokesOnlyTheOrgScopeSessions_TheirAccessAndRefreshTokens401_AndKeepsEnrollments` (AC Grant/revoke, Copilot 4)
+- `OrgPeopleEndpointTests.LastOrgAdmin_RevokeAndDisableOfTheLastEnabledAdmin_Are409_AndADisabledAdminDoesNotCount` (AC Grant/revoke, Disable last-admin)
+- `OrgPeopleEndpointTests.LastOrgAdmin_TwoAdminsDemotingOrDisablingEachOtherConcurrently_NeverLeaveZero` (reality-check race test)
+- `OrgPeopleEndpointTests.Disable_RevokesEverySession_SignInIsTheUniform401_AndEnableReverses` (AC Disable/enable, Copilot 4)
+- `OrgPeopleEndpointTests.Disable_OfAnOrgAdmin_AlsoRevokesTheirOrgScopeSession_AndSelfDisableIsRefused` (AC Disable; `409 cannot-disable-self`)
+- `OrgPeopleEndpointTests.Patch_WithNeitherOrBothFields_Is400_AndANoOpWritesNothing`
+- `ExerciseRealtimeHubRoleIsolationTests.DisablingThePerson_CutsAStaffConnectionOpenedBeforeIt_SoItReceivesNoFurtherStaffBroadcast` (Copilot 5)
+- `CompositionRootWiringTests.TheOrgTierRoutes_TakeOnlyAllowListedExerciseIds` + `OrgPeopleCompositionRootWiringTests` (AC Isolation allow-list, wiring)
+
 ### Copilot review 3 fold (2026-10-16)
 - Changed: last-admin safeguard now also covers disabling a person, counts enabled org admins only, and returns 409 `last-org-admin`; tests added.
 
@@ -65,7 +82,7 @@ Checked against what A1b (#608), A1c (#615) and Phase 2 (#642) shipped. The ACs 
 | Role gating: "Planner ... refused (403) on every `/api/org/people*` route" | Correct, and now enforced by the A1c declarative role matrix. | Add: "Each route is registered in the route x role matrix (`RoleMatrixTests`, story 17) as orgAdmin-only; the avatar-read exception stays." |
 
 ### 3. Still to build (seams)
-- Backend: `Features/Org/People/*` slice (list/search/page, `PATCH` org-role, `PATCH` disabled), `AddOrgPeople()/MapOrgPeopleEndpoints()` one-liners for the orchestrator, `OrgAdminOnly` filter, `PersonSessionRevoker`, org-audit overload. The route family is `/api/org/people` (the existing `/api/org/*` routes are the pattern: mapped in `ExerciseLifecycleAdminEndpoints`).
+- Backend: `Features/Org/PeopleDirectory/*` slice (list/search/page, `PATCH` org-role, `PATCH` disabled), `AddOrgPeople()/MapOrgPeopleEndpoints()` one-liners for the orchestrator, `OrgAdminOnly` filter, `PersonSessionRevoker`, org-audit overload. The route family is `/api/org/people` (the existing `/api/org/*` routes are the pattern: mapped in `ExerciseLifecycleAdminEndpoints`).
 - Frontend: directory table (COBRA, dense), React Query hooks over the shared axios client, service in the `orgExercisesService` style.
 - Wiring: `Program.cs` and `staffRouteRegistry.tsx` lines + `CompositionRootWiringTests` allow-list go through the orchestrator.
 

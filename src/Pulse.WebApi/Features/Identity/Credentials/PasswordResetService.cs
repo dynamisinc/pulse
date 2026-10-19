@@ -7,6 +7,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
+using Pulse.WebApi.Features.Identity.Sessions;
 using Pulse.WebApi.Features.Identity.Staff;
 using Pulse.WebApi.Features.Realtime;
 
@@ -170,20 +171,8 @@ public sealed partial class PasswordResetService
     /// (access AND refresh: <c>RevokedAt</c> stops both). Sessions minted before the person column existed carry the
     /// person only as <c>StaffUserId</c> (shared key), so both columns are matched.
     /// </summary>
-    private async Task<List<Guid>> StageRevokeEverySessionAsync(Guid personId, DateTimeOffset now, CancellationToken cancellationToken)
-    {
-        // Session is unscoped (looked up pre-scope by token); the person predicate is the confinement.
-        var sessions = await _dbContext.Sessions
-            .Where(s => s.RevokedAt == null && (s.PersonId == personId || s.StaffUserId == personId))
-            .ToListAsync(cancellationToken);
-
-        foreach (var session in sessions)
-        {
-            session.RevokedAt = now;
-        }
-
-        return sessions.Select(session => session.Id).ToList();
-    }
+    private Task<List<Guid>> StageRevokeEverySessionAsync(Guid personId, DateTimeOffset now, CancellationToken cancellationToken) =>
+        PersonSessionRevoker.StageRevokeAsync(_dbContext, personId, PersonSessionScope.All, now, cancellationToken);
 
     private async Task CutRevokedConnectionsAfterCommitAsync(List<Guid> revoked, CancellationToken cancellationToken)
     {
