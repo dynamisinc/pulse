@@ -97,6 +97,13 @@ public static class PauseOverlayServiceCollectionExtensions
         services.RemoveAll<IPauseOverlayPublisher>();
         services.AddSingleton<IPauseOverlayPublisher, PauseOverlayPublisher>();
 
+        // #390: a LIFECYCLE transition pushes the participant overlay too (the push side of the GET's
+        // "lifecycle wins"). REPLACES AddExerciseLifecycle()'s TryAdded no-op — RemoveAll + add, so it wins in either
+        // wiring order, exactly like the publisher swap above. A singleton that resolves the scoped projection in its
+        // OWN scope per notification: see LifecycleOverlayPublisher's remarks for why not scoped.
+        services.RemoveAll<IExerciseLifecycleTransitionObserver>();
+        services.AddSingleton<IExerciseLifecycleTransitionObserver, LifecycleOverlayPublisher>();
+
         // The READ side (Tom's ruling, 2026-07-27): the pause store contributes to the exercise-configuration
         // overlay seam by DECORATING the lifecycle projection — endex > pre-start > pause > none. See
         // SteeringPauseOverlayProjection for the chain, and for why ISteeringOverlaySource is deliberately left

@@ -1,6 +1,7 @@
 namespace Pulse.WebApi.Features.EngineRuntime.Steering;
 
 using System.Text.Json.Serialization;
+using Pulse.WebApi.Features.ParticipantShell;
 
 /// <summary>
 /// The PARTICIPANT-facing overlay-state projection (feature: world-steering, story 08; XC-002, COR-018,
@@ -13,15 +14,17 @@ using System.Text.Json.Serialization;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>The XC-002 projection is STRUCTURAL, not a discipline (read this before adding a property).</b> The one
-/// factory, <see cref="FromSnapshot"/>, takes an <see cref="OverlayStateSnapshot"/> — a record that itself
-/// carries no staff field. It deliberately does NOT accept a <see cref="PauseTierTransition"/>, so
+/// <b>The XC-002 projection is STRUCTURAL, not a discipline (read this before adding a property).</b> There are
+/// exactly two factories and both take a participant-safe record that itself carries no staff field:
+/// <see cref="FromSnapshot"/> (the steering store's <see cref="OverlayStateSnapshot"/>, used by the Freeze push) and
+/// <see cref="FromComposed"/> (the composed <c>GET /api/overlay-state</c> projection, used by the lifecycle push,
+/// #390). Neither accepts a <see cref="PauseTierTransition"/>, so
 /// <see cref="PauseTierTransition.ActingHumanId"/> (COR-018 staff attribution) is not merely omitted here, it
 /// is not reachable from here: a participant can never learn WHICH controller paused the exercise. For the same
 /// reason no <see cref="PauseTier"/> value is projected — <c>INJECTS PAUSED</c>/<c>ENGINE PAUSED</c>/<c>WORLD
 /// FROZEN</c> are STAFF vocabulary, and only the fiction-safe <c>pause</c>/<c>none</c> kind crosses to the
-/// participant world. Do not add a property that is not already on <see cref="OverlayStateSnapshot"/>, and do
-/// not add a second factory that reads a staff record.
+/// participant world. Do not add a property that is not on the participant record it is built from, and do
+/// not add a factory that reads a staff record.
 /// </para>
 /// <para>
 /// <b>No time field (COR-050/053).</b> The overlay carries no timestamp at all: the participant shell's pause
@@ -67,6 +70,29 @@ public sealed class ParticipantOverlayStateDto
             Register = snapshot.Register,
             Message = snapshot.Message,
             Sequence = snapshot.Sequence,
+        };
+    }
+
+    /// <summary>
+    /// Projects the COMPOSED overlay — exactly the <see cref="OverlayStateResponse"/> <c>GET /api/overlay-state</c>
+    /// serves — onto the push wire shape, stamped with a push <paramref name="sequence"/> ticket (#390). The pushed
+    /// frame is therefore the GET body plus <c>sequence</c> and nothing else: a field later added to
+    /// <see cref="OverlayStateResponse"/> is added HERE, once, and the lifecycle push carries it with no publisher
+    /// change. Never built from the steering store, so the push can never disagree with the GET.
+    /// </summary>
+    /// <param name="composed">The composed participant overlay, as the GET serves it.</param>
+    /// <param name="sequence">The <see cref="OverlayStateService.NextSequence"/> ticket for this push.</param>
+    /// <returns>The participant-safe push frame.</returns>
+    public static ParticipantOverlayStateDto FromComposed(OverlayStateResponse composed, long sequence)
+    {
+        ArgumentNullException.ThrowIfNull(composed);
+
+        return new ParticipantOverlayStateDto
+        {
+            State = composed.State,
+            Register = composed.Register,
+            Message = composed.Message,
+            Sequence = sequence,
         };
     }
 }

@@ -8,6 +8,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.EngineRuntime.Steering;
+using Pulse.WebApi.Features.ExerciseConfiguration.Lifecycle;
 using Xunit;
 
 /// <summary>
@@ -156,6 +157,45 @@ public sealed class PauseOverlayCompositionTests
 
         resumed.Outcome.Should().Be(PauseTierOutcome.Applied);
         overlayState.Get(exerciseA).State.Should().Be("none", "AC3: Resume clears the participant holding page");
+    }
+
+    /// <summary>#390: whichever order the two slices are wired in, the overlay pusher replaces the lifecycle no-op.</summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void AddPauseParticipantOverlay_ReplacesTheLifecycleNoOpObserver_InEitherOrder(bool lifecycleFirst)
+    {
+        var services = new ServiceCollection();
+        if (lifecycleFirst)
+        {
+            services.AddExerciseLifecycle();
+            services.AddPauseParticipantOverlay();
+        }
+        else
+        {
+            services.AddPauseParticipantOverlay();
+            services.AddExerciseLifecycle();
+        }
+
+        services.Where(descriptor => descriptor.ServiceType == typeof(IExerciseLifecycleTransitionObserver))
+            .Should().ContainSingle()
+            .Which.Should().Match<ServiceDescriptor>(
+                descriptor => descriptor.ImplementationType == typeof(LifecycleOverlayPublisher)
+                    && descriptor.Lifetime == ServiceLifetime.Singleton,
+                "the lifecycle slice TryAdds its no-op, and this slice RemoveAll + adds the real pusher — so the pusher "
+                + "wins in both orders, as a singleton (it resolves the scoped projection in its own scope)");
+    }
+
+    /// <summary>A lifecycle-only host keeps the no-op floor and stays constructible.</summary>
+    [Fact]
+    public void AddExerciseLifecycle_Alone_RegistersTheNoOpTransitionObserver()
+    {
+        var services = new ServiceCollection();
+
+        services.AddExerciseLifecycle();
+
+        services.Should().ContainSingle(descriptor => descriptor.ServiceType == typeof(IExerciseLifecycleTransitionObserver))
+            .Which.ImplementationType.Should().Be(typeof(NoOpExerciseLifecycleTransitionObserver));
     }
 
     /// <summary>

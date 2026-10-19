@@ -198,6 +198,10 @@ public static class LifecycleOverlayComposer
     /// <param name="state">A canonical or legacy lifecycle literal.</param>
     /// <returns>The lifecycle contribution — <c>none</c>, or an unspecified-register <c>pause</c>.</returns>
     public static OverlayContribution FromLifecycle(string? state) =>
+        // PENDING DECISION (Tom, #390): 'completed' projects to 'none' here today, so EndEx simply LIFTS any overlay
+        // (and, since #390, pushes that lift to connected tabs). Whether 'completed' should instead project to the
+        // terminal 'endex' overlay is an open product ruling, not settled by #390 — do not change it without it.
+        // Both the GET and the lifecycle push read this one line, so the ruling lands here and only here.
         ExerciseLifecycleStates.TryParse(state, out var canonical)
         && string.Equals(canonical, ExerciseLifecycleStates.Paused, StringComparison.Ordinal)
             ? new OverlayContribution(LifecycleOverlayWire.Pause, Register: null, string.Empty)
