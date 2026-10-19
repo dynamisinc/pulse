@@ -232,6 +232,12 @@ public sealed partial class EnrollmentService
             return EnrollmentResult.Conflict(LeadConflictError);
         }
 
+        // PROVIDER-GOVERNANCE §8: demoting the lead turns swamped mode off. A TRANSFER demotes the previous lead, and the
+        // exercise still has a lead afterwards, so the no-lead heal never catches it: without this the new lead would
+        // inherit timeout auto-send they never turned on (adversarial review W1 on #642).
+        await TurnSwampedModeOffAfterCommitAsync(
+            caller, exercise, enrollment, leadReleased: previousLeadId is not null, now, cancellationToken, reason: "lead-transferred");
+
         return EnrollmentResult.Ok(enrollment);
     }
 
@@ -455,7 +461,8 @@ public sealed partial class EnrollmentService
         Enrollment enrollment,
         bool leadReleased,
         DateTimeOffset now,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string reason = "lead-released")
     {
         if (!leadReleased)
         {
@@ -476,7 +483,7 @@ public sealed partial class EnrollmentService
 
         var swampedPayload = string.Create(
             CultureInfo.InvariantCulture,
-            $"{{\"reason\":\"lead-released\",\"wasOn\":{(swampedWasOn ? "true" : "false")}}}");
+            $"{{\"reason\":{JsonSerializer.Serialize(reason)},\"wasOn\":{(swampedWasOn ? "true" : "false")}}}");
         Record(caller, exercise, enrollment, SwampedModeOffEventType, SwampedModeOffAuditKind, swampedPayload, now);
 
         try

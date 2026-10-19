@@ -1004,7 +1004,7 @@ public sealed partial class EngineReviewService
         }
 
         var state = _autonomy.GetOrCreate(exerciseId);
-        // Defence in depth (PROVIDER-GOVERNANCE §8, Phase 1): with timeout auto-send unauthorised, swamped mode is read
+        // Defence in depth (PROVIDER-GOVERNANCE §8): with timeout auto-send unauthorised on this environment, swamped mode is read
         // as OFF, so an expired countdown HOLDs even if swamped mode is somehow on.
         var swamped = state.SwampedModeEnabled && _timeoutAutoSendAuthorized;
         var cutToFake = _providerCut.IsCutToFake(exerciseId);
@@ -1134,7 +1134,7 @@ public sealed partial class EngineReviewService
             var burst = await PrepareBurstAsync(item, exerciseId, input: null, leadTextOverride: null, cancellationToken);
 
             // NO await between this re-decision and the publisher call. The governed timeout-auto-send flag is a
-            // synchronous field read (PROVIDER-GOVERNANCE §8, Phase 1): unauthorised reads swamped mode as OFF → HOLD.
+            // synchronous field read (PROVIDER-GOVERNANCE §8): unauthorised reads swamped mode as OFF → HOLD.
             var state = _autonomy.GetOrCreate(exerciseId);
             var recheck = AutoHoldPolicy.Evaluate(
                 countdown,
