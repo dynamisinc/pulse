@@ -464,6 +464,18 @@ describe('SwampedModeToggle — banner follows the inputs expiries really use (S
       /degraded mode/,
     ],
     [
+      'default lowered to Suggest (no clamp)',
+      { autonomy: { effectiveLevel: 'suggest' } },
+      'TIMEOUT AUTO-SEND IS SUSPENDED',
+      /autonomy is Suggest; expired timers hold/,
+    ],
+    [
+      'effective level delayed-auto stays ACTIVE',
+      { autonomy: { effectiveLevel: 'delayed-auto' } },
+      'TIMEOUT AUTO-SEND IS ACTIVE',
+      /publish instead of holding/,
+    ],
+    [
       'not authorized',
       { timeoutAutoSendAuthorized: false },
       'TIMEOUT AUTO-SEND IS NOT AUTHORIZED',

@@ -1,9 +1,11 @@
 /**
  * features/controller/engine/hooks/useDraftTimer.liveLabel.test.ts
  * ---------------------------------------------------------------------------
- * W2: the LIVE (display-only) countdown label follows the same expiry rule as `decide()`,
- * fed the server-derived inputs (`effectiveTimeoutAutoSend(serverSwamped, settings)`,
- * cut-to-Fake, effective level). A card says "sends in" only when the server will publish,
+ * W2: the hook's OWN live (display-only) label follows the same expiry rule as `decide()`,
+ * fed the caller's inputs (`effectiveTimeoutAutoSend(serverSwamped, settings)`, cut-to-Fake,
+ * effective level). NOTE: the visible review card is `ReviewQueue`, which gets its "sends in"
+ * / "holds in" from `useCardAutoSend` (server-derived in live mode; see its test), not from
+ * this label. A card says "sends in" only when the server will publish,
  * otherwise "holds in"; live mode never publishes or emits client-side.
  */
 import { renderHook } from '@testing-library/react'

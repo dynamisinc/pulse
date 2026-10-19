@@ -622,6 +622,11 @@ function settle(exerciseId: string, internal: EngineSettingsInternal): void {
  * Clears a stale swamped-mode message when a settings GET lands: a failed re-read is
  * resolved by ANY applied GET; a refusal only once the server's swamped state has changed.
  */
+/** Stamps a successfully APPLIED settings DTO: when it landed, and no outstanding failures. */
+function appliedStamp(): Pick<EngineSettingsState, 'lastAppliedAt' | 'refreshFailures'> {
+  return { lastAppliedAt: Date.now(), refreshFailures: 0 }
+}
+
 function reconcileSwampedError(
   current: EngineSettingsState,
   next: EngineSettingsDto,
@@ -664,8 +669,7 @@ function startLiveFetch(exerciseId: string, background = false): void {
         setFor(exerciseId, {
           ...current,
           ...reconcileSwampedError(current, settings),
-          lastAppliedAt: Date.now(),
-          refreshFailures: 0,
+          ...appliedStamp(),
           settings,
           loading: false,
           error: null,
@@ -817,7 +821,13 @@ function runSetAutonomyDefault(
       if (!isLiveGeneration(exerciseId, mine)) return
       const latest = getSnapshot(exerciseId)
       if (tryApply(mine, mySeq)) {
-        setFor(exerciseId, { ...latest, settings, pendingAutonomyDefault: false, error: null })
+        setFor(exerciseId, {
+          ...latest,
+          ...appliedStamp(),
+          settings,
+          pendingAutonomyDefault: false,
+          error: null,
+        })
       } else {
         setFor(exerciseId, { ...latest, pendingAutonomyDefault: false })
       }
@@ -863,7 +873,13 @@ function runSetTierPolicyMode(
       if (!isLiveGeneration(exerciseId, mine)) return
       const latest = getSnapshot(exerciseId)
       if (tryApply(mine, mySeq)) {
-        setFor(exerciseId, { ...latest, settings, pendingTierPolicy: false, error: null })
+        setFor(exerciseId, {
+          ...latest,
+          ...appliedStamp(),
+          settings,
+          pendingTierPolicy: false,
+          error: null,
+        })
       } else {
         setFor(exerciseId, { ...latest, pendingTierPolicy: false })
       }
@@ -917,7 +933,13 @@ function runCutGenerationToFake(
       if (!isLiveGeneration(exerciseId, mine)) return
       const latest = getSnapshot(exerciseId)
       if (tryApply(mine, mySeq)) {
-        setFor(exerciseId, { ...latest, settings, pendingProviderLever: false, error: null })
+        setFor(exerciseId, {
+          ...latest,
+          ...appliedStamp(),
+          settings,
+          pendingProviderLever: false,
+          error: null,
+        })
       } else {
         setFor(exerciseId, { ...latest, pendingProviderLever: false })
       }
@@ -967,7 +989,13 @@ function runRestoreGenerationProvider(
       if (!isLiveGeneration(exerciseId, mine)) return
       const latest = getSnapshot(exerciseId)
       if (tryApply(mine, mySeq)) {
-        setFor(exerciseId, { ...latest, settings, pendingProviderLever: false, error: null })
+        setFor(exerciseId, {
+          ...latest,
+          ...appliedStamp(),
+          settings,
+          pendingProviderLever: false,
+          error: null,
+        })
       } else {
         setFor(exerciseId, { ...latest, pendingProviderLever: false })
       }
@@ -1027,7 +1055,13 @@ function runSetAmbientPolicy(
       if (!isLiveGeneration(exerciseId, mine)) return
       const latest = getSnapshot(exerciseId)
       if (tryApply(mine, mySeq)) {
-        setFor(exerciseId, { ...latest, settings, pendingAmbientPolicy: false, ambientError: null })
+        setFor(exerciseId, {
+          ...latest,
+          ...appliedStamp(),
+          settings,
+          pendingAmbientPolicy: false,
+          ambientError: null,
+        })
       } else {
         setFor(exerciseId, { ...latest, pendingAmbientPolicy: false })
       }
@@ -1126,8 +1160,7 @@ function executeSwampedMode(
               swampedError: null,
               swampedErrorKind: null,
               error: null,
-              lastAppliedAt: Date.now(),
-              refreshFailures: 0,
+              ...appliedStamp(),
             })
           } else {
             setFor(exerciseId, { ...latest, pendingSwampedMode: false })

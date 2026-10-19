@@ -108,6 +108,8 @@ export const STALE_FAILURE_COUNT = 2
 /** No applied GET for longer than this (tab visible) flags the console stale. */
 export const STALE_AFTER_MS = 60_000
 const STALE_TICK_MS = 15_000
+/** Max wait for the tab-return background GET before the time-based flag may show. */
+const TAB_RETURN_GRACE_MS = 5_000
 
 /**
  * The per-exercise, lead-gated swamped-mode flag. See the module header for
@@ -139,21 +141,39 @@ export function useSwampedMode(): UseSwampedModeResult {
   // Staleness: re-evaluated on a short tick (and when the tab becomes visible) so a hung or
   // silently failing refresh is flagged even though nothing else re-renders.
   const [nowMs, setNowMs] = useState(() => Date.now())
+  // After the tab returns to visible, the time-based branch waits (at most
+  // {@link TAB_RETURN_GRACE_MS}) for the immediate background GET, so a screen reader is not
+  // told "could not be refreshed" on every tab return.
+  const [graceFrom, setGraceFrom] = useState<number | null>(null)
   useEffect(() => {
-    const refreshNow = () => {
+    let graceTimer: number | undefined
+    const tick = () => {
       if (document.visibilityState !== 'hidden') setNowMs(Date.now())
     }
-    const id = window.setInterval(refreshNow, STALE_TICK_MS)
-    document.addEventListener('visibilitychange', refreshNow)
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden') return
+      const at = Date.now()
+      setNowMs(at)
+      setGraceFrom(at)
+      window.clearTimeout(graceTimer)
+      graceTimer = window.setTimeout(() => setNowMs(Date.now()), TAB_RETURN_GRACE_MS)
+    }
+    const id = window.setInterval(tick, STALE_TICK_MS)
+    document.addEventListener('visibilitychange', onVisibility)
     return () => {
       window.clearInterval(id)
-      document.removeEventListener('visibilitychange', refreshNow)
+      window.clearTimeout(graceTimer)
+      document.removeEventListener('visibilitychange', onVisibility)
     }
   }, [])
   const lastConfirmedAt = engine.lastAppliedAt
+  const inGrace =
+    graceFrom !== null &&
+    nowMs - graceFrom < TAB_RETURN_GRACE_MS &&
+    (lastConfirmedAt === null || lastConfirmedAt < graceFrom)
   const stale =
     engine.refreshFailures >= STALE_FAILURE_COUNT ||
-    (lastConfirmedAt !== null && nowMs - lastConfirmedAt > STALE_AFTER_MS)
+    (lastConfirmedAt !== null && !inGrace && nowMs - lastConfirmedAt > STALE_AFTER_MS)
 
   const setSwampedMode = useCallback(
     (next: boolean) => {

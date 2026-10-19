@@ -86,6 +86,10 @@ const BANNER_COPY: Record<TimeoutAutoSendState, {
     detail:
       '— swamped mode is on, but the engine is in degraded mode; expired timers hold.',
   },
+  'autonomy-lowered': {
+    title: 'TIMEOUT AUTO-SEND IS SUSPENDED',
+    detail: '— swamped mode is on, but autonomy is Suggest; expired timers hold.',
+  },
   'not-authorized': {
     title: 'TIMEOUT AUTO-SEND IS NOT AUTHORIZED',
     detail:

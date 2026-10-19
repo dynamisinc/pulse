@@ -30,6 +30,7 @@ vi.mock('../services/engineSettingsActions', async () => ({
   )),
   getSettings: vi.fn(),
   setSwampedMode: vi.fn(),
+  setAutonomyDefault: vi.fn(),
 }))
 
 const getSettings = vi.mocked(actions.getSettings)
@@ -113,6 +114,74 @@ describe('stale console flag (W3)', () => {
     expect(result.current.stale).toBe(false) // exactly ~60 s: not yet over
     await tick(SETTINGS_POLL_MS)
     expect(result.current.stale).toBe(true)
+  })
+})
+
+describe('tab-return grace (W3 polish)', () => {
+  function setVisibility(state: 'visible' | 'hidden'): void {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => state })
+  }
+
+  it('does not flag the time-based branch on tab return until the GET settles or 5 s pass', async () => {
+    setVisibility('visible')
+    getSettings.mockResolvedValueOnce(dto(false))
+    const { result } = renderHook(() => useConsole())
+    await tick(0)
+    getSettings.mockReturnValue(new Promise(() => {})) // refreshes hang
+    await tick(SETTINGS_POLL_MS * 3)
+    expect(result.current.stale).toBe(true)
+
+    setVisibility('hidden')
+    document.dispatchEvent(new Event('visibilitychange'))
+    setVisibility('visible')
+    await act(async () => {
+      document.dispatchEvent(new Event('visibilitychange'))
+    })
+    expect(result.current.stale).toBe(false) // grace
+
+    await tick(4_000)
+    expect(result.current.stale).toBe(false)
+    await tick(1_100)
+    expect(result.current.stale).toBe(true) // capped at 5 s
+  })
+
+  it('stays fresh when the in-flight GET lands after the tab returns', async () => {
+    setVisibility('visible')
+    getSettings.mockResolvedValueOnce(dto(false))
+    const { result } = renderHook(() => useConsole())
+    await tick(0)
+    let land: (v: EngineSettingsDto) => void = () => {}
+    getSettings.mockReturnValueOnce(new Promise<EngineSettingsDto>(r => { land = r }))
+    await tick(SETTINGS_POLL_MS * 3)
+    expect(result.current.stale).toBe(true)
+
+    getSettings.mockResolvedValue(dto(false))
+    await act(async () => {
+      document.dispatchEvent(new Event('visibilitychange'))
+    })
+    await act(async () => land(dto(false)))
+    await tick(6_000)
+    expect(result.current.stale).toBe(false)
+  })
+})
+
+describe('mutation stamps (W3 polish)', () => {
+  it('a successful settings mutation stamps lastAppliedAt and resets failures', async () => {
+    getSettings.mockResolvedValueOnce(dto(false))
+    const { result } = renderHook(() => useEngineSettings())
+    await tick(0)
+    const before = result.current.lastAppliedAt
+    getSettings.mockRejectedValue(new Error('x'))
+    act(() => result.current.refetch())
+    await tick(0)
+    expect(result.current.refreshFailures).toBe(1)
+
+    vi.mocked(actions.setAutonomyDefault).mockResolvedValue(dto(false))
+    await tick(1_000)
+    act(() => result.current.setAutonomyDefault('delayed-auto'))
+    await tick(0)
+    expect(result.current.refreshFailures).toBe(0)
+    expect(result.current.lastAppliedAt).toBeGreaterThan(before ?? 0)
   })
 })
 
