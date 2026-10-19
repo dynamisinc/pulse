@@ -14,7 +14,7 @@
  * match and how to narrow it. The summary and charts above are unaffected.
  */
 
-import { dateOf, groupByHalfHour, type PostGroup } from '../services/reportFormat'
+import { dateOf, groupByHalfHour, mergeRepeats, type PostGroup } from '../services/reportFormat'
 import { describeFilters } from '../services/reportFilters'
 import type { ReportPost, ReportPostRecord } from '../types/report'
 import { ReportPostCard } from './ReportPostCard'
@@ -39,7 +39,12 @@ export function PostRecord({
   postRecord,
   spansMultipleDays = false,
 }: PostRecordProps) {
-  const groups = groupByHalfHour(posts)
+  const groups = groupByHalfHour(posts).map(group => ({
+    group,
+    entries: mergeRepeats(group.posts, group.nestedIds),
+  }))
+  const cards = groups.reduce((sum, { entries }) => sum + entries.length, 0)
+  const listed = groups.reduce((sum, { group }) => sum + group.posts.length, 0)
   return (
     <section className={styles.section} aria-labelledby="report-posts-h">
       <h2 id="report-posts-h" className={styles.heading}>
@@ -58,17 +63,23 @@ export function PostRecord({
           {`${postRecord.matching.toLocaleString('en-US')} posts match. The printable record holds up to ${postRecord.limit.toLocaleString('en-US')}. Narrow the sources or the time window above.`}
         </p>
       )}
+      {cards < listed && (
+        <p className={styles.omit} data-testid="merged-note">
+          {`Repeated engine posts print once: these ${listed.toLocaleString('en-US')} posts appear as ${cards.toLocaleString('en-US')} cards. A card that stands for repeats says "Posted N times".`}
+        </p>
+      )}
       {!postRecord.withheld && groups.length === 0 && (
         <p className={styles.method}>No posts to list.</p>
       )}
-      {groups.map(group => (
+      {groups.map(({ group, entries }) => (
         <div key={group.key}>
           <div className={styles.hour}>{group.label}</div>
           <div className={styles.feed}>
-            {group.posts.map(post => (
+            {entries.map(({ post, repeats }) => (
               <ReportPostCard
                 key={post.id}
                 post={post}
+                repeats={repeats}
                 nested={group.nestedIds.has(post.id)}
                 spansMultipleDays={spansMultipleDays}
                 showDate={dateOf(post.scenarioAt) !== headingDay(group)}

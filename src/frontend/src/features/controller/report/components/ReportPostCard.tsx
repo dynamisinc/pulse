@@ -25,6 +25,7 @@ import {
   initialsOf,
   formatStamp,
   refLabel,
+  repeatsLabel,
   sourceLabel,
 } from '../services/reportFormat'
 import type { ReportMedia, ReportPost } from '../types/report'
@@ -91,6 +92,11 @@ export interface ReportPostCardProps {
    * root's half-hour heading from the day before).
    */
   readonly showDate?: boolean
+  /**
+   * Story 34 (DF-50): the identical engine repeats this card stands for, its own post first.
+   * Two or more print a "Posted N times" tag; omitted (or one) is an ordinary card.
+   */
+  readonly repeats?: readonly ReportPost[]
 }
 
 export function ReportPostCard({
@@ -98,6 +104,7 @@ export function ReportPostCard({
   nested = false,
   spansMultipleDays = false,
   showDate = false,
+  repeats = [],
 }: ReportPostCardProps) {
   const { author } = post
   const mediaItems = post.media.map((item, index) => (
@@ -110,6 +117,7 @@ export function ReportPostCard({
       className={`${styles.post} ${takenDown ? styles.taken : ''} ${nested ? styles.nested : ''}`}
       data-testid="report-post"
       data-nested={nested ? 'true' : undefined}
+      data-repeats={repeats.length > 1 ? repeats.length : undefined}
     >
       <div className={styles.time}>
         {showDate ? formatStamp(post.scenarioAt, true) : post.scenarioTime}
@@ -142,28 +150,35 @@ export function ReportPostCard({
             {mediaItems}
           </div>
         ) : mediaItems}
-        <div className={styles.engagement}>
-          <span>{`${post.likes.toLocaleString('en-US')} ${post.likes === 1 ? 'like' : 'likes'}`}</span>
-          <span>{`${post.reposts.toLocaleString('en-US')} ${post.reposts === 1 ? 'repost' : 'reposts'}`}</span>
-          <span>{`${post.replies.toLocaleString('en-US')} ${post.replies === 1 ? 'reply' : 'replies'}`}</span>
-        </div>
-        <div className={styles.tags}>
-          <span className={`${styles.tag} ${participantish ? styles.tagPt : ''}`}>
-            <i className={`${styles.sw} ${SOURCE_SWATCH[post.source]}`} aria-hidden="true" />
-            {sourceLabel(post.source, post.postedBy)}
-          </span>
-          {post.editCount !== null && post.editCount > 0 && (
-            <span className={`${styles.tag} ${styles.tagEdited}`}>
-              {post.lastEditedAt !== null
-                ? `Edited ${post.editCount}× · last at ${formatStamp(post.lastEditedAt, spansMultipleDays)}`
-                : `Edited ${post.editCount}×`}
+        <div className={styles.meta}>
+          <div className={styles.engagement}>
+            <span>{`${post.likes.toLocaleString('en-US')} ${post.likes === 1 ? 'like' : 'likes'}`}</span>
+            <span>{`${post.reposts.toLocaleString('en-US')} ${post.reposts === 1 ? 'repost' : 'reposts'}`}</span>
+            <span>{`${post.replies.toLocaleString('en-US')} ${post.replies === 1 ? 'reply' : 'replies'}`}</span>
+          </div>
+          <div className={styles.tags}>
+            <span className={`${styles.tag} ${participantish ? styles.tagPt : ''}`}>
+              <i className={`${styles.sw} ${SOURCE_SWATCH[post.source]}`} aria-hidden="true" />
+              {sourceLabel(post.source, post.postedBy)}
             </span>
-          )}
-          {post.takenDownAt !== null && (
-            <span className={`${styles.tag} ${styles.tagDown}`}>
-              {`Taken down at ${formatStamp(post.takenDownAt, spansMultipleDays)}`}
-            </span>
-          )}
+            {post.editCount !== null && post.editCount > 0 && (
+              <span className={`${styles.tag} ${styles.tagEdited}`}>
+                {post.lastEditedAt !== null
+                  ? `Edited ${post.editCount}× · last at ${formatStamp(post.lastEditedAt, spansMultipleDays)}`
+                  : `Edited ${post.editCount}×`}
+              </span>
+            )}
+            {post.takenDownAt !== null && (
+              <span className={`${styles.tag} ${styles.tagDown}`}>
+                {`Taken down at ${formatStamp(post.takenDownAt, spansMultipleDays)}`}
+              </span>
+            )}
+            {repeats.length > 1 && (
+              <span className={`${styles.tag} ${styles.tagRepeat}`} data-testid="report-post-repeats">
+                {repeatsLabel(repeats, spansMultipleDays)}
+              </span>
+            )}
+          </div>
         </div>
       </div>
     </article>

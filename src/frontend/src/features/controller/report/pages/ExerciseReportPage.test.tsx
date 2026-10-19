@@ -110,7 +110,12 @@ describe('ExerciseReportPage', () => {
     expect(screen.getByRole('heading', { name: /Post record/ })).toBeInTheDocument()
     expect(screen.getByTestId('omitted-noise-note')).toHaveTextContent('Background noise (2 posts)')
     expect(screen.getByText('15 Oct 2026 · 09:30')).toBeInTheDocument() // a half-hour group heading
-    expect(screen.getAllByTestId('report-post')).toHaveLength(MOCK_REPORT.posts.length)
+    // Story 34 (DF-50): the mock's 6-post engine burst prints as 3 cards.
+    expect(screen.getAllByTestId('report-post')).toHaveLength(MOCK_REPORT.posts.length - 3)
+    expect(screen.getByTestId('merged-note')).toHaveTextContent(
+      `these ${MOCK_REPORT.posts.length} posts appear as ${MOCK_REPORT.posts.length - 3} cards`)
+    expect(screen.getAllByTestId('report-post-repeats').map(n => n.textContent))
+      .toEqual(['Posted 3 times, 15 Oct 10:10–10:12', 'Posted 2 times, 15 Oct 10:10–10:11'])
     expect(screen.getByText('All times are scenario time')).toBeInTheDocument()
   })
 
@@ -131,7 +136,7 @@ describe('ExerciseReportPage', () => {
       expect.objectContaining({ params: { sources: 'participant,scripted,engine,noise' } }),
     ))
     await waitFor(() =>
-      expect(screen.getAllByTestId('report-post')).toHaveLength(MOCK_REPORT.posts.length + 2))
+      expect(screen.getAllByTestId('report-post')).toHaveLength(MOCK_REPORT.posts.length + 2 - 3))
     expect(screen.queryByTestId('omitted-noise-note')).not.toBeInTheDocument()
   })
 
@@ -462,6 +467,8 @@ describe('ExerciseReportPage', () => {
       await waitFor(() => expect(screen.getByTestId('filter-statement')).toHaveTextContent(
         'Showing participant, scripted inject and engine posts, 10-15 09:00 – 10-15 10:00'))
       await waitFor(() => expect(screen.getAllByTestId('report-post')).toHaveLength(6))
+      // Nothing in 09:00-10:00 repeats, so no merge note (story 34).
+      expect(screen.queryByTestId('merged-note')).not.toBeInTheDocument()
 
       await user.click(screen.getByRole('button', { name: 'Clear' }))
       await waitFor(() => expect(lastParams(get)).toEqual({ sources: 'participant,scripted,engine' }))
