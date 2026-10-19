@@ -305,6 +305,78 @@ gh variable set VITE_USE_MOCK_DATA --env uat --body 'true'   # then re-run Deplo
 > `VITE_USE_MOCK_DATA` must **never** be set on a real participant-facing **production** environment
 > (per that module's header and the root `CLAUDE.md`). It is a UAT/pilot escape hatch only.
 
+### Adding test staff accounts (role smoke)
+
+UAT was seeded with one staff login, `controller1`. A1b made `controller1` the exercise's lead: the
+backfill picks the earliest person-backed controller. A role smoke (A1c, story identity-auth-roles/17)
+also needs a non-lead controller, a planner and an evaluator. Each extra staff login needs two things:
+
+- an **allowlist entry**, which lets it authenticate (steps 1–2 below);
+- an **Enrollment**, which gives it a role in the exercise (step 3).
+
+Staff login refuses an authenticated identity that has no enrollment in the exercise with **403**.
+
+**1 — Replace the `STAFF_IDENTITY_ACCOUNTS_JSON` secret with the full array.** The secret is the whole list,
+not an append.
+
+- **Keep the `controller1` entry exactly as it is:** same `Username`, `Secret` and `ExternalSubject`.
+  `ExternalSubject` is the key the `StaffUser` / `Person` row is found by. If you change it, the next
+  `controller1` login becomes a *new* person with no enrollment, and the exercise loses its lead.
+- **If the current `controller1` secret is lost,** give it a new `Secret`; that only changes the password.
+  GitHub cannot show a secret back.
+- **Every `ExternalSubject` must be unique and stable.**
+
+```bash
+gh secret set STAFF_IDENTITY_ACCOUNTS_JSON --env uat --body '[
+  {"Username":"controller1","Secret":"<unchanged>","ExternalSubject":"uat-controller1","DisplayName":"Exercise Controller"},
+  {"Username":"controller2","Secret":"<new-secret>","ExternalSubject":"uat-controller2","DisplayName":"Second Controller"},
+  {"Username":"planner1","Secret":"<new-secret>","ExternalSubject":"uat-planner1","DisplayName":"Exercise Planner"},
+  {"Username":"evaluator1","Secret":"<new-secret>","ExternalSubject":"uat-evaluator1","DisplayName":"Exercise Evaluator"}
+]'
+```
+
+**2 — Re-run Deploy Infrastructure** (`uat`). This is the only way the new entries reach the App Service as
+`Authentication__StaffIdentity__Accounts__{i}__*`.
+
+- **The masking step** hides each `Secret` in the logs.
+- **The re-run re-applies every Bicep-owned app setting.** Anything changed by hand in the portal is
+  reverted. The governance flags come from `parameters/uat.bicepparam`, so they stay as `main` has them.
+  For example, `TimeoutAutoSendAuthorized` stays false until its own reviewed commit merges.
+- **Check the result.** Re-run the step-2 `az webapp config appsettings list` check: expect
+  `Accounts__0` through `Accounts__3`. The settings change restarts the app; if a login still fails with
+  401, run `az webapp restart`.
+
+**3 — Enroll each new login in the exercise**: re-run `bootstrap-exercise` once per account. Use the
+**same `hostname`** as step 4 and send only the `staff` sub-request.
+
+```bash
+for pair in controller2:controller planner1:planner evaluator1:evaluator; do
+  curl -sS -X POST https://app-pulse-api-uat-dynamis.azurewebsites.net/api/ops/bootstrap-exercise \
+    -H "X-Bootstrap-Secret: <the BOOTSTRAP_SECRET>" -H "Content-Type: application/json" \
+    -d "{\"hostname\":\"app-pulse-api-uat-dynamis.azurewebsites.net\",\"staff\":{\"username\":\"${pair%%:*}\",\"role\":\"${pair##*:}\"}}" \
+    -w " %{http_code}\n"
+done
+```
+
+- **What it does:** each call reuses the existing exercise and creates the person plus an `Enrollment` with
+  that role. It changes nothing else.
+- **Re-running is safe,** but it never changes an existing enrollment's role.
+- **Valid roles:** `controller`, `planner`, `evaluator`, `orgAdmin`. `orgAdmin` enrolls the person as a
+  planner and sets the org-admin grant.
+- **A 400 naming the allowlist** means step 2 has not landed yet.
+
+Other routes do not do this:
+
+- `POST /api/staff/accounts` creates **participant-world** accounts (`participant` / `pio`) only.
+- Staff grants have no HTTP route yet; that is A2.
+
+**4 — Lead.** A newly enrolled controller is **not** the lead, and `controller1` stays the lead. That gives
+the smoke its lead and non-lead pair with no further step. To move the lead later, a planner or org admin
+uses `PUT /api/staff/enrollments/{id}/lead`.
+
+**5 — Verify.** Sign each login in at `/staff/login`, using its own browser profile.
+`GET /api/staff/assignments` should show the expected `role`, and `isLead: true` only for `controller1`.
+
 ## Out of Scope
 
 Any application code (stories 01–05 cover all of it). Production (`pulse.cobrasoftware.com`) config — this

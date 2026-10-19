@@ -74,6 +74,17 @@ Decided by Tom on 2026-10-14 (#486, Tier-2 items 3, 4 and 7):
 - **Shared devices: tap Sign out.** A participant session ends at midnight in the exercise time zone.
   A **View-only code** session also persists, but is not day-capped (accepted for the demo).
 
+## Test staff accounts (role smoke)
+
+UAT has one staff login (`controller1`, the lead). To add a non-lead controller, a planner or an evaluator:
+
+1. Replace the `STAFF_IDENTITY_ACCOUNTS_JSON` secret with the full array, keeping `controller1` unchanged.
+2. Re-run **Deploy Infrastructure**.
+3. Enroll each login by re-running `bootstrap-exercise` with only the `staff` sub-request.
+
+Steps and caveats:
+[login/06 → Adding test staff accounts](features/login/06-uat-goLive-config-runbook.md#adding-test-staff-accounts-role-smoke).
+
 ## Trusted proxy (forwarded headers, #480)
 
 Behind App Service every request arrives from the platform front end, so without forwarded headers every
