@@ -288,41 +288,6 @@ public sealed class ExerciseRealtimeHubStaffGroupTests
     }
 
     [RequiresDockerFact]
-    public async Task ParticipantConnection_RegisteredAfterTheRevokeTookItsSession_IsCutByTheReCheck()
-    {
-        // #602 L-2, the host-bound (participant) path: same race, same guarantee.
-        var exerciseA = await SeedExerciseAsync();
-        var session = TestSessions.NewSession($"participant-race-{Guid.NewGuid():N}", exerciseA);
-        await using (var seed = _fixture.CreateContext())
-        {
-            seed.Sessions.Add(session);
-            await seed.SaveChangesAsync();
-        }
-
-        var principal = SessionPrincipal.Create(new AuthenticatedSession
-        {
-            SessionId = session.Id,
-            ExerciseId = exerciseA,
-            Kind = "participant",
-            PrincipalId = session.PrincipalId,
-            ActingHumanId = session.ActingHumanId,
-        });
-        var registry = new SessionConnectionRegistry();
-        var revoker = new SessionConnectionRevoker(registry);
-
-        var outcome = await ConnectWithRaceAsync(
-            exerciseA,
-            principal,
-            registry,
-            revokeOnJoining: $"exercise:{exerciseA}",
-            revoke: () => RevokeAsync(session.Id, revoker));
-
-        outcome.Aborted.Should().BeTrue();
-        outcome.Removed.Should().Equal($"exercise:{exerciseA}");
-        registry.Take(session.Id).Should().BeEmpty();
-    }
-
-    [RequiresDockerFact]
     public async Task StaffConnection_WhoseSessionStaysLive_RemainsRegistered_AndIsCutByALaterRevoke()
     {
         // The control: no revocation in the window — the re-check keeps the connection, and a later revoke's Take finds it.

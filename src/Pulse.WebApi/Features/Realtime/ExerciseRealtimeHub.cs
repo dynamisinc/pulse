@@ -113,9 +113,8 @@ public sealed partial class ExerciseRealtimeHub : Hub
     /// <summary>Creates the hub over the persistence context its staff-membership check reads through.</summary>
     /// <param name="dbContext">
     /// The hub-scope persistence context. Used ONLY to verify a staff-kind connection's session and assignment
-    /// (unscoped access records), and — when a <paramref name="connections"/> registry is present — to re-read a
-    /// registered connection's OWN session right after registering it (#602 L-2). Never touched for an anonymous
-    /// connection.
+    /// (unscoped access records), including the post-registration re-read of that session (#602 L-2); never touched
+    /// for a participant, read-only or anonymous connection.
     /// </param>
     /// <param name="logger">Diagnostics logger (a failed staff check is logged; never token material).</param>
     /// <param name="connections">
@@ -198,9 +197,12 @@ public sealed partial class ExerciseRealtimeHub : Hub
 
         // identity-auth-roles/16: remember which session this connection was opened under, so revoking that session
         // also cuts this connection (membership is otherwise only checked here, at connect time).
-        if (principal is not null && !await RegisterLiveAsync(principal.SessionId, exerciseId.Value, staffGroup: false))
+        // (Unlike the staff path below, this path never opens the database, so it is not re-checked after registering:
+        // the register-after-take window is closed for STAFF connections only — see RegisterLiveAsync, #602 L-2.)
+        if (principal is not null && _connections is not null)
         {
-            return;
+            _connections.Register(principal.SessionId, exerciseId.Value, Context);
+            Context.Items[RegisteredSessionItemKey] = principal.SessionId;
         }
 
         await base.OnConnectedAsync();
@@ -237,7 +239,7 @@ public sealed partial class ExerciseRealtimeHub : Hub
         // Both groups derive from the SAME verified session exercise — the staff group can never point elsewhere.
         await Groups.AddToGroupAsync(Context.ConnectionId, GroupNameFor(verifiedExerciseId));
         await Groups.AddToGroupAsync(Context.ConnectionId, StaffGroupNameFor(verifiedExerciseId));
-        if (!await RegisterLiveAsync(principal.SessionId, verifiedExerciseId, staffGroup: true))
+        if (!await RegisterLiveAsync(principal.SessionId, verifiedExerciseId))
         {
             return;
         }
@@ -246,7 +248,7 @@ public sealed partial class ExerciseRealtimeHub : Hub
     }
 
     /// <summary>
-    /// Registers this connection under its session, THEN re-reads the session (#602 L-2). The revoke rule commits the
+    /// Registers a VERIFIED STAFF connection under its session, THEN re-reads the session (#602 L-2). The revoke rule commits the
     /// revocation and only then <see cref="SessionConnectionRegistry.Take"/>s the session's connections; a connection
     /// verified before that commit but registered after the take would otherwise survive the revocation. Registering
     /// first and re-checking second closes the window: either the take sees the registration (and cuts it), or this
@@ -254,7 +256,7 @@ public sealed partial class ExerciseRealtimeHub : Hub
     /// the groups it joined, and aborted (fail closed). A re-check that cannot complete aborts it too (reconnectable).
     /// </summary>
     /// <returns><c>true</c> when the connection may stay; <c>false</c> when it was cut.</returns>
-    private async Task<bool> RegisterLiveAsync(Guid sessionId, Guid exerciseId, bool staffGroup)
+    private async Task<bool> RegisterLiveAsync(Guid sessionId, Guid exerciseId)
     {
         if (_connections is null)
         {
@@ -287,11 +289,7 @@ public sealed partial class ExerciseRealtimeHub : Hub
 
         _connections.Unregister(sessionId, Context.ConnectionId);
         Context.Items.Remove(RegisteredSessionItemKey);
-        if (staffGroup)
-        {
-            await Groups.RemoveFromGroupAsync(Context.ConnectionId, StaffGroupNameFor(exerciseId));
-        }
-
+        await Groups.RemoveFromGroupAsync(Context.ConnectionId, StaffGroupNameFor(exerciseId));
         await Groups.RemoveFromGroupAsync(Context.ConnectionId, GroupNameFor(exerciseId));
         Context.Abort();
         return false;

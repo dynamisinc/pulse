@@ -27,8 +27,12 @@ using Microsoft.AspNetCore.SignalR;
 /// <para>
 /// <b>The register-after-take race.</b> A revocation commits, then <see cref="Take"/>s the session's connections; a
 /// connection whose connect-time check ran before the commit but whose <see cref="Register"/> lands after the take is not
-/// in that take. The hub therefore re-reads the session AFTER registering and cuts the connection itself if it is no
-/// longer live (<c>ExerciseRealtimeHub.RegisterLiveAsync</c>): every interleaving is covered by one side or the other.
+/// in that take. For a STAFF connection (the staff group carries staff-only content) the hub therefore re-reads the
+/// session AFTER registering and cuts the connection itself if it is no longer live
+/// (<c>ExerciseRealtimeHub.RegisterLiveAsync</c>): every interleaving is covered by one side or the other. A
+/// participant / read-only connection is registered without that re-read — its path deliberately never opens the
+/// database — so the same narrow window remains for it (it can only keep the exercise-wide group it was already entitled
+/// to at connect time, until it disconnects).
 /// </para>
 /// </remarks>
 public sealed class SessionConnectionRegistry
