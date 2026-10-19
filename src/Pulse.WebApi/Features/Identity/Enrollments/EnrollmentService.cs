@@ -58,6 +58,12 @@ public sealed partial class EnrollmentService
     /// <summary>The 409 error code for a lead change that lost a race with another (the one-lead unique index).</summary>
     public const string LeadConflictError = "lead-conflict";
 
+    /// <summary>
+    /// The 409 error code for a revoke that raced a concurrent lead change (Gate-1 S-003): the row became the lead after it
+    /// was read, so the soft delete was refused by <c>CK_Enrollments_DeletedAt_NotLead</c> and NOTHING was saved. Retry.
+    /// </summary>
+    public const string LeadChangedRetryError = "lead-changed-retry";
+
     /// <summary>The XC-004 event type of a lead released because its holder lost the controller grant.</summary>
     public const string LeadReleasedEventType = "enrollment.lead.released";
 
@@ -103,6 +109,8 @@ public sealed partial class EnrollmentService
     private const string EnrollmentEntityType = "enrollment";
     private const int DuplicateKeyErrorNumber = 2601;
     private const int UniqueConstraintErrorNumber = 2627;
+    private const int CheckConstraintErrorNumber = 547;
+    private const string LeadNotRevokedConstraint = "CK_Enrollments_DeletedAt_NotLead";
 
     private readonly PulseDbContext _dbContext;
     private readonly StaffCallerContext _staffCaller;
@@ -428,7 +436,19 @@ public sealed partial class EnrollmentService
         enrollment.DeletedAt = now;
         var revoked = await RevokeExerciseSessionsAsync(exercise.Id, [enrollment.PersonId], now, cancellationToken);
         Record(caller, exercise, enrollment, RevokedEventType, RevokedAuditKind, RolePayload(role: null, enrollment.Role), now);
-        await _dbContext.SaveChangesAsync(cancellationToken);
+        try
+        {
+            await _dbContext.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException exception) when (IsCheckViolation(exception, LeadNotRevokedConstraint))
+        {
+            // Gate-1 S-003: a concurrent SetLead made this row the lead after FindReachableAsync read it, so the database
+            // refused a revoked lead. The whole unit of work (soft delete, session revocations, records) rolled back, and no
+            // lead was released here — so there is nothing to turn swamped mode off for. The caller retries.
+            _dbContext.ChangeTracker.Clear();
+            return EnrollmentResult.Conflict(LeadChangedRetryError);
+        }
+
         await TurnSwampedModeOffAfterCommitAsync(caller, exercise, enrollment, leadReleased, now, cancellationToken);
         await CutRevokedConnectionsAfterCommitAsync(revoked, cancellationToken);
 
@@ -553,6 +573,10 @@ public sealed partial class EnrollmentService
     private static string RolePayload(string? role, string? previousRole) => string.Create(
         CultureInfo.InvariantCulture,
         $"{{\"role\":{JsonSerializer.Serialize(role)},\"previousRole\":{JsonSerializer.Serialize(previousRole)}}}");
+
+    private static bool IsCheckViolation(DbUpdateException exception, string constraint) =>
+        exception.InnerException is SqlException { Number: CheckConstraintErrorNumber } sql
+        && sql.Message.Contains(constraint, StringComparison.Ordinal);
 
     private static bool IsUniqueKeyViolation(DbUpdateException exception) =>
         exception.InnerException is SqlException

@@ -53,7 +53,14 @@ public sealed class PasswordContext
 /// <b>Context words.</b> Each source is lower-cased and reduced to its letters and digits, both whole (e.g.
 /// <c>"Fairhaven County EM"</c> → <c>fairhavencountyem</c>) and word by word; every resulting term of at least
 /// <see cref="MinimumContextTermLength"/> characters is refused anywhere inside the equally-reduced password. The floor
-/// keeps short names ("Al", "EM") from refusing unrelated passwords.
+/// keeps short names ("Al", "EM") from refusing unrelated passwords. The ORGANIZATION name contributes its whole name
+/// but only its DISTINCTIVE words (Gate-1 S-006): at least <see cref="MinimumOrganizationWordLength"/> characters and not
+/// a generic agency word (<see cref="GenericOrganizationWords"/>), so "Fairhaven County Emergency Management" refuses
+/// "fairhaven" but not every password that happens to contain "county" or "emergency".
+/// </para>
+/// <para>
+/// <b>The blocklist is compared on a trimmed, case-folded COPY</b> (Gate-1 S-006), so <c>"password1234 "</c> cannot slip
+/// past it; the password itself is never trimmed or altered (800-63B: spaces are legitimate characters).
 /// </para>
 /// </remarks>
 public static class PasswordPolicy
@@ -69,6 +76,16 @@ public static class PasswordPolicy
 
     /// <summary>The shortest context term that is refused inside a password.</summary>
     public const int MinimumContextTermLength = 4;
+
+    /// <summary>The shortest organization-name WORD that is refused on its own (the whole name is always refused).</summary>
+    public const int MinimumOrganizationWordLength = 6;
+
+    /// <summary>Generic agency words that are never refused on their own as organization-name words.</summary>
+    public static IReadOnlySet<string> GenericOrganizationWords { get; } = new HashSet<string>(StringComparer.Ordinal)
+    {
+        "county", "city", "emergency", "management", "department", "office", "agency", "services", "service",
+        "public", "safety", "region", "regional", "state", "government", "district", "authority", "organization",
+    };
 
     /// <summary>The error code for a missing or too-short password.</summary>
     public const string TooShortError = "password-too-short";
@@ -121,7 +138,7 @@ public static class PasswordPolicy
             return TooLongError;
         }
 
-        if (Blocklist.Value.Contains(password.ToLowerInvariant()))
+        if (Blocklist.Value.Contains(password.Trim().ToLowerInvariant()))
         {
             return CommonError;
         }
@@ -155,7 +172,7 @@ public static class PasswordPolicy
             ? email[..at]
             : context.Email;
 
-        foreach (var source in new[] { context.OrganizationName, emailLocalPart, context.DisplayName })
+        foreach (var (source, isOrganization) in new[] { (context.OrganizationName, true), (emailLocalPart, false), (context.DisplayName, false) })
         {
             if (string.IsNullOrWhiteSpace(source))
             {
@@ -170,7 +187,10 @@ public static class PasswordPolicy
 
             foreach (var word in Words(source))
             {
-                if (word.Length >= MinimumContextTermLength)
+                var distinctive = isOrganization
+                    ? word.Length >= MinimumOrganizationWordLength && !GenericOrganizationWords.Contains(word)
+                    : word.Length >= MinimumContextTermLength;
+                if (distinctive)
                 {
                     yield return word;
                 }

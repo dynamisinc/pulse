@@ -28,7 +28,8 @@ using Pulse.WebApi.Features.Realtime;
 /// <para>
 /// <b><c>POST /api/org/people/{personId}/password-reset</c> — org admin only</b>
 /// (<see cref="OrgAdminAuthorizationFilter.OrgAdminOnly"/>), tenant-bound in the service: <c>200 {"resetUrl":"…"}</c>
-/// once; the bare <c>404</c> for a missing or another customer's person; <c>409 {"error":"person-disabled"}</c>;
+/// once; the bare <c>404</c> for a missing or another customer's person; <c>409 {"error":"target-is-org-admin"}</c> for a
+/// PEER org admin (self-reset allowed); <c>409 {"error":"person-disabled"}</c>;
 /// <c>503 {"error":"reset-link-unavailable"}</c> without a frontend base URL. <c>Cache-Control: no-store</c> on every
 /// answer, including the filter's 401/403. It is the org tier's one PERSON-id route, allow-listed in
 /// <see cref="PersonIdRoutes"/>.
