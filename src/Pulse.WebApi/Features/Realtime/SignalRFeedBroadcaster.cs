@@ -1,6 +1,9 @@
 namespace Pulse.WebApi.Features.Realtime;
 
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.Extensions.Logging;
+using Pulse.WebApi.Features.EngineRuntime.Steering;
+using Pulse.WebApi.Features.ExerciseConfiguration.Lifecycle;
 using Pulse.WebApi.Features.Social;
 using Pulse.WebApi.Features.Social.Editing;
 using Pulse.WebApi.Features.Social.Engagement;
@@ -19,8 +22,33 @@ using Pulse.WebApi.Features.Social.Pins;
 /// structurally absent from the DTO. The target group is derived from the caller-supplied
 /// <paramref name="exerciseId"/> scope via <see cref="ExerciseRealtimeHub.GroupNameFor"/> — the same
 /// derivation the hub uses to place a connection, so a post reaches only the sessions in its own exercise.
+/// <para>
+/// <b>The EndEx send gate (#375, COR-032) — every frame passes ONE choke point.</b> Before each send the
+/// broadcaster reads the exercise's stored lifecycle status through <see cref="ExerciseLifecycleStatusReader"/>
+/// and asks <see cref="ExerciseLifecycleStates.IsLivePushOpen"/>. Today that coincides, by design, with
+/// <see cref="ExerciseLifecycleStates.IsParticipantAccessible"/> — the predicate
+/// <see cref="ExerciseLifecycleGatingMiddleware"/> refuses the REST participant surface on — but the two may diverge
+/// in <c>completed</c> (participant REST reads may reopen there; live pushes stay closed). Open (<c>staged</c> /
+/// <c>live</c> / <c>paused</c>, legacy <c>active</c>): the frame goes to <see cref="ExerciseRealtimeHub.GroupNameFor"/>
+/// as before. Anything else — <c>build</c>, <c>completed</c>, <c>archived</c>, an unknown literal, or no exercise
+/// row — FAILS CLOSED: the frame goes to <see cref="ExerciseRealtimeHub.StaffGroupNameFor"/> only, so a participant
+/// tab still connected after EndEx receives nothing while staff consoles keep their live view. The hub stays
+/// un-gated on CONNECT by design (the overlay client re-GETs <c>/api/overlay-state</c> on reconnect); this send
+/// side is what closes the risk the gating middleware names. The gate lives here rather than in a decorator so
+/// that every caller (storyline auto-send, inject bursts, approve, controller-as-persona, pins, takedowns,
+/// edits, engagement) inherits it and the registered <see cref="IFeedBroadcaster"/> stays this concrete type.
+/// </para>
+/// <para>
+/// <b>Accepted race:</b> each send reads the status once, then calls <c>SendAsync</c>. An EndEx committed between
+/// those two steps can let that send's single frame reach participants — at most one in-flight frame per send.
+/// </para>
+/// <para>
+/// <b>Not this gate's concern: Freeze.</b> A paused world is still push-open here (participants are served the
+/// holding page). Freeze is handled by the participant pause overlay (<c>PauseOverlayPublisher</c>, CR-001) and by
+/// #379's participant write gate, not by this broadcaster.
+/// </para>
 /// </remarks>
-public sealed class SignalRFeedBroadcaster : IFeedBroadcaster
+public sealed partial class SignalRFeedBroadcaster : IFeedBroadcaster
 {
     /// <summary>The SignalR client method name a subscriber handles to receive a fanned-out post.</summary>
     private const string PostReceivedEvent = "PostReceived";
@@ -38,13 +66,24 @@ public sealed class SignalRFeedBroadcaster : IFeedBroadcaster
     private const string PostEngagementChangedEvent = "PostEngagementChanged";
 
     private readonly IHubContext<ExerciseRealtimeHub> _hubContext;
+    private readonly ExerciseLifecycleStatusReader _lifecycleStatusReader;
+    private readonly ILogger<SignalRFeedBroadcaster> _logger;
 
     /// <summary>Creates the broadcaster with the hub context it fans out through.</summary>
     /// <param name="hubContext">The context for <see cref="ExerciseRealtimeHub"/>.</param>
-    public SignalRFeedBroadcaster(IHubContext<ExerciseRealtimeHub> hubContext)
+    /// <param name="lifecycleStatusReader">Reads the exercise's stored lifecycle status before each send.</param>
+    /// <param name="logger">Logs a send that was withheld from participants.</param>
+    public SignalRFeedBroadcaster(
+        IHubContext<ExerciseRealtimeHub> hubContext,
+        ExerciseLifecycleStatusReader lifecycleStatusReader,
+        ILogger<SignalRFeedBroadcaster> logger)
     {
         ArgumentNullException.ThrowIfNull(hubContext);
+        ArgumentNullException.ThrowIfNull(lifecycleStatusReader);
+        ArgumentNullException.ThrowIfNull(logger);
         _hubContext = hubContext;
+        _lifecycleStatusReader = lifecycleStatusReader;
+        _logger = logger;
     }
 
     /// <inheritdoc />
@@ -55,27 +94,26 @@ public sealed class SignalRFeedBroadcaster : IFeedBroadcaster
     {
         ArgumentNullException.ThrowIfNull(post);
 
-        await _hubContext.Clients
-            .Group(ExerciseRealtimeHub.GroupNameFor(exerciseId))
-            .SendAsync(PostReceivedEvent, post, cancellationToken: cancellationToken);
+        var target = await ResolveTargetAsync(exerciseId, PostReceivedEvent, cancellationToken);
+        await target.SendAsync(PostReceivedEvent, post, cancellationToken: cancellationToken);
     }
 
     /// <inheritdoc />
     /// <remarks>
     /// Sends <c>PostRemoved</c> with <see cref="PostRemovedDto"/> (the post id and nothing else, XC-002) to the
     /// exercise-wide group from <see cref="ExerciseRealtimeHub.GroupNameFor"/>, the same group
-    /// <c>PostReceived</c> uses, because participants are the ones who must drop the post. It never targets
-    /// <see cref="ExerciseRealtimeHub.StaffGroupNameFor"/>: staff connections already belong to the exercise-wide
-    /// group, so they receive it exactly once.
+    /// <c>PostReceived</c> uses, because participants are the ones who must drop the post. While participants are
+    /// admitted it never targets <see cref="ExerciseRealtimeHub.StaffGroupNameFor"/>: staff connections already belong
+    /// to the exercise-wide group, so they receive it exactly once. (Outside those states the EndEx gate in the type's
+    /// remarks sends to the staff group INSTEAD — still exactly once.)
     /// </remarks>
     public async Task BroadcastPostRemovedAsync(
         Guid exerciseId,
         Guid postId,
         CancellationToken cancellationToken = default)
     {
-        await _hubContext.Clients
-            .Group(ExerciseRealtimeHub.GroupNameFor(exerciseId))
-            .SendAsync(PostRemovedEvent, PostRemovedDto.For(postId), cancellationToken: cancellationToken);
+        var target = await ResolveTargetAsync(exerciseId, PostRemovedEvent, cancellationToken);
+        await target.SendAsync(PostRemovedEvent, PostRemovedDto.For(postId), cancellationToken: cancellationToken);
     }
 
     /// <inheritdoc />
@@ -90,9 +128,8 @@ public sealed class SignalRFeedBroadcaster : IFeedBroadcaster
         bool pinnedForAll,
         CancellationToken cancellationToken = default)
     {
-        await _hubContext.Clients
-            .Group(ExerciseRealtimeHub.GroupNameFor(exerciseId))
-            .SendAsync(PostPinChangedEvent, PostPinChangedDto.For(postId, pinnedForAll), cancellationToken: cancellationToken);
+        var target = await ResolveTargetAsync(exerciseId, PostPinChangedEvent, cancellationToken);
+        await target.SendAsync(PostPinChangedEvent, PostPinChangedDto.For(postId, pinnedForAll), cancellationToken: cancellationToken);
     }
 
     /// <inheritdoc />
@@ -108,17 +145,16 @@ public sealed class SignalRFeedBroadcaster : IFeedBroadcaster
     {
         ArgumentNullException.ThrowIfNull(edited);
 
-        await _hubContext.Clients
-            .Group(ExerciseRealtimeHub.GroupNameFor(exerciseId))
-            .SendAsync(PostEditedEvent, edited, cancellationToken: cancellationToken);
+        var target = await ResolveTargetAsync(exerciseId, PostEditedEvent, cancellationToken);
+        await target.SendAsync(PostEditedEvent, edited, cancellationToken: cancellationToken);
     }
 
     /// <inheritdoc />
     /// <remarks>
     /// Sends <c>PostEngagementChanged</c> with the given <see cref="PostEngagementChangedDto"/> (post id, shown counts,
     /// version; nothing else, XC-002) to the exercise-wide group from <see cref="ExerciseRealtimeHub.GroupNameFor"/>,
-    /// exactly as <c>PostRemoved</c> does, never to the staff group alone. Staff connections already belong to that
-    /// group, so consoles receive it once too.
+    /// exactly as <c>PostRemoved</c> does — never to the staff group alone while participants are admitted (see the
+    /// type's EndEx gate). Staff connections already belong to that group, so consoles receive it once too.
     /// </remarks>
     public async Task BroadcastPostEngagementChangedAsync(
         Guid exerciseId,
@@ -127,8 +163,42 @@ public sealed class SignalRFeedBroadcaster : IFeedBroadcaster
     {
         ArgumentNullException.ThrowIfNull(change);
 
-        await _hubContext.Clients
-            .Group(ExerciseRealtimeHub.GroupNameFor(exerciseId))
-            .SendAsync(PostEngagementChangedEvent, change, cancellationToken: cancellationToken);
+        var target = await ResolveTargetAsync(exerciseId, PostEngagementChangedEvent, cancellationToken);
+        await target.SendAsync(PostEngagementChangedEvent, change, cancellationToken: cancellationToken);
     }
+
+    /// <summary>
+    /// The lifecycle choke point (#375): the exercise-wide group when participants are admitted, otherwise the
+    /// staff-only group (fail closed). See the type's remarks.
+    /// </summary>
+    /// <param name="exerciseId">The server-resolved exercise the frame belongs to (COR-001).</param>
+    /// <param name="eventName">The client event about to be sent, for the suppression log.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The client proxy the frame must be sent to.</returns>
+    private async Task<IClientProxy> ResolveTargetAsync(Guid exerciseId, string eventName, CancellationToken cancellationToken)
+    {
+        // Exercise is the scope, not an IExerciseScoped entity: this is a direct status read by the SERVER-resolved
+        // id the caller fans out for, never a client-supplied one.
+        var status = await _lifecycleStatusReader(exerciseId, cancellationToken);
+        if (ExerciseLifecycleStates.IsLivePushOpen(status))
+        {
+            return _hubContext.Clients.Group(ExerciseRealtimeHub.GroupNameFor(exerciseId));
+        }
+
+        LogParticipantSendSuppressed(eventName, exerciseId, status ?? "(no exercise row)");
+        return _hubContext.Clients.Group(ExerciseRealtimeHub.StaffGroupNameFor(exerciseId));
+    }
+
+    /// <summary>
+    /// Source-generated notice that a frame was withheld from participants (CA1848). Debug, not Information:
+    /// producers keep persisting into completed exercises until #640, so this fires routinely.
+    /// </summary>
+    /// <param name="eventName">The client event withheld.</param>
+    /// <param name="exerciseId">The exercise.</param>
+    /// <param name="lifecycleStatus">The stored status that closed the participant group.</param>
+    [LoggerMessage(
+        Level = LogLevel.Debug,
+        Message = "A {EventName} frame for exercise {ExerciseId} was NOT sent to participants: its lifecycle state " +
+                  "{LifecycleStatus} is not open to live pushes (COR-032). It was sent to the staff group only.")]
+    private partial void LogParticipantSendSuppressed(string eventName, Guid exerciseId, string lifecycleStatus);
 }

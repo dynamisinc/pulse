@@ -107,6 +107,8 @@ enabled set — a shared filter here, or a per-epic obligation on each channel e
 an owner, read "disabled channel" as *hidden from the nav*, never *unreachable*.
 
 **(d) The SignalR hub is un-gated at EndEx — and the assumption behind that is currently false (WR-001).**
+> **Update 2026-10-19 (#375):** closed on the send side. `SignalRFeedBroadcaster` now routes every participant feed frame to the staff group only when `ExerciseLifecycleStates.IsParticipantAccessible` is false (the REST gate's own predicate), so connected participant tabs receive nothing after EndEx. The hub stays open on connect by design (the overlay client re-GETs on reconnect). Producers that still *persist* content into a closed exercise are tracked in #640.
+
 `/hubs/exercise` is **not** in `UseExerciseLifecycleGating()`'s covered set. Story 03 recorded that as a
 scoped, named risk resting on "nothing publishes into a completed exercise" — and the tree says that is an
 assumption, not an invariant: `ExerciseLifecycleBehaviour` has **zero consumers** anywhere in `src/`
