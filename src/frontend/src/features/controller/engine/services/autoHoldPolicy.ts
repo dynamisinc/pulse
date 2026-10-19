@@ -76,9 +76,29 @@ export function decide(
   // mode is explicitly on and the draft is still effectively Delayed-auto (a
   // safety clamp having lowered it suspends this) and the exercise is not cut to
   // Fake (hold-on-cut: a pre-cut live draft must never auto-send after the cut).
-  const autoSend =
-    swampedMode && !providerCutToFake && effective.level === AutonomyLevel.DelayedAuto
-  return autoSend ? TimeoutDisposition.Publish : TimeoutDisposition.Hold
+  return wouldAutoSendOnExpiry(effective, swampedMode, providerCutToFake)
+    ? TimeoutDisposition.Publish
+    : TimeoutDisposition.Hold
+}
+
+/**
+ * The expiry rule on its own: would an EXPIRED, no-decision draft auto-send? True only when
+ * swamped mode is on, generation is not cut to Fake, the engine is not stopped, and the
+ * draft is still effectively Delayed-auto. `decide()` uses this for its terminal branch, and
+ * the live (display-only) countdown label uses it to say "sends in" vs "holds in" BEFORE
+ * expiry, so the card can never contradict what the server will do.
+ */
+export function wouldAutoSendOnExpiry(
+  effective: EffectiveAutonomy,
+  swampedMode: boolean,
+  providerCutToFake = false,
+): boolean {
+  return (
+    !effective.generationStopped &&
+    swampedMode &&
+    !providerCutToFake &&
+    effective.level === AutonomyLevel.DelayedAuto
+  )
 }
 
 /**

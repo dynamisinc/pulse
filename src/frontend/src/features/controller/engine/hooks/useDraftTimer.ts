@@ -53,7 +53,12 @@ import {
   type DelayedAutoCountdown,
   type EffectiveAutonomy,
 } from '../models/reviewContracts'
-import { decide, evaluate, type DraftTimeoutResolved } from '../services/autoHoldPolicy'
+import {
+  decide,
+  evaluate,
+  wouldAutoSendOnExpiry,
+  type DraftTimeoutResolved,
+} from '../services/autoHoldPolicy'
 
 /** How often (ms) the hook re-reads the scenario clock to keep the countdown live. */
 const DEFAULT_TICK_MS = 1000
@@ -153,15 +158,20 @@ function buildLabel(
   hasExpired: boolean,
   remainingMs: number,
   displayOnly: boolean,
+  willAutoSend: boolean,
 ): string {
   if (displayOnly) {
-    return hasExpired ? 'resolving…' : `holds in ${formatMmSs(remainingMs)}`
+    // Live: still display-only (the server owns the action), but the wording follows the SAME
+    // expiry rule `decide()` uses, fed server-derived inputs, so the card never says "holds"
+    // while the server will publish.
+    if (hasExpired) return 'resolving…'
+    return `${willAutoSend ? 'sends' : 'holds'} in ${formatMmSs(remainingMs)}`
   }
   if (disposition === TimeoutDisposition.Hold && hasExpired) {
     return 'timer expired — held for you'
   }
   if (disposition === TimeoutDisposition.AwaitDecision) {
-    return `holds in ${formatMmSs(remainingMs)}`
+    return `${willAutoSend ? 'sends' : 'holds'} in ${formatMmSs(remainingMs)}`
   }
   return 'needs review'
 }
@@ -213,7 +223,13 @@ export function useDraftTimer(
     : decide(countdown, effective, currentScenarioMinute, swampedMode, providerCutToFake)
   const hasExpired = countdown.hasExpired(currentScenarioMinute)
   const minutesRemaining = countdown.minutesRemaining(currentScenarioMinute)
-  const label = buildLabel(disposition, hasExpired, countdown.remainingMs(nowMs), displayOnly)
+  const label = buildLabel(
+    disposition,
+    hasExpired,
+    countdown.remainingMs(nowMs),
+    displayOnly,
+    wouldAutoSendOnExpiry(effective, swampedMode, providerCutToFake),
+  )
 
   // Guards the one-shot terminal transition: once a given countdown's expiry has
   // resolved, never re-emit/re-resolve on subsequent ticks (even if `onResolve`'s
