@@ -218,6 +218,51 @@ public static class ExerciseLifecycleTestData
         Status = status,
     };
 
+    /// <summary>
+    /// exercise-build-golive/04: makes an existing exercise satisfy every evaluable BLOCKING readiness item, so a stage
+    /// (build → staged) passes the readiness gate. It adds data; it never bypasses the gate. Adds a scenario start time
+    /// (the time zone is left as seeded), a controller enrollment when none exists, and an enabled, hashed view-only code
+    /// for participant access when none exists. It adds no participant account, so "personas bound" stays ok as long as
+    /// the caller has not seeded an unbound one.
+    /// </summary>
+    /// <param name="context">An unscoped context against the test database.</param>
+    /// <param name="exerciseId">The exercise to make stage-ready.</param>
+    /// <returns>A task that completes when the rows are saved.</returns>
+    public static async Task MakeStageReadyAsync(PulseDbContext context, Guid exerciseId)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+
+        var exercise = await context.Exercises.SingleAsync(e => e.Id == exerciseId);
+        exercise.ScheduledStartAt ??= new DateTimeOffset(2033, 3, 1, 9, 0, 0, TimeSpan.Zero);
+        exercise.ParticipantName ??= "Harbor City"; // story 09: participant-name is a blocking readiness item
+
+        if (!await context.Enrollments.IgnoreQueryFilters()
+                .AnyAsync(e => e.ExerciseId == exerciseId && e.Role == EnrollmentRoles.Controller))
+        {
+            context.Enrollments.Add(new Enrollment
+            {
+                Id = Guid.NewGuid(),
+                ExerciseId = exerciseId,
+                Role = EnrollmentRoles.Controller,
+                CreatedAt = DateTimeOffset.UtcNow,
+            });
+        }
+
+        if (!await context.SharedCredentials.IgnoreQueryFilters().AnyAsync(c => c.ExerciseId == exerciseId))
+        {
+            context.SharedCredentials.Add(new SharedCredential
+            {
+                Id = Guid.NewGuid(),
+                ExerciseId = exerciseId,
+                CurrentHash = "not-a-real-hash",
+                IsEnabled = true,
+                CreatedAt = DateTimeOffset.UtcNow,
+            });
+        }
+
+        await context.SaveChangesAsync();
+    }
+
     /// <summary>Builds a visible post in the given exercise, so a served feed is provably non-empty.</summary>
     /// <param name="exerciseId">The owning exercise.</param>
     /// <param name="body">The post body.</param>

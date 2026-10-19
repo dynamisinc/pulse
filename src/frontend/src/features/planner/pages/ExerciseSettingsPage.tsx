@@ -239,6 +239,7 @@ import { ComplianceChromePanel } from '../components/ComplianceChromePanel'
 import { PracticeModePanel } from '../components/PracticeModePanel'
 import { AccountImport } from '../components/AccountImport'
 import { ReadinessPanel } from '../components/ReadinessPanel'
+import { StageExerciseControl } from '../components/StageExerciseControl'
 import { PANEL_SAVE_BAR_SCROLL_PADDING_PX } from '../components/PanelSaveBar'
 
 // ---------------------------------------------------------------------------
@@ -288,7 +289,16 @@ const SECTIONS: readonly ExerciseConfigSection[] = [
     id: 'readiness',
     label: 'Readiness',
     icon: faClipboardCheck,
-    content: { kind: 'panel', panel: <ReadinessPanel /> },
+    content: {
+      kind: 'panel',
+      // Story 04: the Stage control sits directly under the checklist it is gated by.
+      panel: (
+        <>
+          <ReadinessPanel />
+          <StageExerciseControl />
+        </>
+      ),
+    },
   },
 
   ...EXERCISE_SETTINGS_SECTION_ORDER.map<ExerciseConfigSection>(section => ({

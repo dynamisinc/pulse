@@ -113,7 +113,8 @@ function isReadinessStatus(value: unknown): value is ReadinessStatus {
   return value === 'ok' || value === 'open' || value === 'notChecked'
 }
 
-function isReadinessItem(value: unknown): value is ReadinessItem {
+/** Validates one checklist row (also used to parse the stage refusal's `blocking` list). */
+export function isReadinessItem(value: unknown): value is ReadinessItem {
   if (typeof value !== 'object' || value === null) return false
   const item = value as Record<string, unknown>
   return (
@@ -182,7 +183,7 @@ const MOCK_READINESS: ExerciseReadiness = {
       id: 'participant-name',
       label: 'Participant-facing exercise name is set',
       status: 'open',
-      detail: 'No participant-facing name is set. Participants never see the internal name.',
+      detail: 'No participant-facing name is set. Participants would see only the brand header.',
     },
     {
       id: 'participant-access',

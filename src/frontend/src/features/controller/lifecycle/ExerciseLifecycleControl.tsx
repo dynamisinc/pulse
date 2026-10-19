@@ -14,6 +14,9 @@
  *   - **End exercise** while `completed` is a legal next state (a live or paused exercise);
  *   - nothing to press otherwise (build, completed, archived): the control then shows only the
  *     last result and any error, or renders nothing at all if there is neither.
+ * While Start is offered it also shows a one-line, INFORMATIONAL readiness summary
+ * (`StagedReadinessSummary`, exercise-build-golive story 04): "all blocking items done" or "N
+ * blocking items open - starting is still allowed". It never gates Start (the server does not).
  * Start runs at once, with no confirm: it is the presenter's deliberate first beat. It is NOT
  * undone by EndEx -- EndEx is the final transition, a different act, not an "un-start" -- and
  * there is no way back to staged from this console; the mitigation for a premature start is
@@ -77,7 +80,13 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import { faCircleExclamation, faPlay, faStop } from '@fortawesome/free-solid-svg-icons'
+import {
+  faCircleCheck,
+  faCircleExclamation,
+  faPlay,
+  faStop,
+  faTriangleExclamation,
+} from '@fortawesome/free-solid-svg-icons'
 import { Stack, Typography } from '@mui/material'
 import {
   CobraLinkButton,
@@ -87,6 +96,7 @@ import {
 import { usePermissions } from '@/core/auth'
 import { touchTargetSx, useCoarsePointer } from '../components/confirm'
 import { useActiveExerciseInternalName } from '@/features/staff/hooks/useActiveExerciseInternalName'
+import { useReadiness } from '@/features/planner/hooks/useReadiness'
 import { EndExerciseDialog } from './EndExerciseDialog'
 import { useExerciseLifecycle } from './useExerciseLifecycle'
 import type { LifecycleTarget } from './lifecycleService'
@@ -97,6 +107,11 @@ import type { LifecycleTarget } from './lifecycleService'
  * answer was lost, or another controller got there first). The state names match the header pill.
  */
 const STATUS_TEXT: Readonly<Record<LifecycleTarget, { done: string; already: string }>> = {
+  // Never requested from this console (the planner stages); present so the record is total.
+  staged: {
+    done: 'Exercise staged. The state is now STAGED.',
+    already: 'The exercise was already staged. The state is now STAGED.',
+  },
   live: {
     done: 'Exercise started. The state is now LIVE.',
     already: 'The exercise was already started. The state is now LIVE.',
@@ -105,6 +120,33 @@ const STATUS_TEXT: Readonly<Record<LifecycleTarget, { done: string; already: str
     done: 'Exercise ended. The state is now ENDEX.',
     already: 'The exercise had already ended. The state is now ENDEX.',
   },
+}
+
+/**
+ * INFORMATIONAL readiness at Start (exercise-build-golive story 04). Mounted only while Start is
+ * offered (a staged exercise), so no readiness request exists otherwise. It NEVER gates Start:
+ * StartEx is not readiness-gated on the server either. Status is icon plus words; nothing is
+ * shown while readiness loads or if it cannot be read (silence, not a guess).
+ */
+function StagedReadinessSummary() {
+  const query = useReadiness()
+  const data = query.isError ? undefined : query.data
+  if (data === undefined) return null
+  const openBlocking = data.blocking.filter(item => item.status === 'open').length
+  const allDone = openBlocking === 0
+  const text = allDone
+    ? 'Readiness: all blocking items done'
+    : `Readiness: ${openBlocking} blocking ${openBlocking === 1 ? 'item' : 'items'} open — starting is still allowed`
+  return (
+    <Typography
+      component="span"
+      data-testid="lifecycle-readiness"
+      sx={{ fontSize: 12, display: 'inline-flex', gap: 0.75, alignItems: 'center' }}
+    >
+      <FontAwesomeIcon icon={allDone ? faCircleCheck : faTriangleExclamation} aria-hidden="true" />
+      <span>{text}</span>
+    </Typography>
+  )
 }
 
 /** How long a result stays in the live region before it is cleared (see the module header). */
@@ -221,6 +263,8 @@ function ExerciseLifecycleControlBody() {
             {pending === 'live' ? 'Starting…' : 'Start exercise'}
           </CobraPrimaryButton>
         )}
+
+        {canStart && <StagedReadinessSummary />}
 
         {canEnd && (
           <CobraSecondaryButton
