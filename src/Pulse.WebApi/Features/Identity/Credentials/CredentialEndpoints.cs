@@ -5,7 +5,11 @@ using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.Routing;
+using System.Threading.RateLimiting;
+using Microsoft.Extensions.Configuration;
+using Pulse.WebApi.Features.Identity.RateLimits;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Pulse.WebApi.Features.ExerciseLifecycleAdmin;
@@ -21,7 +25,9 @@ using Pulse.WebApi.Features.Realtime;
 /// <remarks>
 /// <para>
 /// <b><c>POST /api/auth/password/reset</c> — PRE-AUTH</b> (on <see cref="PreAuthAllowlist"/>): the person has no session
-/// to present. Behind the staff-login per-IP limiter (NFR-009) and the login body limit; <c>Cache-Control: no-store</c>.
+/// to present. Behind its OWN per-IP fixed-window limiter, <see cref="PasswordResetRateLimitPolicy"/> (NFR-009; its own
+/// partition, so reset attempts and sign-in attempts do not spend each other's budget), and the login body limit;
+/// <c>Cache-Control: no-store</c>.
 /// <c>204</c> on success; <c>400 {"error":"invalid-token"}</c> for any bad / expired / used token (uniform);
 /// <c>400 {"error":"&lt;policy-code&gt;"}</c> for a <see cref="PasswordPolicy"/> refusal.
 /// </para>
@@ -35,8 +41,8 @@ using Pulse.WebApi.Features.Realtime;
 /// <see cref="PersonIdRoutes"/>.
 /// </para>
 /// <para>
-/// <b>Pipeline dependencies</b> (already in Program.cs): <c>AddStaffIdentity</c> registers the
-/// <see cref="StaffAuthEndpoints.StaffLoginRateLimitPolicy"/> policy; <c>AddExerciseLifecycleAdmin</c> registers
+/// <b>Pipeline dependencies</b> (already in Program.cs): <c>app.UseRateLimiter()</c> enforces the policy this slice
+/// registers; <c>AddExerciseLifecycleAdmin</c> registers
 /// <see cref="StaffCallerContext"/>; <c>AddEasyLoginFoundation</c> registers <see cref="JoinUrlBuilder"/> (each is also
 /// TryAdd-ed here so the slice composes on its own); <c>app.UseOrganizationResolution()</c> must precede the routes,
 /// as for every <c>/api/org/*</c> route.
@@ -46,6 +52,13 @@ public static class CredentialEndpoints
 {
     /// <summary>The pre-auth "set a password from a link" route.</summary>
     public const string ResetRoute = "/api/auth/password/reset";
+
+    /// <summary>
+    /// The reset route's own per-IP rate-limit policy. Its permit count is the staff-login one
+    /// (<c>Authentication:RateLimits:StaffLoginPerMinute</c>, default 10 a minute) — the same internet-facing pre-auth
+    /// class — but a separate partition (adversarial review S4 on #665).
+    /// </summary>
+    public const string PasswordResetRateLimitPolicy = "password-reset";
 
     /// <summary>The org admin's staff reset route.</summary>
     public const string AdminResetRoute = "/api/org/people/{personId:guid}/password-reset";
@@ -65,6 +78,24 @@ public static class CredentialEndpoints
         ArgumentNullException.ThrowIfNull(services);
 
         services.TryAddSingleton(TimeProvider.System);
+
+        // Its own per-IP partition (S4); AddRateLimiter accumulates option callbacks, so this adds one named policy
+        // beside the others and needs no Program.cs change (app.UseRateLimiter() is already in the pipeline).
+        services.AddRateLimiter(options =>
+        {
+            options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+            options.AddPolicy(PasswordResetRateLimitPolicy, httpContext =>
+                RateLimitPartition.GetFixedWindowLimiter(
+                    partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                    factory: _ => new FixedWindowRateLimiterOptions
+                    {
+                        PermitLimit = AuthRateLimits.StaffLoginPerMinute(
+                            httpContext.RequestServices.GetRequiredService<IConfiguration>()),
+                        Window = TimeSpan.FromMinutes(1),
+                        QueueLimit = 0,
+                    }));
+        });
+
         services.AddScoped<CredentialTokenService>();
         services.AddScoped<PasswordResetService>();
         services.AddScoped<AdminPasswordResetService>();
@@ -91,7 +122,7 @@ public static class CredentialEndpoints
         // no-store first, so it is on every answer (the filters run outermost-first).
         endpoints.MapPost(ResetRoute, ResetAsync)
             .AddEndpointFilter<NoStoreEndpointFilter>()
-            .RequireRateLimiting(StaffAuthEndpoints.StaffLoginRateLimitPolicy)
+            .RequireRateLimiting(PasswordResetRateLimitPolicy)
             .WithLoginBodyLimit()
             .AllowAnonymousPreAuth();
 

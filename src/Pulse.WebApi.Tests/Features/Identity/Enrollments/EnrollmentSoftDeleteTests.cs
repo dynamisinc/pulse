@@ -192,6 +192,48 @@ public sealed class EnrollmentSoftDeleteTests
     }
 
     [RequiresDockerFact]
+    public async Task SetLead_ThatRacesARevokeOfItsTarget_Is409LeadChangedRetry_AndChangesNothing()
+    {
+        // Adversarial review W1 (#665): the target is revoked between FindReachableAsync's read and the lead UPDATE, so the
+        // Active() UPDATE skips it. Before the fix, SaveChanges then re-wrote IsLead = 1 onto the revoked row (a 547 → 500)
+        // after the previous lead had already been demoted.
+        var org = await _kit.SeedOrganizationAsync();
+        var exercise = await _kit.SeedExerciseAsync(org);
+        var (planner, _) = await _kit.SeedStaffAsync(org, exercise, "planner");
+        var (plannerSession, _) = await _kit.SeedStaffSessionAsync(planner, exercise, "planner");
+        var (_, oldLead) = await _kit.SeedStaffAsync(org, exercise, "controller", isLead: true);
+        var (_, target) = await _kit.SeedStaffAsync(org, exercise, "controller");
+
+        var hook = new Pulse.WebApi.Tests.Helpers.BeforeCommandHook(
+            sql => sql.Contains("UPDATE", StringComparison.Ordinal) && sql.Contains("[IsLead]", StringComparison.Ordinal),
+            async () =>
+            {
+                await using var competing = _kit.ReadContext();
+                await competing.Database.ExecuteSqlInterpolatedAsync(
+                    $"UPDATE [Enrollments] SET [DeletedAt] = SYSDATETIMEOFFSET() WHERE [Id] = {target}");
+            });
+
+        var (service, context) = _kit.ServiceFor(plannerSession, planner, org, exercise, interceptor: hook);
+        await using (context)
+        {
+            var result = await service.SetLeadAsync(target);
+            result.Outcome.Should().Be(EnrollmentOutcome.Conflict);
+            result.Error.Should().Be(EnrollmentService.LeadChangedRetryError);
+        }
+
+        hook.Fired.Should().BeTrue("the competing revoke landed in the window");
+        await using var read = _kit.ReadContext();
+        (await read.Enrollments.IgnoreQueryFilters().AsNoTracking().SingleAsync(e => e.Id == oldLead)).IsLead
+            .Should().BeTrue("the previous lead's demotion rolled back with the refused change");
+        (await read.Enrollments.IgnoreQueryFilters().AsNoTracking().SingleAsync(e => e.Id == target)).IsLead
+            .Should().BeFalse("a revoked row is never made lead");
+        (await read.TelemetryEvents.IgnoreQueryFilters().AsNoTracking()
+                .CountAsync(t => t.ExerciseId == exercise && t.EventType == EnrollmentService.LeadChangedEventType))
+            .Should().Be(0);
+        _kit.Swamped.Calls.Should().BeEmpty("no lead change committed, so the swamped-off path does not run");
+    }
+
+    [RequiresDockerFact]
     public async Task TheDatabase_RefusesARevokedLead_AndARevokedParticipantWorldEnrollment()
     {
         var org = await _kit.SeedOrganizationAsync();

@@ -82,16 +82,31 @@ public sealed class CredentialTokenService
     /// <param name="purpose">Invite or reset.</param>
     /// <param name="subject">The person or the one-off account the token sets a password for.</param>
     /// <param name="organizationId">The subject's own organization (server-resolved, never a client value).</param>
-    /// <param name="issuedByPersonId">The issuing person (an admin), or <c>null</c>.</param>
+    /// <param name="issuedByPersonId">The issuing person (an admin), or <c>null</c> for a SELF-DELIVERED token.</param>
     /// <param name="now">The single wall-clock read of the calling operation.</param>
+    /// <param name="deliverToEmail">
+    /// Where a null-issuer token will be sent. REQUIRED when <paramref name="issuedByPersonId"/> is <c>null</c>, and it must
+    /// be the subject's OWN email (trimmed, case-insensitive); ignored for an admin-issued token.
+    /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The staged row and the raw token, which exists ONLY here.</returns>
+    /// <remarks>
+    /// <b>The null-issuer rule (orchestrator decision, #665).</b> A token with no issuer may only be created by a path that
+    /// delivers it to the person THEMSELVES: the first-admin invite to the invited address (#575b) and forgot-password to the
+    /// account's own address (later). Never to a third party. <see cref="PasswordResetService"/> trusts a null issuer at
+    /// redemption (its W5 peer-admin check skips it), so this is where that trust is earned: #575b and forgot-password MUST
+    /// pass <paramref name="deliverToEmail"/>. A violation throws <see cref="InvalidOperationException"/> rather than
+    /// returning a refusal: the delivery target is chosen by server code, never by a request, so a mismatch is a programming
+    /// error that must fail loudly (and roll back the caller's unit of work), not an outcome a client could provoke.
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">A null-issuer token whose delivery target is not the subject's own email.</exception>
     public async Task<IssuedCredentialToken> StageIssueAsync(
         string purpose,
         CredentialSubject subject,
         Guid organizationId,
         Guid? issuedByPersonId,
         DateTimeOffset now,
+        string? deliverToEmail = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(subject);
@@ -103,6 +118,11 @@ public sealed class CredentialTokenService
         if (organizationId == Guid.Empty)
         {
             throw new ArgumentException("A credential token must belong to a resolved organization.", nameof(organizationId));
+        }
+
+        if (issuedByPersonId is null)
+        {
+            await EnsureSelfDeliveryAsync(subject, organizationId, deliverToEmail, cancellationToken);
         }
 
         await OutstandingFor(subject, organizationId)
@@ -211,10 +231,57 @@ public sealed class CredentialTokenService
     /// <param name="token">The token being redeemed.</param>
     /// <param name="passwordChangedAt">The subject's last password change, or <c>null</c>.</param>
     /// <returns><c>true</c> when the token must be refused.</returns>
+    /// <remarks>
+    /// The tie (<c>CreatedAt == PasswordChangedAt</c>) counts as stale: under clock skew between instances this fails
+    /// CLOSED — a link is refused rather than outliving the credential change it may predate.
+    /// </remarks>
     public static bool IsStaleFor(CredentialToken token, DateTimeOffset? passwordChangedAt)
     {
         ArgumentNullException.ThrowIfNull(token);
         return passwordChangedAt is { } changedAt && token.CreatedAt <= changedAt;
+    }
+
+    /// <summary>
+    /// The null-issuer rule: <paramref name="deliverToEmail"/> must be the subject's own email (trimmed, case-insensitive).
+    /// The subject is read inside <paramref name="organizationId"/> only.
+    /// </summary>
+    private async Task EnsureSelfDeliveryAsync(
+        CredentialSubject subject,
+        Guid organizationId,
+        string? deliverToEmail,
+        CancellationToken cancellationToken)
+    {
+        string? ownEmail;
+        if (subject.PersonId is { } personId)
+        {
+            ownEmail = await _dbContext.People
+                .AsNoTracking()
+                .InOrganization(organizationId)
+                .Where(p => p.Id == personId)
+                .Select(p => p.Email)
+                .FirstOrDefaultAsync(cancellationToken);
+        }
+        else
+        {
+            // An account is exercise-scoped; this server-side check bypasses the exercise filter by the account's own id
+            // and confirms its exercise belongs to the token's organization.
+            ownEmail = await (
+                from account in _dbContext.Accounts.IgnoreQueryFilters().AsNoTracking()
+                join exercise in _dbContext.Exercises.AsNoTracking().InOrganization(organizationId) on account.ExerciseId equals exercise.Id
+                where account.Id == subject.AccountId
+                select account.Email).FirstOrDefaultAsync(cancellationToken);
+        }
+
+        var target = deliverToEmail?.Trim();
+        var own = ownEmail?.Trim();
+        if (string.IsNullOrEmpty(target)
+            || string.IsNullOrEmpty(own)
+            || !string.Equals(target, own, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                "A credential token with no issuer may only be delivered to the subject's own email address "
+                + "(the null-issuer rule, #665). Pass issuedByPersonId, or deliverToEmail equal to the subject's own email.");
+        }
     }
 
     private IQueryable<CredentialToken> OutstandingFor(CredentialSubject subject, Guid organizationId) =>

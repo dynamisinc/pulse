@@ -156,7 +156,7 @@ public sealed partial class AdminPasswordResetService
             person.OrganizationId,
             issuedByPersonId: caller.StaffUserId,
             now,
-            cancellationToken);
+            cancellationToken: cancellationToken);
 
         _dbContext.OrgAuditEvents.Add(new OrgAuditEvent
         {
