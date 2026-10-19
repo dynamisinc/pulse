@@ -573,6 +573,8 @@ describe('ExerciseReportPage', () => {
         expect(timeInput(name)).toHaveAttribute('type', 'datetime-local')
         expect(timeInput(name)).toHaveAttribute('min', '2026-10-14T00:00')
         expect(timeInput(name)).toHaveAttribute('step', '60')
+        // A 4-digit year cap, so typing "2026" moves straight on to the hour in Chrome.
+        expect(timeInput(name)).toHaveAttribute('max', '9999-12-31T23:59')
       }
     })
 

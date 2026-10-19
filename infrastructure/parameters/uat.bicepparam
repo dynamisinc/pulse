@@ -97,8 +97,9 @@ param generationNoTrainingAttested = true
 // ⚠ Autonomous ambient chatter (ambient-chatter story 01, AC0) — App Service setting
 // Generation__Governance__AmbientAutonomyAuthorized. When false, the engine settings POST rejects ambient mode
 // `autonomous` with a 400 (review mode still works). Stated explicitly rather than left to the main.bicep default.
-// NOT authorized until PROVIDER-GOVERNANCE §8 amendment 2 is signed; the signer flips this in that same commit.
-param generationAmbientAutonomyAuthorized = false
+// AUTHORIZED for uat by PROVIDER-GOVERNANCE §8 amendment 2 (signed: Tom Bull, 2026-10-19; #593). Raising an exercise to
+// `autonomous` is lead-controller only (A1c). Set back to false to withdraw the authorization.
+param generationAmbientAutonomyAuthorized = true
 
 // ⚠ Timeout auto-send (swamped mode) — App Service setting Generation__Governance__TimeoutAutoSendAuthorized. When
 // false, turning swamped mode ON is refused with a 400 and an expired Delayed-auto countdown always holds for a human.
