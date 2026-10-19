@@ -112,7 +112,9 @@ public static class ParticipantWritePauseExtensions
         where TBuilder : IEndpointConventionBuilder
     {
         ArgumentNullException.ThrowIfNull(builder);
-        return builder.AddEndpointFilter(new ParticipantWritePauseFilter());
+        return builder
+            .AddEndpointFilter(new ParticipantWritePauseFilter())
+            .WithMetadata(ParticipantWritePauseMetadata.Instance);
     }
 
     /// <summary>
@@ -129,6 +131,24 @@ public static class ParticipantWritePauseExtensions
     {
         ArgumentNullException.ThrowIfNull(builder);
         ArgumentNullException.ThrowIfNull(isExempt);
-        return builder.AddEndpointFilter(new ParticipantWritePauseFilter(isExempt));
+        return builder
+            .AddEndpointFilter(new ParticipantWritePauseFilter(isExempt))
+            .WithMetadata(ParticipantWritePauseMetadata.Instance);
     }
+}
+
+/// <summary>
+/// An endpoint-metadata MARKER stamped by <see cref="ParticipantWritePauseExtensions.RefuseWhenWritesPaused{TBuilder}(TBuilder)"/>
+/// (both overloads) alongside the <see cref="ParticipantWritePauseFilter"/> it adds. Endpoint filters are not visible
+/// on a built endpoint, so this marker is what lets a test enumerate the live <c>EndpointDataSource</c> and prove every
+/// participant write route carries the held-world refusal (#661 S1). It has no runtime behaviour of its own.
+/// </summary>
+public sealed class ParticipantWritePauseMetadata
+{
+    private ParticipantWritePauseMetadata()
+    {
+    }
+
+    /// <summary>The single shared marker instance.</summary>
+    public static ParticipantWritePauseMetadata Instance { get; } = new();
 }
