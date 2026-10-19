@@ -85,7 +85,7 @@ import {
 } from '../mountContract'
 import { useChromeConfig } from '../chromeConfig'
 import { useExerciseEndedFlag } from '../writeGate'
-import { ExerciseEndedBanner } from './ExerciseEndedBanner'
+import { EXERCISE_ENDED_BANNER_TEXT, ExerciseEndedBanner } from './ExerciseEndedBanner'
 
 /** The shell's fixed compliance-chrome banner height (D7-005, SHELL-CONTRACT §1). */
 const BANNER_HEIGHT = '22px'
@@ -119,6 +119,19 @@ const TOP_WRAP_PADDING =
   `calc(env(safe-area-inset-top, 0px) + ${WRAP_PADDING_BLOCK}) env(safe-area-inset-right, 0px) ${WRAP_PADDING_BLOCK} env(safe-area-inset-left, 0px)`
 const BOTTOM_WRAP_PADDING =
   `${WRAP_PADDING_BLOCK} env(safe-area-inset-right, 0px) calc(env(safe-area-inset-bottom, 0px) + ${WRAP_PADDING_BLOCK}) env(safe-area-inset-left, 0px)`
+
+/** Visually hidden but still announced (the ended-banner live region). */
+const visuallyHiddenStyle: CSSProperties = {
+  position: 'absolute',
+  width: '1px',
+  height: '1px',
+  margin: '-1px',
+  padding: 0,
+  overflow: 'hidden',
+  clipPath: 'inset(50%)',
+  whiteSpace: 'nowrap',
+  border: 0,
+}
 
 /** The var value when chrome is off (D7-008) — collapses `ShellLayout`'s inset to zero. */
 const NO_CHROME_HEIGHT = '0px'
@@ -301,10 +314,33 @@ export function ComplianceChrome() {
   // Chrome-off is a legal state (AC3): render no classification banners. The effect above has
   // already driven both inset vars to 0px, so ShellLayout's content region
   // has no reserved-gap artifact. The ended band (if any) still shows.
-  if (!config.enabled) return endedBanner
+  // W-2: a live region must exist BEFORE its text changes to be announced reliably, so it is
+  // always mounted (empty) and filled when the exercise ends. The visible band is not a live
+  // region, so the text is not announced twice.
+  const announcer = (
+    <div
+      role="status"
+      aria-live="polite"
+      aria-atomic="true"
+      style={visuallyHiddenStyle}
+      data-testid="pulse-exercise-ended-announcer"
+    >
+      {ended ? EXERCISE_ENDED_BANNER_TEXT : ''}
+    </div>
+  )
+
+  if (!config.enabled) {
+    return (
+      <>
+        {announcer}
+        {endedBanner}
+      </>
+    )
+  }
 
   return (
     <>
+      {announcer}
       <div
         ref={topRef}
         role="note"

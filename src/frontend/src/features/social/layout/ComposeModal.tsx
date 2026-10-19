@@ -59,6 +59,7 @@ import {
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faXmark } from '@fortawesome/free-solid-svg-icons'
 import { hasOtherModalMounted } from '@/core/a11y/modalPriority'
+import { useExerciseEndedFlag } from '@/features/participant-shell/writeGate'
 import { Composer } from '../components/Composer'
 import { ParticipantTooltip } from '../components/ParticipantTooltip'
 import { useVisualViewportInset } from '@/core/hooks/useVisualViewportInset'
@@ -138,6 +139,16 @@ export function ComposeModal({ onClose, returnFocusRef }: ComposeModalProps) {
       if (lost && opener !== null && opener.isConnected) opener.focus()
     }
   }, [returnFocusRef])
+
+  // EndEx while the modal is open: a draft stays (the composer inside disables submit and says
+  // why, so the text is still readable and copyable); with no draft there is nothing to keep, so
+  // the modal closes and the host moves focus somewhere stable.
+  const ended = useExerciseEndedFlag()
+  useEffect(() => {
+    if (!ended) return
+    const dialog = dialogRef.current
+    if (dialog !== null && !hasUnsentDraft(dialog)) onClose()
+  }, [ended, onClose])
 
   // Put focus on the SAFE choice when the question appears.
   useEffect(() => {

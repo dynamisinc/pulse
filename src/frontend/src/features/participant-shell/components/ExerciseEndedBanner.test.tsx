@@ -71,9 +71,33 @@ afterEach(() => {
 })
 
 describe('ExerciseEndedBanner', () => {
+  it('announces via a live region that exists BEFORE the flip and is filled after it (W-2)', () => {
+    ended = false
+    const view = render(<Chrome />)
+    const region = screen.getByTestId('pulse-exercise-ended-announcer')
+    expect(region).toHaveAttribute('role', 'status')
+    expect(region).toBeEmptyDOMElement()
+
+    ended = true
+    view.rerender(<Chrome />)
+
+    expect(screen.getByTestId('pulse-exercise-ended-announcer')).toBe(region)
+    expect(region).toHaveTextContent(ENDED_TEXT)
+    // The visible band is not itself a live region, so the text is not announced twice.
+    expect(screen.getByTestId('pulse-exercise-ended-banner')).not.toHaveAttribute('role')
+  })
+
+  it('keeps the (empty) live region even with chrome off', () => {
+    ended = false
+    mockUseChromeConfig.mockReturnValue({ ...CONFIG, enabled: false })
+    render(<Chrome />)
+    expect(screen.getByTestId('pulse-exercise-ended-announcer')).toBeEmptyDOMElement()
+  })
+
   it('carries the exact copy', () => {
     expect(EXERCISE_ENDED_BANNER_TEXT).toBe(ENDED_TEXT)
     render(<Chrome />)
+    expect(screen.getByTestId('pulse-exercise-ended-banner')).toHaveTextContent(ENDED_TEXT)
     expect(screen.getByRole('status')).toHaveTextContent(ENDED_TEXT)
   })
 

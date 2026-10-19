@@ -6,7 +6,7 @@
  * feed, threads, profiles, notifications and the personal Following / Pinned tabs stay readable --
  * and the flip happens WITHOUT remounting the channel (scroll position survives EndEx).
  */
-import { act, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { resetExerciseClock } from '@/core/clock'
 import { resetTelemetryBuffer } from '@/core/telemetry'
@@ -68,6 +68,11 @@ describe('exercise ended: writes are off', () => {
     expectNoWrites()
   })
 
+  it('a live profile shows the follow button (control for the ended case below)', async () => {
+    renderChannel({ entries: ['/fairhavenwater'] })
+    expect((await screen.findAllByTestId('follow-button')).length).toBeGreaterThan(0)
+  })
+
   it('a profile is readable with no follow button', async () => {
     renderChannel({ entries: ['/fairhavenwater'], ended: true })
     await waitFor(() => expect(screen.getByTestId('profile-identity')).toBeInTheDocument())
@@ -94,5 +99,81 @@ describe('exercise ended: the flip', () => {
     expect(screen.getAllByTestId('post-card')[0]).toBe(firstCard)
     expectNoWrites()
     expect(screen.getByRole('tab', { name: 'Following' })).toBeInTheDocument()
+  })
+})
+
+describe('exercise ended: a draft open at EndEx is kept (W-1)', () => {
+  const NOT_BODY = () => expect(document.activeElement).not.toBe(document.body)
+
+  it('keeps the inline composer draft readable, with submit and media off and the reason shown', async () => {
+    const view = renderChannel({ entries: ['/home'] })
+    await feedReady()
+    const box = within(screen.getByTestId('composer')).getByLabelText('Post text')
+    fireEvent.change(box, { target: { value: 'half-written thought' } })
+    box.focus()
+
+    act(() => view.setShellMount({ ended: true }))
+
+    const kept = within(screen.getByTestId('composer')).getByLabelText('Post text')
+    expect(kept).toBe(box)
+    expect(kept).toHaveValue('half-written thought')
+    expect(kept).toHaveAttribute('readonly')
+    expect(within(screen.getByTestId('composer')).getByRole('button', { name: 'Post' })).toBeDisabled()
+    expect(screen.getByTestId('composer-ended')).toHaveTextContent(
+      'This exercise has ended. Nothing new can be posted.',
+    )
+    NOT_BODY()
+  })
+
+  it('an EMPTY inline composer simply goes away', async () => {
+    const view = renderChannel({ entries: ['/home'] })
+    await feedReady()
+    act(() => view.setShellMount({ ended: true }))
+    expect(screen.queryByTestId('composer')).not.toBeInTheDocument()
+  })
+
+  it('keeps a reply draft readable in a thread', async () => {
+    const view = renderChannel({ entries: [`/i/status/${THREADABLE_POST_ID}`] })
+    const box = within(await screen.findByTestId('reply-composer')).getByLabelText('Reply text')
+    fireEvent.change(box, { target: { value: 'my reply' } })
+    box.focus()
+
+    act(() => view.setShellMount({ ended: true }))
+
+    const kept = within(screen.getByTestId('reply-composer')).getByLabelText('Reply text')
+    expect(kept).toBe(box)
+    expect(kept).toHaveValue('my reply')
+    expect(kept).toHaveAttribute('readonly')
+    NOT_BODY()
+  })
+
+  it('keeps an open compose modal with a draft, and focus stays in it', async () => {
+    const view = renderChannel({ entries: ['/home'] })
+    await feedReady()
+    fireEvent.click(screen.getByTestId('nav-post-button'))
+    const dialog = await screen.findByRole('dialog')
+    const box = within(dialog).getByLabelText('Post text')
+    fireEvent.change(box, { target: { value: 'my draft' } })
+
+    act(() => view.setShellMount({ ended: true }))
+
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+    expect(within(screen.getByRole('dialog')).getByLabelText('Post text')).toHaveValue('my draft')
+    expect(screen.getByTestId('composer-ended')).toBeInTheDocument()
+    expect(screen.queryByTestId('nav-post-button')).not.toBeInTheDocument()
+    NOT_BODY()
+  })
+
+  it('closes an open EMPTY compose modal and never leaves focus on <body>', async () => {
+    const view = renderChannel({ entries: ['/home'] })
+    await feedReady()
+    fireEvent.click(screen.getByTestId('nav-post-button'))
+    await screen.findByRole('dialog')
+
+    act(() => view.setShellMount({ ended: true }))
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    NOT_BODY()
+    expect(screen.getByTestId('social-main')).toHaveFocus()
   })
 })

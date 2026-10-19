@@ -408,6 +408,14 @@ export interface UseComposePostResult {
   readonly canPost: boolean
   /** Whether the composer must not render at all (observer mode, COR-015). */
   readonly isReadOnly: boolean
+  /** The exercise has ended: nothing can be sent. An already-open draft stays readable. */
+  readonly isEnded: boolean
+  /**
+   * The composer should not render: ended AND there was no draft when it ended. A draft that
+   * is open at EndEx stays mounted (readable and copyable, submit and media off) so nothing is
+   * lost silently and focus is not dropped.
+   */
+  readonly hiddenByEnd: boolean
   /** All conditions met to publish (content, ready tray with alts, within limit, canPost). */
   readonly canPublish: boolean
   /** Why Post is disabled for a MEDIA reason the author can fix, or `undefined`. */
@@ -484,7 +492,17 @@ export function useComposePost(options: UseComposePostOptions = {}): UseComposeP
   const showCount = remaining <= COUNT_VISIBLE_THRESHOLD
   const isLow = showCount && !isOverLimit
 
-  const isReadOnly = !canWrite
+  const isReadOnly = session.isReadOnly
+  const hasDraft = text.trim().length > 0 || items.length > 0
+  // Latch, at the moment `ended` turns true, whether a draft was open (adjusted during render,
+  // not in an effect, so it never paints a frame with the draft gone).
+  const [endedSeen, setEndedSeen] = useState(false)
+  const [keptAtEnd, setKeptAtEnd] = useState(false)
+  if (ended !== endedSeen) {
+    setEndedSeen(ended)
+    setKeptAtEnd(ended && hasDraft)
+  }
+  const hiddenByEnd = ended && !keptAtEnd
   const canPost = session.personaId !== undefined
 
   // "Has content" is judged on what would be SENT: text that is only markup
@@ -494,7 +512,7 @@ export function useComposePost(options: UseComposePostOptions = {}): UseComposeP
   const isUploading = items.some(item => item.status === 'uploading')
   const hasMedia = items.length > 0
   const canPublish =
-    (hasText || hasMedia) && mediaReady && !isOverLimit && canPost && !isReadOnly && !isPublishing
+    (hasText || hasMedia) && mediaReady && !isOverLimit && canPost && canWrite && !isPublishing
 
   const mediaBlockReason = useMemo((): string | undefined => {
     if (items.some(item => item.status === 'failed')) {
@@ -700,6 +718,8 @@ export function useComposePost(options: UseComposePostOptions = {}): UseComposeP
     isOverLimit,
     canPost,
     isReadOnly,
+    isEnded: ended,
+    hiddenByEnd,
     canPublish,
     mediaBlockReason,
     publish,

@@ -7,8 +7,10 @@
  * `--pulse-chrome-top`, so the alert bar, pins and overlays shift down automatically.
  *
  * Out-of-fiction register (it speaks as the exercise, not the fiction): a FontAwesome icon PLUS
- * text, never colour alone; `role="status"`; NO dismiss control (it must stay while the exercise
- * is ended); no time of any kind (scenario or wall-clock). Text wraps on narrow screens.
+ * text, never colour alone; NOT a live region itself (ComplianceChrome keeps an always-mounted,
+ * initially empty live region and fills it on the flip, so the announcement is reliable and not
+ * doubled); NO dismiss control (it must stay while the exercise is ended); no time of any kind
+ * (scenario or wall-clock). Text wraps on narrow screens.
  *
  * World: participant. Plain React + a CSS module; no COBRA, no MUI.
  */
@@ -36,7 +38,6 @@ export function ExerciseEndedBanner({ top, safeAreaTop, ref }: ExerciseEndedBann
   return (
     <div
       ref={ref}
-      role="status"
       data-testid="pulse-exercise-ended-banner"
       className={safeAreaTop ? `${styles.banner} ${styles.safeTop}` : styles.banner}
       style={style}

@@ -127,7 +127,6 @@ import { useThread, type ThreadReplyView } from '../hooks/useThread'
 import { useSocialDirectory } from '../layout/socialDirectory'
 import { ReplyComposer } from './ReplyComposer'
 import styles from './ThreadView.module.css'
-import { useCanWrite } from '@/features/participant-shell/writeGate'
 
 /** The focused post's enlargement; MUST equal the `scale()` in `.focusedWrap`. */
 const FOCUSED_SCALE = 1.06
@@ -202,8 +201,9 @@ export function ThreadView({
 
   // The reply box exists only for a session that can write AS a persona (D1-011:
   // absent, never disabled).
-  const canWrite = useCanWrite()
-  const canReply = affordances && canWrite && session.personaId !== undefined
+  // Not gated on `useCanWrite`: an already-open reply draft stays mounted at EndEx (the
+  // composer itself hides when ended with no draft, and disables submit when one is open).
+  const canReply = affordances && !session.isReadOnly && session.personaId !== undefined
 
   // Live reply append streams for the same sessions the feed's pill does.
   const { ancestors, focused, replies, loading, error, newReplyCount, appendReply } = useThread(

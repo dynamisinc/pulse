@@ -60,7 +60,6 @@ import { Feed } from '../../pages/Feed'
 import { PinnedFeed } from '../../pinned/PinnedFeed'
 import { useSocialOpeners } from '../useSocialOpeners'
 import styles from './HomeView.module.css'
-import { useCanWrite } from '@/features/participant-shell/writeGate'
 
 /** The mountable Home panels, and the tablist that switches them. */
 type FeedTabId = 'all' | 'following' | 'pinned'
@@ -83,8 +82,6 @@ export function HomeView() {
   const { variant } = useShellContext()
   const session = useSession()
   const canCompose = affordancesAvailable(variant)
-  // Ended exercise: no composer, but the personal views (Following / Pinned) stay.
-  const canWrite = useCanWrite()
 
   // Stable identities (memoized in the hook) so the feed's memoized rows still
   // skip re-render under burst even though callbacks are threaded down
@@ -138,7 +135,7 @@ export function HomeView() {
 
   return (
     <div className={styles.home}>
-      {canCompose && canWrite && <Composer />}
+      {canCompose && <Composer />}
 
       {/* All Posts <-> Following <-> Pinned (SOC-081, story 07). Absent entirely for an observer /
           read-only / no-persona session -- see `canUseFollowing`. */}

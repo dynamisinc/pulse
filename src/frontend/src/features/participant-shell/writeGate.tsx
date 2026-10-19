@@ -2,7 +2,8 @@
  * features/participant-shell/writeGate.tsx
  * ---------------------------------------------------------------------------
  * The ONE write-affordance seam for the participant world (exercise-ended
- * read-only review; see docs/features/participant-shell and the "Ended" design note).
+ * read-only review; the 2026-10-19 "Widened" note in
+ * docs/features/exercise-configuration/03-exercise-lifecycle.md).
  *
  * WHY A SEAM, NOT A VARIANT. After EndEx (lifecycle `completed`) participants may still READ
  * everything, including their PERSONAL views: notifications, the Following and Pinned tabs and
