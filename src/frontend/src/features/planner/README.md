@@ -219,3 +219,19 @@ The identity-auth-roles story-02 primary AC names two provisioning paths (bulk i
 CSV import panel** — individual create is a backend endpoint
 (`POST /api/staff/accounts`) and is not built as a frontend form here. A future story
 can add an individual-create form following the same service/hook/panel pattern.
+
+## Story 20 / #575a — Staff section (identity-auth-roles)
+
+A **Staff** section in the page's `SECTIONS` registry: list the exercise's staff (lead marked
+with icon + the word "Lead"), add from `candidates`, change role, remove, make lead. Gated by
+`can('assignStaff')` (`core/auth/rolePermissions.ts`; planner + orgAdmin; the page itself is
+planner-only today). No routing change.
+
+| File | Role |
+|------|------|
+| `components/StaffPanel.tsx` | The section: table, add form, inline `role="alert"` errors, confirm flows (remove, make lead with the swamped-mode warning, self-removal/demotion sign-out warning). |
+| `components/StaffConfirmDialog.tsx` | `alertdialog` with initial focus on Cancel. |
+| `hooks/useStaffAssignment.ts` | `useStaffRoster` + `useStaffMutations`; every success invalidates the list (no optimistic updates). |
+| `services/staffAssignmentService.ts` | Axios calls, fail-closed list validation, `StaffAssignmentError` (status + server code). No mock adapter. |
+| `services/staffErrors.ts` | Maps 409 codes / 404 to the user-facing messages; says when to refetch. |
+| `types/staff.ts` | `StaffRole`, `StaffEnrollment`, `StaffCandidate`, `StaffRoster`. |

@@ -209,8 +209,31 @@ Players never see whether an exercise is in practice mode.
 When you create an exercise, Pulse assigns you to it. Your role on the new exercise is the role you
 had when you created it.
 
-> **Not yet available:** adding other staff to an exercise, or changing someone's role, from a
-> screen. Ask Dynamis support to set up staff accounts and assignments.
+### Staff
+
+Open **Exercise Settings** and choose **Staff** in the left-hand list. Only planners see it. The
+table shows everyone who has a staff role on this exercise, with their email and role. The lead
+controller is marked with a star and the word **Lead**.
+
+- **Add staff.** Under **Add staff**, pick a person from your organisation, pick a role (planner,
+  controller or evaluator) and select **Add staff**. Only people who do not yet have a role on
+  this exercise are listed. If the list is empty, everyone already has a role.
+- **Change a role.** Use the role menu on the person's row. The change takes effect straight
+  away, and the person is signed out of this exercise so they pick up the new role when they sign
+  back in.
+- **Remove someone.** Select **Remove** on their row and confirm. They lose their role on this
+  exercise and are signed out of it. They can be added again later.
+- **Make a controller the lead.** Select **Make lead** on a controller's row and confirm. Only
+  controllers can be the lead. **Changing the lead turns swamped mode off.**
+- **Your own row.** If you remove yourself, or change your own role away from planner, Pulse warns
+  you first: you will lose your staff role on this exercise and be signed out of it.
+
+**Last planner rule.** An exercise must keep at least one planner. Pulse refuses to remove the
+only planner or change their role. Add or promote a second planner first.
+
+If two people edit the staff at once you may see "The lead changed while you were working. Refresh
+and try again." or "That person or role no longer exists here." The list refreshes itself; check
+it and try again.
 
 ---
 

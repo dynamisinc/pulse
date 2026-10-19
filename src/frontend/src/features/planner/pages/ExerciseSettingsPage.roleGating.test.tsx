@@ -26,6 +26,9 @@ vi.mock('../components/ComplianceChromePanel', () => ({
 vi.mock('../components/PracticeModePanel', () => ({
   PracticeModePanel: () => <div data-testid="stub-practice-panel" />,
 }))
+vi.mock('../components/StaffPanel', () => ({
+  StaffPanel: () => <div data-testid="stub-staff-panel" />,
+}))
 vi.mock('../components/AccountImport', () => ({
   AccountImport: () => <div data-testid="stub-account-import" />,
 }))
@@ -68,4 +71,20 @@ describe('ExerciseSettingsPage by role', () => {
     renderPage()
     expect(screen.getByTestId('exercise-settings-read-only')).toBeInTheDocument()
   })
+})
+
+describe('ExerciseSettingsPage Staff section by role (story 20)', () => {
+  it('a planner sees the Staff nav item', () => {
+    setStubSession({ role: 'planner', isLead: false })
+    renderPage()
+    expect(screen.getByTestId('exercise-config-nav-staff')).toHaveTextContent('Staff')
+  })
+
+  for (const role of ['controller', 'evaluator', 'orgAdmin'] as const) {
+    it(`${role} does not see the Staff nav item`, () => {
+      setStubSession({ role, isLead: true })
+      renderPage()
+      expect(screen.queryByTestId('exercise-config-nav-staff')).not.toBeInTheDocument()
+    })
+  }
 })

@@ -38,6 +38,7 @@ const ROLE_ONLY: ReadonlyArray<readonly [StaffAction, readonly SessionRole[]]> =
   ['freezeTiers', ['controller']],
   ['editExerciseSettings', ['planner']],
   ['setLeadController', ['planner']],
+  ['assignStaff', ['orgAdmin', 'planner']],
   ['manageViewOnlyCodes', ['planner', 'controller']],
   ['manageAccounts', ['planner', 'controller']],
   ['editContent', ['planner', 'controller']],
