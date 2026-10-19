@@ -72,7 +72,7 @@ The beats are the plan's demo storyline v2 ([§3](../PARTICIPANT-FIRST-DEMO-PLAN
 | The break (T−355 to T−305) | p01–p05 | Metro Desk 9 breaks the story (p01). Residents lose pressure (p02, p04). The utility responds with a crew photo (p03). County EM supports and redirects traffic (p05) |
 | The advisory (T−290 to T−246) | p06–p12 | **Metro Desk 9's on-scene video (p06, plays inline; thread p06→p07→p08).** The utility issues the boil water advisory (p09). County EM shares it with a 2-photo grid (p10). A zone-map question gets answered by a neighbor (p11→p12) |
 | First doubts (T−240 to T−200) | p13–p17 | The Scoop: "only telling us NOW?" (p13). A boiling tip (p14). **Brown-water photo (p15) with the utility's answer in-thread (p16).** Hydrant flushing explained (p17) |
-| Water sites and the lookalike (T−185 to T−138) | p18–p26 | Repairs run into tomorrow (p18). **County EM opens free water sites (p19), with a 3-deep thread: infant line question → answer → confirmation (p19→p20→p22→p26).** **The lookalike says "bring cash, $5 per case" (p21) and outpaces the official post.** In its thread a neighbor flags it (p23), a resident can't tell them apart (p24) and **the verified utility says the account isn't theirs (p25)** |
+| Water sites and the lookalike (T−185 to T−138) | p18–p26 | Repairs run into tomorrow (p18). **County EM opens free water sites (p19), with a 3-deep thread: infant line question → answer → confirmation (p19→p20→p22→p26).** **The lookalike says "bring cash, $5 per jug" (p21) and outpaces the official post.** In its thread a neighbor flags it (p23), a resident can't tell them apart (p24) and **the verified utility says the account isn't theirs (p25)** |
 | Lines, rumor, recovery (T−130 to T−14) | p27–p36 | Lines at the high school, photo (p27). Neighbors helping (p28). **The Scoop's anonymous "source" (p29) and the exchange under it (p29→p30→p31).** Pressure returns in Zone 2 (p32). County EM reminder (p33). A thank-you (p34). A shower question answered (p35→p36) |
 
 Point out: **Trending `#WaterIssues`** (21 of the 36 opening posts carry it, and no post carries another tag), the
@@ -146,7 +146,7 @@ Seeded baselines (likes / reposts / replies). Real clicks are added on top durin
 
 | Rumor | Baseline | Official | Baseline |
 |---|---|---|---|
-| p21 lookalike "$5 per case" | 724 / 611 / 88 | p19 County EM water sites | 612 / 538 / 37 |
+| p21 lookalike "$5 per jug" | 724 / 611 / 88 | p19 County EM water sites | 612 / 538 / 37 |
 | p29 The Scoop "a source says" | 547 / 332 / 92 | p32 utility "pressure returning" | 262 / 181 / 30 |
 | **rs03 impersonator "do NOT boil"** | **1,840 / 1,420 / 310** | **the PIO's live post** | **real counts only** (participants get no baseline) |
 | rs05 The Scoop video | 962 / 718 / 141 | rs10 utility reply | 344 / 291 / 41 |
@@ -184,9 +184,8 @@ review (display names change in `pack.json` alone):
 - **Still for Tom:** approve or replace the **8 generated drafts** (the avatars of `mvega_fh`, `tbrandt41`,
   `kwardFH` and `dreyes_fh`, and the 4 org banners). They are flat illustrations, not photos. A replacement
   keeps the same path and file name, and then needs `-WhatIf` again.
-- Two post texts read slightly differently from their final photos: **p15** says "kitchen tap" over a
-  bathroom-sink photo, and **p19** says "2 cases per household" over a photo of 5-gallon jugs. Change the
-  text in `pack.json` if that matters.
+- **Post text follows the final media** (Tom, 2026-10-19): p06 describes the trench the video shows, p15 says
+  "bathroom tap", and p19, p21, p28 and p34 say jugs, not cases.
 
 ### 3. When to seed: read this before Mon 10/19
 
@@ -364,12 +363,12 @@ without the alt text and engagement, and the items are appended at the end.
 
 ## Validation (2026-10-19, final media)
 
-- `Seed-DemoContent.ps1 -WhatIf` **passes** with exit 0 and no warnings: "9 persona edit(s), 29 file(s) (18.1 MB),
+- `Seed-DemoContent.ps1 -WhatIf` **passes** with exit 0 and no warnings: "9 persona edit(s), 29 file(s) (13.3 MB),
   36 post(s) (23 top-level), 15 run-sheet item(s) (30 scripted post(s)), 100 noise entries, 2 pin(s)". The
   exercise-context check passed against UAT. Every file passes the type, size and magic-byte checks.
-- The videos are H.264 High, `yuv420p`, `+faststart`, 1280×720, 24 fps, no audio: 13 s / 3.5 MB, 16 s / 10.0 MB and
-  10 s / 2.3 MB. Every photo is a 1600×900 sRGB JPEG under 330 KB. No file carries EXIF, GPS, XMP, ICC or a capture
-  time.
+- The videos are H.264 High, `yuv420p`, `+faststart`, 1280×720, 24 fps, no audio: 13 s / 3.5 MB, 16 s / 5.2 MB and
+  10 s / 2.3 MB, with no encoder tag. V2 blurs the fire engine's unit marking in every frame. Every photo is a
+  1600×900 sRGB JPEG under 330 KB. No file carries EXIF, GPS, XMP, ICC or a capture time.
 - `kestrel-msel.xlsx` was rebuilt for the new video alt text (`Pulse Media Alt`), and `build-kestrel-msel.py --check`
   passes: 34 rows, 8 social, 26 skipped, 0 failed, 0 warnings.
 - Not checked here: playback in Chrome and Safari after the upload, and the live self-check (both need UAT).

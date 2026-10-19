@@ -142,8 +142,8 @@ uploads a minute per account. S1 waits out a 429, so more files only make the ru
 - **Used by:** p03 (@FairhavenWater, "We are responding to a main break on Elm Street…").
 - **The shot:** a utility crew around an excavated street trench with a large pipe exposed and water at the bottom.
   Backs or hard hats, not faces. No company names.
-- **Alt:** "A worker in a welding mask kneels in an excavated trench, welding a joint on a large steel pipe, while a
-  second worker in an orange vest and blue hard hat works beside the pipe."
+- **Alt:** "A worker in a welding mask kneels in an excavated trench, welding a joint on a large steel pipe. A second
+  worker in an orange vest is just visible at the edge of the trench."
 - **Search:** `pipe repair workers`, `road excavation`, `water pipe trench`, `construction workers street`.
 
 ### P2 · `photo-advisory-sign` (GENERATED)
@@ -165,7 +165,7 @@ uploads a minute per account. S1 waits out a 429, so more files only make the ru
 
 ### P4 · `photo-brown-sink` (STOCK)
 
-- **Used by:** p15 (@tbrandt41, "this is what came out of my kitchen tap…").
+- **Used by:** p15 (@tbrandt41, "this is what came out of my bathroom tap…").
 - **The shot:** cloudy, brownish tap water in a white sink. It should look like a resident's phone photo.
 - **Alt:** "Cloudy, rust-brown tap water pouring from a chrome tap and filling a white bathroom sink."
 - **Search:** `dirty water sink`, `brown water sink`, `rusty water`.

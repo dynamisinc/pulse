@@ -19,7 +19,8 @@ Then set **Status** and note any edit you made (crop, trim, blur, text added).
 
 Every file was re-encoded for the pack and **all its metadata was stripped** (EXIF, GPS, XMP, capture time,
 device, ICC; videos with `-map_metadata -1`), because the server keeps whatever metadata a file carries. Photos
-are sRGB JPEG and the videos are silent (the supplied audio tracks were empty).
+are sRGB JPEG and the videos are silent (the supplied audio tracks were empty). The MP4s carry no encoder tag
+and no x264 settings block either.
 
 Shot descriptions and search terms are in [`MEDIA-SHOTLIST.md`](MEDIA-SHOTLIST.md).
 
@@ -29,8 +30,8 @@ Shot descriptions and search terms are in [`MEDIA-SHOTLIST.md`](MEDIA-SHOTLIST.m
 |---|---|---|---|---|---|---|
 | `media/news-elm-break.mp4` | V1 · p06 Metro Desk 9 on-scene report | STOCK | Dynamis team (supplied 2026-10-19) | Licensed to Dynamis; licence held by the team | internal | Trimmed to 8.1 s–end of the supplied 21 s cut (12.8 s). The opening aerial shot was cut: it showed an excavator brand logo and a for-sale banner with a phone number. 1280×720 H.264, no audio |
 | `media/news-elm-break.poster.jpg` | V1 poster | STOCK | Same as the clip | Same as the clip | internal | Frame at 2 s of the final clip |
-| `media/news-mill-road.mp4` | V2 · rs01 BREAKING (beat 2) | STOCK | Dynamis team (supplied 2026-10-19) | Licensed to Dynamis; licence held by the team | internal | Cropped to the left 1600×900 of the 1080p frame (drops a van's rear number and a car badge), then 1280×720 H.264, 16 s, no audio |
-| `media/news-mill-road.poster.jpg` | V2 poster | STOCK | Same as the clip | Same as the clip | internal | Frame at 2 s of the final clip |
+| `media/news-mill-road.mp4` | V2 · rs01 BREAKING (beat 2) | STOCK | Dynamis team (supplied 2026-10-19) | Licensed to Dynamis; licence held by the team | internal | Cropped to the left 1600×900 of the 1080p frame (drops a van's rear number and a car badge), then 1280×720 H.264, 16 s, no audio. The fire engine's unit marking ("E97" on the rear, "97" on the side panel) is blurred in every frame, tracked as the camera moves. Re-encoded at a 2.6 Mbps cap (5.4 MB) |
+| `media/news-mill-road.poster.jpg` | V2 poster | STOCK | Same as the clip | Same as the clip | internal | Frame at 2 s of the final (blurred) clip |
 | `media/scoop-brown-tap.mp4` | V3 · rs05 The Scoop (beat 3) | STOCK | Dynamis team (supplied 2026-10-19) | Licensed to Dynamis; licence held by the team | internal | 1280×720 H.264, 10 s, no audio |
 | `media/scoop-brown-tap.poster.jpg` | V3 poster | STOCK | Same as the clip | Same as the clip | internal | Frame at 1 s of the final clip |
 
@@ -38,7 +39,7 @@ Shot descriptions and search terms are in [`MEDIA-SHOTLIST.md`](MEDIA-SHOTLIST.m
 
 | File | Used for | Status | Source | Licence | URL | Notes |
 |---|---|---|---|---|---|---|
-| `media/photo-elm-crew.jpg` | P1 · p03 | STOCK | Dynamis team (supplied 2026-10-19) | Licensed to Dynamis; licence held by the team | internal | 16:9 crop, 1600×900 |
+| `media/photo-elm-crew.jpg` | P1 · p03 | STOCK | Dynamis team (supplied 2026-10-19) | Licensed to Dynamis; licence held by the team | internal | 16:9 crop, 1600×900, cut about 100 px narrower on the right so the second worker's face and hard hat are out of frame |
 | `media/photo-advisory-sign.jpg` | P2 · p10 | GENERATED | AI-generated image, supplied by the Dynamis team | n/a (generated for Dynamis) | internal | Scaled to 1600×900. The sign text is part of the generated image. Recorded as generated with Tom's OK (FIC-002) |
 | `media/photo-boiling-pot.jpg` | P3 · p10 | STOCK | Dynamis team (supplied 2026-10-19) | Licensed to Dynamis; licence held by the team | internal | 16:9 crop, 1600×900. Original credit line (from the stripped metadata): Africa Images (Olga Yastremska) |
 | `media/photo-brown-sink.jpg` | P4 · p15 | STOCK | Dynamis team (supplied 2026-10-19) | Licensed to Dynamis; licence held by the team | internal | Scaled to 1600×900 |
