@@ -99,6 +99,7 @@ public class EngineSteeringLeverRecordsTests
     [InlineData("lead-released")]
     [InlineData("no-lead-recheck")]
     [InlineData("lead-lost-revert")]
+    [InlineData("lead-transferred")]
     public void SwampedModePayload_HasOneShapeForEveryReason_AndOmitsAnUnknownMinute(string reason)
     {
         using var withMinute = JsonDocument.Parse(EngineSteeringLeverRecords.SwampedModePayload(reason, wasOn: true, isOn: false, scenarioMinute: 9));

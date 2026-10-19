@@ -71,6 +71,9 @@ public sealed partial class EnrollmentService
     /// <summary>The org-audit kind of swamped mode turned off because the exercise lost its lead.</summary>
     public const string SwampedModeOffAuditKind = "org.engine.swamped-mode-off";
 
+    /// <summary>The swamped-off <c>reason</c> recorded when a lead transfer demotes the previous lead.</summary>
+    public const string LeadTransferredReason = "lead-transferred";
+
     /// <summary>The XC-004 event type of a lead change.</summary>
     public const string LeadChangedEventType = StaffChangeEventTypes.LeadChanged;
 
@@ -239,6 +242,12 @@ public sealed partial class EnrollmentService
             _dbContext.ChangeTracker.Clear();
             return EnrollmentResult.Conflict(LeadConflictError);
         }
+
+        // PROVIDER-GOVERNANCE §8: demoting the lead turns swamped mode off. A TRANSFER demotes the previous lead, and the
+        // exercise still has a lead afterwards, so the no-lead heal never catches it: without this the new lead would
+        // inherit timeout auto-send they never turned on (adversarial review W1 on #642).
+        await TurnSwampedModeOffAfterCommitAsync(
+            caller, exercise, enrollment, leadReleased: previousLeadId is not null, now, cancellationToken, reason: LeadTransferredReason);
 
         return EnrollmentResult.Ok(enrollment);
     }
@@ -463,7 +472,8 @@ public sealed partial class EnrollmentService
         Enrollment enrollment,
         bool leadReleased,
         DateTimeOffset now,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string reason = EngineSteeringLeverRecords.LeadReleasedReason)
     {
         if (!leadReleased)
         {
@@ -482,9 +492,16 @@ public sealed partial class EnrollmentService
             return;
         }
 
+        if (!swampedWasOn && reason == LeadTransferredReason)
+        {
+            // A transfer happens routinely; when swamped mode was already off it changed nothing, so it records nothing
+            // (delta review: audit noise). A release still records wasOn:false, as before.
+            return;
+        }
+
         // #618: the ONE swamped-off shape {reason, wasOn, isOn, scenarioMinute?} every path records.
         var swampedPayload = EngineSteeringLeverRecords.SwampedModePayload(
-            EngineSteeringLeverRecords.LeadReleasedReason,
+            reason,
             swampedWasOn,
             isOn: false,
             EngineSteeringLeverRecords.ScenarioMinuteOrNull(_clock, exercise.Id));

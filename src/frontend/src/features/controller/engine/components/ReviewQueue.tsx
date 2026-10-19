@@ -12,7 +12,7 @@
  * `<Avatar>`/`<VerifiedMark>` primitives, so the persona reads identically to
  * every participant surface — a trust signal is never re-themed per world), the
  * action label ("reply → @handle"), preview text, storyline tag, and a countdown
- * state that is one of "holds in M:SS" (+ a depleting bar) | "needs review" |
+ * state that is one of "holds in M:SS" / "sends in M:SS" (+ a depleting bar) | "needs review" |
  * "timer expired — held for you". Every disposition/countdown carries a TEXT label,
  * never colour alone (NFR-001). Held/priority items get a red left border AND the
  * held text.
@@ -65,6 +65,7 @@ import { usePersonas } from '@/features/personas'
 import type { Persona } from '@/features/personas'
 import { DraftDisposition, type EngineReviewItem } from '../models/reviewContracts'
 import { USE_MOCK_DATA } from '@/core/config/mockData'
+import { useCardAutoSend } from '../hooks/useCardAutoSend'
 import { useReviewQueue } from '../hooks/useReviewQueue'
 // D5 dark operator-chrome tokens (README §"Design Tokens"). Staff-only.
 import { consoleChrome as chrome } from '../../consoleChrome'
@@ -117,7 +118,11 @@ interface CountdownState {
 }
 
 /** Derives the card's countdown state + EXACT label from the item + scenario now. */
-function countdownStateOf(item: EngineReviewItem, nowMs: number): CountdownState {
+function countdownStateOf(
+  item: EngineReviewItem,
+  nowMs: number,
+  willAutoSend: boolean,
+): CountdownState {
   switch (item.disposition) {
     case DraftDisposition.Held:
       return { kind: 'held', label: 'timer expired — held for you' }
@@ -139,7 +144,8 @@ function countdownStateOf(item: EngineReviewItem, nowMs: number): CountdownState
       }
       const total = countdown.countdownMinutes * 60_000
       const fraction = total > 0 ? Math.min(1, Math.max(0, remaining / total)) : 0
-      return { kind: 'holds', label: `holds in ${formatMSS(remaining)}`, fraction }
+      const verb = willAutoSend ? 'sends' : 'holds'
+      return { kind: 'holds', label: `${verb} in ${formatMSS(remaining)}`, fraction }
     }
     default:
       return { kind: 'review', label: 'needs review' }
@@ -158,6 +164,7 @@ export function ReviewQueue({ editSlot }: ReviewQueueProps = {}) {
   // Story 11 (DF-14): a non-controller reads the cards; every decision (A/V/E/R/B) is absent.
   const canControl = useCanControl()
   const queue = useReviewQueue()
+  const willAutoSend = useCardAutoSend()
   const { items, nowMs, pendingCount, heldCount, timersUnder60sCount } = queue
   // Common-fields-only read (handle/displayName/avatar) — no `personaType`, so
   // the narrower two-world `Persona` contract is the right one (SOC-052/D1-008).
@@ -392,7 +399,7 @@ export function ReviewQueue({ editSlot }: ReviewQueueProps = {}) {
             item={item}
             focused={index === focusIndex}
             selected={selectedIds.has(item.draftId)}
-            countdown={countdownStateOf(item, nowMs)}
+            countdown={countdownStateOf(item, nowMs, willAutoSend)}
             persona={personaByHandle.get(item.leadPersonaHandle.toLowerCase())}
             editable={Boolean(editSlot)}
             onFocusCard={() => setFocusIndex(index)}

@@ -27,7 +27,7 @@ using Pulse.WebApi.Features.Identity.Enrollments;
 /// minute is OMITTED (never a fabricated 0) while the exercise's scenario clock has not started
 /// (<see cref="ScenarioMinuteOrNull"/>). The payload is opaque <c>nvarchar(max)</c>, shared verbatim by the event and
 /// the audit row, and never carries an identity (the actor is on the envelope). Every
-/// <c>engine.swamped-mode.turned-off</c> — controller, lead release, no-lead re-check, lead-lost revert — has the ONE
+/// <c>engine.swamped-mode.turned-off</c> — controller, lead release / transfer, no-lead re-check, lead-lost revert — has the ONE
 /// shape <c>{reason, wasOn, isOn, scenarioMinute?}</c>, built by <see cref="SwampedModePayload"/>.
 /// </para>
 /// </remarks>
