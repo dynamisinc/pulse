@@ -111,6 +111,20 @@ reopened. It stays in the list, labelled **Archived**, below the others.
 
 > **Not yet available:** duplicating an exercise, and deleting an exercise.
 
+## People directory
+
+Org admins open **People** (under Administer) to see everyone in the organization. Only org admins
+can open it.
+
+- Search by name or email, and page through the list (25 a page).
+- Each row shows the person's status as an icon plus a word: **Org admin**, **Disabled**,
+  **Locked out**. It also lists their exercises with their role; a star and "(lead)" marks a lead
+  controller.
+- **Make admin / Remove admin**, **Disable / Enable** and **Reset link** each ask you to confirm first.
+  Removing the last enabled admin, or disabling yourself, is refused with a message.
+- **Reset link** shows a one-time link once, with a Copy button. Give it to the person directly. You
+  cannot make a link for another org admin.
+
 ---
 
 ## Exercise settings
