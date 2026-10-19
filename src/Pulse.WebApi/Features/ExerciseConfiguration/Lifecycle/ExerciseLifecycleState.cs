@@ -358,11 +358,13 @@ public sealed record ExerciseLifecycleBehaviour
 
     /// <summary>Whether participant sim WRITES (post/reply/react) are meaningful in this state.</summary>
     /// <remarks>
-    /// <b>Advisory in this story, not enforced by it.</b> <c>paused</c> reports <c>false</c> while
-    /// <see cref="ParticipantAccessOpen"/> stays <c>true</c> (the holding page must render), but this story's
-    /// gating middleware refuses service on <see cref="ParticipantAccessOpen"/> alone — refusing a write in a
-    /// paused world is CTL-023's tiered-pause behaviour (world-steering), and adding a second, parallel
-    /// enforcement of it here is exactly the duplication hazard 1 forbids.
+    /// <b>Enforced (#379).</b> <c>paused</c> reports <c>false</c> while <see cref="ParticipantAccessOpen"/> stays
+    /// <c>true</c> (the holding page must render), so the gating middleware still SERVES a paused exercise; the
+    /// write refusal is <c>Pulse.WebApi.Features.EngineRuntime.Steering.ParticipantWriteGate</c>, applied to every
+    /// participant write route by <c>Pulse.WebApi.Features.Identity.SharedAccess.ParticipantWritePauseFilter</c>
+    /// (<c>.RefuseWhenWritesPaused()</c>): a participant post, reply, reaction, follow, media upload or post edit
+    /// gets <c>409 {"reason":"frozen"}</c> before its handler runs, staff sessions excepted. That gate is the one
+    /// enforcement point (it also covers the Freeze pause tier); this middleware does not duplicate it.
     /// </remarks>
     public bool ParticipantWritesAccepted { get; init; }
 

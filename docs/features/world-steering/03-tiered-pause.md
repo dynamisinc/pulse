@@ -97,6 +97,13 @@ stops only on Freeze**. Break Fiction (story 04) implies world-freeze.
 - [x] The tier control is **fully keyboard-operable** (NFR-001) — tab to each tier option, activate
       with Enter/Space, and the Freeze confirm step is reachable and dismissable by keyboard alone.
 
+### Ruling (Tom, 2026-10-19): Freeze means "participants held" (#379)
+- [x] **Freeze world** halts PARTICIPANT sim writes: post, reply, like/repost, follow, media upload and post edit
+      get `409 {"reason":"frozen"}` (`ParticipantWriteGate` + `.RefuseWhenWritesPaused()`; see
+      `exercise-build-golive/11`). It does **not** hold staff conduct: a controller's post as a persona still
+      publishes and reaches the held world. The participant's personal pin (a private bookmark) is exempt.
+      Pause injects and Pause engine leave participant writes allowed.
+
 ## Out of Scope
 Break Fiction (story 04, which implies Freeze); the exercise-clock's native/production mechanics
 (E1 COR-050 — this story's `pausableExerciseClock` is an explicitly-mock stand-in); the holding-page
