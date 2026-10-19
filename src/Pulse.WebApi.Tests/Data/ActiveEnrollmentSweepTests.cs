@@ -33,6 +33,9 @@ public sealed class ActiveEnrollmentSweepTests
 
     private static readonly Regex EnrollmentsRead = new(@"\.Enrollments\b", RegexOptions.CultureInvariant);
 
+    /// <summary>Where one read's own segment ends: the next <c>.Enrollments</c> or a query-syntax <c>join</c>.</summary>
+    private static readonly Regex SegmentEnd = new(@"\.Enrollments\b|\bjoin\b", RegexOptions.CultureInvariant);
+
     [Fact]
     public void EveryEnrollmentsRead_ExcludesRevokedRows_ThroughActive()
     {
@@ -49,6 +52,14 @@ public sealed class ActiveEnrollmentSweepTests
             + $"must include `{Constraint}` (Pulse.WebApi.Data.ActiveEnrollments) in its query chain. Offending site(s): "
             + string.Join(" | ", offenders));
     }
+
+    [Theory]
+    [InlineData(".IgnoreQueryFilters().Active().Where(x) join e in _db.Exercises on a equals b", true)]
+    [InlineData(".IgnoreQueryFilters() join x in _db.Enrollments.Active() on a equals b", false)]
+    [InlineData(".AsNoTracking().Any(e => _db.Enrollments.Active().Any())", false)]
+    [InlineData(".Active() on a equals b select x", true)]
+    public void TheOwnSegment_StopsAtTheNextReadOrJoin_SoAnotherReadsActiveCannotCoverThisOne(string chain, bool covered) =>
+        OwnSegment(chain).Contains(Constraint, StringComparison.Ordinal).Should().Be(covered);
 
     [Fact]
     public void NoProductionCodeReachesEnrollmentsThroughSetOrRawSql()
@@ -99,12 +110,24 @@ public sealed class ActiveEnrollmentSweepTests
                         continue;
                     }
 
-                    sites.Add(new CallSite($"{relativePath}:{i + 1}", code.Trim(), chain.Contains(Constraint, StringComparison.Ordinal)));
+                    sites.Add(new CallSite($"{relativePath}:{i + 1}", code.Trim(), OwnSegment(chain).Contains(Constraint, StringComparison.Ordinal)));
                 }
             }
         }
 
         return sites;
+    }
+
+    /// <summary>
+    /// The part of <paramref name="chain"/> that belongs to THIS <c>.Enrollments</c> read (Gate-1 S-004): up to the next
+    /// <c>.Enrollments</c>, the next query-syntax <c>join</c>, or the statement's end (the chain already stops at
+    /// <c>;</c>). So in one statement holding two reads, the second read's <c>.Active()</c> can never cover the first.
+    /// </summary>
+    internal static string OwnSegment(string chain)
+    {
+        ArgumentNullException.ThrowIfNull(chain);
+        var end = SegmentEnd.Match(chain);
+        return end.Success ? chain[..end.Index] : chain;
     }
 
     /// <summary>The rest of the statement after the DbSet name, across wrapped lines, up to its terminating <c>;</c>.</summary>

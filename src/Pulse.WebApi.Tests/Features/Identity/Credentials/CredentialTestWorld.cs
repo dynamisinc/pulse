@@ -183,10 +183,15 @@ internal sealed class CredentialProbeFactory : WebApplicationFactory<Program>
 {
     private const string ConnectionStringEnvVar = "ConnectionStrings__DefaultConnection";
     private readonly string? _frontendBaseUrl;
+    private readonly Action<IServiceCollection>? _configureServices;
 
-    public CredentialProbeFactory(string connectionString, string? frontendBaseUrl = CredentialTestWorld.FrontendBaseUrl)
+    public CredentialProbeFactory(
+        string connectionString,
+        string? frontendBaseUrl = CredentialTestWorld.FrontendBaseUrl,
+        Action<IServiceCollection>? configureServices = null)
     {
         _frontendBaseUrl = frontendBaseUrl;
+        _configureServices = configureServices;
         Environment.SetEnvironmentVariable(ConnectionStringEnvVar, connectionString);
     }
 
@@ -198,6 +203,11 @@ internal sealed class CredentialProbeFactory : WebApplicationFactory<Program>
         ArgumentNullException.ThrowIfNull(builder);
         builder.ConfigureAppConfiguration((_, configuration) => configuration.AddInMemoryCollection(
             new System.Collections.Generic.Dictionary<string, string?> { [JoinUrlBuilder.FrontendBaseUrlKey] = _frontendBaseUrl ?? string.Empty }));
+        if (_configureServices is not null)
+        {
+            builder.ConfigureServices(_configureServices);
+        }
+
         builder.ConfigureLogging(logging =>
         {
             logging.SetMinimumLevel(LogLevel.Trace);
