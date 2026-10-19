@@ -152,6 +152,45 @@ public sealed class EnrollmentSoftDeleteTests
     }
 
     [RequiresDockerFact]
+    public async Task Revoke_ThatRacesAConcurrentSetLead_Is409LeadChangedRetry_AndChangesNothing()
+    {
+        // Gate-1 S-003: the row becomes the lead between FindReachableAsync's read and the save, so the soft delete would
+        // violate CK_Enrollments_DeletedAt_NotLead. The whole unit of work rolls back and the caller is told to retry.
+        var org = await _kit.SeedOrganizationAsync();
+        var exercise = await _kit.SeedExerciseAsync(org);
+        var (planner, _) = await _kit.SeedStaffAsync(org, exercise, "planner");
+        var (plannerSession, _) = await _kit.SeedStaffSessionAsync(planner, exercise, "planner");
+        var (controller, enrollment) = await _kit.SeedStaffAsync(org, exercise, "controller");
+        var (controllerSession, _) = await _kit.SeedStaffSessionAsync(controller, exercise, "controller");
+
+        var hook = new BeforeSaveHook(async () =>
+        {
+            await using var competing = _kit.ReadContext();
+            await competing.Database.ExecuteSqlInterpolatedAsync($"UPDATE [Enrollments] SET [IsLead] = 1 WHERE [Id] = {enrollment}");
+        });
+
+        var (service, context) = _kit.ServiceFor(plannerSession, planner, org, exercise, interceptor: hook);
+        await using (context)
+        {
+            var result = await service.RevokeAsync(enrollment);
+            result.Outcome.Should().Be(EnrollmentOutcome.Conflict);
+            result.Error.Should().Be(EnrollmentService.LeadChangedRetryError);
+        }
+
+        hook.Fired.Should().BeTrue("the competing lead change landed in the window");
+        await using var read = _kit.ReadContext();
+        var row = await read.Enrollments.IgnoreQueryFilters().AsNoTracking().SingleAsync(e => e.Id == enrollment);
+        row.DeletedAt.Should().BeNull("nothing was saved");
+        row.IsLead.Should().BeTrue("the concurrent lead change stands; this revoke released nothing");
+        (await read.Sessions.AsNoTracking().SingleAsync(s => s.Id == controllerSession)).RevokedAt.Should().BeNull(
+            "the session revocation rolled back with the refused soft delete");
+        (await read.TelemetryEvents.IgnoreQueryFilters().AsNoTracking()
+                .CountAsync(t => t.ExerciseId == exercise && t.EventType == EnrollmentService.RevokedEventType))
+            .Should().Be(0);
+        _kit.Swamped.Calls.Should().BeEmpty("no lead was released, so the swamped-off path does not run");
+    }
+
+    [RequiresDockerFact]
     public async Task TheDatabase_RefusesARevokedLead_AndARevokedParticipantWorldEnrollment()
     {
         var org = await _kit.SeedOrganizationAsync();
@@ -185,5 +224,25 @@ public sealed class EnrollmentSoftDeleteTests
         (await InsertAsync("controller", isLead: true)).Should().Be(547, "CK_Enrollments_DeletedAt_NotLead");
         (await InsertAsync("participant", isLead: false)).Should().Be(547, "CK_Enrollments_DeletedAt_StaffOnly");
         (await InsertAsync("controller", isLead: false)).Should().BeNull("positive control: a revoked staff row is valid");
+    }
+
+    /// <summary>Runs one competing write just before the first save of the context it is attached to.</summary>
+    private sealed class BeforeSaveHook(Func<Task> competingWrite) : Microsoft.EntityFrameworkCore.Diagnostics.SaveChangesInterceptor
+    {
+        public bool Fired { get; private set; }
+
+        public override async ValueTask<Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<int>> SavingChangesAsync(
+            Microsoft.EntityFrameworkCore.Diagnostics.DbContextEventData eventData,
+            Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<int> result,
+            System.Threading.CancellationToken cancellationToken = default)
+        {
+            if (!Fired)
+            {
+                Fired = true;
+                await competingWrite();
+            }
+
+            return result;
+        }
     }
 }
