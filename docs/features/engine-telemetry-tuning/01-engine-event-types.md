@@ -184,6 +184,40 @@ and `engine.decided.toneMix` = `ambient`. The ambient policy's acting human (`Am
 verified session, not a client-supplied value (review W-2). A controller-approved ambient post keeps the default engine
 actor (no `actingHumanId`); the approval's own decision event names the human.
 
+## Autonomy steering-lever records (#618) — staff-change family, not the loop taxonomy
+
+Recorded here because this file is the event catalogue. Until #618 the three in-memory autonomy levers emitted no
+backend XC-004 record (only the lead-release / no-lead swamped-off flips did). Each lever now records every **real**
+change as one XC-004 event **and** one org-audit row, staged together through the shared `StaffChangeRecorder` —
+exactly like the existing `engine.swamped-mode.turned-off` flip. Constants: `EngineSteeringLeverRecords`.
+
+| Route | Event type | Org-audit kind | Payload keys |
+|---|---|---|---|
+| `POST /api/engine/autonomy/swamped-mode` (`enabled: true`) | `engine.swamped-mode.turned-on` | `org.engine.swamped-mode-on` | `reason: "controller"`, `wasOn`, `isOn`, `scenarioMinute` |
+| `POST /api/engine/autonomy/swamped-mode` (`enabled: false`) | `engine.swamped-mode.turned-off` (**reused**) | `org.engine.swamped-mode-off` (**reused**) | `reason: "controller"`, `wasOn`, `isOn`, `scenarioMinute` (the lead-release / no-lead paths keep `reason: "lead-released"` / `"no-lead-recheck"`) |
+| `POST /api/engine/autonomy/kill-switch` | `engine.kill-switch.engaged` | `org.engine.kill-switch-engaged` | `mode` (`drop-to-suggest` \| `full-stop`), `fromPosture`, `toPosture`, `scenarioMinute` |
+| `POST /api/engine/autonomy/restore` | `engine.autonomy.restored` | `org.engine.autonomy-restored` | `fromPosture`, `toPosture`, `scenarioMinute` |
+
+- **Posture** (previous/new state of the safety clamp): `running` (no clamp) \| `clamped` (Suggest clamp: kill switch
+  drop-to-suggest or the degraded-mode clamp) \| `stopped` (kill switch full-stop).
+- **Envelope:** channel `system`, `actor.kind: "system"`, `actor.actingHumanId` = the verified **session** person
+  (`StaffUser.Id`, never the body `actingHumanId` — WR-2), `actor.sessionId` = that session, `actor.role` = the caller's
+  live enrollment role; target `exercise` / exercise id; scenario time = the live scenario clock's instant (else the
+  stored one, else wall clock). The audit row's `actorPersonId` is the same session person; event and audit share the
+  payload verbatim. No identity is ever written into the payload.
+- **Only real changes are recorded**, like `engine.provider_changed`: swamped ON while on / OFF while off, a kill
+  switch that leaves the posture where it was, and a restore with nothing clamped record nothing. A refused call
+  (`400` — e.g. swamped ON while `Generation:Governance:TimeoutAutoSendAuthorized` is false, an unknown kill-switch
+  mode — or `403`, including the Tier-2 M-1 post-write revert) records nothing.
+- **Not atomic with the change, not fatal:** the lever is process memory and is already live, so a failed record save
+  is logged at Error and the request still succeeds (the `CommitSettingsEventAsync` precedent).
+- **Why not in `EngineEventTypes`:** these are staff-change records (system channel + org audit) and share the
+  dotted-kebab naming of the pre-existing `engine.swamped-mode.turned-off` they extend; `EngineEventTypes` is the
+  engine-loop taxonomy (lower_snake, `actor.kind: "engine"`) pinned by `EngineEventTaxonomyTests`.
+- **Tests:** `EngineReviewEndpointsTests.EveryRoute_ASpoofedBodyActingHumanId_IsNotRecorded_TheSessionPersonIs`
+  (positive half for the three levers) and the `EngineReviewEndpointsTests.SteeringLevers.cs` lever tests
+  (Docker-gated); `EngineSteeringLeverRecordsTests` (vocabulary + payload shapes, `[Fact]`).
+
 ## Build notes
 
 **Status detail.** Built and merged to the umbrella `feature/engine-telemetry-tuning` (head `c79c2a8`).

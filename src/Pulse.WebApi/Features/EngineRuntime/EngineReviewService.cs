@@ -55,9 +55,9 @@ using Pulse.WebApi.Features.Social;
 /// <see cref="IEnginePublishService"/> → B1 ingest), which emits its own per-post <c>post</c> events. The two
 /// engine-SETTINGS mutations (autonomy default / tier policy, story 05) likewise emit exactly one additive
 /// event each (<see cref="EngineEventTypes.AutonomyDefaultChanged"/> /
-/// <see cref="EngineEventTypes.TierPolicyChanged"/>) — a deliberate, reviewer-approved divergence from the
-/// swamped-mode/kill-switch/restore trio, which persist none: those controls' state is process memory, so the
-/// event is the only record of the change that survives a restart. Story 07's generation-provider cut/restore
+/// <see cref="EngineEventTypes.TierPolicyChanged"/>); the event is the only record of the change that survives a
+/// restart. The swamped-mode/kill-switch/restore trio record each real change as a staff-change event + org audit
+/// (#618, <see cref="EngineSteeringLeverRecords"/>). Story 07's generation-provider cut/restore
 /// joins them on the same terms, emitting one <see cref="EngineEventTypes.ProviderChanged"/> per real
 /// transition — and none at all for an idempotent no-op (an already-Fake cut, a restore with no cut active).
 /// </para>
@@ -408,8 +408,8 @@ public sealed partial class EngineReviewService
     /// person's lead enrollment on the server-resolved exercise (<see cref="ExerciseCallerRole.IsStillLeadAsync"/>);
     /// when it no longer holds, swamped mode is turned straight back OFF through the same state API and the request is
     /// <see cref="EngineReviewOutcome.Forbidden"/> (403). A demotion commits before its own OFF, so the outcome is OFF
-    /// whichever request wins. Like the ON itself, the revert persists no record (the state is process memory, and the
-    /// demotion's own OFF is the recorded change).
+    /// whichever request wins. A refused (reverted) ON records nothing — the demotion's own OFF is the recorded change;
+    /// an ON or OFF that lands and changes the state is recorded (#618, <see cref="EngineSteeringLeverRecords"/>).
     /// </remarks>
     /// <param name="enabled">The requested state.</param>
     /// <param name="input">The acting human (COR-018) + optional telemetry zone.</param>
@@ -440,6 +440,7 @@ public sealed partial class EngineReviewService
         }
 
         var state = _autonomy.GetOrCreate(exerciseId);
+        var wasOn = state.SwampedModeEnabled;
         state.SetSwampedMode(enabled, input.ActingHumanId, _clock.CurrentScenarioMinute(exerciseId));
 
         // M-1: ON is a raise — re-check the lead live, AFTER the write, and revert to OFF when it was lost meanwhile.
@@ -449,6 +450,7 @@ public sealed partial class EngineReviewService
             return EngineAutonomyResult.Forbidden();
         }
 
+        await RecordSwampedModeChangeAsync(exerciseId, input, wasOn, enabled, cancellationToken); // #618
         return EngineAutonomyResult.Ok(EngineAutonomyStateDto.From(state));
     }
 
@@ -477,7 +479,9 @@ public sealed partial class EngineReviewService
         }
 
         var state = _autonomy.GetOrCreate(exerciseId);
+        var fromPosture = EngineSteeringLeverRecords.PostureOf(state);
         state.EngageKillSwitch(mode, input.ActingHumanId, _clock.CurrentScenarioMinute(exerciseId));
+        await RecordKillSwitchEngagedAsync(exerciseId, input, mode, fromPosture, state, cancellationToken); // #618
 
         // Ambient-chatter 01 (AC6): either kill-switch mode LOWERS autonomous ambient posting to off, so a later
         // restore can never re-raise it; only a controller re-selecting the mode does.
@@ -522,9 +526,8 @@ public sealed partial class EngineReviewService
 
         // Resolve the SAME shared per-exercise state instance the reaction loop + auto-HOLD tick read (never a
         // fresh Create) so a resumed clamp is visible to the loop immediately — this is load-bearing for the
-        // undo. Like the kill-switch / swamped-mode siblings, this control persists NO telemetry (mapping an
-        // autonomy change onto XC-004 is engine-telemetry-tuning's job, not yet built), so the returned
-        // (nullable) level change is discarded exactly as EngageKillSwitch discards EngineKillSwitchFired.
+        // undo. A real lift is recorded (#618: engine.autonomy.restored + org audit) after the M-1 re-check below;
+        // the returned (nullable) level change itself is only read for "did it lift".
         var state = _autonomy.GetOrCreate(exerciseId);
         var wasStopped = state.IsGenerationStopped;
         var degradedReason = state.DegradedReason;
@@ -538,6 +541,7 @@ public sealed partial class EngineReviewService
             return EngineAutonomyResult.Forbidden();
         }
 
+        await RecordAutonomyRestoredAsync(exerciseId, input, lifted is not null, wasStopped, state, cancellationToken); // #618
         return EngineAutonomyResult.Ok(EngineAutonomyStateDto.From(state));
     }
 
@@ -1383,8 +1387,8 @@ public sealed partial class EngineReviewService
     /// <summary>
     /// Persists the ONE XC-004 event for a settings change (XC-004: exactly one event per meaningful action) in
     /// its own single <c>SaveChanges</c> — the mutation itself is process memory, so this event IS the durable
-    /// record, and it is the deliberate divergence from the swamped-mode/kill-switch/restore trio (which emit no
-    /// backend telemetry). One server clock read is shared by the envelope's wall clock + emittedAt.
+    /// record (the swamped-mode/kill-switch/restore trio record through <see cref="EngineSteeringLeverRecords"/>,
+    /// #618). One server clock read is shared by the envelope's wall clock + emittedAt.
     /// </summary>
     /// <remarks>
     /// <b>Deliberately NOT atomic with the in-memory posture change, and deliberately not fatal.</b> The
@@ -1734,7 +1738,14 @@ public sealed partial class EngineReviewService
 /// <summary>The action-request inputs a request-bound review decision carries — the acting human (COR-018) and the exercise IANA zone (XC-008). Never a client <c>exerciseId</c>.</summary>
 /// <param name="ActingHumanId">The individual controller behind the shared account (COR-018) — required.</param>
 /// <param name="TimeZone">The exercise IANA time zone for the XC-004 envelope (XC-008) — required (client-supplied stopgap until COR-050 metadata carries it).</param>
-public readonly record struct EngineReviewActionInput(string? ActingHumanId, string? TimeZone);
+public readonly record struct EngineReviewActionInput(string? ActingHumanId, string? TimeZone)
+{
+    /// <summary>
+    /// The server-verified session behind the action (person, role, session) — set ONLY by the endpoint from the
+    /// caller's session (WR-2), never from the body. The steering levers record it as their actor (#618).
+    /// </summary>
+    public Pulse.WebApi.Features.Identity.Enrollments.StaffChangeActor? Session { get; init; }
+}
 
 /// <summary>The outcome kind of a review-service operation, mapped to an HTTP status at the endpoint (fail closed).</summary>
 public enum EngineReviewOutcome

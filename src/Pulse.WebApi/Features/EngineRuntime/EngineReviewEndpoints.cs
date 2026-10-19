@@ -13,6 +13,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Pulse.Core.Features.Autonomy.Models;
 using Pulse.Core.Features.Generation.Services;
 using Pulse.WebApi.Features.EngineRuntime.Usage;
+using Pulse.WebApi.Features.Identity.Enrollments;
 using Pulse.WebApi.Features.Identity.RoleMatrix;
 using Pulse.WebApi.Features.Identity.Staff;
 
@@ -591,7 +592,10 @@ public static class EngineReviewEndpoints
     /// identity <see cref="SetAmbientPolicyAsync"/> attributes to), never the client-supplied body value. The body
     /// field is still accepted and still required for wire compatibility (a missing one keeps the service's COR-018
     /// <c>400</c>), but its value is not trusted: a spoofed id is never what the decision, the autonomy state or the
-    /// XC-004 audit event records. The time zone is the body's, unchanged.
+    /// XC-004 audit event records. The time zone is the body's, unchanged. The verified session itself (person, role,
+    /// session id) rides along as <see cref="EngineReviewActionInput.Session"/>, the actor the steering levers record
+    /// (#618). Every route here sits behind the controller-role gate, so a role the live read could not name is recorded
+    /// as <c>controller</c>.
     /// </summary>
     /// <param name="httpContext">The current request.</param>
     /// <param name="bodyInput">The input projected from the request body.</param>
@@ -605,7 +609,13 @@ public static class EngineReviewEndpoints
         }
 
         var actingHumanId = string.IsNullOrWhiteSpace(bodyInput.ActingHumanId) ? null : caller.PersonId.ToString();
-        return new EngineReviewActionInput(actingHumanId, bodyInput.TimeZone);
+        return new EngineReviewActionInput(actingHumanId, bodyInput.TimeZone)
+        {
+            Session = new StaffChangeActor(
+                caller.PersonId,
+                caller.Role ?? EngineCockpitControllerRoleFilter.ControllerRole,
+                caller.SessionId),
+        };
     }
 
     /// <summary>Maps an engine-settings result to its HTTP status (fail closed).</summary>

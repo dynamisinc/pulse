@@ -43,7 +43,7 @@ using Xunit;
 /// test is <see cref="RequiresDockerFactAttribute"/>.
 /// </summary>
 [Collection(MsSqlCollection.Name)]
-public sealed class EngineReviewEndpointsTests
+public sealed partial class EngineReviewEndpointsTests
 {
     private readonly MsSqlContainerFixture _fixture;
 
@@ -558,9 +558,9 @@ public sealed class EngineReviewEndpointsTests
     /// <summary>
     /// Gate-1 WR-006: every one of the twelve request-bound steering routes, posted with a SPOOFED body
     /// <c>actingHumanId</c>, records the SESSION person in the route's XC-004 event — and nothing anywhere carries the
-    /// spoofed value. <c>swamped-mode</c> and <c>autonomy/restore</c> persist no event or audit at all (the autonomy
-    /// state keeps no actor; mapping those changes onto XC-004 is engine-telemetry-tuning's), so for those two rows the
-    /// assertion is the absence of the spoofed id: there is no record for the session person to appear in.
+    /// spoofed value. #618: the three autonomy levers (<c>swamped-mode</c>, <c>kill-switch</c>, <c>autonomy/restore</c>)
+    /// now record their own staff-change event + org audit, so for those rows the POSITIVE half is asserted too: the
+    /// lever's event names the session person (and its session), and its org-audit row names the session person as actor.
     /// </summary>
     [RequiresDockerTheory]
     [InlineData("approve")]
@@ -621,6 +621,29 @@ public sealed class EngineReviewEndpointsTests
                 .And.OnlyContain(
                     e => e.Actor.ActingHumanId == host.StaffUserId.ToString(),
                     "{0}: the decision is attributed to the verified session's person (WR-2)", route);
+        }
+
+        // #618: the autonomy levers' own record — positively the session person, on the event AND the org audit.
+        var leverRecord = route switch
+        {
+            "swamped-mode" => (EngineSteeringLeverRecords.SwampedModeOnEventType, EngineSteeringLeverRecords.SwampedModeOnAuditKind),
+            "kill-switch" => (EngineSteeringLeverRecords.KillSwitchEngagedEventType, EngineSteeringLeverRecords.KillSwitchEngagedAuditKind),
+            "restore" => (EngineSteeringLeverRecords.AutonomyRestoredEventType, EngineSteeringLeverRecords.AutonomyRestoredAuditKind),
+            _ => ((string EventType, string AuditKind)?)null,
+        };
+        if (leverRecord is { } lever)
+        {
+            var leverEvent = events.Where(e => e.EventType == lever.EventType).Should()
+                .ContainSingle("{0} records exactly one {1}", route, lever.EventType).Subject;
+            leverEvent.Actor.ActingHumanId.Should().Be(
+                host.StaffUserId.ToString(), "{0}: the lever is attributed to the verified session's person (WR-2)", route);
+            leverEvent.Actor.SessionId.Should().Be(host.SessionId.ToString(), "{0}: through the session it was pulled on", route);
+
+            var audit = await verify.OrgAuditEvents.IgnoreQueryFilters()
+                .Where(a => a.ExerciseId == exerciseId && a.Kind == lever.AuditKind)
+                .ToListAsync();
+            audit.Should().ContainSingle("{0} is mirrored to the org audit once", route)
+                .Which.ActorPersonId.Should().Be(host.StaffUserId, "{0}: the audit names the session person", route);
         }
     }
 
@@ -731,16 +754,20 @@ public sealed class EngineReviewEndpointsTests
     {
         private readonly WebApplication _app;
 
-        private EngineReviewTestHost(WebApplication app, CapturingEnginePublishService publisher, Guid staffUserId)
+        private EngineReviewTestHost(WebApplication app, CapturingEnginePublishService publisher, Guid staffUserId, Guid sessionId)
         {
             _app = app;
             Publisher = publisher;
             StaffUserId = staffUserId;
+            SessionId = sessionId;
             Client = app.GetTestClient();
         }
 
         /// <summary>The session's staff person — the identity every steering action is attributed to (WR-2).</summary>
         public Guid StaffUserId { get; }
+
+        /// <summary>The live session the steering actions are made through (recorded on the #618 lever events).</summary>
+        public Guid SessionId { get; }
 
         public HttpClient Client { get; }
 
@@ -761,8 +788,9 @@ public sealed class EngineReviewEndpointsTests
             // authenticated staff user ASSIGNED to the resolved exercise (so the pre-existing route/scope/
             // publish tests pass through the new gate unchanged); the denial-case tests flip these knobs.
             var staffUserId = Guid.NewGuid();
+            var sessionId = Guid.NewGuid();
             var accessor = authenticatedStaff
-                ? new StubCurrentStaffSessionAccessor(new CurrentStaffSession { SessionId = Guid.NewGuid(), StaffUserId = staffUserId })
+                ? new StubCurrentStaffSessionAccessor(new CurrentStaffSession { SessionId = sessionId, StaffUserId = staffUserId })
                 : new StubCurrentStaffSessionAccessor(null);
 
             // Seed the assignment the filter checks against. Defaults to the resolved exercise (authorized);
@@ -816,7 +844,7 @@ public sealed class EngineReviewEndpointsTests
             app.MapEngineReview();
             await app.StartAsync();
 
-            return new EngineReviewTestHost(app, publisher, staffUserId);
+            return new EngineReviewTestHost(app, publisher, staffUserId, sessionId);
         }
 
         public async ValueTask DisposeAsync()
