@@ -1,6 +1,6 @@
 # Story: Exercise report: a denser printed post record, with engine repeats merged
 
-**Feature:** Demo feedback cut (10/20)  ·  **Phase:** 1 (post-demo)  ·  **Status:** In Review
+**Feature:** Demo feedback cut (10/20)  ·  **Phase:** 1 (post-demo)  ·  **Status:** Complete
 **Requirements:** EVL-030 (lite), NFR-001  ·  **Decisions:** DF-50  ·  **Issue:** #632
 **Stack:** frontend  ·  **Review:** Tier-1  ·  **Priority:** Should  ·  **Effort:** S
 
