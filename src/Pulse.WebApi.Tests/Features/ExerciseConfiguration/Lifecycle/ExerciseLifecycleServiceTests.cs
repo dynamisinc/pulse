@@ -6,6 +6,7 @@ using System.Text.Json;
 using System.Threading.Tasks;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging.Abstractions;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.ExerciseConfiguration.Lifecycle;
@@ -364,6 +365,29 @@ public sealed class ExerciseLifecycleServiceTests
         (await CountTransitionEventsAsync(exerciseId)).Should().Be(0);
     }
 
+    [RequiresDockerFact]
+    public async Task Stage_ThroughTheOrgTierEntryPoint_WhileScopedToAnotherReadyExercise_IsRefused()
+    {
+        // Both exercises are stage-ready, so only the scope != target guard can refuse: a regression to a
+        // null-scope-only check would stage the target on the OTHER exercise's checklist.
+        var target = await SeedAsync("build", stageReady: true);
+        var other = await SeedAsync("build", stageReady: true);
+
+        var exerciseContext = new ExerciseContext { CurrentExerciseId = other };
+        await using var context = _fixture.CreateContext(exerciseContext);
+        var service = NewService(context, exerciseContext, new StubCurrentStaffSessionAccessor(null));
+
+        var result = await service.TransitionTenantCheckedAsync(
+            Organization.DefaultOrganizationId,
+            target,
+            new ExerciseLifecycleTransitionRequest { To = "staged" });
+
+        result.Outcome.Should().Be(ExerciseLifecycleOutcome.TransitionNotAllowed);
+        (await ReadStatusAsync(target)).Should().Be("build");
+        (await ReadStatusAsync(other)).Should().Be("build");
+        (await CountTransitionEventsAsync(target)).Should().Be(0);
+    }
+
     private async Task<Guid> SeedAsync(string status, bool stageReady = false)
     {
         var exerciseId = Guid.NewGuid();
@@ -384,7 +408,13 @@ public sealed class ExerciseLifecycleServiceTests
         PulseDbContext context,
         ExerciseContext exerciseContext,
         ICurrentStaffSessionAccessor staff) =>
-        new(context, exerciseContext, staff, new ExerciseReadinessService(context, exerciseContext));
+        new(
+            context,
+            exerciseContext,
+            staff,
+            new NoOpExerciseLifecycleTransitionObserver(),
+            NullLogger<ExerciseLifecycleService>.Instance,
+            new ExerciseReadinessService(context, exerciseContext));
 
     private async Task<ExerciseLifecycleResult> TransitionAsync(
         Guid exerciseId,

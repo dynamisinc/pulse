@@ -64,6 +64,7 @@ describe('the readiness-blocking 409 (exercise-build-golive story 04)', () => {
   it.each([
     ['an empty blocking list', { ...body, blocking: [] }],
     ['a malformed item', { ...body, blocking: [{ id: 'x', label: 'X', status: 'weird', detail: null }] }],
+    ['an item that is not open', { ...body, blocking: [{ id: 'x', label: 'X', status: 'ok', detail: null }] }],
     ['a non-array list', { ...body, blocking: 'nope' }],
     ['a different error code', { ...body, error: 'other' }],
     ['no blocking key', { error: 'readiness-blocking', message: 'm' }],

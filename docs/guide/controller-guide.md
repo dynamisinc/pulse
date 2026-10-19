@@ -139,7 +139,8 @@ Walk this list before every StartEx. It takes about ten minutes.
 
 1. In the title row, select **Start exercise**.
 2. The button reads **Starting…** for a moment. The header state pill changes from **STAGED** to **LIVE** and the
-   scenario clock starts.
+   scenario clock starts. (Known gap: the engine can already be running the clock before Start; holding it
+   until Start is a pending engine-runtime change.)
 
 Next to **Start exercise** a short line shows the planner's readiness check, for example "Readiness: all
 blocking items done" or "Readiness: 2 blocking items open — starting is still allowed". It is information
@@ -640,10 +641,15 @@ then Auto), the generation provider **Restore** button, and the step from **ENGI
 **ENGINE · LIVE** on the engine switch, with the degraded banner's **Restore**. While Swamped mode is on, a **TIMEOUT AUTO-SEND IS ACTIVE** banner stays on screen. If generation is cut to Fake, the banner reads **TIMEOUT AUTO-SEND IS SUSPENDED** instead, and expired timers hold.
 Use it only when the lead decides the cell cannot keep up.
 
-> **Phase 1:** Swamped mode cannot be turned on yet. Until the lead-controller role ships, the **Swamped mode**
-> control is greyed out with the note "Timeout auto-send is off until the lead-controller role ships.", and Pulse
-> refuses the request if it is sent anyway. Every undecided burst whose countdown ends is held for you. Turning
-> Swamped mode off always works.
+> **If timeout auto-send is not authorized on your environment,** Swamped mode cannot be turned on. The
+> **Swamped mode** switch is greyed out for the lead (others don't see it), with the note "Timeout auto-send is
+> not authorized on this environment.", and Pulse refuses the request if it is sent anyway. Every undecided burst
+> whose countdown ends is held for you. Turning Swamped mode off always works.
+>
+> Swamped mode is a shared setting for the whole exercise, not just your screen. When the lead turns it on or off,
+> the lead's console shows it as soon as Pulse confirms it. Other controllers' open consoles catch up within about
+> 30 seconds, or straight away when they open **ENGINE** or come back to the console's browser tab. If Pulse
+> refuses the change, the switch stays where it was and the reason is shown beside it.
 
 ### The engine switch (kill switch)
 

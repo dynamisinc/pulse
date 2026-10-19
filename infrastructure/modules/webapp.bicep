@@ -93,7 +93,7 @@ param generationNoTrainingAttested bool = false
 @description('Generation:Governance:AmbientAutonomyAuthorized (ambient-chatter story 01, AC0) — whether ANY exercise may select ambient \'autonomous\' mode (engine posts that publish with no controller click). False by default: PROVIDER-GOVERNANCE.md §8 does not authorise it until a second signed amendment; while false the settings API rejects \'autonomous\' with 400.')
 param generationAmbientAutonomyAuthorized bool = false
 
-@description('Generation:Governance:TimeoutAutoSendAuthorized (PROVIDER-GOVERNANCE §8, Phase 1) — whether timeout auto-send (swamped mode: a Delayed-auto draft publishing on countdown expiry with no controller click) is authorised. False by default: while false the swamped-mode API refuses ON with 400 and an expired countdown always holds for a human.')
+@description('Generation:Governance:TimeoutAutoSendAuthorized (PROVIDER-GOVERNANCE §8) — whether timeout auto-send (swamped mode: a Delayed-auto draft publishing on countdown expiry with no controller click) is authorised. False by default: while false the swamped-mode API refuses ON with 400 and an expired countdown always holds for a human.')
 param generationTimeoutAutoSendAuthorized bool = false
 
 @description('Generation:Governance:Retention — the attestable retention posture. Retained is today\'s posture (standard retention under the no-training contract); switch to ZeroDataRetention only once the per-subscription abuse-monitoring/ZDR approval lands (PROVIDER-GOVERNANCE.md §2). Never left Unspecified.')
@@ -200,7 +200,7 @@ var generationSettings = [
     name: 'Generation__Governance__AmbientAutonomyAuthorized'
     value: generationAmbientAutonomyAuthorized ? 'true' : 'false'
   }
-  // PROVIDER-GOVERNANCE §8 Phase 1: the governed timeout-auto-send (swamped mode) flag. Same lowercase-literal rule.
+  // PROVIDER-GOVERNANCE §8: the governed timeout-auto-send (swamped mode) flag. Same lowercase-literal rule.
   {
     name: 'Generation__Governance__TimeoutAutoSendAuthorized'
     value: generationTimeoutAutoSendAuthorized ? 'true' : 'false'

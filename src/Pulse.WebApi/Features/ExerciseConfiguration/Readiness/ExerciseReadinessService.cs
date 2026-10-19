@@ -116,7 +116,8 @@ public sealed class ExerciseReadinessResult
 /// </para>
 /// <para>
 /// <b>Accounts.</b> A participant account is an <see cref="Account"/> whose enrollment is a participant-world role and
-/// which is not disabled; a disabled account cannot sign in, so it neither grants access nor needs a persona.
+/// which is not disabled; a disabled account cannot sign in, so it neither grants access nor needs a persona. It is
+/// bound only when its enrollment's persona id names a persona that exists in this exercise (the id carries no FK).
 /// </para>
 /// </remarks>
 public sealed class ExerciseReadinessService
@@ -160,6 +161,7 @@ public sealed class ExerciseReadinessService
             {
                 e.Status,
                 e.ScheduledStartAt,
+                e.CurrentScenarioTime,
                 e.TimeZone,
                 e.ComplianceChromeEnabled,
                 e.WatermarkEnabled,
@@ -190,8 +192,15 @@ public sealed class ExerciseReadinessService
                 && a.DisabledAt == null
                 && (a.Enrollment.Role == EnrollmentRoles.Participant || a.Enrollment.Role == EnrollmentRoles.Pio));
 
+        // "Bound" means the enrollment names a persona that actually exists in THIS exercise: PersonaId carries no FK, so a
+        // dangling id (a deleted persona, or another exercise's) counts as unbound. One query: a correlated Any against
+        // the exercise-filtered Personas set with an explicit ExerciseId predicate.
         var accounts = await participantAccounts
-            .Select(a => new { Unbound = a.Enrollment.PersonaId == null })
+            .Select(a => new
+            {
+                Unbound = a.Enrollment.PersonaId == null
+                    || !_dbContext.Personas.Any(p => p.ExerciseId == exerciseId && p.Id == a.Enrollment.PersonaId),
+            })
             .GroupBy(_ => 1)
             .Select(g => new { Total = g.Count(), Unbound = g.Count(a => a.Unbound) })
             .FirstOrDefaultAsync(cancellationToken);
@@ -220,13 +229,15 @@ public sealed class ExerciseReadinessService
 
         var hasFeed = await _dbContext.Posts
             .AsNoTracking()
-            // "Visible at scenario start": a live top-level post dated at or before the scheduled start (any live
-            // top-level post when no start is set yet; the schedule item flags that separately).
+            // "Visible at scenario start": a live top-level post dated at or before the exercise's scenario start
+            // instant, CurrentScenarioTime (the clock starts from it). ScheduledStartAt is a real-world planning value
+            // that does NOT start the clock, so it is not compared against scenario-time posts. With no scenario
+            // start stored yet, any live top-level post counts.
             .AnyAsync(
                 p => p.ExerciseId == exerciseId
                     && p.DeletedAt == null
                     && p.ParentPostId == null
-                    && (exercise.ScheduledStartAt == null || p.CreatedScenarioTime <= exercise.ScheduledStartAt),
+                    && (exercise.CurrentScenarioTime == null || p.CreatedScenarioTime <= exercise.CurrentScenarioTime),
                 cancellationToken);
 
         var hasNoise = await _dbContext.NoisePosts

@@ -411,3 +411,104 @@ describe('liveOverlayStateStore — an unorderable push is malformed (SG-002)', 
     expect(liveOverlayStateStore.getSnapshot().state).toBe('pause')
   })
 })
+
+describe('liveOverlayStateStore — a tab becoming visible re-GETs (#390)', () => {
+  /** What `document.visibilityState` reports; restored after every test. */
+  let visibility: DocumentVisibilityState = 'visible'
+
+  beforeEach(() => {
+    visibility = 'visible'
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      get: () => visibility,
+    })
+  })
+
+  afterEach(() => {
+    // Back to jsdom's own prototype getter.
+    delete (document as { visibilityState?: DocumentVisibilityState }).visibilityState
+  })
+
+  function becomes(next: DocumentVisibilityState): void {
+    visibility = next
+    document.dispatchEvent(new Event('visibilitychange'))
+  }
+
+  /** Seeds a tab that received a Freeze while live: the holding page is up at sequence 5. */
+  async function seedFrozen(): Promise<void> {
+    resolveGet(wireState({ state: 'pause', register: 'in-fiction', sequence: 5 }))
+    liveOverlayStateStore.ensureStarted(connection)
+    await flush()
+    expect(liveOverlayStateStore.getSnapshot().state).toBe('pause')
+    getMock.mockClear()
+  }
+
+  it('re-GETs on visible and clears a stranded pause the server no longer serves', async () => {
+    // The #390 shape: a Freeze push put the holding page up, then the exercise ended
+    // while the tab was backgrounded and the lifecycle push never arrived. Coming back
+    // to the tab must not leave "We'll be right back" over a finished exercise.
+    await seedFrozen()
+    resolveGet(wireState({ state: 'none', register: 'in-fiction', sequence: 6 }))
+
+    becomes('hidden')
+    becomes('visible')
+    await flush()
+
+    expect(getMock).toHaveBeenCalledTimes(1)
+    expect(getMock).toHaveBeenCalledWith('/overlay-state')
+    expect(liveOverlayStateStore.getSnapshot()).toEqual({
+      state: 'none',
+      register: 'in-fiction',
+      message: '',
+    })
+  })
+
+  it('does not re-GET when the tab becomes hidden', async () => {
+    await seedFrozen()
+
+    becomes('hidden')
+    await flush()
+
+    expect(getMock).not.toHaveBeenCalled()
+    expect(liveOverlayStateStore.getSnapshot().state).toBe('pause')
+  })
+
+  it('keeps the CR-001 guards: a visibility GET overtaken by a push is dropped', async () => {
+    await seedFrozen()
+    const pending = deferred<{ data: unknown }>()
+    getMock.mockReturnValueOnce(pending.promise)
+
+    becomes('visible')
+    expect(getMock).toHaveBeenCalledTimes(1)
+
+    // A Resume push lands while the visibility GET is in flight; the stale body must not win.
+    connection.push(wireState({ state: 'none', register: 'in-fiction', sequence: 6 }))
+    pending.resolve({ data: wireState({ state: 'pause', register: 'in-fiction', sequence: 5 }) })
+    await flush()
+
+    expect(liveOverlayStateStore.getSnapshot().state).toBe('none')
+  })
+
+  it('removes the listener on detach, so a reset tab issues no GET on visible', async () => {
+    await seedFrozen()
+
+    liveOverlayStateStore.resetForTests()
+    becomes('hidden')
+    becomes('visible')
+    await flush()
+
+    expect(getMock).not.toHaveBeenCalled()
+  })
+
+  it('attaches exactly one listener however many times the shell starts the source', async () => {
+    liveOverlayStateStore.ensureStarted(connection)
+    liveOverlayStateStore.ensureStarted(connection)
+    await flush()
+    getMock.mockClear()
+
+    becomes('visible')
+    await flush()
+
+    expect(getMock).toHaveBeenCalledTimes(1)
+  })
+})

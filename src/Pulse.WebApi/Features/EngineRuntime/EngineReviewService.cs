@@ -55,9 +55,9 @@ using Pulse.WebApi.Features.Social;
 /// <see cref="IEnginePublishService"/> → B1 ingest), which emits its own per-post <c>post</c> events. The two
 /// engine-SETTINGS mutations (autonomy default / tier policy, story 05) likewise emit exactly one additive
 /// event each (<see cref="EngineEventTypes.AutonomyDefaultChanged"/> /
-/// <see cref="EngineEventTypes.TierPolicyChanged"/>) — a deliberate, reviewer-approved divergence from the
-/// swamped-mode/kill-switch/restore trio, which persist none: those controls' state is process memory, so the
-/// event is the only record of the change that survives a restart. Story 07's generation-provider cut/restore
+/// <see cref="EngineEventTypes.TierPolicyChanged"/>); the event is the only record of the change that survives a
+/// restart. The swamped-mode/kill-switch/restore trio record each real change as a staff-change event + org audit
+/// (#618, <see cref="EngineSteeringLeverRecords"/>). Story 07's generation-provider cut/restore
 /// joins them on the same terms, emitting one <see cref="EngineEventTypes.ProviderChanged"/> per real
 /// transition — and none at all for an idempotent no-op (an already-Fake cut, a restore with no cut active).
 /// </para>
@@ -88,14 +88,15 @@ public sealed partial class EngineReviewService
     private readonly ILogger<EngineReviewService> _logger;
     private readonly EngineAmbientPolicyRegistry _ambientPolicy;
     private readonly bool _timeoutAutoSendAuthorized;
+    private readonly IEngineSteeringLeverRecorder _steeringLeverRecorder;
 
     /// <summary>
     /// The 400 message <see cref="SetSwampedModeAsync"/> returns for an ON request while the governed
-    /// <c>Generation:Governance:TimeoutAutoSendAuthorized</c> flag is false (PROVIDER-GOVERNANCE §8, Phase 1).
+    /// <c>Generation:Governance:TimeoutAutoSendAuthorized</c> flag is false (PROVIDER-GOVERNANCE §8). Worded for any
+    /// environment, not only the Phase-1 UAT window (#636 W-001).
     /// </summary>
     public const string TimeoutAutoSendNotAuthorizedMessage =
-        "timeout auto-send (swamped mode) is not authorized on this environment until the lead-controller gate lands "
-        + "(PROVIDER-GOVERNANCE §8, Phase 1)";
+        "timeout auto-send (swamped mode) is not authorized on this environment (PROVIDER-GOVERNANCE §8)";
 
     /// <summary>Creates the review service over its persistence, scope, clock, telemetry, publish, push, and autonomy collaborators.</summary>
     /// <param name="store">The seam-freeze review-item persistence store (reads + lookup).</param>
@@ -122,6 +123,10 @@ public sealed partial class EngineReviewService
     /// keep compiling; when absent timeout auto-send is NOT authorised (fail closed: swamped ON is refused and an
     /// expired countdown is always held).
     /// </param>
+    /// <param name="steeringLeverRecorder">
+    /// Records the swamped-mode / kill-switch / restore levers (#618). Optional so existing direct constructions keep
+    /// compiling; when absent (never in the DI-built service — <c>AddEngineReview</c> registers it) nothing is recorded.
+    /// </param>
     public EngineReviewService(
         IEngineReviewStore store,
         PulseDbContext dbContext,
@@ -137,7 +142,8 @@ public sealed partial class EngineReviewService
         IGenerationProviderCutRegistry providerCut,
         ILogger<EngineReviewService> logger,
         EngineAmbientPolicyRegistry? ambientPolicy = null,
-        IOptions<EngineAmbientGovernanceOptions>? governance = null)
+        IOptions<EngineAmbientGovernanceOptions>? governance = null,
+        IEngineSteeringLeverRecorder? steeringLeverRecorder = null)
     {
         ArgumentNullException.ThrowIfNull(store);
         ArgumentNullException.ThrowIfNull(dbContext);
@@ -168,6 +174,7 @@ public sealed partial class EngineReviewService
         _logger = logger;
         _ambientPolicy = ambientPolicy ?? new EngineAmbientPolicyRegistry();
         _timeoutAutoSendAuthorized = governance?.Value.TimeoutAutoSendAuthorized ?? false;
+        _steeringLeverRecorder = steeringLeverRecorder ?? NullSteeringLeverRecorder.Instance;
     }
 
     // ---- Queue read -----------------------------------------------------------------------------
@@ -408,8 +415,10 @@ public sealed partial class EngineReviewService
     /// person's lead enrollment on the server-resolved exercise (<see cref="ExerciseCallerRole.IsStillLeadAsync"/>);
     /// when it no longer holds, swamped mode is turned straight back OFF through the same state API and the request is
     /// <see cref="EngineReviewOutcome.Forbidden"/> (403). A demotion commits before its own OFF, so the outcome is OFF
-    /// whichever request wins. Like the ON itself, the revert persists no record (the state is process memory, and the
-    /// demotion's own OFF is the recorded change).
+    /// whichever request wins. A refused (reverted) ON records nothing — the demotion's own OFF is the recorded change —
+    /// unless swamped mode was already on before it, when the revert is a real ON→OFF recorded as a system
+    /// <c>lead-lost-revert</c>; an ON or OFF that lands and changes the state is recorded (#618,
+    /// <see cref="EngineSteeringLeverRecords"/>).
     /// </remarks>
     /// <param name="enabled">The requested state.</param>
     /// <param name="input">The acting human (COR-018) + optional telemetry zone.</param>
@@ -434,21 +443,31 @@ public sealed partial class EngineReviewService
 
         if (enabled && !_timeoutAutoSendAuthorized)
         {
-            // PROVIDER-GOVERNANCE §8, Phase 1: raising toward unreviewed timeout publishes is refused until the
-            // lead-controller gate lands. Lowering (enabled=false) is never refused.
+            // PROVIDER-GOVERNANCE §8: raising toward unreviewed timeout publishes is refused on any environment that has
+            // not authorised it. Lowering (enabled=false) is never refused.
             return EngineAutonomyResult.Invalid(TimeoutAutoSendNotAuthorizedMessage);
         }
 
         var state = _autonomy.GetOrCreate(exerciseId);
+        var wasOn = state.SwampedModeEnabled; // #618: read beside the write, not atomic with it (EngineReviewService.SteeringLevers.cs)
         state.SetSwampedMode(enabled, input.ActingHumanId, _clock.CurrentScenarioMinute(exerciseId));
 
         // M-1: ON is a raise — re-check the lead live, AFTER the write, and revert to OFF when it was lost meanwhile.
-        if (enabled && !await IsStillLeadAsync(exerciseId, sessionPersonId, cancellationToken))
+        // CancellationToken.None: a client abort must never skip the revert (#618 W-B).
+        if (enabled && !await IsStillLeadAsync(exerciseId, sessionPersonId, CancellationToken.None))
         {
-            state.SetSwampedMode(false, ExerciseCallerRole.NoLeadActor, _clock.CurrentScenarioMinute(exerciseId));
+            // #618 W-C: re-read just before the revert — a concurrent TurnOff (lead release / no-lead heal) may already
+            // have turned it off and recorded that; then there is nothing to revert and nothing more to record.
+            if (state.SwampedModeEnabled)
+            {
+                state.SetSwampedMode(false, ExerciseCallerRole.NoLeadActor, _clock.CurrentScenarioMinute(exerciseId));
+                await RecordSwampedLeadLostRevertAsync(exerciseId, wasOn); // #618: only an ALREADY-on exercise really changed
+            }
+
             return EngineAutonomyResult.Forbidden();
         }
 
+        await RecordSwampedModeChangeAsync(exerciseId, input, wasOn, enabled); // #618
         return EngineAutonomyResult.Ok(EngineAutonomyStateDto.From(state));
     }
 
@@ -477,11 +496,21 @@ public sealed partial class EngineReviewService
         }
 
         var state = _autonomy.GetOrCreate(exerciseId);
+        var fromPosture = EngineSteeringLeverRecords.PostureOf(state);
         state.EngageKillSwitch(mode, input.ActingHumanId, _clock.CurrentScenarioMinute(exerciseId));
 
         // Ambient-chatter 01 (AC6): either kill-switch mode LOWERS autonomous ambient posting to off, so a later
         // restore can never re-raise it; only a controller re-selecting the mode does.
-        await DemoteAutonomousAmbientAsync(exerciseId, input, cancellationToken);
+        try
+        {
+            await DemoteAutonomousAmbientAsync(exerciseId, input, cancellationToken);
+        }
+        finally
+        {
+            // #618: LAST, after every state change (AC6) — and in a finally (W-A): the demotion is applied in memory
+            // before its event commit, which rethrows a client abort; the applied kill switch is still recorded.
+            await RecordKillSwitchEngagedAsync(exerciseId, input, mode, fromPosture, state);
+        }
 
         return EngineAutonomyResult.Ok(EngineAutonomyStateDto.From(state));
     }
@@ -522,9 +551,8 @@ public sealed partial class EngineReviewService
 
         // Resolve the SAME shared per-exercise state instance the reaction loop + auto-HOLD tick read (never a
         // fresh Create) so a resumed clamp is visible to the loop immediately — this is load-bearing for the
-        // undo. Like the kill-switch / swamped-mode siblings, this control persists NO telemetry (mapping an
-        // autonomy change onto XC-004 is engine-telemetry-tuning's job, not yet built), so the returned
-        // (nullable) level change is discarded exactly as EngageKillSwitch discards EngineKillSwitchFired.
+        // undo. A real lift is recorded (#618: engine.autonomy.restored + org audit) after the M-1 re-check below;
+        // the returned (nullable) level change itself is only read for "did it lift".
         var state = _autonomy.GetOrCreate(exerciseId);
         var wasStopped = state.IsGenerationStopped;
         var degradedReason = state.DegradedReason;
@@ -532,12 +560,13 @@ public sealed partial class EngineReviewService
 
         // M-1: a restore that lifted a clamp is a raise — re-check the lead live, AFTER the write, and re-impose the
         // clamp when the lead was lost meanwhile.
-        if (lifted is not null && !await IsStillLeadAsync(exerciseId, sessionPersonId, cancellationToken))
+        if (lifted is not null && !await IsStillLeadAsync(exerciseId, sessionPersonId, CancellationToken.None)) // #618 W-B
         {
             ReimposeSafetyClamp(state, wasStopped, degradedReason, _clock.CurrentScenarioMinute(exerciseId));
             return EngineAutonomyResult.Forbidden();
         }
 
+        await RecordAutonomyRestoredAsync(exerciseId, input, lifted is not null, wasStopped, state); // #618
         return EngineAutonomyResult.Ok(EngineAutonomyStateDto.From(state));
     }
 
@@ -1004,7 +1033,7 @@ public sealed partial class EngineReviewService
         }
 
         var state = _autonomy.GetOrCreate(exerciseId);
-        // Defence in depth (PROVIDER-GOVERNANCE §8, Phase 1): with timeout auto-send unauthorised, swamped mode is read
+        // Defence in depth (PROVIDER-GOVERNANCE §8): with timeout auto-send unauthorised on this environment, swamped mode is read
         // as OFF, so an expired countdown HOLDs even if swamped mode is somehow on.
         var swamped = state.SwampedModeEnabled && _timeoutAutoSendAuthorized;
         var cutToFake = _providerCut.IsCutToFake(exerciseId);
@@ -1134,7 +1163,7 @@ public sealed partial class EngineReviewService
             var burst = await PrepareBurstAsync(item, exerciseId, input: null, leadTextOverride: null, cancellationToken);
 
             // NO await between this re-decision and the publisher call. The governed timeout-auto-send flag is a
-            // synchronous field read (PROVIDER-GOVERNANCE §8, Phase 1): unauthorised reads swamped mode as OFF → HOLD.
+            // synchronous field read (PROVIDER-GOVERNANCE §8): unauthorised reads swamped mode as OFF → HOLD.
             var state = _autonomy.GetOrCreate(exerciseId);
             var recheck = AutoHoldPolicy.Evaluate(
                 countdown,
@@ -1383,8 +1412,8 @@ public sealed partial class EngineReviewService
     /// <summary>
     /// Persists the ONE XC-004 event for a settings change (XC-004: exactly one event per meaningful action) in
     /// its own single <c>SaveChanges</c> — the mutation itself is process memory, so this event IS the durable
-    /// record, and it is the deliberate divergence from the swamped-mode/kill-switch/restore trio (which emit no
-    /// backend telemetry). One server clock read is shared by the envelope's wall clock + emittedAt.
+    /// record (the swamped-mode/kill-switch/restore trio record through <see cref="EngineSteeringLeverRecords"/>,
+    /// #618). One server clock read is shared by the envelope's wall clock + emittedAt.
     /// </summary>
     /// <remarks>
     /// <b>Deliberately NOT atomic with the in-memory posture change, and deliberately not fatal.</b> The
@@ -1734,7 +1763,14 @@ public sealed partial class EngineReviewService
 /// <summary>The action-request inputs a request-bound review decision carries — the acting human (COR-018) and the exercise IANA zone (XC-008). Never a client <c>exerciseId</c>.</summary>
 /// <param name="ActingHumanId">The individual controller behind the shared account (COR-018) — required.</param>
 /// <param name="TimeZone">The exercise IANA time zone for the XC-004 envelope (XC-008) — required (client-supplied stopgap until COR-050 metadata carries it).</param>
-public readonly record struct EngineReviewActionInput(string? ActingHumanId, string? TimeZone);
+public readonly record struct EngineReviewActionInput(string? ActingHumanId, string? TimeZone)
+{
+    /// <summary>
+    /// The server-verified session behind the action (person, role, session) — set ONLY by the endpoint from the
+    /// caller's session (WR-2), never from the body. The steering levers record it as their actor (#618).
+    /// </summary>
+    public Pulse.WebApi.Features.Identity.Enrollments.StaffChangeActor? Session { get; init; }
+}
 
 /// <summary>The outcome kind of a review-service operation, mapped to an HTTP status at the endpoint (fail closed).</summary>
 public enum EngineReviewOutcome

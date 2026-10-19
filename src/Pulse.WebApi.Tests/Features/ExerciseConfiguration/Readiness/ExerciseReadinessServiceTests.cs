@@ -174,6 +174,45 @@ public sealed class ExerciseReadinessServiceTests
         item.Detail.Should().Be("3 participant accounts have no persona.");
     }
 
+    /// <summary>Enrollment.PersonaId has no FK, so an id that names no persona in THIS exercise is unbound.</summary>
+    [RequiresDockerFact]
+    public async Task PersonasBound_CountsADanglingOrForeignPersonaIdAsUnbound()
+    {
+        var exerciseId = await SeedReadyAsync();
+        var otherExercise = await SeedReadyAsync();
+        var foreignPersona = await AddPersonaAsync(otherExercise, avatar: true);
+        await AddAccountAsync(exerciseId, personaBound: true, credential: true, personaId: Guid.NewGuid());
+        await AddAccountAsync(exerciseId, personaBound: true, credential: true, personaId: foreignPersona);
+
+        var report = await ReadAsync(exerciseId);
+        var item = Blocking(report, "personas-bound");
+
+        item.Status.Should().Be(ReadinessItemStatuses.Open, "a persona id with no persona row in this exercise binds nothing");
+        item.Detail.Should().Be("2 participant accounts have no persona.");
+        report.Ready.Should().BeFalse();
+    }
+
+    /// <summary>A pio account is a participant-world sign-in, so it counts exactly as a participant account does.</summary>
+    [RequiresDockerFact]
+    public async Task PioAccount_CountsForParticipantAccess_PersonasBound_AndSignInIssued()
+    {
+        var access = await SeedReadyAsync(accounts: 0);
+        await AddAccountAsync(access, personaBound: true, credential: true, role: EnrollmentRoles.Pio);
+        var accessReport = await ReadAsync(access);
+        Blocking(accessReport, "participant-access").Status.Should().Be(
+            ReadinessItemStatuses.Ok, "a pio account alone gives participant-world access");
+        Blocking(accessReport, "personas-bound").Status.Should().Be(ReadinessItemStatuses.Ok);
+        Warning(accessReport, "sign-in-issued").Status.Should().Be(ReadinessItemStatuses.Ok);
+
+        var gaps = await SeedReadyAsync(accounts: 0);
+        await AddAccountAsync(gaps, personaBound: false, credential: false, role: EnrollmentRoles.Pio);
+        var gapsReport = await ReadAsync(gaps);
+        Blocking(gapsReport, "personas-bound").Detail.Should().Be(
+            "1 participant account has no persona.", "an unbound pio account is counted");
+        Warning(gapsReport, "sign-in-issued").Detail.Should().Be(
+            "1 participant account has no sign-in link or password yet.", "a pio account with no sign-in is counted");
+    }
+
     [RequiresDockerFact]
     public async Task PersonasBound_UsesTheSingular_ForOneAccount_AndIsOkWithNoAccounts()
     {
@@ -273,7 +312,7 @@ public sealed class ExerciseReadinessServiceTests
     }
 
     [RequiresDockerFact]
-    public async Task OpeningFeed_CountsOnlyTopLevelPostsAtOrBeforeTheScheduledStart()
+    public async Task OpeningFeed_CountsOnlyTopLevelPostsAtOrBeforeTheScenarioStart()
     {
         var afterStart = await SeedReadyAsync(post: false);
         await AddPostAsync(afterStart, deleted: false, scenarioTime: new DateTimeOffset(2033, 3, 1, 12, 0, 0, TimeSpan.Zero));
@@ -290,6 +329,37 @@ public sealed class ExerciseReadinessServiceTests
         Warning(await ReadAsync(replyOnly), "opening-feed").Status.Should().Be(
             ReadinessItemStatuses.Open, "a reply is not a top-level opening post");
         Warning(await ReadAsync(atStart), "opening-feed").Status.Should().Be(ReadinessItemStatuses.Ok);
+    }
+
+    /// <summary>
+    /// The scheduled start is a REAL-WORLD planning date (it does not start the clock); the scenario start is
+    /// <see cref="Exercise.CurrentScenarioTime"/>. A 2026 planning date must not push 2033 scenario-time posts out of
+    /// the opening feed.
+    /// </summary>
+    [RequiresDockerFact]
+    public async Task OpeningFeed_ComparesAgainstTheScenarioStart_NotTheRealWorldScheduledStart()
+    {
+        var exerciseId = await SeedReadyAsync(post: false);
+        await UpdateExerciseAsync(exerciseId, e =>
+        {
+            e.ScheduledStartAt = new DateTimeOffset(2026, 11, 2, 13, 0, 0, TimeSpan.Zero);
+            e.CurrentScenarioTime = new DateTimeOffset(2033, 3, 1, 9, 0, 0, TimeSpan.Zero);
+        });
+        await AddPostAsync(exerciseId, deleted: false, scenarioTime: new DateTimeOffset(2033, 3, 1, 8, 0, 0, TimeSpan.Zero));
+
+        Warning(await ReadAsync(exerciseId), "opening-feed").Status.Should().Be(
+            ReadinessItemStatuses.Ok, "the 08:00 post precedes the 09:00 scenario start; the 2026 real-world date is irrelevant");
+    }
+
+    [RequiresDockerFact]
+    public async Task OpeningFeed_CountsAnyLiveTopLevelPost_WhenNoScenarioStartIsStored()
+    {
+        var exerciseId = await SeedReadyAsync(post: false);
+        await UpdateExerciseAsync(exerciseId, e => e.CurrentScenarioTime = null);
+        await AddPostAsync(exerciseId, deleted: false, scenarioTime: new DateTimeOffset(2040, 1, 1, 0, 0, 0, TimeSpan.Zero));
+
+        Warning(await ReadAsync(exerciseId), "opening-feed").Status.Should().Be(
+            ReadinessItemStatuses.Ok, "with no scenario start stored, any live top-level post counts");
     }
 
     [RequiresDockerFact]
@@ -457,6 +527,7 @@ public sealed class ExerciseReadinessServiceTests
         {
             var exercise = ExerciseLifecycleTestData.ExerciseInState(exerciseId, "build");
             exercise.ScheduledStartAt = new DateTimeOffset(2033, 3, 1, 9, 0, 0, TimeSpan.Zero);
+            exercise.CurrentScenarioTime = new DateTimeOffset(2033, 3, 1, 9, 0, 0, TimeSpan.Zero);
             seed.Exercises.Add(exercise);
 
             if (controller)
@@ -515,8 +586,19 @@ public sealed class ExerciseReadinessServiceTests
         CreatedAt = DateTimeOffset.UtcNow,
     };
 
-    private async Task<Guid> AddAccountAsync(Guid exerciseId, bool personaBound, bool credential, bool disabled = false)
+    /// <summary>
+    /// Adds a participant-world account. A bound account binds to <paramref name="personaId"/> when given (which may be
+    /// dangling, on purpose), otherwise to a freshly seeded persona (with an avatar) in the same exercise.
+    /// </summary>
+    private async Task<Guid> AddAccountAsync(
+        Guid exerciseId,
+        bool personaBound,
+        bool credential,
+        bool disabled = false,
+        string role = EnrollmentRoles.Participant,
+        Guid? personaId = null)
     {
+        Guid? boundPersona = personaBound ? personaId ?? await AddPersonaAsync(exerciseId, avatar: true) : null;
         var accountId = Guid.NewGuid();
         await using var seed = _fixture.CreateContext();
         seed.Accounts.Add(new Account
@@ -532,8 +614,8 @@ public sealed class ExerciseReadinessServiceTests
             {
                 Id = Guid.NewGuid(),
                 ExerciseId = exerciseId,
-                Role = EnrollmentRoles.Participant,
-                PersonaId = personaBound ? Guid.NewGuid() : null,
+                Role = role,
+                PersonaId = boundPersona,
                 CreatedAt = DateTimeOffset.UtcNow,
             },
         });
@@ -571,7 +653,7 @@ public sealed class ExerciseReadinessServiceTests
         await seed.SaveChangesAsync();
     }
 
-    private async Task AddPersonaAsync(Guid exerciseId, bool avatar)
+    private async Task<Guid> AddPersonaAsync(Guid exerciseId, bool avatar)
     {
         var personaId = Guid.NewGuid();
         Guid? avatarId = avatar ? Guid.NewGuid() : null;
@@ -603,6 +685,7 @@ public sealed class ExerciseReadinessServiceTests
             AvatarMediaId = avatarId,
         });
         await seed.SaveChangesAsync();
+        return personaId;
     }
 
     private async Task AddInjectAsync(Guid exerciseId, string status, bool deleted = false)
@@ -623,7 +706,8 @@ public sealed class ExerciseReadinessServiceTests
         await seed.SaveChangesAsync();
     }
 
-    // Defaults to 08:00, an hour before the seeded 09:00 scheduled start, so the post is in the opening feed.
+    // Defaults to 08:00, an hour before the seeded 09:00 scenario start (CurrentScenarioTime), so the post is in the
+    // opening feed.
     private async Task AddPostAsync(
         Guid exerciseId,
         bool deleted,

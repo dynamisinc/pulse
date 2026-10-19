@@ -188,6 +188,8 @@ import {
   type EngineReviewItem,
   type ReviewQueueEditSlotProps,
 } from '../engine'
+import { effectiveTimeoutAutoSend } from '../engine/models/effectiveTimeoutAutoSend'
+import { useSwampedSettingsPoll } from '../engine/hooks/useSwampedSettingsPoll'
 import type { ReplyTarget } from '@/features/social'
 import {
   SLOT_SPLIT_MIN_WIDTH_PX,
@@ -382,10 +384,16 @@ export function ControllerConsole(
   // `<EngineControlBar>`/`<ReviewQueue>` children's own reads of the same hooks
   // all agree by construction (D5-014/2.1 counts-consistency).
   const { items } = useReviewQueue()
-  const { swampedMode } = useSwampedMode()
+  const { swampedMode: serverSwampedMode } = useSwampedMode()
+  const consoleEngineSettings = useEngineSettings()
   // Hold-on-cut (ADP-042): while cut to Fake the server holds expiries, so the
   // browser drivers must hold too (no phantom auto-send telemetry).
-  const providerCutToFake = useEngineSettings().settings?.providerCutToFake ?? false
+  const providerCutToFake = consoleEngineSettings.settings?.providerCutToFake ?? false
+  // Expiry must match the server: auto-send only when the server says swamped mode is on AND
+  // this deployment authorizes it (one shared rule, also used by the toggle banner).
+  const swampedMode = effectiveTimeoutAutoSend(serverSwampedMode, consoleEngineSettings.settings)
+  // No settings push exists: poll the settings in the BACKGROUND (and on tab-visible).
+  useSwampedSettingsPoll(consoleEngineSettings.refreshInBackground)
   const engineControl = useEngineControl()
   const draftTimerCtx = useMemo(
     () => ({ exerciseId, timeZone, actingHumanId: identity.actingHumanId }),

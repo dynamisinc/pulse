@@ -5,9 +5,11 @@ using System.Net;
 using System.Text.Json;
 using System.Threading.Tasks;
 using FluentAssertions;
+using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.ExerciseConfiguration.Readiness;
 using Pulse.WebApi.Tests.Data;
 using Pulse.WebApi.Tests.Features.ExerciseConfiguration.Lifecycle;
+using Pulse.WebApi.Tests.Helpers;
 
 /// <summary>
 /// exercise-build-golive/03 (ADMIN-IDENTITY-MODEL §8.2 "read everything in the exercise"): <c>GET /api/staff/readiness</c>
@@ -40,15 +42,47 @@ public sealed class ReadinessRoleTests
 
         using var response = await client.GetAsync(ReadinessEndpoints.ReadinessRoute);
 
-        if (expected == HttpStatusCode.OK)
+        response.StatusCode.Should().Be(
+            expected,
+            expected == HttpStatusCode.OK
+                ? "{0} may read the exercise's readiness"
+                : "{0} must be refused the staff readiness read with exactly this status",
+            role);
+    }
+
+    /// <summary>
+    /// A staff session that POINTS at this exercise but carries no enrollment in it — either a staff human with no
+    /// enrollment anywhere, or one enrolled (as planner) only in another exercise of the same organization — is refused.
+    /// The session's role claim is never trusted on its own.
+    /// </summary>
+    [RequiresDockerTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Readiness_RefusesAStaffSessionOnThisExercise_WithNoEnrollmentInIt(bool enrolledElsewhere)
+    {
+        var world = await RoleMatrixWorld.SeedAsync(_fixture, status: "build");
+        Guid personId;
+        if (enrolledElsewhere)
         {
-            response.StatusCode.Should().Be(HttpStatusCode.OK, "{0} may read the exercise's readiness", role);
+            var other = await RoleMatrixWorld.SeedAsync(_fixture, status: "build", organizationId: world.OrganizationId);
+            personId = other.PersonOf(MatrixRole.Planner);
         }
         else
         {
-            response.StatusCode.Should().BeOneOf(
-                [HttpStatusCode.Unauthorized, HttpStatusCode.Forbidden], "{0} must be refused the staff readiness read", role);
+            personId = Guid.NewGuid();
+            await using var seed = _fixture.CreateContext();
+            seed.StaffUsers.Add(StaffTenantSeed.StaffUserFor(personId, world.OrganizationId));
+            await seed.SaveChangesAsync();
         }
+
+        var (_, token) = await world.StaffTokenAsync(personId, world.ExerciseId, EnrollmentRoles.Planner);
+        using var host = new RoleMatrixHost(_fixture.ConnectionString!);
+        using var client = world.Client(host, token);
+
+        using var response = await client.GetAsync(ReadinessEndpoints.ReadinessRoute);
+
+        response.StatusCode.Should().Be(
+            HttpStatusCode.Forbidden, "a session naming this exercise is not an enrollment in it");
     }
 
     [RequiresDockerFact]

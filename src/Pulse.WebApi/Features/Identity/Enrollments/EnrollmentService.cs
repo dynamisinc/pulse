@@ -9,6 +9,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.EngineRuntime;
+using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.ExerciseLifecycleAdmin;
 using Pulse.WebApi.Features.Realtime;
 
@@ -43,7 +44,7 @@ using Pulse.WebApi.Features.Realtime;
 /// and a failure is logged, never surfaced: the grant change has already committed. Its record is split by what each
 /// half describes: the <c>enrollment.lead.released</c> event + audit are part of the enrollment change and are staged
 /// in the SAME unit of work; the <c>engine.swamped-mode.turned-off</c> event + audit describe the in-memory flip, so
-/// they are written after the flip (a second, small save) and carry the real <c>wasOn</c>. A failed flip therefore
+/// they are written after the flip (a second, small save) and are written only when the flip really turned swamped mode off. A failed flip therefore
 /// leaves no "turned off" record claiming otherwise, and a failed follow-up save is logged without failing the request.
 /// </para>
 /// </remarks>
@@ -59,10 +60,10 @@ public sealed partial class EnrollmentService
     public const string LeadConflictError = "lead-conflict";
 
     /// <summary>The XC-004 event type of a lead released because its holder lost the controller grant.</summary>
-    public const string LeadReleasedEventType = "enrollment.lead.released";
+    public const string LeadReleasedEventType = StaffChangeEventTypes.LeadReleased;
 
     /// <summary>The XC-004 event type of swamped mode turned off because the exercise lost its lead.</summary>
-    public const string SwampedModeOffEventType = "engine.swamped-mode.turned-off";
+    public const string SwampedModeOffEventType = StaffChangeEventTypes.SwampedModeTurnedOff;
 
     /// <summary>The org-audit kind of a lead released because its holder lost the controller grant.</summary>
     public const string LeadReleasedAuditKind = "org.enrollment.lead-released";
@@ -70,17 +71,20 @@ public sealed partial class EnrollmentService
     /// <summary>The org-audit kind of swamped mode turned off because the exercise lost its lead.</summary>
     public const string SwampedModeOffAuditKind = "org.engine.swamped-mode-off";
 
+    /// <summary>The swamped-off <c>reason</c> recorded when a lead transfer demotes the previous lead.</summary>
+    public const string LeadTransferredReason = "lead-transferred";
+
     /// <summary>The XC-004 event type of a lead change.</summary>
-    public const string LeadChangedEventType = "enrollment.lead.changed";
+    public const string LeadChangedEventType = StaffChangeEventTypes.LeadChanged;
 
     /// <summary>The XC-004 event type of a grant.</summary>
-    public const string GrantedEventType = "enrollment.granted";
+    public const string GrantedEventType = StaffChangeEventTypes.EnrollmentGranted;
 
     /// <summary>The XC-004 event type of a role change.</summary>
-    public const string RoleChangedEventType = "enrollment.role.changed";
+    public const string RoleChangedEventType = StaffChangeEventTypes.EnrollmentRoleChanged;
 
     /// <summary>The XC-004 event type of a removal.</summary>
-    public const string RevokedEventType = "enrollment.revoked";
+    public const string RevokedEventType = StaffChangeEventTypes.EnrollmentRevoked;
 
     /// <summary>The org-audit kind of a grant to someone else.</summary>
     public const string GrantedAuditKind = "org.enrollment.granted";
@@ -108,6 +112,7 @@ public sealed partial class EnrollmentService
     private readonly ISwampedModeSwitch _swampedMode;
     private readonly ISessionConnectionRevoker _connectionRevoker;
     private readonly ILogger<EnrollmentService> _logger;
+    private readonly IExerciseClock? _clock;
 
     /// <summary>Creates the service.</summary>
     /// <param name="dbContext">The request-scoped persistence context (one unit of work).</param>
@@ -117,6 +122,10 @@ public sealed partial class EnrollmentService
     /// <param name="swampedMode">The OFF-only swamped-mode seam used when an exercise loses its lead.</param>
     /// <param name="connectionRevoker">Cuts the live hub connections of the sessions a grant change revokes.</param>
     /// <param name="logger">Logs a post-commit swamped-mode flip that failed (never surfaced to the caller).</param>
+    /// <param name="clock">
+    /// The scenario clock — read only for the swamped-off record's <c>scenarioMinute</c> (omitted when absent or not
+    /// started; #618 aligned the payload shape across every swamped-off path).
+    /// </param>
     public EnrollmentService(
         PulseDbContext dbContext,
         StaffCallerContext staffCaller,
@@ -124,9 +133,11 @@ public sealed partial class EnrollmentService
         TimeProvider timeProvider,
         ISwampedModeSwitch swampedMode,
         ISessionConnectionRevoker connectionRevoker,
-        ILogger<EnrollmentService>? logger = null)
+        ILogger<EnrollmentService>? logger = null,
+        IExerciseClock? clock = null)
     {
         _logger = logger ?? NullLogger<EnrollmentService>.Instance;
+        _clock = clock;
         ArgumentNullException.ThrowIfNull(swampedMode);
         ArgumentNullException.ThrowIfNull(connectionRevoker);
         _swampedMode = swampedMode;
@@ -231,6 +242,12 @@ public sealed partial class EnrollmentService
             _dbContext.ChangeTracker.Clear();
             return EnrollmentResult.Conflict(LeadConflictError);
         }
+
+        // PROVIDER-GOVERNANCE §8: demoting the lead turns swamped mode off. A TRANSFER demotes the previous lead, and the
+        // exercise still has a lead afterwards, so the no-lead heal never catches it: without this the new lead would
+        // inherit timeout auto-send they never turned on (adversarial review W1 on #642).
+        await TurnSwampedModeOffAfterCommitAsync(
+            caller, exercise, enrollment, leadReleased: previousLeadId is not null, now, cancellationToken, reason: LeadTransferredReason);
 
         return EnrollmentResult.Ok(enrollment);
     }
@@ -445,7 +462,7 @@ public sealed partial class EnrollmentService
 
     /// <summary>
     /// Turns the exercise's swamped mode OFF after a committed lead release (M-002): idempotent, so it is simply called
-    /// for every committed release. Then records the flip (XC-004 + org audit, with the real <c>wasOn</c>) in a small
+    /// for every committed release. Then records the flip (XC-004 + org audit) only when it really turned swamped mode off in a small
     /// follow-up save. Neither the flip nor its record can fail the request — the enrollment change has already
     /// committed — so a failure of either is logged and swallowed.
     /// </summary>
@@ -455,7 +472,8 @@ public sealed partial class EnrollmentService
         Enrollment enrollment,
         bool leadReleased,
         DateTimeOffset now,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string reason = EngineSteeringLeverRecords.LeadReleasedReason)
     {
         if (!leadReleased)
         {
@@ -474,9 +492,19 @@ public sealed partial class EnrollmentService
             return;
         }
 
-        var swampedPayload = string.Create(
-            CultureInfo.InvariantCulture,
-            $"{{\"reason\":\"lead-released\",\"wasOn\":{(swampedWasOn ? "true" : "false")}}}");
+        if (!swampedWasOn)
+        {
+            // Swamped mode was already off: the flip changed nothing, so it records nothing — for a transfer (delta
+            // review: audit noise) and, since #618 S-A, for a release too (only real changes are recorded).
+            return;
+        }
+
+        // #618: the ONE swamped-off shape {reason, wasOn, isOn, scenarioMinute?} every path records.
+        var swampedPayload = EngineSteeringLeverRecords.SwampedModePayload(
+            reason,
+            swampedWasOn,
+            isOn: false,
+            EngineSteeringLeverRecords.ScenarioMinuteOrNull(_clock, exercise.Id));
         Record(caller, exercise, enrollment, SwampedModeOffEventType, SwampedModeOffAuditKind, swampedPayload, now);
 
         try

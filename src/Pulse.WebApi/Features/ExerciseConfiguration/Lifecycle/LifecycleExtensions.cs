@@ -73,6 +73,10 @@ public static class LifecycleExtensions
         // The seam this slice OWNS: a fail-closed floor world-steering replaces at merge (see remarks).
         services.TryAddSingleton<ISteeringOverlaySource, NoSteeringOverlaySource>();
 
+        // #390: the post-commit transition seam this slice also OWNS. TryAdd, like the steering floor above:
+        // world-steering's AddPauseParticipantOverlay() replaces it (RemoveAll + add) with the overlay pusher.
+        services.TryAddSingleton<IExerciseLifecycleTransitionObserver, NoOpExerciseLifecycleTransitionObserver>();
+
         // The seams 01b owns: Replace, never TryAdd (see remarks — TryAdd here is the silent failure).
         services.Replace(ServiceDescriptor.Scoped<IShellVariantProjection, LifecycleShellVariantProjection>());
         services.Replace(ServiceDescriptor.Scoped<IOverlayStateProjection, LifecycleOverlayStateProjection>());

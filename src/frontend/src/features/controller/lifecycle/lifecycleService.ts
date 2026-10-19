@@ -152,7 +152,8 @@ function parseReadinessBlocking(data: unknown): LifecycleError | undefined {
   const body = data as Record<string, unknown>
   if (body.error !== 'readiness-blocking') return undefined
   if (!Array.isArray(body.blocking) || body.blocking.length === 0) return undefined
-  if (!body.blocking.every(isReadinessItem)) return undefined
+  // Every listed item must be a valid item AND open: the body means "these items are blocking".
+  if (!body.blocking.every(item => isReadinessItem(item) && item.status === 'open')) return undefined
   const message = showableServerMessage(body.message) ?? READINESS_BLOCKING_FALLBACK
   return new LifecycleError(message, 409, body.blocking)
 }

@@ -517,8 +517,13 @@ Directly under the checklist, while the exercise is still being built, you will 
 - After staging, the page reads "Exercise staged." and the button is replaced by "This exercise is staged. A
   controller starts it from the console." Only a controller can start the exercise.
 
-> **Note:** Unstaging arrives later (story 07). Until then, a staged exercise cannot take new setup content,
-> so finish your setup before you stage.
+> **Note:** Unstaging arrives later (story 07). Once staged, participants can sign in and see the ambient
+> world, and planners can no longer post as personas (controllers still can), so finish your setup first.
+> A full content lock at go-live is a later change (story 05).
+>
+> **Known gap:** today the scenario clock is driven by the engine, not by the lifecycle, so it can already be
+> running while the exercise is staged. Holding the clock until a controller starts the exercise is tracked
+> as an engine-runtime change.
 
 ---
 
