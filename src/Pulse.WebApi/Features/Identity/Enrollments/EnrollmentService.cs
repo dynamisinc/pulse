@@ -44,7 +44,7 @@ using Pulse.WebApi.Features.Realtime;
 /// and a failure is logged, never surfaced: the grant change has already committed. Its record is split by what each
 /// half describes: the <c>enrollment.lead.released</c> event + audit are part of the enrollment change and are staged
 /// in the SAME unit of work; the <c>engine.swamped-mode.turned-off</c> event + audit describe the in-memory flip, so
-/// they are written after the flip (a second, small save) and carry the real <c>wasOn</c>. A failed flip therefore
+/// they are written after the flip (a second, small save) and are written only when the flip really turned swamped mode off. A failed flip therefore
 /// leaves no "turned off" record claiming otherwise, and a failed follow-up save is logged without failing the request.
 /// </para>
 /// </remarks>
@@ -462,7 +462,7 @@ public sealed partial class EnrollmentService
 
     /// <summary>
     /// Turns the exercise's swamped mode OFF after a committed lead release (M-002): idempotent, so it is simply called
-    /// for every committed release. Then records the flip (XC-004 + org audit, with the real <c>wasOn</c>) in a small
+    /// for every committed release. Then records the flip (XC-004 + org audit) only when it really turned swamped mode off in a small
     /// follow-up save. Neither the flip nor its record can fail the request — the enrollment change has already
     /// committed — so a failure of either is logged and swallowed.
     /// </summary>
@@ -492,10 +492,10 @@ public sealed partial class EnrollmentService
             return;
         }
 
-        if (!swampedWasOn && reason == LeadTransferredReason)
+        if (!swampedWasOn)
         {
-            // A transfer happens routinely; when swamped mode was already off it changed nothing, so it records nothing
-            // (delta review: audit noise). A release still records wasOn:false, as before.
+            // Swamped mode was already off: the flip changed nothing, so it records nothing — for a transfer (delta
+            // review: audit noise) and, since #618 S-A, for a release too (only real changes are recorded).
             return;
         }
 

@@ -202,7 +202,7 @@ exactly like the existing `engine.swamped-mode.turned-off` flip. Names: `StaffCh
 | `POST /api/engine/autonomy/restore` | `engine.autonomy.restored` | `org.engine.autonomy-restored` | `fromPosture`, `toPosture`, `scenarioMinute?` |
 
 - **One `engine.swamped-mode.turned-off` shape for every path:** `{reason, wasOn, isOn, scenarioMinute?}` with
-  `reason` = `controller` (the route), `lead-released` or `lead-transferred` (`EnrollmentService`; a transfer records only when swamped mode was on), `no-lead-recheck` (`ExerciseCallerRole`)
+  `reason` = `controller` (the route), `lead-released` or `lead-transferred` (`EnrollmentService`; both record only when the flip really turned swamped mode off), `no-lead-recheck` (`ExerciseCallerRole`)
   or `lead-lost-revert` (below). `isOn` is always `false` on this type.
 - **`scenarioMinute` is omitted** (never a fabricated `0`) when there is no scenario clock or the exercise's clock has
   not started — an unstarted clock reads minute 0. The envelope's required `scenarioTime` keeps its existing fallback:
@@ -221,12 +221,15 @@ exactly like the existing `engine.swamped-mode.turned-off` flip. Names: `StaffCh
   `Generation:Governance:TimeoutAutoSendAuthorized` is false, an unknown kill-switch mode — or `403`) records nothing,
   including the Tier-2 M-1 post-write reverts that put the state back exactly. **One exception:** a refused swamped ON
   whose M-1 revert turns OFF swamped mode that was **already on** before the request (the lead was lost in between)
-  is a real ON→OFF change, recorded as `engine.swamped-mode.turned-off` with `reason: "lead-lost-revert"` and a
+  is a real ON→OFF change (re-checked just before the revert: if a concurrent lead release / no-lead heal already
+  turned it off, that OFF is the record and nothing more is written), recorded as `engine.swamped-mode.turned-off`
+  with `reason: "lead-lost-revert"` and a
   **system** actor (no person — the revert is the lost lead's consequence, not the caller's choice). The revert is not
   skipped for an already-on exercise: a concurrent demotion's OFF can land between the previous-state read and this
   write, so only the post-write revert guarantees swamped mode never ends ON without a lead.
 - **Recorded last, in its own unit of work, never fatal:** each lever records after every one of its state changes
-  (the kill switch after its AC6 ambient demotion), through `IEngineSteeringLeverRecorder`, which writes in its own DI
+  (the kill switch after its AC6 ambient demotion, in a `finally` so a client abort during the demotion's event commit
+  cannot skip it; the M-1 re-checks run with `CancellationToken.None` so an abort cannot skip a revert), through `IEngineSteeringLeverRecorder`, which writes in its own DI
   scope / `PulseDbContext` (the `ExerciseCallerRole` no-lead precedent, WR-003) with `CancellationToken.None`. Any
   failure — the exercise read, the save, or the recorder itself — is logged at Error and swallowed: the lever is
   process memory, already live, and must neither become a `500` nor skip a safety effect.

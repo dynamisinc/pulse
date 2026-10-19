@@ -72,9 +72,9 @@
  * `resetForTests`) so a remount under a different exercise reads a distinct
  * state and no exercise's engine-control state leaks into another's.
  *
- * TELEMETRY (ADP-041/§11, XC-004). Every actual `degrade`/`restore`
- * transition, and every `setMode` transition IN MOCK MODE only (see above), (a
- * value that changes) emits ONE event via the caller-safe
+ * TELEMETRY (ADP-041/§11, XC-004). IN MOCK MODE ONLY (`USE_MOCK_DATA`), every
+ * actual `setMode`/`degrade`/`restore` transition (a value that changes)
+ * emits ONE event via the caller-safe
  * `buildAndEmit`: `eventType: 'engine.autonomy_changed'` (an open string — no
  * envelope migration), `channel: 'system'`, `actor { kind: 'engine',
  * actingHumanId }`, scenario time (COR-053), `payload.cause` distinguishing
@@ -380,7 +380,8 @@ export function useEngineControl(): UseEngineControlResult {
         degradedReason: reason.trim() || 'generation provider degraded',
       }
       setFor(exerciseId, next)
-      emit('degraded-mode', next)
+      // DEV-only provider mock: never a client emit on the live path (#618 S-B).
+      if (USE_MOCK_DATA) emit('degraded-mode', next)
     },
     [exerciseId, emit],
   )
@@ -390,7 +391,7 @@ export function useEngineControl(): UseEngineControlResult {
     if (!current.degraded) return
     const next: EngineControlState = { ...current, degraded: false, degradedReason: null }
     setFor(exerciseId, next)
-    emit('restore', next)
+    if (USE_MOCK_DATA) emit('restore', next) // #618 S-B: mock-only, like degrade()
   }, [exerciseId, emit])
 
   return {

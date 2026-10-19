@@ -453,10 +453,17 @@ public sealed partial class EngineReviewService
         state.SetSwampedMode(enabled, input.ActingHumanId, _clock.CurrentScenarioMinute(exerciseId));
 
         // M-1: ON is a raise — re-check the lead live, AFTER the write, and revert to OFF when it was lost meanwhile.
-        if (enabled && !await IsStillLeadAsync(exerciseId, sessionPersonId, cancellationToken))
+        // CancellationToken.None: a client abort must never skip the revert (#618 W-B).
+        if (enabled && !await IsStillLeadAsync(exerciseId, sessionPersonId, CancellationToken.None))
         {
-            state.SetSwampedMode(false, ExerciseCallerRole.NoLeadActor, _clock.CurrentScenarioMinute(exerciseId));
-            await RecordSwampedLeadLostRevertAsync(exerciseId, wasOn); // #618: only an ALREADY-on exercise really changed
+            // #618 W-C: re-read just before the revert — a concurrent TurnOff (lead release / no-lead heal) may already
+            // have turned it off and recorded that; then there is nothing to revert and nothing more to record.
+            if (state.SwampedModeEnabled)
+            {
+                state.SetSwampedMode(false, ExerciseCallerRole.NoLeadActor, _clock.CurrentScenarioMinute(exerciseId));
+                await RecordSwampedLeadLostRevertAsync(exerciseId, wasOn); // #618: only an ALREADY-on exercise really changed
+            }
+
             return EngineAutonomyResult.Forbidden();
         }
 
@@ -494,9 +501,17 @@ public sealed partial class EngineReviewService
 
         // Ambient-chatter 01 (AC6): either kill-switch mode LOWERS autonomous ambient posting to off, so a later
         // restore can never re-raise it; only a controller re-selecting the mode does.
-        await DemoteAutonomousAmbientAsync(exerciseId, input, cancellationToken);
+        try
+        {
+            await DemoteAutonomousAmbientAsync(exerciseId, input, cancellationToken);
+        }
+        finally
+        {
+            // #618: LAST, after every state change (AC6) — and in a finally (W-A): the demotion is applied in memory
+            // before its event commit, which rethrows a client abort; the applied kill switch is still recorded.
+            await RecordKillSwitchEngagedAsync(exerciseId, input, mode, fromPosture, state);
+        }
 
-        await RecordKillSwitchEngagedAsync(exerciseId, input, mode, fromPosture, state); // #618: LAST, after every state change (AC6)
         return EngineAutonomyResult.Ok(EngineAutonomyStateDto.From(state));
     }
 
@@ -545,7 +560,7 @@ public sealed partial class EngineReviewService
 
         // M-1: a restore that lifted a clamp is a raise — re-check the lead live, AFTER the write, and re-impose the
         // clamp when the lead was lost meanwhile.
-        if (lifted is not null && !await IsStillLeadAsync(exerciseId, sessionPersonId, cancellationToken))
+        if (lifted is not null && !await IsStillLeadAsync(exerciseId, sessionPersonId, CancellationToken.None)) // #618 W-B
         {
             ReimposeSafetyClamp(state, wasStopped, degradedReason, _clock.CurrentScenarioMinute(exerciseId));
             return EngineAutonomyResult.Forbidden();

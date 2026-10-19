@@ -150,6 +150,55 @@ public sealed class LeadControllerPostWriteRecheckTests
     }
 
     [RequiresDockerFact]
+    public async Task SwampedOn_RevertedByM1_WhenAConcurrentTurnOffAlreadyRan_NeitherRevertsNorRecordsAgain()
+    {
+        // #618 W-C: swamped was on; the lead is lost, and a concurrent TurnOff (the lead release / no-lead heal, which
+        // records its own OFF) lands between this ON's write and its re-check. The re-check must find it already off.
+        var hook = new FirstReaderHook();
+        var harness = Build(hook);
+        await using var _ = harness;
+        var state = harness.Autonomy.GetOrCreate(harness.ExerciseId);
+        state.SetSwampedMode(true, "lead", 0);
+        harness.ArmClock(harness.DemoteLead);
+        hook.OnFirstReader = () => state.SetSwampedMode(false, "system:no-lead", 0);
+
+        var result = await harness.Service.SetSwampedModeAsync(true, Input(harness.Lead), harness.Lead);
+
+        result.Outcome.Should().Be(EngineReviewOutcome.Forbidden);
+        hook.Fired.Should().BeTrue("the concurrent OFF ran between the write and the re-check");
+        state.SwampedModeEnabled.Should().BeFalse();
+        harness.Records.Should().BeEmpty("the concurrent OFF is the recorded change; a lead-lost-revert too would double it");
+    }
+
+    [RequiresDockerFact]
+    public async Task KillSwitch_WhenTheRequestIsAbortedDuringTheAmbientDemotionCommit_StillRecordsTheAppliedLever()
+    {
+        // #618 W-A: the demotion is applied in memory, then its event commit rethrows the client abort — the kill switch
+        // (already applied) must still be recorded.
+        var harness = Build();
+        await using var _ = harness;
+        harness.Ambient.Set(harness.ExerciseId, new AmbientTierPolicy
+        {
+            Mode = AmbientPolicyMode.Autonomous,
+            MaxPerMinute = 1,
+            MaxPerHour = 1,
+            TopicAllowList = [],
+            PersonaAllowList = [],
+            SetBy = "arrange",
+        });
+        using var aborted = new CancellationTokenSource();
+        await aborted.CancelAsync();
+
+        var act = () => harness.Service.EngageKillSwitchAsync(KillSwitchMode.FullStop, Input(harness.Lead), aborted.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>("the abort still surfaces");
+        harness.Autonomy.GetOrCreate(harness.ExerciseId).IsGenerationStopped.Should().BeTrue("the lever applied");
+        harness.Ambient.Get(harness.ExerciseId).Mode.Should().Be(AmbientPolicyMode.Off, "the demotion applied in memory");
+        harness.Records.Should().ContainSingle("the applied kill switch is recorded despite the abort")
+            .Which.EventType.Should().Be(EngineSteeringLeverRecords.KillSwitchEngagedEventType);
+    }
+
+    [RequiresDockerFact]
     public async Task SwampedOn_NoDemotion_RecordsOneTurnedOn()
     {
         var harness = Build();
@@ -401,7 +450,7 @@ public sealed class LeadControllerPostWriteRecheckTests
         TimeZone = "UTC",
     };
 
-    private Harness Build()
+    private Harness Build(Microsoft.EntityFrameworkCore.Diagnostics.IInterceptor? interceptor = null)
     {
         var exerciseId = Guid.NewGuid();
         Guid lead;
@@ -411,7 +460,11 @@ public sealed class LeadControllerPostWriteRecheckTests
         }
 
         var context = new ExerciseContext { CurrentExerciseId = exerciseId };
-        var db = _fixture.CreateContext(context);
+        var db = interceptor is null
+            ? _fixture.CreateContext(context)
+            : new PulseDbContext(
+                new DbContextOptionsBuilder<PulseDbContext>().UseSqlServer(_fixture.ConnectionString!).AddInterceptors(interceptor).Options,
+                context);
         var native = new ExerciseClockService(new ManualTimeProvider(ScenarioStart));
         native.Start(exerciseId, ScenarioStart, TimeZoneInfo.Utc);
         var clock = new HookableClock(native);
@@ -495,6 +548,29 @@ public sealed class LeadControllerPostWriteRecheckTests
         }
 
         public async ValueTask DisposeAsync() => await db.DisposeAsync();
+    }
+
+    /// <summary>Runs <see cref="OnFirstReader"/> once, as the service's context issues its first query after arming.</summary>
+    private sealed class FirstReaderHook : Microsoft.EntityFrameworkCore.Diagnostics.DbCommandInterceptor
+    {
+        public Action? OnFirstReader { get; set; }
+
+        public bool Fired { get; private set; }
+
+        public override ValueTask<Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<System.Data.Common.DbDataReader>> ReaderExecutingAsync(
+            System.Data.Common.DbCommand command,
+            Microsoft.EntityFrameworkCore.Diagnostics.CommandEventData eventData,
+            Microsoft.EntityFrameworkCore.Diagnostics.InterceptionResult<System.Data.Common.DbDataReader> result,
+            CancellationToken cancellationToken = default)
+        {
+            if (!Fired && OnFirstReader is { } hook)
+            {
+                Fired = true;
+                hook();
+            }
+
+            return base.ReaderExecutingAsync(command, eventData, result, cancellationToken);
+        }
     }
 
     /// <summary>Captures every steering-lever record instead of writing it (#618).</summary>

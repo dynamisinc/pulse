@@ -416,6 +416,16 @@ describe('useEngineControl — live mode (UAT engine-pause fix; USE_MOCK_DATA=fa
 
     expect(result.current.modeSettledCount).toBe(2)
   })
+  it('degrade()/restore() (the DEV-only provider mock) emit NO client telemetry on the live path (#618 S-B)', () => {
+    const { result } = renderHook(() => useEngineControl())
+
+    act(() => result.current.degrade('provider down'))
+    act(() => result.current.restore())
+
+    expect(result.current.degraded).toBe(false)
+    expect(getEmittedTelemetryEvents()).toHaveLength(0)
+    expect(mockedLiveSetMode).not.toHaveBeenCalled()
+  })
 })
 
 describe('engineControlStore.adoptServerMode — a SILENT local adopt (no telemetry, no POST)', () => {
