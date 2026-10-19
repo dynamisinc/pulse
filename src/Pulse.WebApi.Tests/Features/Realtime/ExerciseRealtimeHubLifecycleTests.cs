@@ -15,20 +15,26 @@ using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.EngineRuntime.Steering;
+using Pulse.WebApi.Features.ExerciseConfiguration.Lifecycle;
 using Pulse.WebApi.Features.Realtime;
 using Pulse.WebApi.Features.Social;
+using Pulse.WebApi.Features.Social.Editing;
+using Pulse.WebApi.Features.Social.Engagement;
 using Pulse.WebApi.Tests.Data;
+using Pulse.WebApi.Tests.Features.Identity.Staff;
 using Pulse.WebApi.Tests.Helpers;
 
 /// <summary>
 /// The over-the-wire proof of the EndEx send gate (#375; COR-032, COR-054): once an exercise leaves the
 /// participant-accessible states, a participant tab STILL CONNECTED to <c>/hubs/exercise</c> receives no further
 /// feed frame, while a staff console on the same exercise keeps its live view. Boots the REAL <c>Program</c>
-/// composition root over REAL SQL Server (real host resolution, real sessions, real staff verification) with ONE
-/// override: the <see cref="ExerciseLifecycleStatusReader"/> is a mutable stub, so the test can flip
-/// <c>live → completed</c> between two broadcasts without racing a transition endpoint.
+/// composition root over REAL SQL Server (real host resolution, real sessions, real staff verification). The first
+/// test overrides ONE thing — the <see cref="ExerciseLifecycleStatusReader"/> is a mutable stub, isolating the gate.
+/// The others use NO stub: the production DB-backed reader, after a REAL EndEx through
+/// <see cref="ExerciseLifecycleService.TransitionAsync"/>, which pins the reader → gate wiring end to end.
 /// </summary>
 /// <remarks>
 /// <b>"Receives nothing" is asserted with an ordering barrier, not a hopeful sleep</b> (same technique as
@@ -41,6 +47,10 @@ using Pulse.WebApi.Tests.Helpers;
 public sealed class ExerciseRealtimeHubLifecycleTests
 {
     private const string PostReceived = "PostReceived";
+    private const string PostRemoved = "PostRemoved";
+    private const string PostPinChanged = "PostPinChanged";
+    private const string PostEdited = "PostEdited";
+    private const string PostEngagementChanged = "PostEngagementChanged";
     private const string ReadinessProbe = "LifecycleReadinessProbe";
     private const string OnConnectedBarrierMethod = "LifecycleOnConnectedBarrierNoSuchMethod";
 
@@ -66,25 +76,132 @@ public sealed class ExerciseRealtimeHubLifecycleTests
 
         // While live: the participant is served the post (proof the connection is genuinely live).
         var whileLive = await BroadcastPostAsync(host, exercise.Id);
-        await participant.WaitForPostAsync(whileLive);
-        await staff.WaitForPostAsync(whileLive);
+        await participant.WaitForAsync(PostReceived, whileLive);
+        await staff.WaitForAsync(PostReceived, whileLive);
 
         // EndEx.
         status.Status = "completed";
 
         var afterEndEx = await BroadcastPostAsync(host, exercise.Id);
-        await staff.WaitForPostAsync(afterEndEx);
+        await staff.WaitForAsync(PostReceived, afterEndEx);
 
         // Ordering barrier: the probe goes to the exercise-wide group AFTER the suppressed post, so once it arrives
         // any PostReceived addressed to the participant would already have been delivered.
         await participant.WaitUntilProbeAsync(host, $"exercise:{exercise.Id}");
 
-        participant.Posts.Should().Equal(
-            new[] { whileLive },
+        participant.Frames.Should().Equal(
+            new[] { (PostReceived, whileLive) },
             "after EndEx a still-connected participant must receive nothing further on the hub (#375)");
-        staff.Posts.Should().Equal(
-            new[] { whileLive, afterEndEx },
+        staff.Frames.Should().Equal(
+            new[] { (PostReceived, whileLive), (PostReceived, afterEndEx) },
             "a staff console keeps its live view of a completed exercise, exactly once per post");
+    }
+
+    [RequiresDockerFact]
+    public async Task RealReader_AfterARealEndExTransition_TheParticipantReceivesNothing_WhileStaffDoes()
+    {
+        // Gate-2 W-1: NO stub. The production DB-backed reader must feed the gate: a real live → completed
+        // transition through ExerciseLifecycleService, then a broadcast through the DI-registered broadcaster.
+        // (Verified locally to FAIL when the registered reader is forced to answer "live".)
+        var exercise = await SeedExerciseAsync();
+        var participantToken = await SeedParticipantSessionAsync(exercise.Id);
+        var staffToken = await SeedStaffSessionAsync(exercise.Id);
+
+        using var host = new LifecycleHost(_fixture.ConnectionString!, status: null);
+        await using var participant = await ConnectAsync(host, exercise.Hostname, participantToken);
+        await using var staff = await ConnectAsync(host, exercise.Hostname, staffToken);
+        await participant.WaitUntilProbeAsync(host, $"exercise:{exercise.Id}");
+        await staff.WaitUntilProbeAsync(host, $"exercise:{exercise.Id}:staff");
+
+        var whileLive = await BroadcastPostAsync(host, exercise.Id);
+        await participant.WaitForAsync(PostReceived, whileLive);
+
+        await EndExAsync(exercise.Id);
+
+        var afterEndEx = await BroadcastPostAsync(host, exercise.Id);
+        await staff.WaitForAsync(PostReceived, afterEndEx);
+        await participant.WaitUntilProbeAsync(host, $"exercise:{exercise.Id}");
+
+        participant.Frames.Should().Equal(
+            new[] { (PostReceived, whileLive) },
+            "the REAL reader sees the committed 'completed' row, so the participant group is closed (#375)");
+        staff.Frames.Should().Equal(
+            new[] { (PostReceived, whileLive), (PostReceived, afterEndEx) },
+            "staff keep their live view after EndEx");
+    }
+
+    [RequiresDockerFact]
+    public async Task ReconnectAfterEndEx_EveryFrameType_ReachesStaffOnly_NeverTheParticipant()
+    {
+        // Gate-2 S-1: the hub stays OPEN on connect after EndEx by design (the overlay client re-GETs on reconnect),
+        // so a participant can (re)connect to a completed exercise. Every one of the five frames must still reach
+        // only the staff group. Real reader, real transition, no stub.
+        var exercise = await SeedExerciseAsync();
+        var participantToken = await SeedParticipantSessionAsync(exercise.Id);
+        var staffToken = await SeedStaffSessionAsync(exercise.Id);
+        await EndExAsync(exercise.Id);
+
+        using var host = new LifecycleHost(_fixture.ConnectionString!, status: null);
+        await using var participant = await ConnectAsync(host, exercise.Hostname, participantToken);
+        await using var staff = await ConnectAsync(host, exercise.Hostname, staffToken);
+        await participant.WaitUntilProbeAsync(host, $"exercise:{exercise.Id}");
+        await staff.WaitUntilProbeAsync(host, $"exercise:{exercise.Id}:staff");
+
+        var sent = await BroadcastEveryFrameAsync(host, exercise.Id);
+        await staff.WaitForAsync(sent[^1].Event, sent[^1].Id);
+        await participant.WaitUntilProbeAsync(host, $"exercise:{exercise.Id}");
+
+        participant.Frames.Should().BeEmpty(
+            "a participant connected to a completed exercise must receive no feed frame of any type (#375)");
+        staff.Frames.Should().Equal(sent, "every frame type reaches the staff group, once each, in send order");
+    }
+
+    /// <summary>A REAL EndEx: <c>live → completed</c> through the shipped lifecycle service, committed to SQL.</summary>
+    private async Task EndExAsync(Guid exerciseId)
+    {
+        await using var context = _fixture.CreateContext();
+        var service = new ExerciseLifecycleService(
+            context,
+            new ExerciseContext { CurrentExerciseId = exerciseId },
+            new StubCurrentStaffSessionAccessor(null));
+
+        var result = await service.TransitionAsync(new ExerciseLifecycleTransitionRequest { To = "completed" });
+        result.Outcome.Should().Be(ExerciseLifecycleOutcome.Ok, "live → completed is an allowed EndEx transition");
+    }
+
+    /// <summary>Sends one of each of the five frames through the DI-registered broadcaster; returns (event, id) in order.</summary>
+    private static async Task<(string Event, string Id)[]> BroadcastEveryFrameAsync(LifecycleHost host, Guid exerciseId)
+    {
+        var postId = await BroadcastPostAsync(host, exerciseId);
+        var removed = Guid.NewGuid();
+        var pinned = Guid.NewGuid();
+        var edited = Guid.NewGuid();
+        var engaged = Guid.NewGuid();
+
+        await using (var scope = host.Services.CreateAsyncScope())
+        {
+            var broadcaster = scope.ServiceProvider.GetRequiredService<IFeedBroadcaster>();
+            await broadcaster.BroadcastPostRemovedAsync(exerciseId, removed);
+            await broadcaster.BroadcastPostPinChangedAsync(exerciseId, pinned, pinnedForAll: true);
+            await broadcaster.BroadcastPostEditedAsync(exerciseId, new PostEditedDto
+            {
+                PostId = edited.ToString(),
+                Text = "corrected",
+                Edited = new PostEditedSummaryDto { Count = 1, ScenarioTime = "2033-09-04T16:05:00.0000000+00:00" },
+                Version = 1,
+            });
+            await broadcaster.BroadcastPostEngagementChangedAsync(
+                exerciseId, PostEngagementChangedDto.For(engaged, new ParticipantPostCounts(1, 0, 0), 1));
+        }
+
+        return
+        [
+            (PostReceived, postId),
+            (PostRemoved, removed.ToString()),
+            (PostPinChanged, pinned.ToString()),
+            (PostEdited, edited.ToString()),
+            (PostEngagementChanged, engaged.ToString()),
+        ];
     }
 
     private static async Task<string> BroadcastPostAsync(LifecycleHost host, Guid exerciseId)
@@ -174,33 +291,32 @@ public sealed class ExerciseRealtimeHubLifecycleTests
         return token;
     }
 
-    /// <summary>Records every <c>PostReceived</c> id and readiness-probe nonce a client connection receives.</summary>
+    /// <summary>Records every feed frame (as event, id) and readiness-probe nonce a client connection receives.</summary>
     private sealed class RecordingConnection : IAsyncDisposable
     {
         private readonly HubConnection _connection;
-        private readonly List<string> _posts = new();
+        private readonly List<(string Event, string Id)> _frames = new();
         private readonly ConcurrentDictionary<string, byte> _probes = new(StringComparer.Ordinal);
 
         public RecordingConnection(HubConnection connection)
         {
             _connection = connection;
-            _connection.On<JsonElement>(PostReceived, payload =>
+            _connection.On<JsonElement>(PostReceived, payload => Record(PostReceived, payload, "id"));
+            foreach (var frame in new[] { PostRemoved, PostPinChanged, PostEdited, PostEngagementChanged })
             {
-                lock (_posts)
-                {
-                    _posts.Add(payload.GetProperty("id").GetString() ?? string.Empty);
-                }
-            });
+                _connection.On<JsonElement>(frame, payload => Record(frame, payload, "postId"));
+            }
+
             _connection.On<string>(ReadinessProbe, nonce => _probes.TryAdd(nonce, 0));
         }
 
-        public IReadOnlyList<string> Posts
+        public IReadOnlyList<(string Event, string Id)> Frames
         {
             get
             {
-                lock (_posts)
+                lock (_frames)
                 {
-                    return _posts.ToList();
+                    return _frames.ToList();
                 }
             }
         }
@@ -228,12 +344,12 @@ public sealed class ExerciseRealtimeHubLifecycleTests
             _probes.ContainsKey(nonce).Should().BeTrue($"the connection should receive a probe on {groupName} within {DeliveryTimeout}");
         }
 
-        public async Task WaitForPostAsync(string id)
+        public async Task WaitForAsync(string eventName, string id)
         {
             var deadline = DateTime.UtcNow + DeliveryTimeout;
             while (DateTime.UtcNow < deadline)
             {
-                if (Posts.Contains(id))
+                if (Frames.Contains((eventName, id)))
                 {
                     return;
                 }
@@ -241,23 +357,33 @@ public sealed class ExerciseRealtimeHubLifecycleTests
                 await Task.Delay(25);
             }
 
-            Posts.Should().Contain(id, $"post {id} should have been delivered within {DeliveryTimeout}");
+            Frames.Should().Contain((eventName, id), $"{eventName} {id} should have been delivered within {DeliveryTimeout}");
         }
 
         public ValueTask DisposeAsync() => _connection.DisposeAsync();
+
+        private void Record(string eventName, JsonElement payload, string idProperty)
+        {
+            var id = payload.TryGetProperty(idProperty, out var value) ? value.GetString() ?? string.Empty : string.Empty;
+            lock (_frames)
+            {
+                _frames.Add((eventName, id));
+            }
+        }
     }
 
     /// <summary>
-    /// The real <c>Program</c> host over the fixture's database, with the lifecycle status reader replaced by
-    /// <paramref name="status"/> (ConfigureTestServices runs last, so it wins over the production registration).
+    /// The real <c>Program</c> host over the fixture's database. With a <c>status</c> stub the lifecycle status reader
+    /// is replaced by it (ConfigureTestServices runs last, so it wins over the production registration); with
+    /// <c>null</c> NOTHING is overridden and the production DB-backed reader runs.
     /// </summary>
     private sealed class LifecycleHost : WebApplicationFactory<Program>
     {
         private const string ConnectionStringEnvVar = "ConnectionStrings__DefaultConnection";
 
-        private readonly MutableLifecycleStatusReader _status;
+        private readonly MutableLifecycleStatusReader? _status;
 
-        public LifecycleHost(string connectionString, MutableLifecycleStatusReader status)
+        public LifecycleHost(string connectionString, MutableLifecycleStatusReader? status)
         {
             _status = status;
             Environment.SetEnvironmentVariable(ConnectionStringEnvVar, connectionString);
@@ -266,8 +392,11 @@ public sealed class ExerciseRealtimeHubLifecycleTests
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
             ArgumentNullException.ThrowIfNull(builder);
-            builder.ConfigureTestServices(services =>
-                services.Replace(ServiceDescriptor.Singleton<ExerciseLifecycleStatusReader>(_status.ReadAsync)));
+            if (_status is { } stub)
+            {
+                builder.ConfigureTestServices(services =>
+                    services.Replace(ServiceDescriptor.Singleton<ExerciseLifecycleStatusReader>(stub.ReadAsync)));
+            }
         }
 
         protected override void Dispose(bool disposing)

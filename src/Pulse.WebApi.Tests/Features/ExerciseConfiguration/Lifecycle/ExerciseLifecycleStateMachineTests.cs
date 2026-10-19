@@ -274,4 +274,17 @@ public sealed class ExerciseLifecycleStateMachineTests
         ExerciseLifecycleStates.IsLivePushOpen(state).Should().Be(
             ExerciseLifecycleStates.IsParticipantAccessible(state),
             "live pushes and participant REST access coincide today by design (they may diverge in completed)");
+
+    /// <summary>
+    /// #375 tripwire: whatever a later ended-mode follow-up does to participant REST reads, a finished exercise is
+    /// never open to live pushes.
+    /// </summary>
+    [Theory]
+    [InlineData("completed")]
+    [InlineData("complete")]
+    [InlineData("archived")]
+    public void IsLivePushOpen_StaysClosedOnceTheExerciseHasEnded(string state) =>
+        ExerciseLifecycleStates.IsLivePushOpen(state).Should().BeFalse(
+            "the ended-mode follow-up may reopen participant REST READS in '{0}', but it must NOT reopen live pushes: "
+            + "nothing new may arrive in an open participant tab after EndEx (#375)", state);
 }

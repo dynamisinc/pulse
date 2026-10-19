@@ -39,8 +39,13 @@ using Pulse.WebApi.Features.Social.Pins;
 /// edits, engagement) inherits it and the registered <see cref="IFeedBroadcaster"/> stays this concrete type.
 /// </para>
 /// <para>
-/// <b>Accepted race:</b> the status is read just before each send, so an EndEx committed between that read and the
-/// send can let at most one in-flight frame reach participants.
+/// <b>Accepted race:</b> each send reads the status once, then calls <c>SendAsync</c>. An EndEx committed between
+/// those two steps can let that send's single frame reach participants — at most one in-flight frame per send.
+/// </para>
+/// <para>
+/// <b>Not this gate's concern: Freeze.</b> A paused world is still push-open here (participants are served the
+/// holding page). Freeze is handled by the participant pause overlay (<c>PauseOverlayPublisher</c>, CR-001) and by
+/// #379's participant write gate, not by this broadcaster.
 /// </para>
 /// </remarks>
 public sealed partial class SignalRFeedBroadcaster : IFeedBroadcaster
