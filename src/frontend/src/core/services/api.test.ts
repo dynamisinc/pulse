@@ -598,7 +598,7 @@ describe('the refresh call carries a ~20 s timeout (that call only)', () => {
 })
 
 describe('excluded paths never trigger a refresh', () => {
-  it.each(['/auth/join', '/auth/word'])(
+  it.each(['/auth/join', '/auth/word', '/auth/password/reset'])(
     'a 401 from %s is a rejected link/word, not an expired session',
     async path => {
       setTokens({ token: 'x', refreshToken: 'y' }, { persist: true })
@@ -618,6 +618,19 @@ describe('excluded paths never trigger a refresh', () => {
       expect(getRefreshToken()).toBe('y')
     },
   )
+})
+
+describe('password reset is pre-auth (#576)', () => {
+  it('does not attach a stored bearer when the caller opts out', async () => {
+    setTokens({ token: 'x', refreshToken: 'y' }, { persist: true })
+    let auth: unknown = 'unset'
+    const adapter: AxiosAdapter = config => {
+      auth = config.headers.get('Authorization')
+      return Promise.resolve(respond(config, 204, undefined))
+    }
+    await api.post('/auth/password/reset', {}, { adapter, _pulseSkipAuthAttach: true } as never)
+    expect(auth).toBeFalsy()
+  })
 })
 
 describe('a late 401 adopts a pair that was already rotated', () => {

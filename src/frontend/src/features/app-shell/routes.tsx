@@ -85,7 +85,7 @@ import { ParticipantSignInPage } from '@/features/login/pages/ParticipantSignInP
 import { StaffSignInPage } from '@/features/login/pages/StaffSignInPage'
 import { JoinPage } from '@/features/login/pages/JoinPage'
 import { StaffSetPasswordPage } from '@/features/staffPasswordReset/pages/StaffSetPasswordPage' // #576
-import { JOIN_PATH, LOGIN_PATH, STAFF_LOGIN_PATH } from './constants'
+import { JOIN_PATH, LOGIN_PATH, STAFF_LOGIN_PATH, STAFF_RESET_PATH } from './constants'
 
 /**
  * Builds the role-aware route table. The orchestrator passes the concrete
@@ -102,7 +102,7 @@ export function createRoleAwareRoutes(surfaces: RoleAwareEntryProps): RouteObjec
       path: STAFF_LOGIN_PATH,
       element: <StaffSignInPage />,
     },
-    { path: '/staff/reset', element: <StaffSetPasswordPage /> }, // #576 pre-auth set-password
+    { path: STAFF_RESET_PATH, element: <StaffSetPasswordPage /> }, // #576 pre-auth set-password
     // Personal-link sign-in (easy-login 08). Pre-auth like the two above. The bare
     // path is the scrubbed address after a reload (the token is gone by then).
     {

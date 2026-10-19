@@ -135,6 +135,23 @@ password:
 - After five wrong passwords your account is locked for 15 minutes, and the lock grows with further
   failures, up to 4 hours. Every failed sign-in shows the same message, whatever the reason.
 
+#### Setting or resetting your password
+
+If you forget your password, ask your **organization admin** for a reset link. Pulse does not send
+email yet, so the admin copies the link and gives it to you directly. Open it and choose a new
+password:
+
+- Use at least **12 characters**. There are no rules about numbers or symbols, so a long phrase works
+  well. Pulse refuses very common passwords and ones that contain your name, your email or your
+  organization's name.
+- The link works **once**, for **60 minutes**. If it has expired or was already used, ask for a new one.
+- Setting a new password **signs you out everywhere** and cancels any older links.
+
+An org admin cannot get a reset link for another org admin.
+
+> **Not yet on a screen:** the admin's "Reset password" button arrives with the organization directory.
+> Until then, Dynamis support issues the link.
+
 > **Not yet on a screen:** the organization sign-in page. Until it arrives, sign in on the exercise's
 > address as described above.
 
