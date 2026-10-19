@@ -203,4 +203,72 @@ public sealed class MissSafeAntiBeratePioScenarioTests
         storyline.Intensity.Should().Be(controlStoryline.Intensity, "nor can they calm it");
         (await subject.PhaseChangesAsync()).Should().NotContain(c => c.ToPhase == nameof(StorylinePhase.Addressed));
     }
+
+    /// <summary>
+    /// PR #634 CR-001: response-match prompts are metered against the CTL-034 budget (D4), but prompt demand alone must
+    /// never starve escalation. At 6 (exactly the budget) and 10 (well past it) irrelevant official posts a minute, the
+    /// prompts saturate the budget on their own; the miss-safe minimum service still lets the burst the cadence would
+    /// have fired anyway go out - and ONLY that burst (it never creates one the cadence would not fire), so the subject
+    /// fires exactly as often as the post-free control.
+    /// </summary>
+    [Theory]
+    [InlineData(6)]
+    [InlineData(10)]
+    public async Task AFloodOfIrrelevantPostsThatSaturatesTheDemandBudget_StillCannotPauseEscalation(int postsPerMinute)
+    {
+        var (subject, storyline) = await EscalatingAsync(autoConfirm: false);
+        var (control, _) = await EscalatingAsync(autoConfirm: false);
+        await using var _s = subject;
+        await using var _c = control;
+
+        for (var i = 0; i < 15; i++)
+        {
+            for (var post = 0; post < postsPerMinute; post++)
+            {
+                subject.OfficialPost(ScenarioScripts.UnrelatedPost);
+            }
+
+            await subject.RunMinutesAsync(1);
+            await control.RunMinutesAsync(1);
+        }
+
+        subject.Timeline.Skip(PostMinute).Should().OnlyContain(
+            t => t.MatchPrompts == postsPerMinute, "precondition: every post raised a prompt, saturating the budget by itself");
+        var subjectFires = subject.Timeline.Skip(PostMinute).Select(t => t.ReviewItemsEnqueued).ToList();
+        var controlFires = control.Timeline.Skip(PostMinute).Select(t => t.ReviewItemsEnqueued).ToList();
+        controlFires.Sum().Should().BeGreaterThan(0, "precondition: the control escalates in this window");
+        subjectFires.Should().Equal(
+            controlFires,
+            "prompt demand from posts we cannot throttle must not pause escalation (ADP-002a), nor add bursts the cadence would not fire");
+        storyline.Phase.Should().Be(StorylinePhase.Escalating);
+    }
+
+    /// <summary>
+    /// PR #634 W-001: a response burst is voiced only on the tick its storyline is addressed, so it must never be gated by
+    /// prompt demand - otherwise an answer landing in the same minute as a flood of unrelated posts would lose its
+    /// gratitude reaction permanently.
+    /// </summary>
+    [Fact]
+    public async Task AnAnswerLandingAmidAPromptSaturatingFlood_StillDrawsItsResponseBurst()
+    {
+        var (scenario, storyline) = await EscalatingAsync(autoConfirm: true);
+        await using var _ = scenario;
+        var itemsBefore = (await scenario.ReviewItemsAsync()).Count;
+
+        scenario.OfficialPost(ScenarioScripts.AnsweringPost);
+        for (var post = 0; post < WorkloadDemandMeter.BudgetPerMinute; post++)
+        {
+            scenario.OfficialPost(ScenarioScripts.UnrelatedPost);
+        }
+
+        scenario.Advance(1);
+        var tick = await scenario.TickAsync();
+
+        scenario.Timeline[^1].MatchPrompts.Should().Be(WorkloadDemandMeter.BudgetPerMinute, "precondition: the prompts alone fill the budget");
+        storyline.Phase.Should().Be(StorylinePhase.Addressed, "the answering post was auto-confirmed");
+        tick.ReviewItemsEnqueued.Should().Be(1, "the response reaction is not starved by prompt demand");
+        (await scenario.ReviewItemsAsync()).Should().HaveCount(itemsBefore + 1);
+        (await scenario.DecidedAsync()).Last().DominantTone.Should().StartWith("gratitude");
+    }
 }
+

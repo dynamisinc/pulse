@@ -36,8 +36,9 @@ using Pulse.WebApi.Features.EngineRuntime.Clock;
 /// <b>Correction (Gate-1, W-004): <c>TargetFollow.Modulate</c> is NOT unwired.</b> An earlier pass of this
 /// story's docs (and the story text itself) claimed the DECIDE-stage burst-steering half stayed unwired this
 /// pass. That was wrong about the shipped codebase: <c>DecideStage.Decide</c> falls back to
-/// <c>IntentComposer.Compose</c> for any trigger with no registered behavior (the inaction trigger this
-/// endpoint's target feeds registers none), and <c>IntentComposer.Compose</c> already calls
+/// <c>IntentComposer.Compose</c> for any trigger with no registered behavior, and the inaction trigger this
+/// endpoint's target feeds is shaped by <c>SilenceEscalationBehavior</c>, which starts from that same
+/// <c>IntentComposer.Compose</c> and only re-tones it (D2), and <c>IntentComposer.Compose</c> already calls
 /// <c>TargetFollow.Modulate</c> to size the requested burst. So the moment a controller sets a live target via
 /// this endpoint, BOTH halves react on the next tick: the MEASURE-stage chase this story exists to prove
 /// (<c>Storyline.Tick</c>/<c>TickTowardTarget</c>, verified in

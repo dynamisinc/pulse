@@ -66,9 +66,9 @@ using Pulse.WebApi.Tests.Features.EngineRuntime.Clock;
 /// enqueued in minute m (each is one decision the controller must be able to make, at ANY autonomy level; one burst
 /// equals one decision regardless of how many posts it carries) PLUS the response-match prompts raised in minute m
 /// (one per official post the engine could not confirm on its own). That is the CTL-034 text: "review-queue actions +
-/// response-match prompts + queue fires". The queue-fire part is the unit the production meter records
-/// (<see cref="DemandEventKind.QueueFire"/>); see <see cref="QueueFireDemandPerMinute"/> and
-/// <see cref="ControllerDemandPerMinute"/>.
+/// response-match prompts + queue fires". The production meter records both kinds against one budget
+/// (<see cref="DemandEventKind.QueueFire"/> and, since D4, <see cref="DemandEventKind.ResponseMatchPrompt"/>); see
+/// <see cref="QueueFireDemandPerMinute"/> and <see cref="ControllerDemandPerMinute"/>.
 /// </para>
 /// </remarks>
 internal sealed class ReactionScenario : IAsyncDisposable
@@ -354,7 +354,7 @@ internal sealed class ReactionScenario : IAsyncDisposable
 
     /// <summary>
     /// Queue-fire demand per scenario minute: review items enqueued in each minute (one decision per burst). This is
-    /// exactly what the production meter (<see cref="WorkloadDemandMeter"/>) records and budgets.
+    /// the queue-fire part of what the production meter (<see cref="WorkloadDemandMeter"/>) records and budgets.
     /// </summary>
     public IReadOnlyDictionary<int, int> QueueFireDemandPerMinute() =>
         _timeline

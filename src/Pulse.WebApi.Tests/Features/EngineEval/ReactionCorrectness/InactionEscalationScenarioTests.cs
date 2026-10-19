@@ -3,6 +3,7 @@ namespace Pulse.WebApi.Tests.Features.EngineEval.ReactionCorrectness;
 using System.Linq;
 using System.Threading.Tasks;
 using FluentAssertions;
+using Pulse.Core.Features.SilenceEscalation.Services;
 using Pulse.Core.Features.Storylines.Models;
 using Pulse.Core.Features.Storylines.Services;
 using Xunit;
@@ -25,13 +26,12 @@ using Xunit;
 /// would see, the tone the decide stage chose, and the prompt the generation provider was handed.
 /// </para>
 /// <para>
-/// <b>Deliberately NOT asserted here</b> (reported as product defects in the story doc's "Defects found"
-/// section, to be fixed in a separate change): (1) the fractional Standard-curve rise (2.5/min configured, 2.0/min
-/// observed, per-tick rounding), so "rises exactly per the curve" is asserted only as a bound, never an equality;
-/// (2) the silence-duration tone ramp (<c>SilenceEscalationBehavior</c> is not registered on the driver's decide
-/// stage); (3) the decided intent's tone mix is not what the provider prompt carries (the prompt uses the
-/// storyline's phase mix). The prompt/tone assertions below therefore check the mix the provider was actually
-/// asked for, which is anxious / speculative in every unanswered phase.
+/// <b>Defects D1-D3, now fixed and asserted here</b> (see the story doc's "Defects found" section): (1) D1 - the
+/// Standard curve rises at its configured 2.5/min under per-minute ticks (it used to round to 2.0/min), asserted as
+/// an equality to the curve, not merely a bound; (2) D2 - the silence-duration tone ramp
+/// (<c>SilenceEscalationBehavior</c>, now registered on the driver's decide stage) shifts the decided mix from
+/// worry toward speculation + anger; (3) D3 - the provider prompt carries the decided intent's tone mix, so the
+/// ramp is what the provider is asked for.
 /// </para>
 /// </remarks>
 public sealed class InactionEscalationScenarioTests
@@ -90,10 +90,13 @@ public sealed class InactionEscalationScenarioTests
         var last = series[^1];
         last.Intensity.Should().BeGreaterThan(openedAt.Intensity + 30, "30 more silent minutes is a large, visible escalation");
         last.Intensity.Should().BeLessThanOrEqualTo(curve.Ceiling, "the curve's ceiling still bounds the climb");
-        // Upper bound only: the climb can never be FASTER than the configured curve rate.
-        last.Intensity.Should().BeLessThanOrEqualTo(
-            openedAt.Intensity + (int)System.Math.Ceiling(curve.RiseRateUnaddressed * 30),
-            "intensity follows the curve; it does not outrun the configured rise rate");
+        // D1: the climb runs AT the configured curve rate (2.5/min x 30 min = +75), within one point of integer
+        // quantization - neither faster nor the old per-tick-rounded 2.0/min (+60).
+        (last.Intensity - openedAt.Intensity).Should().BeCloseTo(
+            (int)System.Math.Round(curve.RiseRateUnaddressed * 30),
+            1,
+            "intensity follows the configured curve rate, not a per-tick-rounded one");
+        last.Intensity.Should().Be(78, "minute 50 on the Standard curve with a 20-minute window is ~78 (spec)");
         last.MinutesSilent.Should().Be(50, "the silence clock was never reset by anything");
     }
 
@@ -134,4 +137,55 @@ public sealed class InactionEscalationScenarioTests
             gap => gap >= scenario.Registration.RateConfig.MinMinutesBetweenInactionReactions,
             "one storyline's ongoing silence re-fires at most once per reaction cadence (no firehose, ADP-011)");
     }
+
+    [Fact]
+    public async Task AsTheSilenceRunsOn_TheDecidedToneShiftsFromWorryTowardSpeculationAndAnger()
+    {
+        // D2: SilenceEscalationBehavior is registered on the driver's decide stage, so successive inaction bursts in
+        // the Escalating phase carry SilenceRules.EscalationTone for the silence so far: worry-led just past the
+        // window, shifting to speculation + anger by ~2x the window. Before D2 the mix was the phase-flat one.
+        await using var scenario = ReactionScenario.Create();
+        var storyline = scenario.AddStoryline(responseWindowMin: 20);
+
+        await scenario.RunMinutesAsync(50);
+
+        var bursts = await scenario.DecidedAsync();
+        bursts.Should().HaveCountGreaterThan(2, "silence keeps producing bursts");
+        storyline.Phase.Should().Be(StorylinePhase.Escalating, "the ramp under test is the Escalating phase's");
+
+        var expectedFirst = SilenceRules.EscalationTone(minutesSilent: 20, windowMin: 20);
+        bursts[0].DominantTone.Should().Be(
+            $"worry {expectedFirst.Worry.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture)}",
+            "just past the window the silence-escalation mix is worry-led");
+        bursts[^1].DominantTone.Should().MatchRegex(
+            "^(speculation|anger) ",
+            "by ~2x the window the vacuum has filled with speculation and anger, not worry");
+    }
+
+    [Fact]
+    public async Task AsTheSilenceRunsOn_TheProviderIsAskedForTheDecidedEscalatingMix()
+    {
+        // D3 (with D2): the generate request carries the decided intent's tone mix, so the silence-escalation ramp
+        // reaches the provider prompt. The first burst's prompt mix is the decided mix; later bursts ask for visibly
+        // more speculation + anger and less worry.
+        await using var scenario = ReactionScenario.Create();
+        scenario.AddStoryline(responseWindowMin: 20);
+
+        await scenario.RunMinutesAsync(50);
+
+        var requests = scenario.Provider.Requests;
+        requests.Should().HaveCountGreaterThan(2, "silence keeps producing bursts");
+        var first = ScenarioScripts.PromptMix(requests[0]);
+        var last = ScenarioScripts.PromptMix(requests[^1]);
+
+        var decidedFirst = SilenceRules.EscalationTone(minutesSilent: 20, windowMin: 20);
+        first["worry"].Should().Be(
+            System.Math.Round(decidedFirst.Worry, 1, System.MidpointRounding.AwayFromZero),
+            "the prompt carries the decided silence-escalation mix, not the phase mix");
+        last["worry"].Should().BeLessThan(first["worry"], "worry cools as the silence runs on");
+        (last.GetValueOrDefault("speculation") + last.GetValueOrDefault("anger")).Should().BeGreaterThan(
+            first.GetValueOrDefault("speculation") + first.GetValueOrDefault("anger"),
+            "the provider is asked for more speculation and anger the longer officials stay silent");
+    }
 }
+
