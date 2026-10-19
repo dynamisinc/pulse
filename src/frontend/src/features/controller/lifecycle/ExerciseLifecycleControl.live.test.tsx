@@ -121,9 +121,8 @@ beforeEach(() => {
       return {
         data: {
           exerciseId: serverExerciseId,
-          exerciseName: serverExerciseId === 'ex-live-0001'
-            ? 'Coastal Surge (live)'
-            : 'Harbor Drill (other)',
+          // The PARTICIPANT-facing name differs on purpose: staff labels show the internal one.
+          exerciseName: serverExerciseId === 'ex-live-0001' ? 'Harbor Town' : null,
           timeZone: 'America/New_York',
           status: serverState,
         },
@@ -661,6 +660,7 @@ describe('ExerciseLifecycleControl (live) -- the server\'s exercise must be the 
     const dialog = await screen.findByRole('dialog')
 
     expect(within(dialog).getByTestId('end-exercise-name')).toHaveTextContent('Coastal Surge (live)')
+    expect(within(dialog).queryByText(/Harbor Town/)).toBeNull()
   })
 })
 
