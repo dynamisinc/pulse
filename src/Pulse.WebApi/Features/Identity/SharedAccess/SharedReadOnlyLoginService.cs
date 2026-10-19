@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.EngineRuntime.Clock;
+using Pulse.WebApi.Features.ExerciseConfiguration.Lifecycle;
 using Pulse.WebApi.Features.Identity.Sessions;
 
 /// <summary>
@@ -159,12 +160,16 @@ public sealed class SharedReadOnlyLoginService
         var locked = credential?.LockedOutUntil is { } lockedUntil && lockedUntil > now;
 
         // A credential can authenticate only when it is enabled, not revoked, not locked, and actually holds a
-        // current password. Anything else takes the NEGATIVE path (which still fails closed identically to a
-        // wrong password — the response never distinguishes "no credential" from "wrong password").
+        // current password, in an exercise whose lifecycle accepts participant reads (one rule for all, 2026-10-19:
+        // staged, live, paused, completed). Anything else takes the NEGATIVE path (which still fails closed
+        // identically to a wrong password — the response never distinguishes "no credential", "closed exercise" or
+        // "wrong password"). A closed exercise therefore behaves as a disabled credential does: the decoy runs and no
+        // attempt counts toward lockout.
         var canAuthenticate =
             credential is { IsEnabled: true, RevokedAt: null } &&
             !locked &&
-            !string.IsNullOrEmpty(credential.CurrentHash);
+            !string.IsNullOrEmpty(credential.CurrentHash) &&
+            ExerciseLifecycleStates.IsParticipantSignInAllowed(exercise.Status);
 
         bool authenticated;
         if (canAuthenticate)
@@ -180,8 +185,8 @@ public sealed class SharedReadOnlyLoginService
         }
         else
         {
-            // NEGATIVE path (absent / disabled / revoked / locked / passwordless credential): run a DECOY verify
-            // against a fixed dummy hash so the PBKDF2 cost is paid regardless of credential state — no
+            // NEGATIVE path (absent / disabled / revoked / locked / passwordless credential, or a closed exercise): run
+            // a DECOY verify against a fixed dummy hash so the PBKDF2 cost is paid regardless of credential state — no
             // enabled-state timing oracle (story-07 fold of the story-06 Gate-1 Minor). Always returns false.
             authenticated = _hasher.VerifyDecoy(request.Password);
         }

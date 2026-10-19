@@ -10,7 +10,7 @@ using Pulse.WebApi.Features.Identity.Sessions;
 /// <summary>
 /// The personal-link sign-in behind <c>POST /api/auth/join { token }</c> (easy-login/03, EL-7): the sibling of
 /// <c>ParticipantLoginService</c>. A token whose link is active, in the HOST-RESOLVED exercise, for an enabled account,
-/// while the exercise is Staged/Live/Paused, mints exactly the participant session a password sign-in mints
+/// while the exercise accepts participant reads (Staged/Live/Paused/Completed), mints exactly the participant session a password sign-in mints
 /// (<see cref="ParticipantSessionRequests"/>). Anything else is one uniform refusal. Scoped, matching the
 /// <see cref="PulseDbContext"/> unit of work.
 /// </summary>
@@ -142,12 +142,13 @@ public sealed class JoinLoginService
             .FirstOrDefaultAsync(cancellationToken);
 
         // 4. Admit only an enabled participant-world account (participant / pio, as for the day word: Gate-2 S-6) in an
-        //    exercise participants may enter (EL-8, EL-11). Every other case is the same refusal and the same
-        //    identity-less event: no target, never the token.
+        //    exercise whose lifecycle accepts participant reads (EL-8; one rule for all, 2026-10-19: staged, live,
+        //    paused, completed). Every other case is the same refusal and the same identity-less event: no target,
+        //    never the token.
         if (match is null
             || match.Account.DisabledAt is not null
             || !ParticipantSessionRequests.IsParticipantWorldRole(match.Enrollment.Role)
-            || !ExerciseLifecycleStates.IsParticipantAccessible(facts.Status))
+            || !ExerciseLifecycleStates.IsParticipantSignInAllowed(facts.Status))
         {
             _dbContext.TelemetryEvents.Add(EasyLoginTelemetry.LinkLoginFailed(scope.Value, time));
             await _dbContext.SaveChangesAsync(cancellationToken);
@@ -252,7 +253,8 @@ public enum JoinLoginOutcome
 
     /// <summary>
     /// Any other refusal: unknown, malformed, revoked, superseded or another exercise's token, a disabled account, an
-    /// account role outside the participant world, or an exercise outside Staged/Live/Paused (<c>401</c>, bodyless). One
+    /// account role outside the participant world, or an exercise whose lifecycle refuses participant reads (build, archived,
+    /// unknown) (<c>401</c>, bodyless). One
     /// failure event was emitted.
     /// </summary>
     Rejected,

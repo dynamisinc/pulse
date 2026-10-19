@@ -47,7 +47,6 @@ public sealed class JoinLoginServiceTests
         DisabledAccount,
         StaffAdjacentRole,
         ExerciseInBuild,
-        ExerciseCompleted,
         ExerciseArchived,
     }
 
@@ -133,7 +132,8 @@ public sealed class JoinLoginServiceTests
     [InlineData("staged")]
     [InlineData("live")]
     [InlineData("paused")]
-    public async Task Join_IsAdmitted_InEveryParticipantAccessibleState(string status)
+    [InlineData("completed")]
+    public async Task Join_IsAdmitted_InEveryParticipantReadState(string status)
     {
         var exercise = await PersonalLinkSeed.ExerciseAsync(_fixture, status: status);
         var account = await PersonalLinkSeed.AccountAsync(_fixture, exercise.Id);
@@ -142,7 +142,7 @@ public sealed class JoinLoginServiceTests
         await using var context = ScopedContext(exercise.Id);
         var result = await ServiceFor(context, exercise.Id, new RecordingSessionIssuer()).JoinAsync(new JoinRequestBody { Token = token });
 
-        result.Outcome.Should().Be(JoinLoginOutcome.Authenticated, "participants may enter a {0} exercise (EL-11)", status);
+        result.Outcome.Should().Be(JoinLoginOutcome.Authenticated, "one rule for all (2026-10-19): sign-in is admitted wherever participant reads are, so {0} admits", status);
     }
 
     [RequiresDockerTheory]
@@ -154,14 +154,12 @@ public sealed class JoinLoginServiceTests
     [InlineData(RejectCase.DisabledAccount)]
     [InlineData(RejectCase.StaffAdjacentRole)]
     [InlineData(RejectCase.ExerciseInBuild)]
-    [InlineData(RejectCase.ExerciseCompleted)]
     [InlineData(RejectCase.ExerciseArchived)]
     public async Task Join_EveryOtherOutcome_IsTheSameRefusal_WithOneIdentitylessTargetlessEvent(RejectCase rejectCase)
     {
         var status = rejectCase switch
         {
             RejectCase.ExerciseInBuild => "build",
-            RejectCase.ExerciseCompleted => "completed",
             RejectCase.ExerciseArchived => "archived",
             _ => "live",
         };

@@ -59,11 +59,21 @@ public sealed class RoleMatrixHost : WebApplicationFactory<Program>
 {
     private const string ConnectionStringEnvVar = "ConnectionStrings__DefaultConnection";
 
+    private readonly bool _timeoutAutoSendAuthorized;
+
     /// <summary>Creates the host against <paramref name="connectionString"/> (a never-connecting one when <c>null</c>).</summary>
-    public RoleMatrixHost(string? connectionString)
-        => Environment.SetEnvironmentVariable(
+    /// <param name="connectionString">The test database, or <c>null</c> for a never-connecting one.</param>
+    /// <param name="timeoutAutoSendAuthorized">
+    /// The governed timeout-auto-send flag. On by default so swamped-mode probes reach the lead gate; off only for the
+    /// test that pins the gate's order against the governance refusal (#636 S-002).
+    /// </param>
+    public RoleMatrixHost(string? connectionString, bool timeoutAutoSendAuthorized = true)
+    {
+        _timeoutAutoSendAuthorized = timeoutAutoSendAuthorized;
+        Environment.SetEnvironmentVariable(
             ConnectionStringEnvVar,
             connectionString ?? "Server=nonexistent;Database=pulse;Trusted_Connection=False;Connect Timeout=1;");
+    }
 
     /// <summary>Every mapped route endpoint of the live host.</summary>
     public IReadOnlyList<RouteEndpoint> RouteEndpoints() =>
@@ -80,7 +90,7 @@ public sealed class RoleMatrixHost : WebApplicationFactory<Program>
         builder.UseSetting("Generation:Governance:AmbientAutonomyAuthorized", "true");
         // The Phase-1 timeout-auto-send flag (PROVIDER-GOVERNANCE §8) is ON here so swamped-mode probes reach the
         // lead gate this suite is about; the flag-off refusal is covered by EngineReviewSafetyInvariantTests.
-        builder.UseSetting("Generation:Governance:TimeoutAutoSendAuthorized", "true");
+        builder.UseSetting("Generation:Governance:TimeoutAutoSendAuthorized", _timeoutAutoSendAuthorized ? "true" : "false");
 
         builder.ConfigureTestServices(services =>
         {

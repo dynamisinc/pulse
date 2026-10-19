@@ -11,6 +11,7 @@ using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.Identity.Accounts;
 using Pulse.WebApi.Features.Identity.Sessions;
 using Pulse.WebApi.Tests.Data;
+using Pulse.WebApi.Tests.Features.ExerciseConfiguration.Lifecycle;
 using Pulse.WebApi.Tests.Features.Identity.PersonalLinks;
 using Pulse.WebApi.Tests.Features.Identity.Staff;
 using Pulse.WebApi.Tests.Features.EngineRuntime.Clock;
@@ -36,7 +37,10 @@ public sealed class ParticipantLoginServiceTests
     private ParticipantLoginService ServiceFor(PulseDbContext context, Guid? scope, ISessionIssuer issuer) =>
         new(context, new ExerciseContext { CurrentExerciseId = scope }, issuer, _hasher, TestScenarioNow.Over(context));
 
-    private async Task<Exercise> SeedExerciseAsync(DateTimeOffset? scenarioTime, string timeZone = "America/Chicago")
+    private async Task<Exercise> SeedExerciseAsync(
+        DateTimeOffset? scenarioTime,
+        string timeZone = "America/Chicago",
+        string status = "active")
     {
         var exercise = new Exercise
         {
@@ -44,7 +48,7 @@ public sealed class ParticipantLoginServiceTests
             Id = Guid.NewGuid(),
             Name = $"Exercise {Guid.NewGuid():N}",
             TimeZone = timeZone,
-            Status = "active",
+            Status = status,
         };
 
         await using var seed = _fixture.CreateContext();
@@ -169,6 +173,78 @@ public sealed class ParticipantLoginServiceTests
         await using var verify = _fixture.CreateContext(new ExerciseContext { CurrentExerciseId = exercise.Id });
         (await verify.Accounts.SingleAsync(a => a.Id == account.Id)).LastLoginAt.Should().BeNull(
             "a failed login must not record LastLoginAt");
+    }
+
+    /// <summary>
+    /// One rule for all (Tom, 2026-10-19): a password sign-in is admitted exactly where participant reads are accepted
+    /// (<c>ExerciseLifecycleStates.IsParticipantSignInAllowed</c>): staged, live, paused and completed.
+    /// </summary>
+    [RequiresDockerTheory]
+    [InlineData("staged")]
+    [InlineData("live")]
+    [InlineData("paused")]
+    [InlineData("completed")]
+    public async Task Login_RightPassword_IsAdmitted_InEveryParticipantReadState(string status)
+    {
+        var exercise = await SeedExerciseAsync(scenarioTime: null, status: status);
+        await SeedAccountAsync(exercise.Id, "alice", "correct-password");
+
+        var issuer = new RecordingSessionIssuer();
+        await using var context = _fixture.CreateContext(new ExerciseContext { CurrentExerciseId = exercise.Id });
+        var result = await ServiceFor(context, exercise.Id, issuer)
+            .LoginAsync(new ParticipantLoginRequest { Username = "alice", Password = "correct-password" });
+
+        result.Outcome.Should().Be(ParticipantLoginOutcome.Authenticated, "a {0} exercise accepts participant reads, so it admits sign-in", status);
+        issuer.IssueCount.Should().Be(1);
+    }
+
+    /// <summary>
+    /// One rule for all: build, archived and an unrecognized status refuse a password sign-in even with the right
+    /// password, and the refusal is exactly a wrong password's (same outcome, same identity-less failure event with
+    /// the attempted handle, no session, no LastLoginAt), so the response never reveals the lifecycle state (NFR-009).
+    /// </summary>
+    [RequiresDockerTheory]
+    [InlineData("build")]
+    [InlineData("archived")]
+    [InlineData("scheduled")]
+    [InlineData("not-a-state")]
+    public async Task Login_RightPassword_InAStateThatRefusesParticipantReads_IsRefusedExactlyLikeAWrongPassword(string status)
+    {
+        var exercise = await SeedExerciseAsync(scenarioTime: null, status: status);
+        var account = await SeedAccountAsync(exercise.Id, "alice", "correct-password");
+
+        var issuer = new RecordingSessionIssuer();
+        ParticipantLoginResult right;
+        ParticipantLoginResult wrong;
+        await using (var context = _fixture.CreateContext(new ExerciseContext { CurrentExerciseId = exercise.Id }))
+        {
+            right = await ServiceFor(context, exercise.Id, issuer)
+                .LoginAsync(new ParticipantLoginRequest { Username = "alice", Password = "correct-password" });
+        }
+
+        await using (var context = _fixture.CreateContext(new ExerciseContext { CurrentExerciseId = exercise.Id }))
+        {
+            wrong = await ServiceFor(context, exercise.Id, issuer)
+                .LoginAsync(new ParticipantLoginRequest { Username = "alice", Password = "WRONG" });
+        }
+
+        right.Outcome.Should().Be(ParticipantLoginOutcome.RejectedCredential, "a {0} exercise admits no participant sign-in", status);
+        right.Outcome.Should().Be(wrong.Outcome, "the lifecycle refusal is indistinguishable from a wrong password");
+        right.Issued.Should().BeNull();
+        right.ValidationError.Should().BeNull("a refusal says nothing about why");
+        issuer.IssueCount.Should().Be(0, "no session in a {0} exercise", status);
+
+        var events = await ReadLoginEventsAsync(exercise.Id);
+        events.Should().HaveCount(2, "each attempt emits exactly one login event");
+        events.Should().OnlyContain(e =>
+            e.Payload == PasswordFailurePayload
+            && e.Actor.Kind == "system"
+            && e.Actor.ParticipantId == null
+            && e.Target != null && e.Target.EntityType == "accountHandle" && e.Target.EntityId == "alice",
+            "the lifecycle refusal records the same identity-less failure a wrong password records");
+
+        await using var verify = _fixture.CreateContext(new ExerciseContext { CurrentExerciseId = exercise.Id });
+        (await verify.Accounts.SingleAsync(a => a.Id == account.Id)).LastLoginAt.Should().BeNull();
     }
 
     [RequiresDockerFact]

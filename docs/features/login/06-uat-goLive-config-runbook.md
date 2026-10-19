@@ -364,6 +364,8 @@ done
 - **Valid roles:** `controller`, `planner`, `evaluator`, `orgAdmin`. `orgAdmin` enrolls the person as a
   planner and sets the org-admin grant.
 - **A 400 naming the allowlist** means step 2 has not landed yet.
+- **Login status before and after this step:** `401` means the allowlist entry is not live yet (step 2 has not
+  landed, or the app has not restarted); `403` means the login authenticated but has no enrollment yet.
 
 Other routes do not do this:
 

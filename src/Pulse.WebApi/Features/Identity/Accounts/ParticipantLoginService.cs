@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.EngineRuntime.Clock;
+using Pulse.WebApi.Features.ExerciseConfiguration.Lifecycle;
 using Pulse.WebApi.Features.Identity.EasyLogin;
 using Pulse.WebApi.Features.Identity.Sessions;
 
@@ -182,9 +183,12 @@ public sealed class ParticipantLoginService
         // easy-login/03 (EL-8): a person staff have DISABLED is refused here too, deliberately AFTER Verify() has run,
         // so the timing, the 401 and the failure event are exactly those of a wrong password. Likewise a legacy account
         // whose enrollment carries a STAFF role (migrated by AdminIdentityFoundation; no longer creatable): this path
-        // mints participant-world sessions only (XC-002), the same gate the join-link and day-word paths apply.
+        // mints participant-world sessions only (XC-002), the same gate the join-link and day-word paths apply. And, by the
+        // same "one rule for all" (2026-10-19), an exercise whose lifecycle refuses participant reads (build, archived,
+        // unknown) admits no sign-in: the identical refusal, so the response never reveals the lifecycle state.
         if (account is null || !authenticated || account.DisabledAt is not null
-            || !ParticipantSessionRequests.IsParticipantWorldRole(account.Enrollment.Role))
+            || !ParticipantSessionRequests.IsParticipantWorldRole(account.Enrollment.Role)
+            || !ExerciseLifecycleStates.IsParticipantSignInAllowed(exercise.Status))
         {
             // Fail closed: no session, and a failure event with NO session identity (target = the sanitized
             // attempted handle for audit). One SaveChanges — the write-guard runs here against the valid scope.
@@ -324,7 +328,7 @@ public enum ParticipantLoginOutcome
     /// <summary>The request failed validation (missing/oversized field) — the endpoint returns 400.</summary>
     Invalid,
 
-    /// <summary>The credential was rejected (unknown handle / credential-less / wrong password / disabled account) — 401, fail closed.</summary>
+    /// <summary>The credential was rejected (unknown handle / credential-less / wrong password / disabled account / an exercise whose lifecycle refuses participant reads) — 401, fail closed.</summary>
     RejectedCredential,
 
     /// <summary>No exercise scope resolved from the host — the endpoint returns 401 (fail closed, no telemetry).</summary>

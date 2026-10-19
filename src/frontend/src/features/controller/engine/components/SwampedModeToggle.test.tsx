@@ -52,7 +52,7 @@ function stubSettings(providerCutToFake: boolean, timeoutAutoSendAuthorized?: bo
   } as unknown as ReturnType<typeof useEngineSettings>)
 }
 
-beforeEach(() => stubSettings(false))
+beforeEach(() => stubSettings(false, true))
 
 beforeEach(() => {
   access.canControl = true
@@ -68,6 +68,10 @@ function stub(overrides: Partial<UseSwampedModeResult> = {}): UseSwampedModeResu
     swampedMode: false,
     isLead: true,
     setSwampedMode: vi.fn(),
+    pending: false,
+    error: null,
+    stale: false,
+    lastConfirmedAt: null,
     ...overrides,
   }
 }
@@ -252,7 +256,7 @@ describe('SwampedModeToggle — hold-on-cut qualifier (ADP-042)', () => {
   })
 })
 
-describe('SwampedModeToggle — Phase 1: timeout auto-send not authorized (PROVIDER-GOVERNANCE §8)', () => {
+describe('SwampedModeToggle — timeout auto-send not authorized (PROVIDER-GOVERNANCE §8)', () => {
   it('disables the ON control and describes it with a text + icon note', () => {
     stubSettings(false, false)
     const setSwampedMode = vi.fn()
@@ -262,7 +266,7 @@ describe('SwampedModeToggle — Phase 1: timeout auto-send not authorized (PROVI
     const toggle = screen.getByTestId('swamped-mode-enable-toggle')
     expect(toggle).toBeDisabled()
     const note = screen.getByTestId('swamped-mode-not-authorized-note')
-    expect(note).toHaveTextContent('Timeout auto-send is off until the lead-controller role ships.')
+    expect(note).toHaveTextContent('Timeout auto-send is not authorized on this environment.')
     expect(note.querySelector('svg')).not.toBeNull()
     expect(toggle).toHaveAttribute('aria-describedby', note.id)
 
@@ -314,7 +318,7 @@ describe('SwampedModeToggle — Phase 1: timeout auto-send not authorized (PROVI
     const toggle = screen.getByTestId('swamped-mode-enable-toggle')
     expect(toggle).toBeDisabled()
     const note = screen.getByTestId('swamped-mode-not-authorized-note')
-    expect(note).toHaveTextContent('Timeout auto-send is off')
+    expect(note).toHaveTextContent('Timeout auto-send is not authorized')
     expect(note.querySelector('svg')).not.toBeNull()
     expect(screen.queryByTestId('swamped-mode-non-lead-note')).not.toBeInTheDocument()
     fireEvent.click(toggle)
@@ -330,5 +334,189 @@ describe('SwampedModeToggle — Phase 1: timeout auto-send not authorized (PROVI
     fireEvent.click(screen.getByTestId('swamped-mode-turn-off-button'))
     fireEvent.click(screen.getByTestId('swamped-mode-turn-off-confirm'))
     expect(setSwampedMode).toHaveBeenCalledWith(false)
+  })
+})
+
+describe('SwampedModeToggle — server-driven pending + refusal', () => {
+  it('marks the switch unavailable while a request is pending, without native disabled (keeps focus, WR-101)', () => {
+    const setSwampedMode = vi.fn()
+    mockedUseSwampedMode.mockReturnValue(stub({ pending: true, setSwampedMode }))
+    render(<SwampedModeToggle />)
+
+    const toggle = screen.getByTestId('swamped-mode-enable-toggle')
+    toggle.focus()
+    expect(toggle).not.toBeDisabled()
+    expect(toggle).toHaveAttribute('aria-disabled', 'true')
+    expect(toggle).toHaveAttribute('aria-busy', 'true')
+    expect(toggle).toHaveFocus()
+    fireEvent.click(toggle)
+    expect(setSwampedMode).not.toHaveBeenCalled()
+  })
+
+  it('shows a refusal inline as text + icon in a status region', () => {
+    mockedUseSwampedMode.mockReturnValue(stub({ error: 'Timeout auto-send is not authorized.' }))
+    render(<SwampedModeToggle />)
+
+    const err = screen.getByTestId('swamped-mode-error')
+    expect(err).toHaveAttribute('role', 'status')
+    expect(err).toHaveTextContent('Timeout auto-send is not authorized.')
+    expect(err.querySelector('svg')).not.toBeNull()
+  })
+
+  it('keeps an always-mounted, empty status region when there is no error', () => {
+    mockedUseSwampedMode.mockReturnValue(stub())
+    render(<SwampedModeToggle />)
+    const region = screen.getByTestId('swamped-mode-error')
+    expect(region).toHaveAttribute('role', 'status')
+    expect(region).toBeEmptyDOMElement()
+    expect(screen.getByTestId('swamped-mode-enable-toggle')).not.toHaveAttribute('aria-describedby')
+  })
+
+  it('ties the switch to the status region while it holds an error', () => {
+    mockedUseSwampedMode.mockReturnValue(stub({ error: 'Only the lead controller can turn swamped mode on.' }))
+    render(<SwampedModeToggle />)
+    expect(screen.getByTestId('swamped-mode-enable-toggle')).toHaveAttribute(
+      'aria-describedby',
+      'swamped-mode-status',
+    )
+  })
+
+  it('does not claim ACTIVE when swamped is on but auto-send is not authorized (text + icon)', () => {
+    stubSettings(false, false)
+    mockedUseSwampedMode.mockReturnValue(stub({ swampedMode: true }))
+    render(<SwampedModeToggle />)
+    const banner = screen.getByTestId('swamped-mode-active-banner')
+    expect(banner).toHaveTextContent('TIMEOUT AUTO-SEND IS NOT AUTHORIZED')
+    expect(banner).not.toHaveTextContent('TIMEOUT AUTO-SEND IS ACTIVE')
+    expect(banner.querySelector('svg')).not.toBeNull()
+  })
+
+  it('keeps the OFF confirm open while the request is pending (not closed as if done)', () => {
+    mockedUseSwampedMode.mockReturnValue(stub({ swampedMode: true, isLead: false }))
+    const { rerender } = render(<SwampedModeToggle />)
+    fireEvent.click(screen.getByTestId('swamped-mode-turn-off-button'))
+    // Click confirm while still "not pending" would close at once; model a queued change:
+    mockedUseSwampedMode.mockReturnValue(stub({ swampedMode: true, isLead: false, pending: true }))
+    rerender(
+      <ThemeProvider theme={cobraTheme}>
+        <SwampedModeToggle />
+      </ThemeProvider>,
+    )
+    expect(screen.getByTestId('swamped-mode-turn-off-confirm')).toBeDisabled()
+    expect(screen.queryByTestId('swamped-mode-turn-off-button')).not.toBeInTheDocument()
+  })
+
+  it('disables the non-lead OFF confirm while pending', () => {
+    mockedUseSwampedMode.mockReturnValue(stub({ swampedMode: true, isLead: false, pending: true }))
+    render(<SwampedModeToggle />)
+    fireEvent.click(screen.getByTestId('swamped-mode-turn-off-button'))
+    expect(screen.getByTestId('swamped-mode-turn-off-confirm')).toBeDisabled()
+  })
+})
+
+describe('SwampedModeToggle — banner follows the inputs expiries really use (S2)', () => {
+  /** Full-enough settings for the banner: authorized, and the autonomy fields it reads. */
+  function stubBanner(
+    over: {
+      providerCutToFake?: boolean
+      timeoutAutoSendAuthorized?: boolean
+      autonomy?: {
+        generationStopped?: boolean
+        safetyClampActive?: boolean
+        degradedReason?: string | null
+        effectiveLevel?: string | null
+      }
+    },
+  ): void {
+    mockedUseEngineSettings.mockReturnValue({
+      settings: {
+        providerCutToFake: false,
+        timeoutAutoSendAuthorized: true,
+        ...over,
+        autonomy: {
+          generationStopped: false,
+          safetyClampActive: false,
+          degradedReason: null,
+          ...over.autonomy,
+        },
+      },
+    } as unknown as ReturnType<typeof useEngineSettings>)
+  }
+
+  const cases: ReadonlyArray<[string, Parameters<typeof stubBanner>[0], string, RegExp]> = [
+    ['healthy', {}, 'TIMEOUT AUTO-SEND IS ACTIVE', /publish instead of holding/],
+    ['cut to Fake', { providerCutToFake: true }, 'TIMEOUT AUTO-SEND IS SUSPENDED', /cut to Fake/],
+    [
+      'kill switch full stop',
+      { autonomy: { generationStopped: true } },
+      'TIMEOUT AUTO-SEND IS SUSPENDED',
+      /fully stopped/,
+    ],
+    [
+      'kill switch suggest-only clamp',
+      { autonomy: { safetyClampActive: true } },
+      'TIMEOUT AUTO-SEND IS SUSPENDED',
+      /clamped to suggest-only/,
+    ],
+    [
+      'degraded mode',
+      { autonomy: { safetyClampActive: true, degradedReason: 'provider unavailable' } },
+      'TIMEOUT AUTO-SEND IS SUSPENDED',
+      /degraded mode/,
+    ],
+    [
+      'default lowered to Suggest (no clamp)',
+      { autonomy: { effectiveLevel: 'suggest' } },
+      'TIMEOUT AUTO-SEND IS SUSPENDED',
+      /autonomy is Suggest; expired timers hold/,
+    ],
+    [
+      'effective level delayed-auto stays ACTIVE',
+      { autonomy: { effectiveLevel: 'delayed-auto' } },
+      'TIMEOUT AUTO-SEND IS ACTIVE',
+      /publish instead of holding/,
+    ],
+    [
+      'not authorized',
+      { timeoutAutoSendAuthorized: false },
+      'TIMEOUT AUTO-SEND IS NOT AUTHORIZED',
+      /not authorized timeout auto-send/,
+    ],
+  ]
+
+  it.each(cases)('%s -> %s (text + icon)', (_name, over, title, detail) => {
+    stubBanner(over)
+    mockedUseSwampedMode.mockReturnValue(stub({ swampedMode: true }))
+    render(<SwampedModeToggle />)
+
+    const banner = screen.getByTestId('swamped-mode-active-banner')
+    expect(banner).toHaveTextContent(title)
+    expect(banner).toHaveTextContent(detail)
+    expect(banner.querySelector('svg')).not.toBeNull()
+    if (title !== 'TIMEOUT AUTO-SEND IS ACTIVE') {
+      expect(banner).not.toHaveTextContent('TIMEOUT AUTO-SEND IS ACTIVE')
+    }
+  })
+})
+
+describe('SwampedModeToggle — stale console note (W3)', () => {
+  it('shows text + icon with the last confirmed time inside the status region when stale', () => {
+    mockedUseSwampedMode.mockReturnValue(
+      stub({ stale: true, lastConfirmedAt: new Date(2033, 8, 4, 9, 7).getTime() }),
+    )
+    render(<SwampedModeToggle />)
+
+    const note = screen.getByTestId('swamped-mode-stale-note')
+    expect(note).toHaveTextContent('Swamped state could not be refreshed. Last confirmed 09:07')
+    const region = screen.getByTestId('swamped-mode-error')
+    expect(region).toHaveAttribute('role', 'status')
+    expect(region).toContainElement(note)
+    expect(region.querySelector('svg')).not.toBeNull()
+  })
+
+  it('shows no note when fresh', () => {
+    mockedUseSwampedMode.mockReturnValue(stub())
+    render(<SwampedModeToggle />)
+    expect(screen.queryByTestId('swamped-mode-stale-note')).not.toBeInTheDocument()
   })
 })

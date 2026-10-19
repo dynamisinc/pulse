@@ -62,7 +62,7 @@ using Pulse.WebApi.Features.Identity.Sessions;
 /// <para>
 /// <b>Never creates or changes an account (COR-011)</b> beyond recording <see cref="Account.LastLoginAt"/> on success.
 /// Refuses disabled accounts (<see cref="Account.DisabledAt"/>), any role outside the participant world, and any
-/// exercise that is not Staged/Live/Paused (EL-11). <b>The word appears nowhere</b>: not in a log (nothing here logs),
+/// exercise whose lifecycle refuses participant reads (build, archived, unknown; one rule for all, 2026-10-19). <b>The word appears nowhere</b>: not in a log (nothing here logs),
 /// an exception, an error body or telemetry. The failure event's target is the sanitized attempted sign-in name, nulled
 /// when it normalises to the attempted word or verifies as today's word, and dropped by story 01's redactor when it
 /// looks like any other secret.
@@ -221,10 +221,11 @@ public sealed class WordLoginService
             .Include(a => a.Enrollment)
             .FirstOrDefaultAsync(a => a.ExerciseId == exerciseId && a.Username == signInName, cancellationToken);
 
-        // 6. Everything must hold: today's word, a participant-accessible exercise (EL-11: Staged / Live / Paused; an
-        //    unknown status fails closed), and an enabled participant-world account of that name.
+        // 6. Everything must hold: today's word, an exercise whose lifecycle accepts participant reads (one rule for all,
+        //    2026-10-19: Staged / Live / Paused / Completed; an unknown status fails closed), and an enabled
+        //    participant-world account of that name.
         if (!wordMatches
-            || !ExerciseLifecycleStates.IsParticipantAccessible(facts.Status)
+            || !ExerciseLifecycleStates.IsParticipantSignInAllowed(facts.Status)
             || account is null
             || account.DisabledAt is not null
             || !ParticipantSessionRequests.IsParticipantWorldRole(account.Enrollment.Role))

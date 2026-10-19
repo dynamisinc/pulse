@@ -7,6 +7,7 @@ using Microsoft.Extensions.Options;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.EngineRuntime.Clock;
+using Pulse.WebApi.Features.ExerciseConfiguration.Lifecycle;
 using Pulse.WebApi.Features.Identity.EasyLogin;
 
 /// <summary>
@@ -38,9 +39,16 @@ using Pulse.WebApi.Features.Identity.EasyLogin;
 /// of the CURRENT exercise day and the access expiry is <c>min(now + SessionLifetime, end of day)</c>, so a session can
 /// never slide into the next day. Once the day of the session's last issue or refresh has ended, refresh is the
 /// ordinary fail-closed 401 with no event; a row whose stored window was still open at that point (stamped under the
-/// old sliding rule) is also revoked, so it reads as ended in the audit trail and a retry stops at the revoked check. Refresh is deliberately NOT refused at EndEx (<c>completed</c>): the
-/// lifecycle gate already refuses participant data routes, and refusing refresh would bounce participants off the
-/// COR-054 EndEx overlay. Staff and read-only sessions renew exactly as before.
+/// old sliding rule) is also revoked, so it reads as ended in the audit trail and a retry stops at the revoked check.
+/// Staff and read-only sessions are not day-capped and renew exactly as before.
+/// </para>
+/// <para>
+/// <b>One rule for all (Tom, 2026-10-19).</b> Every non-staff session (today <c>participant</c> and shared view-only
+/// <c>readonly</c>; any future kind fails closed) renews only while its bound exercise's lifecycle accepts participant reads
+/// (<see cref="ExerciseLifecycleStates.IsParticipantSignInAllowed"/>: staged, live, paused, completed), the same rule
+/// every participant sign-in applies. In <c>build</c>, <c>archived</c>, an unknown status, or when the exercise cannot
+/// be read, the refresh is refused exactly like a revoked session (401, no event, nothing written). <c>completed</c>
+/// still renews, so participants are not bounced off the COR-054 EndEx overlay. Staff sessions are not checked.
 /// </para>
 /// <para>
 /// <b>Only an enabled account renews (easy-login Gate-2 W-001, S-1).</b> A <c>participant</c>-kind session bound to an
@@ -157,7 +165,8 @@ public sealed class SessionService
     /// <c>session.refreshed</c> XC-004 event in the same unit of work. Fails closed
     /// (<see cref="RefreshOutcome.Invalid"/> → 401, no event) on an absent/unknown refresh token, or one whose session
     /// is revoked or whose refresh window has lapsed, or (a participant session) whose account is not an enabled account
-    /// of the session's own exercise, or (a capped participant session) whose exercise day has ended. In that last case
+    /// of the session's own exercise, or (a participant or read-only session) whose exercise's lifecycle refuses
+    /// participant reads, or (a capped participant session) whose exercise day has ended. In that last case
     /// the session is also revoked (still no event), because its stored window was still open.
     /// </summary>
     /// <param name="rawRefreshToken">The presented raw refresh token, or <c>null</c> when none.</param>
@@ -201,6 +210,17 @@ public sealed class SessionService
         var facts = session.ExerciseId is { } boundExerciseId
             ? await _exerciseFacts.GetAsync(boundExerciseId, cancellationToken)
             : null;
+
+        // One rule for all (2026-10-19): a participant-world session renews only while its exercise accepts participant
+        // reads, the same predicate every participant sign-in applies. Refused exactly as a revoked session is: 401, no
+        // event, nothing written, so the response never reveals the lifecycle state. Missing facts fail closed. Staff
+        // sessions are out of scope and renew in every state. Every kind that is NOT staff is checked (not a list of
+        // participant-world kinds), so a future session kind fails closed until it is deliberately exempted.
+        if (!string.Equals(session.Kind, StaffKind, StringComparison.Ordinal)
+            && !ExerciseLifecycleStates.IsParticipantSignInAllowed(facts?.Status))
+        {
+            return RefreshResult.Invalid();
+        }
 
         DateTimeOffset? endOfExerciseDay = null;
         if (ParticipantSessionCap.AppliesTo(session.Kind, _options))
