@@ -130,7 +130,7 @@ public sealed class ParticipantLinkServiceTests
     {
         await using var context = ModelOnlyContext();
         var service = PersonalLinkSeed.LinkService(context, Guid.NewGuid(), _protector);
-        var account = new Account { Id = Guid.NewGuid(), Username = "x", DisplayName = "X", Role = "participant" };
+        var account = new Account { Id = Guid.NewGuid(), Username = "x", DisplayName = "X", Enrollment = new Enrollment { Role = "participant" } };
 
         var act = () => service.EnsureActiveAsync(account, null, Now);
 
@@ -160,7 +160,7 @@ public sealed class ParticipantLinkServiceTests
             ExerciseId = accountExercise,
             Username = "x",
             DisplayName = "X",
-            Role = "participant",
+            Enrollment = new Enrollment { Id = Guid.NewGuid(), ExerciseId = accountExercise, Role = "participant" },
         };
 
         var ensure = () => service.EnsureActiveAsync(account, null, Now);

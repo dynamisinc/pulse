@@ -68,10 +68,16 @@ public static class SessionPrincipal
         {
             new(SessionIdClaimType, session.SessionId.ToString()),
             new(SessionKindClaimType, session.Kind),
-            new(ExerciseIdClaimType, session.ExerciseId.ToString()),
             new(PrincipalIdClaimType, session.PrincipalId),
             new(ActingHumanIdClaimType, session.ActingHumanId),
         };
+
+        // identity-auth-roles/16: an ORG-SCOPE session (ADMIN-IDENTITY-MODEL §1.2) has no exercise, so it carries no
+        // exercise claim at all — never a Guid.Empty stand-in.
+        if (session.ExerciseId is { } exerciseId)
+        {
+            claims.Add(new Claim(ExerciseIdClaimType, exerciseId.ToString()));
+        }
 
         if (session.StaffUserId is { } staffUserId)
         {
@@ -113,10 +119,22 @@ public static class SessionPrincipal
         var principalId = identity.FindFirst(PrincipalIdClaimType)?.Value;
         var actingHumanId = identity.FindFirst(ActingHumanIdClaimType)?.Value;
 
+        // The exercise claim is ABSENT for an org-scope session (identity-auth-roles/16) and then reads as null; when
+        // present it must still be a real, non-empty id — a malformed or Guid.Empty claim fails the whole read closed.
+        var exerciseClaim = identity.FindFirst(ExerciseIdClaimType)?.Value;
+        Guid? exerciseId = null;
+        if (exerciseClaim is not null)
+        {
+            if (!Guid.TryParse(exerciseClaim, out var parsedExerciseId) || parsedExerciseId == Guid.Empty)
+            {
+                return null;
+            }
+
+            exerciseId = parsedExerciseId;
+        }
+
         if (!Guid.TryParse(identity.FindFirst(SessionIdClaimType)?.Value, out var sessionId)
-            || !Guid.TryParse(identity.FindFirst(ExerciseIdClaimType)?.Value, out var exerciseId)
             || sessionId == Guid.Empty
-            || exerciseId == Guid.Empty
             // Whitespace, not just empty: a blank-but-present kind/principal/human would yield an identity that
             // stamps an unattributable telemetry row, which is the outcome this whole boundary exists to prevent.
             || string.IsNullOrWhiteSpace(kind)
@@ -161,8 +179,11 @@ public sealed class SessionIdentity
     /// <summary>The persisted <c>Session.Id</c>.</summary>
     public required Guid SessionId { get; init; }
 
-    /// <summary>The session's bound exercise (COR-001/COR-012).</summary>
-    public required Guid ExerciseId { get; init; }
+    /// <summary>
+    /// The session's bound exercise (COR-001/COR-012), or <c>null</c> for an ORG-SCOPE staff session
+    /// (identity-auth-roles/16) — every exercise-scoped consumer must fail closed on <c>null</c>.
+    /// </summary>
+    public required Guid? ExerciseId { get; init; }
 
     /// <summary>The session kind — <c>participant</c> / <c>staff</c> / <c>readonly</c>.</summary>
     public required string Kind { get; init; }

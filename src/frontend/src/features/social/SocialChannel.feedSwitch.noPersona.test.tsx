@@ -35,6 +35,10 @@ const SCENARIO_NOW = new Date('2033-09-04T14:30:00.000Z')
 /** A shared-terminal participant session with no persona bound (COR-015). */
 const NO_PERSONA_SESSION: Session = {
   exerciseId: 'ex-mock-0001',
+  scope: 'exercise',
+  personId: null,
+  world: 'participant',
+  isLead: false,
   accountId: 'acct-shared',
   role: 'participant',
   personaId: undefined,

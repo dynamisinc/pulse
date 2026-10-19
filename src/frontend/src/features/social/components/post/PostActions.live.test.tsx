@@ -37,6 +37,10 @@ vi.mock('@/core/services/api', () => ({
 
 const LIVE_SESSION: Session = {
   exerciseId: 'ex-live-0001',
+  scope: 'exercise',
+  personId: null,
+  world: 'participant',
+  isLead: false,
   accountId: 'acct-live',
   role: 'participant',
   personaId: 'persona-live-viewer',

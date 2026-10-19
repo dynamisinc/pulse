@@ -369,7 +369,7 @@ public sealed class DayWordEndpointsHttpTests
         envelope.EnumerateObject().Select(p => p.Name).Should().BeEquivalentTo(["token", "refreshToken", "session"]);
         var session = envelope.GetProperty("session");
         session.EnumerateObject().Select(p => p.Name).Should().BeEquivalentTo(
-            ["exerciseId", "accountId", "role", "personaId", "actingHumanId", "isReadOnly", "expiresAt"],
+            ["exerciseId", "accountId", "role", "personaId", "actingHumanId", "isReadOnly", "expiresAt", "personId", "world", "scope", "isLead"],
             "exactly the /api/auth/login envelope (ParticipantLoginResponseDto)");
         session.GetProperty("exerciseId").GetString().Should().Be(exercise.Id.ToString());
         session.GetProperty("accountId").GetString().Should().Be(account.Id.ToString());

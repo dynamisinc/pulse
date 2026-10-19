@@ -566,9 +566,8 @@ public sealed class PersonaCastSeederTests
                 ExerciseId = exerciseId,
                 Username = $"pio-{Guid.NewGuid():N}",
                 DisplayName = "PIO",
-                Role = "participant",
-                PersonaId = county.Id,
                 CreatedAt = DateTimeOffset.UtcNow,
+                Enrollment = new Enrollment { Id = Guid.NewGuid(), ExerciseId = exerciseId, Role = "participant", PersonaId = county.Id },
             });
             await seed.SaveChangesAsync();
         }
@@ -612,7 +611,7 @@ public sealed class PersonaCastSeederTests
         {
             (await read.Posts.IgnoreQueryFilters().SingleAsync(p => p.Id == postId)).AuthorPersonaId.Should().Be(
                 county.Id, "the county's posts now read as @KestrelCoEM without being touched");
-            (await read.Accounts.IgnoreQueryFilters().SingleAsync(a => a.Id == accountId)).PersonaId.Should().Be(
+            (await read.Accounts.Include(account => account.Enrollment).IgnoreQueryFilters().SingleAsync(a => a.Id == accountId)).Enrollment.PersonaId.Should().Be(
                 county.Id, "a participant bound to the county persona stays bound to it");
         }
 

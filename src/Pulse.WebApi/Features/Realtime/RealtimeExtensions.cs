@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Pulse.WebApi.Features.Social;
 
 /// <summary>
@@ -29,6 +30,10 @@ public static class RealtimeExtensions
 
         services.AddSignalR();
         services.AddScoped<IFeedBroadcaster, SignalRFeedBroadcaster>();
+
+        // identity-auth-roles/16: the connection → session registry the grant-revoke rule cuts connections through.
+        services.TryAddSingleton<SessionConnectionRegistry>();
+        services.TryAddSingleton<ISessionConnectionRevoker, SessionConnectionRevoker>();
 
         return services;
     }

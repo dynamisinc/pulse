@@ -125,6 +125,8 @@ public sealed partial class SessionAuthenticationMiddleware
 
         // Precedence: overwrite the host's provisional write with the session's bound exercise. The settable
         // seam is the concrete ExerciseContext; the DbContext-facing IExerciseContext stays get-only.
+        // identity-auth-roles/16: an ORG-SCOPE session (ExerciseId null) writes null here — deliberately overwriting
+        // any provisional host scope — so CurrentExerciseId stays unset and every exercise-scoped route fails closed.
         if (exerciseContext is ExerciseContext settableExerciseContext)
         {
             settableExerciseContext.CurrentExerciseId = authenticated.ExerciseId;
@@ -143,11 +145,11 @@ public sealed partial class SessionAuthenticationMiddleware
         EventId = 1,
         Level = LogLevel.Warning,
         Message = "Rejecting a participant session bound to exercise {SessionExerciseId} presented on a host that resolved to {HostExerciseId} — a participant session is host-bound; failing closed (403).")]
-    private partial void LogParticipantHostMismatch(Guid sessionExerciseId, Guid? hostExerciseId);
+    private partial void LogParticipantHostMismatch(Guid? sessionExerciseId, Guid? hostExerciseId);
 
     [LoggerMessage(
         EventId = 2,
         Level = LogLevel.Warning,
         Message = "Authenticated a session bound to exercise {ExerciseId} but the registered IExerciseContext ({ExerciseContextType}) is not settable; leaving the scope as host resolution set it.")]
-    private partial void LogExerciseContextNotSettable(Guid exerciseId, Type exerciseContextType);
+    private partial void LogExerciseContextNotSettable(Guid? exerciseId, Type exerciseContextType);
 }

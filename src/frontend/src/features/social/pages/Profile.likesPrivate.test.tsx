@@ -28,6 +28,10 @@ const OWN_ID = 'persona-dreyes_fh'
 
 const READONLY_SESSION: Session = {
   exerciseId: 'ex-mock-0001',
+  scope: 'exercise',
+  personId: null,
+  world: 'participant',
+  isLead: false,
   accountId: 'acct-observer',
   role: 'participant',
   personaId: OWN_ID, // bound, but read-only: an observer is not the persona
@@ -38,6 +42,10 @@ const READONLY_SESSION: Session = {
 
 const NO_PERSONA_SESSION: Session = {
   exerciseId: 'ex-mock-0001',
+  scope: 'exercise',
+  personId: null,
+  world: 'participant',
+  isLead: false,
   accountId: 'acct-shared',
   role: 'participant',
   personaId: undefined,

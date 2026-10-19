@@ -3,6 +3,7 @@ namespace Pulse.WebApi.Features.Identity.Accounts;
 using Microsoft.EntityFrameworkCore;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
+using Pulse.WebApi.Features.Identity.EasyLogin;
 using Pulse.WebApi.Features.Identity.Sessions;
 
 /// <summary>
@@ -160,7 +161,9 @@ public sealed class ParticipantLoginService
         // 4. Resolve the account within the host-resolved scope. The GLOBAL query filter confines this to the
         //    resolved exercise — a handle from another exercise is simply invisible (the isolation guarantee).
         //    Tracked (not AsNoTracking): a successful login updates LastLoginAt.
+        //    identity-auth-roles/16: the enrollment (role + persona) is loaded with it, under the same filter.
         var account = await _dbContext.Accounts
+            .Include(a => a.Enrollment)
             .FirstOrDefaultAsync(a => a.Username == username, cancellationToken);
 
         // 5. Verify the credential. Verify() runs an equivalent PBKDF2 derivation even when the account is unknown
@@ -169,8 +172,11 @@ public sealed class ParticipantLoginService
         var authenticated = _passwordHasher.Verify(account?.CredentialHash, request.Password);
 
         // easy-login/03 (EL-8): a person staff have DISABLED is refused here too, deliberately AFTER Verify() has run,
-        // so the timing, the 401 and the failure event are exactly those of a wrong password.
-        if (account is null || !authenticated || account.DisabledAt is not null)
+        // so the timing, the 401 and the failure event are exactly those of a wrong password. Likewise a legacy account
+        // whose enrollment carries a STAFF role (migrated by AdminIdentityFoundation; no longer creatable): this path
+        // mints participant-world sessions only (XC-002), the same gate the join-link and day-word paths apply.
+        if (account is null || !authenticated || account.DisabledAt is not null
+            || !ParticipantSessionRequests.IsParticipantWorldRole(account.Enrollment.Role))
         {
             // Fail closed: no session, and a failure event with NO session identity (target = the sanitized
             // attempted handle for audit). One SaveChanges — the write-guard runs here against the valid scope.
@@ -186,13 +192,14 @@ public sealed class ParticipantLoginService
             {
                 ExerciseId = scope.Value,
                 Kind = ParticipantSessionKind,
-                Role = account.Role,
+                Role = account.Enrollment.Role,
                 PrincipalId = account.Id.ToString(),
                 ActingHumanId = string.IsNullOrEmpty(account.ActingHumanId) ? account.Id.ToString() : account.ActingHumanId,
                 IsReadOnly = false,
                 AccountId = account.Id,
                 StaffUserId = null,
-                PersonaId = account.PersonaId,
+                PersonaId = account.Enrollment.PersonaId,
+                PersonId = account.Enrollment.PersonId,
             },
             cancellationToken);
 

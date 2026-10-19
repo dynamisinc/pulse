@@ -562,10 +562,10 @@ public sealed class StorylineSteeringEndpointsTests
             // exercise-isolation/11: the staff human the session names must EXIST and share the exercise's
             // customer tenant, or the org bound fails closed and every staff endpoint 403s.
             context.StaffUsers.Add(StaffTenantSeed.StaffUserFor(staffUserId));
-            context.StaffAssignments.Add(new StaffAssignment
+            context.Enrollments.Add(new Enrollment
             {
                 Id = Guid.NewGuid(),
-                StaffUserId = staffUserId,
+                PersonId = staffUserId,
                 ExerciseId = exerciseId,
                 Role = assignedRole,
                 CreatedAt = DateTimeOffset.UtcNow,

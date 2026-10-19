@@ -130,7 +130,8 @@ public sealed class AccountDto
             ExerciseId = account.ExerciseId.ToString(),
             Username = account.Username,
             DisplayName = account.DisplayName,
-            Role = account.Role,
+            // identity-auth-roles/16: the role lives on the account's enrollment (set by every creator).
+            Role = account.Enrollment.Role,
             HasCredential = !string.IsNullOrEmpty(account.CredentialHash),
             CreatedAt = account.CreatedAt.ToString("O"),
         };

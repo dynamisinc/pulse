@@ -313,8 +313,8 @@ public sealed class EasyLoginRegistrationTests
         ExerciseId = Guid.NewGuid(),
         Username = "jsmith",
         DisplayName = "Jane Smith",
-        Role = "participant",
         CreatedAt = DateTimeOffset.UtcNow,
+        Enrollment = new Enrollment { Id = Guid.NewGuid(), ExerciseId = Guid.NewGuid(), Role = "participant" },
     };
 
     private static int ValueOf(EasyLoginOptions options, string name) => name switch

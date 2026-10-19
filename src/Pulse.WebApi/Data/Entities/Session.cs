@@ -58,7 +58,31 @@ public sealed class Session
     /// participant this must equal the host-resolved exercise (story 08); for staff it is the selected
     /// active exercise (story 05). Indexed for the revoke-all-by-exercise query (story 07).
     /// </summary>
-    public Guid ExerciseId { get; set; }
+    /// <remarks>
+    /// <b>Nullable since identity-auth-roles/16 (ADMIN-IDENTITY-MODEL §1.2): <c>null</c> means ORG SCOPE</b> — a
+    /// staff session minted for an org admin with no exercise selected. That is structurally distinct from
+    /// <see cref="Guid.Empty"/> (the "unresolved" sentinel): the session middleware writes <c>null</c> into
+    /// <c>IExerciseContext.CurrentExerciseId</c>, so every exercise-scoped route fails closed under it.
+    /// </remarks>
+    public Guid? ExerciseId { get; set; }
+
+    /// <summary>
+    /// The <see cref="Person"/> the session was minted for (identity-auth-roles/16), or <c>null</c> when the
+    /// principal has no person (a one-off participant, a read-only viewer). For staff this equals
+    /// <see cref="StaffUserId"/> (the shared key). Keys the grant-revoke and cross-world revocations.
+    /// </summary>
+    public Guid? PersonId { get; set; }
+
+    /// <summary>The schema bound of <see cref="Origin"/>.</summary>
+    public const int MaxOriginLength = 256;
+
+    /// <summary>
+    /// The browser origin the session was minted from (the request <c>Origin</c> header), or <c>null</c> when the
+    /// request carried none. The server backstop of the one-world-per-origin rule (ADMIN-IDENTITY-MODEL §1.2):
+    /// minting a session for a person in one world revokes their live other-world sessions from the same origin.
+    /// </summary>
+    public string? Origin { get; set; }
+
 
     /// <summary>
     /// The canonical principal identifier that projects onto the frozen <c>Session.accountId</c> wire field,

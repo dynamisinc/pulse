@@ -61,7 +61,7 @@ public sealed class OrgAdminSurfaceFamilyTests
             "AC2: the org-scoped exercise list is the OrgAdmin surface's Phase-1 content");
         assignments.StatusCode.Should().Be(
             HttpStatusCode.OK,
-            "AC2: so is the org-scoped view of who holds a StaffAssignment on which of the organization's "
+            "AC2: so is the org-scoped view of who holds a Enrollment on which of the organization's "
             + "exercises. Before this feature an orgAdmin session had no server-side surface at all — every "
             + "endpoint either ignored role entirely or gated on the three STAFF_ROLES it is deliberately not "
             + "a member of");
@@ -100,9 +100,9 @@ public sealed class OrgAdminSurfaceFamilyTests
             world.OtherExercise.Id.ToString(), "nor another customer's exercise");
 
         await using var read = _fixture.CreateContext();
-        var otherAssignmentExists = await read.StaffAssignments
+        var otherAssignmentExists = await read.Enrollments.IgnoreQueryFilters()
             .AsNoTracking()
-            .AnyAsync(a => a.StaffUserId == world.OtherStaffUserId);
+            .AnyAsync(a => a.PersonId == world.OtherStaffUserId);
         otherAssignmentExists.Should().BeTrue(
             "StaffAssignment has no query filter at all, so this unbounded read proves the other customer's "
             + "row exists — which makes its absence from the response the tenant bound closing the door, not "
@@ -122,10 +122,10 @@ public sealed class OrgAdminSurfaceFamilyTests
         {
             // Customer Y's human, assigned to customer X's exercise. The exercise-side bound alone would let
             // this through and disclose a foreign human's identity on our roster.
-            seed.StaffAssignments.Add(new StaffAssignment
+            seed.Enrollments.Add(new Enrollment
             {
                 Id = Guid.NewGuid(),
-                StaffUserId = world.OtherStaffUserId,
+                PersonId = world.OtherStaffUserId,
                 ExerciseId = world.OwnExercise.Id,
                 Role = "evaluator",
                 CreatedAt = DateTimeOffset.UtcNow,
@@ -205,10 +205,9 @@ public sealed class OrgAdminSurfaceFamilyTests
             new Uri(ExerciseLifecycleAdminEndpoints.StaffAssignmentsRoute, UriKind.Relative));
 
         rows!.Single(row => row.StaffUserId == world.CallerStaffUserId.ToString()).Role.Should().Be(
-            "orgAdmin",
-            "core/auth/roles.ts spells it camelCase and the column stores the frozen literal verbatim, so a "
-            + "lower-cased 'orgadmin' on the wire would fail the client's isExerciseRole guard and drop the "
-            + "session straight back to the fail-closed branch this story exists to close");
+            "planner",
+            "identity-auth-roles/16: the org admin's in-exercise access is a planner ENROLLMENT; orgAdmin itself is the "
+            + "org-level grant on the person, never an exercise role on the wire");
     }
 
     /// <summary>Shared arrangement for AC5: a non-org-admin role is refused the family's own read.</summary>

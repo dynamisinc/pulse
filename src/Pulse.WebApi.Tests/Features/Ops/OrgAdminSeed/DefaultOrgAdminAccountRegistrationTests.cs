@@ -210,7 +210,10 @@ public sealed class DefaultOrgAdminAccountRegistrationTests
     {
         using var scope = provider.CreateScope();
 
-        return await scope.ServiceProvider.GetRequiredService<IIdentityProvider>()
+        // identity-auth-roles/16: the default credential lives in the Dynamis allowlist, which is now the break-glass
+        // LINK of the chained provider (PulsePasswordIdentityProvider → DynamisIdentityProvider); that link is resolved
+        // directly because the chain's Pulse step needs a database this composition probe deliberately does not have.
+        return await scope.ServiceProvider.GetRequiredService<DynamisIdentityProvider>()
             .AuthenticateAsync(new StaffCredentials { Username = username, Secret = secret });
     }
 }

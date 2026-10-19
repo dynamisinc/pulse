@@ -113,13 +113,37 @@ public sealed class StaffLoginService
         var now = DateTimeOffset.UtcNow;
         var scenarioTime = exercise.CurrentScenarioTime ?? now;
 
-        // 3. Authenticate through the provider-agnostic seam. Never logs the secret.
+        // 3. identity-auth-roles/15 (Gate-1 M-3): a person with a PULSE password gets the same per-person lockout and
+        //    disable as the org sign-in. A locked-out or disabled person is refused with the uniform failure WITHOUT
+        //    verifying. Allowlist-only staff (no Pulse password) are not matched here, so their legacy behaviour is
+        //    unchanged.
+        var passwordPerson = await PulsePasswordIdentityProvider.FindPasswordPersonAsync(
+            _dbContext, username, exercise.OrganizationId, cancellationToken);
+        if (passwordPerson is not null && StaffSignInLockout.IsBlocked(passwordPerson, now))
+        {
+            _dbContext.TelemetryEvents.Add(BuildLoginTelemetry(
+                exerciseId, role: null, actingHumanId: null, outcome: FailureOutcomePayload,
+                now: now, scenarioTime: scenarioTime, timeZone: exercise.TimeZone, targetStaffUserId: null));
+            await _dbContext.SaveChangesAsync(cancellationToken);
+
+            return StaffLoginResult.Rejected();
+        }
+
+        // 4. Authenticate through the provider-agnostic seam. Never logs the secret.
+        //    identity-auth-roles/16: the credentials carry the exercise's organization so the chained Pulse password
+        //    provider can resolve the Person by (org, email); the Dynamis provider ignores it.
         var authentication = await _identityProvider.AuthenticateAsync(
-            new StaffCredentials { Username = username, Secret = request.Secret },
+            new StaffCredentials { Username = username, Secret = request.Secret, OrganizationId = exercise.OrganizationId },
             cancellationToken);
 
         if (authentication.Outcome != StaffAuthenticationOutcome.Authenticated || authentication.Identity is null)
         {
+            if (passwordPerson is not null)
+            {
+                // A failed Pulse-password verification counts toward the person's lockout (saved with the event below).
+                StaffSignInLockout.RecordFailure(passwordPerson, now);
+            }
+
             // Fail closed: rejected credentials get NO session and a failure event with no session identity.
             _dbContext.TelemetryEvents.Add(BuildLoginTelemetry(
                 exerciseId, role: null, actingHumanId: null, outcome: FailureOutcomePayload,
@@ -129,9 +153,15 @@ public sealed class StaffLoginService
             return StaffLoginResult.Rejected();
         }
 
+        if (passwordPerson is not null)
+        {
+            // The Pulse password verified: clear the counter, as the org sign-in does (saved with whichever event follows).
+            StaffSignInLockout.RecordSuccess(passwordPerson);
+        }
+
         var identity = authentication.Identity;
 
-        // 4. Resolve / provision the StaffUser by external subject (unscoped — findable regardless of scope).
+        // 5. Resolve / provision the StaffUser by external subject (unscoped — findable regardless of scope).
         // org-scope-exempt(ResolutionRoot): this read IS the identity resolution — an IdP subject mapped to a
         // staff human before any session or tenant exists. A tenant bound here would lock every human out.
         var staffUser = await _dbContext.StaffUsers
@@ -139,9 +169,10 @@ public sealed class StaffLoginService
 
         if (staffUser is null)
         {
+            var newStaffUserId = Guid.NewGuid();
             staffUser = new StaffUser
             {
-                Id = Guid.NewGuid(),
+                Id = newStaffUserId,
                 // exercise-isolation/11 (COR-010): a first-seen staff human joins the CUSTOMER that owns the
                 // exercise they are logging in to — the only tenant the server can attribute them to here,
                 // and never a client-supplied value. (A multi-customer IdP that carries an org claim plugs in
@@ -151,6 +182,16 @@ public sealed class StaffLoginService
                 DisplayName = identity.DisplayName,
                 Username = identity.Username,
                 CreatedAt = now,
+
+                // identity-auth-roles/16: the staff facet SHARES its Person's primary key, so a first-seen staff
+                // human gets their Person in the same unit of work (no email until invited, A2).
+                Person = new Person
+                {
+                    Id = newStaffUserId,
+                    OrganizationId = exercise.OrganizationId,
+                    DisplayName = Person.BoundDisplayName(identity.DisplayName),
+                    CreatedAt = now,
+                },
             };
             _dbContext.StaffUsers.Add(staffUser);
         }
@@ -178,11 +219,18 @@ public sealed class StaffLoginService
             return StaffLoginResult.NotAssigned();
         }
 
-        // 5. Authorization: the staff user must be assigned to the selected exercise. StaffAssignment is the
-        //    cross-exercise access record (COR-005, unscoped) — the role is per-exercise.
-        var assignment = await _dbContext.StaffAssignments
+        // 6. Authorization: the staff user must hold a STAFF enrollment in the selected exercise (identity-auth-roles/16:
+        //    Enrollment replaces StaffAssignment; StaffUser.Id == Person.Id). Login runs before any exercise scope
+        //    exists, so the central exercise filter would match nothing — it is bypassed and the exercise is named
+        //    explicitly instead.
+        // org-scope-exempt(TenantChecked): the cross-customer case was refused just above by the explicit
+        // `staffUser.OrganizationId != exercise.OrganizationId` comparison, so this read only ever sees the caller's
+        // own enrollment in an exercise of the caller's own organization.
+        var assignment = await _dbContext.Enrollments
+            .IgnoreQueryFilters()
             .AsNoTracking()
-            .FirstOrDefaultAsync(a => a.StaffUserId == staffUser.Id && a.ExerciseId == exerciseId, cancellationToken);
+            .Where(EnrollmentRoles.IsStaffEnrollment)
+            .FirstOrDefaultAsync(a => a.PersonId == staffUser.Id && a.ExerciseId == exerciseId, cancellationToken);
 
         if (assignment is null)
         {
@@ -202,14 +250,14 @@ public sealed class StaffLoginService
         // (a rejected credential or an unassigned user never updates it).
         staffUser.LastLoginAt = now;
 
-        // 6. Success: persist the StaffUser mutation AND the single success telemetry event in ONE unit of work
+        // 7. Success: persist the StaffUser mutation AND the single success telemetry event in ONE unit of work
         //    (the write-guard runs here — the scoped telemetry row carries the validated, non-empty ExerciseId).
         _dbContext.TelemetryEvents.Add(BuildLoginTelemetry(
             exerciseId, role: role, actingHumanId: staffUser.Id.ToString(), outcome: SuccessOutcomePayload,
             now: now, scenarioTime: scenarioTime, timeZone: exercise.TimeZone, targetStaffUserId: staffUser.Id));
         await _dbContext.SaveChangesAsync(cancellationToken);
 
-        // 7. Mint the session through the story-03 issuer (it owns Session persistence + the raw token). Staff
+        // 8. Mint the session through the story-03 issuer (it owns Session persistence + the raw token). Staff
         //    sessions bind the StaffUser as both principal and acting-human; no account / persona.
         var issued = await _sessionIssuer.IssueAsync(
             new SessionIssueRequest
@@ -223,10 +271,12 @@ public sealed class StaffLoginService
                 AccountId = null,
                 StaffUserId = staffUser.Id,
                 PersonaId = null,
+                PersonId = staffUser.Id,
             },
             cancellationToken);
 
-        return StaffLoginResult.Authenticated(issued);
+        // isLead is read LIVE from the enrollment (never stored on the session) — here, the one just authorized.
+        return StaffLoginResult.Authenticated(issued, assignment.IsLead);
     }
 
     /// <summary>
@@ -234,7 +284,7 @@ public sealed class StaffLoginService
     /// <c>channel: 'system'</c>, event type <c>login</c>. Off-envelope empty strings are null-omitted (the v0
     /// schema types the optional actor ids as <c>min(1).optional()</c>).
     /// </summary>
-    private static TelemetryEvent BuildLoginTelemetry(
+    internal static TelemetryEvent BuildLoginTelemetry(
         Guid exerciseId,
         string? role,
         string? actingHumanId,
@@ -308,11 +358,15 @@ public sealed class StaffLoginResult
     /// <summary>A successful login carrying the issued session.</summary>
     /// <param name="issued">The issuer result.</param>
     /// <returns>An authenticated result.</returns>
-    public static StaffLoginResult Authenticated(SessionIssueResult issued)
+    /// <param name="isLead">Whether the authorizing enrollment is the exercise's lead controller (read live).</param>
+    public static StaffLoginResult Authenticated(SessionIssueResult issued, bool isLead = false)
     {
         ArgumentNullException.ThrowIfNull(issued);
-        return new StaffLoginResult(StaffLoginOutcome.Authenticated, issued, null);
+        return new StaffLoginResult(StaffLoginOutcome.Authenticated, issued, null) { IsLead = isLead };
     }
+
+    /// <summary>Whether the session's enrollment is the lead controller (projected onto <c>Session.isLead</c>).</summary>
+    public bool IsLead { get; private init; }
 
     /// <summary>A rejected request (bad body / unknown exercise).</summary>
     /// <param name="validationError">The human-readable reason.</param>
@@ -344,4 +398,17 @@ public sealed class StaffLoginRequest
 
     /// <summary>The exercise being entered — the selected active exercise; validated against the caller's assignments.</summary>
     public string? ExerciseId { get; init; }
+
+    /// <summary>
+    /// identity-auth-roles/15 (ADMIN-IDENTITY-MODEL §1.2): the org sign-in handle — the person's email (or, for a legacy
+    /// allowlisted staffer with no email yet, their allowlist username). Used only by the org sign-in shape (no
+    /// <see cref="ExerciseId"/>); see <see cref="OrgStaffLoginService"/>.
+    /// </summary>
+    public string? Email { get; init; }
+
+    /// <summary>The org sign-in password — validated, never logged or persisted (NFR-009).</summary>
+    public string? Password { get; init; }
+
+    /// <summary>The organization's URL slug (<c>console.&lt;domain&gt;/o/{slug}</c>); absent for the email-first org choice.</summary>
+    public string? OrgSlug { get; init; }
 }

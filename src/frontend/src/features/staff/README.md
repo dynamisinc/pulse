@@ -48,7 +48,7 @@ of their assigned exercises their staff session is scoped to.
 | `hooks/useStaffAssignments.ts` | React Query 5 query wrapping the assignment-list read. |
 | `hooks/useSetActiveExercise.ts` | React Query 5 mutation wrapping the switch; invalidates the query cache on success. |
 | `services/staffAssignmentsService.ts` | The data seam. Routes through the shared axios client with a mock adapter behind `USE_MOCK_DATA` (one env-guarded flip point); validates response bodies fail-closed; throws a transport-agnostic `StaffAssignmentError`. |
-| `types.ts` | The `StaffAssignment` client contract (mirrors the backend `StaffAssignmentDto`). |
+| `types.ts` | The `Enrollment` client contract (mirrors the backend `StaffAssignmentDto`). |
 
 ### Backend contract consumed
 

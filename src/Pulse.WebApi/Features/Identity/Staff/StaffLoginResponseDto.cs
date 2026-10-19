@@ -36,7 +36,8 @@ public sealed class StaffLoginResponseDto
     /// <summary>Builds the login response from the issuer's result.</summary>
     /// <param name="result">The <see cref="ISessionIssuer"/> result carrying the persisted session + raw token(s).</param>
     /// <returns>The login response DTO.</returns>
-    public static StaffLoginResponseDto From(SessionIssueResult result)
+    /// <param name="isLead">Whether the session's enrollment is the lead controller, read live (identity-auth-roles/16).</param>
+    public static StaffLoginResponseDto From(SessionIssueResult result, bool isLead = false)
     {
         ArgumentNullException.ThrowIfNull(result);
 
@@ -44,7 +45,7 @@ public sealed class StaffLoginResponseDto
         {
             Token = result.SessionToken,
             RefreshToken = result.RefreshToken,
-            Session = SessionDto.FromSession(result.Session),
+            Session = SessionDto.FromSession(result.Session, isLead),
         };
     }
 }

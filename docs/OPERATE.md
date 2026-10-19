@@ -44,8 +44,10 @@ halves auto-fires **both** workflows on the push and neither can be held. Do one
 
 - **Cancel and re-dispatch** (works after the fact). In Actions, cancel the auto-triggered *Deploy
   Backend* run immediately, let *Deploy Frontend* finish, confirm the new bundle is serving, then
-  re-dispatch *Deploy Backend*. Cancelling is safe: the migration script is applied in a single
-  transaction, so a cancelled run leaves the schema untouched, and re-running it is idempotent.
+  re-dispatch *Deploy Backend*. Cancelling is safe **only before its deploy job starts**: the migration script
+  is applied in a single transaction, so a run cancelled before the migration leaves the schema untouched, and
+  re-running it is idempotent. Once the deploy job has started, let it finish. Cancelling after the migration has
+  committed leaves the new schema under the old code.
 - **Split the merge** (works by construction, preferred when you control the merge). Land the additive
   client-guard change as its own commit to `main` first — it touches `src/frontend/**` only, so only
   *Deploy Frontend* fires — then merge the backend half.
@@ -154,6 +156,56 @@ new values back onto the narrower legacy set, so distinctions collapse (and a `D
 not identity-preserving — it silently reclassifies). Read the specific migration's `Down` before relying
 on it. UAT is a disposable playground: for anything non-trivial, re-seeding from a clean database is
 faster and more honest than unwinding a migration.
+
+### AdminIdentityFoundation (A1b): deploy order and rollback
+
+This migration replaces `StaffAssignments` with `People` + `Enrollments`. It also changes what a session
+can carry: an org-admin session has `exerciseId: null`, and the role is a union of exercise and org roles.
+
+**Deploy in a quiet window.** Pick a time with no live exercise. While the backend deploy runs, expect about 5 minutes
+of failures on sign-in, staff assignments, the roster and exports:
+- the migration takes schema locks while it applies;
+- for about 3 minutes the old process runs on the new schema before the new code starts.
+Everyone with an `orgAdmin` session must sign in again afterwards, because the migration revokes those sessions.
+
+**Order: either works; backend first or both together is simplest.** The new bundle's session and staff-assignment
+parsers accept both shapes:
+- **The pre-A1 shape** (no `scope`, `world`, `isLead` or `personId`). The missing fields default to an exercise
+  session, the world implied by the role, not lead, and no person.
+- **The legacy exercise-scoped `orgAdmin` session and `orgAdmin` assignment row.** The bundle reads these as
+  `planner`, which is what A1 migrates such people to; the old backend still authorizes them on the server.
+- **The A1 shape.**
+
+The old bundle ignores the new fields, so it keeps working against the new backend too, **except for org admins**:
+it requires an exercise on every session, so org admins cannot use the console from the moment the backend lands until
+the new bundle is serving. Do **not** cancel *Deploy
+Backend* once its deploy job has started (see the cancel-and-re-dispatch rule above).
+
+**Staff and participants on one origin: use separate browser profiles.** A1 enforces one world per browser. Signing in
+as a participant signs out every staff tab in the same browser profile, and the reverse. On UAT, staff and participant
+share one origin. For demos and testing, open the staff console and the participant views in **separate browser
+profiles** (or one in a private window).
+
+**Before the backend deploy, note the time.** Write down the UTC time just before *Deploy Backend* starts its deploy
+job. That is the point-in-time-restore (PITR) target if a rollback is needed.
+
+**Rollback order of preference:**
+
+1. **Forward-fix.** Preferred. Most problems after this deploy are code problems, not data problems, and a fix on
+   `main` redeploys in minutes without touching the data.
+2. **PITR to the noted time.** If the data is wrong, restore `sqldb-pulse-uat` to the time noted above (Azure portal
+   → the database → *Restore*, as a new database, then swap the connection string). Then redeploy the backend and
+   frontend from the commit before the merge, **backend first, frontend second**. Anything written after the noted
+   time is lost. Both bundles read the restored pre-A1 session shape, so the order of the two redeploys does not
+   matter; org-scope sign-in simply stops working once the old backend is back.
+3. **The migration's `Down`.** Last resort. It is reversible but **not loss-free**:
+   - `StaffAssignments` come back with the same ids, and `Accounts.Role` / `PersonaId` are restored from enrollments.
+   - A person who was both a planner and an org admin comes back as `orgAdmin` only.
+   - Org-scope sessions are deleted (they have no exercise to point at).
+   - A person who holds an `OrgRole` but has no enrollments loses admin access entirely: the pre-A1 schema keeps
+     org-admin access only on per-exercise rows. Re-grant it by hand after `Down` if needed.
+   - Everything that exists only from A1 on is dropped: people's emails and passwords, org audit events, login
+     choices, organization slugs, `FirstLiveAt`.
 
 ## Incident log
 

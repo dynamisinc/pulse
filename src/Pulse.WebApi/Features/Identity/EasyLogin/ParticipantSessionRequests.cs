@@ -58,13 +58,14 @@ public static class ParticipantSessionRequests
         {
             ExerciseId = exerciseId,
             Kind = ParticipantSessionKind,
-            Role = account.Role,
+            Role = account.Enrollment.Role,
             PrincipalId = accountId,
             ActingHumanId = string.IsNullOrEmpty(account.ActingHumanId) ? accountId : account.ActingHumanId,
             IsReadOnly = false,
             AccountId = account.Id,
             StaffUserId = null,
-            PersonaId = account.PersonaId,
+            PersonaId = account.Enrollment.PersonaId,
+            PersonId = account.Enrollment.PersonId,
         };
     }
 }

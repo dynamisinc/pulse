@@ -146,6 +146,7 @@ public sealed class BootstrapOrganizationTests
                 Id = customerOrganizationId,
                 Name = $"Real Customer {customerOrganizationId:N}",
                 CreatedAt = DateTimeOffset.UtcNow,
+                Slug = $"org-{Guid.NewGuid():N}",
             });
             seed.Exercises.Add(new Exercise
             {

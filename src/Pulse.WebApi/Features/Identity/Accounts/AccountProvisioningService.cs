@@ -121,9 +121,12 @@ public sealed class AccountProvisioningService
             ExerciseId = scope,
             Username = username,
             DisplayName = displayName,
-            Role = role,
             CredentialHash = password is null ? null : _passwordHasher.Hash(password),
             CreatedAt = now,
+
+            // identity-auth-roles/16: the account is the sign-in facet of its participant-role enrollment, which
+            // carries the role (and, once bound, the persona). Inserted with the account in the same unit of work.
+            Enrollment = new Enrollment { Id = Guid.NewGuid(), ExerciseId = scope, Role = role, CreatedAt = now },
         };
 
         _dbContext.Accounts.Add(account);
@@ -206,9 +209,9 @@ public sealed class AccountProvisioningService
                 ExerciseId = scope,
                 Username = username,
                 DisplayName = displayName,
-                Role = role,
                 CredentialHash = password is null ? null : _passwordHasher.Hash(password),
                 CreatedAt = now,
+                Enrollment = new Enrollment { Id = Guid.NewGuid(), ExerciseId = scope, Role = role, CreatedAt = now },
             });
 
             createdCount++;

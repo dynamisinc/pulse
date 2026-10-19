@@ -47,6 +47,7 @@ function ChannelProbe() {
 
   // What the real feed does on its own on mount: a participant-kind `view`.
   useEffect(() => {
+    if (session.exerciseId === null) return
     buildAndEmit({
       exerciseId: session.exerciseId,
       eventType: 'view',

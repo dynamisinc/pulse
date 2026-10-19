@@ -242,6 +242,34 @@ public sealed class ExerciseLifecycleServiceTests
         (await service.GetAsync()).Outcome.Should().Be(ExerciseLifecycleOutcome.NotFound);
     }
 
+    /// <summary>
+    /// identity-auth-roles/16 (Copilot fold C): StartEx (staged → live) stamps Exercises.FirstLiveAt in the same unit of
+    /// work as the transition, and a later resume (paused → live) never moves it.
+    /// </summary>
+    [RequiresDockerFact]
+    public async Task StartEx_StampsFirstLiveAtOnce_AndAResumeNeverMovesIt()
+    {
+        var exerciseId = await SeedAsync("staged");
+
+        var before = DateTimeOffset.UtcNow.AddSeconds(-1);
+        (await TransitionAsync(exerciseId, "live")).Outcome.Should().Be(ExerciseLifecycleOutcome.Ok);
+
+        DateTimeOffset? stamped;
+        await using (var read = _fixture.CreateContext())
+        {
+            stamped = (await read.Exercises.SingleAsync(e => e.Id == exerciseId)).FirstLiveAt;
+            stamped.Should().NotBeNull("the first transition to live records when the exercise first ran");
+            stamped!.Value.Should().BeOnOrAfter(before);
+        }
+
+        (await TransitionAsync(exerciseId, "paused")).Outcome.Should().Be(ExerciseLifecycleOutcome.Ok);
+        (await TransitionAsync(exerciseId, "live")).Outcome.Should().Be(ExerciseLifecycleOutcome.Ok);
+
+        await using var after = _fixture.CreateContext();
+        (await after.Exercises.SingleAsync(e => e.Id == exerciseId)).FirstLiveAt.Should().Be(
+            stamped, "FirstLiveAt is the FIRST time — a resume after a pause never moves it");
+    }
+
     private async Task<Guid> SeedAsync(string status)
     {
         var exerciseId = Guid.NewGuid();

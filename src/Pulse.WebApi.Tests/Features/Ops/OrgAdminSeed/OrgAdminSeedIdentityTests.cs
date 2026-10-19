@@ -96,10 +96,14 @@ public sealed class OrgAdminSeedIdentityTests
             "a first-seen staff human joins the same well-known default tenant BootstrapService and the "
             + "OrganizationTenantBoundary migration use — never Guid.Empty, which the write guard refuses");
 
-        (await context.StaffAssignments
+        (await context.Enrollments.IgnoreQueryFilters()
                 .AsNoTracking()
-                .SingleAsync(a => a.StaffUserId == staffUser.Id && a.ExerciseId == exercise.Id))
-            .Role.Should().Be(ExerciseAdminRoles.OrgAdmin);
+                .SingleAsync(a => a.PersonId == staffUser.Id && a.ExerciseId == exercise.Id))
+            .Role.Should().Be(
+                ExerciseAdminRoles.Planner,
+                "identity-auth-roles/16: the seeded in-exercise access is a planner enrollment; orgAdmin is Person.OrgRole");
+        (await context.People.AsNoTracking().SingleAsync(p => p.Id == staffUser.Id)).OrgRole
+            .Should().Be(ExerciseAdminRoles.OrgAdmin);
 
         await transaction.RollbackAsync();
     }
@@ -143,9 +147,9 @@ public sealed class OrgAdminSeedIdentityTests
             seededStaffUserId,
             "the session must bind to the very staff user the seeder wrote — same row, not a same-looking one");
         issuer.LastRequest.Role.Should().Be(
-            ExerciseAdminRoles.OrgAdmin,
-            "Session.Role comes from the assignment, so the seeded assignment is what actually makes the org "
-            + "tier reachable; anything else means the seed did not take");
+            ExerciseAdminRoles.Planner,
+            "identity-auth-roles/16: an exercise-bound staff login carries the enrollment's role (planner for a seeded "
+            + "org admin); the org-scope orgAdmin session comes from org-level sign-in (story 15)");
         issuer.LastRequest.Kind.Should().Be("staff");
         issuer.LastRequest.ExerciseId.Should().Be(exercise.Id);
 
@@ -212,9 +216,9 @@ public sealed class OrgAdminSeedIdentityTests
         issuer.LastRequest!.StaffUserId.Should().Be(
             seedResult.StaffUserId!.Value, "the session binds to the very staff user the seeder wrote");
         issuer.LastRequest.Role.Should().Be(
-            ExerciseAdminRoles.OrgAdmin,
-            "and it must be an ORG ADMIN session, since that is the role the org tier gates on; a staff session "
-            + "with any other role reaches none of it");
+            ExerciseAdminRoles.Planner,
+            "identity-auth-roles/16: the exercise-bound login is the seeded planner enrollment; the org-scope orgAdmin "
+            + "session is story 15's org-level sign-in");
 
         (await context.StaffUsers
                 .AsNoTracking()
@@ -251,11 +255,16 @@ public sealed class OrgAdminSeedIdentityTests
             .Select(u => u.Id)
             .ToListAsync();
 
-        var incumbents = await context.StaffAssignments
-            .Where(a => a.Role == ExerciseAdminRoles.OrgAdmin && defaultTenantStaffUserIds.Contains(a.StaffUserId))
+        // identity-auth-roles/16: the org-admin grant is Person.OrgRole (no longer an exercise-role assignment).
+        var incumbents = await context.People
+            .Where(p => defaultTenantStaffUserIds.Contains(p.Id) && p.OrgRole != null)
             .ToListAsync();
 
-        context.StaffAssignments.RemoveRange(incumbents);
+        foreach (var incumbent in incumbents)
+        {
+            incumbent.OrgRole = null;
+        }
+
         await context.SaveChangesAsync();
     }
 }

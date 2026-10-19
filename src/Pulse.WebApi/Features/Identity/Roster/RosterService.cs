@@ -223,7 +223,7 @@ public sealed class RosterService
             }
 
             var (account, persona, link) = created[0];
-            return RosterAddResult.Created(RosterEntryProjection.Create(account, persona, _linkDtoFactory.Create(link), liveSessions: 0));
+            return RosterAddResult.Created(RosterEntryProjection.Create(account, account.Enrollment.Role, persona, _linkDtoFactory.Create(link), liveSessions: 0));
         }
     }
 
@@ -243,12 +243,13 @@ public sealed class RosterService
 
         var exerciseId = scope.Value;
 
-        // StaffAssignment is unscoped by design (a staff human spans exercises): the explicit predicate on BOTH the
-        // caller's own staff user id and the resolved exercise is what confines this read.
-        var role = await _dbContext.StaffAssignments
+        // identity-auth-roles/16: the caller's OWN enrollment in the resolved exercise. Enrollment is IExerciseScoped
+        // (the central filter confines it to the resolved scope) and the explicit predicates keep it to this caller
+        // (StaffUser.Id == Person.Id, the shared key) and this exercise.
+        var role = await _dbContext.Enrollments
             .AsNoTracking()
-            .Where(a => a.StaffUserId == current.StaffUserId && a.ExerciseId == exerciseId)
-            .Select(a => a.Role)
+            .Where(e => e.PersonId == current.StaffUserId && e.ExerciseId == exerciseId)
+            .Select(e => e.Role)
             .FirstOrDefaultAsync(cancellationToken);
 
         if (!RosterStaffRoleFilter.IsAdmittedRole(role))
@@ -275,6 +276,7 @@ public sealed class RosterService
     {
         var accountQuery = track ? _dbContext.Accounts : _dbContext.Accounts.AsNoTracking();
         var accounts = await accountQuery
+            .Include(a => a.Enrollment)
             .OrderBy(a => a.CreatedAt)
             .ThenBy(a => a.Id)
             .ToListAsync(cancellationToken);
@@ -290,7 +292,7 @@ public sealed class RosterService
 
         foreach (var account in accounts)
         {
-            if (!RosterRoles.IsRosterRole(account.Role))
+            if (!RosterRoles.IsRosterRole(account.Enrollment.Role))
             {
                 otherSignInNames.Add(account.Username);
                 continue;
@@ -304,14 +306,14 @@ public sealed class RosterService
                 Agency = account.Agency,
                 JobRole = account.JobRole,
                 Email = account.Email,
-                ExerciseRole = string.Equals(account.Role, RosterRoles.Pio, StringComparison.OrdinalIgnoreCase)
+                ExerciseRole = string.Equals(account.Enrollment.Role, RosterRoles.Pio, StringComparison.OrdinalIgnoreCase)
                     ? RosterRoles.Pio
                     : RosterRoles.Participant,
-                Persona = account.PersonaId is { } personaId ? personasById.GetValueOrDefault(personaId) : null,
+                Persona = account.Enrollment.PersonaId is { } personaId ? personasById.GetValueOrDefault(personaId) : null,
                 PersonaAutoCreated = account.PersonaAutoCreated,
 
                 // A dangling id and another exercise's persona look the same here: neither is in this exercise's set.
-                HadUnresolvedPersona = account.PersonaId is { } storedId && !personasById.ContainsKey(storedId),
+                HadUnresolvedPersona = account.Enrollment.PersonaId is { } storedId && !personasById.ContainsKey(storedId),
             });
         }
 
@@ -344,14 +346,22 @@ public sealed class RosterService
                 ExerciseId = caller.ExerciseId,
                 Username = participant.SignInName,
                 DisplayName = participant.Name,
-                Role = participant.ExerciseRole,
                 Agency = participant.Agency,
                 JobRole = participant.JobRole,
                 Email = participant.Email,
                 CredentialHash = null,
                 CreatedAt = now,
-                PersonaId = participant.Persona?.Id,
                 PersonaAutoCreated = participant.PersonaAutoCreated,
+
+                // identity-auth-roles/16: the participant-role enrollment carries the role and the persona.
+                Enrollment = new Enrollment
+                {
+                    Id = Guid.NewGuid(),
+                    ExerciseId = caller.ExerciseId,
+                    Role = participant.ExerciseRole,
+                    PersonaId = participant.Persona?.Id,
+                    CreatedAt = now,
+                },
             };
             _dbContext.Accounts.Add(account);
 
@@ -368,7 +378,7 @@ public sealed class RosterService
 
         foreach (var participant in workspace.Updated)
         {
-            // A matched participant who had no persona gets one (implementation.md, amended f07c1ea). Account.PersonaId has
+            // A matched participant who had no persona gets one (implementation.md, amended f07c1ea). Enrollment.PersonaId has
             // no foreign key, so the persona row must be inserted here or the id would dangle. No link is issued for them.
             AddCreatedPersona(caller, participant);
 
@@ -377,13 +387,13 @@ public sealed class RosterService
             account.Agency = participant.Agency;
             account.JobRole = participant.JobRole;
             account.Email = participant.Email;
-            account.Role = participant.ExerciseRole;
+            account.Enrollment.Role = participant.ExerciseRole;
             account.PersonaAutoCreated = participant.PersonaAutoCreated;
 
             // A row only ever binds a persona, never clears one (a blank personaHandle keeps the current persona).
             if (participant.Persona is { } persona)
             {
-                account.PersonaId = persona.Id;
+                account.Enrollment.PersonaId = persona.Id;
             }
         }
 

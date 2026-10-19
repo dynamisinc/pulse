@@ -95,6 +95,7 @@ public sealed class DefaultDenySessionGateTests
     [InlineData("GET", "/api/exercise-context")]
     [InlineData("POST", "/api/auth/login")]
     [InlineData("POST", "/api/auth/staff/login")]
+    [InlineData("POST", "/api/auth/staff/login/choose")]
     [InlineData("POST", "/api/auth/shared")]
     [InlineData("POST", "/api/auth/join")]
     [InlineData("POST", "/api/auth/word")]
@@ -107,7 +108,7 @@ public sealed class DefaultDenySessionGateTests
     [InlineData("POST", "/api/ops/bind-participant-persona")]
     public async Task AllowlistedRoute_WithNoCredential_IsNeverRejectedByTheGate(string method, string route)
     {
-        // These thirteen must stay reachable pre-auth. What they RETURN is each endpoint's own business (400 for
+        // These fourteen (identity-auth-roles/15 added the org choice) must stay reachable pre-auth. What they RETURN is each endpoint's own business (400 for
         // a missing body, 404 for an unconfigured ops secret, and 401 from /api/auth/refresh itself when no
         // refresh token is presented); the regression guarded here is narrower and exact: the GATE must not be
         // what answers. The RFC 6750 challenge header is the discriminator — only the gate writes it.

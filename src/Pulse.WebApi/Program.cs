@@ -13,6 +13,7 @@ using Pulse.WebApi.Features.ExerciseResolution;
 using Pulse.WebApi.Features.Identity.Accounts;
 using Pulse.WebApi.Features.Identity.DayWord;        // easy-login 05
 using Pulse.WebApi.Features.Identity.EasyLogin;      // easy-login 01
+using Pulse.WebApi.Features.Identity.Enrollments;    // identity-auth-roles/16
 using Pulse.WebApi.Features.Identity.LinkCards;      // easy-login 04
 using Pulse.WebApi.Features.Identity.LinkEmail;      // easy-login 13
 using Pulse.WebApi.Features.Identity.PersonalLinks;  // easy-login 03
@@ -97,6 +98,7 @@ builder.Services.AddStaffIdentity(builder.Configuration);
 // identity-auth-roles/18 (#480): trusted-proxy forwarded headers. A no-op unless ForwardedHeaders:KnownNetworks/KnownProxies are set.
 builder.Services.AddPulseForwardedHeaders(builder.Configuration);
 builder.Services.AddSessions(builder.Configuration);
+builder.Services.AddEnrollments();   // identity-auth-roles/16: Enrollment service + lead-controller route
 
 // Per-exercise configuration (E1 exercise-configuration, story 01b). REQUIRED, not optional: the six
 // participant-shell config GETs mapped by MapParticipantShellEndpoints() below now resolve
@@ -486,6 +488,7 @@ app.MapExerciseLifecycleAdminEndpoints();  // COR-074/075/076 POST+GET /api/org/
 app.MapExerciseContextEndpoints();  // #51 GET /api/exercise-context (frozen ExerciseScope; 404 on unknown host)
 app.MapSessionEndpoints();          // #60 GET /api/session, POST /api/auth/refresh, POST /api/auth/logout
 app.MapStaffAuthEndpoints();        // #62 POST /api/auth/staff/login, GET /api/staff/assignments, POST /api/staff/active-exercise
+app.MapEnrollmentEndpoints();       // identity-auth-roles/16 PUT /api/staff/enrollments/{id}/lead
 app.MapSharedReadOnlyEndpoints();          // #63 POST /api/auth/shared (view-only session + ephemeral identity)
 app.MapAccountEndpoints();                 // #59 POST /api/auth/login, POST /api/staff/accounts[/import]
 app.MapSharedCredentialLifecycleEndpoints(); // #64 POST /api/staff/shared-credential/{rotate,revoke}

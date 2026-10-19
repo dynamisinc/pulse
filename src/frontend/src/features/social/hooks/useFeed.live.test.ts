@@ -38,6 +38,10 @@ import { useFeed } from './useFeed'
 
 const MOCK_SESSION: Session = {
   exerciseId: 'ex-live-0001',
+  scope: 'exercise',
+  personId: null,
+  world: 'participant',
+  isLead: false,
   accountId: 'acct-dreyes',
   role: 'participant',
   personaId: 'persona-dreyes_fh',

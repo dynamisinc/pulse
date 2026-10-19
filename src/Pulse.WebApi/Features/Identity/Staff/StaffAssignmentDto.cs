@@ -26,4 +26,18 @@ public sealed class StaffAssignmentDto
     /// <summary>The staff role on that exercise — the <c>ExerciseRole</c> string vocabulary (verbatim).</summary>
     [JsonPropertyName("role")]
     public required string Role { get; init; }
+
+    /// <summary>
+    /// The enrolled person's id (identity-auth-roles/16 frozen-type change: the frontend <c>StaffAssignment</c> becomes
+    /// <c>Enrollment</c>, the same fields plus <c>personId</c>). For a staff enrollment this is the caller's own id.
+    /// </summary>
+    [JsonPropertyName("personId")]
+    public required string PersonId { get; init; }
+
+    /// <summary>
+    /// Whether this enrollment is the exercise's lead controller — read live from <c>Enrollment.IsLead</c>
+    /// (identity-auth-roles/16 orchestrator fold: the frontend <c>Enrollment</c> type carries it too).
+    /// </summary>
+    [JsonPropertyName("isLead")]
+    public required bool IsLead { get; init; }
 }

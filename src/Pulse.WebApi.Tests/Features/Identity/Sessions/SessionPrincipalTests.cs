@@ -93,7 +93,6 @@ public class SessionPrincipalTests
 
     [Theory]
     [InlineData(SessionPrincipal.SessionIdClaimType)]
-    [InlineData(SessionPrincipal.ExerciseIdClaimType)]
     [InlineData(SessionPrincipal.SessionKindClaimType)]
     [InlineData(SessionPrincipal.PrincipalIdClaimType)]
     [InlineData(SessionPrincipal.ActingHumanIdClaimType)]

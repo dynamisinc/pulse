@@ -533,7 +533,7 @@ export async function getOrgExercises(): Promise<OrgExercise[]> {
 
 /**
  * Creates one exercise under the caller's own organization (COR-074). The new
- * exercise is always in `build` status with a `StaffAssignment` minted for the
+ * exercise is always in `build` status with an `Enrollment` minted for the
  * creator — both server-decided; this seam asserts neither.
  *
  * A blank `hostname` is OMITTED from the body rather than sent as `""`, so the

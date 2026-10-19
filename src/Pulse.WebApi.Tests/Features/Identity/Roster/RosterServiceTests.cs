@@ -52,11 +52,11 @@ public sealed class RosterServiceTests
         }
 
         await using var read = Read(world.ExerciseId);
-        var account = await read.Accounts.SingleAsync();
+        var account = await read.Accounts.Include(account => account.Enrollment).SingleAsync();
         account.ExerciseId.Should().Be(world.ExerciseId, "stamped from the resolved scope");
         account.Username.Should().Be("rchen");
         account.DisplayName.Should().Be("Riley Chen");
-        account.Role.Should().Be("participant", "no org persona means ExerciseRole participant (EL-1)");
+        account.Enrollment.Role.Should().Be("participant", "no org persona means ExerciseRole participant (EL-1)");
         account.Agency.Should().Be("Fulco Fire");
         account.JobRole.Should().Be("Captain", "the CSV role column is a free-text job label, not an ExerciseRole");
         account.Email.Should().Be("riley@example.test");
@@ -64,7 +64,7 @@ public sealed class RosterServiceTests
         account.PersonaAutoCreated.Should().BeTrue();
 
         var persona = await read.Personas.SingleAsync();
-        account.PersonaId.Should().Be(persona.Id);
+        account.Enrollment.PersonaId.Should().Be(persona.Id);
         persona.Handle.Should().Be("riley_chen");
         persona.DisplayName.Should().Be("Riley Chen");
         persona.Kind.Should().Be("human");
@@ -91,8 +91,8 @@ public sealed class RosterServiceTests
         }
 
         await using var read = Read(world.ExerciseId);
-        var accounts = await read.Accounts.OrderBy(a => a.DisplayName).ToListAsync();
-        accounts.Should().HaveCount(2).And.OnlyContain(a => a.PersonaId == orgId && a.Role == "pio" && !a.PersonaAutoCreated);
+        var accounts = await read.Accounts.Include(account => account.Enrollment).OrderBy(a => a.DisplayName).ToListAsync();
+        accounts.Should().HaveCount(2).And.OnlyContain(a => a.Enrollment.PersonaId == orgId && a.Enrollment.Role == "pio" && !a.PersonaAutoCreated);
         (await read.Personas.CountAsync()).Should().Be(1, "binding an org persona creates no persona");
 
         var humans = accounts.Select(a => ParticipantSessionRequests.For(a, world.ExerciseId).ActingHumanId).ToList();
@@ -115,7 +115,7 @@ public sealed class RosterServiceTests
 
         await using (var read = Read(world.ExerciseId))
         {
-            (await read.Accounts.CountAsync()).Should().Be(0, "a dry run writes no account");
+            (await read.Accounts.Include(account => account.Enrollment).CountAsync()).Should().Be(0, "a dry run writes no account");
             (await read.Personas.CountAsync()).Should().Be(1, "a dry run writes no persona (only the seeded org persona exists)");
             (await read.ParticipantLinks.CountAsync()).Should().Be(0, "a dry run writes no link");
             (await read.TelemetryEvents.CountAsync()).Should().Be(0, "a dry run emits no event");
@@ -149,7 +149,7 @@ public sealed class RosterServiceTests
         }
 
         await using var read = Read(world.ExerciseId);
-        (await read.Accounts.Select(a => a.DisplayName).OrderBy(n => n).ToListAsync()).Should().Equal("A One", "B Two");
+        (await read.Accounts.Include(account => account.Enrollment).Select(a => a.DisplayName).OrderBy(n => n).ToListAsync()).Should().Equal("A One", "B Two");
         (await read.Personas.CountAsync()).Should().Be(2, "the failed row created no persona");
     }
 
@@ -176,7 +176,7 @@ public sealed class RosterServiceTests
         }
 
         await using var after = Read(world.ExerciseId);
-        (await after.Accounts.CountAsync()).Should().Be(2, "zero accounts created by the re-upload");
+        (await after.Accounts.Include(account => account.Enrollment).CountAsync()).Should().Be(2, "zero accounts created by the re-upload");
         (await after.Personas.CountAsync()).Should().Be(2, "zero personas created by the re-upload");
         (await after.ParticipantLinks.AsNoTracking().Select(l => new { l.Id, l.TokenHash }).ToListAsync())
             .Should().BeEquivalentTo(linksBefore, "zero links created or rotated");
@@ -204,13 +204,13 @@ public sealed class RosterServiceTests
         }
 
         await using var read = Read(world.ExerciseId);
-        var account = await read.Accounts.SingleAsync();
+        var account = await read.Accounts.Include(account => account.Enrollment).SingleAsync();
         account.DisplayName.Should().Be("Riley Chen-Ng", "matched by sign-in name, so the display name is corrected");
         account.Agency.Should().Be("Fulco Fire Dept");
         account.JobRole.Should().Be("Captain", "a blank cell never clears a stored value");
         account.Email.Should().Be("riley@example.test", "a blank cell never clears a stored value");
-        account.PersonaId.Should().Be(orgId);
-        account.Role.Should().Be("pio");
+        account.Enrollment.PersonaId.Should().Be(orgId);
+        account.Enrollment.Role.Should().Be("pio");
         account.PersonaAutoCreated.Should().BeFalse();
     }
 
@@ -295,7 +295,7 @@ public sealed class RosterServiceTests
         entry.Email.Should().Be("m@example.test");
 
         await using var read = Read(world.ExerciseId);
-        (await read.Accounts.SingleAsync()).Id.ToString().Should().Be(entry.Id);
+        (await read.Accounts.Include(account => account.Enrollment).SingleAsync()).Id.ToString().Should().Be(entry.Id);
         (await read.TelemetryEvents.Select(e => e.EventType).ToListAsync()).Should().Equal(
             [EasyLoginTelemetry.LinkIssuedEventType], "a single add is not an import; its one event is the link issue");
     }
@@ -319,7 +319,7 @@ public sealed class RosterServiceTests
         }
 
         await using var read = Read(world.ExerciseId);
-        (await read.Accounts.CountAsync()).Should().Be(1, "a refused add writes nothing");
+        (await read.Accounts.Include(account => account.Enrollment).CountAsync()).Should().Be(1, "a refused add writes nothing");
         (await read.TelemetryEvents.CountAsync()).Should().Be(0);
     }
 
@@ -405,7 +405,7 @@ public sealed class RosterServiceTests
         }
 
         await using var read = Read(world.ExerciseId);
-        (await read.Accounts.CountAsync()).Should().Be(0);
+        (await read.Accounts.Include(account => account.Enrollment).CountAsync()).Should().Be(0);
     }
 
     [RequiresDockerFact]
@@ -423,7 +423,7 @@ public sealed class RosterServiceTests
         }
 
         await using var read = Read(world.ExerciseId);
-        (await read.Accounts.Select(a => a.Username).OrderBy(u => u).ToListAsync()).Should().Equal("RCHEN", "rchen2");
+        (await read.Accounts.Include(account => account.Enrollment).Select(a => a.Username).OrderBy(u => u).ToListAsync()).Should().Equal("RCHEN", "rchen2");
     }
 
     [RequiresDockerFact]
@@ -450,7 +450,7 @@ public sealed class RosterServiceTests
         }
 
         await using var read = Read(world.ExerciseId);
-        (await read.Accounts.CountAsync(a => a.DisplayName != "Concurrent Person")).Should().Be(0, "nothing of the roster's was written");
+        (await read.Accounts.Include(account => account.Enrollment).CountAsync(a => a.DisplayName != "Concurrent Person")).Should().Be(0, "nothing of the roster's was written");
         (await read.Personas.CountAsync()).Should().Be(0);
         (await read.TelemetryEvents.CountAsync()).Should().Be(0);
     }
@@ -484,12 +484,12 @@ public sealed class RosterServiceTests
 
         await using (var read = Read(world.ExerciseId))
         {
-            var account = await read.Accounts.SingleAsync();
+            var account = await read.Accounts.Include(account => account.Enrollment).SingleAsync();
             var persona = await read.Personas.SingleAsync();
             account.Id.Should().Be(legacy.Id);
-            account.PersonaId.Should().Be(persona.Id, "the persona row exists, so the reference does not dangle");
+            account.Enrollment.PersonaId.Should().Be(persona.Id, "the persona row exists, so the reference does not dangle");
             account.PersonaAutoCreated.Should().BeTrue();
-            account.Role.Should().Be("participant");
+            account.Enrollment.Role.Should().Be("participant");
             persona.ExerciseId.Should().Be(world.ExerciseId, "stamped from the resolved scope");
             persona.Handle.Should().Be("madonna_2");
             persona.Kind.Should().Be("human");
@@ -524,7 +524,7 @@ public sealed class RosterServiceTests
         }
 
         await using var between = Read(world.ExerciseId);
-        (await between.Accounts.SingleAsync()).JobRole.Should().Be("Ops Chief");
+        (await between.Accounts.Include(account => account.Enrollment).SingleAsync()).JobRole.Should().Be("Ops Chief");
         var events = await between.TelemetryEvents.CountAsync();
 
         await using (var again = RosterHarness.For(_fixture, world))
@@ -534,7 +534,7 @@ public sealed class RosterServiceTests
         }
 
         await using var after = Read(world.ExerciseId);
-        (await after.Accounts.SingleAsync()).JobRole.Should().Be("Ops Chief", "no flip-flop between the two rows");
+        (await after.Accounts.Include(account => account.Enrollment).SingleAsync()).JobRole.Should().Be("Ops Chief", "no flip-flop between the two rows");
         (await after.TelemetryEvents.CountAsync()).Should().Be(events, "a stable re-upload emits no roster.imported");
     }
 
@@ -562,9 +562,9 @@ public sealed class RosterServiceTests
         reports[2].Rows.Should().BeEquivalentTo(reports[0].Rows, "and so does upload 3");
 
         await using var read = Read(world.ExerciseId);
-        var stored = await read.Accounts.SingleAsync();
+        var stored = await read.Accounts.Include(account => account.Enrollment).SingleAsync();
         stored.Id.Should().Be(dana.Id);
-        (stored.Email, stored.JobRole, stored.PersonaId).Should().Be(("dana@example.test", (string?)null, (Guid?)null), "nothing was written");
+        (stored.Email, stored.JobRole, stored.Enrollment.PersonaId).Should().Be(("dana@example.test", (string?)null, (Guid?)null), "nothing was written");
         (await read.Personas.CountAsync()).Should().Be(0);
         (await read.TelemetryEvents.CountAsync()).Should().Be(0, "no upload wrote anything, so none emits roster.imported");
     }

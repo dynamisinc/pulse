@@ -171,7 +171,7 @@ public static class SessionEndpoints
         var result = await sessionService.GetCurrentAsync(rawToken, cancellationToken);
 
         return result.Outcome == SessionQueryOutcome.Live
-            ? Results.Ok(SessionDto.FromSession(result.Session!))
+            ? Results.Ok(SessionDto.FromSession(result.Session!, result.IsLead))
             : Results.Unauthorized();
     }
 

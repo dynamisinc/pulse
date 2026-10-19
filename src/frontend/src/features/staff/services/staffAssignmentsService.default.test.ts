@@ -21,9 +21,9 @@ describe('getStaffAssignments (default mock adapter)', () => {
     const assignments = await getStaffAssignments()
 
     expect(assignments).toEqual([
-      { exerciseId: 'ex-mock-0001', exerciseName: 'Coastal Surge (Mock Exercise)', role: 'controller' },
-      { exerciseId: 'ex-mock-0002', exerciseName: 'Ridgeline Wildfire TTX', role: 'evaluator' },
-      { exerciseId: 'ex-mock-0003', exerciseName: 'Harbor Freeze Tabletop', role: 'planner' },
+      { exerciseId: 'ex-mock-0001', exerciseName: 'Coastal Surge (Mock Exercise)', role: 'controller', personId: 'person-mock-staff', isLead: true },
+      { exerciseId: 'ex-mock-0002', exerciseName: 'Ridgeline Wildfire TTX', role: 'evaluator', personId: 'person-mock-staff', isLead: false },
+      { exerciseId: 'ex-mock-0003', exerciseName: 'Harbor Freeze Tabletop', role: 'planner', personId: 'person-mock-staff', isLead: false },
     ])
   })
 
@@ -44,6 +44,8 @@ describe('setActiveExercise (default mock adapter)', () => {
       exerciseId: 'ex-mock-0002',
       exerciseName: 'Ridgeline Wildfire TTX',
       role: 'evaluator',
+      personId: 'person-mock-staff',
+      isLead: false,
     })
   })
 

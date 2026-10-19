@@ -26,7 +26,8 @@ import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { faClipboardCheck, faGear, faSliders } from '@fortawesome/free-solid-svg-icons'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { useSession, useRole } from '@/core/auth'
-import type { ExerciseRole, Session } from '@/core/auth'
+import type { ExerciseSession, SessionRole } from '@/core/auth'
+import { withRole } from '@/core/auth/withRole.testUtils'
 import { useExerciseContext } from '@/core/exerciseContext'
 import type { ExerciseScope } from '@/core/exerciseContext'
 import { RoleAwareEntry, type RoleAwareEntryProps } from './RoleAwareEntry'
@@ -93,8 +94,12 @@ const ALL_STAFF_SURFACE_TESTIDS = [
   'staff-not-allowed-page',
 ]
 
-const BASE_SESSION: Session = {
+const BASE_SESSION: ExerciseSession = {
   exerciseId: 'ex-mock-0001',
+  scope: 'exercise',
+  personId: null,
+  world: 'participant',
+  isLead: false,
   accountId: 'acct-test',
   role: 'participant',
   personaId: 'persona-test',
@@ -110,8 +115,8 @@ const SCOPE: ExerciseScope = {
   status: 'active',
 }
 
-function primeSession(role: ExerciseRole, overrides: Partial<Session> = {}) {
-  const session: Session = { ...BASE_SESSION, role, ...overrides }
+function primeSession(role: SessionRole, overrides: Partial<ExerciseSession> = {}) {
+  const session = withRole({ ...BASE_SESSION, ...overrides }, role)
   vi.mocked(useSession).mockReturnValue(session)
   vi.mocked(useRole).mockReturnValue(session.role)
   vi.mocked(useExerciseContext).mockReturnValue(SCOPE)

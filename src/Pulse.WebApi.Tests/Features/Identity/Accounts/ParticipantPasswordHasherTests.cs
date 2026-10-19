@@ -75,7 +75,7 @@ public sealed class ParticipantPasswordHasherTests
         var hash = _hasher.Hash("shared-format-password");
 
         var framework = new Microsoft.AspNetCore.Identity.PasswordHasher<Pulse.WebApi.Data.Entities.Account>();
-        var subject = new Pulse.WebApi.Data.Entities.Account { Username = "", DisplayName = "", Role = "" };
+        var subject = new Pulse.WebApi.Data.Entities.Account { Username = "", DisplayName = "" };
 
         framework.VerifyHashedPassword(subject, hash, "shared-format-password")
             .Should().BeOneOf(

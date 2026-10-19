@@ -141,8 +141,10 @@ public sealed class AnonymousAccessRegressionTests
         // same way, so a route added to the allowlist AND marked .AllowAnonymousPreAuth() would be invisible to
         // every test in both suites. The literal pins it: GROWING the pre-auth allowlist must fail a test and force
         // a decision, not merely appear in a diff and hope a human notices (AC4).
+        // identity-auth-roles/15: 13 -> 14 for POST /api/auth/staff/login/choose (the org choice, ADMIN-IDENTITY-MODEL
+        // §1.2) — pre-auth by nature, behind the staff-login per-IP limiter, uniform 401, no-store.
         PreAuthAllowlist.Routes.Should().HaveCount(
-            13,
+            14,
             "the pre-auth allowlist is the one deliberately hand-maintained opt-out in the whole gate; a new entry "
             + "is a security decision and must be made explicitly here as well as there");
 

@@ -15,7 +15,7 @@
 
 import { useQuery, type UseQueryResult } from '@tanstack/react-query'
 import { getStaffAssignments, type StaffAssignmentError } from '../services/staffAssignmentsService'
-import type { StaffAssignment } from '../types'
+import type { Enrollment } from '../types'
 
 /** The query key this hook uses. */
 export const STAFF_ASSIGNMENTS_QUERY_KEY = ['staff', 'assignments'] as const
@@ -25,8 +25,8 @@ export const STAFF_ASSIGNMENTS_QUERY_KEY = ['staff', 'assignments'] as const
  * standard React Query `isPending` / `isSuccess` / `data` / `isError` /
  * `error` state the switcher renders against.
  */
-export function useStaffAssignments(): UseQueryResult<StaffAssignment[], StaffAssignmentError> {
-  return useQuery<StaffAssignment[], StaffAssignmentError>({
+export function useStaffAssignments(): UseQueryResult<Enrollment[], StaffAssignmentError> {
+  return useQuery<Enrollment[], StaffAssignmentError>({
     queryKey: STAFF_ASSIGNMENTS_QUERY_KEY,
     queryFn: getStaffAssignments,
   })
