@@ -11,6 +11,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Data.Extensions;
+using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.ExerciseConfiguration;
 using Pulse.WebApi.Features.ExerciseConfiguration.Chrome;
 using Pulse.WebApi.Features.Identity.Staff;
@@ -95,6 +96,7 @@ public sealed class ChromeTestHost : IAsyncDisposable
 
         builder.Services.AddPulsePersistence(builder.Configuration);
         builder.Services.AddExerciseScoping();
+        builder.Services.AddExerciseClock(); // engine-runtime/08: IScenarioNow (+ the clock it reads)
 
         // B2's staff-identity dependencies the shared staff gate resolves per request.
         builder.Services.AddScoped<StaffAssignmentService>();

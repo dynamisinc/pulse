@@ -12,6 +12,8 @@ using Pulse.WebApi.Features.Identity.Staff;
 using Pulse.WebApi.Tests.Data;
 using Pulse.WebApi.Tests.Features.Identity.Staff;
 using Xunit;
+using Pulse.WebApi.Features.EngineRuntime.Clock;
+using Pulse.WebApi.Tests.Features.EngineRuntime.Clock;
 
 /// <summary>
 /// Service-level tests for <see cref="ExerciseSettingsService"/> against real SQL Server — the outcomes and
@@ -227,6 +229,59 @@ public sealed class ExerciseSettingsServiceTests
     }
 
     [RequiresDockerFact]
+    public async Task UpdateAsync_StampsTheExercisesScenarioNow_TheRunningClock_ElseTheLatestPost_ElseNow()
+    {
+        // engine-runtime/08 (CLK-2): the settings event's scenario time is IScenarioNow's, for THIS exercise only.
+        var world = new DateTimeOffset(2033, 6, 14, 9, 0, 0, TimeSpan.FromHours(-4));
+
+        // 1. No clock, no posts: the event's own wall-clock read, exactly as before.
+        var fresh = Guid.NewGuid();
+        await SeedAsync(fresh);
+        await using (var context = _fixture.CreateContext())
+        {
+            await CreateService(context, fresh).UpdateAsync(new UpdateExerciseSettingsRequest { Name = "Fresh", TimeZone = "America/Chicago" });
+        }
+
+        // 2. No clock: the latest post (another exercise's later post ignored).
+        var posted = Guid.NewGuid();
+        await SeedAsync(posted);
+        await using (var seed = _fixture.CreateContext())
+        {
+            await TestScenarioNow.SeedWorldTimeAsync(seed, posted, world);
+            await TestScenarioNow.SeedWorldTimeAsync(seed, fresh, world.AddYears(1));
+        }
+
+        await using (var context = _fixture.CreateContext())
+        {
+            await CreateService(context, posted).UpdateAsync(new UpdateExerciseSettingsRequest { Name = "Posted", TimeZone = "America/Chicago" });
+        }
+
+        // 3. A running clock wins over the latest post.
+        var clocked = Guid.NewGuid();
+        await SeedAsync(clocked);
+        var clock = new ExerciseClockService(TimeProvider.System);
+        clock.Start(clocked, world.AddDays(1), TimeZoneInfo.Utc);
+        clock.Freeze(clocked);
+        await using (var seed = _fixture.CreateContext())
+        {
+            await TestScenarioNow.SeedWorldTimeAsync(seed, clocked, world.AddDays(3));
+        }
+
+        await using (var context = _fixture.CreateContext())
+        {
+            await CreateService(context, clocked, clock).UpdateAsync(new UpdateExerciseSettingsRequest { Name = "Clocked", TimeZone = "America/Chicago" });
+        }
+
+        await using var verify = _fixture.CreateContext();
+        var freshEvent = await verify.TelemetryEvents.IgnoreQueryFilters().AsNoTracking().SingleAsync(e => e.ExerciseId == fresh);
+        freshEvent.ScenarioTime.Should().Be(freshEvent.WallClockTime, "no clock and no posts: today's wall-clock fallback");
+        (await verify.TelemetryEvents.IgnoreQueryFilters().AsNoTracking().SingleAsync(e => e.ExerciseId == posted))
+            .ScenarioTime.Should().Be(world, "no clock: where the world is, its latest post");
+        (await verify.TelemetryEvents.IgnoreQueryFilters().AsNoTracking().SingleAsync(e => e.ExerciseId == clocked))
+            .ScenarioTime.Should().BeCloseTo(world.AddDays(1), TimeSpan.FromSeconds(1), "a running (here frozen) clock is authoritative");
+    }
+
+    [RequiresDockerFact]
     public async Task UpdateAsync_InvalidRequest_RejectsBeforeAnythingIsApplied_AndEmitsNoTelemetry()
     {
         var exerciseId = Guid.NewGuid();
@@ -258,7 +313,8 @@ public sealed class ExerciseSettingsServiceTests
             .Should().Be(0);
     }
 
-    private static ExerciseSettingsService CreateService(PulseDbContext context, Guid? currentExerciseId) =>
+    private static ExerciseSettingsService CreateService(
+        PulseDbContext context, Guid? currentExerciseId, IExerciseClock? clock = null) =>
         new(
             context,
             new ExerciseContext { CurrentExerciseId = currentExerciseId },
@@ -266,7 +322,8 @@ public sealed class ExerciseSettingsServiceTests
             {
                 SessionId = Guid.NewGuid(),
                 StaffUserId = Guid.NewGuid(),
-            }));
+            }),
+            TestScenarioNow.Over(context, clock));
 
     private async Task SeedAsync(Guid exerciseId, Action<Exercise>? configure = null)
     {

@@ -116,7 +116,8 @@ public sealed class PersonalLinkTelemetryTests
             PersonalLinkSeed.LinkService(context, exercise.Id, protector),
             new RosterLinkDtoFactory(protector, new JoinUrlBuilder(new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build())),
             new ExerciseFactsReader(context),
-            new ManualTimeProvider(DateTimeOffset.UtcNow));
+            new ManualTimeProvider(DateTimeOffset.UtcNow),
+            TestScenarioNow.Over(context));
 
         var result = action switch
         {

@@ -10,6 +10,7 @@ using Pulse.WebApi.Features.Identity.EasyLogin;
 using Pulse.WebApi.Features.Identity.Sessions;
 using Pulse.WebApi.Tests.Data;
 using Pulse.WebApi.Tests.Features.Identity.Staff;
+using Pulse.WebApi.Tests.Features.EngineRuntime.Clock;
 
 /// <summary>
 /// easy-login/01 (Sessions and gates AC) — <see cref="ParticipantSessionRequests.For"/> builds the same
@@ -109,7 +110,7 @@ public sealed class ParticipantSessionRequestsTests
         await using (var context = _fixture.CreateContext(new ExerciseContext { CurrentExerciseId = exercise.Id }))
         {
             var service = new ParticipantLoginService(
-                context, new ExerciseContext { CurrentExerciseId = exercise.Id }, issuer, hasher);
+                context, new ExerciseContext { CurrentExerciseId = exercise.Id }, issuer, hasher, TestScenarioNow.Over(context));
             (await service.LoginAsync(new ParticipantLoginRequest { Username = account.Username, Password = "pw-equivalence-1" }))
                 .Outcome.Should().Be(ParticipantLoginOutcome.Authenticated);
         }

@@ -112,7 +112,7 @@ public sealed partial class LinkEmailService
     private readonly JoinUrlBuilder _joinUrlBuilder;
     private readonly IParticipantLinkMailer _mailer;
     private readonly IOptions<LinkEmailPacing> _pacing;
-    private readonly IExerciseClock _exerciseClock;
+    private readonly IScenarioNow _scenarioNow;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<LinkEmailService> _logger;
 
@@ -126,7 +126,7 @@ public sealed partial class LinkEmailService
     /// <param name="joinUrlBuilder">Tells whether a join base is configured at all.</param>
     /// <param name="mailer">Sends one message; <see cref="IParticipantLinkMailer.IsConfigured"/> is the 503 switch.</param>
     /// <param name="pacing">The pause between sends and the batch time budget.</param>
-    /// <param name="exerciseClock">The native exercise clock, for each event's scenario time.</param>
+    /// <param name="scenarioNow">The exercise's scenario now for telemetry (engine-runtime/08, CLK-2: clock, else latest post, else now).</param>
     /// <param name="timeProvider">The server wall clock.</param>
     /// <param name="logger">The logger (one count-only summary per batch).</param>
     public LinkEmailService(
@@ -139,7 +139,7 @@ public sealed partial class LinkEmailService
         JoinUrlBuilder joinUrlBuilder,
         IParticipantLinkMailer mailer,
         IOptions<LinkEmailPacing> pacing,
-        IExerciseClock exerciseClock,
+        IScenarioNow scenarioNow,
         TimeProvider timeProvider,
         ILogger<LinkEmailService> logger)
     {
@@ -152,7 +152,7 @@ public sealed partial class LinkEmailService
         ArgumentNullException.ThrowIfNull(joinUrlBuilder);
         ArgumentNullException.ThrowIfNull(mailer);
         ArgumentNullException.ThrowIfNull(pacing);
-        ArgumentNullException.ThrowIfNull(exerciseClock);
+        ArgumentNullException.ThrowIfNull(scenarioNow);
         ArgumentNullException.ThrowIfNull(timeProvider);
         ArgumentNullException.ThrowIfNull(logger);
 
@@ -165,7 +165,7 @@ public sealed partial class LinkEmailService
         _joinUrlBuilder = joinUrlBuilder;
         _mailer = mailer;
         _pacing = pacing;
-        _exerciseClock = exerciseClock;
+        _scenarioNow = scenarioNow;
         _timeProvider = timeProvider;
         _logger = logger;
     }
@@ -337,6 +337,12 @@ public sealed partial class LinkEmailService
         var throttled = false;
         var reReadFailed = false;
 
+        // engine-runtime/08 (CLK-2, S-3): the batch's scenario now, resolved ONCE before any send (one post read at most,
+        // never one per recipient). The batch is one staff action, so every link-emailed event in it carries this one
+        // scenario instant; each event still takes its own wall-clock read below.
+        var batchTime = await EasyLoginEventTime.ForAsync(
+            exerciseId, facts, _scenarioNow, _timeProvider.GetUtcNow(), cancellationToken);
+
         foreach (var step in plan)
         {
             if (step.Delivery is null)
@@ -402,9 +408,10 @@ public sealed partial class LinkEmailService
             attempted++;
             var outcome = await SendOneAsync(facts.Name, delivery);
 
-            // XC-004: one event per attempt, one clock read for it, saved now. CancellationToken.None on purpose: the
-            // send already happened, so its audit record must be written even if the caller has just gone.
-            var time = EasyLoginEventTime.For(exerciseId, facts, _exerciseClock, _timeProvider.GetUtcNow());
+            // XC-004: one event per attempt, one wall-clock read for it (the batch's scenario now, above), saved now.
+            // CancellationToken.None on purpose: the send already happened, so its audit record must be written even if
+            // the caller has just gone.
+            var time = batchTime with { WallClock = _timeProvider.GetUtcNow() };
             _dbContext.TelemetryEvents.Add(EasyLoginTelemetry.LinkEmailed(
                 exerciseId,
                 actor,

@@ -5,21 +5,25 @@ using Pulse.WebApi.Data.Entities;
 
 /// <summary>
 /// The exercise facts a staff-change record needs: the exercise and its organization (the two scopes the record is
-/// written to), and the stored scenario instant + time zone the XC-004 event is stamped with.
+/// written to), and the scenario instant + time zone the XC-004 event is stamped with.
 /// </summary>
 /// <param name="ExerciseId">The exercise the event is scoped to.</param>
 /// <param name="OrganizationId">The organization the audit record is scoped to.</param>
-/// <param name="CurrentScenarioTime">The exercise's stored scenario instant, or <c>null</c> when none is persisted.</param>
+/// <param name="ScenarioTime">
+/// The exercise's scenario now, already resolved by the caller through <c>IScenarioNow</c> (engine-runtime/08, CLK-2:
+/// the clock, else the latest post, else the operation's wall-clock now).
+/// </param>
 /// <param name="TimeZone">The exercise time zone.</param>
-public sealed record StaffChangeExercise(Guid ExerciseId, Guid OrganizationId, DateTimeOffset? CurrentScenarioTime, string TimeZone)
+public sealed record StaffChangeExercise(Guid ExerciseId, Guid OrganizationId, DateTimeOffset ScenarioTime, string TimeZone)
 {
-    /// <summary>Projects the facts from a loaded <see cref="Exercise"/>.</summary>
+    /// <summary>Projects the facts from a loaded <see cref="Exercise"/> and its resolved scenario now.</summary>
     /// <param name="exercise">The exercise.</param>
+    /// <param name="scenarioTime">The exercise's scenario now (<c>IScenarioNow</c>).</param>
     /// <returns>The facts.</returns>
-    public static StaffChangeExercise From(Exercise exercise)
+    public static StaffChangeExercise From(Exercise exercise, DateTimeOffset scenarioTime)
     {
         ArgumentNullException.ThrowIfNull(exercise);
-        return new StaffChangeExercise(exercise.Id, exercise.OrganizationId, exercise.CurrentScenarioTime, exercise.TimeZone);
+        return new StaffChangeExercise(exercise.Id, exercise.OrganizationId, scenarioTime, exercise.TimeZone);
     }
 }
 
@@ -80,9 +84,8 @@ public static class StaffChangeRecorder
             },
             WallClockTime = now,
 
-            // COR-053: the exercise's stored scenario instant, falling back to the wall clock (the pre-COR-050
-            // placeholder every staff event uses) — never re-derived when one is persisted.
-            ScenarioTime = exercise.CurrentScenarioTime ?? now,
+            // COR-053: the exercise's scenario now, resolved by the caller (IScenarioNow), never re-derived here.
+            ScenarioTime = exercise.ScenarioTime,
             TimeZone = exercise.TimeZone,
             Target = target,
             Payload = payload,

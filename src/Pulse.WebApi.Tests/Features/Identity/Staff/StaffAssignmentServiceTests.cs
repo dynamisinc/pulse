@@ -9,6 +9,7 @@ using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.Identity.Staff;
 using Pulse.WebApi.Tests.Data;
+using Pulse.WebApi.Tests.Features.EngineRuntime.Clock;
 
 /// <summary>
 /// Integration tests for <see cref="StaffAssignmentService"/> (story 05, COR-005 / XC-002 / XC-004) against
@@ -30,7 +31,7 @@ public sealed class StaffAssignmentServiceTests
         var accessor = staffUserId is null || sessionId is null
             ? new StubCurrentStaffSessionAccessor(null)
             : new StubCurrentStaffSessionAccessor(new CurrentStaffSession { SessionId = sessionId.Value, StaffUserId = staffUserId.Value });
-        return new StaffAssignmentService(context, accessor);
+        return new StaffAssignmentService(context, accessor, scenarioNow: TestScenarioNow.Over(context));
     }
 
     private async Task<Exercise> SeedExerciseAsync(string name)

@@ -78,9 +78,9 @@ using Pulse.WebApi.Features.Social.Follows;
 ///   <item><description>A RUNNING exercise clock is authoritative and is used as-is, never clamped:
 ///   <see cref="Post.CreatedScenarioTime"/> can still be client-supplied this phase, so a post stamped ahead of the
 ///   clock must not drag every other participant's reaction time forward.</description></item>
-///   <item><description>Otherwise the exercise's persisted <c>CurrentScenarioTime</c>, else the post's own
-///   <see cref="Post.CreatedScenarioTime"/> (always a scenario instant), CLAMPED to be no earlier than the post's
-///   instant: the stored value is written only by the seed and can be stale.</description></item>
+///   <item><description>Otherwise the exercise's latest post (<see cref="IScenarioNow"/>, engine-runtime/08), else the
+///   post's own <see cref="Post.CreatedScenarioTime"/> (always a scenario instant), CLAMPED to be no earlier than the
+///   post's instant.</description></item>
 ///   <item><description>An un-like is additionally never earlier than the active row's own
 ///   <see cref="PostReaction.CreatedScenarioTime"/>, so the history never shows an un-like before its like (e.g. a
 ///   like stamped by a running clock that a host restart has since lost).</description></item>
@@ -141,6 +141,7 @@ public sealed partial class ReactionService
     private readonly IPostEngagementReader _engagementReader;
     private readonly IFeedBroadcaster _feedBroadcaster;
     private readonly ILogger<ReactionService> _logger;
+    private readonly IScenarioNow _scenarioNow;
 
     /// <summary>
     /// Creates the service over its persistence, scope, session-identity, clock, engagement, fan-out and logging
@@ -155,6 +156,7 @@ public sealed partial class ReactionService
     /// </param>
     /// <param name="feedBroadcaster">The real-time fan-out that carries <c>PostEngagementChanged</c> (DF-17).</param>
     /// <param name="logger">Operational log for a failed push (never telemetry).</param>
+    /// <param name="scenarioNow">The exercise's scenario now for telemetry (engine-runtime/08, CLK-2: clock, else latest post, else now).</param>
     public ReactionService(
         PulseDbContext dbContext,
         IExerciseContext exerciseContext,
@@ -162,7 +164,8 @@ public sealed partial class ReactionService
         IExerciseClock exerciseClock,
         IPostEngagementReader engagementReader,
         IFeedBroadcaster feedBroadcaster,
-        ILogger<ReactionService> logger)
+        ILogger<ReactionService> logger,
+        IScenarioNow scenarioNow)
     {
         ArgumentNullException.ThrowIfNull(dbContext);
         ArgumentNullException.ThrowIfNull(exerciseContext);
@@ -171,6 +174,7 @@ public sealed partial class ReactionService
         ArgumentNullException.ThrowIfNull(engagementReader);
         ArgumentNullException.ThrowIfNull(feedBroadcaster);
         ArgumentNullException.ThrowIfNull(logger);
+        ArgumentNullException.ThrowIfNull(scenarioNow);
 
         _dbContext = dbContext;
         _exerciseContext = exerciseContext;
@@ -179,6 +183,7 @@ public sealed partial class ReactionService
         _engagementReader = engagementReader;
         _feedBroadcaster = feedBroadcaster;
         _logger = logger;
+        _scenarioNow = scenarioNow;
     }
 
     /// <summary>
@@ -272,16 +277,19 @@ public sealed partial class ReactionService
         //    event. Scenario time is never the wall clock (DP-15); see the type remarks for the order.
         var now = DateTimeOffset.UtcNow;
         // org-scope-exempt(ResolvedScope): exerciseId comes from TryGetScope (IExerciseContext) at step 1 and is
-        // never a request field; it only supplies the scenario-time fallback and the telemetry time zone.
+        // never a request field; it only supplies the telemetry time zone.
         var exercise = await _dbContext.Exercises
             .AsNoTracking()
             .Where(candidate => candidate.Id == exerciseId)
-            .Select(candidate => new { candidate.CurrentScenarioTime, candidate.TimeZone })
+            .Select(candidate => new { candidate.TimeZone })
             .FirstOrDefaultAsync(cancellationToken);
         // A RUNNING clock is authoritative and is not clamped (the post's own time may be client-supplied). Only the
-        // fallbacks are clamped to the post: the stored CurrentScenarioTime is seed-written and can be stale.
+        // fallbacks are clamped to the post: the exercise's latest post (IScenarioNow, engine-runtime/08), else the
+        // post's own instant.
         var scenarioTime = _exerciseClock.CurrentScenarioTime(exerciseId)
-            ?? Later(exercise?.CurrentScenarioTime ?? baseline.PostScenarioTime, baseline.PostScenarioTime);
+            ?? Later(
+                await _scenarioNow.FindAsync(exerciseId, cancellationToken) ?? baseline.PostScenarioTime,
+                baseline.PostScenarioTime);
 
         // An un-like never precedes the like it ends (its row's own scenario instant), whatever the source above.
         if (!activate)

@@ -136,7 +136,10 @@ public sealed class OrganizationScopeSweepTests
         // PauseOverlayServiceCollectionExtensions — the composed participant-overlay read both overlay publishers push,
         // by the SERVER-resolved exercise id (the steering tier's scope, or the committed lifecycle transition's row);
         // the same read the overlay GET performs, never a client-supplied id.
-        ["ResolvedScope"] = 28,
+        // engine-runtime/08 (CLK-2): -1 — MediaUploadService.PersistAsync no longer reads the exercise row (its only use
+        // was the retired CurrentScenarioTime fallback; scenario time now comes from IScenarioNow over Posts). The
+        // ReactionService read above now supplies only the time zone.
+        ["ResolvedScope"] = 27,
 
         // orgAdmin startup seeder: +1 for OrgAdminSeedService, which resolves the seeded staff human by their
         // configured IdP ExternalSubject — the SAME resolve-by-subject read StaffLoginService and

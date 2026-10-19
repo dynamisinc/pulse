@@ -25,6 +25,7 @@ using Pulse.WebApi.Features.Social;
 using Pulse.WebApi.Features.Social.Editing;
 using Pulse.WebApi.Features.Social.Engagement;
 using Pulse.WebApi.Tests.Data;
+using Pulse.WebApi.Tests.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Tests.Features.Identity.Staff;
 using Pulse.WebApi.Tests.Helpers;
 
@@ -166,6 +167,7 @@ public sealed class ExerciseRealtimeHubLifecycleTests
             new ExerciseContext { CurrentExerciseId = exerciseId },
             new StubCurrentStaffSessionAccessor(null),
             // #390 (merged with #375): this test pins the FEED send gate; the overlay push is #651's to test.
+            TestScenarioNow.Over(context),
             new NoOpExerciseLifecycleTransitionObserver(),
             NullLogger<ExerciseLifecycleService>.Instance);
 

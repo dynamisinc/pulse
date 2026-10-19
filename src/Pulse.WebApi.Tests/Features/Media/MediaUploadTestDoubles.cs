@@ -148,8 +148,23 @@ internal sealed class UploadHarness : IDisposable
                 OrganizationId = Organization.DefaultOrganizationId,
                 Name = "media harness",
                 Status = "live",
-                CurrentScenarioTime = exerciseHasScenarioTime ? ExerciseScenarioTime : null,
             });
+
+            if (exerciseHasScenarioTime)
+            {
+                // engine-runtime/08 (CLK-2): the world's scenario instant is its latest post (the retired column is never read).
+                seed.Posts.Add(new Post
+                {
+                    Id = Guid.NewGuid(),
+                    ExerciseId = ExerciseId,
+                    AuthorPersonaId = Guid.NewGuid(),
+                    Body = "The world's latest post.",
+                    CreatedScenarioTime = ExerciseScenarioTime,
+                    Origin = "participant",
+                    ActingHumanId = "human-world-time",
+                    CreatedWallClock = ExerciseScenarioTime,
+                });
+            }
 
             if (staffUserId is { } staffId)
             {
@@ -190,7 +205,7 @@ internal sealed class UploadHarness : IDisposable
             httpContextAccessor ?? new HttpContextAccessor(),
             Store,
             Signer,
-            Clock,
+            TestScenarioNow.Over(Db, Clock, Time),
             Time,
             Microsoft.Extensions.Options.Options.Create(Options),
             logger ?? NullLogger<MediaUploadService>.Instance);

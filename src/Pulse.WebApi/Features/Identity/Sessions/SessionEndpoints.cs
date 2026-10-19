@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.Identity.EasyLogin;
 using Pulse.WebApi.Features.Identity.Staff;
 using Pulse.WebApi.Features.Identity.RateLimits;
@@ -73,6 +74,9 @@ public static class SessionEndpoints
         services.AddScoped<ISessionIssuer, SessionIssuer>();
 
         // The endpoint funnel behind /api/session, /api/auth/refresh, /api/auth/logout.
+        // engine-runtime/08 (CLK-2): this slice stamps telemetry through IScenarioNow. AddExerciseClock is idempotent
+        // (TryAdd), so it converges on the host's one clock and resolver whichever registration runs first.
+        services.AddExerciseClock();
         services.AddScoped<SessionService>();
 
         // Easy-login story 06 (participant day cap): the issuer and the service read the server clock and the bound

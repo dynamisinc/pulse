@@ -17,6 +17,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Data.Extensions;
+using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.Exports;
 using Pulse.WebApi.Features.Identity.Sessions;
 using Pulse.WebApi.Features.Identity.Staff;
@@ -55,6 +56,7 @@ public sealed class PostExportTestHost : IAsyncDisposable
 
         builder.Services.AddPulsePersistence(builder.Configuration);
         builder.Services.AddExerciseScoping();
+        builder.Services.AddExerciseClock(); // engine-runtime/08: IScenarioNow (+ the clock it reads)
 
         // B2's staff identity, as AddStaffIdentity()/AddSessions() register it: the real token-reading accessor.
         builder.Services.AddHttpContextAccessor();

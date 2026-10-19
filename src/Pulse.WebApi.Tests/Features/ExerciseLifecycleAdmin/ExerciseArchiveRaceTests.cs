@@ -16,6 +16,7 @@ using Pulse.WebApi.Features.ExerciseLifecycleAdmin;
 using Pulse.WebApi.Features.Identity.Staff;
 using Pulse.WebApi.Tests.Data;
 using Xunit;
+using Pulse.WebApi.Tests.Features.EngineRuntime.Clock;
 
 /// <summary>
 /// demo-feedback story 22, Gate-1 L-4: archive stages <c>exercise.archived</c> BEFORE the lifecycle service reads and
@@ -65,8 +66,10 @@ public sealed class ExerciseArchiveRaceTests
                     context,
                     new ExerciseContext(),
                     staff,
+                    TestScenarioNow.Over(context),
                     new NoOpExerciseLifecycleTransitionObserver(),
-                    NullLogger<ExerciseLifecycleService>.Instance));
+                    NullLogger<ExerciseLifecycleService>.Instance),
+                TestScenarioNow.Over(context));
 
             var result = await service.ArchiveAsync(world.OwnExercise.Id);
 

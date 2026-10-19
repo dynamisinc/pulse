@@ -19,6 +19,7 @@ using Pulse.WebApi.Features.Social.Follows;
 using Pulse.WebApi.Tests.Data;
 using Pulse.WebApi.Tests.Features.Identity.Staff;
 using Xunit;
+using Pulse.WebApi.Tests.Features.EngineRuntime.Clock;
 
 /// <summary>
 /// demo-feedback story 19, Gate-1 L-2 / L-3 / L-5 — <see cref="PostEditService"/> driven directly over real SQL with
@@ -53,7 +54,8 @@ public sealed class PostEditRaceTests
             new ParticipantWriteGate(new ExerciseFactsReader(db)),
             broadcaster,
             new NarrowProjector(),
-            time);
+            time,
+            TestScenarioNow.Over(db));
 
     private PulseDbContext Context(Guid exerciseId, IInterceptor? interceptor = null)
     {

@@ -15,6 +15,7 @@ using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.Identity.Providers;
 using Pulse.WebApi.Features.Identity.Staff;
 using Pulse.WebApi.Features.Ops.OrgAdminSeed;
+using Pulse.WebApi.Tests.Features.EngineRuntime.Clock;
 
 /// <summary>
 /// Shared doubles and builders for the <see cref="OrgAdminSeedService"/> suites — a settable
@@ -145,7 +146,8 @@ internal static class OrgAdminSeedTestKit
             context,
             allowlist,
             new TestHostEnvironment(environmentName),
-            logger ?? NullLogger<OrgAdminSeedService>.Instance);
+            logger ?? NullLogger<OrgAdminSeedService>.Instance,
+            TestScenarioNow.Over(context));
 
     /// <summary>A fresh customer tenant with a globally-unique name (the Name column is uniquely indexed).</summary>
     /// <param name="id">The tenant id.</param>

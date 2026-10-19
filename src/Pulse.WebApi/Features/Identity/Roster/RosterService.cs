@@ -61,7 +61,7 @@ public sealed class RosterService
     private readonly IParticipantLinkIssuer _linkIssuer;
     private readonly RosterLinkDtoFactory _linkDtoFactory;
     private readonly TimeProvider _timeProvider;
-    private readonly IExerciseClock? _exerciseClock;
+    private readonly IScenarioNow? _scenarioNow;
 
     /// <summary>Creates the service.</summary>
     /// <param name="dbContext">The request's persistence context (central exercise filter and write guard).</param>
@@ -71,7 +71,7 @@ public sealed class RosterService
     /// <param name="linkIssuer">Gives each new participant a link (story 03's issuer; story 01's null default issues none).</param>
     /// <param name="linkDtoFactory">Projects a new participant's link state.</param>
     /// <param name="timeProvider">The server clock, read once per operation.</param>
-    /// <param name="exerciseClock">The native exercise clock for scenario time, when the host has one.</param>
+    /// <param name="scenarioNow">The exercise's scenario now for telemetry (engine-runtime/08, CLK-2: clock, else latest post, else now).</param>
     public RosterService(
         PulseDbContext dbContext,
         IExerciseContext exerciseContext,
@@ -80,7 +80,7 @@ public sealed class RosterService
         IParticipantLinkIssuer linkIssuer,
         RosterLinkDtoFactory linkDtoFactory,
         TimeProvider timeProvider,
-        IExerciseClock? exerciseClock = null)
+        IScenarioNow? scenarioNow = null)
     {
         ArgumentNullException.ThrowIfNull(dbContext);
         ArgumentNullException.ThrowIfNull(exerciseContext);
@@ -97,7 +97,7 @@ public sealed class RosterService
         _linkIssuer = linkIssuer;
         _linkDtoFactory = linkDtoFactory;
         _timeProvider = timeProvider;
-        _exerciseClock = exerciseClock;
+        _scenarioNow = scenarioNow;
     }
 
     /// <summary>
@@ -139,7 +139,7 @@ public sealed class RosterService
             }
 
             var now = _timeProvider.GetUtcNow();
-            var time = EasyLoginEventTime.For(caller.ExerciseId, caller.Facts, _exerciseClock, now);
+            var time = await EasyLoginEventTime.ForAsync(caller.ExerciseId, caller.Facts, _scenarioNow, now, cancellationToken);
 
             await StageAsync(caller, workspace, accountsById, now, time, cancellationToken);
             _dbContext.TelemetryEvents.Add(EasyLoginTelemetry.RosterImported(
@@ -204,7 +204,7 @@ public sealed class RosterService
             }
 
             var now = _timeProvider.GetUtcNow();
-            var time = EasyLoginEventTime.For(caller.ExerciseId, caller.Facts, _exerciseClock, now);
+            var time = await EasyLoginEventTime.ForAsync(caller.ExerciseId, caller.Facts, _scenarioNow, now, cancellationToken);
             var created = await StageAsync(caller, workspace, accountsById, now, time, cancellationToken);
 
             try

@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
+using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.Identity.Sessions;
 using Pulse.WebApi.Features.Identity.RateLimits;
 
@@ -64,6 +65,9 @@ public static class SharedReadOnlyEndpoints
         // The slow-KDF hasher is stateless + thread-safe → singleton. The login funnel + the read-only probe
         // are Scoped, matching the PulseDbContext unit of work they write/read through.
         services.AddSingleton<ISharedCredentialHasher, SharedCredentialHasher>();
+        // engine-runtime/08 (CLK-2): this slice stamps telemetry through IScenarioNow. AddExerciseClock is idempotent
+        // (TryAdd), so it converges on the host's one clock and resolver whichever registration runs first.
+        services.AddExerciseClock();
         services.AddScoped<SharedReadOnlyLoginService>();
         services.AddScoped<IReadOnlySessionProbe, ReadOnlySessionProbe>();
 

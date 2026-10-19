@@ -18,6 +18,7 @@ using Pulse.WebApi.Features.Identity.Staff;
 using Pulse.WebApi.Tests.Data;
 using Pulse.WebApi.Tests.Features.Identity.Staff;
 using Pulse.WebApi.Tests.Helpers;
+using Pulse.WebApi.Tests.Features.EngineRuntime.Clock;
 
 /// <summary>The link state a seeded participant starts with.</summary>
 internal enum SeededLink
@@ -81,9 +82,9 @@ internal sealed class LinkCardTestWorld
             Name = name ?? $"Coastal Surge {id:N}",
             TimeZone = timeZone,
             Status = "live",
-            CurrentScenarioTime = scenarioTime,
         });
         await seed.SaveChangesAsync();
+        await TestScenarioNow.SeedWorldTimeAsync(seed, id, scenarioTime); // engine-runtime/08: the world's time is its latest post
         return id;
     }
 

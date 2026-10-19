@@ -13,6 +13,7 @@ using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Tests.Data;
 using Pulse.WebApi.Tests.Features.ExerciseConfiguration.Lifecycle;
 using static Pulse.WebApi.Tests.Features.Social.Reactions.ReactionTestSeed;
+using Pulse.WebApi.Tests.Features.EngineRuntime.Clock;
 
 /// <summary>
 /// End-to-end coverage of <c>PUT</c>/<c>DELETE /api/posts/{postId}/reactions/{kind}</c> (demo-polish B3) through the
@@ -418,7 +419,7 @@ public class ReactionEndpointTests
     [RequiresDockerFact]
     public async Task React_NoClockAndNoStoredScenarioTime_StampsThePostsOwnScenarioTime_NeverTheWallClock()
     {
-        // No running clock and NO persisted CurrentScenarioTime: the last fallback is the post's own scenario instant,
+        // No running clock and no other post: the latest post IS this post, so the stamp is the post's own scenario instant,
         // never DateTimeOffset.UtcNow (DP-15). The post instant is deliberately in the PAST, years before the wall
         // clock: a wall-clock fallback would then be LATER than the post, so the never-before-the-post clamp could not
         // mask it, and the stamp would visibly differ.
@@ -449,8 +450,8 @@ public class ReactionEndpointTests
     [RequiresDockerFact]
     public async Task React_AStaleStoredScenarioTimeEarlierThanThePost_IsClampedToThePostsOwnScenarioTime()
     {
-        // The stored CurrentScenarioTime is written only by the seed, so it can be stale and EARLIER than a post made
-        // since. A reaction or un-like can never predate its post: the stamp is clamped to the post's instant.
+        // engine-runtime/08: with no clock the fallback is the exercise's latest post, and an older world post can never
+        // make a reaction or un-like predate its post: the stamp is clamped to the post's instant.
         var staleStored = new DateTimeOffset(2033, 9, 4, 9, 30, 0, TimeSpan.Zero);
         var postScenarioTime = new DateTimeOffset(2033, 9, 4, 15, 0, 0, TimeSpan.Zero);
         var world = await SeedWorldAsync(

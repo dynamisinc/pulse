@@ -4,6 +4,7 @@ using System.Linq;
 using Microsoft.EntityFrameworkCore;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
+using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.Realtime;
 
 /// <summary>
@@ -54,6 +55,7 @@ public sealed class StaffAssignmentService
     private readonly PulseDbContext _dbContext;
     private readonly ICurrentStaffSessionAccessor _currentStaffSession;
     private readonly ISessionConnectionRevoker? _connectionRevoker;
+    private readonly IScenarioNow? _scenarioNow;
 
     /// <summary>Creates the service over its persistence context and the current-staff-session seam.</summary>
     /// <param name="dbContext">The persistence context the assignment read + session mutation run through.</param>
@@ -63,10 +65,16 @@ public sealed class StaffAssignmentService
     /// (and closes them, so the client reconnects into the new exercise). Optional: a host without the realtime hub
     /// has no connections to move.
     /// </param>
+    /// <param name="scenarioNow">
+    /// engine-runtime/08 (CLK-2): the switch's telemetry scenario time (clock, else latest post, else now). Always
+    /// supplied by DI (<c>AddExerciseClock</c>); optional only so the realtime hub's assignments-only read
+    /// (<see cref="GetAssignmentsAsync"/>) can construct the service without it. A switch without it fails loudly.
+    /// </param>
     public StaffAssignmentService(
         PulseDbContext dbContext,
         ICurrentStaffSessionAccessor currentStaffSession,
-        ISessionConnectionRevoker? connectionRevoker = null)
+        ISessionConnectionRevoker? connectionRevoker = null,
+        IScenarioNow? scenarioNow = null)
     {
         ArgumentNullException.ThrowIfNull(dbContext);
         ArgumentNullException.ThrowIfNull(currentStaffSession);
@@ -74,6 +82,7 @@ public sealed class StaffAssignmentService
         _dbContext = dbContext;
         _currentStaffSession = currentStaffSession;
         _connectionRevoker = connectionRevoker;
+        _scenarioNow = scenarioNow;
     }
 
     /// <summary>
@@ -237,7 +246,12 @@ public sealed class StaffAssignmentService
         }
 
         var now = DateTimeOffset.UtcNow;
-        var scenarioTime = exercise.CurrentScenarioTime ?? now;
+
+        // engine-runtime/08 (CLK-2): the TARGET exercise's scenario now (clock, else its latest post, else now). The id
+        // is the exercise row just read .InOrganization(...) for an assignment the caller holds.
+        var scenarioNow = _scenarioNow ?? throw new InvalidOperationException(
+            "StaffAssignmentService needs IScenarioNow to switch exercises; register AddExerciseClock().");
+        var scenarioTime = await scenarioNow.GetAsync(exercise.Id, now, cancellationToken);
         var previousExerciseId = session.ExerciseId;
 
         // Persist the selection: the session's bound exercise AND its per-exercise role both move to the newly

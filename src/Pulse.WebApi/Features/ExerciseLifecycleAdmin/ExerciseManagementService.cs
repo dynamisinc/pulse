@@ -6,6 +6,7 @@ using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
+using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.ExerciseConfiguration;
 using Pulse.WebApi.Features.ExerciseConfiguration.Lifecycle;
 
@@ -57,6 +58,7 @@ public sealed class ExerciseManagementService
     private readonly PulseDbContext _dbContext;
     private readonly StaffCallerContext _staffCaller;
     private readonly ExerciseLifecycleService _lifecycle;
+    private readonly IScenarioNow _scenarioNow;
 
     /// <summary>Creates the service over its persistence context and the server-resolved caller seams.</summary>
     /// <param name="dbContext">The request-scoped unit of work every write goes through.</param>
@@ -65,18 +67,22 @@ public sealed class ExerciseManagementService
     /// The request-scoped COR-032 lifecycle service (same <see cref="PulseDbContext"/> instance), entered through its
     /// tenant-checked <c>TransitionTenantCheckedAsync</c>, never through the caller's active exercise scope.
     /// </param>
+    /// <param name="scenarioNow">The exercise's scenario now for telemetry (engine-runtime/08, CLK-2: clock, else latest post, else now).</param>
     public ExerciseManagementService(
         PulseDbContext dbContext,
         StaffCallerContext staffCaller,
-        ExerciseLifecycleService lifecycle)
+        ExerciseLifecycleService lifecycle,
+        IScenarioNow scenarioNow)
     {
         ArgumentNullException.ThrowIfNull(dbContext);
         ArgumentNullException.ThrowIfNull(staffCaller);
         ArgumentNullException.ThrowIfNull(lifecycle);
+        ArgumentNullException.ThrowIfNull(scenarioNow);
 
         _dbContext = dbContext;
         _staffCaller = staffCaller;
         _lifecycle = lifecycle;
+        _scenarioNow = scenarioNow;
     }
 
     /// <summary>
@@ -119,12 +125,16 @@ public sealed class ExerciseManagementService
         exercise.Name = name;
 
         var now = DateTimeOffset.UtcNow;
+
+        // engine-runtime/08 (CLK-2): exercise.Id is the row just found inside the caller's own tenant.
+        var scenarioTime = await _scenarioNow.GetAsync(exercise.Id, now, cancellationToken);
         _dbContext.TelemetryEvents.Add(BuildTelemetry(
             exercise,
             caller,
             RenamedEventType,
             JsonSerializer.Serialize(new RenamedPayload { PreviousLength = previousLength, NewLength = name.Length }),
-            now));
+            now,
+            scenarioTime));
 
         await _dbContext.SaveChangesAsync(cancellationToken);
 
@@ -163,12 +173,16 @@ public sealed class ExerciseManagementService
         }
 
         var now = DateTimeOffset.UtcNow;
+
+        // engine-runtime/08 (CLK-2): exercise.Id is the row just found inside the caller's own tenant.
+        var scenarioTime = await _scenarioNow.GetAsync(exercise.Id, now, cancellationToken);
         _dbContext.TelemetryEvents.Add(BuildTelemetry(
             exercise,
             caller,
             ArchivedEventType,
             JsonSerializer.Serialize(new ArchivedPayload { From = state }),
-            now));
+            now,
+            scenarioTime));
 
         // The existing lifecycle service (resolved from DI, sharing this request's PulseDbContext), entered through
         // its tenant-checked entry point: it re-reads the exercise bounded by the caller's server-resolved tenant,
@@ -275,7 +289,8 @@ public sealed class ExerciseManagementService
         StaffCaller caller,
         string eventType,
         string payload,
-        DateTimeOffset now) => new()
+        DateTimeOffset now,
+        DateTimeOffset scenarioTime) => new()
     {
         EventId = Guid.NewGuid().ToString(),
         SchemaVersion = SchemaVersion,
@@ -290,7 +305,7 @@ public sealed class ExerciseManagementService
             SessionId = caller.SessionId.ToString(),
         },
         WallClockTime = now,
-        ScenarioTime = exercise.CurrentScenarioTime ?? now,
+        ScenarioTime = scenarioTime,
         TimeZone = exercise.TimeZone,
         Target = new TelemetryTarget { EntityType = ExerciseEntityType, EntityId = exercise.Id.ToString() },
         Payload = payload,

@@ -11,6 +11,7 @@ using Pulse.WebApi.Features.Identity.Accounts;
 using Pulse.WebApi.Features.Identity.Staff;
 using Pulse.WebApi.Tests.Data;
 using Pulse.WebApi.Tests.Features.Identity.Staff;
+using Pulse.WebApi.Tests.Features.EngineRuntime.Clock;
 
 /// <summary>
 /// The standing cross-exercise isolation suite's account entries (<c>exercise-isolation/07</c>, COR-001/COR-007)
@@ -70,7 +71,7 @@ public sealed class AccountLoginIsolationTests
         await using (var contextA = _fixture.CreateContext(new ExerciseContext { CurrentExerciseId = exerciseA.Id }))
         {
             var serviceA = new ParticipantLoginService(
-                contextA, new ExerciseContext { CurrentExerciseId = exerciseA.Id }, new RecordingSessionIssuer(), _hasher);
+                contextA, new ExerciseContext { CurrentExerciseId = exerciseA.Id }, new RecordingSessionIssuer(), _hasher, TestScenarioNow.Over(contextA));
 
             var resultA = await serviceA.LoginAsync(new ParticipantLoginRequest { Username = "bob", Password = "bob-correct-pw" });
 
@@ -83,7 +84,7 @@ public sealed class AccountLoginIsolationTests
         await using (var contextB = _fixture.CreateContext(new ExerciseContext { CurrentExerciseId = exerciseB.Id }))
         {
             var serviceB = new ParticipantLoginService(
-                contextB, new ExerciseContext { CurrentExerciseId = exerciseB.Id }, issuerB, _hasher);
+                contextB, new ExerciseContext { CurrentExerciseId = exerciseB.Id }, issuerB, _hasher, TestScenarioNow.Over(contextB));
 
             var resultB = await serviceB.LoginAsync(new ParticipantLoginRequest { Username = "bob", Password = "bob-correct-pw" });
 

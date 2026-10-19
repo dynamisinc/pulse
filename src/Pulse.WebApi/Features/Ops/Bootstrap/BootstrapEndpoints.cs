@@ -9,6 +9,7 @@ using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.Identity.Accounts;
 using Pulse.WebApi.Features.Identity.Providers;
 using Pulse.WebApi.Features.Identity.Sessions;
@@ -98,6 +99,9 @@ public static class BootstrapEndpoints
         // Scoped to match the PulseDbContext unit of work they write through. Story identity-auth-roles/10 adds the shared,
         // exercise-confined persona resolver (COR-001) + the persona-binding service HERE rather than behind a new
         // Add* call, so no further Program.cs wiring is required.
+        // engine-runtime/08 (CLK-2): this slice stamps telemetry through IScenarioNow. AddExerciseClock is idempotent
+        // (TryAdd), so it converges on the host's one clock and resolver whichever registration runs first.
+        services.AddExerciseClock();
         services.AddScoped<BootstrapService>();
         services.AddScoped<OpsPersonaResolver>();
         services.AddScoped<ParticipantPersonaBindingService>();

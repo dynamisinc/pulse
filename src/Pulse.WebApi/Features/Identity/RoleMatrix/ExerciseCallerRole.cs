@@ -174,10 +174,11 @@ public sealed class ExerciseCallerRole
     private static async Task EnsureSwampedOffWithoutLeadAsync(
         IServiceProvider services,
         PulseDbContext dbContext,
-        StaffChangeExercise exercise,
+        Guid exerciseId,
+        Guid organizationId,
+        string timeZone,
         CancellationToken cancellationToken)
     {
-        var exerciseId = exercise.ExerciseId;
         var registry = services.GetService<EngineAutonomyRegistry>();
         if (registry is null || !registry.GetOrCreate(exerciseId).SwampedModeEnabled)
         {
@@ -203,6 +204,12 @@ public sealed class ExerciseCallerRole
 
         var scenarioMinute = clock?.CurrentScenarioMinute(exerciseId) ?? 0;
         var now = (services.GetService<TimeProvider>() ?? TimeProvider.System).GetUtcNow();
+
+        // engine-runtime/08 (CLK-2): resolved only here, when a record is actually written, so the per-request role
+        // check pays nothing for it. A host without the resolver keeps the wall clock.
+        var scenarioNow = services.GetService<IScenarioNow>();
+        var scenarioTime = scenarioNow is null ? now : await scenarioNow.GetAsync(exerciseId, now, cancellationToken);
+        var exercise = new StaffChangeExercise(exerciseId, organizationId, scenarioTime, timeZone);
         var payload = string.Create(
             CultureInfo.InvariantCulture,
             $"{{\"reason\":\"{NoLeadRecheckReason}\",\"wasOn\":true,\"scenarioMinute\":{scenarioMinute}}}");
@@ -294,7 +301,7 @@ public sealed class ExerciseCallerRole
         var facts = await dbContext.Exercises
             .AsNoTracking()
             .Where(e => e.Id == exerciseId)
-            .Select(e => new { e.Status, e.OrganizationId, e.CurrentScenarioTime, e.TimeZone })
+            .Select(e => new { e.Status, e.OrganizationId, e.TimeZone })
             .FirstOrDefaultAsync(cancellationToken);
         var status = facts?.Status;
 
@@ -303,7 +310,9 @@ public sealed class ExerciseCallerRole
             await EnsureSwampedOffWithoutLeadAsync(
                 services,
                 dbContext,
-                new StaffChangeExercise(exerciseId, facts.OrganizationId, facts.CurrentScenarioTime, facts.TimeZone),
+                exerciseId,
+                facts.OrganizationId,
+                facts.TimeZone,
                 cancellationToken);
         }
 

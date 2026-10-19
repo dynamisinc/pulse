@@ -21,6 +21,7 @@ using Pulse.WebApi.Features.Realtime;
 using Pulse.WebApi.Features.Social;
 using Pulse.WebApi.Tests.Data;
 using Pulse.WebApi.Tests.Helpers;
+using Pulse.WebApi.Tests.Features.EngineRuntime.Clock;
 
 /// <summary>
 /// An <see cref="IFeedBroadcaster"/> double that records every <c>PostRemoved</c> broadcast, so a test can count
@@ -218,7 +219,7 @@ public sealed class ModerationSeeder
         ?? throw new InvalidOperationException("The MsSql fixture has no connection string.");
 
     /// <summary>Seeds a live exercise with its own hostname.</summary>
-    /// <param name="currentScenarioTime">The stored <c>Exercise.CurrentScenarioTime</c>, or <c>null</c>.</param>
+    /// <param name="currentScenarioTime">Where the exercise's world is (one post at that scenario instant, engine-runtime/08), or <c>null</c>.</param>
     /// <returns>The seeded exercise.</returns>
     public async Task<SeededExercise> SeedExerciseAsync(DateTimeOffset? currentScenarioTime = null)
     {
@@ -234,9 +235,9 @@ public sealed class ModerationSeeder
             Hostname = host,
             TimeZone = "UTC",
             Status = "live",
-            CurrentScenarioTime = currentScenarioTime,
         });
         await seed.SaveChangesAsync();
+        await TestScenarioNow.SeedWorldTimeAsync(seed, id, currentScenarioTime);
         return new SeededExercise(id, host);
     }
 

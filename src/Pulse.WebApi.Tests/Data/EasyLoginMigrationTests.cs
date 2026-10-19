@@ -15,6 +15,7 @@ using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.Identity.Accounts;
 using Pulse.WebApi.Features.Identity.EasyLogin;
 using Pulse.WebApi.Tests.Features.Identity.Staff;
+using Pulse.WebApi.Tests.Features.EngineRuntime.Clock;
 
 /// <summary>
 /// easy-login/01 (Schema AC) — the database-level proofs for the feature's ONE migration, <c>EasyLoginSchema</c>,
@@ -100,7 +101,7 @@ public class EasyLoginMigrationTests
         await using (var context = database.NewContext(exerciseId))
         {
             var service = new ParticipantLoginService(
-                context, new ExerciseContext { CurrentExerciseId = exerciseId }, issuer, hasher);
+                context, new ExerciseContext { CurrentExerciseId = exerciseId }, issuer, hasher, TestScenarioNow.Over(context));
 
             var result = await service.LoginAsync(
                 new ParticipantLoginRequest { Username = "legacy_user", Password = "legacy-pass-123" });

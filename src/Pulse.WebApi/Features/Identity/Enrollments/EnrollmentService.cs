@@ -8,6 +8,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
+using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.EngineRuntime;
 using Pulse.WebApi.Features.ExerciseLifecycleAdmin;
 using Pulse.WebApi.Features.Realtime;
@@ -111,6 +112,7 @@ public sealed partial class EnrollmentService
     private readonly ISwampedModeSwitch _swampedMode;
     private readonly ISessionConnectionRevoker _connectionRevoker;
     private readonly ILogger<EnrollmentService> _logger;
+    private readonly IScenarioNow _scenarioNow;
 
     /// <summary>Creates the service.</summary>
     /// <param name="dbContext">The request-scoped persistence context (one unit of work).</param>
@@ -120,6 +122,7 @@ public sealed partial class EnrollmentService
     /// <param name="swampedMode">The OFF-only swamped-mode seam used when an exercise loses its lead.</param>
     /// <param name="connectionRevoker">Cuts the live hub connections of the sessions a grant change revokes.</param>
     /// <param name="logger">Logs a post-commit swamped-mode flip that failed (never surfaced to the caller).</param>
+    /// <param name="scenarioNow">The exercise's scenario now for telemetry (engine-runtime/08, CLK-2: clock, else latest post, else now).</param>
     public EnrollmentService(
         PulseDbContext dbContext,
         StaffCallerContext staffCaller,
@@ -127,6 +130,7 @@ public sealed partial class EnrollmentService
         TimeProvider timeProvider,
         ISwampedModeSwitch swampedMode,
         ISessionConnectionRevoker connectionRevoker,
+        IScenarioNow scenarioNow,
         ILogger<EnrollmentService>? logger = null)
     {
         _logger = logger ?? NullLogger<EnrollmentService>.Instance;
@@ -138,11 +142,13 @@ public sealed partial class EnrollmentService
         ArgumentNullException.ThrowIfNull(staffCaller);
         ArgumentNullException.ThrowIfNull(exerciseContext);
         ArgumentNullException.ThrowIfNull(timeProvider);
+        ArgumentNullException.ThrowIfNull(scenarioNow);
 
         _dbContext = dbContext;
         _staffCaller = staffCaller;
         _exerciseContext = exerciseContext;
         _timeProvider = timeProvider;
+        _scenarioNow = scenarioNow;
     }
 
     /// <summary>
@@ -186,6 +192,7 @@ public sealed partial class EnrollmentService
         }
 
         var now = _timeProvider.GetUtcNow();
+        var scenarioTime = await _scenarioNow.GetAsync(exercise.Id, now, cancellationToken);
 
         // org-scope-exempt(TenantChecked): exercise.Id was just resolved inside the caller's own scope and organization
         // (FindReachableAsync), so this reads only that one exercise's current lead (for the audit payload).
@@ -218,7 +225,7 @@ public sealed partial class EnrollmentService
                 $"{{\"enrollmentId\":{JsonSerializer.Serialize(enrollment.Id.ToString())}," +
                 $"\"previousLeadEnrollmentId\":{JsonSerializer.Serialize(previousLeadId?.ToString())}}}");
 
-            Record(caller, exercise, enrollment, LeadChangedEventType, LeadSetAuditKind, payload, now);
+            Record(caller, exercise, enrollment, LeadChangedEventType, LeadSetAuditKind, payload, now, scenarioTime);
 
             await _dbContext.SaveChangesAsync(cancellationToken);
             await transaction.CommitAsync(cancellationToken);
@@ -239,7 +246,8 @@ public sealed partial class EnrollmentService
         // exercise still has a lead afterwards, so the no-lead heal never catches it: without this the new lead would
         // inherit timeout auto-send they never turned on (adversarial review W1 on #642).
         await TurnSwampedModeOffAfterCommitAsync(
-            caller, exercise, enrollment, leadReleased: previousLeadId is not null, now, cancellationToken, reason: LeadTransferredReason);
+            caller, exercise, enrollment, leadReleased: previousLeadId is not null, now, scenarioTime, cancellationToken,
+            reason: LeadTransferredReason);
 
         return EnrollmentResult.Ok(enrollment);
     }
@@ -300,6 +308,7 @@ public sealed partial class EnrollmentService
         }
 
         var now = _timeProvider.GetUtcNow();
+        var scenarioTime = await _scenarioNow.GetAsync(exercise.Id, now, cancellationToken);
         var enrollment = new Enrollment
         {
             Id = Guid.NewGuid(),
@@ -327,7 +336,7 @@ public sealed partial class EnrollmentService
         }
 
         var auditKind = person.Id == caller.StaffUserId ? SelfGrantedAuditKind : GrantedAuditKind;
-        Record(caller, exercise, enrollment, GrantedEventType, auditKind, RolePayload(staffRole, previousRole: null), now);
+        Record(caller, exercise, enrollment, GrantedEventType, auditKind, RolePayload(staffRole, previousRole: null), now, scenarioTime);
 
         try
         {
@@ -378,14 +387,15 @@ public sealed partial class EnrollmentService
         }
 
         var now = _timeProvider.GetUtcNow();
+        var scenarioTime = await _scenarioNow.GetAsync(exercise.Id, now, cancellationToken);
         var previousRole = enrollment.Role;
-        var leadReleased = ReleaseLeadIfLost(caller, exercise, enrollment, newRole: staffRole, now);
+        var leadReleased = ReleaseLeadIfLost(caller, exercise, enrollment, newRole: staffRole, now, scenarioTime);
         enrollment.Role = staffRole;
 
         var revoked = await RevokeExerciseSessionsAsync(exercise.Id, [enrollment.PersonId], now, cancellationToken);
-        Record(caller, exercise, enrollment, RoleChangedEventType, RoleChangedAuditKind, RolePayload(staffRole, previousRole), now);
+        Record(caller, exercise, enrollment, RoleChangedEventType, RoleChangedAuditKind, RolePayload(staffRole, previousRole), now, scenarioTime);
         await _dbContext.SaveChangesAsync(cancellationToken);
-        await TurnSwampedModeOffAfterCommitAsync(caller, exercise, enrollment, leadReleased, now, cancellationToken);
+        await TurnSwampedModeOffAfterCommitAsync(caller, exercise, enrollment, leadReleased, now, scenarioTime, cancellationToken);
         await CutRevokedConnectionsAfterCommitAsync(revoked, cancellationToken);
 
         return EnrollmentResult.Ok(enrollment);
@@ -414,13 +424,14 @@ public sealed partial class EnrollmentService
 
         var (enrollment, exercise) = target.Value;
         var now = _timeProvider.GetUtcNow();
+        var scenarioTime = await _scenarioNow.GetAsync(exercise.Id, now, cancellationToken);
 
-        var leadReleased = ReleaseLeadIfLost(caller, exercise, enrollment, newRole: null, now);
+        var leadReleased = ReleaseLeadIfLost(caller, exercise, enrollment, newRole: null, now, scenarioTime);
         _dbContext.Enrollments.Remove(enrollment);
         var revoked = await RevokeExerciseSessionsAsync(exercise.Id, [enrollment.PersonId], now, cancellationToken);
-        Record(caller, exercise, enrollment, RevokedEventType, RevokedAuditKind, RolePayload(role: null, enrollment.Role), now);
+        Record(caller, exercise, enrollment, RevokedEventType, RevokedAuditKind, RolePayload(role: null, enrollment.Role), now, scenarioTime);
         await _dbContext.SaveChangesAsync(cancellationToken);
-        await TurnSwampedModeOffAfterCommitAsync(caller, exercise, enrollment, leadReleased, now, cancellationToken);
+        await TurnSwampedModeOffAfterCommitAsync(caller, exercise, enrollment, leadReleased, now, scenarioTime, cancellationToken);
         await CutRevokedConnectionsAfterCommitAsync(revoked, cancellationToken);
 
         return EnrollmentResult.Ok(enrollment);
@@ -435,7 +446,8 @@ public sealed partial class EnrollmentService
     /// sets one. A no-op for any other enrollment or change.
     /// </summary>
     /// <returns>Whether the lead was released, i.e. whether swamped mode must be turned off once the change commits.</returns>
-    private bool ReleaseLeadIfLost(StaffCaller caller, Exercise exercise, Enrollment enrollment, string? newRole, DateTimeOffset now)
+    private bool ReleaseLeadIfLost(
+        StaffCaller caller, Exercise exercise, Enrollment enrollment, string? newRole, DateTimeOffset now, DateTimeOffset scenarioTime)
     {
         if (!enrollment.IsLead || string.Equals(newRole, EnrollmentRoles.Controller, StringComparison.Ordinal))
         {
@@ -448,7 +460,7 @@ public sealed partial class EnrollmentService
             CultureInfo.InvariantCulture,
             $"{{\"enrollmentId\":{JsonSerializer.Serialize(enrollment.Id.ToString())}," +
             $"\"newRole\":{JsonSerializer.Serialize(newRole)}}}");
-        Record(caller, exercise, enrollment, LeadReleasedEventType, LeadReleasedAuditKind, leadPayload, now);
+        Record(caller, exercise, enrollment, LeadReleasedEventType, LeadReleasedAuditKind, leadPayload, now, scenarioTime);
         return true;
     }
 
@@ -464,6 +476,7 @@ public sealed partial class EnrollmentService
         Enrollment enrollment,
         bool leadReleased,
         DateTimeOffset now,
+        DateTimeOffset scenarioTime,
         CancellationToken cancellationToken,
         string reason = "lead-released")
     {
@@ -494,7 +507,7 @@ public sealed partial class EnrollmentService
         var swampedPayload = string.Create(
             CultureInfo.InvariantCulture,
             $"{{\"reason\":{JsonSerializer.Serialize(reason)},\"wasOn\":{(swampedWasOn ? "true" : "false")}}}");
-        Record(caller, exercise, enrollment, SwampedModeOffEventType, SwampedModeOffAuditKind, swampedPayload, now);
+        Record(caller, exercise, enrollment, SwampedModeOffEventType, SwampedModeOffAuditKind, swampedPayload, now, scenarioTime);
 
         try
         {
@@ -668,10 +681,11 @@ public sealed partial class EnrollmentService
         string eventType,
         string auditKind,
         string payload,
-        DateTimeOffset now) =>
+        DateTimeOffset now,
+        DateTimeOffset scenarioTime) =>
         StaffChangeRecorder.Stage(
             _dbContext,
-            StaffChangeExercise.From(exercise),
+            StaffChangeExercise.From(exercise, scenarioTime),
             new StaffChangeActor(caller.StaffUserId, caller.Role, caller.SessionId),
             new TelemetryTarget { EntityType = EnrollmentEntityType, EntityId = enrollment.Id.ToString() },
             enrollment.PersonId,

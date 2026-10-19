@@ -29,6 +29,7 @@ using Pulse.WebApi.Features.Identity.Sessions;
 using Pulse.WebApi.Features.Identity.Staff;
 using Pulse.WebApi.Tests.Data;
 using Pulse.WebApi.Tests.Helpers;
+using Pulse.WebApi.Tests.Features.EngineRuntime.Clock;
 
 /// <summary>Seeds the rows the personal-link suites need, with fresh ids per call (no table truncation).</summary>
 internal static class PersonalLinkSeed
@@ -54,12 +55,12 @@ internal static class PersonalLinkSeed
             Hostname = $"pl-{id:N}.pulse.test",
             TimeZone = timeZone,
             Status = status,
-            CurrentScenarioTime = scenarioTime,
         };
 
         await using var seed = fixture.CreateContext();
         seed.Exercises.Add(exercise);
         await seed.SaveChangesAsync();
+        await TestScenarioNow.SeedWorldTimeAsync(seed, id, scenarioTime); // engine-runtime/08: the world's time is its latest post
         return exercise;
     }
 

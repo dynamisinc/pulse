@@ -18,6 +18,7 @@ using Pulse.WebApi.Features.Identity.Staff;
 using Pulse.WebApi.Features.Ops.Bootstrap;
 using Pulse.WebApi.Tests.Data;
 using Pulse.WebApi.Tests.Features.Identity.Staff;
+using Pulse.WebApi.Tests.Features.EngineRuntime.Clock;
 
 /// <summary>
 /// Story login/05 (Tier-2) integration tests for <see cref="BootstrapService"/> against REAL SQL Server
@@ -52,7 +53,8 @@ public sealed class BootstrapServiceTests
             Options.Create(new DynamisIdentityProviderOptions { Accounts = new List<DynamisStaffAccount>(allowlist) }),
             _sharedHasher,
             _participantHasher,
-            new OpsPersonaResolver(context));
+            new OpsPersonaResolver(context),
+            TestScenarioNow.Over(context));
 
     [RequiresDockerFact]
     public async Task Bootstrap_EmptyDatabase_CreatesHostBoundLiveExercise()
@@ -307,7 +309,8 @@ public sealed class BootstrapServiceTests
             var loginService = new StaffLoginService(
                 loginContext,
                 new DynamisIdentityProvider(Options.Create(new DynamisIdentityProviderOptions { Accounts = allowlist })),
-                new RecordingSessionIssuer());
+                new RecordingSessionIssuer(),
+                TestScenarioNow.Over(loginContext));
 
             var login = await loginService.LoginAsync(new StaffLoginRequest
             {
@@ -325,7 +328,8 @@ public sealed class BootstrapServiceTests
             var loginService = new StaffLoginService(
                 loginContext,
                 new DynamisIdentityProvider(Options.Create(new DynamisIdentityProviderOptions { Accounts = allowlist })),
-                new RecordingSessionIssuer());
+                new RecordingSessionIssuer(),
+                TestScenarioNow.Over(loginContext));
 
             var login = await loginService.LoginAsync(new StaffLoginRequest
             {
@@ -613,7 +617,7 @@ public sealed class BootstrapServiceTests
         // The returned plaintext authenticates via the shared read-only login funnel (POST /api/auth/shared).
         await using (var loginContext = _fixture.CreateContext(ScopeFor(exerciseId)))
         {
-            var loginService = new SharedReadOnlyLoginService(loginContext, ScopeFor(exerciseId), _sharedHasher, new RecordingSessionIssuer());
+            var loginService = new SharedReadOnlyLoginService(loginContext, ScopeFor(exerciseId), _sharedHasher, new RecordingSessionIssuer(), TestScenarioNow.Over(loginContext));
             var login = await loginService.LoginAsync(new SharedReadOnlyLoginRequest { Password = password });
             login.Outcome.Should().Be(SharedReadOnlyLoginOutcome.Authenticated,
                 "the bootstrapped shared credential authenticates via the shared login using the one-time plaintext");
@@ -622,7 +626,7 @@ public sealed class BootstrapServiceTests
         // A wrong password is rejected.
         await using (var loginContext = _fixture.CreateContext(ScopeFor(exerciseId)))
         {
-            var loginService = new SharedReadOnlyLoginService(loginContext, ScopeFor(exerciseId), _sharedHasher, new RecordingSessionIssuer());
+            var loginService = new SharedReadOnlyLoginService(loginContext, ScopeFor(exerciseId), _sharedHasher, new RecordingSessionIssuer(), TestScenarioNow.Over(loginContext));
             var login = await loginService.LoginAsync(new SharedReadOnlyLoginRequest { Password = "definitely-not-the-password" });
             login.Outcome.Should().Be(SharedReadOnlyLoginOutcome.Rejected, "a wrong shared password fails closed");
         }
@@ -652,7 +656,7 @@ public sealed class BootstrapServiceTests
 
         await using (var loginContext = _fixture.CreateContext(ScopeFor(exerciseId)))
         {
-            var loginService = new SharedReadOnlyLoginService(loginContext, ScopeFor(exerciseId), _sharedHasher, new RecordingSessionIssuer());
+            var loginService = new SharedReadOnlyLoginService(loginContext, ScopeFor(exerciseId), _sharedHasher, new RecordingSessionIssuer(), TestScenarioNow.Over(loginContext));
             var login = await loginService.LoginAsync(new SharedReadOnlyLoginRequest { Password = password });
             login.Outcome.Should().Be(SharedReadOnlyLoginOutcome.Authenticated,
                 "the ORIGINAL shared password still authenticates after an idempotent re-run (never clobbered)");

@@ -515,17 +515,26 @@ public sealed record EasyLoginStaffActor(Guid? StaffUserId, string? Role);
 public sealed record EasyLoginEventTime(DateTimeOffset WallClock, DateTimeOffset ScenarioTime, string TimeZone)
 {
     /// <summary>
-    /// Builds the event time as <c>InjectQueueService</c> does: scenario time is the live exercise clock, else the
-    /// persisted scenario instant, else the wall clock; a blank zone becomes <c>UTC</c>.
+    /// Builds the event time: scenario time is the exercise's scenario now from <see cref="IScenarioNow"/>
+    /// (engine-runtime/08, CLK-2: the running clock, else the exercise's latest post, else <paramref name="now"/>); a
+    /// blank zone becomes <c>UTC</c>.
     /// </summary>
-    /// <param name="exerciseId">The resolved exercise (for the live clock).</param>
+    /// <param name="exerciseId">The server-resolved exercise.</param>
     /// <param name="facts">The exercise facts from <see cref="ExerciseFactsReader"/>, or <c>null</c>.</param>
-    /// <param name="clock">The native exercise clock, or <c>null</c> when none is available.</param>
+    /// <param name="scenarioNow">The scenario-now resolver, or <c>null</c> on a host without one (scenario time is then <paramref name="now"/>).</param>
     /// <param name="now">The server wall clock, read once by the caller.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The event time.</returns>
-    public static EasyLoginEventTime For(Guid exerciseId, ExerciseFacts? facts, IExerciseClock? clock, DateTimeOffset now)
+    public static async Task<EasyLoginEventTime> ForAsync(
+        Guid exerciseId,
+        ExerciseFacts? facts,
+        IScenarioNow? scenarioNow,
+        DateTimeOffset now,
+        CancellationToken cancellationToken = default)
     {
-        var scenario = clock?.CurrentScenarioTime(exerciseId) ?? facts?.StoredScenarioTime ?? now;
+        var scenario = scenarioNow is null
+            ? now
+            : await scenarioNow.GetAsync(exerciseId, now, cancellationToken).ConfigureAwait(false);
         var zone = string.IsNullOrWhiteSpace(facts?.TimeZone) ? ExerciseDay.UtcZoneId : facts.TimeZone;
         return new EasyLoginEventTime(now, scenario, zone);
     }

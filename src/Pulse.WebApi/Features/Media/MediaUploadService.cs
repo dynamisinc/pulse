@@ -98,7 +98,8 @@ public sealed class MediaUploadResult
 /// </para>
 /// <para>
 /// <b>Scenario time — the DP-18a staff-metadata exception.</b> <see cref="MediaAsset.CreatedScenarioTime"/> is
-/// stamped <c>running exercise clock ?? the exercise's persisted CurrentScenarioTime ?? the server wall clock</c>.
+/// stamped <c>running exercise clock ?? the exercise's latest post ?? the server wall clock</c> (<see cref="IScenarioNow"/>,
+/// engine-runtime/08).
 /// The wall-clock fallback is deliberate here and ONLY here: an asset has no post to anchor to, the column is
 /// staff-only metadata (the library's <c>uploadedAtScenario</c>; no participant payload carries it), and S1 seeds
 /// media during <c>build</c> when no clock runs, so refusing the upload would break demo prep.
@@ -155,7 +156,7 @@ public sealed partial class MediaUploadService
     private readonly IHttpContextAccessor _httpContextAccessor;
     private readonly IMediaStore _store;
     private readonly IMediaUrlSigner _signer;
-    private readonly IExerciseClock _exerciseClock;
+    private readonly IScenarioNow _scenarioNow;
     private readonly TimeProvider _timeProvider;
     private readonly MediaUploadOptions _options;
     private readonly ILogger<MediaUploadService> _logger;
@@ -169,7 +170,7 @@ public sealed partial class MediaUploadService
     /// <param name="httpContextAccessor">The current request (its principal names the account for the log line).</param>
     /// <param name="store">The media store.</param>
     /// <param name="signer">The read-URL signer.</param>
-    /// <param name="exerciseClock">The native per-exercise scenario clock (COR-050).</param>
+    /// <param name="scenarioNow">The exercise's scenario now (engine-runtime/08, CLK-2: clock, else latest post, else now; COR-050/053).</param>
     /// <param name="timeProvider">The server wall clock.</param>
     /// <param name="options">The upload limits.</param>
     /// <param name="logger">Diagnostics logger (never logs token material).</param>
@@ -182,7 +183,7 @@ public sealed partial class MediaUploadService
         IHttpContextAccessor httpContextAccessor,
         IMediaStore store,
         IMediaUrlSigner signer,
-        IExerciseClock exerciseClock,
+        IScenarioNow scenarioNow,
         TimeProvider timeProvider,
         IOptions<MediaUploadOptions> options,
         ILogger<MediaUploadService> logger)
@@ -195,7 +196,7 @@ public sealed partial class MediaUploadService
         ArgumentNullException.ThrowIfNull(httpContextAccessor);
         ArgumentNullException.ThrowIfNull(store);
         ArgumentNullException.ThrowIfNull(signer);
-        ArgumentNullException.ThrowIfNull(exerciseClock);
+        ArgumentNullException.ThrowIfNull(scenarioNow);
         ArgumentNullException.ThrowIfNull(timeProvider);
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(logger);
@@ -208,7 +209,7 @@ public sealed partial class MediaUploadService
         _httpContextAccessor = httpContextAccessor;
         _store = store;
         _signer = signer;
-        _exerciseClock = exerciseClock;
+        _scenarioNow = scenarioNow;
         _timeProvider = timeProvider;
         _options = options.Value;
         _logger = logger;
@@ -530,13 +531,9 @@ public sealed partial class MediaUploadService
     {
         var now = _timeProvider.GetUtcNow();
 
-        // org-scope-exempt(ResolvedScope): exerciseId is the SERVER-resolved scope from IExerciseContext (step 1 of
-        // UploadAsync), never a form field; it only supplies the scenario-time fallback (COR-053).
-        var exerciseScenarioTime = await _dbContext.Exercises
-            .AsNoTracking()
-            .Where(exercise => exercise.Id == exerciseId)
-            .Select(exercise => exercise.CurrentScenarioTime)
-            .FirstOrDefaultAsync(cancellationToken);
+        // engine-runtime/08 (CLK-2): exerciseId is the SERVER-resolved scope from IExerciseContext (step 1 of
+        // UploadAsync), never a form field. The clock, else the exercise's latest post, else the wall clock (COR-053).
+        var scenarioTime = await _scenarioNow.GetAsync(exerciseId, now, cancellationToken);
 
         var stored = upload.Stored!;
         var sniffed = upload.Sniffed!;
@@ -553,9 +550,9 @@ public sealed partial class MediaUploadService
             DurationSec = hints.DurationSec,
             OriginalFileName = upload.OriginalFileName!,
             UploadedByHumanId = uploaderHumanId,
-            // DP-18a staff-metadata exception (see the class remarks): clock ?? persisted scenario time ?? wall clock.
+            // DP-18a staff-metadata exception (see the class remarks): clock ?? latest post ?? wall clock.
             // Never participant-visible; CreatedWallClock is the authoritative upload order.
-            CreatedScenarioTime = _exerciseClock.CurrentScenarioTime(exerciseId) ?? exerciseScenarioTime ?? now,
+            CreatedScenarioTime = scenarioTime,
             CreatedWallClock = now,
             PosterMediaAssetId = hints.Poster?.Id,
         };

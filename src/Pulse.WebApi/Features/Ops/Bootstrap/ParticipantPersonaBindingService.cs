@@ -6,6 +6,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
+using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.ExerciseResolution;
 using Pulse.WebApi.Features.Identity.Accounts;
 using Pulse.WebApi.Features.Identity.EasyLogin;
@@ -44,7 +45,7 @@ using Pulse.WebApi.Features.Identity.EasyLogin;
 /// (<c>changed: false</c>). Every authorized, resolvable call emits exactly ONE XC-004
 /// <c>account.persona_bound</c> event in the same unit of work as the mutation — including the no-op, because the
 /// operator action itself is the auditable event. One server wall-clock read stamps the event (never client
-/// input); scenario time is the exercise's stored instant, falling back to the wall clock when unset.
+/// input); scenario time is the exercise's scenario now (IScenarioNow: clock, else latest post, else the wall clock).
 /// </para>
 /// </remarks>
 public sealed class ParticipantPersonaBindingService
@@ -62,23 +63,28 @@ public sealed class ParticipantPersonaBindingService
     private readonly PulseDbContext _dbContext;
     private readonly BootstrapOptions _options;
     private readonly OpsPersonaResolver _personaResolver;
+    private readonly IScenarioNow _scenarioNow;
 
     /// <summary>Creates the binding service over its collaborators.</summary>
     /// <param name="dbContext">The persistence context the binding + its single audit event commit through (one unit of work).</param>
     /// <param name="options">The bound options carrying the REUSED bootstrap secret (the fail-closed gate).</param>
     /// <param name="personaResolver">The shared, exercise-confined persona resolver (COR-001).</param>
+    /// <param name="scenarioNow">The exercise's scenario now for telemetry (engine-runtime/08, CLK-2: clock, else latest post, else now).</param>
     public ParticipantPersonaBindingService(
         PulseDbContext dbContext,
         IOptions<BootstrapOptions> options,
-        OpsPersonaResolver personaResolver)
+        OpsPersonaResolver personaResolver,
+        IScenarioNow scenarioNow)
     {
         ArgumentNullException.ThrowIfNull(dbContext);
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(personaResolver);
+        ArgumentNullException.ThrowIfNull(scenarioNow);
 
         _dbContext = dbContext;
         _options = options.Value ?? new BootstrapOptions();
         _personaResolver = personaResolver;
+        _scenarioNow = scenarioNow;
     }
 
     /// <summary>
@@ -205,8 +211,10 @@ public sealed class ParticipantPersonaBindingService
         var now = DateTimeOffset.UtcNow;
         account.Enrollment.PersonaId = resolvedPersonaId;
 
+        // engine-runtime/08 (CLK-2): the ops-resolved exercise's scenario now (clock, else latest post, else now).
+        var scenarioTime = await _scenarioNow.GetAsync(exercise.Id, now, cancellationToken);
         _dbContext.TelemetryEvents.Add(BuildBoundTelemetry(
-            exercise, account, resolvedPersonaId, resolution.Handle!, previousPersonaId, changed, now));
+            exercise, account, resolvedPersonaId, resolution.Handle!, previousPersonaId, changed, now, scenarioTime));
 
         // One SaveChanges — the write-guard runs here; every scoped row carries the non-empty exercise id.
         await _dbContext.SaveChangesAsync(cancellationToken);
@@ -229,7 +237,8 @@ public sealed class ParticipantPersonaBindingService
         string personaHandle,
         Guid? previousPersonaId,
         bool changed,
-        DateTimeOffset now)
+        DateTimeOffset now,
+        DateTimeOffset scenarioTime)
     {
         var payload = string.Create(
             CultureInfo.InvariantCulture,
@@ -251,7 +260,7 @@ public sealed class ParticipantPersonaBindingService
                 ActingHumanId = BindActorId,
             },
             WallClockTime = now,
-            ScenarioTime = exercise.CurrentScenarioTime ?? now,
+            ScenarioTime = scenarioTime,
             TimeZone = string.IsNullOrWhiteSpace(exercise.TimeZone) ? FallbackTimeZone : exercise.TimeZone,
             Target = new TelemetryTarget { EntityType = AccountEntityType, EntityId = account.Id.ToString() },
             Payload = payload,

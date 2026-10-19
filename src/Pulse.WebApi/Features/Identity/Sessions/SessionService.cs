@@ -6,6 +6,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
+using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.ExerciseConfiguration.Lifecycle;
 using Pulse.WebApi.Features.Identity.EasyLogin;
 
@@ -27,10 +28,9 @@ using Pulse.WebApi.Features.Identity.EasyLogin;
 /// replayed; it is idempotent.
 /// </para>
 /// <para>
-/// <b>Scenario time = the exercise's stored scenario time (documented B2 placeholder).</b> Lifecycle events
-/// stamp <c>scenarioTime</c> from the bound <see cref="Exercise.CurrentScenarioTime"/> (falling back to the
-/// wall clock when unset) until the native backend scenario clock (COR-050) lands in Phase B3 — mirroring
-/// <c>StaffLoginService</c>. The <c>session.expired</c> event is emitted only from <c>GET /api/session</c> (the
+/// <b>Scenario time = the bound exercise's scenario now (engine-runtime/08, CLK-2).</b> Lifecycle events stamp
+/// <c>scenarioTime</c> from <see cref="IScenarioNow"/> for the session's bound exercise: the running clock, else its
+/// latest post, else the wall clock — mirroring <c>StaffLoginService</c>. The <c>session.expired</c> event is emitted only from <c>GET /api/session</c> (the
 /// bounded moment the client learns it must re-auth), never per-request in the middleware, to avoid spamming.
 /// </para>
 /// <para>
@@ -79,21 +79,24 @@ public sealed class SessionService
     private readonly int _dayRolloverHour;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<SessionService> _logger;
+    private readonly IScenarioNow _scenarioNow;
 
     /// <summary>Creates the service over its persistence context, the configured session lifetimes and the day cap's inputs.</summary>
     /// <param name="dbContext">The persistence context the session mutation + its lifecycle event are written through.</param>
     /// <param name="options">The short-lived session / refresh-window lifetimes used when renewing on refresh, and the participant day-cap switch.</param>
-    /// <param name="exerciseFacts">The easy-login exercise read (EL-17): the bound exercise's zone and stored scenario time on refresh.</param>
+    /// <param name="exerciseFacts">The easy-login exercise read (EL-17): the bound exercise's zone on refresh.</param>
     /// <param name="easyLoginOptions">The easy-login settings, for the exercise day's rollover hour.</param>
     /// <param name="timeProvider">The server wall clock.</param>
     /// <param name="logger">Logs the once-per-exercise time-zone fallback warning.</param>
+    /// <param name="scenarioNow">The exercise's scenario now for telemetry (engine-runtime/08, CLK-2: clock, else latest post, else now).</param>
     public SessionService(
         PulseDbContext dbContext,
         IOptions<SessionOptions> options,
         ExerciseFactsReader exerciseFacts,
         IOptions<EasyLoginOptions> easyLoginOptions,
         TimeProvider timeProvider,
-        ILogger<SessionService> logger)
+        ILogger<SessionService> logger,
+        IScenarioNow scenarioNow)
     {
         ArgumentNullException.ThrowIfNull(dbContext);
         ArgumentNullException.ThrowIfNull(options);
@@ -101,6 +104,7 @@ public sealed class SessionService
         ArgumentNullException.ThrowIfNull(easyLoginOptions);
         ArgumentNullException.ThrowIfNull(timeProvider);
         ArgumentNullException.ThrowIfNull(logger);
+        ArgumentNullException.ThrowIfNull(scenarioNow);
 
         _dbContext = dbContext;
         _options = options.Value;
@@ -108,6 +112,7 @@ public sealed class SessionService
         _dayRolloverHour = easyLoginOptions.Value.DayRolloverHour;
         _timeProvider = timeProvider;
         _logger = logger;
+        _scenarioNow = scenarioNow;
     }
 
     /// <summary>
@@ -198,7 +203,7 @@ public sealed class SessionService
         }
 
         // The bound exercise's facts: the ONE exercise read on this path, through the easy-login reader (EL-17), shared
-        // by the participant day cap (zone) and the session.refreshed envelope (stored scenario time + zone). The id is
+        // by the participant day cap (zone) and the session.refreshed envelope (zone). The id is
         // the server-issued session's own binding, so a session for exercise A is only ever capped by A's zone.
         // An ORG-SCOPE session (identity-auth-roles/16: ExerciseId null) has no exercise, so no facts: it is never a
         // participant session (no day cap) and carries no exercise-scoped telemetry.
@@ -255,8 +260,10 @@ public sealed class SessionService
         session.ExpiresAt = windows.ExpiresAt;
         session.RefreshExpiresAt = windows.RefreshExpiresAt;
 
-        // The same session.refreshed event as before, built from the facts already read (no second exercise read).
-        AddLifecycleEvent(session, SessionRefreshedEventType, now, facts?.StoredScenarioTime, facts?.TimeZone);
+        // The same session.refreshed event as before, built from the facts already read (no second exercise read). The
+        // scenario time is the bound exercise's scenario now (CLK-2; a database read only when no clock is running).
+        var scenarioTime = await ScenarioTimeForAsync(session, now, cancellationToken);
+        AddLifecycleEvent(session, SessionRefreshedEventType, now, scenarioTime, facts?.TimeZone);
         await _dbContext.SaveChangesAsync(cancellationToken);
 
         return RefreshResult.Refreshed(session, newSessionToken, newRefreshToken, await IsLeadAsync(session, cancellationToken));
@@ -338,7 +345,7 @@ public sealed class SessionService
     /// <summary>
     /// Adds one XC-004 session-lifecycle event against the locked v0 envelope and persists it together with the
     /// accompanying session mutation in ONE <c>SaveChangesAsync</c> (the same unit of work). Scenario time is
-    /// the bound exercise's stored scenario time (B2 placeholder, falling back to the wall clock).
+    /// the bound exercise's scenario now (<see cref="IScenarioNow"/>).
     /// </summary>
     private async Task EmitLifecycleEventAsync(
         Session session,
@@ -346,7 +353,7 @@ public sealed class SessionService
         DateTimeOffset now,
         CancellationToken cancellationToken)
     {
-        // The bound exercise supplies the (placeholder) scenario time + time zone for the envelope. It is the
+        // The bound exercise supplies the time zone for the envelope (the scenario time is IScenarioNow's). It is the
         // unscoped scope root, so this read is not filtered. An org-scope session (no exercise) emits no
         // exercise-scoped event (identity-auth-roles/16).
         if (session.ExerciseId is { } boundExerciseId)
@@ -357,22 +364,33 @@ public sealed class SessionService
                 .AsNoTracking()
                 .FirstOrDefaultAsync(e => e.Id == boundExerciseId, cancellationToken);
 
-            AddLifecycleEvent(session, eventType, now, exercise?.CurrentScenarioTime, exercise?.TimeZone);
+            var scenarioTime = await ScenarioTimeForAsync(session, now, cancellationToken);
+            AddLifecycleEvent(session, eventType, now, scenarioTime, exercise?.TimeZone);
         }
 
         await _dbContext.SaveChangesAsync(cancellationToken);
     }
 
     /// <summary>
+    /// The scenario now of the session's bound exercise (engine-runtime/08, CLK-2): the running clock, else the
+    /// exercise's latest post, else <paramref name="now"/>. The id is the server-issued session's own binding, never a
+    /// request value. An org-scope session (no exercise) emits no exercise-scoped event, so it reads nothing.
+    /// </summary>
+    private Task<DateTimeOffset> ScenarioTimeForAsync(Session session, DateTimeOffset now, CancellationToken cancellationToken) =>
+        session.ExerciseId is { } boundExerciseId
+            ? _scenarioNow.GetAsync(boundExerciseId, now, cancellationToken)
+            : Task.FromResult(now);
+
+    /// <summary>
     /// Stages one XC-004 session-lifecycle event against the locked v0 envelope (the caller saves it with its session
-    /// mutation). Scenario time is the bound exercise's stored scenario time, falling back to the wall clock; the zone
-    /// falls back to UTC when the exercise could not be read.
+    /// mutation). Scenario time is the bound exercise's scenario now, resolved by the caller
+    /// (<see cref="ScenarioTimeForAsync"/>); the zone falls back to UTC when the exercise could not be read.
     /// </summary>
     private void AddLifecycleEvent(
         Session session,
         string eventType,
         DateTimeOffset now,
-        DateTimeOffset? storedScenarioTime,
+        DateTimeOffset scenarioTime,
         string? timeZone)
     {
         // identity-auth-roles/16: an ORG-SCOPE session has no exercise, and TelemetryEvent requires one (the
@@ -392,7 +410,7 @@ public sealed class SessionService
             Channel = SystemChannel,
             Actor = BuildActor(session),
             WallClockTime = now,
-            ScenarioTime = storedScenarioTime ?? now,
+            ScenarioTime = scenarioTime,
             TimeZone = timeZone ?? FallbackTimeZone,
             EmittedAt = now,
         });

@@ -24,6 +24,7 @@ using Pulse.WebApi.Features.Identity.Staff;
 using Pulse.WebApi.Tests.Data;
 using Pulse.WebApi.Tests.Features.Identity.Staff;
 using Pulse.WebApi.Tests.Helpers;
+using Pulse.WebApi.Tests.Features.EngineRuntime.Clock;
 
 /// <summary>One seeded exercise with a staff user assigned to it.</summary>
 /// <param name="ExerciseId">The exercise.</param>
@@ -251,7 +252,8 @@ internal sealed class RosterHarness : IAsyncDisposable
             new ExerciseFactsReader(context),
             issuerOverride?.Invoke(context) ?? (issuer is null ? new NullParticipantLinkIssuer() : issuer),
             linkDtos,
-            TimeProvider.System);
+            TimeProvider.System,
+            TestScenarioNow.Over(context));
         var query = new RosterQueryService(context, exerciseContext, linkDtos, joinUrls, TimeProvider.System, linkMailer);
 
         return new RosterHarness(context, service, query, issuer);

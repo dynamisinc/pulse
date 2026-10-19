@@ -484,7 +484,6 @@ public class SuggestionEndpointTests
             Hostname = world.Host,
             TimeZone = "America/Chicago",
             Status = "active",
-            CurrentScenarioTime = new DateTimeOffset(2033, 9, 4, 9, 30, 0, TimeSpan.Zero),
         });
 
         // Handle order (the endpoint's stable order): alpha < bravo < charlie < delta < echo.

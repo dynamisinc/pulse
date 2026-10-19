@@ -502,10 +502,10 @@ public static class ExerciseReportBuilder
     }
 
     /// <summary>
-    /// The report's "now" in scenario time: the later of the exercise clock (live, else the persisted placeholder) and
+    /// The report's "now" in scenario time: the later of the exercise clock (live, or rehydrated after a restart) and
     /// the latest post, so a default window end never hides a post. <c>null</c> when both are missing.
     /// </summary>
-    /// <param name="clock">The live or stored scenario time, if any.</param>
+    /// <param name="clock">The running clock's scenario time, if any.</param>
     /// <param name="latestPost">The latest post's scenario time, if any.</param>
     /// <returns>The instant, or <c>null</c>.</returns>
     public static DateTimeOffset? ScenarioNow(DateTimeOffset? clock, DateTimeOffset? latestPost) =>

@@ -10,6 +10,7 @@ using Pulse.WebApi.Features.Identity.SharedAccess;
 using Pulse.WebApi.Features.Identity.Staff;
 using Pulse.WebApi.Tests.Data;
 using Pulse.WebApi.Tests.Features.Identity.Staff;
+using Pulse.WebApi.Tests.Features.EngineRuntime.Clock;
 
 /// <summary>
 /// Story 07 (COR-001 / COR-016 / XC-001, TIER-2) — the always-Critical cross-exercise proof for the
@@ -30,7 +31,7 @@ public sealed class SharedCredentialLifecycleIsolationTests
     private static IExerciseContext ScopeFor(Guid exerciseId) => new ExerciseContext { CurrentExerciseId = exerciseId };
 
     private SharedCredentialLifecycleService NewLifecycleService(PulseDbContext context, IExerciseContext scope, Guid sessionId, Guid staffUserId) =>
-        new(context, scope, new StubCurrentStaffSessionAccessor(new CurrentStaffSession { SessionId = sessionId, StaffUserId = staffUserId }), _hasher);
+        new(context, scope, new StubCurrentStaffSessionAccessor(new CurrentStaffSession { SessionId = sessionId, StaffUserId = staffUserId }), _hasher, TestScenarioNow.Over(context));
 
     private async Task<Guid> SeedExerciseAsync()
     {
@@ -144,7 +145,7 @@ public sealed class SharedCredentialLifecycleIsolationTests
     {
         var scope = ScopeFor(exerciseId);
         await using var context = _fixture.CreateContext(scope);
-        var service = new SharedReadOnlyLoginService(context, scope, _hasher, new RecordingSessionIssuer());
+        var service = new SharedReadOnlyLoginService(context, scope, _hasher, new RecordingSessionIssuer(), TestScenarioNow.Over(context));
         var result = await service.LoginAsync(new SharedReadOnlyLoginRequest { Password = password });
         return result.Outcome;
     }
