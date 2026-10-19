@@ -424,6 +424,7 @@ describe('SwampedModeToggle — banner follows the inputs expiries really use (S
         generationStopped?: boolean
         safetyClampActive?: boolean
         degradedReason?: string | null
+        effectiveLevel?: string | null
       }
     },
   ): void {
