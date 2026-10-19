@@ -32,9 +32,11 @@ using Pulse.WebApi.Tests.Helpers;
 /// #379 — participant sim writes are refused while the exercise is held: lifecycle <c>paused</c>, or the pause tier
 /// <c>Freeze</c>. Every participant write route (<c>POST /api/posts</c> top-level and reply, the reaction
 /// <c>PUT</c> for a like and a repost, the follow <c>POST</c>) answers <c>409 {"reason":"frozen"}</c> BEFORE its
-/// handler runs, so no row, no telemetry event and no broadcast. The <c>Injects</c> and <c>Engine</c> tiers hold
-/// only staff/engine content and leave participant writes alone, and a controller posting as a persona through the
-/// same <c>POST /api/posts</c> is never refused (staff conduct continues while the world is held). Boots the REAL
+/// handler runs, so no row, no telemetry event and no broadcast. The undo routes (unlike, un-repost, unfollow) leave
+/// the existing reaction / follow in place. A personal pin is exempt (ruling, Tom, 2026-10-19: "Allow pins"). The
+/// <c>Injects</c> and <c>Engine</c> tiers hold only staff/engine content and leave participant writes alone, and a
+/// controller posting as a persona through the same <c>POST /api/posts</c> is never refused (staff conduct continues
+/// while the world is held). Freezing one exercise never refuses another (COR-001). Boots the REAL
 /// <c>Program</c> against real SQL; only the broadcaster is recorded.
 /// </summary>
 [Collection(MsSqlCollection.Name)]
@@ -48,7 +50,7 @@ public sealed class ParticipantWritePauseEndpointTests
 
     public ParticipantWritePauseEndpointTests(MsSqlContainerFixture fixture) => _fixture = fixture;
 
-    /// <summary>The two ways a world is held for participants: the <c>paused</c> lifecycle, and the Freeze tier.</summary>
+    /// <summary>The two ways a world is held for participants: the <c>paused</c> lifecycle, and Freeze.</summary>
     public static TheoryData<string> HeldConditions => new() { "paused", "freeze" };
 
     // ---- Refused while held --------------------------------------------------------------------------------------
@@ -130,6 +132,130 @@ public sealed class ParticipantWritePauseEndpointTests
         await AssertNothingWrittenAsync(world, host);
     }
 
+    [RequiresDockerTheory]
+    [InlineData("paused", "like")]
+    [InlineData("paused", "repost")]
+    [InlineData("freeze", "like")]
+    [InlineData("freeze", "repost")]
+    public async Task Unreact_WhileHeld_Is409Frozen_AndTheReactionStaysActive(string condition, string kind)
+    {
+        var world = await SeedWorldAsync(condition);
+        var reactionId = await SeedReactionAsync(world, kind);
+        await using var host = await StartHeldAsync(world, condition);
+        using var client = host.CreateClientFor(world.Host, world.ParticipantToken);
+
+        using var response = await client.DeleteAsync(ReactionUri(world.TargetPost, kind));
+
+        await AssertFrozenAsync(response, condition);
+        await using var db = _fixture.CreateContext();
+        var reaction = await db.PostReactions.IgnoreQueryFilters().AsNoTracking().SingleAsync(r => r.Id == reactionId);
+        reaction.DeletedAt.Should().BeNull($"the refused un-{kind} must leave the reaction active");
+        (await db.PostReactions.IgnoreQueryFilters().CountAsync(r => r.ExerciseId == world.Exercise)).Should().Be(1);
+        await AssertNoEventsOrBroadcastsAsync(world, host);
+    }
+
+    [RequiresDockerTheory]
+    [MemberData(nameof(HeldConditions))]
+    public async Task Unfollow_WhileHeld_Is409Frozen_AndTheFollowStays(string condition)
+    {
+        var world = await SeedWorldAsync(condition);
+        var followId = await SeedFollowAsync(world);
+        await using var host = await StartHeldAsync(world, condition);
+        using var client = host.CreateClientFor(world.Host, world.ParticipantToken);
+
+        using var response = await client.DeleteAsync(FollowUri(world.OtherPersona));
+
+        await AssertFrozenAsync(response, condition);
+        await using var db = _fixture.CreateContext();
+        (await db.Follows.IgnoreQueryFilters().AnyAsync(f => f.Id == followId))
+            .Should().BeTrue("the refused unfollow must leave the follow in place");
+        await AssertNoEventsOrBroadcastsAsync(world, host);
+    }
+
+    /// <summary>
+    /// Ruling (Tom, 2026-10-19, WR-002): "Allow pins". A personal pin is a private bookmark, so the held-world gate
+    /// exempts it: pin and unpin both work while paused or frozen. (Like and repost stay refused: see
+    /// <see cref="Reaction_WhileHeld_Is409Frozen_AndWritesAndBroadcastsNothing"/>.)
+    /// </summary>
+    [RequiresDockerTheory]
+    [MemberData(nameof(HeldConditions))]
+    public async Task PersonalPin_PutAndDelete_WhileHeld_Succeed(string condition)
+    {
+        var world = await SeedWorldAsync(condition);
+        await using var host = await StartHeldAsync(world, condition);
+        using var client = host.CreateClientFor(world.Host, world.ParticipantToken);
+
+        using (var pin = await client.PutAsync(ReactionUri(world.TargetPost, "pin"), content: null))
+        {
+            pin.StatusCode.Should().Be(HttpStatusCode.OK, $"a personal pin is exempt while {condition}");
+        }
+
+        await using (var db = _fixture.CreateContext())
+        {
+            (await db.PostReactions.IgnoreQueryFilters().AsNoTracking()
+                    .SingleAsync(r => r.ExerciseId == world.Exercise && r.Kind == "pin"))
+                .DeletedAt.Should().BeNull("the pin landed");
+        }
+
+        using (var unpin = await client.DeleteAsync(ReactionUri(world.TargetPost, "pin")))
+        {
+            unpin.StatusCode.Should().Be(HttpStatusCode.OK, $"a personal unpin is exempt while {condition}");
+        }
+
+        await using (var db = _fixture.CreateContext())
+        {
+            (await db.PostReactions.IgnoreQueryFilters().AsNoTracking()
+                    .SingleAsync(r => r.ExerciseId == world.Exercise && r.Kind == "pin"))
+                .DeletedAt.Should().NotBeNull("the unpin landed");
+        }
+
+        host.Broadcaster.Engagement.Should().BeEmpty("a pin never moves a displayed count");
+    }
+
+    [RequiresDockerTheory]
+    [MemberData(nameof(HeldConditions))]
+    public async Task NearMissPinKind_WhileHeld_IsStillRefused(string condition)
+    {
+        // The exemption is an exact, case-sensitive match on kind=pin; anything else stays under the gate.
+        var world = await SeedWorldAsync(condition);
+        await using var host = await StartHeldAsync(world, condition);
+        using var client = host.CreateClientFor(world.Host, world.ParticipantToken);
+
+        using var response = await client.PutAsync(ReactionUri(world.TargetPost, "PIN"), content: null);
+
+        await AssertFrozenAsync(response, condition);
+        await AssertNothingWrittenAsync(world, host);
+    }
+
+    [RequiresDockerFact]
+    public async Task FreezingExerciseA_DoesNotRefuseAParticipantPostInExerciseB()
+    {
+        // S-3 / COR-001: the Freeze tier is per exercise, end to end over HTTP.
+        var frozenA = await SeedWorldAsync("freeze");
+        var liveB = await SeedWorldAsync("live");
+        await using var host = await StartHeldAsync(frozenA, "freeze");
+
+        using (var clientB = host.CreateClientFor(liveB.Host, liveB.ParticipantToken))
+        using (var responseB = await clientB.PostAsync(
+            PostsUri, Json(PostBody(liveB.ParticipantPersona, "participant"))))
+        {
+            responseB.StatusCode.Should().Be(
+                HttpStatusCode.Created, "exercise B is not frozen; A's Freeze must never reach it");
+        }
+
+        using (var clientA = host.CreateClientFor(frozenA.Host, frozenA.ParticipantToken))
+        using (var responseA = await clientA.PostAsync(
+            PostsUri, Json(PostBody(frozenA.ParticipantPersona, "participant"))))
+        {
+            await AssertFrozenAsync(responseA, "freeze");
+        }
+
+        await using var db = _fixture.CreateContext();
+        (await db.Posts.IgnoreQueryFilters().CountAsync(p => p.ExerciseId == liveB.Exercise)).Should().Be(2);
+        (await db.Posts.IgnoreQueryFilters().CountAsync(p => p.ExerciseId == frozenA.Exercise)).Should().Be(1);
+        host.Broadcaster.Posts.Should().ContainSingle("only B's post is fanned out");
+    }
+
     // ---- Not refused: the lighter tiers, and staff ---------------------------------------------------------------
 
     [RequiresDockerTheory]
@@ -153,12 +279,16 @@ public sealed class ParticipantWritePauseEndpointTests
             reply.StatusCode.Should().Be(HttpStatusCode.Created);
         }
 
-        (await client.PutAsync(ReactionUri(world.TargetPost, "like"), content: null)).StatusCode.Should().Be(HttpStatusCode.OK);
-        (await client.PutAsync(ReactionUri(world.TargetPost, "repost"), content: null)).StatusCode.Should().Be(HttpStatusCode.OK);
-        (await client.PostAsync(FollowUri(world.OtherPersona), content: null)).StatusCode.Should().Be(HttpStatusCode.OK);
+        (await client.PutAsync(ReactionUri(world.TargetPost, "like"), content: null))
+            .StatusCode.Should().Be(HttpStatusCode.OK);
+        (await client.PutAsync(ReactionUri(world.TargetPost, "repost"), content: null))
+            .StatusCode.Should().Be(HttpStatusCode.OK);
+        (await client.PostAsync(FollowUri(world.OtherPersona), content: null))
+            .StatusCode.Should().Be(HttpStatusCode.OK);
 
         await using var db = _fixture.CreateContext();
-        (await db.Posts.IgnoreQueryFilters().CountAsync(p => p.ExerciseId == world.Exercise && p.AuthorPersonaId == world.ParticipantPersona))
+        (await db.Posts.IgnoreQueryFilters().CountAsync(
+                p => p.ExerciseId == world.Exercise && p.AuthorPersonaId == world.ParticipantPersona))
             .Should().Be(2, "the post and the reply both landed");
         (await db.PostReactions.IgnoreQueryFilters().CountAsync(r => r.ExerciseId == world.Exercise)).Should().Be(2);
         (await db.Follows.IgnoreQueryFilters().CountAsync(f => f.ExerciseId == world.Exercise)).Should().Be(1);
@@ -185,11 +315,13 @@ public sealed class ParticipantWritePauseEndpointTests
     private string ConnectionString => _fixture.ConnectionString
         ?? throw new InvalidOperationException("The MsSql fixture has no connection string.");
 
-    private static Uri ReactionUri(Guid postId, string kind) => new($"/api/posts/{postId}/reactions/{kind}", UriKind.Relative);
+    private static Uri ReactionUri(Guid postId, string kind) =>
+        new($"/api/posts/{postId}/reactions/{kind}", UriKind.Relative);
 
     private static Uri FollowUri(Guid personaId) => new($"/api/personas/{personaId}/follow", UriKind.Relative);
 
-    private static StringContent Json(object body) => new(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json");
+    private static StringContent Json(object body) =>
+        new(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json");
 
     private static Dictionary<string, object?> PostBody(
         Guid authorPersonaId, string origin, Guid? parentPostId = null, string? actingHumanId = null) => new()
@@ -206,7 +338,8 @@ public sealed class ParticipantWritePauseEndpointTests
     private static async Task AssertFrozenAsync(HttpResponseMessage response, string condition)
     {
         var body = await response.Content.ReadAsStringAsync();
-        response.StatusCode.Should().Be(HttpStatusCode.Conflict, $"a participant write is refused while {condition}; got {body}");
+        response.StatusCode.Should().Be(
+            HttpStatusCode.Conflict, $"a participant write is refused while {condition}; got {body}");
         using var json = JsonDocument.Parse(body);
         json.RootElement.GetProperty("reason").GetString().Should().Be("frozen");
     }
@@ -219,10 +352,64 @@ public sealed class ParticipantWritePauseEndpointTests
         (await db.PostReactions.IgnoreQueryFilters().CountAsync(r => r.ExerciseId == world.Exercise)).Should().Be(0);
         (await db.Follows.IgnoreQueryFilters().CountAsync(f => f.ExerciseId == world.Exercise)).Should().Be(0);
         (await db.TelemetryEvents.IgnoreQueryFilters().CountAsync(e => e.ExerciseId == world.Exercise
-            && (e.EventType.StartsWith("post") || e.EventType == "reaction" || e.EventType == "repost" || e.EventType.StartsWith("follow"))))
+            && (e.EventType.StartsWith("post")
+                || e.EventType == "reaction"
+                || e.EventType == "repost"
+                || e.EventType == "follow"
+                || e.EventType == "unfollow")))
             .Should().Be(0, "a refused write emits no telemetry");
         host.Broadcaster.Posts.Should().BeEmpty("a refused write is never fanned out");
         host.Broadcaster.Engagement.Should().BeEmpty("a refused reaction pushes no engagement change");
+    }
+
+    private async Task AssertNoEventsOrBroadcastsAsync(SeededWorld world, PauseTestHost host)
+    {
+        await using var db = _fixture.CreateContext();
+        // Scoped to the write path's own event types: host startup can emit unrelated audit events into a seeded
+        // exercise (e.g. staff.org_admin_seeded for the enrolled controller).
+        (await db.TelemetryEvents.IgnoreQueryFilters().CountAsync(e => e.ExerciseId == world.Exercise
+            && (e.EventType.StartsWith("post")
+                || e.EventType == "reaction"
+                || e.EventType == "repost"
+                || e.EventType == "follow"
+                || e.EventType == "unfollow")))
+            .Should().Be(0, "a refused write emits no telemetry");
+        host.Broadcaster.Posts.Should().BeEmpty("a refused write is never fanned out");
+        host.Broadcaster.Engagement.Should().BeEmpty("a refused undo pushes no engagement change");
+    }
+
+    private async Task<Guid> SeedReactionAsync(SeededWorld world, string kind)
+    {
+        var id = Guid.NewGuid();
+        await using var seed = _fixture.CreateContext();
+        seed.PostReactions.Add(new PostReaction
+        {
+            Id = id,
+            ExerciseId = world.Exercise,
+            PostId = world.TargetPost,
+            PersonaId = world.ParticipantPersona,
+            Kind = kind,
+            CreatedScenarioTime = StoredScenarioTime,
+        });
+        await seed.SaveChangesAsync();
+        return id;
+    }
+
+    private async Task<Guid> SeedFollowAsync(SeededWorld world)
+    {
+        var id = Guid.NewGuid();
+        await using var seed = _fixture.CreateContext();
+        seed.Follows.Add(new Follow
+        {
+            Id = id,
+            ExerciseId = world.Exercise,
+            FollowerPersonaId = world.ParticipantPersona,
+            FolloweePersonaId = world.OtherPersona,
+            CreatedScenarioTime = StoredScenarioTime,
+            CreatedWallClock = DateTimeOffset.UtcNow,
+        });
+        await seed.SaveChangesAsync();
+        return id;
     }
 
     private async Task<PauseTestHost> StartHeldAsync(SeededWorld world, string condition)
@@ -348,7 +535,8 @@ public sealed class RecordingPauseBroadcaster : IFeedBroadcaster
     public IReadOnlyList<PostEngagementChangedDto> Engagement => _engagement.ToArray();
 
     /// <inheritdoc />
-    public Task BroadcastPostAsync(Guid exerciseId, ParticipantPostDto post, CancellationToken cancellationToken = default)
+    public Task BroadcastPostAsync(
+        Guid exerciseId, ParticipantPostDto post, CancellationToken cancellationToken = default)
     {
         _posts.Enqueue(post);
         return Task.CompletedTask;
@@ -363,12 +551,15 @@ public sealed class RecordingPauseBroadcaster : IFeedBroadcaster
     }
 }
 
-/// <summary>The real <c>Program</c> host with only the broadcaster recorded (see <see cref="PostWriteWebApplicationFactory"/>).</summary>
+/// <summary>
+/// The real <c>Program</c> host with only the broadcaster recorded (see <see cref="PostWriteWebApplicationFactory"/>).
+/// </summary>
 public sealed class PauseTestHost : WebApplicationFactory<Program>
 {
     private const string ConnectionStringEnvVar = "ConnectionStrings__DefaultConnection";
 
-    public PauseTestHost(string connectionString) => Environment.SetEnvironmentVariable(ConnectionStringEnvVar, connectionString);
+    public PauseTestHost(string connectionString) =>
+        Environment.SetEnvironmentVariable(ConnectionStringEnvVar, connectionString);
 
     public RecordingPauseBroadcaster Broadcaster { get; } = new();
 

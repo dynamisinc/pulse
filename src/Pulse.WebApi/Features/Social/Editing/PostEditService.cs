@@ -36,8 +36,8 @@ using Pulse.WebApi.Features.Social.Follows;
 /// <para>
 /// <b>When (DF-30).</b> The window is 15 minutes of SERVER wall clock from <see cref="Post.CreatedWallClock"/>
 /// (<see cref="TimeProvider"/>); an edit is also refused while posting is refused — the shared
-/// <see cref="ParticipantWriteGate"/>: pause tier Freeze, or a lifecycle that does not accept participant writes (paused
-/// or ended). The window keeps running meanwhile.
+/// <see cref="ParticipantWriteGate"/>: pause tier Freeze, or a lifecycle that does not accept participant writes
+/// (paused or ended). The window keeps running meanwhile.
 /// </para>
 /// <para>
 /// <b>An edit is not a new post (DF-33).</b> One transaction writes the <see cref="PostEdit"/>, the post's new text and
@@ -71,7 +71,9 @@ public sealed partial class PostEditService
     /// <param name="sessionPersonaAccessor">The caller's session-bound persona (the participant arm).</param>
     /// <param name="staffSessionAccessor">The caller's live staff session, if any (refused, DF-32).</param>
     /// <param name="exerciseFacts">The exercise's lifecycle status, time zone and stored scenario time.</param>
-    /// <param name="writeGate">The shared held-world refusal (#379): Freeze tier, or a lifecycle refusing participant writes.</param>
+    /// <param name="writeGate">
+    /// The shared held-world refusal (#379): Freeze tier, or a lifecycle refusing participant writes.
+    /// </param>
     /// <param name="broadcaster">The exercise-group fan-out (<c>PostEdited</c>).</param>
     /// <param name="projector">The participant projection of the edited post (the 200 body).</param>
     /// <param name="timeProvider">The server wall clock (window, <see cref="PostEdit.EditedAt"/>, telemetry).</param>
@@ -475,7 +477,9 @@ public static class PostEditRefusalReasons
     /// <summary>The post already has the maximum number of edits.</summary>
     public const string EditLimit = "edit-limit";
 
-    /// <summary>Posting is refused right now (<see cref="ParticipantWriteGate"/>: Freeze, or a paused/ended lifecycle).</summary>
+    /// <summary>
+    /// Posting is refused right now (<see cref="ParticipantWriteGate"/>: Freeze, or a paused/ended lifecycle).
+    /// </summary>
     public const string Frozen = ParticipantWriteGate.FrozenReason;
 }
 

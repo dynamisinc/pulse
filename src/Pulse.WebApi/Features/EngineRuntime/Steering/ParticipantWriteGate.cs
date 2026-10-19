@@ -25,6 +25,11 @@ using Pulse.WebApi.Features.Identity.EasyLogin;
 /// WITHOUT a Freeze tier (a test pinning scenario time, a clock not yet started) does not refuse participant writes.
 /// </para>
 /// <para>
+/// <b>Freeze means "participants held" (ruling, Tom, 2026-10-19; CTL-023).</b> This gate answers for PARTICIPANT
+/// writes only. Staff-as-persona posts still publish and reach the held world; the filter passes staff sessions
+/// through, and the personal pin (a private bookmark) is exempt at its route ("Allow pins", same ruling).
+/// </para>
+/// <para>
 /// <b>Injects / Engine tiers do not refuse.</b> They hold staff injects and engine content only; the world stays open.
 /// </para>
 /// </remarks>

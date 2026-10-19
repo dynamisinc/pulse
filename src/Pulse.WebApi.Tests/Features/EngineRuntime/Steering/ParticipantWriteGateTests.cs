@@ -26,7 +26,10 @@ public sealed class ParticipantWriteGateTests
     public static TheoryData<PauseTier, string?, bool> Matrix()
     {
         var data = new TheoryData<PauseTier, string?, bool>();
-        string?[] statuses = ["build", "staged", "live", "paused", "completed", "archived", "active", "scheduled", "bogus", null];
+        string?[] statuses =
+        [
+            "build", "staged", "live", "paused", "completed", "archived", "active", "scheduled", "bogus", null,
+        ];
         foreach (var tier in new[] { PauseTier.Running, PauseTier.Injects, PauseTier.Engine, PauseTier.Freeze })
         {
             foreach (var status in statuses)
@@ -50,7 +53,11 @@ public sealed class ParticipantWriteGateTests
         var gate = new ParticipantWriteGate(new ExerciseFactsReader(db), registry);
 
         gate.IsRefused(exerciseId, status).Should().Be(
-            expectedRefused, "tier {0} with lifecycle '{1}' must {2}be refused", tier, status, expectedRefused ? string.Empty : "not ");
+            expectedRefused,
+            "tier {0} with lifecycle '{1}' must {2}be refused",
+            tier,
+            status,
+            expectedRefused ? string.Empty : "not ");
     }
 
     [Fact]
@@ -111,7 +118,9 @@ public sealed class ParticipantWriteGateTests
     private static (PauseTierRegistry Registry, IExerciseClock Clock) NewRegistry()
     {
         var clock = new ExerciseClockService(TimeProvider.System);
-        return (new PauseTierRegistry(clock, new NullPauseOverlayPublisher(), NullLogger<PauseTierRegistry>.Instance), clock);
+        var registry = new PauseTierRegistry(
+            clock, new NullPauseOverlayPublisher(), NullLogger<PauseTierRegistry>.Instance);
+        return (registry, clock);
     }
 
     private static async Task SetTierAsync(PauseTierRegistry registry, Guid exerciseId, PauseTier tier)

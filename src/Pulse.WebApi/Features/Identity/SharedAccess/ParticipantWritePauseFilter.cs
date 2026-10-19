@@ -16,6 +16,11 @@ using Pulse.WebApi.Features.Identity.Staff;
 /// <see cref="ReadOnlyWriteDenialExtensions.DenyReadOnlySessions{TBuilder}"/>.
 /// </summary>
 /// <remarks>
+/// <para>
+/// <b>Freeze semantics: "participants held" (ruling, Tom, 2026-10-19; CTL-023).</b> A Freeze holds PARTICIPANTS: their
+/// sim writes are refused. Staff conduct is not held: a controller's post as a persona still publishes and reaches
+/// the held world (it is fanned out like any other post), and staff uploads still land.
+/// </para>
 /// <list type="bullet">
 ///   <item><b>Unresolved scope — passed through.</b> There is no exercise to ask about; the endpoint already fails
 ///   closed with 401.</item>
@@ -24,11 +29,26 @@ using Pulse.WebApi.Features.Identity.Staff;
 ///   <c>ExerciseLifecycleGatingMiddleware</c> does, through <see cref="ICurrentStaffSessionAccessor"/>, and only when
 ///   the gate would refuse, so the common running path costs no session lookup.</item>
 ///   <item><b>Everyone else</b> (participant, and a read-only session if it ever got this far) is refused.</item>
+///   <item><b>An unknown / unreadable exercise — refused, on purpose.</b> The gate fails closed when the exercise row
+///   cannot be read. That is deliberately STRICTER than <c>ExerciseLifecycleGatingMiddleware</c>, which passes a
+///   <c>null</c> state through; do not "align" the two: a write gate must deny when it cannot tell.</item>
+///   <item><b>A route-declared exemption — passed through.</b> A slice may name requests the hold does not cover
+///   (the <c>isExempt</c> overload of
+///   <see cref="ParticipantWritePauseExtensions.RefuseWhenWritesPaused{TBuilder}(TBuilder, Func{HttpContext, bool})"/>).
+///   The only one today is the personal pin, a private bookmark (ruling, Tom, 2026-10-19: "Allow pins").</item>
 /// </list>
 /// Services are resolved lazily from request services, so the filter itself has no constructor dependencies.
 /// </remarks>
 public sealed class ParticipantWritePauseFilter : IEndpointFilter
 {
+    private readonly Func<HttpContext, bool>? _isExempt;
+
+    /// <summary>Creates the filter.</summary>
+    /// <param name="isExempt">
+    /// Optional: requests the hold does not cover (checked first, before any read). <c>null</c> exempts nothing.
+    /// </param>
+    public ParticipantWritePauseFilter(Func<HttpContext, bool>? isExempt = null) => _isExempt = isExempt;
+
     /// <inheritdoc />
     public async ValueTask<object?> InvokeAsync(EndpointFilterInvocationContext context, EndpointFilterDelegate next)
     {
@@ -36,6 +56,11 @@ public sealed class ParticipantWritePauseFilter : IEndpointFilter
         ArgumentNullException.ThrowIfNull(next);
 
         var httpContext = context.HttpContext;
+        if (_isExempt?.Invoke(httpContext) == true)
+        {
+            return await next(context);
+        }
+
         var services = httpContext.RequestServices;
         var cancellationToken = httpContext.RequestAborted;
 
@@ -87,6 +112,23 @@ public static class ParticipantWritePauseExtensions
         where TBuilder : IEndpointConventionBuilder
     {
         ArgumentNullException.ThrowIfNull(builder);
-        return builder.AddEndpointFilter<TBuilder, ParticipantWritePauseFilter>();
+        return builder.AddEndpointFilter(new ParticipantWritePauseFilter());
+    }
+
+    /// <summary>
+    /// As <see cref="RefuseWhenWritesPaused{TBuilder}(TBuilder)"/>, but requests matching <paramref name="isExempt"/>
+    /// pass through. Keep the predicate exact (e.g. an ordinal match on a route value), so it can only ever widen
+    /// for what it names.
+    /// </summary>
+    /// <typeparam name="TBuilder">The endpoint convention builder type (route handler or route group).</typeparam>
+    /// <param name="builder">The endpoint / group builder to guard.</param>
+    /// <param name="isExempt">The requests the hold does not cover.</param>
+    /// <returns>The same builder, for chaining.</returns>
+    public static TBuilder RefuseWhenWritesPaused<TBuilder>(this TBuilder builder, Func<HttpContext, bool> isExempt)
+        where TBuilder : IEndpointConventionBuilder
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+        ArgumentNullException.ThrowIfNull(isExempt);
+        return builder.AddEndpointFilter(new ParticipantWritePauseFilter(isExempt));
     }
 }

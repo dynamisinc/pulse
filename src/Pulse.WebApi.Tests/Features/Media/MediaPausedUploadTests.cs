@@ -51,13 +51,16 @@ public sealed class MediaPausedUploadTests
         using var response = await client.PostAsync(MediaUri, MediaTestFiles.Form(MediaTestFiles.Png(), "p.png"));
 
         var body = await response.Content.ReadAsStringAsync();
-        response.StatusCode.Should().Be(HttpStatusCode.Conflict, $"a participant upload is refused while {condition}; got {body}");
+        response.StatusCode.Should().Be(
+            HttpStatusCode.Conflict, $"a participant upload is refused while {condition}; got {body}");
         JsonDocument.Parse(body).RootElement.GetProperty("reason").GetString().Should().Be("frozen");
 
         await using var check = _fixture.CreateContext();
         (await check.MediaAssets.IgnoreQueryFilters().CountAsync(asset => asset.ExerciseId == exercise.ExerciseId))
             .Should().Be(0, "no MediaAsset row is written");
-        (Directory.Exists(host.LocalRoot) ? Directory.EnumerateFiles(host.LocalRoot, "*", SearchOption.AllDirectories) : [])
+        (Directory.Exists(host.LocalRoot)
+                ? Directory.EnumerateFiles(host.LocalRoot, "*", SearchOption.AllDirectories)
+                : [])
             .Should().BeEmpty("no blob is stored");
     }
 
@@ -113,7 +116,8 @@ public sealed class MediaPausedUploadTests
 
     private MediaTestHost NewHost() => new(_fixture.ConnectionString!, "Development", null);
 
-    private static Task<PauseTierResult> SetTierAsync(MediaTestHost host, MediaSeed.SeededExercise exercise, PauseTier tier) =>
+    private static Task<PauseTierResult> SetTierAsync(
+        MediaTestHost host, MediaSeed.SeededExercise exercise, PauseTier tier) =>
         host.Services.GetRequiredService<PauseTierRegistry>().SetTierAsync(
             exercise.ExerciseId, tier, "controller-1", new PauseClockStart(MediaSeed.ScenarioTime, TimeZoneInfo.Utc));
 }
