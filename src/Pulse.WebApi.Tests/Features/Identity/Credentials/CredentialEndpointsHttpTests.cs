@@ -613,7 +613,9 @@ public sealed class CredentialEndpointsHttpTests
         var (org, _) = await _world.SeedOrganizationAsync();
         var (otherOrg, _) = await _world.SeedOrganizationAsync();
         var (victim, _) = await _world.SeedPersonAsync(org);
-        var forged = await _world.IssueAsync(CredentialTokenPurposes.Reset, victim, otherOrg);
+        // An issuer is given so the self-delivery check (which reads the person inside the token's org) cannot short-circuit
+        // the forgery: the row lands, and the REDEMPTION's tenant bound is what is under test.
+        var forged = await _world.IssueAsync(CredentialTokenPurposes.Reset, victim, otherOrg, issuedBy: victim);
 
         await using var factory = new CredentialProbeFactory(_fixture.ConnectionString!);
         using var anonymous = CredentialTestWorld.CreateClient(factory);

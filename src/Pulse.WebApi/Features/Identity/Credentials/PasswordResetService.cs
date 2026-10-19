@@ -105,7 +105,9 @@ public sealed partial class PasswordResetService
 
         // Adversarial review W5 (#665): the admin reset refuses a PEER org admin at issue, but the target may have been
         // promoted to org admin after the link was issued. Refuse the redemption then too (uniformly) unless the person
-        // issued it themselves. A token with no issuer (system / self-service issuance) is not a peer's link.
+        // issued it themselves. A token with no issuer is not a peer's link: CredentialTokenService.StageIssueAsync only
+        // creates one for SELF-DELIVERY to the subject's own email (the null-issuer rule — #575b's first-admin invite and
+        // the later forgot-password MUST comply), so it can never have been handed to a third party.
         if (Person.IsOrgAdmin(person.OrgRole) && token.IssuedByPersonId is { } issuer && issuer != person.Id)
         {
             return PasswordResetResult.Invalid(InvalidTokenError);

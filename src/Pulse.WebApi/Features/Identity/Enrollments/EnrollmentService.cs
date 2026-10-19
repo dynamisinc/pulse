@@ -232,7 +232,8 @@ public sealed partial class EnrollmentService
             // demoted). Confirm inside the transaction that the target IS now the live lead; otherwise roll everything back
             // and ask the caller to retry. Our UPDATE holds the target's row lock until commit, so a revoke cannot slip in
             // after this check.
-            // org-scope-exempt(TenantChecked): the same caller-reachable exercise's target row, by its id, as the UPDATE above.
+            // org-scope-exempt(TenantChecked): keyed by the ALREADY-AUTHORIZED enrollment id (resolved inside the caller's own
+            // scope and organization by FindReachableAsync) and read inside the same transaction as the UPDATE above.
             var targetIsLead = updated > 0 && await _dbContext.Enrollments
                 .IgnoreQueryFilters()
                 .Active()
