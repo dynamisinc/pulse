@@ -61,6 +61,9 @@ type TimeField = 'from' | 'to'
 
 const HALF_TYPED = 'Enter a full date and time.'
 
+/** The latest value the pickers accept: it caps the year at 4 digits. */
+const PICKER_MAX = '9999-12-31T23:59'
+
 /** Screen-reader-only text (the standard clip pattern). */
 const VISUALLY_HIDDEN = {
   position: 'absolute',
@@ -196,6 +199,9 @@ export function ReportFilterBar({
         htmlInput: {
           autoComplete: 'off',
           step: 60,
+          // A 4-digit year cap: without it Chrome's year segment takes 6 digits, so typing
+          // "2026" never moves on to the hour (Tom, UAT 10/19).
+          max: PICKER_MAX,
           ...(earliest === null ? {} : { min: toInputValue(earliest) }),
         },
       }}
