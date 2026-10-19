@@ -76,8 +76,38 @@ public static class PauseOverlayServiceCollectionExtensions
         // (#375), so both register it through the one TryAdd below.
         services.TryAddExerciseLifecycleStatusReader();
 
+        // #390 Gate-1 WR-002: the COMPOSED overlay the pause publisher pushes — the same read the GET performs
+        // (ParticipantShellConfigService.GetOverlayStateAsync): the exercise row (or the unconfigured fallback) through
+        // ExerciseShellConfigSource, then the registered IOverlayStateProjection — in its OWN scope per call, for the
+        // same captive-dependency reason as the lifecycle reader above.
+        services.TryAddSingleton<ComposedOverlayStateReader>(provider =>
+            async (exerciseId, cancellationToken) =>
+            {
+                await using var scope = provider.GetRequiredService<IServiceScopeFactory>().CreateAsyncScope();
+
+                // org-scope-exempt(ResolvedScope): exerciseId is the SERVER-resolved scope the transition carries,
+                // never a client-supplied id, so this read stays inside the caller's tenant.
+                var exercise = await scope.ServiceProvider.GetRequiredService<PulseDbContext>().Exercises
+                    .AsNoTracking()
+                    .SingleOrDefaultAsync(row => row.Id == exerciseId, cancellationToken);
+                var source = exercise is null
+                    ? ExerciseShellConfigSource.Unconfigured(exerciseId)
+                    : ExerciseShellConfigSource.FromExercise(exercise);
+
+                return await scope.ServiceProvider.GetRequiredService<IOverlayStateProjection>()
+                    .ProjectAsync(source, cancellationToken);
+            });
+
         services.RemoveAll<IPauseOverlayPublisher>();
         services.AddSingleton<IPauseOverlayPublisher, PauseOverlayPublisher>();
+
+        // #390: a LIFECYCLE transition pushes the participant overlay too (the push side of the GET's
+        // "lifecycle wins"). REPLACES AddExerciseLifecycle()'s TryAdded no-op — RemoveAll + add, so it wins in either
+        // wiring order, exactly like the publisher swap above. A singleton that reads through the ComposedOverlayStateReader
+        // registered above (its OWN scope per notification, committed state at ticket time — PR #651 review W1): see
+        // LifecycleOverlayPublisher's remarks for why not scoped.
+        services.RemoveAll<IExerciseLifecycleTransitionObserver>();
+        services.AddSingleton<IExerciseLifecycleTransitionObserver, LifecycleOverlayPublisher>();
 
         // The READ side (Tom's ruling, 2026-07-27): the pause store contributes to the exercise-configuration
         // overlay seam by DECORATING the lifecycle projection — endex > pre-start > pause > none. See

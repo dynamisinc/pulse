@@ -129,6 +129,27 @@ public sealed class SteeringCompositionRootWiringTests
     }
 
     /// <summary>
+    /// #390: the lifecycle's post-commit observer in the REAL host is world-steering's overlay pusher, not
+    /// <c>AddExerciseLifecycle()</c>'s TryAdded no-op. A surviving no-op is silent — every transition still succeeds
+    /// and every slice suite stays green, while connected participants are stranded on a stale holding page again.
+    /// </summary>
+    [Fact]
+    public void ProgramCs_ResolvesTheLifecycleOverlayPublisher_NotTheNoOpTransitionObserver()
+    {
+        using var factory = new WiringProbeFactory();
+
+        factory.Services.GetServices<IExerciseLifecycleTransitionObserver>().Should().ContainSingle(
+            "the seam is single-observer: RemoveAll + add must leave exactly one registration")
+            .Which.Should().BeOfType<LifecycleOverlayPublisher>(
+                "AddPauseParticipantOverlay() must replace the lifecycle slice's NoOpExerciseLifecycleTransitionObserver "
+                + "so an EndEx / pause / resume pushes OverlayStateChanged to connected participants (#390)");
+
+        using var scope = factory.Services.CreateScope();
+        scope.ServiceProvider.GetRequiredService<ExerciseLifecycleService>().Should().NotBeNull(
+            "the scoped lifecycle service must still be constructible over the singleton observer");
+    }
+
+    /// <summary>
     /// <b>A deliberate NON-registration, pinned so nobody "finishes the merge".</b>
     /// <c>LifecycleProjection.cs</c> invites world-steering to contribute an <c>ISteeringOverlaySource</c> adapter
     /// over <c>OverlayStateService</c>. Under Tom's ruling that seam cannot be used: the lifecycle composer joins a

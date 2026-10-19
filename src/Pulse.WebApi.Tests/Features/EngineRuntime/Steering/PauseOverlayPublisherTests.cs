@@ -11,6 +11,7 @@ using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Pulse.WebApi.Features.EngineRuntime.Steering;
+using Pulse.WebApi.Features.ParticipantShell;
 using Pulse.WebApi.Features.Realtime;
 using Xunit;
 
@@ -181,9 +182,14 @@ public sealed class PauseOverlayPublisherTests
 
         var json = JsonSerializer.Serialize(payload);
         using var document = JsonDocument.Parse(json);
+        var getKeys = LifecycleOverlayPushTests.JsonFields(
+            JsonSerializer.Serialize(new OverlayStateResponse(), JsonSerializerOptions.Web)).Keys;
         document.RootElement.EnumerateObject().Select(property => property.Name).Should().BeEquivalentTo(
-            ["state", "register", "message", "sequence"],
-            "the participant wire shape is the frozen OverlayState triple plus the ordering sequence — nothing else");
+            getKeys.Append("sequence"),
+            "WR-002: the participant push frame is EXACTLY the GET /api/overlay-state body plus the ordering sequence — "
+            + "every key the GET serves, nothing else (generic, so a field added to OverlayStateResponse is covered)");
+        getKeys.Should().BeEquivalentTo(
+            ["state", "register", "message"], "the frozen OverlayState triple, today");
 
         json.Should().NotContain(
             "human-director-42",
@@ -202,7 +208,7 @@ public sealed class PauseOverlayPublisherTests
         propertyNames.Should().BeEquivalentTo(
             ["State", "Register", "Message", "Sequence"],
             "a future maintainer must not be able to leak provenance/attribution through this projection — it is "
-            + "built ONLY from OverlayStateSnapshot, which has no staff field to project");
+            + "built ONLY from the composed OverlayStateResponse, which has no staff field to project");
     }
 
     // ---- the out-of-order strategy: trust the registry, not transition.To ----------------------
@@ -385,6 +391,46 @@ public sealed class PauseOverlayPublisherTests
             0, "and the clear path does not even read the lifecycle — there is no state in which it should not run");
     }
 
+    // ---- #390 Gate-1 WR-002: the push is the COMPOSED overlay (lifecycle-aware), never the raw store --------
+
+    /// <summary>
+    /// A Resume while the LIFECYCLE is paused pushes the lifecycle's holding page — exactly what the GET serves — not
+    /// the raw cleared store snapshot, which would drop the holding page over a paused exercise.
+    /// </summary>
+    [Fact]
+    public async Task PublishAsync_ResumeWhileTheLifecycleIsPaused_PushesTheLifecycleHoldingPage_AsTheGetDoes()
+    {
+        var exerciseId = Guid.NewGuid();
+        var harness = new Harness(tier: PauseTier.Running, lifecycleStatus: "paused");
+        harness.OverlayState.Apply(exerciseId, "pause", "in-fiction", harness.OverlayState.NextSequence(exerciseId));
+
+        await harness.Publisher.PublishAsync(Transition(exerciseId, PauseTier.Freeze, PauseTier.Running));
+
+        harness.OverlayState.Get(exerciseId).State.Should().Be("none", "the store is still cleared, as today");
+        var push = harness.PushesTo($"exercise:{exerciseId}").Should().ContainSingle().Subject;
+        var get = await harness.Composed.ProjectAsync(exerciseId, "paused");
+        push.State.Should().Be("pause", "the lifecycle's COR-032 holding page still stands");
+        new { push.State, push.Register, push.Message }.Should().BeEquivalentTo(
+            new { get.State, get.Register, get.Message }, "the push is the composed GET projection");
+        push.Sequence.Should().Be(harness.OverlayState.Get(exerciseId).Sequence, "the store's post-write sequence");
+    }
+
+    /// <summary>The publish lock is held for the whole publish and released after it — and on a hub failure.</summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task PublishAsync_ReleasesThePublishLock_OnSuccessAndOnFailure(bool hubThrows)
+    {
+        var exerciseId = Guid.NewGuid();
+        var harness = new Harness(tier: PauseTier.Freeze, hubThrows: hubThrows);
+
+        await harness.Publisher.PublishAsync(Transition(exerciseId, PauseTier.Running, PauseTier.Freeze));
+
+        using var reacquired = await harness.OverlayState.AcquirePublishLockAsync(exerciseId)
+            .WaitAsync(TimeSpan.FromSeconds(5));
+        reacquired.Should().NotBeNull("a publish — successful or swallowed — must never leave the exercise locked");
+    }
+
     // ---- AC7 (XC-004): no competing/duplicate telemetry from the overlay write path ------------
 
     [Fact]
@@ -450,6 +496,7 @@ public sealed class PauseOverlayPublisherTests
             hubContext.SetupGet(context => context.Clients).Returns(clients.Object);
 
             OverlayState = new OverlayStateService();
+            Composed = new ComposedOverlayTestSupport(OverlayState);
             Publisher = new PauseOverlayPublisher(
                 hubContext.Object,
                 OverlayState,
@@ -459,6 +506,10 @@ public sealed class PauseOverlayPublisherTests
                     LifecycleReads++;
                     return Task.FromResult<string?>(LifecycleStatus);
                 },
+                // WR-002: the pushed frame is the REAL composed projection over this store, with the exercise in
+                // LifecycleStatus — so every push in this suite is what the GET would serve. It is a separate read
+                // from the precedence gate's, and deliberately does not count towards LifecycleReads.
+                Composed.Reader(() => LifecycleStatus),
                 NullLogger<PauseOverlayPublisher>.Instance);
         }
 
@@ -474,6 +525,9 @@ public sealed class PauseOverlayPublisherTests
         public int LifecycleReads { get; private set; }
 
         public OverlayStateService OverlayState { get; }
+
+        /// <summary>The real composed projection chain the publisher pushes through (what the GET serves).</summary>
+        public ComposedOverlayTestSupport Composed { get; }
 
         public PauseOverlayPublisher Publisher { get; }
 
