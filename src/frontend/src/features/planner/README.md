@@ -195,6 +195,19 @@ Only ids with a real destination are linked (and only while the item is not `ok`
 `/staff/participant-admin` (the roster, where people and their persona handles are
 added). No other id has a link.
 
+### Story 04 — Gated go-live: Stage exercise (feature: exercise-build-golive)
+
+| File | Role |
+|------|------|
+| `components/StageExerciseControl.tsx` | The planner's **Stage exercise** control, mounted directly under `ReadinessPanel` in the Readiness section. Reads the lifecycle through the existing controller hook (`useExerciseLifecycle`, extended with a `staged` target and `transitionBlocking`). Button only in `build`; other states show one status sentence. `aria-disabled` (focusable) with a visible reason while readiness has open blocking items; on a server `readiness-blocking` 409 it shows the returned items in the dialog and refetches readiness. On success it invalidates lifecycle + readiness and announces "Exercise staged." in a polite live region. |
+| `components/StageExerciseDialog.tsx` | The COBRA confirm dialog (not typed-name): title "Stage <name>?", the ambient-world / clock body copy, the readiness summary, Cancel / Stage. Focus lands on Cancel, Escape cancels, focus returns to the trigger, controls are `aria-disabled` while pending. |
+
+Cross-feature imports: this feature imports `useExerciseLifecycle` / `lifecycleService` from
+`features/controller/lifecycle`, and `controller/lifecycle` imports `useReadiness` /
+`readinessService` from this feature by **direct file path** (not the barrels), which is what keeps
+the two from forming an import cycle. Stage is planner-only on the server; StartEx is controller-only
+and not readiness-gated.
+
 ### Backend contract consumed
 
 `GET /api/staff/readiness` → `200 { ready, lifecycleState, blocking[], warnings[] }`,

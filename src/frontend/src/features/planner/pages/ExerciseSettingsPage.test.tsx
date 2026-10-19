@@ -124,6 +124,11 @@ vi.mock('../services/practiceModeService', async importOriginal => {
   return { ...actual, getPracticeMode: vi.fn(), setPracticeMode: vi.fn() }
 })
 
+// The Stage control reads the exercise context + lifecycle; it has its own suite.
+vi.mock('../components/StageExerciseControl', () => ({
+  StageExerciseControl: () => <div data-testid="stub-stage-control" />,
+}))
+
 vi.mock('../services/readinessService', async importOriginal => {
   const actual = await importOriginal<typeof import('../services/readinessService')>()
   return { ...actual, getReadiness: vi.fn() }
