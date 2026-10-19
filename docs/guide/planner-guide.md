@@ -220,18 +220,23 @@ controller is marked with a star and the word **Lead**.
 - **Add staff.** Under **Add staff**, pick a person from your organisation, pick a role (planner,
   controller or evaluator) and select **Add staff**. Only people who do not yet have a role on
   this exercise are listed. If the list is empty, everyone already has a role.
-- **Change a role.** Use the role menu on the person's row. The change takes effect straight
-  away, and the person is signed out of this exercise so they pick up the new role when they sign
-  back in.
+- **Change a role.** Use the role menu on the person's row and confirm. The person is signed out
+  of this exercise so they pick up the new role when they sign back in.
 - **Remove someone.** Select **Remove** on their row and confirm. They lose their role on this
   exercise and are signed out of it. They can be added again later.
 - **Make a controller the lead.** Select **Make lead** on a controller's row and confirm. Only
   controllers can be the lead. **Changing the lead turns swamped mode off.**
-- **Your own row.** If you remove yourself, or change your own role away from planner, Pulse warns
-  you first: you will lose your staff role on this exercise and be signed out of it.
+- **Removing or changing the lead.** If you remove the lead controller or change their role, Pulse
+  warns you first: the exercise is left with no lead, and swamped mode turns off.
+- **Your own row.** If you remove yourself, Pulse warns you first: you will lose your staff role on
+  this exercise and be signed out of it. If you change your own role away from planner, you keep a
+  staff role in the new role, but you lose planner access and are signed out straight away.
 
 **Last planner rule.** An exercise must keep at least one planner. Pulse refuses to remove the
 only planner or change their role. Add or promote a second planner first.
+
+After each change, Pulse confirms it in a short message under the description, such as "Sam Ortiz
+is now an Evaluator."
 
 If two people edit the staff at once you may see "The lead changed while you were working. Refresh
 and try again." or "That person or role no longer exists here." The list refreshes itself; check

@@ -23,8 +23,9 @@ using Pulse.WebApi.Tests.Helpers;
 /// Story 20 (#575a) — the staff ASSIGN routes over the REAL <c>Program</c> host (no test-side wiring, so a missing
 /// <c>Program.cs</c> line fails here): <c>GET</c>/<c>POST /api/org/exercises/{exerciseId}/enrollments</c>,
 /// <c>PATCH</c>/<c>DELETE /api/staff/enrollments/{id}</c>. The full caller matrix with exact statuses, the bare 404 for a
-/// foreign exercise / foreign organization / missing id, 409 <c>conflicting-enrollment</c>, 409 <c>last-planner</c>,
-/// re-grant after a soft-delete revoke, the grant-revoke rule (old tokens 401), and the XC-004 + org-audit records.
+/// foreign exercise / foreign organization / missing id (and for a DISABLED person, who is also never a candidate), 409
+/// <c>conflicting-enrollment</c>, 409 <c>last-planner</c>, re-grant after a soft-delete revoke, the grant-revoke rule (old
+/// tokens 401), and the XC-004 + org-audit records.
 /// </summary>
 [Collection(MsSqlCollection.Name)]
 public sealed class StaffAssignmentHttpTests
@@ -292,6 +293,46 @@ public sealed class StaffAssignmentHttpTests
         await using var read = _kit.ReadContext();
         (await read.Enrollments.IgnoreQueryFilters().Active().CountAsync(e => e.PersonId == person || e.PersonId == foreignPerson))
             .Should().Be(0);
+    }
+
+    [RequiresDockerFact]
+    public async Task DisabledPerson_IsNeverACandidate_AndGrantingThem_IsTheSameBare404AsAMissingPerson()
+    {
+        var world = await SeedWorldAsync();
+        var disabled = await SeedPersonAsync(world.Org, "Dana Disabled", $"dana-{Guid.NewGuid():N}@example.com");
+        await using (var write = _kit.ReadContext())
+        {
+            await write.People.IgnoreQueryFilters().Where(p => p.Id == disabled)
+                .ExecuteUpdateAsync(set => set.SetProperty(p => p.DisabledAt, DateTimeOffset.UtcNow));
+        }
+
+        using var host = new StaffHost(_fixture.ConnectionString!);
+        var uri = new Uri($"/api/org/exercises/{world.Exercise}/enrollments", UriKind.Relative);
+        foreach (var caller in new[] { Caller.Planner, Caller.OrgAdmin })
+        {
+            using (var list = await (await ClientAsync(host, world, caller)).GetAsync(uri))
+            {
+                list.StatusCode.Should().Be(HttpStatusCode.OK);
+                (await list.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("candidates").EnumerateArray()
+                    .Select(c => c.GetProperty("personId").GetString())
+                    .Should().NotContain(disabled.ToString(), "a disabled person cannot sign in, so is never offered ({0})", caller);
+            }
+
+            // The disabled person and a person that does not exist answer identically: status AND (empty) body.
+            foreach (var (target, why) in new[] { (disabled, "disabled"), (Guid.NewGuid(), "missing") })
+            {
+                using var grant = await (await ClientAsync(host, world, caller)).PostAsJsonAsync(
+                    uri, new { personId = target.ToString(), role = "controller" });
+                grant.StatusCode.Should().Be(HttpStatusCode.NotFound, "{0} person as {1}", why, caller);
+                (await grant.Content.ReadAsStringAsync()).Should().BeEmpty("the bare 404 reveals nothing ({0})", why);
+            }
+        }
+
+        await using var read = _kit.ReadContext();
+        (await read.Enrollments.IgnoreQueryFilters().CountAsync(e => e.PersonId == disabled))
+            .Should().Be(0, "no refused grant wrote anything");
+        (await read.StaffUsers.IgnoreQueryFilters().AnyAsync(u => u.Id == disabled))
+            .Should().BeFalse("no staff facet is created for a refused grant");
     }
 
     [RequiresDockerFact]

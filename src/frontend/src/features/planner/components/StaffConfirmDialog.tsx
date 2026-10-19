@@ -2,7 +2,8 @@
  * features/planner/components/StaffConfirmDialog.tsx
  * ---------------------------------------------------------------------------
  * The confirm step in front of the Staff section's consequential actions (remove, make lead,
- * demote yourself). STAFF world: COBRA buttons, FontAwesome, `sx`-only.
+ * every role change, since a role change signs that person out of the exercise). STAFF world:
+ * COBRA buttons, FontAwesome, `sx`-only.
  *
  * Accessibility: `role="alertdialog"` named by its title and described by its body (MUI traps
  * focus; Escape and Cancel dismiss). Initial focus is on Cancel, the safe choice. MUI restores

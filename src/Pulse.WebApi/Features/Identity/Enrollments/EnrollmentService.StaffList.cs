@@ -12,8 +12,10 @@ using Pulse.WebApi.Data.Entities;
 public sealed partial class EnrollmentService
 {
     /// <summary>
-    /// Lists exercise <paramref name="exerciseId"/>'s ACTIVE staff enrollments (revoked rows excluded) and the people of
-    /// the exercise's organization who hold no active enrollment of any role in it. Same gate as the writes: a planner on
+    /// Lists exercise <paramref name="exerciseId"/>'s ACTIVE staff enrollments (revoked rows excluded) and the ENABLED
+    /// people of the exercise's organization who hold no active enrollment of any role in it (a disabled person is never a
+    /// candidate — <see cref="GrantAsync"/> refuses them — though an existing enrollment of theirs is still listed, so a
+    /// planner can see and remove it). Same gate as the writes: a planner on
     /// THAT exercise (their resolved scope) or an org admin (org-scope session, an exercise of their own organization);
     /// anyone else is refused before the exercise is looked up, and a foreign or missing exercise is the bare 404.
     /// </summary>
@@ -47,11 +49,12 @@ public sealed partial class EnrollmentService
             .Select(e => new { e.Id, e.PersonId, e.Role, e.IsLead })
             .ToListAsync(cancellationToken);
 
-        // The exercise's own organization's people only — a person of another tenant is never listed or joined.
+        // The exercise's own organization's people only — a person of another tenant is never listed or joined. Disabled
+        // people are kept here (their staff rows stay listed) and dropped from the candidates below.
         var people = await _dbContext.People
             .AsNoTracking()
             .InOrganization(exercise.OrganizationId)
-            .Select(p => new { p.Id, p.DisplayName, p.Email })
+            .Select(p => new { p.Id, p.DisplayName, p.Email, Disabled = p.DisabledAt != null })
             .ToListAsync(cancellationToken);
         var peopleById = people.ToDictionary(p => p.Id);
 
@@ -77,7 +80,7 @@ public sealed partial class EnrollmentService
 
         var enrolled = enrollments.Where(e => e.PersonId is not null).Select(e => e.PersonId!.Value).ToHashSet();
         var candidates = people
-            .Where(p => !enrolled.Contains(p.Id))
+            .Where(p => !p.Disabled && !enrolled.Contains(p.Id))
             .Select(p => new StaffCandidateDto { PersonId = p.Id.ToString(), DisplayName = p.DisplayName, Email = p.Email })
             .OrderBy(dto => dto.DisplayName, StringComparer.OrdinalIgnoreCase)
             .ThenBy(dto => dto.PersonId, StringComparer.Ordinal)

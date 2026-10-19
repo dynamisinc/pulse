@@ -312,8 +312,9 @@ public sealed partial class EnrollmentService
     /// </summary>
     /// <param name="exerciseId">The exercise (a planner's own resolved exercise, or one of an org admin's org).</param>
     /// <param name="personId">
-    /// The person to enroll (must belong to the exercise's organization); <c>null</c> (a request that omitted it) is a
-    /// 400, judged only after the caller is authorized.
+    /// The person to enroll (must belong to the exercise's organization and be enabled — a disabled person is the same bare
+    /// 404 as a missing one, so the refusal reveals nothing new); <c>null</c> (a request that omitted it) is a 400, judged
+    /// only after the caller is authorized.
     /// </param>
     /// <param name="role">The staff role: planner, controller or evaluator.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
@@ -349,10 +350,12 @@ public sealed partial class EnrollmentService
             return EnrollmentResult.NotFound();
         }
 
-        // The person must belong to the exercise's own organization — a cross-tenant person is the bare 404.
+        // The person must belong to the exercise's own organization — a cross-tenant person is the bare 404 — and must be
+        // enabled: a disabled person cannot sign in, so granting them a role is refused with that SAME bare 404 (no new
+        // signal about who exists or is disabled), matching their absence from the Staff tab's candidates.
         var person = await _dbContext.People
             .InOrganization(exercise.OrganizationId)
-            .FirstOrDefaultAsync(p => p.Id == requestedPersonId, cancellationToken);
+            .FirstOrDefaultAsync(p => p.Id == requestedPersonId && p.DisabledAt == null, cancellationToken);
         if (person is null)
         {
             return EnrollmentResult.NotFound();

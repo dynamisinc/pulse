@@ -8,18 +8,26 @@
  * WHAT IT DOES. Lists who holds a staff role in the planner's CURRENT exercise (the exercise id
  * comes from the exercise context; the server enforces scope). A planner can add an org person
  * from `candidates` with a role, change a role (native select), remove someone, and make a
- * controller the lead. Remove / Make lead / demoting yourself go through a confirm dialog.
+ * controller the lead. Remove / Make lead / EVERY role change go through one confirm dialog.
  *
  * RULES THE UI CARRIES.
  *  - Lead is shown as icon + the word "Lead", never colour alone (NFR-001).
- *  - Make lead warns that it turns swamped mode off (Phase 2 server behaviour, #642).
- *  - Removing or demoting YOURSELF warns you lose this exercise's staff role and are signed
- *    out of it (the server revokes the sessions). On success, an exercise-bound session is then
- *    ended through the shared sign-out path (`endSession()` + the login route), so the page never
- *    sits on stale planner controls backed by a revoked token. An org-scope session is not
- *    revoked by the server (it is not minted from the exercise grant), so it stays.
- *  - Failures show inline in a `role="alert"` block (icon + words) mapped by `staffErrors.ts`;
- *    409/404 also refetch. Every success refetches; nothing is optimistic.
+ *  - Make lead warns that it turns swamped mode off (Phase 2 server behaviour, #642). It is gated
+ *    by `can('setLeadController')` (planner only), not `assignStaff`: an org admin can assign
+ *    staff but not pick the lead, so it is hidden rather than offered and 403'd.
+ *  - A role change signs that person out of this exercise (the server revokes their sessions so
+ *    the new role takes effect), so every change is confirmed first and says so (S-002).
+ *  - Removing or demoting the LEAD warns that the exercise is left with no lead and swamped mode
+ *    turns off (W-003); that sentence joins whichever confirm applies.
+ *  - Removing or demoting YOURSELF warns you are signed out of it (demoting also says you keep the
+ *    new staff role but lose planner access). The server revokes the sessions; on success, an
+ *    exercise-bound session is then ended through the shared sign-out path (`endSession()` + the
+ *    login route), so the page never sits on stale planner controls backed by a revoked token. An
+ *    org-scope session is not revoked by the server (it is not minted from the exercise grant), so
+ *    it stays.
+ *  - Successes are announced in a page-level polite `role="status"` region (W-001); failures show
+ *    inline in a `role="alert"` block (icon + words) mapped by `staffErrors.ts`; 409/404 also
+ *    refetch. Every success refetches; nothing is optimistic.
  * The server is the authority (403s, last-planner, conflicts); this only hides what cannot work.
  */
 import { useState } from 'react'
@@ -49,14 +57,26 @@ const ROLE_LABEL: Readonly<Record<StaffRole, string>> = {
   evaluator: 'Evaluator',
 }
 
-type Pending =
-  | { readonly kind: 'remove'; readonly row: StaffEnrollment }
-  | { readonly kind: 'lead'; readonly row: StaffEnrollment }
-  | { readonly kind: 'demote'; readonly row: StaffEnrollment; readonly role: StaffRole }
+/** "a Controller" / "an Evaluator", for the success announcement. */
+const withArticle = (role: StaffRole) =>
+  `${role === 'evaluator' ? 'an' : 'a'} ${ROLE_LABEL[role]}`
 
-const SIGN_OUT_WARNING =
+type Pending =
+  | { readonly kind: 'remove'; readonly row: StaffEnrollment; readonly self: boolean }
+  | { readonly kind: 'lead'; readonly row: StaffEnrollment }
+  | {
+    readonly kind: 'role'
+    readonly row: StaffEnrollment
+    readonly role: StaffRole
+    readonly self: boolean
+  }
+
+const SELF_REMOVE_WARNING =
   'You are changing your own role. You will lose your staff role in this exercise and be '
   + 'signed out of it.'
+
+const LEAD_WARNING =
+  'This person is the lead controller. The exercise will have no lead, and swamped mode turns off.'
 
 function dialogCopy(pending: Pending): {
   title: string
@@ -65,6 +85,7 @@ function dialogCopy(pending: Pending): {
   destructive: boolean
 } {
   const name = pending.row.displayName
+  const leadLines = pending.kind !== 'lead' && pending.row.isLead ? [LEAD_WARNING] : []
   if (pending.kind === 'lead') {
     return {
       title: `Make ${name} the lead?`,
@@ -76,20 +97,49 @@ function dialogCopy(pending: Pending): {
       destructive: false,
     }
   }
-  if (pending.kind === 'demote') {
+  if (pending.kind === 'role') {
+    const label = ROLE_LABEL[pending.role]
+    if (pending.self) {
+      // S-003: say what you keep (the new staff role), what you lose, and that it is immediate.
+      const selfLine = pending.row.role === 'planner'
+        ? `You keep a staff role in this exercise as ${label}, but you lose planner access and `
+          + 'will be signed out now.'
+        : `You will be signed out of this exercise and must sign in again as ${label}.`
+      return {
+        title: `Change your role to ${label}?`,
+        paragraphs: [selfLine, ...leadLines],
+        confirm: 'Change role',
+        destructive: true,
+      }
+    }
     return {
-      title: `Change your role to ${ROLE_LABEL[pending.role]}?`,
-      paragraphs: [SIGN_OUT_WARNING],
+      title: `Change ${name}'s role to ${label}?`,
+      paragraphs: [
+        `${name} will be signed out of this exercise and must sign in again as ${label}.`,
+        ...leadLines,
+      ],
       confirm: 'Change role',
-      destructive: true,
+      destructive: pending.row.isLead,
     }
   }
   return {
     title: `Remove ${name}?`,
-    paragraphs: [`${name} will lose their staff role in this exercise.`],
+    paragraphs: [
+      `${name} will lose their staff role in this exercise.`,
+      ...leadLines,
+      ...(pending.self ? [SELF_REMOVE_WARNING] : []),
+    ],
     confirm: 'Remove',
     destructive: true,
   }
+}
+
+/** The polite announcement for a write that succeeded (W-001). */
+function successMessage(pending: Pending): string {
+  const name = pending.row.displayName
+  if (pending.kind === 'lead') return `${name} is now the lead controller.`
+  if (pending.kind === 'role') return `${name} is now ${withArticle(pending.role)}.`
+  return `Removed ${name}.`
 }
 
 export function StaffPanel() {
@@ -103,6 +153,7 @@ export function StaffPanel() {
   const m = useStaffMutations(exerciseId)
 
   const [error, setError] = useState<string | null>(null)
+  const [announcement, setAnnouncement] = useState('')
   const [pending, setPending] = useState<Pending | null>(null)
   const [candidateId, setCandidateId] = useState('')
   const [newRole, setNewRole] = useState<StaffRole>('controller')
@@ -112,11 +163,16 @@ export function StaffPanel() {
   const busy = m.grant.isPending || m.changeRole.isPending || m.remove.isPending
     || m.makeLead.isPending
 
-  /** Runs one write; success clears the error (the hook refetched), failure explains itself. */
-  async function run(action: () => Promise<unknown>): Promise<boolean> {
+  /**
+   * Runs one write; success clears the error (the hook refetched) and announces `success`
+   * politely, failure explains itself in the alert region.
+   */
+  async function run(action: () => Promise<unknown>, success: string): Promise<boolean> {
     setError(null)
+    setAnnouncement('')
     try {
       await action()
+      setAnnouncement(success)
       return true
     } catch (e) {
       setError(staffErrorMessage(e))
@@ -125,15 +181,14 @@ export function StaffPanel() {
     }
   }
 
+  // W-002: planner only — an org admin assigns staff but does not pick the lead.
+  const canMakeLead = can('setLeadController')
   const isSelf = (row: StaffEnrollment) => myPersonId !== null && row.personId === myPersonId
 
+  /** Every role change signs someone out, so it always goes through the confirm (S-002). */
   function onRoleSelect(row: StaffEnrollment, role: StaffRole) {
     if (role === row.role) return
-    if (isSelf(row) && row.role === 'planner') {
-      setPending({ kind: 'demote', row, role })
-      return
-    }
-    void run(() => m.changeRole.mutateAsync({ id: row.id, role }))
+    setPending({ kind: 'role', row, role, self: isSelf(row) })
   }
 
   async function confirm() {
@@ -141,14 +196,14 @@ export function StaffPanel() {
     const p = pending
     const ok = await run(() => {
       if (p.kind === 'lead') return m.makeLead.mutateAsync({ id: p.row.id })
-      if (p.kind === 'demote') return m.changeRole.mutateAsync({ id: p.row.id, role: p.role })
+      if (p.kind === 'role') return m.changeRole.mutateAsync({ id: p.row.id, role: p.role })
       return m.remove.mutateAsync({ id: p.row.id })
-    })
+    }, successMessage(p))
     setPending(null)
-    // A self-demote / self-remove revoked this exercise-bound session server-side (the
+    // A self role change / self-remove revoked this exercise-bound session server-side (the
     // grant-revoke rule): end it here and go to sign-in, exactly as the header's sign-out does,
     // rather than leave planner controls on screen that the next call would 401.
-    const selfChange = p.kind === 'demote' || (p.kind === 'remove' && isSelf(p.row))
+    const selfChange = p.kind !== 'lead' && p.self
     if (ok && selfChange && session?.scope === 'exercise') {
       void endSession()
       navigate(LOGIN_PATH)
@@ -157,13 +212,17 @@ export function StaffPanel() {
 
   async function onGrant() {
     if (candidateId === '') return
-    const ok = await run(() => m.grant.mutateAsync({ personId: candidateId, role: newRole }))
+    const who = roster.data?.candidates.find(c => c.personId === candidateId)?.displayName
+      ?? 'The person'
+    const ok = await run(
+      () => m.grant.mutateAsync({ personId: candidateId, role: newRole }),
+      `${who} added as ${ROLE_LABEL[newRole]}.`,
+    )
     if (ok) setCandidateId('')
   }
 
   const data = roster.data
   const copy = pending === null ? null : dialogCopy(pending)
-  const selfWarn = pending !== null && pending.kind === 'remove' && isSelf(pending.row)
 
   return (
     <Box
@@ -179,6 +238,15 @@ export function StaffPanel() {
       <Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.5 }}>
         Who can plan, run and evaluate this exercise. Changes take effect immediately.
       </Typography>
+
+      <Box
+        role="status"
+        aria-live="polite"
+        data-testid="staff-status"
+        sx={{ mt: 1.5 }}
+      >
+        {announcement !== '' ? <Typography variant="body2">{announcement}</Typography> : null}
+      </Box>
 
       <Box role="alert" data-testid="staff-error-region" sx={{ mt: 1.5 }}>
         {error !== null ? (
@@ -279,7 +347,7 @@ export function StaffPanel() {
                       </td>
                       <td>
                         <Stack direction="row" sx={{ gap: 1 }}>
-                          {row.role === 'controller' && !row.isLead ? (
+                          {row.role === 'controller' && !row.isLead && canMakeLead ? (
                             <CobraLinkButton
                               type="button"
                               disabled={busy}
@@ -293,7 +361,7 @@ export function StaffPanel() {
                             type="button"
                             disabled={busy}
                             aria-label={`Remove ${row.displayName}`}
-                            onClick={() => setPending({ kind: 'remove', row })}
+                            onClick={() => setPending({ kind: 'remove', row, self: isSelf(row) })}
                           >
                             Remove
                           </CobraLinkButton>
@@ -360,9 +428,7 @@ export function StaffPanel() {
         <StaffConfirmDialog
           open
           title={copy.title}
-          paragraphs={
-            selfWarn ? [...copy.paragraphs, SIGN_OUT_WARNING] : copy.paragraphs
-          }
+          paragraphs={copy.paragraphs}
           confirmLabel={copy.confirm}
           destructive={copy.destructive}
           pending={busy}
