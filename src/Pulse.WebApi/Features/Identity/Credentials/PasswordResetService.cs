@@ -95,7 +95,7 @@ public sealed partial class PasswordResetService
         var person = await _dbContext.People
             .InOrganization(token.OrganizationId)
             .FirstOrDefaultAsync(p => p.Id == personId, cancellationToken);
-        if (person is null || person.DisabledAt is not null)
+        if (person is null || person.DisabledAt is not null || CredentialTokenService.IsStaleFor(token, person.PasswordChangedAt))
         {
             return PasswordResetResult.Invalid(InvalidTokenError);
         }

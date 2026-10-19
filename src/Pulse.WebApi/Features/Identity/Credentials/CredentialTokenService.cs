@@ -75,8 +75,9 @@ public sealed class CredentialTokenService
 
     /// <summary>
     /// STAGES (does not save) a new token of <paramref name="purpose"/> for one identity, and voids that identity's
-    /// earlier unused tokens of the same purpose in the same unit of work. The caller saves — together with its own
-    /// audit record — so the token, the voiding and the record commit or fail as one.
+    /// earlier unused tokens of the same purpose. The voiding is ONE conditional statement executed immediately
+    /// (<c>UPDATE … SET UsedAt = now WHERE UsedAt IS NULL …</c>, Gate-1 S-002), so run this inside the caller's
+    /// transaction: the voiding, the new token and the caller's audit record then commit or roll back as one.
     /// </summary>
     /// <param name="purpose">Invite or reset.</param>
     /// <param name="subject">The person or the one-off account the token sets a password for.</param>
@@ -104,13 +105,9 @@ public sealed class CredentialTokenService
             throw new ArgumentException("A credential token must belong to a resolved organization.", nameof(organizationId));
         }
 
-        var earlier = await OutstandingFor(subject, organizationId)
+        await OutstandingFor(subject, organizationId)
             .Where(t => t.Purpose == purpose)
-            .ToListAsync(cancellationToken);
-        foreach (var token in earlier)
-        {
-            token.UsedAt = now;
-        }
+            .ExecuteUpdateAsync(set => set.SetProperty(t => t.UsedAt, now), cancellationToken);
 
         var raw = Base64Url.EncodeToString(RandomNumberGenerator.GetBytes(TokenByteLength));
         var row = new CredentialToken
@@ -179,16 +176,19 @@ public sealed class CredentialTokenService
     }
 
     /// <summary>
-    /// STAGES (does not save) the credential-change rule (ADMIN-IDENTITY-MODEL §3.3, Copilot review 5): every
-    /// outstanding token of BOTH purposes for <paramref name="subject"/> is voided, so an older invite or reset link can
-    /// never set a password again. Call it in the SAME unit of work as the credential change.
+    /// Applies the credential-change rule (ADMIN-IDENTITY-MODEL §3.3, Copilot review 5): every outstanding token of
+    /// BOTH purposes for <paramref name="subject"/> is voided, so an older invite or reset link can never set a password
+    /// again. ONE conditional statement executed immediately (Gate-1 S-002: no read-then-update window), so call it
+    /// inside the transaction of the credential change. A token issued concurrently that this statement cannot see is
+    /// still refused at redemption: <see cref="IsStaleFor"/> rejects any token created before the subject's last
+    /// password change.
     /// </summary>
     /// <param name="dbContext">The unit of work the credential change is saved through.</param>
     /// <param name="subject">The person or account whose credential changed.</param>
     /// <param name="organizationId">Its organization.</param>
     /// <param name="now">The single wall-clock read of the calling operation.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>How many tokens were staged as voided.</returns>
+    /// <returns>How many tokens were voided.</returns>
     public static async Task<int> StageCredentialChangeInvalidationAsync(
         PulseDbContext dbContext,
         CredentialSubject subject,
@@ -199,13 +199,22 @@ public sealed class CredentialTokenService
         ArgumentNullException.ThrowIfNull(dbContext);
         ArgumentNullException.ThrowIfNull(subject);
 
-        var outstanding = await Outstanding(dbContext, subject, organizationId).ToListAsync(cancellationToken);
-        foreach (var token in outstanding)
-        {
-            token.UsedAt = now;
-        }
+        return await Outstanding(dbContext, subject, organizationId)
+            .ExecuteUpdateAsync(set => set.SetProperty(t => t.UsedAt, now), cancellationToken);
+    }
 
-        return outstanding.Count;
+    /// <summary>
+    /// Whether <paramref name="token"/> predates the subject's last password change, i.e. was issued against a
+    /// credential that has since changed. Such a token is refused even if no voiding statement ever reached it (a token
+    /// committed concurrently with a credential change, Gate-1 S-002).
+    /// </summary>
+    /// <param name="token">The token being redeemed.</param>
+    /// <param name="passwordChangedAt">The subject's last password change, or <c>null</c>.</param>
+    /// <returns><c>true</c> when the token must be refused.</returns>
+    public static bool IsStaleFor(CredentialToken token, DateTimeOffset? passwordChangedAt)
+    {
+        ArgumentNullException.ThrowIfNull(token);
+        return passwordChangedAt is { } changedAt && token.CreatedAt <= changedAt;
     }
 
     private IQueryable<CredentialToken> OutstandingFor(CredentialSubject subject, Guid organizationId) =>
