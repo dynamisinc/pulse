@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Pulse.WebApi.Features.Identity.SharedAccess;
 using Pulse.WebApi.Features.Social.Engagement;
 using Pulse.WebApi.Features.Social.Follows;
 
@@ -62,8 +63,9 @@ public static class ReactionEndpoints
     {
         ArgumentNullException.ThrowIfNull(endpoints);
 
-        endpoints.MapPut("/api/posts/{postId:guid}/reactions/{kind}", ReactAsync);
-        endpoints.MapDelete("/api/posts/{postId:guid}/reactions/{kind}", UnreactAsync);
+        // #379: a participant like / repost (and its undo) is refused (409 frozen) while the exercise is paused or frozen.
+        endpoints.MapPut("/api/posts/{postId:guid}/reactions/{kind}", ReactAsync).RefuseWhenWritesPaused();
+        endpoints.MapDelete("/api/posts/{postId:guid}/reactions/{kind}", UnreactAsync).RefuseWhenWritesPaused();
 
         return endpoints;
     }
