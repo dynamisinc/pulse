@@ -12,6 +12,7 @@ using Pulse.WebApi.Features.ExerciseConfiguration;
 using Pulse.WebApi.Features.ExerciseConfiguration.Chrome;
 using Pulse.WebApi.Features.ExerciseConfiguration.Lifecycle;
 using Pulse.WebApi.Features.ExerciseConfiguration.PracticeMode;
+using Pulse.WebApi.Features.ExerciseConfiguration.Readiness;
 using Xunit;
 
 /// <summary>
@@ -263,6 +264,27 @@ public sealed class CompositionRootWiringTests
             "POST {0} must be wired exactly once — it is the only COR-032 transition path, so a duplicate "
             + "mapping would AmbiguousMatch every StartEx/EndEx",
             LifecycleEndpoints.TransitionRoute);
+    }
+
+    /// <summary>
+    /// exercise-build-golive/03: the readiness read rides <c>AddExerciseLifecycle()</c> /
+    /// <c>MapExerciseLifecycleEndpoints()</c>, so the existing <c>Program.cs</c> lines wire it — mapped once, and its
+    /// service resolvable.
+    /// </summary>
+    [Fact]
+    public void ProgramCs_WiresTheStaffReadinessRouteExactlyOnce_ThroughTheLifecycleExtensions()
+    {
+        using var factory = new WiringProbeFactory();
+
+        var dataSource = factory.Services.GetRequiredService<EndpointDataSource>();
+        CountRoutes(dataSource, "GET", ReadinessEndpoints.ReadinessRoute).Should().Be(
+            1,
+            "GET {0} must be wired exactly once via MapExerciseLifecycleEndpoints()",
+            ReadinessEndpoints.ReadinessRoute);
+
+        using var scope = factory.Services.CreateScope();
+        scope.ServiceProvider.GetService<ExerciseReadinessService>().Should().NotBeNull(
+            "the readiness handler resolves this service at request time; AddExerciseLifecycle() registers it");
     }
 
     private static int CountRoutes(EndpointDataSource dataSource, string method, string rawText)
