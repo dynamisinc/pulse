@@ -21,15 +21,15 @@ route (COR-011).
 ## Acceptance Criteria
 
 - [ ] **Given** an active link in the host-resolved exercise, an enabled account, and an exercise in
-      Staged/Live/Paused, **when** `POST /api/auth/join { "token": "…" }` is called, **then** it answers
+      Staged/Live/Paused/Completed *(Superseded 2026-10-19, EL-11, one rule for all: Completed admits; Build/Archived refuse.)*, **when** `POST /api/auth/join { "token": "…" }` is called, **then** it answers
       `200` with exactly the `/api/auth/login` envelope (`token`, `refreshToken`, `session` with `personaId` when
       the account has one, `isReadOnly: false`), built with `ParticipantSessionRequests`. It sets the link's
       `LastUsedAt` and `UseCount` and the account's `LastLoginAt`. The link can be used again and again until
       revoked or reissued; it does not expire on use.
 - [ ] **Given** any other outcome, **then** the answer is the **same bodyless `401`** with the same shape and
       timing class: an unknown token, a malformed token, a **revoked** link, a **superseded** (reissued) link, a
-      token that belongs to another exercise, a disabled account, an exercise that is Build/Completed/Archived,
-      and an unresolved host scope. The lookup is one hash comparison against `ParticipantLink.TokenHash`, so
+      token that belongs to another exercise, a disabled account, an exercise that is Build/Archived (or an unknown status)
+      *(Superseded 2026-10-19, EL-11, one rule for all: Completed admits; Build/Archived refuse.)*, and an unresolved host scope. The lookup is one hash comparison against `ParticipantLink.TokenHash`, so
       "unknown" and "revoked" are the same code path. A missing body or empty `token` is `400`; an oversized body
       is refused by the 16 KiB login body limit. The route is rate-limited by its own `easy-login-join` policy
       (default 30 per minute per IP, `429` beyond it, from `EasyLoginOptions`).
@@ -112,10 +112,11 @@ and rate limit), AC-3 reissue, AC-4 revoke, AC-5 disable/enable, AC-6 the real i
 Telemetry, AC-9 Authorization and abuse.
 
 - **AC-1** `JoinLoginServiceTests.Join_ActiveLink_IssuesTheSameSessionAsAPasswordSignIn_AndRecordsTheUse`,
-  `.Join_TheSameLink_WorksAgainAndAgain_UntilRevokedOrReissued`, `.Join_IsAdmitted_InEveryParticipantAccessibleState`,
+  `.Join_TheSameLink_WorksAgainAndAgain_UntilRevokedOrReissued`, `.Join_IsAdmitted_InEveryParticipantReadState` (staged, live, paused, completed; superseded 2026-10-19, EL-11, one rule for all),
   `.Join_Success_BookkeepingAndTelemetry_ShareOneSaveChanges`; `JoinEndpointsHttpTests.Join_Success_Is200_WithExactlyTheLoginEnvelope`.
 - **AC-2** `JoinLoginServiceTests.Join_EveryOtherOutcome_IsTheSameRefusal_WithOneIdentitylessTargetlessEvent` (unknown,
-  malformed, revoked, superseded, other exercise's token, disabled account, build, completed, archived),
+  malformed, revoked, superseded, other exercise's token, disabled account, build, archived; completed moved to the
+  admitted list, superseded 2026-10-19, EL-11, one rule for all),
   `.Join_WithNoResolvedScope_IsRefused_WithNoEvent`, `.Join_OnAHostScopeWithNoExerciseRow_IsRefused_WithNoEvent`,
   `.Join_AMissingOrEmptyToken_IsInvalid_BeforeAnyLookup`; `JoinEndpointsHttpTests.Join_AMissingBodyOrEmptyToken_Is400ProblemDetails`,
   `.Join_WithNoResolvedHost_IsABodyless401`, `.Join_EveryRefusal_IsTheSameBodyless401_OverTheRealPipeline`,

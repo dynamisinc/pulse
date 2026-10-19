@@ -22,11 +22,14 @@
  * never colour alone. It stays mounted for as long as `swampedMode` is true;
  * there is no dismiss.
  *
- * PHASE 1 GOVERNANCE (PROVIDER-GOVERNANCE §8). When the engine settings report
+ * GOVERNANCE (PROVIDER-GOVERNANCE §8). When the engine settings report
  * `timeoutAutoSendAuthorized === false`, the server refuses swamped mode ON, so
- * the ON control is DISABLED (it is a real control that cannot work here yet,
+ * the ON control is DISABLED (it is a real control that cannot work in this environment,
  * not a role gate) with a text + icon note it is described by. Turning an
  * already-on switch OFF is never blocked.
+ *
+ * SERVER-DRIVEN. The switch reflects the server's state; while a request is in flight
+ * (`pending`) it is disabled, and a 400/403 refusal shows inline (`error`).
  *
  * The hook backing this (`useSwampedMode`) does all of the gating/telemetry —
  * this component only renders its state and calls its setter.
@@ -45,14 +48,77 @@ import { Box, Stack, Typography } from '@mui/material'
 import { CobraLinkButton, CobraSecondaryButton } from '@/theme/styledComponents'
 import { useSwampedMode } from '../hooks/useSwampedMode'
 import { useEngineSettings } from '../hooks/useEngineSettings'
+import { timeoutAutoSendState, type TimeoutAutoSendState } from '../models/effectiveTimeoutAutoSend'
 // D5 dark operator-chrome tokens (matches `ReviewQueue`'s `chrome`). Staff-only.
 import { consoleChrome as chrome } from '../../consoleChrome'
 import { useCanControl } from '../../access'
 
+/**
+ * Banner wording per state (text + icon always; the icon is rendered by the banner). Only
+ * `active` claims auto-send; every other state says why expired timers HOLD.
+ */
+const BANNER_COPY: Record<TimeoutAutoSendState, {
+  readonly title: string
+  readonly detail: string
+}> = {
+  off: { title: '', detail: '' },
+  active: {
+    title: 'TIMEOUT AUTO-SEND IS ACTIVE',
+    detail: '— swamped mode is on; expired timers publish instead of holding.',
+  },
+  cut: {
+    title: 'TIMEOUT AUTO-SEND IS SUSPENDED',
+    detail:
+      '— swamped mode is on, but auto-send is SUSPENDED while generation is cut to Fake; expired timers hold.',
+  },
+  stopped: {
+    title: 'TIMEOUT AUTO-SEND IS SUSPENDED',
+    detail:
+      '— swamped mode is on, but generation is fully stopped (kill switch); expired timers hold.',
+  },
+  clamped: {
+    title: 'TIMEOUT AUTO-SEND IS SUSPENDED',
+    detail:
+      '— swamped mode is on, but the engine is clamped to suggest-only (kill switch); expired timers hold.',
+  },
+  degraded: {
+    title: 'TIMEOUT AUTO-SEND IS SUSPENDED',
+    detail:
+      '— swamped mode is on, but the engine is in degraded mode; expired timers hold.',
+  },
+  'autonomy-lowered': {
+    title: 'TIMEOUT AUTO-SEND IS SUSPENDED',
+    detail: '— swamped mode is on, but autonomy is Suggest; expired timers hold.',
+  },
+  'not-authorized': {
+    title: 'TIMEOUT AUTO-SEND IS NOT AUTHORIZED',
+    detail:
+      '— swamped mode is on, but this environment has not authorized timeout auto-send; expired timers hold.',
+  },
+}
+
+/** hh:mm of the last confirmed settings read (staff wall time, as `UsagePanel` shows it). */
+function formatLastConfirmed(at: number | null): string {
+  if (at === null) return 'never'
+  return new Date(at).toLocaleTimeString(undefined, {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  })
+}
+
 export function SwampedModeToggle() {
-  const { swampedMode, isLead, setSwampedMode } = useSwampedMode()
+  const { swampedMode, isLead, setSwampedMode, pending, error, stale, lastConfirmedAt } =
+    useSwampedMode()
   const canControl = useCanControl()
   const [confirmingOff, setConfirmingOff] = useState(false)
+  // The confirm stays open from the click until the request settles (`pending` falls), so the
+  // UI never closes as if the change were done while it is merely queued or in flight.
+  const [submittedOff, setSubmittedOff] = useState(false)
+  if (submittedOff && !pending) {
+    setSubmittedOff(false)
+    setConfirmingOff(false)
+  }
   // WR-004: keyboard focus follows the OFF-only confirm step. Confirm is focused on open;
   // Cancel returns to the trigger; after Confirm focus lands on the trigger, then (once swamped
   // mode is actually off and the trigger unmounts) on the non-lead note.
@@ -77,13 +143,16 @@ export function SwampedModeToggle() {
     }
   }, [swampedMode])
   const settings = useEngineSettings().settings
-  // Hold-on-cut (ADP-042): while cut to Fake, expiries hold even under swamped mode.
-  const providerCutToFake = settings?.providerCutToFake ?? false
-  // Phase 1 (PROVIDER-GOVERNANCE §8): the server refuses swamped ON while the
-  // governed flag is false. Only an explicit `false` disables; OFF stays open.
+  // PROVIDER-GOVERNANCE §8: wherever the deployment does not authorize timeout auto-send, the
+  // server refuses swamped ON. Only an explicit `false` disables; OFF stays open.
   // Turning ON needs the lead role (COR-015, absent for others) AND this flag; OFF is never
   // refused.
   const onRefused = settings?.timeoutAutoSendAuthorized === false && !swampedMode
+  // Swamped can be ON while the deployment does not authorize auto-send (server holds): the
+  // banner must not claim ACTIVE then. Same rule as the console's draft-timer input.
+  // Which banner to show comes from the SAME server-derived inputs the timers use.
+  const autoSendState = timeoutAutoSendState(swampedMode, settings)
+  const errorId = error ? 'swamped-mode-status' : undefined
 
   return (
     <Stack
@@ -102,14 +171,25 @@ export function SwampedModeToggle() {
           data-testid="swamped-mode-enable-toggle"
           role="switch"
           aria-checked={swampedMode}
+          // WR-101: `pending` uses aria-disabled + a click guard, NOT native `disabled`, so the
+          // lead's own focused switch keeps keyboard focus while its request is in flight
+          // (native disabled drops focus).
           disabled={onRefused}
-          aria-describedby={onRefused ? 'swamped-mode-not-authorized-note' : undefined}
+          aria-disabled={pending || undefined}
+          aria-busy={pending}
+          aria-describedby={
+            [onRefused ? 'swamped-mode-not-authorized-note' : undefined, errorId]
+              .filter(Boolean)
+              .join(' ') || undefined
+          }
           aria-label={
             swampedMode
               ? 'Swamped mode is on — turn off timeout auto-send'
               : 'Swamped mode is off — turn on timeout auto-send'
           }
-          onClick={() => setSwampedMode(!swampedMode)}
+          onClick={() => {
+            if (!pending) setSwampedMode(!swampedMode)
+          }}
           sx={{
             display: 'inline-flex',
             alignItems: 'center',
@@ -138,6 +218,40 @@ export function SwampedModeToggle() {
         </Box>
       )}
 
+      {/* Always-mounted live region (so a screen reader announces text swaps): holds a server
+          refusal (400 governance / 403 lead gate) as text + icon, never colour alone. */}
+      {canControl && (
+        <Stack
+          direction="row"
+          id="swamped-mode-status"
+          role="status"
+          data-testid="swamped-mode-error"
+          sx={{ alignItems: 'center', gap: 0.75 }}
+        >
+          {stale && (
+            <>
+              <FontAwesomeIcon icon={faTriangleExclamation} color={chrome.amber} aria-hidden="true" />
+              <Typography
+                component="span"
+                data-testid="swamped-mode-stale-note"
+                sx={{ fontSize: 10.5, color: chrome.ink }}
+              >
+                Swamped state could not be refreshed. Last confirmed{' '}
+                {formatLastConfirmed(lastConfirmedAt)}
+              </Typography>
+            </>
+          )}
+          {error && (
+            <>
+              <FontAwesomeIcon icon={faTriangleExclamation} color={chrome.amber} aria-hidden="true" />
+              <Typography component="span" sx={{ fontSize: 10.5, color: chrome.ink }}>
+                {error}
+              </Typography>
+            </>
+          )}
+        </Stack>
+      )}
+
       {canControl && isLead && onRefused && (
         <Stack
           direction="row"
@@ -147,7 +261,7 @@ export function SwampedModeToggle() {
         >
           <FontAwesomeIcon icon={faCircleInfo} color={chrome.inkMuted} aria-hidden="true" />
           <Typography component="span" sx={{ fontSize: 10.5, color: chrome.inkMuted }}>
-            Timeout auto-send is off until the lead-controller role ships.
+            Timeout auto-send is not authorized on this environment.
           </Typography>
         </Stack>
       )}
@@ -176,12 +290,10 @@ export function SwampedModeToggle() {
             component="span"
             sx={{ fontSize: 11, fontWeight: 800, letterSpacing: '0.04em', color: chrome.amber }}
           >
-            {providerCutToFake ? 'TIMEOUT AUTO-SEND IS SUSPENDED' : 'TIMEOUT AUTO-SEND IS ACTIVE'}
+            {BANNER_COPY[autoSendState].title}
           </Typography>
           <Typography component="span" sx={{ fontSize: 10.5, color: chrome.inkMuted }}>
-            {providerCutToFake
-              ? '— swamped mode is on, but auto-send is SUSPENDED while generation is cut to Fake; expired timers hold.'
-              : '— swamped mode is on; expired timers publish instead of holding.'}
+            {BANNER_COPY[autoSendState].detail}
           </Typography>
         </Stack>
       )}
@@ -205,12 +317,14 @@ export function SwampedModeToggle() {
                 size="small"
                 startIcon={<FontAwesomeIcon icon={faPowerOff} aria-hidden="true" />}
                 data-testid="swamped-mode-turn-off-confirm"
+                aria-describedby={errorId}
+                disabled={pending}
                 ref={confirmRef}
                 onClick={() => {
                   restoreTriggerFocus.current = true
                   confirmedOff.current = true
                   setSwampedMode(false)
-                  setConfirmingOff(false)
+                  setSubmittedOff(true)
                 }}
               >
                 Confirm: turn swamped mode off

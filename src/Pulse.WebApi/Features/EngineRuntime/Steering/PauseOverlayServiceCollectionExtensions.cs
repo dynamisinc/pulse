@@ -72,27 +72,9 @@ public static class PauseOverlayServiceCollectionExtensions
         services.TryAddSingleton<PauseTierReader>(provider =>
             exerciseId => provider.GetRequiredService<PauseTierRegistry>().GetTier(exerciseId));
 
-        // The lifecycle status the PUSH side gates on (CR-001), resolved through its OWN scope per call: the
-        // publisher is a singleton and PulseDbContext is scoped, so a constructor-injected context would be a
-        // captive dependency. IServiceScopeFactory lives here in the factory rather than in the publisher's
-        // signature, which keeps that signature free of any persistence type (AC7's assertion).
-        //
-        // Exercise is the SCOPE, not an IExerciseScoped entity, so PulseDbContext's global read filter is a no-op
-        // on this table — this is a direct read by the SERVER-resolved id the transition carries, never a
-        // client-supplied one (COR-001). Same idiom as PauseTierEndpoints.ResolveClockStartAsync.
-        services.TryAddSingleton<ExerciseLifecycleStatusReader>(provider =>
-            async (exerciseId, cancellationToken) =>
-            {
-                await using var scope = provider.GetRequiredService<IServiceScopeFactory>().CreateAsyncScope();
-
-                // org-scope-exempt(ResolvedScope): exerciseId is the SERVER-resolved scope the transition
-                // carries, never a client-supplied id, so this status read stays inside the caller's tenant.
-                return await scope.ServiceProvider.GetRequiredService<PulseDbContext>().Exercises
-                    .AsNoTracking()
-                    .Where(exercise => exercise.Id == exerciseId)
-                    .Select(exercise => exercise.Status)
-                    .SingleOrDefaultAsync(cancellationToken);
-            });
+        // The lifecycle status the PUSH side gates on (CR-001). Shared with the feed broadcaster's EndEx send gate
+        // (#375), so both register it through the one TryAdd below.
+        services.TryAddExerciseLifecycleStatusReader();
 
         // #390 Gate-1 WR-002: the COMPOSED overlay the pause publisher pushes — the same read the GET performs
         // (ParticipantShellConfigService.GetOverlayStateAsync): the exercise row (or the unconfigured fallback) through
@@ -137,6 +119,43 @@ public static class PauseOverlayServiceCollectionExtensions
         // way still wins. Scoped, matching the seam and the request-scoped unit of work behind it.
         services.TryAddScoped<LifecycleOverlayStateProjection>();
         services.Replace(ServiceDescriptor.Scoped<IOverlayStateProjection, SteeringPauseOverlayProjection>());
+
+        return services;
+    }
+
+    /// <summary>
+    /// Registers the database-backed <see cref="ExerciseLifecycleStatusReader"/> (TryAdd, so a host or test that
+    /// registered its own reader first still wins). Shared by <see cref="AddPauseParticipantOverlay"/> (the
+    /// pause-overlay push gate, CR-001) and <c>RealtimeExtensions.AddSocialRealtimeHub</c> (the feed broadcaster's
+    /// EndEx send gate, #375), so neither depends on the other being wired.
+    /// </summary>
+    /// <param name="services">The service collection.</param>
+    /// <returns>The same collection, for chaining.</returns>
+    public static IServiceCollection TryAddExerciseLifecycleStatusReader(this IServiceCollection services)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+
+        // Resolved through its OWN scope per call: the publisher is a singleton and PulseDbContext is scoped, so a
+        // constructor-injected context would be a captive dependency. IServiceScopeFactory lives here in the factory
+        // rather than in the publisher's signature, which keeps that signature free of any persistence type (AC7's
+        // assertion).
+        //
+        // Exercise is the SCOPE, not an IExerciseScoped entity, so PulseDbContext's global read filter is a no-op
+        // on this table — this is a direct read by the SERVER-resolved id the transition carries, never a
+        // client-supplied one (COR-001). Same idiom as PauseTierEndpoints.ResolveClockStartAsync.
+        services.TryAddSingleton<ExerciseLifecycleStatusReader>(provider =>
+            async (exerciseId, cancellationToken) =>
+            {
+                await using var scope = provider.GetRequiredService<IServiceScopeFactory>().CreateAsyncScope();
+
+                // org-scope-exempt(ResolvedScope): exerciseId is the SERVER-resolved scope the transition
+                // carries, never a client-supplied id, so this status read stays inside the caller's tenant.
+                return await scope.ServiceProvider.GetRequiredService<PulseDbContext>().Exercises
+                    .AsNoTracking()
+                    .Where(exercise => exercise.Id == exerciseId)
+                    .Select(exercise => exercise.Status)
+                    .SingleOrDefaultAsync(cancellationToken);
+            });
 
         return services;
     }
