@@ -218,6 +218,8 @@ public sealed class ParticipantFacingNameLeakTests
     /// The link-email path normalizes a blank or padded stored participant name (<c>LinkEmailService</c> via
     /// <see cref="Exercise.NormalizeParticipantName"/>): whitespace yields the generic subject (never the internal name
     /// and never a dangling "for " artifact), and a padded value is trimmed into the subject.
+    /// Note: <c>LinkEmailComposer.Subject</c> also collapses whitespace, so this guards the LEAK (no internal-name
+    /// fallback for a blank stored name) more than it isolates the service's normalization call.
     /// </summary>
     [RequiresDockerTheory]
     [InlineData("   ", null)]

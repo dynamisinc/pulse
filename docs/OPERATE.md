@@ -69,7 +69,8 @@ only for the window between them — but a tab holding the old bundle stays blan
 
 - A frontend that ships **before** the backend tolerates an old backend: the settings response guard accepts
   an absent `participantName` and reads it as `null`. The `participant-name` readiness item renders whatever
-  the server sends.
+  the server sends. In that window a planner's saved participant name is ignored by the old backend and the
+  field comes back empty; re-enter it after the backend deploys (fails safe).
 - A backend that ships **before** the frontend is tolerated by the old (post-#669) bundle: the resolver and
   the card-sheet guard accept `exerciseName: null`.
 
@@ -84,12 +85,16 @@ only for the window between them — but a tab holding the old bundle stays blan
    side menu moves to PR-4c with it.
 3. **Re-scaffold the migration after #655 (`20261019171234`) and #665 (`20261019200000`) are on `main`.**
    `ef migrations add` cannot set the id, so:
+   0. Install the CI-pinned tool: `dotnet tool install --global dotnet-ef --version 10.0.10` (the repo has no
+      local tool manifest; `deploy-backend.yml` pins 10.0.10).
    1. Merge `main` into the branch; let `ModelSnapshot` merge textually.
    2. From the repo root: `dotnet ef migrations add TmpA3Model --project src/Pulse.WebApi/Pulse.WebApi.csproj`.
    3. Copy the body of `BuildTargetModel` from the generated `*_TmpA3Model.Designer.cs` into
       `20261019230000_A3SetupContentParticipantName.Designer.cs` (keep that file's class/attribute header).
-   4. Delete the `*_TmpA3Model` `.cs` and `.Designer.cs`. If the Tmp run changed the snapshot and the change is
-      identical to the textual merge, keep it; otherwise revert that change to the merged snapshot.
+   4. **Check that the generated `*_TmpA3Model.cs` has EMPTY `Up()` and `Down()`.** If it does not, the merged
+      snapshot or the A3 migration is missing schema: stop and fix that; do not paper over it. Then delete the
+      `*_TmpA3Model` `.cs` and `.Designer.cs`, and keep the snapshot exactly as the textual merge left it
+      (revert anything the Tmp run wrote to it).
    5. `dotnet ef migrations has-pending-model-changes --project src/Pulse.WebApi/Pulse.WebApi.csproj` must report none.
    6. Run `A3SetupContentParticipantNameMigrationTests` and `IdempotentMigrationScriptTests`. The test
       constants `MigrationUnderTest` and `BeforeA3` pin the migration ids; update `BeforeA3` if the
@@ -99,8 +104,9 @@ only for the window between them — but a tab holding the old bundle stays blan
    safe: the new columns are additive (a nullable column, and `bit NOT NULL DEFAULT 0`) and the old
    model ignores them. A schema `Down` is optional and manual. It drops the three columns, and the
    planner-entered participant names and the setup/conduct split are lost (a replayed Up re-derives
-   them from `WorldName` and the lifecycle telemetry). Generate the script and apply it to
-   `sqldb-pulse-uat` by hand:
+   them from `WorldName` and the lifecycle telemetry). Generate the script **from a checkout that still contains
+   the A3 migration** (the #670 merge commit, before the revert; on post-revert `main` it reports
+   "migration not found") and apply it to `sqldb-pulse-uat` by hand:
    `dotnet ef migrations script 20261019230000_A3SetupContentParticipantName 20261017120000_AdminIdentityFoundation --project src/Pulse.WebApi/Pulse.WebApi.csproj`
    (adjust the "to" migration to whichever migration precedes A3 on `main` at that time). If PR-4c has
    shipped, revert it first so nothing renders the name.
