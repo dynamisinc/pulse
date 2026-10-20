@@ -135,7 +135,35 @@ describe('getExerciseSettings — response parsing', () => {
     expect(settings.channels.filter(channel => channel.enabled).map(c => c.id)).toEqual(['social'])
   })
 
+  it('tolerates an OLD backend: an absent participantName loads as null (deploy-order safety)', async () => {
+    const { participantName: _omitted, ...legacy } = VALID_BODY
+    mockGet.mockResolvedValue({ data: legacy } as Awaited<ReturnType<typeof api.get>>)
+
+    const settings = await getExerciseSettings()
+
+    expect(settings.participantName).toBeNull()
+    expect(settings.name).toBe(VALID_BODY.name)
+  })
+
+  it('keeps a present participantName string or null as sent', async () => {
+    mockGet.mockResolvedValue({ data: VALID_BODY } as Awaited<ReturnType<typeof api.get>>)
+    expect((await getExerciseSettings()).participantName).toBe('Atlanta Coastal Exercise')
+
+    mockGet.mockResolvedValue({
+      data: { ...VALID_BODY, participantName: null },
+    } as Awaited<ReturnType<typeof api.get>>)
+    expect((await getExerciseSettings()).participantName).toBeNull()
+  })
+
+  it('normalizes an absent participantName on the PUT response too', async () => {
+    const { participantName: _omitted, ...legacy } = VALID_BODY
+    mockPut.mockResolvedValue({ data: legacy } as Awaited<ReturnType<typeof api.put>>)
+
+    expect((await updateExerciseSettings(UPDATE)).participantName).toBeNull()
+  })
+
   it.each<[string, unknown]>([
+    ['a participantName that is a number', { ...VALID_BODY, participantName: 7 }],
     ['an empty body', undefined],
     ['a null body', null],
     ['a body missing the required timeZone', { ...VALID_BODY, timeZone: undefined }],

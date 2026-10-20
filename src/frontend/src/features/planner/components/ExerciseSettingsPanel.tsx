@@ -675,7 +675,7 @@ function ExerciseSettingsForm({
               {...textFieldProps(
                 'participantName',
                 'The name participants see for this exercise. They never see the internal '
-                + 'exercise name. Required before the exercise can go live.',
+                + 'exercise name. Required before the exercise can be staged.',
               )}
               label="Participant-facing name"
               value={values.participantName}

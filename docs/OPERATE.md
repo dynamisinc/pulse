@@ -63,32 +63,50 @@ frontend second** — the exact opposite of promotion.
 Left unmanaged the failure is **transient and self-healing** — both workflows complete, so UAT blanks
 only for the window between them — but a tab holding the old bundle stays blank until a hard reload.
 
-#### A3 — participant-facing name + setup-content columns (exercise-build-golive/09, PR-4b)
+#### A3 — participant-facing name + setup-content columns (exercise-build-golive/09, #670)
 
-This change runs the rule above in **reverse** (backend first), so it ships as two PRs. PR-4a
-(`feature/build-09a-null-name-tolerance`) is frontend-only: the resolver accepts `exerciseName: null`, the
-card-sheet guard accepts a null name, and staff labels come from the staff assignments rather than the scope.
-PR-4b (`feature/build-a3-setup-content`) is a superset that adds the `A3SetupContentParticipantName`
-migration, the backend scope projection (`exerciseName` = `Exercises.ParticipantName`, never the internal
-`Name`), the participant NavRail name and the settings field.
+**#670 is order-independent.** Either workflow may finish first; there is no cancel and re-dispatch race.
 
-1. **Precondition: PR-4a is deployed to UAT.** The serving bundle must tolerate a null `exerciseName`
-   before any backend emits one; the old guard rejects null and blanks the participant world and staff shell.
-2. **PR-4b deploys backend first, then frontend.** The new NavRail renders `exerciseName`. Against an old
-   backend that value is the internal name, which can leak the scenario (#376). When the merge fires both
-   workflows, **cancel the *Deploy Frontend* run**, let *Deploy Backend* (with the migration) finish, then
-   re-dispatch *Deploy Frontend*. Cancelling the frontend run is always safe; it changes no data.
-3. **Rollback: frontend first, then backend/schema.** Roll the bundle back first so nothing renders the
-   name, then the backend. Down drops the three columns. Planner-entered participant names and the
-   setup/conduct split are lost; a replayed Up re-derives them from `WorldName` and the lifecycle telemetry.
-4. **After deploy, reload open staff consoles.** The settings PUT is a full replace. An old tab's PUT omits
+- A frontend that ships **before** the backend tolerates an old backend: the settings response guard accepts
+  an absent `participantName` and reads it as `null`. The `participant-name` readiness item renders whatever
+  the server sends.
+- A backend that ships **before** the frontend is tolerated by the old (post-#669) bundle: the resolver and
+  the card-sheet guard accept `exerciseName: null`.
+
+1. **Precondition: #669 is deployed to UAT.** It is merged to `main`; verify its *Deploy Frontend* run is
+   green. Without it the serving bundle's guard rejects a null `exerciseName`, which blanks the participant
+   world and staff shell once the new backend emits one.
+2. **The NavRail participant-name rendering ships separately as PR-4c.** Merge it **only after #670's
+   *Deploy Backend* run is green**, including the *Smoke test — the NEW build is serving (commit matches)*
+   step (`/api/build` commit equals the run's SHA) and the *Smoke test — an exercise-scoped read works*
+   step (`/api/exercise-context`). Reason: against an old backend `exerciseName` is the internal `Name`, which
+   the NavRail would show to participants (#376 leak). The participant-guide sentence about the name in the
+   side menu moves to PR-4c with it.
+3. **Re-scaffold the migration after #655 (`20261019171234`) and #665 (`20261019200000`) are on `main`.**
+   `ef migrations add` cannot set the id, so:
+   1. Merge `main` into the branch; let `ModelSnapshot` merge textually.
+   2. From the repo root: `dotnet ef migrations add TmpA3Model --project src/Pulse.WebApi/Pulse.WebApi.csproj`.
+   3. Copy the body of `BuildTargetModel` from the generated `*_TmpA3Model.Designer.cs` into
+      `20261019230000_A3SetupContentParticipantName.Designer.cs` (keep that file's class/attribute header).
+   4. Delete the `*_TmpA3Model` `.cs` and `.Designer.cs`. If the Tmp run changed the snapshot and the change is
+      identical to the textual merge, keep it; otherwise revert that change to the merged snapshot.
+   5. `dotnet ef migrations has-pending-model-changes --project src/Pulse.WebApi/Pulse.WebApi.csproj` must report none.
+   6. Run `A3SetupContentParticipantNameMigrationTests` and `IdempotentMigrationScriptTests`. The test
+      constants `MigrationUnderTest` and `BeforeA3` pin the migration ids; update `BeforeA3` if the
+      predecessor on `main` changed.
+4. **Rollback: no workflow runs a `Down`.** *Deploy Backend* has no ref input (its only input is the
+   environment), so roll back the backend with a **revert PR**. Reverting the code without a `Down` is
+   safe: the new columns are additive (a nullable column, and `bit NOT NULL DEFAULT 0`) and the old
+   model ignores them. A schema `Down` is optional and manual. It drops the three columns, and the
+   planner-entered participant names and the setup/conduct split are lost (a replayed Up re-derives
+   them from `WorldName` and the lifecycle telemetry). Generate the script and apply it to
+   `sqldb-pulse-uat` by hand:
+   `dotnet ef migrations script 20261019230000_A3SetupContentParticipantName 20261017120000_AdminIdentityFoundation --project src/Pulse.WebApi/Pulse.WebApi.csproj`
+   (adjust the "to" migration to whichever migration precedes A3 on `main` at that time). If PR-4c has
+   shipped, revert it first so nothing renders the name.
+5. **After deploy, reload open staff consoles.** The settings PUT is a full replace. An old tab's PUT omits
    `participantName` and clears it. That fails safe (no name shows, and the `participant-name` readiness item
    blocks staging again), but the planner must re-enter the name.
-5. **Migration ordering.** Merge #655 (`20261019171234`) and #665 (`20261019200000`) first. Then re-scaffold
-   this migration so its Designer and the model snapshot carry all three: `dotnet ef migrations remove`, then
-   `dotnet ef migrations add` with the same id `20261019230000_A3SetupContentParticipantName`, and re-apply
-   the hand-written Up/Down (the `EXEC(N'…')`-wrapped backfills and the remarks). Re-run
-   `IdempotentMigrationScriptTests` and `A3SetupContentParticipantNameMigrationTests`.
 6. **Backfill cost and locks.** The column adds are metadata-only (a nullable column, and a `bit NOT NULL
    DEFAULT 0`). The `IsSetupContent` backfill aggregates the lifecycle events **once per exercise**: one scan
    of `TelemetryEvents` (there is no `EventType` index, so this is the largest read), then one join against

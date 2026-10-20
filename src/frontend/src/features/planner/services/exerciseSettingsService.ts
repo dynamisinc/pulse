@@ -234,6 +234,20 @@ function isNullableString(value: unknown): value is string | null {
   return value === null || typeof value === 'string'
 }
 
+/**
+ * Like {@link isNullableString} but also accepts an ABSENT key. An OLD backend (frontend deployed
+ * before the A3 migration/DTO) sends no `participantName` at all; that is tolerated and normalized
+ * to `null` by {@link normalizeSettings}. A present non-string, non-null value is still rejected.
+ */
+function isOptionalNullableString(value: unknown): value is string | null | undefined {
+  return value === undefined || isNullableString(value)
+}
+
+/** Fills keys an older backend omits so callers always see the full `ExerciseSettings` shape. */
+function normalizeSettings(body: ExerciseSettings): ExerciseSettings {
+  return { ...body, participantName: body.participantName ?? null }
+}
+
 function isStringMap(value: unknown): value is Record<string, string> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
   return Object.values(value as Record<string, unknown>).every(entry => typeof entry === 'string')
@@ -248,7 +262,7 @@ function isSettingsBody(value: unknown): value is ExerciseSettings {
     typeof body.name === 'string' &&
     typeof body.timeZone === 'string' &&
     isNullableString(body.worldName) &&
-    isNullableString(body.participantName) &&
+    isOptionalNullableString(body.participantName) &&
     isNullableString(body.locale) &&
     isNullableString(body.scheduledStartAt) &&
     isNullableString(body.scheduledEndAt) &&
@@ -438,7 +452,7 @@ export async function getExerciseSettings(): Promise<ExerciseSettings> {
   if (!isSettingsBody(data)) {
     throw new ExerciseSettingsError('The settings response was empty or malformed.')
   }
-  return data
+  return normalizeSettings(data)
 }
 
 /**
@@ -472,5 +486,5 @@ export async function updateExerciseSettings(
   if (!isSettingsBody(data)) {
     throw new ExerciseSettingsError('The settings response was empty or malformed.')
   }
-  return data
+  return normalizeSettings(data)
 }

@@ -179,6 +179,82 @@ public sealed class ParticipantFacingNameLeakTests
     }
 
     /// <summary>
+    /// A stored participant name that is blank or padded (a legacy row, a direct DB edit) goes through the same
+    /// normalization on the card sheet as on the scope: whitespace is null (no fallback to the internal name, no empty
+    /// header), and a padded value is trimmed.
+    /// </summary>
+    [RequiresDockerTheory]
+    [InlineData("   ", null)]
+    [InlineData("\t \n", null)]
+    [InlineData("  " + ParticipantName + "  ", ParticipantName)]
+    public async Task ThePrintedCardSheet_NormalizesAWhitespaceParticipantName(string storedName, string? expected)
+    {
+        var world = new LinkCardTestWorld(_fixture);
+        var sentinel = NewSentinel();
+        var exercise = await world.SeedExerciseAsync(name: sentinel, participantName: storedName);
+        var staff = await world.SeedStaffAsync((exercise, "controller"));
+        await world.SeedParticipantAsync(exercise, "Jane Smith", agency: "Fulco County EM");
+
+        var result = await world.GenerateAsync(exercise, staff);
+
+        result.Outcome.Should().Be(LinkCardOutcome.Ok);
+        result.Sheet!.Cards.Should().ContainSingle("the sheet is real, so the absence below is meaningful");
+        result.Sheet.ExerciseName.Should().Be(expected, "a blank stored name is null and a padded one is trimmed");
+        var json = JsonSerializer.Serialize(result.Sheet);
+        json.Should().NotContain(sentinel, "a blank participant name never falls back to the internal name (§8.4)");
+        using var document = JsonDocument.Parse(json);
+        var name = document.RootElement.GetProperty("exerciseName");
+        if (expected is null)
+        {
+            name.ValueKind.Should().Be(JsonValueKind.Null, "a blank name is null on the wire, never an empty header");
+        }
+        else
+        {
+            name.GetString().Should().Be(expected);
+        }
+    }
+
+    /// <summary>
+    /// The link-email path normalizes a blank or padded stored participant name (<c>LinkEmailService</c> via
+    /// <see cref="Exercise.NormalizeParticipantName"/>): whitespace yields the generic subject (never the internal name
+    /// and never a dangling "for " artifact), and a padded value is trimmed into the subject.
+    /// </summary>
+    [RequiresDockerTheory]
+    [InlineData("   ", null)]
+    [InlineData("\t \n", null)]
+    [InlineData("  " + ParticipantName + "  ", ParticipantName)]
+    public async Task ThePersonalLinkEmail_NormalizesAWhitespaceParticipantName(string storedName, string? expected)
+    {
+        var world = new LinkEmailTestWorld(_fixture);
+        var sentinel = NewSentinel();
+        var exercise = await world.SeedExerciseAsync(name: sentinel, participantName: storedName);
+        var staff = await world.SeedStaffAsync((exercise, "controller"));
+        await world.SeedParticipantAsync(exercise, "Ann Active");
+        var mailer = new FakeParticipantLinkMailer();
+
+        var result = await world.SendAsync(exercise, staff, mailer);
+
+        result.Outcome.Should().Be(LinkEmailOutcome.Ok);
+        var message = mailer.Messages.Should().ContainSingle("the email is real, so the absence below is meaningful").Subject;
+        if (expected is null)
+        {
+            message.Subject.Should().Be(
+                LinkEmailComposer.SubjectWithoutExerciseName, "a blank participant name falls back to the generic subject");
+            message.Subject.Should().NotStartWith(
+                LinkEmailComposer.SubjectPrefix, "a blank name must not leave a dangling \"for \" in the subject");
+        }
+        else
+        {
+            message.Subject.Should().Be(LinkEmailComposer.SubjectPrefix + expected, "a padded name is trimmed");
+        }
+
+        message.Subject.Should().NotEndWith(" ", "no blank-name artifact trails the subject");
+        message.Subject.Should().NotContain(sentinel);
+        message.HtmlBody.Should().NotContain(sentinel);
+        message.PlainTextBody.Should().NotContain(sentinel);
+    }
+
+    /// <summary>
     /// The email-template inventory, enumerated so a NEW participant email (A2's invite and reset, PR #665) cannot land
     /// without being added to the leak cases above: every type in the API assembly with a method that produces a message
     /// carrying a <c>Subject</c> (an email template) is listed here.

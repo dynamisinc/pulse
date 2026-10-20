@@ -65,7 +65,6 @@ import {
   faHouse,
   faUser,
 } from '@fortawesome/free-solid-svg-icons'
-import { useOptionalExerciseContext } from '@/core/exerciseContext'
 import type { Persona } from '@/features/personas'
 import { formatUnreadBadge, notificationsLinkName } from '../notifications/unreadBadge'
 import { useNotificationsSummary } from '../notifications/useNotifications'
@@ -125,9 +124,6 @@ export function NavRail({
   const { location } = useSocialNavigation()
   const handleLinkClick = useSocialLinkClick()
   const { available: notificationsAvailable, unread } = useNotificationsSummary()
-  // The PARTICIPANT-facing exercise name (story 09). Null/absent -> brand-only: no placeholder
-  // and never the internal name (the scope carries no fallback).
-  const exerciseName = useOptionalExerciseContext()?.exerciseName ?? null
   const current = soleSegment(location.pathname)
 
   const items: NavItemSpec[] = [
@@ -172,12 +168,6 @@ export function NavRail({
             <PulseLogo size={32} />
           </a>
         </ParticipantTooltip>
-
-        {exerciseName && (
-          <p className={styles.exerciseName} data-testid="nav-rail-exercise-name">
-            {exerciseName}
-          </p>
-        )}
 
         <ul className={styles.list}>
           {items.map(item => {

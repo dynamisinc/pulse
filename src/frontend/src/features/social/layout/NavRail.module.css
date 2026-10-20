@@ -68,20 +68,6 @@
   color: var(--pc-accent);
 }
 
-/*
- * The participant-facing exercise name under the logo (story 09). Icon rail: visually hidden but
- * kept in the accessibility tree; wide rail: visible, wrapping (never clipped).
- */
-.exerciseName {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  margin: -1px;
-  overflow: hidden;
-  clip-path: inset(50%);
-  white-space: nowrap;
-}
-
 .logo:hover {
   background: var(--pc-hover);
 }
@@ -231,22 +217,6 @@
 
   .logo {
     align-self: flex-start;
-  }
-
-  .exerciseName {
-    position: static;
-    width: auto;
-    height: auto;
-    margin: 0 0 4px;
-    padding: 0 16px;
-    clip-path: none;
-    overflow: visible;
-    white-space: normal;
-    overflow-wrap: anywhere;
-    color: var(--pc-ink);
-    font-size: 13px;
-    font-weight: 700;
-    line-height: 1.25;
   }
 
   .list {
