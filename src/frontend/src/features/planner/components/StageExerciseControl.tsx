@@ -40,7 +40,7 @@ import {
 } from '@fortawesome/free-solid-svg-icons'
 import { Box, Stack, Typography } from '@mui/material'
 import { CobraLinkButton, CobraPrimaryButton } from '@/theme/styledComponents'
-import { useExerciseContext } from '@/core/exerciseContext'
+import { useActiveExerciseInternalName } from '@/features/staff/hooks/useActiveExerciseInternalName'
 import { useExerciseLifecycle } from '@/features/controller/lifecycle/useExerciseLifecycle'
 import type { LifecycleState } from '@/features/controller/lifecycle/lifecycleService'
 import { READINESS_QUERY_KEY, useReadiness } from '../hooks/useReadiness'
@@ -64,7 +64,8 @@ export function StageExerciseControl() {
   const lifecycle = useExerciseLifecycle()
   const readiness = useReadiness()
   const queryClient = useQueryClient()
-  const { exerciseName } = useExerciseContext()
+  // Staff world: the INTERNAL name (story 09), never the participant-facing scope name.
+  const exerciseName = useActiveExerciseInternalName()
   const [open, setOpen] = useState(false)
   const [announcement, setAnnouncement] = useState('')
   const [focusGroupOnClose, setFocusGroupOnClose] = useState(false)

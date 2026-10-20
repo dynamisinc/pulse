@@ -43,6 +43,25 @@ vi.mock('@/core/exerciseContext', () => ({
 
 vi.mock('@/core/auth', () => ({ endSession: vi.fn() }))
 
+// The badge name is the INTERNAL name from the staff assignments (story 09), not the scope's.
+vi.mock('@/features/staff/services/staffAssignmentsService', async importOriginal => {
+  const actual =
+    await importOriginal<typeof import('@/features/staff/services/staffAssignmentsService')>()
+  return {
+    ...actual,
+    getStaffAssignments: () =>
+      Promise.resolve([
+        {
+          exerciseId: 'ex-test-staff-header-tablet',
+          exerciseName: 'Bay Shield 2026',
+          role: 'controller',
+          personId: 'p-1',
+          isLead: false,
+        },
+      ]),
+  }
+})
+
 const ROSTER: readonly StaffPresenceMember[] = [
   { id: 'a', initials: 'AB', label: 'Test member A', color: '#276749' },
   { id: 'b', initials: 'CD', label: 'Test member B', color: '#5b3f86' },
@@ -83,11 +102,11 @@ const PAUSED: StatePillConfig = {
 }
 
 describe.each([768, 820, 1024, 1180])('StaffHeader at %ipx (tablet)', width => {
-  it('keeps identity, scenario clock, state pill (dot + text) and the classification tag in the row', () => {
+  it('keeps identity, scenario clock, state pill (dot + text) and the classification tag in the row', async () => {
     renderHeader(width, { stateOverride: PAUSED })
     const header = screen.getByTestId('staff-header')
     expect(within(header).getByTestId('staff-header-identity-badge')).toBeInTheDocument()
-    expect(within(header).getByText('Bay Shield 2026')).toBeInTheDocument()
+    expect(await within(header).findByText('Bay Shield 2026')).toBeInTheDocument()
     expect(within(header).getByTestId('staff-header-scenario-clock')).toBeInTheDocument()
     const pill = within(header).getByTestId('staff-header-state-pill')
     expect(within(pill).getByTestId('staff-header-state-pill-dot')).toBeInTheDocument()

@@ -193,7 +193,7 @@ function isCardsBody(value: unknown): value is RosterCardsDto {
   if (typeof value !== 'object' || value === null) return false
   const body = value as Record<string, unknown>
   return (
-    typeof body.exerciseName === 'string' &&
+    (body.exerciseName === null || typeof body.exerciseName === 'string') &&
     Array.isArray(body.cards) &&
     body.cards.every(isCardBody) &&
     Array.isArray(body.skipped) &&
