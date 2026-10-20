@@ -16,10 +16,12 @@ using Pulse.Core.Features.Autonomy.Models;
 using Pulse.Core.Features.Autonomy.Services;
 using Pulse.Core.Features.Generation.Models;
 using Pulse.Core.Features.Generation.Services;
+using Pulse.Core.Features.ReactionLoop.Models;
 using Pulse.Core.Features.Storylines.Models;
 using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Extensions;
 using Pulse.WebApi.Features.EngineRuntime;
+using Pulse.WebApi.Features.EngineRuntime.Addressing;
 using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.EngineRuntime.Steering;
 using Pulse.WebApi.Features.EngineRuntime.Telemetry;
@@ -178,6 +180,84 @@ public sealed class ReactionLoopEnginePauseTests
         second.ScenarioMinute.Should().Be(35, "scenario time keeps moving under the Engine tier");
         storyline.MinutesSinceLastOfficialResponse.Should().Be(35, "the officials' silence still accrues in real scenario time");
         storyline.Phase.Should().Be(StorylinePhase.Escalating, "the world keeps living: the window still opened");
+    }
+
+    [Fact]
+    public async Task Tick_WhileEnginePaused_AnOfficialPostStillAddressesItsStoryline_ButNoReplyIsGenerated()
+    {
+        var exerciseId = Guid.NewGuid();
+        var manualTime = new ManualTimeProvider(ScenarioStart);
+        var provider = new CountingGenerationProvider();
+
+        await using var host = BuildHost(manualTime, provider);
+        host.GetRequiredService<IExerciseClock>().Start(exerciseId, ScenarioStart, TimeZoneInfo.Utc);
+        host.GetRequiredService<PauseTierRegistry>().Restore(exerciseId, PauseTier.Engine);
+        manualTime.Advance(TimeSpan.FromMinutes(25)); // past the 20-minute window
+
+        var cast = Cast("@rosa", "@marcus", "@lena");
+        var storyline = SeededStoryline(exerciseId, "Water main contamination fears", cast.Keys.ToList());
+        var registration = Registration(exerciseId, [storyline], cast);
+        registration.ResponseMatching.EnableAutoConfirm(); // so a plausible answer resolves straight to a match
+
+        host.GetRequiredService<IAddressingInbox>().Enqueue(
+            exerciseId,
+            new AddressingObservation(
+                AddressingSource.OfficialPost,
+                Guid.NewGuid().ToString(),
+                "County update on #WaterIssues: do not drink tap water until further notice."));
+
+        var result = await RunOneTickAsync(host, registration);
+
+        storyline.Phase.Should().Be(StorylinePhase.Addressed, "the participant's answer is a world event, and the world keeps living");
+        storyline.MinutesSinceLastOfficialResponse.Should().Be(0, "the answer resets the silence clock even while the engine is held");
+        provider.Calls.Should().Be(0, "the response reply burst is new engine content, so it is not generated");
+        result.ReviewItemsEnqueued.Should().Be(0);
+        (await ReviewItemCountAsync(host, exerciseId)).Should().Be(0, "no reply draft reaches the review queue");
+        (await EventCountsAsync(host, exerciseId)).GetValueOrDefault(EngineEventTypes.Generated).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task Tick_WhileEnginePaused_WithTheCadenceGateDisabled_StillRaisesNoTrigger()
+    {
+        var exerciseId = Guid.NewGuid();
+        var manualTime = new ManualTimeProvider(ScenarioStart);
+        var provider = new CountingGenerationProvider();
+
+        await using var host = BuildHost(manualTime, provider);
+        host.GetRequiredService<IExerciseClock>().Start(exerciseId, ScenarioStart, TimeZoneInfo.Utc);
+        host.GetRequiredService<PauseTierRegistry>().Restore(exerciseId, PauseTier.Engine);
+        manualTime.Advance(TimeSpan.FromMinutes(25));
+
+        var cast = Cast("@rosa", "@marcus", "@lena");
+        var storyline = SeededStoryline(exerciseId, "Water main contamination fears", cast.Keys.ToList());
+        var registration = new ReactionLoopRegistration
+        {
+            ExerciseId = exerciseId,
+            ExerciseBrief = "A fictional water-utility incident in the town of Cedar Falls.",
+            TimeZone = "America/Chicago",
+            ScenarioStart = ScenarioStart,
+            TimeZoneInfo = TimeZoneInfo.Utc,
+            Storylines = [storyline],
+            PersonasByHandle = cast,
+            Autonomy = EngineAutonomyState.Create(exerciseId, AutonomyLevel.Suggest),
+            ControllerDeskId = Guid.NewGuid(),
+
+            // Cadence 0 disables the observe-stage gate, so the re-based marker cannot suppress the trigger: only the
+            // held tick's explicit drop does.
+            RateConfig = RateGovernanceConfig.Default with { MinMinutesBetweenInactionReactions = 0 },
+        };
+
+        var first = await RunOneTickAsync(host, registration);
+        manualTime.Advance(TimeSpan.FromMinutes(1));
+        var second = await RunOneTickAsync(host, registration);
+
+        first.InactionTriggers.Should().Be(0, "a held tick raises no trigger even with the cadence gate off");
+        second.InactionTriggers.Should().Be(0);
+        (first.ReviewItemsEnqueued + second.ReviewItemsEnqueued).Should().Be(0);
+        provider.Calls.Should().Be(0);
+        var counts = await EventCountsAsync(host, exerciseId);
+        counts.GetValueOrDefault(EngineEventTypes.Observed).Should().Be(0);
+        counts.GetValueOrDefault(EngineEventTypes.Generated).Should().Be(0);
     }
 
     [Fact]

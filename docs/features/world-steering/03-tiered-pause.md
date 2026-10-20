@@ -78,6 +78,10 @@ stops only on Freeze**. Break Fiction (story 04) implies world-freeze.
       the tier is `engine`, `ReactionLoopDriver.RunTickAsync` raises no new storyline work (no trigger, no
       provider call, no `engine.generated`, no review item). MEASURE and the scenario clock keep running,
       and each storyline's reaction cadence is re-based while held, so resuming produces no catch-up burst.
+      As a result, a storyline that never reacted, or whose silence window opened during the pause, waits
+      one cadence after resume before its first draft. An official post made during the pause still
+      addresses its storyline (silence clock reset, phase Addressed), but the engine's reply burst is
+      dropped, not deferred to resume.
       Ambient chatter was already held by its publish gate. Already-queued drafts can still be approved,
       and the console's kill-switch call is unchanged. Tests: `ReactionLoopEnginePauseTests`.)*
 - [x] `usePauseState()` exposes the active tier as INJECTS PAUSED / ENGINE PAUSED / WORLD FROZEN /

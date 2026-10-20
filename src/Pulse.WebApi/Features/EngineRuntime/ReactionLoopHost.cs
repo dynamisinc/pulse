@@ -357,6 +357,7 @@ public sealed partial class ReactionLoopDriver
     private readonly TimeProvider _timeProvider;
     private readonly EngineTierPolicyRegistry _tierPolicy;
     private readonly IAddressingInbox _addressingInbox;
+    private readonly PauseTierRegistry _pauseTiers;
     private readonly ILogger<ReactionLoopDriver> _logger;
 
     // The decide-stage policies for the two trigger kinds this loop raises. The matched-response reaction
@@ -381,6 +382,10 @@ public sealed partial class ReactionLoopDriver
     /// <param name="timeProvider">The server wall-clock source for the telemetry envelope (never client input).</param>
     /// <param name="tierPolicy">The per-exercise model-tier-policy override a controller may set at runtime (story 05).</param>
     /// <param name="addressingInbox">The official posts participants made since the last tick (engine-runtime/06).</param>
+    /// <param name="pauseTiers">
+    /// The per-exercise pause tier (CTL-023): ENGINE PAUSED holds new storyline work. Required, so a host composed
+    /// without <c>AddPauseTierSteering()</c> fails at resolution instead of silently reading every exercise as Running.
+    /// </param>
     /// <param name="logger">Records how each official post resolved (matched / needs confirmation / unmatched).</param>
     public ReactionLoopDriver(
         GenerateStage generateStage,
@@ -390,6 +395,7 @@ public sealed partial class ReactionLoopDriver
         TimeProvider timeProvider,
         EngineTierPolicyRegistry tierPolicy,
         IAddressingInbox addressingInbox,
+        PauseTierRegistry pauseTiers,
         ILogger<ReactionLoopDriver> logger)
     {
         ArgumentNullException.ThrowIfNull(generateStage);
@@ -399,6 +405,7 @@ public sealed partial class ReactionLoopDriver
         ArgumentNullException.ThrowIfNull(timeProvider);
         ArgumentNullException.ThrowIfNull(tierPolicy);
         ArgumentNullException.ThrowIfNull(addressingInbox);
+        ArgumentNullException.ThrowIfNull(pauseTiers);
         ArgumentNullException.ThrowIfNull(logger);
 
         _generateStage = generateStage;
@@ -408,6 +415,7 @@ public sealed partial class ReactionLoopDriver
         _timeProvider = timeProvider;
         _tierPolicy = tierPolicy;
         _addressingInbox = addressingInbox;
+        _pauseTiers = pauseTiers;
         _logger = logger;
     }
 
@@ -472,7 +480,7 @@ public sealed partial class ReactionLoopDriver
         //     The cadence is re-based every held tick (HoldReactionCadence) so resuming does not fire one late,
         //     "long silence" burst per storyline on the first tick. Freeze is skipped whole by the host; it is
         //     listed here only as defense in depth, the same pair the ambient publish gate closes on.
-        var engineHeld = IsEngineHeld(scopedServices, registration.ExerciseId);
+        var engineHeld = IsEngineHeld(registration.ExerciseId);
         if (engineHeld)
         {
             HoldReactionCadence(registration.Storylines, scenarioMinute);
@@ -658,12 +666,11 @@ public sealed partial class ReactionLoopDriver
     /// <summary>
     /// Whether exercise <paramref name="exerciseId"/>'s pause tier holds new engine content: <see cref="PauseTier.Engine"/>
     /// (or <see cref="PauseTier.Freeze"/>, which the host already skips whole). Read from the singleton
-    /// <see cref="PauseTierRegistry"/> through the tick's scope, keyed by the tick's own server-derived exercise
-    /// (COR-001), exactly as <see cref="InterimEngineLifecyclePublishGate"/> reads it. When no registry is registered
-    /// (a host composed without <c>AddPauseTierSteering</c>), no tier can ever have been set, so the exercise is Running.
+    /// <see cref="PauseTierRegistry"/> (constructor-injected, the SAME instance the pause-tier endpoint writes), keyed by
+    /// the tick's own server-derived exercise (COR-001), exactly as <see cref="InterimEngineLifecyclePublishGate"/> reads it.
     /// </summary>
-    private static bool IsEngineHeld(IServiceProvider scopedServices, Guid exerciseId) =>
-        scopedServices.GetService<PauseTierRegistry>()?.GetTier(exerciseId) is PauseTier.Engine or PauseTier.Freeze;
+    private bool IsEngineHeld(Guid exerciseId) =>
+        _pauseTiers.GetTier(exerciseId) is PauseTier.Engine or PauseTier.Freeze;
 
     /// <summary>
     /// Re-bases the reaction cadence (ADP-011) of every storyline that could raise an inaction trigger — unaddressed and

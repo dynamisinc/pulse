@@ -8,6 +8,7 @@ using Microsoft.Extensions.Hosting;
 using Pulse.Core.Core.Extensions;
 using Pulse.WebApi.Data.Extensions;
 using Pulse.WebApi.Features.EngineRuntime;
+using Pulse.WebApi.Features.EngineRuntime.Steering;
 using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.EngineRuntime.Publishing;
 using Xunit;
@@ -31,6 +32,8 @@ public sealed class ReactionLoopHostDiTests
         services.AddEngineRuntimeSeams();
 
         services.AddReactionLoopHost();
+
+        services.AddPauseTierSteering(); // the PauseTierRegistry the driver requires (CTL-023)
 
         return services.BuildServiceProvider();
     }
