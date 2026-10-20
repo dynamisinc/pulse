@@ -19,6 +19,19 @@ public interface IExerciseClockChangeSink
 }
 
 /// <summary>
+/// Told, like <see cref="IExerciseClockChangeSink"/>, that an exercise's clock anchor changed — but any number may be
+/// registered (the sink is a single slot the persistence slice owns). Background services that sleep while no exercise
+/// clock is running register one, so a clock that starts or unfreezes wakes them (idle-db-autopause). Same contract:
+/// never block, never throw.
+/// </summary>
+public interface IExerciseClockChangeListener
+{
+    /// <summary>Told that exercise <paramref name="exerciseId"/>'s clock anchor changed.</summary>
+    /// <param name="exerciseId">The exercise whose clock changed.</param>
+    void ClockChanged(Guid exerciseId);
+}
+
+/// <summary>
 /// The default <see cref="IExerciseClockChangeSink"/>: does nothing. Registered with <c>TryAddSingleton</c> by
 /// <see cref="ExerciseClockServiceCollectionExtensions.AddExerciseClock"/>, and replaced by
 /// <c>AddExerciseRuntimePersistence()</c> (story 18) with the queue that writes the anchor through.

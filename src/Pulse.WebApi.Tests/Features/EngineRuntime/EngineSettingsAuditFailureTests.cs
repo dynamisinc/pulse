@@ -139,7 +139,7 @@ public sealed class EngineSettingsAuditFailureTests
             Logger = new CapturingLogger();
 
             Service = new EngineReviewService(
-                new EngineReviewStore(_db),
+                new EngineReviewStore(_db, new EngineReviewTickSignal()),
                 _db,
                 context,
                 clock,

@@ -31,17 +31,19 @@ using Pulse.WebApi.Features.EngineRuntime.Steering;
 /// </para>
 /// <para>
 /// <b>Cadence (L6).</b> One tick every <see cref="InjectBurstRunnerOptions.ActiveInterval"/> (1 s) while anything is
-/// firing — at most one post per burst per tick keeps the feed legible (SOC-071) — and every
-/// <see cref="InjectBurstRunnerOptions.IdleInterval"/> (5 s) otherwise. A controller action that starts or resumes a
-/// burst wakes the runner through <see cref="InjectRunnerSignal"/>, so the idle sleep never delays a burst's second
-/// post (its first goes out inline in the Fire request).
+/// firing — at most one post per burst per tick keeps the feed legible (SOC-071). While nothing is firing the runner
+/// SLEEPS (<see cref="InjectBurstRunnerOptions.IdleSleep"/>, indefinitely by default) instead of polling: every path
+/// that makes an item firing (Fire, Retry, Release) wakes it through <see cref="InjectRunnerSignal"/> after commit, so
+/// the sleep never delays a burst's second post (its first goes out inline in the Fire request). Polling while idle kept
+/// the serverless database from ever auto-pausing.
 /// </para>
 /// <para>
 /// <b>No database work while the host starts.</b> The loop WAITS before it sweeps: the first sweep runs one
 /// <see cref="InjectBurstRunnerOptions.IdleInterval"/> after start (or at the first wake-up), never inside start-up. A
 /// sweep at the instant the host came up competed with whatever else was starting — in the test suite, the SignalR hub
 /// tests' own connection, against an unreachable placeholder database — and bought nothing: a restart resumes firing
-/// bursts within the idle interval, at their original spacing (the lateness rule).
+/// bursts within the idle interval, at their original spacing (the lateness rule). This first sweep is also what
+/// picks up items left firing by a restart, since nothing wakes the runner for them.
 /// </para>
 /// <para>
 /// <b>A failing sweep backs off.</b> While the database is unreachable each failed sweep doubles the wait, from the idle
@@ -161,7 +163,7 @@ public sealed partial class InjectBurstRunner : BackgroundService
 
     /// <summary>
     /// The wait before the next sweep: <see cref="InjectBurstRunnerOptions.ActiveInterval"/> while anything is firing,
-    /// <see cref="InjectBurstRunnerOptions.IdleInterval"/> otherwise — and after <paramref name="consecutiveFailures"/>
+    /// <see cref="InjectBurstRunnerOptions.IdleSleep"/> (until woken) otherwise — and after <paramref name="consecutiveFailures"/>
     /// failed sweeps in a row, the idle interval doubled per further failure (idle, 2x, 4x, ...), never less than the
     /// idle interval and never more than <see cref="InjectBurstRunnerOptions.MaxFailureBackoff"/>.
     /// </summary>
@@ -175,7 +177,7 @@ public sealed partial class InjectBurstRunner : BackgroundService
 
         if (consecutiveFailures <= 0)
         {
-            return firing > 0 ? options.ActiveInterval : options.IdleInterval;
+            return firing > 0 ? options.ActiveInterval : options.IdleSleep;
         }
 
         var idle = options.IdleInterval;
@@ -309,10 +311,17 @@ public sealed class InjectBurstRunnerOptions
     public TimeSpan ActiveInterval { get; init; } = TimeSpan.FromSeconds(1);
 
     /// <summary>
-    /// Tick period while nothing is firing — and the wait before the FIRST sweep after start-up; a wake-up cuts it
+    /// The wait before the FIRST sweep after start-up, and the base the failure backoff doubles from; a wake-up cuts it
     /// short. Default 5 s.
     /// </summary>
     public TimeSpan IdleInterval { get; init; } = TimeSpan.FromSeconds(5);
+
+    /// <summary>
+    /// The wait after a sweep that found nothing firing; a wake-up cuts it short. Default
+    /// <see cref="Timeout.InfiniteTimeSpan"/>: an idle runner does no database work until a Fire, Retry or Release
+    /// wakes it, so the database can auto-pause between exercises.
+    /// </summary>
+    public TimeSpan IdleSleep { get; init; } = Timeout.InfiniteTimeSpan;
 
     /// <summary>
     /// The longest wait between sweeps while sweeps keep failing (the wait doubles from <see cref="IdleInterval"/> per
