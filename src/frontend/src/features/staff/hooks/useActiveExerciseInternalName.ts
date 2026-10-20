@@ -50,7 +50,9 @@ export function useActiveExerciseInternalName(): string | null {
     setKept({ exerciseId, name: resolved })
   }
   if (resolved !== null) return resolved
-  // A successful read without this exercise is authoritative: do not keep a stale name.
-  if (query.isSuccess) return null
+  // Any data present came from a successful read (no placeholder/initial data), and a read
+  // without this exercise is authoritative, even if a LATER refetch failed (React Query keeps
+  // the previous data on error). The kept name only bridges the no-data gap after a reset.
+  if (query.data !== undefined) return null
   return kept !== null && sameExercise(kept.exerciseId, exerciseId) ? kept.name : null
 }

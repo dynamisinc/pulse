@@ -72,4 +72,19 @@ describe('useActiveExerciseInternalName', () => {
     rerender()
     expect(result.current).toBeNull()
   })
+
+  it('stays null when a refetch FAILS after a read that dropped the exercise (error keeps old data)', () => {
+    assignments.data = [enrollment('ex-1', 'Harbor Storm')]
+    assignments.isSuccess = true
+    const { result, rerender } = renderHook(() => useActiveExerciseInternalName())
+    expect(result.current).toBe('Harbor Storm')
+
+    assignments.data = [enrollment('ex-2', 'Other')]
+    rerender()
+    expect(result.current).toBeNull()
+
+    assignments.isSuccess = false // status 'error', previous data retained
+    rerender()
+    expect(result.current).toBeNull()
+  })
 })
