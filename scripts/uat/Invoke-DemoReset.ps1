@@ -74,6 +74,10 @@
 .PARAMETER AutoConfirmResponses
     Passed to Reset-DemoState.ps1 (step 2): demo beat 4's setting.
 
+.PARAMETER AllowLiveProvider
+    Passed to Test-DemoReady.ps1 (step 5): its check 4 then accepts a live generation provider (AzureOpenAI), for a
+    demo that runs the live AI on purpose instead of DF-38's Fake provider.
+
 .PARAMETER ReloadFiredRunSheet
     Passed to Seed-DemoContent.ps1 (step 4): after a rehearsal that fired the run sheet (README-seed.md).
 
@@ -94,6 +98,9 @@
 
 .EXAMPLE
     pwsh scripts/uat/Invoke-DemoReset.ps1 -AutoConfirmResponses -ReloadFiredRunSheet     # after a rehearsal
+
+.EXAMPLE
+    pwsh scripts/uat/Invoke-DemoReset.ps1 -AutoConfirmResponses -AllowLiveProvider      # the demo runs the live AI
 #>
 [CmdletBinding()]
 param(
@@ -104,6 +111,7 @@ param(
     [string] $ExerciseId,
     [switch] $AutoConfirmResponses,
     [switch] $ReloadFiredRunSheet,
+    [switch] $AllowLiveProvider,
     [ValidateRange(1, 120)] [int] $RestartTimeoutMinutes = 15,
     [ValidateRange(1, 600)] [int] $PollSeconds = 20,
     [string] $LogDirectory = (Join-Path $PSScriptRoot 'logs'),
@@ -510,8 +518,8 @@ function Get-DemoResetPlan {
     <# The steps after step 1: name, script and arguments. -WhatIf swaps in each script's own preview. #>
     param(
         [string] $ApiHost, [string] $SiteUrl, [string] $StaffUsername, [string] $ExerciseId, [switch] $AutoConfirmResponses,
-        [switch] $ReloadFiredRunSheet, [switch] $WhatIf, [string] $Subscription, [string] $ResourceGroup, [string] $WebAppName,
-        [string] $ReadyJsonPath
+        [switch] $ReloadFiredRunSheet, [switch] $AllowLiveProvider, [switch] $WhatIf, [string] $Subscription, [string] $ResourceGroup,
+        [string] $WebAppName, [string] $ReadyJsonPath
     )
     $resetArguments = @{ ApiHost = $ApiHost; SiteUrl = $SiteUrl; Subscription = $Subscription; ResourceGroup = $ResourceGroup; WebAppName = $WebAppName }
     if ($WhatIf) { $resetArguments['CheckOnly'] = $true }
@@ -526,6 +534,7 @@ function Get-DemoResetPlan {
 
     $readyArguments = @{ ApiHost = $ApiHost; SiteUrl = $SiteUrl; StaffUsername = $StaffUsername; Subscription = $Subscription; ResourceGroup = $ResourceGroup; WebAppName = $WebAppName; Json = $true; JsonPath = $ReadyJsonPath }
     if ($ExerciseId) { $readyArguments['ExerciseId'] = $ExerciseId }
+    if ($AllowLiveProvider) { $readyArguments['AllowLiveProvider'] = $true }
 
     @(
         [pscustomobject]@{ Number = 2; Name = 'Engine re-seed'; Script = 'Reset-DemoState.ps1'; Arguments = $resetArguments; Run = $true }
@@ -546,6 +555,7 @@ function Invoke-DemoReset {
         [string] $ExerciseId,
         [switch] $AutoConfirmResponses,
         [switch] $ReloadFiredRunSheet,
+        [switch] $AllowLiveProvider,
         [int] $RestartTimeoutMinutes = 15,
         [int] $PollSeconds = 20,
         [Parameter(Mandatory)] [string] $LogDirectory,
@@ -573,7 +583,8 @@ function Invoke-DemoReset {
 
         $planArguments = @{
             ApiHost = $ApiHost; SiteUrl = $SiteUrl; StaffUsername = $StaffUsername; ExerciseId = $ExerciseId
-            AutoConfirmResponses = $AutoConfirmResponses; ReloadFiredRunSheet = $ReloadFiredRunSheet; WhatIf = $WhatIf
+            AutoConfirmResponses = $AutoConfirmResponses; ReloadFiredRunSheet = $ReloadFiredRunSheet
+            AllowLiveProvider = $AllowLiveProvider; WhatIf = $WhatIf
             Subscription = $Subscription; ResourceGroup = $ResourceGroup; WebAppName = $WebAppName; ReadyJsonPath = $readyJson
         }
         $plan = @(Get-DemoResetPlan @planArguments)
@@ -655,7 +666,7 @@ if ($MyInvocation.InvocationName -eq '.') { return }
 
 $runArguments = @{
     WhatIf = $WhatIf; ApiHost = $ApiHost; SiteUrl = $SiteUrl; StaffUsername = $StaffUsername; ExerciseId = $ExerciseId
-    AutoConfirmResponses = $AutoConfirmResponses; ReloadFiredRunSheet = $ReloadFiredRunSheet
+    AutoConfirmResponses = $AutoConfirmResponses; ReloadFiredRunSheet = $ReloadFiredRunSheet; AllowLiveProvider = $AllowLiveProvider
     RestartTimeoutMinutes = $RestartTimeoutMinutes; PollSeconds = $PollSeconds; LogDirectory = $LogDirectory
     Subscription = $Subscription; ResourceGroup = $ResourceGroup; WebAppName = $WebAppName
 }
