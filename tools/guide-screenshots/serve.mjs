@@ -8,9 +8,10 @@
  * The one difference from `npm run dev`: a tiny in-memory Vite plugin lets the
  * browser override three MOCK seams through localStorage (see
  * MOCK_SEAM_REWRITES below):
- *   - pulse.guideShots.role    the mock session's role. In plain mock mode the
- *                              session is always the participant Dana Reyes and
- *                              staff sign-in has no mock, so staff consoles are
+ *   - pulse.guideShots.role    the mock session's role (and, derived from it,
+ *                              its world). In plain mock mode the session is
+ *                              always the participant Dana Reyes and staff
+ *                              sign-in has no mock, so staff consoles are
  *                              otherwise unreachable.
  *   - pulse.guideShots.alerts  JSON alert list for the participant alert bar
  *                              (the stock mock has none).
@@ -52,6 +53,18 @@ const MOCK_SEAM_REWRITES = [
     key: ROLE_STORAGE_KEY,
   },
   {
+    // Mock session world must follow the overridden role: the resolver rejects a world that
+    // contradicts the role, so a controller left in the participant world lands on /login.
+    // Mirrors the resolver's `worldForRole` (participant/pio -> participant, else staff). It is
+    // inlined: calling `worldForRole` here runs at module init, before roles.ts (a circular
+    // import) has initialized PARTICIPANT_ROLES.
+    file: 'src/core/auth/sessionResolver.ts',
+    find: "world: 'participant',",
+    replace: k => `world: ((r => r === 'participant' || r === 'pio' ? 'participant' : 'staff')` +
+      `(${readOverride(k, false)} ?? 'participant')) as SessionWorld,`,
+    key: ROLE_STORAGE_KEY,
+  },
+  {
     // Alert-bar content: a JSON array of { id, severity, message, scenarioTime }
     file: 'src/features/participant-shell/components/AlertBar/useAlerts.ts',
     find: 'const MOCK_ALERTS: readonly Alert[] = []',
@@ -82,15 +95,17 @@ function mockSeamOverridePlugin() {
     enforce: 'pre',
     transform(code, id) {
       const file = id.split('?')[0].replaceAll('\\', '/')
-      const rewrite = MOCK_SEAM_REWRITES.find(r => file.endsWith(r.file))
-      if (!rewrite) return null
-      if (!code.includes(rewrite.find)) {
-        throw new Error(
-          `[guide-shots] could not find "${rewrite.find}" in ${rewrite.file}; ` +
-          'the mock seam changed — update MOCK_SEAM_REWRITES in serve.mjs.',
-        )
-      }
-      return code.replace(rewrite.find, rewrite.replace(rewrite.key))
+      const rewrites = MOCK_SEAM_REWRITES.filter(r => file.endsWith(r.file))
+      if (rewrites.length === 0) return null
+      return rewrites.reduce((out, rewrite) => {
+        if (!out.includes(rewrite.find)) {
+          throw new Error(
+            `[guide-shots] could not find "${rewrite.find}" in ${rewrite.file}; ` +
+            'the mock seam changed — update MOCK_SEAM_REWRITES in serve.mjs.',
+          )
+        }
+        return out.replace(rewrite.find, rewrite.replace(rewrite.key))
+      }, code)
     },
   }
 }
