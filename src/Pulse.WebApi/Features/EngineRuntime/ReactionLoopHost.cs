@@ -25,6 +25,7 @@ using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.EngineRuntime.Addressing;
 using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.EngineRuntime.Review;
+using Pulse.WebApi.Features.EngineRuntime.Steering;
 using Pulse.WebApi.Features.EngineRuntime.Telemetry;
 
 /// <summary>
@@ -43,6 +44,12 @@ using Pulse.WebApi.Features.EngineRuntime.Telemetry;
 /// that exercise (this host skips the tick entirely, so no observe/generate runs and no silence accrues), and
 /// a <b>time-jump</b> leaps the scenario minute so the next tick's storyline advancement blows the windows the
 /// skip carried past and surfaces them.
+/// </para>
+/// <para>
+/// <b>Engine paused (CTL-023, world-steering/03 + 07).</b> The <see cref="Steering.PauseTier.Engine"/> tier does NOT
+/// skip the tick: the clock keeps running and MEASURE still advances the storylines, so no elapsed time is caught up
+/// in one jump on resume. <see cref="ReactionLoopDriver"/> reads the tier each tick and raises no new storyline work
+/// (no trigger, no provider call, no <c>engine.generated</c>, no review item) while it holds.
 /// </para>
 /// <para>
 /// <b>Registration seam.</b> The host iterates <see cref="IReactionLoopRegistry"/> — the in-memory set of
@@ -350,6 +357,7 @@ public sealed partial class ReactionLoopDriver
     private readonly TimeProvider _timeProvider;
     private readonly EngineTierPolicyRegistry _tierPolicy;
     private readonly IAddressingInbox _addressingInbox;
+    private readonly PauseTierRegistry _pauseTiers;
     private readonly ILogger<ReactionLoopDriver> _logger;
 
     // The decide-stage policies for the two trigger kinds this loop raises. The matched-response reaction
@@ -374,6 +382,10 @@ public sealed partial class ReactionLoopDriver
     /// <param name="timeProvider">The server wall-clock source for the telemetry envelope (never client input).</param>
     /// <param name="tierPolicy">The per-exercise model-tier-policy override a controller may set at runtime (story 05).</param>
     /// <param name="addressingInbox">The official posts participants made since the last tick (engine-runtime/06).</param>
+    /// <param name="pauseTiers">
+    /// The per-exercise pause tier (CTL-023): ENGINE PAUSED holds new storyline work. Required, so a host composed
+    /// without <c>AddPauseTierSteering()</c> fails at resolution instead of silently reading every exercise as Running.
+    /// </param>
     /// <param name="logger">Records how each official post resolved (matched / needs confirmation / unmatched).</param>
     public ReactionLoopDriver(
         GenerateStage generateStage,
@@ -383,6 +395,7 @@ public sealed partial class ReactionLoopDriver
         TimeProvider timeProvider,
         EngineTierPolicyRegistry tierPolicy,
         IAddressingInbox addressingInbox,
+        PauseTierRegistry pauseTiers,
         ILogger<ReactionLoopDriver> logger)
     {
         ArgumentNullException.ThrowIfNull(generateStage);
@@ -392,6 +405,7 @@ public sealed partial class ReactionLoopDriver
         ArgumentNullException.ThrowIfNull(timeProvider);
         ArgumentNullException.ThrowIfNull(tierPolicy);
         ArgumentNullException.ThrowIfNull(addressingInbox);
+        ArgumentNullException.ThrowIfNull(pauseTiers);
         ArgumentNullException.ThrowIfNull(logger);
 
         _generateStage = generateStage;
@@ -401,6 +415,7 @@ public sealed partial class ReactionLoopDriver
         _timeProvider = timeProvider;
         _tierPolicy = tierPolicy;
         _addressingInbox = addressingInbox;
+        _pauseTiers = pauseTiers;
         _logger = logger;
     }
 
@@ -456,6 +471,21 @@ public sealed partial class ReactionLoopDriver
             pendingEvents.AddRange(measured.TelemetryEvents);
         }
 
+        // 1b. ENGINE PAUSED (CTL-023 tier 2, world-steering/03 + 07) — "new engine content halts; injects + world
+        //     continue". While the exercise's tier is Engine the loop raises NO new storyline work: no inaction
+        //     trigger, no decide, no provider call, no engine.generated, no review item. MEASURE above still ran and
+        //     the scenario clock keeps going (the tier never freezes it), so silence accrues in real scenario time
+        //     and nothing is caught up in one jump on resume. Official posts are still drained and resolved below:
+        //     the participants' answers are world events that did happen, so they still address a storyline now.
+        //     The cadence is re-based every held tick (HoldReactionCadence) so resuming does not fire one late,
+        //     "long silence" burst per storyline on the first tick. Freeze is skipped whole by the host; it is
+        //     listed here only as defense in depth, the same pair the ambient publish gate closes on.
+        var engineHeld = IsEngineHeld(registration.ExerciseId);
+        if (engineHeld)
+        {
+            HoldReactionCadence(registration.Storylines, scenarioMinute);
+        }
+
         // 2. OBSERVE — the refreshed world for inaction triggers (silence windows elapsed), plus every official
         //    post participants made since the last tick (engine-runtime/06 — until then this was always [], so
         //    no participant post could ever address a storyline). The reaction cadence (ADP-011) suppresses
@@ -468,7 +498,11 @@ public sealed partial class ReactionLoopDriver
             _addressingInbox.Drain(registration.ExerciseId),
             scenarioClock,
             registration.RateConfig.MinMinutesBetweenInactionReactions);
-        foreach (var trigger in observed.InactionTriggers)
+
+        // Held by the Engine tier: drop the inaction triggers outright (the re-based cadence already suppresses them
+        // unless the cadence gate is disabled with 0), so no engine.observed is emitted for work that will not run.
+        IReadOnlyList<InactionTrigger> inactionTriggers = engineHeld ? [] : observed.InactionTriggers;
+        foreach (var trigger in inactionTriggers)
         {
             pendingEvents.Add(BuildObservedEvent(context, trigger));
         }
@@ -504,13 +538,16 @@ public sealed partial class ReactionLoopDriver
         //       never demand more than the budget of controller decisions per scenario minute — one burst = one
         //       decision, counted together with this minute's response-match prompts (recorded above) — subject to
         //       the miss-safe minimum service in PassesDemandGate (prompt demand alone never starves the engine).
+        //       Under the Engine tier the work list stays empty: a response burst is new engine content too, so the
+        //       answer is applied to the storyline above but not voiced.
+        IReadOnlyList<Storyline> voiced = engineHeld ? [] : responses.Voiced;
         var work = new List<(Storyline Storyline, ReactionTriggerKind Kind)>();
-        foreach (var addressed in responses.Voiced)
+        foreach (var addressed in voiced)
         {
             work.Add((addressed, ReactionTriggerKind.OfficialResponse));
         }
 
-        foreach (var trigger in observed.InactionTriggers)
+        foreach (var trigger in inactionTriggers)
         {
             if (responses.IsAnswered(trigger.StorylineId))
             {
@@ -528,6 +565,14 @@ public sealed partial class ReactionLoopDriver
         foreach (var (storyline, kind) in work)
         {
             cancellationToken.ThrowIfCancellationRequested();
+
+            // The tier is re-read per burst, not only once per tick: each burst awaits a provider call, so a controller
+            // can enter ENGINE PAUSED mid-tick. Once it holds, the rest of this tick's work is abandoned; the next tick
+            // is held from the start and re-bases the cadence of everything left undone.
+            if (IsEngineHeld(registration.ExerciseId))
+            {
+                break;
+            }
 
             if (!PassesDemandGate(tickState, storyline, kind, scenarioMinute))
             {
@@ -566,7 +611,16 @@ public sealed partial class ReactionLoopDriver
                 .GenerateAsync(BuildGenerateRequest(registration, storyline, intent, tier), cancellationToken)
                 .ConfigureAwait(false);
 
+            // The engine.generated event is still recorded for a call that was already made: it carries the
+            // provider spend, and dropping it would under-report usage.
             pendingEvents.Add(BuildGeneratedEvent(context, storyline, draftId, generateResult));
+
+            // ENGINE PAUSED arrived while this burst was being generated: discard it rather than enqueue a draft
+            // after the pause took, and stop the remaining work.
+            if (IsEngineHeld(registration.ExerciseId))
+            {
+                break;
+            }
 
             // A guard-failing or diversity-failing burst is dropped here — it never becomes a review item (§8.5).
             if (generateResult.Disposition != GenerateDisposition.Accepted)
@@ -623,7 +677,36 @@ public sealed partial class ReactionLoopDriver
             }
         }
 
-        return new ReactionTickResult(scenarioMinute, observed.InactionTriggers.Count, reviewItems.Count, ambientPublished);
+        return new ReactionTickResult(scenarioMinute, inactionTriggers.Count, reviewItems.Count, ambientPublished);
+    }
+
+    /// <summary>
+    /// Whether exercise <paramref name="exerciseId"/>'s pause tier holds new engine content: <see cref="PauseTier.Engine"/>
+    /// (or <see cref="PauseTier.Freeze"/>, which the host already skips whole). Read from the singleton
+    /// <see cref="PauseTierRegistry"/> (constructor-injected, the SAME instance the pause-tier endpoint writes), keyed by
+    /// the tick's own server-derived exercise (COR-001), exactly as <see cref="InterimEngineLifecyclePublishGate"/> reads it.
+    /// </summary>
+    private bool IsEngineHeld(Guid exerciseId) =>
+        _pauseTiers.GetTier(exerciseId) is PauseTier.Engine or PauseTier.Freeze;
+
+    /// <summary>
+    /// Re-bases the reaction cadence (ADP-011) of every storyline that could raise an inaction trigger — unaddressed and
+    /// silent past its window — to <paramref name="scenarioMinute"/>, on each tick the Engine tier holds the loop. On
+    /// resume the observe stage then sees the cadence as just started, so the storylines re-fire on the normal cadence
+    /// instead of all at once on the first tick. Only the engine's own reaction marker moves:
+    /// <see cref="Storyline.MinutesSinceLastOfficialResponse"/> is untouched, because the officials' silence during the
+    /// pause really happened and keeps shaping intensity and tone.
+    /// </summary>
+    private static void HoldReactionCadence(IReadOnlyList<Storyline> storylines, int scenarioMinute)
+    {
+        foreach (var storyline in storylines)
+        {
+            if (storyline.Phase is StorylinePhase.Seeded or StorylinePhase.Escalating or StorylinePhase.Peak
+                && storyline.MinutesSinceLastOfficialResponse >= storyline.ResponseWindowMin)
+            {
+                storyline.RecordEngineReaction(scenarioMinute);
+            }
+        }
     }
 
     /// <summary>

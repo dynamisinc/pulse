@@ -20,6 +20,7 @@ using Pulse.WebApi.Data;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Data.Extensions;
 using Pulse.WebApi.Features.EngineRuntime;
+using Pulse.WebApi.Features.EngineRuntime.Steering;
 using Pulse.WebApi.Features.EngineRuntime.Clock;
 using Pulse.WebApi.Features.EngineRuntime.Telemetry;
 using Pulse.WebApi.Features.Realtime;
@@ -183,6 +184,7 @@ public sealed class EngineDraftCeilingIntegrationTests
         services.AddExerciseClock();
         services.AddEngineRuntimeSeams();
         services.AddReactionLoopHost();
+        services.AddPauseTierSteering(); // the PauseTierRegistry the driver requires (CTL-023)
         services.AddEngineReview();
 
         // The governed timeout-auto-send flag (PROVIDER-GOVERNANCE §8, Phase 1) — explicit per test.
