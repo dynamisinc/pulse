@@ -260,8 +260,10 @@ public sealed class ReactionLoopEnginePauseTests
         counts.GetValueOrDefault(EngineEventTypes.Generated).Should().Be(0);
     }
 
-    [Fact]
-    public async Task Tick_WhenEnginePausedArrivesDuringAProviderCall_TheBurstIsDiscarded_AndNoFurtherCallIsMade()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Tick_WhenEnginePausedArrivesDuringAProviderCall_TheBurstIsDiscarded_AndNoFurtherCallIsMade(bool pauseMidTick)
     {
         var exerciseId = Guid.NewGuid();
         var manualTime = new ManualTimeProvider(ScenarioStart);
@@ -278,12 +280,26 @@ public sealed class ReactionLoopEnginePauseTests
             .ToList<Storyline>();
         var registration = Registration(exerciseId, storylines, cast);
 
-        // The controller enters ENGINE PAUSED while the first burst is being generated.
-        provider.OnCall = () => tiers.Restore(exerciseId, PauseTier.Engine);
+        // The controller enters ENGINE PAUSED while the first burst is being generated (or, as the control, never).
+        if (pauseMidTick)
+        {
+            provider.OnCall = () => tiers.Restore(exerciseId, PauseTier.Engine);
+        }
 
         var result = await RunOneTickAsync(host, registration);
+        var generated = (await EventCountsAsync(host, exerciseId)).GetValueOrDefault(EngineEventTypes.Generated);
+
+        if (!pauseMidTick)
+        {
+            // Control: the same tick, unpaused, voices all three storylines, so the paused case's single call is the
+            // re-check at work, not a demand or decide limit.
+            provider.Calls.Should().Be(3, "three storylines are due this tick");
+            result.ReviewItemsEnqueued.Should().Be(3);
+            return;
+        }
 
         provider.Calls.Should().Be(1, "no further provider call is made once the tier holds, even mid-tick");
+        generated.Should().Be(1, "the in-flight call happened and carries its spend, so its engine.generated is kept");
         result.ReviewItemsEnqueued.Should().Be(0, "a burst whose generation finished after the pause took is discarded");
         (await ReviewItemCountAsync(host, exerciseId)).Should().Be(0, "nothing reaches the review queue after the pause");
     }
