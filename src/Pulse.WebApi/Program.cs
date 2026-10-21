@@ -219,6 +219,7 @@ builder.Services.AddSocialFeedRead();      // #270 GET /api/feed (+ BP's project
 builder.Services.AddSocialPostWrite();     // #271 POST /api/posts (sanitize + stamp + telemetry + broadcast)
 builder.Services.AddSocialPersonaRead();   // #273 GET /api/personas
 builder.Services.AddSocialRealtimeHub();   // #272 exercise-grouped hub + IFeedBroadcaster impl
+builder.Services.AddScenarioClockApi();    // fix/noise-new-posts-clock ScenarioClockChanged push (clock observer)
 builder.Services.AddPostEditing();         // demo-feedback/19 edit own post (S-5; after the realtime hub)
 builder.Services.AddSocialModeration();    // demo-polish B6
 builder.Services.AddSocialThreads();       // demo-polish B2
@@ -446,6 +447,7 @@ app.MapGroup(string.Empty).DenyReadOnlySessions().MapSocialReactionEndpoints(); 
 
 app.MapSocialPersonaEndpoints();  // #273 GET /api/personas
 app.MapSocialRealtimeHub();       // #272 SignalR hub at /hubs/exercise
+app.MapScenarioClockEndpoints();  // fix/noise-new-posts-clock GET /api/clock (any live session; 401 unresolved)
 app.MapSocialModerationEndpoints(); // demo-polish B6
 app.MapMedia(); // demo-polish BM
 app.MapPersonaAdminEndpoints(); // demo-polish PE-BE (staff + controller + read-only gates inside)

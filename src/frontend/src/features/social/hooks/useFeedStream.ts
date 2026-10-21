@@ -60,6 +60,14 @@
  * pill's number honest (a "1 new post" pill whose only post is the reader's own
  * would load nothing).
  *
+ * KEEPING A POST THE DRAIN COULD NOT RENDER (fix/noise-new-posts-clock). `loadBuffered()`
+ * drains everything, but the caller may be unable to render some of it yet — a post whose
+ * author is not in the cached persona cast (a persona created after the page loaded). Such a
+ * post must not vanish with the count the reader was shown, so the caller hands it back via
+ * `requeue(posts)`: it goes back at the OLD end of the buffer (it arrived before anything
+ * buffered since the drain), the id set and `newCount` follow, and the cap still evicts the
+ * oldest. The pill's number therefore stays equal to what a drain would return, exactly.
+ *
  * ISOLATION (COR-001) / XC-002. The hook adds no `exerciseId` and never widens
  * a post's shape — it moves already-narrowed `ParticipantPostView`s from the
  * source into a buffer and back out. Both guarantees are inherited from the
@@ -131,6 +139,12 @@ export interface UseFeedStreamResult {
    * post was registered as theirs (see the module header).
    */
   discard(ids: readonly string[]): void
+  /**
+   * Puts posts a drain returned (newest-first, as `loadBuffered()` hands them back) but the
+   * caller could not render yet back into the buffer, keeping `newCount` honest. Posts already
+   * buffered are ignored; the cap still applies (oldest evicted). Stable identity.
+   */
+  requeue(posts: readonly ParticipantPostView[]): void
   /** The current transport mode (informational; fallback is transparent, NFR-003). */
   readonly mode: FeedTransportMode
 }
@@ -227,10 +241,30 @@ export function useFeedStream({
     setNewCount(kept.length)
   }, [])
 
+  const requeue = useCallback((posts: readonly ParticipantPostView[]): void => {
+    if (posts.length === 0) return
+    // The buffer is oldest-first, `posts` newest-first: restore them to the OLD end.
+    const returning = posts
+      .filter(post => !bufferedIdsRef.current.has(post.id))
+      .reverse()
+    if (returning.length === 0) return
+    let next = [...returning, ...bufferRef.current]
+    for (const post of returning) bufferedIdsRef.current.add(post.id)
+    if (next.length > FEED_STREAM_BUFFER_CAP) {
+      for (const evicted of next.slice(0, next.length - FEED_STREAM_BUFFER_CAP)) {
+        bufferedIdsRef.current.delete(evicted.id)
+      }
+      next = next.slice(next.length - FEED_STREAM_BUFFER_CAP)
+    }
+    bufferRef.current = next
+    setNewCount(next.length)
+  }, [])
+
   return {
     newCount: enabled ? newCount : 0,
     loadBuffered,
     discard,
+    requeue,
     mode: source.mode,
   }
 }
