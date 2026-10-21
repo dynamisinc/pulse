@@ -69,7 +69,7 @@ cannot be loaded fails the pre-flight, with the pins, run-sheet, anchor and edit
 
 **Check 4 and the live AI.** By default check 4 expects the Fake provider (DF-38) and FAILS on a live one. When the
 demo runs the live AI on purpose (as on 10/20, AzureOpenAI), pass `-AllowLiveProvider` to `Test-DemoReady.ps1`, or to
-`Invoke-DemoReset.ps1`, which hands it to its step 5. Check 4 then PASSES on the live provider, and WARNS if a live
+`Invoke-DemoReset.ps1`, which hands it to its step 5. Check 4 then PASSES on a live provider (AzureOpenAI or ClaudeFoundry), and WARNS if a live
 provider is configured but generation has been cut to Fake (the kill switch), because the live AI would not answer.
 
 ```text

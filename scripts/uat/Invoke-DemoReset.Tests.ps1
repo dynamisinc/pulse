@@ -203,6 +203,20 @@ Describe 'Invoke-DemoReset.ps1' {
         }
     }
 
+    Describe 'Script entry: every parameter reaches the run splat (PR #674 adversarial review W1)' {
+        It 'the script-level $runArguments carries each of the script''s parameters' {
+            $ast = [System.Management.Automation.Language.Parser]::ParseFile($script:ScriptFile, [ref] $null, [ref] $null)
+            $parameters = @($ast.ParamBlock.Parameters | ForEach-Object { $_.Name.VariablePath.UserPath })
+            $splat = $ast.EndBlock.Statements |
+                Where-Object { $_ -is [System.Management.Automation.Language.AssignmentStatementAst] -and $_.Left.VariablePath.UserPath -eq 'runArguments' } |
+                Select-Object -First 1
+            $splat | Should -Not -BeNullOrEmpty
+            $keys = @($splat.Right.Expression.KeyValuePairs | ForEach-Object { $_.Item1.Value })
+            $parameters | Should -Not -BeNullOrEmpty
+            foreach ($name in $parameters) { $keys | Should -Contain $name -Because "-$name must reach the run, or the script silently ignores it" }
+        }
+    }
+
     Describe '-ApiHost is normalized once, before any request (PR #548 review)' {
         It '<Value>: every request goes to the origin, and every script gets the bare host api.fake.test' -ForEach @(
             @{ Value = 'https://api.fake.test' }

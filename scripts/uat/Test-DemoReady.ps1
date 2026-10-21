@@ -19,7 +19,7 @@
       3. Engine review queue (GET /api/engine/review-queue): 0 pending drafts (queued, counting down or held).
          WARN on 1 to 5, FAIL on more.
       4. Generation provider (GET /api/engine/settings): the effective provider is Fake (DF-38). With
-         -AllowLiveProvider a live provider (AzureOpenAI) is a PASS too, for a demo that runs the live AI on
+         -AllowLiveProvider a live provider (AzureOpenAI or ClaudeFoundry) is a PASS too, for a demo that runs the live AI on
          purpose; a live provider configured but cut to Fake is then a WARN (the live AI will not answer).
       5. White noise (GET /api/staff/noise) is `off`, and media marking (GET /api/staff/chrome-settings,
          `watermarkEnabled`) is on. Noise posts newer than the seed anchor cannot be flagged: GET /api/feed has no
@@ -75,7 +75,7 @@
     Where -Json writes.
 
 .PARAMETER AllowLiveProvider
-    Check 4 accepts a live generation provider (AzureOpenAI) as well as Fake. Use it when the demo runs the live
+    Check 4 accepts a live generation provider (AzureOpenAI or ClaudeFoundry) as well as Fake. Use it when the demo runs the live
     AI on purpose instead of DF-38's Fake provider; without it a live provider FAILS check 4.
 
 .EXAMPLE

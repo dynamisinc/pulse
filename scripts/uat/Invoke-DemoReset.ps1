@@ -75,7 +75,7 @@
     Passed to Reset-DemoState.ps1 (step 2): demo beat 4's setting.
 
 .PARAMETER AllowLiveProvider
-    Passed to Test-DemoReady.ps1 (step 5): its check 4 then accepts a live generation provider (AzureOpenAI), for a
+    Passed to Test-DemoReady.ps1 (step 5): its check 4 then accepts a live generation provider (AzureOpenAI or ClaudeFoundry), for a
     demo that runs the live AI on purpose instead of DF-38's Fake provider.
 
 .PARAMETER ReloadFiredRunSheet
