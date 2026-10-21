@@ -6,6 +6,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using FluentAssertions;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -26,10 +27,41 @@ public sealed class InjectBurstRunnerLoopTests
     private static readonly InjectBurstRunnerOptions Defaults = new();
 
     [Fact]
-    public void NextDelay_IsTheActiveCadenceWhileFiring_AndTheIdleCadenceOtherwise()
+    public void NextDelay_IsTheActiveCadenceWhileFiring_AndASleepUntilWokenOtherwise()
     {
         InjectBurstRunner.NextDelay(firing: 2, consecutiveFailures: 0, Defaults).Should().Be(TimeSpan.FromSeconds(1));
-        InjectBurstRunner.NextDelay(firing: 0, consecutiveFailures: 0, Defaults).Should().Be(TimeSpan.FromSeconds(5));
+        InjectBurstRunner.NextDelay(firing: 0, consecutiveFailures: 0, Defaults).Should().Be(
+            Timeout.InfiniteTimeSpan,
+            "an idle runner must not poll: a 5 s idle sweep alone kept the serverless database from ever auto-pausing, "
+            + "and every path into Firing wakes the runner");
+    }
+
+    [Fact]
+    public async Task TheLoop_AfterASweepThatFindsNothingFiring_DoesNoMoreDatabaseWorkUntilWoken()
+    {
+        var harness = new LoopHarness(
+            new InjectBurstRunnerOptions
+            {
+                ActiveInterval = TimeSpan.FromMilliseconds(20),
+                IdleInterval = TimeSpan.FromMilliseconds(20),
+                MaxFailureBackoff = TimeSpan.FromMilliseconds(20),
+            },
+            emptyDatabase: true);
+
+        await harness.Runner.StartAsync(CancellationToken.None);
+        try
+        {
+            (await harness.WaitForSweepsAsync(1, TimeSpan.FromSeconds(10))).Should().BeTrue("the first sweep runs one idle interval after start");
+            await Task.Delay(TimeSpan.FromMilliseconds(400));
+            harness.Sweeps.Should().Be(1, "with nothing firing the runner sleeps instead of re-sweeping every idle interval");
+
+            harness.Signal.Wake(); // a controller's Fire
+            (await harness.WaitForSweepsAsync(2, TimeSpan.FromSeconds(10))).Should().BeTrue("a wake-up starts a sweep at once");
+        }
+        finally
+        {
+            await harness.Runner.StopAsync(CancellationToken.None);
+        }
     }
 
     [Fact]
@@ -103,17 +135,26 @@ public sealed class InjectBurstRunnerLoopTests
         harness.Logger.Entries.Single(entry => entry.EventId == 1).Level.Should().Be(LogLevel.Warning);
     }
 
-    /// <summary>A runner over a "database" that counts every sweep's resolution and throws as an unreachable server would.</summary>
+    /// <summary>
+    /// A runner over a "database" that counts every sweep's resolution and either throws as an unreachable server would,
+    /// or (<c>emptyDatabase</c>) answers with an empty in-memory store — nothing firing.
+    /// </summary>
     private sealed class LoopHarness
     {
         private int _sweeps;
 
-        public LoopHarness(InjectBurstRunnerOptions options)
+        public LoopHarness(InjectBurstRunnerOptions options, bool emptyDatabase = false)
         {
             var services = new ServiceCollection();
+            var databaseName = Guid.NewGuid().ToString();
             services.AddScoped<PulseDbContext>(_ =>
             {
                 Interlocked.Increment(ref _sweeps);
+                if (emptyDatabase)
+                {
+                    return new PulseDbContext(new DbContextOptionsBuilder<PulseDbContext>().UseInMemoryDatabase(databaseName).Options);
+                }
+
                 throw new InvalidOperationException("A network-related error occurred: the server was not found.");
             });
             var scopeFactory = services.BuildServiceProvider().GetRequiredService<IServiceScopeFactory>();

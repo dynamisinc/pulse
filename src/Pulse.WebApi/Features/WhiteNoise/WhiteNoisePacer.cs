@@ -19,8 +19,8 @@ using Pulse.WebApi.Features.EngineRuntime.Steering;
 /// <remarks>
 /// <para>
 /// <b>Scope for a non-request caller (COR-001), the <c>InjectBurstRunner</c> pattern.</b> A trusted sweep reads only
-/// the ids of exercises that have a pool (<c>IgnoreQueryFilters</c> on <c>NoisePosts</c>, ids only; an exercise
-/// without a pool has nothing to post). Each exercise is then worked inside its OWN DI scope whose
+/// the ids of exercises that have a pool AND a level other than <c>off</c> (<c>IgnoreQueryFilters</c>, ids only; an
+/// exercise without a pool, or with noise off, has nothing to post). Each exercise is then worked inside its OWN DI scope whose
 /// <see cref="ExerciseContext.CurrentExerciseId"/> is set BEFORE <see cref="WhiteNoiseService"/> (and with it
 /// <see cref="PulseDbContext"/> and the post funnel) is resolved, so every read and write is confined to that exercise
 /// and a pool entry never crosses into another.
@@ -35,6 +35,16 @@ using Pulse.WebApi.Features.EngineRuntime.Steering;
 /// finds the persisted level and starts a fresh timetable one gap out: no catch-up burst for the downtime.
 /// </para>
 /// <para>
+/// <b>Idle sleep.</b> While the sweep finds no exercise that can post — none with a pool and noise on, or every such
+/// exercise stopped in memory (Freeze, a frozen or unstarted clock) — the pacer SLEEPS
+/// (<see cref="WhiteNoisePacerOptions.IdleSleep"/>, indefinitely by default) instead of sweeping every second. The
+/// writes that can make an exercise able to post wake it through <see cref="WhiteNoisePacerSignal"/>: a level change
+/// and a pool change in <see cref="WhiteNoiseService"/>, after they commit, and every exercise clock change (a
+/// <c>WakeOnClockChange</c> listener — leaving Freeze unfreezes the clock). Sweeping every second while idle kept the
+/// serverless database from ever auto-pausing. A lifecycle that is not staged or live is read per exercise from the
+/// database, so an exercise past EndEx with noise left on still ticks; turn noise off to let the pacer sleep.
+/// </para>
+/// <para>
 /// <b>Fault isolation per exercise.</b> One exercise's failure is logged (once per distinct failure) and its timetable
 /// moves on a gap; every other exercise still ticks. A failing sweep backs off, doubling to
 /// <see cref="WhiteNoisePacerOptions.MaxFailureBackoff"/>.
@@ -46,10 +56,15 @@ using Pulse.WebApi.Features.EngineRuntime.Steering;
 /// </remarks>
 public sealed partial class WhiteNoisePacer : BackgroundService
 {
+    // The levels that post anything (PerMinute > 0): the sweep's filter, so it mirrors the timetable exactly.
+    private static readonly string[] PostingLevels =
+        NoiseRates.All.Where(level => NoiseRates.PerMinute(level) > 0).ToArray();
+
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly PauseTierRegistry _pauseTiers;
     private readonly IExerciseClock _clock;
     private readonly TimeProvider _timeProvider;
+    private readonly WhiteNoisePacerSignal _signal;
     private readonly WhiteNoisePacerOptions _options;
     private readonly NoiseScheduler _scheduler;
     private readonly ILogger<WhiteNoisePacer> _logger;
@@ -63,6 +78,7 @@ public sealed partial class WhiteNoisePacer : BackgroundService
     /// <param name="clock">The exercise clock.</param>
     /// <param name="timeProvider">The server clock driving the timetable.</param>
     /// <param name="jitter">The jitter draws.</param>
+    /// <param name="signal">The wake-up line a level or pool change pokes after it commits.</param>
     /// <param name="options">The tick cadence.</param>
     /// <param name="logger">Diagnostics.</param>
     public WhiteNoisePacer(
@@ -71,6 +87,7 @@ public sealed partial class WhiteNoisePacer : BackgroundService
         IExerciseClock clock,
         TimeProvider timeProvider,
         INoiseJitterSource jitter,
+        WhiteNoisePacerSignal signal,
         WhiteNoisePacerOptions options,
         ILogger<WhiteNoisePacer> logger)
     {
@@ -79,6 +96,7 @@ public sealed partial class WhiteNoisePacer : BackgroundService
         ArgumentNullException.ThrowIfNull(clock);
         ArgumentNullException.ThrowIfNull(timeProvider);
         ArgumentNullException.ThrowIfNull(jitter);
+        ArgumentNullException.ThrowIfNull(signal);
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(logger);
 
@@ -86,6 +104,7 @@ public sealed partial class WhiteNoisePacer : BackgroundService
         _pauseTiers = pauseTiers;
         _clock = clock;
         _timeProvider = timeProvider;
+        _signal = signal;
         _options = options;
         _scheduler = new NoiseScheduler(jitter);
         _logger = logger;
@@ -110,7 +129,7 @@ public sealed partial class WhiteNoisePacer : BackgroundService
         {
             try
             {
-                await Task.Delay(delay, _timeProvider, stoppingToken).ConfigureAwait(false);
+                await _signal.WaitAsync(delay, _timeProvider, stoppingToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
@@ -119,7 +138,7 @@ public sealed partial class WhiteNoisePacer : BackgroundService
 
             try
             {
-                await RunTickAsync(stoppingToken).ConfigureAwait(false);
+                var tick = await RunTickCoreAsync(stoppingToken).ConfigureAwait(false);
                 if (consecutiveFailures > 0)
                 {
                     LogTickRecovered(consecutiveFailures);
@@ -127,7 +146,7 @@ public sealed partial class WhiteNoisePacer : BackgroundService
 
                 consecutiveFailures = 0;
                 lastLoggedFailure = null;
-                delay = _options.TickInterval;
+                delay = NextDelay(tick.ExercisesThatCanPost, _options);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
@@ -151,6 +170,22 @@ public sealed partial class WhiteNoisePacer : BackgroundService
     }
 
     /// <summary>
+    /// The wait after a successful sweep: <see cref="WhiteNoisePacerOptions.TickInterval"/> while any exercise can post,
+    /// <see cref="WhiteNoisePacerOptions.IdleSleep"/> (until woken) otherwise.
+    /// </summary>
+    /// <param name="exercisesThatCanPost">
+    /// How many exercises the sweep found with a pool, noise on, and not stopped in memory (Freeze, a frozen or
+    /// unstarted clock).
+    /// </param>
+    /// <param name="options">The cadence.</param>
+    /// <returns>The wait (a wake-up still cuts it short).</returns>
+    public static TimeSpan NextDelay(int exercisesThatCanPost, WhiteNoisePacerOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        return exercisesThatCanPost > 0 ? options.TickInterval : options.IdleSleep;
+    }
+
+    /// <summary>
     /// The wait after <paramref name="consecutiveFailures"/> failed sweeps in a row: the tick interval doubled per
     /// further failure, capped at <see cref="WhiteNoisePacerOptions.MaxFailureBackoff"/>.
     /// </summary>
@@ -168,22 +203,30 @@ public sealed partial class WhiteNoisePacer : BackgroundService
     }
 
     /// <summary>
-    /// One tick: finds the exercises with a pool, then, for each that is making noise, is not stopped and is due,
-    /// publishes one post inside that exercise's own scope. A failure on one exercise never stops the rest.
+    /// One tick: finds the exercises with a pool and noise on, then, for each that is not stopped and is due, publishes
+    /// one post inside that exercise's own scope. A failure on one exercise never stops the rest.
     /// </summary>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>How many noise posts this tick published.</returns>
-    public async Task<int> RunTickAsync(CancellationToken cancellationToken = default)
+    public async Task<int> RunTickAsync(CancellationToken cancellationToken = default) =>
+        (await RunTickCoreAsync(cancellationToken).ConfigureAwait(false)).Published;
+
+    private async Task<TickResult> RunTickCoreAsync(CancellationToken cancellationToken)
     {
         IReadOnlyList<Guid> exercises;
         await using (var sweepScope = _scopeFactory.CreateAsyncScope())
         {
             var dbContext = sweepScope.ServiceProvider.GetRequiredService<PulseDbContext>();
 
-            // Trusted server-side sweep across exercises: ids only, each then processed within its own scope.
+            // Trusted server-side sweep across exercises: ids only, each then processed within its own scope. An
+            // exercise whose level is off is left out: it has nothing to post (the timetable treats off as a stop), and
+            // leaving it out is what lets an idle pacer stop sweeping.
             exercises = await dbContext.NoisePosts
                 .IgnoreQueryFilters()
                 .AsNoTracking()
+                // org-scope-exempt(ResolvedScope): an existence check correlated to ids from the server's own noise-pool rows (each written only under its exercise's resolved scope); it returns ids, each then worked in its own scope, and nothing tenant-bound is disclosed or written.
+                .Where(entry => dbContext.Exercises
+                    .Any(exercise => exercise.Id == entry.ExerciseId && PostingLevels.Contains(exercise.NoiseLevel)))
                 .Select(entry => entry.ExerciseId)
                 .Distinct()
                 .OrderBy(exerciseId => exerciseId)
@@ -201,6 +244,7 @@ public sealed partial class WhiteNoisePacer : BackgroundService
         }
 
         var published = 0;
+        var canPost = 0;
         foreach (var exerciseId in exercises)
         {
             if (exerciseId == Guid.Empty)
@@ -214,6 +258,8 @@ public sealed partial class WhiteNoisePacer : BackgroundService
                 _scheduler.IsDue(exerciseId, NoiseRates.Off, stopped: true, _timeProvider.GetUtcNow());
                 continue;
             }
+
+            canPost++;
 
             try
             {
@@ -245,7 +291,7 @@ public sealed partial class WhiteNoisePacer : BackgroundService
 #pragma warning restore CA1031
         }
 
-        return published;
+        return new TickResult(published, canPost);
     }
 
     private async Task<bool> TickExerciseAsync(Guid exerciseId, CancellationToken cancellationToken)
@@ -303,6 +349,9 @@ public sealed partial class WhiteNoisePacer : BackgroundService
         Level = LogLevel.Information,
         Message = "White-noise pacer recovered after {FailedSweeps} failed sweeps.")]
     private partial void LogTickRecovered(int failedSweeps);
+
+    /// <summary>One tick's outcome: posts published, and how many exercises could post (noise on, not stopped).</summary>
+    private readonly record struct TickResult(int Published, int ExercisesThatCanPost);
 }
 
 /// <summary>The <see cref="WhiteNoisePacer"/> cadence.</summary>
@@ -322,4 +371,11 @@ public sealed class WhiteNoisePacerOptions
 
     /// <summary>The longest wait between sweeps while sweeps keep failing. Default 60 s.</summary>
     public TimeSpan MaxFailureBackoff { get; init; } = TimeSpan.FromSeconds(60);
+
+    /// <summary>
+    /// The wait after a sweep that found no exercise making noise; a wake-up cuts it short. Default
+    /// <see cref="Timeout.InfiniteTimeSpan"/>: an idle pacer does no database work until a level or pool change, or an
+    /// exercise clock change, wakes it (or the 12-hourly safety sweep), so the database can auto-pause between exercises.
+    /// </summary>
+    public TimeSpan IdleSleep { get; init; } = Timeout.InfiniteTimeSpan;
 }

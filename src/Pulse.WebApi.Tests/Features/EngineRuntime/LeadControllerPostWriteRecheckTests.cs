@@ -477,7 +477,7 @@ public sealed class LeadControllerPostWriteRecheckTests
         var autonomy = new EngineAutonomyRegistry();
         var recorder = new CapturingSteeringLeverRecorder(() => autonomy.GetOrCreate(exerciseId).SwampedModeEnabled);
         var service = new EngineReviewService(
-            new EngineReviewStore(db),
+            new EngineReviewStore(db, new EngineReviewTickSignal()),
             db,
             context,
             clock,

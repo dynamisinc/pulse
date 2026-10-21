@@ -494,12 +494,23 @@ public sealed partial class InjectQueueService
     /// <param name="itemId">The item id.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The item, or the refusal.</returns>
-    public Task<InjectResult<InjectItemDto>> ReleaseAsync(Guid itemId, CancellationToken cancellationToken = default) =>
-        TransitionAsync(
-            itemId,
-            InjectActions.Release,
-            (item, caller) => InjectTransitions.Release(item, caller.StaffUserId),
-            cancellationToken);
+    public async Task<InjectResult<InjectItemDto>> ReleaseAsync(Guid itemId, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            return await TransitionAsync(
+                itemId,
+                InjectActions.Release,
+                (item, caller) => InjectTransitions.Release(item, caller.StaffUserId),
+                cancellationToken);
+        }
+        finally
+        {
+            // Unconditional, as for Fire and Retry: the idle runner sleeps until woken, and a release that committed
+            // `firing` but then failed must not strand the burst. A spurious wake costs one sweep.
+            _runnerSignal.Wake();
+        }
+    }
 
     /// <summary><c>POST /api/injects/{id}/skip</c>: <c>pending|held → skipped</c>; remaining posts are skipped.</summary>
     /// <param name="itemId">The item id.</param>
@@ -543,6 +554,13 @@ public sealed partial class InjectQueueService
             // finish rolled back, so it is the same lost race as a stale version — the 409 with the item as it is now.
             LogLockConflict(ex, InjectActions.Fire, itemId);
             return await CurrentItemConflictAsync(itemId, caller.ExerciseId, InjectActions.Fire, cancellationToken);
+        }
+        finally
+        {
+            // Unconditional: a burst's fire commits `firing` and its claim BEFORE publishing, so a failure after that
+            // commit (a lock conflict on the record step, any other database error) leaves an item firing that only the
+            // sleeping runner can finish. A spurious wake costs one sweep; a missed one strands the pile-on.
+            _runnerSignal.Wake();
         }
     }
 
@@ -627,6 +645,11 @@ public sealed partial class InjectQueueService
         {
             LogLockConflict(ex, InjectActions.Retry, itemId);
             return await CurrentItemConflictAsync(itemId, caller.ExerciseId, InjectActions.Retry, cancellationToken);
+        }
+        finally
+        {
+            // Unconditional, as for Fire: a retry that committed `firing` and then failed must not strand the burst.
+            _runnerSignal.Wake();
         }
     }
 

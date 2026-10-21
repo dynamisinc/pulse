@@ -243,6 +243,30 @@ public sealed class EngineReviewServiceTests
     }
 
     [RequiresDockerFact]
+    public async Task ReRoll_DelayedAuto_WakesTheSleepingAutoHoldTick_AndASuggestReRollDoesNot()
+    {
+        // The auto-HOLD tick sleeps while nothing counts down (so the database can auto-pause). A re-roll that restarts
+        // a countdown is one of the two writes that must wake it; a Suggest re-roll goes back to Queued and must not.
+        var exerciseId = Guid.NewGuid();
+        var delayed = Guid.NewGuid();
+        var suggest = Guid.NewGuid();
+        await SeedAsync(
+            DelayedAuto(delayed, exerciseId, DraftDisposition.Held),
+            Suggest(suggest, exerciseId, DraftDisposition.Queued));
+
+        var signal = new EngineReviewTickSignal();
+        await using var harness = Build(exerciseId, tickSignal: signal);
+
+        (await harness.Service.ReRollAsync(suggest, Input("controller-5"))).Outcome.Should().Be(EngineReviewOutcome.Ok);
+        (await signal.WaitAsync(TimeSpan.Zero, TimeProvider.System, CancellationToken.None)).Should().BeFalse(
+            "a Suggest re-roll starts no countdown");
+
+        (await harness.Service.ReRollAsync(delayed, Input("controller-5"))).Outcome.Should().Be(EngineReviewOutcome.Ok);
+        (await signal.WaitAsync(TimeSpan.Zero, TimeProvider.System, CancellationToken.None)).Should().BeTrue(
+            "a Delayed-auto re-roll restarts a countdown the sleeping tick must evaluate");
+    }
+
+    [RequiresDockerFact]
     public async Task BatchApprove_PublishesEachUnresolved_SkipsResolved_OneDecisionPerBurst()
     {
         var exerciseId = Guid.NewGuid();
@@ -1013,7 +1037,8 @@ public sealed class EngineReviewServiceTests
         Func<EngineBurst, EngineBurstPublishResult>? publishOutcome = null,
         IEngineReviewBroadcaster? reviewBroadcaster = null,
         Func<Task>? afterQueueSnapshot = null,
-        bool timeoutAutoSendAuthorized = true)
+        bool timeoutAutoSendAuthorized = true,
+        EngineReviewTickSignal? tickSignal = null)
     {
         // timeoutAutoSendAuthorized: this suite's swamped-mode / auto-send tests exercise the authorised posture, so
         // the harness sets Generation:Governance:TimeoutAutoSendAuthorized = true explicitly (production defaults false,
@@ -1049,7 +1074,8 @@ public sealed class EngineReviewServiceTests
 
         var broadcaster = new Mock<IEngineReviewBroadcaster>();
         var registry = new EngineAutonomyRegistry();
-        IEngineReviewStore store = new EngineReviewStore(db);
+        tickSignal ??= new EngineReviewTickSignal();
+        IEngineReviewStore store = new EngineReviewStore(db, tickSignal);
         if (afterQueueSnapshot is not null)
         {
             store = new AfterSnapshotStore(store, afterQueueSnapshot);
@@ -1070,7 +1096,8 @@ public sealed class EngineReviewServiceTests
             new GenerationProviderCutRegistry(),
             NullLogger<EngineReviewService>.Instance,
             ambientPolicy: null,
-            governance: Options.Create(new EngineAmbientGovernanceOptions { TimeoutAutoSendAuthorized = timeoutAutoSendAuthorized }));
+            governance: Options.Create(new EngineAmbientGovernanceOptions { TimeoutAutoSendAuthorized = timeoutAutoSendAuthorized }),
+            tickSignal: tickSignal);
 
         return new Harness(service, db, published, registry, time);
     }

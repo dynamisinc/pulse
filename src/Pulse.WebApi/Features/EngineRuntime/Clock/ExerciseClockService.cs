@@ -25,6 +25,7 @@ public sealed class ExerciseClockService : IExerciseClock, IExerciseClockPersist
 {
     private readonly TimeProvider _timeProvider;
     private readonly IExerciseClockChangeSink _changeSink;
+    private readonly IExerciseClockChangeListener[] _listeners;
     private readonly ConcurrentDictionary<Guid, ExerciseClockState> _clocks = new();
 
     /// <summary>Creates the native clock over <paramref name="timeProvider"/> with no persistence hook.</summary>
@@ -41,11 +42,28 @@ public sealed class ExerciseClockService : IExerciseClock, IExerciseClockPersist
     /// <param name="timeProvider">The time source scenario time advances against; injected for testability.</param>
     /// <param name="changeSink">Told after every Start/Freeze/Unfreeze/Jump; must never block or throw.</param>
     public ExerciseClockService(TimeProvider timeProvider, IExerciseClockChangeSink changeSink)
+        : this(timeProvider, changeSink, [])
+    {
+    }
+
+    /// <summary>
+    /// Creates the native clock, telling <paramref name="changeSink"/> and then every one of
+    /// <paramref name="listeners"/> after every anchor change.
+    /// </summary>
+    /// <param name="timeProvider">The time source scenario time advances against; injected for testability.</param>
+    /// <param name="changeSink">Told after every Start/Freeze/Unfreeze/Jump; must never block or throw.</param>
+    /// <param name="listeners">Also told after every change (e.g. to wake sleeping background services).</param>
+    public ExerciseClockService(
+        TimeProvider timeProvider,
+        IExerciseClockChangeSink changeSink,
+        IEnumerable<IExerciseClockChangeListener> listeners)
     {
         ArgumentNullException.ThrowIfNull(timeProvider);
         ArgumentNullException.ThrowIfNull(changeSink);
+        ArgumentNullException.ThrowIfNull(listeners);
         _timeProvider = timeProvider;
         _changeSink = changeSink;
+        _listeners = listeners.ToArray();
     }
 
     /// <inheritdoc />
@@ -61,21 +79,21 @@ public sealed class ExerciseClockService : IExerciseClock, IExerciseClockPersist
             _timeProvider.GetTimestamp(),
             _timeProvider.GetUtcNow(),
             frozen: false);
-        _changeSink.ClockChanged(exerciseId);
+        NotifyChanged(exerciseId);
     }
 
     /// <inheritdoc />
     public void Freeze(Guid exerciseId)
     {
         Require(exerciseId).Freeze(_timeProvider);
-        _changeSink.ClockChanged(exerciseId);
+        NotifyChanged(exerciseId);
     }
 
     /// <inheritdoc />
     public void Unfreeze(Guid exerciseId)
     {
         Require(exerciseId).Unfreeze(_timeProvider);
-        _changeSink.ClockChanged(exerciseId);
+        NotifyChanged(exerciseId);
     }
 
     /// <inheritdoc />
@@ -83,7 +101,7 @@ public sealed class ExerciseClockService : IExerciseClock, IExerciseClockPersist
     {
         ArgumentOutOfRangeException.ThrowIfNegative(scenarioMinutes);
         Require(exerciseId).Jump(_timeProvider, scenarioMinutes);
-        _changeSink.ClockChanged(exerciseId);
+        NotifyChanged(exerciseId);
     }
 
     /// <inheritdoc />
@@ -133,6 +151,16 @@ public sealed class ExerciseClockService : IExerciseClock, IExerciseClockPersist
 
     /// <inheritdoc />
     public bool Clear(Guid exerciseId) => _clocks.TryRemove(exerciseId, out _);
+
+    /// <summary>Tells the sink, then every listener, that <paramref name="exerciseId"/>'s anchor changed.</summary>
+    private void NotifyChanged(Guid exerciseId)
+    {
+        _changeSink.ClockChanged(exerciseId);
+        foreach (var listener in _listeners)
+        {
+            listener.ClockChanged(exerciseId);
+        }
+    }
 
     private ExerciseClockState Require(Guid exerciseId)
     {
