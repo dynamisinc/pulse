@@ -261,6 +261,59 @@ public sealed class ReactionLoopEnginePauseTests
     }
 
     [Fact]
+    public async Task Tick_WhenEnginePausedArrivesDuringAProviderCall_TheBurstIsDiscarded_AndNoFurtherCallIsMade()
+    {
+        var exerciseId = Guid.NewGuid();
+        var manualTime = new ManualTimeProvider(ScenarioStart);
+        var provider = new CountingGenerationProvider();
+
+        await using var host = BuildHost(manualTime, provider);
+        var tiers = host.GetRequiredService<PauseTierRegistry>();
+        host.GetRequiredService<IExerciseClock>().Start(exerciseId, ScenarioStart, TimeZoneInfo.Utc);
+        manualTime.Advance(TimeSpan.FromMinutes(25)); // three storylines are due this tick
+
+        var cast = Cast("@rosa", "@marcus", "@lena");
+        var storylines = Enumerable.Range(0, 3)
+            .Select(i => SeededStoryline(exerciseId, $"Concern {i}", cast.Keys.ToList()))
+            .ToList<Storyline>();
+        var registration = Registration(exerciseId, storylines, cast);
+
+        // The controller enters ENGINE PAUSED while the first burst is being generated.
+        provider.OnCall = () => tiers.Restore(exerciseId, PauseTier.Engine);
+
+        var result = await RunOneTickAsync(host, registration);
+
+        provider.Calls.Should().Be(1, "no further provider call is made once the tier holds, even mid-tick");
+        result.ReviewItemsEnqueued.Should().Be(0, "a burst whose generation finished after the pause took is discarded");
+        (await ReviewItemCountAsync(host, exerciseId)).Should().Be(0, "nothing reaches the review queue after the pause");
+    }
+
+    [Fact]
+    public async Task Tick_DrivenDirectlyUnderTheFreezeTier_GeneratesNothing()
+    {
+        var exerciseId = Guid.NewGuid();
+        var manualTime = new ManualTimeProvider(ScenarioStart);
+        var provider = new CountingGenerationProvider();
+
+        await using var host = BuildHost(manualTime, provider);
+        host.GetRequiredService<IExerciseClock>().Start(exerciseId, ScenarioStart, TimeZoneInfo.Utc);
+        manualTime.Advance(TimeSpan.FromMinutes(25));
+
+        // The tier alone, with the clock left running: this bypasses the host's frozen-tick skip, so only the
+        // driver's own Freeze backstop can hold the tick.
+        host.GetRequiredService<PauseTierRegistry>().Restore(exerciseId, PauseTier.Freeze);
+
+        var cast = Cast("@rosa", "@marcus", "@lena");
+        var storyline = SeededStoryline(exerciseId, "Water main contamination fears", cast.Keys.ToList());
+        var result = await RunOneTickAsync(host, Registration(exerciseId, [storyline], cast));
+
+        result.ReviewItemsEnqueued.Should().Be(0, "the Freeze tier holds new engine content in the driver too");
+        result.InactionTriggers.Should().Be(0);
+        provider.Calls.Should().Be(0);
+        (await EventCountsAsync(host, exerciseId)).GetValueOrDefault(EngineEventTypes.Generated).Should().Be(0);
+    }
+
+    [Fact]
     public async Task Resume_AfterEnginePause_FiresNoCatchUpBurst_ThenTheNormalCadenceResumes()
     {
         var exerciseId = Guid.NewGuid();
@@ -420,6 +473,9 @@ public sealed class ReactionLoopEnginePauseTests
 
         public int Calls => Volatile.Read(ref _calls);
 
+        /// <summary>Runs inside every call, before the fake answers: lets a test change state mid-generation.</summary>
+        public Action? OnCall { get; set; }
+
         public string Name => _inner.Name;
 
         public GenerationGovernance Governance => _inner.Governance;
@@ -427,6 +483,7 @@ public sealed class ReactionLoopEnginePauseTests
         public Task<GenerationResult> GenerateAsync(GenerationRequest request, CancellationToken cancellationToken = default)
         {
             Interlocked.Increment(ref _calls);
+            OnCall?.Invoke();
             return _inner.GenerateAsync(request, cancellationToken);
         }
     }

@@ -566,6 +566,14 @@ public sealed partial class ReactionLoopDriver
         {
             cancellationToken.ThrowIfCancellationRequested();
 
+            // The tier is re-read per burst, not only once per tick: each burst awaits a provider call, so a controller
+            // can enter ENGINE PAUSED mid-tick. Once it holds, the rest of this tick's work is abandoned; the next tick
+            // is held from the start and re-bases the cadence of everything left undone.
+            if (IsEngineHeld(registration.ExerciseId))
+            {
+                break;
+            }
+
             if (!PassesDemandGate(tickState, storyline, kind, scenarioMinute))
             {
                 continue;
@@ -603,7 +611,16 @@ public sealed partial class ReactionLoopDriver
                 .GenerateAsync(BuildGenerateRequest(registration, storyline, intent, tier), cancellationToken)
                 .ConfigureAwait(false);
 
+            // The engine.generated event is still recorded for a call that was already made: it carries the
+            // provider spend, and dropping it would under-report usage.
             pendingEvents.Add(BuildGeneratedEvent(context, storyline, draftId, generateResult));
+
+            // ENGINE PAUSED arrived while this burst was being generated: discard it rather than enqueue a draft
+            // after the pause took, and stop the remaining work.
+            if (IsEngineHeld(registration.ExerciseId))
+            {
+                break;
+            }
 
             // A guard-failing or diversity-failing burst is dropped here — it never becomes a review item (§8.5).
             if (generateResult.Disposition != GenerateDisposition.Accepted)
