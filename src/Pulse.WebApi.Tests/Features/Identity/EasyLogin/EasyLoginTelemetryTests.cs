@@ -237,7 +237,7 @@ public sealed class EasyLoginTelemetryTests
         var now = new DateTimeOffset(2026, 10, 20, 13, 0, 0, TimeSpan.Zero);
         var stored = new DateTimeOffset(2033, 6, 14, 8, 0, 0, TimeSpan.Zero);
         var live = new DateTimeOffset(2033, 6, 14, 9, 0, 0, TimeSpan.Zero);
-        var facts = new ExerciseFacts("Ex", "America/New_York", "live", Guid.NewGuid(), stored);
+        var facts = new ExerciseFacts("Ex", "America/New_York", "live", Guid.NewGuid(), stored, ParticipantName: null);
 
         var running = Mock.Of<IExerciseClock>(c => c.CurrentScenarioTime(ExerciseId) == live);
         var stopped = Mock.Of<IExerciseClock>(c => c.CurrentScenarioTime(ExerciseId) == null);

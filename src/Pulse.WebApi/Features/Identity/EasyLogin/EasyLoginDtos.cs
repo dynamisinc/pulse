@@ -414,9 +414,15 @@ public sealed class RosterCardSkipDto
 /// <summary>The <c>POST /api/staff/roster/cards</c> response body (<c>RosterCardsDto</c>; request shape EL-20).</summary>
 public sealed class RosterCardsDto
 {
-    /// <summary>The exercise name for the sheet header.</summary>
+    /// <summary>
+    /// The participant-facing exercise name for the sheet header (exercise-build-golive/09, §8.4), or <c>null</c> when
+    /// unset (the sheet then omits the line). Never the internal name. Unlike the file's other optional members this one
+    /// is WRITTEN as <c>null</c>, never omitted: the frozen TypeScript is <c>exerciseName: string | null</c> (key always
+    /// present), and the client's guard rejects a body without it.
+    /// </summary>
     [JsonPropertyName("exerciseName")]
-    public required string ExerciseName { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public required string? ExerciseName { get; init; }
 
     /// <summary>The cards, ordered by name.</summary>
     [JsonPropertyName("cards")]

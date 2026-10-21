@@ -53,6 +53,9 @@ public class IdempotentMigrationScriptTests
     /// <summary>The last migration before identity-auth-roles/16 (A1) — the shape UAT holds when the A1 cut deploys.</summary>
     private const string BeforeAdminIdentity = "20261017011709_DemoFeedbackNamedLookalikePairs";
 
+    /// <summary>The last migration before exercise-build-golive/09 (A3) — the shape UAT holds when PR-4 deploys.</summary>
+    private const string BeforeA3 = "20261017120000_AdminIdentityFoundation";
+
     private readonly MsSqlContainerFixture _fixture;
 
     public IdempotentMigrationScriptTests(MsSqlContainerFixture fixture)
@@ -256,6 +259,68 @@ public class IdempotentMigrationScriptTests
             .Should().Be(1, "an existing post survives untouched");
         (await Count($"SELECT COUNT(*) FROM [TelemetryEvents] WHERE [ExerciseId] = '{seed.Exercise}'"))
             .Should().Be(1, "existing telemetry survives untouched");
+    }
+
+    [RequiresDockerFact]
+    public async Task TheDeployScript_BringsUpA3_OverExistingPostsFollowsAndExercises_AndReplaysAsANoOp()
+    {
+        // exercise-build-golive/09: A3's backfills name the columns its own ALTERs add (ParticipantName, IsSetupContent),
+        // the exact shape that only fails in the script — so the script, batch by batch, must bring them up.
+        await using var database = await ScriptDatabase.CreateAsync(_fixture);
+        await database.MigrateToAsync(BeforeA3);
+
+        var exercise = Guid.NewGuid();
+        var setupPost = Guid.NewGuid();
+        var conductPost = Guid.NewGuid();
+        var setupFollow = Guid.NewGuid();
+        var leftBuildAt = new DateTimeOffset(2026, 9, 1, 12, 0, 0, TimeSpan.Zero);
+        const string payload = """{"from":"build","to":"staged"}""";
+        await database.ExecuteAsync($"""
+            INSERT INTO [Exercises] ([Id], [Name], [TimeZone], [Status], [ComplianceChromeEnabled], [WatermarkEnabled],
+                                     [IsPracticeMode], [OrganizationId], [WorldName])
+            VALUES ('{exercise}', N'INTERNAL-{exercise:N}', N'UTC', N'live', 1, 1, 0, '{Organization.DefaultOrganizationId}',
+                    N'Metro Atlanta');
+            INSERT INTO [TelemetryEvents] ([EventId], [SchemaVersion], [ExerciseId], [EventType], [Channel], [Actor_Kind],
+                                           [WallClockTime], [ScenarioTime], [TimeZone], [Payload], [EmittedAt])
+            VALUES (N'{Guid.NewGuid()}', N'v0', '{exercise}', N'exercise.lifecycle.transitioned', N'system', N'system',
+                    '{leftBuildAt:O}', '{leftBuildAt:O}', N'UTC', N'{payload}', '{leftBuildAt:O}');
+            INSERT INTO [Posts] ([Id], [ExerciseId], [AuthorPersonaId], [Body], [CreatedScenarioTime], [Origin],
+                                 [ActingHumanId], [CreatedWallClock])
+            VALUES ('{setupPost}', '{exercise}', '{Guid.NewGuid()}', N'Opening feed', '2033-09-04T13:00:00+00:00',
+                    N'engine', N'human-1', '{leftBuildAt.AddHours(-1):O}'),
+                   ('{conductPost}', '{exercise}', '{Guid.NewGuid()}', N'Conduct', '2033-09-04T14:00:00+00:00',
+                    N'engine', N'human-1', '{leftBuildAt.AddHours(1):O}');
+            INSERT INTO [Follows] ([Id], [ExerciseId], [FollowerPersonaId], [FolloweePersonaId], [CreatedScenarioTime],
+                                   [CreatedWallClock])
+            VALUES ('{setupFollow}', '{exercise}', '{Guid.NewGuid()}', '{Guid.NewGuid()}', '2033-09-04T13:00:00+00:00',
+                    '{leftBuildAt.AddHours(-1):O}');
+            """);
+
+        var script = database.GenerateIdempotentScript();
+        await database.ApplyScriptAsync(script);
+
+        (await database.AppliedMigrationsAsync()).Should().BeEquivalentTo(
+            database.AllMigrations(), "the A3 batch must compile and run in the script, not just under Migrate()");
+        await AssertA3BackfillAsync(database, exercise, setupPost, conductPost, setupFollow);
+
+        // The deploy re-applies the same script on every merge: a second apply must be a no-op.
+        await database.ApplyScriptAsync(script);
+
+        (await database.AppliedMigrationsAsync()).Should().BeEquivalentTo(database.AllMigrations());
+        await AssertA3BackfillAsync(database, exercise, setupPost, conductPost, setupFollow);
+    }
+
+    private static async Task AssertA3BackfillAsync(
+        ScriptDatabase database, Guid exercise, Guid setupPost, Guid conductPost, Guid setupFollow)
+    {
+        (await database.ScalarAsync<string>($"SELECT [ParticipantName] FROM [Exercises] WHERE [Id] = '{exercise}'"))
+            .Should().Be("Metro Atlanta", "ParticipantName is backfilled from WorldName, never the internal Name");
+        (await database.ScalarAsync<bool>($"SELECT [IsSetupContent] FROM [Posts] WHERE [Id] = '{setupPost}'"))
+            .Should().BeTrue("a post written before the exercise first left build is setup");
+        (await database.ScalarAsync<bool>($"SELECT [IsSetupContent] FROM [Posts] WHERE [Id] = '{conductPost}'"))
+            .Should().BeFalse("a post written after it left build is conduct");
+        (await database.ScalarAsync<bool>($"SELECT [IsSetupContent] FROM [Follows] WHERE [Id] = '{setupFollow}'"))
+            .Should().BeTrue("a follow created before the exercise first left build is setup");
     }
 
     /// <summary>The legacy (pre-A1) rows seeded for the A1 deploy-script test, by raw SQL in the pre-A1 schema.</summary>

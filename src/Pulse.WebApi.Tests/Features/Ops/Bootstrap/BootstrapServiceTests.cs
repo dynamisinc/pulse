@@ -114,7 +114,9 @@ public sealed class BootstrapServiceTests
         var scope = ExerciseScopeDto.FromExercise(exercise!);
 
         scope.ExerciseId.Should().Be(exercise!.Id.ToString());
-        scope.ExerciseName.Should().Be("UAT Pilot");
+        scope.ExerciseName.Should().BeNull(
+            "bootstrap sets only the INTERNAL name; the participant-facing scope never falls back to it "
+            + "(exercise-build-golive/09, §8.4)");
         scope.TimeZone.Should().Be("UTC", "an unspecified time zone normalizes to the UTC default");
         scope.Status.Should().BeOneOf(
             ["build", "staged", "live", "paused", "completed", "archived"],

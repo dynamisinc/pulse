@@ -169,7 +169,8 @@ public sealed class LifecycleTransitionRoleTests
     [RequiresDockerFact]
     public async Task PlannerStage_WithAnOpenBlockingItem_Is409WithTheReadinessBody_AndChangesNothing()
     {
-        // The matrix world has controllers enrolled but no scenario start time and no participant access.
+        // The matrix world has controllers enrolled but no participant-facing name, no participant access and no scenario
+        // start time.
         var world = await RoleMatrixWorld.SeedAsync(_fixture, status: "build");
         using var host = new RoleMatrixHost(_fixture.ConnectionString!);
         using var planner = world.Client(host, await world.TokenForAsync(MatrixRole.Planner));
@@ -185,7 +186,7 @@ public sealed class LifecycleTransitionRoleTests
 
         var blocking = root.GetProperty("blocking").EnumerateArray().ToList();
         blocking.Select(i => i.GetProperty("id").GetString()).Should().Equal(
-            ["participant-access", "schedule-set"], "only the OPEN blocking items, in checklist order");
+            ["participant-name", "participant-access", "schedule-set"], "only the OPEN blocking items, in checklist order");
         blocking.Should().OnlyContain(i =>
             i.EnumerateObject().Select(p => p.Name).SequenceEqual(new[] { "id", "label", "status", "detail" })
             && i.GetProperty("status").GetString() == "open"

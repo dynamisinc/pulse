@@ -36,9 +36,15 @@ public sealed class ExerciseScopeDto
     [JsonPropertyName("exerciseId")]
     public required string ExerciseId { get; init; }
 
-    /// <summary>The exercise's human-readable name.</summary>
+    /// <summary>
+    /// The PARTICIPANT-FACING exercise name (<see cref="Exercise.ParticipantName"/>, exercise-build-golive/09, §8.4), or
+    /// <c>null</c> when the planner has not set one. <b>Never</b> the internal <see cref="Exercise.Name"/>, which can leak
+    /// the scenario, and never a fallback to it: a null name means participant surfaces show the brand alone. Written as
+    /// <c>null</c> (not omitted) — the frozen client type is <c>exerciseName: string | null</c> (Tier-2 coordinated change).
+    /// </summary>
     [JsonPropertyName("exerciseName")]
-    public required string ExerciseName { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public required string? ExerciseName { get; init; }
 
     /// <summary>The exercise's IANA time zone (XC-008), e.g. <c>America/New_York</c>.</summary>
     [JsonPropertyName("timeZone")]
@@ -52,7 +58,9 @@ public sealed class ExerciseScopeDto
     public required string Status { get; init; }
 
     /// <summary>
-    /// Projects an <see cref="Exercise"/> to the frozen wire shape. <see cref="TimeZone"/> and
+    /// Projects an <see cref="Exercise"/> to the frozen wire shape. <see cref="ExerciseName"/> is the participant-facing
+    /// name only (no fallback to the internal name), <c>null</c> when null/whitespace and trimmed otherwise
+    /// (<see cref="Exercise.NormalizeParticipantName"/>). <see cref="TimeZone"/> and
     /// <see cref="Status"/> read the exercise's stored config verbatim (required, non-null by their defaults).
     /// </summary>
     /// <param name="exercise">The resolved exercise to project.</param>
@@ -64,7 +72,7 @@ public sealed class ExerciseScopeDto
         return new ExerciseScopeDto
         {
             ExerciseId = exercise.Id.ToString(),
-            ExerciseName = exercise.Name,
+            ExerciseName = Exercise.NormalizeParticipantName(exercise.ParticipantName),
             TimeZone = exercise.TimeZone,
             Status = exercise.Status,
         };
