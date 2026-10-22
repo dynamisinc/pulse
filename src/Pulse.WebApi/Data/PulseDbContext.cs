@@ -174,6 +174,12 @@ public class PulseDbContext : DbContext
     /// <summary>The password-verified candidates of a <see cref="LoginChoice"/>. Unscoped, read only through its choice.</summary>
     public DbSet<LoginChoiceCandidate> LoginChoiceCandidates => Set<LoginChoiceCandidate>();
 
+    /// <summary>
+    /// Single-use invite / reset tokens (identity-auth-roles/21, ADMIN-IDENTITY-MODEL §3.3). <see cref="IOrganizationOwned"/>
+    /// resolution root looked up by token hash — NOT centrally filtered; every other read is <c>InOrganization</c>-bounded.
+    /// </summary>
+    public DbSet<CredentialToken> CredentialTokens => Set<CredentialToken>();
+
     /// <summary>Persisted server-side sessions (COR-012). NOT exercise-scoped — looked up by opaque token pre-scope-resolution.</summary>
     public DbSet<Session> Sessions => Set<Session>();
 
@@ -309,6 +315,18 @@ public class PulseDbContext : DbContext
             // initializer is also 'off', so EF always writes the value explicitly. No CHECK constraint; story 05 validates.
             entity.Property(e => e.NoiseLevel).IsRequired().HasMaxLength(Exercise.MaxNoiseLevelLength)
                 .HasDefaultValue(Exercise.DefaultNoiseLevel);
+
+            // identity-auth-roles/21 (ADMIN-IDENTITY-MODEL §3.4): the participant sign-in methods bit set, stored as int.
+            // Required-WITH-DEFAULT All (7), so the migration backfills every existing exercise to today's behaviour.
+            // HasSentinel(-1) is LOAD-BEARING (the Persona.Castable lesson): with a store default, EF omits a property
+            // equal to its sentinel from the INSERT. The CLR default (None = 0) as sentinel would let the database turn a
+            // deliberate None into All; -1 is unrepresentable here (the CHECK refuses it), so EF always writes the value.
+            entity.Property(e => e.SignInMethods).IsRequired()
+                .HasDefaultValue(ExerciseSignInMethods.All)
+                .HasSentinel((ExerciseSignInMethods)(-1));
+            entity.ToTable(table => table.HasCheckConstraint(
+                "CK_Exercises_SignInMethods",
+                "[SignInMethods] >= 0 AND [SignInMethods] <= 7"));
         });
 
         modelBuilder.Entity<PersonaTemplate>(entity =>
@@ -478,6 +496,13 @@ public class PulseDbContext : DbContext
             entity.HasOne<MediaAsset>()
                 .WithMany()
                 .HasForeignKey(e => e.PosterMediaAssetId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // identity-auth-roles/21 (ADMIN-IDENTITY-MODEL §4.1): the uploading participant account, nullable (staff
+            // uploads and every existing row read NULL). Restrict, no navigation (house style); schema only in A2.
+            entity.HasOne<Account>()
+                .WithMany()
+                .HasForeignKey(e => e.UploadedByAccountId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
@@ -680,6 +705,9 @@ public class PulseDbContext : DbContext
             entity.Property(e => e.FailedLoginCount).IsRequired().HasDefaultValue(0);
             entity.Property(e => e.OrgRole).HasMaxLength(Person.MaxOrgRoleLength);
 
+            // identity-auth-roles/21 (ADMIN-IDENTITY-MODEL §4.2): the staff avatar blob (org prefix), nullable, bounded.
+            entity.Property(e => e.AvatarBlobName).HasMaxLength(Person.MaxAvatarBlobNameLength);
+
             // The org-level grant vocabulary: orgAdmin or nothing.
             entity.ToTable(table => table.HasCheckConstraint(
                 "CK_People_OrgRole",
@@ -706,15 +734,18 @@ public class PulseDbContext : DbContext
 
             // One person, ONE role per exercise — enforced by the database itself, so being staff and a participant
             // in one exercise is impossible (ADMIN-IDENTITY-MODEL §1.1). Filtered: one-off participants have no person.
+            // identity-auth-roles/21: LIVE rows only — a revoked (soft-deleted, XC-010) enrollment keeps its row, and the
+            // same person can be enrolled again.
             entity.HasIndex(e => new { e.ExerciseId, e.PersonId })
                 .IsUnique()
-                .HasFilter("[PersonId] IS NOT NULL");
+                .HasFilter("[PersonId] IS NOT NULL AND [DeletedAt] IS NULL");
 
             // At most one lead controller per exercise. A separately-named index on the same column as the plain
-            // scope index above (EF keys index identity on the column set unless the name differs).
+            // scope index above (EF keys index identity on the column set unless the name differs). Live rows only
+            // (identity-auth-roles/21); CK_Enrollments_DeletedAt_NotLead already keeps a revoked row off the lead.
             entity.HasIndex(e => e.ExerciseId, "IX_Enrollments_ExerciseId_Lead")
                 .IsUnique()
-                .HasFilter("[IsLead] = 1");
+                .HasFilter("[IsLead] = 1 AND [DeletedAt] IS NULL");
 
             // The cross-exercise "this person's enrollments" read (switcher, staff sign-in).
             entity.HasIndex(e => e.PersonId);
@@ -740,6 +771,16 @@ public class PulseDbContext : DbContext
                 table.HasCheckConstraint(
                     "CK_Enrollments_IsLead_ControllerOnly",
                     "[IsLead] = 0 OR [Role] = 'controller'");
+
+                // identity-auth-roles/21 (XC-010 soft delete): only a STAFF enrollment is ever revoked by soft delete (a
+                // participant enrollment is the parent of an account, whose navigation reads do not pass through
+                // ActiveEnrollments), and a revoked row is never the lead (revoke releases it first).
+                table.HasCheckConstraint(
+                    "CK_Enrollments_DeletedAt_StaffOnly",
+                    "[DeletedAt] IS NULL OR [Role] IN ('planner', 'controller', 'evaluator')");
+                table.HasCheckConstraint(
+                    "CK_Enrollments_DeletedAt_NotLead",
+                    "[DeletedAt] IS NULL OR [IsLead] = 0");
             });
         });
 
@@ -787,6 +828,53 @@ public class PulseDbContext : DbContext
                 .WithMany()
                 .HasForeignKey(e => e.PersonId)
                 .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // ==========================================================================================
+        // identity-auth-roles/21 — ADMIN-IDENTITY-MODEL A2 (the A2CredentialFoundation migration). CredentialToken is an
+        // IOrganizationOwned RESOLUTION ROOT (looked up by token hash before any tenant is known), so it carries no
+        // global filter; the write-guard refuses an empty OrganizationId. Every foreign key is Restrict (XC-010).
+        // ==========================================================================================
+        modelBuilder.Entity<CredentialToken>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+
+            entity.Property(e => e.TokenHash).IsRequired().HasMaxLength(CredentialToken.MaxTokenHashLength);
+            entity.HasIndex(e => e.TokenHash).IsUnique();
+
+            entity.Property(e => e.Purpose).IsRequired().HasMaxLength(CredentialToken.MaxPurposeLength);
+
+            entity.Property(e => e.OrganizationId).IsRequired();
+            entity.HasIndex(e => e.OrganizationId);
+
+            // The "outstanding tokens of this identity" reads (voiding on issue, the credential-change invalidation).
+            entity.HasIndex(e => e.PersonId);
+            entity.HasIndex(e => e.AccountId);
+
+            entity.HasOne<Organization>()
+                .WithMany()
+                .HasForeignKey(e => e.OrganizationId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Person>()
+                .WithMany()
+                .HasForeignKey(e => e.PersonId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Account>()
+                .WithMany()
+                .HasForeignKey(e => e.AccountId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Person>()
+                .WithMany()
+                .HasForeignKey(e => e.IssuedByPersonId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.ToTable(table =>
+            {
+                table.HasCheckConstraint("CK_CredentialTokens_Purpose", "[Purpose] IN ('invite', 'reset')");
+                table.HasCheckConstraint(
+                    "CK_CredentialTokens_OneSubject",
+                    "([PersonId] IS NOT NULL AND [AccountId] IS NULL) OR ([PersonId] IS NULL AND [AccountId] IS NOT NULL)");
+            });
         });
 
         // ==========================================================================================

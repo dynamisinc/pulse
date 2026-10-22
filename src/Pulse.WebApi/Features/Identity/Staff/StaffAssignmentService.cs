@@ -125,7 +125,7 @@ public sealed class StaffAssignmentService
         var rows = await (
             // org-scope-exempt(TenantChecked): own-only (PersonId == the caller's session-carried id) and every row
             // must inner-join an Exercise of the caller's OWN organization, so no other customer's exercise is listed.
-            from a in _dbContext.Enrollments.IgnoreQueryFilters().AsNoTracking().Where(EnrollmentRoles.IsStaffEnrollment)
+            from a in _dbContext.Enrollments.IgnoreQueryFilters().Active().AsNoTracking().Where(EnrollmentRoles.IsStaffEnrollment)
             where a.PersonId == current.StaffUserId
             join e in _dbContext.Exercises.AsNoTracking().InOrganization(callerOrganizationId) on a.ExerciseId equals e.Id
             orderby e.Name
@@ -206,6 +206,7 @@ public sealed class StaffAssignmentService
         // exercise was just resolved INSIDE the caller's own organization, so this never reaches another customer.
         var assignment = await _dbContext.Enrollments
             .IgnoreQueryFilters()
+            .Active()
             .AsNoTracking()
             .Where(EnrollmentRoles.IsStaffEnrollment)
             .FirstOrDefaultAsync(a => a.PersonId == current.StaffUserId && a.ExerciseId == exerciseId, cancellationToken);

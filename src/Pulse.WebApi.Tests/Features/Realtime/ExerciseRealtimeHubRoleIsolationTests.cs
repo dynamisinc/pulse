@@ -202,6 +202,48 @@ public sealed class ExerciseRealtimeHubRoleIsolationTests
     }
 
     [RequiresDockerFact]
+    public async Task SelfRevokeOverHttp_CutsThePlannersOwnOpenHubConnection_UnderTheRevokedSession()
+    {
+        // #575a self-revoke: a planner (not the last) DELETEs their OWN enrollment over the real HTTP route with the SAME
+        // session their hub connection was opened under. The grant-revoke rule revokes that session, and the post-commit
+        // connection cut aborts the planner's own live connection, so the console stops receiving staff pushes.
+        var kit = new Pulse.WebApi.Tests.Features.Identity.Enrollments.EnrollmentTestKit(_fixture);
+        var exercise = await SeedExerciseAsync();
+        var org = Organization.DefaultOrganizationId;
+        var (planner, plannerEnrollment) = await kit.SeedStaffAsync(org, exercise.Id, "planner");
+        await kit.SeedStaffAsync(org, exercise.Id, "planner");
+        var (_, plannerToken) = await kit.SeedStaffSessionAsync(planner, exercise.Id, "planner");
+
+        using var host = new RealtimeRoleHost(_fixture.ConnectionString!);
+        await using var console = await ConnectAsync(host, exercise.Hostname, plannerToken);
+        await console.WaitUntilInGroupAsync(host, $"exercise:{exercise.Id}:staff");
+        var before = await BroadcastReviewItemAsync(host, exercise.Id);
+        await console.WaitForAsync(ReviewItemChanged, before);
+
+        var closed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        console.Connection.Closed += _ =>
+        {
+            closed.TrySetResult();
+            return Task.CompletedTask;
+        };
+
+        using (var client = host.CreateClient())
+        {
+            client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", plannerToken);
+            using var removed = await client.DeleteAsync(new Uri($"/api/staff/enrollments/{plannerEnrollment}", UriKind.Relative));
+            removed.StatusCode.Should().Be(System.Net.HttpStatusCode.OK, "a planner who is not the last may remove themselves");
+        }
+
+        (await Task.WhenAny(closed.Task, Task.Delay(DeliveryTimeout))).Should().Be(
+            closed.Task, "the caller's own revoked session's hub connection is aborted");
+        console.Connection.State.Should().Be(HubConnectionState.Disconnected);
+
+        var after = await BroadcastReviewItemAsync(host, exercise.Id);
+        await Task.Delay(250);
+        console.Frames.Should().NotContain((ReviewItemChanged, after), "a self-revoked planner receives no further staff broadcast");
+    }
+
+    [RequiresDockerFact]
     public async Task ExpiredStaffToken_IsRejected_NeverConnects()
     {
         // B5 AC6: an invalid/expired token yields a participant-or-rejected connection, never staff. Here the

@@ -145,8 +145,11 @@ public sealed class AnonymousAccessRegressionTests
         // §1.2) — pre-auth by nature, behind the staff-login per-IP limiter, uniform 401, no-store.
         // #617: 14 -> 15 for GET /api/build — the running commit, polled credential-less by the Deploy Backend
         // smoke to prove the NEW build is serving; it returns only {"commit":"…"}, no-store, and reads no request.
+        // identity-auth-roles/21 (#576): 15 -> 16 for POST /api/auth/password/reset — sets a password from a single-use
+        // invite/reset link, so the person has no session; the 256-bit token in the body is the credential. Uniform 400
+        // invalid-token, the staff-login per-IP limiter, the login body limit, no-store.
         PreAuthAllowlist.Routes.Should().HaveCount(
-            15,
+            16,
             "the pre-auth allowlist is the one deliberately hand-maintained opt-out in the whole gate; a new entry "
             + "is a security decision and must be made explicitly here as well as there");
 

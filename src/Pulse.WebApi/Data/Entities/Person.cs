@@ -55,6 +55,9 @@ public sealed class Person : IOrganizationOwned
     /// <summary>The schema bound of <see cref="PasswordHash"/>.</summary>
     public const int MaxPasswordHashLength = 512;
 
+    /// <summary>The schema bound of <see cref="AvatarBlobName"/> (the same bound as <c>MediaAsset.BlobName</c>).</summary>
+    public const int MaxAvatarBlobNameLength = 256;
+
     /// <summary>The only org-level grant (ADMIN-IDENTITY-MODEL §1.1): the organization administrator.</summary>
     public const string OrgAdminRole = "orgAdmin";
 
@@ -97,6 +100,14 @@ public sealed class Person : IOrganizationOwned
 
     /// <summary>Wall-clock instant the person was disabled, or <c>null</c> while enabled.</summary>
     public DateTimeOffset? DisabledAt { get; set; }
+
+    /// <summary>
+    /// The staff avatar's blob name (ADMIN-IDENTITY-MODEL §4.2, wave A2), under the org prefix
+    /// <c>org/{orgId}/people/{personId}.webp</c> — outside every exercise prefix — or <c>null</c> when the person has
+    /// none. Schema only in the A2 migration (identity-auth-roles/21); the avatar story (23) writes and serves it.
+    /// Staff-world only (XC-002): never projected onto a participant DTO.
+    /// </summary>
+    public string? AvatarBlobName { get; set; }
 
     /// <summary>Server wall-clock instant (UTC) the person was first recorded.</summary>
     public DateTimeOffset CreatedAt { get; set; }

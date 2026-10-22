@@ -173,11 +173,12 @@ script is idempotent-forward only and is never auto-reversed. A schema rollback 
 directly):
 
 ```bash
-dotnet ef migrations script <target-migration> <migration-to-undo> --idempotent --project src/Pulse.WebApi
+dotnet ef migrations script <migration-to-undo> <target-migration> --idempotent --project src/Pulse.WebApi
 ```
 
-where `<target-migration>` is the one you want to land back on — i.e. the arguments are from-then-to,
-so undoing the newest migration means naming the one **before** it first.
+where `<target-migration>` is the one you want to land back on. The arguments are **from, then to**: a down script
+goes *from* the migration being undone *to* the one before it, so name the **newest** migration first. (Naming
+the older one first generates an *up* script instead.)
 
 Note that a `Down` is not guaranteed loss-free: where a migration widens a vocabulary, `Down` maps the
 new values back onto the narrower legacy set, so distinctions collapse (and a `Down` **then** re-`Up` is
@@ -234,6 +235,41 @@ job. That is the point-in-time-restore (PITR) target if a rollback is needed.
      org-admin access only on per-exercise rows. Re-grant it by hand after `Down` if needed.
    - Everything that exists only from A1 on is dropped: people's emails and passwords, org audit events, login
      choices, organization slugs, `FirstLiveAt`.
+
+### A2CredentialFoundation (#576): pre-check, deploy order and rollback
+
+This migration adds the `CredentialTokens` table (invite and reset links, stored as SHA-256 hashes only), three
+schema-only columns (`People.AvatarBlobName`, `Exercises.SignInMethods` defaulting to 7 = all three participant sign-in
+methods, `MediaAssets.UploadedByAccountId`), and `Enrollments.DeletedAt`: removing a staff member from an exercise now
+keeps the row as history instead of deleting it. No existing row changes meaning, and nothing is backfilled.
+
+**Pre-check (read-only, run against the target database before the deploy).** Each query must return what its comment
+says; anything else means the database is not at the expected A1 shape, so stop and investigate:
+
+```sql
+SELECT TOP 1 [MigrationId] FROM [__EFMigrationsHistory] ORDER BY [MigrationId] DESC;
+-- expect 20261017120000_AdminIdentityFoundation
+SELECT OBJECT_ID('CredentialTokens') AS CredentialTokens,
+       COL_LENGTH('Enrollments', 'DeletedAt') AS DeletedAt,
+       COL_LENGTH('Exercises', 'SignInMethods') AS SignInMethods;
+-- expect NULL, NULL, NULL
+SELECT [ExerciseId], [PersonId], COUNT(*) FROM [Enrollments] WHERE [PersonId] IS NOT NULL
+GROUP BY [ExerciseId], [PersonId] HAVING COUNT(*) > 1;
+-- expect no rows (already enforced by the A1 unique index; the A2 index only loosens it)
+SELECT [ExerciseId], COUNT(*) FROM [Enrollments] WHERE [IsLead] = 1 GROUP BY [ExerciseId] HAVING COUNT(*) > 1;
+-- expect no rows
+```
+
+**Deploy order: backend only, any time.** The frontend is unaffected (no wire shape changes for existing routes). The
+migration takes brief schema locks on `Enrollments`, `Exercises`, `People` and `MediaAssets`. The new routes are
+`POST /api/auth/password/reset` (pre-auth) and `POST /api/org/people/{personId}/password-reset` (org admin). Email is
+not sent anywhere yet: the admin reset returns the link once, for the admin to hand over.
+
+**Rollback.** Forward-fix is preferred. The migration's `Down` is reversible but **not loss-free**: every issued invite
+and reset link stops working (the table is dropped), staff avatar names and upload attribution are dropped, and every
+removed (soft-deleted) enrollment row is hard-deleted first, which is what removal did before A2. EF generates a
+rollback script when the FROM migration is newer than the TO migration:
+`dotnet ef migrations script 20261019200000_A2CredentialFoundation 20261017120000_AdminIdentityFoundation --project src/Pulse.WebApi`.
 
 ## Incident log
 

@@ -190,6 +190,7 @@ public sealed partial class OrgAdminSeedService
             // exercises just read through .InOrganization(organizationId), so no other customer's row is seen.
             var enrolledExerciseIds = await _dbContext.Enrollments
                 .IgnoreQueryFilters()
+                .Active()
                 .Where(a => a.PersonId == staffUser.Id && tenantExerciseIds.Contains(a.ExerciseId))
                 .Select(a => a.ExerciseId)
                 .ToListAsync(cancellationToken);

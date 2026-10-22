@@ -174,6 +174,7 @@ public sealed class ExerciseReadinessService
 
         var staff = await _dbContext.Enrollments
             .AsNoTracking()
+            .Active() // #576: a revoked (soft-deleted) staff grant does not count toward readiness.
             .Where(e => e.ExerciseId == exerciseId)
             .GroupBy(_ => 1)
             .Select(g => new

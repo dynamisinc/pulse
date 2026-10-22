@@ -44,3 +44,6 @@ export const JOIN_PATH = '/join'
  * stays world-neutral" note.
  */
 export const STAFF_LOGIN_PATH = '/staff/login'
+
+/** Pre-auth set-password landing for a copied reset/invite link (`#token=...`; #576). */
+export const STAFF_RESET_PATH = '/staff/reset'

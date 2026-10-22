@@ -325,6 +325,7 @@ public sealed class SessionService
         // run before any scope is resolved, so the central exercise filter is bypassed and the exercise named instead.
         return await _dbContext.Enrollments
             .IgnoreQueryFilters()
+            .Active()
             .AsNoTracking()
             .AnyAsync(e => e.ExerciseId == exerciseId && e.PersonId == personId && e.IsLead, cancellationToken);
     }

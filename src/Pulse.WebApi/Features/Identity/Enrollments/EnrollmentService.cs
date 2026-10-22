@@ -33,9 +33,9 @@ using Pulse.WebApi.Features.Realtime;
 /// one. Scope is never read from the request body.
 /// </para>
 /// <para>
-/// A1 maps only the lead route (<c>PUT /api/staff/enrollments/{id}/lead</c>); grant / change / revoke are the service
-/// seam the A2 staff-assignment UI (story 20) maps, and they already enforce one-role-per-exercise (409
-/// <c>conflicting-enrollment</c>) and the grant-revoke rule.
+/// A1 mapped the lead route (<c>PUT /api/staff/enrollments/{id}/lead</c>); story 20 (A2) maps grant / change / revoke
+/// and the staff-list read (<see cref="EnrollmentEndpoints"/>). They enforce one-role-per-exercise (409
+/// <c>conflicting-enrollment</c>), the grant-revoke rule, and the last-planner guard (409 <c>last-planner</c>).
 /// </para>
 /// <para>
 /// <b>Losing the lead (M-002 / M-1).</b> Swamped mode lives in the in-memory engine autonomy registry, outside this
@@ -58,6 +58,22 @@ public sealed partial class EnrollmentService
 
     /// <summary>The 409 error code for a lead change that lost a race with another (the one-lead unique index).</summary>
     public const string LeadConflictError = "lead-conflict";
+
+    /// <summary>
+    /// The 409 error code for a revoke that raced a concurrent lead change (Gate-1 S-003): the row became the lead after it
+    /// was read, so the soft delete was refused by <c>CK_Enrollments_DeletedAt_NotLead</c> and NOTHING was saved — and
+    /// for a lead change that raced a revoke or a role change of its target (adversarial review W1 on #665). Retry.
+    /// Since story 20 the last-planner guard locks and re-reads a revoke's target first, so on that path it is defence
+    /// in depth.
+    /// </summary>
+    public const string LeadChangedRetryError = "lead-changed-retry";
+
+    /// <summary>
+    /// The 409 error code for a removal or role change that would leave the exercise with NO active planner (story 20,
+    /// ADMIN-IDENTITY-MODEL §8.2 "cannot remove the last planner"). Counted under a lock in the same transaction as the
+    /// write, so two planners removing each other concurrently can never both succeed.
+    /// </summary>
+    public const string LastPlannerError = "last-planner";
 
     /// <summary>The XC-004 event type of a lead released because its holder lost the controller grant.</summary>
     public const string LeadReleasedEventType = StaffChangeEventTypes.LeadReleased;
@@ -104,6 +120,8 @@ public sealed partial class EnrollmentService
     private const string EnrollmentEntityType = "enrollment";
     private const int DuplicateKeyErrorNumber = 2601;
     private const int UniqueConstraintErrorNumber = 2627;
+    private const int CheckConstraintErrorNumber = 547;
+    private const string LeadNotRevokedConstraint = "CK_Enrollments_DeletedAt_NotLead";
 
     private readonly PulseDbContext _dbContext;
     private readonly StaffCallerContext _staffCaller;
@@ -199,6 +217,7 @@ public sealed partial class EnrollmentService
         // (FindReachableAsync), so this reads only that one exercise's current lead (for the audit payload).
         var previousLeadId = await _dbContext.Enrollments
             .IgnoreQueryFilters()
+            .Active()
             .AsNoTracking()
             .Where(e => e.ExerciseId == exercise.Id && e.IsLead)
             .Select(e => (Guid?)e.Id)
@@ -211,15 +230,37 @@ public sealed partial class EnrollmentService
             // ONE statement: UPDATE … SET IsLead = CASE WHEN Id = @id THEN 1 ELSE 0 END
             //                WHERE ExerciseId = @exercise AND (IsLead = 1 OR Id = @id).
             // org-scope-exempt(TenantChecked): the same caller-reachable exercise as above.
-            await _dbContext.Enrollments
+            var updated = await _dbContext.Enrollments
                 .IgnoreQueryFilters()
+                .Active()
                 .Where(e => e.ExerciseId == exercise.Id && (e.IsLead || e.Id == enrollment.Id))
                 .ExecuteUpdateAsync(set => set.SetProperty(e => e.IsLead, e => e.Id == enrollment.Id), cancellationToken);
 
-            // The statement above already wrote it; mirror it on the tracked entity WITHOUT marking it modified.
+            // Adversarial review W1 (#665): a revoke that landed between FindReachableAsync and the statement above leaves
+            // the target out of the Active() set, so it was NOT made lead (and, if there was a previous lead, that lead was
+            // demoted). Confirm inside the transaction that the target IS now the live lead; otherwise roll everything back
+            // and ask the caller to retry. Our UPDATE holds the target's row lock until commit, so a revoke cannot slip in
+            // after this check.
+            // org-scope-exempt(TenantChecked): keyed by the ALREADY-AUTHORIZED enrollment id (resolved inside the caller's own
+            // scope and organization by FindReachableAsync) and read inside the same transaction as the UPDATE above.
+            var targetIsLead = updated > 0 && await _dbContext.Enrollments
+                .IgnoreQueryFilters()
+                .Active()
+                .AsNoTracking()
+                .AnyAsync(e => e.Id == enrollment.Id && e.IsLead, cancellationToken);
+            if (!targetIsLead)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                _dbContext.ChangeTracker.Clear();
+                return EnrollmentResult.Conflict(LeadChangedRetryError);
+            }
+
+            // The statement above already wrote it; mirror it on the tracked entity WITHOUT marking it modified (W1: setting
+            // OriginalValue alone leaves IsModified set, which re-wrote IsLead = 1 in SaveChanges).
             var isLead = _dbContext.Entry(enrollment).Property(e => e.IsLead);
             isLead.CurrentValue = true;
             isLead.OriginalValue = true;
+            isLead.IsModified = false;
 
             var payload = string.Create(
                 CultureInfo.InvariantCulture,
@@ -242,6 +283,18 @@ public sealed partial class EnrollmentService
             _dbContext.ChangeTracker.Clear();
             return EnrollmentResult.Conflict(LeadConflictError);
         }
+        catch (DbUpdateException exception) when (IsLeadCheckViolation(exception.InnerException as SqlException))
+        {
+            // W1: the lead / revoke / role CHECKs refused a write that raced a concurrent change — never a 500.
+            _dbContext.ChangeTracker.Clear();
+            return EnrollmentResult.Conflict(LeadChangedRetryError);
+        }
+        catch (SqlException exception) when (IsLeadCheckViolation(exception))
+        {
+            // The same, surfaced raw by ExecuteUpdate (e.g. the target stopped being a controller in between).
+            _dbContext.ChangeTracker.Clear();
+            return EnrollmentResult.Conflict(LeadChangedRetryError);
+        }
 
         // PROVIDER-GOVERNANCE §8: demoting the lead turns swamped mode off. A TRANSFER demotes the previous lead, and the
         // exercise still has a lead afterwards, so the no-lead heal never catches it: without this the new lead would
@@ -258,13 +311,17 @@ public sealed partial class EnrollmentService
     /// check and, under a race, by the database's unique index. Creates the person's staff facet if they have none.
     /// </summary>
     /// <param name="exerciseId">The exercise (a planner's own resolved exercise, or one of an org admin's org).</param>
-    /// <param name="personId">The person to enroll (must belong to the exercise's organization).</param>
+    /// <param name="personId">
+    /// The person to enroll (must belong to the exercise's organization and be enabled — a disabled person is the same bare
+    /// 404 as a missing one, so the refusal reveals nothing new); <c>null</c> (a request that omitted it) is a 400, judged
+    /// only after the caller is authorized.
+    /// </param>
     /// <param name="role">The staff role: planner, controller or evaluator.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The outcome the endpoint maps to a status.</returns>
     public async Task<EnrollmentResult> GrantAsync(
         Guid exerciseId,
-        Guid personId,
+        Guid? personId,
         string? role,
         CancellationToken cancellationToken = default)
     {
@@ -282,16 +339,23 @@ public sealed partial class EnrollmentService
             return EnrollmentResult.Invalid("role must be a staff role: planner, controller or evaluator.");
         }
 
+        if (personId is not { } requestedPersonId)
+        {
+            return EnrollmentResult.Invalid("personId is required.");
+        }
+
         var exercise = await FindReachableExerciseAsync(caller, exerciseId, cancellationToken);
         if (exercise is null)
         {
             return EnrollmentResult.NotFound();
         }
 
-        // The person must belong to the exercise's own organization — a cross-tenant person is the bare 404.
+        // The person must belong to the exercise's own organization — a cross-tenant person is the bare 404 — and must be
+        // enabled: a disabled person cannot sign in, so granting them a role is refused with that SAME bare 404 (no new
+        // signal about who exists or is disabled), matching their absence from the Staff tab's candidates.
         var person = await _dbContext.People
             .InOrganization(exercise.OrganizationId)
-            .FirstOrDefaultAsync(p => p.Id == personId, cancellationToken);
+            .FirstOrDefaultAsync(p => p.Id == requestedPersonId && p.DisabledAt == null, cancellationToken);
         if (person is null)
         {
             return EnrollmentResult.NotFound();
@@ -301,6 +365,7 @@ public sealed partial class EnrollmentService
         // scope) and the person inside the exercise's organization; this only asks whether the pair is enrolled.
         var alreadyEnrolled = await _dbContext.Enrollments
             .IgnoreQueryFilters()
+            .Active()
             .AnyAsync(e => e.ExerciseId == exercise.Id && e.PersonId == person.Id, cancellationToken);
         if (alreadyEnrolled)
         {
@@ -353,6 +418,8 @@ public sealed partial class EnrollmentService
     /// <summary>
     /// Changes a STAFF enrollment's role, revoking the person's live sessions on that exercise in the same unit of
     /// work (the grant they were minted from changed). A lead controller moved off <c>controller</c> loses the lead.
+    /// Moving the exercise's ONLY active planner off <c>planner</c> (including oneself) is refused with 409
+    /// <see cref="LastPlannerError"/>, counted under a lock in the same transaction as the write.
     /// </summary>
     /// <param name="enrollmentId">The target enrollment.</param>
     /// <param name="role">The new staff role.</param>
@@ -386,13 +453,33 @@ public sealed partial class EnrollmentService
         }
 
         var now = _timeProvider.GetUtcNow();
-        var previousRole = enrollment.Role;
-        var leadReleased = ReleaseLeadIfLost(caller, exercise, enrollment, newRole: staffRole, now);
-        enrollment.Role = staffRole;
+        bool leadReleased;
+        IReadOnlyList<Guid> revoked;
+        await using (var transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken))
+        {
+            // Story 20: lock the exercise's planner set (and the target), re-read the target, and refuse the last planner —
+            // all inside the transaction the write commits in.
+            if (await LockAndGuardLastPlannerAsync(enrollment, newRole: staffRole, cancellationToken) is { } refused)
+            {
+                return refused;
+            }
 
-        var revoked = await RevokeExerciseSessionsAsync(exercise.Id, [enrollment.PersonId], now, cancellationToken);
-        Record(caller, exercise, enrollment, RoleChangedEventType, RoleChangedAuditKind, RolePayload(staffRole, previousRole), now);
-        await _dbContext.SaveChangesAsync(cancellationToken);
+            if (string.Equals(enrollment.Role, staffRole, StringComparison.Ordinal))
+            {
+                // A concurrent change already put the target in this role: nothing to do.
+                return EnrollmentResult.Ok(enrollment);
+            }
+
+            var previousRole = enrollment.Role;
+            leadReleased = ReleaseLeadIfLost(caller, exercise, enrollment, newRole: staffRole, now);
+            enrollment.Role = staffRole;
+
+            revoked = await RevokeExerciseSessionsAsync(exercise.Id, [enrollment.PersonId], now, cancellationToken);
+            Record(caller, exercise, enrollment, RoleChangedEventType, RoleChangedAuditKind, RolePayload(staffRole, previousRole), now);
+            await _dbContext.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+        }
+
         await TurnSwampedModeOffAfterCommitAsync(caller, exercise, enrollment, leadReleased, now, cancellationToken);
         await CutRevokedConnectionsAfterCommitAsync(revoked, cancellationToken);
 
@@ -400,7 +487,12 @@ public sealed partial class EnrollmentService
     }
 
     /// <summary>
-    /// Removes a STAFF enrollment, revoking the person's live sessions on that exercise in the same unit of work.
+    /// Removes a STAFF enrollment, revoking the person's live sessions on that exercise in the same unit of work. The
+    /// removal is a SOFT delete (XC-010, identity-auth-roles/21): the row keeps its history with
+    /// <see cref="Enrollment.DeletedAt"/> set, every enrollment read excludes it (<see cref="ActiveEnrollments.Active"/>),
+    /// and the filtered unique indexes ignore it, so the same person can be enrolled again. A second revoke of the same
+    /// id is the bare 404 (the revoked row is no longer reachable). Removing the exercise's ONLY active planner (including
+    /// oneself) is refused with 409 <see cref="LastPlannerError"/>, counted under a lock in the same transaction as the write.
     /// </summary>
     /// <param name="enrollmentId">The target enrollment.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
@@ -422,16 +514,104 @@ public sealed partial class EnrollmentService
 
         var (enrollment, exercise) = target.Value;
         var now = _timeProvider.GetUtcNow();
+        bool leadReleased;
+        IReadOnlyList<Guid> revoked;
+        try
+        {
+            await using var transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken);
 
-        var leadReleased = ReleaseLeadIfLost(caller, exercise, enrollment, newRole: null, now);
-        _dbContext.Enrollments.Remove(enrollment);
-        var revoked = await RevokeExerciseSessionsAsync(exercise.Id, [enrollment.PersonId], now, cancellationToken);
-        Record(caller, exercise, enrollment, RevokedEventType, RevokedAuditKind, RolePayload(role: null, enrollment.Role), now);
-        await _dbContext.SaveChangesAsync(cancellationToken);
+            // Story 20: the last-planner guard, counted under a lock in THIS transaction (see LockAndGuardLastPlannerAsync).
+            if (await LockAndGuardLastPlannerAsync(enrollment, newRole: null, cancellationToken) is { } refused)
+            {
+                return refused;
+            }
+
+            // The lead (if held) is released BEFORE the row is marked revoked: CK_Enrollments_DeletedAt_NotLead refuses a
+            // revoked lead, so the order is load-bearing as well as the policy.
+            leadReleased = ReleaseLeadIfLost(caller, exercise, enrollment, newRole: null, now);
+            enrollment.DeletedAt = now;
+            revoked = await RevokeExerciseSessionsAsync(exercise.Id, [enrollment.PersonId], now, cancellationToken);
+            Record(caller, exercise, enrollment, RevokedEventType, RevokedAuditKind, RolePayload(role: null, enrollment.Role), now);
+            await _dbContext.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+        }
+        catch (DbUpdateException exception) when (IsCheckViolation(exception, LeadNotRevokedConstraint))
+        {
+            // Gate-1 S-003, now defence in depth: the guard above X-locks and re-reads the target, so a concurrent SetLead
+            // either landed before it (and its lead is released here) or blocks until this commits. Should the database
+            // still refuse a revoked lead, the whole unit of work rolled back, no lead was released — so there is nothing
+            // to turn swamped mode off for — and the caller retries.
+            _dbContext.ChangeTracker.Clear();
+            return EnrollmentResult.Conflict(LeadChangedRetryError);
+        }
+
         await TurnSwampedModeOffAfterCommitAsync(caller, exercise, enrollment, leadReleased, now, cancellationToken);
         await CutRevokedConnectionsAfterCommitAsync(revoked, cancellationToken);
 
         return EnrollmentResult.Ok(enrollment);
+    }
+
+    /// <summary>
+    /// THE last-planner guard (story 20, ADMIN-IDENTITY-MODEL §8.2), run inside the caller's open transaction BEFORE it
+    /// stages any change. One statement X-locks every active planner row of the exercise plus the target row (a no-op
+    /// <c>SET Role = Role</c>; the locks are held to commit), so every concurrent removal / role change on the same
+    /// exercise — each of which runs this same statement first — waits for this one to commit and then counts what it
+    /// committed. The target is then re-read under that lock (its role / lead / revoked state may have moved since it
+    /// was first read) and synced onto the tracked entity. Two planners removing each other concurrently therefore
+    /// serialize: the second sees one planner left and is refused.
+    /// </summary>
+    /// <param name="enrollment">The tracked target (already resolved inside the caller's scope / organization).</param>
+    /// <param name="newRole">The role it is moving to, or <c>null</c> for a removal.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns><c>null</c> to proceed; otherwise the refusal (409 <c>last-planner</c>, or the bare 404 for a target revoked meanwhile).</returns>
+    private async Task<EnrollmentResult?> LockAndGuardLastPlannerAsync(
+        Enrollment enrollment,
+        string? newRole,
+        CancellationToken cancellationToken)
+    {
+        var exerciseId = enrollment.ExerciseId;
+        var targetId = enrollment.Id;
+
+        // org-scope-exempt(TenantChecked): exerciseId is the target's exercise, just resolved by FindReachableAsync inside
+        // the caller's own scope and an InOrganization exercise; this only locks that one exercise's planners + the target.
+        await _dbContext.Enrollments
+            .IgnoreQueryFilters()
+            .Active()
+            .Where(e => e.ExerciseId == exerciseId && (e.Role == EnrollmentRoles.Planner || e.Id == targetId))
+            .ExecuteUpdateAsync(set => set.SetProperty(e => e.Role, e => e.Role), cancellationToken);
+
+        // org-scope-exempt(TenantChecked): the same caller-reachable exercise as the lock above; read under that lock.
+        var rows = await _dbContext.Enrollments
+            .IgnoreQueryFilters()
+            .Active()
+            .AsNoTracking()
+            .Where(e => e.ExerciseId == exerciseId && (e.Role == EnrollmentRoles.Planner || e.Id == targetId))
+            .Select(e => new { e.Id, e.Role, e.IsLead })
+            .ToListAsync(cancellationToken);
+
+        var fresh = rows.FirstOrDefault(row => row.Id == targetId);
+        if (fresh is null || !EnrollmentRoles.IsStaffRole(fresh.Role))
+        {
+            // Revoked by a concurrent request after it was first read: the same bare 404 as a second revoke.
+            return EnrollmentResult.NotFound();
+        }
+
+        // Sync the committed state onto the tracked entity WITHOUT marking it modified (the change below is then the
+        // only thing written, and is judged against the current role and lead).
+        var entry = _dbContext.Entry(enrollment);
+        entry.Property(e => e.Role).OriginalValue = fresh.Role;
+        entry.Property(e => e.Role).CurrentValue = fresh.Role;
+        entry.Property(e => e.IsLead).OriginalValue = fresh.IsLead;
+        entry.Property(e => e.IsLead).CurrentValue = fresh.IsLead;
+
+        var losesPlanner = string.Equals(fresh.Role, EnrollmentRoles.Planner, StringComparison.Ordinal)
+            && !string.Equals(newRole, EnrollmentRoles.Planner, StringComparison.Ordinal);
+        if (losesPlanner && !rows.Any(row => row.Id != targetId && string.Equals(row.Role, EnrollmentRoles.Planner, StringComparison.Ordinal)))
+        {
+            return EnrollmentResult.Conflict(LastPlannerError);
+        }
+
+        return null;
     }
 
     /// <summary>
@@ -556,6 +736,15 @@ public sealed partial class EnrollmentService
         CultureInfo.InvariantCulture,
         $"{{\"role\":{JsonSerializer.Serialize(role)},\"previousRole\":{JsonSerializer.Serialize(previousRole)}}}");
 
+    private static bool IsLeadCheckViolation(SqlException? exception) =>
+        exception is { Number: CheckConstraintErrorNumber }
+        && (exception.Message.Contains(LeadNotRevokedConstraint, StringComparison.Ordinal)
+            || exception.Message.Contains("CK_Enrollments_IsLead_ControllerOnly", StringComparison.Ordinal));
+
+    private static bool IsCheckViolation(DbUpdateException exception, string constraint) =>
+        exception.InnerException is SqlException { Number: CheckConstraintErrorNumber } sql
+        && sql.Message.Contains(constraint, StringComparison.Ordinal);
+
     private static bool IsUniqueKeyViolation(DbUpdateException exception) =>
         exception.InnerException is SqlException
         {
@@ -610,15 +799,18 @@ public sealed partial class EnrollmentService
             enrollment = await (
                 // org-scope-exempt(TenantChecked): the row must inner-join an Exercise of the caller's OWN
                 // server-resolved organization, so another customer's enrollment is the same bare 404 as a missing one.
-                from e in _dbContext.Enrollments.IgnoreQueryFilters()
-                join x in _dbContext.Exercises.AsNoTracking().InOrganization(caller.OrganizationId) on e.ExerciseId equals x.Id
+                // NO AsNoTracking anywhere in this query (identity-auth-roles/21): it is a query-level switch in EF Core, so on
+                // the joined Exercises it made the whole query untracked and the org admin's role change, lead release and
+                // soft-delete revoke were silently never saved. Only `e` is projected, so no exercise row is tracked.
+                from e in _dbContext.Enrollments.IgnoreQueryFilters().Active()
+                join x in _dbContext.Exercises.InOrganization(caller.OrganizationId) on e.ExerciseId equals x.Id
                 where e.Id == enrollmentId
                 select e).FirstOrDefaultAsync(cancellationToken);
         }
         else
         {
             // A planner: the central exercise filter confines this to the resolved exercise.
-            enrollment = await _dbContext.Enrollments.FirstOrDefaultAsync(e => e.Id == enrollmentId, cancellationToken);
+            enrollment = await _dbContext.Enrollments.Active().FirstOrDefaultAsync(e => e.Id == enrollmentId, cancellationToken);
         }
 
         if (enrollment is null)

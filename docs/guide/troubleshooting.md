@@ -159,6 +159,12 @@ When a new version is ready, the player sees a small banner, **A fresh version i
 | "You're not assigned to this exercise. Contact your planner." | Your username and secret are correct, but you have no role on the exercise at this address. | Check that you are using the right exercise address. Ask Dynamis support to assign you. |
 | "This address isn't configured for staff sign-in — check the URL your planner gave you." | The web address does not belong to an exercise. | Check the address. Staff sign-in is the exercise address followed by `/staff/login`. |
 
+**"This link is invalid or has expired."** (on the set-password page): a reset link works once, for 60
+minutes. Ask your organization admin for a new one.
+
+**"Choose a different password."** or a similar message: the new password is too short (fewer than 12
+characters), too common, or contains your name, email or organization name. Try a longer phrase.
+
 **"You need the … role to open …"**: you are signed in, but your role cannot open that screen. See
 [Roles](getting-started.md#roles).
 

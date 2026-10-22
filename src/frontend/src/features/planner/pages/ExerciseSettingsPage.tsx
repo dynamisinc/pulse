@@ -20,7 +20,8 @@
  * right — the Cadence/COBRA idiom for dense operator config, chosen over tabs
  * because it keeps scaling as more panels land.
  *
- * Seven sections, from ONE registry (`SECTIONS` below). Readiness is listed first in the
+ * Eight sections, from ONE registry (`SECTIONS` below); the eighth, Staff (identity-auth-roles
+ * story 20), is shown only to a role that may assign staff. Readiness is listed first in the
  * nav (the go-live view; exercise-build-golive story 03, a self-contained read-only
  * panel) but is NOT the arrival section: `DEFAULT_SECTION` stays Identity & schedule.
  * The numbered list below is the original six:
@@ -223,6 +224,7 @@ import {
   faPenToSquare,
   faShieldHalved,
   faTriangleExclamation,
+  faUsers,
 } from '@fortawesome/free-solid-svg-icons'
 import CobraStyles from '@/theme/CobraStyles'
 import { usePermissions } from '@/core/auth'
@@ -240,6 +242,7 @@ import { PracticeModePanel } from '../components/PracticeModePanel'
 import { AccountImport } from '../components/AccountImport'
 import { ReadinessPanel } from '../components/ReadinessPanel'
 import { StageExerciseControl } from '../components/StageExerciseControl'
+import { StaffPanel } from '../components/StaffPanel'
 import { PANEL_SAVE_BAR_SCROLL_PADDING_PX } from '../components/PanelSaveBar'
 
 // ---------------------------------------------------------------------------
@@ -253,6 +256,7 @@ type ExerciseConfigSectionId =
   | 'chrome'
   | 'practice'
   | 'accounts'
+  | 'staff'
 
 /**
  * What a section shows.
@@ -329,6 +333,14 @@ const SECTIONS: readonly ExerciseConfigSection[] = [
     label: 'Import participant accounts',
     icon: faFileImport,
     content: { kind: 'panel', panel: <AccountImport /> },
+  },
+  {
+    // Staff assignment (identity-auth-roles story 20, #575a). Gated by `assignStaff` (see the
+    // workspace): the section is left out of the nav and never mounted without it.
+    id: 'staff',
+    label: 'Staff',
+    icon: faUsers,
+    content: { kind: 'panel', panel: <StaffPanel /> },
   },
 ]
 
@@ -496,7 +508,11 @@ function ExerciseSettingsWorkspace() {
   // unknown `?section=` value degrades to `DEFAULT_SECTION` rather than
   // throwing, so a stale or hand-edited link never crashes the page.
   const [searchParams, setSearchParams] = useSearchParams()
-  const activeId = resolveSectionId(searchParams.get(SECTION_QUERY_PARAM))
+  const canAssignStaff = usePermissions().can('assignStaff')
+  const resolvedId = resolveSectionId(searchParams.get(SECTION_QUERY_PARAM))
+  // The Staff section exists only for a role that may assign staff (a deep link falls back).
+  const activeId = resolvedId === 'staff' && !canAssignStaff ? DEFAULT_SECTION : resolvedId
+  const visibleSections = SECTIONS.filter(section => section.id !== 'staff' || canAssignStaff)
 
   const [settingsStatus, setSettingsStatus] = useState<ExerciseSettingsStatus>(
     CLEAN_EXERCISE_SETTINGS_STATUS,
@@ -657,7 +673,7 @@ function ExerciseSettingsWorkspace() {
               gap: 0.5,
             }}
           >
-            {SECTIONS.map(section => (
+            {visibleSections.map(section => (
               <Box
                 component="li"
                 key={section.id}
@@ -771,7 +787,7 @@ function ExerciseSettingsWorkspace() {
           </SectionShell>
 
           {/* Self-contained panels: one entry each, mounted from the registry. */}
-          {SECTIONS.map(section =>
+          {visibleSections.map(section =>
             section.content.kind === 'panel' ? (
               <SectionShell key={section.id} active={section.id === activeId}>
                 {section.content.panel}
