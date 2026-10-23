@@ -361,12 +361,37 @@ public sealed class BootstrapService
         {
             Id = Organization.DefaultOrganizationId,
             Name = Organization.DefaultOrganizationName,
-            Slug = OrganizationSlug.FromName(Organization.DefaultOrganizationName),
+            Slug = await UniqueOrganizationSlugAsync(Organization.DefaultOrganizationName, cancellationToken),
             CreatedAt = now,
         });
 
         return Organization.DefaultOrganizationId;
     }
+
+    /// <summary>
+    /// #602 L-5: the slug for a new organization named <paramref name="name"/> that does not collide with an existing
+    /// one — <see cref="OrganizationSlug.FromName"/>, then <c>-2</c>, <c>-3</c>… exactly as the
+    /// <c>AdminIdentityFoundation</c> backfill suffixes (<see cref="OrganizationSlug.WithCollisionSuffix"/>) — so a
+    /// re-created default organization never trips the unique slug index.
+    /// </summary>
+    private async Task<string> UniqueOrganizationSlugAsync(string name, CancellationToken cancellationToken)
+    {
+        var baseSlug = OrganizationSlug.FromName(name);
+        var slug = baseSlug;
+        for (var ordinal = 2; await SlugTakenAsync(slug, cancellationToken); ordinal++)
+        {
+            slug = OrganizationSlug.WithCollisionSuffix(baseSlug, ordinal);
+        }
+
+        return slug;
+    }
+
+    private async Task<bool> SlugTakenAsync(string slug, CancellationToken cancellationToken) =>
+        // org-scope-exempt(TenantRoot): an existence probe of the TENANT ROOT table by its unique slug, to keep a new
+        // tenant's slug unique — there is no outer scope to bound it by, and it returns no row, only whether one exists.
+        await _dbContext.Organizations
+            .AsNoTracking()
+            .AnyAsync(o => o.Slug == slug, cancellationToken);
 
     /// <summary>Normalizes the requested time zone: trimmed, bounded, defaulting to <c>UTC</c> when blank.</summary>
     private static string NormalizeTimeZone(string? raw)

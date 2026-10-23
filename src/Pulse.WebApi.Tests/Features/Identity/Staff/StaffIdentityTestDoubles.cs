@@ -3,6 +3,7 @@ namespace Pulse.WebApi.Tests.Features.Identity.Staff;
 using System;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Pulse.WebApi.Data.Entities;
 using Pulse.WebApi.Features.Identity.Providers;
@@ -131,4 +132,54 @@ public sealed class CountingSaveChangesInterceptor : SaveChangesInterceptor
         SaveChangesCallCount++;
         return base.SavingChangesAsync(eventData, result, cancellationToken);
     }
+}
+
+/// <summary>
+/// #602 M-2 / M-5: a counting <see cref="IPasswordHasher{TUser}"/> over the real PBKDF2 hasher — the spy the fixed
+/// slow-verification tests read. Every <see cref="VerifyHashedPassword"/> is one slow (PBKDF2) verification, real or
+/// dummy, so the count is what an attacker's stopwatch would see, without measuring wall time.
+/// </summary>
+public sealed class CountingPasswordHasher : IPasswordHasher<Person>
+{
+    private readonly PasswordHasher<Person> _inner = new();
+    private int _verifications;
+
+    /// <summary>How many slow verifications have run through this hasher.</summary>
+    public int Verifications => Volatile.Read(ref _verifications);
+
+    /// <inheritdoc />
+    public string HashPassword(Person user, string password) => _inner.HashPassword(user, password);
+
+    /// <inheritdoc />
+    public PasswordVerificationResult VerifyHashedPassword(Person user, string hashedPassword, string providedPassword)
+    {
+        Interlocked.Increment(ref _verifications);
+        return _inner.VerifyHashedPassword(user, hashedPassword, providedPassword);
+    }
+}
+
+/// <summary>Builds the request-scoped <see cref="StaffPasswordVerifier"/> the way DI does, for directly-built services.</summary>
+public static class TestPasswordVerifiers
+{
+    /// <summary>A verifier over the real PBKDF2 hasher (or the given spy).</summary>
+    /// <param name="hasher">An optional hasher (e.g. a <see cref="CountingPasswordHasher"/>).</param>
+    /// <returns>A fresh per-request verifier.</returns>
+    public static StaffPasswordVerifier New(IPasswordHasher<Person>? hasher = null) =>
+        new(hasher ?? new PasswordHasher<Person>());
+}
+
+/// <summary>
+/// The staff sign-in wall-clock floor for funnels a test builds directly: BOTH floors explicitly 0 (#602 W1). The
+/// production floors are the options' own non-zero defaults; only tests switch them off.
+/// </summary>
+public static class TestSignInTiming
+{
+    /// <summary>No floor (both 0), on the system clock.</summary>
+    public static StaffSignInTiming NoFloor { get; } = new(
+        Microsoft.Extensions.Options.Options.Create(new StaffSignInTimingOptions
+        {
+            OrgSignInFloorMilliseconds = 0,
+            ExerciseBoundSignInFloorMilliseconds = 0,
+        }),
+        TimeProvider.System);
 }

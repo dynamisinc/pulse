@@ -94,7 +94,7 @@ public sealed class PulsePasswordIdentityProviderTests
                     DisplayName = "Allowlisted",
                 },
             ],
-        })));
+        })), TestPasswordVerifiers.New());
 
     private async Task<(Guid Org, string Email, string Subject)> SeedStaffAsync(bool withPulsePassword)
     {

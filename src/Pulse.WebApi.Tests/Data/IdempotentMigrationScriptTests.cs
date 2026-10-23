@@ -234,6 +234,17 @@ public class IdempotentMigrationScriptTests
             SELECT COUNT(*) FROM [Accounts] a JOIN [Enrollments] e ON e.[Id] = a.[EnrollmentId]
             WHERE a.[Id] = '{seed.PioAccount}' AND e.[Role] = 'pio' AND e.[PersonaId] IS NULL
             """)).Should().Be(1, "the pio account's role moves to its enrollment");
+        (await Count($"""
+            SELECT COUNT(*) FROM [Accounts] a JOIN [Enrollments] e ON e.[Id] = a.[EnrollmentId]
+            WHERE a.[Id] = '{seed.StaffRoleAccount}' AND e.[Id] = a.[Id] AND e.[Role] = 'controller'
+              AND e.[PersonaId] IS NULL AND e.[PersonId] IS NULL AND e.[IsLead] = 0 AND e.[ExerciseId] = '{seed.Exercise}'
+            """)).Should().Be(
+                1,
+                "#602 Low-2: a legacy STAFF-role account carrying a persona takes the backfill's CASE ... ELSE NULL branch — "
+                + "its role is lower-cased onto its same-id enrollment and the persona is dropped (the enrollment check "
+                + "constraint refuses one on a staff role); an account-backed controller is never the lead");
+        (await Count($"SELECT COUNT(*) FROM [Enrollments] WHERE [ExerciseId] = '{seed.Exercise}' AND [IsLead] = 1"))
+            .Should().Be(1, "the exercise still has exactly one lead — the person-backed controller");
         (await Count("SELECT COUNT(*) FROM sys.columns WHERE [object_id] = OBJECT_ID('Accounts') AND [name] IN ('Role', 'PersonaId')"))
             .Should().Be(0, "the old homes are dropped once the data has moved");
 
@@ -268,6 +279,7 @@ public class IdempotentMigrationScriptTests
         Guid PersonaId,
         Guid ParticipantAccount,
         Guid PioAccount,
+        Guid StaffRoleAccount,
         Guid ControllerSession,
         Guid AdminSession,
         Guid ParticipantSession,
@@ -285,6 +297,7 @@ public class IdempotentMigrationScriptTests
             var personaId = Guid.NewGuid();
             var participantAccount = Guid.NewGuid();
             var pioAccount = Guid.NewGuid();
+            var staffRoleAccount = Guid.NewGuid();
             var controllerSession = Guid.NewGuid();
             var adminSession = Guid.NewGuid();
             var participantSession = Guid.NewGuid();
@@ -301,7 +314,8 @@ public class IdempotentMigrationScriptTests
                     ('{adminAssignment}', '{admin}', '{exercise}', N'orgAdmin', SYSDATETIMEOFFSET());
                 INSERT INTO [Accounts] ([Id], [ExerciseId], [Username], [DisplayName], [Role], [PersonaId], [CreatedAt], [FailedLoginCount]) VALUES
                     ('{participantAccount}', '{exercise}', N'user_{participantAccount:N}', N'Legacy Participant', N'participant', '{personaId}', SYSDATETIMEOFFSET(), 0),
-                    ('{pioAccount}', '{exercise}', N'user_{pioAccount:N}', N'Legacy PIO', N'pio', NULL, SYSDATETIMEOFFSET(), 0);
+                    ('{pioAccount}', '{exercise}', N'user_{pioAccount:N}', N'Legacy PIO', N'pio', NULL, SYSDATETIMEOFFSET(), 0),
+                    ('{staffRoleAccount}', '{exercise}', N'user_{staffRoleAccount:N}', N'Legacy Staff-Role Account', N'Controller', '{personaId}', SYSDATETIMEOFFSET(), 0);
                 INSERT INTO [Sessions] ([Id], [TokenHash], [Kind], [ExerciseId], [PrincipalId], [StaffUserId], [AccountId], [PersonaId],
                                         [Role], [ActingHumanId], [IsReadOnly], [IssuedAt], [ExpiresAt], [RefreshExpiresAt]) VALUES
                     ('{controllerSession}', N'hash-{controllerSession:N}', N'staff', '{exercise}', N'{controller}', '{controller}', NULL, NULL,
@@ -320,7 +334,7 @@ public class IdempotentMigrationScriptTests
 
             return new LegacyIdentityRows(
                 exercise, controller, admin, controllerAssignment, adminAssignment, personaId, participantAccount, pioAccount,
-                controllerSession, adminSession, participantSession, post, wentLiveAt);
+                staffRoleAccount, controllerSession, adminSession, participantSession, post, wentLiveAt);
         }
     }
 
