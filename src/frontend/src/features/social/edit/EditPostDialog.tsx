@@ -27,10 +27,14 @@
  * No wall-clock time is shown (COR-053).
  */
 
-import { useRef, useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faTriangleExclamation } from '@fortawesome/free-solid-svg-icons'
 import { EmojiPicker, EmojiPickerButton, useEmojiPicker } from '@/core/emoji'
+import {
+  EXERCISE_ENDED_WRITE_MESSAGE,
+  useExerciseEndedFlag,
+} from '@/features/participant-shell/writeGate'
 import { DEFAULT_CHAR_LIMIT } from '../hooks/useComposePost'
 import type { PostMedia } from '../types/post'
 import { EditDialogShell } from './EditDialogShell'
@@ -88,6 +92,12 @@ export function EditPostDialog({
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const textRef = useRef<HTMLTextAreaElement | null>(null)
+  // EndEx while this dialog is open: Save is off and the reason is shown in place.
+  const ended = useExerciseEndedFlag()
+  const endedRef = useRef(ended)
+  useEffect(() => {
+    endedRef.current = ended
+  }, [ended])
 
   const emoji = useEmojiPicker({
     targetRef: textRef,
@@ -101,7 +111,7 @@ export function EditPostDialog({
   const isOver = remaining < 0
   const isLow = !isOver && remaining <= LOW_REMAINING
   const unchanged = text === initialText
-  const canSave = text.trim() !== '' && !isOver && !unchanged
+  const canSave = text.trim() !== '' && !isOver && !unchanged && !ended
 
   const counterClass = isOver
     ? `${styles.counter} ${styles.counterOver}`
@@ -139,7 +149,12 @@ export function EditPostDialog({
     } catch (failure) {
       editedPostsStore.setPendingText(postId, null, generation)
       const reason = failure instanceof EditPostError ? failure.reason : 'failed'
-      setError(editFailureMessage(reason))
+      // A 403 while the exercise has ended is the gate, not "not yours".
+      setError(
+        reason === 'forbidden' && endedRef.current
+          ? EXERCISE_ENDED_WRITE_MESSAGE
+          : editFailureMessage(reason),
+      )
       if (reason === 'window-closed' || reason === 'edit-limit') onRejected?.(reason)
       setSaving(false)
     }
@@ -177,6 +192,13 @@ export function EditPostDialog({
         </div>
 
         {emoji.isOpen && <EmojiPicker {...emoji.pickerProps} className={styles.emojiPicker} />}
+
+        {ended && error === null && (
+          <p className={styles.error} role="alert" data-testid="edit-post-ended">
+            <FontAwesomeIcon icon={faTriangleExclamation} aria-hidden="true" />
+            <span>{EXERCISE_ENDED_WRITE_MESSAGE}</span>
+          </p>
+        )}
 
         {error !== null && (
           <p className={styles.error} role="alert" data-testid="edit-post-error">

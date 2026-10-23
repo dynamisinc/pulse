@@ -60,6 +60,16 @@
 import { useCallback, useLayoutEffect, useRef, useState } from 'react'
 import { useSession } from '@/core/auth'
 import { followPersona, unfollowPersona } from '../services/followService'
+import { useTransientMessage } from './useTransientMessage'
+import {
+  EXERCISE_ENDED_WRITE_MESSAGE,
+  isEndedRefusal,
+  useCanWrite,
+  useExerciseEndedFlag,
+} from '@/features/participant-shell/writeGate'
+
+/** Announced when a follow / unfollow write fails and is rolled back. */
+export const FOLLOW_FAILURE_MESSAGE = "Couldn't update your follow. Please try again."
 
 /** Options for {@link useFollow}. */
 export interface UseFollowOptions {
@@ -88,6 +98,8 @@ export interface UseFollowResult {
   readonly isReadOnly: boolean
   /** True while a toggle's request is in flight — a second toggle is a no-op until it settles. */
   readonly pending: boolean
+  /** The brief failure message to announce (polite live region) after a rollback, or `null`. */
+  readonly errorMessage: string | null
   /**
    * Toggles follow/unfollow: flips state + count optimistically, then rolls
    * BOTH back if the write fails. A no-op unless `canFollow`, and a no-op
@@ -104,12 +116,17 @@ export interface UseFollowResult {
 export function useFollow(options: UseFollowOptions): UseFollowResult {
   const { personaId, initialFollowerCount, initiallyFollowing = false } = options
   const session = useSession()
+  // Read-only session OR exercise ended: every write is off (personal READ views are unaffected).
+  const canWrite = useCanWrite()
+  const ended = useExerciseEndedFlag()
+  const notice = useTransientMessage()
+  const { show, clear } = notice
 
   const [isFollowing, setIsFollowing] = useState(initiallyFollowing)
   const [followerCount, setFollowerCount] = useState(initialFollowerCount)
   const [pending, setPending] = useState(false)
 
-  const isReadOnly = session.isReadOnly
+  const isReadOnly = !canWrite
   // A viewer can never follow THEMSELVES: the server rejects a self-follow with 400
   // (story 07 AC8 — a self-edge would inflate a persona's own displayed follower count
   // with itself). Without this clause the control renders on the viewer's own profile
@@ -181,9 +198,10 @@ export function useFollow(options: UseFollowOptions): UseFollowResult {
   }, [personaId])
 
   const toggleFollow = useCallback(() => {
-    if (session.isReadOnly || session.personaId === undefined) return
+    if (!canWrite || session.personaId === undefined) return
     if (session.personaId === personaId) return // self-follow: server 400s (story 07 AC8)
     if (pending) return
+    clear()
 
     const wasFollowing = isFollowing
     const previousCount = followerCount
@@ -228,7 +246,7 @@ export function useFollow(options: UseFollowOptions): UseFollowResult {
         )
         setPending(false)
       })
-      .catch(() => {
+      .catch((failure: unknown) => {
         if (requestTokenRef.current !== token) return
         // Roll back BOTH the toggle and the count — a failed write must never
         // leave the button showing "Following" (or the count bumped) when the
@@ -236,8 +254,12 @@ export function useFollow(options: UseFollowOptions): UseFollowResult {
         setIsFollowing(wasFollowing)
         setFollowerCount(previousCount)
         setPending(false)
+        // W2 (#661): a refused follow used to roll back SILENTLY. Say so, politely.
+        show(isEndedRefusal(failure, ended) ? EXERCISE_ENDED_WRITE_MESSAGE : FOLLOW_FAILURE_MESSAGE)
       })
-  }, [session.isReadOnly, session.personaId, pending, isFollowing, followerCount, personaId])
+  }, [
+    canWrite, session.personaId, pending, isFollowing, followerCount, personaId, ended, show, clear,
+  ])
 
   return {
     isFollowing,
@@ -245,6 +267,7 @@ export function useFollow(options: UseFollowOptions): UseFollowResult {
     canFollow,
     isReadOnly,
     pending,
+    errorMessage: notice.message,
     toggleFollow,
   }
 }

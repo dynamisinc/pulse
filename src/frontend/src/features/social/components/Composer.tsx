@@ -95,6 +95,7 @@ import {
 } from '../hooks/useComposePost'
 import { AttachButton, ComposerMediaTray } from './ComposerMedia'
 import { ParticipantTooltip } from './ParticipantTooltip'
+import { EXERCISE_ENDED_WRITE_MESSAGE } from '@/features/participant-shell/writeGate'
 import styles from './Composer.module.css'
 
 export interface ComposerProps {
@@ -126,7 +127,7 @@ export function Composer({ charLimit, onPosted }: ComposerProps) {
 
   // COR-015 / D1-011: the composer is absent in a read-only session, never a
   // disabled form — a screen reader must not announce controls that can't be used.
-  if (compose.isReadOnly) return null
+  if (compose.isReadOnly || compose.hiddenByEnd) return null
 
   return (
     <ComposerForm
@@ -206,7 +207,7 @@ export function ComposerForm({
     targetRef: textRef,
     value: compose.text,
     onChange: compose.setText,
-    disabled: compose.isPublishing,
+    disabled: compose.isPublishing || compose.isEnded,
   })
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
@@ -255,13 +256,13 @@ export function ComposerForm({
         placeholder={placeholder}
         aria-label={textLabel}
         aria-describedby={inputDescribedBy}
-        readOnly={compose.isPublishing}
+        readOnly={compose.isPublishing || compose.isEnded}
         rows={rows}
       />
 
       <ComposerMediaTray
         attachments={compose.attachments}
-        disabled={compose.isPublishing}
+        disabled={compose.isPublishing || compose.isEnded}
         fallbackFocusRef={attachButtonRef}
         onAltChange={compose.setAttachmentAlt}
         onCancel={compose.cancelAttachment}
@@ -280,7 +281,7 @@ export function ComposerForm({
           </p>
           {/* Retry only when nothing was created. After a refusal or an unreadable
               2xx a Retry would be refused again / could double-post (see header). */}
-          {compose.publishErrorKind === 'failed' && (
+          {compose.publishErrorKind === 'failed' && !compose.isEnded && (
             <button
               type="button"
               className={styles.retryButton}
@@ -298,7 +299,7 @@ export function ComposerForm({
           <AttachButton
             buttonRef={attachButtonRef}
             onPick={compose.attachFiles}
-            disabled={compose.isPublishing}
+            disabled={compose.isPublishing || compose.isEnded}
           />
           <ParticipantTooltip label="Add emoji">
             <EmojiPickerButton {...emoji.buttonProps} className={styles.emojiButton} />
@@ -327,6 +328,14 @@ export function ComposerForm({
           </button>
         </div>
       </div>
+
+      {/* EndEx with a draft open: the draft stays readable and copyable; say why it cannot go. */}
+      {compose.isEnded && (
+        <p className={styles.publishErrorText} role="alert" data-testid="composer-ended">
+          <FontAwesomeIcon icon={faTriangleExclamation} aria-hidden="true" />
+          <span>{EXERCISE_ENDED_WRITE_MESSAGE}</span>
+        </p>
+      )}
 
       {emoji.isOpen && <EmojiPicker {...emoji.pickerProps} className={styles.emojiPicker} />}
 

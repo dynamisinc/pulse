@@ -47,6 +47,13 @@ public sealed class ParticipantOverlayStateDto
     public required string Message { get; init; }
 
     /// <summary>
+    /// Whether the exercise has ended (<c>completed</c>) — copied verbatim from the composed GET body's
+    /// <see cref="OverlayStateResponse.Ended"/>, so both pushers carry exactly what a re-GET would serve.
+    /// </summary>
+    [JsonPropertyName("ended")]
+    public required bool Ended { get; init; }
+
+    /// <summary>
     /// The monotonic write sequence of this state (0 = never written). Opaque to participants — it carries no
     /// exercise content and no staff information; the client uses it only to DROP a push that is older than
     /// what it has already applied, so a late out-of-order push can never re-show a cleared holding page.
@@ -73,6 +80,7 @@ public sealed class ParticipantOverlayStateDto
             State = composed.State,
             Register = composed.Register,
             Message = composed.Message,
+            Ended = composed.Ended,
             Sequence = sequence,
         };
     }

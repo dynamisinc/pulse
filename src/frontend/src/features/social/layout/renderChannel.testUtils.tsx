@@ -31,6 +31,7 @@ import {
   type ShellMountProps,
   type ShellVariant,
 } from '@/features/participant-shell/mountContract'
+import { ExerciseEndedProvider } from '@/features/participant-shell/writeGate'
 import { SocialChannel } from '../SocialChannel'
 import { MemorySocialNavigationProvider } from './SocialNavigationProvider'
 
@@ -59,6 +60,8 @@ export interface RenderChannelOptions {
    * (what `createRoleAwareRoutes` does). Needed to observe the sign-out redirect.
    */
   appRoutes?: boolean
+  /** Start in the ENDED (read-only review) state. Flip later via `setShellMount({ ended })`. */
+  ended?: boolean
 }
 
 /** What `renderChannel` returns: RTL's result plus a way to move the shell's mount state. */
@@ -68,7 +71,11 @@ export interface RenderChannelResult extends RenderResult {
    * component (and the query client) mounted: how the shell's variant query settles after a
    * cold load (MT-D8).
    */
-  setShellMount: (next: { variant: ShellMountProps['variant'], variantPending?: boolean }) => void
+  setShellMount: (next: {
+    variant?: ShellMountProps['variant']
+    variantPending?: boolean
+    ended?: boolean
+  }) => void
 }
 
 export function renderChannel(options: RenderChannelOptions = {}): RenderChannelResult {
@@ -77,24 +84,30 @@ export function renderChannel(options: RenderChannelOptions = {}): RenderChannel
   setExerciseClock({ scenarioNow: () => SCENARIO_NOW })
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
 
-  const tree = (variant: ShellMountProps['variant'], variantPending: boolean | undefined) => {
+  const tree = (
+    variant: ShellMountProps['variant'],
+    variantPending: boolean | undefined,
+    ended: boolean,
+  ) => {
     const mount: ShellMountProps = { variant, scenarioNow: SCENARIO_NOW, variantPending }
     const channel = <SocialChannel />
     const stack = (
       <ExerciseContextProvider>
         <SessionProvider>
           <ShellContextProvider value={mount}>
-            {memory === undefined
-              ? channel
-              : (
-                <MemorySocialNavigationProvider
-                  {...(memory.initialEntries !== undefined
-                    ? { initialEntries: memory.initialEntries }
-                    : {})}
-                >
-                  {channel}
-                </MemorySocialNavigationProvider>
-              )}
+            <ExerciseEndedProvider ended={ended}>
+              {memory === undefined
+                ? channel
+                : (
+                  <MemorySocialNavigationProvider
+                    {...(memory.initialEntries !== undefined
+                      ? { initialEntries: memory.initialEntries }
+                      : {})}
+                  >
+                    {channel}
+                  </MemorySocialNavigationProvider>
+                )}
+            </ExerciseEndedProvider>
           </ShellContextProvider>
         </SessionProvider>
       </ExerciseContextProvider>
@@ -122,9 +135,17 @@ export function renderChannel(options: RenderChannelOptions = {}): RenderChannel
     )
   }
 
-  const result = render(tree(options.variant ?? 'full', options.variantPending))
+  let current = {
+    variant: options.variant ?? 'full',
+    variantPending: options.variantPending,
+    ended: options.ended ?? false,
+  }
+  const result = render(tree(current.variant, current.variantPending, current.ended))
   return {
     ...result,
-    setShellMount: next => result.rerender(tree(next.variant, next.variantPending)),
+    setShellMount: next => {
+      current = { ...current, ...next }
+      result.rerender(tree(current.variant, current.variantPending, current.ended))
+    },
   }
 }

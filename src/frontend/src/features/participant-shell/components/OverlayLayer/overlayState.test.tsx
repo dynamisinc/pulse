@@ -55,6 +55,7 @@ describe('useOverlayState (boundary-mocked branch)', () => {
       state: 'broadcast',
       register: 'out-of-fiction',
       message: 'Severe weather advisory cancelled; this is a real emergency.',
+      ended: false,
     }
     mockGet.mockResolvedValue({ data: mockedState } as Awaited<ReturnType<typeof api.get>>)
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })

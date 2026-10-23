@@ -60,7 +60,7 @@ const CHROME_DISABLED: ChromeConfig = {
 }
 
 function overlayState(overrides: Partial<OverlayState>): OverlayState {
-  return { state: 'none', register: 'in-fiction', message: '', ...overrides }
+  return { state: 'none', register: 'in-fiction', message: '', ended: false, ...overrides }
 }
 
 beforeEach(() => {

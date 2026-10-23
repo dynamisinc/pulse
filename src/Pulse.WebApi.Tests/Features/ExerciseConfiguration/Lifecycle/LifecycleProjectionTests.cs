@@ -126,6 +126,50 @@ public sealed class LifecycleProjectionTests
         response.Message.Should().BeEmpty();
     }
 
+    /// <summary>
+    /// The ended, read-only review (Tom, 2026-10-19): the lifecycle projection sets the additive <c>ended</c> flag
+    /// exactly in <c>completed</c> (and its legacy alias), with the overlay state left at <c>none</c>.
+    /// </summary>
+    [Theory]
+    [InlineData("build", false)]
+    [InlineData("staged", false)]
+    [InlineData("live", false)]
+    [InlineData("paused", false)]
+    [InlineData("completed", true)]
+    [InlineData("complete", true)]
+    [InlineData("Completed", true)]
+    [InlineData("archived", false)]
+    [InlineData("active", false)]
+    [InlineData("scheduled", false)]
+    [InlineData("running", false)]
+    [InlineData("", false)]
+    public async Task OverlayProjection_SetsEnded_OnlyInCompleted(string status, bool ended)
+    {
+        LifecycleOverlayComposer.IsEnded(status).Should().Be(ended);
+        LifecycleOverlayComposer.IsEnded(null).Should().BeFalse("a missing status has not ended (fail closed)");
+
+        var response = await new LifecycleOverlayStateProjection(new NoSteeringOverlaySource())
+            .ProjectAsync(SourceIn(status));
+
+        response.Ended.Should().Be(ended, "'ended' is true exactly when the exercise is completed ('{0}')", status);
+        if (ended)
+        {
+            response.State.Should().Be("none", "completed is never the blocking 'endex' overlay (#390 ruling)");
+        }
+    }
+
+    /// <summary>A steering overlay cannot clear the flag: it is the lifecycle's, set after composition.</summary>
+    [Fact]
+    public async Task OverlayProjection_InCompleted_StaysEnded_WhateverSteeringContributes()
+    {
+        var freeze = new OverlayContribution(LifecycleOverlayWire.Pause, LifecycleOverlayWire.InFiction, "held");
+
+        var response = await new LifecycleOverlayStateProjection(new StubSteeringOverlaySource(freeze))
+            .ProjectAsync(SourceIn("completed"));
+
+        response.Ended.Should().BeTrue();
+    }
+
     // ---------------------------------------------------------------------------------------------
     // The reconciliation (integration hazard 1): ONE composed overlay, never two competing ones.
     // ---------------------------------------------------------------------------------------------

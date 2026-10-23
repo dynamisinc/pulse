@@ -253,7 +253,7 @@ public sealed class SteeringPauseOverlayProjectionTests
 
     /// <summary>XC-002: the served body is the unchanged frozen three-field shape, with no staff field.</summary>
     [Fact]
-    public async Task TheServedBody_IsTheFrozenThreeFieldShape()
+    public async Task TheServedBody_IsTheFrozenThreeFieldShape_PlusEnded()
     {
         var exerciseId = Guid.NewGuid();
         var store = new OverlayStateService();
@@ -262,10 +262,12 @@ public sealed class SteeringPauseOverlayProjectionTests
         var overlay = await Build(store).ProjectAsync(SourceIn(exerciseId, ExerciseLifecycleStates.Live));
 
         typeof(OverlayStateResponse).GetProperties().Select(property => property.Name).Should().BeEquivalentTo(
-            ["State", "Register", "Message"],
-            "the frozen OverlayStateResponse is FILLED, never reshaped — and it structurally cannot carry "
-            + "actingHumanId, a PauseTier or a timestamp (XC-002/COR-018/COR-053)");
+            ["State", "Register", "Message", "Ended"],
+            "the frozen OverlayStateResponse is FILLED, never reshaped (plus the additive lifecycle 'ended' flag, Tom "
+            + "2026-10-19) — and it structurally cannot carry actingHumanId, a PauseTier or a timestamp "
+            + "(XC-002/COR-018/COR-053)");
         overlay.Should().NotBeNull();
+        overlay.Ended.Should().BeFalse("a live Freeze has not ended; the decorator passes the lifecycle's flag through");
     }
 
     /// <summary>

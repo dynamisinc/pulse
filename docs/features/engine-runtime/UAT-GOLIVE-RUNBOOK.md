@@ -13,6 +13,7 @@
 | A1 (with #573) and #571 are merged | Both PRs show *Merged*. #571's merge auto-deploys the backend and frontend; wait for **Deploy Backend** and **Deploy Frontend** to go green. |
 | UAT is healthy on `Fake` | `https://app-pulse-api-uat-dynamis.azurewebsites.net/health` returns 200. |
 | You can reach the bootstrap secret | The `uat` environment secret `BOOTSTRAP_SECRET`, which step 3 needs. |
+| UAT stays on ONE instance (B1, capacity 1) | Do not scale UAT out. Freeze (the pause tier) lives in the in-memory `PauseTierRegistry`, so it holds per instance only. A second instance would not see a Freeze set on the first, and participants routed to it could keep writing (#661 S4). |
 | Provider alerts are ON in this run | #571 sets `deployProviderAlerts = true`; the `PULSE_ALERT_OWNER_EMAIL` secret exists on `uat` (Tom, 10/17). If the secret were missing, the deploy fails with a clear message rather than deploying silently. |
 
 ## 0b. Capture the current app settings (before any deploy)

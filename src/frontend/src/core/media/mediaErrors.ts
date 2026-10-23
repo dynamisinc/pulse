@@ -56,6 +56,7 @@ export const MEDIA_ERROR_TEXT = {
   refused:
     'That upload was not accepted. Try a different file, or sign in again if this keeps happening.',
   unavailable: 'Uploads are not available right now.',
+  notAcceptedNow: 'That upload was not accepted right now. Try again in a moment.',
   failed: 'The upload failed. Check your connection and try again.',
 } as const
 
@@ -73,6 +74,9 @@ export function mediaUploadErrorMessage(status: number | undefined, kind?: Media
       return MEDIA_ERROR_TEXT.unsupported
     case 429:
       return MEDIA_ERROR_TEXT.rateLimited
+    case 409:
+      // A state conflict (e.g. the exercise is not accepting uploads), not a connection fault.
+      return MEDIA_ERROR_TEXT.notAcceptedNow
     case 400:
     case 401:
     case 403:

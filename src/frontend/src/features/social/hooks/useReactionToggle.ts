@@ -71,6 +71,11 @@ import { emitMockReactionEngagement } from '../services/mockEngagementChanges'
 import { postCountsStore } from '../services/postCountsStore'
 import { notificationsStore } from '../notifications/notificationsStore'
 import { useTransientMessage, type UseTransientMessageResult } from './useTransientMessage'
+import {
+  EXERCISE_ENDED_WRITE_MESSAGE,
+  isEndedRefusal,
+  useExerciseEndedFlag,
+} from '@/features/participant-shell/writeGate'
 
 /** Options for {@link useReactionToggle}. */
 export interface UseReactionToggleOptions {
@@ -122,6 +127,12 @@ export function useReactionToggle(options: UseReactionToggleOptions): UseReactio
   const { postId, kind, initialCount, initiallyActive, canAct, failureMessage, emitMockTelemetry } =
     options
   const ownNotice = useTransientMessage()
+  // A 403 while ended means "the exercise has ended", not a flaky write (read at failure time).
+  const ended = useExerciseEndedFlag()
+  const endedRef = useRef(ended)
+  useEffect(() => {
+    endedRef.current = ended
+  }, [ended])
   const { message, show, clear } = options.notice ?? ownNotice
 
   // Seed once. In mock mode the adapter's memory wins over the post's own flags
@@ -205,11 +216,15 @@ export function useReactionToggle(options: UseReactionToggleOptions): UseReactio
             emitMockReactionEngagement(postId, kind, state.counts[kind], generation)
           }
         },
-        () => {
+        (failure: unknown) => {
           // Roll back EXACTLY, and tell the viewer (polite live region).
           commit(previous)
           if (nextActive) notificationsStore.cancelOwnReaction(postId, kind)
-          show(failureMessage)
+          show(
+            isEndedRefusal(failure, endedRef.current)
+              ? EXERCISE_ENDED_WRITE_MESSAGE
+              : failureMessage,
+          )
         },
       )
       .finally(() => {

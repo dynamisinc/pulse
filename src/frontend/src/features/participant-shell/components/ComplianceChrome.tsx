@@ -76,7 +76,7 @@
  * styling only, never Cadence/COBRA.
  */
 
-import { useLayoutEffect, useRef, type CSSProperties } from 'react'
+import { useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
 import { useCssMediaQuery } from '@/core/hooks/useCssMediaQuery'
 import {
   SHELL_CHROME_BOTTOM_VAR,
@@ -84,6 +84,8 @@ import {
   SHELL_Z,
 } from '../mountContract'
 import { useChromeConfig } from '../chromeConfig'
+import { useExerciseEndedFlag } from '../writeGate'
+import { EXERCISE_ENDED_BANNER_TEXT, ExerciseEndedBanner } from './ExerciseEndedBanner'
 
 /** The shell's fixed compliance-chrome banner height (D7-005, SHELL-CONTRACT §1). */
 const BANNER_HEIGHT = '22px'
@@ -117,6 +119,19 @@ const TOP_WRAP_PADDING =
   `calc(env(safe-area-inset-top, 0px) + ${WRAP_PADDING_BLOCK}) env(safe-area-inset-right, 0px) ${WRAP_PADDING_BLOCK} env(safe-area-inset-left, 0px)`
 const BOTTOM_WRAP_PADDING =
   `${WRAP_PADDING_BLOCK} env(safe-area-inset-right, 0px) calc(env(safe-area-inset-bottom, 0px) + ${WRAP_PADDING_BLOCK}) env(safe-area-inset-left, 0px)`
+
+/** Visually hidden but still announced (the ended-banner live region). */
+const visuallyHiddenStyle: CSSProperties = {
+  position: 'absolute',
+  width: '1px',
+  height: '1px',
+  margin: '-1px',
+  padding: 0,
+  overflow: 'hidden',
+  clipPath: 'inset(50%)',
+  whiteSpace: 'nowrap',
+  border: 0,
+}
 
 /** The var value when chrome is off (D7-008) — collapses `ShellLayout`'s inset to zero. */
 const NO_CHROME_HEIGHT = '0px'
@@ -230,6 +245,12 @@ export function ComplianceChrome() {
   const wraps = useCssMediaQuery(CHROME_WRAP_QUERY)
   const topRef = useRef<HTMLDivElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
+  const endedRef = useRef<HTMLDivElement>(null)
+  // Exercise ended (published by ShellLayout's ExerciseEndedProvider): a status band under the
+  // top banner (renders with chrome off too). Its height is MEASURED and added to the published top
+  // inset so everything pinned below shifts down.
+  const ended = useExerciseEndedFlag()
+  const [endedTop, setEndedTop] = useState(config.enabled ? TOP_BANNER_HEIGHT : NO_CHROME_HEIGHT)
 
   // Publish the inset contract on :root so ShellLayout's content region
   // (a sibling subtree, not a descendant of this component) insets
@@ -244,7 +265,7 @@ export function ComplianceChrome() {
     if (config.enabled) acquireChromeInset(TOP_BANNER_HEIGHT, BOTTOM_BANNER_HEIGHT)
     else acquireChromeInset(NO_CHROME_HEIGHT, NO_CHROME_HEIGHT)
     return releaseChromeInset
-  }, [config.enabled, wraps])
+  }, [config.enabled, wraps, ended])
 
   // Narrow screens (#612): the wrapped bands' heights depend on the text, so publish what
   // was actually rendered, and keep it current (rotation, font load, config text change).
@@ -253,25 +274,73 @@ export function ComplianceChrome() {
   useLayoutEffect(() => {
     const top = topRef.current
     const bottom = bottomRef.current
-    if (!config.enabled || !wraps || top === null || bottom === null) return undefined
-    const publish = () => publishChromeInset(measuredHeight(top), measuredHeight(bottom))
+    const endedEl = endedRef.current
+    const measureBands = config.enabled && wraps && top !== null && bottom !== null
+    const measureEnded = ended && endedEl !== null
+    if (!measureBands && !measureEnded) {
+      setEndedTop(config.enabled ? TOP_BANNER_HEIGHT : NO_CHROME_HEIGHT)
+      return undefined
+    }
+    const publish = () => {
+      const topBand = !config.enabled
+        ? NO_CHROME_HEIGHT
+        : measureBands ? measuredHeight(top) : TOP_BANNER_HEIGHT
+      const bottomBand = !config.enabled
+        ? NO_CHROME_HEIGHT
+        : measureBands ? measuredHeight(bottom) : BOTTOM_BANNER_HEIGHT
+      setEndedTop(topBand)
+      const topInset = measureEnded
+        ? `calc(${topBand} + ${measuredHeight(endedEl)})`
+        : topBand
+      publishChromeInset(topInset, bottomBand)
+    }
     publish()
     if (typeof ResizeObserver === 'undefined') return undefined
     const observer = new ResizeObserver(publish)
     // Border box: the published value includes the safe-area padding, so a padding-only
     // change (a rotation that moves the insets) must re-measure too.
-    observer.observe(top, { box: 'border-box' })
-    observer.observe(bottom, { box: 'border-box' })
+    if (measureBands) {
+      observer.observe(top, { box: 'border-box' })
+      observer.observe(bottom, { box: 'border-box' })
+    }
+    if (measureEnded) observer.observe(endedEl, { box: 'border-box' })
     return () => observer.disconnect()
-  }, [config.enabled, wraps, config.top.text, config.bottom.text])
+  }, [config.enabled, wraps, ended, config.top.text, config.bottom.text])
 
-  // Chrome-off is a legal state (AC3): render nothing. The effect above has
+  const endedBanner = ended ? (
+    <ExerciseEndedBanner ref={endedRef} top={endedTop} safeAreaTop={!config.enabled} />
+  ) : null
+
+  // Chrome-off is a legal state (AC3): render no classification banners. The effect above has
   // already driven both inset vars to 0px, so ShellLayout's content region
-  // has no reserved-gap artifact.
-  if (!config.enabled) return null
+  // has no reserved-gap artifact. The ended band (if any) still shows.
+  // W-2: a live region must exist BEFORE its text changes to be announced reliably, so it is
+  // always mounted (empty) and filled when the exercise ends. The visible band is not a live
+  // region, so the text is not announced twice.
+  const announcer = (
+    <div
+      role="status"
+      aria-live="polite"
+      aria-atomic="true"
+      style={visuallyHiddenStyle}
+      data-testid="pulse-exercise-ended-announcer"
+    >
+      {ended ? EXERCISE_ENDED_BANNER_TEXT : ''}
+    </div>
+  )
+
+  if (!config.enabled) {
+    return (
+      <>
+        {announcer}
+        {endedBanner}
+      </>
+    )
+  }
 
   return (
     <>
+      {announcer}
       <div
         ref={topRef}
         role="note"
@@ -310,6 +379,7 @@ export function ComplianceChrome() {
       >
         <span style={wraps ? wrapTextStyle : undefined}>{config.bottom.text}</span>
       </div>
+      {endedBanner}
     </>
   )
 }
