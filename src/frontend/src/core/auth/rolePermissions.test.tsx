@@ -28,6 +28,7 @@ const ROLE_ONLY: ReadonlyArray<readonly [StaffAction, readonly SessionRole[]]> =
   ['renameExercise', ['orgAdmin', 'planner']],
   ['archiveExercise', ['orgAdmin', 'planner']],
   ['unarchiveExercise', ['orgAdmin']],
+  ['manageOrgPeople', ['orgAdmin']],
   ['stageExercise', ['planner']],
   ['unstageExercise', ['planner']],
   ['startExercise', ['controller']],

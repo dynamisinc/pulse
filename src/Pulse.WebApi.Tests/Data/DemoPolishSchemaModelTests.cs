@@ -45,6 +45,7 @@ public class DemoPolishSchemaModelTests
     [InlineData(typeof(MediaAsset), "CreatedScenarioTime", typeof(DateTimeOffset), false, null)]
     [InlineData(typeof(MediaAsset), "CreatedWallClock", typeof(DateTimeOffset), false, null)]
     [InlineData(typeof(MediaAsset), "PosterMediaAssetId", typeof(Guid?), true, null)]
+    [InlineData(typeof(MediaAsset), "UploadedByAccountId", typeof(Guid?), true, null)] // identity-auth-roles/21 (§4.1)
     [InlineData(typeof(PostMediaItem), "Id", typeof(Guid), false, null)]
     [InlineData(typeof(PostMediaItem), "ExerciseId", typeof(Guid), false, null)]
     [InlineData(typeof(PostMediaItem), "PostId", typeof(Guid), false, null)]
@@ -84,6 +85,9 @@ public class DemoPolishSchemaModelTests
     {
         "Id", "ExerciseId", "Kind", "ContentType", "BlobName", "Bytes", "Width", "Height", "DurationSec",
         "OriginalFileName", "UploadedByHumanId", "CreatedScenarioTime", "CreatedWallClock", "PosterMediaAssetId",
+
+        // identity-auth-roles/21 (ADMIN-IDENTITY-MODEL §4.1): the A2 migration's schema-only participant-upload tag.
+        "UploadedByAccountId",
     })]
     [InlineData(typeof(PostMediaItem), new[]
     {

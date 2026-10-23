@@ -194,6 +194,7 @@ public sealed class RoleMatrixTests
         PreAuth("POST /api/auth/login");
         PreAuth("POST /api/auth/staff/login");
         PreAuth("POST /api/auth/staff/login/choose"); // identity-auth-roles/15: org sign-in org choice (choice token)
+        PreAuth("POST /api/auth/password/reset");     // identity-auth-roles/21: set a password from a single-use link
         PreAuth("POST /api/auth/shared");
         PreAuth("POST /api/auth/join");
         PreAuth("POST /api/auth/word");
@@ -214,6 +215,8 @@ public sealed class RoleMatrixTests
         Probe("POST /api/org/exercises", OrgAdminOnly);
         Probe("PATCH /api/org/exercises/{exerciseId:guid}", OrgAdminOrPlanner);
         Probe("POST /api/org/exercises/{exerciseId:guid}/archive", OrgAdminOrPlanner);
+        Probe("POST /api/org/people/{personId:guid}/password-reset", OrgAdminOnly); // identity-auth-roles/21 (§3.3 admin reset)
+        Probe("PATCH /api/org/people/{personId:guid}", OrgAdminOnly); // identity-auth-roles/19 (org directory: grant / disable)
 
         // ---- Configuration: planner only. Lead assignment: planner only. ----
         Probe("PUT /api/staff/exercise-settings", PlannerOnly);

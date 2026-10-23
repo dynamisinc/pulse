@@ -100,4 +100,12 @@ public sealed class MediaAsset : IExerciseScoped
     /// to another <see cref="MediaAsset"/> (<c>Restrict</c>).
     /// </summary>
     public Guid? PosterMediaAssetId { get; set; }
+
+    /// <summary>
+    /// The participant ACCOUNT that uploaded this asset (ADMIN-IDENTITY-MODEL §4.1, wave A2), or <c>null</c> for a
+    /// staff upload and every row that predates the column. Foreign key to <see cref="Account"/> (<c>Restrict</c>).
+    /// Schema only in the A2 migration (identity-auth-roles/21): the avatar story (23) writes it, and the controller's
+    /// "Participant uploads" filter reads it. Staff-only (XC-002): never projected onto a participant payload.
+    /// </summary>
+    public Guid? UploadedByAccountId { get; set; }
 }

@@ -11,6 +11,8 @@ using Pulse.WebApi.Features.ExerciseConfiguration.Lifecycle;
 using Pulse.WebApi.Features.ExerciseConfiguration.PracticeMode;
 using Pulse.WebApi.Features.ExerciseResolution;
 using Pulse.WebApi.Features.Identity.Accounts;
+using Pulse.WebApi.Features.Identity.Credentials;    // #576
+using Pulse.WebApi.Features.Org.PeopleDirectory;             // #574
 using Pulse.WebApi.Features.Identity.DayWord;        // easy-login 05
 using Pulse.WebApi.Features.Identity.EasyLogin;      // easy-login 01
 using Pulse.WebApi.Features.Identity.Enrollments;    // identity-auth-roles/16
@@ -182,6 +184,8 @@ builder.Services.AddLinkEmail();
 // rather than a hard order) and reads the tenant off the IOrganizationContext that AddExerciseScoping
 // registers. Its pipeline half — app.UseOrganizationResolution(), below — IS order-critical.
 builder.Services.AddExerciseLifecycleAdmin();
+builder.Services.AddCredentials();   // #576 CredentialToken lifecycle, password policy, no-op IPulseMailer, password reset
+builder.Services.AddOrgPeople();     // #574 org directory: people list, org-admin grant/revoke, disable/enable
 
 // UAT bootstrap seam (feature login/05, #308/#310) — the secret-gated, idempotent seed endpoint that
 // creates the FIRST Exercise/StaffAssignment/SharedCredential/Account in an empty database (no other
@@ -491,6 +495,8 @@ app.MapExerciseContextEndpoints();  // #51 GET /api/exercise-context (frozen Exe
 app.MapSessionEndpoints();          // #60 GET /api/session, POST /api/auth/refresh, POST /api/auth/logout
 app.MapStaffAuthEndpoints();        // #62 POST /api/auth/staff/login, GET /api/staff/assignments, POST /api/staff/active-exercise
 app.MapEnrollmentEndpoints();       // identity-auth-roles/16 PUT /api/staff/enrollments/{id}/lead
+app.MapCredentialEndpoints();       // #576 POST /api/auth/password/reset (pre-auth), POST /api/org/people/{personId}/password-reset (org admin)
+app.MapOrgPeopleEndpoints();        // #574 GET /api/org/people, GET+PATCH /api/org/people/{personId} (org admin)
 app.MapSharedReadOnlyEndpoints();          // #63 POST /api/auth/shared (view-only session + ephemeral identity)
 app.MapAccountEndpoints();                 // #59 POST /api/auth/login, POST /api/staff/accounts[/import]
 app.MapSharedCredentialLifecycleEndpoints(); // #64 POST /api/staff/shared-credential/{rotate,revoke}

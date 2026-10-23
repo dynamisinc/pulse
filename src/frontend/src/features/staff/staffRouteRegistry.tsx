@@ -50,6 +50,7 @@
  */
 
 import {
+  faAddressBook, // #574
   faClipboardCheck,
   faFilePdf,
   faFolderOpen,
@@ -62,6 +63,7 @@ import { ControllerConsoleRoute } from '@/features/controller'
 import { ExerciseReportPage } from '@/features/controller/report'
 import { EvaluatorDashboardRoute } from '@/features/evaluator'
 import { ExerciseManagementRoute } from '@/features/exerciseLifecycleAdmin'
+import { OrgDirectoryRoute } from '@/features/orgDirectory' // #574
 import { ParticipantAdminSurface } from '@/features/participantAdmin'
 import { PlannerWorkspaceRoute } from '@/features/planner'
 
@@ -183,6 +185,16 @@ const REGISTRY_TABLE = [
     allowedRoles: ['controller', 'evaluator'],
     group: 'conduct',
     description: 'A printable record of the posts, metrics and charts, to save as a PDF.',
+  },
+  { // #574 org people directory (org admin only)
+    id: 'org-people-directory',
+    path: '/staff/people',
+    label: 'People',
+    icon: faAddressBook,
+    element: <OrgDirectoryRoute />,
+    allowedRoles: ['orgAdmin'],
+    group: 'administer',
+    description: 'See your organization\'s people, grant org admin, disable and reset passwords.',
   },
 ] as const satisfies StaffRouteRegistry
 
