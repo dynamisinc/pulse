@@ -57,4 +57,13 @@ public sealed class Enrollment : IExerciseScoped
 
     /// <summary>Server wall-clock instant (UTC) the enrollment was granted.</summary>
     public DateTimeOffset CreatedAt { get; set; }
+
+    /// <summary>
+    /// Wall-clock instant (UTC) the enrollment was REVOKED, or <c>null</c> while it is live (XC-010 soft delete,
+    /// identity-auth-roles/21). A revoked row is history only: every enrollment read excludes it through
+    /// <see cref="ActiveEnrollments.Active"/> (pinned by <c>ActiveEnrollmentSweepTests</c>), both filtered unique indexes
+    /// ignore it (so the same person can be enrolled again), and the database refuses it on a participant-world role
+    /// or on a lead (<c>CK_Enrollments_DeletedAt_StaffOnly</c>, <c>CK_Enrollments_DeletedAt_NotLead</c>).
+    /// </summary>
+    public DateTimeOffset? DeletedAt { get; set; }
 }

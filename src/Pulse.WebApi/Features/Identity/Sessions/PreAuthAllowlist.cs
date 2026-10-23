@@ -46,6 +46,11 @@ using Microsoft.AspNetCore.Routing;
 ///   secret-bearing call and break the UAT go-live runbook. (The 2026-07-25 endpoint audit classified these
 ///   "correctly gated" and omitted them from its 8-route allowlist; this is that list's one correction.)
 ///   </description></item>
+///   <item><description><c>/api/auth/password/reset</c> (identity-auth-roles/21, #576) — sets a password from a
+///   single-use invite/reset link, so the person has no session to present: the 256-bit token in the body IS the
+///   credential (like the refresh token). Uniform <c>400 invalid-token</c> for every bad token, the staff-login per-IP
+///   limiter, the 16 KiB login body limit, no-store.
+///   </description></item>
 ///   <item><description><c>/api/build</c> (#617) — the running build's commit, polled credential-less by the
 ///   Deploy Backend smoke to prove the NEW build is serving. Returns only <c>{"commit":"…"}</c>, no-store.
 ///   </description></item>
@@ -66,7 +71,7 @@ public static class PreAuthAllowlist
 
     /// <summary>
     /// The allowlist, as <c>"{METHOD} {routePattern}"</c> keys matching
-    /// <see cref="RoutePattern.RawText"/>. Exactly fifteen routes.
+    /// <see cref="RoutePattern.RawText"/>. Exactly sixteen routes.
     /// </summary>
     public static IReadOnlySet<string> Routes { get; } = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
@@ -74,6 +79,7 @@ public static class PreAuthAllowlist
         "POST /api/auth/login",
         "POST /api/auth/staff/login",
         "POST /api/auth/staff/login/choose",
+        "POST /api/auth/password/reset",
         "POST /api/auth/shared",
         "POST /api/auth/join",
         "POST /api/auth/word",

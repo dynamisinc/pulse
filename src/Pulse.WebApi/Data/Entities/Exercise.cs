@@ -295,4 +295,18 @@ public sealed class Exercise : IOrganizationOwned
     /// <c>live</c>. Staff-world only (XC-002) — never projected onto a participant surface.
     /// </summary>
     public DateTimeOffset? FirstLiveAt { get; set; }
+
+    // ============================================================================================
+    // identity-auth-roles/21 (ADMIN-IDENTITY-MODEL §3.4 / §9, the A2 A2CredentialFoundation migration). Schema only.
+    // ============================================================================================
+
+    /// <summary>
+    /// Which participant sign-in methods this exercise allows (ADMIN-IDENTITY-MODEL §3.4): a
+    /// <see cref="ExerciseSignInMethods"/> bit set stored as an <c>int</c>. Required, defaulting to
+    /// <see cref="ExerciseSignInMethods.All"/> (= 7) — today's behaviour, every method on — for every existing row and
+    /// every raw insert; a CHECK keeps the value inside the three defined bits. Schema only in the A2 migration
+    /// (identity-auth-roles/21): nothing reads it yet, and the sign-in-methods story (22) adds the behaviour.
+    /// Staff-world only (XC-002).
+    /// </summary>
+    public ExerciseSignInMethods SignInMethods { get; set; } = ExerciseSignInMethods.All;
 }

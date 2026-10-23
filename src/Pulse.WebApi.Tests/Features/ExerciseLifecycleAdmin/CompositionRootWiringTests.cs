@@ -8,6 +8,8 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Pulse.WebApi.Features.ExerciseLifecycleAdmin;
+using Pulse.WebApi.Features.Identity.Credentials;
+using Pulse.WebApi.Tests.Features.Identity.Credentials;
 using Xunit;
 
 /// <summary>
@@ -127,25 +129,37 @@ public sealed class CompositionRootWiringTests
                 .Select(method => (Method: method, Route: endpoint.RoutePattern.RawText ?? string.Empty)))
             .ToList();
 
+        // identity-auth-roles/21 (#576): the org tier's first PERSON-id route (the org admin's staff password reset) joins
+        // the allow-list — a person of the caller's own organization, never an organization or staff-user id.
+        var allowListed = ExerciseLifecycleAdminEndpoints.ExerciseIdRoutes
+            .Concat(CredentialEndpoints.PersonIdRoutes)
+            .ToList();
+
         pairs.Should().OnlyHaveUniqueItems();
         pairs.Should().BeEquivalentTo(
-            ExerciseLifecycleAdminEndpoints.ExerciseIdRoutes,
+            allowListed,
             "an /api/org/{{id}}-shaped endpoint invites exactly the client-supplied scope COR-001 forbids one tier "
-            + "down. Only the allow-listed story-22 (method, route) pairs may carry an id, each authorized against "
+            + "down. Only the allow-listed (method, route) pairs may carry an id, each authorized against "
             + "the caller's own server-resolved tenant");
 
         foreach (var endpoint in parameterized)
         {
             var parameter = endpoint.RoutePattern.Parameters.Should().ContainSingle(
                 "{0} takes exactly one route value", endpoint.RoutePattern.RawText).Which;
-            parameter.Name.Should().Be("exerciseId", "never an organization or staff-user id on the org tier");
+            var isPersonRoute = CredentialEndpoints.PersonIdRoutes.Any(route => route.Route == endpoint.RoutePattern.RawText);
+            parameter.Name.Should().Be(
+                isPersonRoute ? "personId" : "exerciseId",
+                "never an organization or staff-user id on the org tier");
             parameter.ParameterPolicies.Select(policy => policy.Content).Should().Contain(
                 "guid", "{0}: a non-GUID never reaches the handler", endpoint.RoutePattern.RawText);
         }
 
         OrgExerciseByIdIsolationTests.Callers.Keys.Should().BeEquivalentTo(
             ExerciseLifecycleAdminEndpoints.ExerciseIdRoutes,
-            "every allow-listed (method, route) must be driven by the foreign-tenant 404 test");
+            "every allow-listed exercise-id (method, route) must be driven by the foreign-tenant 404 test");
+        CredentialEndpointsHttpTests.PersonIdCallers.Keys.Should().BeEquivalentTo(
+            CredentialEndpoints.PersonIdRoutes,
+            "every allow-listed person-id (method, route) must be driven by the foreign-tenant 404 test");
     }
 
     private static int CountRoutes(EndpointDataSource dataSource, string method, string rawText)

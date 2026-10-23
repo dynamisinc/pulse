@@ -27,6 +27,13 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- identity-auth-roles/21: the NIST SP 800-63B blocklist PasswordPolicy loads (provenance + MIT licence in the
+         sibling NOTICE file). A fixed logical name so a folder move cannot silently break the lookup. -->
+    <EmbeddedResource Include="Features\Identity\Credentials\Resources\common-passwords-10k.txt"
+                      LogicalName="Pulse.WebApi.Credentials.common-passwords-10k.txt" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\Pulse.Core\Pulse.Core.csproj" />
   </ItemGroup>
 

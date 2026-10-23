@@ -159,7 +159,9 @@ describe('a pair is stored and the server was not reached: Reconnecting, not /lo
     await screen.findByRole('heading', { name: 'Reconnecting…' })
     expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1)
     expect(screen.getAllByRole('main')).toHaveLength(1)
-    expect(screen.getByRole('status')).toHaveFocus()
+    // #623: focus lands in the screen's mount effect, which can run after the heading is
+    // found on a loaded CI runner — wait for it rather than racing it.
+    await waitFor(() => expect(screen.getByRole('status')).toHaveFocus())
     expect(screen.getByRole('status')).toHaveAttribute('aria-live', 'polite')
   })
 
@@ -304,6 +306,9 @@ describe('Try again', () => {
 
     renderProvider()
     const button = await screen.findByRole('button', { name: 'Try again' })
+    // #623: let the mount effect focus the status region first, so it cannot run after the
+    // click and pull focus off the button.
+    await waitFor(() => expect(screen.getByRole('status')).toHaveFocus())
     await user.click(button)
 
     expect(screen.getByRole('status')).toHaveTextContent('Trying to reach Pulse…')
@@ -325,6 +330,9 @@ describe('Try again', () => {
 
     renderProvider()
     const button = await screen.findByRole('button', { name: 'Try again' })
+    // #623: let the mount effect focus the status region first, so it cannot run after the
+    // click and pull focus off the button.
+    await waitFor(() => expect(screen.getByRole('status')).toHaveFocus())
     await user.click(button)
 
     await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent(/still can't reach pulse/i))
