@@ -252,7 +252,137 @@ public sealed class EngineAutonomyState : IEngineSafetySwitch
         return null;
     }
 
+    // ---- Persistence seams (engine-runtime story 07) ----------------------------------------------
+
+    /// <summary>
+    /// Copies the live state into an immutable <see cref="EngineAutonomySnapshot"/> for the write-through store
+    /// (engine-runtime story 07). A pure read: no event, no mutation. The copy is exact — including the raises — so
+    /// the persisted row can carry them as "previous" for a later human restore.
+    /// </summary>
+    /// <returns>The snapshot of this exercise's autonomy/safety state.</returns>
+    public EngineAutonomySnapshot ToSnapshot() =>
+        new(
+            ExerciseId,
+            _default,
+            new Dictionary<Guid, AutonomyLevel>(_overrides),
+            _swampedMode,
+            _safetyClamp,
+            _stopped,
+            _degradedReason);
+
+    /// <summary>
+    /// Applies a persisted <paramref name="snapshot"/> at startup (engine-runtime story 07, decision Q1), under the
+    /// fail-closed rule: state that LOWERS the engine's reach is restored exactly; state that RAISES it is withheld,
+    /// left at the floor, and returned as <see cref="EngineHeldRaises"/> for a later human restore.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Restored (lowering, automatically, no human step):</b></para>
+    /// <list type="bullet">
+    ///   <item>the safety clamp — imposed at <see cref="AutonomyLevels.Floor"/>, the only clamp any safety path sets;</item>
+    ///   <item>the kill switch's full stop (<c>FullStop</c>) — and its clamp, as <see cref="EngageKillSwitch"/> sets both;</item>
+    ///   <item>the degraded reason, plus the clamp the degrade imposed (<see cref="DegradeToSuggest"/> sets both);</item>
+    ///   <item>a <see cref="AutonomyLevel.Suggest"/> storyline override (the floor, so never a raise).</item>
+    /// </list>
+    /// <para><b>Withheld (raises, never applied here):</b> a <see cref="AutonomyLevel.DelayedAuto"/> exercise default or
+    /// storyline override, and swamped mode ON. They are returned in <see cref="EngineHeldRaises"/>; the state keeps its
+    /// floor values. Automation never raises its own autonomy (E8 §8.2), and a boot is not a human.</para>
+    /// <para><b>Only ever lowers — never a backdoor to clear.</b> Every write here goes through the same one-way
+    /// primitives as the safety controls (<see cref="ImposeClamp"/> only lowers; the stop and the degraded reason are
+    /// only ever set, never unset), so applying a snapshot onto a state that a controller clamped while the load was in
+    /// flight keeps the clamp (story 07 "A kill switch that races the load is not lost"). A newer live value wins over
+    /// the snapshot wherever both exist: a live degraded reason is kept, and a live storyline override is not replaced.
+    /// Only a human <see cref="RestoreFromSafety"/> clears the clamp or the stop. The exercise default and swamped mode
+    /// are never written: the floor is what a fresh state already holds, and a live human value is newer.</para>
+    /// <para><b>No audit event.</b> Nothing is returned to log: a restore is not a transition a human or the engine
+    /// made. The rehydrator emits one <c>engine.state_restored</c> event per exercise instead (story 07, XC-004).</para>
+    /// <para><b>Validated before anything is applied.</b> An invalid snapshot throws and changes nothing; the caller
+    /// (the rehydrator) treats any throw as unreadable and boots the exercise at the most restrictive reading (Q7).</para>
+    /// </remarks>
+    /// <param name="snapshot">The persisted state for THIS exercise.</param>
+    /// <returns>The raises the restore withheld (<see cref="EngineHeldRaises.None"/> when there were none).</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="snapshot"/> is null.</exception>
+    /// <exception cref="ArgumentException">The snapshot belongs to another exercise (COR-001), carries an empty storyline id, or a level that is not a defined <see cref="AutonomyLevel"/>.</exception>
+    /// <exception cref="NotSupportedException">The snapshot carries <see cref="AutonomyLevel.Auto"/> anywhere (v1.1).</exception>
+    internal EngineHeldRaises Restore(EngineAutonomySnapshot snapshot)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+        ValidateSnapshot(snapshot);
+
+        // ---- Lowering state: restored exactly, through the one-way primitives only. ----
+        if (snapshot.SafetyClamp is not null || snapshot.Stopped || snapshot.DegradedReason is not null)
+        {
+            // Every safety path clamps at the floor; a stop or a degrade always carries that clamp.
+            ImposeClamp(AutonomyLevels.Floor);
+        }
+
+        if (snapshot.Stopped)
+        {
+            _stopped = true;
+        }
+
+        if (!string.IsNullOrWhiteSpace(snapshot.DegradedReason) && _degradedReason is null)
+        {
+            _degradedReason = snapshot.DegradedReason.Trim();
+        }
+
+        // ---- Overrides: floor overrides restored (a live override is newer and wins); raises withheld. ----
+        var heldOverrides = new Dictionary<Guid, AutonomyLevel>();
+        foreach (var (storylineId, level) in snapshot.StorylineOverrides)
+        {
+            if (level == AutonomyLevels.Floor)
+            {
+                _overrides.TryAdd(storylineId, level);
+            }
+            else
+            {
+                heldOverrides[storylineId] = level;
+            }
+        }
+
+        // ---- Default and swamped mode: never written; a raise is withheld. ----
+        var heldDefault = snapshot.ExerciseDefault == AutonomyLevels.Floor ? (AutonomyLevel?)null : snapshot.ExerciseDefault;
+        var held = new EngineHeldRaises(heldDefault, heldOverrides, snapshot.SwampedMode);
+        return held.IsEmpty ? EngineHeldRaises.None : held;
+    }
+
     // ---- internals -------------------------------------------------------------------------------
+
+    /// <summary>Rejects a snapshot for another exercise, an empty storyline id, an undefined level, or Auto (v1.1).</summary>
+    private void ValidateSnapshot(EngineAutonomySnapshot snapshot)
+    {
+        if (snapshot.ExerciseId != ExerciseId)
+        {
+            throw new ArgumentException(
+                "An autonomy snapshot can only be restored onto its own exercise's state (COR-001).", nameof(snapshot));
+        }
+
+        ArgumentNullException.ThrowIfNull(snapshot.StorylineOverrides, nameof(snapshot));
+        EnsureRestorable(snapshot.ExerciseDefault);
+        if (snapshot.SafetyClamp is { } clamp)
+        {
+            EnsureRestorable(clamp);
+        }
+
+        foreach (var (storylineId, level) in snapshot.StorylineOverrides)
+        {
+            if (storylineId == Guid.Empty)
+            {
+                throw new ArgumentException("A persisted storyline override needs a storyline id.", nameof(snapshot));
+            }
+
+            EnsureRestorable(level);
+        }
+    }
+
+    private static void EnsureRestorable(AutonomyLevel level)
+    {
+        if (!Enum.IsDefined(level))
+        {
+            throw new ArgumentException($"'{(int)level}' is not a defined autonomy level.", nameof(level));
+        }
+
+        AutonomyLevels.EnsureSelectable(level);
+    }
 
     /// <summary>Lowers the clamp toward <paramref name="max"/>; never raises an existing clamp.</summary>
     private void ImposeClamp(AutonomyLevel max) =>
