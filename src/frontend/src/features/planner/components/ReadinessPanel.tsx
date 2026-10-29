@@ -76,6 +76,11 @@ const FIX_LINKS: Readonly<Record<string, FixLink>> = {
     label: 'Set the schedule',
     to: { pathname: PLAN_PATH, search: '?section=identity' },
   },
+  // Story 09: the participant-facing name lives in the Identity & schedule section.
+  'participant-name': {
+    label: 'Set the participant-facing name',
+    to: { pathname: PLAN_PATH, search: '?section=identity' },
+  },
   'chrome-valid': {
     label: 'Fix compliance chrome',
     to: { pathname: PLAN_PATH, search: '?section=chrome' },

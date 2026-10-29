@@ -32,7 +32,7 @@ public sealed class LinkEmailServiceTests
     [RequiresDockerFact]
     public async Task EachEligibleParticipant_GetsOneMessage_WithTheirOwnLink_AndEveryoneElseIsSkippedWithTheReason()
     {
-        var exercise = await _world.SeedExerciseAsync(name: "Coastal Surge 2026");
+        var exercise = await _world.SeedExerciseAsync(name: "HURREX internal", participantName: "Coastal Surge 2026");
         var staff = await _world.SeedStaffAsync((exercise, "controller"));
         var ann = await _world.SeedParticipantAsync(exercise, "Ann Active");
         var ben = await _world.SeedParticipantAsync(exercise, "Ben NoEmail", email: string.Empty);
@@ -60,7 +60,8 @@ public sealed class LinkEmailServiceTests
 
         mailer.Messages.Select(m => m.RecipientAddress).Should().Equal([ann.Email, gus.Email], "one message per eligible person");
         var annMessage = mailer.Messages[0];
-        annMessage.Subject.Should().Be("Your sign-in link for Coastal Surge 2026");
+        annMessage.Subject.Should().Be(
+            "Your sign-in link for Coastal Surge 2026", "the subject carries the participant-facing name (§8.4)");
         annMessage.HtmlBody.Should().Contain(ann.JoinUrl).And.Contain(ann.SignInName).And.NotContain(gus.JoinUrl!);
         annMessage.PlainTextBody.Should().Contain(ann.JoinUrl).And.Contain(ann.SignInName);
         mailer.Messages[1].HtmlBody.Should().Contain(gus.JoinUrl).And.NotContain(ann.JoinUrl!, "each email carries its OWN link");

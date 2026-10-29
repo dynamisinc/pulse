@@ -282,6 +282,9 @@ public class PulseDbContext : DbContext
             // active-exercise selection), NEVER from a client-supplied id/body/route/query value.
             // ---------------------------------------------------------------------------------------
             entity.Property(e => e.WorldName).HasMaxLength(200);
+
+            // exercise-build-golive/09 (§8.4): the participant-facing name. Nullable, NO fallback to Name.
+            entity.Property(e => e.ParticipantName).HasMaxLength(Exercise.MaxParticipantNameLength);
             entity.Property(e => e.Locale).HasMaxLength(35);           // BCP-47 tags are far shorter in practice.
             entity.Property(e => e.EnabledChannels).HasMaxLength(256); // comma-separated channel-catalog ids.
             entity.Property(e => e.BrandName).HasMaxLength(200);
@@ -425,6 +428,10 @@ public class PulseDbContext : DbContext
             // demo-feedback/17 (DF-29..DF-31): edit tracking. EditCount is required-WITH-DEFAULT so the migration adds it
             // NOT NULL DEFAULT 0 to a table that already holds rows; the two last-edit instants are nullable by type.
             entity.Property(e => e.EditCount).IsRequired().HasDefaultValue(0);
+
+            // exercise-build-golive/09 (A3 migration, ADMIN-IDENTITY-MODEL §5.4): setup vs conduct. Required-WITH-DEFAULT
+            // so the migration adds it NOT NULL DEFAULT 0 to a table that already holds rows (backfilled there).
+            entity.Property(e => e.IsSetupContent).IsRequired().HasDefaultValue(false);
         });
 
         modelBuilder.Entity<Follow>(entity =>
@@ -446,6 +453,9 @@ public class PulseDbContext : DbContext
             // the read the profile surface performs per persona; the unique index above only serves the
             // outbound (follower-leading) direction.
             entity.HasIndex(e => new { e.ExerciseId, e.FolloweePersonaId });
+
+            // exercise-build-golive/09 (A3 migration, ADMIN-IDENTITY-MODEL §5.4): the same setup/conduct flag as Post.
+            entity.Property(e => e.IsSetupContent).IsRequired().HasDefaultValue(false);
         });
 
         // ==========================================================================================

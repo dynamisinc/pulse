@@ -65,6 +65,8 @@ const SETTINGS_ENDPOINT = '/staff/exercise-settings'
 export const MAX_NAME_LENGTH = 200
 /** Max length of the participant-visible world name (server: `MaxWorldNameLength`). */
 export const MAX_WORLD_NAME_LENGTH = 200
+/** Max length of the participant-facing exercise name (server: `MaxParticipantNameLength`). */
+export const MAX_PARTICIPANT_NAME_LENGTH = 80
 /** Max length of the BCP-47 locale tag (server: `MaxLocaleLength`). */
 export const MAX_LOCALE_LENGTH = 35
 /** Max length of the participant-visible brand name (server: `MaxBrandNameLength`). */
@@ -120,6 +122,11 @@ export interface ExerciseSettings {
   /** The staff-facing internal name — always a string. */
   readonly name: string
   readonly worldName: string | null
+  /**
+   * The name PARTICIPANTS see for this exercise, or `null` when unset (a blocking readiness
+   * item). Distinct from `name` (internal, never shown to participants) and `worldName`.
+   */
+  readonly participantName: string | null
   /** BCP-47 tag, or `null` when not configured. */
   readonly locale: string | null
   /** The exercise's single IANA zone (XC-008) — always a string. */
@@ -157,6 +164,8 @@ export interface ExerciseSettingsUpdate {
   /** REQUIRED on the wire, 1–200 chars. */
   readonly name: string
   readonly worldName: string | null
+  /** Required-and-nullable: PUT is a full replace, so omitting it would wipe the name. */
+  readonly participantName: string | null
   readonly locale: string | null
   /** REQUIRED on the wire; IANA only ("Eastern Standard Time" is a 400). */
   readonly timeZone: string
@@ -225,6 +234,20 @@ function isNullableString(value: unknown): value is string | null {
   return value === null || typeof value === 'string'
 }
 
+/**
+ * Like {@link isNullableString} but also accepts an ABSENT key. An OLD backend (frontend deployed
+ * before the A3 migration/DTO) sends no `participantName` at all; that is tolerated and normalized
+ * to `null` by {@link normalizeSettings}. A present non-string, non-null value is still rejected.
+ */
+function isOptionalNullableString(value: unknown): value is string | null | undefined {
+  return value === undefined || isNullableString(value)
+}
+
+/** Fills keys an older backend omits so callers always see the full `ExerciseSettings` shape. */
+function normalizeSettings(body: ExerciseSettings): ExerciseSettings {
+  return { ...body, participantName: body.participantName ?? null }
+}
+
 function isStringMap(value: unknown): value is Record<string, string> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
   return Object.values(value as Record<string, unknown>).every(entry => typeof entry === 'string')
@@ -239,6 +262,7 @@ function isSettingsBody(value: unknown): value is ExerciseSettings {
     typeof body.name === 'string' &&
     typeof body.timeZone === 'string' &&
     isNullableString(body.worldName) &&
+    isOptionalNullableString(body.participantName) &&
     isNullableString(body.locale) &&
     isNullableString(body.scheduledStartAt) &&
     isNullableString(body.scheduledEndAt) &&
@@ -334,6 +358,7 @@ let mockSettings: ExerciseSettings = {
   exerciseId: '6f0a1c52-9d4b-4f3a-8a01-2c7d9e5b1a44',
   name: 'Atlanta Coastal Incident Exercise 2026',
   worldName: 'Metro Atlanta',
+  participantName: 'Atlanta Coastal Incident Exercise',
   locale: 'en-US',
   timeZone: 'America/New_York',
   scheduledStartAt: '2026-03-01T13:00:00.0000000+00:00',
@@ -357,6 +382,7 @@ function applyMockUpdate(update: ExerciseSettingsUpdate): ExerciseSettings {
     exerciseId: mockSettings.exerciseId,
     name: update.name,
     worldName: update.worldName,
+    participantName: update.participantName,
     locale: update.locale,
     timeZone: update.timeZone,
     scheduledStartAt: update.scheduledStartAt,
@@ -426,7 +452,7 @@ export async function getExerciseSettings(): Promise<ExerciseSettings> {
   if (!isSettingsBody(data)) {
     throw new ExerciseSettingsError('The settings response was empty or malformed.')
   }
-  return data
+  return normalizeSettings(data)
 }
 
 /**
@@ -460,5 +486,5 @@ export async function updateExerciseSettings(
   if (!isSettingsBody(data)) {
     throw new ExerciseSettingsError('The settings response was empty or malformed.')
   }
-  return data
+  return normalizeSettings(data)
 }

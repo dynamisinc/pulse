@@ -243,7 +243,7 @@ public sealed class ParticipantSessionCapTests
             Guid.NewGuid(), zone is null ? null : Facts(zone), asOf, rolloverHour, new RecordingLogger());
 
     private static ExerciseFacts Facts(string zone) =>
-        new("Cap test", zone, "live", Organization.DefaultOrganizationId, StoredScenarioTime: null);
+        new("Cap test", zone, "live", Organization.DefaultOrganizationId, StoredScenarioTime: null, ParticipantName: null);
 
     /// <summary>Records the formatted warnings it receives.</summary>
     private sealed class RecordingLogger : ILogger

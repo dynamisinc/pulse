@@ -234,6 +234,7 @@ public static class ExerciseLifecycleTestData
 
         var exercise = await context.Exercises.SingleAsync(e => e.Id == exerciseId);
         exercise.ScheduledStartAt ??= new DateTimeOffset(2033, 3, 1, 9, 0, 0, TimeSpan.Zero);
+        exercise.ParticipantName ??= "Harbor City"; // story 09: participant-name is a blocking readiness item
 
         if (!await context.Enrollments.IgnoreQueryFilters()
                 .AnyAsync(e => e.ExerciseId == exerciseId && e.Role == EnrollmentRoles.Controller))

@@ -47,3 +47,7 @@ Source: [`docs/design/ADMIN-IDENTITY-MODEL.md`](../../design/ADMIN-IDENTITY-MODE
 | 12 Push lifecycle | hub group message, composer + header | 10, 11 | — | A5 | M |
 
 Reuse: `PulseDbContext` central filter for every delete, blob outbox, `ComplianceChromeGuard`, COBRA type-to-confirm, SignalR feed hook, telemetry emitter. The A3 migration (`Posts.IsSetupContent`, `Exercises.ParticipantName`) is orchestrator-owned. Stories 01/03/04/05/06 edits ride in wave A3 alongside.
+
+## Note 2026-10-19 (Session D, PR-4: story 09 + A3 migration)
+
+PR-4 carries story 09 and the A3 migration `20261019230000_A3SetupContentParticipantName` (`Exercises.ParticipantName`, `Posts.IsSetupContent`, `Follows.IsSetupContent` + the ADMIN-IDENTITY-MODEL 5.4 backfill). The `IsSetupContent` write-path stamp is story 01 (PR-5), not PR-4. Readiness `participant-name` becomes a real check in PR-4. The PR is held until Tom opens the UAT window; regenerate the migration after #655 (20261019171234) and #665 (20261019200000) merge. See the currency check in story 09.

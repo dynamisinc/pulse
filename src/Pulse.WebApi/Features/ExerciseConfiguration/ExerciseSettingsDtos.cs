@@ -62,6 +62,13 @@ public sealed class ExerciseSettingsDto
     [JsonPropertyName("worldName")]
     public string? WorldName { get; init; }
 
+    /// <summary>
+    /// The participant-facing exercise name (exercise-build-golive/09, §8.4), or <c>null</c> when not set. The only
+    /// exercise name participants ever see; there is no fallback to <see cref="Name"/>.
+    /// </summary>
+    [JsonPropertyName("participantName")]
+    public string? ParticipantName { get; init; }
+
     /// <summary>The participant-visible BCP-47 locale (e.g. <c>en-US</c>), or <c>null</c> when not configured.</summary>
     [JsonPropertyName("locale")]
     public string? Locale { get; init; }
@@ -132,6 +139,7 @@ public sealed class ExerciseSettingsDto
             ExerciseId = exercise.Id.ToString(),
             Name = exercise.Name,
             WorldName = exercise.WorldName,
+            ParticipantName = exercise.ParticipantName,
             Locale = exercise.Locale,
             TimeZone = exercise.TimeZone,
             ScheduledStartAt = ToRoundTrip(exercise.ScheduledStartAt),
@@ -189,6 +197,13 @@ public sealed class UpdateExerciseSettingsRequest
     /// <summary>The participant-visible world name. Optional; <c>null</c> clears it. Sanitized (NFR-004).</summary>
     [JsonPropertyName("worldName")]
     public string? WorldName { get; init; }
+
+    /// <summary>
+    /// The participant-facing exercise name (exercise-build-golive/09, §8.4). Optional; <c>null</c>/blank clears it
+    /// (full replace, like every other field). Sanitized (NFR-004), at most 80 characters.
+    /// </summary>
+    [JsonPropertyName("participantName")]
+    public string? ParticipantName { get; init; }
 
     /// <summary>The participant-visible BCP-47 locale tag. Optional; <c>null</c> clears it.</summary>
     [JsonPropertyName("locale")]
