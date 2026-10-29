@@ -380,6 +380,21 @@ public sealed class WeatherProductDescriptorTests : IDisposable
     }
 
     [Fact]
+    public async Task ADraftUpgrade_WhoseTargetWasRetractedBeforePublish_Fails()
+    {
+        var exercise = _harness.NewExercise();
+        var target = await _harness.SeedAsync(exercise, "weather_product", "retracted", WeatherPayloads.Watch());
+        var stored = WeatherPayloads.Warning("upgrade", target.Id);
+        stored["supersedesPermalink"] = "/weather/weather-desk/tornado-watch-1";
+        var draft = await _harness.SeedAsync(exercise, "weather_product", "draft", stored, "tornado-warning-1");
+
+        var result = await _descriptor.ValidatePayloadAsync(
+            WeatherPayloads.Warning("upgrade", target.Id), _harness.ValidationContext(exercise, draft.Id));
+
+        result.Errors.Should().Contain("payload.supersedesContentId: must name a published weather product in this exercise");
+    }
+
+    [Fact]
     public async Task AProductCannotSupersedeItself()
     {
         var exercise = _harness.NewExercise();
@@ -477,18 +492,6 @@ public sealed class WeatherProductDescriptorTests : IDisposable
 
         descriptor.ResolvePublishOptions(broken).Should().BeNull();
         descriptor.ResolvePublishOptions(forecast).Should().BeNull();
-    }
-
-    [Fact]
-    public void Headline_IsVerbatimData_TrimOnly()
-    {
-        // D4-010: the alert, the post, the widget and the page all quote the stored string.
-        var headline = "TORNADO WARNING for northern Kestrel County until 3:15 PM — take cover NOW & stay put <3 "
-                       + new string('x', 100);
-        headline.Trim().Length.Should().BeLessThan(WeatherLimits.HeadlineMaxLength);
-
-        WeatherPlainText.Headline("  " + headline + "\t").Should().Be(headline.Trim());
-        WeatherPlainText.Headline(headline.Trim()).Should().Be(headline.Trim(), "no case change, no truncation, no rewriting");
     }
 
     private static ContentItem Item(JsonObject payload) => new()

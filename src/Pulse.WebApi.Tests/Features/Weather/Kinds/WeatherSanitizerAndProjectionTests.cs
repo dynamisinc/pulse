@@ -31,10 +31,10 @@ public sealed partial class WeatherSanitizerAndProjectionTests : IDisposable
         "<a href=\"javascript:alert(1)\">Take shelter.</a>",
         "<style>body{display:none}</style>Take shelter.",
         "<iframe srcdoc=\"<script>alert(1)</script>\"></iframe>Take shelter.",
-        "Take\u0000 shelter.\u001b[31m‮",
+        "Take\u0000 shelter.\u001b[31m\u202E",
         // A control or bidi character INSIDE a tag must not let the tag survive and then collapse into a live one.
         "<\u0001script>alert(1)</script>Take shelter.",
-        "<‮script>alert(1)</script>Take shelter.",
+        "<\u202Escript>alert(1)</script>Take shelter.",
         "<\u0000img src=x onerror=alert(1)>Take shelter.",
         "<\tscript>alert(1)</script>Take shelter.",
     ];
@@ -167,6 +167,8 @@ public sealed partial class WeatherSanitizerAndProjectionTests : IDisposable
         stored["supersedesPermalink"] = "https://evil.test/x";
 
         _products.ProjectPayload(stored)["supersedesPermalink"].Should().BeNull();
+        stored["supersedesPermalink"] = "/social/posts/123";
+        _products.ProjectPayload(stored)["supersedesPermalink"].Should().BeNull("only a weather permalink is echoed");
     }
 
     [Fact]
@@ -199,7 +201,7 @@ public sealed partial class WeatherSanitizerAndProjectionTests : IDisposable
         foreach (var value in Strings(payload))
         {
             CompleteTag().IsMatch(value).Should().BeFalse("no complete tag survives: {0}", value);
-            value.Should().NotContainAny(["<script", "<SCRIPT", "alert(1)</", "\u0000", "\u001b", "‮"]);
+            value.Should().NotContainAny(["<script", "<SCRIPT", "alert(1)</", "\u0000", "\u001b", "\u202E"]);
             value.Any(char.IsControl).Should().BeFalse("control characters are removed: {0}", value);
         }
     }

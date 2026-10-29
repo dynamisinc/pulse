@@ -4,9 +4,10 @@ using System.Text;
 using Pulse.WebApi.Features.Social;
 
 /// <summary>
-/// The weather kinds' plain-text policy (story 01, NFR-004) for every payload string, the narrative and the headline. It
+/// The weather kinds' plain-text policy (story 01, NFR-004) for every payload string. It
 /// REUSES <see cref="PostSanitizer"/> for tag stripping (the <c>plain</c> profile's engine; never a fork) and adds only
-/// control-character removal and trimming. Like <see cref="PostSanitizer"/> it strips and never entity-encodes: the
+/// control-character removal and trimming (the headline and the <c>BodyHtml</c> narrative are the
+/// funnel's: a descriptor never sees them). Like <see cref="PostSanitizer"/> it strips and never entity-encodes: the
 /// participant render path is a React text node.
 /// </summary>
 public static class WeatherPlainText
@@ -62,23 +63,11 @@ public static class WeatherPlainText
         return builder.ToString();
     }
 
-    /// <summary>
-    /// The headline policy (D4-010): the stored string is quoted verbatim by the alert, the post, the widget and the page, so
-    /// the only transformation is trimming the ends — no case change, no truncation, no tag or entity rewriting.
-    /// </summary>
-    /// <param name="headline">The authored headline.</param>
-    /// <returns>The headline, trimmed.</returns>
-    public static string Headline(string headline)
-    {
-        ArgumentNullException.ThrowIfNull(headline);
-        return headline.Trim();
-    }
-
     /// <summary>The Unicode code-point length of <paramref name="value"/> (what a post limit counts).</summary>
     /// <param name="value">The text.</param>
     /// <returns>The number of runes.</returns>
     public static int CodePointLength(string value) => value.EnumerateRunes().Count();
 
     // The explicit bidi embeddings/overrides/isolates: invisible, and able to reorder displayed text (spoofing).
-    private static bool IsBidiControl(char c) => c is >= '‪' and <= '‮' or >= '⁦' and <= '⁩';
+    private static bool IsBidiControl(char c) => c is >= '\u202A' and <= '\u202E' or >= '\u2066' and <= '\u2069';
 }

@@ -78,10 +78,16 @@ public static class WeatherVocabulary
 /// </summary>
 public static class WeatherLimits
 {
-    /// <summary>The product narrative (<c>BodyHtml</c>) cap.</summary>
+    /// <summary>
+    /// The product narrative (<c>BodyHtml</c>) cap. NOT enforced by the weather descriptors (FC-7 gives a descriptor the
+    /// payload only); it needs a funnel-side per-kind body limit (follow-up raised with F04).
+    /// </summary>
     public const int NarrativeMaxLength = 4000;
 
-    /// <summary>The longest headline the weather kinds guarantee to keep untruncated (D4-010).</summary>
+    /// <summary>
+    /// The longest headline the weather kinds guarantee to keep untruncated (D4-010). The headline is the funnel's field
+    /// (sanitized, trimmed, capped at <c>ContentItem.MaxHeadlineLength</c>); weather adds no transformation of its own.
+    /// </summary>
     public const int HeadlineMaxLength = 200;
 
     /// <summary>Each IBW field (<c>what</c>, <c>where</c>, <c>when</c>, <c>impacts</c>).</summary>

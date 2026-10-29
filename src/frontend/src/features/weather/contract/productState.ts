@@ -51,6 +51,9 @@ export function isCancelledBy(
  * A product's state at `scenarioNow`: `cancelled` when a published `cancel`
  * product in `published` supersedes it (it wins over every time-based state),
  * else `pending` before effective, `expired` from expiry on, else `active`.
+ * A published cancel takes effect on its target at once, whatever the cancel's
+ * own effective time (an NWS cancel is immediate); the caller passes only
+ * products already published at `scenarioNow`.
  *
  * @param product The product.
  * @param scenarioNow The exercise's scenario now (a `Date` from `scenarioNow()` or an ISO instant).

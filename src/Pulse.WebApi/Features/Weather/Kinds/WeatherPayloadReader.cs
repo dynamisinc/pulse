@@ -62,9 +62,11 @@ internal static partial class WeatherPayloadReader
         if (fromStore)
         {
             supersedesPermalink = r.OptionalString(payload, "supersedesPermalink", 512, multiline: false);
-            if (supersedesPermalink is not null && !ChannelVocabulary.IsHostRelativePath(supersedesPermalink))
+            if (supersedesPermalink is not null
+                && (!ChannelVocabulary.IsHostRelativePath(supersedesPermalink)
+                    || !supersedesPermalink.StartsWith("/" + ChannelVocabulary.Weather + "/", StringComparison.Ordinal)))
             {
-                // A stored value that is not a host-relative path is dropped, never echoed (FC-9.3).
+                // Only a host-relative WEATHER permalink is ever echoed (FC-9.3); anything else is dropped.
                 supersedesPermalink = null;
             }
         }
