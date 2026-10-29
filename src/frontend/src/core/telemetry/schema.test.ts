@@ -173,10 +173,12 @@ describe('telemetryEventV0Schema', () => {
     }
   })
 
-  it('covers all 15 documented Phase-1 event types', () => {
+  it('covers all 40 documented event types', () => {
     // Guards against someone silently trimming the documented vocabulary.
-    // 15 since profiles-social-graph/07 added `unfollow` alongside `follow`.
-    expect(KNOWN_TELEMETRY_EVENT_TYPES).toHaveLength(15)
+    // 15 Phase-1 types (`unfollow` since profiles-social-graph/07) plus the 25
+    // December channels types (channels-foundation FC-6b, story 02; pinned
+    // name-for-name by features/channels/contract/wireContract.test.ts).
+    expect(KNOWN_TELEMETRY_EVENT_TYPES).toHaveLength(40)
   })
 
   // ---------------------------------------------------------------------

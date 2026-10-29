@@ -26,6 +26,7 @@ using Pulse.WebApi.Features.Injects.Import;         // demo-feedback 03
 using Pulse.WebApi.Features.Exports;                // demo-feedback 02
 using Pulse.WebApi.Features.Social.Pins;            // demo-feedback 04
 using Pulse.WebApi.Features.WhiteNoise;             // demo-feedback 05
+using Pulse.WebApi.Features.Channels;               // channels-foundation 01
 using Pulse.WebApi.Features.ExerciseLifecycleAdmin;
 using Pulse.WebApi.Features.Media; // demo-polish BM
 using Pulse.WebApi.Features.Ops.Build;            // #617
@@ -219,6 +220,7 @@ builder.Services.AddSocialFeedRead();      // #270 GET /api/feed (+ BP's project
 builder.Services.AddSocialPostWrite();     // #271 POST /api/posts (sanitize + stamp + telemetry + broadcast)
 builder.Services.AddSocialPersonaRead();   // #273 GET /api/personas
 builder.Services.AddSocialRealtimeHub();   // #272 exercise-grouped hub + IFeedBroadcaster impl
+builder.Services.AddScenarioClockApi();    // fix/noise-new-posts-clock ScenarioClockChanged push (clock observer)
 builder.Services.AddPostEditing();         // demo-feedback/19 edit own post (S-5; after the realtime hub)
 builder.Services.AddSocialModeration();    // demo-polish B6
 builder.Services.AddSocialThreads();       // demo-polish B2
@@ -293,6 +295,10 @@ builder.Services.AddInjectImport();             // demo-feedback 03 POST /api/in
 builder.Services.AddPostPins();                 // demo-feedback 04 personal + exercise pins, GET /api/feed/pinned
 builder.Services.AddWhiteNoise();               // demo-feedback 05 noise pool + pacer, /api/staff/noise*
 
+// December channels release (channels-foundation, FC-9.10): the one channels DI seam. Story 01 registers nothing (its
+// schema rides AddPulsePersistence's PulseDbContext); later foundation stories fill AddChannels() without editing here.
+builder.Services.AddChannels();
+
 // CORS: allow exactly the configured frontend origin (Authentication__FrontendBaseUrl — the same app
 // setting infrastructure/modules/webapp.bicep provisions for the Static Web App's URL). Fail closed
 // (no cross-origin access at all) when the key is unset/empty rather than falling open.
@@ -318,6 +324,9 @@ builder.Services.AddCors(options =>
 
 // Reads APPLICATIONINSIGHTS_CONNECTION_STRING from configuration; a missing/absent connection string
 // (local development) is a documented no-throw no-op here, never a startup failure.
+// The SDK also swallows its OWN registration failures: 2.22.0 hit keyed services from the live generation
+// provider's resilience handler and silently registered nothing (UAT blackout from 2026-10-19).
+// ApplicationInsightsRegistrationTests pins this call against the live provider config; keep it green.
 builder.Services.AddApplicationInsightsTelemetry();
 
 var app = builder.Build();
@@ -446,6 +455,7 @@ app.MapGroup(string.Empty).DenyReadOnlySessions().MapSocialReactionEndpoints(); 
 
 app.MapSocialPersonaEndpoints();  // #273 GET /api/personas
 app.MapSocialRealtimeHub();       // #272 SignalR hub at /hubs/exercise
+app.MapScenarioClockEndpoints();  // fix/noise-new-posts-clock GET /api/clock (any live session; 401 unresolved)
 app.MapSocialModerationEndpoints(); // demo-polish B6
 app.MapMedia(); // demo-polish BM
 app.MapPersonaAdminEndpoints(); // demo-polish PE-BE (staff + controller + read-only gates inside)

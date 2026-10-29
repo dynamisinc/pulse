@@ -504,7 +504,7 @@ the orchestrator mounts C2/C3. PE's backend half must merge before the 10/15 bac
 | # | Decision | Effect on the plan |
 |---|---|---|
 | 1 | **Demo Tue 10/20; ready Mon 10/19** | The calendar above; the backend freeze moves to Thu 10/15 |
-| 2 | **Stock media** (royalty-free: Pexels / Pixabay) | Test clips now (P3); final picks at seeding. Videos: H.264 MP4, 720p, ≤ 30 s (well under the 100 MB cap). No real logos, real people's likeness or real news brands |
+| 2 | **Stock media** (royalty-free: Pexels / Pixabay; widened 2026-10-19 by [FIC-002](../design/DECISIONS.md) to team-licensed and generated media) | Test clips now (P3); final picks at seeding. Videos: H.264 MP4, 720p, ≤ 30 s (well under the 100 MB cap). No real logos, real people's likeness or real news brands |
 | 3 | **Azure Blob for media** | Real upload pipeline (I1 + BM), a private container, keyless user-delegation read SAS. This replaces the static-file approach. Uploads become real for participants (F4) and controllers (C1) |
 | 4 | **Engine paused, maybe running** | Paused by default; the beat-7 teaser either way. If it runs, its posts are text-only with real counts only. The backend freeze still matters because the engine's state lives in memory |
 | 5 | **No phone** | Desktop-first; the mobile bottom tab bar becomes Could |

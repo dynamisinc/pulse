@@ -37,6 +37,12 @@ function entry(id: string, minute: number, seq: number, text = `text of ${id}`):
   return toEntry(view(id, { scenarioTime: at(minute), text }), seq)
 }
 
+/** An entry stamped `second` seconds after 10:00:00, for lists longer than an hour of minutes. */
+function entryAtSecond(id: string, second: number, seq: number): LiveWorldEntry {
+  const scenarioTime = new Date(Date.parse(at(0)) + second * 1000).toISOString()
+  return toEntry(view(id, { scenarioTime }), seq)
+}
+
 function ids(list: readonly LiveWorldEntry[]): string[] {
   return list.map(item => item.view.id)
 }
@@ -102,6 +108,25 @@ describe('ingest: buffer versus insert', () => {
     expect(ids(merged.rows)).toEqual(['c', 'a', 'b', 'z'])
     expect(merged.pending).toEqual([])
     expect(mergePending(base)).toBe(base)
+  })
+
+  it('mergePending keeps the revealed arrivals at the MAX_ROWS cap, evicting the oldest existing rows', () => {
+    // A full list, every row newer than the held arrivals (the lagging-stamp case).
+    const full = ingest(
+      { rows: [], pending: [] },
+      Array.from({ length: MAX_ROWS }, (_, i) => entryAtSecond(`r${i}`, 10_000 - i, i)),
+      false,
+    )
+    const held = ingest(full, [entryAtSecond('n1', 1, 900), entryAtSecond('n2', 2, 901)], true)
+    const merged = mergePending(held)
+
+    expect(merged.rows).toHaveLength(MAX_ROWS)
+    expect(ids(merged.rows)).toContain('n1')
+    expect(ids(merged.rows)).toContain('n2')
+    expect(ids(merged.rows)).not.toContain(`r${MAX_ROWS - 1}`)
+    expect(ids(merged.rows)).not.toContain(`r${MAX_ROWS - 2}`)
+    expect(ids(merged.rows)).toContain(`r${MAX_ROWS - 3}`)
+    expect(merged.pending).toEqual([])
   })
 
   it('returns the SAME state for an empty batch or an unchanged re-delivery', () => {

@@ -1,0 +1,120 @@
+{
+  "$comment": "FROZEN channels-foundation wire contract (story 02, #698; FC-1, FC-3, FC-5, FC-6b). Read by BOTH suites: ChannelContractParityTests (C#, src/Pulse.WebApi.Tests/Features/Channels) and wireContract.test.ts (TS). Additive-only after Wave 1, and only with the orchestrator. Edit this file, the C# records and types.ts together.",
+  "vocabulary": {
+    "channelIds": ["social", "portal", "news", "press", "weather"],
+    "contentChannelIds": ["news", "press", "weather"],
+    "contentKinds": ["article", "release", "weather_product", "forecast"],
+    "contentStatuses": ["draft", "scheduled", "published", "retracted"],
+    "participantContentStates": ["published", "retracted"],
+    "contentOrigins": ["controller", "participant", "engine", "inject"],
+    "revisionKinds": ["edit", "update", "correction", "silent_rewrite"],
+    "participantRevisionKinds": ["update", "correction"],
+    "stampMovingRevisionKinds": ["update", "correction", "silent_rewrite"],
+    "alertSeverities": ["info", "advisory", "emergency"],
+    "mediaRoles": ["hero", "inline", "attachment"],
+    "contentMediaKinds": ["image", "video", "document"],
+    "realtimeEvents": ["ContentPublished", "ContentRevised", "ContentRetracted", "AlertsChanged"]
+  },
+  "telemetryEventTypes": [
+    "content_dwell",
+    "content_published",
+    "content_revised",
+    "content_retracted",
+    "content_share",
+    "alert_issued",
+    "alert_cleared",
+    "outlet_action",
+    "content_schedule_failed",
+    "content_video_play",
+    "content_video_progress",
+    "content_embed_open",
+    "press_draft_created",
+    "press_embargo_set",
+    "press_embargo_cancelled",
+    "press_approval_requested",
+    "press_approval_approved",
+    "press_approval_returned",
+    "weather_zone_changed",
+    "portal_view",
+    "portal_module_click",
+    "resource_view",
+    "portal_config_changed",
+    "display_command",
+    "display_session_started"
+  ],
+  "shapes": {
+    "OutletRefDto": ["id", "channelId", "slug", "name", "skinKey"],
+    "OutletDto": [
+      "id", "channelId", "slug", "name", "tagline", "parentOutletId", "pairedPersonaId", "logo",
+      "categories", "skinKey", "skinOverrides", "homeRoute"
+    ],
+    "ContentMediaDto": [
+      "id", "kind", "role", "url", "posterUrl", "contentType", "width", "height", "durationSec", "alt", "caption"
+    ],
+    "ContentBylineDto": ["name", "personaId"],
+    "ContentRevisionDto": ["number", "kind", "scenarioTime", "note"],
+    "ChannelContentSummaryDto": [
+      "id", "channelId", "kind", "outlet", "slug", "permalink", "state", "headline", "dek", "kicker", "category",
+      "hero", "publishedScenarioTime", "updatedScenarioTime", "featured"
+    ],
+    "ChannelContentDto": [
+      "id", "channelId", "kind", "outlet", "slug", "permalink", "state", "headline", "dek", "kicker", "category",
+      "hero", "publishedScenarioTime", "updatedScenarioTime", "featured",
+      "byline", "bodyHtml", "media", "revisions", "pairedPostId", "alertId", "payload"
+    ],
+    "ChannelContentTombstoneDto": ["id", "channelId", "kind", "outlet", "slug", "permalink", "state", "retractedScenarioTime"],
+    "ChannelContentListDto": ["items", "nextCursor"],
+    "ChannelContentStaffDto": [
+      "id", "channelId", "kind", "outlet", "slug", "permalink", "state", "headline", "dek", "kicker", "category",
+      "hero", "publishedScenarioTime", "updatedScenarioTime", "featured",
+      "byline", "bodyHtml", "media", "revisions", "pairedPostId", "alertId", "payload",
+      "status", "origin", "actingHumanId", "scheduledScenarioTime", "publishedWallClock", "background", "featuredRank",
+      "injectId", "externalSource", "externalRef", "revisionCount", "revisionLog", "version"
+    ],
+    "ContentMediaWriteRequest": ["mediaId", "role", "alt"],
+    "ContentWriteRequest": [
+      "kind", "outletId", "headline", "dek", "kicker", "category", "bylineName", "bylinePersonaId", "bodyHtml",
+      "heroMediaId", "media", "payload", "background", "featuredRank", "scheduledScenarioTime", "externalSource",
+      "externalRef", "version"
+    ],
+    "AlertDto": ["id", "severity", "message", "scenarioTime", "href", "sourceChannel", "contentId", "expiresScenarioTime"],
+    "AlertsChangedDto": ["alerts"],
+    "ContentRevisedDto": ["id", "channelId", "permalink", "updatedScenarioTime", "revisions", "headline", "dek"],
+    "ContentRetractedDto": ["id", "channelId", "permalink", "retractedScenarioTime"],
+    "LinkPreviewDto": ["title", "description", "image", "sourceName", "permalink"],
+    "PublishOptions": ["pairedPost", "alert"],
+    "PairedPostOptions": ["text"],
+    "PublishAlertOptions": ["severity", "headline", "expiresScenarioTime"]
+  },
+  "participantShapes": [
+    "OutletRefDto",
+    "OutletDto",
+    "ContentMediaDto",
+    "ContentBylineDto",
+    "ContentRevisionDto",
+    "ChannelContentSummaryDto",
+    "ChannelContentDto",
+    "ChannelContentTombstoneDto",
+    "ChannelContentListDto",
+    "AlertDto",
+    "AlertsChangedDto",
+    "ContentRevisedDto",
+    "ContentRetractedDto",
+    "LinkPreviewDto"
+  ],
+  "participantExcludedKeys": [
+    "origin",
+    "actingHumanId",
+    "status",
+    "background",
+    "featuredRank",
+    "version",
+    "injectId",
+    "externalRef",
+    "externalSource",
+    "publishedWallClock",
+    "scheduledScenarioTime",
+    "revisionLog",
+    "revisionCount"
+  ]
+}

@@ -345,6 +345,11 @@ export interface UseComposePostOptions {
    * host reacts (a modal closes, a thread appends the reply).
    */
   readonly onPosted?: (view: ParticipantPostView) => void
+  /**
+   * The draft's starting text (channels-foundation 21: compose-with-link pre-fills an in-sim
+   * permalink). Read once, on mount; the draft is the author's after that. Default empty.
+   */
+  readonly initialText?: string
 }
 
 /** The full compose surface the composers bind to. */
@@ -410,11 +415,11 @@ let attachmentSeq = 0
  * contract; `<Composer>` and `<ReplyComposer>` are its intended consumers.
  */
 export function useComposePost(options: UseComposePostOptions = {}): UseComposePostResult {
-  const { charLimit = DEFAULT_CHAR_LIMIT, parentPostId, onPosted } = options
+  const { charLimit = DEFAULT_CHAR_LIMIT, parentPostId, onPosted, initialText = '' } = options
   const { exerciseId, timeZone } = useExerciseContext()
   const session = useSession()
 
-  const [text, setTextState] = useState('')
+  const [text, setTextState] = useState(initialText)
   const [items, setItems] = useState<readonly ComposerAttachment[]>([])
   const [mediaError, setMediaError] = useState<string | undefined>(undefined)
   const [isPublishing, setIsPublishing] = useState(false)

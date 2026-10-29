@@ -63,6 +63,7 @@ public sealed class StorylineTargetChaseIntegrationTests
         services.AddExerciseClock();
         services.AddEngineRuntimeSeams();
         services.AddReactionLoopHost();
+        services.AddPauseTierSteering(); // the PauseTierRegistry the driver requires (CTL-023)
 
         // W-005: registers StorylineSteeringService over the SAME IReactionLoopRegistry
         // AddReactionLoopHost() already registered (TryAddSingleton converges on it), so a test can go through

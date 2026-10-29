@@ -58,9 +58,36 @@ public sealed class MediaCompositionRootWiringTests
             "/dev-media is never an endpoint (it would have to be allowlisted) — it is a Development-only static mapping");
     }
 
+    /// <summary>press-room story 02: the document routes are mapped once; the upload shares the media-upload rate limit.</summary>
+    [Fact]
+    public void ProgramCs_MapsTheDocumentRoutesExactlyOnce_TheUploadRateLimited_AndTheGateDefaultsToDeny()
+    {
+        using var factory = new WiringProbe();
+        var endpoints = factory.Services.GetRequiredService<EndpointDataSource>().Endpoints.OfType<RouteEndpoint>().ToList();
+
+        var upload = endpoints.Where(endpoint => Matches(endpoint, "POST", MediaEndpoints.DocumentUploadRoute)).ToList();
+        var read = endpoints.Where(endpoint => Matches(endpoint, "GET", MediaEndpoints.DocumentReadRoute)).ToList();
+
+        upload.Should().ContainSingle();
+        read.Should().ContainSingle();
+        upload[0].Metadata.GetMetadata<EnableRateLimitingAttribute>()?.PolicyName.Should().Be(
+            MediaEndpoints.MediaUploadRateLimitPolicy, "rate-limited like every media upload (NFR-009)");
+        upload[0].Metadata.GetMetadata<IAllowAnonymous>().Should().BeNull();
+        read[0].Metadata.GetMetadata<IAllowAnonymous>().Should().BeNull();
+
+        using var scope = factory.Services.CreateScope();
+        scope.ServiceProvider.GetRequiredService<Pulse.WebApi.Features.Media.Documents.IDocumentUploadAuthorizer>()
+            .Should().BeOfType<Pulse.WebApi.Features.Media.Documents.DenyAllDocumentUploadAuthorizer>("no feature has opted participants in yet");
+        scope.ServiceProvider.GetRequiredService<Pulse.WebApi.Features.Media.Documents.IDocumentScanner>()
+            .Should().BeOfType<Pulse.WebApi.Features.Media.Documents.PdfDenyListScanner>();
+        scope.ServiceProvider.GetRequiredService<Pulse.WebApi.Features.Media.Documents.DocumentReadService>().Should().NotBeNull();
+    }
+
     [Theory]
     [InlineData("POST", "/api/media")]
     [InlineData("GET", "/api/staff/media")]
+    [InlineData("POST", "/api/media/documents")]
+    [InlineData("GET", "/api/media/documents/00000000-0000-0000-0000-000000000001")]
     public async Task MediaRoutes_AnswerTheGates401_Not404_WithNoCredential(string method, string route)
     {
         using var factory = new WiringProbe();

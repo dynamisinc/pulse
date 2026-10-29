@@ -198,6 +198,7 @@ import { wallClockNowIso } from '@/core/time/wallClock'
 import { buildAndEmit } from '@/core/telemetry'
 import { PostCard, type PostView, type ParticipantPostView } from '@/features/social'
 import { usePersonas, type Persona } from '@/features/personas'
+import { invalidatePersonas } from '@/features/personas/personaService'
 import {
   useShellContext,
   affordancesAvailable,
@@ -232,7 +233,9 @@ function sortNewestFirst(views: readonly PostView[]): PostView[] {
  * re-widened here) to renderable `PostView`s: attaches each post's author from
  * the persona cast, skips a post whose author is absent (never crash the feed)
  * or whose id is already rendered (de-dupes the mount-window baseline/stream
- * overlap). Mirrors `feedService.assembleFeedView`'s per-row assembly.
+ * overlap). (`handleLoadNew` keeps an unknown-author BUFFERED post behind the
+ * pill rather than letting this skip lose it.) Mirrors `feedService.assembleFeedView`'s
+ * per-row assembly.
  */
 function resolveLiveViews(
   buffered: readonly ParticipantPostView[],
@@ -420,7 +423,7 @@ export function Feed({
   // observer/read-only session (D1-011) — nothing streams there. The stream is
   // top-level only (replies never raise the pill - `feedStreamSource`).
   const streamEnabled = affordances
-  const { newCount, loadBuffered, discard } = useFeedStream({
+  const { newCount, loadBuffered, discard, requeue } = useFeedStream({
     enabled: streamEnabled,
     admit: admitArrival,
   })
@@ -542,6 +545,12 @@ export function Feed({
     onOpenThread(postId)
   }, [onOpenThread])
 
+  /**
+   * Unknown-author posts put back behind the pill, each with the cast it was requeued
+   * against (see `handleLoadNew`). The retry is keyed on the CAST refreshing, not on taps.
+   */
+  const requeuedRef = useRef<Map<string, ReadonlyMap<string, Persona>>>(new Map())
+
   const handleLoadNew = useCallback(() => {
     // Guard BEFORE draining: if the persona cast has not resolved yet, do NOT
     // drain — every author resolution would fail and the drain would drop the
@@ -557,11 +566,38 @@ export function Feed({
     if (buffered.length === 0) return
 
     const resolved = resolveLiveViews(buffered, personaById, renderedIds)
-    // Nothing resolved: every buffered post was a mount-window duplicate already
-    // on screen or an unknown author — both correctly skipped, matching the
-    // baseline `assembleFeedView` skip. The drain above already cleared the
-    // count and hid the pill; don't scroll to a feed that didn't change, and
-    // don't emit a load event for a load that rendered nothing. Return early.
+
+    // An UNKNOWN author is not a drop: the post's author was created after this page
+    // loaded (a late joiner), so the cached cast cannot resolve it YET. Put it back
+    // behind the pill (the count stays honest: it equals what a tap would load) and ask
+    // for a fresh cast; the next tap, once the cast carries the author, renders it.
+    // (A mount-window DUPLICATE already on screen is still dropped: nothing to show.)
+    // Each post gets ONE refreshed cast to resolve against. A tap before that refresh
+    // lands keeps it waiting (and asks again, in case the last read failed). Once a NEWER
+    // cast still lacks the author, it is dropped (the old baseline skip), so the pill can
+    // never stay stuck on a post that will never render.
+    const unresolved = buffered.filter(
+      post => !renderedIds.has(post.id) && !personaById.has(post.authorPersonaId),
+    )
+    const retryable = unresolved.filter(post => {
+      const castAtRequeue = requeuedRef.current.get(post.id)
+      if (castAtRequeue === undefined || castAtRequeue === personaById) return true
+      requeuedRef.current.delete(post.id)
+      return false
+    })
+    if (retryable.length > 0) {
+      for (const post of retryable) {
+        if (!requeuedRef.current.has(post.id)) requeuedRef.current.set(post.id, personaById)
+      }
+      requeue(retryable)
+      invalidatePersonas()
+    }
+    for (const view of resolved) requeuedRef.current.delete(view.id)
+
+    // Nothing resolved: every drained post was a mount-window duplicate already on
+    // screen, or an unknown author that is back behind the pill. Don't scroll to a
+    // feed that didn't change, and don't emit a load event for a load that rendered
+    // nothing. Return early.
     if (resolved.length === 0) return
 
     setLiveViews(prev => sortNewestFirst([...resolved, ...prev]))
@@ -590,7 +626,8 @@ export function Feed({
       payload: { newPostsLoaded: resolved.length },
     })
   }, [
-    loadBuffered, personaById, renderedIds, exerciseId, timeZone, session.accountId, feedEntityId,
+    loadBuffered, requeue, personaById, renderedIds, exerciseId, timeZone, session.accountId,
+    feedEntityId,
   ])
 
   // XC-004: one 'view' event on first mount. The ref guard makes it emit-once

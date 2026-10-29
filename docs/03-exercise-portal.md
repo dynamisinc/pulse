@@ -44,7 +44,7 @@ The portal does double duty: **navigation shell** for the whole simulated intern
 
 | ID | Requirement |
 |---|---|
-| PRT-040 | **Kiosk/big-screen mode:** a facilitator-driven, login-free display view for tabletop exercises — clean full-screen rendering of a chosen surface (portal, a feed, a specific article/post/warning), auto-cycling playlists, and facilitator remote control ("show this next"). Pairs with module-based time advancement (COR-052): advancing a module updates the display. TTXs outnumber functional exercises ~3:1 among target customers; without this, screenshots-in-PowerPoint remains cheaper for the majority use case. |
+| PRT-040 | **Kiosk/big-screen mode:** a facilitator-driven, login-free display view for tabletop exercises — clean full-screen rendering of a chosen surface (portal, a feed, a specific article/post/warning), auto-cycling playlists, and facilitator remote control ("show this next"). Pairs with module-based time advancement (COR-052): advancing a module updates the display. TTXs outnumber functional exercises ~3:1 among target customers; without this, screenshots-in-PowerPoint remains cheaper for the majority use case. **Amended 10/29 (Tom):** December ships **kiosk-lite** on the existing shared view-only login (`/portal?display=1`); the **login-free, facilitator-driven display with remote control** (playlists, "show this next") is post-December. |
 | PRT-041 | Kiosk sessions are read-only, exercise-scoped, and count in telemetry as a display session (not attributed person-level — shared screens, review finding D9). |
 
 ### F3.5 World texture
