@@ -40,6 +40,9 @@ Files: `Features/Channels/Enablement/**`, the `ChannelCatalog` edit in `Particip
   failed refetch keeps the last answer; the server stays authoritative). `<ChannelRoute channelId>` shows a busy
   placeholder while loading, and while a cached "disabled" is being refetched, then the children or `ChannelNotFound`.
   Inside a staged staff "Preview as participant" (`useOptionalPreview()`) it renders the channel regardless (AC3).
+  Today the preview host (`PreviewChannelHost`) mounts Social directly, not through `<ChannelRoute>`, so this client
+  half of AC3 goes live when the preview hosts a guarded channel (add an integration test with the real `PreviewProvider`
+  then). A later cleanup could invert the dependency (a channels-owned bypass context the preview mounts).
 - **`ChannelNotFound`:** story 12 owns the final skinned version; this story ships a fiction-safe baseline in
   `features/channels/routing/ChannelNotFound.tsx` (FC-8 `routing/`) that story 12 restyles in place. Handoff to 12: today an unknown participant path redirects to Social home
   (`SocialRoutes` catch-all) while a disabled channel renders `ChannelNotFound`; 12's participant not-found should

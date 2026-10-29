@@ -206,6 +206,23 @@ describe('<ChannelRoute>', () => {
     expect(await screen.findByText('news channel content')).toBeInTheDocument()
   })
 
+  it('a cached "enabled" renders at once, then switches to not-found when the refetch says disabled', async () => {
+    const queryClient = newQueryClient()
+    respondWith({ social: true, news: true })
+    const first = renderRoute('news', queryClient)
+    expect(await screen.findByText('news channel content')).toBeInTheDocument()
+    first.unmount()
+
+    let answer: (value: unknown) => void = () => {}
+    mockGet.mockReturnValue(new Promise(resolve => { answer = resolve }) as never)
+    renderRoute('news', queryClient)
+    expect(screen.getByText('news channel content')).toBeInTheDocument()
+
+    answer({ data: navConfig({ social: true }), status: 200 })
+    expect(await screen.findByTestId('channel-not-found')).toBeInTheDocument()
+    expect(screen.queryByText('news channel content')).not.toBeInTheDocument()
+  })
+
   it('lets a staged staff preview render a disabled channel (staff are not blocked)', async () => {
     previewActive = true
     respondWith({ social: true })
