@@ -284,6 +284,8 @@ export function useChannelStream(options: UseChannelStreamOptions): UseChannelSt
         if (reason !== 'stopped') {
           hadGap = true
         } else if (getAccessToken() !== null) {
+          // Frames sent while the connection was down are lost: resync once the restart connects.
+          hadGap = true
           connection.start().catch(() => {
             hadGap = true
           })

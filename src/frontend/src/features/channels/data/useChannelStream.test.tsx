@@ -185,6 +185,8 @@ describe('useChannelStream', () => {
 
   afterEach(() => {
     vi.useRealTimers()
+    vi.unstubAllGlobals()
+    tokenState.token = null
   })
 
   it('subscribes to the three content events on the shared connection, starts it, and unsubscribes on unmount', () => {
@@ -337,7 +339,7 @@ describe('useChannelStream', () => {
   })
 
   it('restarts the shared connection after a deliberate stop when a token is stored', () => {
-    const { connection } = setup()
+    const { connection, onResync } = setup()
     expect(connection.startCalls).toBe(1)
 
     tokenState.token = null
@@ -347,7 +349,8 @@ describe('useChannelStream', () => {
     tokenState.token = 'next-identity'
     act(() => connection.setState(HubConnectionState.Disconnected, 'stopped'))
     expect(connection.startCalls).toBe(2)
-    tokenState.token = null
+    act(() => connection.setState(HubConnectionState.Connected))
+    expect(onResync).toHaveBeenCalledTimes(1)
   })
 
   it('bumps announcementSeq so an identical message is announced again', () => {
@@ -412,7 +415,6 @@ describe('useChannelStream', () => {
     expect(delivered).toEqual([items[0]?.id, items[2]?.id])
     expect(hook.result.current.newItemCount).toBe(3)
     expect(reported).toHaveBeenCalledWith(new Error('consumer bug'))
-    vi.unstubAllGlobals()
   })
 
   it('resets the count when the channel view changes', () => {
