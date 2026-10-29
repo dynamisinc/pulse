@@ -95,8 +95,9 @@ public sealed class EasyLoginWireTests
         var previousUi = CultureInfo.CurrentUICulture;
         try
         {
-            CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo(name);
-            CultureInfo.CurrentUICulture = CultureInfo.GetCultureInfo(name);
+            var culture = WithExplicitCalendar(name);
+            CultureInfo.CurrentCulture = culture;
+            CultureInfo.CurrentUICulture = culture;
             action();
         }
         finally
@@ -104,5 +105,41 @@ public sealed class EasyLoginWireTests
             CultureInfo.CurrentCulture = previous;
             CultureInfo.CurrentUICulture = previousUi;
         }
+    }
+
+    /// <summary>
+    /// Builds <paramref name="name"/> with its non-Gregorian calendar pinned rather than inherited, because the default is
+    /// ICU/CLDR data, not .NET: the CI runner's ICU began defaulting ar-SA to Gregorian (10/2026), which silently turned
+    /// the hazard precondition (and every ar-SA case here) into a Gregorian no-op. Fails loudly if the platform does not
+    /// offer the calendar at all, rather than quietly testing nothing.
+    /// </summary>
+    private static CultureInfo WithExplicitCalendar(string name)
+    {
+        var culture = new CultureInfo(name, useUserOverride: false);
+        var wanted = name switch
+        {
+            "ar-SA" => new[] { typeof(UmAlQuraCalendar), typeof(HijriCalendar) },
+            "th-TH" => new[] { typeof(ThaiBuddhistCalendar) },
+            "fa-IR" => new[] { typeof(PersianCalendar) },
+            _ => [],
+        };
+        if (wanted.Length == 0)
+        {
+            return culture;
+        }
+
+        foreach (var type in wanted)
+        {
+            var calendar = Array.Find(culture.OptionalCalendars, c => c.GetType() == type);
+            if (calendar is not null)
+            {
+                culture.DateTimeFormat.Calendar = calendar;
+                return culture;
+            }
+        }
+
+        throw new InvalidOperationException(
+            $"{name} offers none of [{string.Join(", ", Array.ConvertAll(wanted, t => t.Name))}] on this platform; "
+            + $"its calendars are [{string.Join(", ", Array.ConvertAll(culture.OptionalCalendars, c => c.GetType().Name))}].");
     }
 }
