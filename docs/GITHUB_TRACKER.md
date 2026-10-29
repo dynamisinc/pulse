@@ -95,6 +95,13 @@ gh issue edit <n> -R dynamisinc/pulse --remove-label status:todo --add-label sta
 > verify with `gh api graphql` before bulk-linking, and fall back to a task-list checklist in the
 > parent body if needed.
 
+## Conventions added with the December channels mirror (10/29)
+
+- **Cross-cutting features** (shared by several epics, e.g. `channels-foundation`) are parented under **E1 — Platform Core** (#37), as `telemetry`, `participant-shell` and `backend-host` already are; the feature body says which epics it serves.
+- **Release scope** is the label `release:december` (no GitHub milestones are used in this repo). It goes on the epic, feature and story issues that are in scope for that release; Deferred stories get **no issue** and are listed in the body of their feature issue instead.
+- **Channel labels** `channel:portal` / `channel:news` / `channel:press` / `channel:weather` (listed above) are applied to the epic, feature and story issues of those channels; a cross-cutting feature carries none.
+- **Story titles** are prefixed with the feature's short tag and number (`F04 —` for the foundation, `News 04 —`, `Press 04 —`, `Weather 04 —`, `Portal 04 —`) because the channel features number their stories independently.
+
 ## Guardrails
 
 - **Print each `gh` command before running it**; show the number/URL after.

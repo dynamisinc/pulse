@@ -1,0 +1,28 @@
+# Story: Shared content primitives (dateline, watermark slot, sanitized body, media, live region)
+
+**Feature:** Channels foundation  ·  **Epic:** E4/E5/E6 (shared)  ·  **Phase:** 3 — December release (Tom, 10/21)  ·  **Status:** Not Started
+**Requirements:** COR-053, XC-008, NWS-014 (inline video via existing player), NWS-032, NFR-001, NFR-004, NFR-008  ·  **Design decisions:** D3-P1 (slots 5–7), D4-012, D2-008  ·  **Issue:** #710
+**Stack:** frontend  ·  **World:** participant  ·  **Wave:** 2  ·  **Effort:** M
+
+## Context
+The pieces every channel page needs and that the D3/D4 briefs mandate be identical: the scenario-time dateline, the EXERCISE watermark chip slot (bottom-right on high-risk imagery),
+the sanitized body renderer, media with the existing band overlay, and one live-region announcer. Presentational only: no fetching, no skin ownership.
+
+## Acceptance Criteria
+- [ ] **`ScenarioDateline`.** Given a `scenarioTime` ISO string, then it renders in the exercise time zone via `formatScenarioTime` / the shell's `scenarioNow` (relative "2h ago" derived from `scenarioNow`, never `Date.now()`); the format string comes from the skin's `dateline.format`, resolved through a **format registry** (`registerDatelineFormat(name, fn)`; built-ins `standard`, `relative`, `compact`; a channel registers its own, e.g. news's `wire`, so no channel forks the primitive, news FU-3c) and every format function receives only the scenario-time formatter, never a `Date`; it never says "scenario time"; a lint/test rule forbids `toLocale*`/`Date.now` in this module (COR-053/XC-008).
+- [ ] **`WatermarkSlot`.** Given a high-risk container (hero image, radar/cone image, warning product), then a bottom-right "EXERCISE" chip slot is reserved and **rendered when** `isWatermarkRequired(chromeConfig)` (`watermark || !enabled`); it is `aria-hidden`, `pointer-events: none`, ≥ 4.5:1, does not overlap the video control row, and reserves its space when off so layout does not shift (NFR-008; chrome and watermark never both off).
+- [ ] **`ContentMedia`.** Given a `ContentMediaDto`, then images and video render via the existing media components with `ExerciseBands` when required, `alt` required for images (a missing alt falls back to a non-empty placeholder and warns in dev), video uses the existing inline player imported from `core/media` (extracted from the Social components if it currently lives there, so no channel pulls Social chrome, news FU-9; fullscreen the wrapper, not the `<video>`), and `document` kind renders a download link only, with its file name (Q-03, Tom 10/29: PDFs are download-only attachments in December; inline PDF rendering is post-December and `ContentMedia` gains no page-count field, press FU-7).
+- [ ] **`SanitizedBody`.** Given server-sanitized `bodyHtml`, then it renders through one DOMPurify pass with the same allowlist (defense in depth), forces `rel="noopener noreferrer"` and in-sim links to client-side routes, strips inline event handlers/`javascript:`, and a stored `<script>` or `onerror` payload never executes (NFR-004; test with a payload corpus).
+- [ ] **Embedded Pulse posts.** The body renderer supports an `<pulse-post data-id>` placeholder resolved by a render-prop so E4 can embed a post in D1 anatomy without this module depending on social.
+- [ ] **`LiveRegionAnnouncer`.** Given content arrivals, then one polite live region announces "N new stories" no more than once per 5 s (coalesced) and severity text is never color-only; emergency alerts are not announced here (the alert bar owns that).
+- [ ] **Accessibility.** Primitives are keyboard-operable, have visible focus, meet 44px touch targets on coarse pointers (`useCoarsePointer`), respect `usePrefersReducedMotion`, and pass `axe` with no serious/critical violations in Vitest.
+- [ ] **No enterprise look.** No default MUI component styling is visible (every component is styled by tokens/CSS vars), no COBRA import (static test).
+
+## Out of Scope
+Article layout and slot grid (E4), letterhead (E5; an inline PDF viewer is post-December), warning-product formatting (E6), data hooks (15), the skin provider (13). Pull quotes and share button are E4's.
+
+## Technical Notes
+Files: `features/channels/primitives/**` (+ tests), plus `core/media/**` only if the player must be extracted. Reuse `core/clock`, `core/media`, `ExerciseBands`, `isWatermarkRequired`, `useCoarsePointer`, `usePrefersReducedMotion`. MUI 9: `sx` for system props. FontAwesome only.
+
+## Dependencies
+02. Can run with 03, 04, 08, 09, 10, 13.
