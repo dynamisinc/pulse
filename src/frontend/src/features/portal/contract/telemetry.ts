@@ -46,7 +46,8 @@ export const PORTAL_TELEMETRY_SHAPES = [
     eventType: 'resource_view', emitter: 'client', entityType: 'portal_resource', hasEntityId: true,
     payloadKeys: [], deferred: false,
   },
-  // server (03): actor = the staff human; payload.fields = changed field NAMES, never values
+  // server (03): actor = the staff human; entityId = the PortalConfig row id;
+  // payload.fields = changed field NAMES, never values
   {
     eventType: 'portal_config_changed', emitter: 'server', entityType: 'portal', hasEntityId: true,
     payloadKeys: ['fields'], deferred: false,
@@ -56,7 +57,8 @@ export const PORTAL_TELEMETRY_SHAPES = [
     eventType: 'display_command', emitter: 'server', entityType: 'display', hasEntityId: true,
     payloadKeys: ['command'], deferred: true,
   },
-  // Deferred (05): actor { kind: 'display' }, no person attribution (PRT-041)
+  // Deferred (05): no person attribution (PRT-041); needs a `display` actor kind the
+  // v0 envelope does not have yet, so story 05 adds it first
   {
     eventType: 'display_session_started', emitter: 'server', entityType: 'display', hasEntityId: true,
     payloadKeys: [], deferred: true,

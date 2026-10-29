@@ -46,8 +46,9 @@ public static class PortalTelemetry
         new(ChannelTelemetryEventTypes.ResourceView, EmitterClient, EntityPortalResource, HasEntityId: true, PayloadKeys: [], Deferred: false);
 
     /// <summary>
-    /// <c>portal_config_changed</c>: server (03), actor = the staff human; <c>payload.fields</c> names the changed
-    /// fields, never their values.
+    /// <c>portal_config_changed</c>: server (03), actor = the staff human; <c>target.entityId</c> is the
+    /// <c>PortalConfig</c> row id (the first write creates it); <c>payload.fields</c> names the changed fields,
+    /// never their values.
     /// </summary>
     public static PortalTelemetryShape PortalConfigChanged { get; } =
         new(ChannelTelemetryEventTypes.PortalConfigChanged, EmitterServer, EntityPortal, HasEntityId: true, PayloadKeys: ["fields"], Deferred: false);
@@ -57,8 +58,8 @@ public static class PortalTelemetry
         new(ChannelTelemetryEventTypes.DisplayCommand, EmitterServer, EntityDisplay, HasEntityId: true, PayloadKeys: ["command"], Deferred: true);
 
     /// <summary>
-    /// <c>display_session_started</c>: server (05); actor <c>{ kind: 'display', displayId }</c>, no person
-    /// attribution (PRT-041). Deferred (Q-35).
+    /// <c>display_session_started</c>: server (05); no person attribution (PRT-041). Deferred (Q-35): PC-6 wants
+    /// a <c>display</c> actor kind, which the v0 envelope does not have yet, so story 05 must add one first.
     /// </summary>
     public static PortalTelemetryShape DisplaySessionStarted { get; } =
         new(ChannelTelemetryEventTypes.DisplaySessionStarted, EmitterServer, EntityDisplay, HasEntityId: true, PayloadKeys: [], Deferred: true);

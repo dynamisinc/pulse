@@ -3,6 +3,7 @@ import { KNOWN_TELEMETRY_EVENT_TYPES, telemetryEventV0Schema } from '@/core/tele
 import { CHANNEL_IDS, WIRE_SHAPE_KEYS } from '@/features/channels/contract'
 import channelsWire from '@/features/channels/contract/wireContract.json'
 import wire from './portalWireContract.json'
+import { isForbiddenKey } from './forbiddenKeys'
 import { PORTAL_TELEMETRY_SHAPES } from './telemetry'
 import { PORTAL_WIRE_SHAPE_KEYS } from './types'
 import {
@@ -19,7 +20,7 @@ function shapeKeys(name: string): readonly string[] {
 }
 
 function isForbidden(key: string): boolean {
-  return wire.participantForbiddenKeyPatterns.some(p => key.toLowerCase().includes(p))
+  return isForbiddenKey(key, wire.participantForbiddenKeyPatterns)
 }
 
 /**
@@ -85,6 +86,14 @@ describe('portal wire contract (PC-1 / PC-3 / PC-6)', () => {
         expect(isForbidden(key)).toBe(true)
       }
       expect(channelsWire.participantExcludedKeys).toContain('version')
+    })
+
+    it.each([
+      ['tokenHash', true], ['displayToken', true], ['accessTokens', true], ['actingHumanId', true],
+      ['lastSeenAt', true], ['createdWallClock', true], ['exerciseId', true], ['version', true],
+      ['last_seen', true], ['hashtags', false], ['skinOverrides', false], ['title', false],
+    ] as const)('matches whole words only: %s -> %s', (key, expected) => {
+      expect(isForbidden(key)).toBe(expected)
     })
 
     it('a staff shape trips the same check (the test can fail)', () => {

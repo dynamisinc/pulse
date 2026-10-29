@@ -8,6 +8,7 @@ import {
   isIsoScenarioTime,
 } from '@/features/channels/contract'
 import wire from '../contract/portalWireContract.json'
+import { isForbiddenKey } from '../contract/forbiddenKeys'
 import { isPortalDto, isPortalResourceList } from '../contract/guards'
 import { PORTAL_DEFAULT_MODULE_ORDER, PORTAL_MODULE_CHANNELS } from '../contract/vocabulary'
 import {
@@ -202,7 +203,7 @@ describe('portal fixtures', () => {
 
   it.each(scenarios)('$key: no participant-visible key looks staff-only (XC-002)', scenario => {
     const leaks = keys(scenario).filter(key =>
-      wire.participantForbiddenKeyPatterns.some(p => key.toLowerCase().includes(p)),
+      isForbiddenKey(key, wire.participantForbiddenKeyPatterns),
     )
     expect(leaks).toEqual([])
   })

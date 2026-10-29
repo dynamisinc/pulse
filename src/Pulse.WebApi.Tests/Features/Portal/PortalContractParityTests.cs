@@ -22,9 +22,10 @@ using Pulse.WebApi.Features.Portal.Contracts;
 /// <c>src/frontend/src/features/portal/contract/portalWireContract.json</c> is read by BOTH suites (this one and
 /// <c>portalWireContract.test.ts</c>), so the C# records, <see cref="PortalVocabulary"/>, <see cref="PortalTelemetry"/>
 /// and the TS types can only agree through it. Key sets are read off a REAL serialization of a fully-populated
-/// instance, so a <c>[JsonPropertyName]</c> typo or a dropped member fails here. Plain facts, no database.
+/// instance AND of an all-nullables-null instance, so a <c>[JsonPropertyName]</c> typo, a dropped member or a null
+/// omitted from the wire fails here. Plain facts, no database.
 /// </summary>
-public class PortalContractParityTests
+public partial class PortalContractParityTests
 {
     private static readonly Lazy<JsonObject> Golden = new(() =>
         (JsonNode.Parse(File.ReadAllText(Path.Combine(
@@ -32,6 +33,8 @@ public class PortalContractParityTests
             ?? throw new InvalidOperationException("portalWireContract.json is empty.")).AsObject());
 
     private static readonly IReadOnlyDictionary<string, object> Samples = BuildSamples();
+
+    private static readonly IReadOnlyDictionary<string, object> NullSamples = BuildNullSamples();
 
     public static TheoryData<string> ShapeNames()
     {
@@ -65,8 +68,51 @@ public class PortalContractParityTests
     [MemberData(nameof(ShapeNames))]
     public void SerializedKeys_EqualTheGoldenKeySet(string shape)
     {
+        var expected = GoldenStrings(Golden.Value["shapes"]![shape]);
+
         SerializedKeys(Samples[shape]).Should().BeEquivalentTo(
-            GoldenStrings(Golden.Value["shapes"]![shape]), $"{shape} must serialize to exactly the frozen PC-3 camelCase keys");
+            expected, $"{shape} must serialize to exactly the frozen PC-3 camelCase keys");
+        if (NullSamples.TryGetValue(shape, out var nulls))
+        {
+            SerializedKeys(nulls).Should().BeEquivalentTo(expected, $"{shape} must write every nullable key as null");
+        }
+    }
+
+    [Fact]
+    public void Samples_PopulateEveryNullableMember_AndNullSamplesNullThemAll()
+    {
+        // Guards the guard: each nullable member is written once with a value and once as null, and every shape
+        // that has a nullable member has a null sample.
+        foreach (var (shape, sample) in Samples)
+        {
+            var nullables = NullableProperties(sample.GetType());
+            foreach (var property in nullables)
+            {
+                property.GetValue(sample).Should().NotBeNull($"the full {shape} sample populates {property.Name}");
+            }
+
+            if (nullables.Count > 0)
+            {
+                NullSamples.Should().ContainKey(shape, $"{shape} has nullable members");
+            }
+        }
+
+        foreach (var (shape, sample) in NullSamples)
+        {
+            foreach (var property in NullableProperties(sample.GetType()))
+            {
+                property.GetValue(sample).Should().BeNull($"{shape}.{property.Name} is nullable");
+            }
+        }
+    }
+
+    private static List<PropertyInfo> NullableProperties(Type type)
+    {
+        var context = new NullabilityInfoContext();
+        return type.GetProperties(BindingFlags.Public | BindingFlags.Instance)
+            .Where(p => Nullable.GetUnderlyingType(p.PropertyType) is not null
+                || context.Create(p).WriteState == NullabilityState.Nullable)
+            .ToList();
     }
 
     [Fact]
@@ -78,7 +124,7 @@ public class PortalContractParityTests
             .Value.SerializerOptions;
         var hub = factory.Services.GetRequiredService<IOptions<JsonHubProtocolOptions>>().Value.PayloadSerializerOptions;
 
-        foreach (var (shape, sample) in Samples)
+        foreach (var (shape, sample) in Samples.Concat(NullSamples))
         {
             var expected = GoldenStrings(Golden.Value["shapes"]![shape]);
 
@@ -102,6 +148,8 @@ public class PortalContractParityTests
         // The check can fail: the staff config carries `version`, and a type naming any forbidden pattern trips it.
         ForbiddenMembers(typeof(PortalConfigStaffDto)).Should().Contain("PortalConfigStaffDto.Version");
         ForbiddenMembers(typeof(LeakyProbe)).Should().HaveCount(6);
+        ForbiddenMembers(typeof(HarmlessProbe)).Should().BeEmpty("only whole words count, so hashtags is not a hash");
+        ForbiddenMembers(typeof(NestedLeakProbe)).Should().HaveCount(6, "the walk looks inside arrays too");
     }
 
     [Theory]
@@ -289,8 +337,7 @@ public class PortalContractParityTests
             foreach (var property in type.GetProperties(BindingFlags.Public | BindingFlags.Instance))
             {
                 var wireName = property.GetCustomAttribute<JsonPropertyNameAttribute>()?.Name ?? property.Name;
-                if (ForbiddenPatterns.Any(p =>
-                    property.Name.Contains(p, StringComparison.OrdinalIgnoreCase) || wireName.Contains(p, StringComparison.OrdinalIgnoreCase)))
+                if (IsForbiddenMemberName(property.Name) || IsForbiddenMemberName(wireName))
                 {
                     hits.Add($"{type.Name}.{property.Name}");
                 }
@@ -306,16 +353,60 @@ public class PortalContractParityTests
         return hits;
     }
 
+    /// <summary>
+    /// Whether a run of the name's whole words (camelCase / PascalCase / snake_case) spells a forbidden pattern,
+    /// optionally pluralised, so <c>TokenHash</c> and <c>LastSeenAt</c> trip it and <c>Hashtags</c> does not.
+    /// Mirrors <c>isForbiddenKey</c> in <c>forbiddenKeys.ts</c>.
+    /// </summary>
+    private static bool IsForbiddenMemberName(string name)
+    {
+        var words = WordBoundary().Split(name).Where(w => w.Length > 0).Select(w => w.ToLowerInvariant()).ToArray();
+        for (var start = 0; start < words.Length; start++)
+        {
+            var run = string.Empty;
+            for (var end = start; end < words.Length; end++)
+            {
+                run += words[end];
+                if (ForbiddenPatterns.Any(p => run == p || run == p + "s"))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>The element type of an array or any generic collection (dictionaries: the value), else the type itself.</summary>
     private static Type ElementType(Type type)
     {
         type = Nullable.GetUnderlyingType(type) ?? type;
-        if (type.IsGenericType && type.GetGenericTypeDefinition() == typeof(IReadOnlyList<>))
+        if (type == typeof(string))
         {
-            return type.GetGenericArguments()[0];
+            return type;
         }
 
-        return type;
+        if (type.IsArray)
+        {
+            return type.GetElementType()!;
+        }
+
+        var enumerable = type.IsGenericType && type.GetGenericTypeDefinition() == typeof(IEnumerable<>)
+            ? type
+            : type.GetInterfaces().FirstOrDefault(i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IEnumerable<>));
+        if (enumerable is null)
+        {
+            return type;
+        }
+
+        var element = enumerable.GetGenericArguments()[0];
+        return element.IsGenericType && element.GetGenericTypeDefinition() == typeof(KeyValuePair<,>)
+            ? element.GetGenericArguments()[1]
+            : element;
     }
+
+    [GeneratedRegex(@"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])|[_\-\s]+", RegexOptions.CultureInvariant)]
+    private static partial Regex WordBoundary();
 
     private static string[] GoldenStrings(JsonNode? node) =>
         node!.AsArray().Select(n => n!.GetValue<string>()).ToArray();
@@ -331,7 +422,7 @@ public class PortalContractParityTests
     {
         var media = new ContentMediaDto
         {
-            Id = "m-1", Kind = "image", Role = "hero", Url = "/media/m-1", PosterUrl = null, ContentType = "image/png",
+            Id = "m-1", Kind = "image", Role = "hero", Url = "/media/m-1", PosterUrl = "/media/m-1/poster", ContentType = "image/png",
             Width = 200, Height = 80, DurationSec = null, Alt = "Fairhaven Today logo", Caption = null,
         };
         var module = new PortalModuleDto { Id = PortalVocabulary.ModuleTopStories, ChannelId = ChannelVocabulary.News };
@@ -349,31 +440,79 @@ public class PortalContractParityTests
             ["PortalModuleDto"] = module,
             ["PortalResourceDto"] = new PortalResourceDto
             {
-                Id = "r-1", Title = "Emergency contacts", Summary = null, BodyHtml = "<p>Call <a href=\"/press/wire-room\">us</a></p>",
-                Media = media,
+                Id = "r-1", Title = "Emergency contacts", Summary = "Who to call.",
+                BodyHtml = "<p>Call <a href=\"/press/wire-room\">us</a></p>", Media = media,
             },
             ["PortalModuleSettingDto"] = setting,
             ["PortalConfigStaffDto"] = new PortalConfigStaffDto
             {
-                CityName = "Fairhaven", LayoutKey = PortalVocabulary.LayoutAnchor, Modules = [setting], Logo = media,
-                ResolvedName = "Fairhaven Today", Version = 3,
+                PortalName = "Fairhaven Today", CityName = "Fairhaven", Tagline = "Your city.", Logo = media,
+                LayoutKey = PortalVocabulary.LayoutAnchor, Modules = [setting],
+                SkinOverrides = new JsonObject { ["schemaVersion"] = 1 }, ResolvedName = "Fairhaven Today", Version = 3,
             },
             ["PortalConfigWriteRequest"] = new PortalConfigWriteRequest
             {
-                LayoutKey = PortalVocabulary.LayoutAnchor, Modules = [setting], LogoMediaId = "m-1", Version = 3,
+                PortalName = "Fairhaven Today", CityName = "Fairhaven", Tagline = "Your city.", LogoMediaId = "m-1",
+                LayoutKey = PortalVocabulary.LayoutAnchor, Modules = [setting],
+                SkinOverrides = new JsonObject { ["schemaVersion"] = 1 }, Version = 3,
             },
             ["PortalResourceStaffDto"] = new PortalResourceStaffDto
             {
-                Id = "r-1", Title = "Emergency contacts", SortOrder = 0, Visible = false, Version = 2,
+                Id = "r-1", Title = "Emergency contacts", Summary = "Who to call.", BodyHtml = "<p>b</p>", Media = media,
+                SortOrder = 0, Visible = false, Version = 2,
             },
-            ["PortalResourceWriteRequest"] = new PortalResourceWriteRequest { Title = "Emergency contacts", Visible = true },
+            ["PortalResourceWriteRequest"] = new PortalResourceWriteRequest
+            {
+                Title = "Emergency contacts", Summary = "Who to call.", BodyHtml = "<p>b</p>", MediaAssetId = "m-1",
+                Visible = true, Version = 2,
+            },
             ["PortalResourceReorderRequest"] = new PortalResourceReorderRequest { OrderedIds = ["r-2", "r-1"] },
+        };
+    }
+
+    /// <summary>One instance per shape that HAS nullable members, with every one of them null.</summary>
+    private static Dictionary<string, object> BuildNullSamples()
+    {
+        var masthead = new PortalMastheadDto { Name = "Local Today", Tagline = null, Logo = null };
+
+        return new Dictionary<string, object>(StringComparer.Ordinal)
+        {
+            ["PortalDto"] = new PortalDto
+            {
+                Masthead = masthead, LayoutKey = PortalVocabulary.LayoutAnchor, SkinOverrides = null, HasResources = false,
+            },
+            ["PortalMastheadDto"] = masthead,
+            ["PortalResourceDto"] = new PortalResourceDto { Id = "r-1", Title = "T", Summary = null, BodyHtml = null, Media = null },
+            ["PortalConfigStaffDto"] = new PortalConfigStaffDto
+            {
+                PortalName = null, CityName = null, Tagline = null, Logo = null, LayoutKey = PortalVocabulary.LayoutAnchor,
+                SkinOverrides = null, ResolvedName = "Local Today", Version = 0,
+            },
+            ["PortalConfigWriteRequest"] = new PortalConfigWriteRequest
+            {
+                PortalName = null, CityName = null, Tagline = null, LogoMediaId = null,
+                LayoutKey = PortalVocabulary.LayoutAnchor, SkinOverrides = null, Version = 0,
+            },
+            ["PortalResourceStaffDto"] = new PortalResourceStaffDto
+            {
+                Id = "r-1", Title = "T", Summary = null, BodyHtml = null, Media = null, SortOrder = 0, Visible = true, Version = 1,
+            },
+            ["PortalResourceWriteRequest"] = new PortalResourceWriteRequest
+            {
+                Title = "T", Summary = null, BodyHtml = null, MediaAssetId = null, Visible = true, Version = 0,
+            },
         };
     }
 
     /// <summary>A probe with one member per forbidden pattern except <c>version</c> (asserted on a real staff DTO).</summary>
     private sealed record LeakyProbe(
         string DisplayToken, string TokenHash, string ActingHumanId, string LastSeenAt, string CreatedWallClock, string ExerciseId);
+
+    /// <summary>Names that contain a pattern only as part of a longer word.</summary>
+    private sealed record HarmlessProbe(IReadOnlyList<string> Hashtags, string Conversation, string SkinOverrides);
+
+    /// <summary>A leak one level down, behind an array.</summary>
+    private sealed record NestedLeakProbe(LeakyProbe[] Items);
 
     /// <summary>Boots the real composition root (no database is opened) to read its serializer options.</summary>
     private sealed class HostOptionsProbeFactory : WebApplicationFactory<Program>

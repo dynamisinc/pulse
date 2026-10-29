@@ -132,7 +132,7 @@ export interface PortalResourceWriteRequest {
   readonly bodyHtml: string | null
   readonly mediaAssetId: string | null
   readonly visible: boolean
-  /** Ignored on create. */
+  /** Send `0` on create, where it is ignored. */
   readonly version: number
 }
 export const PORTAL_RESOURCE_WRITE_KEYS = wireKeys<PortalResourceWriteRequest>()([

@@ -156,9 +156,9 @@ public sealed record PortalResourceWriteRequest
     [JsonPropertyName("visible")]
     public required bool Visible { get; init; }
 
-    /// <summary>The version read (ignored on create; a stale value on update is a 409).</summary>
+    /// <summary>The version read (send <c>0</c> on create, where it is ignored; a stale value on update is a 409).</summary>
     [JsonPropertyName("version")]
-    public int Version { get; init; }
+    public required int Version { get; init; }
 }
 
 /// <summary>Staff <c>POST /api/portal/resources/reorder</c> body: the new shelf order.</summary>
