@@ -369,6 +369,7 @@ public sealed class OutletEndpointsTests
         problem.Item!.Version.Should().Be(2);
         await using var db = host.Db(seeded.ExerciseId);
         (await db.Outlets.AnyAsync(o => o.Id == outlet.Guid)).Should().BeTrue("the losing delete wrote nothing");
+        (await host.OutletEventsAsync(seeded.ExerciseId)).Should().ContainSingle("only the create; the losing delete's event rolled back with it");
     }
 
     [RequiresDockerFact]

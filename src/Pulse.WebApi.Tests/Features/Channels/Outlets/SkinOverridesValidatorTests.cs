@@ -316,6 +316,7 @@ public sealed class SkinOverridesValidatorTests
     [InlineData("\u200B")]
     [InlineData("\u2028")]
     [InlineData("\u2029")]
+    [InlineData("\U000E0041")] // TAG LATIN CAPITAL A: astral Cf, two UTF-16 chars
     public void Strings_RefuseInvisibleFormattingCharacters(string invisible)
     {
         var overrides = new JsonObject { ["palette"] = new JsonObject { ["accent"] = $"#c8{invisible}102e" } };

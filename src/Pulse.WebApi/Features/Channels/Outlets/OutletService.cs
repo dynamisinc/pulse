@@ -314,6 +314,7 @@ public sealed partial class OutletService
             _dbContext.ChangeTracker.Clear();
             if (await SlugConflictAsync(draft.ChannelId, draft.Slug, outletId: null, cancellationToken) is { } raced)
             {
+                LogLostRace(ex, OutletTelemetry.ActionCreate, draft.ChannelId);
                 return OutletResult.Conflict<OutletStaffDto>(raced, null);
             }
 
