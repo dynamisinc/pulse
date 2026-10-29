@@ -291,6 +291,19 @@ public sealed class WeatherProductDescriptorTests : IDisposable
         create.Errors.Should().ContainSingle().Which.Should().StartWith("payload.zoneSlugs[1]: unknown_zone");
     }
 
+    [Fact]
+    public async Task ANeverPublishedDraft_GetsNoGrandfathering_ForADeletedZone()
+    {
+        var exercise = _harness.NewExercise();
+        var draft = await _harness.SeedAsync(exercise, "weather_product", "draft", WeatherPayloads.Watch());
+        _harness.Catalog(exercise).Live.Remove("kestrel-county-south");
+
+        var result = await _descriptor.ValidatePayloadAsync(
+            WeatherPayloads.Watch(), _harness.ValidationContext(exercise, draft.Id));
+
+        result.Errors.Should().ContainSingle().Which.Should().StartWith("payload.zoneSlugs[1]: unknown_zone");
+    }
+
     // ---- supersession (isolation is always Critical) ---------------------------------------------
 
     [Theory]

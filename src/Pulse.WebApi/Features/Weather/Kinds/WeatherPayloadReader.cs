@@ -42,8 +42,10 @@ internal static partial class WeatherPayloadReader
             r.Fail("expiresScenarioTime", "must be after effectiveScenarioTime");
         }
 
+        // Write-only rules (supersession presence, the forced warning alert) are skipped on a stored read: they guard
+        // authoring, and a later change to them must never blank an already-published product's projection.
         var supersedes = r.OptionalGuid(payload, "supersedesContentId");
-        if (action is not null)
+        if (action is not null && !fromStore)
         {
             var superseding = WeatherVocabulary.SupersedingActions.Contains(action, StringComparer.Ordinal);
             if (superseding && supersedes is null)
@@ -75,7 +77,7 @@ internal static partial class WeatherPayloadReader
 
         var actions = r.StringList(payload, "actions", WeatherLimits.MaxActions, WeatherLimits.ActionMaxLength) ?? [];
         var delivery = ReadDelivery(payload, r);
-        if (delivery is not null && !delivery.RaiseAlert
+        if (!fromStore && delivery is not null && !delivery.RaiseAlert
             && productType == WeatherVocabulary.ProductWarning && action != WeatherVocabulary.ActionCancel)
         {
             r.Fail("delivery.raiseAlert", "a warning always raises its alert");
@@ -286,7 +288,7 @@ internal static partial class WeatherPayloadReader
     }
 
     // The wire convention for every *ScenarioTime (mirrors isIsoScenarioTime in channels guards.ts): ISO-8601 with an offset.
-    [GeneratedRegex(@"\A\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,7})?)?(?:Z|[+-]\d{2}:\d{2})\z", RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"\A[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}(?::[0-9]{2}(?:\.[0-9]{1,7})?)?(?:Z|[+-][0-9]{2}:[0-9]{2})\z", RegexOptions.CultureInvariant)]
     private static partial Regex IsoInstantPattern();
 
     /// <summary>Typed field access that records a field-level error for every problem.</summary>

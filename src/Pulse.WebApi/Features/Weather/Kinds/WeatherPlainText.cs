@@ -24,15 +24,21 @@ public static class WeatherPlainText
     {
         ArgumentNullException.ThrowIfNull(input);
 
-        var stripped = PostSanitizer.Sanitize(input);
-        var builder = new StringBuilder(stripped.Length);
-        for (var i = 0; i < stripped.Length; i++)
+        // Control characters go FIRST: removed after tag stripping, "<\u0001script>" would survive the stripper (not an
+        // opener) and then collapse into a live "<script>". With them gone, the stripper sees the real tags.
+        return PostSanitizer.Sanitize(RemoveControls(input, multiline)).Trim();
+    }
+
+    private static string RemoveControls(string input, bool multiline)
+    {
+        var builder = new StringBuilder(input.Length);
+        for (var i = 0; i < input.Length; i++)
         {
-            var c = stripped[i];
+            var c = input[i];
             if (c == '\r')
             {
                 // CRLF and a lone CR are both one line break.
-                if (i + 1 < stripped.Length && stripped[i + 1] == '\n')
+                if (i + 1 < input.Length && input[i + 1] == '\n')
                 {
                     i++;
                 }
@@ -53,7 +59,7 @@ public static class WeatherPlainText
             }
         }
 
-        return builder.ToString().Trim();
+        return builder.ToString();
     }
 
     /// <summary>

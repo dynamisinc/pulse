@@ -32,7 +32,37 @@ public sealed partial class WeatherSanitizerAndProjectionTests : IDisposable
         "<style>body{display:none}</style>Take shelter.",
         "<iframe srcdoc=\"<script>alert(1)</script>\"></iframe>Take shelter.",
         "Take\u0000 shelter.\u001b[31m‮",
+        // A control or bidi character INSIDE a tag must not let the tag survive and then collapse into a live one.
+        "<\u0001script>alert(1)</script>Take shelter.",
+        "<‮script>alert(1)</script>Take shelter.",
+        "<\u0000img src=x onerror=alert(1)>Take shelter.",
+        "<\tscript>alert(1)</script>Take shelter.",
     ];
+
+    [Theory]
+    [MemberData(nameof(Corpus))]
+    public void Clean_IsIdempotent_OnTheCorpus(string attack)
+    {
+        foreach (var multiline in new[] { true, false })
+        {
+            var once = WeatherPlainText.Clean(attack, multiline);
+
+            WeatherPlainText.Clean(once, multiline).Should().Be(once);
+            CompleteTag().IsMatch(once).Should().BeFalse(once);
+        }
+    }
+
+    [Fact]
+    public void AStoredWarningWithItsAlertOff_StillProjects()
+    {
+        // Write-only rules never blank a stored product: projection reads the participant-visible shape.
+        var stored = WeatherPayloads.Warning();
+        stored["delivery"]!["raiseAlert"] = false;
+        stored.Remove("supersedesContentId");
+        stored["action"] = "update";
+
+        _products.ProjectPayload(stored).Should().NotBeEmpty();
+    }
 
     [Theory]
     [MemberData(nameof(Corpus))]

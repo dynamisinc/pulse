@@ -50,6 +50,11 @@ internal sealed class WeatherKindHarness : IDisposable
         item.Kind = kind;
         item.Status = status;
         item.PayloadJson = payload.ToJsonString();
+        if (status is ChannelVocabulary.StatusPublished or ChannelVocabulary.StatusRetracted)
+        {
+            item.PublishedScenarioTime = ChannelRows.ScenarioTime;
+        }
+
         db.ContentItems.Add(item);
         await db.SaveChangesAsync();
         return item;

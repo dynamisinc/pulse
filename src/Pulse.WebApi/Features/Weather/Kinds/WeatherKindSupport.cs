@@ -44,7 +44,8 @@ internal static class WeatherKindSupport
 
     /// <summary>
     /// The stored payload of the item being written (an edit or revise), when it is a weather item of
-    /// <paramref name="kind"/> in the resolved exercise; else null (a create, or nothing to grandfather).
+    /// <paramref name="kind"/> in the resolved exercise that has been PUBLISHED at least once; else null (a create, a
+    /// never-published draft, or nothing to grandfather).
     /// </summary>
     /// <param name="context">The validation context.</param>
     /// <param name="kind">The kind.</param>
@@ -61,7 +62,8 @@ internal static class WeatherKindSupport
         // The central filter already scopes the context to context.ExerciseId; the explicit predicate is belt and braces.
         var json = await context.Db.ContentItems
             .Where(c => c.Id == id && c.ExerciseId == context.ExerciseId
-                        && c.ChannelId == ChannelVocabulary.Weather && c.Kind == kind)
+                        && c.ChannelId == ChannelVocabulary.Weather && c.Kind == kind
+                        && c.PublishedScenarioTime != null)
             .Select(c => c.PayloadJson)
             .FirstOrDefaultAsync(cancellationToken);
         return json is null ? null : TryParseObject(json);
