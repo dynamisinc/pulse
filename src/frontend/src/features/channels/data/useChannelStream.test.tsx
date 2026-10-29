@@ -339,7 +339,10 @@ describe('useChannelStream', () => {
   })
 
   it('restarts the shared connection after a deliberate stop when a token is stored', () => {
-    const { connection, onResync } = setup()
+    // Mounted on an already-Connected hub, so only the stop-and-restart can create the gap.
+    const connection = new FakeConnection()
+    connection.state = HubConnectionState.Connected
+    const { onResync } = setup({ connection })
     expect(connection.startCalls).toBe(1)
 
     tokenState.token = null
