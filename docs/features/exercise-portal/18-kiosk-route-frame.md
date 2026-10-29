@@ -33,4 +33,4 @@ The slide/portal board content (19); **Deferred (post-December, Q-35): the per-d
 Files: `features/portal/kiosk/frame/**` only (`KioskGate`, `useKioskMode`, `KioskFrame`); the `ShellLayout.tsx` kiosk branch and the `isWatermarkRequired` kiosk clause are PP-2, built under `participant-shell/06`. Publish `kiosk/frame/types.ts` (the `KioskFrame` props) first so 19 can start. Reuse `mountContract` `variant`, `OverlayLayer`, `tokenStore`, the existing read-only session flag from the login envelope. The login page already has the "View-only code" tab (`signInWithSharedCode`); no login UI change.
 
 ## Dependencies
-06, 07 (skin, layout), **PP-2** (participant-shell/06 AC2 + watermark clause), F11 (bar), F12 (landing). **No longer depends on 05 or 08 (Deferred) or PP-1.** Can run with 17, 19, 21, 22.
+06, 07 (skin, layout), **foundation story 22 / PP-2** (#788: kiosk chrome stripping + watermark clause; must merge by end of CW4), F11 (bar), F12 (landing). **No longer depends on 05 or 08 (Deferred) or PP-1.** Can run with 17, 19, 21, 22.

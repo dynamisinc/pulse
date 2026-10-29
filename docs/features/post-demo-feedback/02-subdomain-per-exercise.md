@@ -20,18 +20,19 @@ This story makes the subdomain the normal way an exercise is addressed, with no 
 ## Acceptance Criteria
 - [ ] Given an environment with a configured base domain, when a controller creates an exercise with host name `exercise-a`,
       then `exercise-a.<env-host>` resolves to that exercise with no manual DNS or certificate step (wildcard DNS record
-      and wildcard certificate for `*.<env-host>`, served by **Azure Front Door**; one cert, not one binding per exercise. Front Door managed certificates do not
-      cover wildcard domains, so the certificate is a wildcard cert held in Key Vault and referenced by Front Door; the
-      issuer and an automated renewal owner are named before build, and provisioning is fully automatic, so no per-exercise lead time).
+      and one wildcard certificate for `*.<env-host>`, not one binding per exercise; provisioning is fully automatic, so no per-exercise lead time).
+      **The hosting front end is decided at build (Tom, 10/29):** the builder brings costed options before provisioning, either
+      **Azure Front Door + a Key Vault wildcard cert from a CA with auto-renewal**, or **App Service + a Let's Encrypt wildcard issued by a DNS-challenge renewal job**;
+      whichever is chosen names its cert issuer and an automated-renewal owner, and neither App Service nor Front Door managed certs issue wildcards).
 - [ ] Given a wildcard cert and DNS in place, when an exercise is created, then the host name is validated (DNS-label
       rules, reserved names blocked such as `www`, `api`, `staff`, `admin`; unique per environment) and stored on
       `Exercise.Hostname`; the host lifecycle is decided (Tom, 10/21): kept while the exercise is
       archived, freed when it is deleted, and changing an exercise's host name ("rename" means the host name, not the
       display name, which never affects routing) keeps the old host as an alias that still resolves to the same exercise.
-      **Proposed, to confirm with Tom (not decided):** aliases count toward uniqueness and the reserved-name list and are
-      deleted with the exercise; "freed" means released from that exercise, after which the host (or alias) is held for a
-      quarantine period (proposed 30 days) before another exercise may claim it, so a stale link or QR card never lands a participant
-      in a different exercise (XC-001).
+      **Decided (Tom, 10/29):** "freed" means released from that exercise, after which the host (or alias) is held for a
+      **90-day quarantine** before another exercise may claim it, so a stale link or QR card never lands a participant
+      in a different exercise (XC-001). **Proposed, to confirm with Tom (not decided):** aliases count toward uniqueness and the
+      reserved-name list and are deleted with the exercise.
 - [ ] Given a request on an unknown or deleted exercise subdomain, when it reaches the API, then scope stays unset
       (fail closed, zero rows; an archived exercise's host still resolves and keeps its existing archived behavior) and the participant sees a neutral "exercise not found" page with no exercise list and no
       platform branding (COR-004, COR-008).
@@ -55,12 +56,14 @@ exercise's host name beyond the rename-with-alias rule; multi-region DNS; the Ca
 
 ## Technical Notes
 Backend: reuse `Features/ExerciseResolution/` and `IExerciseContext`; do not add a second resolver. Infra: wildcard cert
-and DNS through **Azure Front Door** (decided, Tom 10/21). Neither App Service nor Front Door managed certs issue
-wildcards, so the cert is bring-your-own in Key Vault (a CA with Key Vault auto-renewal, or an ACME renewal job);
-the builder confirms the issuer with Tom before provisioning. Alias hosts
+and DNS: Azure Front Door was the 10/21 choice, but Tom's 10/29 decision is **decide at build**, because it needs a
+bring-your-own wildcard cert (a cost not in view on 10/21). The builder brings costed options: **Front Door + a Key Vault
+wildcard cert from a CA with auto-renewal** versus **App Service + a Let's Encrypt wildcard via a DNS-challenge renewal job**
+(neither App Service nor Front Door managed certs issue wildcards), and confirms the choice and the renewal owner with Tom
+before provisioning. *(A prior review noted this reconfirm was missing from these notes; it is recorded here.)* Alias hosts
 need a small alias table checked by the resolver. Frontend: the API base URL must follow the page origin (today
 `VITE_API_URL` is fixed), or the API must be served from each subdomain; this is the main open design point. See
-`implementation.md`, Decision PDF-D6 (decided).
+`implementation.md`, Decision PDF-D6 (decided; Front Door vs App Service decide at build, Tom 10/29).
 
 ## Dependencies
-`exercise-isolation/08` (landed), `login`, `easy-login`, `app-shell/01`. Coordinates with the PDF-03 backup site (can sit behind the same Front Door) and `exercise-isolation/09` (network readiness: customer networks must allow the wildcard).
+`exercise-isolation/08` (landed), `login`, `easy-login`, `app-shell/01`. Coordinates with the PDF-03 backup site (can sit behind the same Front Door if Front Door is chosen) and `exercise-isolation/09` (network readiness: customer networks must allow the wildcard).

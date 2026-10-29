@@ -29,7 +29,7 @@ Looking Glass demonstrated the pattern: NewsNow published "Emergency Call Delays
 | NWS-010 | Article model: headline, dek/subhead, hero media (image or inline Beat video), rich body (text, embedded images/video, pull quotes, embedded social posts from E2), byline (persona reporter optional), category, publish timestamp (scenario + wall clock, rendered in scenario time per COR-053), outlet. |
 | NWS-011 | Every article gets a stable, exercise-scoped permalink; opening it renders a full article page under the outlet's brand (Looking Glass parity: `/news-now/emergency-call-delays/`). |
 | NWS-012 | Breaking-news treatment is authorial, not platform chrome: outlets can style headlines/banners within their own brand (consistent with the no-platform-badges principle — the *outlet* says BREAKING, not Pulse). |
-| NWS-013 | Articles can be published immediately, scheduled, or held for controller fire (E7/E9 inject flow). Updates/corrections append an editor's note — correction behavior is itself a scenario lever (an outlet that quietly rewrites vs. transparently corrects). |
+| NWS-013 | Articles can be published immediately, scheduled, or held for controller fire (E7/E9 inject flow). Updates/corrections append an editor's note — correction behavior is itself a scenario lever (an outlet that quietly rewrites vs. transparently corrects). **Amended 10/29 (Tom):** corrections have **two renderings** (D3-P4): a visible **appended editor's note**, and a **silent rewrite** that adds no note but still moves the "Updated" stamp. |
 | NWS-014 | Embedded video plays inline with a broadcast-style player — this is the primary Utube-replacement surface for Beat news clips. |
 | NWS-015 | Articles are link-previewable in E2 (SOC-004) and featurable on the portal (PRT-004). |
 
@@ -46,7 +46,7 @@ Looking Glass demonstrated the pattern: NewsNow published "Emergency Call Delays
 | ID | Requirement |
 |---|---|
 | NWS-030 | Article views, dwell (best-effort), and share-outs to E2 are captured per session for E10. View/dwell telemetry is **session-level evidence, not person-level proof** (PIO teams share screens and projectors) and is labeled as such in evaluation outputs. |
-| NWS-031 | Comments on articles are **out of scope at launch** (public discourse lives in E2); an outlet page links to "discussion" on its social post instead. |
+| NWS-031 | Comments on articles are **out of scope at launch** (public discourse lives in E2); an outlet page links to "discussion" on its social post instead. **Amended 10/29 (Tom):** **no comments, ever** (not merely out of scope at launch). |
 | NWS-032 | Article pages are a high-risk leak class: in-content "EXERCISE" watermarking applies per NFR-008 once available (banners-only at launch). |
 
 ## 3. User experience

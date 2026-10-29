@@ -140,7 +140,7 @@ waits for that route's story (serial edge: PC-3/PC-4 and FC-3/FC-4 are the seam)
 | 15 Resources shelf | frontend | `features/portal/resources/**` | 02, 04 (route; mock until live), F14 | 09-14, 16 | 3 | M |
 | 16 Console portal setup | frontend (staff) | `features/controller/portalSetup/**` | 03, 04, 07 (module ids), F17 | 09-15 | 3 | L |
 | 17 Mount, landing, telemetry | frontend | `features/portal/PortalChannel.tsx`, `features/portal/hooks/usePortal.ts*`, `features/portal/index.ts` | 03, 06, 07, 13, 14, F12, F08, F15 (telemetry emitter), modules 09-12 registered (seam) | 18, 19, 21, 22 | 4 | L |
-| 18 Kiosk-lite frame (`/portal?display=1`) | frontend | `features/portal/kiosk/frame/**` | 06, 07, **PP-2** (shell kiosk variant + watermark clause), F11, F12 | 17, 19, 21, 22 | 4 | M |
+| 18 Kiosk-lite frame (`/portal?display=1`) | frontend | `features/portal/kiosk/frame/**` | 06, 07, **PP-2 = foundation 22** (#788; shell kiosk variant + watermark clause), F11, F12 | 17, 19, 21, 22 | 4 | M |
 | 19 Kiosk-lite portal board | frontend | `features/portal/kiosk/board/**` | 09, 10, 11, 12 (hooks), 18 (frame contract, same wave: ship the `KioskFrame` props type first), F14, F15, F21, weather 10 | 17, 21, 22 | 4 | M |
 | 20 Console display control | frontend (staff) | **Deferred (post-December, Q-35)** | (05, 08, F07, F17) | — | — | (L) |
 | 21 Evergreen filler pack | backend | `Features/Portal/Seed/**` | 03 (seeds outlets via F03), F04, F05, F07 | 17-19, 22 | 4 | M |
@@ -162,7 +162,7 @@ declared in 02's contract fixtures). 17 depends on modules 09-12 only through th
 | Participant composition root | `src/frontend/src/App.tsx` / `createRoleAwareRoutes` | Orchestrator wires story 18's `KioskGate` as an element wrapping the `/portal` route (above `PortalChannel`; it is a no-op without `display=1`). `/portal` is still mounted by F12's `ChannelRouter`, not by App.tsx; there is **no** `/display/:token` route in December. |
 | Staff route registry | `features/staff/staffRouteRegistry` | Orchestrator adds two entries: `portal-setup` (16) and `top-stories-board` (22). (`display` (20) is Deferred.) |
 | Hosting headers | — | **None in December.** The `/display/*` `no-referrer` / `no-store` headers (PP-3's second half) were for the Deferred `/display/:token` route. |
-| Shell kiosk variant | `participant-shell` `ShellLayout.tsx`, `chromeConfig.ts` | **PP-2**, built under `participant-shell/06` AC2 before story 18 starts; not a portal story. |
+| Shell kiosk variant | `participant-shell` `ShellLayout.tsx`, `chromeConfig.ts` | **PP-2 = foundation story 22** (#788), merged by end of CW4 before story 18 starts; not a portal story. |
 
 ---
 
